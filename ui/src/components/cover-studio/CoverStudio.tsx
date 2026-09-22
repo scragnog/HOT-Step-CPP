@@ -1,5 +1,5 @@
 // CoverStudio.tsx — Main Cover Studio orchestrator
-// Composes: SourcePanel, ArtistSettingsPanel, ActivitySidebar
+// Composes: SourcePanel, ArtistSettingsPanel
 import React, { useState, useEffect, useCallback } from 'react';
 import type { Song } from '../../types';
 import { Search, Loader2 } from 'lucide-react';
@@ -17,13 +17,11 @@ import {
 } from '../../services/supersepApi';
 import { SourcePanel } from './SourcePanel';
 import { ArtistSettingsPanel } from './ArtistSettingsPanel';
-import { ActivitySidebar } from '../shared/ActivitySidebar';
 import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
 import { StemMixer, type StemControl, type MixerStemInfo } from '../shared/StemMixer';
 import {
   addManualQueueItem, updateManualQueueItem,
   completeManualQueueItem, failManualQueueItem,
-  useAudioGenQueueSelector,
 } from '../../stores/audioGenQueueStore';
 import {
   persist, restore, getTrackCache, saveTrackCacheEntry, transposeKey,
@@ -112,32 +110,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [genProgress, setGenProgress] = useState(0);
   const [genStage, setGenStage] = useState('');
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [toast, setToast] = useState('');
   const [queueItemId, setQueueItemId] = useState<string | null>(null);
-  const completionCounter = useAudioGenQueueSelector(s => s.completionCounter);
 
-  // ── Sidebar resize ──
-  const [sidebarWidth, setSidebarWidth] = usePersistedState('hs-activitySidebarWidth', 320);
-  const handleSidebarResize = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = sidebarWidth;
-    const onMove = (ev: MouseEvent) => {
-      const newW = Math.min(700, Math.max(240, startW + startX - ev.clientX));
-      setSidebarWidth(newW);
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [sidebarWidth, setSidebarWidth]);
 
   // ── Advanced Mode (SuperSep) ──
   const [advancedMode, setAdvancedMode] = useState(false);
@@ -613,7 +588,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
         if (s.status === 'succeeded') {
           clearInterval(iv); setGenProgress(100); setGenStage('Complete!');
-          setRefreshTrigger(p => p + 1); showToast(t('cover.coverGenerated'));
+          showToast(t('cover.coverGenerated'));
 
           // Complete queue item with audio data
           completeManualQueueItem(qId, {
@@ -812,23 +787,6 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           onRegenerateCaption={handleRegenerateCaption}
         />
 
-        {/* Resize handle */}
-        <div
-          className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors"
-          onMouseDown={handleSidebarResize}
-        >
-          <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
-        </div>
-        {/* Right: Recent Covers + Queue */}
-        <div className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden" style={{ width: sidebarWidth }}>
-          <ActivitySidebar
-            showToast={showToast}
-            source="cover-studio"
-            refreshKey={refreshTrigger + completionCounter}
-            queueCountColor="bg-cyan-500/20 text-cyan-300"
-            compact={sidebarWidth < 380}
-          />
-        </div>
       </div>
     </div>
     </BackendCapabilityGate>

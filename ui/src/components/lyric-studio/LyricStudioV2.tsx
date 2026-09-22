@@ -14,7 +14,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { usePersistedState } from '../../hooks/usePersistedState';
 import { lireekApi } from '../../services/lireekApi';
 import type { Artist, LyricsSet, Profile, Generation, SongLyric } from '../../services/lireekApi';
 import { ArtistGrid } from './ArtistGrid';
@@ -34,7 +33,6 @@ import { SourceLyricsTab } from './SourceLyricsTab';
 import { ProfilesTab } from './ProfilesTab';
 import { WrittenSongsTab } from './WrittenSongsTab';
 import { RecordingsTab } from './RecordingsTab';
-import { ActivitySidebar } from '../shared/ActivitySidebar';
 import { useAudioGeneration } from './useAudioGeneration';
 import { enqueueAudioGen, useResumeQueue, useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
 import { usePlaybackSelector } from '../../stores/playbackStore';
@@ -95,30 +93,6 @@ export const LyricStudioV2: React.FC = () => {
 
   // ── Navigation ──
   const [nav, setNav] = useState<NavState>({ level: 'artists', selectedArtist: null, selectedAlbum: null });
-
-  // ── Right panel width (persisted, pixel-based) ──
-  const [lsRightPanelWidth, setLsRightPanelWidth] = usePersistedState('hs-activitySidebarWidth', 320);
-  const compactRight = lsRightPanelWidth < 380;
-
-  const handleRightPanelResize = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = lsRightPanelWidth;
-    const onMove = (ev: MouseEvent) => {
-      const newW = Math.min(700, Math.max(240, startW + startX - ev.clientX));
-      setLsRightPanelWidth(newW);
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [lsRightPanelWidth, setLsRightPanelWidth]);
 
   // ── Data ──
   const [artists, setArtists] = useState<Artist[]>([]);
@@ -651,17 +625,6 @@ export const LyricStudioV2: React.FC = () => {
                 </div>
               </div>
             </div>
-            {/* Resize handle */}
-            <div
-              className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors"
-              onMouseDown={handleRightPanelResize}
-            >
-              <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
-            </div>
-            <div className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden" style={{ width: lsRightPanelWidth }}>
-              <ActivitySidebar source="lyric-studio" showToast={showToast}
-                refreshKey={recordingsRefreshKey} compact={compactRight} />
-            </div>
           </div>
         )}
 
@@ -697,17 +660,6 @@ export const LyricStudioV2: React.FC = () => {
                   />
                 </div>
               </div>
-            </div>
-            {/* Resize handle */}
-            <div
-              className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors"
-              onMouseDown={handleRightPanelResize}
-            >
-              <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
-            </div>
-            <div className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden" style={{ width: lsRightPanelWidth }}>
-              <ActivitySidebar source="lyric-studio" showToast={showToast}
-                refreshKey={recordingsRefreshKey} compact={compactRight} />
             </div>
           </div>
         )}
@@ -789,22 +741,6 @@ export const LyricStudioV2: React.FC = () => {
                 </div>
               </div>
 
-              {/* Resize handle */}
-              <div
-                className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors"
-                onMouseDown={handleRightPanelResize}
-              >
-                <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
-              </div>
-
-              {/* Right: sidebar panel */}
-              <div className="flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden flex flex-col relative" style={{ width: lsRightPanelWidth }}>
-                <div className="relative z-[1] flex-1 min-h-0 overflow-hidden">
-                  <ActivitySidebar source="lyric-studio"
-                    showToast={showToast}
-                    refreshKey={recordingsRefreshKey} compact={compactRight} />
-                </div>
-              </div>
             </div>
           </div>
         )}

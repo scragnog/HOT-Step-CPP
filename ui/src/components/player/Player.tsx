@@ -7,13 +7,14 @@ import {
   Shuffle, Repeat, Repeat1,
   Volume2, VolumeX,
   RotateCcw, Trash2, Download,
-  Music, Activity, ListMusic, Scissors, X,
+  Activity, Scissors, X,
 } from 'lucide-react';
 import { DiscoIcon } from './DiscoIcon';
 import { useTranslation } from 'react-i18next';
 import { isPitchShiftReady } from '../../audio/pitchShift';
 import type { Song } from '../../types';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
+import { CoverImage } from '../shared/CoverImage';
 
 interface PlayerProps {
   currentSong: Song | null;
@@ -44,9 +45,6 @@ interface PlayerProps {
   onDownloadVariant?: (v: 'noadapter' | 'original' | 'mastered') => void;
   spectrumEnabled: boolean;
   onToggleSpectrum: () => void;
-  showPlaylist: boolean;
-  playlistCount: number;
-  onTogglePlaylist: () => void;
   trimMode: boolean;
   onToggleTrimMode: () => void;
   discoMode: boolean;
@@ -130,9 +128,6 @@ export const Player: React.FC<PlayerProps> = ({
   onDownloadVariant,
   spectrumEnabled,
   onToggleSpectrum,
-  showPlaylist,
-  playlistCount,
-  onTogglePlaylist,
   trimMode,
   onToggleTrimMode,
   discoMode,
@@ -159,11 +154,7 @@ export const Player: React.FC<PlayerProps> = ({
       {/* Left: Song Info */}
       <div className="flex items-center gap-3 w-[240px] flex-shrink-0">
         <div className="w-12 h-12 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center overflow-hidden flex-shrink-0">
-          {currentSong.coverUrl ? (
-            <img src={currentSong.coverUrl} alt="" className="w-full h-full object-cover" />
-          ) : (
-            <Music size={20} className="text-zinc-600" />
-          )}
+          <CoverImage url={currentSong.coverUrl} seed={currentSong.id} iconSize={20} />
         </div>
         <div className="min-w-0">
           <div className="text-sm font-medium text-zinc-900 dark:text-white truncate">{disguiseTitle(currentSong.title || 'Untitled')}</div>
@@ -353,23 +344,6 @@ export const Player: React.FC<PlayerProps> = ({
           <Scissors size={15} />
         </button>
 
-        {/* Playlist toggle */}
-        <button
-          onClick={onTogglePlaylist}
-          className={`p-1.5 rounded-lg transition-all relative ${
-            showPlaylist
-              ? 'text-pink-400 bg-pink-500/10'
-              : 'text-zinc-500 hover:text-pink-400 hover:bg-pink-500/5'
-          }`}
-          title={showPlaylist ? t('player.hidePlaylist') : t('player.showPlaylist')}
-        >
-          <ListMusic size={15} />
-          {playlistCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-pink-500 text-[8px] font-bold text-white flex items-center justify-center">
-              {playlistCount}
-            </span>
-          )}
-        </button>
 
         {/* Volume */}
         <div className="flex items-center gap-1.5 group flex-shrink-0">

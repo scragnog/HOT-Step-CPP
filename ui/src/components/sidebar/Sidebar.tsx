@@ -2,7 +2,7 @@
 // Ported from hot-step-9000, simplified for current cpp feature set.
 
 import React from 'react';
-import { Disc, Library, Mic, Guitar, Paintbrush, Scissors, Layers, Blocks, Settings, Power, Terminal, RotateCcw, Sun, Moon, Sparkles, Wand2, Zap, Piano, GraduationCap } from 'lucide-react';
+import { Disc, Library, Mic, Guitar, Paintbrush, Scissors, Layers, Blocks, Settings, Power, RotateCcw, Sun, Moon, Sparkles, Wand2, Zap, Piano, GraduationCap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePersistedState } from '../../hooks/usePersistedState';
 
@@ -13,8 +13,6 @@ interface SidebarProps {
   onRestart?: () => void;
   theme?: 'dark' | 'light';
   onToggleTheme?: () => void;
-  showTerminal?: boolean;
-  onToggleTerminal?: () => void;
   showAssistant?: boolean;
   onToggleAssistant?: () => void;
 }
@@ -26,8 +24,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onRestart,
   theme = 'dark',
   onToggleTheme,
-  showTerminal = false,
-  onToggleTerminal,
   showAssistant = false,
   onToggleAssistant,
 }) => {
@@ -180,25 +176,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
 
         <div className="mt-auto flex flex-col gap-2">
-          {/* Terminal toggle */}
-          {onToggleTerminal && (
-            <button
-              onClick={onToggleTerminal}
-              className={`
-                w-full rounded-xl flex items-center gap-3 transition-all duration-200
-                ${isOpen ? 'px-3 py-2.5 justify-start' : 'aspect-square justify-center'}
-                ${showTerminal
-                  ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/15'
-                  : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-300 hover:bg-white/5'}
-              `}
-              title={showTerminal ? t('sidebar.terminal.hide') : t('sidebar.terminal.show')}
-            >
-              <div className="flex-shrink-0"><Terminal size={20} /></div>
-              {isOpen && (
-                <span className="text-sm font-medium whitespace-nowrap">{t('sidebar.terminal.label')}</span>
-              )}
-            </button>
-          )}
 
           {/* Assistant toggle */}
           {onToggleAssistant && (

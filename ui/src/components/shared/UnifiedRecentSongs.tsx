@@ -16,6 +16,7 @@ import { usePlaylist } from '../lyric-studio/playlistStore';
 import { playFromList, unifiedRecentSongToTrack } from '../../stores/playbackStore';
 import { SongActionsMenu, songFromRecent } from './SongActionsMenu';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
+import { CoverImage } from './CoverImage';
 
 interface UnifiedRecentSongsProps {
   showToast: (msg: string, type?: 'success' | 'error') => void;
@@ -215,13 +216,7 @@ export const UnifiedRecentSongs: React.FC<UnifiedRecentSongsProps> = ({
               className="flex items-center gap-2.5 rounded-lg hover:bg-white/[0.06] transition-colors text-left group px-2 overflow-hidden relative cursor-pointer"
               onClick={() => handlePlay(rs)}>
               <div className="w-14 h-14 rounded-md flex-shrink-0 overflow-hidden bg-zinc-100 dark:bg-zinc-800 relative">
-                {coverUrl ? (
-                  <img src={coverUrl} alt="" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <Music className="w-5 h-5 text-zinc-600" />
-                  </div>
-                )}
+                <CoverImage url={coverUrl} seed={String(rs.id)} iconSize={20} />
                 <div className="absolute inset-0 bg-black/20 dark:bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                   <Play className="w-4 h-4 text-white ml-0.5" />
                 </div>

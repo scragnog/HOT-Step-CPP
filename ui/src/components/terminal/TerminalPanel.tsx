@@ -18,8 +18,29 @@ interface VramInfo {
 }
 
 interface TerminalPanelProps {
-  onClose: () => void;
+  /** Omitted when embedded in the activity column — no close button is shown. */
+  onClose?: () => void;
+  /** Rendered inside a section: drops the title row, keeps tabs/search/lines. */
+  embedded?: boolean;
 }
+
+// Stream views. One SSE feed carries everything; the tabs are prefix filters
+// over it, so switching costs nothing and no line is ever lost.
+const STREAM_TABS: { id: string; label: string; test: (text: string) => boolean }[] = [
+  { id: 'all', label: 'Logs', test: () => true },
+  {
+    id: 'model',
+    label: 'Model Output',
+    test: (t) => /\[(DiT|LM[-\] ]|VAE|FSQ|Adapter|Mastering|MM3|YuE2|Synth|Sampler)/i.test(t)
+      || t.includes('vae_decode'),
+  },
+  {
+    id: 'system',
+    label: 'System',
+    test: (t) => /\[(Server|Plugins|GGUF|Model|Engine)/i.test(t)
+      || /ERROR|FAIL|WARN/i.test(t),
+  },
+];
 
 // Color classes by log prefix
 function getLineColor(text: string): string {
@@ -80,9 +101,10 @@ const LogLineItem = React.memo<{
 
 LogLineItem.displayName = 'LogLineItem';
 
-export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
+export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose, embedded = false }) => {
   const { lines, connected, clear } = useEventSource('/api/logs', true);
   const [search, setSearch] = useState('');
+  const [streamTab, setStreamTab] = useState('all');
   const [vram, setVram] = useState<VramInfo | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -116,12 +138,15 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
     snapToBottom();
   }, [setPinned, snapToBottom]);
 
-  // Filter lines by search term
+  // Filter lines by stream tab, then by search term
   const filteredLines = useMemo(() => {
-    if (!search.trim()) return lines;
-    const term = search.toLowerCase();
-    return lines.filter(l => l.text.toLowerCase().includes(term));
-  }, [lines, search]);
+    const tab = STREAM_TABS.find(t => t.id === streamTab) ?? STREAM_TABS[0];
+    const term = search.trim().toLowerCase();
+    if (tab.id === 'all' && !term) return lines;
+    return lines.filter(l =>
+      tab.test(l.text) && (!term || l.text.toLowerCase().includes(term))
+    );
+  }, [lines, search, streamTab]);
 
   // Snap on new/changed lines — layout effect so the pinned view never paints
   // at the stale position first.
@@ -150,6 +175,9 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
     if (prevSearch.current && !search) pinAndSnap();
     prevSearch.current = search;
   }, [search, pinAndSnap]);
+
+  // A tab switch replaces the whole visible list — land at the bottom of it.
+  useEffect(() => { pinAndSnap(); }, [streamTab, pinAndSnap]);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -219,13 +247,15 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
   return (
     <div className="h-full flex flex-col overflow-hidden bg-white dark:bg-[#0d0d0f]">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-3 border-b border-zinc-200 dark:border-white/5 bg-zinc-100/80 dark:bg-zinc-900/80">
+      <div className={`flex items-center justify-between px-3 ${embedded ? 'py-1.5' : 'py-3'} border-b border-zinc-200 dark:border-white/5 bg-zinc-100/80 dark:bg-zinc-900/80`}>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
             {connected
               ? <Wifi size={12} className="text-green-400" />
               : <WifiOff size={12} className="text-red-400" />}
-            <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">Terminal</span>
+            {!embedded && (
+              <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">Terminal</span>
+            )}
           </div>
 
           {/* VRAM badge */}
@@ -291,14 +321,31 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose }) => {
           >
             <Trash2 size={12} />
           </button>
-          <button
-            onClick={onClose}
-            className="p-1 rounded text-zinc-500 hover:text-white hover:bg-white/5 transition-colors"
-            title="Close terminal"
-          >
-            <X size={12} />
-          </button>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-1 rounded text-zinc-500 hover:text-white hover:bg-white/5 transition-colors"
+              title="Close terminal"
+            >
+              <X size={12} />
+            </button>
+          )}
         </div>
+      </div>
+
+      {/* Stream tabs */}
+      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-zinc-200 dark:border-white/5 bg-zinc-100/50 dark:bg-zinc-900/60">
+        {STREAM_TABS.map(tab => (
+          <button key={tab.id}
+            onClick={() => setStreamTab(tab.id)}
+            className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors whitespace-nowrap ${
+              streamTab === tab.id
+                ? 'text-pink-500 dark:text-pink-400 bg-pink-500/10'
+                : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-white/5'
+            }`}>
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* Search bar */}

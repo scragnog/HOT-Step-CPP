@@ -39,7 +39,6 @@ import { Toast, type ToastType } from './components/shared/Toast';
 import { ConfirmDialog } from './components/shared/ConfirmDialog';
 import { downloadTrack, downloadTrackVersion } from './utils/downloadTrack';
 import { SettingsPanel, type AppSettings, DEFAULT_SETTINGS } from './components/settings/SettingsPanel';
-import { TerminalPanel } from './components/terminal/TerminalPanel';
 import { AssistantPanel } from './components/assistant/AssistantPanel';
 import { LyricStudioV2 } from './components/lyric-studio/LyricStudioV2';
 import { CoverStudio } from './components/cover-studio/CoverStudio';
@@ -52,7 +51,6 @@ import { MidiStudio } from './components/midi-studio/MidiStudio';
 import { TrainingStudio } from './components/training-studio/TrainingStudio';
 import { GlobalParamBar } from './components/global-bar/GlobalParamBar';
 import { InstaGenPanel } from './components/insta-gen/InstaGenPanel';
-import { PlaylistSidebar } from './components/playlist/PlaylistSidebar';
 import {
   usePlaybackSelector,
   togglePlay as pbTogglePlay,
@@ -77,7 +75,7 @@ import {
   play as pbPlay,
 } from './stores/playbackStore';
 import type { Song, GenerationParams } from './types';
-import { usePlaylist, addToPlaylist } from './components/lyric-studio/playlistStore';
+import { addToPlaylist } from './components/lyric-studio/playlistStore';
 import { DisguiseModeProvider } from './hooks/useDisguiseMode';
 import { ABCompareModal } from './components/shared/ABCompareModal';
 import { useABCompareSelector, playAB, openModal as openABModal, clear as clearAB } from './stores/abCompareStore';
@@ -135,6 +133,16 @@ function urlForView(view: string): string {
 }
 
 /** Restarting overlay — polls /api/health and reloads when the server is back */
+// Which recent-songs feed the activity column shows, per view. Views that are
+// not listed — library, settings, training — show every source.
+const ACTIVITY_SOURCE: Record<string, string | undefined> = {
+  'create': 'create',
+  'insta-gen': 'insta-gen',
+  'lyric-studio': 'lyric-studio',
+  'cover-studio': 'cover-studio',
+  'repaint': 'repaint',
+};
+
 const RestartingOverlay: React.FC = () => {
   const { t } = useTranslation();
   const [status, setStatus] = useState(t('app.restarting.stopping'));
@@ -249,12 +257,8 @@ const AppContent: React.FC = () => {
   // Resizable panel widths (persisted)
   const [createPanelWidth, setCreatePanelWidth] = usePersistedState('ace-createPanelWidth', 490);
   const [rightSidebarWidth, setRightSidebarWidth] = usePersistedState('ace-rightSidebarWidth', 360);
-  const [activitySidebarWidth, setActivitySidebarWidth] = usePersistedState('hs-activitySidebarWidth', 320);
+  const [activitySidebarWidth, setActivitySidebarWidth] = usePersistedState('hs-activitySidebarWidth', 420);
   const [showRightSidebar, setShowRightSidebar] = useState(true);
-
-  // Terminal panel state (persisted)
-  const [showTerminal, setShowTerminal] = usePersistedState('ace-showTerminal', false);
-  const [terminalWidth, setTerminalWidth] = usePersistedState('ace-terminalWidth', 450);
 
   // Assistant panel state (persisted)
   const [showAssistant, setShowAssistant] = usePersistedState('hs-showAssistant', false);
@@ -266,10 +270,6 @@ const AppContent: React.FC = () => {
   // Theme state
   const { theme, toggleTheme } = useTheme();
 
-  // Playlist sidebar (persisted)
-  const [showPlaylist, setShowPlaylist] = usePersistedState('ace-showPlaylist', false);
-  const [playlistWidth, setPlaylistWidth] = usePersistedState('ace-playlistWidth', 300);
-  const playlistData = usePlaylist();
 
   // ── Playback (from unified store — each selector only re-renders when its value changes) ──
   const currentTrack = usePlaybackSelector(s => s.currentTrack);
@@ -988,40 +988,6 @@ const AppContent: React.FC = () => {
             />
           </DiscoPulseWrapper>
 
-          {/* Resize handle — Activity Sidebar */}
-          <div
-            className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              const startX = e.clientX;
-              const startW = activitySidebarWidth;
-              const onMove = (ev: MouseEvent) => {
-                const newW = Math.min(700, Math.max(240, startW + startX - ev.clientX));
-                setActivitySidebarWidth(newW);
-              };
-              const onUp = () => {
-                document.removeEventListener('mousemove', onMove);
-                document.removeEventListener('mouseup', onUp);
-                document.body.style.cursor = '';
-                document.body.style.userSelect = '';
-              };
-              document.body.style.cursor = 'col-resize';
-              document.body.style.userSelect = 'none';
-              document.addEventListener('mousemove', onMove);
-              document.addEventListener('mouseup', onUp);
-            }}
-          >
-            <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
-          </div>
-          {/* Activity Sidebar — Recent Songs + Queue */}
-          <DiscoPulseWrapper hue={DISCO.activity} className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden" style={{ width: activitySidebarWidth }}>
-            <ActivitySidebar
-              source="insta-gen"
-              showToast={showToast}
-              refreshKey={songCreatedCount}
-              compact={activitySidebarWidth < 380}
-            />
-          </DiscoPulseWrapper>
 
           {/* Right Sidebar — Song detail (same as Create) */}
           {showRightSidebar && selectedSong && (
@@ -1230,40 +1196,6 @@ const AppContent: React.FC = () => {
           />
         </DiscoPulseWrapper>
 
-        {/* Resize handle — Activity Sidebar */}
-        <div
-          className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors"
-          onMouseDown={(e) => {
-            e.preventDefault();
-            const startX = e.clientX;
-            const startW = activitySidebarWidth;
-            const onMove = (ev: MouseEvent) => {
-              const newW = Math.min(700, Math.max(240, startW + startX - ev.clientX));
-              setActivitySidebarWidth(newW);
-            };
-            const onUp = () => {
-              document.removeEventListener('mousemove', onMove);
-              document.removeEventListener('mouseup', onUp);
-              document.body.style.cursor = '';
-              document.body.style.userSelect = '';
-            };
-            document.body.style.cursor = 'col-resize';
-            document.body.style.userSelect = 'none';
-            document.addEventListener('mousemove', onMove);
-            document.addEventListener('mouseup', onUp);
-          }}
-        >
-          <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
-        </div>
-        {/* Activity Sidebar — Recent Songs + Queue */}
-        <DiscoPulseWrapper hue={DISCO.activity} className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden" style={{ width: activitySidebarWidth }}>
-          <ActivitySidebar
-            source="create"
-            showToast={showToast}
-            refreshKey={songCreatedCount}
-            compact={activitySidebarWidth < 380}
-          />
-        </DiscoPulseWrapper>
 
         {/* Right Sidebar — resizable */}
         {showRightSidebar && selectedSong && (
@@ -1357,54 +1289,167 @@ const AppContent: React.FC = () => {
           }}
           theme={theme}
           onToggleTheme={toggleTheme}
-          showTerminal={showTerminal}
-          onToggleTerminal={() => setShowTerminal(prev => !prev)}
           showAssistant={showAssistant}
           onToggleAssistant={() => setShowAssistant(prev => !prev)}
         />
         </DiscoPulseWrapper>
 
+        {/* Left stack — everything the activity column does NOT cover. The
+            player lives in here rather than spanning the window, so the
+            column runs the full height and the transport stops at its edge. */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <main className="flex-1 flex overflow-hidden relative">
           {renderContent()}
         </main>
 
-        {/* Playlist Sidebar — right of main, left of terminal */}
-        {showPlaylist && (
-          <>
+          {/* ── Bottom Player Area: Markers → Waveform → Transport ── */}
+          <DiscoPulseWrapper hue={DISCO.player} className="flex-shrink-0 bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-white/5" style={{ position: 'relative' }}>
+            {/* Collapsible visualisation area — animates up when playing, down when paused/stopped.
+                Uses CSS Grid 0fr→1fr trick so the transition tracks actual content height perfectly,
+                unlike max-height which over-shoots and makes the expand feel instant. */}
             <div
-              className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                const startX = e.clientX;
-                const startW = playlistWidth;
-                const onMove = (ev: MouseEvent) => {
-                  const newW = Math.min(600, Math.max(220, startW + startX - ev.clientX));
-                  setPlaylistWidth(newW);
-                };
-                const onUp = () => {
-                  document.removeEventListener('mousemove', onMove);
-                  document.removeEventListener('mouseup', onUp);
-                  document.body.style.cursor = '';
-                  document.body.style.userSelect = '';
-                };
-                document.body.style.cursor = 'col-resize';
-                document.body.style.userSelect = 'none';
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('mouseup', onUp);
+              style={{
+                display: 'grid',
+                gridTemplateRows: (playerActive || trimMode) ? '1fr' : '0fr',
+                opacity: (playerActive || trimMode) ? 1 : 0,
+                transition: 'grid-template-rows 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease',
               }}
             >
-              <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
+              <div style={{ overflow: 'hidden', minHeight: 0 }}>
+              <SectionMarkers audioUrl={currentTrack?.audioUrl ?? undefined} duration={duration} />
+              {/* Two analysers, one visible at a time. The media-element one must
+                  stay mounted forever (it owns a MediaElementSourceNode that carries
+                  the file decks' audio — see SpectrumAnalyzer's header), so it is
+                  collapsed rather than unmounted while a live render is playing. */}
+              <SpectrumAnalyzer
+                mediaElement={spectrumMediaEl}
+                visible={spectrumEnabled && playerActive && !isStreamTrack}
+                isPlaying={isPlaying}
+              />
+              <StreamSpectrum visible={spectrumEnabled && playerActive && isStreamTrack} />
+              {trimMode && (
+                <TrimControls
+                  trimInPoint={trimInPoint}
+                  trimOutPoint={trimOutPoint}
+                  trimClickCount={trimClickCount}
+                  songId={currentTrack?.id ?? null}
+                  audioUrl={currentTrack?.audioUrl ?? null}
+                  onReload={pbReloadCurrentTrack}
+                  onCancel={() => pbSetTrimMode(false)}
+                />
+              )}
+              {/* One waveform. The live-render canvas replaces it rather than
+                  stacking: a track still being written has no file to draw peaks
+                  from, so its envelope comes from mm3StreamStore as windows land. */}
+              <div className="relative" style={{ height: 56 }}>
+                {isStreamTrack ? (
+                  <StreamWaveform height={56} />
+                ) : (
+                  <Waveform
+                    height={56}
+                    trimIn={trimMode ? trimInPoint : null}
+                    trimOut={trimMode ? trimOutPoint : null}
+                    onClickTime={trimMode ? pbHandleTrimClick : undefined}
+                  />
+                )}
+              </div>
+              </div>
+              {/* /inner overflow wrapper */}
             </div>
-            <DiscoPulseWrapper hue={DISCO.playlist}
-              className="flex-shrink-0 h-full border-l border-zinc-200 dark:border-white/5"
-              style={{ width: playlistWidth }}
-            >
-              <PlaylistSidebar onClose={() => setShowPlaylist(false)} />
-            </DiscoPulseWrapper>
-          </>
-        )}
+            <LyricsBar
+              audioUrl={currentTrack?.audioUrl ?? undefined}
+              currentTime={currentTime}
+              isPlaying={isPlaying}
+            />
+            {/* Global A/B comparison mini-bar — visible from any view when both tracks are pinned */}
+            <ABMiniBar />
+            {/* Post-processing runs for minutes with no other on-screen trace.
+                Docked at the root so it is visible from every view, Library
+                included. */}
+            <PostProcessDock />
 
-        {/* Assistant Panel — between playlist and terminal, resizable */}
+            <Player
+              currentSong={currentSong}
+              isPlaying={isPlaying}
+              onTogglePlay={pbTogglePlay}
+              onStop={pbStop}
+              currentTime={currentTime}
+              duration={duration}
+              onSeek={handleSeek}
+              onNext={pbNext}
+              onPrevious={pbPrevious}
+              volume={volume}
+              onVolumeChange={pbSetVolume}
+              playbackRate={playbackRate}
+              onPlaybackRateChange={pbSetPlaybackRate}
+              pitch441={pitch441}
+              onTogglePitch441={() => pbSetPitch441(!pitch441)}
+              isShuffle={shuffle}
+              onToggleShuffle={() => pbSetShuffle(!shuffle)}
+              repeatMode={repeat}
+              onToggleRepeat={pbCycleRepeat}
+              onReusePrompt={() => currentSong && handleReuse(currentSong as Song)}
+              onDelete={() => currentSong && handleDelete(currentSong as Song)}
+              onDownload={() => currentSong && downloadTrack(currentSong as Song)}
+              playMastered={playMastered}
+              playNoAdapter={playNoAdapter}
+              onSetPlaybackVariant={pbSetPlaybackVariant}
+              onDownloadVariant={(v) => currentSong && downloadTrackVersion(currentSong as Song, v)}
+              spectrumEnabled={spectrumEnabled}
+              onToggleSpectrum={() => pbSetSpectrumEnabled(!spectrumEnabled)}
+              trimMode={trimMode}
+              onToggleTrimMode={() => pbSetTrimMode(!trimMode)}
+              abMode={abMode}
+              abActiveLabel={abActiveLabel}
+              onToggleAB={pbToggleAB}
+              onExitABMode={pbExitABMode}
+              discoMode={discoMode}
+              onToggleDisco={handleToggleDisco}
+            />
+            <HiHatParticles />
+          </DiscoPulseWrapper>
+        </div>
+
+        {/* Activity column — Playlist/Recent + Queue + Terminal. One instance for
+            every view, so the queue and the engine log are never more than a
+            glance away regardless of which studio is open. */}
+        <div
+          className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startW = activitySidebarWidth;
+            const onMove = (ev: MouseEvent) => {
+              setActivitySidebarWidth(Math.min(900, Math.max(240, startW + startX - ev.clientX)));
+            };
+            const onUp = () => {
+              document.removeEventListener('mousemove', onMove);
+              document.removeEventListener('mouseup', onUp);
+              document.body.style.cursor = '';
+              document.body.style.userSelect = '';
+            };
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+          }}
+        >
+          <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
+        </div>
+        <DiscoPulseWrapper hue={DISCO.activity}
+          className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden"
+          style={{ width: activitySidebarWidth }}
+        >
+          <ActivitySidebar
+            source={ACTIVITY_SOURCE[activeView]}
+            showToast={showToast}
+            refreshKey={songCreatedCount}
+            compact={activitySidebarWidth < 380}
+            showTerminal
+          />
+        </DiscoPulseWrapper>
+
+        {/* Assistant Panel — right of the activity column, resizable */}
         {showAssistant && (
           <>
             <div
@@ -1440,152 +1485,7 @@ const AppContent: React.FC = () => {
           </>
         )}
 
-        {/* Terminal Panel — far right, resizable */}
-        {showTerminal && (
-          <>
-            <div
-              className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-emerald-500/20 active:bg-emerald-500/30 transition-colors"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                const startX = e.clientX;
-                const startW = terminalWidth;
-                const onMove = (ev: MouseEvent) => {
-                  const newW = Math.min(900, Math.max(300, startW + startX - ev.clientX));
-                  setTerminalWidth(newW);
-                };
-                const onUp = () => {
-                  document.removeEventListener('mousemove', onMove);
-                  document.removeEventListener('mouseup', onUp);
-                  document.body.style.cursor = '';
-                  document.body.style.userSelect = '';
-                };
-                document.body.style.cursor = 'col-resize';
-                document.body.style.userSelect = 'none';
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('mouseup', onUp);
-              }}
-            >
-              <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-emerald-400 transition-colors" />
-            </div>
-            <DiscoPulseWrapper hue={DISCO.terminal}
-              className="flex-shrink-0 h-full border-l border-zinc-200 dark:border-white/5"
-              style={{ width: terminalWidth }}
-            >
-              <TerminalPanel onClose={() => setShowTerminal(false)} />
-            </DiscoPulseWrapper>
-          </>
-        )}
       </div>
-
-      {/* ── Bottom Player Area: Markers → Waveform → Transport ── */}
-      <DiscoPulseWrapper hue={DISCO.player} className="flex-shrink-0 bg-white dark:bg-zinc-950 border-t border-zinc-200 dark:border-white/5" style={{ position: 'relative' }}>
-        {/* Collapsible visualisation area — animates up when playing, down when paused/stopped.
-            Uses CSS Grid 0fr→1fr trick so the transition tracks actual content height perfectly,
-            unlike max-height which over-shoots and makes the expand feel instant. */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateRows: (playerActive || trimMode) ? '1fr' : '0fr',
-            opacity: (playerActive || trimMode) ? 1 : 0,
-            transition: 'grid-template-rows 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease',
-          }}
-        >
-          <div style={{ overflow: 'hidden', minHeight: 0 }}>
-          <SectionMarkers audioUrl={currentTrack?.audioUrl ?? undefined} duration={duration} />
-          {/* Two analysers, one visible at a time. The media-element one must
-              stay mounted forever (it owns a MediaElementSourceNode that carries
-              the file decks' audio — see SpectrumAnalyzer's header), so it is
-              collapsed rather than unmounted while a live render is playing. */}
-          <SpectrumAnalyzer
-            mediaElement={spectrumMediaEl}
-            visible={spectrumEnabled && playerActive && !isStreamTrack}
-            isPlaying={isPlaying}
-          />
-          <StreamSpectrum visible={spectrumEnabled && playerActive && isStreamTrack} />
-          {trimMode && (
-            <TrimControls
-              trimInPoint={trimInPoint}
-              trimOutPoint={trimOutPoint}
-              trimClickCount={trimClickCount}
-              songId={currentTrack?.id ?? null}
-              audioUrl={currentTrack?.audioUrl ?? null}
-              onReload={pbReloadCurrentTrack}
-              onCancel={() => pbSetTrimMode(false)}
-            />
-          )}
-          {/* One waveform. The live-render canvas replaces it rather than
-              stacking: a track still being written has no file to draw peaks
-              from, so its envelope comes from mm3StreamStore as windows land. */}
-          <div className="relative" style={{ height: 56 }}>
-            {isStreamTrack ? (
-              <StreamWaveform height={56} />
-            ) : (
-              <Waveform
-                height={56}
-                trimIn={trimMode ? trimInPoint : null}
-                trimOut={trimMode ? trimOutPoint : null}
-                onClickTime={trimMode ? pbHandleTrimClick : undefined}
-              />
-            )}
-          </div>
-          </div>
-          {/* /inner overflow wrapper */}
-        </div>
-        <LyricsBar
-          audioUrl={currentTrack?.audioUrl ?? undefined}
-          currentTime={currentTime}
-          isPlaying={isPlaying}
-        />
-        {/* Global A/B comparison mini-bar — visible from any view when both tracks are pinned */}
-        <ABMiniBar />
-        {/* Post-processing runs for minutes with no other on-screen trace.
-            Docked at the root so it is visible from every view, Library
-            included. */}
-        <PostProcessDock />
-
-        <Player
-          currentSong={currentSong}
-          isPlaying={isPlaying}
-          onTogglePlay={pbTogglePlay}
-          onStop={pbStop}
-          currentTime={currentTime}
-          duration={duration}
-          onSeek={handleSeek}
-          onNext={pbNext}
-          onPrevious={pbPrevious}
-          volume={volume}
-          onVolumeChange={pbSetVolume}
-          playbackRate={playbackRate}
-          onPlaybackRateChange={pbSetPlaybackRate}
-          pitch441={pitch441}
-          onTogglePitch441={() => pbSetPitch441(!pitch441)}
-          isShuffle={shuffle}
-          onToggleShuffle={() => pbSetShuffle(!shuffle)}
-          repeatMode={repeat}
-          onToggleRepeat={pbCycleRepeat}
-          onReusePrompt={() => currentSong && handleReuse(currentSong as Song)}
-          onDelete={() => currentSong && handleDelete(currentSong as Song)}
-          onDownload={() => currentSong && downloadTrack(currentSong as Song)}
-          playMastered={playMastered}
-          playNoAdapter={playNoAdapter}
-          onSetPlaybackVariant={pbSetPlaybackVariant}
-          onDownloadVariant={(v) => currentSong && downloadTrackVersion(currentSong as Song, v)}
-          spectrumEnabled={spectrumEnabled}
-          onToggleSpectrum={() => pbSetSpectrumEnabled(!spectrumEnabled)}
-          showPlaylist={showPlaylist}
-          playlistCount={playlistData.items.length}
-          onTogglePlaylist={() => setShowPlaylist(prev => !prev)}
-          trimMode={trimMode}
-          onToggleTrimMode={() => pbSetTrimMode(!trimMode)}
-          abMode={abMode}
-          abActiveLabel={abActiveLabel}
-          onToggleAB={pbToggleAB}
-          onExitABMode={pbExitABMode}
-          discoMode={discoMode}
-          onToggleDisco={handleToggleDisco}
-        />
-        <HiHatParticles />
-      </DiscoPulseWrapper>
 
       {/* Modals */}
       <Toast

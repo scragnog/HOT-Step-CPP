@@ -70,6 +70,11 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
   const { t } = useTranslation();
   const { capabilities } = useCapabilities();
   const mm3Mode = useBackendStore(s => s.activeBackendId) === 'minimax-m3';
+  // YuE2's request carries style, lyrics and an optional score — nothing else.
+  // Time signature, vocal gender and language have no slot on the wire and no
+  // place in the trained style sentence, so they are dead knobs there. BPM and
+  // Key stay: they compose into that sentence's trained tail.
+  const yue2Mode = useBackendStore(s => s.activeBackendId) === 'yue2';
   // Clamp to the active backend's manifest when it defines one (§4.2/§4.5) —
   // never a hardcoded ACE-only ceiling. capabilities?.core.duration.max is
   // undefined while loading, so DEFAULT_DURATION_MAX (the prior hardcoded
@@ -153,8 +158,8 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
           </select>
         </div>
 
-        {/* Time Signature — no path to MiniMax-Music3, so hidden there */}
-        {!mm3Mode && (
+        {/* Time Signature — no path to MiniMax-Music3 or YuE2, so hidden there */}
+        {!mm3Mode && !yue2Mode && (
           <div>
             <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('metadataSection.timeSig')}</label>
             <select className={selectClasses} value={timeSignature}
@@ -166,7 +171,9 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
           </div>
         )}
 
-        {/* Vocal Gender — written into the caption's Vocal Details in MM3 mode */}
+        {/* Vocal Gender — written into the caption's Vocal Details in MM3 mode,
+            and nowhere at all on YuE2 */}
+        {!yue2Mode && (
         <div>
           <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('metadataSection.vocalGender')}</label>
           <select className={selectClasses} value={vocalGender}
@@ -181,8 +188,10 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
             ))}
           </select>
         </div>
+        )}
 
-        {/* Language */}
+        {/* Language — YuE2 infers it from the lyrics; there is no field for it */}
+        {!yue2Mode && (
         <div className="col-span-2">
           <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
             {mm3Mode ? t('metadataSection.lyricsLanguage') : t('metadataSection.vocalLanguage')}
@@ -197,6 +206,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
             <p className="mt-1 text-[10px] leading-snug text-zinc-500">{t('metadataSection.lyricsLanguageHint')}</p>
           )}
         </div>
+        )}
       </div>
     </div>
   );

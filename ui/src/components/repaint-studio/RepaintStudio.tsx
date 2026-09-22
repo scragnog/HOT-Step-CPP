@@ -1,6 +1,6 @@
 // RepaintStudio.tsx — Main Repaint Studio orchestrator
 //
-// Composes: RepaintWaveform, RegionLyricsEditor, RepaintSettings, ActivitySidebar
+// Composes: RepaintWaveform, RegionLyricsEditor, RepaintSettings
 // Allows users to select a region of an existing track and regenerate it
 // with optionally modified lyrics.
 
@@ -8,19 +8,16 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Upload, Loader2, X, Music, FolderOpen, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
-import { usePersistedState } from '../../hooks/usePersistedState';
 import { generateApi, songApi } from '../../services/api';
 import { createGenerationTimer, getGenerationTimeoutMinutes } from '../../utils/generationTimer';
 import { fetchLrc } from '../../utils/lrcUtils';
 import { RepaintWaveform } from './RepaintWaveform';
 import { RegionLyricsEditor } from './RegionLyricsEditor';
 import { RepaintSettings } from './RepaintSettings';
-import { ActivitySidebar } from '../shared/ActivitySidebar';
 import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
 import {
   addManualQueueItem, updateManualQueueItem,
   completeManualQueueItem, failManualQueueItem,
-  useAudioGenQueueSelector,
 } from '../../stores/audioGenQueueStore';
 import type { Song } from '../../types';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
@@ -40,7 +37,6 @@ function restore<T>(key: string, fallback: T): T {
 export const RepaintStudio: React.FC = () => {
   const { token } = useAuth();
   const gp = useGlobalParamsStore();
-  const completionCounter = useAudioGenQueueSelector(s => s.completionCounter);
   const { disguiseArtist } = useDisguiseMode();
 
   // ── Source song state ──
@@ -71,12 +67,10 @@ export const RepaintStudio: React.FC = () => {
   const [genStage, setGenStage] = useState('');
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [queueItemId, setQueueItemId] = useState<string | null>(null);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [toast, setToast] = useState('');
   const [wipDismissed, setWipDismissed] = useState(false);
 
   // ── Sidebar resize ──
-  const [sidebarWidth, setSidebarWidth] = usePersistedState('hs-repaintSidebarWidth', 320);
 
   // ── Library picker ──
   const [showLibrary, setShowLibrary] = useState(false);
@@ -283,7 +277,6 @@ export const RepaintStudio: React.FC = () => {
           setIsGenerating(false);
           setActiveJobId(null);
           setQueueItemId(null);
-          setRefreshTrigger(p => p + 1);
           showToast('Repaint complete!');
           setTimeout(() => { setGenProgress(0); setGenStage(''); }, 3000);
 
@@ -326,26 +319,6 @@ export const RepaintStudio: React.FC = () => {
 
   const canGenerate = !!sourceAudioUrl && !isGenerating && (regionEnd > regionStart || (regionEnd === 0 && duration > 0));
 
-  // ── Sidebar resize handler ──
-  const handleSidebarResize = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = sidebarWidth;
-    const onMove = (ev: MouseEvent) => {
-      const newW = Math.min(700, Math.max(240, startW + startX - ev.clientX));
-      setSidebarWidth(newW);
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [sidebarWidth, setSidebarWidth]);
 
   // ── Render ──
   return (
@@ -527,22 +500,6 @@ export const RepaintStudio: React.FC = () => {
           />
         </div>
 
-        {/* ── Right: Resize handle + Activity Sidebar ── */}
-        <div
-          className="flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-pink-500/20 active:bg-pink-500/30 transition-colors"
-          onMouseDown={handleSidebarResize}
-        >
-          <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
-        </div>
-        <div className="h-full flex-shrink-0 border-l border-white/5 overflow-hidden" style={{ width: sidebarWidth }}>
-          <ActivitySidebar
-            showToast={(msg) => showToast(msg as string)}
-            source="repaint"
-            refreshKey={refreshTrigger + completionCounter}
-            queueCountColor="bg-pink-500/20 text-pink-300"
-            compact={sidebarWidth < 380}
-          />
-        </div>
       </div>
     </div>
     </BackendCapabilityGate>

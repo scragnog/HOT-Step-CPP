@@ -7,7 +7,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Zap, Download, Tag, AlertTriangle, Loader2, Settings2,
   ChevronRight, Save, Scissors,
-  Key, Database, Globe, Gauge
+  Key, Database, Globe, Gauge, Image as ImageIcon
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { SUPPORTED_LANGUAGES } from '../../i18n';
@@ -21,6 +21,7 @@ import {
   EnvTextRow, EnvPasswordRow, EnvPathRow, EnvSubsection,
 } from './SettingsPrimitives';
 import './SettingsPanel.css';
+import { COVER_SETS, getCoverSet, setCoverSet, type CoverSet } from '../../utils/defaultCover';
 
 export interface AppSettings {
   coResident: boolean;
@@ -75,6 +76,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 }) => {
   const { t, i18n } = useTranslation();
   const { token } = useAuth();
+  const [coverSet, setCoverSetState] = useState<CoverSet>(getCoverSet);
   const [nukeConfirm, setNukeConfirm] = useState(false);
   const [nukeRunning, setNukeRunning] = useState(false);
   const [nukeResult, setNukeResult] = useState<string | null>(null);
@@ -747,6 +749,31 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       </div>
 
 
+
+      {/* Generic cover art */}
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <ImageIcon size={16} className="settings-section-icon" />
+          <span className="settings-section-title">Cover art</span>
+        </div>
+
+        <SelectRow
+          id="setting-cover-set"
+          label="Generic artwork"
+          description="Which set of stand-in covers a track shows until it has one of its own. Each track keeps the same image within a set."
+          value={coverSet}
+          options={COVER_SETS.map(s => ({ value: s.id, label: s.label }))}
+          onChange={(v) => { setCoverSetState(v as CoverSet); setCoverSet(v as CoverSet); }}
+        />
+
+        <div className="flex gap-1.5 mt-3">
+          {[0, 7, 13, 21, 34, 42].map(i => (
+            <img key={i} src={`/covers/${coverSet}/${String(i).padStart(2, '0')}.webp`}
+              alt="" loading="lazy"
+              className="w-12 h-12 rounded-md object-cover border border-zinc-200 dark:border-white/10" />
+          ))}
+        </div>
+      </div>
 
       {/* Disco Mode */}
       <div className="border-t border-zinc-200 dark:border-white/5 pt-4 mt-4">

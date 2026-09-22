@@ -17,12 +17,16 @@ import { downloadTrack, downloadAll } from '../../utils/downloadTrack';
 import type { Song } from '../../types';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { SongActionsMenu, songFromPlaylistItem } from '../shared/SongActionsMenu';
+import { CoverImage } from '../shared/CoverImage';
 
 interface PlaylistSidebarProps {
-  onClose: () => void;
+  /** Omitted when embedded — the host section owns the header. */
+  onClose?: () => void;
+  /** Rendered inside a tabbed section: no header row, actions move to the footer. */
+  embedded?: boolean;
 }
 
-export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose }) => {
+export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose, embedded = false }) => {
   const playlist = usePlaylist();
   const { t } = useTranslation();
   const currentSongId = usePlaybackSelector(s => s.currentTrack?.id ?? null);
@@ -68,8 +72,9 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose }) => 
   }, [playlist.items]);
 
   return (
-    <div className="flex flex-col h-full bg-zinc-50/80 dark:bg-zinc-950/80 backdrop-blur-sm">
-      {/* Header */}
+    <div className={`flex flex-col h-full ${embedded ? '' : 'bg-zinc-50/80 dark:bg-zinc-950/80 backdrop-blur-sm'}`}>
+      {/* Header — the embedded form gets its header from the enclosing tab strip */}
+      {!embedded && (
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/5 flex-shrink-0">
         <div className="flex items-center gap-2">
           <ListMusic className="w-4 h-4 text-pink-400" />
@@ -97,13 +102,16 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose }) => 
               <Trash2 className="w-3 h-3" />
             </button>
           )}
-          <button onClick={onClose}
-            className="p-1 rounded-md text-zinc-500 hover:text-white hover:bg-white/10 transition-colors"
-            title={t('playlist.closePlaylist')}>
-            <X className="w-3 h-3" />
-          </button>
+          {onClose && (
+            <button onClick={onClose}
+              className="p-1 rounded-md text-zinc-500 hover:text-white hover:bg-white/10 transition-colors"
+              title={t('playlist.closePlaylist')}>
+              <X className="w-3 h-3" />
+            </button>
+          )}
         </div>
       </div>
+      )}
 
       {/* Track list */}
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide">
@@ -141,15 +149,9 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose }) => 
                   </div>
 
                   {/* Cover art */}
-                  {item.coverUrl ? (
-                    <div className="w-9 h-9 rounded-md overflow-hidden flex-shrink-0 bg-zinc-100 dark:bg-zinc-800">
-                      <img src={item.coverUrl} alt="" className="w-full h-full object-cover" />
-                    </div>
-                  ) : (
-                    <div className="w-9 h-9 rounded-md flex-shrink-0 bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
-                      <Music className="w-3.5 h-3.5 text-zinc-600" />
-                    </div>
-                  )}
+                  <div className="w-9 h-9 rounded-md overflow-hidden flex-shrink-0 bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+                    <CoverImage url={item.coverUrl} seed={item.id} iconSize={14} />
+                  </div>
 
                   {/* Title / Artist */}
                   <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handlePlay(item)}>
@@ -209,7 +211,25 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose }) => 
             className="flex items-center gap-1.5 text-[10px] font-semibold text-pink-400 hover:text-pink-300 transition-colors">
             <Play className="w-3 h-3" /> {t('playlist.playAll')}
           </button>
-          <span className="text-[9px] text-zinc-600 font-mono">{totalDuration}</span>
+          <div className="flex items-center gap-1">
+            <span className="text-[9px] text-zinc-600 font-mono">{totalDuration}</span>
+            {embedded && (
+              <>
+                <button onClick={handleDownloadAll} disabled={downloading}
+                  className="p-1 rounded-md text-zinc-600 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                  title={downloading ? 'Downloading...' : 'Download all tracks'}>
+                  {downloading
+                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : <DownloadCloud className="w-3 h-3" />}
+                </button>
+                <button onClick={playlist.clear}
+                  className="p-1 rounded-md text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                  title={t('playlist.clearPlaylist')}>
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>

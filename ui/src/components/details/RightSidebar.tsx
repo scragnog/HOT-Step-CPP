@@ -1,13 +1,22 @@
 // RightSidebar.tsx — Selected song details panel
-// Ported from hot-step-9000's RightSidebar, simplified for current feature set.
+//
+// Reads its parameters through songFacts, which picks the field set by backend.
+// Nothing here may reach into generation_params directly: that blob holds every
+// panel's settings, not the ones this render used, and reading it generically
+// is what put AS1.5 numbers on MM3 and YuE2 songs.
 
 import React from 'react';
-import { X, Play, Pause, RotateCcw, Music, Clock, Hash, Gauge, Cpu, Terminal, Settings2, Zap, Radio, Activity, Layers, Sparkles, SlidersHorizontal, Pencil } from 'lucide-react';
+import { X, Play, Pause, RotateCcw, Pencil, ChevronDown, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Song } from '../../types';
 import { HoverFullText } from '../shared/HoverFullText';
 import { SongActionsMenu } from '../shared/SongActionsMenu';
-import { formatDitModel, formatLmModel } from '../global-bar/modelLabels';
+import { CoverImage } from '../shared/CoverImage';
+import { displayTitle, songArtist, songSubject } from '../../utils/songDisplay';
+import {
+  BACKEND_LABELS, buildFactGroups, buildTrackChips, songBackend,
+  type Fact,
+} from './songFacts';
 
 interface RightSidebarProps {
   song: Song;
@@ -22,6 +31,13 @@ interface RightSidebarProps {
   onEditMetadata?: (song: Song) => void;
 }
 
+/** Per-backend accent, so the chip is recognisable at a glance. */
+const BACKEND_CHIP: Record<string, string> = {
+  'ace': 'bg-pink-500/10 text-pink-600 dark:text-pink-400 border-pink-500/30',
+  'minimax-m3': 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/30',
+  'yue2': 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30',
+};
+
 export const RightSidebar: React.FC<RightSidebarProps> = ({
   song,
   onClose,
@@ -35,7 +51,12 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   onEditMetadata,
 }) => {
   const { t } = useTranslation();
-  const gp = song.generationParams;
+
+  const backend = songBackend(song);
+  const chips = React.useMemo(() => buildTrackChips(song), [song]);
+  const groups = React.useMemo(() => buildFactGroups(song), [song]);
+  const artist = songArtist(song);
+  const subject = songSubject(song);
 
   // Inline rename state
   const [editing, setEditing] = React.useState(false);
@@ -78,21 +99,18 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto hide-scrollbar p-4 space-y-4">
-        {/* Cover Art Placeholder */}
-        <div className="aspect-square w-full rounded-xl bg-gradient-to-br from-pink-500/20 to-purple-600/20 border border-zinc-200 dark:border-white/5 flex items-center justify-center">
-          {song.coverUrl ? (
-            <img src={song.coverUrl} alt={song.title} className="w-full h-full object-cover rounded-xl" />
-          ) : (
-            <Music size={48} className="text-zinc-600" />
-          )}
+        {/* Cover */}
+        <div className="aspect-square w-full rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-white/5 flex items-center justify-center">
+          <CoverImage url={song.coverUrl} seed={song.id} alt={song.title}
+            className="w-full h-full object-cover" iconSize={48} />
         </div>
 
-        {/* Title & Style */}
+        {/* Title, artist, what it is about */}
         <div>
           {editing ? (
             <input
               ref={inputRef}
-              className="w-full text-lg font-bold bg-zinc-800 border border-pink-500/40 rounded-lg px-2 py-0.5 text-white outline-none focus:border-pink-500"
+              className="w-full text-lg font-bold bg-zinc-100 dark:bg-zinc-800 border border-pink-500/40 rounded-lg px-2 py-0.5 text-zinc-900 dark:text-white outline-none focus:border-pink-500"
               value={editTitle}
               onChange={e => setEditTitle(e.target.value)}
               onBlur={commitRename}
@@ -103,11 +121,13 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
             />
           ) : (
             <div className="flex items-center gap-1.5 group/title">
-              <h2 className="text-lg font-bold text-white leading-tight truncate">{song.title || 'Untitled'}</h2>
+              <h2 className="text-lg font-bold text-zinc-900 dark:text-white leading-tight truncate">
+                {displayTitle(song)}
+              </h2>
               {onRename && (
                 <button
                   onClick={() => { setEditTitle(song.title || ''); setEditing(true); }}
-                  className="flex-shrink-0 p-1 rounded-lg text-zinc-600 hover:text-zinc-300 opacity-0 group-hover/title:opacity-100 transition-opacity"
+                  className="flex-shrink-0 p-1 rounded-lg text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 opacity-0 group-hover/title:opacity-100 transition-opacity"
                   title={t('library.rename')}
                 >
                   <Pencil size={13} />
@@ -115,16 +135,26 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
               )}
             </div>
           )}
-          {song.style && (
+
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <span className={`px-2 py-0.5 rounded-md border text-[10px] font-semibold uppercase tracking-wider ${BACKEND_CHIP[backend]}`}>
+              {BACKEND_LABELS[backend]}
+            </span>
+            {artist && (
+              <span className="text-xs text-zinc-600 dark:text-zinc-400 truncate">{artist}</span>
+            )}
+          </div>
+
+          {subject && (
             <HoverFullText
               as="p"
-              text={song.style}
-              className="mt-1 text-sm text-zinc-600 dark:text-zinc-400 line-clamp-2 cursor-help"
+              text={subject}
+              className="mt-2 text-sm text-zinc-700 dark:text-zinc-300 line-clamp-3 cursor-help"
             />
           )}
         </div>
 
-        {/* Action Buttons */}
+        {/* Actions */}
         <div className="flex items-center gap-2">
           <button
             onClick={() => onPlay(song)}
@@ -154,237 +184,93 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
           />
         </div>
 
-        {/* Metadata Badges */}
-        <div className="grid grid-cols-2 gap-2">
-          {song.duration && (
-            <MetaBadge icon={<Clock size={14} />} label={t('details.duration')} value={String(song.duration)} gradient="from-amber-500/10 to-orange-500/10 border-amber-200 dark:border-amber-500/30" iconColor="text-amber-600 dark:text-amber-400" />
-          )}
-          {(song.bpm || gp?.bpm) ? (
-            <MetaBadge icon={<Gauge size={14} />} label={t('details.bpm')} value={String(song.bpm || gp?.bpm)} gradient="from-rose-500/10 to-pink-500/10 border-rose-200 dark:border-rose-500/30" iconColor="text-rose-600 dark:text-rose-400" />
-          ) : null}
-          {gp?.keyScale && (
-            <MetaBadge icon={<Hash size={14} />} label={t('details.key')} value={gp.keyScale} gradient="from-emerald-500/10 to-teal-500/10 border-emerald-200 dark:border-emerald-500/30" iconColor="text-emerald-600 dark:text-emerald-400" />
-          )}
-          {gp?.timeSignature && (
-            <MetaBadge icon={<Music size={14} />} label={t('details.timeSig')} value={gp.timeSignature} gradient="from-violet-500/10 to-purple-500/10 border-violet-200 dark:border-violet-500/30" iconColor="text-violet-600 dark:text-violet-400" />
-          )}
-        </div>
-
-        {/* Generation Parameters Grid — HOT-Step 9000 style */}
-        {gp && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500/20 to-purple-500/20 border border-indigo-200 dark:border-indigo-500/30 flex items-center justify-center">
-                <SlidersHorizontal size={12} className="text-indigo-600 dark:text-indigo-400" />
-              </div>
-              <h4 className="text-xs font-bold text-zinc-800 dark:text-zinc-200 uppercase tracking-wider">{t('details.generationInfo')}</h4>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              {/* Models — blue accent */}
-              {gp.ditModel && (
-                <ParamCell
-                  label="DiT Model"
-                  value={formatDitModel(gp.ditModel)}
-                  title={gp.ditModel}
-                  gradient="from-blue-500/10 to-cyan-500/10 border-blue-200 dark:border-blue-500/30"
-                  iconColor="text-blue-600 dark:text-blue-400"
-                  icon={<Cpu size={12} />}
-                />
-              )}
-              {gp.lmModel && (
-                <ParamCell
-                  label="LM Model"
-                  value={formatLmModel(gp.lmModel)}
-                  title={gp.lmModel}
-                  gradient="from-blue-500/10 to-cyan-500/10 border-blue-200 dark:border-blue-500/30"
-                  iconColor="text-blue-600 dark:text-blue-400"
-                  icon={<Terminal size={12} />}
-                />
-              )}
-
-              {/* Engine — tech accent */}
-              {gp.inferenceSteps && (
-                <ParamCell
-                  label="Steps"
-                  value={String(gp.inferenceSteps)}
-                  gradient="from-slate-500/10 to-zinc-500/10 border-slate-200 dark:border-slate-500/30"
-                  iconColor="text-slate-600 dark:text-slate-400"
-                  icon={<Gauge size={12} />}
-                />
-              )}
-              {gp.guidanceScale !== undefined && (
-                <ParamCell
-                  label="CFG Scale"
-                  value={String(gp.guidanceScale)}
-                  gradient="from-slate-500/10 to-zinc-500/10 border-slate-200 dark:border-slate-500/30"
-                  iconColor="text-slate-600 dark:text-slate-400"
-                  icon={<Settings2 size={12} />}
-                />
-              )}
-
-              {/* Solver + Scheduler — violet accent */}
-              {gp.inferMethod && (
-                <ParamCell
-                  label="Solver"
-                  value={gp.inferMethod.toUpperCase()}
-                  gradient="from-violet-500/10 to-purple-500/10 border-violet-200 dark:border-violet-500/30"
-                  iconColor="text-violet-600 dark:text-violet-400"
-                  icon={<Zap size={12} />}
-                />
-              )}
-              {gp.scheduler && gp.scheduler !== 'linear' && (
-                <ParamCell
-                  label="Schedule"
-                  value={gp.scheduler.split(':')[0].replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
-                  gradient="from-violet-500/10 to-purple-500/10 border-violet-200 dark:border-violet-500/30"
-                  iconColor="text-violet-600 dark:text-violet-400"
-                  icon={<Clock size={12} />}
-                />
-              )}
-
-              {/* Guidance — emerald accent */}
-              {gp.guidanceMode && (
-                <ParamCell
-                  label="Guidance"
-                  value={gp.guidanceMode.toUpperCase()}
-                  gradient="from-emerald-500/10 to-teal-500/10 border-emerald-200 dark:border-emerald-500/30"
-                  iconColor="text-emerald-600 dark:text-emerald-400"
-                  icon={<Radio size={12} />}
-                />
-              )}
-
-              {/* Shift */}
-              {gp.shift !== undefined && (
-                <ParamCell
-                  label="Shift"
-                  value={gp.shift < 0 ? 'Auto' : String(gp.shift)}
-                  gradient="from-amber-500/10 to-orange-500/10 border-amber-200 dark:border-amber-500/30"
-                  iconColor="text-amber-600 dark:text-amber-400"
-                  icon={<Activity size={12} />}
-                />
-              )}
-
-              {/* Seed — mono */}
-              {gp.seed !== undefined && (
-                <ParamCell
-                  label="Seed"
-                  value={String(gp.seed).substring(0, 12) + (String(gp.seed).length > 12 ? '…' : '')}
-                  gradient="from-slate-500/10 to-zinc-500/10 border-slate-200 dark:border-slate-500/30"
-                  iconColor="text-slate-600 dark:text-slate-400"
-                  icon={<Hash size={12} />}
-                  mono
-                />
-              )}
-
-              {/* LM Seed — mono */}
-              {gp.lmSeed !== undefined && (
-                <ParamCell
-                  label="LM Seed"
-                  value={String(gp.lmSeed).substring(0, 12) + (String(gp.lmSeed).length > 12 ? '…' : '')}
-                  gradient="from-slate-500/10 to-zinc-500/10 border-slate-200 dark:border-slate-500/30"
-                  iconColor="text-slate-600 dark:text-slate-400"
-                  icon={<Hash size={12} />}
-                  mono
-                />
-              )}
-
-              {/* Batch Size */}
-              {gp.batchSize && gp.batchSize > 1 && (
-                <ParamCell
-                  label="Batch"
-                  value={String(gp.batchSize)}
-                  gradient="from-slate-500/10 to-zinc-500/10 border-slate-200 dark:border-slate-500/30"
-                  iconColor="text-slate-600 dark:text-slate-400"
-                  icon={<Layers size={12} />}
-                />
-              )}
-
-              {/* Adapter — pink accent */}
-              {(gp.adapter || gp.loraPath) && (
-                <ParamCell
-                  label="Adapter"
-                  value={getModelShortName(gp.adapter || gp.loraPath || '')}
-                  title={gp.adapter || gp.loraPath || ''}
-                  gradient="from-pink-500/10 to-rose-500/10 border-pink-200 dark:border-pink-500/30"
-                  iconColor="text-pink-600 dark:text-pink-400"
-                  icon={<Sparkles size={12} />}
-                  span2
-                />
-              )}
-              {gp.loraScale !== undefined && gp.loraScale !== 1 && (gp.adapter || gp.loraPath) && (
-                <ParamCell
-                  label="Adapter Scale"
-                  value={String(gp.loraScale)}
-                  gradient="from-pink-500/10 to-rose-500/10 border-pink-200 dark:border-pink-500/30"
-                  iconColor="text-pink-600 dark:text-pink-400"
-                  icon={<SlidersHorizontal size={12} />}
-                />
-              )}
-
-              {/* Thinking */}
-              {gp.useCotCaption !== undefined && (
-                <ParamCell
-                  label="Thinking"
-                  value={gp.useCotCaption ? 'ON' : 'OFF'}
-                  gradient={gp.useCotCaption
-                    ? "from-emerald-500/10 to-green-500/10 border-emerald-200 dark:border-emerald-500/30"
-                    : "from-slate-500/10 to-zinc-500/10 border-slate-200 dark:border-slate-500/30"}
-                  iconColor={gp.useCotCaption ? "text-emerald-600 dark:text-emerald-400" : "text-slate-600 dark:text-slate-400"}
-                  icon={<Zap size={12} />}
-                />
-              )}
-            </div>
+        {/* Track chips — only the ones this backend actually measured */}
+        {chips.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {chips.map(chip => (
+              <span key={chip.label}
+                className="px-2 py-1 rounded-lg bg-zinc-100 dark:bg-white/[0.04] border border-zinc-200 dark:border-white/5 text-[11px]">
+                <span className="text-zinc-500">{chip.label} </span>
+                <span className="text-zinc-800 dark:text-zinc-200 font-medium">{chip.value}</span>
+              </span>
+            ))}
           </div>
+        )}
+
+        {/* Style / caption — the prompt, kept below the human-readable bits */}
+        {song.style && (
+          <Collapsible title="Prompt" defaultOpen={!subject}>
+            <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed whitespace-pre-wrap break-words">
+              {song.style}
+            </p>
+          </Collapsible>
+        )}
+
+        {/* How it was made */}
+        {groups.length > 0 && (
+          <Collapsible title="How it was made" defaultOpen>
+            <div className="space-y-3">
+              {groups.map(group => (
+                <div key={group.title}>
+                  <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1">
+                    {group.title}
+                  </div>
+                  <div className="rounded-lg border border-zinc-200 dark:border-white/5 divide-y divide-zinc-200 dark:divide-white/5 overflow-hidden">
+                    {group.facts.map(fact => <FactRow key={fact.label} fact={fact} />)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Collapsible>
         )}
 
         {/* Lyrics */}
         {song.lyrics && (
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{t('details.lyrics')}</h4>
-            <pre className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap font-sans leading-relaxed bg-zinc-50/80 dark:bg-zinc-900/50 rounded-xl p-3 border border-zinc-200 dark:border-white/5 max-h-64 overflow-y-auto">
+          <Collapsible title={t('details.lyrics')} defaultOpen={false}>
+            <pre className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap font-sans leading-relaxed max-h-64 overflow-y-auto">
               {song.lyrics}
             </pre>
-          </div>
+          </Collapsible>
         )}
       </div>
     </div>
   );
 };
 
-/** Extract basename from a full model path */
-const getModelShortName = (modelId: string): string => {
-  const base = modelId.split(/[\\/]/).filter(Boolean).pop() || modelId;
-  return base.replace(/^acestep-/, '');
+/** One label → value line. Deliberately plain: a dozen gradient tiles read as
+ *  decoration, a list of aligned pairs reads as data. */
+const FactRow: React.FC<{ fact: Fact }> = ({ fact }) => (
+  <div className="flex items-baseline gap-3 px-2.5 py-1.5 bg-zinc-50/60 dark:bg-white/[0.02]">
+    <span className="text-[11px] text-zinc-500 flex-shrink-0">{fact.label}</span>
+    <span
+      title={fact.title ?? fact.value}
+      className={`ml-auto text-right text-xs font-medium truncate
+        ${fact.mono ? 'font-mono text-[11px]' : ''}
+        ${fact.tone === 'warn' ? 'text-amber-600 dark:text-amber-400'
+          : fact.tone === 'good' ? 'text-emerald-600 dark:text-emerald-400'
+          : 'text-zinc-800 dark:text-zinc-200'}`}
+    >
+      {fact.value}
+    </span>
+  </div>
+);
+
+const Collapsible: React.FC<{
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}> = ({ title, defaultOpen = true, children }) => {
+  const [open, setOpen] = React.useState(defaultOpen);
+  return (
+    <div className="rounded-xl border border-zinc-200 dark:border-white/5 bg-zinc-50/60 dark:bg-zinc-900/40 overflow-hidden">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-1.5 px-3 py-2 text-left hover:bg-zinc-100/60 dark:hover:bg-white/[0.03] transition-colors"
+      >
+        {open ? <ChevronDown size={12} className="text-zinc-500" /> : <ChevronRight size={12} className="text-zinc-500" />}
+        <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">{title}</span>
+      </button>
+      {open && <div className="px-3 pb-3">{children}</div>}
+    </div>
+  );
 };
-
-/** Color-coded metadata badge (top section) */
-const MetaBadge: React.FC<{ icon: React.ReactNode; label: string; value: string; gradient: string; iconColor: string }> = ({ icon, label, value, gradient, iconColor }) => (
-  <div className={`flex items-center gap-2 px-3 py-2 rounded-lg bg-gradient-to-r ${gradient} border`}>
-    <div className={iconColor}>{icon}</div>
-    <div className="min-w-0">
-      <div className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</div>
-      <div className="text-sm text-zinc-800 dark:text-zinc-200 font-medium truncate">{value}</div>
-    </div>
-  </div>
-);
-
-/** Color-coded generation parameter cell (2-column grid) */
-const ParamCell: React.FC<{
-  label: string;
-  value: string;
-  gradient: string;
-  iconColor: string;
-  icon: React.ReactNode;
-  mono?: boolean;
-  span2?: boolean;
-  title?: string;  // full text shown on hover (the cell value is truncated)
-}> = ({ label, value, gradient, iconColor, icon, mono, span2, title }) => (
-  <div className={`flex items-center gap-2 px-2.5 py-2 rounded-lg bg-gradient-to-r ${gradient} border ${span2 ? 'col-span-2' : ''}`}>
-    <div className={`${iconColor} flex-shrink-0`}>{icon}</div>
-    <div className="min-w-0 flex-1">
-      <div className="text-[9px] text-zinc-500 uppercase tracking-wider leading-none mb-0.5">{label}</div>
-      <div className={`text-xs text-zinc-800 dark:text-zinc-200 font-semibold truncate ${mono ? 'font-mono' : ''}`} title={title ?? value}>{value}</div>
-    </div>
-  </div>
-);

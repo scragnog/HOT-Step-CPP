@@ -18,6 +18,8 @@ import { downloadAll } from '../../utils/downloadTrack';
 import { HoverFullText } from '../shared/HoverFullText';
 import { SongActionsMenu } from '../shared/SongActionsMenu';
 import { openImportTracks } from './ImportTracksModal';
+import { CoverImage } from '../shared/CoverImage';
+import { displayTitle, displaySubtext } from '../../utils/songDisplay';
 
 // ── Source filter definitions ────────────────────────────────────────────────
 
@@ -37,33 +39,6 @@ const SOURCE_FILTERS: { id: SourceFilter; label: string; color: string }[] = [
 
 function getSongSource(song: Song): string {
   return (song.generationParams as any)?.source || (song.generation_params as any)?.source || 'create';
-}
-
-/** Lyric Studio is the only source that knows WHO a song is by and what it is
- *  ABOUT — it stamps both into generation_params. So its rows read as
- *  "Artist - Title" over the subject, instead of a bare title over a caption
- *  that is the same handful of genre words on every track of an album. */
-function lyricStudioMeta(song: Song): { artist: string; subject: string } {
-  const gp = (song.generationParams || song.generation_params) as any;
-  if (!gp || gp.source !== 'lyric-studio') return { artist: '', subject: '' };
-  return {
-    artist: typeof gp.artist === 'string' ? gp.artist.trim() : '',
-    subject: typeof gp.subject === 'string' ? gp.subject.trim() : '',
-  };
-}
-
-/** Title as DISPLAYED — never what rename edits, which stays the stored title. */
-function displayTitle(song: Song): string {
-  const title = song.title || 'Untitled';
-  const { artist } = lyricStudioMeta(song);
-  // Don't double up when the stored title already carries the artist.
-  if (!artist || title.startsWith(`${artist} - `)) return title;
-  return `${artist} - ${title}`;
-}
-
-/** The one-line description under the title. */
-function displaySubtext(song: Song): string {
-  return lyricStudioMeta(song).subject || song.style || song.caption || '';
 }
 
 // ── Pagination ───────────────────────────────────────────────────────────────
@@ -795,11 +770,7 @@ const SongItem: React.FC<SongItemProps> = ({
 
       {/* Cover Art Thumbnail */}
       <div className="relative w-11 h-11 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex-shrink-0 flex items-center justify-center overflow-hidden">
-        {song.coverUrl ? (
-          <img src={song.coverUrl} alt="" className="w-full h-full object-cover" />
-        ) : (
-          <Music size={18} className="text-zinc-600" />
-        )}
+        <CoverImage url={song.coverUrl} seed={song.id} iconSize={18} />
         {/* Play overlay on hover (not in selection mode) */}
         {!selectionMode && (
           <button
@@ -1015,139 +986,116 @@ const SongCard: React.FC<SongCardProps> = ({
   return (
     <div
       className={`
-        group relative rounded-xl border overflow-hidden cursor-pointer aspect-square
-        transition-all duration-200 hover:scale-[1.02] hover:shadow-lg hover:shadow-black/20
+        group relative rounded-2xl border p-2 cursor-pointer flex flex-col
+        transition-all duration-200 hover:shadow-lg hover:shadow-black/30
         ${isStreaming
           ? 'border-orange-500/60 mm3-stream-glow'
           : isSelected && selectionMode
           ? 'border-pink-500/40 bg-pink-500/5 ring-1 ring-pink-500/20'
           : isActive
-            ? 'border-pink-500/30 bg-pink-500/5'
-            : 'border-zinc-200 dark:border-white/5 bg-zinc-50/80 dark:bg-zinc-900/50 hover:border-zinc-300 dark:hover:border-white/10 hover:bg-zinc-100/50 dark:hover:bg-zinc-800/50'
+            ? 'border-pink-500/30 bg-pink-500/[0.06]'
+            : 'border-zinc-200 dark:border-white/[0.06] bg-zinc-50/80 dark:bg-zinc-900/60 hover:border-zinc-300 dark:hover:border-white/10 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/60'
         }
       `}
       onClick={handleClick}
     >
-      {/* Full-bleed image */}
-      <div className="absolute inset-0 bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
-        {song.coverUrl || song.cover_url ? (
-          <img src={song.coverUrl || song.cover_url} alt="" className="w-full h-full object-cover" />
-        ) : (
-          <Music size={32} className="text-zinc-700" />
+      {/* ── Artwork ── inset with its own radius, so the card reads as a card
+          rather than as a photo with text printed over it. */}
+      <div className="relative aspect-square rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+        <CoverImage url={song.coverUrl || song.cover_url} seed={song.id} iconSize={32} />
+
+        {/* Play button — always on show, per the card design. Hover only grows it. */}
+        {!selectionMode && (
+          <button
+            onClick={(e) => { e.stopPropagation(); if (isActive) togglePlay(); else onPlay(); }}
+            className="absolute left-2.5 bottom-2.5 z-10 w-10 h-10 rounded-full
+                       bg-black/45 backdrop-blur-sm border border-white/20
+                       flex items-center justify-center text-white
+                       transition-transform duration-200 hover:scale-110 hover:bg-black/60"
+            title={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying
+              ? <Pause size={17} />
+              : <Play size={17} className="ml-0.5" />
+            }
+          </button>
+        )}
+
+        {/* Selection checkbox */}
+        {selectionMode && (
+          <div className="absolute top-2 left-2 z-20">
+            {isSelected
+              ? <CheckSquare size={20} className="text-pink-400 drop-shadow" />
+              : <Square size={20} className="text-white/60 drop-shadow" />
+            }
+          </div>
+        )}
+
+        {/* Duration badge */}
+        <div className="absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-md bg-black/50 backdrop-blur-sm text-[10px] font-mono text-white/85"
+          style={selectionMode ? { left: '2rem' } : undefined}
+        >
+          {formatDuration(song.duration)}
+        </div>
+
+        {/* Live-render treatment: the orange ring above says "not finished", this
+            says how far along and how much is listenable. Progress is measured in
+            AUDIO RECEIVED, which is the part the play button can actually reach —
+            the engine's stage percentage would run ahead of it and promise audio
+            that is not there yet. */}
+        {isStreaming && (
+          <>
+            {/* Several takes stream at once and only one is audible. The badge says
+                which, because otherwise the audio that starts by itself belongs to
+                a card you cannot pick out. */}
+            <div className={`absolute top-2 right-2 z-20 flex items-center gap-1 px-1.5 py-0.5 rounded-md
+                            text-[9px] font-bold uppercase tracking-wide text-white shadow
+                            ${streamAudible ? 'bg-pink-500/90' : 'bg-orange-500/90'}`}>
+              <Radio size={9} className="animate-pulse" />
+              {streamAudible ? 'Listening' : 'Generating'}
+            </div>
+            <div className="absolute inset-x-0 bottom-0 z-20">
+              <div className="px-2 pb-1 text-[9px] font-medium text-orange-200 drop-shadow
+                              flex items-center justify-between tabular-nums">
+                <span>{streamAudible ? 'playing as it renders' : 'generation in progress'}</span>
+                <span>{Math.round(streamFrac * 100)}%</span>
+              </div>
+              <div className="h-1 bg-black/50">
+                <div
+                  className="h-full bg-gradient-to-r from-orange-500 to-amber-400 transition-[width] duration-300"
+                  style={{ width: `${streamFrac * 100}%` }}
+                />
+              </div>
+            </div>
+          </>
         )}
       </div>
 
-      {/* Play overlay */}
-      {!selectionMode && (
-        <button
-          onClick={(e) => { e.stopPropagation(); if (isActive) togglePlay(); else onPlay(); }}
-          className={`absolute inset-0 z-10 flex items-center justify-center bg-black/20 dark:bg-black/40 transition-opacity ${
-            isStreaming ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-          }`}
-        >
-          <div className="w-12 h-12 rounded-full bg-white/15 backdrop-blur-sm flex items-center justify-center border border-white/20">
-            {isPlaying
-              ? <Pause size={20} className="text-white" />
-              : <Play size={20} className="text-white ml-0.5" />
-            }
-          </div>
-        </button>
-      )}
-
-      {/* Selection checkbox */}
-      {selectionMode && (
-        <div className="absolute top-2 left-2 z-20">
-          {isSelected
-            ? <CheckSquare size={20} className="text-pink-400 drop-shadow" />
-            : <Square size={20} className="text-white/60 drop-shadow" />
-          }
-        </div>
-      )}
-
-      {/* Duration badge */}
-      <div className="absolute top-2 left-2 z-10 px-1.5 py-0.5 rounded-md bg-black/40 backdrop-blur-sm text-[10px] font-mono text-white/80"
-        style={selectionMode ? { left: '2rem' } : undefined}
-      >
-        {formatDuration(song.duration)}
-      </div>
-
-      {/* Live-render treatment: the orange ring above says "not finished", this
-          says how far along and how much is listenable. Progress is measured in
-          AUDIO RECEIVED, which is the part the play button can actually reach —
-          the engine's stage percentage would run ahead of it and promise audio
-          that is not there yet. */}
-      {isStreaming && (
-        <>
-          {/* Several takes stream at once and only one is audible. The badge says
-              which, because otherwise the audio that starts by itself belongs to
-              a card you cannot pick out. */}
-          <div className={`absolute top-2 right-2 z-20 flex items-center gap-1 px-1.5 py-0.5 rounded-md
-                          text-[9px] font-bold uppercase tracking-wide text-white shadow
-                          ${streamAudible ? 'bg-pink-500/90' : 'bg-orange-500/90'}`}>
-            <Radio size={9} className="animate-pulse" />
-            {streamAudible ? 'Listening' : 'Generating'}
-          </div>
-          <div className="absolute inset-x-0 bottom-0 z-20">
-            <div className="px-2 pb-1 text-[9px] font-medium text-orange-200 drop-shadow
-                            flex items-center justify-between tabular-nums">
-              <span>{streamAudible ? 'playing as it renders' : 'generation in progress'}</span>
-              <span>{Math.round(streamFrac * 100)}%</span>
-            </div>
-            <div className="h-1 bg-black/50">
-              <div
-                className="h-full bg-gradient-to-r from-orange-500 to-amber-400 transition-[width] duration-300"
-                style={{ width: `${streamFrac * 100}%` }}
-              />
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Actions — hidden on a live render: every item on it (download, delete,
-          send-to-cover, export) needs a file that does not exist yet. */}
-      {!selectionMode && !isStreaming && (
-        <div className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity">
-          <SongActionsMenu
-            song={song}
-            size={14}
-            className="w-7 h-7 !p-0 rounded-full bg-black/40 backdrop-blur-sm flex items-center justify-center text-white/70 hover:text-white hover:bg-black/60"
-            onReuse={onReuse}
-            onAddToPlaylist={onAddToPlaylist}
-            onDownload={onDownload}
-            onSendToCover={onSendToCover}
-            onEditMetadata={onEditMetadata}
-            onDelete={onDelete}
-          />
-        </div>
-      )}
-
-      {/* Info overlay — gradient from bottom */}
-      <div className="absolute inset-x-0 bottom-0 z-10 p-3 pt-10 bg-gradient-to-t from-black/80 via-black/50 to-transparent pointer-events-none">
+      {/* ── Text ── */}
+      <div className="px-1 pt-2.5 pb-0.5 flex flex-col gap-1">
         {/* Title — editable */}
         {editing ? (
-          <div className="pointer-events-auto">
-            <input
-              ref={renameInputRef}
-              className="w-full text-sm font-semibold bg-black/40 backdrop-blur-sm border border-pink-500/40 rounded-lg px-2 py-0.5 text-white outline-none focus:border-pink-500"
-              value={editTitle}
-              onChange={e => setEditTitle(e.target.value)}
-              onBlur={commitRename}
-              onKeyDown={e => {
-                if (e.key === 'Enter') commitRename();
-                if (e.key === 'Escape') { setEditTitle(song.title || ''); setEditing(false); }
-              }}
-              onClick={e => e.stopPropagation()}
-            />
-          </div>
+          <input
+            ref={renameInputRef}
+            className="w-full text-sm font-semibold bg-black/30 border border-pink-500/40 rounded-lg px-2 py-0.5 text-zinc-900 dark:text-white outline-none focus:border-pink-500"
+            value={editTitle}
+            onChange={e => setEditTitle(e.target.value)}
+            onBlur={commitRename}
+            onKeyDown={e => {
+              if (e.key === 'Enter') commitRename();
+              if (e.key === 'Escape') { setEditTitle(song.title || ''); setEditing(false); }
+            }}
+            onClick={e => e.stopPropagation()}
+          />
         ) : (
-          <div className="flex items-center gap-1 group/title pointer-events-auto">
-            <div className={`text-sm font-semibold drop-shadow-sm truncate ${isActive ? 'text-pink-400' : 'text-white'}`}>
+          <div className="flex items-center gap-1 group/title">
+            <div className={`text-sm font-semibold truncate ${isActive ? 'text-pink-400' : 'text-zinc-900 dark:text-white'}`}>
               {disguiseTitle(displayTitle(song))}
             </div>
             {onRename && !selectionMode && (
               <button
                 onClick={e => { e.stopPropagation(); setEditTitle(song.title || ''); setEditing(true); }}
-                className="flex-shrink-0 p-0.5 rounded text-white/50 hover:text-white opacity-0 group-hover/title:opacity-100 transition-opacity"
+                className="flex-shrink-0 p-0.5 rounded text-zinc-400 dark:text-white/40 hover:text-zinc-700 dark:hover:text-white opacity-0 group-hover/title:opacity-100 transition-opacity"
                 title={t('library.rename')}
               >
                 <Pencil size={11} />
@@ -1156,17 +1104,37 @@ const SongCard: React.FC<SongCardProps> = ({
           </div>
         )}
 
-        {/* Style / Caption — wraps, max 3 lines */}
-        <div className="text-[11px] text-white/70 mt-0.5 leading-tight line-clamp-3">
+        {/* Subject, or the caption when there is no subject */}
+        <div className="text-[11px] text-zinc-600 dark:text-white/55 leading-snug line-clamp-2 min-h-[2rem]">
           {isDisguised ? '' : (displaySubtext(song) || t('library.noDescription'))}
         </div>
 
-        {/* Quality + Date row */}
-        <div className="flex items-center gap-2 mt-1.5 pointer-events-auto">
-          <QualityBadge song={song} />
-          <span className="text-[10px] text-white/50">
-            {formatDate(song.created_at || song.createdAt)}
-          </span>
+        {/* Footer — age on the left, the song menu on the right */}
+        <div className="flex items-center justify-between gap-2 pt-0.5">
+          <div className="flex items-center gap-2 min-w-0">
+            <QualityBadge song={song} />
+            <span className="text-[10px] text-zinc-500 dark:text-white/40 truncate">
+              {formatDate(song.created_at || song.createdAt)}
+            </span>
+          </div>
+
+          {/* Hidden on a live render: every item on it (download, delete,
+              send-to-cover, export) needs a file that does not exist yet. */}
+          {!selectionMode && !isStreaming && (
+            <SongActionsMenu
+              song={song}
+              size={14}
+              className="w-6 h-6 !p-0 rounded-full flex items-center justify-center flex-shrink-0
+                         text-zinc-400 dark:text-white/40 hover:text-zinc-800 dark:hover:text-white
+                         hover:bg-zinc-200/70 dark:hover:bg-white/10"
+              onReuse={onReuse}
+              onAddToPlaylist={onAddToPlaylist}
+              onDownload={onDownload}
+              onSendToCover={onSendToCover}
+              onEditMetadata={onEditMetadata}
+              onDelete={onDelete}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -1570,11 +1538,7 @@ const SongTable: React.FC<SongTableProps> = ({
 
               thumb: (
                 <div className="relative w-8 h-8 rounded bg-zinc-100 dark:bg-zinc-800 overflow-hidden flex items-center justify-center">
-                  {song.coverUrl || song.cover_url ? (
-                    <img src={song.coverUrl || song.cover_url} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <Music size={12} className="text-zinc-600" />
-                  )}
+                  <CoverImage url={song.coverUrl || song.cover_url} seed={song.id} iconSize={12} />
                   {!selectionMode && (
                     <button
                       onClick={(e) => { e.stopPropagation(); if (isActive) togglePlay(); else onPlay(song); }}
