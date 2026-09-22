@@ -782,10 +782,16 @@ ${req.lyrics}`);
       const alStart = performance.now();
       const prevStage = job.stage;
       try {
+        // ONE string, sent and mapped. multipart/form-data normalises a text
+        // part's newlines to CRLF, so a `\n` lyric reaches the engine as
+        // `\r\n` and every codepoint offset it returns runs one ahead per
+        // preceding line. Normalising here (and stripping \r engine-side) means
+        // both ends count the same characters. The song row keeps req.lyrics.
+        const alignText = req.lyrics.replace(/\r\n?/g, '\n');
         for (let i = 0; i < filepaths.length; i++) {
           job.stage = `Aligning lyrics${filepaths.length > 1 ? ` ${i + 1}/${filepaths.length}` : ''}`;
-          const aligned = await yue2Align(fs.readFileSync(filepaths[i]), req.lyrics);
-          const lyricsJson = yue2LyricsJson(req.lyrics, aligned.words);
+          const aligned = await yue2Align(fs.readFileSync(filepaths[i]), alignText);
+          const lyricsJson = yue2LyricsJson(alignText, aligned.words);
           const lyricsPath = filepaths[i].replace(/\.[^.]+$/, '.lyrics.json');
           fs.writeFileSync(lyricsPath, JSON.stringify(lyricsJson, null, 2));
           const words = lyricsJson.lines.reduce((n, l) => n + l.words.length, 0);

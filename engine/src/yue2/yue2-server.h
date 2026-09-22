@@ -796,7 +796,13 @@ static void yue2_handle_align(const httplib::Request & req, httplib::Response & 
         return;
     }
     const std::string & audio  = req.form.get_file("audio").content;
-    const std::string   lyrics = req.form.get_field("lyrics");
+    // CR is dropped, not counted. multipart/form-data normalises a text part's
+    // newlines to CRLF (undici does, per the spec), so the lyrics a caller
+    // sent as `\n` arrive here as `\r\n` — and the char offsets below would
+    // then run one ahead, per preceding line, of the string the CALLER will
+    // index with. Both ends count a `\n`-only string.
+    std::string lyrics = req.form.get_field("lyrics");
+    lyrics.erase(std::remove(lyrics.begin(), lyrics.end(), '\r'), lyrics.end());
     if (audio.empty()) {
         yue2_json_error(res, 400, "the `audio` part is empty");
         return;
