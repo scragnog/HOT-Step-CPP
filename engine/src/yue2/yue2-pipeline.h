@@ -737,6 +737,32 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
         }
     }
 
+    // Progress is counted in ODE STEPS, not chunks. A chunk was the unit until
+    // #158: one chunk is minutes of solving that reported nothing, so the last
+    // thing anything downstream saw was the SEMANTIC stage's final step, and
+    // the Node-side watchdog — which cannot tell a stage that ended from a
+    // stage that died — cancelled an M4 Pro render 120 s into an 11-minute
+    // chunk that was working perfectly.
+    //
+    // The budget is exact for the native solver (every chunk x variation group
+    // runs req.ode_steps). A Lua scheduler may return a different count, so
+    // the total is a ceiling there and the step number is clamped to it rather
+    // than allowed to overshoot: a bar that stops at 99% is a smaller lie than
+    // one that reads 110%.
+    int64_t nar_steps_done = 0;
+    int64_t nar_steps_total = 0;
+    for (const auto & cp : plan) {
+        (void) cp;
+        nar_steps_total += (int64_t) ((n_var + group - 1) / group) * (int64_t) req.ode_steps;
+    }
+    if (nar_steps_total <= 0) nar_steps_total = (int64_t) plan.size();
+    // Say the NAR stage has STARTED before solving anything. Without this the
+    // reported phase stays `semantic` until the first chunk finishes, which is
+    // exactly the window #158 died in.
+    if (progress) {
+        progress({ YUE2_STAGE_NAR, 0, nar_steps_total });
+    }
+
     for (size_t ci = 0; ci < plan.size(); ci++) {
         if (cancel && cancel->load()) {
             if (err) *err = "cancelled";
@@ -760,11 +786,24 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
             }
             Yue2NarSolveResult solve;
             const auto nar_solve_start = std::chrono::steady_clock::now();
+            // One tick per ODE step, and one cancel check with it: a cancel
+            // used to be read only between chunks, so a request to stop sat
+            // unanswered for as long as the chunk had left to run (#158).
+            const int64_t steps_before = nar_steps_done;
+            const Yue2NarStepFn on_step = [&](int step, int) -> bool {
+                if (cancel && cancel->load()) return false;
+                nar_steps_done = steps_before + (int64_t) step;
+                if (progress) {
+                    progress({ YUE2_STAGE_NAR, std::min(nar_steps_done, nar_steps_total), nar_steps_total });
+                }
+                return true;
+            };
             const bool ok = !plugins
                 ? yue2_nar_solve_midpoint(m, chunk, noise_slice, req.ode_steps, {}, false, &solve, err,
-                                          req.nar_cache_ratio)
+                                          req.nar_cache_ratio, on_step)
                 : yue2_nar_solve_plugins(m, chunk, noise_slice, req.ode_steps,
-                                         req.nar_solver, req.nar_scheduler, req.plugin_params, &solve, err);
+                                         req.nar_solver, req.nar_scheduler, req.plugin_params, &solve, err,
+                                         on_step);
             nar_solve_ms += std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - nar_solve_start).count();
             velocity_ms += solve.total_velocity_ms;
@@ -773,6 +812,10 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
             if (!ok) {
                 return false;
             }
+            // Bank this group's budget rather than whatever the solver
+            // actually stepped, so a Lua scheduler's different step count
+            // cannot drift the running total against the ceiling above.
+            nar_steps_done = steps_before + (int64_t) req.ode_steps;
             for (int j = j0; j < j0 + M; j++) {
                 auto & dst = (*latents_out)[(size_t) cp.song][(size_t) j];
                 const size_t off = (size_t) ((j - j0) * chunk_len * LD);
@@ -783,9 +826,6 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
         fprintf(stderr, "[YuE2-NAR-Chunk] song=%d index=%zu frames=%lld prefix_tokens=%lld solve_ms=%.1f velocity_ms=%.1f calls=%d variations=%d\n",
                 cp.song, ci, (long long) chunk_len, (long long) nar_cache.filled[(size_t) cp.set], nar_solve_ms,
                 velocity_ms, velocity_calls, n_var);
-        if (progress) {
-            progress({ YUE2_STAGE_NAR, (int64_t) ci + 1, (int64_t) plan.size() });
-        }
     }
     return true;
 }

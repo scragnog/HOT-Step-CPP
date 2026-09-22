@@ -732,10 +732,23 @@ struct Yue2NarSolveResult {
 // captured for parity reporting (typically {0,1,ode_steps/2-1,ode_steps-1}
 // per 02-fixture-schema.md §2.6). `steps` is `ode_steps` (32 for this
 // checkpoint, but read from config, never hardcoded — 03 §3.9's own caution).
+// Called after every ODE step of a chunk solve. Return false to abandon the
+// solve (the caller reports it as cancelled).
+//
+// A chunk is ONE unit of work to the pipeline and can be many minutes of it:
+// #158 saw a single chunk take 11 minutes of solving on an M4 Pro, during
+// which the engine reported nothing at all. Nothing downstream could tell that
+// from a hang, and the Node-side stall watchdog cancelled a render that was
+// working perfectly. A solve that says where it is cannot be mistaken for a
+// wedged one, and a solve that is asked every step whether to stop can answer
+// a cancel in seconds instead of when the chunk happens to end.
+using Yue2NarStepFn = std::function<bool(int step, int steps)>;
+
 static bool yue2_nar_solve_midpoint(const Yue2Model & m, const Yue2NarChunk & chunk,
                                     const std::vector<float> & initial_noise, int steps,
                                     const std::vector<int64_t> & pinned_steps, bool want_input_embedding_step0,
-                                    Yue2NarSolveResult * out, std::string * err, float cache_ratio = 0.0f) {
+                                    Yue2NarSolveResult * out, std::string * err, float cache_ratio = 0.0f,
+                                    const Yue2NarStepFn & on_step = {}) {
     if (steps <= 0) {
         if (err) {
             *err = "yue2_nar_solve_midpoint: steps must be > 0";
@@ -821,6 +834,10 @@ static bool yue2_nar_solve_midpoint(const Yue2Model & m, const Yue2NarChunk & ch
                 new_state[(size_t) i] = state[(size_t) i] - v_cached[(size_t) i] * (float) dt;
             }
             state = std::move(new_state);
+            if (on_step && !on_step(step + 1, steps)) {
+                if (err) *err = "cancelled";
+                return false;
+            }
             continue;
         }
 
@@ -861,6 +878,11 @@ static bool yue2_nar_solve_midpoint(const Yue2Model & m, const Yue2NarChunk & ch
         v_cached      = second.velocity;
         have_cached_v = true;
         state         = std::move(new_state);
+
+        if (on_step && !on_step(step + 1, steps)) {
+            if (err) *err = "cancelled";
+            return false;
+        }
     }
 
     out->final_latents = std::move(state);
@@ -878,7 +900,7 @@ static bool yue2_nar_solve_plugins(
     const std::vector<float> & initial_noise, int steps,
     const std::string & solver_name, const std::string & scheduler_name,
     const std::unordered_map<std::string, std::string> & plugin_params,
-    Yue2NarSolveResult * out, std::string * err) {
+    Yue2NarSolveResult * out, std::string * err, const Yue2NarStepFn & on_step = {}) {
     if (steps <= 0 || chunk.n_var != 1 ||
         initial_noise.size() != (size_t) (chunk.chunk_len * m.lm_cfg.latent_dim)) {
         if (err) *err = "YuE2 NAR plugin solve: invalid steps or noise shape (plugins solve one variation at a time)";
@@ -963,6 +985,10 @@ static bool yue2_nar_solve_plugins(
                 if (err) *err = "YuE2 NAR plugin produced non-finite latents";
                 return false;
             }
+        }
+        if (on_step && !on_step(step + 1, steps)) {
+            if (err) *err = "cancelled";
+            return false;
         }
     }
     out->final_latents = std::move(state);

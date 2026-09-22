@@ -32,6 +32,23 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
   // YuE2 run that had already finished (#158). While blind, the wall-clock
   // timeout below is the only backstop — which is what it is for.
   const BLIND_GRACE_MS = 10_000;
+  // A stage that WAS ticking and has gone silent is the ambiguous case, and it
+  // is the one that keeps costing users renders (#96, #158). The tight window
+  // is only honest while the ticks are arriving: the moment they stop, the
+  // stage may have died, or it may simply have ENDED and handed over to a long
+  // quiet operation whose own first report has not landed yet. #158 was the
+  // second kind — the semantic stage's last step stayed on screen while an
+  // 11-minute NAR chunk solved underneath it, on an Apple Silicon box where
+  // that chunk is slow enough to matter.
+  //
+  // So the 2 min mark is where we ASK the engine, not where we kill the job.
+  // If it answers "still running", the stage falls back to the quiet window
+  // and the wall-clock timeout remains the backstop. A genuinely wedged engine
+  // is still caught quickly, because it answers "failed" or stops answering at
+  // all, and neither of those paths waits.
+  const RUNNING_PROBE_MS = 30_000;
+  let lastProbeAt = 0;
+  let stillRunningSince = 0;
   const startedAt = Date.now();
   let lastProgressAt = Date.now();
   let lastPollOkAt = Date.now();
@@ -49,6 +66,7 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
       lastProgressAt = Date.now();
       lastStage = job.stage;
       lastProgress = job.progress;
+      stillRunningSince = 0;
     }
 
     // Stall detection: no progress update for the window this stage allows
@@ -56,21 +74,36 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
     const inVaeDecode = typeof lastStage === 'string' && lastStage.startsWith('Decoding audio (VAE)');
     const staleLimit = inVaeDecode ? STALE_TIMEOUT_VAE_MS
                      : isTickingStage(lastStage) ? STALE_TIMEOUT_MS : STALE_TIMEOUT_QUIET_MS;
-    if (stalledFor > staleLimit && Date.now() - lastPollOkAt < BLIND_GRACE_MS) {
+    if (stalledFor > staleLimit && Date.now() - lastPollOkAt < BLIND_GRACE_MS
+        && Date.now() - lastProbeAt > RUNNING_PROBE_MS) {
+      lastProbeAt = Date.now();
       // Never let the watchdog destroy work the engine has already finished.
-      // A ticking stage that stops ticking is as often a stage that ENDED —
-      // the stage string goes stale at exactly the moment the next, quiet
-      // phase begins — as one that died. Confirm with the engine before
-      // cancelling: #158 and #96 both ended with a completed track thrown
-      // away because this branch fired on a job that was already done.
+      // #158 and #96 both ended with a completed track thrown away because
+      // this branch fired on a job that was already done.
       const final = await aceClient.pollJob(aceJobId).catch(() => null);
       if (final?.status === 'done') return;
       if (final?.status !== 'failed' && final?.status !== 'cancelled') {
-        await aceClient.cancelJob(aceJobId).catch(() => {});
-        throw new Error(
-          `Generation stalled — no progress for ${Math.round(stalledFor / 1000)}s ` +
-          `(last stage: "${lastStage}")`
-        );
+        // The engine says it is still working. On a ticking stage that only
+        // means the ticks stopped, so give it the quiet window before doing
+        // anything irreversible — and say so once, because a user watching a
+        // frozen step counter deserves to know it is being waited on rather
+        // than ignored.
+        if (isTickingStage(lastStage) && stalledFor < STALE_TIMEOUT_QUIET_MS) {
+          if (!stillRunningSince) {
+            stillRunningSince = Date.now();
+            console.warn(
+              `[Generate] ${aceJobId}: no progress for ${Math.round(stalledFor / 1000)}s at ` +
+              `"${lastStage}", but the engine reports it is still running — waiting up to ` +
+              `${Math.round(STALE_TIMEOUT_QUIET_MS / 60_000)} min before treating it as stalled.`
+            );
+          }
+        } else {
+          await aceClient.cancelJob(aceJobId).catch(() => {});
+          throw new Error(
+            `Generation stalled — no progress for ${Math.round(stalledFor / 1000)}s ` +
+            `(last stage: "${lastStage}")`
+          );
+        }
       }
     }
 
