@@ -825,6 +825,10 @@ struct MM3GenResult {
     bool        dropped         = false;
     int         round           = 0;
     int         eos_rounds_used = 1;
+    /** This take was kept only because every round ran out of candidates: it
+     *  hit the frame cap (or the length floor) and is rendered anyway, because
+     *  a capped song beats twenty minutes of planning and no audio at all. */
+    bool        eos_fallback    = false;
 
     double  ar_ms    = 0.0;
     double  cond_ms  = 0.0;
@@ -1318,9 +1322,16 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
             fprintf(stderr, "[MM3-Pipe] require_eos/min_frames ignored on an interleaved stream: what was planned "
                             "has already been played, so nothing can be dropped or re-planned\n");
         }
+        // Set only when every round has been spent without a single candidate
+        // being the song that was asked for: the index of the longest plan,
+        // kept as a last resort so the job produces audio instead of an error.
+        int fallback = -1;
         // A candidate is kept only if it is the song that was asked for: ended,
         // where endings are required, AND long enough to hold the lyrics.
         const auto accepted = [&](int t) -> bool {
+            if (t == fallback) {
+                return true;
+            }
             const MM3ArResult & a = ars[(size_t) t];
             if (a.n_frames <= 0) {
                 return false;
@@ -1372,23 +1383,49 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
                 break;
             }
             if (round + 1 >= rounds_max) {
-                if (err) {
-                    const int planned = rounds_max * K;
-                    if (min_frames > 0 && n_short > 0) {
-                        *err = "every candidate ended too early after " + std::to_string(rounds_max) +
-                               " round(s) of " + std::to_string(K) + " (" + std::to_string(planned) +
-                               " plans, all shorter than " + std::to_string(min_frames / 25) +
-                               "s); the prompt or adapter is ending the song before the lyrics are sung";
-                    } else if (req.require_eos) {
-                        *err = "no candidate ended naturally after " + std::to_string(rounds_max) + " round(s) of " +
-                               std::to_string(K) + " (" + std::to_string(planned) +
-                               " plans reached the frame cap); the adapter or prompt is not producing endings";
-                    } else {
-                        *err = "no candidate reached the minimum length after " + std::to_string(rounds_max) +
-                               " round(s) of " + std::to_string(K) + " (" + std::to_string(planned) + " plans)";
+                // Every round spent, nothing accepted. The planning is already
+                // paid for — up to rounds_max x K full-length AR passes, which
+                // is tens of minutes — and a capped song is exactly what this
+                // backend rendered before endings existed. So the longest plan
+                // is kept and the caller is TOLD (eos_fallback), rather than
+                // the whole job failing with no audio at all.
+                int64_t best = 0;
+                for (int t = 0; t < K; t++) {
+                    if (ars[(size_t) t].n_frames > best) {
+                        best     = ars[(size_t) t].n_frames;
+                        fallback = t;
                     }
                 }
-                return false;
+                const int planned = rounds_max * K;
+                if (fallback < 0) {
+                    // Not the ending check failing — no plan produced a single
+                    // frame, which is a real stage-1 failure.
+                    if (err) {
+                        *err = "no candidate produced any frames after " + std::to_string(rounds_max) +
+                               " round(s) of " + std::to_string(K) + " (" + std::to_string(planned) + " plans)";
+                    }
+                    return false;
+                }
+                if (min_frames > 0 && n_short > 0) {
+                    fprintf(stderr,
+                            "[MM3-Pipe] every candidate ended too early after %d round(s) of %d (%d plans, all "
+                            "shorter than %llds); keeping the longest (take %d, %lld frames, %.0fs) rather than "
+                            "failing - the prompt or adapter is ending the song before the lyrics are sung\n",
+                            rounds_max, K, planned, (long long) (min_frames / 25), fallback, (long long) best,
+                            (double) best / 25.0);
+                } else if (req.require_eos) {
+                    fprintf(stderr,
+                            "[MM3-Pipe] no candidate ended naturally after %d round(s) of %d (%d plans reached the "
+                            "frame cap); keeping the longest (take %d, %lld frames, %.0fs) rather than failing - "
+                            "the adapter or prompt is not producing endings at this duration\n",
+                            rounds_max, K, planned, fallback, (long long) best, (double) best / 25.0);
+                } else {
+                    fprintf(stderr,
+                            "[MM3-Pipe] no candidate reached the minimum length after %d round(s) of %d (%d plans); "
+                            "keeping the longest (take %d, %lld frames, %.0fs) rather than failing\n",
+                            rounds_max, K, planned, fallback, (long long) best, (double) best / 25.0);
+                }
+                break;
             }
         }
         int winner = -1;
@@ -1404,6 +1441,7 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
             outs[t].dropped         = cand && (!accepted(t) || (winner >= 0 && t != winner));
             outs[t].round           = round;
             outs[t].eos_rounds_used = round + 1;
+            outs[t].eos_fallback    = (t == fallback) && !outs[t].dropped;
         }
         if (cand && req.on_candidates) {
             std::vector<int> kept;

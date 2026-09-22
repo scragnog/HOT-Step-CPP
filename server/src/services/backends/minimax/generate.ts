@@ -108,6 +108,10 @@ const MM3_ENDING_ROUNDS = 4;
 const MM3_MAX_WORDS_PER_SEC = 4.0;
 /** Frames per second of the MM3 planner — 1 semantic frame = 40 ms. */
 const MM3_FPS = 25;
+/** The engine's hard frame ceiling (MM3_MAX_AUDIO_FRAMES in mm3-request.h):
+ *  360s. Duration is a CAP, not a target — the planner must reach EOS before
+ *  it, so no adapter whose songs run past 6 minutes can ever end naturally. */
+const MM3_MAX_FRAMES = 9000;
 /** Floor for a render with no lyrics to measure. A sub-15s "song" is broken
  *  whatever the prompt said, and an instrumental still has no other yardstick. */
 const MM3_MIN_FLOOR_SEC = 15;
@@ -1239,6 +1243,17 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
         + `${tooShort} too short, `
         + `${Math.max(0, dropped - capped - tooShort)} other candidates not selected`
         + (seeds.length ? ` (seeds ${seeds.join(', ')})` : ''));
+      if (finalDetail?.eos_fallback) {
+        // Every plan hit the cap. The engine rendered the longest one instead
+        // of failing, so the user gets audio — but it does not end, and the two
+        // things that actually fix that are a longer duration or the toggle.
+        const askedSec = Math.round((req.duration ?? 0));
+        log('WARNING',
+          `[MM3] None of the ${planned} plans ended within ${askedSec}s, so the longest was rendered anyway `
+          + `— this song stops at the duration cap rather than ending. `
+          + `Raise Duration (the engine ceiling is ${Math.round(MM3_MAX_FRAMES / MM3_FPS)}s) or turn `
+          + `"Require Natural Ending" off to skip the extra rounds.`);
+      }
       if (tooShort > 0) {
         const floorSec = Math.round((req.min_frames ?? 0) / MM3_FPS);
         log('INFO',

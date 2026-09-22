@@ -243,6 +243,9 @@ struct MM3JobState {
      *  — a distinct failure from hitting the cap, and the one worth telling a
      *  user about, because it means the planner keeps ending the song early. */
     int      takes_short     = 0;
+    /** True when NO candidate was ever accepted and the longest capped plan was
+     *  rendered anyway. The job succeeded, but not as the user asked. */
+    bool     eos_fallback    = false;
 
     bool    have_result = false;
     int64_t frames      = 0;
@@ -1248,6 +1251,13 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
             st->takes_dropped   = planned - K;
             st->takes_capped    = capped;
             st->takes_short     = too_short;
+            st->eos_fallback    = rs[0].eos_fallback;
+        }
+        if (rs[0].eos_fallback) {
+            fprintf(stderr,
+                    "[MM3-Job] %s: NO candidate met the ending/length check; rendering the longest plan anyway "
+                    "(%lld frames, %.0fs) - the song will not end naturally\n",
+                    job->id.c_str(), (long long) rs[0].ar.n_frames, (double) rs[0].ar.n_frames / 25.0);
         }
         const std::string tail = dropped_seeds.empty() ? std::string() : " (dropped seeds in the last round: " + dropped_seeds + ")";
         fprintf(stderr, "[MM3-Job] %s: candidates - %d planned over %d round(s), %d kept and rendered, "
@@ -1740,6 +1750,7 @@ static void mm3_handle_job(const httplib::Request & hreq, httplib::Response & re
     yyjson_mut_obj_add_int(o, orot, "takes_dropped", st->takes_dropped);
     yyjson_mut_obj_add_int(o, orot, "takes_capped", st->takes_capped);
     yyjson_mut_obj_add_int(o, orot, "takes_short", st->takes_short);
+    yyjson_mut_obj_add_bool(o, orot, "eos_fallback", st->eos_fallback);
     if (st->n_takes > 1 || st->require_eos) {
         yyjson_mut_val * arr = yyjson_mut_arr(o);
         for (int t = 0; t < (int) st->takes.size(); t++) {

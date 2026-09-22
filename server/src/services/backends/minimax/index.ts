@@ -557,7 +557,9 @@ async function capabilities(): Promise<BackendCapabilities> {
         hint: 'Plans candidates together. For one requested song, stops the batch '
             + 'at the first natural ending and renders that song. Variations keep '
             + 'all candidates that end. Re-plans with fresh seeds if none end before '
-            + 'the ceiling. Off renders the plan even if it reaches the ceiling.',
+            + 'the ceiling, then renders the longest plan anyway. Costs up to 12 '
+            + 'planning passes when nothing ends, so turn it off if your adapter '
+            + 'writes songs longer than the Duration you asked for.',
         default: true,
       },
       {

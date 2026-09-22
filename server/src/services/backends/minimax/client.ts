@@ -413,6 +413,10 @@ export interface Mm3JobDetail {
    *  from capped, and the one worth reporting: it means the planner keeps
    *  ending the song before the lyrics are sung. */
   takes_short?: number;
+  /** True when NO candidate met the ending/length check and the engine rendered
+   *  the longest capped plan anyway rather than failing the job. The audio is
+   *  real, but it stops at the duration cap instead of ending. */
+  eos_fallback?: boolean;
   /** Per-take summary. Present whenever there is more than one take, and —
    *  since the ending arbitration — whenever `require_eos` was set, even for a
    *  single surviving take. Take t's audio is at
