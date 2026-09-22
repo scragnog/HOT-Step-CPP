@@ -24,16 +24,39 @@ export interface LyricsJson {
   lines: LyricsLine[];
 }
 
+/**
+ * The URL of a sidecar (`.lyrics.json`, `.lrc`) for a track.
+ *
+ * Sidecars are written once, beside the BASE render, and the derived files
+ * share its timeline: mastering and the no-adapter reference re-render the
+ * same performance, they do not re-sing it. The player, though, is playing
+ * whichever variant is selected — `<uuid>_mastered.wav` whenever
+ * post-processing produced one — and a naive extension swap then asks for
+ * `<uuid>_mastered.lyrics.json`, which nothing ever writes.
+ *
+ * That failure is silent rather than loud: the server answers a missing file
+ * under /audio with the SPA's index.html and a 200, so `res.ok` is true and
+ * the caller parses HTML as JSON. Strip the variant suffix instead, and the
+ * lyrics bar works on every variant of every backend.
+ *
+ * The query string goes too — playbackStore cache-busts audio URLs with
+ * `?_t=`, which would otherwise defeat the extension match entirely.
+ */
+export function sidecarUrl(audioUrl: string, suffix: string): string {
+  return audioUrl.split('?')[0].replace(/(?:_mastered|_noadapter)?\.\w+$/, suffix);
+}
+
 /** Fetch .lyrics.json for the given audio URL. Returns null if not found. */
 export async function fetchLyricsJson(audioUrl: string): Promise<LyricsJson | null> {
   if (!audioUrl) return null;
   try {
-    const jsonUrl = audioUrl.replace(/\.\w+$/, '.lyrics.json');
-    const res = await fetch(jsonUrl);
+    const res = await fetch(sidecarUrl(audioUrl, '.lyrics.json'));
     if (!res.ok) return null;
     const data = await res.json();
     return data?.version && data?.lines ? data : null;
   } catch {
+    // Includes the HTML-instead-of-JSON case above: a missing sidecar answers
+    // 200 with the SPA shell, and .json() throws on it.
     return null;
   }
 }

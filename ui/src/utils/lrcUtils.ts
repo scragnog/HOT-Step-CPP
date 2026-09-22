@@ -2,6 +2,8 @@
 //
 // Used by: LyricsBar, SectionMarkers, RepaintStudio (RegionLyricsEditor)
 
+import { sidecarUrl } from './wordLrcUtils';
+
 /** A single timestamped lyric line from an LRC file. */
 export interface LrcLine {
   time: number;   // seconds
@@ -215,7 +217,7 @@ export function lrcToPlainLyrics(allLines: RegionLrcLine[]): string {
 export async function fetchLrc(audioUrl: string): Promise<string | null> {
   if (!audioUrl) return null;
   try {
-    const lrcUrl = audioUrl.replace(/\.\w+$/, '.lrc');
+    const lrcUrl = sidecarUrl(audioUrl, '.lrc');
     const res = await fetch(lrcUrl);
     if (!res.ok) return null;
     const text = await res.text();

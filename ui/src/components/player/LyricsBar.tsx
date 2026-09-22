@@ -5,7 +5,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { ChevronDown, ChevronUp, Music } from 'lucide-react';
 import { parseLrc, type LrcLine } from '../../utils/lrcUtils';
-import { fetchLyricsJson, findCurrentLineIndex, findActiveWordIndex, type LyricsJson } from '../../utils/wordLrcUtils';
+import { fetchLyricsJson, findCurrentLineIndex, findActiveWordIndex, sidecarUrl, type LyricsJson } from '../../utils/wordLrcUtils';
 import { WordHighlighter } from './WordHighlighter';
 
 interface LyricsBarProps {
@@ -52,7 +52,7 @@ export const LyricsBar: React.FC<LyricsBarProps> = ({ audioUrl, currentTime }) =
             // Fall back to .lrc
             setWordData(null);
             try {
-                const lrcUrl = audioUrl.replace(/\.\w+$/, '.lrc');
+                const lrcUrl = sidecarUrl(audioUrl, '.lrc');
                 const res = await fetch(lrcUrl);
                 if (!res.ok) throw new Error('No LRC');
                 const text = await res.text();

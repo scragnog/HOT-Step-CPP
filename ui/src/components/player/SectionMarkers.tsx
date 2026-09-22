@@ -8,7 +8,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { parseSectionMarkers, type SectionMarker } from '../../utils/lrcUtils';
-import { fetchLyricsJson } from '../../utils/wordLrcUtils';
+import { fetchLyricsJson, sidecarUrl } from '../../utils/wordLrcUtils';
 
 interface SectionMarkersProps {
   audioUrl?: string;
@@ -24,7 +24,7 @@ export const SectionMarkers: React.FC<SectionMarkersProps> = ({ audioUrl, durati
 
     (async () => {
       try {
-        const res = await fetch(audioUrl.replace(/\.\w+$/, '.lrc'));
+        const res = await fetch(sidecarUrl(audioUrl, '.lrc'));
         if (res.ok) {
           const text = await res.text();
           if (cancelled) return;
