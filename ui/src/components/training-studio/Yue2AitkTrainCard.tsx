@@ -118,12 +118,12 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // rank stays 64 so switching back to LoRA restores the LoRA recipe.
   rank: 64, alpha: 256, adapterType: 'lokr', lokrDim: 64, lokrFactor: 4,
   // LoKr under Prodigy (Rob's ear tests, 2026-09-22): LoRA's KL 1.4 overcooks
-  // both halves; KL 0.9 with the planner at 0.6 and the decoder at 1.0 is the
+  // both halves; KL 1.0 with the planner at 0.6 and the decoder at 1.0 is the
   // tested recipe. LoRA keeps KL 1.4 with the planner at 0.3 (LORA_STOP).
-  stopMode: 'kl', targetKl: 0.9, lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
+  stopMode: 'kl', targetKl: 1.0, lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
 };
 const LORA_STOP = { targetKl: 1.4, plannerLrScale: 0.3, narLrScale: undefined };
-const LOKR_STOP = { targetKl: 0.9, plannerLrScale: 0.6, narLrScale: 1 };
+const LOKR_STOP = { targetKl: 1.0, plannerLrScale: 0.6, narLrScale: 1 };
 type PrepareForm = Yue2AitkPrepareRequest;
 
 function defaultPreview(everySteps: number): Yue2JointPreviewOptions {
@@ -216,6 +216,12 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
       if (stored.narLrScale === undefined || stored.narLrScale === 0.5) stored.narLrScale = LOKR_STOP.narLrScale;
     }
     window.localStorage.setItem(lokrRecipe2, '1');
+  }
+  // LoKr recipe 3 (2026-09-22): target KL 0.9 -> 1.0.
+  const lokrRecipe3 = `${FORM_KEY}${datasetId}:defaults-lokr-recipe-3`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(lokrRecipe3)) {
+    if (stored.adapterType === 'lokr' && stored.targetKl === 0.9) stored.targetKl = LOKR_STOP.targetKl;
+    window.localStorage.setItem(lokrRecipe3, '1');
   }
   return { ...DEFAULT_FORM, ...stored };
 }
@@ -821,7 +827,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number')}
       </div>
       {(form.adapterType ?? 'lora') === 'lokr' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.lokrHint', 'LoKr trains a Kronecker-factored delta per site instead of a low-rank pair. Strength is alpha / dim; 4x (64 / 4 / 256, about 106 MB for both halves) is the tested default, against 279 MB for the rank-64 LoRA. For more capacity raise dim and keep alpha at 4x dim; at factor 4 stay below dim 256, where some sites stop factorizing and ignore alpha.')}</p>}
-      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 0.9. Training stops once the trailing 20-step mean reaches the target; steps is the cap.')}</p>}
+      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 1.0. Training stops once the trailing 20-step mean reaches the target; steps is the cap.')}</p>}
       {(form.stopMode ?? 'steps') === 'loss' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetLossHint', 'Composite = AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight. Training stops once the trailing 20-step mean is at or below this.')}</p>}
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         {resumeChoice ? <p className="text-xs text-zinc-500">Optimizer: {form.optimizer ?? 'adamw'} (restored from the selected run)</p>
