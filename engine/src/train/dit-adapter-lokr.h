@@ -18,6 +18,7 @@
 // activations instead.
 
 #include "lokr-common.h"
+#include "lokr-apply.h"
 #include "train/dit-adapter.h"
 
 #include <algorithm>
@@ -82,54 +83,31 @@ static inline bool dit_lokr_w1_would_factor(int dim, bool decompose_both, int64_
 // token axis folded into ne1 — the two invariants apply()'s note below explains
 // are load-bearing. Reordering changes float summation order only, which LK3's
 // materialised-kron reference tolerates.
+// The order enum, the picker and the contraction itself moved to
+// engine/src/lokr-apply.h (2026-09-22) so the YuE2 joint trainer shares them.
+// These names stay as aliases for dit-vram.h and the self-tests.
 enum DitLokrOrder {
-    DIT_LOKR_ORDER_W2 = 0,  // w2 (or w2_b,w2_a) then w1        — cut at out_k
-    DIT_LOKR_ORDER_W1 = 1,  // w1 then w2 (or w2_b,w2_a)        — cut at in_n
-    DIT_LOKR_ORDER_MID = 2, // w2_b then w1 then w2_a           — cut at dim
+    DIT_LOKR_ORDER_W2  = LOKR_ORDER_W2,   // w2 (or w2_b,w2_a) then w1        — cut at out_k
+    DIT_LOKR_ORDER_W1  = LOKR_ORDER_W1,   // w1 then w2 (or w2_b,w2_a)        — cut at in_n
+    DIT_LOKR_ORDER_MID = LOKR_ORDER_MID,  // w2_b then w1 then w2_a           — cut at dim
 };
 
 static inline const char * dit_lokr_order_name(int o) {
-    return o == DIT_LOKR_ORDER_W1 ? "w1-first" : (o == DIT_LOKR_ORDER_MID ? "mid" : "w2-first");
+    return lokr_order_name(o);
 }
 
-// Matmul MACs per token for one order, used only as the tie-break below.
 static inline double dit_lokr_order_flops(int order, bool mono, int64_t in_m, int64_t in_n, int64_t out_l,
                                           int64_t out_k, int64_t dim) {
-    const double M = (double) in_m, N = (double) in_n, L = (double) out_l, K = (double) out_k, D = (double) dim;
-    if (order == DIT_LOKR_ORDER_W1) {
-        return mono ? (M * L * N + L * K * N) : (M * L * N + L * D * N + L * K * D);
-    }
-    if (order == DIT_LOKR_ORDER_MID) {
-        return M * D * N + M * L * D + L * K * D;
-    }
-    return mono ? (M * K * N + M * L * K) : (M * D * N + M * K * D + M * L * K);
+    return lokr_order_flops(order, mono, in_m, in_n, out_l, out_k, dim);
 }
 
-// Cut channel count: the width of BOTH transposes, so the copy cost is
-// (in_m + out_l) * cut.
 static inline int64_t dit_lokr_order_cut(int order, int64_t in_n, int64_t out_k, int64_t dim) {
-    return order == DIT_LOKR_ORDER_W1 ? in_n : (order == DIT_LOKR_ORDER_MID ? dim : out_k);
+    return lokr_order_cut(order, in_n, out_k, dim);
 }
 
 static inline int dit_lokr_pick_order(bool mono, int64_t in_m, int64_t in_n, int64_t out_l, int64_t out_k,
                                       int64_t dim) {
-    const int cands[3]   = { DIT_LOKR_ORDER_W2, DIT_LOKR_ORDER_W1, DIT_LOKR_ORDER_MID };
-    int       best       = DIT_LOKR_ORDER_W2;
-    int64_t   best_cut   = out_k;
-    double    best_flops = dit_lokr_order_flops(DIT_LOKR_ORDER_W2, mono, in_m, in_n, out_l, out_k, dim);
-    for (int i = 1; i < 3; i++) {
-        if (cands[i] == DIT_LOKR_ORDER_MID && mono) {
-            continue;  // no w2_a/w2_b to cut between
-        }
-        const int64_t cut = dit_lokr_order_cut(cands[i], in_n, out_k, dim);
-        const double  fl  = dit_lokr_order_flops(cands[i], mono, in_m, in_n, out_l, out_k, dim);
-        if (cut < best_cut || (cut == best_cut && fl < best_flops)) {
-            best       = cands[i];
-            best_cut   = cut;
-            best_flops = fl;
-        }
-    }
-    return best;
+    return lokr_pick_order(mono, in_m, in_n, out_l, out_k, dim);
 }
 
 // Retained apply() intermediates for one site, ELEMENTS PER TOKEN — every
@@ -171,15 +149,10 @@ static inline double dit_lokr_site_live_elems(int order, bool mono, int64_t in_m
 
 // ─── per-site state ─────────────────────────────────────────────────────────
 
-struct DitLokrSite {
-    ggml_tensor * w1   = nullptr;  // ggml [in_m, out_l]
-    ggml_tensor * w2   = nullptr;  // ggml [in_n, out_k]   monolithic
-    ggml_tensor * w2_a = nullptr;  // ggml [dim,  out_k]   factorized
-    ggml_tensor * w2_b = nullptr;  // ggml [in_n, dim]
-    int64_t       out_l = 0, out_k = 0, in_m = 0, in_n = 0;
-    bool          mono  = true;
-    int           order = DIT_LOKR_ORDER_W2;  // decided once in init(), see dit_lokr_pick_order
-    float         scale = 1.0f, alpha_eff = 0.0f;
+// w1/w2/w2_a/w2_b, the four kron dims, dim, mono, order and scale live in the
+// shared LokrApplySite (lokr-apply.h); order is decided once in init().
+struct DitLokrSite : LokrApplySite {
+    float alpha_eff = 0.0f;
 };
 
 // ─── LoKR ───────────────────────────────────────────────────────────────────
@@ -271,6 +244,7 @@ struct DitAdapterLoKr final : DitAdapter {
                 }
                 k.alpha_eff = a_eff;
                 k.scale     = a_eff / (float) dim;
+                k.dim       = dim;
                 k.order     = dit_lokr_pick_order(k.mono, k.in_m, k.in_n, k.out_l, k.out_k, dim);
                 n_order[k.order]++;
                 if (k.mono) {
@@ -419,66 +393,20 @@ struct DitAdapterLoKr final : DitAdapter {
     // over S (then dst->ne[2] == S and out_prod takes the per-token fallback
     // this note's first half exists to avoid). So the win here is choosing the
     // CHEAPEST place to pay them — see DitLokrOrder above.
+    //
+    // The contraction itself (the three orders, the swaps, the scale==1
+    // shortcut) is lokr_apply_delta() in lokr-apply.h, shared with the YuE2
+    // joint trainer. This override only reshapes its [out_k, out_l*S] result
+    // onto the base output and adds.
     ggml_tensor * apply(ggml_context * ctx_g, ggml_tensor * w, int layer, int s, ggml_tensor * x) const override {
         ggml_tensor *       y = ggml_mul_mat(ctx_g, w, x);
         const DitLokrSite * k = site(layer, s);
         if (!k) {
             return y;
         }
-        ggml_tensor * xc = ggml_is_contiguous(x) ? x : ggml_cont(ctx_g, x);
-        const int64_t S  = ggml_nelements(xc) / xc->ne[0];
-        // alpha/dim on the tiny side. K6 forces alpha = dim wherever both kron
-        // factors are monolithic, and the shipped preset passes alpha == dim
-        // anyway, so scale is 1.0f on every site of a production run: skip the
-        // node rather than launch 352 forward + 352 backward kernels per
-        // micro-step to multiply a 20-element tensor by exactly one. x * 1.0f is
-        // exact in IEEE-754, so this is a bit-identical graph shortening.
-        ggml_tensor * w1s = (k->scale == 1.0f) ? k->w1 : ggml_scale(ctx_g, k->w1, k->scale);
-        ggml_tensor * d   = nullptr;                             // [out_k, out_l*S] when done
-
-        if (k->order == DIT_LOKR_ORDER_W1) {
-            // x --swap--> [in_m, in_n*S] --w1--> [out_l, in_n*S] --swap-->
-            // [in_n, out_l*S] --w2--> [out_k, out_l*S].
-            ggml_tensor * Xf = lokr_swap(ctx_g, xc, k->in_n, k->in_m, S);  // [in_m, in_n*S]
-            ggml_tensor * U  = ggml_mul_mat(ctx_g, w1s, Xf);               // [out_l, in_n*S]
-            ggml_tensor * Uf = lokr_swap(ctx_g, U, k->out_l, k->in_n, S);  // [in_n, out_l*S]
-            d = k->mono ? ggml_mul_mat(ctx_g, k->w2, Uf)
-                        : ggml_mul_mat(ctx_g, k->w2_a, ggml_mul_mat(ctx_g, k->w2_b, Uf));
-        } else if (k->order == DIT_LOKR_ORDER_MID) {
-            // x --w2_b--> [dim, in_m*S] --swap--> [in_m, dim*S] --w1-->
-            // [out_l, dim*S] --swap--> [dim, out_l*S] --w2_a--> [out_k, out_l*S].
-            ggml_tensor * X2 = ggml_reshape_2d(ctx_g, xc, k->in_n, k->in_m * S);
-            ggml_tensor * Z  = ggml_mul_mat(ctx_g, k->w2_b, X2);            // [dim, in_m*S]
-            ggml_tensor * Zf = lokr_swap(ctx_g, Z, (int64_t) dim, k->in_m, S);   // [in_m, dim*S]
-            ggml_tensor * V  = ggml_mul_mat(ctx_g, w1s, Zf);                     // [out_l, dim*S]
-            ggml_tensor * Vf = lokr_swap(ctx_g, V, k->out_l, (int64_t) dim, S);  // [dim, out_l*S]
-            d                = ggml_mul_mat(ctx_g, k->w2_a, Vf);                 // [out_k, out_l*S]
-        } else {
-            // x --w2--> [out_k, in_m*S] --swap--> [in_m, out_k*S] --w1-->
-            // [out_l, out_k*S] --swap--> [out_k, out_l*S].
-            // [in_n, in_m*S] — same bytes as [in_n, in_m, S], ne2 == 1.
-            ggml_tensor * X2 = ggml_reshape_2d(ctx_g, xc, k->in_n, k->in_m * S);
-            ggml_tensor * T1 = k->mono ? ggml_mul_mat(ctx_g, k->w2, X2)
-                                       : ggml_mul_mat(ctx_g, k->w2_a, ggml_mul_mat(ctx_g, k->w2_b, X2));
-            ggml_tensor * T1f = lokr_swap(ctx_g, T1, k->out_k, k->in_m, S);   // [in_m, out_k*S]
-            ggml_tensor * T2  = ggml_mul_mat(ctx_g, w1s, T1f);                // [out_l, out_k*S]
-            d                 = lokr_swap(ctx_g, T2, k->out_l, k->out_k, S);  // [out_k, out_l*S]
-        }
+        ggml_tensor * d     = lokr_apply_delta(ctx_g, x, *k);  // [out_k, out_l*S]
         ggml_tensor * delta = ggml_reshape_4d(ctx_g, d, y->ne[0], y->ne[1], y->ne[2], y->ne[3]);
         return ggml_add(ctx_g, y, delta);
-    }
-
-    // Exchange the two leading axes of `t`, read as [a, b, S], and hand back the
-    // [b, a*S] fold the next mul_mat wants. The 3-D form exists only so
-    // ggml_permute(1, 0, 2, 3) — src axis0 to position 1, axis1 to position 0 —
-    // is expressible. ggml_cont_2d rather than cont + a separate reshape_2d: the
-    // CONT backward already reshapes the gradient when the shapes differ, so the
-    // extra view node bought nothing (measured: 17645 -> 17389 graph nodes at 32
-    // layers / 11 sites, no measurable step-time change — kept because it is
-    // strictly less graph for the same maths).
-    static ggml_tensor * lokr_swap(ggml_context * ctx_g, ggml_tensor * t, int64_t a, int64_t b, int64_t S) {
-        ggml_tensor * t3 = ggml_reshape_3d(ctx_g, t, a, b, S);
-        return ggml_cont_2d(ctx_g, ggml_permute(ctx_g, t3, 1, 0, 2, 3), b, a * S);
     }
 
     // §2.4: <dir>/lokr_weights.safetensors, LyCORIS key layout. No
