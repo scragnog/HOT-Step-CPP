@@ -288,7 +288,7 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
   }
   const st = await readStatus(item.datasetId);
   switch (stage) {
-    case 'cache': return st.stages.preprocess.done && st.stages.preprocess.captionModeOk !== false ? null : { captionMode: 'ace' };
+    case 'cache': return st.stages.preprocess.done && st.stages.preprocess.captionModeOk !== false ? null : { captionMode: 'yue2' };
     case 'codes': return st.stages.tokenize.done ? null : {};
     case 'sheet': return st.stages.sheet.done ? null : {};
     case 'stems': {

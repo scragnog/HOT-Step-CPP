@@ -39,6 +39,8 @@ import { yue2OptimRequest } from '../services/training/yue2Optim.js';
 //   GET    /datasets/:id/samples/:sampleId/audio        — stream audio (Range aware)
 //   GET    /datasets/:id/samples/:sampleId/mm3          — read <stem>.mm3.txt
 //   PUT    /datasets/:id/samples/:sampleId/mm3          — write <stem>.mm3.txt
+//   GET    /datasets/:id/samples/:sampleId/yue2         — read <stem>.yue2.txt
+//   PUT    /datasets/:id/samples/:sampleId/yue2         — write <stem>.yue2.txt
 //   POST   /datasets/:id/label                          — start a labeling job
 //   POST   /datasets/:id/enhance/genius                 — start a Genius job
 //   POST   /datasets/:id/enhance/caption                — start an LLM caption job
@@ -1092,74 +1094,87 @@ router.patch('/datasets/:id/samples/:sampleId', async (req: Request, res: Respon
   }
 });
 
-// ── MM3 Structured Caption (§2.4a) ───────────────────────────────────────
+// ── Caption sidecars: MM3 (§2.4a) and YuE2 ───────────────────────────────
 //
-// Lives in `<stem>.mm3.txt` beside the audio (what `ace-train mm3-condition`
-// reads), NOT in the sidecar — so it cannot ride the PATCH whitelist above.
+// Each lives beside the audio — `<stem>.mm3.txt` (what `ace-train mm3-condition`
+// reads) and `<stem>.yue2.txt` (the YuE2 planner sentence, read by
+// `yue2-preprocess --captions yue2`) — NOT in the sidecar, so neither can ride
+// the PATCH whitelist above.
 // Served on demand rather than embedded in the samples list: at ~3 KB a
 // caption it would double the list payload for a field only the drawer shows.
 
-/** `<stem>.mm3.txt` for a sample, mirroring enhanceService's write path. */
-function mm3PathOf(sample: TrainingSample): string {
-  return `${sample.audioPath.replace(/\.[^.\\/]+$/, '')}.mm3.txt`;
+/** `<stem>.mm3.txt` / `<stem>.yue2.txt` for a sample, mirroring the write paths
+ *  in enhanceService (MM3) and yue2CaptionJob (YuE2). */
+function captionSidecarPath(sample: TrainingSample, suffix: string): string {
+  const ext = path.extname(sample.audioPath);
+  return `${sample.audioPath.slice(0, sample.audioPath.length - ext.length)}${suffix}`;
 }
 
-router.get('/datasets/:id/samples/:sampleId/mm3', async (req: Request, res: Response) => {
-  try {
-    const ds = repo.getDataset(req.params.id as string);
-    if (!ds) {
-      res.status(404).json({ error: 'Dataset not found' });
-      return;
+/** The GET/PUT pair for one caption sidecar. Both formats are a FILE beside the
+ *  audio rather than a sidecar field, so neither rides the samples list — this
+ *  is the drawer's only way to see or edit them. */
+function captionSidecarRoutes(kind: string, suffix: string, label: string): void {
+  router.get(`/datasets/:id/samples/:sampleId/${kind}`, async (req: Request, res: Response) => {
+    try {
+      const ds = repo.getDataset(req.params.id as string);
+      if (!ds) {
+        res.status(404).json({ error: 'Dataset not found' });
+        return;
+      }
+      const samples = await buildSamples(ds);
+      const sample = samples.find(s => s.sampleId === req.params.sampleId);
+      if (!sample) {
+        res.status(404).json({ error: 'Sample not found' });
+        return;
+      }
+      const file = captionSidecarPath(sample, suffix);
+      // Absent file is `text: ''`, not a 404 — "no caption yet" is a normal
+      // state for a dataset labeled before this format existed.
+      const text = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+      res.json({ text });
+    } catch (err: any) {
+      console.error(`[Training] ${label} read failed: ${err.message}`);
+      res.status(500).json({ error: err.message });
     }
-    const samples = await buildSamples(ds);
-    const sample = samples.find(s => s.sampleId === req.params.sampleId);
-    if (!sample) {
-      res.status(404).json({ error: 'Sample not found' });
-      return;
-    }
-    const mm3Path = mm3PathOf(sample);
-    // Absent file is `text: ''`, not a 404 — "no MM3 caption yet" is a normal
-    // state for a dataset labeled before MOSS existed.
-    const text = fs.existsSync(mm3Path) ? fs.readFileSync(mm3Path, 'utf8') : '';
-    res.json({ text });
-  } catch (err: any) {
-    console.error(`[Training] MM3 read failed: ${err.message}`);
-    res.status(500).json({ error: err.message });
-  }
-});
+  });
 
-router.put('/datasets/:id/samples/:sampleId/mm3', async (req: Request, res: Response) => {
-  try {
-    const ds = repo.getDataset(req.params.id as string);
-    if (!ds) {
-      res.status(404).json({ error: 'Dataset not found' });
-      return;
+  router.put(`/datasets/:id/samples/:sampleId/${kind}`, async (req: Request, res: Response) => {
+    try {
+      const ds = repo.getDataset(req.params.id as string);
+      if (!ds) {
+        res.status(404).json({ error: 'Dataset not found' });
+        return;
+      }
+      const text = String((req.body || {}).text ?? '');
+      const samples = await buildSamples(ds);
+      const sample = samples.find(s => s.sampleId === req.params.sampleId);
+      if (!sample) {
+        res.status(404).json({ error: 'Sample not found' });
+        return;
+      }
+      if (sample.fileMissing) {
+        res.status(409).json({ error: 'Audio file is missing from disk' });
+        return;
+      }
+      const file = captionSidecarPath(sample, suffix);
+      if (text.trim()) {
+        fs.writeFileSync(file, text, 'utf8');
+      } else if (fs.existsSync(file)) {
+        // Clearing the editor deletes the file — an empty sidecar would still
+        // be picked up by the trainer and condition on nothing.
+        fs.unlinkSync(file);
+      }
+      res.json({ text });
+    } catch (err: any) {
+      console.error(`[Training] ${label} write failed: ${err.message}`);
+      res.status(500).json({ error: err.message });
     }
-    const text = String((req.body || {}).text ?? '');
-    const samples = await buildSamples(ds);
-    const sample = samples.find(s => s.sampleId === req.params.sampleId);
-    if (!sample) {
-      res.status(404).json({ error: 'Sample not found' });
-      return;
-    }
-    if (sample.fileMissing) {
-      res.status(409).json({ error: 'Audio file is missing from disk' });
-      return;
-    }
-    const mm3Path = mm3PathOf(sample);
-    if (text.trim()) {
-      fs.writeFileSync(mm3Path, text, 'utf8');
-    } else if (fs.existsSync(mm3Path)) {
-      // Clearing the editor deletes the file — an empty .mm3.txt would still
-      // be picked up by `ace-train mm3-condition` and condition on nothing.
-      fs.unlinkSync(mm3Path);
-    }
-    res.json({ text });
-  } catch (err: any) {
-    console.error(`[Training] MM3 write failed: ${err.message}`);
-    res.status(500).json({ error: err.message });
-  }
-});
+  });
+}
+
+captionSidecarRoutes('mm3', '.mm3.txt', 'MM3');
+captionSidecarRoutes('yue2', '.yue2.txt', 'YuE2');
+
 
 router.get('/datasets/:id/samples/:sampleId/audio', async (req: Request, res: Response) => {
   try {
@@ -2983,13 +2998,18 @@ function countYue2ScannableAudio(dir: string): { files: number; unsupported: num
  *  reports zeroes, which reads as "no sidecars" and keeps the old default.
  */
 const SIDECAR_HEAD_BYTES = 4096;
-function countYue2Sidecars(dir: string): { withCaption: number; withLyrics: number } {
-  let withCaption = 0, withLyrics = 0;
+function countYue2Sidecars(dir: string): { withCaption: number; withLyrics: number; withYue2: number } {
+  let withCaption = 0, withLyrics = 0, withYue2 = 0;
   try {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       if (!e.isFile()) continue;
       if (!YUE2_AUDIO_EXTS.has(path.extname(e.name).toLowerCase())) continue;
-      const sidecar = path.join(dir, `${path.parse(e.name).name}.txt`);
+      const stem = path.parse(e.name).name;
+      // The planner caption is its own file and is what `--caption-mode yue2`
+      // reads. Counted separately so the card can say a cache cut in another
+      // mode is ignoring N of them.
+      if (fs.existsSync(path.join(dir, `${stem}.yue2.txt`))) withYue2++;
+      const sidecar = path.join(dir, `${stem}.txt`);
       let head = '';
       try {
         const fd = fs.openSync(sidecar, 'r');
@@ -3007,7 +3027,7 @@ function countYue2Sidecars(dir: string): { withCaption: number; withLyrics: numb
       if (/^[ \t]*lyrics[ \t]*:/mi.test(head)) withLyrics++;
     }
   } catch { /* folder gone or unreadable */ }
-  return { withCaption, withLyrics };
+  return { withCaption, withLyrics, withYue2 };
 }
 
 /** GET /datasets/:id/yue2 — latent cache state, model readiness and the
@@ -3070,15 +3090,21 @@ router.get('/datasets/:id/yue2', async (req: Request, res: Response) => {
        *  rather than just silently picking a mode. */
       sidecarsWithCaption: sidecars.withCaption,
       sidecarsWithLyrics: sidecars.withLyrics,
+      sidecarsWithYue2: sidecars.withYue2,
       /** The shared defaults, with ONE per-dataset override: a corpus that
        *  shipped with captions or lyrics defaults to reading them. Defaulting
        *  to `none` there builds a cache with neither, and every later stage
        *  then skips every source — which is exactly what happened, quietly,
-       *  until the failure surfaced two stages downstream. */
+       *  until the failure surfaced two stages downstream.
+       *
+       *  `yue2`, not `ace`: it IS `ace` plus the planner sentence from
+       *  `<stem>.yue2.txt` where that file exists, and per-track fallback to
+       *  the ACE caption where it does not. Strictly the better of the two,
+       *  and the labeling pass now writes those sidecars. */
       defaults: {
         ...YUE2_NAR_DEFAULTS,
         captionMode: (sidecars.withLyrics > 0 || sidecars.withCaption > 0)
-          ? 'ace' : YUE2_NAR_DEFAULTS.captionMode,
+          ? 'yue2' : YUE2_NAR_DEFAULTS.captionMode,
       },
       presets: YUE2_PRESETS,
       defaultPreset: YUE2_DEFAULT_PRESET,
@@ -3159,7 +3185,7 @@ router.post('/datasets/:id/yue2-preprocess', (req: Request, res: Response) => {
     // align stage then skipped every source of a bulk run.
     const sidecarsForMode = isYue2CaptionMode(b.captionMode) ? undefined : countYue2Sidecars(ds.sourceDir);
     const captionMode = isYue2CaptionMode(b.captionMode) ? b.captionMode
-      : sidecarsForMode && (sidecarsForMode.withLyrics > 0 || sidecarsForMode.withCaption > 0) ? 'ace' : D.captionMode;
+      : sidecarsForMode && (sidecarsForMode.withLyrics > 0 || sidecarsForMode.withCaption > 0) ? 'yue2' : D.captionMode;
     const defaultCaption = typeof b.defaultCaption === 'string' ? b.defaultCaption.trim() : '';
     if (captionMode === 'default' && !defaultCaption) {
       res.status(400).json({ error: 'Caption mode "default" needs a caption to use for every clip.' });
@@ -3906,7 +3932,9 @@ router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
           // export and sound generic, with nothing anywhere saying why. Name it
           // here rather than let the run look healthy.
           captionMode: cache?.captionMode ?? '',
-          captionModeOk: !cache || cache.captionMode === 'ace',
+          // `yue2` counts: it parses the same sidecar and only swaps the style
+          // sentence, so the lyrics this stage needs are there either way.
+          captionModeOk: !cache || cache.captionMode === 'ace' || cache.captionMode === 'yue2',
         },
         tokenize: {
           // `codec_ids_present` is the engine's own flag and says the stage
@@ -4463,6 +4491,32 @@ router.get('/datasets/:id/yue2-ar-runs', (req: Request, res: Response) => {
   }
 });
 
+/** The caption a dataset track contributes, newest source first: the YuE2
+ *  planner sentence beside the audio, then whatever the cache baked in (the ACE
+ *  caption), then the MM3 structured caption flattened to one line.
+ *
+ *  Sidecar FIRST, not manifest first. A cache is cut once and then outlives
+ *  several rounds of captioning, so the manifest is a snapshot of what the
+ *  labels said on the day — reading it in preference to the file on disk is how
+ *  an album with eleven `.yue2.txt` beside its audio rendered from its ACE
+ *  captions for weeks without anything saying so.
+ *
+ *  Note the consequence: a caption served here may be one the adapter never
+ *  trained on, if the cache was cut in `ace` mode. That is the user's call —
+ *  re-cut and retrain to make the two agree. */
+function datasetTrackCaption(audioPath: string, baked: string): string {
+  const read = (file: string): string => {
+    try { return fs.readFileSync(file, 'utf8').trim(); } catch { return ''; }
+  };
+  if (!audioPath) return baked.trim();
+  const stem = audioPath.slice(0, audioPath.length - path.extname(audioPath).length);
+  // The MM3 caption is a multi-line structured block; as a YuE2 style it is a
+  // last resort and it goes in as one line, never as its own field layout.
+  return read(`${stem}.yue2.txt`)
+    || baked.trim()
+    || read(`${stem}.mm3.txt`).replace(/\s+/g, ' ').trim();
+}
+
 /** GET /yue2-adapter-captions?adapter=<path> — the captions the dataset behind
  *  one trained adapter was trained on.
  *
@@ -4480,7 +4534,7 @@ router.get('/yue2-adapter-captions', (req: Request, res: Response) => {
     const asked = typeof req.query.adapter === 'string' ? req.query.adapter.trim() : '';
     const jointRun = jointRunForAdapter(asked);
     if (jointRun) {
-      res.json({ tracks: jointCaptionTracks(jointRun) });
+      res.json({ tracks: jointCaptionTracks(jointRun, datasetTrackCaption) });
       return;
     }
     const dir = asked ? path.dirname(path.resolve(asked)) : '';
@@ -4507,7 +4561,8 @@ router.get('/yue2-adapter-captions', (req: Request, res: Response) => {
     const str = (v: unknown): string => (typeof v === 'string' ? v : '');
     const tracks = sources
       .map(s => ({
-        name: str(s.name), caption: str(s.caption),
+        name: str(s.name),
+        caption: datasetTrackCaption(str(s.source), str(s.caption)),
         genre: str(s.genre), bpm: str(s.bpm), key: str(s.key),
       }))
       .filter(t => t.name && t.caption)

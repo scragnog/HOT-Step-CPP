@@ -7,7 +7,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Headphones, Loader2, X, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { getSampleMm3, sampleAudioUrl, saveSampleMm3 } from '../../services/trainingApi';
+import { getSampleMm3, getSampleYue2, sampleAudioUrl, saveSampleMm3, saveSampleYue2 } from '../../services/trainingApi';
 import { mergedSample, useTrainingStore } from '../../stores/trainingStore';
 import { AuditionPlayer } from './AuditionPlayer';
 
@@ -59,15 +59,39 @@ export const SampleDrawer: React.FC<SampleDrawerProps> = ({ sampleId }) => {
       .catch((err: Error) => setMm3Error(err.message));
   };
 
+  // YuE2 planner caption — the third format, same file-not-field arrangement
+  // as MM3 (<stem>.yue2.txt), so the same fetch-on-open / save-on-blur path.
+  const [yue2, setYue2] = useState<string | null>(null);
+  const [yue2Error, setYue2Error] = useState<string | null>(null);
+  const yue2SavedRef = useRef('');
+  useEffect(() => {
+    let stale = false;
+    setYue2(null);
+    setYue2Error(null);
+    if (!datasetId || !sampleId) return;
+    getSampleYue2(datasetId, sampleId)
+      .then(({ text }) => { if (!stale) { yue2SavedRef.current = text; setYue2(text); } })
+      .catch((err: Error) => { if (!stale) { setYue2(''); setYue2Error(err.message); } });
+    return () => { stale = true; };
+  }, [datasetId, sampleId]);
+  const flushYue2 = () => {
+    if (!datasetId || yue2 === null || yue2 === yue2SavedRef.current) return;
+    const text = yue2;
+    saveSampleYue2(datasetId, sampleId, text)
+      .then(() => { yue2SavedRef.current = text; setYue2Error(null); })
+      .catch((err: Error) => setYue2Error(err.message));
+  };
+
   if (!sample || !datasetId) return null;
 
   const readOnly = sample.labelStatus === 'processing' || sample.fileMissing;
-  const close = () => { void flushSample(sampleId); flushMm3(); setOpenSampleId(null); };
+  const close = () => { void flushSample(sampleId); flushMm3(); flushYue2(); setOpenSampleId(null); };
   const goto = (delta: number) => {
     const next = sampleOrder[idx + delta];
     if (!next) return;
     void flushSample(sampleId);
     flushMm3();
+    flushYue2();
     setOpenSampleId(next);
   };
 
@@ -191,6 +215,37 @@ export const SampleDrawer: React.FC<SampleDrawerProps> = ({ sampleId }) => {
               />
               {mm3Error && (
                 <span className="text-[11px] text-red-500 dark:text-red-400 break-words">{mm3Error}</span>
+              )}
+            </>
+          )}
+        </label>
+
+        {/* YuE2 planner caption — one sentence, fixed part order. Written in the
+            same labeling pass as the other two (enhanceService), editable here
+            because the planner is prompted with exactly this text. */}
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.drawer.yue2Caption', 'YuE2 caption')}</span>
+          {yue2 === null ? (
+            <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-zinc-500">
+              <Loader2 size={12} className="animate-spin" />
+            </div>
+          ) : (
+            <>
+              {yue2 === '' && yue2SavedRef.current === '' && !yue2Error && (
+                <span className="text-[11px] text-zinc-500">{t('trainingStudio.drawer.yue2Missing', 'No YuE2 caption yet — run the caption step (or Enhance → YuE2 caption) to write one.')}</span>
+              )}
+              <textarea
+                rows={4}
+                value={yue2}
+                disabled={readOnly}
+                placeholder={t('trainingStudio.drawer.yue2Placeholder', 'One sentence: language, genre, vocal, instruments, mood, production, BPM…')}
+                onChange={(e) => setYue2(e.target.value)}
+                onBlur={flushYue2}
+                onKeyDown={(e) => { if (e.key === 'Escape') setYue2(yue2SavedRef.current); }}
+                className={`${area} font-mono text-xs leading-relaxed`}
+              />
+              {yue2Error && (
+                <span className="text-[11px] text-red-500 dark:text-red-400 break-words">{yue2Error}</span>
               )}
             </>
           )}

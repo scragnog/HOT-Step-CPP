@@ -446,7 +446,7 @@ export type Yue2NarTarget = 'nar_attn' | 'nar_attn_mlp' | 'nar_attn_mlp_proj';
  *  missing here, so the one mode the AR half requires could not be typed, let
  *  alone offered: it parses the ACE sidecar into its fields and carries the
  *  caption AND the lyrics into the manifest, which is what the aligner reads. */
-export type Yue2CaptionMode = 'ace' | 'txt' | 'default' | 'none';
+export type Yue2CaptionMode = 'ace' | 'yue2' | 'txt' | 'default' | 'none';
 export type Yue2VaeVariant = 'standard' | 'legacy';
 export type Yue2PresetName = 'fast' | 'balanced' | 'thorough';
 
@@ -558,6 +558,8 @@ export interface Yue2Status {
    *  sheet. The caption-mode default follows these rather than a constant. */
   sidecarsWithCaption?: number;
   sidecarsWithLyrics?: number;
+  /** Tracks with a `<stem>.yue2.txt` planner caption beside them. */
+  sidecarsWithYue2?: number;
   defaults: Yue2Defaults;
   presets: Record<Yue2PresetName, { steps: number; saveEvery: number }>;
   defaultPreset: Yue2PresetName;
@@ -1309,6 +1311,18 @@ export interface TrainingDatasetDetail extends TrainingDatasetSummary {
   warnings: string[];         // e.g. "Only 6 samples — 10+ recommended"
   activeJobId: string | null;
   preprocessedVariants: number;   // subdirs of data/training/tensors/<slug> with a preprocess_meta.json
+}
+
+/** YuE2 planner caption (`<stem>.yue2.txt`) — same on-demand pair as MM3. */
+export async function getSampleYue2(id: string, sampleId: string): Promise<{ text: string }> {
+  return request(`/datasets/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}/yue2`);
+}
+
+export async function saveSampleYue2(id: string, sampleId: string, text: string): Promise<{ text: string }> {
+  return request(
+    `/datasets/${encodeURIComponent(id)}/samples/${encodeURIComponent(sampleId)}/yue2`,
+    { method: 'PUT', ...jsonBody({ text }) },
+  );
 }
 
 // ── Jobs ─────────────────────────────────────────────────────────────────

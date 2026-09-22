@@ -123,6 +123,10 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
   const set = <K extends keyof PreprocessForm>(k: K, v: PreprocessForm[K]) =>
     setEdits(e => ({ ...e, [k]: v }));
 
+  /** The two modes that carry the sidecar's lyrics into the cache. Everything
+   *  downstream (cursor spans, the AR prefix) needs one of them. */
+  const readsSidecar = form.captionMode === 'ace' || form.captionMode === 'yue2';
+
   const blocked = status.missingForPreprocess.length > 0;
   const cache = status.cache;
   // The cache is keyed per SOURCE FILE and is clip-length independent, so
@@ -255,10 +259,13 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
                 <option value="default">{t('trainingStudio.yue2.captionDefault', 'One caption I type here, on every clip')}</option>
                 <option value="txt">{t('trainingStudio.yue2.captionTxt', 'The raw sidecar file, field names and all')}</option>
               </select>
+              {/* `yue2` reads the same sidecar as `ace` — it only swaps the style
+                  sentence for the planner one — so both are the healthy answer
+                  here, and neither throws the lyrics away. */}
               {(status.sidecarsWithLyrics ?? 0) > 0 && (
-                <span className={`text-[10px] leading-snug ${form.captionMode === 'ace'
+                <span className={`text-[10px] leading-snug ${readsSidecar
                   ? 'text-emerald-600 dark:text-emerald-500' : 'text-amber-600 dark:text-amber-500'}`}>
-                  {form.captionMode === 'ace'
+                  {readsSidecar
                     ? t('trainingStudio.yue2.captionFound',
                         '{{n}} of the scanned tracks ship a sidecar with lyrics, and this mode reads them.',
                         { n: status.sidecarsWithLyrics })
@@ -268,14 +275,33 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
                         { n: status.sidecarsWithLyrics })}
                 </span>
               )}
+              {/* The cache is cut once and then outlives several rounds of
+                  captioning. A cache cut in another mode is silently ignoring
+                  every planner caption written since, and nothing downstream
+                  can tell — say so here, where the re-cut is one Force away. */}
+              {!!cache && (status.sidecarsWithYue2 ?? 0) > 0 && cache.captionMode !== 'yue2' && (
+                <span className="text-[10px] leading-snug text-amber-600 dark:text-amber-500">
+                  {t('trainingStudio.yue2.captionStaleCache',
+                    '{{n}} tracks have a .yue2.txt planner caption, but this cache was cut with '
+                    + '"{{mode}}" and trained on the ACE captions instead. Re-cut with Force to use them.',
+                    { n: status.sidecarsWithYue2, mode: cache.captionMode || 'none' })}
+                </span>
+              )}
               <span className="text-[10px] text-zinc-500 leading-snug">
-                {form.captionMode === 'ace'
+                {form.captionMode === 'yue2'
+                  ? t('trainingStudio.yue2.captionYue2Hint',
+                      'The default, and `ace` plus one thing: the style is the one-sentence planner '
+                      + 'caption from .yue2.txt where the labeling pass wrote one, and the ACE caption '
+                      + 'where it did not. Lyrics come from the same sidecar either way, so the cursor '
+                      + 'stage and the AR half get everything they need. Training on the planner\'s own '
+                      + 'sentence order makes the prompt Lyric Studio writes for a new song the same shape.')
+                  : form.captionMode === 'ace'
                   ? t('trainingStudio.yue2.captionAceHint',
                       'Reads the .txt beside each track as the fielded sidecar it is, and carries the '
                       + 'caption and the lyric sheet into the cache separately. This is the only mode the '
                       + 'later stages can use: cursor spans align against those lyrics, and the AR half '
-                      + 'trains on that caption as its prefix. Any other mode and both skip every track. '
-                      + 'Pick one of the others only for a NAR-only run.')
+                      + 'trains on that caption as its prefix. Only this and the YuE2 mode feed them; '
+                      + 'anything else and both skip every track.')
                   : form.captionMode === 'txt'
                   ? t('trainingStudio.yue2.captionTxtHint',
                       'There is no YuE2 caption sidecar. The .txt beside each track is the ACE one — '
@@ -286,7 +312,8 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
                         'The same style text on every clip, with the trigger word in front of it.')
                     : t('trainingStudio.yue2.captionNoneHint',
                         'The style is the trigger word alone, which is exactly how the adapter is '
-                        + 'addressed at generation time. This is the default.')}
+                        + 'addressed at generation time. NAR-only runs: the later stages skip every '
+                        + 'track without lyrics.')}
               </span>
             </label>
             <label className="flex flex-col gap-1">

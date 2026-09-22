@@ -915,8 +915,9 @@ export const Yue2AlignCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
                 {t('trainingStudio.yue2ar.alignNoLyrics',
                   'The latent cache was built with clip captions set to "{{mode}}", so it carries no lyrics '
                   + 'and this stage has nothing to align: it would skip every source and fail. Re-encode the '
-                  + 'latents with clip captions set to "ace" — the sidecars beside the audio already hold the '
-                  + 'lyrics, and the AR half needs the captions anyway, since the caption is its prefix.',
+                  + 'latents with clip captions set to the YuE2 mode (or "ace") — the sidecars beside the '
+                  + 'audio already hold the lyrics, and the AR half needs the captions anyway, since the '
+                  + 'caption is its prefix.',
                   { mode: status.stages.preprocess.captionMode || 'none' })}
               </span>
             </div>

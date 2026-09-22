@@ -1012,6 +1012,9 @@ async function runLabelJob(job: TrainingJob): Promise<void> {
                 // MOSS does it as a second decode, Gemini as a second audio
                 // call. It is what `ace-train mm3-condition` reads.
                 wantMm3: true,
+                wantYue2: opts.caption?.wantYue2 !== false,
+                yue2Provider: opts.caption?.yue2Provider,
+                yue2Model: opts.caption?.yue2Model,
                 model: opts.caption?.model,
                 includeLyricsExcerpt: true,
                 temperature: 0.45,
@@ -1212,6 +1215,10 @@ async function runCaptionJob(job: TrainingJob): Promise<void> {
           // MOSS only — costs one extra decode off the same encode and writes
           // <stem>.mm3.txt, which is what `ace-train mm3-condition` reads.
           wantMm3: opts.wantMm3 !== false,
+          // The third format, from the same pass (enhanceService).
+          wantYue2: opts.wantYue2 !== false,
+          yue2Provider: opts.yue2Provider,
+          yue2Model: opts.yue2Model,
           signal: job.controller.signal,
           log: (level, message) => emitLog(job, level, `${sample.filename}: ${message}`),
         }));

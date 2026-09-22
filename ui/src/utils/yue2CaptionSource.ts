@@ -66,8 +66,14 @@ export interface Yue2CaptionSelection {
 
 /** `hs-yue2CaptionSource:<absolute adapter path>` → Yue2CaptionSelection */
 export const YUE2_CAPTION_SOURCE_PREFIX = 'hs-yue2CaptionSource:';
-/** `hs-yue2SourceTracks:<absolute adapter path>` → Yue2SourceTrack[] */
-export const YUE2_SOURCE_TRACKS_PREFIX = 'hs-yue2SourceTracks:';
+/** `hs-yue2SourceTracks2:<absolute adapter path>` → Yue2SourceTrack[]
+ *
+ *  The `2` is a cache bust. Until 2026-09-21 the server answered with whatever
+ *  caption the latent cache baked in, which for a cache cut in `ace` mode is
+ *  the ACE caption even when a `.yue2.txt` sits beside the audio. Clients that
+ *  already cached those would go on serving them for as long as the adapter
+ *  stayed selected, because a non-empty cache is never refetched. */
+export const YUE2_SOURCE_TRACKS_PREFIX = 'hs-yue2SourceTracks2:';
 
 // ── Storage ──────────────────────────────────────────────────────────────────
 

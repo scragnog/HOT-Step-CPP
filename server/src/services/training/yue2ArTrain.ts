@@ -183,8 +183,11 @@ export const YUE2_AR_DEFAULTS = {
    *  taking `caption:` as the style and `lyrics:` as the lyrics. Measured
    *  2026-09-15 (_LISTENING/2026-09-14/RESULTS.md, arms 130-147): the
    *  conditioning is the whole difference between an adapter that caps and one
-   *  that sounds like the artist. */
-  captionMode: 'ace' as const,
+   *  that sounds like the artist. `yue2` is that same parse with the style
+   *  taken from `<stem>.yue2.txt` where the labeling pass wrote one — the
+   *  planner's own sentence order, so the trained prefix and the prompt Lyric
+   *  Studio writes for a new song are the same shape. */
+  captionMode: 'yue2' as const,
   /** Upstream's CUR_W. The lyric-cursor auxiliary loss, measured to matter:
    *  frame-to-lyric alignment loss 12.3 → 1.6 with it, 10.8 → 16.3 without, on
    *  the same songs. It needs `cursor_words` in the manifest, i.e. the

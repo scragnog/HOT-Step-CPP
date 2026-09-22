@@ -438,8 +438,30 @@ static void yp_resolve_caption(const Yue2PreprocessArgs & a, const std::string &
         if (a.caption_mode == "yue2") {
             std::string yue2_cap;
             const std::string base = yp_caption_path(audio_path);
-            if (yp_read_text(base.substr(0, base.size() - 4) + ".yue2.txt", &yue2_cap) && !pm_trim(yue2_cap).empty()) {
+            const std::string stem = base.substr(0, base.size() - 4);
+            if (yp_read_text(stem + ".yue2.txt", &yue2_cap) && !pm_trim(yue2_cap).empty()) {
                 *caption = pm_trim(yue2_cap);
+            } else if (pm_trim(*caption).empty()) {
+                // Last resort: the MM3 structured caption, which is the only
+                // other description of this recording anyone wrote. It is a
+                // multi-line fielded block and nothing like a planner sentence,
+                // so it goes in flattened to one line and only when there is no
+                // ACE caption either — an off-format style still beats an empty
+                // one, which trains the row on the trigger word alone.
+                std::string mm3_cap;
+                if (yp_read_text(stem + ".mm3.txt", &mm3_cap) && !pm_trim(mm3_cap).empty()) {
+                    std::string flat;
+                    flat.reserve(mm3_cap.size());
+                    bool space = false;
+                    for (char ch : mm3_cap) {
+                        const bool ws = (isspace((unsigned char) ch) != 0);
+                        if (ws) { space = true; continue; }
+                        if (space && !flat.empty()) flat.push_back(' ');
+                        space = false;
+                        flat.push_back(ch);
+                    }
+                    *caption = pm_trim(flat);
+                }
             }
         }
     } else if (a.caption_mode == "txt") {

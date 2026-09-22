@@ -19,6 +19,7 @@ import { buildUserPrompt, parseStructuredResponse, CAPTION_INSTRUCTIONS, CAPTION
 import {
   applyFactSubstitution, captionWithMoss, correctFactsInProse, MM3_INSTRUCTIONS,
 } from './mossCaption.js';
+import { captionSampleForYue2, writeYue2Sidecar } from './yue2CaptionJob.js';
 import type { TrainingDatasetRow, TrainingSample } from './types.js';
 
 const MAX_CAPTION_CHARS = 4000;
@@ -337,6 +338,61 @@ function writeMm3Sidecar(
 }
 
 /**
+ * Write `<stem>.yue2.txt` from the caption this run just produced — the third
+ * format, in the same pass as the other two.
+ *
+ * Unlike MM3 this needs no second look at the audio: the planner caption is a
+ * reorder of facts we now hold (the fresh caption, the local BPM, the language),
+ * so it is one cheap chat call, not another upload or decode. MOSS has no chat
+ * mode, so a MOSS run borrows the configured default provider and skips with a
+ * warning when there is none — never failing the sample over the third caption.
+ */
+async function writeYue2Alongside(
+  sample: TrainingSample,
+  ds: TrainingDatasetRow,
+  fields: Record<string, string>,
+  opts: {
+    provider: string; model?: string; yue2Provider?: string; yue2Model?: string;
+    signal?: AbortSignal; log?: (level: 'info' | 'warn', message: string) => void;
+  },
+): Promise<void> {
+  // The caption this run wrote, not the stale one on the sample row.
+  const caption = (fields.caption || sample.caption || '').trim();
+  if (!caption) return;
+
+  const provider = (opts.yue2Provider
+    || (opts.provider === 'moss' ? config.lireek.defaultProvider : opts.provider)
+    || '').trim();
+  if (!provider || provider === 'moss') {
+    opts.log?.('warn', 'YuE2 caption skipped — no chat provider configured (MOSS has no text mode)');
+    return;
+  }
+
+  try {
+    const text = await captionSampleForYue2(
+      { ...sample, caption, genre: fields.genre || sample.genre }, ds,
+      {
+        provider,
+        // `model` belongs to the captioning provider; it is only the right model
+        // when the YuE2 call goes to that same provider.
+        model: provider === opts.provider ? opts.model : opts.yue2Model,
+        signal: opts.signal,
+        log: opts.log,
+      },
+    );
+    if (!text) {
+      opts.log?.('warn', 'YuE2 caption call returned nothing — .yue2.txt not written');
+      return;
+    }
+    opts.log?.('info', `wrote YuE2 planner caption (${writeYue2Sidecar(sample.audioPath, text)})`);
+  } catch (err: any) {
+    if ((err as NodeJS.ErrnoException)?.name === 'AbortError') throw err;
+    opts.log?.('warn',
+      `YuE2 caption failed (${String(err?.message || err).slice(0, 160)}) — .yue2.txt not written`);
+  }
+}
+
+/**
  * Rewrite one sample's caption with an LLM. Returns the subset of sidecar
  * fields the model produced — `{}` when it produced nothing usable.
  */
@@ -347,6 +403,13 @@ export async function enhanceCaption(
     provider: string; model?: string; includeLyricsExcerpt: boolean; temperature: number;
     /** MOSS only: also write the MM3 Structured Caption sidecar. */
     wantMm3?: boolean;
+    /** Also write `<stem>.yue2.txt`. On by default — the three caption formats
+     *  are written in one pass so a dataset is never labeled for two of them. */
+    wantYue2?: boolean;
+    /** The chat provider for the YuE2 rewrite. Defaults to the captioning
+     *  provider, or the configured default when that is MOSS. */
+    yue2Provider?: string;
+    yue2Model?: string;
     signal?: AbortSignal;
     log?: (level: 'info' | 'warn', message: string) => void;
   },
@@ -354,7 +417,9 @@ export async function enhanceCaption(
   // Local, audio-grounded path. Checked BEFORE getProvider because 'moss' is not
   // an LLM provider — it has no API key, no model list, and it listens.
   if (opts.provider === 'moss') {
-    return captionWithMossProvider(sample, opts);
+    const out = await captionWithMossProvider(sample, opts);
+    if (opts.wantYue2 !== false) await writeYue2Alongside(sample, ds, out, opts);
+    return out;
   }
 
   const provider = getProvider(opts.provider);
@@ -462,5 +527,6 @@ export async function enhanceCaption(
   if (parsed.bpm) out.bpm = cleanText(parsed.bpm, 16);
   if (parsed.key) out.key = cleanText(parsed.key, 64);
   if (parsed.signature) out.signature = cleanText(parsed.signature, 16);
+  if (opts.wantYue2 !== false) await writeYue2Alongside(sample, ds, out, opts);
   return out;
 }

@@ -89,6 +89,44 @@ export function yue2StyleString(parts: Yue2StyleParts): string {
   return squash(`${head(trigger, true)}${cap} ${tail(parts)}`);
 }
 
+/** The trailing "…, 168 BPM" and "…, key of D minor." segments, matched one at
+ *  a time from the end so either order and either alone both come apart. The
+ *  leading [\s,]* eats the separator with them, so nothing is left dangling. */
+const TAIL_BPM_RE = /[\s,]*(\d+(?:\.\d+)?)\s*BPM\s*\.?\s*$/i;
+const TAIL_KEY_RE = /[\s,]*key of\s+([^,.]+?)\s*\.?\s*$/i;
+
+/**
+ * Peel a trained tail off a caption that already carries one.
+ *
+ * A dataset caption ends with the same "<bpm> BPM, key of <key>." the template
+ * composes, because the labeller wrote it in that format. Appending a second
+ * tail produced "…, 178 BPM 168 BPM, key of D minor." — the model gets two
+ * tempos and believes neither.
+ *
+ * applyYue2StyleTemplate's own idempotency strip cannot catch this: it removes
+ * only a tail IDENTICAL to the one it is about to add, and a caption saying
+ * 178 BPM does not match a request saying 168. So pull the fields out
+ * generically, and let the caller decide which value wins.
+ *
+ * Genre is deliberately NOT parsed. It has no marker word, so anything that
+ * claimed to find it would be guessing at the end of the user's own prose.
+ */
+export function splitYue2Tail(caption: string): { caption: string; bpm: string; key: string } {
+  let rest = squash(caption);
+  let bpm = '';
+  let key = '';
+  // Two passes: the tail may be written in either order, and each match
+  // exposes the next one at the end of the string.
+  for (let pass = 0; pass < 2; pass++) {
+    const k = rest.match(TAIL_KEY_RE);
+    if (k) { key = key || squash(k[1]); rest = rest.slice(0, k.index); }
+    const b = rest.match(TAIL_BPM_RE);
+    if (b) { bpm = bpm || squash(b[1]); rest = rest.slice(0, b.index); }
+    if (!k && !b) break;
+  }
+  return { caption: squash(rest), bpm, key };
+}
+
 /**
  * Compose, but tolerate a caption that is already composed.
  *

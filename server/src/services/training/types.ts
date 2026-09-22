@@ -612,7 +612,11 @@ export interface LabelOptions {
   useUnderstand?: boolean; // default false — LEGACY /understand path (2026-07-27 pivot)
   mergePolicy?: MergePolicy;
   understand?: UnderstandOverrides;
-  caption?: { provider?: string; model?: string };
+  caption?: {
+    provider?: string; model?: string;
+    /** See CaptionOptions — the YuE2 sidecar rides the same pass. */
+    wantYue2?: boolean; yue2Provider?: string; yue2Model?: string;
+  };
   /** Answer 200 {jobId:null, skipped} instead of 400 when nothing needs
    *  labelling. Set by the bulk pipeline, for which an already-labelled dataset
    *  is a completed stage rather than a failure. */
@@ -641,6 +645,15 @@ export interface CaptionOptions {
    * Ignored by the cloud providers, which have no MM3 mode.
    */
   wantMm3?: boolean;
+  /**
+   * Also write the one-sentence YuE2 planner caption to `<stem>.yue2.txt`.
+   * Defaults to on: all three caption formats come out of one labeling pass.
+   * It is a text rewrite, so MOSS runs borrow `yue2Provider` (or the configured
+   * default chat provider) for this one call.
+   */
+  wantYue2?: boolean;
+  yue2Provider?: string;
+  yue2Model?: string;
 }
 
 export interface BuildOptions {

@@ -386,8 +386,12 @@ async function capabilities(): Promise<BackendCapabilities> {
       // note), so `editable: false` hides the UI control the same way MM3's
       // does.
       duration: { max: YUE2_MAX_DURATION_SEC, auto: true, editable: false },
-      bpm: false,
-      keyscale: false,
+      // No wire field, but not absent either: both are composed into the
+      // style sentence's trained "<genre>, <bpm> BPM, key of <key>." tail
+      // (generate.ts, yue2StyleForAdapter). Reported true because the values
+      // reach the model.
+      bpm: true,
+      keyscale: true,
       negativePrompt: false,
       // Songs per request; the engine decodes them in lockstep (doc 30 #6).
       // Older engines never report the cap and render one track.

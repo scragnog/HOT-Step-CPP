@@ -183,7 +183,7 @@ export const EnhancePanel: React.FC<EnhancePanelProps> = ({ selectedSampleIds, d
                   </button>
                 </div>
                 <span className="text-[11px] text-zinc-500">{t('trainingStudio.enhance.captionHint')}</span>
-                <span className="text-[11px] text-zinc-500">{t('trainingStudio.enhance.yue2CaptionHint', 'YuE2 caption: rewrites each track\'s facts and ACE caption into the planner\'s one-sentence format (needs the ACE caption first). Preprocess with clip captions set to the YuE2 mode to train on them.')}</span>
+                <span className="text-[11px] text-zinc-500">{t('trainingStudio.enhance.yue2CaptionHint', 'YuE2 caption: the caption run above already writes one per track — this button backfills tracks labeled before it, or rewrites them. Preprocess with clip captions set to the YuE2 mode to train on them.')}</span>
               </>
             ) : (
               <div className="text-[11px] text-zinc-500 px-3 py-2 rounded-lg border border-zinc-200 dark:border-white/5 bg-zinc-50 dark:bg-black/20">

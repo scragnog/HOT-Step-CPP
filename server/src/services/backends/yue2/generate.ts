@@ -45,11 +45,12 @@ import {
 import { readSafetensorsMeta } from '../../training/yue2Runs.js';
 import { jointRunForAdapter } from '../../training/yue2AitkRuns.js';
 import { yue2AdapterTrigger } from './jointAdapterContext.js';
+import type { Yue2AdapterScales } from './client.js';
 import { yue2Align, yue2Synth, yue2FinalDetail, yue2PropsCached, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
 import { yue2LyricsJson } from './align.js';
 import { classifyYue2Score, type Yue2ScoreHealth } from './scoreHealth.js';
 import { yue2PersistedSelection } from './index.js';
-import { applyYue2StyleTemplate, type Yue2StyleTemplate } from './style.js';
+import { applyYue2StyleTemplate, splitYue2Tail, type Yue2StyleTemplate } from './style.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
 import type { GenerationAttempt } from '../types.js';
 
@@ -100,8 +101,8 @@ export interface Yue2ParamMapping {
  *  two adapters were TRAINED on, and the log exists so a disagreement between
  *  them is visible at a glance instead of after a listening round. */
 export interface Yue2StyleHalves {
-  ar: { path: string; trigger: string };
-  nar: { path: string; trigger: string };
+  ar: { path: string; trigger: string; scales: Yue2AdapterScales };
+  nar: { path: string; trigger: string; scales: Yue2AdapterScales };
 }
 
 function yue2StyleForAdapter(
@@ -109,11 +110,12 @@ function yue2StyleForAdapter(
 ): { style: string; notes: string[]; halves: Yue2StyleHalves; trainedCot: string } {
   const notes: string[] = [];
   const picked = yue2PersistedSelection().adapters;
-  const halfOf = (p: string) => ({
-    path: p,
-    trigger: yue2AdapterTrigger(p).trigger,
+  const halfOf = (slot: { path: string; scales: Yue2AdapterScales }) => ({
+    path: slot.path,
+    trigger: yue2AdapterTrigger(slot.path).trigger,
+    scales: slot.scales,
   });
-  const halves: Yue2StyleHalves = { ar: halfOf(picked.ar.path), nar: halfOf(picked.nar.path) };
+  const halves: Yue2StyleHalves = { ar: halfOf(picked.ar), nar: halfOf(picked.nar) };
 
   // TWO slots, ONE style sentence. The template composes a single trigger, so
   // when both halves are loaded one of them has to drive it, and that is the
@@ -179,11 +181,40 @@ function yue2StyleForAdapter(
   // now, so absence is the file's age and not a default to fill in with
   // `upstream`.
   const template: Yue2StyleTemplate = inferred || meta?.styleTemplate === 'upstream' ? 'upstream' : 'bare';
-  // No genre/BPM/key tail: at training time those came from the dataset's own
-  // sidecars, and this backend exposes no such fields (capabilities: bpm
-  // false, keyscale false). Whatever belongs in the tail the user writes into
-  // the caption, which is exactly where it lands.
-  const style = applyYue2StyleTemplate({ trigger, caption, template });
+  // The genre/BPM/key tail is part of the trained sentence, not an extra this
+  // backend lacks: yue2_style_string() (engine/src/train/yue2-sidecar.h) built
+  // "<genre>, <bpm> BPM, key of <key>." from the dataset's sidecar on every
+  // artist row, so the model has seen it throughout. There is no wire field
+  // for them — the tail IS the channel — so the user's Song Info values are
+  // composed into it here.
+  //
+  // Only when actually set: tail() drops blanks, so a render that leaves BPM
+  // at 0 and Key on Auto composes the identical string it did before.
+  const userBpm = Number(params.bpm) > 0 ? String(Math.round(Number(params.bpm))) : '';
+  const userKey = String(params.keyScale || '').trim();
+
+  // A caption from the dataset ("automatic" caption source) usually ENDS with
+  // a tail of its own, because the labeller wrote it in the trained format.
+  // Appending a second one gave "…, 178 BPM 168 BPM, key of D minor." So when
+  // the user supplies a value, peel the caption's tail off first and let their
+  // value win per field, with the caption's own filling anything they left
+  // unset. When they supply neither, the caption is not touched at all and the
+  // composed string is byte-identical to what it was before any of this.
+  const supplied = !!(userBpm || userKey);
+  const split = supplied ? splitYue2Tail(caption) : { caption, bpm: '', key: '' };
+  const bpm = userBpm || split.bpm;
+  const key = userKey || split.key;
+  const style = applyYue2StyleTemplate({ trigger, caption: split.caption, template, bpm, key });
+  if (supplied) {
+    const replaced = [
+      userBpm && split.bpm && split.bpm !== userBpm ? `BPM ${split.bpm} -> ${userBpm}` : '',
+      userKey && split.key && split.key !== userKey ? `key ${split.key} -> ${userKey}` : '',
+    ].filter(Boolean).join(', ');
+    notes.push('Style tail: '
+      + [bpm ? `${bpm} BPM` : '', key ? `key of ${key}` : ''].filter(Boolean).join(', ')
+      + ' — composed into the style sentence, which is the only slot YuE2 has for them.'
+      + (replaced ? ` Replaced the caption's own ${replaced}.` : ''));
+  }
 
   if (inferred) {
     notes.push(`Joint adapter trigger "${trigger}" was inferred from the dataset setting; this checkpoint did not record or train with the trigger phrase. Prompt injection is experimental for this run.`);
@@ -817,6 +848,11 @@ ${req.lyrics}`);
         ...job.params,
         backend: 'yue2',
         seed: td.seed,
+        // The AR/NAR pick is engine state rather than a request field, so
+        // without this the row records nothing about which adapter sang —
+        // and the gp.lmAdapter sitting beside it belongs to ACE-Step's 4B
+        // planner, which is what the details panel used to show.
+        ...(halves.ar.path || halves.nar.path ? { yue2Adapters: halves } : {}),
         yue2Request: { ...req, seed: td.seed, noise_seed: td.noise_seed, lm_batch_size: undefined, synth_batch_size: undefined },
         yue2: {
           ode_steps: sub.ode_steps ?? req.ode_steps,
