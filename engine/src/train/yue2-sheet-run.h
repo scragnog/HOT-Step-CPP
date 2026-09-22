@@ -191,6 +191,7 @@ struct SourceRow {
     std::string name;         // manifest sources[].name
     std::string path;         // manifest sources[].source — the audio file
     std::string latent_rel;   // manifest sources[].latents, may be empty (the match key when present)
+    double      gain_db       = 0.0;  // manifest sources[].loudness_gain_db, applied to our decode too
     bool        has_abc       = false;
     bool        has_abc_error = false;
 };
@@ -392,6 +393,7 @@ static int yue2_sheet_run(const Yue2SheetArgs & a) {
             s.name       = pm_js_str(it, "name");
             s.path       = pm_js_str(it, "source");
             s.latent_rel = pm_js_str(it, "latents");
+            if (yyjson_val * gv = yyjson_obj_get(it, "loudness_gain_db"); gv && yyjson_is_num(gv)) s.gain_db = yyjson_get_num(gv);
             const std::string abc_v   = pm_js_str(it, "abc");
             const std::string err_v   = pm_js_str(it, "abc_error");
             s.has_abc       = !abc_v.empty();
@@ -521,6 +523,7 @@ static int yue2_sheet_run(const Yue2SheetArgs & a) {
             n_infra_failed++;
             continue;
         }
+        yue2_apply_gain_db(planar, T48, s.gain_db);  // the level the latents were encoded at
 
         std::vector<float> mono((size_t) T48);
         const float *      L = planar;

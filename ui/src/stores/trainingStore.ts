@@ -471,7 +471,7 @@ interface TrainingState {
   setYue2BatchDraft(ids: string[] | null): void;
   setYue2BatchFollow(follow: boolean): void;
   loadYue2Batches(): Promise<void>;
-  startYue2Batch(input: { datasetIds: string[]; lyricTiming: boolean; recipe: Partial<trainingApi.Yue2JointTrainRequest> }): Promise<trainingApi.Yue2BatchSummary>;
+  startYue2Batch(input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Partial<trainingApi.Yue2JointTrainRequest> }): Promise<trainingApi.Yue2BatchSummary>;
   pauseYue2Batch(id: string): Promise<void>;
   resumeYue2Batch(id: string): Promise<void>;
   cancelYue2Batch(id: string): Promise<void>;

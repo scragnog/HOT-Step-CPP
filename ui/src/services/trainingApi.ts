@@ -459,6 +459,8 @@ export interface Yue2CacheSummary {
   totalAudioSec: number;
   skipped: number;
   failed: number;
+  /** null = cut before loudness normalization (2026-09-23). */
+  loudnessLufs?: number | null;
 }
 
 /** An installed `yue2-lm-*.gguf`. DELIBERATELY NOT a quality ladder like
@@ -2821,7 +2823,7 @@ export interface Yue2BatchSummary {
   finishedAt: number | null;
   pauseRequested?: boolean;
 }
-export async function startYue2Batch(input: { datasetIds: string[]; lyricTiming: boolean; recipe: Partial<Yue2JointTrainRequest> }): Promise<Yue2BatchSummary> {
+export async function startYue2Batch(input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Partial<Yue2JointTrainRequest> }): Promise<Yue2BatchSummary> {
   const data = await request<{ batch: Yue2BatchSummary }>('/yue2-batch', { method: 'POST', ...jsonBody(input) });
   return data.batch;
 }

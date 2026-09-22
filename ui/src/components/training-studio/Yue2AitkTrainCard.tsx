@@ -129,8 +129,9 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // under Prodigy (base_lr is gamma = 1.0); the planner scale still applies,
   // now on top of d. The pre-fix Prodigy history — "learns too fast,
   // corrupts the AR" — was the missing bias correction, not the optimizer.
-  steps: 750, saveEvery: 50, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
-  optimizer: 'prodigy', prodigyD0: 1e-6, muonLrScale: 1, muonNsSteps: 5,
+  steps: 750, saveEvery: 25, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
+  // Cautious on (2026-09-23, Rob's call after the limpbizkit A/B).
+  optimizer: 'prodigy', cautious: true, prodigyD0: 1e-6, muonLrScale: 1, muonNsSteps: 5,
   // LoKr 64/4/256 (2026-09-22, Rob's pick after the size sweep): scale
   // alpha/dim = 4, all four sites factorized, ~106 MB for the AR+NAR pair.
   // rank stays 64 so switching back to LoRA restores the LoRA recipe.
@@ -139,10 +140,10 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // both halves; KL 1.0 with the planner at 0.6 and the decoder at 1.0 is the
   // tested recipe. LoRA keeps KL 1.4 with the planner at 0.3 (LORA_STOP).
   // Trend (2026-09-22): the 20-step mean lagged the KL trend by ~10 steps.
-  stopMode: 'kl', targetKl: 1.0, targetKlMode: 'trend', lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
+  stopMode: 'kl', targetKl: 1.1, targetKlMode: 'trend', lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
 };
 const LORA_STOP = { targetKl: 1.4, plannerLrScale: 0.3, narLrScale: undefined };
-const LOKR_STOP = { targetKl: 1.0, plannerLrScale: 0.6, narLrScale: 1 };
+const LOKR_STOP = { targetKl: 1.1, plannerLrScale: 0.6, narLrScale: 1 };
 type PrepareForm = Yue2AitkPrepareRequest;
 
 function defaultPreview(everySteps: number): Yue2JointPreviewOptions {
@@ -249,6 +250,15 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     if (stored.preview && stored.preview.seconds === 40) stored.preview = { ...stored.preview, seconds: 90, previewMaxFrames: 2250 };
     window.localStorage.setItem(preview90, '1');
   }
+  // 2026-09-23 defaults: save every 25, cautious on, LoKr KL 1.1. Values still
+  // on the previous defaults move; deliberate ones stay.
+  const d0923 = `${FORM_KEY}${datasetId}:defaults-2026-09-23`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(d0923)) {
+    if (stored.saveEvery === 50) stored.saveEvery = 25;
+    if (stored.optimizer !== 'adamw' && (stored.cautious === undefined || stored.cautious === false)) stored.cautious = true;
+    if (stored.adapterType === 'lokr' && stored.targetKl === 1.0) stored.targetKl = LOKR_STOP.targetKl;
+    window.localStorage.setItem(d0923, '1');
+  }
   return { ...DEFAULT_FORM, ...stored };
 }
 function writeStored(key: string, value: unknown): void {
@@ -291,6 +301,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const startBatch = useTrainingStore(s => s.startYue2Batch);
   const setPhase = useTrainingStore(s => s.setPhase);
   const [batchStarting, setBatchStarting] = useState(false);
+  const [batchClearCache, setBatchClearCache] = useState(false);
   // A batch draft turns this card into the recipe editor for N datasets: the
   // form is the same, Start sends it to the server-side batch instead of one
   // run, and the per-dataset paths are resolved per item by the runner.
@@ -303,7 +314,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       const recipe = { ...form, cursorWeight: timingWeight, dataset: '', output: '', resume: '',
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
           everySteps: form.saveEvery, previewMaxFrames: Math.max(8, Math.min(120, form.preview.seconds || 90)) * 25 } } : {}) };
-      await startBatch({ datasetIds: batchDraft, lyricTiming, recipe });
+      await startBatch({ datasetIds: batchDraft, lyricTiming, clearCache: batchClearCache, recipe });
       setPhase('train');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -594,7 +605,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const loadPreset = (preset: Yue2JointPreset) => {
     // A preset saved before adapter types existed was a LoRA recipe; without
     // this it would load its LoRA alpha onto the LoKr default.
-    setForm(previous => ({ ...previous, adapterType: 'lora', ...LORA_STOP, ...preset.settings }));
+    setForm(previous => ({ ...previous, adapterType: 'lora', ...LORA_STOP, cautious: false, ...preset.settings }));
     if (preset.version === 2 && typeof preset.settings.lyricTiming === 'boolean') onLyricTimingChange(preset.settings.lyricTiming);
   };
   const removePreset = (name: string) => {
@@ -988,6 +999,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <p className="mt-1 text-[11px] text-zinc-500">
           {t('trainingStudio.yue2.aitkBatch.draftHint', 'Each dataset runs its caches, lead sheets, timing (when enabled), preparation and joint training in order with this recipe. The batch runs on the server; the page follows the dataset being trained.')}
         </p>
+        <label className="mt-2 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
+          <input type="checkbox" className="mt-0.5 accent-amber-500" checked={batchClearCache} disabled={batchStarting || yue2RunAllActive}
+            onChange={event => setBatchClearCache(event.target.checked)} />
+          <span>
+            <span className="font-semibold">{t('trainingStudio.yue2.aitkBatch.clearCache', 'Clear out all cached data')}</span>
+            <span className="block text-[11px] text-zinc-500">{t('trainingStudio.yue2.aitkBatch.clearCacheHint', "Deletes each dataset's YuE2 caches (latents, codes, lead sheets, vocal stems, lyric timing, prepared datasets) before it starts, so everything is rebuilt from the audio. Source audio, captions and trained adapters are not touched. Each album then takes as long as a first-time preparation.")}</span>
+          </span>
+        </label>
         <div className="mt-2 flex items-center gap-3">
           <button type="button" onClick={() => void runBatch()} disabled={batchStarting || yue2RunAllActive}
             className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2">

@@ -706,7 +706,7 @@ router.post('/yue2-batch', (req: Request, res: Response) => {
     const b = (req.body || {}) as Record<string, unknown>;
     const datasetIds = Array.isArray(b.datasetIds) ? b.datasetIds.filter((x): x is string => typeof x === 'string' && x.length > 0) : [];
     const recipe = b.recipe && typeof b.recipe === 'object' ? b.recipe as Record<string, unknown> : {};
-    const result = startYue2Batch({ datasetIds, lyricTiming: b.lyricTiming !== false, recipe });
+    const result = startYue2Batch({ datasetIds, lyricTiming: b.lyricTiming !== false, clearCache: b.clearCache === true, recipe });
     if ('error' in result) { res.status(result.error.includes('already running') ? 409 : 400).json({ error: result.error }); return; }
     res.status(202).json({ batch: result });
   } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
@@ -3928,7 +3928,9 @@ router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
       latentsDir: yue2LatentsDir(ds.slug),
       stages: {
         preprocess: {
-          done: !!cache && cache.clips > 0,
+          // A cache cut before loudness normalization is not done: training on
+          // it teaches the album's mastering level (clipping on loud albums).
+          done: !!cache && cache.clips > 0 && cache.loudnessLufs !== null,
           cache: cache ?? null,
           missing: missingYue2TrainModels('preprocess', { vaeVariant: 'standard' }),
           // A cache built for the NAR (or before `ace` existed) carries no

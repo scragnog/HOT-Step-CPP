@@ -279,6 +279,14 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
                   captioning. A cache cut in another mode is silently ignoring
                   every planner caption written since, and nothing downstream
                   can tell — say so here, where the re-cut is one Force away. */}
+              {!!cache && cache.loudnessLufs === null && (
+                <span className="text-[10px] leading-snug text-amber-600 dark:text-amber-500">
+                  {t('trainingStudio.yue2.loudnessStaleCache',
+                    "This cache was cut before loudness normalization, so it trains at each album's mastering "
+                    + 'level (loud albums then render clipped). Run the cache again: every track is brought to '
+                    + '-14 LUFS and re-encoded.')}
+                </span>
+              )}
               {!!cache && (status.sidecarsWithYue2 ?? 0) > 0 && cache.captionMode !== 'yue2' && (
                 <span className="text-[10px] leading-snug text-amber-600 dark:text-amber-500">
                   {t('trainingStudio.yue2.captionStaleCache',

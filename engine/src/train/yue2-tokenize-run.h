@@ -211,6 +211,7 @@ struct SourceRow {
     std::string latent_rel;  // manifest sources[].latents
     std::string stem;        // latent_stem(latent_rel)
     int64_t     frames = 0;  // manifest sources[].frames — the LATENT frame count
+    double      gain_db = 0.0;  // manifest sources[].loudness_gain_db, applied to our decode too
     int64_t     n_clips = 0;
 
     // Filled by the run.
@@ -323,6 +324,7 @@ static int yue2_tokenize_run(const Yue2TokenizeArgs & a) {
             s.name       = pm_js_str(it, "name");
             s.path       = pm_js_str(it, "source");
             s.latent_rel = pm_js_str(it, "latents");
+            if (yyjson_val * gv = yyjson_obj_get(it, "loudness_gain_db"); gv && yyjson_is_num(gv)) s.gain_db = yyjson_get_num(gv);
             s.frames     = pm_js_i64(it, "frames", 0);
             s.n_clips    = pm_js_i64(it, "clips", 0);
             s.seconds    = (double) s.frames / (man_fps > 0.0 ? man_fps : 25.0);
@@ -519,6 +521,8 @@ static int yue2_tokenize_run(const Yue2TokenizeArgs & a) {
                     continue;
                 }
             }
+            // The level yue2-preprocess encoded the latents at (yue2-loudness.h).
+            yue2_apply_gain_db(planar, T48, s.gain_db);
 
             // Decoding at 48 kHz and resampling here — rather than asking
             // ffmpeg for 24 kHz directly — is deliberate: the latents in this

@@ -437,6 +437,9 @@ export interface Yue2CacheSummary {
   totalAudioSec: number;
   skipped: number;
   failed: number;
+  /** The integrated loudness every track was normalized to, null for a cache
+   *  cut before normalization (2026-09-23), which trains at mastering level. */
+  loudnessLufs: number | null;
 }
 
 /** Read the preprocess manifest's own summary block. Null when there is no
@@ -459,6 +462,7 @@ export function readYue2PreprocessSummary(manifestPath: string): Yue2CacheSummar
       totalAudioSec: Number(j.total_audio_sec) || 0,
       skipped: Number(j.n_skipped) || 0,
       failed: Number(j.n_failed) || 0,
+      loudnessLufs: Number.isFinite(Number(j.loudness_target_lufs)) && j.loudness_target_lufs !== undefined ? Number(j.loudness_target_lufs) : null,
     };
   } catch {
     return null;

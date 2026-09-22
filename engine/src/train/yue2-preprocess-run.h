@@ -206,6 +206,7 @@
 
 #include "train/preprocess-io.h"  // pm_* path/string/atomic-write helpers
 #include "train/yue2-sidecar.h"      // the ACE Option-A sidecar parser, shared with yue2-ar-train
+#include "train/yue2-loudness.h"     // one integrated loudness for every training track
 #include "yue2/yue2-model.h"
 #include "yue2/yue2-vae-encode.h"
 
@@ -251,6 +252,10 @@ struct Yue2PreprocessArgs {
     // and every other field — codec_ids included — is carried through byte for
     // byte. See yue2_preprocess_captions_only().
     bool    captions_only = false;
+    // --loudness-lufs: bring every track to this integrated loudness before it
+    // is encoded (yue2-loudness.h). 0 = off, which keeps the pre-2026-09-23
+    // cache keys and the unnormalized audio.
+    double  loudness_lufs = -14.0;
 };
 
 // ── Small helpers ──────────────────────────────────────────────────────────
@@ -728,6 +733,7 @@ struct Yue2PpSource {
     int64_t     clips  = 0;
     bool        cache_hit = false;
     double      seconds   = 0.0;
+    double      gain_db   = 0.0;  // loudness gain applied before encoding
 };
 
 // ── `--captions-only`: refill the text fields of an existing manifest ──────
@@ -1146,15 +1152,26 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
         yp_resolve_caption(a, path, &s.caption, &s.lyrics, &sidecar_hit, &s.sm);
         (void) sidecar_hit;
 
+        // The loudness target is part of the key: normalized latents are a
+        // different encoding of the file. Off keeps the old key byte for byte.
+        const bool   loud_on   = a.loudness_lufs != 0.0;
+        char         loud_tag[32] = "";
+        if (loud_on) snprintf(loud_tag, sizeof(loud_tag), "|lufs%.2f", a.loudness_lufs);
         const std::string key = yp_key_hex(name + "|" + std::to_string(fbytes) + "|" + std::to_string(fmtime) + "|" +
-                                           variant_name + "|" + vae_base + "|v1");
+                                           variant_name + "|" + vae_base + "|v1" + loud_tag);
         s.stem                        = pm_safe_stem(name) + "_" + key;
         const std::string latent_rel  = "latents/" + s.stem + ".f32";
         const std::string latent_path = a.out_dir + "/" + latent_rel;
         s.latent_rel = latent_rel;
 
+        // The gain rides beside the latent, so a cache hit still knows it.
+        const std::string gain_path = a.out_dir + "/latents/" + s.stem + ".gain";
+        bool gain_known = !loud_on;
+        if (loud_on) {
+            if (FILE * gf = hs_fopen(gain_path.c_str(), "rb")) { gain_known = fscanf(gf, "%lf", &s.gain_db) == 1; fclose(gf); }
+        }
         int64_t frames = 0;
-        if (yp_cache_frames(latent_path, LD, &frames)) {
+        if (gain_known && yp_cache_frames(latent_path, LD, &frames)) {
             s.cache_hit = true;
             n_cached++;
         } else {
@@ -1192,9 +1209,16 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
                 }
             }
 
-            // data.py clamps to [-1, 1] and does not normalise. Matched here:
-            // loudness is part of what the NAR renders, and rescaling every
-            // clip would teach it a level the base model does not use.
+            // data.py clamps to [-1, 1] and does not normalise, and this used
+            // to match it. It no longer does: the adapter learns each album's
+            // mastering level and overshoots it on loud ones (yue2-loudness.h).
+            if (loud_on) {
+                double lufs = 0.0; bool capped = false;
+                s.gain_db = yue2_loudness_gain_db(planar, T, a.loudness_lufs, -1.0, &lufs, &capped);
+                yue2_apply_gain_db(planar, T, s.gain_db);
+                fprintf(stderr, "[yue2-preprocess] %zu/%zu loudness %s: %.1f LUFS, gain %+.1f dB%s\n", i + 1,
+                        picked.size(), name.c_str(), lufs, s.gain_db, capped ? " (boost capped at -1 dBFS peak)" : "");
+            }
             const size_t n_samp = (size_t) T * 2;
             for (size_t k = 0; k < n_samp; k++) {
                 if (planar[k] > 1.0f) {
@@ -1250,6 +1274,17 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
                         name.c_str(), latent_path.c_str());
                 n_failed++;
                 continue;
+            }
+            if (loud_on) {
+                FILE * gf = hs_fopen(gain_path.c_str(), "wb");
+                if (!gf || fprintf(gf, "%.6f\n", s.gain_db) < 0) {
+                    if (gf) fclose(gf);
+                    fprintf(stderr, "[yue2-preprocess] %zu/%zu FAIL %s: cannot write %s\n", i + 1, picked.size(),
+                            name.c_str(), gain_path.c_str());
+                    n_failed++;
+                    continue;
+                }
+                fclose(gf);
             }
             frames = got;
             n_encoded++;
@@ -1317,6 +1352,9 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
     yyjson_mut_obj_add_strcpy(doc, root, "dtype", "f32");
     yyjson_mut_obj_add_strcpy(doc, root, "latent_kind", "posterior_mean");
     yyjson_mut_obj_add_real(doc, root, "clip_seconds", a.clip_seconds);
+    // yue2-tokenize and yue2-sheet apply each source's loudness_gain_db to
+    // their own decode of the file, so every stream starts from one level.
+    if (a.loudness_lufs != 0.0) yyjson_mut_obj_add_real(doc, root, "loudness_target_lufs", a.loudness_lufs);
     yyjson_mut_obj_add_int(doc, root, "clip_frames", clip_frames);
     yyjson_mut_obj_add_strcpy(doc, root, "caption_mode", a.caption_mode.c_str());
     yyjson_mut_obj_add_strcpy(doc, root, "default_caption", a.default_caption.c_str());
@@ -1365,6 +1403,7 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
         yyjson_mut_obj_add_int(doc, so, "clips", s.clips);
         yyjson_mut_obj_add_real(doc, so, "duration_sec", s.seconds);
         yyjson_mut_obj_add_bool(doc, so, "cache_hit", s.cache_hit);
+        if (a.loudness_lufs != 0.0) yyjson_mut_obj_add_real(doc, so, "loudness_gain_db", s.gain_db);
         yyjson_mut_arr_append(sarr, so);
 
         for (int64_t k = 0; k < s.clips; k++) {

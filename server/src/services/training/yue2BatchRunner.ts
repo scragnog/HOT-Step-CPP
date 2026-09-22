@@ -21,6 +21,7 @@ import * as repo from './datasetsRepo.js';
 import * as queue from './labelingQueue.js';
 import { trainingBaseDir } from './paths.js';
 import { listYue2AitkRuns } from './yue2AitkRuns.js';
+import { listPreparedCaches } from './preparedDataReset.js';
 
 export type Yue2BatchStage = 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train';
 export type Yue2BatchStatus = 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
@@ -55,6 +56,10 @@ export interface Yue2BatchSummary {
   /** The dataset whose stage is running right now, for the UI to follow. */
   currentDatasetId: string | null;
   lyricTiming: boolean;
+  /** Delete each dataset's YuE2 caches (latents, codes, lead sheets, stems,
+   *  timing, prepared datasets) before its first stage, so it rebuilds from
+   *  the audio. Once per dataset: a resumed batch keeps what it rebuilt. */
+  clearCache?: boolean;
   /** The joint-train request applied to every dataset, paths stripped. */
   recipe: Record<string, unknown>;
   createdAt: number;
@@ -142,7 +147,7 @@ export function getBatch(id: string): Yue2BatchSummary | undefined {
   return live ? toSummary(live) : readSnapshots().find(s => s.id === id);
 }
 
-export function startBatch(input: { datasetIds: string[]; lyricTiming: boolean; recipe: Record<string, unknown> }): Yue2BatchSummary | { error: string } {
+export function startBatch(input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Record<string, unknown> }): Yue2BatchSummary | { error: string } {
   if (hasActiveBatch()) return { error: 'A YuE2 batch is already running' };
   const items: Yue2BatchItem[] = [];
   for (const id of input.datasetIds) {
@@ -155,6 +160,7 @@ export function startBatch(input: { datasetIds: string[]; lyricTiming: boolean; 
   const recipe: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(input.recipe)) if (!RECIPE_STRIP.has(k) && v !== undefined) recipe[k] = v;
   const state: BatchState = { id: randomUUID(), status: 'running', items, currentDatasetId: null, lyricTiming: input.lyricTiming,
+    ...(input.clearCache ? { clearCache: true } : {}),
     recipe, createdAt: Date.now(), finishedAt: null, pauseRequested: false, cancelRequested: false };
   batches.set(state.id, state);
   persist(state);
@@ -238,6 +244,21 @@ async function waitWhilePaused(state: BatchState): Promise<void> {
 
 async function runItem(state: BatchState, item: Yue2BatchItem): Promise<void> {
   item.status = 'running'; item.error = null; state.currentDatasetId = item.datasetId; persist(state);
+  if (state.clearCache && item.stages.every(s => s.status === 'pending' && !s.jobId)) {
+    try {
+      const ds = repo.getDataset(item.datasetId);
+      if (!ds) throw new Error('Dataset not found');
+      // YuE2 caches only: this dataset's ACE and MM3 caches belong to other backends.
+      for (const cache of listPreparedCaches(ds.slug, ds.sourceDir)) {
+        if (cache.name.startsWith('yue2-')) fs.rmSync(cache.path, { recursive: true, force: false });
+      }
+    } catch (err) {
+      item.status = 'failed'; item.error = `Clearing cached data failed: ${err instanceof Error ? err.message : String(err)}`;
+      for (const rest of item.stages) rest.status = 'cancelled';
+      persist(state);
+      return;
+    }
+  }
   for (const result of item.stages) {
     if (result.status === 'done') continue;
     await waitWhilePaused(state);

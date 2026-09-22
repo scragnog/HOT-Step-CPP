@@ -406,6 +406,10 @@ static void print_usage(void) {
             "                [--force]  re-cut over an existing manifest built with a\n"
             "                different --clip-seconds. Cheap: the cached latents are\n"
             "                clip-length independent, so nothing is re-encoded.\n"
+            "                [--loudness-lufs <f>]  default -14: every track is brought to this\n"
+            "                integrated loudness (BS.1770) before encoding, boosts capped at a\n"
+            "                -1 dBFS peak. Each source's gain is recorded for yue2-tokenize and\n"
+            "                yue2-sheet. 0 = off (the old, unnormalized cache keys).\n"
             "                TF32 is forced off (the encoder is 50x outside its parity gate\n"
             "                on a TF32 cuBLAS handle) and there is no escape hatch.\n"
             "  yue2-tokenize  Fill the codec_ids slot yue2-preprocess reserves: run the YuE2\n"
@@ -4672,6 +4676,7 @@ static int cmd_yue2_preprocess(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--limit"))           a.limit           = atoi(next("--limit"));
         else if (!strcmp(argv[i], "--force"))           a.force           = true;
         else if (!strcmp(argv[i], "--captions-only"))   a.captions_only   = true;
+        else if (!strcmp(argv[i], "--loudness-lufs"))   a.loudness_lufs   = atof(next("--loudness-lufs"));
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
         else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
     }
