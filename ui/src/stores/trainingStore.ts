@@ -104,6 +104,9 @@ export interface TrainStepPoint {
   /** Server-clock time since the first metric of this job, so the tooltip can
    *  say how long the run took to reach a point. */
   elapsedMs?: number;
+  /** The AR KL term of a joint YuE2 run — a second loss component, on its own
+   *  scale, which the chart gives its own axis. */
+  arKl?: number;
 }
 
 /** One `metric:'milestone'` frame — a tick on the chart's x-axis. */
@@ -1659,6 +1662,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
                   ...(typeof ev.gradNorm === 'number' ? { gradNorm: ev.gradNorm } : {}),
                   ...(stepMs !== undefined ? { stepMs } : {}),
                   ...(typeof ev.ma5 === 'number' ? { ma5: ev.ma5 } : {}),
+                  ...(typeof ev.arKl === 'number' ? { arKl: ev.arKl } : {}),
                   ...(runStartTs > 0 && typeof ev.ts === 'number' ? { elapsedMs: Math.max(0, ev.ts - runStartTs) } : {}),
                 },
               ),
