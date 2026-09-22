@@ -19,8 +19,7 @@ class Yue2AitkTrainState {
 public:
     struct NamedTensors { std::string name; ggml_tensor * parameter; ggml_tensor * gradient; };
     static constexpr int kLayers = 28;
-    static constexpr int kSites = 4;
-    static constexpr int kFactors = 2;
+    static constexpr int kSites = kYue2AitkSites;
     static constexpr uint32_t kDefaultSeed = 0x59414531u;
 
     Yue2AitkTrainState() = default;
@@ -42,7 +41,7 @@ public:
             !yue2_aitk_make_expert_adapters(ctx_, dims, kLayers, rank, alpha, &nar_, "nar")) {
             reset(); return fail(error, "failed to allocate AR/NAR adapters");
         }
-        slots_.reserve(2u * kLayers * kSites * kFactors);
+        slots_.reserve(2u * kLayers * kSites * 2u);
         if (!build_slots(nar_, "diffusion_model", 0, error) || !build_slots(ar_, "text_encoders", 1, error)) { reset(); return false; }
         if (cursor) {
             auto * parameter=ggml_new_tensor_2d(ctx_,GGML_TYPE_F32,2048,2048);
@@ -69,7 +68,7 @@ public:
     }
 
     void reset() {
-        initialized_ = false; slots_.clear(); ar_ = {}; nar_ = {}; cursor_slot_=kInvalid;
+        initialized_ = false; slots_.clear(); layer_slots_ = {}; ar_ = {}; nar_ = {}; cursor_slot_=kInvalid;
         if (buffer_) { ggml_backend_buffer_free(buffer_); buffer_ = nullptr; }
         if (ctx_) { ggml_free(ctx_); ctx_ = nullptr; }
         backend_ = nullptr;
@@ -93,20 +92,20 @@ public:
         return result;
     }
 
-    // Upload the eight block gradients into their persistent F32 slots. The
-    // tensors remain available for a later optimizer, but this class performs
-    // no update itself.
+    // Upload one layer's block gradients (yue2_aitk_layer_params order) into
+    // their persistent F32 slots. The tensors remain available for a later
+    // optimizer, but this class performs no update itself.
     bool upload_gradients(bool nar, int layer, const Yue2AitkBlockBackwardHost & g, std::string * error = nullptr) {
         if (!initialized_ || layer < 0 || layer >= kLayers) return fail(error, "train state is not initialized or layer is invalid");
-        const std::array<const std::vector<float> *, 8> values = {{&g.qkv_dA,&g.qkv_dB,&g.output_dA,&g.output_dB,&g.gate_up_dA,&g.gate_up_dB,&g.down_dA,&g.down_dB}};
-        for (int factor = 0; factor < kFactors; ++factor) for (int site = 0; site < kSites; ++site) {
-            const size_t index = slot_index_[nar ? 0 : 1][layer][site][factor];
-            if (index == kInvalid || values[site*2+factor]->size() != slots_[index].host.size()) return fail(error, "gradient shape mismatch");
-            for (float value : *values[site*2+factor]) if (!std::isfinite(value)) return fail(error,"non-finite adapter gradient");
+        const std::vector<size_t> & indices = layer_slots_[nar ? 0 : 1][static_cast<size_t>(layer)];
+        if (g.params.size() != indices.size()) return fail(error, "gradient count mismatch");
+        for (size_t i = 0; i < indices.size(); ++i) {
+            if (g.params[i].size() != slots_[indices[i]].host.size()) return fail(error, "gradient shape mismatch");
+            for (float value : g.params[i]) if (!std::isfinite(value)) return fail(error,"non-finite adapter gradient");
         }
-        for (int factor = 0; factor < kFactors; ++factor) for (int site = 0; site < kSites; ++site) {
-            Slot & slot = slots_[slot_index_[nar ? 0 : 1][layer][site][factor]];
-            ggml_backend_tensor_set(slot.gradient, values[site*2+factor]->data(), 0, ggml_nbytes(slot.gradient));
+        for (size_t i = 0; i < indices.size(); ++i) {
+            Slot & slot = slots_[indices[i]];
+            ggml_backend_tensor_set(slot.gradient, g.params[i].data(), 0, ggml_nbytes(slot.gradient));
         }
         return true;
     }
@@ -171,6 +170,8 @@ private:
         ggml_tensor * parameter = nullptr;
         ggml_tensor * gradient = nullptr;
         int64_t rows = 0, cols = 0;
+        // Init policy: 0 = U(+-1/sqrt(cols)) (kaiming_uniform, a=sqrt(5)),
+        // 1 = zero, -1 = identity (the resume-only cursor head).
         int factor = 0;
         std::vector<float> host;
     };
@@ -179,7 +180,8 @@ private:
     ggml_backend_buffer_t buffer_ = nullptr;
     Yue2AitkExpertAdapters ar_, nar_;
     std::vector<Slot> slots_;
-    std::array<std::array<std::array<std::array<size_t, kFactors>, kSites>, kLayers>, 2> slot_index_{};
+    // [expert (0 = NAR, 1 = AR)][layer] -> slot indices in yue2_aitk_layer_params order.
+    std::array<std::vector<std::vector<size_t>>, 2> layer_slots_{};
     uint32_t seed_ = kDefaultSeed;
     std::string init_policy_ = "native-v1";
     bool initialized_ = false;
@@ -189,23 +191,23 @@ private:
 
     static bool fail(std::string * error, const char * message) { if (error) *error = message; return false; }
     static bool fail(std::string * error, const std::string & message) { if (error) *error = message; return false; }
-    static const Yue2AitkFusedLora & site(const Yue2AitkExpertAdapters & e, int layer, int s) {
-        const Yue2AitkLayerAdapters & l = e.layers[static_cast<size_t>(layer)];
-        return s == 0 ? l.qkv : s == 1 ? l.output : s == 2 ? l.gate_up : l.down;
-    }
     bool build_slots(const Yue2AitkExpertAdapters & expert, const char * prefix, int expert_index, std::string * error) {
         static const char * names[kSites] = {"self_attn.qkv_proj", "self_attn.o_proj", "mlp.gate_up_proj", "mlp.down_proj"};
+        if (expert.layers.size() != static_cast<size_t>(kLayers)) return fail(error, "adapter layer count mismatch");
+        auto & per_layer = layer_slots_[static_cast<size_t>(expert_index)];
+        per_layer.assign(static_cast<size_t>(kLayers), {});
         for (int layer=0; layer<kLayers; ++layer) for (int s=0; s<kSites; ++s) {
-            const Yue2AitkFusedLora & site_ref = site(expert,layer,s);
-            for (int factor=0; factor<kFactors; ++factor) {
-                ggml_tensor * parameter = factor == 0 ? site_ref.a : site_ref.b;
+            std::vector<Yue2AitkSiteParam> params;
+            yue2_aitk_site_params(yue2_aitk_site(expert.layers[static_cast<size_t>(layer)], s), &params);
+            for (const Yue2AitkSiteParam & p : params) {
+                ggml_tensor * parameter = p.tensor;
                 if (!parameter) return fail(error, "null adapter parameter");
                 const int64_t rows = parameter->ne[1], cols = parameter->ne[0];
                 ggml_tensor * gradient = ggml_new_tensor_2d(ctx_, GGML_TYPE_F32, cols, rows);
                 if (!gradient) return fail(error, "failed to allocate persistent gradient");
-                const std::string name = std::string(prefix) + ".model.layers." + std::to_string(layer) + "." + names[s] + ".lora_" + (factor == 0 ? "A" : "B") + ".weight";
-                Slot slot{name,parameter,gradient,rows,cols,factor,std::vector<float>(static_cast<size_t>(rows*cols),0.0f)};
-                slot_index_[expert_index][layer][s][factor] = slots_.size(); slots_.push_back(std::move(slot));
+                const std::string name = std::string(prefix) + ".model.layers." + std::to_string(layer) + "." + names[s] + p.suffix;
+                Slot slot{name,parameter,gradient,rows,cols,p.zero_init ? 1 : 0,std::vector<float>(static_cast<size_t>(rows*cols),0.0f)};
+                per_layer[static_cast<size_t>(layer)].push_back(slots_.size()); slots_.push_back(std::move(slot));
             }
         }
         return true;

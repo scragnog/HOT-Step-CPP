@@ -43,6 +43,33 @@ struct Yue2AitkExpertAdapters {
     std::vector<ggml_tensor *> params; // each unique A/B tensor exactly once
 };
 
+// One trainable factor of one site. The trainer's slot list, the block
+// executor's gradient download and the exporter all walk the SAME sequence
+// (site order qkv, o, gate_up, down; factors in the order pushed here), so a
+// new parameterization only has to add its factors in one place.
+// `zero_init` marks the factor that starts at zero so dW = 0 at step 0.
+struct Yue2AitkSiteParam {
+    ggml_tensor * tensor = nullptr;
+    const char *  suffix = "";  // PEFT-style tensor suffix, e.g. ".lora_A.weight"
+    bool          zero_init = false;
+};
+constexpr int kYue2AitkSites = 4;
+inline const Yue2AitkFusedLora & yue2_aitk_site(const Yue2AitkLayerAdapters & l, int s) {
+    return s == 0 ? l.qkv : s == 1 ? l.output : s == 2 ? l.gate_up : l.down;
+}
+inline void yue2_aitk_site_params(const Yue2AitkFusedLora & site, std::vector<Yue2AitkSiteParam> * out) {
+    out->push_back({site.a, ".lora_A.weight", false});
+    out->push_back({site.b, ".lora_B.weight", true});
+}
+inline std::vector<ggml_tensor *> yue2_aitk_layer_params(const Yue2AitkLayerAdapters & l) {
+    std::vector<Yue2AitkSiteParam> params;
+    for (int s = 0; s < kYue2AitkSites; ++s) yue2_aitk_site_params(yue2_aitk_site(l, s), &params);
+    std::vector<ggml_tensor *> out;
+    out.reserve(params.size());
+    for (const auto & p : params) out.push_back(p.tensor);
+    return out;
+}
+
 // Allocate one fused adapter collection. `params` receives eight tensors per
 // layer (four A/B pairs), rather than fourteen tensors from the Legacy split
 // maker. Both factors are F32 trainables and are marked with ggml_set_param.

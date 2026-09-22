@@ -23,10 +23,8 @@ struct Yue2AitkBlockForwardHost {
 
 struct Yue2AitkBlockBackwardHost {
     std::vector<float> dx;
-    std::vector<float> qkv_dA, qkv_dB;
-    std::vector<float> output_dA, output_dB;
-    std::vector<float> gate_up_dA, gate_up_dB;
-    std::vector<float> down_dA, down_dB;
+    // One gradient per trainable factor, in yue2_aitk_layer_params order.
+    std::vector<std::vector<float>> params;
 };
 
 namespace yue2_aitk_executor_detail {
@@ -246,10 +244,11 @@ public:
         ggml_tensor * dx_copy = nullptr;
         if (device_dx) { ggml_tensor * gh = ggml_graph_get_grad(graph, h); if (!gh) return fail(error, "missing block input gradient"); dx_copy = ggml_cpy(r.ctx, gh, device_dx); ggml_set_output(dx_copy); ggml_build_forward_expand(graph, dx_copy); }
         if(!supports_all(backend,graph,error)) return false;
+        const std::vector<ggml_tensor *> layer_params = yue2_aitk_layer_params(*adapters);
         if (workspace) {
             ggml_set_input(h); ggml_set_input(upstream);
-            for (ggml_tensor * p : {h, adapters->qkv.a, adapters->qkv.b, adapters->output.a, adapters->output.b,
-                                    adapters->gate_up.a, adapters->gate_up.b, adapters->down.a, adapters->down.b}) {
+            std::vector<ggml_tensor *> outputs = layer_params; outputs.insert(outputs.begin(), h);
+            for (ggml_tensor * p : outputs) {
                 ggml_tensor * g = ggml_graph_get_grad(graph, p);
                 if (!g) return fail(error, "missing block gradient");
                 ggml_set_output(g);
@@ -261,7 +260,8 @@ public:
         if(ggml_backend_graph_compute(backend,graph)!=GGML_STATUS_SUCCESS) return fail(error,"backward graph compute failed");
         auto get=[&](ggml_tensor*t,std::vector<float>&v,const char*n)->bool{ggml_tensor*g=ggml_graph_get_grad(graph,t);if(!g)return fail(error,std::string("missing gradient: ")+n);v.resize(ggml_nbytes(g)/sizeof(float));ggml_backend_tensor_get(g,v.data(),0,ggml_nbytes(g));return true;};
         if(!device_dx && !get(h,result->dx,"x")) return false;
-        if(!get(adapters->qkv.a,result->qkv_dA,"qkv A")||!get(adapters->qkv.b,result->qkv_dB,"qkv B")||!get(adapters->output.a,result->output_dA,"output A")||!get(adapters->output.b,result->output_dB,"output B")||!get(adapters->gate_up.a,result->gate_up_dA,"gate_up A")||!get(adapters->gate_up.b,result->gate_up_dB,"gate_up B")||!get(adapters->down.a,result->down_dA,"down A")||!get(adapters->down.b,result->down_dB,"down B")) return false;
+        result->params.resize(layer_params.size());
+        for(size_t i=0;i<layer_params.size();++i) if(!get(layer_params[i],result->params[i],ggml_get_name(layer_params[i]))) return false;
         return true;
     }
 };
