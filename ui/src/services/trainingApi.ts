@@ -1810,6 +1810,9 @@ export interface TrainingMetricEvent {
   clipScale?: number;
   /** Wall time of THIS step, not elapsed. The direct spill signal. */
   stepMs?: number;
+  /** YuE2 joint: cumulative training time for the run (sum of step_ms across
+   *  preview segments and resumes; excludes loads, checkpoints, previews). */
+  trainMs?: number;
   /** eval: how many fixed held-out crops the number averages. */
   crops?: number;
   etaMs?: number;

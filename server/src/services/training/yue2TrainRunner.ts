@@ -372,7 +372,9 @@ export async function runYue2AceTrain<S extends RelayState>(
   }
 
   job.status = 'running';
-  job.startedAt = Date.now();
+  // Once per job: the joint trainer calls this once per preview segment, and
+  // resetting here made every elapsed readout restart at each pause.
+  job.startedAt ??= Date.now();
   job.phase = 'engine-stop';
   emitJob(job);
   emitProgress(job);

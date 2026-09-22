@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, X } from 'lucide-react';
 import abcjs from 'abcjs';
 import 'abcjs/abcjs-audio.css';
+import { followNoteInBox } from '../../utils/abcFollow';
 
 export interface Yue2ScorePreviewData {
   abc: string;
@@ -53,7 +54,7 @@ export const Yue2ScorePreviewModal: React.FC<Props> = ({ open, data, error, onCo
     if (!tunes?.[0] || !audioRef.current || !abcjs.synth.supportsAudio()) return;
     audioRef.current.innerHTML = '';
     const control = new abcjs.synth.SynthController();
-    const box = scoreRef.current;
+    const box = scoreRef.current.parentElement;
     let lit: Element[] = [];
     control.load(audioRef.current, {
       onStart() { lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = []; },
@@ -61,8 +62,7 @@ export const Yue2ScorePreviewModal: React.FC<Props> = ({ open, data, error, onCo
         lit.forEach(el => el.classList.remove('abcjs-highlight'));
         lit = (ev.elements ?? []).flat();
         lit.forEach(el => el.classList.add('abcjs-highlight'));
-        const first = lit[0] as (Element & { scrollIntoView?: (o: ScrollIntoViewOptions) => void }) | undefined;
-        if (first && box) first.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+        followNoteInBox(lit[0], box);
       },
       onFinished() { lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = []; },
     }, { displayLoop: false, displayRestart: true, displayPlay: true, displayProgress: true, displayWarp: false });

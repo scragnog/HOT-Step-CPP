@@ -25,6 +25,7 @@ import type { Yue2OptimOptions } from '../../services/trainingApi';
 
 import abcjs from 'abcjs';
 import 'abcjs/abcjs-audio.css';
+import { followNoteInBox } from '../../utils/abcFollow';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, Download, FileText, History, Loader2, Mic2,
@@ -516,7 +517,9 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
   // triggers abcjs's own soundfont fetch from its default CDN
   // (https://paulrosen.github.io/abcjs/soundfont/) — nothing bundled here.
   useEffect(() => {
-    if (!showDetail || !detail?.abc || !scoreRef.current) return;
+    // `open` too: collapsing the section keeps this component mounted, and the
+    // synth plays on its own AudioContext until it is told to stop.
+    if (!open || !showDetail || !detail?.abc || !scoreRef.current) return;
     scoreRef.current.innerHTML = '';
     let tunes: ReturnType<typeof abcjs.renderAbc> | undefined;
     try {
@@ -528,13 +531,14 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
     if (!tunes) return;
     const warnings = tunes[0]?.warnings;
     setRenderNote(warnings && warnings.length ? `abcjs warnings: ${warnings.slice(0, 3).join(' | ')}` : '');
+    let synthControl: InstanceType<typeof abcjs.synth.SynthController> | null = null;
     if (audioControlRef.current && abcjs.synth.supportsAudio() && tunes[0]) {
       audioControlRef.current.innerHTML = '';
-      const synthControl = new abcjs.synth.SynthController();
+      synthControl = new abcjs.synth.SynthController();
       // Follow the playback: abcjs calls onEvent per note with the SVG
       // elements it drew for it (add_classes above), so we tint those and
       // keep them in view inside the scrolling paper.
-      const box = scoreRef.current;
+      const box = scoreOuterRef.current;
       let lit: Element[] = [];
       const cursorControl = {
         onStart() { lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = []; },
@@ -542,8 +546,7 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
           lit.forEach(el => el.classList.remove('abcjs-highlight'));
           lit = (ev.elements ?? []).flat();
           lit.forEach(el => el.classList.add('abcjs-highlight'));
-          const first = lit[0] as (Element & { scrollIntoView?: (o: ScrollIntoViewOptions) => void }) | undefined;
-          if (first && box) first.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+          followNoteInBox(lit[0], box);
         },
         onFinished() { lit.forEach(el => el.classList.remove('abcjs-highlight')); lit = []; },
       };
@@ -553,7 +556,9 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
       });
       synthControl.setTune(tunes[0], false).catch(() => { /* score still renders without audio */ });
     }
-  }, [detail, showDetail]);
+    // Switching track, collapsing the preview or unmounting all land here.
+    return () => { try { synthControl?.pause(); } catch { /* nothing was playing */ } };
+  }, [detail, showDetail, open]);
 
   return (
     <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/10">

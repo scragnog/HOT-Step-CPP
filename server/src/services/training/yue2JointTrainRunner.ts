@@ -161,7 +161,43 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
   return null;
 }
 
-function relayJsonLine(job: TrainingJob, line: string, state: RelayState): void {
+/** Pure training time for the run, carried across preview segments and
+ *  resumes: the sum of the trainer's own step_ms, so model loads, checkpoint
+ *  writes and preview renders never count. Keyed by step so a re-run step
+ *  (resume from an earlier checkpoint) replaces rather than double counts. */
+interface TrainClock { byStep: Map<number, number> }
+function trainClockTotal(c: TrainClock): number { let t = 0; for (const v of c.byStep.values()) t += v; return t; }
+
+/** Seed the clock from the run being resumed: every train.jsonl under that
+ *  run's root (the segment logs too), steps up to the resume step only. */
+export function seedTrainClock(resume: string | undefined, resumeStep: number): TrainClock {
+  const clock: TrainClock = { byStep: new Map() };
+  if (!resume || resumeStep <= 0) return clock;
+  let root = path.dirname(path.dirname(resume));  // .../checkpoint-stepN/optimizer.resume -> segment or run dir
+  if (path.basename(path.dirname(root)) === 'segments') root = path.dirname(path.dirname(root));
+  const logs: string[] = [];
+  const walk = (dir: string, depth: number) => {
+    let entries: fs.Dirent[] = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isFile() && e.name === 'train.jsonl') logs.push(full);
+      else if (e.isDirectory() && depth < 2 && (e.name === 'segments' || /^segment-\d+$/.test(e.name))) walk(full, depth + 1);
+    }
+  };
+  walk(root, 0);
+  for (const log of logs.sort()) {
+    let text = '';
+    try { text = fs.readFileSync(log, 'utf8'); } catch { continue; }
+    for (const line of text.split(/\r?\n/)) {
+      const e = parseYue2JointEvent(line, 0);
+      if (e?.stage === 'joint' && e.step !== undefined && e.step <= resumeStep && e.stepMs !== undefined) clock.byStep.set(e.step, e.stepMs);
+    }
+  }
+  return clock;
+}
+
+function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?: TrainClock): void {
   const event = parseYue2JointEvent(line, state.totalSteps);
   if (!event) { log(job, 'info', line); return; }
   const raw = JSON.parse(line) as Record<string, unknown>;
@@ -182,7 +218,8 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState): void 
       totalSteps: state.totalSteps, ...(event.loss === undefined ? {} : { loss: event.loss }),
       ...(event.arKl === undefined ? {} : { arKl: event.arKl }),
       ...(event.gradNorm === undefined ? {} : { gradNorm: event.gradNorm }),
-      ...(event.stepMs === undefined ? {} : { stepMs: event.stepMs }) });
+      ...(event.stepMs === undefined ? {} : { stepMs: event.stepMs }),
+      ...(clock && event.stepMs !== undefined ? (clock.byStep.set(step, event.stepMs), { trainMs: trainClockTotal(clock) }) : {}) });
     emitProgress(job);
     log(job, 'info', `Joint training step ${step}${event.loss === undefined ? '' : ` loss ${event.loss}`}`);
   } else if (stage === 'checkpoint' || stage === 'checkpoint_stage') {
@@ -270,6 +307,7 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
     const resumeStep = resume ? Number((/checkpoint-step(\d+)/.exec(resume) || [])[1] || 0) : 0;
     let step = resumeStep;
     let segmentNo = 1;
+    const clock = seedTrainClock(resume, resumeStep);
     for (;;) {
       if (isCancelled(job)) return;
       const segmentOut = preview ? path.join(o.outDir, 'segments', `segment-${String(segmentNo).padStart(6, '0')}`) : o.outDir;
@@ -290,7 +328,7 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
           if (['adapter.safetensors', 'optimizer.resume', 'native-ar.safetensors', 'native-nar.safetensors']
             .some(name => !fs.existsSync(path.join(checkpoint, name)))) return `Joint-training checkpoint-step${expect} is incomplete`;
           return null;
-        }, (line, current) => relayJsonLine(job, line, current), state, o.spawnEnv);
+        }, (line, current) => relayJsonLine(job, line, current, clock), state, o.spawnEnv);
       if (isCancelled(job)) return;
       if (!state.pausedAt || !preview || state.pausedAt >= o.steps) break;
       const ckpt = checkpointRecords(segmentOut).find(c => c.step === state.pausedAt);

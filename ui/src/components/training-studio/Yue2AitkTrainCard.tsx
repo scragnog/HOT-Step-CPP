@@ -113,7 +113,11 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // corrupts the AR" — was the missing bias correction, not the optimizer.
   steps: 750, saveEvery: 50, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
   optimizer: 'prodigy', prodigyD0: 1e-6, muonLrScale: 1, muonNsSteps: 5,
-  rank: 64, alpha: 64, stopMode: 'kl', targetKl: 1.4, lr: 2e-4, plannerLrScale: 0.3,
+  // LoKr 64/4/256 (2026-09-22, Rob's pick after the size sweep): scale
+  // alpha/dim = 4, all four sites factorized, ~106 MB for the AR+NAR pair.
+  // rank stays 64 so switching back to LoRA restores the LoRA recipe.
+  rank: 64, alpha: 256, adapterType: 'lokr', lokrDim: 64, lokrFactor: 4,
+  stopMode: 'kl', targetKl: 1.4, lr: 2e-4, plannerLrScale: 0.3,
 };
 type PrepareForm = Yue2AitkPrepareRequest;
 
@@ -176,6 +180,17 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
   if (typeof window !== 'undefined' && !window.localStorage.getItem(prodigy)) {
     if (stored.optimizer === 'adamw') stored.optimizer = 'prodigy';
     window.localStorage.setItem(prodigy, '1');
+  }
+  // LoKr default (2026-09-22): a form that never chose an adapter type was on
+  // the LoRA default, so it moves; its alpha moves only if it was still the
+  // LoRA default 64. A form that picked LoRA or LoKr deliberately stays.
+  const lokrDefault = `${FORM_KEY}${datasetId}:defaults-lokr-64-4-256`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(lokrDefault)) {
+    if (stored.adapterType === undefined) {
+      stored.adapterType = 'lokr'; stored.lokrDim = 64; stored.lokrFactor = 4;
+      if (stored.alpha === undefined || stored.alpha === 64) stored.alpha = 256;
+    }
+    window.localStorage.setItem(lokrDefault, '1');
   }
   return { ...DEFAULT_FORM, ...stored };
 }
@@ -346,8 +361,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               const next = [...prior, { step: item.step!, loss: item.loss!, ep: item.step!,
                 ...(typeof item.arKl === 'number' ? { arKl: item.arKl } : {}),
                 ...(typeof item.gradNorm === 'number' ? { gradNorm: item.gradNorm } : {}),
-                ...(typeof job.startedAt === 'number' && typeof item.ts === 'number'
-                  ? { elapsedMs: Math.max(0, item.ts - job.startedAt) } : {}),
+                // Cumulative training time from the server (survives preview
+                // pauses and resumes); wall clock since start only as a fallback.
+                ...(typeof item.trainMs === 'number' ? { elapsedMs: item.trainMs }
+                  : typeof job.startedAt === 'number' && typeof item.ts === 'number'
+                    ? { elapsedMs: Math.max(0, item.ts - job.startedAt) } : {}),
                 ...(stepMs !== undefined ? { stepMs } : {}) }];
               next.sort((a, b) => a.step - b.step);
               const capped = next.slice(-METRIC_CAP);
@@ -506,7 +524,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     setPresetName('');
   };
   const loadPreset = (preset: Yue2JointPreset) => {
-    setForm(previous => ({ ...previous, ...preset.settings }));
+    // A preset saved before adapter types existed was a LoRA recipe; without
+    // this it would load its LoRA alpha onto the LoKr default.
+    setForm(previous => ({ ...previous, adapterType: 'lora', ...preset.settings }));
     if (preset.version === 2 && typeof preset.settings.lyricTiming === 'boolean') onLyricTimingChange(preset.settings.lyricTiming);
   };
   const removePreset = (name: string) => {
@@ -758,8 +778,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               // LoKr's scale is alpha/dim, so alpha follows the dim by default
               // (LyCORIS scale 1); LoRA gets its rank/alpha defaults back.
               setForm(previous => adapterType === 'lokr'
-                ? { ...previous, adapterType, lokrDim: previous.lokrDim ?? 32, lokrFactor: previous.lokrFactor ?? 8, alpha: previous.lokrDim ?? 32 }
-                : { ...previous, adapterType, alpha: previous.rank ?? DEFAULT_FORM.alpha });
+                ? { ...previous, adapterType, lokrDim: previous.lokrDim ?? 64, lokrFactor: previous.lokrFactor ?? 4, alpha: 4 * (previous.lokrDim ?? 64) }
+                : { ...previous, adapterType, alpha: previous.rank ?? 64 });
             }}>
             <option value="lora">{t('trainingStudio.yue2.method.adapterLora', 'LoRA')}</option>
             <option value="lokr">{t('trainingStudio.yue2.method.adapterLokr', 'LoKr (experimental)')}</option>
@@ -775,7 +795,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </>}
         {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number')}
       </div>
-      {(form.adapterType ?? 'lora') === 'lokr' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.lokrHint', 'LoKr trains a Kronecker-factored delta per site instead of a low-rank pair. Untested for quality on YuE2: dim 32 / factor 8 is 14 MB against 224 MB for the rank-64 LoRA. Alpha equal to dim is scale 1; the DiT defaults (512 / 6) come out larger than the LoRA here.')}</p>}
+      {(form.adapterType ?? 'lora') === 'lokr' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.lokrHint', 'LoKr trains a Kronecker-factored delta per site instead of a low-rank pair. Strength is alpha / dim; 4x (64 / 4 / 256, about 106 MB for both halves) is the tested default, against 279 MB for the rank-64 LoRA. For more capacity raise dim and keep alpha at 4x dim; at factor 4 stay below dim 256, where some sites stop factorizing and ignore alpha.')}</p>}
       {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. Likeness starts near 1.25; planner damage (looping outros) near 1.9. Training stops once the trailing 20-step mean reaches the target; steps is the cap.')}</p>}
       {(form.stopMode ?? 'steps') === 'loss' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetLossHint', 'Composite = AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight. Training stops once the trailing 20-step mean is at or below this.')}</p>}
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
