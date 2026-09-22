@@ -38,6 +38,43 @@ function detectEngineVariant(): string {
 }
 const ENGINE_VARIANT = detectEngineVariant();
 
+/**
+ * What actually went wrong, in a form a user can act on or paste into an issue.
+ *
+ * `err.message` alone is not enough, and #171 is why: when every address of a
+ * host fails, Node rejects with an AggregateError whose message is the EMPTY
+ * STRING and whose real causes sit in `.errors`. Three retries then logged
+ * "Download failed after 3 attempts: yue2-lm-bf16.gguf — " with nothing after
+ * the dash, and the reporter (and we) had no idea whether it was DNS, IPv6, a
+ * proxy, a blocked CDN host or a full disk.
+ *
+ * So: unwrap the aggregate, name the errno and the address it could not reach,
+ * and say which HOST the attempt was against — for a Hugging Face LFS file
+ * that is a CDN redirect target, not huggingface.co, and the difference is the
+ * whole diagnosis.
+ */
+export function describeDownloadError(err: any): string {
+  if (!err) return 'unknown error';
+  const message = typeof err.message === 'string' ? err.message.trim() : '';
+  const parts: string[] = [message || err.name || String(err)];
+
+  if (Array.isArray(err.errors) && err.errors.length) {
+    const causes = err.errors.map((e: any) => {
+      const where = e?.address ? `${e.address}${e.port ? `:${e.port}` : ''}` : '';
+      return [e?.code, e?.syscall, where].filter(Boolean).join(' ') || e?.message || String(e);
+    });
+    parts.push(`(${[...new Set(causes)].join('; ')})`);
+  } else if (err.code) {
+    const where = err.address ? `${err.address}${err.port ? `:${err.port}` : ''}` : '';
+    parts.push(`(${[err.code, err.syscall, where].filter(Boolean).join(' ')})`);
+  }
+
+  if (typeof err.url === 'string') {
+    try { parts.push(`while fetching ${new URL(err.url).host}`); } catch { /* not a URL: say nothing */ }
+  }
+  return parts.join(' ');
+}
+
 // Detect CUDA major version for runtime DLL selection
 function detectCudaMajorVersion(): number {
   try {
@@ -565,14 +602,15 @@ class ModelDownloadService extends EventEmitter {
         if ((job.status as DownloadStatus) === 'cancelled') return;
 
         const isLastAttempt = attempt === ModelDownloadService.RETRY_DELAYS.length - 1;
+        const why = describeDownloadError(err);
         if (isLastAttempt) {
           job.status = 'failed';
-          job.error = err.message;
+          job.error = why;
           job.speed = 0;
           this.emit('progress');
-          console.error(`[ModelManager] Download failed after ${attempt + 1} attempts: ${file.filename} — ${err.message}`);
+          console.error(`[ModelManager] Download failed after ${attempt + 1} attempts: ${file.filename} — ${why}`);
         } else {
-          console.warn(`[ModelManager] Download attempt ${attempt + 1} failed for ${file.filename}: ${err.message}`);
+          console.warn(`[ModelManager] Download attempt ${attempt + 1} failed for ${file.filename}: ${why}`);
           job.speedSamples = [];
         }
       }
@@ -717,7 +755,7 @@ class ModelDownloadService extends EventEmitter {
         await this._downloadSimple(url, dest);
         console.log(`[ModelManager] Companion file fetched: ${companion.filename}`);
       } catch (err: any) {
-        console.warn(`[ModelManager] Companion fetch failed for ${companion.filename}: ${err.message}`);
+        console.warn(`[ModelManager] Companion fetch failed for ${companion.filename}: ${describeDownloadError(err)}`);
       }
     }
   }
@@ -738,7 +776,7 @@ class ModelDownloadService extends EventEmitter {
         }
         if (res.statusCode && res.statusCode >= 400) {
           res.resume();
-          reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+          reject(Object.assign(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`), { url }));
           return;
         }
         const writeStream = fs.createWriteStream(destPath);
@@ -771,6 +809,10 @@ class ModelDownloadService extends EventEmitter {
         headers['Authorization'] = `Bearer ${job.hfToken}`;
       }
 
+      // Which host the failure was actually against. After a redirect this is
+      // the CDN, not huggingface.co — see describeDownloadError.
+      const fail = (err: any) => { if (err && typeof err === 'object' && !err.url) err.url = url; return err; };
+
       const req = transport.get(parsedUrl, { headers }, (res) => {
         // Handle redirects
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
@@ -791,7 +833,7 @@ class ModelDownloadService extends EventEmitter {
 
         if (res.statusCode && res.statusCode >= 400) {
           res.resume();
-          reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`));
+          reject(fail(new Error(`HTTP ${res.statusCode}: ${res.statusMessage}`)));
           return;
         }
 
@@ -806,6 +848,15 @@ class ModelDownloadService extends EventEmitter {
 
         const writeStream = fs.createWriteStream(partPath, {
           flags: startByte > 0 ? 'a' : 'w',
+        });
+
+        // A write failure (no space, no permission on the models dir, a
+        // read-only volume) was an unhandled 'error' event: pipe() does not
+        // forward it, so it reached the process as an uncaught exception
+        // instead of failing this one download.
+        writeStream.on('error', (err) => {
+          res.destroy();
+          reject(fail(err));
         });
 
         res.on('data', (chunk: Buffer) => {
@@ -835,9 +886,9 @@ class ModelDownloadService extends EventEmitter {
           writeStream.end();
           if (job.status !== 'cancelled') {
             job.status = 'paused';
-            job.error = err.message;
+            job.error = describeDownloadError(fail(err));
           }
-          reject(err);
+          reject(fail(err));
         });
 
         res.pipe(writeStream, { end: false });
@@ -854,9 +905,9 @@ class ModelDownloadService extends EventEmitter {
       req.on('error', (err) => {
         if (job.status !== 'cancelled') {
           job.status = 'paused';
-          job.error = err.message;
+          job.error = describeDownloadError(fail(err));
         }
-        reject(err);
+        reject(fail(err));
       });
     });
   }

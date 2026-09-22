@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { modelDownloadService } from './modelDownloadService.js';
+import { describeDownloadError, modelDownloadService } from './modelDownloadService.js';
 
 const svc = modelDownloadService as any;
 
@@ -60,4 +60,39 @@ test('a sidecar whose stamp no longer fits the file is ignored and rehashed', as
   assert.equal(svc._cachedSha(p), null);
   assert.equal(await svc._matchesRegistry(p, entry(sha('real contents'))), true);
   assert.equal(fs.readFileSync(`${p}.sha256`, 'utf8').split(/\s+/)[0], sha('real contents'));
+});
+
+// ── Error reporting (#171) ──────────────────────────────────────────────────
+// A Mac reporter got three lines of "Download failed after 3 attempts:
+// yue2-lm-bf16.gguf — " with nothing after the dash. An AggregateError's
+// message is the empty string, so the one thing we logged was the one thing it
+// does not have.
+
+test('an AggregateError reports its causes, not its empty message', () => {
+  const err: any = new AggregateError([
+    Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED', syscall: 'connect', address: '2600::1', port: 443 }),
+    Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED', syscall: 'connect', address: '18.0.0.1', port: 443 }),
+  ]);
+  err.url = 'https://cdn-lfs.huggingface.co/repos/x/model.gguf';
+  const out = describeDownloadError(err);
+  assert.match(out, /ECONNREFUSED connect 2600::1:443/);
+  assert.match(out, /ECONNREFUSED connect 18\.0\.0\.1:443/);
+  assert.match(out, /while fetching cdn-lfs\.huggingface\.co/);
+  assert.doesNotMatch(out, /^\s*—?\s*$/);
+});
+
+test('an ordinary errno error keeps its message and gains its code', () => {
+  const err: any = Object.assign(new Error('getaddrinfo ENOTFOUND huggingface.co'),
+    { code: 'ENOTFOUND', syscall: 'getaddrinfo' });
+  assert.equal(describeDownloadError(err), 'getaddrinfo ENOTFOUND huggingface.co (ENOTFOUND getaddrinfo)');
+});
+
+test('an HTTP status error says which host answered', () => {
+  const err: any = Object.assign(new Error('HTTP 403: Forbidden'), { url: 'https://huggingface.co/a/b.gguf' });
+  assert.equal(describeDownloadError(err), 'HTTP 403: Forbidden while fetching huggingface.co');
+});
+
+test('nothing usable still produces something to read', () => {
+  assert.equal(describeDownloadError(undefined), 'unknown error');
+  assert.equal(describeDownloadError({}), '[object Object]');
 });
