@@ -74,3 +74,19 @@ test('source changes during preparation prevent handoff and cache publication', 
   }), /changed during preparation/);
   assert.equal(fs.existsSync(path.join(f.dir, 'aitk-auto-prepare-v1.json')), false);
 });
+
+test('captions are stale when a .yue2.txt sidecar differs from the cut, or the cut mode is not yue2', async () => {
+  const { yue2CaptionsStale } = await import('./yue2AitkPrepareRunner.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-captions-'));
+  const audio = path.join(dir, 'track.flac');
+  fs.writeFileSync(path.join(dir, 'track.yue2.txt'), 'Pop-punk,  nasal tenor.\n');
+  const manifest = path.join(dir, 'yue2_preprocess.json');
+  const write = (mode: string, caption: string) =>
+    fs.writeFileSync(manifest, JSON.stringify({ caption_mode: mode, sources: [{ source: audio, caption }] }));
+  write('yue2', 'Pop-punk, nasal tenor.'); assert.equal(yue2CaptionsStale(manifest), false);
+  write('yue2', 'An ACE caption.'); assert.equal(yue2CaptionsStale(manifest), true);
+  write('ace', 'Pop-punk, nasal tenor.'); assert.equal(yue2CaptionsStale(manifest), true);
+  fs.unlinkSync(path.join(dir, 'track.yue2.txt'));
+  write('ace', 'An ACE caption.'); assert.equal(yue2CaptionsStale(manifest), false);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

@@ -4,7 +4,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import { spawn } from 'child_process';
+import { execFile, spawn } from 'child_process';
+import { promisify } from 'util';
 import readline from 'readline';
 import { aceTrainExe } from './aceTrain.js';
 import { emitProgress, finishJob, isCancelled, pushEvent, type TrainingJob } from './labelingQueue.js';
@@ -121,6 +122,36 @@ function parseProgress(job: TrainingJob, line: string): void {
   }
 }
 
+/** True when the cut manifest's captions no longer match the dataset's
+ *  `.yue2.txt` sidecars: cut in another caption mode, or captioned again since.
+ *  Preparation imports captions from this manifest verbatim, so a stale cut
+ *  trains on ACE captions while the sidecars sit unread beside the audio. */
+export function yue2CaptionsStale(manifestPath: string): boolean {
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { caption_mode?: unknown; sources?: Array<{ source?: unknown; caption?: unknown }> };
+  const norm = (text: string) => text.replace(/\s+/g, ' ').trim();
+  let sidecars = 0;
+  for (const source of manifest.sources ?? []) {
+    if (typeof source.source !== 'string') continue;
+    let text = '';
+    try { text = norm(fs.readFileSync(source.source.replace(/\.[^./\\]+$/, '') + '.yue2.txt', 'utf8')); } catch { continue; }
+    if (!text) continue;
+    ++sidecars;
+    if (text !== norm(String(source.caption ?? ''))) return true;
+  }
+  return sidecars > 0 && manifest.caption_mode !== 'yue2';
+}
+
+/** Re-read the sidecars into a stale manifest. Captions only: no audio is
+ *  decoded and latents, codes, lead sheets and timings are carried through. */
+export async function refreshYue2ManifestCaptions(job: TrainingJob, manifestPath: string): Promise<void> {
+  if (!yue2CaptionsStale(manifestPath)) return;
+  const exe = aceTrainExe();
+  if (!exe) throw new Error('ace-train is not in this build — rebuild the engine');
+  log(job, 'info', 'The latent cache holds out-of-date captions; re-reading the .yue2.txt sidecars (no audio is re-encoded).');
+  await promisify(execFile)(exe, ['yue2-preprocess', '--captions-only', '--caption-mode', 'yue2', '--out', path.dirname(manifestPath)],
+    { windowsHide: true, env: { ...process.env, CUDA_VISIBLE_DEVICES: '' } });
+}
+
 export async function runYue2AitkPrepareJob(job: TrainingJob, inlineOptions?: ResolvedYue2AitkPrepareOptions): Promise<void> {
   const opts = inlineOptions ?? job.opts as ResolvedYue2AitkPrepareOptions | undefined;
   const validation = opts ? validateYue2AitkPrepareOptions(opts) : 'job is missing joint-training preparation options';
@@ -128,6 +159,8 @@ export async function runYue2AitkPrepareJob(job: TrainingJob, inlineOptions?: Re
   const o = opts!;
   const exe = aceTrainExe();
   if (!exe) { finishJob(job, 'failed', 'ace-train is not in this build — rebuild the engine'); return; }
+  try { await refreshYue2ManifestCaptions(job, o.legacyManifest); }
+  catch (err) { finishJob(job, 'failed', `Caption refresh failed: ${err instanceof Error ? err.message : String(err)}`); return; }
 
   job.status = 'running';
   job.startedAt = Date.now();

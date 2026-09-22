@@ -3,7 +3,7 @@ import path from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { isCancelled, emitProgress, type TrainingJob } from './labelingQueue.js';
 import { log } from './yue2TrainRunner.js';
-import { runYue2AitkPrepareJob, type ResolvedYue2AitkPrepareOptions } from './yue2AitkPrepareRunner.js';
+import { refreshYue2ManifestCaptions, runYue2AitkPrepareJob, type ResolvedYue2AitkPrepareOptions } from './yue2AitkPrepareRunner.js';
 
 function stamp(file: string): unknown {
   const st = fs.statSync(file);
@@ -45,6 +45,9 @@ export async function ensureYue2PreparedDataset(job: TrainingJob, options: Resol
   if (isCancelled(job)) return;
   job.status = 'running'; job.startedAt ??= Date.now();
   job.phase = 'preparing'; job.done = 0; job.total = 1; emitProgress(job);
+  // Before the fingerprint: a refresh rewrites the manifest, which is exactly
+  // what must invalidate a prepared dataset built from the stale captions.
+  await refreshYue2ManifestCaptions(job, options.legacyManifest);
   const fingerprint = preparationFingerprint(options);
   const index = path.join(path.dirname(options.legacyManifest), 'aitk-auto-prepare-v1.json');
   try {
