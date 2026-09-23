@@ -149,6 +149,11 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // one of the rungs. Caption dropout 0.5: the measured recipe, so a new
   // caption lands on the artist rather than beside one memorised track.
   narExtraSteps: 100, captionDropout: 0.5,
+  // Spike guard (2026-09-23): an RBF decoder collapsed after two gradient
+  // spikes (norm 3 and 7 against a 0.2 median) at step 298. Skip any update
+  // above 5x the recent median; three skips within 20 steps ends the run on
+  // the last pre-spike weights.
+  spikeFactor: 5, spikeStop: 3, spikeStopWindow: 20,
 };
 const LORA_STOP = { targetKl: 1.4, plannerLrScale: 0.3, narLrScale: undefined };
 const LOKR_STOP = { targetKl: 1.1, plannerLrScale: 0.6, narLrScale: 1 };
@@ -274,6 +279,11 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     if (stored.narExtraSteps === undefined) stored.narExtraSteps = DEFAULT_FORM.narExtraSteps;
     if (stored.captionDropout === undefined) stored.captionDropout = DEFAULT_FORM.captionDropout;
     window.localStorage.setItem(freeze, '1');
+  }
+  const spike = `${FORM_KEY}${datasetId}:defaults-spike-guard`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(spike)) {
+    if (stored.spikeFactor === undefined) { stored.spikeFactor = DEFAULT_FORM.spikeFactor; stored.spikeStop = DEFAULT_FORM.spikeStop; stored.spikeStopWindow = DEFAULT_FORM.spikeStopWindow; }
+    window.localStorage.setItem(spike, '1');
   }
   return { ...DEFAULT_FORM, ...stored };
 }
@@ -954,6 +964,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             ['klWeight', t('trainingStudio.yue2.method.klWeight', 'KL anchor to base (planner)'), 'default 0.2 · higher keeps the planner closer to the base model'],
             ['abcDropout', t('trainingStudio.yue2.method.abcDropout', 'ABC dropout'), 'default 0.5 · share of lead-sheet examples trained without their sheet, so one adapter serves cot on and off'],
             ['captionDropout', t('trainingStudio.yue2.method.captionDropout', 'Caption dropout'), 'default 0 (this card ships 0.5) · share of steps trained on the trigger alone instead of the song\'s caption. 0.5 is the measured recipe: it stops the adapter binding to each track\'s caption, so a NEW caption generalises. Needs a dataset prepared after 2026-09-20.'],
+            ['spikeFactor', t('trainingStudio.yue2.method.spikeFactor', 'Spike guard'), 'this card ships 5 · skip any update whose gradient norm is over this many times the recent median. 0 turns the guard off'],
+            ['spikeStop', t('trainingStudio.yue2.method.spikeStop', 'Stop after spikes'), 'this card ships 3 · end the run when this many updates are skipped close together (next field). 0 never stops'],
+            ['spikeStopWindow', t('trainingStudio.yue2.method.spikeStopWindow', 'Spike window (steps)'), 'this card ships 20 · how close together the skips must be to stop the run'],
           ] as const).map(([key, label, hint]) => (
             <label key={key} className="flex flex-col gap-1">
               <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{label}</span>
@@ -965,6 +978,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           ))}
         </div>
       </details>
+      <label className="mt-3 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
+        <input type="checkbox" className="mt-0.5 accent-amber-500" checked={form.stopEngine !== false}
+          disabled={active || preparing || starting || yue2RunAllActive}
+          onChange={event => setForm(previous => ({ ...previous, stopEngine: event.target.checked }))} />
+        <span>
+          <span className="font-semibold">{t('trainingStudio.yue2.method.stopEngine', 'Stop the engine during training')}</span>
+          <span className="block text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.stopEngineHelp', 'On by default: the trainer gets the whole GPU and generation is unavailable until it finishes. Turn it off to keep generating (and scoring ladders) while it trains. Both then share the GPU and run slower, and if VRAM runs out Windows spills to system memory and everything crawls.')}</span>
+        </span>
+      </label>
       <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/30 dark:bg-black/10 p-3">
         <summary className="cursor-pointer text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
           {t('trainingStudio.yue2.method.previewTitle', 'Checkpoint previews (optional)')}

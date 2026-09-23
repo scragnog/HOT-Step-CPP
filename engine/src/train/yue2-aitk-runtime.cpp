@@ -64,6 +64,8 @@ struct ResumeBinding {
     std::vector<double> kl_history, loss_history;
     // Step at which the planner was frozen (--nar-extra-steps); -1 = live.
     int planner_frozen_at = -1;
+    // Spike guard state: recent applied gradient norms and recent skip steps.
+    std::vector<double> gnorm_history, spike_steps;
 };
 // Steps in the KL trend fit. Kept in step with Yue2AitkTrainCard's chart.
 constexpr int kKlTrendWindow = 30;
@@ -126,6 +128,7 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
             yyjson_arr_foreach(a,hi,hmax,hv) if(yyjson_is_num(hv) && std::isfinite(yyjson_get_num(hv))) out->push_back(yyjson_get_num(hv));
         };
         history("kl_history",&binding->kl_history); history("loss_history",&binding->loss_history);
+        history("gnorm_history",&binding->gnorm_history); history("spike_steps",&binding->spike_steps);
         if(yyjson_val * v=yyjson_obj_get(root,"planner_frozen_at")) {
             if(!yyjson_is_int(v) || yyjson_get_sint(v)<0 || yyjson_get_sint(v)>plan->completed) return fail(error,"resume planner_frozen_at field is malformed");
             binding->planner_frozen_at=int(yyjson_get_sint(v));
@@ -146,7 +149,8 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
 }
 std::string make_resume_meta(const std::string & cp, const std::string & ds, const std::string & sm, uint64_t seed, int device, int completed, size_t cursor, const std::vector<size_t> & order, const std::string & sampler, float cursor_weight,
                              const yue2_aitk_runtime::Config & config, int opt_iter, double prodigy_d, double prodigy_r,
-                             const std::vector<double> & kl_history, const std::vector<double> & loss_history, int planner_frozen_at) {
+                             const std::vector<double> & kl_history, const std::vector<double> & loss_history, int planner_frozen_at,
+                             const std::vector<double> & gnorm_history, const std::vector<double> & spike_steps) {
     yyjson_mut_doc * doc=yyjson_mut_doc_new(nullptr);
     if (!doc) return {};
     yyjson_mut_val * root=yyjson_mut_obj(doc), * arr=yyjson_mut_arr(doc);
@@ -168,6 +172,10 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     if (config.target_kl_mode!="mean") yyjson_mut_obj_add_strcpy(doc,root,"target_kl_mode",config.target_kl_mode.c_str());
     if (config.nar_lr_scale!=1.0f) yyjson_mut_obj_add_real(doc,root,"nar_lr_scale",config.nar_lr_scale);  // absent = 1.0, keeps old records byte-identical
     if (planner_frozen_at>=0) { yyjson_mut_obj_add_int(doc,root,"planner_frozen_at",planner_frozen_at); yyjson_mut_obj_add_int(doc,root,"nar_extra_steps",config.nar_extra_steps); }
+    // Only guarded runs carry these, so other records are unchanged.
+    if (config.spike_factor > 0.0f) for (auto [key, hist] : { std::pair<const char *, const std::vector<double> *>{"gnorm_history",&gnorm_history}, {"spike_steps",&spike_steps} }) {
+        yyjson_mut_val * a=yyjson_mut_arr(doc); for(double v:*hist) yyjson_mut_arr_add_real(doc,a,v); yyjson_mut_obj_add_val(doc,root,key,a);
+    }
     if (config.optimizer!="adamw") {
         yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
         if (config.optimizer=="prodigy") {
@@ -552,6 +560,7 @@ static int run_impl(Config config, std::string * error) {
         if (!jsonl) { fail(error, "cannot create training JSONL"); return 1; }
         // The planner's KL at the moment a checkpoint is written, for meters.json.
         std::vector<double> kl_recent = resume_binding.kl_history;
+        std::vector<double> gnorm_window = resume_binding.gnorm_history, spike_steps = resume_binding.spike_steps;
         int last_saved = -1;
         // Declared before save_checkpoint, which writes them into the resume
         // record; seeded from it so a resumed segment can stop at once.
@@ -580,7 +589,7 @@ static int run_impl(Config config, std::string * error) {
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
-                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at);
+                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps);
             if (metadata.empty()) return false;
             if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str(), dataset.trigger, config.caption_dropout)) return false;
             if (use_lm) {
@@ -652,6 +661,11 @@ static int run_impl(Config config, std::string * error) {
                 if (config.warmup > 0 && completed < config.warmup) lr *= (double)(completed + 1) / (double)config.warmup;
                 input.adamw_lr = (float) lr;
                 input.adamw_weight_decay = config.weight_decay;
+                // Armed once 20 applied norms are in the window.
+                if (config.spike_factor > 0.0f && gnorm_window.size() >= 20) {
+                    std::vector<double> sorted = gnorm_window; std::sort(sorted.begin(), sorted.end());
+                    input.skip_above = (double) config.spike_factor * sorted[sorted.size() / 2];
+                }
             }
             if(cursor_weight>0 && !item.prompt.cursor.instrumental && item.prompt.cursor.enabled) {
                 const auto & binding=item.prompt.cursor;
@@ -709,6 +723,7 @@ static int run_impl(Config config, std::string * error) {
             if (planner_frozen_at >= 0) line << ",\"planner_frozen\":true";
             else line << ",\"ar_ce\":" << metrics.ar_ce << ",\"ar_kl\":" << metrics.ar_kl;
             line << ",\"nar_mse\":" << metrics.nar_mse << ",\"gradient_norm\":" << metrics.gradient_norm;
+            if (metrics.skipped) line << ",\"spike_skipped\":true";
             if (planner_frozen_at < 0) line << ",\"cursor_ce\":" << metrics.cursor_ce << ",\"cursor_weight\":" << cursor_weight
                    << ",\"cursor_frames\":" << metrics.cursor_frames;
             line
@@ -724,6 +739,26 @@ static int run_impl(Config config, std::string * error) {
             jsonl << line.str();
             std::cout << line.str() << std::flush;
             if (!jsonl.flush()) { fail(error, "training JSONL write failed"); return 1; }
+            if (config.spike_factor > 0.0f) {
+                if (metrics.skipped) {
+                    spike_steps.push_back(completed);
+                    std::fprintf(stderr, "[yue2-aitk] step %d: gradient norm %.3g is a spike (limit %.3g); update skipped\n", completed, metrics.gradient_norm, input.skip_above);
+                } else {
+                    gnorm_window.push_back(metrics.gradient_norm);
+                    if (gnorm_window.size() > 50) gnorm_window.erase(gnorm_window.begin());
+                }
+                while (!spike_steps.empty() && spike_steps.front() <= completed - config.spike_stop_window) spike_steps.erase(spike_steps.begin());
+                if (config.spike_stop > 0 && (int) spike_steps.size() >= config.spike_stop) {
+                    // Skipped updates never touched the weights, so this step's
+                    // weights are the last pre-spike state.
+                    std::fprintf(stderr, "[yue2-aitk] %zu spikes within %d steps: stopping at step %d\n", spike_steps.size(), config.spike_stop_window, completed);
+                    if (!save_checkpoint(completed)) { fail(error, "spike-stop checkpoint publication failed"); return 1; }
+                    event("spike_stop", completed);
+                    event("target", completed);
+                    event("done", completed);
+                    return 0;
+                }
+            }
             if (planner_frozen_at < 0) {
                 kl_recent.push_back(metrics.ar_kl);
                 if (kl_recent.size() > 20) kl_recent.erase(kl_recent.begin());
@@ -763,6 +798,9 @@ static int run_impl(Config config, std::string * error) {
                         // already says frozen and resumes decoder-only.
                         planner_frozen_at = completed;
                         state.freeze_planner();
+                        // The decoder's gradient norm alone is ~10x below the
+                        // joint one, so the spike guard's baseline starts over.
+                        gnorm_window.clear(); spike_steps.clear();
                         if (!save_checkpoint(completed)) { fail(error, "planner-freeze checkpoint publication failed"); return 1; }
                         event("planner_frozen", completed);
                         std::fprintf(stderr, "[yue2-aitk] planner reached KL %.4g at step %d: frozen; decoder-only until step %d\n", reading, completed, end_step());

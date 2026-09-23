@@ -152,6 +152,10 @@ public:
         ++step_;
     }
 
+    // A skipped (spiked) update: no state changes, but the step counter moves
+    // with the run so the resume record's step still equals completed steps.
+    void skip_once() { if (step_ >= INT_MAX) throw std::overflow_error("YuE2 optimizer step counter exhausted"); ++step_; }
+
     HostStateSnapshot capture() const {
         DeviceGuard device(device_index_);
         validate_specs(specs_);

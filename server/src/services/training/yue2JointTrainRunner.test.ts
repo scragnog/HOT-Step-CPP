@@ -53,6 +53,14 @@ test('decoder steps after KL ride only on a KL stop', () => {
   assert.equal(buildYue2JointTrainArgs({ ...base, stopMode: 'kl', targetKl: 1.1, narExtraSteps: 0 }).includes('--nar-extra-steps'), false);
 });
 
+test('spike guard flags ride only when the factor is on', () => {
+  const base = { checkpoint: 'b', dataset: 'd', outDir: 'o', steps: 700, saveEvery: 50, seed: 42, device: 'CUDA0' };
+  const on = buildYue2JointTrainArgs({ ...base, spikeFactor: 5, spikeStop: 3, spikeStopWindow: 20 });
+  assert.deepEqual(on.slice(on.indexOf('--spike-factor'), on.indexOf('--spike-factor') + 6),
+    ['--spike-factor', '5', '--spike-stop', '3', '--spike-stop-window', '20']);
+  assert.equal(buildYue2JointTrainArgs({ ...base, spikeFactor: 0, spikeStop: 3 }).includes('--spike-stop'), false);
+});
+
 test('paused JSON event is recognized without becoming terminal done', () => {
   assert.deepEqual(parseYue2JointEvent('{"stage":"paused","step":50,"resume":"optimizer.resume"}', 100),
     { stage: 'paused', step: 50, totalSteps: 100 });

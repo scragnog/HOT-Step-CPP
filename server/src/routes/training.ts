@@ -3385,6 +3385,9 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         stopMode: b.stopMode ?? saved.stopMode, targetLoss: b.targetLoss ?? saved.targetLoss, targetKl: b.targetKl ?? saved.targetKl,
         targetKlMode: b.targetKlMode ?? saved.targetKlMode,
         narExtraSteps: b.narExtraSteps ?? saved.narExtraSteps,
+        stopEngine: b.stopEngine ?? saved.stopEngine,
+        spikeFactor: b.spikeFactor ?? saved.spikeFactor, spikeStop: b.spikeStop ?? saved.spikeStop,
+        spikeStopWindow: b.spikeStopWindow ?? saved.spikeStopWindow,
         preview: b.preview ?? saved.preview,
         lyricTiming: (saved.alignment as { enabled?: boolean } | undefined)?.enabled === true,
         cursorWeight: (saved.alignment as { cursorWeight?: number } | undefined)?.cursorWeight ?? 0 };
@@ -3576,6 +3579,17 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       targetKl = rawTargetKl;
     }
     const targetKlMode: 'mean' | 'trend' | undefined = stopMode === 'kl' && b.targetKlMode === 'trend' ? 'trend' : undefined;
+    // Spike guard: all three optional; absent means off / engine default.
+    const spike: { spikeFactor?: number; spikeStop?: number; spikeStopWindow?: number } = {};
+    for (const [key, lo, hi, int] of [['spikeFactor', 0, 1000, false], ['spikeStop', 0, 1000, true], ['spikeStopWindow', 1, 100000, true]] as const) {
+      if (b[key] === undefined || b[key] === null || b[key] === '') continue;
+      const v = Number(b[key]);
+      if (!Number.isFinite(v) || v < lo || v > hi || (int && !Number.isInteger(v))) {
+        res.status(400).json({ error: `${key} must be ${int ? 'an integer' : 'a number'} from ${lo} to ${hi}.` });
+        return;
+      }
+      spike[key] = v;
+    }
     let narExtraSteps: number | undefined;
     if (stopMode === 'kl' && b.narExtraSteps !== undefined && b.narExtraSteps !== null && b.narExtraSteps !== '') {
       const raw = Number(b.narExtraSteps);
@@ -3619,6 +3633,8 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(targetKl !== undefined ? { targetKl } : {}),
       ...(targetKlMode ? { targetKlMode } : {}),
       ...(narExtraSteps !== undefined ? { narExtraSteps } : {}),
+      ...(b.stopEngine === false ? { stopEngine: false } : {}),
+      ...spike,
       ...advanced,
       ...(preparation ? { preparation } : {}),
     });

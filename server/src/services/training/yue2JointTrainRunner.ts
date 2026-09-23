@@ -74,6 +74,14 @@ export interface ResolvedYue2JointTrainOptions {
    *  decoder alone for this many more steps (steps stays the cap). The KL
    *  checkpoint is still saved. 0/absent = end the run at the KL. */
   narExtraSteps?: number;
+  /** false keeps the engine running during training (generation stays
+   *  available and shares the GPU). Absent/true stops it, as before. */
+  stopEngine?: boolean;
+  /** Spike guard: skip updates above spikeFactor x the recent median gradient
+   *  norm; spikeStop skips within spikeStopWindow steps end the run. */
+  spikeFactor?: number;
+  spikeStop?: number;
+  spikeStopWindow?: number;
 }
 
 /** Route and native runner share the public stop-mode contract. */
@@ -117,6 +125,11 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   if (o.captionDropout !== undefined) args.push('--caption-dropout', String(o.captionDropout));
   if (o.plannerLrScale !== undefined) args.push('--planner-lr-scale', String(o.plannerLrScale));
   if (o.narLrScale !== undefined && o.narLrScale !== 1 && optimizer !== 'muon') args.push('--nar-lr-scale', String(o.narLrScale));
+  if (o.spikeFactor !== undefined && o.spikeFactor > 0) {
+    args.push('--spike-factor', String(o.spikeFactor));
+    if (o.spikeStop !== undefined && o.spikeStop > 0) args.push('--spike-stop', String(o.spikeStop));
+    if (o.spikeStopWindow !== undefined) args.push('--spike-stop-window', String(o.spikeStopWindow));
+  }
   if (o.resume) args.push('--resume', o.resume);
   if (o.alignment) {
     args.push('--cursor-weight', String(o.alignment.enabled ? o.alignment.cursorWeight : 0));
@@ -246,6 +259,8 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
     log(job, 'info', `Joint training ${stage}${step === undefined ? '' : ` at step ${step}`}`);
   } else if (stage === 'meters' && step !== undefined) {
     log(job, 'info', `Meters at step ${step}: decoder drift ${raw.nar_drift}${raw.ar_kl_mean20 === undefined ? '' : `, planner KL ${raw.ar_kl_mean20}`}`);
+  } else if (stage === 'spike_stop' && step !== undefined) {
+    log(job, 'info', `Repeated gradient spikes at step ${step}; stopping on the last pre-spike weights`);
   } else if (stage === 'planner_frozen' && step !== undefined) {
     log(job, 'info', `Planner reached its KL target at step ${step}; frozen there, decoder keeps training`);
   } else if (stage === 'target' && step !== undefined) {
@@ -347,7 +362,7 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
           if (['adapter.safetensors', 'optimizer.resume', 'native-ar.safetensors', 'native-nar.safetensors']
             .some(name => !fs.existsSync(path.join(checkpoint, name)))) return `Joint-training checkpoint-step${expect} is incomplete`;
           return null;
-        }, (line, current) => relayJsonLine(job, line, current, clock), state, o.spawnEnv);
+        }, (line, current) => relayJsonLine(job, line, current, clock), state, o.spawnEnv, o.stopEngine !== false);
       if (isCancelled(job)) return;
       if (!state.pausedAt || !preview || state.pausedAt >= o.steps) break;
       const ckpt = checkpointRecords(segmentOut).find(c => c.step === state.pausedAt);

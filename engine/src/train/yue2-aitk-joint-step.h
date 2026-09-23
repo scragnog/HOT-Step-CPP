@@ -13,7 +13,7 @@
 // No prefix is retained across calls, and neither expert updates before both
 // objectives have supplied all adapter gradients.
 namespace yue2_aitk_joint {
-struct Metrics { double ar_ce=0, ar_kl=0, nar_mse=0, gradient_norm=0, cursor_ce=0; size_t cursor_frames=0; int step=0; };
+struct Metrics { double ar_ce=0, ar_kl=0, nar_mse=0, gradient_norm=0, cursor_ce=0; size_t cursor_frames=0; int step=0; bool skipped=false; };
 struct Input {
     const yue2_aitk::Batch * batch=nullptr;
     std::vector<float> noisy_latents, flow_target; // [crop frames,64]
@@ -27,6 +27,9 @@ struct Input {
     // LmOptim path, whose schedule lives on lm->opt.base_lr.
     float adamw_lr=1e-4f;
     float adamw_weight_decay=1e-4f;
+    // Spike guard (--spike-factor): a step whose pre-clip gradient norm is
+    // above this skips its update entirely. 0 = off.
+    double skip_above=0;
 };
 using Progress=std::function<void(const char *)>;
 // `optimizer` is the native CUDA AdamW8bit; `lm`/`osched` select the shared
@@ -149,6 +152,17 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     if(planner_frozen) state.zero_planner_gradients();
     if(!state.clip_gradients(1.0f,&result.gradient_norm,error)) return false;
     ggml_backend_synchronize(backend);
+    if (input.skip_above>0 && result.gradient_norm>input.skip_above) {
+        // A spike: no parameter or optimizer-moment changes. Clipping alone is
+        // not enough — Adam-style updates are normalized, so a clipped spike
+        // still takes a full-size step in its (bad) direction. The step
+        // counters advance so resume records stay aligned with the run.
+        result.skipped=true;
+        if (lm) { lm->opt_step++; result.step=lm->opt_step; }
+        else { try { optimizer->skip_once(); } catch(const std::exception & e){return fail(error,e.what());} result.step=optimizer->step(); }
+        *metrics=result;
+        return true;
+    }
     if (lm) {
         // The state's host gradients are the clipped, authoritative values;
         // fill LmOptim's accumulators (own buffer) and step on its scheduler.

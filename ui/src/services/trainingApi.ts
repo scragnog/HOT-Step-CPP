@@ -680,6 +680,15 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   /** KL stop: freeze the planner at its KL target, then train the decoder
    *  alone for this many more steps. 0/absent = stop at the KL. */
   narExtraSteps?: number;
+  /** false keeps the engine running during training so generation stays
+   *  available; both then share the GPU. Absent/true stops it (the default). */
+  stopEngine?: boolean;
+  /** Spike guard: skip updates whose gradient norm exceeds spikeFactor x the
+   *  recent median (0 = off); spikeStop skips within spikeStopWindow steps
+   *  end the run on the last pre-spike weights (0 = never). */
+  spikeFactor?: number;
+  spikeStop?: number;
+  spikeStopWindow?: number;
 }
 
 export interface Yue2JointPreviewOptions {

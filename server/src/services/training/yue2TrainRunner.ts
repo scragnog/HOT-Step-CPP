@@ -364,6 +364,9 @@ export async function runYue2AceTrain<S extends RelayState>(
   onLine: (line: string, st: S) => void,
   st: S,
   spawnEnv?: NodeJS.ProcessEnv,
+  // false keeps the engine up (generation stays available and shares the GPU),
+  // the mirror of the DiT trainer's stopEngine. Default: stop it.
+  stopEngine = true,
 ): Promise<S> {
   const exe = aceTrainExe();
   if (!exe) {
@@ -375,13 +378,18 @@ export async function runYue2AceTrain<S extends RelayState>(
   // Once per job: the joint trainer calls this once per preview segment, and
   // resetting here made every elapsed readout restart at each pause.
   job.startedAt ??= Date.now();
-  job.phase = 'engine-stop';
   emitJob(job);
-  emitProgress(job);
-  log(job, 'info', 'Stopping the engine to free VRAM…');
-  // Not gated on a live child: a crashed engine leaves a respawn scheduled and
-  // stopAceServer is what cancels it.
-  const engineExited = await stopAceServer(`Paused for ${kind}`);
+  let engineExited = true;
+  if (stopEngine) {
+    job.phase = 'engine-stop';
+    emitProgress(job);
+    log(job, 'info', 'Stopping the engine to free VRAM…');
+    // Not gated on a live child: a crashed engine leaves a respawn scheduled and
+    // stopAceServer is what cancels it.
+    engineExited = await stopAceServer(`Paused for ${kind}`);
+  } else {
+    log(job, 'info', 'Keeping the engine running: generation stays available and shares the GPU with training.');
+  }
 
   try {
     if (!engineExited) {
@@ -462,7 +470,8 @@ export async function runYue2AceTrain<S extends RelayState>(
     const problem = verifyOutput();
     if (problem) throw new Error(problem);
   } finally {
-    // ALWAYS restore the engine — success, failure, cancel, timeout.
+    // ALWAYS restore a stopped engine — success, failure, cancel, timeout.
+    if (stopEngine) {
     job.phase = 'engine-restart';
     emitProgress(job);
     log(job, 'info', 'Restarting the engine…');
@@ -470,6 +479,7 @@ export async function runYue2AceTrain<S extends RelayState>(
     const back = await restartAceServer();
     if (!back) {
       log(job, 'warn', 'Engine did not answer /health within 90 s — restart the app if generation fails');
+    }
     }
   }
   return st;

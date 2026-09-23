@@ -101,6 +101,15 @@ struct Config {
     // relative squared error. Written to train.jsonl and the checkpoint's
     // meters.json. Off = no probe cost and byte-identical runs.
     bool nar_drift = false;
+    // Spike guard. A step whose pre-clip gradient norm exceeds spike_factor x
+    // the median of the last 50 applied steps skips its update (0 = off; it
+    // arms once 20 norms are in the window, and the window restarts when the
+    // planner freezes, because the decoder's norm alone is ~10x smaller).
+    // spike_stop skips within spike_stop_window steps end the run there: the
+    // weights on disk are the last pre-spike state (0 = never stop).
+    float spike_factor = 0.0f;
+    std::int32_t spike_stop = 0;
+    std::int32_t spike_stop_window = 20;
 };
 
 enum class ParseResult { ok, help, error };
@@ -117,7 +126,8 @@ inline void usage(FILE * out) {
         "[--target-loss F (0 disables)] [--target-kl F (0 disables)] [--target-loss-window N] [--target-kl-mode mean|trend] "
         "[--kl-weight 0.2] [--abc-dropout 0.5] [--caption-dropout 0] [--planner-lr-scale 1.0 (not muon)] [--nar-lr-scale 1.0 (not muon)] "
         "[--nar-extra-steps N (with --target-kl: freeze the planner at its KL, train the decoder N more steps)] "
-        "[--nar-drift (log the decoder's drift from base at every checkpoint)]\n");
+        "[--nar-drift (log the decoder's drift from base at every checkpoint)] "
+        "[--spike-factor F (skip updates above F x median gradient norm; 0 = off)] [--spike-stop N (stop after N skips)] [--spike-stop-window 20]\n");
 }
 
 namespace detail {
@@ -291,6 +301,15 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--nar-lr-scale")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.nar_lr_scale)) { if (error) *error = "--nar-lr-scale must be a finite number"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--spike-factor")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.spike_factor) || parsed.spike_factor < 0.0f) { if (error) *error = "--spike-factor must be a finite number >= 0"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--spike-stop")) {
+            std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
+                !detail::decimal_i32(value_text.c_str(), &parsed.spike_stop)) { if (error) *error = "--spike-stop must be a nonnegative integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--spike-stop-window")) {
+            std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
+                !detail::decimal_i32(value_text.c_str(), &parsed.spike_stop_window) || parsed.spike_stop_window < 1) { if (error) *error = "--spike-stop-window must be a positive integer"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--nar-drift")) {
             parsed.nar_drift = true;
         } else if (!std::strcmp(arg, "--nar-extra-steps")) {
