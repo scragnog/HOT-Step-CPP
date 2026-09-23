@@ -1,6 +1,11 @@
-<!-- Ear-test score sheet template. Copy, set <title> and CONFIG below; everything else is generic.
-     How to use: .claude/skills/ear-test-scoresheet/SKILL.md -->
-<title>YuE2 Ladder Scores</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Ear-test score sheet (local file). Written by make-scoresheet.mjs from a study.json;
+     re-run the generator rather than editing the STUDY line. See SKILL.md in this folder. -->
+<title>__TITLE__</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
@@ -70,168 +75,180 @@ textarea{flex:1 1 280px;min-height:34px;resize:vertical;font:13px var(--body);pa
 .player audio{width:100%;height:36px}
 .player .wait{font:500 12.5px var(--mono);color:var(--muted);padding:8px 0}
 .row.pending{opacity:.62}
+.savebar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+.savebar button{border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font:600 12.5px var(--body);padding:6px 12px;border-radius:6px;cursor:pointer}
+.savebar button.ghost{background:transparent;color:var(--ink);border-color:var(--rule)}
 .empty{padding:28px;text-align:center;color:var(--muted);background:var(--surface);border:1px dashed var(--rule);border-radius:10px}
 @media (max-width:720px){.row{grid-template-columns:1fr}.foot{grid-column:1}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
-
+</head>
+<body>
 <div class="wrap">
   <header>
     <h1 id="title"></h1>
     <p id="intro"></p>
-    <div class="status" id="status" role="status">Connecting…</div>
+    <div class="savebar">
+      <button id="connect" type="button">Save scores to a file…</button>
+      <button id="export" type="button" class="ghost">Export scores</button>
+      <span class="status" id="status" role="status" style="margin:0"></span>
+    </div>
   </header>
 
   <div class="bar">
     <div class="seg" id="roundSeg" role="group" aria-label="Round"></div>
-    <div class="seg" id="artistSeg" role="group" aria-label="Artist"></div>
+    <div class="seg" id="artistSeg" role="group" aria-label="Group"></div>
   </div>
 
   <div class="legend" id="legend"></div>
 
   <div id="panel"></div>
 </div>
-
 <script>
-// ── CONFIG: the only part a new test edits (plus <title>). ──────────────────
-// criteria: scored 1-5; `series` puts each into one of the two chart lines.
-// Keep two series, one for "what we're pushing for" and one for "what breaks",
-// so the chart shows where they cross. roundNames/axis are per round number.
-const CONFIG={
-  title:"YuE2 Ladder Scores",
-  intro:"Play each render here, score it 1–5 on each criterion, mark it keep, borderline or over the line, then pick the last good rung for each artist. Everything saves as you go.",
-  criteria:[
-    {key:"voice",name:"Voice",desc:"the singer sounds like the artist",series:"likeness"},
-    {key:"writing",name:"Songwriting",desc:"melodies, hooks and structure feel like theirs",series:"likeness"},
-    {key:"sound",name:"Sound",desc:"guitar, drum and production tone match the album",series:"likeness"},
-    {key:"diction",name:"Diction",desc:"every word intelligible, nothing garbled",series:"quality"},
-    {key:"audio",name:"Audio",desc:"clean: no hiss, phasing, crackle or clipping",series:"quality"},
-    {key:"coherence",name:"Coherence",desc:"holds together, no loops, ends properly",series:"quality"},
-  ],
-  series:{likeness:{name:"Likeness",color:"var(--accent)"},quality:{name:"Quality",color:"var(--warn)"}},
-  roundNames:{1:"Round 1 · planner sweep",2:"Round 2 · decoder sweep"},
-  axis:{1:"Planner step",2:"Decoder step"},
-  pickLabel:"Last good rung",
-};
-// ─────────────────────────────────────────────────────────────────────────────
+// The generator replaces the next line with the study: config + tracks.
+const STUDY=__STUDY__;
+// Track: {id, round, group, order, label, sublabel, x, reference, file, url}
+// `url` is relative to this HTML file; `reference` rows (a no-adapter control)
+// are listed but kept off the chart and out of the picker.
+const CONFIG=STUDY, TRACKS=STUDY.tracks;
 const CRIT=CONFIG.criteria.map(c=>[c.key,c.name]);
+const LS="scoresheet:"+STUDY.id;
 document.getElementById("title").textContent=CONFIG.title;
 document.getElementById("intro").textContent=CONFIG.intro;
 document.getElementById("legend").replaceChildren(...CONFIG.criteria.map(c=>{const d=document.createElement("div");const b=document.createElement("b");b.textContent=c.name;d.append(b," — "+c.desc);return d;}));
-let db=null, tracks=[], scores={}, picks={}, round=null, artist=null;
-// Track docs: {round, group, order, label, sublabel, x, reference, file, folder, url}.
-// `group` is the tab (artist); `x` is the chart position; `reference` rows
-// (e.g. a no-adapter render) are listed but kept off the chart and the picker.
-// The fallbacks read the first calibration sheet's older fields.
-const groupOf=t=>t.group??t.artist;
-const isRef=t=>t.reference??(t.ar===0&&t.nar===0);
-const xOf=t=>t.x??(t.sweep==="planner"?t.ar:t.nar);
-const pending=new Map(), writing=new Set();
-// One <audio> per track, reused across redraws so scoring never stops playback.
-const players=new Map();
-function player(t){
-  let a=players.get(t.id);
-  if(!a||a.dataset.src!==t.url){a=el("audio",{controls:"",preload:"metadata",src:t.url,"aria-label":"Play "+t.file});a.dataset.src=t.url;players.set(t.id,a);}
-  return a;
-}
-document.addEventListener("play",e=>{for(const a of players.values())if(a!==e.target&&!a.paused)a.pause();},true);
+
+let scores={}, picks={}, round=null, group=null, fileHandle=null;
+const available=new Set();
 const statusEl=document.getElementById("status");
 function say(t,err){statusEl.textContent=t;statusEl.classList.toggle("err",!!err);}
 function el(tag,attrs={},...kids){const e=document.createElement(tag);for(const[k,v]of Object.entries(attrs)){if(k==="class")e.className=v;else if(k.startsWith("on"))e.addEventListener(k.slice(2),v);else if(v!==undefined&&v!==null)e.setAttribute(k,v);}for(const c of kids.flat())if(c!=null)e.append(c.nodeType?c:document.createTextNode(c));return e;}
 
-// One write in flight per document; later edits coalesce into the next write.
-function save(path,body){pending.set(path,body);flush(path);}
-async function flush(path){
-  if(writing.has(path)||!pending.has(path)||!db)return;
-  const body=pending.get(path);pending.delete(path);writing.add(path);
-  try{await db.doc(path).set(body);say("Saved "+new Date().toLocaleTimeString());}
-  catch(e){say(e?.code==="invalid_argument"?"This view can't save scores (read-only access).":"Save failed: "+(e?.message||e?.code),true);}
-  finally{writing.delete(path);if(pending.has(path))setTimeout(()=>flush(path),150);}
+// ── Persistence: this browser (always) + a scores.json the agent reads. ──────
+function snapshot(){return {study:STUDY.id,updatedAt:Date.now(),scores,picks};}
+function merge(data){
+  for(const[kind,into]of[["scores",scores],["picks",picks]])
+    for(const[k,v]of Object.entries(data?.[kind]||{}))if(!into[k]||(v.updatedAt||0)>(into[k].updatedAt||0))into[k]=v;
 }
-let noteTimers={};
-function saveLater(path,body){clearTimeout(noteTimers[path]);noteTimers[path]=setTimeout(()=>save(path,body),600);}
+try{merge(JSON.parse(localStorage.getItem(LS)||"{}"));}catch{}
+const idb=()=>new Promise((ok,no)=>{const r=indexedDB.open("scoresheet",1);r.onupgradeneeded=()=>r.result.createObjectStore("handles");r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error);});
+async function idbDo(mode,fn){const db=await idb();return new Promise((ok,no)=>{const tx=db.transaction("handles",mode);const q=fn(tx.objectStore("handles"));tx.oncomplete=()=>ok(q?.result);tx.onerror=()=>no(tx.error);});}
+let writing=false, again=false, timer=null;
+function persist(){
+  try{localStorage.setItem(LS,JSON.stringify(snapshot()));}catch{}
+  clearTimeout(timer);timer=setTimeout(writeFile,400);
+}
+async function writeFile(){
+  if(!fileHandle)return;
+  if(writing){again=true;return;}
+  writing=true;
+  try{const w=await fileHandle.createWritable();await w.write(JSON.stringify(snapshot(),null,1));await w.close();say("Saved to "+fileHandle.name+" at "+new Date().toLocaleTimeString());}
+  catch(e){say("Could not write "+fileHandle.name+": "+e.message+". Scores are still kept in this browser.",true);}
+  finally{writing=false;if(again){again=false;writeFile();}}
+}
+async function useHandle(h,fromClick){
+  const perm=await h.queryPermission({mode:"readwrite"});
+  if(perm!=="granted"&&!(fromClick&&await h.requestPermission({mode:"readwrite"})==="granted")){
+    fileHandle=null;document.getElementById("connect").textContent="Reconnect "+h.name;say("Click Reconnect to keep saving to "+h.name+".");return;
+  }
+  fileHandle=h;
+  try{const f=await h.getFile();const text=await f.text();if(text.trim())merge(JSON.parse(text));}catch{}
+  document.getElementById("connect").textContent="Saving to "+h.name;
+  await idbDo("readwrite",s=>s.put(h,STUDY.id));
+  render();writeFile();
+}
+document.getElementById("connect").onclick=async()=>{
+  try{
+    const stored=await idbDo("readonly",s=>s.get(STUDY.id)).catch(()=>null);
+    if(stored&&!fileHandle){await useHandle(stored,true);if(fileHandle)return;}
+    const h=await window.showSaveFilePicker({suggestedName:"scores.json",types:[{description:"Scores",accept:{"application/json":[".json"]}}]});
+    await useHandle(h,true);
+  }catch(e){if(e.name!=="AbortError")say("This browser can't save to a file ("+e.message+"). Use Export scores instead.",true);}
+};
+document.getElementById("export").onclick=()=>{
+  const a=el("a",{href:URL.createObjectURL(new Blob([JSON.stringify(snapshot(),null,1)],{type:"application/json"})),download:"scores.json"});
+  document.body.append(a);a.click();a.remove();
+};
+if(!window.showSaveFilePicker){document.getElementById("connect").hidden=true;say("This browser can't save to a file: use Export scores when you finish and put scores.json next to this page.");}
+else say("Scores are kept in this browser. Click “Save scores to a file…” and save scores.json next to this page so Claude can read them.");
+idbDo("readonly",s=>s.get(STUDY.id)).then(h=>h&&useHandle(h,false)).catch(()=>{});
 
-function rungLabel(t){if(t.label)return[t.label,t.sublabel||""];return isRef(t)?["Base","no adapter"]:[t.sweep==="planner"?"Planner "+t.ar:"Decoder "+t.nar, t.sweep==="planner"?"decoder "+t.nar:"planner "+t.ar];}
-function avg(s,keys){const v=keys.map(k=>s?.[k]).filter(Number.isFinite);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;}
+// ── Audio: renders that have not landed yet are re-checked until they do. ──
+const players=new Map();
+function player(t){let a=players.get(t.id);if(!a){a=el("audio",{controls:"",preload:"metadata",src:t.url,"aria-label":"Play "+t.file});players.set(t.id,a);}return a;}
+document.addEventListener("play",e=>{for(const a of players.values())if(a!==e.target&&!a.paused)a.pause();},true);
+function probe(){
+  for(const t of TRACKS){
+    if(available.has(t.id))continue;
+    const a=new Audio();a.preload="metadata";
+    a.onloadedmetadata=()=>{available.add(t.id);render();};
+    a.src=t.url;
+  }
+}
+probe();setInterval(()=>{if(TRACKS.some(t=>!available.has(t.id)))probe();},10000);
 
+// ── UI ────────────────────────────────────────────────────────────────────
+const isRef=t=>!!t.reference;
+const avg=(s,keys)=>{const v=keys.map(k=>s?.[k]).filter(Number.isFinite);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;};
+let noteTimer=null;
 function render(){
-  const rounds=[...new Set(tracks.map(t=>t.round))].sort();
+  const rounds=[...new Set(TRACKS.map(t=>t.round))].sort((a,b)=>a-b);
   if(round===null||!rounds.includes(round))round=rounds[rounds.length-1]??null;
-  const artists=[...new Set(tracks.filter(t=>t.round===round).map(groupOf))];
-  if(!artists.includes(artist))artist=artists[0]??null;
-  const rs=document.getElementById("roundSeg");rs.replaceChildren(...rounds.map(r=>el("button",{"aria-pressed":String(r===round),onclick:()=>{round=r;render();}},CONFIG.roundNames[r]||"Round "+r)));
-  const as=document.getElementById("artistSeg");as.replaceChildren(...artists.map(a=>el("button",{"aria-pressed":String(a===artist),onclick:()=>{artist=a;render();}},a)));
+  const groups=[...new Set(TRACKS.filter(t=>t.round===round).map(t=>t.group))];
+  if(!groups.includes(group))group=groups[0]??null;
+  document.getElementById("roundSeg").replaceChildren(...rounds.map(r=>el("button",{"aria-pressed":String(r===round),onclick:()=>{round=r;render();}},CONFIG.roundNames?.[r]||"Round "+r)));
+  document.getElementById("artistSeg").replaceChildren(...groups.map(g=>el("button",{"aria-pressed":String(g===group),onclick:()=>{group=g;render();}},g)));
   const panel=document.getElementById("panel");
-  const list=tracks.filter(t=>t.round===round&&groupOf(t)===artist).sort((a,b)=>a.order-b.order);
-  if(!list.length){panel.replaceChildren(el("div",{class:"empty"},db?"No renders listed for this round yet.":"Scores need the saved-data connection; open this page on claude.ai."));return;}
-  const pickPath=`picks/r${round}-${artist}`, pick=picks[`r${round}-${artist}`]||{};
-  const scored=list.filter(t=>scores[t.id]?.verdict).length;
-  const rungOpts=[el("option",{value:""},"— not decided —"),...list.filter(t=>!isRef(t)).map(t=>el("option",{value:t.id,...(pick.lastGood===t.id?{selected:""}:{})},rungLabel(t)[0]))];
-  const sel=el("select",{id:"pick-"+round+"-"+artist,onchange:e=>{picks[`r${round}-${artist}`]={...pick,lastGood:e.target.value};save(pickPath,{...picks[`r${round}-${artist}`],round,artist,updatedAt:Date.now()});}},...rungOpts);
-  const pnote=el("textarea",{id:"picknote-"+round+"-"+artist,placeholder:"Why this rung? What went wrong on the next one?",oninput:e=>{picks[`r${round}-${artist}`]={...picks[`r${round}-${artist}`],note:e.target.value};saveLater(pickPath,{...picks[`r${round}-${artist}`],round,artist,updatedAt:Date.now()});}});
+  const list=TRACKS.filter(t=>t.round===round&&t.group===group).sort((a,b)=>a.order-b.order);
+  if(!list.length){panel.replaceChildren(el("div",{class:"empty"},"No renders in this round yet."));return;}
+  const key=`r${round}-${group}`, pick=picks[key]||{};
+  const setPick=patch=>{picks[key]={...picks[key],...patch,round,group,updatedAt:Date.now()};persist();};
+  const scored=list.filter(t=>CRIT.every(([k])=>Number.isFinite(scores[t.id]?.[k]))).length;
+  const sel=el("select",{id:"pick-"+key,onchange:e=>setPick({lastGood:e.target.value})},
+    el("option",{value:""},"— not decided —"),...list.filter(t=>!isRef(t)).map(t=>el("option",{value:t.id,...(pick.lastGood===t.id?{selected:""}:{})},t.label)));
+  const pnote=el("textarea",{id:"picknote-"+key,placeholder:"Why this rung? What went wrong on the next one?",oninput:e=>{picks[key]={...picks[key],note:e.target.value,round,group,updatedAt:Date.now()};clearTimeout(noteTimer);noteTimer=setTimeout(persist,500);}});
   pnote.value=pick.note||"";
-  const folder=list[0].folder;
-  const copy=el("button",{class:"ghost",onclick:async e=>{try{await navigator.clipboard.writeText(folder);e.target.textContent="Copied";}catch{const r=document.createRange();r.selectNodeContents(e.target.previousSibling);getSelection().removeAllRanges();getSelection().addRange(r);}}},"Copy");
+  const focusId=document.activeElement?.id, caret=document.activeElement?.selectionStart;
   panel.replaceChildren(
-    el("div",{class:"folder"},"Files:",el("code",{},folder),copy),
-    el("div",{class:"pick"},el("label",{for:sel.id},CONFIG.pickLabel),sel,pnote,el("span",{class:"count"},`${scored}/${list.length} judged`)),
+    el("div",{class:"pick"},el("label",{for:sel.id},CONFIG.pickLabel||"Last good rung"),sel,pnote,el("span",{class:"count"},`${scored}/${list.length} scored`)),
     chart(list),
-    el("div",{class:"rows"},...list.map(row))
-  );
+    el("div",{class:"rows"},...list.map(row)));
+  // Put the cursor back if a redraw (a render landing) happened mid-note.
+  if(focusId){const n=document.getElementById(focusId);if(n&&n.tagName==="TEXTAREA"){n.focus();if(Number.isFinite(caret))n.setSelectionRange(caret,caret);}}
 }
-
 function chart(list){
   const pts=list.filter(t=>!isRef(t));
   const W=720,H=150,L=34,R=12,T=12,B=26;
   const x=i=>L+(pts.length<2?0:i*(W-L-R)/(pts.length-1)), y=v=>T+(5-v)*(H-T-B)/4;
-  const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.setAttribute("viewBox",`0 0 ${W} ${H}`);svg.setAttribute("role","img");svg.setAttribute("aria-label","Likeness and quality by rung");
+  const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.setAttribute("viewBox",`0 0 ${W} ${H}`);svg.setAttribute("role","img");svg.setAttribute("aria-label","Score averages by rung");
   const add=(tag,a)=>{const n=document.createElementNS(svg.namespaceURI,tag);for(const[k,v]of Object.entries(a))n.setAttribute(k,v);svg.append(n);return n;};
-  for(let v=1;v<=5;v++){add("line",{x1:L,x2:W-R,y1:y(v),y2:y(v),stroke:"var(--rule)","stroke-width":1});const t=add("text",{x:L-8,y:y(v)+4,"text-anchor":"end","font-size":11,fill:"var(--muted)","font-family":"IBM Plex Mono, monospace"});t.textContent=v;}
-  pts.forEach((t,i)=>{const n=add("text",{x:x(i),y:H-8,"text-anchor":"middle","font-size":11,fill:"var(--muted)","font-family":"IBM Plex Mono, monospace"});n.textContent=xOf(t);});
+  for(let v=1;v<=5;v++){add("line",{x1:L,x2:W-R,y1:y(v),y2:y(v),stroke:"var(--rule)","stroke-width":1});add("text",{x:L-8,y:y(v)+4,"text-anchor":"end","font-size":11,fill:"var(--muted)","font-family":"IBM Plex Mono, monospace"}).textContent=v;}
+  pts.forEach((t,i)=>{add("text",{x:x(i),y:H-8,"text-anchor":"middle","font-size":11,fill:"var(--muted)","font-family":"IBM Plex Mono, monospace"}).textContent=t.x??i+1;});
   for(const[name,def]of Object.entries(CONFIG.series)){
     const keys=CONFIG.criteria.filter(c=>c.series===name).map(c=>c.key);
     const vals=pts.map((t,i)=>[i,avg(scores[t.id],keys)]).filter(p=>p[1]!==null);
     if(vals.length>1)add("polyline",{points:vals.map(([i,v])=>`${x(i)},${y(v)}`).join(" "),fill:"none",stroke:def.color,"stroke-width":2.5,"stroke-linejoin":"round"});
     vals.forEach(([i,v])=>add("circle",{cx:x(i),cy:y(v),r:4,fill:def.color}));
   }
-  const keys=Object.entries(CONFIG.series).map(([name,def])=>el("span",{},el("i",{style:"background:"+def.color}),
-    def.name+" ("+CONFIG.criteria.filter(c=>c.series===name).map(c=>c.name.toLowerCase()).join(", ")+")"));
-  return el("div",{class:"chart"},el("h3",{},"Where the line is · "+(CONFIG.axis[round]||"Rung")),el("div",{class:"keys"},...keys),svg);
+  const keys=Object.entries(CONFIG.series).map(([name,def])=>el("span",{},el("i",{style:"background:"+def.color}),def.name+" ("+CONFIG.criteria.filter(c=>c.series===name).map(c=>c.name.toLowerCase()).join(", ")+")"));
+  return el("div",{class:"chart"},el("h3",{},"Where the line is · "+(CONFIG.axis?.[round]||"Rung")),el("div",{class:"keys"},...keys),svg);
 }
-
 function row(t){
-  const s=scores[t.id]||{}, path="scores/"+t.id;
-  const put=patch=>{scores[t.id]={...scores[t.id],...patch};save(path,{...scores[t.id],track:t.id,updatedAt:Date.now()});render();};
-  const [big,small]=rungLabel(t);
-  const note=el("textarea",{id:"note-"+t.id,placeholder:"Notes: what you heard",oninput:e=>{scores[t.id]={...scores[t.id],note:e.target.value};saveLater(path,{...scores[t.id],track:t.id,updatedAt:Date.now()});}});
+  const s=scores[t.id]||{};
+  const put=patch=>{scores[t.id]={...scores[t.id],...patch,updatedAt:Date.now()};persist();render();};
+  const note=el("textarea",{id:"note-"+t.id,placeholder:"Notes: what you heard",oninput:e=>{scores[t.id]={...scores[t.id],note:e.target.value,updatedAt:Date.now()};clearTimeout(noteTimer);noteTimer=setTimeout(persist,500);}});
   note.value=s.note||"";
-  return el("div",{class:"row"+(s.verdict?" v-"+s.verdict:"")+(t.url?"":" pending")},
-    el("div",{class:"player"},t.url?player(t):el("span",{class:"wait"},"Rendering… this row fills in when the audio is ready.")),
-    el("div",{class:"id"},el("div",{class:"rung"},big,el("small",{},small)),el("div",{class:"file"},t.file)),
+  const ready=available.has(t.id);
+  const verdict=s.verdict?" v-"+s.verdict:"";
+  return el("div",{class:"row"+verdict+(ready?"":" pending")},
+    el("div",{class:"player"},ready?player(t):el("span",{class:"wait"},"Rendering… this row fills in when the file appears.")),
+    el("div",{class:"id"},el("div",{class:"rung"},t.label,el("small",{},t.sublabel||"")),el("div",{class:"file"},t.file)),
     el("div",{class:"crit"},...CRIT.map(([k,label])=>el("div",{},el("div",{class:"name"},label),
       el("div",{class:"dots",role:"group","aria-label":label},...[1,2,3,4,5].map(v=>el("button",{"aria-pressed":String(s[k]===v),"aria-label":`${label} ${v}`,onclick:()=>put({[k]:s[k]===v?null:v})},String(v))))))),
     el("div",{class:"foot"},
       el("div",{class:"verdict",role:"group","aria-label":"Verdict"},...[["good","Keep"],["borderline","Borderline"],["over","Over the line"]].map(([v,l])=>el("button",{"data-v":v,"aria-pressed":String(s.verdict===v),onclick:()=>put({verdict:s.verdict===v?null:v})},l))),
-      note)
-  );
+      note));
 }
-
 render();
-(async()=>{
-  db=await window.claude?.use?.("db");
-  if(!db){say("Saved data is unavailable in this view, so scores won't be kept.",true);render();return;}
-  say("Connected");
-  const err=e=>say("Lost the connection to saved data ("+e.code+"). Reload to reconnect.",true);
-  db.collection("tracks").onSnapshot(s=>{tracks=s.docs.map(d=>({id:d.id,...d.data()}));render();},err);
-  db.collection("scores").onSnapshot(s=>{
-    const focus=document.activeElement?.id;
-    for(const d of s.docs)if(!writing.has("scores/"+d.id)&&!pending.has("scores/"+d.id))scores[d.id]=d.data();
-    if(!focus?.startsWith("note-"))render();
-  },err);
-  db.collection("picks").onSnapshot(s=>{
-    const focus=document.activeElement?.id;
-    for(const d of s.docs)picks[d.id]=d.data();
-    if(!focus?.startsWith("picknote-"))render();
-  },err);
-})();
 </script>
+</body>
+</html>

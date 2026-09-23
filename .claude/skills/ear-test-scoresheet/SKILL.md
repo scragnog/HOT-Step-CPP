@@ -1,6 +1,6 @@
 ---
 name: ear-test-scoresheet
-description: The standard way to run a listening test in HOT-Step - a published score-sheet page (template.html) where Rob plays each render in the browser, scores it 1-5 on named criteria, and the page charts the two score groups by rung so the point where likeness and quality cross is visible. Use whenever renders need judging by ear - checkpoint ladders, recipe A/B tests, sampler or quant comparisons - and whenever you are about to ask Rob to "listen to these files and tell me".
+description: The standard way to run a listening test in HOT-Step - a local HTML score sheet next to the renders where Rob plays each track, scores it 1-5 on named criteria, and the page charts the two score groups by rung so the point where likeness and quality cross is visible. Use whenever renders need judging by ear - checkpoint ladders, recipe A/B tests, sampler or quant comparisons - and whenever you are about to ask Rob to "listen to these files and tell me".
 ---
 
 # Ear-test score sheet
@@ -9,80 +9,86 @@ Rob's verdict (2026-09-23): "the best way so far we've had to score tests like
 this". Use it instead of asking for free-text impressions of a folder of WAVs.
 
 What it gives you:
-- Every render plays inside the page. Rob does not open a file browser.
+- Every render plays inside the page, straight from disk (WAV is fine).
 - Scores 1-5 on named criteria, a Keep / Borderline / Over the line verdict, a
   notes box per render, and a pick per group (the "last good rung").
 - A chart per group that averages the criteria into two lines, one for what
   you're pushing for (likeness) and one for what breaks (quality), plotted by rung.
-- Everything saves to the page's own database, which you read back with
-  `ArtifactData`. Rows appear live as you attach audio, so Rob can start
-  scoring while the rest are still rendering.
+- Rows for renders that don't exist yet say "Rendering…" and fill in on their
+  own when the file appears, so Rob can start while the rest render.
+- Scores save to `scores.json` beside the page, which is how you read them.
 
-`template.html` in this folder is the page. It was used for the YuE2 two-stop
-calibration (planner and decoder sweeps on three albums) and republished from
-this exact file.
+Files in this folder:
+- `template.html` — the page (local file; the default).
+- `make-scoresheet.mjs` — writes `index.html` from a `study.json`.
+- `template-artifact.html` — the claude.ai-hosted variant, only for when Rob
+  can't open files on this machine (see the end).
 
 ## Running a test
 
-### 1. Make the page
+### 1. Lay out the study folder
 
-1. Copy `template.html` to a new file in your scratchpad, one file per study
-   (a new file path = a new artifact and a clean database).
-2. Edit `<title>` and the `CONFIG` block at the top of the script. Nothing else
-   should need changing:
-   - `criteria`: `{key, name, desc, series}`. Keep two series, "pushing for" and
-     "what breaks". Six criteria (three each) scored in ~40 s per render for
-     Rob; more gets tiring.
-   - `roundNames` / `axis`: labels per round number; `pickLabel` for the picker.
-3. Publish with the Artifact tool, `capabilities: {"db": {}, "assets": {}}`.
-   Load the `artifact-capabilities` skill first if this session has not.
+Put renders under `_experiments/_LISTENING/<date>-<study>/` (the listening-hub
+convention), e.g. `round1/<group>/NN-<label>.wav`. The page lives at the top
+of that folder and refers to tracks by relative path.
 
-### 2. Seed one row per render
-
-`ArtifactData` batch of `set` writes to collection `tracks`, doc id like
-`r1-<group>-NN`:
+### 2. Write study.json and generate the page
 
 ```json
-{"round": 1, "group": "greenday_dookie", "order": 2,
- "label": "Planner 50", "sublabel": "decoder 100", "x": 50,
- "file": "02-ar050-nar100.wav", "folder": "D:\\...\\round1-planner\\greenday_dookie"}
+{
+  "id": "yue2-decoder-long-2026-09-23",
+  "title": "YuE2 Decoder Ladder",
+  "intro": "Play each render, score it 1–5 on each criterion. Scores save as you go.",
+  "criteria": [
+    {"key": "voice", "name": "Voice", "desc": "the singer sounds like the artist", "series": "likeness"},
+    {"key": "writing", "name": "Songwriting", "desc": "melodies, hooks and structure feel like theirs", "series": "likeness"},
+    {"key": "sound", "name": "Sound", "desc": "guitar, drum and production tone match the album", "series": "likeness"},
+    {"key": "diction", "name": "Diction", "desc": "every word intelligible, nothing garbled", "series": "quality"},
+    {"key": "audio", "name": "Audio", "desc": "clean: no hiss, phasing, crackle or clipping", "series": "quality"},
+    {"key": "coherence", "name": "Coherence", "desc": "holds together, no loops, ends properly", "series": "quality"}
+  ],
+  "series": {"likeness": {"name": "Likeness", "color": "var(--accent)"},
+             "quality":  {"name": "Quality",  "color": "var(--warn)"}},
+  "roundNames": {"1": "Round 1 · decoder sweep"},
+  "axis": {"1": "Decoder step"},
+  "pickLabel": "Last good rung",
+  "tracks": [
+    {"id": "r1-rbf-01", "round": 1, "group": "rbf_whyrockhard", "order": 1,
+     "label": "Base", "sublabel": "no adapter", "reference": true, "file": "round1/rbf_whyrockhard/01-base.wav"},
+    {"id": "r1-rbf-02", "round": 1, "group": "rbf_whyrockhard", "order": 2,
+     "label": "Decoder 300", "sublabel": "planner frozen at 240", "x": 300, "file": "round1/rbf_whyrockhard/02-nar300.wav"}
+  ]
+}
+```
+
+```
+node .claude/skills/ear-test-scoresheet/make-scoresheet.mjs <study-folder>/study.json
 ```
 
 - `group` becomes a tab; `x` is the chart position; `order` sorts rows.
-- Add `"reference": true` for a control render (base model, no adapter). It is
-  listed and scorable but stays off the chart and out of the picker. Always
-  include one: it anchors the scale (the base scored 1 on likeness and 5 on
-  quality every time).
-- Seed rows before the audio exists: they show "Rendering…" and fill in live.
+- The six criteria above (three per series) are the proven set: about 40 s of
+  scoring per render. Keep two series, "pushing for" and "what breaks".
+- `reference: true` marks a control (base model, no adapter): scorable, but
+  off the chart and out of the picker. Always include one; it anchors the scale.
+- List every planned render up front, rendered or not. To add a round later,
+  append tracks and re-run the generator. Scores are keyed by track id, so
+  they survive.
 
-### 3. Attach audio as it renders
+### 3. Hand it to Rob
 
-The Artifact asset upload refuses `.wav` and `.mp3`. It takes `.mp4`, and an
-audio-only AAC MP4 plays in `<audio>` in every browser:
-
-```
-ffmpeg -v error -y -i in.wav -vn -codec:a aac -b:a 256k -movflags +faststart out.mp4
-```
-
-A 3-4 minute song comes out at 5-12 MB (the limit is 20 MiB; a float WAV is ~80 MB).
-
-Then, per batch of finished files:
-1. `Artifact` publish with `url`, `asset: true`, `file_paths` (up to 25 per call).
-2. `ArtifactData` batch of `update` writes adding `{"url": "/_blob/<id>", "asset": "<id>"}`
-   to each track. **Pin every entry with `if_version`**: an unpinned write to a
-   document that already exists refuses the whole batch. Freshly seeded rows
-   are version 1.
-
-A background loop that converts each WAV once its size stops changing keeps
-the MP4s ready. Upload in batches as they appear.
+Give him the path to `index.html`. On first use he clicks **Save scores to a
+file…** and saves `scores.json` next to the page. After that every change
+writes to it; the browser remembers the file and asks once per session to
+reconnect. Scores are also kept in the browser either way. Browsers without
+file saving (Firefox) get **Export scores** instead: he exports and drops
+`scores.json` in the folder.
 
 ### 4. Read the results
 
-`ArtifactData` `list` (or `query` on `track >= "r2-"`) on collection `scores`,
-limit 100. Each doc is `{<criterion>: 1-5, verdict?, note?, track}`. Picks live
-in `picks` (`r<round>-<group>`: `{lastGood, note}`).
+`scores.json`: `{scores: {<track id>: {<criterion>: 1-5, verdict?, note?}},
+picks: {"r<round>-<group>": {lastGood, note}}}`.
 
-**Scores alone are enough.** Rob skipped verdicts and picks on the first study
+**Scores alone are enough.** On the first study Rob skipped verdicts and picks
 and the criteria still answered the question. Average each series per rung,
 lay the groups side by side, and read the trend, not single rungs.
 
@@ -93,7 +99,7 @@ lay the groups side by side, and read the trend, not single rungs.
   Every rung is a fresh take, so plan two renders per rung when a decision
   rests on it.
 - **Rob's scoring noise is about ±1 per criterion.** Measured by putting the
-  same combination in both rounds without saying so. Treat a difference under
+  same combination in two rounds without saying so. Treat a difference under
   ~0.5 on a series average as noise. A single low rung between two good ones
   is noise, not a line.
 - **Keep automated metrics off the page.** They bias the ear. Compare them
@@ -112,9 +118,6 @@ exist, so re-running after a failure only fills the gaps. Config:
 `{runDir, outDir, caption, lyrics, seed, pairs: [[arStep, narStep], ...]}`;
 `[0, 0]` is the base-model reference.
 
-Stage outputs under `_experiments/_LISTENING/<date>-<study>/<round>/<group>/`
-(see the listening-hub convention).
-
 ## Traps
 
 - `/api/generate` needs a bearer token: `GET /api/auth/auto` returns one.
@@ -128,3 +131,14 @@ Stage outputs under `_experiments/_LISTENING/<date>-<study>/<round>/<group>/`
 - Prompts: use Lyric Studio lyrics the adapter never trained on, with their
   own caption (`generations` table in `server/data/hotstep.db`: `caption`,
   `lyrics`). The same prompt and seed for every rung of a group.
+
+## Hosted variant (only when needed)
+
+`template-artifact.html` is the same page published as a claude.ai artifact,
+for scoring away from this machine. It keeps rows and scores in the artifact's
+database (`capabilities: {"db": {}, "assets": {}}`; config in a `CONFIG` block
+at the top of its script; rows seeded with `ArtifactData` into `tracks`).
+Audio must be uploaded: the asset store refuses `.wav`/`.mp3` but takes an
+audio-only AAC `.mp4` (`ffmpeg -i in.wav -vn -codec:a aac -b:a 256k -movflags
++faststart out.mp4`), then each track gets `{url: "/_blob/<id>"}` via a pinned
+(`if_version`) `ArtifactData` batch update. Much more work than the local page.

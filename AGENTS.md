@@ -161,7 +161,7 @@ only ever saw a rolling window and are lossy.
 | **MiniMax-Music3 backend** (second generation backend: engine port, /mm3 endpoints, backend registry/toggle, trap list) | [.claude/skills/mm3-backend/SKILL.md](.claude/skills/mm3-backend/SKILL.md) |
 | MM3 caption/prompt format (genre adherence) | [.claude/skills/mm3-captioning/SKILL.md](.claude/skills/mm3-captioning/SKILL.md) |
 | **Training an MM3 LM adapter** (album/artist clone: rank, steps, which checkpoint to ship, likeness-vs-coherence) | [.claude/skills/mm3-lm-adapter-training/SKILL.md](.claude/skills/mm3-lm-adapter-training/SKILL.md) |
-| **Any listening test** (checkpoint ladders, A/B renders, "listen and tell me") — the published score-sheet method Rob scores in | [.claude/skills/ear-test-scoresheet/SKILL.md](.claude/skills/ear-test-scoresheet/SKILL.md) |
+| **Any listening test** (checkpoint ladders, A/B renders, "listen and tell me") — the local HTML score sheet Rob scores in | [.claude/skills/ear-test-scoresheet/SKILL.md](.claude/skills/ear-test-scoresheet/SKILL.md) |
 | **What the Discord working group said** (MM3 group: bghira, Serveurperso, testerf, Shaz…) — searchable transcripts of every channel | `node tools/discord-claude/read-log.mjs --list` — see [Discord transcripts](#discord-transcripts) |
 | **Writing anything a human reads** (issue replies, commits, PR bodies, release notes, docs) | [docs/WRITING-STYLE.md](docs/WRITING-STYLE.md) — no emojis, no AI tells, honest confidence |
 | Full feature catalogue (100+) | [FEATURES.md](FEATURES.md) |
