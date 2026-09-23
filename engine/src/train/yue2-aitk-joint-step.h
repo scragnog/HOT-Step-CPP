@@ -168,6 +168,30 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     return true;
 }
 
+// Decoder drift probe (--nar-drift). The decoder's flow prediction on a fixed
+// input, conditioned by the BASE planner so the number measures the decoder
+// alone, however far the planner has moved. `nar` null = the base decoder.
+inline bool nar_probe_prefix(ggml_backend_t backend, const Yue2AitkModel & model, const yue2_aitk::Batch & batch,
+                             Yue2AitkPrefixHost * prefix, std::string * error) {
+    Yue2AitkEndpointHost condition;
+    if(!Yue2AitkEndpoints::token_embedding(backend,model,batch.nar.ar.input_ids.data(),batch.nar.ar.input_ids.size(),&condition,error)) return false;
+    Yue2AitkStackTape tape;
+    return yue2_aitk_stack::forward(backend,model,nullptr,false,condition.values,batch.nar.ar.input_ids.size(),nullptr,false,&tape,prefix,error);
+}
+inline bool nar_probe_predict(ggml_backend_t backend, const Yue2AitkModel & model, const Yue2AitkExpertAdapters * nar,
+                              const Yue2AitkPrefixHost & prefix, const std::vector<float> & noisy, float timestep,
+                              std::vector<float> * out, std::string * error) {
+    constexpr size_t C=64; const size_t frames=noisy.size()/C;
+    Yue2AitkEndpointHost frontend;
+    if(!Yue2AitkEndpoints::nar_frontend(backend,model,noisy.data(),frames,timestep,&frontend,error)) return false;
+    Yue2AitkStackTape tape;
+    if(!yue2_aitk_stack::forward(backend,model,nar,true,frontend.values,frames+2,&prefix,false,&tape,nullptr,error)) return false;
+    std::vector<float> zero((frames+2)*C,0.0f); Yue2AitkEndpointHost prediction;
+    if(!Yue2AitkEndpoints::nar_final(backend,model,tape.final_hidden.data(),zero.data(),tape.length,&prediction,error)) return false;
+    out->assign(prediction.values.begin()+C,prediction.values.begin()+C+frames*C);
+    return true;
+}
+
 // Reference overload for call sites that bind the native AdamW8bit optimizer
 // by name; forwards to the dispatching overload above.
 inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,

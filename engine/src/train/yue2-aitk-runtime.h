@@ -96,6 +96,11 @@ struct Config {
     // more steps (--steps stays the cap). The KL checkpoint is still written,
     // so the old stop point is always on disk. 0 = stop at the KL, as before.
     std::int32_t nar_extra_steps = 0;
+    // Decoder drift meter: at every checkpoint, how far the decoder's flow
+    // prediction has moved from the base decoder's on a fixed probe set, as a
+    // relative squared error. Written to train.jsonl and the checkpoint's
+    // meters.json. Off = no probe cost and byte-identical runs.
+    bool nar_drift = false;
 };
 
 enum class ParseResult { ok, help, error };
@@ -111,7 +116,8 @@ inline void usage(FILE * out) {
         "[--prodigy-d0 F] [--muon-lr-scale F] [--muon-ns-steps N] "
         "[--target-loss F (0 disables)] [--target-kl F (0 disables)] [--target-loss-window N] [--target-kl-mode mean|trend] "
         "[--kl-weight 0.2] [--abc-dropout 0.5] [--caption-dropout 0] [--planner-lr-scale 1.0 (not muon)] [--nar-lr-scale 1.0 (not muon)] "
-        "[--nar-extra-steps N (with --target-kl: freeze the planner at its KL, train the decoder N more steps)]\n");
+        "[--nar-extra-steps N (with --target-kl: freeze the planner at its KL, train the decoder N more steps)] "
+        "[--nar-drift (log the decoder's drift from base at every checkpoint)]\n");
 }
 
 namespace detail {
@@ -285,6 +291,8 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--nar-lr-scale")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.nar_lr_scale)) { if (error) *error = "--nar-lr-scale must be a finite number"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--nar-drift")) {
+            parsed.nar_drift = true;
         } else if (!std::strcmp(arg, "--nar-extra-steps")) {
             std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
                 !detail::decimal_i32(value_text.c_str(), &parsed.nar_extra_steps)) { if (error) *error = "--nar-extra-steps must be a nonnegative integer"; return ParseResult::error; }

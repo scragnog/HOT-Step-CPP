@@ -32,7 +32,7 @@ test('AITK CLI contract preserves checkpoint, dataset, output and resume order',
   }), [
     'yue2-joint-train', '--checkpoint', 'base.gguf', '--dataset', 'dataset.json',
     '--output', 'run-new', '--steps', '100', '--save-every', '10', '--seed', '3',
-    '--device', 'CUDA0', '--resume', 'optimizer.resume',
+    '--device', 'CUDA0', '--nar-drift', '--resume', 'optimizer.resume',
   ]);
 });
 
@@ -75,7 +75,7 @@ test('prodigy run carries optimizer, rank/alpha and target-loss flags', () => {
   }), [
     'yue2-joint-train', '--checkpoint', 'base.gguf', '--dataset', 'dataset.json',
     '--output', 'run-new', '--steps', '400', '--save-every', '50', '--seed', '3',
-    '--device', 'CUDA0', '--rank', '16', '--alpha', '32',
+    '--device', 'CUDA0', '--nar-drift', '--rank', '16', '--alpha', '32',
     '--optimizer', 'prodigy', '--prodigy-d0', '0.000001', '--target-loss', '0.9',
   ]);
 });
@@ -87,7 +87,7 @@ test('muon run carries lr-scale and Newton-Schulz step count, adamw adds no opti
     optimizer: 'muon', muonLrScale: 1.2, muonNsSteps: 7,
   }), [
     'yue2-joint-train', '--checkpoint', 'b', '--dataset', 'd', '--output', 'run-new',
-    '--steps', '100', '--save-every', '10', '--seed', '3', '--device', 'CUDA0',
+    '--steps', '100', '--save-every', '10', '--seed', '3', '--device', 'CUDA0', '--nar-drift',
     '--optimizer', 'muon', '--muon-lr-scale', '1.2', '--muon-ns-steps', '7',
   ]);
   assert.deepEqual(buildYue2JointTrainArgs({
@@ -95,6 +95,6 @@ test('muon run carries lr-scale and Newton-Schulz step count, adamw adds no opti
     steps: 100, saveEvery: 10, seed: 3, device: 'CUDA0', optimizer: 'adamw',
   }), [
     'yue2-joint-train', '--checkpoint', 'b', '--dataset', 'd', '--output', 'run-new',
-    '--steps', '100', '--save-every', '10', '--seed', '3', '--device', 'CUDA0',
+    '--steps', '100', '--save-every', '10', '--seed', '3', '--device', 'CUDA0', '--nar-drift',
   ]);
 });

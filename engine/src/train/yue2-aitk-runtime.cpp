@@ -309,6 +309,57 @@ static int run_impl(Config config, std::string * error) {
                               lokr ? config.lokr_dim : 0, lokr ? config.lokr_factor : 0)) return 1;
         if (lokr) std::fprintf(stderr, "[yue2-aitk] adapter lokr: dim %d factor %d alpha %.4g, %zu trainable parameters\n",
                                config.lokr_dim, config.lokr_factor, (double) config.alpha, state.parameter_count());
+        // Decoder drift probes: 3 songs spread across the dataset x 3 noise
+        // levels, one fixed crop and noise per song (its own sampler, so the
+        // training RNG stream is untouched). The reference is the decoder at
+        // its seed-derived INITIAL adapters, taken here, before any resume
+        // restore: the same code path as every later reading, so the adapted
+        // path's own numerics cancel (the adapter-free base path read a
+        // ~3e-4 floor against it). Rebuilt identically on resume.
+        struct DriftProbe { yue2_aitk::Batch batch; std::vector<std::vector<float>> noisy, base; std::vector<float> timestep; };
+        std::vector<DriftProbe> probes;
+        const auto measure_drift = [&](const Yue2AitkExpertAdapters * nar, bool fill_base, double * drift) -> bool {
+            double sum = 0.0; size_t count = 0;
+            for (auto & probe : probes) {
+                Yue2AitkPrefixHost prefix;
+                if (!yue2_aitk_joint::nar_probe_prefix(backend.value, model, probe.batch, &prefix, error)) return false;
+                for (size_t k = 0; k < probe.noisy.size(); ++k) {
+                    std::vector<float> prediction;
+                    if (!yue2_aitk_joint::nar_probe_predict(backend.value, model, nar, prefix, probe.noisy[k], probe.timestep[k], &prediction, error)) return false;
+                    if (fill_base) { probe.base.push_back(std::move(prediction)); continue; }
+                    const auto & b = probe.base[k];
+                    double num = 0.0, den = 0.0;
+                    for (size_t i = 0; i < b.size(); ++i) { const double d = double(prediction[i]) - b[i]; num += d * d; den += double(b[i]) * b[i]; }
+                    sum += den > 0.0 ? num / den : 0.0; ++count;
+                }
+            }
+            if (drift) *drift = count ? sum / double(count) : 0.0;
+            return true;
+        };
+        if (config.nar_drift) {
+            const size_t n = dataset.items.size();
+            const float levels[3] = {250.0f, 500.0f, 750.0f};
+            for (size_t s = 0; s < std::min<size_t>(3, n); ++s) {
+                const auto & item = dataset.items[s * n / std::min<size_t>(3, n)];
+                DriftProbe probe;
+                for (float level : levels) {
+                    // Same seed per song: the crop and noise repeat, only the level moves.
+                    yue2_aitk::Yue2NativeSampler probe_sampler(config.seed * 1000003ull + 7919ull * (s + 1));
+                    auto sampled = probe_sampler.sample(item.song, item.prompt, 1500, std::vector<float>{level}, 0.0f, 0, 0, 0.0f);
+                    if (probe.noisy.empty()) probe.batch = sampled.batch;
+                    probe.noisy.push_back(std::move(sampled.noisy_bf16)); probe.timestep.push_back(sampled.timestep_bf16);
+                }
+                probes.push_back(std::move(probe));
+            }
+            const auto t0 = std::chrono::steady_clock::now();
+            if (!measure_drift(&state.nar_adapters(), true, nullptr)) return 1;
+            const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            // A second read of the untouched adapters is the meter's floor:
+            // anything but ~0 means the forward is not deterministic.
+            double floor = 0.0;
+            if (!measure_drift(&state.nar_adapters(), false, &floor)) return 1;
+            std::fprintf(stderr, "[yue2-aitk] decoder drift: %zu probes, %.1f s per reading, floor %.3g\n", probes.size() * 3, seconds, floor);
+        }
         const bool use_lm = (config.optimizer != "adamw");
         struct LmOptimHolder {
             LmOptim opt;
@@ -499,6 +550,8 @@ static int run_impl(Config config, std::string * error) {
         const auto end_step = [&]() { return planner_frozen_at >= 0 ? std::min(config.steps, planner_frozen_at + config.nar_extra_steps) : config.steps; };
         std::ofstream jsonl(std::filesystem::u8path(config.output) / "train.jsonl", std::ios::binary);
         if (!jsonl) { fail(error, "cannot create training JSONL"); return 1; }
+        // The planner's KL at the moment a checkpoint is written, for meters.json.
+        std::vector<double> kl_recent = resume_binding.kl_history;
         int last_saved = -1;
         // Declared before save_checkpoint, which writes them into the resume
         // record; seeded from it so a resumed segment can stop at once.
@@ -511,6 +564,19 @@ static int run_impl(Config config, std::string * error) {
             const auto temp_dir = std::filesystem::u8path(config.output) / (".checkpoint-step" + std::to_string(step) + ".tmp");
             std::error_code save_ec; if (std::filesystem::exists(final_dir, save_ec) || std::filesystem::exists(temp_dir, save_ec) || !std::filesystem::create_directory(temp_dir, save_ec) || save_ec) return false;
             const auto adapter = temp_dir / "adapter.safetensors"; const auto resume = temp_dir / "optimizer.resume";
+            if (config.nar_drift) {
+                double drift = 0.0;
+                if (!measure_drift(&state.nar_adapters(), false, &drift)) return false;
+                double kl = -1.0;
+                if (!kl_recent.empty()) { kl = 0.0; for (double v : kl_recent) kl += v; kl /= double(kl_recent.size()); }
+                std::ostringstream meters;
+                meters << std::setprecision(9) << "{\"stage\":\"meters\",\"step\":" << step << ",\"nar_drift\":" << drift;
+                if (kl >= 0.0) meters << ",\"ar_kl_mean20\":" << kl;
+                meters << ",\"planner_frozen\":" << (planner_frozen_at >= 0 ? "true" : "false") << "}\n";
+                std::ofstream(temp_dir / "meters.json", std::ios::binary) << meters.str();
+                jsonl << meters.str(); jsonl.flush();
+                std::cout << meters.str() << std::flush;
+            }
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
@@ -658,6 +724,10 @@ static int run_impl(Config config, std::string * error) {
             jsonl << line.str();
             std::cout << line.str() << std::flush;
             if (!jsonl.flush()) { fail(error, "training JSONL write failed"); return 1; }
+            if (planner_frozen_at < 0) {
+                kl_recent.push_back(metrics.ar_kl);
+                if (kl_recent.size() > 20) kl_recent.erase(kl_recent.begin());
+            }
             if (config.target_loss > 0.0f && planner_frozen_at < 0) {
                 // Same composite the server reports: AR CE + weighted KL + NAR
                 // MSE + weighted cursor CE. The window must be full before a

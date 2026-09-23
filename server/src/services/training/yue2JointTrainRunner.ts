@@ -86,6 +86,8 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
     'yue2-joint-train', '--checkpoint', o.checkpoint, '--dataset', o.dataset,
     '--output', o.outDir, '--steps', String(o.steps), '--save-every', String(o.saveEvery),
     '--seed', String(o.seed), '--device', o.device,
+    // Decoder drift meter at every checkpoint (meters.json): ~5 s a reading.
+    '--nar-drift',
   ];
   if (o.rank !== undefined) args.push('--rank', String(o.rank));
   if (o.alpha !== undefined) args.push('--alpha', String(o.alpha));
@@ -242,6 +244,8 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
         loss: state.lastLoss, path: saved.dir });
     }
     log(job, 'info', `Joint training ${stage}${step === undefined ? '' : ` at step ${step}`}`);
+  } else if (stage === 'meters' && step !== undefined) {
+    log(job, 'info', `Meters at step ${step}: decoder drift ${raw.nar_drift}${raw.ar_kl_mean20 === undefined ? '' : `, planner KL ${raw.ar_kl_mean20}`}`);
   } else if (stage === 'planner_frozen' && step !== undefined) {
     log(job, 'info', `Planner reached its KL target at step ${step}; frozen there, decoder keeps training`);
   } else if (stage === 'target' && step !== undefined) {
