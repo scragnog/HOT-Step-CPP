@@ -32,6 +32,7 @@ file/function/string over the exact line.
 | Anything MiniMax-Music3: engine port, /mm3 endpoints, backend toggle, MM3 debugging | [mm3-backend](mm3-backend/SKILL.md)* |
 | Format a MiniMax-Music3 caption; MM3 genre drift/adherence | [mm3-captioning](mm3-captioning/SKILL.md)* |
 | Train an MM3 LM style/album adapter; pick rank, steps, checkpoint | [mm3-lm-adapter-training](mm3-lm-adapter-training/SKILL.md)* |
+| Judge renders by ear: checkpoint ladders, A/B tests; any "listen and tell me" | [ear-test-scoresheet](ear-test-scoresheet/SKILL.md) |
 | Port `--attn flash` (the fused attention backward) to a trainer; VRAM-model branches; interpret any flash-vs-exact number | [flash-attn-training](flash-attn-training/SKILL.md) |
 
 Feature-specific work (Stem Studio, Lyric Studio/lireek, mastering, cover art,
