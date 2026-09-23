@@ -62,6 +62,8 @@ struct ResumeBinding {
     // restarted the windows empty, so no target stop could fire for the first
     // window's worth of steps of each segment: up to 20 steps of overshoot.
     std::vector<double> kl_history, loss_history;
+    // Step at which the planner was frozen (--nar-extra-steps); -1 = live.
+    int planner_frozen_at = -1;
 };
 // Steps in the KL trend fit. Kept in step with Yue2AitkTrainCard's chart.
 constexpr int kKlTrendWindow = 30;
@@ -124,6 +126,10 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
             yyjson_arr_foreach(a,hi,hmax,hv) if(yyjson_is_num(hv) && std::isfinite(yyjson_get_num(hv))) out->push_back(yyjson_get_num(hv));
         };
         history("kl_history",&binding->kl_history); history("loss_history",&binding->loss_history);
+        if(yyjson_val * v=yyjson_obj_get(root,"planner_frozen_at")) {
+            if(!yyjson_is_int(v) || yyjson_get_sint(v)<0 || yyjson_get_sint(v)>plan->completed) return fail(error,"resume planner_frozen_at field is malformed");
+            binding->planner_frozen_at=int(yyjson_get_sint(v));
+        }
     }
     if (config.optimizer!="adamw" && binding) {
         yyjson_val * vopt=yyjson_obj_get(root,"opt_iter");
@@ -140,7 +146,7 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
 }
 std::string make_resume_meta(const std::string & cp, const std::string & ds, const std::string & sm, uint64_t seed, int device, int completed, size_t cursor, const std::vector<size_t> & order, const std::string & sampler, float cursor_weight,
                              const yue2_aitk_runtime::Config & config, int opt_iter, double prodigy_d, double prodigy_r,
-                             const std::vector<double> & kl_history, const std::vector<double> & loss_history) {
+                             const std::vector<double> & kl_history, const std::vector<double> & loss_history, int planner_frozen_at) {
     yyjson_mut_doc * doc=yyjson_mut_doc_new(nullptr);
     if (!doc) return {};
     yyjson_mut_val * root=yyjson_mut_obj(doc), * arr=yyjson_mut_arr(doc);
@@ -161,6 +167,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     }
     if (config.target_kl_mode!="mean") yyjson_mut_obj_add_strcpy(doc,root,"target_kl_mode",config.target_kl_mode.c_str());
     if (config.nar_lr_scale!=1.0f) yyjson_mut_obj_add_real(doc,root,"nar_lr_scale",config.nar_lr_scale);  // absent = 1.0, keeps old records byte-identical
+    if (planner_frozen_at>=0) { yyjson_mut_obj_add_int(doc,root,"planner_frozen_at",planner_frozen_at); yyjson_mut_obj_add_int(doc,root,"nar_extra_steps",config.nar_extra_steps); }
     if (config.optimizer!="adamw") {
         yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
         if (config.optimizer=="prodigy") {
@@ -197,8 +204,11 @@ static int run_impl(Config config, std::string * error) {
         !std::isfinite(config.abc_dropout) || config.abc_dropout < 0.0f || config.abc_dropout > 1.0f ||
         !std::isfinite(config.caption_dropout) || config.caption_dropout < 0.0f || config.caption_dropout > 1.0f ||
         !std::isfinite(config.planner_lr_scale) || config.planner_lr_scale <= 0.0f ||
-        !std::isfinite(config.nar_lr_scale) || config.nar_lr_scale <= 0.0f) {
+        !std::isfinite(config.nar_lr_scale) || config.nar_lr_scale <= 0.0f || config.nar_extra_steps < 0) {
         fail(error, "invalid runtime configuration"); return 1;
+    }
+    if (config.nar_extra_steps > 0 && !(config.target_kl > 0.0f)) {
+        fail(error, "--nar-extra-steps needs --target-kl: the planner freezes when it reaches that KL"); return 1;
     }
     if (config.optimizer == "muon" && (config.planner_lr_scale != 1.0f || config.nar_lr_scale != 1.0f)) {
         // Muon's update is bucketed by shape and scaled once per bucket
@@ -255,6 +265,7 @@ static int run_impl(Config config, std::string * error) {
         if (resume_plan.completed > config.steps || resume_plan.completed > INT_MAX || resume_plan.record.state.step != resume_plan.completed) { fail(error, "resume completed step is invalid"); return 1; }
         if (resume_plan.cursor >= dataset.items.size()) { fail(error, "resume order cursor is out of range"); return 1; }
         if (!sampler.import_rng_state(resume_plan.sampler)) { fail(error, "resume sampler state is invalid"); return 1; }
+        if (resume_binding.planner_frozen_at >= 0 && config.nar_extra_steps <= 0) { fail(error, "this run's planner is frozen; resume it with --nar-extra-steps"); return 1; }
         order = resume_plan.order; cursor = resume_plan.cursor; completed = resume_plan.completed;
     } else { sampler.rng().shuffle(order); }
     if(cursor_weight>0) for(const auto & item:dataset.items) {
@@ -477,6 +488,15 @@ static int run_impl(Config config, std::string * error) {
                 resume_plan.record = {};
             }
         }
+        // A frozen record resumes frozen: its planner weights, just restored,
+        // are the held ones.
+        int planner_frozen_at = resume_binding.planner_frozen_at;
+        if (planner_frozen_at >= 0) {
+            state.freeze_planner();
+            std::fprintf(stderr, "[yue2-aitk] planner frozen since step %d; decoder-only until step %d\n", planner_frozen_at, std::min(config.steps, planner_frozen_at + config.nar_extra_steps));
+        }
+        // The run's last step: --steps, or the decoder budget once frozen.
+        const auto end_step = [&]() { return planner_frozen_at >= 0 ? std::min(config.steps, planner_frozen_at + config.nar_extra_steps) : config.steps; };
         std::ofstream jsonl(std::filesystem::u8path(config.output) / "train.jsonl", std::ios::binary);
         if (!jsonl) { fail(error, "cannot create training JSONL"); return 1; }
         int last_saved = -1;
@@ -494,7 +514,7 @@ static int run_impl(Config config, std::string * error) {
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
-                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window);
+                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at);
             if (metadata.empty()) return false;
             if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str(), dataset.trigger, config.caption_dropout)) return false;
             if (use_lm) {
@@ -546,7 +566,7 @@ static int run_impl(Config config, std::string * error) {
             if (!save_ec) { last_saved=step; event("checkpoint", step); }
             return !save_ec;
         };
-        while (completed < config.steps) {
+        while (completed < end_step()) {
             if (yue2_aitk_cancel_requested()) {
                 if (completed > 0 && !save_checkpoint(completed)) { fail(error, "cancel checkpoint publication failed"); return 1; }
                 event("cancelled", completed); return 130;
@@ -617,11 +637,15 @@ static int run_impl(Config config, std::string * error) {
             if (metrics.step != completed) { fail(error, "optimizer update count mismatch"); return 1; }
             if (++cursor == order.size()) { sampler.rng().shuffle(order); cursor=0; }
             std::ostringstream line;
-            line << std::setprecision(17) << "{\"stage\":\"joint\",\"step\":" << metrics.step
-                   << ",\"ar_ce\":" << metrics.ar_ce << ",\"ar_kl\":" << metrics.ar_kl
-                   << ",\"nar_mse\":" << metrics.nar_mse << ",\"gradient_norm\":" << metrics.gradient_norm
-                   << ",\"cursor_ce\":" << metrics.cursor_ce << ",\"cursor_weight\":" << cursor_weight
-                   << ",\"cursor_frames\":" << metrics.cursor_frames
+            line << std::setprecision(17) << "{\"stage\":\"joint\",\"step\":" << metrics.step;
+            // Frozen steps have no planner objective, so no AR numbers: a
+            // repeated or zero KL would read as a real measurement.
+            if (planner_frozen_at >= 0) line << ",\"planner_frozen\":true";
+            else line << ",\"ar_ce\":" << metrics.ar_ce << ",\"ar_kl\":" << metrics.ar_kl;
+            line << ",\"nar_mse\":" << metrics.nar_mse << ",\"gradient_norm\":" << metrics.gradient_norm;
+            if (planner_frozen_at < 0) line << ",\"cursor_ce\":" << metrics.cursor_ce << ",\"cursor_weight\":" << cursor_weight
+                   << ",\"cursor_frames\":" << metrics.cursor_frames;
+            line
                    << ",\"step_ms\":" << step_ms
                    << ",\"attention_forward\":\"" << (attention_precision?attention_precision(0):"unknown")
                    << "\",\"attention_backward\":\"" << (attention_precision?attention_precision(1):"unknown")
@@ -634,7 +658,7 @@ static int run_impl(Config config, std::string * error) {
             jsonl << line.str();
             std::cout << line.str() << std::flush;
             if (!jsonl.flush()) { fail(error, "training JSONL write failed"); return 1; }
-            if (config.target_loss > 0.0f) {
+            if (config.target_loss > 0.0f && planner_frozen_at < 0) {
                 // Same composite the server reports: AR CE + weighted KL + NAR
                 // MSE + weighted cursor CE. The window must be full before a
                 // stop, so the earliest stop is at step target_loss_window.
@@ -652,7 +676,7 @@ static int run_impl(Config config, std::string * error) {
                     }
                 }
             }
-            if (config.target_kl > 0.0f) {
+            if (config.target_kl > 0.0f && planner_frozen_at < 0) {
                 // Same window as the composite stop, on the planner's KL to
                 // base alone. The stop is "at or above": the adapter has moved
                 // as far from the base as the recipe allows.
@@ -664,7 +688,15 @@ static int run_impl(Config config, std::string * error) {
                     double sum = 0.0;
                     for (double v : kl_window) sum += v;
                     const double reading = trend ? trend_at_end(kl_window) : sum / (double) keep;
-                    if (reading >= (double) config.target_kl) {
+                    if (reading >= (double) config.target_kl && config.nar_extra_steps > 0) {
+                        // Freeze first, so the KL checkpoint's resume record
+                        // already says frozen and resumes decoder-only.
+                        planner_frozen_at = completed;
+                        state.freeze_planner();
+                        if (!save_checkpoint(completed)) { fail(error, "planner-freeze checkpoint publication failed"); return 1; }
+                        event("planner_frozen", completed);
+                        std::fprintf(stderr, "[yue2-aitk] planner reached KL %.4g at step %d: frozen; decoder-only until step %d\n", reading, completed, end_step());
+                    } else if (reading >= (double) config.target_kl) {
                         if (!save_checkpoint(completed)) { fail(error, "target checkpoint publication failed"); return 1; }
                         event("target", completed);
                         event("done", completed);
@@ -672,15 +704,18 @@ static int run_impl(Config config, std::string * error) {
                     }
                 }
             }
-            if (completed % config.save_every == 0 || completed == config.steps)
+            if (completed % config.save_every == 0 || completed == end_step())
                 if (!save_checkpoint(completed)) { fail(error, "checkpoint publication failed"); return 1; }
-            if (config.pause_at > 0 && completed >= config.pause_at && completed < config.steps) {
+            if (config.pause_at > 0 && completed >= config.pause_at && completed < end_step()) {
                 if (!save_checkpoint(completed)) { fail(error, "pause checkpoint publication failed"); return 1; }
                 event("paused", completed);
                 return 0;
             }
         }
         if (completed > 0 && !save_checkpoint(completed)) { fail(error, "final checkpoint publication failed"); return 1; }
+        // A decoder budget that ended before --steps is an early stop, and the
+        // server validates the last checkpoint off this event.
+        if (planner_frozen_at >= 0 && completed < config.steps) event("target", completed);
         event("done", completed); return yue2_aitk_cancel_requested() ? 130 : 0;
     } catch (const std::exception & exception) { if (error) *error = exception.what(); return 1; }
 }

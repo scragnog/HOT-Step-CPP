@@ -3384,6 +3384,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         steps: b.steps, saveEvery: saved.saveEvery,
         stopMode: b.stopMode ?? saved.stopMode, targetLoss: b.targetLoss ?? saved.targetLoss, targetKl: b.targetKl ?? saved.targetKl,
         targetKlMode: b.targetKlMode ?? saved.targetKlMode,
+        narExtraSteps: b.narExtraSteps ?? saved.narExtraSteps,
         preview: b.preview ?? saved.preview,
         lyricTiming: (saved.alignment as { enabled?: boolean } | undefined)?.enabled === true,
         cursorWeight: (saved.alignment as { cursorWeight?: number } | undefined)?.cursorWeight ?? 0 };
@@ -3575,6 +3576,15 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       targetKl = rawTargetKl;
     }
     const targetKlMode: 'mean' | 'trend' | undefined = stopMode === 'kl' && b.targetKlMode === 'trend' ? 'trend' : undefined;
+    let narExtraSteps: number | undefined;
+    if (stopMode === 'kl' && b.narExtraSteps !== undefined && b.narExtraSteps !== null && b.narExtraSteps !== '') {
+      const raw = Number(b.narExtraSteps);
+      if (!Number.isInteger(raw) || raw < 0 || raw > 0x7fffffff) {
+        res.status(400).json({ error: 'narExtraSteps must be a non-negative integer.' });
+        return;
+      }
+      if (raw > 0) narExtraSteps = raw;
+    }
     if (resume && (!fs.existsSync(resume) || !fs.statSync(resume).isFile())) {
       res.status(400).json({ error: `Joint-training resume record is missing: ${resume}` });
       return;
@@ -3608,12 +3618,14 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(targetLoss !== undefined ? { targetLoss } : {}),
       ...(targetKl !== undefined ? { targetKl } : {}),
       ...(targetKlMode ? { targetKlMode } : {}),
+      ...(narExtraSteps !== undefined ? { narExtraSteps } : {}),
       ...advanced,
       ...(preparation ? { preparation } : {}),
     });
     res.json({ jobId: job.id, kind: job.kind, trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16', outDir, steps, saveEvery, preview, lyricTiming: alignmentEnabled, cursorWeight, alignment,
       optimizer, cautious, rank, alpha: alphaRaw, adapterType, ...(adapterType === 'lokr' ? { lokrDim, lokrFactor } : {}), stopMode, ...advanced,
-      ...(targetLoss !== undefined ? { targetLoss } : {}), ...(targetKl !== undefined ? { targetKl } : {}), ...(targetKlMode ? { targetKlMode } : {}) });
+      ...(targetLoss !== undefined ? { targetLoss } : {}), ...(targetKl !== undefined ? { targetKl } : {}), ...(targetKlMode ? { targetKlMode } : {}),
+      ...(narExtraSteps !== undefined ? { narExtraSteps } : {}) });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

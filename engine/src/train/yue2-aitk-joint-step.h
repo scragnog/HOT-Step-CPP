@@ -58,6 +58,11 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     const auto notify=[&](const char * stage){if(progress)progress(stage);};
     Metrics result;
     state.clear_cursor_gradient();
+    // A frozen planner has no objective left: its forward, teacher, CE/KL and
+    // backward are skipped outright. The NAR's conditioning below still runs
+    // through the (held) planner adapters, exactly as at generation.
+    const bool planner_frozen=state.planner_frozen();
+    if(!planner_frozen) {
     notify("AR adapted forward");
     Yue2AitkEndpointHost embeds;
     if(!Yue2AitkEndpoints::token_embedding(backend,model,batch.ar.input_ids.data(),batch.ar.input_ids.size(),&embeds,error)) return false;
@@ -113,6 +118,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     if(!Yue2AitkEndpoints::ar_final_norm(backend,model,ar.final_hidden.data(),zeros.data(),ar.length,&adapted_norm,error)) return false;
     if(!yue2_aitk_stack::backward(backend,model,state.ar_adapters(),ar,nullptr,std::move(adapted_norm.dx),
         [&](size_t layer,const Yue2AitkBlockBackwardHost & g,std::string * why){return state.upload_gradients(false,int(layer),g,why);},error)) return false;
+    }
     // Recompute with the current adapted AR. This cache is detached host data.
     // It is local to this step and cannot survive the optimizer update below.
     notify("Refresh detached AR conditioning");
@@ -140,6 +146,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
         [&](size_t layer,const Yue2AitkBlockBackwardHost & g,std::string * why){return state.upload_gradients(true,int(layer),g,why);},error)) return false;
     if(!std::isfinite(result.ar_ce)||!std::isfinite(result.ar_kl)||!std::isfinite(result.nar_mse)) return fail(error,"nonfinite joint loss");
     notify("Joint clipping and optimizer update");
+    if(planner_frozen) state.zero_planner_gradients();
     if(!state.clip_gradients(1.0f,&result.gradient_norm,error)) return false;
     ggml_backend_synchronize(backend);
     if (lm) {
@@ -156,6 +163,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
         catch(const std::exception & e){return fail(error,e.what());}
         result.step=optimizer->step();
     }
+    if(planner_frozen) { state.hold_planner(); ggml_backend_synchronize(backend); }
     *metrics=result;
     return true;
 }

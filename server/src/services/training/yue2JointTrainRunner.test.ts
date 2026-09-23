@@ -45,6 +45,14 @@ test('pause resume CLI stays on the absolute step axis and preview cap is synth-
   assert.equal(args.includes('--preview-max-frames'), false);
 });
 
+test('decoder steps after KL ride only on a KL stop', () => {
+  const base = { checkpoint: 'b', dataset: 'd', outDir: 'o', steps: 750, saveEvery: 25, seed: 42, device: 'CUDA0', narExtraSteps: 100 };
+  const kl = buildYue2JointTrainArgs({ ...base, stopMode: 'kl', targetKl: 1.1 });
+  assert.deepEqual(kl.slice(kl.indexOf('--nar-extra-steps'), kl.indexOf('--nar-extra-steps') + 2), ['--nar-extra-steps', '100']);
+  assert.equal(buildYue2JointTrainArgs({ ...base, stopMode: 'steps' }).includes('--nar-extra-steps'), false);
+  assert.equal(buildYue2JointTrainArgs({ ...base, stopMode: 'kl', targetKl: 1.1, narExtraSteps: 0 }).includes('--nar-extra-steps'), false);
+});
+
 test('paused JSON event is recognized without becoming terminal done', () => {
   assert.deepEqual(parseYue2JointEvent('{"stage":"paused","step":50,"resume":"optimizer.resume"}', 100),
     { stage: 'paused', step: 50, totalSteps: 100 });

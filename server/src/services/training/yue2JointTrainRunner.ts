@@ -70,6 +70,10 @@ export interface ResolvedYue2JointTrainOptions {
   /** How the KL stop reads ar_kl: the engine's 20-step mean (default) or a
    *  30-step least-squares trend read at the current step (no lag). */
   targetKlMode?: 'mean' | 'trend';
+  /** KL stop only: freeze the planner when it reaches targetKl and train the
+   *  decoder alone for this many more steps (steps stays the cap). The KL
+   *  checkpoint is still saved. 0/absent = end the run at the KL. */
+  narExtraSteps?: number;
 }
 
 /** Route and native runner share the public stop-mode contract. */
@@ -103,6 +107,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   if (o.stopMode === 'loss' && o.targetLoss !== undefined) args.push('--target-loss', String(o.targetLoss));
   if (o.stopMode === 'kl' && o.targetKl !== undefined) args.push('--target-kl', String(o.targetKl));
   if (o.stopMode === 'kl' && o.targetKlMode === 'trend') args.push('--target-kl-mode', 'trend');
+  if (o.stopMode === 'kl' && o.narExtraSteps !== undefined && o.narExtraSteps > 0) args.push('--nar-extra-steps', String(o.narExtraSteps));
   if (o.lr !== undefined) args.push('--lr', String(o.lr));
   if (o.weightDecay !== undefined) args.push('--weight-decay', String(o.weightDecay));
   if (o.klWeight !== undefined) args.push('--kl-weight', String(o.klWeight));
@@ -237,6 +242,8 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
         loss: state.lastLoss, path: saved.dir });
     }
     log(job, 'info', `Joint training ${stage}${step === undefined ? '' : ` at step ${step}`}`);
+  } else if (stage === 'planner_frozen' && step !== undefined) {
+    log(job, 'info', `Planner reached its KL target at step ${step}; frozen there, decoder keeps training`);
   } else if (stage === 'target' && step !== undefined) {
     state.targetStopped = true;
     log(job, 'info', `Stop target reached at step ${step}; stopping early`);

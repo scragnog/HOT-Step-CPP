@@ -677,6 +677,9 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   plannerLrScale?: number;
   narLrScale?: number;
   targetKlMode?: 'mean' | 'trend';
+  /** KL stop: freeze the planner at its KL target, then train the decoder
+   *  alone for this many more steps. 0/absent = stop at the KL. */
+  narExtraSteps?: number;
 }
 
 export interface Yue2JointPreviewOptions {

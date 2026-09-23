@@ -84,7 +84,7 @@ public:
     }
 
     void reset() {
-        initialized_ = false; slots_.clear(); layer_slots_ = {}; ar_ = {}; nar_ = {}; cursor_slot_=kInvalid;
+        initialized_ = false; slots_.clear(); frozen_.clear(); layer_slots_ = {}; ar_ = {}; nar_ = {}; cursor_slot_=kInvalid;
         if (buffer_) { ggml_backend_buffer_free(buffer_); buffer_ = nullptr; }
         if (ctx_) { ggml_free(ctx_); ctx_ = nullptr; }
         backend_ = nullptr;
@@ -132,6 +132,29 @@ public:
             ggml_backend_tensor_set(slot.gradient, g.params[i].data(), 0, ggml_nbytes(slot.gradient));
         }
         return true;
+    }
+
+    // Planner freeze (--nar-extra-steps): every slot outside the decoder — the
+    // planner's text_encoders.* adapters and the cursor head — is captured
+    // once, then held. zero_planner_gradients() runs before clipping so the
+    // clip norm and Prodigy's d see the decoder alone; hold_planner() runs
+    // after the optimizer step and writes the captured weights back, which
+    // undoes whatever momentum or weight decay moved. Optimizer-agnostic.
+    void freeze_planner() {
+        frozen_.clear();
+        for (size_t i = 0; i < slots_.size(); ++i) {
+            if (slots_[i].name.rfind("diffusion_model", 0) == 0) continue;
+            std::vector<float> weights(ggml_nelements(slots_[i].parameter));
+            ggml_backend_tensor_get(slots_[i].parameter, weights.data(), 0, ggml_nbytes(slots_[i].parameter));
+            frozen_.emplace_back(i, std::move(weights));
+        }
+    }
+    bool planner_frozen() const { return !frozen_.empty(); }
+    void zero_planner_gradients() {
+        for (const auto & f : frozen_) ggml_backend_tensor_memset(slots_[f.first].gradient, 0, 0, ggml_nbytes(slots_[f.first].gradient));
+    }
+    void hold_planner() {
+        for (const auto & f : frozen_) ggml_backend_tensor_set(slots_[f.first].parameter, f.second.data(), 0, ggml_nbytes(slots_[f.first].parameter));
     }
 
     // Default recipe uses one joint parameter group. The host reduction uses
@@ -209,6 +232,7 @@ private:
     ggml_backend_buffer_t buffer_ = nullptr;
     Yue2AitkExpertAdapters ar_, nar_;
     std::vector<Slot> slots_;
+    std::vector<std::pair<size_t, std::vector<float>>> frozen_;  // slot index, held weights
     // [expert (0 = NAR, 1 = AR)][layer] -> slot indices in yue2_aitk_layer_params order.
     std::array<std::vector<std::vector<size_t>>, 2> layer_slots_{};
     uint32_t seed_ = kDefaultSeed;

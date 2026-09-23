@@ -141,6 +141,14 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // tested recipe. LoRA keeps KL 1.4 with the planner at 0.3 (LORA_STOP).
   // Trend (2026-09-22): the 20-step mean lagged the KL trend by ~10 steps.
   stopMode: 'kl', targetKl: 1.1, targetKlMode: 'trend', lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
+  // Planner freeze (2026-09-23): the KL target used to end the whole run, so
+  // the decoder, which carries timbre, stopped wherever the planner did. The
+  // checkpoint-mix ear test (AR200+NAR150 over AR200+NAR100) said the decoder
+  // wants more. Now the planner freezes at its KL and the decoder trains 100
+  // more steps; the KL checkpoint is still saved, so the old stop point is
+  // one of the rungs. Caption dropout 0.5: the measured recipe, so a new
+  // caption lands on the artist rather than beside one memorised track.
+  narExtraSteps: 100, captionDropout: 0.5,
 };
 const LORA_STOP = { targetKl: 1.4, plannerLrScale: 0.3, narLrScale: undefined };
 const LOKR_STOP = { targetKl: 1.1, plannerLrScale: 0.6, narLrScale: 1 };
@@ -258,6 +266,14 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     if (stored.optimizer !== 'adamw' && (stored.cautious === undefined || stored.cautious === false)) stored.cautious = true;
     if (stored.adapterType === 'lokr' && stored.targetKl === 1.0) stored.targetKl = LOKR_STOP.targetKl;
     window.localStorage.setItem(d0923, '1');
+  }
+  // Planner freeze + caption dropout (2026-09-23): fields a form never set
+  // take the new defaults; deliberate values stay.
+  const freeze = `${FORM_KEY}${datasetId}:defaults-planner-freeze`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(freeze)) {
+    if (stored.narExtraSteps === undefined) stored.narExtraSteps = DEFAULT_FORM.narExtraSteps;
+    if (stored.captionDropout === undefined) stored.captionDropout = DEFAULT_FORM.captionDropout;
+    window.localStorage.setItem(freeze, '1');
   }
   return { ...DEFAULT_FORM, ...stored };
 }
@@ -853,6 +869,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             <option value="mean">{t('trainingStudio.yue2.method.targetKlMean', '20-step mean (lags ~10 steps)')}</option>
           </select>
         </label>}
+        {(form.stopMode ?? 'steps') === 'kl' && field(t('trainingStudio.yue2.method.narExtraSteps', 'Decoder steps after KL'), 'narExtraSteps', 'number')}
         {field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number')}
         {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number')}
         {field(t('trainingStudio.yue2.method.device', 'CUDA device'), 'device')}
@@ -883,7 +900,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number')}
       </div>
       {(form.adapterType ?? 'lora') === 'lokr' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.lokrHint', 'LoKr trains a Kronecker-factored delta per site instead of a low-rank pair. Strength is alpha / dim; 4x (64 / 4 / 256, about 106 MB for both halves) is the tested default, against 279 MB for the rank-64 LoRA. For more capacity raise dim and keep alpha at 4x dim; at factor 4 stay below dim 256, where some sites stop factorizing and ignore alpha.')}</p>}
-      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 1.0. Training stops once the trailing 20-step mean reaches the target; steps is the cap.')}</p>}
+      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 1.0. Once the KL reading reaches the target the planner freezes there. With "Decoder steps after KL" above 0, the decoder (timbre, where likeness lives) keeps training alone for that many steps; 0 ends the run at the KL, as before. The KL checkpoint is saved either way. Max steps is the cap.')}</p>}
       {(form.stopMode ?? 'steps') === 'loss' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetLossHint', 'Composite = AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight. Training stops once the trailing 20-step mean is at or below this.')}</p>}
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         {resumeChoice ? <p className="text-xs text-zinc-500">Optimizer: {form.optimizer ?? 'adamw'} (restored from the selected run)</p>
@@ -936,7 +953,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             ['narLrScale', t('trainingStudio.yue2.method.narLrScale', 'Decoder (NAR) learning-rate scale'), 'default 1.0 · the NAR half trains at lr × this. Lower it if renders garble words or lose audio quality before the planner reaches its KL target'],
             ['klWeight', t('trainingStudio.yue2.method.klWeight', 'KL anchor to base (planner)'), 'default 0.2 · higher keeps the planner closer to the base model'],
             ['abcDropout', t('trainingStudio.yue2.method.abcDropout', 'ABC dropout'), 'default 0.5 · share of lead-sheet examples trained without their sheet, so one adapter serves cot on and off'],
-            ['captionDropout', t('trainingStudio.yue2.method.captionDropout', 'Caption dropout'), 'default 0 · share of steps trained on the trigger alone instead of the song\'s caption. 0.5 is the measured recipe: it stops the adapter binding to each track\'s caption, so a NEW caption generalises. Needs a dataset prepared after 2026-09-20.'],
+            ['captionDropout', t('trainingStudio.yue2.method.captionDropout', 'Caption dropout'), 'default 0 (this card ships 0.5) · share of steps trained on the trigger alone instead of the song\'s caption. 0.5 is the measured recipe: it stops the adapter binding to each track\'s caption, so a NEW caption generalises. Needs a dataset prepared after 2026-09-20.'],
           ] as const).map(([key, label, hint]) => (
             <label key={key} className="flex flex-col gap-1">
               <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{label}</span>

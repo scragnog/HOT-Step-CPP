@@ -84,7 +84,7 @@ export const Yue2BatchPanel: React.FC = () => {
       <p className="text-[11px] text-zinc-500">
         {t('trainingStudio.yue2.batch.recipe', 'Recipe')}: {String(recipe.optimizer ?? 'adamw')} · rank {String(recipe.rank ?? 32)}/{String(recipe.alpha ?? 32)}
         {recipe.lr !== undefined ? ` · lr ${recipe.lr}` : ''}{recipe.plannerLrScale !== undefined ? ` · planner ×${recipe.plannerLrScale}` : ''}
-        {recipe.stopMode === 'kl' ? ` · until AR KL ${recipe.targetKl} (cap ${recipe.steps})` : recipe.stopMode === 'loss' ? ` · until loss ${recipe.targetLoss} (cap ${recipe.steps})` : ` · ${recipe.steps} steps`}
+        {recipe.stopMode === 'kl' ? ` · until AR KL ${recipe.targetKl}${Number(recipe.narExtraSteps) > 0 ? `, then decoder +${recipe.narExtraSteps}` : ''} (cap ${recipe.steps})` : recipe.stopMode === 'loss' ? ` · until loss ${recipe.targetLoss} (cap ${recipe.steps})` : ` · ${recipe.steps} steps`}
         {batch.lyricTiming ? ' · lyric timing' : ''}
       </p>
       <div className="flex flex-col gap-1.5">
