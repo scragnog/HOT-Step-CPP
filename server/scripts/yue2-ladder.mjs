@@ -7,7 +7,9 @@
 //
 //   node server/scripts/yue2-ladder.mjs <config.json>
 //
-// config: { runDir, outDir, caption, lyrics, seed, pairs: [[arStep, narStep], ...] }
+// config: { runDir, outDir, caption, lyrics, seed, pairs: [[arStep, narStep], ...], takes? }
+//   takes > 1 renders each pair that many times (seed, seed+1, ...) as -t1, -t2 files:
+//   renders are not reproducible from the seed, so one take per rung is noisy.
 //   a pair of [0, 0] renders the base model with no adapter (diction reference).
 // Idempotent: a pair whose WAV already exists is skipped, so a crashed or
 // interrupted ladder resumes by running it again.
@@ -28,21 +30,24 @@ const meters = (step) => {
   try { return JSON.parse(fs.readFileSync(path.join(cfg.runDir, `checkpoint-step${step}`, 'meters.json'), 'utf8')); }
   catch { return {}; }
 };
+// Single-user local auth: /api/auth/auto hands out a bearer token.
+const { token } = await fetch(`${APP}/api/auth/auto`).then(r => r.json());
+const auth = { Authorization: `Bearer ${token}` };
 const json = async (res) => { const t = await res.text(); if (!res.ok) throw new Error(`${res.status} ${t.slice(0, 300)}`); return JSON.parse(t); };
 const select = (ar, nar) => fetch(`${APP}/api/backends/models`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ backend: 'yue2', selection: { lmAdapterAr: ar, lmAdapterNar: nar } }) }).then(json);
 
-async function render(title) {
-  const { jobId } = await json(await fetch(`${APP}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: cfg.caption, lyrics: cfg.lyrics, seed: cfg.seed, randomSeed: false, batchSize: 1, title }) }));
+async function render(title, seed) {
+  const { jobId } = await json(await fetch(`${APP}/api/generate`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...auth },
+    body: JSON.stringify({ prompt: cfg.caption, lyrics: cfg.lyrics, seed, randomSeed: false, batchSize: 1, title }) }));
   const deadline = Date.now() + 40 * 60_000;
   for (;;) {
     if (Date.now() > deadline) throw new Error(`render ${jobId} timed out`);
-    const s = await json(await fetch(`${APP}/api/generate/status/${jobId}`));
+    const s = await json(await fetch(`${APP}/api/generate/status/${jobId}`, { headers: auth }));
     if (s.status === 'succeeded') {
       const url = (s.result?.audioUrls ?? s.audioUrls ?? [])[0];
       if (!url) throw new Error(`render ${jobId} succeeded without audio`);
-      const res = await fetch(url.startsWith('http') ? url : `${APP}${url}`);
+      const res = await fetch(url.startsWith('http') ? url : `${APP}${url}`, { headers: auth });
       if (!res.ok) throw new Error(`audio download ${res.status}`);
       return { jobId, bytes: Buffer.from(await res.arrayBuffer()), name: path.basename(url.split('?')[0]) };
     }
@@ -69,21 +74,26 @@ const original = await fetch(`${APP}/api/backends/models?backend=yue2`).then(r =
 let n = 0;
 try {
   for (const [ar, nar] of cfg.pairs) {
-    const label = ar === 0 && nar === 0 ? 'base' : `ar${String(ar).padStart(3, '0')}-nar${String(nar).padStart(3, '0')}`;
-    const file = path.join(cfg.outDir, `${String(++n).padStart(2, '0')}-${label}.wav`);
+    const label = ar === 0 && nar === 0 ? 'base' : `ar${String(ar).padStart(4, '0')}-nar${String(nar).padStart(4, '0')}`;
+    const num = String(++n).padStart(2, '0');
+    const takes = ar === 0 && nar === 0 ? 1 : Math.max(1, cfg.takes ?? 1);
+    for (let take = 1; take <= takes; take++) {
+    const file = path.join(cfg.outDir, `${num}-${label}${takes > 1 ? `-t${take}` : ''}.wav`);
+    const seed = cfg.seed + take - 1;
     if (fs.existsSync(file)) { console.log(`skip ${path.basename(file)}`); continue; }
     for (const [step, half] of [[ar, 'ar'], [nar, 'nar']]) {
       if (step > 0 && !fs.existsSync(ckpt(step, half))) throw new Error(`missing ${ckpt(step, half)}`);
     }
     await select(ckpt(ar, 'ar'), ckpt(nar, 'nar'));
     const started = Date.now();
-    const out = await render(`ladder ${path.basename(cfg.outDir)} ${label}`);
+    const out = await render(`ladder ${path.basename(cfg.outDir)} ${label} t${take}`, seed);
     fs.writeFileSync(file, out.bytes);
     const d = await diction(out.bytes, out.name).catch(err => ({ error: String(err.message || err) }));
-    const row = { file: path.basename(file), ar, nar, seed: cfg.seed, seconds: Math.round((Date.now() - started) / 1000),
+    const row = { file: path.basename(file), ar, nar, seed, take, seconds: Math.round((Date.now() - started) / 1000),
       ar_kl: meters(ar).ar_kl_mean20 ?? null, nar_drift: meters(nar).nar_drift ?? null, diction: d, jobId: out.jobId };
     fs.appendFileSync(results, JSON.stringify(row) + '\n');
     console.log(JSON.stringify(row));
+    }
   }
 } finally {
   // Put the user's picks back, or clear them if they cannot be read.

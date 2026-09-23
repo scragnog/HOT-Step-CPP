@@ -216,7 +216,10 @@ function render(){
   if(focusId){const n=document.getElementById(focusId);if(n&&n.tagName==="TEXTAREA"){n.focus();if(Number.isFinite(caret))n.setSelectionRange(caret,caret);}}
 }
 function chart(list){
-  const pts=list.filter(t=>!isRef(t));
+  // One chart point per x: repeated takes of the same rung are averaged.
+  const byX=new Map();
+  for(const t of list.filter(t=>!isRef(t))){const k=t.x??t.id;if(!byX.has(k))byX.set(k,{x:t.x,ids:[]});byX.get(k).ids.push(t.id);}
+  const pts=[...byX.values()];
   const W=720,H=150,L=34,R=12,T=12,B=26;
   const x=i=>L+(pts.length<2?0:i*(W-L-R)/(pts.length-1)), y=v=>T+(5-v)*(H-T-B)/4;
   const svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.setAttribute("viewBox",`0 0 ${W} ${H}`);svg.setAttribute("role","img");svg.setAttribute("aria-label","Score averages by rung");
@@ -225,7 +228,7 @@ function chart(list){
   pts.forEach((t,i)=>{add("text",{x:x(i),y:H-8,"text-anchor":"middle","font-size":11,fill:"var(--muted)","font-family":"IBM Plex Mono, monospace"}).textContent=t.x??i+1;});
   for(const[name,def]of Object.entries(CONFIG.series)){
     const keys=CONFIG.criteria.filter(c=>c.series===name).map(c=>c.key);
-    const vals=pts.map((t,i)=>[i,avg(scores[t.id],keys)]).filter(p=>p[1]!==null);
+    const vals=pts.map((p,i)=>{const v=p.ids.map(id=>avg(scores[id],keys)).filter(v=>v!==null);return[i,v.length?v.reduce((a,b)=>a+b,0)/v.length:null];}).filter(p=>p[1]!==null);
     if(vals.length>1)add("polyline",{points:vals.map(([i,v])=>`${x(i)},${y(v)}`).join(" "),fill:"none",stroke:def.color,"stroke-width":2.5,"stroke-linejoin":"round"});
     vals.forEach(([i,v])=>add("circle",{cx:x(i),cy:y(v),r:4,fill:def.color}));
   }
