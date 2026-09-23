@@ -116,7 +116,7 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req) {
     // so it never needs the VAE resident.
     const bool evict_strict = !g_keep_loaded;
     if (!evict_strict &&
-        !yue2_load_parts(&g_yue2, /*want_lm=*/true, /*want_vae=*/!req.plan_only, req.vae_variant,
+        !yue2_load_parts(&g_yue2, /*want_lm=*/true, /*want_vae=*/!req.plan_only && !req.semantic_only, req.vae_variant,
                          /*want_encoder=*/false, &err)) {
         job->result_body = err.empty() ? "YuE2 load failed" : err;
         job->result_mime  = "text/plain";
@@ -188,6 +188,15 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req) {
         // JSON (result_abc) so a poller gets it without a second fetch.
         job->result_body = first.score_abc;
         job->result_mime  = "text/plain; charset=utf-8";
+    } else if (req.semantic_only) {
+        std::string body = "[";
+        for (size_t i = 0; i < first.semantic_ids.size(); i++) {
+            if (i) body += ',';
+            body += std::to_string(first.semantic_ids[i]);
+        }
+        body += "]";
+        job->result_body = std::move(body);
+        job->result_mime  = "application/json";
     } else if (result.tracks.size() == 1) {
         job->result_body = audio_encode_wav_s16(first.audio_planar.data(), (int) first.samples, result.sample_rate);
         job->result_mime  = "audio/wav";

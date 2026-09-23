@@ -274,7 +274,10 @@ static int run_impl(Config config, std::string * error) {
         if (resume_plan.cursor >= dataset.items.size()) { fail(error, "resume order cursor is out of range"); return 1; }
         if (!sampler.import_rng_state(resume_plan.sampler)) { fail(error, "resume sampler state is invalid"); return 1; }
         if (resume_binding.planner_frozen_at >= 0 && config.nar_extra_steps <= 0) { fail(error, "this run's planner is frozen; resume it with --nar-extra-steps"); return 1; }
+        if (config.freeze_planner_now && config.nar_extra_steps <= 0) { fail(error, "--freeze-planner-now needs --nar-extra-steps (the decoder's budget after the freeze)"); return 1; }
         order = resume_plan.order; cursor = resume_plan.cursor; completed = resume_plan.completed;
+    } else if (config.freeze_planner_now) {
+        fail(error, "--freeze-planner-now needs --resume: it freezes the checkpoint's planner"); return 1;
     } else { sampler.rng().shuffle(order); }
     if(cursor_weight>0) for(const auto & item:dataset.items) {
         const auto & binding=item.prompt.cursor;
@@ -550,6 +553,12 @@ static int run_impl(Config config, std::string * error) {
         // A frozen record resumes frozen: its planner weights, just restored,
         // are the held ones.
         int planner_frozen_at = resume_binding.planner_frozen_at;
+        if (planner_frozen_at < 0 && config.freeze_planner_now) {
+            // A stop decided outside the trainer: this checkpoint's planner is
+            // the one kept. Same bookkeeping as the KL freeze.
+            planner_frozen_at = completed;
+            std::fprintf(stderr, "[yue2-aitk] --freeze-planner-now: planner frozen at the resumed step %d\n", completed);
+        }
         if (planner_frozen_at >= 0) {
             state.freeze_planner();
             std::fprintf(stderr, "[yue2-aitk] planner frozen since step %d; decoder-only until step %d\n", planner_frozen_at, std::min(config.steps, planner_frozen_at + config.nar_extra_steps));

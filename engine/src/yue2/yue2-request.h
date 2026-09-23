@@ -68,6 +68,10 @@ struct Yue2Request {
     // NAR/VAE work, no audio). The score-preview flow: plan once, let the
     // user look at it, then re-submit the same request with `abc` set.
     bool        plan_only = false;
+    // Stop after the semantic stage: the result is the raw codec id stream as
+    // a JSON array, no NAR, no VAE, no audio. A training-time probe of the
+    // planner (the AR half) alone.
+    bool        semantic_only = false;
 
     uint64_t seed         = 0;
     bool     seed_present = false;
@@ -240,6 +244,23 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
             return false;
         }
         out->plan_only = yyjson_is_bool(v) && yyjson_get_bool(v);
+    }
+    if (yyjson_val * v = yyjson_obj_get(root, "semantic_only")) {
+        if (!yyjson_is_bool(v) && !yyjson_is_null(v)) {
+            if (err) {
+                *err = "\"semantic_only\" must be a boolean";
+            }
+            yyjson_doc_free(doc);
+            return false;
+        }
+        out->semantic_only = yyjson_is_bool(v) && yyjson_get_bool(v);
+    }
+    if (out->plan_only && out->semantic_only) {
+        if (err) {
+            *err = "\"plan_only\" and \"semantic_only\" are exclusive";
+        }
+        yyjson_doc_free(doc);
+        return false;
     }
     if (out->plan_only && out->cot == YUE2_COT_OFF) {
         if (err) {
@@ -510,7 +531,7 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         yyjson_doc_free(doc);
         return false;
     }
-    if (out->plan_only && out->synth_batch_size != 1) {
+    if ((out->plan_only || out->semantic_only) && out->synth_batch_size != 1) {
         out->synth_batch_size = 1;  // no NAR runs, so variations mean nothing
     }
 

@@ -7,6 +7,7 @@ import { emitProgress, finishJob, isCancelled, pushEvent, type TrainingJob } fro
 import { buildGpuEnv } from '../gpuDevices.js';
 import { log, runYue2AceTrain, type RelayState } from './yue2TrainRunner.js';
 import { checkpointRecords, listYue2AitkRuns, recordYue2AitkRun } from './yue2AitkRuns.js';
+import { runYue2PlanCheck, type Yue2PlanCheckOptions } from './yue2PlanCheck.js';
 import { renderYue2JointPreview, Yue2PreviewCleanupError } from './yue2JointPreview.js';
 import { yue2Unload } from '../backends/yue2/client.js';
 import { ensureYue2PreparedDataset } from './yue2AutoPrepare.js';
@@ -82,6 +83,14 @@ export interface ResolvedYue2JointTrainOptions {
   spikeFactor?: number;
   spikeStop?: number;
   spikeStopWindow?: number;
+  /** Plan-check planner stop: every `every` steps while the planner is live,
+   *  pause, have the checkpoint's planner write `plans` plans, and freeze the
+   *  planner at the LAST checkpoint whose failure rate stayed within `margin`
+   *  of the base planner's. Needs narExtraSteps (the decoder's budget after
+   *  the freeze). caption/lyrics default to a training song's. */
+  planCheck?: { every: number } & Partial<Yue2PlanCheckOptions>;
+  /** Segment-level: resume with the planner frozen at the resumed step. */
+  freezePlannerNow?: boolean;
 }
 
 /** Route and native runner share the public stop-mode contract. */
@@ -131,6 +140,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
     if (o.spikeStopWindow !== undefined) args.push('--spike-stop-window', String(o.spikeStopWindow));
   }
   if (o.resume) args.push('--resume', o.resume);
+  if (o.resume && o.freezePlannerNow) args.push('--freeze-planner-now');
   if (o.alignment) {
     args.push('--cursor-weight', String(o.alignment.enabled ? o.alignment.cursorWeight : 0));
   }
@@ -262,6 +272,7 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
   } else if (stage === 'spike_stop' && step !== undefined) {
     log(job, 'info', `Repeated gradient spikes at step ${step}; stopping on the last pre-spike weights`);
   } else if (stage === 'planner_frozen' && step !== undefined) {
+    state.frozenAt = step;
     log(job, 'info', `Planner reached its KL target at step ${step}; frozen there, decoder keeps training`);
   } else if (stage === 'target' && step !== undefined) {
     state.targetStopped = true;
@@ -336,17 +347,46 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
     log(job, 'info', `Starting YuE2 joint training (${o.device})`);
     nativeAttempted = true;
     const preview = o.preview?.enabled && o.preview.everySteps > 0 ? o.preview : undefined;
-    if (preview) fs.mkdirSync(path.join(o.outDir, 'segments'), { recursive: true });
+    // Plan checks pause the run like previews do; the pause cadence is the
+    // check's while the planner is live, the preview's once it is frozen.
+    const planCheck = o.planCheck && o.planCheck.every > 0 && (o.narExtraSteps ?? 0) > 0 ? o.planCheck : undefined;
+    const segmented = !!(preview || planCheck);
+    if (segmented) fs.mkdirSync(path.join(o.outDir, 'segments'), { recursive: true });
+    let plannerFrozen = !!o.resume && /planner_frozen_at/.test((() => { try { return fs.readFileSync(o.resume!, 'latin1').slice(0, 65536); } catch { return ''; } })());
+    let checkOpts: Yue2PlanCheckOptions | undefined;
+    let baseFail = 0;
+    let lastGood: { step: number; optimizerPath: string } | undefined;
+    if (planCheck && !plannerFrozen) {
+      let caption = planCheck.caption || '', lyrics = planCheck.lyrics || '';
+      if (!caption || !lyrics) {
+        try {
+          const parsed = JSON.parse(fs.readFileSync(o.dataset, 'utf8')) as { items?: Array<Record<string, unknown>> };
+          const item = parsed.items?.find(x => x && typeof x === 'object');
+          if (!caption) caption = typeof item?.style === 'string' ? item.style : '';
+          if (!lyrics) lyrics = typeof item?.lyrics === 'string' ? item.lyrics : '';
+        } catch { /* a missing prompt fails the check below */ }
+      }
+      if (!caption) throw new Error('Plan check needs a caption: none given and none in the dataset');
+      checkOpts = { plans: planCheck.plans ?? 8, seed: planCheck.seed ?? 424242, margin: planCheck.margin ?? 0.3, caption, lyrics };
+      if (o.stopEngine !== false) throw new Error('Plan checks need the engine running during training: untick "Stop the engine during training"');
+      job.phase = 'plan-check'; emitProgress(job);
+      const base = await runYue2PlanCheck('', 0, checkOpts, o.outDir, job.controller.signal);
+      baseFail = base.failRate;
+      log(job, 'info', `Plan check: base planner fails ${base.failures}/${base.plans.length} plans on this prompt; stop when a checkpoint exceeds ${(baseFail + checkOpts.margin).toFixed(2)}`);
+    }
     let resume = o.resume || '';
     const resumeStep = resume ? Number((/checkpoint-step(\d+)/.exec(resume) || [])[1] || 0) : 0;
     let step = resumeStep;
     let segmentNo = 1;
+    let freezeNext = false;
     const clock = seedTrainClock(resume, resumeStep);
     for (;;) {
       if (isCancelled(job)) return;
       const segmentOut = preview ? path.join(o.outDir, 'segments', `segment-${String(segmentNo).padStart(6, '0')}`) : o.outDir;
-      const pauseAt = preview ? Math.min(o.steps, step + preview.everySteps) : 0;
-      const segment = { ...o, outDir: segmentOut, resume: resume || undefined, pauseAt: pauseAt < o.steps ? pauseAt : undefined };
+      const cadence = planCheck && !plannerFrozen ? planCheck.every : preview ? preview.everySteps : 0;
+      const pauseAt = cadence > 0 ? Math.min(o.steps, step + cadence) : 0;
+      const segment = { ...o, outDir: segmentOut, resume: resume || undefined, pauseAt: pauseAt < o.steps ? pauseAt : undefined, freezePlannerNow: freezeNext };
+      freezeNext = false;
       const state: RelayState = { fatalMessage: '', doneSeen: false, lastStep: step, targetStopped: false, totalSteps: o.steps };
       // A target-loss stop ends the run early: the engine checkpoints the
       // last completed step, so the validator must accept that step, not o.steps.
@@ -364,9 +404,28 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
           return null;
         }, (line, current) => relayJsonLine(job, line, current, clock), state, o.spawnEnv, o.stopEngine !== false);
       if (isCancelled(job)) return;
-      if (!state.pausedAt || !preview || state.pausedAt >= o.steps) break;
+      if (state.frozenAt !== undefined) plannerFrozen = true;
+      if (!state.pausedAt || !segmented || state.pausedAt >= o.steps) break;
       const ckpt = checkpointRecords(segmentOut).find(c => c.step === state.pausedAt);
       if (!ckpt?.optimizerPath || !ckpt.arPath || !ckpt.narPath) throw new Error(`Joint-training pause at step ${state.pausedAt} has no complete paired checkpoint`);
+      if (checkOpts && !plannerFrozen) {
+        job.phase = 'plan-check'; emitProgress(job);
+        const check = await runYue2PlanCheck(ckpt.arPath, state.pausedAt, checkOpts, o.outDir, job.controller.signal);
+        if (isCancelled(job)) return;
+        const over = check.failRate > baseFail + checkOpts.margin;
+        log(job, 'info', `Plan check at step ${state.pausedAt}: ${check.failures}/${check.plans.length} plans fail (base ${(baseFail * 100).toFixed(0)}%)${over ? ' — over the line' : ''}`);
+        pushEvent(job, { type: 'metric', metric: 'planCheck', ts: Date.now(), step: state.pausedAt, failRate: check.failRate, baseFail } as any);
+        if (over) {
+          // Freeze at the last checkpoint that passed. If the first check
+          // fails, there is no earlier planner worth keeping: freeze here.
+          const keep = lastGood ?? { step: state.pausedAt, optimizerPath: ckpt.optimizerPath };
+          log(job, 'info', `Planner stop: freezing at step ${keep.step}; the decoder trains alone from there`);
+          resume = keep.optimizerPath; step = keep.step; segmentNo++; freezeNext = true; plannerFrozen = true;
+          continue;
+        }
+        lastGood = { step: state.pausedAt, optimizerPath: ckpt.optimizerPath };
+      }
+      if (!preview) { resume = ckpt.optimizerPath; step = state.pausedAt; segmentNo++; continue; }
       job.phase = 'preview'; emitProgress(job);
       try {
         await renderYue2JointPreview({ output: o.outDir, step: state.pausedAt, options: preview, arAdapter: ckpt.arPath, narAdapter: ckpt.narPath, dataset: o.dataset, signal: job.controller.signal });

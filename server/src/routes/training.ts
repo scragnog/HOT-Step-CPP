@@ -3386,6 +3386,10 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         targetKlMode: b.targetKlMode ?? saved.targetKlMode,
         narExtraSteps: b.narExtraSteps ?? saved.narExtraSteps,
         stopEngine: b.stopEngine ?? saved.stopEngine,
+        planCheck: b.planCheck ?? saved.planCheck,
+        // Freeze the resumed checkpoint's planner: a stop decided outside the
+        // trainer (a plan sweep on the checkpoints). Never inherited from the run.
+        ...(b.freezePlannerNow === true ? { freezePlannerNow: true } : {}),
         spikeFactor: b.spikeFactor ?? saved.spikeFactor, spikeStop: b.spikeStop ?? saved.spikeStop,
         spikeStopWindow: b.spikeStopWindow ?? saved.spikeStopWindow,
         preview: b.preview ?? saved.preview,
@@ -3590,6 +3594,19 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       }
       spike[key] = v;
     }
+    // Plan-check planner stop (see yue2PlanCheck.ts).
+    let planCheck: { every: number; plans?: number; margin?: number; seed?: number; caption?: string; lyrics?: string } | undefined;
+    if (b.planCheck && typeof b.planCheck === 'object') {
+      const pc = b.planCheck as Record<string, unknown>;
+      const every = Number(pc.every);
+      if (!Number.isInteger(every) || every < 1 || every > 100000) { res.status(400).json({ error: 'planCheck.every must be a positive integer.' }); return; }
+      planCheck = { every };
+      if (pc.plans !== undefined) { const v = Number(pc.plans); if (!Number.isInteger(v) || v < 1 || v > 64) { res.status(400).json({ error: 'planCheck.plans must be 1..64.' }); return; } planCheck.plans = v; }
+      if (pc.margin !== undefined) { const v = Number(pc.margin); if (!Number.isFinite(v) || v < 0 || v > 1) { res.status(400).json({ error: 'planCheck.margin must be 0..1.' }); return; } planCheck.margin = v; }
+      if (pc.seed !== undefined) { const v = Number(pc.seed); if (!Number.isInteger(v) || v < 0) { res.status(400).json({ error: 'planCheck.seed must be a non-negative integer.' }); return; } planCheck.seed = v; }
+      if (typeof pc.caption === 'string') planCheck.caption = pc.caption;
+      if (typeof pc.lyrics === 'string') planCheck.lyrics = pc.lyrics;
+    }
     let narExtraSteps: number | undefined;
     if (stopMode === 'kl' && b.narExtraSteps !== undefined && b.narExtraSteps !== null && b.narExtraSteps !== '') {
       const raw = Number(b.narExtraSteps);
@@ -3635,6 +3652,8 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(narExtraSteps !== undefined ? { narExtraSteps } : {}),
       ...(b.stopEngine === false ? { stopEngine: false } : {}),
       ...spike,
+      ...(planCheck ? { planCheck } : {}),
+      ...(resume && b.freezePlannerNow === true ? { freezePlannerNow: true } : {}),
       ...advanced,
       ...(preparation ? { preparation } : {}),
     });

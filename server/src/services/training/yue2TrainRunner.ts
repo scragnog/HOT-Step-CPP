@@ -68,6 +68,8 @@ export function numOr(v: string | undefined, d?: number): number | undefined {
 // ── stderr -> events ────────────────────────────────────────────────────────
 
 export interface RelayState {
+  /** Set when the joint trainer reports the planner frozen (KL stop). */
+  frozenAt?: number;
   fatalMessage: string;
   doneSeen: boolean;
   lastStep: number;

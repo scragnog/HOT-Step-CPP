@@ -96,6 +96,12 @@ struct Config {
     // more steps (--steps stays the cap). The KL checkpoint is still written,
     // so the old stop point is always on disk. 0 = stop at the KL, as before.
     std::int32_t nar_extra_steps = 0;
+    // With --resume and --nar-extra-steps: freeze the planner at the resumed
+    // step (the checkpoint's planner is the one kept), then train the decoder
+    // alone. This is how a planner stop decided OUTSIDE the trainer (a plan
+    // sweep on the checkpoints) is applied: resume the last good checkpoint
+    // with this flag.
+    bool freeze_planner_now = false;
     // Decoder drift meter: at every checkpoint, how far the decoder's flow
     // prediction has moved from the base decoder's on a fixed probe set, as a
     // relative squared error. Written to train.jsonl and the checkpoint's
@@ -127,6 +133,7 @@ inline void usage(FILE * out) {
         "[--kl-weight 0.2] [--abc-dropout 0.5] [--caption-dropout 0] [--planner-lr-scale 1.0 (not muon)] [--nar-lr-scale 1.0 (not muon)] "
         "[--nar-extra-steps N (with --target-kl: freeze the planner at its KL, train the decoder N more steps)] "
         "[--nar-drift (log the decoder's drift from base at every checkpoint)] "
+        "[--freeze-planner-now (with --resume and --nar-extra-steps: freeze the planner at the resumed step)] "
         "[--spike-factor F (skip updates above F x median gradient norm; 0 = off)] [--spike-stop N (stop after N skips)] [--spike-stop-window 20]\n");
 }
 
@@ -301,6 +308,8 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--nar-lr-scale")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.nar_lr_scale)) { if (error) *error = "--nar-lr-scale must be a finite number"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--freeze-planner-now")) {
+            parsed.freeze_planner_now = true;
         } else if (!std::strcmp(arg, "--spike-factor")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.spike_factor) || parsed.spike_factor < 0.0f) { if (error) *error = "--spike-factor must be a finite number >= 0"; return ParseResult::error; }

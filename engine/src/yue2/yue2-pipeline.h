@@ -955,6 +955,27 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
         return false;
     }
     t_stage = std::chrono::steady_clock::now();
+    if (req.semantic_only) {
+        // Planner probe: the codec stream is the result. No NAR, no VAE.
+        yue2_ar_kv_cache_free(&sem_cache);
+        bool any_limit = false;
+        for (int b = 0; b < B; b++) {
+            Yue2TrackResult tr;
+            tr.song         = b;
+            tr.seed         = songs[(size_t) b].seed;
+            tr.noise_seed   = req.noise_seed + (uint64_t) b;
+            tr.score_abc    = songs[(size_t) b].score_abc;
+            tr.semantic_ids = songs[(size_t) b].codec_ids;
+            tr.total_frames = (int64_t) songs[(size_t) b].codec_ids.size();
+            for (int s = 0; s < 4; s++) tr.stage_end_reason[s] = songs[(size_t) b].stage_end_reason[s];
+            tr.end_reason = (tr.stage_end_reason[YUE2_STAGE_PLAN] == "limit_hit" ||
+                             tr.stage_end_reason[YUE2_STAGE_SEMANTIC] == "limit_hit") ? "limit_hit" : "completed";
+            any_limit |= tr.end_reason == "limit_hit";
+            out->tracks.push_back(std::move(tr));
+        }
+        out->end_reason = any_limit ? "limit_hit" : "completed";
+        return true;
+    }
 
     Yue2ArKvCache              nar_cache;
     std::vector<Yue2ChunkPlan> plan;

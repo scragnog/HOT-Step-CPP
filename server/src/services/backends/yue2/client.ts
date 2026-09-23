@@ -233,6 +233,9 @@ export interface Yue2SynthRequest {
   /** Stop after the plan stage and return only the ABC score — the score
    *  preview flow. Needs cot melody/full and no `abc`. */
   plan_only?: boolean;
+  /** Stop after the semantic stage: the result body is the raw codec id
+   *  stream as a JSON array. No NAR, no VAE. A planner probe for training. */
+  semantic_only?: boolean;
   seed?: number;
   /** Optional override; unset = mode-dependent engine default
    *  (1.01 for cot=off, 1.0 otherwise, per protocol.py's own SongRequest). */

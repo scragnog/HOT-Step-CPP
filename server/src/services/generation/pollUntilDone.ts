@@ -54,6 +54,12 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
   let lastPollOkAt = Date.now();
   let lastStage = job.stage;
   let lastProgress = job.progress;
+  // A 404 from /job means the engine has no such job. One can be a race; three
+  // in a row means the engine restarted under us (training stop, crash) and
+  // the new one never had this id. Without this the loop polls until the
+  // wall-clock timeout with the UI stuck at 0%.
+  let notFoundRun = 0;
+  const NOT_FOUND_LIMIT = 3;
 
   while (true) {
     if (signal.aborted || job.status === 'cancelled') {
@@ -118,6 +124,7 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
     try {
       const status = await aceClient.pollJob(aceJobId);
       lastPollOkAt = Date.now();
+      notFoundRun = 0;
       // Surface the engine's fine-grained phase + step counter so /status can
       // return ace_phase / ace_phase_progress. Optional on the wire (older
       // ace-server builds omit them), so guard.
@@ -135,6 +142,9 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
       if (pollErr.message?.includes('Generation failed') ||
           pollErr.message?.includes('Cancelled')) {
         throw pollErr;
+      }
+      if (/\(404\)/.test(pollErr.message ?? '') && ++notFoundRun >= NOT_FOUND_LIMIT) {
+        throw new Error('Generation lost: the engine no longer knows this job (it restarted mid-render)');
       }
       // Transient poll error (timeout, connection refused) — log and retry
       console.warn(`[Generate] Poll error for job ${aceJobId}: ${pollErr.message} (will retry)`);

@@ -45,7 +45,7 @@ import {
 import { readSafetensorsMeta } from '../../training/yue2Runs.js';
 import { jointRunForAdapter } from '../../training/yue2AitkRuns.js';
 import { yue2AdapterTrigger } from './jointAdapterContext.js';
-import type { Yue2AdapterScales } from './client.js';
+import type { Yue2AdapterScales, Yue2FinalDetail } from './client.js';
 import { yue2Align, yue2Synth, yue2FinalDetail, yue2PropsCached, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
 import { yue2LyricsJson } from './align.js';
 import { classifyYue2Score, type Yue2ScoreHealth } from './scoreHealth.js';
@@ -973,15 +973,21 @@ export interface Yue2PlanPreview {
   abc: string;
   seed: number;
   end_reason: string;
+  stage_end_reasons?: Yue2FinalDetail['stage_end_reasons'];
   health: Yue2ScoreHealth;
   notes: string[];
+  /** Only with params.semantic: the planner's raw codec id stream. */
+  semantic_ids?: number[];
 }
 
 export async function runYue2PlanPreview(params: any, signal?: AbortSignal): Promise<Yue2PlanPreview> {
   const { req, notes } = mapYue2Params(params);
   if (!req.style.trim()) throw new Error('YuE2 needs a caption — the Style Description field is empty');
   if (req.cot === 'off') throw new Error('Score preview needs Chain of Thought "melody" or "full" — cot=off has no lead sheet to preview');
-  const planReq: Yue2SynthRequest = { ...req, plan_only: true };
+  // params.semantic: run the semantic stage too and return its codec ids
+  // (about a minute) instead of stopping at the lead sheet (seconds).
+  const semantic = params?.semantic === true;
+  const planReq: Yue2SynthRequest = semantic ? { ...req, semantic_only: true } : { ...req, plan_only: true };
   delete planReq.abc;
 
   const sub = await yue2Synth(planReq);
@@ -1009,5 +1015,11 @@ export async function runYue2PlanPreview(params: any, signal?: AbortSignal): Pro
   const abc = (detail.abc ?? '').trim();
   if (!abc) throw new Error('YuE2 returned no score for the plan stage');
   const end_reason = detail.end_reason ?? 'completed';
-  return { abc, seed: sub.seed, end_reason, health: classifyYue2Score(abc, end_reason), notes };
+  let semantic_ids: number[] | undefined;
+  if (semantic) {
+    const body = await aceClient.getJobResult(sub.job_id);
+    if (!body.ok) throw new Error(`YuE2 semantic result fetch failed (${body.status})`);
+    semantic_ids = await body.json() as number[];
+  }
+  return { abc, seed: sub.seed, end_reason, stage_end_reasons: detail.stage_end_reasons, health: classifyYue2Score(abc, end_reason), notes, ...(semantic_ids ? { semantic_ids } : {}) };
 }
