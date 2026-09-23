@@ -298,8 +298,15 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
         const yyjson_val * cursor_value = yyjson_obj_get(source, "cursor_words");
         if (cursor_value && !str(const_cast<yyjson_val *>(cursor_value), &cursor_name, true))
             return fail(error, "source cursor_words must be a manifest-relative path");
-        if (request.lyric_timing && !lyrics.empty() && cursor_name.empty())
-            return fail(error, "--lyric-timing requires cursor_words for every lyrical source");
+        if (request.lyric_timing && !lyrics.empty() && cursor_name.empty()) {
+            // The aligner could not place this track's lyrics (wrong sheet, no
+            // singing found). It trains without the timing loss rather than
+            // failing the dataset.
+            std::fprintf(stderr, "[yue2-prepare] NOTE: %s has lyrics but no word timings; it trains without lyric timing\n", id.c_str());
+            item.prompt.cursor.present = true;
+            item.prompt.cursor.enabled = false;
+            item.prompt.cursor.instrumental = false;
+        }
         if (request.lyric_timing && !cursor_name.empty()) {
             if (lyrics.empty()) return fail(error, "cursor_words is invalid for an instrumental source");
             std::filesystem::path cursor_path;

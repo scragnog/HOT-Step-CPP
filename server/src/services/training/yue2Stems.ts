@@ -73,10 +73,27 @@ export function yue2StemSources(audioDir: string): string[] {
     .map(f => path.join(audioDir, f));
 }
 
+/** The stems folder name for a source: its basename without the extension,
+ *  minus trailing dots and spaces. Windows drops those from a path, so
+ *  "04..Get.Happy.Dirty..flac" wrote a folder the aligner could not open.
+ *  Same rule as source_stem() in yue2-align-run.h. */
+export function yue2StemName(sourceFile: string): string {
+  return path.parse(sourceFile).name.replace(/[. ]+$/, '') || '_';
+}
+
 /** `<stemsDir>/<source stem>/vocals.wav`, the one path yue2-align opens. */
 export function yue2VocalPath(stemsDir: string, sourceFile: string): string {
-  return path.join(stemsDir, path.parse(sourceFile).name, 'vocals.wav');
+  return path.join(stemsDir, yue2StemName(sourceFile), 'vocals.wav');
 }
+
+/** Left in place of vocals.wav when separation finds no singing: the track's
+ *  lyrics are wrong for the recording (an interlude with placeholder lyrics).
+ *  yue2-align reads it as instrumental and the track trains untimed. */
+export function yue2NoVocalsPath(stemsDir: string, sourceFile: string): string {
+  return path.join(stemsDir, yue2StemName(sourceFile), 'no-vocals');
+}
+
+class NoVocalsError extends Error {}
 
 async function separateOne(
   srcPath: string,
@@ -123,7 +140,9 @@ async function separateOne(
     };
     const vocal = stems.find(s => VOCAL_NAMES.includes(s.name.trim().toLowerCase()));
     if (!vocal) {
-      throw new Error(`no vocal stem among [${stems.map(s => s.name).join(', ')}]`);
+      // SuperSep drops a silent stem, so none named vocals means no singing.
+      if (stems.length) throw new NoVocalsError('separation found no vocals');
+      throw new Error('separation returned no stems');
     }
 
     const got = await fetch(`${ACE_URL}/supersep/serve?id=${id}&stem=${vocal.index}`);
@@ -161,7 +180,8 @@ export async function yue2SeparateDataset(opts: {
     const name = path.basename(src);
     const dest = yue2VocalPath(stemsDir, src);
 
-    if (!opts.force && fs.existsSync(dest) && fs.statSync(dest).size > 0) {
+    const noVocals = yue2NoVocalsPath(stemsDir, src);
+    if (!opts.force && ((fs.existsSync(dest) && fs.statSync(dest).size > 0) || fs.existsSync(noVocals))) {
       out.skipped++;
       opts.onProgress?.({ index: i + 1, total: sources.length, name, fraction: 1 });
       continue;
@@ -174,6 +194,12 @@ export async function yue2SeparateDataset(opts: {
       });
       out.written++;
     } catch (err) {
+      if (err instanceof NoVocalsError) {
+        fs.mkdirSync(path.dirname(noVocals), { recursive: true });
+        fs.writeFileSync(noVocals, 'SuperSep found no vocals in this track.\n');
+        out.written++;
+        continue;
+      }
       out.failed.push({ name, error: err instanceof Error ? err.message : String(err) });
     }
   }

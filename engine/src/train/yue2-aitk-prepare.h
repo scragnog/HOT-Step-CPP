@@ -117,6 +117,13 @@ inline bool add_cursor(yyjson_mut_doc * doc, yyjson_mut_val * obj, const CursorM
                yyjson_mut_obj_add_bool(doc, root, "instrumental", true) &&
                yyjson_mut_obj_add_val(doc, obj, "cursor", root);
     }
+    // Lyrical but untimed (the aligner could not place it): no binding at all.
+    if (cursor.present && !cursor.enabled && cursor.words5.empty()) {
+        yyjson_mut_val * root = yyjson_mut_obj(doc);
+        return root && yyjson_mut_obj_add_bool(doc, root, "enabled", false) &&
+               yyjson_mut_obj_add_bool(doc, root, "untimed", true) &&
+               yyjson_mut_obj_add_val(doc, obj, "cursor", root);
+    }
     if (!cursor.present || cursor.lyric_codepoints <= 0 || cursor.words5.empty() ||
         cursor.full_lyric_token_end_codepoints.empty() || cursor.off_lyric_token_end_codepoints.empty() ||
         !cursor.full.bound || !cursor.off.bound || cursor.lyrics_sha256.size() != 64 ||

@@ -433,6 +433,22 @@ static void yp_resolve_caption(const Yue2PreprocessArgs & a, const std::string &
                     }
                     sm->instrumental = (v == "true" || v == "1" || v == "yes");
                 }
+                // Lyrics that only SAY there are none: section tags alone
+                // ("[Instrumental]") or Genius's placeholder sentence. Left
+                // lyrical, the aligner finds no singing and the whole album
+                // fails preparation (2026-09-23 batch: oasis, angelsairwaves).
+                if (!sm->instrumental) {
+                    std::string words;
+                    bool in_tag = false;
+                    for (char ch : *lyrics) {
+                        if (ch == '[') in_tag = true;
+                        else if (ch == ']') in_tag = false;
+                        else if (!in_tag && isalpha((unsigned char) ch)) words += (char) tolower((unsigned char) ch);
+                        else if (!in_tag && !words.empty() && words.back() != ' ') words += ' ';
+                    }
+                    words = pm_trim(words);
+                    if (words.empty() || words == "instrumental" || words == "this song is an instrumental") sm->instrumental = true;
+                }
             }
         }
         // "yue2": the ACE sidecar still supplies lyrics and metadata, but the

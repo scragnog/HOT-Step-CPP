@@ -263,7 +263,12 @@ inline bool read_dataset(const std::string & manifest_path, Dataset * out, std::
             yyjson_val * lh = yyjson_obj_get(cursor, "lyrics_sha256");
             yyjson_val * th = yyjson_obj_get(cursor, "tokenizer_sha256");
             yyjson_val * cp = yyjson_obj_get(cursor, "lyric_codepoints");
-            if (cm.instrumental) {
+            yyjson_val * untimed = yyjson_obj_get(cursor, "untimed");
+            if (untimed && !yyjson_is_bool(untimed)) return bad(error, "cursor untimed must be boolean");
+            if (untimed && yyjson_get_bool(untimed)) {
+                if (cm.instrumental) return bad(error, "cursor cannot be both instrumental and untimed");
+                cm.enabled = false;  // lyrical, but no word timings: no timing loss for this track
+            } else if (cm.instrumental) {
                 if (!result.song.lyrics.empty()) return bad(error, "instrumental cursor metadata conflicts with nonempty lyrics");
             } else {
             if (!string_value(lh, &cm.lyrics_sha256) || !hex256(cm.lyrics_sha256) ||

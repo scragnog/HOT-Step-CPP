@@ -134,7 +134,7 @@ import {
   listYue2SheetSources, missingYue2SheetModels, readYue2AbcStatus, readYue2SheetSource,
   resolveYue2SheetModel, YUE2_SHEET_DEFAULTS,
 } from '../services/training/yue2Sheet.js';
-import { yue2StemSources } from '../services/training/yue2Stems.js';
+import { yue2NoVocalsPath, yue2StemSources, yue2VocalPath } from '../services/training/yue2Stems.js';
 import {
   listYue2ArRuns, readYue2ArRunManifest, yue2ArAdapterRoot,
 } from '../services/training/yue2ArRuns.js';
@@ -3890,13 +3890,14 @@ function yue2CachedSourceNames(manifest: string): string[] {
 }
 
 function countYue2VocalStems(dir: string, sourceNames?: string[]): number {
+  // A no-vocals marker is a finished separation too (yue2NoVocalsPath).
   if (sourceNames?.length) return sourceNames.filter(name =>
-    fs.existsSync(path.join(dir, path.parse(name).name, 'vocals.wav'))).length;
+    fs.existsSync(yue2VocalPath(dir, name)) || fs.existsSync(yue2NoVocalsPath(dir, name))).length;
   let n = 0;
   try {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       if (!e.isDirectory()) continue;
-      if (fs.existsSync(path.join(dir, e.name, 'vocals.wav'))) n++;
+      if (fs.existsSync(path.join(dir, e.name, 'vocals.wav')) || fs.existsSync(path.join(dir, e.name, 'no-vocals'))) n++;
     }
   } catch { /* no stems folder yet — 0 is the honest answer */ }
   return n;

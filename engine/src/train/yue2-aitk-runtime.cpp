@@ -259,9 +259,11 @@ static int run_impl(Config config, std::string * error) {
     } else { sampler.rng().shuffle(order); }
     if(cursor_weight>0) for(const auto & item:dataset.items) {
         const auto & binding=item.prompt.cursor;
-        if(!binding.present || (!binding.instrumental && (!binding.enabled ||
+        // present && !enabled && !instrumental = lyrical but untimed: allowed,
+        // it simply contributes no timing loss.
+        if(!binding.present || (!binding.instrumental && binding.enabled &&
            (binding.L<=0 || binding.full_frame_ranges.size()!=item.song.semantic_tokens.size() ||
-            binding.off_frame_ranges.size()!=item.song.semantic_tokens.size())))) {
+            binding.off_frame_ranges.size()!=item.song.semantic_tokens.size()))) {
             if(error)*error="lyric timing requires valid alignment for track "+item.id+"; prepare with alignment or use --cursor-weight 0";
             return 1;
         }
@@ -565,7 +567,7 @@ static int run_impl(Config config, std::string * error) {
                 input.adamw_lr = (float) lr;
                 input.adamw_weight_decay = config.weight_decay;
             }
-            if(cursor_weight>0 && !item.prompt.cursor.instrumental) {
+            if(cursor_weight>0 && !item.prompt.cursor.instrumental && item.prompt.cursor.enabled) {
                 const auto & binding=item.prompt.cursor;
                 input.cursor_weight=cursor_weight;
                 // Four prefixes, four lyric-start columns: the head length is

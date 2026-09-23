@@ -129,6 +129,13 @@ static std::string source_stem(const std::string & name) {
     if (dot != std::string::npos && dot > 0) {
         s.erase(dot);
     }
+    // Windows drops trailing dots and spaces from path components, so a stems
+    // folder named "04..Get.Happy.Dirty." cannot be opened as written. Same
+    // rule as yue2StemName() in yue2Stems.ts, which writes the folders.
+    while (!s.empty() && (s.back() == '.' || s.back() == ' ')) s.pop_back();
+    if (s.empty()) {
+        s = "_";
+    }
     return s;
 }
 
@@ -432,6 +439,14 @@ static int yue2_align_run(const Yue2AlignArgs & a) {
             n_skipped++;
             continue;
         }
+        // yue2Stems.ts leaves this marker when separation found no singing:
+        // the lyrics are wrong for the recording, so there is nothing to align.
+        if (pm_file_exists(join_path(join_path(a.stems, s.stem), "no-vocals"))) {
+            fprintf(stderr, "[yue2-align] %zu/%zu INSTR %-46s separation found no vocals; trains without lyric timing\n",
+                    pi + 1, picked.size(), s.name.c_str());
+            n_instrumental++;
+            continue;
+        }
         const std::string stem_path = join_path(join_path(a.stems, s.stem), "vocals.wav");
         if (!pm_file_exists(stem_path)) {
             fprintf(stderr, "[yue2-align] %zu/%zu SKIP %-46s no vocal stem at %s\n", pi + 1, picked.size(),
@@ -647,5 +662,8 @@ static int yue2_align_run(const Yue2AlignArgs & a) {
                         "the AR trainer's documented behaviour for a mixed manifest, not an error — but check the "
                         "SKIP lines above before assuming it was meant.\n");
     }
-    return n_failed ? 1 : 0;
+    // Some sources aligned: the stage succeeded. The ones that did not train
+    // without lyric timing (preparation marks them untimed), so one bad lyric
+    // sheet costs its own track the timing loss, not the album its run.
+    return 0;
 }
