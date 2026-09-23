@@ -35,6 +35,11 @@ function outputFingerprint(manifest: string): string {
   if (data.schema_version !== 1 || data.recipe_version !== 'aitk-yue2-2026-09-16' || !Array.isArray(data.items) || !data.items.length) {
     throw new Error('Invalid prepared dataset');
   }
+  // Prepared before 2026-09-20: no trigger-only prefixes, so caption dropout
+  // (a card default) is refused by the engine. Stale, so it re-prepares.
+  if (!data.items.every((item: Record<string, unknown>) => Array.isArray(item.prefix_full_nocap_ids))) {
+    throw new Error('Prepared dataset predates trigger-only prefixes');
+  }
   const payloads = data.items.map((item: { latent_file: string }) => stamp(path.resolve(path.dirname(manifest), item.latent_file)));
   return createHash('sha256').update(text).update(JSON.stringify(payloads)).digest('hex');
 }

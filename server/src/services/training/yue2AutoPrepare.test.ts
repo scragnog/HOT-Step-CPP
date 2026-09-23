@@ -25,7 +25,7 @@ function fixture() {
     fs.mkdirSync(opts.output);
     fs.writeFileSync(path.join(opts.output, 'latent.bin'), 'prepared');
     fs.writeFileSync(path.join(opts.output, 'dataset.json'), JSON.stringify({ schema_version: 1,
-      recipe_version: 'aitk-yue2-2026-09-16', items: [{ latent_file: 'latent.bin' }] }));
+      recipe_version: 'aitk-yue2-2026-09-16', items: [{ latent_file: 'latent.bin', prefix_full_nocap_ids: [1] }] }));
   };
   return { dir, o, job, prepare, calls: () => calls };
 }
@@ -51,6 +51,15 @@ test('missing prepared payload is regenerated instead of reused', async () => {
   const first = await ensureYue2PreparedDataset(f.job(), f.o, f.prepare);
   assert.ok(first);
   fs.unlinkSync(path.join(path.dirname(first), 'latent.bin'));
+  assert.notEqual(await ensureYue2PreparedDataset(f.job(), f.o, f.prepare), first);
+  assert.equal(f.calls(), 2);
+});
+
+test('a dataset prepared before trigger-only prefixes is regenerated, not reused', async () => {
+  const f = fixture();
+  const first = await ensureYue2PreparedDataset(f.job(), f.o, f.prepare);
+  assert.ok(first);
+  fs.writeFileSync(first, JSON.stringify({ schema_version: 1, recipe_version: 'aitk-yue2-2026-09-16', items: [{ latent_file: 'latent.bin' }] }));
   assert.notEqual(await ensureYue2PreparedDataset(f.job(), f.o, f.prepare), first);
   assert.equal(f.calls(), 2);
 });
