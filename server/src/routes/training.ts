@@ -3912,17 +3912,15 @@ router.post('/datasets/:id/yue2-joint-previews/render', async (req: Request, res
     const ckpt = run?.checkpoints.find(c => c.step === step);
     if (!run || !ckpt?.arPath || !ckpt.narPath) { res.status(400).json({ error: 'No complete checkpoint at that step in that run' }); return; }
     const seconds = Math.max(8, Math.min(360, Math.round(Number(b.seconds) || 180)));
-    const seed = Number.isInteger(Number(b.seed)) ? Number(b.seed) : 424242;
     const takes = Math.max(1, Math.min(4, Math.round(Number(b.takes) || 1)));
+    const existing = listYue2JointPreviews(run.output).filter(p => p.step === step && p.kind === 'artist').length;
+    const seed = Number.isInteger(Number(b.seed)) ? Number(b.seed) : 424242 + existing;
     const dataset = typeof run.options.dataset === 'string' ? run.options.dataset : undefined;
-    const previews = [];
-    for (let i = 0; i < takes; i++) {
-      const options = { enabled: true, everySteps: 0, seconds, seed: seed + i, previewMaxFrames: seconds * 25, baseline: false, control: false,
-        ...(typeof b.caption === 'string' && b.caption.trim() ? { caption: b.caption.trim() } : {}),
-        ...(typeof b.lyrics === 'string' && b.lyrics.trim() ? { lyrics: b.lyrics.trim() } : {}) };
-      previews.push(await runOnGpuLane(() => renderYue2JointPreview({ output: run.output, step, options, arAdapter: ckpt.arPath!, narAdapter: ckpt.narPath!, dataset }), { label: 'yue2 refine preview', family: 'yue2' }));
-    }
-    res.json({ run: run.jobId, step, previews });
+    const options = { enabled: true, everySteps: 0, takes, seconds, seed, previewMaxFrames: seconds * 25, baseline: false, control: false,
+      ...(typeof b.caption === 'string' && b.caption.trim() ? { caption: b.caption.trim() } : {}),
+      ...(typeof b.lyrics === 'string' && b.lyrics.trim() ? { lyrics: b.lyrics.trim() } : {}) };
+    const last = await runOnGpuLane(() => renderYue2JointPreview({ output: run.output, step, options, arAdapter: ckpt.arPath!, narAdapter: ckpt.narPath!, dataset }), { label: 'yue2 refine preview', family: 'yue2' });
+    res.json({ run: run.jobId, step, previews: [last] });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

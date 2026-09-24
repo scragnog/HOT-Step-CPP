@@ -188,7 +188,7 @@ export async function renderYue2JointPreview(input: {
           if (typeof abc === 'string' && abc.trim()) {
             const h = classifyYue2Score(abc, status.end_reason);
             record.score = { verdict: h.verdict, reason: h.reason, bars: h.bars, vocalShare: h.vocalShare, sections: h.sections };
-            try { fs.mkdirSync(path.join(input.output, 'previews'), { recursive: true }); fs.writeFileSync(path.join(input.output, 'previews', `step-${input.step}-${kind}.score.abc`), abc); } catch { /* the verdict is already on the record */ }
+            try { fs.mkdirSync(path.join(input.output, 'previews'), { recursive: true }); fs.writeFileSync(path.join(input.output, 'previews', `step-${input.step}-${kind}-s${seed}.score.abc`), abc); } catch { /* the verdict is already on the record */ }
           }
           break;
         }
@@ -197,7 +197,7 @@ export async function renderYue2JointPreview(input: {
       }
       const response = await api.result(sub.job_id);
       const bytes = Buffer.from(await response.arrayBuffer());
-      const filename = `step-${input.step}-${kind}.wav`;
+      const filename = `step-${input.step}-${kind}-s${seed}.wav`;
       const dir = path.join(input.output, 'previews'); fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, filename), bytes, { flag: 'wx' });
       record.status = 'done'; record.file = filename; record.updatedAt = Date.now();
