@@ -25,6 +25,7 @@ on:
     paths:
       - 'engine/ggml'
       - 'engine/CMakeLists.txt'
+      - 'engine/patches/**'
       - '.github/workflows/cache-warm.yml'
 
 concurrency:
@@ -166,7 +167,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: engine/build
-          key: cmake-windows-2022-${{ matrix.variant }}-${{ hashFiles('engine/ggml/**', 'engine/CMakeLists.txt') }}
+          key: cmake-windows-2022-${{ matrix.variant }}-${{ hashFiles('engine/ggml/**', 'engine/patches/**', 'engine/CMakeLists.txt') }}
           restore-keys: |
             cmake-windows-2022-${{ matrix.variant }}-
 
@@ -405,7 +406,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: engine/build
-          key: cmake-linux-${{ matrix.variant }}-${{ hashFiles('engine/ggml/**', 'engine/CMakeLists.txt') }}
+          key: cmake-linux-${{ matrix.variant }}-${{ hashFiles('engine/ggml/**', 'engine/patches/**', 'engine/CMakeLists.txt') }}
           restore-keys: |
             cmake-linux-${{ matrix.variant }}-
 

@@ -282,7 +282,7 @@ jobs:
           # (compiler abs-paths baked into CMakeCache) is unusable on another.
           # windows-latest moved to windows-2025; we pin windows-2022, so the old
           # cache must NOT be restored (stale cl.exe path → configure failure).
-          key: cmake-windows-2022-${{ matrix.variant }}-${{ hashFiles('engine/ggml/**', 'engine/CMakeLists.txt') }}
+          key: cmake-windows-2022-${{ matrix.variant }}-${{ hashFiles('engine/ggml/**', 'engine/patches/**', 'engine/CMakeLists.txt') }}
           restore-keys: |
             cmake-windows-2022-${{ matrix.variant }}-
 
@@ -797,7 +797,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: engine/build
-          key: cmake-macos-${{ hashFiles('engine/ggml/**', 'engine/CMakeLists.txt') }}
+          key: cmake-macos-${{ hashFiles('engine/ggml/**', 'engine/patches/**', 'engine/CMakeLists.txt') }}
           restore-keys: |
             cmake-macos-
 
@@ -1307,7 +1307,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: engine/build
-          key: cmake-linux-${{ matrix.variant }}-${{ hashFiles('engine/ggml/**', 'engine/CMakeLists.txt') }}
+          key: cmake-linux-${{ matrix.variant }}-${{ hashFiles('engine/ggml/**', 'engine/patches/**', 'engine/CMakeLists.txt') }}
           restore-keys: |
             cmake-linux-${{ matrix.variant }}-
 
