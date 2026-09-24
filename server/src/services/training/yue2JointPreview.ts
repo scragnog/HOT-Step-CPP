@@ -61,7 +61,7 @@ export function parseYue2JointPreviewOptions(raw: unknown, everySteps: number): 
     enabled,
     everySteps: integer('everySteps', everySteps, 0, 100000),
     seconds: integer('seconds', 90, 8, 360),
-    takes: integer('takes', 1, 1, 4),
+    ...(integer('takes', 1, 1, 4) > 1 ? { takes: integer('takes', 1, 1, 4) } : {}),
     ...(integer('odeSteps', 0, 0, 64) > 0 ? { odeSteps: integer('odeSteps', 0, 0, 64) } : {}),
     ...(typeof b.narCacheRatio === 'number' && b.narCacheRatio >= 0 && b.narCacheRatio <= 0.9 ? { narCacheRatio: b.narCacheRatio } : {}),
     seed: integer('seed', 424242, 0, 0xffffffff),

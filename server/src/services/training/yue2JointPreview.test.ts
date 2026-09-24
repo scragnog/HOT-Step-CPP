@@ -61,6 +61,7 @@ function mockDeps(overrides: Record<string, unknown> = {}) {
     synth: async (value: unknown) => { calls.push({ name: 'synth', value }); return { job_id: 'preview-job' }; },
     poll: async () => ({ status: 'done' }),
     result: async () => new Response(Buffer.from('RIFF-test')),
+    detail: async () => ({}),
     cancel: async (value: unknown) => { calls.push({ name: 'cancel', value }); },
     unload: async () => { calls.push({ name: 'unload' }); return { unloaded: true }; },
     persisted: () => ({ lm: 'base-lm', vae_variant: 'standard', adapters: {
@@ -83,7 +84,8 @@ test('renderer uses selected style/lyrics, writes audio, and restores selection'
   assert.equal((calls.find(c => c.name === 'synth')?.value as any).style, 'chosen style');
   assert.equal(calls.filter(c => c.name === 'unload').length, 1);
   assert.equal(calls.at(-1)?.name, 'select');
-  assert.equal(fs.existsSync(path.join(f.output, 'previews', 'step-4-artist.wav')), true);
+  // Files carry the seed (takes at one step never overwrite each other).
+  assert.equal(fs.existsSync(path.join(f.output, 'previews', `step-4-artist-s${YUE2_JOINT_PREVIEW_DEFAULTS.seed}.wav`)), true);
 });
 
 test('renderer cancels a polling job on render failure and still unloads', async () => {
