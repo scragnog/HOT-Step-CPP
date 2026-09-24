@@ -715,6 +715,9 @@ export interface Yue2JointPreviewOptions {
   everySteps: number;
   /** Artist takes per preview point. */
   takes?: number;
+  /** Draft renders: decoder ODE steps and NAR cache ratio for previews only. */
+  odeSteps?: number;
+  narCacheRatio?: number;
   /** Rung previews render while training continues (needs the VRAM for both). */
   parallel?: boolean;
   seconds: number;
@@ -2488,7 +2491,7 @@ export const yue2RungScoresExportUrl = (format: 'csv' | 'json') => `${API_BASE}/
 
 /** POST /datasets/:id/yue2-joint-previews/render — previews for one checkpoint, on demand. */
 export async function renderYue2JointPreviews(
-  id: string, body: { run: string; step: number; seconds?: number; seed?: number; takes?: number; caption?: string; lyrics?: string },
+  id: string, body: { run: string; step: number; seconds?: number; seed?: number; takes?: number; caption?: string; lyrics?: string; odeSteps?: number; narCacheRatio?: number },
 ): Promise<{ run: string; step: number; previews: Yue2JointPreviewRecord[] }> {
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews/render`, { method: 'POST', ...jsonBody(body) });
 }

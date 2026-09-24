@@ -61,6 +61,8 @@ export function parseYue2JointPreviewOptions(raw: unknown, everySteps: number): 
     everySteps: integer('everySteps', everySteps, 0, 100000),
     seconds: integer('seconds', 90, 8, 360),
     takes: integer('takes', 1, 1, 4),
+    ...(integer('odeSteps', 0, 0, 64) > 0 ? { odeSteps: integer('odeSteps', 0, 0, 64) } : {}),
+    ...(typeof b.narCacheRatio === 'number' && b.narCacheRatio >= 0 && b.narCacheRatio <= 0.9 ? { narCacheRatio: b.narCacheRatio } : {}),
     seed: integer('seed', 424242, 0, 0xffffffff),
     previewMaxFrames: integer('previewMaxFrames', 2250, 0, 9000),
     baseline: bool('baseline', false), control: bool('control', false),
@@ -171,7 +173,9 @@ export async function renderYue2JointPreview(input: {
       recordYue2JointPreview(input.output, record);
       last = record;
       const sub = await api.synth({ style: kind === 'control' ? 'downtempo electronic, calm and spacious' : caption, lyrics: kind === 'control' ? '' : lyrics, cot: 'full', seed,
-        preview_max_frames: input.options.previewMaxFrames });
+        preview_max_frames: input.options.previewMaxFrames,
+        ...(input.options.odeSteps ? { ode_steps: input.options.odeSteps } : {}),
+        ...(input.options.narCacheRatio !== undefined ? { nar_cache_ratio: input.options.narCacheRatio } : {}) });
       activeJob = sub.job_id;
       activeTerminal = false;
       const renderDeadline = Date.now() + 20 * 60_000;

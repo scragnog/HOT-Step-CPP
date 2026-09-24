@@ -37,6 +37,10 @@ export const RefinePanel: React.FC = () => {
   const [takes, setTakes] = useState(2);
   const [autoPreview, setAutoPreview] = useState(true);
   const [parallel, setParallel] = useState(true);
+  // Draft previews: decoder at 12 ODE steps with a 0.7 cache ratio; the
+  // planner stage, which is what a preview judges, is untouched.
+  const [draft, setDraft] = useState(true);
+  const draftOpts = draft ? { odeSteps: 12, narCacheRatio: 0.7 } : {};
   const [lrScale, setLrScale] = useState(0.1);
   // Further training for the decoder from the picked rung (planner frozen):
   // to a reconstruction target, a step budget, or the knee, whichever first.
@@ -111,7 +115,7 @@ export const RefinePanel: React.FC = () => {
         lyricTiming: (opts.alignment as { enabled?: boolean } | undefined)?.enabled === true, autoPrepare: false, checkpoint: '', output: '',
         // Rung previews: the engine pauses after each rung checkpoint and the
         // server renders `takes` previews there before resuming.
-        preview: { enabled: autoPreview, everySteps: 0, takes, seconds, seed: 424242, previewMaxFrames: seconds * 25, baseline: false, control: false, parallel } } as unknown as Yue2JointTrainRequest;
+        preview: { enabled: autoPreview, everySteps: 0, takes, seconds, seed: 424242, previewMaxFrames: seconds * 25, baseline: false, control: false, parallel, ...draftOpts } } as unknown as Yue2JointTrainRequest;
       const result = await startYue2JointTrain(datasetId, request);
       setJob(await getJob(result.jobId));
       setLadderRun(result.jobId);
@@ -122,7 +126,7 @@ export const RefinePanel: React.FC = () => {
   const render = async (step: number) => {
     if (!datasetId || !ladderRun) return;
     setRendering(step); setError('');
-    try { await renderYue2JointPreviews(datasetId, { run: ladderRun, step, seconds, takes }); }
+    try { await renderYue2JointPreviews(datasetId, { run: ladderRun, step, seconds, takes, ...draftOpts }); }
     catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setRendering(null); }
   };
@@ -295,6 +299,10 @@ export const RefinePanel: React.FC = () => {
               <div className={`flex items-center gap-2 self-center ${active || busy || !autoPreview ? 'opacity-50 pointer-events-none' : ''}`}>
                 <Toggle id="refine-parallel" checked={parallel} onChange={setParallel} />
                 <ParamLabel underline={false} className="text-xs normal-case tracking-normal font-normal text-zinc-700 dark:text-zinc-300" label={t('trainingStudio.refine.parallel', 'In parallel with training')} info={t('trainingStudio.refine.parallelInfo', 'Render while training continues instead of pausing it at each rung. Needs the VRAM for both (about 22 GB measured); renders run at about half speed and training a little slower. Untick on a smaller card.')} />
+              </div>
+              <div className={`flex items-center gap-2 self-center ${active || busy ? 'opacity-50 pointer-events-none' : ''}`}>
+                <Toggle id="refine-draft" checked={draft} onChange={setDraft} />
+                <ParamLabel underline={false} className="text-xs normal-case tracking-normal font-normal text-zinc-700 dark:text-zinc-300" label={t('trainingStudio.refine.draft', 'Draft quality')} info={t('trainingStudio.refine.draftInfo', 'Previews only: the decoder runs 12 ODE steps with a 0.7 velocity-cache ratio instead of 32 and 0.5, about a quarter of the decoder time. Timbre is a little softer; structure, diction and late-song behaviour, which the planner sets, are unchanged. Off renders previews at production quality.')} />
               </div>
               <label className="flex flex-col gap-1 w-24">
                 <ParamLabel label={t('trainingStudio.refine.takes', 'Tracks')} meta={t('trainingStudio.refine.takesMeta', '1–4 · default 2')} info={t('trainingStudio.refine.takesInfo', 'Tracks per rung, different seeds. Renders are not deterministic: one take can decay late while another from the same checkpoint is clean, so two is the minimum to trust a rung.')} />

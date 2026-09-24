@@ -4027,7 +4027,10 @@ router.post('/datasets/:id/yue2-joint-previews/render', async (req: Request, res
     const existing = listYue2JointPreviews(run.output).filter(p => p.step === step && p.kind === 'artist').length;
     const seed = Number.isInteger(Number(b.seed)) ? Number(b.seed) : 424242 + existing;
     const dataset = typeof run.options.dataset === 'string' ? run.options.dataset : undefined;
+    const odeSteps = Number.isInteger(Number(b.odeSteps)) && Number(b.odeSteps) > 0 ? Math.min(64, Number(b.odeSteps)) : undefined;
+    const narCacheRatio = typeof b.narCacheRatio === 'number' && b.narCacheRatio >= 0 && b.narCacheRatio <= 0.9 ? b.narCacheRatio : undefined;
     const options = { enabled: true, everySteps: 0, takes, seconds, seed, previewMaxFrames: seconds * 25, baseline: false, control: false,
+      ...(odeSteps ? { odeSteps } : {}), ...(narCacheRatio !== undefined ? { narCacheRatio } : {}),
       ...(typeof b.caption === 'string' && b.caption.trim() ? { caption: b.caption.trim() } : {}),
       ...(typeof b.lyrics === 'string' && b.lyrics.trim() ? { lyrics: b.lyrics.trim() } : {}) };
     const last = await runOnGpuLane(() => renderYue2JointPreview({ output: run.output, step, options, arAdapter: ckpt.arPath!, narAdapter: ckpt.narPath!, dataset }), { label: 'yue2 refine preview', family: 'yue2' });
