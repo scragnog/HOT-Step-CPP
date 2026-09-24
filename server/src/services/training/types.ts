@@ -227,7 +227,10 @@ export interface TrainingPreview {
 /** Checkpoint preview controls for the YuE2 joint trainer (plan 27). */
 export interface Yue2JointPreviewOptions {
   enabled: boolean;
+  /** Steps between preview pauses; 0 with a KL-rung run = one pause per rung. */
   everySteps: number;
+  /** Artist takes per preview point (seeds seed, seed+1, ...). */
+  takes?: number;
   seconds: number;
   seed: number;
   previewMaxFrames: number;

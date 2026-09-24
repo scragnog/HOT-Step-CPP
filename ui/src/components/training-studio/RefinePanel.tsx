@@ -11,6 +11,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Play, Sparkles } from 'lucide-react';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { Yue2JointRunChart } from './Yue2JointRunChart';
 import {
   cancelJob, getJob, linkYue2JointCheckpointPreset, listYue2AitkRuns, listYue2JointPreviews,
   renderYue2JointPreviews, startYue2JointTrain,
@@ -29,6 +30,7 @@ export const RefinePanel: React.FC = () => {
   const [rung, setRung] = useState(0.1);
   const [seconds, setSeconds] = useState(180);
   const [takes, setTakes] = useState(2);
+  const [autoPreview, setAutoPreview] = useState(true);
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
   const [ladderRun, setLadderRun] = useState('');
   const [previews, setPreviews] = useState<Yue2JointPreviewRecord[]>([]);
@@ -78,7 +80,9 @@ export const RefinePanel: React.FC = () => {
         steps: last.step + 1000, stopMode: 'kl', targetKl: ceiling, klCheckpointEvery: rung,
         stopEngine: false, spikeFactor: 5, spikeStop: 3, spikeStopWindow: 20,
         lyricTiming: (opts.alignment as { enabled?: boolean } | undefined)?.enabled === true, autoPrepare: false, checkpoint: '', output: '',
-        preview: { enabled: false, everySteps: 0, seconds: 90, seed: 424242, previewMaxFrames: 2250, baseline: false, control: false } } as unknown as Yue2JointTrainRequest;
+        // Rung previews: the engine pauses after each rung checkpoint and the
+        // server renders `takes` previews there before resuming.
+        preview: { enabled: autoPreview, everySteps: 0, takes, seconds, seed: 424242, previewMaxFrames: seconds * 25, baseline: false, control: false } } as unknown as Yue2JointTrainRequest;
       const result = await startYue2JointTrain(datasetId, request);
       setJob(await getJob(result.jobId));
       setLadderRun(result.jobId);
@@ -123,6 +127,20 @@ export const RefinePanel: React.FC = () => {
             <input className={input} type="number" step="0.05" min={0.05} max={1} value={rung} disabled={active || busy} onChange={e => setRung(Number(e.target.value) || 0.1)} />
           </label>
         </div>
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 self-center">
+            <input type="checkbox" className="accent-amber-500" checked={autoPreview} disabled={active || busy} onChange={e => setAutoPreview(e.target.checked)} />
+            {t('trainingStudio.refine.autoPreview', 'Render previews at each rung')}
+          </label>
+          <label className="flex flex-col gap-1 w-24">
+            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.takes', 'Tracks')}</span>
+            <input className={input} type="number" min={1} max={4} value={takes} disabled={active || busy} onChange={e => setTakes(Math.max(1, Math.min(4, Number(e.target.value) || 1)))} />
+          </label>
+          <label className="flex flex-col gap-1 w-28">
+            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.seconds', 'Length (s)')}</span>
+            <input className={input} type="number" min={30} max={360} step={30} value={seconds} disabled={active || busy} onChange={e => setSeconds(Math.max(30, Math.min(360, Number(e.target.value) || 180)))} />
+          </label>
+        </div>
         <div className="mt-3 flex items-center gap-3">
           <button type="button" onClick={() => void start()} disabled={!source || active || busy}
             className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2">
@@ -133,6 +151,7 @@ export const RefinePanel: React.FC = () => {
           {job && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">{job.status} · {job.phase || 'waiting'}{job.total ? ` · step ${job.done} / ${job.total}` : ''}</span>}
         </div>
         {error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</div>}
+        {job && <div className="mt-3"><Yue2JointRunChart job={job} totalSteps={job.total || 0} klTarget={ceiling} /></div>}
       </div>
 
       <div className="rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-4">
@@ -144,16 +163,8 @@ export const RefinePanel: React.FC = () => {
               {runs.filter(r => r.checkpoints.some(c => c.kl !== undefined)).map(r => <option key={r.jobId} value={r.jobId}>{new Date(r.createdAt).toLocaleString()} · {r.checkpoints.length} checkpoints · {r.status}{r.live ? ' (running)' : ''}</option>)}
             </select>
           </label>
-          <label className="flex flex-col gap-1 w-28">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.seconds', 'Preview (s)')}</span>
-            <input className={input} type="number" min={30} max={360} step={30} value={seconds} onChange={e => setSeconds(Math.max(30, Math.min(360, Number(e.target.value) || 180)))} />
-          </label>
-          <label className="flex flex-col gap-1 w-20">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.takes', 'Takes')}</span>
-            <input className={input} type="number" min={1} max={4} value={takes} onChange={e => setTakes(Math.max(1, Math.min(4, Number(e.target.value) || 1)))} />
-          </label>
         </div>
-        <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.refine.ladderHint', 'Late-song decay shows after two minutes, so keep previews at 180 s or more. Renders are not deterministic: two takes per rung is the minimum to trust a rung.')}</p>
+        <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.refine.ladderHint', 'Late-song decay shows after two minutes, so keep previews at 180 s or more. Renders are not deterministic: two tracks per rung is the minimum to trust a rung. Render adds more tracks to a rung with the count and length above.')}</p>
         {ladder.length > 0 && <table className="mt-3 w-full text-xs">
           <thead><tr className="text-[10px] uppercase tracking-wider text-zinc-500 text-left"><th className="py-1">Step</th><th>KL</th><th>Decoder recon</th><th>Previews</th><th></th></tr></thead>
           <tbody>

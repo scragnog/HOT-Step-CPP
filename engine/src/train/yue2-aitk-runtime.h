@@ -138,6 +138,10 @@ struct Config {
     // multiple of this (0.1 = a rung every 0.1 KL), tagged kl_mark. The
     // rungs are what a listener compares to pick the planner's stop.
     float kl_checkpoint_every = 0.0f;
+    // With --kl-checkpoint-every: end the segment after each rung checkpoint
+    // (event "paused"), so the server can render that rung's previews and
+    // resume, as it does for step-cadence preview pauses.
+    bool pause_on_kl_mark = false;
 };
 
 enum class ParseResult { ok, help, error };
@@ -343,6 +347,8 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
             parsed.recon_reset = true;
         } else if (!std::strcmp(arg, "--unfreeze-planner")) {
             parsed.unfreeze_planner = true;
+        } else if (!std::strcmp(arg, "--pause-on-kl-mark")) {
+            parsed.pause_on_kl_mark = true;
         } else if (!std::strcmp(arg, "--kl-checkpoint-every")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.kl_checkpoint_every) || parsed.kl_checkpoint_every < 0.0f) { if (error) *error = "--kl-checkpoint-every must be a finite number >= 0"; return ParseResult::error; }

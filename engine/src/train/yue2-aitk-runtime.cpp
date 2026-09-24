@@ -859,6 +859,7 @@ static int run_impl(Config config, std::string * error) {
                             event("kl_mark", completed);
                             std::fprintf(stderr, "[yue2-aitk] KL %.3f reached at step %d: rung checkpoint\n", reading, completed);
                             while (next_kl_mark <= reading) next_kl_mark += every;
+                            if (config.pause_on_kl_mark && completed < end_step()) { event("paused", completed); return 0; }
                         }
                     }
                     if (reading >= (double) config.target_kl && config.nar_extra_steps > 0) {

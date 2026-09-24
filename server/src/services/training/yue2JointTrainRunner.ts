@@ -158,7 +158,10 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   }
   if (o.resume && o.reconReset) args.push('--recon-reset');
   if (o.resume && o.unfreezePlanner) args.push('--unfreeze-planner');
-  if (o.klCheckpointEvery !== undefined && o.klCheckpointEvery > 0) args.push('--kl-checkpoint-every', String(o.klCheckpointEvery));
+  if (o.klCheckpointEvery !== undefined && o.klCheckpointEvery > 0) {
+    args.push('--kl-checkpoint-every', String(o.klCheckpointEvery));
+    if (o.preview?.enabled) args.push('--pause-on-kl-mark');
+  }
   if (o.resume) args.push('--resume', o.resume);
   if (o.resume && o.freezePlannerNow) args.push('--freeze-planner-now');
   if (o.alignment) {
@@ -380,7 +383,10 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
   try {
     log(job, 'info', `Starting YuE2 joint training (${o.device})`);
     nativeAttempted = true;
-    const preview = o.preview?.enabled && o.preview.everySteps > 0 ? o.preview : undefined;
+    // Previews pause the run every N steps, or at every KL rung of a planner
+    // refinement (the engine pauses after each rung checkpoint).
+    const rungPreviews = (o.klCheckpointEvery ?? 0) > 0;
+    const preview = o.preview?.enabled && (o.preview.everySteps > 0 || rungPreviews) ? o.preview : undefined;
     // Plan checks pause the run like previews do; the pause cadence is the
     // check's while the planner is live, the preview's once it is frozen.
     const planCheck = o.planCheck && o.planCheck.every > 0 && (o.narExtraSteps ?? 0) > 0 ? o.planCheck : undefined;

@@ -3646,7 +3646,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(resume ? { resume } : {}), datasetSlug: ds.slug,
       spawnEnv: buildGpuEnv().env,
       trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16',
-      preview: preview.enabled && preview.everySteps > 0 ? preview : { ...preview, enabled: false },
+      preview: preview.enabled && (preview.everySteps > 0 || b.refinePlanner === true) ? preview : { ...preview, enabled: false },
       alignment,
       rank, alpha: alphaRaw,
       ...(adapterType === 'lokr' ? { adapterType, ...(lokrDim !== undefined ? { lokrDim } : {}), ...(lokrFactor !== undefined ? { lokrFactor } : {}) } : {}),

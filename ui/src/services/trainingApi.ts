@@ -707,6 +707,8 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
 export interface Yue2JointPreviewOptions {
   enabled: boolean;
   everySteps: number;
+  /** Artist takes per preview point. */
+  takes?: number;
   seconds: number;
   seed: number;
   previewMaxFrames: number;

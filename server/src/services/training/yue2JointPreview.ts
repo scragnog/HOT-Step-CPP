@@ -60,6 +60,7 @@ export function parseYue2JointPreviewOptions(raw: unknown, everySteps: number): 
     enabled,
     everySteps: integer('everySteps', everySteps, 0, 100000),
     seconds: integer('seconds', 90, 8, 360),
+    takes: integer('takes', 1, 1, 4),
     seed: integer('seed', 424242, 0, 0xffffffff),
     previewMaxFrames: integer('previewMaxFrames', 2250, 0, 9000),
     baseline: bool('baseline', false), control: bool('control', false),
@@ -139,7 +140,11 @@ export async function renderYue2JointPreview(input: {
     } catch { /* explicit empty prompt remains a visible render failure */ }
   }
   try {
-    for (const kind of kinds) {
+    type Take = { kind: 'artist' | 'baseline' | 'control'; seed: number };
+    const plan: Take[] = kinds.flatMap((kind): Take[] => kind === 'artist'
+      ? Array.from({ length: Math.max(1, input.options.takes ?? 1) }, (_, i) => ({ kind, seed: input.options.seed + i }))
+      : [{ kind, seed: input.options.seed }]);
+    for (const { kind, seed } of plan) {
       if (input.signal?.aborted) throw new Error('preview cancelled');
       const unity = { global: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1 };
       const selected: Yue2Selection = { lm: base.lm, lm_adapter: kind === 'baseline' ? [] : [
@@ -148,11 +153,11 @@ export async function renderYue2JointPreview(input: {
       await api.select(selected);
       await api.warm({ vae_variant: selected.vae_variant });
       const record: Yue2JointPreviewRecord = { id: randomUUID(), step: input.step, kind, status: 'rendering',
-        seconds: input.options.seconds, seed: input.options.seed, previewMaxFrames: input.options.previewMaxFrames,
+        seconds: input.options.seconds, seed, previewMaxFrames: input.options.previewMaxFrames,
         caption, lyrics, createdAt: started, updatedAt: Date.now() };
       recordYue2JointPreview(input.output, record);
       last = record;
-      const sub = await api.synth({ style: kind === 'control' ? 'downtempo electronic, calm and spacious' : caption, lyrics: kind === 'control' ? '' : lyrics, cot: 'full', seed: input.options.seed,
+      const sub = await api.synth({ style: kind === 'control' ? 'downtempo electronic, calm and spacious' : caption, lyrics: kind === 'control' ? '' : lyrics, cot: 'full', seed,
         preview_max_frames: input.options.previewMaxFrames });
       activeJob = sub.job_id;
       activeTerminal = false;
