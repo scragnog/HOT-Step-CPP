@@ -113,6 +113,9 @@ export interface ResolvedYue2JointTrainOptions {
   /** Multiplies the rate on every optimizer, Prodigy included (--lr is
    *  ignored under Prodigy). Refinements run at a fraction through this. */
   lrScale?: number;
+  /** Decoder training window in frames (25/s). Absent/1500 = the reference
+   *  60 s crop; 0 = whole song (clamped per song to the context). */
+  narCropFrames?: number;
   /** Plan-check planner stop: every `every` steps while the planner is live,
    *  pause, have the checkpoint's planner write `plans` plans, and freeze the
    *  planner at the LAST checkpoint whose failure rate stayed within `margin`
@@ -208,6 +211,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
     }
   }
   if (o.lrScale !== undefined && o.lrScale !== 1) args.push('--lr-scale', String(o.lrScale));
+  if (o.narCropFrames !== undefined && o.narCropFrames !== 1500) args.push('--nar-crop-frames', String(o.narCropFrames));
   if (o.resume) args.push('--resume', o.resume);
   if (o.resume && o.freezePlannerNow) args.push('--freeze-planner-now');
   if (o.alignment) {

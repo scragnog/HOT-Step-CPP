@@ -1124,6 +1124,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             ['spikeStopWindow', t('trainingStudio.yue2.method.spikeStopWindow', 'Spike window (steps)'), 'this card ships 20 · how close together the skips must be to stop the run'],
             ['reconStop', t('trainingStudio.yue2.method.reconStop', 'Decoder stop (min gain)'), 'this card ships 0.005 · once the planner is frozen, stop when the decoder reconstruction meter improves by less than this fraction over the window below. 0 trains to the step cap'],
             ['reconStopWindow', t('trainingStudio.yue2.method.reconStopWindow', 'Decoder stop window (checkpoints)'), 'this card ships 3 · how many checkpoints the gain is measured over'],
+            ['narCropFrames', t('trainingStudio.yue2.method.narCropFrames', 'Decoder crop (frames)'), 'default 1500 (60 s, the reference recipe) · the decoder trains on a random window this long. 0 = the whole song, shortened only where the prompt would not fit the context. Longer windows cost VRAM and time'],
           ] as const).map(([key, label, hint]) => (
             <label key={key} className="flex flex-col gap-1">
               <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{label}</span>

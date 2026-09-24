@@ -701,6 +701,8 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   lrDecayShape?: 'linear' | 'cosine';
   lrCycleSteps?: number;
   lrCycleMult?: number;
+  /** Decoder training window in frames; 1500 default, 0 = whole song. */
+  narCropFrames?: number;
   /** Decoder stop by value: a checkpoint at or under this reconstruction ends the run. */
   reconTarget?: number;
   /** Refinement pass (with resumeRunId/resumeStep): the planner stays frozen,

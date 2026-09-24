@@ -57,7 +57,7 @@ public:
     NativeRng & rng() { return rng_; }
     std::vector<float> sigmoid_schedule(size_t count) { if (!count) throw std::invalid_argument("timestep schedule is empty"); std::vector<float> values; values.reserve(count); for (size_t i = 0; i < count; ++i) values.push_back(float((1.0 - (1.0 / (1.0 + std::exp(-rng_.normal01())))) * 1000.0)); std::sort(values.begin(), values.end(), std::greater<float>()); schedule_ = values; schedule_cursor_ = 0; return values; }
     SampledBatch sample(const SongInput & song, const PromptInput & prompt, size_t train_window_frames, const std::vector<float> & timesteps, float abc_dropout = .5f, size_t ar_token_limit = 0, size_t eligible_timestep_count = 0, float caption_dropout = 0.0f) {
-        if (timesteps.empty() || train_window_frames > 1500 || !(abc_dropout >= 0 && abc_dropout <= 1) || !(caption_dropout >= 0 && caption_dropout <= 1)) throw std::invalid_argument("invalid native sampler configuration");
+        if (timesteps.empty() || train_window_frames > 24576 / 2 || !(abc_dropout >= 0 && abc_dropout <= 1) || !(caption_dropout >= 0 && caption_dropout <= 1)) throw std::invalid_argument("invalid native sampler configuration");
         if (caption_dropout > 0 && !prompt.has_nocap()) throw std::invalid_argument("caption dropout needs a dataset prepared with trigger-only prefixes; re-run preparation");
         const size_t eligible = eligible_timestep_count ? eligible_timestep_count : timesteps.size();
         if (!eligible || eligible > timesteps.size()) throw std::invalid_argument("invalid eligible timestep count");

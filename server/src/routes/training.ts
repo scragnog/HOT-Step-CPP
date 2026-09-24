@@ -3634,6 +3634,12 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       if (!Number.isFinite(v) || v < lo || v > hi || (int && !Number.isInteger(v))) { res.status(400).json({ error: `${key} must be ${int ? 'an integer' : 'a number'} from ${lo} to ${hi}.` }); return; }
       lrSchedule[key] = v;
     }
+    let narCropFrames: number | undefined;
+    if (b.narCropFrames !== undefined && b.narCropFrames !== null && b.narCropFrames !== '') {
+      const v = Number(b.narCropFrames);
+      if (!Number.isInteger(v) || v < 0 || v > 12288) { res.status(400).json({ error: 'narCropFrames must be 0 (whole song) or 1..12288 frames.' }); return; }
+      narCropFrames = v;
+    }
     // Plan-check planner stop (see yue2PlanCheck.ts).
     let planCheck: { every: number; plans?: number; margin?: number; seed?: number; caption?: string; lyrics?: string } | undefined;
     if (b.planCheck && typeof b.planCheck === 'object') {
@@ -3698,6 +3704,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       // Only a fresh main run chains into a refinement; resumes never do.
       ...(!resume && b.autoRefine === true ? { autoRefine: true } : {}),
       ...lrSchedule,
+      ...(narCropFrames !== undefined ? { narCropFrames } : {}),
       ...(resume && b.refinePlanner === true ? { unfreezePlanner: true, klCheckpointEvery: Math.max(0.01, Math.min(1, Number(b.klCheckpointEvery) || 0.1)), refineWarmup: 30, rungAdaptiveLr: true } : {}),
       ...advanced,
       ...(preparation ? { preparation } : {}),

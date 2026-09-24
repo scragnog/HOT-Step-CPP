@@ -770,7 +770,20 @@ static int run_impl(Config config, std::string * error) {
             }
             const std::vector<float> schedule = sampler.sigmoid_schedule(1000);
             const auto & item = dataset.items[order[cursor]];
-            auto sampled = sampler.sample(item.song, item.prompt, 1500, schedule, config.abc_dropout, 0, 999, config.caption_dropout);
+            // Decoder window: --nar-crop-frames (0 = whole song), clamped so the
+            // longest prefix + lead sheet + 2 x window (+5 control tokens)
+            // fits the context. 1500 on a normal song is the reference crop.
+            size_t window = config.nar_crop_frames > 0 ? (size_t) config.nar_crop_frames : item.song.semantic_tokens.size();
+            {
+                // The pairs the sampler can draw: a retained prefix carries the
+                // lead sheet, a dropped one does not (as the dataset check).
+                const auto & p = item.prompt;
+                const size_t used = std::max({p.retained_prefix_ids.size() + p.abc_ids.size(), p.dropped_prefix_ids.size(),
+                                              p.retained_nocap_prefix_ids.size() + p.abc_ids.size(), p.dropped_nocap_prefix_ids.size()}) + 5;
+                const size_t fit = used < yue2_aitk::dataset_detail::kMaxFrames ? (yue2_aitk::dataset_detail::kMaxFrames - used) / 2 : 1;
+                window = std::max<size_t>(1, std::min(window, fit));
+            }
+            auto sampled = sampler.sample(item.song, item.prompt, window, schedule, config.abc_dropout, 0, 999, config.caption_dropout);
             yue2_aitk_joint::Input input; input.batch = &sampled.batch; input.noisy_latents = sampled.noisy_bf16;
             input.flow_target = sampled.target_f32; input.timestep = sampled.timestep_bf16;
             input.kl_weight = config.kl_weight;

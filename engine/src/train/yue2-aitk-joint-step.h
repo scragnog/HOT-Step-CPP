@@ -49,7 +49,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
         input.timestep<0 || input.timestep>1) return fail(error,"invalid joint update input");
     const auto & batch=*input.batch;
     const size_t frames=batch.nar.semantic_tokens.size(), N=batch.ar.target_ids.size();
-    if (!frames || frames>1500 || !N || input.noisy_latents.size()!=frames*C ||
+    if (!frames || batch.nar.ar.input_ids.size()+frames>24576 /* context */ || !N || input.noisy_latents.size()!=frames*C ||
         input.flow_target.size()!=frames*C || batch.ar.prediction_positions.size()!=N ||
         batch.ar.input_ids.empty() || batch.nar.ar.input_ids.empty() ||
         !yue2_aitk_executor_detail::finite_all(input.noisy_latents.data(),input.noisy_latents.size()) ||
