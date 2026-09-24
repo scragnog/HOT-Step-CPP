@@ -2444,6 +2444,17 @@ export async function listYue2JointPreviews(
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews${query}`);
 }
 
+/** Cleanup around a chosen refinement rung. */
+export interface Yue2CleanupItem { count: number; bytes: number; detail?: string[] }
+export interface Yue2CleanupPlan { run: string; step: number; keep: string; caches: Yue2CleanupItem; otherCheckpoints: Yue2CleanupItem; otherRuns: Yue2CleanupItem; resume: Yue2CleanupItem; otherPreviews: Yue2CleanupItem }
+export type Yue2CleanupChoice = { caches?: boolean; otherCheckpoints?: boolean; otherRuns?: boolean; resume?: boolean; otherPreviews?: boolean };
+export async function getYue2CleanupPlan(id: string, run: string, step: number): Promise<Yue2CleanupPlan> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-cleanup-plan?run=${encodeURIComponent(run)}&step=${step}`);
+}
+export async function runYue2Cleanup(id: string, body: { run: string; step: number } & Yue2CleanupChoice): Promise<{ freedBytes: number; done: string[] }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-cleanup`, { method: 'POST', ...jsonBody(body) });
+}
+
 /** DELETE /datasets/:id/yue2-joint-runs/:jobId — a finished run and its checkpoints. */
 export async function deleteYue2AitkRun(id: string, jobId: string): Promise<{ output: string }> {
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });

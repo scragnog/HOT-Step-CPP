@@ -101,6 +101,18 @@ export function recordYue2JointPreview(output: string, record: Yue2JointPreviewR
   const records = read(output).filter(r => r.id !== record.id);
   write(output, [...records, record]);
 }
+/** Drop every preview record and file of a run except those at `keepStep`. */
+export function pruneYue2JointPreviews(output: string, keepStep: number): number {
+  const all = read(output);
+  const gone = all.filter(r => r.step !== keepStep);
+  for (const r of gone) {
+    if (!r.file) continue;
+    fs.rmSync(path.join(output, 'previews', r.file), { force: true });
+    fs.rmSync(path.join(output, 'previews', r.file.replace(/\.wav$/i, '.score.abc')), { force: true });
+  }
+  write(output, all.filter(r => r.step === keepStep));
+  return gone.length;
+}
 export function listYue2JointPreviews(output: string): Yue2JointPreviewRecord[] {
   return read(output).sort((a, b) => b.step - a.step || b.updatedAt - a.updatedAt);
 }

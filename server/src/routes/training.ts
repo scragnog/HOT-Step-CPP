@@ -146,6 +146,7 @@ import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
 import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions, renderYue2JointPreview } from '../services/training/yue2JointPreview.js';
 import { runOnGpuLane } from '../services/generation/gpuLane.js';
 import { listYue2RungScores, scoreYue2Rung, yue2RungScoresCsv } from '../services/training/yue2RungScores.js';
+import { planYue2Cleanup, runYue2Cleanup } from '../services/training/yue2Cleanup.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
 import { writeSidecar } from '../services/training/sidecarIO.js';
@@ -3904,6 +3905,32 @@ router.get('/datasets/:id/yue2-joint-previews', (req: Request, res: Response) =>
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }
+});
+
+/** Cleanup around a chosen rung (Refine tab): GET the plan with sizes, POST
+ * the chosen items. Refused while a job or pipeline is active for the dataset. */
+router.get('/datasets/:id/yue2-cleanup-plan', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const run = String(req.query.run ?? ''); const step = Number(req.query.step);
+    if (!run || !Number.isInteger(step)) { res.status(400).json({ error: 'run and step are required' }); return; }
+    res.json(planYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir }, run, step));
+  } catch (err: any) { res.status(400).json({ error: err?.message || String(err) }); }
+});
+router.post('/datasets/:id/yue2-cleanup', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    if (queue.activeJobForDataset(ds.id) || hasActivePipeline()) { res.status(409).json({ error: 'A job or pipeline is queued or running for this dataset.' }); return; }
+    const b = (req.body || {}) as Record<string, unknown>;
+    const run = String(b.run ?? ''); const step = Number(b.step);
+    if (!run || !Number.isInteger(step)) { res.status(400).json({ error: 'run and step are required' }); return; }
+    const choice = { caches: b.caches === true, otherCheckpoints: b.otherCheckpoints === true, otherRuns: b.otherRuns === true, resume: b.resume === true, otherPreviews: b.otherPreviews === true };
+    const result = runYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir }, run, step, choice);
+    console.log(`[Training] Cleanup around ${ds.slug} run ${run} step ${step}: ${result.done.join(', ') || 'nothing'} (${(result.freedBytes / 1048576).toFixed(0)} MiB)`);
+    res.json(result);
+  } catch (err: any) { res.status(400).json({ error: err?.message || String(err) }); }
 });
 
 /** DELETE /datasets/:id/yue2-joint-runs/:jobId — remove a finished run's

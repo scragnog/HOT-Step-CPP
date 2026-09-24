@@ -18,6 +18,7 @@ import { PreviewPlayer } from './PreviewPlayer';
 import {
   cancelJob, getJob, linkYue2JointCheckpointPreset, listYue2AitkRuns, listYue2JointPreviews,
   renderYue2JointPreviews, startYue2JointTrain, listYue2RungScores, scoreYue2Rung, yue2RungScoresExportUrl, deleteYue2AitkRun,
+  getYue2CleanupPlan, runYue2Cleanup, type Yue2CleanupPlan, type Yue2CleanupChoice,
   type TrainingJobSummary, type Yue2AitkRunRecord, type Yue2JointPreviewRecord, type Yue2JointTrainRequest, type Yue2RungScore,
 } from '../../services/trainingApi';
 
@@ -132,16 +133,65 @@ export const RefinePanel: React.FC = () => {
     const when = `${d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })} ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
     return `${when} · s${last?.step ?? '?'}${last?.kl !== undefined ? ` KL${last.kl.toFixed(2)}` : ''} · ${r.checkpoints.length}ck · ${r.live ? 'running' : r.status}`;
   };
-  const use = async (dir: string) => {
-    if (!datasetId) return;
-    setError('');
-    try { await linkYue2JointCheckpointPreset(datasetId, dir); setPicked(dir); }
-    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+  // Cleanup modal after a rung is chosen: what else can go, with sizes.
+  const [cleanup, setCleanup] = useState<{ step: number; plan: Yue2CleanupPlan } | null>(null);
+  const [choice, setChoice] = useState<Yue2CleanupChoice>({ caches: true, otherCheckpoints: true, otherRuns: true, resume: true, otherPreviews: true });
+  const [cleaning, setCleaning] = useState(false);
+  const [cleanupNote, setCleanupNote] = useState('');
+  const mib = (b: number) => b >= 1073741824 ? `${(b / 1073741824).toFixed(2)} GiB` : `${(b / 1048576).toFixed(0)} MiB`;
+  const use = async (dir: string, step: number) => {
+    if (!datasetId || !ladderRun) return;
+    setError(''); setCleanupNote('');
+    try {
+      await linkYue2JointCheckpointPreset(datasetId, dir); setPicked(dir);
+      const plan = await getYue2CleanupPlan(datasetId, ladderRun, step);
+      setCleanup({ step, plan });
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+  };
+  const doCleanup = async () => {
+    if (!datasetId || !ladderRun || !cleanup) return;
+    setCleaning(true); setError('');
+    try {
+      const r = await runYue2Cleanup(datasetId, { run: ladderRun, step: cleanup.step, ...choice });
+      setCleanupNote(t('trainingStudio.refine.cleanupDone', 'Removed {{what}}; about {{size}} freed.', { what: r.done.join(', ') || 'nothing', size: mib(r.freedBytes) }));
+      setCleanup(null);
+      await refreshRuns();
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setCleaning(false); }
   };
 
   if (!datasetId) return <p className="text-sm text-zinc-500">{t('trainingStudio.refine.noDataset', 'Pick a dataset first.')}</p>;
+  const items: Array<{ key: keyof Yue2CleanupChoice; label: string; item?: { count: number; bytes: number; detail?: string[] } }> = cleanup ? [
+    { key: 'caches', label: t('trainingStudio.refine.cleanCaches', 'Prepared data and caches for this dataset (latents, codes, lead sheets, alignment, stems, MM3 and ACE caches)'), item: cleanup.plan.caches },
+    { key: 'otherCheckpoints', label: t('trainingStudio.refine.cleanCheckpoints', 'The other checkpoints in this run'), item: cleanup.plan.otherCheckpoints },
+    { key: 'otherRuns', label: t('trainingStudio.refine.cleanRuns', 'All other joint runs for this dataset'), item: cleanup.plan.otherRuns },
+    { key: 'resume', label: t('trainingStudio.refine.cleanResume', 'This rung\'s resume file (the adapter files stay)'), item: cleanup.plan.resume },
+    { key: 'otherPreviews', label: t('trainingStudio.refine.cleanPreviews', 'Previews from the other rungs'), item: cleanup.plan.otherPreviews },
+  ] : [];
+  const totalBytes = items.reduce((s, i) => s + (choice[i.key] && i.item ? i.item.bytes : 0), 0);
   return (
     <div className="flex flex-col gap-4">
+      {cleanup && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => !cleaning && setCleanup(null)}>
+        <div className="w-full max-w-xl rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+          <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{t('trainingStudio.refine.cleanupTitle', 'Step {{step}} is now the adapter. Clean up around it?', { step: cleanup.step })}</div>
+          <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.refine.cleanupIntro', 'Everything below is app-generated and can be rebuilt. Source audio, sidecars, captions, labels and this rung\'s adapter files are never touched. Your rung scores are kept.')}</p>
+          <div className="mt-3 flex flex-col gap-2">
+            {items.map(i => <label key={i.key} className="flex items-start gap-3 text-xs text-zinc-700 dark:text-zinc-300">
+              <Toggle id={`cleanup-${i.key}`} checked={!!choice[i.key] && !!i.item?.count} onChange={v => setChoice(prev => ({ ...prev, [i.key]: v }))} />
+              <span className={`flex-1 ${!i.item?.count ? 'opacity-50' : ''}`}>{i.label}<span className="ml-2 text-zinc-500 tabular-nums">{i.item ? `${i.item.count} · ${mib(i.item.bytes)}` : ''}</span>
+                {i.item?.detail?.length ? <span className="block text-[10px] text-zinc-500 truncate">{i.item.detail.join(', ')}</span> : null}</span>
+            </label>)}
+          </div>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <span className="text-[11px] text-zinc-500 tabular-nums">{t('trainingStudio.refine.cleanupTotal', 'About {{size}} to free', { size: mib(totalBytes) })}</span>
+            <div className="flex gap-2">
+              <button type="button" disabled={cleaning} onClick={() => setCleanup(null)} className="px-3 py-1.5 rounded-lg text-xs border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10">{t('trainingStudio.refine.cleanupSkip', 'Keep everything')}</button>
+              <button type="button" disabled={cleaning || totalBytes === 0} onClick={() => void doCleanup()} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500 text-white hover:bg-red-400 disabled:opacity-40">{cleaning ? t('trainingStudio.refine.cleaning', 'Cleaning…') : t('trainingStudio.refine.cleanupGo', 'Delete selected')}</button>
+            </div>
+          </div>
+        </div>
+      </div>}
+      {cleanupNote && <div className="text-[12px] text-emerald-700 dark:text-emerald-300">{cleanupNote}</div>}
       <div className="rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100"><Sparkles size={16} className="text-amber-500" />{t('trainingStudio.refine.title', 'Refine the planner')}{detail?.name ? ` · ${detail.name}` : ''}</div>
         <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.refine.intro', 'The safe presets stop the planner at a conservative KL. Some artists take more. This continues a finished run with the planner live and the decoder along for the ride, saves a checkpoint at every KL rung up to the ceiling, and renders a preview per rung so you can hear where it starts to fall apart late in the song. Pick the last good rung.')}</p>
@@ -227,7 +277,7 @@ export const RefinePanel: React.FC = () => {
                   className="px-2 py-1 rounded-lg text-[11px] border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 disabled:opacity-40">
                   {rendering === c.step ? t('trainingStudio.refine.rendering', 'Rendering…') : t('trainingStudio.refine.render', 'Render more')}
                 </button>
-                <button type="button" onClick={() => void use(c.dir)}
+                <button type="button" onClick={() => void use(c.dir, c.step)}
                   className={`px-2 py-1 rounded-lg text-[11px] font-semibold border ${picked === c.dir ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300' : 'border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10'}`}>
                   {picked === c.dir ? t('trainingStudio.refine.picked', 'In use') : t('trainingStudio.refine.use', 'Use this rung')}
                 </button>
