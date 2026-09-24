@@ -32,6 +32,7 @@ export const RefinePanel: React.FC = () => {
   const [seconds, setSeconds] = useState(180);
   const [takes, setTakes] = useState(2);
   const [autoPreview, setAutoPreview] = useState(true);
+  const [parallel, setParallel] = useState(false);
   const [lrScale, setLrScale] = useState(0.2);
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
   const [ladderRun, setLadderRun] = useState('');
@@ -86,7 +87,7 @@ export const RefinePanel: React.FC = () => {
         lyricTiming: (opts.alignment as { enabled?: boolean } | undefined)?.enabled === true, autoPrepare: false, checkpoint: '', output: '',
         // Rung previews: the engine pauses after each rung checkpoint and the
         // server renders `takes` previews there before resuming.
-        preview: { enabled: autoPreview, everySteps: 0, takes, seconds, seed: 424242, previewMaxFrames: seconds * 25, baseline: false, control: false } } as unknown as Yue2JointTrainRequest;
+        preview: { enabled: autoPreview, everySteps: 0, takes, seconds, seed: 424242, previewMaxFrames: seconds * 25, baseline: false, control: false, parallel } } as unknown as Yue2JointTrainRequest;
       const result = await startYue2JointTrain(datasetId, request);
       setJob(await getJob(result.jobId));
       setLadderRun(result.jobId);
@@ -139,6 +140,10 @@ export const RefinePanel: React.FC = () => {
           <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 self-center">
             <input type="checkbox" className="accent-amber-500" checked={autoPreview} disabled={active || busy} onChange={e => setAutoPreview(e.target.checked)} />
             {t('trainingStudio.refine.autoPreview', 'Render previews at each rung')}
+          </label>
+          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 self-center" title={t('trainingStudio.refine.parallelHint', 'Renders while training continues instead of pausing it. Needs about 22 GB of VRAM for both; renders run at about half speed.')}>
+            <input type="checkbox" className="accent-amber-500" checked={parallel} disabled={active || busy || !autoPreview} onChange={e => setParallel(e.target.checked)} />
+            {t('trainingStudio.refine.parallel', 'In parallel with training')}
           </label>
           <label className="flex flex-col gap-1 w-24">
             <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.takes', 'Tracks')}</span>

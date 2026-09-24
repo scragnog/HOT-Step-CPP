@@ -711,6 +711,8 @@ export interface Yue2JointPreviewOptions {
   everySteps: number;
   /** Artist takes per preview point. */
   takes?: number;
+  /** Rung previews render while training continues (needs the VRAM for both). */
+  parallel?: boolean;
   seconds: number;
   seed: number;
   previewMaxFrames: number;

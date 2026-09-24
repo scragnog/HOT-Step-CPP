@@ -92,6 +92,8 @@ export interface RelayState {
   targetStopped?: boolean;
   /** Written into the run's own train-log.jsonl by the caller. */
   onJsonl?: (ev: Record<string, unknown>) => void;
+  /** A KL-rung checkpoint was written (joint trainer, parallel previews). */
+  onRung?: (step: number) => void;
 }
 
 /** `[yue2-train] step %5lld/%lld  loss %.5f (win %.5f, run %.5f)  |g| %.4f

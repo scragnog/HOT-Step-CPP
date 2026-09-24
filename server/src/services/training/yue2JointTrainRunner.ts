@@ -160,7 +160,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   if (o.resume && o.unfreezePlanner) args.push('--unfreeze-planner');
   if (o.klCheckpointEvery !== undefined && o.klCheckpointEvery > 0) {
     args.push('--kl-checkpoint-every', String(o.klCheckpointEvery));
-    if (o.preview?.enabled) args.push('--pause-on-kl-mark');
+    if (o.preview?.enabled && !o.preview.parallel) args.push('--pause-on-kl-mark');
   }
   if (o.resume) args.push('--resume', o.resume);
   if (o.resume && o.freezePlannerNow) args.push('--freeze-planner-now');
@@ -302,6 +302,7 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
     log(job, 'info', `Meters at step ${step}: decoder drift ${raw.nar_drift}${raw.nar_recon === undefined ? '' : `, reconstruction ${raw.nar_recon}`}${raw.ar_kl_mean20 === undefined ? '' : `, planner KL ${raw.ar_kl_mean20}`}`);
   } else if (stage === 'kl_mark' && step !== undefined) {
     log(job, 'info', `KL rung reached at step ${step}; checkpoint saved`);
+    state.onRung?.(step);
   } else if (stage === 'recon_stop' && step !== undefined) {
     log(job, 'info', `Decoder reconstruction has flattened; decoder done, stopping at step ${step}`);
   } else if (stage === 'spike_stop' && step !== undefined) {
@@ -418,6 +419,7 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
     const resumeStep = resume ? Number((/checkpoint-step(\d+)/.exec(resume) || [])[1] || 0) : 0;
     let step = resumeStep;
     let segmentNo = 1;
+    let previewChain: Promise<void> = Promise.resolve();
     // The first segment carries the caller's freeze (a resume from a chosen
     // checkpoint); later segments freeze only when a plan check says so.
     let freezeNext = !!(o.resume && o.freezePlannerNow);
@@ -430,6 +432,19 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
       const segment = { ...o, outDir: segmentOut, resume: resume || undefined, pauseAt: pauseAt < o.steps ? pauseAt : undefined, freezePlannerNow: freezeNext };
       freezeNext = false;
       const state: RelayState = { fatalMessage: '', doneSeen: false, lastStep: step, targetStopped: false, totalSteps: o.steps };
+      if (preview?.parallel && rungPreviews) {
+        // Parallel rung previews: render each rung's takes while training
+        // goes on, one render at a time, and settle the chain before the job ends.
+        state.onRung = rungStep => {
+          previewChain = previewChain.then(async () => {
+            if (isCancelled(job)) return;
+            const ck = checkpointRecords(segmentOut).find(c => c.step === rungStep);
+            if (!ck?.arPath || !ck.narPath) { log(job, 'warn', `Rung ${rungStep}: checkpoint incomplete, no preview`); return; }
+            try { await renderYue2JointPreview({ output: o.outDir, step: rungStep, options: preview, arAdapter: ck.arPath, narAdapter: ck.narPath, dataset: o.dataset, signal: job.controller.signal }); }
+            catch (err: any) { log(job, 'warn', `Preview at rung ${rungStep} failed; training continues: ${err?.message || err}`); }
+          });
+        };
+      }
       // A target-loss stop ends the run early: the engine checkpoints the
       // last completed step, so the validator must accept that step, not o.steps.
       // An engine-initiated pause (a KL rung) checkpoints wherever it lands.
@@ -483,6 +498,8 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
       // Yue2PreviewCleanupError and must abort before the next segment.
       resume = ckpt.optimizerPath; step = state.pausedAt; segmentNo++;
     }
+    // Parallel rung previews may still be rendering after the trainer ended.
+    if (preview?.parallel) { job.phase = 'preview'; emitProgress(job); await previewChain; }
     if (preview && !isCancelled(job)) {
       const finalDir = path.join(o.outDir, 'segments', `segment-${String(segmentNo).padStart(6, '0')}`);
       const final = checkpointRecords(finalDir).find(c => c.step === o.steps);

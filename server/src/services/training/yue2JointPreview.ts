@@ -64,6 +64,7 @@ export function parseYue2JointPreviewOptions(raw: unknown, everySteps: number): 
     seed: integer('seed', 424242, 0, 0xffffffff),
     previewMaxFrames: integer('previewMaxFrames', 2250, 0, 9000),
     baseline: bool('baseline', false), control: bool('control', false),
+    ...(bool('parallel', false) ? { parallel: true } : {}),
     ...(text('caption') ? { caption: text('caption') } : {}),
     ...(text('lyrics') ? { lyrics: text('lyrics') } : {}),
     ...(text('previewSongId') ? { previewSongId: text('previewSongId') } : {}),

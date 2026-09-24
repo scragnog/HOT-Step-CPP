@@ -231,6 +231,9 @@ export interface Yue2JointPreviewOptions {
   everySteps: number;
   /** Artist takes per preview point (seeds seed, seed+1, ...). */
   takes?: number;
+  /** KL-rung previews render while training continues instead of pausing it
+   *  (training + render measured ~21 GB of VRAM; renders run about half speed). */
+  parallel?: boolean;
   seconds: number;
   seed: number;
   previewMaxFrames: number;
