@@ -3384,7 +3384,9 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         steps: b.steps, saveEvery: b.refine === true && Number.isInteger(Number(b.saveEvery)) && Number(b.saveEvery) > 0 ? Number(b.saveEvery) : saved.saveEvery,
         stopMode: b.stopMode ?? saved.stopMode, targetLoss: b.targetLoss ?? saved.targetLoss, targetKl: b.targetKl ?? saved.targetKl,
         targetKlMode: b.targetKlMode ?? saved.targetKlMode,
-        narExtraSteps: b.narExtraSteps ?? saved.narExtraSteps,
+        // The decoder budget counts from the FREEZE step, which a refinement
+        // does not know: let it run to the cap (freeze + cap > cap always).
+        narExtraSteps: b.refine === true ? b.steps : (b.narExtraSteps ?? saved.narExtraSteps),
         stopEngine: b.stopEngine ?? saved.stopEngine,
         planCheck: b.planCheck ?? saved.planCheck,
         // Freeze the resumed checkpoint's planner: a stop decided outside the

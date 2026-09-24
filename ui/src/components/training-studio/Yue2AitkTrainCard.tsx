@@ -761,7 +761,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     try {
       const result = await startYue2JointTrain(datasetId, { ...form, trainingMethod: 'aitk', refine: true,
         resumeRunId: run.jobId, resumeStep: last.step, steps: last.step + refineBudget, saveEvery: 10,
-        stopMode: 'kl', narExtraSteps: refineBudget, freezePlannerNow: true,
+        stopMode: 'kl', narExtraSteps: last.step + refineBudget, freezePlannerNow: true,
         reconStop: form.reconStop ?? DEFAULT_FORM.reconStop, reconStopWindow: 5,
         lyricTiming, alignmentEnabled: lyricTiming, autoPrepare: false, checkpoint: '', output: '' } as Yue2JointTrainRequest);
       if (typeof window !== 'undefined') window.localStorage.setItem(`${JOB_KEY}${datasetId}`, JSON.stringify(result.jobId));
