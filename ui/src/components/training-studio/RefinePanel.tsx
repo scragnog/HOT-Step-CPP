@@ -37,10 +37,11 @@ export const RefinePanel: React.FC = () => {
   const [takes, setTakes] = useState(2);
   const [autoPreview, setAutoPreview] = useState(true);
   const [parallel, setParallel] = useState(true);
-  // Draft previews: decoder at 12 ODE steps with a 0.7 cache ratio; the
+  // Draft previews: decoder at 12 ODE steps, velocity cache OFF (Rob's
+  // tests 2026-09-23: a raised cache ratio blunts artist likeness). The
   // planner stage, which is what a preview judges, is untouched.
   const [draft, setDraft] = useState(true);
-  const draftOpts = draft ? { odeSteps: 12, narCacheRatio: 0.7 } : {};
+  const draftOpts = draft ? { odeSteps: 12, narCacheRatio: 0 } : {};
   const [lrScale, setLrScale] = useState(0.1);
   // Further training for the decoder from the picked rung (planner frozen):
   // to a reconstruction target, a step budget, or the knee, whichever first.
@@ -302,7 +303,7 @@ export const RefinePanel: React.FC = () => {
               </div>
               <div className={`flex items-center gap-2 self-center ${active || busy ? 'opacity-50 pointer-events-none' : ''}`}>
                 <Toggle id="refine-draft" checked={draft} onChange={setDraft} />
-                <ParamLabel underline={false} className="text-xs normal-case tracking-normal font-normal text-zinc-700 dark:text-zinc-300" label={t('trainingStudio.refine.draft', 'Draft quality')} info={t('trainingStudio.refine.draftInfo', 'Previews only: the decoder runs 12 ODE steps with a 0.7 velocity-cache ratio instead of 32 and 0.5, about a quarter of the decoder time. Timbre is a little softer; structure, diction and late-song behaviour, which the planner sets, are unchanged. Off renders previews at production quality.')} />
+                <ParamLabel underline={false} className="text-xs normal-case tracking-normal font-normal text-zinc-700 dark:text-zinc-300" label={t('trainingStudio.refine.draft', 'Draft quality')} info={t('trainingStudio.refine.draftInfo', 'Previews only: the decoder runs 12 ODE steps instead of 32, with the velocity cache off (a raised cache ratio blunts artist likeness), about a third of the decoder time. Timbre is a little softer; structure, diction and late-song behaviour, which the planner sets, are unchanged. Off renders previews at production quality.')} />
               </div>
               <label className="flex flex-col gap-1 w-24">
                 <ParamLabel label={t('trainingStudio.refine.takes', 'Tracks')} meta={t('trainingStudio.refine.takesMeta', '1–4 · default 2')} info={t('trainingStudio.refine.takesInfo', 'Tracks per rung, different seeds. Renders are not deterministic: one take can decay late while another from the same checkpoint is clean, so two is the minimum to trust a rung.')} />
