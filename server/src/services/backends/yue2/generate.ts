@@ -600,13 +600,20 @@ ${req.lyrics}`);
     job.progress = 2;
     const submitStart = performance.now();
     const sub = await yue2Synth(req);
-    deps.attempt.effective.seed = sub.seed_str ?? sub.seed;
+    // /yue2/synth answers with the job id and nothing else (#177). The seed and
+    // the instrumental flag come from what we sent; a random seed (-1) is only
+    // known once the job reports its tracks, and is recorded then.
+    const instrumental = !req.lyrics;
+    const reqSeed = req.seed ?? -1;
     job.aceJobId = sub.job_id;   // standard /job id — /cancel/:id reaches it unchanged
-    job.params.seed = sub.seed;
-    job.params.randomSeed = false;
-    log('INFO', `[YuE2] Job ${sub.job_id} submitted — cot=${req.cot}, ode_steps=${sub.ode_steps ?? req.ode_steps}, `
-      + `cfg=${sub.cfg_scale ?? req.cfg_scale ?? '(default)'}, vae=${sub.vae_variant ?? req.vae_variant}, `
-      + `seed ${sub.seed}${sub.instrumental ? ', instrumental' : ''}`);
+    if (reqSeed >= 0) {
+      deps.attempt.effective.seed = reqSeed;
+      job.params.seed = reqSeed;
+      job.params.randomSeed = false;
+    }
+    log('INFO', `[YuE2] Job ${sub.job_id} submitted — cot=${req.cot}, ode_steps=${req.ode_steps}, `
+      + `cfg=${req.cfg_scale ?? '(default)'}, vae=${req.vae_variant}, `
+      + `seed ${reqSeed >= 0 ? reqSeed : 'random'}${instrumental ? ', instrumental' : ''}`);
 
     // ── Progress ticker ──
     // No /yue2/job route exists (docs/plans/yue2/06-engine-port-plan.md §7
@@ -678,7 +685,13 @@ ${req.lyrics}`);
     if (parts.length === 0) throw new Error('YuE2 returned a multipart body with no parts');
     const trackDetails: Yue2TrackDetail[] = finalDetail.tracks && finalDetail.tracks.length === parts.length
       ? finalDetail.tracks
-      : parts.map((_, i) => ({ song: i, variation: 0, seed: Number(sub.seed), noise_seed: Number(sub.seed) }));
+      : parts.map((_, i) => ({ song: i, variation: 0, seed: reqSeed, noise_seed: reqSeed }));
+    const resolvedSeed = trackDetails[0]?.seed;
+    if (typeof resolvedSeed === 'number' && resolvedSeed >= 0) {
+      deps.attempt.effective.seed = resolvedSeed;
+      job.params.seed = resolvedSeed;
+      job.params.randomSeed = false;
+    }
 
     const captionLine = yue2CaptionToStyle(caption);
     const title: string = job.params.title || captionLine.substring(0, 60) || 'Untitled';
@@ -736,7 +749,7 @@ ${req.lyrics}`);
         ...job.params,
         ppVaeReencode: false,
         spectralLifterEnabled: false,
-        instrumental: sub.instrumental,
+        instrumental: instrumental,
         stableStepCaptions: [captionLine],
       };
       if (ppParams.postProcessingEnabled !== false) {
@@ -763,7 +776,7 @@ ${req.lyrics}`);
     // writes the same file. Whisper still earns its place on a render whose
     // lyrics you do not have (a cover, an import) or to hear what was really
     // sung rather than what was asked for.
-    if (job.params.whisperLyricsEnabled && !sub.instrumental) {
+    if (job.params.whisperLyricsEnabled && !instrumental) {
       const wStart = performance.now();
       try {
         const { ensureWhisperCli, findWhisperModel, transcribeWithWhisper } =
@@ -809,7 +822,7 @@ ${req.lyrics}`);
     // The spans come back as codepoint offsets into the lyrics we sent, so
     // align.ts maps every word to its line and [Section] by lookup — no
     // reconciliation, and no chance of a line landing under the wrong header.
-    if (job.params.yue2AlignLyrics && !sub.instrumental && req.lyrics) {
+    if (job.params.yue2AlignLyrics && !instrumental && req.lyrics) {
       const alStart = performance.now();
       const prevStage = job.stage;
       try {
@@ -855,10 +868,10 @@ ${req.lyrics}`);
         ...(halves.ar.path || halves.nar.path ? { yue2Adapters: halves } : {}),
         yue2Request: { ...req, seed: td.seed, noise_seed: td.noise_seed, lm_batch_size: undefined, synth_batch_size: undefined },
         yue2: {
-          ode_steps: sub.ode_steps ?? req.ode_steps,
-          cfg_scale: sub.cfg_scale ?? req.cfg_scale,
-          vae_variant: sub.vae_variant ?? req.vae_variant,
-          instrumental: sub.instrumental,
+          ode_steps: req.ode_steps,
+          cfg_scale: req.cfg_scale,
+          vae_variant: req.vae_variant,
+          instrumental: instrumental,
           end_reason: td.end_reason ?? finalDetail.end_reason,
           stage_end_reasons: td.stage_end_reasons ?? finalDetail.stage_end_reasons,
           duration_s: measured > 0 ? Math.round(measured * 10) / 10 : undefined,
@@ -1021,5 +1034,5 @@ export async function runYue2PlanPreview(params: any, signal?: AbortSignal): Pro
     if (!body.ok) throw new Error(`YuE2 semantic result fetch failed (${body.status})`);
     semantic_ids = await body.json() as number[];
   }
-  return { abc, seed: sub.seed, end_reason, stage_end_reasons: detail.stage_end_reasons, health: classifyYue2Score(abc, end_reason), notes, ...(semantic_ids ? { semantic_ids } : {}) };
+  return { abc, seed: detail.tracks?.[0]?.seed ?? planReq.seed ?? -1, end_reason, stage_end_reasons: detail.stage_end_reasons, health: classifyYue2Score(abc, end_reason), notes, ...(semantic_ids ? { semantic_ids } : {}) };
 }
