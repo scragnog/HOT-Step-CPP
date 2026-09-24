@@ -344,6 +344,20 @@ jobs:
             git apply --stat    "$p"
             git apply --verbose "$p"
           done
+          # git apply gives every patched file a fresh mtime, and ggml.h is one
+          # of them, so every run recompiled all of ggml/CUDA even on a cache
+          # hit. When neither the patch stack nor ggml changed since the cached
+          # build, give patched files the stack's last commit time (older than
+          # any cached object) so Ninja keeps those objects.
+          if [ -f engine/build/.built-commit ] && \
+             base="$(cat engine/build/.built-commit)" && \
+             git cat-file -e "$base^{commit}" 2>/dev/null && \
+             git diff --quiet "$base" HEAD -- engine/patches engine/ggml; then
+            ts="$(git log -1 --format=%at -- engine/patches)"
+            python3 -c "import os,sys; t=int(sys.argv[1]); [os.utime(f,(t,t)) for f in sys.argv[2:] if os.path.isfile(f)]" \
+              "$ts" $(sed -n 's#^+++ b/##p' engine/patches/*.patch | sort -u)
+            echo "Patched files set to patch-stack time $ts (unchanged since $base)"
+          fi
 
       - name: Build C++ engine
         shell: pwsh
@@ -844,6 +858,20 @@ jobs:
             git apply --stat    "$p"
             git apply --verbose "$p"
           done
+          # git apply gives every patched file a fresh mtime, and ggml.h is one
+          # of them, so every run recompiled all of ggml/CUDA even on a cache
+          # hit. When neither the patch stack nor ggml changed since the cached
+          # build, give patched files the stack's last commit time (older than
+          # any cached object) so Ninja keeps those objects.
+          if [ -f engine/build/.built-commit ] && \
+             base="$(cat engine/build/.built-commit)" && \
+             git cat-file -e "$base^{commit}" 2>/dev/null && \
+             git diff --quiet "$base" HEAD -- engine/patches engine/ggml; then
+            ts="$(git log -1 --format=%at -- engine/patches)"
+            python3 -c "import os,sys; t=int(sys.argv[1]); [os.utime(f,(t,t)) for f in sys.argv[2:] if os.path.isfile(f)]" \
+              "$ts" $(sed -n 's#^+++ b/##p' engine/patches/*.patch | sort -u)
+            echo "Patched files set to patch-stack time $ts (unchanged since $base)"
+          fi
 
       - name: Build C++ engine
         run: |
@@ -1340,6 +1368,20 @@ jobs:
             git apply --stat    "$p"
             git apply --verbose "$p"
           done
+          # git apply gives every patched file a fresh mtime, and ggml.h is one
+          # of them, so every run recompiled all of ggml/CUDA even on a cache
+          # hit. When neither the patch stack nor ggml changed since the cached
+          # build, give patched files the stack's last commit time (older than
+          # any cached object) so Ninja keeps those objects.
+          if [ -f engine/build/.built-commit ] && \
+             base="$(cat engine/build/.built-commit)" && \
+             git cat-file -e "$base^{commit}" 2>/dev/null && \
+             git diff --quiet "$base" HEAD -- engine/patches engine/ggml; then
+            ts="$(git log -1 --format=%at -- engine/patches)"
+            python3 -c "import os,sys; t=int(sys.argv[1]); [os.utime(f,(t,t)) for f in sys.argv[2:] if os.path.isfile(f)]" \
+              "$ts" $(sed -n 's#^+++ b/##p' engine/patches/*.patch | sort -u)
+            echo "Patched files set to patch-stack time $ts (unchanged since $base)"
+          fi
 
       - name: Build C++ engine
         run: |
