@@ -3405,9 +3405,11 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         // Planner refinement: KL rungs to a ceiling, both halves live.
         // A refinement resumes a converged adapter whose schedule had decayed
         // to zero; a fresh cosine at full rate knocked one off its basin
-        // (grad norm x20 in three steps). Run at a fraction of the run's rate.
+        // (grad norm x20 in three steps). Run flat at a fraction of the
+        // run's rate. The fraction goes through lrScale: scaling lr did
+        // nothing under Prodigy, which ignores lr.
         ...(b.refinePlanner === true ? { refinePlanner: true, stopMode: 'kl', targetKl: b.targetKl ?? saved.targetKl, narExtraSteps: 0, klCheckpointEvery: b.klCheckpointEvery ?? 0.1,
-          lr: (typeof saved.lr === 'number' ? saved.lr : 1e-4) * Math.max(0.05, Math.min(1, Number(b.refineLrScale) || 0.3)) } : {}),
+          lrSchedule: b.lrSchedule ?? 'constant', lrScale: Math.max(0.05, Math.min(1, Number(b.refineLrScale) || 0.3)) } : {}),
         spikeFactor: b.spikeFactor ?? saved.spikeFactor, spikeStop: b.spikeStop ?? saved.spikeStop,
         spikeStopWindow: b.spikeStopWindow ?? saved.spikeStopWindow,
         reconStop: b.reconStop ?? saved.reconStop, reconStopWindow: b.reconStopWindow ?? saved.reconStopWindow,
@@ -3615,6 +3617,23 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       }
       spike[key] = v;
     }
+    // Learning-rate schedule: all optional; absent = the engine's cosine.
+    const lrSchedule: { lrSchedule?: 'cosine' | 'cosine-floor' | 'constant' | 'linear' | 'wsd' | 'sgdr'; lrFloor?: number; lrDecaySteps?: number; lrDecayShape?: 'linear' | 'cosine'; lrCycleSteps?: number; lrCycleMult?: number; lrScale?: number } = {};
+    if (b.lrSchedule !== undefined && b.lrSchedule !== null && b.lrSchedule !== '') {
+      if (!['cosine', 'cosine-floor', 'constant', 'linear', 'wsd', 'sgdr'].includes(String(b.lrSchedule))) { res.status(400).json({ error: 'lrSchedule must be cosine, cosine-floor, constant, linear, wsd or sgdr.' }); return; }
+      if (b.lrSchedule !== 'cosine' && optimizer === 'adamw') { res.status(400).json({ error: 'A learning-rate schedule needs optimizer adamw-lm, prodigy or muon.' }); return; }
+      lrSchedule.lrSchedule = b.lrSchedule as NonNullable<typeof lrSchedule.lrSchedule>;
+    }
+    if (b.lrDecayShape !== undefined && b.lrDecayShape !== null && b.lrDecayShape !== '') {
+      if (b.lrDecayShape !== 'linear' && b.lrDecayShape !== 'cosine') { res.status(400).json({ error: 'lrDecayShape must be linear or cosine.' }); return; }
+      lrSchedule.lrDecayShape = b.lrDecayShape;
+    }
+    for (const [key, lo, hi, int] of [['lrFloor', 0, 1, false], ['lrDecaySteps', 1, 100000, true], ['lrCycleSteps', 1, 100000, true], ['lrCycleMult', 1, 10, false], ['lrScale', 0.001, 10, false]] as const) {
+      if (b[key] === undefined || b[key] === null || b[key] === '') continue;
+      const v = Number(b[key]);
+      if (!Number.isFinite(v) || v < lo || v > hi || (int && !Number.isInteger(v))) { res.status(400).json({ error: `${key} must be ${int ? 'an integer' : 'a number'} from ${lo} to ${hi}.` }); return; }
+      lrSchedule[key] = v;
+    }
     // Plan-check planner stop (see yue2PlanCheck.ts).
     let planCheck: { every: number; plans?: number; margin?: number; seed?: number; caption?: string; lyrics?: string } | undefined;
     if (b.planCheck && typeof b.planCheck === 'object') {
@@ -3678,6 +3697,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(resume && b.refine === true ? { reconReset: true } : {}),
       // Only a fresh main run chains into a refinement; resumes never do.
       ...(!resume && b.autoRefine === true ? { autoRefine: true } : {}),
+      ...lrSchedule,
       ...(resume && b.refinePlanner === true ? { unfreezePlanner: true, klCheckpointEvery: Math.max(0.01, Math.min(1, Number(b.klCheckpointEvery) || 0.1)), refineWarmup: 30, rungAdaptiveLr: true } : {}),
       ...advanced,
       ...(preparation ? { preparation } : {}),

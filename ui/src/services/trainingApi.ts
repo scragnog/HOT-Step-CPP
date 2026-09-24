@@ -694,6 +694,13 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
    *  reconStopWindow checkpoints. 0 = train to the cap. */
   reconStop?: number;
   reconStopWindow?: number;
+  /** Learning-rate schedule (LmOptim optimizers); absent = cosine. */
+  lrSchedule?: 'cosine' | 'cosine-floor' | 'constant' | 'linear' | 'wsd' | 'sgdr';
+  lrFloor?: number;
+  lrDecaySteps?: number;
+  lrDecayShape?: 'linear' | 'cosine';
+  lrCycleSteps?: number;
+  lrCycleMult?: number;
   /** Decoder stop by value: a checkpoint at or under this reconstruction ends the run. */
   reconTarget?: number;
   /** Refinement pass (with resumeRunId/resumeStep): the planner stays frozen,

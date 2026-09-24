@@ -1134,6 +1134,40 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             </label>
           ))}
         </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.lrSchedule', 'Learning-rate schedule')}</span>
+            <select className={input} value={form.lrSchedule ?? 'cosine'} disabled={active || starting || preparing || yue2RunAllActive}
+              onChange={event => setForm(previous => ({ ...previous, lrSchedule: event.target.value === 'cosine' ? undefined : event.target.value as Yue2JointTrainRequest['lrSchedule'] }))}>
+              <option value="cosine">cosine (default)</option>
+              <option value="cosine-floor">cosine to a floor</option>
+              <option value="constant">constant</option>
+              <option value="linear">linear</option>
+              <option value="wsd">warmup, flat, triggered decay (wsd)</option>
+              <option value="sgdr">cosine restarts (sgdr)</option>
+            </select>
+            <span className="text-[10px] text-zinc-500">{({
+              cosine: 'Decays to zero at the step cap. A run that stops early on its KL keeps the weights mid-decay, at a high rate.',
+              'cosine-floor': 'The same cosine, ending at the floor below instead of zero.',
+              constant: 'Flat after warmup. The stops read the model, not the schedule. No annealing.',
+              linear: 'A straight line to zero at the step cap. Included for comparison.',
+              wsd: 'Flat until a stop fires (KL target, decoder stop, or the cap), then a short decay; the stop acts when the decay ends, so the kept weights are annealed. The un-annealed KL checkpoint is saved too.',
+              sgdr: 'Cosine cycles, each longer than the last. Expected to lose: the restarts shake the planner.',
+            } as const)[form.lrSchedule ?? 'cosine']}</span>
+          </label>
+          {form.lrSchedule === 'cosine-floor' && field(t('trainingStudio.yue2.method.lrFloor', 'Floor (fraction of the rate)'), 'lrFloor', 'number', form, value => set('lrFloor', value === '' ? undefined : Number(value)))}
+          {form.lrSchedule === 'wsd' && field(t('trainingStudio.yue2.method.lrDecaySteps', 'Decay steps'), 'lrDecaySteps', 'number', form, value => set('lrDecaySteps', value === '' ? undefined : Number(value)))}
+          {form.lrSchedule === 'wsd' && <label className="flex flex-col gap-1">
+            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.lrDecayShape', 'Decay shape')}</span>
+            <select className={input} value={form.lrDecayShape ?? 'linear'} disabled={active || starting || preparing || yue2RunAllActive}
+              onChange={event => set('lrDecayShape', event.target.value as 'linear' | 'cosine')}>
+              <option value="linear">linear</option>
+              <option value="cosine">cosine</option>
+            </select>
+          </label>}
+          {form.lrSchedule === 'sgdr' && field(t('trainingStudio.yue2.method.lrCycleSteps', 'First cycle (steps)'), 'lrCycleSteps', 'number', form, value => set('lrCycleSteps', value === '' ? undefined : Number(value)))}
+          {form.lrSchedule === 'sgdr' && field(t('trainingStudio.yue2.method.lrCycleMult', 'Cycle growth'), 'lrCycleMult', 'number', form, value => set('lrCycleMult', value === '' ? undefined : Number(value)))}
+        </div>
       </details>
       <label className="mt-3 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
         <input type="checkbox" className="mt-0.5 accent-amber-500" checked={form.stopEngine !== false}

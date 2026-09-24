@@ -153,7 +153,56 @@ struct Config {
     // in the record; the run settles to about one rung per interval.
     std::int32_t refine_warmup = 0;
     bool rung_adaptive_lr = false;
+    // Learning-rate schedule for the LmOptim optimizers (the native adamw
+    // stays flat after warmup). Under Prodigy it is the gamma on its own d.
+    //   cosine        warmup, cosine to zero at --steps (the default, unchanged)
+    //   cosine-floor  the same cosine, ending at lr_floor x the rate
+    //   constant      warmup, then flat
+    //   linear        warmup, straight line to zero at --steps
+    //   wsd           warmup, flat, then a lr_decay_steps tail that the stops
+    //                 trigger: the KL stop, the reconstruction stop, or the
+    //                 cap minus the tail. The run acts on the stop (freeze or
+    //                 end) when the tail ends, so the weights it keeps have
+    //                 been annealed. The decoder re-warms over --warmup after
+    //                 a freeze.
+    //   sgdr          cosine cycles of lr_cycle_steps, each lr_cycle_mult longer
+    std::string lr_schedule = "cosine";
+    float lr_floor = 0.1f;
+    std::int32_t lr_decay_steps = 40;
+    std::string lr_decay_shape = "linear";
+    std::int32_t lr_cycle_steps = 100;
+    float lr_cycle_mult = 2.0f;
+    // Multiplies the rate on every optimizer path, Prodigy's gamma included.
+    // --lr alone never reached Prodigy (it adapts its own d), so a refinement
+    // "at 0.3x the rate" ran at full rate under Prodigy until this existed.
+    float lr_scale = 1.0f;
 };
+
+// The schedule's multiplier for the step about to run (`completed` steps
+// done), before refinement pacing and --lr-scale. decaying_from is the wsd
+// tail's first step, -1 while on the plateau. The cosine branch is the
+// expression the trainer always used, so the default is byte-identical.
+inline double lr_schedule_multiplier(const Config & c, int completed, int decaying_from) {
+    if (c.warmup > 0 && completed < c.warmup) return (double)(completed + 1) / (double)c.warmup;
+    const double pi = 3.14159265358979;
+    const double denom = (double)(c.steps - c.warmup > 1 ? c.steps - c.warmup : 1);
+    const double ratio = std::fmin(1.0, (double)(completed - c.warmup) / denom);
+    const std::string & s = c.lr_schedule;
+    if (s == "constant") return 1.0;
+    if (s == "linear") return 1.0 - ratio;
+    if (s == "cosine-floor") return (double)c.lr_floor + (1.0 - (double)c.lr_floor) * 0.5 * (1.0 + std::cos(pi * ratio));
+    if (s == "wsd") {
+        if (decaying_from < 0 || completed < decaying_from) return 1.0;
+        const double k = std::fmin(1.0, (double)(completed - decaying_from) / (double)c.lr_decay_steps);
+        return c.lr_decay_shape == "cosine" ? 0.5 * (1.0 + std::cos(pi * k)) : 1.0 - k;
+    }
+    if (s == "sgdr") {
+        double t = (double)(completed - c.warmup), len = (double)c.lr_cycle_steps;
+        while (t >= len) { t -= len; len *= (double)c.lr_cycle_mult; }
+        return 0.5 * (1.0 + std::cos(pi * t / len));
+    }
+    return 0.5 * (1.0 + std::cos(pi * ratio));
+}
 
 enum class ParseResult { ok, help, error };
 
@@ -174,7 +223,9 @@ inline void usage(FILE * out) {
         "[--recon-stop F (planner frozen: stop when the reconstruction meter improves under F over --recon-stop-window 3 checkpoints)] [--recon-reset (with --resume: empty window)] "
         "[--unfreeze-planner (with --resume: train the planner on past its freeze)] [--kl-checkpoint-every 0.1 (a checkpoint at each KL rung)] "
         "[--freeze-planner-now (with --resume and --nar-extra-steps: freeze the planner at the resumed step)] "
-        "[--spike-factor F (skip updates above F x median gradient norm; 0 = off)] [--spike-stop N (stop after N skips)] [--spike-stop-window 20]\n");
+        "[--spike-factor F (skip updates above F x median gradient norm; 0 = off)] [--spike-stop N (stop after N skips)] [--spike-stop-window 20] "
+        "[--lr-schedule cosine|cosine-floor|constant|linear|wsd|sgdr] [--lr-floor 0.1] [--lr-decay-steps 40] [--lr-decay-shape linear|cosine] "
+        "[--lr-cycle-steps 100] [--lr-cycle-mult 2] [--lr-scale 1.0 (multiplies the rate on every optimizer, Prodigy included)]\n");
 }
 
 namespace detail {
@@ -369,6 +420,28 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--refine-warmup")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::decimal_i32(text.c_str(), &parsed.refine_warmup) || parsed.refine_warmup < 0) { if (error) *error = "--refine-warmup must be a nonnegative integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--lr-schedule")) {
+            if (!detail::value(arg, argc, argv, &i, &parsed.lr_schedule, error)) return ParseResult::error;
+            const std::string & s = parsed.lr_schedule;
+            if (s != "cosine" && s != "cosine-floor" && s != "constant" && s != "linear" && s != "wsd" && s != "sgdr") { if (error) *error = "--lr-schedule must be cosine, cosine-floor, constant, linear, wsd or sgdr"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--lr-floor")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.lr_floor) || parsed.lr_floor < 0.0f || parsed.lr_floor > 1.0f) { if (error) *error = "--lr-floor must be a fraction in [0, 1]"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--lr-decay-steps")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::decimal_i32(text.c_str(), &parsed.lr_decay_steps) || parsed.lr_decay_steps < 1) { if (error) *error = "--lr-decay-steps must be a positive integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--lr-decay-shape")) {
+            if (!detail::value(arg, argc, argv, &i, &parsed.lr_decay_shape, error)) return ParseResult::error;
+            if (parsed.lr_decay_shape != "linear" && parsed.lr_decay_shape != "cosine") { if (error) *error = "--lr-decay-shape must be linear or cosine"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--lr-cycle-steps")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::decimal_i32(text.c_str(), &parsed.lr_cycle_steps) || parsed.lr_cycle_steps < 1) { if (error) *error = "--lr-cycle-steps must be a positive integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--lr-cycle-mult")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.lr_cycle_mult) || parsed.lr_cycle_mult < 1.0f || parsed.lr_cycle_mult > 10.0f) { if (error) *error = "--lr-cycle-mult must be in [1, 10]"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--lr-scale")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.lr_scale) || parsed.lr_scale <= 0.0f || parsed.lr_scale > 10.0f) { if (error) *error = "--lr-scale must be in (0, 10]"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--kl-checkpoint-every")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.kl_checkpoint_every) || parsed.kl_checkpoint_every < 0.0f) { if (error) *error = "--kl-checkpoint-every must be a finite number >= 0"; return ParseResult::error; }

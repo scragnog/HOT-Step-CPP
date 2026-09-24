@@ -75,6 +75,8 @@ struct ResumeBinding {
     // from it) and the adaptive rate multiplier.
     int unfrozen_at = -1;
     double rung_lr_mult = 1.0;
+    // wsd: the step its decay tail started at; -1 = on the plateau.
+    int lr_decaying_from = -1;
 };
 // Steps in the KL trend fit. Kept in step with Yue2AitkTrainCard's chart.
 constexpr int kKlTrendWindow = 30;
@@ -125,6 +127,7 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
     // Schedule knobs that only reshape the run from here on: note, don't refuse.
     { yyjson_val * v=yyjson_obj_get(root,"lr"); if(v&&yyjson_is_num(v)&&double(yyjson_get_num(v))!=double(config.lr)) std::fprintf(stderr,"[yue2-aitk] resume note: lr changed from %.9g to %.9g; the run continues with the new value\n", double(yyjson_get_num(v)), (double)config.lr); }
     { yyjson_val * v=yyjson_obj_get(root,"warmup"); if(v&&yyjson_is_int(v)&&int(yyjson_get_sint(v))!=config.warmup) std::fprintf(stderr,"[yue2-aitk] resume note: warmup changed from %d to %d; the run continues with the new value\n", int(yyjson_get_sint(v)), config.warmup); }
+    { std::string was="cosine"; if(yyjson_val * v=yyjson_obj_get(root,"lr_schedule")) str_field(v,&was); if(was!=config.lr_schedule) std::fprintf(stderr,"[yue2-aitk] resume note: lr schedule changed from %s to %s; the run continues with the new one\n", was.c_str(), config.lr_schedule.c_str()); }
     { yyjson_val * v=yyjson_obj_get(root,"weight_decay"); if(v&&yyjson_is_num(v)&&double(yyjson_get_num(v))!=double(config.weight_decay)) std::fprintf(stderr,"[yue2-aitk] resume note: weight-decay changed from %.9g to %.9g; the run continues with the new value\n", double(yyjson_get_num(v)), (double)config.weight_decay); }
     yyjson_val * vrecipe=yyjson_obj_get(root,"recipe"), *vcp=yyjson_obj_get(root,"checkpoint_sha256"), *vds=yyjson_obj_get(root,"dataset_sha256"), *vsm=yyjson_obj_get(root,"source_manifest_sha256"), *vseed=yyjson_obj_get(root,"seed"), *vdev=yyjson_obj_get(root,"cuda_index"), *vstep=yyjson_obj_get(root,"completed_step"), *vcursor=yyjson_obj_get(root,"order_cursor"), *vorder=yyjson_obj_get(root,"order"), *vsampler=yyjson_obj_get(root,"sampler_state");
     if (!str_field(vrecipe,&recipe) || recipe!="yue2-aitk-runtime-v1" || !str_field(vcp,&cp) || cp!=checkpoint || !str_field(vds,&ds) || ds!=dataset || !str_field(vsm,&sm) || sm!=source || !yyjson_is_uint(vseed) || yyjson_get_uint(vseed)!=seed || !yyjson_is_int(vdev) || yyjson_get_sint(vdev)!=cuda_index || !yyjson_is_int(vstep) || yyjson_get_sint(vstep)<0 || yyjson_get_sint(vstep)>INT_MAX || !yyjson_is_uint(vcursor) || !yyjson_is_arr(vorder) || yyjson_arr_size(vorder)!=item_count || !str_field(vsampler,&sampler)) return fail(error,"resume metadata binding mismatch");
@@ -141,6 +144,7 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
         history("recon_history",&binding->recon_history);
         if(yyjson_val * v=yyjson_obj_get(root,"kl_mark_last")) { if(yyjson_is_num(v) && std::isfinite(yyjson_get_num(v))) binding->kl_mark_last=yyjson_get_num(v); }
         if(yyjson_val * v=yyjson_obj_get(root,"unfrozen_at")) { if(yyjson_is_int(v) && yyjson_get_sint(v)>=0) binding->unfrozen_at=int(yyjson_get_sint(v)); }
+        if(yyjson_val * v=yyjson_obj_get(root,"lr_decaying_from")) { if(yyjson_is_int(v) && yyjson_get_sint(v)>=0) binding->lr_decaying_from=int(yyjson_get_sint(v)); }
         if(yyjson_val * v=yyjson_obj_get(root,"rung_lr_mult")) { if(yyjson_is_num(v) && std::isfinite(yyjson_get_num(v)) && yyjson_get_num(v)>0) binding->rung_lr_mult=yyjson_get_num(v); }
         if(yyjson_val * v=yyjson_obj_get(root,"planner_frozen_at")) {
             if(!yyjson_is_int(v) || yyjson_get_sint(v)<0 || yyjson_get_sint(v)>plan->completed) return fail(error,"resume planner_frozen_at field is malformed");
@@ -164,7 +168,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
                              const yue2_aitk_runtime::Config & config, int opt_iter, double prodigy_d, double prodigy_r,
                              const std::vector<double> & kl_history, const std::vector<double> & loss_history, int planner_frozen_at,
                              const std::vector<double> & gnorm_history, const std::vector<double> & spike_steps,
-                             const std::vector<double> & recon_history = {}, double kl_mark_last = 0.0, int unfrozen_at = -1, double rung_lr_mult = 1.0) {
+                             const std::vector<double> & recon_history = {}, double kl_mark_last = 0.0, int unfrozen_at = -1, double rung_lr_mult = 1.0, int lr_decaying_from = -1) {
     yyjson_mut_doc * doc=yyjson_mut_doc_new(nullptr);
     if (!doc) return {};
     yyjson_mut_val * root=yyjson_mut_obj(doc), * arr=yyjson_mut_arr(doc);
@@ -192,6 +196,9 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     }
     if (!recon_history.empty()) { yyjson_mut_val * a=yyjson_mut_arr(doc); for(double v:recon_history) yyjson_mut_arr_add_real(doc,a,v); yyjson_mut_obj_add_val(doc,root,"recon_history",a); }
     if (kl_mark_last > 0.0) yyjson_mut_obj_add_real(doc,root,"kl_mark_last",kl_mark_last);
+    // Only non-default schedules carry these, so cosine records are unchanged.
+    if (config.lr_schedule!="cosine") yyjson_mut_obj_add_strcpy(doc,root,"lr_schedule",config.lr_schedule.c_str());
+    if (lr_decaying_from >= 0) yyjson_mut_obj_add_int(doc,root,"lr_decaying_from",lr_decaying_from);
     if (unfrozen_at >= 0) { yyjson_mut_obj_add_int(doc,root,"unfrozen_at",unfrozen_at); yyjson_mut_obj_add_real(doc,root,"rung_lr_mult",rung_lr_mult); }
     if (config.optimizer!="adamw") {
         yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
@@ -240,6 +247,11 @@ static int run_impl(Config config, std::string * error) {
         // (lm-optim.h), so lr_mul would apply to the AdamW-ruled parameters
         // only — a HALF-honoured split is worse than a refused one.
         fail(error, "--planner-lr-scale / --nar-lr-scale are not supported with --optimizer muon"); return 1;
+    }
+    if (config.lr_schedule != "cosine" && config.optimizer == "adamw") {
+        // The native AdamW8bit branch has always been flat after warmup; a
+        // schedule it would silently ignore is refused instead.
+        fail(error, "--lr-schedule needs an LmOptim optimizer: --optimizer adamw-lm, prodigy or muon"); return 1;
     }
     if (config.cautious && config.optimizer == "adamw") {
         fail(error, "--cautious needs an LmOptim optimizer: --optimizer adamw-lm, prodigy or muon (the native AdamW8bit kernel has no update tensor to mask)"); return 1;
@@ -639,6 +651,17 @@ static int run_impl(Config config, std::string * error) {
         const bool first_unfreeze = config.unfreeze_planner && resume_binding.planner_frozen_at >= 0;
         int unfrozen_at = first_unfreeze ? completed : resume_binding.unfrozen_at;
         double rung_lr_mult = resume_binding.rung_lr_mult;
+        const bool wsd = config.lr_schedule == "wsd";
+        int lr_decaying_from = wsd ? resume_binding.lr_decaying_from : -1;
+        // wsd: start the tail now (idempotent). The stop that asked for it acts
+        // when the tail ends.
+        auto start_tail = [&](const char * why) {
+            if (lr_decaying_from >= 0) return;
+            lr_decaying_from = completed;
+            std::fprintf(stderr, "[yue2-aitk] %s at step %d: learning-rate tail of %d steps before acting on it\n", why, completed, config.lr_decay_steps);
+            event("lr_decay", completed);
+        };
+        const auto in_tail = [&]() { return lr_decaying_from >= 0; };
         std::vector<double> kl_window = config.target_kl > 0.0f && !first_unfreeze ? resume_binding.kl_history : std::vector<double>{};
         // KL rungs (--kl-checkpoint-every): the next reading that earns a
         // checkpoint, set from the first reading; the reading itself goes into
@@ -675,7 +698,7 @@ static int run_impl(Config config, std::string * error) {
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
-                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history, kl_mark_last, unfrozen_at, rung_lr_mult);
+                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history, kl_mark_last, unfrozen_at, rung_lr_mult, lr_decaying_from);
             if (metadata.empty()) return false;
             if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str(), dataset.trigger, config.caption_dropout)) return false;
             if (use_lm) {
@@ -727,6 +750,19 @@ static int run_impl(Config config, std::string * error) {
             if (!save_ec) { last_saved=step; event("checkpoint", step); }
             return !save_ec;
         };
+        auto freeze_at_kl = [&](double reading) -> bool {
+            // Freeze first, so the KL checkpoint's resume record already says
+            // frozen and resumes decoder-only.
+            planner_frozen_at = completed;
+            state.freeze_planner();
+            // The decoder's gradient norm alone is ~10x below the joint one,
+            // so the spike guard's baseline starts over.
+            gnorm_window.clear(); spike_steps.clear();
+            if (!save_checkpoint(completed)) return false;
+            event("planner_frozen", completed);
+            std::fprintf(stderr, "[yue2-aitk] planner reached KL %.4g at step %d: frozen; decoder-only until step %d\n", reading, completed, end_step());
+            return true;
+        };
         while (completed < end_step()) {
             if (yue2_aitk_cancel_requested()) {
                 if (completed > 0 && !save_checkpoint(completed)) { fail(error, "cancel checkpoint publication failed"); return 1; }
@@ -745,6 +781,7 @@ static int run_impl(Config config, std::string * error) {
             {
                 double lr = (double) config.lr;
                 if (config.warmup > 0 && completed < config.warmup) lr *= (double)(completed + 1) / (double)config.warmup;
+                if (config.lr_scale != 1.0f) lr *= (double) config.lr_scale;
                 input.adamw_lr = (float) lr;
                 input.adamw_weight_decay = config.weight_decay;
                 // Armed once 20 applied norms are in the window.
@@ -780,17 +817,18 @@ static int run_impl(Config config, std::string * error) {
                 stage_start = now;
             };
             if (use_lm) {
-                // Linear warmup, then cosine to zero. Prodigy's base_lr is the
-                // schedule multiplier on its own d (gamma), as in the Legacy
-                // trainers; with warmup 0 the cosine starts at full value.
+                // --lr-schedule (default: linear warmup, then cosine to zero).
+                // Prodigy's base_lr is the schedule multiplier on its own d
+                // (gamma), as in the Legacy trainers.
+                // wsd: the tail that ends a run at the step cap starts
+                // lr_decay_steps before it.
+                if (wsd && !in_tail() && completed >= end_step() - config.lr_decay_steps) start_tail("step cap ahead");
                 double lr = (config.optimizer == "prodigy") ? 1.0 : (double) config.lr;
-                if (config.warmup > 0 && completed < config.warmup) {
-                    lr *= (double)(completed + 1) / (double)config.warmup;
-                } else {
-                    const double denom = (double)std::max<int32_t>(1, config.steps - config.warmup);
-                    const double ratio = std::min(1.0, (double)(completed - config.warmup) / denom);
-                    lr *= 0.5 * (1.0 + std::cos(3.14159265358979 * ratio));
-                }
+                lr *= yue2_aitk_runtime::lr_schedule_multiplier(config, completed, lr_decaying_from);
+                // wsd: the decoder re-warms after a freeze (the tail left the rate at zero).
+                if (wsd && !in_tail() && planner_frozen_at >= 0 && config.warmup > 0 && completed - planner_frozen_at < config.warmup)
+                    lr *= (double)(completed - planner_frozen_at + 1) / (double)config.warmup;
+                if (config.lr_scale != 1.0f) lr *= (double) config.lr_scale;
                 if (unfrozen_at >= 0) {
                     // Refinement pacing: warm up from the unfreeze, then the
                     // adaptive multiplier (halved whenever a rung was jumped).
@@ -816,6 +854,8 @@ static int run_impl(Config config, std::string * error) {
             if (planner_frozen_at >= 0) line << ",\"planner_frozen\":true";
             else line << ",\"ar_ce\":" << metrics.ar_ce << ",\"ar_kl\":" << metrics.ar_kl;
             line << ",\"nar_mse\":" << metrics.nar_mse << ",\"gradient_norm\":" << metrics.gradient_norm;
+            if (use_lm) line << ",\"lr\":" << lm->opt.base_lr;
+            if (in_tail()) line << ",\"lr_tail\":true";
             if (metrics.skipped) line << ",\"spike_skipped\":true";
             if (planner_frozen_at < 0) line << ",\"cursor_ce\":" << metrics.cursor_ce << ",\"cursor_weight\":" << cursor_weight
                    << ",\"cursor_frames\":" << metrics.cursor_frames;
@@ -847,6 +887,19 @@ static int run_impl(Config config, std::string * error) {
                     std::fprintf(stderr, "[yue2-aitk] %zu spikes within %d steps: stopping at step %d\n", spike_steps.size(), config.spike_stop_window, completed);
                     if (!save_checkpoint(completed)) { fail(error, "spike-stop checkpoint publication failed"); return 1; }
                     event("spike_stop", completed);
+                    event("target", completed);
+                    event("done", completed);
+                    return 0;
+                }
+            }
+            // wsd: the tail has run out, so act on the stop that started it.
+            // A tail that ends at the step cap needs nothing: the loop ends.
+            if (wsd && in_tail() && completed >= lr_decaying_from + config.lr_decay_steps && completed < end_step()) {
+                lr_decaying_from = -1;
+                if (planner_frozen_at < 0 && config.target_kl > 0.0f && config.nar_extra_steps > 0) {
+                    if (!freeze_at_kl(last_kl_reading)) { fail(error, "planner-freeze checkpoint publication failed"); return 1; }
+                } else {
+                    if (!save_checkpoint(completed)) { fail(error, "target checkpoint publication failed"); return 1; }
                     event("target", completed);
                     event("done", completed);
                     return 0;
@@ -907,17 +960,16 @@ static int run_impl(Config config, std::string * error) {
                             if (config.pause_on_kl_mark && completed < end_step()) { event("paused", completed); return 0; }
                         }
                     }
-                    if (reading >= (double) config.target_kl && config.nar_extra_steps > 0) {
-                        // Freeze first, so the KL checkpoint's resume record
-                        // already says frozen and resumes decoder-only.
-                        planner_frozen_at = completed;
-                        state.freeze_planner();
-                        // The decoder's gradient norm alone is ~10x below the
-                        // joint one, so the spike guard's baseline starts over.
-                        gnorm_window.clear(); spike_steps.clear();
-                        if (!save_checkpoint(completed)) { fail(error, "planner-freeze checkpoint publication failed"); return 1; }
-                        event("planner_frozen", completed);
-                        std::fprintf(stderr, "[yue2-aitk] planner reached KL %.4g at step %d: frozen; decoder-only until step %d\n", reading, completed, end_step());
+                    if (reading >= (double) config.target_kl && wsd) {
+                        // wsd: anneal before acting. The un-annealed weights
+                        // are saved too, for comparison; the record carries
+                        // the tail, so a resume of it continues the tail.
+                        if (!in_tail()) {
+                            start_tail("KL target reached");
+                            if (!save_checkpoint(completed)) { fail(error, "KL-target checkpoint publication failed"); return 1; }
+                        }
+                    } else if (reading >= (double) config.target_kl && config.nar_extra_steps > 0) {
+                        if (!freeze_at_kl(reading)) { fail(error, "planner-freeze checkpoint publication failed"); return 1; }
                     } else if (reading >= (double) config.target_kl) {
                         if (!save_checkpoint(completed)) { fail(error, "target checkpoint publication failed"); return 1; }
                         event("target", completed);
@@ -932,23 +984,29 @@ static int run_impl(Config config, std::string * error) {
             // last recon_stop_window checkpoints of the frozen phase. The
             // checkpoint just written is the one kept.
             if (config.recon_target > 0.0f && planner_frozen_at >= 0 && completed % config.save_every == 0 && completed < end_step()
-                && !recon_history.empty() && recon_history.back() <= (double) config.recon_target) {
+                && !recon_history.empty() && recon_history.back() <= (double) config.recon_target && !in_tail()) {
                 std::fprintf(stderr, "[yue2-aitk] reconstruction %.4f at or under the target %.4f: decoder done, stopping at step %d\n", recon_history.back(), (double) config.recon_target, completed);
-                event("recon_stop", completed);
-                event("target", completed);
-                event("done", completed);
-                return 0;
-            }
-            if (config.recon_stop > 0.0f && planner_frozen_at >= 0 && completed % config.save_every == 0 && completed < end_step()
-                && recon_history.size() > (size_t) config.recon_stop_window) {
-                const double before = recon_history[recon_history.size() - 1 - (size_t) config.recon_stop_window], now = recon_history.back();
-                const double improvement = before > 0.0 ? (before - now) / before : 0.0;
-                if (improvement < (double) config.recon_stop) {
-                    std::fprintf(stderr, "[yue2-aitk] reconstruction %.4f -> %.4f over %d checkpoints (%.2f%%): decoder done, stopping at step %d\n", before, now, config.recon_stop_window, 100.0 * improvement, completed);
+                if (wsd) start_tail("decoder done");
+                else {
                     event("recon_stop", completed);
                     event("target", completed);
                     event("done", completed);
                     return 0;
+                }
+            }
+            if (config.recon_stop > 0.0f && planner_frozen_at >= 0 && completed % config.save_every == 0 && completed < end_step()
+                && recon_history.size() > (size_t) config.recon_stop_window && !in_tail()) {
+                const double before = recon_history[recon_history.size() - 1 - (size_t) config.recon_stop_window], now = recon_history.back();
+                const double improvement = before > 0.0 ? (before - now) / before : 0.0;
+                if (improvement < (double) config.recon_stop) {
+                    std::fprintf(stderr, "[yue2-aitk] reconstruction %.4f -> %.4f over %d checkpoints (%.2f%%): decoder done, stopping at step %d\n", before, now, config.recon_stop_window, 100.0 * improvement, completed);
+                    if (wsd) start_tail("decoder done");
+                    else {
+                        event("recon_stop", completed);
+                        event("target", completed);
+                        event("done", completed);
+                        return 0;
+                    }
                 }
             }
             if (config.pause_at > 0 && completed >= config.pause_at && completed < end_step()) {

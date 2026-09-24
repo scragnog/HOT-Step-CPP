@@ -102,6 +102,17 @@ export interface ResolvedYue2JointTrainOptions {
   /** Refinement pacing: warmup steps from the unfreeze; halve the rate when a rung is jumped. */
   refineWarmup?: number;
   rungAdaptiveLr?: boolean;
+  /** Learning-rate schedule (LmOptim optimizers). Absent = the engine's
+   *  cosine. wsd's tail is triggered by the KL/recon stops or the cap. */
+  lrSchedule?: 'cosine' | 'cosine-floor' | 'constant' | 'linear' | 'wsd' | 'sgdr';
+  lrFloor?: number;
+  lrDecaySteps?: number;
+  lrDecayShape?: 'linear' | 'cosine';
+  lrCycleSteps?: number;
+  lrCycleMult?: number;
+  /** Multiplies the rate on every optimizer, Prodigy included (--lr is
+   *  ignored under Prodigy). Refinements run at a fraction through this. */
+  lrScale?: number;
   /** Plan-check planner stop: every `every` steps while the planner is live,
    *  pause, have the checkpoint's planner write `plans` plans, and freeze the
    *  planner at the LAST checkpoint whose failure rate stayed within `margin`
@@ -184,6 +195,19 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
     if (o.refineWarmup !== undefined && o.refineWarmup > 0) args.push('--refine-warmup', String(o.refineWarmup));
     if (o.rungAdaptiveLr) args.push('--rung-adaptive-lr');
   }
+  if (o.lrSchedule && o.lrSchedule !== 'cosine') {
+    args.push('--lr-schedule', o.lrSchedule);
+    if (o.lrSchedule === 'cosine-floor' && o.lrFloor !== undefined) args.push('--lr-floor', String(o.lrFloor));
+    if (o.lrSchedule === 'wsd') {
+      if (o.lrDecaySteps !== undefined) args.push('--lr-decay-steps', String(o.lrDecaySteps));
+      if (o.lrDecayShape) args.push('--lr-decay-shape', o.lrDecayShape);
+    }
+    if (o.lrSchedule === 'sgdr') {
+      if (o.lrCycleSteps !== undefined) args.push('--lr-cycle-steps', String(o.lrCycleSteps));
+      if (o.lrCycleMult !== undefined) args.push('--lr-cycle-mult', String(o.lrCycleMult));
+    }
+  }
+  if (o.lrScale !== undefined && o.lrScale !== 1) args.push('--lr-scale', String(o.lrScale));
   if (o.resume) args.push('--resume', o.resume);
   if (o.resume && o.freezePlannerNow) args.push('--freeze-planner-now');
   if (o.alignment) {
@@ -303,6 +327,7 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
       ...(event.narMse === undefined ? {} : { narMse: event.narMse }),
       ...(event.plannerFrozen ? { plannerFrozen: true } : {}),
       ...(event.gradNorm === undefined ? {} : { gradNorm: event.gradNorm }),
+      ...(event.lr === undefined ? {} : { lr: event.lr }),
       ...(event.stepMs === undefined ? {} : { stepMs: event.stepMs }),
       ...(clock && event.stepMs !== undefined ? (clock.byStep.set(step, event.stepMs), { trainMs: trainClockTotal(clock) }) : {}) });
     emitProgress(job);
@@ -329,6 +354,8 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
     log(job, 'info', `Decoder reconstruction has flattened; decoder done, stopping at step ${step}`);
   } else if (stage === 'spike_stop' && step !== undefined) {
     log(job, 'info', `Repeated gradient spikes at step ${step}; stopping on the last pre-spike weights`);
+  } else if (stage === 'lr_decay' && step !== undefined) {
+    log(job, 'info', `Learning-rate tail started at step ${step}; the stop acts when it ends`);
   } else if (stage === 'planner_frozen' && step !== undefined) {
     state.frozenAt = step;
     log(job, 'info', `Planner reached its KL target at step ${step}; frozen there, decoder keeps training`);
@@ -363,7 +390,7 @@ function persistAitkCatalogue(
 
 /** Pure contract helper kept exportable for server-side event tests. */
 export function parseYue2JointEvent(line: string, totalSteps: number): {
-  stage: string; step?: number; loss?: number; arKl?: number; narMse?: number; plannerFrozen?: boolean; gradNorm?: number; stepMs?: number; totalSteps: number;
+  stage: string; step?: number; loss?: number; arKl?: number; narMse?: number; plannerFrozen?: boolean; gradNorm?: number; lr?: number; stepMs?: number; totalSteps: number;
 } | null {
   try {
     const event = JSON.parse(line) as Record<string, unknown>;
@@ -381,6 +408,7 @@ export function parseYue2JointEvent(line: string, totalSteps: number): {
       ...(finite(event.nar_mse) ? { narMse: event.nar_mse } : {}),
       ...(event.planner_frozen === true ? { plannerFrozen: true } : {}),
       ...(finite(event.gradient_norm) ? { gradNorm: event.gradient_norm } : {}),
+      ...(finite(event.lr) ? { lr: event.lr } : {}),
       ...(stepMs === undefined ? {} : { stepMs }), totalSteps };
   } catch { return null; }
 }
