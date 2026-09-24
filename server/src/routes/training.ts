@@ -4067,6 +4067,7 @@ router.post('/datasets/:id/yue2-joint-previews/render', async (req: Request, res
     const odeSteps = Number.isInteger(Number(b.odeSteps)) && Number(b.odeSteps) > 0 ? Math.min(64, Number(b.odeSteps)) : undefined;
     const narCacheRatio = typeof b.narCacheRatio === 'number' && b.narCacheRatio >= 0 && b.narCacheRatio <= 0.9 ? b.narCacheRatio : undefined;
     const options = { enabled: true, everySteps: 0, takes, seconds, seed, previewMaxFrames: seconds * 25, baseline: false, control: false,
+      ...(b.baselineOnly === true ? { baselineOnly: true } : {}),
       ...(odeSteps ? { odeSteps } : {}), ...(narCacheRatio !== undefined ? { narCacheRatio } : {}),
       ...(typeof b.caption === 'string' && b.caption.trim() ? { caption: b.caption.trim() } : {}),
       ...(typeof b.lyrics === 'string' && b.lyrics.trim() ? { lyrics: b.lyrics.trim() } : {}) };

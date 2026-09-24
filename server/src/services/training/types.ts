@@ -243,6 +243,9 @@ export interface Yue2JointPreviewOptions {
   previewMaxFrames: number;
   baseline: boolean;
   control: boolean;
+  /** Render the takes on the base model only (no adapters), through the same
+   *  re-plan and recompose as artist takes: the like-for-like control. */
+  baselineOnly?: boolean;
   caption?: string;
   lyrics?: string;
   previewSongId?: string;

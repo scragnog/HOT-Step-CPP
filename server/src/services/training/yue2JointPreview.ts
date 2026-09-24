@@ -142,8 +142,8 @@ export async function renderYue2JointPreview(input: {
 }): Promise<Yue2JointPreviewRecord> {
   const started = Date.now();
   const base = input.deps?.persisted ? input.deps.persisted() : yue2PersistedSelection();
-  const kinds: Array<'artist' | 'baseline' | 'control'> = ['artist'];
-  if (input.options.baseline) kinds.push('baseline');
+  const kinds: Array<'artist' | 'baseline' | 'control'> = input.options.baselineOnly ? ['baseline'] : ['artist'];
+  if (input.options.baseline && !input.options.baselineOnly) kinds.push('baseline');
   if (input.options.control) kinds.push('control');
   let last: Yue2JointPreviewRecord | undefined;
   const api = input.deps ?? { select: yue2SelectModel, warm: yue2Warm, synth: yue2Synth,
@@ -170,7 +170,8 @@ export async function renderYue2JointPreview(input: {
     type Group = { kind: 'artist' | 'baseline' | 'control'; seeds: number[] };
     const wanted = Math.max(1, input.options.takes ?? 1);
     const groups: Group[] = kinds.flatMap((kind): Group[] => {
-      if (kind !== 'artist') return [{ kind, seeds: [input.options.seed] }];
+      const takesMode = kind === 'artist' || (kind === 'baseline' && input.options.baselineOnly);
+      if (!takesMode) return [{ kind, seeds: [input.options.seed] }];
       const seeds = Array.from({ length: wanted }, (_, i) => input.options.seed + i);
       const out: Group[] = [];
       // One take per request: each renders its own re-planned lead sheet.
@@ -193,7 +194,7 @@ export async function renderYue2JointPreview(input: {
       // Artist takes: the app's auto re-plan (generate.ts). Plan with the
       // take's seed, redraw a plan the app would reject, render the kept one.
       let supplied: { abc: string; seed: number } | undefined;
-      if (kind === 'artist') {
+      if (kind === 'artist' || (kind === 'baseline' && input.options.baselineOnly)) {
         const attempts: Array<{ seed: number; verdict: string; reason: string }> = [];
         for (let a = 1; a <= PREVIEW_REPLAN_ATTEMPTS; a++) {
           if (input.signal?.aborted) throw new Error('preview cancelled');
