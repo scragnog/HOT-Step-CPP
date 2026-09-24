@@ -339,7 +339,18 @@ Read-only arrays (like `pred_cond` and `pred_uncond` in guidance) will raise an 
 | `step_index` | int | Current step index |
 | `batch_n` | int | Number of batch elements |
 | `n_per` | int | Elements per batch element |
+| `seed` | int | This generation's job seed (batch item 0) |
 | `params` | table | Plugin parameters |
+
+**Stochastic solvers and reproducibility.** Before the first `step()` of a
+generation (and before every `sample()` of a full-loop solver) the engine calls
+`math.randomseed(seed)` on the plugin's Lua state, so `math.random()` is a pure
+function of the job seed and identical payloads render identically. Do **not**
+re-seed from a clock or leave the RNG unseeded: Lua 5.4 seeds `math.random`
+from the clock when the state is created, and plugin states live for the whole
+ace-server process, so an unseeded plugin makes every render irreproducible.
+Deriving your own stream from the `seed` global is fine (and recommended if you
+want a stream that is independent of what else the plugin drew).
 
 ### Guidance globals
 

@@ -407,6 +407,26 @@ function sample(xt, vt_buf, schedule, n, model_fn)
     -- Working copy
     local x = fa_to_tbl(xt, n)
 
+    -- Reproducibility: the look-back jitter below is the ONLY stochastic part of
+    -- this solver, and Lua 5.4 seeds math.random from the clock at lua_State
+    -- creation — a state that then lives for the whole ace-server process. Two
+    -- renders of an identical payload with an identical job seed therefore drew
+    -- different jitter and produced different audio (measured: dit_output rms
+    -- 0.97727 vs 0.95173 on the same 35 s payload, seed 424242 — a larger spread
+    -- than stacking a second adapter at 0.3). Seed from the job seed the engine
+    -- injects as the `seed` global (engine/src/lua-plugin.h) so the jitter keeps
+    -- its exact distribution but becomes a pure function of the seed.
+    -- User-facing workaround on an engine without `seed`: look_back_lambda = 0.
+    if lb_enabled then
+        if seed ~= nil then
+            math.randomseed(math.floor(seed))
+        else
+            print("[STORM] WARNING: engine exposes no 'seed' global — look-back jitter is "
+                .. "UNSEEDED and this render is NOT reproducible. Set look_back_lambda=0 "
+                .. "for deterministic output, or update the engine.")
+        end
+    end
+
     -- Seed x_prev for look-back (jittered copy, same as deployed STORM)
     local x_prev_lb = nil
     if lb_enabled then
