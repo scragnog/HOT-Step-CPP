@@ -378,7 +378,9 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
     const resumeStep = resume ? Number((/checkpoint-step(\d+)/.exec(resume) || [])[1] || 0) : 0;
     let step = resumeStep;
     let segmentNo = 1;
-    let freezeNext = false;
+    // The first segment carries the caller's freeze (a resume from a chosen
+    // checkpoint); later segments freeze only when a plan check says so.
+    let freezeNext = !!(o.resume && o.freezePlannerNow);
     const clock = seedTrainClock(resume, resumeStep);
     for (;;) {
       if (isCancelled(job)) return;
