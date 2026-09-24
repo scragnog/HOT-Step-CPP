@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { Loader2, Play, Sparkles } from 'lucide-react';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { Yue2JointRunChart } from './Yue2JointRunChart';
+import { PreviewPlayer } from './PreviewPlayer';
 import {
   cancelJob, getJob, linkYue2JointCheckpointPreset, listYue2AitkRuns, listYue2JointPreviews,
   renderYue2JointPreviews, startYue2JointTrain,
@@ -167,36 +168,32 @@ export const RefinePanel: React.FC = () => {
           </label>
         </div>
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.refine.ladderHint', 'Late-song decay shows after two minutes, so keep previews at 180 s or more. Renders are not deterministic: two tracks per rung is the minimum to trust a rung. Render adds more tracks to a rung with the count and length above.')}</p>
-        {ladder.length > 0 && <table className="mt-3 w-full text-xs">
-          <thead><tr className="text-[10px] uppercase tracking-wider text-zinc-500 text-left"><th className="py-1">Step</th><th>KL</th><th>Decoder recon</th><th>Previews</th><th></th></tr></thead>
-          <tbody>
-            {ladder.map(c => {
-              const mine = previews.filter(p => p.step === c.step);
-              return <tr key={c.step} className={`border-t border-zinc-200/70 dark:border-white/5 ${picked === c.dir ? 'bg-emerald-500/10' : ''}`}>
-                <td className="py-1.5 font-mono">{c.step}</td>
-                <td className="font-mono">{c.kl !== undefined ? c.kl.toFixed(2) : '—'}{c.frozen ? ' (frozen)' : ''}</td>
-                <td className="font-mono">{c.recon !== undefined ? c.recon.toFixed(3) : '—'}</td>
-                <td>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {mine.map(p => p.audioUrl && p.status === 'done'
-                      ? <audio key={p.id} controls preload="none" src={p.audioUrl} className="h-7 max-w-[220px]" />
-                      : <span key={p.id} className="text-[11px] text-zinc-500">{p.status}{p.error ? `: ${p.error}` : ''}</span>)}
-                    <button type="button" onClick={() => void render(c.step)} disabled={rendering !== null}
-                      className="px-2 py-1 rounded-lg text-[11px] border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 disabled:opacity-40">
-                      {rendering === c.step ? t('trainingStudio.refine.rendering', 'Rendering…') : t('trainingStudio.refine.render', 'Render')}
-                    </button>
-                  </div>
-                </td>
-                <td className="text-right">
-                  <button type="button" onClick={() => void use(c.dir)}
-                    className={`px-2 py-1 rounded-lg text-[11px] font-semibold border ${picked === c.dir ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300' : 'border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10'}`}>
-                    {picked === c.dir ? t('trainingStudio.refine.picked', 'In use') : t('trainingStudio.refine.use', 'Use this rung')}
-                  </button>
-                </td>
-              </tr>;
-            })}
-          </tbody>
-        </table>}
+        {ladder.length > 0 && <div className="mt-3 flex flex-col gap-3">
+          {ladder.map(c => {
+            const mine = previews.filter(p => p.step === c.step);
+            return <div key={c.step} className={`rounded-lg border p-3 ${picked === c.dir ? 'border-emerald-500/60 bg-emerald-500/5' : 'border-zinc-300/70 dark:border-white/10'}`}>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                <span className="font-semibold text-zinc-800 dark:text-zinc-100">{t('trainingStudio.refine.rungStep', 'Step {{step}}', { step: c.step })}</span>
+                <span className="font-mono text-zinc-600 dark:text-zinc-300">KL {c.kl !== undefined ? c.kl.toFixed(2) : '—'}{c.frozen ? ' (frozen)' : ''}</span>
+                <span className="font-mono text-zinc-600 dark:text-zinc-300">recon {c.recon !== undefined ? c.recon.toFixed(3) : '—'}</span>
+                <span className="flex-1" />
+                <button type="button" onClick={() => void render(c.step)} disabled={rendering !== null}
+                  className="px-2 py-1 rounded-lg text-[11px] border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 disabled:opacity-40">
+                  {rendering === c.step ? t('trainingStudio.refine.rendering', 'Rendering…') : t('trainingStudio.refine.render', 'Render more')}
+                </button>
+                <button type="button" onClick={() => void use(c.dir)}
+                  className={`px-2 py-1 rounded-lg text-[11px] font-semibold border ${picked === c.dir ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300' : 'border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10'}`}>
+                  {picked === c.dir ? t('trainingStudio.refine.picked', 'In use') : t('trainingStudio.refine.use', 'Use this rung')}
+                </button>
+              </div>
+              {mine.length > 0 && <div className="mt-2 flex flex-col gap-2">
+                {mine.map((p, i) => p.audioUrl && p.status === 'done'
+                  ? <PreviewPlayer key={p.id} src={p.audioUrl} label={t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}`} />
+                  : <div key={p.id} className="text-[11px] text-zinc-500">{t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}: {p.status}{p.error ? ` — ${p.error}` : ''}</div>)}
+              </div>}
+            </div>;
+          })}
+        </div>}
       </div>
     </div>
   );

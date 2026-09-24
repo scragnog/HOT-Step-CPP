@@ -68,6 +68,9 @@ struct ResumeBinding {
     std::vector<double> gnorm_history, spike_steps;
     // Reconstruction meter at each checkpoint since the planner froze.
     std::vector<double> recon_history;
+    // The last KL rung a checkpoint was written for (--kl-checkpoint-every);
+    // the next segment continues from the rung after it.
+    double kl_mark_last = 0.0;
 };
 // Steps in the KL trend fit. Kept in step with Yue2AitkTrainCard's chart.
 constexpr int kKlTrendWindow = 30;
@@ -132,6 +135,7 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
         history("kl_history",&binding->kl_history); history("loss_history",&binding->loss_history);
         history("gnorm_history",&binding->gnorm_history); history("spike_steps",&binding->spike_steps);
         history("recon_history",&binding->recon_history);
+        if(yyjson_val * v=yyjson_obj_get(root,"kl_mark_last")) { if(yyjson_is_num(v) && std::isfinite(yyjson_get_num(v))) binding->kl_mark_last=yyjson_get_num(v); }
         if(yyjson_val * v=yyjson_obj_get(root,"planner_frozen_at")) {
             if(!yyjson_is_int(v) || yyjson_get_sint(v)<0 || yyjson_get_sint(v)>plan->completed) return fail(error,"resume planner_frozen_at field is malformed");
             binding->planner_frozen_at=int(yyjson_get_sint(v));
@@ -154,7 +158,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
                              const yue2_aitk_runtime::Config & config, int opt_iter, double prodigy_d, double prodigy_r,
                              const std::vector<double> & kl_history, const std::vector<double> & loss_history, int planner_frozen_at,
                              const std::vector<double> & gnorm_history, const std::vector<double> & spike_steps,
-                             const std::vector<double> & recon_history = {}) {
+                             const std::vector<double> & recon_history = {}, double kl_mark_last = 0.0) {
     yyjson_mut_doc * doc=yyjson_mut_doc_new(nullptr);
     if (!doc) return {};
     yyjson_mut_val * root=yyjson_mut_obj(doc), * arr=yyjson_mut_arr(doc);
@@ -181,6 +185,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
         yyjson_mut_val * a=yyjson_mut_arr(doc); for(double v:*hist) yyjson_mut_arr_add_real(doc,a,v); yyjson_mut_obj_add_val(doc,root,key,a);
     }
     if (!recon_history.empty()) { yyjson_mut_val * a=yyjson_mut_arr(doc); for(double v:recon_history) yyjson_mut_arr_add_real(doc,a,v); yyjson_mut_obj_add_val(doc,root,"recon_history",a); }
+    if (kl_mark_last > 0.0) yyjson_mut_obj_add_real(doc,root,"kl_mark_last",kl_mark_last);
     if (config.optimizer!="adamw") {
         yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
         if (config.optimizer=="prodigy") {
@@ -616,11 +621,16 @@ static int run_impl(Config config, std::string * error) {
         // Declared before save_checkpoint, which writes them into the resume
         // record; seeded from it so a resumed segment can stop at once.
         std::vector<double> loss_window = config.target_loss > 0.0f ? resume_binding.loss_history : std::vector<double>{};
-        std::vector<double> kl_window = config.target_kl > 0.0f ? resume_binding.kl_history : std::vector<double>{};
+        // The first unfreeze starts the KL window over: the record's window is
+        // the planner's pre-freeze history, and a trend fitted across that
+        // gap and the new joint steps extrapolates far past the real KL (a
+        // 2.38 reading at KL ~1.4 ended a refinement at once).
+        const bool first_unfreeze = config.unfreeze_planner && resume_binding.planner_frozen_at >= 0;
+        std::vector<double> kl_window = config.target_kl > 0.0f && !first_unfreeze ? resume_binding.kl_history : std::vector<double>{};
         // KL rungs (--kl-checkpoint-every): the next reading that earns a
         // checkpoint, set from the first reading; the reading itself goes into
         // meters.json as kl_reading.
-        double next_kl_mark = -1.0, last_kl_reading = -1.0;
+        double next_kl_mark = resume_binding.kl_mark_last > 0.0 ? resume_binding.kl_mark_last + config.kl_checkpoint_every : -1.0, last_kl_reading = -1.0, kl_mark_last = resume_binding.kl_mark_last;
         auto save_checkpoint = [&](int step) -> bool {
             if (step == last_saved) return true;
             event("checkpoint_stage", step);
@@ -646,7 +656,7 @@ static int run_impl(Config config, std::string * error) {
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
-                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history);
+                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history, kl_mark_last);
             if (metadata.empty()) return false;
             if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str(), dataset.trigger, config.caption_dropout)) return false;
             if (use_lm) {
@@ -855,6 +865,7 @@ static int run_impl(Config config, std::string * error) {
                         const double every = config.kl_checkpoint_every;
                         if (next_kl_mark < 0.0) next_kl_mark = (std::floor(reading / every) + 1.0) * every;
                         if (reading >= next_kl_mark && reading < (double) config.target_kl) {
+                            kl_mark_last = next_kl_mark;  // into this checkpoint's record
                             if (!save_checkpoint(completed)) { fail(error, "KL-rung checkpoint publication failed"); return 1; }
                             event("kl_mark", completed);
                             std::fprintf(stderr, "[yue2-aitk] KL %.3f reached at step %d: rung checkpoint\n", reading, completed);
