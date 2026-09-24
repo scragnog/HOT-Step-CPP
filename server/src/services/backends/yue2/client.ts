@@ -250,6 +250,9 @@ export interface Yue2SynthRequest {
    *  extension, index.ts). A/B-tested at 0.3/0.5/0.7: 0.5 is the quality
    *  ceiling for full-quality renders, 0.7+ is fine for quick drafts. */
   nar_cache_ratio?: number;
+  /** Cap on NAR chunk length in frames (25/s); 0/absent = one reference-size
+   *  chunk. yue2NarChunkSeconds in the UI. */
+  nar_chunk_frames?: number;
   ode_method?: 'midpoint';
   /** Optional NAR Lua overrides. Absent fields keep the checkpoint's midpoint path. */
   infer_method?: 'md_wasserstein_yue2';

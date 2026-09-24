@@ -691,6 +691,19 @@ async function capabilities(): Promise<BackendCapabilities> {
         step: 0.05,
       },
       {
+        key: 'yue2NarChunkSeconds',
+        type: 'slider',
+        label: 'NAR Chunk Length (s)',
+        hint: '0 = the reference: the decoder renders the whole song in one pass. Above 0, it renders '
+            + 'chunks of at most this many seconds, each seeing the prompt and its own codes, as it was '
+            + 'trained (adapter decoders train on 60 s crops). Aimed at late-song timbre drift with '
+            + 'adapters. Chunk joins are hard cuts; listen for seams. Untested by ear.',
+        default: 0,
+        min: 0,
+        max: 300,
+        step: 10,
+      },
+      {
         key: 'yue2VaeVariant',
         type: 'select',
         label: 'VAE Variant',

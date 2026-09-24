@@ -354,6 +354,10 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
     ? Math.min(narCacheRaw, 0.9)
     : undefined;
 
+  // UI slider (index.ts's yue2NarChunkSeconds extension): 0 = one chunk.
+  const chunkRaw = Number(params.yue2NarChunkSeconds);
+  const nar_chunk_frames = Number.isFinite(chunkRaw) && chunkRaw > 0 ? Math.round(Math.min(chunkRaw, 600) * 25) : undefined;
+
   const vaeRaw = typeof params.yue2VaeVariant === 'string' ? params.yue2VaeVariant : 'standard';
   const vae_variant: Yue2SynthRequest['vae_variant'] = vaeRaw === 'legacy' ? 'legacy' : 'standard';
 
@@ -436,6 +440,7 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
     ...(cfg_scale !== undefined ? { cfg_scale } : {}),
     ode_steps,
     ...(nar_cache_ratio !== undefined ? { nar_cache_ratio } : {}),
+    ...(nar_chunk_frames !== undefined ? { nar_chunk_frames } : {}),
     ...(semantic_retries > 0 ? { semantic_retries } : {}),
     ode_method: 'midpoint',
     ...(narSolver ? { infer_method: narSolver } : {}),

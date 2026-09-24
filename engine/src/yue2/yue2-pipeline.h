@@ -163,11 +163,16 @@ static bool yue2_read_f32_file(const std::string & path, std::vector<float> * ou
 // hardcoded. Empty return means "size < 1" (prompt too long for the context
 // window) -- the reference itself raises in this case.
 static std::vector<std::pair<int64_t, int64_t>> yue2_chunk_ranges(int64_t frames, int64_t prefix_tokens,
-                                                                   int64_t context) {
+                                                                   int64_t context, int64_t cap = 0) {
     std::vector<std::pair<int64_t, int64_t>> out;
-    const int64_t                             size = (context - prefix_tokens - 3) / 2;
+    int64_t                                   size = (context - prefix_tokens - 3) / 2;
     if (size < 1 || frames <= 0) {
         return out;
+    }
+    // nar_chunk_frames: never above the reference size, balanced chunks.
+    if (cap > 0 && cap < size && frames > cap) {
+        const int64_t n = (frames + cap - 1) / cap;
+        size            = (frames + n - 1) / n;
     }
     for (int64_t a = 0; a < frames; a += size) {
         out.push_back({ a, std::min(a + size, frames) });
@@ -639,7 +644,8 @@ struct Yue2ChunkPlan {
 };
 
 static bool yue2_seal_chunks(Yue2Model & m, std::vector<Yue2SongState> & songs, Yue2ArKvCache & sem_cache,
-                             Yue2ArKvCache * nar_cache, std::vector<Yue2ChunkPlan> * plan, std::string * err) {
+                             Yue2ArKvCache * nar_cache, std::vector<Yue2ChunkPlan> * plan, std::string * err,
+                             int64_t chunk_cap = 0) {
     plan->clear();
     int64_t capacity = 0;
     for (int b = 0; b < (int) songs.size(); b++) {
@@ -650,7 +656,7 @@ static bool yue2_seal_chunks(Yue2Model & m, std::vector<Yue2SongState> & songs, 
             if (err) *err = "NAR stage: semantic stage produced zero codec frames";
             return false;
         }
-        const auto ranges = yue2_chunk_ranges(frames, prefix_len, (int64_t) m.lm_cfg.context_length);
+        const auto ranges = yue2_chunk_ranges(frames, prefix_len, (int64_t) m.lm_cfg.context_length, chunk_cap);
         if (ranges.empty()) {
             if (err) *err = "NAR stage: chunk_ranges computed size < 1 (prompt too long for the context window)";
             return false;
@@ -999,7 +1005,7 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
 
     Yue2ArKvCache              nar_cache;
     std::vector<Yue2ChunkPlan> plan;
-    if (!yue2_seal_chunks(m, songs, sem_cache, &nar_cache, &plan, err)) {
+    if (!yue2_seal_chunks(m, songs, sem_cache, &nar_cache, &plan, err, (int64_t) req.nar_chunk_frames)) {
         yue2_ar_kv_cache_free(&sem_cache);
         return false;
     }

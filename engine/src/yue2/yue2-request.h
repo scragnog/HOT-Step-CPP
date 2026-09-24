@@ -111,6 +111,13 @@ struct Yue2Request {
     // real, default/original behaviour). Unvalidated quality tradeoff.
     float nar_cache_ratio = 0.0f;
 
+    // Cap on the NAR chunk length in frames (25 per second). 0 = the
+    // reference's size, one chunk for a normal song. Adapter decoders train on
+    // 1500-frame crops, so past that point in a single chunk they run on
+    // positions they never trained on (late-song timbre drift, 2026-09-24).
+    // Chunks under the cap are balanced, so the last one is never a scrap.
+    int nar_chunk_frames = 0;
+
     // ── Ending controls, semantic stage only (2026-09-15) ────────────────
     // Measured on the adapter ladders (_LISTENING/2026-09-14/RESULTS.md, 77/83):
     // a trained AR reaches its ending and MUSIC_END then loses the draw to a
@@ -400,6 +407,19 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
     }
     if (present) {
         out->nar_cache_ratio = (float) num;
+    }
+
+    if (!yue2_req_num(root, "nar_chunk_frames", &num, &present, err)) {
+        yyjson_doc_free(doc);
+        return false;
+    }
+    if (present) {
+        if (num < 0 || num > 1e6) {
+            if (err) *err = "nar_chunk_frames must be 0 (reference) or a positive frame count";
+            yyjson_doc_free(doc);
+            return false;
+        }
+        out->nar_chunk_frames = (int) num;
     }
 
     if (!yue2_req_num(root, "preview_max_frames", &num, &present, err)) {
