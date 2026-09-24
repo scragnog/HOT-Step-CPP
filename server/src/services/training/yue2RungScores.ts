@@ -73,16 +73,20 @@ export function scoreYue2Rung(ds: { id: string; slug: string }, input: { refineR
   const sourceRun = typeof o.resume === 'string' ? o.resume : '';
   const clamp = (v: unknown) => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 5 ? n : null; };
   const db = getDb();
+  // Merge in code: a field the client did not send keeps its stored value
+  // (a likeness click must not blank the notes), and the row always carries
+  // a string for notes (the column is NOT NULL).
+  const prior = db.prepare('SELECT likeness, corruption, notes FROM yue2_rung_scores WHERE checkpoint_dir = ?').get(ckpt.dir) as { likeness: number | null; corruption: number | null; notes: string } | undefined;
+  const likeness = input.likeness === undefined ? (prior?.likeness ?? null) : clamp(input.likeness);
+  const corruption = input.corruption === undefined ? (prior?.corruption ?? null) : clamp(input.corruption);
+  const notes = input.notes === undefined ? (prior?.notes ?? '') : String(input.notes).slice(0, 4000);
   db.prepare(`INSERT INTO yue2_rung_scores (dataset_id, dataset_slug, source_run, refine_run, checkpoint_dir, step, kl, recon, drift, rung, frozen, settings, previews, metrics, likeness, corruption, notes)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(checkpoint_dir) DO UPDATE SET kl = excluded.kl, recon = excluded.recon, drift = excluded.drift, rung = excluded.rung, frozen = excluded.frozen,
       settings = excluded.settings, previews = excluded.previews, metrics = excluded.metrics,
-      likeness = COALESCE(excluded.likeness, yue2_rung_scores.likeness), corruption = COALESCE(excluded.corruption, yue2_rung_scores.corruption),
-      notes = COALESCE(excluded.notes, yue2_rung_scores.notes), updated_at = datetime('now')`)
+      likeness = excluded.likeness, corruption = excluded.corruption, notes = excluded.notes, updated_at = datetime('now')`)
     .run(ds.id, ds.slug, sourceRun, run.jobId, ckpt.dir, ckpt.step, ckpt.kl ?? null, ckpt.recon ?? null, ckpt.drift ?? null, ckpt.rung ? 1 : 0, ckpt.frozen ? 1 : 0,
-      JSON.stringify(settings), JSON.stringify(previews), JSON.stringify({}),
-      input.likeness === undefined ? null : clamp(input.likeness), input.corruption === undefined ? null : clamp(input.corruption),
-      input.notes === undefined ? null : String(input.notes).slice(0, 4000));
+      JSON.stringify(settings), JSON.stringify(previews), JSON.stringify({}), likeness, corruption, notes);
   return row(db.prepare('SELECT * FROM yue2_rung_scores WHERE checkpoint_dir = ?').get(ckpt.dir) as Record<string, unknown>);
 }
 
