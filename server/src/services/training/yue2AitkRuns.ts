@@ -153,6 +153,19 @@ export function recordYue2AitkRun(record: Yue2AitkRunRecord): void {
   } catch { /* a catalogue failure must never change the training result */ }
 }
 
+/** Remove a run from the catalogue and its output directory from disk. The
+ *  caller has checked it is not live. Refuses paths outside the joint adapters
+ *  tree as a guard against a corrupted index entry. */
+export function deleteYue2AitkRun(jobId: string): { output: string } {
+  const run = readIndex().find(r => r.jobId === jobId);
+  if (!run) throw new Error('Unknown run');
+  const output = path.resolve(run.output);
+  if (!/yue2-joint-adapters/i.test(output)) throw new Error(`Refusing to delete outside the joint adapters folder: ${output}`);
+  fs.rmSync(output, { recursive: true, force: true });
+  writeIndex(readIndex().filter(r => r.jobId !== jobId));
+  return { output };
+}
+
 export function listYue2AitkRuns(datasetId: string, datasetSlug?: string): Yue2AitkRunRecord[] {
   return readIndex().filter(r => r.datasetId === datasetId || (!!datasetSlug && r.datasetSlug === datasetSlug))
     .map(r => ({ ...r, checkpoints: checkpointRecords(r.output) }))

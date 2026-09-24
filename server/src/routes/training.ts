@@ -140,7 +140,7 @@ import {
 } from '../services/training/yue2ArRuns.js';
 import { YUE2_LICENSE_NOTICE } from '../services/backends/yue2/index.js';
 import { yue2StyleString } from '../services/backends/yue2/style.js';
-import { jointRunForAdapter, listYue2AitkRuns, yue2JointOutputDirectory } from '../services/training/yue2AitkRuns.js';
+import { jointRunForAdapter, listYue2AitkRuns, yue2JointOutputDirectory, deleteYue2AitkRun } from '../services/training/yue2AitkRuns.js';
 import { clearPreparedCaches, listPreparedCaches } from '../services/training/preparedDataReset.js';
 import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
 import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions, renderYue2JointPreview } from '../services/training/yue2JointPreview.js';
@@ -3904,6 +3904,21 @@ router.get('/datasets/:id/yue2-joint-previews', (req: Request, res: Response) =>
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }
+});
+
+/** DELETE /datasets/:id/yue2-joint-runs/:jobId — remove a finished run's
+ * catalogue entry and its checkpoints from disk. A live run is refused. */
+router.delete('/datasets/:id/yue2-joint-runs/:jobId', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const jobId = req.params.jobId as string;
+    const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === jobId);
+    if (!run) { res.status(404).json({ error: 'Run not found for this dataset' }); return; }
+    const active = queue.activeJobForDataset(ds.id);
+    if (active?.id === jobId || run.status === 'running') { res.status(409).json({ error: 'That run is still training; stop it first' }); return; }
+    res.json(deleteYue2AitkRun(jobId));
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
 
 /** Refinement rung scores: GET lists (optionally one run), PUT upserts one

@@ -9,13 +9,15 @@
 // a ceiling, render a preview per rung, pick the last good one.
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Play, Sparkles } from 'lucide-react';
+import { Loader2, Play, Sparkles, Trash2 } from 'lucide-react';
+import { ModelSelect } from '../global-bar/ModelSelect';
+import { Toggle } from '../settings/SettingsPrimitives';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { Yue2JointRunChart } from './Yue2JointRunChart';
 import { PreviewPlayer } from './PreviewPlayer';
 import {
   cancelJob, getJob, linkYue2JointCheckpointPreset, listYue2AitkRuns, listYue2JointPreviews,
-  renderYue2JointPreviews, startYue2JointTrain, listYue2RungScores, scoreYue2Rung, yue2RungScoresExportUrl,
+  renderYue2JointPreviews, startYue2JointTrain, listYue2RungScores, scoreYue2Rung, yue2RungScoresExportUrl, deleteYue2AitkRun,
   type TrainingJobSummary, type Yue2AitkRunRecord, type Yue2JointPreviewRecord, type Yue2JointTrainRequest, type Yue2RungScore,
 } from '../../services/trainingApi';
 
@@ -112,6 +114,19 @@ export const RefinePanel: React.FC = () => {
     catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setRendering(null); }
   };
+  const remove = async (jobId: string) => {
+    const run = runs.find(r => r.jobId === jobId);
+    if (!datasetId || !run) return;
+    if (!window.confirm(t('trainingStudio.refine.deleteConfirm', 'Delete this run and its {{n}} checkpoint(s) from disk? Scores you entered are kept.', { n: run.checkpoints.length }))) return;
+    setError('');
+    try {
+      await deleteYue2AitkRun(datasetId, jobId);
+      if (source === jobId) setSource('');
+      if (ladderRun === jobId) setLadderRun('');
+      await refreshRuns();
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+  };
+  const runLabel = (r: Yue2AitkRunRecord) => { const last = lastOf(r); return `${new Date(r.createdAt).toLocaleString()} · step ${last?.step ?? '—'}${last?.kl !== undefined ? ` · KL ${last.kl.toFixed(2)}` : ''} · ${r.checkpoints.length} ckpt · ${r.status}${r.live ? ' (running)' : ''}`; };
   const use = async (dir: string) => {
     if (!datasetId) return;
     setError('');
@@ -126,13 +141,14 @@ export const RefinePanel: React.FC = () => {
         <div className="flex items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100"><Sparkles size={16} className="text-amber-500" />{t('trainingStudio.refine.title', 'Refine the planner')}{detail?.name ? ` · ${detail.name}` : ''}</div>
         <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.refine.intro', 'The safe presets stop the planner at a conservative KL. Some artists take more. This continues a finished run with the planner live and the decoder along for the ride, saves a checkpoint at every KL rung up to the ceiling, and renders a preview per rung so you can hear where it starts to fall apart late in the song. Pick the last good rung.')}</p>
         <div className="mt-3 grid grid-cols-1 md:grid-cols-5 gap-3">
-          <label className="flex flex-col gap-1 md:col-span-2">
+          <div className="flex flex-col gap-1 md:col-span-2">
             <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.source', 'Finished run')}</span>
-            <select className={input} value={source} disabled={active || busy} onChange={e => setSource(e.target.value)}>
-              <option value="">{t('trainingStudio.refine.pick', 'Pick a run')}</option>
-              {finished.map(r => { const last = lastOf(r); return <option key={r.jobId} value={r.jobId}>{new Date(r.createdAt).toLocaleString()} · step {last.step}{last.kl !== undefined ? ` · KL ${last.kl.toFixed(2)}` : ''} · {r.status}</option>; })}
-            </select>
-          </label>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0"><ModelSelect id="refine-source" value={source} onChange={setSource} options={finished.map(r => r.jobId)} formatLabel={id => { const r = finished.find(x => x.jobId === id); return r ? runLabel(r) : id; }} formatOf={null} filterable={false} disabled={active || busy} placeholder={t('trainingStudio.refine.pick', 'Pick a run')} /></div>
+              <button type="button" onClick={() => void remove(source)} disabled={!source || active || busy} title={t('trainingStudio.refine.deleteRun', 'Delete run')}
+                className="p-2 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:text-red-500 hover:border-red-500/40 disabled:opacity-40"><Trash2 size={14} /></button>
+            </div>
+          </div>
           <label className="flex flex-col gap-1">
             <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.ceiling', 'KL ceiling')}</span>
             <input className={input} type="number" step="0.1" min={0.5} max={4} value={ceiling} disabled={active || busy} onChange={e => setCeiling(Number(e.target.value) || 2)} />
@@ -147,14 +163,14 @@ export const RefinePanel: React.FC = () => {
           </label>
         </div>
         <div className="mt-3 flex flex-wrap items-end gap-3">
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 self-center">
-            <input type="checkbox" className="accent-amber-500" checked={autoPreview} disabled={active || busy} onChange={e => setAutoPreview(e.target.checked)} />
-            {t('trainingStudio.refine.autoPreview', 'Render previews at each rung')}
-          </label>
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 self-center" title={t('trainingStudio.refine.parallelHint', 'Renders while training continues instead of pausing it. Needs about 22 GB of VRAM for both; renders run at about half speed.')}>
-            <input type="checkbox" className="accent-amber-500" checked={parallel} disabled={active || busy || !autoPreview} onChange={e => setParallel(e.target.checked)} />
-            {t('trainingStudio.refine.parallel', 'In parallel with training')}
-          </label>
+          <div className={`flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 self-center ${active || busy ? 'opacity-50 pointer-events-none' : ''}`}>
+            <Toggle id="refine-auto-preview" checked={autoPreview} onChange={setAutoPreview} />
+            <span>{t('trainingStudio.refine.autoPreview', 'Render previews at each rung')}</span>
+          </div>
+          <div className={`flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 self-center ${active || busy || !autoPreview ? 'opacity-50 pointer-events-none' : ''}`} title={t('trainingStudio.refine.parallelHint', 'Renders while training continues instead of pausing it. Needs about 22 GB of VRAM for both; renders run at about half speed.')}>
+            <Toggle id="refine-parallel" checked={parallel} onChange={setParallel} />
+            <span>{t('trainingStudio.refine.parallel', 'In parallel with training')}</span>
+          </div>
           <label className="flex flex-col gap-1 w-24">
             <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.takes', 'Tracks')}</span>
             <input className={input} type="number" min={1} max={4} value={takes} disabled={active || busy} onChange={e => setTakes(Math.max(1, Math.min(4, Number(e.target.value) || 1)))} />
@@ -179,13 +195,14 @@ export const RefinePanel: React.FC = () => {
 
       <div className="rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-4">
         <div className="flex flex-wrap items-end gap-3">
-          <label className="flex flex-col gap-1 min-w-[280px] flex-1">
+          <div className="flex flex-col gap-1 min-w-[280px] flex-1">
             <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.ladderRun', 'Ladder')}</span>
-            <select className={input} value={ladderRun} onChange={e => setLadderRun(e.target.value)}>
-              <option value="">{t('trainingStudio.refine.pickLadder', 'Pick a refinement run')}</option>
-              {runs.filter(r => r.checkpoints.some(c => c.kl !== undefined)).map(r => <option key={r.jobId} value={r.jobId}>{new Date(r.createdAt).toLocaleString()} · {r.checkpoints.length} checkpoints · {r.status}{r.live ? ' (running)' : ''}</option>)}
-            </select>
-          </label>
+            <div className="flex items-center gap-2">
+              <div className="flex-1 min-w-0"><ModelSelect id="refine-ladder" value={ladderRun} onChange={setLadderRun} options={runs.filter(r => r.checkpoints.some(c => c.kl !== undefined)).map(r => r.jobId)} formatLabel={id => { const r = runs.find(x => x.jobId === id); return r ? runLabel(r) : id; }} formatOf={null} filterable={false} placeholder={t('trainingStudio.refine.pickLadder', 'Pick a refinement run')} /></div>
+              <button type="button" onClick={() => void remove(ladderRun)} disabled={!ladderRun || !!runs.find(r => r.jobId === ladderRun)?.live} title={t('trainingStudio.refine.deleteRun', 'Delete run')}
+                className="p-2 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:text-red-500 hover:border-red-500/40 disabled:opacity-40"><Trash2 size={14} /></button>
+            </div>
+          </div>
         </div>
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.refine.ladderHint', 'Late-song decay shows after two minutes, so keep previews at 180 s or more. Renders are not deterministic: two tracks per rung is the minimum to trust a rung. Render adds more tracks to a rung with the count and length above.')}
           {' '}<a className="underline hover:text-zinc-700 dark:hover:text-zinc-300" href={yue2RungScoresExportUrl('csv')}>{t('trainingStudio.refine.exportCsv', 'Export all scores (CSV)')}</a>

@@ -2444,6 +2444,11 @@ export async function listYue2JointPreviews(
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews${query}`);
 }
 
+/** DELETE /datasets/:id/yue2-joint-runs/:jobId — a finished run and its checkpoints. */
+export async function deleteYue2AitkRun(id: string, jobId: string): Promise<{ output: string }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+}
+
 /** Refinement rung scores (Refine tab): the listener's judgement per rung
  *  beside the rung's facts, for cross-artist analysis later. */
 export interface Yue2RungScore {
