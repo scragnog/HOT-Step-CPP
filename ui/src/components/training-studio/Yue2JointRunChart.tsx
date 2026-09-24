@@ -73,7 +73,7 @@ export const Yue2JointRunChart: React.FC<{ job: TrainingJobSummary | null; total
   const reading = klTrend(kls);
   return (
     <div>
-      <TrainingChart epochs={[]} steps={chartSteps} milestones={[]} target={0} klTarget={klTarget ?? 0} klStopLabel="KL trend (stop reading)" maxEpochs={totalSteps} />
+      <TrainingChart epochs={[]} steps={chartSteps} milestones={[]} target={0} klTarget={klTarget ?? 0} klStopLabel="KL trend (stop reading)" maxEpochs={totalSteps} xMin={Math.max(0, history[0].step - 1)} />
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] tabular-nums text-zinc-500">
         <span>{last.step} / {totalSteps} steps</span>
         {reading !== null && <span>KL trend {reading.toFixed(3)}{klTarget ? ` of ${klTarget}` : ''}</span>}

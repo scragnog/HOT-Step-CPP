@@ -159,6 +159,8 @@ interface Props {
   evals?: Array<{ ep: number; loss: number }>;
   /** Epoch cap, for the x-axis caption. 0 = unknown. */
   maxEpochs?: number;
+  /** Start of the x domain (a resumed run's first step); 0 = from the start. */
+  xMin?: number;
   /** AR KL stop target; > 0 draws it on the ar_kl axis, beside the stop
    *  reading (`klStop` on the steps) that is compared against it. */
   klTarget?: number;
@@ -166,7 +168,7 @@ interface Props {
 }
 
 export const TrainingChart: React.FC<Props> = ({
-  epochs, steps = [], milestones = [], target, maxEpochs = 0, evals = [], klTarget = 0, klStopLabel,
+  epochs, steps = [], milestones = [], target, maxEpochs = 0, evals = [], klTarget = 0, klStopLabel, xMin = 0,
 }) => {
   const { t } = useTranslation();
   /** Cursor position as a fraction of the plot width, null when not hovering. */
@@ -297,11 +299,11 @@ export const TrainingChart: React.FC<Props> = ({
   // average is real, not a layout bug.
   const lastEpoch = epochPts.length ? epochPts[epochPts.length - 1].epoch : 0;
   const lastStepEp = stepPts.length ? stepPts[stepPts.length - 1].ep : 0;
-  const xMax = Math.max(lastEpoch, lastStepEp, 1);
+  const xMax = Math.max(lastEpoch, lastStepEp, xMin + 1);
   /** No epoch series at all: the step layer is carrying its own step numbers as
    *  x (see the store's epPos fallback), so the axis is steps, not epochs. */
   const stepAxis = epochPts.length === 0 && stepPts.length > 0;
-  const xFor = (x: number) => (x / xMax) * VB;
+  const xFor = (x: number) => ((x - xMin) / (xMax - xMin)) * VB;
 
   // ── per-metric scales ─────────────────────────────────────────────────
   // Each metric is normalised by its OWN extremes, which is the whole point:
@@ -367,7 +369,7 @@ export const TrainingChart: React.FC<Props> = ({
   type Hover = { x: number; head: string; rows: Array<{ label: string; value: string; colour: string }>; foot: string[] } | null;
   let hover: Hover = null;
   if (hoverFrac !== null && visible.length) {
-    const xPos = hoverFrac * xMax;
+    const xPos = xMin + hoverFrac * (xMax - xMin);
     const rows: Array<{ label: string; value: string; colour: string }> = [];
     let cursorX = xFor(xPos);
     const stIdx = stepPts.length >= 2 ? nearestIndex(stepPts.map(s => s.ep), xPos) : -1;
@@ -411,7 +413,7 @@ export const TrainingChart: React.FC<Props> = ({
 
   const LABEL = 'absolute text-[10px] tabular-nums pointer-events-none';
   /** x-axis ticks: five evenly spaced positions in the shared domain. */
-  const xTicks = [0, 0.25, 0.5, 0.75, 1].map(f => ({ f, v: f * xMax }));
+  const xTicks = [0, 0.25, 0.5, 0.75, 1].map(f => ({ f, v: xMin + f * (xMax - xMin) }));
 
   return (
     <div className="flex flex-col gap-1.5">

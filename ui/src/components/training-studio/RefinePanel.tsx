@@ -53,9 +53,11 @@ export const RefinePanel: React.FC = () => {
     if (!job || (job.status !== 'running' && job.status !== 'queued')) return;
     const id = window.setInterval(() => {
       void getJob(job.id).then(next => { setJob(next); void refreshRuns(); }).catch(() => {});
+      // Rung previews land while the job runs: keep the ladder's players current.
+      if (datasetId && ladderRun) void listYue2JointPreviews(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => {});
     }, 5000);
     return () => window.clearInterval(id);
-  }, [job?.id, job?.status]);
+  }, [job?.id, job?.status, datasetId, ladderRun]);
   useEffect(() => {
     if (!datasetId || !ladderRun) { setPreviews([]); return; }
     void listYue2JointPreviews(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => setPreviews([]));
