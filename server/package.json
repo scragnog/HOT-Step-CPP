@@ -1,5 +1,6 @@
 {
   "name": "hot-step-cpp-server",
+  "license": "MIT",
   "private": true,
   "version": "1.0.2",
   "engines": {

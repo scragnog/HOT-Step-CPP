@@ -609,7 +609,15 @@ If you see errors about Metal Toolchain, these can usually be ignored — the em
 
 ## License
 
-The engine component (`engine/`) is licensed under MIT. See [engine/LICENSE](engine/LICENSE) for details.
+HOT-Step CPP is released under the MIT License. See [LICENSE](LICENSE).
+
+Some parts carry their own terms:
+
+- **`engine/`** is MIT, copyright the acestep.cpp authors. See [engine/LICENSE](engine/LICENSE).
+- **MDMAchine's plugins** (most of the `md_*` files under `plugins/`, and `storm_sampler_core.lua`) are GPLv3. Each one says so in its header, and the header decides. Releases ship them as source alongside the MIT code, so a release as a whole must meet the GPLv3's terms. The rest of the code remains MIT.
+- **Model weights** are not covered by this licence. Each model is under its own terms, listed in the acknowledgements above.
+
+Contributions are accepted under the repository licence (MIT) unless a file says otherwise.
 
 ---
 
