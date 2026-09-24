@@ -10,7 +10,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, Play, Sparkles, Trash2 } from 'lucide-react';
-import { ModelSelect } from '../global-bar/ModelSelect';
+import { StyledSelect } from '../shared/StyledSelect';
+import { ParamLabel } from '../shared/ParamLabel';
 import { Toggle } from '../settings/SettingsPrimitives';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { Yue2JointRunChart } from './Yue2JointRunChart';
@@ -233,59 +234,78 @@ export const RefinePanel: React.FC = () => {
       <div className="rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100"><Sparkles size={16} className="text-amber-500" />{t('trainingStudio.refine.title', 'Refine the planner')}{detail?.name ? ` · ${detail.name}` : ''}</div>
         <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.refine.intro', 'The safe presets stop the planner at a conservative KL. Some artists take more. This continues a finished run with the planner live and the decoder along for the ride, saves a checkpoint at every KL rung up to the ceiling, and renders a preview per rung so you can hear where it starts to fall apart late in the song. Pick the last good rung.')}</p>
-        <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div className="flex flex-col gap-1 md:col-span-2">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.source', 'Finished run')}</span>
+        <div className="mt-4 flex flex-col gap-4">
+          <div className="flex flex-col gap-1">
+            <ParamLabel label={t('trainingStudio.refine.source', 'Finished run')} info={t('trainingStudio.refine.sourceInfo', 'The run to continue from. Its last checkpoint is the starting point: the planner is unfrozen there and both halves train on. Refinements of refinements are fine; the run list shows what each one reached.')} />
             <div className="flex items-center gap-2">
-              <div className="flex-1 min-w-0"><ModelSelect id="refine-source" value={source} onChange={setSource} options={finished.map(r => r.jobId)} formatLabel={id => { const r = finished.find(x => x.jobId === id); return r ? runLabel(r) : id; }} formatOf={null} filterable={false} disabled={active || busy} placeholder={t('trainingStudio.refine.pick', 'Pick a run')} /></div>
+              <div className="flex-1 min-w-0">
+                <StyledSelect accent="amber" className="w-full" value={source} onChange={v => setSource(String(v))} disabled={active || busy} searchable={false}
+                  placeholder={t('trainingStudio.refine.pick', 'Pick a run')}
+                  options={finished.map(r => ({ value: r.jobId, label: runLabel(r), hint: `${r.checkpoints.length} checkpoints · ${r.status}` }))} />
+              </div>
               <button type="button" onClick={() => void remove(source)} disabled={!source || active || busy} title={t('trainingStudio.refine.deleteRun', 'Delete run')}
                 className="p-2 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:text-red-500 hover:border-red-500/40 disabled:opacity-40"><Trash2 size={14} /></button>
             </div>
           </div>
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.ceiling', 'KL ceiling')}</span>
-            <input className={input} type="number" step="0.1" min={0.5} max={4} value={ceiling} disabled={active || busy} onChange={e => setCeiling(Number(e.target.value) || 2)} />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.rung', 'Rung (KL)')}</span>
-            <input className={input} type="number" step="0.05" min={0.05} max={1} value={rung} disabled={active || busy} onChange={e => setRung(Number(e.target.value) || 0.1)} />
-          </label>
-          <div className={`flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 self-center ${active || busy ? 'opacity-50 pointer-events-none' : ''}`}
-            title={t('trainingStudio.refine.narFurtherHint', 'When you pick a rung, the decoder trains on from it with the planner frozen until the reconstruction target, the step budget, or the knee. The result becomes the adapter.')}>
-            <Toggle id="refine-nar-further" checked={narFurther} onChange={setNarFurther} />
-            <span>{t('trainingStudio.refine.narFurther', 'Further training for NAR')}</span>
+
+          <div className="rounded-lg border border-zinc-300/60 dark:border-white/5 p-3">
+            <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.secPlanner', 'Planner ladder')}</div>
+            <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <label className="flex flex-col gap-1">
+                <ParamLabel label={t('trainingStudio.refine.ceiling', 'KL ceiling')} meta={t('trainingStudio.refine.ceilingMeta', '0.5–4 · default 2.0')} info={t('trainingStudio.refine.ceilingInfo', 'The planner stops when its KL to the base model reaches this. Late-song decay has shown from about 1.7 on some albums and not at all by 1.8 on others, so the ceiling is a search range, not a target: pick the last good rung by ear.')} />
+                <input className={input} type="number" step="0.1" min={0.5} max={4} value={ceiling} disabled={active || busy} onChange={e => setCeiling(Number(e.target.value) || 2)} />
+              </label>
+              <label className="flex flex-col gap-1">
+                <ParamLabel label={t('trainingStudio.refine.rung', 'Rung size (KL)')} meta={t('trainingStudio.refine.rungMeta', '0.05–1 · default 0.1')} info={t('trainingStudio.refine.rungInfo', 'A checkpoint is saved, and previews rendered, each time the KL reading crosses the next multiple of this. Smaller rungs give a finer ladder and more previews to listen to.')} />
+                <input className={input} type="number" step="0.05" min={0.05} max={1} value={rung} disabled={active || busy} onChange={e => setRung(Number(e.target.value) || 0.1)} />
+              </label>
+              <label className="flex flex-col gap-1">
+                <ParamLabel label={t('trainingStudio.refine.lrScale', 'Learning rate (× run)')} meta={t('trainingStudio.refine.lrMeta', '0.05–1 · default 0.1')} info={t('trainingStudio.refine.lrInfo', 'Fraction of the source run\'s rate. A converged adapter restarted at full rate diverged in three steps, so refinement walks: the rate ramps up over the first 30 steps and halves itself whenever the KL jumps more than one rung between checkpoints. Lower if rungs are still being skipped.')} />
+                <input className={input} type="number" step="0.05" min={0.05} max={1} value={lrScale} disabled={active || busy} onChange={e => setLrScale(Math.max(0.05, Math.min(1, Number(e.target.value) || 0.1)))} />
+              </label>
+            </div>
           </div>
-          <label className="flex flex-col gap-1 w-28">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.narTarget', 'Recon target')}</span>
-            <input className={input} type="number" step="0.005" min={0} max={10} value={narTarget} placeholder={t('trainingStudio.refine.narKnee', 'knee')} disabled={active || busy || !narFurther}
-              onChange={e => setNarTarget(e.target.value === '' ? '' : Math.max(0, Number(e.target.value) || 0))} />
-          </label>
-          <label className="flex flex-col gap-1 w-28">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.narBudget', 'NAR max steps')}</span>
-            <input className={input} type="number" min={10} step={10} value={narBudget} disabled={active || busy || !narFurther} onChange={e => setNarBudget(Math.max(10, Math.round(Number(e.target.value) || 0)))} />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.lrScale', 'Learning rate (× run)')}</span>
-            <input className={input} type="number" step="0.05" min={0.05} max={1} value={lrScale} disabled={active || busy} onChange={e => setLrScale(Math.max(0.05, Math.min(1, Number(e.target.value) || 0.1)))} title={t('trainingStudio.refine.lrHint', 'Ramps up over the first 30 steps and halves itself whenever the KL jumps more than one rung between checkpoints.')} />
-          </label>
-        </div>
-        <div className="mt-3 flex flex-wrap items-end gap-3">
-          <div className={`flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 self-center ${active || busy ? 'opacity-50 pointer-events-none' : ''}`}>
-            <Toggle id="refine-auto-preview" checked={autoPreview} onChange={setAutoPreview} />
-            <span>{t('trainingStudio.refine.autoPreview', 'Render previews at each rung')}</span>
+
+          <div className="rounded-lg border border-zinc-300/60 dark:border-white/5 p-3">
+            <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.secDecoder', 'Decoder, after you pick a rung')}</div>
+            <div className="mt-2 flex flex-wrap items-end gap-x-6 gap-y-3">
+              <div className={`flex items-center gap-2 self-center ${active || busy ? 'opacity-50 pointer-events-none' : ''}`}>
+                <Toggle id="refine-nar-further" checked={narFurther} onChange={setNarFurther} />
+                <ParamLabel underline={false} className="text-xs normal-case tracking-normal font-normal text-zinc-700 dark:text-zinc-300" label={t('trainingStudio.refine.narFurther', 'Further training for NAR')} info={t('trainingStudio.refine.narFurtherInfo', 'When you press "Use this rung", the decoder trains on from that rung with the planner frozen, until the reconstruction target, the step budget, or the point where the reconstruction meter stops improving, whichever comes first. That final checkpoint becomes the adapter. Off: the rung is used as it is.')} />
+              </div>
+              <label className="flex flex-col gap-1 w-32">
+                <ParamLabel label={t('trainingStudio.refine.narTarget', 'Recon target')} meta={t('trainingStudio.refine.narTargetMeta', 'default 0.25 · blank = knee')} info={t('trainingStudio.refine.narTargetInfo', 'Stop the decoder once its reconstruction error (how closely it reproduces the album\'s own latents on fixed probes; lower is better, typically 0.29–0.35 and falling) reaches this value. Some albums plateau above it; the knee rule and the step budget then stop the run instead.')} />
+                <input className={input} type="number" step="0.005" min={0} max={10} value={narTarget} placeholder={t('trainingStudio.refine.narKnee', 'knee')} disabled={active || busy || !narFurther}
+                  onChange={e => setNarTarget(e.target.value === '' ? '' : Math.max(0, Number(e.target.value) || 0))} />
+              </label>
+              <label className="flex flex-col gap-1 w-32">
+                <ParamLabel label={t('trainingStudio.refine.narBudget', 'NAR max steps')} meta={t('trainingStudio.refine.narBudgetMeta', 'default 500')} info={t('trainingStudio.refine.narBudgetInfo', 'The most decoder steps to train after the pick. At about 1.5 s a step, 500 is roughly 13 minutes.')} />
+                <input className={input} type="number" min={10} step={10} value={narBudget} disabled={active || busy || !narFurther} onChange={e => setNarBudget(Math.max(10, Math.round(Number(e.target.value) || 0)))} />
+              </label>
+            </div>
           </div>
-          <div className={`flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 self-center ${active || busy || !autoPreview ? 'opacity-50 pointer-events-none' : ''}`} title={t('trainingStudio.refine.parallelHint', 'Renders while training continues instead of pausing it. Needs about 22 GB of VRAM for both; renders run at about half speed.')}>
-            <Toggle id="refine-parallel" checked={parallel} onChange={setParallel} />
-            <span>{t('trainingStudio.refine.parallel', 'In parallel with training')}</span>
+
+          <div className="rounded-lg border border-zinc-300/60 dark:border-white/5 p-3">
+            <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.secPreviews', 'Rung previews')}</div>
+            <div className="mt-2 flex flex-wrap items-end gap-x-6 gap-y-3">
+              <div className={`flex items-center gap-2 self-center ${active || busy ? 'opacity-50 pointer-events-none' : ''}`}>
+                <Toggle id="refine-auto-preview" checked={autoPreview} onChange={setAutoPreview} />
+                <ParamLabel underline={false} className="text-xs normal-case tracking-normal font-normal text-zinc-700 dark:text-zinc-300" label={t('trainingStudio.refine.autoPreview', 'Render previews at each rung')} info={t('trainingStudio.refine.autoPreviewInfo', 'Render the tracks for every rung as it lands, so the ladder is ready to listen to when the run ends. Off: render rungs by hand from the ladder.')} />
+              </div>
+              <div className={`flex items-center gap-2 self-center ${active || busy || !autoPreview ? 'opacity-50 pointer-events-none' : ''}`}>
+                <Toggle id="refine-parallel" checked={parallel} onChange={setParallel} />
+                <ParamLabel underline={false} className="text-xs normal-case tracking-normal font-normal text-zinc-700 dark:text-zinc-300" label={t('trainingStudio.refine.parallel', 'In parallel with training')} info={t('trainingStudio.refine.parallelInfo', 'Render while training continues instead of pausing it at each rung. Needs the VRAM for both (about 22 GB measured); renders run at about half speed and training a little slower. Untick on a smaller card.')} />
+              </div>
+              <label className="flex flex-col gap-1 w-24">
+                <ParamLabel label={t('trainingStudio.refine.takes', 'Tracks')} meta={t('trainingStudio.refine.takesMeta', '1–4 · default 2')} info={t('trainingStudio.refine.takesInfo', 'Tracks per rung, different seeds. Renders are not deterministic: one take can decay late while another from the same checkpoint is clean, so two is the minimum to trust a rung.')} />
+                <input className={input} type="number" min={1} max={4} value={takes} disabled={active || busy} onChange={e => setTakes(Math.max(1, Math.min(4, Number(e.target.value) || 1)))} />
+              </label>
+              <label className="flex flex-col gap-1 w-28">
+                <ParamLabel label={t('trainingStudio.refine.seconds', 'Length (s)')} meta={t('trainingStudio.refine.secondsMeta', '30–360 · default 180')} info={t('trainingStudio.refine.secondsInfo', 'Preview length. Planner decay shows after about two minutes, so keep this at 180 s or more when that is what you are listening for.')} />
+                <input className={input} type="number" min={30} max={360} step={30} value={seconds} disabled={active || busy} onChange={e => setSeconds(Math.max(30, Math.min(360, Number(e.target.value) || 180)))} />
+              </label>
+            </div>
           </div>
-          <label className="flex flex-col gap-1 w-24">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.takes', 'Tracks')}</span>
-            <input className={input} type="number" min={1} max={4} value={takes} disabled={active || busy} onChange={e => setTakes(Math.max(1, Math.min(4, Number(e.target.value) || 1)))} />
-          </label>
-          <label className="flex flex-col gap-1 w-28">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.seconds', 'Length (s)')}</span>
-            <input className={input} type="number" min={30} max={360} step={30} value={seconds} disabled={active || busy} onChange={e => setSeconds(Math.max(30, Math.min(360, Number(e.target.value) || 180)))} />
-          </label>
         </div>
         <div className="mt-3 flex items-center gap-3">
           <button type="button" onClick={() => void start()} disabled={!source || active || busy}
@@ -303,9 +323,13 @@ export const RefinePanel: React.FC = () => {
       <div className="rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-4">
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex flex-col gap-1 min-w-[280px] flex-1">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.ladderRun', 'Ladder')}</span>
+            <ParamLabel label={t('trainingStudio.refine.ladderRun', 'Ladder')} info={t('trainingStudio.refine.ladderInfo', 'A refinement run and its rungs. Rung cards carry the planner\'s KL and the decoder\'s reconstruction at that checkpoint, the rendered tracks, and your scores.')} />
             <div className="flex items-center gap-2">
-              <div className="flex-1 min-w-0"><ModelSelect id="refine-ladder" value={ladderRun} onChange={setLadderRun} options={runs.filter(r => r.checkpoints.some(c => c.kl !== undefined)).map(r => r.jobId)} formatLabel={id => { const r = runs.find(x => x.jobId === id); return r ? runLabel(r) : id; }} formatOf={null} filterable={false} placeholder={t('trainingStudio.refine.pickLadder', 'Pick a refinement run')} /></div>
+              <div className="flex-1 min-w-0">
+                <StyledSelect accent="amber" className="w-full" value={ladderRun} onChange={v => setLadderRun(String(v))} searchable={false}
+                  placeholder={t('trainingStudio.refine.pickLadder', 'Pick a refinement run')}
+                  options={runs.filter(r => r.checkpoints.some(c => c.kl !== undefined)).map(r => ({ value: r.jobId, label: runLabel(r), hint: `${r.checkpoints.filter(c => c.rung).length} rungs · ${r.checkpoints.length} checkpoints` }))} />
+              </div>
               <button type="button" onClick={() => void remove(ladderRun)} disabled={!ladderRun || !!runs.find(r => r.jobId === ladderRun)?.live} title={t('trainingStudio.refine.deleteRun', 'Delete run')}
                 className="p-2 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:text-red-500 hover:border-red-500/40 disabled:opacity-40"><Trash2 size={14} /></button>
             </div>
