@@ -694,6 +694,8 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
    *  reconStopWindow checkpoints. 0 = train to the cap. */
   reconStop?: number;
   reconStopWindow?: number;
+  /** Decoder stop by value: a checkpoint at or under this reconstruction ends the run. */
+  reconTarget?: number;
   /** Refinement pass (with resumeRunId/resumeStep): the planner stays frozen,
    *  the decoder trains on from the run's end at `saveEvery` spacing, and
    *  the reconstruction stop restarts its window. */

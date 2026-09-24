@@ -127,6 +127,10 @@ struct Config {
     // (Steel Panther 300/425/500: subtle, diminishing returns past the knee).
     float recon_stop = 0.0f;
     std::int32_t recon_stop_window = 3;
+    // Decoder stop by value (planner frozen): a checkpoint whose
+    // reconstruction meter is at or under this ends the run. 0 = off. The
+    // knee stop (recon_stop) still applies alongside it.
+    float recon_target = 0.0f;
     // With --resume: start the reconstruction window empty instead of the
     // record's. A refinement pass resumes a run that may have ENDED on the
     // recon stop; its old readings would fire the stop again at once.
@@ -350,6 +354,10 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.recon_stop) || parsed.recon_stop < 0.0f || parsed.recon_stop >= 1.0f) { if (error) *error = "--recon-stop must be a fraction in [0, 1)"; return ParseResult::error; }
             if (parsed.recon_stop > 0.0f) parsed.nar_drift = true;
+        } else if (!std::strcmp(arg, "--recon-target")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.recon_target) || parsed.recon_target < 0.0f) { if (error) *error = "--recon-target must be a finite number >= 0"; return ParseResult::error; }
+            if (parsed.recon_target > 0.0f) parsed.nar_drift = true;
         } else if (!std::strcmp(arg, "--recon-reset")) {
             parsed.recon_reset = true;
         } else if (!std::strcmp(arg, "--unfreeze-planner")) {

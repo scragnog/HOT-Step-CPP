@@ -931,6 +931,14 @@ static int run_impl(Config config, std::string * error) {
             // Decoder stop: the reconstruction meter has flattened over the
             // last recon_stop_window checkpoints of the frozen phase. The
             // checkpoint just written is the one kept.
+            if (config.recon_target > 0.0f && planner_frozen_at >= 0 && completed % config.save_every == 0 && completed < end_step()
+                && !recon_history.empty() && recon_history.back() <= (double) config.recon_target) {
+                std::fprintf(stderr, "[yue2-aitk] reconstruction %.4f at or under the target %.4f: decoder done, stopping at step %d\n", recon_history.back(), (double) config.recon_target, completed);
+                event("recon_stop", completed);
+                event("target", completed);
+                event("done", completed);
+                return 0;
+            }
             if (config.recon_stop > 0.0f && planner_frozen_at >= 0 && completed % config.save_every == 0 && completed < end_step()
                 && recon_history.size() > (size_t) config.recon_stop_window) {
                 const double before = recon_history[recon_history.size() - 1 - (size_t) config.recon_stop_window], now = recon_history.back();

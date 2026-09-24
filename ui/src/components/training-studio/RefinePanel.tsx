@@ -37,6 +37,12 @@ export const RefinePanel: React.FC = () => {
   const [autoPreview, setAutoPreview] = useState(true);
   const [parallel, setParallel] = useState(true);
   const [lrScale, setLrScale] = useState(0.1);
+  // Further training for the decoder from the picked rung (planner frozen):
+  // to a reconstruction target, a step budget, or the knee, whichever first.
+  const [narFurther, setNarFurther] = useState(true);
+  const [narTarget, setNarTarget] = useState<number | ''>(0.25);
+  const [narBudget, setNarBudget] = useState(500);
+  const [narJob, setNarJob] = useState<{ jobId: string; step: number } | null>(null);
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
   const wantedLadder = useTrainingStore(s => s.refineLadderRun);
   const setWantedLadder = useTrainingStore(s => s.setRefineLadderRun);
@@ -143,15 +149,43 @@ export const RefinePanel: React.FC = () => {
   const [cleaning, setCleaning] = useState(false);
   const [cleanupNote, setCleanupNote] = useState('');
   const mib = (b: number) => b >= 1073741824 ? `${(b / 1073741824).toFixed(2)} GiB` : `${(b / 1048576).toFixed(0)} MiB`;
+  const finishPick = async (run: string, dir: string, step: number) => {
+    await linkYue2JointCheckpointPreset(datasetId!, dir); setPicked(dir);
+    const plan = await getYue2CleanupPlan(datasetId!, run, step);
+    setLadderRun(run);
+    setCleanup({ step, plan });
+  };
   const use = async (dir: string, step: number) => {
     if (!datasetId || !ladderRun) return;
     setError(''); setCleanupNote('');
     try {
-      await linkYue2JointCheckpointPreset(datasetId, dir); setPicked(dir);
-      const plan = await getYue2CleanupPlan(datasetId, ladderRun, step);
-      setCleanup({ step, plan });
+      if (!narFurther) { await finishPick(ladderRun, dir, step); return; }
+      // Decoder on from this rung, planner frozen; the result becomes the adapter.
+      const result = await startYue2JointTrain(datasetId, { trainingMethod: 'aitk', refine: true, resumeRunId: ladderRun, resumeStep: step,
+        steps: step + narBudget, saveEvery: 10, stopMode: 'kl', narExtraSteps: step + narBudget, freezePlannerNow: true,
+        reconStop: 0.005, reconStopWindow: 5, ...(narTarget !== '' ? { reconTarget: narTarget } : {}), stopEngine: false,
+        lyricTiming: true, alignmentEnabled: true, autoPrepare: false, checkpoint: '', output: '',
+        preview: { enabled: false, everySteps: 0, seconds: 90, seed: 424242, previewMaxFrames: 2250, baseline: false, control: false } } as unknown as Yue2JointTrainRequest);
+      setNarJob({ jobId: result.jobId, step });
+      setJob(await getJob(result.jobId));
+      setCleanupNote(t('trainingStudio.refine.narStarted', 'Decoder training on from step {{step}}; the adapter is linked when it stops.', { step }));
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   };
+  // When the decoder follow-up ends, its last checkpoint is the adapter.
+  useEffect(() => {
+    if (!narJob || !job || job.id !== narJob.jobId || job.status !== 'done' || !datasetId) return;
+    const pending = narJob; setNarJob(null);
+    void (async () => {
+      try {
+        const r = await listYue2AitkRuns(datasetId);
+        const run = r.runs.find(x => x.jobId === pending.jobId);
+        const last = run?.checkpoints.filter(c => c.arPath && c.narPath).sort((a, b) => b.step - a.step)[0];
+        if (!run || !last) { setError(t('trainingStudio.refine.narNoCheckpoint', 'The decoder run left no complete checkpoint.')); return; }
+        setRuns(r.runs);
+        await finishPick(run.jobId, last.dir, last.step);
+      } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    })();
+  }, [job?.id, job?.status]);
   const doCleanup = async () => {
     if (!datasetId || !ladderRun || !cleanup) return;
     setCleaning(true); setError('');
@@ -199,7 +233,7 @@ export const RefinePanel: React.FC = () => {
       <div className="rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100"><Sparkles size={16} className="text-amber-500" />{t('trainingStudio.refine.title', 'Refine the planner')}{detail?.name ? ` · ${detail.name}` : ''}</div>
         <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.refine.intro', 'The safe presets stop the planner at a conservative KL. Some artists take more. This continues a finished run with the planner live and the decoder along for the ride, saves a checkpoint at every KL rung up to the ceiling, and renders a preview per rung so you can hear where it starts to fall apart late in the song. Pick the last good rung.')}</p>
-        <div className="mt-3 grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
           <div className="flex flex-col gap-1 md:col-span-2">
             <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.source', 'Finished run')}</span>
             <div className="flex items-center gap-2">
@@ -215,6 +249,20 @@ export const RefinePanel: React.FC = () => {
           <label className="flex flex-col gap-1">
             <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.rung', 'Rung (KL)')}</span>
             <input className={input} type="number" step="0.05" min={0.05} max={1} value={rung} disabled={active || busy} onChange={e => setRung(Number(e.target.value) || 0.1)} />
+          </label>
+          <div className={`flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 self-center ${active || busy ? 'opacity-50 pointer-events-none' : ''}`}
+            title={t('trainingStudio.refine.narFurtherHint', 'When you pick a rung, the decoder trains on from it with the planner frozen until the reconstruction target, the step budget, or the knee. The result becomes the adapter.')}>
+            <Toggle id="refine-nar-further" checked={narFurther} onChange={setNarFurther} />
+            <span>{t('trainingStudio.refine.narFurther', 'Further training for NAR')}</span>
+          </div>
+          <label className="flex flex-col gap-1 w-28">
+            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.narTarget', 'Recon target')}</span>
+            <input className={input} type="number" step="0.005" min={0} max={10} value={narTarget} placeholder={t('trainingStudio.refine.narKnee', 'knee')} disabled={active || busy || !narFurther}
+              onChange={e => setNarTarget(e.target.value === '' ? '' : Math.max(0, Number(e.target.value) || 0))} />
+          </label>
+          <label className="flex flex-col gap-1 w-28">
+            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.narBudget', 'NAR max steps')}</span>
+            <input className={input} type="number" min={10} step={10} value={narBudget} disabled={active || busy || !narFurther} onChange={e => setNarBudget(Math.max(10, Math.round(Number(e.target.value) || 0)))} />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.lrScale', 'Learning rate (× run)')}</span>

@@ -89,6 +89,8 @@ export interface ResolvedYue2JointTrainOptions {
    *  fraction) over the last reconStopWindow checkpoints. 0/absent = off. */
   reconStop?: number;
   reconStopWindow?: number;
+  /** Decoder stop by value: a checkpoint at or under this reconstruction ends the run. */
+  reconTarget?: number;
   /** Refinement: resume with the reconstruction window empty (the run may
    *  have ended on the recon stop; its readings would fire it again). */
   reconReset?: boolean;
@@ -173,6 +175,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
     args.push('--recon-stop', String(o.reconStop));
     if (o.reconStopWindow !== undefined) args.push('--recon-stop-window', String(o.reconStopWindow));
   }
+  if (o.reconTarget !== undefined && o.reconTarget > 0) args.push('--recon-target', String(o.reconTarget));
   if (o.resume && o.reconReset) args.push('--recon-reset');
   if (o.resume && o.unfreezePlanner) args.push('--unfreeze-planner');
   if (o.klCheckpointEvery !== undefined && o.klCheckpointEvery > 0) {

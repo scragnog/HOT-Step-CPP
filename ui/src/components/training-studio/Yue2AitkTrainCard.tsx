@@ -154,7 +154,7 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // more steps; the KL checkpoint is still saved, so the old stop point is
   // one of the rungs. Caption dropout 0.5: the measured recipe, so a new
   // caption lands on the artist rather than beside one memorised track.
-  narExtraSteps: 500, captionDropout: 0.5,
+  narExtraSteps: 0, captionDropout: 0.5,
   // Spike guard (2026-09-23): an RBF decoder collapsed after two gradient
   // spikes (norm 3 and 7 against a 0.2 median) at step 298. Skip any update
   // above 5x the recent median; three skips within 20 steps ends the run on
@@ -178,8 +178,10 @@ const PRESETS = [
   { key: 'balanced', label: 'Balanced', targetKl: 1.2, steps: 500 },
   { key: 'thorough', label: 'Thorough', targetKl: 1.6, steps: 700 },
 ] as const;
-const presetValues = (p: typeof PRESETS[number]) => ({ stopMode: 'kl' as const, targetKl: p.targetKl, steps: p.steps, narExtraSteps: p.steps });
-const activePreset = (f: Yue2JointTrainRequest) => PRESETS.find(p => (f.stopMode ?? 'steps') === 'kl' && f.targetKl === p.targetKl && f.steps === p.steps && f.narExtraSteps === p.steps)?.key;
+// 2026-09-24 (Rob): the primary run ends at the KL target; the decoder's
+// further training happens on the Refine tab from the rung he picks.
+const presetValues = (p: typeof PRESETS[number]) => ({ stopMode: 'kl' as const, targetKl: p.targetKl, steps: p.steps, narExtraSteps: 0 });
+const activePreset = (f: Yue2JointTrainRequest) => PRESETS.find(p => (f.stopMode ?? 'steps') === 'kl' && f.targetKl === p.targetKl && f.steps === p.steps && !(f.narExtraSteps ?? 0))?.key;
 type PrepareForm = Yue2AitkPrepareRequest;
 
 function defaultPreview(everySteps: number): Yue2JointPreviewOptions {
@@ -304,6 +306,12 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     window.localStorage.setItem(freeze, '1');
   }
   // Presets (2026-09-24): stored forms move to Balanced once.
+  // 2026-09-24: presets end at the KL; the decoder trains on during refinement.
+  const klEnd = `${FORM_KEY}${datasetId}:defaults-kl-end`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(klEnd)) {
+    if (stored.stopMode === 'kl' && stored.narExtraSteps === stored.steps) stored.narExtraSteps = 0;
+    window.localStorage.setItem(klEnd, '1');
+  }
   const presets = `${FORM_KEY}${datasetId}:defaults-presets`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(presets)) {
     Object.assign(stored, presetValues(PRESETS[1]));
@@ -988,7 +996,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
             : 'border-zinc-300/70 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10'}`}>
           {t(`trainingStudio.yue2.method.preset_${p.key}`, p.label)}
-          <span className="ml-1 font-normal text-zinc-500">KL {p.targetKl} · {p.steps}</span>
+          <span className="ml-1 font-normal text-zinc-500">KL {p.targetKl} · cap {p.steps}</span>
         </button>)}
         {!activePreset(form) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
         <span className="flex-1" />
@@ -1053,7 +1061,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number')}
       </div>
       {(form.adapterType ?? 'lora') === 'lokr' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.lokrHint', 'LoKr trains a Kronecker-factored delta per site instead of a low-rank pair. Strength is alpha / dim; 4x (64 / 4 / 256, about 106 MB for both halves) is the tested default, against 279 MB for the rank-64 LoRA. For more capacity raise dim and keep alpha at 4x dim; at factor 4 stay below dim 256, where some sites stop factorizing and ignore alpha.')}</p>}
-      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 1.0. Once the KL reading reaches the target the planner freezes there. With "Decoder steps after KL" above 0, the decoder (timbre, where likeness lives) keeps training alone for that many steps; 0 ends the run at the KL, as before. The KL checkpoint is saved either way. Max steps is the cap. The presets set the KL target and let the decoder run to the cap: Fast 0.8 / 300, Balanced 1.2 / 500, Thorough 1.6 / 700. The decoder stops earlier when its reconstruction meter flattens (Advanced: decoder stop).')}</p>}
+      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 1.0. Once the KL reading reaches the target the planner freezes there. With "Decoder steps after KL" above 0, the decoder (timbre, where likeness lives) keeps training alone for that many steps; 0 ends the run at the KL, as before. The KL checkpoint is saved either way. Max steps is the cap. The presets end the run at the KL target: Fast 0.8, Balanced 1.2, Thorough 1.6 (the step count is the cap). The decoder then trains on during refinement, from the rung you pick, until its reconstruction target.')}</p>}
       {(form.stopMode ?? 'steps') === 'loss' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetLossHint', 'Composite = AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight. Training stops once the trailing 20-step mean is at or below this.')}</p>}
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         {resumeChoice ? <p className="text-xs text-zinc-500">Optimizer: {form.optimizer ?? 'adamw'} (restored from the selected run)</p>
