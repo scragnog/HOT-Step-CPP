@@ -860,7 +860,7 @@
     "midiStudio.statusTranscribing": "Transcribing — chunk {{done}}/{{total}} · {{notes}} notes so far",
     "midiStudio.statusFailed": "Transcription failed",
     "midiStudio.cancel": "Cancel",
-    "midiStudio.gatedHint": "This looks like a model-access problem.",
+    "midiStudio.gatedHint": "Hugging Face refused access. Accept the licence on the model page with the same account the token belongs to, and if it is a fine-grained token, enable \"Read access to contents of all public gated repos you can access\".",
     "midiStudio.gatedHintLink": "Request access to the {{model}} model on Hugging Face, save your token above, then try again.",
     "midiStudio.chooseFromLibrary": "Choose from Library",
     "midiStudio.noTrackSelected": "No track selected",
