@@ -1,4 +1,5 @@
 import { aceClient } from '../aceClient.js';
+import { engineCrashSeq } from '../aceEngineProcess.js';
 import type { GenerationJob } from './jobTypes.js';
 
 /** Poll ace-server job until completion, with stall detection watchdog.
@@ -60,11 +61,18 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
   // wall-clock timeout with the UI stuck at 0%.
   let notFoundRun = 0;
   const NOT_FOUND_LIMIT = 3;
+  const crashSeqAtStart = engineCrashSeq();
 
   while (true) {
     if (signal.aborted || job.status === 'cancelled') {
       await aceClient.cancelJob(aceJobId).catch(() => {});
       throw new Error('Cancelled');
+    }
+
+    // The engine process died under this job (#179). Whatever respawns has
+    // never heard of it, so waiting out the wall clock only hides the crash.
+    if (engineCrashSeq() !== crashSeqAtStart) {
+      throw new Error('Generation lost: the engine crashed mid-render (see the engine log)');
     }
 
     // Detect progress changes (set by subscribeLines callbacks in runGeneration)
@@ -115,6 +123,10 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
 
     // Absolute wall-clock timeout
     if (Date.now() - startedAt > MAX_WALL_MS) {
+      // Same rule as the stall branch: a render that finished right at the
+      // limit is kept, not cancelled and thrown away (#180).
+      const final = await aceClient.pollJob(aceJobId).catch(() => null);
+      if (final?.status === 'done') return;
       await aceClient.cancelJob(aceJobId).catch(() => {});
       throw new Error(`Generation timed out (${clampedTimeout} min limit)`);
     }

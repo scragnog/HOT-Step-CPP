@@ -56,6 +56,16 @@ let firstCrashTime = 0;
 const MAX_CRASHES = 3;
 const CRASH_WINDOW_MS = 30_000; // 30 seconds
 
+/**
+ * Bumped on every unexpected engine exit. A job in flight when it changes is
+ * gone — the respawned engine never had it — so pollers fail fast instead of
+ * retrying a dead socket until the wall-clock timeout (#179).
+ */
+let crashSeq = 0;
+export function engineCrashSeq(): number {
+  return crashSeq;
+}
+
 /** How long restartAceServer() waits for /health after a respawn. */
 const RESTART_HEALTH_TIMEOUT_MS = 90_000;
 
@@ -100,6 +110,9 @@ export function startAceServer(): ChildProcess | null {
   if (!exe || !fs.existsSync(exe)) {
     console.log(`[Server] ace-server not found at: ${exe}`);
     console.log('[Server] Start ace-server manually, or set ACESTEPCPP_EXE in .env');
+    // A crash respawn lands here when the binary has vanished (an unmounted
+    // volume, #179). Nothing else will ever retry, so say so.
+    setEngineReady(false, `ace-server not found at ${exe}`);
     aceProcess = null;
     return null;
   }
@@ -224,6 +237,7 @@ export function startAceServer(): ChildProcess | null {
     if (spawnEpoch !== lifecycleEpoch) return;     // superseded by a stop/restart
     if (signal !== 'SIGTERM' && signal !== 'SIGINT' && code !== 0) {
       console.error(`[ace-server] Process exited with code ${code}, signal ${signal}`);
+      crashSeq++;
 
       // Crash-count limiter: reset window if enough time has passed
       const now = Date.now();
