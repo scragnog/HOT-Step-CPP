@@ -175,7 +175,10 @@ export const TrainingChart: React.FC<Props> = ({
   const [flipped, setFlipped] = useState<Record<string, boolean>>({});
 
   const epochPts = epochs.filter(e => Number.isFinite(e.loss));
-  const stepPts = steps.filter(s => Number.isFinite(s.loss));
+  // A step without a loss still carries a gradient norm and a step time (the
+  // YuE2 decoder-only phase after the planner freezes): keep it, each series
+  // filters its own values.
+  const stepPts = steps.filter(s => Number.isFinite(s.loss) || Number.isFinite(s.gradNorm) || Number.isFinite(s.stepMs));
   const evalPts = evals.filter(e => Number.isFinite(e.loss));
 
   // ── the metric table ──────────────────────────────────────────────────
