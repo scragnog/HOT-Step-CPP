@@ -255,6 +255,8 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
     pushEvent(job, { type: 'metric', metric: 'step', ts: Date.now(), step,
       totalSteps: state.totalSteps, ...(event.loss === undefined ? {} : { loss: event.loss }),
       ...(event.arKl === undefined ? {} : { arKl: event.arKl }),
+      ...(event.narMse === undefined ? {} : { narMse: event.narMse }),
+      ...(event.plannerFrozen ? { plannerFrozen: true } : {}),
       ...(event.gradNorm === undefined ? {} : { gradNorm: event.gradNorm }),
       ...(event.stepMs === undefined ? {} : { stepMs: event.stepMs }),
       ...(clock && event.stepMs !== undefined ? (clock.byStep.set(step, event.stepMs), { trainMs: trainClockTotal(clock) }) : {}) });
@@ -268,7 +270,7 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
     }
     log(job, 'info', `Joint training ${stage}${step === undefined ? '' : ` at step ${step}`}`);
   } else if (stage === 'meters' && step !== undefined) {
-    log(job, 'info', `Meters at step ${step}: decoder drift ${raw.nar_drift}${raw.ar_kl_mean20 === undefined ? '' : `, planner KL ${raw.ar_kl_mean20}`}`);
+    log(job, 'info', `Meters at step ${step}: decoder drift ${raw.nar_drift}${raw.nar_recon === undefined ? '' : `, reconstruction ${raw.nar_recon}`}${raw.ar_kl_mean20 === undefined ? '' : `, planner KL ${raw.ar_kl_mean20}`}`);
   } else if (stage === 'spike_stop' && step !== undefined) {
     log(job, 'info', `Repeated gradient spikes at step ${step}; stopping on the last pre-spike weights`);
   } else if (stage === 'planner_frozen' && step !== undefined) {
@@ -305,7 +307,7 @@ function persistAitkCatalogue(
 
 /** Pure contract helper kept exportable for server-side event tests. */
 export function parseYue2JointEvent(line: string, totalSteps: number): {
-  stage: string; step?: number; loss?: number; arKl?: number; gradNorm?: number; stepMs?: number; totalSteps: number;
+  stage: string; step?: number; loss?: number; arKl?: number; narMse?: number; plannerFrozen?: boolean; gradNorm?: number; stepMs?: number; totalSteps: number;
 } | null {
   try {
     const event = JSON.parse(line) as Record<string, unknown>;
@@ -320,6 +322,8 @@ export function parseYue2JointEvent(line: string, totalSteps: number): {
     return { stage: event.stage, ...(step === undefined ? {} : { step }),
       ...(loss === undefined ? {} : { loss }),
       ...(finite(event.ar_kl) ? { arKl: event.ar_kl } : {}),
+      ...(finite(event.nar_mse) ? { narMse: event.nar_mse } : {}),
+      ...(event.planner_frozen === true ? { plannerFrozen: true } : {}),
       ...(finite(event.gradient_norm) ? { gradNorm: event.gradient_norm } : {}),
       ...(stepMs === undefined ? {} : { stepMs }), totalSteps };
   } catch { return null; }

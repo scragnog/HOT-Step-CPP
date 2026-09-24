@@ -465,6 +465,11 @@ export interface TrainingMetricEvent {
   lr?: number;
   /** YuE2 joint: the planner's KL to base for this step (the kl stop target). */
   arKl?: number;
+  /** YuE2 joint: the decoder's flow loss for this step; the only loss once
+   *  the planner is frozen (the composite `loss` is then absent). */
+  narMse?: number;
+  /** YuE2 joint: true on decoder-only steps after the planner froze. */
+  plannerFrozen?: boolean;
   gradNorm?: number;
   clipScale?: number;
   /** Wall time of THIS step, not elapsed. The direct spill signal. */

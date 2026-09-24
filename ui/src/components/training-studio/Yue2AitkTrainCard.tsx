@@ -41,7 +41,7 @@ const METRIC_CAP = 2000;
 // `loss` is absent once the planner is frozen: the trainer then reports only
 // the decoder's terms and the composite has no AR part. Those steps still
 // count for progress, pace and the gradient norm.
-type JointStepPoint = { step: number; loss?: number; ep: number; arKl?: number; gradNorm?: number; stepMs?: number; elapsedMs?: number; ma5?: number; ma20?: number };
+type JointStepPoint = { step: number; loss?: number; ep: number; arKl?: number; narMse?: number; frozen?: boolean; gradNorm?: number; stepMs?: number; elapsedMs?: number; ma5?: number; ma20?: number };
 type JointMilestone = { epoch: number; loss: number; path: string };
 function jointLossRate(points: JointStepPoint[]): number | null {
   const means = points.map(p => p.ma20).filter((v): v is number => typeof v === 'number');
@@ -398,8 +398,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   }, [stepHistory, klMode]);
   // The planner freezes at its KL target: from then on steps carry no loss.
   const frozenAt = useMemo(() => {
-    const first = stepHistory.findIndex(p => p.loss === undefined);
-    return first > 0 && stepHistory[first - 1].loss !== undefined ? stepHistory[first - 1].step : undefined;
+    const first = stepHistory.findIndex(p => p.frozen || p.loss === undefined);
+    return first > 0 && !stepHistory[first - 1].frozen && stepHistory[first - 1].loss !== undefined ? stepHistory[first - 1].step : undefined;
   }, [stepHistory]);
   const [milestones, setMilestones] = useState<JointMilestone[]>([]);
   const [jobLogs, setJobLogs] = useState<string[]>([]);
@@ -491,6 +491,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               const stepMs = typeof item.stepMs === 'number' ? item.stepMs : undefined;
               const next = [...prior, { step: item.step!, ep: item.step!,
                 ...(typeof item.loss === 'number' && Number.isFinite(item.loss) ? { loss: item.loss } : {}),
+                ...(typeof item.narMse === 'number' ? { narMse: item.narMse } : {}),
+                ...(item.plannerFrozen ? { frozen: true } : {}),
                 ...(typeof item.arKl === 'number' ? { arKl: item.arKl } : {}),
                 ...(typeof item.gradNorm === 'number' ? { gradNorm: item.gradNorm } : {}),
                 // Cumulative training time from the server (survives preview

@@ -107,6 +107,10 @@ struct Config {
     // relative squared error. Written to train.jsonl and the checkpoint's
     // meters.json. Off = no probe cost and byte-identical runs.
     bool nar_drift = false;
+    // With --resume: restore the checkpoint, take the decoder meters (drift
+    // and reconstruction), write them to the checkpoint's meters.json, exit.
+    // Scores checkpoints of a finished run; --output is a scratch directory.
+    bool meter_only = false;
     // Spike guard. A step whose pre-clip gradient norm exceeds spike_factor x
     // the median of the last 50 applied steps skips its update (0 = off; it
     // arms once 20 norms are in the window, and the window restarts when the
@@ -132,7 +136,8 @@ inline void usage(FILE * out) {
         "[--target-loss F (0 disables)] [--target-kl F (0 disables)] [--target-loss-window N] [--target-kl-mode mean|trend] "
         "[--kl-weight 0.2] [--abc-dropout 0.5] [--caption-dropout 0] [--planner-lr-scale 1.0 (not muon)] [--nar-lr-scale 1.0 (not muon)] "
         "[--nar-extra-steps N (with --target-kl: freeze the planner at its KL, train the decoder N more steps)] "
-        "[--nar-drift (log the decoder's drift from base at every checkpoint)] "
+        "[--nar-drift (log the decoder's drift from base and its reconstruction error at every checkpoint)] "
+        "[--meter-only (with --resume: write the checkpoint's meters.json and exit)] "
         "[--freeze-planner-now (with --resume and --nar-extra-steps: freeze the planner at the resumed step)] "
         "[--spike-factor F (skip updates above F x median gradient norm; 0 = off)] [--spike-stop N (stop after N skips)] [--spike-stop-window 20]\n");
 }
@@ -321,6 +326,8 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
                 !detail::decimal_i32(value_text.c_str(), &parsed.spike_stop_window) || parsed.spike_stop_window < 1) { if (error) *error = "--spike-stop-window must be a positive integer"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--nar-drift")) {
             parsed.nar_drift = true;
+        } else if (!std::strcmp(arg, "--meter-only")) {
+            parsed.meter_only = true; parsed.nar_drift = true;
         } else if (!std::strcmp(arg, "--nar-extra-steps")) {
             std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
                 !detail::decimal_i32(value_text.c_str(), &parsed.nar_extra_steps)) { if (error) *error = "--nar-extra-steps must be a nonnegative integer"; return ParseResult::error; }

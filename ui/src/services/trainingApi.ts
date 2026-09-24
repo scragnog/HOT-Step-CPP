@@ -1836,6 +1836,11 @@ export interface TrainingMetricEvent {
   loss?: number;
   lr?: number;
   arKl?: number;
+  /** YuE2 joint: the decoder's flow loss for this step; the only loss once
+   *  the planner is frozen. */
+  narMse?: number;
+  /** YuE2 joint: true once the planner is frozen (decoder-only steps). */
+  plannerFrozen?: boolean;
   gradNorm?: number;
   clipScale?: number;
   /** Wall time of THIS step, not elapsed. The direct spill signal. */

@@ -327,10 +327,16 @@ static int run_impl(Config config, std::string * error) {
         // restore: the same code path as every later reading, so the adapted
         // path's own numerics cancel (the adapter-free base path read a
         // ~3e-4 floor against it). Rebuilt identically on resume.
-        struct DriftProbe { yue2_aitk::Batch batch; std::vector<std::vector<float>> noisy, base; std::vector<float> timestep; };
+        // Reconstruction (nar_recon): the same probes read against the REAL
+        // latent instead of the base decoder. One-step denoise, x0_hat =
+        // x_t - t * v_hat (x_t = (1-t) x0 + t eps, v = eps - x0), relative
+        // squared error to x0. "How well does the decoder reproduce this
+        // album's sound", which is where likeness lives; expected to fall and
+        // then plateau, unlike drift, which saturates in the first steps.
+        struct DriftProbe { yue2_aitk::Batch batch; std::vector<std::vector<float>> noisy, base, clean; std::vector<float> timestep, t01; };
         std::vector<DriftProbe> probes;
-        const auto measure_drift = [&](const Yue2AitkExpertAdapters * nar, bool fill_base, double * drift) -> bool {
-            double sum = 0.0; size_t count = 0;
+        const auto measure_drift = [&](const Yue2AitkExpertAdapters * nar, bool fill_base, double * drift, double * recon = nullptr) -> bool {
+            double sum = 0.0, rsum = 0.0; size_t count = 0;
             for (auto & probe : probes) {
                 Yue2AitkPrefixHost prefix;
                 if (!yue2_aitk_joint::nar_probe_prefix(backend.value, model, probe.batch, &prefix, error)) return false;
@@ -342,9 +348,14 @@ static int run_impl(Config config, std::string * error) {
                     double num = 0.0, den = 0.0;
                     for (size_t i = 0; i < b.size(); ++i) { const double d = double(prediction[i]) - b[i]; num += d * d; den += double(b[i]) * b[i]; }
                     sum += den > 0.0 ? num / den : 0.0; ++count;
+                    const auto & x0 = probe.clean[k]; const auto & xt = probe.noisy[k]; const double t = probe.t01[k];
+                    double rnum = 0.0, rden = 0.0;
+                    for (size_t i = 0; i < x0.size(); ++i) { const double hat = double(xt[i]) - t * double(prediction[i]); const double d = hat - x0[i]; rnum += d * d; rden += double(x0[i]) * x0[i]; }
+                    rsum += rden > 0.0 ? rnum / rden : 0.0;
                 }
             }
             if (drift) *drift = count ? sum / double(count) : 0.0;
+            if (recon) *recon = count ? rsum / double(count) : 0.0;
             return true;
         };
         if (config.nar_drift) {
@@ -359,6 +370,7 @@ static int run_impl(Config config, std::string * error) {
                     auto sampled = probe_sampler.sample(item.song, item.prompt, 1500, std::vector<float>{level}, 0.0f, 0, 0, 0.0f);
                     if (probe.noisy.empty()) probe.batch = sampled.batch;
                     probe.noisy.push_back(std::move(sampled.noisy_bf16)); probe.timestep.push_back(sampled.timestep_bf16);
+                    probe.clean.push_back(std::move(sampled.clean_f32)); probe.t01.push_back(sampled.timestep_bf16);
                 }
                 probes.push_back(std::move(probe));
             }
@@ -565,6 +577,20 @@ static int run_impl(Config config, std::string * error) {
         }
         // The run's last step: --steps, or the decoder budget once frozen.
         const auto end_step = [&]() { return planner_frozen_at >= 0 ? std::min(config.steps, planner_frozen_at + config.nar_extra_steps) : config.steps; };
+        if (config.meter_only) {
+            if (config.resume.empty()) { fail(error, "--meter-only needs --resume"); return 1; }
+            double drift = 0.0, recon = 0.0;
+            if (!measure_drift(&state.nar_adapters(), false, &drift, &recon)) return 1;
+            double kl = -1.0;
+            if (!resume_binding.kl_history.empty()) { const auto & h = resume_binding.kl_history; const size_t n = std::min<size_t>(20, h.size()); kl = 0.0; for (size_t i = h.size() - n; i < h.size(); ++i) kl += h[i]; kl /= double(n); }
+            std::ostringstream meters;
+            meters << std::setprecision(9) << "{\"stage\":\"meters\",\"step\":" << completed << ",\"nar_drift\":" << drift << ",\"nar_recon\":" << recon;
+            if (kl >= 0.0) meters << ",\"ar_kl_mean20\":" << kl;
+            meters << ",\"planner_frozen\":" << (planner_frozen_at >= 0 ? "true" : "false") << "}\n";
+            std::ofstream(std::filesystem::u8path(config.resume).parent_path() / "meters.json", std::ios::binary) << meters.str();
+            std::cout << meters.str() << std::flush;
+            return 0;
+        }
         std::ofstream jsonl(std::filesystem::u8path(config.output) / "train.jsonl", std::ios::binary);
         if (!jsonl) { fail(error, "cannot create training JSONL"); return 1; }
         // The planner's KL at the moment a checkpoint is written, for meters.json.
@@ -583,12 +609,12 @@ static int run_impl(Config config, std::string * error) {
             std::error_code save_ec; if (std::filesystem::exists(final_dir, save_ec) || std::filesystem::exists(temp_dir, save_ec) || !std::filesystem::create_directory(temp_dir, save_ec) || save_ec) return false;
             const auto adapter = temp_dir / "adapter.safetensors"; const auto resume = temp_dir / "optimizer.resume";
             if (config.nar_drift) {
-                double drift = 0.0;
-                if (!measure_drift(&state.nar_adapters(), false, &drift)) return false;
+                double drift = 0.0, recon = 0.0;
+                if (!measure_drift(&state.nar_adapters(), false, &drift, &recon)) return false;
                 double kl = -1.0;
                 if (!kl_recent.empty()) { kl = 0.0; for (double v : kl_recent) kl += v; kl /= double(kl_recent.size()); }
                 std::ostringstream meters;
-                meters << std::setprecision(9) << "{\"stage\":\"meters\",\"step\":" << step << ",\"nar_drift\":" << drift;
+                meters << std::setprecision(9) << "{\"stage\":\"meters\",\"step\":" << step << ",\"nar_drift\":" << drift << ",\"nar_recon\":" << recon;
                 if (kl >= 0.0) meters << ",\"ar_kl_mean20\":" << kl;
                 meters << ",\"planner_frozen\":" << (planner_frozen_at >= 0 ? "true" : "false") << "}\n";
                 std::ofstream(temp_dir / "meters.json", std::ios::binary) << meters.str();
