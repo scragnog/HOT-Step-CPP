@@ -681,11 +681,12 @@ static int cmd_process_chain(const char * chain_json_path, const char * input_pa
 
         yyjson_val * path_val  = yyjson_obj_get(val, "path");
         yyjson_val * state_val = yyjson_obj_get(val, "state");
-        if (!path_val) continue;
+        if (!yyjson_is_str(path_val)) continue;
 
         ChainEntry e;
         e.path  = yyjson_get_str(path_val);
-        e.state = state_val ? yyjson_get_str(state_val) : "";
+        // a null or missing state means the plugin's defaults
+        e.state = yyjson_is_str(state_val) ? yyjson_get_str(state_val) : "";
         entries.push_back(e);
     }
     yyjson_doc_free(doc);
@@ -994,8 +995,8 @@ static int cmd_monitor(const char * chain_json_path, const char * input_path,
             if (ev && !yyjson_get_bool(ev)) continue;
             yyjson_val * pv = yyjson_obj_get(val, "path");
             yyjson_val * sv = yyjson_obj_get(val, "state");
-            if (!pv) continue;
-            defs.push_back({ yyjson_get_str(pv), sv ? yyjson_get_str(sv) : "" });
+            if (!yyjson_is_str(pv)) continue;
+            defs.push_back({ yyjson_get_str(pv), yyjson_is_str(sv) ? yyjson_get_str(sv) : "" });
         }
     }
     yyjson_doc_free(doc);
