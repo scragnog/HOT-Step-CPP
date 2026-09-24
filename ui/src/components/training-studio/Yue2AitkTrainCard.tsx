@@ -444,7 +444,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [jointPreviews, setJointPreviews] = useState<Yue2JointPreviewRecord[]>([]);
 
   useEffect(() => {
-    if (legacyManifest && !prepare.legacyManifest) {
+    // The dataset's own manifest always wins. A saved value that differs came
+    // from another dataset (the status-switch race), and trained the wrong album.
+    if (legacyManifest && prepare.legacyManifest !== legacyManifest) {
       setPrepare(previous => ({ ...previous, legacyManifest }));
     }
   }, [legacyManifest, prepare.legacyManifest]);

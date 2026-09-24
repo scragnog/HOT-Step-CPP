@@ -21,7 +21,11 @@ export function useYue2Status(datasetId: string): {
   status: Yue2Status | null; error: string | null; reload: () => void;
 } {
   const activeJob = useTrainingStore(s => s.activeJob);
-  const [status, setStatus] = useState<Yue2Status | null>(null);
+  // Tagged with the dataset it was fetched for. On a dataset switch the old
+  // answer must not be handed out while the new fetch is in flight: a card that
+  // mounts in that gap takes the previous dataset's manifest path as its own.
+  const [fetched, setFetched] = useState<{ datasetId: string; status: Yue2Status } | null>(null);
+  const status = fetched?.datasetId === datasetId ? fetched.status : null;
   const [error, setError] = useState<string | null>(null);
   /** Bumped by `reload`. A counter rather than a boolean so two reloads in a
    *  row are two fetches. */
@@ -36,7 +40,7 @@ export function useYue2Status(datasetId: string): {
   useEffect(() => {
     let cancelled = false;
     trainingApi.getYue2Status(datasetId)
-      .then(s => { if (!cancelled) { setStatus(s); setError(null); } })
+      .then(s => { if (!cancelled) { setFetched({ datasetId, status: s }); setError(null); } })
       .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
     return () => { cancelled = true; };
   }, [datasetId, finishedKey, nonce]);

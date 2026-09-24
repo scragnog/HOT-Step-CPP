@@ -3451,7 +3451,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         tokenizer: prepString('tokenizer', prepDefaults.tokenizer),
         trigger: ds.customTag || ds.slug,
         lyricTiming: b.lyricTiming === undefined ? b.alignmentEnabled !== false : b.lyricTiming === true };
-      const prepError = validateYue2AitkPrepareOptions(preparation);
+      const prepError = foreignYue2Manifest(ds, preparation.legacyManifest) || validateYue2AitkPrepareOptions(preparation);
       if (prepError) { res.status(400).json({ error: prepError }); return; }
     }
     if (!automatic && (!dataset || !fs.existsSync(dataset) || !fs.statSync(dataset).isFile())) {
@@ -3696,6 +3696,16 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
  * Import the already-produced HOT-Step YuE2 cache stages into the native AITK
  * schema. This is a CPU job and does not stop ace-server or claim a GPU.
  */
+/** A dataset trains on its own latent cache and nothing else. The UI once sent
+ *  the previously selected dataset's manifest, and the run trained that album
+ *  under this dataset's trigger. Returns the error, or '' when it is ours. */
+function foreignYue2Manifest(ds: TrainingDatasetRow, manifest: string): string {
+  const norm = (p: string) => { const r = path.resolve(p); return process.platform === 'win32' ? r.toLowerCase() : r; };
+  const own = yue2PreprocessManifest(ds.slug);
+  return norm(manifest) === norm(own) ? ''
+    : `YuE2 manifest ${manifest} does not belong to dataset "${ds.slug}" (expected ${own}). Reselect the dataset and try again.`;
+}
+
 function yue2AitkPrepareDefaults(ds: TrainingDatasetRow): {
   options: ResolvedYue2AitkPrepareOptions;
   missing: string[];
@@ -3775,7 +3785,7 @@ router.post('/datasets/:id/yue2-joint-prepare', (req: Request, res: Response) =>
       trigger: ds.customTag || ds.slug,
       lyricTiming: b.lyricTiming !== false,
     };
-    const error = validateYue2AitkPrepareOptions(options);
+    const error = foreignYue2Manifest(ds, options.legacyManifest) || validateYue2AitkPrepareOptions(options);
     if (error) { res.status(400).json({ error }); return; }
     const job = queue.startYue2AitkPrepareJob(ds.id, options);
     res.status(202).json({
