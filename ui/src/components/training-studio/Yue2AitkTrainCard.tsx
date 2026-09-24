@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
 import { TrainingChart } from './TrainingChart';
+import { Toggle } from '../settings/SettingsPrimitives';
 import {
   cancelJob,
   clearPreparedData,
@@ -163,6 +164,9 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // subtle, diminishing returns): stop once the reconstruction meter gains
   // under 0.5% over three checkpoints. The preset's step cap still applies.
   reconStop: 0.005, reconStopWindow: 3,
+  // After the main run: the server starts a planner refinement (Refine tab
+  // defaults) and the card moves to the Refine tab. Rob's call, 2026-09-24.
+  autoRefine: true,
 };
 const LORA_STOP = { targetKl: 1.4, plannerLrScale: 0.3, narLrScale: undefined };
 const LOKR_STOP = { targetKl: 1.2, plannerLrScale: 0.6, narLrScale: 1 };
@@ -305,6 +309,11 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     Object.assign(stored, presetValues(PRESETS[1]));
     window.localStorage.setItem(presets, '1');
   }
+  const autoRefine = `${FORM_KEY}${datasetId}:defaults-auto-refine`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(autoRefine)) {
+    if (stored.autoRefine === undefined) stored.autoRefine = DEFAULT_FORM.autoRefine;
+    window.localStorage.setItem(autoRefine, '1');
+  }
   const recon = `${FORM_KEY}${datasetId}:defaults-recon-stop`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(recon)) {
     if (stored.reconStop === undefined) { stored.reconStop = DEFAULT_FORM.reconStop; stored.reconStopWindow = DEFAULT_FORM.reconStopWindow; }
@@ -378,6 +387,17 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   };
   const [aitkRuns, setAitkRuns] = useState<Yue2AitkRunRecord[]>([]);
   const [resumeChoice, setResumeChoice] = useState('');
+  // Auto-refine: when the run this card started reaches done, hand over to
+  // the Refine tab, where the server-started refinement shows as the active job.
+  const handedOver = useRef<string>('');
+  useEffect(() => {
+    // Only a run that finished just now: a page reload restores an old done job.
+    const fresh = typeof job?.finishedAt === 'number' && Date.now() - job.finishedAt < 120_000;
+    if (!job || job.status !== 'done' || !fresh || form.autoRefine === false || resumeChoice || handedOver.current === job.id) return;
+    handedOver.current = job.id;
+    const timer = window.setTimeout(() => setPhase('refine'), 2500);
+    return () => window.clearTimeout(timer);
+  }, [job?.id, job?.status]);
   const [clearing, setClearing] = useState(false);
   const [cacheInfo, setCacheInfo] = useState<{ slug: string; caches: PreparedCache[]; busy: boolean } | null>(null);
   const [clearNote, setClearNote] = useState('');
@@ -971,6 +991,12 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           <span className="ml-1 font-normal text-zinc-500">KL {p.targetKl} · {p.steps}</span>
         </button>)}
         {!activePreset(form) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
+        <span className="flex-1" />
+        <div className={`flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 ${active || starting || preparing || yue2RunAllActive ? 'opacity-50 pointer-events-none' : ''}`}
+          title={t('trainingStudio.yue2.method.autoRefineHint', 'When the run completes, start a planner refinement of it with the Refine tab defaults (KL rungs to 2.0, previews per rung) and move to the Refine tab.')}>
+          <Toggle id="yue2-auto-refine" checked={form.autoRefine !== false} onChange={v => set('autoRefine', v)} />
+          <span>{t('trainingStudio.yue2.method.autoRefine', 'Automatically proceed to refinement')}</span>
+        </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
         {!resumeChoice && <details className="md:col-span-2"><summary className="cursor-pointer text-[11px] text-zinc-500">Manual resume path</summary>{field(t('trainingStudio.yue2.method.resume', 'Resume record (optional)'), 'resume')}</details>}
@@ -1215,6 +1241,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-zinc-950 p-2 text-[10px] leading-4 text-zinc-300 whitespace-pre-wrap">{jobLogs.join('\n')}</pre>
       </details>}
       {job?.status === 'done' && <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">{t('trainingStudio.yue2.method.checkpointWritten', 'Joint checkpoints are in the selected output directory.')}</p>}
+      {job?.status === 'done' && form.autoRefine !== false && !resumeChoice && <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.autoRefineNote', 'Refinement is starting on the Refine tab.')}</p>}
       {(aitkRuns.length > 0 || runsError) && <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
         <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.auditionTitle', 'Audition a joint checkpoint')}</p>
         {activeBackendId !== 'yue2' && <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.selectYue2', 'Select the YuE2 backend to use these adapters for generation.')}</p>}

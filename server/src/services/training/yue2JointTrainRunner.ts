@@ -12,6 +12,7 @@ import { renderYue2JointPreview, Yue2PreviewCleanupError } from './yue2JointPrev
 import { yue2Unload } from '../backends/yue2/client.js';
 import { ensureYue2PreparedDataset } from './yue2AutoPrepare.js';
 import { getDataset } from './datasetsRepo.js';
+import { config } from '../../config.js';
 import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
 
 export interface ResolvedYue2JointTrainOptions {
@@ -107,6 +108,19 @@ export interface ResolvedYue2JointTrainOptions {
   planCheck?: { every: number } & Partial<Yue2PlanCheckOptions>;
   /** Segment-level: resume with the planner frozen at the resumed step. */
   freezePlannerNow?: boolean;
+  /** After a successful main run: start a planner refinement of it with the
+   *  Refine tab's defaults (the server posts to its own route, so it works
+   *  with the browser closed). Never set on a refinement itself. */
+  autoRefine?: boolean;
+}
+
+/** The Refine tab's defaults, as one request body. Kept here so the
+ *  automatic chain and the tab start the same job. */
+function autoRefineRequest(sourceJobId: string, lastStep: number): Record<string, unknown> {
+  return { trainingMethod: 'aitk', refinePlanner: true, resumeRunId: sourceJobId, resumeStep: lastStep,
+    steps: lastStep + 1000, stopMode: 'kl', targetKl: 2.0, klCheckpointEvery: 0.1, refineLrScale: 0.1,
+    stopEngine: false, spikeFactor: 5, spikeStop: 3, spikeStopWindow: 20, autoPrepare: false, checkpoint: '', output: '',
+    preview: { enabled: true, everySteps: 0, takes: 2, seconds: 180, seed: 424242, previewMaxFrames: 4500, baseline: false, control: false, parallel: true } };
 }
 
 /** Route and native runner share the public stop-mode contract. */
@@ -531,6 +545,20 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
         }
       }
       finishJob(job, 'done');
+      if (o.autoRefine && !o.unfreezePlanner && !o.reconReset) {
+        // Chain the planner refinement through the public route, exactly as
+        // the Refine tab would, after this job has been marked done.
+        const last = checkpointRecords(o.outDir).find(c => !!c.optimizerPath && c.arPath && c.narPath);
+        if (last) {
+          const body = autoRefineRequest(job.id, last.step);
+          const url = `http://127.0.0.1:${config.server.port}/api/training/datasets/${encodeURIComponent(job.datasetId)}/yue2-joint-train`;
+          setTimeout(() => {
+            fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+              .then(async r => { const t = await r.text(); log(job, r.ok ? 'info' : 'warn', r.ok ? `Refinement started automatically from step ${last.step}` : `Automatic refinement did not start: ${t.slice(0, 200)}`); })
+              .catch(err => log(job, 'warn', `Automatic refinement did not start: ${err?.message || err}`));
+          }, 1500);
+        } else log(job, 'warn', 'Automatic refinement skipped: no resumable checkpoint');
+      }
     }
     return;
   } catch (err: unknown) {

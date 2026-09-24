@@ -704,6 +704,8 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   klCheckpointEvery?: number;
   /** Planner refinement: learning rate as a fraction of the source run's (default 0.3). */
   refineLrScale?: number;
+  /** Main run: when it completes, the server starts a planner refinement of it. */
+  autoRefine?: boolean;
 }
 
 export interface Yue2JointPreviewOptions {

@@ -3383,7 +3383,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       // seed, optimizer, adapter shape and dataset come from the indexed run.
       // Per-resume flags never carry over from the source run: a planner
       // refinement of a decoder refinement must not inherit its freeze.
-      const { freezePlannerNow: _f, reconReset: _r, unfreezePlanner: _u, klCheckpointEvery: _k, refine: _e, refinePlanner: _p, ...inherited } = saved as Record<string, unknown>;
+      const { freezePlannerNow: _f, reconReset: _r, unfreezePlanner: _u, klCheckpointEvery: _k, refine: _e, refinePlanner: _p, autoRefine: _a, ...inherited } = saved as Record<string, unknown>;
       b = { ...inherited, trainingMethod: 'aitk', autoPrepare: false,
         checkpoint: saved.checkpoint, dataset: saved.dataset, output: '',
         resume: selected.optimizerPath,
@@ -3674,6 +3674,8 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(planCheck ? { planCheck } : {}),
       ...(resume && b.freezePlannerNow === true ? { freezePlannerNow: true } : {}),
       ...(resume && b.refine === true ? { reconReset: true } : {}),
+      // Only a fresh main run chains into a refinement; resumes never do.
+      ...(!resume && b.autoRefine === true ? { autoRefine: true } : {}),
       ...(resume && b.refinePlanner === true ? { unfreezePlanner: true, klCheckpointEvery: Math.max(0.01, Math.min(1, Number(b.klCheckpointEvery) || 0.1)), refineWarmup: 30, rungAdaptiveLr: true } : {}),
       ...advanced,
       ...(preparation ? { preparation } : {}),
