@@ -42,7 +42,9 @@ export interface Yue2AitkRunRecord {
   method: 'aitk';
   output: string;
   options: Record<string, unknown>;
-  status: 'running' | 'done' | 'failed' | 'cancelled';
+  /** 'interrupted': the index said running when a fresh server started, so
+   *  the process that ran it is gone (an app restart or crash mid-run). */
+  status: 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted';
   createdAt: number;
   updatedAt: number;
   error?: string;
@@ -165,6 +167,18 @@ export function deleteYue2AitkRun(jobId: string): { output: string } {
   writeIndex(readIndex().filter(r => r.jobId !== jobId));
   return { output };
 }
+
+/** At server start nothing is training, so every 'running' entry was killed
+ *  with the previous process: mark it interrupted rather than lie forever. */
+export function reconcileYue2AitkRunsAtStartup(): number {
+  try {
+    const index = readIndex();
+    const stale = index.filter(r => r.status === 'running');
+    if (stale.length) writeIndex(index.map(r => r.status === 'running' ? { ...r, status: 'interrupted' as const, updatedAt: Date.now() } : r));
+    return stale.length;
+  } catch { return 0; }
+}
+reconcileYue2AitkRunsAtStartup();
 
 export function listYue2AitkRuns(datasetId: string, datasetSlug?: string): Yue2AitkRunRecord[] {
   return readIndex().filter(r => r.datasetId === datasetId || (!!datasetSlug && r.datasetSlug === datasetSlug))

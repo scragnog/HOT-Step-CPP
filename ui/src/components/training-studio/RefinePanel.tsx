@@ -126,7 +126,12 @@ export const RefinePanel: React.FC = () => {
       await refreshRuns();
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   };
-  const runLabel = (r: Yue2AitkRunRecord) => { const last = lastOf(r); return `${new Date(r.createdAt).toLocaleString()} · step ${last?.step ?? '—'}${last?.kl !== undefined ? ` · KL ${last.kl.toFixed(2)}` : ''} · ${r.checkpoints.length} ckpt · ${r.status}${r.live ? ' (running)' : ''}`; };
+  // Short enough to survive the picker's middle-ellipsis (about 40 chars).
+  const runLabel = (r: Yue2AitkRunRecord) => {
+    const last = lastOf(r); const d = new Date(r.createdAt);
+    const when = `${d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })} ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+    return `${when} · s${last?.step ?? '?'}${last?.kl !== undefined ? ` KL${last.kl.toFixed(2)}` : ''} · ${r.checkpoints.length}ck · ${r.live ? 'running' : r.status}`;
+  };
   const use = async (dir: string) => {
     if (!datasetId) return;
     setError('');

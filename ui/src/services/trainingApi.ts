@@ -748,7 +748,7 @@ export interface Yue2AitkRunRecord {
   method: 'aitk';
   output: string;
   options: Record<string, unknown>;
-  status: 'running' | 'done' | 'failed' | 'cancelled';
+  status: 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted';
   createdAt: number;
   updatedAt: number;
   error?: string;
