@@ -8,7 +8,8 @@ import { randomUUID } from 'crypto';
 import type { Yue2JointPreviewOptions } from './types.js';
 import { aceClient } from '../aceClient.js';
 import { yue2PersistedSelection, type Yue2PersistedSelection } from '../backends/yue2/index.js';
-import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, type Yue2Selection } from '../backends/yue2/client.js';
+import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, yue2FinalDetail, yue2PropsCached, type Yue2Selection } from '../backends/yue2/client.js';
+import { splitMultipartMixed } from '../backends/yue2/generate.js';
 import { classifyYue2Score } from '../backends/yue2/scoreHealth.js';
 
 export const YUE2_JOINT_PREVIEW_DEFAULTS: Yue2JointPreviewOptions = {
@@ -131,7 +132,7 @@ export async function renderYue2JointPreview(input: {
   arAdapter: string; narAdapter: string; dataset?: string; signal?: AbortSignal;
   deps?: { select: typeof yue2SelectModel; warm: typeof yue2Warm; synth: typeof yue2Synth;
     poll: typeof aceClient.pollJob; result: typeof aceClient.getJobResult; cancel: typeof aceClient.cancelJob; unload: typeof yue2Unload;
-    persisted?: () => Yue2PersistedSelection };
+    detail?: typeof yue2FinalDetail; persisted?: () => Yue2PersistedSelection };
 }): Promise<Yue2JointPreviewRecord> {
   const started = Date.now();
   const base = input.deps?.persisted ? input.deps.persisted() : yue2PersistedSelection();
@@ -155,11 +156,22 @@ export async function renderYue2JointPreview(input: {
     } catch { /* explicit empty prompt remains a visible render failure */ }
   }
   try {
-    type Take = { kind: 'artist' | 'baseline' | 'control'; seed: number };
-    const plan: Take[] = kinds.flatMap((kind): Take[] => kind === 'artist'
-      ? Array.from({ length: Math.max(1, input.options.takes ?? 1) }, (_, i) => ({ kind, seed: input.options.seed + i }))
-      : [{ kind, seed: input.options.seed }]);
-    for (const { kind, seed } of plan) {
+    // Artist takes go out as ONE batched request (lm_batch_size = takes,
+    // seeds seed, seed+1, ...): the planner stage is shared across the batch
+    // and the engine returns one WAV part per song, song-major. Baseline and
+    // control are single songs.
+    const maxBatch = Math.max(1, yue2PropsCached()?.max_lm_batch ?? 1);
+    const detail = input.deps?.detail ?? yue2FinalDetail;
+    type Group = { kind: 'artist' | 'baseline' | 'control'; seeds: number[] };
+    const wanted = Math.max(1, input.options.takes ?? 1);
+    const groups: Group[] = kinds.flatMap((kind): Group[] => {
+      if (kind !== 'artist') return [{ kind, seeds: [input.options.seed] }];
+      const seeds = Array.from({ length: wanted }, (_, i) => input.options.seed + i);
+      const out: Group[] = [];
+      for (let k = 0; k < seeds.length; k += maxBatch) out.push({ kind, seeds: seeds.slice(k, k + maxBatch) });
+      return out;
+    });
+    for (const { kind, seeds } of groups) {
       if (input.signal?.aborted) throw new Error('preview cancelled');
       const unity = { global: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1 };
       const selected: Yue2Selection = { lm: base.lm, lm_adapter: kind === 'baseline' ? [] : [
@@ -167,63 +179,75 @@ export async function renderYue2JointPreview(input: {
       ], vae_variant: base.vae_variant === 'legacy' ? 'legacy' : 'standard' };
       await api.select(selected);
       await api.warm({ vae_variant: selected.vae_variant });
-      const record: Yue2JointPreviewRecord = { id: randomUUID(), step: input.step, kind, status: 'rendering',
+      const records: Yue2JointPreviewRecord[] = seeds.map(seed => ({ id: randomUUID(), step: input.step, kind, status: 'rendering',
         seconds: input.options.seconds, seed, previewMaxFrames: input.options.previewMaxFrames,
-        caption, lyrics, createdAt: started, updatedAt: Date.now() };
-      recordYue2JointPreview(input.output, record);
-      last = record;
-      const sub = await api.synth({ style: kind === 'control' ? 'downtempo electronic, calm and spacious' : caption, lyrics: kind === 'control' ? '' : lyrics, cot: 'full', seed,
+        caption, lyrics, createdAt: started, updatedAt: Date.now() }));
+      for (const r of records) recordYue2JointPreview(input.output, r);
+      last = records[records.length - 1];
+      const sub = await api.synth({ style: kind === 'control' ? 'downtempo electronic, calm and spacious' : caption, lyrics: kind === 'control' ? '' : lyrics, cot: 'full', seed: seeds[0],
         preview_max_frames: input.options.previewMaxFrames,
+        ...(seeds.length > 1 ? { lm_batch_size: seeds.length } : {}),
         ...(input.options.odeSteps ? { ode_steps: input.options.odeSteps } : {}),
         ...(input.options.narCacheRatio !== undefined ? { nar_cache_ratio: input.options.narCacheRatio } : {}) });
       activeJob = sub.job_id;
       activeTerminal = false;
-      const renderDeadline = Date.now() + 20 * 60_000;
-      for (;;) {
-        if (Date.now() >= renderDeadline) throw new Error('preview exceeded 20-minute time limit');
-        if (input.signal?.aborted) {
-          await api.cancel(sub.job_id).catch(() => {});
-          const deadline = Date.now() + 30_000;
-          while (Date.now() < deadline) {
-            const stopped = await api.poll(sub.job_id).catch(() => null);
-            if (stopped && (stopped.status === 'cancelled' || stopped.status === 'failed' || stopped.status === 'done')) { activeTerminal = true; break; }
-            await new Promise(resolve => setTimeout(resolve, 250));
+      const renderDeadline = Date.now() + 30 * 60_000;
+      const markFailed = (message: string) => { for (const r of records) { if (r.status === 'rendering') { r.status = 'failed'; r.error = message; r.updatedAt = Date.now(); recordYue2JointPreview(input.output, r); } } };
+      try {
+        for (;;) {
+          if (Date.now() >= renderDeadline) throw new Error('preview exceeded 30-minute time limit');
+          if (input.signal?.aborted) {
+            await api.cancel(sub.job_id).catch(() => {});
+            const deadline = Date.now() + 30_000;
+            while (Date.now() < deadline) {
+              const stopped = await api.poll(sub.job_id).catch(() => null);
+              if (stopped && (stopped.status === 'cancelled' || stopped.status === 'failed' || stopped.status === 'done')) { activeTerminal = true; break; }
+              await new Promise(resolve => setTimeout(resolve, 250));
+            }
+            throw new Error('preview cancelled');
           }
-          throw new Error('preview cancelled');
+          let status;
+          try { status = await api.poll(sub.job_id); }
+          catch (err) { await api.cancel(sub.job_id).catch(() => {}); throw err; }
+          if (status.status === 'done') { activeTerminal = true; break; }
+          if (status.status === 'failed' || status.status === 'cancelled') { activeTerminal = true; throw new Error(`preview engine job ${status.status}`); }
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
-        let status;
-        try { status = await api.poll(sub.job_id); }
-        catch (err) {
-          await api.cancel(sub.job_id).catch(() => {});
-          throw err;
-        }
-        if (status.status === 'done') {
-          activeTerminal = true;
-          if (typeof status.end_reason === 'string') record.endReason = status.end_reason;
-          if (status.stage_end_reasons && typeof status.stage_end_reasons === 'object') record.stageEndReasons = status.stage_end_reasons;
-          const abc = (status as { abc?: unknown }).abc;
+        // Per-track end reasons and scores; a single song reports at the top level.
+        const d = await detail(sub.job_id).catch(() => ({} as Awaited<ReturnType<typeof yue2FinalDetail>>));
+        const perTrack = (i: number) => (d.tracks && d.tracks.length > i ? d.tracks[i] : i === 0 ? d : undefined);
+        records.forEach((record, i) => {
+          const t = perTrack(i);
+          if (!t) return;
+          if (typeof t.end_reason === 'string') record.endReason = t.end_reason;
+          if (t.stage_end_reasons && typeof t.stage_end_reasons === 'object') record.stageEndReasons = t.stage_end_reasons as Record<string, string>;
+          const abc = (t as { abc?: unknown }).abc;
           if (typeof abc === 'string' && abc.trim()) {
-            const h = classifyYue2Score(abc, status.end_reason);
+            const h = classifyYue2Score(abc, t.end_reason);
             record.score = { verdict: h.verdict, reason: h.reason, bars: h.bars, vocalShare: h.vocalShare, sections: h.sections };
-            try { fs.mkdirSync(path.join(input.output, 'previews'), { recursive: true }); fs.writeFileSync(path.join(input.output, 'previews', `step-${input.step}-${kind}-s${seed}.score.abc`), abc); } catch { /* the verdict is already on the record */ }
+            try { fs.mkdirSync(path.join(input.output, 'previews'), { recursive: true }); fs.writeFileSync(path.join(input.output, 'previews', `step-${input.step}-${kind}-s${record.seed}.score.abc`), abc); } catch { /* the verdict is already on the record */ }
           }
-          break;
-        }
-        if (status.status === 'failed' || status.status === 'cancelled') { activeTerminal = true; throw new Error(`preview engine job ${status.status}`); }
-        await new Promise(resolve => setTimeout(resolve, 500));
+        });
+        const response = await api.result(sub.job_id);
+        const body = Buffer.from(await response.arrayBuffer());
+        const contentType = response.headers.get('content-type') ?? '';
+        const parts = seeds.length > 1 && /multipart\/mixed/i.test(contentType) ? splitMultipartMixed(body, contentType) : [body];
+        if (parts.length < records.length) throw new Error(`preview batch returned ${parts.length} of ${records.length} tracks`);
+        const dir = path.join(input.output, 'previews'); fs.mkdirSync(dir, { recursive: true });
+        records.forEach((record, i) => {
+          const filename = `step-${input.step}-${kind}-s${record.seed}.wav`;
+          fs.writeFileSync(path.join(dir, filename), parts[i], { flag: 'wx' });
+          record.status = 'done'; record.file = filename; record.updatedAt = Date.now();
+          recordYue2JointPreview(input.output, record);
+        });
+      } catch (err: any) {
+        markFailed(err?.message || String(err));
+        throw err;
       }
-      const response = await api.result(sub.job_id);
-      const bytes = Buffer.from(await response.arrayBuffer());
-      const filename = `step-${input.step}-${kind}-s${seed}.wav`;
-      const dir = path.join(input.output, 'previews'); fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, filename), bytes, { flag: 'wx' });
-      record.status = 'done'; record.file = filename; record.updatedAt = Date.now();
-      recordYue2JointPreview(input.output, record);
-      last = record;
     }
     return last!;
   } catch (err: any) {
-    if (last) { last.status = 'failed'; last.error = err?.message || String(err); last.updatedAt = Date.now(); recordYue2JointPreview(input.output, last); }
+    if (last && last.status === 'rendering') { last.status = 'failed'; last.error = err?.message || String(err); last.updatedAt = Date.now(); recordYue2JointPreview(input.output, last); }
     throw err;
   } finally {
     const restore: Yue2Selection = { lm: base.lm, vae_variant: base.vae_variant === 'legacy' ? 'legacy' : 'standard', lm_adapter: [] };

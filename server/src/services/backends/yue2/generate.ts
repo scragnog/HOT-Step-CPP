@@ -494,7 +494,7 @@ function yue2StageText(phase: string | undefined, step: number, total: number): 
 
 /** Split a `multipart/mixed` body into its raw parts (the engine's batch
  *  result: one WAV per part, no per-part headers worth reading). */
-function splitMultipartMixed(body: Buffer, contentType: string): Buffer[] {
+export function splitMultipartMixed(body: Buffer, contentType: string): Buffer[] {
   const m = /boundary=([^;]+)/.exec(contentType);
   if (!m) return [body];
   const boundary = Buffer.from(`--${m[1].trim()}`);
