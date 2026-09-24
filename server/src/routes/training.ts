@@ -3385,7 +3385,10 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       b = { ...inherited, trainingMethod: 'aitk', autoPrepare: false,
         checkpoint: saved.checkpoint, dataset: saved.dataset, output: '',
         resume: selected.optimizerPath,
-        steps: b.steps, saveEvery: b.refine === true && Number.isInteger(Number(b.saveEvery)) && Number(b.saveEvery) > 0 ? Number(b.saveEvery) : saved.saveEvery,
+        // A planner refinement saves at KL rungs only: no routine step saves
+        // (saveEvery = the cap, so the only step-cadence save is the last one).
+        steps: b.steps, saveEvery: b.refinePlanner === true ? Number(b.steps)
+          : b.refine === true && Number.isInteger(Number(b.saveEvery)) && Number(b.saveEvery) > 0 ? Number(b.saveEvery) : saved.saveEvery,
         stopMode: b.stopMode ?? saved.stopMode, targetLoss: b.targetLoss ?? saved.targetLoss, targetKl: b.targetKl ?? saved.targetKl,
         targetKlMode: b.targetKlMode ?? saved.targetKlMode,
         // The decoder budget counts from the FREEZE step, which a refinement
