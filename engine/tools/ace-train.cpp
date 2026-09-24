@@ -941,6 +941,8 @@ static void print_usage(void) {
             "                                            SVD and uploads identical bytes.\n"
             "    --pissa-frozen-f16                      hold the frozen A0/B0 pair in F16 (half the VRAM;\n"
             "                                            init cancels to f16 precision). Unheard.\n"
+            "    --pissa-standalone                      export plain rank-2r LoRA on the original base, no\n"
+            "                                            residual file: for loaders that merge PEFT files\n"
             "    --pissa-oversample <n>      8           extra SVD columns beyond the rank.\n"
             "    --pissa-iters <n>           2           power iterations (0-4).\n"
             "    --hra                                   HRA: --rank (even) Householder reflections on\n"
@@ -2302,6 +2304,7 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--hot-pizza") || !strcmp(argv[i], "--hot-pissa")) { a.pissa = true; a.hot_pizza = true; }  // old spelling accepted
         else if (!strcmp(argv[i], "--pissa-cache-dir"))   a.pissa_cache_dir = next("--pissa-cache-dir");
         else if (!strcmp(argv[i], "--pissa-frozen-f16"))  a.pissa_f16    = true;
+        else if (!strcmp(argv[i], "--pissa-standalone"))  a.pissa_standalone = true;
         else if (!strcmp(argv[i], "--pissa-oversample"))  a.pissa_oversample = atoi(next("--pissa-oversample"));
         else if (!strcmp(argv[i], "--pissa-iters"))       a.pissa_iters  = atoi(next("--pissa-iters"));
         else if (!strcmp(argv[i], "--hra"))               a.hra          = true;
