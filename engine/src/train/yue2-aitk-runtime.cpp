@@ -894,8 +894,7 @@ static int run_impl(Config config, std::string * error) {
                         if (reading >= next_kl_mark && reading < (double) config.target_kl) {
                             if (config.rung_adaptive_lr && reading >= next_kl_mark + every) {
                                 rung_lr_mult = std::max(0.05, rung_lr_mult * 0.5);
-                                std::fprintf(stderr, "[yue2-aitk] KL %.3f jumped past rung %.2f: rate multiplier now %.3g
-", reading, next_kl_mark, rung_lr_mult);
+                                std::fprintf(stderr, "[yue2-aitk] KL %.3f jumped past rung %.2f: rate multiplier now %.3g\n", reading, next_kl_mark, rung_lr_mult);
                             }
                             kl_mark_last = next_kl_mark;  // into this checkpoint's record
                             rung_checkpoint = true;
