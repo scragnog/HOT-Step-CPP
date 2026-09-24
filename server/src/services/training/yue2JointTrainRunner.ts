@@ -122,7 +122,7 @@ export function autoRefineRequest(sourceJobId: string, lastStep: number): Record
   return { trainingMethod: 'aitk', refinePlanner: true, resumeRunId: sourceJobId, resumeStep: lastStep,
     steps: lastStep + 1000, stopMode: 'kl', targetKl: 2.0, klCheckpointEvery: 0.1, refineLrScale: 0.1,
     stopEngine: false, spikeFactor: 5, spikeStop: 3, spikeStopWindow: 20, autoPrepare: false, checkpoint: '', output: '',
-    preview: { enabled: true, everySteps: 0, takes: 2, seconds: 180, seed: 424242, previewMaxFrames: 4500, baseline: false, control: false, parallel: true } };
+    preview: { enabled: true, everySteps: 0, takes: 2, seconds: 300, seed: 424242, previewMaxFrames: 7500, baseline: false, control: false, parallel: true } };
 }
 
 /** Route and native runner share the public stop-mode contract. */

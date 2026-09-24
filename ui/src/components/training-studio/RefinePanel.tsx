@@ -33,7 +33,7 @@ export const RefinePanel: React.FC = () => {
   const [source, setSource] = useState('');
   const [ceiling, setCeiling] = useState(2.0);
   const [rung, setRung] = useState(0.1);
-  const [seconds, setSeconds] = useState(180);
+  const [seconds, setSeconds] = useState(300);
   const [takes, setTakes] = useState(2);
   const [autoPreview, setAutoPreview] = useState(true);
   const [parallel, setParallel] = useState(true);
@@ -301,8 +301,8 @@ export const RefinePanel: React.FC = () => {
                 <input className={input} type="number" min={1} max={4} value={takes} disabled={active || busy} onChange={e => setTakes(Math.max(1, Math.min(4, Number(e.target.value) || 1)))} />
               </label>
               <label className="flex flex-col gap-1 w-28">
-                <ParamLabel label={t('trainingStudio.refine.seconds', 'Length (s)')} meta={t('trainingStudio.refine.secondsMeta', '30–360 · default 180')} info={t('trainingStudio.refine.secondsInfo', 'Preview length. Planner decay shows after about two minutes, so keep this at 180 s or more when that is what you are listening for.')} />
-                <input className={input} type="number" min={30} max={360} step={30} value={seconds} disabled={active || busy} onChange={e => setSeconds(Math.max(30, Math.min(360, Number(e.target.value) || 180)))} />
+                <ParamLabel label={t('trainingStudio.refine.seconds', 'Length (s)')} meta={t('trainingStudio.refine.secondsMeta', '30–360 · default 300')} info={t('trainingStudio.refine.secondsInfo', 'Preview length. A take shorter than the planned song is cut mid-song at this limit and has no ending, which can read as corruption in its last seconds; the take then shows "preview_limit". Keep it long enough for a whole song (most albums fit in 300 s; 360 is the most).')} />
+                <input className={input} type="number" min={30} max={360} step={30} value={seconds} disabled={active || busy} onChange={e => setSeconds(Math.max(30, Math.min(360, Number(e.target.value) || 300)))} />
               </label>
             </div>
           </div>
@@ -335,7 +335,7 @@ export const RefinePanel: React.FC = () => {
             </div>
           </div>
         </div>
-        <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.refine.ladderHint', 'Late-song decay shows after two minutes, so keep previews at 180 s or more. Renders are not deterministic: two tracks per rung is the minimum to trust a rung. Render adds more tracks to a rung with the count and length above.')}
+        <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.refine.ladderHint', 'A take marked preview_limit was cut at the length limit mid-song, so its abrupt end is the limit, not the planner. Renders are not deterministic: two tracks per rung is the minimum to trust a rung. Render adds more tracks to a rung with the count and length above.')}
           {' '}<a className="underline hover:text-zinc-700 dark:hover:text-zinc-300" href={yue2RungScoresExportUrl('csv')}>{t('trainingStudio.refine.exportCsv', 'Export all scores (CSV)')}</a>
           {' · '}<a className="underline hover:text-zinc-700 dark:hover:text-zinc-300" href={yue2RungScoresExportUrl('json')} target="_blank" rel="noreferrer">JSON</a></p>
         {ladder.length > 0 && <div className="mt-3 flex flex-col gap-3">
