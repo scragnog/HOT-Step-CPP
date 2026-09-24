@@ -3,14 +3,14 @@
 // owns bounded, durable metadata and safe file resolution.
 import fs from 'fs';
 import path from 'path';
-import { randomUUID } from 'crypto';
+import { randomInt, randomUUID } from 'crypto';
 
 import type { Yue2JointPreviewOptions } from './types.js';
 import { aceClient } from '../aceClient.js';
 import { yue2PersistedSelection, type Yue2PersistedSelection } from '../backends/yue2/index.js';
-import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, yue2FinalDetail, yue2PropsCached, type Yue2Selection } from '../backends/yue2/client.js';
+import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, yue2FinalDetail, type Yue2Selection } from '../backends/yue2/client.js';
 import { splitMultipartMixed } from '../backends/yue2/generate.js';
-import { classifyYue2Score } from '../backends/yue2/scoreHealth.js';
+import { classifyYue2Score, yue2PlanUsable } from '../backends/yue2/scoreHealth.js';
 
 export const YUE2_JOINT_PREVIEW_DEFAULTS: Yue2JointPreviewOptions = {
   enabled: false, everySteps: 0, seconds: 90, seed: 424242,
@@ -35,9 +35,15 @@ export interface Yue2JointPreviewRecord {
    *  This is where AR over-training shows first (looping sections, no vocal),
    *  so a run can be judged checkpoint by checkpoint without listening. */
   score?: { verdict: string; reason: string; bars: number; vocalShare: number; sections: string[] };
+  /** Artist takes go through the app's auto re-plan: the plan that was
+   *  rendered (its seed) and every attempt before it. */
+  plan?: { seed: number; accepted: boolean; attempts: Array<{ seed: number; verdict: string; reason: string }> };
   createdAt: number;
   updatedAt: number;
 }
+// Plan attempts per artist take: Rob's app setting (yue2ReplanAttempts 10).
+const PREVIEW_REPLAN_ATTEMPTS = 10;
+
 export class Yue2PreviewCleanupError extends Error { readonly code = 'PREVIEW_CLEANUP'; }
 
 const MAX_RECORDS = 256;
@@ -160,7 +166,6 @@ export async function renderYue2JointPreview(input: {
     // seeds seed, seed+1, ...): the planner stage is shared across the batch
     // and the engine returns one WAV part per song, song-major. Baseline and
     // control are single songs.
-    const maxBatch = Math.max(1, yue2PropsCached()?.max_lm_batch ?? 1);
     const detail = input.deps?.detail ?? yue2FinalDetail;
     type Group = { kind: 'artist' | 'baseline' | 'control'; seeds: number[] };
     const wanted = Math.max(1, input.options.takes ?? 1);
@@ -168,7 +173,8 @@ export async function renderYue2JointPreview(input: {
       if (kind !== 'artist') return [{ kind, seeds: [input.options.seed] }];
       const seeds = Array.from({ length: wanted }, (_, i) => input.options.seed + i);
       const out: Group[] = [];
-      for (let k = 0; k < seeds.length; k += maxBatch) out.push({ kind, seeds: seeds.slice(k, k + maxBatch) });
+      // One take per request: each renders its own re-planned lead sheet.
+      for (const seed of seeds) out.push({ kind, seeds: [seed] });
       return out;
     });
     for (const { kind, seeds } of groups) {
@@ -184,7 +190,36 @@ export async function renderYue2JointPreview(input: {
         caption, lyrics, createdAt: started, updatedAt: Date.now() }));
       for (const r of records) recordYue2JointPreview(input.output, r);
       last = records[records.length - 1];
-      const sub = await api.synth({ style: kind === 'control' ? 'downtempo electronic, calm and spacious' : caption, lyrics: kind === 'control' ? '' : lyrics, cot: 'full', seed: seeds[0],
+      // Artist takes: the app's auto re-plan (generate.ts). Plan with the
+      // take's seed, redraw a plan the app would reject, render the kept one.
+      let supplied: { abc: string; seed: number } | undefined;
+      if (kind === 'artist') {
+        const attempts: Array<{ seed: number; verdict: string; reason: string }> = [];
+        for (let a = 1; a <= PREVIEW_REPLAN_ATTEMPTS; a++) {
+          if (input.signal?.aborted) throw new Error('preview cancelled');
+          const planSeed = a === 1 ? seeds[0] : randomInt(1, 2 ** 31 - 1);
+          const planSub = await api.synth({ style: caption, lyrics, cot: 'full', seed: planSeed, plan_only: true });
+          activeJob = planSub.job_id; activeTerminal = false;
+          for (;;) {
+            const st = await api.poll(planSub.job_id);
+            if (st.status === 'done') break;
+            if (st.status === 'failed' || st.status === 'cancelled') { activeTerminal = true; throw new Error(`preview plan ${st.status}`); }
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          activeTerminal = true;
+          const pd = await detail(planSub.job_id);
+          const abc = (pd.abc ?? '').trim();
+          const h = classifyYue2Score(abc, pd.end_reason);
+          attempts.push({ seed: planSeed, verdict: h.verdict, reason: h.reason });
+          supplied = { abc, seed: planSeed };
+          if (abc && yue2PlanUsable(h.verdict, false)) break;
+        }
+        const accepted = !!supplied && yue2PlanUsable(attempts[attempts.length - 1].verdict, false);
+        records[0].plan = { seed: supplied!.seed, accepted, attempts };
+        recordYue2JointPreview(input.output, records[0]);
+      }
+      const sub = await api.synth({ style: kind === 'control' ? 'downtempo electronic, calm and spacious' : caption, lyrics: kind === 'control' ? '' : lyrics, cot: 'full', seed: supplied ? supplied.seed : seeds[0],
+        ...(supplied ? { abc: supplied.abc } : {}),
         preview_max_frames: input.options.previewMaxFrames,
         ...(seeds.length > 1 ? { lm_batch_size: seeds.length } : {}),
         ...(input.options.odeSteps ? { ode_steps: input.options.odeSteps } : {}),
@@ -225,7 +260,7 @@ export async function renderYue2JointPreview(input: {
           if (typeof abc === 'string' && abc.trim()) {
             const h = classifyYue2Score(abc, t.end_reason);
             record.score = { verdict: h.verdict, reason: h.reason, bars: h.bars, vocalShare: h.vocalShare, sections: h.sections };
-            try { fs.mkdirSync(path.join(input.output, 'previews'), { recursive: true }); fs.writeFileSync(path.join(input.output, 'previews', `step-${input.step}-${kind}-s${record.seed}.score.abc`), abc); } catch { /* the verdict is already on the record */ }
+            try { fs.mkdirSync(path.join(input.output, 'previews'), { recursive: true }); fs.writeFileSync(path.join(input.output, 'previews', `step-${input.step}-${kind}-s${record.seed}${record.plan ? `-p${record.plan.seed}` : ''}.score.abc`), abc); } catch { /* the verdict is already on the record */ }
           }
         });
         const response = await api.result(sub.job_id);
@@ -235,7 +270,9 @@ export async function renderYue2JointPreview(input: {
         if (parts.length < records.length) throw new Error(`preview batch returned ${parts.length} of ${records.length} tracks`);
         const dir = path.join(input.output, 'previews'); fs.mkdirSync(dir, { recursive: true });
         records.forEach((record, i) => {
-          const filename = `step-${input.step}-${kind}-s${record.seed}.wav`;
+          // Re-planned takes carry their plan seed, so a re-render never
+          // collides with (or replaces) an earlier take of the same seed.
+          const filename = `step-${input.step}-${kind}-s${record.seed}${record.plan ? `-p${record.plan.seed}` : ''}.wav`;
           fs.writeFileSync(path.join(dir, filename), parts[i], { flag: 'wx' });
           record.status = 'done'; record.file = filename; record.updatedAt = Date.now();
           recordYue2JointPreview(input.output, record);

@@ -131,3 +131,10 @@ export function classifyYue2Score(abc: string, endReason?: string): Yue2ScoreHea
   }
   return { ...base, verdict: 'healthy', reason: `${bars} bars, ${(vocalShare * 100).toFixed(0)}% vocal, ${distinct} distinct section(s)` };
 }
+
+/** Whether the auto re-plan keeps a plan (generation and training previews
+ *  share it). 'unknown' = no vocal line: for a vocal song that plan renders as
+ *  garble (2026-09-24, Oasis step 140), so it is redrawn like a runaway. */
+export function yue2PlanUsable(verdict: string, instrumental: boolean): boolean {
+  return verdict === 'healthy' || verdict === 'long' || (verdict === 'unknown' && instrumental);
+}

@@ -48,7 +48,7 @@ import { yue2AdapterTrigger } from './jointAdapterContext.js';
 import type { Yue2AdapterScales, Yue2FinalDetail } from './client.js';
 import { yue2Align, yue2Synth, yue2FinalDetail, yue2PropsCached, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
 import { yue2LyricsJson } from './align.js';
-import { classifyYue2Score, type Yue2ScoreHealth } from './scoreHealth.js';
+import { classifyYue2Score, type Yue2ScoreHealth, yue2PlanUsable } from './scoreHealth.js';
 import { yue2PersistedSelection } from './index.js';
 import { applyYue2StyleTemplate, splitYue2Tail, type Yue2StyleTemplate } from './style.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
@@ -595,11 +595,7 @@ ${req.lyrics}`);
         autoReplan.attempts.push({ seed: plan.seed, verdict: plan.health.verdict, reason: plan.health.reason });
         log('INFO', `[YuE2] Plan attempt ${attempt}: seed ${plan.seed}, ${plan.health.verdict} — ${plan.health.reason}`);
         chosen = { abc: plan.abc, seed: plan.seed };
-        // 'unknown' = no vocal line in the score: for a vocal song that plan
-        // renders as garble (2026-09-24, Oasis step 140), so redraw it too.
-        const usable = plan.health.verdict === 'healthy' || plan.health.verdict === 'long'
-          || (plan.health.verdict === 'unknown' && job.params.instrumental === true);
-        if (usable) { autoReplan.accepted = true; break; }
+        if (yue2PlanUsable(plan.health.verdict, job.params.instrumental === true)) { autoReplan.accepted = true; break; }
       }
       if (autoReplan && chosen) {
         req.abc = chosen.abc;
