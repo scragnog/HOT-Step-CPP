@@ -1099,7 +1099,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {runsError && <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{runsError}</p>}
         {availableCheckpoints.length > 0 && <div className="mt-2 flex items-center gap-2 flex-wrap">
           <select className={input} value={selectedCheckpoint} onChange={event => { setSelectedCheckpoint(event.target.value); setApplyNote(''); setPresetLinkNote(''); }}>
-            {availableCheckpoints.map(checkpoint => <option key={checkpoint.dir} value={checkpoint.dir}>step {checkpoint.step}{checkpoint.dir === availableCheckpoints[0]?.dir ? ' (latest)' : ''}</option>)}
+            {/* One group per run: every run for this dataset is listed, and
+                bare "step N" rows from two runs read as stale duplicates (#182). */}
+            {aitkRuns.filter(run => run.checkpoints.some(checkpoint => checkpoint.arPath && checkpoint.narPath)).map(run => (
+              <optgroup key={run.jobId} label={`${new Date(run.createdAt).toLocaleString()} · ${run.live ? 'running' : run.status}`}>
+                {run.checkpoints.filter(checkpoint => checkpoint.arPath && checkpoint.narPath).map(checkpoint => (
+                  <option key={checkpoint.dir} value={checkpoint.dir}>step {checkpoint.step}{checkpoint.dir === availableCheckpoints[0]?.dir ? ' (latest)' : ''}</option>
+                ))}
+              </optgroup>
+            ))}
           </select>
           <button type="button" onClick={() => void applyCheckpoint()} disabled={activeBackendId !== 'yue2' || active || preparing || applyingCheckpoint || yue2RunAllActive || !selectedCheckpoint}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-500/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40 flex items-center gap-1.5">
