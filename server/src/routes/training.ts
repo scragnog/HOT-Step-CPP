@@ -3909,6 +3909,30 @@ router.get('/datasets/:id/yue2-joint-previews', (req: Request, res: Response) =>
   }
 });
 
+/** GET /yue2-review — every refinement ladder (a run with KL-rung
+ * checkpoints) across datasets, with preview and score counts. The
+ * "Awaiting review" page. */
+router.get('/yue2-review', (_req: Request, res: Response) => {
+  try {
+    const rows: Array<Record<string, unknown>> = [];
+    for (const ds of repo.listDatasets()) {
+      const active = queue.activeJobForDataset(ds.id);
+      for (const run of listYue2AitkRuns(ds.id, ds.slug)) {
+        const rungs = run.checkpoints.filter(c => c.rung && c.arPath && c.narPath);
+        if (!rungs.length) continue;
+        const previews = listYue2JointPreviews(run.output).filter(p => p.status === 'done' && rungs.some(r => r.step === p.step));
+        const scored = new Set(listYue2RungScores(ds.id, run.jobId).filter(s => s.likeness !== null || s.corruption !== null || s.notes).map(s => s.step));
+        const kls = rungs.map(r => r.kl).filter((k): k is number => typeof k === 'number');
+        rows.push({ datasetId: ds.id, datasetSlug: ds.slug, datasetName: ds.name, refineRun: run.jobId, status: run.status, createdAt: run.createdAt,
+          live: active?.id === run.jobId, rungs: rungs.length, previews: previews.length, scored: scored.size,
+          unscored: rungs.filter(r => !scored.has(r.step)).length, klMin: kls.length ? Math.min(...kls) : null, klMax: kls.length ? Math.max(...kls) : null });
+      }
+    }
+    rows.sort((a, b) => (b.createdAt as number) - (a.createdAt as number));
+    res.json({ rows });
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
+});
+
 /** Cleanup around a chosen rung (Refine tab): GET the plan with sizes, POST
  * the chosen items. Refused while a job or pipeline is active for the dataset. */
 router.get('/datasets/:id/yue2-cleanup-plan', (req: Request, res: Response) => {

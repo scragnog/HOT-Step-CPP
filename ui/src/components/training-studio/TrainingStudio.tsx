@@ -18,6 +18,7 @@ import { DatasetList } from './DatasetList';
 import { MonitorPanel } from './MonitorPanel';
 import { PhaseStepper } from './PhaseStepper';
 import { RefinePanel } from './RefinePanel';
+import { ReviewPanel } from './ReviewPanel';
 import { PreprocessPanel } from './PreprocessPanel';
 import { TrainPanel } from './TrainPanel';
 import { Yue2QueuePanel } from './Yue2QueuePanel';
@@ -44,11 +45,13 @@ function buildTrainingUrl(datasetId: string | null, phase: TrainingPhase): strin
   if (phase === 'preprocess') return `${TS_BASE}/dataset/${id}/preprocess`;
   if (phase === 'train') return `${TS_BASE}/dataset/${id}/train`;
   if (phase === 'refine') return `${TS_BASE}/dataset/${id}/refine`;
+  if (phase === 'review') return `${TS_BASE}/review`;
   return `${TS_BASE}/dataset/${id}`;
 }
 
-function parseTrainingUrl(path: string): { datasetId?: string; phase?: 'preprocess' | 'train' | 'refine' | 'monitor' } {
+function parseTrainingUrl(path: string): { datasetId?: string; phase?: 'preprocess' | 'train' | 'refine' | 'review' | 'monitor' } {
   if (path.startsWith(`${TS_BASE}/monitor`)) return { phase: 'monitor' };
+  if (path.startsWith(`${TS_BASE}/review`)) return { phase: 'review' };
   const m = path.match(/\/training-studio\/dataset\/([^/]+)(?:\/(preprocess|train|refine))?/);
   if (!m) return {};
   return { datasetId: decodeURIComponent(m[1]), phase: (m[2] as 'preprocess' | 'train' | 'refine') || undefined };
@@ -223,6 +226,8 @@ export const TrainingStudio: React.FC = () => {
           <TrainPanel />
         ) : phase === 'refine' ? (
           <RefinePanel />
+        ) : phase === 'review' ? (
+          <ReviewPanel />
         ) : (
           <MonitorPanel />
         )}

@@ -124,6 +124,7 @@
     "trainingStudio.phase.preprocess": "Preprocess",
     "trainingStudio.phase.train": "Train",
     "trainingStudio.phase.refine": "Refine",
+    "trainingStudio.phase.review": "Review",
     "trainingStudio.phase.monitor": "Monitor",
     "trainingStudio.phase.comingSoon": "Coming in a later update",
     "trainingStudio.empty.title": "No datasets yet",

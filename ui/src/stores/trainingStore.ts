@@ -205,7 +205,7 @@ function clearTimer(key: string): void {
 /** The four top-level phases of the studio (`PhaseStepper`). Exported so the
  *  URL-sync code in `TrainingStudio.tsx` can name it without repeating the
  *  union. */
-export type TrainingPhase = 'dataset' | 'preprocess' | 'train' | 'refine' | 'monitor';
+export type TrainingPhase = 'dataset' | 'preprocess' | 'train' | 'refine' | 'review' | 'monitor';
 
 interface TrainingState {
   // navigation
@@ -367,6 +367,9 @@ interface TrainingState {
 
   // actions
   setPhase(phase: TrainingState['phase']): void;
+  /** The ladder the Refine tab should show next (set by the review page). */
+  refineLadderRun: string;
+  setRefineLadderRun(run: string): void;
   setStep(step: TrainingState['step']): void;
   closeDataset(): void;
   loadCapabilities(): Promise<void>;
@@ -566,6 +569,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   error: null,
 
   setPhase: (phase) => set({ phase }),
+  refineLadderRun: '',
+  setRefineLadderRun: (refineLadderRun) => set({ refineLadderRun }),
   setStep: (step) => set({ step }),
 
   closeDataset: () => set({

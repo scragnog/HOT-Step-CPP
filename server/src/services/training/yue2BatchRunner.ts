@@ -21,9 +21,10 @@ import * as repo from './datasetsRepo.js';
 import * as queue from './labelingQueue.js';
 import { trainingBaseDir } from './paths.js';
 import { listYue2AitkRuns } from './yue2AitkRuns.js';
+import { autoRefineRequest } from './yue2JointTrainRunner.js';
 import { listPreparedCaches } from './preparedDataReset.js';
 
-export type Yue2BatchStage = 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train';
+export type Yue2BatchStage = 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine';
 export type Yue2BatchStatus = 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
 export type Yue2BatchItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -154,7 +155,7 @@ export function startBatch(input: { datasetIds: string[]; lyricTiming: boolean; 
     const ds = repo.getDataset(id);
     if (!ds) return { error: `Dataset not found: ${id}` };
     items.push({ datasetId: ds.id, name: ds.name || ds.slug, status: 'pending', currentStage: null, error: null,
-      stages: stagesFor(input.lyricTiming).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
+      stages: stagesFor(input.lyricTiming, input.recipe.autoRefine !== false).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
   }
   if (!items.length) return { error: 'Select at least one dataset' };
   const recipe: Record<string, unknown> = {};
@@ -212,12 +213,17 @@ export function cancelBatch(id: string): boolean {
 
 // ── The loop ─────────────────────────────────────────────────────────────
 
-function stagesFor(lyricTiming: boolean): Yue2BatchStage[] {
-  return lyricTiming ? ['cache', 'codes', 'sheet', 'stems', 'align', 'train'] : ['cache', 'codes', 'sheet', 'train'];
+function stagesFor(lyricTiming: boolean, refine = true): Yue2BatchStage[] {
+  // The batch owns the chain: train, then the planner refinement with its
+  // rung previews, then the next dataset. The run-level auto-refine hook is
+  // switched off for batch runs so nothing fires twice.
+  const base: Yue2BatchStage[] = lyricTiming ? ['cache', 'codes', 'sheet', 'stems', 'align', 'train'] : ['cache', 'codes', 'sheet', 'train'];
+  return refine ? [...base, 'refine'] : base;
 }
 
 const STAGE_PATH: Record<Yue2BatchStage, string> = {
   cache: 'yue2-preprocess', codes: 'yue2-tokenize', sheet: 'yue2-sheet', stems: 'yue2-stems', align: 'yue2-align', train: 'yue2-joint-train',
+  refine: 'yue2-joint-train',
 };
 
 async function runBatch(state: BatchState): Promise<void> {
@@ -323,8 +329,15 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
       return st.stages.align.done ? null : {};
     }
     case 'train': return { ...state.recipe, trainingMethod: 'aitk', autoPrepare: true, checkpoint: '', dataset: '', output: '',
-      lyricTiming: state.lyricTiming, alignmentEnabled: state.lyricTiming,
+      lyricTiming: state.lyricTiming, alignmentEnabled: state.lyricTiming, autoRefine: false,
       ...(state.lyricTiming ? {} : { cursorWeight: 0 }) };
+    case 'refine': {
+      const trainJob = item.stages.find(s => s.stage === 'train')?.jobId;
+      const run = trainJob ? listYue2AitkRuns(item.datasetId).find(r => r.jobId === trainJob) : undefined;
+      const last = run?.checkpoints.filter(c => !!c.optimizerPath && c.arPath && c.narPath).sort((a, b) => b.step - a.step)[0];
+      if (!run || !last) throw new Error('No resumable checkpoint from the training stage to refine');
+      return autoRefineRequest(run.jobId, last.step);
+    }
   }
 }
 

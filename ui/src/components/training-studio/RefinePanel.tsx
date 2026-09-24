@@ -38,7 +38,11 @@ export const RefinePanel: React.FC = () => {
   const [parallel, setParallel] = useState(true);
   const [lrScale, setLrScale] = useState(0.1);
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
+  const wantedLadder = useTrainingStore(s => s.refineLadderRun);
+  const setWantedLadder = useTrainingStore(s => s.setRefineLadderRun);
   const [ladderRun, setLadderRun] = useState('');
+  // The review page hands over a ladder to show; take it once.
+  useEffect(() => { if (wantedLadder) { setLadderRun(wantedLadder); setWantedLadder(''); } }, [wantedLadder]);
   const [previews, setPreviews] = useState<Yue2JointPreviewRecord[]>([]);
   const [rendering, setRendering] = useState<number | null>(null);
   const [error, setError] = useState('');

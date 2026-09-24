@@ -2446,6 +2446,12 @@ export async function listYue2JointPreviews(
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews${query}`);
 }
 
+/** Awaiting review: refinement ladders across datasets with score counts. */
+export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null }
+export async function listYue2Review(): Promise<{ rows: Yue2ReviewRow[] }> {
+  return request('/yue2-review');
+}
+
 /** Cleanup around a chosen refinement rung. */
 export interface Yue2CleanupItem { count: number; bytes: number; detail?: string[] }
 export interface Yue2CleanupPlan { run: string; step: number; keep: string; caches: Yue2CleanupItem; otherCheckpoints: Yue2CleanupItem; otherRuns: Yue2CleanupItem; resume: Yue2CleanupItem; otherPreviews: Yue2CleanupItem }
@@ -2894,7 +2900,7 @@ export async function resumePipeline(id: string): Promise<void> {
 }
 
 // ── YuE2 batch (server-owned, resumable) ───────────────────────────────
-export type Yue2BatchStage = 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train';
+export type Yue2BatchStage = 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine';
 export type Yue2BatchItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 export interface Yue2BatchStageResult { stage: Yue2BatchStage; jobId: string; status: Yue2BatchItemStatus; error: string | null; startedAt: number | null; finishedAt: number | null }
 export interface Yue2BatchItem { datasetId: string; name: string; status: Yue2BatchItemStatus; currentStage: Yue2BatchStage | null; stages: Yue2BatchStageResult[]; error: string | null }

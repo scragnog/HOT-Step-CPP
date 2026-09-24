@@ -116,7 +116,7 @@ export interface ResolvedYue2JointTrainOptions {
 
 /** The Refine tab's defaults, as one request body. Kept here so the
  *  automatic chain and the tab start the same job. */
-function autoRefineRequest(sourceJobId: string, lastStep: number): Record<string, unknown> {
+export function autoRefineRequest(sourceJobId: string, lastStep: number): Record<string, unknown> {
   return { trainingMethod: 'aitk', refinePlanner: true, resumeRunId: sourceJobId, resumeStep: lastStep,
     steps: lastStep + 1000, stopMode: 'kl', targetKl: 2.0, klCheckpointEvery: 0.1, refineLrScale: 0.1,
     stopEngine: false, spikeFactor: 5, spikeStop: 3, spikeStopWindow: 20, autoPrepare: false, checkpoint: '', output: '',
