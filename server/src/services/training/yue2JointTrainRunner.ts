@@ -432,8 +432,10 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
       const state: RelayState = { fatalMessage: '', doneSeen: false, lastStep: step, targetStopped: false, totalSteps: o.steps };
       // A target-loss stop ends the run early: the engine checkpoints the
       // last completed step, so the validator must accept that step, not o.steps.
-      const wanted = () => state.targetStopped && state.lastStep > step
-        ? state.lastStep : (pauseAt > 0 && pauseAt < o.steps ? pauseAt : o.steps);
+      // An engine-initiated pause (a KL rung) checkpoints wherever it lands.
+      const wanted = () => state.pausedAt && state.pausedAt < o.steps ? state.pausedAt
+        : state.targetStopped && state.lastStep > step
+          ? state.lastStep : (pauseAt > 0 && pauseAt < o.steps ? pauseAt : o.steps);
       nativeAttempted = true;
       await runYue2AceTrain(job, 'yue2-joint-train', buildYue2JointTrainArgs(segment),
         Math.max(30 * 60 * 1000, (o.steps - step) * 10 * 60 * 1000), () => {
