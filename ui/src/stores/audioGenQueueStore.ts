@@ -750,6 +750,10 @@ async function _notifySongCreated(songId: string): Promise<void> {
         if (mastered && !item.masteredAudioUrl) { item.masteredAudioUrl = mastered; dirty = true; }
         const noAdapter = song.noAdapterAudioUrl || (song as any).noadapter_audio_url;
         if (noAdapter && !item.noAdapterAudioUrl) { item.noAdapterAudioUrl = noAdapter; dirty = true; }
+        // The raw render too: a job result that reported the master as its audio
+        // would otherwise leave both sides of the switch on the same file.
+        const raw = song.audioUrl || (song as any).audio_url;
+        if (raw && raw !== item.audioUrl) { item.audioUrl = raw; dirty = true; }
         // Per-take length, from the row that measured it off the WAV header.
         const dur = Number(song.duration);
         if (Number.isFinite(dur) && dur > 0 && dur !== item.audioDuration) {

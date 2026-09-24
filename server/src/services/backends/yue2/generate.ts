@@ -948,7 +948,12 @@ ${req.lyrics}`);
     job.progress = 100;
     job.stage = 'Complete!';
     job.result = {
-      audioUrls: audioUrls.map((u, i) => masteredUrls[i] || u),
+      // Raw renders, with the masters index-aligned beside them — the ACE shape.
+      // Folding the master into audioUrls left the playbar's unmastered switch
+      // pointing at the mastered file.
+      audioUrls,
+      masteredAudioUrl: masteredUrls.find(u => !!u) || undefined,
+      masteredAudioUrls: audioUrls.map((_, i) => masteredUrls[i] || ''),
       songIds,
       duration: durations[0] > 0 ? Math.round(durations[0]) : 0,
       timing,

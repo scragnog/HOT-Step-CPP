@@ -317,6 +317,9 @@ function outcomeFromJob(job: GenerationJob): GenerationOutcome {
   const artifacts: GenerationArtifact[] = (result?.audioUrls ?? []).map((url, trackIndex) => ({
     kind: 'audio', trackIndex, url,
   }));
+  (result?.masteredAudioUrls ?? []).forEach((url, trackIndex) => {
+    if (url) artifacts.push({ kind: 'mastered', trackIndex, url });
+  });
   return {
     endReason: job.status === 'succeeded' ? 'completed' : job.status === 'cancelled' ? 'cancelled' : 'failed',
     stages: result?.timing ?? [],
