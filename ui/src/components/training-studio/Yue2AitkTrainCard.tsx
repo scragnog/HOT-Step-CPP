@@ -129,7 +129,7 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // under Prodigy (base_lr is gamma = 1.0); the planner scale still applies,
   // now on top of d. The pre-fix Prodigy history — "learns too fast,
   // corrupts the AR" — was the missing bias correction, not the optimizer.
-  steps: 750, saveEvery: 25, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
+  steps: 500, saveEvery: 25, seed: 42, device: 'CUDA0', lyricTiming: true, cursorWeight: 0.08,
   // Cautious on (2026-09-23, Rob's call after the limpbizkit A/B).
   optimizer: 'prodigy', cautious: true, prodigyD0: 1e-6, muonLrScale: 1, muonNsSteps: 5,
   // LoKr 64/4/256 (2026-09-22, Rob's pick after the size sweep): scale
@@ -140,7 +140,9 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // both halves; KL 1.0 with the planner at 0.6 and the decoder at 1.0 is the
   // tested recipe. LoRA keeps KL 1.4 with the planner at 0.3 (LORA_STOP).
   // Trend (2026-09-22): the 20-step mean lagged the KL trend by ~10 steps.
-  stopMode: 'kl', targetKl: 1.1, targetKlMode: 'trend', lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
+  // Presets (2026-09-24, Rob): Balanced is the default. The KL target stops
+  // the planner; the decoder trains on to the step cap.
+  stopMode: 'kl', targetKl: 1.2, targetKlMode: 'trend', lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
   // Planner freeze (2026-09-23): the KL target used to end the whole run, so
   // the decoder, which carries timbre, stopped wherever the planner did. The
   // checkpoint-mix ear test (AR200+NAR150 over AR200+NAR100) said the decoder
@@ -148,7 +150,7 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // more steps; the KL checkpoint is still saved, so the old stop point is
   // one of the rungs. Caption dropout 0.5: the measured recipe, so a new
   // caption lands on the artist rather than beside one memorised track.
-  narExtraSteps: 100, captionDropout: 0.5,
+  narExtraSteps: 500, captionDropout: 0.5,
   // Spike guard (2026-09-23): an RBF decoder collapsed after two gradient
   // spikes (norm 3 and 7 against a 0.2 median) at step 298. Skip any update
   // above 5x the recent median; three skips within 20 steps ends the run on
@@ -156,7 +158,17 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   spikeFactor: 5, spikeStop: 3, spikeStopWindow: 20,
 };
 const LORA_STOP = { targetKl: 1.4, plannerLrScale: 0.3, narLrScale: undefined };
-const LOKR_STOP = { targetKl: 1.1, plannerLrScale: 0.6, narLrScale: 1 };
+const LOKR_STOP = { targetKl: 1.2, plannerLrScale: 0.6, narLrScale: 1 };
+// Training presets (2026-09-24). The planner stops at the KL target and
+// freezes; the decoder keeps training until the step cap (narExtraSteps =
+// cap, so it never ends the run before the cap does).
+const PRESETS = [
+  { key: 'fast', label: 'Fast', targetKl: 0.8, steps: 300 },
+  { key: 'balanced', label: 'Balanced', targetKl: 1.2, steps: 500 },
+  { key: 'thorough', label: 'Thorough', targetKl: 1.6, steps: 700 },
+] as const;
+const presetValues = (p: typeof PRESETS[number]) => ({ stopMode: 'kl' as const, targetKl: p.targetKl, steps: p.steps, narExtraSteps: p.steps });
+const activePreset = (f: Yue2JointTrainRequest) => PRESETS.find(p => (f.stopMode ?? 'steps') === 'kl' && f.targetKl === p.targetKl && f.steps === p.steps && f.narExtraSteps === p.steps)?.key;
 type PrepareForm = Yue2AitkPrepareRequest;
 
 function defaultPreview(everySteps: number): Yue2JointPreviewOptions {
@@ -279,6 +291,12 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     if (stored.narExtraSteps === undefined) stored.narExtraSteps = DEFAULT_FORM.narExtraSteps;
     if (stored.captionDropout === undefined) stored.captionDropout = DEFAULT_FORM.captionDropout;
     window.localStorage.setItem(freeze, '1');
+  }
+  // Presets (2026-09-24): stored forms move to Balanced once.
+  const presets = `${FORM_KEY}${datasetId}:defaults-presets`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(presets)) {
+    Object.assign(stored, presetValues(PRESETS[1]));
+    window.localStorage.setItem(presets, '1');
   }
   const spike = `${FORM_KEY}${datasetId}:defaults-spike-guard`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(spike)) {
@@ -855,7 +873,19 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {preparing && <button type="button" onClick={() => void stopPrepare()} className="ml-3 text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
         {prepareJob?.error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{prepareJob.error}</div>}
       </details>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.preset', 'Preset')}</span>
+        {PRESETS.map(p => <button key={p.key} type="button" disabled={active || starting || preparing || yue2RunAllActive}
+          onClick={() => setForm(previous => ({ ...previous, ...presetValues(p) }))}
+          className={`px-3 py-1 rounded-lg text-xs font-semibold border disabled:opacity-40 ${activePreset(form) === p.key
+            ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
+            : 'border-zinc-300/70 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10'}`}>
+          {t(`trainingStudio.yue2.method.preset_${p.key}`, p.label)}
+          <span className="ml-1 font-normal text-zinc-500">KL {p.targetKl} · {p.steps}</span>
+        </button>)}
+        {!activePreset(form) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
         {!resumeChoice && <details className="md:col-span-2"><summary className="cursor-pointer text-[11px] text-zinc-500">Manual resume path</summary>{field(t('trainingStudio.yue2.method.resume', 'Resume record (optional)'), 'resume')}</details>}
         <label className="flex flex-col gap-1">
           <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.stopMode', 'Train until')}</span>
@@ -910,7 +940,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number')}
       </div>
       {(form.adapterType ?? 'lora') === 'lokr' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.lokrHint', 'LoKr trains a Kronecker-factored delta per site instead of a low-rank pair. Strength is alpha / dim; 4x (64 / 4 / 256, about 106 MB for both halves) is the tested default, against 279 MB for the rank-64 LoRA. For more capacity raise dim and keep alpha at 4x dim; at factor 4 stay below dim 256, where some sites stop factorizing and ignore alpha.')}</p>}
-      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 1.0. Once the KL reading reaches the target the planner freezes there. With "Decoder steps after KL" above 0, the decoder (timbre, where likeness lives) keeps training alone for that many steps; 0 ends the run at the KL, as before. The KL checkpoint is saved either way. Max steps is the cap.')}</p>}
+      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 1.0. Once the KL reading reaches the target the planner freezes there. With "Decoder steps after KL" above 0, the decoder (timbre, where likeness lives) keeps training alone for that many steps; 0 ends the run at the KL, as before. The KL checkpoint is saved either way. Max steps is the cap. The presets set the KL target and let the decoder run to the cap: Fast 0.8 / 300, Balanced 1.2 / 500, Thorough 1.6 / 700.')}</p>}
       {(form.stopMode ?? 'steps') === 'loss' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetLossHint', 'Composite = AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight. Training stops once the trailing 20-step mean is at or below this.')}</p>}
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         {resumeChoice ? <p className="text-xs text-zinc-500">Optimizer: {form.optimizer ?? 'adamw'} (restored from the selected run)</p>
