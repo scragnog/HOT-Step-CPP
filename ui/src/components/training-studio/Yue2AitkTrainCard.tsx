@@ -355,10 +355,16 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [presets, setPresets] = useState<Yue2JointPreset[]>(() => readStored<Yue2JointPreset[]>(YUE2_JOINT_PRESETS_KEY, []));
   const [presetName, setPresetName] = useState('');
   const [presetError, setPresetError] = useState('');
-  const [prepare, setPrepare] = useState<PrepareForm>(() => readStored(`${PREP_KEY}${datasetId}`, {
-    legacyManifest: legacyManifest ?? '', checkpoint: '', tokenizer: '', output: '',
-    models: { vae: '', semantic: '', sheetsage: '' },
-  }));
+  // The saved form, with the dataset's own manifest over whatever was saved:
+  // a saved path that differs came from another dataset and trained its album.
+  const readPrepare = (): PrepareForm => {
+    const saved = readStored<PrepareForm>(`${PREP_KEY}${datasetId}`, {
+      legacyManifest: legacyManifest ?? '', checkpoint: '', tokenizer: '', output: '',
+      models: { vae: '', semantic: '', sheetsage: '' },
+    });
+    return legacyManifest ? { ...saved, legacyManifest } : saved;
+  };
+  const [prepare, setPrepare] = useState<PrepareForm>(readPrepare);
   const [prepareJob, setPrepareJob] = useState<TrainingJobSummary | null>(null);
   const [prepareManifest, setPrepareManifest] = useState('');
   const [appliedPrepareJobId, setAppliedPrepareJobId] = useState(() => readStored<string>(`${PREP_KEY}${datasetId}:applied`, ''));
@@ -444,8 +450,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [jointPreviews, setJointPreviews] = useState<Yue2JointPreviewRecord[]>([]);
 
   useEffect(() => {
-    // The dataset's own manifest always wins. A saved value that differs came
-    // from another dataset (the status-switch race), and trained the wrong album.
+    // The dataset's own manifest always wins, including when it arrives late.
     if (legacyManifest && prepare.legacyManifest !== legacyManifest) {
       setPrepare(previous => ({ ...previous, legacyManifest }));
     }
@@ -580,10 +585,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   useEffect(() => {
     setForm(readStoredForm(datasetId));
     setResumeChoice('');
-    setPrepare(readStored<PrepareForm>(`${PREP_KEY}${datasetId}`, {
-      legacyManifest: legacyManifest ?? '', checkpoint: '', tokenizer: '', output: '',
-      models: { vae: '', semantic: '', sheetsage: '' },
-    }));
+    setPrepare(readPrepare());
     setPrepareManifest(readStored<string>(`${PREP_KEY}${datasetId}:manifest`, ''));
     setJob(null);
     setPrepareJob(null);
