@@ -132,9 +132,33 @@ static std::vector<Yue2CtcSpan> yue2_ctc_merge_tokens(const std::vector<int> & t
     return out;
 }
 
+// MMS_FA reads romanised text only (its 28 labels are a-z, ' and *), which is
+// what upstream feeds it through uroman. Cyrillic letters get uroman's
+// romanisation here so Russian, Ukrainian and Belarusian lyrics align instead
+// of dropping out as "no alignable characters". Only the CTC targets change:
+// the char spans stay codepoint offsets into the original lyrics.
+static const char * yue2_romanize_cyrillic(uint32_t cp) {
+    static const char * const lower[32] = {
+        "a", "b", "v", "g", "d", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p",
+        "r", "s", "t", "u", "f", "kh", "ts", "ch", "sh", "shch", "", "y", "", "e", "yu", "ya",
+    };
+    if (cp >= 0x0410 && cp <= 0x042F) return lower[cp - 0x0410];
+    if (cp >= 0x0430 && cp <= 0x044F) return lower[cp - 0x0430];
+    switch (cp) {
+        case 0x0401: case 0x0451: return "yo";   // Ё ё
+        case 0x0404: case 0x0454: return "ye";   // Є є
+        case 0x0406: case 0x0456: return "i";    // І і
+        case 0x0407: case 0x0457: return "yi";   // Ї ї
+        case 0x040E: case 0x045E: return "u";    // Ў ў
+        case 0x0490: case 0x0491: return "g";    // Ґ ґ
+        default: return nullptr;
+    }
+}
+
 // cursor_prep.py's words_of(): (char0, char1, normalised word) per word, char
 // offsets in CODEPOINTS into the lyrics string, skipping [Section] lines.
-// Normalisation: lowercase, U+2019 -> ', keep [a-z'], drop if no letter.
+// Normalisation: lowercase, U+2019 -> ', Cyrillic romanised, keep [a-z'],
+// drop if no letter.
 struct Yue2LyricWord {
     int64_t     c0 = 0, c1 = 0;  // codepoint span in the original lyrics
     std::string norm;            // [a-z'] only
@@ -176,6 +200,9 @@ static std::vector<Yue2LyricWord> yue2_cursor_words_of(const std::string & lyric
                         if (len == 1) {
                             char lc = (char) ((c >= 'A' && c <= 'Z') ? c + 32 : c);
                             if ((lc >= 'a' && lc <= 'z') || lc == '\'') norm.push_back(lc);
+                        } else if (len == 2) {
+                            const uint32_t cp = ((uint32_t) (c & 0x1F) << 6) | ((unsigned char) line[i + 1] & 0x3F);
+                            if (const char * latin = yue2_romanize_cyrillic(cp)) norm += latin;
                         } else if (len == 3 && c == 0xE2 && (unsigned char) line[i + 1] == 0x80 &&
                                    (unsigned char) line[i + 2] == 0x99) {
                             norm.push_back('\'');  // U+2019 -> '
