@@ -746,6 +746,30 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       setError(err instanceof Error ? err.message : String(err));
     } finally { setStarting(false); }
   };
+  // Refinement: the finished run's decoder trains on, planner frozen, with
+  // checkpoints every 10 steps so the reconstruction stop lands near the knee.
+  // A new run beside the original; the original is never touched. The
+  // planner stays frozen: it is the sensitive half (late-song decay past its
+  // KL), the decoder is where likeness keeps improving.
+  const [refineRun, setRefineRun] = useState('');
+  const [refineBudget, setRefineBudget] = useState(500);
+  const refine = async () => {
+    const run = aitkRuns.find(r => r.jobId === refineRun);
+    const last = run?.checkpoints.filter(c => !!c.optimizerPath).sort((a, b) => b.step - a.step)[0];
+    if (!run || !last) return;
+    setStarting(true); setError('');
+    try {
+      const result = await startYue2JointTrain(datasetId, { ...form, trainingMethod: 'aitk', refine: true,
+        resumeRunId: run.jobId, resumeStep: last.step, steps: last.step + refineBudget, saveEvery: 10,
+        stopMode: 'kl', narExtraSteps: refineBudget, freezePlannerNow: true,
+        reconStop: form.reconStop ?? DEFAULT_FORM.reconStop, reconStopWindow: 5,
+        lyricTiming, alignmentEnabled: lyricTiming, autoPrepare: false, checkpoint: '', output: '' } as Yue2JointTrainRequest);
+      if (typeof window !== 'undefined') window.localStorage.setItem(`${JOB_KEY}${datasetId}`, JSON.stringify(result.jobId));
+      setJob(await getJob(result.jobId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally { setStarting(false); }
+  };
   const stop = async () => {
     if (!job) return;
     setError('');
@@ -884,6 +908,31 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </select>
       </label>
       {resumeChoice && <p className="mt-1 text-[11px] text-zinc-500">The server restores the original dataset, base, optimizer and adapter settings. Set Steps to the total step you want to reach.</p>}
+      <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+        <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.refineTitle', 'Refine a finished adapter')}</div>
+        <p className="text-[11px] text-zinc-500 mt-1">{t('trainingStudio.yue2.method.refineHint', 'Trains the decoder on from where the run ended, planner frozen, with a checkpoint every 10 steps; the reconstruction stop ends it at the knee or at the budget. Writes a new run beside the original.')}</p>
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1 min-w-[260px] flex-1">
+            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.refineRun', 'Finished run')}</span>
+            <select className={input} value={refineRun} disabled={active || preparing || starting || yue2RunAllActive} onChange={event => setRefineRun(event.target.value)}>
+              <option value="">{t('trainingStudio.yue2.method.refinePick', 'Pick a run')}</option>
+              {aitkRuns.filter(run => !run.live && !run.resumeError && run.checkpoints.some(c => !!c.optimizerPath)).map(run => {
+                const last = run.checkpoints.filter(c => !!c.optimizerPath).sort((a, b) => b.step - a.step)[0];
+                return <option key={run.jobId} value={run.jobId}>{new Date(run.createdAt).toLocaleString()} · to step {last.step} · {run.status}</option>;
+              })}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 w-28">
+            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.refineBudget', 'Max extra steps')}</span>
+            <input className={input} type="number" min={10} step={10} value={refineBudget} disabled={active || preparing || starting || yue2RunAllActive}
+              onChange={event => setRefineBudget(Math.max(10, Math.round(Number(event.target.value) || 0)))} />
+          </label>
+          <button type="button" onClick={() => void refine()} disabled={!refineRun || active || preparing || starting || yue2RunAllActive}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-500/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40">
+            {t('trainingStudio.yue2.method.refineStart', 'Refine decoder')}
+          </button>
+        </div>
+      </div>
       <details className="mt-4 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-3">
         <summary className="cursor-pointer text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.autoPrepareAdvanced', 'Advanced: dataset preparation and model paths')}</summary>
         <p className="text-[11px] text-zinc-500 mt-1">{t('trainingStudio.yue2.method.autoPrepareHint', 'Preparation runs automatically at the start of training. These controls are only needed for custom paths, manual preparation or resuming a run.')}</p>

@@ -3381,7 +3381,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       b = { ...saved, trainingMethod: 'aitk', autoPrepare: false,
         checkpoint: saved.checkpoint, dataset: saved.dataset, output: '',
         resume: selected.optimizerPath,
-        steps: b.steps, saveEvery: saved.saveEvery,
+        steps: b.steps, saveEvery: b.refine === true && Number.isInteger(Number(b.saveEvery)) && Number(b.saveEvery) > 0 ? Number(b.saveEvery) : saved.saveEvery,
         stopMode: b.stopMode ?? saved.stopMode, targetLoss: b.targetLoss ?? saved.targetLoss, targetKl: b.targetKl ?? saved.targetKl,
         targetKlMode: b.targetKlMode ?? saved.targetKlMode,
         narExtraSteps: b.narExtraSteps ?? saved.narExtraSteps,
@@ -3390,6 +3390,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         // Freeze the resumed checkpoint's planner: a stop decided outside the
         // trainer (a plan sweep on the checkpoints). Never inherited from the run.
         ...(b.freezePlannerNow === true ? { freezePlannerNow: true } : {}),
+        ...(b.refine === true ? { refine: true } : {}),
         spikeFactor: b.spikeFactor ?? saved.spikeFactor, spikeStop: b.spikeStop ?? saved.spikeStop,
         spikeStopWindow: b.spikeStopWindow ?? saved.spikeStopWindow,
         reconStop: b.reconStop ?? saved.reconStop, reconStopWindow: b.reconStopWindow ?? saved.reconStopWindow,
@@ -3655,6 +3656,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...spike,
       ...(planCheck ? { planCheck } : {}),
       ...(resume && b.freezePlannerNow === true ? { freezePlannerNow: true } : {}),
+      ...(resume && b.refine === true ? { reconReset: true } : {}),
       ...advanced,
       ...(preparation ? { preparation } : {}),
     });

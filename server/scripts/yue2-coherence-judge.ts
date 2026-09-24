@@ -3,7 +3,11 @@
 // vanish, smear) should show as the last third's match rate and word rate
 // falling away from the first third's. Rob's idea (2026-09-24).
 //
-//   npx tsx server/scripts/yue2-coherence-judge.ts <study dir> [--only <group>]
+//   npx tsx server/scripts/yue2-coherence-judge.ts <study dir> [--only <group>] [--stems]
+//
+// --stems: whisper the SuperSep vocal stem (engine level 4, cached beside the
+// track) instead of the mix, and write judge-stems.json. Rob's suggestion:
+// whisper on the mix hears nothing on loud tracks.
 //
 // Reads <study>/study.json (tracks with file + group), the group's
 // config.json (lyrics), writes <study>/judge.json {trackId: metrics} and, if
@@ -16,8 +20,38 @@ import { transcribeWithWhisper, stripSectionMarkers } from '../src/services/whis
 const study = process.argv[2];
 const onlyIx = process.argv.indexOf('--only');
 const only = onlyIx > 0 ? process.argv[onlyIx + 1] : '';
+const useStems = process.argv.includes('--stems');
+const ACE_URL = 'http://127.0.0.1:8085';
+
+/** The vocal stem of `wav` through the engine's SuperSep (vocals-only level),
+ *  cached at `<dir>/stems/<name>.vocals.wav`. Mirrors yue2Stems.separateOne. */
+async function vocalStem(wav: string): Promise<string> {
+  const out = path.join(path.dirname(wav), 'stems', path.basename(wav, '.wav') + '.vocals.wav');
+  if (fs.existsSync(out) && fs.statSync(out).size > 0) return out;
+  const started = await fetch(`${ACE_URL}/supersep/separate?level=4`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: fs.readFileSync(wav) });
+  if (!started.ok) throw new Error(`separate: ${await started.text()}`);
+  const { id } = await started.json() as { id: string };
+  try {
+    for (let i = 0; i < 2400; i++) {
+      const p = await (await fetch(`${ACE_URL}/supersep/progress?id=${id}`)).json() as { status: string; error?: string };
+      if (p.status === 'done') break;
+      if (p.status === 'failed' || p.status === 'cancelled') throw new Error(p.error || `separation ${p.status}`);
+      await new Promise(r => setTimeout(r, 500));
+    }
+    const { stems } = await (await fetch(`${ACE_URL}/supersep/result?id=${id}`)).json() as { stems: Array<{ name: string; index: number }> };
+    const vocal = stems.find(s => ['vocals', 'vocal', 'lead vocals', 'lead_vocals'].includes(s.name.trim().toLowerCase()));
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    if (!vocal) { fs.writeFileSync(out, ''); return out; }  // no singing found: an empty marker
+    const got = await fetch(`${ACE_URL}/supersep/serve?id=${id}&stem=${vocal.index}`);
+    if (!got.ok) throw new Error(`serve: stem ${vocal.index}`);
+    fs.writeFileSync(out, Buffer.from(await got.arrayBuffer()));
+    return out;
+  } finally {
+    await fetch(`${ACE_URL}/supersep/release?id=${id}`, { method: 'POST' }).catch(() => {});
+  }
+}
 const doc = JSON.parse(fs.readFileSync(path.join(study, 'study.json'), 'utf8')) as { tracks: Array<{ id: string; group: string; file: string; label: string }> };
-const judgePath = path.join(study, 'judge.json');
+const judgePath = path.join(study, useStems ? 'judge-stems.json' : 'judge.json');
 const judged: Record<string, Metrics> = fs.existsSync(judgePath) ? JSON.parse(fs.readFileSync(judgePath, 'utf8')) : {};
 
 interface Metrics { seconds: number; words: number; match: number; rate: number; thirds: Array<{ match: number; rate: number }>; lateMatch: number; lateRate: number }
@@ -44,7 +78,11 @@ for (const t of doc.tracks) {
   const vocab = lyricsFor[t.group];
   const seconds = wavSeconds(wav);
   const t0 = Date.now();
-  const r = await transcribeWithWhisper(wav, '', { language: 'en', beamSize: 5 });
+  let source = wav;
+  if (useStems) {
+    try { source = await vocalStem(wav); } catch (err) { console.log(`${t.id}: stems failed: ${(err as Error).message}`); continue; }
+  }
+  const r = source && fs.statSync(source).size > 0 ? await transcribeWithWhisper(source, '', { language: 'en', beamSize: 5 }) : null;
   const words = (r?.segments ?? []).flatMap(s => s.words?.length ? s.words : [{ word: s.text, start: s.start, end: s.end, probability: 1 }])
     .flatMap(w => norm(w.word).map(x => ({ w: x, t: w.start })));
   const thirds = [0, 1, 2].map(k => {

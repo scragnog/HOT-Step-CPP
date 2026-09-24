@@ -127,6 +127,10 @@ struct Config {
     // (Steel Panther 300/425/500: subtle, diminishing returns past the knee).
     float recon_stop = 0.0f;
     std::int32_t recon_stop_window = 3;
+    // With --resume: start the reconstruction window empty instead of the
+    // record's. A refinement pass resumes a run that may have ENDED on the
+    // recon stop; its old readings would fire the stop again at once.
+    bool recon_reset = false;
 };
 
 enum class ParseResult { ok, help, error };
@@ -145,7 +149,7 @@ inline void usage(FILE * out) {
         "[--nar-extra-steps N (with --target-kl: freeze the planner at its KL, train the decoder N more steps)] "
         "[--nar-drift (log the decoder's drift from base and its reconstruction error at every checkpoint)] "
         "[--meter-only (with --resume: write the checkpoint's meters.json and exit)] "
-        "[--recon-stop F (planner frozen: stop when the reconstruction meter improves under F over --recon-stop-window 3 checkpoints)] "
+        "[--recon-stop F (planner frozen: stop when the reconstruction meter improves under F over --recon-stop-window 3 checkpoints)] [--recon-reset (with --resume: empty window)] "
         "[--freeze-planner-now (with --resume and --nar-extra-steps: freeze the planner at the resumed step)] "
         "[--spike-factor F (skip updates above F x median gradient norm; 0 = off)] [--spike-stop N (stop after N skips)] [--spike-stop-window 20]\n");
 }
@@ -327,6 +331,8 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.recon_stop) || parsed.recon_stop < 0.0f || parsed.recon_stop >= 1.0f) { if (error) *error = "--recon-stop must be a fraction in [0, 1)"; return ParseResult::error; }
             if (parsed.recon_stop > 0.0f) parsed.nar_drift = true;
+        } else if (!std::strcmp(arg, "--recon-reset")) {
+            parsed.recon_reset = true;
         } else if (!std::strcmp(arg, "--recon-stop-window")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::decimal_i32(text.c_str(), &parsed.recon_stop_window) || parsed.recon_stop_window < 1) { if (error) *error = "--recon-stop-window must be a positive integer"; return ParseResult::error; }

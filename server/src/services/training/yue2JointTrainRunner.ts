@@ -88,6 +88,9 @@ export interface ResolvedYue2JointTrainOptions {
    *  fraction) over the last reconStopWindow checkpoints. 0/absent = off. */
   reconStop?: number;
   reconStopWindow?: number;
+  /** Refinement: resume with the reconstruction window empty (the run may
+   *  have ended on the recon stop; its readings would fire it again). */
+  reconReset?: boolean;
   /** Plan-check planner stop: every `every` steps while the planner is live,
    *  pause, have the checkpoint's planner write `plans` plans, and freeze the
    *  planner at the LAST checkpoint whose failure rate stayed within `margin`
@@ -148,6 +151,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
     args.push('--recon-stop', String(o.reconStop));
     if (o.reconStopWindow !== undefined) args.push('--recon-stop-window', String(o.reconStopWindow));
   }
+  if (o.resume && o.reconReset) args.push('--recon-reset');
   if (o.resume) args.push('--resume', o.resume);
   if (o.resume && o.freezePlannerNow) args.push('--freeze-planner-now');
   if (o.alignment) {
