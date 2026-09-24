@@ -871,7 +871,13 @@ function yue2LmAdapterCatalogue(): {
       if (!ckpt.arPath || !ckpt.narPath) continue;
       const configuredSteps = Number(run.options.steps);
       const final = Number.isFinite(configuredSteps) && configuredSteps > 0 && ckpt.step === configuredSteps;
-      const runName = `AITK · ${run.datasetSlug || run.datasetId || run.jobId}`;
+      // Several runs of one dataset list the same steps: name the run by its
+      // start time (the output folder's suffix), schedule and refinement.
+      const started = /_(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-\d{2}$/.exec(path.basename(run.output));
+      const runName = [`AITK · ${run.datasetSlug || run.datasetId || run.jobId}`,
+        started ? `${started[2]}-${started[3]} ${started[4]}:${started[5]}` : '',
+        typeof run.options.lrSchedule === 'string' ? run.options.lrSchedule : '',
+        run.options.refinePlanner === true ? 'refine' : ''].filter(Boolean).join(' · ');
       const add = (kind: Yue2LmAdapterKind, ref: string): void => {
         const abs = path.resolve(ref);
         const fileMeta = readSafetensorsMeta(abs);

@@ -590,13 +590,17 @@ ${req.lyrics}`);
         autoReplan.attempts.push({ seed: plan.seed, verdict: plan.health.verdict, reason: plan.health.reason });
         log('INFO', `[YuE2] Plan attempt ${attempt}: seed ${plan.seed}, ${plan.health.verdict} — ${plan.health.reason}`);
         chosen = { abc: plan.abc, seed: plan.seed };
-        if (plan.health.verdict !== 'runaway') { autoReplan.accepted = true; break; }
+        // 'unknown' = no vocal line in the score: for a vocal song that plan
+        // renders as garble (2026-09-24, Oasis step 140), so redraw it too.
+        const usable = plan.health.verdict === 'healthy' || plan.health.verdict === 'long'
+          || (plan.health.verdict === 'unknown' && job.params.instrumental === true);
+        if (usable) { autoReplan.accepted = true; break; }
       }
       if (autoReplan && chosen) {
         req.abc = chosen.abc;
         req.seed = chosen.seed;
-        if (!autoReplan.accepted) log('WARNING', `[YuE2] Every plan attempt was a runaway; rendering the last one (seed ${chosen.seed})`);
-        else if (autoReplan.attempts.length > 1) log('INFO', `[YuE2] Runaway plan replaced after ${autoReplan.attempts.length} attempts`);
+        if (!autoReplan.accepted) log('WARNING', `[YuE2] Every plan attempt was a runaway or had no vocal line; rendering the last one (seed ${chosen.seed})`);
+        else if (autoReplan.attempts.length > 1) log('INFO', `[YuE2] Bad plan replaced after ${autoReplan.attempts.length} attempts`);
       }
     }
 
