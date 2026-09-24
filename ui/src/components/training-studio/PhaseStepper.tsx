@@ -11,18 +11,20 @@
 // batch queue already shows on the Train page.
 
 import React from 'react';
-import { Database, Layers, Cpu, Activity, Lock } from 'lucide-react';
+import { Database, Layers, Cpu, Activity, Lock, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useBackendStore } from '../../stores/backendStore';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
 
-type Phase = 'dataset' | 'preprocess' | 'train' | 'monitor';
+type Phase = 'dataset' | 'preprocess' | 'train' | 'refine' | 'monitor';
 
 const PHASES: Array<{ id: Phase; icon: React.ReactNode; labelKey: string; enabled: boolean }> = [
   { id: 'dataset',    icon: <Database size={14} />, labelKey: 'trainingStudio.phase.dataset',    enabled: true },
   { id: 'preprocess', icon: <Layers size={14} />,   labelKey: 'trainingStudio.phase.preprocess', enabled: true },
   { id: 'train',      icon: <Cpu size={14} />,      labelKey: 'trainingStudio.phase.train',      enabled: true },
+  // YuE2 only: push a finished adapter's planner up the KL rungs and listen.
+  { id: 'refine',     icon: <Sparkles size={14} />, labelKey: 'trainingStudio.phase.refine',     enabled: true },
   { id: 'monitor',    icon: <Activity size={14} />, labelKey: 'trainingStudio.phase.monitor',    enabled: true },
 ];
 
@@ -41,7 +43,7 @@ export const PhaseStepper: React.FC = () => {
   // queue view on the same Train page.
   const phases = backendId === YUE2_BACKEND_ID
     ? PHASES.filter(p => p.id !== 'preprocess' && p.id !== 'monitor')
-    : PHASES;
+    : PHASES.filter(p => p.id !== 'refine');
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">

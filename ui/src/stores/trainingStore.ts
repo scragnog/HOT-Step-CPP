@@ -205,7 +205,7 @@ function clearTimer(key: string): void {
 /** The four top-level phases of the studio (`PhaseStepper`). Exported so the
  *  URL-sync code in `TrainingStudio.tsx` can name it without repeating the
  *  union. */
-export type TrainingPhase = 'dataset' | 'preprocess' | 'train' | 'monitor';
+export type TrainingPhase = 'dataset' | 'preprocess' | 'train' | 'refine' | 'monitor';
 
 interface TrainingState {
   // navigation

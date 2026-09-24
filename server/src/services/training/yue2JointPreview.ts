@@ -59,7 +59,7 @@ export function parseYue2JointPreviewOptions(raw: unknown, everySteps: number): 
   return {
     enabled,
     everySteps: integer('everySteps', everySteps, 0, 100000),
-    seconds: integer('seconds', 90, 8, 120),
+    seconds: integer('seconds', 90, 8, 360),
     seed: integer('seed', 424242, 0, 0xffffffff),
     previewMaxFrames: integer('previewMaxFrames', 2250, 0, 9000),
     baseline: bool('baseline', false), control: bool('control', false),

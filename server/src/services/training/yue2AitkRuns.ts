@@ -20,6 +20,11 @@ export interface Yue2AitkCheckpointRecord {
   step: number;
   dir: string;
   loss?: number;
+  /** From the checkpoint's meters.json: the planner's KL stop reading (or
+   *  its 20-step mean), the decoder's reconstruction meter, frozen state. */
+  kl?: number;
+  recon?: number;
+  frozen?: boolean;
   adapterPath?: string;
   optimizerPath?: string;
   arPath?: string;
@@ -118,9 +123,16 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
       const candidate = path.join(dir, name);
       return fs.existsSync(candidate) && fs.statSync(candidate).isFile() ? candidate : undefined;
     };
+    let meters: Record<string, unknown> = {};
+    try { meters = JSON.parse(fs.readFileSync(path.join(dir, 'meters.json'), 'utf8')) as Record<string, unknown>; } catch { /* older checkpoints have none */ }
+    const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+    const kl = num(meters.kl_reading) ?? num(meters.ar_kl_mean20);
     rows.push({
       step: Number(match[1]), dir,
       ...(losses.has(Number(match[1])) ? { loss: losses.get(Number(match[1])) } : {}),
+      ...(kl !== undefined ? { kl } : {}),
+      ...(num(meters.nar_recon) !== undefined ? { recon: num(meters.nar_recon) } : {}),
+      ...(meters.planner_frozen === true ? { frozen: true } : {}),
       adapterPath: file('adapter.safetensors'), optimizerPath: file('optimizer.resume'),
       arPath: file('native-ar.safetensors'), narPath: file('native-nar.safetensors'),
     });

@@ -278,7 +278,7 @@ static int run_impl(Config config, std::string * error) {
         if (resume_plan.completed > config.steps || resume_plan.completed > INT_MAX || resume_plan.record.state.step != resume_plan.completed) { fail(error, "resume completed step is invalid"); return 1; }
         if (resume_plan.cursor >= dataset.items.size()) { fail(error, "resume order cursor is out of range"); return 1; }
         if (!sampler.import_rng_state(resume_plan.sampler)) { fail(error, "resume sampler state is invalid"); return 1; }
-        if (resume_binding.planner_frozen_at >= 0 && config.nar_extra_steps <= 0) { fail(error, "this run's planner is frozen; resume it with --nar-extra-steps"); return 1; }
+        if (resume_binding.planner_frozen_at >= 0 && config.nar_extra_steps <= 0 && !config.unfreeze_planner) { fail(error, "this run's planner is frozen; resume it with --nar-extra-steps (or --unfreeze-planner)"); return 1; }
         if (config.freeze_planner_now && config.nar_extra_steps <= 0) { fail(error, "--freeze-planner-now needs --nar-extra-steps (the decoder's budget after the freeze)"); return 1; }
         order = resume_plan.order; cursor = resume_plan.cursor; completed = resume_plan.completed;
     } else if (config.freeze_planner_now) {
@@ -570,6 +570,12 @@ static int run_impl(Config config, std::string * error) {
         // A frozen record resumes frozen: its planner weights, just restored,
         // are the held ones.
         int planner_frozen_at = resume_binding.planner_frozen_at;
+        if (planner_frozen_at >= 0 && config.unfreeze_planner) {
+            // Planner refinement: both halves train on from here; the KL
+            // ceiling (--target-kl) is the new stop.
+            planner_frozen_at = -1;
+            std::fprintf(stderr, "[yue2-aitk] --unfreeze-planner: planner trains on from step %d\n", completed);
+        }
         if (planner_frozen_at < 0 && config.freeze_planner_now) {
             // A stop decided outside the trainer: this checkpoint's planner is
             // the one kept. Same bookkeeping as the KL freeze.
@@ -607,6 +613,10 @@ static int run_impl(Config config, std::string * error) {
         // record; seeded from it so a resumed segment can stop at once.
         std::vector<double> loss_window = config.target_loss > 0.0f ? resume_binding.loss_history : std::vector<double>{};
         std::vector<double> kl_window = config.target_kl > 0.0f ? resume_binding.kl_history : std::vector<double>{};
+        // KL rungs (--kl-checkpoint-every): the next reading that earns a
+        // checkpoint, set from the first reading; the reading itself goes into
+        // meters.json as kl_reading.
+        double next_kl_mark = -1.0, last_kl_reading = -1.0;
         auto save_checkpoint = [&](int step) -> bool {
             if (step == last_saved) return true;
             event("checkpoint_stage", step);
@@ -622,6 +632,7 @@ static int run_impl(Config config, std::string * error) {
                 std::ostringstream meters;
                 meters << std::setprecision(9) << "{\"stage\":\"meters\",\"step\":" << step << ",\"nar_drift\":" << drift << ",\"nar_recon\":" << recon;
                 if (kl >= 0.0) meters << ",\"ar_kl_mean20\":" << kl;
+                if (last_kl_reading >= 0.0) meters << ",\"kl_reading\":" << last_kl_reading;
                 meters << ",\"planner_frozen\":" << (planner_frozen_at >= 0 ? "true" : "false") << "}\n";
                 std::ofstream(temp_dir / "meters.json", std::ios::binary) << meters.str();
                 jsonl << meters.str(); jsonl.flush();
@@ -835,6 +846,17 @@ static int run_impl(Config config, std::string * error) {
                     double sum = 0.0;
                     for (double v : kl_window) sum += v;
                     const double reading = trend ? trend_at_end(kl_window) : sum / (double) keep;
+                    last_kl_reading = reading;
+                    if (config.kl_checkpoint_every > 0.0f) {
+                        const double every = config.kl_checkpoint_every;
+                        if (next_kl_mark < 0.0) next_kl_mark = (std::floor(reading / every) + 1.0) * every;
+                        if (reading >= next_kl_mark && reading < (double) config.target_kl) {
+                            if (!save_checkpoint(completed)) { fail(error, "KL-rung checkpoint publication failed"); return 1; }
+                            event("kl_mark", completed);
+                            std::fprintf(stderr, "[yue2-aitk] KL %.3f reached at step %d: rung checkpoint\n", reading, completed);
+                            while (next_kl_mark <= reading) next_kl_mark += every;
+                        }
+                    }
                     if (reading >= (double) config.target_kl && config.nar_extra_steps > 0) {
                         // Freeze first, so the KL checkpoint's resume record
                         // already says frozen and resumes decoder-only.

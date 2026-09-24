@@ -143,7 +143,8 @@ import { yue2StyleString } from '../services/backends/yue2/style.js';
 import { jointRunForAdapter, listYue2AitkRuns, yue2JointOutputDirectory } from '../services/training/yue2AitkRuns.js';
 import { clearPreparedCaches, listPreparedCaches } from '../services/training/preparedDataReset.js';
 import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
-import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions } from '../services/training/yue2JointPreview.js';
+import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions, renderYue2JointPreview } from '../services/training/yue2JointPreview.js';
+import { runOnGpuLane } from '../services/generation/gpuLane.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
 import { writeSidecar } from '../services/training/sidecarIO.js';
@@ -3393,6 +3394,8 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         // trainer (a plan sweep on the checkpoints). Never inherited from the run.
         ...(b.freezePlannerNow === true ? { freezePlannerNow: true } : {}),
         ...(b.refine === true ? { refine: true } : {}),
+        // Planner refinement: KL rungs to a ceiling, both halves live.
+        ...(b.refinePlanner === true ? { refinePlanner: true, stopMode: 'kl', targetKl: b.targetKl ?? saved.targetKl, narExtraSteps: 0, klCheckpointEvery: b.klCheckpointEvery ?? 0.1 } : {}),
         spikeFactor: b.spikeFactor ?? saved.spikeFactor, spikeStop: b.spikeStop ?? saved.spikeStop,
         spikeStopWindow: b.spikeStopWindow ?? saved.spikeStopWindow,
         reconStop: b.reconStop ?? saved.reconStop, reconStopWindow: b.reconStopWindow ?? saved.reconStopWindow,
@@ -3659,6 +3662,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(planCheck ? { planCheck } : {}),
       ...(resume && b.freezePlannerNow === true ? { freezePlannerNow: true } : {}),
       ...(resume && b.refine === true ? { reconReset: true } : {}),
+      ...(resume && b.refinePlanner === true ? { unfreezePlanner: true, klCheckpointEvery: Math.max(0.01, Math.min(1, Number(b.klCheckpointEvery) || 0.1)) } : {}),
       ...advanced,
       ...(preparation ? { preparation } : {}),
     });
@@ -3886,6 +3890,36 @@ router.get('/datasets/:id/yue2-joint-previews', (req: Request, res: Response) =>
         : {}),
     }));
     res.json({ run: run.jobId, output: run.output, previews });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** POST /datasets/:id/yue2-joint-previews/render — render previews for one
+ * checkpoint of a run on demand (the refine ladder). Body: { run, step,
+ * seconds?, seed?, takes? }. Needs the engine up; runs on the GPU lane. */
+router.post('/datasets/:id/yue2-joint-previews/render', async (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    if (isEngineSuspended() || !engineReady) { res.status(503).json({ error: 'The engine is not running; previews need it up' }); return; }
+    const b = (req.body || {}) as Record<string, unknown>;
+    const step = Number(b.step);
+    const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === b.run || path.resolve(r.output) === path.resolve(String(b.run ?? '')));
+    const ckpt = run?.checkpoints.find(c => c.step === step);
+    if (!run || !ckpt?.arPath || !ckpt.narPath) { res.status(400).json({ error: 'No complete checkpoint at that step in that run' }); return; }
+    const seconds = Math.max(8, Math.min(360, Math.round(Number(b.seconds) || 180)));
+    const seed = Number.isInteger(Number(b.seed)) ? Number(b.seed) : 424242;
+    const takes = Math.max(1, Math.min(4, Math.round(Number(b.takes) || 1)));
+    const dataset = typeof run.options.dataset === 'string' ? run.options.dataset : undefined;
+    const previews = [];
+    for (let i = 0; i < takes; i++) {
+      const options = { enabled: true, everySteps: 0, seconds, seed: seed + i, previewMaxFrames: seconds * 25, baseline: false, control: false,
+        ...(typeof b.caption === 'string' && b.caption.trim() ? { caption: b.caption.trim() } : {}),
+        ...(typeof b.lyrics === 'string' && b.lyrics.trim() ? { lyrics: b.lyrics.trim() } : {}) };
+      previews.push(await runOnGpuLane(() => renderYue2JointPreview({ output: run.output, step, options, arAdapter: ckpt.arPath!, narAdapter: ckpt.narPath!, dataset }), { label: 'yue2 refine preview', family: 'yue2' }));
+    }
+    res.json({ run: run.jobId, step, previews });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

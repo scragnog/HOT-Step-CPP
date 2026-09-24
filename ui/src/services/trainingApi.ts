@@ -698,6 +698,10 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
    *  the decoder trains on from the run's end at `saveEvery` spacing, and
    *  the reconstruction stop restarts its window. */
   refine?: boolean;
+  /** Planner refinement (with resumeRunId/resumeStep): both halves train on
+   *  to the KL ceiling `targetKl`, a rung checkpoint every klCheckpointEvery. */
+  refinePlanner?: boolean;
+  klCheckpointEvery?: number;
 }
 
 export interface Yue2JointPreviewOptions {
@@ -716,6 +720,10 @@ export interface Yue2JointPreviewOptions {
 export interface Yue2AitkCheckpointRecord {
   step: number;
   dir: string;
+  /** From meters.json: planner KL reading, decoder reconstruction, frozen. */
+  kl?: number;
+  recon?: number;
+  frozen?: boolean;
   adapterPath?: string;
   optimizerPath?: string;
   arPath?: string;
@@ -2426,6 +2434,13 @@ export async function listYue2JointPreviews(
 ): Promise<{ run: string; output: string; previews: Yue2JointPreviewRecord[] }> {
   const query = run ? `?run=${encodeURIComponent(run)}` : '';
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews${query}`);
+}
+
+/** POST /datasets/:id/yue2-joint-previews/render — previews for one checkpoint, on demand. */
+export async function renderYue2JointPreviews(
+  id: string, body: { run: string; step: number; seconds?: number; seed?: number; takes?: number; caption?: string; lyrics?: string },
+): Promise<{ run: string; step: number; previews: Yue2JointPreviewRecord[] }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews/render`, { method: 'POST', ...jsonBody(body) });
 }
 
 /** POST /api/training/datasets/:id/yue2-joint-prepare (CPU-only import). */

@@ -91,6 +91,11 @@ export interface ResolvedYue2JointTrainOptions {
   /** Refinement: resume with the reconstruction window empty (the run may
    *  have ended on the recon stop; its readings would fire it again). */
   reconReset?: boolean;
+  /** Planner refinement (with resume): train the planner on past its freeze
+   *  to the KL ceiling (targetKl), saving a rung checkpoint every
+   *  klCheckpointEvery of KL for a listener to compare. */
+  unfreezePlanner?: boolean;
+  klCheckpointEvery?: number;
   /** Plan-check planner stop: every `every` steps while the planner is live,
    *  pause, have the checkpoint's planner write `plans` plans, and freeze the
    *  planner at the LAST checkpoint whose failure rate stayed within `margin`
@@ -152,6 +157,8 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
     if (o.reconStopWindow !== undefined) args.push('--recon-stop-window', String(o.reconStopWindow));
   }
   if (o.resume && o.reconReset) args.push('--recon-reset');
+  if (o.resume && o.unfreezePlanner) args.push('--unfreeze-planner');
+  if (o.klCheckpointEvery !== undefined && o.klCheckpointEvery > 0) args.push('--kl-checkpoint-every', String(o.klCheckpointEvery));
   if (o.resume) args.push('--resume', o.resume);
   if (o.resume && o.freezePlannerNow) args.push('--freeze-planner-now');
   if (o.alignment) {
@@ -290,6 +297,8 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
         ...(num(raw.nar_drift) !== undefined ? { narDrift: num(raw.nar_drift) } : {}) });
     }
     log(job, 'info', `Meters at step ${step}: decoder drift ${raw.nar_drift}${raw.nar_recon === undefined ? '' : `, reconstruction ${raw.nar_recon}`}${raw.ar_kl_mean20 === undefined ? '' : `, planner KL ${raw.ar_kl_mean20}`}`);
+  } else if (stage === 'kl_mark' && step !== undefined) {
+    log(job, 'info', `KL rung reached at step ${step}; checkpoint saved`);
   } else if (stage === 'recon_stop' && step !== undefined) {
     log(job, 'info', `Decoder reconstruction has flattened; decoder done, stopping at step ${step}`);
   } else if (stage === 'spike_stop' && step !== undefined) {
