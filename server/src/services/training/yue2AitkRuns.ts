@@ -25,6 +25,8 @@ export interface Yue2AitkCheckpointRecord {
   kl?: number;
   recon?: number;
   frozen?: boolean;
+  /** Written at a KL rung (--kl-checkpoint-every), not a routine save. */
+  rung?: boolean;
   adapterPath?: string;
   optimizerPath?: string;
   arPath?: string;
@@ -133,6 +135,7 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
       ...(kl !== undefined ? { kl } : {}),
       ...(num(meters.nar_recon) !== undefined ? { recon: num(meters.nar_recon) } : {}),
       ...(meters.planner_frozen === true ? { frozen: true } : {}),
+      ...(meters.kl_rung === true ? { rung: true } : {}),
       adapterPath: file('adapter.safetensors'), optimizerPath: file('optimizer.resume'),
       arPath: file('native-ar.safetensors'), narPath: file('native-nar.safetensors'),
     });

@@ -728,6 +728,8 @@ export interface Yue2AitkCheckpointRecord {
   kl?: number;
   recon?: number;
   frozen?: boolean;
+  /** A KL-rung checkpoint of a planner refinement (previews were rendered). */
+  rung?: boolean;
   adapterPath?: string;
   optimizerPath?: string;
   arPath?: string;

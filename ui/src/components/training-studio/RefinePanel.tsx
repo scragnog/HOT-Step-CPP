@@ -32,7 +32,7 @@ export const RefinePanel: React.FC = () => {
   const [seconds, setSeconds] = useState(180);
   const [takes, setTakes] = useState(2);
   const [autoPreview, setAutoPreview] = useState(true);
-  const [lrScale, setLrScale] = useState(0.3);
+  const [lrScale, setLrScale] = useState(0.2);
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
   const [ladderRun, setLadderRun] = useState('');
   const [previews, setPreviews] = useState<Yue2JointPreviewRecord[]>([]);
@@ -175,10 +175,12 @@ export const RefinePanel: React.FC = () => {
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.refine.ladderHint', 'Late-song decay shows after two minutes, so keep previews at 180 s or more. Renders are not deterministic: two tracks per rung is the minimum to trust a rung. Render adds more tracks to a rung with the count and length above.')}</p>
         {ladder.length > 0 && <div className="mt-3 flex flex-col gap-3">
           {ladder.map(c => {
-            const mine = previews.filter(p => p.step === c.step);
-            return <div key={c.step} className={`rounded-lg border p-3 ${picked === c.dir ? 'border-emerald-500/60 bg-emerald-500/5' : 'border-zinc-300/70 dark:border-white/10'}`}>
+            const mine = previews.filter(p => p.step === c.step).sort((a, b) => a.seed - b.seed);
+            return <div key={c.step} className={`rounded-lg border p-3 ${picked === c.dir ? 'border-emerald-500/60 bg-emerald-500/5' : c.rung ? 'border-amber-500/40' : 'border-zinc-300/70 dark:border-white/10'}`}>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                 <span className="font-semibold text-zinc-800 dark:text-zinc-100">{t('trainingStudio.refine.rungStep', 'Step {{step}}', { step: c.step })}</span>
+                {c.rung && <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-semibold">{t('trainingStudio.refine.rungBadge', 'rung')}</span>}
+                {!c.rung && <span className="text-[10px] text-zinc-500">{t('trainingStudio.refine.routineSave', 'routine save')}</span>}
                 <span className="font-mono text-zinc-600 dark:text-zinc-300">KL {c.kl !== undefined ? c.kl.toFixed(2) : '—'}{c.frozen ? ' (frozen)' : ''}</span>
                 <span className="font-mono text-zinc-600 dark:text-zinc-300">recon {c.recon !== undefined ? c.recon.toFixed(3) : '—'}</span>
                 <span className="flex-1" />

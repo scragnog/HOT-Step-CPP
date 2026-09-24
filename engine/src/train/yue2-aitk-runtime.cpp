@@ -635,6 +635,11 @@ static int run_impl(Config config, std::string * error) {
         // checkpoint, set from the first reading; the reading itself goes into
         // meters.json as kl_reading.
         double next_kl_mark = resume_binding.kl_mark_last > 0.0 ? resume_binding.kl_mark_last + config.kl_checkpoint_every : -1.0, last_kl_reading = -1.0, kl_mark_last = resume_binding.kl_mark_last;
+        bool rung_checkpoint = false;  // the checkpoint being written is a KL rung
+        // After the first unfreeze the window starts empty; rather than 30
+        // blind steps (the KL climbed 0.92 -> 1.64 in them and skipped four
+        // rungs), read the plain mean of what is there from 5 fresh steps.
+        const bool partial_readings = first_unfreeze;
         auto save_checkpoint = [&](int step) -> bool {
             if (step == last_saved) return true;
             event("checkpoint_stage", step);
@@ -651,6 +656,7 @@ static int run_impl(Config config, std::string * error) {
                 meters << std::setprecision(9) << "{\"stage\":\"meters\",\"step\":" << step << ",\"nar_drift\":" << drift << ",\"nar_recon\":" << recon;
                 if (kl >= 0.0) meters << ",\"ar_kl_mean20\":" << kl;
                 if (last_kl_reading >= 0.0) meters << ",\"kl_reading\":" << last_kl_reading;
+                if (rung_checkpoint) meters << ",\"kl_rung\":true";
                 meters << ",\"planner_frozen\":" << (planner_frozen_at >= 0 ? "true" : "false") << "}\n";
                 std::ofstream(temp_dir / "meters.json", std::ios::binary) << meters.str();
                 jsonl << meters.str(); jsonl.flush();
@@ -860,17 +866,21 @@ static int run_impl(Config config, std::string * error) {
                 const bool trend = config.target_kl_mode == "trend";
                 const int keep = trend ? kKlTrendWindow : config.target_loss_window;
                 while (static_cast<int>(kl_window.size()) > keep) kl_window.erase(kl_window.begin());
-                if (static_cast<int>(kl_window.size()) == keep) {
+                const bool partial = partial_readings && static_cast<int>(kl_window.size()) < keep && kl_window.size() >= 5;
+                if (static_cast<int>(kl_window.size()) == keep || partial) {
                     double sum = 0.0;
                     for (double v : kl_window) sum += v;
-                    const double reading = trend ? trend_at_end(kl_window) : sum / (double) keep;
+                    const double reading = partial ? sum / (double) kl_window.size() : trend ? trend_at_end(kl_window) : sum / (double) keep;
                     last_kl_reading = reading;
                     if (config.kl_checkpoint_every > 0.0f) {
                         const double every = config.kl_checkpoint_every;
                         if (next_kl_mark < 0.0) next_kl_mark = (std::floor(reading / every) + 1.0) * every;
                         if (reading >= next_kl_mark && reading < (double) config.target_kl) {
                             kl_mark_last = next_kl_mark;  // into this checkpoint's record
-                            if (!save_checkpoint(completed)) { fail(error, "KL-rung checkpoint publication failed"); return 1; }
+                            rung_checkpoint = true;
+                            const bool saved_rung = save_checkpoint(completed);
+                            rung_checkpoint = false;
+                            if (!saved_rung) { fail(error, "KL-rung checkpoint publication failed"); return 1; }
                             event("kl_mark", completed);
                             std::fprintf(stderr, "[yue2-aitk] KL %.3f reached at step %d: rung checkpoint\n", reading, completed);
                             while (next_kl_mark <= reading) next_kl_mark += every;
