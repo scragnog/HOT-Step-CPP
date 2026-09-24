@@ -62,6 +62,12 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
   let notFoundRun = 0;
   const NOT_FOUND_LIMIT = 3;
   const crashSeqAtStart = engineCrashSeq();
+  // Heartbeat token from the ace-server poll body. adapter_progress is the
+  // live delta index of an in-flight adapter precompute; during a lazy
+  // inference-time DiT reload the phase is dit_inference and phase_step
+  // stays 0 for the whole multi-minute precompute, so adapter_progress is
+  // the only moving signal and without it the job is killed mid-load.
+  let lastAceHeartbeat = '';
 
   while (true) {
     if (signal.aborted || job.status === 'cancelled') {
@@ -145,6 +151,12 @@ export async function pollUntilDone(aceJobId: string, job: GenerationJob, signal
         const step = status.phase_step ?? 0;
         const total = status.phase_total ?? 0;
         job.acePhaseProgress = total > 0 ? `step ${step}/${total}` : '';
+        const aceHeartbeat = `${status.phase}|${step}|${total}|${status.adapter_progress ?? -1}`;
+        if (aceHeartbeat !== lastAceHeartbeat) {
+          lastProgressAt = Date.now();
+          lastAceHeartbeat = aceHeartbeat;
+          stillRunningSince = 0;
+        }
       }
       if (status.status === 'done') return;
       if (status.status === 'failed') throw new Error('Generation failed on ace-server');

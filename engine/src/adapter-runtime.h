@@ -336,6 +336,8 @@ static bool adapter_runtime_lora(DiTLoRA *                  lora,
             cancelled = true;
             break;
         }
+        // Heartbeat for external watchdogs (surfaced via /job adapter_progress).
+        g_adapter_progress.store(merged + skipped, std::memory_order_relaxed);
 
         const std::string & gguf_name = kv.first;
         const STEntry *     ea        = kv.second;
@@ -537,6 +539,8 @@ static bool adapter_runtime_lokr(DiTLoRA *                  lora,
             cancelled = true;
             break;
         }
+        // Heartbeat for external watchdogs (surfaced via /job adapter_progress).
+        g_adapter_progress.store(merged + skipped, std::memory_order_relaxed);
 
         const std::string & lyc_prefix = kv.first;
         const LoKrEntry &   m          = kv.second;
@@ -1044,6 +1048,14 @@ static bool adapter_load_runtime_stack(DiTLoRA *                       lora,
         fprintf(stderr, "[Adapter-RT] WARNING: empty adapter stack\n");
         return false;
     }
+
+    // Reset the watchdog-heartbeat counter to "inactive" on every exit path
+    // (success, cancel, failure) so a stale index never leaks into the next
+    // job's /job responses. adapter_load_runtime() forwards to this function,
+    // so one guard at this entry point covers both call shapes.
+    struct ProgressGuard {
+        ~ProgressGuard() { g_adapter_progress.store(-1, std::memory_order_release); }
+    } progress_guard;
 
     // One context sized for the union of slots. Slots are shared across adapters
     // (deltas accumulate into the same tensor), so the per-adapter slot count

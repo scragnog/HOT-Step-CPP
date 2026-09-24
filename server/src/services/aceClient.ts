@@ -201,6 +201,11 @@ export interface AceJobStatus {
   /** Additive YuE2 completion metadata when emitted by the engine. */
   end_reason?: string;
   stage_end_reasons?: Record<string, string>;
+  /** Live delta index of an in-flight adapter precompute, -1 when none.
+   *  The DiT can reload lazily at inference time (adapter swap under
+   *  keep-loaded), where phase_step stays 0 for the whole load — this is
+   *  the only moving signal during that window. */
+  adapter_progress?: number;
 }
 
 /** Fine-grained engine phase — matches JobPhase in hot-step-server.cpp.
