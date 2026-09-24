@@ -3648,8 +3648,8 @@ int main(int argc, char ** argv) {
                  "{\"status\":\"%s\",\"phase\":\"%s\",\"phase_step\":%d,\"phase_total\":%d,\"adapter_progress\":%d}",
                  job_status_str(job->status.load()), job_phase_str(job->phase.load()), step, total, aprog);
         // HOT-Step: additive YuE2 terminal fields, spliced in only when a
-        // family actually populated them (ACE/MM3 jobs leave both empty, so
-        // their response is byte-identical to before). Read only meaningful
+        // family actually populated them (ACE/MM3 jobs leave them empty and
+        // get only the phase fields above). Read only meaningful
         // once status != running, same convention as result_body/result_mime.
         std::string body = phase_buf;
         if (!job->result_end_reason.empty() || !job->result_stage_end_reasons.empty() || !job->result_abc.empty() ||
