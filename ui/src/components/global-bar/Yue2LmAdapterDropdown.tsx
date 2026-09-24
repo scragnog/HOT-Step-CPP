@@ -36,11 +36,12 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, ChevronDown, ChevronRight, Loader2, RotateCcw } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, FolderOpen, Loader2, RotateCcw, Search } from 'lucide-react';
 import { useBackendStore } from '../../stores/backendStore';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import { ParamLabel } from '../shared/ParamLabel';
 import { Slider } from '../shared/Slider';
+import { FileBrowserModal } from '../shared/FileBrowserModal';
 
 const inputClasses =
   'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 ' +
@@ -378,6 +379,24 @@ export const Yue2LmAdapterDropdown: React.FC = () => {
   } = useYue2Adapters();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const savedFolder = String((catalogue?.defaults as Record<string, unknown> | undefined)?.lmAdapterFolder ?? '');
+  const [folder, setFolder] = useState(savedFolder);
+  const [browsing, setBrowsing] = useState(false);
+  useEffect(() => { setFolder(savedFolder); }, [savedFolder]);
+
+  /** Adapters copied from another machine are not in this one's training
+   *  index; the server scans this folder for them as well. */
+  const scanFolder = async (dir: string) => {
+    setFolder(dir);
+    setBusy(true);
+    setNote(null);
+    const ok = await selectModels({ lmAdapterFolder: dir.trim() }, activeBackendId);
+    setBusy(false);
+    if (!ok) {
+      setNote(t('globalBar.yue2AdapterFolderFailed',
+        'That folder could not be used. It needs to be a full path to a folder that exists.'));
+    }
+  };
 
   const license = typeof capabilities?.license === 'string' ? capabilities.license : undefined;
 
@@ -423,6 +442,43 @@ export const Yue2LmAdapterDropdown: React.FC = () => {
             'No YuE2 adapters trained yet. Train one in the Training Studio (NAR or AR LoRA) and it appears here — no restart needed.')}
         </p>
       )}
+
+      <div>
+        <ParamLabel
+          label={t('globalBar.yue2AdapterFolder', 'Adapter folder')}
+          info={t('globalBar.yue2AdapterFolderHint',
+            'Adapters trained here appear on their own. For ones trained on another machine, point this at the folder you copied them into. Every AR and NAR adapter file inside it, including in subfolders, is added to the lists below.')}
+          rootClassName="flex mb-1.5"
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
+        <div className="flex gap-1.5">
+          <input
+            className={inputClasses}
+            value={folder}
+            disabled={locked}
+            onChange={e => setFolder(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') void scanFolder(folder); }}
+            placeholder={t('globalBar.yue2AdapterFolderPlaceholder', 'Optional: folder with copied adapters') as string}
+          />
+          <button type="button" disabled={locked} onClick={() => void scanFolder(folder)}
+            title={t('adapter.scanFolder') as string}
+            className="px-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 disabled:opacity-40">
+            <Search size={14} />
+          </button>
+          <button type="button" disabled={locked} onClick={() => setBrowsing(true)}
+            title={t('adapter.browseFolder') as string}
+            className="px-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 disabled:opacity-40">
+            <FolderOpen size={14} />
+          </button>
+        </div>
+      </div>
+      <FileBrowserModal
+        open={browsing}
+        onClose={() => setBrowsing(false)}
+        onSelect={p => { setBrowsing(false); void scanFolder(p); }}
+        mode="folder"
+        startPath={folder || undefined}
+        title={t('adapter.selectAdapterFolder') as string}
+      />
 
       <SlotPanel
         kind="nar"

@@ -83,6 +83,11 @@ const SLOT_SCALES_SETTING: Record<Yue2LmAdapterKind, string> = {
   nar: 'yue2_lm_adapter_nar_scales',
 };
 
+/** A folder the user pointed the picker at, '' for none. Adapters trained on
+ *  another machine and copied over are not in this machine's run index, so the
+ *  catalogue also scans here — the YuE2 twin of AS1.5's adapter folder. */
+const ADAPTER_FOLDER_SETTING = 'yue2_lm_adapter_folder';
+
 /** The order the stack is sent in, load-bearing rather than cosmetic: the
  *  engine builds its change key by walking the list it was given, so the same
  *  two adapters in the other order read as a different request and cost a full
@@ -895,7 +900,55 @@ function yue2LmAdapterCatalogue(): {
       add('nar', ckpt.narPath);
     }
   }
+
+  // The user's adapter folder: anything the index above did not already list.
+  // The half comes from the file's own `format`, the same field the engine
+  // gates on, so a folder can hold any naming (last-checkpoint, renamed
+  // exports) and a fused adapter.safetensors or optimizer state is skipped.
+  const folder = getSetting(ADAPTER_FOLDER_SETTING, '');
+  for (const abs of folder ? scanSafetensors(folder) : []) {
+    if (meta[abs]) continue;
+    const fileMeta = readSafetensorsMeta(abs);
+    const kind: Yue2LmAdapterKind | null = /^yue2-ar-/.test(fileMeta?.format ?? '') ? 'ar'
+      : /^yue2-nar-/.test(fileMeta?.format ?? '') ? 'nar' : null;
+    if (!kind) continue;
+    const { trigger, inferred } = yue2AdapterTrigger(abs);
+    const runName = path.relative(folder, path.dirname(abs)) || path.basename(folder);
+    const steps = fileMeta?.steps;
+    paths.push(abs);
+    meta[abs] = {
+      label: [kind.toUpperCase(), `Folder · ${runName}`, trigger ? `"${trigger}"` : ''].filter(Boolean).join(' · '),
+      kind,
+      runName,
+      trigger: trigger || undefined,
+      triggerInferred: inferred || undefined,
+      rank: fileMeta?.rank,
+      steps: steps && Number.isFinite(steps) && steps > 0 ? steps : undefined,
+      bytes: (() => { try { return fs.statSync(abs).size; } catch { return undefined; } })(),
+      styleTemplate: fileMeta?.styleTemplate,
+      captionDropout: fileMeta?.captionDropout,
+    };
+  }
   return { paths, meta };
+}
+
+/** Every .safetensors under `root`, absolute. ponytail: depth 4 / 2000 files,
+ *  enough for <folder>/<run>/segments/<seg>/<checkpoint>; raise if someone
+ *  points it at a whole drive and misses files. */
+function scanSafetensors(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string, depth: number): void => {
+    let entries: fs.Dirent[];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (out.length >= 2000) return;
+      const p = path.join(dir, e.name);
+      if (e.isDirectory() && depth < 4) walk(p, depth + 1);
+      else if (e.isFile() && /\.safetensors$/i.test(e.name)) out.push(path.resolve(p));
+    }
+  };
+  walk(path.resolve(root), 0);
+  return out;
 }
 
 async function models(): Promise<BackendModels> {
@@ -930,6 +983,7 @@ async function models(): Promise<BackendModels> {
       // resident model is adapted at all.
       lmAdapterMerged: props?.adapter?.merged ?? '',
       lmAdapterInForce: props?.adapter?.in_force === true,
+      lmAdapterFolder: getSetting(ADAPTER_FOLDER_SETTING, ''),
     },
     meta,
   };
@@ -1006,6 +1060,16 @@ function readSlotSelection(
 }
 
 async function selectModel(selection: Record<string, string>) {
+  // The scan folder is a picker setting, not a model pick: save it and, when
+  // that is all the caller sent, leave the engine alone.
+  if (typeof selection.lmAdapterFolder === 'string') {
+    const folder = selection.lmAdapterFolder.trim();
+    if (folder && !(path.isAbsolute(folder) && fs.existsSync(folder) && fs.statSync(folder).isDirectory())) {
+      throw new Error(`YuE2 adapter folder not usable: ${folder} (needs an absolute path to an existing folder)`);
+    }
+    setSetting(ADAPTER_FOLDER_SETTING, folder);
+    if (Object.keys(selection).length === 1) return { changed: false, lmAdapterFolder: folder };
+  }
   const persisted = yue2PersistedSelection();
   const sel: Yue2Selection = {
     lm: selection.lm ?? persisted.lm,

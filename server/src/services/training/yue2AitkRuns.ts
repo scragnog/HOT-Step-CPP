@@ -67,7 +67,7 @@ function isRunRecord(value: unknown): value is Yue2AitkRunRecord {
   return r.version === 1 && typeof r.jobId === 'string' && r.jobId.length <= 128
     && typeof r.datasetId === 'string' && typeof r.datasetSlug === 'string'
     && r.method === 'aitk' && typeof r.output === 'string' && r.output.length <= 32768
-    && (r.status === 'running' || r.status === 'done' || r.status === 'failed' || r.status === 'cancelled')
+    && ['running', 'done', 'failed', 'cancelled', 'interrupted'].includes(r.status)
     && Number.isFinite(r.createdAt) && Number.isFinite(r.updatedAt)
     && Array.isArray(r.checkpoints) && r.checkpoints.length <= 1024
     && r.checkpoints.every(c => !!c && Number.isInteger(c.step) && c.step >= 0
