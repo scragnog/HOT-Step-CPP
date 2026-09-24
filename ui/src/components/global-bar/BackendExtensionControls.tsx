@@ -118,6 +118,29 @@ export const BackendExtensionControls: React.FC<{
             </div>
           );
         }
+        if (p.multiline) {
+          // A dropped text file (an .abc lead sheet exported from MuseScore,
+          // say) replaces the contents, so nobody has to open it and paste.
+          return (
+            <div key={p.key}>
+              <ParamLabel label={p.label} info={p.hint} rootClassName="flex mb-1.5"
+                className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
+              <textarea
+                className={`${backendInputClasses} font-mono text-xs min-h-[6rem] resize-y`}
+                spellCheck={false}
+                value={String(value ?? '')}
+                onChange={(e) => gp.setBackendParam?.(p.key, e.target.value)}
+                onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); }}
+                onDrop={(e) => {
+                  const file = e.dataTransfer.files[0];
+                  if (!file) return;
+                  e.preventDefault();
+                  void file.text().then((text) => gp.setBackendParam?.(p.key, text));
+                }}
+              />
+            </div>
+          );
+        }
         return (
           <div key={p.key}>
             <ParamLabel label={p.label} info={p.hint} rootClassName="flex mb-1.5"

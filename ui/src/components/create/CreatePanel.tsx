@@ -230,6 +230,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   // the user says Continue — with THAT score and THAT seed pinned.
   const { token } = useAuth();
   const yue2PreviewScore = useGlobalParamsStore((s: any) => !!s.backendParams?.yue2PreviewScore);
+  const yue2AbcSupplied = useGlobalParamsStore((s: any) => typeof s.backendParams?.yue2Abc === 'string' && !!s.backendParams.yue2Abc.trim());
   const [scorePreview, setScorePreview] = useState<{ open: boolean; params: Partial<GenerationParams> | null; data: Yue2ScorePreviewData | null; error: string | null }>(
     { open: false, params: null, data: null, error: null });
   const planScore = useCallback(async (params: Partial<GenerationParams>, freshSeed: boolean) => {
@@ -358,7 +359,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     // if (streamMode) {
     //   (params as any).streamMode = true;
     // }
-    if (yue2Mode && yue2PreviewScore) {
+    // A pasted lead sheet (#181) is the score; previewing would plan a new one
+    // and throw it away.
+    if (yue2Mode && yue2PreviewScore && !yue2AbcSupplied) {
       void planScore(params, false);
       return;
     }

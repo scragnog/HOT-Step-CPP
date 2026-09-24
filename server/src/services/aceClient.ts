@@ -248,6 +248,8 @@ export interface AceWarmRequest {
 export interface PluginParamSchema {
   key: string;
   type: 'slider' | 'select' | 'toggle' | 'text';
+  /** text only: render a multi-line box (lead sheets, anything pasted). */
+  multiline?: boolean;
   label: string;
   hint?: string;
   transform?: string;
