@@ -3379,7 +3379,10 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       }
       // Only the stopping target and preview policy are editable. The base,
       // seed, optimizer, adapter shape and dataset come from the indexed run.
-      b = { ...saved, trainingMethod: 'aitk', autoPrepare: false,
+      // Per-resume flags never carry over from the source run: a planner
+      // refinement of a decoder refinement must not inherit its freeze.
+      const { freezePlannerNow: _f, reconReset: _r, unfreezePlanner: _u, klCheckpointEvery: _k, refine: _e, refinePlanner: _p, ...inherited } = saved as Record<string, unknown>;
+      b = { ...inherited, trainingMethod: 'aitk', autoPrepare: false,
         checkpoint: saved.checkpoint, dataset: saved.dataset, output: '',
         resume: selected.optimizerPath,
         steps: b.steps, saveEvery: b.refine === true && Number.isInteger(Number(b.saveEvery)) && Number(b.saveEvery) > 0 ? Number(b.saveEvery) : saved.saveEvery,

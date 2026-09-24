@@ -606,7 +606,11 @@ static int run_impl(Config config, std::string * error) {
         if (!jsonl) { fail(error, "cannot create training JSONL"); return 1; }
         // The planner's KL at the moment a checkpoint is written, for meters.json.
         std::vector<double> kl_recent = resume_binding.kl_history;
-        std::vector<double> gnorm_window = resume_binding.gnorm_history, spike_steps = resume_binding.spike_steps;
+        // An unfrozen planner puts the joint gradient norm (~10x the decoder's
+        // alone) against a decoder-only baseline: every step would read as a
+        // spike. Restart the guard's window, as the freeze does.
+        std::vector<double> gnorm_window = config.unfreeze_planner ? std::vector<double>{} : resume_binding.gnorm_history;
+        std::vector<double> spike_steps = config.unfreeze_planner ? std::vector<double>{} : resume_binding.spike_steps;
         std::vector<double> recon_history = config.recon_reset ? std::vector<double>{} : resume_binding.recon_history;
         int last_saved = -1;
         // Declared before save_checkpoint, which writes them into the resume
