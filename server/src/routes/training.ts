@@ -145,6 +145,7 @@ import { clearPreparedCaches, listPreparedCaches } from '../services/training/pr
 import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
 import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions, renderYue2JointPreview } from '../services/training/yue2JointPreview.js';
 import { runOnGpuLane } from '../services/generation/gpuLane.js';
+import { listYue2RungScores, scoreYue2Rung, yue2RungScoresCsv } from '../services/training/yue2RungScores.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
 import { writeSidecar } from '../services/training/sidecarIO.js';
@@ -3903,6 +3904,39 @@ router.get('/datasets/:id/yue2-joint-previews', (req: Request, res: Response) =>
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }
+});
+
+/** Refinement rung scores: GET lists (optionally one run), PUT upserts one
+ * rung's judgement (the server fills the facts). Export across datasets:
+ * GET /yue2-rung-scores/export?format=csv|json. */
+router.get('/datasets/:id/yue2-rung-scores', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    res.json({ scores: listYue2RungScores(ds.id, typeof req.query.run === 'string' ? req.query.run : undefined) });
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
+});
+router.put('/datasets/:id/yue2-rung-scores', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const b = (req.body || {}) as Record<string, unknown>;
+    if (typeof b.refineRun !== 'string' || !Number.isInteger(Number(b.step))) { res.status(400).json({ error: 'refineRun and step are required' }); return; }
+    res.json({ score: scoreYue2Rung({ id: ds.id, slug: ds.slug }, { refineRun: b.refineRun, step: Number(b.step),
+      ...(b.likeness !== undefined ? { likeness: b.likeness === null ? null : Number(b.likeness) } : {}),
+      ...(b.corruption !== undefined ? { corruption: b.corruption === null ? null : Number(b.corruption) } : {}),
+      ...(typeof b.notes === 'string' ? { notes: b.notes } : {}) }) });
+  } catch (err: any) { res.status(400).json({ error: err?.message || String(err) }); }
+});
+router.get('/yue2-rung-scores/export', (req: Request, res: Response) => {
+  try {
+    const rows = listYue2RungScores();
+    if (req.query.format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="yue2-rung-scores.csv"');
+      res.send(yue2RungScoresCsv(rows));
+    } else res.json({ scores: rows });
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
 
 /** POST /datasets/:id/yue2-joint-previews/render — render previews for one

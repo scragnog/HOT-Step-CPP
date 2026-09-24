@@ -24,6 +24,7 @@ export interface Yue2AitkCheckpointRecord {
    *  its 20-step mean), the decoder's reconstruction meter, frozen state. */
   kl?: number;
   recon?: number;
+  drift?: number;
   frozen?: boolean;
   /** Written at a KL rung (--kl-checkpoint-every), not a routine save. */
   rung?: boolean;
@@ -134,6 +135,7 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
       ...(losses.has(Number(match[1])) ? { loss: losses.get(Number(match[1])) } : {}),
       ...(kl !== undefined ? { kl } : {}),
       ...(num(meters.nar_recon) !== undefined ? { recon: num(meters.nar_recon) } : {}),
+      ...(num(meters.nar_drift) !== undefined ? { drift: num(meters.nar_drift) } : {}),
       ...(meters.planner_frozen === true ? { frozen: true } : {}),
       ...(meters.kl_rung === true ? { rung: true } : {}),
       adapterPath: file('adapter.safetensors'), optimizerPath: file('optimizer.resume'),

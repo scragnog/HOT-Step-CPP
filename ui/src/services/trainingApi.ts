@@ -2444,6 +2444,22 @@ export async function listYue2JointPreviews(
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews${query}`);
 }
 
+/** Refinement rung scores (Refine tab): the listener's judgement per rung
+ *  beside the rung's facts, for cross-artist analysis later. */
+export interface Yue2RungScore {
+  id: number; datasetId: string; datasetSlug: string; sourceRun: string; refineRun: string; checkpointDir: string;
+  step: number; kl: number | null; recon: number | null; drift: number | null; rung: boolean; frozen: boolean;
+  settings: Record<string, unknown>; previews: Array<Record<string, unknown>>; metrics: Record<string, unknown>;
+  likeness: number | null; corruption: number | null; notes: string; createdAt: string; updatedAt: string;
+}
+export async function listYue2RungScores(id: string, run?: string): Promise<{ scores: Yue2RungScore[] }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores${run ? `?run=${encodeURIComponent(run)}` : ''}`);
+}
+export async function scoreYue2Rung(id: string, body: { refineRun: string; step: number; likeness?: number | null; corruption?: number | null; notes?: string }): Promise<{ score: Yue2RungScore }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores`, { method: 'PUT', ...jsonBody(body) });
+}
+export const yue2RungScoresExportUrl = (format: 'csv' | 'json') => `${API_BASE}/yue2-rung-scores/export?format=${format}`;
+
 /** POST /datasets/:id/yue2-joint-previews/render — previews for one checkpoint, on demand. */
 export async function renderYue2JointPreviews(
   id: string, body: { run: string; step: number; seconds?: number; seed?: number; takes?: number; caption?: string; lyrics?: string },

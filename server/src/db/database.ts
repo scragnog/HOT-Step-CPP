@@ -236,6 +236,32 @@ export function initDb(): void {
       updated_at        TEXT DEFAULT (datetime('now'))
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_training_datasets_src ON training_datasets(source_dir);
+
+    -- YuE2 refinement rung scores (Refine tab): Rob's ear judgement per rung
+    -- checkpoint beside the rung's facts, for cross-artist analysis later.
+    CREATE TABLE IF NOT EXISTS yue2_rung_scores (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      dataset_id     TEXT NOT NULL,
+      dataset_slug   TEXT NOT NULL,
+      source_run     TEXT NOT NULL DEFAULT '',
+      refine_run     TEXT NOT NULL,
+      checkpoint_dir TEXT NOT NULL UNIQUE,
+      step           INTEGER NOT NULL,
+      kl             REAL,
+      recon          REAL,
+      drift          REAL,
+      rung           INTEGER NOT NULL DEFAULT 0,
+      frozen         INTEGER NOT NULL DEFAULT 0,
+      settings       TEXT NOT NULL DEFAULT '{}',
+      previews       TEXT NOT NULL DEFAULT '[]',
+      metrics        TEXT NOT NULL DEFAULT '{}',
+      likeness       INTEGER,
+      corruption     INTEGER,
+      notes          TEXT NOT NULL DEFAULT '',
+      created_at     TEXT DEFAULT (datetime('now')),
+      updated_at     TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_yue2_rung_scores_ds ON yue2_rung_scores(dataset_id, refine_run, step);
   `);
 
   // ── Migrations — add columns that may not exist in older databases ────────
