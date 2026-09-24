@@ -15,8 +15,8 @@ import { Yue2JointRunChart } from './Yue2JointRunChart';
 import { PreviewPlayer } from './PreviewPlayer';
 import {
   cancelJob, getJob, linkYue2JointCheckpointPreset, listYue2AitkRuns, listYue2JointPreviews,
-  renderYue2JointPreviews, startYue2JointTrain,
-  type TrainingJobSummary, type Yue2AitkRunRecord, type Yue2JointPreviewRecord, type Yue2JointTrainRequest,
+  renderYue2JointPreviews, startYue2JointTrain, listYue2RungScores, scoreYue2Rung, yue2RungScoresExportUrl,
+  type TrainingJobSummary, type Yue2AitkRunRecord, type Yue2JointPreviewRecord, type Yue2JointTrainRequest, type Yue2RungScore,
 } from '../../services/trainingApi';
 
 const input = 'px-2 py-1.5 rounded-lg text-xs bg-white/70 dark:bg-black/20 border border-zinc-300/70 dark:border-white/10 text-zinc-800 dark:text-zinc-100';
@@ -32,7 +32,7 @@ export const RefinePanel: React.FC = () => {
   const [seconds, setSeconds] = useState(180);
   const [takes, setTakes] = useState(2);
   const [autoPreview, setAutoPreview] = useState(true);
-  const [parallel, setParallel] = useState(false);
+  const [parallel, setParallel] = useState(true);
   const [lrScale, setLrScale] = useState(0.1);
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
   const [ladderRun, setLadderRun] = useState('');
@@ -41,6 +41,16 @@ export const RefinePanel: React.FC = () => {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [picked, setPicked] = useState('');
+  // Scores per rung (by step) for the ladder run; notes are saved on blur.
+  const [scores, setScores] = useState<Record<number, Yue2RungScore>>({});
+  const [noteDraft, setNoteDraft] = useState<Record<number, string>>({});
+  const loadScores = () => { if (datasetId && ladderRun) void listYue2RungScores(datasetId, ladderRun).then(r => setScores(Object.fromEntries(r.scores.map(s => [s.step, s])))).catch(() => {}); };
+  useEffect(() => { setScores({}); setNoteDraft({}); loadScores(); }, [datasetId, ladderRun]);
+  const score = async (step: number, patch: { likeness?: number | null; corruption?: number | null; notes?: string }) => {
+    if (!datasetId || !ladderRun) return;
+    try { const r = await scoreYue2Rung(datasetId, { refineRun: ladderRun, step, ...patch }); setScores(prev => ({ ...prev, [step]: r.score })); }
+    catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+  };
 
   const refreshRuns = async () => {
     if (!datasetId) return;
@@ -177,7 +187,9 @@ export const RefinePanel: React.FC = () => {
             </select>
           </label>
         </div>
-        <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.refine.ladderHint', 'Late-song decay shows after two minutes, so keep previews at 180 s or more. Renders are not deterministic: two tracks per rung is the minimum to trust a rung. Render adds more tracks to a rung with the count and length above.')}</p>
+        <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.refine.ladderHint', 'Late-song decay shows after two minutes, so keep previews at 180 s or more. Renders are not deterministic: two tracks per rung is the minimum to trust a rung. Render adds more tracks to a rung with the count and length above.')}
+          {' '}<a className="underline hover:text-zinc-700 dark:hover:text-zinc-300" href={yue2RungScoresExportUrl('csv')}>{t('trainingStudio.refine.exportCsv', 'Export all scores (CSV)')}</a>
+          {' · '}<a className="underline hover:text-zinc-700 dark:hover:text-zinc-300" href={yue2RungScoresExportUrl('json')} target="_blank" rel="noreferrer">JSON</a></p>
         {ladder.length > 0 && <div className="mt-3 flex flex-col gap-3">
           {ladder.map(c => {
             const mine = previews.filter(p => p.step === c.step).sort((a, b) => a.seed - b.seed);
@@ -197,6 +209,16 @@ export const RefinePanel: React.FC = () => {
                   className={`px-2 py-1 rounded-lg text-[11px] font-semibold border ${picked === c.dir ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300' : 'border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10'}`}>
                   {picked === c.dir ? t('trainingStudio.refine.picked', 'In use') : t('trainingStudio.refine.use', 'Use this rung')}
                 </button>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px]">
+                {(['likeness', 'corruption'] as const).map(key => <div key={key} className="flex items-center gap-1">
+                  <span className="text-zinc-500 w-16">{key === 'likeness' ? t('trainingStudio.refine.scoreLikeness', 'Likeness') : t('trainingStudio.refine.scoreCorruption', 'Corruption')}</span>
+                  {[1, 2, 3, 4, 5].map(n => <button key={n} type="button" onClick={() => void score(c.step, { [key]: scores[c.step]?.[key] === n ? null : n })}
+                    className={`w-6 h-6 rounded border text-[11px] font-semibold ${scores[c.step]?.[key] === n ? (key === 'corruption' ? 'bg-red-500/20 border-red-500 text-red-700 dark:text-red-300' : 'bg-amber-500/20 border-amber-500 text-amber-700 dark:text-amber-300') : 'border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:bg-zinc-500/10'}`}>{n}</button>)}
+                </div>)}
+                <input className={`${input} flex-1 min-w-[240px]`} placeholder={t('trainingStudio.refine.notes', 'Notes: what you heard, and where (m:ss)')}
+                  value={noteDraft[c.step] ?? scores[c.step]?.notes ?? ''} onChange={e => setNoteDraft(prev => ({ ...prev, [c.step]: e.target.value }))}
+                  onBlur={e => { if (e.target.value !== (scores[c.step]?.notes ?? '')) void score(c.step, { notes: e.target.value }); }} />
               </div>
               {mine.length > 0 && <div className="mt-2 flex flex-col gap-2">
                 {mine.map((p, i) => p.audioUrl && p.status === 'done'
