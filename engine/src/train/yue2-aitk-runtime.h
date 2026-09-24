@@ -142,6 +142,13 @@ struct Config {
     // (event "paused"), so the server can render that rung's previews and
     // resume, as it does for step-cadence preview pauses.
     bool pause_on_kl_mark = false;
+    // Planner refinement pacing. --refine-warmup N: the rate ramps from zero
+    // over N steps after the unfreeze (the unfreeze step rides in the resume
+    // record). --rung-adaptive-lr: when a reading jumps more than one rung
+    // since the last, the rate halves (floor 0.05x) and the multiplier rides
+    // in the record; the run settles to about one rung per interval.
+    std::int32_t refine_warmup = 0;
+    bool rung_adaptive_lr = false;
 };
 
 enum class ParseResult { ok, help, error };
@@ -349,6 +356,11 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
             parsed.unfreeze_planner = true;
         } else if (!std::strcmp(arg, "--pause-on-kl-mark")) {
             parsed.pause_on_kl_mark = true;
+        } else if (!std::strcmp(arg, "--rung-adaptive-lr")) {
+            parsed.rung_adaptive_lr = true;
+        } else if (!std::strcmp(arg, "--refine-warmup")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::decimal_i32(text.c_str(), &parsed.refine_warmup) || parsed.refine_warmup < 0) { if (error) *error = "--refine-warmup must be a nonnegative integer"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--kl-checkpoint-every")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.kl_checkpoint_every) || parsed.kl_checkpoint_every < 0.0f) { if (error) *error = "--kl-checkpoint-every must be a finite number >= 0"; return ParseResult::error; }

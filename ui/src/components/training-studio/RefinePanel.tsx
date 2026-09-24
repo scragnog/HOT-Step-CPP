@@ -33,7 +33,7 @@ export const RefinePanel: React.FC = () => {
   const [takes, setTakes] = useState(2);
   const [autoPreview, setAutoPreview] = useState(true);
   const [parallel, setParallel] = useState(false);
-  const [lrScale, setLrScale] = useState(0.2);
+  const [lrScale, setLrScale] = useState(0.1);
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
   const [ladderRun, setLadderRun] = useState('');
   const [previews, setPreviews] = useState<Yue2JointPreviewRecord[]>([]);
@@ -133,7 +133,7 @@ export const RefinePanel: React.FC = () => {
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.lrScale', 'Learning rate (× run)')}</span>
-            <input className={input} type="number" step="0.05" min={0.05} max={1} value={lrScale} disabled={active || busy} onChange={e => setLrScale(Math.max(0.05, Math.min(1, Number(e.target.value) || 0.3)))} />
+            <input className={input} type="number" step="0.05" min={0.05} max={1} value={lrScale} disabled={active || busy} onChange={e => setLrScale(Math.max(0.05, Math.min(1, Number(e.target.value) || 0.1)))} title={t('trainingStudio.refine.lrHint', 'Ramps up over the first 30 steps and halves itself whenever the KL jumps more than one rung between checkpoints.')} />
           </label>
         </div>
         <div className="mt-3 flex flex-wrap items-end gap-3">

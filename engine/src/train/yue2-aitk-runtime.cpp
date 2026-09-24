@@ -71,6 +71,10 @@ struct ResumeBinding {
     // The last KL rung a checkpoint was written for (--kl-checkpoint-every);
     // the next segment continues from the rung after it.
     double kl_mark_last = 0.0;
+    // Planner refinement: the step the planner was unfrozen at (warmup counts
+    // from it) and the adaptive rate multiplier.
+    int unfrozen_at = -1;
+    double rung_lr_mult = 1.0;
 };
 // Steps in the KL trend fit. Kept in step with Yue2AitkTrainCard's chart.
 constexpr int kKlTrendWindow = 30;
@@ -136,6 +140,8 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
         history("gnorm_history",&binding->gnorm_history); history("spike_steps",&binding->spike_steps);
         history("recon_history",&binding->recon_history);
         if(yyjson_val * v=yyjson_obj_get(root,"kl_mark_last")) { if(yyjson_is_num(v) && std::isfinite(yyjson_get_num(v))) binding->kl_mark_last=yyjson_get_num(v); }
+        if(yyjson_val * v=yyjson_obj_get(root,"unfrozen_at")) { if(yyjson_is_int(v) && yyjson_get_sint(v)>=0) binding->unfrozen_at=int(yyjson_get_sint(v)); }
+        if(yyjson_val * v=yyjson_obj_get(root,"rung_lr_mult")) { if(yyjson_is_num(v) && std::isfinite(yyjson_get_num(v)) && yyjson_get_num(v)>0) binding->rung_lr_mult=yyjson_get_num(v); }
         if(yyjson_val * v=yyjson_obj_get(root,"planner_frozen_at")) {
             if(!yyjson_is_int(v) || yyjson_get_sint(v)<0 || yyjson_get_sint(v)>plan->completed) return fail(error,"resume planner_frozen_at field is malformed");
             binding->planner_frozen_at=int(yyjson_get_sint(v));
@@ -158,7 +164,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
                              const yue2_aitk_runtime::Config & config, int opt_iter, double prodigy_d, double prodigy_r,
                              const std::vector<double> & kl_history, const std::vector<double> & loss_history, int planner_frozen_at,
                              const std::vector<double> & gnorm_history, const std::vector<double> & spike_steps,
-                             const std::vector<double> & recon_history = {}, double kl_mark_last = 0.0) {
+                             const std::vector<double> & recon_history = {}, double kl_mark_last = 0.0, int unfrozen_at = -1, double rung_lr_mult = 1.0) {
     yyjson_mut_doc * doc=yyjson_mut_doc_new(nullptr);
     if (!doc) return {};
     yyjson_mut_val * root=yyjson_mut_obj(doc), * arr=yyjson_mut_arr(doc);
@@ -186,6 +192,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     }
     if (!recon_history.empty()) { yyjson_mut_val * a=yyjson_mut_arr(doc); for(double v:recon_history) yyjson_mut_arr_add_real(doc,a,v); yyjson_mut_obj_add_val(doc,root,"recon_history",a); }
     if (kl_mark_last > 0.0) yyjson_mut_obj_add_real(doc,root,"kl_mark_last",kl_mark_last);
+    if (unfrozen_at >= 0) { yyjson_mut_obj_add_int(doc,root,"unfrozen_at",unfrozen_at); yyjson_mut_obj_add_real(doc,root,"rung_lr_mult",rung_lr_mult); }
     if (config.optimizer!="adamw") {
         yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
         if (config.optimizer=="prodigy") {
@@ -630,6 +637,8 @@ static int run_impl(Config config, std::string * error) {
         // gap and the new joint steps extrapolates far past the real KL (a
         // 2.38 reading at KL ~1.4 ended a refinement at once).
         const bool first_unfreeze = config.unfreeze_planner && resume_binding.planner_frozen_at >= 0;
+        int unfrozen_at = first_unfreeze ? completed : resume_binding.unfrozen_at;
+        double rung_lr_mult = resume_binding.rung_lr_mult;
         std::vector<double> kl_window = config.target_kl > 0.0f && !first_unfreeze ? resume_binding.kl_history : std::vector<double>{};
         // KL rungs (--kl-checkpoint-every): the next reading that earns a
         // checkpoint, set from the first reading; the reading itself goes into
@@ -666,7 +675,7 @@ static int run_impl(Config config, std::string * error) {
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
-                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history, kl_mark_last);
+                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history, kl_mark_last, unfrozen_at, rung_lr_mult);
             if (metadata.empty()) return false;
             if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str(), dataset.trigger, config.caption_dropout)) return false;
             if (use_lm) {
@@ -782,6 +791,13 @@ static int run_impl(Config config, std::string * error) {
                     const double ratio = std::min(1.0, (double)(completed - config.warmup) / denom);
                     lr *= 0.5 * (1.0 + std::cos(3.14159265358979 * ratio));
                 }
+                if (unfrozen_at >= 0) {
+                    // Refinement pacing: warm up from the unfreeze, then the
+                    // adaptive multiplier (halved whenever a rung was jumped).
+                    const int since = completed - unfrozen_at;
+                    if (config.refine_warmup > 0 && since < config.refine_warmup) lr *= (double)(since + 1) / (double) config.refine_warmup;
+                    lr *= rung_lr_mult;
+                }
                 lm->opt.base_lr = (float)lr;
             }
             if (!yue2_aitk_joint::run(backend.value, model, state, use_lm ? nullptr : adamw.get(), input, &metrics, error,
@@ -876,6 +892,11 @@ static int run_impl(Config config, std::string * error) {
                         const double every = config.kl_checkpoint_every;
                         if (next_kl_mark < 0.0) next_kl_mark = (std::floor(reading / every) + 1.0) * every;
                         if (reading >= next_kl_mark && reading < (double) config.target_kl) {
+                            if (config.rung_adaptive_lr && reading >= next_kl_mark + every) {
+                                rung_lr_mult = std::max(0.05, rung_lr_mult * 0.5);
+                                std::fprintf(stderr, "[yue2-aitk] KL %.3f jumped past rung %.2f: rate multiplier now %.3g
+", reading, next_kl_mark, rung_lr_mult);
+                            }
                             kl_mark_last = next_kl_mark;  // into this checkpoint's record
                             rung_checkpoint = true;
                             const bool saved_rung = save_checkpoint(completed);

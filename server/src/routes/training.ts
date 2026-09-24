@@ -3669,7 +3669,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(planCheck ? { planCheck } : {}),
       ...(resume && b.freezePlannerNow === true ? { freezePlannerNow: true } : {}),
       ...(resume && b.refine === true ? { reconReset: true } : {}),
-      ...(resume && b.refinePlanner === true ? { unfreezePlanner: true, klCheckpointEvery: Math.max(0.01, Math.min(1, Number(b.klCheckpointEvery) || 0.1)) } : {}),
+      ...(resume && b.refinePlanner === true ? { unfreezePlanner: true, klCheckpointEvery: Math.max(0.01, Math.min(1, Number(b.klCheckpointEvery) || 0.1)), refineWarmup: 30, rungAdaptiveLr: true } : {}),
       ...advanced,
       ...(preparation ? { preparation } : {}),
     });

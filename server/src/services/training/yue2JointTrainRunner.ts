@@ -96,6 +96,9 @@ export interface ResolvedYue2JointTrainOptions {
    *  klCheckpointEvery of KL for a listener to compare. */
   unfreezePlanner?: boolean;
   klCheckpointEvery?: number;
+  /** Refinement pacing: warmup steps from the unfreeze; halve the rate when a rung is jumped. */
+  refineWarmup?: number;
+  rungAdaptiveLr?: boolean;
   /** Plan-check planner stop: every `every` steps while the planner is live,
    *  pause, have the checkpoint's planner write `plans` plans, and freeze the
    *  planner at the LAST checkpoint whose failure rate stayed within `margin`
@@ -161,6 +164,8 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   if (o.klCheckpointEvery !== undefined && o.klCheckpointEvery > 0) {
     args.push('--kl-checkpoint-every', String(o.klCheckpointEvery));
     if (o.preview?.enabled && !o.preview.parallel) args.push('--pause-on-kl-mark');
+    if (o.refineWarmup !== undefined && o.refineWarmup > 0) args.push('--refine-warmup', String(o.refineWarmup));
+    if (o.rungAdaptiveLr) args.push('--rung-adaptive-lr');
   }
   if (o.resume) args.push('--resume', o.resume);
   if (o.resume && o.freezePlannerNow) args.push('--freeze-planner-now');
