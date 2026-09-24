@@ -698,10 +698,22 @@ async function capabilities(): Promise<BackendCapabilities> {
         type: 'toggle',
         label: 'Re-plan runaway scores',
         hint: 'Plan the lead sheet first (seconds), and if it is a runaway — normal sections, then an '
-            + 'outro that never ends — draw a new seed and plan again, up to three tries, before any '
-            + 'audio is rendered. Needs Chain of Thought melody or full. Off = render whatever the '
-            + 'planner writes.',
+            + 'outro that never ends — draw a new seed and plan again, up to the number of tries '
+            + 'below, before any audio is rendered. Needs Chain of Thought melody or full. Off = '
+            + 'render whatever the planner writes.',
         default: true,
+      },
+      {
+        key: 'yue2ReplanAttempts',
+        type: 'slider',
+        label: 'Re-plan tries',
+        hint: 'How many plans to draw (seconds each) before rendering the last one regardless. '
+            + 'An adapter pushed far past its safe KL writes runaway plans on most seeds, so a '
+            + 'higher number here buys more chances before a six-minute render is spent on one.',
+        default: 3,
+        min: 1,
+        max: 10,
+        step: 1,
       },
       {
         key: 'yue2PreviewScore',

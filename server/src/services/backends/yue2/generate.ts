@@ -566,7 +566,9 @@ ${req.lyrics}`);
     let autoReplan: { attempts: Array<{ seed: number; verdict: string; reason: string }>; accepted: boolean } | undefined;
     if (job.params.yue2AutoReplan !== false && req.cot !== 'off' && !req.abc) {
       autoReplan = { attempts: [], accepted: false };
-      const maxAttempts = 3;
+      // UI slider (index.ts's yue2ReplanAttempts extension) clamps to [1, 10].
+      const attemptsRaw = Number(job.params.yue2ReplanAttempts);
+      const maxAttempts = Number.isInteger(attemptsRaw) && attemptsRaw >= 1 && attemptsRaw <= 10 ? attemptsRaw : 3;
       let chosen: { abc: string; seed: number } | undefined;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         if ((job.status as string) === 'cancelled') break;
