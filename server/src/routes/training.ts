@@ -3398,7 +3398,11 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         ...(b.freezePlannerNow === true ? { freezePlannerNow: true } : {}),
         ...(b.refine === true ? { refine: true } : {}),
         // Planner refinement: KL rungs to a ceiling, both halves live.
-        ...(b.refinePlanner === true ? { refinePlanner: true, stopMode: 'kl', targetKl: b.targetKl ?? saved.targetKl, narExtraSteps: 0, klCheckpointEvery: b.klCheckpointEvery ?? 0.1 } : {}),
+        // A refinement resumes a converged adapter whose schedule had decayed
+        // to zero; a fresh cosine at full rate knocked one off its basin
+        // (grad norm x20 in three steps). Run at a fraction of the run's rate.
+        ...(b.refinePlanner === true ? { refinePlanner: true, stopMode: 'kl', targetKl: b.targetKl ?? saved.targetKl, narExtraSteps: 0, klCheckpointEvery: b.klCheckpointEvery ?? 0.1,
+          lr: (typeof saved.lr === 'number' ? saved.lr : 1e-4) * Math.max(0.05, Math.min(1, Number(b.refineLrScale) || 0.3)) } : {}),
         spikeFactor: b.spikeFactor ?? saved.spikeFactor, spikeStop: b.spikeStop ?? saved.spikeStop,
         spikeStopWindow: b.spikeStopWindow ?? saved.spikeStopWindow,
         reconStop: b.reconStop ?? saved.reconStop, reconStopWindow: b.reconStopWindow ?? saved.reconStopWindow,

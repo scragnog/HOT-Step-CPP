@@ -32,6 +32,7 @@ export const RefinePanel: React.FC = () => {
   const [seconds, setSeconds] = useState(180);
   const [takes, setTakes] = useState(2);
   const [autoPreview, setAutoPreview] = useState(true);
+  const [lrScale, setLrScale] = useState(0.3);
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
   const [ladderRun, setLadderRun] = useState('');
   const [previews, setPreviews] = useState<Yue2JointPreviewRecord[]>([]);
@@ -80,7 +81,7 @@ export const RefinePanel: React.FC = () => {
     try {
       const opts = run.options as Record<string, unknown>;
       const request = { trainingMethod: 'aitk', refinePlanner: true, resumeRunId: run.jobId, resumeStep: last.step,
-        steps: last.step + 1000, stopMode: 'kl', targetKl: ceiling, klCheckpointEvery: rung,
+        steps: last.step + 1000, stopMode: 'kl', targetKl: ceiling, klCheckpointEvery: rung, refineLrScale: lrScale,
         stopEngine: false, spikeFactor: 5, spikeStop: 3, spikeStopWindow: 20,
         lyricTiming: (opts.alignment as { enabled?: boolean } | undefined)?.enabled === true, autoPrepare: false, checkpoint: '', output: '',
         // Rung previews: the engine pauses after each rung checkpoint and the
@@ -113,7 +114,7 @@ export const RefinePanel: React.FC = () => {
       <div className="rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-4">
         <div className="flex items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100"><Sparkles size={16} className="text-amber-500" />{t('trainingStudio.refine.title', 'Refine the planner')}{detail?.name ? ` · ${detail.name}` : ''}</div>
         <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.refine.intro', 'The safe presets stop the planner at a conservative KL. Some artists take more. This continues a finished run with the planner live and the decoder along for the ride, saves a checkpoint at every KL rung up to the ceiling, and renders a preview per rung so you can hear where it starts to fall apart late in the song. Pick the last good rung.')}</p>
-        <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-5 gap-3">
           <label className="flex flex-col gap-1 md:col-span-2">
             <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.source', 'Finished run')}</span>
             <select className={input} value={source} disabled={active || busy} onChange={e => setSource(e.target.value)}>
@@ -128,6 +129,10 @@ export const RefinePanel: React.FC = () => {
           <label className="flex flex-col gap-1">
             <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.rung', 'Rung (KL)')}</span>
             <input className={input} type="number" step="0.05" min={0.05} max={1} value={rung} disabled={active || busy} onChange={e => setRung(Number(e.target.value) || 0.1)} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.refine.lrScale', 'Learning rate (× run)')}</span>
+            <input className={input} type="number" step="0.05" min={0.05} max={1} value={lrScale} disabled={active || busy} onChange={e => setLrScale(Math.max(0.05, Math.min(1, Number(e.target.value) || 0.3)))} />
           </label>
         </div>
         <div className="mt-3 flex flex-wrap items-end gap-3">

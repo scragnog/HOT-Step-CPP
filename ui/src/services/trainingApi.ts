@@ -702,6 +702,8 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
    *  to the KL ceiling `targetKl`, a rung checkpoint every klCheckpointEvery. */
   refinePlanner?: boolean;
   klCheckpointEvery?: number;
+  /** Planner refinement: learning rate as a fraction of the source run's (default 0.3). */
+  refineLrScale?: number;
 }
 
 export interface Yue2JointPreviewOptions {

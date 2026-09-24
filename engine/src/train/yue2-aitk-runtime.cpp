@@ -614,8 +614,12 @@ static int run_impl(Config config, std::string * error) {
         // An unfrozen planner puts the joint gradient norm (~10x the decoder's
         // alone) against a decoder-only baseline: every step would read as a
         // spike. Restart the guard's window, as the freeze does.
-        std::vector<double> gnorm_window = config.unfreeze_planner ? std::vector<double>{} : resume_binding.gnorm_history;
-        std::vector<double> spike_steps = config.unfreeze_planner ? std::vector<double>{} : resume_binding.spike_steps;
+        // Only the FIRST unfreeze (the record still says frozen) restarts the
+        // window; later segments keep theirs, or the guard is unarmed for 20
+        // steps after every rung (a 19.9 spike at step 527 went through).
+        const bool first_unfreeze_guard = config.unfreeze_planner && resume_binding.planner_frozen_at >= 0;
+        std::vector<double> gnorm_window = first_unfreeze_guard ? std::vector<double>{} : resume_binding.gnorm_history;
+        std::vector<double> spike_steps = first_unfreeze_guard ? std::vector<double>{} : resume_binding.spike_steps;
         std::vector<double> recon_history = config.recon_reset ? std::vector<double>{} : resume_binding.recon_history;
         int last_saved = -1;
         // Declared before save_checkpoint, which writes them into the resume
