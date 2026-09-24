@@ -689,6 +689,11 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   spikeFactor?: number;
   spikeStop?: number;
   spikeStopWindow?: number;
+  /** Decoder stop: with the planner frozen, end the run when the
+   *  reconstruction meter improves by less than reconStop (fraction) over
+   *  reconStopWindow checkpoints. 0 = train to the cap. */
+  reconStop?: number;
+  reconStopWindow?: number;
 }
 
 export interface Yue2JointPreviewOptions {
@@ -1841,6 +1846,9 @@ export interface TrainingMetricEvent {
   narMse?: number;
   /** YuE2 joint: true once the planner is frozen (decoder-only steps). */
   plannerFrozen?: boolean;
+  /** YuE2 joint, at a checkpoint: reconstruction meter and drift from base. */
+  narRecon?: number;
+  narDrift?: number;
   gradNorm?: number;
   clipScale?: number;
   /** Wall time of THIS step, not elapsed. The direct spill signal. */

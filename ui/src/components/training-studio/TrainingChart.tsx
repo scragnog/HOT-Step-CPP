@@ -59,7 +59,7 @@ export interface ChartMilestone {
 
 /** What a step point may carry beyond the store's own shape: the 20-step stop
  *  mean (computed by the AITK card) and the AR KL term of a joint run. */
-export type ChartStepPoint = TrainStepPoint & { ma20?: number; arKl?: number; klStop?: number; narMse?: number };
+export type ChartStepPoint = TrainStepPoint & { ma20?: number; arKl?: number; klStop?: number; narMse?: number; narRecon?: number };
 
 const VB = 100;
 /** Vertical breathing room so the target line and the extremes clear the edges. */
@@ -178,7 +178,7 @@ export const TrainingChart: React.FC<Props> = ({
   // A step without a loss still carries a gradient norm and a step time (the
   // YuE2 decoder-only phase after the planner freezes): keep it, each series
   // filters its own values.
-  const stepPts = steps.filter(s => Number.isFinite(s.loss) || Number.isFinite(s.narMse) || Number.isFinite(s.gradNorm) || Number.isFinite(s.stepMs));
+  const stepPts = steps.filter(s => Number.isFinite(s.loss) || Number.isFinite(s.narMse) || Number.isFinite(s.narRecon) || Number.isFinite(s.gradNorm) || Number.isFinite(s.stepMs));
   const evalPts = evals.filter(e => Number.isFinite(e.loss));
 
   // ── the metric table ──────────────────────────────────────────────────
@@ -224,7 +224,11 @@ export const TrainingChart: React.FC<Props> = ({
     // The decoder's own loss: the one series that continues after the YuE2
     // planner freezes, when the composite loss above stops.
     fromSteps('narMse', t('trainingStudio.chart.mNarMse', 'decoder loss'),
-      s => s.narMse, '#c4b5fd', '#7c3aed');
+      s => s.narMse, '#c4b5fd', '#7c3aed', true);
+    // One reading per checkpoint: how well the decoder reproduces the album's
+    // own latents. Falls and flattens; the decoder stop reads its knee.
+    fromSteps('narRecon', t('trainingStudio.chart.mNarRecon', 'decoder recon'),
+      s => s.narRecon, '#6ee7b7', '#059669');
     fromSteps('lr', t('trainingStudio.chart.mLr', 'learning rate'),
       s => s.lr, '#86efac', '#16a34a');
     fromSteps('grad', t('trainingStudio.chart.mGrad', 'grad norm'),

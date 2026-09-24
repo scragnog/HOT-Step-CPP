@@ -120,6 +120,13 @@ struct Config {
     float spike_factor = 0.0f;
     std::int32_t spike_stop = 0;
     std::int32_t spike_stop_window = 20;
+    // Decoder stop (needs --nar-drift, planner frozen): at a checkpoint, if
+    // the reconstruction meter improved by less than recon_stop (a fraction,
+    // 0.005 = half a percent) over the last recon_stop_window checkpoints,
+    // the decoder is done: stop there. 0 = off. Ear-checked 2026-09-24
+    // (Steel Panther 300/425/500: subtle, diminishing returns past the knee).
+    float recon_stop = 0.0f;
+    std::int32_t recon_stop_window = 3;
 };
 
 enum class ParseResult { ok, help, error };
@@ -138,6 +145,7 @@ inline void usage(FILE * out) {
         "[--nar-extra-steps N (with --target-kl: freeze the planner at its KL, train the decoder N more steps)] "
         "[--nar-drift (log the decoder's drift from base and its reconstruction error at every checkpoint)] "
         "[--meter-only (with --resume: write the checkpoint's meters.json and exit)] "
+        "[--recon-stop F (planner frozen: stop when the reconstruction meter improves under F over --recon-stop-window 3 checkpoints)] "
         "[--freeze-planner-now (with --resume and --nar-extra-steps: freeze the planner at the resumed step)] "
         "[--spike-factor F (skip updates above F x median gradient norm; 0 = off)] [--spike-stop N (stop after N skips)] [--spike-stop-window 20]\n");
 }
@@ -315,6 +323,13 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
                 !detail::finite_float(text.c_str(), &parsed.nar_lr_scale)) { if (error) *error = "--nar-lr-scale must be a finite number"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--freeze-planner-now")) {
             parsed.freeze_planner_now = true;
+        } else if (!std::strcmp(arg, "--recon-stop")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.recon_stop) || parsed.recon_stop < 0.0f || parsed.recon_stop >= 1.0f) { if (error) *error = "--recon-stop must be a fraction in [0, 1)"; return ParseResult::error; }
+            if (parsed.recon_stop > 0.0f) parsed.nar_drift = true;
+        } else if (!std::strcmp(arg, "--recon-stop-window")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::decimal_i32(text.c_str(), &parsed.recon_stop_window) || parsed.recon_stop_window < 1) { if (error) *error = "--recon-stop-window must be a positive integer"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--spike-factor")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.spike_factor) || parsed.spike_factor < 0.0f) { if (error) *error = "--spike-factor must be a finite number >= 0"; return ParseResult::error; }

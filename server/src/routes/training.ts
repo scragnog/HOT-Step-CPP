@@ -3392,6 +3392,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         ...(b.freezePlannerNow === true ? { freezePlannerNow: true } : {}),
         spikeFactor: b.spikeFactor ?? saved.spikeFactor, spikeStop: b.spikeStop ?? saved.spikeStop,
         spikeStopWindow: b.spikeStopWindow ?? saved.spikeStopWindow,
+        reconStop: b.reconStop ?? saved.reconStop, reconStopWindow: b.reconStopWindow ?? saved.reconStopWindow,
         preview: b.preview ?? saved.preview,
         lyricTiming: (saved.alignment as { enabled?: boolean } | undefined)?.enabled === true,
         cursorWeight: (saved.alignment as { cursorWeight?: number } | undefined)?.cursorWeight ?? 0 };
@@ -3584,8 +3585,8 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
     }
     const targetKlMode: 'mean' | 'trend' | undefined = stopMode === 'kl' && b.targetKlMode === 'trend' ? 'trend' : undefined;
     // Spike guard: all three optional; absent means off / engine default.
-    const spike: { spikeFactor?: number; spikeStop?: number; spikeStopWindow?: number } = {};
-    for (const [key, lo, hi, int] of [['spikeFactor', 0, 1000, false], ['spikeStop', 0, 1000, true], ['spikeStopWindow', 1, 100000, true]] as const) {
+    const spike: { spikeFactor?: number; spikeStop?: number; spikeStopWindow?: number; reconStop?: number; reconStopWindow?: number } = {};
+    for (const [key, lo, hi, int] of [['spikeFactor', 0, 1000, false], ['spikeStop', 0, 1000, true], ['spikeStopWindow', 1, 100000, true], ['reconStop', 0, 0.999, false], ['reconStopWindow', 1, 1000, true]] as const) {
       if (b[key] === undefined || b[key] === null || b[key] === '') continue;
       const v = Number(b[key]);
       if (!Number.isFinite(v) || v < lo || v > hi || (int && !Number.isInteger(v))) {

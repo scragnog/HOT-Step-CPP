@@ -41,7 +41,7 @@ const METRIC_CAP = 2000;
 // `loss` is absent once the planner is frozen: the trainer then reports only
 // the decoder's terms and the composite has no AR part. Those steps still
 // count for progress, pace and the gradient norm.
-type JointStepPoint = { step: number; loss?: number; ep: number; arKl?: number; narMse?: number; frozen?: boolean; gradNorm?: number; stepMs?: number; elapsedMs?: number; ma5?: number; ma20?: number };
+type JointStepPoint = { step: number; loss?: number; ep: number; arKl?: number; narMse?: number; narRecon?: number; frozen?: boolean; gradNorm?: number; stepMs?: number; elapsedMs?: number; ma5?: number; ma20?: number };
 type JointMilestone = { epoch: number; loss: number; path: string };
 function jointLossRate(points: JointStepPoint[]): number | null {
   const means = points.map(p => p.ma20).filter((v): v is number => typeof v === 'number');
@@ -159,6 +159,10 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // above 5x the recent median; three skips within 20 steps ends the run on
   // the last pre-spike weights.
   spikeFactor: 5, spikeStop: 3, spikeStopWindow: 20,
+  // Decoder stop (2026-09-24, Rob's ear check on Steel Panther 300/425/500:
+  // subtle, diminishing returns): stop once the reconstruction meter gains
+  // under 0.5% over three checkpoints. The preset's step cap still applies.
+  reconStop: 0.005, reconStopWindow: 3,
 };
 const LORA_STOP = { targetKl: 1.4, plannerLrScale: 0.3, narLrScale: undefined };
 const LOKR_STOP = { targetKl: 1.2, plannerLrScale: 0.6, narLrScale: 1 };
@@ -300,6 +304,11 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
   if (typeof window !== 'undefined' && !window.localStorage.getItem(presets)) {
     Object.assign(stored, presetValues(PRESETS[1]));
     window.localStorage.setItem(presets, '1');
+  }
+  const recon = `${FORM_KEY}${datasetId}:defaults-recon-stop`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(recon)) {
+    if (stored.reconStop === undefined) { stored.reconStop = DEFAULT_FORM.reconStop; stored.reconStopWindow = DEFAULT_FORM.reconStopWindow; }
+    window.localStorage.setItem(recon, '1');
   }
   const spike = `${FORM_KEY}${datasetId}:defaults-spike-guard`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(spike)) {
@@ -487,9 +496,17 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           setLiveMetric(item);
           if (typeof item.step === 'number' && Number.isFinite(item.step)) {
             setStepHistory(previous => {
+              const existing = previous.find(point => point.step === item.step);
               const prior = previous.filter(point => point.step !== item.step);
               const stepMs = typeof item.stepMs === 'number' ? item.stepMs : undefined;
-              const next = [...prior, { step: item.step!, ep: item.step!,
+              if (typeof item.narRecon === 'number' && item.loss === undefined && item.stepMs === undefined) {
+                // Checkpoint meters: attach to the step's point.
+                const merged = { ...(existing ?? { step: item.step!, ep: item.step! }), narRecon: item.narRecon };
+                const withRecon = [...prior, merged].sort((a, b) => a.step - b.step).slice(-METRIC_CAP);
+                writeStored(metricKey, { steps: withRecon });
+                return withRecon;
+              }
+              const next = [...prior, { ...(existing?.narRecon !== undefined ? { narRecon: existing.narRecon } : {}), step: item.step!, ep: item.step!,
                 ...(typeof item.loss === 'number' && Number.isFinite(item.loss) ? { loss: item.loss } : {}),
                 ...(typeof item.narMse === 'number' ? { narMse: item.narMse } : {}),
                 ...(item.plannerFrozen ? { frozen: true } : {}),
@@ -961,7 +978,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number')}
       </div>
       {(form.adapterType ?? 'lora') === 'lokr' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.lokrHint', 'LoKr trains a Kronecker-factored delta per site instead of a low-rank pair. Strength is alpha / dim; 4x (64 / 4 / 256, about 106 MB for both halves) is the tested default, against 279 MB for the rank-64 LoRA. For more capacity raise dim and keep alpha at 4x dim; at factor 4 stay below dim 256, where some sites stop factorizing and ignore alpha.')}</p>}
-      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 1.0. Once the KL reading reaches the target the planner freezes there. With "Decoder steps after KL" above 0, the decoder (timbre, where likeness lives) keeps training alone for that many steps; 0 ends the run at the KL, as before. The KL checkpoint is saved either way. Max steps is the cap. The presets set the KL target and let the decoder run to the cap: Fast 0.8 / 300, Balanced 1.2 / 500, Thorough 1.6 / 700.')}</p>}
+      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 1.0. Once the KL reading reaches the target the planner freezes there. With "Decoder steps after KL" above 0, the decoder (timbre, where likeness lives) keeps training alone for that many steps; 0 ends the run at the KL, as before. The KL checkpoint is saved either way. Max steps is the cap. The presets set the KL target and let the decoder run to the cap: Fast 0.8 / 300, Balanced 1.2 / 500, Thorough 1.6 / 700. The decoder stops earlier when its reconstruction meter flattens (Advanced: decoder stop).')}</p>}
       {(form.stopMode ?? 'steps') === 'loss' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetLossHint', 'Composite = AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight. Training stops once the trailing 20-step mean is at or below this.')}</p>}
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         {resumeChoice ? <p className="text-xs text-zinc-500">Optimizer: {form.optimizer ?? 'adamw'} (restored from the selected run)</p>
@@ -1018,6 +1035,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             ['spikeFactor', t('trainingStudio.yue2.method.spikeFactor', 'Spike guard'), 'this card ships 5 · skip any update whose gradient norm is over this many times the recent median. 0 turns the guard off'],
             ['spikeStop', t('trainingStudio.yue2.method.spikeStop', 'Stop after spikes'), 'this card ships 3 · end the run when this many updates are skipped close together (next field). 0 never stops'],
             ['spikeStopWindow', t('trainingStudio.yue2.method.spikeStopWindow', 'Spike window (steps)'), 'this card ships 20 · how close together the skips must be to stop the run'],
+            ['reconStop', t('trainingStudio.yue2.method.reconStop', 'Decoder stop (min gain)'), 'this card ships 0.005 · once the planner is frozen, stop when the decoder reconstruction meter improves by less than this fraction over the window below. 0 trains to the step cap'],
+            ['reconStopWindow', t('trainingStudio.yue2.method.reconStopWindow', 'Decoder stop window (checkpoints)'), 'this card ships 3 · how many checkpoints the gain is measured over'],
           ] as const).map(([key, label, hint]) => (
             <label key={key} className="flex flex-col gap-1">
               <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{label}</span>

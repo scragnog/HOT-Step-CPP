@@ -83,6 +83,11 @@ export interface ResolvedYue2JointTrainOptions {
   spikeFactor?: number;
   spikeStop?: number;
   spikeStopWindow?: number;
+  /** Decoder stop: once the planner is frozen, end the run at a checkpoint
+   *  where the reconstruction meter improved by less than reconStop (a
+   *  fraction) over the last reconStopWindow checkpoints. 0/absent = off. */
+  reconStop?: number;
+  reconStopWindow?: number;
   /** Plan-check planner stop: every `every` steps while the planner is live,
    *  pause, have the checkpoint's planner write `plans` plans, and freeze the
    *  planner at the LAST checkpoint whose failure rate stayed within `margin`
@@ -138,6 +143,10 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
     args.push('--spike-factor', String(o.spikeFactor));
     if (o.spikeStop !== undefined && o.spikeStop > 0) args.push('--spike-stop', String(o.spikeStop));
     if (o.spikeStopWindow !== undefined) args.push('--spike-stop-window', String(o.spikeStopWindow));
+  }
+  if (o.reconStop !== undefined && o.reconStop > 0) {
+    args.push('--recon-stop', String(o.reconStop));
+    if (o.reconStopWindow !== undefined) args.push('--recon-stop-window', String(o.reconStopWindow));
   }
   if (o.resume) args.push('--resume', o.resume);
   if (o.resume && o.freezePlannerNow) args.push('--freeze-planner-now');
@@ -270,7 +279,15 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
     }
     log(job, 'info', `Joint training ${stage}${step === undefined ? '' : ` at step ${step}`}`);
   } else if (stage === 'meters' && step !== undefined) {
+    const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+    if (num(raw.nar_recon) !== undefined || num(raw.nar_drift) !== undefined) {
+      pushEvent(job, { type: 'metric', metric: 'step', ts: Date.now(), step, totalSteps: state.totalSteps,
+        ...(num(raw.nar_recon) !== undefined ? { narRecon: num(raw.nar_recon) } : {}),
+        ...(num(raw.nar_drift) !== undefined ? { narDrift: num(raw.nar_drift) } : {}) });
+    }
     log(job, 'info', `Meters at step ${step}: decoder drift ${raw.nar_drift}${raw.nar_recon === undefined ? '' : `, reconstruction ${raw.nar_recon}`}${raw.ar_kl_mean20 === undefined ? '' : `, planner KL ${raw.ar_kl_mean20}`}`);
+  } else if (stage === 'recon_stop' && step !== undefined) {
+    log(job, 'info', `Decoder reconstruction has flattened; decoder done, stopping at step ${step}`);
   } else if (stage === 'spike_stop' && step !== undefined) {
     log(job, 'info', `Repeated gradient spikes at step ${step}; stopping on the last pre-spike weights`);
   } else if (stage === 'planner_frozen' && step !== undefined) {

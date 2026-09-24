@@ -470,6 +470,10 @@ export interface TrainingMetricEvent {
   narMse?: number;
   /** YuE2 joint: true on decoder-only steps after the planner froze. */
   plannerFrozen?: boolean;
+  /** YuE2 joint, at a checkpoint: the decoder's reconstruction meter and its
+   *  drift from base (meters.json). */
+  narRecon?: number;
+  narDrift?: number;
   gradNorm?: number;
   clipScale?: number;
   /** Wall time of THIS step, not elapsed. The direct spill signal. */

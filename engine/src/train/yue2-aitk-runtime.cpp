@@ -66,6 +66,8 @@ struct ResumeBinding {
     int planner_frozen_at = -1;
     // Spike guard state: recent applied gradient norms and recent skip steps.
     std::vector<double> gnorm_history, spike_steps;
+    // Reconstruction meter at each checkpoint since the planner froze.
+    std::vector<double> recon_history;
 };
 // Steps in the KL trend fit. Kept in step with Yue2AitkTrainCard's chart.
 constexpr int kKlTrendWindow = 30;
@@ -129,6 +131,7 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
         };
         history("kl_history",&binding->kl_history); history("loss_history",&binding->loss_history);
         history("gnorm_history",&binding->gnorm_history); history("spike_steps",&binding->spike_steps);
+        history("recon_history",&binding->recon_history);
         if(yyjson_val * v=yyjson_obj_get(root,"planner_frozen_at")) {
             if(!yyjson_is_int(v) || yyjson_get_sint(v)<0 || yyjson_get_sint(v)>plan->completed) return fail(error,"resume planner_frozen_at field is malformed");
             binding->planner_frozen_at=int(yyjson_get_sint(v));
@@ -150,7 +153,8 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
 std::string make_resume_meta(const std::string & cp, const std::string & ds, const std::string & sm, uint64_t seed, int device, int completed, size_t cursor, const std::vector<size_t> & order, const std::string & sampler, float cursor_weight,
                              const yue2_aitk_runtime::Config & config, int opt_iter, double prodigy_d, double prodigy_r,
                              const std::vector<double> & kl_history, const std::vector<double> & loss_history, int planner_frozen_at,
-                             const std::vector<double> & gnorm_history, const std::vector<double> & spike_steps) {
+                             const std::vector<double> & gnorm_history, const std::vector<double> & spike_steps,
+                             const std::vector<double> & recon_history = {}) {
     yyjson_mut_doc * doc=yyjson_mut_doc_new(nullptr);
     if (!doc) return {};
     yyjson_mut_val * root=yyjson_mut_obj(doc), * arr=yyjson_mut_arr(doc);
@@ -176,6 +180,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     if (config.spike_factor > 0.0f) for (auto [key, hist] : { std::pair<const char *, const std::vector<double> *>{"gnorm_history",&gnorm_history}, {"spike_steps",&spike_steps} }) {
         yyjson_mut_val * a=yyjson_mut_arr(doc); for(double v:*hist) yyjson_mut_arr_add_real(doc,a,v); yyjson_mut_obj_add_val(doc,root,key,a);
     }
+    if (!recon_history.empty()) { yyjson_mut_val * a=yyjson_mut_arr(doc); for(double v:recon_history) yyjson_mut_arr_add_real(doc,a,v); yyjson_mut_obj_add_val(doc,root,"recon_history",a); }
     if (config.optimizer!="adamw") {
         yyjson_mut_obj_add_int(doc,root,"opt_iter",opt_iter);
         if (config.optimizer=="prodigy") {
@@ -596,6 +601,7 @@ static int run_impl(Config config, std::string * error) {
         // The planner's KL at the moment a checkpoint is written, for meters.json.
         std::vector<double> kl_recent = resume_binding.kl_history;
         std::vector<double> gnorm_window = resume_binding.gnorm_history, spike_steps = resume_binding.spike_steps;
+        std::vector<double> recon_history = resume_binding.recon_history;
         int last_saved = -1;
         // Declared before save_checkpoint, which writes them into the resume
         // record; seeded from it so a resumed segment can stop at once.
@@ -620,11 +626,12 @@ static int run_impl(Config config, std::string * error) {
                 std::ofstream(temp_dir / "meters.json", std::ios::binary) << meters.str();
                 jsonl << meters.str(); jsonl.flush();
                 std::cout << meters.str() << std::flush;
+                if (planner_frozen_at >= 0) recon_history.push_back(recon);
             }
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
-                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps);
+                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history);
             if (metadata.empty()) return false;
             if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str(), dataset.trigger, config.caption_dropout)) return false;
             if (use_lm) {
@@ -849,6 +856,21 @@ static int run_impl(Config config, std::string * error) {
             }
             if (completed % config.save_every == 0 || completed == end_step())
                 if (!save_checkpoint(completed)) { fail(error, "checkpoint publication failed"); return 1; }
+            // Decoder stop: the reconstruction meter has flattened over the
+            // last recon_stop_window checkpoints of the frozen phase. The
+            // checkpoint just written is the one kept.
+            if (config.recon_stop > 0.0f && planner_frozen_at >= 0 && completed % config.save_every == 0 && completed < end_step()
+                && recon_history.size() > (size_t) config.recon_stop_window) {
+                const double before = recon_history[recon_history.size() - 1 - (size_t) config.recon_stop_window], now = recon_history.back();
+                const double improvement = before > 0.0 ? (before - now) / before : 0.0;
+                if (improvement < (double) config.recon_stop) {
+                    std::fprintf(stderr, "[yue2-aitk] reconstruction %.4f -> %.4f over %d checkpoints (%.2f%%): decoder done, stopping at step %d\n", before, now, config.recon_stop_window, 100.0 * improvement, completed);
+                    event("recon_stop", completed);
+                    event("target", completed);
+                    event("done", completed);
+                    return 0;
+                }
+            }
             if (config.pause_at > 0 && completed >= config.pause_at && completed < end_step()) {
                 if (!save_checkpoint(completed)) { fail(error, "pause checkpoint publication failed"); return 1; }
                 event("paused", completed);
