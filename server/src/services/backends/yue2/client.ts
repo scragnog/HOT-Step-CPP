@@ -236,6 +236,9 @@ export interface Yue2SynthRequest {
   /** Stop after the semantic stage: the result body is the raw codec id
    *  stream as a JSON array. No NAR, no VAE. A planner probe for training. */
   semantic_only?: boolean;
+  /** Recompose on a composer runaway (semantic stage at its cap): new seed,
+   *  up to this many extra tries, before the NAR runs. 0/absent = off. */
+  semantic_retries?: number;
   seed?: number;
   /** Optional override; unset = mode-dependent engine default
    *  (1.01 for cot=off, 1.0 otherwise, per protocol.py's own SongRequest). */

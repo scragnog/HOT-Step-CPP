@@ -346,6 +346,9 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
   // yue2-nar-graph.h). 0/unset = off, every step computed for real -- the
   // UI slider (index.ts's yue2NarCacheRatio extension) clamps to [0, 0.9],
   // this just guards a directly-posted value too.
+  // UI slider (index.ts's yue2ComposeRetries extension) clamps to [0, 10].
+  const retriesRaw = Number(params.yue2ComposeRetries);
+  const semantic_retries = Number.isInteger(retriesRaw) && retriesRaw >= 0 && retriesRaw <= 10 ? retriesRaw : 2;
   const narCacheRaw = Number(params.yue2NarCacheRatio);
   const nar_cache_ratio = Number.isFinite(narCacheRaw) && narCacheRaw > 0
     ? Math.min(narCacheRaw, 0.9)
@@ -433,6 +436,7 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
     ...(cfg_scale !== undefined ? { cfg_scale } : {}),
     ode_steps,
     ...(nar_cache_ratio !== undefined ? { nar_cache_ratio } : {}),
+    ...(semantic_retries > 0 ? { semantic_retries } : {}),
     ode_method: 'midpoint',
     ...(narSolver ? { infer_method: narSolver } : {}),
     ...(narScheduler ? { scheduler: narScheduler } : {}),

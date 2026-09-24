@@ -950,9 +950,29 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
     const bool have_abc = (req.cot != YUE2_COT_OFF);  // off never has an ABC span; melody/full always do (sampled or supplied)
 
     Yue2ArKvCache sem_cache;
-    if (!yue2_run_semantic_stage(m, tok, req, have_abc, songs, cancel, progress, &sem_cache,
-                                 &out->stage_ms[YUE2_STAGE_SEMANTIC], err)) {
-        return false;
+    // Recompose on a runaway: a song whose composer ran to the cap (limit_hit,
+    // not the preview cap) gets a new seed and another go, up to
+    // req.semantic_retries times. The plan is kept; only the codec stream is
+    // redrawn. Each try costs the stage's seconds, never a render.
+    for (int attempt = 0;; attempt++) {
+        double stage_ms = 0.0;
+        if (!yue2_run_semantic_stage(m, tok, req, have_abc, songs, cancel, progress, &sem_cache, &stage_ms, err)) {
+            return false;
+        }
+        out->stage_ms[YUE2_STAGE_SEMANTIC] += stage_ms;
+        bool runaway = false;
+        for (int b = 0; b < B; b++) runaway |= songs[(size_t) b].stage_end_reason[YUE2_STAGE_SEMANTIC] == "limit_hit";
+        if (!runaway || attempt >= req.semantic_retries || (cancel && cancel->load())) break;
+        yue2_ar_kv_cache_free(&sem_cache);
+        for (int b = 0; b < B; b++) {
+            Yue2SongState & sg = songs[(size_t) b];
+            if (sg.stage_end_reason[YUE2_STAGE_SEMANTIC] != "limit_hit") continue;
+            sg.seed += 1000003ull;
+            sg.rng.seed(sg.seed);
+            sg.codec_ids.clear();
+            sg.stage_end_reason[YUE2_STAGE_SEMANTIC].clear();
+        }
+        fprintf(stderr, "[YuE2] composer ran to its cap: recomposing with a new seed (try %d of %d)\n", attempt + 1, req.semantic_retries);
     }
     t_stage = std::chrono::steady_clock::now();
     if (req.semantic_only) {

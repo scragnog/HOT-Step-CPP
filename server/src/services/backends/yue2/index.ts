@@ -716,6 +716,20 @@ async function capabilities(): Promise<BackendCapabilities> {
         step: 1,
       },
       {
+        key: 'yue2ComposeRetries',
+        type: 'slider',
+        label: 'Recompose runaway songs',
+        hint: 'A healthy lead sheet can still be composed into a runaway: the composer (semantic '
+            + 'stage) runs to its cap, six minutes, instead of ending the song. When that happens '
+            + 'the engine redraws the seed and composes again, up to this many extra tries, before '
+            + 'any audio is rendered; each try costs the composer\'s seconds, not a render. '
+            + '0 = render whatever came out.',
+        default: 2,
+        min: 0,
+        max: 10,
+        step: 1,
+      },
+      {
         key: 'yue2PreviewScore',
         type: 'toggle',
         label: 'Preview the score first',

@@ -72,6 +72,12 @@ struct Yue2Request {
     // a JSON array, no NAR, no VAE, no audio. A training-time probe of the
     // planner (the AR half) alone.
     bool        semantic_only = false;
+    // When the semantic (composer) stage runs to its cap instead of ending
+    // the song, redraw that song's seed and compose again, up to this many
+    // times, before the NAR runs. 0 = render whatever came out. A plan that
+    // is healthy can still be composed into a six-minute runaway; this
+    // catches that in the seconds the stage costs, not the minutes a render does.
+    int         semantic_retries = 0;
 
     uint64_t seed         = 0;
     bool     seed_present = false;
@@ -244,6 +250,16 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
             return false;
         }
         out->plan_only = yyjson_is_bool(v) && yyjson_get_bool(v);
+    }
+    if (yyjson_val * v = yyjson_obj_get(root, "semantic_retries")) {
+        if (!yyjson_is_int(v) && !yyjson_is_null(v)) {
+            if (err) {
+                *err = "\"semantic_retries\" must be an integer";
+            }
+            yyjson_doc_free(doc);
+            return false;
+        }
+        if (yyjson_is_int(v)) out->semantic_retries = (int) std::max<int64_t>(0, std::min<int64_t>(20, yyjson_get_sint(v)));
     }
     if (yyjson_val * v = yyjson_obj_get(root, "semantic_only")) {
         if (!yyjson_is_bool(v) && !yyjson_is_null(v)) {
