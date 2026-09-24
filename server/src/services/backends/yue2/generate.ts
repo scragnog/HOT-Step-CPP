@@ -600,7 +600,7 @@ ${req.lyrics}`);
       if (autoReplan && chosen) {
         req.abc = chosen.abc;
         req.seed = chosen.seed;
-        if (!autoReplan.accepted) log('WARNING', `[YuE2] Every plan attempt was a runaway or had no vocal line; rendering the last one (seed ${chosen.seed})`);
+        if (!autoReplan.accepted) log('WARNING', `[YuE2] Every plan attempt was a runaway, had no vocal line or ran to its cap; rendering the last one (seed ${chosen.seed})`);
         else if (autoReplan.attempts.length > 1) log('INFO', `[YuE2] Bad plan replaced after ${autoReplan.attempts.length} attempts`);
       }
     }

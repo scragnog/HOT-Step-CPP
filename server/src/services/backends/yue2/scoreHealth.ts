@@ -134,7 +134,9 @@ export function classifyYue2Score(abc: string, endReason?: string): Yue2ScoreHea
 
 /** Whether the auto re-plan keeps a plan (generation and training previews
  *  share it). 'unknown' = no vocal line: for a vocal song that plan renders as
- *  garble (2026-09-24, Oasis step 140), so it is redrawn like a runaway. */
+ *  garble (2026-09-24, Oasis step 140), so it is redrawn like a runaway.
+ *  'long' = the planner ran to its token cap: Rob's rule (2026-09-24) is that
+ *  a cap means broken, so it is redrawn too. */
 export function yue2PlanUsable(verdict: string, instrumental: boolean): boolean {
-  return verdict === 'healthy' || verdict === 'long' || (verdict === 'unknown' && instrumental);
+  return verdict === 'healthy' || (verdict === 'unknown' && instrumental);
 }

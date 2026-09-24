@@ -218,9 +218,12 @@ export async function renderYue2JointPreview(input: {
         records[0].plan = { seed: supplied!.seed, accepted, attempts };
         recordYue2JointPreview(input.output, records[0]);
       }
+      // Artist takes render as the app would: the composer runs to its real
+      // cap (9000 frames) and a take that reaches it is recomposed, like the
+      // app's Compose Retries. A preview cap would hide the runaway: it stops
+      // at 300 s looking like a long song (3 of 4 takes, 2026-09-24).
       const sub = await api.synth({ style: kind === 'control' ? 'downtempo electronic, calm and spacious' : caption, lyrics: kind === 'control' ? '' : lyrics, cot: 'full', seed: supplied ? supplied.seed : seeds[0],
-        ...(supplied ? { abc: supplied.abc } : {}),
-        preview_max_frames: input.options.previewMaxFrames,
+        ...(supplied ? { abc: supplied.abc, semantic_retries: PREVIEW_REPLAN_ATTEMPTS } : { preview_max_frames: input.options.previewMaxFrames }),
         ...(seeds.length > 1 ? { lm_batch_size: seeds.length } : {}),
         ...(input.options.odeSteps ? { ode_steps: input.options.odeSteps } : {}),
         ...(input.options.narCacheRatio !== undefined ? { nar_cache_ratio: input.options.narCacheRatio } : {}) });
@@ -251,6 +254,15 @@ export async function renderYue2JointPreview(input: {
         // Per-track end reasons and scores; a single song reports at the top level.
         const d = await detail(sub.job_id).catch(() => ({} as Awaited<ReturnType<typeof yue2FinalDetail>>));
         const perTrack = (i: number) => (d.tracks && d.tracks.length > i ? d.tracks[i] : i === 0 ? d : undefined);
+        // One file stem per take, shared by its .wav and .score.abc (cleanup
+        // pairs them by name). Re-planned takes carry their plan seed; a stem
+        // already on disk (a re-render) gets -2, -3, so nothing is replaced.
+        const stems = records.map(record => {
+          const base = `step-${input.step}-${kind}-s${record.seed}${record.plan ? `-p${record.plan.seed}` : ''}`;
+          let stem = base;
+          for (let n = 2; fs.existsSync(path.join(input.output, 'previews', `${stem}.wav`)); n++) stem = `${base}-${n}`;
+          return stem;
+        });
         records.forEach((record, i) => {
           const t = perTrack(i);
           if (!t) return;
@@ -260,7 +272,7 @@ export async function renderYue2JointPreview(input: {
           if (typeof abc === 'string' && abc.trim()) {
             const h = classifyYue2Score(abc, t.end_reason);
             record.score = { verdict: h.verdict, reason: h.reason, bars: h.bars, vocalShare: h.vocalShare, sections: h.sections };
-            try { fs.mkdirSync(path.join(input.output, 'previews'), { recursive: true }); fs.writeFileSync(path.join(input.output, 'previews', `step-${input.step}-${kind}-s${record.seed}${record.plan ? `-p${record.plan.seed}` : ''}.score.abc`), abc); } catch { /* the verdict is already on the record */ }
+            try { fs.mkdirSync(path.join(input.output, 'previews'), { recursive: true }); fs.writeFileSync(path.join(input.output, 'previews', `${stems[i]}.score.abc`), abc); } catch { /* the verdict is already on the record */ }
           }
         });
         const response = await api.result(sub.job_id);
@@ -272,7 +284,7 @@ export async function renderYue2JointPreview(input: {
         records.forEach((record, i) => {
           // Re-planned takes carry their plan seed, so a re-render never
           // collides with (or replaces) an earlier take of the same seed.
-          const filename = `step-${input.step}-${kind}-s${record.seed}${record.plan ? `-p${record.plan.seed}` : ''}.wav`;
+          const filename = `${stems[i]}.wav`;
           fs.writeFileSync(path.join(dir, filename), parts[i], { flag: 'wx' });
           record.status = 'done'; record.file = filename; record.updatedAt = Date.now();
           recordYue2JointPreview(input.output, record);
