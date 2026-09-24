@@ -1002,13 +1002,8 @@ jobs:
           # Config
           cp .env.example "$DIST/.env.example"
 
-          # Launch script
-          cat > "$DIST/HOT-Step.sh" << 'LAUNCH'
-          #!/bin/bash
-          DIR="$(cd "$(dirname "$0")" && pwd)"
-          export HOT_STEP_ROOT="$DIR"
-          exec "$DIR/runtime/bin/node" "$DIR/server/server.mjs"
-          LAUNCH
+          # Launch script: the shared one, with the restart loop (#172).
+          cp release/HOT-Step.sh "$DIST/HOT-Step.sh"
           chmod +x "$DIST/HOT-Step.sh"
 
       - name: Smoke test packaged engine

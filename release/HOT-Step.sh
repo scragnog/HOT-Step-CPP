@@ -20,7 +20,8 @@ export HOT_STEP_ROOT="$DIR"
 mkdir -p "$DIR/models"
 
 # Open browser after a short delay (desktop only — silent on headless)
-(sleep 5 && xdg-open "http://localhost:3001" 2>/dev/null) &
+if [ "$(uname)" = "Darwin" ]; then OPENER=open; else OPENER=xdg-open; fi
+(sleep 5 && "$OPENER" "http://localhost:3001" 2>/dev/null) &
 
 # ── Restart loop ──────────────────────────────────────────
 # The server writes .restart-requested when the user clicks
