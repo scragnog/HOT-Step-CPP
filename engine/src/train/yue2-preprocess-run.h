@@ -832,6 +832,10 @@ static int yue2_preprocess_captions_only(const Yue2PreprocessArgs & a) {
             yyjson_mut_obj_remove_str(obj, kv.first);
             yyjson_mut_obj_add_strcpy(mdoc, obj, kv.first, kv.second->c_str());
         }
+        // A sidecar re-marked instrumental must reach the trainer without a
+        // full re-encode.
+        yyjson_mut_obj_remove_str(obj, "instrumental");
+        yyjson_mut_obj_add_bool(mdoc, obj, "instrumental", sm.instrumental);
     };
     std::map<std::string, YpCapRow> by_latent;
     int64_t n_src = 0, n_cap = 0, n_lyr = 0, n_missing = 0;

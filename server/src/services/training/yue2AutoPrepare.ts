@@ -24,7 +24,8 @@ export function preparationFingerprint(o: ResolvedYue2AitkPrepareOptions): strin
       if (typeof source[key] === 'string' && source[key]) files.push(path.resolve(path.dirname(o.legacyManifest), source[key]));
     }
   }
-  return createHash('sha256').update(JSON.stringify({ version: 2, text, timing: o.lyricTiming !== false, trigger: o.trigger || '',
+  // version 3: the importer now clears a flagged instrumental's lyrics.
+  return createHash('sha256').update(JSON.stringify({ version: 3, text, timing: o.lyricTiming !== false, trigger: o.trigger || '',
     files: [...new Set(files)].sort().map(stamp) })).digest('hex');
 }
 

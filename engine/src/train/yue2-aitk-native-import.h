@@ -239,6 +239,12 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
         if ((caption_value && !str(caption_value, &style)) || (lyrics_value && !str(lyrics_value, &lyrics)) ||
             (abc_value && !str(abc_value, &abc)) || (abc_error_value && !str(abc_error_value, &abc_error)))
             return fail(error, "Legacy caption, lyrics, ABC and ABC error fields must be strings");
+        // Preprocess flags an instrumental but keeps its sidecar text, which is
+        // often a bare "[Instrumental]". Trained as lyrics, that is a vocal
+        // prompt no generation sends: an instrumental request has none.
+        const auto instrumental_value = yyjson_obj_get(source, "instrumental");
+        const bool flagged_instrumental = yyjson_is_bool(instrumental_value) && yyjson_get_bool(instrumental_value);
+        if (flagged_instrumental) lyrics.clear();
         const std::string source_lyrics_before_normalization = lyrics;
         if (caption_format == "plain" && style.find("lyrics:") != std::string::npos)
             return fail(error, "plain caption contains a lyrics: section; rerun preprocessing with caption_mode=ace");
@@ -298,6 +304,7 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
         const yyjson_val * cursor_value = yyjson_obj_get(source, "cursor_words");
         if (cursor_value && !str(const_cast<yyjson_val *>(cursor_value), &cursor_name, true))
             return fail(error, "source cursor_words must be a manifest-relative path");
+        if (flagged_instrumental) cursor_name.clear();   // aligned before it was flagged
         if (request.lyric_timing && !lyrics.empty() && cursor_name.empty()) {
             // The aligner could not place this track's lyrics (wrong sheet, no
             // singing found). It trains without the timing loss rather than
