@@ -591,6 +591,16 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     if (typeof window !== 'undefined') window.localStorage.setItem(YUE2_JOINT_PRESETS_KEY, JSON.stringify(presets));
   }, [presets]);
 
+  // "Perform all stages" runs in the store and can outlive this card: after a
+  // page remount it starts training through the old instance, so the job never
+  // reaches this one. Adopt any joint job the store reports for this dataset.
+  const storeJob = useTrainingStore(s => s.activeJob);
+  useEffect(() => {
+    if (!storeJob || !isJointJob(storeJob, datasetId) || storeJob.id === job?.id) return;
+    setJob(storeJob);
+    window.localStorage.setItem(`${JOB_KEY}${datasetId}`, JSON.stringify(storeJob.id));
+  }, [datasetId, storeJob?.id]);
+
   useEffect(() => {
     if (!job || !['queued', 'running'].includes(job.status)) return;
     const id = job.id;
