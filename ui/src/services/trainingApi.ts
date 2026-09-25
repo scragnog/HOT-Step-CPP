@@ -717,6 +717,9 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   refineLrScale?: number;
   /** Main run: when it completes, the server starts a planner refinement of it. */
   autoRefine?: boolean;
+  /** Further decoder training only: a checkpoint is kept when reconstruction
+   *  has dropped by at least this since the last kept one. */
+  reconKeepDelta?: number;
 }
 
 export interface Yue2JointPreviewOptions {
@@ -775,6 +778,10 @@ export interface Yue2JointPreviewRecord {
   endReason?: string;
   stageEndReasons?: Record<string, string>;
   score?: { verdict: string; reason: string; bars: number; vocalShare: number; sections: string[] };
+  /** Planner re-plan attempts behind this take's accepted seed. */
+  plan?: { seed: number; accepted: boolean; attempts: Array<{ seed: number; verdict: string; reason: string }> };
+  /** Composer re-plans behind this take. */
+  composerReplans?: number;
   id: string;
   step: number;
   kind: 'artist' | 'baseline' | 'control';
@@ -2473,7 +2480,7 @@ export type Yue2CleanupChoice = { caches?: boolean; otherCheckpoints?: boolean; 
 export async function getYue2CleanupPlan(id: string, run: string, step: number): Promise<Yue2CleanupPlan> {
   return request(`/datasets/${encodeURIComponent(id)}/yue2-cleanup-plan?run=${encodeURIComponent(run)}&step=${step}`);
 }
-export async function runYue2Cleanup(id: string, body: { run: string; step: number } & Yue2CleanupChoice): Promise<{ freedBytes: number; done: string[] }> {
+export async function runYue2Cleanup(id: string, body: { run: string; step: number } & Yue2CleanupChoice): Promise<{ freedBytes: number; done: string[]; movedTo?: string }> {
   return request(`/datasets/${encodeURIComponent(id)}/yue2-cleanup`, { method: 'POST', ...jsonBody(body) });
 }
 

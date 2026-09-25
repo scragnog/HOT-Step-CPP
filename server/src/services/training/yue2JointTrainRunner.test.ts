@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildYue2JointTrainArgs, parseYue2JointEvent, parseYue2JointStopMode } from './yue2JointTrainRunner.js';
+import { buildYue2JointTrainArgs, parseYue2JointEvent, parseYue2JointStopMode, reconKeepDecision } from './yue2JointTrainRunner.js';
 
 test('joint stop mode accepts the explicit step count sent by the UI', () => {
   assert.equal(parseYue2JointStopMode('steps'), 'steps');
@@ -86,6 +86,17 @@ test('prodigy run carries optimizer, rank/alpha and target-loss flags', () => {
     '--device', 'CUDA0', '--nar-drift', '--rank', '16', '--alpha', '32',
     '--optimizer', 'prodigy', '--prodigy-d0', '0.000001', '--target-loss', '0.9',
   ]);
+});
+
+test('recon-keep decision keeps the first checkpoint and every real improvement, drops a flat one', () => {
+  const first = reconKeepDecision(undefined, 0.05, 0.01);
+  assert.deepEqual(first, { keep: true, bestRecon: 0.05 });
+  const improved = reconKeepDecision(0.05, 0.03, 0.01);
+  assert.deepEqual(improved, { keep: true, bestRecon: 0.03 });
+  const flat = reconKeepDecision(0.03, 0.029, 0.01);
+  assert.deepEqual(flat, { keep: false, bestRecon: 0.03 });
+  const wellPastDelta = reconKeepDecision(0.03, 0.018, 0.01);
+  assert.deepEqual(wellPastDelta, { keep: true, bestRecon: 0.018 });
 });
 
 test('muon run carries lr-scale and Newton-Schulz step count, adamw adds no optimizer flag', () => {

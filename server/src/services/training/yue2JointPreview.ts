@@ -37,6 +37,10 @@ export interface Yue2JointPreviewRecord {
   /** Artist takes go through the app's auto re-plan: the plan that was
    *  rendered (its seed) and every attempt before it. */
   plan?: { seed: number; accepted: boolean; attempts: Array<{ seed: number; verdict: string; reason: string }> };
+  /** The render's own composer retries (the app's Compose Retries, not the
+   *  plan re-draws above): how many times the seed the engine echoed back
+   *  advanced past the requested one, each step exactly 1000003. */
+  composerReplans?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -226,7 +230,8 @@ export async function renderYue2JointPreview(input: {
       // cap (9000 frames) and a take that reaches it is recomposed, like the
       // app's Compose Retries. A preview cap would hide the runaway: it stops
       // at 300 s looking like a long song (3 of 4 takes, 2026-09-24).
-      const sub = await api.synth({ style: kind === 'control' ? 'downtempo electronic, calm and spacious' : caption, lyrics: kind === 'control' ? '' : lyrics, cot: 'full', seed: supplied ? supplied.seed : seeds[0],
+      const requestedSeed = supplied ? supplied.seed : seeds[0];
+      const sub = await api.synth({ style: kind === 'control' ? 'downtempo electronic, calm and spacious' : caption, lyrics: kind === 'control' ? '' : lyrics, cot: 'full', seed: requestedSeed,
         ...(supplied ? { abc: supplied.abc, semantic_retries: PREVIEW_REPLAN_ATTEMPTS } : { preview_max_frames: input.options.previewMaxFrames }),
         ...(input.options.odeSteps ? { ode_steps: input.options.odeSteps } : {}),
         ...(input.options.narCacheRatio !== undefined ? { nar_cache_ratio: input.options.narCacheRatio } : {}) });
@@ -271,6 +276,14 @@ export async function renderYue2JointPreview(input: {
           if (!t) return;
           if (typeof t.end_reason === 'string') record.endReason = t.end_reason;
           if (t.stage_end_reasons && typeof t.stage_end_reasons === 'object') record.stageEndReasons = t.stage_end_reasons as Record<string, string>;
+          // Composer retries advance the seed by exactly 1000003 each try
+          // (yue2-pipeline.h); the retry count itself is not reported, only
+          // echoed back in the final seed, so it is recovered from the delta.
+          const echoedSeed = (t as unknown as { seed?: unknown }).seed;
+          if (typeof echoedSeed === 'number' && Number.isFinite(echoedSeed) && echoedSeed >= requestedSeed) {
+            const replans = (echoedSeed - requestedSeed) / 1000003;
+            if (Number.isInteger(replans) && replans >= 0 && replans <= PREVIEW_REPLAN_ATTEMPTS) record.composerReplans = replans;
+          }
           const abc = (t as { abc?: unknown }).abc;
           if (typeof abc === 'string' && abc.trim()) {
             const h = classifyYue2Score(abc, t.end_reason);

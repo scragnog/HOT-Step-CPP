@@ -48,13 +48,17 @@ export const RefinePanel: React.FC = () => {
   const [narFurther, setNarFurther] = useState(true);
   const [narTarget, setNarTarget] = useState<number | ''>(0.25);
   const [narBudget, setNarBudget] = useState(500);
-  const [narJob, setNarJob] = useState<{ jobId: string; step: number } | null>(null);
+  const [narKeepDelta, setNarKeepDelta] = useState(0.003);
+  // Persisted in the store (not local state) so the running decoder follow-up
+  // keeps being tracked, and the running ladder keeps being shown, across a
+  // navigation away from this tab and back.
+  const narJob = useTrainingStore(s => s.refineNarJob);
+  const setNarJob = useTrainingStore(s => s.setRefineNarJob);
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
-  const wantedLadder = useTrainingStore(s => s.refineLadderRun);
-  const setWantedLadder = useTrainingStore(s => s.setRefineLadderRun);
-  const [ladderRun, setLadderRun] = useState('');
-  // The review page hands over a ladder to show; take it once.
-  useEffect(() => { if (wantedLadder) { setLadderRun(wantedLadder); setWantedLadder(''); } }, [wantedLadder]);
+  // The review page hands over a ladder by calling setRefineLadderRun; this IS
+  // the tab's selection, so it survives navigating away and back.
+  const ladderRun = useTrainingStore(s => s.refineLadderRun);
+  const setLadderRun = useTrainingStore(s => s.setRefineLadderRun);
   const [previews, setPreviews] = useState<Yue2JointPreviewRecord[]>([]);
   const [rendering, setRendering] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -77,9 +81,25 @@ export const RefinePanel: React.FC = () => {
       const r = await listYue2AitkRuns(datasetId);
       setRuns(r.runs);
       if (r.activeJob?.kind === 'yue2-joint-train') setJob(r.activeJob);
+      // Keep the ladder selection live: default it to the running ladder, or
+      // else the newest one with KL checkpoints, whenever it's empty or names
+      // a run that's gone (deleted, or never set on this dataset before).
+      if (!ladderRun || !r.runs.some(x => x.jobId === ladderRun)) {
+        const live = r.runs.find(x => x.live);
+        const newestKl = [...r.runs].filter(x => x.checkpoints.some(c => c.kl !== undefined)).sort((a, b) => b.createdAt - a.createdAt)[0];
+        const next = live?.jobId ?? newestKl?.jobId;
+        if (next) setLadderRun(next);
+      }
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   };
   useEffect(() => { void refreshRuns(); }, [datasetId]);
+  // A decoder follow-up may have finished while this panel was unmounted; pick
+  // its job back up so the "when it ends" effect below still fires.
+  useEffect(() => {
+    if (!narJob) return;
+    if (job && job.id === narJob.jobId) return;
+    void getJob(narJob.jobId).then(setJob).catch(() => {});
+  }, [narJob?.jobId]);
   // Poll the refine job while it runs; refresh the ladder as rungs land.
   useEffect(() => {
     if (!job || (job.status !== 'running' && job.status !== 'queued')) return;
@@ -165,11 +185,15 @@ export const RefinePanel: React.FC = () => {
     if (!datasetId || !ladderRun) return;
     setError(''); setCleanupNote('');
     try {
-      if (!narFurther) { await finishPick(ladderRun, dir, step); return; }
+      // A decoder-only run (its own "further training" follow-up) never gets
+      // another decoder follow-up chained onto it — that rung finishes here.
+      const run = runs.find(r => r.jobId === ladderRun);
+      const isDecoderOnly = (run?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true;
+      if (!narFurther || isDecoderOnly) { await finishPick(ladderRun, dir, step); return; }
       // Decoder on from this rung, planner frozen; the result becomes the adapter.
       const result = await startYue2JointTrain(datasetId, { trainingMethod: 'aitk', refine: true, resumeRunId: ladderRun, resumeStep: step,
         steps: step + narBudget, saveEvery: 10, stopMode: 'kl', narExtraSteps: step + narBudget, freezePlannerNow: true,
-        reconStop: 0.005, reconStopWindow: 5, ...(narTarget !== '' ? { reconTarget: narTarget } : {}), stopEngine: false,
+        reconStop: 0.005, reconStopWindow: 5, reconKeepDelta: narKeepDelta, ...(narTarget !== '' ? { reconTarget: narTarget } : {}), stopEngine: false,
         lyricTiming: true, alignmentEnabled: true, autoPrepare: false, checkpoint: '', output: '',
         preview: { enabled: false, everySteps: 0, seconds: 90, seed: 424242, previewMaxFrames: 2250, baseline: false, control: false } } as unknown as Yue2JointTrainRequest);
       setNarJob({ jobId: result.jobId, step });
@@ -192,12 +216,14 @@ export const RefinePanel: React.FC = () => {
       } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     })();
   }, [job?.id, job?.status]);
-  const doCleanup = async () => {
+  const noCleanupChoice: Yue2CleanupChoice = { caches: false, otherCheckpoints: false, otherRuns: false, resume: false, otherPreviews: false };
+  const doCleanup = async (over?: Yue2CleanupChoice) => {
     if (!datasetId || !ladderRun || !cleanup) return;
     setCleaning(true); setError('');
     try {
-      const r = await runYue2Cleanup(datasetId, { run: ladderRun, step: cleanup.step, ...choice });
-      setCleanupNote(t('trainingStudio.refine.cleanupDone', 'Removed {{what}}; about {{size}} freed.', { what: r.done.join(', ') || 'nothing', size: mib(r.freedBytes) }));
+      const r = await runYue2Cleanup(datasetId, { run: ladderRun, step: cleanup.step, ...(over ?? choice) });
+      const moved = r.movedTo ? ` ${t('trainingStudio.refine.cleanupMoved', 'Moved to {{dir}}.', { dir: r.movedTo })}` : '';
+      setCleanupNote(t('trainingStudio.refine.cleanupDone', 'Removed {{what}}; about {{size}} freed.', { what: r.done.join(', ') || 'nothing', size: mib(r.freedBytes) }) + moved);
       setCleanup(null);
       await refreshRuns();
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
@@ -205,6 +231,15 @@ export const RefinePanel: React.FC = () => {
   };
 
   if (!datasetId) return <p className="text-sm text-zinc-500">{t('trainingStudio.refine.noDataset', 'Pick a dataset first.')}</p>;
+  // Once a run has stopped and none of its rungs is picked yet, say plainly
+  // that the ladder isn't done until "Use this rung" is pressed.
+  const ladderRunRec = runs.find(r => r.jobId === ladderRun);
+  const ladderIsDecoderOnly = (ladderRunRec?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true;
+  const finishedUnpickedNotice = ladderRunRec && !ladderRunRec.live && ladderRunRec.status === 'done' && !ladder.some(c => c.dir === picked)
+    ? (ladderIsDecoderOnly
+      ? t('trainingStudio.refine.noticeDecoderDone', 'Decoder training finished. Press Use this rung on its last checkpoint to link the adapter and clean up.')
+      : t('trainingStudio.refine.noticePlannerDone', 'Refinement finished. Listen to the rungs, then press Use this rung on the one you choose. With Further training for NAR on, the decoder then trains on from that rung and the adapter is linked when it stops; off, the rung is linked as it is and you can clean up.'))
+    : '';
   const items: Array<{ key: keyof Yue2CleanupChoice; label: string; item?: { count: number; bytes: number; detail?: string[] } }> = cleanup ? [
     { key: 'caches', label: t('trainingStudio.refine.cleanCaches', 'Prepared data and caches for this dataset (latents, codes, lead sheets, alignment, stems, MM3 and ACE caches)'), item: cleanup.plan.caches },
     { key: 'otherCheckpoints', label: t('trainingStudio.refine.cleanCheckpoints', 'The other checkpoints in this run'), item: cleanup.plan.otherCheckpoints },
@@ -218,7 +253,7 @@ export const RefinePanel: React.FC = () => {
       {cleanup && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => !cleaning && setCleanup(null)}>
         <div className="w-full max-w-xl rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={e => e.stopPropagation()}>
           <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{t('trainingStudio.refine.cleanupTitle', 'Step {{step}} is now the adapter. Clean up around it?', { step: cleanup.step })}</div>
-          <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.refine.cleanupIntro', 'Everything below is app-generated and can be rebuilt. Source audio, sidecars, captions, labels and this rung\'s adapter files are never touched. Your rung scores are kept.')}</p>
+          <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.refine.cleanupIntro', 'Everything below is app-generated and can be rebuilt. Source audio, sidecars, captions, labels and this rung\'s adapter files are never touched. Your rung scores are kept.')} {t('trainingStudio.refine.cleanupMovesAnyway', 'Either way the adapter\'s run folder moves to yue2-joint-adapters\\refined.')}</p>
           <div className="mt-3 flex flex-col gap-2">
             {items.map(i => <label key={i.key} className="flex items-start gap-3 text-xs text-zinc-700 dark:text-zinc-300">
               <Toggle id={`cleanup-${i.key}`} checked={!!choice[i.key] && !!i.item?.count} onChange={v => setChoice(prev => ({ ...prev, [i.key]: v }))} />
@@ -229,7 +264,7 @@ export const RefinePanel: React.FC = () => {
           <div className="mt-4 flex items-center justify-between gap-3">
             <span className="text-[11px] text-zinc-500 tabular-nums">{t('trainingStudio.refine.cleanupTotal', 'About {{size}} to free', { size: mib(totalBytes) })}</span>
             <div className="flex gap-2">
-              <button type="button" disabled={cleaning} onClick={() => setCleanup(null)} className="px-3 py-1.5 rounded-lg text-xs border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10">{t('trainingStudio.refine.cleanupSkip', 'Keep everything')}</button>
+              <button type="button" disabled={cleaning} onClick={() => void doCleanup(noCleanupChoice)} className="px-3 py-1.5 rounded-lg text-xs border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10">{t('trainingStudio.refine.cleanupSkip', 'Keep everything')}</button>
               <button type="button" disabled={cleaning || totalBytes === 0} onClick={() => void doCleanup()} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-500 text-white hover:bg-red-400 disabled:opacity-40">{cleaning ? t('trainingStudio.refine.cleaning', 'Cleaning…') : t('trainingStudio.refine.cleanupGo', 'Delete selected')}</button>
             </div>
           </div>
@@ -286,6 +321,10 @@ export const RefinePanel: React.FC = () => {
               <label className="flex flex-col gap-1 w-32">
                 <ParamLabel label={t('trainingStudio.refine.narBudget', 'NAR max steps')} meta={t('trainingStudio.refine.narBudgetMeta', 'default 500')} info={t('trainingStudio.refine.narBudgetInfo', 'The most decoder steps to train after the pick. At about 1.5 s a step, 500 is roughly 13 minutes.')} />
                 <input className={input} type="number" min={10} step={10} value={narBudget} disabled={active || busy || !narFurther} onChange={e => setNarBudget(Math.max(10, Math.round(Number(e.target.value) || 0)))} />
+              </label>
+              <label className="flex flex-col gap-1 w-40">
+                <ParamLabel label={t('trainingStudio.refine.narKeepDelta', 'Keep a checkpoint per recon drop')} meta={t('trainingStudio.refine.narKeepDeltaMeta', 'default 0.003')} info={t('trainingStudio.refine.narKeepDeltaInfo', 'During further decoder training a checkpoint is kept only when the reconstruction meter has dropped by at least this since the last kept one; the rest are deleted so the ladder shows real progress, not every 10 steps. The newest checkpoint is always kept.')} />
+                <input className={input} type="number" min={0} step={0.001} value={narKeepDelta} disabled={active || busy || !narFurther} onChange={e => setNarKeepDelta(Math.max(0, Number(e.target.value) || 0))} />
               </label>
             </div>
           </div>
@@ -347,9 +386,18 @@ export const RefinePanel: React.FC = () => {
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.refine.ladderHint', 'A take marked preview_limit was cut at the length limit mid-song, so its abrupt end is the limit, not the planner. Renders are not deterministic: two tracks per rung is the minimum to trust a rung. Render adds more tracks to a rung with the count and length above.')}
           {' '}<a className="underline hover:text-zinc-700 dark:hover:text-zinc-300" href={yue2RungScoresExportUrl('csv')}>{t('trainingStudio.refine.exportCsv', 'Export all scores (CSV)')}</a>
           {' · '}<a className="underline hover:text-zinc-700 dark:hover:text-zinc-300" href={yue2RungScoresExportUrl('json')} target="_blank" rel="noreferrer">JSON</a></p>
+        {finishedUnpickedNotice && <div className="mt-3 rounded-lg border border-amber-500/60 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
+          {finishedUnpickedNotice}
+        </div>}
         {ladder.length > 0 && <div className="mt-3 flex flex-col gap-3">
           {ladder.map(c => {
             const mine = previews.filter(p => p.step === c.step).sort((a, b) => a.seed - b.seed);
+            // Over-training signal: rising re-plan counts across this rung's
+            // finished takes, summed for a quick header glance.
+            const doneTakes = mine.filter(p => p.status === 'done');
+            const plannerReplans = doneTakes.reduce((sum, p) => sum + (p.plan ? p.plan.attempts.length - 1 : 0), 0);
+            const composerReplans = doneTakes.reduce((sum, p) => sum + (typeof p.composerReplans === 'number' ? p.composerReplans : 0), 0);
+            const hasReplanData = doneTakes.some(p => p.plan || typeof p.composerReplans === 'number');
             return <div key={c.step} className={`rounded-lg border p-3 ${picked === c.dir ? 'border-emerald-500/60 bg-emerald-500/5' : c.rung ? 'border-amber-500/40' : 'border-zinc-300/70 dark:border-white/10'}`}>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                 <span className="font-semibold text-zinc-800 dark:text-zinc-100">{t('trainingStudio.refine.rungStep', 'Step {{step}}', { step: c.step })}</span>
@@ -357,6 +405,7 @@ export const RefinePanel: React.FC = () => {
                 {!c.rung && <span className="text-[10px] text-zinc-500">{t('trainingStudio.refine.routineSave', 'routine save')}</span>}
                 <span className="font-mono text-zinc-600 dark:text-zinc-300">KL {c.kl !== undefined ? c.kl.toFixed(2) : '—'}{c.frozen ? ' (frozen)' : ''}</span>
                 <span className="font-mono text-zinc-600 dark:text-zinc-300">recon {c.recon !== undefined ? c.recon.toFixed(3) : '—'}</span>
+                {hasReplanData && <span className="font-mono text-zinc-500" title={t('trainingStudio.refine.replansInfo', 'planner / composer re-plans across this rung\'s takes; rising counts are a sign of over-training')}>{t('trainingStudio.refine.replans', 'replans {{p}}/{{c}}', { p: plannerReplans, c: composerReplans })}</span>}
                 <span className="flex-1" />
                 <button type="button" onClick={() => void render(c.step)} disabled={rendering !== null}
                   className="px-2 py-1 rounded-lg text-[11px] border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 disabled:opacity-40">
@@ -379,7 +428,7 @@ export const RefinePanel: React.FC = () => {
               </div>
               {mine.length > 0 && <div className="mt-2 flex flex-col gap-2">
                 {mine.map((p, i) => p.audioUrl && p.status === 'done'
-                  ? <PreviewPlayer key={p.id} src={p.audioUrl} label={t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}`} />
+                  ? <PreviewPlayer key={p.id} src={p.audioUrl} label={t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}${p.plan ? ` · planner replans ${p.plan.attempts.length - 1}` : ''}${typeof p.composerReplans === 'number' ? ` · composer replans ${p.composerReplans}` : ''}`} />
                   : <div key={p.id} className="text-[11px] text-zinc-500">{t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}: {p.status}{p.error ? ` — ${p.error}` : ''}</div>)}
               </div>}
             </div>;

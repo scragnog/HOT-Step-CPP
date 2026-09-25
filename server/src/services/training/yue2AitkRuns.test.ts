@@ -68,3 +68,29 @@ test('AITK run catalogue writes and rereads atomically in an isolated training r
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('moving a run renames its output directory and rewrites the index in place', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-move-'));
+  try {
+    const script = [
+      "import fs from 'node:fs';",
+      "import path from 'node:path';",
+      "import { recordYue2AitkRun, listYue2AitkRuns, moveYue2AitkRun } from './src/services/training/yue2AitkRuns.js';",
+      "const out = path.join(process.env.TRAINING_DIR, 'run'); fs.mkdirSync(path.join(out, 'checkpoint-step9'), { recursive: true });",
+      "fs.writeFileSync(path.join(out, 'checkpoint-step9', 'native-ar.safetensors'), 'x');",
+      "recordYue2AitkRun({ version: 1, jobId: 'job-move', datasetId: 'ds-move', datasetSlug: 'slug-move', method: 'aitk', output: out, options: {}, status: 'done', createdAt: 1, updatedAt: 2, checkpoints: [] });",
+      "const target = path.join(process.env.TRAINING_DIR, 'refined', 'run');",
+      "moveYue2AitkRun('job-move', target);",
+      "if (fs.existsSync(out)) throw new Error('old output still exists');",
+      "if (!fs.existsSync(path.join(target, 'checkpoint-step9', 'native-ar.safetensors'))) throw new Error('checkpoint did not move');",
+      "const rows = listYue2AitkRuns('ds-move'); if (rows[0].output !== target) throw new Error('index was not rewritten to the new path');",
+      "let refused = false; try { moveYue2AitkRun('job-move', target); } catch { refused = true; }",
+      "if (!refused) throw new Error('moving onto an existing path should have been refused');",
+    ].join('');
+    execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, TRAINING_DIR: root }, stdio: 'pipe',
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

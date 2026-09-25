@@ -168,6 +168,21 @@ export function deleteYue2AitkRun(jobId: string): { output: string } {
   return { output };
 }
 
+/** Rename a finished run's output directory (e.g. into a `refined/`
+ *  subfolder after a cleanup) and repoint the durable index at the new path.
+ *  Refuses to land on an existing path so a move never silently merges two
+ *  runs. */
+export function moveYue2AitkRun(jobId: string, newOutput: string): void {
+  const run = readIndex().find(r => r.jobId === jobId);
+  if (!run) throw new Error('Unknown run');
+  const oldOutput = path.resolve(run.output);
+  const target = path.resolve(newOutput);
+  if (fs.existsSync(target)) throw new Error(`Refusing to move onto an existing path: ${target}`);
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.renameSync(oldOutput, target);
+  writeIndex(readIndex().map(r => r.jobId === jobId ? { ...r, output: target, updatedAt: Date.now() } : r));
+}
+
 /** At server start nothing is training, so every 'running' entry was killed
  *  with the previous process: mark it interrupted rather than lie forever. */
 export function reconcileYue2AitkRunsAtStartup(): number {

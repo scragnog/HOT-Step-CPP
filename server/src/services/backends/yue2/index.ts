@@ -198,6 +198,23 @@ export function yue2PersistedSelection(): Yue2PersistedSelection {
   };
 }
 
+/** After a Training Studio cleanup moves a finished run's output directory
+ *  (into a `refined/` subfolder), repoint any persisted AR/NAR slot pick that
+ *  was pointing inside the old directory, so the loaded adapter selection
+ *  survives the move instead of pointing at a path that no longer exists. */
+export function yue2RepointPersistedAdapters(oldRoot: string, newRoot: string): void {
+  const oldPrefix = path.resolve(oldRoot);
+  const newPrefix = path.resolve(newRoot);
+  for (const kind of YUE2_ADAPTER_SLOTS) {
+    const current = getSetting(SLOT_PATH_SETTING[kind], '');
+    if (!current) continue;
+    const resolved = path.resolve(current);
+    if (resolved === oldPrefix || resolved.startsWith(oldPrefix + path.sep)) {
+      setSetting(SLOT_PATH_SETTING[kind], newPrefix + resolved.slice(oldPrefix.length));
+    }
+  }
+}
+
 /** The engine's own key spelling for an adapter set (yue2_adapter_key):
  *  `<path>@<global>,a<attn>,m<mlp>,e<early>,i<mid>,l<late>`, every number to
  *  4dp, `; `-joined for a stack. Built here so the persisted pick can be

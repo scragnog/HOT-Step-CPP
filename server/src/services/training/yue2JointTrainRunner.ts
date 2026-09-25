@@ -8,7 +8,7 @@ import { buildGpuEnv } from '../gpuDevices.js';
 import { log, runYue2AceTrain, type RelayState } from './yue2TrainRunner.js';
 import { checkpointRecords, listYue2AitkRuns, recordYue2AitkRun } from './yue2AitkRuns.js';
 import { runYue2PlanCheck, type Yue2PlanCheckOptions } from './yue2PlanCheck.js';
-import { renderYue2JointPreview, Yue2PreviewCleanupError } from './yue2JointPreview.js';
+import { renderYue2JointPreview, listYue2JointPreviews, Yue2PreviewCleanupError } from './yue2JointPreview.js';
 import { yue2Unload } from '../backends/yue2/client.js';
 import { ensureYue2PreparedDataset } from './yue2AutoPrepare.js';
 import { getDataset } from './datasetsRepo.js';
@@ -92,6 +92,12 @@ export interface ResolvedYue2JointTrainOptions {
   reconStopWindow?: number;
   /** Decoder stop by value: a checkpoint at or under this reconstruction ends the run. */
   reconTarget?: number;
+  /** Decoder-only checkpoint thinning: once the planner is frozen, a routine
+   *  (non-rung) checkpoint is deleted as soon as a later one lands unless its
+   *  nar_recon improved on the best kept reading by at least this fraction.
+   *  The newest checkpoint is never deleted (deletion is always deferred to
+   *  the next checkpoint). 0/absent = keep every checkpoint, as before. */
+  reconKeepDelta?: number;
   /** Refinement: resume with the reconstruction window empty (the run may
    *  have ended on the recon stop; its readings would fire it again). */
   reconReset?: boolean;
@@ -276,6 +282,7 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
   if (o.stopMode && o.stopMode !== 'steps' && o.stopMode !== 'loss' && o.stopMode !== 'kl') return 'stopMode must be steps, loss or kl';
   if (o.stopMode === 'loss' && (o.targetLoss === undefined || !Number.isFinite(o.targetLoss) || o.targetLoss < 0)) return 'targetLoss must be a non-negative finite number when stopMode is loss';
   if (o.stopMode === 'kl' && (o.targetKl === undefined || !Number.isFinite(o.targetKl) || o.targetKl <= 0)) return 'targetKl must be a positive finite number when stopMode is kl';
+  if (o.reconKeepDelta !== undefined && (!Number.isFinite(o.reconKeepDelta) || o.reconKeepDelta < 0 || o.reconKeepDelta > 1)) return 'reconKeepDelta must be between 0 and 1';
   if (o.resume && (!fs.existsSync(o.resume) || !fs.statSync(o.resume).isFile())) return `resume record is missing: ${o.resume}`;
   if (!o.spawnEnv) o.spawnEnv = buildGpuEnv().env;
   return null;
@@ -317,7 +324,20 @@ export function seedTrainClock(resume: string | undefined, resumeStep: number): 
   return clock;
 }
 
-function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?: TrainClock): void {
+/** Decoder-only checkpoint thinning (reconKeepDelta), tracked outside
+ *  RelayState (owned by yue2TrainRunner.ts) in a closure the caller keeps
+ *  across the whole run. Deletion of a checkpoint is always deferred to the
+ *  next one, so the newest checkpoint on disk is never removed. */
+interface ReconThinning { keepDelta: number; bestRecon?: number; disposable?: { step: number; dir: string; recon: number } }
+
+/** Pure decision: does this checkpoint's reconstruction reading improve
+ *  enough on the best one kept so far to be worth keeping itself? */
+export function reconKeepDecision(bestRecon: number | undefined, recon: number, keepDelta: number): { keep: boolean; bestRecon: number } {
+  if (bestRecon === undefined || recon <= bestRecon - keepDelta) return { keep: true, bestRecon: recon };
+  return { keep: false, bestRecon };
+}
+
+function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?: TrainClock, thinning?: ReconThinning): void {
   const event = parseYue2JointEvent(line, state.totalSteps);
   if (!event) { log(job, 'info', line); return; }
   const raw = JSON.parse(line) as Record<string, unknown>;
@@ -360,6 +380,23 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
         ...(num(raw.nar_drift) !== undefined ? { narDrift: num(raw.nar_drift) } : {}) });
     }
     log(job, 'info', `Meters at step ${step}: decoder drift ${raw.nar_drift}${raw.nar_recon === undefined ? '' : `, reconstruction ${raw.nar_recon}`}${raw.ar_kl_mean20 === undefined ? '' : `, planner KL ${raw.ar_kl_mean20}`}`);
+    if (thinning && raw.planner_frozen === true && raw.kl_rung !== true) {
+      if (thinning.disposable && thinning.disposable.step !== step) {
+        const gone = thinning.disposable;
+        try { fs.rmSync(gone.dir, { recursive: true, force: true }); } catch { /* best effort */ }
+        log(job, 'info', `Checkpoint step ${gone.step} dropped: reconstruction ${gone.recon} did not improve on ${thinning.bestRecon} by ${thinning.keepDelta}`);
+        thinning.disposable = undefined;
+      }
+      const recon = num(raw.nar_recon);
+      if (recon !== undefined && opts) {
+        const decision = reconKeepDecision(thinning.bestRecon, recon, thinning.keepDelta);
+        if (decision.keep) thinning.bestRecon = decision.bestRecon;
+        else {
+          const dir = checkpointRecords(opts.outDir).find(c => c.step === step)?.dir;
+          if (dir) thinning.disposable = { step, dir, recon };
+        }
+      }
+    }
   } else if (stage === 'kl_mark' && step !== undefined) {
     log(job, 'info', `KL rung reached at step ${step}; checkpoint saved`);
     state.onRung?.(step);
@@ -496,6 +533,9 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
     // checkpoint); later segments freeze only when a plan check says so.
     let freezeNext = !!(o.resume && o.freezePlannerNow);
     const clock = seedTrainClock(resume, resumeStep);
+    const thinning: ReconThinning | undefined = o.reconKeepDelta && o.reconKeepDelta > 0
+      ? { keepDelta: o.reconKeepDelta, bestRecon: resume ? checkpointRecords(path.dirname(path.dirname(resume))).find(c => c.step === resumeStep)?.recon : undefined }
+      : undefined;
     for (;;) {
       if (isCancelled(job)) return;
       const segmentOut = preview ? path.join(o.outDir, 'segments', `segment-${String(segmentNo).padStart(6, '0')}`) : o.outDir;
@@ -533,7 +573,7 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
           if (['adapter.safetensors', 'optimizer.resume', 'native-ar.safetensors', 'native-nar.safetensors']
             .some(name => !fs.existsSync(path.join(checkpoint, name)))) return `Joint-training checkpoint-step${expect} is incomplete`;
           return null;
-        }, (line, current) => relayJsonLine(job, line, current, clock), state, o.spawnEnv, o.stopEngine !== false);
+        }, (line, current) => relayJsonLine(job, line, current, clock, thinning), state, o.spawnEnv, o.stopEngine !== false);
       if (isCancelled(job)) return;
       if (state.frozenAt !== undefined) plannerFrozen = true;
       if (!state.pausedAt || !segmented || state.pausedAt >= o.steps) break;
@@ -573,11 +613,14 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
     // Parallel rung previews may still be rendering after the trainer ended.
     if (preview?.parallel) { job.phase = 'preview'; emitProgress(job); await previewChain; }
     if (preview && !isCancelled(job)) {
-      const finalDir = path.join(o.outDir, 'segments', `segment-${String(segmentNo).padStart(6, '0')}`);
-      const final = checkpointRecords(finalDir).find(c => c.step === o.steps);
-      if (final?.arPath && final.narPath) {
+      // The highest complete checkpoint of the WHOLE run, not segment.steps:
+      // a KL-ceiling stop checkpoints past the last kl_mark rung and the
+      // engine exits without a matching pause, so o.steps never lands there.
+      const final = checkpointRecords(o.outDir).find(c => c.arPath && c.narPath);
+      if (final?.arPath && final.narPath && !listYue2JointPreviews(o.outDir).some(p => p.step === final.step)) {
         job.phase = 'preview'; emitProgress(job);
-        try { await renderYue2JointPreview({ output: o.outDir, step: o.steps, options: preview, arAdapter: final.arPath, narAdapter: final.narPath, dataset: o.dataset, signal: job.controller.signal }); }
+        log(job, 'info', `Rendering final preview at step ${final.step} (no preview recorded at that step yet)`);
+        try { await renderYue2JointPreview({ output: o.outDir, step: final.step, options: preview, arAdapter: final.arPath, narAdapter: final.narPath, dataset: o.dataset, signal: job.controller.signal }); }
         catch (err: any) {
           if (err instanceof Yue2PreviewCleanupError) throw err;
           log(job, 'warn', `Final preview failed; checkpoint is intact: ${err?.message || err}`);

@@ -3415,6 +3415,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         reconStop: b.reconStop ?? saved.reconStop, reconStopWindow: b.reconStopWindow ?? saved.reconStopWindow,
         // A resume sets its own decoder target or none; never the source run's.
         ...(b.reconTarget !== undefined ? { reconTarget: b.reconTarget } : {}),
+        reconKeepDelta: b.reconKeepDelta ?? saved.reconKeepDelta,
         preview: b.preview ?? saved.preview,
         lyricTiming: (saved.alignment as { enabled?: boolean } | undefined)?.enabled === true,
         cursorWeight: (saved.alignment as { cursorWeight?: number } | undefined)?.cursorWeight ?? 0 };
@@ -3607,8 +3608,8 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
     }
     const targetKlMode: 'mean' | 'trend' | undefined = stopMode === 'kl' && b.targetKlMode === 'trend' ? 'trend' : undefined;
     // Spike guard: all three optional; absent means off / engine default.
-    const spike: { spikeFactor?: number; spikeStop?: number; spikeStopWindow?: number; reconStop?: number; reconStopWindow?: number; reconTarget?: number } = {};
-    for (const [key, lo, hi, int] of [['spikeFactor', 0, 1000, false], ['spikeStop', 0, 1000, true], ['spikeStopWindow', 1, 100000, true], ['reconStop', 0, 0.999, false], ['reconStopWindow', 1, 1000, true], ['reconTarget', 0, 10, false]] as const) {
+    const spike: { spikeFactor?: number; spikeStop?: number; spikeStopWindow?: number; reconStop?: number; reconStopWindow?: number; reconTarget?: number; reconKeepDelta?: number } = {};
+    for (const [key, lo, hi, int] of [['spikeFactor', 0, 1000, false], ['spikeStop', 0, 1000, true], ['spikeStopWindow', 1, 100000, true], ['reconStop', 0, 0.999, false], ['reconStopWindow', 1, 1000, true], ['reconTarget', 0, 10, false], ['reconKeepDelta', 0, 1, false]] as const) {
       if (b[key] === undefined || b[key] === null || b[key] === '') continue;
       const v = Number(b[key]);
       if (!Number.isFinite(v) || v < lo || v > hi || (int && !Number.isInteger(v))) {
@@ -3980,7 +3981,7 @@ router.get('/datasets/:id/yue2-cleanup-plan', (req: Request, res: Response) => {
     if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
     const run = String(req.query.run ?? ''); const step = Number(req.query.step);
     if (!run || !Number.isInteger(step)) { res.status(400).json({ error: 'run and step are required' }); return; }
-    res.json(planYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir }, run, step));
+    res.json(planYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir, lyricsSetId: ds.lyricsSetId }, run, step));
   } catch (err: any) { res.status(400).json({ error: err?.message || String(err) }); }
 });
 router.post('/datasets/:id/yue2-cleanup', (req: Request, res: Response) => {
@@ -3992,7 +3993,7 @@ router.post('/datasets/:id/yue2-cleanup', (req: Request, res: Response) => {
     const run = String(b.run ?? ''); const step = Number(b.step);
     if (!run || !Number.isInteger(step)) { res.status(400).json({ error: 'run and step are required' }); return; }
     const choice = { caches: b.caches === true, otherCheckpoints: b.otherCheckpoints === true, otherRuns: b.otherRuns === true, resume: b.resume === true, otherPreviews: b.otherPreviews === true };
-    const result = runYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir }, run, step, choice);
+    const result = runYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir, lyricsSetId: ds.lyricsSetId }, run, step, choice);
     console.log(`[Training] Cleanup around ${ds.slug} run ${run} step ${step}: ${result.done.join(', ') || 'nothing'} (${(result.freedBytes / 1048576).toFixed(0)} MiB)`);
     res.json(result);
   } catch (err: any) { res.status(400).json({ error: err?.message || String(err) }); }

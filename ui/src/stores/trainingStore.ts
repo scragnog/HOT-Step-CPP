@@ -367,9 +367,15 @@ interface TrainingState {
 
   // actions
   setPhase(phase: TrainingState['phase']): void;
-  /** The ladder the Refine tab should show next (set by the review page). */
+  /** The ladder the Refine tab should show next (set by the review page), and
+   *  the persistent Refine tab selection otherwise — survives navigating away
+   *  and back, unlike a local useState would. */
   refineLadderRun: string;
   setRefineLadderRun(run: string): void;
+  /** The Refine tab's in-flight decoder follow-up job, so returning to the tab
+   *  after it finished elsewhere still triggers the cleanup handoff. */
+  refineNarJob: { jobId: string; step: number } | null;
+  setRefineNarJob(job: { jobId: string; step: number } | null): void;
   setStep(step: TrainingState['step']): void;
   closeDataset(): void;
   loadCapabilities(): Promise<void>;
@@ -571,6 +577,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   setPhase: (phase) => set({ phase }),
   refineLadderRun: '',
   setRefineLadderRun: (refineLadderRun) => set({ refineLadderRun }),
+  refineNarJob: null,
+  setRefineNarJob: (refineNarJob) => set({ refineNarJob }),
   setStep: (step) => set({ step }),
 
   closeDataset: () => set({

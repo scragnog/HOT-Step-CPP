@@ -7,8 +7,15 @@
 import fs from 'fs';
 import path from 'path';
 import { listPreparedCaches, clearPreparedCaches } from './preparedDataReset.js';
-import { listYue2AitkRuns, deleteYue2AitkRun } from './yue2AitkRuns.js';
+import { listYue2AitkRuns, deleteYue2AitkRun, checkpointRecords, moveYue2AitkRun } from './yue2AitkRuns.js';
 import { listYue2JointPreviews, pruneYue2JointPreviews } from './yue2JointPreview.js';
+import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
+import { yue2RepointPersistedAdapters } from '../backends/yue2/index.js';
+
+/** A run already parked under a `refined/` folder is a finished, shipped
+ *  adapter: a later cleanup on some OTHER run must never sweep it as an
+ *  "other run" to delete. */
+const REFINED_RE = /[\\/]refined[\\/]/i;
 
 export interface Yue2CleanupItem { count: number; bytes: number; detail?: string[] }
 export interface Yue2CleanupPlan {
@@ -43,11 +50,11 @@ function locate(ds: { id: string; slug: string }, runId: string, step: number) {
   return { runs, run, keep };
 }
 
-export function planYue2Cleanup(ds: { id: string; slug: string; sourceDir: string }, runId: string, step: number): Yue2CleanupPlan {
+export function planYue2Cleanup(ds: { id: string; slug: string; sourceDir: string; lyricsSetId?: number }, runId: string, step: number): Yue2CleanupPlan {
   const { runs, run, keep } = locate(ds, runId, step);
   const caches = listPreparedCaches(ds.slug, ds.sourceDir);
   const others = run.checkpoints.filter(c => c.step !== step);
-  const otherRuns = runs.filter(r => r.jobId !== runId && r.status !== 'running');
+  const otherRuns = runs.filter(r => r.jobId !== runId && r.status !== 'running' && !REFINED_RE.test(path.resolve(r.output)));
   const previews = listYue2JointPreviews(run.output).filter(p => p.step !== step);
   const previewBytes = previews.reduce((s, p) => s + (p.file ? fileBytes(path.join(run.output, 'previews', p.file)) : 0), 0);
   return {
@@ -60,12 +67,12 @@ export function planYue2Cleanup(ds: { id: string; slug: string; sourceDir: strin
   };
 }
 
-export function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string }, runId: string, step: number, choice: Yue2CleanupChoice): { freedBytes: number; done: string[] } {
+export function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string; lyricsSetId?: number }, runId: string, step: number, choice: Yue2CleanupChoice): { freedBytes: number; done: string[]; movedTo?: string } {
   const plan = planYue2Cleanup(ds, runId, step);
   const { runs, run, keep } = locate(ds, runId, step);
   let freed = 0; const done: string[] = [];
   if (choice.otherRuns) {
-    for (const r of runs.filter(r => r.jobId !== runId && r.status !== 'running')) { deleteYue2AitkRun(r.jobId); }
+    for (const r of runs.filter(r => r.jobId !== runId && r.status !== 'running' && !REFINED_RE.test(path.resolve(r.output)))) { deleteYue2AitkRun(r.jobId); }
     freed += plan.otherRuns.bytes; done.push(`${plan.otherRuns.count} other run(s)`);
   }
   if (choice.otherCheckpoints) {
@@ -84,5 +91,30 @@ export function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string
     clearPreparedCaches(ds.slug, ds.sourceDir);
     freed += plan.caches.bytes; done.push(`${plan.caches.count} cache folder(s)`);
   }
-  return { freedBytes: freed, done };
+  // Always move the finished adapter into refined/, whatever the choice
+  // flags: "Keep everything" (every flag false) still ends the ladder here,
+  // and a run under refined/ is excluded from every later cleanup's
+  // otherRuns sweep (see REFINED_RE above).
+  let movedTo: string | undefined;
+  const oldOutput = path.resolve(run.output);
+  if (!REFINED_RE.test(oldOutput)) {
+    const target = path.join(path.dirname(oldOutput), 'refined', path.basename(oldOutput));
+    try {
+      moveYue2AitkRun(runId, target);
+      movedTo = target;
+      done.push(`moved to refined/${path.basename(oldOutput)}`);
+      const oldPaths = [keep.arPath, keep.narPath].filter((p): p is string => !!p);
+      const newKeep = checkpointRecords(target).find(c => c.step === step);
+      if (newKeep?.arPath && newKeep.narPath) {
+        const known = listYue2AitkRuns(ds.id, ds.slug)
+          .flatMap(r => r.checkpoints.flatMap(c => [c.arPath, c.narPath].filter((p): p is string => !!p)))
+          .concat(oldPaths);
+        refreshYue2PresetsForJointCheckpoint({ slug: ds.slug, lyricsSetId: ds.lyricsSetId }, newKeep.arPath, newKeep.narPath, known);
+      }
+      yue2RepointPersistedAdapters(oldOutput, target);
+    } catch (err: any) {
+      console.warn(`[Training] YuE2 cleanup: failed to move run ${runId} to refined/: ${err?.message || err}`);
+    }
+  }
+  return { freedBytes: freed, done, ...(movedTo ? { movedTo } : {}) };
 }
