@@ -24,6 +24,7 @@ import { runOnGpuLane, gpuLaneBusy, gpuLaneDepth, gpuLaneOwner, resetGpuLane, ty
 import { isActiveJob, type GenerationJob } from '../services/generation/jobTypes.js';
 import { pollUntilDone } from '../services/generation/pollUntilDone.js';
 import { translateParams } from '../services/generation/translateParams.js';
+import { timbreReferenceMissing } from '../services/generation/sourceAudio.js';
 import { buildEnvelope, GenerationEnvelopeError } from '../services/generation/envelope.js';
 import { noteEnqueued, noteFinished } from '../services/generation/residency.js';
 import { runYue2PlanPreview } from '../services/backends/yue2/generate.js';
@@ -260,6 +261,16 @@ router.post('/', (req, res) => {
 
   const userId = getUserId(req);
   if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+  // A profile can carry a timbre reference whose upload was deleted; the
+  // synth phase would find that out minutes in. Refuse it at the form (#162).
+  if (!req.body?.backend || req.body.backend === 'ace') {
+    const missing = timbreReferenceMissing(req.body);
+    if (missing) {
+      res.status(400).json({ error: `Timbre reference file is missing (${missing}). The upload it referred to is gone; re-upload it or clear the reference.` });
+      return;
+    }
+  }
 
   const jobId = uuidv4();
   const enqueuedAt = Date.now();

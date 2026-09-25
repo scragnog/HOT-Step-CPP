@@ -110,6 +110,32 @@ export function applyTempoAndPitch(
  *  of margin absorbs resample rounding on 44.1 kHz sources. */
 const TIMBRE_MAX_SECONDS = 598;
 
+/** Where a job's timbre reference lives on disk, or undefined if it has none. */
+function resolveTimbreRefPath(params: any, masteringRef: string | undefined): string | undefined {
+  const rawTimbre = params?.timbreReference;
+  const timbreRef = (rawTimbre === true && typeof masteringRef === 'string')
+    ? masteringRef
+    : (typeof rawTimbre === 'string' ? rawTimbre : undefined);
+  if (!timbreRef) return undefined;
+  const mappedRef = mapPath(timbreRef) || timbreRef;
+  return mappedRef.startsWith('/references/')
+    ? path.join(config.data.dir, 'references', mappedRef.replace('/references/', ''))
+    : path.isAbsolute(mappedRef)
+      ? mappedRef
+      : path.join(config.data.dir, 'references', mappedRef);
+}
+
+/** The basename of a timbre reference whose file is gone, else null. Checked
+ *  at submission so a profile holding a deleted upload fails at the form,
+ *  not deep in the synth phase (#162). Randomize picks a sibling file from
+ *  the same folder, so only a fixed reference is checked. */
+export function timbreReferenceMissing(params: any): string | null {
+  if (params?.randomizeTimbreRef) return null;
+  const refPath = resolveTimbreRefPath(params, params?.masteringReference);
+  if (!refPath || fs.existsSync(refPath)) return null;
+  return path.basename(refPath);
+}
+
 /** Resolve and load timbre reference audio */
 export async function loadTimbreReference(
   params: any,
@@ -118,20 +144,10 @@ export async function loadTimbreReference(
   jobId: string,
   log: LogFn
 ): Promise<Buffer | undefined> {
-  const rawTimbre = params.timbreReference;
-  const timbreRef = (rawTimbre === true && typeof masteringRef === 'string')
-    ? masteringRef
-    : (typeof rawTimbre === 'string' ? rawTimbre : undefined);
-
-  log('DEBUG', `[Synth Phase] timbreRef=${timbreRef}, masteringRef=${masteringRef}`);
-  if (!timbreRef) return undefined;
-
-  const mappedRef = mapPath(timbreRef) || timbreRef;
-  let refPath = mappedRef.startsWith('/references/')
-    ? path.join(config.data.dir, 'references', mappedRef.replace('/references/', ''))
-    : path.isAbsolute(mappedRef)
-      ? mappedRef
-      : path.join(config.data.dir, 'references', mappedRef);
+  log('DEBUG', `[Synth Phase] timbreRef=${params.timbreReference}, masteringRef=${masteringRef}`);
+  const resolved = resolveTimbreRefPath(params, masteringRef);
+  if (!resolved) return undefined;
+  let refPath = resolved;
 
   // Randomize timbre reference
   //
