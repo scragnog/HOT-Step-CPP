@@ -94,3 +94,27 @@ test('moving a run renames its output directory and rewrites the index in place'
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('a run folder moved by hand into refined/ is found again by the index', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-heal-'));
+  try {
+    const script = [
+      "import fs from 'node:fs';",
+      "import path from 'node:path';",
+      "import { recordYue2AitkRun, jointRunForAdapter, listYue2AitkRuns } from './src/services/training/yue2AitkRuns.js';",
+      "const out = path.join(process.env.TRAINING_DIR, 'run'); fs.mkdirSync(path.join(out, 'checkpoint-step9'), { recursive: true });",
+      "fs.writeFileSync(path.join(out, 'checkpoint-step9', 'native-ar.safetensors'), 'x');",
+      "fs.writeFileSync(path.join(out, 'checkpoint-step9', 'native-nar.safetensors'), 'x');",
+      "recordYue2AitkRun({ version: 1, jobId: 'job-heal', datasetId: 'ds-heal', datasetSlug: 'slug-heal', method: 'aitk', output: out, options: {}, status: 'done', createdAt: 1, updatedAt: 2, checkpoints: [] });",
+      "const target = path.join(process.env.TRAINING_DIR, 'refined', 'run'); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.renameSync(out, target);",
+      "const rows = listYue2AitkRuns('ds-heal'); if (rows[0].output !== target) throw new Error('index did not follow the moved folder: ' + rows[0].output);",
+      "if (rows[0].checkpoints[0]?.arPath === undefined) throw new Error('checkpoints not rescanned at the new path');",
+      "if (!jointRunForAdapter(path.join(target, 'checkpoint-step9', 'native-ar.safetensors'))) throw new Error('adapter under refined/ not resolved to its run');",
+    ].join('');
+    execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, TRAINING_DIR: root }, stdio: 'pipe',
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

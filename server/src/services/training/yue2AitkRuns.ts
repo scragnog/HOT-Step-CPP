@@ -57,8 +57,31 @@ function readIndex(): Yue2AitkRunRecord[] {
     if (!stat.isFile() || stat.size > MAX_INDEX_BYTES) return [];
     const value = JSON.parse(fs.readFileSync(INDEX, 'utf8')) as unknown;
     if (!Array.isArray(value)) return [];
-    return value.filter(isRunRecord);
+    const records = value.filter(isRunRecord);
+    // A run folder moved by hand into refined/ (the cleanup's own destination)
+    // is found again here, so every consumer of the index (the adapter
+    // catalogue, the caption-source picker, jointRunForAdapter) keeps working
+    // without the user re-registering anything. The fix is written back once.
+    let relocated = false;
+    const healed = records.map(r => {
+      const moved = relocatedOutput(r.output);
+      if (!moved) return r;
+      relocated = true;
+      return { ...r, output: moved, updatedAt: Date.now() };
+    });
+    if (relocated) { try { writeIndex(healed); } catch { /* next read heals again */ } }
+    return healed;
   } catch { return []; }
+}
+
+/** Where a recorded run folder went if it is gone from its recorded path:
+ *  `<parent>/refined/<name>`, the only place the app itself moves runs to. */
+function relocatedOutput(output: string): string | null {
+  try {
+    if (fs.existsSync(output)) return null;
+    const candidate = path.join(path.dirname(output), 'refined', path.basename(output));
+    return fs.existsSync(candidate) && fs.statSync(candidate).isDirectory() ? candidate : null;
+  } catch { return null; }
 }
 
 function isRunRecord(value: unknown): value is Yue2AitkRunRecord {
