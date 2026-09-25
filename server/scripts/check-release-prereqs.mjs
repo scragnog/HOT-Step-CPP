@@ -310,13 +310,11 @@ if (OFFLINE) {
   await checkTrtSdk();
 }
 
-console.log('
-Documentation (tools/docs/check-docs.mjs)');
+console.log('\nDocumentation (tools/docs/check-docs.mjs)');
 {
   const { spawnSync } = await import('node:child_process');
-  const r = spawnSync(process.execPath, [path.join(ROOT, 'tools', 'docs', 'check-docs.mjs')], { encoding: 'utf8' });
-  if (r.status !== 0) problems.push(`docs drift: ${(r.stderr || r.stdout).trim().split('
-').slice(0, 6).join(' | ')}`);
+  const r = spawnSync(process.execPath, [path.join(REPO_ROOT, 'tools', 'docs', 'check-docs.mjs')], { encoding: 'utf8' });
+  if (r.status !== 0) problems.push(`docs drift: ${(r.stderr || r.stdout).trim().split('\n').slice(0, 6).join(' | ')}`);
   else console.log('  ok');
 }
 
