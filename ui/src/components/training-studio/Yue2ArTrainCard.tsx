@@ -342,6 +342,11 @@ export const Yue2SheetCard: React.FC<{ datasetId: string; status: Yue2ArStatus; 
           {t('trainingStudio.yue2ar.sheetTitle', 'Lead sheets')}
         </h3>
       </div>
+      {mine && jobRunning && (
+        <p className="text-[11px] text-amber-500 mb-2">
+          {t('trainingStudio.yue2ar.sheetLiveNote', 'Lead sheets appear here as each source finishes.')}
+        </p>
+      )}
       <p className="text-[11px] text-zinc-500 leading-relaxed mb-3">
         {t('trainingStudio.yue2ar.sheetBlurb',
           'Transcribes each source\'s own audio into a SheetSage2 lead sheet (chords + melody), which '
@@ -437,8 +442,9 @@ export const Yue2SheetCard: React.FC<{ datasetId: string; status: Yue2ArStatus; 
         </div>
       )}
 
-      {abc && abc.sourcesWithAbc + abc.sourcesWithError > 0 && (
-        <Yue2SheetPreview datasetId={datasetId} reloadKey={abc.sourcesWithAbc + abc.sourcesWithError} />
+      {(mine && jobRunning || (abc && abc.sourcesWithAbc + abc.sourcesWithError > 0)) && (
+        <Yue2SheetPreview datasetId={datasetId} reloadKey={(abc?.sourcesWithAbc ?? 0) + (abc?.sourcesWithError ?? 0)}
+          live={mine && jobRunning} />
       )}
     </div>
   );
@@ -451,7 +457,7 @@ export const Yue2SheetCard: React.FC<{ datasetId: string; status: Yue2ArStatus; 
 // changes whenever the manifest's abc/abc_error counts do (a run or re-run
 // finished), which is the cue to refetch the picker list.
 
-function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadKey: number }) {
+function Yue2SheetPreview({ datasetId, reloadKey, live }: { datasetId: string; reloadKey: number; live: boolean }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [sources, setSources] = useState<Yue2SheetSourceStatus[] | null>(null);
@@ -491,6 +497,26 @@ function Yue2SheetPreview({ datasetId, reloadKey }: { datasetId: string; reloadK
       .catch(err => { if (!cancelled) setListError(err?.message || String(err)); });
     return () => { cancelled = true; };
   }, [open, datasetId, reloadKey]);
+
+  // While the job is running, the manifest gets rewritten after every source
+  // finishes, so poll the same list route instead of waiting for the job to
+  // finish and bump reloadKey. Merges rather than replaces so the selection
+  // above doesn't get yanked mid-poll.
+  useEffect(() => {
+    if (!open || !live) return;
+    const id = setInterval(() => {
+      listYue2SheetSources(datasetId)
+        .then(r => {
+          setSources(r.sources);
+          setSelected(prev => {
+            if (prev && r.sources.some(s => s.name === prev && s.ok)) return prev;
+            return r.sources.find(s => s.ok)?.name ?? prev;
+          });
+        })
+        .catch(() => { /* next poll retries */ });
+    }, 5000);
+    return () => clearInterval(id);
+  }, [open, live, datasetId]);
 
   useEffect(() => {
     if (!open || !selected) return;

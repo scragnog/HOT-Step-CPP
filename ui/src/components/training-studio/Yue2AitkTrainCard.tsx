@@ -146,7 +146,10 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // Trend (2026-09-22): the 20-step mean lagged the KL trend by ~10 steps.
   // Presets (2026-09-24, Rob): Balanced is the default. The KL target stops
   // the planner; the decoder trains on to the step cap.
-  stopMode: 'kl', targetKl: 1.2, targetKlMode: 'trend', lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
+  stopMode: 'kl', targetKl: 1.0, targetKlMode: 'trend', lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
+  // WSD by default (2026-09-25): the stop-triggered decay anneals the kept
+  // weights instead of leaving them mid-cosine on an early KL stop.
+  lrSchedule: 'wsd',
   // Planner freeze (2026-09-23): the KL target used to end the whole run, so
   // the decoder, which carries timbre, stopped wherever the planner did. The
   // checkpoint-mix ear test (AR200+NAR150 over AR200+NAR100) said the decoder
@@ -169,13 +172,13 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   autoRefine: true,
 };
 const LORA_STOP = { targetKl: 1.4, plannerLrScale: 0.3, narLrScale: undefined };
-const LOKR_STOP = { targetKl: 1.2, plannerLrScale: 0.6, narLrScale: 1 };
+const LOKR_STOP = { targetKl: 1.0, plannerLrScale: 0.6, narLrScale: 1 };
 // Training presets (2026-09-24). The planner stops at the KL target and
 // freezes; the decoder keeps training until the step cap (narExtraSteps =
 // cap, so it never ends the run before the cap does).
 const PRESETS = [
   { key: 'fast', label: 'Fast', targetKl: 0.8, steps: 300 },
-  { key: 'balanced', label: 'Balanced', targetKl: 1.2, steps: 500 },
+  { key: 'balanced', label: 'Balanced', targetKl: 1.0, steps: 500 },
   { key: 'thorough', label: 'Thorough', targetKl: 1.6, steps: 700 },
 ] as const;
 // 2026-09-24 (Rob): the primary run ends at the KL target; the decoder's
@@ -331,6 +334,15 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
   if (typeof window !== 'undefined' && !window.localStorage.getItem(spike)) {
     if (stored.spikeFactor === undefined) { stored.spikeFactor = DEFAULT_FORM.spikeFactor; stored.spikeStop = DEFAULT_FORM.spikeStop; stored.spikeStopWindow = DEFAULT_FORM.spikeStopWindow; }
     window.localStorage.setItem(spike, '1');
+  }
+  // 2026-09-25 defaults: wsd schedule, AR KL target 1.0. A form that never
+  // touched the schedule, or is still sitting on the old KL 1.2, moves;
+  // anything set deliberately stays.
+  const d0925 = `${FORM_KEY}${datasetId}:defaults-2026-09-25`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(d0925)) {
+    if (stored.lrSchedule === undefined) stored.lrSchedule = 'wsd';
+    if (stored.targetKl === 1.2) stored.targetKl = 1.0;
+    window.localStorage.setItem(d0925, '1');
   }
   return { ...DEFAULT_FORM, ...stored };
 }
@@ -1065,7 +1077,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number')}
       </div>
       {(form.adapterType ?? 'lora') === 'lokr' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.lokrHint', 'LoKr trains a Kronecker-factored delta per site instead of a low-rank pair. Strength is alpha / dim; 4x (64 / 4 / 256, about 106 MB for both halves) is the tested default, against 279 MB for the rank-64 LoRA. For more capacity raise dim and keep alpha at 4x dim; at factor 4 stay below dim 256, where some sites stop factorizing and ignore alpha.')}</p>}
-      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 1.0. Once the KL reading reaches the target the planner freezes there. With "Decoder steps after KL" above 0, the decoder (timbre, where likeness lives) keeps training alone for that many steps; 0 ends the run at the KL, as before. The KL checkpoint is saved either way. Max steps is the cap. The presets end the run at the KL target: Fast 0.8, Balanced 1.2, Thorough 1.6 (the step count is the cap). The decoder then trains on during refinement, from the rung you pick, until its reconstruction target.')}</p>}
+      {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 1.0. Once the KL reading reaches the target the planner freezes there. With "Decoder steps after KL" above 0, the decoder (timbre, where likeness lives) keeps training alone for that many steps; 0 ends the run at the KL, as before. The KL checkpoint is saved either way. Max steps is the cap. The presets end the run at the KL target: Fast 0.8, Balanced 1.0, Thorough 1.6 (the step count is the cap). The decoder then trains on during refinement, from the rung you pick, until its reconstruction target.')}</p>}
       {(form.stopMode ?? 'steps') === 'loss' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetLossHint', 'Composite = AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight. Training stops once the trailing 20-step mean is at or below this.')}</p>}
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         {resumeChoice ? <p className="text-xs text-zinc-500">Optimizer: {form.optimizer ?? 'adamw'} (restored from the selected run)</p>
@@ -1138,13 +1150,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
           <label className="flex flex-col gap-1">
             <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.lrSchedule', 'Learning-rate schedule')}</span>
-            <select className={input} value={form.lrSchedule ?? 'cosine'} disabled={active || starting || preparing || yue2RunAllActive}
-              onChange={event => setForm(previous => ({ ...previous, lrSchedule: event.target.value === 'cosine' ? undefined : event.target.value as Yue2JointTrainRequest['lrSchedule'] }))}>
-              <option value="cosine">cosine (default)</option>
+            <select className={input} value={form.lrSchedule ?? 'wsd'} disabled={active || starting || preparing || yue2RunAllActive}
+              onChange={event => setForm(previous => ({ ...previous, lrSchedule: event.target.value as Yue2JointTrainRequest['lrSchedule'] }))}>
+              <option value="cosine">cosine</option>
               <option value="cosine-floor">cosine to a floor</option>
               <option value="constant">constant</option>
               <option value="linear">linear</option>
-              <option value="wsd">warmup, flat, triggered decay (wsd)</option>
+              <option value="wsd">warmup, flat, triggered decay (wsd, default)</option>
               <option value="sgdr">cosine restarts (sgdr)</option>
             </select>
             <span className="text-[10px] text-zinc-500">{({
@@ -1154,7 +1166,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               linear: 'A straight line to zero at the step cap. Included for comparison.',
               wsd: 'Flat until a stop fires (KL target, decoder stop, or the cap), then a short decay; the stop acts when the decay ends, so the kept weights are annealed. The un-annealed KL checkpoint is saved too.',
               sgdr: 'Cosine cycles, each longer than the last. Expected to lose: the restarts shake the planner.',
-            } as const)[form.lrSchedule ?? 'cosine']}</span>
+            } as const)[form.lrSchedule ?? 'wsd']}</span>
           </label>
           {form.lrSchedule === 'cosine-floor' && field(t('trainingStudio.yue2.method.lrFloor', 'Floor (fraction of the rate)'), 'lrFloor', 'number', form, value => set('lrFloor', value === '' ? undefined : Number(value)))}
           {form.lrSchedule === 'wsd' && field(t('trainingStudio.yue2.method.lrDecaySteps', 'Decay steps'), 'lrDecaySteps', 'number', form, value => set('lrDecaySteps', value === '' ? undefined : Number(value)))}

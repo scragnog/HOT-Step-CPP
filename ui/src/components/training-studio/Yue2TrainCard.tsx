@@ -116,7 +116,7 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
     haloFrames: d.haloFrames,
     only: '',
     limit: 0,
-    force: false,
+    force: true,
     acknowledgeSidecarFormat: false,
     ...edits,
   };
@@ -405,8 +405,9 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
                   {t('trainingStudio.yue2.force', 'Rewrite the manifest')}
                   <span className="block text-[10px] text-zinc-500">
                     {t('trainingStudio.yue2.forceHint',
-                      'Needed to re-cut an existing cache at a different clip length. The cached '
-                      + 'latents themselves are clip-length independent, so this costs no GPU time.')}
+                      'On by default: re-running rewrites the manifest with the caption mode chosen above '
+                      + '(otherwise an old cut keeps its old captions) and re-cuts at the clip length. '
+                      + 'Cached latents are clip-length independent, so this costs no GPU time.')}
                   </span>
                 </span>
               </label>
