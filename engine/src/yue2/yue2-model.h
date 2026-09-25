@@ -1643,6 +1643,16 @@ static bool yue2_load_parts(Yue2Model * m, bool want_ar, bool want_nar, bool wan
                                       yue2_aitk_load_embedding_bf16, &why);
                 if (!ok) errs.push_back(why);
                 if (ok) ok = yue2_bind_convrot_lm(m, &errs);
+                if (ok && m->companion_enabled) {
+                    // ConvRot generation has its own graph; the companion is
+                    // wired into the GGUF merge and the trainer, not here yet.
+                    static bool warned = false;
+                    if (!warned) {
+                        fprintf(stderr, "[YuE2-Companion] WARNING: ConvRot generation does not apply the companion "
+                                        "decoder adapter yet; use a GGUF LM (bf16/Q8_0/K-quant) to render with it\n");
+                        warned = true;
+                    }
+                }
                 if (ok) {
                     bool has_ar = false, has_nar = false;
                     for (const auto & spec : m->lm_adapter_want) {
