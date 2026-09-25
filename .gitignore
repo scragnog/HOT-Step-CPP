@@ -93,6 +93,7 @@ tools/mm3-retarget/out/
 !tools/mm3-runtime-probes/
 !tools/mm3-trt-export/
 !tools/tensorrt-sdk/
+!tools/release-gate/
 !tools/mm3-runtime-probes/sglang/
 !tools/mm3-runtime-probes/sglang/**
 tools/discord-claude/node_modules/

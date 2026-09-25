@@ -171,6 +171,7 @@ only ever saw a rolling window and are lossy.
 | Writing a Lua plugin | [docs/PLUGINS.md](docs/PLUGINS.md) |
 | Build / install / releases | [README.md](README.md) |
 | Cutting & publishing a release (agent runbook) | [docs/RELEASING.md](docs/RELEASING.md) |
+| **Pre-release go/no-go** (`node tools/release-gate/run.mjs`: API-driven regression tiers, few-step training, renders staged for the ear test) | [tools/release-gate/README.md](tools/release-gate/README.md) |
 | Internal design/investigation docs (perf, adapters, upstream sync, feature designs) | `docs/plans/` *(gitignored, local-only)* |
 | In-app assistant behaviour/KB | [server/src/data/assistant-knowledge.md](server/src/data/assistant-knowledge.md) |
 

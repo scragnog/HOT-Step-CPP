@@ -41,6 +41,22 @@ If you added a model this cycle, uploading the weights is a separate deliberate
 step — see the `model-management` skill — and it must happen **before** the tag,
 not after the release goes live.
 
+## 0b. Run the release gate on a packaged build
+
+```bash
+node tools/release-gate/run.mjs --zip release/out/HOT-Step-CPP-vX.Y.Z-win-x64-cuda.zip
+```
+
+Exit 0 or do not tag. The gate boots the extracted zip against this checkout's
+models, then walks the app through its API: every ACE generation mode, a check
+that solvers, schedulers, guidance modes and adapters actually change the
+output, MM3 and YuE2 renders, the audio tools, a few steps of every trainer,
+and fixed-seed fingerprints. Budget about an hour on the 5090 with training
+included, or `--tiers 0-3` for the half-hour subset. The run ends by staging
+every render in `_experiments/_LISTENING/<stamp>-release-gate/` with a score
+sheet: listen before you tag, because nothing mechanical judges quality.
+Details and flags: [tools/release-gate/README.md](../tools/release-gate/README.md).
+
 ## 1. (Optional) Compile-test before releasing
 
 To verify CI compiles without cutting a real release, push a throwaway
