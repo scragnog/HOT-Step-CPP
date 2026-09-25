@@ -78,6 +78,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const { token } = useAuth();
   const [coverSet, setCoverSetState] = useState<CoverSet>(getCoverSet);
   const [nukeConfirm, setNukeConfirm] = useState(false);
+  // The release tag the server reports; a git checkout says "dev" (#185).
+  const [appVersion, setAppVersion] = useState('');
+  useEffect(() => {
+    fetch('/api/health').then(r => r.json()).then(d => setAppVersion(String(d?.version || ''))).catch(() => {});
+  }, []);
   const [nukeRunning, setNukeRunning] = useState(false);
   const [nukeResult, setNukeResult] = useState<string | null>(null);
   const [nukeLyricsConfirm, setNukeLyricsConfirm] = useState(false);
@@ -315,7 +320,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   return (
     <div className="settings-panel">
       <div className="settings-header">
-        <h1 className="settings-title">{t('settings.title')}</h1>
+        <h1 className="settings-title">{t('settings.title')}{appVersion && <span className="ml-3 align-middle text-xs font-normal text-zinc-500 dark:text-zinc-400">v{appVersion}</span>}</h1>
         <p className="settings-subtitle">
           {t('settings.subtitle')}
         </p>
@@ -450,6 +455,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <EnvSubsection title={t('settings.env.paths')} isOpen={openSections.paths} onToggle={() => toggleSection('paths')}>
               <EnvPathRow envKey="LYRICS_EXPORT_DIR" label={t('settings.env.lyricsExportDir')} description={t('settings.env.lyricsExportDirDesc')}
                 value={envValues.LYRICS_EXPORT_DIR || ''} onChange={handleEnvChange} onBrowse={handleBrowse} />
+              <EnvPathRow envKey="MUSCRIPTOR_MODELS_DIR" label={t('settings.env.muscriptorModelsDir')} description={t('settings.env.muscriptorModelsDirDesc')}
+                value={envValues.MUSCRIPTOR_MODELS_DIR || ''} onChange={handleEnvChange} onBrowse={handleBrowse} />
             </EnvSubsection>
 
             {/* Save bar */}
@@ -543,6 +550,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <option value="openai-compat">{envValues.OPENAI_COMPAT_NAME || 'OpenAI Compatible'}</option>
           </select>
         </div>
+        <EnvTextRow envKey="LLM_TIMEOUT_MS" label={t('settings.ai.llmTimeout')} description={t('settings.ai.llmTimeoutDesc')}
+          value={envValues.LLM_TIMEOUT_MS || ''} onChange={handleEnvChange} type="number" placeholder="300000" />
         <EnvTextRow envKey="GEMINI_MODEL" label={t('settings.ai.geminiModel')} description={t('settings.ai.geminiModelDesc')}
           value={envValues.GEMINI_MODEL || ''} onChange={handleEnvChange} placeholder="gemini-2.5-flash" />
         <EnvTextRow envKey="OPENAI_MODEL" label={t('settings.ai.openaiModel')} description={t('settings.ai.openaiModelDesc')}
