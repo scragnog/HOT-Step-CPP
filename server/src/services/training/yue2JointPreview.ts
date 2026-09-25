@@ -9,7 +9,7 @@ import type { Yue2JointPreviewOptions } from './types.js';
 import { aceClient } from '../aceClient.js';
 import { yue2PersistedSelection, type Yue2PersistedSelection } from '../backends/yue2/index.js';
 import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, yue2FinalDetail, type Yue2Selection } from '../backends/yue2/client.js';
-import { classifyYue2Score, yue2PlanUsable } from '../backends/yue2/scoreHealth.js';
+import { classifyYue2Score, yue2PlanUsable, type Yue2ScoreLegibility } from '../backends/yue2/scoreHealth.js';
 
 export const YUE2_JOINT_PREVIEW_DEFAULTS: Yue2JointPreviewOptions = {
   enabled: false, everySteps: 0, seconds: 90, seed: 424242,
@@ -33,10 +33,13 @@ export interface Yue2JointPreviewRecord {
   /** Render-free planner health: the preview's own lead sheet, classified.
    *  This is where AR over-training shows first (looping sections, no vocal),
    *  so a run can be judged checkpoint by checkpoint without listening. */
-  score?: { verdict: string; reason: string; bars: number; vocalShare: number; sections: string[] };
+  score?: { verdict: string; reason: string; bars: number; vocalShare: number; sections: string[];
+    /** Legibility flags (worst first) and the counts behind them — kept so a
+     *  later pass can check them against the rung's ear scores. */
+    flags?: string[]; legibility?: Yue2ScoreLegibility };
   /** Artist takes go through the app's auto re-plan: the plan that was
    *  rendered (its seed) and every attempt before it. */
-  plan?: { seed: number; accepted: boolean; attempts: Array<{ seed: number; verdict: string; reason: string }> };
+  plan?: { seed: number; accepted: boolean; attempts: Array<{ seed: number; verdict: string; reason: string; flags?: string[] }> };
   /** The render's own composer retries (the app's Compose Retries, not the
    *  plan re-draws above): how many times the seed the engine echoed back
    *  advanced past the requested one, each step exactly 1000003. */
@@ -113,17 +116,22 @@ export function recordYue2JointPreview(output: string, record: Yue2JointPreviewR
   const records = read(output).filter(r => r.id !== record.id);
   write(output, [...records, record]);
 }
-/** Drop every preview record and file of a run except those at `keepStep`. */
+/** Drop the audio of every preview except those at `keepStep`. The record
+ *  and its `.score.abc` stay (a few KB each): they are the labelled data a
+ *  legibility flag is checked against once the rung has been ear-scored, and
+ *  deleting them left the 2026-09-25 ladders with scores but no sheets. */
 export function pruneYue2JointPreviews(output: string, keepStep: number): number {
   const all = read(output);
-  const gone = all.filter(r => r.step !== keepStep);
-  for (const r of gone) {
-    if (!r.file) continue;
+  let gone = 0;
+  for (const r of all) {
+    if (r.step === keepStep || !r.file) continue;
     fs.rmSync(path.join(output, 'previews', r.file), { force: true });
-    fs.rmSync(path.join(output, 'previews', r.file.replace(/\.wav$/i, '.score.abc')), { force: true });
+    delete r.file;
+    r.updatedAt = Date.now();
+    gone++;
   }
-  write(output, all.filter(r => r.step === keepStep));
-  return gone.length;
+  write(output, all);
+  return gone;
 }
 export function listYue2JointPreviews(output: string): Yue2JointPreviewRecord[] {
   return read(output).sort((a, b) => b.step - a.step || b.updatedAt - a.updatedAt);
@@ -197,7 +205,7 @@ export async function renderYue2JointPreview(input: {
       // take's seed, redraw a plan the app would reject, render the kept one.
       let supplied: { abc: string; seed: number } | undefined;
       if (kind === 'artist' || (kind === 'baseline' && input.options.baselineOnly)) {
-        const attempts: Array<{ seed: number; verdict: string; reason: string }> = [];
+        const attempts: Array<{ seed: number; verdict: string; reason: string; flags?: string[] }> = [];
         for (let a = 1; a <= PREVIEW_REPLAN_ATTEMPTS; a++) {
           if (input.signal?.aborted) throw new Error('preview cancelled');
           const planSeed = a === 1 ? seeds[0] : randomInt(1, 2 ** 31 - 1);
@@ -217,8 +225,8 @@ export async function renderYue2JointPreview(input: {
           activeTerminal = true;
           const pd = await detail(planSub.job_id);
           const abc = (pd.abc ?? '').trim();
-          const h = classifyYue2Score(abc, pd.end_reason);
-          attempts.push({ seed: planSeed, verdict: h.verdict, reason: h.reason });
+          const h = classifyYue2Score(abc, pd.end_reason, lyrics);
+          attempts.push({ seed: planSeed, verdict: h.verdict, reason: h.reason, ...(h.legibility.flags.length ? { flags: h.legibility.flags } : {}) });
           supplied = { abc, seed: planSeed };
           if (abc && yue2PlanUsable(h.verdict, !lyrics)) break;
         }
@@ -286,8 +294,8 @@ export async function renderYue2JointPreview(input: {
           }
           const abc = (t as { abc?: unknown }).abc;
           if (typeof abc === 'string' && abc.trim()) {
-            const h = classifyYue2Score(abc, t.end_reason);
-            record.score = { verdict: h.verdict, reason: h.reason, bars: h.bars, vocalShare: h.vocalShare, sections: h.sections };
+            const h = classifyYue2Score(abc, t.end_reason, kind === 'control' ? undefined : lyrics);
+            record.score = { verdict: h.verdict, reason: h.reason, bars: h.bars, vocalShare: h.vocalShare, sections: h.sections, flags: h.legibility.flags, legibility: h.legibility };
             try { fs.mkdirSync(path.join(input.output, 'previews'), { recursive: true }); fs.writeFileSync(path.join(input.output, 'previews', `${stems[i]}.score.abc`), abc); } catch { /* the verdict is already on the record */ }
           }
         });

@@ -779,9 +779,11 @@ export interface Yue2AitkRunRecord {
 export interface Yue2JointPreviewRecord {
   endReason?: string;
   stageEndReasons?: Record<string, string>;
-  score?: { verdict: string; reason: string; bars: number; vocalShare: number; sections: string[] };
+  score?: { verdict: string; reason: string; bars: number; vocalShare: number; sections: string[];
+    /** Legibility flags on a plan the verdict passed (riff loops, few pitches, one chord, sections short of the lyric), worst first. */
+    flags?: string[] };
   /** Planner re-plan attempts behind this take's accepted seed. */
-  plan?: { seed: number; accepted: boolean; attempts: Array<{ seed: number; verdict: string; reason: string }> };
+  plan?: { seed: number; accepted: boolean; attempts: Array<{ seed: number; verdict: string; reason: string; flags?: string[] }> };
   /** Composer re-plans behind this take. */
   composerReplans?: number;
   id: string;

@@ -69,7 +69,10 @@ export function scoreYue2Rung(ds: { id: string; slug: string }, input: { refineR
     adapterType: o.adapterType, lokrDim: o.lokrDim, lokrFactor: o.lokrFactor, alpha: o.alpha, captionDropout: o.captionDropout, steps: o.steps, saveEvery: o.saveEvery,
   };
   const previews = listYue2JointPreviews(run.output).filter(p => p.step === input.step)
-    .map(p => ({ id: p.id, kind: p.kind, seed: p.seed, seconds: p.seconds, status: p.status, endReason: p.endReason, verdict: p.score?.verdict, file: p.file }));
+    .map(p => ({ id: p.id, kind: p.kind, seed: p.seed, seconds: p.seconds, status: p.status, endReason: p.endReason, verdict: p.score?.verdict, file: p.file,
+      // Legibility counts ride along so the ear score and the plan's features
+      // sit in one row, whatever later happens to the run folder.
+      flags: p.score?.flags, legibility: p.score?.legibility, plannerReplans: p.plan ? p.plan.attempts.length - 1 : undefined, composerReplans: p.composerReplans }));
   const sourceRun = typeof o.resume === 'string' ? o.resume : '';
   const clamp = (v: unknown) => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 5 ? n : null; };
   const db = getDb();

@@ -1346,7 +1346,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {jointPreviews.map(preview => <div key={preview.id} className="flex items-center gap-2 text-[11px] text-zinc-600 dark:text-zinc-400">
             <span className="w-20 shrink-0">step {preview.step} · {preview.kind}</span>
             <span className="flex-1">{preview.status === 'failed' ? preview.error || 'render failed' : preview.endReason === 'preview_limit' ? t('trainingStudio.yue2.method.previewCapped', 'Preview length reached') : preview.status}</span>
-            {preview.score && <span title={preview.score.reason} className={`shrink-0 font-semibold uppercase tracking-wider ${preview.score.verdict === 'healthy' ? 'text-emerald-500' : preview.score.verdict === 'long' ? 'text-amber-500' : 'text-red-500'}`}>
+            {preview.score && <span title={[preview.score.reason, ...(preview.score.flags ?? [])].join('\n')} className={`shrink-0 font-semibold uppercase tracking-wider ${preview.score.verdict === 'healthy' && !preview.score.flags?.length ? 'text-emerald-500' : preview.score.verdict === 'long' || preview.score.verdict === 'healthy' ? 'text-amber-500' : 'text-red-500'}`}>
               {preview.score.verdict} · {preview.score.bars} bars · {Math.round(preview.score.vocalShare * 100)}% vocal
             </span>}
             {preview.audioUrl && preview.status === 'done' && <audio controls preload="none" src={preview.audioUrl} className="h-7 max-w-[240px]" />}

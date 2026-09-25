@@ -50,3 +50,40 @@ test('Z-rests count as whole bars and chord symbols are ignored', () => {
 test('no vocal bars is unknown', () => {
   assert.equal(classifyYue2Score('').verdict, 'unknown');
 });
+
+// Legibility: what a plan the verdict passed can still get wrong.
+function sheet(vocalBars: string[], insBars: string[], sections = ['intro', 'verse', 'chorus', 'verse', 'chorus', 'outro']): string {
+  const lines: string[] = [HEADER];
+  const per = Math.ceil(vocalBars.length / sections.length);
+  sections.forEach((section, s) => {
+    lines.push(`% ${section}`, 'V: Vocal', vocalBars.slice(s * per, (s + 1) * per).join('|') + '|',
+      'V: Ins', insBars.slice(s * per, (s + 1) * per).join('|') + '|');
+  });
+  return lines.join('\n');
+}
+const CHORDS = ['"C"', '"F"', '"G"', '"Am"'];
+// A tune that never plays the same 4-bar phrase twice: pitch walks with the bar.
+const tune = (n: number) => Array.from({ length: n }, (_, i) => `${CHORDS[i % 4]}${'CDEFGABc'[i % 8]}4${'CDEFGABc'[(i * 3) % 8]}4${'CDEFGABc'[(i * 5 + 1) % 8]}8`);
+
+test('a varied sheet raises no legibility flag', () => {
+  const h = classifyYue2Score(sheet(tune(96), tune(96)), undefined, '[Intro]\n[Verse 1]\nla\n[Chorus]\nla\n[Verse 2]\nla\n[Chorus]\nla\n[Outro]');
+  assert.deepEqual(h.legibility.flags, []);
+  assert.equal(h.legibility.lyricSections, 6);
+  assert.ok(h.legibility.insLoop.bars < 8);
+});
+
+test('a two-bar riff played for the whole sheet is a loop, one chord and one pitch are flagged', () => {
+  const ins = Array.from({ length: 96 }, (_, i) => (i % 2 ? '"D#m"d24-d4c4' : '"D#m"d8D4F4d4A4F4d4-'));
+  const vocal = Array.from({ length: 96 }, (_, i) => (i % 8 ? '"D#m"z32' : '"D#m"d32'));
+  const h = classifyYue2Score(sheet(vocal, ins));
+  assert.equal(h.legibility.insLoop.period, 2);
+  assert.equal(h.legibility.insLoop.bars, 96);
+  assert.match(h.legibility.flags[0], /Ins voice repeats a 2-bar riff for 96 bars/);
+  assert.ok(h.legibility.flags.some(f => /1 pitch/.test(f)));
+  assert.ok(h.legibility.flags.some(f => /1 chord/.test(f)));
+});
+
+test('a plan with fewer sections than the lyric is flagged', () => {
+  const h = classifyYue2Score(sheet(tune(48), tune(48), ['verse', 'chorus']), undefined, '[Verse 1]\nla\n[Chorus]\nla\n[Verse 2]\nla\n[Bridge]\nla\n[Chorus]\nla');
+  assert.match(h.legibility.flags[0], /2 section\(s\) planned for 5 lyric section tags/);
+});

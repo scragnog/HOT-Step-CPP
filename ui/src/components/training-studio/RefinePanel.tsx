@@ -283,9 +283,15 @@ export const RefinePanel: React.FC = () => {
     const plannerReplans = doneTakes.reduce((sum, p) => sum + (p.plan ? p.plan.attempts.length - 1 : 0), 0);
     const composerReplans = doneTakes.reduce((sum, p) => sum + (typeof p.composerReplans === 'number' ? p.composerReplans : 0), 0);
     const hasReplanData = doneTakes.some(p => p.plan || typeof p.composerReplans === 'number');
+    // Legibility flags on the rendered plans: a plan the verdict passed that
+    // still loops a riff, sings on two pitches or skips lyric sections. A
+    // count and its reasons, not part of the score, until ear scores have
+    // been checked against them.
+    const flaggedTakes = doneTakes.filter(p => p.score?.flags?.length);
+    const flagReasons = flaggedTakes.flatMap(p => (p.score?.flags ?? []).map(f => `take ${mine.indexOf(p) + 1}: ${f}`)).join('\n');
     const sc = scores[step];
     const overall = rungOverall({ likeness: sc?.likeness, corruption: sc?.corruption, plannerReplans, composerReplans, takes: doneTakes.length });
-    return { mine, doneTakes, plannerReplans, composerReplans, hasReplanData, overall };
+    return { mine, doneTakes, plannerReplans, composerReplans, hasReplanData, flaggedTakes, flagReasons, overall };
   };
   // Best rung by overall score, ties going to the lower (less-trained, so
   // less likely overcooked) step. Ladder is sorted ascending, so keeping the
@@ -458,7 +464,7 @@ export const RefinePanel: React.FC = () => {
         {ladder.length > 0 && <div className="mt-3 flex flex-col gap-3">
           {ladder.map(c => {
             const stats = rungStats(c.step);
-            const { mine, plannerReplans, composerReplans, hasReplanData, overall } = stats;
+            const { mine, plannerReplans, composerReplans, hasReplanData, flaggedTakes, flagReasons, overall } = stats;
             return <div key={c.step} id={`refine-rung-${c.step}`}
               className={`rounded-lg border p-3 ${picked === c.dir ? 'border-emerald-500/60 bg-emerald-500/5' : c.step === bestStep ? 'border-sky-500/70' : c.rung ? 'border-amber-500/40' : 'border-zinc-300/70 dark:border-white/10'}`}>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
@@ -469,6 +475,7 @@ export const RefinePanel: React.FC = () => {
                 <span className="font-mono text-zinc-600 dark:text-zinc-300">KL {c.kl !== undefined ? c.kl.toFixed(2) : '—'}{c.frozen ? ' (frozen)' : ''}</span>
                 <span className="font-mono text-zinc-600 dark:text-zinc-300">recon {c.recon !== undefined ? c.recon.toFixed(3) : '—'}</span>
                 {hasReplanData && <span className="font-mono text-zinc-500" title={t('trainingStudio.refine.replansInfo', 'planner / composer re-plans across this rung\'s takes; rising counts are a sign of over-training')}>{t('trainingStudio.refine.replans', 'replans {{p}}/{{c}}', { p: plannerReplans, c: composerReplans })}</span>}
+                {flaggedTakes.length > 0 && <span className="font-mono text-red-600 dark:text-red-400" title={flagReasons}>{t('trainingStudio.refine.planFlags', 'plan flags {{n}}/{{takes}}', { n: flaggedTakes.length, takes: stats.doneTakes.length })}</span>}
                 {overall && <span className="font-mono text-sky-700 dark:text-sky-300" title={t('trainingStudio.refine.overallInfo', 'overall = (likeness + (6 − corruption)) / 2, minus a soft penalty for replan load')}>{t('trainingStudio.refine.overall', 'overall {{n}}', { n: overall.overall.toFixed(2) })}</span>}
                 <span className="flex-1" />
                 <button type="button" onClick={() => void render(c.step)} disabled={rendering !== null}
@@ -492,8 +499,8 @@ export const RefinePanel: React.FC = () => {
               </div>
               {mine.length > 0 && <div className="mt-2 flex flex-col gap-2">
                 {mine.map((p, i) => p.audioUrl && p.status === 'done'
-                  ? <PreviewPlayer key={p.id} src={p.audioUrl} label={t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}${p.plan ? ` · planner replans ${p.plan.attempts.length - 1}` : ''}${typeof p.composerReplans === 'number' ? ` · composer replans ${p.composerReplans}` : ''}`} />
-                  : <div key={p.id} className="text-[11px] text-zinc-500">{t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}: {p.status}{p.error ? ` — ${p.error}` : ''}</div>)}
+                  ? <PreviewPlayer key={p.id} src={p.audioUrl} label={t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}${p.score?.flags?.length ? ` · ${p.score.flags[0]}` : ''}${p.plan ? ` · planner replans ${p.plan.attempts.length - 1}` : ''}${typeof p.composerReplans === 'number' ? ` · composer replans ${p.composerReplans}` : ''}`} />
+                  : <div key={p.id} className="text-[11px] text-zinc-500">{t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}: {p.status === 'done' && !p.file ? t('trainingStudio.refine.audioPruned', 'audio removed by cleanup') : p.status}{p.error ? ` — ${p.error}` : ''}{p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}{p.score?.flags?.length ? ` · ${p.score.flags[0]}` : ''}</div>)}
               </div>}
             </div>;
           })}
