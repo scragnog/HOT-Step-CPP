@@ -176,6 +176,12 @@ What sets it apart:
   fails hands its passengers back to the queue to render alone. Batched decoding rounds
   differently from solo decoding, so a seed rendered in a batch can differ from the same
   seed rendered alone; the Batch Size setting has always had the same property.
+- With Keep Models in VRAM on (Settings, Environment tab), a composed song renders on a
+  second engine lane while the next queued YuE2 song starts composing. The output is
+  identical to a solo render. The two lanes share one GPU, so composing slows while a
+  render runs and the measured gain on a pair of songs is a few percent, not a doubling.
+  It needs about 4 GB of free VRAM at the handoff; below that, or with ConvRot or a Lua
+  NAR plugin, the song renders inline as before.
 - It has its own NAR solver and scheduler choices (Midpoint or Wasserstein Flow, Uniform
   or HT V3). The shared Lua plugins do not run on it.
 - Adapters load into two slots in the Adapters cluster, one for the AR half and one for

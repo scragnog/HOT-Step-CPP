@@ -336,7 +336,7 @@ static bool yue2_nar_pos_emb_lookup(const Yue2Model & m, int64_t nar_len, std::v
     ggml_set_output(g);
     ggml_build_forward_expand(gf, g);
 
-    BackendPair           bp    = { m.backend, m.cpu_backend, strcmp(ggml_backend_name(m.backend), "CPU") != 0 };
+    BackendPair           bp    = { yue2_nar_backend(m), m.cpu_backend, strcmp(ggml_backend_name(m.backend), "CPU") != 0 };
     ggml_backend_sched_t sched = backend_sched_new(bp, 64);
     bool                 ok    = sched && ggml_backend_sched_alloc_graph(sched, gf);
     if (!ok) {
@@ -660,7 +660,7 @@ static bool yue2_nar_velocity(const Yue2Model & m, const Yue2NarChunk & chunk, c
     ggml_set_output(velocity_out);
     ggml_build_forward_expand(gf, velocity_out);
 
-    BackendPair bp = { m.backend, m.cpu_backend, strcmp(ggml_backend_name(m.backend), "CPU") != 0 };
+    BackendPair bp = { yue2_nar_backend(m), m.cpu_backend, strcmp(ggml_backend_name(m.backend), "CPU") != 0 };
     g.sched = backend_sched_new(bp, YUE2_NAR_MAX_NODES);
     if (!g.sched || !ggml_backend_sched_alloc_graph(g.sched, g.gf)) {
         yue2_nar_velocity_graph_free(&g);

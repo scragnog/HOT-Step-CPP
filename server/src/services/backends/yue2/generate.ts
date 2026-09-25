@@ -65,6 +65,11 @@ export interface Yue2GenerationDeps {
   /** YuE2 jobs still waiting behind this one, oldest first, for coalescing.
    *  Absent = never coalesce. */
   pendingJobs?(): GenerationJob[];
+  /** Lane handoff for the engine's NAR lane (yue2-job.h): once this job is
+   *  composed and rendering, the next YuE2 job may start composing. */
+  releaseLane?(): boolean;
+  nextLaneFamily?(): string | undefined;
+  runOnLane?<T>(fn: () => Promise<T>): Promise<T>;
 }
 
 /** Mirrors the capability manifest's core.duration (max 360, auto: true). */
@@ -752,6 +757,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
   }
 
   let detailTimer: NodeJS.Timeout | undefined;
+  let laneReleased = false;
   const setAll = (fn: (j: GenerationJob) => void) => { for (const m of members) if ((m.job.status as string) !== 'cancelled') fn(m.job); };
   let sub: Awaited<ReturnType<typeof yue2Synth>>;
   let finalDetail: Yue2FinalDetail;
@@ -795,6 +801,15 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
             j.acePhase = phase;
             if (total > 0) j.acePhaseProgress = `step ${step}/${total}`;
           });
+          // Composed. The engine renders this song on its own NAR lane
+          // (yue2-job.h), so the next YuE2 job can start composing now; any
+          // other family stays behind us, since it would evict our weights.
+          // The GPU work left here (post-processing) takes the lane again.
+          if (!laneReleased && deps.releaseLane && (phase === 'nar' || phase === 'vae_decode')
+              && deps.nextLaneFamily?.() === 'yue2') {
+            laneReleased = deps.releaseLane();
+            if (laneReleased) log('INFO', '[YuE2] Composed; the GPU lane goes to the next YuE2 job while this one renders');
+          }
         } catch { /* transient poll failure — pollUntilDone owns the real watchdog */ }
       })();
     }, DETAIL_POLL_MS);
@@ -839,33 +854,42 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
   // ── Finish each member from its own slice of the tracks ──
   // Song-major, so a member's tracks are contiguous: lm_batch_size songs
   // times synth_batch_size variations. Song numbers are renumbered per job.
-  let offset = 0;
-  for (const m of members) {
-    const count = yue2TracksPerJob(m, req);
-    const slice = parts.slice(offset, offset + count);
-    const songBase = trackDetails[offset]?.song ?? 0;
-    const details = trackDetails.slice(offset, offset + count).map(td => ({ ...td, song: td.song - songBase }));
-    offset += count;
-    if ((m.job.status as string) === 'cancelled') { failYue2Job(m.job, new Error('Cancelled')); continue; }
-    if (slice.length !== count) {
-      failYue2Job(m.job, new Error(`YuE2 returned ${parts.length} track(s) for a batch that expected ${offset}`));
-      continue;
+  const finishAll = async () => {
+    let offset = 0;
+    for (const m of members) {
+      const count = yue2TracksPerJob(m, req);
+      const slice = parts.slice(offset, offset + count);
+      const songBase = trackDetails[offset]?.song ?? 0;
+      const details = trackDetails.slice(offset, offset + count).map(td => ({ ...td, song: td.song - songBase }));
+      offset += count;
+      if ((m.job.status as string) === 'cancelled') { failYue2Job(m.job, new Error('Cancelled')); continue; }
+      if (slice.length !== count) {
+        failYue2Job(m.job, new Error(`YuE2 returned ${parts.length} track(s) for a batch that expected ${offset}`));
+        continue;
+      }
+      // A member's own view of the result: its first track's score and reasons
+      // stand where a solo render's job-level fields would.
+      const memberDetail: Yue2FinalDetail = members.length === 1 ? finalDetail : {
+        ...finalDetail,
+        abc: details[0]?.abc,
+        end_reason: details.some(td => td.end_reason === 'limit_hit') ? 'limit_hit' : (details[0]?.end_reason ?? finalDetail.end_reason),
+        stage_end_reasons: details[0]?.stage_end_reasons,
+        semantic_ids: undefined,
+        tracks: details,
+      };
+      try {
+        await finishYue2Job(m, slice, details, memberDetail);
+      } catch (err: any) {
+        failYue2Job(m.job, err);
+      }
     }
-    // A member's own view of the result: its first track's score and reasons
-    // stand where a solo render's job-level fields would.
-    const memberDetail: Yue2FinalDetail = members.length === 1 ? finalDetail : {
-      ...finalDetail,
-      abc: details[0]?.abc,
-      end_reason: details.some(td => td.end_reason === 'limit_hit') ? 'limit_hit' : (details[0]?.end_reason ?? finalDetail.end_reason),
-      stage_end_reasons: details[0]?.stage_end_reasons,
-      semantic_ids: undefined,
-      tracks: details,
-    };
-    try {
-      await finishYue2Job(m, slice, details, memberDetail);
-    } catch (err: any) {
-      failYue2Job(m.job, err);
-    }
+  };
+  // Post-processing is GPU work: after a lane handoff it waits its turn again.
+  if (laneReleased && deps.runOnLane) {
+    setAll(j => { j.stage = 'YuE2: waiting for the GPU to finish...'; });
+    await deps.runOnLane(finishAll);
+  } else {
+    await finishAll();
   }
 }
 

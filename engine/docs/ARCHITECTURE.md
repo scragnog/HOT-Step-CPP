@@ -430,6 +430,14 @@ Parsed by `yue2_parse_request` in `engine/src/yue2/yue2-request.h`.
 
 Progress and results for `/yue2/synth` use the shared `GET /job`.
 
+Under `--keep-loaded` the request's render half (NAR and VAE) runs on a second thread with
+its own backend instance (`yue2-job.h`, the NAR lane) once the AR half has composed and
+sealed the song, so the work thread can compose the next request meanwhile. The job's phase
+reads `nar` from the handoff. The lane is skipped, and the render runs inline, when
+`YUE2_NO_OVERLAP` is set, under ConvRot, with a Lua NAR solver or scheduler, or with less
+than `YUE2_OVERLAP_MIN_FREE_GB` (default 4) of free VRAM. Warm, unload and select-model wait
+for a render in flight before touching weights.
+
 ## Generation modes
 
 These apply to ACE-Step requests. The engine reads what is in the JSON: an empty

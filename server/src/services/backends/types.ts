@@ -322,6 +322,13 @@ export interface GenerationContext {
   /** Jobs of the same backend still queued behind this one, oldest first.
    *  A backend that batches across requests reads it; the rest ignore it. */
   pendingJobs?: () => GenerationJob[];
+  /** Give the GPU lane to the next task before this job is finished, for a
+   *  backend whose engine serialises the rest of the work itself. */
+  releaseLane?: () => boolean;
+  /** Family of the task next in line for the lane. */
+  nextLaneFamily?: () => string | undefined;
+  /** Take the lane again for GPU work after releasing it. */
+  runOnLane?: <T>(fn: () => Promise<T>) => Promise<T>;
 }
 
 export interface ResolvedRequest {

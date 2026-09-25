@@ -377,6 +377,10 @@ struct Yue2Model {
     bool           backend_ref = false;
     ggml_backend_t backend     = nullptr;
     ggml_backend_t cpu_backend = nullptr;
+    // Second backend on the same device for the NAR half and the VAE, so a
+    // song's render can overlap the next song's composing on another thread
+    // (yue2-job.h's NAR lane). nullptr = everything runs on `backend`.
+    ggml_backend_t backend_nar = nullptr;
 
     WeightCtx wctx_lm  = {};  // AR half
     WeightCtx wctx_nar = {};  // NAR half
@@ -1307,6 +1311,10 @@ static void yue2_unload(Yue2Model * m) {
     m->companion_path.clear();
     m->lm_adapter_family.clear();
     m->lm_adapter_merged.clear();
+    if (m->backend_nar) {
+        ggml_backend_free(m->backend_nar);
+        m->backend_nar = nullptr;
+    }
     if (m->backend_ref) {
         backend_release(m->backend, m->cpu_backend);
         m->backend     = nullptr;
@@ -1314,6 +1322,12 @@ static void yue2_unload(Yue2Model * m) {
         m->backend_ref = false;
     }
     fprintf(stderr, "[YuE2] Unloaded\n");
+}
+
+// The backend the NAR half and the VAE compute on: the second instance when
+// the overlap lane made one, the shared one otherwise.
+static inline ggml_backend_t yue2_nar_backend(const Yue2Model & m) {
+    return m.backend_nar ? m.backend_nar : m.backend;
 }
 
 // Bind the already-uploaded ConvRot checkpoint to the inference weight view.

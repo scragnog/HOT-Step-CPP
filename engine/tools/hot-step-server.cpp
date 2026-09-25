@@ -4946,6 +4946,7 @@ int main(int argc, char ** argv) {
     }
     cv_work.notify_one();
     worker.join();
+    yue2_nar_lane_stop();  // finishes a render in flight, drops queued ones
 
     // cleanup
     fprintf(stderr, "[Server] Shutting down...\n");

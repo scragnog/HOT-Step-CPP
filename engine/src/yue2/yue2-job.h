@@ -32,10 +32,16 @@
 #include "audio-io.h"
 #include "yyjson.h"
 
+#include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 
 static std::mutex   g_yue2_mutex;
 static Yue2Model     g_yue2;
@@ -93,60 +99,122 @@ static JobPhase yue2_job_phase_for_stage(Yue2Stage s) {
     return JobPhase::DIT_INFERENCE;
 }
 
-// The one worker function, run on the shared work_push() GPU-serializing
-// thread. Non-streaming; a request may carry lm_batch_size songs x
-// synth_batch_size noise variations (doc 30 #6), which come back song-major
-// as multipart/mixed — the same shape ACE's own batch path emits
-// (hot-step-server.cpp), plus a per-track "tracks" array on the status JSON.
-static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req) {
-    if (job->cancel.load()) {
-        job_set_phase(*job, JobPhase::CANCELLED);
-        job->status.store(3);
-        return;
+// ── The NAR lane ────────────────────────────────────────────────────────────
+//
+// A second GPU thread for the render half. The work_push() thread composes
+// (plan + semantic + seal, the AR half, on the shared backend) and hands the
+// sealed song here, where the NAR half and the VAE run on the model's second
+// backend instance (yue2_nar_backend) while the work thread already composes
+// the next song. AR is the longer stage and latency-bound (one small kernel
+// after another); the NAR is a few big graphs, so the two fill each other's
+// gaps on one GPU. Both halves must stay resident, so the lane only opens
+// under --keep-loaded; with strict eviction the render runs inline as before.
+//
+// g_yue2_nar_mutex is held while the lane computes. Anything that changes the
+// model's residency or weights (warm, unload, select-model, adapter merges)
+// takes it after g_yue2_mutex, so a render never sees weights move under it.
+static std::mutex                        g_yue2_nar_mutex;
+static std::deque<std::function<void()>> g_yue2_nar_queue;
+static std::mutex                        g_yue2_nar_qmutex;
+static std::condition_variable           g_yue2_nar_cv;
+static std::thread                       g_yue2_nar_thread;
+static bool                              g_yue2_nar_stop = false;
+
+static void yue2_nar_lane_main() {
+    for (;;) {
+        std::function<void()> fn;
+        {
+            std::unique_lock<std::mutex> lock(g_yue2_nar_qmutex);
+            g_yue2_nar_cv.wait(lock, [] { return g_yue2_nar_stop || !g_yue2_nar_queue.empty(); });
+            if (g_yue2_nar_stop) {
+                break;  // finishes the current render, drops the rest (same as worker_main)
+            }
+            fn = std::move(g_yue2_nar_queue.front());
+            g_yue2_nar_queue.pop_front();
+        }
+        fn();
     }
+}
 
-    std::lock_guard<std::mutex> lock(g_yue2_mutex);
-
-    job_set_phase(*job, JobPhase::LOADING_DIT);
-    std::string err;
-    // Residency (doc 30 #5): with "keep models loaded" off — ACE's own
-    // EVICT_STRICT default — the pipeline walks the AR half, the NAR half and
-    // the VAE through VRAM one at a time and loads each itself; with it on,
-    // everything is brought up here and stays. A plan-only job never decodes,
-    // so it never needs the VAE resident.
-    const bool evict_strict = !g_keep_loaded;
-    if (!evict_strict &&
-        !yue2_load_parts(&g_yue2, /*want_lm=*/true, /*want_vae=*/!req.plan_only && !req.semantic_only, req.vae_variant,
-                         /*want_encoder=*/false, &err)) {
-        job->result_body = err.empty() ? "YuE2 load failed" : err;
-        job->result_mime  = "text/plain";
-        job_set_phase(*job, JobPhase::FAILED);
-        job->status.store(2);
-        return;
+static void yue2_nar_lane_push(std::function<void()> fn) {
+    std::lock_guard<std::mutex> lock(g_yue2_nar_qmutex);
+    if (!g_yue2_nar_thread.joinable()) {
+        g_yue2_nar_thread = std::thread(yue2_nar_lane_main);
     }
-    if (!yue2_ensure_tokenizer(&err)) {
-        job->result_body = err;
-        job->result_mime  = "text/plain";
-        job_set_phase(*job, JobPhase::FAILED);
-        job->status.store(2);
-        return;
+    g_yue2_nar_queue.push_back(std::move(fn));
+    g_yue2_nar_cv.notify_one();
+}
+
+// Called once at shutdown after the work thread has been joined.
+static void yue2_nar_lane_stop() {
+    {
+        std::lock_guard<std::mutex> lock(g_yue2_nar_qmutex);
+        g_yue2_nar_stop = true;
     }
-
-    Yue2ProgressFn progress = [&job](const Yue2Progress & p) {
-        job_set_phase(*job, yue2_job_phase_for_stage(p.stage), (int) p.step, (int) (p.total > 0 ? p.total : 0));
-    };
-
-    Yue2PipelineResult result;
-    const bool ok = yue2_pipeline_run(g_yue2, g_yue2_tok, req, progress, &job->cancel, &result, &err, evict_strict);
-
-    // Post-run residency: mirrors ACE's own EVICT_STRICT default / mm3-job.h's
-    // release_if_transient posture. arbitratesResidencyInEngine=false means
-    // the Node-side runner is what evicts OTHER families before a YuE2 call;
-    // this only handles YuE2's own "keep models loaded" toggle.
-    if (!g_keep_loaded) {
-        yue2_unload(&g_yue2);
+    g_yue2_nar_cv.notify_one();
+    if (g_yue2_nar_thread.joinable()) {
+        g_yue2_nar_thread.join();
     }
+}
 
+// May this job's render overlap the next job's composing? Caller holds
+// g_yue2_mutex. Creates the second backend on first use.
+static bool yue2_overlap_ok(Yue2Model & m, const Yue2Request & req, bool evict_strict, std::string * why) {
+    if (evict_strict) {
+        *why = "keep models loaded is off";
+        return false;
+    }
+    if (std::getenv("YUE2_NO_OVERLAP")) {
+        *why = "YUE2_NO_OVERLAP is set";
+        return false;
+    }
+    if (!m.backend || strcmp(ggml_backend_name(m.backend), "CPU") == 0) {
+        *why = "CPU backend";
+        return false;
+    }
+    if (m.convrot) {
+        *why = "ConvRot inference";  // ponytail: the INT8 path binds the shared backend at load; untested on two
+        return false;
+    }
+    if (!req.nar_solver.empty() || !req.nar_scheduler.empty()) {
+        *why = "Lua NAR plugins share one interpreter with the work thread";
+        return false;
+    }
+    if (!m.nar_resident || !m.vae_resident) {
+        *why = "NAR half or VAE not resident";
+        return false;
+    }
+    // Room for the render's compute buffers next to the next song's KV cache.
+    size_t             free_b = 0, total_b = 0;
+    ggml_backend_dev_t dev = ggml_backend_get_device(m.backend);
+    if (dev) {
+        ggml_backend_dev_memory(dev, &free_b, &total_b);
+    }
+    double min_gb = 4.0;
+    if (const char * e = std::getenv("YUE2_OVERLAP_MIN_FREE_GB")) {
+        min_gb = atof(e);
+    }
+    if (dev && (double) free_b / (1024.0 * 1024.0 * 1024.0) < min_gb) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%.1f GB free, need %.1f", (double) free_b / (1024.0 * 1024.0 * 1024.0), min_gb);
+        *why = buf;
+        return false;
+    }
+    if (!m.backend_nar) {
+        // The lane is idle here (every render on it holds g_yue2_nar_mutex).
+        std::lock_guard<std::mutex> nar_lock(g_yue2_nar_mutex);
+        m.backend_nar = backend_init_extra("YuE2-NAR");
+        if (!m.backend_nar) {
+            *why = "no second backend instance";
+            return false;
+        }
+    }
+    return true;
+}
+
+// Fill the Job's terminal fields from a finished (or failed) run.
+static void yue2_job_finish(const std::shared_ptr<Job> & job, const Yue2Request & req, Yue2PipelineResult & result,
+                            bool ok, const std::string & err) {
     if (!ok) {
         const bool cancelled = job->cancel.load();
         job->result_body = err.empty() ? "YuE2 generation failed" : err;
@@ -254,4 +322,85 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req) {
     fprintf(stderr, "[YuE2-Job] %s: done (%zu track(s), %lld frames, %lld samples, end_reason=%s)\n", job->id.c_str(),
             result.tracks.size(), (long long) first.total_frames, (long long) first.samples,
             result.end_reason.c_str());
+}
+
+// The one worker function, run on the shared work_push() GPU-serializing
+// thread. Non-streaming; a request may carry lm_batch_size songs x
+// synth_batch_size noise variations (doc 30 #6), which come back song-major
+// as multipart/mixed — the same shape ACE's own batch path emits
+// (hot-step-server.cpp), plus a per-track "tracks" array on the status JSON.
+// Composes here; renders here too unless the NAR lane above takes the song.
+static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req_in) {
+    if (job->cancel.load()) {
+        job_set_phase(*job, JobPhase::CANCELLED);
+        job->status.store(3);
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(g_yue2_mutex);
+
+    job_set_phase(*job, JobPhase::LOADING_DIT);
+    std::string err;
+    // Residency (doc 30 #5): with "keep models loaded" off — ACE's own
+    // EVICT_STRICT default — the pipeline walks the AR half, the NAR half and
+    // the VAE through VRAM one at a time and loads each itself; with it on,
+    // everything is brought up here and stays. A plan-only job never decodes,
+    // so it never needs the VAE resident.
+    const bool evict_strict = !g_keep_loaded;
+    auto       req          = std::make_shared<Yue2Request>(std::move(req_in));
+    if (!evict_strict &&
+        !yue2_load_parts(&g_yue2, /*want_lm=*/true, /*want_vae=*/!req->plan_only && !req->semantic_only, req->vae_variant,
+                         /*want_encoder=*/false, &err)) {
+        job->result_body = err.empty() ? "YuE2 load failed" : err;
+        job->result_mime  = "text/plain";
+        job_set_phase(*job, JobPhase::FAILED);
+        job->status.store(2);
+        return;
+    }
+    if (!yue2_ensure_tokenizer(&err)) {
+        job->result_body = err;
+        job->result_mime  = "text/plain";
+        job_set_phase(*job, JobPhase::FAILED);
+        job->status.store(2);
+        return;
+    }
+
+    Yue2ProgressFn progress = [job](const Yue2Progress & p) {
+        job_set_phase(*job, yue2_job_phase_for_stage(p.stage), (int) p.step, (int) (p.total > 0 ? p.total : 0));
+    };
+
+    auto result = std::make_shared<Yue2PipelineResult>();
+    auto ho     = std::make_shared<Yue2ArHandoff>();
+    bool ok = yue2_pipeline_run_ar(g_yue2, g_yue2_tok, *req, progress, &job->cancel, result.get(), ho.get(), &err,
+                                   evict_strict);
+
+    if (ok && !ho->done) {
+        std::string why;
+        if (yue2_overlap_ok(g_yue2, *req, evict_strict, &why)) {
+            // Composed. The render goes to the lane; this thread is free for
+            // the next song the moment the lock drops. Phase reads "nar" from
+            // here so a poller can tell the composing is over.
+            job_set_phase(*job, JobPhase::YUE2_NAR);
+            fprintf(stderr, "[YuE2-Job] %s: composed, handing the render to the NAR lane\n", job->id.c_str());
+            yue2_nar_lane_push([job, req, ho, result, progress]() {
+                std::lock_guard<std::mutex> nar_lock(g_yue2_nar_mutex);
+                std::string                 nerr;
+                const bool nok = yue2_pipeline_run_nar(g_yue2, *req, *ho, progress, &job->cancel, result.get(), &nerr,
+                                                       /*evict_strict=*/false, /*load_parts=*/false);
+                yue2_job_finish(job, *req, *result, nok, nerr);
+            });
+            return;
+        }
+        fprintf(stderr, "[YuE2-Job] %s: rendering inline (%s)\n", job->id.c_str(), why.c_str());
+        ok = yue2_pipeline_run_nar(g_yue2, *req, *ho, progress, &job->cancel, result.get(), &err, evict_strict);
+    }
+
+    // Post-run residency: mirrors ACE's own EVICT_STRICT default / mm3-job.h's
+    // release_if_transient posture. arbitratesResidencyInEngine=false means
+    // the Node-side runner is what evicts OTHER families before a YuE2 call;
+    // this only handles YuE2's own "keep models loaded" toggle.
+    if (!g_keep_loaded) {
+        yue2_unload(&g_yue2);
+    }
+    yue2_job_finish(job, *req, *result, ok, err);
 }

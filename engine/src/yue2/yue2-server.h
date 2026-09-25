@@ -256,6 +256,7 @@ static void yue2_handle_props(const httplib::Request &, httplib::Response & res)
 // POST /yue2/warm — load LM + the currently-selected VAE variant. Idempotent.
 static void yue2_handle_warm(const httplib::Request &, httplib::Response & res) {
     std::lock_guard<std::mutex> lock(g_yue2_mutex);
+    std::lock_guard<std::mutex> nar_lock(g_yue2_nar_mutex);  // the render lane must be idle before weights move
 
     const bool  was_loaded = g_yue2.lm_resident && g_yue2.vae_resident;
     std::string err;
@@ -287,6 +288,7 @@ static void yue2_handle_warm(const httplib::Request &, httplib::Response & res) 
 // POST /yue2/unload — free all YuE2 VRAM unconditionally. Idempotent.
 static void yue2_handle_unload(const httplib::Request &, httplib::Response & res) {
     std::lock_guard<std::mutex> lock(g_yue2_mutex);
+    std::lock_guard<std::mutex> nar_lock(g_yue2_nar_mutex);  // the render lane must be idle before weights move
     yue2_unload(&g_yue2);
     res.set_content("{\"unloaded\":true}", "application/json");
 }
@@ -468,6 +470,7 @@ static void yue2_handle_select_model(const httplib::Request & req, httplib::Resp
     }
 
     std::lock_guard<std::mutex> lock(g_yue2_mutex);
+    std::lock_guard<std::mutex> nar_lock(g_yue2_nar_mutex);  // the render lane must be idle before weights move
 
     // No vae_variant in the body means the caller said nothing about the VAE,
     // so the effective variant is the one already picked. Defaulting to

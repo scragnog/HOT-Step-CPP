@@ -1315,6 +1315,9 @@ export const yue2Backend: EngineBackend = {
       pollUntilDone: ctx.pollUntilDone,
       signal: ctx.signal,
       pendingJobs: ctx.pendingJobs,
+      releaseLane: ctx.releaseLane,
+      nextLaneFamily: ctx.nextLaneFamily,
+      runOnLane: ctx.runOnLane,
     });
     return outcomeFromJob(job);
   },

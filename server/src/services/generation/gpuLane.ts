@@ -31,6 +31,18 @@ let current: LaneLease | null = null;
 export function gpuLaneBusy(): boolean { return current !== null; }
 export function gpuLaneDepth(): number { return pending.length; }
 export function gpuLaneOwner(): LaneLease | null { return current; }
+/** The family of the task next in line, if any. */
+export function gpuLaneNextFamily(): string | undefined { return pending[0]?.family; }
+
+/** Hand the lane to the next task while this one carries on without the
+ *  GPU (a YuE2 job whose render the engine runs on its own lane). The lease
+ *  stops being current; its eventual completion releases nothing. */
+export function releaseGpuLane(lease: LaneLease): boolean {
+  if (current !== lease) return false;
+  current = null;
+  pump();
+  return true;
+}
 
 /** Invalidates callbacks and rejects queued tasks. The current task retains
  * ownership until its promise settles, including any external post-processing.

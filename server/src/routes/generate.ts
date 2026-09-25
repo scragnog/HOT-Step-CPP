@@ -20,7 +20,10 @@ import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { pushLog } from './logs.js';
 import { getBackend, getActiveBackendId } from '../services/backends/registry.js';
 import { mm3StreamUrl } from '../services/backends/minimax/client.js';
-import { runOnGpuLane, gpuLaneBusy, gpuLaneDepth, gpuLaneOwner, resetGpuLane, type LaneLease } from '../services/generation/gpuLane.js';
+import {
+  runOnGpuLane, gpuLaneBusy, gpuLaneDepth, gpuLaneOwner, gpuLaneNextFamily, releaseGpuLane, resetGpuLane,
+  type LaneLease,
+} from '../services/generation/gpuLane.js';
 import { isActiveJob, type GenerationJob } from '../services/generation/jobTypes.js';
 import { pollUntilDone } from '../services/generation/pollUntilDone.js';
 import { translateParams } from '../services/generation/translateParams.js';
@@ -119,6 +122,9 @@ async function runGeneration(
     pendingJobs: () => Array.from(jobs.values())
       .filter(j => j.id !== job.id && j.status === 'pending' && j.envelope?.backendId === backendId)
       .sort((a, b) => a.createdAt - b.createdAt),
+    releaseLane: () => releaseGpuLane(lease),
+    nextLaneFamily: gpuLaneNextFamily,
+    runOnLane: fn => runOnGpuLane(fn, { label: `${job.id} finish`, family: backendId }),
   });
 }
 // ── Async generation queue ────────────────────────────────────────────

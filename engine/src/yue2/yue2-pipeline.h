@@ -961,9 +961,32 @@ static bool yue2_run_vae_stage(Yue2Model & m, const Yue2Request & req, const std
 // VAE alone — with the sealed NAR cache surviving the swaps. Otherwise
 // whatever is resident stays and missing parts are loaded on demand, which is
 // the old shape. Either way the caller need not preload anything.
-static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Request & req,
-                               const Yue2ProgressFn & progress, std::atomic<bool> * cancel,
-                               Yue2PipelineResult * out, std::string * err, bool evict_strict = false) {
+// ── The two halves of a run ─────────────────────────────────────────────────
+//
+// The pipeline splits where the AR half stops touching the GPU: after the
+// chunks are sealed. Everything the NAR half needs from the AR half travels
+// in this handoff, so the two can run on different threads and backends
+// (yue2-job.h's NAR lane): song N renders while song N+1 composes.
+struct Yue2ArHandoff {
+    std::vector<Yue2SongState> songs;
+    Yue2ArKvCache              nar_cache;
+    std::vector<Yue2ChunkPlan> plan;
+    int                        M    = 1;
+    bool                       done = false;  // plan_only / semantic_only: `out` is already complete
+};
+
+static void yue2_handoff_free(Yue2ArHandoff * ho) {
+    yue2_ar_kv_cache_free(&ho->nar_cache);
+    ho->plan.clear();
+    ho->songs.clear();
+}
+
+// Plan, compose and seal. On success with ho->done == false the caller owns
+// ho->nar_cache and must run yue2_pipeline_run_nar (or yue2_handoff_free).
+static bool yue2_pipeline_run_ar(Yue2Model & m, const BPETokenizer & tok, Yue2Request & req,
+                                  const Yue2ProgressFn & progress, std::atomic<bool> * cancel,
+                                  Yue2PipelineResult * out, Yue2ArHandoff * ho, std::string * err,
+                                  bool evict_strict = false) {
     yue2_request_resolve_defaults(&req, m.lm_cfg);
 
     // One /yue2/synth job is one imatrix "chunk" — counted here (not inside
@@ -980,8 +1003,10 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
     }
 
     const int B = req.songs.empty() ? std::max(1, req.lm_batch_size) : (int) req.songs.size();
-    const int M = std::max(1, req.synth_batch_size);
-    std::vector<Yue2SongState> songs((size_t) B);
+    ho->M       = std::max(1, req.synth_batch_size);
+    ho->done    = false;
+    std::vector<Yue2SongState> & songs = ho->songs;
+    songs.assign((size_t) B, Yue2SongState{});
     for (int b = 0; b < B; b++) {
         Yue2SongState & sg = songs[(size_t) b];
         // Song b of a plain batch is the request's prompt at seed + b; a
@@ -1003,12 +1028,6 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
         }
         sg.rng.seed(sg.seed);
     }
-    auto t_stage = std::chrono::steady_clock::now();
-    auto lap = [&](int stage) {
-        const auto now = std::chrono::steady_clock::now();
-        out->stage_ms[stage] = std::chrono::duration<double, std::milli>(now - t_stage).count();
-        t_stage = now;
-    };
 
     // ── AR half ──
     if (!yue2_load_parts(&m, /*want_ar=*/true, /*want_nar=*/!evict_strict, /*want_vae=*/false, req.vae_variant,
@@ -1037,6 +1056,7 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
             out->tracks.push_back(std::move(tr));
         }
         out->end_reason = any_limit ? "limit_hit" : "completed";
+        ho->done        = true;
         return true;
     }
     const bool have_abc = (req.cot != YUE2_COT_OFF);  // off never has an ABC span; melody/full always do (sampled or supplied)
@@ -1066,7 +1086,6 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
         }
         fprintf(stderr, "[YuE2] composer ran to its cap: recomposing with a new seed (try %d of %d)\n", attempt + 1, req.semantic_retries);
     }
-    t_stage = std::chrono::steady_clock::now();
     if (req.semantic_only) {
         // Planner probe: the codec stream is the result. No NAR, no VAE.
         yue2_ar_kv_cache_free(&sem_cache);
@@ -1086,35 +1105,56 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
             out->tracks.push_back(std::move(tr));
         }
         out->end_reason = any_limit ? "limit_hit" : "completed";
+        ho->done        = true;
         return true;
     }
 
-    Yue2ArKvCache              nar_cache;
-    std::vector<Yue2ChunkPlan> plan;
-    if (!yue2_seal_chunks(m, songs, sem_cache, &nar_cache, &plan, err, (int64_t) req.nar_chunk_frames)) {
+    if (!yue2_seal_chunks(m, songs, sem_cache, &ho->nar_cache, &ho->plan, err, (int64_t) req.nar_chunk_frames)) {
         yue2_ar_kv_cache_free(&sem_cache);
         return false;
     }
     yue2_ar_kv_cache_free(&sem_cache);
+    return true;
+}
+
+// Render and decode a sealed handoff. Frees the handoff's cache either way.
+// `load_parts` false means the caller guarantees the NAR half and the VAE are
+// resident and nothing may touch the model's residency here (the overlap
+// lane, where the AR half is composing the next song at the same time).
+static bool yue2_pipeline_run_nar(Yue2Model & m, const Yue2Request & req, Yue2ArHandoff & ho,
+                                   const Yue2ProgressFn & progress, std::atomic<bool> * cancel,
+                                   Yue2PipelineResult * out, std::string * err, bool evict_strict = false,
+                                   bool load_parts = true) {
+    std::vector<Yue2SongState> & songs = ho.songs;
+    const int B = (int) songs.size();
+    const int M = ho.M;
+    auto t_stage = std::chrono::steady_clock::now();
+    auto lap = [&](int stage) {
+        const auto now = std::chrono::steady_clock::now();
+        out->stage_ms[stage] = std::chrono::duration<double, std::milli>(now - t_stage).count();
+        t_stage = now;
+    };
 
     // ── NAR half ──
-    if (evict_strict) {
-        yue2_evict_half(&m, /*ar=*/true, /*nar=*/false);
-    }
-    if (!yue2_load_parts(&m, /*want_ar=*/false, /*want_nar=*/true, /*want_vae=*/false, req.vae_variant, false, err)) {
-        yue2_ar_kv_cache_free(&nar_cache);
-        return false;
+    if (load_parts) {
+        if (evict_strict) {
+            yue2_evict_half(&m, /*ar=*/true, /*nar=*/false);
+        }
+        if (!yue2_load_parts(&m, /*want_ar=*/false, /*want_nar=*/true, /*want_vae=*/false, req.vae_variant, false, err)) {
+            yue2_handoff_free(&ho);
+            return false;
+        }
     }
     std::vector<std::vector<std::vector<float>>> latents;  // [song][variation][frames*64]
-    if (!yue2_run_nar_stage(m, req, songs, nar_cache, plan, M, cancel, progress, &latents, err)) {
-        yue2_ar_kv_cache_free(&nar_cache);
+    if (!yue2_run_nar_stage(m, req, songs, ho.nar_cache, ho.plan, M, cancel, progress, &latents, err)) {
+        yue2_handoff_free(&ho);
         return false;
     }
-    yue2_ar_kv_cache_free(&nar_cache);
+    yue2_ar_kv_cache_free(&ho.nar_cache);
     lap(YUE2_STAGE_NAR);
 
     // ── VAE ──
-    if (evict_strict) {
+    if (load_parts && evict_strict) {
         yue2_evict_half(&m, /*ar=*/false, /*nar=*/true);
     }
     bool any_limit = false, any_preview = false;
@@ -1160,4 +1200,17 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
     out->sample_rate = (int) m.vae_cfg.sample_rate;
     out->end_reason  = any_limit ? "limit_hit" : any_preview ? "preview_limit" : "completed";
     return true;
+}
+
+static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Request & req,
+                               const Yue2ProgressFn & progress, std::atomic<bool> * cancel,
+                               Yue2PipelineResult * out, std::string * err, bool evict_strict = false) {
+    Yue2ArHandoff ho;
+    if (!yue2_pipeline_run_ar(m, tok, req, progress, cancel, out, &ho, err, evict_strict)) {
+        return false;
+    }
+    if (ho.done) {
+        return true;
+    }
+    return yue2_pipeline_run_nar(m, req, ho, progress, cancel, out, err, evict_strict);
 }

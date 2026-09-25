@@ -417,6 +417,24 @@ static void backend_release(ggml_backend_t backend, ggml_backend_t cpu_backend) 
     }
 }
 
+// A second backend instance on the same device as the shared one: its own
+// stream, pool and handles, so a graph computed on it from another thread
+// overlaps the shared backend's work instead of queueing behind it. Buffers
+// allocated for the shared backend are usable from it (same device). Not part
+// of the refcount; free with ggml_backend_free. nullptr on CPU or before the
+// shared backend exists.
+static ggml_backend_t backend_init_extra(const char * label) {
+    if (g_backend_refs <= 0 || !g_backend_cache.has_gpu) {
+        return nullptr;
+    }
+    ggml_backend_dev_t dev = ggml_backend_get_device(g_backend_cache.backend);
+    ggml_backend_t     b   = dev ? ggml_backend_dev_init(dev, nullptr) : nullptr;
+    if (b) {
+        fprintf(stderr, "[Load] %s backend: %s (second instance)\n", label, ggml_backend_name(b));
+    }
+    return b;
+}
+
 // Create a scheduler from a backend pair.
 // max_nodes: graph size hint (4096 for small models, 8192 for large)
 // When a GPU is present, use its host buffer type for the CPU backend.

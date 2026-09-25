@@ -285,7 +285,7 @@ static bool yue2_vae_prepare(const Yue2Model & m, Yue2VaeGraph * g, std::string 
         return false;
     }
     const void * token = (const void *) m.wctx_vae.buffer;
-    if (g->weights_token == token && g->sched) {
+    if (g->weights_token == token && g->sched && g->backend == yue2_nar_backend(m)) {
         return true;
     }
     yue2_vae_graph_free(g);
@@ -296,10 +296,14 @@ static bool yue2_vae_prepare(const Yue2Model & m, Yue2VaeGraph * g, std::string 
     const int              NR  = (int) vc.res_dilations.size();
     const float            eps = vc.snake_eps > 0.0f ? vc.snake_eps : 1e-9f;
 
-    BackendPair bp = backend_init("YuE2-Vae");
+    // The model's own backend (its NAR-lane instance when there is one), so a
+    // decode on the NAR lane never shares a stream with the AR half. A model
+    // with weights resident always has a backend; the old backend_init()
+    // shared-ref path only ever returned that same one.
+    BackendPair bp = { yue2_nar_backend(m), m.cpu_backend, strcmp(ggml_backend_name(yue2_nar_backend(m)), "CPU") != 0 };
     g->backend     = bp.backend;
     g->cpu_backend = bp.cpu_backend;
-    g->backend_ref = true;
+    g->backend_ref = false;
 
     // Per block: 1 snake_pre (2 tensors) + 1 repacked convt + NR*(2 snakes,
     // 4 tensors). Plus 1 snake_out (2 tensors).
