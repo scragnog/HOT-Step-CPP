@@ -223,7 +223,7 @@ router.post('/hf-token', (req: Request, res: Response) => {
     console.log(`[MidiStudio] HF token ${token.trim() ? 'saved' : 'cleared'}`);
     res.json({ ok: true, hfTokenSet: !!token.trim() });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

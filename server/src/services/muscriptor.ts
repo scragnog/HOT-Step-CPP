@@ -47,6 +47,13 @@ export function setHfToken(token: string): void {
   if (!t) {
     fs.rmSync(HF_TOKEN_PATH, { force: true });
   } else {
+    // A token that is not a plain hf_ string surfaces later as a gated-repo
+    // 401 that looks like an access problem (#183). Refuse it here instead.
+    if (!/^hf_[A-Za-z0-9]{10,}$/.test(t)) {
+      const err = new Error('That does not look like a Hugging Face token: it should start with hf_ and contain only letters and digits.');
+      (err as any).status = 400;
+      throw err;
+    }
     fs.writeFileSync(HF_TOKEN_PATH, t, { encoding: 'utf-8' });
   }
 }
@@ -68,7 +75,10 @@ export function aceMidiExe(): string | null {
 
 // ── Model weights (gated on HF — downloaded with the user's read token) ──
 
-export const MODELS_DIR = path.join(config.data.dir, 'models', 'muscriptor');
+// MUSCRIPTOR_MODELS_DIR (Settings > Environment) mirrors ACESTEPCPP_MODELS so
+// the gated weights can live outside the install (#86). Read at import, so a
+// change needs a restart.
+export const MODELS_DIR = process.env.MUSCRIPTOR_MODELS_DIR || path.join(config.data.dir, 'models', 'muscriptor');
 
 export function modelDir(m: MuscriptorModel): string {
   return path.join(MODELS_DIR, m);
