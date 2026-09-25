@@ -116,6 +116,9 @@ async function runGeneration(
     signal,
     pollUntilDone,
     hooks: { onEngineJob() {}, onStage() {}, onArtifact() {} },
+    pendingJobs: () => Array.from(jobs.values())
+      .filter(j => j.id !== job.id && j.status === 'pending' && j.envelope?.backendId === backendId)
+      .sort((a, b) => a.createdAt - b.createdAt),
   });
 }
 // ── Async generation queue ────────────────────────────────────────────

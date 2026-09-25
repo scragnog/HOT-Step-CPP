@@ -196,7 +196,12 @@ static uint64_t yue2_token_hash(const std::vector<int32_t> & ids) {
 // plan, its prompt and its codec stream. B == 1 is bit-for-bit the old path.
 struct Yue2SongState {
     std::mt19937_64      rng;
-    uint64_t             seed = 0;
+    uint64_t             seed       = 0;
+    uint64_t             noise_seed = 0;  // NAR noise for variation j is noise_seed + j
+    std::string          style;           // this song's prompt (the request's, or its "songs" entry's)
+    std::string          lyrics;
+    std::string          abc_text;        // supplied score, when this song brought one
+    bool                 abc_given = false;
     std::vector<int32_t> abc_ids;
     std::string          score_abc;
     std::vector<int32_t> prefix_ids;   // the positive semantic prompt (what NAR prefixes with)
@@ -258,58 +263,87 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
         for (auto & sg : songs) sg.stage_end_reason[YUE2_STAGE_PLAN] = "skipped";
         return true;
     }
-    if (req.abc_provided) {
-        std::vector<int32_t> ids;
+    // Songs that brought a score skip the model; the rest plan together as one
+    // batch, set p of the cache holding song plan_idx[p]. A coalesced batch
+    // mixes both freely (an approved preview beside a fresh prompt).
+    std::vector<int> plan_idx;
+    for (int b = 0; b < B; b++) {
+        Yue2SongState & sg = songs[(size_t) b];
+        if (!sg.abc_given) {
+            plan_idx.push_back(b);
+            continue;
+        }
         try {
-            ids = yue2_bpe_encode(&tok, req.abc);
-            yue2_validate_abc_ids(ids, "yue2_run_plan_stage");
+            sg.abc_ids = yue2_bpe_encode(&tok, sg.abc_text);
+            yue2_validate_abc_ids(sg.abc_ids, "yue2_run_plan_stage");
         } catch (const std::exception & e) {
             if (err) {
                 *err = std::string("plan stage: ") + e.what();
             }
             return false;
         }
-        for (auto & sg : songs) {
-            sg.abc_ids   = ids;
-            sg.score_abc = req.abc;
-            sg.stage_end_reason[YUE2_STAGE_PLAN] = "skipped";
-        }
+        sg.score_abc = sg.abc_text;
+        sg.stage_end_reason[YUE2_STAGE_PLAN] = "skipped";
+    }
+    const int P = (int) plan_idx.size();
+    if (P == 0) {
         return true;
     }
 
-    const std::vector<int32_t> prefix = yue2_token_prefixes(&tok, req.style, req.lyrics, req.cot, nullptr);
+    std::vector<std::vector<int32_t>> prefixes((size_t) P);
+    int64_t                            max_prefix = 0;
+    for (int p = 0; p < P; p++) {
+        const Yue2SongState & sg = songs[(size_t) plan_idx[(size_t) p]];
+        prefixes[(size_t) p] = yue2_token_prefixes(&tok, sg.style, sg.lyrics, req.cot, nullptr);
+        max_prefix = std::max<int64_t>(max_prefix, (int64_t) prefixes[(size_t) p].size());
+    }
 
     Yue2SamplingParams sp = yue2_stage_params(m.lm_cfg.abc, req.plan);
 
     Yue2ArKvCache cache;
-    const int64_t capacity = (int64_t) prefix.size() + sp.max_tokens + 4;
-    if (!yue2_ar_kv_cache_alloc(m, capacity, &cache, err, B)) {
+    const int64_t capacity = max_prefix + sp.max_tokens + 4;
+    if (!yue2_ar_kv_cache_alloc(m, capacity, &cache, err, P)) {
         return false;
     }
     cache.head_lo = YUE2_PLAN_HEAD_LO;
     cache.head_n  = YUE2_PLAN_HEAD_N;
     const int64_t base = cache.head_lo;
 
-    Yue2ArForwardResult pre;
-    if (!yue2_ar_prefill(m, cache, prefix, { (int64_t) prefix.size() - 1 }, {}, &pre, err, 0)) {
-        yue2_ar_kv_cache_free(&cache);
-        return false;
-    }
-    for (int b = 1; b < B; b++) {
-        if (!yue2_ar_kv_cache_copy_set(m, cache, 0, b, cache.filled[0], err)) {
+    // Prefill every set; a prompt identical to an earlier set's is copied
+    // rather than forwarded again (lm_batch_size > 1: every song shares one).
+    int64_t            W = 0;
+    std::vector<float> logits;  // [P, W]
+    for (int p = 0; p < P; p++) {
+        int twin = -1;
+        for (int t = 0; t < p; t++) {
+            if (prefixes[(size_t) t] == prefixes[(size_t) p]) {
+                twin = t;
+                break;
+            }
+        }
+        if (twin >= 0) {
+            if (!yue2_ar_kv_cache_copy_set(m, cache, twin, p, cache.filled[(size_t) twin], err)) {
+                yue2_ar_kv_cache_free(&cache);
+                return false;
+            }
+            const std::vector<float> twin_row(logits.begin() + (size_t) twin * (size_t) W,
+                                              logits.begin() + (size_t) (twin + 1) * (size_t) W);
+            logits.insert(logits.end(), twin_row.begin(), twin_row.end());
+            continue;
+        }
+        Yue2ArForwardResult pre;
+        const std::vector<int32_t> & prefix = prefixes[(size_t) p];
+        if (!yue2_ar_prefill(m, cache, prefix, { (int64_t) prefix.size() - 1 }, {}, &pre, err, p)) {
             yue2_ar_kv_cache_free(&cache);
             return false;
         }
-    }
-    const int64_t W = pre.V;  // logits width (the head window)
-    std::vector<float> logits((size_t) B * (size_t) W);
-    for (int b = 0; b < B; b++) {
-        std::copy(pre.logits.begin(), pre.logits.end(), logits.begin() + (size_t) b * (size_t) W);
+        W = pre.V;  // logits width (the head window)
+        logits.insert(logits.end(), pre.logits.begin(), pre.logits.end());
     }
 
-    std::vector<std::vector<int32_t>> history((size_t) B);
-    std::vector<bool>                 done((size_t) B, false);
-    std::vector<int32_t>              next_ids((size_t) B, YUE2_ABC_END);
+    std::vector<std::vector<int32_t>> history((size_t) P);
+    std::vector<bool>                 done((size_t) P, false);
+    std::vector<int32_t>              next_ids((size_t) P, YUE2_ABC_END);
     int64_t                            step = 0;
     for (; step < sp.max_tokens; step++) {
         if (cancel && cancel->load()) {
@@ -320,25 +354,26 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
             return false;
         }
         int n_active = 0;
-        for (int b = 0; b < B; b++) {
-            if (done[(size_t) b]) {
-                next_ids[(size_t) b] = YUE2_ABC_END;  // passive row
+        for (int p = 0; p < P; p++) {
+            Yue2SongState & sg = songs[(size_t) plan_idx[(size_t) p]];
+            if (done[(size_t) p]) {
+                next_ids[(size_t) p] = YUE2_ABC_END;  // passive row
                 continue;
             }
-            std::vector<float> scores(logits.begin() + (size_t) b * (size_t) W,
-                                      logits.begin() + (size_t) (b + 1) * (size_t) W);
-            yue2_distribution(scores, sp, YUE2_ABC_END, 0, YUE2_EOD, history[(size_t) b], step,
+            std::vector<float> scores(logits.begin() + (size_t) p * (size_t) W,
+                                      logits.begin() + (size_t) (p + 1) * (size_t) W);
+            yue2_distribution(scores, sp, YUE2_ABC_END, 0, YUE2_EOD, history[(size_t) p], step,
                               /*legacy_off=*/false, base);
             const int64_t tok_id =
-                base + (sp.temperature == 0.0f ? yue2_sample_argmax(scores) : yue2_sample_draw(scores, songs[(size_t) b].rng));
+                base + (sp.temperature == 0.0f ? yue2_sample_argmax(scores) : yue2_sample_draw(scores, sg.rng));
             if (tok_id == YUE2_ABC_END) {
-                done[(size_t) b] = true;
-                songs[(size_t) b].stage_end_reason[YUE2_STAGE_PLAN] = "eos";
-                next_ids[(size_t) b] = YUE2_ABC_END;
+                done[(size_t) p] = true;
+                sg.stage_end_reason[YUE2_STAGE_PLAN] = "eos";
+                next_ids[(size_t) p] = YUE2_ABC_END;
                 continue;
             }
-            history[(size_t) b].push_back((int32_t) tok_id);
-            next_ids[(size_t) b] = (int32_t) tok_id;
+            history[(size_t) p].push_back((int32_t) tok_id);
+            next_ids[(size_t) p] = (int32_t) tok_id;
             n_active++;
         }
         if (progress) {
@@ -354,11 +389,12 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
     }
     yue2_ar_kv_cache_free(&cache);
 
-    for (int b = 0; b < B; b++) {
+    for (int p = 0; p < P; p++) {
+        const int       b  = plan_idx[(size_t) p];
         Yue2SongState & sg = songs[(size_t) b];
-        sg.abc_ids   = history[(size_t) b];
+        sg.abc_ids   = history[(size_t) p];
         sg.score_abc = yue2_bpe_decode(&tok, sg.abc_ids);
-        if (!done[(size_t) b]) sg.stage_end_reason[YUE2_STAGE_PLAN] = "limit_hit";
+        if (!done[(size_t) p]) sg.stage_end_reason[YUE2_STAGE_PLAN] = "limit_hit";
         fprintf(stderr, "[YuE2-AR-Tokens] plan song=%d n=%zu hash=%016llx\n", b, sg.abc_ids.size(),
                 (unsigned long long) yue2_token_hash(sg.abc_ids));
     }
@@ -397,7 +433,7 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         Yue2SongState & sg = songs[(size_t) b];
         const std::vector<int32_t> * abc_ptr = have_abc ? &sg.abc_ids : nullptr;
         try {
-            sg.prefix_ids = yue2_token_prefixes(&tok, req.style, req.lyrics, req.cot, abc_ptr);
+            sg.prefix_ids = yue2_token_prefixes(&tok, sg.style, sg.lyrics, req.cot, abc_ptr);
             if (use_cfg) neg_prefix[(size_t) b] = yue2_negative_prefix(&tok, req.cot, abc_ptr);
         } catch (const std::exception & e) {
             if (err) {
@@ -770,7 +806,7 @@ static bool yue2_run_nar_stage(Yue2Model & m, const Yue2Request & req, std::vect
                     return false;
                 }
             } else {
-                yue2_fill_noise(req.noise_seed + (uint64_t) b + (uint64_t) j, &nz, frames * LD);
+                yue2_fill_noise(songs[(size_t) b].noise_seed + (uint64_t) j, &nz, frames * LD);
             }
             (*latents_out)[(size_t) b][(size_t) j].reserve((size_t) (frames * LD));
         }
@@ -943,12 +979,29 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
         }
     }
 
-    const int B = std::max(1, req.lm_batch_size);
+    const int B = req.songs.empty() ? std::max(1, req.lm_batch_size) : (int) req.songs.size();
     const int M = std::max(1, req.synth_batch_size);
     std::vector<Yue2SongState> songs((size_t) B);
     for (int b = 0; b < B; b++) {
-        songs[(size_t) b].seed = req.seed + (uint64_t) b;
-        songs[(size_t) b].rng.seed(songs[(size_t) b].seed);
+        Yue2SongState & sg = songs[(size_t) b];
+        // Song b of a plain batch is the request's prompt at seed + b; a
+        // "songs" entry brings its own prompt, and its own seeds when it says so.
+        sg.seed       = req.seed + (uint64_t) b;
+        sg.noise_seed = req.noise_seed + (uint64_t) b;
+        sg.style      = req.style;
+        sg.lyrics     = req.lyrics;
+        sg.abc_text   = req.abc;
+        sg.abc_given  = req.abc_provided;
+        if (!req.songs.empty()) {
+            const Yue2SongSpec & spec = req.songs[(size_t) b];
+            sg.style     = spec.style;
+            sg.lyrics    = spec.lyrics;
+            sg.abc_text  = spec.abc;
+            sg.abc_given = spec.abc_provided;
+            if (spec.seed_present) sg.seed = spec.seed;
+            sg.noise_seed = spec.noise_seed_present ? spec.noise_seed : (spec.seed_present ? spec.seed : sg.noise_seed);
+        }
+        sg.rng.seed(sg.seed);
     }
     auto t_stage = std::chrono::steady_clock::now();
     auto lap = [&](int stage) {
@@ -976,7 +1029,7 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
             Yue2TrackResult tr;
             tr.song       = b;
             tr.seed       = songs[(size_t) b].seed;
-            tr.noise_seed = req.noise_seed + (uint64_t) b;
+            tr.noise_seed = songs[(size_t) b].noise_seed;
             tr.score_abc  = songs[(size_t) b].score_abc;
             for (int s = 0; s < 4; s++) tr.stage_end_reason[s] = songs[(size_t) b].stage_end_reason[s];
             tr.end_reason = tr.stage_end_reason[YUE2_STAGE_PLAN] == "limit_hit" ? "limit_hit" : "completed";
@@ -1022,7 +1075,7 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
             Yue2TrackResult tr;
             tr.song         = b;
             tr.seed         = songs[(size_t) b].seed;
-            tr.noise_seed   = req.noise_seed + (uint64_t) b;
+            tr.noise_seed   = songs[(size_t) b].noise_seed;
             tr.score_abc    = songs[(size_t) b].score_abc;
             tr.semantic_ids = songs[(size_t) b].codec_ids;
             tr.total_frames = (int64_t) songs[(size_t) b].codec_ids.size();
@@ -1075,7 +1128,7 @@ static bool yue2_pipeline_run(Yue2Model & m, const BPETokenizer & tok, Yue2Reque
             tr.song         = b;
             tr.variation    = j;
             tr.seed         = songs[(size_t) b].seed;
-            tr.noise_seed   = req.noise_seed + (uint64_t) b + (uint64_t) j;
+            tr.noise_seed   = songs[(size_t) b].noise_seed + (uint64_t) j;
             tr.score_abc    = songs[(size_t) b].score_abc;
             tr.semantic_ids = songs[(size_t) b].codec_ids;
             tr.total_frames = (int64_t) songs[(size_t) b].codec_ids.size();

@@ -670,6 +670,15 @@ async function capabilities(): Promise<BackendCapabilities> {
       { key: 'yue2HtShift', type: 'slider', label: 'HT Shift Warp', default: 1, min: 0.5, max: 8, step: 0.1,
         visible_when: { key: 'yue2NarScheduler', equals: 'ht_v3' } },
       {
+        key: 'yue2Coalesce',
+        type: 'toggle',
+        label: 'Batch Queued Songs',
+        hint: 'When several YuE2 songs are waiting with the same settings and adapters, render them '
+            + 'together in one pass (up to the engine\'s batch ceiling). More songs per minute; each '
+            + 'song finishes when its batch does. Off renders every job on its own.',
+        default: true,
+      },
+      {
         key: 'yue2BatchSize',
         type: 'slider',
         label: 'Batch Size',
@@ -1299,10 +1308,13 @@ export const yue2Backend: EngineBackend = {
   operations: YUE2_OPERATIONS,
   resolveRequest,
   async generate(job: GenerationJob, ctx: GenerationContext): Promise<GenerationOutcome> {
+    // A job another job already rendered inside its batch comes back as it
+    // is; runYue2Generation returns at once when coalescedInto is set.
     await runYue2Generation(job, {
       attempt: ctx.attempt,
       pollUntilDone: ctx.pollUntilDone,
       signal: ctx.signal,
+      pendingJobs: ctx.pendingJobs,
     });
     return outcomeFromJob(job);
   },

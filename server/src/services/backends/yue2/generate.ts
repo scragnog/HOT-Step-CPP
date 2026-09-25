@@ -46,7 +46,7 @@ import { readSafetensorsMeta } from '../../training/yue2Runs.js';
 import { jointRunForAdapter } from '../../training/yue2AitkRuns.js';
 import { yue2AdapterTrigger } from './jointAdapterContext.js';
 import type { Yue2AdapterScales, Yue2FinalDetail } from './client.js';
-import { yue2Align, yue2Synth, yue2FinalDetail, yue2PropsCached, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
+import { yue2Align, yue2Synth, yue2FinalDetail, yue2Props, yue2PropsCached, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
 import { yue2LyricsJson } from './align.js';
 import { classifyYue2Score, type Yue2ScoreHealth, yue2PlanUsable } from './scoreHealth.js';
 import { yue2PersistedSelection } from './index.js';
@@ -62,12 +62,19 @@ export interface Yue2GenerationDeps {
   pollUntilDone(
     aceJobId: string, job: GenerationJob, signal: AbortSignal, timeoutMinutes?: number,
   ): Promise<void>;
+  /** YuE2 jobs still waiting behind this one, oldest first, for coalescing.
+   *  Absent = never coalesce. */
+  pendingJobs?(): GenerationJob[];
 }
 
 /** Mirrors the capability manifest's core.duration (max 360, auto: true). */
 const YUE2_MAX_DURATION_SEC = 360;
 
 const DETAIL_POLL_MS = 1_500;
+
+/** How long a YuE2 job with an empty queue behind it waits for siblings before
+ *  rendering alone (queue coalescing). */
+const YUE2_COALESCE_WAIT_MS = 750;
 
 export interface Yue2ParamMapping {
   req: Yue2SynthRequest;
@@ -524,13 +531,30 @@ export function splitMultipartMixed(body: Buffer, contentType: string): Buffer[]
   return parts;
 }
 
-export async function runYue2Generation(job: GenerationJob, deps: Yue2GenerationDeps): Promise<void> {
+type Yue2Log = (level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', msg: string) => void;
+type Yue2AutoReplan = { attempts: Array<{ seed: number; verdict: string; reason: string }>; accepted: boolean };
+
+/** A job mapped, logged and (when on) auto-replanned: everything that happens
+ *  before its request goes to the engine. Several of these can share one
+ *  engine call (see runYue2Generation). */
+interface Yue2PreparedJob {
+  job: GenerationJob;
+  req: Yue2SynthRequest;
+  caption: string;
+  halves: Yue2StyleHalves;
+  autoReplan?: Yue2AutoReplan;
+  timing: StageTiming[];
+  pipelineStart: number;
+  log: Yue2Log;
+  /** Set on the lead only; a follower's attempt is filled in when its own
+   *  lane turn returns the already-finished job (index.ts generate()). */
+  attempt?: GenerationAttempt;
+}
+
+async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): Promise<Yue2PreparedJob> {
   const pipelineStart = performance.now();
   const timing: StageTiming[] = [];
-  const timeoutMinutes: number | undefined = job.params.generationTimeoutMinutes;
-  const log = (level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', msg: string) => logGeneration(job.id, level, msg);
-
-  if (job.status === 'cancelled') return;
+  const log: Yue2Log = (level, msg) => logGeneration(job.id, level, msg);
 
   const { req, notes, caption, halves } = mapYue2Params(job.params);
 
@@ -555,76 +579,192 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
       + 'never saw.');
   }
   log('INFO', `[YuE2] Style sent: ${req.style}`);
-  if (req.lyrics) log('DEBUG', `[YuE2] Lyrics sent (${req.lyrics.length} chars):
-${req.lyrics}`);
+  if (req.lyrics) log('DEBUG', `[YuE2] Lyrics sent (${req.lyrics.length} chars):\n${req.lyrics}`);
+
+  if (!req.style.trim()) {
+    throw new Error('YuE2 needs a caption — the Style Description field is empty');
+  }
+
+  // ── Auto-replan ──
+  // A runaway plan (normal sections, then an outro that never ends) is
+  // seed-dependent and costs a six-minute render to discover. Plan first
+  // (seconds), classify, redraw the seed on a runaway verdict, then render
+  // exactly the approved score. Skipped when the user already approved a
+  // score in the preview modal, under cot=off (no plan stage), or when the
+  // toggle is off.
+  let autoReplan: Yue2AutoReplan | undefined;
+  if (job.params.yue2AutoReplan !== false && req.cot !== 'off' && !req.abc) {
+    autoReplan = { attempts: [], accepted: false };
+    // UI slider (index.ts's yue2ReplanAttempts extension) clamps to [1, 10].
+    const attemptsRaw = Number(job.params.yue2ReplanAttempts);
+    const maxAttempts = Number.isInteger(attemptsRaw) && attemptsRaw >= 1 && attemptsRaw <= 10 ? attemptsRaw : 3;
+    let chosen: { abc: string; seed: number } | undefined;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if ((job.status as string) === 'cancelled') break;
+      job.status = 'running';
+      job.stage = attempt === 1 ? 'YuE2: planning the score...' : `YuE2: re-planning (attempt ${attempt} of ${maxAttempts})...`;
+      job.progress = 1;
+      let plan: Awaited<ReturnType<typeof runYue2PlanPreview>>;
+      try {
+        plan = await runYue2PlanPreview(attempt === 1 ? job.params : { ...job.params, randomSeed: true, seed: -1 });
+      } catch (err: any) {
+        log('WARNING', `[YuE2] Auto-replan attempt ${attempt} failed (${err?.message || err}); rendering with the engine's own plan`);
+        autoReplan = undefined;
+        break;
+      }
+      autoReplan.attempts.push({ seed: plan.seed, verdict: plan.health.verdict, reason: plan.health.reason });
+      log('INFO', `[YuE2] Plan attempt ${attempt}: seed ${plan.seed}, ${plan.health.verdict} — ${plan.health.reason}`);
+      chosen = { abc: plan.abc, seed: plan.seed };
+      if (yue2PlanUsable(plan.health.verdict, job.params.instrumental === true || !req.lyrics)) { autoReplan.accepted = true; break; }
+    }
+    if (autoReplan && chosen) {
+      req.abc = chosen.abc;
+      req.seed = chosen.seed;
+      if (!autoReplan.accepted) log('WARNING', `[YuE2] Every plan attempt was a runaway, had no vocal line or ran to its cap; rendering the last one (seed ${chosen.seed})`);
+      else if (autoReplan.attempts.length > 1) log('INFO', `[YuE2] Bad plan replaced after ${autoReplan.attempts.length} attempts`);
+    }
+  }
+
+  return { job, req, caption, halves, autoReplan, timing, pipelineStart, log, attempt };
+}
+
+/** Everything about a request except the song itself. Two queued jobs whose
+ *  keys match can share one AR batch: same cot, guidance, samplers, NAR
+ *  settings and adapters, differing only in prompt, score and seeds. */
+function yue2CoalesceKey(job: GenerationJob, req: Yue2SynthRequest): string {
+  const shared: Record<string, unknown> = { ...req };
+  for (const k of ['style', 'lyrics', 'abc', 'seed', 'noise_seed', 'lm_batch_size', 'songs']) delete shared[k];
+  const ordered = Object.fromEntries(Object.keys(shared).sort().map(k => [k, shared[k]]));
+  return JSON.stringify([job.userId, job.envelope.models, ordered]);
+}
+
+/** The "songs" entries one prepared job contributes: its lm_batch_size takes
+ *  of the same prompt, seeded seed + i exactly as the plain path would. */
+function yue2SongEntries(p: Yue2PreparedJob): NonNullable<Yue2SynthRequest['songs']> {
+  const n = Math.max(1, p.req.lm_batch_size ?? 1);
+  return Array.from({ length: n }, (_, i) => ({
+    style: p.req.style,
+    ...(p.req.lyrics ? { lyrics: p.req.lyrics } : {}),
+    ...(p.req.abc ? { abc: p.req.abc } : {}),
+    ...(typeof p.req.seed === 'number' ? { seed: p.req.seed + i } : {}),
+    ...(typeof p.req.noise_seed === 'number' ? { noise_seed: p.req.noise_seed + i } : {}),
+  }));
+}
+
+function yue2TracksPerJob(p: Yue2PreparedJob, req: Yue2SynthRequest): number {
+  return Math.max(1, p.req.lm_batch_size ?? 1) * Math.max(1, req.synth_batch_size ?? 1);
+}
+
+function failYue2Job(job: GenerationJob, err: any): void {
+  // `as string`: POST /api/generate/cancel/:id mutates job.status from
+  // outside this function, which TS's control-flow narrowing can't see.
+  if (err?.message === 'Cancelled' || (job.status as string) === 'cancelled') {
+    job.status = 'cancelled';
+    job.stage = 'Cancelled';
+    failGenerationLog(job.id, 'Cancelled by user', 'yue2-text2music');
+  } else {
+    job.status = 'failed';
+    job.error = err?.message || 'Unknown error';
+    job.stage = 'Failed';
+    console.error(`[Generate] Job ${job.id} (yue2) failed:`, err?.message);
+    failGenerationLog(job.id, err?.message || 'Unknown error', 'yue2-text2music');
+  }
+}
+
+/** Queue coalescing. The job holding the GPU lane pulls compatible YuE2 jobs
+ *  still waiting behind it into the same engine call, one "songs" entry each,
+ *  so the AR stages decode every song in one batch. Throughput, not latency:
+ *  each song finishes when the batch does. A follower's own lane turn comes
+ *  later and finds it already finished (index.ts generate() returns the job
+ *  as-is when `coalescedInto` is set). A batch that fails or is cancelled
+ *  hands its followers back to the queue untouched, so they render alone. */
+export async function runYue2Generation(job: GenerationJob, deps: Yue2GenerationDeps): Promise<void> {
+  if (job.coalescedInto) return;   // rendered inside another job's batch
+  if (job.status === 'cancelled') return;
+
+  let lead: Yue2PreparedJob;
+  try {
+    lead = await prepareYue2Job(job, deps.attempt);
+  } catch (err: any) {
+    failYue2Job(job, err);
+    return;
+  }
+  const { log } = lead;
+  const timeoutMinutes: number | undefined = job.params.generationTimeoutMinutes;
+
+  // ── Coalesce ──
+  const members: Yue2PreparedJob[] = [lead];
+  // The ceiling comes from the engine manifest; after a server restart nothing
+  // may have fetched it yet, and a missing manifest must not read as "1".
+  const props = yue2PropsCached() ?? (await yue2Props()).props;
+  const maxSongs = Math.max(1, Number(props?.max_lm_batch) || 1);
+  let songsSoFar = Math.max(1, lead.req.lm_batch_size ?? 1);
+  if (job.params.yue2Coalesce !== false && deps.pendingJobs && songsSoFar < maxSongs && (job.status as string) !== 'cancelled') {
+    const key = yue2CoalesceKey(job, lead.req);
+    // Songs queued together arrive milliseconds apart, and with auto-replan
+    // off this job reaches here before its siblings have been posted. A short
+    // wait when nothing is queued yet costs nothing against a render.
+    if (deps.pendingJobs().length === 0) await new Promise(r => setTimeout(r, YUE2_COALESCE_WAIT_MS));
+    for (const cand of deps.pendingJobs()) {
+      if (songsSoFar >= maxSongs) break;
+      if (cand.status !== 'pending' || cand.coalescedInto || cand.params?.yue2Coalesce === false) continue;
+      let mapped: Yue2ParamMapping;
+      try { mapped = mapYue2Params(cand.params); } catch { continue; }
+      if (yue2CoalesceKey(cand, mapped.req) !== key) continue;
+      const need = Math.max(1, mapped.req.lm_batch_size ?? 1);
+      if (songsSoFar + need > maxSongs) continue;
+      cand.coalescedInto = job.id;
+      cand.status = 'running';
+      cand.stage = 'YuE2: joining a batch...';
+      cand.progress = 1;
+      try {
+        const prepared = await prepareYue2Job(cand);
+        if ((cand.status as string) === 'cancelled') { failYue2Job(cand, new Error('Cancelled')); continue; }
+        prepared.log('INFO', `[YuE2] Rendering in one batch with job ${job.id}`);
+        members.push(prepared);
+        songsSoFar += need;
+      } catch (err: any) {
+        failYue2Job(cand, err);
+      }
+    }
+  }
+  const releaseFollowers = (reason: string) => {
+    for (const m of members.slice(1)) {
+      if ((m.job.status as string) === 'cancelled') { failYue2Job(m.job, new Error('Cancelled')); continue; }
+      m.log('WARNING', `[YuE2] ${reason}; this song goes back to the queue to render on its own`);
+      m.job.coalescedInto = undefined;
+      m.job.status = 'pending';
+      m.job.stage = 'Queued';
+      m.job.progress = 0;
+    }
+    members.length = 1;
+  };
+
+  // ── Submit ──
+  const req: Yue2SynthRequest = members.length === 1 ? lead.req : (() => {
+    const shared: Yue2SynthRequest = { ...lead.req };
+    delete shared.lyrics; delete shared.abc; delete shared.seed; delete shared.noise_seed; delete shared.lm_batch_size;
+    return { ...shared, songs: members.flatMap(yue2SongEntries) };
+  })();
+  if (members.length > 1) {
+    log('INFO', `[YuE2] Batch of ${members.length} queued jobs (${songsSoFar} songs): ${members.map(m => m.job.id).join(', ')}`);
+    console.log(`[Generate] Job ${job.id} — YuE2 batch of ${members.length} jobs, ${songsSoFar} songs`);
+  }
 
   let detailTimer: NodeJS.Timeout | undefined;
-
+  const setAll = (fn: (j: GenerationJob) => void) => { for (const m of members) if ((m.job.status as string) !== 'cancelled') fn(m.job); };
+  let sub: Awaited<ReturnType<typeof yue2Synth>>;
+  let finalDetail: Yue2FinalDetail;
+  let parts: Buffer[];
+  let trackDetails: Yue2TrackDetail[];
   try {
-    if (!req.style.trim()) {
-      throw new Error('YuE2 needs a caption — the Style Description field is empty');
-    }
-
-    // ── Auto-replan ──
-    // A runaway plan (normal sections, then an outro that never ends) is
-    // seed-dependent and costs a six-minute render to discover. Plan first
-    // (seconds), classify, redraw the seed on a runaway verdict, then render
-    // exactly the approved score. Skipped when the user already approved a
-    // score in the preview modal, under cot=off (no plan stage), or when the
-    // toggle is off.
-    let autoReplan: { attempts: Array<{ seed: number; verdict: string; reason: string }>; accepted: boolean } | undefined;
-    if (job.params.yue2AutoReplan !== false && req.cot !== 'off' && !req.abc) {
-      autoReplan = { attempts: [], accepted: false };
-      // UI slider (index.ts's yue2ReplanAttempts extension) clamps to [1, 10].
-      const attemptsRaw = Number(job.params.yue2ReplanAttempts);
-      const maxAttempts = Number.isInteger(attemptsRaw) && attemptsRaw >= 1 && attemptsRaw <= 10 ? attemptsRaw : 3;
-      let chosen: { abc: string; seed: number } | undefined;
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        if ((job.status as string) === 'cancelled') break;
-        job.status = 'running';
-        job.stage = attempt === 1 ? 'YuE2: planning the score...' : `YuE2: re-planning (attempt ${attempt} of ${maxAttempts})...`;
-        job.progress = 1;
-        let plan: Awaited<ReturnType<typeof runYue2PlanPreview>>;
-        try {
-          plan = await runYue2PlanPreview(attempt === 1 ? job.params : { ...job.params, randomSeed: true, seed: -1 });
-        } catch (err: any) {
-          log('WARNING', `[YuE2] Auto-replan attempt ${attempt} failed (${err?.message || err}); rendering with the engine's own plan`);
-          autoReplan = undefined;
-          break;
-        }
-        autoReplan.attempts.push({ seed: plan.seed, verdict: plan.health.verdict, reason: plan.health.reason });
-        log('INFO', `[YuE2] Plan attempt ${attempt}: seed ${plan.seed}, ${plan.health.verdict} — ${plan.health.reason}`);
-        chosen = { abc: plan.abc, seed: plan.seed };
-        if (yue2PlanUsable(plan.health.verdict, job.params.instrumental === true || !req.lyrics)) { autoReplan.accepted = true; break; }
-      }
-      if (autoReplan && chosen) {
-        if (autoReplan.accepted) {
-          req.abc = chosen.abc;
-          req.seed = chosen.seed;
-          if (autoReplan.attempts.length > 1) log('INFO', `[YuE2] Bad plan replaced after ${autoReplan.attempts.length} attempts`);
-        } else {
-          // A capped plan handed back as `abc` gets a synthetic ABC_END from the
-          // engine and renders as "completed" — a truncated riff loop the
-          // composer then has to sing over (2026-09-25, limbizkit step270).
-          // Drop the lead sheet entirely instead: cot=off composes straight
-          // from the lyric, with no plan stage to run away.
-          req.cot = 'off';
-          log('WARNING', `[YuE2] Every plan attempt was a runaway, had no vocal line or ran to its cap; rendering without a lead sheet (cot=off)`);
-        }
-      }
-    }
-
-    // ── Submit ──
-    job.status = 'running';
-    job.stage = 'YuE2: submitting...';
-    job.progress = 2;
+    setAll(j => { j.status = 'running'; j.stage = 'YuE2: submitting...'; j.progress = 2; });
     const submitStart = performance.now();
-    const sub = await yue2Synth(req);
+    sub = await yue2Synth(req);
     // /yue2/synth answers with the job id and nothing else (#177). The seed and
     // the instrumental flag come from what we sent; a random seed (-1) is only
     // known once the job reports its tracks, and is recorded then.
-    const instrumental = !req.lyrics;
-    const reqSeed = req.seed ?? -1;
+    const reqSeed = lead.req.seed ?? -1;
     job.aceJobId = sub.job_id;   // standard /job id — /cancel/:id reaches it unchanged
     if (reqSeed >= 0) {
       deps.attempt.effective.seed = reqSeed;
@@ -633,7 +773,7 @@ ${req.lyrics}`);
     }
     log('INFO', `[YuE2] Job ${sub.job_id} submitted — cot=${req.cot}, ode_steps=${req.ode_steps}, `
       + `cfg=${req.cfg_scale ?? '(default)'}, vae=${req.vae_variant}, `
-      + `seed ${reqSeed >= 0 ? reqSeed : 'random'}${instrumental ? ', instrumental' : ''}`);
+      + `seed ${reqSeed >= 0 ? reqSeed : 'random'}${lead.req.lyrics ? '' : ', instrumental'}`);
 
     // ── Progress ticker ──
     // No /yue2/job route exists (docs/plans/yue2/06-engine-port-plan.md §7
@@ -649,10 +789,12 @@ ${req.lyrics}`);
           const step = status.phase_step ?? 0;
           const total = status.phase_total ?? 0;
           const { stage, progress } = yue2StageText(phase, step, total);
-          job.stage = stage;
-          job.progress = progress;
-          job.acePhase = phase;
-          if (total > 0) job.acePhaseProgress = `step ${step}/${total}`;
+          setAll(j => {
+            j.stage = stage;
+            j.progress = progress;
+            j.acePhase = phase;
+            if (total > 0) j.acePhaseProgress = `step ${step}/${total}`;
+          });
         } catch { /* transient poll failure — pollUntilDone owns the real watchdog */ }
       })();
     }, DETAIL_POLL_MS);
@@ -661,17 +803,81 @@ ${req.lyrics}`);
     await deps.pollUntilDone(sub.job_id, job, deps.signal, timeoutMinutes);
     clearInterval(detailTimer);
     detailTimer = undefined;
-    timing.push({ name: 'YuE2 Generate', ms: Math.round(performance.now() - submitStart) });
+    const generateMs = Math.round(performance.now() - submitStart);
+    for (const m of members) m.timing.push({ name: 'YuE2 Generate', ms: generateMs });
 
-    // ── Result ──
-    job.stage = 'YuE2: saving audio...';
-    job.progress = 95;
-    const saveStart = performance.now();
+    setAll(j => { j.stage = 'YuE2: saving audio...'; j.progress = 95; });
 
     // Additive end_reason/stage_end_reasons/artifacts — see the ASSUMPTION
     // note in client.ts. Every field here is optional; an engine build that
     // doesn't populate them yet just yields an empty object.
-    const finalDetail = await yue2FinalDetail(sub.job_id);
+    finalDetail = await yue2FinalDetail(sub.job_id);
+
+    const audioRes = await aceClient.getJobResult(sub.job_id);
+    const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+    if (audioBuffer.length === 0) {
+      throw new Error('YuE2 returned an empty audio body');
+    }
+    const contentType = audioRes.headers.get('content-type') || 'audio/wav';
+    // One WAV, or multipart/mixed with one WAV part per track, song-major
+    // (yue2-job.h) — the same shape ACE's batch path emits.
+    parts = contentType.startsWith('multipart/mixed')
+      ? splitMultipartMixed(audioBuffer, contentType)
+      : [audioBuffer];
+    if (parts.length === 0) throw new Error('YuE2 returned a multipart body with no parts');
+    const perSong = Math.max(1, req.synth_batch_size ?? 1);
+    trackDetails = finalDetail.tracks && finalDetail.tracks.length === parts.length
+      ? finalDetail.tracks
+      : parts.map((_, i) => ({ song: Math.floor(i / perSong), variation: i % perSong, seed: reqSeed, noise_seed: reqSeed }));
+  } catch (err: any) {
+    if (detailTimer) clearInterval(detailTimer);
+    releaseFollowers(`The batch render failed (${err?.message || err})`);
+    failYue2Job(job, err);
+    return;
+  }
+
+  // ── Finish each member from its own slice of the tracks ──
+  // Song-major, so a member's tracks are contiguous: lm_batch_size songs
+  // times synth_batch_size variations. Song numbers are renumbered per job.
+  let offset = 0;
+  for (const m of members) {
+    const count = yue2TracksPerJob(m, req);
+    const slice = parts.slice(offset, offset + count);
+    const songBase = trackDetails[offset]?.song ?? 0;
+    const details = trackDetails.slice(offset, offset + count).map(td => ({ ...td, song: td.song - songBase }));
+    offset += count;
+    if ((m.job.status as string) === 'cancelled') { failYue2Job(m.job, new Error('Cancelled')); continue; }
+    if (slice.length !== count) {
+      failYue2Job(m.job, new Error(`YuE2 returned ${parts.length} track(s) for a batch that expected ${offset}`));
+      continue;
+    }
+    // A member's own view of the result: its first track's score and reasons
+    // stand where a solo render's job-level fields would.
+    const memberDetail: Yue2FinalDetail = members.length === 1 ? finalDetail : {
+      ...finalDetail,
+      abc: details[0]?.abc,
+      end_reason: details.some(td => td.end_reason === 'limit_hit') ? 'limit_hit' : (details[0]?.end_reason ?? finalDetail.end_reason),
+      stage_end_reasons: details[0]?.stage_end_reasons,
+      semantic_ids: undefined,
+      tracks: details,
+    };
+    try {
+      await finishYue2Job(m, slice, details, memberDetail);
+    } catch (err: any) {
+      failYue2Job(m.job, err);
+    }
+  }
+}
+
+/** Save, post-process, transcribe, align and persist one job's tracks, then
+ *  mark it succeeded: the tail of the old single-job path, unchanged. */
+async function finishYue2Job(
+  p: Yue2PreparedJob, parts: Buffer[], trackDetails: Yue2TrackDetail[], finalDetail: Yue2FinalDetail,
+): Promise<void> {
+  const { job, req, caption, halves, autoReplan, timing, pipelineStart, log } = p;
+  const instrumental = !req.lyrics;
+  const saveStart = performance.now();
+  {
     // Healthy-but-long vs runaway: the score says which, when there is one
     // (cot=off renders have no plan stage and no score to read).
     const scoreHealth = finalDetail.abc ? classifyYue2Score(finalDetail.abc, finalDetail.end_reason) : undefined;
@@ -690,25 +896,9 @@ ${req.lyrics}`);
         .filter(([, r]) => r === 'eos').map(([s]) => s);
       if (eosStages.length) log('INFO', `[YuE2] Stages reaching their own terminator: ${eosStages.join(', ')}`);
     }
-
-    const audioRes = await aceClient.getJobResult(sub.job_id);
-    const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
-    if (audioBuffer.length === 0) {
-      throw new Error('YuE2 returned an empty audio body');
-    }
-    const contentType = audioRes.headers.get('content-type') || 'audio/wav';
-    // One WAV, or multipart/mixed with one WAV part per track, song-major
-    // (yue2-job.h) — the same shape ACE's batch path emits.
-    const parts = contentType.startsWith('multipart/mixed')
-      ? splitMultipartMixed(audioBuffer, contentType)
-      : [audioBuffer];
-    if (parts.length === 0) throw new Error('YuE2 returned a multipart body with no parts');
-    const trackDetails: Yue2TrackDetail[] = finalDetail.tracks && finalDetail.tracks.length === parts.length
-      ? finalDetail.tracks
-      : parts.map((_, i) => ({ song: i, variation: 0, seed: reqSeed, noise_seed: reqSeed }));
     const resolvedSeed = trackDetails[0]?.seed;
     if (typeof resolvedSeed === 'number' && resolvedSeed >= 0) {
-      deps.attempt.effective.seed = resolvedSeed;
+      if (p.attempt) p.attempt.effective.seed = resolvedSeed;
       job.params.seed = resolvedSeed;
       job.params.randomSeed = false;
     }
@@ -978,23 +1168,6 @@ ${req.lyrics}`);
     console.log(`[Generate] Job ${job.id} (yue2) completed in ${(totalMs / 1000).toFixed(1)}s`);
     finishGenerationLog(job.id, 'yue2-text2music');
 
-  } catch (err: any) {
-    if (detailTimer) clearInterval(detailTimer);
-    // `as string`: POST /api/generate/cancel/:id mutates job.status from
-    // outside this function, which TS's control-flow narrowing can't see.
-    if (err.message === 'Cancelled' || (job.status as string) === 'cancelled') {
-      job.status = 'cancelled';
-      job.stage = 'Cancelled';
-      failGenerationLog(job.id, 'Cancelled by user', 'yue2-text2music');
-    } else {
-      job.status = 'failed';
-      job.error = err.message || 'Unknown error';
-      job.stage = 'Failed';
-      console.error(`[Generate] Job ${job.id} (yue2) failed:`, err.message);
-      failGenerationLog(job.id, err.message || 'Unknown error', 'yue2-text2music');
-    }
-  } finally {
-    if (detailTimer) clearInterval(detailTimer);
   }
 }
 

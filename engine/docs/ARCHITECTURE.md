@@ -411,6 +411,7 @@ Parsed by `yue2_parse_request` in `engine/src/yue2/yue2-request.h`.
 | `seed` | random | Song seed. Song i of a batch uses `seed + i` |
 | `noise_seed` | `seed` | NAR noise seed. Variation j uses `noise_seed + j` |
 | `lm_batch_size` | 1 | Songs per request, 1 to 4 |
+| `songs` | none | A batch of different songs: an array of 1 to 4 objects, each with its own `style` (required), `lyrics`, `abc`, `seed` and `noise_seed`. Everything else comes from the request. Sets the batch size and cannot be combined with `lm_batch_size` above 1. Song i without a `seed` uses the request seed plus i. Tracks come back song-major in array order |
 | `synth_batch_size` | 1 | Noise variations per song, 1 to 9 |
 | `plan_<field>`, `semantic_<field>` | checkpoint | Per-stage sampler overrides. `<field>` is `temperature`, `top_p`, `top_k`, `repetition_penalty`, `penalty_window`, `min_tokens` or `max_tokens` |
 | `cfg_scale` | resolved from the checkpoint | NAR CFG |

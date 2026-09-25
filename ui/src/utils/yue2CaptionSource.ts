@@ -441,10 +441,22 @@ export async function applyYue2PresetAdapters(
 ): Promise<boolean> {
   const ar = String(preset?.yue2_ar_adapter_path ?? '').trim();
   const nar = String(preset?.yue2_nar_adapter_path ?? '').trim();
-  try {
-    return await useBackendStore.getState().selectModels(
-      { lmAdapterAr: ar, lmAdapterNar: nar }, YUE2_BACKEND_ID);
-  } catch {
-    return false;
-  }
+  // A queue wave submits several songs of one album at once; they share the
+  // one in-flight selection rather than each posting the same pick.
+  const key = `${ar}\n${nar}`;
+  const inFlight = _applyInFlight.get(key);
+  if (inFlight) return inFlight;
+  const p = (async () => {
+    try {
+      return await useBackendStore.getState().selectModels(
+        { lmAdapterAr: ar, lmAdapterNar: nar }, YUE2_BACKEND_ID);
+    } catch {
+      return false;
+    } finally {
+      _applyInFlight.delete(key);
+    }
+  })();
+  _applyInFlight.set(key, p);
+  return p;
 }
+const _applyInFlight = new Map<string, Promise<boolean>>();

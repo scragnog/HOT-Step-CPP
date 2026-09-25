@@ -54,6 +54,21 @@ struct Yue2StageOverride {
     int   max_tokens         = -1;
 };
 
+// One song of a coalesced batch ("songs": [...]): its own prompt, score and
+// seeds, everything else shared with the request. Queued jobs from different
+// callers render as one AR batch this way, which is where the throughput win
+// is (every decode step serves B streams for about the price of one).
+struct Yue2SongSpec {
+    std::string style;
+    std::string lyrics;
+    std::string abc;
+    bool        abc_provided       = false;
+    uint64_t    seed               = 0;
+    bool        seed_present       = false;
+    uint64_t    noise_seed         = 0;
+    bool        noise_seed_present = false;
+};
+
 struct Yue2Request {
     std::string id = "yue2";
     Yue2StageOverride plan;      // ABC / lead-sheet stage
@@ -61,6 +76,9 @@ struct Yue2Request {
     std::string style;
     std::string lyrics;
     Yue2Cot     cot = YUE2_COT_OFF;
+    // Per-song prompts. Non-empty overrides style/lyrics/abc/seed/noise_seed
+    // and lm_batch_size (= songs.size()); song b's missing seed is seed + b.
+    std::vector<Yue2SongSpec> songs;
 
     std::string abc;               // externally-supplied ABC text; skips the plan stage's model call
     bool        abc_provided = false;
@@ -220,7 +238,7 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         yyjson_doc_free(doc);
         return false;
     }
-    if (!present || out->style.empty()) {
+    if ((!present || out->style.empty()) && !yyjson_obj_get(root, "songs")) {
         if (err) {
             *err = "\"style\" is required and must be non-empty";
         }
@@ -389,6 +407,73 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
             }
             *f.dst = (int) num;
         }
+    }
+
+    // "songs": [{style, lyrics?, abc?, seed?, noise_seed?}, ...] — a coalesced
+    // batch. Each entry is one song with its own prompt; the count is the
+    // batch. Mixing with lm_batch_size > 1 is refused: which of the two is
+    // the batch would be a guess.
+    if (yyjson_val * arr = yyjson_obj_get(root, "songs")) {
+        if (!yyjson_is_arr(arr)) {
+            if (err) *err = "\"songs\" must be an array";
+            yyjson_doc_free(doc);
+            return false;
+        }
+        size_t n = yyjson_arr_size(arr);  // not const: yyjson_arr_foreach writes its bound here
+        if (n < 1 || n > (size_t) YUE2_MAX_LM_BATCH) {
+            if (err) *err = "\"songs\" must hold 1.." + std::to_string(YUE2_MAX_LM_BATCH) + " entries";
+            yyjson_doc_free(doc);
+            return false;
+        }
+        if (out->lm_batch_size > 1) {
+            if (err) *err = "\"songs\" and lm_batch_size > 1 cannot be combined";
+            yyjson_doc_free(doc);
+            return false;
+        }
+        size_t       idx = 0;
+        yyjson_val * sv  = nullptr;
+        yyjson_arr_foreach(arr, idx, n, sv) {
+            if (!yyjson_is_obj(sv)) {
+                if (err) *err = "\"songs\" entries must be objects";
+                yyjson_doc_free(doc);
+                return false;
+            }
+            Yue2SongSpec spec;
+            bool         sp = false;
+            if (!yue2_req_str(sv, "style", &spec.style, &sp, err) || !yue2_req_str(sv, "lyrics", &spec.lyrics, &sp, err) ||
+                !yue2_req_str(sv, "abc", &spec.abc, &sp, err)) {
+                yyjson_doc_free(doc);
+                return false;
+            }
+            spec.abc_provided = !spec.abc.empty();
+            if (spec.style.empty()) {
+                if (err) *err = "\"songs\" entry " + std::to_string(idx) + " needs a non-empty \"style\"";
+                yyjson_doc_free(doc);
+                return false;
+            }
+            if (!yue2_req_num(sv, "seed", &num, &sp, err)) {
+                yyjson_doc_free(doc);
+                return false;
+            }
+            if (sp) {
+                spec.seed         = (uint64_t) num;
+                spec.seed_present = true;
+            }
+            if (!yue2_req_num(sv, "noise_seed", &num, &sp, err)) {
+                yyjson_doc_free(doc);
+                return false;
+            }
+            if (sp) {
+                spec.noise_seed         = (uint64_t) num;
+                spec.noise_seed_present = true;
+            }
+            out->songs.push_back(std::move(spec));
+        }
+        out->lm_batch_size = (int) out->songs.size();
+        // The top-level prompt is what /yue2/props-style validators and the
+        // log lines read; the first song stands in for it when absent.
+        if (out->style.empty()) out->style = out->songs[0].style;
+        if (out->lyrics.empty()) out->lyrics = out->songs[0].lyrics;
     }
 
     if (!yue2_req_num(root, "cfg_scale", &num, &present, err)) {

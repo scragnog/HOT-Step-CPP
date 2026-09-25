@@ -51,6 +51,10 @@ export interface GenerationJob {
   error?: string;
   params: any;
   createdAt: number;
+  /** Set while another job renders this one inside its engine batch (YuE2
+   *  queue coalescing). The backend returns it untouched on its own lane
+   *  turn; cleared if the batch fails so it renders alone. */
+  coalescedInto?: string;
   /** MiniMax-Music3 "play while rendering": true once the engine has confirmed
    *  it will serve this job's audio on GET /mm3/stream. The ENGINE's answer,
    *  not the request's — it may decline, and the UI must then behave exactly

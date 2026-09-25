@@ -1120,6 +1120,61 @@ async function _waitForEngine(onTick?: (status: string) => void): Promise<boolea
 
 // ── Queue runner ─────────────────────────────────────────────────────────────
 
+/** Queued YuE2 songs submitted in one wave. The server batches compatible
+ *  waiting jobs into a single engine call, up to the engine's own ceiling
+ *  (max_lm_batch, 4); sending them together is what makes them "waiting
+ *  together". A wave is one album's songs: same preset adapters, same
+ *  caption source, so the server's compatibility check passes. */
+const YUE2_QUEUE_WAVE = 4;
+
+function _submitWave(next: AudioQueueItem, pending: AudioQueueItem[]): AudioQueueItem[] {
+  if (useBackendStore.getState().activeBackendId !== YUE2_BACKEND_ID) return [next];
+  const wave = [next];
+  for (const item of pending) {
+    if (wave.length >= YUE2_QUEUE_WAVE) break;
+    if (item === next || item.jobId || item.lyricsSetId !== next.lyricsSetId) continue;
+    wave.push(item);
+  }
+  return wave;
+}
+
+/** Run one item to completion. 'done' whether it succeeded or failed; the
+ *  engine-unavailable message when it was parked for a retry instead. */
+async function _runQueueItem(next: AudioQueueItem, token: string): Promise<'done' | string> {
+  try {
+    await _executeItem(next, token);
+    next.status = 'succeeded';
+    _engineWaits.delete(next.id);
+    _state.completionCounter++;
+    // Notify App.tsx so Library updates in real-time — every take, not
+    // just the first (see _notifyItemSongs).
+    _notifyItemSongs(next);
+    _maybeAutoAddToPlaylist(next);
+  } catch (err) {
+    const msg = (err as Error).message || '';
+    const waits = _engineWaits.get(next.id) ?? 0;
+
+    if (_isEngineUnavailable(msg) && waits < MAX_ENGINE_WAITS) {
+      // Park this item; the runner holds the whole queue until the engine is
+      // back. Keep any jobId: on retry _tryReconnect re-attaches if the server
+      // still knows the job, and re-submits if it doesn't.
+      _engineWaits.set(next.id, waits + 1);
+      next.status = 'pending';
+      next.progress = undefined;
+      next.stage = 'Waiting for engine…';
+      _emit(true);
+      console.warn(`[AudioQueue] Engine unavailable (${msg}) — holding queue`);
+      return msg || 'engine unavailable';
+    }
+    next.status = 'failed';
+    next.error = msg;
+    _engineWaits.delete(next.id);
+    console.error(`[AudioQueue] Item ${next.id} failed:`, next.error);
+  }
+  _emit(true);
+  return 'done';
+}
+
 let _running = false;
 
 async function _processQueue(token: string): Promise<void> {
@@ -1168,44 +1223,37 @@ async function _processQueue(token: string): Promise<void> {
           continue;
         }
 
-        await _executeItem(next, token);
-        next.status = 'succeeded';
-        _engineWaits.delete(next.id);
-        _state.completionCounter++;
-        // Notify App.tsx so Library updates in real-time — every take, not
-        // just the first (see _notifyItemSongs).
-        _notifyItemSongs(next);
-        _maybeAutoAddToPlaylist(next);
-      } catch (err) {
-        const msg = (err as Error).message || '';
-        const waits = _engineWaits.get(next.id) ?? 0;
-
-        if (_isEngineUnavailable(msg) && waits < MAX_ENGINE_WAITS) {
-          // Park this item and hold the whole queue until the engine is back.
-          // Keep any jobId: on retry _tryReconnect re-attaches if the server
-          // still knows the job, and re-submits if it doesn't.
-          _engineWaits.set(next.id, waits + 1);
-          next.status = 'pending';
-          next.progress = undefined;
-          next.stage = 'Waiting for engine…';
-          _emit(true);
-          console.warn(`[AudioQueue] Engine unavailable (${msg}) — holding queue`);
-
-          if (await _waitForEngine(s => { next.stage = s; _emit(); })) {
-            next.stage = 'Retrying…';
+        // YuE2: the songs queued behind this one from the same album go up in
+        // the same wave, so the server finds them waiting together and renders
+        // them as one engine batch (backends/yue2/generate.ts coalescing).
+        // Every other backend keeps the one-at-a-time flow.
+        const wave = _submitWave(next, pending);
+        if (wave.length > 1) console.log(`[AudioQueue] Submitting ${wave.length} songs together for server-side batching`);
+        const results = await Promise.all(wave.map(item => _runQueueItem(item, token)));
+        const held = wave.filter((_, i) => results[i] !== 'done');
+        if (held.length) {
+          // Park them and hold the whole queue until the engine is back.
+          if (await _waitForEngine(s => { for (const item of held) item.stage = s; _emit(); })) {
+            for (const item of held) item.stage = 'Retrying…';
             _emit(true);
             continue;
           }
-          next.status = 'failed';
-          next.error = `Engine did not come back: ${msg}`;
-        } else {
-          next.status = 'failed';
-          next.error = msg;
+          for (const [i, item] of wave.entries()) {
+            if (results[i] === 'done') continue;
+            item.status = 'failed';
+            item.error = `Engine did not come back: ${results[i]}`;
+            _engineWaits.delete(item.id);
+            console.error(`[AudioQueue] Item ${item.id} failed:`, item.error);
+          }
+          _emit(true);
         }
-        _engineWaits.delete(next.id);
+      } catch (err) {
+        // Only the reconnect path above can throw; _runQueueItem settles its own item.
+        next.status = 'failed';
+        next.error = (err as Error).message || '';
         console.error(`[AudioQueue] Item ${next.id} failed:`, next.error);
+        _emit(true);
       }
-      _emit(true);
     }
   } finally {
     _running = false;

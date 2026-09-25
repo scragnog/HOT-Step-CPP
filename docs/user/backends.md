@@ -167,6 +167,15 @@ What sets it apart:
   rather than from a broken score, and the generation log says so.
 - Batch Size renders several songs in one pass, up to a limit the engine reports for your
   setup, and Noise Variations renders the same composed song from different noise.
+- Batch Queued Songs (on by default) does the same across the queue: when several YuE2
+  jobs are waiting with the same settings and adapters, the one that reaches the engine
+  takes the others with it and composes them together, up to that same limit. An album
+  queued from Lyric Studio is the typical case. Songs per minute go up; each song finishes
+  when its batch does rather than as soon as its own turn would have. A job that needs a
+  different adapter, guidance or sampler setting waits for its own turn. A batch that
+  fails hands its passengers back to the queue to render alone. Batched decoding rounds
+  differently from solo decoding, so a seed rendered in a batch can differ from the same
+  seed rendered alone; the Batch Size setting has always had the same property.
 - It has its own NAR solver and scheduler choices (Midpoint or Wasserstein Flow, Uniform
   or HT V3). The shared Lua plugins do not run on it.
 - Adapters load into two slots in the Adapters cluster, one for the AR half and one for

@@ -265,6 +265,11 @@ export interface Yue2SynthRequest {
   preview_max_frames?: number;
   /** Songs per request (seeds seed+i), 1..props.max_lm_batch. Omitted at 1. */
   lm_batch_size?: number;
+  /** A coalesced batch: one entry per song with its own prompt, score and
+   *  seeds; everything else comes from the request. Sets the batch size
+   *  (1..props.max_lm_batch) and replaces style/lyrics/abc/seed/noise_seed.
+   *  Not combinable with lm_batch_size > 1. Tracks come back song-major. */
+  songs?: Array<{ style: string; lyrics?: string; abc?: string; seed?: number; noise_seed?: number }>;
   /** Noise variations per song (NAR noise seeds noise_seed+j), 1..props.max_synth_batch. Omitted at 1. */
   synth_batch_size?: number;
   /** NAR noise seed; defaults to `seed`. Set from a track's echoed noise_seed to replay one variation. */

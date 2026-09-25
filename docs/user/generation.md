@@ -397,6 +397,8 @@ re-runs from the Library wait in the same line.
   when the engine picks it up, not while it waits) is also failed.
 - While the engine is starting or paused for training, queued jobs wait for it rather than
   failing.
+- YuE2 jobs waiting with matching settings render together as one engine batch when Batch
+  Queued Songs is on. See [Backends](backends.md#yue2).
 - The queue survives a page reload: running jobs reconnect. After a full restart of the app
   the server has forgotten them, so unstarted and interrupted jobs are held and a banner
   offers Resume or Discard. Nothing restarts on its own.

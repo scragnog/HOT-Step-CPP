@@ -319,6 +319,9 @@ export interface GenerationContext {
   signal: AbortSignal;
   pollUntilDone: PollUntilDone;
   hooks: GenerationHooks;
+  /** Jobs of the same backend still queued behind this one, oldest first.
+   *  A backend that batches across requests reads it; the rest ignore it. */
+  pendingJobs?: () => GenerationJob[];
 }
 
 export interface ResolvedRequest {
