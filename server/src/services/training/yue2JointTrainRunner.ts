@@ -117,6 +117,10 @@ export interface ResolvedYue2JointTrainOptions {
   /** Decoder training window in frames (25/s). Absent/1500 = the reference
    *  60 s crop; 0 = whole song (clamped per song to the context). */
   narCropFrames?: number;
+  /** The tokenizer's companion decoder adapter, resolved by the job runner
+   *  where the engine looks for it; absent = the pristine decoder. Recorded
+   *  in the run options so a resume can tell which decoder it started on. */
+  companion?: string;
   /** Plan-check planner stop: every `every` steps while the planner is live,
    *  pause, have the checkpoint's planner write `plans` plans, and freeze the
    *  planner at the LAST checkpoint whose failure rate stayed within `margin`
@@ -216,12 +220,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   // The tokenizer's companion decoder adapter is part of the decoder whenever
   // it is installed: the engine merges it under every generation, so the
   // adapter trains on the decoder it will render with (2026-09-25).
-  // Same two places the engine searches (models/yue2, then models/), so the
-  // trainer and the renderer agree on whether the companion exists.
-  const companion = [yue2ModelDir(), config.aceServer.models]
-    .map(dir => path.join(dir, 'nar_lora_joint_v9.safetensors')).find(p => fs.existsSync(p));
-  if (companion) args.push('--companion', companion);
-  console.log(`[YuE2 train] companion decoder adapter: ${companion ?? 'not installed (training on the pristine decoder)'}`);
+  if (o.companion) args.push('--companion', o.companion);
   if (o.resume) args.push('--resume', o.resume);
   if (o.resume && o.freezePlannerNow) args.push('--freeze-planner-now');
   if (o.alignment) {
@@ -444,6 +443,15 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
   const error = opts ? validateOptions(opts) : 'job is missing joint-training options';
   if (error) { finishJob(job, 'failed', error); return; }
   const o = opts!;
+  // The tokenizer's companion decoder adapter is part of the decoder whenever
+  // it is installed: the engine merges it under every generation, so the
+  // adapter trains on the decoder it will render with (2026-09-25). Looked up
+  // in the same two places the engine searches (models/yue2, then models/).
+  const companion = [yue2ModelDir(), config.aceServer.models]
+    .map(dir => path.join(dir, 'nar_lora_joint_v9.safetensors')).find(p => fs.existsSync(p));
+  if (o.resume && o.companion !== companion) log(job, 'warn', `Companion decoder adapter differs from the run being resumed: was ${o.companion ?? 'not installed'}, now ${companion ?? 'not installed'}`);
+  o.companion = companion;
+  log(job, 'info', `Companion decoder adapter: ${companion ?? 'not installed (training on the pristine decoder)'}`);
   let nativeAttempted = false;
   try {
     log(job, 'info', `Starting YuE2 joint training (${o.device})`);

@@ -12,7 +12,7 @@ test('joint stop mode accepts the explicit step count sent by the UI', () => {
 test('AITK native joint JSON event maps to the server metric contract', () => {
   assert.deepEqual(parseYue2JointEvent(
     '{"stage":"joint","step":7,"ar_ce":1.2,"ar_kl":0.3,"nar_mse":0.004,"gradient_norm":2.5}', 100),
-    { stage: 'joint', step: 7, loss: 1.264, arKl: 0.3, gradNorm: 2.5, totalSteps: 100 });
+    { stage: 'joint', step: 7, loss: 1.264, arKl: 0.3, narMse: 0.004, gradNorm: 2.5, totalSteps: 100 });
 });
 
 test('AITK native joint JSON forwards the measured step duration', () => {
