@@ -279,7 +279,8 @@
       "description": "YuE2 — a second generation backend, separate from ACE-Step and MiniMax-Music3: an autoregressive language model (plan/semantic/nar stages) plus a VAE decoder, producing 48 kHz stereo audio from a freeform style + lyrics prompt. Q8_0 LM (near-lossless, NAR-stage rel-L2 vs bf16 output 0.019 against bf16's own 0.013 baseline — docs/plans/yue2/07-quant-ladder.md §5) plus the standard VAE. ~4.4 GB total. License: CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "fileIds": [
         "yue2-lm-q8_0",
-        "yue2-vae-standard-f32"
+        "yue2-vae-standard-f32",
+        "yue2-nar-companion-v9"
       ]
     },
     {
@@ -290,7 +291,8 @@
       "fileIds": [
         "yue2-aitk-convrot-checkpoint",
         "yue2-lm-q8_0",
-        "yue2-vae-standard-f32"
+        "yue2-vae-standard-f32",
+        "yue2-nar-companion-v9"
       ]
     },
     {
@@ -300,7 +302,8 @@
       "description": "YuE2 at source precision (BF16 LM) plus the standard VAE — the reference quality bar the whole quant ladder is measured against (docs/plans/yue2/07-quant-ladder.md). Largest download and VRAM footprint of the four YuE2 packs. ~7.8 GB total. License: CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "fileIds": [
         "yue2-lm-bf16",
-        "yue2-vae-standard-f32"
+        "yue2-vae-standard-f32",
+        "yue2-nar-companion-v9"
       ]
     },
     {
@@ -310,7 +313,8 @@
       "description": "YuE2 with the Q4_K_M-imat LM (imatrix-guided quantization; NAR-stage rel-L2 vs bf16 output 0.116 against bf16's own 0.013 baseline — docs/plans/yue2/07-quant-ladder.md §12/§14) plus the standard VAE. The usual choice for limited VRAM. ~3.0 GB total. License: CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "fileIds": [
         "yue2-lm-Q4_K_M-imat",
-        "yue2-vae-standard-f32"
+        "yue2-vae-standard-f32",
+        "yue2-nar-companion-v9"
       ]
     },
     {
@@ -320,7 +324,8 @@
       "description": "YuE2 with the smallest LM this ladder ships, Q2_K-imat, plus the standard VAE. WARNING: audibly degraded — NAR-stage rel-L2 vs bf16 output is 0.389 against bf16's own 0.013 baseline (docs/plans/yue2/07-quant-ladder.md §12/§14), the second-worst measurement on the whole ladder. Pick this only for the smallest possible download/VRAM footprint and expect the flow-matching output to sound rougher than every other pack. ~2.2 GB total. License: CC BY-NC 4.0, with the authors' clarification that individuals — creators, musicians, researchers — may use the model and its outputs freely, including commercially; only companies need a commercial license (gezhang@umich.edu).",
       "fileIds": [
         "yue2-lm-Q2_K-imat",
-        "yue2-vae-standard-f32"
+        "yue2-vae-standard-f32",
+        "yue2-nar-companion-v9"
       ]
     },
     {
@@ -343,7 +348,8 @@
         "yue2-lm-q8_0",
         "yue2-vae-standard-f32",
         "yue2-tok-f16",
-        "yue2-sheetsage2-f16"
+        "yue2-sheetsage2-f16",
+        "yue2-nar-companion-v9"
       ]
     },
     {
@@ -4345,6 +4351,27 @@
       "repo": "scragnog/YuE2-GGUF",
       "description": "Codes half of the minted regulariser pack: true YuE2 semantic codes as headerless little-endian int32, indexed by minted_manifest.json. Not useful alone.",
       "tags": []
+    },
+    {
+      "id": "yue2-nar-companion-v9",
+      "filename": "nar_lora_joint_v9.safetensors",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "repoPath": "nar_lora_joint_v9.safetensors",
+      "displayName": "YuE2 Tokenizer Companion Decoder Adapter (v9)",
+      "scale": null,
+      "variant": "companion",
+      "quant": "F32",
+      "sizeBytes": 140560592,
+      "repo": "Mothersuperior/yue2-mothersuperior-realaudio-tokenizer-v4",
+      "description": "Mothersuperior's decoder adapter published as a pair with the v9 tokenizer head that YuE2 training uses to turn real audio into codes. It is merged under every YuE2 generation and kept frozen inside the decoder during joint training, so adapters train on the decoder they render with. Without it the decoder narrows real-audio mixes towards mono (round trip on six real songs: L/R correlation 0.78-0.92 against the originals' ~0.65; 0.57-0.72 with it). A rank-32 LoRA on the decoder blocks plus full vae2llm/llm2vae weights. License: CC BY-NC 4.0.",
+      "tags": [
+        "yue2",
+        "decoder",
+        "companion"
+      ],
+      "sha256": "585f303da1d5252d228d1e8ac6d4c4d11d970df9297406935cc8bdafa49cfa7e"
     },
     {
       "id": "whisper-large-v3-turbo",

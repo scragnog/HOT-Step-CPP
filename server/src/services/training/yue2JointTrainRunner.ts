@@ -13,6 +13,7 @@ import { yue2Unload } from '../backends/yue2/client.js';
 import { ensureYue2PreparedDataset } from './yue2AutoPrepare.js';
 import { getDataset } from './datasetsRepo.js';
 import { config } from '../../config.js';
+import { yue2ModelDir } from './yue2Train.js';
 import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
 
 export interface ResolvedYue2JointTrainOptions {
@@ -212,6 +213,11 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   }
   if (o.lrScale !== undefined && o.lrScale !== 1) args.push('--lr-scale', String(o.lrScale));
   if (o.narCropFrames !== undefined && o.narCropFrames !== 1500) args.push('--nar-crop-frames', String(o.narCropFrames));
+  // The tokenizer's companion decoder adapter is part of the decoder whenever
+  // it is installed: the engine merges it under every generation, so the
+  // adapter trains on the decoder it will render with (2026-09-25).
+  const companion = path.join(yue2ModelDir(), 'nar_lora_joint_v9.safetensors');
+  if (fs.existsSync(companion)) args.push('--companion', companion);
   if (o.resume) args.push('--resume', o.resume);
   if (o.resume && o.freezePlannerNow) args.push('--freeze-planner-now');
   if (o.alignment) {
