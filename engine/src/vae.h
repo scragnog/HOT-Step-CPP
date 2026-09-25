@@ -799,6 +799,26 @@ static int vae_ggml_decode_tiled(VAEGGML *     m,
                                  int           overlap    = 64,
                                  bool (*cancel)(void *)   = nullptr,
                                  void * cancel_data       = nullptr) {
+    // A track at or under chunk_size decodes untiled, in one graph, which
+    // wants roughly 10 MB of activations per latent frame: 726 frames asked
+    // Vulkan for 6.78 GB and took ace-server down on a 4 GB card (#186). When
+    // the device cannot hold that, tile at 256 regardless of the setting.
+    // ponytail: per-frame figure is the #186 measurement (9.3 MB), not a graph
+    // size query; replace with ggml_backend_sched's reserve size if it drifts.
+    if (T_latent <= chunk_size && T_latent > 256 && m->backend) {
+        size_t free_b = 0, total_b = 0;
+        if (ggml_backend_dev_t dev = ggml_backend_get_device(m->backend)) {
+            ggml_backend_dev_memory(dev, &free_b, &total_b);
+        }
+        const size_t need = (size_t) T_latent * (10u << 20);
+        if (free_b > 0 && need > free_b) {
+            fprintf(stderr, "[VAE] Untiled decode of %d frames needs about %.2f GB, device reports %.2f GB free: tiling at 256\n",
+                    T_latent, need / 1073741824.0, free_b / 1073741824.0);
+            chunk_size = 256;
+            if (overlap > 64) overlap = 64;
+        }
+    }
+
     // Ensure positive stride (matches Python effective_overlap reduction)
     while (chunk_size - 2 * overlap <= 0 && overlap > 0) {
         overlap /= 2;
