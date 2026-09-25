@@ -598,10 +598,19 @@ ${req.lyrics}`);
         if (yue2PlanUsable(plan.health.verdict, job.params.instrumental === true || !req.lyrics)) { autoReplan.accepted = true; break; }
       }
       if (autoReplan && chosen) {
-        req.abc = chosen.abc;
-        req.seed = chosen.seed;
-        if (!autoReplan.accepted) log('WARNING', `[YuE2] Every plan attempt was a runaway, had no vocal line or ran to its cap; rendering the last one (seed ${chosen.seed})`);
-        else if (autoReplan.attempts.length > 1) log('INFO', `[YuE2] Bad plan replaced after ${autoReplan.attempts.length} attempts`);
+        if (autoReplan.accepted) {
+          req.abc = chosen.abc;
+          req.seed = chosen.seed;
+          if (autoReplan.attempts.length > 1) log('INFO', `[YuE2] Bad plan replaced after ${autoReplan.attempts.length} attempts`);
+        } else {
+          // A capped plan handed back as `abc` gets a synthetic ABC_END from the
+          // engine and renders as "completed" — a truncated riff loop the
+          // composer then has to sing over (2026-09-25, limbizkit step270).
+          // Drop the lead sheet entirely instead: cot=off composes straight
+          // from the lyric, with no plan stage to run away.
+          req.cot = 'off';
+          log('WARNING', `[YuE2] Every plan attempt was a runaway, had no vocal line or ran to its cap; rendering without a lead sheet (cot=off)`);
+        }
       }
     }
 

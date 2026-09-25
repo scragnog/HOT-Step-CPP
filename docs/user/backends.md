@@ -161,6 +161,10 @@ What sets it apart:
 - Preview the score first (off by default) plans the lead sheet only, shows it with
   playback, and lets you continue, re-plan with a new seed, or cancel before any audio
   is rendered. You can also paste your own ABC lead sheet to render from.
+- Without the preview, the app plans first anyway and redraws the seed when the lead sheet
+  is a runaway, has no vocal line, or hit its cap, up to the attempt count in Settings. If
+  every attempt fails, the song renders with Chain of Thought off (straight from the lyric)
+  rather than from a broken score, and the generation log says so.
 - Batch Size renders several songs in one pass, up to a limit the engine reports for your
   setup, and Noise Variations renders the same composed song from different noise.
 - It has its own NAR solver and scheduler choices (Midpoint or Wasserstein Flow, Uniform
