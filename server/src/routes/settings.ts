@@ -4,6 +4,7 @@
 // GET  /api/settings/env — returns current values for exposed keys
 // PUT  /api/settings/env — updates .env file and hot-reloads config
 
+import { MODELS_DIR as MUSCRIPTOR_MODELS_DIR } from '../services/muscriptor.js';
 import { Router } from 'express';
 import fs from 'fs';
 import {
@@ -33,6 +34,8 @@ function getResolvedDefaults(): Record<string, string> {
     CUDA_VISIBLE_DEVICES: config.aceServer.cudaVisibleDevices,
     SERVER_PORT: String(config.server.port),
     DATA_DIR: config.data.dir,
+    MUSCRIPTOR_MODELS_DIR: MUSCRIPTOR_MODELS_DIR,
+    LLM_TIMEOUT_MS: String(config.lireek.llmTimeoutMs),
   };
 }
 

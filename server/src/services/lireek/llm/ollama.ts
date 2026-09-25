@@ -68,7 +68,7 @@ export class OllamaProvider extends LLMProvider {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(300_000),
+      signal: AbortSignal.timeout(config.lireek.llmTimeoutMs),
     });
 
     let resp = await doFetch();

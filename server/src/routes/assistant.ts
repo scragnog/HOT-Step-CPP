@@ -12,8 +12,9 @@ import type { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PORTABLE_MODE, PROJECT_ROOT } from '../config.js';
+import { config, PORTABLE_MODE, PROJECT_ROOT } from '../config.js';
 import { getProvider, listProviders } from '../services/lireek/llm/registry.js';
+import { gpuLaneBusy } from '../services/generation/gpuLane.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const router = Router();
@@ -190,6 +191,11 @@ router.post('/chat', async (req: Request, res: Response) => {
     sendSse('complete', { text: fullText || result });
     res.end();
   } catch (err: any) {
+    // The provider's abort fires exactly when a render holds the GPU and a
+    // local model is being starved (#136): say so, and name the setting.
+    if (/abort|timeout/i.test(`${err?.name} ${err?.message}`) && gpuLaneBusy()) {
+      err.message = `The assistant timed out while the engine was busy with a generation or stem job. Wait for it to finish, or raise LLM_TIMEOUT_MS (currently ${config.lireek.llmTimeoutMs} ms) in Settings > Environment.`;
+    }
     console.error('[Assistant] Chat error:', err.message);
     // If headers already sent (SSE started), send error event
     if (res.headersSent) {

@@ -2,7 +2,7 @@
 
 import { Router } from 'express';
 import { aceClient } from '../services/aceClient.js';
-import { config } from '../config.js';
+import { APP_VERSION, config } from '../config.js';
 import { engineReady, engineBootStatus } from '../engineState.js';
 
 const router = Router();
@@ -44,6 +44,7 @@ router.get('/', async (_req, res) => {
 
   res.json({
     status: 'ok',
+    version: APP_VERSION,
     aceServer: {
       status: aceStatus,
       url: config.aceServer.url,

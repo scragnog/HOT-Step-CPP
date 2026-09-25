@@ -18,6 +18,13 @@ export const PROJECT_ROOT = process.env.HOT_STEP_ROOT
 // Load .env from project root (optional — smart defaults work without it)
 // On first launch, bootstrap .env from .env.example so settings are writable.
 const ENV_PATH = path.join(PROJECT_ROOT, '.env');
+
+/** The release tag, from the VERSION file the release workflow writes at the
+ *  package root; a git checkout has none and reports "dev" (#185). */
+export const APP_VERSION: string = (() => {
+  try { return fs.readFileSync(path.join(PROJECT_ROOT, 'VERSION'), 'utf-8').trim() || 'dev'; }
+  catch { return 'dev'; }
+})();
 const ENV_EXAMPLE_PATH = path.join(PROJECT_ROOT, '.env.example');
 if (!fs.existsSync(ENV_PATH) && fs.existsSync(ENV_EXAMPLE_PATH)) {
   try {
@@ -227,6 +234,10 @@ export const config = {
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
     ollamaBaseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
     lmstudioBaseUrl: process.env.LMSTUDIO_BASE_URL || 'http://localhost:1234/v1',
+    // One completion call's abort limit, every provider. A local model on
+    // unified memory can need more than the old fixed 300 s while SuperSep
+    // or the DiT holds the GPU (#136).
+    llmTimeoutMs: Math.max(10_000, parseInt(process.env.LLM_TIMEOUT_MS || '300000', 10) || 300_000),
     // LM Studio can require a bearer token once its server has Authentication
     // switched on, which is what you need for its MCP features (issue #121).
     // Empty means anonymous, which is how a default LM Studio install answers.
@@ -313,7 +324,7 @@ export const EXPOSED_ENV_KEYS = [
   // API keys
   'GENIUS_ACCESS_TOKEN', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY',
   // LLM config
-  'DEFAULT_LLM_PROVIDER',
+  'DEFAULT_LLM_PROVIDER', 'LLM_TIMEOUT_MS',
   'GEMINI_MODEL', 'OPENAI_MODEL', 'ANTHROPIC_MODEL',
   'OLLAMA_MODEL', 'LMSTUDIO_MODEL', 'UNSLOTH_MODEL',
   // LLM endpoints
@@ -327,7 +338,7 @@ export const EXPOSED_ENV_KEYS = [
   'LABEL_GENIUS_CONCURRENCY', 'LABEL_GENIUS_MIN_INTERVAL_MS',
   'LABEL_CAPTION_CONCURRENCY', 'LABEL_CAPTION_MIN_INTERVAL_MS',
   // Paths
-  'LYRICS_EXPORT_DIR',
+  'LYRICS_EXPORT_DIR', 'MUSCRIPTOR_MODELS_DIR',
 ] as const;
 
 /**
@@ -345,7 +356,7 @@ export const RESTART_REQUIRED_KEYS = new Set([
   'ACESTEPCPP_MODELS', 'ACESTEPCPP_ADAPTERS', 'ACESTEPCPP_PORT', 'ACESTEPCPP_HOST',
   'ACESTEPCPP_VAE_CHUNK', 'ACESTEPCPP_VAE_OVERLAP', 'ACESTEPCPP_KEEP_LOADED',
   'CUDA_VISIBLE_DEVICES',
-  'SERVER_PORT', 'DATA_DIR',
+  'SERVER_PORT', 'DATA_DIR', 'MUSCRIPTOR_MODELS_DIR',
 ]);
 
 /**
@@ -394,6 +405,8 @@ export function reloadEnvConfig(): string[] {
   }, () => config.data.dir);
 
   // ── Lireek / LLM (hot-reloaded — takes effect immediately) ──
+  apply('LLM_TIMEOUT_MS', v => { config.lireek.llmTimeoutMs = Math.max(10_000, parseInt(v || '300000', 10) || 300_000); },
+    () => String(config.lireek.llmTimeoutMs));
   apply('GENIUS_ACCESS_TOKEN', v => { config.lireek.geniusAccessToken = v; },
     () => config.lireek.geniusAccessToken);
   apply('GEMINI_API_KEY', v => { config.lireek.geminiApiKey = v; },

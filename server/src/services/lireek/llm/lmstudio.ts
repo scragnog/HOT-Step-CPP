@@ -88,7 +88,7 @@ export class LMStudioProvider extends LLMProvider {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(300_000),
+      signal: AbortSignal.timeout(config.lireek.llmTimeoutMs),
     });
 
     let resp = await doFetch();
