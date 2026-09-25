@@ -165,11 +165,14 @@ public:
         std::vector<Built> built;
         auto site = [&](int i, Yue2AitkConvRotLinear * dst, std::vector<std::pair<const char *, int64_t>> parts, int64_t in) -> bool {
             // parts: (companion module, its output width), in fused-row order.
-            int64_t r_total = 0, out_total = 0, r = 0;
+            // Each part keeps its own rank: a companion with q at 64 and k/v at
+            // 32 must not copy q's A with k's row count.
+            int64_t r_total = 0, out_total = 0;
+            std::vector<int64_t> ranks;
             for (auto & p : parts) {
                 const STEntry * a = entry("layers." + std::to_string(i) + "." + p.first + ".lora_A");
                 if (!a || a->n_dims != 2 || a->shape[1] != in) return false;
-                r = a->shape[0]; r_total += r; out_total += p.second;
+                ranks.push_back(a->shape[0]); r_total += a->shape[0]; out_total += p.second;
             }
             if (out_total != dst->rows || in != dst->cols) return false;
             Built b;
@@ -178,7 +181,9 @@ public:
             b.ha.assign((size_t) (in * r_total), 0.0f);
             b.hb.assign((size_t) (r_total * out_total), 0.0f);
             int64_t r0 = 0, o0 = 0;
-            for (auto & p : parts) {
+            for (size_t pi = 0; pi < parts.size(); ++pi) {
+                auto &        p = parts[pi];
+                const int64_t r = ranks[pi];
                 const std::string base = "layers." + std::to_string(i) + "." + p.first;
                 const STEntry * ea = entry(base + ".lora_A"), * eb = entry(base + ".lora_B");
                 if (!ea || !eb || eb->n_dims != 2 || eb->shape[0] != p.second || eb->shape[1] != r) return false;

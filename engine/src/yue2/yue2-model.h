@@ -1304,6 +1304,7 @@ static void yue2_unload(Yue2Model * m) {
     m->lm_adapter_desc.clear();
     m->lm_adapter_tensors = 0;
     m->companion_applied  = false;
+    m->companion_path.clear();
     m->lm_adapter_family.clear();
     m->lm_adapter_merged.clear();
     if (m->backend_ref) {
@@ -1392,6 +1393,7 @@ static const char * YUE2_COMPANION_FILE = "nar_lora_joint_v9.safetensors";
 
 static bool yue2_apply_companion(Yue2Model * m, const GGUFModel & gf, std::vector<std::string> * errs) {
     m->companion_applied = false;
+    m->companion_path.clear();
     if (!m->companion_enabled) {
         return true;
     }

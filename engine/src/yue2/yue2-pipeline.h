@@ -426,6 +426,14 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         if (err) *err = "codec_ids needs a single song and cfg_scale 1 (the stream is not sampled)";
         return false;
     }
+    // The supplied stream is prefilled in one graph at positions after the
+    // prefix; past the trained context that is RoPE positions the model never
+    // saw, and a huge array is a VRAM exhaustion, not a render.
+    if (supplied_n > 0 && max_prefix + supplied_n + 4 > (int64_t) m.lm_cfg.context_length) {
+        if (err) *err = "codec_ids too long: " + std::to_string(supplied_n) + " codes plus the prefix exceed the model context of " +
+                        std::to_string(m.lm_cfg.context_length);
+        return false;
+    }
     if (!yue2_ar_kv_cache_alloc(m, max_prefix + std::max<int64_t>(sp.max_tokens, supplied_n) + 4, &cache, err, S)) {
         return false;
     }
