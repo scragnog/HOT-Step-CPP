@@ -76,7 +76,7 @@ When to move off them:
 - Leave the schedule on wsd. Plain cosine leaves an early-stopped run mid-decay at a high rate, and cosine restarts were expected to shake the planner.
 - Training presets saves your current settings under a name in this browser. It never saves dataset, checkpoint or output paths.
 
-"Train multiple" runs the whole chain (caches, preparation, joint training) for several datasets in sequence with shared settings and a separate output folder each. The batch runs on the server.
+"Train multiple" runs the whole chain (caches, preparation, joint training, then the refinement pass when auto-refine is on, which it is by default) for several datasets in sequence with shared settings and a separate output folder each. The batch runs on the server: it survives a page reload, and after a server restart it is listed as paused so you can resume it with every finished stage kept. The batch panel above the Training Studio phases shows the queue, the running stage's step count, and a link back to the running training from anywhere in the studio.
 
 How long it takes and how much VRAM it needs at these settings have not been recorded in the code or skills yet.
 <!-- TODO(verify): joint training wall-clock time and peak VRAM at the Balanced preset. -->

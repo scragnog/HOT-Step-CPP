@@ -38,7 +38,6 @@ import { useTrainingStore } from '../../stores/trainingStore';
 import {
   Yue2StemsCard, Yue2AlignCard, Yue2ArTrainStageCard, Yue2SheetCard, Yue2TokenizeCard,
 } from './Yue2ArTrainCard';
-import { Yue2BatchTrainWizard } from './Yue2BatchTrainWizard';
 import { Yue2NarTrainCard, Yue2PreprocessCard } from './Yue2TrainCard';
 import { Yue2AitkTrainCard } from './Yue2AitkTrainCard';
 import { Yue2AitkBatchWizard } from './Yue2AitkBatchWizard';
@@ -225,7 +224,6 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
   // awareness of its own, so it rides this one nonce instead of duplicating
   // that logic a third time.
   const [reloadNonce, setReloadNonce] = useState(0);
-  const [batchOpen, setBatchOpen] = useState(false);
   const [aitkBatchOpen, setAitkBatchOpen] = useState(false);
   const reload = () => { reloadYue2Status(); reloadArStatus(); setReloadNonce(n => n + 1); };
 
@@ -268,7 +266,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
       jobBusyElsewhere={jobBusy}
       runAllActive={yue2RunAllActive}
       runAllStage={yue2RunAllStage}
-      onQueueMultiple={() => setBatchOpen(true)}
+      onQueueMultiple={() => setAitkBatchOpen(true)}
     />
   );
 
@@ -400,7 +398,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
 
       {runAllControl}
 
-      <Yue2BatchTrainWizard open={batchOpen} onClose={() => setBatchOpen(false)} />
+      <Yue2AitkBatchWizard open={aitkBatchOpen} onClose={() => setAitkBatchOpen(false)} />
     </div>
   );
 };

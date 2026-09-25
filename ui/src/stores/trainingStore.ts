@@ -59,25 +59,6 @@ export type Yue2StageSet = Record<Yue2StageKey, boolean>;
 export const YUE2_ALL_STAGES: Yue2StageSet =
   { latents: true, codes: true, sheet: true, stems: true, align: true, nar: true, ar: true };
 
-export type Yue2QueueStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
-
-/** One dataset's slot in the bulk YuE2 training queue. */
-export interface Yue2QueueItem {
-  datasetId: string;
-  /** Snapshotted at queue time so the row still names itself after the
-   *  dataset list refreshes mid-run. */
-  name: string;
-  /** The dataset's own trigger word (customTag), '' for none. Per dataset,
-   *  never one trigger for the whole queue — a queue of six albums is six
-   *  different artists. */
-  trigger: string;
-  status: Yue2QueueStatus;
-  /** 1-6 while this item is running, null otherwise. */
-  stage: number | null;
-  /** The failing stage's own message; '' unless status is 'failed'. */
-  error: string;
-}
-
 const JOB_LOG_CAP = 200;
 const EDIT_DEBOUNCE_MS = 500;
 /** Points kept for the chart's per-step layer. A 500-song LM run emits ~25 000
@@ -236,22 +217,6 @@ interface TrainingState {
   /** Which of the five YuE2 stages (1-5) the chain is currently on or waiting
    *  to finish. Null when the chain isn't running. */
   yue2RunAllStage: number | null;
-  /** The bulk queue: one row per dataset the user ticked, in run order. Kept
-   *  after the queue finishes so the outcome is still readable — clearing it
-   *  is an explicit act (`clearYue2Queue`). Empty means "never run this
-   *  session", which is what hides the progress panel. */
-  yue2Queue: Yue2QueueItem[];
-  /** True from the first dataset starting until the last one stops. Drives the
-   *  same button-disabling as `yue2RunAllActive`, which the queue also sets. */
-  yue2QueueActive: boolean;
-  /** Index into `yue2Queue` of the dataset being trained; -1 when idle. */
-  yue2QueueIndex: number;
-  /** Set by "Stop after this dataset" — the queue finishes the dataset it is
-   *  on and marks the rest cancelled. There is deliberately no mid-job kill
-   *  here: cancelling the RUNNING job is the job card's own Cancel button. */
-  yue2QueueStopping: boolean;
-  /** Which stages the running (or last) queue was told to perform. */
-  yue2QueueStages: Yue2StageSet;
 
   // preprocess
   preprocessStatus: PreprocessStatus | null;
@@ -454,21 +419,6 @@ interface TrainingState {
     lyricTiming: boolean,
     startTraining: () => Promise<string | null>,
   ): Promise<void>;
-  /** The same chain, run over SEVERAL datasets back to back. One dataset at a
-   *  time, strictly sequential — the engine holds one GPU and the server runs
-   *  one training job at a time, so a parallel queue would only mean two jobs
-   *  fighting over the same VRAM. A dataset that fails does NOT stop the
-   *  queue: its row is marked failed with the stage's own message and the next
-   *  dataset starts, because the common failure (one album with no lyrics) has
-   *  nothing to do with the five albums queued behind it. */
-  runYue2Queue(
-    items: Array<{ datasetId: string; name: string; trigger: string }>,
-    stages: Yue2StageSet,
-  ): Promise<void>;
-  /** Finish the dataset in flight, then stop and mark the rest cancelled. */
-  stopYue2Queue(): void;
-  /** Drop the finished queue's rows, hiding the progress panel. */
-  clearYue2Queue(): void;
   loadTrainDitStatus(q?: { variantKey?: string; adapterName?: string }): Promise<void>;
   startTrainDit(opts: TrainDitOptions): Promise<void>;
   loadAuditions(): Promise<void>;
@@ -522,11 +472,6 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   yue2BatchFollow: true,
   yue2RunAllActive: false,
   yue2RunAllStage: null,
-  yue2Queue: [],
-  yue2QueueActive: false,
-  yue2QueueIndex: -1,
-  yue2QueueStopping: false,
-  yue2QueueStages: { ...YUE2_ALL_STAGES },
 
   preprocessStatus: null,
   preprocessLoading: false,
@@ -1164,85 +1109,6 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     } finally {
       set({ yue2RunAllActive: false, yue2RunAllStage: null });
     }
-  },
-
-  runYue2Queue: async (items, stages) => {
-    if (get().yue2QueueActive || get().yue2RunAllActive) return;
-    const running = get().activeJob;
-    if (running && (running.status === 'queued' || running.status === 'running')) {
-      set({ error: 'A training job is already running — wait for it to finish first.' });
-      return;
-    }
-    if (items.length === 0) return;
-
-    const queue: Yue2QueueItem[] = items.map(it => ({
-      datasetId: it.datasetId,
-      name: it.name,
-      trigger: it.trigger,
-      status: 'pending',
-      stage: null,
-      error: '',
-    }));
-    // yue2RunAllActive rides along so every per-stage Start button in
-    // Yue2TrainStages is disabled for the whole queue, not just for the
-    // dataset currently open — a queue is running, nothing else may start.
-    set({
-      yue2Queue: queue, yue2QueueActive: true, yue2QueueIndex: -1,
-      yue2QueueStopping: false, yue2QueueStages: { ...stages },
-      yue2RunAllActive: true, yue2RunAllStage: null, error: null,
-    });
-
-    /** Patch one row without disturbing the others — the array is replaced on
-     *  every write so React sees a new reference. */
-    const patch = (i: number, fields: Partial<Yue2QueueItem>): void => {
-      set({ yue2Queue: get().yue2Queue.map((row, idx) => (idx === i ? { ...row, ...fields } : row)) });
-    };
-
-    try {
-      for (let i = 0; i < queue.length; i++) {
-        if (get().yue2QueueStopping) {
-          // Everything from here on was never started.
-          set({
-            yue2Queue: get().yue2Queue.map((row, idx) =>
-              (idx >= i && row.status === 'pending' ? { ...row, status: 'cancelled' as const } : row)),
-          });
-          break;
-        }
-        const item = queue[i];
-        set({ yue2QueueIndex: i });
-        patch(i, { status: 'running', stage: null, error: '' });
-
-        const result = await runYue2StageChain(
-          set, get, item.datasetId, item.trigger, stages,
-          n => { patch(i, { stage: n }); set({ yue2RunAllStage: n }); },
-        );
-
-        patch(i, result.ok
-          ? { status: 'done', stage: null, error: '' }
-          : { status: 'failed', stage: null, error: result.error ?? 'Failed.' });
-
-        // The dataset list carries the asset chips this queue just changed,
-        // and refreshAfterJob only refreshes when a dataset is OPEN — from the
-        // dataset grid nothing would have re-read them.
-        void get().loadDatasets();
-      }
-    } catch (err) {
-      set({ error: errMessage(err) });
-    } finally {
-      set({
-        yue2QueueActive: false, yue2QueueIndex: -1, yue2QueueStopping: false,
-        yue2RunAllActive: false, yue2RunAllStage: null,
-      });
-    }
-  },
-
-  stopYue2Queue: () => {
-    if (get().yue2QueueActive) set({ yue2QueueStopping: true });
-  },
-
-  clearYue2Queue: () => {
-    if (get().yue2QueueActive) return;
-    set({ yue2Queue: [], yue2QueueIndex: -1, yue2QueueStopping: false });
   },
 
   startTrainLm: async (opts) => {
@@ -1895,10 +1761,10 @@ function yue2StageFailure(label: string, job: TrainingJobSummary): string {
  *
  * Module-level rather than a store action because BOTH callers need it and
  * they report differently: `runYue2AllStages` puts the failure on the store's
- * one `error` banner, while `runYue2Queue` puts it on that dataset's queue row
- * and carries on to the next album. So this returns the outcome instead of
- * writing it anywhere, and takes `onStage` instead of touching
- * `yue2RunAllStage` itself.
+ * one `error` banner. So this returns the outcome instead of writing it
+ * anywhere, and takes `onStage` instead of touching `yue2RunAllStage` itself.
+ * (The browser-side bulk queue that was its second caller is gone: bulk
+ * training is the server-owned batch in yue2BatchRunner.ts.)
  *
  * `datasetId` is threaded through every call — nothing here reads
  * `selectedDatasetId`, which is what lets the queue train datasets the user

@@ -22,7 +22,7 @@ Training follows whichever generation backend is active (ACE-Step, MiniMax-Music
 7. Watch the run: a live loss chart and stats update as it trains, and periodic milestone checkpoints appear as badges once the run has enough epochs behind it.
 8. Use **Audition** to A/B the trained planner against the base model on identical caption, lyrics, and seed, decoded straight through without the DiT. Optionally render both sides through the DiT too for a fuller comparison. Click a milestone badge to audition that checkpoint directly.
 9. For YuE2 only, use **Refine** to push a finished planner adapter up the KL-divergence rungs and render a preview at each step, then **Review** to see every dataset with an unscored refinement ladder and score them by ear.
-10. Use **Import multiple…** from the dataset list to queue several source folders through label, build, and (for ACE) preprocess and train in one unattended run; the **Monitor** phase shows its progress as a queue of datasets, each with a chip per pipeline stage. This is separate from YuE2's own **Train multiple…**, which chains its five training stages over several already-created datasets instead.
+10. Use **Import multiple…** from the dataset list to queue several source folders through label, build, and (for ACE) preprocess and train in one unattended run; the **Monitor** phase shows its progress as a queue of datasets, each with a chip per pipeline stage. This is separate from YuE2's own **Train multiple…**, which runs preparation, joint training and refinement over several already-created datasets instead.
 
 ## Controls
 
@@ -30,7 +30,7 @@ Training follows whichever generation backend is active (ACE-Step, MiniMax-Music
 |---|---|
 | New dataset | Opens the import wizard: source folder, recursive toggle, name, trigger word, and default lyric language. |
 | Import multiple… | Bulk-imports several sibling folders as separate datasets and queues label/build/preprocess/train stages for each; watched from the Monitor phase. |
-| Train multiple… (YuE2 only) | Queues YuE2's five-stage chain over several already-created datasets, one after another, using shared recipe settings. |
+| Train multiple… (YuE2 only) | Runs preparation, joint training and refinement over several already-created datasets, one after another, with one recipe. The batch runs on the server, so it survives a page reload and a server restart (resume it from the batch panel after a restart). The panel sits above every Training Studio phase with a "Go to the running training" link; "Follow" opens each dataset as the batch moves to it and never pulls you off a dataset you opened yourself. |
 | Phase tabs (Dataset · Preprocess/Codes · Train · Refine · Review · Monitor) | Switches between the stages above. Preprocess/Codes and Monitor are hidden under YuE2; Refine and Review only appear under YuE2. |
 | Label step: scope, sources, merge policy | Restricts labeling to unlabeled/all/selected tracks, picks which of Essentia/Genius/caption to run, and how new data merges with what a track already has. |
 | Review grid | Per-track editable table with bulk actions (exclude, mark instrumental, set genre/tag, scoped re-label). Opens a full-detail drawer per track. |

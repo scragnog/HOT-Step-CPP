@@ -21,7 +21,6 @@ import { RefinePanel } from './RefinePanel';
 import { ReviewPanel } from './ReviewPanel';
 import { PreprocessPanel } from './PreprocessPanel';
 import { TrainPanel } from './TrainPanel';
-import { Yue2QueuePanel } from './Yue2QueuePanel';
 import { Yue2BatchPanel } from './Yue2BatchPanel';
 
 // ── URL helpers ──────────────────────────────────────────────────────────────
@@ -198,11 +197,10 @@ export const TrainingStudio: React.FC = () => {
         <CapabilityBanner />
         <PhaseStepper />
 
-        {/* Above the phase content, not inside it: the bulk queue is started
-            from the dataset grid, runs datasets that are never opened, and
-            must stay visible wherever the user wanders while it works. Renders
-            nothing until a queue has been started this session. */}
-        <Yue2QueuePanel />
+        {/* Above the phase content, not inside it: the batch runs datasets
+            that are never opened and must stay visible wherever the user
+            wanders while it works. Server-owned, so it is also here after a
+            reload. Renders nothing when no batch ran recently. */}
         <Yue2BatchPanel />
 
         {fatalError ? (
