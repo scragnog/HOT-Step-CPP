@@ -181,6 +181,10 @@ struct Config {
     // clamped per song so prompt + lead sheet + 2 x window fits the 24576
     // context, so a long song trains on the longest window that fits.
     std::int32_t nar_crop_frames = 1500;
+    // The tokenizer's companion decoder adapter (nar_lora_joint_v9.safetensors):
+    // a frozen part of the decoder while training, as the engine merges it
+    // under every generation. Empty = the pristine base decoder.
+    std::string companion;
 };
 
 // The schedule's multiplier for the step about to run (`completed` steps
@@ -231,7 +235,8 @@ inline void usage(FILE * out) {
         "[--spike-factor F (skip updates above F x median gradient norm; 0 = off)] [--spike-stop N (stop after N skips)] [--spike-stop-window 20] "
         "[--lr-schedule cosine|cosine-floor|constant|linear|wsd|sgdr] [--lr-floor 0.1] [--lr-decay-steps 40] [--lr-decay-shape linear|cosine] "
         "[--lr-cycle-steps 100] [--lr-cycle-mult 2] [--lr-scale 1.0 (multiplies the rate on every optimizer, Prodigy included)] "
-        "[--nar-crop-frames 1500 (decoder training window; 0 = whole song, clamped to the context)]\n");
+        "[--nar-crop-frames 1500 (decoder training window; 0 = whole song, clamped to the context)] "
+        "[--companion <nar_lora_joint_v9.safetensors> (the tokenizer's companion decoder adapter, frozen)]\n");
 }
 
 namespace detail {
@@ -445,6 +450,8 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--lr-cycle-mult")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.lr_cycle_mult) || parsed.lr_cycle_mult < 1.0f || parsed.lr_cycle_mult > 10.0f) { if (error) *error = "--lr-cycle-mult must be in [1, 10]"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--companion")) {
+            if (!detail::value(arg, argc, argv, &i, &parsed.companion, error)) return ParseResult::error;
         } else if (!std::strcmp(arg, "--nar-crop-frames")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::decimal_i32(text.c_str(), &parsed.nar_crop_frames) || parsed.nar_crop_frames < 0) { if (error) *error = "--nar-crop-frames must be 0 (whole song) or a positive frame count"; return ParseResult::error; }

@@ -1452,9 +1452,15 @@ static bool yue2_apply_companion(Yue2Model * m, const GGUFModel & gf, std::vecto
     std::string err, fam;
     const int n = yue2_adapter_merge_st(&m->wctx_nar, gf, st, "", Yue2LmAdapterScales{}, m->backend, &err, &fam, &md);
     if (n <= 0) {
+        // Not fatal: nobody asked for the companion by name, so a merge the LM
+        // cannot take (an IQ2/IQ1 quant needs an importance matrix to
+        // re-quantize) renders with the plain decoder, loudly. The preflight
+        // refuses before touching any staged weight, so nothing is half-merged.
         st_close(&st);
-        errs->push_back("companion " + path + ": " + (err.empty() ? "matched no decoder tensors" : err));
-        return false;
+        fprintf(stderr, "[YuE2-Companion] WARNING: not applied (%s); this LM renders WITHOUT the companion "
+                        "decoder adapter — use the bf16, Q8_0 or a K-quant LM\n",
+                err.empty() ? "matched no decoder tensors" : err.c_str());
+        return true;
     }
     // Flow heads: full replacement of the staged tensor data.
     int heads = 0;

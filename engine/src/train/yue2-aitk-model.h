@@ -7,6 +7,7 @@
 // Consumes the validated installed checkpoint header through yue2-aitk-checkpoint.h.
 
 #include "yue2-aitk-checkpoint.h"
+#include "safetensors.h"
 #include "../../ggml/include/ggml.h"
 #include "../../ggml/include/ggml-backend.h"
 #include "../../ggml/include/ggml-alloc.h"
@@ -22,6 +23,13 @@ struct Yue2AitkConvRotLinear {
     int rotation = 256;
     int64_t rows = 0;
     int64_t cols = 0;
+    // The tokenizer's companion decoder adapter (apply_companion): a frozen
+    // low-rank delta [in, r] / [r, out] on decoder blocks, or a dense F32
+    // replacement weight [in, out] (llm2vae, which the companion replaces
+    // outright and whose ConvRot weight cannot be patched in place).
+    ggml_tensor * frozen_a = nullptr;
+    ggml_tensor * frozen_b = nullptr;
+    ggml_tensor * dense = nullptr;
 };
 
 struct Yue2AitkLayerWeights {
@@ -129,7 +137,109 @@ public:
         return true;
     }
 
+    // Mothersuperior's companion decoder adapter (nar_lora_joint_v9, the pair
+    // of the v9 tokenizer head that makes our training codes): its block LoRA
+    // becomes a frozen branch on every decoder linear (q/k/v and gate/up fused
+    // block-diagonally to match the fused sites), llm2vae takes its full
+    // weight through a dense path, and vae2llm (weight, bias) and the llm2vae
+    // bias are overwritten. Nothing here is a parameter; gradients still flow
+    // through it to the layers below. The engine merges the same file under
+    // every generation, so adapters train on the decoder they render with.
+    bool apply_companion(const char * path, std::string * error) {
+        auto fail = [&](const std::string & m) { if (error) *error = "companion: " + m; return false; };
+        if (!backend_ || nar_.layers.empty()) return fail("model is not loaded");
+        STFile st = {};
+        if (!st_open(&st, path)) return fail(std::string("cannot open ") + path);
+        struct Closer { STFile * s; ~Closer() { st_close(s); } } closer{&st};
+        auto entry = [&](const std::string & name) -> const STEntry * {
+            for (const auto & e : st.entries) if (e.name == name && e.dtype == "F32") return &e;
+            return nullptr;
+        };
+        auto f32 = [&](const STEntry * e) { return (const float *) st_data(st, *e); };
+        const int L = (int) nar_.layers.size();
+        ggml_init_params ip = { (size_t) (L * 8 + 4) * ggml_tensor_overhead(), nullptr, true };
+        companion_ctx_ = ggml_init(ip);
+        if (!companion_ctx_) return fail("context allocation failed");
+        struct Site { const char * fused; std::vector<const char *> parts; int64_t in, out; };
+        struct Built { ggml_tensor * a; ggml_tensor * b; std::vector<float> ha, hb; };
+        std::vector<Built> built;
+        auto site = [&](int i, Yue2AitkConvRotLinear * dst, std::vector<std::pair<const char *, int64_t>> parts, int64_t in) -> bool {
+            // parts: (companion module, its output width), in fused-row order.
+            int64_t r_total = 0, out_total = 0, r = 0;
+            for (auto & p : parts) {
+                const STEntry * a = entry("layers." + std::to_string(i) + "." + p.first + ".lora_A");
+                if (!a || a->n_dims != 2 || a->shape[1] != in) return false;
+                r = a->shape[0]; r_total += r; out_total += p.second;
+            }
+            if (out_total != dst->rows || in != dst->cols) return false;
+            Built b;
+            b.a = ggml_new_tensor_2d(companion_ctx_, GGML_TYPE_F32, in, r_total);
+            b.b = ggml_new_tensor_2d(companion_ctx_, GGML_TYPE_F32, r_total, out_total);
+            b.ha.assign((size_t) (in * r_total), 0.0f);
+            b.hb.assign((size_t) (r_total * out_total), 0.0f);
+            int64_t r0 = 0, o0 = 0;
+            for (auto & p : parts) {
+                const std::string base = "layers." + std::to_string(i) + "." + p.first;
+                const STEntry * ea = entry(base + ".lora_A"), * eb = entry(base + ".lora_B");
+                if (!ea || !eb || eb->n_dims != 2 || eb->shape[0] != p.second || eb->shape[1] != r) return false;
+                const float * A = f32(ea), * B = f32(eb);
+                // A [r, in] rows stack; B [out, r] lands block-diagonally.
+                std::copy(A, A + r * in, b.ha.begin() + r0 * in);
+                for (int64_t o = 0; o < p.second; ++o)
+                    for (int64_t k = 0; k < r; ++k) b.hb[(size_t) ((o0 + o) * r_total + r0 + k)] = B[o * r + k];
+                r0 += r; o0 += p.second;
+            }
+            dst->frozen_a = b.a; dst->frozen_b = b.b;
+            built.push_back(std::move(b));
+            return true;
+        };
+        for (int i = 0; i < L; ++i) {
+            auto & ly = nar_.layers[(size_t) i];
+            if (!site(i, &ly.qkv, {{"nar_self_attn.q_proj", 2048}, {"nar_self_attn.k_proj", 1024}, {"nar_self_attn.v_proj", 1024}}, 2048) ||
+                !site(i, &ly.output, {{"nar_self_attn.o_proj", 2048}}, 2048) ||
+                !site(i, &ly.gate_up, {{"nar_mlp.gate_proj", 6144}, {"nar_mlp.up_proj", 6144}}, 2048) ||
+                !site(i, &ly.down, {{"nar_mlp.down_proj", 2048}}, 6144))
+                return fail("layer " + std::to_string(i) + ": block LoRA missing or misshapen");
+        }
+        const STEntry * l2v = entry("llm2vae.weight");
+        if (!l2v || l2v->n_dims != 2 || l2v->shape[0] != llm2vae_.rows || l2v->shape[1] != llm2vae_.cols) return fail("llm2vae.weight missing or misshapen");
+        llm2vae_.dense = ggml_new_tensor_2d(companion_ctx_, GGML_TYPE_F32, llm2vae_.cols, llm2vae_.rows);
+        companion_buffer_ = ggml_backend_alloc_ctx_tensors(companion_ctx_, backend_);
+        if (!companion_buffer_) return fail("backend buffer allocation failed");
+        for (auto & b : built) {
+            ggml_backend_tensor_set(b.a, b.ha.data(), 0, ggml_nbytes(b.a));
+            ggml_backend_tensor_set(b.b, b.hb.data(), 0, ggml_nbytes(b.b));
+        }
+        ggml_backend_tensor_set(llm2vae_.dense, f32(l2v), 0, ggml_nbytes(llm2vae_.dense));
+        // Ordinary flow-head tensors: overwrite in place, in their own type.
+        for (auto [ours, theirs] : { std::pair<const char *, const char *>{"model.diffusion_model.vae2llm.weight", "vae2llm.weight"},
+                                     {"model.diffusion_model.vae2llm.bias", "vae2llm.bias"}, {"model.diffusion_model.llm2vae.bias", "llm2vae.bias"} }) {
+            ggml_tensor * t = ordinary(ours);
+            const STEntry * e = entry(theirs);
+            if (!t || !e || (int64_t) ((e->data_end - e->data_start) / 4) != ggml_nelements(t)) return fail(std::string(theirs) + " missing or misshapen");
+            const float * v = f32(e);
+            const int64_t n = ggml_nelements(t);
+            if (t->type == GGML_TYPE_F32) {
+                ggml_backend_tensor_set(t, v, 0, ggml_nbytes(t));
+            } else if (t->type == GGML_TYPE_BF16) {
+                std::vector<ggml_bf16_t> h((size_t) n);
+                for (int64_t k = 0; k < n; ++k) h[(size_t) k] = ggml_fp32_to_bf16(v[k]);
+                ggml_backend_tensor_set(t, h.data(), 0, ggml_nbytes(t));
+            } else {
+                return fail(std::string(ours) + " has an unexpected type");
+            }
+        }
+        companion_ = true;
+        return true;
+    }
+    bool companion() const { return companion_; }
+
     void reset() {
+        if (companion_buffer_) ggml_backend_buffer_free(companion_buffer_);
+        companion_buffer_ = nullptr;
+        if (companion_ctx_) ggml_free(companion_ctx_);
+        companion_ctx_ = nullptr;
+        companion_ = false;
         if (buffer_) ggml_backend_buffer_free(buffer_);
         buffer_ = nullptr;
         if (ctx_) ggml_free(ctx_);
@@ -318,4 +428,7 @@ private:
     }
 
     Yue2AitkConvRotLinear lm_head_, llm2vae_, time0_, time2_;
+    ggml_context * companion_ctx_ = nullptr;
+    ggml_backend_buffer_t companion_buffer_ = nullptr;
+    bool companion_ = false;
 };

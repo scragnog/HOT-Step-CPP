@@ -58,8 +58,25 @@ inline ggml_tensor * linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
                             ggml_tensor * x, const Yue2AitkFusedLora * adapter = nullptr,
                             ggml_tensor * bias = nullptr) {
     GGML_ASSERT(x->type == GGML_TYPE_F32 && x->ne[0] == w.cols);
-    ggml_tensor * base = ggml_convrot8(ctx, w.weight_i8, x, w.scales_f32,
-                                      bias ? f32(ctx, bias) : nullptr, w.rotation, true);
+    ggml_tensor * base;
+    if (w.dense) {
+        // Companion full-weight replacement (llm2vae): F32 maths, BF16 output.
+        base = ggml_mul_mat(ctx, w.dense, round(ctx, x));
+        ggml_mul_mat_set_prec(base, GGML_PREC_F32);
+        if (bias) base = ggml_add(ctx, base, f32(ctx, bias));
+        base = round(ctx, base);
+    } else {
+        base = ggml_convrot8(ctx, w.weight_i8, x, w.scales_f32,
+                             bias ? f32(ctx, bias) : nullptr, w.rotation, true);
+    }
+    if (w.frozen_a) {
+        // Companion decoder LoRA: frozen, same boundaries as the trainable branch.
+        ggml_tensor * ca = ggml_mul_mat(ctx, w.frozen_a, round(ctx, x));
+        ggml_mul_mat_set_prec(ca, GGML_PREC_F32);
+        ggml_tensor * cd = ggml_mul_mat(ctx, w.frozen_b, ca);
+        ggml_mul_mat_set_prec(cd, GGML_PREC_F32);
+        base = round(ctx, ggml_add(ctx, base, round(ctx, cd)));
+    }
     if (!adapter) return base;
     if (adapter->is_lokr()) {
         // Same boundary as the LoRA branch: BF16-rounded input, F32 factor

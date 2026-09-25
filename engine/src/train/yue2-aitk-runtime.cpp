@@ -345,8 +345,10 @@ static int run_impl(Config config, std::string * error) {
     try {
         event("load"); Yue2AitkModel model; Yue2AitkTrainState state;
         if (!model.load(config.checkpoint.c_str(), backend.value, yue2_aitk_load_embedding_bf16, error) ||
+            (!config.companion.empty() && !model.apply_companion(config.companion.c_str(), error)) ||
             !state.initialize(backend.value, static_cast<uint32_t>(config.seed), error,cursor_weight>0,config.rank,config.alpha,
                               lokr ? config.lokr_dim : 0, lokr ? config.lokr_factor : 0)) return 1;
+        if (model.companion()) std::fprintf(stderr, "[yue2-aitk] companion decoder adapter: %s (frozen)\n", config.companion.c_str());
         if (lokr) std::fprintf(stderr, "[yue2-aitk] adapter lokr: dim %d factor %d alpha %.4g, %zu trainable parameters\n",
                                config.lokr_dim, config.lokr_factor, (double) config.alpha, state.parameter_count());
         // Decoder drift probes: 3 songs spread across the dataset x 3 noise
