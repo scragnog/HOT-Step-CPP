@@ -3619,7 +3619,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       spike[key] = v;
     }
     // Learning-rate schedule: all optional; absent = the engine's cosine.
-    const lrSchedule: { lrSchedule?: 'cosine' | 'cosine-floor' | 'constant' | 'linear' | 'wsd' | 'sgdr'; lrFloor?: number; lrDecaySteps?: number; lrDecayShape?: 'linear' | 'cosine'; lrCycleSteps?: number; lrCycleMult?: number; lrScale?: number } = {};
+    const lrSchedule: { lrSchedule?: 'cosine' | 'cosine-floor' | 'constant' | 'linear' | 'wsd' | 'sgdr'; lrFloor?: number; lrDecaySteps?: number; lrDecayShape?: 'linear' | 'cosine'; lrCycleSteps?: number; lrCycleMult?: number; lrScale?: number; klOvershootMargin?: number } = {};
     if (b.lrSchedule !== undefined && b.lrSchedule !== null && b.lrSchedule !== '') {
       if (!['cosine', 'cosine-floor', 'constant', 'linear', 'wsd', 'sgdr'].includes(String(b.lrSchedule))) { res.status(400).json({ error: 'lrSchedule must be cosine, cosine-floor, constant, linear, wsd or sgdr.' }); return; }
       if (b.lrSchedule !== 'cosine' && optimizer === 'adamw') { res.status(400).json({ error: 'A learning-rate schedule needs optimizer adamw-lm, prodigy or muon.' }); return; }
@@ -3629,7 +3629,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       if (b.lrDecayShape !== 'linear' && b.lrDecayShape !== 'cosine') { res.status(400).json({ error: 'lrDecayShape must be linear or cosine.' }); return; }
       lrSchedule.lrDecayShape = b.lrDecayShape;
     }
-    for (const [key, lo, hi, int] of [['lrFloor', 0, 1, false], ['lrDecaySteps', 1, 100000, true], ['lrCycleSteps', 1, 100000, true], ['lrCycleMult', 1, 10, false], ['lrScale', 0.001, 10, false]] as const) {
+    for (const [key, lo, hi, int] of [['lrFloor', 0, 1, false], ['lrDecaySteps', 1, 100000, true], ['lrCycleSteps', 1, 100000, true], ['lrCycleMult', 1, 10, false], ['lrScale', 0.001, 10, false], ['klOvershootMargin', 0, 10, false]] as const) {
       if (b[key] === undefined || b[key] === null || b[key] === '') continue;
       const v = Number(b[key]);
       if (!Number.isFinite(v) || v < lo || v > hi || (int && !Number.isInteger(v))) { res.status(400).json({ error: `${key} must be ${int ? 'an integer' : 'a number'} from ${lo} to ${hi}.` }); return; }

@@ -88,6 +88,14 @@ double trend_at_end(const std::vector<double> & v) {
     for (size_t i = 0; i < v.size(); ++i) { const double dx = (double) i - xm; sxy += dx * (v[i] - ym); sxx += dx * dx; }
     return ym + (sxx > 0.0 ? sxy / sxx : 0.0) * (n - 1.0 - xm);
 }
+// The same least-squares line's slope, per step.
+double trend_slope(const std::vector<double> & v) {
+    const double n = (double) v.size(), xm = (n - 1.0) / 2.0;
+    double ym = 0.0; for (double y : v) ym += y; ym /= n;
+    double sxy = 0.0, sxx = 0.0;
+    for (size_t i = 0; i < v.size(); ++i) { const double dx = (double) i - xm; sxy += dx * (v[i] - ym); sxx += dx * dx; }
+    return sxx > 0.0 ? sxy / sxx : 0.0;
+}
 bool parse_resume_meta(const std::string & text, const std::string & checkpoint, const std::string & dataset, const std::string & source,
                        uint64_t seed, int cuda_index, size_t item_count, ResumePlan * plan, std::string * error,
                        float * cursor_weight, bool cursor_explicit,
@@ -975,10 +983,35 @@ static int run_impl(Config config, std::string * error) {
                             if (config.pause_on_kl_mark && completed < end_step()) { event("paused", completed); return 0; }
                         }
                     }
-                    if (reading >= (double) config.target_kl && wsd) {
-                        // wsd: anneal before acting. The un-annealed weights
-                        // are saved too, for comparison; the record carries
-                        // the tail, so a resume of it continues the tail.
+                    if (wsd && in_tail() && config.kl_overshoot_margin > 0.0f && reading >= (double) config.target_kl + (double) config.kl_overshoot_margin) {
+                        // The anneal is carrying the planner past the target:
+                        // act on the stop now rather than when the tail ends.
+                        std::fprintf(stderr, "[yue2-aitk] KL %.3f is past the target %.3g by more than %.3g during the tail at step %d: acting now\n",
+                                     reading, (double) config.target_kl, (double) config.kl_overshoot_margin, completed);
+                        lr_decaying_from = -1;
+                        if (config.nar_extra_steps > 0) {
+                            if (!freeze_at_kl(reading)) { fail(error, "planner-freeze checkpoint publication failed"); return 1; }
+                        } else {
+                            if (!save_checkpoint(completed)) { fail(error, "target checkpoint publication failed"); return 1; }
+                            event("target", completed);
+                            event("done", completed);
+                            return 0;
+                        }
+                    } else if (wsd && !in_tail() && reading < (double) config.target_kl && kl_window.size() >= 5) {
+                        // Start the tail early enough that it ENDS at the
+                        // target: a linear or cosine decay covers about half
+                        // of what a flat rate would over the same steps.
+                        const double slope = trend_slope(kl_window);
+                        if (slope > 0.0 && reading + 0.5 * slope * (double) config.lr_decay_steps >= (double) config.target_kl) {
+                            std::fprintf(stderr, "[yue2-aitk] KL %.3f rising %.4f a step: the target %.3g is about a tail away\n", reading, slope, (double) config.target_kl);
+                            start_tail("KL target ahead");
+                            if (!save_checkpoint(completed)) { fail(error, "KL-target checkpoint publication failed"); return 1; }
+                        }
+                    } else if (reading >= (double) config.target_kl && wsd) {
+                        // wsd: anneal before acting (the trend gave no warning,
+                        // or the margin is off). The un-annealed weights are
+                        // saved too, for comparison; the record carries the
+                        // tail, so a resume of it continues the tail.
                         if (!in_tail()) {
                             start_tail("KL target reached");
                             if (!save_checkpoint(completed)) { fail(error, "KL-target checkpoint publication failed"); return 1; }

@@ -115,6 +115,8 @@ export interface ResolvedYue2JointTrainOptions {
   lrFloor?: number;
   lrDecaySteps?: number;
   lrDecayShape?: 'linear' | 'cosine';
+  /** wsd + KL stop: act at once if the KL passes the target by this during the tail (engine default 0.1; 0 = off). */
+  klOvershootMargin?: number;
   lrCycleSteps?: number;
   lrCycleMult?: number;
   /** Multiplies the rate on every optimizer, Prodigy included (--lr is
@@ -215,6 +217,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
     if (o.lrSchedule === 'wsd') {
       if (o.lrDecaySteps !== undefined) args.push('--lr-decay-steps', String(o.lrDecaySteps));
       if (o.lrDecayShape) args.push('--lr-decay-shape', o.lrDecayShape);
+      if (o.klOvershootMargin !== undefined) args.push('--kl-overshoot-margin', String(o.klOvershootMargin));
     }
     if (o.lrSchedule === 'sgdr') {
       if (o.lrCycleSteps !== undefined) args.push('--lr-cycle-steps', String(o.lrCycleSteps));

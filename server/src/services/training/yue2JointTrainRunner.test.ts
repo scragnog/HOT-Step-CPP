@@ -117,3 +117,11 @@ test('muon run carries lr-scale and Newton-Schulz step count, adamw adds no opti
     '--steps', '100', '--save-every', '10', '--seed', '3', '--device', 'CUDA0', '--nar-drift',
   ]);
 });
+
+test('wsd overshoot margin rides only with the wsd schedule', () => {
+  const base = { checkpoint: 'b', dataset: 'd', outDir: 'o', steps: 500, saveEvery: 25, seed: 42, device: 'CUDA0', stopMode: 'kl' as const, targetKl: 1 };
+  const wsd = buildYue2JointTrainArgs({ ...base, lrSchedule: 'wsd', lrDecaySteps: 40, klOvershootMargin: 0.15 });
+  assert.deepEqual(wsd.slice(wsd.indexOf('--lr-decay-steps'), wsd.indexOf('--lr-decay-steps') + 4), ['--lr-decay-steps', '40', '--kl-overshoot-margin', '0.15']);
+  assert.equal(buildYue2JointTrainArgs({ ...base, lrSchedule: 'constant', klOvershootMargin: 0.15 }).includes('--kl-overshoot-margin'), false);
+});
+

@@ -1164,12 +1164,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               'cosine-floor': 'The same cosine, ending at the floor below instead of zero.',
               constant: 'Flat after warmup. The stops read the model, not the schedule. No annealing.',
               linear: 'A straight line to zero at the step cap. Included for comparison.',
-              wsd: 'Flat until a stop fires (KL target, decoder stop, or the cap), then a short decay; the stop acts when the decay ends, so the kept weights are annealed. The un-annealed KL checkpoint is saved too.',
+              wsd: 'Flat until a stop is near, then a short decay; the stop acts when the decay ends, so the kept weights are annealed. With a KL target the decay starts when the KL trend says the target is about a decay away, so it lands on the target rather than past it; if the KL still passes the target by the overshoot margin (default 0.1) during the decay, the stop acts at once. The un-annealed checkpoint at the decay start is saved too.',
               sgdr: 'Cosine cycles, each longer than the last. Expected to lose: the restarts shake the planner.',
             } as const)[form.lrSchedule ?? 'wsd']}</span>
           </label>
           {form.lrSchedule === 'cosine-floor' && field(t('trainingStudio.yue2.method.lrFloor', 'Floor (fraction of the rate)'), 'lrFloor', 'number', form, value => set('lrFloor', value === '' ? undefined : Number(value)))}
           {form.lrSchedule === 'wsd' && field(t('trainingStudio.yue2.method.lrDecaySteps', 'Decay steps'), 'lrDecaySteps', 'number', form, value => set('lrDecaySteps', value === '' ? undefined : Number(value)))}
+          {form.lrSchedule === 'wsd' && (form.stopMode ?? 'steps') === 'kl' && field(t('trainingStudio.yue2.method.klOvershootMargin', 'KL overshoot margin'), 'klOvershootMargin', 'number', form, value => set('klOvershootMargin', value === '' ? undefined : Number(value)))}
           {form.lrSchedule === 'wsd' && <label className="flex flex-col gap-1">
             <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.lrDecayShape', 'Decay shape')}</span>
             <select className={input} value={form.lrDecayShape ?? 'linear'} disabled={active || starting || preparing || yue2RunAllActive}

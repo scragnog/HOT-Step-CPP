@@ -170,6 +170,14 @@ struct Config {
     float lr_floor = 0.1f;
     std::int32_t lr_decay_steps = 40;
     std::string lr_decay_shape = "linear";
+    // wsd with --target-kl: the tail starts when the KL trend says the target
+    // is about a tail away (a decaying rate covers about half of a flat
+    // tail's drift), so the annealed weights land ON the target instead of
+    // lr_decay_steps past it. If the reading still passes the target by more
+    // than this while annealing, the stop acts at once: an un-annealed
+    // adapter at the target beats an annealed one well past it. 0 = act only
+    // when the tail ends, as before.
+    float kl_overshoot_margin = 0.1f;
     std::int32_t lr_cycle_steps = 100;
     float lr_cycle_mult = 2.0f;
     // Multiplies the rate on every optimizer path, Prodigy's gamma included.
@@ -233,7 +241,7 @@ inline void usage(FILE * out) {
         "[--unfreeze-planner (with --resume: train the planner on past its freeze)] [--kl-checkpoint-every 0.1 (a checkpoint at each KL rung)] "
         "[--freeze-planner-now (with --resume and --nar-extra-steps: freeze the planner at the resumed step)] "
         "[--spike-factor F (skip updates above F x median gradient norm; 0 = off)] [--spike-stop N (stop after N skips)] [--spike-stop-window 20] "
-        "[--lr-schedule cosine|cosine-floor|constant|linear|wsd|sgdr] [--lr-floor 0.1] [--lr-decay-steps 40] [--lr-decay-shape linear|cosine] "
+        "[--lr-schedule cosine|cosine-floor|constant|linear|wsd|sgdr] [--lr-floor 0.1] [--lr-decay-steps 40] [--lr-decay-shape linear|cosine] [--kl-overshoot-margin 0.1 (wsd: act at once if the KL passes the target by this during the tail; 0 = off)] "
         "[--lr-cycle-steps 100] [--lr-cycle-mult 2] [--lr-scale 1.0 (multiplies the rate on every optimizer, Prodigy included)] "
         "[--nar-crop-frames 1500 (decoder training window; 0 = whole song, clamped to the context)] "
         "[--companion <nar_lora_joint_v9.safetensors> (the tokenizer's companion decoder adapter, frozen)]\n");
@@ -441,6 +449,9 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--lr-decay-steps")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::decimal_i32(text.c_str(), &parsed.lr_decay_steps) || parsed.lr_decay_steps < 1) { if (error) *error = "--lr-decay-steps must be a positive integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--kl-overshoot-margin")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.kl_overshoot_margin) || parsed.kl_overshoot_margin < 0.0f || parsed.kl_overshoot_margin > 10.0f) { if (error) *error = "--kl-overshoot-margin must be a KL amount in [0, 10]"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--lr-decay-shape")) {
             if (!detail::value(arg, argc, argv, &i, &parsed.lr_decay_shape, error)) return ParseResult::error;
             if (parsed.lr_decay_shape != "linear" && parsed.lr_decay_shape != "cosine") { if (error) *error = "--lr-decay-shape must be linear or cosine"; return ParseResult::error; }

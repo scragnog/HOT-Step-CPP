@@ -699,6 +699,8 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   lrFloor?: number;
   lrDecaySteps?: number;
   lrDecayShape?: 'linear' | 'cosine';
+  /** wsd + KL stop: act at once if the KL passes the target by this during the tail (engine default 0.1; 0 = off). */
+  klOvershootMargin?: number;
   lrCycleSteps?: number;
   lrCycleMult?: number;
   /** Decoder training window in frames; 1500 default, 0 = whole song. */
