@@ -421,7 +421,12 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     const int64_t legal_hi = YUE2_CODEC_OFFSET + YUE2_CODEC_SIZE;
 
     Yue2ArKvCache & cache = *cache_out;
-    if (!yue2_ar_kv_cache_alloc(m, max_prefix + sp.max_tokens + 4, &cache, err, S)) {
+    const int64_t supplied_n = (int64_t) req.codec_ids.size();
+    if (supplied_n > 0 && (B != 1 || use_cfg)) {
+        if (err) *err = "codec_ids needs a single song and cfg_scale 1 (the stream is not sampled)";
+        return false;
+    }
+    if (!yue2_ar_kv_cache_alloc(m, max_prefix + std::max<int64_t>(sp.max_tokens, supplied_n) + 4, &cache, err, S)) {
         return false;
     }
     cache.head_lo = YUE2_SEM_HEAD_LO;
@@ -464,6 +469,26 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         }
         W = pre.V;
         logits.insert(logits.end(), pre.logits.begin(), pre.logits.end());
+    }
+
+    if (supplied_n > 0) {
+        // Round trip: forward the supplied stream teacher-forced, exactly the
+        // rows sampling would have left in the cache, and skip the draw.
+        Yue2SongState & sg = songs[0];
+        std::vector<int32_t> ids;
+        ids.reserve((size_t) supplied_n);
+        for (int32_t c : req.codec_ids) ids.push_back(c + YUE2_CODEC_OFFSET);
+        Yue2ArForwardResult dummy;
+        if (!yue2_ar_prefill(m, cache, ids, {}, {}, &dummy, err, sg.cond_set)) {
+            yue2_ar_kv_cache_free(&cache);
+            return false;
+        }
+        sg.codec_ids = req.codec_ids;
+        sg.stage_end_reason[YUE2_STAGE_SEMANTIC] = "supplied";
+        fprintf(stderr, "[YuE2-AR-Tokens] semantic song=0 n=%zu hash=%016llx (supplied)\n", sg.codec_ids.size(),
+                (unsigned long long) yue2_token_hash(sg.codec_ids));
+        *stage_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        return true;
     }
 
     std::vector<std::vector<int32_t>> history((size_t) B);

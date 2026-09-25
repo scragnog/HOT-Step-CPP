@@ -118,6 +118,13 @@ struct Yue2Request {
     // Chunks under the cap are balanced, so the last one is never a scrap.
     int nar_chunk_frames = 0;
 
+    // Supplied semantic codes (raw codec ids, 0..32767): the composer does
+    // not sample; it prefills these teacher-forced, so the decoder renders
+    // exactly this stream. A round trip: tokenize real audio, render it back
+    // (decoder A/B, e.g. with or without the tokenizer's companion adapter).
+    // Single song, single variation. Empty = normal generation.
+    std::vector<int32_t> codec_ids;
+
     // ── Ending controls, semantic stage only (2026-09-15) ────────────────
     // Measured on the adapter ladders (_LISTENING/2026-09-14/RESULTS.md, 77/83):
     // a trained AR reaches its ending and MUSIC_END then loses the draw to a
@@ -420,6 +427,24 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
             return false;
         }
         out->nar_chunk_frames = (int) num;
+    }
+
+    if (yyjson_val * v = yyjson_obj_get(root, "codec_ids")) {
+        if (!yyjson_is_arr(v)) {
+            if (err) *err = "codec_ids must be an array of raw codec ids";
+            yyjson_doc_free(doc);
+            return false;
+        }
+        size_t idx, max;
+        yyjson_val * x;
+        yyjson_arr_foreach(v, idx, max, x) {
+            if (!yyjson_is_int(x) || yyjson_get_sint(x) < 0 || yyjson_get_sint(x) >= YUE2_CODEC_SIZE) {
+                if (err) *err = "codec_ids entries must be integers in [0, 32768)";
+                yyjson_doc_free(doc);
+                return false;
+            }
+            out->codec_ids.push_back((int32_t) yyjson_get_sint(x));
+        }
     }
 
     if (!yue2_req_num(root, "preview_max_frames", &num, &present, err)) {
