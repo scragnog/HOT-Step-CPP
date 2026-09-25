@@ -595,7 +595,7 @@ ${req.lyrics}`);
         autoReplan.attempts.push({ seed: plan.seed, verdict: plan.health.verdict, reason: plan.health.reason });
         log('INFO', `[YuE2] Plan attempt ${attempt}: seed ${plan.seed}, ${plan.health.verdict} — ${plan.health.reason}`);
         chosen = { abc: plan.abc, seed: plan.seed };
-        if (yue2PlanUsable(plan.health.verdict, job.params.instrumental === true)) { autoReplan.accepted = true; break; }
+        if (yue2PlanUsable(plan.health.verdict, job.params.instrumental === true || !req.lyrics)) { autoReplan.accepted = true; break; }
       }
       if (autoReplan && chosen) {
         req.abc = chosen.abc;

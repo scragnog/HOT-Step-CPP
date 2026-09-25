@@ -3,9 +3,11 @@
 // A render that hits the frame cap has two very different causes, and only
 // one is a fault (becausereasons' CNZN model card, September 2026):
 //
-//   long     a healthy score that is simply longer than the cap — a
-//            ten-section lyric at 96 BPM wants six and a half minutes. Raise
-//            the cap or drop a chorus; nothing is broken.
+//   long     a score that reads as a song but ran to the cap. Since
+//            2026-09-24 (f9223e1d) the app treats any cap as broken and
+//            redraws it like a runaway: a ten-section lyric at 96 BPM that
+//            wants six and a half minutes is the reporter's problem to
+//            shorten, not a plan the renderer can finish.
 //   runaway  an over-committed planner writing "intro > verse" for hundreds
 //            of bars: minutes of groove and no singing. That IS the fault,
 //            and it is visible in the ABC before a note is rendered.

@@ -890,7 +890,7 @@ function yue2LmAdapterCatalogue(): {
       const runName = [`AITK · ${run.datasetSlug || run.datasetId || run.jobId}`,
         started ? `${started[2]}-${started[3]} ${started[4]}:${started[5]}` : '',
         typeof run.options.lrSchedule === 'string' ? run.options.lrSchedule : '',
-        run.options.refinePlanner === true ? 'refine' : ''].filter(Boolean).join(' · ');
+        run.options.refinePlanner === true || run.options.unfreezePlanner === true ? 'refine' : ''].filter(Boolean).join(' · ');
       const add = (kind: Yue2LmAdapterKind, ref: string): void => {
         const abs = path.resolve(ref);
         const fileMeta = readSafetensorsMeta(abs);

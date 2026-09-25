@@ -9,7 +9,6 @@ import type { Yue2JointPreviewOptions } from './types.js';
 import { aceClient } from '../aceClient.js';
 import { yue2PersistedSelection, type Yue2PersistedSelection } from '../backends/yue2/index.js';
 import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, yue2FinalDetail, type Yue2Selection } from '../backends/yue2/client.js';
-import { splitMultipartMixed } from '../backends/yue2/generate.js';
 import { classifyYue2Score, yue2PlanUsable } from '../backends/yue2/scoreHealth.js';
 
 export const YUE2_JOINT_PREVIEW_DEFAULTS: Yue2JointPreviewOptions = {
@@ -162,10 +161,9 @@ export async function renderYue2JointPreview(input: {
     } catch { /* explicit empty prompt remains a visible render failure */ }
   }
   try {
-    // Artist takes go out as ONE batched request (lm_batch_size = takes,
-    // seeds seed, seed+1, ...): the planner stage is shared across the batch
-    // and the engine returns one WAV part per song, song-major. Baseline and
-    // control are single songs.
+    // Every take is its own request: each renders its own re-planned lead
+    // sheet (a batch would share one planner pass). Baseline and control are
+    // single songs too.
     const detail = input.deps?.detail ?? yue2FinalDetail;
     type Group = { kind: 'artist' | 'baseline' | 'control'; seeds: number[] };
     const wanted = Math.max(1, input.options.takes ?? 1);
@@ -201,7 +199,12 @@ export async function renderYue2JointPreview(input: {
           const planSeed = a === 1 ? seeds[0] : randomInt(1, 2 ** 31 - 1);
           const planSub = await api.synth({ style: caption, lyrics, cot: 'full', seed: planSeed, plan_only: true });
           activeJob = planSub.job_id; activeTerminal = false;
+          const planDeadline = Date.now() + 10 * 60_000;
           for (;;) {
+            if (input.signal?.aborted || Date.now() >= planDeadline) {
+              await api.cancel(planSub.job_id).catch(() => {});
+              throw new Error(input.signal?.aborted ? 'preview cancelled' : 'preview plan exceeded 10-minute time limit');
+            }
             const st = await api.poll(planSub.job_id);
             if (st.status === 'done') break;
             if (st.status === 'failed' || st.status === 'cancelled') { activeTerminal = true; throw new Error(`preview plan ${st.status}`); }
@@ -213,9 +216,9 @@ export async function renderYue2JointPreview(input: {
           const h = classifyYue2Score(abc, pd.end_reason);
           attempts.push({ seed: planSeed, verdict: h.verdict, reason: h.reason });
           supplied = { abc, seed: planSeed };
-          if (abc && yue2PlanUsable(h.verdict, false)) break;
+          if (abc && yue2PlanUsable(h.verdict, !lyrics)) break;
         }
-        const accepted = !!supplied && yue2PlanUsable(attempts[attempts.length - 1].verdict, false);
+        const accepted = !!supplied && yue2PlanUsable(attempts[attempts.length - 1].verdict, !lyrics);
         records[0].plan = { seed: supplied!.seed, accepted, attempts };
         recordYue2JointPreview(input.output, records[0]);
       }
@@ -225,7 +228,6 @@ export async function renderYue2JointPreview(input: {
       // at 300 s looking like a long song (3 of 4 takes, 2026-09-24).
       const sub = await api.synth({ style: kind === 'control' ? 'downtempo electronic, calm and spacious' : caption, lyrics: kind === 'control' ? '' : lyrics, cot: 'full', seed: supplied ? supplied.seed : seeds[0],
         ...(supplied ? { abc: supplied.abc, semantic_retries: PREVIEW_REPLAN_ATTEMPTS } : { preview_max_frames: input.options.previewMaxFrames }),
-        ...(seeds.length > 1 ? { lm_batch_size: seeds.length } : {}),
         ...(input.options.odeSteps ? { ode_steps: input.options.odeSteps } : {}),
         ...(input.options.narCacheRatio !== undefined ? { nar_cache_ratio: input.options.narCacheRatio } : {}) });
       activeJob = sub.job_id;
@@ -278,9 +280,7 @@ export async function renderYue2JointPreview(input: {
         });
         const response = await api.result(sub.job_id);
         const body = Buffer.from(await response.arrayBuffer());
-        const contentType = response.headers.get('content-type') ?? '';
-        const parts = seeds.length > 1 && /multipart\/mixed/i.test(contentType) ? splitMultipartMixed(body, contentType) : [body];
-        if (parts.length < records.length) throw new Error(`preview batch returned ${parts.length} of ${records.length} tracks`);
+        const parts = [body];
         const dir = path.join(input.output, 'previews'); fs.mkdirSync(dir, { recursive: true });
         records.forEach((record, i) => {
           // Re-planned takes carry their plan seed, so a re-render never

@@ -216,8 +216,12 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   // The tokenizer's companion decoder adapter is part of the decoder whenever
   // it is installed: the engine merges it under every generation, so the
   // adapter trains on the decoder it will render with (2026-09-25).
-  const companion = path.join(yue2ModelDir(), 'nar_lora_joint_v9.safetensors');
-  if (fs.existsSync(companion)) args.push('--companion', companion);
+  // Same two places the engine searches (models/yue2, then models/), so the
+  // trainer and the renderer agree on whether the companion exists.
+  const companion = [yue2ModelDir(), config.aceServer.models]
+    .map(dir => path.join(dir, 'nar_lora_joint_v9.safetensors')).find(p => fs.existsSync(p));
+  if (companion) args.push('--companion', companion);
+  console.log(`[YuE2 train] companion decoder adapter: ${companion ?? 'not installed (training on the pristine decoder)'}`);
   if (o.resume) args.push('--resume', o.resume);
   if (o.resume && o.freezePlannerNow) args.push('--freeze-planner-now');
   if (o.alignment) {
