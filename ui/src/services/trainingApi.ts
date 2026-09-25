@@ -1041,6 +1041,10 @@ export interface Yue2ArStatus {
        *  right build for a NAR-only run and useless for the AR half — the AR
        *  prefix IS the caption, and the aligner reads the manifest's lyrics. */
       captionModeOk: boolean;
+      /** True for a cache cut without the YuE2 caption mode while .yue2.txt
+       *  planner captions exist beside the audio: it trains on the ACE
+       *  captions. The chains re-cut it. */
+      captionsStale?: boolean;
     };
     tokenize: {
       /** The engine's own flag says the stage RAN; `sourcesWithCodes` says how

@@ -4182,6 +4182,10 @@ router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
           // `yue2` counts: it parses the same sidecar and only swaps the style
           // sentence, so the lyrics this stage needs are there either way.
           captionModeOk: !cache || cache.captionMode === 'ace' || cache.captionMode === 'yue2',
+          // An ACE cut while .yue2.txt planner captions sit beside the audio:
+          // it trains on the ACE captions. The chains re-cut it (a manifest
+          // rewrite; the latents are reused).
+          captionsStale: !!cache && cache.captionMode !== 'yue2' && countYue2Sidecars(ds.sourceDir).withYue2 > 0,
         },
         tokenize: {
           // `codec_ids_present` is the engine's own flag and says the stage

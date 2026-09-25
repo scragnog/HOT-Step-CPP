@@ -291,7 +291,7 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
                 <span className="text-[10px] leading-snug text-amber-600 dark:text-amber-500">
                   {t('trainingStudio.yue2.captionStaleCache',
                     '{{n}} tracks have a .yue2.txt planner caption, but this cache was cut with '
-                    + '"{{mode}}" and trained on the ACE captions instead. Re-cut with Force to use them.',
+                    + '"{{mode}}" and trained on the ACE captions instead. Run the cache again with the caption mode above to use them (a manifest rewrite; nothing is re-encoded).',
                     { n: status.sidecarsWithYue2, mode: cache.captionMode || 'none' })}
                 </span>
               )}

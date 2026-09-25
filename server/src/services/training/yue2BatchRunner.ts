@@ -285,7 +285,7 @@ async function runItem(state: BatchState, item: Yue2BatchItem): Promise<void> {
 
 interface ArStatus {
   stages: {
-    preprocess: { done: boolean; captionModeOk: boolean };
+    preprocess: { done: boolean; captionModeOk: boolean; captionsStale?: boolean };
     tokenize: { done: boolean };
     sheet: { done: boolean };
     align: { done: boolean; stemsReady: number; stemsNeeded: number };
@@ -315,7 +315,7 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
   }
   const st = await readStatus(item.datasetId);
   switch (stage) {
-    case 'cache': return st.stages.preprocess.done && st.stages.preprocess.captionModeOk !== false ? null : { captionMode: 'yue2' };
+    case 'cache': return st.stages.preprocess.done && st.stages.preprocess.captionModeOk !== false && !st.stages.preprocess.captionsStale ? null : { captionMode: 'yue2' };
     case 'codes': return st.stages.tokenize.done ? null : {};
     case 'sheet': return st.stages.sheet.done ? null : {};
     case 'stems': {

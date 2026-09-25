@@ -1915,23 +1915,26 @@ async function runYue2StageChain(
   try {
     // Stage 1: latent cache.
     //
-    // captionMode 'ace', not the server default of 'none'. The default is
+    // captionMode 'yue2', not the server default of 'none'. The default is
     // right for a NAR-only run — the clip carries no caption and the style is
     // the trigger alone — but this chain goes on to train the AR half, and
     // there the caption IS the prefix and the aligner reads the manifest's
     // lyrics. A cache built with 'none' carries neither, so cursor spans skip
     // every source for having no lyrics and AR training exports something
-    // generic with nothing saying why.
+    // generic with nothing saying why. 'yue2' is 'ace' plus the .yue2.txt
+    // planner sentence where one exists (2026-09-25: this chain still sent
+    // 'ace', so every run-all cut trained on the ACE captions).
     //
-    // And re-encode when an EXISTING cache was built that way, rather than
-    // skipping the stage because latents are present: a cache the later
-    // stages cannot read is not a stage that is done.
+    // And re-encode when an EXISTING cache was built the wrong way, rather
+    // than skipping the stage because latents are present: a cache the later
+    // stages cannot read, or one that ignores the planner captions, is not a
+    // stage that is done.
     if (stages.latents) {
       onStage(1);
       const arStatus = await trainingApi.getYue2ArStatus(datasetId);
-      if (!arStatus.stages.preprocess.done || arStatus.stages.preprocess.captionModeOk === false) {
+      if (!arStatus.stages.preprocess.done || arStatus.stages.preprocess.captionModeOk === false || arStatus.stages.preprocess.captionsStale) {
         const job = await startYue2JobAndAwait(set, get, {},
-          () => trainingApi.startYue2Preprocess(datasetId, { captionMode: 'ace' }));
+          () => trainingApi.startYue2Preprocess(datasetId, { captionMode: 'yue2' }));
         if (job.status !== 'done') return { ok: false, error: yue2StageFailure('Latent cache', job) };
       }
     }
@@ -2058,15 +2061,16 @@ async function runYue2JointChain(
   startTraining: () => Promise<string | null>,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
-    // Stage 1: latent cache — same captionMode 'ace' rule as the legacy chain:
-    // the aligner reads the manifest's lyrics, so a 'none' cache must be
-    // rebuilt, not skipped.
+    // Stage 1: latent cache — same captionMode 'yue2' rule as the legacy
+    // chain: the aligner reads the manifest's lyrics, so a 'none' cache must
+    // be rebuilt, not skipped, and an 'ace' cut that ignores the .yue2.txt
+    // planner captions is rebuilt too.
     onStage(1);
     {
       const arStatus = await trainingApi.getYue2ArStatus(datasetId);
-      if (!arStatus.stages.preprocess.done || arStatus.stages.preprocess.captionModeOk === false) {
+      if (!arStatus.stages.preprocess.done || arStatus.stages.preprocess.captionModeOk === false || arStatus.stages.preprocess.captionsStale) {
         const job = await startYue2JobAndAwait(set, get, {},
-          () => trainingApi.startYue2Preprocess(datasetId, { captionMode: 'ace' }));
+          () => trainingApi.startYue2Preprocess(datasetId, { captionMode: 'yue2' }));
         if (job.status !== 'done') return { ok: false, error: yue2StageFailure('Latent cache', job) };
       }
     }
