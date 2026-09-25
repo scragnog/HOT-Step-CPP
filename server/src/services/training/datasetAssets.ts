@@ -34,6 +34,8 @@ import type {
 import { findYue2ArAdapter, findYue2ArAdaptersFor } from './yue2ArRuns.js';
 import { findYue2NarAdapter, findYue2NarAdaptersFor } from './yue2Runs.js';
 import { yue2PreprocessManifest } from './yue2Train.js';
+import { findYue2JointAdaptersFor } from './yue2AitkRuns.js';
+import { getDb } from '../../db/database.js';
 
 // ── Trained-adapter lookup ───────────────────────────────────────────────
 //
@@ -172,6 +174,7 @@ export function readDatasetAssets(
     mm3Adapter: TrainingAdapterHit | null;
     yue2NarAdapter: TrainingAdapterHit | null;
     yue2ArAdapter: TrainingAdapterHit | null;
+    yue2Joint?: { dir: string; trainedAt: string } | null;
   },
 ): DatasetAssets {
   const assets: DatasetAssets = {
@@ -213,10 +216,16 @@ export function readDatasetAssets(
   };
 
   const yue2Flags = readYue2StageFlags(ds.slug);
+  // Joint (AITK) runs hold both halves in one checkpoint; the legacy separate
+  // NAR/AR trainers are only a fallback.
+  let joint = precomputed ? precomputed.yue2Joint ?? null : null;
+  if (!precomputed) { try { joint = findYue2JointAdaptersFor([ds]).get(ds.id) ?? null; } catch { /* stays null */ } }
+  const jointHit = (kind: 'yue2-nar' | 'yue2-ar'): TrainingAdapterHit | null =>
+    joint ? { path: joint.dir, kind, detail: 'joint', trainedAt: joint.trainedAt } : null;
   assets.yue2 = {
     ...yue2Flags,
-    narAdapter: precomputed ? precomputed.yue2NarAdapter : safeYue2NarAdapter(ds),
-    arAdapter: precomputed ? precomputed.yue2ArAdapter : safeYue2ArAdapter(ds),
+    narAdapter: jointHit('yue2-nar') ?? (precomputed ? precomputed.yue2NarAdapter : safeYue2NarAdapter(ds)),
+    arAdapter: jointHit('yue2-ar') ?? (precomputed ? precomputed.yue2ArAdapter : safeYue2ArAdapter(ds)),
   };
 
   return assets;
@@ -341,6 +350,13 @@ export async function listDatasetsWithAssets(): Promise<TrainingDatasetRow[]> {
   const mm3Adapters = findMm3LmAdaptersFor(idsAndSlugs);
   const yue2NarAdapters = findYue2NarAdaptersFor(idsAndSlugs);
   const yue2ArAdapters = findYue2ArAdaptersFor(idsAndSlugs);
+  let yue2Joint = new Map<string, { dir: string; trainedAt: string }>();
+  try { yue2Joint = findYue2JointAdaptersFor(idsAndSlugs); } catch { /* chips stay on the legacy finders */ }
+  // Artist for the grid filter, via the Lyric Studio set the dataset was exported from.
+  const artistBySet = new Map<number, string>();
+  try {
+    for (const r of getDb().prepare('SELECT ls.id AS id, a.name AS name FROM lyrics_sets ls JOIN artists a ON a.id = ls.artist_id').all() as Array<{ id: number; name: string }>) artistBySet.set(r.id, r.name);
+  } catch { /* no Lyric Studio tables: filter falls back to name/album */ }
 
   for (const ds of rows) {
     if (!ds.albumName.trim() && !probed.has(ds.id)) {
@@ -354,7 +370,9 @@ export async function listDatasetsWithAssets(): Promise<TrainingDatasetRow[]> {
       mm3Adapter: mm3Adapters.get(ds.id) ?? null,
       yue2NarAdapter: yue2NarAdapters.get(ds.id) ?? null,
       yue2ArAdapter: yue2ArAdapters.get(ds.id) ?? null,
+      yue2Joint: yue2Joint.get(ds.id) ?? null,
     });
+    ds.artistName = artistBySet.get(Number(ds.lyricsSetId)) || ds.defaultArtist || '';
   }
 
   if (deferred.length) probeInBackground(deferred);

@@ -218,6 +218,26 @@ export function reconcileYue2AitkRunsAtStartup(): number {
 }
 reconcileYue2AitkRunsAtStartup();
 
+/** Per dataset: the newest joint run holding a checkpoint with both native
+ *  AR and NAR weights. One index read for the whole list, and only two stats
+ *  per checkpoint dir (no train.jsonl or meters parse) so the dataset grid can
+ *  call it on every list request. */
+export function findYue2JointAdaptersFor(rows: Array<{ id: string; slug: string }>): Map<string, { dir: string; trainedAt: string }> {
+  const out = new Map<string, { dir: string; trainedAt: string }>();
+  const bySlug = new Map(rows.map(r => [r.slug, r.id]));
+  const ids = new Set(rows.map(r => r.id));
+  for (const r of readIndex().sort((a, b) => b.updatedAt - a.updatedAt)) {
+    const id = ids.has(r.datasetId) ? r.datasetId : bySlug.get(r.datasetSlug);
+    if (!id || out.has(id)) continue;
+    const ls = (dir: string) => { try { return fs.readdirSync(dir).map(n => path.join(dir, n)); } catch { return []; } };
+    const bases = [r.output, ...ls(path.join(r.output, 'segments'))];
+    const dir = bases.flatMap(ls).filter(d => /[\\/]checkpoint-step\d+$/.test(d)).find(d =>
+      fs.existsSync(path.join(d, 'native-ar.safetensors')) && fs.existsSync(path.join(d, 'native-nar.safetensors')));
+    if (dir) out.set(id, { dir, trainedAt: new Date(r.updatedAt).toISOString() });
+  }
+  return out;
+}
+
 export function listYue2AitkRuns(datasetId: string, datasetSlug?: string): Yue2AitkRunRecord[] {
   return readIndex().filter(r => r.datasetId === datasetId || (!!datasetSlug && r.datasetSlug === datasetSlug))
     .map(r => ({ ...r, checkpoints: checkpointRecords(r.output) }))

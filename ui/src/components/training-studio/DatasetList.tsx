@@ -3,7 +3,7 @@
 // The empty state is the studio's front door: no datasets means a single
 // centred card explaining what the Dataset phase does.
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Database, Disc3, FolderOpen, FolderPlus, GraduationCap, ListChecks, Loader2, Plus, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useBackendStore } from '../../stores/backendStore';
@@ -38,6 +38,10 @@ export const DatasetList: React.FC = () => {
   const loading = useTrainingStore(s => s.loading);
   const openDataset = useTrainingStore(s => s.openDataset);
   const deleteDataset = useTrainingStore(s => s.deleteDataset);
+  const loadDatasets = useTrainingStore(s => s.loadDatasets);
+  // Fresh chips on every return to the grid: cleanup and training change the
+  // disk behind a list that was fetched when the studio mounted.
+  useEffect(() => { void loadDatasets(); }, [loadDatasets]);
 
   // "Train multiple…" is YuE2's server-owned batch (yue2BatchRunner.ts:
   // caches, preparation, joint training, refinement per dataset). ACE's bulk
@@ -51,6 +55,15 @@ export const DatasetList: React.FC = () => {
   const [yue2BatchOpen, setYue2BatchOpen] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const confirmTarget = datasets.find(d => d.id === confirmId) || null;
+  const [query, setQuery] = useState('');
+  const [doneFilter, setDoneFilter] = useState<'all' | 'done' | 'todo'>('all');
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const isDone = (d: typeof datasets[number]) => !!(d.assets?.yue2?.arAdapter && d.assets?.yue2?.narAdapter);
+    return datasets.filter(d =>
+      (!q || [d.name, d.artistName, d.albumName, d.customTag].some(v => (v ?? '').toLowerCase().includes(q)))
+      && (!isYue2 || doneFilter === 'all' || (doneFilter === 'done') === isDone(d)));
+  }, [datasets, query, doneFilter, isYue2]);
 
   if (loading && datasets.length === 0) {
     return (
@@ -118,8 +131,29 @@ export const DatasetList: React.FC = () => {
         </div>
       </div>
 
+      <div className="flex items-center gap-2">
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder={t('trainingStudio.list.filter', 'Filter by dataset, artist or album…') as string}
+          className="flex-1 max-w-md rounded-lg bg-zinc-100 dark:bg-black/20 px-3 py-1.5 text-xs"
+        />
+        {isYue2 && (
+          <select
+            value={doneFilter}
+            onChange={e => setDoneFilter(e.target.value as 'all' | 'done' | 'todo')}
+            className="rounded-lg bg-zinc-100 dark:bg-black/20 px-2 py-1.5 text-xs"
+          >
+            <option value="all">{t('trainingStudio.list.filterAll', 'All datasets')}</option>
+            <option value="done">{t('trainingStudio.list.filterDone', 'AR + NAR adapters done')}</option>
+            <option value="todo">{t('trainingStudio.list.filterTodo', 'Not done yet')}</option>
+          </select>
+        )}
+        <span className="text-[11px] text-zinc-500">{visible.length} / {datasets.length}</span>
+      </div>
+
       <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
-        {datasets.map(ds => (
+        {visible.map(ds => (
           <div
             key={ds.id}
             onClick={() => void openDataset(ds.id)}
@@ -129,6 +163,7 @@ export const DatasetList: React.FC = () => {
               <Database size={16} className="text-amber-500 mt-0.5 flex-shrink-0" />
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold text-zinc-900 dark:text-white truncate">{ds.name}</div>
+                {ds.artistName && <div className="text-[11px] text-zinc-600 dark:text-zinc-400 truncate">{ds.artistName}</div>}
                 <div className="text-[11px] font-mono text-zinc-500 truncate" title={ds.sourceDir}>{ds.sourceDir}</div>
               </div>
               <button

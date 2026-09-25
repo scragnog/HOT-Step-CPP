@@ -1300,6 +1300,8 @@ export interface TrainingDatasetSummary {
   /** What the dataset has on DISK beyond its row — attached by the list and
    *  detail endpoints, absent on the bare row a PATCH echoes back. */
   assets?: DatasetAssets;
+  /** Lyric Studio artist, list endpoint only. */
+  artistName?: string;
 }
 
 /** One trained adapter directory found on disk. */
@@ -2954,6 +2956,7 @@ export async function listYue2Batches(): Promise<Yue2BatchSummary[]> {
 }
 export async function pauseYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}/pause`, { method: 'POST' }); }
 export async function resumeYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}/resume`, { method: 'POST' }); }
+export async function addToYue2Batch(id: string, datasetIds: string[]): Promise<void> { await request<{ batch: Yue2BatchSummary }>(`/yue2-batch/${encodeURIComponent(id)}/items`, { method: 'POST', ...jsonBody({ datasetIds }) }); }
 export async function cancelYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
 
 export async function cancelPipeline(id: string): Promise<void> {

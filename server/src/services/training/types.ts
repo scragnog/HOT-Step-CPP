@@ -299,6 +299,8 @@ export interface TrainingDatasetSummary {
   /** What the dataset has on DISK beyond its row — attached by the list and
    *  detail endpoints, absent on the bare row a PATCH echoes back. */
   assets?: DatasetAssets;
+  /** Lyric Studio artist (via lyricsSetId), list endpoint only. */
+  artistName?: string;
 }
 
 /** One trained adapter directory found on disk. */

@@ -11,7 +11,7 @@
 // batch queue already shows on the Train page.
 
 import React from 'react';
-import { Database, Layers, Cpu, Activity, Lock, Sparkles, ListChecks } from 'lucide-react';
+import { ArrowLeft, Database, Layers, Cpu, Activity, Lock, Sparkles, ListChecks } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useBackendStore } from '../../stores/backendStore';
 import { useTrainingStore } from '../../stores/trainingStore';
@@ -34,6 +34,8 @@ export const PhaseStepper: React.FC = () => {
   const { t } = useTranslation();
   const phase = useTrainingStore(s => s.phase);
   const setPhase = useTrainingStore(s => s.setPhase);
+  const selectedDatasetId = useTrainingStore(s => s.selectedDatasetId);
+  const closeDataset = useTrainingStore(s => s.closeDataset);
   // Phase 2 is a different thing per backend: ACE encodes a tensor cache,
   // MiniMax-Music3 exports RVQ codes. Same slot in the pipeline, so the chip is
   // relabelled rather than a fifth phase being invented.
@@ -49,6 +51,15 @@ export const PhaseStepper: React.FC = () => {
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
+      {selectedDatasetId && (
+        <button
+          type="button"
+          onClick={() => { closeDataset(); setPhase('dataset'); }}
+          className="flex items-center gap-1.5 px-3 py-1.5 mr-2 rounded-full text-xs font-semibold border border-zinc-300/70 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-black/5 dark:hover:bg-white/5"
+        >
+          <ArrowLeft size={14} /> {t('trainingStudio.phase.allDatasets', 'All datasets')}
+        </button>
+      )}
       {phases.map((p, i) => {
         const active = phase === p.id;
         return (

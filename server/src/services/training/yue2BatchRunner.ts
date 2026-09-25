@@ -169,6 +169,22 @@ export function startBatch(input: { datasetIds: string[]; lyricTiming: boolean; 
   return toSummary(state);
 }
 
+/** Queue more datasets on an active batch. The loop iterates the live items
+ *  array, so appended items run after the current ones, with the batch's recipe. */
+export function appendToBatch(id: string, datasetIds: string[]): Yue2BatchSummary | { error: string } {
+  const state = batches.get(id);
+  if (!state || !isActive(state.status)) return { error: 'Batch is not running' };
+  for (const dsId of datasetIds) {
+    if (state.items.some(i => i.datasetId === dsId)) continue;
+    const ds = repo.getDataset(dsId);
+    if (!ds) return { error: `Dataset not found: ${dsId}` };
+    state.items.push({ datasetId: ds.id, name: ds.name || ds.slug, status: 'pending', currentStage: null, error: null,
+      stages: stagesFor(state.lyricTiming, state.recipe.autoRefine !== false).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
+  }
+  persist(state);
+  return toSummary(state);
+}
+
 export function pauseBatch(id: string): 'ok' | 'not_found' | 'not_active' {
   const state = batches.get(id);
   if (!state) return getBatch(id) ? 'not_active' : 'not_found';

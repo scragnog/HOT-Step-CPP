@@ -161,7 +161,7 @@ import {
 } from '../services/training/yue2AitkPrepareRunner.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { parseYue2JointStopMode } from '../services/training/yue2JointTrainRunner.js';
-import { cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
+import { appendToBatch as appendToYue2Batch, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
 import {
   aceTrainExe, engineGpuBackend, engineSupportsFlashAttnTraining,
   findRegCorpora, getModelSnapshot, pickBf16, pickDitBaseFor, pickLmFor, refreshModelSnapshot,
@@ -725,6 +725,12 @@ router.get('/yue2-batch/:id', (req: Request, res: Response) => {
 router.delete('/yue2-batch/:id', (req: Request, res: Response) => {
   if (!cancelYue2Batch(req.params.id as string)) { res.status(404).json({ error: 'Batch not found' }); return; }
   res.json({ ok: true });
+});
+router.post('/yue2-batch/:id/items', (req: Request, res: Response) => {
+  const ids = Array.isArray(req.body?.datasetIds) ? (req.body.datasetIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.length > 0) : [];
+  const result = appendToYue2Batch(req.params.id as string, ids);
+  if ('error' in result) { res.status(409).json({ error: result.error }); return; }
+  res.json({ batch: result });
 });
 router.post('/yue2-batch/:id/pause', (req: Request, res: Response) => {
   const r = pauseYue2Batch(req.params.id as string);

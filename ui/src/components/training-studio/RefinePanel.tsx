@@ -49,6 +49,7 @@ export const RefinePanel: React.FC = () => {
   const { t } = useTranslation();
   const detail = useTrainingStore(s => s.detail);
   const datasetId = useTrainingStore(s => s.selectedDatasetId);
+  const datasetName = useTrainingStore(s => s.datasets.find(d => d.id === s.selectedDatasetId)?.name);
   const [runs, setRuns] = useState<Yue2AitkRunRecord[]>([]);
   const [source, setSource] = useState('');
   const [ceiling, setCeiling] = useState(2.0);
@@ -499,7 +500,7 @@ export const RefinePanel: React.FC = () => {
               </div>
               {mine.length > 0 && <div className="mt-2 flex flex-col gap-2">
                 {mine.map((p, i) => p.audioUrl && p.status === 'done'
-                  ? <PreviewPlayer key={p.id} src={p.audioUrl} label={t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}${p.score?.flags?.length ? ` · ${p.score.flags[0]}` : ''}${p.plan ? ` · planner replans ${p.plan.attempts.length - 1}` : ''}${typeof p.composerReplans === 'number' ? ` · composer replans ${p.composerReplans}` : ''}`} />
+                  ? <PreviewPlayer key={p.id} src={p.audioUrl} downloadName={`${datasetName || 'preview'}_step${c.step}_take${i + 1}_seed${p.seed}.wav`} label={t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}${p.score?.flags?.length ? ` · ${p.score.flags[0]}` : ''}${p.plan ? ` · planner replans ${p.plan.attempts.length - 1}` : ''}${typeof p.composerReplans === 'number' ? ` · composer replans ${p.composerReplans}` : ''}`} />
                   : <div key={p.id} className="text-[11px] text-zinc-500">{t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}: {p.status === 'done' && !p.file ? t('trainingStudio.refine.audioPruned', 'audio removed by cleanup') : p.status}{p.error ? ` — ${p.error}` : ''}{p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}{p.score?.flags?.length ? ` · ${p.score.flags[0]}` : ''}</div>)}
               </div>}
             </div>;

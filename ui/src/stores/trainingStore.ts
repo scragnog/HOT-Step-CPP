@@ -434,6 +434,7 @@ interface TrainingState {
   pauseYue2Batch(id: string): Promise<void>;
   resumeYue2Batch(id: string): Promise<void>;
   cancelYue2Batch(id: string): Promise<void>;
+  addToYue2Batch(id: string, datasetIds: string[]): Promise<void>;
   startPipeline(input: StartPipelineInput): Promise<PipelineSummary>;
   cancelPipeline(id: string): Promise<void>;
   pausePipeline(id: string): Promise<void>;
@@ -1269,6 +1270,10 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   },
   resumeYue2Batch: async (id) => {
     try { await trainingApi.resumeYue2Batch(id); await get().loadYue2Batches(); } catch (err) { set({ error: errMessage(err) }); }
+  },
+  addToYue2Batch: async (id, datasetIds) => {
+    await trainingApi.addToYue2Batch(id, datasetIds);
+    await get().loadYue2Batches();
   },
   cancelYue2Batch: async (id) => {
     try { await trainingApi.cancelYue2Batch(id); await get().loadYue2Batches(); } catch (err) { set({ error: errMessage(err) }); }

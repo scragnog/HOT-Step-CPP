@@ -5,11 +5,11 @@
 // bar with the last third shaded (where planner decay shows), a time readout,
 // and jump buttons for the passages that matter.
 import React, { useEffect, useRef, useState } from 'react';
-import { Pause, Play, SkipBack } from 'lucide-react';
+import { Download, Pause, Play, SkipBack } from 'lucide-react';
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
-export const PreviewPlayer: React.FC<{ src: string; label?: string; sublabel?: string }> = ({ src, label, sublabel }) => {
+export const PreviewPlayer: React.FC<{ src: string; label?: string; sublabel?: string; downloadName?: string }> = ({ src, label, sublabel, downloadName }) => {
   const audio = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
@@ -54,6 +54,7 @@ export const PreviewPlayer: React.FC<{ src: string; label?: string; sublabel?: s
         <button type="button" onClick={() => seek(time + 15)} className="px-2 py-0.5 rounded border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10">+15 s</button>
         {jumps.map(j => <button key={j.f} type="button" onClick={() => seek(j.t)} className="px-2 py-0.5 rounded border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10">{fmt(j.t)}</button>)}
         <span className="ml-1 text-zinc-500">shaded = last third</span>
+        {downloadName && <a href={src} download={downloadName} className="ml-auto px-2 py-0.5 rounded border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 flex items-center gap-1"><Download size={10} />download</a>}
       </div>
     </div>
   );
