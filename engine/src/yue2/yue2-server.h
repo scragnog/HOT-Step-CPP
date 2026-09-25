@@ -209,6 +209,10 @@ static void yue2_handle_props(const httplib::Request &, httplib::Response & res)
         yyjson_mut_obj_add_uint(doc, ad, "tensors", (uint64_t) g_yue2.lm_adapter_tensors);
         yyjson_mut_obj_add_strcpy(doc, ad, "family", g_yue2.lm_adapter_family.c_str());
         yyjson_mut_obj_add_bool(doc, ad, "in_force", g_yue2.lm_resident && !g_yue2.lm_adapter_desc.empty());
+        // The tokenizer's companion decoder adapter (merged under every NAR load).
+        yyjson_mut_obj_add_bool(doc, ad, "companion_enabled", g_yue2.companion_enabled);
+        yyjson_mut_obj_add_bool(doc, ad, "companion_applied", g_yue2.companion_applied);
+        yyjson_mut_obj_add_strcpy(doc, ad, "companion_path", g_yue2.companion_path.c_str());
 
         // Per-adapter breakdown, in request order. The aggregate above says
         // whether the model is adapted at all; once the picker has an AR slot
@@ -946,6 +950,9 @@ static void yue2_register_routes(httplib::Server & svr, const char * models_dir)
     {
         std::lock_guard<std::mutex> lock(g_yue2_mutex);
         yue2_discover(&g_yue2, models_dir);
+        // The tokenizer's companion decoder adapter under every NAR load
+        // (yue2-model.h, companion_enabled). YUE2_NO_COMPANION=1 opts out.
+        g_yue2.companion_enabled = std::getenv("YUE2_NO_COMPANION") == nullptr;
     }
     svr.Get("/yue2/props", yue2_handle_props);
     svr.Post("/yue2/warm", yue2_handle_warm);

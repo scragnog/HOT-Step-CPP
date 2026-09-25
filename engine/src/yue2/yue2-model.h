@@ -361,6 +361,19 @@ struct Yue2Model {
     };
     std::vector<MergedAdapter> lm_adapter_merged;
 
+    // The tokenizer's companion decoder adapter (Mothersuperior's
+    // nar_lora_joint_v9, the pair of the v9 head our training codes come
+    // from): merged under every NAR load when enabled and installed. Its
+    // decoder-block LoRA goes through the ordinary merge; vae2llm/llm2vae are
+    // full replacement weights (biases included). Round trip 2026-09-25: the
+    // base decoder collapses real-audio stereo (L/R corr 0.78-0.92 vs the
+    // originals' ~0.65); with the companion it matches. Off by default so
+    // probes and parity tools on their own Yue2Model stay on the pristine
+    // base; ace-server turns it on (YUE2_NO_COMPANION=1 opts out).
+    bool           companion_enabled = false;
+    bool           companion_applied = false;
+    std::string    companion_path;
+
     bool           backend_ref = false;
     ggml_backend_t backend     = nullptr;
     ggml_backend_t cpu_backend = nullptr;
@@ -1290,6 +1303,7 @@ static void yue2_unload(Yue2Model * m) {
     // survives, so the next warm/synth re-merges the same set.
     m->lm_adapter_desc.clear();
     m->lm_adapter_tensors = 0;
+    m->companion_applied  = false;
     m->lm_adapter_family.clear();
     m->lm_adapter_merged.clear();
     if (m->backend_ref) {
@@ -1368,9 +1382,137 @@ static bool yue2_convrot_backend_supported(ggml_backend_t backend) {
 // silently got the base model has no way to tell, and the whole point of the
 // quantized-base guard in yue2-adapter.h is not to ship a wrong-but-quiet
 // model. yue2_load_parts's own all-or-nothing contract then unloads.
+
+// The companion (see companion_enabled): find nar_lora_joint_v9.safetensors in
+// the search dirs, merge its decoder-block LoRA (renamed to our NAR sites,
+// scale 1) and overwrite the four flow-head tensors with its full weights.
+// Absent file = nothing to do (logged once). A present file that fails to
+// apply is fatal, like any requested adapter.
+static const char * YUE2_COMPANION_FILE = "nar_lora_joint_v9.safetensors";
+
+static bool yue2_apply_companion(Yue2Model * m, const GGUFModel & gf, std::vector<std::string> * errs) {
+    m->companion_applied = false;
+    if (!m->companion_enabled) {
+        return true;
+    }
+    std::string path;
+    for (const auto & dir : m->search_dirs) {
+        const std::string cand = dir + YUE2_SEP + YUE2_COMPANION_FILE;
+        HS_STAT_T sb;
+        if (hs_stat(cand, &sb) == 0) {
+            path = cand;
+            break;
+        }
+    }
+    if (path.empty()) {
+        static bool warned = false;
+        if (!warned) {
+            fprintf(stderr, "[YuE2-Companion] %s not installed: the decoder runs WITHOUT the tokenizer's companion "
+                            "adapter (install it from the Model Manager)\n", YUE2_COMPANION_FILE);
+            warned = true;
+        }
+        return true;
+    }
+    STFile st = {};
+    if (!st_open(&st, path.c_str())) {
+        errs->push_back("companion " + path + ": cannot open");
+        return false;
+    }
+    // layers.N.nar_self_attn.{q,k,v,o}_proj / nar_mlp.{gate,up,down}_proj
+    //   .lora_{A,B} -> yue2.blk.N.nar_attn_{q,k,v,output} / nar_ffn_*.lora_{A,B}.weight
+    int64_t rank = 0;
+    for (auto & e : st.entries) {
+        if (e.name.compare(0, 7, "layers.") != 0) continue;
+        const size_t d1 = e.name.find('.', 7);
+        if (d1 == std::string::npos) continue;
+        const std::string layer = e.name.substr(7, d1 - 7);
+        std::string rest = e.name.substr(d1 + 1);  // e.g. nar_self_attn.q_proj.lora_A
+        const size_t dl = rest.rfind('.');
+        if (dl == std::string::npos) continue;
+        const std::string which = rest.substr(dl + 1);  // lora_A / lora_B
+        const std::string site  = rest.substr(0, dl);
+        static const std::pair<const char *, const char *> map[] = {
+            { "nar_self_attn.q_proj", "nar_attn_q" }, { "nar_self_attn.k_proj", "nar_attn_k" },
+            { "nar_self_attn.v_proj", "nar_attn_v" }, { "nar_self_attn.o_proj", "nar_attn_output" },
+            { "nar_mlp.gate_proj", "nar_ffn_gate" },  { "nar_mlp.up_proj", "nar_ffn_up" },
+            { "nar_mlp.down_proj", "nar_ffn_down" },
+        };
+        for (const auto & kv : map) {
+            if (site == kv.first && (which == "lora_A" || which == "lora_B")) {
+                if (which == "lora_A" && rank == 0) rank = e.shape[0];
+                e.name = "yue2.blk." + layer + "." + kv.second + "." + which + ".weight";
+                break;
+            }
+        }
+    }
+    Yue2AdapterMeta md;
+    md.format = "yue2-nar-lora-v1";
+    md.alpha  = (float) rank;  // the file's rule: W += B @ A at scale 1
+    md.rank   = rank;
+    std::string err, fam;
+    const int n = yue2_adapter_merge_st(&m->wctx_nar, gf, st, "", Yue2LmAdapterScales{}, m->backend, &err, &fam, &md);
+    if (n <= 0) {
+        st_close(&st);
+        errs->push_back("companion " + path + ": " + (err.empty() ? "matched no decoder tensors" : err));
+        return false;
+    }
+    // Flow heads: full replacement of the staged tensor data.
+    int heads = 0;
+    for (const char * name : { "vae2llm.weight", "vae2llm.bias", "llm2vae.weight", "llm2vae.bias" }) {
+        const STEntry * src = nullptr;
+        for (const auto & e : st.entries) {
+            if (e.name == name) { src = &e; break; }
+        }
+        WeightCtx::PendingCopy * pc = nullptr;
+        for (auto & p : m->wctx_nar.pending) {
+            if (p.tensor && std::string(ggml_get_name(p.tensor)) == name) { pc = &p; break; }
+        }
+        if (!src || !pc || src->dtype != "F32") {
+            st_close(&st);
+            errs->push_back(std::string("companion ") + path + ": flow head " + name + (src ? (pc ? " is not F32" : " not staged") : " missing"));
+            return false;
+        }
+        const int64_t count = ggml_nelements(pc->tensor);
+        if ((int64_t) ((src->data_end - src->data_start) / 4) != count) {
+            st_close(&st);
+            errs->push_back(std::string("companion ") + path + ": flow head " + name + " has the wrong size");
+            return false;
+        }
+        const float * f = (const float *) st_data(st, *src);
+        const ggml_type t = pc->tensor->type;
+        const size_t nbytes = (size_t) count * ggml_type_size(t);
+        m->wctx_nar.staging.emplace_back(new float[(nbytes + 3) / 4]);
+        void * dst = m->wctx_nar.staging.back().get();
+        if (t == GGML_TYPE_F32) {
+            memcpy(dst, f, nbytes);
+        } else if (t == GGML_TYPE_BF16) {
+            for (int64_t i = 0; i < count; i++) ((ggml_bf16_t *) dst)[i] = ggml_fp32_to_bf16(f[i]);
+        } else if (t == GGML_TYPE_F16) {
+            for (int64_t i = 0; i < count; i++) ((ggml_fp16_t *) dst)[i] = ggml_fp32_to_fp16(f[i]);
+        } else {
+            st_close(&st);
+            errs->push_back(std::string("companion ") + path + ": flow head " + name + " is stored as " + ggml_type_name(t));
+            return false;
+        }
+        pc->src    = dst;
+        pc->nbytes = nbytes;
+        heads++;
+    }
+    st_close(&st);
+    m->companion_applied = true;
+    m->companion_path    = path;
+    fprintf(stderr, "[YuE2-Companion] %s: %d decoder tensor(s) merged + %d flow head(s) replaced\n", path.c_str(), n, heads);
+    return true;
+}
+
 static bool yue2_apply_adapters(Yue2Model * m, const GGUFModel & gf, std::vector<std::string> * errs,
                                 bool ar = true, bool nar = true) {
     yue2_forget_merged(m, ar, nar);
+    // Under every NAR load, before any user adapter: the companion is part of
+    // the decoder, and user NAR adapters are trained on top of it.
+    if (nar && !yue2_apply_companion(m, gf, errs)) {
+        return false;
+    }
     if (m->lm_adapter_want.empty()) {
         return true;
     }

@@ -673,12 +673,13 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
                                  const Yue2LmAdapterScales & scales,
                                  ggml_backend_t              backend,
                                  std::string *               err_out,
-                                 std::string *               family_out = nullptr) {
+                                 std::string *               family_out = nullptr,
+                                 const Yue2AdapterMeta *     md_override = nullptr) {
     WeightSource ws = {};
     ws.is_st        = false;
     ws.gf           = const_cast<GGUFModel *>(&gf);
 
-    const Yue2AdapterMeta md = yue2_adapter_read_meta(st);
+    const Yue2AdapterMeta md = md_override ? *md_override : yue2_adapter_read_meta(st);
 
     // `format` is a guard, not decoration, and since the AR family landed it
     // does TWO jobs.
