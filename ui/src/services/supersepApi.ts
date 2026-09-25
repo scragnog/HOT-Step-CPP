@@ -107,6 +107,19 @@ export async function recombineStems(
   return res.blob();
 }
 
+/** Release a completed/abandoned job's server-side resources. Fire-and-forget:
+ * the route doesn't exist server-side yet (added separately, #132), so a 404
+ * here is expected for now — swallow it with a console.warn rather than
+ * throwing, since a missing release endpoint must never block the UI. */
+export async function releaseSeparation(jobId: string): Promise<void> {
+  try {
+    const res = await fetch(`${API_BASE}/${jobId}/release`, { method: 'POST' });
+    if (!res.ok) console.warn(`[supersepApi] release ${jobId} returned ${res.status}`);
+  } catch (err) {
+    console.warn(`[supersepApi] release ${jobId} failed:`, err);
+  }
+}
+
 /** Helper: poll until job completes, calling onProgress along the way. */
 export async function waitForCompletion(
   jobId: string,

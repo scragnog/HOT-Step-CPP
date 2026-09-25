@@ -12,13 +12,14 @@ import { generateApi } from '../../services/api';
 import { createGenerationTimer, getGenerationTimeoutMinutes } from '../../utils/generationTimer';
 import { lireekApi, type Artist, type AlbumPreset } from '../../services/lireekApi';
 import {
-  startSeparation, waitForCompletion, recombineStems, getStemAudioUrl,
+  recombineStems,
   type SeparationLevel,
 } from '../../services/supersepApi';
 import { SourcePanel } from './SourcePanel';
 import { ArtistSettingsPanel } from './ArtistSettingsPanel';
 import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
-import { StemMixer, type StemControl, type MixerStemInfo } from '../shared/StemMixer';
+import { StemMixer } from '../shared/StemMixer';
+import { useCoverStemsStore } from '../../stores/coverStemsStore';
 import {
   addManualQueueItem, updateManualQueueItem,
   completeManualQueueItem, failManualQueueItem,
@@ -115,15 +116,15 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
 
   // ── Advanced Mode (SuperSep) ──
+  // Split result, controls, job id and in-flight progress live in
+  // coverStemsStore — component-local state here was destroyed by leaving
+  // the tab, since that unmounts CoverStudio (#135).
   const [advancedMode, setAdvancedMode] = useState(false);
   const [sepLevel, setSepLevel] = useState<SeparationLevel>(() => restore('sepLevel', 1) as SeparationLevel);
-  const [isSeparating, setIsSeparating] = useState(false);
-  const [sepProgress, setSepProgress] = useState(0);
-  const [sepMessage, setSepMessage] = useState('');
-  const [sepJobId, setSepJobId] = useState<string | null>(null);
-  const [sepStems, setSepStems] = useState<MixerStemInfo[] | null>(null);
-  const [stemControls, setStemControls] = useState<StemControl[]>([]);
-  const [showMixer, setShowMixer] = useState(false);
+  const {
+    sepJobId, sepStems, stemControls, showMixer, isSeparating, sepProgress, sepMessage,
+    setShowMixer, setStemControls, startSeparation: startStemSeparation, clearStems,
+  } = useCoverStemsStore();
 
 
   // ── Persist ──
@@ -624,8 +625,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setMetadata(null); setAnalysis(null);
     setSongArtist(''); setSongTitle(''); setLyrics('');
     setBpmCorrection(1); setKeyOverride(null);
-    // Clear stems too
-    setSepStems(null); setStemControls([]); setSepJobId(null); setShowMixer(false);
+    // Clear stems too — releases the split job server-side.
+    clearStems();
   };
 
   const handleClearArtist = () => {
@@ -639,44 +640,18 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const canGenerate = !!sourceAudioUrl && (!!lyrics.trim() || instrumental);
 
   // ── SuperSep handlers ──
+  // Split + poll now runs inside coverStemsStore.startSeparation, so it keeps
+  // going to completion even if the user leaves Cover Studio mid-split (#135).
   const handleSeparate = useCallback(async () => {
     if (!sourceAudioUrl) { showToast(t('cover.uploadAudioFirst')); return; }
-    setIsSeparating(true);
-    setSepProgress(0);
-    setSepMessage(t('cover.startingSeparation'));
-    setSepStems(null);
-
-
     try {
-      // Start separation — pass server URL directly (no need to download/re-upload)
-      const jobId = await startSeparation(sourceAudioUrl, sepLevel);
-      setSepJobId(jobId);
-
-      // Wait for completion with progress updates
-      const result = await waitForCompletion(jobId, (progress, message) => {
-        setSepProgress(progress);
-        setSepMessage(message);
-      });
-
-      // Map SuperSep stems to shared MixerStemInfo (add audioUrl)
-      const mixerStems: MixerStemInfo[] = result.stems.map(s => ({
-        name: s.name,
-        category: s.category,
-        audioUrl: getStemAudioUrl(jobId, s.index),
-        index: s.index,
-        stage: s.stage,
-      }));
-      setSepStems(mixerStems);
-      // Initialize stem controls (all at 100%, unmuted)
-      setStemControls(mixerStems.map(s => ({ index: s.index, volume: 1.0, muted: false })));
-      setShowMixer(true);
-      showToast(t('cover.separatedIntoStems', { count: result.stems.length }));
+      await startStemSeparation(sourceAudioUrl, sepLevel);
+      const count = useCoverStemsStore.getState().sepStems?.length ?? 0;
+      showToast(t('cover.separatedIntoStems', { count }));
     } catch (err: any) {
       showToast(`Separation failed: ${err.message}`);
-    } finally {
-      setIsSeparating(false);
     }
-  }, [sourceAudioUrl, sepLevel]);
+  }, [sourceAudioUrl, sepLevel, startStemSeparation]);
 
 
 
