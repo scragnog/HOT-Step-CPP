@@ -1,14 +1,19 @@
 # HOT-Step CPP Skill Library
 
-Thirteen skills that encode how this project is actually maintained — including
-institutional knowledge that exists nowhere else in committed form (the local
-`docs/plans/` design docs are gitignored; their essential content is distilled
-into these skills). Written for engineers and AI sessions with zero prior
-context beyond `CLAUDE.md`.
+One skill per maintenance domain, encoding how this project is actually
+maintained, including institutional knowledge that exists nowhere else in
+committed form (the local `docs/plans/` design docs are gitignored; their
+essential content is distilled into these skills and into `docs/dev/`).
+Written for engineers and AI sessions with zero prior context beyond
+`AGENTS.md`.
 
-Every skill was adversarially fact-checked against the repo (paths, line
-numbers, commands, behavioral claims) as of 2026-07-02, HEAD `168dcb5`.
-Line-number citations drift as code changes — trust the named
+Skills are procedures. The public docs under `docs/user/` and `docs/dev/` are the
+reference; when a skill and a doc page disagree, fix whichever is stale and say
+so. `node tools/docs/check-docs.mjs` fails if a skill folder here is missing from
+the table below.
+
+The 2026-07-02 fact-check (HEAD `168dcb5`) covered the first thirteen skills.
+Line-number citations drift as code changes; trust the named
 file/function/string over the exact line.
 
 ## Picking a skill

@@ -2,7 +2,7 @@
 
 Dev-only tooling that produces the TensorRT assets `release.yml` downloads
 for the Windows `cuda13.1` build (the only variant that compiles the MM3
-TensorRT DiT renderer, `HOT_STEP_TRT`). See `docs/RELEASING.md` → "TensorRT
+TensorRT DiT renderer, `HOT_STEP_TRT`). See `docs/dev/releasing.md` → "TensorRT
 SDK for CI" for the operational runbook, and
 `docs/plans/2026-09-11-mm3-trt-dit-shipping.md` for the wider shipping plan.
 

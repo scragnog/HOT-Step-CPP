@@ -23,7 +23,7 @@ Contract:
 2. After completing each step's `xt` update, call `on_step(step_idx, t_curr, t_next)`. **`on_step` is where the engine applies**: cancel checks, cover-switch, DCW correction, guidance `post_step`, repaint injection, CFG cutoff, and progress logging (`hot-step-sampler.h:798-951`). Skip it and all of those silently stop working for your solver.
 3. On the final step leave the x0 prediction in `xt` (`xt[i] = xt[i] - vt_buf[i] * t_curr`); there is no engine-side final step for full-loop solvers.
 
-Worked example with full commentary: `plugins/README.md` lines 96-162 (this section of that README IS accurate, unlike its basic examples). Real production plugin: `plugins/solvers/md_pingpong_simple.lua`.
+Worked example with full commentary: `plugins/README.md` (its "Full-Loop Solvers" section). Real production plugin: `plugins/solvers/md_pingpong_simple.lua`.
 
 Known engine-side TODO: DCW for full-loop multi-eval solvers uses the live `vt` rather than a pre-solver snapshot (`hot-step-sampler.h:844` TODO comment) — if your full-loop solver leaves stale velocities in `vt_buf` when calling `on_step`, DCW sees those.
 
@@ -125,10 +125,10 @@ Consequences worth internalizing:
 
 ## 6. Docs-vs-code discrepancies (code wins)
 
-1. **`plugins/README.md` basic examples are outdated**: they show `return { ..., step = function(...) }` module style with `x:get(i)` / `x:set(i,v)` methods and a `schedule()` that returns a table. The real API is a global `solver = {...}` table plus a global `function step(xt, vt, t_curr, t_prev, n)` using `xt[i]` indexing. Every shipped plugin uses the real style. Exception: the README's full-loop section (lines 96-162) is accurate.
-2. **`transform` is dead in the UI**: extracted (`lua-plugin.h:235`), serialized (`lua-plugin-registry.h:254`), typed (`ui/src/types/pluginTypes.ts`), never applied by `PluginControls.tsx`. `docs/PLUGINS.md` (~line 289) claims otherwise.
-3. **`docs/PLUGINS.md` scheduler section** says `shift` is "from UI" — actually back-calculated from the upstream schedule's second timestep and clamped (`<0.5 → 1.0`, `>10 → 3.0`) in `engine/src/sampler-schedule.h:61-74`.
-4. **`docs/PLUGINS.md` omits** `owns_loop`/`sample()` and the entire postprocess plugin type. Postprocess is documented nowhere except the code (and now this reference).
+1. **Old module-return examples** (`return { ..., step = function(...) }`, `x:get(i)` / `x:set(i,v)`, a `schedule()` returning a table) still circulate in community files and were in `plugins/README.md` until 2026-09-25. The real API is a global `solver = {...}` table plus a global `function step(xt, vt, t_curr, t_prev, n)` using `xt[i]` indexing. Every shipped plugin uses the real style.
+2. **`transform` is dead in the UI**: extracted (`lua-plugin.h:235`), serialized (`lua-plugin-registry.h:254`), typed (`ui/src/types/pluginTypes.ts`), never applied by `PluginControls.tsx`. `docs/dev/plugins-authoring.md` (~line 289) claims otherwise.
+3. **`docs/dev/plugins-authoring.md` scheduler section** says `shift` is "from UI" — actually back-calculated from the upstream schedule's second timestep and clamped (`<0.5 → 1.0`, `>10 → 3.0`) in `engine/src/sampler-schedule.h:61-74`.
+4. **`docs/dev/plugins-authoring.md` omits** `owns_loop`/`sample()` and the entire postprocess plugin type. Postprocess is documented nowhere except the code (and now this reference).
 5. **Global naming split**: solvers get `step_index`; guidance (`guide()` and `post_step()`) gets `step_idx`. Two names, same concept — do not mix them up across plugin types.
 
 ## 7. Handy debug snippets (PowerShell)

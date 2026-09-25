@@ -1,97 +1,23 @@
-# HOT-Step Community Plugins
+# HOT-Step community plugins
 
-Drop custom Lua plugin files here to extend the engine without rebuilding.
-
-## Directory Structure
+Drop Lua plugin files here to extend the engine without rebuilding. The engine loads
+`engine/plugins/` (built in) first, then this folder. Restart the app and the plugin appears
+in its dropdown. On a duplicate name the first one loaded wins, so a built-in plugin cannot
+be replaced from here; give yours a new `name`.
 
 ```
 plugins/
-├── solvers/        ← Custom ODE/SDE solvers
-├── schedulers/     ← Custom noise schedules
-└── guidance/       ← Custom guidance modes
+  solvers/        ODE and SDE solvers
+  schedulers/     noise schedules
+  guidance/       guidance modes
+  postprocess/    post-VAE audio processing
+  docs/           user manuals for the plugins shipped here
 ```
 
-## How It Works
-
-1. Place `.lua` files in the appropriate subdirectory
-2. Restart the engine (or the app)
-3. Your plugin appears in the UI dropdown automatically
-
-The engine scans `engine/plugins/` (built-in) first, then this `plugins/` directory.
-Duplicate names are skipped with a console warning.
-
-## Writing a Plugin
-
-Every plugin is a single `.lua` file that returns a table with metadata and a `step()` function.
-
-### Solver Example
-
-```lua
-return {
-  name    = "my_solver",
-  display = "My Custom Solver",
-  type    = "solver",
-  nfe     = 1,
-  accent  = "pink",
-
-  -- Optional user-facing parameters
-  params = {
-    { key = "strength", type = "slider", label = "Strength",
-      default = 0.5, min = 0, max = 1, step = 0.01 },
-  },
-
-  step = function(x, v, t, t_next, dt, params)
-    -- x: current latent (FloatArray)
-    -- v: velocity prediction (FloatArray)
-    -- t, t_next, dt: timestep scalars
-    -- params: table of user values { strength = "0.5", ... }
-    for i = 0, x:size() - 1 do
-      x:set(i, x:get(i) + dt * v:get(i))
-    end
-  end,
-}
-```
-
-### Scheduler Example
-
-```lua
-return {
-  name    = "my_schedule",
-  display = "My Schedule",
-  type    = "scheduler",
-
-  schedule = function(n_steps, params)
-    -- Return a table of n_steps+1 descending floats from 1.0 to 0.0
-    local ts = {}
-    for i = 0, n_steps do
-      ts[i + 1] = 1.0 - i / n_steps
-    end
-    return ts
-  end,
-}
-```
-
-### Guidance Example
-
-```lua
-return {
-  name    = "my_guidance",
-  display = "My Guidance",
-  type    = "guidance",
-
-  guide = function(cond, uncond, scale, t, params)
-    -- cond/uncond: FloatArray (conditional/unconditional predictions)
-    -- scale: guidance scale (number)
-    -- t: current timestep (0→1)
-    -- Return guided prediction in cond (modified in-place)
-    for i = 0, cond:size() - 1 do
-      local c = cond:get(i)
-      local u = uncond:get(i)
-      cond:set(i, u + scale * (c - u))
-    end
-  end,
-}
-```
+How to write one: [docs/dev/plugins-authoring.md](../docs/dev/plugins-authoring.md) has the
+API (`solver = {...}` metadata table plus a global `step()`, the `apg()` bridge, `post_step()`,
+the parameter schema, the sandbox). The list of every plugin the app currently ships, built in
+and community, is generated into [docs/user/plugins.md](../docs/user/plugins.md).
 
 ## Full-Loop Solvers
 
@@ -161,22 +87,14 @@ end
 > **Note:** `on_step()` applies engine corrections (DCW, repaint, guidance
 > post-step) automatically. You don't need to handle these yourself.
 
-## Parameter Types
 
-| Type     | Fields                                           |
-|----------|--------------------------------------------------|
-| `slider` | `key`, `label`, `default`, `min`, `max`, `step`  |
-| `select` | `key`, `label`, `default`, `options`              |
-| `toggle` | `key`, `label`, `default`                        |
-| `text`   | `key`, `label`, `default`, `hint`                |
+## Sandbox
 
-## Safety
+Plugins run in a restricted Lua environment: no `os`, `io`, `debug`, `dofile` or `loadfile`.
+`math`, `string`, `table` and `require` (for companion data files in the same folder) are
+available, along with the `FloatArray` API for zero-copy access to the latent buffers.
 
-Plugins run in a sandboxed Lua environment:
-- ❌ No `os`, `io`, `debug`, `dofile`, `loadfile`
-- ✅ `math`, `string`, `table`, `require` (for companion data files)
-- ✅ Full `FloatArray` API for zero-copy memory access
+## Sharing
 
-## Sharing Plugins
-
-Share your `.lua` files with other HOT-Step users! Just drop them in the right folder.
+A plugin is a single `.lua` file. Share it as is; the recipient drops it in the matching
+subfolder here.

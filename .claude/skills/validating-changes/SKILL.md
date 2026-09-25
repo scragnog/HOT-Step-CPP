@@ -287,6 +287,28 @@ What it CANNOT check, so do it by hand:
   pushing anything to a public repo, and credit the original author in the model
   card if the weights are not ours.
 
+## Tier 7 — Documentation (does the owning page say what the code now does?)
+
+Bar: `node tools/docs/check-docs.mjs` exits 0, and the page that owns the changed
+area describes the new behaviour.
+
+Applies to any change a user or developer can see. The ownership table in
+`AGENTS.md` ("Documentation is part of the change") names the page per source area.
+Routes, plugins and the model registry feed generated tables, so those need
+`node tools/docs/build-docs.mjs` rather than a hand edit. The generated blocks in
+`server/src/data/assistant-knowledge.md` come from `docs/user/`, so a user-facing
+page change also refreshes what the in-app assistant knows (picked up on the next
+server start). Template and rules: `docs/dev/docs-contributing.md`.
+
+```powershell
+node tools/docs/build-docs.mjs
+node tools/docs/check-docs.mjs
+```
+
+The checker fails on a UI folder with no page, a stale generated table, a broken
+relative link, an unindexed skill, or a studio page `FEATURES.md` does not link to.
+It also runs inside `check-release-prereqs.mjs` and in CI (`docs.yml`).
+
 ## Key files
 
 | Path | Role |
@@ -352,8 +374,8 @@ What it CANNOT check, so do it by hand:
   log anatomy, all generate endpoints.
 - `CLAUDE.md` (repo root) — orientation map, build/git rules.
 - `engine/docs/ARCHITECTURE.md` — engine internals, request JSON, generation modes.
-- `docs/PLUGINS.md` — Lua plugin authoring (plugins hot-load, no rebuild).
-- `docs/RELEASING.md` — release process (any pushed `v*` tag triggers a full
+- `docs/dev/plugins-authoring.md` — Lua plugin authoring (plugins hot-load, no rebuild).
+- `docs/dev/releasing.md` — release process (any pushed `v*` tag triggers a full
   multi-platform CI build — never push casual `v*` tags).
 - `docs/plans/` — internal design/investigation docs. **Gitignored, local-only —
   may be absent on a fresh clone.**

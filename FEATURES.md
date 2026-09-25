@@ -1,465 +1,389 @@
-# HOT-Step CPP — Features
+# Features
 
-Everything HOT-Step CPP adds on top of the base [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) engine.
+HOT-Step CPP is a desktop app for local AI music generation. It started as a fork of [acestep.cpp](https://github.com/ServeurpersoCom/acestep.cpp) and now runs three music models, which the app calls backends: ACE-Step 1.5, MiniMax-Music3 and YuE2. All three run natively in one C++/GGML engine. Generation, training, stem separation, captioning and transcription all happen on your own machine; the only network calls are model downloads, Genius lyric lookups and any external LLM provider you choose to configure.
 
-Two music models run natively in the engine, switchable from the toolbar: **ACE-Step 1.5** and **MiniMax-Music3**. Most of what follows applies to both; the MiniMax-Music3 section covers what is specific to it.
+This page is the catalogue: one line per feature, grouped in sidebar order. Each group links to the page that explains how to use it. The full doc index is in [docs/README.md](docs/README.md).
 
----
+## Backends
 
-## MiniMax-Music3 backend
+Pick the backend from a button in the global bar. The choice survives a restart, switching frees the outgoing backend's VRAM, controls a backend cannot use are hidden, and studios it cannot run point you back to ACE-Step 1.5. Details: [Backends](docs/user/backends.md), [Models](docs/user/models.md), [Getting higher quality output](docs/user/quality.md).
 
-A native C++/GGML port of [MiniMax-Music3](https://huggingface.co/MiniMaxAI/MiniMax-Music3), to our knowledge the first implementation outside Python. Every stage runs in the engine and was checked against the reference before shipping.
+### ACE-Step 1.5
 
-| Feature | Description |
-|---------|-------------|
-| **Full native pipeline** | 8B planner LM, flow-matching DiT, RVQ depth decoder, condition encoder and vocoder, all in C++/GGML. No Python at generation time. |
-| **Play while rendering** | Finished windows stream as they land, so playback starts while later windows are still being planned. First audio in roughly ten seconds on a warm model. A streaming render gets a grid card, play bar and live waveform like any other track. |
-| **Sliding pipeline** | Windows render while the planner is still planning ahead of them, rather than waiting for the whole plan. |
-| **Variations per render** | N takes come out of one batched pass through the planner instead of N sequential renders. Each take is its own queue entry, card and stream. |
-| **LRC lyric timestamps** | Timings are read from the model's own attention, so there is no Whisper pass and no second decode. Capture costs about a tenth of a second. |
-| **Caption Composer** | Plain English description in, MM3 Structured Caption out, with no language model in the path and nothing sent anywhere. |
-| **Split model format** | One GGUF per pipeline component, each selectable at its own quantisation. Mix a high-precision planner with a compact DiT, and swap one without reloading the other. |
-| **Importance-matrix quants** | Every planner quant below Q8 is built against an importance matrix measured from the full-precision model. Q2_K goes from unusable to close to Q8. Sizes run from 7.05 GB (Q6_K) down to 2.75 GB (IQ2_XXS), against 17.2 GB at f16. |
-| **LM and DiT adapters** | LoRA and LoKr on both, applied at runtime with live per-group strength dials, or merged into the weights for zero per-step cost. MM3 planner merge mode prefers GPU merging, with a CPU-assisted toggle in the LM adapters dropdown and automatic fallback for unsupported GPU formats. The DiT trainer and both LM trainers (ACE-Step and MiniMax-Music3) share DoRA, rsLoRA, LoRA+, HiRA, LoHa, PiSSA and HRA parameterizations; both LM trainers add learned artist tokens and a trainable KV prefix, stored in the same adapter file as the LoRA and applied automatically at generation on either backend. None of the extra parameterizations has beaten plain LoRA by ear yet. |
-| **AR plan cache** | Changing only flow-stage settings replays the cached plan instead of re-running the planner. Survives a restart, and refuses to load against a different model. |
-| **Guidance-distilled composers** | Depth-pruned, guidance-distilled planner LMs load and run, including single-row operation when the checkpoint bakes guidance in at CFG 1.0. |
-| **Low-step compensation** | The noise schedule adapts automatically below 30 steps, so short renders stay full-bodied instead of going thin. Minimum steps dropped from 8 to 2. |
-| **Shared tooling** | The Lua solver plugins, StableStep, VST effects and mastering all run on MM3 output. |
+| Feature | What it does |
+|---|---|
+| Three-stage pipeline | Planner LM (0.6B, 1.7B or 4B), DiT (Standard or XL) and VAE, producing 48 kHz stereo. |
+| Explicit music fields | BPM, key, time signature and a duration target from 10 to 600 seconds. |
+| Every studio | The only backend with covers, repaint, stem generation, Song Builder and STORM streaming. |
+| Full plugin support | Every Lua solver, scheduler, guidance mode and postprocess plugin. |
+| DiT and planner adapters | LoRA and LoKr on the DiT with merge, runtime and low-rank modes, plus a planner LM adapter. |
+| Batch size | Several takes from one request, each saved as its own song. |
+| LRC from the DiT | Lyric timestamps read from the DiT's own attention during the render. |
+| ScragVAE and PP-VAE | An alternative fine-tuned VAE decoder, and an optional second autoencoder pass that cleans up fizz. |
 
----
+### MiniMax-Music3
 
-## Training Studio
+| Feature | What it does |
+|---|---|
+| Native port | 8B planner LM, depth decoder, condition encoder, flow-matching DiT and vocoder, all in C++/GGML, producing 44.1 kHz stereo. |
+| Split model format | Five GGUFs, each selectable at its own quantisation, so a high-precision planner can pair with a compact DiT. |
+| Importance-matrix quants | Planner quants below Q8 are built against an importance matrix measured from the full-precision model. |
+| Structured Caption | Global Metadata, Vocal Details and Arrangement sections, with tempo and key in the prose. Compose Caption builds one from a plain description with no AI model. |
+| Natural endings | The planner decides where the song stops (ceiling 300 s), planning several candidates and keeping the first to end. |
+| Variations Per Render | One to four different songs from one prompt in a single planner pass, each its own queue entry. |
+| Play While Rendering | Playback starts a few seconds in while later windows are still rendering. The full file saves as usual. |
+| Plan cache | Changing only flow-stage settings replays the saved plan instead of planning again. |
+| Low-step compensation | Below 30 flow steps the schedule reshapes so short renders keep their low end and stereo image. |
+| Planner adapters | LoRA adapters with Strength, Attention, MLP and depth-thirds dials, in runtime or merge mode. |
+| LRC from the planner | Line-level lyric timestamps read from the planner's attention. |
+| TensorRT renderer | Optional TensorRT flow DiT that refits weights from the selected GGUF. |
+| Opt-in sampler plugins | The Lua solvers, schedulers and guidance modes can drive the flow DiT, behind an experimental toggle. |
+| Guidance-distilled planners | Depth-pruned, guidance-distilled planner checkpoints load and run. |
 
-Fine-tunes style adapters for all three models on your own GPU, with no Python and no external tools.
+### YuE2
 
-| Feature | Description |
-|---------|-------------|
-| **Dataset creation** | Point it at a folder of songs. Local BPM/key analysis via Essentia, lyrics from Genius, captions from a captioning model that runs on your machine. Album and artist read from the audio tags when labels are absent. |
-| **Quantized-base training** | Training against a K-quant or MXFP4 base takes the VRAM floor from 31.4 GB to roughly 10 GB, which is what makes MM3 adapter training possible below a 32 GB card. |
-| **Full-song DiT training crops** | A custom flash-attention forward and backward (TF32 tensor cores, bitwise-deterministic) makes attention memory linear in sequence length, so ACE-Step DiT adapters train on whole tracks instead of ~50 s windows — on a 32 GB card the auto-fit picks crops around 150 s at full depth, and it is faster per step than the exact graph. On by default; the exact graph stays one checkbox away. |
-| **Flash-attention LM training** | The same fused attention op, ported to both planner LM trainers. On ACE-Step's, the causal mask skips roughly half its compute for free, raising the longest song a 0.6B/1.7B adapter trains on without truncation and beating the shipped per-head-block path on the 4B. On MiniMax-Music3's, it turns a quadratic-in-crop-length VRAM wall into a linear one — measured usable crop ceiling goes from ~4,300 frames to a whole album's longest track (~11,000+ frames) on a 32 GB card. Off by default on both; the exact graph is what every shipped adapter has trained on so far. |
-| **ACE-Step adapters** | Planner LM LoRA (0.6B/1.7B/4B) and DiT LoRA. |
-| **MiniMax-Music3 adapters** | Planner LM LoRA and LoKr, and flow-DiT LoRA, trained end to end in-engine from audio through RVQ codes. |
-| **YuE2 adapters** | A LoRA on each half of the YuE2 LM (AR composer and NAR flow stage), trained either by the legacy seven-stage chain or by **Joint Training**, which trains a fused AR + NAR adapter in one run. Joint training requires a CUDA build. |
-| **YuE2 joint trainer options** | Optimizer choice (Prodigy by default, plus AdamW and Muon), LoRA rank and alpha, stop on a step count or on a target loss (step count stays the default), named presets stored in the browser, and a Perform all stages button that runs the preparation stages not already done, then starts training from the on-screen settings. |
-| **Checkpoint previews** | Renders an audio preview at every checkpoint, so an adapter can be judged mid-run rather than after it. |
-| **Objective evaluation** | Calibration and evaluation passes score adapters, with the score shown in the adapter picker, so the best checkpoint is identifiable rather than assumed to be the last. |
-| **Pause, resume, survive** | Runs pause and resume, batch pipelines are restart-proof and resumable from their record, and a saved plan refuses to load against the wrong model. |
-| **Audition mode** | Hear what the planner learned with zero DiT influence, A/B against the base, with the dataset's own metadata pinned so the comparison is fair. |
-| **Small adapter files** | A HOT-PiZZA adapter ships as 0.7 GB instead of 2.8: the half of every PiSSA adapter that is the base model's own singular directions is downloaded once (the residual file in the model registry) and every adapter carries only what it learned. Finished runs drop their 4 GB optimizer state unless asked to keep it. |
-| **Validated defaults** | MM3 adapter defaults are the recipe that ended songs naturally with full likeness by ear: per-track Structured Captions, HOT-PiZZA, an 82-second frozen history in front of every crop, crops anchored where they truly sit in the song, 500 steps. Faster and more thorough presets keep the same geometry. |
-| **Natural endings** | MiniMax-Music3 plans candidates in one batch. For one requested song, it stops at the first candidate to reach EOS and renders that song. Explicit variations retain all candidates that end. If none end before the ceiling, it retries with fresh seeds. On by default in the Generation dropdown. |
-| **Caption source** | In Lyric Studio and Create, an MM3 render's caption can come from the trained dataset itself: the source track nearest in tempo (default), a chosen track, or the song's own caption. A dataset caption with new lyrics renders as a new song in the band's style. |
-| **Target-loss stopping** | Stop on a target loss measured over whole passes rather than a step count, and continue a run that already stopped. |
+| Feature | What it does |
+|---|---|
+| Native port | AR composer and NAR renderer halves plus a VAE decoder, in C++/GGML, producing 48 kHz stereo. |
+| Freeform prompt | A plain style sentence plus lyrics. BPM and key go in the sentence; language comes from the lyrics. |
+| Model-ended songs | The composer decides the length, up to six minutes. |
+| Chain of Thought | Full lead sheet (default), Melody only, or Off. Off skips the lead sheet but runs guidance, so it is the slowest mode. |
+| Lead sheet preview | Plans the score only and shows it as staff notation with playback and a health verdict; continue, re-plan or cancel. You can also paste your own ABC lead sheet. |
+| Batch Size and Noise Variations | Several songs in one pass, or the same composed song rendered from different noise. |
+| Own NAR sampler | Midpoint or Wasserstein Flow solvers with Uniform or HT V3 schedules. |
+| Two adapter slots | Separate AR (composer) and NAR (renderer) adapters, merged into the loaded model with Apply. |
+| Companion decoder | A small decoder adapter that ships in every YuE2 pack is applied to every GGUF generation. |
+| Forced-alignment LRC | Lyric timestamps from an aligner run after the render. |
+| Quant ladder | Imatrix-guided packs from Q2_K up to BF16, plus an INT8 ConvRot checkpoint for Ampere or newer NVIDIA cards. |
 
----
+## Generation
 
-## Local audio captioning
+The global bar holds every setting that applies to a render, whichever studio starts it. Details: [Generation](docs/user/generation.md), [Adapters](docs/user/adapters.md), [Plugins](docs/user/plugins.md).
 
-[MOSS-Music-8B-Instruct](https://huggingface.co/OpenMOSS-Team/MOSS-Music-8B-Instruct) ported to GGML and shipped as the `ace-caption` CLI. Audio in, caption out, entirely on your machine.
+| Feature | What it does |
+|---|---|
+| Global parameter bar | Models, backend, adapters, generation, LM, post-processing, profiles and VRAM in pinnable sections with one-line summaries. |
+| Plugin pickers | Solver, schedule and guidance mode come from Lua plugins, each with its own settings panel. |
+| Built-in schedules | Beta (Custom), Power and Composite (2-Stage), plus an Auto shift derived from duration and step count. |
+| Performance trades | CFG Cutoff, LM CFG Cutoff and Step Cache for speed at some cost in adherence. |
+| Timbre reference | A reference track fed to the DiT to guide tone and texture. |
+| DCW correction | Wavelet-domain correction during sampling, low band, high band, both, or latent space. |
+| Auto-trim | Renders past the requested length, cuts at a natural ending, and fades out only if none is found. |
+| Latent post-processing | Latent shift, latent rescale and custom timestep lists. |
+| Denoiser and LSS | An in-engine spectral gate after decode and a latent spectral suppressor before it. |
+| Seed Manager | Save, star, search and reload seeds; the seed actually used is stored with each song. |
+| LM seed lock | The LM seed follows the DiT seed, or runs independently with its own seed manager. |
+| LM controls | Chain-of-thought caption, temperature, CFG, top-k, top-p, negative prompt, and Presence, Frequency or DRY repetition penalties. |
+| LM codes strength | How many DiT steps the LM's codes condition. Repeat renders with the same seed can reuse cached codes. |
+| Profiles | Save, apply, rename, export and import named snapshots of every bar setting, optionally with caption and lyrics. |
+| VRAM indicator | GPU memory in use; hover to see loaded models and unload them. |
+| Job queue | One queue for every studio, with retry once on failure, stall detection, a generation timeout, and Resume or Discard after a restart. |
 
-| Feature | Description |
-|---------|-------------|
-| **Native GGML port** | Whisper log-mel frontend, audio tower encoder and LM decode, all in C++. Parity against the reference at correlation 0.9999995 or better, with argmax exact. |
-| **One encode, every format** | A single encode emits all caption formats, rather than re-encoding per format. |
-| **Dataset mode** | `--src-list` loads the model once per dataset instead of once per track. |
-| **Hybrid captions** | What the model hears paired with what Essentia measures, so tempo and key come from analysis rather than the model's guess. |
-| **Both caption styles** | ACE-Step's reference caption style and MM3's Structured Caption format. |
+### Post-processing chain
 
----
+Everything runs on a copy of the render, in a fixed order, under one master switch. The original is kept, and the chain can run later from the Library.
 
-## C++ Inference Engine
+| Feature | What it does |
+|---|---|
+| StableStep | Re-renders the instrumental through Stable Audio 3 and remixes the untouched vocal at its original balance. Optional adapters, crossover or mix blending, and its own sampler. |
+| PP-VAE re-encode | Second autoencoder pass against fizz, with an original-blend slider and an ONNX/TensorRT path. |
+| Spectral Lifter | Denoise, noise floor, high-frequency extension, transient boost and shimmer reduction. |
+| Vocal Naturalizer | Experimental five-stage DSP pass against robotic vocal artefacts, skipped on instrumentals. |
+| VST3 chain | Your own VST3 plugins, reorderable, with native editor windows, presets, live monitoring and a pre-chain gain offset. |
+| Mastering | Matches level, EQ and dynamics to a reference track, which can double as the timbre reference. |
+| Final normalizer | LUFS targets for streaming, broadcast or club playback with a look-ahead peak limiter. |
+| Whisper lyrics | Word-level lyric transcription, guided by your lyrics, optionally on an isolated vocal. |
+| Cover art | 1024 x 1024 cover with FLUX.2-klein-4B from the song's subject or lyrics, after or alongside the chain. |
+| Quality evaluator | Spectral scoring of the unprocessed or processed audio, shown as a badge in the Library. |
+| Tiled decoder | A postprocess plugin can replace the built-in VAE decode. |
 
-Built on acestep.cpp (GGML/CUDA), with extensive modifications to the sampling, scheduling, and guidance systems:
+## Auto-Gen
 
-### Lua Plugin Architecture
+Genre-first song creation that fills in everything else. Details: [Auto-Gen](docs/user/studios/insta-gen.md)
 
-All solvers, schedulers, guidance modes, and postprocess plugins are implemented as hot-loadable Lua plugins. Drop a `.lua` file into the appropriate `engine/plugins/` subdirectory and it appears in the UI at next launch — no C++ rebuild required. Each plugin can declare its own user-facing parameters (sliders, toggles, dropdowns) via a schema table, which the UI renders dynamically. Solvers can declare `owns_loop=true` to take full control of the denoising loop for adaptive solvers like DOPRI5.
+| Feature | What it does |
+|---|---|
+| Genre picker | Searchable, categorised genre taxonomy, with a Random button that picks two to four. |
+| Vocal modes | Instrumental, Lyrics from the built-in LM, or Lyrics + AI from an external LLM and your subject, or a random one. |
+| Custom system prompt | Edit, save and reset the system prompt sent to the external LLM. |
+| Caption rewrite toggle | Let the built-in LM enrich the caption, or send it as typed. |
+| Lyric preview | Review and edit the lyrics, caption and metadata before committing. |
+| Refine in Custom-Gen | Sends the previewed lyrics, caption and metadata to Custom-Gen for hand tuning. |
+| Cover art override | Change the cover art subject for one song. |
+| Own queue | Auto-Gen jobs run one at a time with a filtered generations list beside the panel. |
 
-The engine provides a native C++ bridge for performance-critical operations (APG momentum smoothing, perpendicular projection, norm thresholding) that Lua plugins can call via the `apg()` function. Advanced plugins can also declare a `post_step()` hook that receives model evaluation callbacks for techniques requiring extra forward passes at arbitrary latent positions. See the **[Plugin Authoring Guide](PLUGINS.md)** for the full API reference.
+## Custom-Gen
 
-#### Solvers (17)
+Full manual control of caption, lyrics and music parameters. Details: [Custom-Gen](docs/user/studios/create.md)
 
-ODE/SDE solvers for the flow matching sampling loop:
+| Feature | What it does |
+|---|---|
+| Style and lyrics | Caption, section-tagged lyrics, negative prompt, instrumental toggle and song info. |
+| Wildcards | `{a\|b\|c}` syntax in caption and lyrics, expanded in place or at generate time from the seed. |
+| LoRA trigger box | Prepends a trigger word for adapters that do not record one. |
+| Beat I/O | Asks for a clean percussive intro and outro of 1 to 8 bars for DJ mixing. |
+| Generate with AI | A configured LLM writes caption, lyrics, title and metadata from a genre and subject. |
+| Compose Caption | MiniMax-Music3 Structured Caption from a plain description, with genre routing and warnings. |
+| Caption source | On MiniMax-Music3 and YuE2, borrow a training dataset's caption: nearest tempo, a named track, or your own. |
+| Latent import | Continue from a saved `.latent` file, with its embedded metadata. |
+| Backend-aware fields | BPM, duration, key, time signature, vocal gender and language show only where the active backend uses them. |
+| YuE2 lead sheet preview | Opens before render when "Preview the score first" is on. |
 
-| Plugin | Description |
-|--------|-------------|
-| **Euler** | 1st-order Euler method (1 NFE) |
-| **Heun** | 2nd-order Heun's method (2 NFE) |
-| **RK4** | Classic 4th-order Runge-Kutta (4 NFE) |
-| **RK5** | 5th-order Runge-Kutta (6 NFE) |
-| **GL2s** | Gauss-Legendre 2-stage implicit Runge-Kutta (2 NFE) |
-| **RF-Solver** | 2nd-order rectified flow solver (2 NFE) |
-| **DPM++ 2M** | DPM-Solver++ multistep 2nd-order (1 NFE) |
-| **DPM++ 2M Adaptive** | Adaptive step-size variant of DPM++ 2M |
-| **DPM++ 3M** | DPM-Solver++ multistep 3rd-order (1 NFE) |
-| **UniPC** | Unified predictor-corrector (1 NFE) |
-| **UniPC-P** | UniPC with p-corrector (1 NFE) |
-| **JKASS Quality** | Multi-evaluation adaptive solver (4 NFE) |
-| **JKASS Fast** | Single-evaluation JKASS variant (1 NFE) |
-| **AFLOPS / AFLOPS-2** | Adaptive flow ODE solver with error estimation |
-| **DOPRI5 / DOP853** | Dormand-Prince adaptive solvers (5th/8th order) |
-| **SDE** | Stochastic differential equation solver with Philox RNG |
-| **STORK-2 / STORK-4** | Stochastic Taylor Runge-Kutta solvers |
+## Library, player and playlists
 
-#### Schedulers (9)
+Every render and import lands here. Details: [Library](docs/user/studios/library.md)
 
-Noise schedule curves for the denoising trajectory:
-
-| Plugin | Description |
-|--------|-------------|
-| **Linear** | Uniform timestep spacing |
-| **Cosine** | Cosine-annealed schedule |
-| **Power** | Polynomial schedule with configurable exponent |
-| **SGM Uniform** | Score-based generative model uniform schedule |
-| **DDIM Uniform** | DDIM-style uniform schedule |
-| **Linear-Quadratic** | Linear start transitioning to quadratic |
-| **Beta (5,7)** | Beta distribution schedule |
-| **Bong Tangent** | Tangent-based custom schedule |
-| **Beta Math** | Generalised beta distribution with configurable α/β |
-
-#### Guidance Modes (7)
-
-Classifier-free guidance strategies, all routed through the native APG bridge:
-
-| Plugin | Description |
-|--------|-------------|
-| **APG** | Analytical Perpendicular Guidance — momentum smoothing, perpendicular projection, norm thresholding |
-| **Dynamic CFG** | Adaptive guidance scale that varies across timesteps — high early for structure, low late for detail |
-| **CFG++** | Manifold-constrained guidance for few-step models |
-| **Rescaled CFG** | Standard-deviation-based rescaling to prevent oversaturation |
-| **CFG-Zero⋆** | Zero-init guidance — zeroes early ODE steps where CFG predictions are counterproductive (Fan et al. 2025) |
-| **SMC-CFG** | Sliding Mode Control guidance — control-theoretic correction for stability at high scales (Han et al. 2025) |
-| **CFG-MP** | Manifold Projection — iterative post-step projection using extra model evaluations to reduce the prediction gap (Su et al. 2025). Uses the `post_step()` hook for model callbacks |
-
-#### Postprocess Plugins
-
-Lua postprocess plugins that replace or augment the built-in VAE tiled decoder. Each plugin can declare its own UI parameters.
-
-| Plugin | Description |
-|--------|-------------|
-| **MD Audio Tiled Core** | Advanced tiled VAE decode with OLA crossfading, dual-pass merge, and integrated DSP chain. By [MDMAchine](https://github.com/MDMAchine). |
-
-### Other Engine Features
-
-| Feature | Description |
-|---------|-------------|
-| **Composite 2-Stage Scheduler** | Blend two scheduler curves across the denoising trajectory for fine-grained noise control. |
-| **Auto-Shift** | Adaptive noise shift scaling that adjusts based on track duration and step count. |
-| **DCW Sampling** | Differential Correction in Wavelet domain — an alternative sampling technique calibrated for the GGML engine. |
-| **Sideband Parameter Channel** | Extension layer for passing HOT-Step-specific parameters without modifying upstream function signatures, keeping the acestep.cpp sync path clean. |
-| **Latent Post-Processing** | Latent shift, latent rescale, and custom timestep scheduling — expose the latent space for experimentation. |
-| **LM Seed Locking** | Ties the LM seed to the DiT seed — locking the seed locks both, randomising randomises both. |
-| **Upstream Sync Infrastructure** | Marker-based system for tracking acestep.cpp divergence and cleanly merging upstream changes. |
-| **Safetensors Model Support** | Dual-format model loading — HuggingFace safetensors directories work alongside GGUF files for DiT, LM, Text Encoder, VAE, and Cond Encoder. Auto-detected by path (directory = safetensors, `.gguf` = GGUF). BF16 safetensors produce bit-perfect output vs BF16 GGUF. Format-agnostic `WeightSource` abstraction enables adapters to work with both base model formats. |
-| **Cover Noise Method** | Configurable noise injection method for cover generation with rescale implementation. |
-
----
-
-## LoRA / Adapter System
-
-| Feature | Description |
-|---------|-------------|
-| **Per-Group Adapter Scales** | Independent scale control for self_attn, cross_attn, mlp, and cond_embed weight groups. |
-| **K-Quant Adapter Support** | Custom CUDA copy kernels for GPU-accelerated merge of Q4_K_M, Q5_K_M, and Q6_K quantised adapters. |
-| **Threaded CPU Dequant** | Multi-threaded CPU fallback with AVX512 fast-path for K-quant adapter merge when GPU copy isn't available. |
-| **Runtime LoRA Mode** | Apply LoRA deltas in the forward pass graph at inference time, instead of permanently merging weights. Switchable per-generation. |
-| **Adapter Browser** | File browser modal with scan endpoints, trigger word injection, and support for absolute paths outside the registry. |
-| **Adapter Scale Override Presets** | Predefined scale profiles (e.g. "vocals up", "instruments up") selectable from the sidebar. |
-| **Merge Model Detection** | Correctly identifies SFT-turbo blend models and skips inappropriate guidance clamping that would degrade output. |
-| **Safetensors Base Model Support** | Adapter merge and runtime LoRA work with both GGUF and safetensors base models via the `WeightSource` abstraction — no format-specific code paths. |
-
----
-
-## Audio Processing Pipeline
-
-| Feature | Description |
-|---------|-------------|
-| **Lossless WAV Pipeline** | Engine outputs WAV16; 32-bit float WAV used throughout the processing chain to preserve dynamic range. |
-| **Matchering Mastering Engine** | Integrated loudness, EQ, and dynamics matching to a user-supplied reference track. |
-| **Mastered / Unmastered Toggle** | Instant A/B comparison via dual WaveSurfer instances with synced playback position. |
-| **Spectral Denoiser** | Wiener-filter spectral subtraction for post-generation artifact removal (evolved from initial spectral gating approach). |
-| **Profile-Based Denoiser** | Learns a noise profile from a reference sample for targeted, surgical artifact removal. |
-| **Spectral Lifter** | Post-processing pipeline with tunable parameters for spectral shaping. Ported to native C++ (originally a Python subprocess). |
-| **VST3 Host** | Scans, loads, and runs VST3 plugins for offline audio processing — 40+ plugins detected from standard install paths. |
-| **VST3 Chain in Pipeline** | Wire a VST3 processing chain directly into the generation output — mastering, EQ, compression, etc. from your existing plugin collection. |
-| **Real-Time Monitor (WASAPI)** | Low-latency audio preview with seek and transport controls for auditioning output before committing. |
-| **Duration Buffer + Auto-Trim** | Generates slightly longer than requested, then detects natural song endings and trims cleanly — no more abrupt cuts. |
-| **Configurable Fade-Out** | Slider-controlled fade duration; automatically skipped when auto-trim detects a clean ending. |
-| **Download with Format Conversion** | Export as WAV, MP3, or FLAC with configurable defaults in Settings. |
-| **48kHz Native Processing** | Mastering pipeline operates at the native 48kHz sample rate — no lossy resample round-trip. |
-| **PP-VAE Neural Audio Polish** | Post-processing VAE that runs generated audio through an encode→decode round-trip to smooth spectral artifacts and improve tonal coherence. Optional wet/dry blend slider. F32 recommended for best quality. |
-| **ScragVAE Decoder** | Fine-tuned VAE decoder with +38% high-frequency energy and +29dB dynamic range improvement. Drop-in replacement for the standard decoder — selectable at runtime from the Models dropdown. |
-| **AI Cover Art** | Automatic 1024×1024 album cover art generation using FLUX.2-klein-4B via stable-diffusion.cpp. Downloads model + sd-cli binary on first use (~5.2 GB). Toggleable auto-generation after audio creation, plus on-demand "Generate Cover Art" from the song context menu. Prompts built from song subject or lyrics keywords. |
-| **Vocal Naturalizer** ⚠️ | **Experimental.** 5-stage DSP humanization pipeline for AI-generated vocals. Applies vibrato injection, formant randomization, metallic reduction, quantization masking, and transition smoothing directly to the full mix using frequency-band-targeted filters. Runs between Spectral Lifter and VST Chain, automatically skipped on instrumentals. All parameters exposed as sliders in a dedicated accordion. **Note:** This feature is under active development and may subtly degrade audio quality or interfere with downstream VST/mastering processing. A/B test with it disabled to verify results. Ported from [ComfyUI_MusicTools](https://github.com/jeankassio/ComfyUI_MusicTools) (MIT License). |
-| **Audio Quality Evaluator** | Automatic post-generation quality scoring via spectral analysis. Three weighted metrics: **Metallic Sound** (40%, spectral rolloff at 85th percentile), **Word Cuts** (40%, spectral flux discontinuities via z-score analysis), and **Noise/Hiss** (20%, zero-crossing rate). Produces a 0–100% score per track. Selectable target — evaluate unmastered (raw), mastered (post-processed), or both for direct comparison. Scores stored in the song database and displayed as colour-coded badges (green ≥80%, amber 50–79%, red <50%) in Library cards with per-metric hover tooltips. Pure TypeScript implementation using a custom radix-2 Cooley-Tukey FFT — no external DSP dependencies. Ported from [JK-AceStep-Nodes](https://github.com/jeankassio/JK-AceStep-Nodes) (MIT License). |
-
----
-
-## UI / UX
-
-### Create Modes
-
-Two creation modes for different workflows, both sharing the same engine pipeline:
-
-#### Auto-Gen
-
-AI-driven song creation — minimal input, maximum automation:
-
-| Feature | Description |
-|---------|-------------|
-| **Genre-First Workflow** | Select from a curated, searchable genre taxonomy to define the song's style. Random genre selection available. |
-| **Three Lyric Modes** | Instrumental, AI-generated lyrics (with optional subject), or fully automated with random subject selection. |
-| **LLM Lyric Generation** | External LLM writes lyrics, style caption, and title — supports Gemini, LM Studio, OpenAI-compatible providers. |
-| **Preview Mode** | Toggle to review and edit AI-generated lyrics before committing to audio generation. |
-| **Random Subject** | Let the LLM pick the topic — generates a subject, then lyrics for that subject, then a matching title. |
-| **Random Genre** | One-click random genre selection from the full taxonomy. |
-| **Serial Queue** | Jobs run one at a time through an internal queue — queue multiple while one generates. |
-| **Live Progress** | Real-time stage updates (generating lyrics → resolving metadata → submitting → generating audio) with elapsed time. |
-| **Structured LLM Metadata** | AI-generated metadata (BPM, duration, key, time signature) via structured LLM prompts with editable system prompt. Caption rewrite operates independently of LM skip. |
-
-#### Custom-Gen
-
-Full manual control for power users:
-
-| Feature | Description |
-|---------|-------------|
-| **Complete Parameter Control** | Set style caption, lyrics, title, artist, BPM, duration, key signature, and time signature. |
-| **Instrumental Toggle** | Switch between vocal and instrumental modes. |
-| **Queue-Based Generation** | Queue multiple generations with configurable parallel job limits. |
-| **Direct Engine Access** | All global engine settings (solvers, schedulers, guidance, adapters) apply directly. |
-| **Artist-Title Metadata** | Fields for artist name, subject description, and key signature — embedded in generation metadata. |
-
-### General UI
-
-| Feature | Description |
-|---------|-------------|
-| **Full React + Tailwind UI** | Purpose-built dark-themed interface, ported and extended from the Python-based HOT-Step 9000. |
-| **WaveSurfer.js Waveform Player** | Bars-mode waveform visualisation with hover plugin; animated collapse/expand on pause. |
-| **Spectrum Analyzer** | audioMotion-analyzer integration with mirrored bar mode and configurable density. |
-| **Global Parameter Top Bar** | All engine settings extracted into a persistent, colour-coded top bar with collapsible section dropdowns. |
-| **VRAM Indicator** | Real-time GPU memory usage display in the top bar. |
-| **Terminal Panel** | Verbose generation progress streamed via SSE with batched UI updates for performance. |
-| **Generation Queue** | Queue additional generations while one is running; completed/cancelled jobs auto-dismiss after 3 seconds. |
-| **JSON Preset Export / Import** | Save and load complete generation parameter sets as JSON files. |
-| **Global Playlist Sidebar** | Persistent, resizable playlist replacing per-page floating players. |
-| **Inline Song Rename** | Pencil icon on any track for quick title editing. |
-| **Bulk Select & Delete** | Multi-select tracks in the library for batch deletion. |
-| **Human-Readable Model Labels** | Friendly names for GGUF model files with enriched badge summaries showing quantisation and size. |
-| **Toggle Switches** | All boolean controls use styled toggle switches instead of plain checkboxes. |
-| **Persistent UI State** | Accordion states, sidebar collapse, scroll positions, and panel sizes all persist across navigation. |
-| **Per-Track Download Buttons** | Download individual tracks directly from the playlist sidebar. |
-| **A/B Comparison** | Dual-track playback for comparing two generations side by side. Global A/B mini-bar above the player for cross-view comparison with seed-locked comparison support. |
-| **Library View Modes** | Three view modes — Grid (card overlay with cover art), List, and Table. Table mode has resizable columns with drag handles and localStorage persistence. |
-| **Send to Playlist Toggle** | Toggle in the generation queue to auto-send completed tracks to the playlist sidebar. |
-| **Player Stop Button** | Dedicated Stop button to decouple playbar collapse from pause behaviour. |
-| **Model Descriptions** | Rich model descriptions shown in the Models tab dropdowns — each model displays its characteristics, recommended use case, and format badge (GGUF/ST). |
-| **Format Badges** | Custom model dropdowns with visual GGUF/ST format badges to distinguish between quantised GGUF files and native safetensors models. |
-| **Dynamic Plugin Parameters** | Solver, scheduler, guidance, and postprocess plugins can declare custom UI parameters (sliders, toggles, dropdowns) that render dynamically — no hardcoded UI needed. |
-
----
+| Feature | What it does |
+|---|---|
+| Three views | Grid with cover art, list, or table, remembered per browser. |
+| Source filters | Tabs per studio plus Imported, with counts. |
+| Table column picker | Opt-in columns for generation details such as seed, CFG, solver and adapter, with resizable widths. |
+| Multi-select | Bulk download or delete. |
+| Track menu | Post-processing, edit in Custom-Gen, playlist, download, send to Cover Studio, metadata, Export Params (JSON preset), Retranscribe Lyrics, cover art, A/B slots, delete. |
+| Upload into Library | Imports WAV, MP3, FLAC, M4A, MP4, AAC, OGG, Opus, WebM and AIFF, with optional post-processing. |
+| Metadata editor | Title, artist, album, year, genre, BPM, key, comment, lyrics and cover image; some fields are embed-only. |
+| Editable cover-art prompt | Generate or regenerate cover art from a pre-filled, editable prompt. |
+| A/B compare | Pin two tracks, play them against each other, and open a parameter diff. |
+| Song details | Backend chip, per-backend "How it was made" breakdown, prompt and lyrics. |
+| Streaming rows | A MiniMax-Music3 render in progress shows in the list and plays before its file exists. |
+| Tagged downloads | Metadata and cover art embedded in downloaded files, in the format chosen in Settings. |
+| Global player | Transport, repeat modes, spectrum analyzer, disco mode and volume, visible in every view. |
+| Rate and pitch preview | Playback speed from 0.5x to 2x, and a 48k/44.1k toggle that hears a render clocked at 44.1 kHz. |
+| Variant switch | No Adapter, Unmastered and Mastered versions, each with its own download. |
+| Waveform tools | Trim and crop in and out points, section markers and a synced LRC lyrics bar. |
+| Playlist queue | One browser-local play queue with reorder, Play All and Download All. |
 
 ## Lyric Studio
 
-A complete AI-powered lyrics and music generation workspace, powered by the Lireek backend:
+AI-assisted lyric writing from a learned style profile, plus per-album render presets. Details: [Lyric Studio](docs/user/studios/lyric-studio.md)
 
-| Feature | Description |
-|---------|-------------|
-| **Lireek Backend** | Full server-side lyric engine with SQLite database for artists, albums, profiles, and generations. |
-| **LLM Orchestration** | 7 LLM provider integrations (Gemini, LM Studio, OpenAI-compatible, etc.) with real-time SSE streaming. |
-| **Artist Profiles** | Per-artist configuration with adapter presets, reference tracks, style summaries, and computed generation statistics. |
-| **Lyric Profiler** | Statistical analysis engine — contraction rates, rhyme schemes, meter patterns, perspective tracking — computed locally without LLM calls. |
-| **Streaming Generation** | Real-time SSE streaming of lyrics with live UI updates as the LLM writes. |
-| **Audio Generation Queue** | Integrated music generation from lyrics with full parameter parity to Custom-Gen. |
-| **Bulk Operations** | "Fill to N" mode — auto-calculates how many generations each profile needs to reach a target count, with progress badges. |
-| **Send to Custom-Gen** | Transfers artist context, adapter path, reference track, key signature, and all metadata to Custom-Gen in one click. |
-| **Artist Sidebar** | Persistent sidebar with artist list, scroll position memory, and per-artist song counts. |
-| **Album Pages** | Browse by album with header bars, generated songs tab, and inline audio playback. |
-| **Database Migration** | Import tool for migrating from HOT-Step 9000’s `hotstep_lyrics.db` — artists, profiles, and generations. |
-| **Dynamic LLM Model List** | Fetches available models from provider APIs instead of using a hardcoded list. |
-| **Profile Stats Recalculation** | One-click re-run of all local statistical analysis without making any LLM calls. |
-| **LRC Synced Lyrics** | Timestamped lyric display synced to audio playback with seeking support. |
-| **Track Cropping** | Destructive IN/OUT point editing for trimming generated tracks to clean boundaries. |
-| **Subject Field** | Optional subject field for guiding lyric generation — sets the topic without dictating specific content. |
-
----
+| Feature | What it does |
+|---|---|
+| Genius fetch | Pull an artist's or album's lyrics, or add artists, albums and songs by hand. |
+| Style profiles | An LLM profiles themes, tone and structure; rhyme, meter and vocabulary statistics are computed locally without one. |
+| Lyric generation | Streams new songs from a profile, with an optional subject and count, avoiding subjects, keys and titles used before. |
+| Refine | An LLM revises lyrics and title, saved as a linked new generation. |
+| Per-backend captions | ACE-Step/YuE2 caption, MiniMax-Music3 Structured Caption and YuE2 planner caption per song. |
+| Caption source picker | Borrow a caption from the album's captioned training tracks. |
+| Generate Audio | Queue a render through the active backend with the album's preset. |
+| Send to Custom-Gen | Opens Custom-Gen with lyrics, caption, metadata and adapter preset filled in. |
+| Album presets | DiT and planner adapters with group scales and a reference track on ACE-Step; one LM adapter on MiniMax-Music3; AR and NAR adapters on YuE2. |
+| Editable system prompts | Override the generation, metadata, profiler and refinement prompts per provider. |
+| Per-role providers | Separate provider and model for profiling, generation and refinement. |
+| Duration from lyrics | Compute duration from lyrics and BPM instead of the LLM's estimate. |
+| Randomize timbre | Pick a random reference track per render. |
+| Bulk operations | Batch Genius fetches, profile builds, lyric generation with fill-to-target, audio renders and preset assignment. |
+| Agent access | Drive Lyric Studio from Claude Code or Codex through the [MCP server](tools/mcp-lyricstudio/README.md). |
 
 ## Cover Studio
 
-Full-featured cover generation workspace with audio analysis, stem manipulation, and artist-specific generation:
+Re-style an existing recording. Requires the ACE-Step backend. Details: [Cover Studio](docs/user/studios/cover-studio.md)
 
-| Feature | Description |
-|---------|-------------|
-| **Audio Analysis** | Essentia-based extraction of BPM, key, energy, and timbre characteristics from source tracks. |
-| **Source Upload** | Upload and analyse reference audio for style-matched cover generation. Drag-and-drop with format auto-detection. |
-| **BPM Correction** | ÷2 / Detected / ×2 buttons to fix Essentia’s common tempo halving/doubling errors. |
-| **Key Override** | Manual key correction dropdown when Essentia’s detection is wrong — shows both detected and overridden keys. |
-| **Style Description** | Editable caption field for describing the target style. Auto-filled from artist profile when available, freely editable. |
-| **Artist-Optional Generation** | Generate covers using just a style description — no artist or adapter required. |
-| **Pitch Shift** | ±12 semitone slider with real-time key transposition preview (e.g. “+3 st → F Major”). |
-| **Tempo Scale** | 0.5x–2.0x tempo slider with computed BPM preview. |
-| **Structure Fidelity** | Controls how closely the output follows the source’s arrangement and structure. |
-| **Source Timbre** | Controls how much of the original artist’s sonic character is preserved in the output. |
-| **Timbre Reference Conditioning** | Uses the target artist’s reference track as a DiT timbre conditioner to influence sonic character. |
-| **Stem Separation + Recombination** | Advanced mode: split source into stems via SuperSep, configure the stem mix, then generate from the recombined audio. |
-| **Album Adapter Presets** | Per-album adapter presets with bound reference tracks — select an album to auto-load the matching adapter and reference. |
-| **Cover Generation UI** | Full workspace with metadata extraction, artist grid, cover-specific sliders, progress tracking, and recent covers list. |
-| **Persistent State** | All settings, selections, and analysis results persist across navigation and reloads. |
-
----
+| Feature | What it does |
+|---|---|
+| Source upload | MP3, WAV, FLAC, OGG, M4A, Opus or AAC, or send a track from the Library. |
+| Latent import | Use a `.latent` or `.hslat` file and its embedded lyrics, caption, BPM and key. |
+| Essentia analysis | Local BPM and key detection, cached per browser. |
+| BPM and key fixes | Halve, double or type the tempo; override the detected key. |
+| Genius lyrics search | Find the source's lyrics, paste your own, or go instrumental. |
+| Target artist | Fills the style description from an artist profile, or drafts one with an LLM, and loads a matching album adapter preset. |
+| Structure Fidelity | How closely the output follows the source arrangement. |
+| Source Preservation and noise method | How much of the source survives, with Classic or Full Denoise noise methods. |
+| NoFSQ mode | Skips FSQ quantisation for a result closer to the source. |
+| Tempo and pitch | 0.5x to 2x tempo and -12 to +12 semitones, with the target key shown. |
+| Timbre reference | A second reference track for the DiT's timbre conditioning. |
+| Stem mix | Split the source with SuperSep and mute or lower stems before generating. |
+| Serial cover queue | Queue more covers while one renders. |
 
 ## Repaint Studio
 
-Region-based audio regeneration with waveform selection and synchronized lyrics editing:
+Regenerate one region of a track in place. Requires the ACE-Step backend, carries a work-in-progress banner, and does not extend audio past either end. Details: [Repaint Studio](docs/user/studios/repaint-studio.md)
 
-| Feature | Description |
-|---------|-------------|
-| **Waveform Region Selector** | Visual waveform display with click-drag region selection for choosing which section of a track to regenerate. |
-| **LRC Lyrics Editor** | Synchronized lyrics editor showing timestamped lyrics aligned to the selected region. |
-| **Selective Regeneration** | Regenerate only the selected portion of a track while preserving the rest — fix problematic sections without re-generating the entire song. |
-| **WIP Status** | Includes a dismissable notice banner indicating the feature is under active development. |
+| Feature | What it does |
+|---|---|
+| Source picker | Upload a file or pick a song from the Library. |
+| Region selection | Waveform handles, a range slider or exact start and end times, with region playback. |
+| Region lyrics | Line-by-line editor synced to the region when an LRC file exists, plain text otherwise. |
+| Style reuse | Leave the style blank to reuse the source's own caption. |
 
----
+## Stem Separator (Stem Studio)
 
-## Stem Studio
+Split a track into stems, or have the DiT regenerate parts. Details: [Stem Separator](docs/user/studios/stem-studio.md)
 
-Neural audio source separation with a 4-stage ONNX pipeline and interactive stem mixer:
-
-| Feature | Description |
-|---------|-------------|
-| **SuperSep Pipeline** | 4-stage cascaded separation using specialised ONNX models for different instrument groups. |
-| **Stage 1: BS-RoFormer** | Primary 6-stem split (Vocals, Drums, Bass, Guitar, Piano, Other) using Band-Split RoFormer with full-track chunking. |
-| **Stage 2: Mel-Band RoFormer** | Vocal sub-separation into Lead Vocals and Backing Vocals. Full-track processing with late-vocal detection. |
-| **Stage 3: MDX23C** | Drum sub-separation into Kick, Snare, Toms, Hi-Hat, Cymbals, and Other Percussion via STFT-based MDX processing. |
-| **Stage 4: HTDemucs** | Hybrid transformer for “Other” refinement — dual-input model taking both STFT spectrograms and raw waveforms, with dual-output combination. |
-| **4 Separation Levels** | Basic (6 stems), Vocal Split (+ lead/backing), Full (+ drum sub-stems), Maximum (+ other sub-stems). |
-| **Interactive Stem Mixer** | Multi-solo, mute, and per-stem volume sliders with real-time Web Audio playback. |
-| **Chunking + Overlap-Add** | Full-length audio processing with 1-second crossfade windows for seamless chunk boundaries. |
-| **Sequential VRAM Management** | Models loaded and released strictly sequentially — peak GPU usage stays under 3 GB. |
-| **Per-Stage WAV Exports** | All stages generate raw WAVs in `stage-N/` directories for diagnostics, regardless of downstream routing. |
-| **Hidden Intermediate Stems** | Debug stems (e.g. raw Vocals before lead/backing split) saved to disk but filtered from the UI mixer. |
-| **MDX STFT Preprocessing** | Generic engine function for MDX23C and HTDemucs models with stripped STFT layers — handles the [1,4,dim_f,T] tensor layout. |
-| **Source Library Browser** | Pick source audio from the song library with search, source filtering, and mastered/unmastered toggle. |
-| **ZIP Download** | Download all stems as a single ZIP archive, or download individual stems. |
-| **Persistent Source Selection** | Source audio URL and filename persist across sessions via localStorage. |
-
----
+| Feature | What it does |
+|---|---|
+| SuperSep | BS-RoFormer, Mel-Band RoFormer and MDX23C in native GGML. |
+| Separation levels | Basic (6 stems), Vocal Split (8), Full (12, with drum sub-stems), BS-RoFormer 2-stem, and Leap Xe 2-stem with a dedicated model per side. |
+| Extract (DiT) | Regenerates up to 12 instrument tracks from the mix with a base DiT, with an optional style hint and lyrics. |
+| Stem mixer | Synced preview with mute, solo and 0 to 200% volume per stem. |
+| Downloads | One stem as WAV, or every stem as a ZIP. |
+| Recent extractions | Reload or delete past jobs from either mode. |
+| Library picker | Pick a source by studio, in its raw or mastered version. |
 
 ## Stem Builder
 
-Generatively create new instrument stems for source tracks using the DiT engine:
+Generate a new instrument stem over a backing track. Requires the ACE-Step backend and a base DiT. Details: [Stem Builder](docs/user/studios/stem-builder.md)
 
-| Feature | Description |
-|---------|-------------|
-| **Generative Stem Creation** | Select a source audio file and generate new AI-created instrument layers (vocals, drums, bass, guitar, piano) that complement the original track. |
-| **Instrument Layer Selection** | Choose which stems to generate — add missing instruments or create alternative takes for existing ones. |
-| **Per-Stem Preview** | Real-time audio preview of generated stems alongside the source track with per-stem volume controls. |
-| **Source Audio Browser** | Browse source audio from the song library with search and mastered/unmastered toggle. |
-| **Iterative Layering** | Build up arrangements by generating stems one at a time — each new layer is created in the context of the existing mix. |
-| **Full Pipeline Integration** | Generated stems pass through the complete engine pipeline including post-processing, mastering, and format export. |
+| Feature | What it does |
+|---|---|
+| Target track | Pick one of 12 instruments, with an optional style hint. |
+| Raw stems | Output skips mastering, the post-processing chain and adapters, and matches the source length. |
+| Synced preview | Plays source and stem together with separate volume and mute. |
+| Layer stack | Carry the newest layer forward as the next source to build an arrangement. |
+| Recent builds | Upload dropzone plus the last 20 builds from the Library, each reusable as a source. |
 
----
+## Song Builder
+
+Build a song section by section with variant auditioning. Requires the ACE-Step backend. Details: [Song Builder](docs/user/studios/song-builder.md)
+
+| Feature | What it does |
+|---|---|
+| Projects | A saved song with shared caption, BPM, key and time signature. |
+| Section variants | Four candidates per section, streamed in one at a time; audition and pick one. |
+| Append and prepend | Each new section is a repaint extension of the real audio built so far. |
+| Transition blend | Up to 10 seconds of the seam regenerated as a transition. |
+| Clip point | Attach the next section at any point set from the playhead. |
+| Match a section's feel | Experimental bias toward an earlier section's harmonic shape. |
+| Length in bars | Bars or seconds, with an estimate from the lyric line count. |
+| Lyric corrections | Edit a committed section's lyrics to match what was actually sung. |
+| Stop and keep | Cancel remaining variants and pick from the finished ones. |
+| Fast variants | Mastering and heavy post-processing off by default while building. |
+
+## STORM
+
+Live streaming performance with crossfaded slots. Requires the ACE-Step backend. Details: [STORM](docs/user/studios/storm.md)
+
+| Feature | What it does |
+|---|---|
+| Continuous mode | Renders back-to-back slots that crossfade into one endless stream. |
+| Live controls | Change style, lyrics, seed, BPM, guidance, steps and length for the next slot without stopping. |
+| Sticky fields | Pin a style or lyric change so it stays for every following slot. |
+| Lyric advance | Loop, cycle or shuffle through lyric sections as slots play. |
+| AI continuation | An external LLM continues the lyrics every 1, 2 or 4 slots. |
+| Stream sampler overrides | Per-stream solver, scheduler and guider, changeable live. |
+| Buffering | Crossfade length in beats and a maximum look-ahead buffer. |
+| DJ mode | Two decks with a crossfader, Camelot key compatibility, cuts, nudges and beat quantize. |
+| Sequential mode | Queues one song through the normal queue into the Library. |
+| Record | Captures the stream to a `.webm` file in the browser. |
+| Slot timeline | Each played slot shows its seed, detected key and BPM, and settings. |
 
 ## MIDI Studio
 
-Audio-to-MIDI transcription on HOT-Step's **native `ace-midi` engine** — a C++/GGML port of [MuScriptor](https://github.com/muscriptor/muscriptor) (Kyutai & Mirelo — code MIT, model weights CC BY-NC 4.0, non-commercial), validated byte-for-byte against the reference implementation. GPU-accelerated (a 3.5-min track transcribes in ~50 s on an RTX 5090), zero Python.
+Audio-to-MIDI transcription on its own native engine. Weights are CC BY-NC 4.0, and MIDI made here inherits that. Details: [MIDI Studio](docs/user/studios/midi-studio.md)
 
-| Feature | Description |
-|---------|-------------|
-| **Multi-Instrument Transcription** | Convert any library track — or a WAV/MP3 uploaded from your PC — into a multi-track `.mid` file: drums, bass, guitar, keys, and more (34 instrument groups + drums). |
-| **Model Choice + In-App Weight Download** | `small` (103M), `medium` (307M), or `large` (1.4B). The weights are **gated** on Hugging Face: request access via the in-app links (free), save your read token, and download each model with live progress — all inside MIDI Studio. |
-| **Live Event Stream** | The engine streams note events over SSE as it transcribes (chunk progress + notes-so-far in the UI; live playable piano roll planned). |
-| **Piano-Roll Preview** | Built-in SVG piano roll with per-channel instrument coloring and GM family legend, rendered from a native MIDI parser. |
-| **History** | Completed transcriptions persist to `data/midi/` and survive restarts. |
+| Feature | What it does |
+|---|---|
+| Native transcription | `ace-midi`, a C++/GGML port of MuScriptor, on any backend, from a library track or a WAV or MP3. |
+| Multi-instrument output | A `.mid` with separate parts for drums, bass, guitar, keys and the rest. |
+| Model sizes | Small (CPU), medium and large. |
+| Gated weights in-app | Save a Hugging Face token and download weights with live progress. |
+| Live piano roll | Notes appear as chunks complete. |
+| Preview | Plays original and MIDI together with a crossfade and per-instrument mute and solo. |
+| Persistent jobs | Transcriptions survive restarts. |
 
----
+## Training Studio
 
-## StableStep
+Build datasets from your own audio and train adapters on your GPU, for all three backends. Details: [Training Studio](docs/user/studios/training-studio.md), [ACE-Step training](docs/user/training/ace-step.md), [MiniMax-Music3 training](docs/user/training/minimax-music3.md), [YuE2 training](docs/user/training/yue2.md), [Training internals](docs/dev/training-internals.md)
 
-Post-processing refiner that re-renders the instrumental of a generated track through **Stable Audio 3** (SDEdit-style partial re-noising) running natively in the C++ engine — no Python. Replaces autoencoder fizz with real spectral detail while the vocals are separated out and remixed unprocessed. *Powered by Stability AI* (models under the [Stability AI Community License](https://stability.ai/community-license-agreement)).
-
-| Feature | Description |
-|---------|-------------|
-| **SDEdit Instrumental Refine** | The instrumental is encoded into SAME-L latent space, partially re-noised at the chosen strength, and denoised by the SA3 DiT (8-step distilled rectified flow) conditioned on a prompt derived from the track's own caption (vocal descriptors stripped, length appended). |
-| **Vocal-Safe Pipeline** | BS-RoFormer splits vocals (lead + backing) from the mix; the instrumental is derived as the exact complement so no content is lost. The vocal stem is remixed over the refined instrumental with nothing but a sample-rate conversion applied — lyrics and performance are never re-generated. |
-| **Optional Vocal PP-VAE** | Off by default. Re-encodes the vocal stem through the PP-VAE, which smooths fizzy or mechanical AS1.5 vocals at a measured cost: ~2 dB across the midrange rising to ~6 dB above 16 kHz, roughly half the energy above 10 kHz, and input/output coherence below 0.1 above 4 kHz — the top octaves come back resynthesised rather than reproduced. Enable it only when the fizz bothers you more than the loss of air. |
-| **Refine Strength** | 0.10–0.60 slider (default 0.30). Low = cleanup; high = re-interpretation of the instrumentation. |
-| **Dual Engine Backends** | GGML (CUDA / Vulkan / CPU, 4 GGUF files ~5.8 GB — fastest option on NVIDIA in current testing) or ONNX Runtime with TensorRT (NVIDIA, ~12 GB). Auto mode picks whichever is installed. |
-| **In-App Model Download** | Model Manager → StableStep tab, with license acceptance and optional Hugging Face token. Both backend sets from [scragnog/HOT-Step-CPP-StableStep](https://huggingface.co/scragnog/HOT-Step-CPP-StableStep). |
-| **Level Matching** | The refined instrumental is RMS-matched to its pre-processing level and the vocal stem's level is preserved through the sample-rate conversion, so the original vocal/instrumental balance survives the chain. |
+| Feature | What it does |
+|---|---|
+| Dataset wizard | Scan a folder, set a trigger word and language, preview before creating. |
+| Labeling | Essentia BPM and key, Genius lyrics, and captions from local MOSS or a cloud LLM. |
+| Local captioning | MOSS-Music-8B-Instruct in native GGML (`ace-caption`), in ACE-Step or MM3 caption formats. |
+| Review grid | Spreadsheet editing of every track with bulk actions and scoped re-labels. |
+| Dataset build | Writes a Side-Step-compatible `dataset.json` with trigger placement and genre ratio. |
+| Preprocess and codes | Encodes audio for ACE-Step, or RVQ codes for MiniMax-Music3 with an optional cover-laundering pass. |
+| ACE-Step adapters | Planner LM LoRA (0.6B, 1.7B, 4B) and DiT LoRA. |
+| MiniMax-Music3 adapters | Planner LM LoRA trained from RVQ codes. |
+| YuE2 adapters | Five-stage chain with Perform all stages, and Joint Training of the AR and NAR pair with Prodigy, AdamW or Muon. |
+| Quality presets | Fast, Balanced and Thorough presets on the training forms. |
+| Adapter methods | DoRA, rsLoRA, LoRA+, HiRA, LoHa, PiSSA and HRA, plus learned artist tokens and a trainable KV prefix on the LM trainers. |
+| Small PiSSA adapters | The base model's own directions ship once, so each adapter carries only what it learned. |
+| Quantized-base training | Train against a K-quant or MXFP4 base for a much lower VRAM floor. |
+| Flash-attention training | Fused attention that makes memory linear in sequence length; on by default for the DiT, opt-in for the LM trainers. |
+| Target-loss stopping | Stop on a loss target instead of a step count, and continue a stopped run. |
+| Live monitoring | Loss chart, stats and milestone checkpoint badges. |
+| Audition | Same-seed A/B of base and adapter planner, optionally rendered through the DiT. |
+| Adapter scoring | Evaluation passes put an artist-match score in the planner adapter picker. |
+| YuE2 Refine and Review | Push a planner adapter up KL rungs with a preview per rung, then score the ladders by ear. |
+| Batch pipeline | Import multiple folders and run label, build, preprocess and train unattended; YuE2's Train multiple chains its stages over several datasets. |
+| Send to Lyric Studio | Export a dataset's artist and album with its trained adapters as a preset. |
 
 ## AI Assistant
 
-In-app LLM-powered assistant with full context awareness:
+An LLM chat sidebar that sees your current settings. Details: [Assistant](docs/user/studios/assistant.md)
 
-| Feature | Description |
-|---------|-------------|
-| **Streaming Chat Sidebar** | Toggleable chat panel with SSE-streamed responses, markdown rendering, and thinking/response separation. |
-| **Full Settings Awareness** | Every message includes a JSON snapshot of all engine parameters, content fields (lyrics, caption, BPM, duration, key, time signature, language), and active mode. |
-| **Mode-Aware Guidance** | Automatically detects which studio the user is in (Auto-Gen, Custom-Gen, Lyric Studio, Cover Studio, Stem Studio, Stem Builder) and tailors advice to that workflow. |
-| **Actionable Suggestions** | LLM responses can include structured action blocks that the user can preview as diffs and apply individually or in bulk — settings update reactively. |
-| **Content Editing** | Can write, rewrite, or update lyrics, style descriptions, and other content fields directly via action blocks with one-click apply. |
-| **Per-Action Apply** | Each suggested change has its own Apply button — cherry-pick individual settings without accepting the full batch. Applied items show a checkmark and dim out. |
-| **Thinking Separation** | LLM chain-of-thought is separated from the response and displayed in a collapsible "💭 Thought process" block — visible but visually distinct. |
-| **Multi-Provider Support** | Uses the same LLM provider registry as Lyric Studio — supports Gemini, LM Studio, OpenAI-compatible endpoints, etc. Provider and model selection persisted independently. |
-| **Knowledge Base** | Static knowledge base covering all engine parameters, solvers, schedulers, guidance modes, adapters, post-processing, troubleshooting, and lyric formatting rules. |
-| **Markdown Rendering** | Lightweight built-in renderer for headers, bold, italic, inline code, fenced code blocks, lists, and horizontal rules — no external dependencies. |
-
----
-
-## Timbre & Audio Conditioning
-
-| Feature | Description |
-|---------|-------------|
-| **Timbre Reference** | Use a reference track as a DiT timbre conditioner to influence the sonic character of generations. |
-| **FLAC Decoding** | Native dr_flac support for FLAC reference files alongside WAV and MP3. |
-| **LM Code Cache** | Cache LM-generated audio codes for deterministic re-generation with consistent structure. |
-| **LM Codes Strength** | Slider controlling how strongly cached LM codes influence the generation — from subtle guidance to exact reproduction. |
-| **Co-Resident Models** | Run DiT and VAE from different model files simultaneously (e.g. turbo DiT with full VAE). |
-
----
-
-## Settings & Configuration
-
-| Feature | Description |
-|---------|-------------|
-| **Settings Page** | Central configuration hub for models, adapters, mastering references, and download preferences. |
-| **Smart Defaults** | Works out of the box without a `.env` file — auto-discovers engine binary and model paths. |
-| **Selectable VAE Decoder** | Choose between standard and alternative VAE decoders at runtime. |
-| **LM / Thinking Toggle** | Skip or enable the LM inference phase entirely — useful for speed when you don't need metadata generation. |
-| **Nuke Generations** | One-click wipe of all generated content and database entries. |
-| **Configurable Download Defaults** | Set preferred export format, filename prefix, and download behaviour. |
-| **Environment Editor** | Read and edit the server's `.env` file directly from the Settings UI with categorised sections, masked API keys, and save confirmation. |
-| **Runtime Config Reload** | Hot-reload LLM provider settings and API keys without restarting the server. Engine-level changes show a restart notification. |
-| **VAE Chunk/Overlap Settings** | Exposed VAE chunk size and overlap parameters for tuning memory usage on Vulkan/low-VRAM GPUs. |
-| **OpenAI-Compatible Provider** | Generic OpenAI-compatible LLM provider supporting oMLX, vLLM, LocalAI, and similar endpoints. Configurable base URL and API key. |
-
----
+| Feature | What it does |
+|---|---|
+| Streaming chat | Resizable panel with a collapsible thought-process block when the model provides one. |
+| Settings snapshot | Every message carries a JSON snapshot of the current parameters and content fields. |
+| Suggested changes | Proposed setting changes as from-to rows, applied one at a time or all at once. |
+| Content edits | Writes or rewrites caption, lyrics and other content fields in Custom-Gen. |
+| Shared providers | Same provider registry as Lyric Studio, with remembered provider and model. |
+| Knowledge base | Covers engine parameters, plugins, adapters, post-processing and lyric formatting. |
 
 ## Model Manager
 
-| Feature | Description |
-|---------|-------------|
-| **In-App Model Downloads** | Browse and download 100+ GGUF and safetensors models directly from the app — no manual file management needed. |
-| **Curated Starter Packs** | 4 pre-configured bundles (Quick Start, Minimal, XL Quality, Blackwell Optimized) with one-click download of the full pipeline. |
-| **Tabbed Model Catalogue** | Browse all available models organised by role (DiT, LM, Text Encoder, VAE, PP-VAE) with descriptions and quantisation badges. |
-| **Concurrent Resumable Downloads** | Multiple simultaneous downloads with HTTP Range-based resumption — interruptions resume from where they left off. |
-| **Real-Time Progress** | SSE-streamed download progress with speed, ETA, and per-file status tracking. |
-| **Installed Status Tracking** | The catalogue shows which models you already have installed, with per-pack completion indicators. |
-| **Model Deletion** | Remove installed models directly from the UI with confirmation prompts. |
-| **5 HuggingFace Repos** | Models sourced from Serveurperso/ACE-Step-1.5-GGUF, scragnog/ace-step-1.5-gguf-merge-models, scragnog/Ace-Step-1.5-MXFP4-Quants, scragnog/Ace-Step-1.5-ScragVAE, and scragnog/HOT-Step-CPP-PP-VAE. |
+Browse, download and remove every model file in the app. Details: [Model Manager](docs/user/studios/model-manager.md), [Models](docs/user/models.md)
 
----
+| Feature | What it does |
+|---|---|
+| Family tabs | ACE-Step 1.5, MiniMax-Music3, YuE2 and Shared, with role sub-tabs and installed counts. |
+| Starter packs | One-click bundles per backend, plus shared runtime, separation, StableStep, Whisper and captioning packs. |
+| Concurrent downloads | Several files at once with percent, speed and ETA, and resume after an interruption. |
+| Verification | Size and header checks before a downloaded file is kept. |
+| Delete | Remove installed files to free space. |
+| StableStep licence gate | Licence acceptance and an optional Hugging Face token. |
+| TensorRT builder match | Marks the builder DLL that matches your GPU. |
+| First-launch prompt | Opens itself when no models are found. |
 
-## Build & Developer Tools
+## Settings
 
-| Feature | Description |
-|---------|-------------|
-| **dev-rebuild.bat** | Graceful HTTP shutdown of the running app before engine rebuild — prevents the supervisor's auto-restart from causing a respawn loop. |
-| **MSVC Build Compatibility** | Automatic Visual Studio discovery via vswhere, Ninja binary fallback, and Node.js version guard. |
-| **File-Based Logging** | Structured logging system mirroring HOT-Step 9000 patterns for consistent debugging. |
-| **Quantize Tool** | Experimental GGUF quantisation with IQ, NVFP4, MXFP4, and ternary format support. |
-| **Quant Benchmark** | Automated inference benchmarking with peak VRAM tracking and results logging. |
-| **MXFP4 Tensor Core Tests** | Blackwell GPU stress tests demonstrating 22–33% speedup with MXFP4 quantisation. |
-| **Graceful Shutdown** | Proper Windows process cleanup with a "you can close this page" confirmation screen. |
-| **Smart Update Scripts** | `update-and-build.bat` / `.sh` scripts for source builders — pulls latest changes, rebuilds engine, and reinstalls dependencies in one step. |
+Configuration for engine, server, providers, downloads and storage. Details: [Settings](docs/user/studios/settings.md)
+
+| Feature | What it does |
+|---|---|
+| Environment editor | Edits `.env` with only changed keys written, and a Restart now button when a key needs it. |
+| GPU device picker | Lists NVIDIA cards by name and VRAM and stores a stable GPU UUID. |
+| Keep models in VRAM | Engine flag that keeps DiT, adapter and VAE resident between renders, plus a per-request toggle that skips DiT/VAE swaps. |
+| Warm on startup | `.env` settings that preload a DiT, VAE and adapter after the engine boots. |
+| Pipeline parallelism | Run Whisper, quality evaluation and cover art alongside post-processing. |
+| Generation timeout | 10 minutes to 6 hours, per track. |
+| AI services | API keys and endpoints for Gemini, OpenAI, Anthropic, Ollama, LM Studio, llama.cpp, Unsloth and OpenAI-compatible servers, applied live. |
+| Download defaults | WAV, FLAC, Opus or MP3, bitrate, mastered or original, and optional latent file. |
+| Filename trigger | Use an adapter's filename as its trigger word, prepended, appended or replacing the caption. |
+| Display language and theme | Interface language, light or dark theme, and generic artwork sets. |
+| Storage cleanup | Stem storage counter and separate nukes for generations, written lyrics and profiles. |
+| Terminal, Restart and Quit | Live engine log with search and a VRAM badge; sidebar restart and clean shutdown. |
+
+## Engine and plugins
+
+The C++17 engine behind every backend. Details: [Plugins](docs/user/plugins.md), [Plugin authoring](docs/dev/plugins-authoring.md), [Engine](docs/dev/engine.md), [Architecture](docs/dev/architecture.md)
+
+| Feature | What it does |
+|---|---|
+| Portable builds | Windows CUDA, Vulkan and CPU, Linux, and macOS Metal releases. |
+| Engine binaries | `ace-server`, `ace-lm`, `ace-synth`, `ace-understand`, `ace-train`, `ace-caption`, `ace-midi`, `neural-codec`, `mp3-codec` and `quantize`. |
+| Lua plugins | Solvers, schedulers, guidance modes and postprocess plugins load from `engine/plugins/` at launch with no rebuild. |
+| Plugin UI | Each plugin declares its own sliders, toggles and dropdowns, rendered by the UI. |
+| Native bridge | `apg()` for momentum, projection and norm thresholding, and `post_step()` for extra forward passes. |
+| Loop-owning solvers | A solver can take over the whole denoising loop for adaptive stepping. |
+| Model formats | GGUF, safetensors directories and ONNX, detected by path. |
+| Quantize tool | K-quants, IQ quants, MXFP4 and NVFP4, with importance-matrix support. |
+| TensorRT paths | MiniMax-Music3 flow DiT, PP-VAE and StableStep through TensorRT on NVIDIA. |
+| Flash-attention training ops | Custom fused attention forward and backward in the ggml CUDA backend. |
+| Upstream hooks | Fork hooks and a patch stack checked by `engine/verify-hooks.ps1` before every build. |
+
+## Developer tooling
+
+For contributors and agents. Details: [Building](docs/dev/building.md), [HTTP API](docs/dev/api.md), [Architecture](docs/dev/architecture.md), [Releasing](docs/dev/releasing.md), [Writing the docs](docs/dev/docs-contributing.md)
+
+| Feature | What it does |
+|---|---|
+| HTTP API | Everything the UI does is JSON over HTTP on port 3001, indexed per route. |
+| Dev loop | `dev.bat` runs Vite with hot reload and the Node server in watch mode. |
+| Safe engine rebuild | `dev-rebuild.bat` shuts the app down cleanly before rebuilding the engine. |
+| Release gate | [`tools/release-gate`](tools/release-gate/README.md) drives the app through its API and stages renders for an ear test. |
+| Release prerequisites | `check-release-prereqs.mjs` confirms every model and data file is reachable by a user. |
+| Docs checks | `tools/docs/build-docs.mjs` regenerates tables; `check-docs.mjs` catches drift and broken links. |
+| Lyric Studio MCP server | [`tools/mcp-lyricstudio`](tools/mcp-lyricstudio/README.md) exposes Lyric Studio to Claude Code and Codex. |

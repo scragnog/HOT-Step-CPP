@@ -16,7 +16,7 @@ Terms used below:
 
 - Adding a new studio/view/panel to the UI.
 - Adding a control (slider, toggle, dropdown) to an existing studio or the global parameter bar.
-  - **Exception:** a knob for a solver/scheduler/guidance mode is NOT a UI task — Lua plugins declare their own UI params (`docs/PLUGINS.md`, lua-plugin-authoring skill). Wiring one into `getGlobalParams()` is the wrong implementation entirely.
+  - **Exception:** a knob for a solver/scheduler/guidance mode is NOT a UI task — Lua plugins declare their own UI params (`docs/dev/plugins-authoring.md`, lua-plugin-authoring skill). Wiring one into `getGlobalParams()` is the wrong implementation entirely.
 - Wiring the UI to a new or existing server API endpoint.
 - Debugging UI state, routing, persistence, or "my new param does nothing" issues.
 
@@ -176,6 +176,6 @@ Poll every 1.5 s. Progress may arrive as 0–1 OR 0–100 — normalise both, as
 - [reference.md](reference.md) (same folder) — full Stem Studio end-to-end dissection, store code templates, DISCO hue table, localStorage key namespaces.
 - `CLAUDE.md` (repo root) — cross-tier build/git rules.
 - `FEATURES.md` — feature catalogue.
-- `docs/PLUGINS.md` — if your UI feature exposes a new solver/scheduler/guidance knob, that's a Lua plugin, not C++ (plugins declare their own UI params).
+- `docs/dev/plugins-authoring.md` — if your UI feature exposes a new solver/scheduler/guidance knob, that's a Lua plugin, not C++ (plugins declare their own UI params).
 - `engine/docs/ARCHITECTURE.md` — engine request JSON, generation modes.
 - `docs/plans/` — internal design docs. **Gitignored, local-only — may be absent on a fresh clone.**

@@ -288,7 +288,7 @@ check if the server seems to run old code.
   right subdir; it appears in the UI next launch. Native bridge is `apg()`; advanced
   plugins use `post_step()` for extra forward passes. Editing `dit-sampler.h` to add a
   solver is obsolete practice — routing goes through `hot-step-sampler.h`. Guide:
-  `docs/PLUGINS.md`.
+  `docs/dev/plugins-authoring.md`.
 - **Node/TypeScript changes:** `npx tsc --noEmit` to type-check; `tsx watch` auto-restarts
   the server in dev mode. Don't `npm run build` during dev.
 
@@ -350,8 +350,8 @@ check if the server seems to run old code.
 - `engine/docs/ARCHITECTURE.md` — engine internals, CLI, request JSON, generation modes
   (note: its binary count and raw manual-cmake instructions are stale; the wrapper scripts
   + dev-rebuild are current practice).
-- `docs/PLUGINS.md` — Lua plugin authoring (the no-rebuild path for solvers/schedulers/guidance).
-- `docs/RELEASING.md` — release builds; pushing any `v*` tag triggers a full multi-platform CI build.
+- `docs/dev/plugins-authoring.md` — Lua plugin authoring (the no-rebuild path for solvers/schedulers/guidance).
+- `docs/dev/releasing.md` — release builds; pushing any `v*` tag triggers a full multi-platform CI build.
 - `CLAUDE.md` — repo-wide rules (git discipline, environment, log layout).
 - **Full sync + hook-repair process: the `upstream-sync` skill** (`.claude/skills/upstream-sync/`,
   always present) — it carries the concrete re-hook repair steps this skill's failure table

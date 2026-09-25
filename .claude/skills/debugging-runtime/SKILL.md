@@ -182,5 +182,5 @@ Dev-mode note: under `dev.bat` (tsx watch), every source-change auto-restart cre
 - [reference.md](reference.md) (this folder) — copy-paste triage command pack, status JSON shapes, engine phase reference, watchdog timing table.
 - [CLAUDE.md](../../../CLAUDE.md) — build/git rules that constrain what you may do while debugging.
 - [engine/docs/ARCHITECTURE.md](../../../engine/docs/ARCHITECTURE.md) — engine internals, request JSON, generation modes.
-- [docs/PLUGINS.md](../../../docs/PLUGINS.md) — Lua solver/scheduler plugins (a bad plugin can wedge DiT inference).
+- [docs/dev/plugins-authoring.md](../../../docs/dev/plugins-authoring.md) — Lua solver/scheduler plugins (a bad plugin can wedge DiT inference).
 - `docs/plans/` — internal investigation docs. **Gitignored, local-only — may be absent on a fresh clone.**

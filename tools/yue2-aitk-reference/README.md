@@ -7,7 +7,7 @@ remain selectable as Legacy. Python is required only for reference comparisons.
 
 ## Integrated native workflow
 
-See [the training guide](../../docs/TRAINING.md) for cache preparation, joint
+See [the training guide](../../docs/dev/training-internals.md) for cache preparation, joint
 training and resume. Each checkpoint contains a combined Toolkit-layout adapter,
 two native inference adapters, and exact optimizer/RNG resume state.
 

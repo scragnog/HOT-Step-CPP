@@ -168,7 +168,7 @@ Param traps:
   if params and params.rms_servo ~= nil then v = params.rms_servo end
   ```
 - Keys are namespaced by plugin **`name`**, not filename. Renaming the plugin silently orphans users' stored values.
-- **Do not rely on the `transform` schema field** — it is extracted and serialized but `PluginControls.tsx` never applies it; values are sent verbatim. `docs/PLUGINS.md`'s claim that the UI transforms values is not implemented.
+- **Do not rely on the `transform` schema field** — it is extracted and serialized but `PluginControls.tsx` never applies it; values are sent verbatim. `docs/dev/plugins-authoring.md`'s claim that the UI transforms values is not implemented.
 - `accent` (UI colorway) must be one of: amber, cyan (default), blue, teal, green, emerald, purple, indigo, orange, pink, rose, sky, violet (`PluginControls.tsx:20-35`).
 - Fields like `stork_substeps`, `beat_stability`, `apg_momentum` are a **separate legacy sideband** channel (`hot-step-params.h:97-100`, `translateParams.ts:147-155`), not `plugin_params`. New plugins must use declared `params` only.
 
@@ -201,8 +201,8 @@ Param traps:
 | `ui/src/components/global-bar/PluginControls.tsx` | Renders declared params; accent map |
 | `ui/src/stores/globalParamsStore.ts` | `hs-pluginParams` localStorage persistence |
 | `engine/plugins/` + `plugins/` | Built-in and user plugin tiers |
-| `docs/PLUGINS.md` | Committed authoring guide (mostly accurate; see caveats in reference.md) |
-| `plugins/README.md` | Root README — basic examples are OUTDATED; full-loop section (lines 96-162) is accurate |
+| `docs/dev/plugins-authoring.md` | Committed authoring guide (mostly accurate; see caveats in reference.md) |
+| `plugins/README.md` | Community plugins folder README: points at the authoring guide; its full-loop solver section is accurate |
 
 ## Failure signatures
 
@@ -268,12 +268,12 @@ Per-backend caveats worth knowing before you assume a plugin "works everywhere":
 - **VALIDATED**: the engine snapshots `vt` before multi-eval solver steps (`hot-step-sampler.h:1179-1195`) because sharing one buffer between "original velocity" and "model_fn output" silently degraded Heun to Euler.
 - **VALIDATED**: stateful plugins must reset on `step_index == 0`; persisting `lua_State`s bleed state across generations (documented in-code at `md_pingpong_simple.lua:242-246` — "explosive velocity on step 1").
 - **VALIDATED**: `philox_randn` is NOT exposed to Lua. `sde.lua:3-4` mentions it as a required C helper, but it is not registered; the SDE stochastic path is handled C++-side for that specific plugin. Pure-Lua stochastic plugins must roll their own RNG (see the LCG + Box-Muller in `md_pingpong_simple.lua`).
-- **VALIDATED**: `plugins/README.md` basic examples (module-return style, `x:get(i)`/`x:set(i,v)`, `schedule()` returning a table) do NOT match the real API — trust `docs/PLUGINS.md` and `engine/src/lua-plugin.h`. Exception: the README's full-loop solver section (lines 96-162) is accurate.
+- The outdated module-return examples that used to live in `plugins/README.md` were removed on 2026-09-25; the README now points at `docs/dev/plugins-authoring.md`. Trust that guide and `engine/src/lua-plugin.h`.
 - **UNVERIFIED**: whether the TensorRT sampler variant (`hot-step-sampler-trt.h`) covers solver/guidance plugins identically — it calls the same scheduler override, but its plugin dispatch was not audited. Check before relying on plugins under the TensorRT backend.
 
 ## Deeper reading
 
 - [reference.md](reference.md) (this folder) — full-loop solver contract, `post_step()` details, postprocess internals, param schema JSON shape, docs-vs-code discrepancy list.
-- `docs/PLUGINS.md` — committed authoring guide. Known inaccuracies: says `shift` comes "from UI" (actually back-calculated); documents `transform` as applied by the UI (it is not); omits `owns_loop`/`sample()` and the postprocess type; uses `step_idx` naming loosely (solvers get `step_index`, guidance gets `step_idx`).
+- `docs/dev/plugins-authoring.md` — committed authoring guide. Known inaccuracies: says `shift` comes "from UI" (actually back-calculated); documents `transform` as applied by the UI (it is not); omits `owns_loop`/`sample()` and the postprocess type; uses `step_idx` naming loosely (solvers get `step_index`, guidance gets `step_idx`).
 - `engine/docs/ARCHITECTURE.md` — engine internals, request JSON.
 - `docs/plans/` — internal design docs, **gitignored and local-only** (may be absent on a fresh clone).

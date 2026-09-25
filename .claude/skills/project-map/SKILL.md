@@ -105,7 +105,7 @@ API mounts are all registered in `server/src/index.ts:72-95`. Route files in `se
 
 **Engine source map**: full per-subsystem table in [reference.md](reference.md). Fast rules: LM phase → `engine/src/pipeline-lm.cpp` / `qwen3-lm.h`; DiT synth → `pipeline-synth*.cpp` / `dit.h`; all solver/scheduler/guidance routing → `hot-step-sampler.h` (upstream `dit-sampler.h` is bypassed); adapters → `adapter-merge.h` / `adapter-runtime.h`; VAE → `vae.h` / `vae-ort.h`; HTTP server → `engine/tools/hot-step-server.cpp`.
 
-**Plugins**: solvers (21) / schedulers (9) / guidance (7) are hot-loadable Lua files in `engine/plugins/{solvers,schedulers,guidance}/`; the registry also scans repo-root `plugins/` as a project overlay (`engine/src/lua-plugin-registry.h:35-50`), which holds `postprocess/` (md_audio_tiled). Drop a `.lua` in the right subdir → appears in UI next launch, no C++ rebuild. Adding a solver/scheduler/guidance = write a Lua plugin, never edit `dit-sampler.h`. Guide: `docs/PLUGINS.md`. Native headers in `engine/src/solvers|schedulers|guidance/` are legacy — new work goes in Lua.
+**Plugins**: solvers (21) / schedulers (9) / guidance (7) are hot-loadable Lua files in `engine/plugins/{solvers,schedulers,guidance}/`; the registry also scans repo-root `plugins/` as a project overlay (`engine/src/lua-plugin-registry.h:35-50`), which holds `postprocess/` (md_audio_tiled). Drop a `.lua` in the right subdir → appears in UI next launch, no C++ rebuild. Adding a solver/scheduler/guidance = write a Lua plugin, never edit `dit-sampler.h`. Guide: `docs/dev/plugins-authoring.md`. Native headers in `engine/src/solvers|schedulers|guidance/` are legacy — new work goes in Lua.
 
 ## Data layer
 
@@ -141,7 +141,7 @@ powershell -File engine\verify-hooks.ps1   # After any upstream sync
 | npm install fails / weird dep errors | Node 24+ | Use Node 18–22 |
 | Vulkan pinned-memory alloc failure in VAE | VAE chunk too large | Tune `ACESTEPCPP_VAE_CHUNK` / `ACESTEPCPP_VAE_OVERLAP` in `.env` |
 | First-launch hang "Downloading CUDA runtime" | Portable CUDA DLL bootstrap (`index.ts:318+`) | Wait or go offline → engine starts CPU-only |
-| Accidental CI release build | Pushed a `v*` tag | Use `-CI-Test` suffix for throwaways; see `docs/RELEASING.md` |
+| Accidental CI release build | Pushed a `v*` tag | Use `-CI-Test` suffix for throwaways; see `docs/dev/releasing.md` |
 
 ## Institutional knowledge
 
@@ -158,5 +158,5 @@ powershell -File engine\verify-hooks.ps1   # After any upstream sync
 ## Deeper reading
 
 - [reference.md](reference.md) (this folder) — full engine source map, complete engine endpoint list, `AceRequest` field catalogue, data/config details.
-- `FEATURES.md` — full feature catalogue (100+). `engine/docs/ARCHITECTURE.md` — engine internals, CLI, request JSON. `docs/PLUGINS.md` — Lua plugin authoring. `docs/RELEASING.md` — release runbook. `server/src/data/assistant-knowledge.md` — in-app assistant KB.
+- `FEATURES.md` — full feature catalogue (100+). `engine/docs/ARCHITECTURE.md` — engine internals, CLI, request JSON. `docs/dev/plugins-authoring.md` — Lua plugin authoring. `docs/dev/releasing.md` — release runbook. `server/src/data/assistant-knowledge.md` — in-app assistant KB.
 - `docs/plans/` is **gitignored (local-only)** — internal design/investigation docs (perf, adapters, `upstream-sync-workflow.md`); may be absent on a fresh clone.

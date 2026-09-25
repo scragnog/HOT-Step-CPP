@@ -125,7 +125,7 @@ the same sidecar scheme.
 
 - Real releases: `v1.1.2` (latest, published, 22 assets — verified live),
   `v1.1.1`, `v1.1.0`, ...
-- Throwaway convention: any hyphenated `v*` tag. `docs/RELEASING.md` uses
+- Throwaway convention: any hyphenated `v*` tag. `docs/dev/releasing.md` uses
   `vX.Y.Z-CI-Test`; recent actual throwaways were lowercase
   `v0.0.0-ci-test-N`. Case/format of the suffix doesn't matter to the
   changelog guard — **only the hyphen does**.
@@ -153,7 +153,7 @@ gh workflow run cache-warm.yml                                # re-warm master c
 Quoting note: the `--jq` expressions above are single-quoted; in PowerShell
 keep them single-quoted so `$` and `|` inside are passed literally.
 
-## Known stale spots in docs/RELEASING.md
+## Known stale spots in docs/dev/releasing.md
 
 - Line 43-45: says 4 Windows + 4 Linux variants and "18 assets (9 archives +
   9 .sha256)". Reality: 5 variants per OS (`cuda12-volta` added later), 22

@@ -168,6 +168,6 @@ Invoke-RestMethod -Method Post http://localhost:3001/api/generate/reset-queue # 
 
 - [reference.md](reference.md) (same folder) — full node-tier walkthrough, ServerFields field list, endpoints/watchdogs, LM cache internals, translateParams special cases.
 - [engine/docs/ARCHITECTURE.md](../../../engine/docs/ARCHITECTURE.md) — engine internals, task types, request JSON. **Caveat:** its request-JSON reference predates several sideband fields; the code (`aceClient.ts` `AceRequest` interface + `ServerFields`) is the authoritative schema.
-- [docs/PLUGINS.md](../../../docs/PLUGINS.md) — Lua solver/scheduler/guidance plugins (how `plugin_params` are consumed).
+- [docs/dev/plugins-authoring.md](../../../docs/dev/plugins-authoring.md) — Lua solver/scheduler/guidance plugins (how `plugin_params` are consumed).
 - `docs/plans/` — internal design docs (per-section masking, upstream sync workflow). **Gitignored, local-only — may be absent on a fresh clone.**
 - [CLAUDE.md](../../../CLAUDE.md) — build/git rules and log layout.

@@ -1,0 +1,19 @@
+name: Docs
+
+# Fails when the docs drift from the code: a studio without a page, a stale generated
+# table, a broken link, a skill missing from the index. See docs/dev/docs-contributing.md.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node tools/docs/check-docs.mjs

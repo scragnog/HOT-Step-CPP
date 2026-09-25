@@ -1,436 +1,29 @@
-# Architecture
-
-> Full technical reference for acestep.cpp. For a quick start guide, see [README.md](../README.md).
-
-# acestep.cpp
-
-Portable C++17 implementation of ACE-Step 1.5 music generation using GGML.
-Text + lyrics in, stereo 48kHz MP3 or WAV out. Runs on CPU, CUDA, ROCm, Metal, Vulkan.
-
-## Build
-
-```bash
-git submodule update --init
-
-mkdir build && cd build
-
-# macOS (Metal + Accelerate BLAS auto-enabled)
-cmake ..
-
-# Linux with NVIDIA GPU
-cmake .. -DGGML_CUDA=ON
-
-# Linux with AMD GPU (ROCm)
-cmake .. -DGGML_HIP=ON
-
-# Linux with Vulkan
-cmake .. -DGGML_VULKAN=ON
-
-cmake --build . --config Release -j$(nproc)
-```
-
-### Windows
-
-Install [Visual C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-(select "Desktop development with C++" workload) and optionally the
-[CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) and/or the
-[Vulkan SDK](https://vulkan.lunarg.com/sdk/home).
-
-```cmd
-git submodule update --init
-
-call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-
-mkdir build
-cd build
-
-rem NVIDIA GPU
-cmake .. -DGGML_CUDA=ON
-
-rem AMD/Intel GPU (Vulkan)
-cmake .. -DGGML_VULKAN=ON
-
-rem all backends (CUDA + Vulkan + CPU, runtime loading)
-cmake .. -DGGML_CPU_ALL_VARIANTS=ON -DGGML_CUDA=ON -DGGML_VULKAN=ON -DGGML_BACKEND_DL=ON
-
-cmake --build . --config Release -j %NUMBER_OF_PROCESSORS%
-```
-
-Builds seven binaries: `ace-lm` (LLM), `ace-synth` (DiT + VAE), `ace-server` (HTTP server), `ace-understand` (reverse: audio -> metadata), `neural-codec` (VAE encode/decode), `mp3-codec` (MP3 encoder/decoder) and `quantize` (GGUF requantizer).
-
-## Models
-
-Pre-quantized GGUFs on [Hugging Face](https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF).
-
-```bash
-pip install hf
-./models.sh              # Q8_0 turbo essentials (~7.7 GB)
-./models.sh --all        # every model, every quant (~97 GB)
-./models.sh --quant Q6_K # pick a specific quant (Q4_K_M, Q5_K_M, Q6_K, Q8_0, BF16)
-./models.sh --sft        # add SFT DiT variant
-./models.sh --shifts     # add shift1/shift3/continuous variants
-```
-
-Default downloads 4 files into `models/`:
-
-| GGUF | Arch | Size |
-|------|------|------|
-| Qwen3-Embedding-0.6B-Q8_0.gguf | text encoder (28L, H=1024) | 748 MB |
-| acestep-5Hz-lm-4B-Q8_0.gguf | Qwen3 causal LM | 4.2 GB |
-| acestep-v15-turbo-Q8_0.gguf | DiT 2B + CondEncoder (24L, H=2048) | 2.4 GB |
-| vae-BF16.gguf | AutoencoderOobleck | 322 MB |
-
-Three LM sizes: 0.6B (fast), 1.7B, 4B (best quality).
-Six DiT variants: turbo, sft, base, turbo-shift1, turbo-shift3, turbo-continuous.
-XL (4B DiT) variants: xl-turbo, xl-sft, xl-base (32L, H=2560, higher quality, ~9.5 GB BF16).
-VAE is always BF16 (small, bandwidth-bound, quality-critical).
-
-<details>
-<summary>Building GGUFs from source (checkpoints + convert)</summary>
-
-If you want to convert from the original safetensors yourself:
-
-```bash
-pip install gguf hf
-./checkpoints.sh       # download raw HF checkpoints (turbo + 4B LM)
-./checkpoints.sh --all # all variants (SFT, shift1/3, 0.6B/1.7B LM)
-python3 convert.py     # convert all checkpoints to GGUF (models/)
-./quantize.sh          # quantize BF16 -> Q4_K_M/Q5_K_M/Q6_K/Q8_0
-```
-
-`checkpoints.sh` downloads safetensors, config.json, and tokenizer files
-into `checkpoints/`. `convert.py` packs everything into self-contained
-GGUF files in `models/`, bundling BPE tokenizer, silence_latent, and
-config metadata so no external file is needed at runtime.
-
-</details>
-
-## CLI
-
-`ace-lm` generates lyrics and audio codes, `ace-synth` synthesizes audio.
-The input JSON is never modified. Output is always numbered: `request0.json`.
-
-```bash
-cat > /tmp/request.json << 'EOF'
-{
-    "caption": "Upbeat pop rock with driving guitars and catchy hooks",
-    "inference_steps": 8,
-    "shift": 3.0,
-    "vocal_language": "fr"
-}
-EOF
-
-# LLM: request.json -> request0.json (enriched with metadata + lyrics + codes)
-./ace-lm \
-    --request /tmp/request.json \
-    --lm models/acestep-5Hz-lm-4B-Q8_0.gguf
-
-# DiT+VAE: request0.json -> request00.mp3
-./ace-synth \
-    --request /tmp/request0.json \
-    --embedding models/Qwen3-Embedding-0.6B-Q8_0.gguf \
-    --dit models/acestep-v15-turbo-Q8_0.gguf \
-    --vae models/vae-BF16.gguf
-```
-
-With an adapter (LoRA today, PEFT directory or ComfyUI single file):
-
-```bash
-# PEFT directory (contains adapter_model.safetensors + adapter_config.json)
-./ace-synth \
-    --request /tmp/request0.json \
-    --embedding models/Qwen3-Embedding-0.6B-Q8_0.gguf \
-    --dit models/acestep-v15-turbo-Q8_0.gguf \
-    --vae models/vae-BF16.gguf \
-    --adapter /path/to/peft-adapter
-
-# ComfyUI single .safetensors file (alpha baked in, no config needed)
-./ace-synth \
-    --request /tmp/request0.json \
-    --embedding models/Qwen3-Embedding-0.6B-Q8_0.gguf \
-    --dit models/acestep-v15-turbo-Q8_0.gguf \
-    --vae models/vae-BF16.gguf \
-    --adapter best_sft_v2_2338_comfyui.safetensors
-```
-
-Generate multiple songs at once with `lm_batch_size` in the JSON:
-
-```bash
-# 2 different songs from one prompt (different lyrics, codes, metadata)
-cat > /tmp/request.json << 'EOF'
-{
-    "caption": "Upbeat pop rock anthem with driving guitars and catchy hooks",
-    "vocal_language": "fr",
-    "lm_batch_size": 2
-}
-EOF
-
-# LM: request.json (lm_batch_size=2) -> request0.json, request1.json
-./ace-lm \
-    --request /tmp/request.json \
-    --lm models/acestep-5Hz-lm-4B-Q8_0.gguf
-
-# DiT+VAE: both requests in one GPU batch -> request00.mp3, request10.mp3
-./ace-synth \
-    --request /tmp/request0.json /tmp/request1.json \
-    --embedding models/Qwen3-Embedding-0.6B-Q8_0.gguf \
-    --dit models/acestep-v15-turbo-Q8_0.gguf \
-    --vae models/vae-BF16.gguf
-```
-
-`lm_batch_size` controls how many songs the LM generates. User-provided
-fields are preserved in all outputs. Empty fields are filled independently
-per batch item, producing genuinely different songs.
-ace-synth takes all request files as CLI arguments and runs them in a
-single GPU batch.
-
-Transform an existing song with `--src-audio` (no LLM needed):
-
-```bash
-cat > /tmp/cover.json << 'EOF'
-{
-    "task_type": "cover",
-    "caption": "Jazz piano cover with brushed drums and walking bass",
-    "lyrics": "[Instrumental]"
-}
-EOF
-
-./ace-synth \
-    --src-audio song.wav \
-    --request /tmp/cover.json \
-    --embedding models/Qwen3-Embedding-0.6B-Q8_0.gguf \
-    --dit models/acestep-v15-turbo-Q8_0.gguf \
-    --vae models/vae-BF16.gguf \
-```
-
-Ready-made examples in `examples/`:
-
-```bash
-cd examples
-./simple.sh                    # caption only, LLM fills everything
-./simple-batch.sh              # 2 songs from one prompt (lm_batch_size=2)
-./partial.sh                   # caption + lyrics + duration
-./full.sh                      # all metadata provided
-./dit-only.sh                  # skip LLM, DiT from noise
-./server-turbo.sh              # start HTTP server (turbo model)
-./server-sft.sh                # start HTTP server (SFT model)
-./client.sh                    # test server (single song)
-./client-batch.py              # test server batch (2 songs)
-./client-understand.sh <audio> # test /understand + /synth roundtrip
-```
-
-Each example has a `-sft` variant (SFT model, 50 steps, CFG 1.0)
-alongside the turbo default (8 steps, no CFG).
-
-## Generation modes
-
-The LLM fills what's missing in the JSON and generates audio codes.
-Empty field = "fill it". Filled = "don't touch".
-All modes always output numbered files (`request0.json` .. `requestN-1.json`).
-The input JSON is never modified.
-
-**Caption only** (`lyrics=""`): two LLM passes. Phase 1 uses the "Expand"
-prompt to generate an enriched caption, lyrics, and metadata (bpm, keyscale,
-timesignature, duration, vocal_language) via CoT. Phase 2 reinjects the CoT
-and generates audio codes using the "Generate tokens" prompt. CFG is forced
-to 1.0 in phase 1 (free sampling); `lm_cfg_scale` only applies in phase 2.
-With `lm_batch_size > 1`, each element runs its own phase 1,
-producing N completely different songs. See `examples/simple-batch.json`.
-
-**Caption + lyrics (+ optional metadata)**: single LLM pass. The "Generate
-tokens" prompt is used directly. Missing metadata is filled via CoT, the
-caption is enriched, and audio codes are generated. User-provided metadata
-fields are never overwritten. `lm_cfg_scale` applies to both CoT and code
-generation. See `examples/partial.json`.
-
-**Everything provided** (caption, lyrics, bpm, duration, keyscale,
-timesignature): the LLM skips CoT and generates audio codes directly.
-With `lm_batch_size > 1`, all elements share the same prompt (single prefill,
-KV cache copied), producing N different audio code sets. See `examples/full.json`.
-
-**Instrumental** (`lyrics="[Instrumental]"`): treated as "lyrics provided",
-so the single-pass "Generate tokens" path is used. No lyrics generation.
-The DiT was trained with this exact string as the no-vocal condition.
-
-**Passthrough** (`audio_codes` present): LLM is skipped entirely.
-Run `ace-synth` to decode existing codes. See `examples/dit-only.json`.
-
-**Cover** (`"task_type": "cover"` + `--src-audio`): no LLM needed. The source audio
-(WAV or MP3, any sample rate) is resampled to 48kHz, VAE-encoded to latent
-space, then passed through an FSQ roundtrip (tokenize 25Hz to 5Hz, detokenize
-back to 25Hz). The lossy 5:1 temporal compression destroys micro-timings,
-ornaments and transients, so the DiT diverges from the source and produces
-a free reinterpretation rather than a close remix.
-`audio_cover_strength` in the JSON controls how many DiT steps see the source
-(0.5 = half the steps use source context, half use silence). The caption
-steers the style while the source provides loose structure.
-Duration is determined by the source audio.
-
-**Cover-nofsq** (`"task_type": "cover-nofsq"` + `--src-audio`): cover variant
-that skips the FSQ roundtrip. The DiT receives clean VAE latents at 25Hz,
-preserving the full detail of the source. Produces remixes that stay close
-to the original structure, melody, and timbre. Pass `--ref-audio` pointing to
-the same file as `--src-audio` for best results.
-`audio_cover_strength` works well at higher values (0.2 to 0.5) compared to
-regular cover. Same JSON fields as cover, just change the task_type.
-
-**Repaint** (`"task_type": "repaint"` + `--src-audio`):
-regenerates a time region of the source audio while preserving the rest.
-`repainting_start` and `repainting_end` define the region in seconds.
-Default start is 0. Default end (`-1`) resolves to source start when
-outpainting (start < 0) or source duration otherwise.
-Negative start outpaints before the source, end beyond source duration
-outpaints after. The source audio is padded with silence before VAE
-encoding. `audio_cover_strength` is ignored (the mask handles everything).
-
-```bash
-# Inpaint: regenerate seconds 10-25
-cat > /tmp/repaint.json << 'EOF'
-{
-    "task_type": "repaint",
-    "caption": "Smooth jazz guitar solo with reverb",
-    "lyrics": "[Instrumental]",
-    "repainting_start": 10.0,
-    "repainting_end": 25.0,
-    "inference_steps": 50,
-    "guidance_scale": 1.0,
-    "shift": 1.0
-}
-EOF
-
-# Outpaint: generate 5s before the song (end defaults to 0)
-cat > /tmp/outpaint.json << 'EOF'
-{
-    "task_type": "repaint",
-    "caption": "Smooth jazz intro building into the main theme",
-    "lyrics": "[Instrumental]",
-    "repainting_start": -5.0,
-    "inference_steps": 50,
-    "guidance_scale": 1.0,
-    "shift": 1.0
-}
-EOF
-
-./ace-synth \
-    --src-audio song.wav \
-    --request /tmp/repaint.json \
-    --embedding models/Qwen3-Embedding-0.6B-Q8_0.gguf \
-    --dit models/acestep-v15-sft-Q8_0.gguf \
-    --vae models/vae-BF16.gguf
-```
-
-**Lego** (`"task_type": "lego"` + `--src-audio`):
-generates a new instrument track layered over an existing backing track.
-See `examples/lego.json` and `examples/lego.sh`.
-
-```bash
-cat > /tmp/lego.json << 'EOF'
-{
-    "caption": "electric guitar riff, funk guitar, house music, instrumental",
-    "lyrics": "[Instrumental]",
-    "task_type": "lego",
-    "track": "guitar",
-    "inference_steps": 50,
-    "guidance_scale": 1.0,
-    "shift": 1.0
-}
-EOF
-
-./ace-synth \
-    --src-audio backing-track.wav \
-    --request /tmp/lego.json \
-    --embedding models/Qwen3-Embedding-0.6B-Q8_0.gguf \
-    --dit models/acestep-v15-base-Q8_0.gguf \
-    --vae models/vae-BF16.gguf \
-    --wav
-```
-
-Available track names for lego, extract, and complete: `vocals`, `backing_vocals`,
-`drums`, `bass`, `guitar`, `keyboard`, `percussion`, `strings`, `synth`, `fx`,
-`brass`, `woodwinds`.
-
-### Model compatibility
-
-| Task | Turbo | Base/SFT | LM used |
-|------|-------|----------|---------|
-| text2music | yes | yes | yes |
-| cover | yes | yes | no (skipped) |
-| cover-nofsq | yes | yes | no (skipped) |
-| repaint | yes | yes | no (skipped) |
-| lego | no | yes | yes |
-| extract | no | yes | no (skipped) |
-| complete | no | yes | yes |
-
-For skipped tasks, `caption` and `lyrics` are passed verbatim to the DiT.
-
-### DiT context per mode
-
-What the DiT actually receives in its 128-channel context `[src(64) | mask(64)]`:
-
-| Mode | src channels | mask value | instruction |
-|------|-------------|------------|-------------|
-| text2music | silence | 1.0 | "Fill the audio semantic mask..." |
-| cover | FSQ(src) roundtrip | 1.0 | "Generate audio semantic tokens..." |
-| cover-nofsq | raw VAE src (no FSQ) | 1.0 | "Generate audio semantic tokens..." |
-| repaint | silence in zone / src outside | 0.0 outside / 1.0 in zone | "Repaint the mask area..." |
-| lego (no region) | raw VAE src everywhere | 1.0 | "Generate the TRACK track..." |
-| lego (with region) | raw VAE src everywhere | 0.0 outside / 1.0 in zone | "Generate the TRACK track..." |
-| extract | raw VAE src | 1.0 | "Extract the TRACK track..." |
-| complete | raw VAE src | 1.0 | "Complete the input track..." |
-
-cover uses an FSQ roundtrip (tokenize 25Hz->5Hz then detokenize 5Hz->25Hz). The
-lossy compression destroys source detail and the DiT diverges freely.
-cover-nofsq skips this roundtrip: same instruction, clean 25Hz latents. The DiT
-stays close to the source and produces faithful remixes. Pass
-ref_audio = src_audio for best results.
-All other tasks with source audio use raw VAE latents (no FSQ).
-
-### Region-mode pipeline (repaint + lego with region)
-
-Region coordinates are resolved in a unified block after mode routing:
-`s.rs += left_pad_sec; s.re += left_pad_sec`. When outpainting is active,
-source audio has been padded with silence before VAE encoding, so T_cover
-and all downstream latent operations naturally reflect the extended canvas.
-
-Three mechanisms stack on top of each other when a repaint region is active:
-
-1. **Step injection** (denoising loop, first 50% of steps): frames outside the
-   region are forced back to `t_next * noise + (1 - t_next) * src_latents` at each
-   step. This prevents the DiT from drifting outside the preserved zone.
-   For repaint: src_latents = full source (prevents decay of preserved content).
-   For lego: same formula, src = full backing track.
-
-2. **Latent boundary blend** (post-generation, pre-VAE): 12-frame linear crossfade
-   at region edges. Outside-zone latents blend from generated toward source.
-   Formula: `output[t] = m * generated[t] + (1-m) * src[t]`
-   where m ramps 0->1 approaching the zone boundary.
-
-3. **Waveform splice** (post-VAE decode): replaces non-region audio samples with
-   the original PCM from `src_audio` (interleaved input), with a 25ms linear
-   crossfade at zone edges. Eliminates VAE reconstruction artifacts in preserved
-   regions. Skipped if region covers the full duration.
-
-Key difference repaint vs lego: repaint silences the zone in the DiT context src
-(so the DiT generates fresh content there). Lego keeps the full backing track in
-context even inside the zone (DiT generates a new layer that harmonizes with it).
-
-### CLI scope
-
-`ace-synth` and `ace-lm` expose cover and repaint via `--src-audio` with all
-model types. Lego, extract, and complete are accessible via JSON request
-(`task_type` field) and the HTTP server, but have no dedicated CLI flag:
-pass `--src-audio` and set `task_type` in the JSON directly. These three modes
-require a base or SFT model (not turbo).
-
+# Engine request and CLI reference
+
+This page is the reference for the engine's request JSON, generation modes, CLI
+flags and HTTP endpoints. For how the engine is put together (binaries, pipelines,
+hook files, plugins, adapters, TensorRT, training, the ggml patch stack), read the
+engine guide: [docs/dev/engine.md](../../docs/dev/engine.md).
+
+Building the engine: [docs/dev/building.md](../../docs/dev/building.md).
+Model files and where to get them: [docs/user/models.md](../../docs/user/models.md).
+
+Everything here was checked against `engine/src/request.cpp`,
+`engine/tools/hot-step-server.cpp` and the CLI sources in `engine/tools/`. When the
+code and this page disagree, the code wins; fix the page.
 
 ## Request JSON reference
 
-Only `caption` is required. All other fields default to "unset" which means
-the LLM fills them, or a sensible runtime default is applied.
+The ACE-Step request (`AceRequest`, `engine/src/request.h`) is one JSON object. It
+is read by `ace-lm`, `ace-synth` and `ace-understand`, and by ace-server's `/lm`,
+`/synth`, `/understand`, `/vae` and `/codes-decode`. Missing fields keep their
+defaults. `/lm` and `/understand` return the same shape, so their output can be fed
+straight to `/synth` or `ace-synth`.
 
 ```json
 {
     "caption":              "",
+    "negative_prompt":      "",
     "lyrics":               "",
     "bpm":                  0,
     "duration":             0,
@@ -442,239 +35,477 @@ the LLM fills them, or a sensible runtime default is applied.
     "synth_batch_size":     1,
     "lm_temperature":       0.85,
     "lm_cfg_scale":         2.0,
+    "lm_cfg_cutoff_ratio":  1.0,
     "lm_top_p":             0.9,
     "lm_top_k":             0,
+    "lm_rep_penalty":       1.0,
+    "lm_rep_window":        64,
+    "lm_rep_mode":          "presence",
+    "lm_dry_base":          1.75,
+    "lm_dry_min_len":       3,
     "lm_negative_prompt":   "",
+    "lm_seed":              -1,
     "use_cot_caption":      true,
+    "lm_mode":              "generate",
     "audio_codes":          "",
     "inference_steps":      0,
     "guidance_scale":       0.0,
     "shift":                0.0,
+    "custom_timesteps":     "",
+    "dit_sliding_window":   -1,
     "audio_cover_strength": 1.0,
     "cover_noise_strength": 0.0,
+    "cover_noise_method":   "",
     "repainting_start":     0,
     "repainting_end":       -1,
-    "task_type":            "",
+    "task_type":            "text2music",
     "track":                "",
-    "infer_method":         "",
+    "latent_shift":         0.0,
+    "latent_rescale":       1.0,
+    "lss_strength":         0.0,
+    "lss_var_thresh":       0.15,
+    "lss_dc_remove":        true,
+    "output_format":        "mp3",
+    "peak_clip":            10,
+    "mp3_bitrate":          128,
     "synth_model":          "",
     "lm_model":             "",
+    "vae":                  "",
     "adapter":              "",
-    "adapter_scale":        1.0
+    "adapter_scale":        1.0,
+    "adapters":             [],
+    "adapter_sections":     [],
+    "lm_adapter":           "",
+    "lm_adapter_scale":     1.0,
+    "postprocess_plugin":   "",
+    "pp_vae_reencode":      false,
+    "get_lrc":              false,
+    "use_ort_vae":          false,
+    "stream_mode":          false,
+    "stream_depth":         8,
+    "stream_chunk_dir":     ""
 }
 ```
 
-### Text conditioning (ace-lm + ace-synth)
+`GET /props` returns this object with every default filled in, under `default`.
 
-**`caption`** (string, required)
-Natural language description of the music style, mood, instruments, etc.
-Fed to both the LLM and the DiT text encoder.
+Two more fields are parsed but not used for dispatch: `solver` (default `"euler"`)
+and `stork_substeps` (default 10). `solver` only appears in a log line. On ace-server
+the solver comes from `infer_method` and `stork_substeps` from the sideband (see
+[ace-server sideband fields](#ace-server-sideband-fields)). The `dcw_scaler`,
+`dcw_high_scaler` and `dcw_mode` keys are also read into `AceRequest`, but the
+sampler only acts on the sideband copy, which needs `dcw_enabled`.
 
-**`lyrics`** (string, default `""`)
-Controls vocal generation. Three valid states:
-- `""`: LLM generates lyrics from the caption (phase 1 "Expand" prompt).
-- `"[Instrumental]"`: no vocals. Passed directly to the DiT, LLM skips lyrics generation.
-- Any other string: user-provided lyrics used as-is, LLM only fills missing metadata.
+### Text conditioning
 
-There is no `instrumental` flag. This field is the single source of truth for
-vocal content.
+**`caption`** (string). Style, mood, instruments. Fed to the LM and to the DiT text
+encoder. `/lm` rejects an empty caption. `/synth` and `ace-synth` require one except
+for `lego`, `extract` and `complete` (and, on `/synth`, `cover` and `repaint`).
 
-### Metadata (LLM-filled if unset)
+**`negative_prompt`** (string, default `""`). When non-empty, it is encoded as the
+DiT's unconditional branch for CFG.
 
-**`bpm`** (int, default `0` = unset)
-Beats per minute. LLM generates one if 0.
+**`lyrics`** (string, default `""`). Three states:
 
-**`duration`** (float seconds, default `0` = unset)
-Target audio duration. `0` means the LLM picks it. FSM constrains LLM output
-to [10, 600]s; values <= 0 after generation fall back to 120s.
+- `""`: the LM writes lyrics from the caption.
+- `"[Instrumental]"`: no vocals. The parser also forces `vocal_language` to
+  `"unknown"`, which is what the DiT was trained with.
+- Anything else: used as written. The LM only fills missing metadata.
 
-**`keyscale`** (string, default `""` = unset)
-Musical key and scale, e.g. `"C major"`, `"F# minor"`. LLM fills if empty.
+### Metadata (the LM fills what is unset)
 
-**`timesignature`** (string, default `""` = unset)
-Time signature numerator as a string, e.g. `"4"` for 4/4, `"3"` for 3/4.
-LLM fills if empty.
+**`bpm`** (int, `0` = unset).
 
-**`vocal_language`** (string, default `""` = unset)
-BCP-47 language code for lyrics, e.g. `"en"`, `"fr"`, `"ja"`. Three states:
-- `""`: LLM detects the language via CoT and fills this field.
-- `"unknown"`: explicit "no specific language" signal to the DiT.
-- Any language code: used as-is. When lyrics are being generated, the FSM
-  constrains the LLM output to that language.
+**`duration`** (float seconds, `0` = unset). The LM's FSM constrains it to 10 to 600
+seconds. If a request reaches the DiT with no duration, it renders 30 seconds.
 
-### Generation control
+**`keyscale`** (string, `""` = unset), for example `"C major"`, `"F# minor"`.
 
-**`seed`** (int64, default `-1` = random)
-RNG seed for the DiT pipeline (Philox noise). The LM always uses a
-random seed internally.
+**`timesignature`** (string, `""` = unset). The numerator only: `"4"` for 4/4.
 
-**`lm_batch_size`** (int, default `1`)
-Number of LM variations. Has no effect on ace-synth.
+**`vocal_language`** (string, `""` = unset). `""` lets the LM detect it, `"unknown"`
+means no specific language, any other code is used as given.
 
-**`synth_batch_size`** (int, default `1`)
-Number of DiT variations per request. Works in all modes: text2music,
-cover, repaint, lego, extract, complete. Combined with `lm_batch_size`, you get
-`lm_batch_size * synth_batch_size` total outputs.
+### Seeds and batching
 
-### Batching
+**`seed`** (int64, `-1` = random). Seed for the DiT's Philox noise; the low 32 bits
+are used. Resolved once per input request.
 
-Three rules govern all batching, in both CLIs and the server:
+**`lm_seed`** (int64, `-1` = unset). Seed for the LM sampler. On ace-server `/lm`, an
+unset `lm_seed` follows `seed`, and a random value is drawn if both are unset. Batch
+item `b` of `/lm` gets `lm_seed + b`.
+<!-- TODO(verify): ace-lm and ace-understand never resolve lm_seed = -1, so the LM
+     sampler seeds from (uint32_t)-1 on every run. Check whether that is intended. -->
 
-1. Each input JSON is executed independently, as if it were the only one.
-2. `seed=-1` is resolved to a random value once per input JSON.
-   An explicit seed is used as-is.
-3. `lm_batch_size=N` duplicates with consecutive LM-internal seeds.
-   `synth_batch_size=N` duplicates with consecutive `seed` values.
+**`lm_batch_size`** (int, default 1). Number of LM variations. `ace-lm` clamps it to
+1..9; ace-server clamps it to 1..`--max-batch`.
 
-**`audio_codes`** (string, default `""`)
-Comma-separated FSQ token IDs produced by ace-lm. When non-empty, the
-entire LLM pass is skipped and ace-synth decodes these codes directly
-(passthrough mode).
+**`synth_batch_size`** (int, default 1). DiT variations per request, each with
+`seed + i`. The total across a `/synth` batch is clamped to 9.
 
-**`audio_cover_strength`** (float, default `1.0`)
-Only used in `cover` mode. Fraction of DiT steps that see the source audio
-as context. At `1.0` all steps use the source. At `0.0` no
-steps use the source (pure text2music, source is ignored). Values below 1.0
-switch DiT context to silence and encoder hidden states to text2music
-instruction at the corresponding step. Lower values give more creative
-freedom, higher values preserve more of the original structure.
-Defaults to 1.0 for `lego`, `extract`, `complete` (context-switch inactive for these modes).
-Ignored in `repaint` mode (the mask handles everything).
+The rules:
 
-**`cover_noise_strength`** (float, default `0.0`)
-Only used in `cover` mode. Blends initial noise with source latents before
-diffusion starts. `0.0` = pure noise (default). `1.0` = start nearly identical
-to the source. The schedule is truncated to the nearest timestep matching the
-noise level. `cover_steps` is recalculated against the remaining steps.
+1. Each input request runs as if it were the only one.
+2. `seed = -1` resolves to one random value per input request.
+3. `lm_batch_size = N` produces N LM outputs; `synth_batch_size = N` produces N DiT
+   outputs with consecutive seeds.
 
-**`repainting_start`** (float seconds, default `0`)
-**`repainting_end`** (float seconds, default `-1`)
-Region boundaries for `repaint` and `lego` modes. Default end (`-1`) resolves
-to source start when outpainting (start < 0), source duration otherwise.
-Negative start pads silence before, end beyond source duration pads after.
-Error if end <= start after adjustment.
+### LM sampling (`ace-lm`, `/lm`)
 
-**`task_type`** (string, default `""` = `text2music`)
-Controls the generation mode. This field is the single source of truth for
-what the pipeline does. Empty is equivalent to `text2music`.
-Values: `text2music`, `cover`, `cover-nofsq`, `repaint`, `lego`, `extract`, `complete`.
+**`lm_mode`** (string, default `"generate"`). `generate` fills metadata and lyrics
+and writes audio codes. `inspire` turns a short query into metadata and lyrics, no
+codes. `format` turns caption and lyrics into metadata and lyrics, no codes. Any
+other value is rejected.
 
-- `text2music`: standard text-to-music synthesis from silence.
-- `cover`: re-synthesize source audio with a new style. FSQ roundtrip degrades
-  source latents, so the DiT diverges freely. Requires `--src-audio`.
-  `audio_cover_strength` controls how many DiT steps see the source.
-- `cover-nofsq`: remix source audio without FSQ roundtrip. The DiT works on
-  clean 25Hz VAE latents and stays close to the original. Requires `--src-audio`.
-  Pass `--ref-audio` = `--src-audio` for best results.
-- `repaint`: regenerate a time region of the source audio. Requires `--src-audio`.
-  Negative start outpaints before, end beyond duration outpaints after.
-- `lego`: generate a new instrument track in context of a backing track. Requires
-  `--src-audio` and `track`. Base model only. Output is the generated track
-  (behavior analogous to stem generation; the output mix vs isolated stem is
-  model-dependent and unverified in this codebase).
-  Supports optional region constraint via `repainting_start/end`.
-- `extract`: isolate a specific stem from a mixed source. Requires `--src-audio`
-  and `track`. Base model only. LM is skipped (same as cover/repaint).
-- `complete`: generate a full mix from a single isolated stem. Requires `--src-audio`
-  (the isolated stem, e.g. a cappella vocals) and `track` (what to add, e.g. `drums`).
-  Base model only. Output duration = source duration. The DiT regenerates all frames
-  conditioned on the stem; it does NOT splice or extend temporally.
-  `track` can be a pre-formatted string like `"VOCALS | DRUMS"` for multi-stem.
+**`lm_temperature`** (float, default 0.85). Applies to both phases.
 
-`lego`, `extract`, and `complete` always use the full source context
-(`audio_cover_strength` defaults to 1.0 and the context-switch mechanism is inactive).
+**`lm_cfg_scale`** (float, default 2.0). LM classifier-free guidance. Always active
+in phase 2 (audio codes). Phase 1 turns CFG off whenever it writes free text (lyrics
+or the CoT caption), so it only applies there when lyrics are given and
+`use_cot_caption` is false. `1.0` disables it.
 
-**`track`** (string, default `""`)
-Track name for `lego`, `extract`, and `complete` modes. Standard names: `vocals`, `backing_vocals`, `drums`,
-`bass`, `guitar`, `keyboard`, `percussion`, `strings`, `synth`, `fx`, `brass`,
-`woodwinds`. Non-standard names produce a warning but are passed through.
+**`lm_cfg_cutoff_ratio`** (float, default 1.0). Fraction of code tokens that use CFG.
+`0.5` runs CFG for the first half of the tokens only.
 
-### Server model routing (ace-server only)
+**`lm_top_p`** (float, default 0.9). Nucleus cutoff. `1.0` disables it.
 
-These fields are parsed by ace-server but are not part of the C++ `AceRequest`
-struct. They select which model to load from the `--models` directory.
+**`lm_top_k`** (int, default 0). `0` disables top-k.
 
-**`synth_model`** (string, default `""`)
-DiT model filename to use for /synth (e.g. `"acestep-v15-turbo-Q8_0.gguf"`).
-Empty string keeps the currently loaded DiT, or loads the first available one.
+**`lm_rep_penalty`** (float, default 1.0 = off). Repetition penalty over recently
+emitted audio codes, to break code loops.
 
-**`lm_model`** (string, default `""`)
-LM model filename to use for /lm and /understand (e.g. `"acestep-5Hz-lm-4B-Q8_0.gguf"`).
-Empty string keeps the currently loaded LM, or loads the first available one.
+**`lm_rep_window`** (int, default 64). Lookback in codes (64 codes is about 13 s at
+5 Hz).
 
-**`adapter`** (string, default `""`)
-Adapter name from the `--adapters` directory (e.g. `"singer-v2.safetensors"`
-or `"my-peft-adapter"`). Empty string means no adapter. Changing the adapter
-reloads the DiT (deltas are merged into weights at load time). Supported
-algorithm today: LoRA.
+**`lm_rep_mode`** (string, default `"presence"`). How the penalty is applied:
+`presence` penalises each distinct code in the window once, `frequency` raises the
+penalty to the power of the occurrence count, `dry` penalises only codes that would
+extend a verbatim repeat. Unknown values fall back to `presence`.
 
-**`adapter_scale`** (float, default `1.0`)
-Adapter scaling factor. Only used when `adapter` is set.
+**`lm_dry_base`** (float, default 1.75) and **`lm_dry_min_len`** (int, default 3).
+`dry` mode only: growth per extra matched code, and matched codes before any penalty.
 
-### LM sampling (ace-lm)
+**`lm_negative_prompt`** (string, default `""`). Negative caption for phase 2 CFG.
+Empty uses a caption-less unconditional prompt.
 
-**`lm_temperature`** (float, default `0.85`)
-Sampling temperature for both phase 1 (lyrics/metadata) and phase 2 (audio
-codes). Lower = more deterministic.
+**`use_cot_caption`** (bool, default true). When true the LM rewrites the caption
+through CoT and that version goes to the DiT. When false the caption is kept as
+written.
 
-**`lm_cfg_scale`** (float, default `2.0`)
-Classifier-Free Guidance scale for the LM. Always active in phase 2 (audio
-code generation). In phase 1, CFG is disabled whenever textual expansion is
-happening (lyrics generation or CoT caption enrichment). In practice CFG
-only applies to phase 1 when lyrics are provided AND `use_cot_caption=false`,
-i.e. the LM is filling metadata fields without any free-text generation.
-`1.0` disables CFG.
+**`audio_codes`** (string, default `""`). Comma-separated 5 Hz FSQ code IDs. When set
+in `generate` mode the LM is skipped and the DiT decodes these codes.
 
-**`lm_top_p`** (float, default `0.9`)
-Nucleus sampling cutoff. `1.0` disables.
+### DiT sampling (`ace-synth`, `/synth`)
 
-**`lm_top_k`** (int, default `0` = disabled)
-Top-K sampling. `0` disables hard top-K (top_p still applies).
+**`inference_steps`** (int, `0` = auto). Auto is 8 on a turbo DiT and 50 otherwise.
+Clamped to 300.
 
-**`lm_negative_prompt`** (string, default `""`)
-Negative caption for CFG in phase 2. Empty string falls back to a
-caption-less unconditional prompt.
+**`guidance_scale`** (float, `0` = auto). Auto is 1.0 (no CFG). A value above 1.0 on
+a turbo model is kept, with a warning in the log.
 
-**`use_cot_caption`** (bool, default `true`)
-When `true`, the LLM enriches the user caption via CoT and the enriched
-version is written to the output JSON (and fed to the DiT). When `false`,
-the user caption is preserved verbatim. Only matters when the LLM runs
-phase 1 (i.e. some metadata is missing). When all metadata is provided
-phase 1 is skipped and the caption is never touched regardless of this flag.
+**`shift`** (float, `0` = auto). Timestep shift, `t' = s*t / (1 + (s-1)*t)`. Auto is
+3.0 on turbo and 1.0 otherwise. On ace-server, `-1` computes a shift from duration
+and step count instead (between 1 and 6, centred on 3).
 
-### DiT flow matching (ace-synth)
+**`custom_timesteps`** (string, default `""`). Comma-separated descending timesteps,
+for example `"0.97,0.76,0.615,0.5,0.395,0.28,0.18,0.085,0"`. Overrides
+`inference_steps` and `shift`. The last value is the endpoint, so N values give N-1
+steps.
 
-**`inference_steps`** (int, default `0` = auto)
-Number of diffusion denoising steps. `0` resolves from the loaded model:
-turbo = `8`, base/SFT = `50`.
+**`dit_sliding_window`** (int, default -1). Window override, in tokens (12.5 per
+second), for the DiT's sliding-window attention layers. `-1` keeps the model's value,
+`0` makes every layer full attention, a positive value sets the window. Larger than
+the trained window is out of distribution.
 
-**`guidance_scale`** (float, default `0.0` = auto)
-CFG scale for the DiT. `0.0` resolves to `1.0` (CFG disabled).
-Any value > 1.0 on a turbo model is overridden to 1.0 with a warning.
+**`latent_shift`**, **`latent_rescale`** (float, defaults 0.0 and 1.0). Applied to the
+DiT output before VAE decode: `latent * latent_rescale + latent_shift`.
+<!-- TODO(verify): on the GGML path through ace-server these look applied twice, once
+     in hot-step-sampler.h from the sideband copy and once in pipeline-synth-ops.cpp
+     from the request copy. Confirm before relying on non-default values. -->
 
-**`shift`** (float, default `0.0` = auto)
-Flow-matching schedule shift. Controls the timestep distribution.
-`shift = s*t / (1 + (s-1)*t)`. `0.0` resolves from the loaded model:
-turbo = `3.0`, base/SFT = `1.0`.
+**`lss_strength`** (float, default 0 = off), **`lss_var_thresh`** (default 0.15),
+**`lss_dc_remove`** (default true). Latent Spectral Suppressor: before VAE decode,
+latent channels whose relative variance is under `lss_var_thresh` are attenuated
+toward `1 - lss_strength`, with optional per-channel DC removal.
 
-**`infer_method`** (string, default `""` = ODE Euler)
-Diffusion solver. `""` or `"ode"` uses ODE Euler (one model eval per step,
-same seed always gives same result). `"sde"` uses SDE Stochastic (predicts x0
-then re-noises with fresh Philox noise at each step, producing varied results
-across different trajectories). SDE is reproducible: the per-step noise is
-derived from the original seed so the same seed gives the same SDE trajectory.
+### Source audio and tasks
 
-Turbo preset: `inference_steps=8, guidance_scale=1.0, shift=3.0`.
-Base/SFT preset: `inference_steps=50, guidance_scale=1.0, shift=1.0`.
+**`task_type`** (string, default `"text2music"`). One of `text2music`, `cover`,
+`cover-nofsq`, `repaint`, `lego`, `extract`, `complete`. See
+[Generation modes](#generation-modes).
+
+**`track`** (string, default `""`). Stem name for `lego`, `extract` and `complete`.
+
+**`audio_cover_strength`** (float, default 1.0). Fraction of DiT steps that see the
+source as context. Below 1.0 the remaining steps switch to silence context and the
+text2music instruction.
+
+**`cover_noise_strength`** (float, default 0.0). Starts diffusion from a blend of
+noise and the clean source latents instead of pure noise, when the task uses a
+source context. `1.0` starts close to the source.
+
+**`cover_noise_method`** (string, default `""`). How the schedule is shortened for
+`cover_noise_strength`. `""` truncates the early steps. `"rescale"` keeps the full
+step count and rescales the schedule into the reduced range.
+
+**`repainting_start`**, **`repainting_end`** (float seconds, defaults 0 and -1).
+Region for `repaint` and `lego`. A negative start outpaints before the source; an
+end past the source outpaints after it; `-1` means the end of the source.
+
+### Output
+
+**`output_format`** (string, default `"mp3"`). `mp3`, `wav16`, `wav24` or `wav32`.
+`ace-synth` uses it for the file extension and format. `/synth` uses it when the URL
+has no `?format=`.
+
+**`peak_clip`** (int, default 10). Output normalisation percentile: `0` is plain peak
+normalisation, `10` clips the top 0.001 %, `999` clips the top 0.1 %.
+
+**`mp3_bitrate`** (int, default 128). Used by `/vae` and `/codes-decode`. `/synth`
+and `ace-synth` use the `--mp3-bitrate` flag instead.
+
+**`get_lrc`** (bool, default false). Runs an extra DiT pass for cross-attention
+alignment and produces LRC lyric timestamps. ace-server returns them in the
+`X-LRC-Text` header of the `/job` result.
+
+**`postprocess_plugin`** (string, default `""`). A Lua postprocess plugin to use for
+VAE decode instead of the built-in tiled decoder.
+
+**`pp_vae_reencode`** (bool, default false). Round-trips the audio through the
+post-processing VAE when a PP-VAE model is installed.
+
+**`use_ort_vae`** (bool, default false). Decodes through the ONNX Runtime VAE when
+ace-server was started with `--onnx-dir` and a `vae_decoder.onnx` was found.
+
+**`stream_mode`** (bool, default false), **`stream_depth`** (int, default 8),
+**`stream_chunk_dir`** (string). Routes the DiT through the ring-buffer streaming
+pipeline. Needs an ONNX DiT.
+
+### Models and adapters
+
+**`synth_model`** (string). DiT file name from the registry. Empty keeps the loaded
+DiT on ace-server, or takes the first one.
+
+**`lm_model`** (string). LM file name for `/lm` and `/understand`. Same fallback.
+
+**`vae`** (string). VAE file name for `/vae` and `/codes-decode`. `/synth` selects its
+VAE with the sideband field `vae_model` instead; `ace-synth` always uses the first VAE
+in the registry.
+
+**`adapter`** (string), **`adapter_scale`** (float, default 1.0). One DiT adapter: a
+name from `--adapters`, or on ace-server an absolute path to a `.safetensors` file or
+an adapter directory (`adapter_model.safetensors` or `lokr_weights.safetensors`).
+
+**`adapters`** (array). A stack of DiT adapters; when non-empty it replaces `adapter`.
+Each entry is a name or path string, or an object:
+
+```json
+{ "name": "my-adapter", "scale": 0.8, "gain_curve": [0.0, 1.0, 1.0], "gain_domain": "steps" }
+```
+
+`gain_curve` is an optional list of gains sampled uniformly over the run;
+`gain_domain` is `"t"` (flow-matching time, the default) or `"steps"` (fraction of
+steps). Curves are applied per step and never baked into weights, so changing them
+does not reload the model.
+
+**`adapter_sections`** (array). Per-section adapter masking. One object per lyric
+section, `{ "weights": [...], "size": n }`: `weights` holds each stacked adapter's
+scale for that section and `size` is a relative length hint. Active with two or more
+adapters, or with any stack that uses gain curves. Forces `adapter_mode` to
+`runtime`.
+
+**`lm_adapter`** (string), **`lm_adapter_scale`** (float, default 1.0). A runtime LoRA
+for the ACE-Step planner LM: a name from `<adapters>/lm/` or a path. `/lm` fails the
+job if the name does not resolve.
+
+### ace-server sideband fields
+
+`/synth` reads these with a second parser (`parse_server_fields`). They are not part
+of `AceRequest`, so `/lm` does not echo them back. When `/synth` receives an array,
+only the first object's sideband fields are read.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `vae_model` | `""` | VAE from the registry. An `.onnx` VAE routes decode through ONNX Runtime and encodes with the first non-ONNX VAE |
+| `emb_model` | `""` | Text encoder from the registry |
+| `infer_method` | `"euler"` | Solver plugin name. Unknown names fall back to `euler` |
+| `scheduler` | `""` | Scheduler plugin name. Empty uses the shift schedule |
+| `guidance_mode` | `"apg"` | Guidance plugin name. Unknown names fall back to `apg` |
+| `plugin_params` | `{}` | Plugin parameters, `{"pluginName:key": value}`. Values may be strings, numbers or booleans |
+| `apg_momentum`, `apg_norm_threshold` | 0.75, 2.5 | APG tuning |
+| `stork_substeps`, `beat_stability`, `frequency_damping`, `temporal_smoothing` | 10, 0.25, 0.4, 0.13 | Copied into the solver state |
+| `cfg_cutoff_ratio` | 1.0 | Fraction of DiT steps that run CFG |
+| `cache_ratio` | 0.0 | Fraction of middle steps that reuse the previous velocity instead of a forward pass |
+| `custom_timesteps` | `""` | Same as the request field; the sampler reads this copy |
+| `dcw_enabled`, `dcw_mode`, `dcw_scaler`, `dcw_high_scaler` | false, `"low"`, 0.1, 0.0 | Wavelet-domain sampler correction. `dcw_mode` is `low`, `high`, `double` or `pix` |
+| `latent_shift`, `latent_rescale` | 0.0, 1.0 | Same as the request fields |
+| `denoise_strength`, `denoise_smoothing`, `denoise_mix` | 0.0, 0.7, 0.25 | Post-VAE spectral denoiser. Uses the `--noise-profile` noise profile when one was loaded |
+| `adapter_mode` | `"merge"` | `merge`, `runtime` or `runtime_lowrank` |
+| `adapter_runtime_quant` | `"bf16"` | Runtime delta precision: `bf16`, `q8_0`, `q4_k` |
+| `adapter_merge_lowvram` | false | Merge mode: requantise merged weights to the base type instead of F32 |
+| `adapter_group_scales` | all 1.0 | Object with `self_attn`, `cross_attn`, `mlp`, `cond_embed`, `time_embed`, `proj_in` |
+| `adapter_section_align_at` | 0.55 | Fraction of steps before per-section masks are rebuilt from cross-attention alignment. `<= 0` keeps the proportional map |
+| `adapter_section_isolation` | 0.0 | 0 to 1 penalty on self-attention across section boundaries |
+| `rebase_source`, `rebase_beta` | `""`, 0.0 | Nudge adapted weights toward the adapter's training base: a DiT name from the registry, and the strength. Merge mode only |
+| `concepts` | `[]` | Concept steering vectors: `{"name", "path", "target": "dit" or "lm", "alpha", "layers": [...]}` |
+| `concept_extract` | none | `{"out", "name", "positive", "negative", "target_class", "pairs", "null_ref", "top_k"}`. Turns the job into a paired harvest that writes a concept GGUF instead of audio. Needs `out`, `positive` and `negative` |
+| `seed_strength` | 0.0 | Repaint only: bias the region's initial noise toward the `seed_latents` multipart part |
+| `evict_lm` | false | Free the LM before loading the synth pipeline |
+| `vae_chunk` | 0 | Per-request VAE tile size (`0` keeps the loaded value) |
+| `batch_cfg` | -1 | `0` splits CFG into two forwards, `1` batches them, `-1` keeps the default |
+
+<!-- TODO(verify): /lm never parses the sideband, so a concept with target "lm" only
+     reaches the LM through whatever the last /synth left in g_hotstep_params. -->
+
+### MiniMax-Music3 request (`POST /mm3/synth`)
+
+Parsed by `mm3_parse_synth_request` in `engine/src/minimax/mm3-request.h`. Type errors
+are reported, not ignored.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `caption` | required | Structured caption. Markdown formatting is cleaned before use |
+| `lyrics` | `""` | Empty means instrumental |
+| `duration` | required unless `max_frames` | Seconds. Rendered at 25 frames per second, capped at 9000 frames |
+| `max_frames` | none | Frame count; wins over `duration` |
+| `seed` | -1 | `-1` draws a random seed |
+| `ar_seed` | -1 | Separate seed for the planner stage; `-1` ties it to `seed` |
+| `steps` | checkpoint (30) | Flow steps, 1 to 1000 |
+| `cfg_flow` | checkpoint (1.7) | Flow CFG, above 0 up to 100 |
+| `flow_uncond_interval` | 1 | 1 to 16. Above 1, the unconditional branch runs only every Nth step |
+| `get_wav_bits` | 16 | 16, 24 or 32 |
+| `get_lrc` | false | Lyric timestamps from the LM's alignment heads |
+| `get_ar_codes` | false | Keep the planner codes on the job (`GET /mm3/job?id=&ar=1` or `GET /mm3/take?...&ar=1`) |
+| `dit_backend` | `"ggml"` | `ggml` or `tensorrt` |
+| `depth_fused` | true | Fused depth-decoder graph with GPU sampling |
+| `infer_method`, `scheduler`, `guidance_mode`, `plugin_params` | `""`, `""`, `""`, `{}` | Lua plugins for the flow stage. Empty keeps the native Euler path and plain CFG. `guidance_mode: "apg"` uses native APG |
+| `flow_shift` | 1.0 | Above 0 up to 20. Only used with a scheduler plugin |
+| `apg_norm_threshold` | 2.5 | 0 to 100 |
+| `lm_temperature`, `lm_top_k`, `lm_top_p` | 1.0, 0, 0.0 | Planner sampling. `lm_top_k` 0 uses the checkpoint's value |
+| `lm_rep_penalty`, `lm_rep_window`, `lm_rep_mode`, `lm_dry_base`, `lm_dry_min_len` | 1.0, 320, `"dry"`, 1.75, 15 | Planner repetition penalty, in 25 fps frames |
+| `takes` | 1 | Songs from one planner pass, 1 to 8, clamped to the checkpoint's row budget. Take t uses `seed + t`; fetch with `GET /mm3/take` |
+| `require_eos`, `stop_after_first_eos`, `eos_rounds`, `min_frames` | false, false, 4, 0 | Natural-ending controls. `eos_rounds` is 1 to 16; `min_frames` drops plans shorter than that |
+| `reuse_ar` | false | Reuse the previous planner output when every planner input matches |
+| `forced_frame_hiddens_file`, `save_frame_hiddens`, `frame_hiddens_save_path` | | Load or save the planner output as a `.mm3hiddens` file |
+| `forced_semantic`, `forced_acoustic` | | Replay captured codes. Both or neither; `forced_acoustic` has 7 entries per semantic entry |
+| `stream` | false | Emit audio per window for `GET /mm3/stream` |
+| `lm_adapter` | `""` | Path to a PEFT LM adapter |
+| `lm_adapter_mode` | `"runtime"` | `runtime` or `merge` |
+| `lm_adapter_merge_gpu` | true | Merge mode: merge on the GPU |
+| `lm_adapter_scale`, `lm_adapter_scale_attn`, `lm_adapter_scale_mlp`, `lm_adapter_scale_early`, `lm_adapter_scale_mid`, `lm_adapter_scale_late` | | Adapter scales: overall, by module group, and by depth third |
+| `lm_soft_off` | false | Run the adapter's weight delta without its artist token or KV prefix |
+
+### YuE2 request (`POST /yue2/synth`)
+
+Parsed by `yue2_parse_request` in `engine/src/yue2/yue2-request.h`.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `style` | required | Style tags |
+| `lyrics` | `""` | Lyrics |
+| `cot` | `"off"` | `off`, `melody` or `full`. `melody` and `full` run the ABC plan stage |
+| `abc` | none | ABC text to use instead of running the plan stage |
+| `plan_only` | false | Stop after the plan stage and return the ABC score. Needs `cot` other than `off` |
+| `semantic_only` | false | Stop after the semantic stage and return the codec ids |
+| `semantic_retries` | 0 | Re-draw a song whose semantic stage hits its cap, up to this many times |
+| `seed` | random | Song seed. Song i of a batch uses `seed + i` |
+| `noise_seed` | `seed` | NAR noise seed. Variation j uses `noise_seed + j` |
+| `lm_batch_size` | 1 | Songs per request, 1 to 4 |
+| `synth_batch_size` | 1 | Noise variations per song, 1 to 9 |
+| `plan_<field>`, `semantic_<field>` | checkpoint | Per-stage sampler overrides. `<field>` is `temperature`, `top_p`, `top_k`, `repetition_penalty`, `penalty_window`, `min_tokens` or `max_tokens` |
+| `cfg_scale` | resolved from the checkpoint | NAR CFG |
+| `ode_steps` | checkpoint | NAR ODE steps |
+| `ode_method` | `"midpoint"` | The only method implemented |
+| `infer_method`, `scheduler`, `plugin_params` | `""`, `""`, `{}` | Lua solver and scheduler for the NAR stage. Empty keeps native midpoint and the uniform grid |
+| `nar_cache_ratio` | 0.0 | Fraction of middle NAR steps that reuse the last velocity |
+| `nar_chunk_frames` | 0 | NAR chunk cap in frames (25 per second). 0 renders a normal song in one chunk |
+| `end_threshold` | 0.0 | 0 to 1. Stop the semantic stage when the sampler puts this much probability on the end token |
+| `end_bias`, `end_bias_from_sec`, `end_bias_ramp_sec` | 0.0 | Additive end-token bias (-50 to 50), when it starts, and its ramp |
+| `codec_ids` | none | Semantic codes (0 to 32767) to render instead of sampling. Single song, single variation |
+| `preview_max_frames` | 0 | Bound on semantic frames, 0 to 9000 (training previews) |
+| `vae_variant` | `"standard"` | `standard` or `legacy` |
+| `noise_source`, `noise_fixture_path` | `"native"` | Validation only: `fixture` reads NAR noise from a raw f32 file |
+| `id` | `"yue2"` | Request label |
+
+Progress and results for `/yue2/synth` use the shared `GET /job`.
+
+## Generation modes
+
+These apply to ACE-Step requests. The engine reads what is in the JSON: an empty
+field means "fill it", a filled field means "keep it". Which LM call runs before the
+DiT is the client's choice; the DiT side routes on `task_type` alone.
+
+**Caption only** (`lyrics` empty). The LM runs phase 1 with the inspire instruction
+to write lyrics and metadata through CoT, then phase 2 for audio codes. CFG is off in
+phase 1. With `lm_batch_size > 1` each item runs its own phase 1, so the songs
+differ.
+
+**Caption and lyrics.** Phase 1 fills missing metadata (and, with
+`use_cot_caption`, rewrites the caption), then phase 2 writes codes. Given metadata
+is never overwritten.
+
+**Everything given** (caption, lyrics, bpm, duration, keyscale, timesignature, and
+`use_cot_caption` false). Phase 1 is skipped and the LM writes codes directly.
+
+**Instrumental** (`lyrics` is `"[Instrumental]"`). Treated as lyrics given, so no
+lyrics are written.
+
+**Passthrough** (`audio_codes` set). The LM is skipped and the DiT decodes the codes.
+
+**Cover** (`task_type: "cover"` with source audio). The source is resampled to
+48 kHz, VAE-encoded, and put through an FSQ round trip (25 Hz to 5 Hz and back),
+which loses fine detail, so the DiT reinterprets it freely.
+`audio_cover_strength` sets how many steps see the source. The duration comes from
+the source.
+
+**Cover without FSQ** (`task_type: "cover-nofsq"`). The same, but the DiT gets the
+clean 25 Hz latents and stays close to the source. Pairing it with the same file as
+the reference audio is the usual setup.
+
+**Repaint** (`task_type: "repaint"` with source audio). Regenerates the region from
+`repainting_start` to `repainting_end` and keeps the rest. Outside the region the
+source latents are spliced back before decode, and on the audio path the original
+samples are spliced back after decode.
+
+```json
+{
+    "task_type": "repaint",
+    "caption": "Smooth jazz guitar solo with reverb",
+    "lyrics": "[Instrumental]",
+    "repainting_start": 10.0,
+    "repainting_end": 25.0
+}
+```
+
+**Lego** (`task_type: "lego"`, source audio and `track`). Generates a new
+instrument layer in the context of a backing track. Takes an optional region.
+
+**Extract** (`task_type: "extract"`, source audio and `track`). Isolates one stem.
+
+**Complete** (`task_type: "complete"`, source audio and `track`). Builds a full mix
+around an isolated stem. `track` can be a preformatted list such as
+`"VOCALS | DRUMS"`.
+
+Standard `track` names: `vocals`, `backing_vocals`, `drums`, `bass`, `guitar`,
+`keyboard`, `percussion`, `strings`, `synth`, `fx`, `brass`, `woodwinds`.
+
+| Task | Turbo DiT | Base or SFT DiT |
+|---|---|---|
+| text2music | yes | yes |
+| cover, cover-nofsq | yes | yes |
+| repaint | yes | yes |
+| lego, extract, complete | runs, with a warning that turbo output is incoherent | yes |
+
+The instruction the DiT receives per task is defined in `engine/src/task-types.h`.
 
 ## ace-lm reference
 
 ```
-Usage: ace-lm --request <json> --lm <gguf> [options]
+Usage: ace-lm --models <dir> --request <json> [options]
 
 Required:
-  --request <json>       Input request JSON
-  --lm <gguf>            5Hz LM GGUF file
+  --models <dir>         Directory of GGUF model files
+  --request <json>       Input request JSON (carries lm_model)
 
 Debug:
   --max-seq <N>          KV cache size (default: 8192)
@@ -686,32 +517,26 @@ Debug:
   --dump-tokens <path>   Dump prompt token IDs (CSV)
 ```
 
-Three LLM sizes: 0.6B (fast), 1.7B, 4B (best quality).
-
-Batching is controlled by `lm_batch_size` in the request JSON (default 1).
-Model weights are read once per decode step for all N sequences.
+The LM comes from the request's `lm_model`, resolved against `--models`; empty takes
+the first LM found. The input is never modified. Output is always numbered:
+`request.json` produces `request0.json` .. `requestN-1.json`, one per
+`lm_batch_size` item. `lm_mode` is honoured.
 
 ## ace-synth reference
 
 ```
-Usage: ace-synth --request <json...> --embedding <gguf> --dit <gguf> --vae <gguf> [options]
+Usage: ace-synth --models <dir> --request <json...> [options]
 
 Required:
+  --models <dir>          Directory of GGUF model files
   --request <json...>     One or more request JSONs (from ace-lm --request)
-  --embedding <gguf>      Embedding GGUF file
-  --dit <gguf>            DiT GGUF file
-  --vae <gguf>            VAE GGUF file
 
-Audio:
+Optional:
+  --adapters <dir>        Directory of adapter files (enables JSON adapter field)
   --src-audio <file>      Source audio (WAV or MP3)
   --ref-audio <file>      Timbre reference audio (WAV or MP3)
 
-Adapter:
-  --adapter <path>        Adapter safetensors file or PEFT directory
-  --adapter-scale <float> Adapter scaling factor (default: 1.0)
-
-Output:
-  --format <fmt>          Output format: mp3, wav16, wav24, wav32 (default: mp3)
+Audio encoding:
   --mp3-bitrate <kbps>    MP3 bitrate (default: 128)
 
 Memory control:
@@ -725,59 +550,69 @@ Debug:
   --dump <dir>            Dump intermediate tensors
 ```
 
-Models are loaded once and reused across all requests.
+The first request picks the models: `synth_model` for the DiT (empty takes the first),
+`adapter` or `adapters` from `--adapters`, and `output_format` for the output. The
+text encoder and VAE are always the first in their registry bucket. All requests run
+as one GPU batch, with `synth_batch_size` expanding each. Output is
+`<request basename><index>.mp3` (or `.wav`), so `request0.json` gives
+`request00.mp3`.
 
-When `--adapter` is provided, deltas are merged into the DiT projection
-weights at load time (before QKV fusion and GPU upload). For LoRA, the
-safetensors file is parsed directly, each lora_A/lora_B pair is multiplied
-(`alpha/rank * scale * B @ A`), and the result is added to the base weight
-in F32 before requantizing back to the original GGUF type. This is a
-static merge: inference runs at full speed with no adapter overhead.
-`--adapter` accepts either a safetensors file or a directory containing
-`adapter_model.safetensors` and `adapter_config.json` (PEFT format).
+`--src-audio` supplies the source for cover, repaint, lego, extract and complete.
+`--ref-audio` supplies a timbre reference for any task. Both are resampled to 48 kHz
+and VAE-encoded.
 
-`--src-audio` provides source content for cover, repaint, lego, extract and
-complete tasks. The audio (WAV or MP3, any sample rate) is resampled to 48kHz
-and VAE-encoded once. `audio_cover_strength` in the JSON controls how many
-DiT steps use the source context (default 1.0). `cover_noise_strength`
-blends the initial noise with source latents to start diffusion closer to
-the source (default 0.0).
+The CLI reads only `AceRequest` fields. The sideband fields in
+[ace-server sideband fields](#ace-server-sideband-fields) are not available here,
+so sampling uses the default solver (`euler`) and guidance (`apg`).
 
-`--ref-audio` provides a timbre reference, independent of the task. The audio
-is VAE-encoded and fed to the 4-layer timbre encoder, which pools to a single
-embedding via frame[0]. This conditions the DiT to match the tonal quality of
-the reference. When omitted, the timbre encoder receives a single silence
-frame (no timbre conditioning).
+```bash
+# LM: request.json -> request0.json (metadata, lyrics, codes)
+./ace-lm --models models --request /tmp/request.json
 
-Batching comes from two sources: multiple `--request` files on the CLI
-(or JSON array on the server), and `synth_batch_size` inside each request.
-Both are combined: 2 request files with `synth_batch_size=3` yields 6 tracks
-in one GPU pass.
+# DiT + VAE: request0.json -> request00.mp3
+./ace-synth --models models --request /tmp/request0.json
+
+# Cover from an existing song, no LM
+./ace-synth --models models --request /tmp/cover.json --src-audio song.wav
+```
+
+## ace-understand reference
+
+Reverse pipeline: audio in, then VAE encode, FSQ tokenize and the LM's understand
+prompt. The output JSON is a request that `ace-lm` or `ace-synth` can take.
+
+```
+Usage: ace-understand --models <dir> --src-audio <file> [--request <json>] [options]
+
+Required:
+  --models <dir>          Directory of GGUF model files
+  --src-audio <file>      Source audio (WAV or MP3, any sample rate)
+
+Optional:
+  --request <json>        Request JSON carrying model selection and
+                          sampling params (lm_model, synth_model,
+                          lm_temperature, lm_top_p, lm_top_k)
+
+When no --request is given, understand defaults apply
+(temperature 0.3, top_p disabled).
+
+Output:
+  -o <json>               Output JSON (default: stdout summary)
+
+Memory control:
+  --vae-chunk <N>         Latent frames per tile (default: 256)
+  --vae-overlap <N>       Overlap frames per side (default: 64)
+
+Debug:
+  --max-seq <N>           KV cache size (default: 8192)
+  --no-fsm                Disable FSM constrained decoding
+  --no-fa                 Disable flash attention
+  --dump <dir>            Dump tok_latents + tok_codes (skip LM)
+```
+
+The DiT file supplies the FSQ tokenizer weights.
 
 ## ace-server reference
-
-HTTP server exposing the same pipelines as `ace-lm`, `ace-synth`, and
-`ace-understand`. One binary, one port.
-
-POST /lm, POST /synth, and POST /understand are all **asynchronous**: they
-return a job ID immediately, push the request to a FIFO queue, and the single
-worker thread processes jobs in order. Clients poll GET /job?id=N for status
-and fetch results with GET /job?id=N&result=1.
-Cancel: POST /job?id=N&cancel=1 stops a specific job.
-
-`--models` scans a directory for GGUF files and classifies each by its
-`general.architecture` metadata into LM, Text-Enc, DiT, and VAE buckets.
-Each request loads the model, executes, and frees it. With `--keep-loaded`,
-models persist in VRAM and are reused across requests. GPU access is
-serialized by the single worker thread (no mutex needed).
-
-| Pipeline | GGUF architectures needed | Enables | VRAM (approx) |
-|:---------|:--------------------------|:--------|:--------------|
-| LM | `acestep-lm` | /lm | ~7 GB (batch=1) |
-| Synth | `acestep-text-enc` + `acestep-dit` + `acestep-vae` | /synth | ~12 GB |
-| Understand | `acestep-lm` + `acestep-dit` + `acestep-vae` | /understand | ~7 GB |
-
-Endpoints whose pipeline has no models in the registry return 501.
 
 ```
 Usage: ace-server --models <dir> [options]
@@ -792,6 +627,13 @@ Memory control:
   --keep-loaded           Keep models in VRAM between requests
   --vae-chunk <N>         Latent frames per tile (default: 256)
   --vae-overlap <N>       Overlap frames per side (default: 64)
+
+ONNX/TensorRT:
+  --onnx-dir <dir>        Directory with ONNX models (e.g. vae_decoder.onnx)
+
+Speculative decoding:
+  --draft-lm <path>       Path to 0.6B draft LM (auto-discovers if omitted)
+  --no-draft              Disable draft model auto-discovery
 
 Output:
   --mp3-bitrate <kbps>    MP3 bitrate (default: 128)
@@ -809,110 +651,172 @@ Debug:
   --clamp-fp16            Clamp hidden states to FP16 range
 ```
 
-Examples:
+Notes the usage text does not cover:
 
-```bash
-# all models in one directory
-./ace-server --models /path/to/models
+- `--noise-profile <wav>` is also accepted. It loads a noise profile for the
+  spectral denoiser (`denoise_strength`).
+- `--draft-lm` auto-discovery is disabled in the code; only an explicit path enables
+  speculative decoding.
+- `--max-batch` is clamped to 1..9.
+- `--models` is scanned at startup, and its `onnx/` subfolder too. `--adapters` is
+  scanned for DiT adapters and its `lm/` subfolder for planner-LM adapters.
+- `--onnx-dir` looks for `vae/vae_decoder.onnx`, then `vae_decoder.onnx`.
+- The app starts ace-server on port 8085.
 
-# with adapters
-./ace-server --models /path/to/models --adapters /path/to/adapters
+| Pipeline | Needs | Enables |
+|---|---|---|
+| LM | an LM GGUF | `/lm` |
+| Synth | DiT, text encoder and VAE | `/synth`, `/warm` |
+| Understand | LM, DiT and VAE | `/understand` |
 
-# custom port and batch limit
-./ace-server --models /path/to/models --host 0.0.0.0 --port 8085 --max-batch 2
-```
+Endpoints whose pipeline has no models return 501. With only MM3 or YuE2 weights
+present, the server still starts and serves those routes.
 
 ### Endpoints
 
+All compute endpoints are asynchronous. They return `{"id":"<hex>"}` at once and put
+the work on the single GPU queue.
+
 ```
-POST /lm                        Submit LM generation, returns job ID
-POST /lm?mode=inspire           Submit inspire generation, returns job ID
-POST /lm?mode=format            Submit format generation, returns job ID
-  body: application/json AceRequest
-  response: {"id":"1"}
+POST /lm[?keep_loaded=1]         LM job. Body: AceRequest JSON. lm_mode picks
+                                 generate, inspire or format.
+POST /synth[?format=mp3|wav16|wav24|wav32][&keep_loaded=1]
+                                 Synth job. Body: AceRequest JSON, or an array of
+                                 them, or multipart/form-data with parts:
+                                   request      JSON text (required)
+                                   audio        source audio (WAV or MP3)
+                                   ref_audio    timbre reference audio
+                                   src_latents  raw f32 [T*64], replaces audio
+                                   ref_latents  raw f32 [T*64], replaces ref_audio
+                                   seed_latents raw f32 [T*64], see seed_strength
+                                 Without ?format= the first request's output_format
+                                 is used.
+POST /understand                 Understand job. multipart/form-data: audio
+                                 (required), request (optional JSON).
+POST /vae                        VAE job. multipart/form-data: audio (encode,
+                                 returns raw f32 latents) or src_latents (decode,
+                                 returns audio), plus optional request JSON (vae,
+                                 output_format, peak_clip, mp3_bitrate).
+POST /codes-decode               Codes to audio. Body: AceRequest JSON with
+                                 audio_codes (required), synth_model, vae,
+                                 output_format, peak_clip.
+POST /warm[?keep_loaded=1]       Preload. Body: {"dit", "vae", "adapter",
+                                 "adapter_scale"}.
 
-POST /synth                     Submit synth generation (MP3), returns job ID
-POST /synth?wav=1               Submit synth generation (WAV), returns job ID
-  body: application/json AceRequest or [AceRequest, ...]
-  body: multipart/form-data (request + audio + ref_audio)
-  response: {"id":"2"}
+GET  /job?id=N                   Status: {"status", "phase", "phase_step",
+                                 "phase_total", "adapter_progress"}. status is
+                                 running, done, failed or cancelled. YuE2 jobs add
+                                 end_reason, stage_end_reasons, tracks and abc.
+GET  /job?id=N&result=1          Result. /lm and /understand: JSON array of
+                                 AceRequest. /synth: one audio file, or
+                                 multipart/mixed for a batch; LRC text in the
+                                 X-LRC-Text header when get_lrc was set.
+GET  /job?id=N&latent=1          /synth: the first track's post-DiT latents, raw
+                                 f32 [T*64].
+POST /job?id=N&cancel=1          Cancel a job.
+GET  /jobs                       Every job in the table.
 
-POST /understand                Submit understand, returns job ID
-  body: multipart/form-data (audio + optional request)
-  body: application/json (codes only mode)
-  response: {"id":"3"}
-
-GET  /job?id=N                  Poll job status
-  response: {"status":"running|done|failed|cancelled"}
-
-GET  /job?id=N&result=1         Fetch job result
-  LM/understand: application/json [AceRequest, ...]
-  synth jobs:    audio/mpeg or audio/wav (single track)
-  synth jobs:    multipart/mixed (batch, each part is raw audio)
-
-POST /job?id=N&cancel=1         Cancel a specific job
-  response: {"status":"cancelled"}
-
-GET  /health                    Server health check
-  response: {"status":"ok"}
-
-GET  /props                     Server config, models, presets, defaults
-  response: application/json
-
-GET  /logs                      SSE stream of server stderr
-  response: text/event-stream
-
-GET  /                          Embedded WebUI (gzipped HTML)
+GET  /health                     {"status":"ok"}
+GET  /props                      version, models (lm, embedding, dit, vae),
+                                 adapters, lm_adapters, cli (max_batch,
+                                 mp3_bitrate), default (full AceRequest), presets
+                                 (turbo, sft).
+GET  /logs                       Server stderr as server-sent events.
+GET  /plugins                    Lua plugin registry.
+GET  /vram                       {"used_mb", "total_mb", "free_mb"} (zeros on
+                                 non-CUDA builds).
+GET  /models/loaded              Resident modules: {"loaded": [{"label", "mb",
+                                 "in_use"}]}.
+POST /models/unload              Body {"label"}. Evicts one module.
+POST /models/restore-policy      Undo ?keep_loaded=1. 409 when --keep-loaded was
+                                 given on the command line.
+GET  /                           Embedded web UI (gzip).
 ```
 
-`lm_model`, `synth_model`, `adapter`, `adapter_scale` fields in the JSON body
-select which model and adapter to load. `synth_batch_size` duplicates a
-request for multiple DiT variations (clamped to 9). Error responses are
-JSON: `{"error":"message"}` with 400, 500, 501, or 503 status.
+Post-processing endpoints. These run synchronously on the HTTP thread, except
+SuperSep, which has its own job table.
 
-**GET /props** returns available models, server configuration, and the
-default AceRequest (source of truth for webui dropdowns and placeholders):
-```json
-{
-  "models": {
-    "lm": ["acestep-5Hz-lm-0.6B-Q8_0.gguf", "acestep-5Hz-lm-4B-Q8_0.gguf"],
-    "embedding": ["Qwen3-Embedding-0.6B-Q8_0.gguf"],
-    "dit": ["acestep-v15-turbo-Q8_0.gguf", "acestep-v15-xl-turbo-Q8_0.gguf"],
-    "vae": ["vae-BF16.gguf"]
-  },
-  "adapters": [],
-  "cli": { "max_batch": 1, "mp3_bitrate": 128 },
-  "default": { "caption": "", "duration": 0, ... }
-}
 ```
+POST /pp-vae-reencode[?blend=0..1][&backend=onnx|gguf][&out_fmt=s16|s24|f32]
+                                 Body: WAV. PP-VAE round trip. blend 0 is fully
+                                 re-encoded, 1 is the original.
+POST /sa3-refine?...             Body: WAV or MP3. Stable Audio 3 refine. Query
+                                 parameters are documented above the handler in
+                                 hot-step-server.cpp (tokens, n_tokens, strength,
+                                 steps, sampler, seed, rms_match, env_match, mix,
+                                 band_blend, band_freq, band_width, out_sr,
+                                 backend, adapters, solver, scheduler,
+                                 guidance_mode, guidance_scale, plugin_params).
+POST /supersep/separate?level=0..4
+                                 Body: audio. Starts stem separation, returns {"id"}.
+GET  /supersep/progress?id=      Progress.
+GET  /supersep/result?id=        Stem list.
+GET  /supersep/serve?id=&stem=N  One stem as WAV.
+POST /supersep/release?id=       Drop a job and free its stems.
+POST /supersep/recombine         Body {"id", "stems": [{"index", "volume",
+                                 "muted"}]}. Returns the mix as WAV.
+POST /spectral-lifter?...        Body: WAV. Query: denoise_strength, noise_floor,
+                                 hf_mix, transient_boost, shimmer_reduction.
+```
+
+`/pp-vae-reencode`, `/sa3-refine`, `/supersep/serve`, `/supersep/recombine` and
+`/spectral-lifter` take `?out_fmt=s16|s24|f32` for the returned WAV; the default is
+`s16`.
+
+MiniMax-Music3 and YuE2 endpoints. Request fields for the two synth routes are in
+[MiniMax-Music3 request](#minimax-music3-request-post-mm3synth) and
+[YuE2 request](#yue2-request-post-yue2synth).
+
+```
+GET  /mm3/props                  MM3 files, config, what is loaded.
+POST /mm3/warm, /mm3/unload      Load or free MM3 weights.
+POST /mm3/select-model           Body {"lm", "depth", "cond", "dit", "voc"} quant
+                                 tokens ("" = best available).
+POST /mm3/synth                  MM3 job on the shared queue.
+GET  /mm3/job?id=                MM3 progress: stage, window, seed, timings.
+                                 &ar=1 returns the planner codes.
+GET  /mm3/take?id=&take=N        Audio for one take of an ensemble render.
+                                 &lrc=1 returns its LRC, &ar=1 its planner codes.
+GET  /mm3/stream?id=             Live audio chunks of a running job (one reader).
+POST /mm3/tokenize-check         Prompt token count (5000-token limit).
+POST /mm3/imatrix                Activation statistics for quantize --imatrix.
+POST /mm3/voc-decode, /mm3/dit-forward, /mm3/flow-sample, /mm3/depth-frame,
+     /mm3/cond-encode, /mm3/lm-plan, /mm3/synth-e2e
+                                 Bring-up and parity endpoints. They run outside
+                                 the job queue.
+
+GET  /yue2/props                 YuE2 files, config, what is loaded.
+POST /yue2/warm, /yue2/unload    Load or free YuE2 weights.
+POST /yue2/select-model          Body {"vae_variant", "lm_type", "lm_adapter",
+                                 "lm_adapter_scale"}; absent keys are left alone.
+POST /yue2/synth                 YuE2 job; poll with GET /job.
+POST /yue2/tokenize-check        Prompt assembly and token count, no GPU work.
+POST /yue2/imatrix               Activation statistics for quantize --imatrix.
+POST /yue2/align                 multipart: audio + lyrics. Forced alignment.
+```
+
+Errors are JSON, `{"error":"message"}`, with a 4xx or 5xx status.
 
 ### Concurrency
 
-A single GPU mutex serializes all compute. LM and synth workers run in
-detached threads and block on the mutex until the GPU is free. Understand
-uses try_lock and returns 503 instantly if the GPU is busy.
+One worker thread runs every GPU job in FIFO order: ACE-Step, MM3 and YuE2 alike.
+The job table holds 32 entries; finished jobs are evicted oldest first and running
+jobs never are. Each job has its own cancel flag, and a cancel during adapter
+precompute takes effect between deltas.
 
-Completed jobs are stored in memory (LRU, 10 entries). A disconnected
-client can poll and fetch the result after reconnecting. Each job has
-its own cancel flag so multi-user cancel is safe.
+By default the model store keeps one module in VRAM at a time. `--keep-loaded`
+keeps everything resident for the life of the process; `?keep_loaded=1` does the
+same from a request, until `POST /models/restore-policy`.
 
-By default, each request loads its model, executes, and frees it.
-With `--keep-loaded`, models persist in VRAM and are reused. If the
-requested model differs from the one currently loaded, the old model
-is freed and the new one is loaded before processing.
-
-Request bodies are limited to 256 MB (source + reference audio, up to
-10 minutes WAV each).
+Request bodies are limited to 256 MB. Socket read and write timeouts are 600 s.
 
 ## neural-codec reference
 
-GGML-native neural audio codec based on the Oobleck VAE encoder and decoder.
-Serves two purposes: validating the precision of the full VAE chain (encode +
-decode roundtrip), and compressing music at 6.8 kbit/s with no perceptible
-difference from the original.
+ACE-Step VAE encoder and decoder as an audio codec: 48 kHz stereo to 64-channel
+latents at 25 Hz and back.
 
 ```
-Usage: neural-codec --vae <gguf> --encode|--decode -i <input> [-o <o>] [--q8|--q4]
+Usage: neural-codec --vae <gguf> --encode|--decode -i <input> [-o <output>] [--q8|--q4]
 
 Required:
   --vae <path>            VAE GGUF file
@@ -938,239 +842,31 @@ Latent formats (decode auto-detects):
   NAC4: header + per-frame Q4. ~6.8 kbit/s.
 ```
 
-The encoder is the symmetric mirror of the decoder: same snake activations,
-same residual units, strided conv1d for downsampling instead of transposed
-conv1d for upsampling. No new GGML ops. Downsample 2x4x4x6x10 = 1920x.
-
-48kHz stereo audio is compressed to 64-dimensional latent frames at 25 Hz.
-Three output formats, decode auto-detects from file content:
-
-| Format | Frame size | Bitrate | 3 min song | vs f32 (cossim) |
-|--------|-----------|---------|------------|-----------------|
-| f32    | 256B      | 51 kbit/s | 1.1 MB   | baseline        |
-| NAC8   | 66B       | 13 kbit/s | 290 KB   | 0.9999          |
-| NAC4   | 34B       | 6.8 kbit/s | 150 KB  | 0.989           |
-
-NAC = Neural Audio Codec. The NAC8 and NAC4 file formats are headerless
-except for a 4-byte magic (`NAC8` or `NAC4`) and a uint32 frame count.
-Q8 quantization error is 39 dB below the VAE reconstruction error (free).
-Q4 quantization error is 16 dB below the VAE reconstruction error (inaudible
-on most material).
+NAC8 and NAC4 files start with an 8-byte header: the 4-byte magic (`NAC8` or
+`NAC4`) and a uint32 frame count. A NAC8 frame is 66 bytes (an f16 scale and 64
+int8 values).
 
 ```bash
-# encode (Q4: 6.8 kbit/s, ~150 KB for 3 minutes)
 ./neural-codec --vae models/vae-BF16.gguf --encode --q4 -i song.wav -o song.nac4
-
-# encode (Q8: 13 kbit/s, ~290 KB for 3 minutes)
-./neural-codec --vae models/vae-BF16.gguf --encode --q8 -i song.wav -o song.nac8
-
-# decode (auto-detects format)
 ./neural-codec --vae models/vae-BF16.gguf --decode -i song.nac4 -o song_decoded.wav
-
-# roundtrip validation: compare song.wav and song_decoded.wav with your ears
 ```
 
 ## mp3-codec reference
 
-Standalone MIT-licensed MPEG1 Layer III encoder and decoder. No external
-dependencies. The encoder is used by `ace-synth` for MP3 output. The decoder
-uses minimp3 (CC0). Reads WAV or MP3, writes WAV or MP3 (auto-detected
-from output extension).
+Standalone MP3 encoder and decoder. The encoder in `engine/mp3/` is the one
+`ace-synth` and ace-server use for MP3 output. The mode follows the output
+extension.
 
 ```
-Usage: mp3-codec -i <input> -o <o> [options]
+Usage: mp3-codec -i <input> -o <output> [options]
 
   -i <path>     Input file (WAV or MP3)
   -o <path>     Output file (WAV or MP3)
   -b <kbps>     Bitrate for MP3 encoding (default: 128)
   --format <f>  WAV format: wav16, wav24, wav32 (default: wav16)
-
-Mode is auto-detected from output extension.
-
-Examples:
-  mp3-codec -i song.wav -o song.mp3
-  mp3-codec -i song.wav -o song.mp3 -b 192
-  mp3-codec -i song.mp3 -o song.wav
-  mp3-codec -i song.mp3 -o song.wav --format wav32
 ```
-
-## ace-understand reference
-
-Reverse pipeline: audio (or pre-existing audio codes) -> LM understand ->
-metadata + lyrics. The output JSON is reusable as ace-lm or ace-synth input.
-
-Two input modes: `--src-audio` runs the full chain (VAE encode + FSQ tokenize +
-LM), `--request` with an `audio_codes` field skips straight to the LM.
-
-```
-Usage: ace-understand [--src-audio <file> --dit <gguf> --vae <gguf> | --request <json>] --lm <gguf>
-
-Audio input (full pipeline):
-  --src-audio <file>      Source audio (WAV or MP3, any sample rate)
-  --dit <gguf>            DiT GGUF (for FSQ tokenizer weights + silence_latent)
-  --vae <gguf>            VAE GGUF (for audio encoding)
-
-Code input (skip VAE + tokenizer):
-  --request <json>        Request JSON with audio_codes field
-
-Required:
-  --lm <gguf>             5Hz LM GGUF file
-
-Output:
-  -o <json>               Output JSON (default: stdout summary)
-
-Sampling params (lm_temperature, lm_top_p, lm_top_k) come from the
-request JSON. Without --request, understand defaults apply
-(temperature=0.3, top_p disabled).
-
-Memory control:
-  --vae-chunk <N>         Latent frames per tile (default: 256)
-  --vae-overlap <N>       Overlap frames per side (default: 64)
-
-Debug:
-  --max-seq <N>           KV cache size (default: 8192)
-  --no-fsm                Disable FSM constrained decoding
-  --no-fa                 Disable flash attention
-  --dump <dir>            Dump tok_latents + tok_codes (skip LM)
-```
-
-## Architecture
-
-```
-ace-lm (Qwen3 causal LM, 0.6B/1.7B/4B)
-  Phase 1 (if needed): CoT generates bpm, keyscale, timesignature, lyrics
-  Phase 2: audio codes (5Hz tokens, FSQ vocabulary)
-  Both phases batched: N sequences per forward, weights read once
-  CFG with dual KV cache per batch element (cond + uncond)
-  Output: request0.json .. requestN-1.json
-
-ace-synth
-  BPE tokenize
-  Qwen3-Embedding (28L text encoder)
-  CondEncoder (lyric 8L + timbre 4L + text_proj)
-  FSQ detokenizer (audio codes -> flow matching source latents)
-  Adapter merge (optional: LoRA safetensors delta -> dequant/merge/requant at load)
-  DiT (2B: 24L H=2048, XL: 32L H=2560, flow matching ODE Euler or SDE Stochastic)
-  VAE (AutoencoderOobleck, tiled decode)
-  WAV stereo 48kHz
-
-ace-understand (reverse pipeline)
-  Audio read (WAV/MP3, any rate -> 48kHz stereo)
-  VAE encode (tiled, AutoencoderOobleck encoder)
-  FSQ tokenize (latent -> 5Hz codes via 2L attention pooler)
-  Qwen3 LM (understand prompt: codes -> CoT metadata + lyrics)
-  FSM constrains CoT fields, audio codes blocked after </think>
-  No CFG, no batch. Single sequence, greedy-ish (temperature=0.3)
-  Output: JSON with caption, lyrics, bpm, key, duration, language
-```
-
-## LM specifics
-
-ace-lm is not a general-purpose chat engine. It is a two-phase autoregressive
-pipeline specialized for ACE-Step music generation.
-
-Phase 1 (CoT) generates structured metadata (bpm, keyscale, timesignature, caption,
-duration, language) and optionally lyrics via chain-of-thought reasoning. An FSM
-(finite state machine) built from a prefix tree enforces valid field names and values
-at every decode step, hard-masking invalid tokens before sampling.
-
-Phase 2 (audio codes) generates 5Hz FSQ tokens. The FSQ codec uses levels
-[8,8,8,5,5,5] producing 64000 distinct codes (8*8*8*5*5*5). The tokenizer
-reserves 65535 slots (audio_code_0 to audio_code_65534) appended to the base
-Qwen3 vocabulary; the 1535 extra slots are unused by the codec. A partial LM
-head projects only the audio code subrange of the embedding matrix, cutting
-the output GEMM by 70% compared to full-vocab projection.
-Classifier-free guidance (CFG) is fused into the batch dimension: N
-conditional and N unconditional sequences are packed into a single forward pass
-(2*N tokens, one weight read), then combined as
-`logits = uncond + scale * (cond - uncond)`. The KV cache is a single 4D tensor
-`[D, max_seq, Nkv, n_sets]` shared across all batch elements and CFG paths. Shared
-prompts are prefilled once and cloned to other KV sets via copy, avoiding redundant
-prefills.
-
-## Accuracy
-
-Test logs (turbo + SFT, seed 42, Philox noise, multiple quantizations):
-[`tests/`](https://github.com/ServeurpersoCom/acestep.cpp/tree/master/tests)
-
-Each script compares GGML C++ output against the Python reference
-(cosine similarity per intermediate tensor). Requires the original
-ACE-Step-1.5 repo cloned alongside acestep.cpp (`../ACE-Step-1.5`).
 
 ```bash
-cd tests
-python3 debug-lm-logits.py    # Qwen3 LM: first-token logits GGML vs PyTorch (0.6B/1.7B/4B)
-python3 debug-detok-cossim.py # FSQ detokenizer: step-by-step cossim C++ vs Python
-python3 debug-dit-cossim.py   # DiT: per-layer cossim GGML vs Python (turbo/SFT, BF16/quantized)
+mp3-codec -i song.wav -o song.mp3 -b 192
+mp3-codec -i song.mp3 -o song.wav --format wav32
 ```
-
-## Patched GGML fork
-
-Uses a patched GGML fork (submodule) with two new ops, a Metal im2col optimization, and
-a CUDA bugfix for the Oobleck VAE decoder. All backends: CPU, CUDA, ROCm, Metal, Vulkan.
-F32/F16/BF16 data types. The DiT uses only standard GGML ops and needs no patches.
-
-The VAE reconstructs audio from latent space through 5 upsampling blocks (total 1920x),
-each running a transposed convolution followed by 3 WaveNet-style residual units with
-dilated convolutions and Snake activations. A single tile builds a graph of 36 snake
-activations, 5 transposed convolutions, and 32 regular convolutions. At the final blocks,
-sequence lengths reach 491520 timesteps, which stresses GGML ops designed for short NLP
-sequences.
-
-### `GGML_OP_SNAKE` (fused Snake activation)
-
-Computes y = x + sin^2(a * x) * inv_b in a single kernel.
-The Oobleck VAE calls this 36 times per tile. Without a fused op, each activation
-requires 5 separate GGML kernels (mul, sin, sqr, mul, add), causing 5x the memory
-traffic. The fused kernel reads x once and writes y once. BF16 cast nodes before/after
-each snake call halve memory bandwidth at the cost of negligible precision loss
-(cossim > 0.999 vs F32 baseline).
-
-### `GGML_OP_COL2IM_1D` (scatter-add for GEMM-based conv_transpose_1d)
-
-Gather-based reconstruction of a 1D signal from GEMM columns [K*OC, T_in] to
-[T_out, OC], with fused padding crop via the p0 parameter.
-Upstream `ggml_conv_transpose_1d` uses a naive kernel (one scalar FMA loop per output
-element, no shared memory, no tensor cores). The VAE spends 40% of its FLOP budget on
-transposed convolutions. We decompose each as `mul_mat + col2im_1d`, routing the heavy
-GEMM through cuBLAS/BLAS/MPS tensor cores. The col2im_1d gather has a 2-iteration inner
-loop and is pure bandwidth. BF16 cast nodes around col2im_1d halve the scatter bandwidth.
-
-### Metal: `kernel_im2col_1d` (flat 1D dispatch)
-
-The generic Metal `kernel_im2col` dispatches (IC, 1, OW) threadgroups with K threads
-each. For the VAE's 1D convolutions with small kernels (k=1 or k=7), this wastes 78-97%
-of SIMD lanes (7 or 1 active threads per 32-wide SIMD group). The dedicated
-`kernel_im2col_1d` uses a flat dispatch identical to snake and col2im_1d:
-(total/256, 1, 1) threadgroups with 256 threads, achieving full SIMD utilization.
-The dispatch branches on `is_2D` at runtime; the 2D path and kernel are unchanged.
-CUDA and Vulkan already use flat dispatch and are not affected.
-
-VAE decode (M2 Pro 16GB, 86.8s audio @ 48kHz stereo):
-
-| chunk | overlap | im2col    | tiles | time   |
-|------:|--------:|-----------|------:|-------:|
-|   256 |      64 | generic   |    17 | 71.2s  |
-|  1024 |      16 | generic   |     3 | 38.9s  |
-|   256 |      64 | im2col_1d |    17 | 31.8s  |
-|  1024 |      16 | im2col_1d |     3 | 18.3s  |
-
-### Bugfix: `im2col` gridDim.y overflow (CUDA)
-
-Upstream `im2col_kernel` uses OW directly as grid dimension Y, which exceeds the CUDA
-65535 gridDim limit on long sequences. The VAE calls `ggml_conv_1d` (im2col path) 32
-times per tile at output widths up to 491520. Fixed with a grid-stride loop on OW and
-`MIN(OW, MAX_GRIDDIM_Z)` clamping.
-
-### Upstream divergence
-
-The GGML submodule diverges from upstream only by the addition of
-`GGML_OP_SNAKE` and `GGML_OP_COL2IM_1D`. No existing upstream kernel is
-modified. These ops are required; the VAE does not work without them.
-
-An earlier approach patched the upstream naive ops instead of adding custom
-ones. Those patches were dropped. They are documented here in case someone
-wants to study the naive path:
-
-- `conv_transpose_1d`: bounded loop replacing O(T_in) brute-force, CUDA and Metal
-- `im2col`: grid-stride loop on OW to fix gridDim.y overflow for large tensors

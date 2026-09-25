@@ -98,7 +98,7 @@ both pairs rather than letting the job fail after the model loads.
 ear-validated.** The DiT trainer's own blind listening test found that no
 parameterization beat plain LoRA — treat that as the prior for MM3 too until
 MM3 has run its own test. Full gate numbers and the open HiRA/HRA bugs:
-`docs/TRAINING.md` MM3 section.
+`docs/dev/training-internals.md` MM3 section.
 
 ## Supervising fewer positions does NOT buy VRAM
 

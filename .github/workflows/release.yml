@@ -25,7 +25,7 @@ env:
   # the CUDA 12 build keeps the unsuffixed name.
   ORT_VERSION: '1.26.0'
   # TensorRT SDK for the Windows cuda13.1 variant only (see
-  # docs/plans/2026-09-11-mm3-trt-dit-shipping.md and docs/RELEASING.md
+  # docs/plans/2026-09-11-mm3-trt-dit-shipping.md and docs/dev/releasing.md
   # "TensorRT SDK for CI"). The headers+license zip is hosted; the .lib import
   # libraries are regenerated at build time from the (distributable) runtime
   # DLLs via tools/tensorrt-sdk/make-import-libs.ps1 — NVIDIA's SLA does not

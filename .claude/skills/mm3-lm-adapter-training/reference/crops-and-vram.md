@@ -104,7 +104,7 @@ practical spill ceiling. **Default is still `exact`, the table below is
 unchanged, and none of this is in the recipe** — the shipped recipe trains at
 crop 750, where flash measures no benefit (checkpointed segments already hide
 the small softmax in allocator slack), and nothing trained under flash has
-been heard. Full numbers: `docs/TRAINING.md` MM3 section,
+been heard. Full numbers: `docs/dev/training-internals.md` MM3 section,
 `.claude/skills/flash-attn-training/SKILL.md` §3/§7. What fits in 30 GB
 **at `--attn exact`**, the only mode any shipped adapter has trained under:
 

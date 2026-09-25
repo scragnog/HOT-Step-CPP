@@ -87,6 +87,7 @@ tools/mcp-lyricstudio/node_modules/
 !tools/mm3-reg-corpus/
 !tools/mm3-trim-silence/
 !tools/vocal-end/
+!tools/docs/
 tools/vocal-end/out/
 !tools/mm3-retarget/
 tools/mm3-retarget/out/
@@ -123,6 +124,7 @@ Thumbs.db
 # .claude/ is local-only EXCEPT the committed skill library
 .claude/*
 !.claude/skills/
+!.claude/settings.json
 .gemini/
 # Codex's own per-machine config. The SHARED Codex rules live in AGENTS.md,
 # which is committed; this holds sandbox/approval settings that are one

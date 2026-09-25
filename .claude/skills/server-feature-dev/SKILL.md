@@ -211,6 +211,6 @@ More depth (full aceClient method catalog, engine spawn args, settings hot-reloa
 - `CLAUDE.md` (repo root) — orientation map, build/git rules.
 - `engine/docs/ARCHITECTURE.md` — engine internals, CLI, request JSON, generation modes (committed).
 - `FEATURES.md` — full feature catalogue (committed).
-- `docs/PLUGINS.md` — Lua plugin authoring; solvers/schedulers/guidance are plugins, not C++ (committed).
+- `docs/dev/plugins-authoring.md` — Lua plugin authoring; solvers/schedulers/guidance are plugins, not C++ (committed).
 - `docs/plans/` — internal design/investigation docs. **Gitignored, local-only — may be absent on a fresh clone.**
 - `server/src/data/assistant-knowledge.md` — in-app assistant knowledge base (committed).

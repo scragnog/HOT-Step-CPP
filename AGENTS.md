@@ -11,9 +11,10 @@ create a separate copy for another agent. Each skill needs a `SKILL.md` with
 `name` and `description` frontmatter for discovery. Keep mandatory project rules
 in this file, since skill selection depends on the task.
 
-The junction and skill folders are local and gitignored. A new checkout needs
-the skills and discovery link installed separately. Refresh the client's skill
-list after changes, or restart it if the changes do not appear.
+The skill library under `.claude/skills/` is committed (`.gitignore` whitelists
+it); the `.agents/skills` junction is local and needs recreating on a new
+checkout. Refresh the client's skill list after changes, or restart it if the
+changes do not appear.
 
 ## What this is
 
@@ -63,7 +64,7 @@ LAUNCH.bat → Node server (Express :3001)
 - **Never `git reset --hard`.** This checkout sets `submodule.recurse=true`, so a hard reset in the superproject **also resets `engine/ggml`** and silently wipes the whole `engine/patches/` stack out of its tracked files. The next build looks like a broken engine change, not a git accident: CMake re-applies the stack, but the two patches that *create* files (`flash-attn-train`, `zz-yue2-convrot8`) fail with "already exists in working directory" — their `.cu`/`.cuh` are untracked, so the reset left them behind. You then get hundreds of CUDA errors about undefined `GGML_OP_CONVROT8` / `ggml_flash_attn_train_*`, because the orphaned kernels reference ops that are no longer declared. To undo an unwanted working-tree change, use `git checkout -- <path>` or `git restore <path>` on explicit paths. To recover from a hard reset: delete `engine/ggml/src/ggml-cuda/{convrot8,fattn-train}.{cu,cuh}`, re-apply those two patches, then run `engine/verify-hooks.ps1`.
 - **Push requires explicit user approval — always ask first.**
 - Commit to local git **often** (data has been lost before to uncommitted files).
-- **Releases:** push a `vX.Y.Z` tag → the `Release` workflow builds all platforms and drafts a GitHub Release. **Any pushed `v*` tag triggers a build** — use a `-CI-Test` suffix for throwaway compile checks, and don't push local feature tags matching `v*`. Full process + gotchas: [docs/RELEASING.md](docs/RELEASING.md).
+- **Releases:** push a `vX.Y.Z` tag → the `Release` workflow builds all platforms and drafts a GitHub Release. **Any pushed `v*` tag triggers a build** — use a `-CI-Test` suffix for throwaway compile checks, and don't push local feature tags matching `v*`. Full process + gotchas: [docs/dev/releasing.md](docs/dev/releasing.md).
 - Use `gh` CLI for GitHub ops (authenticated as `scragnog`).
 
 ## Shipping to users (works here ≠ works for them)
@@ -123,7 +124,39 @@ Start with the newest session folder. Generation failures → matching `gen_*.lo
 
 ## Plugin system
 
-Solvers (17), schedulers (9), guidance modes, and postprocess are **hot-loadable Lua plugins** in [engine/plugins/](engine/plugins/) — drop a `.lua` in the right subdir, appears in the UI next launch, no C++ rebuild. Each plugin can declare its own UI params. Native C++ bridge via `apg()`; advanced plugins use `post_step()` for extra forward passes. **Adding a solver/scheduler/guidance = write a `.lua` plugin** (the old approach of editing `dit-sampler.h` is obsolete — the engine now routes through `hot-step-sampler.h`). Authoring guide: [docs/PLUGINS.md](docs/PLUGINS.md).
+Solvers, schedulers, guidance modes and postprocess steps are **hot-loadable Lua plugins** in [engine/plugins/](engine/plugins/) — drop a `.lua` in the right subdir, appears in the UI next launch, no C++ rebuild. Each plugin can declare its own UI params. Native C++ bridge via `apg()`; advanced plugins use `post_step()` for extra forward passes. **Adding a solver/scheduler/guidance = write a `.lua` plugin** (the old approach of editing `dit-sampler.h` is obsolete — the engine now routes through `hot-step-sampler.h`). Authoring guide: [docs/dev/plugins-authoring.md](docs/dev/plugins-authoring.md).
+
+## Documentation is part of the change
+
+Public docs live in `docs/user/` (users) and `docs/dev/` (contributors and agents), indexed
+from [docs/README.md](docs/README.md) and [FEATURES.md](FEATURES.md). A change that alters
+behaviour a user or developer can see is not done until the owning page says so. Rules and the
+page template: [docs/dev/docs-contributing.md](docs/dev/docs-contributing.md).
+
+| Change in | Update |
+|---|---|
+| `ui/src/components/<studio>/` | `docs/user/studios/<studio>.md` (map in `tools/docs/check-docs.mjs`), the one-liner in `FEATURES.md` |
+| `ui/src/components/global-bar/`, generation params, post-processing | `docs/user/generation.md` |
+| A new studio or UI folder | new page + a row in `STUDIO_PAGES` in `tools/docs/check-docs.mjs` + `FEATURES.md` |
+| `server/src/routes/`, `server/src/index.ts` mounts | `node tools/docs/build-docs.mjs` (regenerates `docs/dev/api.md`) |
+| `engine/plugins/`, `plugins/` | `node tools/docs/build-docs.mjs` (regenerates `docs/user/plugins.md` tables) |
+| `server/src/data/model-registry.json` | `node tools/docs/build-docs.mjs` (regenerates `docs/user/models.md`) + `check-release-prereqs.mjs` |
+| `engine/src/`, `engine/tools/` | `docs/dev/engine.md`; `engine/docs/ARCHITECTURE.md` if request JSON or CLI flags changed |
+| `server/src/config.ts`, env vars, Settings UI | `docs/dev/config.md`, `docs/user/studios/settings.md` |
+| Backend capabilities (`server/src/services/backends/*/index.ts`) | `docs/user/backends.md` capability matrix |
+| Adapter loading, stacking, masking | `docs/user/adapters.md`, `adapter-system` skill |
+| Training flags, defaults, recipes | `docs/user/training/<backend>.md`, `docs/dev/training-internals.md` |
+| Build scripts, CI workflows, release steps | `docs/dev/building.md`, `docs/dev/releasing.md` |
+| Anything the in-app assistant should know | `docs/user/` first, then `node tools/docs/build-docs.mjs` refreshes the generated blocks in `server/src/data/assistant-knowledge.md`; hand-written blocks there are for behaviour rules only |
+| A new `.claude/skills/<skill>` | row in `.claude/skills/README.md` |
+
+Then run `node tools/docs/check-docs.mjs`. It fails on a studio with no page, a stale generated
+table, a broken link, or an unindexed skill, and runs in CI (`docs.yml`) and inside
+`check-release-prereqs.mjs`. Claude Code also gets a Stop hook (`.claude/settings.json`) that
+blocks once when code changed with no doc change; Codex has no hooks, so this table is the rule.
+
+The assistant knowledge base is read once at server start, so a regenerated
+`assistant-knowledge.md` is picked up on the next restart, not live.
 
 ## Agent work coordination
 
@@ -157,22 +190,28 @@ only ever saw a rolling window and are lossy.
 
 | For… | Read |
 |------|------|
-| **Any maintenance task — start here** (per-domain procedures, gotchas, distilled institutional knowledge) | [.claude/skills/README.md](.claude/skills/README.md) — 16 skills (13 fact-checked + 3 MM3) |
+| **Any maintenance task — start here** (per-domain procedures, gotchas, distilled institutional knowledge) | [.claude/skills/README.md](.claude/skills/README.md) — one skill per maintenance domain |
 | **MiniMax-Music3 backend** (second generation backend: engine port, /mm3 endpoints, backend registry/toggle, trap list) | [.claude/skills/mm3-backend/SKILL.md](.claude/skills/mm3-backend/SKILL.md) |
 | MM3 caption/prompt format (genre adherence) | [.claude/skills/mm3-captioning/SKILL.md](.claude/skills/mm3-captioning/SKILL.md) |
 | **Training an MM3 LM adapter** (album/artist clone: rank, steps, which checkpoint to ship, likeness-vs-coherence) | [.claude/skills/mm3-lm-adapter-training/SKILL.md](.claude/skills/mm3-lm-adapter-training/SKILL.md) |
 | **Any listening test** (checkpoint ladders, A/B renders, "listen and tell me") — the local HTML score sheet Rob scores in | [.claude/skills/ear-test-scoresheet/SKILL.md](.claude/skills/ear-test-scoresheet/SKILL.md) |
 | **What the Discord working group said** (MM3 group: bghira, Serveurperso, testerf, Shaz…) — searchable transcripts of every channel | `node tools/discord-claude/read-log.mjs --list` — see [Discord transcripts](#discord-transcripts) |
-| **Writing anything a human reads** (issue replies, commits, PR bodies, release notes, docs) | [docs/WRITING-STYLE.md](docs/WRITING-STYLE.md) — no emojis, no AI tells, honest confidence |
-| Full feature catalogue (100+) | [FEATURES.md](FEATURES.md) |
-| Engine internals, CLI, request JSON, generation modes | [engine/docs/ARCHITECTURE.md](engine/docs/ARCHITECTURE.md) |
-| **Training system** (dataset→preprocess→LM/DiT training→audition; ace-train, FSQ, ggml training gotchas) | [docs/TRAINING.md](docs/TRAINING.md) |
+| **Writing anything a human reads** (issue replies, commits, PR bodies, release notes, docs) | [docs/dev/writing-style.md](docs/dev/writing-style.md) — no emojis, no AI tells, honest confidence |
+| **Every doc page, both audiences** | [docs/README.md](docs/README.md) |
+| Feature catalogue, one line each, linking to the page | [FEATURES.md](FEATURES.md) |
+| **Updating docs when you change code** (ownership table above, page template, generators) | [docs/dev/docs-contributing.md](docs/dev/docs-contributing.md) |
+| System architecture, feature → route/service/UI/engine map | [docs/dev/architecture.md](docs/dev/architecture.md) |
+| Engine guide (binaries, per-backend pipeline, hooks, plugins, TRT, training) | [docs/dev/engine.md](docs/dev/engine.md) |
+| Engine request JSON and CLI flag reference | [engine/docs/ARCHITECTURE.md](engine/docs/ARCHITECTURE.md) |
+| HTTP route index (generated) | [docs/dev/api.md](docs/dev/api.md) |
+| Env vars and settings reference | [docs/dev/config.md](docs/dev/config.md) |
+| **Training system** (dataset→preprocess→LM/DiT training→audition; ace-train, FSQ, ggml training gotchas) | [docs/dev/training-internals.md](docs/dev/training-internals.md) |
 | **Flash-attention training** (fused attention backward: porting `--attn flash` to a trainer, VRAM-model branches, measurement traps) | [.claude/skills/flash-attn-training/SKILL.md](.claude/skills/flash-attn-training/SKILL.md) |
-| Writing a Lua plugin | [docs/PLUGINS.md](docs/PLUGINS.md) |
-| Build / install / releases | [README.md](README.md) |
-| Cutting & publishing a release (agent runbook) | [docs/RELEASING.md](docs/RELEASING.md) |
+| Writing a Lua plugin | [docs/dev/plugins-authoring.md](docs/dev/plugins-authoring.md) |
+| Build, dev loop, type-checks, portable packaging | [docs/dev/building.md](docs/dev/building.md) |
+| Cutting & publishing a release (agent runbook) | [docs/dev/releasing.md](docs/dev/releasing.md) |
 | **Pre-release go/no-go** (`node tools/release-gate/run.mjs`: API-driven regression tiers, few-step training, renders staged for the ear test) | [tools/release-gate/README.md](tools/release-gate/README.md) |
 | Internal design/investigation docs (perf, adapters, upstream sync, feature designs) | `docs/plans/` *(gitignored, local-only)* |
 | In-app assistant behaviour/KB | [server/src/data/assistant-knowledge.md](server/src/data/assistant-knowledge.md) |
 
-> **Doc convention:** committed contributor-facing docs = `README.md`, `FEATURES.md`, `docs/PLUGINS.md`, `engine/docs/ARCHITECTURE.md`. Internal planning/investigation docs live in `docs/plans/`, which is **gitignored** (local only). This file (`AGENTS.md`) is committed; `CLAUDE.md` only imports it.
+> **Doc convention:** committed docs = `README.md`, `FEATURES.md`, everything under `docs/user/` and `docs/dev/`, `engine/docs/ARCHITECTURE.md`, and the skills. Internal planning/investigation docs live in `docs/plans/`, which is **gitignored** (local only); distil lasting decisions into `docs/dev/`. This file (`AGENTS.md`) is committed; `CLAUDE.md` only imports it.

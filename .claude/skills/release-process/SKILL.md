@@ -182,7 +182,7 @@ gh release edit vX.Y.Z --draft=false --latest                  # publish — ONL
 ```
 
 **Expect 24 assets** (12 archives + 12 `.sha256`). It was 22 until Linux
-gained a `rocm` variant; `docs/RELEASING.md` still says 18, which predates
+gained a `rocm` variant; `docs/dev/releasing.md` still says 18, which predates
 `cuda12-volta` as well. Asset names:
 
 - `HOT-Step-CPP-vX.Y.Z-win-x64-{cuda13.1,cuda12.8,cuda12-volta,vulkan,cpu}.zip`
@@ -213,7 +213,7 @@ discipline on master directly becomes the release notes** — write
 |---|---|
 | `.github/workflows/release.yml` | The entire pipeline: 5 Windows + 5 Linux + 1 macOS builds, notes generation, draft creation. Only workflow triggered by `v*` tags. |
 | `.github/workflows/cache-warm.yml` | Builds the engine on master under the same cache keys release.yml uses, so tag runs can restore it (GitHub caches are ref-scoped; only master caches are visible to tag runs). Triggers: manual dispatch, or master push touching `engine/ggml` (submodule gitlink), `engine/CMakeLists.txt`, or itself. |
-| `docs/RELEASING.md` | Human runbook. Mostly accurate; asset count (18) and variant list (4/OS) are stale — reality is 24 assets, 5 Windows variants and 6 Linux variants. |
+| `docs/dev/releasing.md` | Human runbook. Mostly accurate; asset count (18) and variant list (4/OS) are stale — reality is 24 assets, 5 Windows variants and 6 Linux variants. |
 | `engine/tools/version.cmake` | Generates `version.h` with `ACE_VERSION "<git-hash> (<date>)"` at build time. Never hand-edit versions. |
 | `engine/CMakeLists.txt:9-15` | `version` custom target wiring for the above. |
 | `release/` | Packaging inputs used by CI: `esbuild.config.mjs` (bundles server to `server.mjs`), `HOT-Step.bat`/`HOT-Step.sh` launchers, `README.txt`. |
@@ -302,7 +302,7 @@ recent test-tag naming history): see [reference.md](reference.md).
 
 ## Deeper reading
 
-- `docs/RELEASING.md` — committed human runbook. Trust it EXCEPT the asset
+- `docs/dev/releasing.md` — committed human runbook. Trust it EXCEPT the asset
   count (says 18, reality 24) and the variant list (missing `cuda12-volta`
   and `rocm`).
 - `.github/workflows/release.yml` and `cache-warm.yml` — ground truth; when

@@ -91,7 +91,7 @@ what the LM sees : album b, album b title, pop punk, bright major-key ...
 
 Passing `{skipPresent: true}` at the translateParams call site would make this
 robust; it is not done today. See
-[mm3-captioning](../mm3-captioning/SKILL.md) for the MM3 Structured Caption
+[mm3-captioning](../../mm3-captioning/SKILL.md) for the MM3 Structured Caption
 format; training and rendering both use the three-section per-track format.
 
 ## Lyrics shape matters as much as the adapter

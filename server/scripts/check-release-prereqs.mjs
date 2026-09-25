@@ -148,7 +148,7 @@ async function checkHuggingFace() {
 // ── 1b. TensorRT SDK assets release.yml downloads exist on Hugging Face ─────
 //
 // release.yml's Windows cuda13.1 job fetches a headers zip and two runtime
-// DLLs from a dedicated HF repo at build time (see docs/RELEASING.md
+// DLLs from a dedicated HF repo at build time (see docs/dev/releasing.md
 // "TensorRT SDK for CI"). Nothing else exercises that path before a real
 // release build does, so a stale/renamed file there fails silently until the
 // tag build hits it.
@@ -308,6 +308,16 @@ if (OFFLINE) {
   await checkHuggingFace();
   console.log('\nTensorRT SDK (CI download)');
   await checkTrtSdk();
+}
+
+console.log('
+Documentation (tools/docs/check-docs.mjs)');
+{
+  const { spawnSync } = await import('node:child_process');
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'tools', 'docs', 'check-docs.mjs')], { encoding: 'utf8' });
+  if (r.status !== 0) problems.push(`docs drift: ${(r.stderr || r.stdout).trim().split('
+').slice(0, 6).join(' | ')}`);
+  else console.log('  ok');
 }
 
 console.log('');

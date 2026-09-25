@@ -157,5 +157,5 @@ There is **no dedicated bench tool** — instrumentation is log-based. Logs land
 
 - [reference.md](reference.md) — full line-referenced internals: TRT build/load/refit flow, LM-TRT KV design, adapter name-mapping, streaming, model dir layout, complete DONE/PLANNED ledger.
 - `engine/docs/ARCHITECTURE.md` — committed engine internals, CLI, request JSON.
-- `docs/PLUGINS.md` — committed Lua plugin authoring (solvers/schedulers/guidance run identically on GGML and TRT samplers).
+- `docs/dev/plugins-authoring.md` — committed Lua plugin authoring (solvers/schedulers/guidance run identically on GGML and TRT samplers).
 - `docs/plans/2026-05-31-TRT-OPTIMIZATION-PLAN.md`, `docs/plans/2026-04-18-performance-optimizations.md`, `docs/plans/dit_optimization_analysis.md` — **local-only, gitignored; may be absent on other machines.** Where they disagree with code, code wins (see the re-upload discrepancy above).
