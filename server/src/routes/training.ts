@@ -4764,6 +4764,53 @@ function datasetTrackCaption(audioPath: string, baked: string): string {
     || read(`${stem}.mm3.txt`).replace(/\s+/g, ' ').trim();
 }
 
+/** GET /yue2-dataset-captions?dataset=<id> | ?lyricsSet=<id> | ?adapter=<path>
+ *
+ *  The caption-source picker's list, keyed by the training DATASET rather than
+ *  by an adapter (2026-09-25, Rob): the dataset record, its audio and its
+ *  sidecars never move, whereas a run folder can be moved (refined/) and the
+ *  prepared manifest is deleted by the post-pick cleanup. The three keys are
+ *  the three handles the UI has: Lyric Studio holds the album's lyrics set,
+ *  Create holds an adapter path, and a dropdown holds a dataset id.
+ *
+ *  `styled` is composed here with the trainer's own function from the same
+ *  sidecar fields the prepare step used; the trigger opener is added at
+ *  generate time, as before. Every failure answers with an empty list. */
+router.get('/yue2-dataset-captions', async (req: Request, res: Response) => {
+  const empty = { datasetId: '', datasetSlug: '', datasetName: '', tracks: [] as unknown[] };
+  try {
+    const q = (key: string): string => typeof req.query[key] === 'string' ? (req.query[key] as string).trim() : '';
+    let ds: TrainingDatasetRow | null = null;
+    if (q('dataset')) ds = repo.getDataset(q('dataset'));
+    else if (q('lyricsSet')) {
+      const id = Number(q('lyricsSet'));
+      ds = Number.isFinite(id) ? repo.listDatasets().find(d => Number(d.lyricsSetId) === id) ?? null : null;
+    } else if (q('adapter')) {
+      const run = jointRunForAdapter(q('adapter'));
+      ds = run ? repo.getDataset(run.datasetId) ?? repo.listDatasets().find(d => d.slug === run.datasetSlug) ?? null : null;
+    }
+    if (!ds) { res.json(empty); return; }
+    const samples = await buildSamples(ds);
+    // Parity with the prepared style: a `.yue2.txt` caption is the whole
+    // trained sentence (it carries its own BPM), so it gets no tail; an ACE
+    // caption gets the trainer's "<genre>, <bpm> BPM, key of <key>." tail.
+    const yue2Sidecar = (audioPath: string): string => {
+      try { return fs.readFileSync(audioPath.slice(0, audioPath.length - path.extname(audioPath).length) + '.yue2.txt', 'utf8').replace(/\s+/g, ' ').trim(); }
+      catch { return ''; }
+    };
+    const tracks = samples
+      .filter(s => !s.excluded && !s.fileMissing)
+      .map(s => ({ name: s.filename, caption: datasetTrackCaption(s.audioPath, s.caption || ''), yue2: yue2Sidecar(s.audioPath),
+        genre: s.genre || '', bpm: s.bpm === null || s.bpm === undefined ? '' : String(s.bpm), key: s.key || '' }))
+      .filter(t => t.caption)
+      .map(({ yue2, ...t }) => ({ ...t, styled: yue2 || yue2StyleString(t) }));
+    res.json({ datasetId: ds.id, datasetSlug: ds.slug, datasetName: ds.albumName || ds.name || ds.slug, tracks });
+  } catch (err: any) {
+    console.warn(`[Training] yue2-dataset-captions failed: ${err?.message || err}`);
+    res.json(empty);
+  }
+});
+
 /** GET /yue2-adapter-captions?adapter=<path> — the captions the dataset behind
  *  one trained adapter was trained on.
  *
