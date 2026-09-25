@@ -95,6 +95,18 @@ router.get('/:jobId/progress', async (req, res) => {
   }
 });
 
+// POST /api/supersep/:jobId/release — let the engine drop a finished job.
+// The engine keeps every job resident (its pool has no eviction); Cover
+// Studio calls this when a split is cleared or replaced (#132).
+router.post('/:jobId/release', async (req, res) => {
+  try {
+    const aceRes = await fetch(`${ACE_URL}/supersep/release?id=${req.params.jobId}`, { method: 'POST' });
+    res.status(aceRes.ok ? 200 : aceRes.status).json({ ok: aceRes.ok });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/supersep/:jobId/result
 router.get('/:jobId/result', async (req, res) => {
   try {
