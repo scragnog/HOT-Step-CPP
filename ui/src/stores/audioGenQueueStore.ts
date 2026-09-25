@@ -25,7 +25,7 @@ import { resolveDuration } from '../utils/estimateDuration';
 import { createGenerationTimer, getGenerationTimeoutMinutes } from '../utils/generationTimer';
 import { captionForBackend, MM3_BACKEND_ID } from '../utils/captionForBackend';
 import {
-  activeYue2AdapterPath, applyYue2PresetAdapters, ensureYue2SourceTracks, YUE2_BACKEND_ID,
+  applyYue2PresetAdapters, ensureYue2CaptionSource, YUE2_BACKEND_ID,
 } from '../utils/yue2CaptionSource';
 import { ensureMm3SourceTracks } from '../utils/mm3CaptionSource';
 import { normalizeKeyScale } from '../utils/keyScale';
@@ -1331,30 +1331,26 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   // song's own caption.
   const backendId = useBackendStore.getState().activeBackendId;
   if (backendId === MM3_BACKEND_ID) await ensureMm3SourceTracks(item.lyricsSetId);
-  // YuE2's equivalent, in two parts, and the ORDER is the whole point.
+  // YuE2's equivalent, in two parts.
   //
   // First the album's own adapters. YuE2 merges the delta into the resident LM
   // rather than passing it per request, so without this every song in a queue
   // renders through whichever album happened to be selected last — the failure
-  // the MM3 block below was written for, but persisting in the engine rather
+  // the MM3 block above was written for, but persisting in the engine rather
   // than in a param. AWAITED, not fired and forgotten: the merge has to be in
   // force before this item is submitted, and the queue is serial, so the wait
   // costs nothing that the model reload was not going to cost.
   //
-  // Then the captions, which is why this moved ahead of the other adapter
-  // steps: the caption source is keyed by ADAPTER PATH and defaults to
-  // Automatic, so resolving before the album's adapter is in force would hand
-  // this song a caption out of the PREVIOUS album's dataset.
-  //
-  // The cache fill has to happen here rather than in the picker:
-  // resolveYue2CaptionForGeneration reads the track list out of the cache the
-  // Create picker fills, so a song generated from Lyric Studio without that
-  // panel ever being opened resolved to the written caption and the album's own
-  // captions never reached the model.
+  // Then the caption source, resolved by the album's lyrics-set id — a handle
+  // that survives a moved run folder or a swept prepared cache, unlike the
+  // adapter path this used to key on. The cache fill has to happen here rather
+  // than in the picker: captionForBackend below reads it out of the cache
+  // fetchYue2CaptionSource fills, so a song generated from Lyric Studio
+  // without that panel ever being opened would otherwise resolve to the
+  // written caption and the album's own captions would never reach the model.
   if (backendId === YUE2_BACKEND_ID) {
     await applyYue2PresetAdapters(preset);
-    const yue2Adapter = activeYue2AdapterPath();
-    if (yue2Adapter) await ensureYue2SourceTracks(yue2Adapter);
+    await ensureYue2CaptionSource({ lyricsSet: item.lyricsSetId });
   }
   params.caption = captionForBackend(gen, backendId, item.lyricsSetId);
   params.title = gen.title || '';

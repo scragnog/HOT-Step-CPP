@@ -31,8 +31,8 @@
  * whole songs under their own captions, so a training caption is an
  * in-distribution prompt — but no caption column of its own: there is one
  * caption and the choice is which dataset track, if any, replaces it. That
- * choice belongs to the ADAPTER rather than to the song, so no id is passed
- * here; see utils/yue2CaptionSource.ts.
+ * choice belongs to the training DATASET, resolved from `lyricsSetId` the same
+ * way as MM3's; see utils/yue2CaptionSource.ts.
  */
 
 import { resolveMm3CaptionForGeneration } from './mm3CaptionSource';
@@ -57,7 +57,7 @@ export function captionForBackend(
     // distribution. The dataset-track pick remains the fallback for songs
     // written before the field existed.
     if ((gen.caption_yue2 || '').trim()) return (gen.caption_yue2 || '').trim();
-    const resolved = resolveYue2CaptionForGeneration(gen);
+    const resolved = resolveYue2CaptionForGeneration(gen, lyricsSetId);
     if (resolved.caption.trim()) return resolved.caption;
   }
   return gen.caption || '';

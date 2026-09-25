@@ -12,7 +12,8 @@ import {
   type Mm3CaptionSelection, type Mm3SourceTrack,
 } from '../../utils/mm3CaptionSource';
 import {
-  ensureYue2SourceTracks, readYue2SongSelection, resolveYue2Caption,
+  ensureYue2CaptionSource, hasStoredYue2CaptionSelection, hasStoredYue2SongSelection,
+  readYue2SongSelection, resolveYue2Caption,
   writeYue2SongSelection, yue2PresetAdapterPath, yue2TrackBpm, YUE2_BACKEND_ID,
   pickNearestBpmTrack as pickNearestYue2Track,
   type Yue2CaptionSelection, type Yue2SourceTrack,
@@ -80,30 +81,46 @@ const GenerationStatusBadge: React.FC<{ gen: Generation }> = ({ gen }) => {
  * this caption — MM3's three-heading Structured Caption is a different text for
  * a different model. Same control, different home.
  *
- * The choice is stored per song AND per adapter (see writeYue2SongSelection):
- * the caption list belongs to the adapter's training dataset, so a track title
- * chosen under one artist's adapter means nothing under another's.
+ * The choice is stored per song AND per dataset (see writeYue2SongSelection):
+ * the caption list belongs to one training dataset, so a track title chosen
+ * under one album means nothing under another's.
  *
- * The default is Automatic, for the same reason as MM3 above: a caption the
- * adapter was actually trained on is what lands in the album's character. This
- * song's own caption is the opt-in, and it is never altered by the choice — the
- * picker only decides which text conditions the render.
+ * The default is Automatic when the album's preset names a YuE2 adapter — a
+ * caption the adapter was actually trained on is what lands in the album's
+ * character — and Custom on a base-model render, which has no adapter to be
+ * in distribution for. This song's own caption is always the opt-in, and it
+ * is never altered by the choice — the picker only decides which text
+ * conditions the render.
  *
  * On any other backend this renders exactly the box that was here before.
  */
 const Yue2CaptionField: React.FC<{
   gen: Generation;
   yue2Mode: boolean;
-  adapterPath: string;
+  datasetId: string;
+  datasetName: string;
+  /** Whether the album's preset names a YuE2 adapter — decides the default
+   *  mode when nothing has been stored for this song yet. */
+  hasAdapter: boolean;
   tracks: Yue2SourceTrack[];
   onSave: (value: string) => void;
-}> = ({ gen, yue2Mode, adapterPath, tracks, onSave }) => {
+}> = ({ gen, yue2Mode, datasetId, datasetName, hasAdapter, tracks, onSave }) => {
   const { t } = useTranslation();
-  const [sel, setSel] = useState<Yue2CaptionSelection>(
-    () => readYue2SongSelection(adapterPath, gen.id));
-  useEffect(() => { setSel(readYue2SongSelection(adapterPath, gen.id)); }, [adapterPath, gen.id]);
+  // Nothing stored anywhere for this song or this dataset: fall back to a
+  // default that depends on whether the album has an adapter, rather than
+  // readYue2SongSelection's own default (Automatic whenever a dataset is
+  // linked, adapter or not — right for Create, wrong for a base-model album).
+  const resolveSel = useCallback((): Yue2CaptionSelection => {
+    if (!datasetId) return { mode: 'custom' };
+    if (hasStoredYue2SongSelection(datasetId, gen.id) || hasStoredYue2CaptionSelection(datasetId)) {
+      return readYue2SongSelection(datasetId, gen.id);
+    }
+    return hasAdapter ? { mode: 'auto' } : { mode: 'custom' };
+  }, [datasetId, gen.id, hasAdapter]);
+  const [sel, setSel] = useState<Yue2CaptionSelection>(resolveSel);
+  useEffect(() => { setSel(resolveSel()); }, [resolveSel]);
 
-  const hasTracks = yue2Mode && !!adapterPath && tracks.length > 0;
+  const hasTracks = yue2Mode && !!datasetId && tracks.length > 0;
   const resolved = hasTracks
     ? resolveYue2Caption(gen.caption || '', gen.bpm, tracks, sel)
     : { caption: gen.caption || '', mode: 'custom' as const, fromName: undefined };
@@ -118,7 +135,7 @@ const Yue2CaptionField: React.FC<{
     const next: Yue2CaptionSelection = (value === 'auto' || value === 'custom')
       ? { mode: value }
       : { mode: 'track', selectedName: value.slice('track:'.length) };
-    writeYue2SongSelection(adapterPath, gen.id, next);
+    writeYue2SongSelection(datasetId, gen.id, next);
     setSel(next);
   };
 
@@ -131,7 +148,7 @@ const Yue2CaptionField: React.FC<{
       {hasTracks && (
         <div className="flex items-center gap-2 mb-2">
           <span className="text-[10px] text-zinc-500 uppercase tracking-wider flex-shrink-0">
-            {t('lyric.yue2CaptionSource', 'Caption source')}
+            {t('lyric.yue2CaptionSource', 'Caption source')}{datasetName ? ` · ${datasetName}` : ''}
           </span>
           <select
             value={selectValue}
@@ -326,41 +343,46 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
   const [captionSelections, setCaptionSelections] = useState<Record<number, Mm3CaptionSelection>>({});
 
   // ── YuE2 caption source ──
-  // THIS ALBUM's adapter, from its preset — not the one the engine is holding.
-  // Both render paths apply the album's halves before they resolve a caption, so
-  // the preset is what decides which dataset's captions these songs can use;
-  // asking the engine instead offered the LAST album's track list here (a Reel
-  // Big Fish album listing Skunk Anansie's tracks, 2026-09-16). An album with no
-  // YuE2 adapter renders on the base model and gets no picker at all.
+  // THIS ALBUM's training dataset, resolved by its lyrics-set id
+  // (training_datasets.lyrics_set_id server-side) — not the adapter the engine
+  // happens to be holding, and not the adapter's own run manifest either: both
+  // break when a run folder moves or its prepared cache is swept, and neither
+  // has anything to do with the dataset the album is actually built on.
+  //
+  // Still fetches the preset, but only to know whether the album has an
+  // adapter — that decides the default mode (Automatic vs Custom) down in
+  // Yue2CaptionField, since a base-model render has no adapter to be
+  // in-distribution for even when the album's dataset itself has captions.
   //
   // One lookup serves every card; the per-song CHOICE is stored per
-  // (adapter, song) instead.
+  // (dataset, song) instead.
   const yue2Mode = useBackendStore(s => s.activeBackendId) === YUE2_BACKEND_ID;
   const yue2Catalogue = useBackendStore(s => s.models[YUE2_BACKEND_ID] ?? null);
   const fetchBackendModels = useBackendStore(s => s.fetchModels);
   const [yue2Tracks, setYue2Tracks] = useState<Yue2SourceTrack[]>([]);
-  const [yue2Adapter, setYue2Adapter] = useState('');
+  const [yue2Dataset, setYue2Dataset] = useState<{ id: string; name: string } | null>(null);
+  const [yue2HasAdapter, setYue2HasAdapter] = useState(false);
   useEffect(() => {
     if (yue2Mode && !yue2Catalogue) void fetchBackendModels(YUE2_BACKEND_ID);
   }, [yue2Mode, yue2Catalogue, fetchBackendModels]);
   useEffect(() => {
     let live = true;
-    const load = async (): Promise<string> => {
-      if (!yue2Mode || !lyricsSetId) return '';
+    const load = async () => {
+      if (!yue2Mode || !lyricsSetId) return;
       try {
-        return yue2PresetAdapterPath((await lireekApi.getPreset(lyricsSetId)).preset);
-      } catch { return ''; }
+        const preset = (await lireekApi.getPreset(lyricsSetId)).preset;
+        if (live) setYue2HasAdapter(!!yue2PresetAdapterPath(preset));
+      } catch { if (live) setYue2HasAdapter(false); }
+      const src = await ensureYue2CaptionSource({ lyricsSet: lyricsSetId });
+      if (live) {
+        setYue2Dataset(src.datasetId ? { id: src.datasetId, name: src.datasetName } : null);
+        setYue2Tracks(src.tracks);
+      }
     };
-    void load().then(path => { if (live) setYue2Adapter(path); });
+    if (!yue2Mode) { setYue2Dataset(null); setYue2Tracks([]); setYue2HasAdapter(false); return; }
+    void load();
     return () => { live = false; };
   }, [yue2Mode, lyricsSetId]);
-  useEffect(() => {
-    let live = true;
-    const load = async (): Promise<Yue2SourceTrack[]> =>
-      (!yue2Mode || !yue2Adapter) ? [] : ensureYue2SourceTracks(yue2Adapter);
-    void load().then(tr => { if (live) setYue2Tracks(tr); });
-    return () => { live = false; };
-  }, [yue2Mode, yue2Adapter]);
   const captionSelectionFor = useCallback(
     (genId: number): Mm3CaptionSelection => captionSelections[genId] ?? readMm3CaptionSelection(genId),
     [captionSelections],
@@ -703,7 +725,9 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
                       <Yue2CaptionField
                         gen={gen}
                         yue2Mode={yue2Mode}
-                        adapterPath={yue2Adapter}
+                        datasetId={yue2Dataset?.id || ''}
+                        datasetName={yue2Dataset?.name || ''}
+                        hasAdapter={yue2HasAdapter}
                         tracks={yue2Tracks}
                         onSave={(value) => handleSaveField(gen.id, 'caption', value)}
                       />

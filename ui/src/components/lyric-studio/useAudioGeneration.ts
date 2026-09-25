@@ -18,8 +18,9 @@ import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { captionForBackend, MM3_BACKEND_ID } from '../../utils/captionForBackend';
 import { ensureMm3SourceTracks } from '../../utils/mm3CaptionSource';
 import {
-  activeYue2AdapterPath, applyYue2PresetAdapters, ensureYue2SourceTracks,
-  readYue2CaptionSelection, writeYue2CaptionSelection, YUE2_BACKEND_ID,
+  applyYue2PresetAdapters, clearYue2CaptionSources, ensureYue2CaptionSource,
+  readYue2SongSelection, YUE2_BACKEND_ID, YUE2_CAPTION_DATASET_KEY, YUE2_CAPTION_SOURCES_KEY,
+  type Yue2CaptionSourcesHandoff,
 } from '../../utils/yue2CaptionSource';
 import {
   MM3_CAPTION_SOURCES_KEY, clearMm3CaptionSources,
@@ -61,33 +62,30 @@ export function useAudioGeneration({ profiles, showToast: _showToast }: UseAudio
     // YuE2's equivalent, in the order the queue runner uses for the same reason
     // (audioGenQueueStore._executeItem).
     //
-    // The album's two adapter halves go first. The adapter is merged into the
+    // The album's two adapter halves go first — the adapter is merged into the
     // resident LM, so it is engine state rather than a request param and has to
-    // be POSTed like the picker does — and the caption source is keyed by
-    // ADAPTER PATH and defaults to Automatic, so resolving a caption before the
-    // album's adapter is in force would hand this song one of the PREVIOUS
-    // album's captions. Awaited for that reason, where this used to be
+    // be POSTed like the picker does. Awaited, where this used to be
     // fire-and-forget; it never throws, and a preset that cannot be applied
     // simply leaves whatever is in force showing in the picker.
     //
-    // Then the caption list, which has to be filled HERE rather than in the
-    // picker: resolveYue2CaptionForGeneration reads it out of the cache the
-    // Create picker fills, so a song generated from Lyric Studio without that
-    // panel ever being opened resolved to the written caption and the album's own
-    // captions never reached the model.
+    // Then the caption source, resolved by the album's lyrics-set id — which
+    // survives a moved run folder or a swept prepared cache, unlike the adapter
+    // path this used to key on. Awaited so the handoff below carries real
+    // tracks rather than an empty list from a cold cache.
+    let yue2Handoff: Yue2CaptionSourcesHandoff | null = null;
     if (backendId === YUE2_BACKEND_ID) {
       await applyYue2PresetAdapters(preset as Parameters<typeof applyYue2PresetAdapters>[0]);
-      const yue2Adapter = activeYue2AdapterPath();
-      if (yue2Adapter) {
-        await ensureYue2SourceTracks(yue2Adapter);
-        // Automatic writes a dataset caption into the box over there, so tell
-        // the panel what Custom should hand back: THIS song's own caption, not
-        // the dataset track's. Only when nothing is stashed — an existing stash
-        // is the user's own words and outranks ours.
-        const sel = readYue2CaptionSelection(yue2Adapter);
-        if (sel.mode !== 'custom' && sel.customCaption === undefined) {
-          writeYue2CaptionSelection(yue2Adapter, { ...sel, customCaption: gen.caption || '' });
-        }
+      const src = await ensureYue2CaptionSource({ lyricsSet: lyricsSetId });
+      if (src.datasetId) {
+        const sel = readYue2SongSelection(src.datasetId, gen.id);
+        yue2Handoff = {
+          datasetId: src.datasetId,
+          datasetName: src.datasetName,
+          mode: sel.mode,
+          selectedName: sel.selectedName,
+          customCaption: gen.caption || '',
+          tracks: src.tracks,
+        };
       }
     }
     write('hs-caption', captionForBackend(gen, backendId, lyricsSetId));
@@ -110,6 +108,16 @@ export function useAudioGeneration({ profiles, showToast: _showToast }: UseAudio
       } satisfies Mm3CaptionSourcesHandoff);
     } else {
       clearMm3CaptionSources();
+    }
+
+    // YuE2 caption source handoff — same idea, keyed by dataset id (resolved
+    // above). Cleared on any other backend so a stale handoff cannot resurface
+    // the control after a backend switch.
+    if (yue2Handoff) {
+      write(YUE2_CAPTION_SOURCES_KEY, yue2Handoff);
+      write(YUE2_CAPTION_DATASET_KEY, yue2Handoff.datasetId);
+    } else {
+      clearYue2CaptionSources();
     }
     write('hs-instrumental', false);
 
