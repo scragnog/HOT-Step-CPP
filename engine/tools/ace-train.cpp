@@ -268,7 +268,8 @@ static void print_usage(void) {
             "  mm3-codes     MiniMax-Music3 dataset -> RVQ codes (LM training input).\n"
             "                --dataset <dataset.json> --rvq <mm3-rvq-*.gguf>\n"
             "                --enc <mm3-enc-*.gguf> --out <dir>\n"
-            "                [--ffmpeg <path>] [--max-duration <sec>] [--tf32 on|off]\n"
+            "                [--ffmpeg <path>|none] [--max-duration <sec>] [--tf32 on|off]\n"
+            "                none reads audio_path as a stereo WAV already at the encoder rate.\n"
             "                --fixture <f.fix> instead: check the encoder graph against a\n"
             "                golden window from engine/tools/rvq-encoder-fixture.py.\n"
             "                Writes <out>/codes/<id>.codes, int32 [frames+1, 8], row 0 the\n"
@@ -944,6 +945,8 @@ static void print_usage(void) {
             "                                            SVD and uploads identical bytes.\n"
             "    --pissa-frozen-f16                      hold the frozen A0/B0 pair in F16 (half the VRAM;\n"
             "                                            init cancels to f16 precision). Unheard.\n"
+            "    --pissa-standalone                      export plain rank-2r LoRA on the original base, no\n"
+            "                                            residual file: for loaders that merge PEFT files\n"
             "    --pissa-oversample <n>      8           extra SVD columns beyond the rank.\n"
             "    --pissa-iters <n>           2           power iterations (0-4).\n"
             "    --hra                                   HRA: --rank (even) Householder reflections on\n"
@@ -2305,6 +2308,7 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--hot-pizza") || !strcmp(argv[i], "--hot-pissa")) { a.pissa = true; a.hot_pizza = true; }  // old spelling accepted
         else if (!strcmp(argv[i], "--pissa-cache-dir"))   a.pissa_cache_dir = next("--pissa-cache-dir");
         else if (!strcmp(argv[i], "--pissa-frozen-f16"))  a.pissa_f16    = true;
+        else if (!strcmp(argv[i], "--pissa-standalone"))  a.pissa_standalone = true;
         else if (!strcmp(argv[i], "--pissa-oversample"))  a.pissa_oversample = atoi(next("--pissa-oversample"));
         else if (!strcmp(argv[i], "--pissa-iters"))       a.pissa_iters  = atoi(next("--pissa-iters"));
         else if (!strcmp(argv[i], "--hra"))               a.hra          = true;
@@ -3406,32 +3410,38 @@ static int cmd_mm3_codes(int argc, char ** argv) {
             continue;
         }
 
-        char cmd[4096];
-        if (max_duration > 0) {
-            snprintf(cmd, sizeof(cmd),
-                     "\"%s\" -y -v error -i \"%s\" -ac 2 -ar %lld -t %d -c:a pcm_f32le -f wav \"%s\"",
-                     ffmpeg.c_str(), audio.c_str(), (long long) SR, max_duration, tmp_wav.c_str());
-        } else {
-            snprintf(cmd, sizeof(cmd),
-                     "\"%s\" -y -v error -i \"%s\" -ac 2 -ar %lld -c:a pcm_f32le -f wav \"%s\"",
-                     ffmpeg.c_str(), audio.c_str(), (long long) SR, tmp_wav.c_str());
-        }
+        // --ffmpeg none: the caller already wrote a stereo WAV at the encoder's
+        // rate, and it is read as it stands.
+        const bool        direct = ffmpeg == "none";
+        const std::string wav_in = direct ? audio : tmp_wav;
+        if (!direct) {
+            char cmd[4096];
+            if (max_duration > 0) {
+                snprintf(cmd, sizeof(cmd),
+                         "\"%s\" -y -v error -i \"%s\" -ac 2 -ar %lld -t %d -c:a pcm_f32le -f wav \"%s\"",
+                         ffmpeg.c_str(), audio.c_str(), (long long) SR, max_duration, tmp_wav.c_str());
+            } else {
+                snprintf(cmd, sizeof(cmd),
+                         "\"%s\" -y -v error -i \"%s\" -ac 2 -ar %lld -c:a pcm_f32le -f wav \"%s\"",
+                         ffmpeg.c_str(), audio.c_str(), (long long) SR, tmp_wav.c_str());
+            }
 #ifdef _WIN32
-        const std::string wrapped = "\"" + std::string(cmd) + "\"";
-        const int         rcode   = hs_system(wrapped);
+            const std::string wrapped = "\"" + std::string(cmd) + "\"";
+            const int         rcode   = hs_system(wrapped);
 #else
-        const int rcode = hs_system(cmd);
+            const int rcode = hs_system(cmd);
 #endif
-        if (rcode != 0 || !pm_file_exists(tmp_wav)) {
-            fprintf(stderr, "[mm3-codes] %zu/%zu FAIL %s: ffmpeg exit %d\n", idx, n_samples,
-                    filename.c_str(), rcode);
-            fail_n++;
-            continue;
+            if (rcode != 0 || !pm_file_exists(tmp_wav)) {
+                fprintf(stderr, "[mm3-codes] %zu/%zu FAIL %s: ffmpeg exit %d\n", idx, n_samples,
+                        filename.c_str(), rcode);
+                fail_n++;
+                continue;
+            }
         }
 
         // PLANAR reader — see the long note in cmd_mm3_preprocess about what
         // the interleaved one silently did to five LoRA runs.
-        FILE * wf = hs_fopen(tmp_wav, "rb");
+        FILE * wf = hs_fopen(wav_in, "rb");
         if (!wf) { fprintf(stderr, "[mm3-codes] cannot reopen temp wav\n"); fail_n++; continue; }
         fseek(wf, 0, SEEK_END);
         const long wsz = ftell(wf);
@@ -3442,8 +3452,8 @@ static int cmd_mm3_codes(int argc, char ** argv) {
         int     T = 0, got_sr = 0;
         float * planar = wread ? audio_io_read_wav_buf(wbuf.data(), wbuf.size(), &T, &got_sr) : nullptr;
         if (!planar || T <= 0 || got_sr != (int) SR) {
-            fprintf(stderr, "[mm3-codes] %zu/%zu FAIL %s: cannot decode transcode\n", idx, n_samples,
-                    filename.c_str());
+            fprintf(stderr, "[mm3-codes] %zu/%zu FAIL %s: %s\n", idx, n_samples, filename.c_str(),
+                    direct ? "not a stereo WAV at the encoder rate (--ffmpeg none reads it as is)" : "cannot decode transcode");
             free(planar);
             fail_n++;
             continue;

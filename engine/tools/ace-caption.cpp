@@ -212,7 +212,7 @@ static std::string detokenize(const BPETokenizer & tok, const std::vector<int32_
 }
 
 int main(int argc, char ** argv) {
-    std::string models, src, mode = "prose", prompt, out_path, ffmpeg, src_list;
+    std::string models, lm_file, src, mode = "prose", prompt, out_path, ffmpeg, src_list;
     std::vector<std::string> prompt_files;   // repeatable; see the per-mode note below
     int max_tokens = 1024;
     int top_k_debug = 0;
@@ -231,6 +231,7 @@ int main(int argc, char ** argv) {
             return argv[++i];
         };
         if (a == "--models") { models = next("--models"); }
+        else if (a == "--lm") { lm_file = next("--lm"); }
         else if (a == "--src-audio") { src = next("--src-audio"); }
         else if (a == "--mode") { mode = next("--mode"); }
         else if (a == "--prompt") { prompt = next("--prompt"); }
@@ -250,6 +251,7 @@ int main(int argc, char ** argv) {
         else {
             fprintf(stderr,
                     "usage: ace-caption --models <dir> --src-audio <file>\n"
+                    "       [--lm <moss-lm-*.gguf>]   (any quantisation; default q8_0, then f16)\n"
                     "       [--mode prose|mm3|lyrics[,...]] [--prompt \"...\"]\n"
                     "       [--prompt-file [prose=|mm3=|lyrics=]<path>]   (repeatable)\n"
                     "       [-o <out.txt>] [--max-tokens N] [--max-seconds S]\n"
@@ -423,7 +425,9 @@ int main(int argc, char ** argv) {
     moss::AudioTower tower;
     moss::LmModel lm;
     std::string lm_path = models + sep + "moss-lm-q8_0.gguf";
-    {
+    if (!lm_file.empty()) {
+        lm_path = lm_file;
+    } else {
         FILE * probe = fopen(lm_path.c_str(), "rb");
         if (probe) {
             fclose(probe);

@@ -365,6 +365,10 @@ struct MM3LmTrainArgs {
     //   pissa_f16 — frozen A0/B0 in F16 (halves their VRAM; init cancels to f16).
     std::string pissa_cache_dir;
     bool        pissa_f16        = false;
+    //   pissa_standalone - export plain rank-2r LoRA on the original base
+    //   instead of a delta tied to a residual written beside it, for loaders
+    //   that merge ordinary PEFT files and know nothing of the residual.
+    bool        pissa_standalone = false;
     bool        hra      = false;
     /** After each checkpoint export, load it straight back with the RUNTIME
      *  loader and check that the scale, the tensors and the parameterization
@@ -1261,7 +1265,8 @@ static int mm3_lm_fdcheck_main(const MM3LmTrainArgs & a, int n_probe, double eps
     // which is what makes dL/dA measurable at all.
     if (!fd_lokr && a.pissa) {
         LmPissaStats ps;
-        if (!lm_pissa_init_standalone(&lora, a.pissa_oversample, a.pissa_iters, &ps, &err, a.pissa_cache_dir, a.lm_path)) {
+        if (!lm_pissa_init_standalone(&lora, a.pissa_oversample, a.pissa_iters, &ps, &err, a.pissa_cache_dir, a.lm_path,
+                                      !a.pissa_standalone)) {
             fprintf(stderr, "[mm3-fd] PiSSA init failed: %s\n", err.c_str());
             lm_lora_detach(&lora, &t.lm);
             lm_lora_free(&lora);
@@ -2237,7 +2242,8 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     // ~200 MB scratch and gives it back before anything competes for VRAM.
     if (!want_lokr && a.pissa) {
         LmPissaStats ps;
-        if (!lm_pissa_init_standalone(&lora, a.pissa_oversample, a.pissa_iters, &ps, &err, a.pissa_cache_dir, a.lm_path)) {
+        if (!lm_pissa_init_standalone(&lora, a.pissa_oversample, a.pissa_iters, &ps, &err, a.pissa_cache_dir, a.lm_path,
+                                      !a.pissa_standalone)) {
             fprintf(stderr, "[mm3-lm-train] PiSSA init failed: %s\n", err.c_str());
             lm_lora_detach(&lora, &t.lm);
             lm_lora_free(&lora);
