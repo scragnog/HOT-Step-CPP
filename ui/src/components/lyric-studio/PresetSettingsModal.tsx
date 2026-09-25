@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Save, Loader2, ChevronDown, ChevronRight, Zap, Music, FolderSearch, Brain } from 'lucide-react';
+import { X, Save, Loader2, ChevronDown, ChevronRight, Zap, Music, FolderSearch, FolderOpen, Search, Brain } from 'lucide-react';
 import { lireekApi, type Mm3PresetAdapter } from '../../services/lireekApi';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
+import { StyledSelect, type SelectOption } from '../shared/StyledSelect';
 import { useBackendStore } from '../../stores/backendStore';
 import { MM3_BACKEND_ID } from '../../utils/captionForBackend';
 import { YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
@@ -79,7 +80,7 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [groupsExpanded, setGroupsExpanded] = useState(false);
   const [browserOpen, setBrowserOpen] = useState(false);
-  const [browserTarget, setBrowserTarget] = useState<'adapter' | 'lmAdapter' | 'reference'>('adapter');
+  const [browserTarget, setBrowserTarget] = useState<'adapter' | 'lmAdapter' | 'reference' | 'yue2Folder'>('adapter');
   // MM3 mode shows the MM3 adapter for this album instead of the two ACE
   // adapters (2026-09-11): the preset row is shared, the backends' adapters
   // are not interchangeable, so each mode edits its own column.
@@ -90,12 +91,65 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
   // MM3, and the catalogue already records each file's half and trigger.
   const yue2Catalogue = useBackendStore(s => s.models[YUE2_BACKEND_ID] ?? null);
   const fetchBackendModels = useBackendStore(s => s.fetchModels);
+  const selectModels = useBackendStore(s => s.selectModels);
   useEffect(() => {
     if (yue2Mode && !yue2Catalogue) void fetchBackendModels(YUE2_BACKEND_ID);
   }, [yue2Mode, yue2Catalogue, fetchBackendModels]);
   const [mm3Adapters, setMm3Adapters] = useState<{
     datasetSlug: string | null; candidates: Mm3PresetAdapter[]; others: Mm3PresetAdapter[];
   } | null>(null);
+
+  // Repointing which folder the two YuE2 halves are picked from — same folder
+  // scan the global Adapters picker uses (Yue2LmAdapterDropdown), so adapters
+  // moved into a subfolder (e.g. .../refined) show up here too.
+  const [yue2Folder, setYue2Folder] = useState('');
+  const [yue2FolderBusy, setYue2FolderBusy] = useState(false);
+  const [yue2FolderNote, setYue2FolderNote] = useState<string | null>(null);
+  useEffect(() => {
+    const saved = (yue2Catalogue?.defaults as Record<string, unknown> | undefined)?.lmAdapterFolder;
+    if (typeof saved === 'string') setYue2Folder(saved);
+  }, [yue2Catalogue]);
+
+  const scanYue2Folder = async (dir: string) => {
+    const trimmed = dir.trim();
+    setYue2Folder(dir);
+    setYue2FolderBusy(true);
+    setYue2FolderNote(null);
+    const ok = await selectModels({ lmAdapterFolder: trimmed }, YUE2_BACKEND_ID);
+    setYue2FolderBusy(false);
+    if (!ok) {
+      setYue2FolderNote(t('lyric.yue2AdapterFolderFailed',
+        'That folder could not be used. It needs a full path to a folder that exists.'));
+      return;
+    }
+    // selectModels already refetched the catalogue — read it fresh rather than
+    // the stale closure over this render's yue2Catalogue.
+    const cat = useBackendStore.getState().models[YUE2_BACKEND_ID];
+    const meta = cat?.lmAdapterMeta ?? {};
+    const all = cat?.lmAdapters ?? [];
+    const norm = (p: string) => p.toLowerCase().replace(/\\/g, '/');
+    const folderNorm = norm(trimmed);
+    const inFolder = all.filter(p => norm(p).startsWith(folderNorm));
+    const pickBest = (half: 'ar' | 'nar'): string | null => {
+      const candidates = inFolder.filter(p => (meta[p] as { kind?: string } | undefined)?.kind === half);
+      if (candidates.length === 0) return null;
+      return candidates.reduce((best, p) => {
+        const bestSteps = (meta[best] as { steps?: number } | undefined)?.steps ?? -1;
+        const pSteps = (meta[p] as { steps?: number } | undefined)?.steps ?? -1;
+        return pSteps > bestSteps ? p : best;
+      }, candidates[0]);
+    };
+    const arPick = pickBest('ar');
+    const narPick = pickBest('nar');
+    setForm(p => ({
+      ...p,
+      yue2_ar_adapter_path: arPick ?? p.yue2_ar_adapter_path,
+      yue2_nar_adapter_path: narPick ?? p.yue2_nar_adapter_path,
+    }));
+    if (!arPick && !narPick) {
+      setYue2FolderNote(t('lyric.yue2AdapterFolderNoneFound', 'No AR/NAR adapter found under that folder.'));
+    }
+  };
 
   // Load existing preset
   useEffect(() => {
@@ -213,6 +267,33 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
                     engine — on this backend the adapter is merged into the
                     resident LM, so it is engine state rather than a per-request
                     field. Strengths stay in the global picker's dials. */}
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                    {t('lyric.yue2AdapterFolder', 'Adapter folder')}
+                  </label>
+                  <div className="flex gap-2">
+                    <input type="text" value={yue2Folder}
+                      onChange={e => setYue2Folder(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') void scanYue2Folder(yue2Folder); }}
+                      disabled={yue2FolderBusy}
+                      placeholder="Folder of AR/NAR adapters, e.g. …\yue2-joint-adapters\refined"
+                      className="flex-1 bg-zinc-200 dark:bg-black/20 border border-zinc-300 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-pink-500 transition-colors disabled:opacity-50"
+                    />
+                    <button onClick={() => void scanYue2Folder(yue2Folder)} disabled={yue2FolderBusy}
+                      className="px-2.5 py-2 rounded-lg text-xs font-semibold bg-pink-900/20 text-pink-400 hover:bg-pink-900/30 transition-colors flex items-center gap-1 flex-shrink-0 disabled:opacity-50">
+                      {yue2FolderBusy ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                    </button>
+                    <button onClick={() => { setBrowserTarget('yue2Folder'); setBrowserOpen(true); }} disabled={yue2FolderBusy}
+                      className="px-2.5 py-2 rounded-lg text-xs font-semibold bg-pink-900/20 text-pink-400 hover:bg-pink-900/30 transition-colors flex items-center gap-1 flex-shrink-0 disabled:opacity-50">
+                      <FolderOpen size={12} />
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-zinc-600">
+                    {t('lyric.yue2AdapterFolderHint',
+                      'Point this at a folder of adapters, e.g. one you moved under yue2-joint-adapters\\refined; every AR and NAR file inside it, including subfolders, is added to the lists below and the two halves are filled in from it.')}
+                  </p>
+                  {yue2FolderNote && <p className="text-[10px] text-amber-500/90">{yue2FolderNote}</p>}
+                </div>
                 {(['ar', 'nar'] as const).map(half => {
                   const field = half === 'ar' ? 'yue2_ar_adapter_path' : 'yue2_nar_adapter_path';
                   const value = form[field];
@@ -228,10 +309,17 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
                   });
                   const label = (p2: string) => {
                     const m = meta[p2];
-                    const bits = [m?.trigger || m?.runName || p2.split(/[\/]/).pop()];
+                    const bits = [m?.trigger || m?.runName || p2.split(/[\\/]/).pop()];
                     if (m?.steps) bits.push(`${m.steps} steps`);
                     return bits.filter(Boolean).join(' · ');
                   };
+                  const options: Array<SelectOption<string>> = [
+                    { value: '', label: t('lyric.yue2AdapterNone', 'None — base model') },
+                    ...(value && !paths.includes(value)
+                      ? [{ value, label: `${value} (${t('lyric.yue2AdapterMissing', 'not installed')})` }]
+                      : []),
+                    ...paths.map(p2 => ({ value: p2, label: label(p2), hint: meta[p2]?.trigger || meta[p2]?.runName ? p2 : undefined })),
+                  ];
                   return (
                     <div className="space-y-3" key={half}>
                       <div className="flex items-center gap-2 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
@@ -241,15 +329,8 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
                           : t('lyric.yue2NarAdapter', 'YuE2 NAR adapter (renders the audio)')}
                       </div>
                       <div className="space-y-2">
-                        <select value={value}
-                          onChange={e => setForm(p2 => ({ ...p2, [field]: e.target.value }))}
-                          className="w-full bg-zinc-200 dark:bg-black/20 border border-zinc-300 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-800 dark:text-white focus:outline-none focus:border-emerald-500 transition-colors">
-                          <option value="">{t('lyric.yue2AdapterNone', 'None — base model')}</option>
-                          {value && !paths.includes(value) && (
-                            <option value={value}>{value} ({t('lyric.yue2AdapterMissing', 'not installed')})</option>
-                          )}
-                          {paths.map(p2 => <option key={p2} value={p2}>{label(p2)}</option>)}
-                        </select>
+                        <StyledSelect value={value} onChange={v => setForm(p2 => ({ ...p2, [field]: v }))}
+                          options={options} accent="pink" className="w-full" searchable={paths.length >= 8} />
                         {value && (
                           <span className="text-[10px] text-zinc-500 truncate block" title={value}>{value}</span>
                         )}
@@ -273,25 +354,26 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
                     {t('lyric.mm3Adapter', 'MM3 Adapter')}
                   </div>
                   <div className="space-y-2">
-                    <select value={form.mm3_adapter_path}
-                      onChange={e => setForm(p => ({ ...p, mm3_adapter_path: e.target.value }))}
-                      className="w-full bg-zinc-200 dark:bg-black/20 border border-zinc-300 dark:border-white/10 rounded-lg px-3 py-2 text-xs text-zinc-800 dark:text-white focus:outline-none focus:border-emerald-500 transition-colors">
-                      <option value="">{t('lyric.mm3AdapterNone', 'None — base model')}</option>
-                      {form.mm3_adapter_path && mm3Adapters
-                        && ![...mm3Adapters.candidates, ...mm3Adapters.others].some(a => a.file === form.mm3_adapter_path) && (
-                        <option value={form.mm3_adapter_path}>{form.mm3_adapter_path} ({t('lyric.mm3AdapterMissing', 'not installed')})</option>
-                      )}
-                      {mm3Adapters && mm3Adapters.candidates.length > 0 && (
-                        <optgroup label={t('lyric.mm3AdapterTrainedHere', 'Trained on this album')}>
-                          {mm3Adapters.candidates.map(a => <option key={a.file} value={a.file}>{mm3Label(a)}</option>)}
-                        </optgroup>
-                      )}
-                      {mm3Adapters && mm3Adapters.others.length > 0 && (
-                        <optgroup label={t('lyric.mm3AdapterOthers', 'Other installed adapters')}>
-                          {mm3Adapters.others.map(a => <option key={a.file} value={a.file}>{mm3Label(a)}</option>)}
-                        </optgroup>
-                      )}
-                    </select>
+                    <StyledSelect
+                      value={form.mm3_adapter_path}
+                      onChange={v => setForm(p => ({ ...p, mm3_adapter_path: v }))}
+                      accent="pink"
+                      className="w-full"
+                      searchable={!!mm3Adapters && mm3Adapters.candidates.length + mm3Adapters.others.length >= 8}
+                      options={[
+                        { value: '', label: t('lyric.mm3AdapterNone', 'None — base model') },
+                        ...(form.mm3_adapter_path && mm3Adapters
+                          && ![...mm3Adapters.candidates, ...mm3Adapters.others].some(a => a.file === form.mm3_adapter_path)
+                          ? [{ value: form.mm3_adapter_path, label: `${form.mm3_adapter_path} (${t('lyric.mm3AdapterMissing', 'not installed')})` }]
+                          : []),
+                        ...(mm3Adapters?.candidates ?? []).map(a => ({
+                          value: a.file, label: mm3Label(a), hint: t('lyric.mm3AdapterTrainedHere', 'Trained on this album') as string,
+                        })),
+                        ...(mm3Adapters?.others ?? []).map(a => ({
+                          value: a.file, label: mm3Label(a), hint: t('lyric.mm3AdapterOthers', 'Other installed adapter') as string,
+                        })),
+                      ]}
+                    />
                     {form.mm3_adapter_path && (
                       <span className="text-[10px] text-zinc-500 truncate block" title={form.mm3_adapter_path}>{form.mm3_adapter_path}</span>
                     )}
@@ -447,6 +529,7 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
           // always adapter_model.safetensors, so the filename carries nothing.
           if (browserTarget === 'adapter') setForm(p => ({ ...p, adapter_path: stripWeightsFile(path) }));
           else if (browserTarget === 'lmAdapter') setForm(p => ({ ...p, lm_adapter_path: stripWeightsFile(path) }));
+          else if (browserTarget === 'yue2Folder') void scanYue2Folder(path);
           else setForm(p => ({ ...p, reference_track_path: path }));
           setBrowserOpen(false);
         }}
@@ -454,6 +537,7 @@ export const PresetSettingsModal: React.FC<PresetSettingsModalProps> = ({
         filter={browserTarget === 'reference' ? 'audio' : 'adapters'}
         title={browserTarget === 'reference' ? 'Select Reference Audio'
           : browserTarget === 'lmAdapter' ? 'Select Planner Adapter Folder'
+          : browserTarget === 'yue2Folder' ? 'Select YuE2 adapter folder'
           : 'Select Adapter Folder'}
       />
     </>
