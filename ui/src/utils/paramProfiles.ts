@@ -133,12 +133,20 @@ function readLS<T>(key: string, fallback: T): T {
 
 // ── Collect ──────────────────────────────────────────────────────────────
 
-/** Snapshot every generation parameter + content field, exactly as set. */
-export function collectProfileData(): ProfileData {
+/**
+ * Snapshot every generation parameter + content field, exactly as set.
+ * Pass includeContent=false to omit the CONTENT_KEYS group entirely (issue
+ * #77 — caption/lyrics opt-out). applyProfileData() already leaves a field
+ * untouched when it's absent from the data, so an old profile (which always
+ * has these keys) still applies exactly as before.
+ */
+export function collectProfileData(includeContent = true): ProfileData {
   const s = useGlobalParamsStore.getState();
   const out: ProfileData = { _format: 'hot-step-preset', _version: 2 };
-  for (const [field, lsKey] of Object.entries(CONTENT_KEYS)) {
-    out[field] = readLS(lsKey, undefined);
+  if (includeContent) {
+    for (const [field, lsKey] of Object.entries(CONTENT_KEYS)) {
+      out[field] = readLS(lsKey, undefined);
+    }
   }
   for (const field of PROFILE_FIELDS) {
     out[field] = s[field];

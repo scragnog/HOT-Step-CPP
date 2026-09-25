@@ -7,11 +7,15 @@
 // means to a user.
 
 import React, { useEffect, useState } from 'react';
-import { Save } from 'lucide-react';
+import { Minus, Plus, Save } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { ToggleSwitch } from './BarSection';
 import { SeedManagerDrawer } from './SeedManagerDrawer';
 import { ParamLabel } from '../shared/ParamLabel';
+
+// Matches the seed range used elsewhere in the app (StormLiveControls, TrainDitForm).
+const MAX_SEED = 2147483647;
 
 /** Seed input with local string buffer — prevents parseInt("-") snap-back. */
 const SeedInput: React.FC<{ value: number; onChange: (v: number) => void; className: string }> = ({
@@ -30,8 +34,10 @@ const SeedInput: React.FC<{ value: number; onChange: (v: number) => void; classN
 };
 
 export const SeedControl: React.FC<{ inputClasses: string; hint?: string }> = ({ inputClasses, hint }) => {
+  const { t } = useTranslation();
   const gp = useGlobalParams();
   const [seedDrawerOpen, setSeedDrawerOpen] = useState(false);
+  const stepButtonClasses = 'flex-shrink-0 p-1.5 rounded-lg text-zinc-500 hover:text-amber-400 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-zinc-500 disabled:hover:bg-transparent';
 
   return (
     <div className="relative">
@@ -50,7 +56,19 @@ export const SeedControl: React.FC<{ inputClasses: string; hint?: string }> = ({
         </div>
       </div>
       {!gp.randomSeed && (
-        <SeedInput value={gp.seed} onChange={gp.setSeed} className={inputClasses} />
+        <div className="flex items-center gap-1">
+          <button type="button" title={t('seed.decrement')} aria-label={t('seed.decrement')}
+            disabled={gp.randomSeed} className={stepButtonClasses}
+            onClick={() => gp.setSeed(Math.max(0, gp.seed - 1))}>
+            <Minus size={12} />
+          </button>
+          <SeedInput value={gp.seed} onChange={gp.setSeed} className={inputClasses} />
+          <button type="button" title={t('seed.increment')} aria-label={t('seed.increment')}
+            disabled={gp.randomSeed} className={stepButtonClasses}
+            onClick={() => gp.setSeed(Math.min(MAX_SEED, gp.seed + 1))}>
+            <Plus size={12} />
+          </button>
+        </div>
       )}
       <SeedManagerDrawer
         isOpen={seedDrawerOpen}

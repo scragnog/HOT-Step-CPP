@@ -100,6 +100,14 @@ export const BarSection: React.FC<BarSectionProps> = ({
         scheduleClose();
         return;
       }
+      // Keyboard focus is still inside the panel (e.g. mid-edit in a text
+      // field, pointer left to click elsewhere) — don't yank it out from
+      // under the user (#103). Re-checked here, not just at schedule time,
+      // since focus can move into the panel after the pointer already left.
+      if (containerRef.current?.contains(document.activeElement)) {
+        scheduleClose();
+        return;
+      }
       onClose();
     }, HOVER_CLOSE_DELAY);
   }, [onClose, cancelClose]);

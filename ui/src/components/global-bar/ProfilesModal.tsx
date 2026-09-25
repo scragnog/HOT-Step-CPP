@@ -23,6 +23,7 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [newName, setNewName] = useState('');
+  const [includeContent, setIncludeContent] = useState(true);
   const [appliedName, setAppliedName] = useState('');
   const [confirmAction, setConfirmAction] = useState<{ kind: 'delete' | 'overwrite' | 'import'; name: string; data?: Record<string, unknown> } | null>(null);
   const [expandedName, setExpandedName] = useState('');
@@ -40,10 +41,10 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
   useEffect(() => { refresh(); }, [refresh]);
 
   const saveAs = useCallback((name: string) => {
-    profileApi.save(name, collectProfileData())
+    profileApi.save(name, collectProfileData(includeContent))
       .then(() => { setNewName(''); refresh(); })
       .catch(e => setError(e.message));
-  }, [refresh]);
+  }, [refresh, includeContent]);
 
   const handleSaveNew = useCallback(() => {
     const name = newName.trim();
@@ -165,19 +166,26 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
         </div>
 
         {/* Save current */}
-        <div className="px-5 py-3 border-b border-zinc-200 dark:border-white/5 flex items-center gap-2">
-          <input
-            value={newName}
-            onChange={e => setNewName(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') handleSaveNew(); }}
-            placeholder={t('profiles.namePlaceholder')}
-            className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors"
-          />
-          <button onClick={handleSaveNew} disabled={!newName.trim()}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-            <Save size={13} />
-            {t('profiles.saveCurrent')}
-          </button>
+        <div className="px-5 py-3 border-b border-zinc-200 dark:border-white/5 space-y-2">
+          <div className="flex items-center gap-2">
+            <input
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleSaveNew(); }}
+              placeholder={t('profiles.namePlaceholder')}
+              className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors"
+            />
+            <button onClick={handleSaveNew} disabled={!newName.trim()}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              <Save size={13} />
+              {t('profiles.saveCurrent')}
+            </button>
+          </div>
+          <label className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400 cursor-pointer select-none">
+            <input type="checkbox" checked={includeContent} onChange={e => setIncludeContent(e.target.checked)}
+              className="accent-pink-600" />
+            {t('profiles.includeContent')}
+          </label>
         </div>
 
         {/* List */}
