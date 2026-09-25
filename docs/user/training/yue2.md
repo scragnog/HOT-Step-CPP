@@ -31,7 +31,9 @@ The latent cache's "Clip captions" setting decides what the trainer reads. When 
 
 Loudness. The cache brings every track to -14 LUFS before encoding. A cache cut before that existed trains at each album's own mastering level, and loud albums then render clipped; the card warns and a re-run fixes it.
 
-The cache stages are latent cache, codes, lead sheets, vocal stems and lyric cursor spans. The last two are only needed for lyric timing supervision. "Perform all stages" runs them in order. You do not have to prepare anything by hand: Start training prepares the dataset automatically and reuses prepared data that has not changed.
+The latent cache's "Rewrite the manifest" option is on by default: a re-run rewrites the manifest with the caption mode chosen above and re-cuts at the clip length, and the cached latents are reused, so it costs no GPU time. "Perform all stages", "Train multiple" and Start training cut the cache with the YuE2 caption mode, and re-cut a cache that was cut with the ACE captions while `.yue2.txt` files sit beside the audio; the card warns about such a cache until it is re-run.
+
+The cache stages are latent cache, codes, lead sheets, vocal stems and lyric cursor spans. The last two are only needed for lyric timing supervision. "Perform all stages" runs them in order. Lead sheets can be previewed as each source finishes, not only when the stage ends. You do not have to prepare anything by hand: Start training prepares the dataset automatically and reuses prepared data that has not changed.
 
 How many tracks: the app warns below 10 files.
 <!-- TODO(verify): no track-count guidance specific to YuE2 joint training was found in code or skills. -->
@@ -55,7 +57,7 @@ Defaults the card ships:
 | Adapter type | LoKr, dim 64, factor 4, alpha 256 | About 106 MB for the AR and NAR pair, against 279 MB for a rank-64 LoRA. LoKr is marked experimental in the UI but is the tested default. |
 | Optimizer | Prodigy, cautious updates on | Prodigy sets its own step size, so the learning rate field is ignored. |
 | Planner / decoder learning-rate scale | 0.6 / 1.0 | |
-| Learning-rate schedule | Warmup, flat, triggered decay (wsd) | Flat until a stop fires, then a short decay, so the kept weights are annealed. |
+| Learning-rate schedule | Warmup, flat, triggered decay (wsd) | Flat, then a short decay that ends on the stop, so the kept weights are annealed. With a KL target the decay starts when the KL trend says the target is about a decay away, so the run lands on the target rather than 40 steps past it. If the KL still passes the target by the overshoot margin (0.1) during the decay, the stop acts at once. |
 | KL reading | 30-step trend line | The 20-step mean lags by about 10 steps. |
 | Save every | 25 steps | |
 | Lyric timing supervision | On, timing loss weight 0.08 | Uses vocal stems and forced alignment. |
@@ -63,7 +65,7 @@ Defaults the card ships:
 | Spike guard | Skip updates above 5x the recent median; stop after 3 in 20 steps | Ends the run on the last good weights if the gradients blow up. |
 | Decoder stop | Under 0.5% gain over 3 checkpoints | |
 | Automatically proceed to refinement | On | |
-| Checkpoint previews | Off | 90 s when on. |
+| Checkpoint previews | Off | 90 s when on. Previews belong to the Refine phase, which renders one per rung. |
 | Stop the engine during training | On | |
 
 When to move off them:
@@ -93,8 +95,13 @@ Refinement continues the finished run with the planner live, saves a checkpoint 
 | Tracks per rung | 2, 300 s each | Renders are not deterministic, so two takes is the minimum to trust a rung. |
 | In parallel with training | On | Needs VRAM for both, about 22 GB measured. Untick it on a smaller card. |
 | Draft quality | On | Previews only: 12 decoder steps instead of 32, about a third of the decoder time. Timbre is a little softer; structure, diction and late-song behaviour are unchanged. |
+| Keep a checkpoint per recon drop | 0.003 | Further decoder training only: a checkpoint is kept when the reconstruction meter has dropped by at least this since the last kept one; the rest are deleted once a newer one lands, so the ladder shows progress rather than every 10 steps. The newest checkpoint is always kept. |
 
-Pick the last good rung by ear. No automatic measure has been able to tell a good rung from a decaying one, so the ladder is a listening test. Press "Use this rung" on your choice. With "Further training for NAR" on, the decoder then trains on from that rung with the planner frozen, until its reconstruction target (0.25), the 500-step budget, or the point where the reconstruction meter stops improving. At about 1.5 s a step, 500 steps is roughly 13 minutes. The final checkpoint becomes the adapter, and the app offers to clean up the other checkpoints and caches.
+The rung that crosses the KL ceiling is rendered too, like every rung before it. Each take shows how many planner and composer re-plans the render needed, and each rung sums them; rising counts are an early sign of over-training, softened by the app's own auto re-plan at generation time.
+
+Pick the last good rung by ear. No automatic measure has been able to tell a good rung from a decaying one, so the ladder is a listening test. Score each rung's likeness (higher is better) and corruption (lower is better); a floating scoreboard ranks the rungs by an overall figure, (likeness + (6 − corruption)) / 2 minus 0.25 per re-plan per take (capped at 1), and marks the best one. Ties go to the earlier rung. The scoreboard is a suggestion; the pick is yours.
+
+When a ladder finishes, the panel says so and waits for you to press "Use this rung" on your choice. With "Further training for NAR" on, the decoder then trains on from that rung with the planner frozen, until its reconstruction target (0.25), the 500-step budget, or the point where the reconstruction meter stops improving. At about 1.5 s a step, 500 steps is roughly 13 minutes. The final checkpoint becomes the adapter; pressing "Use this rung" on a decoder run's checkpoint links it directly rather than starting another decoder run. The app then offers to clean up the other checkpoints and caches, and either way moves the run into `yue2-joint-adapters/refined/`, repointing the album preset and the engine's adapter pick. Runs under `refined/` are never deleted by a later cleanup. The ladder selection survives leaving the tab, and a refinement that starts on its own is shown as soon as it begins.
 
 The Review phase lists every refinement ladder that still has unscored previews, across datasets, so a batch that ran overnight is one list in the morning.
 
@@ -102,9 +109,9 @@ Checkpoint previews during the main run are optional. They use the first track i
 
 ## Using the result
 
-Adapters are saved in your adapters folder under `yue2-joint-adapters/<trigger>_<date>_<time>`. In "Audition a joint checkpoint", pick a checkpoint and press "Use for generation" to apply its AR and NAR adapters together for the next generation; YuE2 must be the active backend. The two strengths are independent and default to 1 and 1. "Use in Lyric Studio album preset" links the checkpoint to the album preset instead.
+Adapters are saved in your adapters folder under `yue2-joint-adapters/<trigger>_<date>_<time>`, and a refined run moves to `yue2-joint-adapters/refined/` after its cleanup. A run folder moved into `refined/` by hand is found again on the next read. In "Audition a joint checkpoint", pick a checkpoint and press "Use for generation" to apply its AR and NAR adapters together for the next generation; YuE2 must be the active backend. The two strengths are independent and default to 1 and 1. "Use in Lyric Studio album preset" links the checkpoint to the album preset instead.
 
-In Create, the YuE2 Caption source control picks the style caption from the training dataset: "Automatic from dataset" uses the track nearest in tempo, "From dataset track" a specific one, and "Custom" the caption you typed. Every training caption is an in-distribution prompt for the adapter, so picking one steers the render towards that track's character. The trigger opener is not added twice. See [Backends](../backends.md) for YuE2 generation settings and [Adapters](../adapters.md) for adapter handling in general.
+The Caption source control, in Lyric Studio and in Create, picks the style caption from the training dataset: "Automatic from dataset" uses the track nearest in tempo, "From dataset track" a specific one, and "Custom" the caption you typed. It is keyed by the dataset, not the adapter, so it survives a moved run folder and a cleared cache: Lyric Studio resolves the dataset from the album, Send to Custom-Gen carries it over, and Create has a Dataset dropdown for renders with no album behind them. Automatic is the default only while an adapter is in force; a base-model render keeps the caption you wrote. Every training caption is an in-distribution prompt for the adapter, so picking one steers the render towards that track's character. The trigger opener is not added twice. See [Backends](../backends.md) for YuE2 generation settings and [Adapters](../adapters.md) for adapter handling in general.
 
 ## Known limits
 

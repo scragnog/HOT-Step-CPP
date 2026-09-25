@@ -7,9 +7,9 @@
 // listening ladder: resume the finished run with the planner live (the
 // decoder rides along; it never decays), save a checkpoint every 0.1 KL up to
 // a ceiling, render a preview per rung, pick the last good one.
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, Play, Sparkles, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, Play, Sparkles, Trash2 } from 'lucide-react';
 import { StyledSelect } from '../shared/StyledSelect';
 import { ParamLabel } from '../shared/ParamLabel';
 import { Toggle } from '../settings/SettingsPrimitives';
@@ -24,6 +24,26 @@ import {
 } from '../../services/trainingApi';
 
 const input = 'px-2 py-1.5 rounded-lg text-xs bg-white/70 dark:bg-black/20 border border-zinc-300/70 dark:border-white/10 text-zinc-800 dark:text-zinc-100';
+
+// A rung's overall score for the scoreboard: base is likeness and inverted
+// corruption averaged onto the same 1..5 scale as ((6 − corruption) mirrors
+// likeness's direction), then a soft penalty for replan load — the app
+// auto-replans on its own, so a high count is a smell, not a verdict — capped
+// at 1 point so it can never flip the ranking on its own.
+export function rungOverall(args: {
+  likeness: number | null | undefined;
+  corruption: number | null | undefined;
+  plannerReplans: number;
+  composerReplans: number;
+  takes: number;
+}): { overall: number; replansPerTake: number } | null {
+  const { likeness, corruption, plannerReplans, composerReplans, takes } = args;
+  if (typeof likeness !== 'number' || typeof corruption !== 'number') return null;
+  const base = (likeness + (6 - corruption)) / 2;
+  const replansPerTake = (plannerReplans + composerReplans) / Math.max(1, takes);
+  const penalty = Math.min(1, 0.25 * replansPerTake);
+  return { overall: Math.round((base - penalty) * 100) / 100, replansPerTake };
+}
 
 export const RefinePanel: React.FC = () => {
   const { t } = useTranslation();
@@ -75,20 +95,30 @@ export const RefinePanel: React.FC = () => {
     catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   };
 
+  // The last live run this panel auto-switched the ladder to — so a server-
+  // started follow-up (planner refinement after a primary run, or a decoder
+  // follow-up) steals the selection once, even while some other run is
+  // currently picked, without fighting the user's own picks afterwards.
+  const lastAutoSelectedLive = useRef('');
   const refreshRuns = async () => {
     if (!datasetId) return;
     try {
       const r = await listYue2AitkRuns(datasetId);
       setRuns(r.runs);
       if (r.activeJob?.kind === 'yue2-joint-train') setJob(r.activeJob);
-      // Keep the ladder selection live: default it to the running ladder, or
-      // else the newest one with KL checkpoints, whenever it's empty or names
-      // a run that's gone (deleted, or never set on this dataset before).
-      if (!ladderRun || !r.runs.some(x => x.jobId === ladderRun)) {
-        const live = r.runs.find(x => x.live);
+      const live = r.runs.find(x => x.live);
+      if (live && live.jobId !== lastAutoSelectedLive.current) {
+        lastAutoSelectedLive.current = live.jobId;
+        setLadderRun(live.jobId);
+      } else if (!ladderRun || !r.runs.some(x => x.jobId === ladderRun)) {
+        // Keep the ladder selection live: default it to the running ladder,
+        // or else the newest one with KL checkpoints, whenever it's empty or
+        // names a run that's gone (deleted, or never set on this dataset
+        // before).
         const newestKl = [...r.runs].filter(x => x.checkpoints.some(c => c.kl !== undefined)).sort((a, b) => b.createdAt - a.createdAt)[0];
         const next = live?.jobId ?? newestKl?.jobId;
         if (next) setLadderRun(next);
+        if (live && next === live.jobId) lastAutoSelectedLive.current = live.jobId;
       }
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   };
@@ -174,6 +204,7 @@ export const RefinePanel: React.FC = () => {
   const [choice, setChoice] = useState<Yue2CleanupChoice>({ caches: true, otherCheckpoints: true, otherRuns: true, resume: true, otherPreviews: true });
   const [cleaning, setCleaning] = useState(false);
   const [cleanupNote, setCleanupNote] = useState('');
+  const [scoreboardCollapsed, setScoreboardCollapsed] = useState(false);
   const mib = (b: number) => b >= 1073741824 ? `${(b / 1073741824).toFixed(2)} GiB` : `${(b / 1048576).toFixed(0)} MiB`;
   const finishPick = async (run: string, dir: string, step: number) => {
     await linkYue2JointCheckpointPreset(datasetId!, dir); setPicked(dir);
@@ -235,11 +266,46 @@ export const RefinePanel: React.FC = () => {
   // that the ladder isn't done until "Use this rung" is pressed.
   const ladderRunRec = runs.find(r => r.jobId === ladderRun);
   const ladderIsDecoderOnly = (ladderRunRec?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true;
-  const finishedUnpickedNotice = ladderRunRec && !ladderRunRec.live && ladderRunRec.status === 'done' && !ladder.some(c => c.dir === picked)
+  const ladderIsRefinement = (ladderRunRec?.options as Record<string, unknown> | undefined)?.refinePlanner === true;
+  // A primary run finishing is not itself a thing to "pick a rung" for — that
+  // notice is only for a planner refinement or a decoder-only follow-up.
+  const finishedUnpickedNotice = ladderRunRec && !ladderRunRec.live && ladderRunRec.status === 'done' && !ladder.some(c => c.dir === picked) && (ladderIsRefinement || ladderIsDecoderOnly)
     ? (ladderIsDecoderOnly
       ? t('trainingStudio.refine.noticeDecoderDone', 'Decoder training finished. Press Use this rung on its last checkpoint to link the adapter and clean up.')
       : t('trainingStudio.refine.noticePlannerDone', 'Refinement finished. Listen to the rungs, then press Use this rung on the one you choose. With Further training for NAR on, the decoder then trains on from that rung and the adapter is linked when it stops; off, the rung is linked as it is and you can clean up.'))
     : '';
+  // Per-rung facts shared by the ladder cards and the scoreboard: this
+  // rung's previews, its replan load, and its overall score (null unless
+  // it's been scored on both axes).
+  const rungStats = (step: number) => {
+    const mine = previews.filter(p => p.step === step).sort((a, b) => a.seed - b.seed);
+    const doneTakes = mine.filter(p => p.status === 'done');
+    const plannerReplans = doneTakes.reduce((sum, p) => sum + (p.plan ? p.plan.attempts.length - 1 : 0), 0);
+    const composerReplans = doneTakes.reduce((sum, p) => sum + (typeof p.composerReplans === 'number' ? p.composerReplans : 0), 0);
+    const hasReplanData = doneTakes.some(p => p.plan || typeof p.composerReplans === 'number');
+    const sc = scores[step];
+    const overall = rungOverall({ likeness: sc?.likeness, corruption: sc?.corruption, plannerReplans, composerReplans, takes: doneTakes.length });
+    return { mine, doneTakes, plannerReplans, composerReplans, hasReplanData, overall };
+  };
+  // Best rung by overall score, ties going to the lower (less-trained, so
+  // less likely overcooked) step. Ladder is sorted ascending, so keeping the
+  // first strictly-greater score already resolves ties that way.
+  let bestStep: number | undefined;
+  let bestOverall = -Infinity;
+  for (const c of ladder) {
+    const o = rungStats(c.step).overall;
+    if (o && o.overall > bestOverall) { bestOverall = o.overall; bestStep = c.step; }
+  }
+  const scoreboardRows = ladder.map(c => {
+    const stats = rungStats(c.step);
+    const sc = scores[c.step];
+    return { step: c.step, kl: c.kl, likeness: sc?.likeness ?? null, corruption: sc?.corruption ?? null, overall: stats.overall };
+  }).sort((a, b) => {
+    if (a.overall && b.overall) return b.overall.overall - a.overall.overall || a.step - b.step;
+    if (a.overall) return -1;
+    if (b.overall) return 1;
+    return a.step - b.step;
+  });
   const items: Array<{ key: keyof Yue2CleanupChoice; label: string; item?: { count: number; bytes: number; detail?: string[] } }> = cleanup ? [
     { key: 'caches', label: t('trainingStudio.refine.cleanCaches', 'Prepared data and caches for this dataset (latents, codes, lead sheets, alignment, stems, MM3 and ACE caches)'), item: cleanup.plan.caches },
     { key: 'otherCheckpoints', label: t('trainingStudio.refine.cleanCheckpoints', 'The other checkpoints in this run'), item: cleanup.plan.otherCheckpoints },
@@ -391,21 +457,19 @@ export const RefinePanel: React.FC = () => {
         </div>}
         {ladder.length > 0 && <div className="mt-3 flex flex-col gap-3">
           {ladder.map(c => {
-            const mine = previews.filter(p => p.step === c.step).sort((a, b) => a.seed - b.seed);
-            // Over-training signal: rising re-plan counts across this rung's
-            // finished takes, summed for a quick header glance.
-            const doneTakes = mine.filter(p => p.status === 'done');
-            const plannerReplans = doneTakes.reduce((sum, p) => sum + (p.plan ? p.plan.attempts.length - 1 : 0), 0);
-            const composerReplans = doneTakes.reduce((sum, p) => sum + (typeof p.composerReplans === 'number' ? p.composerReplans : 0), 0);
-            const hasReplanData = doneTakes.some(p => p.plan || typeof p.composerReplans === 'number');
-            return <div key={c.step} className={`rounded-lg border p-3 ${picked === c.dir ? 'border-emerald-500/60 bg-emerald-500/5' : c.rung ? 'border-amber-500/40' : 'border-zinc-300/70 dark:border-white/10'}`}>
+            const stats = rungStats(c.step);
+            const { mine, plannerReplans, composerReplans, hasReplanData, overall } = stats;
+            return <div key={c.step} id={`refine-rung-${c.step}`}
+              className={`rounded-lg border p-3 ${picked === c.dir ? 'border-emerald-500/60 bg-emerald-500/5' : c.step === bestStep ? 'border-sky-500/70' : c.rung ? 'border-amber-500/40' : 'border-zinc-300/70 dark:border-white/10'}`}>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                 <span className="font-semibold text-zinc-800 dark:text-zinc-100">{t('trainingStudio.refine.rungStep', 'Step {{step}}', { step: c.step })}</span>
                 {c.rung && <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-semibold">{t('trainingStudio.refine.rungBadge', 'rung')}</span>}
                 {!c.rung && <span className="text-[10px] text-zinc-500">{t('trainingStudio.refine.routineSave', 'routine save')}</span>}
+                {c.step === bestStep && <span className="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-700 dark:text-sky-300 text-[10px] font-semibold">{t('trainingStudio.refine.bestBadge', 'best by score')}</span>}
                 <span className="font-mono text-zinc-600 dark:text-zinc-300">KL {c.kl !== undefined ? c.kl.toFixed(2) : '—'}{c.frozen ? ' (frozen)' : ''}</span>
                 <span className="font-mono text-zinc-600 dark:text-zinc-300">recon {c.recon !== undefined ? c.recon.toFixed(3) : '—'}</span>
                 {hasReplanData && <span className="font-mono text-zinc-500" title={t('trainingStudio.refine.replansInfo', 'planner / composer re-plans across this rung\'s takes; rising counts are a sign of over-training')}>{t('trainingStudio.refine.replans', 'replans {{p}}/{{c}}', { p: plannerReplans, c: composerReplans })}</span>}
+                {overall && <span className="font-mono text-sky-700 dark:text-sky-300" title={t('trainingStudio.refine.overallInfo', 'overall = (likeness + (6 − corruption)) / 2, minus a soft penalty for replan load')}>{t('trainingStudio.refine.overall', 'overall {{n}}', { n: overall.overall.toFixed(2) })}</span>}
                 <span className="flex-1" />
                 <button type="button" onClick={() => void render(c.step)} disabled={rendering !== null}
                   className="px-2 py-1 rounded-lg text-[11px] border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 disabled:opacity-40">
@@ -435,6 +499,34 @@ export const RefinePanel: React.FC = () => {
           })}
         </div>}
       </div>
+
+      {bestStep !== undefined && <div className="hidden md:block fixed right-4 bottom-4 z-40 max-w-xs rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white/90 dark:bg-zinc-900/90 shadow-xl p-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">{t('trainingStudio.refine.scoreboardTitle', 'Scoreboard')}</span>
+          <button type="button" onClick={() => setScoreboardCollapsed(v => !v)} className="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200">
+            {scoreboardCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+          </button>
+        </div>
+        {!scoreboardCollapsed && <>
+          <p className="mt-1 text-[10px] text-zinc-500">{t('trainingStudio.refine.scoreboardFormula', 'Overall = (likeness + (6 − corruption)) / 2, minus 0.25 per replan per take, capped at 1.')}</p>
+          <div className="mt-2 flex flex-col gap-1 max-h-64 overflow-y-auto">
+            {scoreboardRows.map(row => (
+              <button key={row.step} type="button"
+                onClick={() => document.getElementById(`refine-rung-${row.step}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                className={`w-full text-left px-2 py-1 rounded-lg text-[11px] ${row.overall ? (row.step === bestStep ? 'bg-sky-500/15 text-sky-800 dark:text-sky-200' : 'hover:bg-zinc-500/10 text-zinc-700 dark:text-zinc-300') : 'text-zinc-500'}`}>
+                {row.overall ? <>
+                  <div className="flex items-center justify-between gap-2">
+                    <span>{t('trainingStudio.refine.scoreboardStep', 'step {{step}}', { step: row.step })}
+                      {row.step === bestStep && <span className="ml-1 px-1 py-0.5 rounded bg-sky-500/20 text-[9px] font-semibold">{t('trainingStudio.refine.bestChip', 'best')}</span>}</span>
+                    <span className="font-bold font-mono">{row.overall.overall.toFixed(2)}</span>
+                  </div>
+                  <div className="text-[10px] text-zinc-500">KL {row.kl !== undefined ? row.kl.toFixed(2) : '—'} · L {row.likeness} · C {row.corruption} · {t('trainingStudio.refine.scoreboardReplans', 'replans {{n}}/take', { n: row.overall.replansPerTake.toFixed(2) })}</div>
+                </> : t('trainingStudio.refine.scoreboardUnscored', 'step {{step}} · unscored', { step: row.step })}
+              </button>
+            ))}
+          </div>
+        </>}
+      </div>}
     </div>
   );
 };

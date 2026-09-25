@@ -344,6 +344,13 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     if (stored.targetKl === 1.2) stored.targetKl = 1.0;
     window.localStorage.setItem(d0925, '1');
   }
+  // 2026-09-25 (Rob): checkpoint previews are the Refine tab's job; a primary
+  // run renders none by default. Turned off once; tick it again to keep it.
+  const previewOff = `${FORM_KEY}${datasetId}:defaults-2026-09-25-preview-off`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(previewOff)) {
+    if (stored.preview?.enabled) stored.preview = { ...stored.preview, enabled: false };
+    window.localStorage.setItem(previewOff, '1');
+  }
   return { ...DEFAULT_FORM, ...stored };
 }
 function writeStored(key: string, value: unknown): void {

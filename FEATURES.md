@@ -305,7 +305,7 @@ Build datasets from your own audio and train adapters on your GPU, for all three
 | Live monitoring | Loss chart, stats and milestone checkpoint badges. |
 | Audition | Same-seed A/B of base and adapter planner, optionally rendered through the DiT. |
 | Adapter scoring | Evaluation passes put an artist-match score in the planner adapter picker. |
-| YuE2 Refine and Review | Push a planner adapter up KL rungs with a preview per rung, then score the ladders by ear. |
+| YuE2 Refine and Review | Push a planner adapter up KL rungs with a preview per rung, score the ladders by ear, and let a scoreboard rank the rungs by likeness, corruption and re-plans. |
 | Batch pipeline | Import multiple folders and run label, build, preprocess and train unattended; YuE2's Train multiple chains its stages over several datasets. |
 | Send to Lyric Studio | Export a dataset's artist and album with its trained adapters as a preset. |
 
