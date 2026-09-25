@@ -21,7 +21,9 @@ permissions:
 
 env:
   NODE_VERSION: '22.16.0'
-  ORT_VERSION: '1.25.1'
+  # 1.26 is the first release with a CUDA 13 build of the GPU package (#94);
+  # the CUDA 12 build keeps the unsuffixed name.
+  ORT_VERSION: '1.26.0'
   # TensorRT SDK for the Windows cuda13.1 variant only (see
   # docs/plans/2026-09-11-mm3-trt-dit-shipping.md and docs/RELEASING.md
   # "TensorRT SDK for CI"). The headers+license zip is hosted; the .lib import
@@ -172,19 +174,22 @@ jobs:
         uses: actions/cache@v4
         with:
           path: engine/deps/onnxruntime
-          key: ort-win-x64-gpu-${{ env.ORT_VERSION }}
+          key: ort-win-x64-gpu-${{ env.ORT_VERSION }}-cuda${{ matrix.cuda_version }}
 
       - name: Download ONNX Runtime
         if: steps.cache-ort.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          $ortUrl = "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ORT_VERSION }}/onnxruntime-win-x64-gpu-${{ env.ORT_VERSION }}.zip"
+          # The CUDA 13 variants need the provider built against CUDA 13 (#94).
+          $cudaMajor = '${{ matrix.cuda_version }}'.Split('.')[0]
+          $ortPkg = if ($cudaMajor -eq '13') { "onnxruntime-win-x64-gpu_cuda13-${{ env.ORT_VERSION }}" } else { "onnxruntime-win-x64-gpu-${{ env.ORT_VERSION }}" }
+          $ortUrl = "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ORT_VERSION }}/$ortPkg.zip"
           $ortZip = "$env:RUNNER_TEMP\ort.zip"
           Write-Host "Downloading ORT from $ortUrl"
           Invoke-WebRequest -Uri $ortUrl -OutFile $ortZip -UseBasicParsing
           New-Item -ItemType Directory -Force engine/deps | Out-Null
           Expand-Archive -Path $ortZip -DestinationPath engine/deps -Force
-          Move-Item "engine/deps/onnxruntime-win-x64-gpu-${{ env.ORT_VERSION }}" "engine/deps/onnxruntime"
+          Move-Item "engine/deps/$ortPkg" "engine/deps/onnxruntime"
 
       # ── Portable Node.js ───────────────────────────────────────
       - name: Cache portable Node.js
@@ -485,6 +490,8 @@ jobs:
           # Clean staging
           if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
           New-Item -ItemType Directory -Force $dist | Out-Null
+          # The version the app prints and serves at /api/version (#185)
+          Set-Content -Path "$dist/VERSION" -Value $version -NoNewline
 
           # Runtime: portable Node.js
           New-Item -ItemType Directory -Force "$dist/runtime" | Out-Null
@@ -930,6 +937,8 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           DIST="release/staging"
           rm -rf "$DIST" && mkdir -p "$DIST"
+          # The version the app prints and serves at /api/version (#185)
+          printf '%s' "$VERSION" > "$DIST/VERSION"
 
           # Runtime: portable Node.js
           mkdir -p "$DIST/runtime/bin" "$DIST/runtime/lib"
@@ -1270,16 +1279,19 @@ jobs:
         uses: actions/cache@v4
         with:
           path: engine/deps/onnxruntime
-          key: ort-linux-x64-gpu-${{ env.ORT_VERSION }}
+          key: ort-linux-x64-gpu-${{ env.ORT_VERSION }}-cuda${{ matrix.cuda_version }}
 
       - name: Download ONNX Runtime
         if: steps.cache-ort.outputs.cache-hit != 'true'
         run: |
-          ORT_URL="https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ORT_VERSION }}/onnxruntime-linux-x64-gpu-${{ env.ORT_VERSION }}.tgz"
+          # The CUDA 13 variant needs the provider built against CUDA 13 (#94).
+          CUDA_MAJOR=$(echo '${{ matrix.cuda_version }}' | cut -d. -f1)
+          if [ "$CUDA_MAJOR" = "13" ]; then ORT_PKG="onnxruntime-linux-x64-gpu_cuda13-${{ env.ORT_VERSION }}"; else ORT_PKG="onnxruntime-linux-x64-gpu-${{ env.ORT_VERSION }}"; fi
+          ORT_URL="https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ORT_VERSION }}/$ORT_PKG.tgz"
           echo "Downloading ORT from $ORT_URL"
           mkdir -p engine/deps
-          curl -sL "$ORT_URL" | tar -xz -C engine/deps
-          mv "engine/deps/onnxruntime-linux-x64-gpu-${{ env.ORT_VERSION }}" engine/deps/onnxruntime
+          curl -sL --fail "$ORT_URL" | tar -xz -C engine/deps
+          mv "engine/deps/$ORT_PKG" engine/deps/onnxruntime
 
       # ── Portable Node.js ───────────────────────────────────────
       - name: Cache portable Node.js
@@ -1456,6 +1468,8 @@ jobs:
           VARIANT="${{ matrix.variant }}"
           DIST="release/staging"
           rm -rf "$DIST" && mkdir -p "$DIST"
+          # The version the app prints and serves at /api/version (#185)
+          printf '%s' "$VERSION" > "$DIST/VERSION"
 
           # Runtime: portable Node.js
           mkdir -p "$DIST/runtime/bin" "$DIST/runtime/lib"

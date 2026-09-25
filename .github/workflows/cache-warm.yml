@@ -33,7 +33,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ORT_VERSION: '1.25.1'
+  ORT_VERSION: '1.26.0'
 
 jobs:
   # ── Windows (must match release.yml build-windows: runner, deps, flags, keys) ──
@@ -144,18 +144,21 @@ jobs:
         uses: actions/cache@v4
         with:
           path: engine/deps/onnxruntime
-          key: ort-win-x64-gpu-${{ env.ORT_VERSION }}
+          key: ort-win-x64-gpu-${{ env.ORT_VERSION }}-cuda${{ matrix.cuda_version }}
 
       - name: Download ONNX Runtime
         if: steps.cache-ort.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          $ortUrl = "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ORT_VERSION }}/onnxruntime-win-x64-gpu-${{ env.ORT_VERSION }}.zip"
+          # The CUDA 13 variants need the provider built against CUDA 13 (#94).
+          $cudaMajor = '${{ matrix.cuda_version }}'.Split('.')[0]
+          $ortPkg = if ($cudaMajor -eq '13') { "onnxruntime-win-x64-gpu_cuda13-${{ env.ORT_VERSION }}" } else { "onnxruntime-win-x64-gpu-${{ env.ORT_VERSION }}" }
+          $ortUrl = "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ORT_VERSION }}/$ortPkg.zip"
           $ortZip = "$env:RUNNER_TEMP\ort.zip"
           Invoke-WebRequest -Uri $ortUrl -OutFile $ortZip -UseBasicParsing
           New-Item -ItemType Directory -Force engine/deps | Out-Null
           Expand-Archive -Path $ortZip -DestinationPath engine/deps -Force
-          Move-Item "engine/deps/onnxruntime-win-x64-gpu-${{ env.ORT_VERSION }}" "engine/deps/onnxruntime"
+          Move-Item "engine/deps/$ortPkg" "engine/deps/onnxruntime"
 
       - name: Install Ninja build system
         uses: lukka/get-cmake@latest
@@ -386,15 +389,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: engine/deps/onnxruntime
-          key: ort-linux-x64-gpu-${{ env.ORT_VERSION }}
+          key: ort-linux-x64-gpu-${{ env.ORT_VERSION }}-cuda${{ matrix.cuda_version }}
 
       - name: Download ONNX Runtime
         if: steps.cache-ort.outputs.cache-hit != 'true'
         run: |
-          ORT_URL="https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ORT_VERSION }}/onnxruntime-linux-x64-gpu-${{ env.ORT_VERSION }}.tgz"
+          # The CUDA 13 variant needs the provider built against CUDA 13 (#94).
+          CUDA_MAJOR=$(echo '${{ matrix.cuda_version }}' | cut -d. -f1)
+          if [ "$CUDA_MAJOR" = "13" ]; then ORT_PKG="onnxruntime-linux-x64-gpu_cuda13-${{ env.ORT_VERSION }}"; else ORT_PKG="onnxruntime-linux-x64-gpu-${{ env.ORT_VERSION }}"; fi
+          ORT_URL="https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ORT_VERSION }}/$ORT_PKG.tgz"
           mkdir -p engine/deps
           curl -sL "$ORT_URL" | tar -xz -C engine/deps
-          mv "engine/deps/onnxruntime-linux-x64-gpu-${{ env.ORT_VERSION }}" engine/deps/onnxruntime
+          mv "engine/deps/$ORT_PKG" engine/deps/onnxruntime
 
       - name: Install Ninja build system
         uses: lukka/get-cmake@latest
