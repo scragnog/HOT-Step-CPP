@@ -4,6 +4,7 @@
 // GET  /api/backends            — list registered backends + which is active
 // GET  /api/capabilities        — active (or ?backend=<id>) backend's manifest
 // POST /api/backends/active     — switch the active backend { id }
+// POST /api/yue2/import-adapter — split a ComfyUI joint YuE2 adapter { path }
 //
 // Style follows routes/plugins.ts (minimal route, short TTL cache so the UI
 // can poll cheaply) and generalises the capabilities-endpoint pattern in
@@ -31,6 +32,7 @@ import {
   mm3LmAdapterDir,
   MM3_LM_ADAPTER_DEFAULT_SCALES,
 } from '../services/backends/minimax/lmAdapter.js';
+import { importYue2ComfyAdapter } from '../services/backends/yue2/comfyImport.js';
 import type { BackendCapabilities } from '../services/backends/types.js';
 
 const router = Router();
@@ -275,6 +277,18 @@ router.get('/mm3/lm-adapters', (_req, res) => {
     defaultScales: MM3_LM_ADAPTER_DEFAULT_SCALES,
     dir: mm3LmAdapterDir(),
   });
+});
+
+/** POST /api/yue2/import-adapter — split a ComfyUI / ai-toolkit joint YuE2
+ *  adapter into native AR + NAR files and list it in the picker. Answers the
+ *  two paths so the caller can select both halves in one go. */
+router.post('/yue2/import-adapter', (req, res) => {
+  const src = typeof req.body?.path === 'string' ? req.body.path.trim() : '';
+  try {
+    res.json(importYue2ComfyAdapter(src));
+  } catch (err) {
+    res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 export default router;

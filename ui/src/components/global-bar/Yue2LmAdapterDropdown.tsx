@@ -36,7 +36,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, ChevronDown, ChevronRight, FolderOpen, Loader2, RotateCcw, Search } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, FileInput, FolderOpen, Loader2, RotateCcw, Search } from 'lucide-react';
 import { useBackendStore } from '../../stores/backendStore';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import { ParamLabel } from '../shared/ParamLabel';
@@ -382,7 +382,38 @@ export const Yue2LmAdapterDropdown: React.FC = () => {
   const savedFolder = String((catalogue?.defaults as Record<string, unknown> | undefined)?.lmAdapterFolder ?? '');
   const [folder, setFolder] = useState(savedFolder);
   const [browsing, setBrowsing] = useState(false);
+  const [importing, setImporting] = useState(false);
   useEffect(() => { setFolder(savedFolder); }, [savedFolder]);
+
+  /** A ComfyUI / ai-toolkit YuE2 adapter is one file holding both halves in
+   *  the upstream naming. The server splits it into our AR + NAR pair; both
+   *  slots are then pointed at the result, since they are one training run. */
+  const importComfy = async (file: string) => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await fetch('/api/yue2/import-adapter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: file }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
+      const ok = await selectModels({ lmAdapterAr: body.arPath, lmAdapterNar: body.narPath }, activeBackendId);
+      setNote(ok
+        ? t('globalBar.yue2AdapterImported',
+            'Imported "{{name}}" and loaded it into both halves. The next generation reloads the model and merges it.',
+            { name: body.name })
+        : t('globalBar.yue2AdapterImportedNotSet',
+            'Imported "{{name}}" — it is in both lists below, but selecting it failed; pick it by hand.',
+            { name: body.name }));
+    } catch (err) {
+      setNote(t('globalBar.yue2AdapterImportFailed', 'Import failed: {{error}}',
+        { error: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   /** Adapters copied from another machine are not in this one's training
    *  index; the server scans this folder for them as well. */
@@ -478,6 +509,33 @@ export const Yue2LmAdapterDropdown: React.FC = () => {
         mode="folder"
         startPath={folder || undefined}
         title={t('adapter.selectAdapterFolder') as string}
+      />
+
+      <div>
+        <ParamLabel
+          label={t('globalBar.yue2AdapterImport', 'Import ComfyUI adapter')}
+          info={t('globalBar.yue2AdapterImportHint',
+            'For YuE2 LoRA or LoKr adapters made in ComfyUI or ai-toolkit. Those come as a single .safetensors file that holds both halves (NAR and AR) at once, which this app cannot load directly. Importing splits it into an AR and a NAR adapter, lists them under "Imported" below and selects both. The original file is left untouched. Adapters trained in this app never need importing.')}
+          rootClassName="flex mb-1.5"
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
+        <button type="button" disabled={locked} onClick={() => setImporting(true)}
+          title={t('globalBar.yue2AdapterImportButtonHint', 'Pick a ComfyUI / ai-toolkit YuE2 adapter (.safetensors) to convert') as string}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-600 dark:text-zinc-300 hover:text-zinc-800 dark:hover:text-white disabled:opacity-40">
+          <FileInput size={14} />
+          {t('globalBar.yue2AdapterImportButton', 'Import adapter…')}
+        </button>
+        <p className="mt-1 text-[10px] text-zinc-600 dark:text-zinc-500 leading-relaxed">
+          {t('globalBar.yue2AdapterImportSub',
+            'For single-file YuE2 adapters from ComfyUI or ai-toolkit.')}
+        </p>
+      </div>
+      <FileBrowserModal
+        open={importing}
+        onClose={() => setImporting(false)}
+        onSelect={p => { setImporting(false); void importComfy(p); }}
+        mode="file"
+        filter="adapters"
+        title={t('globalBar.yue2AdapterImportPick', 'Select a ComfyUI YuE2 adapter') as string}
       />
 
       <SlotPanel

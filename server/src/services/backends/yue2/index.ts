@@ -913,7 +913,8 @@ function yue2LmAdapterCatalogue(): {
       // Several runs of one dataset list the same steps: name the run by its
       // start time (the output folder's suffix), schedule and refinement.
       const started = /_(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-\d{2}$/.exec(path.basename(run.output));
-      const runName = [`AITK · ${run.datasetSlug || run.datasetId || run.jobId}`,
+      const imported = run.options.source === 'comfyui-import';
+      const runName = [imported ? `Imported · ${String(run.options.name ?? run.jobId)}` : `AITK · ${run.datasetSlug || run.datasetId || run.jobId}`,
         started ? `${started[2]}-${started[3]} ${started[4]}:${started[5]}` : '',
         typeof run.options.lrSchedule === 'string' ? run.options.lrSchedule : '',
         run.options.refinePlanner === true || run.options.unfreezePlanner === true ? 'refine' : ''].filter(Boolean).join(' · ');

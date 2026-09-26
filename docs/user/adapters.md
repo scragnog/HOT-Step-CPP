@@ -271,6 +271,22 @@ The trigger is written into the style prompt for you. With both slots filled onl
 adapter's trigger goes in; if the AR adapter was trained under a different trigger, add
 that one to the caption yourself.
 
+### Importing ComfyUI adapters
+
+YuE2 adapters made in ComfyUI or ai-toolkit come as one `.safetensors` file that holds both
+halves, in naming the engine does not load. **Import adapter…** converts one:
+
+1. Click **Import adapter…** and pick the file.
+2. The app splits it into a NAR and an AR adapter under
+   `yue2-joint-adapters/<name>_<date>_<time>/`, lists them as **Imported · <name>** in both
+   slots and selects both. The original file is not changed.
+
+The trigger is read from the file's training tags, and the step count from its training
+info. These files carry no alpha, so the import uses the strength ComfyUI applies (alpha
+equal to the rank, scale 1.0). If the adapter sounds too strong or too weak, use the
+**Strength** dials. LoRA and LoKr adapters are both supported. Adapters trained in this
+app never need importing.
+
 YuE2 weights are licensed CC BY-NC 4.0, with the authors' exception for individual
 creators, and an adapter trained on them carries the same terms. The panel shows the full
 notice.
@@ -303,6 +319,7 @@ ear, is covered per backend in [ACE-Step training](training/ace-step.md),
 | Out of memory with several adapters | Per-section directives and Active phase windows hold every adapter separately. Set **Adapter VRAM** to Q4, drop an adapter, or use Merge with **Low ¼** when you do not need per-section control. |
 | Out of memory in Merge mode | **HQ** stores merged weights at F32. Switch Merge VRAM to **Low ¼** or use Runtime. |
 | Per-section adapters blur together | See the tips at the end of [Per-section adapters](#per-section-adapters). |
+| A YuE2 adapter from ComfyUI is not listed, or is refused | It is a single joint file. Use **Import adapter…** in the YuE2 panel. |
 | A YuE2 pick has no effect yet | It merges on the next model load. Generate once, or check the slot's status line. |
 
 For reading the logs, see the troubleshooting page.

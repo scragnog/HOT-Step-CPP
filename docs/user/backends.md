@@ -191,6 +191,8 @@ What sets it apart:
   the NAR half, each with its own strengths. An adapter is merged into the loaded model,
   so choosing one or changing a dial means pressing Apply, and the next generation
   reloads the model. Lead the style prompt with the adapter's trigger word.
+  Single-file adapters from ComfyUI or ai-toolkit load through **Import adapter…**, which
+  splits them into the two halves.
 - Lyric timestamps come from a forced aligner run after the render, switched on per
   render in the Post-Processing cluster. It needs the `mms-fa-f32.gguf` model.
 
@@ -228,7 +230,7 @@ controls the UI shows for it. "?" means not yet confirmed.
 | Covers and reference audio | Yes (Cover Studio) | No | No |
 | Repaint | Yes (Repaint) | No | No |
 | Extend | ? | No | No |
-| Adapters at generation | DiT LoRA and LoKr, planner LM LoRA | Planner LM LoRA, applied per render | AR and NAR LoRA, merged at load |
+| Adapters at generation | DiT LoRA and LoKr, planner LM LoRA | Planner LM LoRA, applied per render | AR and NAR LoRA and LoKr, merged at load; ComfyUI joint files via import |
 | Training in Training Studio | Yes | Yes | Yes |
 | Streaming playback | Continuous streaming in STORM; no per-render preview | Play While Rendering | No |
 | Lua plugins (solvers, schedulers, guidance) | Yes, plus postprocess plugins | Yes, opt-in and experimental; no postprocess plugins | No (own NAR solver and scheduler) |

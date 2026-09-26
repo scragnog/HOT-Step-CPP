@@ -52,6 +52,7 @@ Pick the backend from a button in the global bar. The choice survives a restart,
 | Batch Size and Noise Variations | Several songs in one pass, or the same composed song rendered from different noise. |
 | Own NAR sampler | Midpoint or Wasserstein Flow solvers with Uniform or HT V3 schedules. |
 | Two adapter slots | Separate AR (composer) and NAR (renderer) adapters, merged into the loaded model with Apply. |
+| ComfyUI adapter import | Splits a single-file YuE2 adapter from ComfyUI or ai-toolkit into the AR and NAR pair and selects both. See [Adapters](docs/user/adapters.md#importing-comfyui-adapters). |
 | Companion decoder | A small decoder adapter that ships in every YuE2 pack is applied to every GGUF generation. |
 | Forced-alignment LRC | Lyric timestamps from an aligner run after the render. |
 | Quant ladder | Imatrix-guided packs from Q2_K up to BF16, plus an INT8 ConvRot checkpoint for Ampere or newer NVIDIA cards. |
