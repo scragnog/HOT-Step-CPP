@@ -238,6 +238,10 @@ export interface Yue2JointPreviewOptions {
   /** KL-rung previews render while training continues instead of pausing it
    *  (training + render measured ~21 GB of VRAM; renders run about half speed). */
   parallel?: boolean;
+  /** Refinement ladders, 2 takes: take 1 is this rung's own plan; take 2
+   *  renders the ladder's shared lead sheet (the first rung's accepted plan),
+   *  so across the ladder take 2 is one song. Both render in one batch. */
+  sharedSheet?: boolean;
   seconds: number;
   seed: number;
   previewMaxFrames: number;

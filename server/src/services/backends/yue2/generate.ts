@@ -46,7 +46,7 @@ import { readSafetensorsMeta } from '../../training/yue2Runs.js';
 import { jointRunForAdapter } from '../../training/yue2AitkRuns.js';
 import { yue2AdapterTrigger } from './jointAdapterContext.js';
 import type { Yue2AdapterScales, Yue2FinalDetail } from './client.js';
-import { yue2Align, yue2Synth, yue2FinalDetail, yue2Props, yue2PropsCached, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
+import { yue2Align, yue2Synth, yue2FinalDetail, yue2Props, yue2PropsCached, splitMultipartMixed, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
 import { yue2LyricsJson } from './align.js';
 import { classifyYue2Score, type Yue2ScoreHealth, yue2PlanUsable } from './scoreHealth.js';
 import { yue2PersistedSelection } from './index.js';
@@ -513,28 +513,6 @@ function yue2StageText(phase: string | undefined, step: number, total: number): 
   return { stage, progress };
 }
 
-/** Split a `multipart/mixed` body into its raw parts (the engine's batch
- *  result: one WAV per part, no per-part headers worth reading). */
-export function splitMultipartMixed(body: Buffer, contentType: string): Buffer[] {
-  const m = /boundary=([^;]+)/.exec(contentType);
-  if (!m) return [body];
-  const boundary = Buffer.from(`--${m[1].trim()}`);
-  const parts: Buffer[] = [];
-  let pos = body.indexOf(boundary);
-  while (pos !== -1) {
-    const lineEnd = pos + boundary.length;
-    if (body[lineEnd] === 0x2d && body[lineEnd + 1] === 0x2d) break;  // closing "--boundary--"
-    const headerEnd = body.indexOf('\r\n\r\n', lineEnd);
-    if (headerEnd === -1) break;
-    const dataStart = headerEnd + 4;
-    const next = body.indexOf(boundary, dataStart);
-    if (next === -1) break;
-    // Each part's data is followed by "\r\n" before the next boundary line.
-    parts.push(body.subarray(dataStart, next - 2));
-    pos = next;
-  }
-  return parts;
-}
 
 type Yue2Log = (level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', msg: string) => void;
 type Yue2AutoReplan = { attempts: Array<{ seed: number; verdict: string; reason: string }>; accepted: boolean };

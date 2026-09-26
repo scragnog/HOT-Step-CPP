@@ -737,6 +737,8 @@ export interface Yue2JointPreviewOptions {
   narCacheRatio?: number;
   /** Rung previews render while training continues (needs the VRAM for both). */
   parallel?: boolean;
+  /** Take 1 = this rung's plan, take 2 = the ladder's shared lead sheet. */
+  sharedSheet?: boolean;
   seconds: number;
   seed: number;
   previewMaxFrames: number;
@@ -790,6 +792,9 @@ export interface Yue2JointPreviewRecord {
   plan?: { seed: number; accepted: boolean; attempts: Array<{ seed: number; verdict: string; reason: string; flags?: string[] }> };
   /** Composer re-plans behind this take. */
   composerReplans?: number;
+  /** Shared-sheet ladders: 'own' = this rung's plan; 'shared' = the ladder's lead sheet from sheetStep. */
+  sheet?: 'own' | 'shared';
+  sheetStep?: number;
   id: string;
   step: number;
   kind: 'artist' | 'baseline' | 'control';

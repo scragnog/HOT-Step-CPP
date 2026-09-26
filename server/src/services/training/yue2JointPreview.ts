@@ -3,12 +3,12 @@
 // owns bounded, durable metadata and safe file resolution.
 import fs from 'fs';
 import path from 'path';
-import { randomInt, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 
 import type { Yue2JointPreviewOptions } from './types.js';
 import { aceClient } from '../aceClient.js';
 import { yue2PersistedSelection, type Yue2PersistedSelection } from '../backends/yue2/index.js';
-import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, yue2FinalDetail, type Yue2Selection } from '../backends/yue2/client.js';
+import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, yue2FinalDetail, splitMultipartMixed, type Yue2Selection } from '../backends/yue2/client.js';
 import { classifyYue2Score, yue2PlanUsable, type Yue2ScoreLegibility } from '../backends/yue2/scoreHealth.js';
 
 export const YUE2_JOINT_PREVIEW_DEFAULTS: Yue2JointPreviewOptions = {
@@ -44,6 +44,11 @@ export interface Yue2JointPreviewRecord {
    *  plan re-draws above): how many times the seed the engine echoed back
    *  advanced past the requested one, each step exactly 1000003. */
   composerReplans?: number;
+  /** Shared-sheet ladders (options.sharedSheet): 'own' = this rung planned
+   *  it; 'shared' = the ladder's shared lead sheet, planned at `sheetStep`,
+   *  so only this rung's composer and decoder differ. */
+  sheet?: 'own' | 'shared';
+  sheetStep?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -80,6 +85,7 @@ export function parseYue2JointPreviewOptions(raw: unknown, everySteps: number): 
     previewMaxFrames: integer('previewMaxFrames', 2250, 0, 9000),
     baseline: bool('baseline', false), control: bool('control', false),
     ...(bool('parallel', false) ? { parallel: true } : {}),
+    ...(bool('sharedSheet', false) ? { sharedSheet: true } : {}),
     ...(text('caption') ? { caption: text('caption') } : {}),
     ...(text('lyrics') ? { lyrics: text('lyrics') } : {}),
     ...(text('previewSongId') ? { previewSongId: text('previewSongId') } : {}),
@@ -144,6 +150,22 @@ export function resolveYue2JointPreview(output: string, file: string): string | 
     ? candidate : null;
 }
 
+/** A shared-sheet ladder's lead sheet: the first rung whose own plan was
+ *  accepted writes it; every later rung's take 2 renders from it. */
+type SharedSheet = { step: number; seed: number; abc: string };
+function sharedSheetPath(output: string): string { return path.join(output, 'previews', 'shared-sheet.json'); }
+function readSharedSheet(output: string): SharedSheet | null {
+  try {
+    const s = JSON.parse(fs.readFileSync(sharedSheetPath(output), 'utf8')) as SharedSheet;
+    return typeof s.abc === 'string' && s.abc && Number.isInteger(s.step) ? s : null;
+  } catch { return null; }
+}
+function writeSharedSheet(output: string, sheet: SharedSheet): SharedSheet {
+  fs.mkdirSync(path.dirname(sharedSheetPath(output)), { recursive: true });
+  fs.writeFileSync(sharedSheetPath(output), JSON.stringify(sheet, null, 2), 'utf8');
+  return sheet;
+}
+
 export async function renderYue2JointPreview(input: {
   output: string; step: number; options: Yue2JointPreviewOptions;
   arAdapter: string; narAdapter: string; dataset?: string; signal?: AbortSignal;
@@ -183,18 +205,21 @@ export async function renderYue2JointPreview(input: {
     // sheet (a batch would share one planner pass). Baseline and control are
     // single songs too.
     const detail = input.deps?.detail ?? yue2FinalDetail;
-    type Group = { kind: 'artist' | 'baseline' | 'control'; seeds: number[] };
+    type Group = { kind: 'artist' | 'baseline' | 'control'; seeds: number[]; shared?: boolean };
     const wanted = Math.max(1, input.options.takes ?? 1);
     const groups: Group[] = kinds.flatMap((kind): Group[] => {
       const takesMode = kind === 'artist' || (kind === 'baseline' && input.options.baselineOnly);
       if (!takesMode) return [{ kind, seeds: [input.options.seed] }];
+      // Shared sheet: take 1 is this rung's own plan, take 2 the ladder's
+      // shared lead sheet, rendered together as one engine batch.
+      if (kind === 'artist' && input.options.sharedSheet && wanted >= 2) return [{ kind, seeds: [input.options.seed, input.options.seed + 1], shared: true }];
       const seeds = Array.from({ length: wanted }, (_, i) => input.options.seed + i);
       const out: Group[] = [];
       // One take per request: each renders its own re-planned lead sheet.
       for (const seed of seeds) out.push({ kind, seeds: [seed] });
       return out;
     });
-    for (const { kind, seeds } of groups) {
+    for (const { kind, seeds, shared } of groups) {
       if (input.signal?.aborted) throw new Error('preview cancelled');
       const unity = { global: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1 };
       const selected: Yue2Selection = { lm: base.lm, lm_adapter: kind === 'baseline' ? [] : [
@@ -214,7 +239,9 @@ export async function renderYue2JointPreview(input: {
         const attempts: Array<{ seed: number; verdict: string; reason: string; flags?: string[] }> = [];
         for (let a = 1; a <= PREVIEW_REPLAN_ATTEMPTS; a++) {
           if (input.signal?.aborted) throw new Error('preview cancelled');
-          const planSeed = a === 1 ? seeds[0] : randomInt(1, 2 ** 31 - 1);
+          // Fixed re-plan seeds: every rung draws the same sequence, so rungs
+          // differ by their weights, not by luck.
+          const planSeed = seeds[0] + 7919 * (a - 1);
           const planSub = await api.synth({ style: caption, lyrics, cot: 'full', seed: planSeed, plan_only: true });
           activeJob = planSub.job_id; activeTerminal = false;
           const planDeadline = Date.now() + 10 * 60_000;
@@ -244,8 +271,23 @@ export async function renderYue2JointPreview(input: {
       // cap (9000 frames) and a take that reaches it is recomposed, like the
       // app's Compose Retries. A preview cap would hide the runaway: it stops
       // at 300 s looking like a long song (3 of 4 takes, 2026-09-24).
-      const requestedSeed = supplied ? supplied.seed : seeds[0];
-      const sub = await api.synth({ style: kind === 'control' ? 'downtempo electronic, calm and spacious' : caption, lyrics: kind === 'control' ? '' : lyrics, cot: 'full', seed: requestedSeed,
+      const takeAbc: Array<string | undefined> = [supplied?.abc];
+      if (shared && supplied) {
+        let sheet = readSharedSheet(input.output);
+        if (!sheet && records[0].plan?.accepted) sheet = writeSharedSheet(input.output, { step: input.step, seed: supplied.seed, abc: supplied.abc });
+        records[0].sheet = 'own';
+        // No accepted sheet anywhere yet: take 2 falls back to this rung's own plan.
+        if (sheet) { records[1].sheet = 'shared'; records[1].sheetStep = sheet.step; } else records[1].sheet = 'own';
+        takeAbc[1] = sheet ? sheet.abc : supplied.abc;
+        for (const r of records) recordYue2JointPreview(input.output, r);
+      }
+      const requested = shared && supplied ? [supplied.seed, records[1].seed] : [supplied ? supplied.seed : seeds[0]];
+      const draft = { ...(input.options.odeSteps ? { ode_steps: input.options.odeSteps } : {}),
+        ...(input.options.narCacheRatio !== undefined ? { nar_cache_ratio: input.options.narCacheRatio } : {}) };
+      const sub = shared && supplied
+        ? await api.synth({ cot: 'full', semantic_retries: PREVIEW_REPLAN_ATTEMPTS, ...draft,
+            songs: records.map((_, i) => ({ style: caption, lyrics, abc: takeAbc[i]!, seed: requested[i] })) } as Parameters<typeof api.synth>[0])
+        : await api.synth({ style: kind === 'control' ? 'downtempo electronic, calm and spacious' : caption, lyrics: kind === 'control' ? '' : lyrics, cot: 'full', seed: requested[0],
         ...(supplied ? { abc: supplied.abc, semantic_retries: PREVIEW_REPLAN_ATTEMPTS } : { preview_max_frames: input.options.previewMaxFrames }),
         ...(input.options.odeSteps ? { ode_steps: input.options.odeSteps } : {}),
         ...(input.options.narCacheRatio !== undefined ? { nar_cache_ratio: input.options.narCacheRatio } : {}) });
@@ -280,7 +322,7 @@ export async function renderYue2JointPreview(input: {
         // pairs them by name). Re-planned takes carry their plan seed; a stem
         // already on disk (a re-render) gets -2, -3, so nothing is replaced.
         const stems = records.map(record => {
-          const base = `step-${input.step}-${kind}-s${record.seed}${record.plan ? `-p${record.plan.seed}` : ''}`;
+          const base = `step-${input.step}-${kind}-s${record.seed}${record.plan ? `-p${record.plan.seed}` : ''}${record.sheet === 'shared' ? '-shared' : ''}`;
           let stem = base;
           for (let n = 2; fs.existsSync(path.join(input.output, 'previews', `${stem}.wav`)); n++) stem = `${base}-${n}`;
           return stem;
@@ -294,8 +336,8 @@ export async function renderYue2JointPreview(input: {
           // (yue2-pipeline.h); the retry count itself is not reported, only
           // echoed back in the final seed, so it is recovered from the delta.
           const echoedSeed = (t as unknown as { seed?: unknown }).seed;
-          if (typeof echoedSeed === 'number' && Number.isFinite(echoedSeed) && echoedSeed >= requestedSeed) {
-            const replans = (echoedSeed - requestedSeed) / 1000003;
+          if (typeof echoedSeed === 'number' && Number.isFinite(echoedSeed) && echoedSeed >= requested[i]) {
+            const replans = (echoedSeed - requested[i]) / 1000003;
             if (Number.isInteger(replans) && replans >= 0 && replans <= PREVIEW_REPLAN_ATTEMPTS) record.composerReplans = replans;
           }
           const abc = (t as { abc?: unknown }).abc;
@@ -307,7 +349,10 @@ export async function renderYue2JointPreview(input: {
         });
         const response = await api.result(sub.job_id);
         const body = Buffer.from(await response.arrayBuffer());
-        const parts = [body];
+        // A batch comes back as multipart/mixed, one WAV per take in order.
+        const contentType = response.headers.get('content-type') ?? '';
+        const parts = contentType.startsWith('multipart/mixed') ? splitMultipartMixed(body, contentType) : [body];
+        if (parts.length < records.length) throw new Error(`preview returned ${parts.length} track(s) for ${records.length} take(s)`);
         const dir = path.join(input.output, 'previews'); fs.mkdirSync(dir, { recursive: true });
         records.forEach((record, i) => {
           // Re-planned takes carry their plan seed, so a re-render never

@@ -96,7 +96,7 @@ Refinement continues the finished run with the planner live, saves a checkpoint 
 | KL ceiling | 2.0 | A search range, not a target. Late-song decay has shown from about 1.7 on some albums and not at all by 1.8 on others. |
 | Rung size | 0.1 KL | Smaller rungs mean more previews to listen to. |
 | Learning rate | 0.1 times the source run's | |
-| Tracks per rung | 2, 300 s each | Renders are not deterministic, so two takes is the minimum to trust a rung. |
+| Tracks per rung | 2, 300 s each | Take 1 is **this rung's plan**: the rung's own planner writes the lead sheet. Take 2 is the **shared sheet**: the lead sheet the first rung wrote (the earliest rung whose plan passed the judge), so across the ladder take 2 is the same song and only the rung's composer and decoder change it. Every rung uses the same seeds (take 1 424242, take 2 424243) and the same sequence of re-plan seeds. Both takes render as one engine batch. Render more adds own-plan takes. The scoreboard's Overall subtracts 0.25 per replan per take and 0.1 per plan flag per take the rung planned itself, capped at 1 together. |
 | In parallel with training | On | Needs VRAM for both, about 22 GB measured. Untick it on a smaller card. |
 | Draft quality | On | Previews only: 12 decoder steps instead of 32, about a third of the decoder time. Timbre is a little softer; structure, diction and late-song behaviour are unchanged. |
 | Keep a checkpoint per recon drop | 0.003 | Further decoder training only: a checkpoint is kept when the reconstruction meter has dropped by at least this since the last kept one; the rest are deleted once a newer one lands, so the ladder shows progress rather than every 10 steps. The newest checkpoint is always kept. |

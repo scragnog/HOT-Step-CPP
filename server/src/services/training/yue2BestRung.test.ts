@@ -7,4 +7,6 @@ test('rungOverall matches the Refine scoreboard formula', () => {
   assert.equal(rungOverall(4, 2, 2, 2), 3.75);        // 4 − 0.25 × (2 replans / 2 takes)
   assert.equal(rungOverall(4, 2, 40, 2), 3);          // penalty capped at 1
   assert.equal(rungOverall(4, null, 0, 2), null);     // needs both scores
+  assert.equal(rungOverall(4, 2, 0, 2, 2, 1), 3.8);    // 2 flags on the one own-planned take: 0.1 × 2
+  assert.equal(rungOverall(4, 2, 2, 2, 20, 1), 3);     // replans + flags capped at 1 together
 });

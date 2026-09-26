@@ -562,3 +562,26 @@ export async function yue2Align(
   if (!res.ok) throw new Error(await yue2ErrorMessage(res, 'POST /yue2/align'));
   return await res.json() as Yue2AlignResult;
 }
+
+/** Split a `multipart/mixed` body into its raw parts (the engine's batch
+ *  result: one WAV per part, no per-part headers worth reading). */
+export function splitMultipartMixed(body: Buffer, contentType: string): Buffer[] {
+  const m = /boundary=([^;]+)/.exec(contentType);
+  if (!m) return [body];
+  const boundary = Buffer.from(`--${m[1].trim()}`);
+  const parts: Buffer[] = [];
+  let pos = body.indexOf(boundary);
+  while (pos !== -1) {
+    const lineEnd = pos + boundary.length;
+    if (body[lineEnd] === 0x2d && body[lineEnd + 1] === 0x2d) break;  // closing "--boundary--"
+    const headerEnd = body.indexOf('\r\n\r\n', lineEnd);
+    if (headerEnd === -1) break;
+    const dataStart = headerEnd + 4;
+    const next = body.indexOf(boundary, dataStart);
+    if (next === -1) break;
+    // Each part's data is followed by "\r\n" before the next boundary line.
+    parts.push(body.subarray(dataStart, next - 2));
+    pos = next;
+  }
+  return parts;
+}

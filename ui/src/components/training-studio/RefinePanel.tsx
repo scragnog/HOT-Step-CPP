@@ -36,12 +36,16 @@ export function rungOverall(args: {
   plannerReplans: number;
   composerReplans: number;
   takes: number;
+  /** Plan legibility flags on takes this rung planned itself (not a shared
+   *  sheet), and how many such takes there were. Weighted under replans. */
+  planFlags?: number;
+  ownTakes?: number;
 }): { overall: number; replansPerTake: number } | null {
-  const { likeness, corruption, plannerReplans, composerReplans, takes } = args;
+  const { likeness, corruption, plannerReplans, composerReplans, takes, planFlags = 0, ownTakes = takes } = args;
   if (typeof likeness !== 'number' || typeof corruption !== 'number') return null;
   const base = (likeness + (6 - corruption)) / 2;
   const replansPerTake = (plannerReplans + composerReplans) / Math.max(1, takes);
-  const penalty = Math.min(1, 0.25 * replansPerTake);
+  const penalty = Math.min(1, 0.25 * replansPerTake + 0.1 * planFlags / Math.max(1, ownTakes));
   return { overall: Math.round((base - penalty) * 100) / 100, replansPerTake };
 }
 
@@ -170,7 +174,7 @@ export const RefinePanel: React.FC = () => {
         lyricTiming: (opts.alignment as { enabled?: boolean } | undefined)?.enabled === true, autoPrepare: false, checkpoint: '', output: '',
         // Rung previews: the engine pauses after each rung checkpoint and the
         // server renders `takes` previews there before resuming.
-        preview: { enabled: autoPreview, everySteps: 0, takes, seconds, seed: 424242, previewMaxFrames: seconds * 25, baseline: false, control: false, parallel, ...draftOpts } } as unknown as Yue2JointTrainRequest;
+        preview: { enabled: autoPreview, everySteps: 0, takes, seconds, seed: 424242, previewMaxFrames: seconds * 25, baseline: false, control: false, parallel, sharedSheet: true, ...draftOpts } } as unknown as Yue2JointTrainRequest;
       const result = await startYue2JointTrain(datasetId, request);
       setJob(await getJob(result.jobId));
       setLadderRun(result.jobId);
@@ -301,10 +305,13 @@ export const RefinePanel: React.FC = () => {
     // still loops a riff, sings on two pitches or skips lyric sections. A
     // count and its reasons, not part of the score, until ear scores have
     // been checked against them.
-    const flaggedTakes = doneTakes.filter(p => p.score?.flags?.length);
+    const flaggedTakes = doneTakes.filter(p => p.sheet !== 'shared' && p.score?.flags?.length);
     const flagReasons = flaggedTakes.flatMap(p => (p.score?.flags ?? []).map(f => `take ${mine.indexOf(p) + 1}: ${f}`)).join('\n');
     const sc = scores[step];
-    const overall = rungOverall({ likeness: sc?.likeness, corruption: sc?.corruption, plannerReplans, composerReplans, takes: doneTakes.length });
+    // A shared-sheet take's plan is not this rung's, so its flags do not count.
+    const ownPlanned = doneTakes.filter(p => p.sheet !== 'shared');
+    const planFlags = ownPlanned.reduce((sum, p) => sum + (p.score?.flags?.length ?? 0), 0);
+    const overall = rungOverall({ likeness: sc?.likeness, corruption: sc?.corruption, plannerReplans, composerReplans, takes: doneTakes.length, planFlags, ownTakes: ownPlanned.length });
     return { mine, doneTakes, plannerReplans, composerReplans, hasReplanData, flaggedTakes, flagReasons, overall };
   };
   // Best rung by overall score, ties going to the lower (less-trained, so
@@ -522,7 +529,7 @@ export const RefinePanel: React.FC = () => {
               </div>
               {mine.length > 0 && <div className="mt-2 flex flex-col gap-2">
                 {mine.map((p, i) => p.audioUrl && p.status === 'done'
-                  ? <PreviewPlayer key={p.id} src={p.audioUrl} downloadName={`${datasetName || 'preview'}_step${c.step}_take${i + 1}_seed${p.seed}.wav`} label={t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}${p.score?.flags?.length ? ` · ${p.score.flags[0]}` : ''}${p.plan ? ` · planner replans ${p.plan.attempts.length - 1}` : ''}${typeof p.composerReplans === 'number' ? ` · composer replans ${p.composerReplans}` : ''}`} />
+                  ? <PreviewPlayer key={p.id} src={p.audioUrl} downloadName={`${datasetName || 'preview'}_step${c.step}_take${i + 1}_seed${p.seed}.wav`} label={`${t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}${p.sheet === 'own' ? ` · ${t('trainingStudio.refine.sheetOwn', "this rung's plan")}` : p.sheet === 'shared' ? ` · ${t('trainingStudio.refine.sheetShared', 'shared sheet from step {{s}}', { s: p.sheetStep })}` : ''}`} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}${p.score?.flags?.length ? ` · ${p.score.flags[0]}` : ''}${p.plan ? ` · planner replans ${p.plan.attempts.length - 1}` : ''}${typeof p.composerReplans === 'number' ? ` · composer replans ${p.composerReplans}` : ''}`} />
                   : <div key={p.id} className="text-[11px] text-zinc-500">{t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}: {p.status === 'done' && !p.file ? t('trainingStudio.refine.audioPruned', 'audio removed by cleanup') : p.status}{p.error ? ` — ${p.error}` : ''}{p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}{p.score?.flags?.length ? ` · ${p.score.flags[0]}` : ''}</div>)}
               </div>}
             </div>;
@@ -538,7 +545,7 @@ export const RefinePanel: React.FC = () => {
           </button>
         </div>
         {!scoreboardCollapsed && <>
-          <p className="mt-1 text-[10px] text-zinc-500">{t('trainingStudio.refine.scoreboardFormula', 'Overall = (likeness + (6 − corruption)) / 2, minus 0.25 per replan per take, capped at 1.')}</p>
+          <p className="mt-1 text-[10px] text-zinc-500">{t('trainingStudio.refine.scoreboardFormula', 'Overall = (likeness + (6 − corruption)) / 2, minus 0.25 per replan per take and 0.1 per plan flag per take this rung planned, capped at 1 together.')}</p>
           <div className="mt-2 flex flex-col gap-1 max-h-64 overflow-y-auto">
             {scoreboardRows.map(row => (
               <button key={row.step} type="button"

@@ -8,10 +8,11 @@ import { listYue2AitkRuns } from './yue2AitkRuns.js';
 import { listYue2JointPreviews } from './yue2JointPreview.js';
 import { listYue2RungScores } from './yue2RungScores.js';
 
-export function rungOverall(likeness: number | null | undefined, corruption: number | null | undefined, replans: number, takes: number): number | null {
+export function rungOverall(likeness: number | null | undefined, corruption: number | null | undefined, replans: number, takes: number,
+  planFlags = 0, ownTakes = takes): number | null {
   if (typeof likeness !== 'number' || typeof corruption !== 'number') return null;
   const base = (likeness + (6 - corruption)) / 2;
-  const penalty = Math.min(1, 0.25 * (replans / Math.max(1, takes)));
+  const penalty = Math.min(1, 0.25 * (replans / Math.max(1, takes)) + 0.1 * planFlags / Math.max(1, ownTakes));
   return Math.round((base - penalty) * 100) / 100;
 }
 
@@ -28,7 +29,9 @@ export function bestScoredRung(datasetId: string, runId: string, datasetSlug?: s
     const replans = takes.reduce((sum, p) => sum + (p.plan ? p.plan.attempts.length - 1 : 0)
       + (typeof p.composerReplans === 'number' ? p.composerReplans : 0), 0);
     const s = scores.get(c.step);
-    const overall = rungOverall(s?.likeness, s?.corruption, replans, takes.length);
+    const own = takes.filter(p => p.sheet !== 'shared');
+    const flags = own.reduce((sum, p) => sum + (p.score?.flags?.length ?? 0), 0);
+    const overall = rungOverall(s?.likeness, s?.corruption, replans, takes.length, flags, own.length);
     if (overall !== null && (!best || overall > best.overall)) best = { step: c.step, dir: c.dir, overall };
   }
   return best;

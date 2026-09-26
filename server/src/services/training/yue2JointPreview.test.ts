@@ -104,6 +104,46 @@ test('with no song picked, renderer skips an instrumental first track', async ()
   assert.equal(synth.style, 'song style');
 });
 
+function twoWavBatch(): Response {
+  const body = Buffer.from('--B\r\nContent-Type: audio/wav\r\n\r\nRIFF-one\r\n--B\r\nContent-Type: audio/wav\r\n\r\nRIFF-two\r\n--B--\r\n');
+  return new Response(body, { headers: { 'content-type': 'multipart/mixed; boundary=B' } });
+}
+
+test('shared sheet: both takes render in one batch, fixed seeds, first rung falls back to its own plan', async () => {
+  const f = previewFixture();
+  const { deps, calls } = mockDeps({ result: async () => twoWavBatch() });
+  await renderYue2JointPreview({ output: f.output, dataset: f.dataset, step: 10,
+    options: { ...YUE2_JOINT_PREVIEW_DEFAULTS, enabled: true, takes: 2, sharedSheet: true },
+    arAdapter: 'ar', narAdapter: 'nar', deps });
+  const synths = calls.filter(c => c.name === 'synth').map(c => c.value as any);
+  const plans = synths.filter(s => s.plan_only);
+  assert.deepEqual(plans.map(s => s.seed).slice(0, 3), [424242, 424242 + 7919, 424242 + 2 * 7919]);
+  const render = synths.find(s => s.songs);
+  assert.equal(render.songs.length, 2);
+  assert.equal(render.songs[1].seed, 424243);
+  const recs = listYue2JointPreviews(f.output).filter(r => r.step === 10);
+  assert.equal(recs.length, 2);
+  // The empty mock plan is never accepted, so no shared sheet is written.
+  assert.equal(recs.every(r => r.sheet === 'own' && r.status === 'done'), true);
+  assert.equal(fs.existsSync(path.join(f.output, 'previews', 'shared-sheet.json')), false);
+});
+
+test('shared sheet: a later rung renders take 2 from the ladder sheet', async () => {
+  const f = previewFixture();
+  fs.mkdirSync(path.join(f.output, 'previews'), { recursive: true });
+  fs.writeFileSync(path.join(f.output, 'previews', 'shared-sheet.json'), JSON.stringify({ step: 10, seed: 424242, abc: 'SHEET' }));
+  const { deps, calls } = mockDeps({ result: async () => twoWavBatch() });
+  await renderYue2JointPreview({ output: f.output, dataset: f.dataset, step: 20,
+    options: { ...YUE2_JOINT_PREVIEW_DEFAULTS, enabled: true, takes: 2, sharedSheet: true },
+    arAdapter: 'ar', narAdapter: 'nar', deps });
+  const render = calls.map(c => c.value as any).find(v => v?.songs);
+  assert.equal(render.songs[1].abc, 'SHEET');
+  const shared = listYue2JointPreviews(f.output).find(r => r.step === 20 && r.sheet === 'shared');
+  assert.equal(shared?.sheetStep, 10);
+  assert.ok(shared?.file?.endsWith('-shared.wav'));
+  assert.equal(fs.readFileSync(path.join(f.output, 'previews', shared!.file!), 'utf8'), 'RIFF-two');
+});
+
 test('renderer cancels a polling job on render failure and still unloads', async () => {
   const f = previewFixture();
   let polls = 0;
