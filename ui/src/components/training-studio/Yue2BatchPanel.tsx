@@ -15,7 +15,7 @@ import { useTrainingStore } from '../../stores/trainingStore';
 import { getJob, type TrainingJobSummary, type Yue2BatchItem, type Yue2BatchSummary } from '../../services/trainingApi';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
-const STAGE_LABEL: Record<string, string> = { captions: 'captions', cache: 'latent cache', codes: 'codes', sheet: 'lead sheets', stems: 'vocal stems', align: 'lyric timing', train: 'joint training', refine: 'refinement' };
+const STAGE_LABEL: Record<string, string> = { captions: 'captions', cache: 'latent cache', codes: 'codes', sheet: 'lead sheets', stems: 'vocal stems', align: 'lyric timing', train: 'joint training', refine: 'refinement', nar: 'NAR further training', finish: 'link + cleanup' };
 
 const StatusIcon: React.FC<{ status: Yue2BatchItem['status'] }> = ({ status }) => {
   switch (status) {
@@ -103,19 +103,19 @@ export const Yue2BatchPanel: React.FC = () => {
           {active && <button type="button" onClick={() => void cancel(batch.id)} className="flex items-center gap-1 text-red-600 dark:text-red-400 hover:underline"><StopCircle size={12} />{t('common.cancel', 'Cancel')}</button>}
         </div>
       </div>
-      <p className="text-[11px] text-zinc-500">
+      {Object.keys(recipe).length > 0 && <p className="text-[11px] text-zinc-500">
         {t('trainingStudio.yue2.batch.recipe', 'Recipe')}: {String(recipe.optimizer ?? 'adamw')} · rank {String(recipe.rank ?? 32)}/{String(recipe.alpha ?? 32)}
         {recipe.lr !== undefined ? ` · lr ${recipe.lr}` : ''}{recipe.plannerLrScale !== undefined ? ` · planner ×${recipe.plannerLrScale}` : ''}
         {recipe.stopMode === 'kl' ? ` · until AR KL ${recipe.targetKl}${Number(recipe.narExtraSteps) > 0 ? `, then decoder +${recipe.narExtraSteps}` : ''} (cap ${recipe.steps})` : recipe.stopMode === 'loss' ? ` · until loss ${recipe.targetLoss} (cap ${recipe.steps})` : ` · ${recipe.steps} steps`}
         {batch.lyricTiming ? ' · lyric timing' : ''}
-      </p>
+      </p>}
       <div className="flex flex-col gap-1.5">
         {batch.items.map(item => (
-          <div key={item.datasetId} className="flex flex-col gap-0.5">
+          <div key={`${item.datasetId}-${item.refineRun ?? ''}`} className="flex flex-col gap-0.5">
             <div className="flex items-center gap-2 min-w-0">
               <StatusIcon status={item.status} />
               <button type="button" className="text-xs text-zinc-800 dark:text-zinc-200 hover:underline truncate text-left"
-                onClick={() => void openDataset(item.datasetId).then(() => setPhase('train'))}>{item.name}</button>
+                onClick={() => void openDataset(item.datasetId).then(() => setPhase(item.refineRun ? 'refine' : 'train'))}>{item.name}{item.refineRun ? ` (finish${item.pickStep !== undefined ? `, step ${item.pickStep}` : ''})` : ''}</button>
               <span className="text-[11px] text-zinc-500 flex-shrink-0">
                 {item.status === 'running' && item.currentStage ? (STAGE_LABEL[item.currentStage] ?? item.currentStage) : item.status}
                 {item.status === 'running' && job && job.total > 0 && ` · ${job.done}/${job.total}${job.phase && job.phase !== 'training' && job.phase !== 'train' ? ` (${job.phase})` : ''}`}

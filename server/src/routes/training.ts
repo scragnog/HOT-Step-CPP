@@ -90,6 +90,7 @@ import {
 import { AUDIO_EXTENSIONS, isInside, sampleIdFor, trainingBaseDir } from '../services/training/paths.js';
 import { resolveMossPaths } from '../services/training/mossCaption.js';
 import { samplesMissingYue2Caption } from '../services/training/yue2CaptionJob.js';
+import { bestScoredRung } from '../services/training/yue2BestRung.js';
 import { deleteLabel, deleteLabels, patchLabel, readLabel } from '../services/training/labelStore.js';
 import { listDatasetsWithAssets } from '../services/training/datasetAssets.js';
 import { createDatasetFromFolder, DatasetCreateError } from '../services/training/datasetCreate.js';
@@ -162,7 +163,7 @@ import {
 } from '../services/training/yue2AitkPrepareRunner.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { parseYue2JointStopMode } from '../services/training/yue2JointTrainRunner.js';
-import { appendToBatch as appendToYue2Batch, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
+import { appendToBatch as appendToYue2Batch, finishScoredLadders, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
 import {
   aceTrainExe, engineGpuBackend, engineSupportsFlashAttnTraining,
   findRegCorpora, getModelSnapshot, pickBf16, pickDitBaseFor, pickLmFor, refreshModelSnapshot,
@@ -726,6 +727,17 @@ router.get('/yue2-batch/:id', (req: Request, res: Response) => {
 router.delete('/yue2-batch/:id', (req: Request, res: Response) => {
   if (!cancelYue2Batch(req.params.id as string)) { res.status(404).json({ error: 'Batch not found' }); return; }
   res.json({ ok: true });
+});
+/** POST /yue2-batch/finish — body { entries: [{ datasetId, refineRun }] }.
+ *  Per scored ladder: NAR further training from the best-scored rung, then
+ *  link + cleanup. Joins the running batch when there is one. */
+router.post('/yue2-batch/finish', (req: Request, res: Response) => {
+  const raw = Array.isArray(req.body?.entries) ? req.body.entries as unknown[] : [];
+  const entries = raw.filter((e): e is { datasetId: string; refineRun: string } => !!e && typeof e === 'object'
+    && typeof (e as Record<string, unknown>).datasetId === 'string' && typeof (e as Record<string, unknown>).refineRun === 'string');
+  const result = finishScoredLadders(entries);
+  if ('error' in result) { res.status(400).json({ error: result.error }); return; }
+  res.status(202).json({ batch: result });
 });
 router.post('/yue2-batch/:id/items', (req: Request, res: Response) => {
   const ids = Array.isArray(req.body?.datasetIds) ? (req.body.datasetIds as unknown[]).filter((x): x is string => typeof x === 'string' && x.length > 0) : [];
@@ -4002,9 +4014,12 @@ router.get('/yue2-review', (_req: Request, res: Response) => {
         const previews = listYue2JointPreviews(run.output).filter(p => p.status === 'done' && rungs.some(r => r.step === p.step));
         const scored = new Set(listYue2RungScores(ds.id, run.jobId).filter(s => s.likeness !== null || s.corruption !== null || s.notes).map(s => s.step));
         const kls = rungs.map(r => r.kl).filter((k): k is number => typeof k === 'number');
+        let best: ReturnType<typeof bestScoredRung> = null;
+        try { best = bestScoredRung(ds.id, run.jobId, ds.slug); } catch { /* stays null */ }
         rows.push({ datasetId: ds.id, datasetSlug: ds.slug, datasetName: ds.name, refineRun: run.jobId, status: run.status, createdAt: run.createdAt,
           live: active?.id === run.jobId, rungs: rungs.length, previews: previews.length, scored: scored.size,
-          unscored: rungs.filter(r => !scored.has(r.step)).length, klMin: kls.length ? Math.min(...kls) : null, klMax: kls.length ? Math.max(...kls) : null });
+          unscored: rungs.filter(r => !scored.has(r.step)).length, best: best ? { step: best.step, overall: best.overall } : null,
+          decoderOnly: (run.options as Record<string, unknown>)?.freezePlannerNow === true, klMin: kls.length ? Math.min(...kls) : null, klMax: kls.length ? Math.max(...kls) : null });
       }
     }
     rows.sort((a, b) => (b.createdAt as number) - (a.createdAt as number));

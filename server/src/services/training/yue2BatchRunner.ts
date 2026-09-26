@@ -24,8 +24,11 @@ import { listYue2AitkRuns } from './yue2AitkRuns.js';
 import { autoRefineRequest } from './yue2JointTrainRunner.js';
 import { listPreparedCaches } from './preparedDataReset.js';
 import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
+import { bestScoredRung } from './yue2BestRung.js';
+import { runYue2Cleanup } from './yue2Cleanup.js';
+import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
 
-export type Yue2BatchStage = 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine';
+export type Yue2BatchStage = 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine' | 'nar' | 'finish';
 export type Yue2BatchStatus = 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
 export type Yue2BatchItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -49,6 +52,10 @@ export interface Yue2BatchItem {
   currentStage: Yue2BatchStage | null;
   stages: Yue2BatchStageResult[];
   error: string | null;
+  /** A "finish" item: the scored refinement ladder to finish (NAR further
+   *  training from its best rung, then link + cleanup), and the rung picked. */
+  refineRun?: string;
+  pickStep?: number;
 }
 
 export interface Yue2BatchSummary {
@@ -186,6 +193,67 @@ export function appendToBatch(id: string, datasetIds: string[]): Yue2BatchSummar
   return toSummary(state);
 }
 
+/** Finish scored ladders the way "Use this rung" does on the Refine tab:
+ *  NAR further training from the best-scored rung, then link the result to
+ *  the album preset and clean up with the default choices. Queued on the end
+ *  of the running batch when there is one, else run as a batch of its own. */
+export function finishScoredLadders(entries: Array<{ datasetId: string; refineRun: string }>): Yue2BatchSummary | { error: string } {
+  const items: Yue2BatchItem[] = [];
+  for (const e of entries) {
+    const ds = repo.getDataset(e.datasetId);
+    if (!ds) return { error: `Dataset not found: ${e.datasetId}` };
+    items.push({ datasetId: ds.id, name: ds.name || ds.slug, refineRun: e.refineRun, status: 'pending', currentStage: null, error: null,
+      stages: (['nar', 'finish'] as const).map(stage => ({ stage, jobId: '', status: 'pending' as const, error: null, startedAt: null, finishedAt: null })) });
+  }
+  if (!items.length) return { error: 'Nothing to finish' };
+  const live = [...batches.values()].find(b => isActive(b.status));
+  if (live) {
+    for (const item of items) if (!live.items.some(i => i.refineRun === item.refineRun)) live.items.push(item);
+    persist(live);
+    return toSummary(live);
+  }
+  const state: BatchState = { id: randomUUID(), status: 'running', items, currentDatasetId: null, lyricTiming: true, recipe: {},
+    createdAt: Date.now(), finishedAt: null, pauseRequested: false, cancelRequested: false };
+  batches.set(state.id, state);
+  persist(state);
+  setImmediate(() => void runBatch(state));
+  return toSummary(state);
+}
+
+/** The Refine tab's "Further training for NAR" request, at its defaults. */
+function narFurtherRequest(runId: string, step: number): Record<string, unknown> {
+  const budget = 500;
+  return { trainingMethod: 'aitk', refine: true, resumeRunId: runId, resumeStep: step,
+    steps: step + budget, saveEvery: 10, stopMode: 'kl', narExtraSteps: step + budget, freezePlannerNow: true,
+    reconStop: 0.005, reconStopWindow: 5, reconKeepDelta: 0.003, reconTarget: 0.25, stopEngine: false,
+    lyricTiming: true, alignmentEnabled: true, autoPrepare: false, checkpoint: '', output: '',
+    preview: { enabled: false, everySteps: 0, seconds: 90, seed: 424242, previewMaxFrames: 2250, baseline: false, control: false } };
+}
+
+/** Link the finished checkpoint (the NAR run's last, or the picked rung when
+ *  NAR was skipped) to the album preset, then clean up around it. */
+function finishLadder(item: Yue2BatchItem): void {
+  const ds = repo.getDataset(item.datasetId);
+  if (!ds) throw new Error('Dataset not found');
+  const runs = listYue2AitkRuns(ds.id, ds.slug);
+  const narJob = item.stages.find(s => s.stage === 'nar')?.jobId;
+  let runId = item.refineRun ?? '';
+  let step = item.pickStep;
+  if (narJob) {
+    const nar = runs.find(r => r.jobId === narJob);
+    const last = nar?.checkpoints.filter(c => c.arPath && c.narPath).sort((a, b) => b.step - a.step)[0];
+    if (!nar || !last) throw new Error('The NAR further-training run left no complete checkpoint');
+    runId = nar.jobId; step = last.step;
+  }
+  const ckpt = runs.find(r => r.jobId === runId)?.checkpoints.find(c => c.step === step);
+  if (!ckpt?.arPath || !ckpt.narPath || step === undefined) throw new Error(`No complete checkpoint at step ${step} of run ${runId}`);
+  const known = runs.flatMap(r => r.checkpoints).flatMap(c => [c.arPath, c.narPath].filter((v): v is string => !!v));
+  refreshYue2PresetsForJointCheckpoint({ slug: ds.slug, lyricsSetId: ds.lyricsSetId }, ckpt.arPath, ckpt.narPath, known);
+  const result = runYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir, lyricsSetId: ds.lyricsSetId }, runId, step,
+    { caches: true, otherCheckpoints: true, otherRuns: true, resume: true, otherPreviews: true });
+  console.log(`[Training] yue2 batch finish ${ds.slug}: linked step ${step} of ${runId}; removed ${result.done.join(', ') || 'nothing'}${result.movedTo ? `; moved to ${result.movedTo}` : ''}`);
+}
+
 export function pauseBatch(id: string): 'ok' | 'not_found' | 'not_active' {
   const state = batches.get(id);
   if (!state) return getBatch(id) ? 'not_active' : 'not_found';
@@ -242,6 +310,8 @@ function stagesFor(lyricTiming: boolean, refine = true, captions = false): Yue2B
 
 const STAGE_PATH: Record<Yue2BatchStage, string> = {
   captions: 'yue2-captions-missing',
+  nar: 'yue2-joint-train',
+  finish: '',
   cache: 'yue2-preprocess', codes: 'yue2-tokenize', sheet: 'yue2-sheet', stems: 'yue2-stems', align: 'yue2-align', train: 'yue2-joint-train',
   refine: 'yue2-joint-train',
 };
@@ -270,7 +340,7 @@ async function waitWhilePaused(state: BatchState): Promise<void> {
 
 async function runItem(state: BatchState, item: Yue2BatchItem): Promise<void> {
   item.status = 'running'; item.error = null; state.currentDatasetId = item.datasetId; persist(state);
-  if (state.clearCache && item.stages.every(s => s.status === 'pending' && !s.jobId)) {
+  if (state.clearCache && !item.refineRun && item.stages.every(s => s.status === 'pending' && !s.jobId)) {
     try {
       const ds = repo.getDataset(item.datasetId);
       if (!ds) throw new Error('Dataset not found');
@@ -333,6 +403,17 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
     const resumed = resumeTrainingBody(state, item, result.resumeJobId);
     if (resumed !== undefined) return resumed;
   }
+  if (stage === 'nar') {
+    const ds = repo.getDataset(item.datasetId);
+    const best = item.refineRun ? bestScoredRung(item.datasetId, item.refineRun, ds?.slug) : null;
+    if (!best) throw new Error('No rung of this ladder has both a likeness and a corruption score');
+    item.pickStep = best.step; persist(state);
+    // A decoder-only follow-up gets no second one, as on the Refine tab.
+    const run = listYue2AitkRuns(item.datasetId, ds?.slug).find(r => r.jobId === item.refineRun);
+    if ((run?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true) return null;
+    return narFurtherRequest(item.refineRun!, best.step);
+  }
+  if (stage === 'finish') { finishLadder(item); return null; }
   if (stage === 'captions') {
     const c = state.recipe.autoCaption as { provider?: string; model?: string } | undefined;
     return c ? { provider: c.provider, ...(c.model ? { model: c.model } : {}) } : null;

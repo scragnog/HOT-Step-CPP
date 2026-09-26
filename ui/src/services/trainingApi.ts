@@ -2489,7 +2489,7 @@ export async function listYue2JointPreviews(
 }
 
 /** Awaiting review: refinement ladders across datasets with score counts. */
-export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null }
+export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; best: { step: number; overall: number } | null; decoderOnly: boolean }
 export async function listYue2Review(): Promise<{ rows: Yue2ReviewRow[] }> {
   return request('/yue2-review');
 }
@@ -2942,10 +2942,10 @@ export async function resumePipeline(id: string): Promise<void> {
 }
 
 // ── YuE2 batch (server-owned, resumable) ───────────────────────────────
-export type Yue2BatchStage = 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine';
+export type Yue2BatchStage = 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine' | 'nar' | 'finish';
 export type Yue2BatchItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 export interface Yue2BatchStageResult { stage: Yue2BatchStage; jobId: string; status: Yue2BatchItemStatus; error: string | null; startedAt: number | null; finishedAt: number | null }
-export interface Yue2BatchItem { datasetId: string; name: string; status: Yue2BatchItemStatus; currentStage: Yue2BatchStage | null; stages: Yue2BatchStageResult[]; error: string | null }
+export interface Yue2BatchItem { datasetId: string; name: string; status: Yue2BatchItemStatus; currentStage: Yue2BatchStage | null; stages: Yue2BatchStageResult[]; error: string | null; refineRun?: string; pickStep?: number }
 export interface Yue2BatchSummary {
   id: string;
   status: 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
@@ -2964,6 +2964,11 @@ export async function startYue2Batch(input: { datasetIds: string[]; lyricTiming:
 export async function listYue2Batches(): Promise<Yue2BatchSummary[]> {
   const data = await request<{ batches: Yue2BatchSummary[] }>('/yue2-batch');
   return data.batches;
+}
+/** NAR further training from each ladder's best-scored rung, then link + cleanup. */
+export async function finishYue2Ladders(entries: Array<{ datasetId: string; refineRun: string }>): Promise<Yue2BatchSummary> {
+  const data = await request<{ batch: Yue2BatchSummary }>('/yue2-batch/finish', { method: 'POST', ...jsonBody({ entries }) });
+  return data.batch;
 }
 export async function pauseYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}/pause`, { method: 'POST' }); }
 export async function resumeYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}/resume`, { method: 'POST' }); }

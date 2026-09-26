@@ -111,6 +111,8 @@ When a ladder finishes, the panel says so and waits for you to press "Use this r
 
 The Review phase lists every refinement ladder that still has unscored previews, across datasets, so a batch that ran overnight is one list in the morning.
 
+Once ladders are scored, **Finish scored (N)** on the Review phase finishes them on the server, one after another: for each ladder it takes the best rung by the scoreboard's overall score (ties go to the lower step), runs Further training for NAR from it at the Refine tab's defaults (recon target 0.25, 500-step budget, keep-delta 0.003), links the last checkpoint to the album preset, and cleans up with every option ticked (other runs, other checkpoints, other previews, the optimizer resume file, and the dataset's prepared caches). The list shows the rung each ladder will use; untick any you want to finish by hand. It joins the end of a running batch if there is one, and shows in the batch panel like any other batch.
+
 Checkpoint previews during the main run are optional. They and the Refine rung previews use the first track in the dataset that has lyrics and is not marked instrumental (so an instrumental intro track is skipped), with seed 424242. A preview that reaches its length cap stopped at the preview limit, not at a natural ending.
 
 ## Using the result
