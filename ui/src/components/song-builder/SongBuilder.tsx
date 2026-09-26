@@ -22,6 +22,9 @@ import { generateApi, builderApi } from '../../services/api';
 import type { BuilderProject, BuilderSection, BuilderDirection } from '../../services/api';
 import { play, playFromList, togglePlay, usePlaybackSelector, songToTrack } from '../../stores/playbackStore';
 import type { Song } from '../../types';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 
 // ── Lyrics helpers ───────────────────────────────────────────────────────────
 
@@ -553,7 +556,12 @@ export const SongBuilder: React.FC = () => {
               />
               <div className="grid grid-cols-3 gap-2">
                 <div>
-                  <label className="block text-[10px] text-zinc-500 mb-1">BPM</label>
+                  <ParamLabel
+                    label="BPM"
+                    className="block text-[10px] text-zinc-500 mb-1"
+                    meta="default Auto · range 0-300"
+                    info="Sets the song's tempo. Auto (0, the default) lets the model pick its own tempo. Once you choose the first section, an unset BPM backfills from that section's audio automatically, and later sections' bar-based lengths convert against whichever BPM ends up set."
+                  />
                   <input
                     type="number" min={0} max={300}
                     value={newBpm || ''} placeholder="Auto"
@@ -562,18 +570,32 @@ export const SongBuilder: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] text-zinc-500 mb-1">Key</label>
-                  <select value={newKey} onChange={e => setNewKey(e.target.value)}
-                    className="w-full px-2 py-1.5 rounded-lg bg-black/20 border border-white/10 text-sm text-white focus:outline-none focus:border-violet-500">
-                    {KEY_SIGNATURES.map(k => <option key={k} value={k}>{k || 'Auto'}</option>)}
-                  </select>
+                  <ParamLabel
+                    label="Key"
+                    className="block text-[10px] text-zinc-500 mb-1"
+                    info="Sets the song's key/scale. Auto (the default) lets the model pick its own key. Once you choose the first section, an unset key backfills from that section's audio automatically."
+                  />
+                  <StyledSelect
+                    accent="violet"
+                    value={newKey}
+                    onChange={setNewKey}
+                    options={KEY_SIGNATURES.map(k => ({ value: k, label: k || 'Auto' }))}
+                    className="w-full"
+                  />
                 </div>
                 <div>
-                  <label className="block text-[10px] text-zinc-500 mb-1">Time sig</label>
-                  <select value={newTimeSig} onChange={e => setNewTimeSig(e.target.value)}
-                    className="w-full px-2 py-1.5 rounded-lg bg-black/20 border border-white/10 text-sm text-white focus:outline-none focus:border-violet-500">
-                    {TIME_SIGNATURES.map(t => <option key={t} value={t}>{t || 'Auto'}</option>)}
-                  </select>
+                  <ParamLabel
+                    label="Time sig"
+                    className="block text-[10px] text-zinc-500 mb-1"
+                    info="Sets the song's time signature, which controls how many beats count as one bar when a section's length is set in bars. Auto (the default) lets the model pick its own time signature."
+                  />
+                  <StyledSelect
+                    accent="violet"
+                    value={newTimeSig}
+                    onChange={setNewTimeSig}
+                    options={TIME_SIGNATURES.map(t => ({ value: t, label: t || 'Auto' }))}
+                    className="w-full"
+                  />
                 </div>
               </div>
               <button
@@ -642,7 +664,11 @@ export const SongBuilder: React.FC = () => {
           <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wide mb-2">Song settings</h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div className="col-span-2 sm:col-span-1">
-              <label className="block text-[10px] text-zinc-500 mb-1">Style</label>
+              <ParamLabel
+                label="Style"
+                className="block text-[10px] text-zinc-500 mb-1"
+                info="The style/caption prompt shared by every section of this song. Set at project creation and editable here at any time; each new section's generation uses whatever is saved."
+              />
               <input
                 value={project.style || ''}
                 onChange={e => setProject(prev => prev ? { ...prev, style: e.target.value } : prev)}
@@ -652,7 +678,12 @@ export const SongBuilder: React.FC = () => {
               />
             </div>
             <div>
-              <label className="block text-[10px] text-zinc-500 mb-1">BPM</label>
+              <ParamLabel
+                label="BPM"
+                className="block text-[10px] text-zinc-500 mb-1"
+                meta="default Auto · range 0-300"
+                info="Sets the song's tempo. Auto (0, the default) lets the model pick its own tempo and sizes sections in seconds instead of bars. Once the first section is chosen, an unset BPM backfills from that section's audio automatically."
+              />
               <input
                 type="number" min={0} max={300}
                 value={project.bpm || ''} placeholder="Auto"
@@ -662,18 +693,32 @@ export const SongBuilder: React.FC = () => {
               />
             </div>
             <div>
-              <label className="block text-[10px] text-zinc-500 mb-1">Key</label>
-              <select value={project.key_scale || ''} onChange={e => saveProjectFields({ keyScale: e.target.value })}
-                className="w-full px-2 py-1.5 rounded-lg bg-black/20 border border-white/10 text-sm text-white focus:outline-none focus:border-violet-500">
-                {KEY_SIGNATURES.map(k => <option key={k} value={k}>{k || 'Auto'}</option>)}
-              </select>
+              <ParamLabel
+                label="Key"
+                className="block text-[10px] text-zinc-500 mb-1"
+                info="Sets the song's key/scale. Auto (the default) lets the model pick its own key. Once the first section is chosen, an unset key backfills from that section's audio automatically."
+              />
+              <StyledSelect
+                accent="violet"
+                value={project.key_scale || ''}
+                onChange={v => saveProjectFields({ keyScale: v })}
+                options={KEY_SIGNATURES.map(k => ({ value: k, label: k || 'Auto' }))}
+                className="w-full"
+              />
             </div>
             <div>
-              <label className="block text-[10px] text-zinc-500 mb-1">Time sig</label>
-              <select value={project.time_signature || ''} onChange={e => saveProjectFields({ timeSignature: e.target.value })}
-                className="w-full px-2 py-1.5 rounded-lg bg-black/20 border border-white/10 text-sm text-white focus:outline-none focus:border-violet-500">
-                {TIME_SIGNATURES.map(t => <option key={t} value={t}>{t || 'Auto'}</option>)}
-              </select>
+              <ParamLabel
+                label="Time sig"
+                className="block text-[10px] text-zinc-500 mb-1"
+                info="Sets the song's time signature, which controls how many beats count as one bar when a section's length is set in bars. Auto (the default) lets the model pick its own time signature."
+              />
+              <StyledSelect
+                accent="violet"
+                value={project.time_signature || ''}
+                onChange={v => saveProjectFields({ timeSignature: v })}
+                options={TIME_SIGNATURES.map(t => ({ value: t, label: t || 'Auto' }))}
+                className="w-full"
+              />
             </div>
           </div>
           {bpm > 0 ? (
@@ -815,7 +860,11 @@ export const SongBuilder: React.FC = () => {
 
             <div className="mb-3">
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs text-zinc-400">Length</label>
+                <ParamLabel
+                  label="Length"
+                  className="text-xs text-zinc-400"
+                  info="How long this section is. Bars mode (only available once the project has a real BPM) converts a bar count to seconds using the project's BPM and time signature, so the section lines up on the beat. Seconds mode is a plain 5-90s slider. '≈ from lyrics' estimates a bar count from the number of sung lines, about 2 bars per line, as a starting point you then adjust."
+                />
                 {bpm > 0 && (
                   <div className="flex gap-1">
                     <button onClick={() => setLengthMode('bars')}
@@ -905,41 +954,48 @@ export const SongBuilder: React.FC = () => {
             {/* Structural seed — follow an earlier section's chords/feel */}
             {direction !== 'first' && timeline.length > 0 && (
               <div className="mb-3 rounded-lg border border-white/10 bg-black/20 p-2.5">
-                <label className="block text-[11px] text-zinc-400 mb-1.5">Match a section's feel (chords / structure)</label>
-                <select
+                <ParamLabel
+                  label="Match a section's feel (chords / structure)"
+                  className="block text-[11px] text-zinc-400 mb-1.5"
+                  meta="default 0.4 · range 0.1-0.9"
+                  info="Feeds an earlier chosen section's latent into this new section so it starts from that section's harmonic shape (chords, structure), then diverges once your lyrics take over. Off (None): free generation with no structural bias. Higher strength holds closer to the seed section's shape; match its bar count for the best alignment. Only sections with a stored latent are selectable. Experimental."
+                />
+                <StyledSelect
+                  accent="violet"
                   value={seedSectionId ?? ''}
-                  onChange={e => setSeedSectionId(e.target.value || null)}
-                  className="w-full px-2 py-1.5 rounded-lg bg-black/20 border border-white/10 text-sm text-white focus:outline-none focus:border-violet-500"
-                >
-                  <option value="">None (free generation)</option>
-                  {timeline.map((s, i) => {
-                    const hasLatent = !!((s.chosen as any)?.latentUrl || (s.chosen as any)?.latent_url);
-                    return (
-                      <option key={s.id} value={s.id} disabled={!hasLatent}>
-                        #{i + 1} {s.label || 'Section'} ({sectionLenLabel(s)}){hasLatent ? '' : ' — no latent'}
-                      </option>
-                    );
-                  })}
-                </select>
+                  onChange={v => setSeedSectionId(v || null)}
+                  options={[
+                    { value: '', label: 'None (free generation)' },
+                    ...timeline.map((s, i) => {
+                      const hasLatent = !!((s.chosen as any)?.latentUrl || (s.chosen as any)?.latent_url);
+                      return {
+                        value: s.id,
+                        label: `#${i + 1} ${s.label || 'Section'} (${sectionLenLabel(s)})${hasLatent ? '' : ' — no latent'}`,
+                        disabled: !hasLatent,
+                      };
+                    }),
+                  ]}
+                  className="w-full"
+                />
                 {seedSectionId && (
-                  <>
-                    <div className="flex items-center gap-3 mt-2">
-                      <span className="text-[11px] text-zinc-400 whitespace-nowrap">Strength</span>
-                      <input type="range" min={0.1} max={0.9} step={0.05} value={seedStrength} onChange={e => setSeedStrength(Number(e.target.value))} className="flex-1 accent-violet-500" />
-                      <span className="text-[11px] text-violet-300 w-9 text-right">{seedStrength.toFixed(2)}</span>
-                    </div>
-                    <p className="text-[10px] text-zinc-600 mt-1.5">
-                      Biases this section toward the selected one's harmonic shape, then diverges with your lyrics. Higher = closer to the original. Tip: match the bar count for best alignment. Experimental.
-                    </p>
-                  </>
+                  <div className="flex items-center gap-3 mt-2">
+                    <span className="text-[11px] text-zinc-400 whitespace-nowrap">Strength</span>
+                    <input type="range" min={0.1} max={0.9} step={0.05} value={seedStrength} onChange={e => setSeedStrength(Number(e.target.value))} className="flex-1 accent-violet-500" />
+                    <span className="text-[11px] text-violet-300 w-9 text-right">{seedStrength.toFixed(2)}</span>
+                  </div>
                 )}
               </div>
             )}
 
-            <label className="flex items-center gap-2 mb-3 text-[11px] text-zinc-400 cursor-pointer select-none">
-              <input type="checkbox" checked={previewMastering} onChange={e => setPreviewMastering(e.target.checked)} className="accent-violet-500" />
-              Apply mastering/post-processing to these variants (preview only — off by default for speed; runs only on the finished track)
-            </label>
+            <Toggle
+              accent="violet"
+              size="sm"
+              checked={previewMastering}
+              onChange={setPreviewMastering}
+              className="mb-3"
+              label="Apply mastering/post-processing to these variants"
+              info="Runs the full mastering/post-processing chain (mastering, PP-VAE re-encode, StableStep, spectral lifter, LUFS normalization) on each variant as it generates, instead of skipping it mid-build for speed. Off (default): these steps run only once, on the finished track after your last chosen section — build faster, then master the result from the Library. On: each variant preview already sounds close to final, at the cost of slower generation. Cover art, Whisper lyric transcription, quality evaluation, auto-trim and LRC generation are always skipped mid-build regardless of this setting."
+            />
 
             {/* Generate */}
             {isGenerating ? (

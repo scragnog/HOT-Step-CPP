@@ -9,6 +9,8 @@ import React from 'react';
 import { Info } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 import type {
   PreprocessCompat,
   PreprocessDtype,
@@ -113,7 +115,11 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="flex flex-col gap-1.5">
-          <span className={LABEL}>{t('trainingStudio.preprocess.baseModel')}</span>
+          <ParamLabel
+            className={LABEL}
+            label={t('trainingStudio.preprocess.baseModel')}
+            info={t('trainingStudio.preprocess.baseModelInfo')}
+          />
           <StyledSelect
             accent="amber"
             value={value.ditModel}
@@ -125,7 +131,11 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <span className={LABEL}>{t('trainingStudio.preprocess.vae')}</span>
+          <ParamLabel
+            className={LABEL}
+            label={t('trainingStudio.preprocess.vae')}
+            info={t('trainingStudio.preprocess.vaeInfo')}
+          />
           <StyledSelect
             accent="amber"
             value={value.vaeModel}
@@ -137,7 +147,11 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <span className={LABEL}>{t('trainingStudio.preprocess.textEncoder')}</span>
+          <ParamLabel
+            className={LABEL}
+            label={t('trainingStudio.preprocess.textEncoder')}
+            info={t('trainingStudio.preprocess.textEncoderInfo')}
+          />
           <StyledSelect
             accent="amber"
             value={value.textEncoder}
@@ -149,7 +163,12 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
         </div>
 
         <label className="flex flex-col gap-1.5">
-          <span className={LABEL}>{t('trainingStudio.preprocess.maxDuration')}</span>
+          <ParamLabel
+            className={LABEL}
+            label={t('trainingStudio.preprocess.maxDuration')}
+            meta={t('trainingStudio.preprocess.maxDurationMeta')}
+            info={t('trainingStudio.preprocess.maxDurationInfo')}
+          />
           <input
             type="number"
             min={0}
@@ -169,7 +188,12 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
 
         <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5">
-            <span className={LABEL}>{t('trainingStudio.preprocess.normalize')}</span>
+            <ParamLabel
+              className={LABEL}
+              label={t('trainingStudio.preprocess.normalize')}
+              meta={t('trainingStudio.preprocess.normalizeMeta')}
+              info={t('trainingStudio.preprocess.normalizeInfo')}
+            />
             <StyledSelect
               accent="amber"
               value={value.normalize}
@@ -183,7 +207,12 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
           </div>
 
           <label className="flex flex-col gap-1.5">
-            <span className={LABEL}>{t('trainingStudio.preprocess.targetDb')}</span>
+            <ParamLabel
+              className={LABEL}
+              label={t('trainingStudio.preprocess.targetDb')}
+              meta={t('trainingStudio.preprocess.targetDbMeta')}
+              info={t('trainingStudio.preprocess.targetDbInfo')}
+            />
             <input
               type="number"
               min={-60}
@@ -197,7 +226,12 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
           </label>
 
           <div className="flex flex-col gap-1.5">
-            <span className={LABEL}>{t('trainingStudio.preprocess.dtype')}</span>
+            <ParamLabel
+              className={LABEL}
+              label={t('trainingStudio.preprocess.dtype')}
+              meta={t('trainingStudio.preprocess.dtypeMeta')}
+              info={t('trainingStudio.preprocess.dtypeInfo')}
+            />
             <StyledSelect
               accent="amber"
               value={value.dtype}
@@ -211,7 +245,12 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <span className={LABEL}>{t('trainingStudio.preprocess.compat')}</span>
+            <ParamLabel
+              className={LABEL}
+              label={t('trainingStudio.preprocess.compat')}
+              meta={t('trainingStudio.preprocess.compatMeta')}
+              info={t('trainingStudio.preprocess.compatInfo')}
+            />
             <StyledSelect
               accent="amber"
               value={value.compat}
@@ -225,7 +264,12 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
           </div>
 
           <label className="flex flex-col gap-1.5">
-            <span className={LABEL}>{t('trainingStudio.preprocess.maxCaptionTokens')}</span>
+            <ParamLabel
+              className={LABEL}
+              label={t('trainingStudio.preprocess.maxCaptionTokens')}
+              meta={t('trainingStudio.preprocess.maxCaptionTokensMeta')}
+              info={t('trainingStudio.preprocess.maxCaptionTokensInfo')}
+            />
             <input
               type="number"
               min={16}
@@ -239,7 +283,12 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
           </label>
 
           <label className="flex flex-col gap-1.5">
-            <span className={LABEL}>{t('trainingStudio.preprocess.maxLyricTokens')}</span>
+            <ParamLabel
+              className={LABEL}
+              label={t('trainingStudio.preprocess.maxLyricTokens')}
+              meta={t('trainingStudio.preprocess.maxLyricTokensMeta')}
+              info={t('trainingStudio.preprocess.maxLyricTokensInfo')}
+            />
             <input
               type="number"
               min={16}
@@ -253,7 +302,12 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
           </label>
 
           <label className="flex flex-col gap-1.5">
-            <span className={LABEL}>{t('trainingStudio.preprocess.vaeChunk')}</span>
+            <ParamLabel
+              className={LABEL}
+              label={t('trainingStudio.preprocess.vaeChunk')}
+              meta={t('trainingStudio.preprocess.vaeChunkMeta')}
+              info={t('trainingStudio.preprocess.vaeChunkInfo')}
+            />
             <input
               type="number"
               min={64}
@@ -266,7 +320,12 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
           </label>
 
           <label className="flex flex-col gap-1.5">
-            <span className={LABEL}>{t('trainingStudio.preprocess.vaeOverlap')}</span>
+            <ParamLabel
+              className={LABEL}
+              label={t('trainingStudio.preprocess.vaeOverlap')}
+              meta={t('trainingStudio.preprocess.vaeOverlapMeta')}
+              info={t('trainingStudio.preprocess.vaeOverlapInfo')}
+            />
             <input
               type="number"
               min={0}
@@ -280,28 +339,23 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
         </div>
 
         <div className="mt-3 flex flex-col gap-2">
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-            <input
-              type="checkbox"
-              checked={value.overwrite}
-              disabled={!!disabled}
-              onChange={(e) => onChange({ overwrite: e.target.checked })}
-              className="accent-amber-500"
-            />
-            {t('trainingStudio.preprocess.overwrite')}
-          </label>
+          <Toggle
+            accent="amber"
+            checked={value.overwrite}
+            disabled={!!disabled}
+            onChange={(v) => onChange({ overwrite: v })}
+            label={t('trainingStudio.preprocess.overwrite')}
+            info={t('trainingStudio.preprocess.overwriteInfo')}
+          />
 
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-            <input
-              type="checkbox"
-              checked={value.stopEngine}
-              disabled={!!disabled}
-              onChange={(e) => onChange({ stopEngine: e.target.checked })}
-              className="accent-amber-500"
-            />
-            {t('trainingStudio.preprocess.stopEngine')}
-          </label>
-          <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.preprocess.stopEngineHelp')}</span>
+          <Toggle
+            accent="amber"
+            checked={value.stopEngine}
+            disabled={!!disabled}
+            onChange={(v) => onChange({ stopEngine: v })}
+            label={t('trainingStudio.preprocess.stopEngine')}
+            info={t('trainingStudio.preprocess.stopEngineInfo')}
+          />
         </div>
       </details>
     </div>

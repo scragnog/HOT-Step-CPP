@@ -14,6 +14,8 @@ import {
   type LyricStudioExportPreview, type LyricStudioExportResult,
 } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { ParamLabel } from '../shared/ParamLabel';
+import { Toggle } from '../shared/Toggle';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const INPUT = 'rounded-lg px-3 py-2 text-sm bg-zinc-100 dark:bg-black/20 border border-zinc-300 dark:border-white/10 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-amber-500';
@@ -141,12 +143,12 @@ export const SendToLyricStudio: React.FC = () => {
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <label className="flex flex-col gap-1.5">
-                      <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.lyricStudio.artist')}</span>
+                      <ParamLabel label={t('trainingStudio.lyricStudio.artist')} info={t('trainingStudio.lyricStudio.artistInfo')} />
                       <input type="text" value={artist} onChange={e => setArtist(e.target.value)} className={INPUT} />
                       <span className="text-[10px] text-zinc-500">{t(`trainingStudio.lyricStudio.source.${preview.artistSource}`)}</span>
                     </label>
                     <label className="flex flex-col gap-1.5">
-                      <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.lyricStudio.album')}</span>
+                      <ParamLabel label={t('trainingStudio.lyricStudio.album')} info={t('trainingStudio.lyricStudio.albumInfo')} />
                       <input type="text" value={album} onChange={e => setAlbum(e.target.value)} className={INPUT} />
                       <span className="text-[10px] text-zinc-500">{t(`trainingStudio.lyricStudio.source.${preview.albumSource}`)}</span>
                     </label>
@@ -199,32 +201,32 @@ export const SendToLyricStudio: React.FC = () => {
 
                   {/* Adapters → album preset */}
                   {hasPresetAssets ? (
-                    <label className="flex items-start gap-2.5 cursor-pointer">
-                      <input
-                        type="checkbox"
+                    <div className="flex flex-col gap-1.5">
+                      <Toggle
+                        accent="amber"
                         checked={linkAdapters}
-                        onChange={e => setLinkAdapters(e.target.checked)}
-                        className="mt-0.5 accent-amber-500"
+                        onChange={setLinkAdapters}
+                        label={t('trainingStudio.lyricStudio.linkAdapters')}
+                        info={t('trainingStudio.lyricStudio.linkAdaptersInfo')}
                       />
-                      <span className="text-xs text-zinc-700 dark:text-zinc-300">
-                        <span className="font-semibold">{t('trainingStudio.lyricStudio.linkAdapters')}</span>
+                      <div className="pl-[52px] flex flex-col gap-0.5">
                         {preview.ditAdapter && (
-                          <span className="block text-[11px] font-mono text-zinc-500 mt-0.5" title={preview.ditAdapter.path}>
+                          <span className="block text-[11px] font-mono text-zinc-500" title={preview.ditAdapter.path}>
                             {t('trainingStudio.lyricStudio.adapterDit', { name: lastFolder(preview.ditAdapter.path), detail: preview.ditAdapter.detail })}
                           </span>
                         )}
                         {preview.lmAdapter && (
-                          <span className="block text-[11px] font-mono text-zinc-500 mt-0.5" title={preview.lmAdapter.path}>
+                          <span className="block text-[11px] font-mono text-zinc-500" title={preview.lmAdapter.path}>
                             {t('trainingStudio.lyricStudio.adapterLm', { name: lastFolder(preview.lmAdapter.path), detail: preview.lmAdapter.detail })}
                           </span>
                         )}
                         {preview.referenceTrack && (
-                          <span className="block text-[11px] font-mono text-zinc-500 mt-0.5" title={preview.referenceTrack}>
+                          <span className="block text-[11px] font-mono text-zinc-500" title={preview.referenceTrack}>
                             {t('trainingStudio.lyricStudio.adapterReference', { name: fileName(preview.referenceTrack) })}
                           </span>
                         )}
-                      </span>
-                    </label>
+                      </div>
+                    </div>
                   ) : (
                     <div className="text-[11px] text-zinc-500">{t('trainingStudio.lyricStudio.noAdapters')}</div>
                   )}

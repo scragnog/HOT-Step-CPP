@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { profileApi, type ParamProfile } from '../../services/api';
 import { applyProfileData, collectProfileData, describeProfileGroups, summarizeProfile } from '../../utils/paramProfiles';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
+import { Toggle } from '../shared/Toggle';
 
 interface ProfilesModalProps {
   onClose: () => void;
@@ -181,11 +182,14 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
               {t('profiles.saveCurrent')}
             </button>
           </div>
-          <label className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400 cursor-pointer select-none">
-            <input type="checkbox" checked={includeContent} onChange={e => setIncludeContent(e.target.checked)}
-              className="accent-pink-600" />
-            {t('profiles.includeContent')}
-          </label>
+          <Toggle
+            size="sm"
+            accent="pink"
+            checked={includeContent}
+            onChange={setIncludeContent}
+            label={t('profiles.includeContent')}
+            info={t('profiles.includeContentInfo')}
+          />
         </div>
 
         {/* List */}

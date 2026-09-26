@@ -106,7 +106,8 @@ if (exists('FEATURES.md')) {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) walk(p);
       else if (e.name.endsWith('.tsx')) {
-        const src = fs.readFileSync(p, 'utf8');
+        // Comments off first: the shared components describe the native widgets they replace.
+        const src = fs.readFileSync(p, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
         const n = (src.match(/<select[\s>]/g) || []).length + (src.match(/type=["']checkbox["']/g) || []).length;
         if (n) counts[rel(p)] = n;
       }

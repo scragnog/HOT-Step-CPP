@@ -29,10 +29,11 @@ import { AlertTriangle, ChevronDown, ChevronRight, RotateCcw } from 'lucide-reac
 import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { Slider } from '../shared/Slider';
 import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
 
-const inputClasses =
-  'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 ' +
-  'text-sm text-zinc-800 dark:text-zinc-200 outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20';
+/** The Adapters section's own colour (GlobalParamBar.tsx accentColor="emerald"). */
+const ACCENT = 'emerald' as const;
 
 /** Request-param keys, in the order the panel presents them. */
 const PARAM = {
@@ -180,16 +181,16 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
             'A LoRA on the MiniMax-Music3 planner LM — artist identity lives here. Applied at runtime, so these strengths are live per generation. An adapter that fails to load fails the job rather than silently rendering the base model.')}
           rootClassName="flex mb-1.5"
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
-        <select
-          className={inputClasses}
+        <StyledSelect
+          accent={ACCENT}
+          className="w-full"
           value={selected}
-          onChange={e => onPick(e.target.value)}
-        >
-          <option value="">{t('globalBar.mm3LmAdapterNone', 'None — base model')}</option>
-          {(data?.adapters ?? []).map(a => (
-            <option key={a.file} value={a.file}>{a.name || a.file}</option>
-          ))}
-        </select>
+          onChange={onPick}
+          options={[
+            { value: '', label: t('globalBar.mm3LmAdapterNone', 'None — base model') },
+            ...(data?.adapters ?? []).map(a => ({ value: a.file, label: a.name || a.file })),
+          ]}
+        />
       </div>
 
       {/* ── What this adapter is ── */}
@@ -217,19 +218,16 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
             </p>
           )}
           {entry.trigger && entry.triggerPrepend !== false && (
-            <label className="flex items-start gap-2 pt-0.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={params[PARAM.trigger] !== false}
-                onChange={e => setBackendParam(PARAM.trigger, e.target.checked)}
-                className="mt-0.5 accent-emerald-500"
-              />
-              <ParamLabel
-                label={t('globalBar.mm3LmTriggerAutoLabel', 'Add trigger to caption')}
-                info={t('globalBar.mm3LmTriggerAuto',
-                  'Adds the trigger to the caption automatically, in the position it was trained in. The identity is bound to it, so leave this on unless you are placing it yourself. A caption that already opens with the trigger is left alone.')}
-                className="text-[10px] text-zinc-600 dark:text-zinc-500 leading-relaxed" />
-            </label>
+            <Toggle
+              size="sm"
+              accent={ACCENT}
+              checked={params[PARAM.trigger] !== false}
+              onChange={v => setBackendParam(PARAM.trigger, v)}
+              label={t('globalBar.mm3LmTriggerAutoLabel', 'Add trigger to caption')}
+              info={t('globalBar.mm3LmTriggerAuto',
+                'Adds the trigger to the caption automatically, in the position it was trained in. The identity is bound to it, so leave this on unless you are placing it yourself. A caption that already opens with the trigger is left alone.')}
+              className="pt-0.5"
+            />
           )}
           {entry.notes && (
             <p className="text-[10px] text-zinc-600 dark:text-zinc-500 leading-relaxed italic">{entry.notes}</p>
@@ -278,23 +276,20 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
       {selected && (
         <>
           {String(params[PARAM.mode] ?? 'runtime') === 'merge' && (
-            <label className="flex items-start gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={params[PARAM.mergeGpu] !== false}
-                onChange={e => setBackendParam(PARAM.mergeGpu, e.target.checked)}
-                className="mt-0.5 accent-emerald-500"
-              />
-              <ParamLabel
-                label={t('globalBar.mm3LmMergeGpu', 'GPU merging')}
-                info={t('globalBar.mm3LmMergeGpuHint',
-                  'Use the GPU for adapter merging. Turn off to use CPU-assisted merging. Unsupported GPU formats fall back automatically.')}
-                className="text-xs text-zinc-600 dark:text-zinc-400"
-              />
-            </label>
+            <Toggle
+              accent={ACCENT}
+              checked={params[PARAM.mergeGpu] !== false}
+              onChange={v => setBackendParam(PARAM.mergeGpu, v)}
+              label={t('globalBar.mm3LmMergeGpu', 'GPU merging')}
+              info={t('globalBar.mm3LmMergeGpuHint',
+                'Use the GPU for adapter merging. Turn off to use CPU-assisted merging. Unsupported GPU formats fall back automatically.')}
+            />
           )}
           <Slider
             label={t('globalBar.mm3LmStrength', 'Strength')}
+            info={t('globalBar.mm3LmStrengthInfo',
+              'The master dial for this adapter: it multiplies the Attention, MLP and depth-third dials below rather than replacing them. Raise it to push the artist identity harder everywhere at once; lower it, down to 0, to fade the adapter out without changing the balance the other dials set.')}
+            infoMeta={t('globalBar.mm3LmStrengthMeta', 'default 1.0 · range 0-2')}
             value={num(PARAM.scale, defaults.scale)}
             onChange={v => setBackendParam(PARAM.scale, v)}
             min={0} max={2} step={0.05} showInput
@@ -348,18 +343,27 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
               </div>
               <Slider
                 label={t('globalBar.mm3LmEarly', 'Early third')}
+                info={t('globalBar.mm3LmEarlyInfo',
+                  'How strongly the adapter applies to the planner LM\'s first third of layers (layers 0-11), which set up the song\'s structure and tempo. Dialling this down produced runaway tempo and chaos in testing; raise it to push the identity harder at that stage.')}
+                infoMeta={t('globalBar.mm3LmEarlyMeta', 'default 1.0 · range 0-2 · leave at 1.0 for production')}
                 value={num(PARAM.early, defaults.scaleEarly)}
                 onChange={v => setBackendParam(PARAM.early, v)}
                 min={0} max={2} step={0.05} showInput
               />
               <Slider
                 label={t('globalBar.mm3LmMid', 'Middle third')}
+                info={t('globalBar.mm3LmMidInfo',
+                  'How strongly the adapter applies to the planner LM\'s middle third of layers (layers 12-23). Raising or lowering it shifts the identity\'s weight in the middle of the song relative to the early and late thirds.')}
+                infoMeta={t('globalBar.mm3LmMidMeta', 'default 1.0 · range 0-2 · leave at 1.0 for production')}
                 value={num(PARAM.mid, defaults.scaleMid)}
                 onChange={v => setBackendParam(PARAM.mid, v)}
                 min={0} max={2} step={0.05} showInput
               />
               <Slider
                 label={t('globalBar.mm3LmLate', 'Late third')}
+                info={t('globalBar.mm3LmLateInfo',
+                  'How strongly the adapter applies to the planner LM\'s last third of layers (layers 24 and up), which carry sequence termination — where the song ends. Halving this produced fades and songs that ended early or never ended in testing; raise it to push the identity harder at that stage.')}
+                infoMeta={t('globalBar.mm3LmLateMeta', 'default 1.0 · range 0-2 · leave at 1.0 for production')}
                 value={num(PARAM.late, defaults.scaleLate)}
                 onChange={v => setBackendParam(PARAM.late, v)}
                 min={0} max={2} step={0.05} showInput

@@ -10,6 +10,8 @@ import { usePersistedState } from '../../hooks/usePersistedState';
 import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { useAssistantActions, type ActionDiff } from '../../hooks/useAssistantActions';
 import { SimpleMarkdown } from './SimpleMarkdown';
+import { StyledSelect } from '../shared/StyledSelect';
+import { ParamLabel } from '../shared/ParamLabel';
 import {
   chatStream,
   parseActions,
@@ -256,34 +258,41 @@ export const AssistantPanel: React.FC<AssistantPanelProps> = ({ onClose, activeV
       {/* Provider & model selectors */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-200 dark:border-white/5 bg-zinc-50/80 dark:bg-zinc-900/50">
         <div className="flex-1 min-w-0">
-          <label className="block text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-1">Provider</label>
-          <select
-            className="w-full px-3 py-1.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 outline-none transition-colors cursor-pointer"
+          <ParamLabel
+            label="Provider"
+            className="block text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-1"
+            info="Which configured LLM answers your messages. Only providers the app can currently reach are selectable; the rest show as unavailable. Set providers up under Settings > AI Services."
+          />
+          <StyledSelect
+            accent="violet"
             value={selectedProvider}
-            onChange={(e) => handleProviderChange(e.target.value)}
-          >
-            {providers.length === 0 && <option value="">Loading...</option>}
-            {providers.map(p => (
-              <option key={p.id} value={p.id} disabled={!p.available}>
-                {p.name}{!p.available ? ' (unavailable)' : ''}
-              </option>
-            ))}
-          </select>
+            onChange={handleProviderChange}
+            disabled={providers.length === 0}
+            placeholder="Loading..."
+            options={providers.map(p => ({
+              value: p.id,
+              label: p.name + (!p.available ? ' (unavailable)' : ''),
+              disabled: !p.available,
+            }))}
+            className="w-full"
+          />
         </div>
         <div className="flex-1 min-w-0">
-          <label className="block text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-1">Model</label>
-          <select
-            className="w-full px-3 py-1.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20 outline-none transition-colors cursor-pointer"
+          <ParamLabel
+            label="Model"
+            className="block text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-1"
+            info="Which model of the selected provider answers your messages. Defaults to the provider's default model when you switch providers."
+          />
+          <StyledSelect
+            accent="violet"
             value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-          >
-            {availableModels.map(m => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-            {availableModels.length === 0 && (
-              <option value="">Default</option>
-            )}
-          </select>
+            onChange={setSelectedModel}
+            placeholder="Default"
+            options={availableModels.length > 0
+              ? availableModels.map(m => ({ value: m, label: m }))
+              : [{ value: '', label: 'Default' }]}
+            className="w-full"
+          />
         </div>
       </div>
 

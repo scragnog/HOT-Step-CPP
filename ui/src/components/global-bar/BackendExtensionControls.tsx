@@ -16,6 +16,7 @@ import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import { Slider } from '../shared/Slider';
 import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '../shared/StyledSelect';
 import { ToggleSwitch } from './BarSection';
 import type { BackendExtensionGroup, BackendExtensionParam } from '../../stores/backendStore';
 
@@ -30,7 +31,7 @@ export function useBackendExtensions(group: BackendExtensionGroup): BackendExten
   return (capabilities?.extensions ?? []).filter(p => (p.group ?? 'generation') === group);
 }
 
-type Accent = 'pink' | 'emerald' | 'sky' | 'purple' | 'amber' | 'teal';
+type Accent = 'pink' | 'amber' | 'sky' | 'emerald' | 'purple' | 'teal' | 'cyan' | 'violet';
 
 export const BackendExtensionControls: React.FC<{
   group: BackendExtensionGroup;
@@ -106,15 +107,13 @@ export const BackendExtensionControls: React.FC<{
             <div key={p.key}>
               <ParamLabel label={p.label} info={p.hint} rootClassName="flex mb-1.5"
                 className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
-              <select
-                className={backendInputClasses}
+              <StyledSelect
+                accent={accentColor}
+                className="w-full"
                 value={String(value ?? '')}
-                onChange={(e) => gp.setBackendParam?.(p.key, e.target.value)}
-              >
-                {(p.options ?? []).map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+                onChange={(v) => gp.setBackendParam?.(p.key, v)}
+                options={(p.options ?? []).map((o) => ({ value: o.value, label: o.label }))}
+              />
             </div>
           );
         }

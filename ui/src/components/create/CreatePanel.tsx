@@ -38,6 +38,7 @@ import {
 } from '../../utils/yue2CaptionSource';
 import { listDatasets, type TrainingDatasetSummary } from '../../services/trainingApi';
 import { StyledSelect } from '../shared/StyledSelect';
+import { ParamLabel } from '../shared/ParamLabel';
 import { writePersistedState } from '../../hooks/usePersistedState';
 import type { GenerationParams, Song } from '../../types';
 
@@ -477,9 +478,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
         {mm3SourcesActive && mm3Resolved && (
           <div className="pt-2 space-y-1">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                {t('createPanel.mm3CaptionSource', 'Caption source')}
-              </label>
+              <ParamLabel
+                label={t('createPanel.mm3CaptionSource', 'Caption source')}
+                className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+                info={t('createPanel.mm3CaptionSourceInfo', "Chooses which caption this song actually sends to MiniMax-Music3. Automatic from dataset picks the album track whose BPM is closest to this song's, and uses that track's own Structured Caption verbatim. A named Track locks in that specific track's caption instead. Custom uses this song's own caption, editable in the Style Description box above.")}
+              />
               <button
                 onClick={dismissMm3Sources}
                 title={t('createPanel.mm3CaptionSourceDismissHint', 'Stop using the album’s captions for this panel')}
@@ -488,25 +491,27 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
                 {t('createPanel.mm3CaptionSourceDismiss', 'Dismiss')}
               </button>
             </div>
-            <select
+            <StyledSelect
+              accent="pink"
+              size="sm"
+              className="w-full"
               value={mm3Resolved.mode === 'track' && mm3Resolved.fromTitle ? `track:${mm3Resolved.fromTitle}` : mm3Resolved.mode}
-              onChange={e => setMm3Mode(e.target.value)}
-              className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300 outline-none focus:border-cyan-500/50 transition-colors"
-            >
-              <option value="auto">
-                {t('createPanel.mm3CaptionAuto', 'Automatic from dataset')}
-                {(() => {
-                  const auto = pickNearestBpmTrack(mm3Sources!.tracks, bpm);
-                  return auto ? ` (${t('createPanel.mm3CaptionNearestTempo', 'nearest tempo')}: ${auto.title})` : '';
-                })()}
-              </option>
-              {mm3Sources!.tracks.map(track => (
-                <option key={track.title} value={`track:${track.title}`}>
-                  {t('createPanel.mm3CaptionTrack', 'Track')}: {track.title}{track.bpm ? ` · ${track.bpm} BPM` : ''}
-                </option>
-              ))}
-              <option value="custom">{t('createPanel.mm3CaptionCustom', "Custom (this song's own caption)")}</option>
-            </select>
+              onChange={setMm3Mode}
+              options={[
+                {
+                  value: 'auto',
+                  label: `${t('createPanel.mm3CaptionAuto', 'Automatic from dataset')}${(() => {
+                    const auto = pickNearestBpmTrack(mm3Sources!.tracks, bpm);
+                    return auto ? ` (${t('createPanel.mm3CaptionNearestTempo', 'nearest tempo')}: ${auto.title})` : '';
+                  })()}`,
+                },
+                ...mm3Sources!.tracks.map(track => ({
+                  value: `track:${track.title}`,
+                  label: `${t('createPanel.mm3CaptionTrack', 'Track')}: ${track.title}${track.bpm ? ` · ${track.bpm} BPM` : ''}`,
+                })),
+                { value: 'custom', label: t('createPanel.mm3CaptionCustom', "Custom (this song's own caption)") },
+              ]}
+            />
             {mm3CaptionLocked && (
               <p className="text-[10px] text-cyan-400/70">
                 {t('createPanel.mm3CaptionFromTrack', 'From dataset track')}: {mm3Resolved.fromTitle}
@@ -528,9 +533,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
             below the fold the way #163 did for the caption source itself. */}
         {yue2DatasetBlockVisible && (
           <div className="pt-2 space-y-1">
-            <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider block">
-              {t('createPanel.yue2Dataset', 'Dataset')}
-            </label>
+            <ParamLabel
+              label={t('createPanel.yue2Dataset', 'Dataset')}
+              className="text-xs font-medium text-zinc-500 uppercase tracking-wider block"
+              info={t('createPanel.yue2DatasetInfo', "Picks which training dataset's captions the Caption source picker below offers. Defaults to the dataset the active YuE2 adapter was trained on. None turns the picker off and leaves the caption box as plain free text.")}
+            />
             <StyledSelect
               value={yue2DatasetChoice}
               onChange={setYue2DatasetPick}
@@ -547,29 +554,32 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
 
             {yue2SourcesActive && yue2Resolved && (
               <>
-                <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider block pt-1">
-                  {t('createPanel.yue2CaptionSource', 'Caption source')}
-                </label>
-                <select
+                <ParamLabel
+                  label={t('createPanel.yue2CaptionSource', 'Caption source')}
+                  className="text-xs font-medium text-zinc-500 uppercase tracking-wider block pt-1"
+                  info={t('createPanel.yue2CaptionSourceInfo', "Chooses which caption this song actually sends to YuE2. Custom uses the caption typed in the Style Description box above. Automatic from dataset picks the dataset track whose BPM is closest to this song's and uses that track's own caption. A named Track locks in that specific track's caption instead — every dataset caption is one the adapter actually trained on, so picking one steers towards that track rather than the album's average.")}
+                />
+                <StyledSelect
+                  accent="pink"
+                  size="sm"
+                  className="w-full"
                   value={yue2Resolved.mode === 'track' && yue2Resolved.fromName ? `track:${yue2Resolved.fromName}` : yue2Resolved.mode}
-                  onChange={e => setYue2CaptionMode(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300 outline-none focus:border-emerald-500/50 transition-colors"
-                >
-                  <option value="custom">{t('createPanel.yue2CaptionCustom', 'Custom (the caption above)')}</option>
-                  <option value="auto">
-                    {t('createPanel.yue2CaptionAuto', 'Automatic from dataset')}
-                    {(() => {
-                      const auto = pickNearestYue2Track(yue2Tracks, bpm);
-                      return auto ? ` (${t('createPanel.yue2CaptionNearestTempo', 'nearest tempo')}: ${auto.name})` : '';
-                    })()}
-                  </option>
-                  {yue2Tracks.map(track => (
-                    <option key={track.name} value={`track:${track.name}`}>
-                      {t('createPanel.yue2CaptionTrack', 'Track')}: {track.name}
-                      {yue2TrackBpm(track) ? ` · ${yue2TrackBpm(track)} BPM` : ''}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setYue2CaptionMode}
+                  options={[
+                    { value: 'custom', label: t('createPanel.yue2CaptionCustom', 'Custom (the caption above)') },
+                    {
+                      value: 'auto',
+                      label: `${t('createPanel.yue2CaptionAuto', 'Automatic from dataset')}${(() => {
+                        const auto = pickNearestYue2Track(yue2Tracks, bpm);
+                        return auto ? ` (${t('createPanel.yue2CaptionNearestTempo', 'nearest tempo')}: ${auto.name})` : '';
+                      })()}`,
+                    },
+                    ...yue2Tracks.map(track => ({
+                      value: `track:${track.name}`,
+                      label: `${t('createPanel.yue2CaptionTrack', 'Track')}: ${track.name}${yue2TrackBpm(track) ? ` · ${yue2TrackBpm(track)} BPM` : ''}`,
+                    })),
+                  ]}
+                />
                 {yue2CaptionLocked && (
                   <p className="text-[10px] text-emerald-400/70">
                     {t('createPanel.yue2CaptionFromTrack', 'From dataset track')}: {yue2Resolved.fromName}

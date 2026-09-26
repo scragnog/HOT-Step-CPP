@@ -16,7 +16,9 @@ import {
 import { useTranslation } from 'react-i18next';
 import type { AuditionOptions, AuditionPreview, AuditionSideSpec, LsGenerationsResponse } from '../../services/trainingApi';
 import { getLsGenerations } from '../../services/trainingApi';
+import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { useTrainingStore } from '../../stores/trainingStore';
@@ -417,9 +419,11 @@ export const AuditionCard: React.FC<AuditionCardProps> = ({ milestoneRequest }) 
 
       {/* ── Prompt source ────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-2">
-        <span className="text-[10px] uppercase tracking-wide text-zinc-500">
-          {t('trainingStudio.audition.promptSource')}
-        </span>
+        <ParamLabel
+          label={t('trainingStudio.audition.promptSource')}
+          className="text-[10px] uppercase tracking-wide text-zinc-500"
+          info={t('trainingStudio.audition.promptSourceInfo')}
+        />
         <div className="flex items-center gap-1 p-0.5 rounded-lg bg-zinc-100 dark:bg-black/20 border border-zinc-200 dark:border-white/10 w-fit">
           {(['sample', 'text', 'lm', 'lyricstudio'] as PromptSource[]).map(s => (
             <button
@@ -455,20 +459,14 @@ export const AuditionCard: React.FC<AuditionCardProps> = ({ milestoneRequest }) 
               searchPlaceholder="Filter songs…"
             />
             {sampleId && (
-              <label className="flex items-center gap-2 text-[11px] text-zinc-600 dark:text-zinc-400">
-                <input
-                  type="checkbox"
-                  checked={!sampleLocked}
-                  onChange={(e) => setSampleLocked(!e.target.checked)}
-                  className="accent-amber-500"
-                />
-                {t('trainingStudio.audition.editSamplePrompt')}
-              </label>
-            )}
-            {sampleId && sampleLocked && (
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-500">
-                {t('trainingStudio.audition.trainerCaptionNote')}
-              </p>
+              <Toggle
+                size="sm"
+                accent="amber"
+                checked={!sampleLocked}
+                onChange={(v) => setSampleLocked(!v)}
+                label={t('trainingStudio.audition.editSamplePrompt')}
+                info={sampleLocked ? t('trainingStudio.audition.trainerCaptionNote') : undefined}
+              />
             )}
           </div>
         )}
@@ -529,9 +527,11 @@ export const AuditionCard: React.FC<AuditionCardProps> = ({ milestoneRequest }) 
         )}
 
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wide text-zinc-500">
-            {t('trainingStudio.audition.caption')}
-          </span>
+          <ParamLabel
+            label={t('trainingStudio.audition.caption')}
+            className="text-[10px] uppercase tracking-wide text-zinc-500"
+            info={t('trainingStudio.audition.captionInfo')}
+          />
           <textarea
             rows={2}
             value={caption}
@@ -545,9 +545,11 @@ export const AuditionCard: React.FC<AuditionCardProps> = ({ milestoneRequest }) 
 
         {source !== 'lm' && (
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-wide text-zinc-500">
-              {t('trainingStudio.audition.lyrics')}
-            </span>
+            <ParamLabel
+              label={t('trainingStudio.audition.lyrics')}
+              className="text-[10px] uppercase tracking-wide text-zinc-500"
+              info={t('trainingStudio.audition.lyricsInfo')}
+            />
             <textarea
               rows={5}
               value={lyrics}
@@ -563,18 +565,20 @@ export const AuditionCard: React.FC<AuditionCardProps> = ({ milestoneRequest }) 
       {/* ── Sides ────────────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wide text-zinc-500 flex-1">
-            {t('trainingStudio.audition.sides')}
-          </span>
-          <label className="flex items-center gap-1.5 text-[11px] text-zinc-600 dark:text-zinc-400">
-            <input
-              type="checkbox"
-              checked={twoSided}
-              onChange={(e) => setTwoSided(e.target.checked)}
-              className="accent-amber-500"
-            />
-            {t('trainingStudio.audition.twoSided')}
-          </label>
+          <ParamLabel
+            label={t('trainingStudio.audition.sides')}
+            className="text-[10px] uppercase tracking-wide text-zinc-500"
+            rootClassName="flex-1"
+            info={t('trainingStudio.audition.sidesInfo')}
+          />
+          <Toggle
+            size="sm"
+            accent="amber"
+            checked={twoSided}
+            onChange={setTwoSided}
+            label={t('trainingStudio.audition.twoSided')}
+            info={t('trainingStudio.audition.twoSidedInfo')}
+          />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -622,9 +626,12 @@ export const AuditionCard: React.FC<AuditionCardProps> = ({ milestoneRequest }) 
       {/* ── Controls ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wide text-zinc-500">
-            {t('trainingStudio.audition.seed')}
-          </span>
+          <ParamLabel
+            label={t('trainingStudio.audition.seed')}
+            className="text-[10px] uppercase tracking-wide text-zinc-500"
+            meta={t('trainingStudio.audition.seedMeta')}
+            info={t('trainingStudio.audition.seedInfo')}
+          />
           <div className="flex items-center gap-1">
             <input
               type="number"
@@ -645,9 +652,12 @@ export const AuditionCard: React.FC<AuditionCardProps> = ({ milestoneRequest }) 
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-wide text-zinc-500">
-            {t('trainingStudio.audition.duration')}
-          </span>
+          <ParamLabel
+            label={t('trainingStudio.audition.duration')}
+            className="text-[10px] uppercase tracking-wide text-zinc-500"
+            meta={t('trainingStudio.audition.durationMeta')}
+            info={t('trainingStudio.audition.durationInfo')}
+          />
           <input
             type="number"
             min={10}
@@ -665,20 +675,30 @@ export const AuditionCard: React.FC<AuditionCardProps> = ({ milestoneRequest }) 
         </summary>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-2">
           {([
-            ['temperature', temperature, setTemperature, 0.1, 2, 0.05],
-            ['topP', topP, setTopP, 0.05, 1, 0.05],
-            ['cfgScale', cfgScale, setCfgScale, 0, 10, 0.1],
-            ['repPenalty', repPenalty, setRepPenalty, 1, 1.5, 0.01],
-            ['adapterScale', adapterScale, setAdapterScale, 0, 2, 0.05],
-            ['baseScale', baseScale, setBaseScale, 0, 2, 0.05],
+            ['temperature', temperature, setTemperature, 0.1, 2, 0.05,
+              t('trainingStudio.audition.temperatureInfo')],
+            ['topP', topP, setTopP, 0.05, 1, 0.05,
+              t('trainingStudio.audition.topPInfo')],
+            ['cfgScale', cfgScale, setCfgScale, 0, 10, 0.1,
+              t('trainingStudio.audition.cfgScaleInfo')],
+            ['repPenalty', repPenalty, setRepPenalty, 1, 1.5, 0.01,
+              t('trainingStudio.audition.repPenaltyInfo')],
+            ['adapterScale', adapterScale, setAdapterScale, 0, 2, 0.05,
+              t('trainingStudio.audition.adapterScaleInfo')],
+            ['baseScale', baseScale, setBaseScale, 0, 2, 0.05,
+              t('trainingStudio.audition.baseScaleInfo')],
             // DiT render step count — only used when the render toggle is on.
-            ['renderSteps', renderSteps, setRenderSteps, 2, 60, 1],
-          ] as Array<[string, number, (v: number) => void, number, number, number]>).map(
-            ([key, val, setter, min, max, step]) => (
+            ['renderSteps', renderSteps, setRenderSteps, 2, 60, 1,
+              t('trainingStudio.audition.renderStepsInfo')],
+          ] as Array<[string, number, (v: number) => void, number, number, number, string]>).map(
+            ([key, val, setter, min, max, step, info]) => (
               <label key={key} className="flex flex-col gap-1">
-                <span className="text-[10px] uppercase tracking-wide text-zinc-500">
-                  {t(`trainingStudio.audition.${key}`)}
-                </span>
+                <ParamLabel
+                  label={t(`trainingStudio.audition.${key}`)}
+                  className="text-[10px] uppercase tracking-wide text-zinc-500"
+                  meta={t(`trainingStudio.audition.${key}Meta`)}
+                  info={info}
+                />
                 <input
                   type="number"
                   min={min}
@@ -697,45 +717,33 @@ export const AuditionCard: React.FC<AuditionCardProps> = ({ milestoneRequest }) 
 
       {/* ── Render-through-DiT opt-in ────────────────────────────────────── */}
       <div className="flex flex-col gap-2">
-        <label className="flex items-start gap-2.5 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={renderDit}
-            onChange={(e) => setRenderDit(e.target.checked)}
-            className="mt-0.5 accent-amber-500"
-          />
-          <span className="text-xs text-zinc-700 dark:text-zinc-300">
-            <span className="font-semibold">{t('trainingStudio.audition.renderDit')}</span>
-            <span className="block text-[11px] text-zinc-500 mt-0.5">
-              {t('trainingStudio.audition.renderDitHint')}
-            </span>
-          </span>
-        </label>
+        <Toggle
+          accent="amber"
+          checked={renderDit}
+          onChange={setRenderDit}
+          label={t('trainingStudio.audition.renderDit')}
+          info={t('trainingStudio.audition.renderDitHint')}
+        />
         {/* Hidden entirely (not disabled) when no DiT adapter is trained for
             this dataset — an option that can never work is noise. */}
         {renderDit && ditAdapterAvailable && (
-          <label className="flex items-start gap-2.5 cursor-pointer ml-6">
-            <input
-              type="checkbox"
+          <div className="ml-6 flex flex-col gap-0.5">
+            <Toggle
+              accent="amber"
               checked={renderDitAdapter}
-              onChange={(e) => setRenderDitAdapter(e.target.checked)}
-              className="mt-0.5 accent-emerald-500"
+              onChange={setRenderDitAdapter}
+              label={t('trainingStudio.audition.renderDitAdapter')}
+              info={t('trainingStudio.audition.renderDitAdapterHint')}
             />
-            <span className="text-xs text-zinc-700 dark:text-zinc-300">
-              <span className="font-semibold">{t('trainingStudio.audition.renderDitAdapter')}</span>
-              <span className="block text-[11px] text-zinc-500 mt-0.5">
-                {t('trainingStudio.audition.renderDitAdapterHint')}
+            {trainDitStatus?.adapterDir && (
+              <span
+                className="block text-[10px] font-mono text-zinc-500 ml-[52px] truncate max-w-[420px]"
+                title={trainDitStatus.adapterDir}
+              >
+                {trainDitStatus.adapterDir.replace(/[\\/]+$/, '').split(/[\\/]/).slice(-3).join('/')}
               </span>
-              {trainDitStatus?.adapterDir && (
-                <span
-                  className="block text-[10px] font-mono text-zinc-500 mt-0.5 truncate max-w-[420px]"
-                  title={trainDitStatus.adapterDir}
-                >
-                  {trainDitStatus.adapterDir.replace(/[\\/]+$/, '').split(/[\\/]/).slice(-3).join('/')}
-                </span>
-              )}
-            </span>
-          </label>
+            )}
+          </div>
         )}
       </div>
 

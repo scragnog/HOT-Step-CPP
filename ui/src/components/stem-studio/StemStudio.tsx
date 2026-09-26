@@ -24,6 +24,8 @@ import { SourceSelector } from './SourceSelector';
 import { TrackSelector } from './TrackSelector';
 import { RecentExtractions } from './RecentExtractions';
 import { Section } from '../shared/ActivitySidebar';
+import { StyledSelect } from '../shared/StyledSelect';
+import { ParamLabel } from '../shared/ParamLabel';
 import { InlineAudioQueue } from '../lyric-studio/InlineAudioQueue';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
@@ -282,7 +284,11 @@ export const StemStudio: React.FC = () => {
             <details>
               <summary className="text-xs text-zinc-500 cursor-pointer font-medium">{t('stem.optionalStyleLyrics')}</summary>
               <div className="flex flex-col gap-2 mt-2.5">
-                <label className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">{t('stem.styleHint')}</label>
+                <ParamLabel
+                  label={t('stem.styleHint')}
+                  info={t('stem.styleHintInfo', 'Optional free-text caption that steers the Extract render, e.g. genre, instrumentation, mood. Only used in Extract mode; SuperSep ignores it. Leave blank to let the model infer the style from the mix alone.')}
+                  className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider"
+                />
                 <input
                   type="text"
                   value={style}
@@ -290,7 +296,11 @@ export const StemStudio: React.FC = () => {
                   placeholder="e.g. indie rock, distorted guitar, raw vocals"
                   className="px-2.5 py-2 rounded-md border border-white/[0.08] bg-white/[0.04] text-zinc-700 dark:text-zinc-300 text-xs outline-none focus:border-purple-500/40 transition-colors"
                 />
-                <label className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">{t('stem.lyrics')}</label>
+                <ParamLabel
+                  label={t('stem.lyrics')}
+                  info={t('stem.lyricsInfo', 'Optional lyrics text pasted in to steer the Extract vocals track. Only applies when the vocals track is selected; feeding lyrics to other tracks pulls the lead vocal into that track instead. Leave blank if extracting without lyric guidance.')}
+                  className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider"
+                />
                 <textarea
                   value={lyrics}
                   onChange={e => setLyrics(e.target.value)}
@@ -315,17 +325,21 @@ export const StemStudio: React.FC = () => {
           {mode === 'extract' && baseModels.length > 0 && (
             <div style={styles.modelSelector}>
               <Info size={13} style={{ color: '#a78bfa', flexShrink: 0 }} />
-              <span style={styles.modelLabel}>{t('stem.extractModel')}</span>
-              <select
+              <ParamLabel
+                label={t('stem.extractModel')}
+                info={t('stem.extractModelInfo', 'DiT model used to regenerate the selected tracks. Only plain base checkpoints appear (acestep-v15-base-*, acestep-v15-xl-base-*); SFT, merged and turbo builds are filtered out because Extract needs a model that was never fine-tuned toward one sound.')}
+                className="text-[11px] font-semibold text-purple-400 uppercase tracking-wider whitespace-nowrap"
+                rootClassName="flex-shrink-0"
+              />
+              <StyledSelect
+                accent="purple"
                 value={extractModel}
-                onChange={e => setExtractModel(e.target.value)}
-                style={styles.modelSelect}
+                onChange={setExtractModel}
+                options={baseModels.map(m => ({ value: m, label: m.replace(/\.gguf$/i, '') }))}
                 disabled={isExtracting}
-              >
-                {baseModels.map(m => (
-                  <option key={m} value={m}>{m.replace(/\.gguf$/i, '')}</option>
-                ))}
-              </select>
+                className="flex-1"
+                size="sm"
+              />
             </div>
           )}
 
@@ -439,26 +453,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 8,
     background: 'rgba(167,139,250,0.06)',
     border: '1px solid rgba(167,139,250,0.15)',
-  },
-  modelLabel: {
-    fontSize: 11,
-    fontWeight: 600,
-    color: '#a78bfa',
-    textTransform: 'uppercase' as const,
-    letterSpacing: '0.04em',
-    whiteSpace: 'nowrap' as const,
-  },
-  modelSelect: {
-    flex: 1,
-    padding: '5px 10px',
-    borderRadius: 12,
-    border: '1px solid rgba(255,255,255,0.1)',
-    background: '#27272a',
-    color: '#d4d4d8',
-    fontSize: 12,
-    outline: 'none',
-    cursor: 'pointer',
-    transition: 'border-color 0.15s ease',
   },
   progressSection: {
     display: 'flex',

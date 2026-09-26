@@ -16,10 +16,11 @@ import React from 'react';
 import { RotateCcw, ChevronDown } from 'lucide-react';
 import { Slider } from '../shared/Slider';
 import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle, type ToggleAccent } from '../shared/Toggle';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import type { PluginParamSchema } from '../../types/pluginTypes';
 
-const selectClasses = "w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer";
 const inputClasses = "w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors";
 
 // Accent color mapping — plugins declare an accent name, we map to Tailwind
@@ -39,6 +40,15 @@ const accentMap: Record<string, { border: string; bg: string; text: string; hove
   violet:  { border: 'border-violet-500/20',  bg: 'bg-violet-500/5',  text: 'text-violet-400',  hover: 'hover:text-violet-300' },
 };
 const defaultAccent = accentMap.cyan;
+
+// StyledSelect/Toggle only know the app's 8-accent palette; plugins declare a
+// wider set of loose Tailwind color names (accentMap above), so map the odd
+// ones onto their nearest match instead of widening the shared components.
+const SHARED_ACCENT: Record<string, ToggleAccent> = {
+  amber: 'amber', cyan: 'cyan', teal: 'teal', emerald: 'emerald', purple: 'purple',
+  pink: 'pink', sky: 'sky', violet: 'violet',
+  blue: 'sky', green: 'emerald', indigo: 'violet', orange: 'amber', rose: 'pink',
+};
 
 interface PluginControlsProps {
   pluginName: string;
@@ -64,6 +74,7 @@ export const PluginControls: React.FC<PluginControlsProps> = ({
   if (!params || params.length === 0) return null;
 
   const a = (accent && accentMap[accent]) || defaultAccent;
+  const sharedAccent: ToggleAccent = (accent && SHARED_ACCENT[accent]) || 'pink';
 
   // Get value for a param, falling back to its declared default
   const getVal = (p: PluginParamSchema): string => {
@@ -133,15 +144,13 @@ export const PluginControls: React.FC<PluginControlsProps> = ({
                 return (
                   <div key={p.key}>
                     <ParamLabel label={p.label} info={p.hint} className={`text-[10px] ${a.text}`} rootClassName="flex mb-1" />
-                    <select
-                      className={selectClasses}
+                    <StyledSelect
+                      accent={sharedAccent}
                       value={val}
-                      onChange={e => onChange(fullKey, e.target.value)}
-                    >
-                      {(p.options || []).map(o => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
-                      ))}
-                    </select>
+                      onChange={v => onChange(fullKey, v)}
+                      options={(p.options || []).map(o => ({ value: o.value, label: o.label }))}
+                      className="w-full"
+                    />
                   </div>
                 );
 
@@ -149,17 +158,13 @@ export const PluginControls: React.FC<PluginControlsProps> = ({
                 return (
                   <div key={p.key} className="flex items-center justify-between">
                     <ParamLabel label={p.label} info={p.hint} className="text-xs text-zinc-400" />
-                    <button
-                      type="button"
-                      onClick={() => onChange(fullKey, val === 'true' ? 'false' : 'true')}
-                      className={`w-9 h-5 rounded-full transition-colors ${
-                        val === 'true' ? 'bg-pink-500' : 'bg-zinc-600'
-                      } relative`}
-                    >
-                      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
-                        val === 'true' ? 'left-[18px]' : 'left-0.5'
-                      }`} />
-                    </button>
+                    <Toggle
+                      size="sm"
+                      accent={sharedAccent}
+                      checked={val === 'true'}
+                      onChange={v => onChange(fullKey, v ? 'true' : 'false')}
+                      aria-label={p.label}
+                    />
                   </div>
                 );
 

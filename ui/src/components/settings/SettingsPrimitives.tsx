@@ -6,11 +6,17 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff, FolderOpen, ChevronRight } from 'lucide-react';
 import { Toggle as SharedToggle } from '../shared/Toggle';
+import { StyledSelect } from '../shared/StyledSelect';
+import { ParamLabel } from '../shared/ParamLabel';
+
+/** This file's own highlight colour — its one existing accent cue was the
+ *  select's emerald focus ring. Passed to every StyledSelect/Toggle here. */
+const ACCENT = 'emerald' as const;
 
 /** The shared Toggle (components/shared/Toggle.tsx); this name stays for the
  *  settings tabs. New code imports Toggle from shared. */
 export const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; id: string }> = ({ checked, onChange, id }) => (
-  <SharedToggle id={id} checked={checked} onChange={onChange} />
+  <SharedToggle id={id} checked={checked} onChange={onChange} accent={ACCENT} />
 );
 
 /** Single setting row */
@@ -25,14 +31,13 @@ export const SettingRow: React.FC<{
   <div className="setting-row">
     <div className="setting-info">
       <div className="setting-label">
-        {label}
+        <ParamLabel label={label} info={description} className="" />
         {badges?.map((b, i) => (
           <span key={i} className={`setting-badge setting-badge--${b.type}`}>
             {b.text}
           </span>
         ))}
       </div>
-      <div className="setting-description">{description}</div>
     </div>
     <Toggle checked={checked} onChange={onChange} id={id} />
   </div>
@@ -49,19 +54,16 @@ export const SelectRow: React.FC<{
 }> = ({ id, label, description, value, options, onChange }) => (
   <div className="setting-row">
     <div className="setting-info">
-      <div className="setting-label">{label}</div>
-      <div className="setting-description">{description}</div>
+      <ParamLabel label={label} info={description} className="setting-label" />
     </div>
-    <select
+    <StyledSelect
       id={id}
+      accent={ACCENT}
       value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="px-3 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20 outline-none cursor-pointer min-w-[100px]"
-    >
-      {options.map(o => (
-        <option key={o.value} value={o.value}>{o.label}</option>
-      ))}
-    </select>
+      onChange={(v) => onChange(String(v))}
+      options={options}
+      className="min-w-[100px]"
+    />
   </div>
 );
 
@@ -92,12 +94,11 @@ export const EnvTextRow: React.FC<{
   <div className="setting-row">
     <div className="setting-info">
       <div className="setting-label">
-        {label}
+        <ParamLabel label={label} info={description} className="" />
         {RESTART_KEYS.has(envKey) && (
           <span className="setting-badge setting-badge--restart">⚠️ Restart</span>
         )}
       </div>
-      <div className="setting-description">{description}</div>
     </div>
     <input
       id={`env-${envKey}`}
@@ -123,8 +124,7 @@ export const EnvPasswordRow: React.FC<{
   return (
     <div className="setting-row">
       <div className="setting-info">
-        <div className="setting-label">{label}</div>
-        <div className="setting-description">{description}</div>
+        <ParamLabel label={label} info={description} className="setting-label" />
       </div>
       <div className="env-password-wrapper">
         <input
@@ -161,12 +161,11 @@ export const EnvPathRow: React.FC<{
   <div className="setting-row">
     <div className="setting-info">
       <div className="setting-label">
-        {label}
+        <ParamLabel label={label} info={description} className="" />
         {RESTART_KEYS.has(envKey) && (
           <span className="setting-badge setting-badge--restart">⚠️ Restart</span>
         )}
       </div>
-      <div className="setting-description">{description}</div>
     </div>
     <div className="env-path-row">
       <input

@@ -39,6 +39,9 @@ import { VOCAL_LANGUAGES } from '../../constants/languages';
 import { useBackendStore } from '../../stores/backendStore';
 import { MM3_BACKEND_ID } from '../../utils/captionForBackend';
 import { CoverArtSubjectSection } from '../shared/CoverArtSubjectSection';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 
 type LyricMode = 'instrumental' | 'lyrics' | 'lyrics-ai';
 type Phase = 'input' | 'inspiring' | 'preview' | 'generating';
@@ -737,7 +740,10 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
         {/* ── Lyric Mode Selector (3-way segmented control) ── */}
         <div>
           <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5">
-            Vocal Mode
+            <ParamLabel
+              label="Vocal Mode"
+              info="How the song gets its lyrics. Instrumental: no lyrics at all. Lyrics: the built-in LM writes lyrics on its own, on a random topic. Lyrics + AI: an external LLM writes lyrics from a subject you give it, using the provider and model chosen below."
+            />
           </label>
           <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
             {([
@@ -783,7 +789,11 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
             >
               <span className="flex items-center gap-1.5">
                 <Code2 size={12} className="text-cyan-400" />
-                System Prompt
+                <ParamLabel
+                  label="System Prompt"
+                  info="The system prompt sent to the external LLM when it writes lyrics in Lyrics + AI mode. Save stores your edited version as a custom prompt used from then on; Reset discards it and restores the built-in default."
+                  className="text-xs font-medium text-zinc-500 dark:text-zinc-400"
+                />
                 {promptIsCustom && (
                   <span className="text-[9px] text-cyan-400 bg-cyan-400/10 px-1 rounded">custom</span>
                 )}
@@ -847,7 +857,11 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
         {lyricMode === 'lyrics-ai' && (
           <div>
             <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5">
-              Song Subject {!randomSubject && <span className="text-pink-500">*</span>}
+              <ParamLabel
+                label="Song Subject"
+                info="What the song is about, in your own words. The external LLM uses this to write the lyrics for Lyrics + AI mode. Required unless Random is on, which asks the LLM to invent a subject instead of using this field."
+              />
+              {!randomSubject && <span className="text-pink-500"> *</span>}
             </label>
             <div className="flex items-stretch gap-2">
               <input
@@ -881,38 +895,39 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5">
-                LLM Provider
+                <ParamLabel
+                  label="LLM Provider"
+                  info="Which configured external LLM writes the lyrics for Lyrics + AI mode. Only providers that responded successfully to a connectivity check appear here; add or fix credentials under Settings > AI Services > API Keys if none are available. Switching provider resets Model to that provider's default."
+                />
               </label>
-              <select
+              <StyledSelect
+                accent="pink"
                 value={selectedProvider}
-                onChange={(e) => {
-                  setSelectedProvider(e.target.value);
-                  const prov = providers.find(p => p.id === e.target.value);
+                onChange={(v) => {
+                  setSelectedProvider(v);
+                  const prov = providers.find(p => p.id === v);
                   if (prov) setSelectedModel(prov.default_model);
                 }}
-                className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer"
-              >
-                {providers.length === 0 && (
-                  <option value="">No providers available</option>
-                )}
-                {providers.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
+                options={providers.length === 0
+                  ? [{ value: '', label: 'No providers available', disabled: true }]
+                  : providers.map(p => ({ value: p.id, label: p.name }))}
+                className="w-full"
+              />
             </div>
             <div>
               <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5">
-                Model
+                <ParamLabel
+                  label="Model"
+                  info="Which model of the selected LLM Provider writes the lyrics. Different models vary in writing style and how closely they follow the subject; there is no single better choice, it depends on the provider and what the lyrics need."
+                />
               </label>
-              <select
+              <StyledSelect
+                accent="pink"
                 value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer"
-              >
-                {(currentProvider?.models || []).map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
+                onChange={setSelectedModel}
+                options={(currentProvider?.models || []).map(m => ({ value: m, label: m }))}
+                className="w-full"
+              />
             </div>
           </div>
         )}
@@ -920,7 +935,10 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
         {/* Additional caption */}
         <div>
           <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5">
-            {t('instaGen.captionAdditional')}
+            <ParamLabel
+              label={t('instaGen.captionAdditional')}
+              info={t('instaGen.captionAdditionalInfo')}
+            />
           </label>
           <input
             type="text"
@@ -935,17 +953,18 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
         {lyricMode !== 'instrumental' && (
           <div>
             <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5">
-              {t('instaGen.languageLabel')}
+              <ParamLabel
+                label={t('instaGen.languageLabel')}
+                info={t('instaGen.languageLabelInfo')}
+              />
             </label>
-            <select
+            <StyledSelect
+              accent="pink"
               value={vocalLanguage}
-              onChange={(e) => setVocalLanguage(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer"
-            >
-              {VOCAL_LANGUAGES.map(lang => (
-                <option key={lang.value} value={lang.value}>{lang.label}</option>
-              ))}
-            </select>
+              onChange={setVocalLanguage}
+              options={VOCAL_LANGUAGES.map(lang => ({ value: lang.value, label: lang.label }))}
+              className="w-full"
+            />
           </div>
         )}
 
@@ -953,7 +972,10 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
         {computedCaption && (
           <div>
             <label className="block text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-1.5">
-              {t('instaGen.captionLabel')}
+              <ParamLabel
+                label={t('instaGen.captionLabel')}
+                info={t('instaGen.captionLabelInfo')}
+              />
             </label>
             <div className="w-full rounded-xl border border-zinc-300 dark:border-white/10 bg-zinc-100 dark:bg-white/[0.03] px-3 py-2.5 text-sm text-zinc-700 dark:text-zinc-300 italic">
               {computedCaption}
@@ -965,55 +987,29 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
         <CoverArtSubjectSection />
 
         {/* Caption Rewrite toggle */}
-        <div className="flex items-center justify-between py-2">
-          <div className="flex items-center gap-2">
-            <PenLine size={14} className={thinking ? 'text-amber-400' : 'text-zinc-400'} />
-            <span className="text-sm text-zinc-700 dark:text-zinc-300">Caption Rewrite</span>
-            <span className="text-[10px] text-zinc-400 dark:text-zinc-500">(CoT)</span>
-          </div>
-          <button
-            onClick={() => setThinking(!thinking)}
-            className={`
-              relative w-10 h-5 rounded-full transition-colors duration-200
-              ${thinking ? 'bg-amber-500' : 'bg-zinc-300 dark:bg-zinc-600'}
-            `}
-          >
-            <div className={`
-              absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200
-              ${thinking ? 'translate-x-5' : 'translate-x-0.5'}
-            `} />
-          </button>
+        <div className="flex items-center gap-2 py-2">
+          <PenLine size={14} className={thinking ? 'text-amber-400' : 'text-zinc-400'} />
+          <Toggle
+            accent="pink"
+            checked={thinking}
+            onChange={setThinking}
+            label={t('instaGen.captionRewriteLabel')}
+            info={t('instaGen.captionRewriteInfo')}
+          />
         </div>
 
         {/* Preview toggle (hidden for instrumental) */}
         {lyricMode !== 'instrumental' && (
-          <>
-            <div className="flex items-center justify-between py-2">
-              <div className="flex items-center gap-2">
-                {previewEnabled ? <Eye size={14} className="text-violet-400" /> : <EyeOff size={14} className="text-zinc-400" />}
-                <span className="text-sm text-zinc-700 dark:text-zinc-300">
-                  {t('instaGen.previewToggle')}
-                </span>
-              </div>
-              <button
-                onClick={() => setPreviewEnabled(!previewEnabled)}
-                className={`
-                  relative w-10 h-5 rounded-full transition-colors duration-200
-                  ${previewEnabled ? 'bg-violet-500' : 'bg-zinc-300 dark:bg-zinc-600'}
-                `}
-              >
-                <div className={`
-                  absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200
-                  ${previewEnabled ? 'translate-x-5' : 'translate-x-0.5'}
-                `} />
-              </button>
-            </div>
-            {previewEnabled && (
-              <p className="text-xs text-zinc-400 dark:text-zinc-500 -mt-2">
-                {t('instaGen.previewToggleHint')}
-              </p>
-            )}
-          </>
+          <div className="flex items-center gap-2 py-2">
+            {previewEnabled ? <Eye size={14} className="text-violet-400" /> : <EyeOff size={14} className="text-zinc-400" />}
+            <Toggle
+              accent="pink"
+              checked={previewEnabled}
+              onChange={setPreviewEnabled}
+              label={t('instaGen.previewToggle')}
+              info={t('instaGen.previewToggleInfo')}
+            />
+          </div>
         )}
 
         {/* Error display */}

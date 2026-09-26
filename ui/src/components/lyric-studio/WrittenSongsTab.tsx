@@ -4,6 +4,8 @@ import { Trash2, Pencil, Music2, Wand2, Play, Loader2, ChevronDown, ChevronRight
 import { lireekApi, streamRefine, skipThinking } from '../../services/lireekApi';
 import type { Generation, Profile } from '../../services/lireekApi';
 import { StreamingPanel } from './StreamingPanel';
+import { StyledSelect } from '../shared/StyledSelect';
+import { ParamLabel } from '../shared/ParamLabel';
 import { useStreamingStore, startStreamGenerate } from '../../stores/streamingStore';
 import { useBackendStore } from '../../stores/backendStore';
 import { MM3_BACKEND_ID } from '../../utils/captionForBackend';
@@ -141,32 +143,40 @@ const Yue2CaptionField: React.FC<{
 
   return (
     <div className="px-3 py-2 rounded-lg bg-white/5 border border-zinc-200 dark:border-white/5">
-      <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">
-        Caption <span className="text-zinc-600 normal-case tracking-normal">— ACE-Step</span>
-      </label>
+      <ParamLabel
+        label={t('lyric.yue2CaptionLabel', 'Caption — ACE-Step')}
+        info={t('lyric.yue2CaptionLabelInfo', 'The caption box that ACE-Step and YuE2 both render from. Edit it directly, or on YuE2, with a source picker below, let a training-track caption take over instead.')}
+        className="text-[10px] text-zinc-500 uppercase tracking-wider"
+        rootClassName="block mb-1"
+      />
 
       {hasTracks && (
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider flex-shrink-0">
-            {t('lyric.yue2CaptionSource', 'Caption source')}{datasetName ? ` · ${datasetName}` : ''}
-          </span>
-          <select
+          <ParamLabel
+            label={t('lyric.yue2CaptionSource', 'Caption source') + (datasetName ? ` · ${datasetName}` : '')}
+            info={t('lyric.yue2CaptionSourceInfo', "Which caption text conditions a YuE2 render for this song. Automatic uses the training dataset track nearest this song's BPM; picking a named track pins that track's caption instead; Custom uses this song's own caption below, editable directly.")}
+            className="text-[10px] text-zinc-500 uppercase tracking-wider"
+            rootClassName="flex-shrink-0"
+          />
+          <StyledSelect
+            accent="pink"
             value={selectValue}
-            onChange={e => onSelect(e.target.value)}
-            className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-white/5 border border-zinc-300 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-cyan-500/50 transition-colors"
-          >
-            <option value="auto">
-              {t('lyric.yue2CaptionAuto', 'Automatic from dataset')}
-              {autoTrack ? ` (${t('lyric.yue2CaptionNearestTempo', 'nearest tempo')}: ${autoTrack.name})` : ''}
-            </option>
-            {tracks.map(track => (
-              <option key={track.name} value={`track:${track.name}`}>
-                {t('lyric.yue2CaptionTrack', 'Track')}: {track.name}
-                {yue2TrackBpm(track) ? ` · ${yue2TrackBpm(track)} BPM` : ''}
-              </option>
-            ))}
-            <option value="custom">{t('lyric.yue2CaptionCustom', "Custom (this song's own caption)")}</option>
-          </select>
+            onChange={onSelect}
+            options={[
+              {
+                value: 'auto',
+                label: t('lyric.yue2CaptionAuto', 'Automatic from dataset')
+                  + (autoTrack ? ` (${t('lyric.yue2CaptionNearestTempo', 'nearest tempo')}: ${autoTrack.name})` : ''),
+              },
+              ...tracks.map(track => ({
+                value: `track:${track.name}`,
+                label: `${t('lyric.yue2CaptionTrack', 'Track')}: ${track.name}`
+                  + (yue2TrackBpm(track) ? ` · ${yue2TrackBpm(track)} BPM` : ''),
+              })),
+              { value: 'custom', label: t('lyric.yue2CaptionCustom', "Custom (this song's own caption)") },
+            ]}
+            className="flex-1 min-w-0"
+          />
         </div>
       )}
 
@@ -226,32 +236,40 @@ const Mm3CaptionField: React.FC<{
 
   return (
     <div className="px-3 py-2 rounded-lg bg-white/5 border border-zinc-200 dark:border-white/5">
-      <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">
-        MM3 Caption <span className="text-zinc-600 normal-case tracking-normal">— MiniMax-Music3 Structured Caption</span>
-      </label>
+      <ParamLabel
+        label={t('lyric.mm3CaptionLabel', 'MM3 Caption — MiniMax-Music3 Structured Caption')}
+        info={t('lyric.mm3CaptionLabelInfo', "MiniMax-Music3's three-heading Structured Caption, a different text from the ACE-Step/YuE2 caption above and generated separately. MM3 lands off-genre when handed the other caption instead, so this box is what an MM3 render actually reads.")}
+        className="text-[10px] text-zinc-500 uppercase tracking-wider"
+        rootClassName="block mb-1"
+      />
 
       {mm3Mode && (
         hasTracks ? (
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wider flex-shrink-0">
-              {t('lyric.mm3CaptionSource', 'Caption source')}
-            </span>
-            <select
+            <ParamLabel
+              label={t('lyric.mm3CaptionSource', 'Caption source')}
+              info={t('lyric.mm3CaptionSourceInfo', "Which MM3 caption conditions this song's render. Automatic uses the training dataset track nearest this song's BPM; picking a named track pins that track's caption instead; Custom uses this song's own MM3 caption below, editable directly.")}
+              className="text-[10px] text-zinc-500 uppercase tracking-wider"
+              rootClassName="flex-shrink-0"
+            />
+            <StyledSelect
+              accent="pink"
               value={selectValue}
-              onChange={e => onSelect(e.target.value)}
-              className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-white/5 border border-zinc-300 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-cyan-500/50 transition-colors"
-            >
-              <option value="auto">
-                {t('lyric.mm3CaptionAuto', 'Automatic from dataset')}
-                {autoTrack ? ` (${t('lyric.mm3CaptionNearestTempo', 'nearest tempo')}: ${autoTrack.title})` : ''}
-              </option>
-              {tracks.map(track => (
-                <option key={track.title} value={`track:${track.title}`}>
-                  {t('lyric.mm3CaptionTrack', 'Track')}: {track.title}{track.bpm ? ` · ${track.bpm} BPM` : ''}
-                </option>
-              ))}
-              <option value="custom">{t('lyric.mm3CaptionCustom', "Custom (this song's own caption)")}</option>
-            </select>
+              onChange={onSelect}
+              options={[
+                {
+                  value: 'auto',
+                  label: t('lyric.mm3CaptionAuto', 'Automatic from dataset')
+                    + (autoTrack ? ` (${t('lyric.mm3CaptionNearestTempo', 'nearest tempo')}: ${autoTrack.title})` : ''),
+                },
+                ...tracks.map(track => ({
+                  value: `track:${track.title}`,
+                  label: `${t('lyric.mm3CaptionTrack', 'Track')}: ${track.title}` + (track.bpm ? ` · ${track.bpm} BPM` : ''),
+                })),
+                { value: 'custom', label: t('lyric.mm3CaptionCustom', "Custom (this song's own caption)") },
+              ]}
+              className="flex-1 min-w-0"
+            />
           </div>
         ) : (
           <p className="text-[10px] text-amber-400/70 mb-2">
@@ -293,9 +311,12 @@ const Mm3CaptionField: React.FC<{
  *  in Yue2CaptionField above). */
 const Yue2PlannerCaptionField: React.FC<{ gen: Generation; onSave: (value: string) => void }> = ({ gen, onSave }) => (
   <div className="px-3 py-2 rounded-lg bg-white/5 border border-zinc-200 dark:border-white/5">
-    <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">
-      YuE2 Caption <span className="text-zinc-600 normal-case tracking-normal">— one sentence: language → genre → vocal → instruments → mood → production → BPM. When present it is what a YuE2 render is prompted with.</span>
-    </label>
+    <ParamLabel
+      label="YuE2 Caption — one sentence: language → genre → vocal → instruments → mood → production → BPM"
+      info="YuE2's own one-sentence planner caption, in that fixed field order. When present it is what a YuE2 render is prompted with, taking priority over the ACE-Step caption's dataset-track source pick above. Blank falls back to a dataset-track caption instead."
+      className="text-[10px] text-zinc-500 uppercase tracking-wider"
+      rootClassName="block mb-1"
+    />
     <textarea
       key={`yue2-${gen.id}`}
       className="w-full bg-transparent text-xs font-mono text-zinc-700 dark:text-zinc-300 focus:outline-none border-b border-transparent hover:border-white/20 focus:border-cyan-500/50 transition-colors resize-y"
@@ -523,16 +544,18 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
           {t('lyric.generateNoThink')}
         </button>
         <div className="flex items-center gap-2">
-          <label className="text-xs text-zinc-500">{t('lyric.count')}</label>
-          <select
+          <ParamLabel
+            label={t('lyric.count')}
+            info={t('lyric.countInfo', 'How many new songs Generate Lyrics writes in a row from the same profile. Each one still uses past generations for this artist to avoid repeating subjects, keys, titles, BPMs and durations, so a higher count gives more takes to pick between rather than more repetition.')}
+            className="text-xs text-zinc-500"
+          />
+          <StyledSelect
+            accent="pink"
             value={genCount}
-            onChange={(e) => setGenCount(parseInt(e.target.value))}
-            className="px-2 py-1.5 rounded-lg bg-white/5 border border-zinc-300 dark:border-white/10 text-sm text-white focus:outline-none focus:border-emerald-500/50"
-          >
-            {[1, 2, 3, 4, 5, 8, 10].map(n => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
+            onChange={setGenCount}
+            options={[1, 2, 3, 4, 5, 8, 10].map(n => ({ value: n, label: String(n) }))}
+            className="w-16"
+          />
         </div>
         {profiles.length === 0 && (
           <span className="text-xs text-amber-400/60">{t('lyric.buildProfileFirst')}</span>
@@ -681,7 +704,12 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
                       {/* Metadata grid */}
                       <div className="grid grid-cols-2 gap-3">
                         <div className="px-3 py-2 rounded-lg bg-white/5 border border-zinc-200 dark:border-white/5">
-                          <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Subject</label>
+                          <ParamLabel
+                            label="Subject"
+                            info="What the song is about. Generate Lyrics fills this in from the profile and the optional subject field above; edit it here to correct or retitle the topic after the fact."
+                            className="text-[10px] text-zinc-500 uppercase tracking-wider"
+                            rootClassName="block mb-1"
+                          />
                           <input
                             className="w-full bg-transparent text-sm text-amber-300 focus:outline-none border-b border-transparent hover:border-white/20 focus:border-amber-500/50 transition-colors"
                             defaultValue={gen.subject || ''}
@@ -689,7 +717,12 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
                           />
                         </div>
                         <div className="px-3 py-2 rounded-lg bg-white/5 border border-zinc-200 dark:border-white/5">
-                          <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">BPM</label>
+                          <ParamLabel
+                            label="BPM"
+                            info="The song's tempo in beats per minute. Generation and refinement avoid repeating past BPMs for this artist; on YuE2 and MM3 it also picks which dataset track a caption source-picker offers as 'nearest tempo'. Edit it to correct a wrong guess or to steer that nearest-tempo pick."
+                            className="text-[10px] text-zinc-500 uppercase tracking-wider"
+                            rootClassName="block mb-1"
+                          />
                           <input
                             type="number"
                             className="w-full bg-transparent text-sm text-pink-300 focus:outline-none border-b border-transparent hover:border-white/20 focus:border-pink-500/50 transition-colors"
@@ -698,7 +731,12 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
                           />
                         </div>
                         <div className="px-3 py-2 rounded-lg bg-white/5 border border-zinc-200 dark:border-white/5">
-                          <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Key</label>
+                          <ParamLabel
+                            label="Key"
+                            info="The song's musical key. Generation and refinement avoid repeating past keys for this artist. It is free text (edit it if the model's guess is wrong) and carries through to Send to Custom-Gen."
+                            className="text-[10px] text-zinc-500 uppercase tracking-wider"
+                            rootClassName="block mb-1"
+                          />
                           <input
                             className="w-full bg-transparent text-sm text-blue-300 focus:outline-none border-b border-transparent hover:border-white/20 focus:border-blue-500/50 transition-colors"
                             defaultValue={gen.key || ''}
@@ -706,7 +744,12 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
                           />
                         </div>
                         <div className="px-3 py-2 rounded-lg bg-white/5 border border-zinc-200 dark:border-white/5">
-                          <label className="text-[10px] text-zinc-500 uppercase tracking-wider block mb-1">Duration (seconds)</label>
+                          <ParamLabel
+                            label="Duration (seconds)"
+                            info="How long the rendered audio should run. Generation and refinement avoid repeating past durations for this artist; a wrong or estimated value here is what Generate Audio and Send to Custom-Gen use as the target length, so edit it before rendering if it looks off."
+                            className="text-[10px] text-zinc-500 uppercase tracking-wider"
+                            rootClassName="block mb-1"
+                          />
                           <input
                             type="number"
                             className="w-full bg-transparent text-sm text-purple-300 focus:outline-none border-b border-transparent hover:border-white/20 focus:border-purple-500/50 transition-colors"

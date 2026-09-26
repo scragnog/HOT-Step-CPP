@@ -24,6 +24,8 @@ import { useTranslation } from 'react-i18next';
 
 import { listMm3Runs, type Mm3RunSummary } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '../shared/StyledSelect';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
@@ -248,9 +250,16 @@ export const Mm3RunsPanel: React.FC<{ datasetId: string }> = ({ datasetId }) => 
                   )}
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                     <label className="flex flex-col gap-1">
-                      <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
-                        {t('trainingStudio.mm3.runsAddSteps', 'Train this many more')}
-                      </span>
+                      <ParamLabel
+                        className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+                        label={t('trainingStudio.mm3.runsAddSteps', 'Train this many more')}
+                        meta={t('trainingStudio.mm3.runsAddStepsMeta', 'default 250 · step 50 · min 1')}
+                        info={t('trainingStudio.mm3.runsAddStepsInfo',
+                          'How many further steps to run past where this run stopped, on top of the '
+                          + 'step it already reached. Raising it trains longer before the run stops '
+                          + 'again; lowering it stops sooner, sacrificing convergence for a quicker '
+                          + 'checkpoint.')}
+                      />
                       <input type="number" className={INPUT} step={50} min={1}
                         value={addSteps}
                         onChange={e => setAddSteps(Math.max(1, Number(e.target.value)))} />
@@ -260,31 +269,43 @@ export const Mm3RunsPanel: React.FC<{ datasetId: string }> = ({ datasetId }) => 
                       </span>
                     </label>
                     <label className="flex flex-col gap-1">
-                      <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
-                        {t('trainingStudio.mm3.runsStopMode', 'Stop on')}
-                      </span>
-                      <select className={INPUT} value={mode}
-                        onChange={e => setMode(e.target.value as 'steps' | 'loss')}>
-                        <option value="steps">
-                          {t('trainingStudio.mm3.stopSteps', 'Step count')}
-                        </option>
-                        <option value="loss">
-                          {t('trainingStudio.mm3.stopLoss', 'Target loss')}
-                        </option>
-                      </select>
+                      <ParamLabel
+                        className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+                        label={t('trainingStudio.mm3.runsStopMode', 'Stop on')}
+                        info={t('trainingStudio.mm3.runsStopModeInfo',
+                          'Whether the continued run stops once it has trained the step count above, '
+                          + 'or once its held-out loss reaches a target you set below. Step count gives '
+                          + 'a fixed, predictable run length; target loss keeps training until the '
+                          + 'quality bar is met, with the step count above only as the upper cap so it '
+                          + 'cannot run forever.')}
+                      />
+                      <StyledSelect
+                        accent="amber"
+                        value={mode}
+                        onChange={setMode}
+                        options={[
+                          { value: 'steps', label: t('trainingStudio.mm3.stopSteps', 'Step count') },
+                          { value: 'loss', label: t('trainingStudio.mm3.stopLoss', 'Target loss') },
+                        ]}
+                        className="w-full"
+                      />
                     </label>
                     {mode === 'loss' && (
                       <label className="flex flex-col gap-1">
-                        <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
-                          {t('trainingStudio.mm3.runsTargetLoss', 'Target loss')}
-                        </span>
+                        <ParamLabel
+                          className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+                          label={t('trainingStudio.mm3.runsTargetLoss', 'Target loss')}
+                          meta={t('trainingStudio.mm3.runsTargetLossMeta', 'default 0.4 · step 0.05 · min 0')}
+                          info={t('trainingStudio.mm3.runsTargetLossInfo',
+                            'The held-out loss value the run stops at, once "Stop on" is set to target '
+                            + 'loss. The step count above becomes the cap it cannot exceed rather than '
+                            + 'the exact stopping point — the run stops at whichever comes first, the '
+                            + 'target loss or that cap. Lower is a harder target and can take much '
+                            + 'longer to reach.')}
+                        />
                         <input type="number" className={INPUT} step={0.05} min={0}
                           value={targetLoss}
                           onChange={e => setTargetLoss(Math.max(0, Number(e.target.value)))} />
-                        <span className="text-[10px] text-zinc-500">
-                          {t('trainingStudio.mm3.runsTargetHint',
-                            'The step count above becomes the cap')}
-                        </span>
                       </label>
                     )}
                   </div>

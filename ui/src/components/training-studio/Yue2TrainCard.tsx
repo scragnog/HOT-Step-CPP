@@ -45,6 +45,9 @@ import { useTrainingStore } from '../../stores/trainingStore';
 import { formatDurationMs } from '../../utils/trainingEta';
 import { JobProgress } from './JobProgress';
 import { TrainingChart } from './TrainingChart';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
@@ -58,10 +61,15 @@ const BTN_GO = 'px-4 py-2 rounded-lg text-sm font-semibold bg-amber-500 text-bla
 
 const NumField: React.FC<{
   label: string; value: number; onChange: (v: number) => void; step?: number; hint?: string;
-  disabled?: boolean;
-}> = ({ label, value, onChange, step = 1, hint, disabled }) => (
+  info?: string; meta?: string; disabled?: boolean;
+}> = ({ label, value, onChange, step = 1, hint, info, meta, disabled }) => (
   <label className={`flex flex-col gap-1${disabled ? ' opacity-50' : ''}`}>
-    <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">{label}</span>
+    <ParamLabel
+      label={label}
+      info={info}
+      meta={meta}
+      className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+    />
     <input
       type="number" className={INPUT} value={value} step={step} disabled={disabled}
       onChange={e => onChange(Number(e.target.value))}
@@ -244,21 +252,43 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <NumField label={t('trainingStudio.yue2.clipSeconds', 'Clip length (s)')}
               value={form.clipSeconds} onChange={v => set('clipSeconds', v)}
-              hint={t('trainingStudio.yue2.clipSecondsHint',
-                '10 s = 250 frames, which is what every measured run used. The trainer takes the '
-                + 'length from this cache, so changing it re-cuts the manifest.') as string} />
+              meta={t('trainingStudio.yue2.clipSecondsMeta', 'default 10 s') as string}
+              info={t('trainingStudio.yue2.clipSecondsInfo',
+                'How many seconds of audio each training clip covers once cut from the cache. The trainer '
+                + 'takes the clip length from this cache, so changing it here rewrites the manifest next '
+                + 'time you encode. At 25 frames per second, 10 s is 250 frames, which is what every '
+                + 'measured run used. Raising it gives the model more context per clip at the cost of '
+                + 'slower encoding and training; lowering it is cheaper but each clip carries less.') as string} />
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                {t('trainingStudio.yue2.captionMode', 'Clip captions')}
-              </span>
-              <select className={INPUT} value={form.captionMode}
-                onChange={e => set('captionMode', e.target.value as Yue2CaptionMode)}>
-                <option value="ace">{t('trainingStudio.yue2.captionAce', 'Read the sidecars: caption and lyrics')}</option>
-                <option value="yue2">{t('trainingStudio.yue2.captionYue2', 'Sidecar lyrics, with the one-sentence YuE2 caption (.yue2.txt) as the style')}</option>
-                <option value="none">{t('trainingStudio.yue2.captionNone', 'Nothing: the trigger word is the whole style')}</option>
-                <option value="default">{t('trainingStudio.yue2.captionDefault', 'One caption I type here, on every clip')}</option>
-                <option value="txt">{t('trainingStudio.yue2.captionTxt', 'The raw sidecar file, field names and all')}</option>
-              </select>
+              <ParamLabel
+                label={t('trainingStudio.yue2.captionMode', 'Clip captions')}
+                className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                info={t('trainingStudio.yue2.captionModeInfo',
+                  'What text the trainer uses as the style prompt on each clip. The sidecar modes ("Read '
+                  + 'the sidecars" and the YuE2-caption one) are the only ones that also carry the lyrics '
+                  + 'through, which the cursor-span stage and the AR half both need — anything else and '
+                  + 'those stages skip every track. "Nothing" leaves only the trigger word as the style, '
+                  + '"One caption I type here" repeats the same sentence on every clip, and "The raw '
+                  + 'sidecar file" feeds the whole ACE sidecar in verbatim, field names included.') as string}
+              />
+              <StyledSelect
+                accent="amber"
+                value={form.captionMode}
+                onChange={v => set('captionMode', v)}
+                className="w-full"
+                options={[
+                  { value: 'ace', label: t('trainingStudio.yue2.captionAce', 'Read the sidecars: caption and lyrics') as string,
+                    hint: t('trainingStudio.yue2.captionAceHintShort', 'Carries the caption and lyrics through; the only mode besides yue2 the later stages can use.') as string },
+                  { value: 'yue2', label: t('trainingStudio.yue2.captionYue2', 'Sidecar lyrics, with the one-sentence YuE2 caption (.yue2.txt) as the style') as string,
+                    hint: t('trainingStudio.yue2.captionYue2HintShort', 'Default. Same lyrics as the sidecar mode, but the style sentence is the planner caption.') as string },
+                  { value: 'none', label: t('trainingStudio.yue2.captionNone', 'Nothing: the trigger word is the whole style') as string,
+                    hint: t('trainingStudio.yue2.captionNoneHintShort', 'NAR-only: later stages skip every track without lyrics.') as string },
+                  { value: 'default', label: t('trainingStudio.yue2.captionDefault', 'One caption I type here, on every clip') as string,
+                    hint: t('trainingStudio.yue2.captionDefaultHintShort', 'The same style text on every clip, trigger word in front.') as string },
+                  { value: 'txt', label: t('trainingStudio.yue2.captionTxt', 'The raw sidecar file, field names and all') as string,
+                    hint: t('trainingStudio.yue2.captionTxtHintShort', 'The ACE sidecar fed in raw and whole, "caption:"/"genre:" syntax included.') as string },
+                ]}
+              />
               {/* `yue2` reads the same sidecar as `ace` — it only swaps the style
                   sentence for the planner one — so both are the healthy answer
                   here, and neither throws the lyrics away. */}
@@ -295,78 +325,59 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
                     { n: status.sidecarsWithYue2, mode: cache.captionMode || 'none' })}
                 </span>
               )}
-              <span className="text-[10px] text-zinc-500 leading-snug">
-                {form.captionMode === 'yue2'
-                  ? t('trainingStudio.yue2.captionYue2Hint',
-                      'The default, and `ace` plus one thing: the style is the one-sentence planner '
-                      + 'caption from .yue2.txt where the labeling pass wrote one, and the ACE caption '
-                      + 'where it did not. Lyrics come from the same sidecar either way, so the cursor '
-                      + 'stage and the AR half get everything they need. Training on the planner\'s own '
-                      + 'sentence order makes the prompt Lyric Studio writes for a new song the same shape.')
-                  : form.captionMode === 'ace'
-                  ? t('trainingStudio.yue2.captionAceHint',
-                      'Reads the .txt beside each track as the fielded sidecar it is, and carries the '
-                      + 'caption and the lyric sheet into the cache separately. This is the only mode the '
-                      + 'later stages can use: cursor spans align against those lyrics, and the AR half '
-                      + 'trains on that caption as its prefix. Only this and the YuE2 mode feed them; '
-                      + 'anything else and both skip every track.')
-                  : form.captionMode === 'txt'
-                  ? t('trainingStudio.yue2.captionTxtHint',
-                      'There is no YuE2 caption sidecar. The .txt beside each track is the ACE one — '
-                      + '"caption:", "genre:", then the lyrics — and it is fed in RAW AND WHOLE as the '
-                      + 'style prompt, field syntax included.')
-                  : form.captionMode === 'default'
-                    ? t('trainingStudio.yue2.captionDefaultHint',
-                        'The same style text on every clip, with the trigger word in front of it.')
-                    : t('trainingStudio.yue2.captionNoneHint',
-                        'The style is the trigger word alone, which is exactly how the adapter is '
-                        + 'addressed at generation time. NAR-only runs: the later stages skip every '
-                        + 'track without lyrics.')}
-              </span>
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                {t('trainingStudio.yue2.decode', 'Decoder')}
-              </span>
-              <select className={INPUT} value={form.decode}
-                onChange={e => set('decode', e.target.value as 'auto' | 'ffmpeg')}>
-                <option value="auto">auto</option>
-                <option value="ffmpeg" disabled={!status.ffmpeg}>ffmpeg</option>
-              </select>
-              <span className="text-[10px] text-zinc-500 leading-snug">
-                {status.ffmpeg
-                  ? t('trainingStudio.yue2.decodeHint',
-                      'auto = the built-in WAV/MP3 decoder, ffmpeg for everything else. Forcing ffmpeg '
-                      + 'puts one resampler across a mixed corpus.')
-                  : t('trainingStudio.yue2.decodeNoFfmpeg',
-                      'No ffmpeg in this install, so only WAV and MP3 can be decoded.')}
-              </span>
+              <ParamLabel
+                label={t('trainingStudio.yue2.decode', 'Decoder')}
+                className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                info={status.ffmpeg
+                  ? t('trainingStudio.yue2.decodeInfo',
+                      'Which decoder reads the source audio before encoding. auto uses the built-in '
+                      + 'WAV/MP3 decoder and falls back to ffmpeg for everything else; forcing ffmpeg puts '
+                      + 'one resampler across the whole corpus instead of mixing two.') as string
+                  : t('trainingStudio.yue2.decodeNoFfmpegInfo',
+                      'Which decoder reads the source audio before encoding. No ffmpeg in this install, '
+                      + 'so only WAV and MP3 can be decoded either way.') as string}
+              />
+              <StyledSelect
+                accent="amber"
+                value={form.decode}
+                onChange={v => set('decode', v)}
+                className="w-full"
+                options={[
+                  { value: 'auto', label: 'auto' },
+                  { value: 'ffmpeg', label: 'ffmpeg', disabled: !status.ffmpeg },
+                ]}
+              />
             </label>
           </div>
 
           {form.captionMode === 'default' && (
             <label className="flex flex-col gap-1 mt-3">
-              <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                {t('trainingStudio.yue2.defaultCaption', 'Caption for every clip')}
-              </span>
+              <ParamLabel
+                label={t('trainingStudio.yue2.defaultCaption', 'Caption for every clip')}
+                className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                info={t('trainingStudio.yue2.defaultCaptionInfo',
+                  'The exact text used as the style prompt on every training clip, with the trigger word '
+                  + 'placed in front of it. There is no per-track variation in this mode.') as string}
+              />
               <input className={INPUT} value={form.defaultCaption}
                 onChange={e => set('defaultCaption', e.target.value)} />
             </label>
           )}
 
           {form.captionMode === 'txt' && (
-            <label className="flex items-start gap-2 mt-3 text-[11px] text-zinc-600 dark:text-zinc-300">
-              <input type="checkbox" className="mt-0.5" checked={form.acknowledgeSidecarFormat}
-                onChange={e => set('acknowledgeSidecarFormat', e.target.checked)} />
-              <span>
-                {t('trainingStudio.yue2.ackSidecar', 'Train on the ACE sidecars as they are')}
-                <span className="block text-[10px] text-zinc-500">
-                  {t('trainingStudio.yue2.ackSidecarHint',
-                    'The run is refused without this. Tick it only if training the style encoder on '
-                    + '"caption:"/"genre:" field syntax and full lyrics is what you meant.')}
-                </span>
-              </span>
-            </label>
+            <div className="mt-3">
+              <Toggle
+                accent="amber"
+                checked={form.acknowledgeSidecarFormat}
+                onChange={v => set('acknowledgeSidecarFormat', v)}
+                label={t('trainingStudio.yue2.ackSidecar', 'Train on the ACE sidecars as they are')}
+                info={t('trainingStudio.yue2.ackSidecarHint',
+                  'The run is refused without this. Tick it only if training the style encoder on '
+                  + '"caption:"/"genre:" field syntax and full lyrics is what you meant.') as string}
+              />
+            </div>
           )}
 
           <button
@@ -380,37 +391,44 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
           {advanced && (
             <div className="mt-3 pl-3 border-l-2 border-zinc-200 dark:border-white/10 grid grid-cols-2 md:grid-cols-4 gap-3">
               <NumField label={t('trainingStudio.yue2.tileFrames', 'Encoder tile (frames)')}
-                value={form.tileFrames} onChange={v => set('tileFrames', v)} step={50} />
+                value={form.tileFrames} onChange={v => set('tileFrames', v)} step={50}
+                info={t('trainingStudio.yue2.tileFramesInfo',
+                  'How many frames of audio the VAE encoder processes in one pass while cutting the cache.') as string} />
               <NumField label={t('trainingStudio.yue2.haloFrames', 'Tile halo (frames)')}
                 value={form.haloFrames} onChange={v => set('haloFrames', v)}
-                hint={t('trainingStudio.yue2.haloHint',
-                  'The floor is the encoder\'s own receptive field; the engine refuses less.') as string} />
+                info={t('trainingStudio.yue2.haloHint',
+                  'Extra frames of context added to each side of an encoder tile so neighbouring tiles '
+                  + 'blend without a seam. The floor is the encoder\'s own receptive field; the engine '
+                  + 'refuses anything less.') as string} />
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                  {t('trainingStudio.yue2.only', 'Name filter')}
-                </span>
+                <ParamLabel
+                  label={t('trainingStudio.yue2.only', 'Name filter')}
+                  className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                  info={t('trainingStudio.yue2.onlyHint',
+                    'Only encodes files whose name contains this text, case-insensitive. Blank encodes '
+                    + 'every file the scan finds.') as string}
+                />
                 <input className={INPUT} value={form.only} onChange={e => set('only', e.target.value)} />
-                <span className="text-[10px] text-zinc-500">
-                  {t('trainingStudio.yue2.onlyHint', 'Case-insensitive. Blank = every file.')}
-                </span>
               </label>
               <NumField label={t('trainingStudio.yue2.limit', 'File limit')}
                 value={form.limit} onChange={v => set('limit', v)}
-                hint={t('trainingStudio.yue2.limitHint', '0 = no limit') as string} />
-              <label className="flex items-start gap-2 text-[11px] text-zinc-600 dark:text-zinc-300 col-span-2">
-                <input type="checkbox" className="mt-0.5" checked={form.force || reCut}
+                meta={t('trainingStudio.yue2.limitMeta', '0 = no limit') as string}
+                info={t('trainingStudio.yue2.limitInfo',
+                  'Caps how many files this run encodes, useful for a quick test before committing to the '
+                  + 'whole dataset. 0 encodes every scanned file.') as string} />
+              <div className="col-span-2">
+                <Toggle
+                  accent="amber"
+                  checked={form.force || reCut}
                   disabled={reCut}
-                  onChange={e => set('force', e.target.checked)} />
-                <span>
-                  {t('trainingStudio.yue2.force', 'Rewrite the manifest')}
-                  <span className="block text-[10px] text-zinc-500">
-                    {t('trainingStudio.yue2.forceHint',
-                      'On by default: re-running rewrites the manifest with the caption mode chosen above '
-                      + '(otherwise an old cut keeps its old captions) and re-cuts at the clip length. '
-                      + 'Cached latents are clip-length independent, so this costs no GPU time.')}
-                  </span>
-                </span>
-              </label>
+                  onChange={v => set('force', v)}
+                  label={t('trainingStudio.yue2.force', 'Rewrite the manifest')}
+                  info={t('trainingStudio.yue2.forceHint',
+                    'On by default: re-running rewrites the manifest with the caption mode chosen above '
+                    + '(otherwise an old cut keeps its old captions) and re-cuts at the clip length. '
+                    + 'Cached latents are clip-length independent, so this costs no GPU time.') as string}
+                />
+              </div>
             </div>
           )}
 
@@ -846,73 +864,89 @@ export const Yue2NarTrainCard: React.FC<{
             )}
 
             <label className="flex flex-col gap-1 mb-3">
-              <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                {t('trainingStudio.yue2.trigger', 'Trigger word')}
-              </span>
+              <ParamLabel
+                label={t('trainingStudio.yue2.trigger', 'Trigger word')}
+                className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                info={t('trainingStudio.yue2.triggerInfo',
+                  'Put in front of every training caption, and the only handle the trained style has at '
+                  + 'generation time. Required: without one the adapter has no word to address it by, and '
+                  + 'the run is refused rather than warned about twelve minutes in.') as string}
+              />
               <input className={INPUT} value={form.trigger}
                 onChange={e => set('trigger', e.target.value)} />
-              <span className="text-[10px] text-zinc-500 leading-snug">
-                {form.trigger.trim()
-                  ? t('trainingStudio.yue2.triggerHint',
-                      'Put in front of every training caption, and the only handle the trained style '
-                      + 'has at generation time.')
-                  : t('trainingStudio.yue2.triggerMissing',
-                      'Required. Without one the adapter has no word to address it by, and the run is '
-                      + 'refused rather than warned about twelve minutes in.')}
-              </span>
             </label>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <NumField label={t('trainingStudio.yue2.steps', 'Steps')} value={form.steps}
                 onChange={v => set('steps', v)} step={1000}
-                hint={formatDurationMs(form.steps * status.vramModel.secondsPerStep * 1000)} />
+                hint={formatDurationMs(form.steps * status.vramModel.secondsPerStep * 1000)}
+                info={t('trainingStudio.yue2.stepsInfo',
+                  'How many training steps to run. Step count is the only lever measured for this trainer, '
+                  + 'so it is the only thing the Recipe presets move. More steps mean more training time '
+                  + 'and, past a point, a risk of overcooking the adapter; fewer steps finish faster but '
+                  + 'may undertrain.') as string} />
               <NumField label={t('trainingStudio.yue2.rank', 'Rank')} value={form.rank}
                 onChange={v => set('rank', v)} step={64}
-                hint={t('trainingStudio.yue2.rankHint',
-                  '256 is what was measured. 128 saves about 2.6 GB; the ladder between them, and '
-                  + 'upstream\'s 16, have not been heard here.') as string} />
+                info={t('trainingStudio.yue2.rankHint',
+                  'How much capacity the LoRA has. 256 is what was measured; 128 saves about 2.6 GB of '
+                  + 'VRAM at the cost of some capacity, and the ladder between them, plus upstream\'s '
+                  + 'default of 16, have not been heard here. Higher rank can capture more detail but '
+                  + 'costs more VRAM and a larger adapter file.') as string} />
               <NumField label={t('trainingStudio.yue2.saveEvery', 'Snapshot every')}
                 value={form.saveEvery} onChange={v => set('saveEvery', v)} step={500}
-                hint={t('trainingStudio.yue2.saveEveryHint',
-                  'Rungs on the ladder — and where a killed run comes back from.') as string} />
+                info={t('trainingStudio.yue2.saveEveryHint',
+                  'How often, in steps, a checkpoint snapshot is written to disk. These are the rungs on '
+                  + 'the ladder — and where a killed run comes back from. Lower means more frequent '
+                  + 'snapshots to pick from, at the cost of more disk writes.') as string} />
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                  {t('trainingStudio.yue2.target', 'Trained sites')}
-                </span>
-                <select className={INPUT} value={form.target}
-                  onChange={e => set('target', e.target.value as Yue2NarTarget)}>
-                  <option value="nar_attn">nar_attn</option>
-                  <option value="nar_attn_mlp">nar_attn_mlp</option>
-                  <option value="nar_attn_mlp_proj">nar_attn_mlp_proj</option>
-                </select>
-                <span className="text-[10px] text-zinc-500 leading-snug">
-                  {t('trainingStudio.yue2.targetHint',
-                    '{{n}} exported tensors. nar_attn_mlp is attention plus the FFN on all 28 NAR '
-                    + 'blocks — 196 sites — and is what the measured runs used.', { n: tensors })}
-                </span>
+                <ParamLabel
+                  label={t('trainingStudio.yue2.target', 'Trained sites')}
+                  className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                  meta={t('trainingStudio.yue2.targetMeta', '{{n}} exported tensors', { n: tensors }) as string}
+                  info={t('trainingStudio.yue2.targetHint',
+                    'Which weights inside the NAR half the LoRA touches. nar_attn trains only attention; '
+                    + 'nar_attn_mlp adds the feed-forward layers on all 28 NAR blocks — 196 sites — and is '
+                    + 'what the measured runs used; nar_attn_mlp_proj adds the projection layers on top of '
+                    + 'that. Training more sites gives the adapter more places to change the sound, at the '
+                    + 'cost of a larger file and more VRAM.') as string}
+                />
+                <StyledSelect
+                  accent="amber"
+                  value={form.target}
+                  onChange={v => set('target', v)}
+                  className="w-full"
+                  options={[
+                    { value: 'nar_attn', label: 'nar_attn', hint: t('trainingStudio.yue2.targetAttnHint', 'Attention only.') as string },
+                    { value: 'nar_attn_mlp', label: 'nar_attn_mlp', hint: t('trainingStudio.yue2.targetAttnMlpHint', 'Attention plus the FFN on all 28 NAR blocks — what the measured runs used.') as string },
+                    { value: 'nar_attn_mlp_proj', label: 'nar_attn_mlp_proj', hint: t('trainingStudio.yue2.targetAttnMlpProjHint', 'nar_attn_mlp plus the projection layers.') as string },
+                  ]}
+                />
               </label>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                  {t('trainingStudio.yue2.base', 'Base model')}
-                </span>
-                <select className={INPUT} value={form.lmType}
-                  onChange={e => set('lmType', e.target.value)}>
-                  {status.bases.map(b => (
-                    <option key={b.id} value={b.id}>
-                      {b.id}{b.proven ? ` — ${t('trainingStudio.yue2.baseProven', 'measured')}` : ''}
-                      {` · ${gb(b.bytes)}`}
-                    </option>
-                  ))}
-                  {status.bases.length === 0 && <option value={form.lmType}>{form.lmType}</option>}
-                </select>
-                <span className="text-[10px] text-zinc-500 leading-snug">
-                  {t('trainingStudio.yue2.baseHint',
-                    'Only bf16 has been trained on here. Whether a quantized base trains usefully at '
-                    + 'all is not established, so the others are offered without a ranking.')}
-                </span>
+                <ParamLabel
+                  label={t('trainingStudio.yue2.base', 'Base model')}
+                  className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                  info={t('trainingStudio.yue2.baseHint',
+                    'Which YuE2 LM checkpoint the LoRA trains against; the same base must be loaded at '
+                    + 'generation time for the adapter to apply. Only bf16 has been trained on here. '
+                    + 'Whether a quantized base trains usefully at all is not established, so the others '
+                    + 'are offered without a ranking.') as string}
+                />
+                <StyledSelect
+                  accent="amber"
+                  value={form.lmType}
+                  onChange={v => set('lmType', v)}
+                  className="w-full"
+                  options={status.bases.length > 0
+                    ? status.bases.map(b => ({
+                        value: b.id,
+                        label: `${b.id}${b.proven ? ` — ${t('trainingStudio.yue2.baseProven', 'measured')}` : ''} · ${gb(b.bytes)}`,
+                      }))
+                    : [{ value: form.lmType, label: form.lmType }]}
+                />
               </label>
               <div className="flex flex-col gap-1">
                 <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
@@ -940,63 +974,118 @@ export const Yue2NarTrainCard: React.FC<{
               <div className="mt-3 pl-3 border-l-2 border-zinc-200 dark:border-white/10 flex flex-col gap-3">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <NumField label={t('trainingStudio.yue2.alpha', 'Alpha')} value={form.alpha}
-                    onChange={v => set('alpha', v)} step={64} />
+                    onChange={v => set('alpha', v)} step={64}
+                    info={t('trainingStudio.yue2.alphaInfo',
+                      'Scales how strongly the LoRA weights apply relative to the rank. Raising it makes '
+                      + 'the adapter\'s effect stronger at the same rank; lowering it weakens it.') as string} />
                   <Yue2OptimizerFields value={form} onChange={patch => setEdits(p => ({ ...p, ...patch }))} />
                   {form.optimizer !== 'prodigy' && (<NumField label={t('trainingStudio.yue2.lr', 'Learning rate')} value={form.lr}
-                    onChange={v => set('lr', v)} step={1e-5} />)}
+                    onChange={v => set('lr', v)} step={1e-5}
+                    info={t('trainingStudio.yue2.lrInfo',
+                      'How big a step the optimizer takes on each update. Higher trains faster but risks '
+                      + 'instability; lower is steadier but slower to converge. Only used when the '
+                      + 'optimizer above is not Prodigy, which sets its own effective rate automatically.') as string} />)}
                   <label className="flex flex-col gap-1">
-                    <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                      {t('trainingStudio.yue2.lrScheduler', 'Schedule')}
-                    </span>
-                    <select className={INPUT} value={form.lrScheduler}
-                      onChange={e => set('lrScheduler', e.target.value as 'cosine' | 'constant')}>
-                      <option value="cosine">cosine</option>
-                      <option value="constant">constant</option>
-                    </select>
+                    <ParamLabel
+                      label={t('trainingStudio.yue2.lrScheduler', 'Schedule')}
+                      className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                      info={t('trainingStudio.yue2.lrSchedulerInfo',
+                        'How the learning rate moves over the run. cosine decays it from the starting '
+                        + 'rate down toward zero as training progresses; constant holds it steady for the '
+                        + 'whole run.') as string}
+                    />
+                    <StyledSelect
+                      accent="amber"
+                      value={form.lrScheduler}
+                      onChange={v => set('lrScheduler', v)}
+                      className="w-full"
+                      options={[
+                        { value: 'cosine', label: 'cosine' },
+                        { value: 'constant', label: 'constant' },
+                      ]}
+                    />
                   </label>
                   <NumField label={t('trainingStudio.yue2.warmup', 'Warmup steps')} value={form.warmup}
-                    onChange={v => set('warmup', v)} step={10} />
+                    onChange={v => set('warmup', v)} step={10}
+                    info={t('trainingStudio.yue2.warmupInfo',
+                      'How many steps the learning rate ramps up from zero at the start of the run, before '
+                      + 'the schedule above takes over. More warmup steps ease into training more gently; '
+                      + 'fewer reach the full rate sooner but risk an unstable start.') as string} />
                   <NumField label={t('trainingStudio.yue2.gradAccum', 'Grad accum')} value={form.gradAccum}
-                    onChange={v => set('gradAccum', v)} />
+                    onChange={v => set('gradAccum', v)}
+                    info={t('trainingStudio.yue2.gradAccumInfo',
+                      'How many steps of gradients get summed before the optimizer applies an update, '
+                      + 'which behaves like a larger batch without the extra VRAM. Raising it smooths '
+                      + 'updates but makes each optimizer step rarer; 1 updates every step.') as string} />
                   <NumField label={t('trainingStudio.yue2.maxGradNorm', 'Clip grad norm')}
-                    value={form.maxGradNorm} onChange={v => set('maxGradNorm', v)} step={0.1} />
+                    value={form.maxGradNorm} onChange={v => set('maxGradNorm', v)} step={0.1}
+                    info={t('trainingStudio.yue2.maxGradNormInfo',
+                      'Caps how large the gradient is allowed to get on any one step, cutting it back to '
+                      + 'this length if it is bigger. Guards against a spike destabilising the run; too '
+                      + 'low a cap can slow learning by blunting every real update as well.') as string} />
                   <NumField label={t('trainingStudio.yue2.weightDecay', 'Weight decay')}
-                    value={form.weightDecay} onChange={v => set('weightDecay', v)} step={0.01} />
+                    value={form.weightDecay} onChange={v => set('weightDecay', v)} step={0.01}
+                    info={t('trainingStudio.yue2.weightDecayInfo',
+                      'Shrinks the adapter\'s weights a little on every step, independent of the loss. '
+                      + 'Higher discourages large weights, which can reduce overfitting but also blunt '
+                      + 'the adapter\'s learned effect; 0 turns it off.') as string} />
                   <NumField label={t('trainingStudio.yue2.seed', 'Seed')} value={form.seed}
-                    onChange={v => set('seed', v)} />
+                    onChange={v => set('seed', v)}
+                    info={t('trainingStudio.yue2.seedInfo',
+                      'Seeds the random draws that choose clip order and dropout during training. Changing '
+                      + 'it changes which clips and dropout draws land on which step, not the training '
+                      + 'recipe itself; the same seed with the same recipe reproduces the same run.') as string} />
                   <NumField label={t('trainingStudio.yue2.captionDropout', 'Caption dropout')}
                     value={form.captionDropout} onChange={v => set('captionDropout', v)} step={0.05}
-                    hint={t('trainingStudio.yue2.captionDropoutHint',
-                      'Chance of swapping in the EMPTY style prefix. 0 is not "more likeness": it is '
-                      + 'the trigger word ceasing to mean anything relative to no trigger word.') as string} />
+                    info={t('trainingStudio.yue2.captionDropoutHint',
+                      'Chance of swapping in the EMPTY style prefix instead of the real caption on a given '
+                      + 'step. 0 is not "more likeness": it is the trigger word ceasing to mean anything '
+                      + 'relative to no trigger word. Raising it trains the trigger to matter more; too '
+                      + 'high leaves too little signal from the real captions.') as string} />
                   <NumField label={t('trainingStudio.yue2.abcDropout', 'ABC dropout')}
                     value={form.abcDropout} onChange={v => set('abcDropout', v)} step={0.05}
-                    hint={t('trainingStudio.yue2.abcDropoutHint',
-                      'Chance a clip whose source has a lead sheet trains cot=off instead of cot=full '
-                      + 'this draw. A source with no lead sheet always trains cot=off. 0.5 is upstream\'s '
-                      + 'own split.') as string} />
+                    info={t('trainingStudio.yue2.abcDropoutHint',
+                      'Chance a clip whose source has a lead sheet trains cot=off instead of cot=full this '
+                      + 'draw. A source with no lead sheet always trains cot=off. 0.5 is upstream\'s own '
+                      + 'split; raising it trains more like a source with no lead sheet, lowering it leans '
+                      + 'more on cot=full.') as string} />
                   <NumField label={t('trainingStudio.yue2.kvCache', 'K/V canvases')} value={form.kvCache}
                     onChange={v => set('kvCache', v)}
-                    hint={t('trainingStudio.yue2.kvCacheHint',
-                      'AR-prefix caches held at once, about 104 MB each at 10 s clips. A real VRAM '
-                      + 'knob; 8 is what was measured.') as string} />
+                    info={t('trainingStudio.yue2.kvCacheHint',
+                      'How many AR-prefix caches are held at once, about 104 MB each at 10 s clips. A real '
+                      + 'VRAM knob: raising it uses more VRAM but can reuse more cached prefixes; 8 is what '
+                      + 'was measured.') as string} />
                   <NumField label={t('trainingStudio.yue2.clipBlock', 'Clip block')} value={form.clipBlock}
                     onChange={v => set('clipBlock', v)}
-                    hint={t('trainingStudio.yue2.clipBlockHint',
-                      'Steps one working set of clips is held for. With per-clip codec ids every clip '
-                      + 'is its own conditioning, so drawing from the whole album misses the K/V cache '
-                      + 'almost every step and re-runs the AR prefix. 0 draws from everything.') as string} />
+                    info={t('trainingStudio.yue2.clipBlockHint',
+                      'How many steps one working set of clips is held for before the next block is drawn. '
+                      + 'With per-clip codec ids every clip is its own conditioning, so drawing from the '
+                      + 'whole album misses the K/V cache almost every step and re-runs the AR prefix. '
+                      + 'Raising it reuses the cache longer per block; 0 draws from everything.') as string} />
                   <NumField label={t('trainingStudio.yue2.logEvery', 'Log every')} value={form.logEvery}
-                    onChange={v => set('logEvery', v)} />
+                    onChange={v => set('logEvery', v)}
+                    info={t('trainingStudio.yue2.logEveryInfo',
+                      'How often, in steps, the trainer writes a log line with its metrics. Only affects '
+                      + 'how closely you can watch progress, not the training itself.') as string} />
                   <label className="flex flex-col gap-1">
-                    <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                      {t('trainingStudio.yue2.tSampling', 'Timestep sampling')}
-                    </span>
-                    <select className={INPUT} value={form.tSampling}
-                      onChange={e => set('tSampling', e.target.value as 'logit-normal' | 'uniform')}>
-                      <option value="logit-normal">logit-normal</option>
-                      <option value="uniform">uniform</option>
-                    </select>
+                    <ParamLabel
+                      label={t('trainingStudio.yue2.tSampling', 'Timestep sampling')}
+                      className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                      info={t('trainingStudio.yue2.tSamplingInfo',
+                        'Which denoising timesteps get sampled during training. logit-normal biases '
+                        + 'sampling toward the middle of the noise range; uniform samples every timestep '
+                        + 'equally.') as string}
+                    />
+                    <StyledSelect
+                      accent="amber"
+                      value={form.tSampling}
+                      onChange={v => set('tSampling', v)}
+                      className="w-full"
+                      options={[
+                        { value: 'logit-normal', label: 'logit-normal' },
+                        { value: 'uniform', label: 'uniform' },
+                      ]}
+                    />
                   </label>
                 </div>
                 <p className="text-[11px] text-zinc-500 leading-snug">

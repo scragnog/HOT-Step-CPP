@@ -9,6 +9,8 @@ import { AlertTriangle, FolderOpen, Info, Loader2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { scanPreview, type ScanPreview } from '../../services/trainingApi';
 import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { FolderPicker } from './FolderPicker';
 
@@ -132,7 +134,10 @@ export const NewDatasetWizard: React.FC<NewDatasetWizardProps> = ({ open, onClos
           <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
             {/* Folder */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.wizard.folder')}</label>
+              <ParamLabel
+                label={t('trainingStudio.wizard.folder')}
+                info={t('trainingStudio.wizard.folderInfo')}
+              />
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -148,10 +153,14 @@ export const NewDatasetWizard: React.FC<NewDatasetWizardProps> = ({ open, onClos
                   <FolderOpen size={14} /> {t('trainingStudio.wizard.browse')}
                 </button>
               </div>
-              <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400 mt-1">
-                <input type="checkbox" checked={recursive} onChange={(e) => setRecursive(e.target.checked)} className="accent-amber-500" />
-                {t('trainingStudio.wizard.recursive')}
-              </label>
+              <Toggle
+                accent="amber"
+                checked={recursive}
+                onChange={setRecursive}
+                label={t('trainingStudio.wizard.recursive')}
+                info={t('trainingStudio.wizard.recursiveInfo')}
+                className="mt-1"
+              />
             </div>
 
             {/* Scan preview */}
@@ -207,7 +216,10 @@ export const NewDatasetWizard: React.FC<NewDatasetWizardProps> = ({ open, onClos
             {/* Name + trigger */}
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.wizard.name')}</label>
+                <ParamLabel
+                  label={t('trainingStudio.wizard.name')}
+                  info={t('trainingStudio.wizard.nameInfo')}
+                />
                 <input
                   type="text"
                   value={effectiveName}
@@ -218,7 +230,10 @@ export const NewDatasetWizard: React.FC<NewDatasetWizardProps> = ({ open, onClos
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.wizard.trigger')}</label>
+                <ParamLabel
+                  label={t('trainingStudio.wizard.trigger')}
+                  info={t('trainingStudio.wizard.triggerInfo')}
+                />
                 <input
                   type="text"
                   value={effectiveTag}
@@ -228,11 +243,13 @@ export const NewDatasetWizard: React.FC<NewDatasetWizardProps> = ({ open, onClos
                 />
               </div>
             </div>
-            <div className="text-[11px] text-zinc-500 -mt-2">{t('trainingStudio.wizard.triggerHint')}</div>
 
             {/* Lyric language — declared, never guessed by the local AI */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.wizard.language')}</label>
+              <ParamLabel
+                label={t('trainingStudio.wizard.language')}
+                info={t('trainingStudio.wizard.languageInfo')}
+              />
               <StyledSelect
                 accent="amber"
                 className="max-w-56"
@@ -242,7 +259,6 @@ export const NewDatasetWizard: React.FC<NewDatasetWizardProps> = ({ open, onClos
                   .map(l => ({ value: l, label: l.charAt(0).toUpperCase() + l.slice(1) }))}
                 searchPlaceholder="Filter languages…"
               />
-              <div className="text-[11px] text-zinc-500">{t('trainingStudio.wizard.languageHint')}</div>
             </div>
 
             {createError && (

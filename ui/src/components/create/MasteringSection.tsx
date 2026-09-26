@@ -8,6 +8,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, Upload, Trash2, Sparkles, Music2 } from 'lucide-react';
 import { masteringApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 
 interface MasteringSectionProps {
   masteringEnabled: boolean;
@@ -103,37 +106,36 @@ export const MasteringSection: React.FC<MasteringSectionProps> = ({
       {open && (
         <div className="px-3 pb-3 space-y-3">
           {/* Enable toggle */}
-          <label className="flex items-center gap-2.5 cursor-pointer">
-            <input
-              type="checkbox"
+          <div className="flex items-center gap-2.5">
+            <Toggle
+              accent="pink"
               checked={masteringEnabled}
-              onChange={e => onMasteringEnabledChange(e.target.checked)}
-              className="rounded border-zinc-600 bg-zinc-100 dark:bg-zinc-800 text-amber-500 focus:ring-amber-500/20"
+              onChange={onMasteringEnabledChange}
+              label="Apply Reference Mastering"
+              info="Matches the level, frequency balance and dynamics of the render to a reference track you upload. On: the generated audio is mastered to sit at the same loudness and tonal balance as the reference. Off: the render is left as the DiT/VAE produced it."
+              className="text-sm"
             />
-            <span className="text-sm text-zinc-600 dark:text-zinc-400">Apply Reference Mastering</span>
             <Sparkles size={14} className="text-amber-400 ml-auto" />
-          </label>
+          </div>
 
           {masteringEnabled && (
             <>
               {/* Reference selector */}
               <div>
-                <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-                  Reference Track
-                </label>
+                <ParamLabel
+                  label="Reference Track"
+                  info="Which uploaded track mastering matches the render against. The render's level, frequency balance and dynamics are pulled toward this track's."
+                  className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5"
+                />
                 {references.length > 0 ? (
-                  <select
-                    className="w-full px-3 py-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 outline-none transition-colors cursor-pointer"
+                  <StyledSelect
+                    accent="pink"
+                    className="w-full"
                     value={masteringReference}
-                    onChange={e => onMasteringReferenceChange(e.target.value)}
-                  >
-                    <option value="">Select a reference...</option>
-                    {references.map(r => (
-                      <option key={r.name} value={r.name}>
-                        {r.name} ({formatFileSize(r.size)})
-                      </option>
-                    ))}
-                  </select>
+                    onChange={onMasteringReferenceChange}
+                    placeholder="Select a reference..."
+                    options={references.map(r => ({ value: r.name, label: `${r.name} (${formatFileSize(r.size)})` }))}
+                  />
                 ) : (
                   <div className="text-xs text-zinc-500 italic px-1">
                     No reference tracks uploaded yet
@@ -189,30 +191,19 @@ export const MasteringSection: React.FC<MasteringSectionProps> = ({
                     <span className="text-[10px] text-teal-400">Timbre: using dedicated reference ({timbreAudioPath.split(/[\\/]/).pop()})</span>
                   </div>
                 ) : (
-                  <label className="flex items-center gap-2.5 cursor-pointer mt-1">
-                    <input
-                      type="checkbox"
+                  <div className="flex items-center gap-2.5 mt-1">
+                    <Toggle
+                      accent="pink"
                       checked={timbreReference}
-                      onChange={e => onTimbreReferenceChange(e.target.checked)}
-                      className="rounded border-zinc-600 bg-zinc-100 dark:bg-zinc-800 text-teal-500 focus:ring-teal-500/20"
+                      onChange={onTimbreReferenceChange}
+                      label="Also use as timbre reference"
+                      info="Feeds the same mastering reference track to the DiT as a timbre reference, VAE-encoded, guiding the generation's tone and texture to match it. On: the render's timbre is steered toward the reference in addition to mastering matching its level and tonal balance afterward. Off: the reference only shapes the final mastering pass, not the generation itself."
+                      className="text-sm"
                     />
-                    <span className="text-sm text-zinc-600 dark:text-zinc-400">Also use as timbre reference</span>
                     <Music2 size={14} className="text-teal-400 ml-auto" />
-                  </label>
+                  </div>
                 )
               )}
-              {timbreReference && masteringReference && !timbreAudioPath && (
-                <p className="text-[10px] text-zinc-600 leading-relaxed">
-                  The reference track will be VAE-encoded and fed into the timbre conditioning pipeline,
-                  guiding the generation&apos;s tone and texture to match the reference.
-                </p>
-              )}
-
-              {/* Info */}
-              <p className="text-[10px] text-zinc-600 leading-relaxed">
-                The generated audio will be mastered to match the RMS level, frequency spectrum,
-                and dynamic characteristics of the reference track.
-              </p>
             </>
           )}
         </div>

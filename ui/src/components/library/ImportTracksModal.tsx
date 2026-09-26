@@ -16,6 +16,8 @@ import { useTranslation } from 'react-i18next';
 import { songApi } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { startPostProcessing } from '../../stores/postProcessStore';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 
 /** Mirrors IMPORT_EXTENSIONS in server/src/services/library/importTrack.ts —
  *  the server is the authority and re-checks every upload. */
@@ -249,9 +251,13 @@ export const ImportTracksModal: React.FC = () => {
 
           {/* What the track sounds like */}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-zinc-500">
-              {t('library.importDescription', 'Description (optional)')}
-            </label>
+            <ParamLabel
+              label={t('library.importDescription', 'Description (optional)')}
+              className="text-xs font-medium text-zinc-500"
+              info={t('library.importDescriptionHint',
+                'Applied to every file in this batch, and used as the genre tag when the file has none. '
+                + 'StableStep refines towards it — without one, that stage is refused.')}
+            />
             <input
               type="text"
               value={description}
@@ -260,34 +266,22 @@ export const ImportTracksModal: React.FC = () => {
               placeholder={t('library.importDescriptionPlaceholder', 'dark synthwave, analog bass, driving 4/4')}
               className="w-full px-3 py-2 rounded-lg text-xs bg-transparent border border-zinc-200 dark:border-white/10 text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-pink-400/60 disabled:opacity-50"
             />
-            <p className="text-[11px] text-zinc-500">
-              {t('library.importDescriptionHint',
-                'Applied to every file in this batch, and used as the genre tag when the file has none. '
-                + 'StableStep refines towards it — without one, that stage is refused.')}
-            </p>
           </div>
 
           {/* Post-processing opt-in */}
-          <label className={`flex items-start gap-2 text-xs ${busy ? 'opacity-50' : 'cursor-pointer'}`}>
-            <input
-              type="checkbox"
-              checked={runPp}
-              disabled={busy}
-              onChange={e => {
-                setRunPp(e.target.checked);
-                try { localStorage.setItem(PP_PREF_KEY, e.target.checked ? '1' : '0'); } catch { /* ignore */ }
-              }}
-              className="mt-0.5 accent-pink-500"
-            />
-            <span className="text-zinc-600 dark:text-zinc-400">
-              {t('library.importRunPp', 'Run post-processing after import')}
-              <span className="block text-[11px] text-zinc-500">
-                {t('library.importRunPpHint',
-                  'Uses the chain configured in the Post-Processing menu, one track at a time. '
-                  + 'You can also run it later from a track’s menu.')}
-              </span>
-            </span>
-          </label>
+          <Toggle
+            accent="pink"
+            checked={runPp}
+            disabled={busy}
+            onChange={(checked) => {
+              setRunPp(checked);
+              try { localStorage.setItem(PP_PREF_KEY, checked ? '1' : '0'); } catch { /* ignore */ }
+            }}
+            label={t('library.importRunPp', 'Run post-processing after import')}
+            info={t('library.importRunPpHint',
+              'Uses the chain configured in the Post-Processing menu, one track at a time. '
+              + 'You can also run it later from a track’s menu.')}
+          />
 
           {ppNeedsDescription && (
             <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-500">

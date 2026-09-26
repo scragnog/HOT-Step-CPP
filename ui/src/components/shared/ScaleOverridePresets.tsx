@@ -7,6 +7,8 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Save, Trash2, X, Check } from 'lucide-react';
+import { StyledSelect } from './StyledSelect';
+import { ParamLabel } from './ParamLabel';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -126,23 +128,25 @@ export const ScaleOverridePresets: React.FC<ScaleOverridePresetsProps> = ({
 
   return (
     <div className="space-y-1.5">
+      <ParamLabel
+        label="Adapter scale presets"
+        info="Save the overall scale and the four per-group scale sliders above (Self-Attn, Cross-Attn, MLP, Conditioning) as a named preset, then load them back later. Presets are stored in this browser only — they are not saved with the song or the adapter file, and are not visible on another device or after clearing site data."
+        className={`${textSize} font-semibold text-zinc-600 dark:text-zinc-400`}
+      />
       <div className="flex items-center gap-1.5">
         {/* Preset selector */}
-        <select
+        <StyledSelect
           value={selectedIdx}
-          onChange={e => handleSelect(parseInt(e.target.value, 10))}
-          className={`flex-1 bg-black/30 border border-zinc-300 dark:border-white/10 rounded-md px-2 py-1 ${textSize} text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-pink-500 transition-colors cursor-pointer appearance-none`}
-          style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%23888\' stroke-width=\'2\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 6px center' }}
-        >
-          <option value={-1} className="bg-white dark:bg-zinc-900">
-            {presets.length === 0 ? 'No presets saved' : '— Select preset —'}
-          </option>
-          {presets.map((p, i) => (
-            <option key={i} value={i} className="bg-white dark:bg-zinc-900">
-              {p.name}
-            </option>
-          ))}
-        </select>
+          onChange={handleSelect}
+          accent="pink"
+          size={compact ? 'sm' : 'md'}
+          className="flex-1"
+          aria-label="Preset"
+          options={[
+            { value: -1, label: presets.length === 0 ? 'No presets saved' : '— Select preset —' },
+            ...presets.map((p, i) => ({ value: i, label: p.name })),
+          ]}
+        />
 
         {/* Save button */}
         {!saving ? (

@@ -1,10 +1,13 @@
 // ArtistSettingsPanel.tsx — Right panel: artist selector + cover settings + generate
 import React from 'react';
-import { Guitar, Disc3, Zap, Music, ChevronDown, Loader2, Type, X, Mic, RefreshCw } from 'lucide-react';
+import { Guitar, Disc3, Zap, Music, Loader2, Type, X, Mic, RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { EditableSlider } from './EditableSlider';
 import { transposeKey, type AudioAnalysis } from './coverStudioUtils';
 import type { Artist, AlbumPreset } from '../../services/lireekApi';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 
 interface ArtistSettingsPanelProps {
   artists: Artist[];
@@ -119,25 +122,23 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
         {/* Album selector */}
         {presetsWithAdapters.length > 1 && (
           <div className="flex items-center gap-2">
-            <label className="text-[10px] font-medium text-zinc-500 uppercase whitespace-nowrap">Album</label>
-            <div className="relative flex-1">
-              <select
-                value={artistPresets.findIndex(p => p.preset === selectedPreset)}
-                onChange={e => {
-                  const chosen = artistPresets[parseInt(e.target.value)];
-                  if (chosen?.preset) {
-                    onSelectPreset(chosen.preset);
-                  }
-                }}
-                className="w-full appearance-none rounded-lg bg-black/5 dark:bg-white/5 border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 pr-8 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer focus:ring-2 focus:ring-cyan-500/50 focus:outline-none"
-              >
-                {presetsWithAdapters.map(p => {
-                  const idx = artistPresets.indexOf(p);
-                  return <option key={p.lsId} value={idx}>{p.album}</option>;
-                })}
-              </select>
-              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-zinc-600 dark:text-zinc-400 pointer-events-none" />
-            </div>
+            <ParamLabel
+              label="Album"
+              className="text-[10px] font-medium text-zinc-500 uppercase whitespace-nowrap"
+              info="Which album preset to apply. Appears only when the selected artist has more than one album with an adapter; each preset can carry its own adapter and reference track for the render."
+            />
+            <StyledSelect
+              accent="cyan"
+              value={artistPresets.findIndex(p => p.preset === selectedPreset)}
+              onChange={(idx) => {
+                const chosen = artistPresets[idx];
+                if (chosen?.preset) {
+                  onSelectPreset(chosen.preset);
+                }
+              }}
+              options={presetsWithAdapters.map(p => ({ value: artistPresets.indexOf(p), label: p.album }))}
+              className="flex-1"
+            />
           </div>
         )}
 
@@ -170,7 +171,11 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
       <div className="space-y-2">
         <div className="flex items-center gap-2 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
           <Type className="w-4 h-4 text-purple-400" />
-          Style Description
+          <ParamLabel
+            label="Style Description"
+            className="text-sm font-semibold text-zinc-700 dark:text-zinc-300"
+            info="Free-text caption for genre, instruments, vocal style, production and mood, sent as the generation caption. Picking a target artist above fills it in from that artist's profile; it stays editable, so you can tweak the auto-filled text or clear it and write your own for an artist-free cover."
+          />
           {selectedArtistId && (
             <button
               onClick={onRegenerateCaption}
@@ -189,11 +194,6 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
           placeholder="Describe the target style, e.g. 'indie rock, breathy female vocal, lo-fi production, dreamy reverb, 2010s alternative'"
           className="w-full h-24 resize-none rounded-xl bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 px-3 py-2 text-xs text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-purple-500 transition-colors leading-relaxed"
         />
-        <p className="text-[10px] text-zinc-500 leading-tight">
-          {selectedArtistId
-            ? 'Auto-filled from artist. Edit freely to refine the style.'
-            : 'Describe genre, instruments, vocal style, production, mood — used as the generation caption.'}
-        </p>
       </div>
 
       <div className="border-t border-zinc-200 dark:border-white/5" />
@@ -202,21 +202,13 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
       <div className="flex items-center justify-between px-1 py-1">
         <div className="flex items-center gap-2">
           <Mic className="w-4 h-4 text-amber-400" />
-          <div>
-            <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{t('cover.instrumental')}</span>
-            <p className="text-[10px] text-zinc-500 leading-tight mt-0.5">{t('cover.instrumentalHelp')}</p>
-          </div>
+          <ParamLabel
+            label={t('cover.instrumental')}
+            className="text-xs font-medium text-zinc-700 dark:text-zinc-300"
+            info={t('cover.instrumentalHelp')}
+          />
         </div>
-        <button
-          onClick={() => onInstrumentalChange(!instrumental)}
-          className={`relative w-9 h-5 rounded-full transition-colors duration-200 flex-shrink-0 ${
-            instrumental ? 'bg-amber-500' : 'bg-zinc-300 dark:bg-zinc-700'
-          }`}
-        >
-          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${
-            instrumental ? 'translate-x-[18px]' : 'translate-x-0.5'
-          }`} />
-        </button>
+        <Toggle accent="cyan" checked={instrumental} onChange={onInstrumentalChange} aria-label={t('cover.instrumental')} />
       </div>
 
       <div className="border-t border-zinc-200 dark:border-white/5" />
@@ -235,33 +227,32 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
           helpText={t('cover.sourcePreservationHelp')} />
         {coverNoiseStrength > 0 && (
           <div className="flex items-center justify-between px-1 py-1">
-            <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">Noise Method</span>
-            <select
-              className="appearance-none rounded-lg bg-black/5 dark:bg-white/5 border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 pr-8 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer focus:ring-2 focus:ring-cyan-500/50 focus:outline-none"
+            <ParamLabel
+              label="Noise Method"
+              className="text-xs font-medium text-zinc-700 dark:text-zinc-300"
+              info="Which algorithm reintroduces the source's audio noise once Source Preservation is above zero: Classic (Truncate) or Full Denoise (Rescale)."
+            />
+            <StyledSelect
+              accent="cyan"
+              size="sm"
               value={coverNoiseMethod}
-              onChange={(e) => onCoverNoiseMethodChange(e.target.value)}
-            >
-              <option value="">Classic (Truncate)</option>
-              <option value="rescale">Full Denoise (Rescale)</option>
-            </select>
+              onChange={onCoverNoiseMethodChange}
+              options={[
+                { value: '', label: 'Classic (Truncate)' },
+                { value: 'rescale', label: 'Full Denoise (Rescale)' },
+              ]}
+              className="w-auto"
+            />
           </div>
         )}
         {/* NoFSQ toggle */}
         <div className="flex items-center justify-between px-1 py-1">
-          <div>
-            <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">NoFSQ Mode</span>
-            <p className="text-[10px] text-zinc-500 leading-tight mt-0.5">Skip quantization — more faithful to source</p>
-          </div>
-          <button
-            onClick={() => onNoFsqChange(!noFsq)}
-            className={`relative w-9 h-5 rounded-full transition-colors duration-200 flex-shrink-0 ${
-              noFsq ? 'bg-cyan-500' : 'bg-zinc-300 dark:bg-zinc-700'
-            }`}
-          >
-            <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${
-              noFsq ? 'translate-x-[18px]' : 'translate-x-0.5'
-            }`} />
-          </button>
+          <ParamLabel
+            label="NoFSQ Mode"
+            className="text-xs font-medium text-zinc-700 dark:text-zinc-300"
+            info="Skips FSQ quantization on the source audio, for a result closer to the source. On: more faithful reproduction of the source. Off: quantized, the default."
+          />
+          <Toggle accent="cyan" checked={noFsq} onChange={onNoFsqChange} aria-label="NoFSQ Mode" />
         </div>
         <EditableSlider label="Tempo Scale" value={tempoScale} min={0.5} max={2.0} step={0.05}
           onChange={onTempoScale}

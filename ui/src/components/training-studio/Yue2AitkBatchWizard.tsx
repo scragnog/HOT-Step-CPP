@@ -10,6 +10,7 @@ import React, { useMemo, useState } from 'react';
 import { ArrowRight, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { Toggle } from '../shared/Toggle';
 
 interface Props { open: boolean; onClose: () => void }
 
@@ -73,7 +74,7 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
         </div>
         <div className="rounded-lg border border-zinc-200 dark:border-white/10 divide-y divide-zinc-200 dark:divide-white/10 mb-4 max-h-[50vh] overflow-y-auto">
           {visible.map(ds => <label key={ds.id} className="flex items-center gap-2 p-2 text-xs">
-            <input type="checkbox" disabled={queued.has(ds.id)} checked={queued.has(ds.id) || !!checked[ds.id]} onChange={e => setChecked(previous => ({ ...previous, [ds.id]: e.target.checked }))} className="accent-amber-500" />
+            <Toggle size="sm" accent="amber" disabled={queued.has(ds.id)} checked={queued.has(ds.id) || !!checked[ds.id]} onChange={v => setChecked(previous => ({ ...previous, [ds.id]: v }))} aria-label={t('trainingStudio.yue2.aitkBatch.selectDataset', 'Select {{name}}', { name: ds.name })} />
             <span className="flex-1 truncate">{ds.name}</span>
             {queued.has(ds.id) ? <span className="text-amber-600">{t('trainingStudio.yue2.aitkBatch.inBatch', 'in batch')}</span>
               : ds.customTag && <span className="text-zinc-500">{ds.customTag}</span>}

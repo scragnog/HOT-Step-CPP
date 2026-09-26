@@ -19,7 +19,10 @@ import {
 } from 'lucide-react';
 import { useVstChainStore } from '../../stores/vstChainStore';
 import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '../shared/StyledSelect';
 import { usePlaybackSelector, togglePlay } from '../../stores/playbackStore';
+
+const ACCENT = 'violet' as const;
 
 // Format seconds as mm:ss
 function formatTime(s: number): string {
@@ -136,6 +139,7 @@ const PluginSearch: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
 const PresetManager: React.FC = () => {
   const { presets, savePreset, loadPreset, deletePreset, chain } = useVstChainStore();
+  const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [newName, setNewName] = useState('');
   const names = Object.keys(presets);
@@ -153,25 +157,31 @@ const PresetManager: React.FC = () => {
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
       {names.length > 0 && (
-        <select
-          className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-white/10 text-[10px] text-zinc-600 dark:text-zinc-400 cursor-pointer focus:border-violet-500/50 outline-none transition-colors"
-          defaultValue=""
-          onChange={e => { if (e.target.value) { loadPreset(e.target.value); e.target.value = ''; } }}
-        >
-          <option value="" disabled>Load preset…</option>
-          {names.map(n => <option key={n} value={n}>{n}</option>)}
-        </select>
+        <StyledSelect
+          accent={ACCENT}
+          size="sm"
+          value=""
+          onChange={(name) => { if (name) loadPreset(name); }}
+          options={names.map(n => ({ value: n, label: n }))}
+          placeholder={t('vst.loadPreset')}
+          title={t('vst.loadPresetInfo')}
+          aria-label={t('vst.loadPreset')}
+          className="flex-1 min-w-0"
+        />
       )}
 
       {names.length > 0 && (
-        <select
-          className="px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-white/10 text-[10px] text-zinc-600 dark:text-zinc-400 cursor-pointer focus:border-red-500/50 outline-none transition-colors"
-          defaultValue=""
-          onChange={e => { if (e.target.value) { deletePreset(e.target.value); e.target.value = ''; } }}
-        >
-          <option value="" disabled>Delete…</option>
-          {names.map(n => <option key={n} value={n}>✕ {n}</option>)}
-        </select>
+        <StyledSelect
+          accent={ACCENT}
+          size="sm"
+          value=""
+          onChange={(name) => { if (name) deletePreset(name); }}
+          options={names.map(n => ({ value: n, label: `✕ ${n}` }))}
+          placeholder={t('vst.deletePreset')}
+          title={t('vst.deletePresetInfo')}
+          aria-label={t('vst.deletePreset')}
+          className="flex-1 min-w-0"
+        />
       )}
 
       {chain.length > 0 && (
@@ -338,7 +348,11 @@ export const VstChainDropdown: React.FC = () => {
       {/* Presets */}
       {(safeChain.length > 0 || Object.keys(presets).length > 0) && (
         <div className="space-y-1">
-          <div className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">Presets</div>
+          <ParamLabel
+            label="Presets"
+            underline={false}
+            className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium"
+            info={t('vst.presetsInfo')} />
           <PresetManager />
         </div>
       )}

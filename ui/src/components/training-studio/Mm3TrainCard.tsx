@@ -25,6 +25,9 @@ import { useTranslation } from 'react-i18next';
 import { estimateMm3PeakMb, estimateMm3PrefixMb, mm3FlashVramCalibrated, type Mm3PresetName } from '../../services/trainingApi';
 import type { Mm3TrainLmRequest } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 import { JobProgress } from './JobProgress';
 import { Mm3PreviewStrip } from './Mm3PreviewStrip';
 import { Mm3RunsPanel } from './Mm3RunsPanel';
@@ -121,16 +124,20 @@ const MM3_METHOD_KEYS: Record<Mm3Method, { label: string; info: string }> = {
 };
 
 const NumField: React.FC<{
-  label: string; value: number; onChange: (v: number) => void; step?: number; hint?: string;
+  label: string; value: number; onChange: (v: number) => void; step?: number; info?: string; meta?: string;
   disabled?: boolean;
-}> = ({ label, value, onChange, step = 1, hint, disabled }) => (
+}> = ({ label, value, onChange, step = 1, info, meta, disabled }) => (
   <label className={`flex flex-col gap-1${disabled ? ' opacity-50' : ''}`}>
-    <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">{label}</span>
+    <ParamLabel
+      label={label}
+      info={info}
+      meta={meta}
+      className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+    />
     <input
       type="number" className={INPUT} value={value} step={step} disabled={disabled}
       onChange={e => onChange(Number(e.target.value))}
     />
-    {hint && <span className="text-[10px] text-zinc-500 leading-snug">{hint}</span>}
   </label>
 );
 
@@ -529,25 +536,19 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 Only rendered when a laundered cache exists; a dataset without
                 one trains on the standard cache with no extra UI at all. */}
             {hasLaundered && (
-              <label className="flex items-start gap-2 mb-3 cursor-pointer select-none">
-                <input
-                  type="checkbox"
+              <div className="mb-3">
+                <Toggle
+                  accent="amber"
                   checked={trainLaunder}
-                  onChange={e => setTrainLaunder(e.target.checked)}
+                  onChange={setTrainLaunder}
                   disabled={!hasLaundered}
-                  className="mt-0.5 accent-amber-500"
-                />
-                <span className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                  <span className="font-semibold text-zinc-800 dark:text-zinc-200">
-                    {t('trainingStudio.mm3.trainLaunderLabel', 'Train on cover-laundered codes')}
-                  </span>
-                  {' — '}
-                  {t('trainingStudio.mm3.trainLaunderBlurb',
-                    'the vocal-forward code targets for dense mixes ({{n}} tracks laundered). Off = the '
-                    + 'standard cache, exactly as before.',
+                  label={t('trainingStudio.mm3.trainLaunderLabel', 'Train on cover-laundered codes')}
+                  info={t('trainingStudio.mm3.trainLaunderBlurb',
+                    'Trains on the vocal-forward code targets for dense mixes ({{n}} tracks laundered) '
+                    + 'instead of the standard cache. Off: the standard cache, exactly as before.',
                     { n: status?.codesLaundered ?? 0 })}
-                </span>
-              </label>
+                />
+              </div>
             )}
             {/* -- Presets (2026-09-07) -----------------------------------
                 Three recipes that tied blind; they trade minutes, not
@@ -586,14 +587,24 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 the run somewhere. */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                  {t('trainingStudio.mm3.stopMode', 'Train until')}
-                </span>
-                <select className={INPUT} value={form.stopMode}
-                  onChange={e => set('stopMode', e.target.value as 'steps' | 'loss')}>
-                  <option value="steps">{t('trainingStudio.mm3.stopSteps', 'Step count')}</option>
-                  <option value="loss">{t('trainingStudio.mm3.stopLoss', 'Target loss')}</option>
-                </select>
+                <ParamLabel
+                  label={t('trainingStudio.mm3.stopMode', 'Train until')}
+                  info={t('trainingStudio.mm3.stopModeInfo',
+                    'Whether the run ends on a fixed step count, or as soon as a target loss is '
+                    + 'reached. In target-loss mode the step count below still caps the run, so a '
+                    + 'target that never arrives still ends somewhere.')}
+                  className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                />
+                <StyledSelect
+                  accent="amber"
+                  value={form.stopMode}
+                  onChange={v => set('stopMode', v)}
+                  options={[
+                    { value: 'steps', label: t('trainingStudio.mm3.stopSteps', 'Step count') },
+                    { value: 'loss', label: t('trainingStudio.mm3.stopLoss', 'Target loss') },
+                  ]}
+                  className="w-full"
+                />
               </label>
               <NumField
                 label={form.stopMode === 'loss'
@@ -601,33 +612,26 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   : t('trainingStudio.mm3.steps', 'Steps')}
                 value={form.steps}
                 onChange={v => set('steps', v)}
-                hint={form.stopMode === 'loss'
+                meta={t('trainingStudio.mm3.stepsMeta', 'default 800')}
+                info={form.stopMode === 'loss'
                   ? t('trainingStudio.mm3.maxStepsHint',
-                      'The cap. If the target never arrives, the run ends here.') as string
-                  : undefined} />
+                      'The cap. If the target never arrives, the run ends here.')
+                  : t('trainingStudio.mm3.stepsInfo',
+                      'How many training steps to run. Higher lets the adapter learn more but takes '
+                      + 'longer and risks overfitting a small dataset; lower is faster but may undercook '
+                      + 'the likeness.')} />
               {form.stopMode === 'loss' && (
                 <>
                   <NumField label={t('trainingStudio.mm3.targetLoss', 'Target loss')}
                     value={form.targetLoss} onChange={v => set('targetLoss', v)} step={0.05}
-                    hint={t('trainingStudio.mm3.targetLossHint',
+                    info={t('trainingStudio.mm3.targetLossHint',
                       'Stops as soon as the loss reaches this. Down is NOT automatically '
                       + 'better: under ~0.05 training loss the runs that got there had '
-                      + 'memorised the songs.') as string} />
+                      + 'memorised the songs.')} />
                   <label className="flex flex-col gap-1">
-                    <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                      {t('trainingStudio.mm3.targetLossMetric', 'Measured on')}
-                    </span>
-                    <select className={INPUT} value={form.targetLossMetric}
-                      onChange={e => set('targetLossMetric', e.target.value as 'train' | 'eval')}>
-                      <option value="train">
-                        {t('trainingStudio.mm3.metricTrain', 'Training loss (trailing mean)')}
-                      </option>
-                      <option value="eval">
-                        {t('trainingStudio.mm3.metricEval', 'Held-out loss')}
-                      </option>
-                    </select>
-                    <span className="text-[10px] text-zinc-500 leading-snug">
-                      {form.targetLossMetric === 'eval'
+                    <ParamLabel
+                      label={t('trainingStudio.mm3.targetLossMetric', 'Measured on')}
+                      info={form.targetLossMetric === 'eval'
                         ? t('trainingStudio.mm3.metricEvalHint',
                             'The number that says the adapter GENERALISES rather than memorised. '
                             + 'It only lands on evaluation steps, so with Evaluate every set at '
@@ -642,7 +646,18 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                             + 'others. Available on every run, but it cannot tell learning from '
                             + 'memorising.',
                             { n: form.targetLossEpochs, songs: status?.codes ?? 0 })}
-                    </span>
+                      className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                    />
+                    <StyledSelect
+                      accent="amber"
+                      value={form.targetLossMetric}
+                      onChange={v => set('targetLossMetric', v)}
+                      options={[
+                        { value: 'train', label: t('trainingStudio.mm3.metricTrain', 'Training loss (trailing mean)') },
+                        { value: 'eval', label: t('trainingStudio.mm3.metricEval', 'Held-out loss') },
+                      ]}
+                      className="w-full"
+                    />
                   </label>
                 </>
               )}
@@ -660,87 +675,89 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
             )}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <NumField label={t('trainingStudio.mm3.saveEvery', 'Checkpoint every')} value={form.saveEvery}
-                onChange={v => set('saveEvery', v)} />
+                onChange={v => set('saveEvery', v)}
+                meta={t('trainingStudio.mm3.saveEveryMeta', 'default 100 steps')}
+                info={t('trainingStudio.mm3.saveEveryInfo',
+                  'How many training steps between saved checkpoints. Lower saves more often, at the '
+                  + 'cost of disk space and a little time; higher risks losing more progress if the run '
+                  + 'is stopped early or crashes.')} />
               <NumField label={t('trainingStudio.mm3.rank', 'Rank')} value={form.rank}
-                onChange={v => set('rank', v)} />
+                onChange={v => set('rank', v)}
+                meta={t('trainingStudio.mm3.rankMeta', 'default 256, follows the VRAM recommendation')}
+                info={t('trainingStudio.mm3.rankInfo',
+                  'The LoRA\'s capacity — how many parameters the adapter learns. Higher captures more '
+                  + 'detail but needs more VRAM and is more prone to overfitting on a small dataset; '
+                  + 'lower trains faster and fits smaller cards but may undercook the likeness.')} />
               <NumField label={t('trainingStudio.mm3.maxFrames', 'Crop (frames)')} value={form.maxFrames}
-                onChange={v => set('maxFrames', v)} step={50} />
+                onChange={v => set('maxFrames', v)} step={50}
+                meta={t('trainingStudio.mm3.maxFramesMeta', 'default 1500 frames')}
+                info={t('trainingStudio.mm3.maxFramesInfo',
+                  'How many frames of audio each training crop covers. Longer crops give the model more '
+                  + 'context per step but cost VRAM quadratically and slow each step down; shorter crops '
+                  + 'are cheaper but see less of the song at once.')} />
               <NumField label={t('trainingStudio.mm3.cropStartFrac', 'Crops at song start')}
                 value={form.cropStartFrac} onChange={v => set('cropStartFrac', v)} step={0.05}
-                hint={t('trainingStudio.mm3.cropStartFracHint',
+                info={t('trainingStudio.mm3.cropStartFracHint',
                   'Share anchored at frame 0 — what teaches songs to OPEN like songs. '
                   + 'Too low and renders jump in mid-flow.') as string} />
               <NumField label={t('trainingStudio.mm3.cropStartTiles', 'Start tiles')}
                 value={form.cropStartTiles} onChange={v => set('cropStartTiles', v)} step={1}
-                hint={t('trainingStudio.mm3.cropStartTilesHint',
+                info={t('trainingStudio.mm3.cropStartTilesHint',
                   'Half the start share stays at frame 0; the rest lands on aligned tiles '
                   + 'after it, teaching the intro→build→verse arc under short crops. '
                   + '1 = frame 0 only.') as string} />
               <NumField label={t('trainingStudio.mm3.cropEndFrac', 'Crops at song end')}
                 value={form.cropEndFrac} onChange={v => set('cropEndFrac', v)} step={0.05}
-                hint={t('trainingStudio.mm3.cropEndFracHint',
+                info={t('trainingStudio.mm3.cropEndFracHint',
                   'Share flush to the track end — the only place EOS is taught. The '
                   + 'REMAINDER of these two is the random share (currently '
                   + `${Math.max(0, Math.round((1 - form.cropStartFrac - form.cropEndFrac) * 100))}% mid-song crops).`) as string} />
               <NumField label={t('trainingStudio.mm3.depthLossWeight', 'Acoustic loss weight')}
                 value={form.depthLossWeight} onChange={v => set('depthLossWeight', v)} step={0.1}
-                hint={t('trainingStudio.mm3.depthLossWeightHint',
+                info={t('trainingStudio.mm3.depthLossWeightHint',
                   'Trains the adapter to keep vocal timbre intact: acoustic codebooks are '
                   + 'supervised through the frozen depth decoder. 0 disables — renders then '
                   + 'drift into chipmunk/goblin voices. Leave at 1.') as string} />
-              <label className="flex items-start gap-2 text-[11px] text-zinc-600 dark:text-zinc-300 col-span-2">
-                <input type="checkbox" className="mt-0.5" checked={form.keepResumeState}
-                  onChange={e => set('keepResumeState', e.target.checked)} />
-                <span>
-                  {t('trainingStudio.mm3.keepResumeState', 'Keep resume state after completion')}
-                  <span className="block text-[10px] text-zinc-500">
-                    {t('trainingStudio.mm3.keepResumeStateHint',
-                      'The optimizer state (about 4 GB) lets a finished run be continued past its step '
-                      + 'count. Off: it is deleted once the run ends. A run that stops early keeps it either way.')}
-                  </span>
-                </span>
-              </label>
-              <label className="flex items-start gap-2 text-[11px] text-zinc-600 dark:text-zinc-300 col-span-2">
-                <input type="checkbox" className="mt-0.5" checked={form.longTracks === 'exclude'}
-                  onChange={e => set('longTracks', e.target.checked ? 'exclude' : 'crop')} />
-                <span>
-                  {t('trainingStudio.mm3.longTracksExclude', 'Leave out tracks longer than the window')}
-                  <span className="block text-[10px] text-zinc-500">
-                    {t('trainingStudio.mm3.longTracksHint',
-                      'The recipe trains each track as one whole sequence. A track longer than the window '
-                      + '(360 s at 9000 frames) cannot be, so it is left out and named in the log. Unticked: it is '
-                      + 'trained in crops of the window instead, which is the pre-2026-09-11 behaviour.')}
-                  </span>
-                </span>
-              </label>
+              <Toggle accent="amber" className="col-span-2" checked={form.keepResumeState}
+                onChange={v => set('keepResumeState', v)}
+                label={t('trainingStudio.mm3.keepResumeState', 'Keep resume state after completion')}
+                info={t('trainingStudio.mm3.keepResumeStateHint',
+                  'The optimizer state (about 4 GB) lets a finished run be continued past its step '
+                  + 'count. Off: it is deleted once the run ends. A run that stops early keeps it either way.')} />
+              <Toggle accent="amber" className="col-span-2" checked={form.longTracks === 'exclude'}
+                onChange={v => set('longTracks', v ? 'exclude' : 'crop')}
+                label={t('trainingStudio.mm3.longTracksExclude', 'Leave out tracks longer than the window')}
+                info={t('trainingStudio.mm3.longTracksHint',
+                  'The recipe trains each track as one whole sequence. A track longer than the window '
+                  + '(360 s at 9000 frames) cannot be, so it is left out and named in the log. Off: it is '
+                  + 'trained in crops of the window instead, which is the pre-2026-09-11 behaviour.')} />
               <NumField label={t('trainingStudio.mm3.depthLossFrames', 'Acoustic frames/step')}
                 value={form.depthLossFrames} onChange={v => set('depthLossFrames', v)} step={16}
-                hint={t('trainingStudio.mm3.depthLossFramesHint',
+                info={t('trainingStudio.mm3.depthLossFramesHint',
                   'Frames sampled per step for the acoustic loss.') as string} />
             </div>
             <label className="flex flex-col gap-1 mt-3">
-              <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                {t('trainingStudio.mm3.trigger', 'Trigger word')}
-              </span>
+              <ParamLabel
+                label={t('trainingStudio.mm3.trigger', 'Trigger word')}
+                info={t('trainingStudio.mm3.triggerInfo',
+                  'A word associated with this adapter. Typed into a prompt at render time, it invokes '
+                  + 'the adapter\'s identity. Leave blank to skip triggering entirely — the adapter still '
+                  + 'trains and still loads, it just has no invocation word.')}
+                className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+              />
               <input className={INPUT} value={form.trigger} onChange={e => set('trigger', e.target.value)} />
             </label>
             {/* A sibling, not a child: a label nested inside a label is invalid
-                and clicking the checkbox would focus the text input instead. */}
-            <label className="flex items-start gap-2 mt-2 text-[11px] text-zinc-600 dark:text-zinc-300">
-              <input type="checkbox" className="mt-0.5" checked={form.triggerPrepend}
-                onChange={e => set('triggerPrepend', e.target.checked)}
-                disabled={!form.trigger.trim()} />
-              <span>
-                {t('trainingStudio.mm3.triggerPrepend', 'Train the trigger')}
-                <span className="block text-[10px] text-zinc-500">
-                  {t('trainingStudio.mm3.triggerPrependHint',
-                    'Puts "trigger, " at the front of every training caption, in memory — your files '
-                    + 'are not touched. Leave this ON. With it off the word is only recorded in the '
-                    + 'adapter sidecar and never learned, so typing it at render time bolts an unseen '
-                    + 'token sequence onto your prompt and makes the result WORSE, not better.')}
-                </span>
-              </span>
-            </label>
+                and clicking the toggle would focus the text input instead. */}
+            <Toggle accent="amber" className="mt-2" checked={form.triggerPrepend}
+              onChange={v => set('triggerPrepend', v)}
+              disabled={!form.trigger.trim()}
+              label={t('trainingStudio.mm3.triggerPrepend', 'Train the trigger')}
+              info={t('trainingStudio.mm3.triggerPrependHint',
+                'Puts "trigger, " at the front of every training caption, in memory — your files '
+                + 'are not touched. Leave this ON. Off: the word is only recorded in the '
+                + 'adapter sidecar and never learned, so typing it at render time bolts an unseen '
+                + 'token sequence onto your prompt and makes the result WORSE, not better.')} />
 
             {/* -- Previews ------------------------------------------------
                 Above Advanced on purpose: this is the control that decides
@@ -764,22 +781,22 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
                 <NumField label={t('trainingStudio.mm3.previewEverySteps', 'Every N steps')}
                   value={form.previewEverySteps} onChange={v => set('previewEverySteps', v)}
-                  step={50} hint={t('trainingStudio.mm3.previewStepsHint', '0 = off') as string} />
+                  step={50} info={t('trainingStudio.mm3.previewStepsHint', '0 = off') as string} />
                 <NumField label={t('trainingStudio.mm3.previewEveryMinutes', 'Or every N minutes')}
                   value={form.previewEveryMinutes} onChange={v => set('previewEveryMinutes', v)}
-                  step={5} hint={t('trainingStudio.mm3.previewMinutesHint',
+                  step={5} info={t('trainingStudio.mm3.previewMinutesHint',
                     'Whichever comes first') as string} />
                 <NumField label={t('trainingStudio.mm3.previewSeconds', 'Length (s)')}
                   value={form.previewSeconds} onChange={v => set('previewSeconds', v)}
-                  step={4} hint={t('trainingStudio.mm3.previewSecondsHint',
+                  step={4} info={t('trainingStudio.mm3.previewSecondsHint',
                     '24 s costs about 16 s of GPU') as string} />
                 <NumField label={t('trainingStudio.mm3.previewSeed', 'Preview seed')}
                   value={form.previewSeed} onChange={v => set('previewSeed', v)}
-                  hint={t('trainingStudio.mm3.previewSeedHint',
+                  info={t('trainingStudio.mm3.previewSeedHint',
                     'Fixed across the run') as string} />
                 <NumField label={t('trainingStudio.mm3.previewScaleMlp', 'Preview MLP scale')}
                   value={form.previewScaleMlp} onChange={v => set('previewScaleMlp', v)}
-                  step={0.05} hint={t('trainingStudio.mm3.previewScaleMlpHint',
+                  step={0.05} info={t('trainingStudio.mm3.previewScaleMlpHint',
                     'How hard the adapter’s MLP delta is applied in previews only. '
                     + '1 = full, 0 = attention only.') as string} />
               </div>
@@ -794,33 +811,43 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   picking a song here only takes effect while that box is
                   blank. */}
               <label className="flex flex-col gap-1 mt-3">
-                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                  {t('trainingStudio.mm3.previewSong', 'Preview song')}
-                </span>
-                <select className={INPUT} value={form.previewSongId}
-                  disabled={!!form.previewCaption.trim()}
-                  onChange={e => set('previewSongId', e.target.value)}>
-                  <option value="">{t('trainingStudio.mm3.previewSongAuto', 'Auto (held-out, real lyrics preferred)')}</option>
-                  {(status?.previewSongs ?? []).map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.filename}{s.held ? '' : ` (${t('trainingStudio.mm3.previewSongTraining', 'training')})`}
-                      {!s.usableLyrics ? ` — ${t('trainingStudio.mm3.previewSongInstrumental', 'likely instrumental')}` : ''}
-                      {s.durationS > 0 ? ` · ${Math.round(s.durationS)}s` : ''}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-[10px] text-zinc-500 leading-snug">
-                  {form.previewCaption.trim()
+                <ParamLabel
+                  label={t('trainingStudio.mm3.previewSong', 'Preview song')}
+                  info={form.previewCaption.trim()
                     ? t('trainingStudio.mm3.previewSongDisabled', 'Ignored while the caption box below is filled in.')
                     : t('trainingStudio.mm3.previewSongHint',
-                        'Rows marked "likely instrumental" are exactly what the auto-pick now avoids — '
-                        + 'pick one anyway if that is deliberately what you want to hear.')}
-                </span>
+                        'Which held-out song a preview render uses. Rows marked "likely instrumental" '
+                        + 'are exactly what the auto-pick now avoids — pick one anyway if that is '
+                        + 'deliberately what you want to hear.')}
+                  className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                />
+                <StyledSelect
+                  accent="amber"
+                  value={form.previewSongId}
+                  disabled={!!form.previewCaption.trim()}
+                  onChange={v => set('previewSongId', v)}
+                  options={[
+                    { value: '', label: t('trainingStudio.mm3.previewSongAuto', 'Auto (held-out, real lyrics preferred)') },
+                    ...(status?.previewSongs ?? []).map(s => ({
+                      value: s.id,
+                      label: `${s.filename}${s.held ? '' : ` (${t('trainingStudio.mm3.previewSongTraining', 'training')})`}`
+                        + `${!s.usableLyrics ? ` — ${t('trainingStudio.mm3.previewSongInstrumental', 'likely instrumental')}` : ''}`
+                        + `${s.durationS > 0 ? ` · ${Math.round(s.durationS)}s` : ''}`,
+                    })),
+                  ]}
+                  className="w-full"
+                />
               </label>
               <label className="flex flex-col gap-1 mt-3">
-                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                  {t('trainingStudio.mm3.previewCaption', 'Preview caption')}
-                </span>
+                <ParamLabel
+                  label={t('trainingStudio.mm3.previewCaption', 'Preview caption')}
+                  info={t('trainingStudio.mm3.previewCaptionHint',
+                    'Leave blank unless you have a reason not to: a held-out caption carries the '
+                    + 'artist’s true BPM and tuning, and a wrong one becomes audible as soon as '
+                    + 'identity bakes in. The trigger is prepended as "trigger, " on the caption’s '
+                    + 'first line, which is the exact shape the training rows use.')}
+                  className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                />
                 <textarea
                   className={`${INPUT} font-mono text-[11px] leading-snug`} rows={3}
                   placeholder={t('trainingStudio.mm3.previewCaptionPlaceholder',
@@ -829,40 +856,21 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   value={form.previewCaption}
                   onChange={e => set('previewCaption', e.target.value)}
                 />
-                <span className="text-[10px] text-zinc-500 leading-snug">
-                  {t('trainingStudio.mm3.previewCaptionHint',
-                    'Leave blank unless you have a reason not to: a held-out caption carries the '
-                    + 'artist’s true BPM and tuning, and a wrong one becomes audible as soon as '
-                    + 'identity bakes in. The trigger is prepended as "trigger, " on the caption’s '
-                    + 'first line, which is the exact shape the training rows use.')}
-                </span>
               </label>
               <div className="flex flex-col gap-1.5 mt-3">
-                <label className="flex items-start gap-2 text-[11px] text-zinc-600 dark:text-zinc-300">
-                  <input type="checkbox" className="mt-0.5" checked={form.previewControl}
-                    onChange={e => set('previewControl', e.target.checked)} />
-                  <span>
-                    {t('trainingStudio.mm3.previewControl', 'Also render a neutral control caption')}
-                    <span className="block text-[10px] text-zinc-500">
-                      {t('trainingStudio.mm3.previewControlHint',
-                        'An off-genre prompt rendered WITH the adapter. This is the one that catches '
-                        + 'the adapter damaging the base planner - on the artist caption a damaged '
-                        + 'model and a good one both sound roughly like the artist.')}
-                    </span>
-                  </span>
-                </label>
-                <label className="flex items-start gap-2 text-[11px] text-zinc-600 dark:text-zinc-300">
-                  <input type="checkbox" className="mt-0.5" checked={form.previewBaseline}
-                    onChange={e => set('previewBaseline', e.target.checked)} />
-                  <span>
-                    {t('trainingStudio.mm3.previewBaseline', 'Render a no-adapter reference first')}
-                    <span className="block text-[10px] text-zinc-500">
-                      {t('trainingStudio.mm3.previewBaselineHint',
-                        'Free - the engine is still up before the run starts. Without it there is '
-                        + 'nothing to judge "worse than base" against.')}
-                    </span>
-                  </span>
-                </label>
+                <Toggle accent="amber" checked={form.previewControl}
+                  onChange={v => set('previewControl', v)}
+                  label={t('trainingStudio.mm3.previewControl', 'Also render a neutral control caption')}
+                  info={t('trainingStudio.mm3.previewControlHint',
+                    'An off-genre prompt rendered WITH the adapter. This is the one that catches '
+                    + 'the adapter damaging the base planner - on the artist caption a damaged '
+                    + 'model and a good one both sound roughly like the artist.')} />
+                <Toggle accent="amber" checked={form.previewBaseline}
+                  onChange={v => set('previewBaseline', v)}
+                  label={t('trainingStudio.mm3.previewBaseline', 'Render a no-adapter reference first')}
+                  info={t('trainingStudio.mm3.previewBaselineHint',
+                    'Free - the engine is still up before the run starts. Without it there is '
+                    + 'nothing to judge "worse than base" against.')} />
               </div>
             </div>
 
@@ -884,33 +892,36 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               </p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
                 <label className="flex flex-col gap-1 md:col-span-1">
-                  <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                    {t('trainingStudio.mm3.regDataset', 'Corpus')}
-                  </span>
-                  <select className={INPUT} value={form.regDatasetId}
-                    onChange={e => set('regDatasetId', e.target.value)}>
-                    <option value="">{t('trainingStudio.mm3.regOff', 'Off')}</option>
-                    {(status?.regCandidates ?? []).map(d => (
-                      <option key={d.id} value={d.id}>{d.name} ({d.songs})</option>
-                    ))}
-                  </select>
-                  <span className="text-[10px] text-zinc-500 leading-snug">
-                    {(status?.regCandidates?.length ?? 0) === 0
+                  <ParamLabel
+                    label={t('trainingStudio.mm3.regDataset', 'Corpus')}
+                    info={(status?.regCandidates?.length ?? 0) === 0
                       ? t('trainingStudio.mm3.regNone',
                           'No other dataset has RVQ codes yet — a regularisation corpus needs exactly '
                           + 'what a training corpus needs. Run the codes export on one.')
                       : t('trainingStudio.mm3.regDatasetHint',
-                          'Pick something with nothing in common with this artist. Its lyrics may be '
-                          + 'empty; only its captions and codes are used.')}
-                  </span>
+                          'Which unrelated dataset supplies the prior-preservation steps. Pick something '
+                          + 'with nothing in common with this artist. Its lyrics may be empty; only its '
+                          + 'captions and codes are used.')}
+                    className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                  />
+                  <StyledSelect
+                    accent="amber"
+                    value={form.regDatasetId}
+                    onChange={v => set('regDatasetId', v)}
+                    options={[
+                      { value: '', label: t('trainingStudio.mm3.regOff', 'Off') },
+                      ...(status?.regCandidates ?? []).map(d => ({ value: d.id, label: `${d.name} (${d.songs})` })),
+                    ]}
+                    className="w-full"
+                  />
                 </label>
                 <NumField label={t('trainingStudio.mm3.regEvery', 'Every N steps')}
                   value={form.regEvery} onChange={v => set('regEvery', v)}
-                  hint={t('trainingStudio.mm3.regEveryHint',
+                  info={t('trainingStudio.mm3.regEveryHint',
                     '3 = one prior step per two style steps') as string} />
                 <NumField label={t('trainingStudio.mm3.regTopK', 'Classes kept')}
                   value={form.regTopK} onChange={v => set('regTopK', v)} step={64}
-                  hint={t('trainingStudio.mm3.regTopKHint',
+                  info={t('trainingStudio.mm3.regTopKHint',
                     'Coverage: 64 = 90%, 128 = 94%, 256 = 97%') as string} />
               </div>
               {form.regDatasetId && (
@@ -941,13 +952,35 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               <div className="mt-3 pl-3 border-l-2 border-zinc-200 dark:border-white/10 flex flex-col gap-3">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <NumField label={t('trainingStudio.mm3.alpha', 'Alpha')} value={form.alpha}
-                    onChange={v => set('alpha', v)} />
+                    onChange={v => set('alpha', v)}
+                    meta={t('trainingStudio.mm3.alphaMeta', 'default 256')}
+                    info={t('trainingStudio.mm3.alphaInfo',
+                      'Scales how strongly the LoRA\'s learned update is applied on top of the frozen '
+                      + 'weights. Usually left equal to rank; raising it relative to rank strengthens '
+                      + 'the adapter\'s effect, lowering it softens it.')} />
                   <NumField label={t('trainingStudio.mm3.lr', 'Learning rate')} value={form.lr}
-                    onChange={v => set('lr', v)} step={1e-5} />
+                    onChange={v => set('lr', v)} step={1e-5}
+                    meta={t('trainingStudio.mm3.lrMeta', 'default 8e-5')}
+                    info={t('trainingStudio.mm3.lrInfo',
+                      'How fast the adapter\'s weights move each step. Higher can learn faster but risks '
+                      + 'instability or overfitting; lower is safer but slower. Under the Prodigy '
+                      + 'optimizer this becomes a schedule multiplier only — Prodigy picks its own '
+                      + 'effective step size.')} />
                   <NumField label={t('trainingStudio.mm3.gradAccum', 'Grad accum')} value={form.gradAccum}
-                    onChange={v => set('gradAccum', v)} />
+                    onChange={v => set('gradAccum', v)}
+                    meta={t('trainingStudio.mm3.gradAccumMeta', 'default 1')}
+                    info={t('trainingStudio.mm3.gradAccumInfo',
+                      'Number of steps whose gradients are summed before the weights update once, '
+                      + 'simulating a larger batch without more VRAM. Raising it smooths the gradient '
+                      + 'estimate at the cost of a slower wall-clock per effective step; 1 = no '
+                      + 'accumulation.')} />
                   <NumField label={t('trainingStudio.mm3.seed', 'Seed')} value={form.seed}
-                    onChange={v => set('seed', v)} />
+                    onChange={v => set('seed', v)}
+                    meta={t('trainingStudio.mm3.seedMeta', 'default 42')}
+                    info={t('trainingStudio.mm3.seedInfo',
+                      'The random seed for crop order and initialisation. Changing it gives a different '
+                      + 'run outcome for otherwise-identical settings; keeping it fixed makes two runs '
+                      + 'comparable.')} />
                 </div>
                 {/* The dataset-wide caption box lived here until 2026-09-09. One caption for
                     every track replaced the per-track .mm3.txt captions the renders use, and
@@ -964,9 +997,15 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     older ace-train, loudly, rather than silently training
                     plain LoRA. */}
                 <div className="flex flex-col gap-1.5">
-                  <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                    {t('trainingStudio.mm3.adapterType', 'Adapter type')}
-                  </span>
+                  <ParamLabel
+                    label={t('trainingStudio.mm3.adapterType', 'Adapter type')}
+                    info={t('trainingStudio.mm3.adapterTypeHint',
+                      'LoRA is the default. LoKr trains a Kronecker pair per slot for a smaller file '
+                      + '(about 528 MB at factor 6 against a rank-128 LoRA\'s 1.4 GB) — NOT YET '
+                      + 'VALIDATED BY EAR. DoRA/HiRA/LoHa/HRA are new here 2026-09-05 (see each '
+                      + 'button\'s hover text); none has an MM3 measurement of its own yet.')}
+                    className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                  />
                   <div className="flex flex-wrap items-center gap-1.5">
                     {(['lokr', 'lora', 'dora', 'hira', 'loha', 'hra'] as Mm3Method[]).map(m => {
                       const active = method === m;
@@ -987,34 +1026,26 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       );
                     })}
                   </div>
-                  <span className="text-[10px] text-zinc-500 leading-snug">
-                    {t('trainingStudio.mm3.adapterTypeHint',
-                      'LoRA is the default. LoKr trains a Kronecker pair per slot for a smaller file '
-                      + '(about 528 MB at factor 6 against a rank-128 LoRA\'s 1.4 GB) — NOT YET '
-                      + 'VALIDATED BY EAR. DoRA/HiRA/LoHa/HRA are new here 2026-09-05 (see each '
-                      + 'button\'s hover text); none has an MM3 measurement of its own yet.')}
-                  </span>
                   {method !== 'lokr' && (
                     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2 mt-1">
-                      <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300"
-                        title={t('trainingStudio.mm3.hotPizzaInfo')}>
-                        <input type="checkbox" checked={form.pissa && form.hotPizza} disabled={method !== 'lora'} className="accent-amber-500"
-                          onChange={e => setEdits(prev => ({ ...prev, hotPizza: e.target.checked, ...(e.target.checked ? { pissa: true } : {}) }))} />
-                        {t('trainingStudio.mm3.hotPizza', 'HOT-PiZZA')}
-                      </label>
-                      <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300"
-                        title={t('trainingStudio.mm3.pissaInfo')}>
-                        <input type="checkbox" checked={form.pissa} disabled={method !== 'lora'} className="accent-amber-500"
-                          onChange={e => setEdits(prev => ({ ...prev, pissa: e.target.checked, ...(e.target.checked ? {} : { hotPizza: false }) }))} />
-                        {t('trainingStudio.mm3.pissa', 'PiSSA init')}
-                      </label>
+                      <Toggle accent="amber" size="sm" checked={form.pissa && form.hotPizza} disabled={method !== 'lora'}
+                        onChange={v => setEdits(prev => ({ ...prev, hotPizza: v, ...(v ? { pissa: true } : {}) }))}
+                        label={t('trainingStudio.mm3.hotPizza', 'HOT-PiZZA')}
+                        info={t('trainingStudio.mm3.hotPizzaInfo')} />
+                      <Toggle accent="amber" size="sm" checked={form.pissa} disabled={method !== 'lora'}
+                        onChange={v => setEdits(prev => ({ ...prev, pissa: v, ...(v ? {} : { hotPizza: false }) }))}
+                        label={t('trainingStudio.mm3.pissa', 'PiSSA init')}
+                        info={t('trainingStudio.mm3.pissaInfo')} />
+                      <Toggle accent="amber" size="sm" checked={form.rslora} disabled={method === 'hra'}
+                        onChange={v => set('rslora', v)}
+                        label={t('trainingStudio.mm3.rslora', 'rsLoRA')}
+                        info={t('trainingStudio.mm3.rsloraInfo')} />
                       <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-                        <input type="checkbox" checked={form.rslora} disabled={method === 'hra'} className="accent-amber-500"
-                          onChange={e => set('rslora', e.target.checked)} />
-                        {t('trainingStudio.mm3.rslora', 'rsLoRA')}
-                      </label>
-                      <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-                        {t('trainingStudio.mm3.loraPlusRatio', 'LoRA+ ratio')}
+                        <ParamLabel
+                          label={t('trainingStudio.mm3.loraPlusRatio', 'LoRA+ ratio')}
+                          info={t('trainingStudio.mm3.loraPlusRatioInfo')}
+                          className="text-xs text-zinc-700 dark:text-zinc-300"
+                        />
                         <input type="number" min={1} max={64} step={1} value={form.loraPlusRatio}
                           onChange={e => set('loraPlusRatio', Math.max(1, Number(e.target.value) || 1))}
                           className={`${INPUT} w-20`} />
@@ -1024,17 +1055,9 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="flex flex-col gap-1">
-                    <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                      {t('trainingStudio.mm3.optimizer', 'Optimizer')}
-                    </span>
-                    <select className={INPUT} value={form.optimizer}
-                      onChange={e => set('optimizer', e.target.value as 'muon' | 'adamw' | 'prodigy')}>
-                      <option value="prodigy">Prodigy (sets its own LR)</option>
-                      <option value="adamw">AdamW</option>
-                      <option value="muon">Muon</option>
-                    </select>
-                    <span className="text-[10px] text-zinc-500 leading-snug">
-                      {t('trainingStudio.mm3.optimizerHint',
+                    <ParamLabel
+                      label={t('trainingStudio.mm3.optimizer', 'Optimizer')}
+                      info={t('trainingStudio.mm3.optimizerHint',
                         'Prodigy estimates its own step size, so the learning rate below becomes a '
                         + 'schedule multiplier only. On album B it converged to 8.19e-5 against the '
                         + '8e-5 tuned by hand. It costs two extra state buffers (about +2.7 GB at rank '
@@ -1042,43 +1065,49 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                         + 'on. AdamW matches the published SimpleTuner recipe. Muon is NOT recommended: '
                         + 'at the default LR scale of 64 it produced an adapter that rendered digital '
                         + 'silence, because that value was tuned on a different model.')}
-                    </span>
+                      className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                    />
+                    <StyledSelect
+                      accent="amber"
+                      value={form.optimizer}
+                      onChange={v => set('optimizer', v)}
+                      options={[
+                        { value: 'prodigy', label: 'Prodigy (sets its own LR)' },
+                        { value: 'adamw', label: 'AdamW' },
+                        { value: 'muon', label: 'Muon' },
+                      ]}
+                      className="w-full"
+                    />
                   </label>
-                  <label className={'flex items-start gap-2 text-[11px] text-zinc-600 dark:text-zinc-300 '
-                                  + `self-end pb-1${flashSupported ? '' : ' opacity-60'}`}>
-                    <input type="checkbox" className="mt-0.5" checked={attnEffective === 'flash'}
-                      disabled={!flashSupported}
-                      onChange={e => set('attnBackend', e.target.checked ? 'flash' : 'exact')} />
-                    <span>
-                      {t('trainingStudio.mm3.attnBackend', 'Flash attention')}
-                      <span className="block text-[10px] text-zinc-500">
-                        {!flashSupported
-                          ? t('trainingStudio.mm3.attnBackendUnsupported',
-                              'Unavailable on this build: the fused attention kernels exist for CUDA '
-                              + 'only, and the trainer refuses to start on a {{backend}} engine rather '
-                              + 'than run them on the CPU behind your back. Training runs in exact mode.',
-                              { backend: status?.engineBackend ?? 'non-CUDA' })
-                          : flashCalibrated
-                            ? t('trainingStudio.mm3.attnBackendHelp',
-                                'Fused attention kernels — see the VRAM estimate above for the measured saving.')
-                            : t('trainingStudio.mm3.attnBackendHelpPending',
-                                'Fused attention kernels, once mm3-lm-train gains --attn (landing '
-                                + 'concurrently). VRAM saving not yet measured — the estimate above stands '
-                                + 'in with exact mode\'s number until it is.')}
-                      </span>
-                    </span>
-                  </label>
+                  <Toggle accent="amber" className={`self-end pb-1${flashSupported ? '' : ' opacity-60'}`}
+                    checked={attnEffective === 'flash'}
+                    disabled={!flashSupported}
+                    onChange={v => set('attnBackend', v ? 'flash' : 'exact')}
+                    label={t('trainingStudio.mm3.attnBackend', 'Flash attention')}
+                    info={!flashSupported
+                      ? t('trainingStudio.mm3.attnBackendUnsupported',
+                          'Unavailable on this build: the fused attention kernels exist for CUDA '
+                          + 'only, and the trainer refuses to start on a {{backend}} engine rather '
+                          + 'than run them on the CPU behind your back. Training runs in exact mode.',
+                          { backend: status?.engineBackend ?? 'non-CUDA' })
+                      : flashCalibrated
+                        ? t('trainingStudio.mm3.attnBackendHelp',
+                            'Fused attention kernels — see the VRAM estimate above for the measured saving.')
+                        : t('trainingStudio.mm3.attnBackendHelpPending',
+                            'Fused attention kernels, once mm3-lm-train gains --attn (landing '
+                            + 'concurrently). VRAM saving not yet measured — the estimate above stands '
+                            + 'in with exact mode\'s number until it is.')} />
                   {form.adapterType === 'lokr' && (
                     <NumField label={t('trainingStudio.mm3.lokrFactor', 'LoKr factor')}
                       value={form.lokrFactor} onChange={v => set('lokrFactor', v)}
-                      hint={t('trainingStudio.mm3.lokrFactorHint',
+                      info={t('trainingStudio.mm3.lokrFactorHint',
                         '6 gives ~528 MB and 264M parameters. Higher is smaller and less capable: '
                         + '8 -> 274 MB, 16 -> 109 MB.') as string} />
                   )}
                   {form.optimizer === 'muon' && (
                     <NumField label={t('trainingStudio.mm3.muonLrScale', 'Muon LR scale')}
                       value={form.muonLrScale} onChange={v => set('muonLrScale', v)}
-                      hint={t('trainingStudio.mm3.muonLrScaleHint',
+                      info={t('trainingStudio.mm3.muonLrScaleHint',
                         '64 is the best of the values measured so far, not a tuned optimum.') as string} />
                   )}
                 </div>
@@ -1102,38 +1131,53 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       + 'and ship in the same adapter file. Different mechanism from "History before '
                       + 'crop" below, which is FROZEN real-audio context, not a trained parameter.')}
                   </span>
-                  <label className="flex items-start gap-2 text-[11px] text-zinc-600 dark:text-zinc-300">
-                    <input type="checkbox" className="mt-0.5" checked={form.artistTokenOn}
-                      onChange={e => {
-                        const on = e.target.checked;
-                        setEdits(prev => ({
-                          ...prev, artistTokenOn: on,
-                          artistToken: on && !form.artistToken.trim()
-                            ? (form.trigger.trim() || 'artist') : form.artistToken,
-                        }));
-                      }} />
-                    {t('trainingStudio.mm3.artistTokenOn', 'Train an artist token')}
-                  </label>
+                  <Toggle accent="amber" checked={form.artistTokenOn}
+                    onChange={on => {
+                      setEdits(prev => ({
+                        ...prev, artistTokenOn: on,
+                        artistToken: on && !form.artistToken.trim()
+                          ? (form.trigger.trim() || 'artist') : form.artistToken,
+                      }));
+                    }}
+                    label={t('trainingStudio.mm3.artistTokenOn', 'Train an artist token')}
+                    info={t('trainingStudio.mm3.artistTokenOnInfo',
+                      'Adds a named token whose learned vectors sit behind a placeholder in every '
+                      + 'training caption, trained alongside the LoRA. Off: no soft-prompt token is '
+                      + 'added — only the LoRA weights carry the identity.')} />
                   {form.artistTokenOn && (
                     <div className="grid grid-cols-3 gap-2">
                       <label className="flex flex-col gap-1">
-                        <span className="text-[10px] text-zinc-500">
-                          {t('trainingStudio.mm3.artistToken', 'Token name')}
-                        </span>
+                        <ParamLabel
+                          label={t('trainingStudio.mm3.artistToken', 'Token name')}
+                          info={t('trainingStudio.mm3.artistTokenInfo',
+                            'The placeholder word the learned vectors attach to in captions. '
+                            + 'Defaults to the trigger word if one is set.')}
+                          className="text-[10px] text-zinc-500"
+                        />
                         <input className={INPUT} value={form.artistToken}
                           onChange={e => set('artistToken', e.target.value.replace(/[^A-Za-z0-9_-]/g, ''))} />
                       </label>
                       <NumField label={t('trainingStudio.mm3.artistTokenK', 'Token vectors (k)')}
-                        value={form.artistTokenK} onChange={v => set('artistTokenK', v)} />
+                        value={form.artistTokenK} onChange={v => set('artistTokenK', v)}
+                        meta={t('trainingStudio.mm3.artistTokenKMeta', 'default 32')}
+                        info={t('trainingStudio.mm3.artistTokenKInfo',
+                          'How many learned vectors the artist token adds behind its placeholder. More '
+                          + 'vectors give the token more room to encode identity but add trainable '
+                          + 'parameters; fewer is cheaper but may undercapture it.')} />
                       <NumField label={t('trainingStudio.mm3.artistTokenLr', 'Token LR')}
-                        value={form.artistTokenLr} onChange={v => set('artistTokenLr', v)} step={0.0005} />
+                        value={form.artistTokenLr} onChange={v => set('artistTokenLr', v)} step={0.0005}
+                        meta={t('trainingStudio.mm3.artistTokenLrMeta', 'default 0.005')}
+                        info={t('trainingStudio.mm3.artistTokenLrInfo',
+                          'The learning rate for the artist token and its vectors, separate from the '
+                          + 'adapter\'s own learning rate above. Higher moves the token\'s identity in '
+                          + 'faster but risks overshooting; lower is safer but slower to bake in.')} />
                     </div>
                   )}
                   <NumField label={t('trainingStudio.mm3.prefixN', 'Prefix columns (trainable)')}
                     value={form.regDatasetId ? 0 : form.prefixN}
                     onChange={v => set('prefixN', Math.max(0, Math.min(64, v)))}
                     disabled={!!form.regDatasetId}
-                    hint={(form.regDatasetId
+                    info={(form.regDatasetId
                       ? t('trainingStudio.mm3.prefixNVsReg',
                           'Unavailable with a regularisation dataset: the prior capture needs an inert '
                           + 'model, and a prefix is non-zero from initialisation. The engine refuses '
@@ -1144,24 +1188,9 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="flex flex-col gap-1">
-                    <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                      {t('trainingStudio.mm3.base', 'Base precision')}
-                    </span>
-                    <select className={INPUT} value={form.basePrecision}
-                      onChange={e => set('basePrecision', e.target.value)}>
-                      {(status?.bases ?? []).map(b => (
-                        <option key={b.id} value={b.id}>
-                          {b.id} — {(b.bytes / 1073741824).toFixed(1)} GB
-                          {b.quality === 'poor' ? ' (not recommended)' : ''}
-                          {b.id === status?.recommended?.base ? ' \u2713' : ''}
-                        </option>
-                      ))}
-                    </select>
-                    {peak && (
-                      <span className={`text-[10px] leading-snug ${peak.tone}`}>{peak.text}</span>
-                    )}
-                    <span className="text-[10px] text-zinc-500 leading-snug">
-                      {chosen?.quality === 'poor'
+                    <ParamLabel
+                      label={t('trainingStudio.mm3.base', 'Base precision')}
+                      info={chosen?.quality === 'poor'
                         ? t('trainingStudio.mm3.basePoor',
                             'This base is too lossy to train against: measured +14% on the first-step loss '
                             + 'and roughly double the gradient norm, i.e. the quantizer injects more error '
@@ -1172,34 +1201,39 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                             + 'so only VRAM and fidelity change, and step time barely moves (within ~5% '
                             + 'across the whole range). Pick the smallest one that comfortably fits your '
                             + 'card, then spend what is left on LoRA rank.')}
-                    </span>
+                      className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                    />
+                    <StyledSelect
+                      accent="amber"
+                      value={form.basePrecision}
+                      onChange={v => set('basePrecision', v)}
+                      options={(status?.bases ?? []).map(b => ({
+                        value: b.id,
+                        label: `${b.id} — ${(b.bytes / 1073741824).toFixed(1)} GB`
+                          + `${b.quality === 'poor' ? ' (not recommended)' : ''}`
+                          + `${b.id === status?.recommended?.base ? ' ✓' : ''}`,
+                      }))}
+                      className="w-full"
+                    />
+                    {peak && (
+                      <span className={`text-[10px] leading-snug ${peak.tone}`}>{peak.text}</span>
+                    )}
                   </label>
                   <NumField label={t('trainingStudio.mm3.holdout', 'Hold-out fraction')}
                     value={form.holdout} onChange={v => set('holdout', v)} step={0.05}
-                    hint={t('trainingStudio.mm3.holdoutHint',
+                    info={t('trainingStudio.mm3.holdoutHint',
                       '0 disables evaluation — the training loss then cannot tell learning from '
                       + 'memorising. Ignored below 6 songs.') as string} />
                   <NumField label={t('trainingStudio.mm3.evalEvery', 'Evaluate every')}
                     value={form.evalEvery} onChange={v => set('evalEvery', v)} step={25}
-                    hint={t('trainingStudio.mm3.evalEveryHint',
+                    info={t('trainingStudio.mm3.evalEveryHint',
                       'Steps between held-out evaluations. 0 = off. This is also the finest '
                       + 'grain a held-out target can stop on.') as string} />
                 </div>
                 <label className="flex flex-col gap-1">
-                  <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                    {t('trainingStudio.mm3.cropMode', 'Crop mode')}
-                  </span>
-                  <select className={INPUT} value={form.cropMode}
-                    onChange={e => set('cropMode', e.target.value as 'random' | 'beginning' | 'structured')}>
-                    <option value="structured">structured</option>
-                    <option value="random">random</option>
-                    <option value="beginning">beginning</option>
-                  </select>
-                  <span className={`text-[10px] leading-snug ${
-                    form.cropMode !== 'structured'
-                      ? 'text-amber-600/80 dark:text-amber-400/80' : 'text-zinc-500'
-                  }`}>
-                    {form.cropMode === 'random'
+                  <ParamLabel
+                    label={t('trainingStudio.mm3.cropMode', 'Crop mode')}
+                    info={form.cropMode === 'random'
                       ? t('trainingStudio.mm3.cropModeRandom',
                           '`random` hands the model a prompt followed straight by mid-song audio with '
                           + 'no history in front of it, and supervises it — so it learns that a song may '
@@ -1218,51 +1252,47 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                             + 'and pins the rest flush to the track end — the only place EOS is '
                             + 'supervised. This is the default and the two others are each broken at '
                             + 'one end.')}
-                  </span>
+                    className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                  />
+                  <StyledSelect
+                    accent="amber"
+                    value={form.cropMode}
+                    onChange={v => set('cropMode', v)}
+                    options={[
+                      { value: 'structured', label: 'structured' },
+                      { value: 'random', label: 'random' },
+                      { value: 'beginning', label: 'beginning' },
+                    ]}
+                    className="w-full"
+                  />
                 </label>
                 <label className="flex flex-col gap-1">
-                  <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                    {t('trainingStudio.mm3.cropAnchor', 'Crop position')}
-                  </span>
-                  <select className={INPUT} value={form.cropAnchor}
-                    onChange={e => set('cropAnchor', e.target.value as 'song' | 'zero')}>
-                    <option value="song">song (true position)</option>
-                    <option value="zero">zero (legacy)</option>
-                  </select>
-                  <span className="text-[10px] text-zinc-500 leading-snug">
-                    {t('trainingStudio.mm3.cropAnchorHint',
+                  <ParamLabel
+                    label={t('trainingStudio.mm3.cropAnchor', 'Crop position')}
+                    info={t('trainingStudio.mm3.cropAnchorHint',
                       'Under "zero" every crop was presented to the model as if it were the opening of '
                       + 'the song, whatever part of the track it came from - while generation always '
                       + 'starts at frame 0. That mismatch teaches the model that a song can begin '
                       + 'anywhere, and shows up as sound arriving instantly at 0:00 and as tempo '
                       + 'drifting mid-track. "song" labels each crop with where it actually is. Runs '
                       + 'trained under the two are not comparable.')}
-                  </span>
+                    className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                  />
+                  <StyledSelect
+                    accent="amber"
+                    value={form.cropAnchor}
+                    onChange={v => set('cropAnchor', v)}
+                    options={[
+                      { value: 'song', label: 'song (true position)' },
+                      { value: 'zero', label: 'zero (legacy)' },
+                    ]}
+                    className="w-full"
+                  />
                 </label>
                 <label className="flex flex-col gap-1">
-                  <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                    {t('trainingStudio.mm3.prefixFrames', 'History before crop (frames)')}
-                  </span>
-                  <div className="flex gap-2">
-                    <input type="number" className={INPUT} step={50} min={0}
-                      value={form.prefixFrames}
-                      disabled={form.cropAnchor === 'zero'}
-                      onChange={e => set('prefixFrames', Math.max(0, Number(e.target.value)))} />
-                    <button type="button" className={BTN_SM}
-                      disabled={form.cropAnchor === 'zero'}
-                      onClick={() => set('prefixFrames',
-                        form.prefixFrames > 0 ? 0 : form.maxFrames)}>
-                      {/* An ACTION, not a state. It read "Off" while the field
-                          still said 4096, which is how at least one user
-                          reported having switched the prefix off and trained
-                          with it anyway (#142). */}
-                      {form.prefixFrames > 0
-                        ? t('trainingStudio.mm3.prefixTurnOff', 'Turn off')
-                        : t('trainingStudio.mm3.prefixMatch', 'Match crop')}
-                    </button>
-                  </div>
-                  <span className="text-[10px] text-zinc-500 leading-snug">
-                    {form.cropAnchor === 'zero'
+                  <ParamLabel
+                    label={t('trainingStudio.mm3.prefixFrames', 'History before crop (frames)')}
+                    info={form.cropAnchor === 'zero'
                       ? t('trainingStudio.mm3.prefixNeedsSong',
                           'Needs crop position "song". History placed at positions the crop then '
                           + 're-uses is not a history.')
@@ -1282,7 +1312,26 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                             + 'better with the Middle Third dial at 0. History is LINEAR in VRAM where '
                             + 'crop length is quadratic, so it buys context far more cheaply than a '
                             + 'longer crop does.')}
-                  </span>
+                    className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                  />
+                  <div className="flex gap-2">
+                    <input type="number" className={INPUT} step={50} min={0}
+                      value={form.prefixFrames}
+                      disabled={form.cropAnchor === 'zero'}
+                      onChange={e => set('prefixFrames', Math.max(0, Number(e.target.value)))} />
+                    <button type="button" className={BTN_SM}
+                      disabled={form.cropAnchor === 'zero'}
+                      onClick={() => set('prefixFrames',
+                        form.prefixFrames > 0 ? 0 : form.maxFrames)}>
+                      {/* An ACTION, not a state. It read "Off" while the field
+                          still said 4096, which is how at least one user
+                          reported having switched the prefix off and trained
+                          with it anyway (#142). */}
+                      {form.prefixFrames > 0
+                        ? t('trainingStudio.mm3.prefixTurnOff', 'Turn off')
+                        : t('trainingStudio.mm3.prefixMatch', 'Match crop')}
+                    </button>
+                  </div>
                 </label>
               </div>
             )}

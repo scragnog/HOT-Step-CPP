@@ -15,6 +15,7 @@ import { AlertTriangle, FileCode2, Loader2, PauseCircle, XCircle } from 'lucide-
 import { useTranslation } from 'react-i18next';
 
 import { useTrainingStore } from '../../stores/trainingStore';
+import { Toggle } from '../shared/Toggle';
 import { JobProgress } from './JobProgress';
 import { useMm3Status } from './useMm3Status';
 
@@ -93,24 +94,19 @@ export const Mm3CodesCard: React.FC<{ datasetId: string }> = ({ datasetId }) => 
           </div>
         ) : (
           <>
-            <label className="flex items-start gap-2 mb-3 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={launder}
-                onChange={e => setLaunder(e.target.checked)}
-                className="mt-0.5 accent-amber-500"
-              />
-              <span className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                <span className="font-semibold text-zinc-800 dark:text-zinc-200">
-                  {t('trainingStudio.mm3.launderLabel', 'Cover-launder the codes (dense mixes)')}
-                </span>
-                {' — '}
-                {t('trainingStudio.mm3.launderBlurb',
-                  'renders each track back through the model (rec7 states → flow DiT) before encoding, so '
-                  + 'buried vocals reach the code targets. Slower (~3 min/track, capped at 6 min of audio), '
-                  + 'writes a separate cache, and the training form chooses which cache a run uses.')}
-              </span>
-            </label>
+            <Toggle
+              accent="amber"
+              checked={launder}
+              onChange={setLaunder}
+              className="mb-3"
+              label={t('trainingStudio.mm3.launderLabel', 'Cover-launder the codes (dense mixes)')}
+              info={t('trainingStudio.mm3.launderInfo',
+                'Renders each track back through the model (rec7 states through the flow DiT) before encoding, '
+                + 'so vocals buried in a dense mix still reach the code targets. On: slower (about 3 minutes per '
+                + 'track, capped at 6 minutes of audio) and writes a separate cache alongside the plain one; the '
+                + 'training form then picks which cache a run uses. Off: the plain export, unchanged from before '
+                + 'this option existed.')}
+            />
             <div className="flex items-center gap-3 flex-wrap">
               <button
                 onClick={() => void run()}

@@ -42,6 +42,9 @@ import {
 } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { ModelManagerModal } from '../model-manager/ModelManagerModal';
+import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
 import { JobProgress } from './JobProgress';
 import { TrainingChart } from './TrainingChart';
 
@@ -58,19 +61,17 @@ const BTN_STAGE = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 
 const BTN_GO = 'px-4 py-2 rounded-lg text-sm font-semibold bg-amber-500 text-black hover:bg-amber-400 '
              + 'disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2';
 const LABEL = 'text-[11px] font-medium text-zinc-500 uppercase tracking-wider';
-const HINT = 'text-[10px] text-zinc-500 leading-snug';
 
 const NumField: React.FC<{
   label: string; value: number; onChange: (v: number) => void; step?: number; hint?: string;
-  disabled?: boolean;
-}> = ({ label, value, onChange, step = 1, hint, disabled }) => (
+  meta?: string; disabled?: boolean;
+}> = ({ label, value, onChange, step = 1, hint, meta, disabled }) => (
   <label className={`flex flex-col gap-1${disabled ? ' opacity-50' : ''}`}>
-    <span className={LABEL}>{label}</span>
+    <ParamLabel label={label} info={hint} meta={meta} className={LABEL} />
     <input
       type="number" className={INPUT} value={value} step={step} disabled={disabled}
       onChange={e => onChange(Number(e.target.value))}
     />
-    {hint && <span className={HINT}>{hint}</span>}
   </label>
 );
 
@@ -78,10 +79,9 @@ const TextField: React.FC<{
   label: string; value: string; onChange: (v: string) => void; hint?: string; placeholder?: string;
 }> = ({ label, value, onChange, hint, placeholder }) => (
   <label className="flex flex-col gap-1">
-    <span className={LABEL}>{label}</span>
+    <ParamLabel label={label} info={hint} className={LABEL} />
     <input className={INPUT} value={value} placeholder={placeholder}
       onChange={e => onChange(e.target.value)} />
-    {hint && <span className={HINT}>{hint}</span>}
   </label>
 );
 
@@ -89,14 +89,8 @@ const CheckField: React.FC<{
   label: string; checked: boolean; onChange: (v: boolean) => void; hint?: string;
   className?: string;
 }> = ({ label, checked, onChange, hint, className }) => (
-  <label className={`flex items-start gap-2 text-[11px] text-zinc-600 dark:text-zinc-300 ${className ?? ''}`}>
-    <input type="checkbox" className="mt-0.5" checked={checked}
-      onChange={e => onChange(e.target.checked)} />
-    <span>
-      {label}
-      {hint && <span className={`block ${HINT}`}>{hint}</span>}
-    </span>
-  </label>
+  <Toggle accent="amber" checked={checked} onChange={onChange} label={label} info={hint}
+    className={className} />
 );
 
 function gb(bytes: number): string {
@@ -230,17 +224,17 @@ export const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => vo
           {advanced && (
             <div className="mt-3 pl-3 border-l-2 border-zinc-200 dark:border-white/10 grid grid-cols-2 md:grid-cols-4 gap-3">
               <label className="flex flex-col gap-1">
-                <span className={LABEL}>{t('trainingStudio.yue2ar.decode', 'Decoder')}</span>
-                <select className={INPUT} value={form.decode}
-                  onChange={e => set('decode', e.target.value as 'auto' | 'ffmpeg')}>
-                  <option value="auto">auto</option>
-                  <option value="ffmpeg" disabled={!status.ffmpeg}>ffmpeg</option>
-                </select>
-                <span className={HINT}>
-                  {t('trainingStudio.yue2ar.decodeHint',
-                    'Must match what the latent cache used: the codes and the latents are only '
-                    + 'frame-aligned because both came from identically decoded samples.')}
-                </span>
+                <ParamLabel label={t('trainingStudio.yue2ar.decode', 'Decoder')} className={LABEL}
+                  info={t('trainingStudio.yue2ar.decodeHint',
+                    'Which decoder reads the source audio before tokenizing it. Must match what the latent '
+                    + 'cache used: the codes and the latents are only frame-aligned because both came from '
+                    + 'identically decoded samples.')} />
+                <StyledSelect accent="amber" value={form.decode}
+                  onChange={v => set('decode', v)}
+                  options={[
+                    { value: 'auto', label: 'auto' },
+                    { value: 'ffmpeg', label: 'ffmpeg', disabled: !status.ffmpeg },
+                  ]} />
               </label>
               <TextField label={t('trainingStudio.yue2ar.only', 'Name filter')}
                 value={form.only} onChange={v => set('only', v)}
@@ -607,19 +601,19 @@ function Yue2SheetPreview({ datasetId, reloadKey, live }: { datasetId: string; r
 
           {sources && (
             <label className="flex flex-col gap-1">
-              <span className={LABEL}>{t('trainingStudio.yue2ar.sheetTrack', 'Track')}</span>
-              <select className={INPUT} value={selected} onChange={e => setSelected(e.target.value)}>
-                <option value="" disabled>
-                  {t('trainingStudio.yue2ar.sheetTrackPick', 'Choose a source…')}
-                </option>
-                {sources.map(s => (
-                  <option key={s.name} value={s.name} disabled={!s.ok}>
-                    {s.ok
-                      ? `${s.name}${s.repaired ? ` (${t('trainingStudio.yue2ar.sheetRepairedTag', 'repaired')})` : ''}`
-                      : `${s.name} — ${s.error || t('trainingStudio.yue2ar.sheetTrackNone', 'no lead sheet')}`}
-                  </option>
-                ))}
-              </select>
+              <ParamLabel label={t('trainingStudio.yue2ar.sheetTrack', 'Track')} className={LABEL}
+                info={t('trainingStudio.yue2ar.sheetTrackInfo',
+                  'Chooses which source\'s lead sheet and original audio show below. It only picks what this '
+                  + 'preview shows — it starts no job and changes nothing that gets trained.')} />
+              <StyledSelect accent="amber" value={selected} onChange={setSelected}
+                placeholder={t('trainingStudio.yue2ar.sheetTrackPick', 'Choose a source…') as string}
+                options={sources.map(s => ({
+                  value: s.name,
+                  disabled: !s.ok,
+                  label: s.ok
+                    ? `${s.name}${s.repaired ? ` (${t('trainingStudio.yue2ar.sheetRepairedTag', 'repaired')})` : ''}`
+                    : `${s.name} — ${s.error || t('trainingStudio.yue2ar.sheetTrackNone', 'no lead sheet')}`,
+                }))} />
             </label>
           )}
 
@@ -774,25 +768,19 @@ export const Yue2StemsCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
       {advanced && (
         <div className="grid grid-cols-2 gap-3 mb-3">
           <label className="flex flex-col gap-1">
-            <span className={LABEL}>{t('trainingStudio.yue2ar.stemsLevel', 'Separator')}</span>
-            <select className={INPUT} value={form.level}
-              onChange={e => set('level', Number(e.target.value))}>
-              <option value={4}>
-                {t('trainingStudio.yue2ar.stemsLevelVocals', 'Vocals only, one pass (recommended)')}
-              </option>
-              <option value={5}>
-                {t('trainingStudio.yue2ar.stemsLevelLeap', 'Leap Xe pair, two passes')}
-              </option>
-              <option value={0}>
-                {t('trainingStudio.yue2ar.stemsLevelFull', 'Full six-stem split (slowest)')}
-              </option>
-            </select>
-            <span className={HINT}>
-              {t('trainingStudio.yue2ar.stemsLevelHint',
-                'The aligner opens one file, vocals.wav, so the default runs the separator with everything '
-                + 'but the vocal stem masked off. The six-stem split produces a drum kit and a piano this '
-                + 'stage then deletes, at roughly three model passes instead of one.')}
-            </span>
+            <ParamLabel label={t('trainingStudio.yue2ar.stemsLevel', 'Separator')} className={LABEL}
+              info={t('trainingStudio.yue2ar.stemsLevelHint',
+                'Which SuperSep pass separates the vocal. The aligner opens one file, vocals.wav, so the '
+                + 'default runs the separator with everything but the vocal stem masked off, in one pass. '
+                + 'The six-stem split produces a drum kit and a piano this stage then deletes, at roughly '
+                + 'three model passes instead of one — slower for no benefit to this stage.')} />
+            <StyledSelect accent="amber" value={form.level}
+              onChange={v => set('level', Number(v))}
+              options={[
+                { value: 4, label: t('trainingStudio.yue2ar.stemsLevelVocals', 'Vocals only, one pass (recommended)') as string },
+                { value: 5, label: t('trainingStudio.yue2ar.stemsLevelLeap', 'Leap Xe pair, two passes') as string },
+                { value: 0, label: t('trainingStudio.yue2ar.stemsLevelFull', 'Full six-stem split (slowest)') as string },
+              ]} />
           </label>
           <CheckField
             className="col-span-2 md:col-span-1 self-end pb-1.5"
@@ -1450,18 +1438,16 @@ export const Yue2ArTrainStageCard: React.FC<{
           ) : (
             <>
               <label className="flex flex-col gap-1 mb-3">
-                <span className={LABEL}>{t('trainingStudio.yue2ar.trigger', 'Trigger word')}</span>
-                <input className={INPUT} value={form.trigger}
-                  onChange={e => set('trigger', e.target.value)} />
-                <span className={HINT}>
-                  {form.trigger.trim()
+                <ParamLabel label={t('trainingStudio.yue2ar.trigger', 'Trigger word')} className={LABEL}
+                  info={form.trigger.trim()
                     ? t('trainingStudio.yue2ar.triggerHint',
                         'Goes in front of every training caption and is stamped into the adapter, so half a '
-                        + 'run under a different one is a different adapter.')
+                        + 'run under a different one is a different adapter.') as string
                     : t('trainingStudio.yue2ar.triggerMissing',
                         'Required. Without one the trained style has no handle at generation time, and the '
-                        + 'engine only warns — a silent warning inside a long run is not a warning.')}
-                </span>
+                        + 'engine only warns — a silent warning inside a long run is not a warning.') as string} />
+                <input className={INPUT} value={form.trigger}
+                  onChange={e => set('trigger', e.target.value)} />
               </label>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -1482,17 +1468,18 @@ export const Yue2ArTrainStageCard: React.FC<{
                     'Rungs on the ladder. The rung is picked by ear afterwards, so a coarse ladder is a '
                     + 'smaller choice.') as string} />
                 <label className="flex flex-col gap-1">
-                  <span className={LABEL}>{t('trainingStudio.yue2ar.target', 'Trained sites')}</span>
-                  <select className={INPUT} value={form.target}
-                    onChange={e => set('target', e.target.value as Yue2ArTarget)}>
-                    <option value="attn">attn</option>
-                    <option value="attn_mlp">attn_mlp</option>
-                  </select>
-                  <span className={HINT}>
-                    {t('trainingStudio.yue2ar.targetHint',
-                      'attn_mlp is qkvo plus gate/up/down on all 28 AR layers — upstream\'s own group, and '
-                      + 'what the recipe was proven with.')}
-                  </span>
+                  <ParamLabel label={t('trainingStudio.yue2ar.target', 'Trained sites')} className={LABEL}
+                    info={t('trainingStudio.yue2ar.targetHint',
+                      'Which weights inside the AR model the LoRA touches. attn is the attention '
+                      + 'projections only; attn_mlp is qkvo plus gate/up/down on all 28 AR layers — '
+                      + 'upstream\'s own group, and what the recipe was proven with. More sites means more '
+                      + 'trainable parameters and a heavier adapter.')} />
+                  <StyledSelect accent="amber" value={form.target}
+                    onChange={v => set('target', v)}
+                    options={[
+                      { value: 'attn', label: 'attn' },
+                      { value: 'attn_mlp', label: 'attn_mlp' },
+                    ]} />
                 </label>
               </div>
 
@@ -1528,38 +1515,36 @@ export const Yue2ArTrainStageCard: React.FC<{
                         'No source has a lead sheet yet — run the lead-sheet stage, or leave this at any '
                         + 'value; every source trains cot=off either way.') as string} />
                 <label className="flex flex-col gap-1">
-                  <span className={LABEL}>{t('trainingStudio.yue2ar.styleTemplate', 'Style template')}</span>
-                  <select className={INPUT} value={form.styleTemplate}
-                    onChange={e => set('styleTemplate', e.target.value as Yue2StyleTemplate)}>
-                    <option value="upstream">upstream</option>
-                    <option value="bare">bare</option>
-                  </select>
-                  <span className={HINT}>
-                    {t('trainingStudio.yue2ar.styleTemplateHint',
+                  <ParamLabel label={t('trainingStudio.yue2ar.styleTemplate', 'Style template')} className={LABEL}
+                    info={t('trainingStudio.yue2ar.styleTemplateHint',
                       'How the prompt is built from the trigger and the caption. Generation has to compose '
-                      + 'the same string, which is why it is stamped into the adapter.')}
-                  </span>
+                      + 'the same string, which is why it is stamped into the adapter — changing this after '
+                      + 'training makes the trigger mean something different than what the adapter '
+                      + 'learned.')} />
+                  <StyledSelect accent="amber" value={form.styleTemplate}
+                    onChange={v => set('styleTemplate', v)}
+                    options={[
+                      { value: 'upstream', label: 'upstream' },
+                      { value: 'bare', label: 'bare' },
+                    ]} />
                 </label>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                 <label className="flex flex-col gap-1">
-                  <span className={LABEL}>{t('trainingStudio.yue2ar.base', 'Base model')}</span>
-                  <select className={INPUT} value={form.lmType}
-                    onChange={e => set('lmType', e.target.value)}>
-                    {status.bases.map(b => (
-                      <option key={b.id} value={b.id}>
-                        {b.id}{b.proven ? ` — ${t('trainingStudio.yue2ar.baseProven', 'measured')}` : ''}
-                        {` · ${gb(b.bytes)}`}
-                      </option>
-                    ))}
-                    {status.bases.length === 0 && <option value={form.lmType}>{form.lmType}</option>}
-                  </select>
-                  <span className={HINT}>
-                    {t('trainingStudio.yue2ar.baseHint',
-                      'Only bf16 has been trained on here. Whether a quantized base trains usefully at all '
-                      + 'is not established, so the others are offered without a ranking.')}
-                  </span>
+                  <ParamLabel label={t('trainingStudio.yue2ar.base', 'Base model')} className={LABEL}
+                    info={t('trainingStudio.yue2ar.baseHint',
+                      'Which AR base checkpoint the LoRA trains against. Only bf16 has been trained on here '
+                      + '(marked "measured"). Whether a quantized base trains usefully at all is not '
+                      + 'established, so the others are offered without a ranking.')} />
+                  <StyledSelect accent="amber" value={form.lmType}
+                    onChange={v => set('lmType', v)}
+                    options={status.bases.length > 0
+                      ? status.bases.map(b => ({
+                          value: b.id,
+                          label: `${b.id}${b.proven ? ` — ${t('trainingStudio.yue2ar.baseProven', 'measured')}` : ''} · ${gb(b.bytes)}`,
+                        }))
+                      : [{ value: form.lmType, label: form.lmType }]} />
                 </label>
                 <Yue2OptimizerFields value={form} onChange={patch => setEdits(p => ({ ...p, ...patch }))} />
                   {form.optimizer !== 'prodigy' && (<NumField label={t('trainingStudio.yue2ar.lr', 'Learning rate')} value={form.lr}
@@ -1582,14 +1567,23 @@ export const Yue2ArTrainStageCard: React.FC<{
                 <div className="mt-3 pl-3 border-l-2 border-zinc-200 dark:border-white/10 flex flex-col gap-3">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <NumField label={t('trainingStudio.yue2ar.alpha', 'Alpha')} value={form.alpha}
-                      onChange={v => set('alpha', v)} step={16} />
+                      onChange={v => set('alpha', v)} step={16}
+                      hint={t('trainingStudio.yue2ar.alphaHint',
+                        'Scales how strongly the LoRA\'s learned change is applied on top of the base '
+                        + 'weights, independent of rank. Raising it strengthens the adapter\'s pull at the '
+                        + 'same rank; lowering it weakens it.') as string} />
                     <label className="flex flex-col gap-1">
-                      <span className={LABEL}>{t('trainingStudio.yue2ar.lrScheduler', 'Schedule')}</span>
-                      <select className={INPUT} value={form.lrScheduler}
-                        onChange={e => set('lrScheduler', e.target.value as Yue2ArLrScheduler)}>
-                        <option value="cosine">cosine</option>
-                        <option value="constant">constant</option>
-                      </select>
+                      <ParamLabel label={t('trainingStudio.yue2ar.lrScheduler', 'Schedule')} className={LABEL}
+                        info={t('trainingStudio.yue2ar.lrSchedulerHint',
+                          'How the learning rate moves over the cosine horizon below. cosine decays it '
+                          + 'across that horizon; constant holds it flat at the learning rate for the whole '
+                          + 'run.') as string} />
+                      <StyledSelect accent="amber" value={form.lrScheduler}
+                        onChange={v => set('lrScheduler', v)}
+                        options={[
+                          { value: 'cosine', label: 'cosine' },
+                          { value: 'constant', label: 'constant' },
+                        ]} />
                     </label>
                     <NumField label={t('trainingStudio.yue2ar.schedSteps', 'Cosine horizon')}
                       value={form.schedSteps} onChange={v => set('schedSteps', v)} step={100}
@@ -1597,17 +1591,41 @@ export const Yue2ArTrainStageCard: React.FC<{
                         'Not the run length. Moving the steps without moving this changes where on the '
                         + 'curve the run stops.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.warmup', 'Warmup steps')}
-                      value={form.warmup} onChange={v => set('warmup', v)} step={10} />
+                      value={form.warmup} onChange={v => set('warmup', v)} step={10}
+                      hint={t('trainingStudio.yue2ar.warmupHint',
+                        'Steps at the start of the run where the learning rate ramps up from zero instead '
+                        + 'of starting at full strength. More steps ramp up more gradually; 0 starts the run '
+                        + 'at full learning rate immediately.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.gradAccum', 'Grad accum')}
-                      value={form.gradAccum} onChange={v => set('gradAccum', v)} />
+                      value={form.gradAccum} onChange={v => set('gradAccum', v)}
+                      hint={t('trainingStudio.yue2ar.gradAccumHint',
+                        'How many micro-steps of gradients are summed before the weights actually update. '
+                        + 'Raising it simulates a bigger batch on the same VRAM at the cost of more time per '
+                        + 'logged step; 1 updates on every micro-step.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.maxGradNorm', 'Clip grad norm')}
-                      value={form.maxGradNorm} onChange={v => set('maxGradNorm', v)} step={0.1} />
+                      value={form.maxGradNorm} onChange={v => set('maxGradNorm', v)} step={0.1}
+                      hint={t('trainingStudio.yue2ar.maxGradNormHint',
+                        'Caps the size of each gradient update before it is applied. Lower values clamp '
+                        + 'harder, which resists a single bad batch derailing the run; too low can slow '
+                        + 'learning down.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.weightDecay', 'Weight decay')}
-                      value={form.weightDecay} onChange={v => set('weightDecay', v)} step={0.01} />
+                      value={form.weightDecay} onChange={v => set('weightDecay', v)} step={0.01}
+                      hint={t('trainingStudio.yue2ar.weightDecayHint',
+                        'Shrinks the LoRA weights a little on every step, independent of the loss. Raising '
+                        + 'it pulls the adapter toward doing less, which resists overfitting a small corpus; '
+                        + '0 turns it off.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.seed', 'Seed')} value={form.seed}
-                      onChange={v => set('seed', v)} />
+                      onChange={v => set('seed', v)}
+                      hint={t('trainingStudio.yue2ar.seedHint',
+                        'Fixes the random draws (artist/minted mix, dropout, shuffling) so the same recipe '
+                        + 'reproduces the same run. Changing it gives a different draw order, not a '
+                        + 'different recipe.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.adamBeta1', 'Adam β1')}
-                      value={form.adamBeta1} onChange={v => set('adamBeta1', v)} step={0.01} />
+                      value={form.adamBeta1} onChange={v => set('adamBeta1', v)} step={0.01}
+                      hint={t('trainingStudio.yue2ar.adamBeta1Hint',
+                        'How much the optimizer smooths the gradient direction across steps. Higher values '
+                        + 'smooth more, which steadies noisy updates; lower values react to each step\'s '
+                        + 'gradient more directly.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.adamBeta2', 'Adam β2')}
                       value={form.adamBeta2} onChange={v => set('adamBeta2', v)} step={0.005}
                       hint={t('trainingStudio.yue2ar.adamBeta2Hint',
@@ -1619,30 +1637,41 @@ export const Yue2ArTrainStageCard: React.FC<{
                         'Tokens. A longer song truncates without its end marker, so it never teaches a fake '
                         + 'ending. This also sizes the per-layer buffers — it is the VRAM lever.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.chunk', 'CE chunk')} value={form.chunk}
-                      onChange={v => set('chunk', v)} step={64} />
+                      onChange={v => set('chunk', v)} step={64}
+                      hint={t('trainingStudio.yue2ar.chunkHint',
+                        'How many tokens the cross-entropy loss is computed over at once. Lower values use '
+                        + 'less VRAM for the loss computation at the cost of more passes; it does not change '
+                        + 'what is learned, only how the loss is computed.') as string} />
                     <label className="flex flex-col gap-1">
-                      <span className={LABEL}>{t('trainingStudio.yue2ar.attn', 'Attention')}</span>
-                      <select className={INPUT} value={form.attn}
-                        onChange={e => set('attn', e.target.value as Yue2ArAttn)}>
-                        <option value="exact">exact</option>
-                        <option value="flash">flash</option>
-                        <option value="flash-f32">flash-f32</option>
-                      </select>
-                      <span className={HINT}>
-                        {t('trainingStudio.yue2ar.attnHint',
-                          'Flash drops the retained softmax — several GB at full song length — and errors '
-                          + 'out on a backend that cannot do it. The recipe was proven on exact.')}
-                      </span>
+                      <ParamLabel label={t('trainingStudio.yue2ar.attn', 'Attention')} className={LABEL}
+                        info={t('trainingStudio.yue2ar.attnHint',
+                          'Which attention kernel trains with. Flash drops the retained softmax — several '
+                          + 'GB at full song length — and errors out on a backend that cannot do it. The '
+                          + 'recipe was proven on exact.') as string} />
+                      <StyledSelect accent="amber" value={form.attn}
+                        onChange={v => set('attn', v)}
+                        options={[
+                          { value: 'exact', label: 'exact' },
+                          { value: 'flash', label: 'flash' },
+                          { value: 'flash-f32', label: 'flash-f32' },
+                        ]} />
                     </label>
                     <NumField label={t('trainingStudio.yue2ar.ckptFrom', 'First snapshot at')}
-                      value={form.ckptFrom} onChange={v => set('ckptFrom', v)} step={10} />
+                      value={form.ckptFrom} onChange={v => set('ckptFrom', v)} step={10}
+                      hint={t('trainingStudio.yue2ar.ckptFromHint',
+                        'The step the first snapshot is saved at; after that, snapshots follow the '
+                        + '"Snapshot every" interval above. Raising it skips saving the earliest, '
+                        + 'least-trained rungs of the ladder.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.evalEvery', 'Eval every')}
                       value={form.evalEvery} onChange={v => set('evalEvery', v)} step={10}
                       disabled={mintedMissing}
                       hint={t('trainingStudio.yue2ar.evalEveryHint',
                         'Held-out loss on the regulariser pack. 0 turns it off.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.logEvery', 'Log every')}
-                      value={form.logEvery} onChange={v => set('logEvery', v)} />
+                      value={form.logEvery} onChange={v => set('logEvery', v)}
+                      hint={t('trainingStudio.yue2ar.logEveryHint',
+                        'How often, in steps, a training-loss line is written to the log. It only changes '
+                        + 'how often progress is reported, not the run itself.') as string} />
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <TextField label={t('trainingStudio.yue2ar.style', 'Fallback style')}

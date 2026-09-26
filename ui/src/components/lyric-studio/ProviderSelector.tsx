@@ -4,6 +4,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { lireekApi } from '../../services/lireekApi';
+import { StyledSelect } from '../shared/StyledSelect';
+import { ParamLabel } from '../shared/ParamLabel';
 
 // ── Provider type (local, matches API response) ───────────────────────────
 interface LlmProviderInfo {
@@ -71,43 +73,46 @@ export function saveSelections(sel: ModelSelections) {
 export const RowSelector: React.FC<{
   label: string;
   color: string;
+  info: string;
   providers: LlmProviderInfo[];
   selectedProvider: string;
   selectedModel: string;
   onSelectionChange: (provider: string, model: string) => void;
-}> = ({ label, color, providers, selectedProvider, selectedModel, onSelectionChange }) => {
+}> = ({ label, color, info, providers, selectedProvider, selectedModel, onSelectionChange }) => {
   const { t } = useTranslation();
   const currentProvider = providers.find(p => p.id === selectedProvider);
   const models = currentProvider?.models || [];
 
   return (
     <div className="space-y-1">
-      <span className={`text-[10px] font-semibold uppercase tracking-wider ${color}`}>{label}</span>
-      <select
+      <ParamLabel
+        label={label}
+        info={info}
+        className={`text-[10px] font-semibold uppercase tracking-wider ${color}`}
+      />
+      <StyledSelect
+        accent="pink"
         value={selectedProvider}
-        onChange={e => {
-          const pid = e.target.value;
+        onChange={pid => {
           const prov = providers.find(p => p.id === pid);
           onSelectionChange(pid, prov?.default_model || '');
         }}
-        className="w-full px-2 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-[11px] text-white focus:outline-none focus:border-pink-500/50 appearance-none cursor-pointer"
+        options={providers.map(p => ({ value: p.id, label: p.name }))}
+        size="sm"
+        className="w-full"
         title={`${label} Provider`}
-      >
-        {providers.map(p => (
-          <option key={p.id} value={p.id}>{p.name}</option>
-        ))}
-      </select>
-      <select
+      />
+      <StyledSelect
+        accent="pink"
         value={selectedModel}
-        onChange={e => onSelectionChange(selectedProvider, e.target.value)}
-        className="w-full px-2 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-[11px] text-white focus:outline-none focus:border-pink-500/50 appearance-none cursor-pointer"
+        onChange={m => onSelectionChange(selectedProvider, m)}
+        options={models.length > 0
+          ? models.map(m => ({ value: m, label: m }))
+          : [{ value: '', label: t('lyric.noModels') }]}
+        size="sm"
+        className="w-full"
         title={`${label} Model`}
-      >
-        {models.map(m => (
-          <option key={m} value={m}>{m}</option>
-        ))}
-        {models.length === 0 && <option value="">{t('lyric.noModels')}</option>}
-      </select>
+      />
     </div>
   );
 };
@@ -186,6 +191,7 @@ export const TripleProviderSelector: React.FC<TripleProviderSelectorProps> = ({
       <RowSelector
         label={t('lyric.profile')}
         color="text-amber-400"
+        info={t('lyric.providerProfileInfo')}
         providers={providers}
         selectedProvider={selections.profiling.provider}
         selectedModel={selections.profiling.model}
@@ -194,6 +200,7 @@ export const TripleProviderSelector: React.FC<TripleProviderSelectorProps> = ({
       <RowSelector
         label={t('lyric.generate')}
         color="text-green-400"
+        info={t('lyric.providerGenerateInfo')}
         providers={providers}
         selectedProvider={selections.generation.provider}
         selectedModel={selections.generation.model}
@@ -202,6 +209,7 @@ export const TripleProviderSelector: React.FC<TripleProviderSelectorProps> = ({
       <RowSelector
         label={t('lyric.refine')}
         color="text-purple-400"
+        info={t('lyric.providerRefineInfo')}
         providers={providers}
         selectedProvider={selections.refinement.provider}
         selectedModel={selections.refinement.model}
@@ -269,34 +277,36 @@ export const ProviderSelector: React.FC<ProviderSelectorProps> = ({
 
   return (
     <div className={`flex ${compact ? 'flex-row items-center gap-2' : 'flex-col gap-2'}`}>
-      {!compact && <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">{label}</label>}
+      {!compact && (
+        <ParamLabel
+          label={label}
+          info={t('lyric.providerSelectorInfo')}
+          className="text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase tracking-wider"
+        />
+      )}
       <div className={`flex ${compact ? 'flex-row' : 'flex-row'} gap-2 flex-1`}>
-        <select
+        <StyledSelect
+          accent="pink"
           value={selectedProvider}
-          onChange={e => {
-            const pid = e.target.value;
+          onChange={pid => {
             onProviderChange(pid);
             const prov = providers.find(p => p.id === pid);
             if (prov?.default_model) onModelChange(prov.default_model);
           }}
-          className="flex-1 px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-white focus:outline-none focus:border-pink-500/50 appearance-none cursor-pointer"
+          options={providers.map(p => ({ value: p.id, label: p.name }))}
+          className="flex-1"
           title="LLM Provider"
-        >
-          {providers.map(p => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-        <select
+        />
+        <StyledSelect
+          accent="pink"
           value={selectedModel}
-          onChange={e => onModelChange(e.target.value)}
-          className="flex-1 px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-white focus:outline-none focus:border-pink-500/50 appearance-none cursor-pointer"
+          onChange={onModelChange}
+          options={models.length > 0
+            ? models.map(m => ({ value: m, label: m }))
+            : [{ value: '', label: t('lyric.noModels') }]}
+          className="flex-1"
           title="Model"
-        >
-          {models.map(m => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-          {models.length === 0 && <option value="">{t('lyric.noModels')}</option>}
-        </select>
+        />
       </div>
     </div>
   );

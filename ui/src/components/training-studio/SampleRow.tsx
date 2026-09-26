@@ -11,6 +11,7 @@ import { AlertCircle, CheckSquare, Copy, FileWarning, Loader2, Maximize2, Pause,
 import { useTranslation } from 'react-i18next';
 import type { PatchSampleInput, SampleLabelStatus, TrainingSample } from '../../services/trainingApi';
 import { useTrainingStore, type EditableField } from '../../stores/trainingStore';
+import { Toggle } from '../shared/Toggle';
 import type { ColDef } from './SampleGrid';
 
 const STATUS_META: Record<SampleLabelStatus, { dot: string; key: string }> = {
@@ -143,12 +144,14 @@ export const SampleRow: React.FC<SampleRowProps> = ({
     language: textCell('language', sample.language),
 
     instrumental: (
-      <input
-        type="checkbox"
+      <Toggle
+        size="sm"
+        accent="amber"
         checked={sample.isInstrumental}
         disabled={readOnly}
-        onChange={(e) => { void editSample(sample.sampleId, { isInstrumental: e.target.checked }); void flushSample(sample.sampleId); }}
-        className="accent-amber-500"
+        onChange={(checked) => { void editSample(sample.sampleId, { isInstrumental: checked }); void flushSample(sample.sampleId); }}
+        aria-label={t('trainingStudio.grid.instrumental')}
+        title={t('trainingStudio.grid.instrumentalInfo')}
       />
     ),
 
@@ -174,12 +177,14 @@ export const SampleRow: React.FC<SampleRowProps> = ({
     // documented way to unblock Build (§5.5). The store routes that case
     // through the bulk endpoint, which the 409-on-PATCH rule exempts.
     exclude: (
-      <input
-        type="checkbox"
+      <Toggle
+        size="sm"
+        accent="amber"
         checked={sample.excluded}
         disabled={sample.labelStatus === 'processing'}
-        onChange={(e) => void toggleExcluded(sample.sampleId, e.target.checked)}
-        className="accent-amber-500"
+        onChange={(checked) => void toggleExcluded(sample.sampleId, checked)}
+        aria-label={t('trainingStudio.grid.exclude')}
+        title={t('trainingStudio.grid.excludeInfo')}
       />
     ),
 

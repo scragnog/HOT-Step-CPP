@@ -12,6 +12,7 @@ import { useAuth } from '../../context/AuthContext';
 import { ToggleSwitch } from './BarSection';
 import { formatReferenceName } from './modelLabels';
 import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '../shared/StyledSelect';
 
 interface ReferenceTrack {
   name: string;
@@ -83,18 +84,14 @@ export const MasteringDropdown: React.FC = () => {
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
           info="The generated audio is mastered to match the RMS level, frequency spectrum and dynamic characteristics of this track." />
         {references.length > 0 ? (
-          <select
-            className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 outline-none transition-colors cursor-pointer"
+          <StyledSelect
+            accent="amber"
+            className="w-full"
             value={gp.masteringReference}
-            onChange={e => gp.setMasteringReference(e.target.value)}
-          >
-            <option value="">{t('mastering.selectReference')}</option>
-            {references.map(r => (
-              <option key={r.name} value={r.name}>
-                {r.name} ({formatFileSize(r.size)})
-              </option>
-            ))}
-          </select>
+            onChange={gp.setMasteringReference}
+            placeholder={t('mastering.selectReference')}
+            options={references.map(r => ({ value: r.name, label: `${r.name} (${formatFileSize(r.size)})` }))}
+          />
         ) : (
           <div className="text-xs text-zinc-500 italic px-1">
             {t('mastering.noReferencesYet')}

@@ -14,6 +14,7 @@ import { Loader2, Lock, Waves } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
 import type {
   DitAdapterType,
   TrainDitStage,
@@ -565,16 +566,24 @@ export const TrainDitForm: React.FC<Props> = ({
         <span className="text-[11px] text-zinc-500">{t('trainingStudio.train.dit.adapterTypeHelp')}</span>
         {!isLokr && (
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2 mt-1">
-            <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-              <input type="checkbox" checked={value.pissa} disabled={lock || method !== 'lora'} className="accent-amber-500"
-                onChange={(e) => onChange({ pissa: e.target.checked })} />
-              {P('pissa', method === 'lora' ? 'Default off' : 'Plain LoRA only', CHECK_LABEL)}
-            </label>
-            <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-              <input type="checkbox" checked={value.rslora} disabled={lock || method === 'hra'} className="accent-amber-500"
-                onChange={(e) => onChange({ rslora: e.target.checked })} />
-              {P('rslora', method === 'hra' ? 'Not with HRA' : 'Default off', CHECK_LABEL)}
-            </label>
+            <Toggle
+              accent="amber"
+              checked={value.pissa}
+              disabled={lock || method !== 'lora'}
+              onChange={(v) => onChange({ pissa: v })}
+              label={t('trainingStudio.train.dit.pissa')}
+              info={t('trainingStudio.train.dit.pissaInfo')}
+              meta={method === 'lora' ? 'Default off' : 'Plain LoRA only'}
+            />
+            <Toggle
+              accent="amber"
+              checked={value.rslora}
+              disabled={lock || method === 'hra'}
+              onChange={(v) => onChange({ rslora: v })}
+              label={t('trainingStudio.train.dit.rslora')}
+              info={t('trainingStudio.train.dit.rsloraInfo')}
+              meta={method === 'hra' ? 'Not with HRA' : 'Default off'}
+            />
             <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
               {P('loraPlusRatio', 'Default 1 = off · paper 16 · AdamW/Prodigy only', CHECK_LABEL)}
               <input
@@ -698,37 +707,36 @@ export const TrainDitForm: React.FC<Props> = ({
 
       {/* ── Resume + calibration (2026-08-11) ─────────────────────────── */}
       <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5">
-        <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-          <input
-            type="checkbox"
-            checked={value.resumeFromLatest}
-            disabled={lock}
-            onChange={(e) => onChange({ resumeFromLatest: e.target.checked })}
-            className="accent-amber-500"
-          />
-          {P('resumeFromLatest', 'Default on', CHECK_LABEL)}
-        </label>
-        <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-          <input
-            type="checkbox"
-            checked={value.calibrate}
-            disabled={lock}
-            onChange={(e) => onChange({ calibrate: e.target.checked })}
-            className="accent-amber-500"
-          />
-          {P('calibrate', 'Default off', CHECK_LABEL)}
-        </label>
+        <Toggle
+          accent="amber"
+          checked={value.resumeFromLatest}
+          disabled={lock}
+          onChange={(v) => onChange({ resumeFromLatest: v })}
+          label={t('trainingStudio.train.dit.resumeFromLatest')}
+          info={t('trainingStudio.train.dit.resumeFromLatestInfo')}
+          meta="Default on"
+        />
+        <Toggle
+          accent="amber"
+          checked={value.calibrate}
+          disabled={lock}
+          onChange={(v) => onChange({ calibrate: v })}
+          label={t('trainingStudio.train.dit.calibrate')}
+          info={t('trainingStudio.train.dit.calibrateInfo')}
+          meta="Default off"
+        />
         {value.calibrate && (
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 pl-6">
-            <input
-              type="checkbox"
+          <div className="pl-6">
+            <Toggle
+              accent="amber"
               checked={value.calibrateRepoint}
               disabled={lock}
-              onChange={(e) => onChange({ calibrateRepoint: e.target.checked })}
-              className="accent-amber-500"
+              onChange={(v) => onChange({ calibrateRepoint: v })}
+              label={t('trainingStudio.train.dit.calibrateRepoint')}
+              info={t('trainingStudio.train.dit.calibrateRepointInfo')}
+              meta="Default on"
             />
-            {P('calibrateRepoint', 'Default on', CHECK_LABEL)}
-          </label>
+          </div>
         )}
       </div>
 
@@ -777,16 +785,17 @@ export const TrainDitForm: React.FC<Props> = ({
                 )}
               </label>
 
-              <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 sm:col-span-2">
-                <input
-                  type="checkbox"
+              <div className="sm:col-span-2">
+                <Toggle
+                  accent="amber"
                   checked={value.lokrDecomposeBoth}
                   disabled={lock}
-                  onChange={(e) => onChange({ lokrDecomposeBoth: e.target.checked })}
-                  className="accent-amber-500"
+                  onChange={(v) => onChange({ lokrDecomposeBoth: v })}
+                  label={t('trainingStudio.train.dit.lokrDecomposeBoth')}
+                  info={t('trainingStudio.train.dit.lokrDecomposeBothInfo')}
+                  meta="Default on"
                 />
-                {P('lokrDecomposeBoth', 'Default on', CHECK_LABEL)}
-              </label>
+              </div>
             </>
           ) : (
             <>
@@ -1116,37 +1125,33 @@ export const TrainDitForm: React.FC<Props> = ({
           </span>
 
           <div className="flex flex-col gap-1.5 sm:col-span-2">
-            <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-              <input
-                type="checkbox"
-                checked={value.attnBackend === 'flash'}
-                disabled={lock}
-                // The toggle carries the crop cap with it: flash unpins it so
-                // the engine can lift to full-song; exact restores the classic
-                // 1250. The mirror is NOT coupled — 'bf16-f32' is the default
-                // in both modes (Rob, 2026-09-02).
-                onChange={(e) => onChange(e.target.checked
-                  ? { attnBackend: 'flash', cropMax: 0 }
-                  : { attnBackend: 'exact', cropMax: 0 })}
-                className="accent-amber-500"
-              />
-              {P('attnBackend', 'Default on · fused attention', CHECK_LABEL)}
-            </label>
-            <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.train.dit.attnBackendHelp')}</span>
+            <Toggle
+              accent="amber"
+              checked={value.attnBackend === 'flash'}
+              disabled={lock}
+              // The toggle carries the crop cap with it: flash unpins it so
+              // the engine can lift to full-song; exact restores the classic
+              // 1250. The mirror is NOT coupled — 'bf16-f32' is the default
+              // in both modes (Rob, 2026-09-02).
+              onChange={(v) => onChange(v
+                ? { attnBackend: 'flash', cropMax: 0 }
+                : { attnBackend: 'exact', cropMax: 0 })}
+              label={t('trainingStudio.train.dit.attnBackend')}
+              info={t('trainingStudio.train.dit.attnBackendInfo')}
+              meta="Default on · fused attention"
+            />
           </div>
 
           <div className="flex flex-col gap-1.5 sm:col-span-2">
-            <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-              <input
-                type="checkbox"
-                checked={value.cropJitter}
-                disabled={lock}
-                onChange={(e) => onChange({ cropJitter: e.target.checked })}
-                className="accent-amber-500"
-              />
-              {P('cropJitter', 'Experimental · off', CHECK_LABEL)}
-            </label>
-            <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.train.dit.cropJitterHelp')}</span>
+            <Toggle
+              accent="amber"
+              checked={value.cropJitter}
+              disabled={lock}
+              onChange={(v) => onChange({ cropJitter: v })}
+              label={t('trainingStudio.train.dit.cropJitter')}
+              info={t('trainingStudio.train.dit.cropJitterInfo')}
+              meta="Experimental · off"
+            />
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -1249,53 +1254,50 @@ export const TrainDitForm: React.FC<Props> = ({
           {P('stages')}
           <div className="flex items-center gap-4 flex-wrap">
             {ALL_STAGES.map(stage => (
-              <label key={stage} className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-                <input
-                  type="checkbox"
-                  checked={value.stages.includes(stage)}
-                  disabled={lock}
-                  onChange={(e) => toggleStage(stage, e.target.checked)}
-                  className="accent-amber-500"
-                />
-                {stage}
-              </label>
+              <Toggle
+                key={stage}
+                size="sm"
+                accent="amber"
+                checked={value.stages.includes(stage)}
+                disabled={lock}
+                onChange={(v) => toggleStage(stage, v)}
+                label={stage}
+                info={stage === 'train'
+                  ? 'Runs the optimisation step of the pipeline.'
+                  : 'Writes the PEFT adapter directory the app can load.'}
+              />
             ))}
           </div>
 
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-            <input
-              type="checkbox"
-              checked={value.targetMlp}
-              disabled={lock}
-              onChange={(e) => onChange({ targetMlp: e.target.checked })}
-              className="accent-amber-500"
-            />
-            {P('targetMlp', 'Default on', CHECK_LABEL)}
-          </label>
-          <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.train.dit.targetMlpHelp')}</span>
+          <Toggle
+            accent="amber"
+            checked={value.targetMlp}
+            disabled={lock}
+            onChange={(v) => onChange({ targetMlp: v })}
+            label={t('trainingStudio.train.dit.targetMlp')}
+            info={t('trainingStudio.train.dit.targetMlpInfo')}
+            meta="Default on"
+          />
 
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-            <input
-              type="checkbox"
-              checked={value.channelBalance}
-              disabled={lock}
-              onChange={(e) => onChange({ channelBalance: e.target.checked })}
-              className="accent-amber-500"
-            />
-            {P('channelBalance', 'Default on · needs channel_stats.json', CHECK_LABEL)}
-          </label>
+          <Toggle
+            accent="amber"
+            checked={value.channelBalance}
+            disabled={lock}
+            onChange={(v) => onChange({ channelBalance: v })}
+            label={t('trainingStudio.train.dit.channelBalance')}
+            info={t('trainingStudio.train.dit.channelBalanceInfo')}
+            meta="Default on · needs channel_stats.json"
+          />
 
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-            <input
-              type="checkbox"
-              checked={value.stopEngine}
-              disabled={lock}
-              onChange={(e) => onChange({ stopEngine: e.target.checked })}
-              className="accent-amber-500"
-            />
-            {P('stopEngine', 'Default on', CHECK_LABEL)}
-          </label>
-          <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.preprocess.stopEngineHelp')}</span>
+          <Toggle
+            accent="amber"
+            checked={value.stopEngine}
+            disabled={lock}
+            onChange={(v) => onChange({ stopEngine: v })}
+            label={t('trainingStudio.train.dit.stopEngine')}
+            info={t('trainingStudio.train.dit.stopEngineInfo')}
+            meta="Default on"
+          />
         </div>
       </details>
 

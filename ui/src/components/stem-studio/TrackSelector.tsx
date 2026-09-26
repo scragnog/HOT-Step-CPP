@@ -4,7 +4,27 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { EXTRACT_TRACKS, TRACK_LABELS, TRACK_CATEGORIES } from '../../services/stemStudioApi';
 import { SEPARATION_LEVELS, type SeparationLevel } from '../../services/supersepApi';
-import { ToggleSwitch } from '../global-bar/BarSection';
+import { Toggle } from '../shared/Toggle';
+import { StyledSelect } from '../shared/StyledSelect';
+import { ParamLabel } from '../shared/ParamLabel';
+
+/** What each Extract track does — all of them run the same DiT re-synthesis
+ *  pass, so the wording only varies where the track has its own quirk
+ *  (vocals ties into the Lyrics field below). */
+const TRACK_INFO: Record<string, string> = {
+  vocals: 'Generates the lead vocal with DiT, re-synthesised from the full mix rather than isolated from it. If Lyrics below is filled in, it steers this track; pasting lyrics while Vocals is off pulls the lead vocal into whichever other track is selected instead.',
+  backing_vocals: 'Generates a backing/harmony vocal part with DiT, separate from the lead vocal track.',
+  drums: 'Generates the combined drum kit with DiT, as one part rather than split into hits.',
+  bass: 'Generates the bass part with DiT.',
+  guitar: 'Generates the guitar part with DiT.',
+  keyboard: 'Generates the keyboard/piano part with DiT.',
+  percussion: 'Generates a percussion part with DiT, separate from the main drum kit.',
+  strings: 'Generates the strings part with DiT.',
+  synth: 'Generates the synth part with DiT.',
+  fx: 'Generates a sound-effects/atmosphere part with DiT.',
+  brass: 'Generates the brass part with DiT.',
+  woodwinds: 'Generates the woodwinds part with DiT.',
+};
 
 interface TrackSelectorProps {
   selectedTracks: string[];
@@ -103,32 +123,32 @@ export const TrackSelector: React.FC<TrackSelectorProps> = ({
       {/* SuperSep: Separation level dropdown */}
       {isSupersep && (
         <div style={styles.sepLevelSection}>
-          <h3 style={styles.sectionTitle}>{t('stem.separationLevel')}</h3>
-          <select
+          <ParamLabel
+            label={t('stem.separationLevel')}
+            info={t('stem.separationLevelInfo')}
+            meta={t('stem.separationLevelMeta')}
+            className="text-sm font-semibold text-[#d4d4d4]"
+            underline
+          />
+          <StyledSelect
+            accent="purple"
             value={sepLevel}
-            onChange={e => onSepLevelChange(parseInt(e.target.value) as SeparationLevel)}
-            style={styles.sepLevelSelect}
+            onChange={(v) => onSepLevelChange(v as SeparationLevel)}
+            options={SEPARATION_LEVELS.map(l => ({ value: l.value, label: l.label, hint: l.description }))}
             disabled={isExtracting}
-          >
-            {SEPARATION_LEVELS.map(l => (
-              <option key={l.value} value={l.value}>
-                {l.label} — {l.description}
-              </option>
-            ))}
-          </select>
-          <p style={styles.sepLevelHint}>
-            SuperSep uses neural networks to separate the audio into stems.
-            Levels 0-3 produce progressively more stems and take longer. The two
-            2-stem modes are a straight vocal/instrumental split — Leap Xe runs
-            two dedicated models so neither stem is a mix-minus residual.
-          </p>
+          />
         </div>
       )}
 
       {/* Extract: Track selection grid */}
       {!isSupersep && (
         <>
-          <h3 style={styles.sectionTitle}>{t('stem.selectTracks')}</h3>
+          <ParamLabel
+            label={t('stem.selectTracks')}
+            info={t('stem.selectTracksInfo')}
+            className="text-sm font-semibold text-[#d4d4d4] tracking-[0.02em]"
+            underline
+          />
 
           {/* Quick actions */}
           <div style={styles.quickActions}>
@@ -152,17 +172,17 @@ export const TrackSelector: React.FC<TrackSelectorProps> = ({
                     <div style={styles.categoryTracks}>
                       {tracks.map(track => (
                         <div key={track} style={styles.trackItem}>
-                          <ToggleSwitch
+                          <Toggle
+                            size="sm"
                             checked={selectedTracks.includes(track)}
                             onChange={() => toggleTrack(track)}
-                            accentColor={CATEGORY_ACCENTS[cat] || 'purple'}
+                            accent={CATEGORY_ACCENTS[cat] || 'purple'}
                           />
-                          <span style={{
-                            ...styles.trackLabel,
-                            color: selectedTracks.includes(track) ? '#d4d4d4' : '#888',
-                          }}>
-                            {TRACK_LABELS[track] || track}
-                          </span>
+                          <ParamLabel
+                            label={TRACK_LABELS[track] || track}
+                            info={TRACK_INFO[track]}
+                            className={`text-[13px] font-medium ${selectedTracks.includes(track) ? 'text-[#d4d4d4]' : 'text-[#888]'}`}
+                          />
                         </div>
                       ))}
                     </div>
@@ -179,17 +199,17 @@ export const TrackSelector: React.FC<TrackSelectorProps> = ({
                 <div style={styles.categoryTracks}>
                   {grouped['instruments'].map(track => (
                     <div key={track} style={styles.trackItem}>
-                      <ToggleSwitch
+                      <Toggle
+                        size="sm"
                         checked={selectedTracks.includes(track)}
                         onChange={() => toggleTrack(track)}
-                        accentColor={CATEGORY_ACCENTS['instruments'] || 'sky'}
+                        accent={CATEGORY_ACCENTS['instruments'] || 'sky'}
                       />
-                      <span style={{
-                        ...styles.trackLabel,
-                        color: selectedTracks.includes(track) ? '#d4d4d4' : '#888',
-                      }}>
-                        {TRACK_LABELS[track] || track}
-                      </span>
+                      <ParamLabel
+                        label={TRACK_LABELS[track] || track}
+                        info={TRACK_INFO[track]}
+                        className={`text-[13px] font-medium ${selectedTracks.includes(track) ? 'text-[#d4d4d4]' : 'text-[#888]'}`}
+                      />
                     </div>
                   ))}
                 </div>
@@ -242,35 +262,11 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 6,
     transition: 'all 0.15s ease',
   },
-  sectionTitle: {
-    margin: 0,
-    fontSize: 14,
-    fontWeight: 600,
-    color: '#d4d4d4',
-    letterSpacing: '0.02em',
-  },
   // SuperSep level
   sepLevelSection: {
     display: 'flex',
     flexDirection: 'column',
     gap: 8,
-  },
-  sepLevelSelect: {
-    padding: '8px 12px',
-    borderRadius: 10,
-    border: '1px solid rgba(255,255,255,0.1)',
-    background: '#27272a',
-    color: '#d4d4d8',
-    fontSize: 13,
-    outline: 'none',
-    cursor: 'pointer',
-    transition: 'border-color 0.15s ease',
-  },
-  sepLevelHint: {
-    margin: 0,
-    fontSize: 11,
-    color: '#666',
-    lineHeight: 1.5,
   },
   // Extract tracks
   quickActions: {
@@ -332,11 +328,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 6,
     cursor: 'pointer',
     transition: 'background 0.1s ease',
-  },
-  trackLabel: {
-    fontSize: 13,
-    fontWeight: 500,
-    transition: 'color 0.1s ease',
   },
   extractBtn: {
     padding: '10px 16px',

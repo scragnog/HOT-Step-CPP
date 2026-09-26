@@ -11,6 +11,7 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowRight, Check, CircleDashed, Loader2, ListChecks, Pause, Play, StopCircle, X, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { Toggle } from '../shared/Toggle';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { getJob, type TrainingJobSummary, type Yue2BatchItem, type Yue2BatchSummary } from '../../services/trainingApi';
 
@@ -94,10 +95,14 @@ export const Yue2BatchPanel: React.FC = () => {
           )}
         </div>
         <div className="flex items-center gap-3 text-[11px]">
-          <label className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400">
-            <input type="checkbox" className="accent-amber-500" checked={follow} onChange={e => setFollow(e.target.checked)} />
-            {t('trainingStudio.yue2.batch.follow', 'Follow the dataset being trained')}
-          </label>
+          <Toggle
+            size="sm"
+            accent="amber"
+            checked={follow}
+            onChange={setFollow}
+            label={t('trainingStudio.yue2.batch.follow', 'Follow the dataset being trained')}
+            info={t('trainingStudio.yue2.batch.followInfo', 'When the batch moves on to its next dataset, switches this panel to that dataset automatically so its chart, logs and previews show the run in progress. Off: stays on whatever dataset you have open, even as the batch trains others in the background.')}
+          />
           {batch.status === 'running' && <button type="button" onClick={() => void pause(batch.id)} className="flex items-center gap-1 text-zinc-600 dark:text-zinc-300 hover:underline"><Pause size={12} />{batch.pauseRequested ? t('trainingStudio.yue2.batch.pausing', 'Pausing after this stage…') : t('common.pause', 'Pause')}</button>}
           {batch.status !== 'running' && <button type="button" onClick={() => void resume(batch.id)} className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:underline"><Play size={12} />{t('common.resume', 'Resume')}</button>}
           {active && <button type="button" onClick={() => void cancel(batch.id)} className="flex items-center gap-1 text-red-600 dark:text-red-400 hover:underline"><StopCircle size={12} />{t('common.cancel', 'Cancel')}</button>}

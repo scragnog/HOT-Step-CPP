@@ -39,6 +39,9 @@ import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { useAuth } from '../../context/AuthContext';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
 import { EditableSlider } from '../shared/EditableSlider';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 
 interface QueuePanelProps {
@@ -710,15 +713,22 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
               {/* Planner-LM adapter (song structure) */}
               <div className="space-y-1.5">
                 <div className="flex items-center gap-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                  <Zap className="w-3.5 h-3.5 text-violet-400" /> Planner Adapter (LM) to Apply
+                  <Zap className="w-3.5 h-3.5 text-violet-400" />
+                  <ParamLabel
+                    label={t('lyric.plannerAdapterApply')}
+                    info={t('lyric.plannerAdapterApplyInfo')}
+                  />
                 </div>
-                <select value={lmAdapterPath} onChange={e => setLmAdapterPath(e.target.value)}
-                  className="w-full bg-zinc-200 dark:bg-black/20 border border-zinc-300 dark:border-white/10 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-violet-500 transition-colors cursor-pointer">
-                  <option value="">Keep existing / none</option>
-                  {lmAdapterList.map(a => (
-                    <option key={a.path} value={a.path}>{a.name}</option>
-                  ))}
-                </select>
+                <StyledSelect
+                  accent="pink"
+                  value={lmAdapterPath}
+                  onChange={setLmAdapterPath}
+                  options={[
+                    { value: '', label: t('lyric.keepExistingLmAdapter') },
+                    ...lmAdapterList.map(a => ({ value: a.path, label: a.name })),
+                  ]}
+                  className="w-full"
+                />
               </div>
               {/* Reference track */}
               <div className="space-y-1.5">
@@ -805,7 +815,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                 <p className="text-zinc-500 text-sm text-center py-4">{lyricsSets.length === 0 ? 'No albums available' : 'All albums already have profiles ✓'}</p>
               ) : (<>{unprofiled.map(ls => (
                 <label key={ls.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors ${selected.has(ls.id) ? 'bg-amber-500/10 border border-amber-500/20' : 'bg-white/5 border border-transparent hover:bg-white/10'}`}>
-                  <input type="checkbox" checked={selected.has(ls.id)} onChange={() => toggleItem(ls.id)} className="accent-amber-500" />
+                  <Toggle size="sm" accent="pink" checked={selected.has(ls.id)} onChange={() => toggleItem(ls.id)} aria-label={t('lyric.selectAlbum')} />
                   <div className="flex-1 min-w-0">
                     <span className="text-sm text-white truncate block">{disguiseAlbum(ls.album || '') || 'Unknown Album'}</span>
                     <span className="text-[10px] text-zinc-500">{disguiseArtist(ls.artist_name || '')}</span>
@@ -831,7 +841,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                   const genCt = genCountsMap.get(profile.id) || 0;
                   return (
                     <label key={profile.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors ${selected.has(profile.id) ? 'bg-green-500/10 border border-green-500/20' : 'bg-white/5 border border-transparent hover:bg-white/10'}`}>
-                      <input type="checkbox" checked={selected.has(profile.id)} onChange={() => toggleItem(profile.id)} className="accent-green-500" />
+                      <Toggle size="sm" accent="pink" checked={selected.has(profile.id)} onChange={() => toggleItem(profile.id)} aria-label={t('lyric.selectProfile')} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-white truncate">{disguiseAlbum(ls?.album || '') || 'Unknown Album'} — {disguiseArtist(ls?.artist_name || '?')}</span>
@@ -862,7 +872,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                 const take = audioTracksFor(row).length;
                 return (
                   <label key={row.lyricsSetId} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors ${selected.has(row.lyricsSetId) ? 'bg-purple-500/10 border border-purple-500/20' : 'bg-white/5 border border-transparent hover:bg-white/10'}`}>
-                    <input type="checkbox" checked={selected.has(row.lyricsSetId)} onChange={() => toggleItem(row.lyricsSetId)} className="accent-purple-500" />
+                    <Toggle size="sm" accent="pink" checked={selected.has(row.lyricsSetId)} onChange={() => toggleItem(row.lyricsSetId)} aria-label={t('lyric.selectAlbum')} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-white truncate">{disguiseArtist(row.artistName)}</span>
@@ -911,7 +921,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                   const badge = STATUS_BADGE[status];
                   return (
                     <label key={ls.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors ${selected.has(ls.id) ? 'bg-pink-500/10 border border-pink-500/20' : 'bg-white/5 border border-transparent hover:bg-white/10'}`}>
-                      <input type="checkbox" checked={selected.has(ls.id)} onChange={() => toggleItem(ls.id)} className="accent-pink-500" />
+                      <Toggle size="sm" accent="pink" checked={selected.has(ls.id)} onChange={() => toggleItem(ls.id)} aria-label={t('lyric.selectAlbum')} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-white truncate">{disguiseArtist(ls.artist_name || '')}</span>
@@ -956,16 +966,19 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
           {mode === 'generate' && (
             <div className="px-6 py-2 space-y-2">
               <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input type="checkbox" checked={genFillMode} onChange={e => setGenFillMode(e.target.checked)} className="accent-green-500" />
-                  <span className="text-xs text-zinc-600 dark:text-zinc-400">{t('lyric.fillToTarget')}</span>
-                </label>
+                <Toggle
+                  accent="pink"
+                  checked={genFillMode}
+                  onChange={setGenFillMode}
+                  label={t('lyric.fillToTarget')}
+                  info={t('lyric.fillToTargetInfo')}
+                  className="cursor-pointer select-none"
+                />
                 {genFillMode ? (
                   <>
                     <input type="number" min={1} max={100} value={genFillTarget}
                       onChange={e => setGenFillTarget(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
                       className="w-16 px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-white text-center focus:outline-none focus:border-green-500/50" />
-                    <span className="text-[10px] text-zinc-500">{t('lyric.fillToTargetDesc')}</span>
                   </>
                 ) : (
                   <>
@@ -977,12 +990,14 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                 )}
               </div>
               <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 cursor-pointer select-none" title={t('lyric.generateNoThinkHint')}>
-                  <input type="checkbox" checked={genNoThink} onChange={e => setGenNoThink(e.target.checked)} className="accent-sky-500" />
-                  <span className="text-xs text-zinc-600 dark:text-zinc-400 flex items-center gap-1">
-                    <Zap className="w-3 h-3 text-sky-400" /> {t('lyric.noThinking')}
-                  </span>
-                </label>
+                <Toggle
+                  accent="pink"
+                  checked={genNoThink}
+                  onChange={setGenNoThink}
+                  label={t('lyric.noThinking')}
+                  info={t('lyric.generateNoThinkHint')}
+                  className="cursor-pointer select-none"
+                />
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-xs text-zinc-600 dark:text-zinc-400">{t('lyric.hideProfilesWith')}</span>

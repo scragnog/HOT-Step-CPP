@@ -9,6 +9,8 @@ import { LatentImport, type LatentMetadata } from '../shared/LatentImport';
 import { masteringApi } from '../../services/api';
 import { VOCAL_LANGUAGES } from '../../constants/languages';
 import { ProviderSelector } from '../lyric-studio/ProviderSelector';
+import { StyledSelect } from '../shared/StyledSelect';
+import { ParamLabel } from '../shared/ParamLabel';
 
 interface SourcePanelProps {
   sourceFileName: string;
@@ -194,7 +196,11 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
           <Volume2 className="w-4 h-4 text-teal-400" />
-          {t('cover.timbreRef')}
+          <ParamLabel
+            label={t('cover.timbreRef')}
+            info={t('cover.timbreRefHelp')}
+            className="text-sm font-semibold text-zinc-700 dark:text-zinc-300"
+          />
           <span className="text-[10px] font-normal text-zinc-500">(optional)</span>
         </div>
 
@@ -307,11 +313,6 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
           </div>
         )}
 
-        {!timbreOverridePath && (
-          <p className="text-[10px] text-zinc-500 leading-tight">
-            {t('cover.timbreRefHelp')}
-          </p>
-        )}
       </div>
 
       {/* Metadata display */}
@@ -360,7 +361,11 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
           </div>
           {/* BPM correction — Essentia sometimes halves or doubles the tempo */}
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-zinc-500 whitespace-nowrap">{t('cover.tempoFix')}</span>
+            <ParamLabel
+              label={t('cover.tempoFix')}
+              info={t('cover.tempoFixInfo')}
+              className="text-[10px] text-zinc-500 whitespace-nowrap"
+            />
             <div className="flex gap-1 flex-1">
               {([
                 { label: '÷2', value: 0.5 },
@@ -383,7 +388,12 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
           </div>
           {/* Free-text BPM override */}
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-zinc-500 whitespace-nowrap">{t('cover.custom')}</span>
+            <ParamLabel
+              label={t('cover.custom')}
+              info={t('cover.customInfo')}
+              meta={t('cover.customMeta')}
+              className="text-[10px] text-zinc-500 whitespace-nowrap"
+            />
             <input
               type="number"
               min={20}
@@ -408,34 +418,37 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
           </div>
           {/* Key override — Essentia sometimes gets the wrong key */}
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-zinc-500 whitespace-nowrap">{t('cover.keyFix')}</span>
-            <select
+            <ParamLabel
+              label={t('cover.keyFix')}
+              info={t('cover.keyFixInfo')}
+              meta={t('cover.keyFixMeta')}
+              className="text-[10px] text-zinc-500 whitespace-nowrap"
+            />
+            <StyledSelect
+              accent="cyan"
               value={keyOverride || ''}
-              onChange={e => onKeyOverrideChange(e.target.value || null)}
-              className={`flex-1 px-2 py-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 border text-xs outline-none transition-colors cursor-pointer ${
-                keyOverride
-                  ? 'border-teal-500/40 text-teal-300 focus:border-teal-500/60 focus:ring-1 focus:ring-teal-500/20'
-                  : 'border-zinc-300 dark:border-white/10 text-zinc-700 dark:text-zinc-300 focus:border-teal-500/50 focus:ring-1 focus:ring-teal-500/20'
-              }`}
-            >
-              <option value="">Detected{analysis?.key ? ` (${analysis.key})` : ''}</option>
-              {ALL_KEYS.map(k => (
-                <option key={k} value={k}>{k}</option>
-              ))}
-            </select>
+              onChange={(v) => onKeyOverrideChange(v || null)}
+              options={[
+                { value: '', label: `Detected${analysis?.key ? ` (${analysis.key})` : ''}` },
+                ...ALL_KEYS.map(k => ({ value: k, label: k })),
+              ]}
+              className="flex-1"
+            />
           </div>
           {/* Vocal language */}
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-zinc-500 whitespace-nowrap">{t('cover.language')}</span>
-            <select
+            <ParamLabel
+              label={t('cover.language')}
+              info={t('cover.languageInfo')}
+              className="text-[10px] text-zinc-500 whitespace-nowrap"
+            />
+            <StyledSelect
+              accent="cyan"
               value={vocalLanguage}
-              onChange={e => onVocalLanguageChange(e.target.value)}
-              className="flex-1 px-2 py-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300 outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 transition-colors cursor-pointer"
-            >
-              {VOCAL_LANGUAGES.map(l => (
-                <option key={l.value} value={l.value}>{l.label}</option>
-              ))}
-            </select>
+              onChange={onVocalLanguageChange}
+              options={VOCAL_LANGUAGES.map(l => ({ value: l.value, label: l.label }))}
+              className="flex-1"
+            />
           </div>
         </div>
       )}
@@ -456,15 +469,19 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
 
         {advancedMode && (
           <div className="space-y-2">
-            <select
+            <ParamLabel
+              label={t('cover.sepLevel')}
+              info={t('cover.sepLevelInfo')}
+              meta={t('cover.sepLevelMeta')}
+              className="text-[10px] text-zinc-500 whitespace-nowrap"
+            />
+            <StyledSelect
+              accent="cyan"
               value={sepLevel}
-              onChange={(e) => onSepLevelChange(parseInt(e.target.value))}
-              className="w-full px-2 py-1.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20 transition-colors cursor-pointer"
-            >
-              {SEPARATION_LEVELS.map(l => (
-                <option key={l.value} value={l.value}>{l.label} — {l.description}</option>
-              ))}
-            </select>
+              onChange={onSepLevelChange}
+              options={SEPARATION_LEVELS.map(l => ({ value: l.value, label: l.label, hint: l.description }))}
+              className="w-full"
+            />
 
             {hasStems ? (
               <>
@@ -515,7 +532,11 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
       <div className="border-t border-zinc-200 dark:border-white/5 pt-4 space-y-2">
         <div className="flex items-center gap-2 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
           <span className="text-base">✨</span>
-          Caption LLM
+          <ParamLabel
+            label="Caption LLM"
+            info="Used to auto-generate a style description when no caption is found for the selected artist. Picking a different provider or model here changes which one drafts that description; it has no effect once a caption already exists."
+            className="text-sm font-semibold text-zinc-700 dark:text-zinc-300"
+          />
         </div>
         <ProviderSelector
           selectedProvider={coverCaptionProvider}
@@ -525,9 +546,6 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
           label="Caption LLM"
           compact
         />
-        <p className="text-[10px] text-zinc-500 leading-tight">
-          Used to auto-generate a style description when no caption is found for the selected artist.
-        </p>
       </div>
     </div>
   );

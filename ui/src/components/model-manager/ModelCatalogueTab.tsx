@@ -11,6 +11,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { ChevronDown, ChevronRight, Download, ExternalLink, Info, KeyRound, Mail, ShieldCheck } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ModelRow } from './ModelRow';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import type { RegistryFile, DownloadJob } from '../../types';
@@ -572,17 +574,13 @@ const StableStepTab: React.FC<{
         <div className="flex items-start gap-2.5">
           <ShieldCheck size={15} className={`mt-0.5 flex-shrink-0 ${licenseAccepted ? 'text-emerald-400' : 'text-zinc-500'}`} />
           <div className="flex-1">
-            <label className="flex items-start gap-2.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={licenseAccepted}
-                onChange={e => { setLicenseAccepted(e.target.checked); setLicenseNudge(false); }}
-                className="mt-0.5 h-3.5 w-3.5 rounded border-zinc-400 dark:border-zinc-600 accent-emerald-500 flex-shrink-0 cursor-pointer"
-              />
-              <span className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                {STABLESTEP_LICENSE_TEXT}
-              </span>
-            </label>
+            <Toggle
+              accent="pink"
+              checked={licenseAccepted}
+              onChange={checked => { setLicenseAccepted(checked); setLicenseNudge(false); }}
+              label={STABLESTEP_LICENSE_TEXT}
+              info="Confirms you accept the Stability AI Community License for these StableStep weights (free for individuals and organizations under $1M annual revenue; commercial use above that needs a license from Stability AI). Off: every download in this tab is blocked until you accept."
+            />
             <a
               href="https://stability.ai/community-license-agreement"
               target="_blank"
@@ -603,10 +601,14 @@ const StableStepTab: React.FC<{
 
       {/* Optional Hugging Face token */}
       <div className="rounded-xl border border-zinc-200 dark:border-white/5 bg-zinc-100/50 dark:bg-zinc-800/50 px-4 py-3">
-        <label className="flex items-center gap-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-          <KeyRound size={12} />
-          Hugging Face token (optional)
-        </label>
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <KeyRound size={12} className="text-zinc-500" />
+          <ParamLabel
+            label="Hugging Face token (optional)"
+            className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+            info="Sent as an Authorization header on requests to huggingface.co, so a gated StableStep repo can be downloaded. Leave empty for an anonymous download, which works for any repo that isn't gated. Stored locally and never sent anywhere else."
+          />
+        </div>
         <input
           type="password"
           value={hfToken}
@@ -616,10 +618,6 @@ const StableStepTab: React.FC<{
           spellCheck={false}
           className="w-full px-3 py-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 font-mono placeholder-zinc-500 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 outline-none transition-colors"
         />
-        <p className="mt-1.5 text-[10px] text-zinc-500 leading-relaxed">
-          Only needed if the repository is gated on Hugging Face. Leave empty for an
-          anonymous download. Stored locally and sent only to huggingface.co.
-        </p>
       </div>
 
       {/* Download all */}

@@ -10,6 +10,7 @@ import { Cpu, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
 import type {
   LmSize,
   TrainLmStage,
@@ -254,6 +255,12 @@ export const TRAIN_LM_DEFAULTS: TrainLmFormState = {
 };
 
 const ALL_STAGES: TrainLmStage[] = ['extract', 'train', 'export'];
+/** What each pipeline stage does, for the stage toggles' hover cards. */
+const STAGE_INFO: Record<TrainLmStage, string> = {
+  extract: 'Extracts 5 Hz codes and captions from the dataset before training starts. Skip it only when a previous run already cached them and nothing changed underneath.',
+  train: 'Runs the actual training loop that produces the adapter. Turning this off with extract or export on lets you re-run just the surrounding step.',
+  export: 'Bakes the trained checkpoint into the adapter file the app loads at generation time. Skip it to train without producing a usable adapter yet.',
+};
 const LM_SIZES: LmSize[] = ['0.6B', '1.7B', '4B'];
 // Lever B (micro-batching) was closed by its own build gate and never written:
 // ace-train refuses `--batch >1` at exit 2 and the server 400s before the job is
@@ -496,37 +503,35 @@ export const TrainLmForm: React.FC<Props> = ({
 
       {/* ── Resume + calibration (2026-08-10) ─────────────────────────── */}
       <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5">
-        <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-          <input
-            type="checkbox"
-            checked={value.resumeFromLatest}
-            disabled={lock}
-            onChange={(e) => onChange({ resumeFromLatest: e.target.checked })}
-            className="accent-amber-500"
-          />
-          {P('resumeFromLatest', 'Default on', CHECK_LABEL)}
-        </label>
-        <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-          <input
-            type="checkbox"
-            checked={value.calibrate}
-            disabled={lock}
-            onChange={(e) => onChange({ calibrate: e.target.checked })}
-            className="accent-amber-500"
-          />
-          {P('calibrate', 'Default off', CHECK_LABEL)}
-        </label>
+        <Toggle
+          accent="amber"
+          checked={value.resumeFromLatest}
+          disabled={lock}
+          onChange={(v) => onChange({ resumeFromLatest: v })}
+          label={t('trainingStudio.train.resumeFromLatest')}
+          info={t('trainingStudio.train.resumeFromLatestInfo')}
+          meta="Default on"
+        />
+        <Toggle
+          accent="amber"
+          checked={value.calibrate}
+          disabled={lock}
+          onChange={(v) => onChange({ calibrate: v })}
+          label={t('trainingStudio.train.calibrate')}
+          info={t('trainingStudio.train.calibrateInfo')}
+          meta="Default off"
+        />
         {value.calibrate && (
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 pl-6">
-            <input
-              type="checkbox"
-              checked={value.calibrateRepoint}
-              disabled={lock}
-              onChange={(e) => onChange({ calibrateRepoint: e.target.checked })}
-              className="accent-amber-500"
-            />
-            {P('calibrateRepoint', 'Default on', CHECK_LABEL)}
-          </label>
+          <Toggle
+            accent="amber"
+            checked={value.calibrateRepoint}
+            disabled={lock}
+            onChange={(v) => onChange({ calibrateRepoint: v })}
+            label={t('trainingStudio.train.calibrateRepoint')}
+            info={t('trainingStudio.train.calibrateRepointInfo')}
+            meta="Default on"
+            className="pl-6"
+          />
         )}
       </div>
 
@@ -540,11 +545,15 @@ export const TrainLmForm: React.FC<Props> = ({
       {value.adapterType === 'lora' && (
       <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5">
         <span className="text-[11px] uppercase tracking-wide text-zinc-500">{t('trainingStudio.train.softPromptGroup')}</span>
-        <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-          <input type="checkbox" checked={value.artistTokenOn} disabled={lock} className="accent-amber-500"
-            onChange={(e) => onChange({ artistTokenOn: e.target.checked })} />
-          {P('artistTokenOn', 'Default on', CHECK_LABEL)}
-        </label>
+        <Toggle
+          accent="amber"
+          checked={value.artistTokenOn}
+          disabled={lock}
+          onChange={(v) => onChange({ artistTokenOn: v })}
+          label={t('trainingStudio.train.artistTokenOn')}
+          info={t('trainingStudio.train.artistTokenOnInfo')}
+          meta="Default on"
+        />
         <label className="flex flex-col gap-1.5">
           {P('artistToken', 'Blank = the adapter name · letters, digits, _ -')}
           <input
@@ -591,16 +600,16 @@ export const TrainLmForm: React.FC<Props> = ({
             className={FIELD}
           />
         </label>
-        <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 mt-1">
-          <input
-            type="checkbox"
-            checked={value.regEvery > 0}
-            disabled={lock}
-            onChange={(e) => onChange({ regEvery: e.target.checked ? 3 : 0 })}
-            className="accent-amber-500"
-          />
-          {P('priorPreservation', 'Default on · every 3rd step', CHECK_LABEL)}
-        </label>
+        <Toggle
+          accent="amber"
+          checked={value.regEvery > 0}
+          disabled={lock}
+          onChange={(v) => onChange({ regEvery: v ? 3 : 0 })}
+          label={t('trainingStudio.train.priorPreservation')}
+          info={t('trainingStudio.train.priorPreservationInfo')}
+          meta="Default on · every 3rd step"
+          className="mt-1"
+        />
         {value.regEvery > 0 && (
           <div className="grid grid-cols-2 gap-3 pl-6">
             <label className="flex flex-col gap-1.5">
@@ -644,16 +653,15 @@ export const TrainLmForm: React.FC<Props> = ({
           LM. Disabled when a nonzero attnHeadBlock is in effect — flash has
           no S² term for head-blocking to cut, and the server 400s the pair. */}
       <div className="flex flex-col gap-1.5 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5">
-        <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-          <input
-            type="checkbox"
-            checked={value.attnBackend === 'flash'}
-            disabled={lock || value.attnHeadBlock > 0}
-            onChange={(e) => onChange({ attnBackend: e.target.checked ? 'flash' : 'exact' })}
-            className="accent-amber-500"
-          />
-          {P('lm.attnBackend', 'Default on · untick for the exact graph (bit-identical to older runs)', CHECK_LABEL)}
-        </label>
+        <Toggle
+          accent="amber"
+          checked={value.attnBackend === 'flash'}
+          disabled={lock || value.attnHeadBlock > 0}
+          onChange={(v) => onChange({ attnBackend: v ? 'flash' : 'exact' })}
+          label={t('trainingStudio.train.lm.attnBackend')}
+          info={t('trainingStudio.train.lm.attnBackendInfo')}
+          meta="Default on · untick for the exact graph (bit-identical to older runs)"
+        />
         <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.train.lm.attnBackendHelp')}</span>
         {value.attnHeadBlock > 0 && (
           <span className="text-[11px] text-amber-500 pl-6">
@@ -744,23 +752,33 @@ export const TrainLmForm: React.FC<Props> = ({
               LmMethod). */}
           {value.adapterType === 'lora' && (
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2">
-              <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300"
-                title={t('trainingStudio.train.lm.hotPizzaInfo')}>
-                <input type="checkbox" checked={value.pissa && value.hotPizza} disabled={lock || method !== 'lora'} className="accent-amber-500"
-                  onChange={(e) => onChange(e.target.checked ? { hotPizza: true, pissa: true } : { hotPizza: false })} />
-                {P('lm.hotPizza', method === 'lora' ? 'MM3 default; unheard here' : 'Plain LoRA only', CHECK_LABEL)}
-              </label>
-              <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300"
-                title={t('trainingStudio.train.lm.pissaInfo')}>
-                <input type="checkbox" checked={value.pissa} disabled={lock || method !== 'lora'} className="accent-amber-500"
-                  onChange={(e) => onChange(e.target.checked ? { pissa: true } : { pissa: false, hotPizza: false })} />
-                {P('lm.pissa', method === 'lora' ? 'Default off' : 'Plain LoRA only', CHECK_LABEL)}
-              </label>
-              <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-                <input type="checkbox" checked={value.rslora} disabled={lock || method === 'hra'} className="accent-amber-500"
-                  onChange={(e) => onChange({ rslora: e.target.checked })} />
-                {P('rslora', method === 'hra' ? 'Not with HRA' : 'Default off', CHECK_LABEL)}
-              </label>
+              <Toggle
+                accent="amber"
+                checked={value.pissa && value.hotPizza}
+                disabled={lock || method !== 'lora'}
+                onChange={(v) => onChange(v ? { hotPizza: true, pissa: true } : { hotPizza: false })}
+                label={t('trainingStudio.train.lm.hotPizza')}
+                info={t('trainingStudio.train.lm.hotPizzaInfo')}
+                meta={method === 'lora' ? 'MM3 default; unheard here' : 'Plain LoRA only'}
+              />
+              <Toggle
+                accent="amber"
+                checked={value.pissa}
+                disabled={lock || method !== 'lora'}
+                onChange={(v) => onChange(v ? { pissa: true } : { pissa: false, hotPizza: false })}
+                label={t('trainingStudio.train.lm.pissa')}
+                info={t('trainingStudio.train.lm.pissaInfo')}
+                meta={method === 'lora' ? 'Default off' : 'Plain LoRA only'}
+              />
+              <Toggle
+                accent="amber"
+                checked={value.rslora}
+                disabled={lock || method === 'hra'}
+                onChange={(v) => onChange({ rslora: v })}
+                label={t('trainingStudio.train.rslora')}
+                info={t('trainingStudio.train.rsloraInfo')}
+                meta={method === 'hra' ? 'Not with HRA' : 'Default off'}
+              />
               <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
                 {P('loraPlusRatio', 'Default 1 = off · paper 16 · AdamW/Prodigy only', CHECK_LABEL)}
                 <input type="number" min={1} max={64} step={1} value={value.loraPlusRatio} disabled={lock}
@@ -972,51 +990,48 @@ export const TrainLmForm: React.FC<Props> = ({
           {P('stages')}
           <div className="flex items-center gap-4 flex-wrap">
             {ALL_STAGES.map(stage => (
-              <label key={stage} className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-                <input
-                  type="checkbox"
-                  checked={value.stages.includes(stage)}
-                  disabled={lock}
-                  onChange={(e) => toggleStage(stage, e.target.checked)}
-                  className="accent-amber-500"
-                />
-                {stage}
-              </label>
+              <Toggle
+                key={stage}
+                size="sm"
+                accent="amber"
+                checked={value.stages.includes(stage)}
+                disabled={lock}
+                onChange={(v) => toggleStage(stage, v)}
+                label={stage}
+                info={STAGE_INFO[stage]}
+              />
             ))}
           </div>
 
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-            <input
-              type="checkbox"
-              checked={value.lossOnCot}
-              disabled={lock}
-              onChange={(e) => onChange({ lossOnCot: e.target.checked })}
-              className="accent-amber-500"
-            />
-            {P('lossOnCot', 'Default on', CHECK_LABEL)}
-          </label>
+          <Toggle
+            accent="amber"
+            checked={value.lossOnCot}
+            disabled={lock}
+            onChange={(v) => onChange({ lossOnCot: v })}
+            label={t('trainingStudio.train.lossOnCot')}
+            info={t('trainingStudio.train.lossOnCotInfo')}
+            meta="Default on"
+          />
 
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-            <input
-              type="checkbox"
-              checked={value.overwrite}
-              disabled={lock}
-              onChange={(e) => onChange({ overwrite: e.target.checked })}
-              className="accent-amber-500"
-            />
-            {P('reextract', 'Default off', CHECK_LABEL)}
-          </label>
+          <Toggle
+            accent="amber"
+            checked={value.overwrite}
+            disabled={lock}
+            onChange={(v) => onChange({ overwrite: v })}
+            label={t('trainingStudio.train.reextract')}
+            info={t('trainingStudio.train.reextractInfo')}
+            meta="Default off"
+          />
 
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-            <input
-              type="checkbox"
-              checked={value.stopEngine}
-              disabled={lock}
-              onChange={(e) => onChange({ stopEngine: e.target.checked })}
-              className="accent-amber-500"
-            />
-            {P('stopEngine', 'Default on', CHECK_LABEL)}
-          </label>
+          <Toggle
+            accent="amber"
+            checked={value.stopEngine}
+            disabled={lock}
+            onChange={(v) => onChange({ stopEngine: v })}
+            label={t('trainingStudio.train.stopEngine')}
+            info={t('trainingStudio.train.stopEngineInfo')}
+            meta="Default on"
+          />
           <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.preprocess.stopEngineHelp')}</span>
         </div>
       </details>

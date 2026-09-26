@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { ListChecks, RefreshCw } from 'lucide-react';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { finishYue2Ladders, listYue2Review, type Yue2ReviewRow } from '../../services/trainingApi';
+import { Toggle } from '../shared/Toggle';
 
 export const ReviewPanel: React.FC = () => {
   const { t } = useTranslation();
@@ -77,16 +78,20 @@ export const ReviewPanel: React.FC = () => {
           </button>
         </div>
         {finishOpen && <>
-          {finishable.map(r => <label key={r.refineRun} className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-            <input type="checkbox" className="accent-emerald-500" checked={!skip[r.refineRun]} onChange={e => setSkip(prev => ({ ...prev, [r.refineRun]: !e.target.checked }))} />
+          {finishable.map(r => <div key={r.refineRun} className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+            <Toggle size="sm" accent="amber" checked={!skip[r.refineRun]} onChange={v => setSkip(prev => ({ ...prev, [r.refineRun]: !v }))} aria-label={t('trainingStudio.review.finishInclude', 'Include {{name}} in this finish batch', { name: r.datasetName }) as string} />
             <span className="font-semibold min-w-[180px]">{r.datasetName}</span>
             <span className="text-zinc-500">{t('trainingStudio.review.finishPick', 'step {{step}}, overall {{score}}', { step: r.best!.step, score: r.best!.overall.toFixed(2) })}{r.decoderOnly ? ` · ${t('trainingStudio.review.finishNoNar', 'decoder run already, no NAR step')}` : ''}</span>
-          </label>)}
+          </div>)}
           <div className="flex items-center justify-end gap-3">
-            <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300" title={t('trainingStudio.review.finishKneeInfo', 'Stop NAR further training once a line fitted through its last 10 checkpoints gains under 0.5%. Off: train to the 500-step budget or the recon target.') as string}>
-              <input type="checkbox" className="accent-emerald-500" checked={knee} onChange={e => setKnee(e.target.checked)} />
-              {t('trainingStudio.review.finishKnee', 'Stop NAR at the plateau')}
-            </label>
+            <Toggle
+              size="sm"
+              accent="amber"
+              checked={knee}
+              onChange={setKnee}
+              label={t('trainingStudio.review.finishKnee', 'Stop NAR at the plateau')}
+              info={t('trainingStudio.review.finishKneeInfo', 'Stop NAR further training once a line fitted through its last 10 checkpoints gains under 0.5%. Off: train to the 500-step budget or the recon target.')}
+            />
             <button type="button" disabled={finishing || finishable.every(r => skip[r.refineRun])} onClick={() => void finish()}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40">
               {finishing ? t('trainingStudio.review.finishStarting', 'Starting…') : t('trainingStudio.review.finishGo', 'Start')}

@@ -10,6 +10,8 @@ import { useTranslation } from 'react-i18next';
 import { getSampleMm3, getSampleYue2, sampleAudioUrl, saveSampleMm3, saveSampleYue2 } from '../../services/trainingApi';
 import { mergedSample, useTrainingStore } from '../../stores/trainingStore';
 import { AuditionPlayer } from './AuditionPlayer';
+import { ParamLabel } from '../shared/ParamLabel';
+import { Toggle } from '../shared/Toggle';
 
 interface SampleDrawerProps {
   sampleId: string;
@@ -176,7 +178,11 @@ export const SampleDrawer: React.FC<SampleDrawerProps> = ({ sampleId }) => {
 
         {/* Caption */}
         <label className="flex flex-col gap-1.5">
-          <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.drawer.caption')}</span>
+          <ParamLabel
+            label={t('trainingStudio.drawer.caption')}
+            info={t('trainingStudio.drawer.captionInfo', 'The style description this sample trains with, same text as the caption column in the grid. Blank falls back to the filename when the dataset is built. Saves automatically a moment after you stop typing, or right away when you leave the box.')}
+            className="text-xs font-semibold text-zinc-600 dark:text-zinc-400"
+          />
           <textarea
             rows={5}
             value={sample.caption}
@@ -193,7 +199,11 @@ export const SampleDrawer: React.FC<SampleDrawerProps> = ({ sampleId }) => {
             MOSS labeling run writes. Shown beside the AS1.5 caption so the two
             can be compared and edited without leaving the app. */}
         <label className="flex flex-col gap-1.5">
-          <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.drawer.mm3Caption')}</span>
+          <ParamLabel
+            label={t('trainingStudio.drawer.mm3Caption')}
+            info={t('trainingStudio.drawer.mm3CaptionInfo', "MiniMax-Music3's own caption format (Global Metadata / Vocal Details / Arrangement), stored in a separate <stem>.mm3.txt file next to the audio rather than in the dataset row. Only an MM3 planner adapter trains on it. Saves when you leave the box; Escape reverts to the last saved text.")}
+            className="text-xs font-semibold text-zinc-600 dark:text-zinc-400"
+          />
           {mm3 === null ? (
             <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-zinc-500">
               <Loader2 size={12} className="animate-spin" />
@@ -224,7 +234,11 @@ export const SampleDrawer: React.FC<SampleDrawerProps> = ({ sampleId }) => {
             same labeling pass as the other two (enhanceService), editable here
             because the planner is prompted with exactly this text. */}
         <label className="flex flex-col gap-1.5">
-          <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.drawer.yue2Caption', 'YuE2 caption')}</span>
+          <ParamLabel
+            label={t('trainingStudio.drawer.yue2Caption', 'YuE2 caption')}
+            info={t('trainingStudio.drawer.yue2CaptionInfo', 'The one-sentence caption YuE2’s planner is prompted with directly, stored in <stem>.yue2.txt next to the audio. Written by the same labeling pass as the other two captions; editing it here changes exactly what the planner sees during training. Saves when you leave the box; Escape reverts to the last saved text.')}
+            className="text-xs font-semibold text-zinc-600 dark:text-zinc-400"
+          />
           {yue2 === null ? (
             <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-zinc-500">
               <Loader2 size={12} className="animate-spin" />
@@ -252,20 +266,22 @@ export const SampleDrawer: React.FC<SampleDrawerProps> = ({ sampleId }) => {
         </label>
 
         {/* Instrumental */}
-        <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-          <input
-            type="checkbox"
-            checked={sample.isInstrumental}
-            disabled={readOnly}
-            onChange={(e) => { void editSample(sampleId, { isInstrumental: e.target.checked }); void flushSample(sampleId); }}
-            className="accent-amber-500"
-          />
-          {t('trainingStudio.drawer.instrumental')}
-        </label>
+        <Toggle
+          accent="amber"
+          checked={sample.isInstrumental}
+          disabled={readOnly}
+          onChange={(checked) => { void editSample(sampleId, { isInstrumental: checked }); void flushSample(sampleId); }}
+          label={t('trainingStudio.drawer.instrumental')}
+          info={t('trainingStudio.drawer.instrumentalInfo', 'Marks this sample as having no vocals, so training treats it as instrumental and skips the lyrics text. Off: the sample trains with its lyrics as written.')}
+        />
 
         {/* Lyrics */}
         <label className="flex flex-col gap-1.5 flex-1">
-          <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.drawer.lyrics')}</span>
+          <ParamLabel
+            label={t('trainingStudio.drawer.lyrics')}
+            info={t('trainingStudio.drawer.lyricsInfo', 'Lyrics text this sample trains with, alongside its caption. Leave blank for instrumental tracks; use the Instrumental toggle above rather than an empty box, so the sample is flagged correctly everywhere else it is used.')}
+            className="text-xs font-semibold text-zinc-600 dark:text-zinc-400"
+          />
           <textarea
             rows={16}
             value={sample.lyrics}

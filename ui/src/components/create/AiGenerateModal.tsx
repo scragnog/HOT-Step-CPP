@@ -18,6 +18,8 @@ import {
   type InspireProvider,
 } from '../../services/inspireApi';
 import { VOCAL_LANGUAGES } from '../../constants/languages';
+import { StyledSelect } from '../shared/StyledSelect';
+import { ParamLabel } from '../shared/ParamLabel';
 
 // ── Result type for the parent callback ──────────────────────────────────
 export interface AiGenerateResult {
@@ -215,7 +217,6 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({ isOpen, onClos
 
   // ── Shared input classes ──
   const inputClass = 'w-full px-3 py-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors';
-  const selectClass = 'w-full px-3 py-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer appearance-none';
   const labelClass = 'block text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5';
 
   return (
@@ -256,7 +257,11 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({ isOpen, onClos
           <div className="px-5 py-4 space-y-4 max-h-[60vh] overflow-y-auto">
             {/* Provider / Model */}
             <div>
-              <label className={labelClass}>LLM Provider</label>
+              <ParamLabel
+                label="LLM Provider"
+                className={labelClass}
+                info="Which configured LLM writes the caption, lyrics, title and metadata. Model picks which of that provider's models does the writing. Switching either changes the writing style and quality of what comes back, not what it is asked to write about."
+              />
               {providersLoading ? (
                 <div className="flex items-center gap-2 text-xs text-zinc-500 py-2">
                   <Loader2 size={14} className="animate-spin" />
@@ -268,36 +273,36 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({ isOpen, onClos
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-2">
-                  <select
-                    className={selectClass}
+                  <StyledSelect
+                    accent="pink"
                     value={selectedProvider}
-                    onChange={e => handleProviderChange(e.target.value)}
+                    onChange={handleProviderChange}
+                    options={providers.map(p => ({ value: p.id, label: p.name }))}
                     disabled={loading}
                     title="LLM Provider"
-                  >
-                    {providers.map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                  <select
-                    className={selectClass}
+                    className="w-full"
+                  />
+                  <StyledSelect
+                    accent="pink"
                     value={selectedModel}
-                    onChange={e => handleModelChange(e.target.value)}
+                    onChange={handleModelChange}
+                    options={models.map(m => ({ value: m, label: m }))}
+                    placeholder="No models"
                     disabled={loading}
                     title="Model"
-                  >
-                    {models.map(m => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                    {models.length === 0 && <option value="">No models</option>}
-                  </select>
+                    className="w-full"
+                  />
                 </div>
               )}
             </div>
 
             {/* Genre / Style */}
             <div>
-              <label className={labelClass}>Genre / Style</label>
+              <ParamLabel
+                label="Genre / Style"
+                className={labelClass}
+                info="Comma-separated genres and style descriptors, passed to the LLM to shape the caption it writes. More specific genres steer the caption more; leave it blank and the LLM picks its own."
+              />
               <input
                 type="text"
                 className={inputClass}
@@ -306,17 +311,16 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({ isOpen, onClos
                 onChange={e => setGenreText(e.target.value)}
                 disabled={loading}
               />
-              <p className="mt-1 text-[10px] text-zinc-500">
-                Comma-separated genres and style descriptors. Used to generate a rich caption.
-              </p>
             </div>
 
             {/* Subject */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-                  Song Subject
-                </label>
+                <ParamLabel
+                  label="Song Subject"
+                  className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider"
+                  info="What the song should be about, given to the LLM as the writing prompt for the lyrics and caption. Leave it empty and the AI picks its own topic; Random asks the LLM to invent one that fits the genres above."
+                />
                 <button
                   onClick={handleRandomSubject}
                   disabled={loading || randomLoading || !selectedProvider}
@@ -339,24 +343,23 @@ export const AiGenerateModal: React.FC<AiGenerateModalProps> = ({ isOpen, onClos
                 disabled={loading}
                 rows={2}
               />
-              <p className="mt-1 text-[10px] text-zinc-500">
-                What the song should be about. Leave empty for AI to choose.
-              </p>
             </div>
 
             {/* Language */}
             <div>
-              <label className={labelClass}>Vocal Language</label>
-              <select
-                className={selectClass}
+              <ParamLabel
+                label="Vocal Language"
+                className={labelClass}
+                info="The language the LLM writes the lyrics in. Changing it changes only the lyrics' language, not the genre, caption or subject."
+              />
+              <StyledSelect
+                accent="pink"
                 value={language}
-                onChange={e => setLanguage(e.target.value)}
+                onChange={setLanguage}
+                options={VOCAL_LANGUAGES.map(l => ({ value: l.value, label: l.label }))}
                 disabled={loading}
-              >
-                {VOCAL_LANGUAGES.map(l => (
-                  <option key={l.value} value={l.value}>{l.label}</option>
-                ))}
-              </select>
+                className="w-full"
+              />
             </div>
 
             {/* Error */}

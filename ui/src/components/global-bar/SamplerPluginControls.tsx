@@ -29,13 +29,13 @@ import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { usePluginRegistry } from '../../hooks/usePluginRegistry';
 import { PluginControls } from './PluginControls';
 import { ParamLabel } from '../shared/ParamLabel';
-
-const selectClasses =
-  'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 ' +
-  'text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 ' +
-  'outline-none transition-colors cursor-pointer';
+import { StyledSelect } from '../shared/StyledSelect';
 
 const NATIVE = '';
+
+// This picker cluster lives inside BarSection's dropdown panel, which already
+// carries data-hovercard-boundary — no need to add it here.
+const ACCENT = 'sky';
 
 export const SamplerPluginControls: React.FC = () => {
   const gp = useGlobalParams() as any;
@@ -59,7 +59,37 @@ export const SamplerPluginControls: React.FC = () => {
   const solverInfo = join(
     solverMeta?.description,
     (solverMeta?.nfe ?? 1) > 1 && 'Multi-evaluation solvers run extra forward passes per step. On this backend the flow stage is already the bulk of the render time, so expect it to scale roughly with NFE.',
-  );
+  ) ?? 'Decides how each denoising step moves from noise toward audio. Solvers are grouped by network evaluations (NFE) per step: a 2-NFE solver at 20 steps costs about what a 1-NFE solver costs at 40. Native (Euler) is this backend\'s own solver.';
+
+  const schedInfo = schedMeta?.description
+    ?? 'Decides where the sampling steps fall across the noise range. Native keeps this backend\'s own default schedule.';
+
+  const guideInfo = guideMeta?.description
+    ?? 'Decides how the conditional and unconditional predictions are combined each step, using the Guidance Scale. Native (plain CFG) is classifier-free guidance with no extra shaping.';
+
+  const solverOptions = [
+    { value: NATIVE, label: 'Native (Euler)' },
+    ...solvers
+      .filter((s: any) => (s.nfe ?? 1) === 1)
+      .map((s: any) => ({ value: s.name as string, label: s.display as string })),
+    ...solvers
+      .filter((s: any) => (s.nfe ?? 1) > 1)
+      .map((s: any) => ({
+        value: s.name as string,
+        label: `${s.display} (${s.nfe} NFE)`,
+        hint: 'Multi-evaluation: extra forward passes per step.',
+      })),
+  ];
+
+  const schedulerOptions = [
+    { value: NATIVE, label: 'Native' },
+    ...schedulers.map((s: any) => ({ value: s.name as string, label: s.display as string })),
+  ];
+
+  const guidanceOptions = [
+    { value: NATIVE, label: 'Native (plain CFG)' },
+    ...guidance.map((g: any) => ({ value: g.name as string, label: g.display as string })),
+  ];
 
   return (
     <div className="space-y-3">
@@ -72,27 +102,13 @@ export const SamplerPluginControls: React.FC = () => {
       <div>
         <ParamLabel label="Solver" info={solverInfo} rootClassName="flex mb-1.5"
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
-        <select
-          className={selectClasses}
+        <StyledSelect
+          accent={ACCENT}
           value={gp.inferMethod ?? NATIVE}
-          onChange={e => gp.setInferMethod(e.target.value)}
-        >
-          <option value={NATIVE}>Native (Euler)</option>
-          {solvers.filter((s: any) => (s.nfe ?? 1) === 1).length > 0 && (
-            <optgroup label="── Single Evaluation (1 NFE) ──">
-              {solvers.filter((s: any) => (s.nfe ?? 1) === 1).map((s: any) => (
-                <option key={s.name} value={s.name}>{s.display}</option>
-              ))}
-            </optgroup>
-          )}
-          {solvers.filter((s: any) => (s.nfe ?? 1) > 1).length > 0 && (
-            <optgroup label="── Multi Evaluation ──">
-              {solvers.filter((s: any) => (s.nfe ?? 1) > 1).map((s: any) => (
-                <option key={s.name} value={s.name}>{s.display} ({s.nfe} NFE)</option>
-              ))}
-            </optgroup>
-          )}
-        </select>
+          onChange={v => gp.setInferMethod(v)}
+          options={solverOptions}
+          className="w-full"
+        />
       </div>
 
       {solverMeta && solverMeta.params?.length > 0 && (
@@ -109,18 +125,15 @@ export const SamplerPluginControls: React.FC = () => {
 
       {/* Scheduler */}
       <div>
-        <ParamLabel label="Schedule" info={schedMeta?.description} rootClassName="flex mb-1.5"
+        <ParamLabel label="Schedule" info={schedInfo} rootClassName="flex mb-1.5"
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
-        <select
-          className={selectClasses}
+        <StyledSelect
+          accent={ACCENT}
           value={gp.scheduler ?? NATIVE}
-          onChange={e => gp.setScheduler(e.target.value)}
-        >
-          <option value={NATIVE}>Native</option>
-          {schedulers.map((s: any) => (
-            <option key={s.name} value={s.name}>{s.display}</option>
-          ))}
-        </select>
+          onChange={v => gp.setScheduler(v)}
+          options={schedulerOptions}
+          className="w-full"
+        />
       </div>
 
       {schedMeta && schedMeta.params?.length > 0 && (
@@ -137,18 +150,15 @@ export const SamplerPluginControls: React.FC = () => {
 
       {/* Guidance */}
       <div>
-        <ParamLabel label="Guidance" info={guideMeta?.description} rootClassName="flex mb-1.5"
+        <ParamLabel label="Guidance" info={guideInfo} rootClassName="flex mb-1.5"
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
-        <select
-          className={selectClasses}
+        <StyledSelect
+          accent={ACCENT}
           value={gp.guidanceMode ?? NATIVE}
-          onChange={e => gp.setGuidanceMode(e.target.value)}
-        >
-          <option value={NATIVE}>Native (plain CFG)</option>
-          {guidance.map((g: any) => (
-            <option key={g.name} value={g.name}>{g.display}</option>
-          ))}
-        </select>
+          onChange={v => gp.setGuidanceMode(v)}
+          options={guidanceOptions}
+          className="w-full"
+        />
       </div>
 
       {guideMeta && guideMeta.params?.length > 0 && (

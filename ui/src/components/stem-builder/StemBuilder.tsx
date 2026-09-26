@@ -24,6 +24,8 @@ import { LayerStack, type LayerInfo } from './LayerStack';
 import { RecentBuilds } from './RecentBuilds';
 import { PreviewPlayer } from './PreviewPlayer';
 import { Section } from '../shared/ActivitySidebar';
+import { StyledSelect } from '../shared/StyledSelect';
+import { ParamLabel } from '../shared/ParamLabel';
 import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
 import { InlineAudioQueue } from '../lyric-studio/InlineAudioQueue';
 import { useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
@@ -420,17 +422,19 @@ export const StemBuilder: React.FC = () => {
           {baseModels.length > 0 && (
             <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-amber-500/[0.04] border border-amber-500/10">
               <Info size={13} className="text-amber-400 flex-shrink-0" />
-              <span className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider whitespace-nowrap">{t('stemBuilder.model')}</span>
-              <select
+              <ParamLabel
+                label={t('stemBuilder.model')}
+                info={t('stemBuilder.modelInfo')}
+                className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider whitespace-nowrap"
+              />
+              <StyledSelect
+                accent="amber"
                 value={buildModel}
-                onChange={e => setBuildModel(e.target.value)}
+                onChange={setBuildModel}
                 disabled={isGenerating}
-                className="flex-1 px-2 py-1 rounded-md border border-white/[0.08] bg-white/[0.04] text-zinc-300 text-xs outline-none cursor-pointer focus:border-amber-500/40 transition-colors"
-              >
-                {baseModels.map(m => (
-                  <option key={m} value={m}>{m.replace(/\.gguf$/i, '')}</option>
-                ))}
-              </select>
+                options={baseModels.map(m => ({ value: m, label: m.replace(/\.gguf$/i, '') }))}
+                className="flex-1"
+              />
             </div>
           )}
 
@@ -444,7 +448,11 @@ export const StemBuilder: React.FC = () => {
           {/* Collapsible Style Hint */}
           <details>
             <summary className="text-xs text-zinc-500 cursor-pointer font-medium select-none">
-              Style Hint (optional)
+              <ParamLabel
+                label="Style Hint (optional)"
+                info="Free-text description of the stem's character, sent to the engine as the generation caption. Leave it blank to let the engine infer style from the source audio alone; fill it in to steer tone and instrumentation, for example 'tight house drums, warm vintage tone'."
+                className="text-xs text-zinc-500 font-medium"
+              />
             </summary>
             <div className="mt-2">
               <input
@@ -455,9 +463,6 @@ export const StemBuilder: React.FC = () => {
                 disabled={isGenerating}
                 className="w-full px-2.5 py-2 rounded-md border border-white/[0.08] bg-white/[0.04] text-zinc-300 text-xs outline-none placeholder-zinc-600 focus:border-amber-500/40 transition-colors"
               />
-              <div className="text-[10px] text-zinc-600 mt-1">
-                Describes the style of the generated stem
-              </div>
             </div>
           </details>
         </div>

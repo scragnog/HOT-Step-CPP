@@ -6,6 +6,8 @@ import { TripleProviderSelector, type ModelSelections, loadSelections, saveSelec
 import { LLM_DURATION_KEY } from '../../utils/estimateDuration';
 import { USE_LM_ADAPTER_KEY } from '../../utils/lmAdapterPref';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 
 // ── Persisted state hook ────────────────────────────────────────────────────
 function useLocalPersistedState<T>(key: string, defaultValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
@@ -123,7 +125,11 @@ export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
           >
             <span className="flex items-center gap-1.5">
               <Download className="w-3 h-3" />
-              {t('lyric.filenamePrepend')}
+              <ParamLabel
+                label={t('lyric.filenamePrepend')}
+                info={t('lyric.filenamePrependInfo')}
+                className="text-[11px] text-zinc-500 uppercase tracking-wider font-semibold"
+              />
             </span>
           </div>
           <div className="mt-2 px-1">
@@ -134,82 +140,46 @@ export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
               placeholder="e.g. MyLabel - "
               className="w-full bg-zinc-200 dark:bg-black/20 border border-zinc-300 dark:border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-pink-500 transition-colors"
             />
-            <p className="text-[10px] text-zinc-600 mt-1 leading-tight">
-              Prepended to download filenames, e.g. <span className="text-zinc-500">{filenamePrepend || '...'}</span>Artist - Song.flac
-            </p>
           </div>
         </div>
 
         {/* ── LLM Duration Override ───────────────────────────── */}
-        <div>
-          <label
-            className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-zinc-200 dark:border-white/5 cursor-pointer hover:bg-white/[0.06] transition-colors"
-          >
-            <span className="flex items-center gap-1.5 text-[11px] text-zinc-500 uppercase tracking-wider font-semibold">
-              <Clock className="w-3 h-3" />
-              {t('lyric.llmDuration')}
-            </span>
-            <input
-              type="checkbox"
-              checked={useLlmDuration}
-              onChange={e => setUseLlmDuration(e.target.checked)}
-              className="w-3.5 h-3.5 rounded border-zinc-600 bg-zinc-100 dark:bg-zinc-800 text-pink-500 focus:ring-pink-500 focus:ring-offset-0 cursor-pointer"
+        <div className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-zinc-200 dark:border-white/5">
+          <span className="flex items-center gap-1.5">
+            <Clock className="w-3 h-3 text-zinc-500" />
+            <ParamLabel
+              label={t('lyric.llmDuration')}
+              info={t('lyric.llmDurationInfo')}
+              className="text-[11px] text-zinc-500 uppercase tracking-wider font-semibold"
             />
-          </label>
-          <p className="text-[10px] text-zinc-600 mt-1 px-1 leading-tight">
-            {useLlmDuration
-              ? <>Uses the LLM's estimated duration — may overshoot, causing "double song" artifacts.</>
-              : <>Uses calculated duration from lyrics + BPM — tighter fit, less wasted generation.</>
-            }
-          </p>
+          </span>
+          <Toggle size="sm" accent="pink" checked={useLlmDuration} onChange={setUseLlmDuration} aria-label={t('lyric.llmDuration')} />
         </div>
 
         {/* ── Randomize Timbre Reference ────────────────────────── */}
-        <div>
-          <label
-            className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-zinc-200 dark:border-white/5 cursor-pointer hover:bg-white/[0.06] transition-colors"
-          >
-            <span className="flex items-center gap-1.5 text-[11px] text-zinc-500 uppercase tracking-wider font-semibold">
-              <Shuffle className="w-3 h-3" />
-              {t('lyric.randomizeTimbre')}
-            </span>
-            <input
-              type="checkbox"
-              checked={randomizeTimbre}
-              onChange={e => setRandomizeTimbre(e.target.checked)}
-              className="w-3.5 h-3.5 rounded border-zinc-600 bg-zinc-100 dark:bg-zinc-800 text-amber-500 focus:ring-amber-500 focus:ring-offset-0 cursor-pointer"
+        <div className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-zinc-200 dark:border-white/5">
+          <span className="flex items-center gap-1.5">
+            <Shuffle className="w-3 h-3 text-zinc-500" />
+            <ParamLabel
+              label={t('lyric.randomizeTimbre')}
+              info={t('lyric.randomizeTimbreInfo')}
+              className="text-[11px] text-zinc-500 uppercase tracking-wider font-semibold"
             />
-          </label>
-          <p className="text-[10px] text-zinc-600 mt-1 px-1 leading-tight">
-            {randomizeTimbre
-              ? <>Picks a random track from the reference folder as timbre conditioner — prevents riff leakage from a single reference.</>
-              : <>Uses the exact reference track set in the album preset for timbre conditioning.</>
-            }
-          </p>
+          </span>
+          <Toggle size="sm" accent="pink" checked={randomizeTimbre} onChange={setRandomizeTimbre} aria-label={t('lyric.randomizeTimbre')} />
         </div>
 
         {/* ── Use LM Adapter ────────────────────────────────────── */}
-        <div>
-          <label
-            className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-zinc-200 dark:border-white/5 cursor-pointer hover:bg-white/[0.06] transition-colors"
-          >
-            <span className="flex items-center gap-1.5 text-[11px] text-zinc-500 uppercase tracking-wider font-semibold">
-              <Brain className="w-3 h-3" />
-              {t('lyric.useLmAdapter')}
-            </span>
-            <input
-              type="checkbox"
-              checked={useLmAdapter}
-              onChange={e => setUseLmAdapter(e.target.checked)}
-              className="w-3.5 h-3.5 rounded border-zinc-600 bg-zinc-100 dark:bg-zinc-800 text-violet-500 focus:ring-violet-500 focus:ring-offset-0 cursor-pointer"
+        <div className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-zinc-200 dark:border-white/5">
+          <span className="flex items-center gap-1.5">
+            <Brain className="w-3 h-3 text-zinc-500" />
+            <ParamLabel
+              label={t('lyric.useLmAdapter')}
+              info={t('lyric.useLmAdapterInfo')}
+              className="text-[11px] text-zinc-500 uppercase tracking-wider font-semibold"
             />
-          </label>
-          <p className="text-[10px] text-zinc-600 mt-1 px-1 leading-tight">
-            {useLmAdapter
-              ? t('lyric.useLmAdapterOn')
-              : t('lyric.useLmAdapterOff')
-            }
-          </p>
+          </span>
+          <Toggle size="sm" accent="pink" checked={useLmAdapter} onChange={setUseLmAdapter} aria-label={t('lyric.useLmAdapter')} />
         </div>
 
         {/* "Generate All Audio" lived here. It queued every written song in the library

@@ -5,6 +5,8 @@ import React from 'react';
 import { Music, ChevronDown, ChevronRight, Plug, Drum } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { hasWildcards, expandInPlace, randomWildcardSeed } from '../../utils/wildcardUtils';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 
 interface ContentSectionProps {
   caption: string;
@@ -97,7 +99,11 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
       <div>
         <div className="flex items-center justify-between mb-1.5">
           <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-            {t('contentSection.styleDescription')}
+            <ParamLabel
+              label={t('contentSection.styleDescription')}
+              className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+              info={t('contentSection.styleDescriptionInfo')}
+            />
           </label>
           <div className="flex items-center gap-1.5">
             {!captionReadOnly && hasWildcards(caption) && (
@@ -130,7 +136,12 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <span className="flex items-center gap-1 text-[10px] text-zinc-500 shrink-0 w-20">
-            <Plug size={11} /> {t('contentSection.loraTrigger')}
+            <Plug size={11} />
+            <ParamLabel
+              label={t('contentSection.loraTrigger')}
+              className="text-[10px] text-zinc-500"
+              info={t('contentSection.loraTriggerInfo')}
+            />
           </span>
           <input
             type="text"
@@ -192,7 +203,13 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
           <div className="space-y-2 pl-0.5">
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="block text-[10px] text-zinc-600 mb-0.5">{t('contentSection.artist')}</label>
+                <label className="block text-[10px] text-zinc-600 mb-0.5">
+                  <ParamLabel
+                    label={t('contentSection.artist')}
+                    className="text-[10px] text-zinc-600"
+                    info={t('contentSection.artistInfo')}
+                  />
+                </label>
                 <input
                   type="text"
                   className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 dark:text-zinc-400 dark:placeholder:text-zinc-600 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors"
@@ -202,7 +219,13 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
                 />
               </div>
               <div>
-                <label className="block text-[10px] text-zinc-600 mb-0.5">{t('contentSection.title')}</label>
+                <label className="block text-[10px] text-zinc-600 mb-0.5">
+                  <ParamLabel
+                    label={t('contentSection.title')}
+                    className="text-[10px] text-zinc-600"
+                    info={t('contentSection.titleInfo')}
+                  />
+                </label>
                 <input
                   type="text"
                   className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 dark:text-zinc-400 dark:placeholder:text-zinc-600 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors"
@@ -213,7 +236,13 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
               </div>
             </div>
             <div>
-              <label className="block text-[10px] text-zinc-600 mb-0.5">{t('contentSection.subject')}</label>
+              <label className="block text-[10px] text-zinc-600 mb-0.5">
+                <ParamLabel
+                  label={t('contentSection.subject')}
+                  className="text-[10px] text-zinc-600"
+                  info={t('contentSection.subjectInfo')}
+                />
+              </label>
               <input
                 type="text"
                 className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 dark:text-zinc-400 dark:placeholder:text-zinc-600 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors"
@@ -227,31 +256,27 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
       </div>
 
       {/* Instrumental toggle */}
-      <label className="flex items-center gap-2.5 cursor-pointer group">
-        <div className="relative">
-          <input
-            type="checkbox"
-            checked={instrumental}
-            onChange={e => onInstrumentalChange(e.target.checked)}
-            className="sr-only peer"
-          />
-          <div className="w-8 h-4.5 bg-zinc-200 dark:bg-zinc-700 rounded-full peer-checked:bg-pink-500 transition-colors" />
-          <div className="absolute top-0.5 left-0.5 w-3.5 h-3.5 bg-white rounded-full transition-transform peer-checked:translate-x-3.5" />
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Music size={14} className="text-zinc-500" />
-          <span className="text-sm text-zinc-600 dark:text-zinc-400 group-hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">
-            {t('contentSection.instrumental')}
-          </span>
-        </div>
-      </label>
+      <div className="flex items-center gap-1.5">
+        <Music size={14} className="text-zinc-500" />
+        <Toggle
+          accent="pink"
+          checked={instrumental}
+          onChange={onInstrumentalChange}
+          label={t('contentSection.instrumental')}
+          info={t('contentSection.instrumentalInfo')}
+        />
+      </div>
 
       {/* Lyrics */}
       {!instrumental && (
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-              {t('contentSection.lyrics')}
+              <ParamLabel
+                label={t('contentSection.lyrics')}
+                className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+                info={t('contentSection.lyricsInfo')}
+              />
             </label>
             <div className="flex items-center gap-1.5">
               {hasWildcards(lyrics) && (
@@ -279,7 +304,11 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
       {/* Negative Prompt */}
       <div>
         <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-          Negative Prompt
+          <ParamLabel
+            label="Negative Prompt"
+            className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+            info='Free-text description of what to avoid in the output, for example "jazz, acoustic, slow, ambient, piano". Sent to all backends.'
+          />
         </label>
         <textarea
           className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:border-red-500/50 focus:ring-1 focus:ring-red-500/20 outline-none resize-none transition-colors"

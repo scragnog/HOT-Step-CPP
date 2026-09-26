@@ -41,6 +41,7 @@ import { useBackendStore } from '../../stores/backendStore';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import { ParamLabel } from '../shared/ParamLabel';
 import { Slider } from '../shared/Slider';
+import { StyledSelect } from '../shared/StyledSelect';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
 
 const inputClasses =
@@ -189,26 +190,25 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
           info={blurb}
           rootClassName="flex mb-1.5"
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
-        <select
-          className={inputClasses}
+        <StyledSelect
+          accent="emerald"
+          className="w-full"
           value={selected}
           disabled={disabled}
-          onChange={e => void onCommit(kind, e.target.value || null, draft)}
-        >
-          <option value="">{t('globalBar.yue2AdapterBase', 'None — base model')}</option>
-          {paths.map(p => (
-            <option key={p} value={p}>{meta[p]?.label || shortName(p)}</option>
-          ))}
-          {/* A pick whose file has since moved or been deleted still has to be
-              visible: a native select silently shows blank for a value that is
-              not among its options, which reads as "nothing is selected" when
-              something very much is. */}
-          {selected && !paths.includes(selected) && (
-            <option value={selected}>
-              {shortName(selected)} {t('globalBar.yue2AdapterMissing', '(file not found)')}
-            </option>
-          )}
-        </select>
+          onChange={v => void onCommit(kind, v || null, draft)}
+          placeholder={t('globalBar.yue2AdapterBase', 'None — base model') as string}
+          options={[
+            { value: '', label: t('globalBar.yue2AdapterBase', 'None — base model') },
+            ...paths.map(p => ({ value: p, label: meta[p]?.label || shortName(p) })),
+            // A pick whose file has since moved or been deleted still has to be
+            // visible: silently showing blank for a value that is not among
+            // the options reads as "nothing is selected" when something very
+            // much is.
+            ...(selected && !paths.includes(selected)
+              ? [{ value: selected, label: `${shortName(selected)} ${t('globalBar.yue2AdapterMissing', '(file not found)')}` }]
+              : []),
+          ]}
+        />
       </div>
 
       {selected && (
@@ -327,18 +327,24 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
               </div>
               <Slider
                 label={t('globalBar.yue2AdapterEarly', 'Early third')}
+                info={t('globalBar.yue2AdapterEarlyInfo',
+                  'Multiplies this adapter\'s strength on the first third of the block stack, on top of the master and attention/MLP dials. Nothing yet confirms what YuE2 keeps in its early blocks, so treat this as a probe: pull it down if the start of a render leans too hard on the adapter, back to 1.0 otherwise.')}
                 value={draft.early}
                 onChange={v => setDraft(d => ({ ...d, early: v }))}
                 min={0} max={2} step={0.05} showInput
               />
               <Slider
                 label={t('globalBar.yue2AdapterMid', 'Middle third')}
+                info={t('globalBar.yue2AdapterMidInfo',
+                  'Multiplies this adapter\'s strength on the middle third of the block stack, on top of the master and attention/MLP dials. Nothing yet confirms what YuE2 keeps in its middle blocks, so treat this as a probe: pull it down if the middle of a render leans too hard on the adapter, back to 1.0 otherwise.')}
                 value={draft.mid}
                 onChange={v => setDraft(d => ({ ...d, mid: v }))}
                 min={0} max={2} step={0.05} showInput
               />
               <Slider
                 label={t('globalBar.yue2AdapterLate', 'Late third')}
+                info={t('globalBar.yue2AdapterLateInfo',
+                  'Multiplies this adapter\'s strength on the last third of the block stack, on top of the master and attention/MLP dials. On the MM3 planner the late third turned out to carry sequence termination, and halving it produced songs that faded out or never ended; nothing confirms YuE2 divides its blocks the same way, so treat this as a probe rather than a considered dial.')}
                 value={draft.late}
                 onChange={v => setDraft(d => ({ ...d, late: v }))}
                 min={0} max={2} step={0.05} showInput
@@ -524,10 +530,6 @@ export const Yue2LmAdapterDropdown: React.FC = () => {
           <FileInput size={14} />
           {t('globalBar.yue2AdapterImportButton', 'Import adapter…')}
         </button>
-        <p className="mt-1 text-[10px] text-zinc-600 dark:text-zinc-500 leading-relaxed">
-          {t('globalBar.yue2AdapterImportSub',
-            'For single-file YuE2 adapters from ComfyUI or ai-toolkit.')}
-        </p>
       </div>
       <FileBrowserModal
         open={importing}

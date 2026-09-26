@@ -15,6 +15,8 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Slider } from '../shared/Slider';
+import { StyledSelect } from '../shared/StyledSelect';
+import { ParamLabel } from '../shared/ParamLabel';
 import { VOCAL_LANGUAGES } from '../../constants/languages';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import { useBackendStore } from '../../stores/backendStore';
@@ -57,8 +59,6 @@ interface MetadataSectionProps {
   vocalGender: string;
   onVocalGenderChange: (v: string) => void;
 }
-
-const selectClasses = "w-full px-3 py-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer";
 
 export const MetadataSection: React.FC<MetadataSectionProps> = ({
   bpm, onBpmChange, keyScale, onKeyScaleChange,
@@ -108,7 +108,8 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
         {/* BPM */}
         <div>
           <Slider label={t('metadataSection.bpm')} value={bpm} onChange={onBpmChange}
-            min={0} max={240} step={1} showInput suffix="" />
+            min={0} max={240} step={1} showInput suffix=""
+            info={t('metadataSection.bpmInfo')} infoMeta={t('metadataSection.bpmMeta')} />
           {bpm === 0 && <span className="text-[10px] text-zinc-600">{t('metadataSection.auto')}</span>}
         </div>
 
@@ -122,25 +123,24 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
         <div>
           {durationAuto ? (
             isAutoDuration ? (
-              <>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                    {t('metadataSection.duration')}
-                  </label>
-                  {autoChip}
-                </div>
-                <p className="text-[10px] leading-snug text-zinc-500">
-                  {t('metadataSection.durationAutoHint', { max: durationMax })}
-                </p>
-              </>
+              <div className="flex items-center justify-between mb-1.5">
+                <ParamLabel
+                  label={t('metadataSection.duration')}
+                  info={t('metadataSection.durationAutoHint', { max: durationMax })}
+                  className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+                />
+                {autoChip}
+              </div>
             ) : (
               <Slider label={t('metadataSection.duration')} value={duration} onChange={onDurationChange}
-                min={1} max={durationMax} step={1} suffix="s" showInput headerRight={autoChip} />
+                min={1} max={durationMax} step={1} suffix="s" showInput headerRight={autoChip}
+                info={t('metadataSection.durationInfo')} />
             )
           ) : (
             <>
               <Slider label={t('metadataSection.duration')} value={duration} onChange={onDurationChange}
-                min={-1} max={durationMax} step={1} suffix="s" showInput />
+                min={-1} max={durationMax} step={1} suffix="s" showInput
+                info={t('metadataSection.durationInfo')} infoMeta={t('metadataSection.durationMeta')} />
               {duration <= 0 && <span className="text-[10px] text-zinc-600">{t('metadataSection.auto')}</span>}
             </>
           )}
@@ -149,25 +149,39 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
 
         {/* Key */}
         <div>
-          <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('metadataSection.key')}</label>
-          <select className={selectClasses} value={keyScale}
-            onChange={e => onKeyScaleChange(e.target.value)}>
-            {KEY_SIGNATURES.map(k => (
-              <option key={k} value={k}>{k || t('metadataSection.auto')}</option>
-            ))}
-          </select>
+          <ParamLabel
+            label={t('metadataSection.key')}
+            info={t('metadataSection.keyInfo')}
+            meta={t('metadataSection.keyMeta')}
+            className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+            rootClassName="block mb-1.5"
+          />
+          <StyledSelect
+            accent="pink"
+            value={keyScale}
+            onChange={onKeyScaleChange}
+            className="w-full"
+            options={KEY_SIGNATURES.map(k => ({ value: k, label: k || t('metadataSection.auto') }))}
+          />
         </div>
 
         {/* Time Signature — no path to MiniMax-Music3 or YuE2, so hidden there */}
         {!mm3Mode && !yue2Mode && (
           <div>
-            <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('metadataSection.timeSig')}</label>
-            <select className={selectClasses} value={timeSignature}
-              onChange={e => onTimeSignatureChange(e.target.value)}>
-              {TIME_SIGNATURES.map(tSig => (
-                <option key={tSig} value={tSig}>{tSig || t('metadataSection.auto')}</option>
-              ))}
-            </select>
+            <ParamLabel
+              label={t('metadataSection.timeSig')}
+              info={t('metadataSection.timeSigInfo')}
+              meta={t('metadataSection.timeSigMeta')}
+              className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+              rootClassName="block mb-1.5"
+            />
+            <StyledSelect
+              accent="pink"
+              value={timeSignature}
+              onChange={onTimeSignatureChange}
+              className="w-full"
+              options={TIME_SIGNATURES.map(tSig => ({ value: tSig, label: tSig || t('metadataSection.auto') }))}
+            />
           </div>
         )}
 
@@ -175,36 +189,44 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
             and nowhere at all on YuE2 */}
         {!yue2Mode && (
         <div>
-          <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">{t('metadataSection.vocalGender')}</label>
-          <select className={selectClasses} value={vocalGender}
-            onChange={e => onVocalGenderChange(e.target.value)}>
-            {VOCAL_GENDERS.map(g => (
-              <option key={g} value={g}>
-                {g === '' ? t('metadataSection.genderAny')
-                  : g === 'female' ? t('metadataSection.genderFemale')
-                  : g === 'male' ? t('metadataSection.genderMale')
-                  : t('metadataSection.genderDuet')}
-              </option>
-            ))}
-          </select>
+          <ParamLabel
+            label={t('metadataSection.vocalGender')}
+            info={t('metadataSection.vocalGenderInfo')}
+            className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+            rootClassName="block mb-1.5"
+          />
+          <StyledSelect
+            accent="pink"
+            value={vocalGender}
+            onChange={onVocalGenderChange}
+            className="w-full"
+            options={VOCAL_GENDERS.map(g => ({
+              value: g,
+              label: g === '' ? t('metadataSection.genderAny')
+                : g === 'female' ? t('metadataSection.genderFemale')
+                : g === 'male' ? t('metadataSection.genderMale')
+                : t('metadataSection.genderDuet'),
+            }))}
+          />
         </div>
         )}
 
         {/* Language — YuE2 infers it from the lyrics; there is no field for it */}
         {!yue2Mode && (
         <div className="col-span-2">
-          <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-            {mm3Mode ? t('metadataSection.lyricsLanguage') : t('metadataSection.vocalLanguage')}
-          </label>
-          <select className={selectClasses} value={vocalLanguage}
-            onChange={e => onVocalLanguageChange(e.target.value)}>
-            {VOCAL_LANGUAGES.map(l => (
-              <option key={l.value} value={l.value}>{l.label}</option>
-            ))}
-          </select>
-          {mm3Mode && (
-            <p className="mt-1 text-[10px] leading-snug text-zinc-500">{t('metadataSection.lyricsLanguageHint')}</p>
-          )}
+          <ParamLabel
+            label={mm3Mode ? t('metadataSection.lyricsLanguage') : t('metadataSection.vocalLanguage')}
+            info={mm3Mode ? t('metadataSection.lyricsLanguageHint') : t('metadataSection.vocalLanguageInfo')}
+            className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+            rootClassName="block mb-1.5"
+          />
+          <StyledSelect
+            accent="pink"
+            value={vocalLanguage}
+            onChange={onVocalLanguageChange}
+            className="w-full"
+            options={VOCAL_LANGUAGES.map(l => ({ value: l.value, label: l.label }))}
+          />
         </div>
         )}
       </div>

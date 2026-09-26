@@ -10,6 +10,8 @@ import { useBackendStore } from '../../stores/backendStore';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
+import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '../shared/StyledSelect';
 import { BatchImportWizard } from './BatchImportWizard';
 import { DatasetAssetChips } from './DatasetAssetChips';
 import { NewDatasetWizard } from './NewDatasetWizard';
@@ -139,15 +141,27 @@ export const DatasetList: React.FC = () => {
           className="flex-1 max-w-md rounded-lg bg-zinc-100 dark:bg-black/20 px-3 py-1.5 text-xs"
         />
         {isYue2 && (
-          <select
-            value={doneFilter}
-            onChange={e => setDoneFilter(e.target.value as 'all' | 'done' | 'todo')}
-            className="rounded-lg bg-zinc-100 dark:bg-black/20 px-2 py-1.5 text-xs"
-          >
-            <option value="all">{t('trainingStudio.list.filterAll', 'All datasets')}</option>
-            <option value="done">{t('trainingStudio.list.filterDone', 'AR + NAR adapters done')}</option>
-            <option value="todo">{t('trainingStudio.list.filterTodo', 'Not done yet')}</option>
-          </select>
+          <div className="flex flex-col gap-1">
+            <ParamLabel
+              label={t('trainingStudio.list.filterStatusLabel', 'Adapter status')}
+              className="sr-only"
+              info={t('trainingStudio.list.filterStatusInfo',
+                'Narrows the grid below to datasets by whether their YuE2 AR and NAR adapters have both finished training. All datasets shows everything; AR + NAR adapters done shows only datasets with both adapters built; Not done yet shows the rest.')}
+            />
+            <StyledSelect
+              accent="amber"
+              value={doneFilter}
+              onChange={v => setDoneFilter(v)}
+              size="sm"
+              className="rounded-lg"
+              aria-label={t('trainingStudio.list.filterStatusLabel', 'Adapter status') as string}
+              options={[
+                { value: 'all', label: t('trainingStudio.list.filterAll', 'All datasets') },
+                { value: 'done', label: t('trainingStudio.list.filterDone', 'AR + NAR adapters done') },
+                { value: 'todo', label: t('trainingStudio.list.filterTodo', 'Not done yet') },
+              ]}
+            />
+          </div>
         )}
         <span className="text-[11px] text-zinc-500">{visible.length} / {datasets.length}</span>
       </div>

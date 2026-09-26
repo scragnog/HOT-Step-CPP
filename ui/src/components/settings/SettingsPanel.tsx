@@ -16,6 +16,8 @@ import { useAuth } from '../../context/AuthContext';
 import { songApi, settingsApi } from '../../services/api';
 import { lireekApi } from '../../services/lireekApi';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
+import { StyledSelect } from '../shared/StyledSelect';
+import { ParamLabel } from '../shared/ParamLabel';
 import {
   SettingRow, SelectRow, Toggle,
   EnvTextRow, EnvPasswordRow, EnvPathRow, EnvSubsection,
@@ -373,29 +375,28 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               {/* GPU Device selector — auto-detects available GPUs */}
               <div className="setting-row">
                 <div className="setting-info">
-                  <div className="setting-label">GPU Device</div>
-                  <div className="setting-description">
-                    Which GPU the engine should use. Auto picks the card with the most VRAM.
-                    Requires restart.
-                  </div>
+                  <ParamLabel
+                    label="GPU Device"
+                    className="setting-label"
+                    info="Which GPU the engine should use. Auto picks the card with the most VRAM. Pick a specific card to pin the engine to it instead, useful with more than one GPU in the machine. Requires a restart to take effect."
+                  />
                 </div>
                 {detectedGpus.length > 0 ? (
-                  <select
+                  <StyledSelect
                     id="env-CUDA_VISIBLE_DEVICES"
-                    className="env-select"
+                    accent="emerald"
                     value={gpuSelectValue}
-                    onChange={(e) => handleEnvChange('CUDA_VISIBLE_DEVICES', e.target.value)}
-                  >
-                    <option value="">Auto (most VRAM)</option>
-                    {detectedGpus.map((gpu) => (
-                      <option key={gpu.uuid || gpu.index} value={gpu.uuid || String(gpu.index)}>
-                        GPU {gpu.index}: {gpu.name} ({Math.round(gpu.memoryMB / 1024)} GB)
-                      </option>
-                    ))}
-                    {gpuSelectUnknown && (
-                      <option value={gpuSelectValue}>{gpuSelectValue} (from .env)</option>
-                    )}
-                  </select>
+                    onChange={(v) => handleEnvChange('CUDA_VISIBLE_DEVICES', v)}
+                    className="min-w-[180px] max-w-[360px]"
+                    options={[
+                      { value: '', label: 'Auto (most VRAM)' },
+                      ...detectedGpus.map((gpu) => ({
+                        value: gpu.uuid || String(gpu.index),
+                        label: `GPU ${gpu.index}: ${gpu.name} (${Math.round(gpu.memoryMB / 1024)} GB)`,
+                      })),
+                      ...(gpuSelectUnknown ? [{ value: gpuSelectValue, label: `${gpuSelectValue} (from .env)` }] : []),
+                    ]}
+                  />
                 ) : (
                   <input
                     id="env-CUDA_VISIBLE_DEVICES"
@@ -413,12 +414,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   Restart-required (spawn-time flag). Default off (VRAM cost). */}
               <div className="setting-row">
                 <div className="setting-info">
-                  <div className="setting-label">Keep Models in VRAM</div>
-                  <div className="setting-description">
-                    Keep the DiT + adapter + VAE resident between generations so the one-time
-                    ~17 s adapter precompute isn't paid on every render. Much faster repeat
-                    generations, but holds ~13 GB of VRAM. Leave off on VRAM-tight GPUs. Requires restart.
-                  </div>
+                  <ParamLabel
+                    label="Keep Models in VRAM"
+                    className="setting-label"
+                    meta="default off · holds ~13 GB VRAM"
+                    info="Keeps the DiT, adapter, and VAE resident in VRAM between generations, instead of loading them fresh each time. On: skips the one-time ~17s adapter precompute on every render, so repeat generations are much faster, at the cost of ~13 GB of VRAM held continuously. Off: frees that VRAM between renders, better on VRAM-tight GPUs. Requires a restart to take effect."
+                  />
                 </div>
                 <Toggle
                   id="env-ACESTEPCPP_KEEP_LOADED"
@@ -534,21 +535,29 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
         <div className="setting-row">
           <div className="setting-info">
-            <div className="setting-label">{t('settings.ai.defaultProvider')}</div>
-            <div className="setting-description">{t('settings.ai.defaultProviderDesc')}</div>
+            <ParamLabel
+              label={t('settings.ai.defaultProvider')}
+              className="setting-label"
+              info={t('settings.ai.defaultProviderDesc')}
+            />
           </div>
-          <select id="env-DEFAULT_LLM_PROVIDER" className="env-select"
+          <StyledSelect
+            id="env-DEFAULT_LLM_PROVIDER"
+            accent="emerald"
+            className="min-w-[180px] max-w-[360px]"
             value={envValues.DEFAULT_LLM_PROVIDER || 'gemini'}
-            onChange={(e) => handleEnvChange('DEFAULT_LLM_PROVIDER', e.target.value)}>
-            <option value="gemini">Gemini</option>
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="ollama">Ollama</option>
-            <option value="lmstudio">LM Studio</option>
-            <option value="llamacpp">llama.cpp</option>
-            <option value="unsloth">Unsloth</option>
-            <option value="openai-compat">{envValues.OPENAI_COMPAT_NAME || 'OpenAI Compatible'}</option>
-          </select>
+            onChange={(v) => handleEnvChange('DEFAULT_LLM_PROVIDER', v)}
+            options={[
+              { value: 'gemini', label: 'Gemini' },
+              { value: 'openai', label: 'OpenAI' },
+              { value: 'anthropic', label: 'Anthropic' },
+              { value: 'ollama', label: 'Ollama' },
+              { value: 'lmstudio', label: 'LM Studio' },
+              { value: 'llamacpp', label: 'llama.cpp' },
+              { value: 'unsloth', label: 'Unsloth' },
+              { value: 'openai-compat', label: envValues.OPENAI_COMPAT_NAME || 'OpenAI Compatible' },
+            ]}
+          />
         </div>
         <EnvTextRow envKey="LLM_TIMEOUT_MS" label={t('settings.ai.llmTimeout')} description={t('settings.ai.llmTimeoutDesc')}
           value={envValues.LLM_TIMEOUT_MS || ''} onChange={handleEnvChange} type="number" placeholder="300000" />

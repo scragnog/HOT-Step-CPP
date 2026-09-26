@@ -26,6 +26,8 @@ import { CoverArtContent, CoverArtBadge } from './CoverArtDropdown';
 import { PluginControls } from './PluginControls';
 import { EditableSlider } from '../shared/EditableSlider';
 import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
 import { Sa3SamplerControls } from './Sa3SamplerControls';
 
 // LUFS normalization presets
@@ -174,22 +176,21 @@ const MasteringContent: React.FC = () => {
     <div className="space-y-3 mt-2">
       {/* Reference selector */}
       <div>
-        <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-          {t('mastering.referenceTrack')}
-        </label>
+        <ParamLabel
+          label={t('mastering.referenceTrack')}
+          rootClassName="mb-1.5"
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          info={t('mastering.referenceTrackInfo', 'The track Mastering matches level, frequency balance and dynamics against. Upload one below, then pick it here.')}
+        />
         {references.length > 0 ? (
-          <select
-            className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 outline-none transition-colors cursor-pointer"
+          <StyledSelect
+            accent="amber"
             value={gp.masteringReference}
-            onChange={e => gp.setMasteringReference(e.target.value)}
-          >
-            <option value="">{t('mastering.selectReference')}</option>
-            {references.map(r => (
-              <option key={r.name} value={r.name}>
-                {r.name} ({formatFileSize(r.size)})
-              </option>
-            ))}
-          </select>
+            onChange={gp.setMasteringReference}
+            options={references.map(r => ({ value: r.name, label: `${r.name} (${formatFileSize(r.size)})` }))}
+            placeholder={t('mastering.selectReference')}
+            className="w-full"
+          />
         ) : (
           <div className="text-xs text-zinc-500 italic px-1">
             {t('mastering.noReferencesYet')}
@@ -408,37 +409,45 @@ export const PostProcessingDropdown: React.FC = () => {
             <div className="space-y-2 pt-1">
               {/* Model selector */}
               <div>
-                <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1">Model</label>
-                <select
-                  className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 outline-none transition-colors cursor-pointer"
+                <ParamLabel label="Model" rootClassName="mb-1"
+                  className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+                  info="Which Whisper model transcribes the render. Larger models are more accurate but slower; Large v3 Turbo is the recommended balance. Needs the matching model downloaded in the Model Manager." />
+                <StyledSelect
+                  accent="sky"
                   value={gp.whisperModel}
-                  onChange={e => gp.setWhisperModel(e.target.value)}
-                >
-                  <option value="">Auto-detect</option>
-                  <option value="ggml-large-v3-turbo.bin">Large v3 Turbo (recommended)</option>
-                  <option value="ggml-large-v3.bin">Large v3 (best accuracy)</option>
-                  <option value="ggml-medium.bin">Medium</option>
-                  <option value="ggml-base.bin">Base (fastest)</option>
-                </select>
+                  onChange={gp.setWhisperModel}
+                  options={[
+                    { value: '', label: 'Auto-detect' },
+                    { value: 'ggml-large-v3-turbo.bin', label: 'Large v3 Turbo (recommended)' },
+                    { value: 'ggml-large-v3.bin', label: 'Large v3 (best accuracy)' },
+                    { value: 'ggml-medium.bin', label: 'Medium' },
+                    { value: 'ggml-base.bin', label: 'Base (fastest)' },
+                  ]}
+                  className="w-full"
+                />
               </div>
               {/* Language */}
               <div>
-                <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1">Language</label>
-                <select
-                  className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 outline-none transition-colors cursor-pointer"
+                <ParamLabel label="Language" rootClassName="mb-1"
+                  className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+                  info="The language Whisper expects the vocals to be sung in. Auto-detect works for most tracks; pick a language directly if it keeps mis-detecting one." />
+                <StyledSelect
+                  accent="sky"
                   value={gp.whisperLanguage}
-                  onChange={e => gp.setWhisperLanguage(e.target.value)}
-                >
-                  <option value="auto">Auto-detect</option>
-                  <option value="en">English</option>
-                  <option value="ja">Japanese</option>
-                  <option value="zh">Chinese</option>
-                  <option value="ko">Korean</option>
-                  <option value="es">Spanish</option>
-                  <option value="fr">French</option>
-                  <option value="de">German</option>
-                  <option value="ru">Russian</option>
-                </select>
+                  onChange={gp.setWhisperLanguage}
+                  options={[
+                    { value: 'auto', label: 'Auto-detect' },
+                    { value: 'en', label: 'English' },
+                    { value: 'ja', label: 'Japanese' },
+                    { value: 'zh', label: 'Chinese' },
+                    { value: 'ko', label: 'Korean' },
+                    { value: 'es', label: 'Spanish' },
+                    { value: 'fr', label: 'French' },
+                    { value: 'de', label: 'German' },
+                    { value: 'ru', label: 'Russian' },
+                  ]}
+                  className="w-full"
+                />
               </div>
               {/* Beam size */}
               <EditableSlider
@@ -489,15 +498,13 @@ export const PostProcessingDropdown: React.FC = () => {
             {gp.postprocessEnabled && (
               <div className="space-y-2 pt-1">
                 {postprocessPlugins.length > 1 && (
-                  <select
-                    className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20 outline-none transition-colors cursor-pointer"
+                  <StyledSelect
+                    accent="cyan"
                     value={gp.postprocessPlugin}
-                    onChange={e => gp.setPostprocessPlugin(e.target.value)}
-                  >
-                    {postprocessPlugins.map((p: any) => (
-                      <option key={p.name} value={p.name}>{p.display || p.name}</option>
-                    ))}
-                  </select>
+                    onChange={gp.setPostprocessPlugin}
+                    options={postprocessPlugins.map((p: any) => ({ value: p.name as string, label: p.display || p.name }))}
+                    className="w-full"
+                  />
                 )}
                 {selectedPostprocessPlugin && (
                   <ParamLabel
@@ -680,11 +687,12 @@ export const PostProcessingDropdown: React.FC = () => {
                                ? 'border-sky-400/40 bg-sky-500/5'
                                : 'border-zinc-300 dark:border-white/10'}`}>
                           <div className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
+                            <Toggle
+                              size="sm"
+                              accent="sky"
                               checked={enabled}
-                              onChange={e => setSsAdapter(a.name, { enabled: e.target.checked })}
-                              className="accent-sky-500"
+                              onChange={v => setSsAdapter(a.name, { enabled: v })}
+                              aria-label={`Enable ${a.name}`}
                             />
                             <span className="flex-1 text-xs text-zinc-700 dark:text-zinc-300 font-mono truncate"
                                   title={`${a.name} (${a.sizeMb} MB)`}>
@@ -721,42 +729,23 @@ export const PostProcessingDropdown: React.FC = () => {
               </div>
 
               {/* Preserve source dynamics: envelope match to the pre-refine audio */}
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={gp.stableStepPreserveDynamics !== false}
-                  onChange={e => gp.setStableStepPreserveDynamics(e.target.checked)}
-                  className="mt-0.5 accent-sky-500"
-                />
-                <span className="flex-1">
-                  <span className="block text-xs text-zinc-700 dark:text-zinc-300">Preserve source dynamics</span>
-                  <span className="block text-[10px] text-zinc-500 leading-relaxed">
-                    The refined audio follows the original's loudness envelope — timbre
-                    from the refine, dynamics from your generation. Prevents adapters
-                    trained on mastered material from producing brickwalled waveforms.
-                  </span>
-                </span>
-              </label>
+              <Toggle
+                accent="sky"
+                checked={gp.stableStepPreserveDynamics !== false}
+                onChange={gp.setStableStepPreserveDynamics}
+                label="Preserve source dynamics"
+                info="The refined audio follows the original's loudness envelope — timbre from the refine, dynamics from your generation. On (default): prevents adapters trained on mastered material from producing brickwalled waveforms. Off: the refine's own dynamics are used instead."
+              />
 
               {/* Vocal stem handling: leave the AS1.5 vocals alone, or smooth
                   them through the PP-VAE at the cost of high-end detail */}
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={gp.stableStepVocalPpVae === true}
-                  onChange={e => gp.setStableStepVocalPpVae(e.target.checked)}
-                  className="mt-0.5 accent-sky-500"
-                />
-                <span className="flex-1">
-                  <span className="block text-xs text-zinc-700 dark:text-zinc-300">Re-encode vocals through PP-VAE</span>
-                  <span className="block text-[10px] text-zinc-500 leading-relaxed">
-                    Smooths fizzy or mechanical AS1.5 vocals, but the round trip is
-                    lossy — it costs about 5 dB of air above 10 kHz and resynthesises
-                    the top octaves rather than reproducing them. Off: the original
-                    vocal stem is recombined with the SA3 instrumental untouched.
-                  </span>
-                </span>
-              </label>
+              <Toggle
+                accent="sky"
+                checked={gp.stableStepVocalPpVae === true}
+                onChange={gp.setStableStepVocalPpVae}
+                label="Re-encode vocals through PP-VAE"
+                info="Smooths fizzy or mechanical AS1.5 vocals, but the round trip is lossy — it costs about 5 dB of air above 10 kHz and resynthesises the top octaves rather than reproducing them. Off (default): the original vocal stem is recombined with the SA3 instrumental untouched."
+              />
 
               {/* Vocal level. The server already restores the source mix's own
                   vocal-to-bed ratio after the refine; this is taste on top. */}
@@ -778,7 +767,9 @@ export const PostProcessingDropdown: React.FC = () => {
 
               {/* Source blend: crossover splice or full-band mix with the AS1.5 source */}
               <div>
-                <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1">Source blend</label>
+                <ParamLabel label="Source blend" rootClassName="mb-1"
+                  className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+                  info="How the SA3 refine and the original AS1.5 render are combined. Off (default) uses the full SA3 refine. Crossover keeps the original below a frequency and the refine above it. Mix blends the two full-band by amount." />
                 <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10 bg-zinc-100 dark:bg-zinc-800">
                   {([
                     { value: 'off' as const, label: 'Off', tip: 'Full SA3 refine output (no source blending)' },
@@ -835,22 +826,13 @@ export const PostProcessingDropdown: React.FC = () => {
 
               {/* Refine seed: follows the generation seed unless overridden */}
               <div>
-                <label className="flex items-start gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={gp.stableStepSeedFollowsDit !== false}
-                    onChange={e => gp.setStableStepSeedFollowsDit(e.target.checked)}
-                    className="mt-0.5 accent-sky-500"
-                  />
-                  <span className="flex-1">
-                    <span className="block text-xs text-zinc-700 dark:text-zinc-300">Follow generation seed</span>
-                    <span className="block text-[10px] text-zinc-500 leading-relaxed">
-                      The refine uses the song's resolved generation seed — regenerating
-                      with the same seed reproduces the same refine. Untick to set a
-                      fixed independent seed.
-                    </span>
-                  </span>
-                </label>
+                <Toggle
+                  accent="sky"
+                  checked={gp.stableStepSeedFollowsDit !== false}
+                  onChange={gp.setStableStepSeedFollowsDit}
+                  label="Follow generation seed"
+                  info="The refine uses the song's resolved generation seed — regenerating with the same seed reproduces the same refine. On is the default. Off: set a fixed seed for the refine that stays the same even when the generation seed changes."
+                />
                 {gp.stableStepSeedFollowsDit === false && (
                   <input
                     type="number"
@@ -1145,20 +1127,22 @@ export const PostProcessingDropdown: React.FC = () => {
               <div className="space-y-2 pt-1">
                 {/* Preset selector */}
                 <div>
-                  <label className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5">
-                    {t('pp.lufsPreset')}
-                  </label>
-                  <select
-                    className="w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 outline-none transition-colors cursor-pointer"
+                  <ParamLabel
+                    label={t('pp.lufsPreset')}
+                    rootClassName="mb-1.5"
+                    className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+                    info={t('pp.lufsPresetInfo', 'Which loudness target the Final Normalizer aims for. Pick the platform you are mastering for, or Custom to set your own target below.')}
+                  />
+                  <StyledSelect
+                    accent="amber"
                     value={gp.lufsPreset}
-                    onChange={e => gp.setLufsPreset(e.target.value)}
-                  >
-                    {LUFS_PRESETS.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.label}{p.lufs !== null ? ` (${p.lufs} LUFS)` : ''}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={gp.setLufsPreset}
+                    options={LUFS_PRESETS.map(p => ({
+                      value: p.id as string,
+                      label: `${p.label}${p.lufs !== null ? ` (${p.lufs} LUFS)` : ''}`,
+                    }))}
+                    className="w-full"
+                  />
                 </div>
 
                 {/* Custom slider — only when preset is 'custom' */}

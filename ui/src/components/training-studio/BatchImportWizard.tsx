@@ -19,6 +19,9 @@ import {
 import { useTrainingStore } from '../../stores/trainingStore';
 import { DatasetAssetChips } from './DatasetAssetChips';
 import { FolderPicker } from './FolderPicker';
+import { ParamLabel } from '../shared/ParamLabel';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
 
 interface FolderRow {
   path: string;
@@ -36,6 +39,15 @@ const STAGE_LABEL_KEYS: Record<PipelineStage, string> = {
   'train-dit': 'trainingStudio.batch.stageTrainDit',
   'train-lm': 'trainingStudio.batch.stageTrainLm',
   'lyric-studio': 'trainingStudio.batch.stageLyricStudio',
+};
+
+const STAGE_INFO_KEYS: Record<PipelineStage, string> = {
+  label: 'trainingStudio.batch.stageLabelInfo',
+  build: 'trainingStudio.batch.stageBuildInfo',
+  preprocess: 'trainingStudio.batch.stagePreprocessInfo',
+  'train-dit': 'trainingStudio.batch.stageTrainDitInfo',
+  'train-lm': 'trainingStudio.batch.stageTrainLmInfo',
+  'lyric-studio': 'trainingStudio.batch.stageLyricStudioInfo',
 };
 
 // Every stage is on by default EXCEPT train-lm: planner-LM adapters have been
@@ -90,6 +102,10 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
   const genRef = useRef(0);
   /** Index of the last row clicked — the anchor a shift-click extends from. */
   const anchorRef = useRef<number | null>(null);
+  /** Toggle's onChange carries no click event, so shift-click range-select
+   *  (toggleRow's second argument) is captured here on mousedown, before the
+   *  button's own click fires onChange. */
+  const shiftClickRef = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -224,7 +240,6 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
 
   const selectableRows = rows.filter(r => r.audioFiles !== 0);
   const allSelected = selectableRows.length > 0 && selectableRows.every(r => r.checked);
-  const someSelected = selectableRows.some(r => r.checked);
   const selectedRows = rows.filter(r => r.checked && r.audioFiles !== 0);
   const selectedStages = PIPELINE_STAGES.filter(s => stages[s]);
   const canSubmit = selectedRows.length > 0 && selectedStages.length > 0 && !submitting;
@@ -275,7 +290,11 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
           <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
             {/* Root folder */}
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.batch.rootFolder')}</label>
+              <ParamLabel
+                label={t('trainingStudio.batch.rootFolder')}
+                info={t('trainingStudio.batch.rootFolderInfo')}
+                className="text-xs font-semibold text-zinc-600 dark:text-zinc-400"
+              />
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -292,7 +311,6 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
                   <FolderOpen size={14} /> {t('trainingStudio.wizard.browse')}
                 </button>
               </div>
-              <div className="text-[11px] text-zinc-500">{t('trainingStudio.batch.rootHint')}</div>
             </div>
 
             {rootError && (
@@ -309,20 +327,20 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
             {rows.length > 0 && (
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <label className="flex items-center gap-2 text-xs font-semibold text-zinc-600 dark:text-zinc-400 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
+                  <div className="flex items-center gap-2 text-xs font-semibold text-zinc-600 dark:text-zinc-400 select-none">
+                    <Toggle
+                      size="sm"
+                      accent="amber"
                       checked={allSelected}
-                      ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
                       onChange={() => setAllRows(!allSelected)}
                       disabled={selectableRows.length === 0}
-                      className="accent-amber-500"
+                      aria-label={t('trainingStudio.batch.selectAll')}
                     />
                     {t('trainingStudio.batch.folders', { count: rows.length })}
                     <span className="font-normal text-zinc-500">
                       ({t('trainingStudio.batch.selectedCount', { count: selectedRows.length })})
                     </span>
-                  </label>
+                  </div>
                   <div className="flex items-center gap-3">
                     <span className="text-[11px] text-zinc-500 hidden sm:inline">
                       {t('trainingStudio.batch.shiftHint')}
@@ -340,22 +358,25 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
                     const disabled = row.audioFiles === 0;
                     const ds = datasetByDir.get(row.path.toLowerCase());
                     return (
-                      <label
+                      <div
                         key={row.path}
-                        className={`flex flex-col gap-1 px-3 py-2 text-xs select-none ${disabled ? 'opacity-50' : 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/5'}`}
+                        className={`flex flex-col gap-1 px-3 py-2 text-xs select-none ${disabled ? 'opacity-50' : 'hover:bg-black/5 dark:hover:bg-white/5'}`}
                       >
                         <div className="flex items-center gap-2.5">
-                          {/* onClick rather than onChange: only the mouse event
-                              carries shiftKey, and a click forwarded by the
-                              wrapping <label> preserves it. */}
-                          <input
-                            type="checkbox"
-                            checked={row.checked && !disabled}
-                            disabled={disabled}
-                            onClick={(e) => toggleRow(row.path, e.shiftKey)}
-                            onChange={() => { /* handled in onClick */ }}
-                            className="accent-amber-500 flex-shrink-0"
-                          />
+                          {/* mousedown, not the toggle's own onChange, captures
+                              shiftKey: Toggle's onChange carries only the next
+                              boolean, so the range-select modifier is read here
+                              before the click that fires it. */}
+                          <span onMouseDown={(e) => { shiftClickRef.current = e.shiftKey; }}>
+                            <Toggle
+                              size="sm"
+                              accent="amber"
+                              checked={row.checked && !disabled}
+                              disabled={disabled}
+                              onChange={() => toggleRow(row.path, shiftClickRef.current)}
+                              aria-label={t('trainingStudio.batch.selectFolder', { name: row.name })}
+                            />
+                          </span>
                           <span className="flex-1 min-w-0 truncate text-zinc-700 dark:text-zinc-300 font-medium" title={row.path}>{row.name}</span>
                           {row.scanning ? (
                             <Loader2 size={12} className="animate-spin text-zinc-400 flex-shrink-0" />
@@ -392,7 +413,7 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
                             />
                           </div>
                         )}
-                      </label>
+                      </div>
                     );
                   })}
                 </div>
@@ -404,18 +425,18 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
               <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.batch.stages')}</label>
               <div className="flex flex-wrap gap-2">
                 {PIPELINE_STAGES.map(stage => (
-                  <label
+                  <div
                     key={stage}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                    className="flex items-center px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300"
                   >
-                    <input
-                      type="checkbox"
+                    <Toggle
+                      accent="amber"
                       checked={stages[stage]}
                       onChange={() => toggleStage(stage)}
-                      className="accent-amber-500"
+                      label={t(STAGE_LABEL_KEYS[stage])}
+                      info={t(STAGE_INFO_KEYS[stage])}
                     />
-                    {t(STAGE_LABEL_KEYS[stage])}
-                  </label>
+                  </div>
                 ))}
               </div>
               <div className="flex items-start gap-2 text-[11px] text-zinc-500">
@@ -430,43 +451,59 @@ export const BatchImportWizard: React.FC<BatchImportWizardProps> = ({ open, onCl
                 <label className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.label.title')}</label>
                 <div className="flex flex-wrap items-center gap-2">
                   {([
-                    [labelEssentia, setLabelEssentia, 'trainingStudio.label.useEssentia'],
-                    [labelGenius, setLabelGenius, 'trainingStudio.label.useGenius'],
-                    [labelCaption, setLabelCaption, 'trainingStudio.label.useCaption'],
-                  ] as Array<[boolean, (v: boolean) => void, string]>).map(([value, setValue, key]) => (
-                    <label
+                    [labelEssentia, setLabelEssentia, 'trainingStudio.label.useEssentia', 'trainingStudio.label.useEssentiaInfo'],
+                    [labelGenius, setLabelGenius, 'trainingStudio.label.useGenius', 'trainingStudio.label.useGeniusInfo'],
+                    [labelCaption, setLabelCaption, 'trainingStudio.label.useCaption', 'trainingStudio.label.useCaptionInfo'],
+                  ] as Array<[boolean, (v: boolean) => void, string, string]>).map(([value, setValue, key, infoKey]) => (
+                    <div
                       key={key}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                      className="flex items-center px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300"
                     >
-                      <input
-                        type="checkbox"
+                      <Toggle
+                        accent="amber"
                         checked={value}
-                        onChange={(e) => setValue(e.target.checked)}
-                        className="accent-amber-500"
+                        onChange={setValue}
+                        label={t(key)}
+                        info={t(infoKey)}
                       />
-                      {t(key)}
-                    </label>
+                    </div>
                   ))}
-                  <select
-                    value={labelScope}
-                    onChange={(e) => setLabelScope(e.target.value as 'unlabeled' | 'all')}
-                    className="px-2.5 py-1.5 rounded-lg text-xs bg-zinc-100 dark:bg-black/20 border border-zinc-200 dark:border-white/10 text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-amber-500"
-                    title={t('trainingStudio.label.scope')}
-                  >
-                    <option value="unlabeled">{t('trainingStudio.label.scopeUnlabeled')}</option>
-                    <option value="all">{t('trainingStudio.label.scopeAll')}</option>
-                  </select>
-                  <select
-                    value={labelMergePolicy}
-                    onChange={(e) => setLabelMergePolicy(e.target.value as MergePolicy)}
-                    className="px-2.5 py-1.5 rounded-lg text-xs bg-zinc-100 dark:bg-black/20 border border-zinc-200 dark:border-white/10 text-zinc-700 dark:text-zinc-300 focus:outline-none focus:border-amber-500"
-                    title={t('trainingStudio.label.mergePolicy')}
-                  >
-                    <option value="fill_missing">{t('trainingStudio.label.mergeFill')}</option>
-                    <option value="overwrite_caption">{t('trainingStudio.label.mergeCaption')}</option>
-                    <option value="overwrite_lyrics">{t('trainingStudio.label.mergeLyrics')}</option>
-                    <option value="overwrite_all">{t('trainingStudio.label.mergeAll')}</option>
-                  </select>
+                  <div className="flex flex-col gap-1">
+                    <ParamLabel
+                      label={t('trainingStudio.label.scope')}
+                      info={t('trainingStudio.label.scopeInfo')}
+                      className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-400"
+                    />
+                    <StyledSelect
+                      accent="amber"
+                      size="sm"
+                      value={labelScope}
+                      onChange={setLabelScope}
+                      options={[
+                        { value: 'unlabeled', label: t('trainingStudio.label.scopeUnlabeled') },
+                        { value: 'all', label: t('trainingStudio.label.scopeAll') },
+                      ]}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <ParamLabel
+                      label={t('trainingStudio.label.mergePolicy')}
+                      info={t('trainingStudio.label.mergePolicyInfo')}
+                      className="text-[11px] font-semibold text-zinc-600 dark:text-zinc-400"
+                    />
+                    <StyledSelect
+                      accent="amber"
+                      size="sm"
+                      value={labelMergePolicy}
+                      onChange={setLabelMergePolicy}
+                      options={[
+                        { value: 'fill_missing', label: t('trainingStudio.label.mergeFill') },
+                        { value: 'overwrite_caption', label: t('trainingStudio.label.mergeCaption') },
+                        { value: 'overwrite_lyrics', label: t('trainingStudio.label.mergeLyrics') },
+                        { value: 'overwrite_all', label: t('trainingStudio.label.mergeAll') },
+                      ]}
+                    />
+                  </div>
                 </div>
               </div>
             )}

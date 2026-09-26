@@ -5,7 +5,9 @@ import { useTranslation } from 'react-i18next';
 import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
 import { TrainingChart } from './TrainingChart';
-import { Toggle } from '../settings/SettingsPrimitives';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 import {
   cancelJob,
   captionMissingYue2,
@@ -945,9 +947,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const active = job?.status === 'queued' || job?.status === 'running';
   const preparing = prepareJob?.status === 'queued' || prepareJob?.status === 'running';
   const input = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-xs text-zinc-800 dark:text-zinc-200 outline-none focus:border-amber-500/50';
-  const field = (label: string, key: string, type = 'text', source: unknown = form, update?: (value: string) => void) => (
+  const field = (label: string, key: string, type = 'text', source: unknown = form, update?: (value: string) => void, info?: string, meta?: string) => (
     <label className="flex flex-col gap-1">
-      <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{label}</span>
+      <ParamLabel label={label} info={info} meta={meta} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider" />
       <input className={input} type={type} value={String((source as Record<string, unknown>)[key] ?? '')} disabled={(!!resumeChoice && ['seed', 'device', 'rank', 'alpha', 'adapterType', 'lokrDim', 'lokrFactor', 'saveEvery', 'cursorWeight'].includes(key)) || active || starting || preparing || yue2RunAllActive}
         onChange={event => update ? update(event.target.value) : set(key as keyof Yue2JointTrainRequest, type === 'number' ? Number(event.target.value) : event.target.value as never)} />
     </label>
@@ -961,60 +963,81 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-2 leading-relaxed">
         {t('trainingStudio.yue2.method.autoTrainHint', 'Start training prepares the dataset automatically, then trains AR and NAR together. Unchanged prepared data is reused.')}
       </p>
-      <label className="mt-3 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
-        <input type="checkbox" className="mt-0.5 accent-amber-500" checked={lyricTiming} disabled={!!resumeChoice || active || preparing || starting || yue2RunAllActive}
-          onChange={event => onLyricTimingChange(event.target.checked)} />
-        <span>
-          <span className="font-semibold">{t('trainingStudio.yue2.method.lyricTiming', 'Lyric timing supervision')}</span>
-          <span className="block text-[11px] text-zinc-500">{lyricTiming
-            ? t('trainingStudio.yue2.method.lyricTimingOn', 'Uses vocal stems and forced alignment before training.')
-            : t('trainingStudio.yue2.method.lyricTimingOff', 'Skips stems, alignment, and the optional cursor objective.')}</span>
-        </span>
-      </label>
-      <label className="mt-3 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
-        <input type="checkbox" className="mt-0.5 accent-amber-500" checked={!!autoCaption} disabled={!captionDefault || !!resumeChoice || active || preparing || starting || yue2RunAllActive}
-          onChange={event => setForm(previous => ({ ...previous, autoCaption: event.target.checked ? { provider: captionProvider ?? 'gemini' } : false }))} />
-        <span>
-          <span className="font-semibold">{t('trainingStudio.yue2.method.autoCaption', 'Caption tracks that have no YuE2 caption')}</span>
-          <span className="block text-[11px] text-zinc-500">{captionDefault
-            ? t('trainingStudio.yue2.method.autoCaptionHint', 'Before training, tracks without a .yue2.txt are re-captioned from the audio (ACE, MM3 and YuE2 captions; lyrics and BPM are left alone). Skipped when every track has one.')
-            : t('trainingStudio.yue2.method.autoCaptionNone', 'No captioner available: add a Gemini key in Settings → AI Services or install MOSS. Tracks without a .yue2.txt train on the long ACE caption.')}</span>
-        </span>
-      </label>
+      <Toggle
+        accent="amber"
+        className="mt-3"
+        checked={lyricTiming}
+        disabled={!!resumeChoice || active || preparing || starting || yue2RunAllActive}
+        onChange={onLyricTimingChange}
+        label={t('trainingStudio.yue2.method.lyricTiming', 'Lyric timing supervision')}
+        info={lyricTiming
+          ? t('trainingStudio.yue2.method.lyricTimingOn', 'Uses vocal stems and forced alignment before training so the planner learns where each word lands.')
+          : t('trainingStudio.yue2.method.lyricTimingOff', 'Skips stems, alignment, and the optional cursor objective. On: needs vocal stems and lyric alignment run first (below).')}
+      />
+      <Toggle
+        accent="amber"
+        className="mt-3"
+        checked={!!autoCaption}
+        disabled={!captionDefault || !!resumeChoice || active || preparing || starting || yue2RunAllActive}
+        onChange={checked => setForm(previous => ({ ...previous, autoCaption: checked ? { provider: captionProvider ?? 'gemini' } : false }))}
+        label={t('trainingStudio.yue2.method.autoCaption', 'Caption tracks that have no YuE2 caption')}
+        info={captionDefault
+          ? t('trainingStudio.yue2.method.autoCaptionHint', 'Before training, tracks without a .yue2.txt are re-captioned from the audio (ACE, MM3 and YuE2 captions; lyrics and BPM are left alone). Skipped when every track has one. Off: trains on the long ACE caption for those tracks instead.')
+          : t('trainingStudio.yue2.method.autoCaptionNone', 'No captioner available: add a Gemini key in Settings → AI Services or install MOSS. Tracks without a .yue2.txt train on the long ACE caption.')}
+      />
       {autoCaption && <div className="ml-6 mt-1 flex flex-wrap items-center gap-2 text-[11px]">
-        <select className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-1.5 py-0.5" value={autoCaption.provider}
+        <StyledSelect
+          accent="amber"
+          size="sm"
+          value={autoCaption.provider}
           disabled={active || preparing || starting || yue2RunAllActive}
-          onChange={event => setForm(previous => ({ ...previous, autoCaption: { provider: event.target.value as 'gemini' | 'moss' } }))}>
-          {gemini && <option value="gemini">Gemini (cloud, hears the audio)</option>}
-          {mossOk && <option value="moss">MOSS (local, hears the audio)</option>}
-        </select>
-        {autoCaption.provider === 'gemini' && gemini && gemini.models.length > 0 && <select className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-1.5 py-0.5"
-          value={autoCaption.model || gemini.defaultModel} disabled={active || preparing || starting || yue2RunAllActive}
-          onChange={event => setForm(previous => ({ ...previous, autoCaption: { provider: 'gemini', model: event.target.value } }))}>
-          {gemini.models.map(m => <option key={m} value={m}>{m}</option>)}
-        </select>}
+          onChange={value => setForm(previous => ({ ...previous, autoCaption: { provider: value } }))}
+          options={[
+            ...(gemini ? [{ value: 'gemini' as const, label: t('trainingStudio.yue2.method.captionGemini', 'Gemini (cloud, hears the audio)') }] : []),
+            ...(mossOk ? [{ value: 'moss' as const, label: t('trainingStudio.yue2.method.captionMoss', 'MOSS (local, hears the audio)') }] : []),
+          ]}
+          className="w-auto"
+        />
+        {autoCaption.provider === 'gemini' && gemini && gemini.models.length > 0 && <StyledSelect
+          accent="amber"
+          size="sm"
+          value={autoCaption.model || gemini.defaultModel}
+          disabled={active || preparing || starting || yue2RunAllActive}
+          onChange={value => setForm(previous => ({ ...previous, autoCaption: { provider: 'gemini', model: value } }))}
+          options={gemini.models.map(m => ({ value: m, label: m }))}
+          className="w-auto"
+        />}
       </div>}
       {captioning && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" />
         {t('trainingStudio.yue2.method.captioning', 'Captioning tracks without a YuE2 caption: {{done}} / {{total}}', { done: captioning.done, total: captioning.total })}</p>}
       {lyricTiming && !cursorReady && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.lyricTimingNeedsAlignment', 'Run vocal stems and lyric alignment below before starting with timing supervision enabled.')}</p>}
       <label className="mt-4 flex flex-col gap-1">
-        <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Resume a previous run</span>
-        <select className={input} value={resumeChoice} disabled={active || preparing || starting || yue2RunAllActive}
-          onChange={event => selectResume(event.target.value)}>
-          <option value="">Start a new run</option>
-          {aitkRuns.map(run => run.checkpoints.filter(checkpoint => !!checkpoint.optimizerPath).map(checkpoint => (
-            <option key={`${run.jobId}|${checkpoint.step}`} value={`${run.jobId}|${checkpoint.step}`}
-              disabled={!!run.resumeError || run.live}>
-              {new Date(run.createdAt).toLocaleString()} · step {checkpoint.step} · {run.status}
-              {run.resumeError ? ` — ${run.resumeError}` : ''}{run.live ? ' — running' : ''}
-            </option>
-          )))}
-          {aitkRuns.filter(run => !run.checkpoints.some(checkpoint => !!checkpoint.optimizerPath)).map(run => (
-            <option key={run.jobId} disabled value={`unavailable:${run.jobId}`}>
-              {new Date(run.createdAt).toLocaleString()} · {run.resumeError || 'No saved optimizer checkpoint'}
-            </option>
-          ))}
-        </select>
+        <ParamLabel
+          label={t('trainingStudio.yue2.method.resumePrevious', 'Resume a previous run')}
+          className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+          info={t('trainingStudio.yue2.method.resumePreviousInfo', 'Continues an earlier run from a saved optimizer checkpoint, with the original dataset, base, optimizer and adapter settings restored. Pick "Start a new run" to train from scratch instead; a run with no saved optimizer state, or one still running, cannot be resumed.')}
+        />
+        <StyledSelect
+          accent="amber"
+          value={resumeChoice}
+          disabled={active || preparing || starting || yue2RunAllActive}
+          onChange={selectResume}
+          placeholder={t('trainingStudio.yue2.method.resumeStartNew', 'Start a new run')}
+          className="w-full"
+          options={[
+            { value: '', label: t('trainingStudio.yue2.method.resumeStartNew', 'Start a new run') },
+            ...aitkRuns.flatMap(run => run.checkpoints.filter(checkpoint => !!checkpoint.optimizerPath).map(checkpoint => ({
+              value: `${run.jobId}|${checkpoint.step}`,
+              label: `${new Date(run.createdAt).toLocaleString()} · step ${checkpoint.step} · ${run.status}${run.resumeError ? ` — ${run.resumeError}` : ''}${run.live ? ' — running' : ''}`,
+              disabled: !!run.resumeError || run.live,
+            }))),
+            ...aitkRuns.filter(run => !run.checkpoints.some(checkpoint => !!checkpoint.optimizerPath)).map(run => ({
+              value: `unavailable:${run.jobId}`,
+              label: `${new Date(run.createdAt).toLocaleString()} · ${run.resumeError || 'No saved optimizer checkpoint'}`,
+              disabled: true,
+            })),
+          ]}
+        />
       </label>
       {resumeChoice && <p className="mt-1 text-[11px] text-zinc-500">The server restores the original dataset, base, optimizer and adapter settings. Set Steps to the total step you want to reach.</p>}
       <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
@@ -1022,17 +1045,31 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <p className="text-[11px] text-zinc-500 mt-1">{t('trainingStudio.yue2.method.refineHint', 'Trains the decoder on from where the run ended, planner frozen, with a checkpoint every 10 steps; the reconstruction stop ends it at the knee or at the budget. Writes a new run beside the original.')}</p>
         <div className="mt-2 flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1 min-w-[260px] flex-1">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.refineRun', 'Finished run')}</span>
-            <select className={input} value={refineRun} disabled={active || preparing || starting || yue2RunAllActive} onChange={event => setRefineRun(event.target.value)}>
-              <option value="">{t('trainingStudio.yue2.method.refinePick', 'Pick a run')}</option>
-              {aitkRuns.filter(run => !run.live && !run.resumeError && run.checkpoints.some(c => !!c.optimizerPath)).map(run => {
+            <ParamLabel
+              label={t('trainingStudio.yue2.method.refineRun', 'Finished run')}
+              className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+              info={t('trainingStudio.yue2.method.refineRunInfo', 'The completed run to keep training the decoder from. Only runs with a saved optimizer checkpoint, not currently running, are offered.')}
+            />
+            <StyledSelect
+              accent="amber"
+              value={refineRun}
+              disabled={active || preparing || starting || yue2RunAllActive}
+              onChange={setRefineRun}
+              placeholder={t('trainingStudio.yue2.method.refinePick', 'Pick a run')}
+              className="w-full"
+              options={aitkRuns.filter(run => !run.live && !run.resumeError && run.checkpoints.some(c => !!c.optimizerPath)).map(run => {
                 const last = run.checkpoints.filter(c => !!c.optimizerPath).sort((a, b) => b.step - a.step)[0];
-                return <option key={run.jobId} value={run.jobId}>{new Date(run.createdAt).toLocaleString()} · to step {last.step} · {run.status}</option>;
+                return { value: run.jobId, label: `${new Date(run.createdAt).toLocaleString()} · to step ${last.step} · ${run.status}` };
               })}
-            </select>
+            />
           </label>
           <label className="flex flex-col gap-1 w-28">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.refineBudget', 'Max extra steps')}</span>
+            <ParamLabel
+              label={t('trainingStudio.yue2.method.refineBudget', 'Max extra steps')}
+              className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+              info={t('trainingStudio.yue2.method.refineBudgetInfo', 'The step budget for the refinement run, on top of the step the finished run reached. The reconstruction stop below usually ends it sooner, at the knee; this is only the cap.')}
+              meta={t('trainingStudio.yue2.method.refineBudgetMeta', 'default 500')}
+            />
             <input className={input} type="number" min={10} step={10} value={refineBudget} disabled={active || preparing || starting || yue2RunAllActive}
               onChange={event => setRefineBudget(Math.max(10, Math.round(Number(event.target.value) || 0)))} />
           </label>
@@ -1050,16 +1087,23 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           <summary className="cursor-pointer text-[11px] font-medium text-zinc-600 dark:text-zinc-400">{t('trainingStudio.yue2.method.advancedPaths', 'Advanced paths and provenance')}</summary>
         <button type="button" disabled={active || preparing || starting || yue2RunAllActive} onClick={() => setDefaultsRevision(value => value + 1)} className="mt-2 text-xs text-amber-700 dark:text-amber-300 hover:underline">{t('trainingStudio.yue2.method.refreshPaths', 'Check installed assets again')}</button>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-          {field(t('trainingStudio.yue2.method.legacyManifest', 'Existing YuE2 manifest'), 'legacyManifest', 'text', prepare, value => setPrepare(previous => ({ ...previous, legacyManifest: value })))}
-          {field(t('trainingStudio.yue2.method.tokenizer', 'Tokenizer path'), 'tokenizer', 'text', prepare, value => setPrepare(previous => ({ ...previous, tokenizer: value })))}
-          {field(t('trainingStudio.yue2.method.prepareOutput', 'New prepared output directory'), 'output', 'text', prepare, value => setPrepare(previous => ({ ...previous, output: value })))}
-          {field(t('trainingStudio.yue2.method.vae', 'VAE model'), 'vae', 'text', prepare.models, value => setPrepare(previous => ({ ...previous, models: { ...previous.models, vae: value } })))}
-          {field(t('trainingStudio.yue2.method.semantic', 'Semantic tokenizer'), 'semantic', 'text', prepare.models, value => setPrepare(previous => ({ ...previous, models: { ...previous.models, semantic: value } })))}
-          {field(t('trainingStudio.yue2.method.sheetsage', 'SheetSage model'), 'sheetsage', 'text', prepare.models, value => setPrepare(previous => ({ ...previous, models: { ...previous.models, sheetsage: value } })))}
+          {field(t('trainingStudio.yue2.method.legacyManifest', 'Existing YuE2 manifest'), 'legacyManifest', 'text', prepare, value => setPrepare(previous => ({ ...previous, legacyManifest: value })),
+            t('trainingStudio.yue2.method.legacyManifestInfo', 'On-disk path to the legacy YuE2 manifest that native preparation converts from. Usually filled in automatically from the dataset; set it by hand only to prepare from a different manifest.'))}
+          {field(t('trainingStudio.yue2.method.tokenizer', 'Tokenizer path'), 'tokenizer', 'text', prepare, value => setPrepare(previous => ({ ...previous, tokenizer: value })),
+            t('trainingStudio.yue2.method.tokenizerInfo', 'On-disk path to the YuE2 text/audio tokenizer used to prepare the dataset. Usually filled in automatically once the YuE2 training assets are installed.'))}
+          {field(t('trainingStudio.yue2.method.prepareOutput', 'New prepared output directory'), 'output', 'text', prepare, value => setPrepare(previous => ({ ...previous, output: value })),
+            t('trainingStudio.yue2.method.prepareOutputInfo', 'Where native preparation writes the converted dataset (latents, codes, lead sheets). Leave the default unless you want a second prepared copy of this dataset.'))}
+          {field(t('trainingStudio.yue2.method.vae', 'VAE model'), 'vae', 'text', prepare.models, value => setPrepare(previous => ({ ...previous, models: { ...previous.models, vae: value } })),
+            t('trainingStudio.yue2.method.vaeInfo', 'On-disk path to the YuE2 VAE checkpoint used to encode audio during preparation. Usually filled in automatically once installed in Model Manager.'))}
+          {field(t('trainingStudio.yue2.method.semantic', 'Semantic tokenizer'), 'semantic', 'text', prepare.models, value => setPrepare(previous => ({ ...previous, models: { ...previous.models, semantic: value } })),
+            t('trainingStudio.yue2.method.semanticInfo', 'On-disk path to the semantic tokenizer model used during preparation. Usually filled in automatically once installed in Model Manager.'))}
+          {field(t('trainingStudio.yue2.method.sheetsage', 'SheetSage model'), 'sheetsage', 'text', prepare.models, value => setPrepare(previous => ({ ...previous, models: { ...previous.models, sheetsage: value } })),
+            t('trainingStudio.yue2.method.sheetsageInfo', 'On-disk path to the SheetSage lead-sheet model used during preparation. Usually filled in automatically once installed in Model Manager.'))}
         </div>
         </details>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-          {form.resume?.trim() && field(t('trainingStudio.yue2.method.resumeDataset', 'Prepared manifest for resume'), 'dataset')}
+          {form.resume?.trim() && field(t('trainingStudio.yue2.method.resumeDataset', 'Prepared manifest for resume'), 'dataset', 'text', form, undefined,
+            t('trainingStudio.yue2.method.resumeDatasetInfo', 'The prepared dataset manifest that matches the run being resumed by record below. Filled in automatically when a resume record is set; only needed if you are pointing at a different prepared copy.'))}
         </div>
         <button type="button" onClick={() => void prepareDataset()} disabled={preparing || active || starting || yue2RunAllActive || !prepare.legacyManifest || !prepare.checkpoint || !prepare.tokenizer || !prepare.output || !prepare.models.vae || !prepare.models.semantic || !prepare.models.sheetsage}
           className="mt-3 px-3 py-1.5 rounded-lg text-xs font-semibold border border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">
@@ -1081,65 +1125,126 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </button>)}
         {!activePreset(form) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
         <span className="flex-1" />
-        <div className={`flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 ${active || starting || preparing || yue2RunAllActive ? 'opacity-50 pointer-events-none' : ''}`}
-          title={t('trainingStudio.yue2.method.autoRefineHint', 'When the run completes, start a planner refinement of it with the Refine tab defaults (KL rungs to 2.0, previews per rung) and move to the Refine tab.')}>
-          <Toggle id="yue2-auto-refine" checked={form.autoRefine !== false} onChange={v => set('autoRefine', v)} />
-          <span>{t('trainingStudio.yue2.method.autoRefine', 'Automatically proceed to refinement')}</span>
-        </div>
+        <Toggle
+          accent="amber"
+          id="yue2-auto-refine"
+          className={active || starting || preparing || yue2RunAllActive ? 'opacity-50 pointer-events-none' : ''}
+          checked={form.autoRefine !== false}
+          onChange={v => set('autoRefine', v)}
+          label={t('trainingStudio.yue2.method.autoRefine', 'Automatically proceed to refinement')}
+          info={t('trainingStudio.yue2.method.autoRefineHint', 'When the run completes, start a planner refinement of it with the Refine tab defaults (KL rungs to 2.0, previews per rung) and move to the Refine tab. Off: the run stops at done and stays on this tab.')}
+        />
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-        {!resumeChoice && <details className="md:col-span-2"><summary className="cursor-pointer text-[11px] text-zinc-500">Manual resume path</summary>{field(t('trainingStudio.yue2.method.resume', 'Resume record (optional)'), 'resume')}</details>}
+        {!resumeChoice && <details className="md:col-span-2"><summary className="cursor-pointer text-[11px] text-zinc-500">Manual resume path</summary>{field(t('trainingStudio.yue2.method.resume', 'Resume record (optional)'), 'resume', 'text', form, undefined,
+          t('trainingStudio.yue2.method.resumeInfo', 'The saved resume record of a previous run, to continue it without picking it from the Resume list above. Leave blank to start a new run.'))}</details>}
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.stopMode', 'Train until')}</span>
-          <select className={input} value={form.stopMode ?? 'steps'} disabled={active || starting || preparing || yue2RunAllActive}
-            onChange={event => set('stopMode', event.target.value as 'steps' | 'loss' | 'kl')}>
-            <option value="kl">{t('trainingStudio.yue2.method.stopKl', 'AR KL target')}</option>
-            <option value="steps">{t('trainingStudio.yue2.method.stopSteps', 'Step count')}</option>
-            <option value="loss">{t('trainingStudio.yue2.method.stopLoss', 'Target loss')}</option>
-          </select>
+          <ParamLabel
+            label={t('trainingStudio.yue2.method.stopMode', 'Train until')}
+            className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+            info={t('trainingStudio.yue2.method.stopModeInfo', 'What ends the run: an AR KL target (the planner has moved a set distance from the base model), a plain step count, or a target loss. The presets above use the KL target, which is the tested stop.')}
+          />
+          <StyledSelect
+            accent="amber"
+            value={form.stopMode ?? 'steps'}
+            disabled={active || starting || preparing || yue2RunAllActive}
+            onChange={value => set('stopMode', value)}
+            className="w-full"
+            options={[
+              { value: 'kl' as const, label: t('trainingStudio.yue2.method.stopKl', 'AR KL target') },
+              { value: 'steps' as const, label: t('trainingStudio.yue2.method.stopSteps', 'Step count') },
+              { value: 'loss' as const, label: t('trainingStudio.yue2.method.stopLoss', 'Target loss') },
+            ]}
+          />
         </label>
         {field((form.stopMode ?? 'steps') !== 'steps'
           ? t('trainingStudio.yue2.method.maxSteps', 'Max steps')
-          : t('trainingStudio.yue2.method.steps', 'Steps'), 'steps', 'number')}
-        {(form.stopMode ?? 'steps') === 'loss' && field(t('trainingStudio.yue2.method.targetLoss', 'Target loss (composite, trailing mean)'), 'targetLoss', 'number')}
-        {(form.stopMode ?? 'steps') === 'kl' && field(t('trainingStudio.yue2.method.targetKl', 'AR KL target'), 'targetKl', 'number')}
+          : t('trainingStudio.yue2.method.steps', 'Steps'), 'steps', 'number', form, undefined,
+          (form.stopMode ?? 'steps') !== 'steps'
+            ? t('trainingStudio.yue2.method.maxStepsInfo', 'The step budget the run cannot exceed, even once the KL or loss target is reached and the decoder keeps training. Raise it to let a slow-converging artist train longer; lower it to cap wall-clock time.')
+            : t('trainingStudio.yue2.method.stepsInfo', 'How many steps to train, with no other stop condition. Raise it for a longer, more thorough run; lower it to stop sooner.'),
+          t('trainingStudio.yue2.method.stepsMeta', 'default 500'))}
+        {(form.stopMode ?? 'steps') === 'loss' && field(t('trainingStudio.yue2.method.targetLoss', 'Target loss (composite, trailing mean)'), 'targetLoss', 'number', form, undefined,
+          t('trainingStudio.yue2.method.targetLossInfo', 'Stops the run once the trailing 20-step mean of the composite loss (AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight) is at or below this. Lower is a stricter target and trains longer; leave blank to use the step count instead.'))}
+        {(form.stopMode ?? 'steps') === 'kl' && field(t('trainingStudio.yue2.method.targetKl', 'AR KL target'), 'targetKl', 'number', form, undefined,
+          t('trainingStudio.yue2.method.targetKlFieldInfo', 'How far the planner may move from the base model before it freezes. Higher trains a stronger likeness but risks planner damage (looping outros); lower stays safer but weaker. LoRA ships 1.4, LoKr 1.0, because LoKr moves further per unit of KL.'),
+          t('trainingStudio.yue2.method.targetKlFieldMeta', 'default 1.0 (LoKr) / 1.4 (LoRA)'))}
         {(form.stopMode ?? 'steps') === 'kl' && <label className="flex flex-col gap-1">
-          <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.targetKlMode', 'KL reading')}</span>
-          <select className={input} value={form.targetKlMode ?? 'mean'} disabled={active || starting || preparing || yue2RunAllActive}
-            onChange={event => setForm(previous => ({ ...previous, targetKlMode: event.target.value === 'trend' ? 'trend' : 'mean' }))}>
-            <option value="trend">{t('trainingStudio.yue2.method.targetKlTrend', '30-step trend line (no lag)')}</option>
-            <option value="mean">{t('trainingStudio.yue2.method.targetKlMean', '20-step mean (lags ~10 steps)')}</option>
-          </select>
+          <ParamLabel
+            label={t('trainingStudio.yue2.method.targetKlMode', 'KL reading')}
+            className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+            info={t('trainingStudio.yue2.method.targetKlModeInfo', 'How the KL target is read off the training curve. The 30-step trend line reacts immediately to where the curve is heading; the 20-step mean is smoother but lags about 10 steps behind, so the run trains a little past the target before it notices.')}
+          />
+          <StyledSelect
+            accent="amber"
+            value={form.targetKlMode ?? 'mean'}
+            disabled={active || starting || preparing || yue2RunAllActive}
+            onChange={value => setForm(previous => ({ ...previous, targetKlMode: value }))}
+            className="w-full"
+            options={[
+              { value: 'trend' as const, label: t('trainingStudio.yue2.method.targetKlTrend', '30-step trend line (no lag)') },
+              { value: 'mean' as const, label: t('trainingStudio.yue2.method.targetKlMean', '20-step mean (lags ~10 steps)') },
+            ]}
+          />
         </label>}
-        {(form.stopMode ?? 'steps') === 'kl' && field(t('trainingStudio.yue2.method.narExtraSteps', 'Decoder steps after KL'), 'narExtraSteps', 'number')}
-        {field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number')}
-        {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number')}
-        {field(t('trainingStudio.yue2.method.device', 'CUDA device'), 'device')}
+        {(form.stopMode ?? 'steps') === 'kl' && field(t('trainingStudio.yue2.method.narExtraSteps', 'Decoder steps after KL'), 'narExtraSteps', 'number', form, undefined,
+          t('trainingStudio.yue2.method.narExtraStepsInfo', 'Once the planner freezes at its KL target, the decoder (where likeness lives) keeps training alone for this many more steps. 0 ends the run at the KL, saving that checkpoint; raise it to let the decoder train further before stopping, up to the step cap.'),
+          t('trainingStudio.yue2.method.narExtraStepsMeta', 'default 0'))}
+        {field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number', form, undefined,
+          t('trainingStudio.yue2.method.saveEveryInfo', 'How many steps between saved checkpoints. Lower gives more rungs to pick from (and more previews, if enabled) at the cost of disk space and time; higher saves less often.'),
+          t('trainingStudio.yue2.method.saveEveryMeta', 'default 25'))}
+        {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number', form, undefined,
+          t('trainingStudio.yue2.method.seedInfo', 'The random seed for training (batch order, dropout, initial noise). Changing it gives a different run on the same data; keeping it fixed makes a rerun reproducible.'),
+          t('trainingStudio.yue2.method.seedMeta', 'default 42'))}
+        {field(t('trainingStudio.yue2.method.device', 'CUDA device'), 'device', 'text', form, undefined,
+          t('trainingStudio.yue2.method.deviceInfo', 'Which CUDA device trains this run, for a machine with more than one GPU.'),
+          t('trainingStudio.yue2.method.deviceMeta', 'default CUDA0'))}
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.adapterType', 'Adapter type')}</span>
-          <select className={input} value={form.adapterType ?? 'lora'}
+          <ParamLabel
+            label={t('trainingStudio.yue2.method.adapterType', 'Adapter type')}
+            className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+            info={t('trainingStudio.yue2.method.adapterTypeInfo', 'The adapter parameterization trained. LoRA is the standard low-rank pair. LoKr trains a Kronecker-factored delta per site instead, at a similar file size for more capacity, but is experimental. Switching resets rank/alpha (or dim/factor/alpha) and the KL stop to that type\'s tested defaults.')}
+          />
+          <StyledSelect
+            accent="amber"
+            value={form.adapterType ?? 'lora'}
             disabled={!!resumeChoice || active || starting || preparing || yue2RunAllActive}
-            onChange={event => {
-              const adapterType = event.target.value === 'lokr' ? 'lokr' : 'lora';
+            className="w-full"
+            onChange={value => {
+              const adapterType = value === 'lokr' ? 'lokr' : 'lora';
               // LoKr's scale is alpha/dim, so alpha follows the dim by default
               // (LyCORIS scale 1); LoRA gets its rank/alpha defaults back.
               setForm(previous => adapterType === 'lokr'
                 ? { ...previous, adapterType, lokrDim: previous.lokrDim ?? 64, lokrFactor: previous.lokrFactor ?? 4, alpha: 4 * (previous.lokrDim ?? 64), ...LOKR_STOP }
                 : { ...previous, adapterType, alpha: previous.rank ?? 64, ...LORA_STOP });
-            }}>
-            <option value="lora">{t('trainingStudio.yue2.method.adapterLora', 'LoRA')}</option>
-            <option value="lokr">{t('trainingStudio.yue2.method.adapterLokr', 'LoKr (experimental)')}</option>
-          </select>
+            }}
+            options={[
+              { value: 'lora' as const, label: t('trainingStudio.yue2.method.adapterLora', 'LoRA') },
+              { value: 'lokr' as const, label: t('trainingStudio.yue2.method.adapterLokr', 'LoKr (experimental)') },
+            ]}
+          />
         </label>
         {(form.adapterType ?? 'lora') === 'lokr' ? <>
-          {field(t('trainingStudio.yue2.method.lokrDim', 'LoKr dim'), 'lokrDim', 'number')}
-          {field(t('trainingStudio.yue2.method.lokrFactor', 'LoKr factor'), 'lokrFactor', 'number')}
-          {field(t('trainingStudio.yue2.method.lokrAlpha', 'LoKr alpha'), 'alpha', 'number')}
+          {field(t('trainingStudio.yue2.method.lokrDim', 'LoKr dim'), 'lokrDim', 'number', form, undefined,
+            t('trainingStudio.yue2.method.lokrDimInfo', 'The size of the Kronecker-factored delta. Higher gives the adapter more capacity, at a larger file and more VRAM; the tested recipe keeps alpha at 4x this value.'),
+            t('trainingStudio.yue2.method.lokrDimMeta', 'default 64'))}
+          {field(t('trainingStudio.yue2.method.lokrFactor', 'LoKr factor'), 'lokrFactor', 'number', form, undefined,
+            t('trainingStudio.yue2.method.lokrFactorInfo', 'How many sites are Kronecker-factorized, of the four (attention/MLP pairs). At factor 4, stay below dim 256, where some sites stop factorizing and ignore alpha.'),
+            t('trainingStudio.yue2.method.lokrFactorMeta', 'default 4'))}
+          {field(t('trainingStudio.yue2.method.lokrAlpha', 'LoKr alpha'), 'alpha', 'number', form, undefined,
+            t('trainingStudio.yue2.method.lokrAlphaInfo', 'The LoKr strength, alpha / dim. The tested default is 4x the dim; for more capacity raise dim and keep alpha at 4x dim rather than raising alpha alone.'),
+            t('trainingStudio.yue2.method.lokrAlphaMeta', 'default 256 (4x dim 64)'))}
         </> : <>
-          {field(t('trainingStudio.yue2.method.rank', 'LoRA rank'), 'rank', 'number')}
-          {field(t('trainingStudio.yue2.method.alpha', 'LoRA alpha'), 'alpha', 'number')}
+          {field(t('trainingStudio.yue2.method.rank', 'LoRA rank'), 'rank', 'number', form, undefined,
+            t('trainingStudio.yue2.method.rankInfo', 'The size of the low-rank adapter pair. Higher gives more capacity to learn the artist, at a larger file and more VRAM; lower trains a smaller, less expressive adapter.'),
+            t('trainingStudio.yue2.method.rankMeta', 'default 64'))}
+          {field(t('trainingStudio.yue2.method.alpha', 'LoRA alpha'), 'alpha', 'number', form, undefined,
+            t('trainingStudio.yue2.method.alphaInfo', 'The LoRA scale. This card keeps it equal to rank (scale 1); raising alpha above rank strengthens the adapter\'s effect without changing its size.'),
+            t('trainingStudio.yue2.method.alphaMeta', 'default = rank'))}
         </>}
-        {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number')}
+        {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number', form, undefined,
+          t('trainingStudio.yue2.method.cursorWeightInfo', 'How much the lyric-timing (cursor) objective counts in the composite loss, next to the AR/NAR terms. Higher pushes the planner to track word timing more tightly, at some cost to the other objectives; lower lets timing drift more.'),
+          t('trainingStudio.yue2.method.cursorWeightMeta', 'default 0.08'))}
       </div>
       {(form.adapterType ?? 'lora') === 'lokr' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.lokrHint', 'LoKr trains a Kronecker-factored delta per site instead of a low-rank pair. Strength is alpha / dim; 4x (64 / 4 / 256, about 106 MB for both halves) is the tested default, against 279 MB for the rank-64 LoRA. For more capacity raise dim and keep alpha at 4x dim; at factor 4 stay below dim 256, where some sites stop factorizing and ignore alpha.')}</p>}
       {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 1.0. Once the KL reading reaches the target the planner freezes there. With "Decoder steps after KL" above 0, the decoder (timbre, where likeness lives) keeps training alone for that many steps; 0 ends the run at the KL, as before. The KL checkpoint is saved either way. Max steps is the cap. The presets end the run at the KL target: Fast 0.8, Balanced 1.0, Thorough 1.6 (the step count is the cap). The decoder then trains on during refinement, from the rung you pick, until its reconstruction target.')}</p>}
@@ -1189,98 +1294,147 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <p className="mt-2 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.advancedHint', 'Blank = the engine default. These are the knobs the reference AITK recipe exposes; the defaults are what every run so far has used.')}</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
           {([
-            ['lr', t('trainingStudio.yue2.method.lr', 'Learning rate'), 'default 1e-4 · AdamW only (Prodigy learns its own; Muon uses its scale)'],
-            ['weightDecay', t('trainingStudio.yue2.method.weightDecay', 'Weight decay'), 'default 1e-4'],
-            ['plannerLrScale', t('trainingStudio.yue2.method.plannerLrScale', 'Planner learning-rate scale'), 'default 1.0 · the AR half trains at lr × this. This card ships 0.6 for LoKr and 0.3 for LoRA'],
-            ['narLrScale', t('trainingStudio.yue2.method.narLrScale', 'Decoder (NAR) learning-rate scale'), 'default 1.0 · the NAR half trains at lr × this. Lower it if renders garble words or lose audio quality before the planner reaches its KL target'],
-            ['klWeight', t('trainingStudio.yue2.method.klWeight', 'KL anchor to base (planner)'), 'default 0.2 · higher keeps the planner closer to the base model'],
-            ['abcDropout', t('trainingStudio.yue2.method.abcDropout', 'ABC dropout'), 'default 0.5 · share of lead-sheet examples trained without their sheet, so one adapter serves cot on and off'],
-            ['captionDropout', t('trainingStudio.yue2.method.captionDropout', 'Caption dropout'), 'default 0 (this card ships 0.5) · share of steps trained on the trigger alone instead of the song\'s caption. 0.5 is the measured recipe: it stops the adapter binding to each track\'s caption, so a NEW caption generalises. Needs a dataset prepared after 2026-09-20.'],
-            ['spikeFactor', t('trainingStudio.yue2.method.spikeFactor', 'Spike guard'), 'this card ships 5 · skip any update whose gradient norm is over this many times the recent median. 0 turns the guard off'],
-            ['spikeStop', t('trainingStudio.yue2.method.spikeStop', 'Stop after spikes'), 'this card ships 3 · end the run when this many updates are skipped close together (next field). 0 never stops'],
-            ['spikeStopWindow', t('trainingStudio.yue2.method.spikeStopWindow', 'Spike window (steps)'), 'this card ships 20 · how close together the skips must be to stop the run'],
-            ['reconStop', t('trainingStudio.yue2.method.reconStop', 'Decoder stop (min gain)'), 'this card ships 0.005 · once the planner is frozen, stop when the decoder reconstruction meter improves by less than this fraction over the window below. 0 trains to the step cap'],
-            ['reconStopWindow', t('trainingStudio.yue2.method.reconStopWindow', 'Decoder stop window (checkpoints)'), 'this card ships 10 · how many checkpoints the fitted trend is read over'],
-            ['narCropFrames', t('trainingStudio.yue2.method.narCropFrames', 'Decoder crop (frames)'), 'default 1500 (60 s, the reference recipe) · the decoder trains on a random window this long. 0 = the whole song, shortened only where the prompt would not fit the context. Longer windows cost VRAM and time'],
-          ] as const).map(([key, label, hint]) => (
+            ['lr', t('trainingStudio.yue2.method.lr', 'Learning rate'), t('trainingStudio.yue2.method.lrInfo', 'The base learning rate, applied to the AR and NAR halves through their own scales below. Only used by AdamW; Prodigy learns its own rate and Muon uses its own scale instead.'), 'default 1e-4 · AdamW only'],
+            ['weightDecay', t('trainingStudio.yue2.method.weightDecay', 'Weight decay'), t('trainingStudio.yue2.method.weightDecayInfo', 'L2 penalty on the adapter weights each step. Higher keeps the adapter smaller and more conservative; lower lets it move further to fit the training data.'), 'default 1e-4'],
+            ['plannerLrScale', t('trainingStudio.yue2.method.plannerLrScale', 'Planner learning-rate scale'), t('trainingStudio.yue2.method.plannerLrScaleInfo', 'The AR (planner) half trains at learning rate × this. Higher moves the planner faster toward the KL target (or step cap); lower is gentler and less prone to planner damage. This card ships 0.6 for LoKr and 0.3 for LoRA.'), 'default 1.0'],
+            ['narLrScale', t('trainingStudio.yue2.method.narLrScale', 'Decoder (NAR) learning-rate scale'), t('trainingStudio.yue2.method.narLrScaleInfo', 'The NAR (decoder, where timbre and likeness live) half trains at learning rate × this. Lower it if renders garble words or lose audio quality before the planner reaches its KL target.'), 'default 1.0'],
+            ['klWeight', t('trainingStudio.yue2.method.klWeight', 'KL anchor to base (planner)'), t('trainingStudio.yue2.method.klWeightInfo', 'How strongly the planner loss is pulled back toward the base model each step. Higher keeps the planner closer to the base (safer, less likeness); lower lets it drift further per step of training.'), 'default 0.2'],
+            ['abcDropout', t('trainingStudio.yue2.method.abcDropout', 'ABC dropout'), t('trainingStudio.yue2.method.abcDropoutInfo', 'The share of lead-sheet (ABC notation) training examples trained without their sheet, so one adapter serves generation both with and without a lead sheet. Higher trains it to rely on the sheet less; lower makes it expect one more often.'), 'default 0.5'],
+            ['captionDropout', t('trainingStudio.yue2.method.captionDropout', 'Caption dropout'), t('trainingStudio.yue2.method.captionDropoutInfo', 'The share of steps trained on the trigger word alone instead of the song\'s full caption. 0.5, this card\'s recipe, stops the adapter binding to each track\'s caption so a new caption at generation time still lands on the artist; 0 trains on the caption every step. Needs a dataset prepared after 2026-09-20.'), 'default 0 (this card ships 0.5)'],
+            ['spikeFactor', t('trainingStudio.yue2.method.spikeFactor', 'Spike guard'), t('trainingStudio.yue2.method.spikeFactorInfo', 'Skip any weight update whose gradient norm is over this many times the recent median, to stop one bad step from corrupting the adapter. 0 turns the guard off; lower makes it trigger more readily.'), 'this card ships 5'],
+            ['spikeStop', t('trainingStudio.yue2.method.spikeStop', 'Stop after spikes'), t('trainingStudio.yue2.method.spikeStopInfo', 'End the run when this many updates are skipped by the spike guard close together (within the window below), keeping the last pre-spike weights. 0 never stops the run on spikes alone.'), 'this card ships 3'],
+            ['spikeStopWindow', t('trainingStudio.yue2.method.spikeStopWindow', 'Spike window (steps)'), t('trainingStudio.yue2.method.spikeStopWindowInfo', 'How many steps the spike-guard skips above must fall within to count as a run-ending cluster. Wider makes the stop easier to trigger; narrower requires the spikes to be closer together.'), 'this card ships 20'],
+            ['reconStop', t('trainingStudio.yue2.method.reconStop', 'Decoder stop (min gain)'), t('trainingStudio.yue2.method.reconStopInfo', 'Once the planner is frozen, stop when the decoder reconstruction meter improves by less than this fraction over the window below (the knee of the curve). 0 trains to the step cap instead; lower makes the run keep going for smaller gains.'), 'this card ships 0.005'],
+            ['reconStopWindow', t('trainingStudio.yue2.method.reconStopWindow', 'Decoder stop window (checkpoints)'), t('trainingStudio.yue2.method.reconStopWindowInfo', 'How many checkpoints the reconstruction-gain trend above is fitted over. Wider smooths out noise but reacts to the knee more slowly; narrower reacts faster but is noisier.'), 'this card ships 10'],
+            ['narCropFrames', t('trainingStudio.yue2.method.narCropFrames', 'Decoder crop (frames)'), t('trainingStudio.yue2.method.narCropFramesInfo', 'The decoder trains on a random window this many frames long (25 frames/s). 0 trains on the whole song, shortened only where the prompt would not fit the context. Longer windows see more of each song per step but cost more VRAM and time.'), 'default 1500 (60 s, the reference recipe)'],
+          ] as const).map(([key, label, info, meta]) => (
             <label key={key} className="flex flex-col gap-1">
-              <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{label}</span>
+              <ParamLabel label={label} info={info} meta={meta} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider" />
               <input className={input} type="number" step="any" placeholder="engine default"
                 value={form[key] ?? ''} disabled={active || starting || preparing || yue2RunAllActive}
                 onChange={event => set(key, event.target.value === '' ? undefined : Number(event.target.value))} />
-              <span className="text-[10px] text-zinc-500">{hint}</span>
             </label>
           ))}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.lrSchedule', 'Learning-rate schedule')}</span>
-            <select className={input} value={form.lrSchedule ?? 'wsd'} disabled={active || starting || preparing || yue2RunAllActive}
-              onChange={event => setForm(previous => ({ ...previous, lrSchedule: event.target.value as Yue2JointTrainRequest['lrSchedule'] }))}>
-              <option value="cosine">cosine</option>
-              <option value="cosine-floor">cosine to a floor</option>
-              <option value="constant">constant</option>
-              <option value="linear">linear</option>
-              <option value="wsd">warmup, flat, triggered decay (wsd, default)</option>
-              <option value="sgdr">cosine restarts (sgdr)</option>
-            </select>
-            <span className="text-[10px] text-zinc-500">{({
-              cosine: 'Decays to zero at the step cap. A run that stops early on its KL keeps the weights mid-decay, at a high rate.',
-              'cosine-floor': 'The same cosine, ending at the floor below instead of zero.',
-              constant: 'Flat after warmup. The stops read the model, not the schedule. No annealing.',
-              linear: 'A straight line to zero at the step cap. Included for comparison.',
-              wsd: 'Flat until a stop is near, then a short decay; the stop acts when the decay ends, so the kept weights are annealed. With a KL target the decay starts when the KL trend says the target is about a decay away, so it lands on the target rather than past it; if the KL still passes the target by the overshoot margin (default 0.1) during the decay, the stop acts at once. The un-annealed checkpoint at the decay start is saved too.',
-              sgdr: 'Cosine cycles, each longer than the last. Expected to lose: the restarts shake the planner.',
-            } as const)[form.lrSchedule ?? 'wsd']}</span>
+            <ParamLabel
+              label={t('trainingStudio.yue2.method.lrSchedule', 'Learning-rate schedule')}
+              className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+              info={t('trainingStudio.yue2.method.lrScheduleInfo', 'How the learning rate changes over the run. wsd (warmup, flat, triggered decay) is the default: flat until a stop is near, then a short decay, so the kept weights are annealed rather than caught mid-decay. With a KL target the decay starts when the KL trend says the target is about a decay away, landing on the target rather than past it; if the KL still passes the target by the overshoot margin (default 0.1) during the decay, the stop acts at once. cosine and linear decay to zero (or a floor) at the step cap, so a run that stops early on its KL keeps the weights mid-decay, at a high rate. constant stays flat after warmup, with no annealing. sgdr cycles the rate in growing loops; it is expected to lose, since the restarts shake the planner.')}
+            />
+            <StyledSelect
+              accent="amber"
+              value={form.lrSchedule ?? 'wsd'}
+              disabled={active || starting || preparing || yue2RunAllActive}
+              onChange={value => setForm(previous => ({ ...previous, lrSchedule: value }))}
+              className="w-full"
+              options={[
+                { value: 'cosine' as const, label: 'cosine', hint: 'Decays to zero at the step cap.' },
+                { value: 'cosine-floor' as const, label: 'cosine to a floor', hint: 'The same cosine, ending at the floor field below instead of zero.' },
+                { value: 'constant' as const, label: 'constant', hint: 'Flat after warmup. No annealing.' },
+                { value: 'linear' as const, label: 'linear', hint: 'A straight line to zero at the step cap.' },
+                { value: 'wsd' as const, label: 'warmup, flat, triggered decay (wsd, default)', hint: 'Flat until a stop is near, then a short decay so the kept weights are annealed.' },
+                { value: 'sgdr' as const, label: 'cosine restarts (sgdr)', hint: 'Cosine cycles, each longer than the last. Expected to lose.' },
+              ]}
+            />
           </label>
-          {form.lrSchedule === 'cosine-floor' && field(t('trainingStudio.yue2.method.lrFloor', 'Floor (fraction of the rate)'), 'lrFloor', 'number', form, value => set('lrFloor', value === '' ? undefined : Number(value)))}
-          {form.lrSchedule === 'wsd' && field(t('trainingStudio.yue2.method.lrDecaySteps', 'Decay steps'), 'lrDecaySteps', 'number', form, value => set('lrDecaySteps', value === '' ? undefined : Number(value)))}
-          {form.lrSchedule === 'wsd' && (form.stopMode ?? 'steps') === 'kl' && field(t('trainingStudio.yue2.method.klOvershootMargin', 'KL overshoot margin'), 'klOvershootMargin', 'number', form, value => set('klOvershootMargin', value === '' ? undefined : Number(value)))}
+          {form.lrSchedule === 'cosine-floor' && field(t('trainingStudio.yue2.method.lrFloor', 'Floor (fraction of the rate)'), 'lrFloor', 'number', form, value => set('lrFloor', value === '' ? undefined : Number(value)),
+            t('trainingStudio.yue2.method.lrFloorInfo', 'Where the cosine decay ends, as a fraction of the base learning rate, instead of decaying to zero. Higher keeps a stronger residual rate at the end of the run; 0 behaves like plain cosine.'))}
+          {form.lrSchedule === 'wsd' && field(t('trainingStudio.yue2.method.lrDecaySteps', 'Decay steps'), 'lrDecaySteps', 'number', form, value => set('lrDecaySteps', value === '' ? undefined : Number(value)),
+            t('trainingStudio.yue2.method.lrDecayStepsInfo', 'How many steps the wsd schedule\'s decay lasts once triggered. Longer gives a gentler anneal; shorter reaches the low rate faster but more abruptly.'))}
+          {form.lrSchedule === 'wsd' && (form.stopMode ?? 'steps') === 'kl' && field(t('trainingStudio.yue2.method.klOvershootMargin', 'KL overshoot margin'), 'klOvershootMargin', 'number', form, value => set('klOvershootMargin', value === '' ? undefined : Number(value)),
+            t('trainingStudio.yue2.method.klOvershootMarginInfo', 'How far the KL reading may pass the target during the triggered decay before the stop acts immediately instead of waiting for the decay to finish. Lower stops sooner on an overshoot; higher lets the decay run its course more often.'),
+            t('trainingStudio.yue2.method.klOvershootMarginMeta', 'default 0.1'))}
           {form.lrSchedule === 'wsd' && <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.lrDecayShape', 'Decay shape')}</span>
-            <select className={input} value={form.lrDecayShape ?? 'linear'} disabled={active || starting || preparing || yue2RunAllActive}
-              onChange={event => set('lrDecayShape', event.target.value as 'linear' | 'cosine')}>
-              <option value="linear">linear</option>
-              <option value="cosine">cosine</option>
-            </select>
+            <ParamLabel
+              label={t('trainingStudio.yue2.method.lrDecayShape', 'Decay shape')}
+              className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+              info={t('trainingStudio.yue2.method.lrDecayShapeInfo', 'The curve of the wsd schedule\'s triggered decay. linear steps down evenly; cosine eases in and out, spending more time near the flat rate and the floor and less in between.')}
+              meta={t('trainingStudio.yue2.method.lrDecayShapeMeta', 'default linear')}
+            />
+            <StyledSelect
+              accent="amber"
+              value={form.lrDecayShape ?? 'linear'}
+              disabled={active || starting || preparing || yue2RunAllActive}
+              onChange={value => set('lrDecayShape', value)}
+              className="w-full"
+              options={[
+                { value: 'linear' as const, label: 'linear' },
+                { value: 'cosine' as const, label: 'cosine' },
+              ]}
+            />
           </label>}
-          {form.lrSchedule === 'sgdr' && field(t('trainingStudio.yue2.method.lrCycleSteps', 'First cycle (steps)'), 'lrCycleSteps', 'number', form, value => set('lrCycleSteps', value === '' ? undefined : Number(value)))}
-          {form.lrSchedule === 'sgdr' && field(t('trainingStudio.yue2.method.lrCycleMult', 'Cycle growth'), 'lrCycleMult', 'number', form, value => set('lrCycleMult', value === '' ? undefined : Number(value)))}
+          {form.lrSchedule === 'sgdr' && field(t('trainingStudio.yue2.method.lrCycleSteps', 'First cycle (steps)'), 'lrCycleSteps', 'number', form, value => set('lrCycleSteps', value === '' ? undefined : Number(value)),
+            t('trainingStudio.yue2.method.lrCycleStepsInfo', 'The length of the first sgdr cosine cycle. Each following cycle grows by the multiplier below; a shorter first cycle means more, faster restarts early in the run.'))}
+          {form.lrSchedule === 'sgdr' && field(t('trainingStudio.yue2.method.lrCycleMult', 'Cycle growth'), 'lrCycleMult', 'number', form, value => set('lrCycleMult', value === '' ? undefined : Number(value)),
+            t('trainingStudio.yue2.method.lrCycleMultInfo', 'How much longer each sgdr cycle is than the last, as a multiplier. Higher spaces the restarts further apart as the run goes on; 1 keeps every cycle the same length.'))}
         </div>
       </details>
-      <label className="mt-3 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
-        <input type="checkbox" className="mt-0.5 accent-amber-500" checked={form.stopEngine !== false}
-          disabled={active || preparing || starting || yue2RunAllActive}
-          onChange={event => setForm(previous => ({ ...previous, stopEngine: event.target.checked }))} />
-        <span>
-          <span className="font-semibold">{t('trainingStudio.yue2.method.stopEngine', 'Stop the engine during training')}</span>
-          <span className="block text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.stopEngineHelp', 'On by default: the trainer gets the whole GPU and generation is unavailable until it finishes. Turn it off to keep generating (and scoring ladders) while it trains. Both then share the GPU and run slower, and if VRAM runs out Windows spills to system memory and everything crawls.')}</span>
-        </span>
-      </label>
+      <Toggle
+        accent="amber"
+        className="mt-3"
+        checked={form.stopEngine !== false}
+        disabled={active || preparing || starting || yue2RunAllActive}
+        onChange={checked => setForm(previous => ({ ...previous, stopEngine: checked }))}
+        label={t('trainingStudio.yue2.method.stopEngine', 'Stop the engine during training')}
+        info={t('trainingStudio.yue2.method.stopEngineHelp', 'On by default: the trainer gets the whole GPU and generation is unavailable until it finishes. Off: keep generating (and scoring ladders) while it trains. Both then share the GPU and run slower, and if VRAM runs out Windows spills to system memory and everything crawls.')}
+      />
       <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/30 dark:bg-black/10 p-3">
         <summary className="cursor-pointer text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
           {t('trainingStudio.yue2.method.previewTitle', 'Checkpoint previews (optional)')}
         </summary>
-        <label className="mt-2 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
-          <input type="checkbox" className="mt-0.5 accent-amber-500" checked={form.preview?.enabled ?? false}
-            disabled={active || preparing || starting || yue2RunAllActive}
-            onChange={event => setForm(previous => ({ ...previous, preview: { ...(previous.preview ?? defaultPreview(form.saveEvery)), enabled: event.target.checked } }))} />
-          <span>
-            <span className="font-semibold">{t('trainingStudio.yue2.method.previewEnable', 'Render one artist sample at saved checkpoints')}</span>
-            <span className="block text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.previewManual', 'Off by default. Samples are saved for manual listening; they do not start automatically in the player.')}</span>
-          </span>
-        </label>
+        <Toggle
+          accent="amber"
+          className="mt-2"
+          checked={form.preview?.enabled ?? false}
+          disabled={active || preparing || starting || yue2RunAllActive}
+          onChange={checked => setForm(previous => ({ ...previous, preview: { ...(previous.preview ?? defaultPreview(form.saveEvery)), enabled: checked } }))}
+          label={t('trainingStudio.yue2.method.previewEnable', 'Render one artist sample at saved checkpoints')}
+          info={t('trainingStudio.yue2.method.previewManual', 'Off by default. Samples are saved for manual listening; they do not start automatically in the player.')}
+        />
         {form.preview?.enabled && <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
           {field(t('trainingStudio.yue2.method.previewSeconds', 'Preview seconds'), 'seconds', 'number', form.preview, value => setForm(previous => {
             const seconds = Math.max(8, Math.min(120, Number(value) || 90));
             return { ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seconds, previewMaxFrames: seconds * 25 } };
-          }))}
-          {field(t('trainingStudio.yue2.method.previewSeed', 'Preview seed'), 'seed', 'number', form.preview, value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: Number(value) } })))}
+          }), t('trainingStudio.yue2.method.previewSecondsInfo', 'How long the rendered preview sample is, from 8 to 120 seconds. Longer previews show more of the song but take longer to render at every checkpoint.'), t('trainingStudio.yue2.method.previewSecondsMeta', 'default 90'))}
+          {field(t('trainingStudio.yue2.method.previewSeed', 'Preview seed'), 'seed', 'number', form.preview, value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: Number(value) } })),
+            t('trainingStudio.yue2.method.previewSeedInfo', 'The random seed used for every preview render, so previews across checkpoints are directly comparable rather than each landing on a different random take.'), t('trainingStudio.yue2.method.previewSeedMeta', 'default 424242'))}
           <p className="text-[11px] text-zinc-500 md:col-span-2">{t('trainingStudio.yue2.method.previewSongHint', 'The first track in this dataset is used for the preview. Caption and lyrics overrides below are optional.')}</p>
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300"><input type="checkbox" checked={form.preview.baseline} disabled={active || preparing || starting || yue2RunAllActive} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, baseline: event.target.checked } }))} />{t('trainingStudio.yue2.method.previewBaseline', 'Include baseline')}</label>
-          <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300"><input type="checkbox" checked={form.preview.control} disabled={active || preparing || starting || yue2RunAllActive} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, control: event.target.checked } }))} />{t('trainingStudio.yue2.method.previewControl', 'Include control')}</label>
-          <label className="md:col-span-2 flex flex-col gap-1"><span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.previewCaption', 'Caption override (optional)')}</span><textarea className={`${input} min-h-16 resize-y`} value={form.preview.caption ?? ''} disabled={active || preparing || starting || yue2RunAllActive} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, caption: event.target.value } }))} /></label>
-          <label className="md:col-span-2 flex flex-col gap-1"><span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.previewLyrics', 'Lyrics override (optional)')}</span><textarea className={`${input} min-h-20 resize-y`} value={form.preview.lyrics ?? ''} disabled={active || preparing || starting || yue2RunAllActive} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, lyrics: event.target.value } }))} /></label>
+          <Toggle
+            accent="amber"
+            size="sm"
+            checked={form.preview.baseline}
+            disabled={active || preparing || starting || yue2RunAllActive}
+            onChange={checked => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, baseline: checked } }))}
+            label={t('trainingStudio.yue2.method.previewBaseline', 'Include baseline')}
+            info={t('trainingStudio.yue2.method.previewBaselineInfo', 'Also renders a take from the unmodified base model alongside the adapter, so you can hear what the adapter changed.')}
+          />
+          <Toggle
+            accent="amber"
+            size="sm"
+            checked={form.preview.control}
+            disabled={active || preparing || starting || yue2RunAllActive}
+            onChange={checked => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, control: checked } }))}
+            label={t('trainingStudio.yue2.method.previewControl', 'Include control')}
+            info={t('trainingStudio.yue2.method.previewControlInfo', 'Also renders a fixed reference take at every checkpoint, for a stable point of comparison as the adapter trains.')}
+          />
+          <label className="md:col-span-2 flex flex-col gap-1">
+            <ParamLabel
+              label={t('trainingStudio.yue2.method.previewCaption', 'Caption override (optional)')}
+              className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+              info={t('trainingStudio.yue2.method.previewCaptionInfo', 'Replaces the preview track\'s own caption for the rendered sample. Leave blank to use the track\'s caption as-is.')}
+            />
+            <textarea className={`${input} min-h-16 resize-y`} value={form.preview.caption ?? ''} disabled={active || preparing || starting || yue2RunAllActive} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, caption: event.target.value } }))} />
+          </label>
+          <label className="md:col-span-2 flex flex-col gap-1">
+            <ParamLabel
+              label={t('trainingStudio.yue2.method.previewLyrics', 'Lyrics override (optional)')}
+              className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+              info={t('trainingStudio.yue2.method.previewLyricsInfo', 'Replaces the preview track\'s own lyrics for the rendered sample. Leave blank to use the track\'s lyrics as-is.')}
+            />
+            <textarea className={`${input} min-h-20 resize-y`} value={form.preview.lyrics ?? ''} disabled={active || preparing || starting || yue2RunAllActive} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, lyrics: event.target.value } }))} />
+          </label>
         </div>}
       </details>
       <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.hardware', 'Joint training requires a CUDA build and an NVIDIA GPU with BF16 support (Ampere or newer).')}</p>
@@ -1308,14 +1462,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <p className="mt-1 text-[11px] text-zinc-500">
           {t('trainingStudio.yue2.aitkBatch.draftHint', 'Each dataset runs its caches, lead sheets, timing (when enabled), preparation and joint training in order with this recipe. The batch runs on the server; the page follows the dataset being trained.')}
         </p>
-        <label className="mt-2 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
-          <input type="checkbox" className="mt-0.5 accent-amber-500" checked={batchClearCache} disabled={batchStarting || yue2RunAllActive}
-            onChange={event => setBatchClearCache(event.target.checked)} />
-          <span>
-            <span className="font-semibold">{t('trainingStudio.yue2.aitkBatch.clearCache', 'Clear out all cached data')}</span>
-            <span className="block text-[11px] text-zinc-500">{t('trainingStudio.yue2.aitkBatch.clearCacheHint', "Deletes each dataset's YuE2 caches (latents, codes, lead sheets, vocal stems, lyric timing, prepared datasets) before it starts, so everything is rebuilt from the audio. Source audio, captions and trained adapters are not touched. Each album then takes as long as a first-time preparation.")}</span>
-          </span>
-        </label>
+        <Toggle
+          accent="amber"
+          className="mt-2"
+          checked={batchClearCache}
+          disabled={batchStarting || yue2RunAllActive}
+          onChange={setBatchClearCache}
+          label={t('trainingStudio.yue2.aitkBatch.clearCache', 'Clear out all cached data')}
+          info={t('trainingStudio.yue2.aitkBatch.clearCacheHint', "Deletes each dataset's YuE2 caches (latents, codes, lead sheets, vocal stems, lyric timing, prepared datasets) before it starts, so everything is rebuilt from the audio. Source audio, captions and trained adapters are not touched. Each album then takes as long as a first-time preparation.")}
+        />
         <div className="mt-2 flex items-center gap-3">
           <button type="button" onClick={() => void runBatch()} disabled={batchStarting || yue2RunAllActive}
             className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2">
@@ -1372,17 +1527,21 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {activeBackendId !== 'yue2' && <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.selectYue2', 'Select the YuE2 backend to use these adapters for generation.')}</p>}
         {runsError && <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{runsError}</p>}
         {availableCheckpoints.length > 0 && <div className="mt-2 flex items-center gap-2 flex-wrap">
-          <select className={input} value={selectedCheckpoint} onChange={event => { setSelectedCheckpoint(event.target.value); setApplyNote(''); setPresetLinkNote(''); }}>
-            {/* One group per run: every run for this dataset is listed, and
-                bare "step N" rows from two runs read as stale duplicates (#182). */}
-            {aitkRuns.filter(run => run.checkpoints.some(checkpoint => checkpoint.arPath && checkpoint.narPath)).map(run => (
-              <optgroup key={run.jobId} label={`${new Date(run.createdAt).toLocaleString()} · ${run.live ? 'running' : run.status}`}>
-                {run.checkpoints.filter(checkpoint => checkpoint.arPath && checkpoint.narPath).map(checkpoint => (
-                  <option key={checkpoint.dir} value={checkpoint.dir}>step {checkpoint.step}{checkpoint.dir === availableCheckpoints[0]?.dir ? ' (latest)' : ''}</option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
+          {/* One group per run, folded into each option's label: every run for
+              this dataset is listed, and bare "step N" rows from two runs read
+              as stale duplicates (#182). StyledSelect has no optgroup, so the
+              run's timestamp and status prefix each checkpoint's row instead. */}
+          <StyledSelect
+            accent="amber"
+            value={selectedCheckpoint}
+            onChange={value => { setSelectedCheckpoint(value); setApplyNote(''); setPresetLinkNote(''); }}
+            className="w-auto min-w-[220px]"
+            options={aitkRuns.filter(run => run.checkpoints.some(checkpoint => checkpoint.arPath && checkpoint.narPath))
+              .flatMap(run => run.checkpoints.filter(checkpoint => checkpoint.arPath && checkpoint.narPath).map(checkpoint => ({
+                value: checkpoint.dir,
+                label: `${new Date(run.createdAt).toLocaleString()} · ${run.live ? 'running' : run.status} · step ${checkpoint.step}${checkpoint.dir === availableCheckpoints[0]?.dir ? ' (latest)' : ''}`,
+              })))}
+          />
           <button type="button" onClick={() => void applyCheckpoint()} disabled={activeBackendId !== 'yue2' || active || preparing || applyingCheckpoint || yue2RunAllActive || !selectedCheckpoint}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-500/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40 flex items-center gap-1.5">
             {applyingCheckpoint ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}

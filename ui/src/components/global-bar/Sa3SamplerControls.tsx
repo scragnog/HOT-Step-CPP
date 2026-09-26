@@ -27,11 +27,12 @@ import { usePluginRegistry } from '../../hooks/usePluginRegistry';
 import { PluginControls } from './PluginControls';
 import { ParamLabel } from '../shared/ParamLabel';
 import { EditableSlider } from '../shared/EditableSlider';
+import { StyledSelect } from '../shared/StyledSelect';
 
-const selectClasses =
-  'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 ' +
-  'text-sm text-zinc-800 dark:text-zinc-200 focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20 ' +
-  'outline-none transition-colors cursor-pointer';
+// This panel's own colour, matched to the StableStep Accordion's
+// accentColor="sky" in PostProcessingDropdown.tsx (the panel this mounts
+// inside). Every StyledSelect here shares it.
+const ACCENT = 'sky' as const;
 
 const NATIVE = '';
 
@@ -93,27 +94,17 @@ export const Sa3SamplerControls: React.FC = () => {
       <div>
         <ParamLabel label="Refine solver" info={solverInfo} rootClassName="flex mb-1.5"
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
-        <select
-          className={selectClasses}
+        <StyledSelect
+          accent={ACCENT}
+          className="w-full"
           value={gp.stableStepSolver ?? NATIVE}
-          onChange={e => gp.setStableStepSolver(e.target.value)}
-        >
-          <option value={NATIVE}>Native (ping-pong)</option>
-          {singleNfe.length > 0 && (
-            <optgroup label="── Single Evaluation (1 NFE) ──">
-              {singleNfe.map((s: any) => (
-                <option key={s.name} value={s.name}>{s.display}</option>
-              ))}
-            </optgroup>
-          )}
-          {multiNfe.length > 0 && (
-            <optgroup label="── Multi Evaluation ──">
-              {multiNfe.map((s: any) => (
-                <option key={s.name} value={s.name}>{s.display} ({s.nfe} NFE)</option>
-              ))}
-            </optgroup>
-          )}
-        </select>
+          onChange={(v: string) => gp.setStableStepSolver(v)}
+          options={[
+            { value: NATIVE, label: 'Native (ping-pong)' },
+            ...singleNfe.map((s: any) => ({ value: s.name, label: s.display, hint: '1 NFE' })),
+            ...multiNfe.map((s: any) => ({ value: s.name, label: s.display, hint: `${s.nfe} NFE` })),
+          ]}
+        />
       </div>
 
       {solverMeta && solverMeta.params?.length > 0 && (
@@ -132,16 +123,16 @@ export const Sa3SamplerControls: React.FC = () => {
       <div>
         <ParamLabel label="Refine schedule" info={schedInfo} rootClassName="flex mb-1.5"
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
-        <select
-          className={selectClasses}
+        <StyledSelect
+          accent={ACCENT}
+          className="w-full"
           value={gp.stableStepScheduler ?? NATIVE}
-          onChange={e => gp.setStableStepScheduler(e.target.value)}
-        >
-          <option value={NATIVE}>Native (SA3 LogSNR)</option>
-          {schedulers.map((s: any) => (
-            <option key={s.name} value={s.name}>{s.display}</option>
-          ))}
-        </select>
+          onChange={(v: string) => gp.setStableStepScheduler(v)}
+          options={[
+            { value: NATIVE, label: 'Native (SA3 LogSNR)' },
+            ...schedulers.map((s: any) => ({ value: s.name, label: s.display })),
+          ]}
+        />
       </div>
 
       {schedMeta && schedMeta.params?.length > 0 && (
@@ -160,16 +151,16 @@ export const Sa3SamplerControls: React.FC = () => {
       <div>
         <ParamLabel label="Refine guidance" info={guideInfo} rootClassName="flex mb-1.5"
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
-        <select
-          className={selectClasses}
+        <StyledSelect
+          accent={ACCENT}
+          className="w-full"
           value={gp.stableStepGuidanceMode ?? NATIVE}
-          onChange={e => gp.setStableStepGuidanceMode(e.target.value)}
-        >
-          <option value={NATIVE}>None</option>
-          {guidance.map((g: any) => (
-            <option key={g.name} value={g.name}>{g.display}</option>
-          ))}
-        </select>
+          onChange={(v: string) => gp.setStableStepGuidanceMode(v)}
+          options={[
+            { value: NATIVE, label: 'None' },
+            ...guidance.map((g: any) => ({ value: g.name, label: g.display })),
+          ]}
+        />
       </div>
 
       {gp.stableStepGuidanceMode && (

@@ -9,6 +9,9 @@ import { useStreamAudio } from '../../hooks/useStreamAudio';
 import { StormLiveControls, type LyricsMode, type SlotMeta } from './StormLiveControls';
 import { expandWildcards, hasWildcards } from '../../utils/wildcardUtils';
 import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 import type { GenerationParams } from '../../types';
 
 // ── Camelot wheel ─────────────────────────────────────────────────────────────
@@ -62,10 +65,14 @@ const BOX_CLR: Record<BoxState,string> = {
 };
 
 const NEXT_PARAMS = [
-  {label:'Guidance',min:0.5,max:15,step:0.1,key:'guidance_scale',fmt:(v:number)=>v.toFixed(1),color:'text-blue-400'},
-  {label:'Steps',min:4,max:50,step:1,key:'inference_steps',fmt:(v:number)=>String(Math.round(v)),color:'text-yellow-400'},
-  {label:'Duration',min:10,max:300,step:5,key:'duration',fmt:(v:number)=>`${Math.round(v)}s`,color:'text-green-400'},
-  {label:'BPM',min:60,max:200,step:1,key:'bpm',fmt:(v:number)=>String(Math.round(v)),color:'text-orange-400'},
+  {label:'Guidance',min:0.5,max:15,step:0.1,key:'guidance_scale',fmt:(v:number)=>v.toFixed(1),color:'text-blue-400',
+    info:'Slider for the next slot\'s CFG scale — how closely it follows the style description. Higher sticks closer to the caption; lower gives more freedom, which can sound looser.'},
+  {label:'Steps',min:4,max:50,step:1,key:'inference_steps',fmt:(v:number)=>String(Math.round(v)),color:'text-yellow-400',
+    info:'Slider for the next slot\'s inference step count. More steps can sound cleaner but render slower; fewer steps render faster but can sound rougher.'},
+  {label:'Duration',min:10,max:300,step:5,key:'duration',fmt:(v:number)=>`${Math.round(v)}s`,color:'text-green-400',
+    info:'Slider for the next slot\'s length, in seconds.'},
+  {label:'BPM',min:60,max:200,step:1,key:'bpm',fmt:(v:number)=>String(Math.round(v)),color:'text-orange-400',
+    info:'Sends a fixed BPM target for the next rendered slot.'},
 ];
 type NKey = (typeof NEXT_PARAMS)[number]['key'];
 
@@ -186,7 +193,8 @@ const DeckPanel: React.FC<DeckProps> = ({ id, label, otherCamelot, crossfadeGain
           </div>
           {/* Volume */}
           <div className="flex items-center gap-2">
-            <span className="text-[9px] text-zinc-600 w-6">Vol</span>
+            <ParamLabel label="Vol" className="text-[9px] text-zinc-600" rootClassName="w-6"
+              info="Playback volume for this deck's monitor output. Does not change the render." />
             <input type="range" min={0} max={1} step={0.05} value={sa.volume}
               onChange={e => sa.setVolume(Number(e.target.value))}
               className="flex-1 accent-red-500 h-1" />
@@ -200,7 +208,7 @@ const DeckPanel: React.FC<DeckProps> = ({ id, label, otherCamelot, crossfadeGain
         <div className="space-y-1.5">
           {NEXT_PARAMS.map(p => (
             <div key={p.key} className="flex items-center gap-2">
-              <span className={`text-[9px] w-14 ${p.color}`}>{p.label}</span>
+              <ParamLabel label={p.label} info={p.info} className={`text-[9px] ${p.color}`} rootClassName="w-14" />
               <input type="range" min={p.min} max={p.max} step={p.step}
                 value={sliderVals[p.key]}
                 onChange={e => {
@@ -635,7 +643,8 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
               <div className="w-[380px] shrink-0 overflow-y-auto hide-scrollbar p-4 space-y-3 border-r border-zinc-800/60">
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Style</label>
+                    <ParamLabel label="Style" className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+                      info="The style caption for the stream. Supports {A|B|C} wildcard syntax, expandable in place with the wildcard button. Combined with the LoRA trigger word and beat intro/outro text before sending." />
                     <div className="flex items-center gap-1">
                       {hasWildcards(caption) && (
                         <button onClick={()=>setCaption(expandWildcards(caption, streamSeed, 0))}
@@ -657,7 +666,8 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                 {/* LoRA + Beat */}
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-zinc-500 shrink-0 w-10">LoRA</span>
+                    <ParamLabel label="LoRA" className="text-[10px] text-zinc-500" rootClassName="shrink-0 w-10"
+                      info="A trigger word prepended to the style caption. Leave blank to render with no adapter styling." />
                     <input type="text" value={loraTrigger} onChange={e=>setLoraTrigger(e.target.value)}
                       placeholder="trigger word"
                       className="flex-1 px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-[11px] text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-pink-500/40 transition-colors"/>
@@ -681,20 +691,23 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                   </div>
                 </div>
                 {/* Instrumental */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <div className="relative">
-                    <input type="checkbox" checked={instrumental} onChange={e=>setInstrumental(e.target.checked)} className="sr-only peer"/>
-                    <div className="w-7 h-4 bg-zinc-700 rounded-full peer-checked:bg-pink-500 transition-colors"/>
-                    <div className="absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform peer-checked:translate-x-3"/>
-                  </div>
+                <div className="flex items-center gap-2">
                   <Music size={13} className="text-zinc-500"/>
-                  <span className="text-xs text-zinc-400">Instrumental</span>
-                </label>
+                  <Toggle
+                    accent="pink"
+                    size="sm"
+                    checked={instrumental}
+                    onChange={setInstrumental}
+                    label="Instrumental"
+                    info="Skips lyrics and forces an instrumental generation. On: hides the Lyrics field and sends [Instrumental] instead, so only the caption shapes the arrangement. Off: uses whatever is written in Lyrics."
+                  />
+                </div>
                 {/* Lyrics */}
                 {!instrumental && (
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Lyrics</label>
+                      <ParamLabel label="Lyrics" className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+                        info="Lyrics for the stream. The loop/cycle/shuffle buttons control how sections advance automatically as slots play: loop repeats the same lyrics, cycle steps through sections in order, shuffle picks a random unseen section each slot. Ignored when Instrumental is on." />
                       <div className="flex items-center gap-1">
                         {hasWildcards(lyrics) && (
                           <button onClick={()=>setLyrics(expandWildcards(lyrics, streamSeed, 0))}
@@ -725,7 +738,8 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                 {/* Negative prompt */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Negative Prompt</label>
+                    <ParamLabel label="Negative Prompt" className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+                      info="Free-text negative prompt, sent with every slot. Optional; leave blank to skip." />
                     <div className="flex items-center gap-1">
                       {hasWildcards(negPrompt) && (
                         <button onClick={()=>setNegPrompt(expandWildcards(negPrompt, streamSeed, 0))}
@@ -772,7 +786,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                   };
                   return (
                     <div key={s.key} className="flex items-center gap-2">
-                      <label className="text-[10px] text-zinc-500 w-20 shrink-0" title={s.title}>{s.label}</label>
+                      <ParamLabel label={s.label} info={s.title} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
                       <input type="range" min={s.min} max={s.max} step={s.step} value={val}
                         onChange={e => setVal(Number(e.target.value))}
                         className="flex-1 accent-red-500 h-1"/>
@@ -785,7 +799,8 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                 )}
                 {/* Precision */}
                 <div className="flex items-center gap-2">
-                  <label className="text-[10px] text-zinc-500 w-20 shrink-0" title="RK solver order. Auto ramps as cache fills. Restart to apply.">Precision</label>
+                  <ParamLabel label="Precision" className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0"
+                    info="RK solver order (auto, 2 to 5). Auto ramps up as the STORM cache fills. Applies from the next Start, not live." />
                   <div className="flex gap-0.5 flex-1">
                     {(['auto','2','3','4','5']).map(o => (
                       <button key={o} onClick={()=>setRkOrder(o)}
@@ -802,7 +817,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                     { label:'CFG Cutoff',  min:0.1, max:1.0,  step:0.05, val:cfgCutoffRatio, set:setCfgCutoffRatio, fmt:(v:number)=>v<1?v.toFixed(2):'off',  title:'Skip unconditional pass after ratio. 1.0=off. Restart to apply.' },
                   ]).map(s => (
                     <div key={s.label} className="flex items-center gap-2">
-                      <label className="text-[10px] text-zinc-500 w-20 shrink-0" title={s.title}>{s.label}</label>
+                      <ParamLabel label={s.label} info={s.title} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
                       <input type="range" min={s.min} max={s.max} step={s.step} value={s.val}
                         onChange={e=>s.set(Number(e.target.value))}
                         className="flex-1 accent-red-500 h-1"/>
@@ -810,7 +825,8 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                     </div>
                   ))}
                   <div className="flex items-center gap-2">
-                    <label className="text-[10px] text-zinc-500 w-20 shrink-0">LSS</label>
+                    <ParamLabel label="LSS" className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0"
+                      info="Latent self-similarity strength, live-adjustable while streaming." />
                     <input type="range" min={0} max={1} step={0.05} value={lssStrength}
                       onChange={e=>{ const v=Number(e.target.value); setLssStrength(v); if (sa.isPlaying) sa.sendControl('lss_strength',v); }}
                       className="flex-1 accent-red-500 h-1"/>
@@ -828,14 +844,16 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                     { label:'Guider',    val:liveGuidanceMode, set:setLiveGuidanceMode, ctrlKey:'guidance_mode', opts:pluginRegistry.guidance   },
                   ]).map(row => (
                     <div key={row.label} className="flex items-center gap-1.5">
-                      <label className="text-[10px] text-zinc-500 w-14 shrink-0">{row.label}</label>
-                      <select value={row.val}
-                        onChange={e=>{ const v=e.target.value; row.set(v); if (sa.isPlaying&&v) sa.sendControl(row.ctrlKey,v); }}
+                      <ParamLabel label={row.label} className="text-[10px] text-zinc-500" rootClassName="w-14 shrink-0"
+                        info={`Overrides the stream's solver, noise scheduler or guidance mode. "— inherit global —" uses whatever is set in the global bar. Changing this while a stream plays sends the change live.`} />
+                      <StyledSelect
+                        accent="pink"
+                        size="sm"
+                        value={row.val}
+                        onChange={v=>{ row.set(v); if (sa.isPlaying&&v) sa.sendControl(row.ctrlKey,v); }}
                         title={row.val || '— inherit global —'}
-                        className={`flex-1 min-w-0 px-1.5 py-0.5 rounded bg-zinc-800 border text-[10px] outline-none transition-colors cursor-pointer ${sa.isPlaying&&row.val ? 'border-pink-500/40 text-pink-200' : 'border-zinc-700 text-zinc-300'}`}>
-                        <option value="">— inherit global —</option>
-                        {row.opts.map(p=>(<option key={p.name} value={p.name}>{p.display}</option>))}
-                      </select>
+                        options={[{value:'', label:'— inherit global —'}, ...row.opts.map(p=>({value:p.name, label:p.display}))]}
+                        className="flex-1 min-w-0"/>
                       {sa.isPlaying&&row.val&&<span className="text-[8px] text-pink-400 shrink-0">live</span>}
                     </div>
                   ))}
@@ -846,13 +864,15 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                     <span className="text-[9px] text-zinc-600 uppercase tracking-wider">Scheduler params</span>
                     {activeSchedulerParams.map(s => (
                       <div key={s.key} className="flex items-center gap-2">
-                        <label className="text-[10px] text-zinc-500 w-20 shrink-0" title={s.title}>{s.label}</label>
+                        <ParamLabel label={s.label} info={s.title} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
                         {s.type === 'select' ? (
-                          <select value={String(extraSchedulerParams[s.key] ?? s.default)}
-                            onChange={e => { const v=e.target.value; setExtraSchedulerParams(p=>({...p,[s.key]:v})); if (sa.isPlaying) sa.sendControl('plugin_params',{[s.key]:v}); }}
-                            className={`flex-1 min-w-0 px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-[10px] outline-none cursor-pointer ${s.color}`}>
-                            {(s.options ?? []).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                          </select>
+                          <StyledSelect
+                            accent="pink"
+                            size="sm"
+                            value={String(extraSchedulerParams[s.key] ?? s.default)}
+                            onChange={v => { setExtraSchedulerParams(p=>({...p,[s.key]:v})); if (sa.isPlaying) sa.sendControl('plugin_params',{[s.key]:v}); }}
+                            options={(s.options ?? []).map(o => ({value:o.value, label:o.label}))}
+                            className="flex-1 min-w-0"/>
                         ) : (
                           <>
                             <input type="range" min={s.min} max={s.max} step={s.step}
@@ -872,13 +892,15 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                     <span className="text-[9px] text-zinc-600 uppercase tracking-wider">Guider params</span>
                     {activeGuiderParams.map(s => (
                       <div key={s.key} className="flex items-center gap-2">
-                        <label className="text-[10px] text-zinc-500 w-20 shrink-0" title={s.title}>{s.label}</label>
+                        <ParamLabel label={s.label} info={s.title} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
                         {s.type === 'select' ? (
-                          <select value={String(extraGuiderParams[s.key] ?? s.default)}
-                            onChange={e => { const v=e.target.value; setExtraGuiderParams(p=>({...p,[s.key]:v})); if (sa.isPlaying) sa.sendControl('plugin_params',{[s.key]:v}); }}
-                            className={`flex-1 min-w-0 px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-[10px] outline-none cursor-pointer ${s.color}`}>
-                            {(s.options ?? []).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                          </select>
+                          <StyledSelect
+                            accent="pink"
+                            size="sm"
+                            value={String(extraGuiderParams[s.key] ?? s.default)}
+                            onChange={v => { setExtraGuiderParams(p=>({...p,[s.key]:v})); if (sa.isPlaying) sa.sendControl('plugin_params',{[s.key]:v}); }}
+                            options={(s.options ?? []).map(o => ({value:o.value, label:o.label}))}
+                            className="flex-1 min-w-0"/>
                         ) : (
                           <>
                             <input type="range" min={s.min} max={s.max} step={s.step}
@@ -894,7 +916,8 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                 )}
                 {/* XFade */}
                 <div className="flex items-center gap-2">
-                  <label className="text-[10px] text-zinc-500 w-20 shrink-0">XFade</label>
+                  <ParamLabel label="XFade" className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0"
+                    info="Crossfade length between slots, in beats." />
                   <input type="range" min={0} max={64} step={1} value={xfadeBeats}
                     onChange={e=>{ const v=Number(e.target.value); setXfadeBeats(v); sa.setXfadeBeats(v); }}
                     className="flex-1 accent-red-500 h-1"/>
@@ -903,7 +926,8 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                 {/* Max Buf */}
                 <div className="flex items-center gap-2">
                   <label className="text-[10px] text-zinc-500 w-20 shrink-0 flex items-center gap-1">
-                    MaxBuf
+                    <ParamLabel label="MaxBuf" className="text-[10px] text-zinc-500"
+                      info="How far ahead of playback the client is allowed to buffer, in minutes or in slot multiples (toggle with the clock/note icon). The engine pauses rendering once the buffer fills and resumes once playback catches up." />
                     {sa.bufferPaused&&<span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse inline-block"/>}
                     <span className="flex gap-0.5 ml-0.5">
                       <button onClick={()=>setBufMode('time')} className={`text-[8px] px-0.5 rounded transition-colors ${bufMode==='time'?'bg-zinc-600 text-zinc-200':'text-zinc-700'}`}>⏱</button>

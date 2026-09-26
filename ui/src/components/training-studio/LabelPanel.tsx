@@ -11,6 +11,8 @@ import { Loader2, Play } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { MergePolicy } from '../../services/trainingApi';
 import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
+import { ParamLabel } from '../shared/ParamLabel';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { EnhancePanel } from './EnhancePanel';
 import { JobProgress } from './JobProgress';
@@ -111,7 +113,10 @@ export const LabelPanel: React.FC = () => {
 
         {/* Scope */}
         <div className="flex flex-col gap-2">
-          <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.label.scope')}</span>
+          <ParamLabel
+            label={t('trainingStudio.label.scope')}
+            info={t('trainingStudio.label.scopeInfo')}
+          />
           <div className="flex flex-col gap-1.5">
             <label className={radio}>
               <input type="radio" checked={scope === 'unlabeled'} onChange={() => setScope('unlabeled')} className="accent-amber-500" />
@@ -136,81 +141,80 @@ export const LabelPanel: React.FC = () => {
 
         {/* Steps */}
         <div className="flex flex-col gap-2">
-          <label className={`${radio} ${!essentiaOk ? 'opacity-50' : ''}`}>
-            <input
-              type="checkbox"
-              checked={effectiveEssentia}
-              disabled={!essentiaOk}
-              onChange={(e) => setUseEssentia(e.target.checked)}
-              className="accent-amber-500"
-            />
-            {t('trainingStudio.label.useEssentia')}
-          </label>
+          <Toggle
+            accent="amber"
+            checked={effectiveEssentia}
+            disabled={!essentiaOk}
+            onChange={setUseEssentia}
+            label={t('trainingStudio.label.useEssentia')}
+            info={t('trainingStudio.label.useEssentiaInfo')}
+          />
           {!essentiaOk && (
             <div className="ml-6 text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.caps.essentiaMissing')}</div>
           )}
 
-          <label className={`${radio} ${!geniusOk ? 'opacity-50' : ''}`}>
-            <input
-              type="checkbox"
-              checked={effectiveGenius}
-              disabled={!geniusOk}
-              onChange={(e) => setUseGenius(e.target.checked)}
-              className="accent-amber-500"
-            />
-            {t('trainingStudio.label.useGenius')}
-          </label>
+          <Toggle
+            accent="amber"
+            checked={effectiveGenius}
+            disabled={!geniusOk}
+            onChange={setUseGenius}
+            label={t('trainingStudio.label.useGenius')}
+            info={t('trainingStudio.label.useGeniusInfo')}
+          />
           {!geniusOk && (
             <div className="ml-6 text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.enhance.geniusMissing')}</div>
           )}
 
-          <label className={`${radio} ${!captionOk ? 'opacity-50' : ''}`}>
-            <input
-              type="checkbox"
-              checked={effectiveCaption}
-              disabled={!captionOk}
-              onChange={(e) => setUseCaption(e.target.checked)}
-              className="accent-amber-500"
-            />
-            {t('trainingStudio.label.useCaption')}
-          </label>
+          <Toggle
+            accent="amber"
+            checked={effectiveCaption}
+            disabled={!captionOk}
+            onChange={setUseCaption}
+            label={t('trainingStudio.label.useCaption')}
+            info={t('trainingStudio.label.useCaptionInfo')}
+          />
           {effectiveCaption && (mossOk || caps?.llm.configured) && (() => {
             const cloud = caps?.llm.providers.filter(pr => pr.available) ?? [];
             const sel = captionProvider || (mossOk ? 'moss' : caps?.llm.defaultProvider || '');
             const active = cloud.find(pr => pr.id === sel);
             return (
               <div className="ml-6 flex flex-wrap items-center gap-2">
-                <span className="text-[11px] text-zinc-500">Captioner</span>
-                <select
+                <ParamLabel
+                  label={t('trainingStudio.label.captioner')}
+                  info={t('trainingStudio.label.captionerInfo')}
+                  className="text-[11px] text-zinc-500"
+                />
+                <StyledSelect
+                  accent="amber"
+                  size="sm"
                   value={sel}
-                  onChange={(e) => { setCaptionProvider(e.target.value); setCaptionModel(''); }}
-                  className="text-[11px] rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-1.5 py-0.5"
-                >
-                  {mossOk && <option value="moss">MOSS — local, hears the audio</option>}
-                  {/* Two independent facts, and the label used to get one of
-                      them wrong for everyone: WHERE the model runs, which the
-                      provider now declares rather than the UI inferring from
-                      `id === 'gemini'` (that called a local LM Studio server
-                      "cloud"), and WHETHER it receives the audio, which only
-                      Gemini and MOSS do. */}
-                  {cloud.map(pr => (
-                    <option key={pr.id} value={pr.id}>
-                      {`${pr.name} (${pr.local ? 'local' : 'cloud'}, ${pr.id === 'gemini' ? 'hears the audio' : 'text only'})`}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => { setCaptionProvider(v); setCaptionModel(''); }}
+                  className="w-auto"
+                  /* Two independent facts, and the label used to get one of
+                     them wrong for everyone: WHERE the model runs, which the
+                     provider now declares rather than the UI inferring from
+                     `id === 'gemini'` (that called a local LM Studio server
+                     "cloud"), and WHETHER it receives the audio, which only
+                     Gemini and MOSS do. */
+                  options={[
+                    ...(mossOk ? [{ value: 'moss', label: 'MOSS — local, hears the audio' }] : []),
+                    ...cloud.map(pr => ({
+                      value: pr.id,
+                      label: `${pr.name} (${pr.local ? 'local' : 'cloud'}, ${pr.id === 'gemini' ? 'hears the audio' : 'text only'})`,
+                    })),
+                  ]}
+                />
                 {/* Model picker for cloud providers — Gemini's list is fetched
                     live from the API, so new models appear by themselves. */}
                 {active && active.models.length > 0 && (
-                  <select
+                  <StyledSelect
+                    accent="amber"
+                    size="sm"
                     value={captionModel || active.defaultModel}
-                    onChange={(e) => setCaptionModel(e.target.value)}
-                    className="text-[11px] rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-1.5 py-0.5"
-                  >
-                    {active.models.map(m => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
+                    onChange={setCaptionModel}
+                    className="w-auto"
+                    options={active.models.map(m => ({ value: m, label: m }))}
+                  />
                 )}
               </div>
             );
@@ -227,16 +231,17 @@ export const LabelPanel: React.FC = () => {
               MOSS (local) unavailable: {caps.moss.missing}
             </div>
           )}
-          {captionOk ? (
-            <div className="ml-6 text-[11px] text-zinc-500">{t('trainingStudio.label.useCaptionHint')}</div>
-          ) : (
+          {!captionOk && (
             <div className="ml-6 text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.enhance.captionMissing')}</div>
           )}
         </div>
 
         {/* Merge policy */}
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">{t('trainingStudio.label.mergePolicy')}</span>
+          <ParamLabel
+            label={t('trainingStudio.label.mergePolicy')}
+            info={t('trainingStudio.label.mergePolicyInfo')}
+          />
           <StyledSelect
             accent="amber"
             size="sm"
