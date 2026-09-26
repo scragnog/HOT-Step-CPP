@@ -3434,7 +3434,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       // seed, optimizer, adapter shape and dataset come from the indexed run.
       // Per-resume flags never carry over from the source run: a planner
       // refinement of a decoder refinement must not inherit its freeze.
-      const { freezePlannerNow: _f, reconReset: _r, unfreezePlanner: _u, klCheckpointEvery: _k, refine: _e, refinePlanner: _p, autoRefine: _a, ...inherited } = saved as Record<string, unknown>;
+      const { freezePlannerNow: _f, reconReset: _r, unfreezePlanner: _u, klCheckpointEvery: _k, refine: _e, refinePlanner: _p, autoRefine: _a, rungAdaptiveLr: _l, refineWarmup: _w, ...inherited } = saved as Record<string, unknown>;
       b = { ...inherited, trainingMethod: 'aitk', autoPrepare: false,
         checkpoint: saved.checkpoint, dataset: saved.dataset, output: '',
         resume: selected.optimizerPath,
@@ -3452,6 +3452,9 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         // Freeze the resumed checkpoint's planner: a stop decided outside the
         // trainer (a plan sweep on the checkpoints). Never inherited from the run.
         ...(b.freezePlannerNow === true ? { freezePlannerNow: true } : {}),
+        // Decoder-only follow-up: the planner's refinement pacing (lrScale
+        // 0.1 on the ladder run) would otherwise be inherited. Its own rate.
+        ...(b.freezePlannerNow === true ? { lrScale: Math.max(0.05, Math.min(1, Number(b.narLrScale) || 1)) } : {}),
         ...(b.refine === true ? { refine: true } : {}),
         // Planner refinement: KL rungs to a ceiling, both halves live.
         // A refinement resumes a converged adapter whose schedule had decayed
