@@ -690,6 +690,12 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
     // off this job reaches here before its siblings have been posted. A short
     // wait when nothing is queued yet costs nothing against a render.
     if (deps.pendingJobs().length === 0) await new Promise(r => setTimeout(r, YUE2_COALESCE_WAIT_MS));
+    // Claim every compatible follower first, then prepare them. Preparing
+    // takes minutes per song (planning, with its re-plan attempts), and the
+    // queue UI boxes jobs by the lead's member list: claiming one at a time
+    // showed the lead alone, a "batch" of the followers prepared so far, and
+    // the rest still "Queued" until the scan reached them.
+    const claimed: Array<{ cand: GenerationJob; need: number }> = [];
     for (const cand of deps.pendingJobs()) {
       if (songsSoFar >= maxSongs) break;
       if (cand.status !== 'pending' || cand.coalescedInto || cand.params?.yue2Coalesce === false) continue;
@@ -702,14 +708,19 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
       cand.status = 'running';
       cand.stage = 'YuE2: joining a batch...';
       cand.progress = 1;
+      claimed.push({ cand, need });
+      songsSoFar += need;
+    }
+    if (claimed.length) job.coalescedMembers = [job.id, ...claimed.map(c => c.cand.id)];
+    for (const { cand, need } of claimed) {
       try {
         const prepared = await prepareYue2Job(cand);
-        if ((cand.status as string) === 'cancelled') { failYue2Job(cand, new Error('Cancelled')); continue; }
+        if ((cand.status as string) === 'cancelled') { failYue2Job(cand, new Error('Cancelled')); songsSoFar -= need; continue; }
         prepared.log('INFO', `[YuE2] Rendering in one batch with job ${job.id}`);
         members.push(prepared);
-        songsSoFar += need;
       } catch (err: any) {
         failYue2Job(cand, err);
+        songsSoFar -= need;
       }
     }
   }
@@ -735,6 +746,8 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
     job.coalescedMembers = members.map(m => m.job.id);
     log('INFO', `[YuE2] Batch of ${members.length} queued jobs (${songsSoFar} songs): ${members.map(m => m.job.id).join(', ')}`);
     console.log(`[Generate] Job ${job.id} — YuE2 batch of ${members.length} jobs, ${songsSoFar} songs`);
+  } else {
+    job.coalescedMembers = undefined;   // every claimed follower failed to prepare
   }
 
   let detailTimer: NodeJS.Timeout | undefined;
