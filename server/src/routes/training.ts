@@ -3453,8 +3453,11 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         // trainer (a plan sweep on the checkpoints). Never inherited from the run.
         ...(b.freezePlannerNow === true ? { freezePlannerNow: true } : {}),
         // Decoder-only follow-up: the planner's refinement pacing (lrScale
-        // 0.1 on the ladder run) would otherwise be inherited. Its own rate.
-        ...(b.freezePlannerNow === true ? { lrScale: Math.max(0.05, Math.min(1, Number(b.narLrScale) || 1)) } : {}),
+        // 0.1 on the ladder run) would otherwise be inherited. Its own rate,
+        // as a ceiling: the engine ramps to it over 30 steps and halves it on
+        // every gradient spike (a converged decoder at the plain rate
+        // diverged in six steps).
+        ...(b.freezePlannerNow === true ? { lrScale: Math.max(0.05, Math.min(1, Number(b.narLrScale) || 1)), refineWarmup: 30 } : {}),
         ...(b.refine === true ? { refine: true } : {}),
         // Planner refinement: KL rungs to a ceiling, both halves live.
         // A refinement resumes a converged adapter whose schedule had decayed

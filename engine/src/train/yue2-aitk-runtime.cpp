@@ -610,10 +610,12 @@ static int run_impl(Config config, std::string * error) {
             planner_frozen_at = -1;
             std::fprintf(stderr, "[yue2-aitk] --unfreeze-planner: planner trains on from step %d\n", completed);
         }
+        bool fresh_freeze = false;
         if (planner_frozen_at < 0 && config.freeze_planner_now) {
             // A stop decided outside the trainer: this checkpoint's planner is
             // the one kept. Same bookkeeping as the KL freeze.
             planner_frozen_at = completed;
+            fresh_freeze = true;
             std::fprintf(stderr, "[yue2-aitk] --freeze-planner-now: planner frozen at the resumed step %d\n", completed);
         }
         if (planner_frozen_at >= 0) {
@@ -660,7 +662,10 @@ static int run_impl(Config config, std::string * error) {
         // 2.38 reading at KL ~1.4 ended a refinement at once).
         const bool first_unfreeze = config.unfreeze_planner && resume_binding.planner_frozen_at >= 0;
         int unfrozen_at = first_unfreeze ? completed : resume_binding.unfrozen_at;
-        double rung_lr_mult = resume_binding.rung_lr_mult;
+        // A decoder-only pass starts at its own full multiplier: the record's
+        // one was halved for the PLANNER (skipped KL rungs) and paced a
+        // decoder pass down to 0.005x the run rate before this existed.
+        double rung_lr_mult = fresh_freeze ? 1.0 : resume_binding.rung_lr_mult;
         const bool wsd = config.lr_schedule == "wsd";
         int lr_decaying_from = wsd ? resume_binding.lr_decaying_from : -1;
         // wsd: start the tail now (idempotent). The stop that asked for it acts
@@ -852,15 +857,20 @@ static int run_impl(Config config, std::string * error) {
                 if (wsd && !in_tail() && planner_frozen_at >= 0 && config.warmup > 0 && completed - planner_frozen_at < config.warmup)
                     lr *= (double)(completed - planner_frozen_at + 1) / (double)config.warmup;
                 if (config.lr_scale != 1.0f) lr *= (double) config.lr_scale;
-                // Refinement pacing guards a LIVE planner; a frozen one has
-                // nothing to overshoot, so the decoder-only pass after a
-                // refinement runs at the plain rate (the record's rung
-                // multiplier, halved down to 0.05 by skipped rungs, would
-                // otherwise pace it too).
                 if (unfrozen_at >= 0 && planner_frozen_at < 0) {
                     // Refinement pacing: warm up from the unfreeze, then the
                     // adaptive multiplier (halved whenever a rung was jumped).
                     const int since = completed - unfrozen_at;
+                    if (config.refine_warmup > 0 && since < config.refine_warmup) lr *= (double)(since + 1) / (double) config.refine_warmup;
+                    lr *= rung_lr_mult;
+                } else if (config.freeze_planner_now) {
+                    // Decoder-only pass after a pick: the planner's pacing
+                    // above does not apply (nothing to overshoot), but a
+                    // converged decoder restarted at the plain rate diverged
+                    // in six steps (recon 0.47 -> 0.56, three spikes). So it
+                    // ramps from the freeze, and every gradient spike halves
+                    // the multiplier (below) until the rate holds.
+                    const int since = completed - planner_frozen_at;
                     if (config.refine_warmup > 0 && since < config.refine_warmup) lr *= (double)(since + 1) / (double) config.refine_warmup;
                     lr *= rung_lr_mult;
                 }
@@ -902,8 +912,16 @@ static int run_impl(Config config, std::string * error) {
             if (!jsonl.flush()) { fail(error, "training JSONL write failed"); return 1; }
             if (config.spike_factor > 0.0f) {
                 if (metrics.skipped) {
-                    spike_steps.push_back(completed);
                     std::fprintf(stderr, "[yue2-aitk] step %d: gradient norm %.3g is a spike (limit %.3g); update skipped\n", completed, metrics.gradient_norm, input.skip_above);
+                    if (config.freeze_planner_now && rung_lr_mult > 0.05) {
+                        // Decoder-only pass: a spike means the rate is past
+                        // what the decoder holds. Halve it and carry on; the
+                        // stop rule below only counts spikes at the floor.
+                        rung_lr_mult = std::max(0.05, rung_lr_mult * 0.5);
+                        std::fprintf(stderr, "[yue2-aitk] decoder rate multiplier now %.3g\n", rung_lr_mult);
+                    } else {
+                        spike_steps.push_back(completed);
+                    }
                 } else {
                     gnorm_window.push_back(metrics.gradient_norm);
                     if (gnorm_window.size() > 50) gnorm_window.erase(gnorm_window.begin());
