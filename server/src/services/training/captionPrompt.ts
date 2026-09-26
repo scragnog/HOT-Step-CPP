@@ -97,6 +97,10 @@ export const CAPTION_INSTRUCTIONS: string =
   CAPTION_DIMENSIONS.map(s => `    - ${s}\n`).join('') +
   '- NEVER state BPM, key, or time signature in the caption text. They have dedicated fields below, and repeating them in the caption does not match how this model was trained.\n' +
   '- The genre you name in the caption MUST agree with the `genre:` field. Contradicting yourself between the two is worse than naming neither.\n' +
+  // Gemini Flash captioned a whole metal album from its intros (2026-09-26):
+  // a piano/woodblock intro became "minimalist neoclassical", a body-percussion
+  // intro became "Ambient". The full track was uploaded; it over-weighted the start.
+  '- Describe the WHOLE track, weighted by how much of it each part occupies. Intros, outros, interludes and breakdowns are often unrepresentative: a quiet piano or percussion intro before a heavy song does not make the song ambient or classical. Base the genre and caption on the style that dominates most of the running time; mention a contrasting intro or outro only as a secondary detail.\n' +
   '- Name things concretely: `808 bass`, `brushed snare`, `detuned saw lead`, `palm-muted guitar`, `upright piano` — not `interesting textures` or `lush soundscapes`.\n' +
   "- No vague imagery or stacked adjectives ('neon skies, electric hearts'), no marketing copy, and no listener-reaction language ('keeps you moving', 'emotionally resonant').\n" +
   "- Avoid generic openings like 'This track is' when more specific wording can be used immediately.\n" +
