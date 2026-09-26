@@ -398,7 +398,11 @@ re-runs from the Library wait in the same line.
 - While the engine is starting or paused for training, queued jobs wait for it rather than
   failing.
 - YuE2 jobs waiting with matching settings render together as one engine batch when Batch
-  Queued Songs is on. See [Backends](backends.md#yue2).
+  Queued Songs is on. See [Backends](backends.md#yue2). The queue boxes those jobs together
+  and shows the time the whole batch took, the audio it produced and the ratio of the two;
+  each song inside the box shows only its own length.
+- Every finished row shows a ratio next to its length: audio seconds per second of
+  generation, so 3.0 means a minute of music took twenty seconds.
 - The queue survives a page reload: running jobs reconnect. After a full restart of the app
   the server has forgotten them, so unstarted and interrupted jobs are held and a banner
   offers Resume or Discard. Nothing restarts on its own.

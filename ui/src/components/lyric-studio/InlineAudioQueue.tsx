@@ -167,30 +167,93 @@ export const InlineAudioQueue: React.FC = () => {
       {active.length > 0 && (
         <>
           <GroupLabel label="Active" color="text-pink-400" />
-          {active.map(item => (
-            <QueueItemRow key={item.id} item={item} isPlayingInMain={isPlaying(item)} onPlay={handlePlay} />
-          ))}
+          <QueueRows rows={groupBatches(active)} isPlaying={isPlaying} onPlay={handlePlay} />
         </>
       )}
 
       {queued.length > 0 && (
         <>
           <GroupLabel label="Queued" color="text-zinc-600 dark:text-zinc-400" />
-          {queued.map(item => (
-            <QueueItemRow key={item.id} item={item} isPlayingInMain={isPlaying(item)} onPlay={handlePlay} />
-          ))}
+          <QueueRows rows={groupBatches(queued)} isPlaying={isPlaying} onPlay={handlePlay} />
         </>
       )}
 
       {finished.length > 0 && (
         <>
           <GroupLabel label="Completed" color="text-green-400" />
-          {finished.map(item => (
-            <QueueItemRow key={item.id} item={item} isPlayingInMain={isPlaying(item)} onPlay={handlePlay} onDownload={handleDownload} />
-          ))}
+          <QueueRows rows={groupBatches(finished)} isPlaying={isPlaying} onPlay={handlePlay} onDownload={handleDownload} />
         </>
       )}
 
+    </div>
+  );
+};
+
+function fmtClock(sec: number): string {
+  const m = Math.floor(sec / 60);
+  return `${m}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+}
+
+/** Audio seconds per second of generation, the number that says how fast
+ *  a render really was. Absent until both sides are known. */
+function fmtRatio(audioSec: number, elapsedSec: number): string {
+  return audioSec > 0 && elapsedSec > 0 ? `${(audioSec / elapsedSec).toFixed(1)}×` : '';
+}
+
+type QueueRow = { kind: 'item'; item: AudioQueueItem } | { kind: 'batch'; id: string; items: AudioQueueItem[] };
+
+/** Items that rendered in one server batch (YuE2 queue coalescing) sit in
+ *  one box, in list order; a batch that only has one item here is a row. */
+function groupBatches(list: AudioQueueItem[]): QueueRow[] {
+  const rows: QueueRow[] = [];
+  const boxes = new Map<string, { kind: 'batch'; id: string; items: AudioQueueItem[] }>();
+  for (const item of list) {
+    if (!item.batchId) { rows.push({ kind: 'item', item }); continue; }
+    let box = boxes.get(item.batchId);
+    if (!box) { box = { kind: 'batch', id: item.batchId, items: [] }; boxes.set(item.batchId, box); rows.push(box); }
+    box.items.push(item);
+  }
+  return rows.map(r => (r.kind === 'batch' && r.items.length === 1 ? { kind: 'item', item: r.items[0] } : r));
+}
+
+interface RowsProps {
+  rows: QueueRow[];
+  isPlaying: (item: AudioQueueItem) => boolean;
+  onPlay: (item: AudioQueueItem) => void;
+  onDownload?: (item: AudioQueueItem) => void;
+}
+
+const QueueRows: React.FC<RowsProps> = ({ rows, isPlaying, onPlay, onDownload }) => (
+  <>
+    {rows.map(row => row.kind === 'item'
+      ? <QueueItemRow key={row.item.id} item={row.item} isPlayingInMain={isPlaying(row.item)} onPlay={onPlay} onDownload={onDownload} />
+      : <BatchBox key={row.id} items={row.items} isPlaying={isPlaying} onPlay={onPlay} onDownload={onDownload} />)}
+  </>
+);
+
+/** One box per batch: the time the whole batch took, the audio it produced
+ *  in total and the ratio of the two. Members show only their own length. */
+const BatchBox: React.FC<Omit<RowsProps, 'rows'> & { items: AudioQueueItem[] }> = ({ items, isPlaying, onPlay, onDownload }) => {
+  const elapsed = Math.max(0, ...items.map(i => i.elapsed || 0));
+  const done = items.filter(i => i.status === 'succeeded');
+  const total = done.reduce((n, i) => n + (i.audioDuration || 0), 0);
+  const running = items.some(i => i.status === 'generating' || i.status === 'loading-adapter');
+  const ratio = done.length === items.length ? fmtRatio(total, elapsed) : '';
+  return (
+    <div className={`rounded-lg border ${running ? 'border-pink-500/30' : 'border-green-500/30'} bg-white/[0.03] p-1 space-y-1`}>
+      <div className="flex items-center justify-between px-2 pt-0.5">
+        <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">
+          Batch of {items.length}{running ? ' · rendering together' : ''}
+        </span>
+        <span className="flex items-center gap-1.5 text-[10px] font-mono">
+          {elapsed > 0 && <span className="text-zinc-500" title="Time the whole batch took">⏱{fmtClock(elapsed)}</span>}
+          {total > 0 && <span className="text-zinc-600" title="Audio produced by the batch">🎵{fmtClock(total)}</span>}
+          {ratio && <span className="text-emerald-400/80" title="Audio seconds per second of generation">{ratio}</span>}
+        </span>
+      </div>
+      {items.map(item => (
+        <QueueItemRow key={item.id} item={item} isPlayingInMain={isPlaying(item)} onPlay={onPlay} onDownload={onDownload} inBatch />
+      ))}
     </div>
   );
 };
@@ -206,9 +269,11 @@ interface QueueItemRowProps {
   isPlayingInMain: boolean;
   onPlay: (item: AudioQueueItem) => void;
   onDownload?: (item: AudioQueueItem) => void;
+  /** Inside a BatchBox: the box carries the time and ratio, the row only its length. */
+  inBatch?: boolean;
 }
 
-const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPlay, onDownload }) => {
+const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPlay, onDownload, inBatch }) => {
   const queueSong = songFromQueueItem(item);
   const { disguiseArtist } = useDisguiseMode();
   const isRunning = item.status === 'loading-adapter' || item.status === 'generating';
@@ -230,6 +295,7 @@ const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPl
   const durationStr = durationSeconds > 0
     ? `${dMins}:${String(Math.floor(dSecs)).padStart(2, '0')}`
     : '';
+  const ratioStr = isSucceeded ? fmtRatio(durationSeconds, elapsedSeconds) : '';
 
   const borderColor = isSucceeded ? 'border-green-500/20'
     : isFailed ? 'border-red-500/20'
@@ -262,7 +328,7 @@ const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPl
         </div>
 
         <div className="flex items-center gap-1 flex-shrink-0">
-          {elapsedStr && (
+          {elapsedStr && !inBatch && (
             <span className="text-[10px] text-zinc-500 font-mono" title="Generation time">
               ⏱{elapsedStr}
             </span>
@@ -270,6 +336,11 @@ const QueueItemRow: React.FC<QueueItemRowProps> = ({ item, isPlayingInMain, onPl
           {isSucceeded && durationStr && (
             <span className="text-[10px] text-zinc-600 font-mono" title="Track duration">
               🎵{durationStr}
+            </span>
+          )}
+          {!inBatch && ratioStr && (
+            <span className="text-[10px] text-emerald-400/80 font-mono" title="Audio seconds per second of generation">
+              {ratioStr}
             </span>
           )}
           {isPending && (

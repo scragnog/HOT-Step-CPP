@@ -607,7 +607,7 @@ export async function applyVstChain(wavPath: string): Promise<boolean> {
 
   // Process in-place: output to temp, then replace
   const tempOut = wavPath + '.vst_processed.wav';
-  const tempChain = path.join(config.vst.statesDir, `_chain_${Date.now()}.json`);
+  const tempChain = path.join(config.vst.statesDir, `_chain_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.json`);  // several chains can run at once
 
   try {
     ensureDirs();

@@ -752,6 +752,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
     return { ...shared, songs: members.flatMap(yue2SongEntries) };
   })();
   if (members.length > 1) {
+    job.coalescedMembers = members.map(m => m.job.id);
     log('INFO', `[YuE2] Batch of ${members.length} queued jobs (${songsSoFar} songs): ${members.map(m => m.job.id).join(', ')}`);
     console.log(`[Generate] Job ${job.id} — YuE2 batch of ${members.length} jobs, ${songsSoFar} songs`);
   }
@@ -854,43 +855,61 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
   // ── Finish each member from its own slice of the tracks ──
   // Song-major, so a member's tracks are contiguous: lm_batch_size songs
   // times synth_batch_size variations. Song numbers are renumbered per job.
-  const finishAll = async () => {
-    let offset = 0;
-    for (const m of members) {
-      const count = yue2TracksPerJob(m, req);
-      const slice = parts.slice(offset, offset + count);
-      const songBase = trackDetails[offset]?.song ?? 0;
-      const details = trackDetails.slice(offset, offset + count).map(td => ({ ...td, song: td.song - songBase }));
-      offset += count;
-      if ((m.job.status as string) === 'cancelled') { failYue2Job(m.job, new Error('Cancelled')); continue; }
-      if (slice.length !== count) {
-        failYue2Job(m.job, new Error(`YuE2 returned ${parts.length} track(s) for a batch that expected ${offset}`));
-        continue;
-      }
-      // A member's own view of the result: its first track's score and reasons
-      // stand where a solo render's job-level fields would.
-      const memberDetail: Yue2FinalDetail = members.length === 1 ? finalDetail : {
-        ...finalDetail,
-        abc: details[0]?.abc,
-        end_reason: details.some(td => td.end_reason === 'limit_hit') ? 'limit_hit' : (details[0]?.end_reason ?? finalDetail.end_reason),
-        stage_end_reasons: details[0]?.stage_end_reasons,
-        semantic_ids: undefined,
-        tracks: details,
-      };
-      try {
-        await finishYue2Job(m, slice, details, memberDetail);
-      } catch (err: any) {
-        failYue2Job(m.job, err);
-      }
+  const finishOne = async (m: Yue2PreparedJob, offset: number) => {
+    const count = yue2TracksPerJob(m, req);
+    const slice = parts.slice(offset, offset + count);
+    const songBase = trackDetails[offset]?.song ?? 0;
+    const details = trackDetails.slice(offset, offset + count).map(td => ({ ...td, song: td.song - songBase }));
+    if ((m.job.status as string) === 'cancelled') { failYue2Job(m.job, new Error('Cancelled')); return; }
+    if (slice.length !== count) {
+      failYue2Job(m.job, new Error(`YuE2 returned ${parts.length} track(s) for a batch that expected ${offset + count}`));
+      return;
+    }
+    // A member's own view of the result: its first track's score and reasons
+    // stand where a solo render's job-level fields would.
+    const memberDetail: Yue2FinalDetail = members.length === 1 ? finalDetail : {
+      ...finalDetail,
+      abc: details[0]?.abc,
+      end_reason: details.some(td => td.end_reason === 'limit_hit') ? 'limit_hit' : (details[0]?.end_reason ?? finalDetail.end_reason),
+      stage_end_reasons: details[0]?.stage_end_reasons,
+      semantic_ids: undefined,
+      tracks: details,
+    };
+    try {
+      await finishYue2Job(m, slice, details, memberDetail);
+    } catch (err: any) {
+      failYue2Job(m.job, err);
     }
   };
-  // Post-processing is GPU work: after a lane handoff it waits its turn again.
-  if (laneReleased && deps.runOnLane) {
-    setAll(j => { j.stage = 'YuE2: waiting for the GPU to finish...'; });
-    await deps.runOnLane(finishAll);
-  } else {
-    await finishAll();
+  const offsets = new Map<Yue2PreparedJob, number>();
+  {
+    let offset = 0;
+    for (const m of members) { offsets.set(m, offset); offset += yue2TracksPerJob(m, req); }
   }
+  // Only some of the finishing work touches the GPU: StableStep, Whisper, the
+  // forced aligner and cover art. A VST chain, mastering and the normaliser
+  // are CPU, so those members finish at once, side by side, and never wait
+  // for the lane. Members with GPU work wait their turn and run one at a time.
+  const cpuOnly = members.filter(m => !yue2FinishNeedsGpu(m.job.params));
+  const gpu = members.filter(m => yue2FinishNeedsGpu(m.job.params));
+  await Promise.all(cpuOnly.map(m => finishOne(m, offsets.get(m)!)));
+  if (gpu.length) {
+    const finishGpu = async () => { for (const m of gpu) await finishOne(m, offsets.get(m)!); };
+    if (laneReleased && deps.runOnLane) {
+      for (const m of gpu) if ((m.job.status as string) !== 'cancelled') m.job.stage = 'YuE2: waiting for the GPU to finish...';
+      await deps.runOnLane(finishGpu);
+    } else {
+      await finishGpu();
+    }
+  }
+}
+
+/** Does this job's post-render work need the GPU? VST, mastering and the
+ *  normaliser are CPU; these four are not. */
+function yue2FinishNeedsGpu(params: any): boolean {
+  const pp = params.postProcessingEnabled !== false;
+  return (pp && !!(params.stableStepOn ?? params.stableStep))
+    || !!params.whisperLyricsEnabled || !!params.yue2AlignLyrics || !!params.coverArtEnabled;
 }
 
 /** Save, post-process, transcribe, align and persist one job's tracks, then

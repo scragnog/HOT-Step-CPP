@@ -55,6 +55,9 @@ export interface AudioQueueItem {
   progress?: number;
   stage?: string;
   elapsed?: number;
+  /** Lead job id of the server batch this item rendered in (YuE2 queue
+   *  coalescing); the queue boxes items sharing one. */
+  batchId?: string;
   error?: string;
   audioUrl?: string;
   songId?: string;
@@ -873,6 +876,7 @@ export async function enqueueSimpleGen(
         item.stage = status.stage || 'Generating…';
         item.elapsed = t.elapsed;
         _captureMm3Stream(item, status);
+    if (status.batch?.lead) item.batchId = status.batch.lead;
         _syncTakeSiblings(item, status);
         _emit();  // progress tick — debounced persistence
 
@@ -1303,6 +1307,7 @@ async function _tryReconnect(item: AudioQueueItem, _token: string): Promise<bool
     // Still running — resume polling
     console.log(`[AudioQueue] Reconnected to job ${jobId} — resuming poll (status=${status.status})`);
     _captureMm3Stream(item, status);
+    if (status.batch?.lead) item.batchId = status.batch.lead;
     item.status = 'generating';
     item.stage = status.stage || 'Reconnected…';
     item.progress = status.progress;
@@ -1603,6 +1608,7 @@ async function _pollUntilDone(item: AudioQueueItem, _token: string): Promise<voi
       item.stage = status.stage || 'Generating…';
       item.elapsed = t.elapsed;
       _captureMm3Stream(item, status);
+    if (status.batch?.lead) item.batchId = status.batch.lead;
       _syncTakeSiblings(item, status);
       _emit();  // progress tick — debounced persistence
 

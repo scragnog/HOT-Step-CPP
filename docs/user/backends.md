@@ -182,6 +182,9 @@ What sets it apart:
   render runs and the measured gain on a pair of songs is a few percent, not a doubling.
   It needs about 4 GB of free VRAM at the handoff; below that, or with ConvRot or a Lua
   NAR plugin, the song renders inline as before.
+  After the render, songs whose post-processing is CPU only (a VST chain, mastering, the
+  normaliser) finish at once and side by side; only StableStep, Whisper, the aligner and
+  cover art wait for the GPU.
 - It has its own NAR solver and scheduler choices (Midpoint or Wasserstein Flow, Uniform
   or HT V3). The shared Lua plugins do not run on it.
 - Adapters load into two slots in the Adapters cluster, one for the AR half and one for

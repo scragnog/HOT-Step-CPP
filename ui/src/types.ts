@@ -392,6 +392,8 @@ export interface GenerationJob {
   /** MiniMax-Music3 live audio: true once the engine has confirmed it will
    *  serve this job on GET /api/generate/mm3/stream/:jobId. Absent on every
    *  other backend, and on any MM3 render that did not ask for streaming. */
+  /** YuE2 queue coalescing: the jobs this one rendered with, lead first. */
+  batch?: { lead: string; members: string[] } | null;
   mm3_streaming?: boolean;
   /** True when windows render while the planner runs (audio in seconds); false
    *  when the engine fell back to dispatching them after planning; null until
