@@ -65,6 +65,9 @@ export function scanAudioFiles(sourceDir: string, recursive: boolean): ScannedFi
       }
       if (!entry.isFile()) continue;
       if (!AUDIO_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
+      // audioConvert.ts once cached `<track>.engine.wav` beside the source;
+      // leftovers are duplicates of a real track, not songs.
+      if (entry.name.toLowerCase().endsWith('.engine.wav')) continue;
       let st: fs.Stats;
       try { st = fs.statSync(abs); } catch { continue; }
       out.push({

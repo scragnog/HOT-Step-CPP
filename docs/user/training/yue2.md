@@ -33,6 +33,8 @@ Loudness. The cache brings every track to -14 LUFS before encoding. A cache cut 
 
 The latent cache's "Rewrite the manifest" option is on by default: a re-run rewrites the manifest with the caption mode chosen above and re-cuts at the clip length, and the cached latents are reused, so it costs no GPU time. "Perform all stages", "Train multiple" and Start training cut the cache with the YuE2 caption mode, and re-cut a cache that was cut with the ACE captions while `.yue2.txt` files sit beside the audio; the card warns about such a cache until it is re-run.
 
+Files named `*.engine.wav` in a dataset folder are ignored. Older versions left them beside the source as conversion caches; they are copies of real tracks and, if trained, teach the adapter instrumental versions with no lyrics. Delete any you find.
+
 The cache stages are latent cache, codes, lead sheets, vocal stems and lyric cursor spans. The last two are only needed for lyric timing supervision. "Perform all stages" runs them in order. Lead sheets can be previewed as each source finishes, not only when the stage ends. You do not have to prepare anything by hand: Start training prepares the dataset automatically and reuses prepared data that has not changed.
 
 How many tracks: the app warns below 10 files.

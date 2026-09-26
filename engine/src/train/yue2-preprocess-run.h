@@ -1122,6 +1122,12 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
         if (!yp_is_audio_ext(pm_ext_of(n))) {
             continue;
         }
+        // `<track>.engine.wav` is the server's old conversion cache left beside
+        // the source: a duplicate of a real track (captioned instrumental, no
+        // lyrics), which poisoned mj_dangerous with 31% no-vocal clips.
+        if (yp_contains_ci(n, ".engine.wav")) {
+            continue;
+        }
         if (!yp_contains_ci(n, a.only)) {
             continue;
         }
