@@ -9,6 +9,9 @@
 //   3. every skill folder is listed in .claude/skills/README.md
 //   4. every relative link and image in a tracked .md resolves
 //   5. FEATURES.md links to every studio page
+//   6. no new native <select> / checkbox under ui/src (docs/dev/ui-design.md); the
+//      files that still have them are listed in ui-primitives-baseline.json, which
+//      only shrinks: --update-ui-baseline rewrites it after a conversion
 // Exit 1 on any failure. Node builtins only.
 
 import fs from 'node:fs';
@@ -91,6 +94,37 @@ if (exists('FEATURES.md')) {
   const features = fs.readFileSync(path.join(ROOT, 'FEATURES.md'), 'utf8');
   for (const page of new Set(Object.values(STUDIO_PAGES).filter(Boolean))) {
     if (!features.includes(page.replace(/^docs\//, ''))) fail.push(`FEATURES.md does not link to ${page}`);
+  }
+}
+
+// 6. UI primitives (docs/dev/ui-design.md)
+{
+  const BASELINE = 'tools/docs/ui-primitives-baseline.json';
+  const counts = {};
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.tsx')) {
+        const src = fs.readFileSync(p, 'utf8');
+        const n = (src.match(/<select[\s>]/g) || []).length + (src.match(/type=["']checkbox["']/g) || []).length;
+        if (n) counts[rel(p)] = n;
+      }
+    }
+  };
+  walk(path.join(ROOT, 'ui/src'));
+  const baseline = exists(BASELINE) ? JSON.parse(fs.readFileSync(path.join(ROOT, BASELINE), 'utf8')) : {};
+  if (process.argv.includes('--update-ui-baseline')) {
+    const next = Object.fromEntries(Object.keys(counts).sort().map((k) => [k, Math.min(counts[k], baseline[k] ?? counts[k])]));
+    fs.writeFileSync(path.join(ROOT, BASELINE), JSON.stringify(next, null, 2) + '\n');
+    console.log(`[check-docs] ${BASELINE}: ${Object.keys(next).length} file(s), ${Object.values(next).reduce((a, b) => a + b, 0)} native control(s) still allowed`);
+  } else {
+    for (const [file, n] of Object.entries(counts)) {
+      const allowed = baseline[file] ?? 0;
+      if (n > allowed) fail.push(`${file}: ${n} native <select>/checkbox(es), baseline allows ${allowed} — use StyledSelect / Toggle (docs/dev/ui-design.md)`);
+      else if (n < allowed) warn.push(`${file}: baseline allows ${allowed} native control(s) but ${n} remain — run check-docs.mjs --update-ui-baseline`);
+    }
+    for (const file of Object.keys(baseline)) if (!(file in counts)) warn.push(`${file}: in ui-primitives-baseline.json but clean — run check-docs.mjs --update-ui-baseline`);
   }
 }
 

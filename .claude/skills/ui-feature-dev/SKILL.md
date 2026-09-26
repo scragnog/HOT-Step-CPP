@@ -22,6 +22,7 @@ Terms used below:
 
 ## Golden rules (hard constraints)
 
+0. **Controls come from the shared primitives — read [docs/dev/ui-design.md](../../../docs/dev/ui-design.md) before adding any.** A dropdown is `StyledSelect`, an on/off setting is `Toggle`, a parameter label is `ParamLabel` with `info`. Never a native `<select>` or `<input type="checkbox">`; `node tools/docs/check-docs.mjs` fails on a new one. WHY: the native widgets look nothing like the app (grey OS box, white text) and a knob with no explanation is a support question.
 1. **NEVER use a browser agent for visual verification — ask the human user for screenshots/feedback.** The browser agent is too slow/unreliable in this environment. It is acceptable ONLY for non-visual checks (hitting API endpoints). Workflow: make the change → confirm type-check is clean → ask the user "please check X on the /stem-studio page".
 2. **Don't `npm run build` during dev.** Vite HMR means UI edits need no build and no restart. Type-check with `npx tsc -b` from `ui\` (all tsconfigs have `noEmit: true` — nothing is emitted). Only build right before user prod testing. WHY: builds are slow and pointless mid-dev; the dev server already serves source.
 3. **Node 18–22 only.** `ui/package.json` enforces `"node": ">=18.0.0 <24.0.0"`. Node 24+ breaks dependencies.

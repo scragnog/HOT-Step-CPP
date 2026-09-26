@@ -119,57 +119,6 @@
 }
 
 /* Toggle Switch */
-.toggle-switch {
-  position: relative;
-  width: 44px;
-  height: 24px;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.toggle-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-  position: absolute;
-}
-
-.toggle-track {
-  position: absolute;
-  inset: 0;
-  border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.1);
-  transition: background 200ms ease;
-}
-
-.toggle-switch input:checked + .toggle-track {
-  background: #ec4899;
-}
-
-.toggle-thumb {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 20px;
-  height: 20px;
-  border-radius: 9999px;
-  background: white;
-  transition: transform 200ms ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
-
-.toggle-switch input:checked ~ .toggle-thumb {
-  transform: translateX(20px);
-}
-
-.toggle-switch:hover .toggle-track {
-  background: rgba(255, 255, 255, 0.15);
-}
-
-.toggle-switch:hover input:checked + .toggle-track {
-  background: #db2777;
-}
-
 /* Page Header */
 .settings-header {
   margin-bottom: 2rem;

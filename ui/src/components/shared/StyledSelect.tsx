@@ -29,7 +29,7 @@ export interface SelectOption<T extends string | number> {
   disabled?: boolean;
 }
 
-type Accent = 'pink' | 'amber';
+type Accent = 'pink' | 'amber' | 'sky' | 'emerald' | 'purple' | 'teal' | 'cyan' | 'violet';
 
 /** Tailwind needs whole class names in the source, so these cannot be built by
  *  interpolating the accent into a template string. */
@@ -45,6 +45,42 @@ const ACCENT: Record<Accent, { focus: string; row: string; text: string; icon: s
     row: 'bg-amber-500/10 dark:bg-amber-500/15',
     text: 'text-amber-500',
     icon: 'text-amber-500',
+  },
+  sky: {
+    focus: 'focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/20',
+    row: 'bg-sky-500/10 dark:bg-sky-500/15',
+    text: 'text-sky-500',
+    icon: 'text-sky-500',
+  },
+  emerald: {
+    focus: 'focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/20',
+    row: 'bg-emerald-500/10 dark:bg-emerald-500/15',
+    text: 'text-emerald-500',
+    icon: 'text-emerald-500',
+  },
+  purple: {
+    focus: 'focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20',
+    row: 'bg-purple-500/10 dark:bg-purple-500/15',
+    text: 'text-purple-500',
+    icon: 'text-purple-500',
+  },
+  teal: {
+    focus: 'focus:border-teal-500/50 focus:ring-1 focus:ring-teal-500/20',
+    row: 'bg-teal-500/10 dark:bg-teal-500/15',
+    text: 'text-teal-500',
+    icon: 'text-teal-500',
+  },
+  cyan: {
+    focus: 'focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/20',
+    row: 'bg-cyan-500/10 dark:bg-cyan-500/15',
+    text: 'text-cyan-500',
+    icon: 'text-cyan-500',
+  },
+  violet: {
+    focus: 'focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20',
+    row: 'bg-violet-500/10 dark:bg-violet-500/15',
+    text: 'text-violet-500',
+    icon: 'text-violet-500',
   },
 };
 

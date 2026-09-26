@@ -5,23 +5,12 @@
 
 import React, { useState } from 'react';
 import { Eye, EyeOff, FolderOpen, ChevronRight } from 'lucide-react';
+import { Toggle as SharedToggle } from '../shared/Toggle';
 
-/** Toggle switch component */
-export const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; id: string }> = ({
-  checked,
-  onChange,
-  id,
-}) => (
-  <label className="toggle-switch" htmlFor={id}>
-    <input
-      type="checkbox"
-      id={id}
-      checked={checked}
-      onChange={(e) => onChange(e.target.checked)}
-    />
-    <div className="toggle-track" />
-    <div className="toggle-thumb" />
-  </label>
+/** The shared Toggle (components/shared/Toggle.tsx); this name stays for the
+ *  settings tabs. New code imports Toggle from shared. */
+export const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; id: string }> = ({ checked, onChange, id }) => (
+  <SharedToggle id={id} checked={checked} onChange={onChange} />
 );
 
 /** Single setting row */

@@ -107,6 +107,7 @@ After any sync: run `engine/verify-hooks.ps1`. `build.cmd` also runs it before e
 
 ## UI / browser verification
 
+- **Every control under `ui/src/` follows [docs/dev/ui-design.md](docs/dev/ui-design.md):** a dropdown is `StyledSelect`, an on/off setting (selection-list rows included) is `Toggle`, and every parameter label is a `ParamLabel` with a hover explanation. Never a native `<select>` or checkbox; `check-docs.mjs` fails on a new one.
 - **Don't use the built-in browser agent to visually verify UI** — too slow/unreliable here. **Ask the user to check**; they provide screenshots/feedback. Browser agent is fine for non-visual tasks (hitting API endpoints).
 
 ## Debugging — logs
@@ -138,6 +139,7 @@ page template: [docs/dev/docs-contributing.md](docs/dev/docs-contributing.md).
 | `ui/src/components/<studio>/` | `docs/user/studios/<studio>.md` (map in `tools/docs/check-docs.mjs`), the one-liner in `FEATURES.md` |
 | `ui/src/components/global-bar/`, generation params, post-processing | `docs/user/generation.md` |
 | A new studio or UI folder | new page + a row in `STUDIO_PAGES` in `tools/docs/check-docs.mjs` + `FEATURES.md` |
+| A shared UI primitive (`ui/src/components/shared/`) or a converted native control | `docs/dev/ui-design.md`; `node tools/docs/check-docs.mjs --update-ui-baseline` |
 | `server/src/routes/`, `server/src/index.ts` mounts | `node tools/docs/build-docs.mjs` (regenerates `docs/dev/api.md`) |
 | `engine/plugins/`, `plugins/` | `node tools/docs/build-docs.mjs` (regenerates `docs/user/plugins.md` tables) |
 | `server/src/data/model-registry.json` | `node tools/docs/build-docs.mjs` (regenerates `docs/user/models.md`) + `check-release-prereqs.mjs` |

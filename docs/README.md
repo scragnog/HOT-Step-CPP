@@ -63,5 +63,6 @@ In sidebar order.
 | [Releasing](dev/releasing.md) | Cutting and publishing a release, CI caching, gotchas |
 | [Writing and maintaining the docs](dev/docs-contributing.md) | Layout, page template, generated tables, the checker |
 | [Writing style](dev/writing-style.md) | Rules for prose a human reads |
+| [UI design rules](dev/ui-design.md) | The shared controls every screen uses (dropdown, toggle, hover explanation), accent colours, and the check that enforces them |
 | [Skill library](../.claude/skills/README.md) | Procedures per maintenance domain for coding agents |
 | [AGENTS.md](../AGENTS.md) | Project rules for agents, including the documentation ownership table |

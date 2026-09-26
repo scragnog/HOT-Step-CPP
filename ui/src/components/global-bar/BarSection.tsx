@@ -7,6 +7,7 @@
 
 import React, { useRef, useCallback, useEffect } from 'react';
 import { hoverCardIsOpen } from '../shared/ParamLabel';
+import { Toggle, type ToggleAccent } from '../shared/Toggle';
 
 // ── Accent color lookup ────────────────────────────────────────────────────
 // Tailwind JIT can't compile dynamic class names like `bg-${color}-500/10`,
@@ -247,44 +248,7 @@ export const BarSection: React.FC<BarSectionProps> = ({
 };
 
 // ── Inline Toggle Switch ─────────────────────────────────────────────────────
-
-interface ToggleSwitchProps {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  accentColor?: 'pink' | 'emerald' | 'sky' | 'purple' | 'amber' | 'teal';
-}
-
-const TOGGLE_COLORS: Record<string, string> = {
-  pink: 'bg-pink-500',
-  emerald: 'bg-emerald-500',
-  sky: 'bg-sky-500',
-  purple: 'bg-purple-500',
-  amber: 'bg-amber-500',
-  teal: 'bg-teal-500',
-};
-
-export const ToggleSwitch: React.FC<ToggleSwitchProps> = ({ checked, onChange, accentColor = 'pink' }) => {
-  const activeColor = TOGGLE_COLORS[accentColor] || TOGGLE_COLORS.pink;
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={(e) => {
-        e.stopPropagation();
-        onChange(!checked);
-      }}
-      className={`
-        relative inline-flex h-4 w-8 items-center rounded-full transition-colors duration-200 flex-shrink-0
-        ${checked ? activeColor : 'bg-zinc-200 dark:bg-zinc-700'}
-      `}
-    >
-      <span
-        className={`
-          inline-block h-3 w-3 rounded-full bg-white shadow-sm transform transition-transform duration-200
-          ${checked ? 'translate-x-[17px]' : 'translate-x-[3px]'}
-        `}
-      />
-    </button>
-  );
-};
+// Now the shared Toggle (components/shared/Toggle.tsx) at its small size; this
+// name stays so the bar's panels need no edit. New code imports Toggle.
+export const ToggleSwitch: React.FC<{ checked: boolean; onChange: (checked: boolean) => void; accentColor?: ToggleAccent }> =
+  ({ checked, onChange, accentColor = 'pink' }) => <Toggle size="sm" accent={accentColor} checked={checked} onChange={onChange} />;
