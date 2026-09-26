@@ -1567,7 +1567,7 @@ export const Yue2ArTrainStageCard: React.FC<{
                 <div className="mt-3 pl-3 border-l-2 border-zinc-200 dark:border-white/10 flex flex-col gap-3">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <NumField label={t('trainingStudio.yue2ar.alpha', 'Alpha')} value={form.alpha}
-                      onChange={v => set('alpha', v)} step={16}
+                      onChange={v => set('alpha', v)} step={16} meta="default 128 = rank 128, so the LoRA applies at ×1"
                       hint={t('trainingStudio.yue2ar.alphaHint',
                         'Scales how strongly the LoRA\'s learned change is applied on top of the base '
                         + 'weights, independent of rank. Raising it strengthens the adapter\'s pull at the '
@@ -1591,37 +1591,37 @@ export const Yue2ArTrainStageCard: React.FC<{
                         'Not the run length. Moving the steps without moving this changes where on the '
                         + 'curve the run stops.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.warmup', 'Warmup steps')}
-                      value={form.warmup} onChange={v => set('warmup', v)} step={10}
+                      value={form.warmup} onChange={v => set('warmup', v)} step={10} meta="default 50"
                       hint={t('trainingStudio.yue2ar.warmupHint',
                         'Steps at the start of the run where the learning rate ramps up from zero instead '
                         + 'of starting at full strength. More steps ramp up more gradually; 0 starts the run '
                         + 'at full learning rate immediately.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.gradAccum', 'Grad accum')}
-                      value={form.gradAccum} onChange={v => set('gradAccum', v)}
+                      value={form.gradAccum} onChange={v => set('gradAccum', v)} meta="default 2"
                       hint={t('trainingStudio.yue2ar.gradAccumHint',
                         'How many micro-steps of gradients are summed before the weights actually update. '
                         + 'Raising it simulates a bigger batch on the same VRAM at the cost of more time per '
                         + 'logged step; 1 updates on every micro-step.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.maxGradNorm', 'Clip grad norm')}
-                      value={form.maxGradNorm} onChange={v => set('maxGradNorm', v)} step={0.1}
+                      value={form.maxGradNorm} onChange={v => set('maxGradNorm', v)} step={0.1} meta="default 1.0"
                       hint={t('trainingStudio.yue2ar.maxGradNormHint',
                         'Caps the size of each gradient update before it is applied. Lower values clamp '
                         + 'harder, which resists a single bad batch derailing the run; too low can slow '
                         + 'learning down.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.weightDecay', 'Weight decay')}
-                      value={form.weightDecay} onChange={v => set('weightDecay', v)} step={0.01}
+                      value={form.weightDecay} onChange={v => set('weightDecay', v)} step={0.01} meta="default 0 (off)"
                       hint={t('trainingStudio.yue2ar.weightDecayHint',
                         'Shrinks the LoRA weights a little on every step, independent of the loss. Raising '
                         + 'it pulls the adapter toward doing less, which resists overfitting a small corpus; '
                         + '0 turns it off.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.seed', 'Seed')} value={form.seed}
-                      onChange={v => set('seed', v)}
+                      onChange={v => set('seed', v)} meta="default 42"
                       hint={t('trainingStudio.yue2ar.seedHint',
                         'Fixes the random draws (artist/minted mix, dropout, shuffling) so the same recipe '
                         + 'reproduces the same run. Changing it gives a different draw order, not a '
                         + 'different recipe.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.adamBeta1', 'Adam β1')}
-                      value={form.adamBeta1} onChange={v => set('adamBeta1', v)} step={0.01}
+                      value={form.adamBeta1} onChange={v => set('adamBeta1', v)} step={0.01} meta="default 0.9"
                       hint={t('trainingStudio.yue2ar.adamBeta1Hint',
                         'How much the optimizer smooths the gradient direction across steps. Higher values '
                         + 'smooth more, which steadies noisy updates; lower values react to each step\'s '
@@ -1637,7 +1637,7 @@ export const Yue2ArTrainStageCard: React.FC<{
                         'Tokens. A longer song truncates without its end marker, so it never teaches a fake '
                         + 'ending. This also sizes the per-layer buffers — it is the VRAM lever.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.chunk', 'CE chunk')} value={form.chunk}
-                      onChange={v => set('chunk', v)} step={64}
+                      onChange={v => set('chunk', v)} step={64} meta="default 256 rows"
                       hint={t('trainingStudio.yue2ar.chunkHint',
                         'How many tokens the cross-entropy loss is computed over at once. Lower values use '
                         + 'less VRAM for the loss computation at the cost of more passes; it does not change '
@@ -1657,7 +1657,7 @@ export const Yue2ArTrainStageCard: React.FC<{
                         ]} />
                     </label>
                     <NumField label={t('trainingStudio.yue2ar.ckptFrom', 'First snapshot at')}
-                      value={form.ckptFrom} onChange={v => set('ckptFrom', v)} step={10}
+                      value={form.ckptFrom} onChange={v => set('ckptFrom', v)} step={10} meta="default 50"
                       hint={t('trainingStudio.yue2ar.ckptFromHint',
                         'The step the first snapshot is saved at; after that, snapshots follow the '
                         + '"Snapshot every" interval above. Raising it skips saving the earliest, '
@@ -1668,7 +1668,7 @@ export const Yue2ArTrainStageCard: React.FC<{
                       hint={t('trainingStudio.yue2ar.evalEveryHint',
                         'Held-out loss on the regulariser pack. 0 turns it off.') as string} />
                     <NumField label={t('trainingStudio.yue2ar.logEvery', 'Log every')}
-                      value={form.logEvery} onChange={v => set('logEvery', v)}
+                      value={form.logEvery} onChange={v => set('logEvery', v)} meta="default 1 (every step)"
                       hint={t('trainingStudio.yue2ar.logEveryHint',
                         'How often, in steps, a training-loss line is written to the log. It only changes '
                         + 'how often progress is reported, not the run itself.') as string} />

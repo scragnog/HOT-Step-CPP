@@ -375,7 +375,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
   const handleStop = async () => { await sa.stop(); };
 
   // Solver-aware plugin params — storm included so all solvers use one render path
-  const SOLVER_EXTRA_PARAMS: Record<string, Array<{key:string,label:string,min:number,max:number,step:number,default:number,fmt:(v:number)=>string,color:string,title?:string}>> = {
+  const SOLVER_EXTRA_PARAMS: Record<string, Array<{key:string,label:string,min:number,max:number,step:number,default:number,fmt:(v:number)=>string,color:string,title?:string,meta?:string}>> = {
     storm: [
       {key:'stiffness_threshold', label:'Detail Sens',  min:0.05, max:0.50, step:0.01, default:0.15, fmt:v=>v.toFixed(2),          color:'text-pink-400',   title:'Stiffness threshold — lower = more detail on transients'},
       {key:'look_back_lambda',    label:'Coherence',    min:0,    max:1,    step:0.01, default:0.15, fmt:v=>v.toFixed(2),          color:'text-violet-400', title:'Look-back smoothing — 0=off, higher=smoother output'},
@@ -383,27 +383,38 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
       {key:'cache_depth',         label:'Cache Depth',  min:2,    max:10,   step:1,    default:5,    fmt:v=>String(Math.round(v)), color:'text-blue-400',   title:'Steps of solver history — more=smoother blending'},
     ],
     pingpong: [
-      {key:'look_back_lambda',    label:'Coherence',  min:0,   max:1,   step:0.01, default:0.15, fmt:v=>v.toFixed(2), color:'text-violet-400'},
-      {key:'look_back_snr_power', label:'SNR Power',  min:0.5, max:3,   step:0.1,  default:1.5,  fmt:v=>v.toFixed(1), color:'text-cyan-400'},
+      {key:'look_back_lambda',    label:'Coherence',  min:0,   max:1,   step:0.01, default:0.15, fmt:v=>v.toFixed(2), color:'text-violet-400',
+        title:'Blends each step with recent steps to smooth the trajectory and reduce harmonic hum, fading out at low sigma. 0 turns it off; the plugin’s own tuned values run around 0.55 for shorter runs (~25 steps) and 0.35 for longer ones (~35 steps).', meta:'default 0.15 · range 0–1'},
+      {key:'look_back_snr_power', label:'SNR Power',  min:0.5, max:3,   step:0.1,  default:1.5,  fmt:v=>v.toFixed(1), color:'text-cyan-400',
+        title:'Falloff exponent for how fast that look-back smoothing fades as sigma drops. Higher values fade it out sooner, concentrating the smoothing on the early, high-sigma steps.', meta:'default 1.5 · range 0.5–3'},
     ],
     hap: [
-      {key:'kinetic_energy',   label:'Kinetic E',  min:0, max:5,  step:0.05, default:1.0, fmt:v=>v.toFixed(2), color:'text-cyan-400'},
-      {key:'damping_friction', label:'Friction',   min:0, max:8,  step:0.1,  default:0.5, fmt:v=>v.toFixed(1), color:'text-blue-400'},
+      {key:'kinetic_energy',   label:'Kinetic E',  min:0, max:5,  step:0.05, default:1.0, fmt:v=>v.toFixed(2), color:'text-cyan-400',
+        title:'Sent to the hap solver as kinetic_energy when that solver is selected. No hap solver plugin ships in this build, so it currently has no effect.', meta:'default 1.0 · range 0–5'},
+      {key:'damping_friction', label:'Friction',   min:0, max:8,  step:0.1,  default:0.5, fmt:v=>v.toFixed(1), color:'text-blue-400',
+        title:'Sent to the hap solver as damping_friction when that solver is selected. No hap solver plugin ships in this build, so it currently has no effect.', meta:'default 0.5 · range 0–8'},
     ],
     otto: [
-      {key:'combustion_point',  label:'Combustion', min:0.1, max:0.9, step:0.01, default:0.4,  fmt:v=>v.toFixed(2), color:'text-orange-400'},
-      {key:'compression_ratio', label:'Compress',   min:1,   max:20,  step:0.5,  default:10.0, fmt:v=>v.toFixed(1), color:'text-red-400'},
-      {key:'adiabatic_index',   label:'Adiabatic',  min:0.5, max:5,   step:0.1,  default:2.0,  fmt:v=>v.toFixed(1), color:'text-amber-400'},
+      {key:'combustion_point',  label:'Combustion', min:0.1, max:0.9, step:0.01, default:0.4,  fmt:v=>v.toFixed(2), color:'text-orange-400',
+        title:'Sent to the otto solver as combustion_point when that solver is selected. No otto solver plugin ships in this build, so it currently has no effect.', meta:'default 0.4 · range 0.1–0.9'},
+      {key:'compression_ratio', label:'Compress',   min:1,   max:20,  step:0.5,  default:10.0, fmt:v=>v.toFixed(1), color:'text-red-400',
+        title:'Sent to the otto solver as compression_ratio when that solver is selected. No otto solver plugin ships in this build, so it currently has no effect.', meta:'default 10.0 · range 1–20'},
+      {key:'adiabatic_index',   label:'Adiabatic',  min:0.5, max:5,   step:0.1,  default:2.0,  fmt:v=>v.toFixed(1), color:'text-amber-400',
+        title:'Sent to the otto solver as adiabatic_index when that solver is selected. No otto solver plugin ships in this build, so it currently has no effect.', meta:'default 2.0 · range 0.5–5'},
     ],
     brayton: [
-      {key:'pressure_ratio', label:'Pressure', min:1, max:30, step:0.5, default:10.0, fmt:v=>v.toFixed(1), color:'text-sky-400'},
+      {key:'pressure_ratio', label:'Pressure', min:1, max:30, step:0.5, default:10.0, fmt:v=>v.toFixed(1), color:'text-sky-400',
+        title:'Sent to the brayton solver as pressure_ratio when that solver is selected. No brayton solver plugin ships in this build, so it currently has no effect.', meta:'default 10.0 · range 1–30'},
     ],
     causal: [
-      {key:'lina_shift', label:'LINA Shift', min:0.1, max:3.0, step:0.05, default:1.2, fmt:v=>v.toFixed(2), color:'text-teal-400'},
+      {key:'lina_shift', label:'LINA Shift', min:0.1, max:3.0, step:0.05, default:1.2, fmt:v=>v.toFixed(2), color:'text-teal-400',
+        title:'Time-axis warp on the step schedule — below 1 front-loads steps toward high sigma, above 1 back-loads them toward low sigma, 1.0 is no warp. Same lina_shift knob the causal scheduler uses; no causal solver plugin ships in this build, so it currently has no effect here.', meta:'default 1.2 · range 0.1–3'},
     ],
     omni: [
-      {key:'relational_weight', label:'Relational W', min:0, max:1, step:0.05, default:0.5, fmt:v=>v.toFixed(2), color:'text-pink-400'},
-      {key:'sigma_power',       label:'Sigma Power',  min:0.25, max:4, step:0.25, default:1.0, fmt:v=>v.toFixed(2), color:'text-violet-400'},
+      {key:'relational_weight', label:'Relational W', min:0, max:1, step:0.05, default:0.5, fmt:v=>v.toFixed(2), color:'text-pink-400',
+        title:'Base weight of the relational blend term at high sigma, fading toward 0 as sigma drops. 0 keeps the solver at plain Euler throughout; 0.5 balances it during the structure phase.', meta:'default 0.5 · range 0–1'},
+      {key:'sigma_power',       label:'Sigma Power',  min:0.25, max:4, step:0.25, default:1.0, fmt:v=>v.toFixed(2), color:'text-violet-400',
+        title:'How fast the relational weight fades with sigma. 1.0 fades linearly, 2.0 fades faster (quadratic) so the effect concentrates on early steps, below 1.0 fades more slowly.', meta:'default 1.0 · range 0.25–4'},
     ],
   };
   // Match selected solver dropdown to a param key. Blank/unrecognised = show storm params.
@@ -415,7 +426,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
   type ParamOpt = {value: string, label: string};
   type ParamDef = {
     type?: 'slider'|'select';
-    key: string; label: string; color: string; title?: string;
+    key: string; label: string; color: string; title?: string; meta?: string;
     // slider fields
     min?: number; max?: number; step?: number; default?: number|string; fmt?: (v:number)=>string;
     // select fields
@@ -427,24 +438,35 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
       {key:'damping_friction', label:'Friction',   min:0, max:8,  step:0.1,  default:3.0, fmt:v=>v.toFixed(1), color:'text-blue-400',   title:'Damping friction coefficient'},
     ],
     ht_scheduler: [
-      {key:'kinetic_energy',   label:'Kinetic E',  min:0,   max:2,  step:0.05, default:0.3, fmt:v=>v.toFixed(2), color:'text-cyan-400'},
-      {key:'damping_friction', label:'Friction',   min:0,   max:5,  step:0.1,  default:2.2, fmt:v=>v.toFixed(1), color:'text-blue-400'},
-      {key:'critical_temp',    label:'Crit Temp',  min:0.1, max:1,  step:0.05, default:0.6, fmt:v=>v.toFixed(2), color:'text-orange-400'},
-      {key:'phase_intensity',  label:'Phase Int',  min:0,   max:3,  step:0.1,  default:1.0, fmt:v=>v.toFixed(1), color:'text-violet-400'},
+      {key:'kinetic_energy',   label:'Kinetic E',  min:0,   max:2,  step:0.05, default:0.3, fmt:v=>v.toFixed(2), color:'text-cyan-400',
+        title:'HAP leading-edge sharpness in the timestep schedule. 0 is uniform spacing; raising it front-loads more steps at high sigma.', meta:'default 0.3 · range 0–2'},
+      {key:'damping_friction', label:'Friction',   min:0,   max:5,  step:0.1,  default:2.2, fmt:v=>v.toFixed(1), color:'text-blue-400',
+        title:'HAP tail compression in the timestep schedule. Higher values cluster steps toward the front and away from the end of the run.', meta:'default 2.2 · range 0–5'},
+      {key:'critical_temp',    label:'Crit Temp',  min:0.1, max:1,  step:0.05, default:0.6, fmt:v=>v.toFixed(2), color:'text-orange-400',
+        title:'Sigma fraction where the TPT phase transition centers — steps cluster around this point in the schedule.', meta:'default 0.6 · range 0.1–1'},
+      {key:'phase_intensity',  label:'Phase Int',  min:0,   max:3,  step:0.1,  default:1.0, fmt:v=>v.toFixed(1), color:'text-violet-400',
+        title:'TPT clustering strength added on top of the HAP curve. 0 is pure HAP (off), 1 is moderate, higher values cluster steps more strongly around Crit Temp.', meta:'default 1.0 · range 0–3'},
     ],
     otto: [
-      {key:'combustion_point',  label:'Combustion', min:0.1, max:0.9, step:0.01, default:0.4,  fmt:v=>v.toFixed(2), color:'text-orange-400'},
-      {key:'compression_ratio', label:'Compress',   min:1,   max:20,  step:0.5,  default:10.0, fmt:v=>v.toFixed(1), color:'text-red-400'},
-      {key:'adiabatic_index',   label:'Adiabatic',  min:0.5, max:5,   step:0.1,  default:2.0,  fmt:v=>v.toFixed(1), color:'text-amber-400'},
+      {key:'combustion_point',  label:'Combustion', min:0.1, max:0.9, step:0.01, default:0.4,  fmt:v=>v.toFixed(2), color:'text-orange-400',
+        title:'Sent to the otto scheduler as combustion_point when that scheduler is selected. No otto scheduler plugin ships in this build, so it currently has no effect.', meta:'default 0.4 · range 0.1–0.9'},
+      {key:'compression_ratio', label:'Compress',   min:1,   max:20,  step:0.5,  default:10.0, fmt:v=>v.toFixed(1), color:'text-red-400',
+        title:'Sent to the otto scheduler as compression_ratio when that scheduler is selected. No otto scheduler plugin ships in this build, so it currently has no effect.', meta:'default 10.0 · range 1–20'},
+      {key:'adiabatic_index',   label:'Adiabatic',  min:0.5, max:5,   step:0.1,  default:2.0,  fmt:v=>v.toFixed(1), color:'text-amber-400',
+        title:'Sent to the otto scheduler as adiabatic_index when that scheduler is selected. No otto scheduler plugin ships in this build, so it currently has no effect.', meta:'default 2.0 · range 0.5–5'},
     ],
     brayton: [
-      {key:'combustion_start',    label:'C Start', min:0.01, max:0.9,  step:0.01, default:0.2,  fmt:v=>v.toFixed(2), color:'text-orange-400'},
-      {key:'combustion_duration', label:'C Dur',   min:0.05, max:0.99, step:0.01, default:0.5,  fmt:v=>v.toFixed(2), color:'text-amber-400'},
-      {key:'pressure_ratio',      label:'Pressure', min:1,    max:30,  step:0.5,  default:8.0,  fmt:v=>v.toFixed(1), color:'text-sky-400'},
+      {key:'combustion_start',    label:'C Start', min:0.01, max:0.9,  step:0.01, default:0.2,  fmt:v=>v.toFixed(2), color:'text-orange-400',
+        title:'Sent to the brayton scheduler as combustion_start when that scheduler is selected. No brayton scheduler plugin ships in this build, so it currently has no effect.', meta:'default 0.2 · range 0.01–0.9'},
+      {key:'combustion_duration', label:'C Dur',   min:0.05, max:0.99, step:0.01, default:0.5,  fmt:v=>v.toFixed(2), color:'text-amber-400',
+        title:'Sent to the brayton scheduler as combustion_duration when that scheduler is selected. No brayton scheduler plugin ships in this build, so it currently has no effect.', meta:'default 0.5 · range 0.05–0.99'},
+      {key:'pressure_ratio',      label:'Pressure', min:1,    max:30,  step:0.5,  default:8.0,  fmt:v=>v.toFixed(1), color:'text-sky-400',
+        title:'Sent to the brayton scheduler as pressure_ratio when that scheduler is selected. No brayton scheduler plugin ships in this build, so it currently has no effect.', meta:'default 8.0 · range 1–30'},
       {key:'spool_speed',         label:'Spool',    min:1,    max:50,  step:1,    default:20.0, fmt:v=>v.toFixed(0), color:'text-teal-400'},
     ],
     causal: [
-      {type:'select', key:'mode', label:'Mode', default:'polynomial', color:'text-teal-400', options:[
+      {type:'select', key:'mode', label:'Mode', default:'polynomial', color:'text-teal-400',
+        title:'Base timestep curve before the LINA warp is applied — Karras, linear, polynomial, beta, AYS and others. Changes the shape of the step schedule the other causal knobs (Rho, Power, Blend, …) warp on top of.', meta:'default polynomial', options:[
         {value:'karras',             label:'Karras (rho)'},
         {value:'simple',             label:'Simple (Smoothstep)'},
         {value:'linear',             label:'Linear'},
@@ -462,18 +484,24 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
       ]},
       {type:'slider', key:'lina_shift',   label:'LINA Shift', min:0.1, max:3.0, step:0.05, default:1.0, fmt:v=>v.toFixed(2), color:'text-teal-400'},
       {type:'slider', key:'rho',          label:'Rho',        min:1,   max:15,  step:0.5,  default:7.0, fmt:v=>v.toFixed(1), color:'text-cyan-400', title:'Karras rho — higher=more steps at low sigma'},
-      {type:'slider', key:'blend_factor', label:'Blend',      min:0,   max:1,   step:0.05, default:0.5, fmt:v=>v.toFixed(2), color:'text-violet-400'},
+      {type:'slider', key:'blend_factor', label:'Blend',      min:0,   max:1,   step:0.05, default:0.5, fmt:v=>v.toFixed(2), color:'text-violet-400',
+        title:'Blend between the Karras curve (0) and the Linear curve (1). Only active when Mode is set to Blended.', meta:'default 0.5 · range 0–1'},
     ],
     hyper: [
-      {key:'warp_factor', label:'Warp', min:0.1, max:3.0, step:0.05, default:1.2, fmt:v=>v.toFixed(2), color:'text-pink-400'},
+      {key:'warp_factor', label:'Warp', min:0.1, max:3.0, step:0.05, default:1.2, fmt:v=>v.toFixed(2), color:'text-pink-400',
+        title:'Sent to the hyper scheduler as warp_factor. No hyper scheduler plugin ships in this build, so it currently has no effect.', meta:'default 1.2 · range 0.1–3'},
     ],
     pam: [
-      {key:'focal_sigma', label:'Focal σ',   min:0.01, max:0.99, step:0.01, default:0.5, fmt:v=>v.toFixed(2), color:'text-pink-400'},
-      {key:'bandwidth',   label:'Bandwidth', min:0.05, max:2,    step:0.05, default:0.5, fmt:v=>v.toFixed(2), color:'text-violet-400'},
-      {key:'intensity',   label:'Intensity', min:0,    max:10,   step:0.1,  default:3.0, fmt:v=>v.toFixed(1), color:'text-amber-400'},
+      {key:'focal_sigma', label:'Focal σ',   min:0.01, max:0.99, step:0.01, default:0.5, fmt:v=>v.toFixed(2), color:'text-pink-400',
+        title:'Sent to the pam scheduler as focal_sigma. No pam scheduler plugin ships in this build, so it currently has no effect.', meta:'default 0.5 · range 0.01–0.99'},
+      {key:'bandwidth',   label:'Bandwidth', min:0.05, max:2,    step:0.05, default:0.5, fmt:v=>v.toFixed(2), color:'text-violet-400',
+        title:'Sent to the pam scheduler as bandwidth. No pam scheduler plugin ships in this build, so it currently has no effect.', meta:'default 0.5 · range 0.05–2'},
+      {key:'intensity',   label:'Intensity', min:0,    max:10,   step:0.1,  default:3.0, fmt:v=>v.toFixed(1), color:'text-amber-400',
+        title:'Sent to the pam scheduler as intensity. No pam scheduler plugin ships in this build, so it currently has no effect.', meta:'default 3.0 · range 0–10'},
     ],
     noise_decay: [
-      {type:'select', key:'algorithm', label:'Algorithm', default:'polynomial', color:'text-amber-400', options:[
+      {type:'select', key:'algorithm', label:'Algorithm', default:'polynomial', color:'text-amber-400',
+        title:'Sent to the noise_decay scheduler as algorithm. No noise_decay scheduler plugin ships in this build, so it currently has no effect.', meta:'default polynomial', options:[
         {value:'polynomial',  label:'Polynomial'},
         {value:'sigmoidal',   label:'Sigmoidal'},
         {value:'piecewise',   label:'Piecewise'},
@@ -495,25 +523,37 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
       {key:'warmup_steps',    label:'Warmup',    min:0,  max:10,  step:1,    default:0,    fmt:v=>String(Math.round(v)), color:'text-blue-400', title:'Steps before guidance activates'},
     ],
     adg: [
-      {key:'max_angle_deg', label:'Max Angle', min:5,  max:90,  step:1,    default:60.0, fmt:v=>v.toFixed(0), color:'text-orange-400'},
-      {key:'apg_blend',     label:'APG Blend', min:0,  max:1,   step:0.05, default:0.5,  fmt:v=>v.toFixed(2), color:'text-pink-400'},
+      {key:'max_angle_deg', label:'Max Angle', min:5,  max:90,  step:1,    default:60.0, fmt:v=>v.toFixed(0), color:'text-orange-400',
+        title:'Sent to the adg guider as max_angle_deg. No adg guidance plugin ships in this build, so it currently has no effect.', meta:'default 60 · range 5–90'},
+      {key:'apg_blend',     label:'APG Blend', min:0,  max:1,   step:0.05, default:0.5,  fmt:v=>v.toFixed(2), color:'text-pink-400',
+        title:'Sent to the adg guider as apg_blend. No adg guidance plugin ships in this build, so it currently has no effect.', meta:'default 0.5 · range 0–1'},
       {key:'warmup_steps',  label:'Warmup',    min:0,  max:10,  step:1,    default:2,    fmt:v=>String(Math.round(v)), color:'text-blue-400'},
     ],
     pmg: [
-      {key:'strength',    label:'Strength',    min:0, max:3, step:0.05, default:1.0, fmt:v=>v.toFixed(2), color:'text-pink-400'},
-      {key:'glide_power', label:'Glide Power', min:0, max:3, step:0.1,  default:1.0, fmt:v=>v.toFixed(1), color:'text-violet-400'},
+      {key:'strength',    label:'Strength',    min:0, max:3, step:0.05, default:1.0, fmt:v=>v.toFixed(2), color:'text-pink-400',
+        title:'Sent to the pmg guider as strength. No pmg guidance plugin ships in this build, so it currently has no effect.', meta:'default 1.0 · range 0–3'},
+      {key:'glide_power', label:'Glide Power', min:0, max:3, step:0.1,  default:1.0, fmt:v=>v.toFixed(1), color:'text-violet-400',
+        title:'Sent to the pmg guider as glide_power. No pmg guidance plugin ships in this build, so it currently has no effect.', meta:'default 1.0 · range 0–3'},
     ],
     spectral: [
-      {key:'entropy_floor',       label:'Ent Floor',  min:0,  max:2,  step:0.05, default:0.5, fmt:v=>v.toFixed(2), color:'text-cyan-400'},
-      {key:'entropy_sensitivity', label:'Ent Sens',   min:0,  max:2,  step:0.05, default:0.8, fmt:v=>v.toFixed(2), color:'text-teal-400'},
-      {key:'aos_strength',        label:'AOS Str',    min:0,  max:1,  step:0.05, default:0.5, fmt:v=>v.toFixed(2), color:'text-violet-400'},
-      {key:'spectral_threshold',  label:'Spec Thr',   min:0,  max:1,  step:0.05, default:0.3, fmt:v=>v.toFixed(2), color:'text-blue-400'},
+      {key:'entropy_floor',       label:'Ent Floor',  min:0,  max:2,  step:0.05, default:0.5, fmt:v=>v.toFixed(2), color:'text-cyan-400',
+        title:'Sent to the spectral guider as entropy_floor. No spectral guidance plugin ships in this build, so it currently has no effect.', meta:'default 0.5 · range 0–2'},
+      {key:'entropy_sensitivity', label:'Ent Sens',   min:0,  max:2,  step:0.05, default:0.8, fmt:v=>v.toFixed(2), color:'text-teal-400',
+        title:'Sent to the spectral guider as entropy_sensitivity. No spectral guidance plugin ships in this build, so it currently has no effect.', meta:'default 0.8 · range 0–2'},
+      {key:'aos_strength',        label:'AOS Str',    min:0,  max:1,  step:0.05, default:0.5, fmt:v=>v.toFixed(2), color:'text-violet-400',
+        title:'Sent to the spectral guider as aos_strength. No spectral guidance plugin ships in this build, so it currently has no effect.', meta:'default 0.5 · range 0–1'},
+      {key:'spectral_threshold',  label:'Spec Thr',   min:0,  max:1,  step:0.05, default:0.3, fmt:v=>v.toFixed(2), color:'text-blue-400',
+        title:'Sent to the spectral guider as spectral_threshold. No spectral guidance plugin ships in this build, so it currently has no effect.', meta:'default 0.3 · range 0–1'},
     ],
     storm_guidance: [
-      {key:'cfg_knee',        label:'CFG Knee',   min:0,    max:1,  step:0.05, default:0.75, fmt:v=>v.toFixed(2), color:'text-pink-400'},
-      {key:'cfg_floor',       label:'CFG Floor',  min:0,    max:1,  step:0.05, default:0.70, fmt:v=>v.toFixed(2), color:'text-violet-400'},
-      {key:'cfg_tail_power',  label:'Tail Pow',   min:0.5,  max:5,  step:0.1,  default:2.0,  fmt:v=>v.toFixed(1), color:'text-cyan-400'},
-      {key:'nag_clamp_intensity', label:'NAG Clamp', min:0, max:1,  step:0.05, default:0.20, fmt:v=>v.toFixed(2), color:'text-amber-400'},
+      {key:'cfg_knee',        label:'CFG Knee',   min:0,    max:1,  step:0.05, default:0.75, fmt:v=>v.toFixed(2), color:'text-pink-400',
+        title:'Progress fraction of the schedule where guidance starts to roll off toward the floor. Guidance stays flat at full scale before this point; raising the knee delays the rolloff to later steps.', meta:'default 0.75 · range 0–1'},
+      {key:'cfg_floor',       label:'CFG Floor',  min:0,    max:1,  step:0.05, default:0.70, fmt:v=>v.toFixed(2), color:'text-violet-400',
+        title:'Minimum guidance scale during the rolloff, as a fraction of the set guidance scale. Raise it if detail collapses late in the schedule; 0 lets guidance fall to nothing.', meta:'default 0.70 · range 0–1'},
+      {key:'cfg_tail_power',  label:'Tail Pow',   min:0.5,  max:5,  step:0.1,  default:2.0,  fmt:v=>v.toFixed(1), color:'text-cyan-400',
+        title:'Shape of the guidance rolloff curve. 1.0 is a linear fade, 2.0 a smooth quadratic fade, higher values fall off more sharply near the end.', meta:'default 2.0 · range 0.5–5'},
+      {key:'nag_clamp_intensity', label:'NAG Clamp', min:0, max:1,  step:0.05, default:0.20, fmt:v=>v.toFixed(2), color:'text-amber-400',
+        title:'How strongly spiking latent elements get pulled toward the mean each step, suppressing attention/LoRA resonance buildup. 0 disables it; the plugin’s own recommended range for audio LoRA is 0.15–0.25.', meta:'default 0.20 · range 0–1'},
     ],
     hyperguider: [
       {key:'eta',            label:'Eta',         min:0,    max:1,   step:0.01, default:0.0,  fmt:v=>v.toFixed(2), color:'text-pink-400'},
@@ -522,9 +562,12 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
       {key:'contrast_floor', label:'Contrast',    min:0,    max:0.5, step:0.01, default:0.1,  fmt:v=>v.toFixed(2), color:'text-teal-400'},
     ],
     weyl: [
-      {key:'sliding_current',    label:'Sliding',    min:0, max:1,  step:0.05, default:0.3, fmt:v=>v.toFixed(2), color:'text-pink-400'},
-      {key:'dissipation_factor', label:'Dissipation',min:0, max:1,  step:0.05, default:0.3, fmt:v=>v.toFixed(2), color:'text-violet-400'},
-      {key:'weyl_chirality',     label:'Chirality',  min:-1,max:1,  step:0.1,  default:0.0, fmt:v=>v.toFixed(1), color:'text-cyan-400'},
+      {key:'sliding_current',    label:'Sliding',    min:0, max:1,  step:0.05, default:0.3, fmt:v=>v.toFixed(2), color:'text-pink-400',
+        title:'Sent to the weyl guider as sliding_current. No weyl guidance plugin ships in this build, so it currently has no effect.', meta:'default 0.3 · range 0–1'},
+      {key:'dissipation_factor', label:'Dissipation',min:0, max:1,  step:0.05, default:0.3, fmt:v=>v.toFixed(2), color:'text-violet-400',
+        title:'Sent to the weyl guider as dissipation_factor. No weyl guidance plugin ships in this build, so it currently has no effect.', meta:'default 0.3 · range 0–1'},
+      {key:'weyl_chirality',     label:'Chirality',  min:-1,max:1,  step:0.1,  default:0.0, fmt:v=>v.toFixed(1), color:'text-cyan-400',
+        title:'Sent to the weyl guider as weyl_chirality. No weyl guidance plugin ships in this build, so it currently has no effect.', meta:'default 0.0 · range −1–1'},
     ],
   };
 
@@ -786,7 +829,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                   };
                   return (
                     <div key={s.key} className="flex items-center gap-2">
-                      <ParamLabel label={s.label} info={s.title} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
+                      <ParamLabel label={s.label} info={s.title} meta={s.meta} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
                       <input type="range" min={s.min} max={s.max} step={s.step} value={val}
                         onChange={e => setVal(Number(e.target.value))}
                         className="flex-1 accent-red-500 h-1"/>
@@ -864,7 +907,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                     <span className="text-[9px] text-zinc-600 uppercase tracking-wider">Scheduler params</span>
                     {activeSchedulerParams.map(s => (
                       <div key={s.key} className="flex items-center gap-2">
-                        <ParamLabel label={s.label} info={s.title} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
+                        <ParamLabel label={s.label} info={s.title} meta={s.meta} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
                         {s.type === 'select' ? (
                           <StyledSelect
                             accent="pink"
@@ -892,7 +935,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                     <span className="text-[9px] text-zinc-600 uppercase tracking-wider">Guider params</span>
                     {activeGuiderParams.map(s => (
                       <div key={s.key} className="flex items-center gap-2">
-                        <ParamLabel label={s.label} info={s.title} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
+                        <ParamLabel label={s.label} info={s.title} meta={s.meta} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
                         {s.type === 'select' ? (
                           <StyledSelect
                             accent="pink"

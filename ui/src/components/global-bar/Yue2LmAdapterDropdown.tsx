@@ -322,13 +322,13 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
                 <ParamLabel
                   label={t('globalBar.yue2AdapterDepthWarningShort', 'Leave these at 1.0 for renders you want to keep.')}
                   info={t('globalBar.yue2AdapterDepthWarning',
-                    'Each dial covers a third of the block stack. On the MM3 planner the late third turned out to carry sequence termination, and halving it produced songs that faded out or never ended; the early third drove tempo. Nothing says YuE2 divides the work the same way, which is exactly why these are a probe rather than a setting.')}
+                    'Each dial covers a third of the planner\'s transformer blocks by depth (the first, middle and last third of the stack), not the start, middle and end of the song: every block processes the whole song. Each multiplies the adapter\'s strength in those blocks on top of the master and attention/MLP dials, so 1.0 changes nothing. On the MM3 planner the late third turned out to carry sequence termination, and halving it produced songs that faded out or never ended; the early third drove tempo. Nothing says YuE2 divides the work the same way, which is exactly why these are a probe rather than a setting.')}
                   className="text-[10px] text-amber-500/90 leading-relaxed" />
               </div>
               <Slider
                 label={t('globalBar.yue2AdapterEarly', 'Early third')}
                 info={t('globalBar.yue2AdapterEarlyInfo',
-                  'Multiplies this adapter\'s strength on the first third of the block stack, on top of the master and attention/MLP dials. Nothing yet confirms what YuE2 keeps in its early blocks, so treat this as a probe: pull it down if the start of a render leans too hard on the adapter, back to 1.0 otherwise.')}
+                  'Multiplies this adapter\'s strength in the first third of the planner\'s blocks (depth, not song position), on top of the master and attention/MLP dials. On the MM3 planner these blocks drove tempo and basic feel; nothing yet confirms YuE2 keeps the same things there. Lower it if the adapter is bending tempo or groove in ways you do not want, raise it if the render ignores the artist\'s feel, and leave it at 1.0 for renders you want to keep.')}
                 value={draft.early}
                 onChange={v => setDraft(d => ({ ...d, early: v }))}
                 min={0} max={2} step={0.05} showInput
@@ -336,7 +336,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
               <Slider
                 label={t('globalBar.yue2AdapterMid', 'Middle third')}
                 info={t('globalBar.yue2AdapterMidInfo',
-                  'Multiplies this adapter\'s strength on the middle third of the block stack, on top of the master and attention/MLP dials. Nothing yet confirms what YuE2 keeps in its middle blocks, so treat this as a probe: pull it down if the middle of a render leans too hard on the adapter, back to 1.0 otherwise.')}
+                  'Multiplies this adapter\'s strength in the middle third of the planner\'s blocks (depth, not song position), on top of the master and attention/MLP dials. Nothing yet says what YuE2 keeps in its middle blocks, so this is a probe: lower it and listen for what changes, and leave it at 1.0 for renders you want to keep.')}
                 value={draft.mid}
                 onChange={v => setDraft(d => ({ ...d, mid: v }))}
                 min={0} max={2} step={0.05} showInput
@@ -344,7 +344,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
               <Slider
                 label={t('globalBar.yue2AdapterLate', 'Late third')}
                 info={t('globalBar.yue2AdapterLateInfo',
-                  'Multiplies this adapter\'s strength on the last third of the block stack, on top of the master and attention/MLP dials. On the MM3 planner the late third turned out to carry sequence termination, and halving it produced songs that faded out or never ended; nothing confirms YuE2 divides its blocks the same way, so treat this as a probe rather than a considered dial.')}
+                  'Multiplies this adapter\'s strength in the last third of the planner\'s blocks (depth, not song position), on top of the master and attention/MLP dials. On the MM3 planner these blocks carried sequence termination: halving this dial produced songs that faded out or never ended, so if a render loses its ending after you lower it, that is the same effect. Nothing confirms YuE2 divides its blocks the same way; treat it as a probe and leave it at 1.0 for renders you want to keep.')}
                 value={draft.late}
                 onChange={v => setDraft(d => ({ ...d, late: v }))}
                 min={0} max={2} step={0.05} showInput

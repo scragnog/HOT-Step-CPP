@@ -230,7 +230,8 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
             <ParamLabel
               label="Noise Method"
               className="text-xs font-medium text-zinc-700 dark:text-zinc-300"
-              info="Which algorithm reintroduces the source's audio noise once Source Preservation is above zero: Classic (Truncate) or Full Denoise (Rescale)."
+              info="How the denoising schedule is cut when the cover starts partway through it (Source Preservation above zero). Classic (Truncate) drops the early steps and runs only the remaining ones, so a strongly preserved cover gets fewer steps. Full Denoise (Rescale) keeps the full step count and squeezes the whole schedule into the remaining range, so the cover gets every step at finer spacing: slower, usually smoother, same starting point."
+              meta="default Classic"
             />
             <StyledSelect
               accent="cyan"
