@@ -166,8 +166,14 @@ export async function renderYue2JointPreview(input: {
   if ((!caption || !lyrics) && input.dataset) {
     try {
       const parsed = JSON.parse(fs.readFileSync(input.dataset, 'utf8')) as { items?: unknown[] };
-      const item = Array.isArray(parsed.items) ? (parsed.items.find(x => x && typeof x === 'object'
-        && (!input.options.previewSongId || (x as Record<string, unknown>).id === input.options.previewSongId)) as Record<string, unknown> | undefined) : undefined;
+      const items = (Array.isArray(parsed.items) ? parsed.items : []).filter((x): x is Record<string, unknown> => !!x && typeof x === 'object');
+      // No song picked: the first SUNG track. The first item is often an
+      // instrumental intro, and planning a song with no lyrics is "runaway"
+      // on every take (shikari_skies, 2026-09-26).
+      const sung = (x: Record<string, unknown>) => x.instrumental !== true && typeof x.lyrics === 'string' && x.lyrics.trim().length > 0;
+      const item = input.options.previewSongId
+        ? items.find(x => x.id === input.options.previewSongId)
+        : items.find(sung) ?? items[0];
       if (!caption) caption = typeof item?.style === 'string' ? item.style : typeof item?.prompt_style === 'string' ? item.prompt_style : '';
       if (!lyrics) lyrics = typeof item?.lyrics === 'string' ? item.lyrics : typeof item?.prompt_lyrics === 'string' ? item.prompt_lyrics : '';
     } catch { /* explicit empty prompt remains a visible render failure */ }

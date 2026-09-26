@@ -85,7 +85,23 @@ test('renderer uses selected style/lyrics, writes audio, and restores selection'
   assert.equal(calls.filter(c => c.name === 'unload').length, 1);
   assert.equal(calls.at(-1)?.name, 'select');
   // Files carry the seed (takes at one step never overwrite each other).
-  assert.equal(fs.existsSync(path.join(f.output, 'previews', `step-4-artist-s${YUE2_JOINT_PREVIEW_DEFAULTS.seed}.wav`)), true);
+  // (plus `-p<planSeed>` when a plan was recorded).
+  assert.ok(fs.readdirSync(path.join(f.output, 'previews')).some(n => n.startsWith(`step-4-artist-s${YUE2_JOINT_PREVIEW_DEFAULTS.seed}`) && n.endsWith('.wav')));
+});
+
+test('with no song picked, renderer skips an instrumental first track', async () => {
+  const f = previewFixture();
+  fs.writeFileSync(f.dataset, JSON.stringify({ items: [
+    { id: 'intro', style: 'intro style', lyrics: '', instrumental: true },
+    { id: 'song', style: 'song style', lyrics: 'sung lyrics' },
+  ] }));
+  const { deps, calls } = mockDeps();
+  await renderYue2JointPreview({ output: f.output, dataset: f.dataset, step: 4,
+    options: { ...YUE2_JOINT_PREVIEW_DEFAULTS, enabled: true },
+    arAdapter: 'ar.safetensors', narAdapter: 'nar.safetensors', deps });
+  const synth = calls.find(c => c.name === 'synth')?.value as any;
+  assert.equal(synth.lyrics, 'sung lyrics');
+  assert.equal(synth.style, 'song style');
 });
 
 test('renderer cancels a polling job on render failure and still unloads', async () => {

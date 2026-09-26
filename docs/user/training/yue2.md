@@ -109,7 +109,7 @@ When a ladder finishes, the panel says so and waits for you to press "Use this r
 
 The Review phase lists every refinement ladder that still has unscored previews, across datasets, so a batch that ran overnight is one list in the morning.
 
-Checkpoint previews during the main run are optional. They use the first track in the dataset with seed 424242. A preview that reaches its length cap stopped at the preview limit, not at a natural ending.
+Checkpoint previews during the main run are optional. They and the Refine rung previews use the first track in the dataset that has lyrics and is not marked instrumental (so an instrumental intro track is skipped), with seed 424242. A preview that reaches its length cap stopped at the preview limit, not at a natural ending.
 
 ## Using the result
 
