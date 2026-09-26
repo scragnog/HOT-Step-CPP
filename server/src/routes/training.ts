@@ -3452,6 +3452,11 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         // Freeze the resumed checkpoint's planner: a stop decided outside the
         // trainer (a plan sweep on the checkpoints). Never inherited from the run.
         ...(b.freezePlannerNow === true ? { freezePlannerNow: true } : {}),
+        // Decoder-only follow-up: the ladder's lrScale (0.1) is inherited
+        // unless the Refine tab sets its own. Still under the record's rung
+        // multiplier and the refine warmup; the plain run rate diverged.
+        ...(b.freezePlannerNow === true && b.narLrScale !== undefined && b.narLrScale !== null && b.narLrScale !== ''
+          ? { lrScale: Math.max(0.05, Math.min(1, Number(b.narLrScale) || 0.1)) } : {}),
         ...(b.refine === true ? { refine: true } : {}),
         // Planner refinement: KL rungs to a ceiling, both halves live.
         // A refinement resumes a converged adapter whose schedule had decayed

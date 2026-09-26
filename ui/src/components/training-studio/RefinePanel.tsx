@@ -68,6 +68,7 @@ export const RefinePanel: React.FC = () => {
   const [draft, setDraft] = useState(true);
   const draftOpts = draft ? { odeSteps: 12, narCacheRatio: 0 } : {};
   const [lrScale, setLrScale] = useState(0.1);
+  const [narLrScale, setNarLrScale] = useState(0.1);
   // Further training for the decoder from the picked rung (planner frozen):
   // to a reconstruction target, a step budget, or the knee, whichever first.
   const [narFurther, setNarFurther] = useState(true);
@@ -231,7 +232,7 @@ export const RefinePanel: React.FC = () => {
       if (!narFurther || isDecoderOnly) { await finishPick(ladderRun, dir, step); return; }
       // Decoder on from this rung, planner frozen; the result becomes the adapter.
       const result = await startYue2JointTrain(datasetId, { trainingMethod: 'aitk', refine: true, resumeRunId: ladderRun, resumeStep: step,
-        steps: step + narBudget, saveEvery: 10, stopMode: 'kl', narExtraSteps: step + narBudget, freezePlannerNow: true,
+        steps: step + narBudget, saveEvery: 10, stopMode: 'kl', narExtraSteps: step + narBudget, freezePlannerNow: true, narLrScale,
         reconStop: narKnee ? 0.005 : 0, reconStopWindow: 10, reconKeepDelta: narKeepDelta, ...(narTarget !== '' ? { reconTarget: narTarget } : {}), stopEngine: false,
         lyricTiming: true, alignmentEnabled: true, autoPrepare: false, checkpoint: '', output: '',
         preview: { enabled: false, everySteps: 0, seconds: 90, seed: 424242, previewMaxFrames: 2250, baseline: false, control: false } } as unknown as Yue2JointTrainRequest);
@@ -414,6 +415,10 @@ export const RefinePanel: React.FC = () => {
               <label className="flex flex-col gap-1 w-32">
                 <ParamLabel label={t('trainingStudio.refine.narBudget', 'NAR max steps')} meta={t('trainingStudio.refine.narBudgetMeta', 'default 500')} info={t('trainingStudio.refine.narBudgetInfo', 'The most decoder steps to train after the pick. At about 1.5 s a step, 500 is roughly 13 minutes.')} />
                 <input className={input} type="number" min={10} step={10} value={narBudget} disabled={active || busy || !narFurther} onChange={e => setNarBudget(Math.max(10, Math.round(Number(e.target.value) || 0)))} />
+              </label>
+              <label className="flex flex-col gap-1 w-32">
+                <ParamLabel label={t('trainingStudio.refine.narLrScale', 'Decoder rate (× run)')} meta={t('trainingStudio.refine.narLrMeta', '0.05–1 · default 0.1')} info={t('trainingStudio.refine.narLrInfo', 'Fraction of the source run\'s rate for the decoder pass, on top of the same pacing the ladder used (its 30-step warm-up and any halving from skipped rungs). 0.1 is the ladder\'s own value. The plain run rate (1) threw a converged decoder out of its basin within six steps, so raise this in small steps and watch the reconstruction meter over the first checkpoints.')} />
+                <input className={input} type="number" step="0.05" min={0.05} max={1} value={narLrScale} disabled={active || busy || !narFurther} onChange={e => setNarLrScale(Math.max(0.05, Math.min(1, Number(e.target.value) || 0.1)))} />
               </label>
               <label className="flex flex-col gap-1 w-40">
                 <ParamLabel label={t('trainingStudio.refine.narKeepDelta', 'Keep a checkpoint per recon drop')} meta={t('trainingStudio.refine.narKeepDeltaMeta', 'default 0.003')} info={t('trainingStudio.refine.narKeepDeltaInfo', 'During further decoder training a checkpoint is kept only when the reconstruction meter has dropped by at least this since the last kept one; the rest are deleted so the ladder shows real progress, not every 10 steps. The newest checkpoint is always kept.')} />
