@@ -400,7 +400,10 @@ re-runs from the Library wait in the same line.
 - YuE2 jobs waiting with matching settings render together as one engine batch when Batch
   Queued Songs is on. See [Backends](backends.md#yue2). The queue boxes those jobs together
   and shows the time the whole batch took, the audio it produced and the ratio of the two;
-  each song inside the box shows only its own length.
+  each song inside the box shows only its own length. The job that takes the engine lane holds
+  it for 5 seconds before rendering, so the first Generate pressed in Lyric Studio and the
+  ones queued right after it go into one call; the engine takes at most four songs per batch
+  (a compiled limit, not a setting).
 - Every finished row shows a ratio next to its length: audio seconds per second of
   generation, so 3.0 means a minute of music took twenty seconds.
 - The queue survives a page reload: running jobs reconnect. After a full restart of the app

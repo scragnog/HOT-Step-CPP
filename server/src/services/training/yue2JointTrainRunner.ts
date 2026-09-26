@@ -331,7 +331,15 @@ export function seedTrainClock(resume: string | undefined, resumeStep: number): 
  *  RelayState (owned by yue2TrainRunner.ts) in a closure the caller keeps
  *  across the whole run. Deletion of a checkpoint is always deferred to the
  *  next one, so the newest checkpoint on disk is never removed. */
-interface ReconThinning { keepDelta: number; bestRecon?: number; disposable?: { step: number; dir: string; recon: number } }
+interface ReconThinning {
+  keepDelta: number; bestRecon?: number;
+  /** A checkpoint judged not worth keeping; deleted when the next one lands. */
+  disposable?: { step: number; dir: string; recon: number };
+  /** The engine prints the meters line while the checkpoint is still a
+   *  `.tmp` folder, so a step judged disposable waits here until its
+   *  `checkpoint` event says the folder exists under its final name. */
+  pendingDrop?: { step: number; recon: number };
+}
 
 /** Pure decision: does this checkpoint's reconstruction reading improve
  *  enough on the best one kept so far to be worth keeping itself? */
@@ -373,6 +381,11 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
       const saved = checkpointRecords(opts.outDir).find(c => c.step === step && c.arPath && c.narPath);
       if (saved) pushEvent(job, { type: 'metric', metric: 'milestone', ts: Date.now(), step,
         loss: state.lastLoss, path: saved.dir });
+      if (thinning?.pendingDrop?.step === step) {
+        // The folder exists under its final name now (see pendingDrop).
+        if (saved) thinning.disposable = { step, dir: saved.dir, recon: thinning.pendingDrop.recon };
+        thinning.pendingDrop = undefined;
+      }
     }
     log(job, 'info', `Joint training ${stage}${step === undefined ? '' : ` at step ${step}`}`);
   } else if (stage === 'meters' && step !== undefined) {
@@ -394,10 +407,7 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
       if (recon !== undefined && opts) {
         const decision = reconKeepDecision(thinning.bestRecon, recon, thinning.keepDelta);
         if (decision.keep) thinning.bestRecon = decision.bestRecon;
-        else {
-          const dir = checkpointRecords(opts.outDir).find(c => c.step === step)?.dir;
-          if (dir) thinning.disposable = { step, dir, recon };
-        }
+        else thinning.pendingDrop = { step, recon };
       }
     }
   } else if (stage === 'kl_mark' && step !== undefined) {

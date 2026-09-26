@@ -225,9 +225,9 @@ export function finishScoredLadders(entries: Array<{ datasetId: string; refineRu
 
 /** The Refine tab's "Further training for NAR" request, at its defaults. */
 function narFurtherRequest(runId: string, step: number, knee = true): Record<string, unknown> {
-  const budget = 500;
+  const budget = 250;
   return { trainingMethod: 'aitk', refine: true, resumeRunId: runId, resumeStep: step,
-    steps: step + budget, saveEvery: 10, stopMode: 'kl', narExtraSteps: step + budget, freezePlannerNow: true,
+    steps: step + budget, saveEvery: 10, stopMode: 'kl', narExtraSteps: step + budget, freezePlannerNow: true, narLrScale: 0.2,
     reconStop: knee ? 0.005 : 0, reconStopWindow: 10, reconKeepDelta: 0.003, reconTarget: 0.25, stopEngine: false,
     lyricTiming: true, alignmentEnabled: true, autoPrepare: false, checkpoint: '', output: '',
     preview: { enabled: false, everySteps: 0, seconds: 90, seed: 424242, previewMaxFrames: 2250, baseline: false, control: false } };

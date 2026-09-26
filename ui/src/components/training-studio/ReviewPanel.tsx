@@ -90,7 +90,7 @@ export const ReviewPanel: React.FC = () => {
               checked={knee}
               onChange={setKnee}
               label={t('trainingStudio.review.finishKnee', 'Stop NAR at the plateau')}
-              info={t('trainingStudio.review.finishKneeInfo', 'Stop NAR further training once a line fitted through its last 10 checkpoints gains under 0.5%. Off: train to the 500-step budget or the recon target.')}
+              info={t('trainingStudio.review.finishKneeInfo', 'Stop NAR further training once a line fitted through its last 10 checkpoints gains under 0.5%. Off: train to the 250-step budget or the recon target.')}
             />
             <button type="button" disabled={finishing || finishable.every(r => skip[r.refineRun])} onClick={() => void finish()}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40">

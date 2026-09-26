@@ -25,11 +25,16 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
   const setPhase = useTrainingStore(s => s.setPhase);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState('');
+  const [showTrained, setShowTrained] = useState(false);
 
+  // A dataset with a linked YuE2 pair is trained (the grid's "done" chip).
+  const isTrained = (d: typeof datasets[number]) => !!(d.assets?.yue2?.arAdapter && d.assets?.yue2?.narAdapter);
+  const trainedCount = datasets.filter(isTrained).length;
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return q ? datasets.filter(d => d.name.toLowerCase().includes(q) || d.customTag.toLowerCase().includes(q) || (d.artistName ?? '').toLowerCase().includes(q)) : datasets;
-  }, [datasets, filter]);
+    return datasets.filter(d => (showTrained || !isTrained(d))
+      && (!q || d.name.toLowerCase().includes(q) || d.customTag.toLowerCase().includes(q) || (d.artistName ?? '').toLowerCase().includes(q)));
+  }, [datasets, filter, showTrained]);
   const selected = datasets.filter(d => checked[d.id]);
   const active = batches.find(b => b.status === 'running' || b.status === 'paused');
   const busy = !!active;
@@ -67,6 +72,12 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
         <div className="flex items-center gap-2 mb-2">
           <input value={filter} onChange={e => setFilter(e.target.value)} placeholder={t('trainingStudio.batch.filter', 'Filter…')}
             className="flex-1 rounded-lg bg-zinc-100 dark:bg-black/20 p-2 text-xs" />
+          <label className="flex items-center gap-1.5 text-[11px] text-zinc-500 whitespace-nowrap">
+            <Toggle size="sm" accent="amber" checked={showTrained} onChange={setShowTrained} aria-label={t('trainingStudio.yue2.aitkBatch.showTrained', 'Show trained')} />
+            <span title={t('trainingStudio.yue2.aitkBatch.showTrainedInfo', 'Datasets that already have a linked YuE2 adapter pair are hidden so the list shows only what is still to train. Turn this on to retrain one.')}>
+              {t('trainingStudio.yue2.aitkBatch.showTrainedCount', 'Show trained ({{count}})', { count: trainedCount })}
+            </span>
+          </label>
           <button type="button" className="text-[11px] text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
             onClick={() => setChecked(prev => { const next = { ...prev }; const all = visible.every(d => next[d.id]); for (const d of visible) next[d.id] = !all; return next; })}>
             {visible.every(d => checked[d.id]) ? t('trainingStudio.batch.selectNone', 'Select none') : t('trainingStudio.batch.selectAll', 'Select all')}
@@ -77,6 +88,7 @@ export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose }) => {
             <Toggle size="sm" accent="amber" disabled={queued.has(ds.id)} checked={queued.has(ds.id) || !!checked[ds.id]} onChange={v => setChecked(previous => ({ ...previous, [ds.id]: v }))} aria-label={t('trainingStudio.yue2.aitkBatch.selectDataset', 'Select {{name}}', { name: ds.name })} />
             <span className="flex-1 truncate">{ds.name}</span>
             {queued.has(ds.id) ? <span className="text-amber-600">{t('trainingStudio.yue2.aitkBatch.inBatch', 'in batch')}</span>
+              : isTrained(ds) ? <span className="text-emerald-600">{t('trainingStudio.yue2.aitkBatch.trained', 'trained')}</span>
               : ds.customTag && <span className="text-zinc-500">{ds.customTag}</span>}
           </label>)}
           {visible.length === 0 && <div className="p-3 text-xs text-zinc-500">{t('trainingStudio.batch.noDatasets', 'No datasets available.')}</div>}

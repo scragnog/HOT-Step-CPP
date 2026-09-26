@@ -68,12 +68,12 @@ export const RefinePanel: React.FC = () => {
   const [draft, setDraft] = useState(true);
   const draftOpts = draft ? { odeSteps: 12, narCacheRatio: 0 } : {};
   const [lrScale, setLrScale] = useState(0.1);
-  const [narLrScale, setNarLrScale] = useState(0.1);
+  const [narLrScale, setNarLrScale] = useState(0.2);
   // Further training for the decoder from the picked rung (planner frozen):
   // to a reconstruction target, a step budget, or the knee, whichever first.
   const [narFurther, setNarFurther] = useState(true);
   const [narTarget, setNarTarget] = useState<number | ''>(0.25);
-  const [narBudget, setNarBudget] = useState(500);
+  const [narBudget, setNarBudget] = useState(250);
   const [narKeepDelta, setNarKeepDelta] = useState(0.003);
   // The plateau stop: a line fitted through the last 10 checkpoints gaining
   // under 0.5%. Off: budget or recon target only.
@@ -241,9 +241,11 @@ export const RefinePanel: React.FC = () => {
       setCleanupNote(t('trainingStudio.refine.narStarted', 'Decoder training on from step {{step}}; the adapter is linked when it stops.', { step }));
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   };
-  // When the decoder follow-up ends, its last checkpoint is the adapter.
+  // When the decoder follow-up ends, its last checkpoint is the adapter. A
+  // Stop pressed during it means "no further": the same finish, on the last
+  // complete checkpoint on disk.
   useEffect(() => {
-    if (!narJob || !job || job.id !== narJob.jobId || job.status !== 'done' || !datasetId) return;
+    if (!narJob || !job || job.id !== narJob.jobId || (job.status !== 'done' && job.status !== 'cancelled') || !datasetId) return;
     const pending = narJob; setNarJob(null);
     void (async () => {
       try {
@@ -413,11 +415,11 @@ export const RefinePanel: React.FC = () => {
                   onChange={e => setNarTarget(e.target.value === '' ? '' : Math.max(0, Number(e.target.value) || 0))} />
               </label>
               <label className="flex flex-col gap-1 w-32">
-                <ParamLabel label={t('trainingStudio.refine.narBudget', 'NAR max steps')} meta={t('trainingStudio.refine.narBudgetMeta', 'default 500')} info={t('trainingStudio.refine.narBudgetInfo', 'The most decoder steps to train after the pick. At about 1.5 s a step, 500 is roughly 13 minutes.')} />
+                <ParamLabel label={t('trainingStudio.refine.narBudget', 'NAR max steps')} meta={t('trainingStudio.refine.narBudgetMeta', 'default 250')} info={t('trainingStudio.refine.narBudgetInfo', 'The most decoder steps to train after the pick. At about 1.5 s a step, 250 is roughly 6 minutes.')} />
                 <input className={input} type="number" min={10} step={10} value={narBudget} disabled={active || busy || !narFurther} onChange={e => setNarBudget(Math.max(10, Math.round(Number(e.target.value) || 0)))} />
               </label>
               <label className="flex flex-col gap-1 w-32">
-                <ParamLabel label={t('trainingStudio.refine.narLrScale', 'Decoder rate (× run)')} meta={t('trainingStudio.refine.narLrMeta', '0.05–1 · default 0.1')} info={t('trainingStudio.refine.narLrInfo', 'Fraction of the source run\'s rate for the decoder pass, on top of the same pacing the ladder used (its 30-step warm-up and any halving from skipped rungs). 0.1 is the ladder\'s own value. The plain run rate (1) threw a converged decoder out of its basin within six steps, so raise this in small steps and watch the reconstruction meter over the first checkpoints.')} />
+                <ParamLabel label={t('trainingStudio.refine.narLrScale', 'Decoder rate (× run)')} meta={t('trainingStudio.refine.narLrMeta', '0.05–1 · default 0.2')} info={t('trainingStudio.refine.narLrInfo', 'Fraction of the source run\'s rate for the decoder pass, on top of the same pacing the ladder used (its 30-step warm-up and any halving from skipped rungs). 0.1 is the ladder\'s own value; 0.2 is twice that. The plain run rate (1) threw a converged decoder out of its basin within six steps, so raise this in small steps and watch the reconstruction meter over the first checkpoints.')} />
                 <input className={input} type="number" step="0.05" min={0.05} max={1} value={narLrScale} disabled={active || busy || !narFurther} onChange={e => setNarLrScale(Math.max(0.05, Math.min(1, Number(e.target.value) || 0.1)))} />
               </label>
               <label className="flex flex-col gap-1 w-40">
