@@ -852,12 +852,7 @@ static int run_impl(Config config, std::string * error) {
                 if (wsd && !in_tail() && planner_frozen_at >= 0 && config.warmup > 0 && completed - planner_frozen_at < config.warmup)
                     lr *= (double)(completed - planner_frozen_at + 1) / (double)config.warmup;
                 if (config.lr_scale != 1.0f) lr *= (double) config.lr_scale;
-                // Refinement pacing guards a LIVE planner; a frozen one has
-                // nothing to overshoot, so the decoder-only pass after a
-                // refinement runs at the plain rate (the record's rung
-                // multiplier, halved down to 0.05 by skipped rungs, would
-                // otherwise pace it too).
-                if (unfrozen_at >= 0 && planner_frozen_at < 0) {
+                if (unfrozen_at >= 0) {
                     // Refinement pacing: warm up from the unfreeze, then the
                     // adaptive multiplier (halved whenever a rung was jumped).
                     const int since = completed - unfrozen_at;
