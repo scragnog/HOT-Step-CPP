@@ -735,7 +735,7 @@ router.post('/yue2-batch/finish', (req: Request, res: Response) => {
   const raw = Array.isArray(req.body?.entries) ? req.body.entries as unknown[] : [];
   const entries = raw.filter((e): e is { datasetId: string; refineRun: string } => !!e && typeof e === 'object'
     && typeof (e as Record<string, unknown>).datasetId === 'string' && typeof (e as Record<string, unknown>).refineRun === 'string');
-  const result = finishScoredLadders(entries);
+  const result = finishScoredLadders(entries, { knee: req.body?.knee !== false });
   if ('error' in result) { res.status(400).json({ error: result.error }); return; }
   res.status(202).json({ batch: result });
 });

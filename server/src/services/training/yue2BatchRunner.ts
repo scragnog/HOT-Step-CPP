@@ -56,6 +56,9 @@ export interface Yue2BatchItem {
    *  training from its best rung, then link + cleanup), and the rung picked. */
   refineRun?: string;
   pickStep?: number;
+  /** false: NAR further training ignores the plateau stop (budget or recon
+   *  target only). */
+  narKnee?: boolean;
 }
 
 export interface Yue2BatchSummary {
@@ -197,12 +200,12 @@ export function appendToBatch(id: string, datasetIds: string[]): Yue2BatchSummar
  *  NAR further training from the best-scored rung, then link the result to
  *  the album preset and clean up with the default choices. Queued on the end
  *  of the running batch when there is one, else run as a batch of its own. */
-export function finishScoredLadders(entries: Array<{ datasetId: string; refineRun: string }>): Yue2BatchSummary | { error: string } {
+export function finishScoredLadders(entries: Array<{ datasetId: string; refineRun: string }>, opts: { knee?: boolean } = {}): Yue2BatchSummary | { error: string } {
   const items: Yue2BatchItem[] = [];
   for (const e of entries) {
     const ds = repo.getDataset(e.datasetId);
     if (!ds) return { error: `Dataset not found: ${e.datasetId}` };
-    items.push({ datasetId: ds.id, name: ds.name || ds.slug, refineRun: e.refineRun, status: 'pending', currentStage: null, error: null,
+    items.push({ datasetId: ds.id, name: ds.name || ds.slug, refineRun: e.refineRun, narKnee: opts.knee !== false, status: 'pending', currentStage: null, error: null,
       stages: (['nar', 'finish'] as const).map(stage => ({ stage, jobId: '', status: 'pending' as const, error: null, startedAt: null, finishedAt: null })) });
   }
   if (!items.length) return { error: 'Nothing to finish' };
@@ -221,11 +224,11 @@ export function finishScoredLadders(entries: Array<{ datasetId: string; refineRu
 }
 
 /** The Refine tab's "Further training for NAR" request, at its defaults. */
-function narFurtherRequest(runId: string, step: number): Record<string, unknown> {
+function narFurtherRequest(runId: string, step: number, knee = true): Record<string, unknown> {
   const budget = 500;
   return { trainingMethod: 'aitk', refine: true, resumeRunId: runId, resumeStep: step,
     steps: step + budget, saveEvery: 10, stopMode: 'kl', narExtraSteps: step + budget, freezePlannerNow: true,
-    reconStop: 0.005, reconStopWindow: 5, reconKeepDelta: 0.003, reconTarget: 0.25, stopEngine: false,
+    reconStop: knee ? 0.005 : 0, reconStopWindow: 10, reconKeepDelta: 0.003, reconTarget: 0.25, stopEngine: false,
     lyricTiming: true, alignmentEnabled: true, autoPrepare: false, checkpoint: '', output: '',
     preview: { enabled: false, everySteps: 0, seconds: 90, seed: 424242, previewMaxFrames: 2250, baseline: false, control: false } };
 }
@@ -411,7 +414,7 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
     // A decoder-only follow-up gets no second one, as on the Refine tab.
     const run = listYue2AitkRuns(item.datasetId, ds?.slug).find(r => r.jobId === item.refineRun);
     if ((run?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true) return null;
-    return narFurtherRequest(item.refineRun!, best.step);
+    return narFurtherRequest(item.refineRun!, best.step, item.narKnee !== false);
   }
   if (stage === 'finish') { finishLadder(item); return null; }
   if (stage === 'captions') {

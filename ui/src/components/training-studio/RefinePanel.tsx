@@ -70,6 +70,9 @@ export const RefinePanel: React.FC = () => {
   const [narTarget, setNarTarget] = useState<number | ''>(0.25);
   const [narBudget, setNarBudget] = useState(500);
   const [narKeepDelta, setNarKeepDelta] = useState(0.003);
+  // The plateau stop: a line fitted through the last 10 checkpoints gaining
+  // under 0.5%. Off: budget or recon target only.
+  const [narKnee, setNarKnee] = useState(true);
   // Persisted in the store (not local state) so the running decoder follow-up
   // keeps being tracked, and the running ladder keeps being shown, across a
   // navigation away from this tab and back.
@@ -225,7 +228,7 @@ export const RefinePanel: React.FC = () => {
       // Decoder on from this rung, planner frozen; the result becomes the adapter.
       const result = await startYue2JointTrain(datasetId, { trainingMethod: 'aitk', refine: true, resumeRunId: ladderRun, resumeStep: step,
         steps: step + narBudget, saveEvery: 10, stopMode: 'kl', narExtraSteps: step + narBudget, freezePlannerNow: true,
-        reconStop: 0.005, reconStopWindow: 5, reconKeepDelta: narKeepDelta, ...(narTarget !== '' ? { reconTarget: narTarget } : {}), stopEngine: false,
+        reconStop: narKnee ? 0.005 : 0, reconStopWindow: 10, reconKeepDelta: narKeepDelta, ...(narTarget !== '' ? { reconTarget: narTarget } : {}), stopEngine: false,
         lyricTiming: true, alignmentEnabled: true, autoPrepare: false, checkpoint: '', output: '',
         preview: { enabled: false, everySteps: 0, seconds: 90, seed: 424242, previewMaxFrames: 2250, baseline: false, control: false } } as unknown as Yue2JointTrainRequest);
       setNarJob({ jobId: result.jobId, step });
@@ -409,6 +412,10 @@ export const RefinePanel: React.FC = () => {
                 <ParamLabel label={t('trainingStudio.refine.narKeepDelta', 'Keep a checkpoint per recon drop')} meta={t('trainingStudio.refine.narKeepDeltaMeta', 'default 0.003')} info={t('trainingStudio.refine.narKeepDeltaInfo', 'During further decoder training a checkpoint is kept only when the reconstruction meter has dropped by at least this since the last kept one; the rest are deleted so the ladder shows real progress, not every 10 steps. The newest checkpoint is always kept.')} />
                 <input className={input} type="number" min={0} step={0.001} value={narKeepDelta} disabled={active || busy || !narFurther} onChange={e => setNarKeepDelta(Math.max(0, Number(e.target.value) || 0))} />
               </label>
+              <div className={`flex items-center gap-2 self-center ${active || busy || !narFurther ? 'opacity-50 pointer-events-none' : ''}`}>
+                <Toggle id="refine-nar-knee" checked={narKnee} onChange={setNarKnee} />
+                <ParamLabel underline={false} className="text-xs normal-case tracking-normal font-normal text-zinc-700 dark:text-zinc-300" label={t('trainingStudio.refine.narKneeToggle', 'Stop at the plateau')} info={t('trainingStudio.refine.narKneeToggleInfo', 'Stop once a line fitted through the last 10 checkpoints (100 steps) gains under 0.5%: a real plateau, not one noisy reading. Off: train to the step budget or the recon target.')} />
+              </div>
             </div>
           </div>
 

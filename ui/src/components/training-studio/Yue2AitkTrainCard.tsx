@@ -167,7 +167,7 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // Decoder stop (2026-09-24, Rob's ear check on Steel Panther 300/425/500:
   // subtle, diminishing returns): stop once the reconstruction meter gains
   // under 0.5% over three checkpoints. The preset's step cap still applies.
-  reconStop: 0.005, reconStopWindow: 3,
+  reconStop: 0.005, reconStopWindow: 10,
   // After the main run: the server starts a planner refinement (Refine tab
   // defaults) and the card moves to the Refine tab. Rob's call, 2026-09-24.
   autoRefine: true,
@@ -329,6 +329,8 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
   const recon = `${FORM_KEY}${datasetId}:defaults-recon-stop`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(recon)) {
     if (stored.reconStop === undefined) { stored.reconStop = DEFAULT_FORM.reconStop; stored.reconStopWindow = DEFAULT_FORM.reconStopWindow; }
+    // The old two-point knee shipped with 3; the fitted knee needs 10 points.
+    if (stored.reconStopWindow === 3) stored.reconStopWindow = DEFAULT_FORM.reconStopWindow;
     window.localStorage.setItem(recon, '1');
   }
   const spike = `${FORM_KEY}${datasetId}:defaults-spike-guard`;
@@ -844,7 +846,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       const result = await startYue2JointTrain(datasetId, { ...form, trainingMethod: 'aitk', refine: true,
         resumeRunId: run.jobId, resumeStep: last.step, steps: last.step + refineBudget, saveEvery: 10,
         stopMode: 'kl', narExtraSteps: last.step + refineBudget, freezePlannerNow: true,
-        reconStop: form.reconStop ?? DEFAULT_FORM.reconStop, reconStopWindow: 5,
+        reconStop: form.reconStop ?? DEFAULT_FORM.reconStop, reconStopWindow: 10,
         lyricTiming, alignmentEnabled: lyricTiming, autoPrepare: false, checkpoint: '', output: '' } as Yue2JointTrainRequest);
       if (typeof window !== 'undefined') window.localStorage.setItem(`${JOB_KEY}${datasetId}`, JSON.stringify(result.jobId));
       setJob(await getJob(result.jobId));
@@ -1198,7 +1200,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             ['spikeStop', t('trainingStudio.yue2.method.spikeStop', 'Stop after spikes'), 'this card ships 3 · end the run when this many updates are skipped close together (next field). 0 never stops'],
             ['spikeStopWindow', t('trainingStudio.yue2.method.spikeStopWindow', 'Spike window (steps)'), 'this card ships 20 · how close together the skips must be to stop the run'],
             ['reconStop', t('trainingStudio.yue2.method.reconStop', 'Decoder stop (min gain)'), 'this card ships 0.005 · once the planner is frozen, stop when the decoder reconstruction meter improves by less than this fraction over the window below. 0 trains to the step cap'],
-            ['reconStopWindow', t('trainingStudio.yue2.method.reconStopWindow', 'Decoder stop window (checkpoints)'), 'this card ships 3 · how many checkpoints the gain is measured over'],
+            ['reconStopWindow', t('trainingStudio.yue2.method.reconStopWindow', 'Decoder stop window (checkpoints)'), 'this card ships 10 · how many checkpoints the fitted trend is read over'],
             ['narCropFrames', t('trainingStudio.yue2.method.narCropFrames', 'Decoder crop (frames)'), 'default 1500 (60 s, the reference recipe) · the decoder trains on a random window this long. 0 = the whole song, shortened only where the prompt would not fit the context. Longer windows cost VRAM and time'],
           ] as const).map(([key, label, hint]) => (
             <label key={key} className="flex flex-col gap-1">

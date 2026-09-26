@@ -2970,8 +2970,8 @@ export async function setYue2ReviewComplete(id: string, run: string, complete: b
   return request(`/datasets/${encodeURIComponent(id)}/yue2-review-complete`, { method: 'POST', ...jsonBody({ run, complete }) });
 }
 /** NAR further training from each ladder's best-scored rung, then link + cleanup. */
-export async function finishYue2Ladders(entries: Array<{ datasetId: string; refineRun: string }>): Promise<Yue2BatchSummary> {
-  const data = await request<{ batch: Yue2BatchSummary }>('/yue2-batch/finish', { method: 'POST', ...jsonBody({ entries }) });
+export async function finishYue2Ladders(entries: Array<{ datasetId: string; refineRun: string }>, knee = true): Promise<Yue2BatchSummary> {
+  const data = await request<{ batch: Yue2BatchSummary }>('/yue2-batch/finish', { method: 'POST', ...jsonBody({ entries, knee }) });
   return data.batch;
 }
 export async function pauseYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}/pause`, { method: 'POST' }); }

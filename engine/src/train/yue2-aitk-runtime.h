@@ -121,9 +121,10 @@ struct Config {
     std::int32_t spike_stop = 0;
     std::int32_t spike_stop_window = 20;
     // Decoder stop (needs --nar-drift, planner frozen): at a checkpoint, if
-    // the reconstruction meter improved by less than recon_stop (a fraction,
-    // 0.005 = half a percent) over the last recon_stop_window checkpoints,
-    // the decoder is done: stop there. 0 = off. Ear-checked 2026-09-24
+    // a line fitted through the last recon_stop_window reconstruction
+    // readings (at least 3) gains less than recon_stop (a fraction, 0.005 =
+    // half a percent) across that window, the decoder is done: stop there.
+    // It cannot fire before the window has filled. 0 = off. Ear-checked 2026-09-24
     // (Steel Panther 300/425/500: subtle, diminishing returns past the knee).
     float recon_stop = 0.0f;
     std::int32_t recon_stop_window = 3;
@@ -237,7 +238,7 @@ inline void usage(FILE * out) {
         "[--nar-extra-steps N (with --target-kl: freeze the planner at its KL, train the decoder N more steps)] "
         "[--nar-drift (log the decoder's drift from base and its reconstruction error at every checkpoint)] "
         "[--meter-only (with --resume: write the checkpoint's meters.json and exit)] "
-        "[--recon-stop F (planner frozen: stop when the reconstruction meter improves under F over --recon-stop-window 3 checkpoints)] [--recon-reset (with --resume: empty window)] "
+        "[--recon-stop F (planner frozen: stop when a line fitted through the last --recon-stop-window 3 reconstruction readings gains under F)] [--recon-reset (with --resume: empty window)] "
         "[--unfreeze-planner (with --resume: train the planner on past its freeze)] [--kl-checkpoint-every 0.1 (a checkpoint at each KL rung)] "
         "[--freeze-planner-now (with --resume and --nar-extra-steps: freeze the planner at the resumed step)] "
         "[--spike-factor F (skip updates above F x median gradient norm; 0 = off)] [--spike-stop N (stop after N skips)] [--spike-stop-window 20] "

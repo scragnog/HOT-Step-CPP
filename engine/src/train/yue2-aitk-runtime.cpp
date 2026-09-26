@@ -1042,12 +1042,19 @@ static int run_impl(Config config, std::string * error) {
                     return 0;
                 }
             }
+            // The gain is read off a least-squares line through the last
+            // recon_stop_window readings, not two end points: the meter
+            // jitters by 0.2-0.5% a checkpoint, as much as the threshold, and
+            // the two-point test stopped runs still improving 0.5-0.9% per 50
+            // steps (four NAR follow-ups, 2026-09-26). A flat line still stops.
+            const size_t recon_w = (size_t) std::max(3, (int) config.recon_stop_window);
             if (config.recon_stop > 0.0f && planner_frozen_at >= 0 && completed % config.save_every == 0 && completed < end_step()
-                && recon_history.size() > (size_t) config.recon_stop_window && !in_tail()) {
-                const double before = recon_history[recon_history.size() - 1 - (size_t) config.recon_stop_window], now = recon_history.back();
-                const double improvement = before > 0.0 ? (before - now) / before : 0.0;
+                && recon_history.size() >= recon_w && !in_tail()) {
+                const std::vector<double> tail(recon_history.end() - (std::ptrdiff_t) recon_w, recon_history.end());
+                double mean = 0.0; for (double v : tail) mean += v; mean /= (double) recon_w;
+                const double improvement = mean > 0.0 ? -trend_slope(tail) * (double) (recon_w - 1) / mean : 0.0;
                 if (improvement < (double) config.recon_stop) {
-                    std::fprintf(stderr, "[yue2-aitk] reconstruction %.4f -> %.4f over %d checkpoints (%.2f%%): decoder done, stopping at step %d\n", before, now, config.recon_stop_window, 100.0 * improvement, completed);
+                    std::fprintf(stderr, "[yue2-aitk] reconstruction trend %.2f%% over the last %d checkpoints (now %.4f): decoder done, stopping at step %d\n", 100.0 * improvement, (int) recon_w, recon_history.back(), completed);
                     if (wsd) start_tail("decoder done");
                     else {
                         event("recon_stop", completed);

@@ -35,10 +35,11 @@ export const ReviewPanel: React.FC = () => {
   const [finishOpen, setFinishOpen] = useState(false);
   const [skip, setSkip] = useState<Record<string, boolean>>({});
   const [finishing, setFinishing] = useState(false);
+  const [knee, setKnee] = useState(true);
   const finish = async () => {
     setFinishing(true); setError('');
     try {
-      await finishYue2Ladders(finishable.filter(r => !skip[r.refineRun]).map(r => ({ datasetId: r.datasetId, refineRun: r.refineRun })));
+      await finishYue2Ladders(finishable.filter(r => !skip[r.refineRun]).map(r => ({ datasetId: r.datasetId, refineRun: r.refineRun })), knee);
       setFinishOpen(false); setSkip({});
       await loadBatches();
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
@@ -81,7 +82,11 @@ export const ReviewPanel: React.FC = () => {
             <span className="font-semibold min-w-[180px]">{r.datasetName}</span>
             <span className="text-zinc-500">{t('trainingStudio.review.finishPick', 'step {{step}}, overall {{score}}', { step: r.best!.step, score: r.best!.overall.toFixed(2) })}{r.decoderOnly ? ` · ${t('trainingStudio.review.finishNoNar', 'decoder run already, no NAR step')}` : ''}</span>
           </label>)}
-          <div className="flex justify-end">
+          <div className="flex items-center justify-end gap-3">
+            <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300" title={t('trainingStudio.review.finishKneeInfo', 'Stop NAR further training once a line fitted through its last 10 checkpoints gains under 0.5%. Off: train to the 500-step budget or the recon target.') as string}>
+              <input type="checkbox" className="accent-emerald-500" checked={knee} onChange={e => setKnee(e.target.checked)} />
+              {t('trainingStudio.review.finishKnee', 'Stop NAR at the plateau')}
+            </label>
             <button type="button" disabled={finishing || finishable.every(r => skip[r.refineRun])} onClick={() => void finish()}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40">
               {finishing ? t('trainingStudio.review.finishStarting', 'Starting…') : t('trainingStudio.review.finishGo', 'Start')}
