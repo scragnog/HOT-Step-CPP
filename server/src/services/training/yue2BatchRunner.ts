@@ -23,8 +23,9 @@ import { trainingBaseDir } from './paths.js';
 import { listYue2AitkRuns } from './yue2AitkRuns.js';
 import { autoRefineRequest } from './yue2JointTrainRunner.js';
 import { listPreparedCaches } from './preparedDataReset.js';
+import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
 
-export type Yue2BatchStage = 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine';
+export type Yue2BatchStage = 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine';
 export type Yue2BatchStatus = 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
 export type Yue2BatchItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -155,7 +156,7 @@ export function startBatch(input: { datasetIds: string[]; lyricTiming: boolean; 
     const ds = repo.getDataset(id);
     if (!ds) return { error: `Dataset not found: ${id}` };
     items.push({ datasetId: ds.id, name: ds.name || ds.slug, status: 'pending', currentStage: null, error: null,
-      stages: stagesFor(input.lyricTiming, input.recipe.autoRefine !== false).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
+      stages: stagesFor(input.lyricTiming, input.recipe.autoRefine !== false, !!input.recipe.autoCaption).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
   }
   if (!items.length) return { error: 'Select at least one dataset' };
   const recipe: Record<string, unknown> = {};
@@ -179,7 +180,7 @@ export function appendToBatch(id: string, datasetIds: string[]): Yue2BatchSummar
     const ds = repo.getDataset(dsId);
     if (!ds) return { error: `Dataset not found: ${dsId}` };
     state.items.push({ datasetId: ds.id, name: ds.name || ds.slug, status: 'pending', currentStage: null, error: null,
-      stages: stagesFor(state.lyricTiming, state.recipe.autoRefine !== false).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
+      stages: stagesFor(state.lyricTiming, state.recipe.autoRefine !== false, !!state.recipe.autoCaption).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
   }
   persist(state);
   return toSummary(state);
@@ -229,15 +230,18 @@ export function cancelBatch(id: string): boolean {
 
 // ── The loop ─────────────────────────────────────────────────────────────
 
-function stagesFor(lyricTiming: boolean, refine = true): Yue2BatchStage[] {
+function stagesFor(lyricTiming: boolean, refine = true, captions = false): Yue2BatchStage[] {
   // The batch owns the chain: train, then the planner refinement with its
   // rung previews, then the next dataset. The run-level auto-refine hook is
   // switched off for batch runs so nothing fires twice.
   const base: Yue2BatchStage[] = lyricTiming ? ['cache', 'codes', 'sheet', 'stems', 'align', 'train'] : ['cache', 'codes', 'sheet', 'train'];
-  return refine ? [...base, 'refine'] : base;
+  // recipe.autoCaption: tracks with no .yue2.txt are re-captioned from the
+  // audio first, so nothing trains on the long ACE caption.
+  return [...(captions ? ['captions' as const] : []), ...base, ...(refine ? ['refine' as const] : [])];
 }
 
 const STAGE_PATH: Record<Yue2BatchStage, string> = {
+  captions: 'yue2-captions-missing',
   cache: 'yue2-preprocess', codes: 'yue2-tokenize', sheet: 'yue2-sheet', stems: 'yue2-stems', align: 'yue2-align', train: 'yue2-joint-train',
   refine: 'yue2-joint-train',
 };
@@ -329,6 +333,15 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
     const resumed = resumeTrainingBody(state, item, result.resumeJobId);
     if (resumed !== undefined) return resumed;
   }
+  if (stage === 'captions') {
+    const c = state.recipe.autoCaption as { provider?: string; model?: string } | undefined;
+    return c ? { provider: c.provider, ...(c.model ? { model: c.model } : {}) } : null;
+  }
+  if (stage === 'cache' && state.recipe.autoCaption) {
+    const ds = repo.getDataset(item.datasetId);
+    const left = ds ? (await samplesMissingYue2Caption(ds)).length : 0;
+    if (left) throw new Error(`${left} track(s) still have no YuE2 caption (.yue2.txt) after the captions stage; see its job log. Training would fall back to the long ACE captions.`);
+  }
   const st = await readStatus(item.datasetId);
   switch (stage) {
     case 'cache': return st.stages.preprocess.done && st.stages.preprocess.captionModeOk !== false && !st.stages.preprocess.captionsStale ? null : { captionMode: 'yue2' };
@@ -344,7 +357,7 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
       }
       return st.stages.align.done ? null : {};
     }
-    case 'train': return { ...state.recipe, trainingMethod: 'aitk', autoPrepare: true, checkpoint: '', dataset: '', output: '',
+    case 'train': return { ...state.recipe, autoCaption: undefined, trainingMethod: 'aitk', autoPrepare: true, checkpoint: '', dataset: '', output: '',
       lyricTiming: state.lyricTiming, alignmentEnabled: state.lyricTiming, autoRefine: false,
       ...(state.lyricTiming ? {} : { cursorWeight: 0 }) };
     case 'refine': {

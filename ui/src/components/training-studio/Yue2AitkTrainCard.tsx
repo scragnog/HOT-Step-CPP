@@ -8,6 +8,7 @@ import { TrainingChart } from './TrainingChart';
 import { Toggle } from '../settings/SettingsPrimitives';
 import {
   cancelJob,
+  captionMissingYue2,
   clearPreparedData,
   getPreparedData,
   getJob,
@@ -369,6 +370,35 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const { t } = useTranslation();
   const [form, setForm] = useState<Yue2JointTrainRequest>(() => readStoredForm(datasetId));
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
+  // Tracks with no .yue2.txt are re-captioned from the audio before training
+  // (on by default): otherwise they train on the long ACE caption. Gemini's
+  // model list is the live one the Label panel uses.
+  const caps = useTrainingStore(s => s.capabilities);
+  const mossOk = !!caps?.moss.available;
+  const gemini = caps?.llm.providers.find(p => p.id === 'gemini' && p.available);
+  const captionDefault: 'gemini' | 'moss' | null = gemini ? 'gemini' : mossOk ? 'moss' : null;
+  const savedCaption = form.autoCaption || undefined;
+  const captionProvider = savedCaption && ((savedCaption.provider === 'gemini' && gemini) || (savedCaption.provider === 'moss' && mossOk))
+    ? savedCaption.provider : captionDefault;
+  const autoCaption = form.autoCaption === false || !captionProvider ? null
+    : { provider: captionProvider, ...(captionProvider === 'gemini' && savedCaption?.model ? { model: savedCaption.model } : {}) };
+  const [captioning, setCaptioning] = useState<TrainingJobSummary | null>(null);
+  const captionMissing = async () => {
+    if (!autoCaption) return;
+    const started = await captionMissingYue2(datasetId, autoCaption);
+    if (!started.jobId) return;
+    let j = await getJob(started.jobId);
+    setCaptioning(j);
+    while (j.status === 'queued' || j.status === 'running') {
+      await new Promise(r => setTimeout(r, 1500));
+      j = await getJob(started.jobId);
+      setCaptioning(j);
+    }
+    setCaptioning(null);
+    if (j.status !== 'done') throw new Error(`Captioning failed: ${j.error || j.status}`);
+    const left = (await captionMissingYue2(datasetId, { checkOnly: true })).missing ?? 0;
+    if (left) throw new Error(`${left} track(s) still have no YuE2 caption after captioning; see the Label log on the Dataset page. Not training on the ACE captions.`);
+  };
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
   const [presets, setPresets] = useState<Yue2JointPreset[]>(() => readStored<Yue2JointPreset[]>(YUE2_JOINT_PRESETS_KEY, []));
@@ -409,7 +439,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     try {
       const timingWeight = lyricTiming
         ? (typeof form.cursorWeight === 'number' && Number.isFinite(form.cursorWeight) ? form.cursorWeight : 0.08) : 0;
-      const recipe = { ...form, cursorWeight: timingWeight, dataset: '', output: '', resume: '',
+      const recipe = { ...form, autoCaption: autoCaption ?? (false as const), cursorWeight: timingWeight, dataset: '', output: '', resume: '',
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
           everySteps: form.saveEvery, previewMaxFrames: Math.max(8, Math.min(120, form.preview.seconds || 90)) * 25 } } : {}) };
       await startBatch({ datasetIds: batchDraft, lyricTiming, clearCache: batchClearCache, recipe });
@@ -762,7 +792,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         : 0;
       const [resumeRunId, resumeStepText] = resumeChoice.split('|');
       const selectedResume = resumeRunId && resumeStepText ? { resumeRunId, resumeStep: Number(resumeStepText) } : {};
-      const request = { ...form, lyricTiming, alignmentEnabled: lyricTiming, cursorWeight: timingWeight,
+      if (!resumeChoice && !form.resume?.trim()) await captionMissing();
+      const request = { ...form, autoCaption: undefined, lyricTiming, alignmentEnabled: lyricTiming, cursorWeight: timingWeight,
         autoPrepare: !resumeChoice && !form.resume?.trim(), preparation: prepare,
         checkpoint: '', output: '',
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
@@ -938,6 +969,31 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             : t('trainingStudio.yue2.method.lyricTimingOff', 'Skips stems, alignment, and the optional cursor objective.')}</span>
         </span>
       </label>
+      <label className="mt-3 flex items-start gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none">
+        <input type="checkbox" className="mt-0.5 accent-amber-500" checked={!!autoCaption} disabled={!captionDefault || !!resumeChoice || active || preparing || starting || yue2RunAllActive}
+          onChange={event => setForm(previous => ({ ...previous, autoCaption: event.target.checked ? { provider: captionProvider ?? 'gemini' } : false }))} />
+        <span>
+          <span className="font-semibold">{t('trainingStudio.yue2.method.autoCaption', 'Caption tracks that have no YuE2 caption')}</span>
+          <span className="block text-[11px] text-zinc-500">{captionDefault
+            ? t('trainingStudio.yue2.method.autoCaptionHint', 'Before training, tracks without a .yue2.txt are re-captioned from the audio (ACE, MM3 and YuE2 captions; lyrics and BPM are left alone). Skipped when every track has one.')
+            : t('trainingStudio.yue2.method.autoCaptionNone', 'No captioner available: add a Gemini key in Settings → AI Services or install MOSS. Tracks without a .yue2.txt train on the long ACE caption.')}</span>
+        </span>
+      </label>
+      {autoCaption && <div className="ml-6 mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+        <select className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-1.5 py-0.5" value={autoCaption.provider}
+          disabled={active || preparing || starting || yue2RunAllActive}
+          onChange={event => setForm(previous => ({ ...previous, autoCaption: { provider: event.target.value as 'gemini' | 'moss' } }))}>
+          {gemini && <option value="gemini">Gemini (cloud, hears the audio)</option>}
+          {mossOk && <option value="moss">MOSS (local, hears the audio)</option>}
+        </select>
+        {autoCaption.provider === 'gemini' && gemini && gemini.models.length > 0 && <select className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-1.5 py-0.5"
+          value={autoCaption.model || gemini.defaultModel} disabled={active || preparing || starting || yue2RunAllActive}
+          onChange={event => setForm(previous => ({ ...previous, autoCaption: { provider: 'gemini', model: event.target.value } }))}>
+          {gemini.models.map(m => <option key={m} value={m}>{m}</option>)}
+        </select>}
+      </div>}
+      {captioning && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" />
+        {t('trainingStudio.yue2.method.captioning', 'Captioning tracks without a YuE2 caption: {{done}} / {{total}}', { done: captioning.done, total: captioning.total })}</p>}
       {lyricTiming && !cursorReady && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.lyricTimingNeedsAlignment', 'Run vocal stems and lyric alignment below before starting with timing supervision enabled.')}</p>}
       <label className="mt-4 flex flex-col gap-1">
         <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Resume a previous run</span>

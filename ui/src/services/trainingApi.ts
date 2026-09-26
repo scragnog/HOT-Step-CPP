@@ -632,6 +632,9 @@ export interface Yue2TrainRequest extends Partial<Yue2OptimOptions> {
 
 export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   trainingMethod: 'aitk';
+  /** Re-caption tracks with no .yue2.txt from the audio before training
+   *  (ACE + MM3 + YuE2 sidecars). false = off; absent = on, default provider. */
+  autoCaption?: false | { provider: 'gemini' | 'moss'; model?: string };
   autoPrepare?: boolean;
   preparation?: Partial<Yue2AitkPrepareRequest>;
   checkpoint: string;
@@ -2446,6 +2449,14 @@ export async function startYue2JointTrain(
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-train`, { method: 'POST', ...jsonBody(opts) });
 }
 
+/** Re-caption (from the audio) only the tracks with no .yue2.txt. jobId is
+ *  null, with `skipped`, when every track already has one. */
+export async function captionMissingYue2(
+  id: string, opts: { provider?: 'gemini' | 'moss'; model?: string; checkOnly?: boolean },
+): Promise<{ jobId?: string | null; skipped?: string; missing?: number }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-captions-missing`, { method: 'POST', ...jsonBody(opts) });
+}
+
 /** Native AITK joint runs and their split AR/NAR checkpoint files. */
 export async function listYue2AitkRuns(
   id: string,
@@ -2931,7 +2942,7 @@ export async function resumePipeline(id: string): Promise<void> {
 }
 
 // ── YuE2 batch (server-owned, resumable) ───────────────────────────────
-export type Yue2BatchStage = 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine';
+export type Yue2BatchStage = 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine';
 export type Yue2BatchItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 export interface Yue2BatchStageResult { stage: Yue2BatchStage; jobId: string; status: Yue2BatchItemStatus; error: string | null; startedAt: number | null; finishedAt: number | null }
 export interface Yue2BatchItem { datasetId: string; name: string; status: Yue2BatchItemStatus; currentStage: Yue2BatchStage | null; stages: Yue2BatchStageResult[]; error: string | null }

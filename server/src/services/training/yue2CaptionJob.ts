@@ -21,9 +21,16 @@ import {
   YUE2_CAPTION_SYSTEM_PROMPT, normalizeYue2Caption, validateYue2Caption,
 } from '../lireek/prompts.js';
 import type { TrainingSample, TrainingDatasetRow } from './types.js';
+import { buildSamples } from './datasetScan.js';
 
 export function yue2SidecarPath(audioPath: string): string {
   return `${audioPath.replace(/\.[^.\\/]+$/, '')}.yue2.txt`;
+}
+
+/** Included tracks with no `.yue2.txt` beside the audio: the ones a YuE2 run
+ *  would otherwise train on the long ACE caption. */
+export async function samplesMissingYue2Caption(ds: TrainingDatasetRow): Promise<TrainingSample[]> {
+  return (await buildSamples(ds)).filter(s => !s.excluded && !s.fileMissing && !fs.existsSync(yue2SidecarPath(s.audioPath)));
 }
 
 const LANGUAGE_NAMES: Record<string, string> = {

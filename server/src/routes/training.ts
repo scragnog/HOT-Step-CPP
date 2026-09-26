@@ -89,6 +89,7 @@ import {
 } from '../services/training/datasetScan.js';
 import { AUDIO_EXTENSIONS, isInside, sampleIdFor, trainingBaseDir } from '../services/training/paths.js';
 import { resolveMossPaths } from '../services/training/mossCaption.js';
+import { samplesMissingYue2Caption } from '../services/training/yue2CaptionJob.js';
 import { deleteLabel, deleteLabels, patchLabel, readLabel } from '../services/training/labelStore.js';
 import { listDatasetsWithAssets } from '../services/training/datasetAssets.js';
 import { createDatasetFromFolder, DatasetCreateError } from '../services/training/datasetCreate.js';
@@ -1587,6 +1588,38 @@ router.post('/datasets/:id/enhance/yue2-caption', async (req: Request, res: Resp
   } catch (err: any) {
     console.error(`[Training] YuE2 caption start failed: ${err.message}`);
     res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /datasets/:id/yue2-captions-missing — run before YuE2 training. A
+ *  full audio re-caption (ACE caption + MM3 + YuE2 sidecars; lyrics and BPM
+ *  left alone) of ONLY the tracks with no `.yue2.txt`, through the ordinary
+ *  label job. Body: { provider: 'gemini' | 'moss', model?, checkOnly? }.
+ *  { jobId: null, skipped } when every track already has one. */
+router.post('/datasets/:id/yue2-captions-missing', async (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const b = (req.body || {}) as { provider?: string; model?: string; checkOnly?: boolean };
+    const missing = await samplesMissingYue2Caption(ds);
+    if (b.checkOnly === true) { res.json({ missing: missing.length }); return; }
+    if (!missing.length) { res.json({ jobId: null, skipped: 'Every track already has a YuE2 caption' }); return; }
+    const provider = b.provider === 'moss' ? 'moss' : 'gemini';
+    if (provider === 'moss') {
+      // MOSS writes the ACE and MM3 captions; the one-sentence YuE2 caption is
+      // a text rewrite, which goes to the default chat provider.
+      let chatOk = false;
+      try { chatOk = config.lireek.defaultProvider !== 'moss' && getProvider(config.lireek.defaultProvider).isAvailable(); } catch { /* stays false */ }
+      if (!chatOk) { res.status(400).json({ error: 'MOSS cannot write the YuE2 caption itself: it needs a chat provider (Gemini) configured in Settings → AI Services.' }); return; }
+    }
+    const r = await fetch(`http://127.0.0.1:${config.server.port}/api/training/datasets/${encodeURIComponent(ds.id)}/label`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sampleIds: missing.map(s => s.sampleId), useEssentia: false, useGenius: false, useCaption: true,
+        mergePolicy: 'overwrite_caption', caption: { provider, ...(b.model ? { model: b.model } : {}), wantYue2: true } }),
+    });
+    res.status(r.status).json(await r.json());
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
   }
 });
 

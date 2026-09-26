@@ -15,7 +15,7 @@ import { useTrainingStore } from '../../stores/trainingStore';
 import { getJob, type TrainingJobSummary, type Yue2BatchItem, type Yue2BatchSummary } from '../../services/trainingApi';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
-const STAGE_LABEL: Record<string, string> = { cache: 'latent cache', codes: 'codes', sheet: 'lead sheets', stems: 'vocal stems', align: 'lyric timing', train: 'joint training', refine: 'refinement' };
+const STAGE_LABEL: Record<string, string> = { captions: 'captions', cache: 'latent cache', codes: 'codes', sheet: 'lead sheets', stems: 'vocal stems', align: 'lyric timing', train: 'joint training', refine: 'refinement' };
 
 const StatusIcon: React.FC<{ status: Yue2BatchItem['status'] }> = ({ status }) => {
   switch (status) {
