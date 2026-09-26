@@ -764,6 +764,7 @@ export interface Yue2AitkCheckpointRecord {
 
 export interface Yue2AitkRunRecord {
   live?: boolean;
+  reviewComplete?: boolean;
   resumeError?: string;
   version: 1;
   jobId: string;
@@ -2489,7 +2490,7 @@ export async function listYue2JointPreviews(
 }
 
 /** Awaiting review: refinement ladders across datasets with score counts. */
-export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; best: { step: number; overall: number } | null; decoderOnly: boolean }
+export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number } | null; decoderOnly: boolean }
 export async function listYue2Review(): Promise<{ rows: Yue2ReviewRow[] }> {
   return request('/yue2-review');
 }
@@ -2964,6 +2965,9 @@ export async function startYue2Batch(input: { datasetIds: string[]; lyricTiming:
 export async function listYue2Batches(): Promise<Yue2BatchSummary[]> {
   const data = await request<{ batches: Yue2BatchSummary[] }>('/yue2-batch');
   return data.batches;
+}
+export async function setYue2ReviewComplete(id: string, run: string, complete: boolean): Promise<{ reviewComplete: boolean }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-review-complete`, { method: 'POST', ...jsonBody({ run, complete }) });
 }
 /** NAR further training from each ladder's best-scored rung, then link + cleanup. */
 export async function finishYue2Ladders(entries: Array<{ datasetId: string; refineRun: string }>): Promise<Yue2BatchSummary> {

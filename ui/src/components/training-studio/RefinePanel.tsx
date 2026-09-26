@@ -19,7 +19,7 @@ import { PreviewPlayer } from './PreviewPlayer';
 import {
   cancelJob, getJob, linkYue2JointCheckpointPreset, listYue2AitkRuns, listYue2JointPreviews,
   renderYue2JointPreviews, startYue2JointTrain, listYue2RungScores, scoreYue2Rung, yue2RungScoresExportUrl, deleteYue2AitkRun,
-  getYue2CleanupPlan, runYue2Cleanup, type Yue2CleanupPlan, type Yue2CleanupChoice,
+  getYue2CleanupPlan, runYue2Cleanup, setYue2ReviewComplete, type Yue2CleanupPlan, type Yue2CleanupChoice,
   type TrainingJobSummary, type Yue2AitkRunRecord, type Yue2JointPreviewRecord, type Yue2JointTrainRequest, type Yue2RungScore,
 } from '../../services/trainingApi';
 
@@ -262,6 +262,16 @@ export const RefinePanel: React.FC = () => {
     finally { setCleaning(false); }
   };
 
+  // "Reviewing complete": the winner is found, the other rungs need no scores.
+  // The Review phase then lists the ladder as scored, ready for Finish scored.
+  const toggleReviewed = async () => {
+    if (!datasetId || !ladderRun) return;
+    try {
+      await setYue2ReviewComplete(datasetId, ladderRun, !runs.find(r => r.jobId === ladderRun)?.reviewComplete);
+      await refreshRuns();
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+  };
+
   if (!datasetId) return <p className="text-sm text-zinc-500">{t('trainingStudio.refine.noDataset', 'Pick a dataset first.')}</p>;
   // Once a run has stopped and none of its rungs is picked yet, say plainly
   // that the ladder isn't done until "Use this rung" is pressed.
@@ -453,6 +463,11 @@ export const RefinePanel: React.FC = () => {
               </div>
               <button type="button" onClick={() => void remove(ladderRun)} disabled={!ladderRun || !!runs.find(r => r.jobId === ladderRun)?.live} title={t('trainingStudio.refine.deleteRun', 'Delete run')}
                 className="p-2 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:text-red-500 hover:border-red-500/40 disabled:opacity-40"><Trash2 size={14} /></button>
+              {ladderRunRec && (bestStep !== undefined || ladderRunRec.reviewComplete) && <button type="button" onClick={() => void toggleReviewed()}
+                title={t('trainingStudio.refine.reviewCompleteInfo', 'You have found the winner and will not score the other rungs. The Review tab then counts this ladder as scored and offers it to Finish scored, which uses the best-scored rung.')}
+                className={`px-3 py-2 rounded-lg text-xs font-semibold border ${ladderRunRec.reviewComplete ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10' : 'border-zinc-300/70 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10'}`}>
+                {ladderRunRec.reviewComplete ? t('trainingStudio.refine.reviewCompleteOn', 'Review complete ✓') : t('trainingStudio.refine.reviewComplete', 'Reviewing complete')}
+              </button>}
             </div>
           </div>
         </div>

@@ -238,6 +238,20 @@ export function findYue2JointAdaptersFor(rows: Array<{ id: string; slug: string 
   return out;
 }
 
+/** "Reviewing complete": the listener has found the ladder's winner and will
+ *  not score the other rungs. A marker file in the run folder, so it moves
+ *  with the run when cleanup relocates it. */
+const REVIEW_MARKER = 'review-complete';
+export function yue2ReviewComplete(output: string): boolean {
+  return fs.existsSync(path.join(output, REVIEW_MARKER));
+}
+export function setYue2ReviewComplete(output: string, complete: boolean): void {
+  const marker = path.join(output, REVIEW_MARKER);
+  if (complete) fs.writeFileSync(marker, `${new Date().toISOString()}
+`, 'utf8');
+  else fs.rmSync(marker, { force: true });
+}
+
 export function listYue2AitkRuns(datasetId: string, datasetSlug?: string): Yue2AitkRunRecord[] {
   return readIndex().filter(r => r.datasetId === datasetId || (!!datasetSlug && r.datasetSlug === datasetSlug))
     .map(r => ({ ...r, checkpoints: checkpointRecords(r.output) }))

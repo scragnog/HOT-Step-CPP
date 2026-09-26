@@ -21,8 +21,10 @@ export const ReviewPanel: React.FC = () => {
     finally { setLoading(false); }
   };
   useEffect(() => { void load(); const id = window.setInterval(() => void load(), 30_000); return () => window.clearInterval(id); }, []);
-  const pending = rows.filter(r => r.unscored > 0 && r.previews > 0);
-  const rest = rows.filter(r => !(r.unscored > 0 && r.previews > 0));
+  // "Reviewing complete" on the Refine tab counts as scored.
+  const awaiting = (r: Yue2ReviewRow) => r.unscored > 0 && r.previews > 0 && !r.reviewed;
+  const pending = rows.filter(awaiting);
+  const rest = rows.filter(r => !awaiting(r));
   // Scored ladders can be finished in one go on the server: NAR further
   // training from the best-scored rung, then link + cleanup (yue2BatchRunner).
   const batches = useTrainingStore(s => s.yue2Batches);
@@ -50,8 +52,8 @@ export const ReviewPanel: React.FC = () => {
       <span className="text-[11px] text-zinc-600 dark:text-zinc-300 tabular-nums">{t('trainingStudio.review.rungs', '{{n}} rungs', { n: r.rungs })}{r.klMin !== null && r.klMax !== null ? ` · KL ${r.klMin.toFixed(2)}–${r.klMax.toFixed(2)}` : ''} · {t('trainingStudio.review.previews', '{{n}} previews', { n: r.previews })}</span>
       <span className="flex-1" />
       {r.live ? <span className="text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.review.stillRunning', 'still refining')}</span>
-        : r.unscored > 0 ? <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[11px] font-semibold">{t('trainingStudio.review.toScore', '{{n}} to score', { n: r.unscored })}</span>
-        : <span className="text-[11px] text-emerald-600 dark:text-emerald-400">{t('trainingStudio.review.scored', 'scored')}</span>}
+        : r.unscored > 0 && !r.reviewed ? <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[11px] font-semibold">{t('trainingStudio.review.toScore', '{{n}} to score', { n: r.unscored })}</span>
+        : <span className="text-[11px] text-emerald-600 dark:text-emerald-400">{r.reviewed && r.unscored > 0 ? t('trainingStudio.review.reviewed', 'reviewed') : t('trainingStudio.review.scored', 'scored')}</span>}
     </button>
   );
   return (

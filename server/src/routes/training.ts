@@ -142,7 +142,7 @@ import {
 } from '../services/training/yue2ArRuns.js';
 import { YUE2_LICENSE_NOTICE } from '../services/backends/yue2/index.js';
 import { yue2StyleString } from '../services/backends/yue2/style.js';
-import { jointRunForAdapter, listYue2AitkRuns, yue2JointOutputDirectory, deleteYue2AitkRun } from '../services/training/yue2AitkRuns.js';
+import { jointRunForAdapter, listYue2AitkRuns, yue2JointOutputDirectory, deleteYue2AitkRun, yue2ReviewComplete, setYue2ReviewComplete } from '../services/training/yue2AitkRuns.js';
 import { clearPreparedCaches, listPreparedCaches } from '../services/training/preparedDataReset.js';
 import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
 import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions, renderYue2JointPreview } from '../services/training/yue2JointPreview.js';
@@ -3940,7 +3940,7 @@ router.get('/datasets/:id/yue2-joint-runs', (req: Request, res: Response) => {
     const active = queue.activeJobForDataset(ds.id);
     const activeJoint = active?.kind === 'yue2-joint-train' ? active : undefined;
     res.json({
-      runs: runs.map(run => ({ ...run, live: activeJoint?.id === run.jobId,
+      runs: runs.map(run => ({ ...run, live: activeJoint?.id === run.jobId, reviewComplete: yue2ReviewComplete(run.output),
         resumeError: typeof run.options.dataset !== 'string' || !fs.existsSync(run.options.dataset)
           ? 'Prepared dataset was cleared or is missing'
           : !run.checkpoints.some(checkpoint => !!checkpoint.optimizerPath)
@@ -4018,12 +4018,26 @@ router.get('/yue2-review', (_req: Request, res: Response) => {
         try { best = bestScoredRung(ds.id, run.jobId, ds.slug); } catch { /* stays null */ }
         rows.push({ datasetId: ds.id, datasetSlug: ds.slug, datasetName: ds.name, refineRun: run.jobId, status: run.status, createdAt: run.createdAt,
           live: active?.id === run.jobId, rungs: rungs.length, previews: previews.length, scored: scored.size,
-          unscored: rungs.filter(r => !scored.has(r.step)).length, best: best ? { step: best.step, overall: best.overall } : null,
+          unscored: rungs.filter(r => !scored.has(r.step)).length, reviewed: yue2ReviewComplete(run.output), best: best ? { step: best.step, overall: best.overall } : null,
           decoderOnly: (run.options as Record<string, unknown>)?.freezePlannerNow === true, klMin: kls.length ? Math.min(...kls) : null, klMax: kls.length ? Math.max(...kls) : null });
       }
     }
     rows.sort((a, b) => (b.createdAt as number) - (a.createdAt as number));
     res.json({ rows });
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
+});
+
+/** POST /datasets/:id/yue2-review-complete — body { run, complete }. Marks a
+ *  ladder reviewed without scoring every rung; the Review phase then treats it
+ *  as scored and offers it to Finish scored. */
+router.post('/datasets/:id/yue2-review-complete', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === req.body?.run);
+    if (!run) { res.status(404).json({ error: 'Run not found for this dataset' }); return; }
+    setYue2ReviewComplete(run.output, req.body?.complete !== false);
+    res.json({ reviewComplete: yue2ReviewComplete(run.output) });
   } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
 
