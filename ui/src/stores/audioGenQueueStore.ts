@@ -510,6 +510,7 @@ export async function enqueueAudioGen(
   };
 
   _state.items.push(item);
+  _lastEnqueueAt = Date.now();
   _emit(true);
   _lastToken = token;
   _processQueue(token);
@@ -1130,6 +1131,10 @@ async function _waitForEngine(onTick?: (status: string) => void): Promise<boolea
  *  together". A wave is one album's songs: same preset adapters, same
  *  caption source, so the server's compatibility check passes. */
 const YUE2_QUEUE_WAVE = 4;
+/** How long after the last Generate click a not-yet-full YuE2 wave waits for
+ *  more songs before going up. */
+const YUE2_QUEUE_HOLD_MS = 5_000;
+let _lastEnqueueAt = 0;
 
 function _submitWave(next: AudioQueueItem, pending: AudioQueueItem[]): AudioQueueItem[] {
   if (useBackendStore.getState().activeBackendId !== YUE2_BACKEND_ID) return [next];
@@ -1231,7 +1236,25 @@ async function _processQueue(token: string): Promise<void> {
         // the same wave, so the server finds them waiting together and renders
         // them as one engine batch (backends/yue2/generate.ts coalescing).
         // Every other backend keeps the one-at-a-time flow.
-        const wave = _submitWave(next, pending);
+        // The first Generate of an album used to go up alone: this loop
+        // picked it before the next clicks landed, and the rest only joined
+        // after it finished. So a wave that is not full and whose newest
+        // item was queued moments ago waits out the rest of a short hold,
+        // then re-reads the queue; songs queued a while ago never wait.
+        let wave = _submitWave(next, pending);
+        if (useBackendStore.getState().activeBackendId === YUE2_BACKEND_ID && wave.length < YUE2_QUEUE_WAVE) {
+          // Each further click restarts the hold, so it ends a few seconds
+          // after the last one.
+          let waited = false;
+          for (let hold = YUE2_QUEUE_HOLD_MS - (Date.now() - _lastEnqueueAt); hold > 0; hold = YUE2_QUEUE_HOLD_MS - (Date.now() - _lastEnqueueAt)) {
+            await new Promise(r => setTimeout(r, hold));
+            waited = true;
+          }
+          if (waited) {
+            if (_heldIds.has(next.id) || next.status !== 'pending') continue;
+            wave = _submitWave(next, _state.items.filter(i => i.status === 'pending' && !_heldIds.has(i.id)));
+          }
+        }
         if (wave.length > 1) console.log(`[AudioQueue] Submitting ${wave.length} songs together for server-side batching`);
         const results = await Promise.all(wave.map(item => _runQueueItem(item, token)));
         const held = wave.filter((_, i) => results[i] !== 'done');

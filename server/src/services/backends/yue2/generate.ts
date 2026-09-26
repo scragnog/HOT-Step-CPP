@@ -77,10 +77,11 @@ const YUE2_MAX_DURATION_SEC = 360;
 
 const DETAIL_POLL_MS = 1_500;
 
-/** How long the YuE2 job holding the lane waits for siblings to be queued
- *  behind it before rendering (queue coalescing). Long enough to click
- *  Generate on the next few tracks in Lyric Studio. */
-const YUE2_COALESCE_WAIT_MS = 5_000;
+/** How long a YuE2 job with an empty queue behind it waits for siblings before
+ *  rendering alone (queue coalescing). The browser queue already holds an
+ *  album's songs for a few seconds after the last click and posts them in one
+ *  wave (audioGenQueueStore.ts), so this only covers the wave's own spread. */
+const YUE2_COALESCE_WAIT_MS = 750;
 
 export interface Yue2ParamMapping {
   req: Yue2SynthRequest;
@@ -686,11 +687,9 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
   if (job.params.yue2Coalesce !== false && deps.pendingJobs && songsSoFar < maxSongs && (job.status as string) !== 'cancelled') {
     const key = yue2CoalesceKey(job, lead.req);
     // Songs queued together arrive milliseconds apart, and with auto-replan
-    // off this job reaches here before its siblings have been posted. The
-    // first Generate in Lyric Studio used to start alone, with the songs
-    // queued right after it batched among themselves: hold for a few seconds
-    // so they all go in one engine call. Nothing against a render.
-    await new Promise(r => setTimeout(r, YUE2_COALESCE_WAIT_MS));
+    // off this job reaches here before its siblings have been posted. A short
+    // wait when nothing is queued yet costs nothing against a render.
+    if (deps.pendingJobs().length === 0) await new Promise(r => setTimeout(r, YUE2_COALESCE_WAIT_MS));
     for (const cand of deps.pendingJobs()) {
       if (songsSoFar >= maxSongs) break;
       if (cand.status !== 'pending' || cand.coalescedInto || cand.params?.yue2Coalesce === false) continue;
