@@ -434,14 +434,23 @@ static int cmd_process(const char * plugin_path, const char * input_path,
     // bounce point. Feed the track's opening seconds through the plugin and
     // discard the output so detectors are converged at sample 0. Negative
     // projectTimeSamples marks these blocks as pre-roll.
+    //
+    // The opening is fed time-reversed so the pre-roll ends on sample 0.
+    // Whatever a plugin still holds when the real pass starts (a lookahead
+    // limiter's delay line, a reverb tail) is then the song's own first
+    // moments, not the audio from 10 s in, which used to come out as a loud
+    // ~40 ms blip at the head of every mastered file.
     {
         const int warmup = std::min(T, 10 * sr);
         fprintf(stderr, "[vst-host] Warm-up pre-roll: %.1f sec\n", (float)warmup / sr);
+        std::vector<float> rev_L(warmup), rev_R(warmup);
+        std::reverse_copy(left_in, left_in + warmup, rev_L.begin());
+        std::reverse_copy(right_in, right_in + warmup, rev_R.begin());
         std::vector<float> scratch_L(block_size), scratch_R(block_size);
         int wpos = 0;
         while (wpos < warmup) {
             int n = std::min(block_size, warmup - wpos);
-            process_block(left_in + wpos, right_in + wpos,
+            process_block(rev_L.data() + wpos, rev_R.data() + wpos,
                           scratch_L.data(), scratch_R.data(),
                           n, (TSamples)wpos - warmup);
             wpos += n;
