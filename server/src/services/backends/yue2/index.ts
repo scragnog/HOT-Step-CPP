@@ -751,6 +751,17 @@ async function capabilities(): Promise<BackendCapabilities> {
         default: true,
       },
       {
+        key: 'yue2ReplanFlags',
+        type: 'toggle',
+        label: 'Re-plan flagged scores',
+        hint: 'Also redraw a plan that is not a runaway but is still illegible: one chord for the '
+            + 'whole song, a riff looped for most of it, a vocal melody on one or two pitches, or '
+            + 'far fewer sections than the lyric has. Uses the same number of tries. If none of '
+            + 'them is clean, the least-flagged plan renders and the song\'s facts and the log say '
+            + 'so. Off = only runaways are redrawn.',
+        default: true,
+      },
+      {
         key: 'yue2ReplanAttempts',
         type: 'slider',
         label: 'Re-plan tries',

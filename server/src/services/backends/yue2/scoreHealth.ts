@@ -240,3 +240,19 @@ export function classifyYue2Score(abc: string, endReason?: string, lyrics?: stri
 export function yue2PlanUsable(verdict: string, instrumental: boolean): boolean {
   return verdict === 'healthy' || (verdict === 'unknown' && instrumental);
 }
+
+/** Pick the plan to render from a re-plan loop's attempts (2026-09-27, Rob):
+ *  the first clean one (usable and no legibility flags); failing that, the
+ *  usable one with the fewest flags; failing that, the last. `clean` says
+ *  whether the pick was clean, so the caller can warn loudly when not. */
+export function yue2PickPlan<T extends { verdict: string; flags?: string[] }>(attempts: T[], instrumental: boolean, checkFlags = true): { pick: T; index: number; clean: boolean } | undefined {
+  if (!attempts.length) return undefined;
+  const usable = (a: T) => yue2PlanUsable(a.verdict, instrumental);
+  const flagCount = (a: T) => (checkFlags ? a.flags?.length ?? 0 : 0);
+  const clean = attempts.findIndex(a => usable(a) && flagCount(a) === 0);
+  if (clean >= 0) return { pick: attempts[clean], index: clean, clean: true };
+  let best = -1;
+  attempts.forEach((a, i) => { if (usable(a) && (best < 0 || flagCount(a) < flagCount(attempts[best]))) best = i; });
+  const index = best >= 0 ? best : attempts.length - 1;
+  return { pick: attempts[index], index, clean: false };
+}

@@ -9,7 +9,7 @@ import type { Yue2JointPreviewOptions } from './types.js';
 import { aceClient } from '../aceClient.js';
 import { yue2PersistedSelection, type Yue2PersistedSelection } from '../backends/yue2/index.js';
 import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, yue2FinalDetail, splitMultipartMixed, type Yue2Selection } from '../backends/yue2/client.js';
-import { classifyYue2Score, yue2PlanUsable, type Yue2ScoreLegibility } from '../backends/yue2/scoreHealth.js';
+import { classifyYue2Score, yue2PlanUsable, yue2PickPlan, type Yue2ScoreLegibility } from '../backends/yue2/scoreHealth.js';
 
 export const YUE2_JOINT_PREVIEW_DEFAULTS: Yue2JointPreviewOptions = {
   enabled: false, everySteps: 0, seconds: 90, seed: 424242,
@@ -39,7 +39,9 @@ export interface Yue2JointPreviewRecord {
     flags?: string[]; legibility?: Yue2ScoreLegibility };
   /** Artist takes go through the app's auto re-plan: the plan that was
    *  rendered (its seed) and every attempt before it. */
-  plan?: { seed: number; accepted: boolean; attempts: Array<{ seed: number; verdict: string; reason: string; flags?: string[] }> };
+  /** `clean`: the rendered plan passed the judge and has no legibility flags
+   *  (2026-09-27). false = none of the attempts did; the least-flagged was rendered. */
+  plan?: { seed: number; accepted: boolean; clean?: boolean; attempts: Array<{ seed: number; verdict: string; reason: string; flags?: string[] }> };
   /** The render's own composer retries (the app's Compose Retries, not the
    *  plan re-draws above): how many times the seed the engine echoed back
    *  advanced past the requested one, each step exactly 1000003. */
@@ -237,6 +239,7 @@ export async function renderYue2JointPreview(input: {
       let supplied: { abc: string; seed: number } | undefined;
       if (kind === 'artist' || (kind === 'baseline' && input.options.baselineOnly)) {
         const attempts: Array<{ seed: number; verdict: string; reason: string; flags?: string[] }> = [];
+        const sheets: string[] = [];
         for (let a = 1; a <= PREVIEW_REPLAN_ATTEMPTS; a++) {
           if (input.signal?.aborted) throw new Error('preview cancelled');
           // Fixed re-plan seeds: every rung draws the same sequence, so rungs
@@ -260,11 +263,15 @@ export async function renderYue2JointPreview(input: {
           const abc = (pd.abc ?? '').trim();
           const h = classifyYue2Score(abc, pd.end_reason, lyrics);
           attempts.push({ seed: planSeed, verdict: h.verdict, reason: h.reason, ...(h.legibility.flags.length ? { flags: h.legibility.flags } : {}) });
-          supplied = { abc, seed: planSeed };
-          if (abc && yue2PlanUsable(h.verdict, !lyrics)) break;
+          sheets.push(abc);
+          // A plan the judge passes can still be illegible (one chord for the
+          // whole song, a looped riff): re-plan until it is clean too.
+          if (abc && yue2PlanUsable(h.verdict, !lyrics) && !h.legibility.flags.length) break;
         }
-        const accepted = !!supplied && yue2PlanUsable(attempts[attempts.length - 1].verdict, !lyrics);
-        records[0].plan = { seed: supplied!.seed, accepted, attempts };
+        const picked = yue2PickPlan(attempts, !lyrics)!;
+        supplied = { abc: sheets[picked.index], seed: attempts[picked.index].seed };
+        const accepted = yue2PlanUsable(picked.pick.verdict, !lyrics);
+        records[0].plan = { seed: supplied.seed, accepted, clean: picked.clean, attempts };
         recordYue2JointPreview(input.output, records[0]);
       }
       // Artist takes render as the app would: the composer runs to its real

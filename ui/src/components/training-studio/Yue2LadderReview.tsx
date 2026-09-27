@@ -152,7 +152,10 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
     const ownPlanned = doneTakes.filter(p => p.sheet !== 'shared');
     const planFlags = ownPlanned.reduce((sum, p) => sum + (p.score?.flags?.length ?? 0), 0);
     const overall = rungOverall({ likeness: sc?.likeness, corruption: sc?.corruption, plannerReplans, composerReplans, takes: doneTakes.length, planFlags, ownTakes: ownPlanned.length });
-    return { mine, doneTakes, plannerReplans, composerReplans, hasReplanData, flaggedTakes, flagReasons, overall };
+    // Takes whose re-plan loop ran out without a clean plan (plan flags or a
+    // broken verdict on every attempt): the checkpoint itself is suspect.
+    const unclean = doneTakes.filter(p => p.plan && p.plan.clean === false);
+    return { mine, doneTakes, plannerReplans, composerReplans, hasReplanData, flaggedTakes, flagReasons, overall, unclean };
   };
   // Best rung by overall score, ties going to the lower (less-trained, so
   // less likely overcooked) step. Ladder is sorted ascending, so keeping the
@@ -240,9 +243,13 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
                 value={noteDraft[c.step] ?? scores[c.step]?.notes ?? ''} onChange={e => setNoteDraft(prev => ({ ...prev, [c.step]: e.target.value }))}
                 onBlur={e => { if (e.target.value !== (scores[c.step]?.notes ?? '')) void score(c.step, { notes: e.target.value }); }} />
             </div>
+            {stats.unclean.length > 0 && <div className="mt-2 rounded-lg border-2 border-red-500 bg-red-500/10 px-3 py-2 text-[12px] text-red-800 dark:text-red-200">
+              <div className="font-semibold">{t('trainingStudio.refine.noCleanPlan', 'This checkpoint is not writing good plans: no clean lead sheet in {{n}} tries.', { n: stats.unclean[0].plan!.attempts.length })}</div>
+              <div className="mt-0.5">{t('trainingStudio.refine.noCleanPlanDetail', 'The take below was rendered from the least-flagged plan anyway. Flags on it:')} {(stats.unclean[0].score?.flags ?? stats.unclean[0].plan!.attempts[stats.unclean[0].plan!.attempts.length - 1].flags ?? []).join('; ') || t('trainingStudio.refine.noCleanPlanBroken', 'the judge rejected every plan')}</div>
+            </div>}
             {mine.length > 0 && <div className="mt-2 flex flex-col gap-2">
               {mine.map((p, i) => p.audioUrl && p.status === 'done'
-                ? <PreviewPlayer key={p.id} src={p.audioUrl} downloadName={`${datasetName || 'preview'}_step${c.step}_take${i + 1}_seed${p.seed}.wav`} label={`${t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}${p.sheet === 'own' ? ` · ${t('trainingStudio.refine.sheetOwn', "this rung's plan")}` : p.sheet === 'shared' ? ` · ${t('trainingStudio.refine.sheetShared', 'shared sheet from step {{s}}', { s: p.sheetStep })}` : ''}`} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}${p.score?.flags?.length ? ` · ${p.score.flags[0]}` : ''}${p.plan ? ` · planner replans ${p.plan.attempts.length - 1}` : ''}${typeof p.composerReplans === 'number' ? ` · composer replans ${p.composerReplans}` : ''}`} />
+                ? <PreviewPlayer key={p.id} src={p.audioUrl} downloadName={`${datasetName || 'preview'}_step${c.step}_take${i + 1}_seed${p.seed}.wav`} label={`${t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}${p.sheet === 'own' ? ` · ${t('trainingStudio.refine.sheetOwn', "this rung's plan")}` : p.sheet === 'shared' ? ` · ${t('trainingStudio.refine.sheetShared', 'shared sheet from step {{s}}', { s: p.sheetStep })}` : ''}`} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}${p.score?.flags?.length ? ` · ⚠ ${p.score.flags.join('; ')}` : ''}${p.plan ? ` · planner replans ${p.plan.attempts.length - 1}` : ''}${typeof p.composerReplans === 'number' ? ` · composer replans ${p.composerReplans}` : ''}`} />
                 : <div key={p.id} className="text-[11px] text-zinc-500">{t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}: {p.status === 'done' && !p.file ? t('trainingStudio.refine.audioPruned', 'audio removed by cleanup') : p.status}{p.error ? ` — ${p.error}` : ''}{p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}{p.score?.flags?.length ? ` · ${p.score.flags[0]}` : ''}</div>)}
             </div>}
           </div>;

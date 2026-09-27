@@ -48,7 +48,7 @@ import { yue2AdapterTrigger } from './jointAdapterContext.js';
 import type { Yue2AdapterScales, Yue2FinalDetail } from './client.js';
 import { yue2Align, yue2Synth, yue2FinalDetail, yue2Props, yue2PropsCached, splitMultipartMixed, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
 import { yue2LyricsJson } from './align.js';
-import { classifyYue2Score, type Yue2ScoreHealth, yue2PlanUsable } from './scoreHealth.js';
+import { classifyYue2Score, type Yue2ScoreHealth, yue2PlanUsable, yue2PickPlan } from './scoreHealth.js';
 import { yue2PersistedSelection } from './index.js';
 import { applyYue2StyleTemplate, splitYue2Tail, type Yue2StyleTemplate } from './style.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
@@ -517,7 +517,10 @@ function yue2StageText(phase: string | undefined, step: number, total: number): 
 
 
 type Yue2Log = (level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', msg: string) => void;
-type Yue2AutoReplan = { attempts: Array<{ seed: number; verdict: string; reason: string }>; accepted: boolean };
+type Yue2AutoReplan = { attempts: Array<{ seed: number; verdict: string; reason: string; flags?: string[] }>; accepted: boolean;
+  /** The rendered plan passed the judge with no legibility flags (only set
+   *  when flag re-plans are on). false = the least-flagged was rendered. */
+  clean?: boolean };
 
 /** A job mapped, logged and (when on) auto-replanned: everything that happens
  *  before its request goes to the engine. Several of these can share one
@@ -583,6 +586,12 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
     // UI slider (index.ts's yue2ReplanAttempts extension) clamps to [1, 10].
     const attemptsRaw = Number(job.params.yue2ReplanAttempts);
     const maxAttempts = Number.isInteger(attemptsRaw) && attemptsRaw >= 1 && attemptsRaw <= 10 ? attemptsRaw : 3;
+    // Plan flags (2026-09-27, Rob): a plan the judge passes can still be
+    // illegible (one chord for the whole song, a looped riff, a melody on two
+    // pitches). On by default like the runaway re-plans; the same tries.
+    const replanFlags = job.params.yue2ReplanFlags !== false;
+    const instrumentalReq = job.params.instrumental === true || !req.lyrics;
+    const sheets: string[] = [];
     let chosen: { abc: string; seed: number } | undefined;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       if ((job.status as string) === 'cancelled') break;
@@ -597,15 +606,21 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
         autoReplan = undefined;
         break;
       }
-      autoReplan.attempts.push({ seed: plan.seed, verdict: plan.health.verdict, reason: plan.health.reason });
-      log('INFO', `[YuE2] Plan attempt ${attempt}: seed ${plan.seed}, ${plan.health.verdict} — ${plan.health.reason}`);
-      chosen = { abc: plan.abc, seed: plan.seed };
-      if (yue2PlanUsable(plan.health.verdict, job.params.instrumental === true || !req.lyrics)) { autoReplan.accepted = true; break; }
+      const flags = plan.health.legibility?.flags ?? [];
+      autoReplan.attempts.push({ seed: plan.seed, verdict: plan.health.verdict, reason: plan.health.reason, ...(flags.length ? { flags } : {}) });
+      sheets.push(plan.abc);
+      log('INFO', `[YuE2] Plan attempt ${attempt}: seed ${plan.seed}, ${plan.health.verdict} — ${plan.health.reason}${flags.length ? ` — flags: ${flags.join('; ')}` : ''}`);
+      if (yue2PlanUsable(plan.health.verdict, instrumentalReq) && (!replanFlags || !flags.length)) break;
     }
-    if (autoReplan && chosen) {
+    const picked = autoReplan ? yue2PickPlan(autoReplan.attempts, instrumentalReq, replanFlags) : undefined;
+    if (autoReplan && picked) {
+      chosen = { abc: sheets[picked.index], seed: picked.pick.seed };
+      autoReplan.accepted = yue2PlanUsable(picked.pick.verdict, instrumentalReq);
+      if (replanFlags) autoReplan.clean = picked.clean;
       req.abc = chosen.abc;
       req.seed = chosen.seed;
       if (!autoReplan.accepted) log('WARNING', `[YuE2] Every plan attempt was a runaway, had no vocal line or ran to its cap; rendering the last one (seed ${chosen.seed})`);
+      else if (replanFlags && !picked.clean) log('WARNING', `[YuE2] No clean plan in ${autoReplan.attempts.length} attempts: every one carried plan flags. Rendering the least-flagged (seed ${chosen.seed}: ${(picked.pick.flags ?? []).join('; ')}). This adapter/checkpoint is not writing good plans.`);
       else if (autoReplan.attempts.length > 1) log('INFO', `[YuE2] Bad plan replaced after ${autoReplan.attempts.length} attempts`);
     }
   }
@@ -916,10 +931,11 @@ async function finishYue2Job(
   {
     // Healthy-but-long vs runaway: the score says which, when there is one
     // (cot=off renders have no plan stage and no score to read).
-    const scoreHealth = finalDetail.abc ? classifyYue2Score(finalDetail.abc, finalDetail.end_reason) : undefined;
+    const scoreHealth = finalDetail.abc ? classifyYue2Score(finalDetail.abc, finalDetail.end_reason, req.lyrics ?? '') : undefined;
     if (scoreHealth) {
       log(scoreHealth.verdict === 'runaway' ? 'WARNING' : 'INFO',
         `[YuE2] Score: ${scoreHealth.verdict} — ${scoreHealth.reason}`);
+      if (scoreHealth.legibility?.flags?.length) log('WARNING', `[YuE2] Plan flags: ${scoreHealth.legibility.flags.join('; ')}`);
     }
     if (finalDetail.end_reason === 'limit_hit') {
       log('WARNING', scoreHealth?.verdict === 'long'
@@ -1268,5 +1284,5 @@ export async function runYue2PlanPreview(params: any, signal?: AbortSignal): Pro
     if (!body.ok) throw new Error(`YuE2 semantic result fetch failed (${body.status})`);
     semantic_ids = await body.json() as number[];
   }
-  return { abc, seed: detail.tracks?.[0]?.seed ?? planReq.seed ?? -1, end_reason, stage_end_reasons: detail.stage_end_reasons, health: classifyYue2Score(abc, end_reason), notes, ...(semantic_ids ? { semantic_ids } : {}) };
+  return { abc, seed: detail.tracks?.[0]?.seed ?? planReq.seed ?? -1, end_reason, stage_end_reasons: detail.stage_end_reasons, health: classifyYue2Score(abc, end_reason, planReq.lyrics ?? ''), notes, ...(semantic_ids ? { semantic_ids } : {}) };
 }

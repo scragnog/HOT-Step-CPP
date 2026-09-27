@@ -162,9 +162,13 @@ What sets it apart:
   playback, and lets you continue, re-plan with a new seed, or cancel before any audio
   is rendered. You can also paste your own ABC lead sheet to render from.
 - Without the preview, the app plans first anyway and redraws the seed when the lead sheet
-  is a runaway, has no vocal line, or hit its cap, up to the attempt count in Settings. If
-  every attempt fails, the song renders with Chain of Thought off (straight from the lyric)
-  rather than from a broken score, and the generation log says so.
+  is a runaway, has no vocal line, or hit its cap, up to the attempt count in Settings. With
+  **Re-plan flagged scores** (on by default) it also redraws a plan that passes but is
+  illegible: one chord for the whole song, a riff looped for most of it, a vocal melody on
+  one or two pitches, or far fewer sections than the lyric. If no attempt is clean, the
+  least-flagged plan renders and the song's Plan facts and the generation log say so (a
+  sign the adapter is not writing good plans); if every attempt is broken outright, the last
+  one renders.
 - Batch Size renders several songs in one pass, up to a limit the engine reports for your
   setup, and Noise Variations renders the same composed song from different noise.
 - Batch Queued Songs (on by default) does the same across the queue: when several YuE2

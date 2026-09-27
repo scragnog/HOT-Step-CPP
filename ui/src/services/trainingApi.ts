@@ -805,7 +805,10 @@ export interface Yue2JointPreviewRecord {
     /** Legibility flags on a plan the verdict passed (riff loops, few pitches, one chord, sections short of the lyric), worst first. */
     flags?: string[] };
   /** Planner re-plan attempts behind this take's accepted seed. */
-  plan?: { seed: number; accepted: boolean; attempts: Array<{ seed: number; verdict: string; reason: string; flags?: string[] }> };
+  /** `clean` (2026-09-27): the rendered plan passed the judge AND carries no
+   *  legibility flags. false = every attempt was flagged or broken, and the
+   *  least-flagged one was rendered anyway. Absent on older records. */
+  plan?: { seed: number; accepted: boolean; clean?: boolean; attempts: Array<{ seed: number; verdict: string; reason: string; flags?: string[] }> };
   /** Composer re-plans behind this take. */
   composerReplans?: number;
   /** Shared-sheet ladders: 'own' = this rung's plan; 'shared' = the ladder's lead sheet from sheetStep. */

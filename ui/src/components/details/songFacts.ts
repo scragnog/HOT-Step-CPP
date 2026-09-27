@@ -237,7 +237,14 @@ function yue2Facts(gp: any): FactGroup[] {
   const replans = Array.isArray(y.auto_replan?.attempts) ? y.auto_replan.attempts.length : 0;
   if (replans) {
     add(plan, 'Auto-replan', `${replans} attempt${replans === 1 ? '' : 's'}`,
-      { tone: 'warn', title: y.auto_replan.attempts.map((a: any) => `${a.verdict}: ${a.reason}`).join('\n') });
+      { tone: 'warn', title: y.auto_replan.attempts.map((a: any) => `${a.verdict}: ${a.reason}${Array.isArray(a.flags) && a.flags.length ? ` (${a.flags.join('; ')})` : ''}`).join('\n') });
+  }
+  // Legibility flags on the plan that was rendered (2026-09-27), and whether
+  // the re-plan loop ran out without a clean one.
+  const planFlags: string[] = Array.isArray(health?.legibility?.flags) ? health.legibility.flags : [];
+  if (planFlags.length) add(plan, 'Plan flags', planFlags.join('; '), { tone: 'warn' });
+  if (y.auto_replan && y.auto_replan.clean === false) {
+    add(plan, 'Plan quality', `No clean plan in ${replans} tries; rendered the least-flagged`, { tone: 'warn' });
   }
   if (plan.length) groups.push({ title: 'Plan', facts: plan });
 
