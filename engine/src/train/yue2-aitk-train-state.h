@@ -119,7 +119,10 @@ public:
     // Upload one layer's block gradients (yue2_aitk_layer_params order) into
     // their persistent F32 slots. The tensors remain available for a later
     // optimizer, but this class performs no update itself.
-    bool upload_gradients(bool nar, int layer, const Yue2AitkBlockBackwardHost & g, std::string * error = nullptr) {
+    // accumulate (--grad-accum): add to the slot's current gradient instead of
+    // replacing it; the sum is read back on the host, so the first micro-step
+    // of an update must upload without it.
+    bool upload_gradients(bool nar, int layer, const Yue2AitkBlockBackwardHost & g, std::string * error = nullptr, bool accumulate = false) {
         if (!initialized_ || layer < 0 || layer >= kLayers) return fail(error, "train state is not initialized or layer is invalid");
         const std::vector<size_t> & indices = layer_slots_[nar ? 0 : 1][static_cast<size_t>(layer)];
         if (g.params.size() != indices.size()) return fail(error, "gradient count mismatch");
@@ -129,7 +132,13 @@ public:
         }
         for (size_t i = 0; i < indices.size(); ++i) {
             Slot & slot = slots_[indices[i]];
-            ggml_backend_tensor_set(slot.gradient, g.params[i].data(), 0, ggml_nbytes(slot.gradient));
+            if (accumulate) {
+                ggml_backend_tensor_get(slot.gradient, slot.host.data(), 0, ggml_nbytes(slot.gradient));
+                for (size_t k = 0; k < slot.host.size(); ++k) slot.host[k] += g.params[i][k];
+                ggml_backend_tensor_set(slot.gradient, slot.host.data(), 0, ggml_nbytes(slot.gradient));
+            } else {
+                ggml_backend_tensor_set(slot.gradient, g.params[i].data(), 0, ggml_nbytes(slot.gradient));
+            }
         }
         return true;
     }
@@ -159,12 +168,16 @@ public:
 
     // Default recipe uses one joint parameter group. The host reduction uses
     // double accumulation; its rounding must be measured against Torch's norm.
-    bool clip_gradients(float max_norm, double * norm, std::string * error=nullptr) {
-        if (!initialized_ || !(max_norm>0) || !std::isfinite(max_norm)) return fail(error,"invalid clipping request");
+    // pre_scale (--grad-accum: 1/N) multiplies every gradient before the norm
+    // is taken, so the clip sees the mean over the accumulated songs. 1.0
+    // leaves the path byte-identical.
+    bool clip_gradients(float max_norm, double * norm, std::string * error=nullptr, float pre_scale=1.0f) {
+        if (!initialized_ || !(max_norm>0) || !std::isfinite(max_norm) || !(pre_scale>0) || !std::isfinite(pre_scale)) return fail(error,"invalid clipping request");
         double squared=0;
         for (auto & slot : slots_) {
             ggml_backend_tensor_get(slot.gradient,slot.host.data(),0,ggml_nbytes(slot.gradient));
-            for (float value : slot.host) {
+            for (float & value : slot.host) {
+                if (pre_scale!=1.0f) value*=pre_scale;
                 if (!std::isfinite(value)) return fail(error,"non-finite gradient before clipping");
                 squared+=double(value)*double(value);
             }
@@ -172,8 +185,8 @@ public:
         const double length=std::sqrt(squared);
         if (norm) *norm=length;
         const float scale=(std::min)(1.0f,max_norm/(float(length)+1e-6f));
-        if (scale<1.0f) for (auto & slot : slots_) {
-            for (float & value : slot.host) value*=scale;
+        if (scale<1.0f || pre_scale!=1.0f) for (auto & slot : slots_) {
+            if (scale<1.0f) for (float & value : slot.host) value*=scale;
             ggml_backend_tensor_set(slot.gradient,slot.host.data(),0,ggml_nbytes(slot.gradient));
         }
         return true;

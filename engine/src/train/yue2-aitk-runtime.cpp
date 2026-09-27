@@ -137,6 +137,16 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
     { yyjson_val * v=yyjson_obj_get(root,"warmup"); if(v&&yyjson_is_int(v)&&int(yyjson_get_sint(v))!=config.warmup) std::fprintf(stderr,"[yue2-aitk] resume note: warmup changed from %d to %d; the run continues with the new value\n", int(yyjson_get_sint(v)), config.warmup); }
     { std::string was="cosine"; if(yyjson_val * v=yyjson_obj_get(root,"lr_schedule")) str_field(v,&was); if(was!=config.lr_schedule) std::fprintf(stderr,"[yue2-aitk] resume note: lr schedule changed from %s to %s; the run continues with the new one\n", was.c_str(), config.lr_schedule.c_str()); }
     { yyjson_val * v=yyjson_obj_get(root,"weight_decay"); if(v&&yyjson_is_num(v)&&double(yyjson_get_num(v))!=double(config.weight_decay)) std::fprintf(stderr,"[yue2-aitk] resume note: weight-decay changed from %.9g to %.9g; the run continues with the new value\n", double(yyjson_get_num(v)), (double)config.weight_decay); }
+    // Base-matched knobs. Records without them are runs at the defaults. The
+    // betas shape the moments and ar_targets defines the objective, so a
+    // change refuses; the loss weight and accumulation only reshape the run.
+    { float b1=0.9f, b2=0.999f;
+      if(yyjson_val * v=yyjson_obj_get(root,"beta1")) { if(!yyjson_is_num(v)) return fail(error,"resume beta1 field is malformed"); b1=float(yyjson_get_num(v)); }
+      if(yyjson_val * v=yyjson_obj_get(root,"beta2")) { if(!yyjson_is_num(v)) return fail(error,"resume beta2 field is malformed"); b2=float(yyjson_get_num(v)); }
+      if(b1!=config.beta1 || b2!=config.beta2) return fail(error,"resume Adam betas mismatch; start a new run"); }
+    { std::string was="tuned"; if(yyjson_val * v=yyjson_obj_get(root,"ar_targets")) str_field(v,&was); if(was!=config.ar_targets) return fail(error,"resume ar_targets mismatch; start a new run"); }
+    { yyjson_val * v=yyjson_obj_get(root,"ar_loss_weight"); const double was=v&&yyjson_is_num(v)?yyjson_get_num(v):1.0; if(was!=double(config.ar_loss_weight)) std::fprintf(stderr,"[yue2-aitk] resume note: ar-loss-weight changed from %.9g to %.9g; the run continues with the new value\n", was, (double)config.ar_loss_weight); }
+    { yyjson_val * v=yyjson_obj_get(root,"grad_accum"); const int was=v&&yyjson_is_int(v)?int(yyjson_get_sint(v)):1; if(was!=config.grad_accum) std::fprintf(stderr,"[yue2-aitk] resume note: grad-accum changed from %d to %d; the run continues with the new value\n", was, config.grad_accum); }
     yyjson_val * vrecipe=yyjson_obj_get(root,"recipe"), *vcp=yyjson_obj_get(root,"checkpoint_sha256"), *vds=yyjson_obj_get(root,"dataset_sha256"), *vsm=yyjson_obj_get(root,"source_manifest_sha256"), *vseed=yyjson_obj_get(root,"seed"), *vdev=yyjson_obj_get(root,"cuda_index"), *vstep=yyjson_obj_get(root,"completed_step"), *vcursor=yyjson_obj_get(root,"order_cursor"), *vorder=yyjson_obj_get(root,"order"), *vsampler=yyjson_obj_get(root,"sampler_state");
     if (!str_field(vrecipe,&recipe) || recipe!="yue2-aitk-runtime-v1" || !str_field(vcp,&cp) || cp!=checkpoint || !str_field(vds,&ds) || ds!=dataset || !str_field(vsm,&sm) || sm!=source || !yyjson_is_uint(vseed) || yyjson_get_uint(vseed)!=seed || !yyjson_is_int(vdev) || yyjson_get_sint(vdev)!=cuda_index || !yyjson_is_int(vstep) || yyjson_get_sint(vstep)<0 || yyjson_get_sint(vstep)>INT_MAX || !yyjson_is_uint(vcursor) || !yyjson_is_arr(vorder) || yyjson_arr_size(vorder)!=item_count || !str_field(vsampler,&sampler)) return fail(error,"resume metadata binding mismatch");
     plan->completed=static_cast<int>(yyjson_get_sint(vstep)); plan->cursor=static_cast<size_t>(yyjson_get_uint(vcursor)); plan->sampler=std::move(sampler); plan->order.clear(); std::unordered_set<size_t> seen; size_t i=0,max=0; yyjson_val * x=nullptr; yyjson_arr_foreach(vorder,i,max,x) { if(!yyjson_is_uint(x) || yyjson_get_uint(x)>=item_count || !seen.insert(static_cast<size_t>(yyjson_get_uint(x))).second) return fail(error,"resume order is not a permutation"); plan->order.push_back(static_cast<size_t>(yyjson_get_uint(x))); }
@@ -196,6 +206,16 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
         yyjson_mut_val * a=yyjson_mut_arr(doc); for(double v:*hist) yyjson_mut_arr_add_real(doc,a,v); yyjson_mut_obj_add_val(doc,root,key,a);
     }
     if (config.target_kl_mode!="mean") yyjson_mut_obj_add_strcpy(doc,root,"target_kl_mode",config.target_kl_mode.c_str());
+    // Base-matched knobs: written only off their defaults, so every earlier
+    // record and every tuned run's record stays byte-identical.
+    if (config.ar_loss_weight!=1.0f) yyjson_mut_obj_add_real(doc,root,"ar_loss_weight",config.ar_loss_weight);
+    if (config.beta1!=0.9f) yyjson_mut_obj_add_real(doc,root,"beta1",config.beta1);
+    if (config.beta2!=0.999f) yyjson_mut_obj_add_real(doc,root,"beta2",config.beta2);
+    if (config.ar_targets!="tuned") yyjson_mut_obj_add_strcpy(doc,root,"ar_targets",config.ar_targets.c_str());
+    if (config.grad_accum!=1) yyjson_mut_obj_add_int(doc,root,"grad_accum",config.grad_accum);
+    if (config.text_dropout>0.0f) yyjson_mut_obj_add_real(doc,root,"text_dropout",config.text_dropout);
+    if (config.lyric_dropout>0.0f) yyjson_mut_obj_add_real(doc,root,"lyric_dropout",config.lyric_dropout);
+    if (config.uncond_dropout>0.0f) yyjson_mut_obj_add_real(doc,root,"uncond_dropout",config.uncond_dropout);
     if (config.nar_lr_scale!=1.0f) yyjson_mut_obj_add_real(doc,root,"nar_lr_scale",config.nar_lr_scale);  // absent = 1.0, keeps old records byte-identical
     if (planner_frozen_at>=0) { yyjson_mut_obj_add_int(doc,root,"planner_frozen_at",planner_frozen_at); yyjson_mut_obj_add_int(doc,root,"nar_extra_steps",config.nar_extra_steps); }
     // Only guarded runs carry these, so other records are unchanged.
@@ -250,6 +270,31 @@ static int run_impl(Config config, std::string * error) {
     if (config.nar_extra_steps > 0 && !(config.target_kl > 0.0f)) {
         fail(error, "--nar-extra-steps needs --target-kl: the planner freezes when it reaches that KL"); return 1;
     }
+    if (!std::isfinite(config.ar_loss_weight) || config.ar_loss_weight <= 0.0f || config.ar_loss_weight > 10.0f ||
+        !std::isfinite(config.beta1) || config.beta1 < 0.0f || config.beta1 >= 1.0f ||
+        !std::isfinite(config.beta2) || config.beta2 < 0.0f || config.beta2 >= 1.0f ||
+        (config.ar_targets != "tuned" && config.ar_targets != "base") || config.grad_accum < 1 || config.grad_accum > 256) {
+        fail(error, "invalid runtime configuration"); return 1;
+    }
+    if (config.grad_accum > 1 && config.cursor_weight > 0.0f) {
+        // The cursor head's gradient is formed by its own kernel, which the
+        // accumulation path does not sum; nothing that accumulates uses it.
+        fail(error, "--grad-accum above 1 needs --cursor-weight 0"); return 1;
+    }
+    const bool base_targets = config.ar_targets == "base";
+    const float condition_dropout = config.text_dropout + config.lyric_dropout + config.uncond_dropout;
+    if (!std::isfinite(config.text_dropout) || config.text_dropout < 0.0f || !std::isfinite(config.lyric_dropout) || config.lyric_dropout < 0.0f ||
+        !std::isfinite(config.uncond_dropout) || config.uncond_dropout < 0.0f || condition_dropout > 1.0f) {
+        fail(error, "--text-dropout, --lyric-dropout and --both-dropout must be nonnegative and sum to at most 1"); return 1;
+    }
+    if (condition_dropout > 0.0f && config.caption_dropout > 0.0f) {
+        fail(error, "--caption-dropout and the condition dropouts (--text-dropout / --lyric-dropout / --both-dropout) are two recipes for the same prompt slot; use one"); return 1;
+    }
+    if (condition_dropout > 0.0f && config.cursor_weight > 0.0f) {
+        // The dropped-prompt variants carry no cursor bindings (their lyric
+        // columns move or vanish); the base-matched recipe runs without timing.
+        fail(error, "the condition dropouts need --cursor-weight 0"); return 1;
+    }
     if (config.optimizer == "muon" && (config.planner_lr_scale != 1.0f || config.nar_lr_scale != 1.0f)) {
         // Muon's update is bucketed by shape and scaled once per bucket
         // (lm-optim.h), so lr_mul would apply to the AdamW-ruled parameters
@@ -289,6 +334,15 @@ static int run_impl(Config config, std::string * error) {
         }
         std::fprintf(stderr, "[yue2-aitk] caption dropout %.2f: trigger-only style on that share of steps\n", (double) config.caption_dropout);
     }
+    if (condition_dropout > 0.0f) {
+        for (const auto & item : dataset.items)
+            if (!item.prompt.has_condition_variants()) { fail(error, "the condition dropouts need text/lyric/unconditional prefixes for every item; this dataset was prepared before they existed — re-run preparation"); return 1; }
+        std::fprintf(stderr, "[yue2-aitk] condition dropout: text %.2f, lyrics %.2f, both %.2f of steps\n",
+                     (double) config.text_dropout, (double) config.lyric_dropout, (double) config.uncond_dropout);
+    }
+    if (config.ar_loss_weight != 1.0f || config.beta1 != 0.9f || config.beta2 != 0.999f || base_targets || config.grad_accum > 1)
+        std::fprintf(stderr, "[yue2-aitk] base-matched knobs: ar-loss-weight %.3g, betas (%.3g, %.4g), ar-targets %s, grad-accum %d\n",
+                     (double) config.ar_loss_weight, (double) config.beta1, (double) config.beta2, config.ar_targets.c_str(), config.grad_accum);
     yue2_aitk::sha256::digest checkpoint_hash, dataset_hash;
     if (!yue2_aitk::sha256::file(std::filesystem::u8path(config.checkpoint), checkpoint_hash, error)) return 1;
     if (checkpoint_hash.hex() != lower_hash(dataset.base_sha256)) { fail(error, "checkpoint SHA-256 does not match dataset base_sha256"); return 1; }
@@ -452,7 +506,7 @@ static int run_impl(Config config, std::string * error) {
                 o.lr_floor = 1.0f; o.total_steps = 1; o.warmup_steps = 0;
                 o.weight_decay = config.weight_decay;
                 o.grad_clip = 0.0f;  // state.clip_gradients(1.0) is the only clipper
-                o.adam_beta1 = 0.9f; o.adam_beta2 = 0.999f;
+                o.adam_beta1 = config.beta1; o.adam_beta2 = config.beta2;
                 o.prodigy_d0 = config.prodigy_d0;
                 o.muon.lr_scale = config.muon_lr_scale;
                 o.muon.ns_steps = config.muon_ns_steps;
@@ -663,6 +717,10 @@ static int run_impl(Config config, std::string * error) {
         double rung_lr_mult = resume_binding.rung_lr_mult;
         const bool wsd = config.lr_schedule == "wsd";
         int lr_decaying_from = wsd ? resume_binding.lr_decaying_from : -1;
+        // Whether anything reads the planner's KL to base when --kl-weight is
+        // 0: the stops, the rungs, the checkpoint meters. Otherwise the joint
+        // step skips the frozen teacher forward (yue2-aitk-joint-step.h).
+        const bool measure_kl = config.target_kl > 0.0f || config.kl_checkpoint_every > 0.0f || config.nar_drift || config.target_loss > 0.0f;
         // wsd: start the tail now (idempotent). The stop that asked for it acts
         // when the tail ends.
         auto start_tail = [&](const char * why) {
@@ -778,6 +836,28 @@ static int run_impl(Config config, std::string * error) {
                 if (completed > 0 && !save_checkpoint(completed)) { fail(error, "cancel checkpoint publication failed"); return 1; }
                 event("cancelled", completed); return 130;
             }
+            yue2_aitk_joint::Metrics metrics;
+            yue2_aitk_joint::Input input;
+            using Clock = std::chrono::steady_clock;
+            const auto step_start = Clock::now();
+            auto stage_start = step_start;
+            std::string previous_stage;
+            std::vector<std::pair<std::string,double>> stage_times;
+            const auto finish_stage = [&]() {
+                const auto now = Clock::now();
+                if (!previous_stage.empty()) {
+                    const double ms = std::chrono::duration<double,std::milli>(now-stage_start).count();
+                    // --grad-accum repeats every stage once a song: one key each.
+                    auto it = std::find_if(stage_times.begin(), stage_times.end(), [&](const std::pair<std::string,double> & p) { return p.first == previous_stage; });
+                    if (it == stage_times.end()) stage_times.emplace_back(previous_stage, ms); else it->second += ms;
+                }
+                stage_start = now;
+            };
+            // --grad-accum: N songs' gradients summed into one update. Every
+            // micro-step draws its own song, crop, timestep and dropouts from
+            // the same RNG stream, so N = 1 is the stream every run before had.
+            yue2_aitk_joint::Metrics sum;
+            for (int micro = 0; micro < config.grad_accum; ++micro) {
             const std::vector<float> schedule = sampler.sigmoid_schedule(1000);
             const auto & item = dataset.items[order[cursor]];
             // Decoder window: --nar-crop-frames (0 = whole song), clamped so the
@@ -793,10 +873,15 @@ static int run_impl(Config config, std::string * error) {
                 const size_t fit = used < yue2_aitk::dataset_detail::kMaxFrames ? (yue2_aitk::dataset_detail::kMaxFrames - used) / 2 : 1;
                 window = std::max<size_t>(1, std::min(window, fit));
             }
-            auto sampled = sampler.sample(item.song, item.prompt, window, schedule, config.abc_dropout, 0, 999, config.caption_dropout);
-            yue2_aitk_joint::Input input; input.batch = &sampled.batch; input.noisy_latents = sampled.noisy_bf16;
+            auto sampled = sampler.sample(item.song, item.prompt, window, schedule, config.abc_dropout, 0, 999, config.caption_dropout, base_targets,
+                                          config.text_dropout, config.lyric_dropout, config.uncond_dropout);
+            input = yue2_aitk_joint::Input{}; input.batch = &sampled.batch; input.noisy_latents = sampled.noisy_bf16;
             input.flow_target = sampled.target_f32; input.timestep = sampled.timestep_bf16;
             input.kl_weight = config.kl_weight;
+            input.ar_loss_weight = config.ar_loss_weight; input.beta1 = config.beta1; input.beta2 = config.beta2;
+            input.measure_kl = measure_kl;
+            input.accumulate = micro > 0; input.finalize = micro + 1 == config.grad_accum;
+            input.accum_scale = 1.0f / (float) config.grad_accum;
             // AdamW: constant rate after an optional linear warmup. No cosine
             // here on purpose — the LmOptim branch below has always decayed and
             // this branch has always been flat; keeping it flat means a run
@@ -827,18 +912,6 @@ static int run_impl(Config config, std::string * error) {
                 input.cursor_frames.reserve(ranges.size());
                 for(const auto & range:ranges) input.cursor_frames.emplace_back(range.first,range.last);
             }
-            yue2_aitk_joint::Metrics metrics;
-            using Clock = std::chrono::steady_clock;
-            const auto step_start = Clock::now();
-            auto stage_start = step_start;
-            std::string previous_stage;
-            std::vector<std::pair<std::string,double>> stage_times;
-            const auto finish_stage = [&]() {
-                const auto now = Clock::now();
-                if (!previous_stage.empty()) stage_times.emplace_back(previous_stage,
-                    std::chrono::duration<double,std::milli>(now-stage_start).count());
-                stage_start = now;
-            };
             if (use_lm) {
                 // --lr-schedule (default: linear warmup, then cosine to zero).
                 // Prodigy's base_lr is the schedule multiplier on its own d
@@ -866,10 +939,21 @@ static int run_impl(Config config, std::string * error) {
                 use_lm ? &lm->opt : nullptr, use_lm ? lm->osched : nullptr)) return 1;
             ggml_backend_synchronize(backend.value);
             finish_stage();
+            if (++cursor == order.size()) { sampler.rng().shuffle(order); cursor=0; }
+            sum.ar_ce += metrics.ar_ce; sum.ar_kl += metrics.ar_kl; sum.nar_mse += metrics.nar_mse;
+            sum.cursor_ce += metrics.cursor_ce; sum.cursor_frames += metrics.cursor_frames;
+            input.batch = nullptr;  // `sampled` ends with this micro-step
+            }
+            if (config.grad_accum > 1) {
+                // The update's losses are the mean over its songs; the norm,
+                // skip flag and step come from the finalizing micro-step.
+                const double n = (double) config.grad_accum;
+                metrics.ar_ce = sum.ar_ce / n; metrics.ar_kl = sum.ar_kl / n; metrics.nar_mse = sum.nar_mse / n;
+                metrics.cursor_ce = sum.cursor_ce / n; metrics.cursor_frames = sum.cursor_frames;
+            }
             const double step_ms=std::chrono::duration<double,std::milli>(Clock::now()-step_start).count();
             ++completed;
             if (metrics.step != completed) { fail(error, "optimizer update count mismatch"); return 1; }
-            if (++cursor == order.size()) { sampler.rng().shuffle(order); cursor=0; }
             std::ostringstream line;
             line << std::setprecision(17) << "{\"stage\":\"joint\",\"step\":" << metrics.step;
             // Frozen steps have no planner objective, so no AR numbers: a

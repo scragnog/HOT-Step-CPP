@@ -42,6 +42,24 @@ The cache stages are latent cache, codes, lead sheets, vocal stems and lyric cur
 How many tracks: the app warns below 10 files.
 <!-- TODO(verify): no track-count guidance specific to YuE2 joint training was found in code or skills. -->
 
+## Training method
+
+The card offers two recipes for the same trainer.
+
+**Tuned** is the recipe every run before September 2026 used and what the rest of this page describes: Prodigy, a KL anchor and KL stop for the planner, lyric timing, the planner at a lower rate than the decoder, a 60 s decoder window, then a refinement pass. It is the tested one.
+
+**Base-matched** trains the way the YuE2 technical report says the base model itself was trained, as far as an adapter can: the planner's loss weighted at a quarter of the decoder's, AdamW with betas 0.9 / 0.95 and weight decay 0.1, the decoder trained on whole songs, several songs averaged into each update, and the style text or lyrics dropped from the prompt on some steps. It has no KL anchor and no KL or reconstruction stop; it runs to the step count, saves a checkpoint at every "Save every", and you pick the rung by ear. It does not hand off to refinement.
+
+When you pick it, the card hides the tuned-only controls and shows the method's settings. Blank fields use the method defaults shown beside them. Two of those are agreed guesses rather than report values: the learning rate (1e-4; the report only gives full-model rates) and the three dropout rates (0.1 each; the report says the drops happen but not how often). The rest are the report's numbers.
+
+Things to know:
+
+- The first base-matched run on a dataset re-prepares it once, because the prompt variants it trains on were not part of earlier preparations. Both methods then share the prepared dataset.
+- Songs per update (default 8) multiplies the time per step. Set the step count with that in mind: 100 steps at 8 songs each sees 800 songs, roughly what 800 tuned steps see.
+- Whole-song decoder training took about 12 GB of VRAM and 11-15 s a step on a 4-minute song on the RTX 5090. If a song and its prompt do not fit the model's context, the decoder trains on the longest window that does.
+- The audio cache is still loudness-normalised to -14 LUFS for both methods; the base was trained on raw recordings. Changing that is a separate cache-level change and has not been made.
+- Nothing has been heard from this method yet. The plan is an A/B against the tuned recipe on one album through the ear-test score sheet.
+
 ## Recommended settings
 
 Pick a preset. Each stops the planner when its KL reading (how far the planner has moved from the base model) reaches a target; the step count is a cap.

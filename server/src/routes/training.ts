@@ -162,7 +162,7 @@ import {
   type ResolvedYue2AitkPrepareOptions,
 } from '../services/training/yue2AitkPrepareRunner.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
-import { parseYue2JointStopMode } from '../services/training/yue2JointTrainRunner.js';
+import { parseYue2JointStopMode, applyBaseMatchedRecipe } from '../services/training/yue2JointTrainRunner.js';
 import { appendToBatch as appendToYue2Batch, finishScoredLadders, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
 import {
   aceTrainExe, engineGpuBackend, engineSupportsFlashAttnTraining,
@@ -3480,6 +3480,14 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
         return;
       }
     }
+    // Base-matched method: the fixed parts of the recipe replace whatever the
+    // body says (they define the method); its knobs fill in where blank.
+    if (b.method !== undefined && b.method !== 'tuned' && b.method !== 'base-matched') {
+      res.status(400).json({ error: 'method must be tuned or base-matched.' });
+      return;
+    }
+    const method: 'tuned' | 'base-matched' = b.method === 'base-matched' ? 'base-matched' : 'tuned';
+    if (method === 'base-matched') b = applyBaseMatchedRecipe(b);
     const str = (key: string): string => typeof b[key] === 'string' ? (b[key] as string).trim() : '';
     const automatic = b.autoPrepare === true && !str('resume');
     const prepDefaults = automatic ? yue2AitkPrepareDefaults(ds).options : undefined;
@@ -3697,6 +3705,21 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       if (!Number.isInteger(v) || v < 0 || v > 12288) { res.status(400).json({ error: 'narCropFrames must be 0 (whole song) or 1..12288 frames.' }); return; }
       narCropFrames = v;
     }
+    // Base-matched knobs (any method may set them; absent = engine default).
+    const baseMatched: { method?: 'base-matched'; warmup?: number; arLossWeight?: number; beta1?: number; beta2?: number; arTargets?: 'base'; gradAccum?: number; textDropout?: number; lyricDropout?: number; bothDropout?: number } = {};
+    if (method === 'base-matched') baseMatched.method = 'base-matched';
+    for (const [key, lo, hi, int, zeroOk] of [['warmup', 0, 0x7fffffff, true, true], ['arLossWeight', 0, 10, false, false], ['beta1', 0, 0.999999, false, true], ['beta2', 0, 0.999999, false, true],
+      ['gradAccum', 1, 256, true, true], ['textDropout', 0, 1, false, true], ['lyricDropout', 0, 1, false, true], ['bothDropout', 0, 1, false, true]] as const) {
+      if (b[key] === undefined || b[key] === null || b[key] === '') continue;
+      const v = Number(b[key]);
+      if (!Number.isFinite(v) || v > hi || (zeroOk ? v < lo : v <= lo) || (int && !Number.isInteger(v))) { res.status(400).json({ error: `${key} must be ${int ? 'an integer' : 'a number'} ${zeroOk ? 'from' : 'above'} ${lo} to ${hi}.` }); return; }
+      baseMatched[key] = v;
+    }
+    if (b.arTargets !== undefined && b.arTargets !== null && b.arTargets !== '') {
+      if (b.arTargets !== 'tuned' && b.arTargets !== 'base') { res.status(400).json({ error: 'arTargets must be tuned or base.' }); return; }
+      if (b.arTargets === 'base') baseMatched.arTargets = 'base';
+    }
+    if ((baseMatched.textDropout ?? 0) + (baseMatched.lyricDropout ?? 0) + (baseMatched.bothDropout ?? 0) > 1) { res.status(400).json({ error: 'textDropout, lyricDropout and bothDropout must sum to at most 1.' }); return; }
     // Plan-check planner stop (see yue2PlanCheck.ts).
     let planCheck: { every: number; plans?: number; margin?: number; seed?: number; caption?: string; lyrics?: string } | undefined;
     if (b.planCheck && typeof b.planCheck === 'object') {
@@ -3764,9 +3787,10 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(narCropFrames !== undefined ? { narCropFrames } : {}),
       ...(resume && b.refinePlanner === true ? { unfreezePlanner: true, klCheckpointEvery: Math.max(0.01, Math.min(1, Number(b.klCheckpointEvery) || 0.1)), refineWarmup: 30, rungAdaptiveLr: true } : {}),
       ...advanced,
+      ...baseMatched,
       ...(preparation ? { preparation } : {}),
     });
-    res.json({ jobId: job.id, kind: job.kind, trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16', outDir, steps, saveEvery, preview, lyricTiming: alignmentEnabled, cursorWeight, alignment,
+    res.json({ jobId: job.id, kind: job.kind, trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16', method, outDir, steps, saveEvery, preview, lyricTiming: alignmentEnabled, cursorWeight, alignment, ...baseMatched,
       optimizer, cautious, rank, alpha: alphaRaw, adapterType, ...(adapterType === 'lokr' ? { lokrDim, lokrFactor } : {}), stopMode, ...advanced,
       ...(targetLoss !== undefined ? { targetLoss } : {}), ...(targetKl !== undefined ? { targetKl } : {}), ...(targetKlMode ? { targetKlMode } : {}),
       ...(narExtraSteps !== undefined ? { narExtraSteps } : {}) });

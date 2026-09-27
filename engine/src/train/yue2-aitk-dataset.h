@@ -248,6 +248,19 @@ inline bool read_dataset(const std::string & manifest_path, Dataset * out, std::
         if (!!full_nocap != !!off_nocap) return bad(error, "caption-dropout prefixes must come as a pair");
         if (full_nocap && (!ids(full_nocap, &result.prompt.retained_nocap_prefix_ids, false, error) ||
                            !ids(off_nocap, &result.prompt.dropped_nocap_prefix_ids, false, error))) return false;
+        // Optional condition-dropout variants (base-matched training): six
+        // arrays, all present or none. Older datasets have none.
+        {
+            const char * keys[6] = {"prefix_full_nolyrics_ids", "prefix_off_nolyrics_ids", "prefix_full_notext_ids",
+                                    "prefix_off_notext_ids", "prefix_full_uncond_ids", "prefix_off_uncond_ids"};
+            std::vector<int32_t> * outs[6] = {&result.prompt.retained_nolyrics_prefix_ids, &result.prompt.dropped_nolyrics_prefix_ids,
+                                              &result.prompt.retained_notext_prefix_ids, &result.prompt.dropped_notext_prefix_ids,
+                                              &result.prompt.retained_uncond_prefix_ids, &result.prompt.dropped_uncond_prefix_ids};
+            int present = 0;
+            for (const char * key : keys) if (yyjson_obj_get(item, key)) ++present;
+            if (present != 0 && present != 6) return bad(error, "condition-dropout prefixes must come as a complete set of six");
+            if (present) for (int k = 0; k < 6; ++k) if (!ids(yyjson_obj_get(item, keys[k]), outs[k], false, error)) return false;
+        }
         yyjson_val * cursor = yyjson_obj_get(item, "cursor");
         if (cursor) {
             if (!yyjson_is_obj(cursor)) return bad(error, "cursor metadata must be an object");

@@ -725,6 +725,22 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   /** Further decoder training only: a checkpoint is kept when reconstruction
    *  has dropped by at least this since the last kept one. */
   reconKeepDelta?: number;
+  /** Training method. Absent/'tuned' = the recipe every run before 2026-09-27
+   *  used. 'base-matched' = how the YuE2 report says the base was trained; the
+   *  server forces its fixed parts (no KL anchor or stops, one rate for both
+   *  halves, AdamW with the report's betas, cosine to a floor) and fills the
+   *  knobs below where blank. */
+  method?: 'tuned' | 'base-matched';
+  /** Base-matched knobs (blank = the method's default). */
+  warmup?: number;
+  arLossWeight?: number;
+  beta1?: number;
+  beta2?: number;
+  arTargets?: 'tuned' | 'base';
+  gradAccum?: number;
+  textDropout?: number;
+  lyricDropout?: number;
+  bothDropout?: number;
 }
 
 export interface Yue2JointPreviewOptions {

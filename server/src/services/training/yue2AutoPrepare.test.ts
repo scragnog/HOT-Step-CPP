@@ -25,7 +25,7 @@ function fixture() {
     fs.mkdirSync(opts.output);
     fs.writeFileSync(path.join(opts.output, 'latent.bin'), 'prepared');
     fs.writeFileSync(path.join(opts.output, 'dataset.json'), JSON.stringify({ schema_version: 1,
-      recipe_version: 'aitk-yue2-2026-09-16', items: [{ latent_file: 'latent.bin', prefix_full_nocap_ids: [1] }] }));
+      recipe_version: 'aitk-yue2-2026-09-16', items: [{ latent_file: 'latent.bin', prefix_full_nocap_ids: [1], prefix_full_uncond_ids: [1] }] }));
   };
   return { dir, o, job, prepare, calls: () => calls };
 }

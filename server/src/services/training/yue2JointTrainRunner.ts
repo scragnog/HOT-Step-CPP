@@ -129,6 +129,29 @@ export interface ResolvedYue2JointTrainOptions {
    *  where the engine looks for it; absent = the pristine decoder. Recorded
    *  in the run options so a resume can tell which decoder it started on. */
   companion?: string;
+  /** Training method. 'tuned' (absent) is the recipe every run before
+   *  2026-09-27 used; 'base-matched' trains the way the YuE2 report says the
+   *  base was trained (docs/plans/yue2/31-base-matched-training.md), through
+   *  the knobs below, applied by applyBaseMatchedRecipe. Recorded so the run
+   *  index and the adapter card can say which. */
+  method?: 'tuned' | 'base-matched';
+  /** Linear warmup steps (LmOptim optimizers and the native AdamW). */
+  warmup?: number;
+  /** Planner CE weight against the flow loss (engine default 1.0; the base trained at 0.25). */
+  arLossWeight?: number;
+  /** Adam betas on every optimizer path (engine defaults 0.9 / 0.999; the base trained at 0.9 / 0.95). */
+  beta1?: number;
+  beta2?: number;
+  /** 'base': CE only on tokens the model generates at inference (report eq. 5). Engine default 'tuned'. */
+  arTargets?: 'tuned' | 'base';
+  /** Songs per optimizer update (engine default 1). Needs cursorWeight 0 above 1. */
+  gradAccum?: number;
+  /** Condition dropout rates: text-dropped, lyric-dropped, unconditional
+   *  prompt variants. Need a dataset prepared on or after 2026-09-27, no
+   *  captionDropout, cursorWeight 0; sum at most 1. */
+  textDropout?: number;
+  lyricDropout?: number;
+  bothDropout?: number;
   /** Plan-check planner stop: every `every` steps while the planner is live,
    *  pause, have the checkpoint's planner write `plans` plans, and freeze the
    *  planner at the LAST checkpoint whose failure rate stayed within `margin`
@@ -141,6 +164,40 @@ export interface ResolvedYue2JointTrainOptions {
    *  Refine tab's defaults (the server posts to its own route, so it works
    *  with the browser closed). Never set on a refinement itself. */
   autoRefine?: boolean;
+}
+
+/** The base-matched recipe (docs/plans/yue2/31-base-matched-training.md,
+ *  decisions of 2026-09-27). `forced` is what the method means and cannot be
+ *  edited: no KL anchor, no KL/recon stops, no planner freeze, one rate for
+ *  both halves, no lyric timing, plain AdamW with the report's betas.
+ *  `defaults` are the knobs the card exposes for it, applied only where the
+ *  request leaves them blank. Values with no base equivalent (adapter type,
+ *  rank, alpha, seed, steps) come from the request untouched. */
+export const BASE_MATCHED_FORCED = Object.freeze({
+  method: 'base-matched', optimizer: 'adamw-lm', cautious: false,
+  stopMode: 'steps', targetKl: undefined, targetLoss: undefined, targetKlMode: undefined, narExtraSteps: 0,
+  klWeight: 0, captionDropout: 0, plannerLrScale: 1, narLrScale: 1, cursorWeight: 0,
+  spikeFactor: 0, spikeStop: 0, reconStop: 0, reconTarget: 0, reconKeepDelta: undefined,
+  klCheckpointEvery: undefined, planCheck: undefined, refine: undefined, refinePlanner: undefined,
+  freezePlannerNow: undefined, unfreezePlanner: undefined, autoRefine: false,
+  lrSchedule: 'cosine-floor', lrFloor: 0.1, arTargets: 'base',
+} as const);
+export const BASE_MATCHED_DEFAULTS = Object.freeze({
+  lr: 1e-4, weightDecay: 0.1, beta1: 0.9, beta2: 0.95, abcDropout: 0.5,
+  narCropFrames: 0, arLossWeight: 0.25, gradAccum: 8,
+  textDropout: 0.1, lyricDropout: 0.1, bothDropout: 0.1,
+  /** Warmup as a share of the step count (the base's joint phase warmed up over ~3%). */
+  warmupFraction: 0.03,
+} as const);
+export function applyBaseMatchedRecipe(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...body };
+  const blank = (key: string) => out[key] === undefined || out[key] === null || out[key] === '';
+  for (const [key, value] of Object.entries(BASE_MATCHED_DEFAULTS)) if (key !== 'warmupFraction' && blank(key)) out[key] = value;
+  if (blank('warmup')) {
+    const steps = Number(out.steps);
+    out.warmup = Number.isInteger(steps) && steps > 0 ? Math.max(1, Math.round(steps * BASE_MATCHED_DEFAULTS.warmupFraction)) : 1;
+  }
+  return { ...out, ...BASE_MATCHED_FORCED };
 }
 
 /** The Refine tab's defaults, as one request body. Kept here so the
@@ -226,6 +283,17 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   }
   if (o.lrScale !== undefined && o.lrScale !== 1) args.push('--lr-scale', String(o.lrScale));
   if (o.narCropFrames !== undefined && o.narCropFrames !== 1500) args.push('--nar-crop-frames', String(o.narCropFrames));
+  // Base-matched knobs. Each is only passed off its engine default, so a
+  // request without them builds the argument list it always did.
+  if (o.warmup !== undefined && o.warmup > 0) args.push('--warmup', String(o.warmup));
+  if (o.arLossWeight !== undefined && o.arLossWeight !== 1) args.push('--ar-loss-weight', String(o.arLossWeight));
+  if (o.beta1 !== undefined && o.beta1 !== 0.9) args.push('--beta1', String(o.beta1));
+  if (o.beta2 !== undefined && o.beta2 !== 0.999) args.push('--beta2', String(o.beta2));
+  if (o.arTargets === 'base') args.push('--ar-targets', 'base');
+  if (o.gradAccum !== undefined && o.gradAccum > 1) args.push('--grad-accum', String(o.gradAccum));
+  if (o.textDropout !== undefined && o.textDropout > 0) args.push('--text-dropout', String(o.textDropout));
+  if (o.lyricDropout !== undefined && o.lyricDropout > 0) args.push('--lyric-dropout', String(o.lyricDropout));
+  if (o.bothDropout !== undefined && o.bothDropout > 0) args.push('--both-dropout', String(o.bothDropout));
   // The tokenizer's companion decoder adapter is part of the decoder whenever
   // it is installed: the engine merges it under every generation, so the
   // adapter trains on the decoder it will render with (2026-09-25).
@@ -286,6 +354,17 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
   if (o.stopMode === 'loss' && (o.targetLoss === undefined || !Number.isFinite(o.targetLoss) || o.targetLoss < 0)) return 'targetLoss must be a non-negative finite number when stopMode is loss';
   if (o.stopMode === 'kl' && (o.targetKl === undefined || !Number.isFinite(o.targetKl) || o.targetKl <= 0)) return 'targetKl must be a positive finite number when stopMode is kl';
   if (o.reconKeepDelta !== undefined && (!Number.isFinite(o.reconKeepDelta) || o.reconKeepDelta < 0 || o.reconKeepDelta > 1)) return 'reconKeepDelta must be between 0 and 1';
+  if (o.method !== undefined && o.method !== 'tuned' && o.method !== 'base-matched') return 'method must be tuned or base-matched';
+  if (o.warmup !== undefined && (!Number.isInteger(o.warmup) || o.warmup < 0 || o.warmup > o.steps)) return 'warmup must be an integer between 0 and steps';
+  if (o.arLossWeight !== undefined && (!Number.isFinite(o.arLossWeight) || o.arLossWeight <= 0 || o.arLossWeight > 10)) return 'arLossWeight must be in (0, 10]';
+  for (const [key, v] of [['beta1', o.beta1], ['beta2', o.beta2]] as const) if (v !== undefined && (!Number.isFinite(v) || v < 0 || v >= 1)) return `${key} must be in [0, 1)`;
+  if (o.arTargets !== undefined && o.arTargets !== 'tuned' && o.arTargets !== 'base') return 'arTargets must be tuned or base';
+  if (o.gradAccum !== undefined && (!Number.isInteger(o.gradAccum) || o.gradAccum < 1 || o.gradAccum > 256)) return 'gradAccum must be an integer between 1 and 256';
+  if (o.gradAccum !== undefined && o.gradAccum > 1 && o.alignment?.enabled) return 'gradAccum above 1 needs lyric timing off (cursorWeight 0)';
+  const dropouts = [o.textDropout ?? 0, o.lyricDropout ?? 0, o.bothDropout ?? 0];
+  if (dropouts.some(v => !Number.isFinite(v) || v < 0 || v > 1) || dropouts.reduce((a, b) => a + b, 0) > 1) return 'textDropout, lyricDropout and bothDropout must be in [0, 1] and sum to at most 1';
+  if (dropouts.some(v => v > 0) && (o.captionDropout ?? 0) > 0) return 'the condition dropouts and captionDropout are two recipes for the same prompt slot; use one';
+  if (dropouts.some(v => v > 0) && o.alignment?.enabled) return 'the condition dropouts need lyric timing off (cursorWeight 0)';
   if (o.resume && (!fs.existsSync(o.resume) || !fs.statSync(o.resume).isFile())) return `resume record is missing: ${o.resume}`;
   if (!o.spawnEnv) o.spawnEnv = buildGpuEnv().env;
   return null;

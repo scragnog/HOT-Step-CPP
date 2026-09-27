@@ -25,7 +25,9 @@ export function preparationFingerprint(o: ResolvedYue2AitkPrepareOptions): strin
     }
   }
   // version 3: the importer now clears a flagged instrumental's lyrics.
-  return createHash('sha256').update(JSON.stringify({ version: 3, text, timing: o.lyricTiming !== false, trigger: o.trigger || '',
+  // version 4 (2026-09-27): the importer emits the condition-dropout prefix
+  // variants the base-matched method trains on.
+  return createHash('sha256').update(JSON.stringify({ version: 4, text, timing: o.lyricTiming !== false, trigger: o.trigger || '',
     files: [...new Set(files)].sort().map(stamp) })).digest('hex');
 }
 
@@ -40,6 +42,12 @@ function outputFingerprint(manifest: string): string {
   // (a card default) is refused by the engine. Stale, so it re-prepares.
   if (!data.items.every((item: Record<string, unknown>) => Array.isArray(item.prefix_full_nocap_ids))) {
     throw new Error('Prepared dataset predates trigger-only prefixes');
+  }
+  // Prepared before 2026-09-27: no condition-dropout variants, which the
+  // base-matched method needs. Stale, so it re-prepares (both methods then
+  // share the one prepared dataset).
+  if (!data.items.every((item: Record<string, unknown>) => Array.isArray(item.prefix_full_uncond_ids))) {
+    throw new Error('Prepared dataset predates condition-dropout prefixes');
   }
   const payloads = data.items.map((item: { latent_file: string }) => stamp(path.resolve(path.dirname(manifest), item.latent_file)));
   return createHash('sha256').update(text).update(JSON.stringify(payloads)).digest('hex');

@@ -76,9 +76,17 @@ inline bool read_file(const std::filesystem::path & path, std::vector<uint8_t> *
 inline bool token_ids(const PromptInput & p, size_t frames, std::string * e) {
     if (p.retained_prefix_ids.empty() || p.dropped_prefix_ids.empty()) return prep_fail(e, "verified prefixes cannot be empty");
     for (const auto & ids : {std::cref(p.retained_prefix_ids), std::cref(p.dropped_prefix_ids), std::cref(p.abc_ids),
-                             std::cref(p.retained_nocap_prefix_ids), std::cref(p.dropped_nocap_prefix_ids)})
+                             std::cref(p.retained_nocap_prefix_ids), std::cref(p.dropped_nocap_prefix_ids),
+                             std::cref(p.retained_nolyrics_prefix_ids), std::cref(p.dropped_nolyrics_prefix_ids),
+                             std::cref(p.retained_notext_prefix_ids), std::cref(p.dropped_notext_prefix_ids),
+                             std::cref(p.retained_uncond_prefix_ids), std::cref(p.dropped_uncond_prefix_ids)})
         for (int32_t id : ids.get()) if (id < 0 || id >= kVocabSize) return prep_fail(e, "prompt token outside vocabulary");
     if (p.retained_nocap_prefix_ids.empty() != p.dropped_nocap_prefix_ids.empty()) return prep_fail(e, "trigger-only prefixes must come as a pair");
+    {
+        const int present = !p.retained_nolyrics_prefix_ids.empty() + !p.dropped_nolyrics_prefix_ids.empty() + !p.retained_notext_prefix_ids.empty() +
+                            !p.dropped_notext_prefix_ids.empty() + !p.retained_uncond_prefix_ids.empty() + !p.dropped_uncond_prefix_ids.empty();
+        if (present != 0 && present != 6) return prep_fail(e, "condition-dropout prefixes must come as a complete set of six");
+    }
     const size_t crop = std::min(frames, size_t(1500));
     if (p.retained_prefix_ids.size() + p.abc_ids.size() + 2 * crop + 5 > 24576 ||
         p.dropped_prefix_ids.size() + p.abc_ids.size() + 2 * crop + 5 > 24576)
@@ -301,6 +309,14 @@ inline bool prepare_dataset(const PrepareRequest & request, std::string * error 
              !add_ids(doc, obj, "prefix_full_nocap_ids", item.prompt.retained_nocap_prefix_ids) ||
              !add_ids(doc, obj, "prefix_off_nocap_ids", item.prompt.dropped_nocap_prefix_ids)))
             return prep_fail(error, "cannot construct manifest caption-dropout prefixes");
+        if (item.prompt.has_condition_variants() &&
+            (!add_ids(doc, obj, "prefix_full_nolyrics_ids", item.prompt.retained_nolyrics_prefix_ids) ||
+             !add_ids(doc, obj, "prefix_off_nolyrics_ids", item.prompt.dropped_nolyrics_prefix_ids) ||
+             !add_ids(doc, obj, "prefix_full_notext_ids", item.prompt.retained_notext_prefix_ids) ||
+             !add_ids(doc, obj, "prefix_off_notext_ids", item.prompt.dropped_notext_prefix_ids) ||
+             !add_ids(doc, obj, "prefix_full_uncond_ids", item.prompt.retained_uncond_prefix_ids) ||
+             !add_ids(doc, obj, "prefix_off_uncond_ids", item.prompt.dropped_uncond_prefix_ids)))
+            return prep_fail(error, "cannot construct manifest condition-dropout prefixes");
         if (item.prompt.cursor.present && !add_cursor(doc, obj, item.prompt.cursor))
             return prep_fail(error, "cannot serialize cursor metadata");
     }

@@ -194,6 +194,41 @@ struct Config {
     // a frozen part of the decoder while training, as the engine merges it
     // under every generation. Empty = the pristine base decoder.
     std::string companion;
+    // Base-matched training knobs (docs/plans/yue2/31-base-matched-training.md).
+    // Every default is what the trainer did before the knob existed, so a run
+    // that never passes them is byte-identical to before.
+    //
+    // Weight of the planner's cross-entropy against the decoder's flow loss.
+    // The YuE2 report trains the base at L = 0.25 * L_AR + L_FM (eq. 7); 1.0
+    // is the AITK recipe. Adam cancels a plain loss scale, so this acts through
+    // the shared clip: it sets how much of the 1.0 clip norm the planner takes.
+    float ar_loss_weight = 1.0f;
+    // Adam betas on every optimizer path. The base used (0.9, 0.95); torch's
+    // (0.9, 0.999) is what every run before this flag had.
+    float beta1 = 0.9f;
+    float beta2 = 0.999f;
+    // Which AR positions the cross-entropy covers.
+    //   tuned  every suffix token, MUSIC_START included, and ABC_END even when
+    //          the sheet is dropped (the AITK recipe; yue2_model.py:447-456)
+    //   base   the tokens the model generates at inference and their closing
+    //          markers (report eq. 5): ABC + ABC_END, codec + MUSIC_END. The
+    //          pipeline appends MUSIC_START itself, and the off-mode prompt
+    //          carries ABC_START ABC_END MUSIC_START, so none of those are
+    //          ever predicted.
+    std::string ar_targets = "tuned";
+    // Songs per optimizer update. Gradients of N sampled songs are summed and
+    // divided by N before the clip and the update; a "step" stays one update.
+    // The base trained at batch 256; 1 is what every run before this did.
+    std::int32_t grad_accum = 1;
+    // Condition dropout (report: "text and lyric conditioning can be dropped
+    // separately or together"). Per-step probabilities of training on the
+    // text-dropped, lyric-dropped, or unconditional prompt variant
+    // (yue2-aitk-batch.h PromptInput). They need a dataset prepared with
+    // those prefixes, exclude --caption-dropout (two recipes for the same
+    // slot) and lyric timing, and sum to at most 1. All 0 = off.
+    float text_dropout = 0.0f;
+    float lyric_dropout = 0.0f;
+    float uncond_dropout = 0.0f;
 };
 
 // The schedule's multiplier for the step about to run (`completed` steps
@@ -245,7 +280,12 @@ inline void usage(FILE * out) {
         "[--lr-schedule cosine|cosine-floor|constant|linear|wsd|sgdr] [--lr-floor 0.1] [--lr-decay-steps 40] [--lr-decay-shape linear|cosine] [--kl-overshoot-margin 0.1 (wsd: act at once if the KL passes the target by this during the tail; 0 = off)] "
         "[--lr-cycle-steps 100] [--lr-cycle-mult 2] [--lr-scale 1.0 (multiplies the rate on every optimizer, Prodigy included)] "
         "[--nar-crop-frames 1500 (decoder training window; 0 = whole song, clamped to the context)] "
-        "[--companion <nar_lora_joint_v9.safetensors> (the tokenizer's companion decoder adapter, frozen)]\n");
+        "[--companion <nar_lora_joint_v9.safetensors> (the tokenizer's companion decoder adapter, frozen)] "
+        "[--ar-loss-weight 1.0 (planner CE weight against the flow loss; the base trained at 0.25)] "
+        "[--beta1 0.9] [--beta2 0.999 (Adam betas; the base trained at 0.9 / 0.95)] "
+        "[--ar-targets tuned|base (base: CE only on tokens the model generates at inference)] "
+        "[--grad-accum 1 (songs per optimizer update; needs --cursor-weight 0 above 1)] "
+        "[--text-dropout 0] [--lyric-dropout 0] [--both-dropout 0 (condition dropout rates; need a dataset prepared with the variants, no --caption-dropout, --cursor-weight 0)]\n");
 }
 
 namespace detail {
@@ -492,6 +532,30 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--nar-extra-steps")) {
             std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
                 !detail::decimal_i32(value_text.c_str(), &parsed.nar_extra_steps)) { if (error) *error = "--nar-extra-steps must be a nonnegative integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--ar-loss-weight")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.ar_loss_weight) || parsed.ar_loss_weight <= 0.0f || parsed.ar_loss_weight > 10.0f) { if (error) *error = "--ar-loss-weight must be in (0, 10]"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--beta1")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.beta1) || parsed.beta1 < 0.0f || parsed.beta1 >= 1.0f) { if (error) *error = "--beta1 must be in [0, 1)"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--beta2")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.beta2) || parsed.beta2 < 0.0f || parsed.beta2 >= 1.0f) { if (error) *error = "--beta2 must be in [0, 1)"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--ar-targets")) {
+            if (!detail::value(arg, argc, argv, &i, &parsed.ar_targets, error)) return ParseResult::error;
+            if (parsed.ar_targets != "tuned" && parsed.ar_targets != "base") { if (error) *error = "--ar-targets must be tuned or base"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--grad-accum")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::decimal_i32(text.c_str(), &parsed.grad_accum) || parsed.grad_accum < 1 || parsed.grad_accum > 256) { if (error) *error = "--grad-accum must be in [1, 256]"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--text-dropout")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.text_dropout) || parsed.text_dropout < 0.0f || parsed.text_dropout > 1.0f) { if (error) *error = "--text-dropout must be in [0, 1]"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--lyric-dropout")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.lyric_dropout) || parsed.lyric_dropout < 0.0f || parsed.lyric_dropout > 1.0f) { if (error) *error = "--lyric-dropout must be in [0, 1]"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--both-dropout")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.uncond_dropout) || parsed.uncond_dropout < 0.0f || parsed.uncond_dropout > 1.0f) { if (error) *error = "--both-dropout must be in [0, 1]"; return ParseResult::error; }
         } else {
             if (error) *error = std::string("unknown option: ") + arg;
             return ParseResult::error;

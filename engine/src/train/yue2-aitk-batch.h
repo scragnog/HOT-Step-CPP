@@ -57,10 +57,42 @@ struct PromptInput {
     std::vector<int32_t> retained_nocap_prefix_ids;
     std::vector<int32_t> dropped_nocap_prefix_ids;
     std::vector<int32_t> abc_ids;
+    // Condition-dropout variants (base-matched training, docs/plans/yue2/31).
+    // Each is a {full-instruction, off-instruction} pair like the ones above,
+    // with the text taken from the released protocol where it shows it:
+    //   nolyrics  "instr\n[Tags]\nstyle\n[Lyrics]\n\n"   the official instrumental
+    //             tooling's lyric-free request (lyrics="")
+    //   notext    "instr\n[Tags]\n\n[Lyrics]\nlyrics\n"  by symmetry; nothing
+    //             published shows a text-only drop
+    //   uncond    EOD + bare instruction, no [Tags]/[Lyrics] headers: protocol.py
+    //             negative_prefix, the CFG unconditional branch. The off form
+    //             has no ABC bracket at all (see abc_markers()).
+    // Empty when the dataset was prepared before they existed; the trainer
+    // refuses the dropouts on such a dataset rather than training without.
+    std::vector<int32_t> retained_nolyrics_prefix_ids, dropped_nolyrics_prefix_ids;
+    std::vector<int32_t> retained_notext_prefix_ids, dropped_notext_prefix_ids;
+    std::vector<int32_t> retained_uncond_prefix_ids, dropped_uncond_prefix_ids;
+    enum class Condition { kept, nolyrics, notext, uncond };
+    Condition condition = Condition::kept; // stochastic decision is made by the caller
     bool retain_abc = true;     // stochastic decision is made by the caller
     bool retain_caption = true; // likewise; false selects the *_nocap_ prefix
     bool has_nocap() const { return !retained_nocap_prefix_ids.empty() && !dropped_nocap_prefix_ids.empty(); }
+    bool has_condition_variants() const {
+        return !retained_nolyrics_prefix_ids.empty() && !dropped_nolyrics_prefix_ids.empty() &&
+               !retained_notext_prefix_ids.empty() && !dropped_notext_prefix_ids.empty() &&
+               !retained_uncond_prefix_ids.empty() && !dropped_uncond_prefix_ids.empty();
+    }
+    // Every prefix ends in ABC_START and the suffix opens [abc] ABC_END
+    // MUSIC_START, except the unconditional off-mode prompt: protocol.py's off
+    // negative is EOD + instruction + MUSIC_START, no bracket.
+    bool abc_markers() const { return !(condition == Condition::uncond && !retain_abc); }
     const std::vector<int32_t> & selected_prefix() const {
+        switch (condition) {
+            case Condition::nolyrics: return retain_abc ? retained_nolyrics_prefix_ids : dropped_nolyrics_prefix_ids;
+            case Condition::notext:   return retain_abc ? retained_notext_prefix_ids : dropped_notext_prefix_ids;
+            case Condition::uncond:   return retain_abc ? retained_uncond_prefix_ids : dropped_uncond_prefix_ids;
+            case Condition::kept: break;
+        }
         if (retain_caption) return retain_abc ? retained_prefix_ids : dropped_prefix_ids;
         return retain_abc ? retained_nocap_prefix_ids : dropped_nocap_prefix_ids;
     }
@@ -120,9 +152,11 @@ inline ArSequence make_ar_sequence(const PromptInput & prompt,
                                    bool append_music_end) {
     ArSequence out;
     out.prefix_ids = prompt.selected_prefix();
-    if (prompt.retain_abc)
-        out.suffix_ids.insert(out.suffix_ids.end(), prompt.abc_ids.begin(), prompt.abc_ids.end());
-    out.suffix_ids.push_back(kAbcEnd);
+    if (prompt.abc_markers()) {
+        if (prompt.retain_abc)
+            out.suffix_ids.insert(out.suffix_ids.end(), prompt.abc_ids.begin(), prompt.abc_ids.end());
+        out.suffix_ids.push_back(kAbcEnd);
+    }
     out.suffix_ids.push_back(kMusicStart);
     for (int32_t token : song_tokens) out.suffix_ids.push_back(token + kCodecOffset);
     if (append_music_end) {
@@ -146,17 +180,44 @@ inline ArSequence make_ar_sequence(const PromptInput & prompt,
     return out;
 }
 
+// --ar-targets base: keep only the prediction rows whose target the model
+// generates at inference (report eq. 5: payload tokens and their closing
+// markers). The suffix is [abc (A tokens)] ABC_END MUSIC_START codec...
+// [MUSIC_END]; MUSIC_START (index A+1) is appended by the pipeline, never
+// predicted, and with the sheet dropped (A == 0) the off-mode prompt already
+// carries ABC_END, so index A goes too. Without the ABC bracket (the
+// unconditional off prompt) the suffix opens with MUSIC_START at index 0.
+// Filtered by index, not by value.
+inline void keep_base_targets(ArSequence * seq, size_t abc_tokens, bool abc_retained, bool abc_markers = true) {
+    std::vector<int32_t> targets; std::vector<size_t> positions;
+    targets.reserve(seq->target_ids.size()); positions.reserve(seq->prediction_positions.size());
+    const size_t music_start = abc_markers ? abc_tokens + 1 : 0;
+    for (size_t i = 0; i < seq->target_ids.size(); ++i) {
+        if (i == music_start || (abc_markers && !abc_retained && i == 0)) {
+            if (i < seq->prediction_positions.size()) seq->target_mask[seq->prediction_positions[i]] = 0;
+            continue;
+        }
+        targets.push_back(seq->target_ids[i]);
+        if (i < seq->prediction_positions.size()) positions.push_back(seq->prediction_positions[i]);
+    }
+    seq->target_ids = std::move(targets);
+    seq->prediction_positions = std::move(positions);
+}
+
 // ar_token_limit is an explicit caller choice; zero means the reference's
 // ar_max_tokens <= 0 case (the complete song). Otherwise the caller supplies
 // the already-resolved limit. The reference uses min(total, ar_max_tokens), and appends
 // MUSIC_END only when that limit reaches the complete song (yue2_model.py:552-565).
+// base_targets applies keep_base_targets to the AR loss sequence only; the
+// NAR conditioning sequence is never a loss target.
 inline bool build(const PromptInput & prompt, const SongInput & song,
                   FrameRange nar_range, size_t ar_token_limit, Batch * out,
-                  std::string * error = nullptr) {
+                  std::string * error = nullptr, bool base_targets = false) {
     if (!out) return fail(error, "output batch is null");
     if (!validate_song(song, error)) return false;
     if (!validate_range(nar_range, song.semantic_tokens.size(), error)) return false;
     if (!prompt.retain_caption && !prompt.has_nocap()) return fail(error, "caption dropout selected but the item has no trigger-only prefixes");
+    if (prompt.condition != PromptInput::Condition::kept && !prompt.has_condition_variants()) return fail(error, "condition dropout selected but the item has no text/lyric/unconditional prefixes");
     const auto & prefix = prompt.selected_prefix();
     if (prefix.empty()) return fail(error, "selected prompt prefix is empty");
     for (int32_t id : prefix)
@@ -176,6 +237,7 @@ inline bool build(const PromptInput & prompt, const SongInput & song,
     std::vector<int32_t> nar_tokens(song.semantic_tokens.begin() + nar_range.start,
                                     song.semantic_tokens.begin() + nar_range.end);
     out->ar = make_ar_sequence(prompt, ar_tokens, ar_full);
+    if (base_targets) keep_base_targets(&out->ar, prompt.retain_abc ? prompt.abc_ids.size() : 0, prompt.retain_abc, prompt.abc_markers());
     out->nar.frames = nar_range;
     out->nar.semantic_tokens = nar_tokens;
     const size_t offset = nar_range.start * song.latent_channels;

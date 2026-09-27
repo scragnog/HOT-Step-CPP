@@ -33,6 +33,39 @@ the latent, semantic-token and ABC cache stages, then prepare the joint dataset
 and train. Legacy keeps the existing separate AR/NAR workflow. The joint
 checkpoint picker applies both native adapters for generation.
 
+### Two training methods (2026-09-27)
+
+The card's **Training method** select picks between two recipes for the same trainer.
+**Tuned** is every default above and below this section: Prodigy, the KL anchor and KL
+stop, lyric timing, the planner at a lower rate, the 60 s decoder crop. **Base-matched**
+trains the way the YuE2 technical report (Appendix C, eq. 5-7, Table 14) says the base
+was trained, as far as an adapter fine-tune can. The server applies it
+(`applyBaseMatchedRecipe` in `yue2JointTrainRunner.ts`): fixed parts replace the request,
+knobs fill in where blank. Every engine flag it uses defaults to the old behaviour, and a
+run that never passes them is bit-identical to before (gate: 10 tuned steps and 5 native
+AdamW steps, old vs new binary, identical losses and adapter sha256s, 2026-09-27).
+
+| Report | Flag | Base-matched value | Tuned |
+|---|---|---|---|
+| `L = 0.25 L_AR + L_FM` | `--ar-loss-weight` | 0.25 (scales the CE gradient before the shared clip; Adam cancels a plain loss scale, so the clip is where it acts) | 1.0 |
+| Adam β = (0.9, 0.95), wd 0.1 | `--beta1 --beta2 --weight-decay`, `--optimizer adamw-lm` | 0.9 / 0.95 / 0.1 | 0.9 / 0.999 / 1e-4, Prodigy |
+| CE over generated tokens and closing markers (eq. 5) | `--ar-targets base` | MUSIC_START never a target; ABC_END only when the sheet is kept | every suffix token |
+| Batch 256 | `--grad-accum` | 8 songs per update (a "step" stays one update; each micro-step draws its own song from the same RNG stream) | 1 |
+| Text and lyrics dropped separately or together | `--text-dropout --lyric-dropout --both-dropout` | 0.1 / 0.1 / 0.1 (rates are not published) | caption dropout 0.5 instead |
+| Whole songs, no temporal split | `--nar-crop-frames 0` | whole song (about 12 GB VRAM, 11-15 s a step on a 4-minute song) | 1500 |
+| No KL anchor, no stops | `--kl-weight 0`, fixed steps | the frozen teacher forward is skipped when nothing reads the KL | KL 0.2 + target |
+| Warmup + cosine | `--warmup`, `--lr-schedule cosine-floor --lr-floor 0.1` | 3% of steps, floor 0.1 | wsd |
+
+Condition dropout needs prefix variants the importer now always emits (`prefix_{full,off}_{nolyrics,notext,uncond}_ids`);
+`yue2AutoPrepare` re-prepares a dataset that lacks them once, and both methods then share it.
+Their texts: lyric-dropped `[Lyrics]\n\n` (the official instrumental tooling's lyric-free
+request), text-dropped `[Tags]\n\n` (by symmetry, unpublished), unconditional = the bare
+instruction with no headers (`protocol.py` `negative_prefix`; its off form has no ABC bracket,
+so the suffix opens with MUSIC_START). `ace-train yue2-batch-check` is a CPU self-check of these
+layouts and of `--ar-targets base`. Not matched: the report's two no-semantic-token tasks
+(no published layout; our inference never runs them), its flow-time distribution (unstated),
+and loudness (the cache is still normalised to -14 LUFS; the base used raw recordings).
+
 Stops and tails. Under `--lr-schedule wsd` with `--target-kl`, the tail starts when the KL trend line's slope says `reading + 0.5 × slope × lr_decay_steps` reaches the target, so a linear or cosine decay ends on the target; a reading at the target with no warning starts the tail as before. `--kl-overshoot-margin` (default 0.1, 0 = off) acts on the stop at once if the reading passes the target by that much during the tail. During decoder-only training `--recon-stop F` stops when a least-squares line through the last `--recon-stop-window` `nar_recon` readings (at least 3; the app passes 10) gains less than F across them; it was a two-point comparison until 2026-09-26, which the meter's 0.2-0.5% per-checkpoint jitter tripped on runs still improving 0.5-0.9% per 50 steps. The server option `reconKeepDelta` deletes a routine checkpoint whose `nar_recon` did not improve on the best kept one by that amount once a newer checkpoint lands (the newest is never deleted; rung checkpoints are exempt). After the Refine cleanup the run directory moves to `<adapters>/yue2-joint-adapters/refined/` and the `yue2-aitk-runs.json` index, the album presets and the persisted adapter pick are repointed; the index also relocates a run moved into `refined/` by hand. Preview records carry `plan.attempts` (planner re-plans) and `composerReplans`, recovered from the seed the engine echoes back, which advances by 1000003 per recompose. The caption-source list is served by `GET /api/training/yue2-dataset-captions` keyed by dataset id, lyrics set or adapter path, composed from the dataset's sidecars (a `.yue2.txt` caption is the whole trained sentence; an ACE caption gets the genre/BPM/key tail), and matches the prepared manifest's style strings minus the trigger opener.
 
 Training Studio enables lyric-timing supervision for new joint runs by default.

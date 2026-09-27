@@ -946,6 +946,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   };
   const active = job?.status === 'queued' || job?.status === 'running';
   const preparing = prepareJob?.status === 'queued' || prepareJob?.status === 'running';
+  // Training method (docs/user/training/yue2.md "Training method"). The
+  // base-matched method's fixed parts are applied by the server; the card
+  // hides the tuned-only controls and shows the method's own knobs instead.
+  const baseMatched = form.method === 'base-matched';
+  const setMethod = (value: 'tuned' | 'base-matched') => setForm(previous => value === 'base-matched'
+    ? { ...previous, method: 'base-matched', stopMode: 'steps', optimizer: 'adamw-lm', cautious: false, autoRefine: false, narExtraSteps: 0 }
+    : { ...previous, method: undefined, stopMode: 'kl', optimizer: DEFAULT_FORM.optimizer, cautious: DEFAULT_FORM.cautious, autoRefine: true,
+        targetKl: previous.targetKl ?? ((previous.adapterType ?? 'lora') === 'lokr' ? LOKR_STOP.targetKl : LORA_STOP.targetKl) });
   const input = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-xs text-zinc-800 dark:text-zinc-200 outline-none focus:border-amber-500/50';
   const field = (label: string, key: string, type = 'text', source: unknown = form, update?: (value: string) => void, info?: string, meta?: string) => (
     <label className="flex flex-col gap-1">
@@ -1113,7 +1121,26 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {preparing && <button type="button" onClick={() => void stopPrepare()} className="ml-3 text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
         {prepareJob?.error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{prepareJob.error}</div>}
       </details>
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <label className="mt-4 flex flex-col gap-1 md:max-w-md">
+        <ParamLabel
+          label={t('trainingStudio.yue2.method.trainMethod', 'Training method')}
+          className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+          info={t('trainingStudio.yue2.method.trainMethodInfo', 'Tuned is the recipe every run so far used: Prodigy, a KL anchor and KL stop for the planner, lyric timing, planner at a lower rate, a 60 s decoder crop. Base-matched trains the way the YuE2 technical report says the base model was trained: planner loss at a quarter of the decoder loss, AdamW with betas 0.9/0.95 and weight decay 0.1, whole songs for the decoder, gradient accumulation over several songs, and text/lyric prompt dropout. It has no KL anchor or stop and runs to the step count, saving a checkpoint ladder for you to pick from by ear. Unknowns in the report (learning rate, dropout rates) use agreed defaults you can edit below.')}
+        />
+        <StyledSelect
+          accent="amber"
+          value={baseMatched ? 'base-matched' : 'tuned'}
+          disabled={!!resumeChoice || active || starting || preparing || yue2RunAllActive}
+          onChange={value => setMethod(value)}
+          className="w-full"
+          options={[
+            { value: 'tuned' as const, label: t('trainingStudio.yue2.method.trainMethodTuned', 'Tuned (our recipe)') },
+            { value: 'base-matched' as const, label: t('trainingStudio.yue2.method.trainMethodBase', 'Base-matched (YuE2 report recipe)') },
+          ]}
+        />
+      </label>
+      {baseMatched && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.baseMatchedHint', 'Fixed by the method: AdamW (graph) with betas 0.9 / 0.95, no KL anchor or KL stop, planner and decoder at one rate, planner loss weighted 0.25, loss only on the tokens the model generates, whole-song decoder training, cosine decay to 0.1x after a 3% warmup, no lyric timing, no refinement hand-off. The run ends at the step count; pick a checkpoint by ear. The dataset is re-prepared once with the prompt variants this method trains on. Note: the audio cache is still loudness-normalised to -14 LUFS, which the base was not; that is a separate change.')}</p>}
+      {!baseMatched && <div className="mt-4 flex flex-wrap items-center gap-2">
         <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.preset', 'Preset')}</span>
         {PRESETS.map(p => <button key={p.key} type="button" disabled={active || starting || preparing || yue2RunAllActive}
           onClick={() => setForm(previous => ({ ...previous, ...presetValues(p) }))}
@@ -1134,11 +1161,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           label={t('trainingStudio.yue2.method.autoRefine', 'Automatically proceed to refinement')}
           info={t('trainingStudio.yue2.method.autoRefineHint', 'When the run completes, start a planner refinement of it with the Refine tab defaults (KL rungs to 2.0, previews per rung) and move to the Refine tab. Off: the run stops at done and stays on this tab.')}
         />
-      </div>
+      </div>}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
         {!resumeChoice && <details className="md:col-span-2"><summary className="cursor-pointer text-[11px] text-zinc-500">Manual resume path</summary>{field(t('trainingStudio.yue2.method.resume', 'Resume record (optional)'), 'resume', 'text', form, undefined,
           t('trainingStudio.yue2.method.resumeInfo', 'The saved resume record of a previous run, to continue it without picking it from the Resume list above. Leave blank to start a new run.'))}</details>}
-        <label className="flex flex-col gap-1">
+        {!baseMatched && <label className="flex flex-col gap-1">
           <ParamLabel
             label={t('trainingStudio.yue2.method.stopMode', 'Train until')}
             className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
@@ -1156,7 +1183,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               { value: 'loss' as const, label: t('trainingStudio.yue2.method.stopLoss', 'Target loss') },
             ]}
           />
-        </label>
+        </label>}
         {field((form.stopMode ?? 'steps') !== 'steps'
           ? t('trainingStudio.yue2.method.maxSteps', 'Max steps')
           : t('trainingStudio.yue2.method.steps', 'Steps'), 'steps', 'number', form, undefined,
@@ -1242,17 +1269,43 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             t('trainingStudio.yue2.method.alphaInfo', 'The LoRA scale. This card keeps it equal to rank (scale 1); raising alpha above rank strengthens the adapter\'s effect without changing its size.'),
             t('trainingStudio.yue2.method.alphaMeta', 'default = rank'))}
         </>}
-        {lyricTiming && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number', form, undefined,
+        {lyricTiming && !baseMatched && field(t('trainingStudio.yue2.method.cursorWeight', 'Timing loss weight'), 'cursorWeight', 'number', form, undefined,
           t('trainingStudio.yue2.method.cursorWeightInfo', 'How much the lyric-timing (cursor) objective counts in the composite loss, next to the AR/NAR terms. Higher pushes the planner to track word timing more tightly, at some cost to the other objectives; lower lets timing drift more.'),
           t('trainingStudio.yue2.method.cursorWeightMeta', 'default 0.08'))}
       </div>
       {(form.adapterType ?? 'lora') === 'lokr' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.lokrHint', 'LoKr trains a Kronecker-factored delta per site instead of a low-rank pair. Strength is alpha / dim; 4x (64 / 4 / 256, about 106 MB for both halves) is the tested default, against 279 MB for the rank-64 LoRA. For more capacity raise dim and keep alpha at 4x dim; at factor 4 stay below dim 256, where some sites stop factorizing and ignore alpha.')}</p>}
       {(form.stopMode ?? 'steps') === 'kl' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetKlHint', 'AR KL is how far the planner has moved from the base model, so it means the same for every artist. For LoRA, likeness starts near 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, so it ships 1.0. Once the KL reading reaches the target the planner freezes there. With "Decoder steps after KL" above 0, the decoder (timbre, where likeness lives) keeps training alone for that many steps; 0 ends the run at the KL, as before. The KL checkpoint is saved either way. Max steps is the cap. The presets end the run at the KL target: Fast 0.8, Balanced 1.0, Thorough 1.6 (the step count is the cap). The decoder then trains on during refinement, from the rung you pick, until its reconstruction target.')}</p>}
       {(form.stopMode ?? 'steps') === 'loss' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.targetLossHint', 'Composite = AR CE + 0.2 × AR KL + NAR flow MSE + timing CE × weight. Training stops once the trailing 20-step mean is at or below this.')}</p>}
-      <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
+      {!baseMatched && <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         {resumeChoice ? <p className="text-xs text-zinc-500">Optimizer: {form.optimizer ?? 'adamw'} (restored from the selected run)</p>
           : <Yue2OptimizerFields joint value={optimValue} onChange={patch => setForm(previous => ({ ...previous, ...patch }))} />}
-      </div>
+      </div>}
+      {baseMatched && <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
+        <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.baseMatchedKnobs', 'Base-matched settings')}</span>
+        <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.baseMatchedKnobsHint', 'Blank = the method default shown beside each field. The report does not state a fine-tuning learning rate or the dropout rates, so those defaults are agreed guesses; the rest are the report\'s own values.')}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+          {([
+            ['lr', t('trainingStudio.yue2.method.lr', 'Learning rate'), t('trainingStudio.yue2.method.bmLrInfo', 'AdamW peak learning rate for both halves. The report gives full-model rates only (3e-4 joint, annealed to 3e-5), which do not transfer to an adapter; 1e-4 is the agreed default.'), 'default 1e-4'],
+            ['warmup', t('trainingStudio.yue2.method.warmup', 'Warmup steps'), t('trainingStudio.yue2.method.warmupInfo', 'Linear warmup to the peak rate, then cosine decay to a 0.1x floor at the step count. Blank = 3% of the steps, the base\'s own joint-phase warmup share.'), 'default 3% of steps'],
+            ['weightDecay', t('trainingStudio.yue2.method.weightDecay', 'Weight decay'), t('trainingStudio.yue2.method.bmWeightDecayInfo', 'Decoupled weight decay, as the base\'s joint phase used.'), 'default 0.1 (report)'],
+            ['gradAccum', t('trainingStudio.yue2.method.gradAccum', 'Songs per update'), t('trainingStudio.yue2.method.gradAccumInfo', 'Gradients of this many songs are averaged before each optimizer update, so one step sees more than one song, as the base\'s batch of 256 did. Each step takes this many times longer, so lower the step count to match. 1 updates on every song.'), 'default 8'],
+            ['arLossWeight', t('trainingStudio.yue2.method.arLossWeight', 'Planner loss weight'), t('trainingStudio.yue2.method.arLossWeightInfo', 'The planner\'s cross-entropy is weighted by this against the decoder\'s flow loss before the shared gradient clip, so it sets how much of the clip the planner takes. The report trains the base at 0.25; 1.0 is the tuned recipe.'), 'default 0.25 (report)'],
+            ['beta2', t('trainingStudio.yue2.method.beta2', 'Adam beta2'), t('trainingStudio.yue2.method.beta2Info', 'How long the optimizer\'s second moment remembers. The report\'s joint phase used 0.95; torch\'s 0.999 is what the tuned recipe uses.'), 'default 0.95 (report)'],
+            ['textDropout', t('trainingStudio.yue2.method.textDropout', 'Text dropout'), t('trainingStudio.yue2.method.textDropoutInfo', 'Share of steps trained with the style text (trigger included) removed and the lyrics kept. The report drops text and lyrics separately or together for guidance but gives no rates; 0.1 is the agreed default.'), 'default 0.1'],
+            ['lyricDropout', t('trainingStudio.yue2.method.lyricDropout', 'Lyric dropout'), t('trainingStudio.yue2.method.lyricDropoutInfo', 'Share of steps trained with the lyrics removed and the style kept, written the way the official instrumental tooling sends a lyric-free request.'), 'default 0.1'],
+            ['bothDropout', t('trainingStudio.yue2.method.bothDropout', 'Unconditional dropout'), t('trainingStudio.yue2.method.bothDropoutInfo', 'Share of steps trained on the bare instruction with no style or lyrics: exactly the prompt the runtime\'s guidance uses as its unconditional branch.'), 'default 0.1'],
+            ['abcDropout', t('trainingStudio.yue2.method.abcDropout', 'ABC dropout'), t('trainingStudio.yue2.method.bmAbcDropoutInfo', 'Share of steps trained without the lead sheet, matching the report\'s balanced mix of tasks with and without a score.'), 'default 0.5 (report)'],
+            ['narCropFrames', t('trainingStudio.yue2.method.narCropFrames', 'Decoder crop (frames)'), t('trainingStudio.yue2.method.bmNarCropInfo', 'The decoder trains on this many frames per song (25 per second). 0 trains on the whole song, as the base did (about 12 GB of VRAM and 11-15 s a step on a 4-minute song); 1500 is the tuned recipe\'s 60 s crop.'), 'default 0 (whole song, report)'],
+          ] as const).map(([key, label, info, meta]) => (
+            <label key={key} className="flex flex-col gap-1">
+              <ParamLabel label={label} info={info} meta={meta} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider" />
+              <input className={input} type="number" step="any" placeholder="method default"
+                value={form[key] ?? ''} disabled={active || starting || preparing || yue2RunAllActive}
+                onChange={event => set(key, event.target.value === '' ? undefined : Number(event.target.value))} />
+            </label>
+          ))}
+        </div>
+      </div>}
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         <div className="flex flex-col gap-1">
           <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.presets', 'Training presets')}</span>
@@ -1287,7 +1340,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           ))}
         </div>}
       </div>
-      <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/30 dark:bg-black/10 p-3">
+      {!baseMatched && <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/30 dark:bg-black/10 p-3">
         <summary className="cursor-pointer text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
           {t('trainingStudio.yue2.method.advancedTitle', 'Advanced: planner and optimizer')}
         </summary>
@@ -1370,7 +1423,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {form.lrSchedule === 'sgdr' && field(t('trainingStudio.yue2.method.lrCycleMult', 'Cycle growth'), 'lrCycleMult', 'number', form, value => set('lrCycleMult', value === '' ? undefined : Number(value)),
             t('trainingStudio.yue2.method.lrCycleMultInfo', 'How much longer each sgdr cycle is than the last, as a multiplier. Higher spaces the restarts further apart as the run goes on; 1 keeps every cycle the same length.'))}
         </div>
-      </details>
+      </details>}
       <Toggle
         accent="amber"
         className="mt-3"

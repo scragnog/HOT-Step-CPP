@@ -300,6 +300,39 @@ inline bool prepare_from_legacy(const Request & request, std::string * error = n
         item.prompt_style_nocap = style_nocap;
         item.prompt.retained_nocap_prefix_ids.assign(full_nocap.begin(), full_nocap.end());
         item.prompt.dropped_nocap_prefix_ids.assign(off_nocap.begin(), off_nocap.end());
+        // Condition-dropout variants (base-matched training; yue2-aitk-batch.h
+        // PromptInput documents each text and its source). Always emitted; the
+        // trainer draws on them only under --text-dropout / --lyric-dropout /
+        // --both-dropout. The text-dropped style is empty, trigger included:
+        // the base has no trigger concept.
+        {
+            const auto tail_ok = [&](std::vector<int> & full, std::vector<int> & off) -> bool {
+                if (full.empty() || full.back() != YUE2_ABC_START || off.size() < 3 ||
+                    off[off.size() - 2] != YUE2_ABC_END || off.back() != YUE2_MUSIC_START) return false;
+                off.resize(off.size() - 2); // PromptInput prefixes end at ABC_START.
+                return true;
+            };
+            auto full_nolyrics = yue2_token_prefixes(&tokenizer, style, "", YUE2_COT_FULL, nullptr);
+            auto off_nolyrics = yue2_token_prefixes(&tokenizer, style, "", YUE2_COT_OFF, nullptr);
+            auto full_notext = yue2_token_prefixes(&tokenizer, "", lyrics, YUE2_COT_FULL, nullptr);
+            auto off_notext = yue2_token_prefixes(&tokenizer, "", lyrics, YUE2_COT_OFF, nullptr);
+            if (!tail_ok(full_nolyrics, off_nolyrics) || !tail_ok(full_notext, off_notext))
+                return fail(error, "YuE2 tokenizer produced an unexpected condition-dropout prefix tail");
+            // protocol.py negative_prefix: EOD + the bare instruction. Full keeps
+            // its ABC bracket (the sheet rides in the suffix as usual, so the
+            // prefix ends at ABC_START); off has no bracket and its suffix opens
+            // with MUSIC_START (PromptInput::abc_markers()).
+            std::vector<int> full_uncond{YUE2_EOD}, off_uncond{YUE2_EOD};
+            for (const int id : yue2_bpe_encode(&tokenizer, yue2_instruction(YUE2_COT_FULL))) full_uncond.push_back(id);
+            full_uncond.push_back(YUE2_ABC_START);
+            for (const int id : yue2_bpe_encode(&tokenizer, yue2_instruction(YUE2_COT_OFF))) off_uncond.push_back(id);
+            item.prompt.retained_nolyrics_prefix_ids.assign(full_nolyrics.begin(), full_nolyrics.end());
+            item.prompt.dropped_nolyrics_prefix_ids.assign(off_nolyrics.begin(), off_nolyrics.end());
+            item.prompt.retained_notext_prefix_ids.assign(full_notext.begin(), full_notext.end());
+            item.prompt.dropped_notext_prefix_ids.assign(off_notext.begin(), off_notext.end());
+            item.prompt.retained_uncond_prefix_ids.assign(full_uncond.begin(), full_uncond.end());
+            item.prompt.dropped_uncond_prefix_ids.assign(off_uncond.begin(), off_uncond.end());
+        }
         std::string cursor_name;
         const yyjson_val * cursor_value = yyjson_obj_get(source, "cursor_words");
         if (cursor_value && !str(const_cast<yyjson_val *>(cursor_value), &cursor_name, true))

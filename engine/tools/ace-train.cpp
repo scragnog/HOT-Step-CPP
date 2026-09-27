@@ -57,6 +57,7 @@
 #include "train/yue2-aitk-import.h"
 #include "train/yue2-aitk-native-import.h"
 #include "train/yue2-optim-check.h"
+#include "train/yue2-aitk-batch-check.h"
 #include "model-registry.h"
 #include "train/dit-train-run.h"   // pulls in every dit-*.h (DiT LoRA trainer)
 #include "train/lm-train-run.h"    // pulls in every lm-*.h (LM LoRA trainer)
@@ -6503,6 +6504,9 @@ int main(int argc, char ** argv) {
     if (!strcmp(argv[1], "yue2-optim-check")) {
         if (argc < 3) { fprintf(stderr, "usage: ace-train yue2-optim-check <output-dir> [CPU|CUDA0]\n"); return 2; }
         return yue2_optim_check_main(argv[2], argc > 3 ? argv[3] : "CPU");
+    }
+    if (!strcmp(argv[1], "yue2-batch-check")) {
+        return yue2_aitk_batch_check_main();
     }
     if (!strcmp(argv[1], "yue2-nar-train")) {
         return cmd_yue2_nar_train(argc - 1, argv + 1);

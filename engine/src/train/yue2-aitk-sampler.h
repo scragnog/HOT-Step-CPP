@@ -44,6 +44,7 @@ struct SampledBatch {
     FrameRange crop;
     bool abc_retained = false;
     bool caption_retained = true;
+    PromptInput::Condition condition = PromptInput::Condition::kept;
     float timestep = 0.0f;
     float timestep_bf16 = 0.0f;
     std::vector<float> clean_f32, noise_f32, target_f32, noisy_f32, noisy_bf16;
@@ -56,9 +57,18 @@ public:
     explicit Yue2NativeSampler(uint64_t seed) : rng_(seed) {}
     NativeRng & rng() { return rng_; }
     std::vector<float> sigmoid_schedule(size_t count) { if (!count) throw std::invalid_argument("timestep schedule is empty"); std::vector<float> values; values.reserve(count); for (size_t i = 0; i < count; ++i) values.push_back(float((1.0 - (1.0 / (1.0 + std::exp(-rng_.normal01())))) * 1000.0)); std::sort(values.begin(), values.end(), std::greater<float>()); schedule_ = values; schedule_cursor_ = 0; return values; }
-    SampledBatch sample(const SongInput & song, const PromptInput & prompt, size_t train_window_frames, const std::vector<float> & timesteps, float abc_dropout = .5f, size_t ar_token_limit = 0, size_t eligible_timestep_count = 0, float caption_dropout = 0.0f) {
+    // base_targets: --ar-targets base (yue2-aitk-batch.h keep_base_targets). It
+    // changes which rows the AR loss covers, never an RNG draw.
+    // text/lyric/uncond_dropout: the condition-dropout rates (--text-dropout,
+    // --lyric-dropout, --both-dropout). One draw, made only when a rate is set,
+    // picks which prompt variant the step trains on.
+    SampledBatch sample(const SongInput & song, const PromptInput & prompt, size_t train_window_frames, const std::vector<float> & timesteps, float abc_dropout = .5f, size_t ar_token_limit = 0, size_t eligible_timestep_count = 0, float caption_dropout = 0.0f, bool base_targets = false,
+                        float text_dropout = 0.0f, float lyric_dropout = 0.0f, float uncond_dropout = 0.0f) {
         if (timesteps.empty() || train_window_frames > 24576 / 2 || !(abc_dropout >= 0 && abc_dropout <= 1) || !(caption_dropout >= 0 && caption_dropout <= 1)) throw std::invalid_argument("invalid native sampler configuration");
         if (caption_dropout > 0 && !prompt.has_nocap()) throw std::invalid_argument("caption dropout needs a dataset prepared with trigger-only prefixes; re-run preparation");
+        const float condition_total = text_dropout + lyric_dropout + uncond_dropout;
+        if (!(text_dropout >= 0) || !(lyric_dropout >= 0) || !(uncond_dropout >= 0) || !(condition_total <= 1.0f)) throw std::invalid_argument("condition dropout rates must be nonnegative and sum to at most 1");
+        if (condition_total > 0 && !prompt.has_condition_variants()) throw std::invalid_argument("condition dropout needs a dataset prepared with the text/lyric/unconditional prefixes; re-run preparation");
         const size_t eligible = eligible_timestep_count ? eligible_timestep_count : timesteps.size();
         if (!eligible || eligible > timesteps.size()) throw std::invalid_argument("invalid eligible timestep count");
         for (float timestep : timesteps) if (!std::isfinite(timestep) || timestep < 0 || timestep > 1000) throw std::invalid_argument("timestep is outside [0,1000]");
@@ -69,10 +79,17 @@ public:
         // Drawn AFTER the abc draw and only when enabled, so a run with
         // caption_dropout 0 consumes exactly the RNG stream it always did.
         selected.retain_caption = caption_dropout <= 0 || rng_.uniform01() >= caption_dropout;
+        // Condition draw, again only when enabled, after the two above.
+        if (condition_total > 0) {
+            const double u = rng_.uniform01();
+            if (u < uncond_dropout) selected.condition = PromptInput::Condition::uncond;
+            else if (u < uncond_dropout + text_dropout) selected.condition = PromptInput::Condition::notext;
+            else if (u < condition_total) selected.condition = PromptInput::Condition::nolyrics;
+        }
         const size_t timestep_index = rng_.uniform_index(eligible);
         ++schedule_cursor_;
-        SampledBatch out; out.crop = crop; out.abc_retained = selected.retain_abc; out.caption_retained = selected.retain_caption; out.timestep = timesteps[timestep_index]; out.timestep_bf16 = bf16_round_f32(out.timestep / 1000.0f);
-        std::string error; if (!build(selected, song, crop, ar_token_limit, &out.batch, &error)) throw std::invalid_argument(error);
+        SampledBatch out; out.crop = crop; out.abc_retained = selected.retain_abc; out.caption_retained = selected.retain_caption; out.condition = selected.condition; out.timestep = timesteps[timestep_index]; out.timestep_bf16 = bf16_round_f32(out.timestep / 1000.0f);
+        std::string error; if (!build(selected, song, crop, ar_token_limit, &out.batch, &error, base_targets)) throw std::invalid_argument(error);
         // YuE2 cached latents and get_noise are cast to the recipe training
         // dtype before add_noise. This reference models the BF16 recipe:
         // clean/noise round at ingress, target subtracts those rounded values,

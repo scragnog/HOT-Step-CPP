@@ -30,6 +30,23 @@ struct Input {
     // Spike guard (--spike-factor): a step whose pre-clip gradient norm is
     // above this skips its update entirely. 0 = off.
     double skip_above=0;
+    // --ar-loss-weight: the planner CE's weight against the flow loss. Acts on
+    // the CE part of the head gradient before the shared clip; KL keeps its
+    // own weight. 1.0 = the AITK recipe, byte-identical.
+    float ar_loss_weight=1.0f;
+    // Adam betas for the native AdamW8bit path (the LmOptim path reads them
+    // from LmOptim itself). Defaults are torch's, what every run before had.
+    float beta1=.9f, beta2=.999f;
+    // false with kl_weight 0: the frozen teacher forward is skipped and ar_kl
+    // reads 0. The runner sets it false only when nothing reads the KL.
+    bool measure_kl=true;
+    // --grad-accum: micro-steps of one update. accumulate adds this song's
+    // gradients to the slots instead of replacing them; finalize clips (after
+    // multiplying by accum_scale = 1/N) and steps the optimizer. A plain step
+    // is {false, true, 1.0}.
+    bool accumulate=false;
+    bool finalize=true;
+    float accum_scale=1.0f;
 };
 using Progress=std::function<void(const char *)>;
 // `optimizer` is the native CUDA AdamW8bit; `lm`/`osched` select the shared
@@ -46,7 +63,9 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     }
     constexpr size_t H=2048,C=64;
     if (!input.batch || !metrics || !state.initialized() || !std::isfinite(input.timestep) ||
-        input.timestep<0 || input.timestep>1) return fail(error,"invalid joint update input");
+        input.timestep<0 || input.timestep>1 || !std::isfinite(input.ar_loss_weight) || !(input.ar_loss_weight>0) ||
+        !std::isfinite(input.accum_scale) || !(input.accum_scale>0) ||
+        (input.accumulate && input.cursor_weight>0)) return fail(error,"invalid joint update input");
     const auto & batch=*input.batch;
     const size_t frames=batch.nar.semantic_tokens.size(), N=batch.ar.target_ids.size();
     if (!frames || batch.nar.ar.input_ids.size()+frames>24576 /* context */ || !N || input.noisy_latents.size()!=frames*C ||
@@ -60,7 +79,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
         return fail(error,"invalid AR prediction position or target");
     const auto notify=[&](const char * stage){if(progress)progress(stage);};
     Metrics result;
-    state.clear_cursor_gradient();
+    if(!input.accumulate) state.clear_cursor_gradient();
     // A frozen planner has no objective left: its forward, teacher, CE/KL and
     // backward are skipped outright. The NAR's conditioning below still runs
     // through the (held) planner adapters, exactly as at generation.
@@ -76,30 +95,41 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     std::vector<float> zeros(ar.final_hidden.size(),0.0f);
     Yue2AitkEndpointHost adapted_norm;
     if(!Yue2AitkEndpoints::ar_final_norm(backend,model,ar.final_hidden.data(),zeros.data(),ar.length,&adapted_norm,error)) return false;
-    notify("AR frozen teacher forward");
-    Yue2AitkStackTape base;
-    if(!yue2_aitk_stack::forward(backend,model,nullptr,false,embeds.values,ar.length,nullptr,false,&base,nullptr,error)) return false;
-    Yue2AitkEndpointHost base_norm;
-    if(!Yue2AitkEndpoints::ar_final_norm(backend,model,base.final_hidden.data(),zeros.data(),base.length,&base_norm,error)) return false;
-    std::vector<float> selected(N*H),selected_base(N*H);
+    // The frozen teacher exists for the KL term. With no KL weight and nothing
+    // reading the KL, its forward is a wasted pass: the adapted hidden stands
+    // in as "base", so the kernel's (p - q) term is zero and ar_kl reads 0.
+    const bool teacher=input.kl_weight>0 || input.measure_kl;
+    std::vector<float> selected(N*H),selected_base(teacher?N*H:0);
     std::vector<uint32_t> targets(N);
+    if(teacher) {
+        notify("AR frozen teacher forward");
+        Yue2AitkStackTape base;
+        if(!yue2_aitk_stack::forward(backend,model,nullptr,false,embeds.values,ar.length,nullptr,false,&base,nullptr,error)) return false;
+        Yue2AitkEndpointHost base_norm;
+        if(!Yue2AitkEndpoints::ar_final_norm(backend,model,base.final_hidden.data(),zeros.data(),base.length,&base_norm,error)) return false;
+        for(size_t i=0;i<N;++i) std::copy_n(base_norm.values.data()+batch.ar.prediction_positions[i]*H,H,selected_base.data()+i*H);
+    }
     for(size_t i=0;i<N;++i) {
         const size_t row=batch.ar.prediction_positions[i];
         std::copy_n(adapted_norm.values.data()+row*H,H,selected.data()+i*H);
-        std::copy_n(base_norm.values.data()+row*H,H,selected_base.data()+i*H);
         targets[i]=uint32_t(batch.ar.target_ids[i]);
     }
     std::vector<uint16_t> selected_grad(N*H); float ce=0,kl=0;
     yue2_aitk_head_loss::Request head;
     head.backend=backend;head.head=&model.lm_head();head.adapted_hidden=selected.data();
-    head.base_hidden=selected_base.data();head.targets=targets.data();head.positions=N;
-    head.hidden=H;head.kl_weight=input.kl_weight;head.adapted_hidden_grad_bf16=selected_grad.data();head.ce_sum=&ce;head.kl_sum=&kl;
+    head.base_hidden=teacher?selected_base.data():selected.data();head.targets=targets.data();head.positions=N;
+    // The kernel's gradient is d(CE + kl_weight * KL). --ar-loss-weight w wants
+    // d(w * CE + kl_weight * KL) = w * d(CE + (kl_weight / w) * KL): the kernel
+    // runs at kl_weight / w and the hidden gradient is scaled by w below. At
+    // w = 1 both are exact identities.
+    head.hidden=H;head.kl_weight=input.kl_weight/input.ar_loss_weight;head.adapted_hidden_grad_bf16=selected_grad.data();head.ce_sum=&ce;head.kl_sum=&kl;
     notify("AR CE and KL backward");
     if(yue2_aitk_head_loss::compute(head,error)!=yue2_aitk_head_loss::Status::success) return false;
-    result.ar_ce=double(ce)/N;result.ar_kl=double(kl)/N;
+    result.ar_ce=double(ce)/N;result.ar_kl=teacher?double(kl)/N:0.0;
     notify("AR transformer backward");
+    const float ar_w=input.ar_loss_weight;
     for(size_t i=0;i<N;++i) for(size_t d=0;d<H;++d)
-        zeros[batch.ar.prediction_positions[i]*H+d]=ggml_bf16_to_fp32(ggml_bf16_t{selected_grad[i*H+d]});
+        zeros[batch.ar.prediction_positions[i]*H+d]=ggml_bf16_to_fp32(ggml_bf16_t{selected_grad[i*H+d]})*ar_w;
     if(input.cursor_weight>0 && !input.cursor_frames.empty()) {
         size_t audio_index=0;
         while(audio_index<N && (batch.ar.target_ids[audio_index]<yue2_aitk::kCodecOffset ||
@@ -120,7 +150,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     }
     if(!Yue2AitkEndpoints::ar_final_norm(backend,model,ar.final_hidden.data(),zeros.data(),ar.length,&adapted_norm,error)) return false;
     if(!yue2_aitk_stack::backward(backend,model,state.ar_adapters(),ar,nullptr,std::move(adapted_norm.dx),
-        [&](size_t layer,const Yue2AitkBlockBackwardHost & g,std::string * why){return state.upload_gradients(false,int(layer),g,why);},error)) return false;
+        [&](size_t layer,const Yue2AitkBlockBackwardHost & g,std::string * why){return state.upload_gradients(false,int(layer),g,why,input.accumulate);},error)) return false;
     }
     // Recompute with the current adapted AR. This cache is detached host data.
     // It is local to this step and cannot survive the optimizer update below.
@@ -146,11 +176,19 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     notify("NAR flow backward");
     if(!Yue2AitkEndpoints::nar_final(backend,model,nar.final_hidden.data(),flow_grad.data(),nar.length,&prediction,error)) return false;
     if(!yue2_aitk_stack::backward(backend,model,state.nar_adapters(),nar,&prefix,std::move(prediction.dx),
-        [&](size_t layer,const Yue2AitkBlockBackwardHost & g,std::string * why){return state.upload_gradients(true,int(layer),g,why);},error)) return false;
+        [&](size_t layer,const Yue2AitkBlockBackwardHost & g,std::string * why){return state.upload_gradients(true,int(layer),g,why,input.accumulate);},error)) return false;
     if(!std::isfinite(result.ar_ce)||!std::isfinite(result.ar_kl)||!std::isfinite(result.nar_mse)) return fail(error,"nonfinite joint loss");
+    if(!input.finalize) {
+        // A micro-step of --grad-accum: the gradients stay in the slots for the
+        // next song; no clip, no update, the step counter does not move.
+        ggml_backend_synchronize(backend);
+        result.step=lm?lm->opt_step:optimizer->step();
+        *metrics=result;
+        return true;
+    }
     notify("Joint clipping and optimizer update");
     if(planner_frozen) state.zero_planner_gradients();
-    if(!state.clip_gradients(1.0f,&result.gradient_norm,error)) return false;
+    if(!state.clip_gradients(1.0f,&result.gradient_norm,error,input.accum_scale)) return false;
     ggml_backend_synchronize(backend);
     if (input.skip_above>0 && result.gradient_norm>input.skip_above) {
         // A spike: no parameter or optimizer-moment changes. Clipping alone is
@@ -173,6 +211,7 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     } else {
         yue2_aitk::StepConfig cfg;
         cfg.learning_rate=input.adamw_lr; cfg.weight_decay=input.adamw_weight_decay;
+        cfg.beta1=input.beta1; cfg.beta2=input.beta2;
         try { optimizer->step_once(cfg); }
         catch(const std::exception & e){return fail(error,e.what());}
         result.step=optimizer->step();
