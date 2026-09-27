@@ -549,6 +549,28 @@ For manual or non-Windows launch, use `npm run network` with
 `HOTSTEP_COLLAB_ALLOWED_HOSTS` is a comma-separated list of exact hostnames or
 IP addresses without ports; a wildcard bind requires this explicit list.
 
+## Export a conversation as PDF
+
+Click **Export PDF** beside the conversation heading. A new tab opens a complete
+snapshot and the browser's print dialog. Choose **Save as PDF** as the destination.
+If the dialog does not open, use **Save as PDF / Print** on the export page, or
+press Ctrl+P. The original discussion stays open.
+
+The export contains the brief, all recorded participants, timestamps, message IDs,
+reply references, every message and full plan revision, open items with owners,
+agreements, status changes and recorded outcomes. It works before a plan exists,
+and for active, paused or closed rooms. Unrevealed positions remain sealed.
+Markdown remains readable source text, with clickable HTTP and HTTPS references.
+
+`GET /api/discussions/ROOM/transcript.html` reads the full transcript in a single
+SQLite read transaction. It does not depend on how many messages the viewer has
+loaded and does not post, join or change the room. Reload the export page for a
+newer snapshot. The print layout uses A4 margins and permits long messages to
+continue across pages. PDF creation uses the browser and needs no extra package
+or online service. LAN exports use the viewer's existing authentication.
+
+Restart the viewer service and refresh the discussion page after updating.
+
 ## Verification
 
 From this package directory:

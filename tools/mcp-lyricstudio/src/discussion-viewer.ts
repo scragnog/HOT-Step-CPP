@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { DEFAULT_COLLAB_DB, DEFAULT_MAX_ROUNDS, DiscussionStore } from './collaboration.js';
 import { handleWorkRequest } from './work-viewer.js';
+import { renderDiscussionExport } from './discussion-export.js';
 
 export async function readJson(request: IncomingMessage) {
   return new Promise<unknown>((resolve, reject) => {
@@ -48,6 +49,8 @@ export function createDiscussionViewer(dbPath = process.env.HOTSTEP_COLLAB_DB ??
     '/': { type: 'text/html', file: 'index.html' },
     '/viewer.js': { type: 'text/javascript', file: 'viewer.js' },
     '/viewer.css': { type: 'text/css', file: 'viewer.css' },
+    '/transcript-print.css': { type: 'text/css', file: 'transcript-print.css' },
+    '/transcript-print.js': { type: 'text/javascript', file: 'transcript-print.js' },
   };
   const assets = new Map(Object.entries(assetFiles).map(([url, asset]) => [
     url, { type: asset.type, body: readFileSync(new URL(`../viewer/${asset.file}`, import.meta.url)) },
@@ -96,10 +99,11 @@ export function createDiscussionViewer(dbPath = process.env.HOTSTEP_COLLAB_DB ??
         response.writeHead(200, { 'Content-Type': `${asset.type}; charset=utf-8` });
         response.end(asset.body); return;
       }
-      const roomMatch = /^\/api\/discussions\/([a-zA-Z0-9][a-zA-Z0-9._-]{0,99})(?:\/(messages|status|coordination|outcome|plan\.md))?$/.exec(url.pathname);
+      const roomMatch = /^\/api\/discussions\/([a-zA-Z0-9][a-zA-Z0-9._-]{0,99})(?:\/(messages|status|coordination|outcome|plan\.md|transcript\.html))?$/.exec(url.pathname);
       const isWrite = request.method === 'POST';
       const isCreate = isWrite && url.pathname === '/api/discussions';
-      if ((!roomMatch && url.pathname !== '/api/discussions') || (roomMatch && isWrite !== Boolean(roomMatch[2] && roomMatch[2] !== 'plan.md'))) {
+      const isDownload = roomMatch?.[2] === 'plan.md' || roomMatch?.[2] === 'transcript.html';
+      if ((!roomMatch && url.pathname !== '/api/discussions') || (roomMatch && isWrite !== Boolean(roomMatch[2] && !isDownload))) {
         send(404, { error: 'Not found.' }); return;
       }
       const after = url.searchParams.get('after_id') ?? '0';
@@ -154,6 +158,11 @@ export function createDiscussionViewer(dbPath = process.env.HOTSTEP_COLLAB_DB ??
           send(409, { error: error instanceof Error ? error.message : 'Unable to post. Refresh the discussion and try again.' });
         }
         return;
+      }
+      if (roomMatch[2] === 'transcript.html') {
+        const html = renderDiscussionExport(store.exportTranscript(room));
+        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        response.end(html); return;
       }
       if (roomMatch[2] === 'plan.md') {
         if (!store.latestDecision(room)) { send(404, { error: 'No proposed plan has been recorded for this discussion.' }); return; }

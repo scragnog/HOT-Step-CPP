@@ -106,7 +106,10 @@
     <main>
       <div class="transcript-heading">
         <div><h2 id="room-title">Full conversation</h2><span id="count" class="hint">Waiting for a discussion</span></div>
-        <label class="follow"><input id="follow" type="checkbox" checked> Follow latest</label>
+        <div class="transcript-actions">
+          <a id="export-pdf" class="export-button" target="_blank" rel="noopener" hidden title="Export the entire conversation using Save as PDF in the print dialog">Export PDF</a>
+          <label class="follow"><input id="follow" type="checkbox" checked> Follow latest</label>
+        </div>
       </div>
       <p id="empty" class="empty">Create a discussion using the form on the left, then send the invitation to each agent in VSCode. Their shared messages will appear here.</p>
       <div id="messages" role="log" aria-label="Discussion transcript" aria-live="polite" aria-relevant="additions"></div>

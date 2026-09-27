@@ -37,7 +37,8 @@ test('group chat HTTP and MCP share the transcript without app access', { timeou
       assert.equal(index.status, 200);
       assert.match(await index.text(), /Your message to both agents/);
       assert.match(index.headers.get('content-security-policy')!, /default-src 'self'/);
-      for (const asset of ['/viewer.js', '/viewer.css']) assert.equal((await fetch(base + asset)).status, 200);
+      for (const asset of ['/viewer.js', '/viewer.css', '/transcript-print.js', '/transcript-print.css']) assert.equal((await fetch(base + asset)).status, 200);
+      assert.equal((await fetch(base + '/api/discussions/missing/transcript.html')).status, 404);
       assert.deepEqual(await (await fetch(base + '/api/discussions')).json(), { discussions: [] });
       assert.equal(existsSync(dbPath), false);
     });
@@ -65,6 +66,12 @@ test('group chat HTTP and MCP share the transcript without app access', { timeou
       assert.equal(page.messages.length, 1);
       assert.equal(page.participants.length, 1);
       assert.equal(page.discussion.brief, input.brief);
+      const exported = await fetch(base + '/api/discussions/browser-room/transcript.html');
+      assert.equal(exported.status, 200); // No recorded plan is required.
+      const html = await exported.text();
+      assert.match(html, /Review compatibility\./);
+      assert.match(html, /Unrevealed positions are sealed/);
+      assert.match(html, /Save as PDF/);
     });
     await t.test('simultaneous creation cannot overwrite a room', async () => {
       const input = { room: 'same-name', brief: 'Original brief', participant_id: randomUUID(), request_id: randomUUID() };
@@ -156,12 +163,37 @@ test('group chat HTTP and MCP share the transcript without app access', { timeou
       assert.match(revised, /Updated plan\n\n1\. Preserve café vocals\.\n2\./);
       assert.doesNotMatch(revised, /Keep compatibility/);
     });
+    await t.test('PDF print export includes the whole room and full plans without changing it', async () => {
+      const before = store!.exportTranscript('review');
+      const response = await fetch(base + '/api/discussions/review/transcript.html?after_id=999999');
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('content-type'), 'text/html; charset=utf-8');
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+      assert.match(response.headers.get('content-security-policy')!, /default-src 'self'/);
+      const html = await response.text();
+      assert.equal((html.match(/<article class="message"/g) || []).length, before.messages.length);
+      assert.ok(before.messages.length > 100);
+      assert.match(html, /Reply 0</);
+      assert.match(html, /Reply 104</);
+      assert.match(html, /Plan revision 1/);
+      assert.match(html, /Keep compatibility/);
+      assert.match(html, /Check the old format/);
+      assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+      assert.doesNotMatch(html, /<script>alert/);
+      assert.doesNotMatch(html, /browser-room/);
+      assert.deepEqual(store!.exportTranscript('review').messages, before.messages);
+      assert.deepEqual(store!.exportTranscript('review').discussion, before.discussion);
+      assert.equal((await fetch(base + '/api/discussions/missing/transcript.html')).status, 404);
+      assert.equal((await write('transcript.html', { body: 'Not a write endpoint' })).status, 404);
+      assert.equal((await fetch(base + '/api/discussions/review/transcript.html', { headers: { Origin: 'https://example.com' } })).status, 403);
+    });
     await t.test('human pause wakes agents, rejects further messages, and resume restores posting', async () => {
       const cursor = store!.read('review', 0, 1000).next_after_id;
       const waiting = client.callTool({ name: 'collab_wait_for_message', arguments: { room: 'review', after_id: cursor, timeout_ms: 2000 } });
       assert.equal((await write('status', { status: 'paused', body: 'Hold on, I want to rethink this.' })).status, 200);
       const received = JSON.parse(((await waiting).content as { text: string }[])[0].text);
       assert.equal(received.discussion.status, 'paused');
+      assert.equal((await fetch(base + '/api/discussions/review/transcript.html')).status, 200);
       assert.equal((await write('messages', { body: 'Paused post' })).status, 409);
       assert.equal((await write('status', { status: 'active', body: 'Continue.' })).status, 200);
       assert.equal((await write('messages', { body: 'Consider the simpler option.' })).status, 200);
@@ -215,6 +247,9 @@ test('group chat HTTP and MCP share the transcript without app access', { timeou
       const ended = await (await fetch(base + '/api/discussions/review')).json() as any;
       assert.equal(ended.consensus.reached, false);
       assert.ok(ended.decision);
+      const exported = await (await fetch(base + '/api/discussions/review/transcript.html')).text();
+      assert.match(exported, /User ended the discussion/);
+      assert.match(exported, /Codex/); // History survives expired/cleared presence.
     });
   } finally {
     await client.close();

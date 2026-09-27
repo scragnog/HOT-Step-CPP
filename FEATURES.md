@@ -387,4 +387,4 @@ For contributors and agents. Details: [Building](docs/dev/building.md), [HTTP AP
 | Release gate | [`tools/release-gate`](tools/release-gate/README.md) drives the app through its API and stages renders for an ear test. |
 | Release prerequisites | `check-release-prereqs.mjs` confirms every model and data file is reachable by a user. |
 | Docs checks | `tools/docs/build-docs.mjs` regenerates tables; `check-docs.mjs` catches drift and broken links. |
-| Lyric Studio MCP server | [`tools/mcp-lyricstudio`](tools/mcp-lyricstudio/README.md) exposes Lyric Studio to Claude Code and Codex. |
+| Lyric Studio MCP server | [`tools/mcp-lyricstudio`](tools/mcp-lyricstudio/README.md) exposes Lyric Studio to Claude Code and Codex, with shared discussion rooms and full-conversation PDF export. |

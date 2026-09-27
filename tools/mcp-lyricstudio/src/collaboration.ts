@@ -360,6 +360,18 @@ export class DiscussionStore {
     }
     return { ...row, open_items: Array.isArray(items) ? items : [] };
   }
+  exportTranscript(room: string) {
+    // One read transaction freezes the whole export while other processes post.
+    // Read messages, not discussion_positions: unrevealed positions stay sealed.
+    return this.db.transaction(() => ({
+      discussion: this.room(room),
+      exported_at: new Date().toISOString(),
+      participants: this.db.prepare(`SELECT p.name, r.role FROM participants p
+        LEFT JOIN discussion_roles r ON r.participant_id = p.id
+        WHERE p.room = ? ORDER BY p.joined_at, p.rowid`).all(room) as { name: string; role: string | null }[],
+      messages: this.db.prepare('SELECT * FROM messages WHERE room = ? ORDER BY id').all(room) as Message[],
+    }))();
+  }
   exportPlan(room: string, options: { transcript?: boolean } = {}) {
     return this.db.transaction(() => {
       const discussion = this.room(room);

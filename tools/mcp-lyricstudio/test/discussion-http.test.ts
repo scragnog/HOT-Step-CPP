@@ -37,6 +37,7 @@ test('network clients share rooms, wait, agree and disconnect independently', { 
     const base = `http://127.0.0.1:${address.port}`;
     const headers = { Authorization: `Bearer ${token}` };
     assert.equal((await fetch(base)).status, 401);
+    assert.equal((await fetch(base + '/api/discussions/network-test/transcript.html')).status, 401);
     assert.equal((await fetch(base + '/mcp')).status, 401);
     assert.equal((await fetch(base + '/mcp', { headers: { Authorization: 'Bearer wrong' } })).status, 401);
     assert.equal((await fetch(base, { headers: { ...headers, Origin: 'http://evil.test' } })).status, 403);
@@ -73,6 +74,9 @@ test('network clients share rooms, wait, agree and disconnect independently', { 
     const room = 'network-test';
     const pa = (await call(a, 'collab_join_discussion', { room, name: 'Remote A', brief: 'Transport test only.' })).participant_id;
     const pb = (await call(b, 'collab_join_discussion', { room, name: 'Remote B' })).participant_id;
+    const exported = await fetch(base + '/api/discussions/network-test/transcript.html', { headers: browserHeaders });
+    assert.equal(exported.status, 200);
+    assert.match(await exported.text(), /Transport test only\./);
     assert.notEqual(pa, pb);
     // Cursor/presence defaults belong to each HTTP session, not the latest join globally.
     let page = await call(a, 'collab_read_discussion', { room, after_id: 0 });

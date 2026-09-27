@@ -25,6 +25,9 @@ main { min-width: 0; padding: 30px 38px 60px; }
 .transcript-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 15px; margin-bottom: 28px; }
 .transcript-heading h2 { font-size: 19px; margin: 0; overflow-wrap: anywhere; }
 .follow { white-space: nowrap; color: #b6c4d2; }
+.transcript-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px; }
+.export-button { display: inline-block; border: 1px solid #435165; border-radius: 6px; padding: 8px 12px; color: #d8ece2; background: #253b33; text-decoration: none; white-space: nowrap; }
+.export-button:hover { background: #335044; }
 input { accent-color: #86bea8; vertical-align: middle; }
 .empty { color: #9eacba; max-width: 540px; margin: 50px auto; padding: 30px; border: 1px dashed #3b4857; border-radius: 10px; }
 .message { background: #171e27; border: 1px solid #303b49; border-left: 3px solid #88b9a5; border-radius: 8px; padding: 18px 22px; margin: 0 0 16px; scroll-margin: 20px; }

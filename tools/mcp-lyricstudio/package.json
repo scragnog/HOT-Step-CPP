@@ -11,7 +11,7 @@
     "network": "tsx src/network-server.ts",
     "export:plan": "tsx src/export-plan.ts",
     "typecheck": "tsc -p tsconfig.check.json",
-    "test:collaboration": "tsx --test test/collaboration.test.ts test/positions.test.ts test/wake.test.ts test/discussion-viewer.test.ts test/coordination.test.ts test/consensus.test.ts test/presence.test.ts test/discussion-http.test.ts",
+    "test:collaboration": "tsx --test test/collaboration.test.ts test/positions.test.ts test/wake.test.ts test/discussion-viewer.test.ts test/discussion-export.test.ts test/coordination.test.ts test/consensus.test.ts test/presence.test.ts test/discussion-http.test.ts",
     "test:work": "tsx --test test/work-store.test.ts test/work-run.test.ts test/work-http.test.ts test/work-viewer.test.ts",
     "build": "echo No build step - runs from source via tsx; prompts are shared from server/src/services/lireek/prompts.ts",
     "dev": "tsx watch src/index.ts"

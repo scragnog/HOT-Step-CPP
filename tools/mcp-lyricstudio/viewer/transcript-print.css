@@ -1,0 +1,35 @@
+:root { color-scheme: light; font: 11pt/1.5 Arial, sans-serif; color: #17212b; background: #edf0f3; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main, .export-controls { max-width: 210mm; margin: 24px auto; padding: 18mm; background: white; }
+.export-controls { padding: 20px 28px; }
+.export-controls p { margin: 12px 0; }
+button { background: #233b50; color: white; border: 0; border-radius: 5px; padding: 10px 16px; font: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid #196db0; outline-offset: 3px; }
+h1 { font-size: 23pt; line-height: 1.2; margin: 8px 0 22px; overflow-wrap: anywhere; }
+h2 { font-size: 15pt; margin: 24px 0 12px; }
+h3 { font-size: 11pt; margin: 0; }
+h3 span { font-size: 9pt; font-weight: normal; margin-left: 8px; }
+.eyebrow { text-transform: uppercase; letter-spacing: .08em; font-size: 9pt; color: #4c5b68; }
+dl { margin: 0 0 20px; }
+dt { font-weight: bold; float: left; clear: left; width: 26mm; }
+dd { margin: 0 0 6px 28mm; overflow-wrap: anywhere; }
+.document-header > p:not(.eyebrow) { font-size: 9pt; color: #4c5b68; }
+.brief { border-top: 2px solid #233b50; padding-bottom: 14px; }
+.message { border-top: 1px solid #b8c1ca; padding-top: 14px; margin: 18px 0; }
+.message-heading p { font-size: 9pt; color: #4c5b68; margin: 4px 0 12px; }
+.message-heading { break-inside: avoid; break-after: avoid; }
+.prose { white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; }
+a { color: #19517e; text-decoration: underline; overflow-wrap: anywhere; }
+@page { size: A4; margin: 16mm; }
+@media print {
+  :root { background: white; color: black; font-size: 10pt; }
+  .export-controls { display: none; }
+  main { max-width: none; margin: 0; padding: 0; }
+  h1, h2, h3 { break-after: avoid; }
+  .prose { orphans: 3; widows: 3; }
+  a { color: inherit; }
+}
+@media screen and (max-width: 700px) {
+  main, .export-controls { margin: 12px; padding: 20px; }
+}

@@ -38,6 +38,9 @@ function identity(room) {
 
 const SEALED_INSTRUCTION = " The room is in the sealed positions phase: before anything else, research the brief and submit your own independent position with collab_submit_position (your plan, the evidence, what would change your mind). You cannot see the other agent's position until both are in. After the reveal, critique the other position from your role before converging.";
 function updateControls() {
+  byId('export-pdf').hidden = !selectedRoom;
+  if (selectedRoom) byId('export-pdf').href = `/api/discussions/${encodeURIComponent(selectedRoom)}/transcript.html`;
+  else byId('export-pdf').removeAttribute('href');
   byId('composer').hidden = !selectedRoom;
   byId('send').disabled = sending || !selectedRoom || roomStatus !== 'active';
   byId('message').disabled = sending;
