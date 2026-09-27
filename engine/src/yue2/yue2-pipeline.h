@@ -210,6 +210,10 @@ struct Yue2SongState {
     int64_t              cond_set  = 0;   // set of the semantic cache holding this song's positive stream
     int64_t              neg_set   = -1;  // its negative (guidance) stream, -1 without guidance
     int64_t              pair_base = 0;   // first set of this song's pair (cond/neg in either order)
+    // Recompose retry (2026-09-27): a song that ended normally keeps its
+    // codec_ids and is replayed teacher-forced, so only the runaway songs of
+    // the batch are drawn again. Set and cleared by the retry loop.
+    bool                 keep_codes = false;
 };
 
 // Vocab windows the two AR stages sample from (doc 30 #1). The legal range
@@ -444,7 +448,7 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         sg.pair_base = b * per;
         sg.cond_set  = sg.pair_base + ((use_cfg && swap_sets) ? 1 : 0);
         sg.neg_set   = use_cfg ? sg.pair_base + ((swap_sets) ? 0 : 1) : -1;
-        sg.codec_ids.clear();
+        if (!sg.keep_codes) sg.codec_ids.clear();
         max_prefix = std::max<int64_t>(max_prefix, (int64_t) sg.prefix_ids.size());
         if (use_cfg) max_prefix = std::max<int64_t>(max_prefix, (int64_t) neg_prefix[(size_t) b].size());
     }
@@ -537,6 +541,25 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
 
     std::vector<std::vector<int32_t>> history((size_t) B);
     std::vector<bool>                 done((size_t) B, false);
+    // Kept songs (recompose retry): forward their codes teacher-forced into
+    // their positive set, the rows the NAR later reads, and take them out of
+    // the draw. They end with MUSIC_END fed on the next batched step, exactly
+    // as a song that sampled its end does.
+    for (int b = 0; b < B; b++) {
+        Yue2SongState & sg = songs[(size_t) b];
+        if (!sg.keep_codes) continue;
+        if (!sg.codec_ids.empty()) {
+            std::vector<int32_t> ids;
+            ids.reserve(sg.codec_ids.size());
+            for (int32_t c : sg.codec_ids) ids.push_back(c + YUE2_CODEC_OFFSET);
+            Yue2ArForwardResult dummy;
+            if (!yue2_ar_prefill(m, cache, ids, {}, {}, &dummy, err, sg.cond_set)) {
+                yue2_ar_kv_cache_free(&cache);
+                return false;
+            }
+        }
+        done[(size_t) b] = true;
+    }
     std::vector<bool>                 by_threshold((size_t) B, false);
     std::vector<int32_t>              next_ids((size_t) S, YUE2_MUSIC_END);
     static const char * end_trace_path = std::getenv("YUE2_END_TRACE");
@@ -685,6 +708,7 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
 
     for (int b = 0; b < B; b++) {
         Yue2SongState & sg = songs[(size_t) b];
+        if (sg.keep_codes) continue;  // replayed: its end reason is the first pass's
         sg.stage_end_reason[YUE2_STAGE_SEMANTIC] =
             done[(size_t) b] ? (by_threshold[(size_t) b] ? "eos_threshold" : "eos")
                              : (preview_capped ? "preview_limit" : "limit_hit");
@@ -1078,14 +1102,19 @@ static bool yue2_pipeline_run_ar(Yue2Model & m, const BPETokenizer & tok, Yue2Re
         yue2_ar_kv_cache_free(&sem_cache);
         for (int b = 0; b < B; b++) {
             Yue2SongState & sg = songs[(size_t) b];
-            if (sg.stage_end_reason[YUE2_STAGE_SEMANTIC] != "limit_hit") continue;
+            // Songs that ended normally are replayed, not redrawn: before
+            // 2026-09-27 every song of the batch was composed again, and the
+            // healthy ones came back as different songs.
+            sg.keep_codes = sg.stage_end_reason[YUE2_STAGE_SEMANTIC] != "limit_hit";
+            if (sg.keep_codes) continue;
             sg.seed += 1000003ull;
             sg.rng.seed(sg.seed);
             sg.codec_ids.clear();
             sg.stage_end_reason[YUE2_STAGE_SEMANTIC].clear();
         }
-        fprintf(stderr, "[YuE2] composer ran to its cap: recomposing with a new seed (try %d of %d)\n", attempt + 1, req.semantic_retries);
+        fprintf(stderr, "[YuE2] composer ran to its cap: recomposing with a new seed (try %d of %d); songs that ended keep their composition\n", attempt + 1, req.semantic_retries);
     }
+    for (auto & sg : songs) sg.keep_codes = false;
     if (req.semantic_only) {
         // Planner probe: the codec stream is the result. No NAR, no VAE.
         yue2_ar_kv_cache_free(&sem_cache);

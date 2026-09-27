@@ -145,7 +145,10 @@ style + lyrics (+ optional ABC) -> tokenizer and prompt assembly (yue2-tokenizer
 The AR and NAR halves live in one `yue2-lm-<type>.gguf` and are resident together;
 the VAE is a separate `yue2-vae-{standard,legacy}-<type>.gguf` (`yue2-model.h`). The
 NAR stage can use Lua solvers and schedulers through `infer_method` and
-`scheduler`. Other modules in `yue2/` serve training and analysis: MERT and the
+`scheduler`. When a song's composer runs to its cap, `semantic_retries` recomposes it
+with a new seed; the batch's other songs keep their codes and are replayed
+teacher-forced (`keep_codes`), so a retry never changes a song that ended normally.
+Other modules in `yue2/` serve training and analysis: MERT and the
 tokenizer head (`yue2-mert.h`, `yue2-tok-head.h`), MMS_FA forced alignment
 (`yue2-mmsfa.h`, `yue2-ctc-align.h`, also behind `POST /yue2/align`), and
 SheetSage2 (`sheetsage-*.h`).
