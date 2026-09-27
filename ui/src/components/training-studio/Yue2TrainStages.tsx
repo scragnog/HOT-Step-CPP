@@ -30,15 +30,14 @@
 // late.
 
 import React, { useState } from 'react';
-import { ListChecks, Loader2, Scale, XCircle } from 'lucide-react';
+import { ListChecks, Loader2, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { listYue2ArRuns, listYue2Runs } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import {
-  Yue2StemsCard, Yue2AlignCard, Yue2ArTrainStageCard, Yue2SheetCard, Yue2TokenizeCard,
+  Yue2StemsCard, Yue2AlignCard, Yue2SheetCard, Yue2TokenizeCard,
 } from './Yue2ArTrainCard';
-import { Yue2NarTrainCard, Yue2PreprocessCard } from './Yue2TrainCard';
+import { Yue2PreprocessCard } from './Yue2TrainCard';
 import { Yue2AitkTrainCard } from './Yue2AitkTrainCard';
 import { Yue2AitkBatchWizard } from './Yue2AitkBatchWizard';
 import { useYue2ArStatus } from './useYue2ArStatus';
@@ -48,69 +47,7 @@ const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dar
 const BTN_RUNALL = 'w-full px-4 py-2.5 rounded-lg text-sm font-semibold bg-amber-500 text-black '
                   + 'hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors '
                   + 'flex items-center justify-center gap-2';
-const METHOD_KEY = 'hs-yue2-training-method';
 const LYRIC_TIMING_KEY = 'hs-yue2-aitk-lyric-timing:';
-type Yue2TrainingMethod = 'aitk' | 'legacy';
-
-const MethodSelector: React.FC<{ value: Yue2TrainingMethod; onChange: (value: Yue2TrainingMethod) => void }> = ({ value, onChange }) => {
-  const { t } = useTranslation();
-  return (
-    <div className={CARD}>
-      <div className="flex flex-col gap-1 mb-3">
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-          {t('trainingStudio.yue2.method.title', 'Training method')}
-        </h3>
-        <p className="text-[11px] text-zinc-500">
-          {t('trainingStudio.yue2.method.subtitle', 'Choose the Joint Training method or keep the existing Legacy stages.')}
-        </p>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {([
-          ['aitk', t('trainingStudio.yue2.method.aitk', 'Joint Training')],
-          ['legacy', t('trainingStudio.yue2.method.legacy', 'Legacy seven-stage trainer')],
-        ] as const).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => onChange(key)}
-            className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors ${value === key
-              ? 'border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-300'
-              : 'border-zinc-200 dark:border-white/10 text-zinc-600 dark:text-zinc-400 hover:border-amber-500/40'}`}
-          >
-            <span className="font-semibold">{label}</span>
-            {key === 'aitk' && <span className="block mt-0.5 text-[10px] opacity-80">{t('trainingStudio.yue2.method.aitkHint', 'Joint AR + NAR updates')}</span>}
-            {key === 'legacy' && <span className="block mt-0.5 text-[10px] opacity-80">{t('trainingStudio.yue2.method.legacyHint', 'Separate preparation and adapter stages')}</span>}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-/** The newest NAR and AR run's outcome, for the preflight line only — the
- *  store's own chain does not read this, it asks the server fresh. Its own
- *  hook (not useYue2Status/useYue2ArStatus) because neither of those payloads
- *  carries run history; Yue2RunsList/Yue2ArRunsList already fetch the same
- *  two endpoints for the ladder display, so this is a second read of small,
- *  cheap, disk-backed lists, not a second source of truth. */
-function useYue2LatestOutcomes(datasetId: string, reloadKey: unknown): { narDone: boolean; arDone: boolean } {
-  const [narDone, setNarDone] = useState(false);
-  const [arDone, setArDone] = useState(false);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    void listYue2Runs(datasetId)
-      .then(r => { if (!cancelled) setNarDone(r.runs[0]?.outcome === 'completed'); })
-      .catch(() => { if (!cancelled) setNarDone(false); });
-    void listYue2ArRuns(datasetId)
-      .then(r => { if (!cancelled) setArDone(r.runs[0]?.outcome === 'completed'); })
-      .catch(() => { if (!cancelled) setArDone(false); });
-    return () => { cancelled = true; };
-  }, [datasetId, reloadKey]);
-
-  return { narDone, arDone };
-}
-
 const RunAllControl: React.FC<{
   datasetId: string;
   trigger: string;
@@ -194,14 +131,10 @@ const RunAllControl: React.FC<{
 
 export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> = ({ datasetId, trigger }) => {
   const { t } = useTranslation();
-  const [method, setMethod] = useState<Yue2TrainingMethod>(() => {
-    if (typeof window === 'undefined') return 'aitk';
-    return window.localStorage.getItem(METHOD_KEY) === 'legacy' ? 'legacy' : 'aitk';
-  });
   const [lyricTiming, setLyricTiming] = useState(() => {
-    if (typeof window === 'undefined') return true;
+    if (typeof window === 'undefined') return false;
     const saved = window.localStorage.getItem(`${LYRIC_TIMING_KEY}${datasetId}`);
-    return saved === null ? true : saved === 'true';
+    return saved === 'true';
   });
   const storeError = useTrainingStore(s => s.error);
   const activeJob = useTrainingStore(s => s.activeJob);
@@ -223,14 +156,11 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
   // job-finished auto-refresh — the outcomes poll below has no `activeJob`
   // awareness of its own, so it rides this one nonce instead of duplicating
   // that logic a third time.
-  const [reloadNonce, setReloadNonce] = useState(0);
   const [aitkBatchOpen, setAitkBatchOpen] = useState(false);
-  const reload = () => { reloadYue2Status(); reloadArStatus(); setReloadNonce(n => n + 1); };
+  const reload = () => { reloadYue2Status(); reloadArStatus(); };
 
   const jobStatus = activeJob?.status;
   const jobBusy = jobStatus === 'queued' || jobStatus === 'running';
-  const outcomesKey = `${reloadNonce}:${activeJob?.id ?? ''}:${jobBusy ? 'busy' : jobStatus ?? ''}`;
-  const { narDone, arDone } = useYue2LatestOutcomes(datasetId, outcomesKey);
 
   const effectiveTrigger = trigger ?? '';
 
@@ -242,44 +172,13 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
     );
   }
 
-  const skipLabels: string[] = [];
-  if (arStatus?.stages.preprocess.done) skipLabels.push(t('trainingStudio.yue2.runAllStageName1', 'latent cache'));
-  if (arStatus?.stages.tokenize.done) skipLabels.push(t('trainingStudio.yue2.runAllStageName2', 'codes'));
-  if (arStatus?.stages.sheet.done) skipLabels.push(t('trainingStudio.yue2.runAllStageName3', 'lead sheets'));
-  // Stems are counted, not flagged: the stage is "done" once anything has been
-  // separated, which is the same test the chain itself applies.
-  if ((arStatus?.stages.align.stemsReady ?? 0) > 0) {
-    skipLabels.push(t('trainingStudio.yue2.runAllStageName4', 'vocal stems'));
-  }
-  if (arStatus?.stages.align.done) {
-    skipLabels.push(t('trainingStudio.yue2.runAllStageName5', 'lyric cursor spans'));
-  }
-  if (narDone) skipLabels.push(t('trainingStudio.yue2.runAllStageName6', 'NAR LoRA training'));
-  if (arDone) skipLabels.push(t('trainingStudio.yue2.runAllStageName7', 'AR LoRA training'));
 
-  const runAllControl = (
-    <RunAllControl
-      datasetId={datasetId}
-      trigger={effectiveTrigger}
-      skipLabels={skipLabels}
-      disabled={yue2RunAllActive || jobBusy}
-      jobBusyElsewhere={jobBusy}
-      runAllActive={yue2RunAllActive}
-      runAllStage={yue2RunAllStage}
-      onQueueMultiple={() => setAitkBatchOpen(true)}
-    />
-  );
-
-  const selectMethod = (next: Yue2TrainingMethod) => {
-    setMethod(next);
-    window.localStorage.setItem(METHOD_KEY, next);
-  };
   const setAitkLyricTiming = (value: boolean) => {
     setLyricTiming(value);
     window.localStorage.setItem(`${LYRIC_TIMING_KEY}${datasetId}`, String(value));
   };
 
-  if (method === 'aitk') {
+  {
     // Preparation skip preview for the joint chain: stems and alignment only
     // matter while the lyric-timing objective is on.
     const jointSkipLabels: string[] = [];
@@ -327,7 +226,6 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
     );
     return (
       <div className="flex flex-col gap-4">
-        <MethodSelector value={method} onChange={selectMethod} />
         {storeError && (
           <div className="rounded-xl border border-red-500/25 bg-red-500/10 p-3 flex items-start gap-2 text-sm text-red-500">
             <XCircle size={16} className="mt-0.5 flex-shrink-0" />
@@ -359,48 +257,6 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
       </div>
     );
   }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <MethodSelector value={method} onChange={selectMethod} />
-      {(yue2StatusError || arStatusError || storeError) && (
-        <div className="rounded-xl border border-red-500/25 bg-red-500/10 p-3 flex items-start gap-2 text-sm text-red-500">
-          <XCircle size={16} className="mt-0.5 flex-shrink-0" />
-          <span className="min-w-0 break-words">{yue2StatusError || arStatusError || storeError}</span>
-        </div>
-      )}
-
-      {/* The licence, verbatim as the server sends it, rendered exactly once
-          for all seven stages. A trained adapter is a derivative of CC BY-NC
-          weights and carries the same terms, so this belongs above every
-          button that makes one, not in a footnote. */}
-      {yue2Status?.license && (
-        <div className="rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 flex items-start gap-2 text-[11px] text-amber-700 dark:text-amber-300">
-          <Scale size={14} className="mt-0.5 flex-shrink-0" />
-          <span className="min-w-0">
-            {yue2Status.license}
-            {' '}
-            {t('trainingStudio.yue2.licenseDerivative',
-              'An adapter trained on them is a derivative and carries the same terms.')}
-          </span>
-        </div>
-      )}
-
-      {runAllControl}
-
-      {yue2Status && <Yue2PreprocessCard status={yue2Status} onDone={reload} />}
-      {arStatus && <Yue2TokenizeCard status={arStatus} onDone={reload} />}
-      {arStatus && <Yue2SheetCard datasetId={datasetId} status={arStatus} onDone={reload} />}
-      {arStatus && <Yue2StemsCard status={arStatus} onDone={reload} />}
-      {arStatus && <Yue2AlignCard status={arStatus} onDone={reload} />}
-      <Yue2NarTrainCard datasetId={datasetId} trigger={trigger} status={yue2Status} reload={reload} />
-      <Yue2ArTrainStageCard datasetId={datasetId} trigger={trigger} status={arStatus} reload={reload} />
-
-      {runAllControl}
-
-      <Yue2AitkBatchWizard open={aitkBatchOpen} onClose={() => setAitkBatchOpen(false)} />
-    </div>
-  );
 };
 
 export default Yue2TrainStages;

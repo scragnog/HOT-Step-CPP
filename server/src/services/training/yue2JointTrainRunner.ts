@@ -184,7 +184,7 @@ export const BASE_MATCHED_FORCED = Object.freeze({
 } as const);
 export const BASE_MATCHED_DEFAULTS = Object.freeze({
   lr: 1e-4, weightDecay: 0.1, beta1: 0.9, beta2: 0.95, abcDropout: 0.5,
-  narCropFrames: 0, arLossWeight: 0.25, gradAccum: 8,
+  narCropFrames: 0, arLossWeight: 0.25, gradAccum: 4,
   textDropout: 0.1, lyricDropout: 0.1, bothDropout: 0.1,
   /** Warmup as a share of the step count (the base's joint phase warmed up over ~3%). */
   warmupFraction: 0.03,

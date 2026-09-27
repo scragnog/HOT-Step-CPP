@@ -35,9 +35,11 @@ checkpoint picker applies both native adapters for generation.
 
 ### Two training methods (2026-09-27)
 
-The card's **Training method** select picks between two recipes for the same trainer.
+The trainer has two recipes; since the Dookie ear test the same evening the card offers only the
+second, and the Legacy seven-stage picker is gone from the UI (its runners and routes remain).
 **Tuned** is every default above and below this section: Prodigy, the KL anchor and KL
-stop, lyric timing, the planner at a lower rate, the 60 s decoder crop. **Base-matched**
+stop, lyric timing, the planner at a lower rate, the 60 s decoder crop; it stays in the server
+and engine so old runs resume and refine. **Base-matched**
 trains the way the YuE2 technical report (Appendix C, eq. 5-7, Table 14) says the base
 was trained, as far as an adapter fine-tune can. The server applies it
 (`applyBaseMatchedRecipe` in `yue2JointTrainRunner.ts`): fixed parts replace the request,
@@ -50,7 +52,7 @@ AdamW steps, old vs new binary, identical losses and adapter sha256s, 2026-09-27
 | `L = 0.25 L_AR + L_FM` | `--ar-loss-weight` | 0.25 (scales the CE gradient before the shared clip; Adam cancels a plain loss scale, so the clip is where it acts) | 1.0 |
 | Adam β = (0.9, 0.95), wd 0.1 | `--beta1 --beta2 --weight-decay`, `--optimizer adamw-lm` | 0.9 / 0.95 / 0.1 | 0.9 / 0.999 / 1e-4, Prodigy |
 | CE over generated tokens and closing markers (eq. 5) | `--ar-targets base` | MUSIC_START never a target; ABC_END only when the sheet is kept | every suffix token |
-| Batch 256 | `--grad-accum` | 8 songs per update (a "step" stays one update; each micro-step draws its own song from the same RNG stream) | 1 |
+| Batch 256 | `--grad-accum` | 4 songs per update (Thorough preset 8; a "step" stays one update; each micro-step draws its own song from the same RNG stream) | 1 |
 | Text and lyrics dropped separately or together | `--text-dropout --lyric-dropout --both-dropout` | 0.1 / 0.1 / 0.1 (rates are not published) | caption dropout 0.5 instead |
 | Whole songs, no temporal split | `--nar-crop-frames 0` | whole song (about 12 GB VRAM, 11-15 s a step on a 4-minute song) | 1500 |
 | No KL anchor, no stops | `--kl-weight 0`, fixed steps | the frozen teacher forward is skipped when nothing reads the KL | KL 0.2 + target |

@@ -88,6 +88,9 @@ const POLL_MS = 1500;
 const IDLE_WAIT_MS = 10 * 60_000;
 const MAX_LISTED = 20;
 /** Body fields that belong to one dataset, never to a recipe. */
+/** The KL-rung refinement belongs to the tuned recipe; a base-matched run
+ *  ends at its update count and is picked by ear from its own ladder. */
+const wantsRefine = (recipe: Record<string, unknown>) => recipe.autoRefine !== false && recipe.method !== 'base-matched';
 const RECIPE_STRIP = new Set(['dataset', 'output', 'resume', 'resumeRunId', 'resumeStep', 'preparation', 'checkpoint', 'autoPrepare']);
 
 const batches = new Map<string, BatchState>();
@@ -167,7 +170,7 @@ export function startBatch(input: { datasetIds: string[]; lyricTiming: boolean; 
     const ds = repo.getDataset(id);
     if (!ds) return { error: `Dataset not found: ${id}` };
     items.push({ datasetId: ds.id, name: ds.name || ds.slug, status: 'pending', currentStage: null, error: null,
-      stages: stagesFor(input.lyricTiming, input.recipe.autoRefine !== false, !!input.recipe.autoCaption).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
+      stages: stagesFor(input.lyricTiming, wantsRefine(input.recipe), !!input.recipe.autoCaption).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
   }
   if (!items.length) return { error: 'Select at least one dataset' };
   const recipe: Record<string, unknown> = {};
@@ -191,7 +194,7 @@ export function appendToBatch(id: string, datasetIds: string[]): Yue2BatchSummar
     const ds = repo.getDataset(dsId);
     if (!ds) return { error: `Dataset not found: ${dsId}` };
     state.items.push({ datasetId: ds.id, name: ds.name || ds.slug, status: 'pending', currentStage: null, error: null,
-      stages: stagesFor(state.lyricTiming, state.recipe.autoRefine !== false, !!state.recipe.autoCaption).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
+      stages: stagesFor(state.lyricTiming, wantsRefine(state.recipe), !!state.recipe.autoCaption).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
   }
   persist(state);
   return toSummary(state);

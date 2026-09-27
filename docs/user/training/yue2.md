@@ -13,7 +13,7 @@ YuE2 has two halves, and Joint Training trains an adapter for each in every step
 
 The two adapters are saved together in each checkpoint and applied together at generation time.
 
-The older Legacy seven-stage trainer, which trains the NAR and AR adapters in separate stages, is still available under Training method. This guide covers Joint Training.
+The older Legacy seven-stage trainer was removed from the Training Studio on 2026-09-27; Joint Training is the only method offered.
 
 ## Requirements
 
@@ -44,68 +44,57 @@ How many tracks: the app warns below 10 files.
 
 ## Training method
 
-The card offers two recipes for the same trainer.
+Since 2026-09-27 Joint Training uses one recipe, taken from how the YuE2 technical report says the base model itself was trained, as far as an adapter can follow it: the planner's loss weighted at a quarter of the decoder's, AdamW with betas 0.9 / 0.95 and weight decay 0.1, the decoder trained on whole songs, several songs averaged into each update, the style text or lyrics dropped from the prompt on some steps, and the audio cache cut without loudness normalisation. It has no KL anchor and no early stop: the run goes to the update count, saves a checkpoint every 10 updates, and you pick the rung by ear.
 
-**Tuned** is the recipe every run before September 2026 used and what the rest of this page describes: Prodigy, a KL anchor and KL stop for the planner, lyric timing, the planner at a lower rate than the decoder, a 60 s decoder window, then a refinement pass. It is the tested one.
+It replaced the earlier recipe (Prodigy, a KL anchor and KL stop, lyric timing, a 60 s decoder window, then a refinement pass) after a blind ear test on Green Day's Dookie: every rung of the new recipe scored 5 on diction, audio and coherence, with no looping, bad endings or late-song decay at any point, and likeness reached 5 by 100 updates. Rob's verdict was that it is better in every way. The old recipe still exists in the server and engine so that its runs can be resumed and refined, but the card no longer offers it.
 
-**Base-matched** trains the way the YuE2 technical report says the base model itself was trained, as far as an adapter can: the planner's loss weighted at a quarter of the decoder's, AdamW with betas 0.9 / 0.95 and weight decay 0.1, the decoder trained on whole songs, several songs averaged into each update, and the style text or lyrics dropped from the prompt on some steps. It has no KL anchor and no KL or reconstruction stop; it runs to the step count, saves a checkpoint at every "Save every", and you pick the rung by ear. It does not hand off to refinement.
-
-When you pick it, the card hides the tuned-only controls and shows the method's settings. Blank fields use the method defaults shown beside them. Two of those are agreed guesses rather than report values: the learning rate (1e-4; the report only gives full-model rates) and the three dropout rates (0.1 each; the report says the drops happen but not how often). The rest are the report's numbers.
+Two of the recipe's numbers are agreed guesses rather than report values: the learning rate (1e-4; the report only gives full-model rates) and the three prompt-dropout rates (0.1 each; the report says the drops happen but not how often). The rest are the report's.
 
 Things to know:
 
-- The first base-matched run on a dataset re-prepares it once, because the prompt variants it trains on were not part of earlier preparations. Both methods then share the prepared dataset.
-- Songs per update (default 8) multiplies the time per step. Set the step count with that in mind: 100 steps at 8 songs each sees 800 songs, roughly what 800 tuned steps see.
-- Whole-song decoder training took about 12 GB of VRAM and 11-15 s a step on a 4-minute song on the RTX 5090. If a song and its prompt do not fit the model's context, the decoder trains on the longest window that does.
-- Loudness. The tuned recipe cuts the audio cache at -14 LUFS; the base was trained on raw recordings, so base-matched wants the cache cut with normalisation off. "Train multiple" does this itself: its cache stage re-cuts a dataset whose cache is at the other level, which also re-runs the codes and sheet stages (they read the normalised audio). Switching a dataset between methods re-cuts it each time. The single-dataset "Start training" button does not re-cut; run the cache stage with loudness off first, or use "Train multiple" with one dataset.
-- Nothing has been heard from this method yet. The plan is an A/B against the tuned recipe on one album through the ear-test score sheet.
+- The first run on a dataset re-cuts its audio cache with loudness normalisation off (the cache key changes, so the codes and lead-sheet stages run again) and re-prepares it once with the prompt variants the recipe trains on. Both are done for you by "Start training" through the stage chain and by "Train multiple".
+- Songs per update multiplies the time per update: 4 songs is about 28 s an update on an RTX 5090, 8 songs about 60 s. Whole-song decoder training takes about 12 GB of VRAM. If a song and its prompt do not fit the model's context, the decoder trains on the longest window that does.
+- Lyric timing supervision is not used by this recipe; the toggle only decides whether the stem and alignment stages run, and it is off by default.
 
 ## Recommended settings
 
-Pick a preset. Each stops the planner when its KL reading (how far the planner has moved from the base model) reaches a target; the step count is a cap.
+Pick a preset. All three are the same recipe; they differ in how many updates run and how many songs each update averages. Times are from a 15-track album on an RTX 5090 with the engine stopped.
 
-| Preset | AR KL target | Step cap |
-|---|---|---|
-| Fast | 0.8 | 300 |
-| Balanced (default) | 1.0 | 500 |
-| Thorough | 1.6 | 700 |
+| Preset | Updates | Songs per update | Songs seen | Time | Green Day ear test |
+|---|---|---|---|---|---|
+| Fast | 50 | 4 | 200 | ~25 min | likeness 4.3, quality 5 |
+| Balanced (default) | 100 | 4 | 400 | ~50 min | likeness 5, quality 5 |
+| Thorough | 200 | 8 | 1600 | ~3.5 h | likeness 5, quality 5; the extra time bought nothing audible on Dookie, but it is the run closest to the report's batch size |
 
-KL means the same thing for every artist, which is why the run stops on it rather than on loss. The presets are deliberately conservative; the Refine phase (below) is where you push the planner further and listen for where it breaks.
+Every preset saves a checkpoint every 10 updates, so the ladder to listen through is 5, 10 or 20 rungs long. Render the rungs and score them on the ear-test sheet; on Dookie, likeness rose with every rung and quality never dropped, so the last rung was the pick.
 
 Defaults the card ships:
 
 | Setting | Default | Notes |
 |---|---|---|
-| Adapter type | LoKr, dim 64, factor 4, alpha 256 | About 106 MB for the AR and NAR pair, against 279 MB for a rank-64 LoRA. LoKr is marked experimental in the UI but is the tested default. |
-| Optimizer | Prodigy, cautious updates on | Prodigy sets its own step size, so the learning rate field is ignored. |
-| Planner / decoder learning-rate scale | 0.6 / 1.0 | |
-| Learning-rate schedule | Warmup, flat, triggered decay (wsd) | Flat, then a short decay that ends on the stop, so the kept weights are annealed. With a KL target the decay starts when the KL trend says the target is about a decay away, so the run lands on the target rather than 40 steps past it. If the KL still passes the target by the overshoot margin (0.1) during the decay, the stop acts at once. |
-| KL reading | 30-step trend line | The 20-step mean lags by about 10 steps. |
-| Save every | 25 steps | |
-| Lyric timing supervision | On, timing loss weight 0.08 | Uses vocal stems and forced alignment. |
-| Caption dropout | 0.5 | So a new caption lands on the artist rather than beside one memorised track. |
-| Spike guard | Skip updates above 5x the recent median; stop after 3 in 20 steps | Ends the run on the last good weights if the gradients blow up. |
-| Decoder stop | Under 0.5% gain over 3 checkpoints | |
-| Automatically proceed to refinement | On | |
-| Checkpoint previews | Off | 90 s when on. Previews belong to the Refine phase, which renders one per rung. |
+| Adapter type | LoKr, dim 64, factor 4, alpha 256 | About 106 MB for the AR and NAR pair. The ear test ran on this adapter. |
+| Learning rate | 1e-4 | Linear warmup over 3% of the updates, then cosine decay to 0.1x at the end. |
+| Weight decay | 0.1 | The report's value. |
+| Adam beta2 | 0.95 | The report's value; the old recipe used 0.999. |
+| Planner loss weight | 0.25 | The report's value. |
+| Prompt dropout | 0.1 text, 0.1 lyrics, 0.1 both | Agreed guesses; the report gives no rates. |
+| ABC dropout | 0.5 | Matches the report's balanced mix of tasks with and without a score. |
+| Decoder crop | 0 (whole song) | The report packs whole songs. |
+| Save every | 10 updates | |
+| Lyric timing supervision | Off | Not used by the recipe. |
+| Checkpoint previews | Off | Render the ladder afterwards instead. |
 | Stop the engine during training | On | |
 
 When to move off them:
 
-- If you switch to LoRA, the card sets the KL target to 1.4 and the planner scale to 0.3. For LoRA, likeness starts near a KL of 1.25 and planner damage (looping outros) near 1.9. LoKr moves further per unit of KL, which is why it ships at 1.0.
-- Turn lyric timing supervision off for a dataset without usable lyrics. It skips the stem and alignment stages.
-- Turn "Stop the engine during training" off if you want to keep generating or scoring while it trains. Both then share the GPU and run slower, and if VRAM runs out Windows spills into system memory.
-- Leave the schedule on wsd. Plain cosine leaves an early-stopped run mid-decay at a high rate, and cosine restarts were expected to shake the planner.
+- Turn "Stop the engine during training" off if you want to keep generating while it trains. Both then share the GPU and run slower, and if VRAM runs out Windows spills into system memory.
 - Training presets saves your current settings under a name in this browser. It never saves dataset, checkpoint or output paths.
 
-"Train multiple" runs the whole chain (caches, preparation, joint training, then the refinement pass when auto-refine is on, which it is by default) for several datasets in sequence with shared settings and a separate output folder each. Its dataset picker hides datasets that already have a linked YuE2 adapter pair; turn on **Show trained** to list them again for a retrain. The batch runs on the server: it survives a page reload, and after a server restart it is listed as paused so you can resume it with every finished stage kept. The batch panel above the Training Studio phases shows the queue, the running stage's step count, and a link back to the running training from anywhere in the studio.
-
-How long it takes and how much VRAM it needs at these settings have not been recorded in the code or skills yet.
-<!-- TODO(verify): joint training wall-clock time and peak VRAM at the Balanced preset. -->
+"Train multiple" runs the whole chain (cache, codes, lead sheets, preparation, joint training) for several datasets in sequence with shared settings and a separate output folder each. Its dataset picker hides datasets that already have a linked YuE2 adapter pair; turn on **Show trained** to list them again for a retrain. The batch runs on the server: it survives a page reload, and after a server restart it is listed as paused so you can resume it with every finished stage kept. The batch panel above the Training Studio phases shows the queue, the running stage's step count, and a link back to the running training from anywhere in the studio.
 
 ## Refining and picking the adapter
 
-A run saves a checkpoint every 25 steps and one at the KL stop. With "Automatically proceed to refinement" on, it then starts a refinement and switches to the Refine phase.
+The Refine phase belongs to the earlier recipe and its KL rungs. New runs do not hand off to it; pick a rung from the run's own checkpoint ladder by ear instead. What follows still applies to runs made before 2026-09-27 and to refinements started from them.
 
 Refinement continues the finished run with the planner live, saves a checkpoint each time the KL crosses the next rung, and renders previews per rung so you can hear where it starts to fall apart late in the song. Its defaults:
 
