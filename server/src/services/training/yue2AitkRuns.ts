@@ -254,8 +254,16 @@ export function setYue2ReviewComplete(output: string, complete: boolean): void {
 
 export function listYue2AitkRuns(datasetId: string, datasetSlug?: string): Yue2AitkRunRecord[] {
   return readIndex().filter(r => r.datasetId === datasetId || (!!datasetSlug && r.datasetSlug === datasetSlug))
-    .map(r => ({ ...r, checkpoints: checkpointRecords(r.output) }))
+    .map(r => ({ ...r, checkpoints: rungsOf(r, checkpointRecords(r.output)) }))
     .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/** A base-matched run (2026-09-27) has no KL rungs: its ladder is every
+ *  complete checkpoint, so each one is flagged as a rung for the Review page,
+ *  the best-rung pick and the ladder cards. Other runs keep meters.json's flag. */
+function rungsOf(run: Yue2AitkRunRecord, checkpoints: Yue2AitkCheckpointRecord[]): Yue2AitkCheckpointRecord[] {
+  if ((run.options as Record<string, unknown> | undefined)?.method !== 'base-matched') return checkpoints;
+  return checkpoints.map(c => c.arPath && c.narPath ? { ...c, rung: true } : c);
 }
 
 /** Every indexed joint run, newest first, with checkpoint files re-scanned.

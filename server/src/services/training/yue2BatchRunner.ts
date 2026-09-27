@@ -209,8 +209,10 @@ export function finishScoredLadders(entries: Array<{ datasetId: string; refineRu
   for (const e of entries) {
     const ds = repo.getDataset(e.datasetId);
     if (!ds) return { error: `Dataset not found: ${e.datasetId}` };
+    // A base-matched ladder is picked as it is: no decoder follow-up.
+    const baseMatched = (listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === e.refineRun)?.options as Record<string, unknown> | undefined)?.method === 'base-matched';
     items.push({ datasetId: ds.id, name: ds.name || ds.slug, refineRun: e.refineRun, narKnee: opts.knee !== false, status: 'pending', currentStage: null, error: null,
-      stages: (['nar', 'finish'] as const).map(stage => ({ stage, jobId: '', status: 'pending' as const, error: null, startedAt: null, finishedAt: null })) });
+      stages: (baseMatched ? ['finish'] as const : ['nar', 'finish'] as const).map(stage => ({ stage, jobId: '', status: 'pending' as const, error: null, startedAt: null, finishedAt: null })) });
   }
   if (!items.length) return { error: 'Nothing to finish' };
   const live = [...batches.values()].find(b => isActive(b.status));
@@ -246,6 +248,12 @@ function finishLadder(item: Yue2BatchItem): void {
   const narJob = item.stages.find(s => s.stage === 'nar')?.jobId;
   let runId = item.refineRun ?? '';
   let step = item.pickStep;
+  if (step === undefined && !narJob && runId) {
+    // No decoder stage chose a step (a base-matched ladder): the best-scored rung.
+    const best = bestScoredRung(ds.id, runId, ds.slug);
+    if (!best) throw new Error('No rung of this ladder has both a likeness and a corruption score');
+    step = best.step;
+  }
   if (narJob) {
     const nar = runs.find(r => r.jobId === narJob);
     const last = nar?.checkpoints.filter(c => c.arPath && c.narPath).sort((a, b) => b.step - a.step)[0];

@@ -3759,6 +3759,9 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
     // keeps the existing AITK recipe fast while making the checkpoint contract
     // fully recorded for runs that choose it.
     const preview = parseYue2JointPreviewOptions(b.preview, saveEvery);
+    // Base-matched ladders render in parallel at every checkpoint; a pause
+    // cadence would segment the run for nothing, so it is cleared here.
+    if (method === 'base-matched' && preview.enabled && preview.parallel) preview.everySteps = 0;
     const alignmentEnabled = b.lyricTiming === undefined
       ? (b.alignmentEnabled === undefined ? true : b.alignmentEnabled === true)
       : b.lyricTiming === true;
@@ -3771,7 +3774,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(resume ? { resume } : {}), datasetSlug: ds.slug,
       spawnEnv: buildGpuEnv().env,
       trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16',
-      preview: preview.enabled && (preview.everySteps > 0 || b.refinePlanner === true) ? preview : { ...preview, enabled: false },
+      preview: preview.enabled && (preview.everySteps > 0 || b.refinePlanner === true || (method === 'base-matched' && preview.parallel)) ? preview : { ...preview, enabled: false },
       alignment,
       rank, alpha: alphaRaw,
       ...(adapterType === 'lokr' ? { adapterType, ...(lokrDim !== undefined ? { lokrDim } : {}), ...(lokrFactor !== undefined ? { lokrFactor } : {}) } : {}),
@@ -4057,7 +4060,8 @@ router.get('/yue2-review', (_req: Request, res: Response) => {
         rows.push({ datasetId: ds.id, datasetSlug: ds.slug, datasetName: ds.name, refineRun: run.jobId, status: run.status, createdAt: run.createdAt,
           live: active?.id === run.jobId, rungs: rungs.length, previews: previews.length, scored: scored.size,
           unscored: rungs.filter(r => !scored.has(r.step)).length, reviewed: yue2ReviewComplete(run.output), best: best ? { step: best.step, overall: best.overall } : null,
-          decoderOnly: (run.options as Record<string, unknown>)?.freezePlannerNow === true, klMin: kls.length ? Math.min(...kls) : null, klMax: kls.length ? Math.max(...kls) : null });
+          decoderOnly: (run.options as Record<string, unknown>)?.freezePlannerNow === true, klMin: kls.length ? Math.min(...kls) : null, klMax: kls.length ? Math.max(...kls) : null,
+          baseMatched: (run.options as Record<string, unknown>)?.method === 'base-matched' });
       }
     }
     rows.sort((a, b) => (b.createdAt as number) - (a.createdAt as number));

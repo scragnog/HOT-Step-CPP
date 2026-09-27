@@ -2511,7 +2511,7 @@ export async function listYue2JointPreviews(
 }
 
 /** Awaiting review: refinement ladders across datasets with score counts. */
-export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number } | null; decoderOnly: boolean }
+export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number } | null; decoderOnly: boolean; baseMatched?: boolean }
 export async function listYue2Review(): Promise<{ rows: Yue2ReviewRow[] }> {
   return request('/yue2-review');
 }

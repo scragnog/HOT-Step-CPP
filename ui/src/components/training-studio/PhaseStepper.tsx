@@ -45,8 +45,11 @@ export const PhaseStepper: React.FC = () => {
   // than relabelled. Its monitor slot is dropped too: the batch pipeline is
   // the preprocess-based backends' unattended queue, and YuE2 has its own
   // queue view on the same Train page.
+  // Refine is hidden since 2026-09-27: the recipe picks rungs from a run's own
+  // ladder on the Train page. The phase itself stays reachable from Review
+  // for the earlier recipe's ladders.
   const phases = backendId === YUE2_BACKEND_ID
-    ? PHASES.filter(p => p.id !== 'preprocess' && p.id !== 'monitor')
+    ? PHASES.filter(p => p.id !== 'preprocess' && p.id !== 'monitor' && p.id !== 'refine')
     : PHASES.filter(p => p.id !== 'refine' && p.id !== 'review');
 
   return (

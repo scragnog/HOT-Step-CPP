@@ -46,7 +46,9 @@ export const ReviewPanel: React.FC = () => {
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setFinishing(false); }
   };
-  const open = (r: Yue2ReviewRow) => { setRefineLadderRun(r.refineRun); void openDataset(r.datasetId).then(() => setPhase('refine')); };
+  // A base-matched run's ladder lives on the Train page; the earlier recipe's
+  // KL ladders still open on the (hidden) Refine tab.
+  const open = (r: Yue2ReviewRow) => { setRefineLadderRun(r.refineRun); void openDataset(r.datasetId).then(() => setPhase(r.baseMatched ? 'train' : 'refine')); };
   const Row: React.FC<{ r: Yue2ReviewRow }> = ({ r }) => (
     <button type="button" onClick={() => open(r)} className="w-full text-left rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 hover:bg-amber-500/5 px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1">
       <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 min-w-[180px]">{r.datasetName}</span>
@@ -63,7 +65,7 @@ export const ReviewPanel: React.FC = () => {
       <div className="flex items-center gap-2">
         <ListChecks size={16} className="text-amber-500" />
         <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{t('trainingStudio.review.title', 'Awaiting review')}</span>
-        <span className="text-[11px] text-zinc-500">{t('trainingStudio.review.intro', 'Refinement ladders with previews and rungs you have not scored yet. Click one to listen and score on the Refine tab.')}</span>
+        <span className="text-[11px] text-zinc-500">{t('trainingStudio.review.intro', 'Runs with previews and rungs you have not scored yet. Click one to listen and score.')}</span>
         <span className="flex-1" />
         <button type="button" onClick={() => void load()} disabled={loading} className="p-1.5 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:bg-zinc-500/10"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} /></button>
       </div>
@@ -72,7 +74,7 @@ export const ReviewPanel: React.FC = () => {
       <div className="flex flex-col gap-2">{pending.map(r => <Row key={r.refineRun} r={r} />)}</div>
       {finishable.length > 0 && <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 flex flex-col gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-zinc-700 dark:text-zinc-300 flex-1">{t('trainingStudio.review.finishIntro', '{{n}} scored ladder(s) ready to finish: NAR further training from the best-scored rung, then link to the album preset and clean up (all cleanup options, caches included).', { n: finishable.length })}</span>
+          <span className="text-xs text-zinc-700 dark:text-zinc-300 flex-1">{t('trainingStudio.review.finishIntro', '{{n}} scored ladder(s) ready to finish: link the best-scored rung to the album preset and clean up (all cleanup options, caches included). Ladders of the earlier recipe get NAR further training from that rung first.', { n: finishable.length })}</span>
           <button type="button" onClick={() => setFinishOpen(v => !v)} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-500">
             {t('trainingStudio.review.finishCta', 'Finish scored ({{n}})', { n: finishable.length })}
           </button>
@@ -81,7 +83,7 @@ export const ReviewPanel: React.FC = () => {
           {finishable.map(r => <div key={r.refineRun} className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
             <Toggle size="sm" accent="amber" checked={!skip[r.refineRun]} onChange={v => setSkip(prev => ({ ...prev, [r.refineRun]: !v }))} aria-label={t('trainingStudio.review.finishInclude', 'Include {{name}} in this finish batch', { name: r.datasetName }) as string} />
             <span className="font-semibold min-w-[180px]">{r.datasetName}</span>
-            <span className="text-zinc-500">{t('trainingStudio.review.finishPick', 'step {{step}}, overall {{score}}', { step: r.best!.step, score: r.best!.overall.toFixed(2) })}{r.decoderOnly ? ` · ${t('trainingStudio.review.finishNoNar', 'decoder run already, no NAR step')}` : ''}</span>
+            <span className="text-zinc-500">{t('trainingStudio.review.finishPick', 'step {{step}}, overall {{score}}', { step: r.best!.step, score: r.best!.overall.toFixed(2) })}{r.decoderOnly || r.baseMatched ? ` · ${t('trainingStudio.review.finishNoNar', 'linked as it is, no NAR step')}` : ''}</span>
           </div>)}
           <div className="flex items-center justify-end gap-3">
             <Toggle

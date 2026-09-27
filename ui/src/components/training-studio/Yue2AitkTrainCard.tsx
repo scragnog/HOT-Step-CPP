@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
 import { TrainingChart } from './TrainingChart';
 import { StyledSelect } from '../shared/StyledSelect';
+import { Yue2LadderReview } from './Yue2LadderReview';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
 import {
@@ -112,6 +113,12 @@ function snapshotPresetSettings(form: Yue2JointTrainRequest, lyricTiming: boolea
   settings.lyricTiming = lyricTiming;
   return settings as Partial<Yue2JointTrainRequest>;
 }
+// 2026-09-27: every checkpoint of a run is a rung of its ladder, rendered in
+// parallel with training (everySteps 0 = no pauses): one 300 s draft take
+// (12 decoder steps), the same settings the Refine tab's ladders used.
+const LADDER_PREVIEW: Yue2JointPreviewOptions = { enabled: true, everySteps: 0, parallel: true, takes: 1, odeSteps: 12, narCacheRatio: 0, seconds: 300, seed: 424242,
+  previewMaxFrames: 7500, baseline: false, control: false };
+function defaultPreview(_everySteps: number): Yue2JointPreviewOptions { return { ...LADDER_PREVIEW }; }
 const DEFAULT_FORM: Yue2JointTrainRequest = {
   trainingMethod: 'aitk', checkpoint: '', dataset: '', output: '',
   // NAR budget recipe (2026-09-21): the run still ends on the planner's KL to
@@ -161,6 +168,8 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // caption lands on the artist rather than beside one memorised track.
   narExtraSteps: 0, captionDropout: 0,
   autoRefine: false,
+  // The ladder's previews render while training runs, so the engine stays up.
+  preview: LADDER_PREVIEW, stopEngine: false,
 };
 // Tuned-recipe knobs the server forces under base-matched; cleared from
 // stored forms so a saved value from before 2026-09-27 cannot linger.
@@ -183,11 +192,7 @@ const presetValues = (p: typeof PRESETS[number]) => ({ stopMode: 'steps' as cons
 const activePreset = (f: Yue2JointTrainRequest) => PRESETS.find(p => f.steps === p.steps && (f.gradAccum ?? 4) === p.gradAccum)?.key;
 type PrepareForm = Yue2AitkPrepareRequest;
 
-function defaultPreview(everySteps: number): Yue2JointPreviewOptions {
-  // 90 s (2026-09-22): 40 s often ended inside the intro, before any vocal.
-  return { enabled: false, everySteps, seconds: 90, seed: 424242,
-    previewMaxFrames: 2250, baseline: false, control: false };
-}
+
 
 function readStored<T>(key: string, fallback: T): T {
   if (typeof window === 'undefined') return fallback;
@@ -360,6 +365,14 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     Object.assign(stored, presetValues(PRESETS[1]));
     window.localStorage.setItem(baseMatched, '1');
   }
+  // 2026-09-27 (Rob): the run's own ladder is previewed and scored on this
+  // page, so previews are on and the engine stays up. Turned on once.
+  const ladderPreviews = `${FORM_KEY}${datasetId}:defaults-ladder-previews-2026-09-27`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(ladderPreviews)) {
+    stored.preview = { ...LADDER_PREVIEW, ...(stored.preview?.caption ? { caption: stored.preview.caption } : {}), ...(stored.preview?.lyrics ? { lyrics: stored.preview.lyrics } : {}) };
+    stored.stopEngine = false;
+    window.localStorage.setItem(ladderPreviews, '1');
+  }
   return { ...DEFAULT_FORM, ...stored, method: 'base-matched' };
 }
 function writeStored(key: string, value: unknown): void {
@@ -449,7 +462,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         ? (typeof form.cursorWeight === 'number' && Number.isFinite(form.cursorWeight) ? form.cursorWeight : 0.08) : 0;
       const recipe = { ...form, autoCaption: autoCaption ?? (false as const), cursorWeight: timingWeight, dataset: '', output: '', resume: '',
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
-          everySteps: form.saveEvery, previewMaxFrames: Math.max(8, Math.min(120, form.preview.seconds || 90)) * 25 } } : {}) };
+          everySteps: form.preview.parallel ? 0 : form.saveEvery, previewMaxFrames: Math.max(8, Math.min(360, form.preview.seconds || 300)) * 25 } } : {}) };
       await startBatch({ datasetIds: batchDraft, lyricTiming, clearCache: batchClearCache, recipe });
       setPhase('train');
     } catch (err) {
@@ -457,18 +470,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     } finally { setBatchStarting(false); }
   };
   const [aitkRuns, setAitkRuns] = useState<Yue2AitkRunRecord[]>([]);
+  const [ladderNonce, setLadderNonce] = useState(0);
   const [resumeChoice, setResumeChoice] = useState('');
-  // Auto-refine: when the run this card started reaches done, hand over to
-  // the Refine tab, where the server-started refinement shows as the active job.
-  const handedOver = useRef<string>('');
-  useEffect(() => {
-    // Only a run that finished just now: a page reload restores an old done job.
-    const fresh = typeof job?.finishedAt === 'number' && Date.now() - job.finishedAt < 120_000;
-    if (!job || job.status !== 'done' || !fresh || form.autoRefine === false || resumeChoice || handedOver.current === job.id) return;
-    handedOver.current = job.id;
-    const timer = window.setTimeout(() => setPhase('refine'), 2500);
-    return () => window.clearTimeout(timer);
-  }, [job?.id, job?.status]);
   const [clearing, setClearing] = useState(false);
   const [cacheInfo, setCacheInfo] = useState<{ slug: string; caches: PreparedCache[]; busy: boolean } | null>(null);
   const [clearNote, setClearNote] = useState('');
@@ -555,18 +558,26 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     const running = job?.status === 'queued' || job?.status === 'running';
     const timer = running ? window.setInterval(refresh, 5000) : undefined;
     return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer); };
-  }, [datasetId, job?.id, job?.status]);
+  }, [datasetId, job?.id, job?.status, ladderNonce]);
+  // The ladder shown under the run: the run this card's job made, else the
+  // live one, else the newest. Its previews are fetched for that run.
+  const ladderRunRec = aitkRuns.find(r => r.jobId === job?.id) ?? aitkRuns.find(r => r.live) ?? [...aitkRuns].sort((a, b) => b.createdAt - a.createdAt)[0];
+  const ladderRunId = ladderRunRec?.jobId;
 
   useEffect(() => {
     let cancelled = false;
-    const refresh = () => listYue2JointPreviews(datasetId, job?.id)
+    if (!ladderRunId) { setJointPreviews([]); return; }
+    const refresh = () => listYue2JointPreviews(datasetId, ladderRunId)
       .then(result => { if (!cancelled) setJointPreviews(result.previews); })
       .catch(() => { if (!cancelled) setJointPreviews([]); });
     void refresh();
-    const timer = job?.status === 'queued' || job?.status === 'running'
+    // Previews land while the run trains and for a while after it ends
+    // (the parallel chain drains), so keep polling a live or just-finished run.
+    const fresh = typeof job?.finishedAt === 'number' && Date.now() - job.finishedAt < 30 * 60_000;
+    const timer = job?.status === 'queued' || job?.status === 'running' || fresh || ladderRunRec?.live
       ? window.setInterval(refresh, 5000) : undefined;
     return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer); };
-  }, [datasetId, job?.id, job?.status]);
+  }, [datasetId, ladderRunId, job?.status, ladderNonce]);
 
   useEffect(() => {
     setLiveMetric(null);
@@ -788,7 +799,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         autoPrepare: !resumeChoice && !form.resume?.trim(), preparation: prepare,
         checkpoint: '', output: '',
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
-          everySteps: form.saveEvery, previewMaxFrames: Math.max(8, Math.min(120, form.preview.seconds || 90)) * 25 } } : {}),
+          everySteps: form.preview.parallel ? 0 : form.saveEvery, previewMaxFrames: Math.max(8, Math.min(360, form.preview.seconds || 300)) * 25 } } : {}),
         ...(form.resume?.trim() && !resumeChoice ? { resume: form.resume.trim() } : {}),
         ...selectedResume };
       const result = await startYue2JointTrain(datasetId, request);
@@ -1240,7 +1251,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         disabled={active || preparing || starting || yue2RunAllActive}
         onChange={checked => setForm(previous => ({ ...previous, stopEngine: checked }))}
         label={t('trainingStudio.yue2.method.stopEngine', 'Stop the engine during training')}
-        info={t('trainingStudio.yue2.method.stopEngineHelp', 'On by default: the trainer gets the whole GPU and generation is unavailable until it finishes. Off: keep generating (and scoring ladders) while it trains. Both then share the GPU and run slower, and if VRAM runs out Windows spills to system memory and everything crawls.')}
+        info={t('trainingStudio.yue2.method.stopEngineHelp', 'Off by default since the ladder previews render while training runs and need the engine up (about 14 GB for the trainer plus 10-12 GB for the engine and a render). On: the trainer gets the whole GPU, generation is unavailable, and no previews render until the run ends; use it on a smaller card and render the ladder afterwards.')}
       />
       <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/30 dark:bg-black/10 p-3">
         <summary className="cursor-pointer text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
@@ -1252,12 +1263,22 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           checked={form.preview?.enabled ?? false}
           disabled={active || preparing || starting || yue2RunAllActive}
           onChange={checked => setForm(previous => ({ ...previous, preview: { ...(previous.preview ?? defaultPreview(form.saveEvery)), enabled: checked } }))}
-          label={t('trainingStudio.yue2.method.previewEnable', 'Render one artist sample at saved checkpoints')}
-          info={t('trainingStudio.yue2.method.previewManual', 'Off by default. Samples are saved for manual listening; they do not start automatically in the player.')}
+          label={t('trainingStudio.yue2.method.previewEnable', 'Render a preview at every saved checkpoint')}
+          info={t('trainingStudio.yue2.method.previewManual', 'On by default: each checkpoint gets one draft take (12 decoder steps, 300 s) rendered while training continues, so the ladder is ready to score when the run ends. Off: render rungs by hand from the ladder below.')}
         />
+        {form.preview?.enabled && <Toggle
+          accent="amber"
+          size="sm"
+          className="mt-2"
+          checked={form.preview.parallel !== false}
+          disabled={active || preparing || starting || yue2RunAllActive}
+          onChange={checked => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, parallel: checked }, ...(checked ? { stopEngine: false } : {}) }))}
+          label={t('trainingStudio.yue2.method.previewParallel', 'In parallel with training')}
+          info={t('trainingStudio.yue2.method.previewParallelInfo', 'Render each checkpoint\'s preview while training continues; needs the engine up (this also turns "Stop the engine during training" off). Off: training pauses at each checkpoint, renders, and resumes, which fits a smaller card but takes longer.')}
+        />}
         {form.preview?.enabled && <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
           {field(t('trainingStudio.yue2.method.previewSeconds', 'Preview seconds'), 'seconds', 'number', form.preview, value => setForm(previous => {
-            const seconds = Math.max(8, Math.min(120, Number(value) || 90));
+            const seconds = Math.max(8, Math.min(360, Number(value) || 300));
             return { ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seconds, previewMaxFrames: seconds * 25 } };
           }), t('trainingStudio.yue2.method.previewSecondsInfo', 'How long the rendered preview sample is, from 8 to 120 seconds. Longer previews show more of the song but take longer to render at every checkpoint.'), t('trainingStudio.yue2.method.previewSecondsMeta', 'default 90'))}
           {field(t('trainingStudio.yue2.method.previewSeed', 'Preview seed'), 'seed', 'number', form.preview, value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: Number(value) } })),
@@ -1383,7 +1404,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-zinc-950 p-2 text-[10px] leading-4 text-zinc-300 whitespace-pre-wrap">{jobLogs.join('\n')}</pre>
       </details>}
       {job?.status === 'done' && <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">{t('trainingStudio.yue2.method.checkpointWritten', 'Joint checkpoints are in the selected output directory.')}</p>}
-      {job?.status === 'done' && form.autoRefine !== false && !resumeChoice && <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.autoRefineNote', 'Refinement is starting on the Refine tab.')}</p>}
       {(aitkRuns.length > 0 || runsError) && <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
         <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.auditionTitle', 'Audition a joint checkpoint')}</p>
         {activeBackendId !== 'yue2' && <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.selectYue2', 'Select the YuE2 backend to use these adapters for generation.')}</p>}
@@ -1419,18 +1439,12 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {applyNote && <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">{applyNote}</p>}
         {presetLinkNote && <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">{presetLinkNote}</p>}
       </div>}
-      {jointPreviews.length > 0 && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
-        <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.previewStrip', 'Checkpoint previews')}</p>
-        <div className="mt-2 flex flex-col gap-2">
-          {jointPreviews.map(preview => <div key={preview.id} className="flex items-center gap-2 text-[11px] text-zinc-600 dark:text-zinc-400">
-            <span className="w-20 shrink-0">step {preview.step} · {preview.kind}</span>
-            <span className="flex-1">{preview.status === 'failed' ? preview.error || 'render failed' : preview.endReason === 'preview_limit' ? t('trainingStudio.yue2.method.previewCapped', 'Preview length reached') : preview.status}</span>
-            {preview.score && <span title={[preview.score.reason, ...(preview.score.flags ?? [])].join('\n')} className={`shrink-0 font-semibold uppercase tracking-wider ${preview.score.verdict === 'healthy' && !preview.score.flags?.length ? 'text-emerald-500' : preview.score.verdict === 'long' || preview.score.verdict === 'healthy' ? 'text-amber-500' : 'text-red-500'}`}>
-              {preview.score.verdict} · {preview.score.bars} bars · {Math.round(preview.score.vocalShare * 100)}% vocal
-            </span>}
-            {preview.audioUrl && preview.status === 'done' && <audio controls preload="none" src={preview.audioUrl} className="h-7 max-w-[240px]" />}
-          </div>)}
-        </div>
+      {ladderRunRec && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
+        <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.ladderTitle', 'Checkpoint ladder')} · {new Date(ladderRunRec.createdAt).toLocaleString()}{ladderRunRec.live ? ` · ${t('trainingStudio.yue2.method.ladderLive', 'training')}` : ''}</p>
+        <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.ladderHint', 'Every saved checkpoint is a rung. Previews render while the run trains (one 300 s draft take on the dataset\'s first sung track); a rung with none yet says so, and Render adds a take. Score likeness and corruption 1-5, then press Use this rung on your pick: it becomes the dataset\'s adapter and you can clean up the rest. Scores also feed the Review page and "Finish scored" for batches.')}</p>
+        <Yue2LadderReview datasetId={datasetId} datasetName={datasets.find(d => d.id === datasetId)?.name} run={ladderRunRec} previews={jointPreviews}
+          renderOpts={{ seconds: form.preview?.seconds ?? 300, takes: 1, draft: (form.preview?.odeSteps ?? 12) > 0 && (form.preview?.odeSteps ?? 12) < 32 }}
+          onChanged={() => setLadderNonce(n => n + 1)} onError={setError} idPrefix="train-rung" />
       </div>}
     </div>
   );

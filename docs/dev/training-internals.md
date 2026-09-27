@@ -73,6 +73,15 @@ is not mistaken for a pre-normalisation one. Not matched: the report's two no-se
 tasks (no published layout; our inference never runs them) and its flow-time distribution
 (unstated).
 
+Ladder previews (2026-09-27): for a base-matched run the relay fires `state.onRung` on every
+`checkpoint` event (there are no `kl_mark` rungs), the runner's parallel preview chain renders one
+take per checkpoint while training continues, and `listYue2AitkRuns` flags every complete
+checkpoint of such a run as a rung so the Review route, `bestScoredRung` and the ladder cards
+treat it as one. The route clears `preview.everySteps` for a parallel base-matched preview so the
+run is not segmented. The ladder UI (`Yue2LadderReview.tsx`: cards, scores, scoreboard, "Use this
+rung", cleanup modal) was extracted from `RefinePanel.tsx` and is shared by the training card and
+the hidden Refine tab; `finishScoredLadders` runs a base-matched ladder through `finish` only.
+
 Stops and tails. Under `--lr-schedule wsd` with `--target-kl`, the tail starts when the KL trend line's slope says `reading + 0.5 × slope × lr_decay_steps` reaches the target, so a linear or cosine decay ends on the target; a reading at the target with no warning starts the tail as before. `--kl-overshoot-margin` (default 0.1, 0 = off) acts on the stop at once if the reading passes the target by that much during the tail. During decoder-only training `--recon-stop F` stops when a least-squares line through the last `--recon-stop-window` `nar_recon` readings (at least 3; the app passes 10) gains less than F across them; it was a two-point comparison until 2026-09-26, which the meter's 0.2-0.5% per-checkpoint jitter tripped on runs still improving 0.5-0.9% per 50 steps. The server option `reconKeepDelta` deletes a routine checkpoint whose `nar_recon` did not improve on the best kept one by that amount once a newer checkpoint lands (the newest is never deleted; rung checkpoints are exempt). After the Refine cleanup the run directory moves to `<adapters>/yue2-joint-adapters/refined/` and the `yue2-aitk-runs.json` index, the album presets and the persisted adapter pick are repointed; the index also relocates a run moved into `refined/` by hand. Preview records carry `plan.attempts` (planner re-plans) and `composerReplans`, recovered from the seed the engine echoes back, which advances by 1000003 per recompose. The caption-source list is served by `GET /api/training/yue2-dataset-captions` keyed by dataset id, lyrics set or adapter path, composed from the dataset's sidecars (a `.yue2.txt` caption is the whole trained sentence; an ACE caption gets the genre/BPM/key tail), and matches the prepared manifest's style strings minus the trigger opener.
 
 Training Studio enables lyric-timing supervision for new joint runs by default.

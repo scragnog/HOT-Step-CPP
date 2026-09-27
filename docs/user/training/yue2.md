@@ -66,7 +66,7 @@ Pick a preset. All three are the same recipe; they differ in how many updates ru
 | Balanced (default) | 100 | 4 | 400 | ~50 min | likeness 5, quality 5 |
 | Thorough | 200 | 8 | 1600 | ~3.5 h | likeness 5, quality 5; the extra time bought nothing audible on Dookie, but it is the run closest to the report's batch size |
 
-Every preset saves a checkpoint every 10 updates, so the ladder to listen through is 5, 10 or 20 rungs long. Render the rungs and score them on the ear-test sheet; on Dookie, likeness rose with every rung and quality never dropped, so the last rung was the pick.
+Every preset saves a checkpoint every 10 updates, so the ladder to listen through is 5, 10 or 20 rungs long; see Picking the adapter below.
 
 Defaults the card ships:
 
@@ -82,19 +82,29 @@ Defaults the card ships:
 | Decoder crop | 0 (whole song) | The report packs whole songs. |
 | Save every | 10 updates | |
 | Lyric timing supervision | Off | Not used by the recipe. |
-| Checkpoint previews | Off | Render the ladder afterwards instead. |
-| Stop the engine during training | On | |
+| Checkpoint previews | On, in parallel, one 300 s draft take per checkpoint | The run's ladder; see Picking the adapter. |
+| Stop the engine during training | Off | The parallel previews need the engine up. Turn it on (and previews off) on a smaller card. |
 
 When to move off them:
 
-- Turn "Stop the engine during training" off if you want to keep generating while it trains. Both then share the GPU and run slower, and if VRAM runs out Windows spills into system memory.
+- Turn "Stop the engine during training" on, and previews off, on a card without room for the trainer (about 14 GB) plus the engine and a render (10-12 GB) at once; then render the ladder after the run.
 - Training presets saves your current settings under a name in this browser. It never saves dataset, checkpoint or output paths.
 
 "Train multiple" runs the whole chain (cache, codes, lead sheets, preparation, joint training) for several datasets in sequence with shared settings and a separate output folder each. Its dataset picker hides datasets that already have a linked YuE2 adapter pair; turn on **Show trained** to list them again for a retrain. The batch runs on the server: it survives a page reload, and after a server restart it is listed as paused so you can resume it with every finished stage kept. The batch panel above the Training Studio phases shows the queue, the running stage's step count, and a link back to the running training from anywhere in the studio.
 
-## Refining and picking the adapter
+## Picking the adapter
 
-The Refine phase belongs to the earlier recipe and its KL rungs. New runs do not hand off to it; pick a rung from the run's own checkpoint ladder by ear instead. What follows still applies to runs made before 2026-09-27 and to refinements started from them.
+Every saved checkpoint is a rung of the run's ladder, shown under the run on the Train page as soon as training starts. With previews on (the default) each rung gets one 300 s draft take (12 decoder steps, the dataset's first sung track as the prompt) rendered in parallel while training continues, so the ladder is ready to listen to when the run ends; a rung without a take yet says so, and **Render** adds one. Rendering in parallel keeps the engine running during training, which is why "Stop the engine during training" is off by default; on a smaller card turn previews off and render the ladder afterwards.
+
+Score each rung 1-5 on likeness and corruption and leave notes. The floating scoreboard ranks the rungs by an overall score (likeness and inverted corruption averaged, minus a small penalty for re-plans) and marks the best. Press **Use this rung** on your pick: the checkpoint becomes the dataset's adapter (linked to its Lyric Studio album preset) and a cleanup dialog offers to delete the other checkpoints, the previews of the other rungs, the run's resume file, other joint runs for the dataset and the prepared caches, with sizes. Keep everything or delete the selection; the chosen rung's adapter files, the source audio and your scores are never touched, and the run folder moves to `yue2-joint-adapters/refined/`.
+
+Batches score the same way: a finished run's ladder appears on the **Review** page as soon as it has previews, with how many rungs are still unscored. Click a row to open its ladder on the Train page. Once a ladder has a scored rung, **Finish scored** links the best-scored rung and cleans up, for every ladder you tick, in one server-side batch.
+
+The Green Day Dookie test that set the recipe scored 5 on every quality criterion at every rung, so the pick there was the last rung; on other albums, listen for the point where likeness stops improving.
+
+## The Refine phase (earlier recipe)
+
+The Refine tab is hidden since 2026-09-27; its code is kept. It belongs to the earlier recipe and its KL rungs, and the Review page still opens those ladders on it. What follows applies only to runs made before that date and to refinements started from them.
 
 Refinement continues the finished run with the planner live, saves a checkpoint each time the KL crosses the next rung, and renders previews per rung so you can hear where it starts to fall apart late in the song. Its defaults:
 

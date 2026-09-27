@@ -463,6 +463,7 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
       const saved = checkpointRecords(opts.outDir).find(c => c.step === step && c.arPath && c.narPath);
       if (saved) pushEvent(job, { type: 'metric', metric: 'milestone', ts: Date.now(), step,
         loss: state.lastLoss, path: saved.dir });
+      if (saved && opts.method === 'base-matched') state.onRung?.(step);
       if (thinning?.pendingDrop?.step === step) {
         // The folder exists under its final name now (see pendingDrop).
         if (saved) thinning.disposable = { step, dir: saved.dir, recon: thinning.pendingDrop.recon };
@@ -590,7 +591,9 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
     nativeAttempted = true;
     // Previews pause the run every N steps, or at every KL rung of a planner
     // refinement (the engine pauses after each rung checkpoint).
-    const rungPreviews = (o.klCheckpointEvery ?? 0) > 0;
+    // A base-matched run has no KL rungs: every saved checkpoint is one, and
+    // the relay fires onRung from the checkpoint event (2026-09-27).
+    const rungPreviews = (o.klCheckpointEvery ?? 0) > 0 || o.method === 'base-matched';
     const preview = o.preview?.enabled && (o.preview.everySteps > 0 || rungPreviews) ? o.preview : undefined;
     // Plan checks pause the run like previews do; the pause cadence is the
     // check's while the planner is live, the preview's once it is frozen.
