@@ -62,9 +62,14 @@ Their texts: lyric-dropped `[Lyrics]\n\n` (the official instrumental tooling's l
 request), text-dropped `[Tags]\n\n` (by symmetry, unpublished), unconditional = the bare
 instruction with no headers (`protocol.py` `negative_prefix`; its off form has no ABC bracket,
 so the suffix opens with MUSIC_START). `ace-train yue2-batch-check` is a CPU self-check of these
-layouts and of `--ar-targets base`. Not matched: the report's two no-semantic-token tasks
-(no published layout; our inference never runs them), its flow-time distribution (unstated),
-and loudness (the cache is still normalised to -14 LUFS; the base used raw recordings).
+layouts and of `--ar-targets base`. Loudness: `yue2-preprocess --loudness-lufs` (0 = off) is now
+passed by the server (`loudnessLufs` on the cache route); `yue2LoudnessForMethod` gives -14 for
+tuned and 0 for base-matched, and the batch chain's cache stage re-cuts a dataset at the other
+level (the target is part of the latent key, so the manifest is rewritten and codes/sheet/align
+run again). The manifest always carries `loudness_target_lufs` now, 0 included, so an off cache
+is not mistaken for a pre-normalisation one. Not matched: the report's two no-semantic-token
+tasks (no published layout; our inference never runs them) and its flow-time distribution
+(unstated).
 
 Stops and tails. Under `--lr-schedule wsd` with `--target-kl`, the tail starts when the KL trend line's slope says `reading + 0.5 × slope × lr_decay_steps` reaches the target, so a linear or cosine decay ends on the target; a reading at the target with no warning starts the tail as before. `--kl-overshoot-margin` (default 0.1, 0 = off) acts on the stop at once if the reading passes the target by that much during the tail. During decoder-only training `--recon-stop F` stops when a least-squares line through the last `--recon-stop-window` `nar_recon` readings (at least 3; the app passes 10) gains less than F across them; it was a two-point comparison until 2026-09-26, which the meter's 0.2-0.5% per-checkpoint jitter tripped on runs still improving 0.5-0.9% per 50 steps. The server option `reconKeepDelta` deletes a routine checkpoint whose `nar_recon` did not improve on the best kept one by that amount once a newer checkpoint lands (the newest is never deleted; rung checkpoints are exempt). After the Refine cleanup the run directory moves to `<adapters>/yue2-joint-adapters/refined/` and the `yue2-aitk-runs.json` index, the album presets and the persisted adapter pick are repointed; the index also relocates a run moved into `refined/` by hand. Preview records carry `plan.attempts` (planner re-plans) and `composerReplans`, recovered from the seed the engine echoes back, which advances by 1000003 per recompose. The caption-source list is served by `GET /api/training/yue2-dataset-captions` keyed by dataset id, lyrics set or adapter path, composed from the dataset's sidecars (a `.yue2.txt` caption is the whole trained sentence; an ACE caption gets the genre/BPM/key tail), and matches the prepared manifest's style strings minus the trigger opener.
 

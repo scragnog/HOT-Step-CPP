@@ -3260,12 +3260,21 @@ router.post('/datasets/:id/yue2-preprocess', (req: Request, res: Response) => {
       return;
     }
 
+    // Loudness target: absent = the engine's -14 LUFS; 0 = off. It is part of
+    // the cache key, so a change re-encodes and drops codes/sheet/alignment.
+    let loudnessLufs: number | undefined;
+    if (b.loudnessLufs !== undefined && b.loudnessLufs !== null && b.loudnessLufs !== '') {
+      const v = Number(b.loudnessLufs);
+      if (!Number.isFinite(v) || v > 0 || v < -40) { res.status(400).json({ error: 'loudnessLufs must be 0 (off) or a target from -40 to 0 LUFS.' }); return; }
+      loudnessLufs = v;
+    }
     const outDir = yue2LatentsDir(ds.slug);
     const job = queue.startYue2PreprocessJob(ds.id, {
       audioDir: ds.sourceDir,
       outDir,
       manifestPath: yue2PreprocessManifest(ds.slug),
       vaeVariant,
+      ...(loudnessLufs !== undefined ? { loudnessLufs } : {}),
       clipSeconds: num('clipSeconds', D.clipSeconds, 1, 60),
       captionMode,
       defaultCaption,
@@ -4270,6 +4279,9 @@ router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
           // it teaches the album's mastering level (clipping on loud albums).
           done: !!cache && cache.clips > 0 && cache.loudnessLufs !== null,
           cache: cache ?? null,
+          // The level the cache was cut at (0 = off); the batch chain re-cuts
+          // when a method wants another (yue2LoudnessForMethod).
+          loudnessLufs: cache?.loudnessLufs ?? null,
           missing: missingYue2TrainModels('preprocess', { vaeVariant: 'standard' }),
           // A cache built for the NAR (or before `ace` existed) carries no
           // caption, and the AR prefix IS the caption — it would train and

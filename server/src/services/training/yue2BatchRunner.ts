@@ -22,6 +22,7 @@ import * as queue from './labelingQueue.js';
 import { trainingBaseDir } from './paths.js';
 import { listYue2AitkRuns } from './yue2AitkRuns.js';
 import { autoRefineRequest } from './yue2JointTrainRunner.js';
+import { yue2LoudnessForMethod } from './yue2Train.js';
 import { listPreparedCaches } from './preparedDataReset.js';
 import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
 import { bestScoredRung } from './yue2BestRung.js';
@@ -378,7 +379,7 @@ async function runItem(state: BatchState, item: Yue2BatchItem): Promise<void> {
 
 interface ArStatus {
   stages: {
-    preprocess: { done: boolean; captionModeOk: boolean; captionsStale?: boolean };
+    preprocess: { done: boolean; captionModeOk: boolean; captionsStale?: boolean; loudnessLufs?: number | null };
     tokenize: { done: boolean };
     sheet: { done: boolean };
     align: { done: boolean; stemsReady: number; stemsNeeded: number };
@@ -428,7 +429,15 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
   }
   const st = await readStatus(item.datasetId);
   switch (stage) {
-    case 'cache': return st.stages.preprocess.done && st.stages.preprocess.captionModeOk !== false && !st.stages.preprocess.captionsStale ? null : { captionMode: 'yue2' };
+    case 'cache': {
+      // The method decides the loudness the cache is cut at (-14 tuned, 0
+      // base-matched). A cache at the other level is re-cut: the key changes,
+      // so codes, sheet and alignment are dropped and their stages run again.
+      const lufs = yue2LoudnessForMethod(state.recipe.method);
+      const p = st.stages.preprocess;
+      const cut = p.done && p.captionModeOk !== false && !p.captionsStale && p.loudnessLufs === lufs;
+      return cut ? null : { captionMode: 'yue2', loudnessLufs: lufs };
+    }
     case 'codes': return st.stages.tokenize.done ? null : {};
     case 'sheet': return st.stages.sheet.done ? null : {};
     case 'stems': {

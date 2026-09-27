@@ -520,6 +520,11 @@ export interface ResolvedYue2PreprocessOptions {
   force: boolean;
   /** Carried for the runner's own log lines and the run manifest. */
   datasetSlug: string;
+  /** Integrated loudness every track is brought to before encoding. Absent =
+   *  the engine's -14; 0 = off (raw mastering level, what the YuE2 base was
+   *  trained on; the base-matched method asks for it). Part of the cache key,
+   *  so a change re-encodes and the manifest is rewritten from scratch. */
+  loudnessLufs?: number;
 }
 
 export function buildYue2PreprocessArgs(o: ResolvedYue2PreprocessOptions): string[] {
@@ -548,7 +553,15 @@ export function buildYue2PreprocessArgs(o: ResolvedYue2PreprocessOptions): strin
   if (o.only) args.push('--only', o.only);
   if (o.limit > 0) args.push('--limit', String(o.limit));
   if (o.force) args.push('--force');
+  if (o.loudnessLufs !== undefined) args.push('--loudness-lufs', String(o.loudnessLufs));
   return args;
+}
+
+/** The loudness target a cache must be cut at for a training method: the
+ *  engine's -14 LUFS for the tuned recipe, off (0) for base-matched, since
+ *  the base was trained on raw recordings. */
+export function yue2LoudnessForMethod(method: unknown): number {
+  return method === 'base-matched' ? 0 : -14;
 }
 
 export interface ResolvedYue2TrainOptions extends Partial<Yue2OptimOptions> {

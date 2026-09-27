@@ -1380,7 +1380,10 @@ static int yue2_preprocess_run(const Yue2PreprocessArgs & a) {
     yyjson_mut_obj_add_real(doc, root, "clip_seconds", a.clip_seconds);
     // yue2-tokenize and yue2-sheet apply each source's loudness_gain_db to
     // their own decode of the file, so every stream starts from one level.
-    if (a.loudness_lufs != 0.0) yyjson_mut_obj_add_real(doc, root, "loudness_target_lufs", a.loudness_lufs);
+    // Always written, 0 included (2026-09-27): a cache cut with normalization
+    // OFF on purpose (the base-matched recipe) must read as 0, not as a cache
+    // from before normalization existed, which has no key at all.
+    yyjson_mut_obj_add_real(doc, root, "loudness_target_lufs", a.loudness_lufs);
     yyjson_mut_obj_add_int(doc, root, "clip_frames", clip_frames);
     yyjson_mut_obj_add_strcpy(doc, root, "caption_mode", a.caption_mode.c_str());
     yyjson_mut_obj_add_strcpy(doc, root, "default_caption", a.default_caption.c_str());

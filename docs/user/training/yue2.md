@@ -57,7 +57,7 @@ Things to know:
 - The first base-matched run on a dataset re-prepares it once, because the prompt variants it trains on were not part of earlier preparations. Both methods then share the prepared dataset.
 - Songs per update (default 8) multiplies the time per step. Set the step count with that in mind: 100 steps at 8 songs each sees 800 songs, roughly what 800 tuned steps see.
 - Whole-song decoder training took about 12 GB of VRAM and 11-15 s a step on a 4-minute song on the RTX 5090. If a song and its prompt do not fit the model's context, the decoder trains on the longest window that does.
-- The audio cache is still loudness-normalised to -14 LUFS for both methods; the base was trained on raw recordings. Changing that is a separate cache-level change and has not been made.
+- Loudness. The tuned recipe cuts the audio cache at -14 LUFS; the base was trained on raw recordings, so base-matched wants the cache cut with normalisation off. "Train multiple" does this itself: its cache stage re-cuts a dataset whose cache is at the other level, which also re-runs the codes and sheet stages (they read the normalised audio). Switching a dataset between methods re-cuts it each time. The single-dataset "Start training" button does not re-cut; run the cache stage with loudness off first, or use "Train multiple" with one dataset.
 - Nothing has been heard from this method yet. The plan is an A/B against the tuned recipe on one album through the ear-test score sheet.
 
 ## Recommended settings
