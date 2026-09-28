@@ -200,6 +200,12 @@ const presetTime = (p: { steps: number; gradAccum: number }) => {
   const r = (p.steps * p.gradAccum) / (100 * 4);
   return r === 0.5 ? '½×' : `${Number(r.toFixed(1))}×`;
 };
+/** Mirror of BASE_MATCHED_DEFAULTS in server/src/services/training/yue2JointTrainRunner.ts,
+ *  shown as each blank field's placeholder. The server fills blanks from its own copy. */
+const BASE_MATCHED_DEFAULTS = {
+  lr: 1e-4, weightDecay: 0.1, beta2: 0.95, abcDropout: 0.5, narCropFrames: 0, arLossWeight: 0.25,
+  gradAccum: 4, textDropout: 0.1, lyricDropout: 0.1, bothDropout: 0.1, warmupFraction: 0.03,
+} as const;
 type PrepareForm = Yue2AitkPrepareRequest;
 
 
@@ -1238,9 +1244,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {half !== null && loraAlt !== null && ` ${t('trainingStudio.yue2.method.sizeLoraCompare', 'A rank-{{rank}} LoRA would be {{lora}}.', { rank: Number(form.lokrDim ?? 64), lora: formatMB(2 * loraAlt) })}`}
         </p>;
       })()}
-      <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
-        <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.baseMatchedKnobs', 'Base-matched settings')}</span>
-        <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.baseMatchedKnobsHint', 'Blank = the method default shown beside each field. The report does not state a fine-tuning learning rate or the dropout rates, so those defaults are agreed guesses; the rest are the report\'s own values.')}</p>
+      <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
+        <summary className="cursor-pointer text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.baseMatchedKnobs', 'Base-matched settings')}</summary>
+        <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.baseMatchedKnobsHint', 'Blank uses the default shown in grey. The report does not state a fine-tuning learning rate or the dropout rates, so those defaults are agreed guesses; the rest are the report\'s own values.')}</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
           {([
             ['lr', t('trainingStudio.yue2.method.lr', 'Learning rate'), t('trainingStudio.yue2.method.bmLrInfo', 'AdamW peak learning rate for both halves. The report gives full-model rates only (3e-4 joint, annealed to 3e-5), which do not transfer to an adapter; 1e-4 is the agreed default.'), 'default 1e-4'],
@@ -1257,13 +1263,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           ] as const).map(([key, label, info, meta]) => (
             <label key={key} className="flex flex-col gap-1">
               <ParamLabel label={label} info={info} meta={meta} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider" />
-              <input className={input} type="number" step="any" placeholder="method default"
+              <input className={`${input} placeholder:text-zinc-500`} type="number" step="any"
+                placeholder={String(key === 'warmup' ? Math.max(1, Math.round((Number(form.steps) || 0) * BASE_MATCHED_DEFAULTS.warmupFraction)) : BASE_MATCHED_DEFAULTS[key])}
                 value={form[key] ?? ''} disabled={active || starting || preparing || yue2RunAllActive}
                 onChange={event => set(key, event.target.value === '' ? undefined : Number(event.target.value))} />
             </label>
           ))}
         </div>
-      </div>
+      </details>
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         <div className="flex flex-col gap-1">
           <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.presets', 'Training presets')}</span>
