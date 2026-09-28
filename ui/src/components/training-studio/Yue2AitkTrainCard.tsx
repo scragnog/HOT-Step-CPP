@@ -37,6 +37,15 @@ const JOB_KEY = 'hs-yue2-aitk-job:';
 export const FORM_KEY = 'hs-yue2-aitk-form:';
 export const PREP_KEY = 'hs-yue2-aitk-prepare:';
 const METRIC_CAP = 2000;
+// Chart caches (~120 KB a run) were never deleted and filled the 5 MB storage
+// quota, after which every unguarded write on the Train page threw and blanked
+// it. Clear them once per page load, before any other write; a live job's
+// stream replays its history, and the card below keeps only the job on screen.
+try {
+  if (typeof window !== 'undefined') for (const key of Object.keys(window.localStorage)) {
+    if (key.startsWith(JOB_KEY) && key.includes(':metrics:')) window.localStorage.removeItem(key);
+  }
+} catch { /* storage unavailable */ }
 // `loss` is absent once the planner is frozen: the trainer then reports only
 // the decoder's terms and the composite has no AR part. Those steps still
 // count for progress, pace and the gradient norm.
@@ -606,6 +615,12 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     setShowJobLogs(false);
     if (!job?.id) return;
     const metricKey = `${JOB_KEY}${datasetId}:metrics:${job.id}`;
+    // Only the job on screen keeps a cached chart (see the load-time sweep).
+    try {
+      for (const key of Object.keys(window.localStorage)) {
+        if (key.startsWith(JOB_KEY) && key.includes(':metrics:') && !key.startsWith(metricKey)) window.localStorage.removeItem(key);
+      }
+    } catch { /* storage unavailable */ }
     const saved = readStored<{ steps?: JointStepPoint[]; milestones?: JointMilestone[] }>(metricKey, {});
     if (saved.steps?.length) setStepHistory(saved.steps);
     const savedMilestones = readStored<JointMilestone[]>(`${metricKey}:milestones`, saved.milestones ?? []);
