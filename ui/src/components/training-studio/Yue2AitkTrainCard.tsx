@@ -392,15 +392,18 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     stored.stopEngine = false;
     window.localStorage.setItem(ladderPreviews, '1');
   }
-  // 2026-09-28: the chain above runs on every new dataset's empty form too, and
-  // Recipe A (lr undefined -> 1e-4) plus NAR budget (1e-4 -> 2e-4) left a
-  // tuned-era 2e-4 behind that the base-matched step never cleared, so new
-  // runs trained at twice the recipe's rate. A stored 1e-4 or 2e-4 is that
-  // leftover; clearing it lets the server's base-matched default (1e-4) apply.
-  const lrLeftover = `${FORM_KEY}${datasetId}:defaults-lr-base-matched-2026-09-28`;
-  if (typeof window !== 'undefined' && !window.localStorage.getItem(lrLeftover)) {
-    if (stored.lr === 2e-4 || stored.lr === 1e-4) delete stored.lr;
-    window.localStorage.setItem(lrLeftover, '1');
+  // 2026-09-28 reset: the chain above runs on every new dataset's empty form
+  // too, and Recipe A (lr undefined -> 1e-4) plus NAR budget (1e-4 -> 2e-4)
+  // left a tuned-era 2e-4 that the base-matched step never cleared, so runs
+  // trained at twice the recipe's rate. Every stored form goes back to the
+  // recipe defaults once; only the per-run paths survive.
+  const resetAll = `${FORM_KEY}${datasetId}:defaults-reset-2026-09-28`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(resetAll)) {
+    for (const key of Object.keys(stored) as (keyof Yue2JointTrainRequest)[]) {
+      if (!PRESET_EXCLUDED_KEYS.has(key)) delete stored[key];
+    }
+    window.localStorage.setItem(`${FORM_KEY}${datasetId}`, JSON.stringify(stored));
+    window.localStorage.setItem(resetAll, '1');
   }
   return { ...DEFAULT_FORM, ...stored, method: 'base-matched' };
 }
@@ -451,7 +454,21 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   };
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
-  const [presets, setPresets] = useState<Yue2JointPreset[]>(() => readStored<Yue2JointPreset[]>(YUE2_JOINT_PRESETS_KEY, []));
+  // Saved presets keep their names and settings; only the leftover tuned-era
+  // learning rate (see the 2026-09-28 reset) is dropped from them, once.
+  const [presets, setPresets] = useState<Yue2JointPreset[]>(() => {
+    const list = readStored<Yue2JointPreset[]>(YUE2_JOINT_PRESETS_KEY, []);
+    const flag = `${YUE2_JOINT_PRESETS_KEY}:lr-reset-2026-09-28`;
+    if (typeof window === 'undefined' || window.localStorage.getItem(flag)) return list;
+    const cleaned = list.map(p => {
+      if (p.settings.lr !== 2e-4 && p.settings.lr !== 1e-4) return p;
+      const { lr: _lr, ...settings } = p.settings;
+      return { ...p, settings };
+    });
+    window.localStorage.setItem(YUE2_JOINT_PRESETS_KEY, JSON.stringify(cleaned));
+    window.localStorage.setItem(flag, '1');
+    return cleaned;
+  });
   const [presetName, setPresetName] = useState('');
   const [presetError, setPresetError] = useState('');
   // The saved form, with the dataset's own manifest over whatever was saved:

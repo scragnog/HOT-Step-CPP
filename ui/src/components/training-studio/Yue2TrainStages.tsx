@@ -134,6 +134,13 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
   const { t } = useTranslation();
   const [lyricTiming, setLyricTiming] = useState(() => {
     if (typeof window === 'undefined') return false;
+    // 2026-09-28 reset of every stored training setting: lyric timing back off, once.
+    const reset = `${LYRIC_TIMING_KEY}${datasetId}:reset-2026-09-28`;
+    if (!window.localStorage.getItem(reset)) {
+      window.localStorage.removeItem(`${LYRIC_TIMING_KEY}${datasetId}`);
+      window.localStorage.setItem(reset, '1');
+      return false;
+    }
     const saved = window.localStorage.getItem(`${LYRIC_TIMING_KEY}${datasetId}`);
     return saved === 'true';
   });
