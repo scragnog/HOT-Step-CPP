@@ -64,7 +64,7 @@ Things to know:
 
 Pick a preset. All three are the same recipe; they differ in how many updates run and how many songs each update averages. Times are from a 15-track album on an RTX 5090 with the engine stopped.
 
-| Preset | Updates | Songs per update | Songs seen | Time | Ear test |
+| Preset | Updates | Songs per update | Songs seen | Time (card shows it relative to Balanced) | Ear test |
 |---|---|---|---|---|---|
 | Fast | 50 | 4 | 200 | ~25 min | likeness 4.3, quality 5 |
 | Balanced (default) | 100 | 4 | 400 | ~50 min | likeness 5, quality 5 |

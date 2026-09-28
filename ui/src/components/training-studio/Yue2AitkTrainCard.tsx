@@ -180,18 +180,25 @@ const TUNED_KEYS = ['targetKl', 'targetLoss', 'targetKlMode', 'narExtraSteps', '
   'lrDecayShape', 'klOvershootMargin', 'lrCycleSteps', 'lrCycleMult', 'klCheckpointEvery', 'refineWarmup', 'rungAdaptiveLr'] as const;
 const LORA_STOP = { targetKl: 1.4, plannerLrScale: 0.3, narLrScale: undefined };
 const LOKR_STOP = { targetKl: 1.0, plannerLrScale: 0.6, narLrScale: 1 };
-// Presets (2026-09-27, Rob's ear test on Green Day Dookie). All three are the
+// Presets (2026-09-27 ear test on a full album). All three are the
 // base-matched recipe (the server applies its fixed parts); they differ in
 // updates and songs per update. Fast and Balanced are the 4-song run
 // (likeness 4.3 at update 50, 5.0 at 100, 28 s an update on the 5090);
 // Thorough is the 8-song run (5.0 from update 90, 60 s an update, 3.3 h).
 const PRESETS = [
-  { key: 'fast', label: 'Fast', steps: 50, gradAccum: 4, time: '~25 min' },
-  { key: 'balanced', label: 'Balanced', steps: 100, gradAccum: 4, time: '~50 min' },
-  { key: 'thorough', label: 'Thorough', steps: 200, gradAccum: 8, time: '~3.5 h' },
+  { key: 'fast', label: 'Fast', steps: 50, gradAccum: 4 },
+  { key: 'balanced', label: 'Balanced', steps: 100, gradAccum: 4 },
+  { key: 'thorough', label: 'Thorough', steps: 200, gradAccum: 8 },
 ] as const;
 const presetValues = (p: typeof PRESETS[number]) => ({ stopMode: 'steps' as const, steps: p.steps, gradAccum: p.gradAccum, saveEvery: 10 });
 const activePreset = (f: Yue2JointTrainRequest) => PRESETS.find(p => f.steps === p.steps && (f.gradAccum ?? 4) === p.gradAccum)?.key;
+/** Run time scales with songs processed (updates × songs per update), so the
+ *  presets show their cost relative to Balanced rather than wall-clock times
+ *  that only hold for one GPU and one dataset. */
+const presetTime = (p: { steps: number; gradAccum: number }) => {
+  const r = (p.steps * p.gradAccum) / (100 * 4);
+  return r === 0.5 ? '½×' : `${Number(r.toFixed(1))}×`;
+};
 type PrepareForm = Yue2AitkPrepareRequest;
 
 
@@ -1122,7 +1129,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       </details>
       <div className="mt-4">
         <div className="flex items-center gap-2 mb-2">
-          <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.preset', 'Preset')}</span>
+          <ParamLabel label={t('trainingStudio.yue2.method.preset', 'Preset')}
+            className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+            info={t('trainingStudio.yue2.method.presetInfo', 'All three are the same recipe; they differ in how many updates run and how many songs each update averages. Training time grows with the songs processed, so each preset shows its time relative to Balanced. For scale, Balanced took about 50 minutes on a 15-track album on an RTX 5090; a slower GPU or a longer album takes proportionally longer.')} />
           {!activePreset(form) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1132,7 +1141,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
               : 'border-zinc-300 dark:border-white/15 text-zinc-800 dark:text-zinc-100 hover:border-blue-500/50 hover:bg-blue-500/5'}`}>
             <span className="text-base font-bold">{t(`trainingStudio.yue2.method.preset_${p.key}`, p.label)}</span>
-            <span className="text-xs text-zinc-500">{p.steps} × {p.gradAccum} songs · {p.time}</span>
+            <span className="text-xs text-zinc-500">{p.steps} × {p.gradAccum} songs · {p.key === 'balanced' ? t('trainingStudio.yue2.method.presetBaseline', '1× time (baseline)') : t('trainingStudio.yue2.method.presetRelative', '{{ratio}} the time', { ratio: presetTime(p) })}</span>
           </button>)}
         </div>
       </div>
