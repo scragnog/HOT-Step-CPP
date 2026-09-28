@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, Download, Loader2, Play, RotateCcw, Upload, X } from 'lucide-react';
+import { AlertTriangle, Check, Download, Loader2, Play, RotateCcw, Save, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
@@ -858,8 +858,18 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     if (preset.version === 2 && typeof preset.settings.lyricTiming === 'boolean') onLyricTimingChange(preset.settings.lyricTiming);
   };
   const removePreset = (name: string) => {
+    if (!window.confirm(t('trainingStudio.yue2.method.presetDeleteConfirm', 'Delete the preset "{{name}}"?', { name }))) return;
     setPresets(previous => previous.filter(preset => preset.name !== name));
   };
+  const updatePreset = (preset: Yue2JointPreset) => {
+    if (!window.confirm(t('trainingStudio.yue2.method.presetOverwrite', 'Replace the preset "{{name}}" with the current settings?', { name: preset.name }))) return;
+    const saved: Yue2JointPreset = { version: 2, name: preset.name, settings: snapshotPresetSettings(form, lyricTiming) };
+    setPresets(previous => previous.map(p => p === preset ? saved : p));
+  };
+  // A saved preset is "on" when every setting it stores matches the form.
+  const current = snapshotPresetSettings(form, lyricTiming) as Record<string, unknown>;
+  const userPresetActive = (preset: Yue2JointPreset) => Object.entries(preset.settings)
+    .every(([key, value]) => JSON.stringify(value) === JSON.stringify(current[key]));
   const run = async (): Promise<string | null> => {
     setStarting(true); setError('');
     try {
@@ -1004,6 +1014,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   );
   // The lyric timing toggle lives in its own card on the stages page; it is
   // locked while this card is resuming, preparing or training.
+  const busy = active || preparing || starting || yue2RunAllActive;
   const timingLocked = !!resumeChoice || active || preparing || starting;
   useEffect(() => { onTimingLockedChange?.(timingLocked); }, [timingLocked, onTimingLockedChange]);
   const progress = job && job.total > 0 ? ` · ${job.done}/${job.total}` : '';
@@ -1139,7 +1150,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           <ParamLabel label={t('trainingStudio.yue2.method.preset', 'Preset')}
             className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
             info={t('trainingStudio.yue2.method.presetInfo', 'All three are the same recipe; they differ in how many updates run and how many songs each update averages. Training time grows with the songs processed, so each preset shows its time relative to Balanced. For scale, Balanced took about 50 minutes on a 15-track album on an RTX 5090; a slower GPU or a longer album takes proportionally longer.')} />
-          {!activePreset(form) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
+          {!activePreset(form) && !presets.some(userPresetActive) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {PRESETS.map(p => <button key={p.key} type="button" disabled={active || starting || preparing || yue2RunAllActive}
@@ -1150,6 +1161,69 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             <span className="text-base font-bold">{t(`trainingStudio.yue2.method.preset_${p.key}`, p.label)}</span>
             <span className="text-xs text-zinc-500">{p.steps} × {p.gradAccum} songs · {p.key === 'balanced' ? t('trainingStudio.yue2.method.presetBaseline', '1× time (baseline)') : t('trainingStudio.yue2.method.presetRelative', '{{ratio}} the time', { ratio: presetTime(p) })}</span>
           </button>)}
+        </div>
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <ParamLabel label={t('trainingStudio.yue2.method.presets', 'Your presets')}
+            className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+            info={t('trainingStudio.yue2.method.presetHint', 'A preset captures the training settings (steps, save cadence, seed, device, optimizer, rank/alpha and stop target), never the dataset, checkpoint or output paths. Click a name to load it; the save icon overwrites it with the current settings, the download icon exports it to share.')} />
+          {presets.map(preset => {
+            const on = userPresetActive(preset);
+            return <span key={preset.name} className={`inline-flex items-center gap-1 rounded-lg border-2 pl-3 pr-1 py-1 text-xs ${on
+              ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
+              : 'border-zinc-300 dark:border-white/15 text-zinc-800 dark:text-zinc-100'}`}>
+              <button type="button" onClick={() => loadPreset(preset)} disabled={busy}
+                title={t('trainingStudio.yue2.method.presetLoad', 'Load this preset into the form')}
+                className="font-semibold hover:underline disabled:no-underline disabled:opacity-40">{preset.name}</button>
+              <button type="button" onClick={() => updatePreset(preset)} disabled={busy}
+                title={t('trainingStudio.yue2.method.presetUpdate', 'Overwrite this preset with the current settings')}
+                className="rounded p-0.5 text-zinc-400 hover:text-amber-600 dark:hover:text-amber-400 disabled:opacity-40"><Save size={12} /></button>
+              <button type="button" onClick={() => exportPreset(preset)}
+                title={t('trainingStudio.yue2.method.presetExport', 'Download this preset as a .json file to share or back up')}
+                className="rounded p-0.5 text-zinc-400 hover:text-amber-600 dark:hover:text-amber-400"><Download size={12} /></button>
+              <button type="button" onClick={() => removePreset(preset.name)}
+                title={t('trainingStudio.yue2.method.presetRemove', 'Delete this preset')}
+                className="rounded p-0.5 text-zinc-400 hover:text-red-600 dark:hover:text-red-400"><X size={12} /></button>
+            </span>;
+          })}
+          <input className={`${input} !w-48 !py-1 !text-xs`} placeholder={t('trainingStudio.yue2.method.presetNamePlaceholder', 'New preset name')}
+            value={presetName} disabled={busy}
+            onChange={event => { setPresetName(event.target.value); setPresetError(''); }}
+            onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void savePreset(); } }} />
+          <button type="button" onClick={() => void savePreset()} disabled={busy}
+            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">
+            {t('trainingStudio.yue2.method.presetSave', 'Save current settings')}
+          </button>
+          <button type="button" onClick={() => presetFileRef.current?.click()} disabled={busy}
+            title={t('trainingStudio.yue2.method.presetImportTitle', 'Add presets from a .json file exported here or by someone else')}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10 disabled:opacity-40">
+            <Upload size={12} />{t('trainingStudio.yue2.method.presetImport', 'Import')}
+          </button>
+          <input ref={presetFileRef} type="file" accept=".json,application/json" className="hidden"
+            onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importPresets(file); }} />
+        </div>
+        {presetError && <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{presetError}</p>}
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
+            {t('trainingStudio.yue2.method.changedSettings', 'Changed from defaults')}
+          </span>
+          {changedSettings.length === 0
+            ? <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.noChangedSettings', 'none: this form is the recipe defaults')}</span>
+            : <>
+              {changedSettings.map(([key, value]) => (
+                <span key={key} className="inline-flex items-center gap-1 rounded-lg border border-sky-500/40 bg-sky-500/10 pl-2 pr-1 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">
+                  {key}{typeof value === 'object' ? '' : `: ${String(value)}`}
+                  <button type="button" onClick={() => resetSetting(key)} disabled={active || preparing || starting || yue2RunAllActive}
+                    title={t('trainingStudio.yue2.method.resetSetting', 'Reset this setting to its default')}
+                    className="rounded p-0.5 hover:text-sky-900 dark:hover:text-white disabled:opacity-40">
+                    <RotateCcw size={11} />
+                  </button>
+                </span>
+              ))}
+              <button type="button" onClick={resetAllSettings} disabled={active || preparing || starting || yue2RunAllActive}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10 disabled:opacity-40">
+                <RotateCcw size={11} />{t('trainingStudio.yue2.method.resetAll', 'Reset all to defaults')}
+              </button>
+            </>}
         </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
@@ -1271,75 +1345,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           ))}
         </div>
       </details>
-      <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
-        <div className="flex flex-col gap-1">
-          <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.presets', 'Training presets')}</span>
-          <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetHint', 'A preset captures the training settings (steps, save cadence, seed, device, optimizer, rank/alpha and stop target) — never the dataset, checkpoint or output paths. Presets are stored in this browser.')}</span>
-        </div>
-        <div className="mt-2 flex items-center gap-2 flex-wrap">
-          <input className={`${input} min-w-40 flex-1`} placeholder={t('trainingStudio.yue2.method.presetNamePlaceholder', 'New preset name')}
-            value={presetName} disabled={active || preparing || starting || yue2RunAllActive}
-            onChange={event => { setPresetName(event.target.value); setPresetError(''); }}
-            onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void savePreset(); } }} />
-          <button type="button" onClick={() => void savePreset()} disabled={active || preparing || starting || yue2RunAllActive}
-            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">
-            {t('trainingStudio.yue2.method.presetSave', 'Save current settings')}
-          </button>
-          <button type="button" onClick={() => presetFileRef.current?.click()} disabled={active || preparing || starting || yue2RunAllActive}
-            title={t('trainingStudio.yue2.method.presetImportTitle', 'Add presets from a .json file exported here or by someone else')}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10 disabled:opacity-40">
-            <Upload size={12} />{t('trainingStudio.yue2.method.presetImport', 'Import')}
-          </button>
-          <input ref={presetFileRef} type="file" accept=".json,application/json" className="hidden"
-            onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importPresets(file); }} />
-        </div>
-        {presetError && <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{presetError}</p>}
-        {presets.length > 0 && <div className="mt-2 flex flex-wrap gap-2">
-          {presets.map(preset => (
-            <span key={preset.name} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 dark:border-white/10 bg-white/60 dark:bg-zinc-900/40 pl-2.5 pr-1 py-1 text-[11px] text-zinc-700 dark:text-zinc-300">
-              <button type="button" onClick={() => loadPreset(preset)} disabled={active || preparing || starting || yue2RunAllActive}
-                title={t('trainingStudio.yue2.method.presetLoad', 'Load this preset into the form')}
-                className="font-medium hover:underline disabled:no-underline disabled:opacity-40">
-                {preset.name}{preset.settings.steps !== undefined && preset.settings.saveEvery !== undefined
-                  ? ` · ${preset.settings.steps} steps, save every ${preset.settings.saveEvery}` : ''}
-              </button>
-              <button type="button" onClick={() => exportPreset(preset)}
-                title={t('trainingStudio.yue2.method.presetExport', 'Download this preset as a .json file to share or back up')}
-                className="rounded p-0.5 text-zinc-400 hover:text-amber-600 dark:hover:text-amber-400">
-                <Download size={12} />
-              </button>
-              <button type="button" onClick={() => removePreset(preset.name)}
-                title={t('trainingStudio.yue2.method.presetRemove', 'Remove this preset')}
-                className="rounded p-0.5 text-zinc-400 hover:text-red-600 dark:hover:text-red-400">
-                <X size={12} />
-              </button>
-            </span>
-          ))}
-        </div>}
-        <div className="mt-3 flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
-            {t('trainingStudio.yue2.method.changedSettings', 'Changed from defaults')}
-          </span>
-          {changedSettings.length === 0
-            ? <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.noChangedSettings', 'none: this form is the recipe defaults')}</span>
-            : <>
-              {changedSettings.map(([key, value]) => (
-                <span key={key} className="inline-flex items-center gap-1 rounded-lg border border-sky-500/40 bg-sky-500/10 pl-2 pr-1 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">
-                  {key}{typeof value === 'object' ? '' : `: ${String(value)}`}
-                  <button type="button" onClick={() => resetSetting(key)} disabled={active || preparing || starting || yue2RunAllActive}
-                    title={t('trainingStudio.yue2.method.resetSetting', 'Reset this setting to its default')}
-                    className="rounded p-0.5 hover:text-sky-900 dark:hover:text-white disabled:opacity-40">
-                    <RotateCcw size={11} />
-                  </button>
-                </span>
-              ))}
-              <button type="button" onClick={resetAllSettings} disabled={active || preparing || starting || yue2RunAllActive}
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10 disabled:opacity-40">
-                <RotateCcw size={11} />{t('trainingStudio.yue2.method.resetAll', 'Reset all to defaults')}
-              </button>
-            </>}
-        </div>
-      </div>
       <Toggle
         accent="amber"
         className="mt-3"
