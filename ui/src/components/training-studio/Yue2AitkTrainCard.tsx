@@ -392,7 +392,7 @@ function isPrepareJob(job: TrainingJobSummary, datasetId: string): boolean {
   return job.datasetId === datasetId && job.kind === 'yue2-prepare-aitk';
 }
 
-export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: string; cursorReady?: boolean; lyricTiming: boolean; onLyricTimingChange: (value: boolean) => void; exposeStart?: (fn: () => Promise<string | null>) => void }> = ({ datasetId, legacyManifest, cursorReady = false, lyricTiming, onLyricTimingChange, exposeStart }) => {
+export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: string; cursorReady?: boolean; lyricTiming: boolean; onLyricTimingChange: (value: boolean) => void; onTimingLockedChange?: (locked: boolean) => void; exposeStart?: (fn: () => Promise<string | null>) => void }> = ({ datasetId, legacyManifest, cursorReady = false, lyricTiming, onLyricTimingChange, onTimingLockedChange, exposeStart }) => {
   const { t } = useTranslation();
   const [form, setForm] = useState<Yue2JointTrainRequest>(() => readStoredForm(datasetId));
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
@@ -1012,6 +1012,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         onChange={event => update ? update(event.target.value) : set(key as keyof Yue2JointTrainRequest, type === 'number' ? Number(event.target.value) : event.target.value as never)} />
     </label>
   );
+  // The lyric timing toggle lives in its own card on the stages page; it is
+  // locked while this card is resuming, preparing or training.
+  const timingLocked = !!resumeChoice || active || preparing || starting;
+  useEffect(() => { onTimingLockedChange?.(timingLocked); }, [timingLocked, onTimingLockedChange]);
   const progress = job && job.total > 0 ? ` · ${job.done}/${job.total}` : '';
   return (
     <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5">
@@ -1021,17 +1025,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-2 leading-relaxed">
         {t('trainingStudio.yue2.method.autoTrainHint', 'Start training prepares the dataset automatically, then trains the planner (AR) and decoder (NAR) adapters together with the YuE2 report recipe. Unchanged prepared data is reused.')}
       </p>
-      <Toggle
-        accent="amber"
-        className="mt-3"
-        checked={lyricTiming}
-        disabled={!!resumeChoice || active || preparing || starting || yue2RunAllActive}
-        onChange={onLyricTimingChange}
-        label={t('trainingStudio.yue2.method.lyricTiming', 'Lyric timing supervision')}
-        info={lyricTiming
-          ? t('trainingStudio.yue2.method.lyricTimingOn', 'Runs the vocal stem and forced-alignment stages before training. The current recipe does not use the timing loss, so this only costs time; leave it off unless you want the alignment data for something else.')
-          : t('trainingStudio.yue2.method.lyricTimingOff', 'Off: skips stems and alignment. The recipe does not use the timing loss.')}
-      />
       <Toggle
         accent="amber"
         className="mt-3"
@@ -1068,7 +1061,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       </div>}
       {captioning && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" />
         {t('trainingStudio.yue2.method.captioning', 'Captioning tracks without a YuE2 caption: {{done}} / {{total}}', { done: captioning.done, total: captioning.total })}</p>}
-      {lyricTiming && !cursorReady && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.lyricTimingNeedsAlignment', 'Run vocal stems and lyric alignment below before starting with timing supervision enabled.')}</p>}
+      {lyricTiming && !cursorReady && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.lyricTimingNeedsAlignment', 'Run vocal stems and lyric alignment above before starting with timing supervision enabled.')}</p>}
       <label className="mt-4 flex flex-col gap-1">
         <ParamLabel
           label={t('trainingStudio.yue2.method.resumePrevious', 'Resume a previous run')}

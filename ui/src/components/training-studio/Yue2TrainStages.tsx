@@ -34,6 +34,7 @@ import { ListChecks, Loader2, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { useTrainingStore } from '../../stores/trainingStore';
+import { Toggle } from '../shared/Toggle';
 import {
   Yue2StemsCard, Yue2AlignCard, Yue2SheetCard, Yue2TokenizeCard,
 } from './Yue2ArTrainCard';
@@ -136,6 +137,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
     const saved = window.localStorage.getItem(`${LYRIC_TIMING_KEY}${datasetId}`);
     return saved === 'true';
   });
+  const [timingLocked, setTimingLocked] = useState(false);
   const storeError = useTrainingStore(s => s.error);
   const activeJob = useTrainingStore(s => s.activeJob);
   const yue2RunAllActive = useTrainingStore(s => s.yue2RunAllActive);
@@ -247,10 +249,22 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
         {yue2Status && <Yue2PreprocessCard status={yue2Status} done={!!arStatus?.stages.preprocess.done} onDone={reload} />}
         {arStatus && <Yue2TokenizeCard status={arStatus} onDone={reload} />}
         {arStatus && <Yue2SheetCard datasetId={datasetId} status={arStatus} onDone={reload} />}
+        <div className={CARD}>
+          <Toggle
+            accent="amber"
+            checked={lyricTiming}
+            disabled={timingLocked || yue2RunAllActive}
+            onChange={setAitkLyricTiming}
+            label={t('trainingStudio.yue2.method.lyricTiming', 'Lyric timing supervision')}
+            info={lyricTiming
+              ? t('trainingStudio.yue2.method.lyricTimingOn', 'Runs the vocal stem and forced-alignment stages before training. The current recipe does not use the timing loss, so this only costs time; leave it off unless you want the alignment data for something else.')
+              : t('trainingStudio.yue2.method.lyricTimingOff', 'Off: skips stems and alignment. The recipe does not use the timing loss.')}
+          />
+        </div>
         {lyricTiming && arStatus && <Yue2StemsCard status={arStatus} onDone={reload} />}
         {lyricTiming && arStatus && <Yue2AlignCard status={arStatus} onDone={reload} />}
         <Yue2AitkTrainCard key={datasetId} datasetId={datasetId} legacyManifest={arStatus?.manifestPath || yue2Status?.manifestPath}
-          cursorReady={!!arStatus?.stages.align.done} lyricTiming={lyricTiming} onLyricTimingChange={setAitkLyricTiming}
+          cursorReady={!!arStatus?.stages.align.done} lyricTiming={lyricTiming} onLyricTimingChange={setAitkLyricTiming} onTimingLockedChange={setTimingLocked}
           exposeStart={exposeJointStart} />
         {jointRunAllControl}
         <Yue2AitkBatchWizard open={aitkBatchOpen} onClose={() => setAitkBatchOpen(false)} />
