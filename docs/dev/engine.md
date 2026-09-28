@@ -145,11 +145,23 @@ style + lyrics (+ optional ABC) -> tokenizer and prompt assembly (yue2-tokenizer
 The AR and NAR halves live in one `yue2-lm-<type>.gguf` and are resident together;
 the VAE is a separate `yue2-vae-{standard,legacy}-<type>.gguf` (`yue2-model.h`). The
 NAR stage can use Lua solvers and schedulers through `infer_method` and
-`scheduler`. When a song's composer runs to its cap, `semantic_retries` recomposes it
-with a new seed; the batch's other songs keep their codes and are replayed
-teacher-forced (`keep_codes`), so a retry never changes a song that ended normally.
-The retry's KV cache is sized for the longest kept song plus a full draw, because a kept
-song's set is fed MUSIC_END on every step of the redraw. A failed YuE2 job logs its reason
+`scheduler`. A song's composer (semantic stage) stops at `plan_cutoff` (default 1.5)
+times its plan's length plus 20 s (`yue2_plan_cap_frames`, the bars x beats / tempo
+estimate `classifyYue2Score` makes) or at the stage cap, whichever comes first, and counts as
+a runaway there (`limit_hit`). `semantic_retries` is then a per-song budget of redraws. They
+run side by side in their own cache, up to `YUE2_RETRY_DRAWS` (4) at once shared between
+the runaway songs, with seeds `seed + n x 1000003` for try n. A song is settled by the
+first of its draws to end cleanly (`Yue2SemanticPass::first_wins`); its other draws are
+abandoned, and the winner's rows are copied into the song's own set of the first pass's
+cache, so songs that ended there are never replayed. A draw count that does not fit in
+VRAM halves and tries again. Within any pass, a stream that has ended leaves the decode:
+its slot is swapped behind the live ones through one spare slot (`yue2_swap_slots`) and
+`yue2_ar_decode_batch(..., n_active)` decodes the first n sets only. The cache is
+allocated without the spare when VRAM is short, and ended streams then stay in the
+decode as before. Both decode loops sample with `yue2_sample_row`, which runs the reference
+chain over the top-k survivors only and draws the same token for a seed as
+`yue2_distribution` + `yue2_sample_draw`; `YUE2_SAMPLER_CHECK=1` runs both on every step
+and logs any disagreement. A failed YuE2 job logs its reason
 as `[YuE2-Job] <id>: FAILED: <error>`. A `plan_only` request takes up to
 `YUE2_MAX_PLAN_BATCH` (8) `songs` entries against 4 for a render, reported by `/yue2/props`
 as `max_plan_batch`; the server's auto-replan uses it to draw every batch member's plan

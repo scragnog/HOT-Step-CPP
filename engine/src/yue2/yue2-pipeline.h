@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -44,6 +45,7 @@
 #include <cstdlib>
 #include <functional>
 #include <iterator>
+#include <numeric>
 #include <random>
 #include <string>
 #include <utility>
@@ -212,10 +214,7 @@ struct Yue2SongState {
     int64_t              cond_set  = 0;   // set of the semantic cache holding this song's positive stream
     int64_t              neg_set   = -1;  // its negative (guidance) stream, -1 without guidance
     int64_t              pair_base = 0;   // first set of this song's pair (cond/neg in either order)
-    // Recompose retry (2026-09-27): a song that ended normally keeps its
-    // codec_ids and is replayed teacher-forced, so only the runaway songs of
-    // the batch are drawn again. Set and cleared by the retry loop.
-    bool                 keep_codes = false;
+    int64_t              sem_end_step = 0;  // semantic step this stream ended at (a retry's winner is the earliest)
 };
 
 // Vocab windows the two AR stages sample from (doc 30 #1). The legal range
@@ -354,6 +353,8 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
     std::vector<std::vector<int32_t>> history((size_t) P);
     std::vector<bool>                 done((size_t) P, false);
     std::vector<int32_t>              next_ids((size_t) P, YUE2_ABC_END);
+    std::vector<int32_t>              surv_ids;
+    std::vector<float>                surv_vals;
     int64_t                            step = 0;
     for (; step < sp.max_tokens; step++) {
         if (cancel && cancel->load()) {
@@ -374,12 +375,10 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
                 next_ids[(size_t) p] = YUE2_ABC_END;  // passive row
                 continue;
             }
-            std::vector<float> scores(logits.begin() + (size_t) p * (size_t) W,
-                                      logits.begin() + (size_t) (p + 1) * (size_t) W);
-            yue2_distribution(scores, sp, YUE2_ABC_END, 0, YUE2_EOD, history[(size_t) p], step,
-                              /*legacy_off=*/false, base);
-            const int64_t tok_id =
-                base + (sp.temperature == 0.0f ? yue2_sample_argmax(scores) : yue2_sample_draw(scores, sg.rng));
+            // The row is this step's scratch: the next decode overwrites it.
+            const int64_t tok_id = base + yue2_sample_row(logits.data() + (size_t) p * (size_t) W, W, sp, YUE2_ABC_END, 0,
+                                                          YUE2_EOD, history[(size_t) p], step, /*legacy_off=*/false,
+                                                          base, sg.rng, &surv_ids, &surv_vals);
             if (tok_id == YUE2_ABC_END) {
                 done[(size_t) p] = true;
                 sg.stage_end_reason[YUE2_STAGE_PLAN] = "eos";
@@ -419,15 +418,137 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
 
 // ── Stage 2: semantic (codec AR, possibly CFG'd) ────────────────────────────
 //
-// B songs, each with its own prompt (its own plan), on S = B or 2B sets of
-// ONE cache: set cond_set(b) carries the positive stream, cond_set(b)+1 the
-// negative one under guidance. The cache is handed to the caller on success
-// (`cache_out`): the NAR stage reuses its rows instead of re-prefilling the
-// prompt per chunk (doc 30 #2).
+// B streams, each with its own prompt (its own plan), on S = B or 2B sets of
+// ONE cache: slot i holds sets [i*per, i*per+per), the positive stream in
+// cond_set and, under guidance, the negative one in neg_set. The cache is
+// handed to the caller on success (`cache_out`): the NAR stage reuses its rows
+// instead of re-prefilling the prompt per chunk (doc 30 #2).
+//
+// Three things keep the stage from paying for work nobody will use
+// (2026-09-28):
+//  - A stream that has ended leaves the decode. Its slot is swapped behind
+//    the live ones through one spare slot, and each step decodes the live
+//    sets only; the ended stream's KV stays where the NAR will read it. Before
+//    this a finished song was fed MUSIC_END every step and kept attending
+//    over its whole KV until the last song of the batch ended.
+//  - A stream stops at plan_cutoff x its plan's length + 20 s
+//    (yue2_plan_cap_frames), not at the stage's 9000-frame cap, and counts as
+//    a runaway there.
+//  - A retry pass (`first_wins`) holds several draws of each runaway song,
+//    grouped by src_song. A group is over the moment one draw ends cleanly;
+//    its other draws are abandoned and leave the decode.
+
+// The plan's own length in seconds: vocal bars x beats per bar / tempo, the
+// estimate classifyYue2Score (scoreHealth.ts) makes. 0 without a tempo or bars.
+static int64_t yue2_plan_seconds(const std::string & abc) {
+    double tempo = 0.0;
+    int    beats = 4;
+    bool   in_vocal = false;
+    int64_t bars = 0;
+    auto lower = [](std::string s) {
+        for (char & ch : s) ch = (char) std::tolower((unsigned char) ch);
+        return s;
+    };
+    size_t pos = 0;
+    while (pos <= abc.size()) {
+        size_t nl = abc.find('\n', pos);
+        if (nl == std::string::npos) nl = abc.size();
+        std::string line = abc.substr(pos, nl - pos);
+        pos = nl + 1;
+        const size_t a = line.find_first_not_of(" \t\r");
+        if (a == std::string::npos) continue;
+        line = line.substr(a, line.find_last_not_of(" \t\r") - a + 1);
+        if (line[0] == '%') continue;
+        if (line.size() >= 2 && line[1] == ':' && std::isalpha((unsigned char) line[0])) {
+            if (line[0] == 'Q') {
+                const size_t eq = line.find('=');
+                if (eq != std::string::npos) {
+                    const char * p = line.c_str() + eq + 1;
+                    while (*p == ' ' || *p == '\t') p++;
+                    if (std::isdigit((unsigned char) *p)) tempo = std::strtod(p, nullptr);
+                }
+            } else if (line[0] == 'M') {
+                const int n = std::atoi(line.c_str() + 2);
+                beats = n > 0 ? n : 4;
+            } else if (line[0] == 'V') {
+                const std::string rest  = line.substr(2);
+                const size_t      s0    = rest.find_first_not_of(" \t");
+                const std::string first = s0 == std::string::npos ? "" : rest.substr(s0, rest.find_first_of(" \t", s0) - s0);
+                in_vocal = lower(first).find("vocal") != std::string::npos ||
+                           lower(line).find("name=\"vocal") != std::string::npos;
+            }
+            continue;
+        }
+        if (!in_vocal) continue;
+        size_t s = 0;
+        while (s <= line.size()) {
+            size_t e = line.find('|', s);
+            if (e == std::string::npos) e = line.size();
+            std::string seg;  // the segment with chord quotes stripped
+            bool        quoted = false;
+            for (size_t i = s; i < e; i++) {
+                if (line[i] == '"') quoted = !quoted;
+                else if (!quoted) seg += line[i];
+            }
+            const size_t t0 = seg.find_first_not_of(" \t");
+            if (line.find_first_not_of(" \t", s) < e) {  // a non-blank segment (chords count)
+                int64_t n = 1;
+                if (t0 != std::string::npos) {
+                    const std::string t = seg.substr(t0, seg.find_last_not_of(" \t") - t0 + 1);
+                    if (t[0] == 'Z' && t.find_first_not_of("0123456789", 1) == std::string::npos && t.size() > 1) {
+                        n = std::max<int64_t>(1, std::atoll(t.c_str() + 1));
+                    }
+                }
+                bars += n;
+            }
+            s = e + 1;
+        }
+    }
+    if (bars <= 0 || !(tempo > 0.0)) return 0;
+    return (int64_t) std::llround((double) bars * beats * 60.0 / tempo);
+}
+
+// Where a stream counts as a runaway: plan_cutoff x the plan's length + 20 s,
+// never past the stage cap and never before min_tokens + 10 s.
+static int64_t yue2_plan_cap_frames(const Yue2Request & req, const Yue2SamplingParams & sp, const std::string & abc) {
+    const int64_t cap = sp.max_tokens;
+    if (!(req.plan_cutoff > 0.0f)) return cap;
+    const int64_t sec = yue2_plan_seconds(abc);
+    if (sec <= 0) return cap;
+    const int64_t frames = (int64_t) std::ceil(((double) sec * req.plan_cutoff + 20.0) * 25.0);
+    return std::min(cap, std::max(frames, (int64_t) sp.min_tokens + 250));
+}
+
+// Swap the KV of slots i and j (per sets each) through the spare slot. Three
+// separate copies, each one graph the scheduler finishes before the next, so
+// no read can overtake the write it depends on.
+static bool yue2_swap_slots(const Yue2Model & m, Yue2ArKvCache & c, int i, int j, int spare, int per, std::string * err) {
+    for (int k = 0; k < per; k++) {
+        const int64_t a = (int64_t) i * per + k, b = (int64_t) j * per + k, t = (int64_t) spare * per + k;
+        const int64_t na = c.filled[(size_t) a], nb = c.filled[(size_t) b];
+        if (na > 0 && !yue2_ar_kv_cache_copy_set(m, c, a, t, na, err)) return false;
+        if (nb > 0 && !yue2_ar_kv_cache_copy_set(m, c, b, a, nb, err)) return false;
+        if (na > 0 && !yue2_ar_kv_cache_copy_set(m, c, t, b, na, err)) return false;
+        c.filled[(size_t) a] = nb;
+        c.filled[(size_t) b] = na;
+    }
+    return true;
+}
+
+struct Yue2SemanticPass {
+    bool     first_wins      = false;  // groups (src_song) end at their first clean draw
+    uint32_t extra_done_bits = 0;      // songs outside this pass that have ended (progress only)
+};
+
+static bool yue2_stream_clean(const std::string & reason) {
+    return reason == "eos" || reason == "eos_threshold";
+}
+
 static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, const Yue2Request & req,
                                      bool have_abc, std::vector<Yue2SongState> & songs,
                                      std::atomic<bool> * cancel, const Yue2ProgressFn & progress,
-                                     Yue2ArKvCache * cache_out, double * stage_ms, std::string * err) {
+                                     Yue2ArKvCache * cache_out, double * stage_ms, std::string * err,
+                                     const Yue2SemanticPass & pass = {}) {
     const auto t0 = std::chrono::steady_clock::now();
     yue2_ar_step_profile_reset();
     const int  B       = (int) songs.size();
@@ -440,6 +561,11 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     const bool use_cfg = req.cfg_scale != 1.0f || force_sets;
     const int  per     = use_cfg ? 2 : 1;
     const int  S       = B * per;
+    auto seat = [&](Yue2SongState & sg, int slot) {
+        sg.pair_base = slot * per;
+        sg.cond_set  = sg.pair_base + ((use_cfg && swap_sets) ? 1 : 0);
+        sg.neg_set   = use_cfg ? sg.pair_base + ((swap_sets) ? 0 : 1) : -1;
+    };
 
     std::vector<std::vector<int32_t>> neg_prefix((size_t) B);
     int64_t                            max_prefix = 0;
@@ -455,10 +581,8 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
             }
             return false;
         }
-        sg.pair_base = b * per;
-        sg.cond_set  = sg.pair_base + ((use_cfg && swap_sets) ? 1 : 0);
-        sg.neg_set   = use_cfg ? sg.pair_base + ((swap_sets) ? 0 : 1) : -1;
-        if (!sg.keep_codes) sg.codec_ids.clear();
+        seat(sg, b);
+        sg.codec_ids.clear();
         max_prefix = std::max<int64_t>(max_prefix, (int64_t) sg.prefix_ids.size());
         if (use_cfg) max_prefix = std::max<int64_t>(max_prefix, (int64_t) neg_prefix[(size_t) b].size());
     }
@@ -484,14 +608,23 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
                         std::to_string(m.lm_cfg.context_length);
         return false;
     }
-    // A kept song (recompose retry) enters the draw already holding its codes
-    // and is fed MUSIC_END on every step after, so its set needs room for both.
-    int64_t max_kept = 0;
-    for (const Yue2SongState & sg : songs) {
-        if (sg.keep_codes) max_kept = std::max<int64_t>(max_kept, (int64_t) sg.codec_ids.size());
+    std::vector<int64_t> cap((size_t) B);
+    int64_t              max_cap = 0;
+    for (int b = 0; b < B; b++) {
+        cap[(size_t) b] = yue2_plan_cap_frames(req, sp, songs[(size_t) b].score_abc);
+        max_cap         = std::max(max_cap, cap[(size_t) b]);
     }
-    if (!yue2_ar_kv_cache_alloc(m, max_prefix + max_kept + std::max<int64_t>(sp.max_tokens, supplied_n) + 4, &cache, err,
-                                S)) {
+    // Rows per set: the prompt plus the longest stream any set may reach.
+    const int64_t rows = max_prefix + std::max<int64_t>(max_cap, supplied_n) + 4;
+    // The spare slot for compaction. Without room for it the stage still
+    // runs; ended streams just stay in the decode.
+    bool compact = false;
+    if (B > 1 && supplied_n == 0) {
+        std::string spare_err;
+        compact = yue2_ar_kv_cache_alloc(m, rows, &cache, &spare_err, S + per);
+        if (!compact) fprintf(stderr, "[YuE2] no room for the spare set (%s): ended songs stay in the decode\n", spare_err.c_str());
+    }
+    if (!compact && !yue2_ar_kv_cache_alloc(m, rows, &cache, err, S)) {
         return false;
     }
     cache.head_lo = YUE2_SEM_HEAD_LO;
@@ -500,7 +633,8 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     const int64_t end_rel = YUE2_MUSIC_END - base;
 
     // Prefill every set. A prompt identical to an earlier set's is copied
-    // rather than forwarded again (cot=off: every song shares one prompt).
+    // rather than forwarded again (cot=off: every song shares one prompt; a
+    // retry pass: every draw of a song shares its prompt).
     int64_t            W = 0;
     std::vector<float> logits;  // [S, W]
     for (int s = 0; s < S; s++) {
@@ -557,29 +691,17 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     }
 
     std::vector<std::vector<int32_t>> history((size_t) B);
-    std::vector<bool>                 done((size_t) B, false);
-    // Kept songs (recompose retry): forward their codes teacher-forced into
-    // their positive set, the rows the NAR later reads, and take them out of
-    // the draw. They end with MUSIC_END fed on the next batched step, exactly
-    // as a song that sampled its end does.
-    for (int b = 0; b < B; b++) {
-        Yue2SongState & sg = songs[(size_t) b];
-        if (!sg.keep_codes) continue;
-        if (!sg.codec_ids.empty()) {
-            std::vector<int32_t> ids;
-            ids.reserve(sg.codec_ids.size());
-            for (int32_t c : sg.codec_ids) ids.push_back(c + YUE2_CODEC_OFFSET);
-            Yue2ArForwardResult dummy;
-            if (!yue2_ar_prefill(m, cache, ids, {}, {}, &dummy, err, sg.cond_set)) {
-                yue2_ar_kv_cache_free(&cache);
-                return false;
-            }
-        }
-        done[(size_t) b] = true;
-    }
-    std::vector<bool>                 by_threshold((size_t) B, false);
-    std::vector<bool>                 dropped((size_t) B, false);
-    std::vector<int32_t>              next_ids((size_t) S, YUE2_MUSIC_END);
+    std::vector<bool>    done((size_t) B, false), by_threshold((size_t) B, false), dropped((size_t) B, false),
+                         capped((size_t) B, false), abandoned((size_t) B, false);
+    std::vector<int64_t> end_step((size_t) B, -1);
+    std::vector<int32_t> next_tok((size_t) B, YUE2_MUSIC_END);
+    std::vector<int32_t> next_ids((size_t) S, YUE2_MUSIC_END);
+    std::vector<int>     slot_song((size_t) B);  // slot i holds song slot_song[i]; [0,n_live) decode
+    std::iota(slot_song.begin(), slot_song.end(), 0);
+    int                  n_live = B;
+    std::vector<float>   scratch((size_t) W);
+    std::vector<int32_t> surv_ids;
+    std::vector<float>   surv_vals;
     static const char * end_trace_path = std::getenv("YUE2_END_TRACE");
     const bool trace = end_trace_path && *end_trace_path && B == 1;
     int64_t step = 0;
@@ -591,31 +713,29 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
             yue2_ar_kv_cache_free(&cache);
             return false;
         }
-        int n_active = 0;
         for (int b = 0; b < B; b++) {
             Yue2SongState & sg = songs[(size_t) b];
-            if (!done[(size_t) b] && yue2_song_dropped(req, b)) {
-                done[(size_t) b]    = true;
-                dropped[(size_t) b] = true;
-            }
-            if (done[(size_t) b]) {
-                for (int k = 0; k < per; k++) next_ids[(size_t) (sg.pair_base + k)] = YUE2_MUSIC_END;
+            if (done[(size_t) b]) continue;
+            if (yue2_song_dropped(req, sg.src_song)) {
+                done[(size_t) b] = dropped[(size_t) b] = true;
+                end_step[(size_t) b] = step;
                 continue;
             }
-            const float * cond_row = logits.data() + (size_t) sg.cond_set * (size_t) W;
-            std::vector<float> blended;
+            if ((int64_t) sg.codec_ids.size() >= cap[(size_t) b]) {
+                done[(size_t) b] = capped[(size_t) b] = true;
+                end_step[(size_t) b] = step;
+                continue;
+            }
+            float * row = logits.data() + (size_t) sg.cond_set * (size_t) W;
             if (use_cfg) {
-                const float * neg_row = logits.data() + (size_t) sg.neg_set * (size_t) W;
-                const std::vector<float> cond(cond_row, cond_row + W);
-                const std::vector<float> uncond(neg_row, neg_row + W);
-                yue2_cfg_blend(cond, uncond, req.cfg_scale, &blended);
-            } else {
-                blended.assign(cond_row, cond_row + W);
+                yue2_cfg_blend_into(row, logits.data() + (size_t) sg.neg_set * (size_t) W, (size_t) W, req.cfg_scale,
+                                    scratch.data());
+                row = scratch.data();
             }
             // Ending controls (yue2-request.h). The bias lands on the raw logit
             // BEFORE the reference's mask/penalty/temperature/top-k/top-p chain,
             // so the chain itself is untouched; the threshold reads the chain's
-            // OUTPUT, the very distribution the draw below samples from.
+            // OUTPUT, the very distribution the draw samples from.
             if (req.end_bias != 0.0f && step >= (int64_t) sp.min_tokens) {
                 const float t_sec = (float) step * 0.04f;  // 25 Hz codec frames
                 float       w     = 0.0f;
@@ -624,15 +744,15 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
                             ? std::min(1.0f, (t_sec - req.end_bias_from_sec) / req.end_bias_ramp_sec)
                             : 1.0f;
                 }
-                if (w > 0.0f && std::isfinite(blended[(size_t) end_rel])) {
-                    blended[(size_t) end_rel] += w * req.end_bias;
+                if (w > 0.0f && std::isfinite(row[end_rel])) {
+                    row[end_rel] += w * req.end_bias;
                 }
             }
-            // YUE2_END_TRACE=<path>: uncensored per-step record of MUSIC_END's
-            // probability and rank BEFORE the sampler chain (softmax over the
-            // legal ids + END, raw logits, no penalty/temp/top-k/p) and AFTER
-            // it, plus the sampled token — the evidence for "the model reached
-            // its ending and END lost the draw". Read-only; single-song only.
+            // YUE2_END_TRACE=<path>: per-step record of MUSIC_END's probability
+            // and rank BEFORE the sampler chain (softmax over the legal ids +
+            // END, raw logits) and AFTER it, plus the sampled token — the
+            // evidence for "the model reached its ending and END lost the
+            // draw". Read-only; single-song only.
             double  tr_p_pre = -1.0, tr_p_post = -1.0;
             int64_t tr_r_pre = -1, tr_r_post = -1;
             auto stat = [&](const std::vector<float> & s, bool legal_only, double * p, int64_t * rank) {
@@ -655,40 +775,18 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
                 *p    = std::isfinite(se) ? std::exp((double) (se - mx)) / z : 0.0;
                 *rank = std::isfinite(se) ? r : -1;
             };
-            if (trace) stat(blended, true, &tr_p_pre, &tr_r_pre);
-            yue2_distribution(blended, sp, YUE2_MUSIC_END, legal_lo, legal_hi, history[(size_t) b], step, legacy_off,
-                              base);
-            if (trace) stat(blended, false, &tr_p_post, &tr_r_post);
-            if (req.end_threshold > 0.0f && step >= (int64_t) sp.min_tokens &&
-                std::isfinite(blended[(size_t) end_rel])) {
-                // P(END) under the post-chain distribution: logsumexp over the
-                // finite entries (masked ones are -inf and contribute nothing).
-                float mx = -INFINITY;
-                for (float v : blended) {
-                    if (std::isfinite(v) && v > mx) mx = v;
-                }
-                double z = 0.0;
-                for (float v : blended) {
-                    if (std::isfinite(v)) z += std::exp((double) (v - mx));
-                }
-                const double p_end = std::exp((double) (blended[(size_t) end_rel] - mx)) / z;
-                if (p_end >= (double) req.end_threshold) {
-                    if (trace) {
-                        if (FILE * tf = fopen(end_trace_path, "a")) {
-                            fprintf(tf, "%lld\t%.2f\t%.6g\t%lld\t%.6g\t%lld\t%d\tforced_threshold\n",
-                                    (long long) step, (double) step * 0.04, tr_p_pre, (long long) tr_r_pre,
-                                    tr_p_post, (long long) tr_r_post, (int) YUE2_MUSIC_END);
-                            fclose(tf);
-                        }
-                    }
-                    done[(size_t) b]         = true;
-                    by_threshold[(size_t) b] = true;
-                    for (int k = 0; k < per; k++) next_ids[(size_t) (sg.pair_base + k)] = YUE2_MUSIC_END;
-                    continue;
-                }
+            std::vector<float> traced;
+            if (trace) {
+                traced.assign(row, row + W);
+                stat(traced, true, &tr_p_pre, &tr_r_pre);
+                yue2_distribution(traced, sp, YUE2_MUSIC_END, legal_lo, legal_hi, history[(size_t) b], step, legacy_off,
+                                  base);
+                stat(traced, false, &tr_p_post, &tr_r_post);
             }
-            const int64_t tok_id =
-                base + (sp.temperature == 0.0f ? yue2_sample_argmax(blended) : yue2_sample_draw(blended, sg.rng));
+            const float   threshold = step >= (int64_t) sp.min_tokens ? req.end_threshold : 0.0f;
+            const int64_t rel = yue2_sample_row(row, W, sp, YUE2_MUSIC_END, legal_lo, legal_hi, history[(size_t) b], step,
+                                                legacy_off, base, sg.rng, &surv_ids, &surv_vals, threshold);
+            const int64_t tok_id = rel < 0 ? YUE2_MUSIC_END : base + rel;
             if (trace) {
                 if (FILE * tf = fopen(end_trace_path, "a")) {
                     if (step == 0) {
@@ -699,32 +797,89 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
                     }
                     fprintf(tf, "%lld\t%.2f\t%.6g\t%lld\t%.6g\t%lld\t%lld\t%s\n", (long long) step,
                             (double) step * 0.04, tr_p_pre, (long long) tr_r_pre, tr_p_post, (long long) tr_r_post,
-                            (long long) tok_id, tok_id == YUE2_MUSIC_END ? "sampled_end" : "");
+                            (long long) tok_id,
+                            rel < 0 ? "forced_threshold" : (tok_id == YUE2_MUSIC_END ? "sampled_end" : ""));
                     fclose(tf);
                 }
             }
-            if (tok_id == YUE2_MUSIC_END) {
-                done[(size_t) b] = true;
-                for (int k = 0; k < per; k++) next_ids[(size_t) (sg.pair_base + k)] = YUE2_MUSIC_END;
+            if (rel < 0 || tok_id == YUE2_MUSIC_END) {
+                done[(size_t) b]         = true;
+                by_threshold[(size_t) b] = rel < 0;
+                end_step[(size_t) b]     = step;
                 continue;
             }
             history[(size_t) b].push_back((int32_t) tok_id);
             sg.codec_ids.push_back((int32_t) (tok_id - YUE2_CODEC_OFFSET));
-            for (int k = 0; k < per; k++) next_ids[(size_t) (sg.pair_base + k)] = (int32_t) tok_id;
-            n_active++;
+            next_tok[(size_t) b] = (int32_t) tok_id;
+        }
+
+        // A retry pass: a song whose draw has ended cleanly needs no other.
+        uint32_t won = 0;
+        if (pass.first_wins) {
+            for (int b = 0; b < B; b++) {
+                if (done[(size_t) b] && !dropped[(size_t) b] && !capped[(size_t) b] && !abandoned[(size_t) b] &&
+                    songs[(size_t) b].src_song < 32) {
+                    won |= 1u << songs[(size_t) b].src_song;
+                }
+            }
+            for (int b = 0; b < B; b++) {
+                const int g = songs[(size_t) b].src_song;
+                if (!done[(size_t) b] && g < 32 && ((won >> g) & 1u)) {
+                    done[(size_t) b] = abandoned[(size_t) b] = true;
+                    end_step[(size_t) b] = step;
+                }
+            }
         }
         if (progress) {
-            uint32_t songs_done = 0;
-            for (int b = 0; b < B && b < 32; b++) songs_done |= done[(size_t) b] ? (1u << b) : 0u;
+            // Bit g: song g is over (every stream of it ended, or it has won).
+            uint32_t open = 0;
+            for (int b = 0; b < B; b++) {
+                if (!done[(size_t) b] && songs[(size_t) b].src_song < 32) open |= 1u << songs[(size_t) b].src_song;
+            }
+            uint32_t songs_done = pass.extra_done_bits | won;
+            for (int b = 0; b < B; b++) {
+                const int g = songs[(size_t) b].src_song;
+                if (g < 32 && !((open >> g) & 1u)) songs_done |= 1u << g;
+            }
             progress({ YUE2_STAGE_SEMANTIC, step + 1, sp.max_tokens, songs_done });
         }
+
+        if (compact) {
+            for (int i = 0; i < n_live;) {
+                const int b = slot_song[(size_t) i];
+                if (!done[(size_t) b]) {
+                    i++;
+                    continue;
+                }
+                const int j = n_live - 1;
+                if (i != j) {
+                    if (!yue2_swap_slots(m, cache, i, j, B, per, err)) {
+                        yue2_ar_kv_cache_free(&cache);
+                        return false;
+                    }
+                    std::swap(slot_song[(size_t) i], slot_song[(size_t) j]);
+                    seat(songs[(size_t) slot_song[(size_t) i]], i);
+                    seat(songs[(size_t) slot_song[(size_t) j]], j);
+                }
+                n_live--;
+            }
+        }
+        int n_active = 0;
+        for (int b = 0; b < B; b++) n_active += done[(size_t) b] ? 0 : 1;
         if (n_active == 0) {
             break;
+        }
+        const int n_slots = compact ? n_live : B;
+        for (int i = 0; i < n_slots; i++) {
+            const int b = slot_song[(size_t) i];
+            for (int k = 0; k < per; k++) {
+                next_ids[(size_t) (i * per + k)] = done[(size_t) b] ? YUE2_MUSIC_END : next_tok[(size_t) b];
+            }
         }
         // The last content token is forwarded even on the final step so the
         // cache holds every codec row the NAR reads (upstream 2d21090f found
         // the budget-capped case reading a stale row without this).
-        if (!yue2_ar_decode_batch(m, cache, next_ids.data(), &logits, err)) {
+        if (!yue2_ar_decode_batch(m, cache, next_ids.data(), &logits, err, (int64_t) n_slots * per)) {
             yue2_ar_kv_cache_free(&cache);
             return false;
         }
@@ -732,13 +887,16 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
 
     for (int b = 0; b < B; b++) {
         Yue2SongState & sg = songs[(size_t) b];
-        if (sg.keep_codes) continue;  // replayed: its end reason is the first pass's
         sg.stage_end_reason[YUE2_STAGE_SEMANTIC] =
-            dropped[(size_t) b] ? "dropped"
-            : done[(size_t) b]  ? (by_threshold[(size_t) b] ? "eos_threshold" : "eos")
-                                : (preview_capped ? "preview_limit" : "limit_hit");
-        fprintf(stderr, "[YuE2-AR-Tokens] semantic song=%d n=%zu hash=%016llx\n", b, sg.codec_ids.size(),
-                (unsigned long long) yue2_token_hash(sg.codec_ids));
+            dropped[(size_t) b]     ? "dropped"
+            : abandoned[(size_t) b] ? "abandoned"
+            : capped[(size_t) b]    ? "limit_hit"
+            : done[(size_t) b]      ? (by_threshold[(size_t) b] ? "eos_threshold" : "eos")
+                                    : (preview_capped ? "preview_limit" : "limit_hit");
+        sg.sem_end_step = end_step[(size_t) b] >= 0 ? end_step[(size_t) b] : step;
+        fprintf(stderr, "[YuE2-AR-Tokens] semantic song=%d n=%zu hash=%016llx%s\n", sg.src_song, sg.codec_ids.size(),
+                (unsigned long long) yue2_token_hash(sg.codec_ids),
+                capped[(size_t) b] ? " (past its plan's length)" : "");
     }
     *stage_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     yue2_ar_step_profile_log("semantic");
@@ -1112,38 +1270,126 @@ static bool yue2_pipeline_run_ar(Yue2Model & m, const BPETokenizer & tok, Yue2Re
     const bool have_abc = (req.cot != YUE2_COT_OFF);  // off never has an ABC span; melody/full always do (sampled or supplied)
 
     Yue2ArKvCache sem_cache;
-    // Recompose on a runaway: a song whose composer ran to the cap (limit_hit,
-    // not the preview cap) gets a new seed and another go, up to
-    // req.semantic_retries times. The plan is kept; only the codec stream is
-    // redrawn. Each try costs the stage's seconds, never a render.
-    for (int attempt = 0;; attempt++) {
+    {
         double stage_ms = 0.0;
         if (!yue2_run_semantic_stage(m, tok, req, have_abc, songs, cancel, progress, &sem_cache, &stage_ms, err)) {
             return false;
         }
         out->stage_ms[YUE2_STAGE_SEMANTIC] += stage_ms;
-        bool runaway = false;
-        // A song dropped from the batch is never worth another try.
-        for (int b = 0; b < B; b++) {
-            runaway |= songs[(size_t) b].stage_end_reason[YUE2_STAGE_SEMANTIC] == "limit_hit" && !yue2_song_dropped(req, b);
-        }
-        if (!runaway || attempt >= req.semantic_retries || (cancel && cancel->load())) break;
-        yue2_ar_kv_cache_free(&sem_cache);
-        for (int b = 0; b < B; b++) {
-            Yue2SongState & sg = songs[(size_t) b];
-            // Songs that ended normally are replayed, not redrawn: before
-            // 2026-09-27 every song of the batch was composed again, and the
-            // healthy ones came back as different songs.
-            sg.keep_codes = sg.stage_end_reason[YUE2_STAGE_SEMANTIC] != "limit_hit";
-            if (sg.keep_codes) continue;
-            sg.seed += 1000003ull;
-            sg.rng.seed(sg.seed);
-            sg.codec_ids.clear();
-            sg.stage_end_reason[YUE2_STAGE_SEMANTIC].clear();
-        }
-        fprintf(stderr, "[YuE2] composer ran to its cap: recomposing with a new seed (try %d of %d); songs that ended keep their composition\n", attempt + 1, req.semantic_retries);
     }
-    for (auto & sg : songs) sg.keep_codes = false;
+    // Recompose on a runaway: a song whose composer ran past its plan (or to
+    // the stage cap) is drawn again with new seeds, up to req.semantic_retries
+    // draws per song. The plan is kept; only the codec stream is redrawn.
+    //
+    // Draws run side by side in their own cache (2026-09-28), up to
+    // YUE2_RETRY_DRAWS at once shared between the runaway songs, and a song is
+    // settled by the first of its draws to end cleanly. A decode step reads
+    // the weights once whatever the batch width, so four draws cost about what
+    // 1.25 serial tries did, and nothing waits for a hopeless draw to reach
+    // its cap. The winner's rows go into the song's own set of the first
+    // pass's cache, so songs that ended there are never replayed.
+    static constexpr int YUE2_RETRY_DRAWS = 4;
+    std::vector<int> tries((size_t) B, 0);
+    int              draws_cap = YUE2_RETRY_DRAWS;
+    for (int round = 1;; round++) {
+        std::vector<int> runaway;
+        uint32_t         done_bits = 0;
+        int              budget    = 0;
+        for (int b = 0; b < B; b++) {
+            const Yue2SongState & sg = songs[(size_t) b];
+            // A song dropped from the batch is never worth another try.
+            if (sg.stage_end_reason[YUE2_STAGE_SEMANTIC] == "limit_hit" && !yue2_song_dropped(req, sg.src_song) &&
+                tries[(size_t) b] < req.semantic_retries) {
+                runaway.push_back(b);
+                budget += req.semantic_retries - tries[(size_t) b];
+            } else if (sg.src_song < 32) {
+                done_bits |= 1u << sg.src_song;
+            }
+        }
+        if (runaway.empty() || (cancel && cancel->load())) break;
+
+        std::vector<int> want(runaway.size(), 0);
+        for (int left = std::min(draws_cap, budget); left > 0;) {
+            for (size_t r = 0; r < runaway.size() && left > 0; r++) {
+                if (tries[(size_t) runaway[r]] + want[r] < req.semantic_retries) {
+                    want[r]++;
+                    left--;
+                }
+            }
+        }
+        std::vector<Yue2SongState> draws;
+        std::vector<int>           draw_song;
+        for (size_t r = 0; r < runaway.size(); r++) {
+            const Yue2SongState & sg = songs[(size_t) runaway[r]];
+            for (int d = 0; d < want[r]; d++) {
+                Yue2SongState ds;
+                ds.src_song   = sg.src_song;
+                ds.style      = sg.style;
+                ds.lyrics     = sg.lyrics;
+                ds.abc_ids    = sg.abc_ids;
+                ds.score_abc  = sg.score_abc;
+                ds.noise_seed = sg.noise_seed;
+                // Try n of a song draws with its seed + n x 1000003, the step
+                // the server reads its recompose count back from.
+                ds.seed = sg.seed + 1000003ull * (uint64_t) (tries[(size_t) runaway[r]] + d + 1);
+                ds.rng.seed(ds.seed);
+                draws.push_back(std::move(ds));
+                draw_song.push_back(runaway[r]);
+            }
+        }
+        fprintf(stderr, "[YuE2] composer ran past its plan on %zu song(s): drawing %zu recompositions side by side (round %d)\n",
+                runaway.size(), draws.size(), round);
+
+        Yue2ArKvCache    retry_cache;
+        Yue2SemanticPass pass;
+        pass.first_wins      = true;
+        pass.extra_done_bits = done_bits;
+        double      stage_ms = 0.0;
+        std::string rerr;
+        if (!yue2_run_semantic_stage(m, tok, req, have_abc, draws, cancel, progress, &retry_cache, &stage_ms, &rerr,
+                                     pass)) {
+            yue2_ar_kv_cache_free(&retry_cache);
+            if (rerr.find("VRAM") != std::string::npos && draws_cap > 1) {
+                draws_cap = std::max(1, draws_cap / 2);
+                fprintf(stderr, "[YuE2] no VRAM for %zu draws at once; trying %d\n", draws.size(), draws_cap);
+                continue;
+            }
+            yue2_ar_kv_cache_free(&sem_cache);
+            if (err) *err = rerr;
+            return false;
+        }
+        out->stage_ms[YUE2_STAGE_SEMANTIC] += stage_ms;
+
+        for (size_t r = 0; r < runaway.size(); r++) {
+            const int       b  = runaway[r];
+            Yue2SongState & sg = songs[(size_t) b];
+            int             w  = -1;
+            for (size_t d = 0; d < draws.size(); d++) {
+                if (draw_song[d] != b || !yue2_stream_clean(draws[d].stage_end_reason[YUE2_STAGE_SEMANTIC])) continue;
+                if (w < 0 || draws[d].sem_end_step < draws[(size_t) w].sem_end_step) w = (int) d;
+            }
+            tries[(size_t) b] += want[r];
+            if (w < 0) {
+                fprintf(stderr, "[YuE2] song %d: none of %d draws ended cleanly (%d of %d tries used)\n", sg.src_song,
+                        want[r], tries[(size_t) b], req.semantic_retries);
+                continue;
+            }
+            const Yue2SongState & win = draws[(size_t) w];
+            const int64_t n = (int64_t) (win.prefix_ids.size() + win.codec_ids.size());
+            if (!yue2_ar_kv_cache_copy_rows(m, retry_cache, win.cond_set, sem_cache, sg.cond_set, n, err)) {
+                yue2_ar_kv_cache_free(&retry_cache);
+                yue2_ar_kv_cache_free(&sem_cache);
+                return false;
+            }
+            const int try_n = (int) ((win.seed - sg.seed) / 1000003ull);
+            sg.codec_ids                             = win.codec_ids;
+            sg.seed                                  = win.seed;
+            sg.stage_end_reason[YUE2_STAGE_SEMANTIC] = win.stage_end_reason[YUE2_STAGE_SEMANTIC];
+            fprintf(stderr, "[YuE2] song %d: recomposed by try %d of %d (seed %llu, %zu frames)\n", sg.src_song, try_n,
+                    req.semantic_retries, (unsigned long long) win.seed, win.codec_ids.size());
+        }
+        yue2_ar_kv_cache_free(&retry_cache);
+    }
     if (req.semantic_only) {
         // Planner probe: the codec stream is the result. No NAR, no VAE.
         yue2_ar_kv_cache_free(&sem_cache);

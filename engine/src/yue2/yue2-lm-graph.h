@@ -1059,8 +1059,11 @@ static bool yue2_ar_prefill(const Yue2Model & m, Yue2ArKvCache & cache, const st
 // position predicts: `logits_out` is [S, head_n] (head_n == V without a head
 // window). Advances every `filled[s]` by 1 on success. The graph is built
 // once per (KV bucket, S, head window) and replayed with new inputs.
+// n_active > 0 decodes only sets [0,n_active): the semantic stage moves songs
+// that have ended behind the live ones and stops paying for them (their KV
+// stays, for the NAR). Sets past n_active are neither read nor written.
 static bool yue2_ar_decode_batch(const Yue2Model & m, Yue2ArKvCache & cache, const int32_t * ids,
-                                 std::vector<float> * logits_out, std::string * err) {
+                                 std::vector<float> * logits_out, std::string * err, int64_t n_active = 0) {
     const bool profile = yue2_ar_step_profile_enabled();
     auto tick_start = std::chrono::steady_clock::now();
     auto tick = [&](double & ms) {
@@ -1075,7 +1078,7 @@ static bool yue2_ar_decode_batch(const Yue2Model & m, Yue2ArKvCache & cache, con
         }
         return false;
     }
-    const int64_t S = cache.n_sets;
+    const int64_t S = n_active > 0 ? std::min(n_active, cache.n_sets) : cache.n_sets;
     int64_t pos_max = 0;
     for (int64_t s = 0; s < S; s++) {
         if (cache.filled[(size_t) s] >= cache.capacity) {
@@ -1144,9 +1147,15 @@ static bool yue2_ar_decode_batch(const Yue2Model & m, Yue2ArKvCache & cache, con
         ggml_tensor * h = ggml_get_rows(d.ctx, m.lm.token_embd, d.in_ids);  // [H,S]
         const bool use_flash = yue2_lm_use_flash(m.backend);
         for (int i = 0; i < L; i++) {
-            h = yue2_ar_block(d.ctx, d.gf, c, m.lm.blk[(size_t) i], h, d.in_pos, d.in_mask, d.in_rows,
-                              cache.k[(size_t) i], cache.v[(size_t) i], n_kv_pad, use_flash, &m, i, 0,
-                              /*batched=*/true);
+            // The first S sets: set is the outermost axis, so one contiguous view.
+            ggml_tensor * kc = cache.k[(size_t) i];
+            ggml_tensor * vc = cache.v[(size_t) i];
+            if (S < cache.n_sets) {
+                kc = ggml_view_4d(d.ctx, kc, kc->ne[0], kc->ne[1], kc->ne[2], S, kc->nb[1], kc->nb[2], kc->nb[3], 0);
+                vc = ggml_view_4d(d.ctx, vc, vc->ne[0], vc->ne[1], vc->ne[2], S, vc->nb[1], vc->nb[2], vc->nb[3], 0);
+            }
+            h = yue2_ar_block(d.ctx, d.gf, c, m.lm.blk[(size_t) i], h, d.in_pos, d.in_mask, d.in_rows, kc, vc,
+                              n_kv_pad, use_flash, &m, i, 0, /*batched=*/true);
         }
         ggml_tensor * h_final = yue2_lm_rms(d.ctx, h, m.lm.output_norm, c.rms_eps);
         d.out_logits = yue2_lm_head(d.ctx, m, h_final, head_lo, head_n);  // [head_n, S]

@@ -407,7 +407,8 @@ Parsed by `yue2_parse_request` in `engine/src/yue2/yue2-request.h`.
 | `abc` | none | ABC text to use instead of running the plan stage |
 | `plan_only` | false | Stop after the plan stage and return the ABC score. Needs `cot` other than `off` |
 | `semantic_only` | false | Stop after the semantic stage and return the codec ids |
-| `semantic_retries` | 0 | Re-draw a song whose semantic stage hits its cap, up to this many times |
+| `semantic_retries` | 0 | Redraws per song whose semantic stage runs away, up to 4 side by side; the first to end cleanly wins |
+| `plan_cutoff` | 1.5 | A stream past this x its plan's length + 20 s is a runaway (`limit_hit`); 0 = only the stage cap |
 | `seed` | random | Song seed. Song i of a batch uses `seed + i` |
 | `noise_seed` | `seed` | NAR noise seed. Variation j uses `noise_seed + j` |
 | `lm_batch_size` | 1 | Songs per request, 1 to 4 |

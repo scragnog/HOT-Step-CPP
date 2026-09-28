@@ -101,6 +101,11 @@ struct Yue2Request {
     // is healthy can still be composed into a six-minute runaway; this
     // catches that in the seconds the stage costs, not the minutes a render does.
     int         semantic_retries = 0;
+    // A song whose composition runs past plan_cutoff x the plan's own length
+    // (bars x beats / tempo) plus 20 s counts as a runaway there, instead of at
+    // the stage's 9000-frame cap. 0 = off. The default 1.5 cut 1 of 64 saved
+    // songs (2026-09-28), and that one ran 168 s against a 67 s plan.
+    float       plan_cutoff = 1.5f;
     // Runtime only, never parsed: the job's drop mask (POST /job?drop_songs=).
     // Bit b set = song b left the batch (its queue entry was removed), so the
     // plan and compose loops end it at once and the render leaves it out.
@@ -301,6 +306,16 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
             return false;
         }
         if (yyjson_is_int(v)) out->semantic_retries = (int) std::max<int64_t>(0, std::min<int64_t>(20, yyjson_get_sint(v)));
+    }
+    if (yyjson_val * v = yyjson_obj_get(root, "plan_cutoff")) {
+        if (!yyjson_is_num(v) && !yyjson_is_null(v)) {
+            if (err) {
+                *err = "\"plan_cutoff\" must be a number";
+            }
+            yyjson_doc_free(doc);
+            return false;
+        }
+        if (yyjson_is_num(v)) out->plan_cutoff = (float) std::max(0.0, std::min(10.0, yyjson_get_num(v)));
     }
     if (yyjson_val * v = yyjson_obj_get(root, "semantic_only")) {
         if (!yyjson_is_bool(v) && !yyjson_is_null(v)) {

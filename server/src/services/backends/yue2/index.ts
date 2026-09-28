@@ -778,10 +778,11 @@ async function capabilities(): Promise<BackendCapabilities> {
         type: 'slider',
         label: 'Recompose runaway songs',
         hint: 'A healthy lead sheet can still be composed into a runaway: the composer (semantic '
-            + 'stage) runs to its cap, six minutes, instead of ending the song. When that happens '
-            + 'the engine redraws the seed and composes again, up to this many extra tries, before '
-            + 'any audio is rendered; each try costs the composer\'s seconds, not a render. '
-            + '0 = render whatever came out.',
+            + 'stage) runs well past the length the lead sheet asks for instead of ending the song. '
+            + 'A song counts as a runaway once it passes 1.5x its lead sheet\'s length plus 20 s, or '
+            + 'six minutes. The engine then composes it again with new seeds, up to this many extra '
+            + 'tries, several side by side, and keeps the first one that ends properly. This all '
+            + 'happens before any audio is rendered. 0 = render whatever came out.',
         default: 2,
         min: 0,
         max: 10,

@@ -82,8 +82,12 @@
 #include "ggml.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cstdio>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <functional>
 #include <numeric>
 #include <random>
 #include <unordered_map>
@@ -134,6 +138,19 @@ static inline void yue2_cfg_blend(const std::vector<float> & cond, const std::ve
         const float diff   = yue2_round_bf16(cond[i] - uncond[i]);
         const float scaled = yue2_round_bf16(diff * guidance);
         (*out)[i]           = yue2_round_bf16(uncond[i] + scaled);
+    }
+}
+
+// yue2_cfg_blend into a caller buffer (the decode loop's scratch row).
+static inline void yue2_cfg_blend_into(const float * cond, const float * uncond, size_t V, float guidance, float * out) {
+    if (guidance == 1.0f) {
+        std::copy(cond, cond + V, out);
+        return;
+    }
+    for (size_t i = 0; i < V; i++) {
+        const float diff   = yue2_round_bf16(cond[i] - uncond[i]);
+        const float scaled = yue2_round_bf16(diff * guidance);
+        out[i]             = yue2_round_bf16(uncond[i] + scaled);
     }
 }
 
@@ -290,6 +307,171 @@ static inline void yue2_distribution(std::vector<float> & scores, const Yue2Samp
     }
 }
 
+// ── The same chain over survivors only (the decode loops' fast path) ───────
+//
+// yue2_distribution + yue2_sample_draw touch every entry of the row several
+// times per step (mask, top-k selection over a full copy, threshold, top-p
+// gather, the draw's scan): 0.5 ms a composing step and 2 ms a planning step
+// on a 5090 (2026-09-28), 14% and 26% of those stages. This does the same
+// arithmetic in the same order but visits the row twice (a size-k heap for the
+// k-th largest score, then a gather of the survivors) and runs top-p and the
+// draw over the survivors. Survivors come out in ascending id, which is the
+// order both the reference top-p tie-break and the draw walk, so the token
+// drawn for a seed is the one yue2_distribution + yue2_sample_draw would draw
+// (YUE2_SAMPLER_CHECK=1 runs both and says so if they ever differ).
+//
+// `scores` is the caller's scratch row and is modified (mask and penalty land
+// in it). Temperature 0 (greedy) is not handled here: callers keep the full
+// path for it.
+static inline void yue2_distribution_survivors(float * scores, int64_t V, const Yue2SamplingParams & sp,
+                                               int64_t eos_id, int64_t legal_lo, int64_t legal_hi,
+                                               const std::vector<int32_t> & history, int64_t step, bool legacy_off,
+                                               int64_t base, std::vector<int32_t> * ids, std::vector<float> * vals) {
+    eos_id   -= base;
+    legal_lo -= base;
+    legal_hi -= base;
+    ids->clear();
+    vals->clear();
+
+    // Legal mask: only the entries outside [lo,hi) can change.
+    const int64_t lo = std::max<int64_t>(0, std::min<int64_t>(V, legal_lo));
+    const int64_t hi = std::max<int64_t>(lo, std::min<int64_t>(V, legal_hi));
+    for (int64_t v = 0; v < lo; v++) if (v != eos_id) scores[v] = -INFINITY;
+    for (int64_t v = hi; v < V; v++) if (v != eos_id) scores[v] = -INFINITY;
+    if (step < (int64_t) sp.min_tokens && eos_id >= 0 && eos_id < V) scores[eos_id] = -INFINITY;
+
+    if (sp.repetition_penalty != 1.0f && !history.empty() && sp.penalty_window > 0) {
+        const int64_t n     = (int64_t) history.size();
+        const int64_t start = n > sp.penalty_window ? n - sp.penalty_window : 0;
+        std::unordered_map<int32_t, int> freq;
+        for (int64_t i = start; i < n; i++) freq[history[(size_t) i]]++;
+        for (const auto & kv : freq) {
+            const int64_t id = (int64_t) kv.first - base;
+            if (id < 0 || id >= V) continue;
+            float & s = scores[id];
+            if (!std::isfinite(s)) continue;
+            const float alpha = std::pow(sp.repetition_penalty, (float) kv.second);
+            s                 = yue2_maybe_bf16(s < 0.0f ? s * alpha : s / alpha, legacy_off);
+        }
+    }
+
+    // Temperature is applied on the fly, with the reference's own arithmetic.
+    const bool  tempered = sp.temperature != 1.0f;
+    const float temp     = sp.temperature;
+    auto        final_of = [&](int64_t v) {
+        const float s = scores[v];
+        return tempered && std::isfinite(s) ? yue2_maybe_bf16(s / temp, legacy_off) : s;
+    };
+    // Every finite entry is in [lo,hi) or is the end token, so these two
+    // spans are the whole candidate set.
+    auto for_each_candidate = [&](auto && fn) {
+        if (eos_id >= 0 && eos_id < lo) fn(eos_id);
+        for (int64_t v = lo; v < hi; v++) fn(v);
+        if (eos_id >= hi && eos_id < V) fn(eos_id);
+    };
+
+    // top-k threshold: the k-th largest finite score, duplicates counted,
+    // exactly what nth_element over every finite score picks.
+    const int64_t k         = sp.top_k > 0 ? sp.top_k : V;
+    float         threshold = -INFINITY;
+    if (k < V) {
+        std::vector<float> heap;  // min-heap of the k largest so far
+        heap.reserve((size_t) k);
+        int64_t n_finite = 0;
+        for_each_candidate([&](int64_t v) {
+            const float s = final_of(v);
+            if (!std::isfinite(s)) return;
+            n_finite++;
+            if ((int64_t) heap.size() < k) {
+                heap.push_back(s);
+                std::push_heap(heap.begin(), heap.end(), std::greater<float>());
+            } else if (s > heap.front()) {
+                std::pop_heap(heap.begin(), heap.end(), std::greater<float>());
+                heap.back() = s;
+                std::push_heap(heap.begin(), heap.end(), std::greater<float>());
+            }
+        });
+        if (n_finite >= k) threshold = heap.front();
+    }
+    for_each_candidate([&](int64_t v) {
+        const float s = final_of(v);
+        if (std::isfinite(s) && !(s < threshold)) {
+            ids->push_back((int32_t) v);
+            vals->push_back(s);
+        }
+    });
+
+    if (sp.top_p < 1.0f && !ids->empty()) {
+        const size_t        n = ids->size();
+        std::vector<size_t> order(n);
+        std::iota(order.begin(), order.end(), (size_t) 0);
+        std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) { return (*vals)[a] > (*vals)[b]; });
+        const double        max_v = (double) (*vals)[order[0]];
+        std::vector<double> probs(n);
+        double              sum = 0.0;
+        for (size_t i = 0; i < n; i++) {
+            probs[i] = std::exp((double) (*vals)[order[i]] - max_v);
+            sum += probs[i];
+        }
+        const size_t      keep_floor = legacy_off ? 3 : 1;
+        std::vector<bool> removed(n, false);
+        double            cum = 0.0;
+        for (size_t i = 0; i < n; i++) {
+            const double before = cum;
+            cum += sum > 0.0 ? probs[i] / sum : 0.0;
+            if (i >= keep_floor && before > (double) sp.top_p) removed[order[i]] = true;
+        }
+        size_t w = 0;
+        for (size_t i = 0; i < n; i++) {
+            if (removed[i]) continue;
+            (*ids)[w]  = (*ids)[i];
+            (*vals)[w] = (*vals)[i];
+            w++;
+        }
+        ids->resize(w);
+        vals->resize(w);
+    }
+}
+
+// yue2_sample_draw over the survivors: same max, same exp/sum order, same
+// walk. Returns a row-relative index, like yue2_sample_draw.
+static inline int64_t yue2_draw_survivors(const std::vector<int32_t> & ids, const std::vector<float> & vals,
+                                          std::mt19937_64 & rng) {
+    if (ids.empty()) return 0;  // fully masked row: yue2_sample_draw's argmax fallback lands on 0 too
+    double max_v    = -INFINITY;
+    size_t arg_best = 0;
+    for (size_t i = 0; i < vals.size(); i++) {
+        if (vals[i] > max_v) {
+            max_v    = vals[i];
+            arg_best = i;
+        }
+    }
+    std::vector<double> p(vals.size());
+    double              sum = 0.0;
+    for (size_t i = 0; i < vals.size(); i++) {
+        p[i] = std::exp((double) vals[i] - max_v);
+        sum += p[i];
+    }
+    if (!(sum > 0.0)) return ids[arg_best];
+    const double u   = std::uniform_real_distribution<double>(0.0, 1.0)(rng) * sum;
+    double       acc = 0.0;
+    for (size_t i = 0; i < p.size(); i++) {
+        acc += p[i];
+        if (acc > u) return ids[i];
+    }
+    return ids[arg_best];
+}
+
+// YUE2_SAMPLER_CHECK=1: run the full reference path beside the fast one on
+// every step and log any disagreement. A test switch, not a production knob.
+static inline bool yue2_sampler_check_enabled() {
+    static const bool on = [] {
+        const char * e = std::getenv("YUE2_SAMPLER_CHECK");
+        return e && e[0] && e[0] != '0';
+    }();
+    return on;
+}
+
 // ── Drawing an actual token (production decode loop / --generate) ──────────
 //
 // Sampled ids are never fixture-diffable regardless of implementation
@@ -351,4 +533,74 @@ static inline int64_t yue2_sample_draw(const std::vector<float> & scores, std::m
         }
     }
     return arg_best;
+}
+
+// P(eos) under the post-chain distribution of a full row: the semantic
+// stage's end_threshold test, with its own float/double arithmetic.
+static inline double yue2_end_prob_row(const std::vector<float> & s, int64_t eos_rel) {
+    if (eos_rel < 0 || eos_rel >= (int64_t) s.size() || !std::isfinite(s[(size_t) eos_rel])) return -1.0;
+    float mx = -INFINITY;
+    for (float v : s) if (std::isfinite(v) && v > mx) mx = v;
+    double z = 0.0;
+    for (float v : s) if (std::isfinite(v)) z += std::exp((double) (v - mx));
+    return std::exp((double) (s[(size_t) eos_rel] - mx)) / z;
+}
+
+// The same over the survivors (ascending id, every one finite).
+static inline double yue2_end_prob_survivors(const std::vector<int32_t> & ids, const std::vector<float> & vals,
+                                             int64_t eos_rel) {
+    size_t at = ids.size();
+    for (size_t i = 0; i < ids.size(); i++) if (ids[i] == eos_rel) at = i;
+    if (at == ids.size()) return -1.0;
+    float mx = -INFINITY;
+    for (float v : vals) if (v > mx) mx = v;
+    double z = 0.0;
+    for (float v : vals) z += std::exp((double) (v - mx));
+    return std::exp((double) (vals[at] - mx)) / z;
+}
+
+// One token from one logits row, for the plan and semantic decode loops.
+// `row` is scratch (modified). The survivors of the chain stay in `*ids` /
+// `*vals` (ascending id, final scores); the greedy path leaves them empty.
+// end_threshold > 0: when the chain leaves P(eos) at or above it, return -1
+// without drawing (the rng does not advance), as the semantic stage's
+// threshold end always has.
+static inline int64_t yue2_sample_row(float * row, int64_t V, const Yue2SamplingParams & sp, int64_t eos_id,
+                                      int64_t legal_lo, int64_t legal_hi, const std::vector<int32_t> & history,
+                                      int64_t step, bool legacy_off, int64_t base, std::mt19937_64 & rng,
+                                      std::vector<int32_t> * ids, std::vector<float> * vals,
+                                      float end_threshold = 0.0f) {
+    if (sp.temperature == 0.0f) {
+        std::vector<float> s(row, row + V);
+        yue2_distribution(s, sp, eos_id, legal_lo, legal_hi, history, step, legacy_off, base);
+        ids->clear();
+        vals->clear();
+        if (end_threshold > 0.0f && yue2_end_prob_row(s, eos_id - base) >= (double) end_threshold) return -1;
+        return yue2_sample_argmax(s);
+    }
+    const bool         check = yue2_sampler_check_enabled();
+    std::vector<float> ref;
+    std::mt19937_64    ref_rng;
+    if (check) {
+        ref.assign(row, row + V);
+        ref_rng = rng;
+    }
+    yue2_distribution_survivors(row, V, sp, eos_id, legal_lo, legal_hi, history, step, legacy_off, base, ids, vals);
+    const bool    stop = end_threshold > 0.0f && yue2_end_prob_survivors(*ids, *vals, eos_id - base) >= (double) end_threshold;
+    const int64_t tok  = stop ? -1 : yue2_draw_survivors(*ids, *vals, rng);
+    if (check) {
+        static std::atomic<long long> checked{ 0 }, differed{ 0 };
+        yue2_distribution(ref, sp, eos_id, legal_lo, legal_hi, history, step, legacy_off, base);
+        const bool    ref_stop = end_threshold > 0.0f && yue2_end_prob_row(ref, eos_id - base) >= (double) end_threshold;
+        const int64_t want     = ref_stop ? -1 : yue2_sample_draw(ref, ref_rng);
+        if (want != tok) {
+            differed++;
+            fprintf(stderr, "[YuE2-SamplerCheck] MISMATCH at step %lld: fast %lld, reference %lld\n", (long long) step,
+                    (long long) tok, (long long) want);
+        }
+        if (++checked % 2000 == 0) {
+            fprintf(stderr, "[YuE2-SamplerCheck] %lld draws checked, %lld differed\n", checked.load(), differed.load());
+        }
+    }
+    return tok;
 }
