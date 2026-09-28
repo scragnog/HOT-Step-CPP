@@ -91,6 +91,13 @@ feature is simply dead for everyone who downloads it. It has shipped twice
   reference real files, and that every runtime data file gets packaged. Exit 1 =
   do not ship. Details: [.claude/skills/validating-changes/SKILL.md](.claude/skills/validating-changes/SKILL.md) (Tier 6).
 
+## No names in anything public
+
+Never write the maintainer's name, or any artist, album or dataset slug used in testing
+(a slug built from an artist or album name counts), into UI text, docs, skills, code
+comments, commit messages or release notes. Descriptive text says "an ear test on a full
+album", not whose ear or which album. The alias key lives in `docs/plans/` (local only).
+
 ## Upstream sync (fork hooks that break silently)
 
 The C++ engine is a patched fork of acestep.cpp. Three upstream files carry HOT-Step `#include` hooks that break if overwritten during a sync:

@@ -1112,7 +1112,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {preparing && <button type="button" onClick={() => void stopPrepare()} className="ml-3 text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
         {prepareJob?.error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{prepareJob.error}</div>}
       </details>
-      <p className="text-[11px] text-zinc-500 mt-4">{t('trainingStudio.yue2.method.recipeHint', 'The recipe follows the YuE2 technical report: planner loss weighted 0.25 against the decoder, AdamW with betas 0.9 / 0.95 and weight decay 0.1, whole-song decoder training, several songs averaged into each update, style and lyric prompt dropout, no KL anchor and no early stop. The run ends at the update count and saves a checkpoint every 10; pick the rung by ear. Rob\'s Green Day test (2026-09-27): likeness 4.3 at 50 updates of 4 songs, 5.0 at 100, and no structure, ending or degradation problems at any rung. The cache is cut without loudness normalisation for this recipe.')}</p>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.preset', 'Preset')}</span>
         {PRESETS.map(p => <button key={p.key} type="button" disabled={active || starting || preparing || yue2RunAllActive}

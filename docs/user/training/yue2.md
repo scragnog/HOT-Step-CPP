@@ -50,7 +50,7 @@ How many tracks: the app warns below 10 files.
 
 Since 2026-09-27 Joint Training uses one recipe, taken from how the YuE2 technical report says the base model itself was trained, as far as an adapter can follow it: the planner's loss weighted at a quarter of the decoder's, AdamW with betas 0.9 / 0.95 and weight decay 0.1, the decoder trained on whole songs, several songs averaged into each update, the style text or lyrics dropped from the prompt on some steps, and the audio cache cut without loudness normalisation. It has no KL anchor and no early stop: the run goes to the update count, saves a checkpoint every 10 updates, and you pick the rung by ear.
 
-It replaced the earlier recipe (Prodigy, a KL anchor and KL stop, lyric timing, a 60 s decoder window, then a refinement pass) after a blind ear test on Green Day's Dookie: every rung of the new recipe scored 5 on diction, audio and coherence, with no looping, bad endings or late-song decay at any point, and likeness reached 5 by 100 updates. Rob's verdict was that it is better in every way. The old recipe still exists in the server and engine so that its runs can be resumed, but the card no longer offers it, nor the "Refine a finished adapter" box.
+It replaced the earlier recipe (Prodigy, a KL anchor and KL stop, lyric timing, a 60 s decoder window, then a refinement pass) after a blind ear test on a full album: every rung of the new recipe scored 5 on diction, audio and coherence, with no looping, bad endings or late-song decay at any point, and likeness reached 5 by 100 updates. It was judged better in every way. The old recipe still exists in the server and engine so that its runs can be resumed, but the card no longer offers it, nor the "Refine a finished adapter" box.
 
 Two of the recipe's numbers are agreed guesses rather than report values: the learning rate (1e-4; the report only gives full-model rates) and the three prompt-dropout rates (0.1 each; the report says the drops happen but not how often). The rest are the report's.
 
@@ -64,11 +64,11 @@ Things to know:
 
 Pick a preset. All three are the same recipe; they differ in how many updates run and how many songs each update averages. Times are from a 15-track album on an RTX 5090 with the engine stopped.
 
-| Preset | Updates | Songs per update | Songs seen | Time | Green Day ear test |
+| Preset | Updates | Songs per update | Songs seen | Time | Ear test |
 |---|---|---|---|---|---|
 | Fast | 50 | 4 | 200 | ~25 min | likeness 4.3, quality 5 |
 | Balanced (default) | 100 | 4 | 400 | ~50 min | likeness 5, quality 5 |
-| Thorough | 200 | 8 | 1600 | ~3.5 h | likeness 5, quality 5; the extra time bought nothing audible on Dookie, but it is the run closest to the report's batch size |
+| Thorough | 200 | 8 | 1600 | ~3.5 h | likeness 5, quality 5; the extra time bought nothing audible on the test album, but it is the run closest to the report's batch size |
 
 Every preset saves a checkpoint every 10 updates, so the ladder to listen through is 5, 10 or 20 rungs long; see Picking the adapter below.
 
@@ -108,7 +108,7 @@ Score each rung 1-5 on likeness and corruption and leave notes. The floating sco
 
 Batches score the same way: a finished run's ladder appears on the **Review** page as soon as it has previews, with how many rungs are still unscored. Click a row to open its ladder on the Train page. Once a ladder has a scored rung, **Finish scored** links the best-scored rung and cleans up, for every ladder you tick, in one server-side batch.
 
-The Green Day Dookie test that set the recipe scored 5 on every quality criterion at every rung, so the pick there was the last rung; on other albums, listen for the point where likeness stops improving.
+The ear test that set the recipe scored 5 on every quality criterion at every rung, so the pick there was the last rung; on other albums, listen for the point where likeness stops improving.
 
 ## The Refine phase (earlier recipe)
 
