@@ -48,7 +48,7 @@ How many tracks: the app warns below 10 files.
 
 ## Training method
 
-Since 2026-09-27 Joint Training uses one recipe, taken from how the YuE2 technical report says the base model itself was trained, as far as an adapter can follow it: the planner's loss weighted at a quarter of the decoder's, AdamW with betas 0.9 / 0.95 and weight decay 0.1, the decoder trained on whole songs, several songs averaged into each update, the style text or lyrics dropped from the prompt on some steps, and the audio cache cut without loudness normalisation. It has no KL anchor and no early stop: the run goes to the update count, saves a checkpoint every 10 updates, and you pick the rung by ear.
+Since 2026-09-27 Joint Training uses one recipe, taken from how the YuE2 technical report says the base model itself was trained, as far as an adapter can follow it: the planner's loss weighted at a quarter of the decoder's, AdamW with betas 0.9 / 0.95 and weight decay 0.1, the decoder trained on whole songs (the Balanced preset crops it to 60 s), several songs averaged into each update, the style text or lyrics dropped from the prompt on some steps, and the audio cache cut without loudness normalisation. It has no KL anchor and no early stop: the run goes to the update count, saves a checkpoint every 10 updates, and you pick the rung by ear.
 
 It replaced the earlier recipe (Prodigy, a KL anchor and KL stop, lyric timing, a 60 s decoder window, then a refinement pass) after a blind ear test on a full album: every rung of the new recipe scored 5 on diction, audio and coherence, with no looping, bad endings or late-song decay at any point, and likeness reached 5 by 100 updates. It was judged better in every way. The old recipe still exists in the server and engine so that its runs can be resumed, but the card no longer offers it, nor the "Refine a finished adapter" box.
 
@@ -57,18 +57,18 @@ Two of the recipe's numbers are agreed guesses rather than report values: the le
 Things to know:
 
 - The first run on a dataset re-cuts its audio cache with loudness normalisation off (the cache key changes, so the codes and lead-sheet stages run again) and re-prepares it once with the prompt variants the recipe trains on. Both are done for you by "Start training" through the stage chain and by "Train multiple".
-- Songs per update multiplies the time per update: 4 songs is about 28 s an update on an RTX 5090, 8 songs about 60 s. Whole-song decoder training takes about 12 GB of VRAM. If a song and its prompt do not fit the model's context, the decoder trains on the longest window that does.
+- Songs per update multiplies the time per update: 4 whole songs is about 28 s an update on an RTX 5090, 8 songs about 60 s, and 4 songs with Balanced's 60 s decoder crop about 17 s. Whole-song decoder training takes about 12 GB of VRAM. If a song and its prompt do not fit the model's context, the decoder trains on the longest window that does.
 - Lyric timing supervision is not used by this recipe; the toggle only decides whether the stem and alignment stages run, and it is off by default.
 
 ## Recommended settings
 
-Pick a preset. All three are the same recipe; they differ in how many updates run and how many songs each update averages. Times are from a 15-track album on an RTX 5090 with the engine stopped.
+Pick a preset. All three are the same recipe; they differ in how many updates run, how many songs each update averages, and whether the decoder trains on whole songs or 60 s crops. Times are from a 15-track album on an RTX 5090.
 
-| Preset | Updates | Songs per update | Songs seen | Time (card shows it relative to Balanced) | Ear test |
+| Preset | Updates | Songs per update | Decoder | Time (card shows it relative to Balanced) | Ear test |
 |---|---|---|---|---|---|
-| Fast | 50 | 4 | 200 | ~25 min | likeness 4.3, quality 5 |
-| Balanced (default) | 100 | 4 | 400 | ~50 min | likeness 5, quality 5 |
-| Thorough | 200 | 8 | 1600 | ~3.5 h | likeness 5, quality 5; the extra time bought nothing audible on the test album, but it is the run closest to the report's batch size |
+| Fast | 50 | 4 | whole songs | ~25 min | likeness 4.3, quality 5 |
+| Balanced (default) | 100 | 4 | 60 s crops | ~30 min | blind test, 3 takes: likeness 4.1, quality 4.3; ship the last checkpoint, update 70 averaged lower |
+| Thorough | 200 | 8 | whole songs | ~3.5 h | likeness 5, quality 5; the extra time bought nothing audible on the test album, but it is the run closest to the report's batch size |
 
 Every preset saves a checkpoint every 10 updates, so the ladder to listen through is 5, 10 or 20 rungs long; see Picking the adapter below.
 
@@ -83,7 +83,7 @@ Defaults the card ships:
 | Planner loss weight | 0.25 | The report's value. |
 | Prompt dropout | 0.1 text, 0.1 lyrics, 0.1 both | Agreed guesses; the report gives no rates. |
 | ABC dropout | 0.5 | Matches the report's balanced mix of tasks with and without a score. |
-| Decoder crop | 0 (whole song) | The report packs whole songs. |
+| Decoder crop | 1500 (60 s) on Balanced, 0 (whole song) on Fast and Thorough | The report packs whole songs. In a blind test the crop scored level with whole-song runs and trains about 40% faster. |
 | Save every | 10 updates | |
 | Lyric timing supervision | Off | Not used by the recipe. |
 | Checkpoint previews | On, in parallel, one 300 s draft take per checkpoint | The run's ladder; see Picking the adapter. |
