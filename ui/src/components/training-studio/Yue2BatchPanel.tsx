@@ -46,8 +46,10 @@ export const Yue2BatchPanel: React.FC = () => {
   const setPhase = useTrainingStore(s => s.setPhase);
   const selectedDatasetId = useTrainingStore(s => s.selectedDatasetId);
 
-  const batch = batches.find(isActive) ?? batches[0];
-  const active = !!batch && isActive(batch);
+  // Only a running or paused batch has anything to act on; a finished one
+  // (done, failed, cancelled) is history and its datasets say how it went.
+  const batch = batches.find(isActive);
+  const active = !!batch;
   const runningJobId = batch?.items.find(i => i.status === 'running')?.stages.find(s => s.status === 'running')?.jobId || '';
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
 
@@ -74,7 +76,7 @@ export const Yue2BatchPanel: React.FC = () => {
     if (current !== selectedDatasetId) goToCurrent();
   }, [follow, current]);
 
-  if (!batch || (!active && Date.now() - (batch.finishedAt ?? 0) > 6 * 3600_000)) return null;
+  if (!batch) return null;
 
   const done = batch.items.filter(i => i.status === 'done').length;
   const failed = batch.items.filter(i => i.status === 'failed').length;
@@ -105,7 +107,7 @@ export const Yue2BatchPanel: React.FC = () => {
           />
           {batch.status === 'running' && <button type="button" onClick={() => void pause(batch.id)} className="flex items-center gap-1 text-zinc-600 dark:text-zinc-300 hover:underline"><Pause size={12} />{batch.pauseRequested ? t('trainingStudio.yue2.batch.pausing', 'Pausing after this stage…') : t('common.pause', 'Pause')}</button>}
           {batch.status !== 'running' && <button type="button" onClick={() => void resume(batch.id)} className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:underline"><Play size={12} />{t('common.resume', 'Resume')}</button>}
-          {active && <button type="button" onClick={() => void cancel(batch.id)} className="flex items-center gap-1 text-red-600 dark:text-red-400 hover:underline"><StopCircle size={12} />{t('common.cancel', 'Cancel')}</button>}
+          <button type="button" onClick={() => void cancel(batch.id)} className="flex items-center gap-1 text-red-600 dark:text-red-400 hover:underline"><StopCircle size={12} />{t('common.cancel', 'Cancel')}</button>
         </div>
       </div>
       {Object.keys(recipe).length > 0 && <p className="text-[11px] text-zinc-500">
