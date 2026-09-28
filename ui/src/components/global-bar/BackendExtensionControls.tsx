@@ -153,15 +153,18 @@ export const BackendExtensionControls: React.FC<{
         );
   };
 
-  // Sections (`section` on the schema): knobs without one render flat, as
-  // before; the rest fold under one collapsible header per section, collapsed
-  // by default so a backend with many planner knobs shows a couple of
-  // headers rather than the whole list. The header counts how many of its
-  // knobs sit off their default, so a folded section still says whether it
-  // is doing anything.
-  const flat = params.filter((p) => !p.section);
-  const sections: string[] = [];
-  for (const p of params) if (p.section && !sections.includes(p.section)) sections.push(p.section);
+  // Sections (`section` on the schema): knobs without one render flat; the
+  // rest fold under one collapsible header per section, collapsed by default
+  // so a backend with many knobs shows a couple of headers rather than the
+  // whole list. A section renders where its first knob is declared, so a
+  // solver's params fold up right under the solver picker. The header counts
+  // how many of its knobs sit off their default, so a folded section still
+  // says whether it is doing anything.
+  const items: (BackendExtensionParam | string)[] = [];
+  for (const p of params) {
+    if (!p.section) items.push(p);
+    else if (!items.includes(p.section)) items.push(p.section);
+  }
   // Open/closed state survives reloads (per backend + cluster + section).
   const backendId = capabilities?.backend ?? 'backend';
   const storageKey = `hs-ext-sections:${backendId}:${group}`;
@@ -180,8 +183,8 @@ export const BackendExtensionControls: React.FC<{
 
   return (
     <>
-      {flat.map(renderParam)}
-      {sections.map((name) => {
+      {items.map((name) => {
+        if (typeof name !== 'string') return renderParam(name);
         const isOpen = !!open[name];
         const changed = changedIn(name);
         return (

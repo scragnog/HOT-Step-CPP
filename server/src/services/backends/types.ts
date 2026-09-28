@@ -149,8 +149,7 @@ export interface BackendExtensionParam extends PluginParamSchema {
   group?: BackendExtensionGroup;
   /** Optional accordion inside the cluster. Knobs sharing a section render
    *  together under one collapsible header (collapsed by default), in the
-   *  order the section first appears; knobs without one render flat above
-   *  the sections. Keeps a backend with many knobs from showing them all at
+   *  place the section first appears among the flat knobs. Keeps a backend with many knobs from showing them all at
    *  once. */
   section?: string;
   /** Hover text for the section header; the first knob in a section that

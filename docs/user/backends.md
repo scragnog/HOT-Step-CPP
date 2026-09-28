@@ -204,7 +204,8 @@ What sets it apart:
   normaliser) finish at once and side by side; only StableStep, Whisper, the aligner and
   cover art wait for the GPU.
 - It has its own NAR solver and scheduler choices (Midpoint or Wasserstein Flow, Uniform
-  or HT V3). The shared Lua plugins do not run on it.
+  or HT V3). Their tuning knobs sit in a collapsed "Controls" section under the picker.
+  The shared Lua plugins do not run on it.
 - Adapters load into two slots in the Adapters cluster, one for the AR half and one for
   the NAR half, each with its own strengths. An adapter is merged into the loaded model,
   so choosing one or changing a dial means pressing Apply, and the next generation
