@@ -741,7 +741,7 @@ async function capabilities(): Promise<BackendCapabilities> {
         ],
       },
       {
-        key: 'yue2AutoReplan',
+        key: 'yue2AutoReplan', section: 'Re-planning',
         type: 'toggle',
         label: 'Re-plan runaway scores',
         hint: 'Plan the lead sheet first (seconds), and if it is a runaway — normal sections, then an '
@@ -751,7 +751,7 @@ async function capabilities(): Promise<BackendCapabilities> {
         default: true,
       },
       {
-        key: 'yue2ReplanFlags',
+        key: 'yue2ReplanFlags', section: 'Re-planning',
         type: 'toggle',
         label: 'Re-plan flagged scores',
         hint: 'Also redraw a plan that is not a runaway but is still illegible: one chord for the '
@@ -762,7 +762,7 @@ async function capabilities(): Promise<BackendCapabilities> {
         default: true,
       },
       {
-        key: 'yue2ReplanAttempts',
+        key: 'yue2ReplanAttempts', section: 'Re-planning',
         type: 'slider',
         label: 'Re-plan tries',
         hint: 'How many plans to draw (seconds each) before rendering the last one regardless. '
@@ -774,7 +774,7 @@ async function capabilities(): Promise<BackendCapabilities> {
         step: 1,
       },
       {
-        key: 'yue2ComposeRetries',
+        key: 'yue2ComposeRetries', section: 'Re-planning',
         type: 'slider',
         label: 'Recompose runaway songs',
         hint: 'A healthy lead sheet can still be composed into a runaway: the composer (semantic '

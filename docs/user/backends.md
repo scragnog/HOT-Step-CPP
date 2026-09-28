@@ -174,6 +174,8 @@ What sets it apart:
   attempt wins, even when later ones in the same pass are clean as well. A song whose plan
   is settled shows "Plan ready, waiting for N other songs"; one that has finished composing
   while the rest of its batch is still going shows "Composed, waiting for N other songs".
+- The re-plan and recompose knobs live in the collapsed **Re-planning** section of the
+  Generation panel.
 - Recompose runaway songs (2 by default) handles a good lead sheet composed into a
   runaway. A song counts as one once its composition passes 1.5 times the lead sheet's own
   length plus 20 seconds, or six minutes. The engine composes it again with new seeds, up to
