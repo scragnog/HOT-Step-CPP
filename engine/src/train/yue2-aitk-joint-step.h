@@ -84,13 +84,19 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     // backward are skipped outright. The NAR's conditioning below still runs
     // through the (held) planner adapters, exactly as at generation.
     const bool planner_frozen=state.planner_frozen();
+    // Whole-song decoder: the NAR's conditioning sequence is the AR loss
+    // sequence token for token, and no update happens between the two passes,
+    // so the AR forward captures the prefix itself and the refresh is skipped
+    // (~9% of a base-matched update). A crop or a frozen planner keeps it.
+    const bool reuse_prefix=!planner_frozen && batch.nar.ar.input_ids==batch.ar.input_ids;
+    Yue2AitkPrefixHost prefix;
     if(!planner_frozen) {
     notify("AR adapted forward");
     Yue2AitkEndpointHost embeds;
     if(!Yue2AitkEndpoints::token_embedding(backend,model,batch.ar.input_ids.data(),batch.ar.input_ids.size(),&embeds,error)) return false;
     Yue2AitkStackTape ar;
     if(!yue2_aitk_stack::forward(backend,model,&state.ar_adapters(),false,embeds.values,
-        batch.ar.input_ids.size(),nullptr,true,&ar,nullptr,error)) return false;
+        batch.ar.input_ids.size(),nullptr,true,&ar,reuse_prefix?&prefix:nullptr,error)) return false;
     // Final norm's small graph currently shares a forward/backward entry point.
     std::vector<float> zeros(ar.final_hidden.size(),0.0f);
     Yue2AitkEndpointHost adapted_norm;
@@ -154,12 +160,14 @@ inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,
     }
     // Recompute with the current adapted AR. This cache is detached host data.
     // It is local to this step and cannot survive the optimizer update below.
+    if(!reuse_prefix) {
     notify("Refresh detached AR conditioning");
     Yue2AitkEndpointHost condition;
     if(!Yue2AitkEndpoints::token_embedding(backend,model,batch.nar.ar.input_ids.data(),batch.nar.ar.input_ids.size(),&condition,error)) return false;
-    Yue2AitkStackTape condition_tape; Yue2AitkPrefixHost prefix;
+    Yue2AitkStackTape condition_tape;
     if(!yue2_aitk_stack::forward(backend,model,&state.ar_adapters(),false,condition.values,
         batch.nar.ar.input_ids.size(),nullptr,false,&condition_tape,&prefix,error)) return false;
+    }
     notify("NAR forward");
     Yue2AitkEndpointHost frontend;
     if(!Yue2AitkEndpoints::nar_frontend(backend,model,input.noisy_latents.data(),frames,input.timestep,&frontend,error)) return false;

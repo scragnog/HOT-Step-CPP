@@ -6,7 +6,11 @@
 
 The native CUDA joint trainer follows the YuE2 recipe. Each step trains
 both AR and NAR adapters, refreshes detached AR conditioning, clips the combined
-gradients and makes one AdamW8bit update. Existing separate YuE2 trainers remain
+gradients and makes one AdamW8bit update. With a whole-song decoder (`--nar-crop-frames 0`)
+the NAR conditions on the same token sequence the AR loss runs on, so the AR forward
+captures the conditioning prefix itself and the refresh pass is skipped: bit-identical
+adapters, about 10-15% less time per update. A cropped decoder or a frozen planner
+still runs the refresh. Existing separate YuE2 trainers remain
 available as Legacy.
 
 ```text
