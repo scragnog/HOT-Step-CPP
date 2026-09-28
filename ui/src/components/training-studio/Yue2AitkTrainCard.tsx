@@ -1032,6 +1032,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               ]}
             />
           </label>
+          {!resumeChoice && <input
+            className="mt-2 w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-500 outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 disabled:opacity-50"
+            value={form.resume ?? ''}
+            disabled={active || starting || preparing || yue2RunAllActive}
+            onChange={event => set('resume', event.target.value)}
+            placeholder={t('trainingStudio.yue2.method.resumeManual', 'Or paste a resume record path (optional)')}
+            title={t('trainingStudio.yue2.method.resumeInfo', 'The saved resume record of a previous run, to continue it without picking it from the Resume list above. Leave blank to start a new run.')}
+          />}
           {resumeChoice && <p className="mt-1 text-[11px] text-zinc-500">The server restores the original dataset, base, optimizer and adapter settings. Set Steps to the total step you want to reach.</p>}
         </div>
         <div className="flex flex-col gap-1">
@@ -1125,8 +1133,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {!activePreset(form) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-        {!resumeChoice && <details className="md:col-span-2"><summary className="cursor-pointer text-[11px] text-zinc-500">Manual resume path</summary>{field(t('trainingStudio.yue2.method.resume', 'Resume record (optional)'), 'resume', 'text', form, undefined,
-          t('trainingStudio.yue2.method.resumeInfo', 'The saved resume record of a previous run, to continue it without picking it from the Resume list above. Leave blank to start a new run.'))}</details>}
         {field(t('trainingStudio.yue2.method.steps', 'Updates'), 'steps', 'number', form, undefined,
           t('trainingStudio.yue2.method.stepsInfo', 'How many optimizer updates to train. Each update averages "songs per update" songs, so Fast (50 × 4) sees 200 songs and Thorough (200 × 8) sees 1600. The run ends here and every tenth update is a checkpoint; pick one by ear.'),
           t('trainingStudio.yue2.method.stepsMeta', 'Balanced 100'))}
