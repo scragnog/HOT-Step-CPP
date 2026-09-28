@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyYue2Score } from './scoreHealth.js';
+import { classifyYue2Score, yue2PlanDraws } from './scoreHealth.js';
 
 const HEADER = 'X:1\nT:\nM:4/4\nL:1/16\nQ:1/4=120\nV: Vocal clef=treble name="Vocal Melody" snm="Vocal"\nV: Ins clef=treble name="Ins Melody" snm="Inst."\nK:C\n';
 
@@ -86,4 +86,13 @@ test('a two-bar riff played for the whole sheet is a loop, one chord and one pit
 test('a plan with fewer sections than the lyric is flagged', () => {
   const h = classifyYue2Score(sheet(tune(48), tune(48), ['verse', 'chorus']), undefined, '[Verse 1]\nla\n[Chorus]\nla\n[Verse 2]\nla\n[Bridge]\nla\n[Chorus]\nla');
   assert.match(h.legibility.flags[0], /2 section\(s\) planned for 5 lyric section tags/);
+});
+
+test('plan draws: one per song first, then every slot within each budget', () => {
+  assert.deepEqual(yue2PlanDraws([{ used: 0, max: 10 }], 8, true), [0]);
+  assert.deepEqual(yue2PlanDraws([{ used: 1, max: 10 }], 8, false), [0, 0, 0, 0, 0, 0, 0, 0]);
+  assert.deepEqual(yue2PlanDraws([{ used: 9, max: 10 }], 8, false), [0]);
+  assert.deepEqual(yue2PlanDraws([{ used: 0, max: 3 }, { used: 0, max: 3 }], 8, true), [0, 1]);
+  assert.deepEqual(yue2PlanDraws([{ used: 1, max: 3 }, { used: 1, max: 10 }], 8, false), [0, 1, 0, 1, 1, 1, 1, 1]);
+  assert.deepEqual(yue2PlanDraws([{ used: 0, max: 3 }, { used: 0, max: 3 }, { used: 0, max: 3 }], 2, true), [0, 1]);
 });

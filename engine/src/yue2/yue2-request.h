@@ -39,6 +39,10 @@ enum Yue2NoiseSource { YUE2_NOISE_NATIVE = 0, YUE2_NOISE_FIXTURE = 1 };
 // block. Same caps upstream ships (--max-batch 4, variations 9).
 static constexpr int YUE2_MAX_LM_BATCH    = 4;
 static constexpr int YUE2_MAX_SYNTH_BATCH = 9;
+// A plan_only request holds no semantic cache and no NAR, only the plan's own
+// (~0.6 GB of KV per song at the 4096-token cap), so the auto-replan loop can
+// draw twice as many scores in one pass.
+static constexpr int YUE2_MAX_PLAN_BATCH = 8;
 
 // Per-stage sampler overrides (the LM tab). -1 = keep the checkpoint's own
 // GGUF-declared value (yue2.sampling.<stage>.*), which the pipeline reads
@@ -420,8 +424,9 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
             return false;
         }
         size_t n = yyjson_arr_size(arr);  // not const: yyjson_arr_foreach writes its bound here
-        if (n < 1 || n > (size_t) YUE2_MAX_LM_BATCH) {
-            if (err) *err = "\"songs\" must hold 1.." + std::to_string(YUE2_MAX_LM_BATCH) + " entries";
+        const int max_songs = out->plan_only ? YUE2_MAX_PLAN_BATCH : YUE2_MAX_LM_BATCH;
+        if (n < 1 || n > (size_t) max_songs) {
+            if (err) *err = "\"songs\" must hold 1.." + std::to_string(max_songs) + " entries";
             yyjson_doc_free(doc);
             return false;
         }

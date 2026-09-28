@@ -256,3 +256,24 @@ export function yue2PickPlan<T extends { verdict: string; flags?: string[] }>(at
   const index = best >= 0 ? best : attempts.length - 1;
   return { pick: attempts[index], index, clean: false };
 }
+
+/** Which songs draw a plan in one auto-replan pass, as indexes into `budgets`
+ *  in draw order: round-robin over the slots, never past a song's own attempt
+ *  budget. The first pass draws one per song (a pass lasts as long as its
+ *  longest plan, and one clean plan is all a healthy adapter needs); later
+ *  passes fill every slot. */
+export function yue2PlanDraws(budgets: Array<{ used: number; max: number }>, slots: number, firstRound: boolean): number[] {
+  const used = budgets.map(b => b.used);
+  const draws: number[] = [];
+  for (let added = true; added && draws.length < slots;) {
+    added = false;
+    for (let i = 0; i < budgets.length && draws.length < slots; i++) {
+      if (used[i] >= budgets[i].max) continue;
+      draws.push(i);
+      used[i]++;
+      added = true;
+    }
+    if (firstRound) break;
+  }
+  return draws;
+}

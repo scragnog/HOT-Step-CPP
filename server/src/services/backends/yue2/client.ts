@@ -121,6 +121,8 @@ export interface Yue2Props {
   /** Batch ceilings the engine's request parser enforces; absent on older engines (single track). */
   max_lm_batch?: number;
   max_synth_batch?: number;
+  /** Songs per plan_only request ("songs" entries); absent on engines older than 2026-09-28. */
+  max_plan_batch?: number;
   nar_resident?: boolean;
   /** The checkpoint's sampler defaults per stage (GGUF yue2.sampling.*). */
   sampling?: { plan?: Yue2StageDefaults; semantic?: Yue2StageDefaults };
