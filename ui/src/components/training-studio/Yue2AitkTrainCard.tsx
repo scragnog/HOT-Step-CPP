@@ -11,8 +11,6 @@ import { ParamLabel } from '../shared/ParamLabel';
 import {
   cancelJob,
   captionMissingYue2,
-  clearPreparedData,
-  getPreparedData,
   getJob,
   getYue2AitkPrepare,
   listYue2AitkRuns,
@@ -32,7 +30,6 @@ import {
   type Yue2JointBaseInfo,
   type Yue2JointPreviewOptions,
   type Yue2JointPreviewRecord,
-  type PreparedCache,
 } from '../../services/trainingApi';
 import { useBackendStore } from '../../stores/backendStore';
 import { yue2AdapterHalfBytes, formatMB } from '../../utils/yue2AdapterSize';
@@ -40,8 +37,8 @@ import { useTrainingStore } from '../../stores/trainingStore';
 import { descentRate, formatDurationMs } from '../../utils/trainingEta';
 
 const JOB_KEY = 'hs-yue2-aitk-job:';
-const FORM_KEY = 'hs-yue2-aitk-form:';
-const PREP_KEY = 'hs-yue2-aitk-prepare:';
+export const FORM_KEY = 'hs-yue2-aitk-form:';
+export const PREP_KEY = 'hs-yue2-aitk-prepare:';
 const METRIC_CAP = 2000;
 // `loss` is absent once the planner is frozen: the trainer then reports only
 // the decoder's terms and the composite has no AR part. Those steps still
@@ -521,9 +518,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [aitkRuns, setAitkRuns] = useState<Yue2AitkRunRecord[]>([]);
   const [ladderNonce, setLadderNonce] = useState(0);
   const [resumeChoice, setResumeChoice] = useState('');
-  const [clearing, setClearing] = useState(false);
-  const [cacheInfo, setCacheInfo] = useState<{ slug: string; caches: PreparedCache[]; busy: boolean } | null>(null);
-  const [clearNote, setClearNote] = useState('');
   const [selectedCheckpoint, setSelectedCheckpoint] = useState('');
   const [applyingCheckpoint, setApplyingCheckpoint] = useState(false);
   const [applyNote, setApplyNote] = useState('');
@@ -564,13 +558,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       setPrepare(previous => ({ ...previous, legacyManifest }));
     }
   }, [legacyManifest, prepare.legacyManifest]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void getPreparedData(datasetId).then(value => { if (!cancelled) setCacheInfo(value); })
-      .catch(() => { if (!cancelled) setCacheInfo(null); });
-    return () => { cancelled = true; };
-  }, [datasetId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -995,24 +982,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       lyricTiming: saved.alignment?.enabled ?? previous.lyricTiming,
       cursorWeight: saved.alignment?.cursorWeight ?? previous.cursorWeight }));
     if (saved.alignment) onLyricTimingChange(saved.alignment.enabled === true);
-  };
-  const clearCaches = async () => {
-    if (!cacheInfo || clearing) return;
-    const summary = cacheInfo.caches.map(item => `${item.name}: ${item.files} files, ${(item.bytes / 1048576).toFixed(1)} MiB`).join('\n');
-    if (!window.confirm(`Clear all prepared data for ${cacheInfo.slug}?\n\n${summary || 'No generated caches found.'}\n\nSource tracks, sidecars, labels and adapters will remain.`)) return;
-    setClearing(true); setClearNote('');
-    try {
-      await clearPreparedData(datasetId, cacheInfo.slug);
-      setResumeChoice('');
-      setForm(previous => ({ ...previous, resume: '', dataset: '' }));
-      window.localStorage.setItem(`${FORM_KEY}${datasetId}`, JSON.stringify({ ...form, resume: '', dataset: '' }));
-      window.localStorage.removeItem(`${PREP_KEY}${datasetId}:manifest`);
-      window.localStorage.removeItem(`${PREP_KEY}${datasetId}:applied`);
-      window.location.reload();
-    } catch (err) {
-      setClearNote(err instanceof Error ? err.message : String(err));
-      void getPreparedData(datasetId).then(setCacheInfo).catch(() => {});
-    } finally { setClearing(false); }
   };
   const linkCheckpointPreset = async () => {
     if (!selectedCheckpoint) return;
@@ -1465,19 +1434,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           </label>
         </div>}
       </details>
-      <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.hardware', 'Joint training requires a CUDA build and an NVIDIA GPU with BF16 support (Ampere or newer).')}</p>
       <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.autoOutput', 'Adapters are saved in your global adapters folder under yue2-joint-adapters/triggerword_date_time.')}</p>
-      <div className="mt-4 rounded-lg border border-red-500/20 p-3">
-        <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Prepared data</p>
-        <p className="mt-1 text-[11px] text-zinc-500">Clear generated latents, codes, lead sheets, alignment, stems, MM3 caches and ACE tensors for this dataset. Source files, labels and adapters are kept. Older runs may then be unavailable to resume.</p>
-        <button type="button" onClick={() => void clearCaches()}
-          disabled={!cacheInfo?.caches.length || cacheInfo.busy || active || preparing || starting || clearing || yue2RunAllActive}
-          className="mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-500/50 text-red-600 dark:text-red-400 hover:bg-red-500/10 disabled:opacity-40">
-          {clearing ? 'Clearing…' : 'Clear all prepared data'}
-        </button>
-        {cacheInfo && <span className="ml-2 text-[11px] text-zinc-500">{cacheInfo.caches.length} cache folders · {(cacheInfo.caches.reduce((sum, item) => sum + item.bytes, 0) / 1048576).toFixed(1)} MiB</span>}
-        {clearNote && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{clearNote}</p>}
-      </div>
       {error && <div className="mt-3 flex items-start gap-2 text-xs text-red-600 dark:text-red-400"><AlertTriangle size={14} className="mt-0.5 shrink-0" />{error}</div>}
       {job?.error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{job.error}</div>}
       {batchDraft && batchDraft.length > 0 && <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">

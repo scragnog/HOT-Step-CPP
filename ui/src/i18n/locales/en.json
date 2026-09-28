@@ -21,7 +21,6 @@
     "trainingStudio.yue2.method.defaultsMissing": "Some required files are missing. Complete the cache stages and install the YuE2 Joint Training Pack in Model Manager, or enter your existing paths below.",
     "trainingStudio.yue2.method.refreshPaths": "Check installed assets again",
     "trainingStudio.yue2.method.selectYue2": "Select the YuE2 backend to use these adapters for generation.",
-    "trainingStudio.yue2.method.hardware": "Joint training requires a CUDA build and an NVIDIA GPU with BF16 support (Ampere or newer).",
     "trainingStudio.yue2.method.legacyManifest": "Existing YuE2 manifest",
     "trainingStudio.yue2.method.tokenizer": "Tokenizer path",
     "trainingStudio.yue2.method.prepareOutput": "New prepared output directory",

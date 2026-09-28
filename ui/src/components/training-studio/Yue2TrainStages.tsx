@@ -41,6 +41,7 @@ import {
 import { Yue2PreprocessCard } from './Yue2TrainCard';
 import { Yue2AitkTrainCard } from './Yue2AitkTrainCard';
 import { Yue2AitkBatchWizard } from './Yue2AitkBatchWizard';
+import { Yue2ClearPreparedCard } from './Yue2ClearPreparedCard';
 import { useYue2ArStatus } from './useYue2ArStatus';
 import { useYue2Status } from './useYue2Status';
 
@@ -252,7 +253,10 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
             </button>
           </div>
         </div>
-        {jointRunAllControl}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {jointRunAllControl}
+          <Yue2ClearPreparedCard datasetId={datasetId} disabled={timingLocked || jobBusy || yue2RunAllActive} />
+        </div>
         {yue2Status && <Yue2PreprocessCard status={yue2Status} done={!!arStatus?.stages.preprocess.done} onDone={reload} />}
         {arStatus && <Yue2TokenizeCard status={arStatus} onDone={reload} />}
         {arStatus && <Yue2SheetCard datasetId={datasetId} status={arStatus} onDone={reload} />}
