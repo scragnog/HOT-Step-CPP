@@ -392,6 +392,16 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     stored.stopEngine = false;
     window.localStorage.setItem(ladderPreviews, '1');
   }
+  // 2026-09-28: the chain above runs on every new dataset's empty form too, and
+  // Recipe A (lr undefined -> 1e-4) plus NAR budget (1e-4 -> 2e-4) left a
+  // tuned-era 2e-4 behind that the base-matched step never cleared, so new
+  // runs trained at twice the recipe's rate. A stored 1e-4 or 2e-4 is that
+  // leftover; clearing it lets the server's base-matched default (1e-4) apply.
+  const lrLeftover = `${FORM_KEY}${datasetId}:defaults-lr-base-matched-2026-09-28`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(lrLeftover)) {
+    if (stored.lr === 2e-4 || stored.lr === 1e-4) delete stored.lr;
+    window.localStorage.setItem(lrLeftover, '1');
+  }
   return { ...DEFAULT_FORM, ...stored, method: 'base-matched' };
 }
 function writeStored(key: string, value: unknown): void {
