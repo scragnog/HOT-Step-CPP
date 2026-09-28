@@ -35,6 +35,7 @@ import {
   type PreparedCache,
 } from '../../services/trainingApi';
 import { useBackendStore } from '../../stores/backendStore';
+import { yue2AdapterHalfBytes, formatMB } from '../../utils/yue2AdapterSize';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { descentRate, formatDurationMs } from '../../utils/trainingEta';
 
@@ -987,7 +988,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   };
   const active = job?.status === 'queued' || job?.status === 'running';
   const preparing = prepareJob?.status === 'queued' || prepareJob?.status === 'running';
-  const input = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-xs text-zinc-800 dark:text-zinc-200 outline-none focus:border-amber-500/50';
+  const input = 'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 disabled:opacity-50';
   const field = (label: string, key: string, type = 'text', source: unknown = form, update?: (value: string) => void, info?: string, meta?: string) => (
     <label className="flex flex-col gap-1">
       <ParamLabel label={label} info={info} meta={meta} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider" />
@@ -1145,16 +1146,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           </button>)}
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-        {field(t('trainingStudio.yue2.method.steps', 'Updates'), 'steps', 'number', form, undefined,
-          t('trainingStudio.yue2.method.stepsInfo', 'How many optimizer updates to train. Each update averages "songs per update" songs, so Fast (50 × 4) sees 200 songs and Thorough (200 × 8) sees 1600. The run ends here and every tenth update is a checkpoint; pick one by ear.'),
-          t('trainingStudio.yue2.method.stepsMeta', 'Balanced 100'))}
-        {field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number', form, undefined,
-          t('trainingStudio.yue2.method.saveEveryInfo', 'How many steps between saved checkpoints. Lower gives more rungs to pick from (and more previews, if enabled) at the cost of disk space and time; higher saves less often.'),
-          t('trainingStudio.yue2.method.saveEveryMeta', 'default 25'))}
-        {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number', form, undefined,
-          t('trainingStudio.yue2.method.seedInfo', 'The random seed for training (batch order, dropout, initial noise). Changing it gives a different run on the same data; keeping it fixed makes a rerun reproducible.'),
-          t('trainingStudio.yue2.method.seedMeta', 'default 42'))}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
         <label className="flex flex-col gap-1">
           <ParamLabel
             label={t('trainingStudio.yue2.method.base', 'Base model')}
@@ -1202,12 +1194,23 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             ]}
           />
         </label>
+      </div>
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mt-3">
+        {field(t('trainingStudio.yue2.method.steps', 'Updates'), 'steps', 'number', form, undefined,
+          t('trainingStudio.yue2.method.stepsInfo', 'How many optimizer updates to train. Each update averages "songs per update" songs, so Fast (50 × 4) sees 200 songs and Thorough (200 × 8) sees 1600. The run ends here and every tenth update is a checkpoint; pick one by ear.'),
+          t('trainingStudio.yue2.method.stepsMeta', 'Balanced 100'))}
+        {field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number', form, undefined,
+          t('trainingStudio.yue2.method.saveEveryInfo', 'How many steps between saved checkpoints. Lower gives more rungs to pick from (and more previews, if enabled) at the cost of disk space and time; higher saves less often.'),
+          t('trainingStudio.yue2.method.saveEveryMeta', 'default 25'))}
+        {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number', form, undefined,
+          t('trainingStudio.yue2.method.seedInfo', 'The random seed for training (batch order, dropout, initial noise). Changing it gives a different run on the same data; keeping it fixed makes a rerun reproducible.'),
+          t('trainingStudio.yue2.method.seedMeta', 'default 42'))}
         {(form.adapterType ?? 'lora') === 'lokr' ? <>
           {field(t('trainingStudio.yue2.method.lokrDim', 'LoKr dim'), 'lokrDim', 'number', form, undefined,
             t('trainingStudio.yue2.method.lokrDimInfo', 'The size of the Kronecker-factored delta. Higher gives the adapter more capacity, at a larger file and more VRAM; the tested recipe keeps alpha at 4x this value.'),
             t('trainingStudio.yue2.method.lokrDimMeta', 'default 64'))}
           {field(t('trainingStudio.yue2.method.lokrFactor', 'LoKr factor'), 'lokrFactor', 'number', form, undefined,
-            t('trainingStudio.yue2.method.lokrFactorInfo', 'How many sites are Kronecker-factorized, of the four (attention/MLP pairs). At factor 4, stay below dim 256, where some sites stop factorizing and ignore alpha.'),
+            t('trainingStudio.yue2.method.lokrFactorInfo', 'How each weight is split into two Kronecker factors: the smaller factor is at most this size. 4 is tested; 8 also fits. At factor 4, stay below dim 256, where some sites stop factorizing and ignore alpha.'),
             t('trainingStudio.yue2.method.lokrFactorMeta', 'default 4'))}
           {field(t('trainingStudio.yue2.method.lokrAlpha', 'LoKr alpha'), 'alpha', 'number', form, undefined,
             t('trainingStudio.yue2.method.lokrAlphaInfo', 'The LoKr strength, alpha / dim. The tested default is 4x the dim; for more capacity raise dim and keep alpha at 4x dim rather than raising alpha alone.'),
@@ -1220,8 +1223,21 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             t('trainingStudio.yue2.method.alphaInfo', 'The LoRA scale. This card keeps it equal to rank (scale 1); raising alpha above rank strengthens the adapter\'s effect without changing its size.'),
             t('trainingStudio.yue2.method.alphaMeta', 'default = rank'))}
         </>}
+      
       </div>
-      {(form.adapterType ?? 'lora') === 'lokr' && <p className="text-[11px] text-zinc-500 mt-2">{t('trainingStudio.yue2.method.lokrHint', 'LoKr trains a Kronecker-factored delta per site instead of a low-rank pair. Strength is alpha / dim; 4x (64 / 4 / 256, about 106 MB for both halves) is the tested default, against 279 MB for the rank-64 LoRA. For more capacity raise dim and keep alpha at 4x dim; at factor 4 stay below dim 256, where some sites stop factorizing and ignore alpha.')}</p>}
+      {(() => {
+        const lokr = (form.adapterType ?? 'lora') === 'lokr';
+        const half = yue2AdapterHalfBytes(lokr
+          ? { type: 'lokr', dim: Number(form.lokrDim ?? 64), factor: Number(form.lokrFactor ?? 4) }
+          : { type: 'lora', rank: Number(form.rank ?? 64) });
+        const loraAlt = lokr ? yue2AdapterHalfBytes({ type: 'lora', rank: Number(form.lokrDim ?? 64) }) : null;
+        return <p className={`text-[11px] mt-2 ${half === null ? 'text-amber-700 dark:text-amber-300' : 'text-zinc-500'}`}>
+          {half === null
+            ? t('trainingStudio.yue2.method.sizeBadFactor', 'This LoKr factor does not split the attention and MLP outputs on their boundaries, so training will refuse it. Try 4 or 8.')
+            : t('trainingStudio.yue2.method.sizeEstimate', 'Expected adapter size: {{total}} for both halves ({{half}} each for the planner and the decoder).', { total: formatMB(2 * half), half: formatMB(half) })}
+          {half !== null && loraAlt !== null && ` ${t('trainingStudio.yue2.method.sizeLoraCompare', 'A rank-{{rank}} LoRA would be {{lora}}.', { rank: Number(form.lokrDim ?? 64), lora: formatMB(2 * loraAlt) })}`}
+        </p>;
+      })()}
       <div className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.baseMatchedKnobs', 'Base-matched settings')}</span>
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.baseMatchedKnobsHint', 'Blank = the method default shown beside each field. The report does not state a fine-tuning learning rate or the dropout rates, so those defaults are agreed guesses; the rest are the report\'s own values.')}</p>

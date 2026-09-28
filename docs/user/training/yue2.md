@@ -76,7 +76,7 @@ Defaults the card ships:
 
 | Setting | Default | Notes |
 |---|---|---|
-| Adapter type | LoKr, dim 64, factor 4, alpha 256 | About 106 MB for the AR and NAR pair. The ear test ran on this adapter. |
+| Adapter type | LoKr, dim 64, factor 4, alpha 256 | About 106 MB for the AR and NAR pair; the card shows the expected size for whatever dim, factor or rank you enter. The ear test ran on this adapter. |
 | Learning rate | 1e-4 | Linear warmup over 3% of the updates, then cosine decay to 0.1x at the end. |
 | Weight decay | 0.1 | The report's value. |
 | Adam beta2 | 0.95 | The report's value; the old recipe used 0.999. |
