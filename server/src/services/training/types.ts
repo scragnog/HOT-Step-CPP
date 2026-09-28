@@ -252,6 +252,10 @@ export interface Yue2JointPreviewOptions {
   baselineOnly?: boolean;
   caption?: string;
   lyrics?: string;
+  /** Where preview lyrics come from when no lyrics override is set. Absent =
+   *  the dataset's newest Lyric Studio generation, falling back to the
+   *  dataset's own lyrics; 'dataset' always uses the dataset's lyrics. */
+  lyricsSource?: 'dataset';
   previewSongId?: string;
 }
 

@@ -90,6 +90,7 @@ export function parseYue2JointPreviewOptions(raw: unknown, everySteps: number): 
     ...(bool('sharedSheet', false) ? { sharedSheet: true } : {}),
     ...(text('caption') ? { caption: text('caption') } : {}),
     ...(text('lyrics') ? { lyrics: text('lyrics') } : {}),
+    ...(b.lyricsSource === 'dataset' ? { lyricsSource: 'dataset' as const } : {}),
     ...(text('previewSongId') ? { previewSongId: text('previewSongId') } : {}),
   };
 }

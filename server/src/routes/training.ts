@@ -4185,6 +4185,7 @@ router.post('/datasets/:id/yue2-joint-previews/render', async (req: Request, res
     const seconds = Math.max(8, Math.min(360, Math.round(Number(b.seconds) || 180)));
     const takes = Math.max(1, Math.min(4, Math.round(Number(b.takes) || 1)));
     const existing = listYue2JointPreviews(run.output).filter(p => p.step === step && p.kind === 'artist').length;
+    const prior = listYue2JointPreviews(run.output).find(p => p.kind === 'artist' && p.lyrics);
     const seed = Number.isInteger(Number(b.seed)) ? Number(b.seed) : 424242 + existing;
     const dataset = typeof run.options.dataset === 'string' ? run.options.dataset : undefined;
     const odeSteps = Number.isInteger(Number(b.odeSteps)) && Number(b.odeSteps) > 0 ? Math.min(64, Number(b.odeSteps)) : undefined;
@@ -4192,8 +4193,10 @@ router.post('/datasets/:id/yue2-joint-previews/render', async (req: Request, res
     const options = { enabled: true, everySteps: 0, takes, seconds, seed, previewMaxFrames: seconds * 25, baseline: false, control: false,
       ...(b.baselineOnly === true ? { baselineOnly: true } : {}),
       ...(odeSteps ? { odeSteps } : {}), ...(narCacheRatio !== undefined ? { narCacheRatio } : {}),
-      ...(typeof b.caption === 'string' && b.caption.trim() ? { caption: b.caption.trim() } : {}),
-      ...(typeof b.lyrics === 'string' && b.lyrics.trim() ? { lyrics: b.lyrics.trim() } : {}) };
+      // Without an override, a rung sings what the run's earlier previews sang
+      // (a Lyric Studio generation or the dataset's lyrics), so the ladder compares like with like.
+      ...(typeof b.caption === 'string' && b.caption.trim() ? { caption: b.caption.trim() } : prior?.caption ? { caption: prior.caption } : {}),
+      ...(typeof b.lyrics === 'string' && b.lyrics.trim() ? { lyrics: b.lyrics.trim() } : prior?.lyrics ? { lyrics: prior.lyrics } : {}) };
     const last = await runOnGpuLane(() => renderYue2JointPreview({ output: run.output, step, options, arAdapter: ckpt.arPath!, narAdapter: ckpt.narPath!, dataset }), { label: 'yue2 refine preview', family: 'yue2' });
     res.json({ run: run.jobId, step, previews: [last] });
   } catch (err: any) {

@@ -12,6 +12,7 @@ import { renderYue2JointPreview, listYue2JointPreviews, Yue2PreviewCleanupError 
 import { yue2Unload } from '../backends/yue2/client.js';
 import { ensureYue2PreparedDataset } from './yue2AutoPrepare.js';
 import { getDataset } from './datasetsRepo.js';
+import { getDb } from '../../db/database.js';
 import { config } from '../../config.js';
 import { availableYue2Bases, yue2ModelDir } from './yue2Train.js';
 import { engineGpuBackend, type EngineGpuBackend } from './aceTrain.js';
@@ -221,6 +222,27 @@ export interface ResolvedYue2JointTrainOptions {
  *  `defaults` are the knobs the card exposes for it, applied only where the
  *  request leaves them blank. Values with no base equivalent (adapter type,
  *  rank, alpha, seed, steps) come from the request untouched. */
+/** Preview lyrics default to the dataset's newest Lyric Studio generation:
+ *  new lyrics in the artist's voice test the adapter on a song it has not
+ *  memorised. Resolved once per run so every rung sings the same words. The
+ *  caption still comes from the dataset, since that is what training saw. An
+ *  explicit lyrics override or lyricsSource 'dataset' skips this, and a dataset
+ *  with no Lyric Studio set or no generations keeps its own lyrics. */
+function withGeneratedPreviewLyrics<T extends { lyrics?: string; lyricsSource?: 'dataset' }>(job: TrainingJob, preview: T | undefined): T | undefined {
+  if (!preview || preview.lyrics || preview.lyricsSource === 'dataset') return preview;
+  const setId = getDataset(job.datasetId)?.lyricsSetId;
+  if (!setId) return preview;
+  try {
+    const row = getDb().prepare(`SELECT g.id AS id, g.title AS title, g.lyrics AS lyrics FROM generations g
+      JOIN profiles p ON p.id = g.profile_id
+      WHERE p.lyrics_set_id = ? AND trim(g.lyrics) <> '' ORDER BY g.created_at DESC, g.id DESC LIMIT 1`)
+      .get(setId) as { id: number; title: string; lyrics: string } | undefined;
+    if (!row) return preview;
+    log(job, 'info', `Preview lyrics: Lyric Studio generation #${row.id}${row.title ? ` "${row.title}"` : ''} (caption from the dataset)`);
+    return { ...preview, lyrics: row.lyrics };
+  } catch { return preview; }
+}
+
 export const BASE_MATCHED_FORCED = Object.freeze({
   method: 'base-matched', optimizer: 'adamw-lm', cautious: false,
   stopMode: 'steps', targetKl: undefined, targetLoss: undefined, targetKlMode: undefined, narExtraSteps: 0,
@@ -642,7 +664,7 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
     // A base-matched run has no KL rungs: every saved checkpoint is one, and
     // the relay fires onRung from the checkpoint event (2026-09-27).
     const rungPreviews = (o.klCheckpointEvery ?? 0) > 0 || o.method === 'base-matched';
-    const preview = o.preview?.enabled && (o.preview.everySteps > 0 || rungPreviews) ? o.preview : undefined;
+    const preview = withGeneratedPreviewLyrics(job, o.preview?.enabled && (o.preview.everySteps > 0 || rungPreviews) ? o.preview : undefined);
     // Plan checks pause the run like previews do; the pause cadence is the
     // check's while the planner is live, the preview's once it is frozen.
     const planCheck = o.planCheck && o.planCheck.every > 0 && (o.narExtraSteps ?? 0) > 0 ? o.planCheck : undefined;

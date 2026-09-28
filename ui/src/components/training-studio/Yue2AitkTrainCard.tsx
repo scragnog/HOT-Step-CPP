@@ -1385,7 +1385,23 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           }), t('trainingStudio.yue2.method.previewSecondsInfo', 'How long the rendered preview sample is, from 8 to 120 seconds. Longer previews show more of the song but take longer to render at every checkpoint.'), t('trainingStudio.yue2.method.previewSecondsMeta', 'default 90'))}
           {field(t('trainingStudio.yue2.method.previewSeed', 'Preview seed'), 'seed', 'number', form.preview, value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: Number(value) } })),
             t('trainingStudio.yue2.method.previewSeedInfo', 'The random seed used for every preview render, so previews across checkpoints are directly comparable rather than each landing on a different random take.'), t('trainingStudio.yue2.method.previewSeedMeta', 'default 424242'))}
-          <p className="text-[11px] text-zinc-500 md:col-span-2">{t('trainingStudio.yue2.method.previewSongHint', 'The first track in this dataset is used for the preview. Caption and lyrics overrides below are optional.')}</p>
+          <label className="flex flex-col gap-1 md:col-span-2">
+            <ParamLabel label={t('trainingStudio.yue2.method.previewLyrics', 'Preview lyrics')}
+              className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+              info={t('trainingStudio.yue2.method.previewLyricsInfo', 'Lyric Studio generation: the newest lyrics generated for this dataset\'s artist in Lyric Studio, so each rung sings a song it never trained on. Falls back to the dataset\'s lyrics when there are none. Dataset lyrics: the first sung track\'s own lyrics. Either way the caption comes from the dataset, because that is what training saw, and every rung of a run uses the same words.')} />
+            <StyledSelect
+              accent="amber"
+              value={form.preview.lyricsSource ?? 'generated'}
+              disabled={busy}
+              onChange={value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, lyricsSource: value === 'dataset' ? 'dataset' : undefined } }))}
+              options={[
+                { value: 'generated', label: t('trainingStudio.yue2.method.previewLyricsGenerated', 'Lyric Studio generation (falls back to dataset lyrics)') },
+                { value: 'dataset', label: t('trainingStudio.yue2.method.previewLyricsDataset', 'Dataset lyrics') },
+              ]}
+              className="w-full"
+            />
+          </label>
+          <p className="text-[11px] text-zinc-500 md:col-span-2">{t('trainingStudio.yue2.method.previewSongHint', 'The caption comes from the first sung track in this dataset. Caption and lyrics overrides below replace either choice.')}</p>
           <Toggle
             accent="amber"
             size="sm"

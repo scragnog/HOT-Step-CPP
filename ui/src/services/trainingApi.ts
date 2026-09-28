@@ -765,6 +765,9 @@ export interface Yue2JointPreviewOptions {
   previewSongId?: string;
   caption?: string;
   lyrics?: string;
+  /** Absent = the dataset's newest Lyric Studio generation (falling back to
+   *  the dataset's own lyrics); 'dataset' always uses the dataset's lyrics. */
+  lyricsSource?: 'dataset';
 }
 
 export interface Yue2AitkCheckpointRecord {
