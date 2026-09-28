@@ -6441,7 +6441,7 @@ static int cmd_yue2_joint_train(int argc, char ** argv) {
     if (rc != 0 && !error.empty()) fprintf(stderr, "ace-train yue2-joint-train: %s\n", error.c_str());
     return rc;
 }
-int main(int argc, char ** argv) {
+static int ace_train_main(int argc, char ** argv) {
     if (argc < 2) {
         print_usage();
         return 2;
@@ -6537,3 +6537,21 @@ int main(int argc, char ** argv) {
     return 2;
 }
 
+#ifdef __APPLE__
+#    include <unistd.h>
+#endif
+
+int main(int argc, char ** argv) {
+    const int rc = ace_train_main(argc, argv);
+#ifdef __APPLE__
+    // The trainers keep their models in function statics that are never freed,
+    // so ggml-metal's device destructor runs during exit() with residency sets
+    // still alive and aborts on GGML_ASSERT([rsets->data count] == 0). The run
+    // has already exported by then, but the abort turns exit 0 into SIGABRT and
+    // Node reports a finished run as failed (#198, same class as #102). Skip the
+    // static destructors: flush what was written and leave.
+    fflush(nullptr);
+    _exit(rc);
+#endif
+    return rc;
+}

@@ -40,7 +40,7 @@ struct DitGpuMem {
     size_t total_mb() const { return total / (1024 * 1024); }
     size_t used_mb() const { return used / (1024 * 1024); }
     size_t free_mb() const { return free / (1024 * 1024); }
-    const char * source() const { return nvml ? "nvml" : "cuda"; }
+    const char * source() const { return nvml ? "nvml" : "ggml"; }
 };
 
 #ifdef _WIN32
