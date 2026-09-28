@@ -368,6 +368,7 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req_in) {
     }
 
     Yue2ProgressFn progress = [job](const Yue2Progress & p) {
+        job->songs_done.store(p.songs_done, std::memory_order_relaxed);
         job_set_phase(*job, yue2_job_phase_for_stage(p.stage), (int) p.step, (int) (p.total > 0 ? p.total : 0));
     };
 

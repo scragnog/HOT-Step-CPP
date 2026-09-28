@@ -171,7 +171,9 @@ What sets it apart:
   one renders. Every song of a batch plans in the same pass. The first pass draws one plan
   per song; if any song needs another try, later passes draw up to 8 plans at once, shared
   between the songs still looking, in roughly the time of two single plans. The first clean
-  attempt wins, even when later ones in the same pass are clean as well.
+  attempt wins, even when later ones in the same pass are clean as well. A song whose plan
+  is settled shows "Plan ready, waiting for N other songs"; one that has finished composing
+  while the rest of its batch is still going shows "Composed, waiting for N other songs".
 - Batch Size renders several songs in one pass, up to a limit the engine reports for your
   setup, and Noise Variations renders the same composed song from different noise.
 - Batch Queued Songs (on by default) does the same across the queue: when several YuE2

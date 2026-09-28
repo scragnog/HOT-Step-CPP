@@ -206,6 +206,9 @@ export interface AceJobStatus {
    *  keep-loaded), where phase_step stays 0 for the whole load — this is
    *  the only moving signal during that window. */
   adapter_progress?: number;
+  /** YuE2 batches: bit b set = song b finished the running stage and waits
+   *  on the rest. Semantic stage only; 0 otherwise and on other families. */
+  songs_done?: number;
 }
 
 /** Fine-grained engine phase — matches JobPhase in hot-step-server.cpp.

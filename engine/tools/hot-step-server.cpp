@@ -372,6 +372,9 @@ struct Job {
     std::atomic<JobPhase> phase{ JobPhase::QUEUED };
     std::atomic<int>      phase_step{ 0 };
     std::atomic<int>      phase_total{ 0 };
+    // YuE2 batches: bit b set = song b has finished the running stage and is
+    // waiting on the rest of the batch. 0 for every other family.
+    std::atomic<uint32_t> songs_done{ 0 };
 
     // memory ordering contract: result_body and result_mime are written
     // before status is stored (seq_cst). the client loads status (seq_cst)
@@ -3645,8 +3648,9 @@ int main(int argc, char ** argv) {
         int  total = job->phase_total.load(std::memory_order_relaxed);
         int  aprog = g_adapter_progress.load(std::memory_order_relaxed);
         snprintf(phase_buf, sizeof(phase_buf),
-                 "{\"status\":\"%s\",\"phase\":\"%s\",\"phase_step\":%d,\"phase_total\":%d,\"adapter_progress\":%d}",
-                 job_status_str(job->status.load()), job_phase_str(job->phase.load()), step, total, aprog);
+                 "{\"status\":\"%s\",\"phase\":\"%s\",\"phase_step\":%d,\"phase_total\":%d,\"adapter_progress\":%d,\"songs_done\":%u}",
+                 job_status_str(job->status.load()), job_phase_str(job->phase.load()), step, total, aprog,
+                 (unsigned) job->songs_done.load(std::memory_order_relaxed));
         // HOT-Step: additive YuE2 terminal fields, spliced in only when a
         // family actually populated them (ACE/MM3 jobs leave them empty and
         // get only the phase fields above). Read only meaningful

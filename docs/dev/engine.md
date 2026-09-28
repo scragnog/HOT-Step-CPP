@@ -153,7 +153,9 @@ song's set is fed MUSIC_END on every step of the redraw. A failed YuE2 job logs 
 as `[YuE2-Job] <id>: FAILED: <error>`. A `plan_only` request takes up to
 `YUE2_MAX_PLAN_BATCH` (8) `songs` entries against 4 for a render, reported by `/yue2/props`
 as `max_plan_batch`; the server's auto-replan uses it to draw every batch member's plan
-attempts in one pass.
+attempts in one pass. During the semantic stage, `GET /job` carries `songs_done`, a bitmask
+of the batch's songs that have ended and are waiting on the rest (0 in every other stage and
+family).
 Other modules in `yue2/` serve training and analysis: MERT and the
 tokenizer head (`yue2-mert.h`, `yue2-tok-head.h`), MMS_FA forced alignment
 (`yue2-mmsfa.h`, `yue2-ctc-align.h`, also behind `POST /yue2/align`), and

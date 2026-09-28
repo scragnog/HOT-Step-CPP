@@ -57,6 +57,7 @@ struct Yue2Progress {
     Yue2Stage stage;
     int64_t   step  = 0;
     int64_t   total = 0;  // <= 0 means "not knowable yet" (caller should treat as unknown, not zero-of-zero)
+    uint32_t  songs_done = 0;  // bit b: song b of the batch has finished this stage (semantic only)
 };
 
 using Yue2ProgressFn = std::function<void(const Yue2Progress &)>;
@@ -699,7 +700,9 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
             n_active++;
         }
         if (progress) {
-            progress({ YUE2_STAGE_SEMANTIC, step + 1, sp.max_tokens });
+            uint32_t songs_done = 0;
+            for (int b = 0; b < B && b < 32; b++) songs_done |= done[(size_t) b] ? (1u << b) : 0u;
+            progress({ YUE2_STAGE_SEMANTIC, step + 1, sp.max_tokens, songs_done });
         }
         if (n_active == 0) {
             break;

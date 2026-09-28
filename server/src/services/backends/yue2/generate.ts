@@ -635,6 +635,10 @@ async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
         : `YuE2: re-planning (attempts ${from}-${from + n - 1} of ${p.maxAttempts}, drawn together)...`;
       p.m.job.progress = 1;
     }
+    for (const p of pending) {
+      if (live.includes(p) || (p.m.job.status as string) === 'cancelled') continue;
+      p.m.job.stage = `YuE2: Plan ready, waiting for ${live.length} other song${live.length === 1 ? '' : 's'} in the batch to finish planning...`;
+    }
 
     let plans: Array<{ abc: string; end_reason: string }>;
     try {
@@ -830,6 +834,16 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
     job.coalescedMembers = undefined;   // every claimed follower failed to prepare
   }
 
+  // Each member's songs as a bitmask over the batch (song-major, contiguous),
+  // to read the engine's per-song songs_done against.
+  const songBits: number[] = [];
+  let songCount = 0;
+  for (const m of members) {
+    const n = Math.max(1, m.req.lm_batch_size ?? 1);
+    songBits.push(((1 << n) - 1) << songCount);
+    songCount += n;
+  }
+
   let detailTimer: NodeJS.Timeout | undefined;
   let laneReleased = false;
   const setAll = (fn: (j: GenerationJob) => void) => { for (const m of members) if ((m.job.status as string) !== 'cancelled') fn(m.job); };
@@ -869,12 +883,23 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
           const step = status.phase_step ?? 0;
           const total = status.phase_total ?? 0;
           const { stage, progress } = yue2StageText(phase, step, total);
-          setAll(j => {
-            j.stage = stage;
-            j.progress = progress;
-            j.acePhase = phase;
-            if (total > 0) j.acePhaseProgress = `step ${step}/${total}`;
-          });
+          // A song that has finished composing waits on the rest of the
+          // batch; say so rather than show it still "Composing". Keeps the
+          // ": Step n/total" tail the stall watchdog reads.
+          const songsDone = phase === 'semantic' ? status.songs_done ?? 0 : 0;
+          let doneCount = 0;
+          for (let i = 0; i < songCount; i++) doneCount += (songsDone >>> i) & 1;
+          for (const m of members) {
+            if ((m.job.status as string) === 'cancelled') continue;
+            const bits = songBits[members.indexOf(m)];
+            const waiting = songsDone && (songsDone & bits) === bits ? songCount - doneCount : 0;
+            m.job.stage = waiting > 0
+              ? `YuE2: Composed, waiting for ${waiting} other song${waiting === 1 ? '' : 's'} in the batch: Step ${step}/${total}`
+              : stage;
+            m.job.progress = progress;
+            m.job.acePhase = phase;
+            if (total > 0) m.job.acePhaseProgress = `step ${step}/${total}`;
+          }
           // Composed. The engine renders this song on its own NAR lane
           // (yue2-job.h), so the next YuE2 job can start composing now; any
           // other family stays behind us, since it would evict our weights.
