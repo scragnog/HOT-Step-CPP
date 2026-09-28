@@ -28,8 +28,8 @@
 // been memorised". It is the one eval promoted to a `metric` event; the artist
 // hold-out is logged as text, so the chart draws a single unambiguous line.
 //
-// All three kinds are GPU-lane and all three stop the engine. Nothing has been
-// measured for the AR trainer's per-step cost — see AR_MS_PER_STEP_BUDGET.
+// All three kinds are GPU-lane and all three stop the engine. Hangs are caught
+// by runYue2AceTrain's inactivity watchdog (YUE2_IDLE_MS), not a step budget.
 
 import fs from 'fs';
 import path from 'path';
@@ -55,7 +55,7 @@ import {
   buildYue2AlignArgs, missingYue2AlignModels, readYue2CursorWordsStatus,
   type ResolvedYue2AlignOptions,
 } from './yue2Align.js';
-import { log, numOr, runYue2AceTrain, type RelayState } from './yue2TrainRunner.js';
+import { log, numOr, runYue2AceTrain, YUE2_IDLE_MS, type RelayState } from './yue2TrainRunner.js';
 import { yue2SeparateDataset } from './yue2Stems.js';
 import { emitProgress, finishJob, isCancelled, pushEvent, type TrainingJob } from './labelingQueue.js';
 
@@ -530,20 +530,13 @@ export async function runYue2TokenizeJob(job: TrainingJob): Promise<void> {
     return;
   }
 
-  const summary = readYue2PreprocessSummary(opts.manifest);
-  const sources = Math.max(1, summary?.sources ?? getDataset(job.datasetId)?.sampleCount ?? 1);
-  // Nothing measured for MERT + the 8-layer head on this corpus; 5 min a track
-  // with a 30 min floor is a hang guard, not an estimate. The done line reports
-  // the real rate, and it is in the console log for whoever tightens this.
-  const timeoutMs = Math.max(30 * 60 * 1000, sources * 5 * 60 * 1000);
-
   const st: RelayState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
   try {
     log(job, 'info',
       'Tokenizing every source in the latent cache to semantic codes. The manifest is rewritten in '
       + 'place, so this stage and yue2-align both add to what yue2-preprocess wrote.');
 
-    await runYue2AceTrain(job, 'yue2-tokenize', buildYue2TokenizeArgs(opts), timeoutMs, () => {
+    await runYue2AceTrain(job, 'yue2-tokenize', buildYue2TokenizeArgs(opts), YUE2_IDLE_MS, () => {
       const s = readYue2CodecIdsStatus(opts.manifest);
       if (!s) return 'yue2-tokenize finished but the manifest could not be read back';
       return s.sourcesWithCodes > 0
@@ -667,13 +660,6 @@ export async function runYue2SheetJob(job: TrainingJob): Promise<void> {
     return;
   }
 
-  const summary = readYue2PreprocessSummary(opts.manifest);
-  const sources = Math.max(1, summary?.sources ?? getDataset(job.datasetId)?.sampleCount ?? 1);
-  // Doc 23's G6/phase-3c tables: 3-13 minutes per track on the CPU backend
-  // (the exact-load, offline-cache path this stage runs), a few seconds on
-  // CUDA. 10 min a track with a 30 min floor covers the slow end with margin.
-  const timeoutMs = Math.max(30 * 60 * 1000, sources * 10 * 60 * 1000);
-
   const st: SheetState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
   try {
     log(job, 'info',
@@ -681,7 +667,7 @@ export async function runYue2SheetJob(job: TrainingJob): Promise<void> {
       + 'tracks decode fine but fail to render (abc_error) — that is expected, not a job failure; those '
       + 'sources train cot=off on every draw. The manifest is rewritten in place after every source.');
 
-    await runYue2AceTrain(job, 'yue2-sheet', buildYue2SheetArgs(opts), timeoutMs, () => {
+    await runYue2AceTrain(job, 'yue2-sheet', buildYue2SheetArgs(opts), YUE2_IDLE_MS, () => {
       const s = readYue2AbcStatus(opts.manifest);
       if (!s) return 'yue2-sheet finished but the manifest could not be read back';
       return (s.sourcesWithAbc + s.sourcesWithError) > 0
@@ -723,13 +709,6 @@ export async function runYue2AlignJob(job: TrainingJob): Promise<void> {
     return;
   }
 
-  const summary = readYue2PreprocessSummary(opts.manifest);
-  const sources = Math.max(1, summary?.sources ?? getDataset(job.datasetId)?.sampleCount ?? 1);
-  // ~100 s per four minutes of audio on 16 CPU threads, and several times
-  // faster on the GPU default (yue2Align.ts). 5 min a track with a 30 min floor
-  // covers the CPU path on long tracks.
-  const timeoutMs = Math.max(30 * 60 * 1000, sources * 5 * 60 * 1000);
-
   const st: AlignState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
   try {
     // The one thing the engine cannot say, because separation is not its job:
@@ -740,7 +719,7 @@ export async function runYue2AlignJob(job: TrainingJob): Promise<void> {
       `Aligning each source's lyrics against its vocal stem under ${opts.stemsDir}. Sources with no `
       + '`<name>/vocals.wav` there are skipped by name — separate them first if the SKIP count is high.');
 
-    await runYue2AceTrain(job, 'yue2-align', buildYue2AlignArgs(opts), timeoutMs, () => {
+    await runYue2AceTrain(job, 'yue2-align', buildYue2AlignArgs(opts), YUE2_IDLE_MS, () => {
       const s = readYue2CursorWordsStatus(opts.manifest);
       if (!s) return 'yue2-align finished but the manifest could not be read back';
       return s.sourcesWithCursor > 0
@@ -769,18 +748,6 @@ export async function runYue2AlignJob(job: TrainingJob): Promise<void> {
 }
 
 // ── yue2-ar-train ───────────────────────────────────────────────────────────
-
-/** Per-step wall budget for the timeout killer.
- *
- *  NOT AN ESTIMATE, and deliberately not dressed as one: nothing has been
- *  measured for this trainer, for the reason yue2ArTrain.ts gives about
- *  YUE2_VRAM_MODEL — the NAR half's 0.065 s/step belongs to fixed 250-frame
- *  clips, and an AR step is one whole song of up to 12,288 tokens through a
- *  chunked CE head. 30 s is a ceiling chosen to be far above anything plausible
- *  on a card that is thermally throttled or shared, so the killer only ever
- *  fires on a genuine hang. The 2 h floor covers the model load plus a short
- *  run; the eval and export passes ride inside the same budget. */
-const AR_MS_PER_STEP_BUDGET = 30_000;
 
 export async function runYue2ArTrainJob(job: TrainingJob): Promise<void> {
   const opts = job.opts as ResolvedYue2ArTrainOptions | undefined;
@@ -865,10 +832,9 @@ export async function runYue2ArTrainJob(job: TrainingJob): Promise<void> {
     log(job, 'info',
       `Codes present for ${codes.sourcesWithCodes} of ${codes.sources} source(s) via ${codes.tokenizer}.`);
 
-    const timeoutMs = Math.max(2 * 60 * 60 * 1000, opts.steps * AR_MS_PER_STEP_BUDGET);
     const args = buildYue2ArTrainArgs(opts);
 
-    await runYue2AceTrain(job, 'yue2-ar-train', args, timeoutMs, () => {
+    await runYue2AceTrain(job, 'yue2-ar-train', args, YUE2_IDLE_MS, () => {
       const final = path.join(opts.outDir, `${YUE2_AR_ADAPTER_STEM}.safetensors`);
       if (fs.existsSync(final)) return null;
       // Reaching here means exit 0, so the final export should be on disk; a

@@ -359,11 +359,17 @@ function wantsJsonl(kind: Yue2Kind): boolean {
  *  — the AR trainer tracks minted_val, the aligner tracks stem hits — without
  *  either a cast at the callback or those fields landing on RelayState, where
  *  they would be dead for every other kind. */
+/** How long a YuE2 ace-train child may print nothing before it is stopped as
+ *  hung. An hour: a whole-song AR step on Apple Silicon measured ~280 s (#199)
+ *  and the NAR trainer prints every 10 steps; model loads and exports are
+ *  minutes. */
+export const YUE2_IDLE_MS = 60 * 60 * 1000;
+
 export async function runYue2AceTrain<S extends RelayState>(
   job: TrainingJob,
   kind: Yue2Kind,
   args: string[],
-  timeoutMs: number,
+  idleMs: number,
   verifyOutput: () => string | null,
   onLine: (line: string, st: S) => void,
   st: S,
@@ -422,6 +428,7 @@ export async function runYue2AceTrain<S extends RelayState>(
     // stdout, and a parser that reads only one of the two would silently stop
     // reporting progress rather than fail.
     const handle = (line: string): void => {
+      armKiller();
       record(sinks.console, line);
       stderrTail.push(line);
       if (stderrTail.length > 30) stderrTail.shift();
@@ -432,12 +439,21 @@ export async function runYue2AceTrain<S extends RelayState>(
     const rlOut = readline.createInterface({ input: child.stdout! });
     rlOut.on('line', l => { const t = l.trim(); if (t) handle(t); });
 
+    // An inactivity watchdog, not a wall-clock budget: every output line resets
+    // it. A total budget has to guess the step time, and a guess calibrated on
+    // CUDA killed healthy Apple Silicon runs at 18% (#196, #199). The trainers
+    // print at least every few steps, so silence is what a hang looks like.
     let timedOut = false;
-    const killer = setTimeout(() => {
-      timedOut = true;
-      log(job, 'error', `${kind} exceeded its ${Math.round(timeoutMs / 60000)} min budget — stopping.`);
-      killJobChild(job);
-    }, timeoutMs);
+    let killer: NodeJS.Timeout | undefined;
+    function armKiller(): void {
+      clearTimeout(killer);
+      killer = setTimeout(() => {
+        timedOut = true;
+        log(job, 'error', `${kind} printed nothing for ${Math.round(idleMs / 60000)} min — stopping it as hung.`);
+        killJobChild(job);
+      }, idleMs);
+    }
+    armKiller();
 
     const code: number | null = await new Promise<number | null>((resolve, reject) => {
       child.on('error', err => reject(new Error(`Failed to launch ace-train: ${err.message}`)));
@@ -453,7 +469,7 @@ export async function runYue2AceTrain<S extends RelayState>(
 
     if (isCancelled(job)) return st;
     if (timedOut) {
-      throw new Error(`${kind} timed out after ${Math.round(timeoutMs / 60000)} min and was stopped`
+      throw new Error(`${kind} printed nothing for ${Math.round(idleMs / 60000)} min and was stopped as hung`
         + (stderrTail.length ? `: ${stderrTail.slice(-3).join(' | ')}` : ''));
     }
     if (code !== 0) {
@@ -506,11 +522,6 @@ export async function runYue2PreprocessJob(job: TrainingJob): Promise<void> {
   }
 
   const args = buildYue2PreprocessArgs(opts);
-  // ~4 min for a 12-15 track album, measured. Budget generously per track with
-  // a 30 min floor that covers a cold model load on any corpus.
-  const ds = getDataset(job.datasetId);
-  const songs = Math.max(1, ds?.sampleCount ?? 1);
-  const timeoutMs = Math.max(30 * 60 * 1000, songs * 3 * 60 * 1000);
 
   const st: RelayState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
   try {
@@ -525,7 +536,7 @@ export async function runYue2PreprocessJob(job: TrainingJob): Promise<void> {
       'yue2-preprocess scans the source folder directly: subfolders are not searched, and rows you '
       + 'excluded in the dataset grid ARE encoded. Compare the source count below with the dataset\'s.');
 
-    await runYue2AceTrain(job, 'yue2-preprocess', args, timeoutMs, () => {
+    await runYue2AceTrain(job, 'yue2-preprocess', args, YUE2_IDLE_MS, () => {
       if (!fs.existsSync(opts.manifestPath)) return 'yue2-preprocess finished but wrote no manifest';
       const s = readYue2PreprocessSummary(opts.manifestPath);
       return s && s.clips > 0 ? null : 'yue2-preprocess wrote a manifest with no clips in it';
@@ -596,13 +607,9 @@ export async function runYue2TrainJob(job: TrainingJob): Promise<void> {
       `${opts.steps} steps at rank ${opts.rank}/alpha ${opts.alpha}, target ${opts.target} — `
       + `roughly ${mins < 1 ? '<1' : Math.round(mins)} min at the measured 0.065 s/step.`);
 
-    // Budget on the steps still to run, with a 1 h floor so a cold model load
-    // plus a short run never trips the killer. 0.065 s/step measured; 0.5 s
-    // gives an 8x margin for a card that is sharing or thermally throttled.
-    const timeoutMs = Math.max(60 * 60 * 1000, opts.steps * 500);
     const args = buildYue2TrainArgs(opts);
 
-    await runYue2AceTrain(job, 'yue2-nar-train', args, timeoutMs, () => {
+    await runYue2AceTrain(job, 'yue2-nar-train', args, YUE2_IDLE_MS, () => {
       const final = path.join(opts.outDir, `${YUE2_ADAPTER_STEM}.safetensors`);
       if (fs.existsSync(final)) return null;
       // A run can legitimately end without the final export only if it was

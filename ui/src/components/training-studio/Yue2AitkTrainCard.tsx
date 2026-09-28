@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, Loader2, Play, X } from 'lucide-react';
+import { AlertTriangle, Check, Download, Loader2, Play, RotateCcw, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
@@ -780,13 +780,62 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const savePreset = () => {
     const name = presetName.trim();
     if (!name) { setPresetError(t('trainingStudio.yue2.method.presetNameRequired', 'Give the preset a name first.')); return; }
-    if (presets.some(preset => preset.name.toLowerCase() === name.toLowerCase())) {
-      setPresetError(t('trainingStudio.yue2.method.presetExists', 'A preset with that name already exists.'));
-      return;
-    }
+    // Saving under an existing name updates that preset, after asking (#203).
+    const existing = presets.find(preset => preset.name.toLowerCase() === name.toLowerCase());
+    if (existing && !window.confirm(t('trainingStudio.yue2.method.presetOverwrite', 'Replace the preset "{{name}}" with the current settings?', { name: existing.name }))) return;
     setPresetError('');
-    setPresets(previous => [...previous, { version: 2, name, settings: snapshotPresetSettings(form, lyricTiming) }]);
+    const saved: Yue2JointPreset = { version: 2, name: existing?.name ?? name, settings: snapshotPresetSettings(form, lyricTiming) };
+    setPresets(previous => existing ? previous.map(preset => preset === existing ? saved : preset) : [...previous, saved]);
     setPresetName('');
+  };
+  const exportPreset = (preset: Yue2JointPreset) => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ kind: 'hot-step-yue2-joint-preset', ...preset }, null, 2)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${preset.name.replace(/[^a-zA-Z0-9 _-]/g, '_')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+  const presetFileRef = useRef<HTMLInputElement>(null);
+  const importPresets = async (file: File) => {
+    try {
+      const parsed = JSON.parse(await file.text()) as unknown;
+      const incoming = (Array.isArray(parsed) ? parsed : [parsed]).filter((item): item is Yue2JointPreset =>
+        !!item && typeof item === 'object' && typeof (item as Yue2JointPreset).name === 'string'
+        && !!(item as Yue2JointPreset).settings && typeof (item as Yue2JointPreset).settings === 'object');
+      if (!incoming.length) throw new Error('no preset in that file');
+      setPresets(previous => {
+        const next = [...previous];
+        for (const item of incoming) {
+          // A shared file must not carry someone else's paths into this machine's run.
+          const settings = Object.fromEntries(Object.entries(item.settings)
+            .filter(([key]) => !PRESET_EXCLUDED_KEYS.has(key as keyof Yue2JointTrainRequest))) as Partial<Yue2JointTrainRequest>;
+          let name = item.name.trim() || 'Imported preset';
+          for (let n = 2; next.some(p => p.name.toLowerCase() === name.toLowerCase()); n++) name = `${item.name.trim()} (${n})`;
+          next.push({ version: 2, name, settings });
+        }
+        return next;
+      });
+      setPresetError('');
+    } catch (err) {
+      setPresetError(t('trainingStudio.yue2.method.presetImportFailed', 'Could not import that file: {{error}}', { error: err instanceof Error ? err.message : String(err) }));
+    }
+  };
+  // Settings that differ from the recipe defaults, per-run paths excluded
+  // (#200). Each one can be reset on its own, or all at once.
+  const changedSettings = Object.entries(snapshotPresetSettings(form, lyricTiming))
+    .filter(([key, value]) => JSON.stringify(value) !== JSON.stringify((DEFAULT_FORM as unknown as Record<string, unknown>)[key]));
+  const resetSetting = (key: string) => {
+    if (key === 'lyricTiming') { onLyricTimingChange(false); return; }
+    setForm(previous => ({ ...previous, [key]: (DEFAULT_FORM as unknown as Record<string, unknown>)[key] }));
+  };
+  const resetAllSettings = () => {
+    setForm(previous => {
+      const next: Record<string, unknown> = { ...DEFAULT_FORM };
+      for (const key of PRESET_EXCLUDED_KEYS) next[key] = previous[key];
+      return next as unknown as Yue2JointTrainRequest;
+    });
+    if (lyricTiming) onLyricTimingChange(false);
   };
   const loadPreset = (preset: Yue2JointPreset) => {
     // A preset saved before adapter types existed was a LoRA recipe; without
@@ -1254,6 +1303,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">
             {t('trainingStudio.yue2.method.presetSave', 'Save current settings')}
           </button>
+          <button type="button" onClick={() => presetFileRef.current?.click()} disabled={active || preparing || starting || yue2RunAllActive}
+            title={t('trainingStudio.yue2.method.presetImportTitle', 'Add presets from a .json file exported here or by someone else')}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10 disabled:opacity-40">
+            <Upload size={12} />{t('trainingStudio.yue2.method.presetImport', 'Import')}
+          </button>
+          <input ref={presetFileRef} type="file" accept=".json,application/json" className="hidden"
+            onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importPresets(file); }} />
         </div>
         {presetError && <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{presetError}</p>}
         {presets.length > 0 && <div className="mt-2 flex flex-wrap gap-2">
@@ -1265,6 +1321,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
                 {preset.name}{preset.settings.steps !== undefined && preset.settings.saveEvery !== undefined
                   ? ` · ${preset.settings.steps} steps, save every ${preset.settings.saveEvery}` : ''}
               </button>
+              <button type="button" onClick={() => exportPreset(preset)}
+                title={t('trainingStudio.yue2.method.presetExport', 'Download this preset as a .json file to share or back up')}
+                className="rounded p-0.5 text-zinc-400 hover:text-amber-600 dark:hover:text-amber-400">
+                <Download size={12} />
+              </button>
               <button type="button" onClick={() => removePreset(preset.name)}
                 title={t('trainingStudio.yue2.method.presetRemove', 'Remove this preset')}
                 className="rounded p-0.5 text-zinc-400 hover:text-red-600 dark:hover:text-red-400">
@@ -1273,6 +1334,29 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             </span>
           ))}
         </div>}
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
+            {t('trainingStudio.yue2.method.changedSettings', 'Changed from defaults')}
+          </span>
+          {changedSettings.length === 0
+            ? <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.noChangedSettings', 'none: this form is the recipe defaults')}</span>
+            : <>
+              {changedSettings.map(([key, value]) => (
+                <span key={key} className="inline-flex items-center gap-1 rounded-lg border border-sky-500/40 bg-sky-500/10 pl-2 pr-1 py-0.5 text-[11px] text-sky-700 dark:text-sky-300">
+                  {key}{typeof value === 'object' ? '' : `: ${String(value)}`}
+                  <button type="button" onClick={() => resetSetting(key)} disabled={active || preparing || starting || yue2RunAllActive}
+                    title={t('trainingStudio.yue2.method.resetSetting', 'Reset this setting to its default')}
+                    className="rounded p-0.5 hover:text-sky-900 dark:hover:text-white disabled:opacity-40">
+                    <RotateCcw size={11} />
+                  </button>
+                </span>
+              ))}
+              <button type="button" onClick={resetAllSettings} disabled={active || preparing || starting || yue2RunAllActive}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold border border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10 disabled:opacity-40">
+                <RotateCcw size={11} />{t('trainingStudio.yue2.method.resetAll', 'Reset all to defaults')}
+              </button>
+            </>}
+        </div>
       </div>
       <Toggle
         accent="amber"

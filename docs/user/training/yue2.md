@@ -92,7 +92,9 @@ Defaults the card ships:
 When to move off them:
 
 - Turn "Stop the engine during training" on, and previews off, on a card without room for the trainer (about 14 GB) plus the engine and a render (10-12 GB) at once; then render the ladder after the run.
-- Training presets saves your current settings under a name in this browser. It never saves dataset, checkpoint or output paths.
+- The form is saved per dataset in this browser, so your settings survive a restart. "Changed from defaults" under the presets lists every setting you have moved off the recipe; reset one with its arrow, or all of them with **Reset all to defaults**.
+- Training presets saves your current settings under a name in this browser. It never saves dataset, checkpoint or output paths. Saving under an existing name replaces that preset after asking. The download icon on a preset saves it as a `.json` file to share or back up, and **Import** adds presets from such a file (any paths in it are dropped).
+- Every YuE2 training stage is stopped as hung only when it prints nothing for an hour. There is no total time limit, so a slow GPU or Apple Silicon can run a long job to the end.
 
 "Train multiple" runs the whole chain (cache, codes, lead sheets, preparation, joint training) for several datasets in sequence with shared settings and a separate output folder each. Its dataset picker hides datasets that already have a linked YuE2 adapter pair; turn on **Show trained** to list them again for a retrain. The batch runs on the server: it survives a page reload, and after a server restart it is listed as paused so you can resume it with every finished stage kept. The batch panel above the Training Studio phases shows the queue, the running stage's step count, and a link back to the running training from anywhere in the studio.
 

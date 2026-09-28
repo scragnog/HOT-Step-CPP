@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { emitProgress, finishJob, isCancelled, pushEvent, type TrainingJob } from './labelingQueue.js';
 import { buildGpuEnv } from '../gpuDevices.js';
-import { log, runYue2AceTrain, type RelayState } from './yue2TrainRunner.js';
+import { log, runYue2AceTrain, YUE2_IDLE_MS, type RelayState } from './yue2TrainRunner.js';
 import { checkpointRecords, listYue2AitkRuns, recordYue2AitkRun } from './yue2AitkRuns.js';
 import { runYue2PlanCheck, type Yue2PlanCheckOptions } from './yue2PlanCheck.js';
 import { renderYue2JointPreview, listYue2JointPreviews, Yue2PreviewCleanupError } from './yue2JointPreview.js';
@@ -711,7 +711,7 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
           ? state.lastStep : (pauseAt > 0 && pauseAt < o.steps ? pauseAt : o.steps);
       nativeAttempted = true;
       await runYue2AceTrain(job, 'yue2-joint-train', buildYue2JointTrainArgs(segment),
-        Math.max(30 * 60 * 1000, (o.steps - step) * 10 * 60 * 1000), () => {
+        YUE2_IDLE_MS, () => {
           if (!fs.existsSync(segmentOut)) return 'Joint trainer exited without creating its output directory';
           const expect = wanted();
           const checkpoint = path.join(segmentOut, `checkpoint-step${expect}`);
