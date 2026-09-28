@@ -277,7 +277,6 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
         <Yue2AitkTrainCard key={datasetId} datasetId={datasetId} legacyManifest={arStatus?.manifestPath || yue2Status?.manifestPath}
           cursorReady={!!arStatus?.stages.align.done} lyricTiming={lyricTiming} onLyricTimingChange={setAitkLyricTiming} onTimingLockedChange={setTimingLocked}
           exposeStart={exposeJointStart} />
-        {jointRunAllControl}
         <Yue2AitkBatchWizard open={aitkBatchOpen} onClose={() => setAitkBatchOpen(false)} />
       </div>
     );

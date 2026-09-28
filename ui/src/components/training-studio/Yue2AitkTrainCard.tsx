@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, Download, Loader2, Play, RotateCcw, Save, Upload, X } from 'lucide-react';
+import { AlertTriangle, Download, Loader2, Play, RotateCcw, Save, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
@@ -14,7 +14,6 @@ import {
   getJob,
   getYue2AitkPrepare,
   listYue2AitkRuns,
-  linkYue2JointCheckpointPreset,
   listYue2JointPreviews,
   listJobs,
   jobStreamUrl,
@@ -24,14 +23,12 @@ import {
   type TrainingJobSummary,
   type TrainingMetricEvent,
   type TrainingStreamEvent,
-  type Yue2AitkCheckpointRecord,
   type Yue2AitkRunRecord,
   type Yue2JointTrainRequest,
   type Yue2JointBaseInfo,
   type Yue2JointPreviewOptions,
   type Yue2JointPreviewRecord,
 } from '../../services/trainingApi';
-import { useBackendStore } from '../../stores/backendStore';
 import { yue2AdapterHalfBytes, formatMB } from '../../utils/yue2AdapterSize';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { descentRate, formatDurationMs } from '../../utils/trainingEta';
@@ -487,8 +484,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [defaultsAvailable, setDefaultsAvailable] = useState<boolean | null>(null);
   const [missingDefaults, setMissingDefaults] = useState<string[]>([]);
   const [defaultsRevision, setDefaultsRevision] = useState(0);
-  const activeBackendId = useBackendStore(s => s.activeBackendId);
-  const selectModels = useBackendStore(s => s.selectModels);
   const yue2RunAllActive = useTrainingStore(s => s.yue2RunAllActive);
   const batchDraft = useTrainingStore(s => s.yue2BatchDraft);
   const datasets = useTrainingStore(s => s.datasets);
@@ -518,12 +513,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [aitkRuns, setAitkRuns] = useState<Yue2AitkRunRecord[]>([]);
   const [ladderNonce, setLadderNonce] = useState(0);
   const [resumeChoice, setResumeChoice] = useState('');
-  const [selectedCheckpoint, setSelectedCheckpoint] = useState('');
-  const [applyingCheckpoint, setApplyingCheckpoint] = useState(false);
-  const [applyNote, setApplyNote] = useState('');
-  const [linkingPreset, setLinkingPreset] = useState(false);
-  const [presetLinkNote, setPresetLinkNote] = useState('');
-  const [runsError, setRunsError] = useState('');
   const [liveMetric, setLiveMetric] = useState<TrainingMetricEvent | null>(null);
   // AITK's joint runner emits step metrics without an epoch stream. Keep the
   // history here in the same step-domain shape used by the legacy YuE2 chart.
@@ -581,18 +570,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
 
   useEffect(() => {
     let cancelled = false;
-    setRunsError('');
     const refresh = () => listYue2AitkRuns(datasetId).then(result => {
       if (cancelled) return;
-      setRunsError('');
       setAitkRuns(result.runs);
-      const available = result.runs.flatMap(run => run.checkpoints)
-        .filter(checkpoint => checkpoint.arPath && checkpoint.narPath);
-      setSelectedCheckpoint(previous => previous && available.some(checkpoint => checkpoint.dir === previous)
-        ? previous : (available[0]?.dir ?? ''));
-    }).catch(err => {
-      if (!cancelled) setRunsError(err instanceof Error ? err.message : String(err));
-    });
+    }).catch(() => { /* the ladder keeps its last list */ });
     void refresh();
     const running = job?.status === 'queued' || job?.status === 'running';
     const timer = running ? window.setInterval(refresh, 5000) : undefined;
@@ -948,25 +929,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       setError(err instanceof Error ? err.message : String(err));
     }
   };
-  const availableCheckpoints: Yue2AitkCheckpointRecord[] = aitkRuns.flatMap(run => run.checkpoints)
-    .filter(checkpoint => checkpoint.arPath && checkpoint.narPath);
-  const applyCheckpoint = async () => {
-    const checkpoint = availableCheckpoints.find(item => item.dir === selectedCheckpoint);
-    if (!checkpoint?.arPath || !checkpoint.narPath || activeBackendId !== 'yue2') return;
-    setApplyingCheckpoint(true);
-    setApplyNote('');
-    const unity = {
-      lmAdapterArScale: '1', lmAdapterArScaleAttn: '1', lmAdapterArScaleMlp: '1',
-      lmAdapterArScaleEarly: '1', lmAdapterArScaleMid: '1', lmAdapterArScaleLate: '1',
-      lmAdapterNarScale: '1', lmAdapterNarScaleAttn: '1', lmAdapterNarScaleMlp: '1',
-      lmAdapterNarScaleEarly: '1', lmAdapterNarScaleMid: '1', lmAdapterNarScaleLate: '1',
-    };
-    const ok = await selectModels({ lmAdapterAr: checkpoint.arPath, lmAdapterNar: checkpoint.narPath, ...unity }, activeBackendId);
-    setApplyingCheckpoint(false);
-    setApplyNote(ok
-      ? t('trainingStudio.yue2.method.checkpointApplied', 'AR and NAR adapters applied for the next generation.')
-      : t('trainingStudio.yue2.method.checkpointApplyFailed', 'Could not apply this checkpoint. The previous model selection is still active.'));
-  };
   const selectResume = (value: string) => {
     setResumeChoice(value);
     if (!value) { setForm(previous => ({ ...previous, resume: '', dataset: '' })); return; }
@@ -982,21 +944,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       lyricTiming: saved.alignment?.enabled ?? previous.lyricTiming,
       cursorWeight: saved.alignment?.cursorWeight ?? previous.cursorWeight }));
     if (saved.alignment) onLyricTimingChange(saved.alignment.enabled === true);
-  };
-  const linkCheckpointPreset = async () => {
-    if (!selectedCheckpoint) return;
-    setLinkingPreset(true);
-    setPresetLinkNote('');
-    try {
-      const result = await linkYue2JointCheckpointPreset(datasetId, selectedCheckpoint);
-      setPresetLinkNote(result.updated > 0
-        ? `Linked this AR/NAR pair to ${result.updated} Lyric Studio album preset${result.updated === 1 ? '' : 's'}.`
-        : 'No Lyric Studio album preset is linked to this dataset yet. Export the dataset to Lyric Studio first.');
-    } catch (err) {
-      setPresetLinkNote(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLinkingPreset(false);
-    }
   };
   const active = job?.status === 'queued' || job?.status === 'running';
   const preparing = prepareJob?.status === 'queued' || prepareJob?.status === 'running';
@@ -1505,42 +1452,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <summary className="cursor-pointer text-[11px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.yue2.method.showLogs', 'Show training log (last 100 lines)')}</summary>
         <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-zinc-950 p-2 text-[10px] leading-4 text-zinc-300 whitespace-pre-wrap">{jobLogs.join('\n')}</pre>
       </details>}
-      {job?.status === 'done' && <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">{t('trainingStudio.yue2.method.checkpointWritten', 'Joint checkpoints are in the selected output directory.')}</p>}
-      {(aitkRuns.length > 0 || runsError) && <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
-        <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.auditionTitle', 'Audition a joint checkpoint')}</p>
-        {activeBackendId !== 'yue2' && <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.selectYue2', 'Select the YuE2 backend to use these adapters for generation.')}</p>}
-        {runsError && <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{runsError}</p>}
-        {availableCheckpoints.length > 0 && <div className="mt-2 flex items-center gap-2 flex-wrap">
-          {/* One group per run, folded into each option's label: every run for
-              this dataset is listed, and bare "step N" rows from two runs read
-              as stale duplicates (#182). StyledSelect has no optgroup, so the
-              run's timestamp and status prefix each checkpoint's row instead. */}
-          <StyledSelect
-            accent="amber"
-            value={selectedCheckpoint}
-            onChange={value => { setSelectedCheckpoint(value); setApplyNote(''); setPresetLinkNote(''); }}
-            className="w-auto min-w-[220px]"
-            options={aitkRuns.filter(run => run.checkpoints.some(checkpoint => checkpoint.arPath && checkpoint.narPath))
-              .flatMap(run => run.checkpoints.filter(checkpoint => checkpoint.arPath && checkpoint.narPath).map(checkpoint => ({
-                value: checkpoint.dir,
-                label: `${new Date(run.createdAt).toLocaleString()} · ${run.live ? 'running' : run.status} · step ${checkpoint.step}${checkpoint.dir === availableCheckpoints[0]?.dir ? ' (latest)' : ''}`,
-              })))}
-          />
-          <button type="button" onClick={() => void applyCheckpoint()} disabled={activeBackendId !== 'yue2' || active || preparing || applyingCheckpoint || yue2RunAllActive || !selectedCheckpoint}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-500/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40 flex items-center gap-1.5">
-            {applyingCheckpoint ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-            {t('trainingStudio.yue2.method.useCheckpoint', 'Use for generation')}
-          </button>
-          <button type="button" onClick={() => void linkCheckpointPreset()} disabled={active || preparing || linkingPreset || yue2RunAllActive || !selectedCheckpoint}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-500/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40 flex items-center gap-1.5">
-            {linkingPreset ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-            {t('trainingStudio.yue2.method.linkAlbumPreset', 'Use in Lyric Studio album preset')}
-          </button>
-        </div>}
-        {!runsError && availableCheckpoints.length === 0 && <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.noAuditionCheckpoint', 'No complete AR/NAR checkpoint is available yet.')}</p>}
-        {applyNote && <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">{applyNote}</p>}
-        {presetLinkNote && <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400">{presetLinkNote}</p>}
-      </div>}
       {ladderRunRec && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
         <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.ladderTitle', 'Checkpoint ladder')} · {new Date(ladderRunRec.createdAt).toLocaleString()}{ladderRunRec.live ? ` · ${t('trainingStudio.yue2.method.ladderLive', 'training')}` : ''}</p>
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.ladderHint', 'Every saved checkpoint is a rung. Previews render while the run trains (one 300 s draft take on the dataset\'s first sung track); a rung with none yet says so, and Render adds a take. Score likeness and corruption 1-5, then press Use this rung on your pick: it becomes the dataset\'s adapter and you can clean up the rest. Scores also feed the Review page and "Finish scored" for batches.')}</p>
