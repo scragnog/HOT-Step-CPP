@@ -48,6 +48,7 @@ import { TrainingChart } from './TrainingChart';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
+import { Yue2StageCard } from './Yue2StageCard';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
@@ -103,7 +104,7 @@ interface PreprocessForm {
   acknowledgeSidecarFormat: boolean;
 }
 
-export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => void }> = ({ status, onDone }) => {
+export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; onDone: () => void }> = ({ status, done, onDone }) => {
   const { t } = useTranslation();
   const activeJob = useTrainingStore(s => s.activeJob);
   const startYue2Preprocess = useTrainingStore(s => s.startYue2Preprocess);
@@ -165,14 +166,46 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
     }
   };
 
+  const action = blocked ? (
+    <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
+      <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+      <span>
+        {t('trainingStudio.yue2.missing', 'Missing model files')}: {status.missingForPreprocess.join(', ')}
+      </span>
+    </div>
+  ) : (
+    <div className="flex items-center gap-3 flex-wrap">
+      <button
+        onClick={() => void run()}
+        disabled={busy || jobRunning}
+        className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 border border-amber-500/25 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 disabled:opacity-40 transition-colors flex items-center gap-1.5"
+      >
+        {busy ? <Loader2 size={12} className="animate-spin" /> : null}
+        {done
+          ? t('trainingStudio.yue2.ppReRun', 'Encode latents again')
+          : t('trainingStudio.yue2.ppRun', 'Encode latents')}
+      </button>
+      <span className="text-[11px] text-zinc-500">
+        {t('trainingStudio.yue2.ppCost',
+          'About {{gb}} GB of VRAM: the VAE encoder plus a 3.7 GB compute buffer.',
+          { gb: (status.preprocessPeakMb / 1024).toFixed(1) })}
+        {status.vaeFile ? ` · ${status.vaeFile}` : ''}
+      </span>
+    </div>
+  );
+
   return (
-    <div className={CARD}>
-      <div className="flex items-center gap-2 mb-2">
-        <FileCode2 size={15} className="text-amber-500" />
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-          {t('trainingStudio.yue2.ppTitle', 'Latent cache')}
-        </h3>
-      </div>
+    <Yue2StageCard
+      icon={<FileCode2 size={15} className="text-amber-500" />}
+      title={t('trainingStudio.yue2.ppTitle', 'Latent cache')}
+      done={done}
+      action={action}
+      footer={mine && activeJob && (
+        <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/10">
+          <JobProgress />
+        </div>
+      )}
+    >
       <p className="text-[11px] text-zinc-500 leading-relaxed mb-3">
         {t('trainingStudio.yue2.ppBlurb',
           'Encodes the dataset\'s audio through the YuE2 VAE once and caches the latents, which is what '
@@ -181,14 +214,7 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
           + 'encoded is reused.')}
       </p>
 
-      {blocked ? (
-        <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
-          <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
-          <span>
-            {t('trainingStudio.yue2.missing', 'Missing model files')}: {status.missingForPreprocess.join(', ')}
-          </span>
-        </div>
-      ) : (
+      {!blocked && (
         <>
           {/* What the FLAT scan sees, beside what the dataset holds. The engine
               takes --audio <folder> and no manifest, so subfolders and the
@@ -444,24 +470,6 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
             </div>
           )}
 
-          <div className="flex items-center gap-3 flex-wrap mt-3">
-            <button
-              onClick={() => void run()}
-              disabled={busy || jobRunning}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 border border-amber-500/25 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 disabled:opacity-40 transition-colors flex items-center gap-1.5"
-            >
-              {busy ? <Loader2 size={12} className="animate-spin" /> : null}
-              {cache
-                ? t('trainingStudio.yue2.ppReRun', 'Re-encode latents')
-                : t('trainingStudio.yue2.ppRun', 'Encode latents')}
-            </button>
-            <span className="text-[11px] text-zinc-500">
-              {t('trainingStudio.yue2.ppCost',
-                'About {{gb}} GB of VRAM: the VAE encoder plus a 3.7 GB compute buffer.',
-                { gb: (status.preprocessPeakMb / 1024).toFixed(1) })}
-              {status.vaeFile ? ` · ${status.vaeFile}` : ''}
-            </span>
-          </div>
           <p className="text-[11px] text-zinc-500 flex items-center gap-1.5 mt-3">
             <PauseCircle size={12} className="flex-shrink-0" />
             {t('trainingStudio.yue2.enginePaused',
@@ -469,13 +477,7 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; onDone: () => vo
           </p>
         </>
       )}
-
-      {mine && activeJob && (
-        <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/10">
-          <JobProgress />
-        </div>
-      )}
-    </div>
+    </Yue2StageCard>
   );
 };
 

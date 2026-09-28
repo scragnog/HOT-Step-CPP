@@ -41,7 +41,7 @@ The latent cache's "Rewrite the manifest" option is on by default: a re-run rewr
 
 Files named `*.engine.wav` in a dataset folder are ignored. Older versions left them beside the source as conversion caches; they are copies of real tracks and, if trained, teach the adapter instrumental versions with no lyrics. Delete any you find.
 
-The cache stages are latent cache, codes, lead sheets, vocal stems and lyric cursor spans. The last two are only needed for lyric timing supervision. "Perform all stages" runs them in order. A stage that is already complete when you open the page is folded to one line; click it to open the full card. Lead sheets can be previewed as each source finishes, not only when the stage ends. You do not have to prepare anything by hand: Start training prepares the dataset automatically and reuses prepared data that has not changed.
+The cache stages are latent cache, codes, lead sheets, vocal stems and lyric cursor spans. The last two are only needed for lyric timing supervision. "Perform all stages" runs them in order. Each stage card opens collapsed: its run button stays visible (it reads "... again" once the stage is complete), and clicking the title shows the explanation, status and settings. Lead sheets can be previewed as each source finishes, not only when the stage ends. You do not have to prepare anything by hand: Start training prepares the dataset automatically and reuses prepared data that has not changed.
 
 How many tracks: the app warns below 10 files.
 <!-- TODO(verify): no track-count guidance specific to YuE2 joint training was found in code or skills. -->

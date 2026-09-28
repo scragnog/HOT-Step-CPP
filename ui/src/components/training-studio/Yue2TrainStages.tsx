@@ -29,8 +29,8 @@
 // produces a stale skip decision, only a preview line that catches up a beat
 // late.
 
-import React, { useEffect, useState } from 'react';
-import { Check, ChevronDown, ListChecks, Loader2, XCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { ListChecks, Loader2, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { useTrainingStore } from '../../stores/trainingStore';
@@ -44,28 +44,6 @@ import { useYue2ArStatus } from './useYue2ArStatus';
 import { useYue2Status } from './useYue2Status';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
-
-/** A preparation stage that is already complete folds to one line; click to
- *  open the full card. Decided when the page opens, so a stage that finishes
- *  while you watch stays open, and one that stops being complete (caches
- *  cleared) opens again. */
-const DoneFold: React.FC<{ done: boolean; title: string; children: React.ReactNode }> = ({ done, title, children }) => {
-  const [open, setOpen] = useState(!done);
-  useEffect(() => { if (!done) setOpen(true); }, [done]);
-  if (!done) return <>{children}</>;
-  return (
-    <div className="flex flex-col gap-2">
-      <button type="button" onClick={() => setOpen(!open)}
-        className={`${CARD} !py-2.5 flex items-center gap-2 text-left hover:bg-zinc-50 dark:hover:bg-white/[0.03] transition-colors`}>
-        <ChevronDown size={14} className={`text-zinc-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
-        <Check size={14} className="text-emerald-500" />
-        <span className="text-sm font-semibold text-zinc-900 dark:text-white">{title}</span>
-        <span className="text-[11px] text-zinc-500">done</span>
-      </button>
-      {open && children}
-    </div>
-  );
-};
 const BTN_RUNALL = 'w-full px-4 py-2.5 rounded-lg text-sm font-semibold bg-amber-500 text-black '
                   + 'hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors '
                   + 'flex items-center justify-center gap-2';
@@ -266,17 +244,11 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
           </div>
         </div>
         {jointRunAllControl}
-        {yue2Status && <DoneFold key={`pp-${datasetId}`} done={!!arStatus?.stages.preprocess.done} title={t('trainingStudio.yue2.ppTitle', 'Latent cache')}>
-          <Yue2PreprocessCard status={yue2Status} onDone={reload} /></DoneFold>}
-        {arStatus && <DoneFold key={`tok-${datasetId}`} done={arStatus.stages.tokenize.done} title={t('trainingStudio.yue2ar.tokTitle', 'Codes')}>
-          <Yue2TokenizeCard status={arStatus} onDone={reload} /></DoneFold>}
-        {arStatus && <DoneFold key={`sheet-${datasetId}`} done={arStatus.stages.sheet.done} title={t('trainingStudio.yue2ar.sheetTitle', 'Lead sheets')}>
-          <Yue2SheetCard datasetId={datasetId} status={arStatus} onDone={reload} /></DoneFold>}
-        {lyricTiming && arStatus && <DoneFold key={`stems-${datasetId}`} title={t('trainingStudio.yue2ar.stemsTitle', 'Vocal stems')}
-          done={arStatus.stages.align.stemsReady > 0 && (arStatus.stages.align.stemsNeeded === 0 || arStatus.stages.align.stemsReady >= arStatus.stages.align.stemsNeeded)}>
-          <Yue2StemsCard status={arStatus} onDone={reload} /></DoneFold>}
-        {lyricTiming && arStatus && <DoneFold key={`align-${datasetId}`} done={arStatus.stages.align.done} title={t('trainingStudio.yue2ar.alignTitle', 'Lyric cursor spans')}>
-          <Yue2AlignCard status={arStatus} onDone={reload} /></DoneFold>}
+        {yue2Status && <Yue2PreprocessCard status={yue2Status} done={!!arStatus?.stages.preprocess.done} onDone={reload} />}
+        {arStatus && <Yue2TokenizeCard status={arStatus} onDone={reload} />}
+        {arStatus && <Yue2SheetCard datasetId={datasetId} status={arStatus} onDone={reload} />}
+        {lyricTiming && arStatus && <Yue2StemsCard status={arStatus} onDone={reload} />}
+        {lyricTiming && arStatus && <Yue2AlignCard status={arStatus} onDone={reload} />}
         <Yue2AitkTrainCard key={datasetId} datasetId={datasetId} legacyManifest={arStatus?.manifestPath || yue2Status?.manifestPath}
           cursorReady={!!arStatus?.stages.align.done} lyricTiming={lyricTiming} onLyricTimingChange={setAitkLyricTiming}
           exposeStart={exposeJointStart} />

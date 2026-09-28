@@ -46,6 +46,7 @@ import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { JobProgress } from './JobProgress';
+import { Yue2StageCard } from './Yue2StageCard';
 import { TrainingChart } from './TrainingChart';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
@@ -157,14 +158,47 @@ export const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => vo
     }
   };
 
+  const action = blocked ? (
+    <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
+      <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+      <span>
+        {t('trainingStudio.yue2ar.tokMissing',
+          'Missing: {{files}}. Install it from the Model Manager (yue2-tok-f16) — nothing in generation '
+          + 'needs it, so a fresh install will not have it.',
+          { files: stage.missing.join(', ') })}
+      </span>
+    </div>
+  ) : (
+    <div className="flex items-center gap-3 flex-wrap">
+      <button onClick={() => void run()} disabled={busy || jobRunning || needsLatents}
+        className={BTN_STAGE}>
+        {busy ? <Loader2 size={12} className="animate-spin" /> : null}
+        {stage.done
+          ? t('trainingStudio.yue2ar.tokReRun', 'Tokenize again')
+          : t('trainingStudio.yue2ar.tokRun', 'Tokenize')}
+      </button>
+      {needsLatents && (
+        <span className="text-[11px] text-zinc-500">
+          {t('trainingStudio.yue2ar.needsLatents',
+            'Encode the latents first — this stage reads the manifest preprocess writes, not the '
+            + 'source folder.')}
+        </span>
+      )}
+    </div>
+  );
+
   return (
-    <div className={CARD}>
-      <div className="flex items-center gap-2 mb-2">
-        <Waves size={15} className="text-amber-500" />
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-          {t('trainingStudio.yue2ar.tokTitle', 'Codes')}
-        </h3>
-      </div>
+    <Yue2StageCard
+      icon={<Waves size={15} className="text-amber-500" />}
+      title={t('trainingStudio.yue2ar.tokTitle', 'Codes')}
+      done={stage.done}
+      action={action}
+      footer={mine && activeJob && (
+        <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/10">
+          <JobProgress />
+        </div>
+      )}
+    >
       <p className="text-[11px] text-zinc-500 leading-relaxed mb-3">
         {t('trainingStudio.yue2ar.tokBlurb',
           'Runs the sources the latent cache already names back through the semantic tokenizer and caches '
@@ -173,17 +207,7 @@ export const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => vo
           + 'skipped.')}
       </p>
 
-      {blocked ? (
-        <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
-          <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
-          <span>
-            {t('trainingStudio.yue2ar.tokMissing',
-              'Missing: {{files}}. Install it from the Model Manager (yue2-tok-f16) — nothing in generation '
-              + 'needs it, so a fresh install will not have it.',
-              { files: stage.missing.join(', ') })}
-          </span>
-        </div>
-      ) : (
+      {!blocked && (
         <>
           <div className="text-[11px] text-zinc-500 leading-relaxed mb-3">
             {codes && codes.sourcesWithCodes > 0 ? (
@@ -251,32 +275,9 @@ export const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => vo
                   + 'cheap.') as string} />
             </div>
           )}
-
-          <div className="flex items-center gap-3 flex-wrap mt-3">
-            <button onClick={() => void run()} disabled={busy || jobRunning || needsLatents}
-              className={BTN_STAGE}>
-              {busy ? <Loader2 size={12} className="animate-spin" /> : null}
-              {codes && codes.sourcesWithCodes > 0
-                ? t('trainingStudio.yue2ar.tokReRun', 'Tokenize again')
-                : t('trainingStudio.yue2ar.tokRun', 'Tokenize')}
-            </button>
-            {needsLatents && (
-              <span className="text-[11px] text-zinc-500">
-                {t('trainingStudio.yue2ar.needsLatents',
-                  'Encode the latents first — this stage reads the manifest preprocess writes, not the '
-                  + 'source folder.')}
-              </span>
-            )}
-          </div>
         </>
       )}
-
-      {mine && activeJob && (
-        <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/10">
-          <JobProgress />
-        </div>
-      )}
-    </div>
+    </Yue2StageCard>
   );
 };
 
@@ -328,14 +329,55 @@ export const Yue2SheetCard: React.FC<{ datasetId: string; status: Yue2ArStatus; 
     }
   };
 
+  const action = blocked ? (
+    <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
+      <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+      <span>
+        {t('trainingStudio.yue2ar.sheetMissing',
+          'Missing: {{files}}. Install it from the Model Manager (yue2-sheetsage2-f16) — nothing in '
+          + 'generation needs it, so a fresh install will not have it.',
+          { files: stage.missing.join(', ') })}
+      </span>
+    </div>
+  ) : (
+    <div className="flex items-center gap-3 flex-wrap">
+      <button onClick={() => void run()} disabled={busy || jobRunning || needsLatents}
+        className={BTN_STAGE}>
+        {busy ? <Loader2 size={12} className="animate-spin" /> : null}
+        {stage.done
+          ? t('trainingStudio.yue2ar.sheetReRun', 'Transcribe again')
+          : t('trainingStudio.yue2ar.sheetRun', 'Transcribe')}
+      </button>
+      {needsLatents && (
+        <span className="text-[11px] text-zinc-500">
+          {t('trainingStudio.yue2ar.needsLatents',
+            'Encode the latents first — this stage reads the manifest preprocess writes, not the '
+            + 'source folder.')}
+        </span>
+      )}
+    </div>
+  );
+
+  // The preview stays outside the fold: it is how you look at what the stage
+  // produced, and it has its own open/close already.
   return (
-    <div className={CARD}>
-      <div className="flex items-center gap-2 mb-2">
-        <FileText size={15} className="text-amber-500" />
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-          {t('trainingStudio.yue2ar.sheetTitle', 'Lead sheets')}
-        </h3>
-      </div>
+    <Yue2StageCard
+      icon={<FileText size={15} className="text-amber-500" />}
+      title={t('trainingStudio.yue2ar.sheetTitle', 'Lead sheets')}
+      done={stage.done}
+      action={action}
+      footer={<>
+        {mine && activeJob && (
+          <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/10">
+            <JobProgress />
+          </div>
+        )}
+        {(mine && jobRunning || (abc && abc.sourcesWithAbc + abc.sourcesWithError > 0)) && (
+          <Yue2SheetPreview datasetId={datasetId} reloadKey={(abc?.sourcesWithAbc ?? 0) + (abc?.sourcesWithError ?? 0)}
+            live={mine && jobRunning} />
+        )}
+      </>}
+    >
       {mine && jobRunning && (
         <p className="text-[11px] text-amber-500 mb-2">
           {t('trainingStudio.yue2ar.sheetLiveNote', 'Lead sheets appear here as each source finishes.')}
@@ -350,17 +392,7 @@ export const Yue2SheetCard: React.FC<{ datasetId: string; status: Yue2ArStatus; 
           + '"soft-failed", not an error, and those sources also always train cot=off.')}
       </p>
 
-      {blocked ? (
-        <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
-          <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
-          <span>
-            {t('trainingStudio.yue2ar.sheetMissing',
-              'Missing: {{files}}. Install it from the Model Manager (yue2-sheetsage2-f16) — nothing in '
-              + 'generation needs it, so a fresh install will not have it.',
-              { files: stage.missing.join(', ') })}
-          </span>
-        </div>
-      ) : (
+      {!blocked && (
         <>
           <div className="text-[11px] text-zinc-500 leading-relaxed mb-3">
             {abc && (abc.sourcesWithAbc + abc.sourcesWithError) > 0 ? (
@@ -410,37 +442,9 @@ export const Yue2SheetCard: React.FC<{ datasetId: string; status: Yue2ArStatus; 
                   + 'default matters for your corpus.') as string} />
             </div>
           )}
-
-          <div className="flex items-center gap-3 flex-wrap mt-3">
-            <button onClick={() => void run()} disabled={busy || jobRunning || needsLatents}
-              className={BTN_STAGE}>
-              {busy ? <Loader2 size={12} className="animate-spin" /> : null}
-              {abc && (abc.sourcesWithAbc + abc.sourcesWithError) > 0
-                ? t('trainingStudio.yue2ar.sheetReRun', 'Transcribe again')
-                : t('trainingStudio.yue2ar.sheetRun', 'Transcribe')}
-            </button>
-            {needsLatents && (
-              <span className="text-[11px] text-zinc-500">
-                {t('trainingStudio.yue2ar.needsLatents',
-                  'Encode the latents first — this stage reads the manifest preprocess writes, not the '
-                  + 'source folder.')}
-              </span>
-            )}
-          </div>
         </>
       )}
-
-      {mine && activeJob && (
-        <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/10">
-          <JobProgress />
-        </div>
-      )}
-
-      {(mine && jobRunning || (abc && abc.sourcesWithAbc + abc.sourcesWithError > 0)) && (
-        <Yue2SheetPreview datasetId={datasetId} reloadKey={(abc?.sourcesWithAbc ?? 0) + (abc?.sourcesWithError ?? 0)}
-          live={mine && jobRunning} />
-      )}
-    </div>
+    </Yue2StageCard>
   );
 };
 
@@ -724,14 +728,37 @@ export const Yue2StemsCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
     }
   };
 
+  const action = (
+    <div className="flex items-center gap-3">
+      <button onClick={run}
+        disabled={busy || jobRunning || needsLatents}
+        className={BTN_STAGE}>
+        {busy ? <Loader2 size={12} className="animate-spin" /> : null}
+        {complete
+          ? t('trainingStudio.yue2ar.stemsReRun', 'Separate vocals again')
+          : t('trainingStudio.yue2ar.stemsRun', 'Separate vocals')}
+      </button>
+      {needsLatents && (
+        <span className="text-[11px] text-zinc-500">
+          {t('trainingStudio.yue2ar.stemsNeedsLatents',
+            'Encode the latents first \u2014 this stage separates the sources that manifest names.')}
+        </span>
+      )}
+    </div>
+  );
+
   return (
-    <div className={CARD}>
-      <div className="flex items-center gap-2 mb-2">
-        <Scissors size={15} className="text-amber-500" />
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-          {t('trainingStudio.yue2ar.stemsTitle', 'Vocal stems')}
-        </h3>
-      </div>
+    <Yue2StageCard
+      icon={<Scissors size={15} className="text-amber-500" />}
+      title={t('trainingStudio.yue2ar.stemsTitle', 'Vocal stems')}
+      done={complete}
+      action={action}
+      footer={mine && activeJob && (
+        <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/10">
+          <JobProgress />
+        </div>
+      )}
+    >
       <p className="text-[11px] text-zinc-500 leading-relaxed mb-3">
         {t('trainingStudio.yue2ar.stemsBlurb',
           'Separates each song\'s vocal and writes it as <source>/vocals.wav, which is the only thing the '
@@ -793,30 +820,7 @@ export const Yue2StemsCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
           />
         </div>
       )}
-
-      <div className="flex items-center gap-3">
-        <button onClick={run}
-          disabled={busy || jobRunning || needsLatents}
-          className={BTN_STAGE}>
-          {busy ? <Loader2 size={12} className="animate-spin" /> : null}
-          {ready > 0
-            ? t('trainingStudio.yue2ar.stemsReRun', 'Separate again')
-            : t('trainingStudio.yue2ar.stemsRun', 'Separate vocals')}
-        </button>
-        {needsLatents && (
-          <span className="text-[11px] text-zinc-500">
-            {t('trainingStudio.yue2ar.stemsNeedsLatents',
-              'Encode the latents first \u2014 this stage separates the sources that manifest names.')}
-          </span>
-        )}
-      </div>
-
-      {mine && activeJob && (
-        <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/10">
-          <JobProgress />
-        </div>
-      )}
-    </div>
+    </Yue2StageCard>
   );
 };
 
@@ -875,14 +879,79 @@ export const Yue2AlignCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
     }
   };
 
-  return (
-    <div className={CARD}>
-      <div className="flex items-center gap-2 mb-2">
-        <Mic2 size={15} className="text-amber-500" />
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-          {t('trainingStudio.yue2ar.alignTitle', 'Lyric cursor spans')}
-        </h3>
+  const action = blocked ? (
+    <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
+      <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+      <span>
+        {t('trainingStudio.yue2ar.alignMissing',
+          'Missing: {{files}}. The aligner has no Model Manager entry yet, so it has to be placed in '
+          + '{{dir}} by hand.',
+          // `minted.dir` is the YuE2 model folder, which is where the
+          // aligner goes too — the status payload names it once.
+          { files: stage.missing.join(', '), dir: status.minted.dir })}
+      </span>
+    </div>
+  ) : (
+    <div className="flex flex-col gap-3">
+      {noLyrics && (
+        <div className="flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400">
+          <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
+          <span>
+            {t('trainingStudio.yue2ar.alignNoLyrics',
+              'The latent cache was built with clip captions set to "{{mode}}", so it carries no lyrics '
+              + 'and this stage has nothing to align: it would skip every source and fail. Re-encode the '
+              + 'latents with clip captions set to the YuE2 mode (or "ace") — the sidecars beside the '
+              + 'audio already hold the lyrics, and the AR half needs the captions anyway, since the '
+              + 'caption is its prefix.',
+              { mode: status.stages.preprocess.captionMode || 'none' })}
+          </span>
+        </div>
+      )}
+      {noStems && (
+        <div className="flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400">
+          <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
+          <span>
+            {t('trainingStudio.yue2ar.alignNoStems',
+              'Separation happens outside this stage, so the stems are an input it cannot produce. It '
+              + 'wants <source stem>/vocals.wav per song and skips by name, so with none of them it '
+              + 'would align nothing and still report success — the run is refused instead. Run the '
+              + 'Vocal stems stage just above, or point Advanced\'s stems folder at stems you already '
+              + 'have.')}
+          </span>
+        </div>
+      )}
+      <div className="flex items-center gap-3 flex-wrap">
+        <button onClick={() => void run()}
+          disabled={busy || jobRunning || needsLatents || noLyrics || (noStems && !form.stemsDir.trim())}
+          className={BTN_STAGE}>
+          {busy ? <Loader2 size={12} className="animate-spin" /> : null}
+          {stage.done
+            ? t('trainingStudio.yue2ar.alignReRun', 'Align lyrics again')
+            : t('trainingStudio.yue2ar.alignRun', 'Align lyrics')}
+        </button>
+        {needsLatents && (
+          <span className="text-[11px] text-zinc-500">
+            {t('trainingStudio.yue2ar.alignNeedsLatents',
+              'Encode the latents first — the lyrics the spans are measured against come out of that '
+              + 'manifest.')}
+          </span>
+        )}
       </div>
+    </div>
+  );
+
+  return (
+    <Yue2StageCard
+      icon={<Mic2 size={15} className="text-amber-500" />}
+      title={t('trainingStudio.yue2ar.alignTitle', 'Lyric cursor spans')}
+      done={stage.done}
+      action={action}
+      footer={mine && activeJob && (
+        <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/10">
+          <JobProgress />
+        </div>
+      )}
+    >
       <p className="text-[11px] text-zinc-500 leading-relaxed mb-3">
         {t('trainingStudio.yue2ar.alignBlurb',
           'Force-aligns each song\'s lyrics against its vocal stem and caches where every word is sung. '
@@ -891,19 +960,7 @@ export const Yue2AlignCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
           + 'cursor weight down to 0.')}
       </p>
 
-      {blocked ? (
-        <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
-          <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
-          <span>
-            {t('trainingStudio.yue2ar.alignMissing',
-              'Missing: {{files}}. The aligner has no Model Manager entry yet, so it has to be placed in '
-              + '{{dir}} by hand.',
-              // `minted.dir` is the YuE2 model folder, which is where the
-              // aligner goes too — the status payload names it once.
-              { files: stage.missing.join(', '), dir: status.minted.dir })}
-          </span>
-        </div>
-      ) : (
+      {!blocked && (
         <>
           <div className="text-[11px] text-zinc-500 leading-relaxed mb-3">
             {cursor && cursor.sourcesWithCursor > 0 ? (
@@ -921,36 +978,6 @@ export const Yue2AlignCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
               '{{n}} vocal stem(s) in {{dir}}.',
               { n: stage.stemsReady, dir: stage.stemsDir })}
           </div>
-
-          {noLyrics && (
-            <div className="flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400 mb-3">
-              <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
-              <span>
-                {t('trainingStudio.yue2ar.alignNoLyrics',
-                  'The latent cache was built with clip captions set to "{{mode}}", so it carries no lyrics '
-                  + 'and this stage has nothing to align: it would skip every source and fail. Re-encode the '
-                  + 'latents with clip captions set to the YuE2 mode (or "ace") — the sidecars beside the '
-                  + 'audio already hold the lyrics, and the AR half needs the captions anyway, since the '
-                  + 'caption is its prefix.',
-                  { mode: status.stages.preprocess.captionMode || 'none' })}
-              </span>
-            </div>
-          )}
-
-          {noStems && (
-            <div className="flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400 mb-3">
-              <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
-              <span>
-                {t('trainingStudio.yue2ar.alignNoStems',
-                  'Separation happens outside this stage, so the stems are an input it cannot produce. It '
-                  + 'wants <source stem>/vocals.wav per song and skips by name, so with none of them it '
-                  + 'would align nothing and still report success — the run is refused instead. Run the '
-                  + 'Vocal stems stage just above, or point Advanced\'s stems folder at stems you already '
-                  + 'have.')}
-              </span>
-            </div>
-          )}
-
           <button
             onClick={() => setAdvanced(v => !v)}
             className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
@@ -985,33 +1012,9 @@ export const Yue2AlignCard: React.FC<{ status: Yue2ArStatus; onDone: () => void 
                   + 'once the run starts.') as string} />
             </div>
           )}
-
-          <div className="flex items-center gap-3 flex-wrap mt-3">
-            <button onClick={() => void run()}
-              disabled={busy || jobRunning || needsLatents || noLyrics || (noStems && !form.stemsDir.trim())}
-              className={BTN_STAGE}>
-              {busy ? <Loader2 size={12} className="animate-spin" /> : null}
-              {cursor && cursor.sourcesWithCursor > 0
-                ? t('trainingStudio.yue2ar.alignReRun', 'Align again')
-                : t('trainingStudio.yue2ar.alignRun', 'Align lyrics')}
-            </button>
-            {needsLatents && (
-              <span className="text-[11px] text-zinc-500">
-                {t('trainingStudio.yue2ar.alignNeedsLatents',
-                  'Encode the latents first — the lyrics the spans are measured against come out of that '
-                  + 'manifest.')}
-              </span>
-            )}
-          </div>
         </>
       )}
-
-      {mine && activeJob && (
-        <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-white/10">
-          <JobProgress />
-        </div>
-      )}
-    </div>
+    </Yue2StageCard>
   );
 };
 
