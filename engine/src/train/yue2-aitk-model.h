@@ -8,6 +8,7 @@
 
 #include "yue2-aitk-checkpoint.h"
 #include "safetensors.h"
+#include "../gguf-weights.h"
 #include "../../ggml/include/ggml.h"
 #include "../../ggml/include/ggml-backend.h"
 #include "../../ggml/include/ggml-alloc.h"
@@ -30,6 +31,12 @@ struct Yue2AitkConvRotLinear {
     ggml_tensor * frozen_a = nullptr;
     ggml_tensor * frozen_b = nullptr;
     ggml_tensor * dense = nullptr;
+    // GGUF base (load_gguf): the frozen weight in its GGUF type, [in, out_i]
+    // per part, parts stacked on the output axis in the fused site's order
+    // (q|k|v, gate|up). One part when the GGUF could fuse them (same type).
+    std::vector<ggml_tensor *> parts;
+    // GGUF lm_head only: BF16 [out, in] transpose for the head-loss backward.
+    ggml_tensor * dense_t = nullptr;
 };
 
 struct Yue2AitkLayerWeights {
@@ -137,6 +144,99 @@ public:
         return true;
     }
 
+    // GGUF base (the engine's yue2-lm-*.gguf, any type). Same expert layout as
+    // the ConvRot checkpoint, but every linear is a plain mul_mat over its GGUF
+    // weight (Yue2AitkConvRotLinear::parts) and the ordinary tensors are
+    // registered under the checkpoint's names, so every caller is unchanged.
+    // The GGUF keeps one final norm; both experts read it, as generation does.
+    bool load_gguf(const char * path, ggml_backend_t backend, std::string * error = nullptr) {
+        reset();
+        if (!path || !*path || !backend) return fail(error, "GGUF path or backend is empty");
+        GGUFModel gf{};
+        if (!gf_load(&gf, path)) return fail(error, std::string("cannot read GGUF base ") + path);
+        struct Closer { GGUFModel * g; ~Closer() { gf_close(g); } } closer{&gf};
+        auto meta = [&](const std::string & n) { return ggml_get_tensor(gf.meta, n.c_str()); };
+        for (const char * n : { "token_embd.weight", "output.weight", "output_norm.weight", "vae2llm.weight",
+                                "llm2vae.weight", "time_embd.0.weight", "time_embd.1.weight", "latent_pos_embed.weight" })
+            if (!meta(n)) return fail(error, std::string("GGUF base has no ") + n + " (not a YuE2 LM GGUF?)");
+        if (!meta("blk.27.nar_ffn_down.weight") || meta("blk.28.attn_q.weight"))
+            return fail(error, "GGUF base is not a 28-layer YuE2 LM");
+        backend_ = backend;
+        wctx_init(&wctx_, 1024);
+        auto load = [&](const std::string & n) -> ggml_tensor * { return meta(n) ? gf_load_tensor(&wctx_, gf, n) : nullptr; };
+        auto linear = [&](Yue2AitkConvRotLinear * out, std::vector<std::string> names) -> bool {
+            ggml_tensor * fused = nullptr;
+            for (const auto & n : names) if (!meta(n)) return fail(error, "GGUF base has no " + n);
+            if (names.size() == 3) fused = gf_load_qkv_fused(&wctx_, gf, names[0], names[1], names[2]);
+            else if (names.size() == 2) fused = gf_load_pair_fused(&wctx_, gf, names[0], names[1]);
+            if (fused) out->parts = { fused };
+            else for (const auto & n : names) out->parts.push_back(load(n));
+            out->cols = out->parts[0]->ne[0]; out->rows = 0;
+            for (ggml_tensor * p : out->parts) {
+                if (p->ne[0] != out->cols) return fail(error, "GGUF fused parts disagree on input width: " + names[0]);
+                out->rows += p->ne[1];
+            }
+            return true;
+        };
+        auto ordinary = [&](const std::string & ours, const std::string & theirs) -> ggml_tensor * {
+            ggml_tensor * t = load(theirs);
+            if (t) ordinary_.push_back({ ours, t });
+            return t;
+        };
+        ar_.layers.resize(28); nar_.layers.resize(28);
+        for (int i = 0; i < 28; ++i) {
+            const std::string b = "blk." + std::to_string(i) + ".";
+            for (int e = 0; e < 2; ++e) {
+                const std::string g = b + (e ? "nar_" : "");
+                auto & ly = (e ? nar_ : ar_).layers[(size_t) i];
+                const std::string o = std::string(e ? "model.diffusion_model.model.layers." : "text_encoders.model.layers.") +
+                                      std::to_string(i) + ".";
+                if (!linear(&ly.qkv, { g + "attn_q.weight", g + "attn_k.weight", g + "attn_v.weight" }) ||
+                    !linear(&ly.output, { g + "attn_output.weight" }) ||
+                    !linear(&ly.gate_up, { g + "ffn_gate.weight", g + "ffn_up.weight" }) ||
+                    !linear(&ly.down, { g + "ffn_down.weight" }))
+                    return false;
+                if (!ordinary(o + "input_layernorm.weight", g + "attn_norm.weight") ||
+                    !ordinary(o + "post_attention_layernorm.weight", g + "ffn_norm.weight") ||
+                    !ordinary(o + "self_attn.q_norm.weight", g + "attn_q_norm.weight") ||
+                    !ordinary(o + "self_attn.k_norm.weight", g + "attn_k_norm.weight"))
+                    return fail(error, "GGUF base is missing a norm in layer " + std::to_string(i));
+            }
+        }
+        if (!linear(&lm_head_, { "output.weight" }) || !linear(&llm2vae_, { "llm2vae.weight" }) ||
+            !linear(&time0_, { "time_embd.0.weight" }) || !linear(&time2_, { "time_embd.1.weight" }))
+            return false;
+        ar_.final_norm = ordinary("text_encoders.model.norm.weight", "output_norm.weight");
+        nar_.final_norm = ar_.final_norm;
+        ordinary_.push_back({ "model.diffusion_model.model.norm.weight", ar_.final_norm });
+        if (!ordinary("model.diffusion_model.latent_pos_embed.pe", "latent_pos_embed.weight") ||
+            !ordinary("model.diffusion_model.vae2llm.weight", "vae2llm.weight") ||
+            !ordinary("model.diffusion_model.vae2llm.bias", "vae2llm.bias") ||
+            !ordinary("model.diffusion_model.llm2vae.bias", "llm2vae.bias") ||
+            !ordinary("model.diffusion_model.time_embedder.mlp.0.bias", "time_embd.0.bias") ||
+            !ordinary("model.diffusion_model.time_embedder.mlp.2.bias", "time_embd.1.bias"))
+            return fail(error, "GGUF base is missing a flow-head tensor");
+        if (lm_head_.rows != 184704 || lm_head_.cols != 2048) return fail(error, "GGUF lm_head is not [2048, 184704]");
+
+        // Embedding lookups are get_rows, which no backend implements for every
+        // quant type; the head's backward needs W^T. Both are widened to BF16
+        // host-side once, a row at a time, so neither costs a graph node.
+        ggml_tensor * emb_src = meta("token_embd.weight");
+        const bool emb_direct = emb_src->type == GGML_TYPE_BF16 || emb_src->type == GGML_TYPE_F16 || emb_src->type == GGML_TYPE_F32;
+        embedding_tensor_ = emb_direct ? load("token_embd.weight")
+                                       : ggml_new_tensor_2d(wctx_.ctx, GGML_TYPE_BF16, emb_src->ne[0], emb_src->ne[1]);
+        ggml_set_name(embedding_tensor_, "text_encoders.model.embed_tokens");
+        lm_head_.dense_t = ggml_new_tensor_2d(wctx_.ctx, GGML_TYPE_BF16, lm_head_.rows, lm_head_.cols);
+        ggml_set_name(lm_head_.dense_t, "lm_head_transposed");
+        if (!wctx_alloc(&wctx_, backend)) { reset(); return fail(error, "GGUF base allocation failed (out of memory?)"); }
+        if (!emb_direct && !widen_rows_bf16(gf, "token_embd.weight", embedding_tensor_, false, error)) { reset(); return false; }
+        if (!widen_rows_bf16(gf, "output.weight", lm_head_.dense_t, true, error)) { reset(); return false; }
+        stats_.embedding_pending = 0;
+        gguf_ = true;
+        return true;
+    }
+    bool gguf_base() const { return gguf_; }
+
     // Mothersuperior's companion decoder adapter (nar_lora_joint_v9, the pair
     // of the v9 tokenizer head that makes our training codes): its block LoRA
     // becomes a frozen branch on every decoder linear (q/k/v and gate/up fused
@@ -240,6 +340,8 @@ public:
     bool companion() const { return companion_; }
 
     void reset() {
+        wctx_free(&wctx_);
+        gguf_ = false;
         if (companion_buffer_) ggml_backend_buffer_free(companion_buffer_);
         companion_buffer_ = nullptr;
         if (companion_ctx_) ggml_free(companion_ctx_);
@@ -299,6 +401,34 @@ private:
     static bool fail(std::string * error, const std::string & text) {
         if (error) *error = text;
         return false;
+    }
+
+    // GGUF tensor [ne0, ne1] of any type -> BF16 dst, either the same layout or
+    // transposed ([ne1, ne0]). Host peak is one BF16 copy of the source.
+    bool widen_rows_bf16(const GGUFModel & gf, const char * name, ggml_tensor * dst, bool transpose, std::string * error) {
+        const ggml_tensor * src = ggml_get_tensor(gf.meta, name);
+        const auto * traits = src ? ggml_get_type_traits(src->type) : nullptr;
+        if (!src || !traits || !traits->to_float || dst->type != GGML_TYPE_BF16)
+            return fail(error, std::string("cannot widen GGUF tensor ") + name);
+        const int64_t n0 = src->ne[0], n1 = src->ne[1];
+        const uint8_t * raw = (const uint8_t *) gf_get_data(gf, name);
+        const size_t row_bytes = ggml_row_size(src->type, n0);
+        std::vector<float> row((size_t) n0);
+        std::vector<ggml_bf16_t> all((size_t) (n0 * n1));
+        for (int64_t r = 0; r < n1; ++r) {
+            traits->to_float(raw + (size_t) r * row_bytes, row.data(), n0);
+            for (int64_t c = 0; c < n0; ++c) all[(size_t) (r * n0 + c)] = ggml_fp32_to_bf16(row[(size_t) c]);
+        }
+        if (!transpose) { ggml_backend_tensor_set(dst, all.data(), 0, ggml_nbytes(dst)); return true; }
+        constexpr int64_t kBlock = 64;
+        std::vector<ggml_bf16_t> block((size_t) (kBlock * n1));
+        for (int64_t c0 = 0; c0 < n0; c0 += kBlock) {
+            const int64_t nc = std::min(kBlock, n0 - c0);
+            for (int64_t c = 0; c < nc; ++c)
+                for (int64_t r = 0; r < n1; ++r) block[(size_t) (c * n1 + r)] = all[(size_t) (r * n0 + c0 + c)];
+            ggml_backend_tensor_set(dst, block.data(), (size_t) c0 * n1 * sizeof(ggml_bf16_t), (size_t) (nc * n1) * sizeof(ggml_bf16_t));
+        }
+        return true;
     }
 
     static std::vector<std::string> required_ordinary_names() {
@@ -436,4 +566,6 @@ private:
     ggml_context * companion_ctx_ = nullptr;
     ggml_backend_buffer_t companion_buffer_ = nullptr;
     bool companion_ = false;
+    WeightCtx wctx_{};  // GGUF base weights (load_gguf)
+    bool gguf_ = false;
 };

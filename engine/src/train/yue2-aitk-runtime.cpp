@@ -345,7 +345,12 @@ static int run_impl(Config config, std::string * error) {
                      (double) config.ar_loss_weight, (double) config.beta1, (double) config.beta2, config.ar_targets.c_str(), config.grad_accum);
     yue2_aitk::sha256::digest checkpoint_hash, dataset_hash;
     if (!yue2_aitk::sha256::file(std::filesystem::u8path(config.checkpoint), checkpoint_hash, error)) return 1;
-    if (checkpoint_hash.hex() != lower_hash(dataset.base_sha256)) { fail(error, "checkpoint SHA-256 does not match dataset base_sha256"); return 1; }
+    // A GGUF base trains on the same prepared dataset: preparation records the
+    // ConvRot checkpoint as provenance but computes nothing from it (codes,
+    // latents and prompts come from the tokenizer and the VAE). The resume
+    // record still binds the run to this file's hash.
+    const bool gguf_base = std::filesystem::u8path(config.checkpoint).extension() == ".gguf";
+    if (!gguf_base && checkpoint_hash.hex() != lower_hash(dataset.base_sha256)) { fail(error, "checkpoint SHA-256 does not match dataset base_sha256"); return 1; }
     if (!yue2_aitk::sha256::file(std::filesystem::u8path(config.dataset), dataset_hash, error)) return 1;
     const auto source_copy = std::filesystem::u8path(config.dataset).parent_path() / "source-manifest.json";
     yue2_aitk::sha256::digest source_hash;
@@ -406,10 +411,23 @@ static int run_impl(Config config, std::string * error) {
         ggml_backend_dev_backend_reg(device), "ggml_backend_cuda_fattn_train_last_prec"));
     try {
         event("load"); Yue2AitkModel model; Yue2AitkTrainState state;
-        if (!model.load(config.checkpoint.c_str(), backend.value, yue2_aitk_load_embedding_bf16, error) ||
+        if (gguf_base) {
+            // A GGUF weight reaches the graph through mul_mat, whose activation
+            // backward is otherwise an OUT_PROD that no GPU backend takes for a
+            // BF16 or quantized weight. mm-backward.patch's mul_mat form latches
+            // on the first backward, so it is set before any graph is built.
+#ifdef _WIN32
+            _putenv("GGML_BACKWARD_MM=1");
+#else
+            setenv("GGML_BACKWARD_MM", "1", 1);
+#endif
+        }
+        if (!(gguf_base ? model.load_gguf(config.checkpoint.c_str(), backend.value, error)
+                        : model.load(config.checkpoint.c_str(), backend.value, yue2_aitk_load_embedding_bf16, error)) ||
             (!config.companion.empty() && !model.apply_companion(config.companion.c_str(), error)) ||
             !state.initialize(backend.value, static_cast<uint32_t>(config.seed), error,cursor_weight>0,config.rank,config.alpha,
                               lokr ? config.lokr_dim : 0, lokr ? config.lokr_factor : 0)) return 1;
+        if (gguf_base) std::fprintf(stderr, "[yue2-aitk] base: GGUF %s\n", config.checkpoint.c_str());
         if (model.companion()) std::fprintf(stderr, "[yue2-aitk] companion decoder adapter: %s (frozen)\n", config.companion.c_str());
         if (lokr) std::fprintf(stderr, "[yue2-aitk] adapter lokr: dim %d factor %d alpha %.4g, %zu trainable parameters\n",
                                config.lokr_dim, config.lokr_factor, (double) config.alpha, state.parameter_count());

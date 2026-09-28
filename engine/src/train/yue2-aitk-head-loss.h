@@ -160,12 +160,27 @@ struct ChunkWorkspace {
         adapted = ggml_new_tensor_2d(tmp.ctx, GGML_TYPE_F32, request.hidden, count);
         base = ggml_new_tensor_2d(tmp.ctx, GGML_TYPE_F32, request.hidden, count);
         targets = ggml_new_tensor_1d(tmp.ctx, GGML_TYPE_I32, count);
-        adapted_logits = ggml_convrot8(tmp.ctx, request.head->weight_i8, adapted,
-            request.head->scales_f32, nullptr, request.head->rotation, true);
-        base_logits = ggml_convrot8(tmp.ctx, request.head->weight_i8, base,
-            request.head->scales_f32, nullptr, request.head->rotation, true);
         logit_grad = ggml_new_tensor_2d(tmp.ctx, GGML_TYPE_F32, kVocab, count);
-        hidden_grad = ggml_convrot8_back(tmp.ctx, logit_grad, adapted_logits);
+        if (!request.head->parts.empty()) {
+            // GGUF head: ConvRot's BF16 boundaries (rounded input, output and
+            // incoming gradient) over a plain mul_mat; the backward reads the
+            // BF16 transpose load_gguf built, since W^T g is not a mul_mat of W.
+            auto logits = [&](ggml_tensor * h) {
+                ggml_tensor * y = ggml_mul_mat(tmp.ctx, request.head->parts[0], ggml_bf16_round(tmp.ctx, h));
+                ggml_mul_mat_set_prec(y, GGML_PREC_F32);
+                return ggml_bf16_round(tmp.ctx, y);
+            };
+            adapted_logits = logits(adapted);
+            base_logits = logits(base);
+            hidden_grad = ggml_mul_mat(tmp.ctx, request.head->dense_t, ggml_bf16_round(tmp.ctx, logit_grad));
+            ggml_mul_mat_set_prec(hidden_grad, GGML_PREC_F32);
+        } else {
+            adapted_logits = ggml_convrot8(tmp.ctx, request.head->weight_i8, adapted,
+                request.head->scales_f32, nullptr, request.head->rotation, true);
+            base_logits = ggml_convrot8(tmp.ctx, request.head->weight_i8, base,
+                request.head->scales_f32, nullptr, request.head->rotation, true);
+            hidden_grad = ggml_convrot8_back(tmp.ctx, logit_grad, adapted_logits);
+        }
         // The loss kernel indexes these buffers by the global position offset;
         // retain total-position storage even though the graph is chunk-sized.
         per_ce_t = ggml_new_tensor_1d(tmp.ctx, GGML_TYPE_F32, request.positions);
@@ -193,10 +208,13 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
         !request.positions || !request.hidden || request.hidden > std::numeric_limits<int64_t>::max() ||
         request.positions > std::numeric_limits<int>::max() || !std::isfinite(request.kl_weight) ||
         request.kl_weight < 0.0f || request.head->rows != static_cast<int64_t>(kVocab) ||
-        request.head->cols != static_cast<int64_t>(request.hidden) || !request.head->weight_i8 ||
-        !request.head->scales_f32 || !request.head->weight_i8->data || !request.head->scales_f32->data ||
-        request.head->weight_i8->flags & GGML_TENSOR_FLAG_PARAM ||
-        request.head->scales_f32->flags & GGML_TENSOR_FLAG_PARAM) {
+        request.head->cols != static_cast<int64_t>(request.hidden) ||
+        (request.head->parts.empty() &&
+         (!request.head->weight_i8 || !request.head->scales_f32 || !request.head->weight_i8->data ||
+          !request.head->scales_f32->data || request.head->weight_i8->flags & GGML_TENSOR_FLAG_PARAM ||
+          request.head->scales_f32->flags & GGML_TENSOR_FLAG_PARAM)) ||
+        (!request.head->parts.empty() &&
+         (request.head->parts.size() != 1 || !request.head->dense_t || !request.head->parts[0]->data))) {
         return fail(Status::invalid_argument, error, "invalid head-loss request");
     }
     if (!yue2_aitk_is_cuda(request.backend))

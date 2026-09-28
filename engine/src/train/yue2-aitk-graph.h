@@ -54,6 +54,25 @@ inline ggml_tensor * rms(ggml_context * ctx, ggml_tensor * x, ggml_tensor * weig
     // RMSNorm explicitly normalizes in F32, casts, then multiplies BF16 weight.
     return mul_bf16(ctx, round(ctx, ggml_rms_norm(ctx, round(ctx, x), eps)), f32(ctx, weight));
 }
+// Stack [n_i, S] F32 tensors on ne0. CONCAT has no backward, so the parts are
+// accumulated into a zero canvas, as join_halves below does for two halves.
+inline ggml_tensor * join_rows(ggml_context * ctx, const std::vector<ggml_tensor *> & parts) {
+    if (parts.size() == 1) return parts[0];
+    int64_t total = 0;
+    for (ggml_tensor * p : parts) {
+        GGML_ASSERT(p->type == GGML_TYPE_F32 && p->ne[1] == parts[0]->ne[1] && p->ne[2] == 1 && p->ne[3] == 1);
+        total += p->ne[0];
+    }
+    GGML_ASSERT(total % parts[0]->ne[0] == 0);  // ggml_repeat builds the canvas
+    ggml_tensor * shape = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, total, parts[0]->ne[1]);
+    ggml_tensor * out = ggml_scale(ctx, ggml_repeat(ctx, parts[0], shape), 0.0f);
+    size_t offset = 0;
+    for (ggml_tensor * p : parts) {
+        out = ggml_acc(ctx, out, p, out->nb[1], out->nb[2], out->nb[3], offset);
+        offset += size_t(p->ne[0]) * sizeof(float);
+    }
+    return out;
+}
 inline ggml_tensor * linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
                             ggml_tensor * x, const Yue2AitkFusedLora * adapter = nullptr,
                             ggml_tensor * bias = nullptr) {
@@ -64,6 +83,19 @@ inline ggml_tensor * linear(ggml_context * ctx, const Yue2AitkConvRotLinear & w,
         base = ggml_mul_mat(ctx, w.dense, round(ctx, x));
         ggml_mul_mat_set_prec(base, GGML_PREC_F32);
         if (bias) base = ggml_add(ctx, base, f32(ctx, bias));
+        base = round(ctx, base);
+    } else if (!w.parts.empty()) {
+        // GGUF base: the same BF16 value boundaries as ConvRot's compute_bf16
+        // (rounded input, bias and output), over the GGUF weight in its own type.
+        ggml_tensor * xr = round(ctx, x);
+        std::vector<ggml_tensor *> ys;
+        for (ggml_tensor * p : w.parts) {
+            ggml_tensor * y = ggml_mul_mat(ctx, p, xr);
+            ggml_mul_mat_set_prec(y, GGML_PREC_F32);
+            ys.push_back(y);
+        }
+        base = join_rows(ctx, ys);
+        if (bias) base = ggml_add(ctx, base, round(ctx, f32(ctx, bias)));
         base = round(ctx, base);
     } else {
         base = ggml_convrot8(ctx, w.weight_i8, x, w.scales_f32,
