@@ -474,7 +474,14 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
                         std::to_string(m.lm_cfg.context_length);
         return false;
     }
-    if (!yue2_ar_kv_cache_alloc(m, max_prefix + std::max<int64_t>(sp.max_tokens, supplied_n) + 4, &cache, err, S)) {
+    // A kept song (recompose retry) enters the draw already holding its codes
+    // and is fed MUSIC_END on every step after, so its set needs room for both.
+    int64_t max_kept = 0;
+    for (const Yue2SongState & sg : songs) {
+        if (sg.keep_codes) max_kept = std::max<int64_t>(max_kept, (int64_t) sg.codec_ids.size());
+    }
+    if (!yue2_ar_kv_cache_alloc(m, max_prefix + max_kept + std::max<int64_t>(sp.max_tokens, supplied_n) + 4, &cache, err,
+                                S)) {
         return false;
     }
     cache.head_lo = YUE2_SEM_HEAD_LO;

@@ -219,6 +219,8 @@ static void yue2_job_finish(const std::shared_ptr<Job> & job, const Yue2Request 
         const bool cancelled = job->cancel.load();
         job->result_body = err.empty() ? "YuE2 generation failed" : err;
         job->result_mime  = "text/plain";
+        fprintf(stderr, "[YuE2-Job] %s: %s: %s\n", job->id.c_str(), cancelled ? "cancelled" : "FAILED",
+                job->result_body.c_str());
         job_set_phase(*job, cancelled ? JobPhase::CANCELLED : JobPhase::FAILED);
         job->status.store(cancelled ? 3 : 2);
         return;

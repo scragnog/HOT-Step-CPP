@@ -148,6 +148,9 @@ NAR stage can use Lua solvers and schedulers through `infer_method` and
 `scheduler`. When a song's composer runs to its cap, `semantic_retries` recomposes it
 with a new seed; the batch's other songs keep their codes and are replayed
 teacher-forced (`keep_codes`), so a retry never changes a song that ended normally.
+The retry's KV cache is sized for the longest kept song plus a full draw, because a kept
+song's set is fed MUSIC_END on every step of the redraw. A failed YuE2 job logs its reason
+as `[YuE2-Job] <id>: FAILED: <error>`.
 Other modules in `yue2/` serve training and analysis: MERT and the
 tokenizer head (`yue2-mert.h`, `yue2-tok-head.h`), MMS_FA forced alignment
 (`yue2-mmsfa.h`, `yue2-ctc-align.h`, also behind `POST /yue2/align`), and
