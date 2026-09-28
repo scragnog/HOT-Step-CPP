@@ -56,3 +56,11 @@ export function normalizeLanguage(value: unknown, fallback = 'en'): string {
   if (VALID_LANGUAGE_CODES.has(primary)) return primary;
   return fallback;
 }
+
+/** A dataset's declared lyric language: an ISO code, or '' for 'auto' — no
+ *  override, so each file keeps the local AI's own guess (mixed-language
+ *  corpora, #191). The dataset JSON spells '' as 'auto' so a rebuild keeps it. */
+export function datasetLanguage(value: unknown): string {
+  const raw = String(value ?? '').trim().toLowerCase();
+  return raw === 'auto' ? '' : normalizeLanguage(raw);
+}

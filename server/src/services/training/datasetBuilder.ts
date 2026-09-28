@@ -186,7 +186,7 @@ export async function buildDataset(
     default_album: ds.defaultAlbum || '',
     default_genre: ds.defaultGenre || '',
     // ISO code, never a full name — see languageCodes.ts.
-    default_language: normalizeLanguage(ds.defaultLanguage),
+    default_language: ds.defaultLanguage ? normalizeLanguage(ds.defaultLanguage) : 'auto',
   };
   for (const [key, value] of Object.entries(prior.metadata)) {
     if ((OWNED_METADATA_KEYS as readonly string[]).includes(key)) continue;

@@ -13,6 +13,7 @@ import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { FolderPicker } from './FolderPicker';
+import { VOCAL_LANGUAGES } from '../../constants/languages';
 
 /** Same shape as the server's slugify: lowercase, [a-z0-9-_], collapsed. */
 function slugify(name: string): string {
@@ -43,7 +44,7 @@ export const NewDatasetWizard: React.FC<NewDatasetWizardProps> = ({ open, onClos
   const [nameTouched, setNameTouched] = useState(false);
   const [triggerTouched, setTriggerTouched] = useState(false);
   const [customTag, setCustomTag] = useState('');
-  const [language, setLanguage] = useState('english');
+  const [language, setLanguage] = useState('en');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [preview, setPreview] = useState<ScanPreview | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -55,7 +56,7 @@ export const NewDatasetWizard: React.FC<NewDatasetWizardProps> = ({ open, onClos
   useEffect(() => {
     if (!open) return;
     setSourceDir(''); setRecursive(true); setName(''); setNameTouched(false); setTriggerTouched(false);
-    setCustomTag(''); setLanguage('english'); setPreview(null); setScanError(null); setCreateError(null);
+    setCustomTag(''); setLanguage('en'); setPreview(null); setScanError(null); setCreateError(null);
   }, [open]);
 
   // Monotonic request id — a slow scan of an earlier prefix must never overwrite
@@ -105,7 +106,7 @@ export const NewDatasetWizard: React.FC<NewDatasetWizardProps> = ({ open, onClos
         sourceDir,
         recursive,
         customTag: effectiveTag,
-        defaultLanguage: language.trim().toLowerCase() || 'english',
+        defaultLanguage: language || 'en',
       });
       onClose();
     } catch (err) {
@@ -255,8 +256,7 @@ export const NewDatasetWizard: React.FC<NewDatasetWizardProps> = ({ open, onClos
                 className="max-w-56"
                 value={language}
                 onChange={setLanguage}
-                options={['english', 'german', 'spanish', 'french', 'italian', 'portuguese', 'russian', 'japanese', 'korean', 'chinese']
-                  .map(l => ({ value: l, label: l.charAt(0).toUpperCase() + l.slice(1) }))}
+                options={[{ value: 'auto', label: t('trainingStudio.wizard.languageAuto', 'Auto / mixed (per file)') }, ...VOCAL_LANGUAGES]}
                 searchPlaceholder="Filter languages…"
               />
             </div>

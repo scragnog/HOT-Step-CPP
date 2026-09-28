@@ -120,7 +120,7 @@ import {
 } from '../services/training/yue2Train.js';
 import { listYue2Runs, readYue2RunManifest, yue2AdapterRoot } from '../services/training/yue2Runs.js';
 import {
-  isYue2ArAttn, isYue2ArLrScheduler, isYue2ArTarget, isYue2StyleTemplate,
+  isYue2ArAttn, type Yue2ArAttn, isYue2ArLrScheduler, isYue2ArTarget, isYue2StyleTemplate,
   YUE2_AR_DEFAULTS, YUE2_AR_OVERTRAIN_STEPS, YUE2_MINTED_CODES_FILE,
   YUE2_MINTED_MANIFEST_FILE, yue2ArAdapterRunDir, yue2ArRunName, yue2MintedManifest,
 } from '../services/training/yue2ArTrain.js';
@@ -192,6 +192,7 @@ import {
   commitLyricStudioExport, LyricStudioExportError, previewLyricStudioExport,
   refreshYue2PresetsForJointCheckpoint,
 } from '../services/training/lyricStudioExport.js';
+import { datasetLanguage } from '../services/languageCodes.js';
 import { getGenerations, getLyricsSet } from '../db/lireekDb.js';
 import type {
   AuditionListResponse, AuditionOptions, AuditionSideSpec,
@@ -882,7 +883,7 @@ router.patch('/datasets/:id', (req: Request, res: Response) => {
     if (typeof body.defaultArtist === 'string') patch.defaultArtist = body.defaultArtist;
     if (typeof body.defaultAlbum === 'string') patch.defaultAlbum = body.defaultAlbum;
     if (typeof body.defaultGenre === 'string') patch.defaultGenre = body.defaultGenre;
-    if (typeof body.defaultLanguage === 'string') patch.defaultLanguage = body.defaultLanguage.trim().toLowerCase();
+    if (typeof body.defaultLanguage === 'string') patch.defaultLanguage = datasetLanguage(body.defaultLanguage);
     if (typeof body.recursive === 'boolean') patch.recursive = body.recursive;
 
     // slug and sourceDir are immutable after creation.
@@ -4364,7 +4365,7 @@ router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
         files: [YUE2_MINTED_MANIFEST_FILE, YUE2_MINTED_CODES_FILE],
       },
       bases: availableYue2Bases(YUE2_AR_DEFAULTS.rank),
-      defaults: YUE2_AR_DEFAULTS,
+      defaults: { ...YUE2_AR_DEFAULTS, attn: yue2ArAttnForBuild(YUE2_AR_DEFAULTS.attn) },
       /** Above this the engine refuses without `allowOvertrain`. */
       overtrainSteps: YUE2_AR_OVERTRAIN_STEPS,
       adapterRoot: yue2ArAdapterRoot(),
@@ -4662,6 +4663,14 @@ router.post('/datasets/:id/yue2-align', (req: Request, res: Response) => {
   }
 });
 
+/** The flash default cannot run on Vulkan or Metal: there is no fused
+ *  attention-training kernel there and ace-train refuses at step 0 (#201).
+ *  Same coercion as mm3-train-lm; applied to the defaults the card shows too,
+ *  so the form never offers a value this build will refuse. */
+function yue2ArAttnForBuild(attn: Yue2ArAttn): Yue2ArAttn {
+  return attn === 'exact' || engineSupportsFlashAttnTraining() ? attn : 'exact';
+}
+
 /** POST /datasets/:id/yue2-ar-train */
 router.post('/datasets/:id/yue2-ar-train', (req: Request, res: Response) => {
   try {
@@ -4805,7 +4814,7 @@ router.post('/datasets/:id/yue2-ar-train', (req: Request, res: Response) => {
       adamBeta1: num('adamBeta1', D.adamBeta1, 0, 1),
       adamBeta2: num('adamBeta2', D.adamBeta2, 0, 1),
       captionDropout: num('captionDropout', D.captionDropout, 0, 1),
-      attn: isYue2ArAttn(b.attn) ? b.attn : D.attn,
+      attn: yue2ArAttnForBuild(isYue2ArAttn(b.attn) ? b.attn : D.attn),
       maxLen: num('maxLen', D.maxLen, 256, 65536),
       chunk: num('chunk', D.chunk, 1, 8192),
       cursorWeight,

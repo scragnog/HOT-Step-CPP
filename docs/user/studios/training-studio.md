@@ -28,7 +28,7 @@ Training follows whichever generation backend is active (ACE-Step, MiniMax-Music
 
 | Control | What it does |
 |---|---|
-| New dataset | Opens the import wizard: source folder, recursive toggle, name, trigger word, and default lyric language. |
+| New dataset | Opens the import wizard: source folder, recursive toggle, name, trigger word, and default lyric language. The language list has every language the models know; **Auto / mixed** leaves each file's detected language alone, for datasets that mix languages. Correct a single file in the Review grid's language column. |
 | Import multiple… | Bulk-imports several sibling folders as separate datasets and queues label/build/preprocess/train stages for each; watched from the Monitor phase. |
 | Dataset filter | Filters the dataset grid by dataset name, artist (from the linked Lyric Studio album) or album. Under YuE2 a second menu shows only datasets whose AR and NAR adapters are both done, or only the ones still to do. The AR and NAR chips on each card read joint-training runs as well as the older separate trainers. |
 | Base model (YuE2 Joint Training) | The frozen model the adapters train against: the ConvRot int8 checkpoint (the default on a CUDA build, and CUDA only) or any installed `yue2-lm-*.gguf` (any build). Beside it, **Device** names the GPU; empty means this build's first one. See [YuE2 training](../training/yue2.md#requirements). |

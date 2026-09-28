@@ -12,7 +12,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { readDatasetJsonMetadata } from './datasetBuilder.js';
 import { detailFor, syncCounters } from './datasetDetail.js';
-import { normalizeLanguage } from '../languageCodes.js';
+import { datasetLanguage } from '../languageCodes.js';
 import { scanPreview as scanPreviewFolder } from './datasetScan.js';
 import * as repo from './datasetsRepo.js';
 import { labelsDir, slugify, uniqueSlug } from './paths.js';
@@ -107,7 +107,9 @@ export async function createDatasetFromFolder(input: CreateDatasetInput): Promis
     // Normalized to an ISO code the inference FSM can emit — a full name like
     // 'english' trains adapters to produce a token the sampler forbids
     // (languageCodes.ts has the full account).
-    defaultLanguage: normalizeLanguage(
+    // 'auto' (mixed-language corpora, #191) stores '' — no override, each
+    // file keeps the local AI's own language guess.
+    defaultLanguage: datasetLanguage(
       typeof body.defaultLanguage === 'string' && body.defaultLanguage.trim()
         ? body.defaultLanguage
         : metaString(priorMeta, 'default_language')),
