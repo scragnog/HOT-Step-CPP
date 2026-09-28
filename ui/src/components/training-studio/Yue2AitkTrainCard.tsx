@@ -1120,17 +1120,21 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {preparing && <button type="button" onClick={() => void stopPrepare()} className="ml-3 text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
         {prepareJob?.error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{prepareJob.error}</div>}
       </details>
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.preset', 'Preset')}</span>
-        {PRESETS.map(p => <button key={p.key} type="button" disabled={active || starting || preparing || yue2RunAllActive}
-          onClick={() => setForm(previous => ({ ...previous, ...presetValues(p) }))}
-          className={`px-3 py-1 rounded-lg text-xs font-semibold border disabled:opacity-40 ${activePreset(form) === p.key
-            ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
-            : 'border-zinc-300/70 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10'}`}>
-          {t(`trainingStudio.yue2.method.preset_${p.key}`, p.label)}
-          <span className="ml-1 font-normal text-zinc-500">{p.steps} × {p.gradAccum} songs · {p.time}</span>
-        </button>)}
-        {!activePreset(form) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
+      <div className="mt-4">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.preset', 'Preset')}</span>
+          {!activePreset(form) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {PRESETS.map(p => <button key={p.key} type="button" disabled={active || starting || preparing || yue2RunAllActive}
+            onClick={() => setForm(previous => ({ ...previous, ...presetValues(p) }))}
+            className={`flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 transition-colors disabled:opacity-40 ${activePreset(form) === p.key
+              ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
+              : 'border-zinc-300 dark:border-white/15 text-zinc-800 dark:text-zinc-100 hover:border-blue-500/50 hover:bg-blue-500/5'}`}>
+            <span className="text-base font-bold">{t(`trainingStudio.yue2.method.preset_${p.key}`, p.label)}</span>
+            <span className="text-xs text-zinc-500">{p.steps} × {p.gradAccum} songs · {p.time}</span>
+          </button>)}
+        </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
         {field(t('trainingStudio.yue2.method.steps', 'Updates'), 'steps', 'number', form, undefined,
