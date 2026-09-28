@@ -127,7 +127,10 @@ Expect it to fail.
 MM3 and YuE2 caption source pickers (nearest tempo / named track / custom)
 only appear when the album's own dataset carries per-track captions, which
 normally means the album was exported from Training Studio rather than typed
-in or fetched from Genius.
+in or fetched from Genius. Those captions, and the YuE2 caption examples the
+caption writer imitates, are re-read from the dataset's sidecar files every
+time the set is loaded, including by the MCP tools, so a re-captioned dataset
+shows up without re-exporting.
 
 ## Related
 

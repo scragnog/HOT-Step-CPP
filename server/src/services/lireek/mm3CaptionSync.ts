@@ -1,6 +1,6 @@
 /**
- * mm3CaptionSync.ts — keep a lyrics set's source-song MM3 captions in step
- * with the training dataset the set was exported from.
+ * mm3CaptionSync.ts — keep a lyrics set's source-song MM3 and YuE2 captions in
+ * step with the training dataset the set was exported from.
  *
  * Why this exists (2026-09-09): a written song renders on MiniMax-Music3 under
  * one of the album's own training captions by default (utils/mm3CaptionSource
@@ -19,31 +19,39 @@
  * verbatim; 14/14 matched on the set that prompted this), and a song whose
  * caption file changed gets the new text. Cheap: one JSON read and a few
  * small file reads per set, and nothing is written unless something changed.
+ *
+ * It runs inside BOTH getLyricsSet functions (server lireekDb.ts and the MCP
+ * server's db.ts), so it takes the caller's SQLite handle and imports nothing
+ * from the server's DB layer. 2026-09-28: it used to run only in two UI read
+ * routes, so the MCP tools and in-app generation read whatever text the last
+ * UI visit had cached — the YuE2 "house dialect" still quoted a re-captioned
+ * track's old sidecar.
  */
 
 import fs from 'fs';
 import path from 'path';
-import { listDatasets } from '../training/datasetsRepo.js';
-import { updateLyricsSetSongs } from '../../db/lireekDb.js';
+import type Database from 'better-sqlite3';
 
 function norm(s: unknown): string {
   return String(s ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-/** Returns the set with `songs` refreshed (parsed to an array). Persists when
+/** Refreshes `set.songs` (already parsed to an array) in place. Persists when
  *  any caption changed. Never throws: a set with no linked dataset, or a
- *  dataset whose files are unreadable, comes back untouched. */
-export function refreshMm3CaptionsFromDataset(set: Record<string, any>): Record<string, any> {
+ *  dataset whose files are unreadable, is left untouched. */
+export function refreshSidecarCaptions(db: Database.Database, set: Record<string, any>): void {
   try {
     const setId = Number(set?.id);
-    if (!setId) return set;
-    const ds = listDatasets().find(d => Number(d.lyricsSetId) === setId);
-    if (!ds || !ds.datasetJsonPath || !fs.existsSync(ds.datasetJsonPath)) return set;
+    if (!setId || !Array.isArray(set.songs)) return;
+    const ds = db.prepare(
+      'SELECT slug, source_dir, dataset_json_path FROM training_datasets WHERE lyrics_set_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1',
+    ).get(setId) as { slug: string; source_dir: string; dataset_json_path: string } | undefined;
+    if (!ds?.dataset_json_path || !fs.existsSync(ds.dataset_json_path)) return;
 
-    const manifest = JSON.parse(fs.readFileSync(ds.datasetJsonPath, 'utf-8'));
+    const manifest = JSON.parse(fs.readFileSync(ds.dataset_json_path, 'utf-8'));
     const samples: any[] = manifest?.samples ?? manifest?.tracks ?? [];
-    if (!Array.isArray(samples) || samples.length === 0) return set;
-    const dir = path.dirname(ds.datasetJsonPath);
+    if (!Array.isArray(samples) || samples.length === 0) return;
+    const dir = path.dirname(ds.dataset_json_path);
 
     // lyrics text -> caption file path, for every sample that has one. Two
     // sidecar formats live beside the audio: <stem>.mm3.txt (MM3) and
@@ -63,7 +71,7 @@ export function refreshMm3CaptionsFromDataset(set: Record<string, any>): Record<
       for (const { suffix, field } of SIDECARS) {
         const candidates = [
           audio ? audio.replace(/\.[^.\\/]+$/, '') + suffix : '',
-          path.join(ds.sourceDir || dir, stem + suffix),
+          path.join(ds.source_dir || dir, stem + suffix),
           path.join(dir, stem + suffix),
         ].filter(Boolean);
         const file = candidates.find(p => fs.existsSync(p));
@@ -71,12 +79,10 @@ export function refreshMm3CaptionsFromDataset(set: Record<string, any>): Record<
         byLyrics.set(key, { ...(byLyrics.get(key) ?? {}), [field]: file });
       }
     }
-    if (byLyrics.size === 0) return set;
+    if (byLyrics.size === 0) return;
 
-    const songs: any[] = Array.isArray(set.songs) ? set.songs
-      : (typeof set.songs === 'string' ? JSON.parse(set.songs) : []);
     let changed = false;
-    for (const song of songs) {
+    for (const song of set.songs) {
       const files = byLyrics.get(norm(song?.lyrics));
       if (!files) continue;
       for (const [field, file] of Object.entries(files)) {
@@ -90,12 +96,10 @@ export function refreshMm3CaptionsFromDataset(set: Record<string, any>): Record<
       }
     }
     if (changed) {
-      updateLyricsSetSongs(setId, songs);
-      console.log(`[Lireek] MM3/YuE2 captions refreshed from ${ds.slug} for lyrics set ${setId}`);
+      db.prepare('UPDATE lyrics_sets SET songs = ? WHERE id = ?').run(JSON.stringify(set.songs), setId);
+      console.error(`[Lireek] MM3/YuE2 captions refreshed from ${ds.slug} for lyrics set ${setId}`);
     }
-    return { ...set, songs };
   } catch (err: any) {
     console.warn(`[Lireek] MM3 caption refresh skipped: ${err?.message || err}`);
-    return set;
   }
 }

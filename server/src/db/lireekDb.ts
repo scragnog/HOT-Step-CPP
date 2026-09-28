@@ -5,6 +5,7 @@
 
 import { getDb } from './database.js';
 import { normalizeKeyScale } from '../services/lireek/prompts.js';
+import { refreshSidecarCaptions } from '../services/lireek/mm3CaptionSync.js';
 
 // ── Legacy exports (no-ops, kept for compatibility during transition) ────────
 // initLireekDb/closeLireekDb are no longer needed — the tables are created
@@ -150,13 +151,8 @@ export function getLyricsSet(id: number): Record<string, any> | null {
   if (!row) return null;
   row.songs = JSON.parse(row.songs);
   row.total_songs = row.songs.length;
+  refreshSidecarCaptions(getDb(), row);
   return row;
-}
-
-/** Update a set's stored songs only (the MM3 caption refresh; see
- *  services/lireek/mm3CaptionSync.ts). Album and image untouched. */
-export function updateLyricsSetSongs(lyricsSetId: number, songs: Record<string, any>[]): void {
-  getDb().prepare('UPDATE lyrics_sets SET songs = ? WHERE id = ?').run(JSON.stringify(songs), lyricsSetId);
 }
 
 export function deleteLyricsSet(id: number): boolean {

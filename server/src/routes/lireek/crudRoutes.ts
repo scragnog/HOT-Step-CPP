@@ -8,7 +8,6 @@ import type { Router, Request, Response } from 'express';
 import * as db from '../../db/lireekDb.js';
 import * as genius from '../../services/lireek/geniusService.js';
 import { exportGeneration } from '../../services/lireek/exportService.js';
-import { refreshMm3CaptionsFromDataset } from '../../services/lireek/mm3CaptionSync.js';
 
 /** Safely extract a route param as string (Express 5 types params as string | string[]) */
 function param(req: Request, name: string): string {
@@ -132,7 +131,7 @@ export function registerCrudRoutes(router: Router): void {
       const id = intParam(req, 'id');
       const set = db.getLyricsSet(id);
       if (!set) { res.status(404).json({ error: 'Lyrics set not found' }); return; }
-      res.json(refreshMm3CaptionsFromDataset(set));
+      res.json(set);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -141,8 +140,8 @@ export function registerCrudRoutes(router: Router): void {
   router.get('/lyrics-sets/:id/full-detail', (req: Request, res: Response) => {
     try {
       const id = intParam(req, 'id');
-      const set = refreshMm3CaptionsFromDataset(db.getLyricsSet(id) ?? {});
-      if (!set || !set.id) { res.status(404).json({ error: 'Lyrics set not found' }); return; }
+      const set = db.getLyricsSet(id);
+      if (!set) { res.status(404).json({ error: 'Lyrics set not found' }); return; }
       const profiles = db.getProfiles(id);
       const generations = db.getGenerations(undefined, id);
       const preset = db.getPreset(id);

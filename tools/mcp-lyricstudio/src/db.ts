@@ -8,6 +8,7 @@ import path from 'path';
 // Canonical key spelling, shared with the in-app path via the re-exported
 // prompts module (server/src/services/lireek/prompts.ts).
 import { normalizeKeyScale } from './prompts.js';
+import { refreshSidecarCaptions } from '../../../server/src/services/lireek/mm3CaptionSync.js';
 
 let db: Database.Database;
 
@@ -60,6 +61,7 @@ export function getLyricsSet(id: number): any {
   if (!row) return null;
   row.songs = JSON.parse(row.songs);
   row.total_songs = row.songs.length;
+  refreshSidecarCaptions(getDb(), row);
   return row;
 }
 

@@ -11,8 +11,10 @@
 // local chat provider rewrites those facts into the planner's shape; MOSS is
 // not an option here because it has no such prompt mode.
 //
-// Same sidecar discipline as the MM3 caption: written beside the audio, an
-// existing file backed up to `.prev` ONCE, never re-overwritten.
+// Written beside the audio and overwritten in place. Unlike the MM3 sidecar
+// there is no `.prev` backup: a YuE2 caption is always machine-written from
+// the ACE caption and labels, so a re-run can regenerate it, and a stale
+// backup only invites reading the wrong text.
 
 import fs from 'fs';
 import path from 'path';
@@ -67,10 +69,9 @@ export function buildYue2DatasetCaptionPrompt(sample: TrainingSample, ds: Traini
   return lines.join('\n');
 }
 
-/** Write the sidecar with the one-time `.prev` backup. */
+/** Write (or overwrite) the sidecar. */
 export function writeYue2Sidecar(audioPath: string, text: string): string {
   const dst = yue2SidecarPath(audioPath);
-  if (fs.existsSync(dst) && !fs.existsSync(`${dst}.prev`)) fs.renameSync(dst, `${dst}.prev`);
   fs.writeFileSync(dst, `${text.trim()}\n`, 'utf8');
   return path.basename(dst);
 }
