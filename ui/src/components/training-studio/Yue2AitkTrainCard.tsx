@@ -1348,7 +1348,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         <summary className="cursor-pointer text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.advancedSettings', 'Advanced')}</summary>
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.baseMatchedKnobsHint', 'Blank uses the default shown in grey. The report does not state a fine-tuning learning rate or the dropout rates, so those defaults are agreed guesses; the rest are the report\'s own values.')}</p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+        <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mt-2">
           {([
             ['lr', t('trainingStudio.yue2.method.lr', 'Learning rate'), t('trainingStudio.yue2.method.bmLrInfo', 'AdamW peak learning rate for both halves. The report gives full-model rates only (3e-4 joint, annealed to 3e-5), which do not transfer to an adapter; 1e-4 is the agreed default.'), 'default 1e-4'],
             ['warmup', t('trainingStudio.yue2.method.warmup', 'Warmup steps'), t('trainingStudio.yue2.method.warmupInfo', 'Linear warmup to the peak rate, then cosine decay to a 0.1x floor at the step count. Blank = 3% of the steps, the base\'s own joint-phase warmup share.'), 'default 3% of steps'],
