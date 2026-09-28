@@ -87,7 +87,7 @@ Defaults the card ships:
 | Save every | 10 updates | |
 | Lyric timing supervision | Off | Not used by the recipe. |
 | Checkpoint previews | On, in parallel, one 300 s draft take per checkpoint | The run's ladder; see Picking the adapter. |
-| Stop the engine during training | Off | The parallel previews need the engine up. Turn it on (and previews off) on a smaller card. |
+| Stop the engine during training | Off | In the Checkpoint previews section. The parallel previews need the engine up, so turning it on hides "In parallel with training". Turn it on (and previews off) on a smaller card. |
 
 When to move off them:
 

@@ -1319,7 +1319,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </p>;
       })()}
       <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
-        <summary className="cursor-pointer text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.baseMatchedKnobs', 'Base-matched settings')}</summary>
+        <summary className="cursor-pointer text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.advancedSettings', 'Advanced')}</summary>
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.baseMatchedKnobsHint', 'Blank uses the default shown in grey. The report does not state a fine-tuning learning rate or the dropout rates, so those defaults are agreed guesses; the rest are the report\'s own values.')}</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
           {([
@@ -1345,19 +1345,19 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           ))}
         </div>
       </details>
-      <Toggle
-        accent="amber"
-        className="mt-3"
-        checked={form.stopEngine !== false}
-        disabled={active || preparing || starting || yue2RunAllActive}
-        onChange={checked => setForm(previous => ({ ...previous, stopEngine: checked }))}
-        label={t('trainingStudio.yue2.method.stopEngine', 'Stop the engine during training')}
-        info={t('trainingStudio.yue2.method.stopEngineHelp', 'Off by default since the ladder previews render while training runs and need the engine up (about 14 GB for the trainer plus 10-12 GB for the engine and a render). On: the trainer gets the whole GPU, generation is unavailable, and no previews render until the run ends; use it on a smaller card and render the ladder afterwards.')}
-      />
       <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/30 dark:bg-black/10 p-3">
         <summary className="cursor-pointer text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
           {t('trainingStudio.yue2.method.previewTitle', 'Checkpoint previews (optional)')}
         </summary>
+        <Toggle
+          accent="amber"
+          className="mt-2"
+          checked={form.stopEngine !== false}
+          disabled={active || preparing || starting || yue2RunAllActive}
+          onChange={checked => setForm(previous => ({ ...previous, stopEngine: checked }))}
+          label={t('trainingStudio.yue2.method.stopEngine', 'Stop the engine during training')}
+          info={t('trainingStudio.yue2.method.stopEngineHelp', 'Off by default since the ladder previews render while training runs and need the engine up (about 14 GB for the trainer plus 10-12 GB for the engine and a render). On: the trainer gets the whole GPU, generation is unavailable, and no previews render until the run ends; use it on a smaller card and render the ladder afterwards.')}
+        />
         <Toggle
           accent="amber"
           className="mt-2"
@@ -1367,7 +1367,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           label={t('trainingStudio.yue2.method.previewEnable', 'Render a preview at every saved checkpoint')}
           info={t('trainingStudio.yue2.method.previewManual', 'On by default: each checkpoint gets one draft take (12 decoder steps, 300 s) rendered while training continues, so the ladder is ready to score when the run ends. Off: render rungs by hand from the ladder below.')}
         />
-        {form.preview?.enabled && <Toggle
+        {form.preview?.enabled && form.stopEngine === false && <Toggle
           accent="amber"
           size="sm"
           className="mt-2"
@@ -1377,6 +1377,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           label={t('trainingStudio.yue2.method.previewParallel', 'In parallel with training')}
           info={t('trainingStudio.yue2.method.previewParallelInfo', 'Render each checkpoint\'s preview while training continues; needs the engine up (this also turns "Stop the engine during training" off). Off: training pauses at each checkpoint, renders, and resumes, which fits a smaller card but takes longer.')}
         />}
+        {form.preview?.enabled && form.stopEngine !== false && <p className="mt-2 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.previewEngineStopped', 'The engine is stopped during training, so only the final checkpoint gets a preview automatically; render the other rungs from the ladder after the run.')}</p>}
         {form.preview?.enabled && <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
           {field(t('trainingStudio.yue2.method.previewSeconds', 'Preview seconds'), 'seconds', 'number', form.preview, value => setForm(previous => {
             const seconds = Math.max(8, Math.min(360, Number(value) || 300));
