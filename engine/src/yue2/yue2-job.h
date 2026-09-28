@@ -350,6 +350,7 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req_in) {
     // so it never needs the VAE resident.
     const bool evict_strict = !g_keep_loaded;
     auto       req          = std::make_shared<Yue2Request>(std::move(req_in));
+    req->songs_dropped      = &job->songs_dropped;
     if (!evict_strict &&
         !yue2_load_parts(&g_yue2, /*want_lm=*/true, /*want_vae=*/!req->plan_only && !req->semantic_only, req->vae_variant,
                          /*want_encoder=*/false, &err)) {

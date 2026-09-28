@@ -723,6 +723,9 @@ GET  /job?id=N&result=1          Result. /lm and /understand: JSON array of
 GET  /job?id=N&latent=1          /synth: the first track's post-DiT latents, raw
                                  f32 [T*64].
 POST /job?id=N&cancel=1          Cancel a job.
+POST /job?id=N&drop_songs=MASK   YuE2 batch: take songs out (bit b = song b);
+                                 the rest carry on. {"songs_dropped":MASK}.
+                                 Tracks keep their batch song index.
 GET  /jobs                       Every job in the table.
 
 GET  /health                     {"status":"ok"}

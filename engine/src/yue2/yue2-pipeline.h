@@ -196,6 +196,7 @@ static uint64_t yue2_token_hash(const std::vector<int32_t> & ids) {
 // semantic draws exactly as the single-song pipeline shared one RNG), its
 // plan, its prompt and its codec stream. B == 1 is bit-for-bit the old path.
 struct Yue2SongState {
+    int                  src_song = 0;    // index in the request's batch; tracks report it, so songs dropped before the render leave no gap to guess at
     std::mt19937_64      rng;
     uint64_t             seed       = 0;
     uint64_t             noise_seed = 0;  // NAR noise for variation j is noise_seed + j
@@ -253,6 +254,10 @@ static Yue2SamplingParams yue2_stage_params(const Yue2LmConfig::Stage & st, cons
 // prefilled once and copied into the other sets, and a song that has hit
 // ABC_END keeps feeding ABC_END as a passive row so the graph shape holds
 // until every song is done (upstream 2d21090f's design).
+static bool yue2_song_dropped(const Yue2Request & req, int b) {
+    return req.songs_dropped && b < 32 && ((req.songs_dropped->load(std::memory_order_relaxed) >> b) & 1u);
+}
+
 static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Yue2Request & req,
                                  std::vector<Yue2SongState> & songs, std::atomic<bool> * cancel,
                                  const Yue2ProgressFn & progress, double * stage_ms, std::string * err) {
@@ -361,6 +366,10 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
         int n_active = 0;
         for (int p = 0; p < P; p++) {
             Yue2SongState & sg = songs[(size_t) plan_idx[(size_t) p]];
+            if (!done[(size_t) p] && yue2_song_dropped(req, plan_idx[(size_t) p])) {
+                done[(size_t) p] = true;
+                sg.stage_end_reason[YUE2_STAGE_PLAN] = "dropped";
+            }
             if (done[(size_t) p]) {
                 next_ids[(size_t) p] = YUE2_ABC_END;  // passive row
                 continue;
@@ -569,6 +578,7 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         done[(size_t) b] = true;
     }
     std::vector<bool>                 by_threshold((size_t) B, false);
+    std::vector<bool>                 dropped((size_t) B, false);
     std::vector<int32_t>              next_ids((size_t) S, YUE2_MUSIC_END);
     static const char * end_trace_path = std::getenv("YUE2_END_TRACE");
     const bool trace = end_trace_path && *end_trace_path && B == 1;
@@ -584,6 +594,10 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         int n_active = 0;
         for (int b = 0; b < B; b++) {
             Yue2SongState & sg = songs[(size_t) b];
+            if (!done[(size_t) b] && yue2_song_dropped(req, b)) {
+                done[(size_t) b]    = true;
+                dropped[(size_t) b] = true;
+            }
             if (done[(size_t) b]) {
                 for (int k = 0; k < per; k++) next_ids[(size_t) (sg.pair_base + k)] = YUE2_MUSIC_END;
                 continue;
@@ -720,8 +734,9 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         Yue2SongState & sg = songs[(size_t) b];
         if (sg.keep_codes) continue;  // replayed: its end reason is the first pass's
         sg.stage_end_reason[YUE2_STAGE_SEMANTIC] =
-            done[(size_t) b] ? (by_threshold[(size_t) b] ? "eos_threshold" : "eos")
-                             : (preview_capped ? "preview_limit" : "limit_hit");
+            dropped[(size_t) b] ? "dropped"
+            : done[(size_t) b]  ? (by_threshold[(size_t) b] ? "eos_threshold" : "eos")
+                                : (preview_capped ? "preview_limit" : "limit_hit");
         fprintf(stderr, "[YuE2-AR-Tokens] semantic song=%d n=%zu hash=%016llx\n", b, sg.codec_ids.size(),
                 (unsigned long long) yue2_token_hash(sg.codec_ids));
     }
@@ -1043,6 +1058,7 @@ static bool yue2_pipeline_run_ar(Yue2Model & m, const BPETokenizer & tok, Yue2Re
     songs.assign((size_t) B, Yue2SongState{});
     for (int b = 0; b < B; b++) {
         Yue2SongState & sg = songs[(size_t) b];
+        sg.src_song = b;
         // Song b of a plain batch is the request's prompt at seed + b; a
         // "songs" entry brings its own prompt, and its own seeds when it says so.
         sg.seed       = req.seed + (uint64_t) b;
@@ -1107,7 +1123,10 @@ static bool yue2_pipeline_run_ar(Yue2Model & m, const BPETokenizer & tok, Yue2Re
         }
         out->stage_ms[YUE2_STAGE_SEMANTIC] += stage_ms;
         bool runaway = false;
-        for (int b = 0; b < B; b++) runaway |= songs[(size_t) b].stage_end_reason[YUE2_STAGE_SEMANTIC] == "limit_hit";
+        // A song dropped from the batch is never worth another try.
+        for (int b = 0; b < B; b++) {
+            runaway |= songs[(size_t) b].stage_end_reason[YUE2_STAGE_SEMANTIC] == "limit_hit" && !yue2_song_dropped(req, b);
+        }
         if (!runaway || attempt >= req.semantic_retries || (cancel && cancel->load())) break;
         yue2_ar_kv_cache_free(&sem_cache);
         for (int b = 0; b < B; b++) {
@@ -1148,6 +1167,19 @@ static bool yue2_pipeline_run_ar(Yue2Model & m, const BPETokenizer & tok, Yue2Re
         return true;
     }
 
+    // Songs dropped from the batch are not rendered: the kept songs render
+    // in order and each track reports its batch index (src_song). Each kept song still
+    // reads its own rows of the semantic cache through cond_set.
+    for (int b = B - 1; b >= 0; b--) {
+        if (!yue2_song_dropped(req, b)) continue;
+        fprintf(stderr, "[YuE2] song %d was dropped from the batch; not rendering it\n", b);
+        songs.erase(songs.begin() + b);
+    }
+    if (songs.empty()) {
+        yue2_ar_kv_cache_free(&sem_cache);
+        if (err) *err = "cancelled";
+        return false;
+    }
     if (!yue2_seal_chunks(m, songs, sem_cache, &ho->nar_cache, &ho->plan, err, (int64_t) req.nar_chunk_frames)) {
         yue2_ar_kv_cache_free(&sem_cache);
         return false;
@@ -1204,7 +1236,7 @@ static bool yue2_pipeline_run_nar(Yue2Model & m, const Yue2Request & req, Yue2Ar
                 return false;
             }
             Yue2TrackResult tr;
-            tr.song         = b;
+            tr.song         = songs[(size_t) b].src_song;
             tr.variation    = j;
             tr.seed         = songs[(size_t) b].seed;
             tr.noise_seed   = songs[(size_t) b].noise_seed + (uint64_t) j;

@@ -155,7 +155,15 @@ as `[YuE2-Job] <id>: FAILED: <error>`. A `plan_only` request takes up to
 as `max_plan_batch`; the server's auto-replan uses it to draw every batch member's plan
 attempts in one pass. During the semantic stage, `GET /job` carries `songs_done`, a bitmask
 of the batch's songs that have ended and are waiting on the rest (0 in every other stage and
-family).
+family). `POST /job?id=N&drop_songs=MASK` takes songs out of a running batch
+(`Job::songs_dropped`, read through `Yue2Request::songs_dropped`): the plan and semantic
+loops end a dropped song at once (end reason `dropped`), the recompose retry ignores it, and
+it is erased from `songs` before `yue2_seal_chunks`, so it costs no NAR or VAE time. Tracks
+report `song` as the batch index (`Yue2SongState::src_song`), so a gap is visible rather
+than shifting later tracks; the server picks each member's tracks by that index. Dropping
+every song fails the job as cancelled. The server's queue X routes through
+`dropYue2BatchMember` (backends/yue2/generate.ts) and cancels the engine job only when the
+last live member goes.
 Other modules in `yue2/` serve training and analysis: MERT and the
 tokenizer head (`yue2-mert.h`, `yue2-tok-head.h`), MMS_FA forced alignment
 (`yue2-mmsfa.h`, `yue2-ctc-align.h`, also behind `POST /yue2/align`), and

@@ -26,6 +26,7 @@ import {
 } from '../services/generation/gpuLane.js';
 import { isActiveJob, type GenerationJob } from '../services/generation/jobTypes.js';
 import { pollUntilDone } from '../services/generation/pollUntilDone.js';
+import { dropYue2BatchMember } from '../services/backends/yue2/generate.js';
 import { translateParams } from '../services/generation/translateParams.js';
 import { timbreReferenceMissing } from '../services/generation/sourceAudio.js';
 import { buildEnvelope, GenerationEnvelopeError } from '../services/generation/envelope.js';
@@ -437,6 +438,8 @@ router.post('/cancel/:id', (req, res) => {
   if (!job) { res.status(404).json({ error: 'Job not found' }); return; }
 
   job.status = 'cancelled';
+  // One song of a running YuE2 batch: the engine drops it, the rest carry on.
+  if (dropYue2BatchMember(job)) { res.json({ success: true, jobId: job.id }); return; }
   if (job.aceJobId) {
     aceClient.cancelJob(job.aceJobId).catch(() => {});
   }

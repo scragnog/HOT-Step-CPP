@@ -375,6 +375,8 @@ struct Job {
     // YuE2 batches: bit b set = song b has finished the running stage and is
     // waiting on the rest of the batch. 0 for every other family.
     std::atomic<uint32_t> songs_done{ 0 };
+    // YuE2 batches: bit b set = song b left the batch (POST /job?drop_songs=).
+    std::atomic<uint32_t> songs_dropped{ 0 };
 
     // memory ordering contract: result_body and result_mime are written
     // before status is stored (seq_cst). the client loads status (seq_cst)
@@ -3701,6 +3703,18 @@ int main(int argc, char ** argv) {
             job->cancel.store(true);
             fprintf(stderr, "[Server] Cancel requested for job %s\n", job->id.c_str());
             res.set_content("{\"status\":\"cancelled\"}", "application/json");
+            return;
+        }
+        // ?drop_songs=<mask>: YuE2 batch, take songs out of a running job.
+        // The rest carry on; a dropped song is neither composed further nor
+        // rendered, and the job's tracks are the kept songs in order.
+        if (req.has_param("drop_songs")) {
+            const uint32_t mask = (uint32_t) std::strtoul(req.get_param_value("drop_songs").c_str(), nullptr, 10);
+            const uint32_t all  = job->songs_dropped.fetch_or(mask) | mask;
+            fprintf(stderr, "[Server] Job %s: songs dropped mask now %u\n", job->id.c_str(), (unsigned) all);
+            char buf[64];
+            snprintf(buf, sizeof(buf), "{\"songs_dropped\":%u}", (unsigned) all);
+            res.set_content(buf, "application/json");
             return;
         }
         json_error(res, 400, "Unknown action");

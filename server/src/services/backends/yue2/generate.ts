@@ -726,6 +726,32 @@ function failYue2Job(job: GenerationJob, err: any): void {
   }
 }
 
+/** Engine batches in flight, by member job id: the queue's X on one song of
+ *  a batch reaches the engine through here (dropYue2BatchMember). */
+const yue2RunningBatches = new Map<string, { engineJobId: string; members: Array<{ job: GenerationJob; bits: number }> }>();
+
+/** The queue's X on one song of a running YuE2 batch. Before 2026-09-28 it
+ *  only marked the job cancelled: the engine kept recomposing that song and
+ *  the rest of the batch waited on it, and an X on the lead cancelled the
+ *  whole engine job. Now the engine drops the song and the rest carry on.
+ *  Call after setting job.status = 'cancelled'. True = handled; false = the
+ *  job is not in a running batch, or it was the last live member, so the
+ *  caller cancels it the ordinary way. */
+export function dropYue2BatchMember(job: GenerationJob): boolean {
+  const batch = yue2RunningBatches.get(job.id);
+  const me = batch?.members.find(m => m.job === job);
+  if (!batch || !me) return false;
+  if (batch.members.every(m => (m.job.status as string) === 'cancelled')) {
+    aceClient.cancelJob(batch.engineJobId).catch(() => {});
+    return false;
+  }
+  aceClient.dropSongs(batch.engineJobId, me.bits).catch(err =>
+    console.warn(`[YuE2] Could not drop job ${job.id} from engine batch ${batch.engineJobId}: ${err?.message || err}`));
+  job.stage = 'Cancelled';
+  console.log(`[Generate] Job ${job.id} left YuE2 batch ${batch.engineJobId}; the rest carry on`);
+  return true;
+}
+
 /** Queue coalescing. The job holding the GPU lane pulls compatible YuE2 jobs
  *  still waiting behind it into the same engine call, one "songs" entry each,
  *  so the AR stages decode every song in one batch. Throughput, not latency:
@@ -837,12 +863,25 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
   // Each member's songs as a bitmask over the batch (song-major, contiguous),
   // to read the engine's per-song songs_done against.
   const songBits: number[] = [];
+  const songStart = new Map<Yue2PreparedJob, number>();
   let songCount = 0;
   for (const m of members) {
     const n = Math.max(1, m.req.lm_batch_size ?? 1);
     songBits.push(((1 << n) - 1) << songCount);
+    songStart.set(m, songCount);
     songCount += n;
   }
+  const allCancelled = () => members.every(m => (m.job.status as string) === 'cancelled');
+  // What the poll watchdog watches for a batch: cancelled only once every
+  // member is (one member's X drops its songs, dropYue2BatchMember), and the
+  // stage/progress of a member still in it.
+  const pollView: GenerationJob = members.length === 1 ? job : {
+    get status() { return allCancelled() ? 'cancelled' : 'running'; },
+    get stage() { return (members.find(m => (m.job.status as string) !== 'cancelled') ?? lead).job.stage; },
+    get progress() { return (members.find(m => (m.job.status as string) !== 'cancelled') ?? lead).job.progress; },
+    set acePhase(_v: unknown) { /* the ticker sets each member's */ },
+    set acePhaseProgress(_v: unknown) { /* the ticker sets each member's */ },
+  } as unknown as GenerationJob;
 
   let detailTimer: NodeJS.Timeout | undefined;
   let laneReleased = false;
@@ -860,6 +899,13 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
     // known once the job reports its tracks, and is recorded then.
     const reqSeed = lead.req.seed ?? -1;
     job.aceJobId = sub.job_id;   // standard /job id — /cancel/:id reaches it unchanged
+    if (members.length > 1) {
+      const entry = { engineJobId: sub.job_id, members: members.map((m, i) => ({ job: m.job, bits: songBits[i] })) };
+      for (const m of members) yue2RunningBatches.set(m.job.id, entry);
+      // An X that landed between planning and here reached no engine job yet.
+      const early = entry.members.filter(e => (e.job.status as string) === 'cancelled').reduce((a, e) => a | e.bits, 0);
+      if (early && !allCancelled()) await aceClient.dropSongs(sub.job_id, early).catch(() => {});
+    }
     if (reqSeed >= 0) {
       deps.attempt.effective.seed = reqSeed;
       job.params.seed = reqSeed;
@@ -876,7 +922,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
     // phase/phase_step/phase_total into YuE2's own stage names.
     detailTimer = setInterval(() => {
       void (async () => {
-        if (job.status === 'cancelled') return;
+        if (allCancelled()) return;
         try {
           const status = await aceClient.pollJob(sub.job_id);
           const phase = status.phase as string | undefined;
@@ -914,7 +960,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
     }, DETAIL_POLL_MS);
     detailTimer.unref?.();
 
-    await deps.pollUntilDone(sub.job_id, job, deps.signal, timeoutMinutes);
+    await deps.pollUntilDone(sub.job_id, pollView, deps.signal, timeoutMinutes);
     clearInterval(detailTimer);
     detailTimer = undefined;
     const generateMs = Math.round(performance.now() - submitStart);
@@ -945,22 +991,29 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
       : parts.map((_, i) => ({ song: Math.floor(i / perSong), variation: i % perSong, seed: reqSeed, noise_seed: reqSeed }));
   } catch (err: any) {
     if (detailTimer) clearInterval(detailTimer);
+    for (const m of members) yue2RunningBatches.delete(m.job.id);
     releaseFollowers(`The batch render failed (${err?.message || err})`);
     failYue2Job(job, err);
     return;
   }
+  for (const m of members) yue2RunningBatches.delete(m.job.id);
 
   // ── Finish each member from its own slice of the tracks ──
   // Song-major, so a member's tracks are contiguous: lm_batch_size songs
   // times synth_batch_size variations. Song numbers are renumbered per job.
-  const finishOne = async (m: Yue2PreparedJob, offset: number) => {
+  // Tracks are picked by the batch song index the engine reports: a song
+  // dropped from the batch (dropYue2BatchMember) is not rendered, so the
+  // tracks after it are not where their position would say.
+  const finishOne = async (m: Yue2PreparedJob) => {
     const count = yue2TracksPerJob(m, req);
-    const slice = parts.slice(offset, offset + count);
-    const songBase = trackDetails[offset]?.song ?? 0;
-    const details = trackDetails.slice(offset, offset + count).map(td => ({ ...td, song: td.song - songBase }));
+    const first = songStart.get(m)!;
+    const n = Math.max(1, m.req.lm_batch_size ?? 1);
+    const mine = trackDetails.flatMap((td, i) => (td.song >= first && td.song < first + n ? [i] : []));
+    const slice = mine.map(i => parts[i]);
+    const details = mine.map(i => ({ ...trackDetails[i], song: trackDetails[i].song - first }));
     if ((m.job.status as string) === 'cancelled') { failYue2Job(m.job, new Error('Cancelled')); return; }
     if (slice.length !== count) {
-      failYue2Job(m.job, new Error(`YuE2 returned ${parts.length} track(s) for a batch that expected ${offset + count}`));
+      failYue2Job(m.job, new Error(`YuE2 returned ${slice.length} track(s) for this song where ${count} were expected`));
       return;
     }
     // A member's own view of the result: its first track's score and reasons
@@ -979,20 +1032,15 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
       failYue2Job(m.job, err);
     }
   };
-  const offsets = new Map<Yue2PreparedJob, number>();
-  {
-    let offset = 0;
-    for (const m of members) { offsets.set(m, offset); offset += yue2TracksPerJob(m, req); }
-  }
   // Only some of the finishing work touches the GPU: StableStep, Whisper, the
   // forced aligner and cover art. A VST chain, mastering and the normaliser
   // are CPU, so those members finish at once, side by side, and never wait
   // for the lane. Members with GPU work wait their turn and run one at a time.
   const cpuOnly = members.filter(m => !yue2FinishNeedsGpu(m.job.params));
   const gpu = members.filter(m => yue2FinishNeedsGpu(m.job.params));
-  await Promise.all(cpuOnly.map(m => finishOne(m, offsets.get(m)!)));
+  await Promise.all(cpuOnly.map(m => finishOne(m)));
   if (gpu.length) {
-    const finishGpu = async () => { for (const m of gpu) await finishOne(m, offsets.get(m)!); };
+    const finishGpu = async () => { for (const m of gpu) await finishOne(m); };
     if (laneReleased && deps.runOnLane) {
       for (const m of gpu) if ((m.job.status as string) !== 'cancelled') m.job.stage = 'YuE2: waiting for the GPU to finish...';
       await deps.runOnLane(finishGpu);

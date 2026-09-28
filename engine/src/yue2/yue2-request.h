@@ -25,6 +25,7 @@
 
 #include "yyjson.h"
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
@@ -100,6 +101,10 @@ struct Yue2Request {
     // is healthy can still be composed into a six-minute runaway; this
     // catches that in the seconds the stage costs, not the minutes a render does.
     int         semantic_retries = 0;
+    // Runtime only, never parsed: the job's drop mask (POST /job?drop_songs=).
+    // Bit b set = song b left the batch (its queue entry was removed), so the
+    // plan and compose loops end it at once and the render leaves it out.
+    const std::atomic<uint32_t> * songs_dropped = nullptr;
 
     uint64_t seed         = 0;
     bool     seed_present = false;

@@ -182,7 +182,10 @@ What sets it apart:
   queued from Lyric Studio is the typical case. Songs per minute go up; each song finishes
   when its batch does rather than as soon as its own turn would have. A job that needs a
   different adapter, guidance or sampler setting waits for its own turn. A batch that
-  fails hands its passengers back to the queue to render alone. Batched decoding rounds
+  fails hands its passengers back to the queue to render alone. Removing one song of a
+  running batch from the queue (its X) takes only that song out: the engine stops planning
+  or composing it, never recomposes it, leaves it out of the render, and the rest of the
+  batch carries on. That holds for the song whose job started the batch too. Batched decoding rounds
   differently from solo decoding, so a seed rendered in a batch can differ from the same
   seed rendered alone; the Batch Size setting has always had the same property.
 - With Keep Models in VRAM on (Settings, Environment tab), a composed song renders on a

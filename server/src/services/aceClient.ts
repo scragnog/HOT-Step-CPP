@@ -583,6 +583,15 @@ export const aceClient = {
     });
   },
 
+  /** POST /job?id=N&drop_songs=MASK — take songs out of a running YuE2
+   *  batch (bit b = song b). The rest of the batch carries on. */
+  async dropSongs(jobId: string, mask: number): Promise<void> {
+    await aceFetch(`${BASE}/job?id=${jobId}&drop_songs=${mask >>> 0}`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(TIMEOUT_POLL),
+    });
+  },
+
   /** Check if ace-server is reachable */
   async isReachable(): Promise<boolean> {
     try {
