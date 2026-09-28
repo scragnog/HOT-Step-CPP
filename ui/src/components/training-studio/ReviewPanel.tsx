@@ -32,7 +32,7 @@ export const ReviewPanel: React.FC = () => {
   const loadBatches = useTrainingStore(s => s.loadYue2Batches);
   const queued = new Set(batches.filter(b => b.status === 'running' || b.status === 'paused')
     .flatMap(b => b.items.filter(i => i.refineRun && (i.status === 'pending' || i.status === 'running')).map(i => i.refineRun)));
-  const finishable = rest.filter(r => r.best && !r.live && r.status !== 'running' && !queued.has(r.refineRun));
+  const finishable = rest.filter(r => r.best && !r.finished && !r.live && r.status !== 'running' && !queued.has(r.refineRun));
   const [finishOpen, setFinishOpen] = useState(false);
   const [skip, setSkip] = useState<Record<string, boolean>>({});
   const [finishing, setFinishing] = useState(false);

@@ -252,6 +252,16 @@ export function setYue2ReviewComplete(output: string, complete: boolean): void {
   else fs.rmSync(marker, { force: true });
 }
 
+/** "Finished": a rung was linked and the run cleaned up. A marker file in the
+ *  run folder; runs parked under `refined/` by the old cleanup count too. */
+const FINISHED_MARKER = 'finished';
+export function yue2RunFinished(output: string): boolean {
+  return /[\\/]refined[\\/]/i.test(path.resolve(output)) || fs.existsSync(path.join(output, FINISHED_MARKER));
+}
+export function setYue2RunFinished(output: string): void {
+  fs.writeFileSync(path.join(output, FINISHED_MARKER), `${new Date().toISOString()}\n`, 'utf8');
+}
+
 export function listYue2AitkRuns(datasetId: string, datasetSlug?: string): Yue2AitkRunRecord[] {
   return readIndex().filter(r => r.datasetId === datasetId || (!!datasetSlug && r.datasetSlug === datasetSlug))
     .map(r => ({ ...r, checkpoints: rungsOf(r, checkpointRecords(r.output)) }))

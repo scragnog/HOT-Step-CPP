@@ -124,8 +124,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
     setCleaning(true);
     try {
       const r = await runYue2Cleanup(datasetId, { run: cleanup.run, step: cleanup.step, ...(over ?? choice) });
-      const moved = r.movedTo ? ` ${t('trainingStudio.refine.cleanupMoved', 'Moved to {{dir}}.', { dir: r.movedTo })}` : '';
-      setCleanupNote(t('trainingStudio.refine.cleanupDone', 'Removed {{what}}; about {{size}} freed.', { what: r.done.join(', ') || 'nothing', size: mib(r.freedBytes) }) + moved);
+      setCleanupNote(t('trainingStudio.refine.cleanupDone', 'Removed {{what}}; about {{size}} freed.', { what: r.done.join(', ') || 'nothing', size: mib(r.freedBytes) }));
       setCleanup(null);
       await onChanged();
     } catch (err) { fail(err); }

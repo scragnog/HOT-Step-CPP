@@ -266,7 +266,7 @@ function finishLadder(item: Yue2BatchItem): void {
   refreshYue2PresetsForJointCheckpoint({ slug: ds.slug, lyricsSetId: ds.lyricsSetId }, ckpt.arPath, ckpt.narPath, known);
   const result = runYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir, lyricsSetId: ds.lyricsSetId }, runId, step,
     { caches: true, otherCheckpoints: true, otherRuns: true, resume: true, otherPreviews: true });
-  console.log(`[Training] yue2 batch finish ${ds.slug}: linked step ${step} of ${runId}; removed ${result.done.join(', ') || 'nothing'}${result.movedTo ? `; moved to ${result.movedTo}` : ''}`);
+  console.log(`[Training] yue2 batch finish ${ds.slug}: linked step ${step} of ${runId}; removed ${result.done.join(', ') || 'nothing'}`);
 }
 
 export function pauseBatch(id: string): 'ok' | 'not_found' | 'not_active' {
