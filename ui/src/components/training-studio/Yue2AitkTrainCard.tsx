@@ -1005,6 +1005,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <div>
           <label className="flex flex-col gap-1">
             <ParamLabel
+              rootClassName="flex items-center h-4"
               label={t('trainingStudio.yue2.method.resumePrevious', 'Resume a previous run')}
               className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
               info={t('trainingStudio.yue2.method.resumePreviousInfo', 'Continues an earlier run from a saved optimizer checkpoint, with the original dataset, base, optimizer and adapter settings restored. Pick "Start a new run" to train from scratch instead; a run with no saved optimizer state, or one still running, cannot be resumed.')}
@@ -1033,21 +1034,27 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           </label>
           {resumeChoice && <p className="mt-1 text-[11px] text-zinc-500">The server restores the original dataset, base, optimizer and adapter settings. Set Steps to the total step you want to reach.</p>}
         </div>
-        <div className="md:pt-6">
-          <Toggle
-            accent="amber"
-            checked={!!autoCaption}
-            disabled={!captionDefault || !!resumeChoice || active || preparing || starting || yue2RunAllActive}
-            onChange={checked => setForm(previous => ({ ...previous, autoCaption: checked ? { provider: captionProvider ?? 'gemini' } : false }))}
-            label={t('trainingStudio.yue2.method.autoCaption', 'Caption tracks that have no YuE2 caption')}
-            info={captionDefault
-              ? t('trainingStudio.yue2.method.autoCaptionHint', 'Before training, tracks without a .yue2.txt are re-captioned from the audio (ACE, MM3 and YuE2 captions; lyrics and BPM are left alone). Skipped when every track has one. Off: trains on the long ACE caption for those tracks instead.')
-              : t('trainingStudio.yue2.method.autoCaptionNone', 'No captioner available: add a Gemini key in Settings → AI Services or install MOSS. Tracks without a .yue2.txt train on the long ACE caption.')}
-          />
-          {autoCaption && <div className="ml-6 mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2 h-4">
+            <Toggle
+              size="sm"
+              accent="amber"
+              checked={!!autoCaption}
+              disabled={!captionDefault || !!resumeChoice || active || preparing || starting || yue2RunAllActive}
+              onChange={checked => setForm(previous => ({ ...previous, autoCaption: checked ? { provider: captionProvider ?? 'gemini' } : false }))}
+              aria-label={t('trainingStudio.yue2.method.autoCaption', 'Caption tracks that have no YuE2 caption')}
+            />
+            <ParamLabel
+              label={t('trainingStudio.yue2.method.autoCaption', 'Caption tracks that have no YuE2 caption')}
+              className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+              info={captionDefault
+                ? t('trainingStudio.yue2.method.autoCaptionHint', 'Before training, tracks without a .yue2.txt are re-captioned from the audio (ACE, MM3 and YuE2 captions; lyrics and BPM are left alone). Skipped when every track has one. Off: trains on the long ACE caption for those tracks instead.')
+                : t('trainingStudio.yue2.method.autoCaptionNone', 'No captioner available: add a Gemini key in Settings → AI Services or install MOSS. Tracks without a .yue2.txt train on the long ACE caption.')}
+            />
+          </div>
+          {autoCaption && <div className="flex flex-col gap-2">
             <StyledSelect
               accent="amber"
-              size="sm"
               value={autoCaption.provider}
               disabled={active || preparing || starting || yue2RunAllActive}
               onChange={value => setForm(previous => ({ ...previous, autoCaption: { provider: value } }))}
@@ -1055,16 +1062,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
                 ...(gemini ? [{ value: 'gemini' as const, label: t('trainingStudio.yue2.method.captionGemini', 'Gemini (cloud, hears the audio)') }] : []),
                 ...(mossOk ? [{ value: 'moss' as const, label: t('trainingStudio.yue2.method.captionMoss', 'MOSS (local, hears the audio)') }] : []),
               ]}
-              className="w-auto"
+              className="w-full"
             />
             {autoCaption.provider === 'gemini' && gemini && gemini.models.length > 0 && <StyledSelect
               accent="amber"
-              size="sm"
               value={autoCaption.model || gemini.defaultModel}
               disabled={active || preparing || starting || yue2RunAllActive}
               onChange={value => setForm(previous => ({ ...previous, autoCaption: { provider: 'gemini', model: value } }))}
               options={gemini.models.map(m => ({ value: m, label: m }))}
-              className="w-auto"
+              className="w-full"
             />}
           </div>}
         </div>
