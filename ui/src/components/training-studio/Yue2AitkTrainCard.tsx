@@ -890,30 +890,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       setError(err instanceof Error ? err.message : String(err));
     } finally { setStarting(false); }
   };
-  // Refinement: the finished run's decoder trains on, planner frozen, with
-  // checkpoints every 10 steps so the reconstruction stop lands near the knee.
-  // A new run beside the original; the original is never touched. The
-  // planner stays frozen: it is the sensitive half (late-song decay past its
-  // KL), the decoder is where likeness keeps improving.
-  const [refineRun, setRefineRun] = useState('');
-  const [refineBudget, setRefineBudget] = useState(500);
-  const refine = async () => {
-    const run = aitkRuns.find(r => r.jobId === refineRun);
-    const last = run?.checkpoints.filter(c => !!c.optimizerPath).sort((a, b) => b.step - a.step)[0];
-    if (!run || !last) return;
-    setStarting(true); setError('');
-    try {
-      const result = await startYue2JointTrain(datasetId, { ...form, trainingMethod: 'aitk', refine: true,
-        resumeRunId: run.jobId, resumeStep: last.step, steps: last.step + refineBudget, saveEvery: 10,
-        stopMode: 'kl', narExtraSteps: last.step + refineBudget, freezePlannerNow: true,
-        reconStop: form.reconStop ?? DEFAULT_FORM.reconStop, reconStopWindow: 10,
-        lyricTiming, alignmentEnabled: lyricTiming, autoPrepare: false, checkpoint: '', output: '' } as Yue2JointTrainRequest);
-      if (typeof window !== 'undefined') window.localStorage.setItem(`${JOB_KEY}${datasetId}`, JSON.stringify(result.jobId));
-      setJob(await getJob(result.jobId));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally { setStarting(false); }
-  };
   const stop = async () => {
     if (!job) return;
     setError('');
@@ -1025,111 +1001,77 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-2 leading-relaxed">
         {t('trainingStudio.yue2.method.autoTrainHint', 'Start training prepares the dataset automatically, then trains the planner (AR) and decoder (NAR) adapters together with the YuE2 report recipe. Unchanged prepared data is reused.')}
       </p>
-      <Toggle
-        accent="amber"
-        className="mt-3"
-        checked={!!autoCaption}
-        disabled={!captionDefault || !!resumeChoice || active || preparing || starting || yue2RunAllActive}
-        onChange={checked => setForm(previous => ({ ...previous, autoCaption: checked ? { provider: captionProvider ?? 'gemini' } : false }))}
-        label={t('trainingStudio.yue2.method.autoCaption', 'Caption tracks that have no YuE2 caption')}
-        info={captionDefault
-          ? t('trainingStudio.yue2.method.autoCaptionHint', 'Before training, tracks without a .yue2.txt are re-captioned from the audio (ACE, MM3 and YuE2 captions; lyrics and BPM are left alone). Skipped when every track has one. Off: trains on the long ACE caption for those tracks instead.')
-          : t('trainingStudio.yue2.method.autoCaptionNone', 'No captioner available: add a Gemini key in Settings → AI Services or install MOSS. Tracks without a .yue2.txt train on the long ACE caption.')}
-      />
-      {autoCaption && <div className="ml-6 mt-1 flex flex-wrap items-center gap-2 text-[11px]">
-        <StyledSelect
-          accent="amber"
-          size="sm"
-          value={autoCaption.provider}
-          disabled={active || preparing || starting || yue2RunAllActive}
-          onChange={value => setForm(previous => ({ ...previous, autoCaption: { provider: value } }))}
-          options={[
-            ...(gemini ? [{ value: 'gemini' as const, label: t('trainingStudio.yue2.method.captionGemini', 'Gemini (cloud, hears the audio)') }] : []),
-            ...(mossOk ? [{ value: 'moss' as const, label: t('trainingStudio.yue2.method.captionMoss', 'MOSS (local, hears the audio)') }] : []),
-          ]}
-          className="w-auto"
-        />
-        {autoCaption.provider === 'gemini' && gemini && gemini.models.length > 0 && <StyledSelect
-          accent="amber"
-          size="sm"
-          value={autoCaption.model || gemini.defaultModel}
-          disabled={active || preparing || starting || yue2RunAllActive}
-          onChange={value => setForm(previous => ({ ...previous, autoCaption: { provider: 'gemini', model: value } }))}
-          options={gemini.models.map(m => ({ value: m, label: m }))}
-          className="w-auto"
-        />}
-      </div>}
-      {captioning && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" />
-        {t('trainingStudio.yue2.method.captioning', 'Captioning tracks without a YuE2 caption: {{done}} / {{total}}', { done: captioning.done, total: captioning.total })}</p>}
-      {lyricTiming && !cursorReady && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.lyricTimingNeedsAlignment', 'Run vocal stems and lyric alignment above before starting with timing supervision enabled.')}</p>}
-      <label className="mt-4 flex flex-col gap-1">
-        <ParamLabel
-          label={t('trainingStudio.yue2.method.resumePrevious', 'Resume a previous run')}
-          className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
-          info={t('trainingStudio.yue2.method.resumePreviousInfo', 'Continues an earlier run from a saved optimizer checkpoint, with the original dataset, base, optimizer and adapter settings restored. Pick "Start a new run" to train from scratch instead; a run with no saved optimizer state, or one still running, cannot be resumed.')}
-        />
-        <StyledSelect
-          accent="amber"
-          value={resumeChoice}
-          disabled={active || preparing || starting || yue2RunAllActive}
-          onChange={selectResume}
-          placeholder={t('trainingStudio.yue2.method.resumeStartNew', 'Start a new run')}
-          className="w-full"
-          options={[
-            { value: '', label: t('trainingStudio.yue2.method.resumeStartNew', 'Start a new run') },
-            ...aitkRuns.flatMap(run => run.checkpoints.filter(checkpoint => !!checkpoint.optimizerPath).map(checkpoint => ({
-              value: `${run.jobId}|${checkpoint.step}`,
-              label: `${new Date(run.createdAt).toLocaleString()} · step ${checkpoint.step} · ${run.status}${run.resumeError ? ` — ${run.resumeError}` : ''}${run.live ? ' — running' : ''}`,
-              disabled: !!run.resumeError || run.live,
-            }))),
-            ...aitkRuns.filter(run => !run.checkpoints.some(checkpoint => !!checkpoint.optimizerPath)).map(run => ({
-              value: `unavailable:${run.jobId}`,
-              label: `${new Date(run.createdAt).toLocaleString()} · ${run.resumeError || 'No saved optimizer checkpoint'}`,
-              disabled: true,
-            })),
-          ]}
-        />
-      </label>
-      {resumeChoice && <p className="mt-1 text-[11px] text-zinc-500">The server restores the original dataset, base, optimizer and adapter settings. Set Steps to the total step you want to reach.</p>}
-      <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
-        <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.refineTitle', 'Refine a finished adapter')}</div>
-        <p className="text-[11px] text-zinc-500 mt-1">{t('trainingStudio.yue2.method.refineHint', 'Trains the decoder on from where the run ended, planner frozen, with a checkpoint every 10 steps; the reconstruction stop ends it at the knee or at the budget. Writes a new run beside the original.')}</p>
-        <div className="mt-2 flex flex-wrap items-end gap-2">
-          <label className="flex flex-col gap-1 min-w-[260px] flex-1">
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+        <div>
+          <label className="flex flex-col gap-1">
             <ParamLabel
-              label={t('trainingStudio.yue2.method.refineRun', 'Finished run')}
+              label={t('trainingStudio.yue2.method.resumePrevious', 'Resume a previous run')}
               className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
-              info={t('trainingStudio.yue2.method.refineRunInfo', 'The completed run to keep training the decoder from. Only runs with a saved optimizer checkpoint, not currently running, are offered.')}
+              info={t('trainingStudio.yue2.method.resumePreviousInfo', 'Continues an earlier run from a saved optimizer checkpoint, with the original dataset, base, optimizer and adapter settings restored. Pick "Start a new run" to train from scratch instead; a run with no saved optimizer state, or one still running, cannot be resumed.')}
             />
             <StyledSelect
               accent="amber"
-              value={refineRun}
+              value={resumeChoice}
               disabled={active || preparing || starting || yue2RunAllActive}
-              onChange={setRefineRun}
-              placeholder={t('trainingStudio.yue2.method.refinePick', 'Pick a run')}
+              onChange={selectResume}
+              placeholder={t('trainingStudio.yue2.method.resumeStartNew', 'Start a new run')}
               className="w-full"
-              options={aitkRuns.filter(run => !run.live && !run.resumeError && run.checkpoints.some(c => !!c.optimizerPath)).map(run => {
-                const last = run.checkpoints.filter(c => !!c.optimizerPath).sort((a, b) => b.step - a.step)[0];
-                return { value: run.jobId, label: `${new Date(run.createdAt).toLocaleString()} · to step ${last.step} · ${run.status}` };
-              })}
+              options={[
+                { value: '', label: t('trainingStudio.yue2.method.resumeStartNew', 'Start a new run') },
+                ...aitkRuns.flatMap(run => run.checkpoints.filter(checkpoint => !!checkpoint.optimizerPath).map(checkpoint => ({
+                  value: `${run.jobId}|${checkpoint.step}`,
+                  label: `${new Date(run.createdAt).toLocaleString()} · step ${checkpoint.step} · ${run.status}${run.resumeError ? ` — ${run.resumeError}` : ''}${run.live ? ' — running' : ''}`,
+                  disabled: !!run.resumeError || run.live,
+                }))),
+                ...aitkRuns.filter(run => !run.checkpoints.some(checkpoint => !!checkpoint.optimizerPath)).map(run => ({
+                  value: `unavailable:${run.jobId}`,
+                  label: `${new Date(run.createdAt).toLocaleString()} · ${run.resumeError || 'No saved optimizer checkpoint'}`,
+                  disabled: true,
+                })),
+              ]}
             />
           </label>
-          <label className="flex flex-col gap-1 w-28">
-            <ParamLabel
-              label={t('trainingStudio.yue2.method.refineBudget', 'Max extra steps')}
-              className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
-              info={t('trainingStudio.yue2.method.refineBudgetInfo', 'The step budget for the refinement run, on top of the step the finished run reached. The reconstruction stop below usually ends it sooner, at the knee; this is only the cap.')}
-              meta={t('trainingStudio.yue2.method.refineBudgetMeta', 'default 500')}
+          {resumeChoice && <p className="mt-1 text-[11px] text-zinc-500">The server restores the original dataset, base, optimizer and adapter settings. Set Steps to the total step you want to reach.</p>}
+        </div>
+        <div className="md:pt-6">
+          <Toggle
+            accent="amber"
+            checked={!!autoCaption}
+            disabled={!captionDefault || !!resumeChoice || active || preparing || starting || yue2RunAllActive}
+            onChange={checked => setForm(previous => ({ ...previous, autoCaption: checked ? { provider: captionProvider ?? 'gemini' } : false }))}
+            label={t('trainingStudio.yue2.method.autoCaption', 'Caption tracks that have no YuE2 caption')}
+            info={captionDefault
+              ? t('trainingStudio.yue2.method.autoCaptionHint', 'Before training, tracks without a .yue2.txt are re-captioned from the audio (ACE, MM3 and YuE2 captions; lyrics and BPM are left alone). Skipped when every track has one. Off: trains on the long ACE caption for those tracks instead.')
+              : t('trainingStudio.yue2.method.autoCaptionNone', 'No captioner available: add a Gemini key in Settings → AI Services or install MOSS. Tracks without a .yue2.txt train on the long ACE caption.')}
+          />
+          {autoCaption && <div className="ml-6 mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+            <StyledSelect
+              accent="amber"
+              size="sm"
+              value={autoCaption.provider}
+              disabled={active || preparing || starting || yue2RunAllActive}
+              onChange={value => setForm(previous => ({ ...previous, autoCaption: { provider: value } }))}
+              options={[
+                ...(gemini ? [{ value: 'gemini' as const, label: t('trainingStudio.yue2.method.captionGemini', 'Gemini (cloud, hears the audio)') }] : []),
+                ...(mossOk ? [{ value: 'moss' as const, label: t('trainingStudio.yue2.method.captionMoss', 'MOSS (local, hears the audio)') }] : []),
+              ]}
+              className="w-auto"
             />
-            <input className={input} type="number" min={10} step={10} value={refineBudget} disabled={active || preparing || starting || yue2RunAllActive}
-              onChange={event => setRefineBudget(Math.max(10, Math.round(Number(event.target.value) || 0)))} />
-          </label>
-          <button type="button" onClick={() => void refine()} disabled={!refineRun || active || preparing || starting || yue2RunAllActive}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-500/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40">
-            {t('trainingStudio.yue2.method.refineStart', 'Refine decoder')}
-          </button>
+            {autoCaption.provider === 'gemini' && gemini && gemini.models.length > 0 && <StyledSelect
+              accent="amber"
+              size="sm"
+              value={autoCaption.model || gemini.defaultModel}
+              disabled={active || preparing || starting || yue2RunAllActive}
+              onChange={value => setForm(previous => ({ ...previous, autoCaption: { provider: 'gemini', model: value } }))}
+              options={gemini.models.map(m => ({ value: m, label: m }))}
+              className="w-auto"
+            />}
+          </div>}
         </div>
       </div>
+      {captioning && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" />
+        {t('trainingStudio.yue2.method.captioning', 'Captioning tracks without a YuE2 caption: {{done}} / {{total}}', { done: captioning.done, total: captioning.total })}</p>}
+      {lyricTiming && !cursorReady && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.lyricTimingNeedsAlignment', 'Run vocal stems and lyric alignment above before starting with timing supervision enabled.')}</p>}
       <details className="mt-4 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 p-3">
         <summary className="cursor-pointer text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.autoPrepareAdvanced', 'Advanced: dataset preparation and model paths')}</summary>
         <p className="text-[11px] text-zinc-500 mt-1">{t('trainingStudio.yue2.method.autoPrepareHint', 'Preparation runs automatically at the start of training. These controls are only needed for custom paths, manual preparation or resuming a run.')}</p>
