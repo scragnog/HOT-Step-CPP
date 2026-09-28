@@ -19,6 +19,7 @@
 import fs from 'fs';
 import path from 'path';
 import { getProvider } from '../lireek/llm/registry.js';
+import { stripThinkingBlocks } from '../lireek/llm/postprocess.js';
 import {
   YUE2_CAPTION_SYSTEM_PROMPT, normalizeYue2Caption, validateYue2Caption,
 } from '../lireek/prompts.js';
@@ -98,9 +99,9 @@ export async function captionSampleForYue2(
     const result = await provider.call(
       YUE2_CAPTION_SYSTEM_PROMPT, prompt, model,
       (chunk: string) => { streamed += chunk; },
-      { temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.3, top_p: 0.9 },
+      { temperature: typeof opts.temperature === 'number' ? opts.temperature : 0.3, top_p: 0.9, noThink: true },
     );
-    return normalizeYue2Caption((result && result.trim()) ? result : streamed, { bpm });
+    return normalizeYue2Caption(stripThinkingBlocks((result && result.trim()) ? result : streamed), { bpm });
   };
   let text = await call(userPrompt);
   let issues = validateYue2Caption(text);

@@ -15,7 +15,8 @@ import { config, getFFmpegPath } from '../../config.js';
 import { searchSongLyrics } from '../lireek/geniusService.js';
 import { getProvider } from '../lireek/llm/registry.js';
 import { sanitizeHeaders } from './lyricsSanitizer.js';
-import { buildUserPrompt, parseStructuredResponse, CAPTION_INSTRUCTIONS, CAPTION_TOP_P } from './captionPrompt.js';
+import { buildUserPrompt, captionProblem, parseStructuredResponse, CAPTION_INSTRUCTIONS, CAPTION_TOP_P } from './captionPrompt.js';
+import { stripThinkingBlocks } from '../lireek/llm/postprocess.js';
 import {
   applyFactSubstitution, captionWithMoss, correctFactsInProse, MM3_INSTRUCTIONS,
 } from './mossCaption.js';
@@ -495,25 +496,41 @@ export async function enhanceCaption(
 
   if (!text.trim()) {
     const userPrompt = buildUserPrompt({ ...promptArgs, audioAttached: false });
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        let streamed = '';
-        const result = await provider.call(
-          CAPTION_INSTRUCTIONS,
-          userPrompt,
-          model,
-          (chunk: string) => { streamed += chunk; },
-          { temperature: opts.temperature, top_p: CAPTION_TOP_P },
-        );
-        // Defensive fallback (assistant.ts): some providers return '' and only stream.
-        text = (result && result.trim()) ? result : streamed;
-        break;
-      } catch (err: any) {
-        if (attempt === 0 && isNetworkError(err)) {
-          await new Promise(r => setTimeout(r, 2000));
-          continue;
+    const callText = async (prompt: string): Promise<string> => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          let streamed = '';
+          const result = await provider.call(
+            CAPTION_INSTRUCTIONS,
+            prompt,
+            model,
+            (chunk: string) => { streamed += chunk; },
+            { temperature: opts.temperature, top_p: CAPTION_TOP_P, noThink: true },
+          );
+          // Defensive fallback (assistant.ts): some providers return '' and only stream.
+          return stripThinkingBlocks((result && result.trim()) ? result : streamed);
+        } catch (err: any) {
+          if (attempt === 0 && isNetworkError(err)) {
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
+          throw err;
         }
-        throw err;
+      }
+    };
+    text = await callText(userPrompt);
+    // One retry with the reason, then give up and keep the existing caption:
+    // a sidecar holding "I need to adapt the caption…" is worse than the old
+    // one (#190).
+    const problem = captionProblem(parseStructuredResponse(text).caption);
+    if (problem) {
+      opts.log?.('warn', `LLM caption rejected (${problem}) — retrying once`);
+      text = await callText([userPrompt, '', `Your previous answer was REJECTED: ${problem}.`,
+        'Answer with the five template lines only, filled in with real values.'].join('\n'));
+      const again = captionProblem(parseStructuredResponse(text).caption);
+      if (again) {
+        opts.log?.('warn', `LLM caption rejected again (${again}) — keeping the existing caption`);
+        return {};
       }
     }
   }

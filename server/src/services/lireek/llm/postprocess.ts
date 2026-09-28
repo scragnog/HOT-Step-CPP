@@ -10,6 +10,15 @@ export function stripThinkingBlocks(text: string): string {
   result = result.replace(/<\|channel>thought[\s\S]*?<channel\|>/g, '');
   result = result.replace(/<(?:think|analysis|reasoning|reflection|thought)>[\s\S]*/g, '');
   result = result.replace(/<\|channel>thought[\s\S]*/g, '');
+  // A closing tag with no opener: the chat template opened the block itself
+  // (or emitted an empty pair for enable_thinking=false) and the model reasoned
+  // in plain text, then closed it. Everything before the last closer is the
+  // reasoning (#189).
+  const closers = [...result.matchAll(/<\/(?:think|analysis|reasoning|reflection|thought)>/g)];
+  if (closers.length) {
+    const last = closers[closers.length - 1];
+    result = result.slice(last.index! + last[0].length);
+  }
   const cotMatch = result.match(/^(?:\s*\*+\s*)?(?:Thinking Process|Thought Process|Thinking|Reasoning):\s*[\s\S]*?(?:---|[*]{3,}|={3,})\s*/i);
   if (cotMatch) result = result.slice(cotMatch[0].length);
   return result.trim();

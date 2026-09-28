@@ -241,6 +241,22 @@ function dropNA(fields: CaptionFields): CaptionFields {
  * blob-regex hunt → plaintext label scan (+ tail recovery) → drop "n/a" →
  * total-failure fallback of `{ caption: raw }`.
  */
+/** Why a rewritten caption is unusable, or null when it reads like one.
+ *  Local text-only models answer the instructions instead of following them:
+ *  they echo the template placeholder, narrate their plan ("I need to…"), or
+ *  complain that no audio came with the request (#190). Any of those written
+ *  to a sidecar replaces a good MOSS caption with junk. */
+export function captionProblem(caption: string | undefined): string | null {
+  const c = (caption ?? '').trim();
+  if (!c) return 'no caption line';
+  if (/<[^>]{2,}>/.test(c)) return 'echoed the template placeholder';
+  if (/\b(I need to|I still need|let me|wait,|no audio|not attached|audio (?:was|is) not|based on (?:the )?local analysis)\b/i.test(c)) {
+    return 'wrote commentary instead of a caption';
+  }
+  if (c.split(/\s+/).length < 12) return `too short (${c.split(/\s+/).length} words)`;
+  return null;
+}
+
 export function parseStructuredResponse(raw: string): CaptionFields {
   const input: unknown = raw;
 
