@@ -17,7 +17,11 @@ The older Legacy seven-stage trainer was removed from the Training Studio on 202
 
 ## Requirements
 
-- A CUDA build of the app and an NVIDIA GPU with BF16 support (Ampere or newer). Joint Training does not run on other hardware.
+- A GPU the app's build supports: CUDA (NVIDIA) or Vulkan (AMD, Intel, NVIDIA). On a Vulkan build Joint Training trains on a GGUF base and runs several times slower than on CUDA; roughly 4 to 5 minutes per update of 4 songs on an RTX 4090 over Vulkan, against about 1 minute over CUDA.
+- A base model, picked with **Base model** on the Joint Training card:
+  - **ConvRot int8** (`yue2_3b_int8_convrot.safetensors`) is the checkpoint the recipe was tuned and ear-tested on. It needs a CUDA build, and it is the default there.
+  - **GGUF** is any installed `yue2-lm-*.gguf`, on any build. bf16 is full precision; the quantized files hold the base in less memory (Q4_K_M is about 2 GB) and trained within about 1% of bf16's first-step loss. On a build without CUDA the default is bf16 when it is installed.
+  The adapter a run produces works with every base at generation time.
 - The YuE2 Joint Training Pack, installed from the Model Manager. The card warns if model paths are missing.
 - YuE2 selected as the active backend. Under YuE2 the Training Studio shows Dataset, Train, Refine and Review; there is no separate Preprocess phase, because the caches are built on the Train page.
 

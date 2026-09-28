@@ -342,6 +342,8 @@ skipped.
 | `quant-cpy-kquant.patch` | CUDA `CPY` reaches ggml's generic quant-to-F32 converter, so K-quants can be cast |
 | `zz-yue2-convrot8.patch` | Adds the CUDA-only `GGML_OP_CONVROT8` and `_BACK` ops for YuE2 ConvRot training, with new `ggml-cuda/convrot8.{cu,cuh}` |
 | `zzz-yue2-bf16-round.patch` | Adds the `GGML_UNARY_OP_BF16_ROUND` unary op |
+| `sched-unplaced-log.patch` | Logs the node no backend accepts before the scheduler's `cur_backend_id != -1` assert |
+| `zzzz-vulkan-train-ops.patch` | Vulkan `BF16_ROUND` and `FLASH_ATTN_TRAIN`/`_BACK`, with new `vulkan-shaders/fa_train_*` files; what the YuE2 joint trainer needs off CUDA |
 
 `engine/patches/README.md` explains each one in depth, with the measurements behind
 it.

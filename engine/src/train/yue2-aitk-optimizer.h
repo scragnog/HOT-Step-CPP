@@ -3,12 +3,14 @@
 
 // Staged YuE2 optimizer ownership layer. Copy beside the native training
 // sources before integration; this file intentionally does not edit engine/.
-#include "adamw8bit_cuda.h"
 #include "../../ggml/include/ggml-backend.h"
 #include "../../ggml/include/ggml.h"
+#if YUE2_AITK_CUDA_RUNTIME
+#include "adamw8bit_cuda.h"
 #include "../../ggml/include/ggml-cuda.h"
 
 #include <cuda_runtime_api.h>
+#endif
 
 #include <algorithm>
 #include <climits>
@@ -43,25 +45,6 @@ struct StepConfig {
     float weight_decay = 1e-4f;
 };
 
-class CudaBuffer {
-public:
-    CudaBuffer() = default;
-    CudaBuffer(const CudaBuffer &) = delete;
-    CudaBuffer & operator=(const CudaBuffer &) = delete;
-    CudaBuffer(CudaBuffer && other) noexcept : ptr_(other.ptr_), bytes_(other.bytes_) { other.ptr_ = nullptr; other.bytes_ = 0; }
-    CudaBuffer & operator=(CudaBuffer && other) noexcept { if (this != &other) { reset(); ptr_ = other.ptr_; bytes_ = other.bytes_; other.ptr_ = nullptr; other.bytes_ = 0; } return *this; }
-    ~CudaBuffer() { reset(); }
-
-    void allocate(size_t bytes) { reset(); bytes_ = bytes; if (bytes && cudaMalloc(&ptr_, bytes) != cudaSuccess) { bytes_ = 0; throw std::runtime_error("YuE2 optimizer cudaMalloc failed"); } }
-    void zero(cudaStream_t stream) { if (ptr_ && cudaMemsetAsync(ptr_, 0, bytes_, stream) != cudaSuccess) throw std::runtime_error("YuE2 optimizer cudaMemsetAsync failed"); }
-    void * get() const { return ptr_; }
-    explicit operator bool() const { return ptr_ != nullptr; }
-    void reset() noexcept { if (ptr_) cudaFree(ptr_); ptr_ = nullptr; bytes_ = 0; }
-private:
-    void * ptr_ = nullptr;
-    size_t bytes_ = 0;
-};
-
 struct HostStateSnapshot {
     std::vector<std::string> names;
     std::vector<size_t> elements;
@@ -82,6 +65,26 @@ struct HostStateSnapshot {
     std::vector<std::vector<uint8_t>> state4_u8;
     std::vector<std::vector<float>> absmax3;
     std::vector<std::vector<float>> absmax4;
+};
+
+#if YUE2_AITK_CUDA_RUNTIME
+class CudaBuffer {
+public:
+    CudaBuffer() = default;
+    CudaBuffer(const CudaBuffer &) = delete;
+    CudaBuffer & operator=(const CudaBuffer &) = delete;
+    CudaBuffer(CudaBuffer && other) noexcept : ptr_(other.ptr_), bytes_(other.bytes_) { other.ptr_ = nullptr; other.bytes_ = 0; }
+    CudaBuffer & operator=(CudaBuffer && other) noexcept { if (this != &other) { reset(); ptr_ = other.ptr_; bytes_ = other.bytes_; other.ptr_ = nullptr; other.bytes_ = 0; } return *this; }
+    ~CudaBuffer() { reset(); }
+
+    void allocate(size_t bytes) { reset(); bytes_ = bytes; if (bytes && cudaMalloc(&ptr_, bytes) != cudaSuccess) { bytes_ = 0; throw std::runtime_error("YuE2 optimizer cudaMalloc failed"); } }
+    void zero(cudaStream_t stream) { if (ptr_ && cudaMemsetAsync(ptr_, 0, bytes_, stream) != cudaSuccess) throw std::runtime_error("YuE2 optimizer cudaMemsetAsync failed"); }
+    void * get() const { return ptr_; }
+    explicit operator bool() const { return ptr_ != nullptr; }
+    void reset() noexcept { if (ptr_) cudaFree(ptr_); ptr_ = nullptr; bytes_ = 0; }
+private:
+    void * ptr_ = nullptr;
+    size_t bytes_ = 0;
 };
 
 class DeviceGuard {
@@ -230,4 +233,17 @@ private:
     ggml_backend_t backend_ = nullptr; int device_index_ = 0; cudaStream_t stream_ = nullptr; int step_ = 0; std::vector<ParameterSpec> specs_; std::vector<Slot> slots_;
 };
 
+#else
+// Non-CUDA builds: the 8-bit AdamW is a CUDA kernel. The runner maps
+// --optimizer adamw to the LmOptim AdamW there, so this is never constructed.
+class Optimizer {
+public:
+    Optimizer(ggml_backend_t, int, std::vector<ParameterSpec>) { throw std::runtime_error("the native AdamW8bit optimizer needs a CUDA build"); }
+    int step() const { return 0; }
+    void step_once(const StepConfig &) {}
+    void skip_once() {}
+    HostStateSnapshot capture() const { return {}; }
+    void restore(const HostStateSnapshot &) {}
+};
+#endif
 } // namespace yue2_aitk

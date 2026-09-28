@@ -632,6 +632,8 @@ export interface Yue2TrainRequest extends Partial<Yue2OptimOptions> {
 
 export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   trainingMethod: 'aitk';
+  /** 'convrot' or a yue2-lm GGUF id ('bf16', 'Q4_K_M', ...); '' = the server's default. */
+  base?: string;
   /** Re-caption tracks with no .yue2.txt from the audio before training
    *  (ACE + MM3 + YuE2 sidecars). false = off; absent = on, default provider. */
   autoCaption?: false | { provider: 'gemini' | 'moss'; model?: string };
@@ -2565,9 +2567,14 @@ export async function startYue2AitkPrepare(
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-prepare`, { method: 'POST', ...jsonBody(opts) });
 }
 
+/** A base the joint trainer can load: the ConvRot checkpoint or a yue2-lm GGUF.
+ *  `runnable` is false for ConvRot on a build without CUDA. */
+export interface Yue2JointBaseInfo { id: string; bytes: number; convrot: boolean; runnable: boolean }
+
 export async function getYue2AitkPrepare(
   id: string, output?: string,
-): Promise<{ ready: boolean; manifest?: string; missing?: string[]; activeJob: TrainingJobSummary | null; jobs: TrainingJobSummary[]; defaults?: Partial<Yue2AitkPrepareRequest> & { models?: Partial<Yue2AitkPrepareRequest['models']> } }> {
+): Promise<{ ready: boolean; manifest?: string; missing?: string[]; activeJob: TrainingJobSummary | null; jobs: TrainingJobSummary[]; defaults?: Partial<Yue2AitkPrepareRequest> & { models?: Partial<Yue2AitkPrepareRequest['models']> };
+  bases?: Yue2JointBaseInfo[]; defaultBase?: string; defaultDevice?: string }> {
   const query = output ? `?output=${encodeURIComponent(output)}` : '';
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-prepare${query}`);
 }

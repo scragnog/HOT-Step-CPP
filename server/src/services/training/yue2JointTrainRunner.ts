@@ -13,7 +13,55 @@ import { yue2Unload } from '../backends/yue2/client.js';
 import { ensureYue2PreparedDataset } from './yue2AutoPrepare.js';
 import { getDataset } from './datasetsRepo.js';
 import { config } from '../../config.js';
-import { yue2ModelDir } from './yue2Train.js';
+import { availableYue2Bases, yue2ModelDir } from './yue2Train.js';
+import { engineGpuBackend, type EngineGpuBackend } from './aceTrain.js';
+
+// ── Base checkpoint: ConvRot or any installed yue2-lm GGUF ────────────────
+//
+// The joint trainer takes either the raw ConvRot checkpoint (CUDA only: its
+// linears are the CONVROT8 op) or a yue2-lm-*.gguf, on any backend. ConvRot
+// is the default where it can run, the recipe was tuned on it; elsewhere the
+// default is the proven GGUF (bf16), then the largest installed.
+
+export const YUE2_JOINT_CONVROT = 'convrot';
+
+export function yue2ConvRotCheckpoint(): string {
+  return path.join(yue2ModelDir(), 'yue2_3b_int8_convrot.safetensors');
+}
+
+export interface Yue2JointBase { id: string; file: string; bytes: number; convrot: boolean; runnable: boolean }
+
+export function yue2JointBases(backend: EngineGpuBackend = engineGpuBackend()): Yue2JointBase[] {
+  const convrotRuns = backend === 'cuda' || backend === 'unknown';
+  const out: Yue2JointBase[] = [];
+  const cr = yue2ConvRotCheckpoint();
+  if (fs.existsSync(cr)) out.push({ id: YUE2_JOINT_CONVROT, file: cr, bytes: fs.statSync(cr).size, convrot: true, runnable: convrotRuns });
+  for (const b of availableYue2Bases()) out.push({ id: b.id, file: b.file, bytes: b.bytes, convrot: false, runnable: true });
+  return out;
+}
+
+export function defaultYue2JointBase(bases: Yue2JointBase[] = yue2JointBases()): string {
+  return bases.find(b => b.runnable)?.id ?? YUE2_JOINT_CONVROT;
+}
+
+/** The checkpoint file for a base id ('' = the default), or an error. */
+export function resolveYue2JointBase(asked: string): { checkpoint: string } | { error: string } {
+  const bases = yue2JointBases();
+  const id = asked || defaultYue2JointBase(bases);
+  const base = bases.find(b => b.id === id);
+  if (!base) {
+    return { error: id === YUE2_JOINT_CONVROT
+      ? `raw ConvRot checkpoint is missing: ${yue2ConvRotCheckpoint()}. Install it, or pick a GGUF base.`
+      : `YuE2 base "${id}" is not installed (no yue2-lm-${id}.gguf in ${yue2ModelDir()}).` };
+  }
+  if (!base.runnable) return { error: 'The ConvRot checkpoint needs a CUDA build of the engine. Pick a GGUF base instead.' };
+  return { checkpoint: base.file };
+}
+
+/** The ggml device this build trains on when the request names none. */
+export function defaultYue2JointDevice(backend: EngineGpuBackend = engineGpuBackend()): string {
+  return backend === 'vulkan' ? 'Vulkan0' : backend === 'metal' ? 'MTL0' : backend === 'cpu' ? 'CPU' : 'CUDA0';
+}
 import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
 
 export interface ResolvedYue2JointTrainOptions {
@@ -331,7 +379,7 @@ function preparedManifest(pathname: string): string | null {
 }
 
 function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
-  if (!o.checkpoint || !fs.existsSync(o.checkpoint) || !fs.statSync(o.checkpoint).isFile()) return `raw ConvRot checkpoint is missing or is not a file: ${o.checkpoint || '(empty)'}`;
+  if (!o.checkpoint || !fs.existsSync(o.checkpoint) || !fs.statSync(o.checkpoint).isFile()) return `base checkpoint is missing or is not a file: ${o.checkpoint || '(empty)'}`;
   const manifestError = preparedManifest(o.dataset);
   if (manifestError) return `${manifestError}: ${o.dataset || '(empty)'}`;
   if (!o.outDir) return 'Joint training requires a new output directory';
@@ -342,7 +390,7 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
   if (!Number.isInteger(o.seed) || o.seed < 0) return 'seed must be a non-negative integer';
   if (o.seed > 0xffffffff) return 'seed must fit uint32';
   if (o.steps > 0x7fffffff) return 'steps must fit int32';
-  if (!/^CUDA[0-9]+$/i.test(o.device)) return 'device must be an explicit CUDA device such as CUDA0';
+  if (!/^((CUDA|Vulkan|MTL)[0-9]+|CPU)$/i.test(o.device)) return 'device must be a ggml device such as CUDA0, Vulkan0, MTL0 or CPU';
   if (o.optimizer && o.optimizer !== 'adamw' && o.optimizer !== 'adamw-lm' && o.optimizer !== 'prodigy' && o.optimizer !== 'muon') return 'optimizer must be adamw, adamw-lm, prodigy or muon';
   if (o.cautious && (o.optimizer ?? 'adamw') === 'adamw') return 'cautious needs optimizer adamw-lm, prodigy or muon';
   if (o.rank !== undefined && (!Number.isInteger(o.rank) || o.rank < 1 || o.rank > 65536)) return 'rank must be an integer between 1 and 65536';

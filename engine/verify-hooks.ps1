@@ -312,6 +312,26 @@ if (Test-Path $ggmlAlloc) {
     Write-Host "  [WARN] $ggmlAlloc not found - ggml submodule not checked out?" -ForegroundColor Yellow
 }
 
+# -- Hook 14: ggml-vulkan must carry the training ops (BF16_ROUND, fused attention)
+#             SUBMODULE file. Without them the YuE2 joint trainer on a Vulkan
+#             build refuses to start (BF16_ROUND unsupported) or, worse, falls
+#             back to exact attention, whose memory rules out whole songs.
+$ggmlVk = "$ggml\src\ggml-vulkan\ggml-vulkan.cpp"
+if (Test-Path $ggmlVk) {
+    $content = Get-Content $ggmlVk -Raw
+    if ($content -match 'HOT-Step patch: flash-attn-train \(Vulkan\)' -and $content -match 'HOT-Step patch: BF16_ROUND' -and
+        (Test-Path "$ggml\src\ggml-vulkan\vulkan-shaders\fa_train_fwd.comp")) {
+        Write-Host "  [OK] ggml-vulkan has the training ops and their shaders" -ForegroundColor Green
+    } else {
+        Write-Host "  [FAIL] ggml-vulkan is missing the zzzz-vulkan-train-ops patch (or its shader files)" -ForegroundColor Red
+        Write-Host "         YuE2 joint training on Vulkan will refuse to start or lose fused attention." -ForegroundColor Yellow
+        Write-Host "         Fix (from the repo root): git apply engine\patches\zzzz-vulkan-train-ops.patch" -ForegroundColor Yellow
+        $errors++
+    }
+} else {
+    Write-Host "  [WARN] $ggmlVk not found - ggml submodule not checked out?" -ForegroundColor Yellow
+}
+
 # ── Summary ───────────────────────────────────────────────────────────
 Write-Host ""
 if ($errors -gt 0) {

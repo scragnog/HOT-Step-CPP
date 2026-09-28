@@ -4,6 +4,7 @@
 // status contract are shared by ace-train and the CUDA runner; model loading
 // and the training loop remain in yue2-aitk-runtime.cpp.
 
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -27,7 +28,8 @@ struct Config {
     float cursor_weight = 0.08f;
     bool cursor_weight_explicit = false;
     std::uint64_t seed = 0;
-    std::int32_t cuda_index = 0;
+    std::int32_t cuda_index = 0;  // the device index, whatever the backend
+    std::string device_name = "CUDA0";  // ggml device name: CUDA0, Vulkan0, MTL0, CPU
     bool jsonl = true;
     std::int32_t rank = 32;
     float alpha = 32.0f;
@@ -309,15 +311,22 @@ inline bool decimal_i32(const char * text, std::int32_t * out) {
     return true;
 }
 
-inline bool device(const char * text, std::int32_t * index) {
-    if (!text || !index) return false;
-    std::string value(text);
-    if (value.size() < 5 || (value[0] != 'C' && value[0] != 'c') ||
-        (value[1] != 'U' && value[1] != 'u') || (value[2] != 'D' && value[2] != 'd') ||
-        (value[3] != 'A' && value[3] != 'a')) return false;
-    const char * suffix = value.c_str() + 4;
-    if (*suffix == ':') ++suffix;
-    return decimal_i32(suffix, index);
+// "CUDA0", "CUDA:0", "Vulkan1", "MTL0", "CPU" -> ggml device name + index.
+inline bool device(const char * text, std::string * name, std::int32_t * index) {
+    if (!text || !name || !index) return false;
+    std::string value(text), prefix;
+    size_t i = 0;
+    while (i < value.size() && std::isalpha((unsigned char) value[i])) prefix += value[i++];
+    if (prefix.empty()) return false;
+    std::string upper = prefix;
+    for (char & ch : upper) ch = (char) std::toupper((unsigned char) ch);
+    if (upper == "CPU" && i == value.size()) { *name = "CPU"; *index = 0; return true; }
+    if (upper == "CUDA") prefix = "CUDA"; else if (upper == "VULKAN") prefix = "Vulkan"; else if (upper == "MTL" || upper == "METAL") prefix = "MTL";
+    else return false;
+    if (i < value.size() && value[i] == ':') ++i;
+    if (!decimal_i32(value.c_str() + i, index)) return false;
+    *name = prefix + std::to_string(*index);
+    return true;
 }
 
 inline bool value(const char * option, int argc, char ** argv, int * cursor,
@@ -386,7 +395,7 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
                 !detail::decimal_u64(value_text.c_str(), &parsed.seed)) { if (error) *error = "--seed must be an unsigned decimal integer"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--device")) {
             std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
-                !detail::device(value_text.c_str(), &parsed.cuda_index)) { if (error) *error = "--device must be CUDA0 or CUDA:0"; return ParseResult::error; }
+                !detail::device(value_text.c_str(), &parsed.device_name, &parsed.cuda_index)) { if (error) *error = "--device must be CUDA0, Vulkan0, MTL0 or CPU"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--rank")) {
             std::string value_text; if (!detail::value(arg, argc, argv, &i, &value_text, error) ||
                 !detail::decimal_i32(value_text.c_str(), &parsed.rank)) { if (error) *error = "--rank must be a nonnegative integer"; return ParseResult::error; }

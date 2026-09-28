@@ -162,7 +162,7 @@ import {
   type ResolvedYue2AitkPrepareOptions,
 } from '../services/training/yue2AitkPrepareRunner.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
-import { parseYue2JointStopMode, applyBaseMatchedRecipe } from '../services/training/yue2JointTrainRunner.js';
+import { parseYue2JointStopMode, applyBaseMatchedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint } from '../services/training/yue2JointTrainRunner.js';
 import { appendToBatch as appendToYue2Batch, finishScoredLadders, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
 import {
   aceTrainExe, engineGpuBackend, engineSupportsFlashAttnTraining,
@@ -3500,7 +3500,13 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
     const str = (key: string): string => typeof b[key] === 'string' ? (b[key] as string).trim() : '';
     const automatic = b.autoPrepare === true && !str('resume');
     const prepDefaults = automatic ? yue2AitkPrepareDefaults(ds).options : undefined;
-    const checkpoint = str('checkpoint') || path.join(yue2ModelDir(), 'yue2_3b_int8_convrot.safetensors');
+    // A resume carries its run's checkpoint path; a new run names a base id.
+    let checkpoint = str('checkpoint');
+    if (!checkpoint) {
+      const base = resolveYue2JointBase(str('base'));
+      if ('error' in base) { res.status(400).json({ error: base.error }); return; }
+      checkpoint = base.checkpoint;
+    }
     const dataset = str('dataset');
     const outDir = str('output') || yue2JointOutputDirectory(config.aceServer.adapters, ds.customTag || ds.slug);
     const resume = str('resume');
@@ -3511,9 +3517,9 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
     const steps = integer('steps', 0);
     const saveEvery = integer('saveEvery', 0);
     const seed = integer('seed', 42);
-    const device = str('device');
+    const device = str('device') || defaultYue2JointDevice();
     if (!checkpoint || !fs.existsSync(checkpoint) || !fs.statSync(checkpoint).isFile()) {
-      res.status(400).json({ error: `raw ConvRot checkpoint is missing: ${checkpoint || '(empty)'}. Install the verified checkpoint before starting joint training.` });
+      res.status(400).json({ error: `base checkpoint is missing: ${checkpoint || '(empty)'}. Install it, or pick another base.` });
       return;
     }
     let preparation: ResolvedYue2AitkPrepareOptions | undefined;
@@ -3832,7 +3838,6 @@ function yue2AitkPrepareDefaults(ds: TrainingDatasetRow): {
   provenance: Record<string, string>;
 } {
   const legacyManifest = yue2PreprocessManifest(ds.slug);
-  const checkpoint = path.join(yue2ModelDir(), 'yue2_3b_int8_convrot.safetensors');
   const semanticModel = resolveYue2TokenizerModel();
   const trainModels = resolveYue2TrainModels(YUE2_NAR_DEFAULTS.lmType, 'standard');
   // Text BPE vocabulary lives in the LM GGUF, not the audio tokenizer GGUF.
@@ -3841,6 +3846,9 @@ function yue2AitkPrepareDefaults(ds: TrainingDatasetRow): {
       .filter(name => /^yue2-lm-.*\.gguf$/i.test(name))
       .map(name => path.join(yue2ModelDir(), name))[0] || '' : '');
   const sheetModel = resolveYue2SheetModel();
+  // Recorded as provenance only: preparation computes nothing from the base,
+  // so a machine without the ConvRot checkpoint records its LM GGUF instead.
+  const checkpoint = fs.existsSync(yue2ConvRotCheckpoint()) ? yue2ConvRotCheckpoint() : tokenizer;
   let manifestFields: Record<string, unknown> = {};
   try {
     if (fs.existsSync(legacyManifest) && fs.statSync(legacyManifest).size <= 16 * 1024 * 1024) {
@@ -3865,7 +3873,7 @@ function yue2AitkPrepareDefaults(ds: TrainingDatasetRow): {
   const options: ResolvedYue2AitkPrepareOptions = { legacyManifest, checkpoint, tokenizer, output, models, trigger: ds.customTag || ds.slug };
   const missing: string[] = [];
   if (!fs.existsSync(legacyManifest)) missing.push(`YuE2 latent manifest: ${legacyManifest}`);
-  if (!fs.existsSync(checkpoint)) missing.push(`raw ConvRot checkpoint: ${checkpoint}`);
+  if (!checkpoint || !fs.existsSync(checkpoint)) missing.push(`a YuE2 base (ConvRot checkpoint or LM GGUF): ${yue2ConvRotCheckpoint()}`);
   if (!tokenizer) missing.push('YuE2 LM GGUF containing the text tokenizer');
   if (!models.vae || !fs.existsSync(models.vae)) missing.push('YuE2 VAE encoder GGUF');
   if (!models.semantic || !fs.existsSync(models.semantic)) missing.push('YuE2 semantic tokenizer GGUF');
@@ -3940,7 +3948,10 @@ router.get('/datasets/:id/yue2-joint-prepare', (req: Request, res: Response) => 
         }
       } catch { /* readiness remains false */ }
     }
+    const bases = yue2JointBases();
     res.json({ ready, defaults: defaults.options, missing: defaults.missing, provenance: defaults.provenance,
+      bases: bases.map(({ id, bytes, convrot, runnable }) => ({ id, bytes, convrot, runnable })),
+      defaultBase: defaultYue2JointBase(bases), defaultDevice: defaultYue2JointDevice(),
       ...(manifest ? { manifest } : {}), activeJob: active?.kind === 'yue2-prepare-aitk' ? queue.toSummary(active) : null, jobs });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });

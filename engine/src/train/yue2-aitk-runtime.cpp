@@ -249,6 +249,15 @@ static int run_impl(Config config, std::string * error) {
     if (!fresh_output(std::filesystem::u8path(config.output), error)) return 1;
     if (config.seed > UINT32_MAX) { fail(error, "native-v1 runtime seed must fit uint32_t"); return 1; }
     if (config.steps <= 0 || config.save_every <= 0 || config.cuda_index < 0 || config.cuda_index > 127) { fail(error, "invalid runtime configuration"); return 1; }
+    const bool cuda_device = config.device_name.rfind("CUDA", 0) == 0;
+    if (!YUE2_AITK_CUDA_RUNTIME && cuda_device) { fail(error, "this build has no CUDA backend; pass --device Vulkan0, MTL0 or CPU"); return 1; }
+    if (!cuda_device && config.optimizer == "adamw") {
+        // The 8-bit AdamW is a CUDA kernel; LmOptim's AdamW is the same update
+        // with full-precision moments, built from ggml ops.
+        std::fprintf(stderr, "[yue2-aitk] --optimizer adamw is the CUDA 8-bit kernel; running LmOptim AdamW (adamw-lm) on %s\n",
+                     config.device_name.c_str());
+        config.optimizer = "adamw-lm";
+    }
     if (config.rank < 1 || config.rank > 65536 || !std::isfinite(config.alpha) || config.alpha <= 0.0f || config.alpha > 1e6f ||
         (config.optimizer != "adamw" && config.optimizer != "adamw-lm" && config.optimizer != "prodigy" && config.optimizer != "muon") ||
         !std::isfinite(config.lr) || config.lr <= 0.0f ||
@@ -345,12 +354,13 @@ static int run_impl(Config config, std::string * error) {
                      (double) config.ar_loss_weight, (double) config.beta1, (double) config.beta2, config.ar_targets.c_str(), config.grad_accum);
     yue2_aitk::sha256::digest checkpoint_hash, dataset_hash;
     if (!yue2_aitk::sha256::file(std::filesystem::u8path(config.checkpoint), checkpoint_hash, error)) return 1;
-    // A GGUF base trains on the same prepared dataset: preparation records the
-    // ConvRot checkpoint as provenance but computes nothing from it (codes,
-    // latents and prompts come from the tokenizer and the VAE). The resume
-    // record still binds the run to this file's hash.
+    // Any base trains on the same prepared dataset: preparation records a base
+    // checkpoint as provenance but computes nothing from it (codes, latents
+    // and prompts come from the tokenizer and the VAE). The resume record
+    // still binds the run to this file's hash.
     const bool gguf_base = std::filesystem::u8path(config.checkpoint).extension() == ".gguf";
-    if (!gguf_base && checkpoint_hash.hex() != lower_hash(dataset.base_sha256)) { fail(error, "checkpoint SHA-256 does not match dataset base_sha256"); return 1; }
+    if (checkpoint_hash.hex() != lower_hash(dataset.base_sha256))
+        std::fprintf(stderr, "[yue2-aitk] base differs from the one the dataset was prepared beside (provenance only)\n");
     if (!yue2_aitk::sha256::file(std::filesystem::u8path(config.dataset), dataset_hash, error)) return 1;
     const auto source_copy = std::filesystem::u8path(config.dataset).parent_path() / "source-manifest.json";
     yue2_aitk::sha256::digest source_hash;
@@ -399,13 +409,27 @@ static int run_impl(Config config, std::string * error) {
     std::error_code ec;
     if (!std::filesystem::create_directory(std::filesystem::u8path(config.output), ec) || ec) { fail(error, "cannot create new training output directory"); return 1; }
     ggml_backend_load_all();
-    const auto device = ggml_backend_dev_by_name(("CUDA" + std::to_string(config.cuda_index)).c_str());
+    const auto device = ggml_backend_dev_by_name(config.device_name.c_str());
     const char * reg_name = device ? ggml_backend_reg_name(ggml_backend_dev_backend_reg(device)) : nullptr;
-    if (!reg_name || std::strncmp(reg_name, "CUDA", 4) != 0) { fail(error, "requested device is not a CUDA backend"); return 1; }
+    if (!reg_name) { fail(error, ("no ggml device named " + config.device_name).c_str()); return 1; }
+    if (cuda_device != (std::strncmp(reg_name, "CUDA", 4) == 0)) { fail(error, "requested device is not the backend its name says"); return 1; }
     struct Backend { ggml_backend_t value = nullptr; ~Backend() { if (value) ggml_backend_free(value); } } backend{device ? ggml_backend_dev_init(device, nullptr) : nullptr};
-    if (!backend.value) { fail(error, "requested CUDA backend is unavailable"); return 1; }
-    std::fprintf(stderr, "[yue2-aitk] training device %s via %s; optimizer scheduler uses CUDA + CPU (no Vulkan compute)\n",
-                 ggml_backend_dev_name(device), reg_name);
+    if (!backend.value) { fail(error, "requested backend is unavailable"); return 1; }
+    {
+        // Fused training attention where the backend has it (CUDA, CPU); the
+        // exact math attention elsewhere.
+        ggml_init_params ip = { 8 * ggml_tensor_overhead(), nullptr, true };
+        ggml_context * probe = ggml_init(ip);
+        ggml_tensor * q = ggml_new_tensor_4d(probe, GGML_TYPE_F32, 128, 16, 16, 1);
+        ggml_tensor * k = ggml_new_tensor_4d(probe, GGML_TYPE_F32, 128, 16, 8, 1);
+        ggml_tensor * v = ggml_new_tensor_4d(probe, GGML_TYPE_F32, 128, 16, 8, 1);
+        ggml_tensor * m = ggml_new_tensor_2d(probe, GGML_TYPE_F16, 16, 16);
+        yue2_aitk_graph::math_attention() = !ggml_backend_supports_op(backend.value, ggml_flash_attn_train(probe, q, k, v, m, 1.0f)) ||
+                                            std::getenv("YUE2_AITK_MATH_ATTENTION") != nullptr;
+        ggml_free(probe);
+    }
+    std::fprintf(stderr, "[yue2-aitk] training device %s via %s; attention %s\n", ggml_backend_dev_name(device), reg_name,
+                 yue2_aitk_graph::math_attention() ? "exact (no fused training kernel on this backend)" : "fused");
     using AttentionPrecision = const char * (*)(int);
     const auto attention_precision = reinterpret_cast<AttentionPrecision>(ggml_backend_reg_get_proc_address(
         ggml_backend_dev_backend_reg(device), "ggml_backend_cuda_fattn_train_last_prec"));

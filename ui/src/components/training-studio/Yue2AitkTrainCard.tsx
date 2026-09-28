@@ -29,6 +29,7 @@ import {
   type Yue2AitkCheckpointRecord,
   type Yue2AitkRunRecord,
   type Yue2JointTrainRequest,
+  type Yue2JointBaseInfo,
   type Yue2JointPreviewOptions,
   type Yue2JointPreviewRecord,
   type PreparedCache,
@@ -146,7 +147,8 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // The server forces the recipe's fixed parts whatever this form says
   // (applyBaseMatchedRecipe); the lines below that name tuned-only knobs are
   // history the migration in readStoredForm clears from stored forms.
-  method: 'base-matched', steps: 100, saveEvery: 10, gradAccum: 4, seed: 42, device: 'CUDA0', lyricTiming: false, cursorWeight: 0,
+  // device '' = the server picks this build's first GPU (CUDA0, Vulkan0, MTL0).
+  method: 'base-matched', steps: 100, saveEvery: 10, gradAccum: 4, seed: 42, device: '', base: '', lyricTiming: false, cursorWeight: 0,
   optimizer: 'adamw-lm', cautious: false, prodigyD0: 1e-6, muonLrScale: 1, muonNsSteps: 5,
   // LoKr 64/4/256 (2026-09-22, Rob's pick after the size sweep): scale
   // alpha/dim = 4, all four sites factorized, ~106 MB for the AR+NAR pair.
@@ -208,6 +210,9 @@ function readStored<T>(key: string, fallback: T): T {
  *  merged form back, so this self-heals on the first load after an upgrade. */
 function readStoredForm(datasetId: string): Yue2JointTrainRequest {
   const stored = readStored<Partial<Yue2JointTrainRequest>>(`${FORM_KEY}${datasetId}`, {});
+  // CUDA0 was the stored default before Vulkan training (2026-09-28); on a
+  // Vulkan build it would name a device that does not exist.
+  if (stored.device === 'CUDA0') stored.device = '';
   const migration = `${FORM_KEY}${datasetId}:defaults-64`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(migration)) {
     // Move values that match the former defaults; retain deliberate custom values.
@@ -435,6 +440,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     return legacyManifest ? { ...saved, legacyManifest } : saved;
   };
   const [prepare, setPrepare] = useState<PrepareForm>(readPrepare);
+  const [bases, setBases] = useState<Yue2JointBaseInfo[]>([]);
+  const [defaultBase, setDefaultBase] = useState('');
+  const [defaultDevice, setDefaultDevice] = useState('');
   const [prepareJob, setPrepareJob] = useState<TrainingJobSummary | null>(null);
   const [prepareManifest, setPrepareManifest] = useState('');
   const [appliedPrepareJobId, setAppliedPrepareJobId] = useState(() => readStored<string>(`${PREP_KEY}${datasetId}:applied`, ''));
@@ -528,6 +536,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     void getYue2AitkPrepare(datasetId).then(result => {
       const defaults = result.defaults;
       if (cancelled) return;
+      setBases(result.bases ?? []);
+      setDefaultBase(result.defaultBase ?? '');
+      setDefaultDevice(result.defaultDevice ?? '');
       setDefaultsAvailable(!!defaults);
       setMissingDefaults(result.missing ?? []);
       if (!defaults) return;
@@ -1136,9 +1147,28 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number', form, undefined,
           t('trainingStudio.yue2.method.seedInfo', 'The random seed for training (batch order, dropout, initial noise). Changing it gives a different run on the same data; keeping it fixed makes a rerun reproducible.'),
           t('trainingStudio.yue2.method.seedMeta', 'default 42'))}
-        {field(t('trainingStudio.yue2.method.device', 'CUDA device'), 'device', 'text', form, undefined,
-          t('trainingStudio.yue2.method.deviceInfo', 'Which CUDA device trains this run, for a machine with more than one GPU.'),
-          t('trainingStudio.yue2.method.deviceMeta', 'default CUDA0'))}
+        <label className="flex flex-col gap-1">
+          <ParamLabel
+            label={t('trainingStudio.yue2.method.base', 'Base model')}
+            className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+            info={t('trainingStudio.yue2.method.baseInfo', 'The frozen model the adapters train against. ConvRot (int8) is the checkpoint the recipe was tuned and ear-tested on, and needs a CUDA build. A GGUF base runs on any GPU: bf16 is full precision, and the quantized files trade a little accuracy for a lot of memory (Q4_K_M holds the base in about 2 GB). The adapter works with every base at generation time.')}
+            meta={t('trainingStudio.yue2.method.baseMeta', 'default {{base}}', { base: defaultBase || 'convrot' })}
+          />
+          <StyledSelect
+            accent="amber"
+            value={form.base || defaultBase}
+            disabled={!!resumeChoice || active || starting || preparing || yue2RunAllActive || bases.length === 0}
+            className="w-full"
+            onChange={value => set('base', value)}
+            options={bases.filter(b => b.runnable).map(b => ({
+              value: b.id,
+              label: `${b.convrot ? t('trainingStudio.yue2.method.baseConvrot', 'ConvRot int8') : `GGUF ${b.id}`} · ${(b.bytes / 1e9).toFixed(1)} GB`,
+            }))}
+          />
+        </label>
+        {field(t('trainingStudio.yue2.method.device', 'Device'), 'device', 'text', form, undefined,
+          t('trainingStudio.yue2.method.deviceInfo', 'Which GPU trains this run, for a machine with more than one: CUDA0, CUDA1 on an NVIDIA build, Vulkan0, Vulkan1 on a Vulkan build. Leave empty for the first GPU.'),
+          t('trainingStudio.yue2.method.deviceMeta', 'default {{device}}', { device: defaultDevice || 'CUDA0' }))}
         <label className="flex flex-col gap-1">
           <ParamLabel
             label={t('trainingStudio.yue2.method.adapterType', 'Adapter type')}

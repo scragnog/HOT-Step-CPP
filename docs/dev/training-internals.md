@@ -13,7 +13,26 @@ available as Legacy.
 ace-train yue2-joint-train --checkpoint base.safetensors --dataset prepared/dataset.json --output new-run --steps 150 --save-every 50 --seed 42 --device CUDA0
 ```
 
-The checkpoint must be the raw YuE2 ConvRot safetensors model. The dataset must
+The checkpoint is the raw YuE2 ConvRot safetensors model or any `yue2-lm-*.gguf`
+(chosen by extension). A GGUF base loads through `Yue2AitkModel::load_gguf`: every
+linear is a plain `mul_mat` over the GGUF weight (fused q|k|v and gate|up stay
+separate parts when their quant types differ, joined with `join_rows`), the head
+loss backs through a BF16 transpose of `output.weight` built at load, and the run
+sets `GGML_BACKWARD_MM=1` so no activation gradient is an `OUT_PROD` of a BF16 or
+quantized weight. Same seed, first step on CUDA: bf16 GGUF ar_ce 3.6378 / nar_mse
+1.18468 against ConvRot's 3.6373 / 1.18457. Preparation records a base only as
+provenance, so one prepared dataset serves every base; a mismatch is a warning.
+
+`--device` takes any ggml device (`CUDA0`, `Vulkan0`, `MTL0`, `CPU`). Off CUDA the
+same trainer runs from ggml ops: `--optimizer adamw` (the CUDA 8-bit kernel) maps
+to LmOptim's AdamW, the head's CE + KL gradient is built from `soft_max`/`log`/
+`get_rows`/`set_rows` instead of `joint_loss_cuda.cu`, and attention uses the
+fused `FLASH_ATTN_TRAIN` ops where the backend has them (CUDA, CPU, Vulkan via
+`zzzz-vulkan-train-ops.patch`) and exact attention elsewhere
+(`YUE2_AITK_MATH_ATTENTION=1` forces it, for diagnosis). Exact attention keeps
+`[keys, S, heads]` probabilities per layer, which rules out whole songs, and on
+Vulkan it produced non-finite values in the AR forward (not root-caused; the
+fused path does not). ConvRot needs CUDA: `CONVROT8` has no other kernel. The dataset must
 use the joint trainer's schema-1 manifest, including matching model and source
 hashes. Existing Legacy caches cannot be passed directly. Output must be a new
 directory. Each `checkpoint-stepN` contains the combined
@@ -120,8 +139,10 @@ prepared by other YuE2 training tools, use `yue2-import-aitk-cache --help`.
 The synthetic native resume check reproduces uninterrupted training exactly.
 Real full-song updates and native adapter merging have passed. Native and Torch
 calculations have documented rounding differences; audio quality still needs
-listening qualification. This path requires a CUDA build and BF16-capable
-NVIDIA hardware (Ampere or newer). Model Manager's **YuE2 Joint Training Pack**
+listening qualification. The ConvRot base requires a CUDA build and BF16-capable
+NVIDIA hardware (Ampere or newer); a GGUF base runs on Vulkan too (whole-song
+steps verified finite on an RTX 4090 over Vulkan, 47-95 s per song; not yet
+ear-tested, and not yet run on AMD). Model Manager's **YuE2 Joint Training Pack**
 contains the required weights; Legacy remains available on its supported backends.
 
 ## MiniMax-Music3 (MM3) LM adapters

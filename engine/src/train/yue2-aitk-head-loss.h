@@ -13,11 +13,13 @@
 // gradient by the KL weight again.
 
 #include "yue2-aitk-model.h"
-#include "joint_loss_cuda.h"
 #include "../../ggml/include/ggml-alloc.h"
+#if YUE2_AITK_CUDA_RUNTIME
+#include "joint_loss_cuda.h"
 #include "../../ggml/include/ggml-cuda.h"
 
 #include <cuda_runtime_api.h>
+#endif
 
 #include <cstddef>
 #include <cmath>
@@ -98,13 +100,14 @@ inline bool validate_nodes(ggml_backend_t backend, const ggml_cgraph * graph, st
     for (int i = 0; i < ggml_graph_n_nodes(const_cast<ggml_cgraph *>(graph)); ++i) {
         const ggml_tensor * node = ggml_graph_node(const_cast<ggml_cgraph *>(graph), i);
         if (node && node->op != GGML_OP_NONE && !ggml_backend_supports_op(backend, node)) {
-            if (error) *error = "CUDA backend does not support a head-loss graph node";
+            if (error) *error = std::string("backend does not support head-loss node ") + ggml_op_desc(node);
             return false;
         }
     }
     return true;
 }
 
+#if YUE2_AITK_CUDA_RUNTIME
 struct CudaDeviceGuard {
     int previous = -1;
     bool switched = false;
@@ -130,6 +133,9 @@ struct CudaDeviceGuard {
         if (switched) (void) cudaSetDevice(previous);
     }
 };
+#else
+struct CudaDeviceGuard { explicit CudaDeviceGuard(ggml_backend_t) {} bool valid = false; };
+#endif
 
 // One graph/context/buffer per chunk shape. Full chunks are reused for every
 // 128-position batch; a second cache is created only when a tail exists.
@@ -145,6 +151,10 @@ struct ChunkWorkspace {
     ggml_tensor * hidden_grad = nullptr;
     ggml_tensor * per_ce_t = nullptr;
     ggml_tensor * per_kl_t = nullptr;
+    // Portable loss (non-CUDA backends): the CUDA kernel's maths as a graph.
+    ggml_tensor * flat_index = nullptr;  // [count] I32, row * vocab + target
+    ggml_tensor * chunk_ce = nullptr;    // [1, count]
+    ggml_tensor * chunk_kl = nullptr;    // [1, count]
     ggml_cgraph * forward = nullptr;
     ggml_cgraph * backward = nullptr;
 
@@ -191,11 +201,35 @@ struct ChunkWorkspace {
         forward = ggml_new_graph_custom(tmp.ctx, 64, false);
         backward = ggml_new_graph_custom(tmp.ctx, 64, false);
         if (!forward || !backward) return fail(Status::graph_failure, error, "head-loss graph allocation failed");
+        if (!yue2_aitk_is_cuda(request.backend)) {
+            // d/dlogits of CE + w*KL(base||adapted), over the whole AR, is
+            // ((1+w) p - w q - onehot(target)) / total, p = softmax(adapted),
+            // q = softmax(base). The onehot is one element per row, so it is a
+            // get_rows / set_rows pair on the flattened gradient.
+            const float w = request.kl_weight, inv = 1.0f / float(request.positions);
+            const int64_t V = int64_t(kVocab), n = int64_t(count);
+            ggml_tensor * p = ggml_soft_max(tmp.ctx, adapted_logits);
+            ggml_tensor * q = ggml_soft_max(tmp.ctx, base_logits);
+            flat_index = ggml_new_tensor_1d(tmp.ctx, GGML_TYPE_I32, n);
+            ggml_tensor * g = ggml_add(tmp.ctx, ggml_scale(tmp.ctx, p, (1.0f + w) * inv), ggml_scale(tmp.ctx, q, -w * inv));
+            ggml_tensor * g_flat = ggml_reshape_2d(tmp.ctx, g, 1, V * n);
+            ggml_tensor * at_target = ggml_scale_bias(tmp.ctx, ggml_get_rows(tmp.ctx, g_flat, flat_index), 1.0f, -inv);
+            ggml_tensor * g_done = ggml_reshape_2d(tmp.ctx, ggml_set_rows(tmp.ctx, g_flat, at_target, flat_index), V, n);
+            ggml_build_forward_expand(forward, ggml_cpy(tmp.ctx, g_done, logit_grad));
+            // CE = -log p[target]; KL = sum q (log q - log p). Clamped logs: a
+            // probability below 1e-30 contributes nothing measurable to either.
+            ggml_tensor * log_p = ggml_log(tmp.ctx, ggml_clamp(tmp.ctx, p, 1e-30f, 1.0f));
+            ggml_tensor * log_q = ggml_log(tmp.ctx, ggml_clamp(tmp.ctx, q, 1e-30f, 1.0f));
+            chunk_ce = ggml_scale(tmp.ctx, ggml_get_rows(tmp.ctx, ggml_reshape_2d(tmp.ctx, log_p, 1, V * n), flat_index), -1.0f);
+            chunk_kl = ggml_sum_rows(tmp.ctx, ggml_mul(tmp.ctx, q, ggml_sub(tmp.ctx, log_q, log_p)));
+            ggml_build_forward_expand(forward, chunk_ce);
+            ggml_build_forward_expand(forward, chunk_kl);
+        }
         ggml_build_forward_expand(forward, adapted_logits);
         ggml_build_forward_expand(forward, base_logits);
         ggml_build_forward_expand(backward, hidden_grad);
         if (!validate_nodes(request.backend, forward, error) || !validate_nodes(request.backend, backward, error))
-            return fail(Status::graph_failure, error, "head-loss graph contains an unsupported CUDA node");
+            return fail(Status::graph_failure, error, "head-loss graph contains a node this backend does not support");
         tmp.buffer = ggml_backend_alloc_ctx_tensors(tmp.ctx, request.backend);
         if (!tmp.buffer) return fail(Status::allocation_failure, error, "head-loss backend buffer allocation failed");
         return Status::success;
@@ -217,8 +251,10 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
          (request.head->parts.size() != 1 || !request.head->dense_t || !request.head->parts[0]->data))) {
         return fail(Status::invalid_argument, error, "invalid head-loss request");
     }
-    if (!yue2_aitk_is_cuda(request.backend))
-        return fail(Status::unsupported_backend, error, "head loss requires the CUDA GGML backend");
+    const bool cuda = yue2_aitk_is_cuda(request.backend);
+#if !YUE2_AITK_CUDA_RUNTIME
+    if (cuda) return fail(Status::unsupported_backend, error, "this build has no CUDA head-loss kernel");
+#endif
     if (request.positions > std::numeric_limits<std::size_t>::max() / request.hidden ||
         request.positions > std::numeric_limits<std::size_t>::max() / kVocab)
         return fail(Status::invalid_argument, error, "head-loss request size overflows");
@@ -231,7 +267,7 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
         }
     }
     CudaDeviceGuard device_guard(request.backend);
-    if (!device_guard.valid)
+    if (cuda && !device_guard.valid)
         return fail(Status::unsupported_backend, error, "unable to select the GGML CUDA backend device");
 
     std::vector<float> chunk_grad(kArChunk * request.hidden);
@@ -263,11 +299,22 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
         ggml_backend_tensor_set(adapted, request.adapted_hidden + offset * request.hidden, 0, ggml_nbytes(adapted));
         ggml_backend_tensor_set(base, request.base_hidden + offset * request.hidden, 0, ggml_nbytes(base));
         ggml_backend_tensor_set(targets, request.targets + offset, 0, ggml_nbytes(targets));
+        if (!cuda) {
+            std::vector<int32_t> flat(count);
+            for (std::size_t i = 0; i < count; ++i) flat[i] = int32_t(i * kVocab + request.targets[offset + i]);
+            ggml_backend_tensor_set(workspace.flat_index, flat.data(), 0, ggml_nbytes(workspace.flat_index));
+        }
         if (ggml_backend_graph_compute(request.backend, forward) != GGML_STATUS_SUCCESS) {
             return fail(Status::graph_failure, error, "head-loss forward graph failed");
         }
         ggml_backend_synchronize(request.backend);
 
+        if (!cuda) {
+            ggml_backend_tensor_get(workspace.chunk_ce, per_ce.data() + offset, 0, count * sizeof(float));
+            ggml_backend_tensor_get(workspace.chunk_kl, per_kl.data() + offset, 0, count * sizeof(float));
+        }
+#if YUE2_AITK_CUDA_RUNTIME
+        if (cuda) {
         auto * adapted_ptr = static_cast<const float *>(adapted_logits->data);
         auto * base_ptr = static_cast<const float *>(base_logits->data);
         auto * target_ptr = static_cast<const uint32_t *>(targets->data);
@@ -286,6 +333,8 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
 
         ggml_backend_tensor_get(per_ce_t, per_ce.data() + offset, offset * sizeof(float), count * sizeof(float));
         ggml_backend_tensor_get(per_kl_t, per_kl.data() + offset, offset * sizeof(float), count * sizeof(float));
+        }
+#endif
         *request.ce_sum += [&] { float value = 0.0f; for (std::size_t i = 0; i < count; ++i) value += per_ce[offset + i]; return value; }();
         *request.kl_sum += [&] { float value = 0.0f; for (std::size_t i = 0; i < count; ++i) value += per_kl[offset + i]; return value; }();
 

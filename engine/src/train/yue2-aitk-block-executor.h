@@ -55,6 +55,12 @@ inline bool checked_count(int64_t a, int64_t b, size_t * out) {
     if (a <= 0 || b <= 0 || static_cast<uint64_t>(a) > (std::numeric_limits<size_t>::max)() / static_cast<uint64_t>(b)) return false;
     *out = static_cast<size_t>(a) * static_cast<size_t>(b); return true;
 }
+// Same bytes? `data` alone is not an identity: Vulkan hands out offsets from a
+// fixed fake base per backend buffer, and a large context is split across
+// several buffers, so distinct tensors can share a `data` value.
+inline bool same_memory(const ggml_tensor * a, const ggml_tensor * b) {
+    return a->buffer == b->buffer && a->data == b->data;
+}
 inline bool finite_all(const float * p, size_t n) {
     if (!p) return false;
     for (size_t i = 0; i < n; ++i) if (!std::isfinite(p[i])) return false;
@@ -171,7 +177,7 @@ public:
                           t->ne[2] == 1 && t->ne[3] == 1 && t->data);
         };
         if (!valid_device(device_input) || !valid_device(device_output)) return fail(error, "invalid device block buffer shape/type");
-        if (device_input && (!constants || (device_output && device_input->data == device_output->data)))
+        if (device_input && (!constants || (device_output && same_memory(device_input, device_output))))
             return fail(error, "device input needs shared constants and a distinct output");
         ggml_tensor * h = device_input ? device_input : ggml_new_tensor_2d(r.ctx, GGML_TYPE_F32, config.hidden, sequence);
         ggml_tensor * cos_t = constants ? constants->cosine : ggml_new_tensor_4d(r.ctx, GGML_TYPE_F32, config.head_dim/2, 1, sequence, 1);
@@ -227,8 +233,8 @@ public:
         };
         if (!valid_device(device_input) || !valid_device(device_upstream) || !valid_device(device_dx)) return fail(error, "invalid device backward buffer shape/type");
         if (device_input && !constants) return fail(error, "device input needs shared constants");
-        if (device_dx && ((device_input && device_dx->data == device_input->data) ||
-                          (device_upstream && device_dx->data == device_upstream->data)))
+        if (device_dx && ((device_input && same_memory(device_dx, device_input)) ||
+                          (device_upstream && same_memory(device_dx, device_upstream))))
             return fail(error, "device input gradient needs a distinct output");
         ggml_tensor * h=device_input ? device_input : ggml_new_tensor_2d(r.ctx,GGML_TYPE_F32,config.hidden,sequence), * upstream=device_upstream ? device_upstream : ggml_new_tensor_2d(r.ctx,GGML_TYPE_F32,config.hidden,sequence);
         std::vector<uint16_t> mask_data;

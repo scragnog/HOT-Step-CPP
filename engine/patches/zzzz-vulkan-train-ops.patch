@@ -1,0 +1,549 @@
+diff --git a/engine/ggml/src/ggml-vulkan/ggml-vulkan.cpp b/engine/ggml/src/ggml-vulkan/ggml-vulkan.cpp
+index e5419ef2..4e9313fa 100644
+--- a/engine/ggml/src/ggml-vulkan/ggml-vulkan.cpp
++++ b/engine/ggml/src/ggml-vulkan/ggml-vulkan.cpp
+@@ -903,6 +903,7 @@ struct vk_device_struct {
+     vk_pipeline pipeline_hardsigmoid[2];
+     vk_pipeline pipeline_hardswish[2];
+     vk_pipeline pipeline_abs[2];
++    vk_pipeline pipeline_bf16_round;  // HOT-Step patch: BF16_ROUND (F32 only)
+     vk_pipeline pipeline_softplus[2];
+     vk_pipeline pipeline_step[2];
+     vk_pipeline pipeline_round[2];
+@@ -967,6 +968,8 @@ struct vk_device_struct {
+     vk_pipeline pipeline_snake_bf16;
+     vk_pipeline pipeline_pool2d_f32;
+     vk_pipeline pipeline_rwkv_wkv6_f32;
++    // HOT-Step patch: flash-attn-train (Vulkan); null without 32-lane subgroup shuffles
++    vk_pipeline pipeline_fa_train_fwd, pipeline_fa_train_dq, pipeline_fa_train_dkv;
+     vk_pipeline pipeline_rwkv_wkv7_f32;
+     // [size_idx][kda] where size_idx: 0=d16, 1=d32, 2=d64, 3=d128
+     vk_pipeline pipeline_gated_delta_net[4][2];
+@@ -1655,6 +1658,20 @@ struct vk_op_pool2d_push_constants {
+     int32_t p0; int32_t p1;
+ };
+ 
++// HOT-Step patch: flash-attn-train (Vulkan) — mirrors fa_train_common.glsl
++struct vk_op_fa_train_push_constants {
++    uint32_t D, S, Nh, B, S_kv, Nkv;
++    uint32_t q_nb1, q_nb2, q_nb3;
++    uint32_t k_nb1, k_nb2, k_nb3;
++    uint32_t v_nb1, v_nb2, v_nb3;
++    uint32_t m_ne0, m_ne1, m_ne2, m_ne3, has_mask;
++    float    scale;
++    uint32_t lse_off, dk_off, dv_off;
++    uint32_t q_off, k_off, v_off, m_off, f_off, g_off, d_off;
++    uint32_t row_base;
++};
++static_assert(sizeof(vk_op_fa_train_push_constants) <= 128, "fa_train push constants exceed 128 bytes");
++
+ struct vk_op_rwkv_wkv6_push_constants {
+     uint32_t B;
+     uint32_t T;
+@@ -5360,6 +5377,7 @@ static void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
+     CREATE_UNARY(exp)
+     CREATE_UNARY(expm1)
+ #undef CREATE_UNARY
++    ggml_vk_create_pipeline(device, device->pipeline_bf16_round, "bf16_round_f32", bf16_round_f32_len, bf16_round_f32_data, "main", 2, sizeof(vk_op_unary_push_constants), {512, 1, 1}, {}, 1);
+ 
+     ggml_vk_create_pipeline(device, device->pipeline_add1_f16_f16, "add1_f16_f16", add1_f16_f16_len, add1_f16_f16_data, "main", 3, sizeof(vk_op_binary_push_constants), {512, 1, 1}, {}, 1);
+     ggml_vk_create_pipeline(device, device->pipeline_add1_f16_f32, "add1_f16_f32", add1_f16_f32_len, add1_f16_f32_data, "main", 3, sizeof(vk_op_binary_push_constants), {512, 1, 1}, {}, 1);
+@@ -5516,6 +5534,14 @@ static void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
+ 
+     ggml_vk_create_pipeline(device, device->pipeline_rwkv_wkv6_f32, "rwkv_wkv6_f32", rwkv_wkv6_f32_len, rwkv_wkv6_f32_data, "main", 7, sizeof(vk_op_rwkv_wkv6_push_constants), {1, 1, 1}, {device->subgroup_size}, 1);
+ 
++    // HOT-Step patch: flash-attn-train (Vulkan). The kernels reduce inside
++    // 32-lane clusters with subgroupShuffleXor, so they need both.
++    if (device->subgroup_shuffle && device->subgroup_size >= 32) {
++        ggml_vk_create_pipeline(device, device->pipeline_fa_train_fwd, "fa_train_fwd_f32", fa_train_fwd_f32_len, fa_train_fwd_f32_data, "main", 5, sizeof(vk_op_fa_train_push_constants), {1, 1, 1}, {}, 1);
++        ggml_vk_create_pipeline(device, device->pipeline_fa_train_dq, "fa_train_bwd_dq_f32", fa_train_bwd_dq_f32_len, fa_train_bwd_dq_f32_data, "main", 7, sizeof(vk_op_fa_train_push_constants), {1, 1, 1}, {}, 1);
++        ggml_vk_create_pipeline(device, device->pipeline_fa_train_dkv, "fa_train_bwd_dkv_f32", fa_train_bwd_dkv_f32_len, fa_train_bwd_dkv_f32_data, "main", 7, sizeof(vk_op_fa_train_push_constants), {1, 1, 1}, {}, 1);
++    }
++
+     ggml_vk_create_pipeline(device, device->pipeline_rwkv_wkv7_f32, "rwkv_wkv7_f32", rwkv_wkv7_f32_len, rwkv_wkv7_f32_data, "main", 8, sizeof(vk_op_rwkv_wkv7_push_constants), {1, 1, 1}, {device->subgroup_size}, 1);
+ 
+     {
+@@ -11005,6 +11031,8 @@ static vk_pipeline ggml_vk_op_get_pipeline(ggml_backend_vk_context * ctx, const
+                 return ctx->device->pipeline_hardswish[dst->type == GGML_TYPE_F16];
+             case GGML_UNARY_OP_ABS:
+                 return ctx->device->pipeline_abs[dst->type == GGML_TYPE_F16];
++            case GGML_UNARY_OP_BF16_ROUND:
++                return dst->type == GGML_TYPE_F32 ? ctx->device->pipeline_bf16_round : nullptr;
+             case GGML_UNARY_OP_SOFTPLUS:
+                 return ctx->device->pipeline_softplus[dst->type == GGML_TYPE_F16];
+             case GGML_UNARY_OP_STEP:
+@@ -12194,6 +12222,76 @@ static void ggml_vk_op_f32_wkv(ggml_backend_vk_context * ctx, vk_context& subctx
+     }
+ }
+ 
++// HOT-Step patch: flash-attn-train (Vulkan). FLASH_ATTN_TRAIN is one dispatch;
++// FLASH_ATTN_TRAIN_BACK is two (dQ per query row, dK/dV per key row) that
++// read only the forward tensors and write disjoint regions, so no barrier.
++static void ggml_vk_flash_attn_train(ggml_backend_vk_context * ctx, vk_context& subctx, ggml_tensor * dst) {
++    const bool back = dst->op == GGML_OP_FLASH_ATTN_TRAIN_BACK;
++    const ggml_tensor * q = dst->src[0];
++    const ggml_tensor * k = dst->src[1];
++    const ggml_tensor * v = dst->src[2];
++    const ggml_tensor * m = dst->src[3];
++    const ggml_tensor * f = back ? dst->src[4] : nullptr;
++    const ggml_tensor * g = back ? dst->src[5] : nullptr;
++
++    vk_op_fa_train_push_constants pc{};
++    pc.D = (uint32_t) q->ne[0]; pc.S = (uint32_t) q->ne[1]; pc.Nh = (uint32_t) q->ne[2]; pc.B = (uint32_t) q->ne[3];
++    pc.S_kv = (uint32_t) k->ne[1]; pc.Nkv = (uint32_t) k->ne[2];
++    pc.q_nb1 = (uint32_t) (q->nb[1]/4); pc.q_nb2 = (uint32_t) (q->nb[2]/4); pc.q_nb3 = (uint32_t) (q->nb[3]/4);
++    pc.k_nb1 = (uint32_t) (k->nb[1]/4); pc.k_nb2 = (uint32_t) (k->nb[2]/4); pc.k_nb3 = (uint32_t) (k->nb[3]/4);
++    pc.v_nb1 = (uint32_t) (v->nb[1]/4); pc.v_nb2 = (uint32_t) (v->nb[2]/4); pc.v_nb3 = (uint32_t) (v->nb[3]/4);
++    pc.has_mask = m != nullptr;
++    pc.m_ne0 = m ? (uint32_t) m->ne[0] : 1; pc.m_ne1 = m ? (uint32_t) m->ne[1] : 1;
++    pc.m_ne2 = m ? (uint32_t) m->ne[2] : 1; pc.m_ne3 = m ? (uint32_t) m->ne[3] : 1;
++    memcpy(&pc.scale, (const float *) dst->op_params + 0, sizeof(float));
++    pc.lse_off = (uint32_t) (ggml_flash_attn_train_lse_offset(q)/4);
++    if (back) {
++        size_t oq, ok, ov; int64_t n;
++        ggml_flash_attn_train_back_offsets(q, k, v, &oq, &ok, &ov, &n);
++        pc.dk_off = (uint32_t) (ok/4); pc.dv_off = (uint32_t) (ov/4);
++    }
++    pc.q_off = get_misalign_bytes(ctx, q)/4; pc.k_off = get_misalign_bytes(ctx, k)/4; pc.v_off = get_misalign_bytes(ctx, v)/4;
++    pc.m_off = m ? get_misalign_bytes(ctx, m)/2 : 0;
++    pc.f_off = f ? get_misalign_bytes(ctx, f)/4 : 0; pc.g_off = g ? get_misalign_bytes(ctx, g)/4 : 0;
++    pc.d_off = get_misalign_bytes(ctx, dst)/4;
++
++    const vk_subbuffer qb = ggml_vk_tensor_subbuffer(ctx, q, true);
++    const vk_subbuffer kb = ggml_vk_tensor_subbuffer(ctx, k, true);
++    const vk_subbuffer vb = ggml_vk_tensor_subbuffer(ctx, v, true);
++    const vk_subbuffer mb = m ? ggml_vk_tensor_subbuffer(ctx, m, true) : qb;  // unread without a mask
++    const vk_subbuffer db = ggml_vk_tensor_subbuffer(ctx, dst, true);
++
++    // Each row loops over every row of the other side, so one dispatch over a
++    // whole song is seconds of GPU time: the desktop freezes on a GPU that
++    // also drives the display, and Windows resets the device past its TDR
++    // limit. Slice the rows so a dispatch stays around 2^25 (row, partner,
++    // head) pairs, a few tens of ms; the display can preempt between slices.
++    const auto sliced = [&](vk_pipeline & pipeline, std::initializer_list<vk::DescriptorBufferInfo> bufs,
++                            uint32_t rows, uint32_t partners, uint32_t heads) {
++        // GGML_VK_FA_TRAIN_SLICE_PAIRS overrides the budget (tests force tiny slices).
++        static const uint64_t budget = getenv("GGML_VK_FA_TRAIN_SLICE_PAIRS") ?
++            std::max<uint64_t>(1, strtoull(getenv("GGML_VK_FA_TRAIN_SLICE_PAIRS"), nullptr, 10)) : (1ull << 25);
++        const uint64_t per_row = std::max<uint64_t>(1, (uint64_t) partners * heads * pc.B);
++        uint32_t slice = (uint32_t) std::max<uint64_t>(4, (budget / per_row) & ~3ull);
++        slice = std::min(slice, (rows + 3) & ~3u);
++        const uint32_t n = (rows + slice - 1)/slice;
++        ggml_pipeline_request_descriptor_sets(ctx, pipeline, n);
++        for (uint32_t r = 0; r < rows; r += slice) {
++            pc.row_base = r;
++            ggml_vk_dispatch_pipeline(ctx, subctx, pipeline, bufs, pc, {(std::min(slice, rows - r) + 3)/4, heads, pc.B});
++        }
++    };
++    if (!back) {
++        sliced(ctx->device->pipeline_fa_train_fwd, {qb, kb, vb, mb, db}, pc.S, pc.S_kv, pc.Nh);
++        return;
++    }
++    const vk_subbuffer fb = ggml_vk_tensor_subbuffer(ctx, f, true);
++    const vk_subbuffer gb = ggml_vk_tensor_subbuffer(ctx, g, true);
++    // dK/dV rows loop over every query row of every head in their group.
++    sliced(ctx->device->pipeline_fa_train_dq, {qb, kb, vb, mb, fb, gb, db}, pc.S, pc.S_kv, pc.Nh);
++    sliced(ctx->device->pipeline_fa_train_dkv, {qb, kb, vb, mb, fb, gb, db}, pc.S_kv, pc.S*(pc.Nh/pc.Nkv), pc.Nkv);
++}
++
+ static void ggml_vk_rwkv_wkv6(ggml_backend_vk_context * ctx, vk_context& subctx, ggml_tensor * dst) {
+     const size_t seq_length = dst->src[0]->ne[2];
+     const size_t n_embed = dst->ne[0];
+@@ -15028,6 +15126,7 @@ static bool ggml_vk_build_graph(ggml_backend_vk_context * ctx, ggml_cgraph * cgr
+         case GGML_UNARY_OP_FLOOR:
+         case GGML_UNARY_OP_TRUNC:
+         case GGML_UNARY_OP_SGN:
++        case GGML_UNARY_OP_BF16_ROUND:
+             ggml_vk_unary(ctx, compute_ctx, src0, node);
+             break;
+         case GGML_UNARY_OP_XIELU:
+@@ -15170,6 +15269,11 @@ static bool ggml_vk_build_graph(ggml_backend_vk_context * ctx, ggml_cgraph * cgr
+ 
+         break;
+ 
++    case GGML_OP_FLASH_ATTN_TRAIN:
++    case GGML_OP_FLASH_ATTN_TRAIN_BACK:
++        ggml_vk_flash_attn_train(ctx, compute_ctx, node);
++
++        break;
+     case GGML_OP_RWKV_WKV6:
+         ggml_vk_rwkv_wkv6(ctx, compute_ctx, node);
+ 
+@@ -17434,6 +17538,8 @@ static bool ggml_backend_vk_device_supports_op(ggml_backend_dev_t dev, const ggm
+                     return (op->src[0]->type == GGML_TYPE_F32 || op->src[0]->type == GGML_TYPE_F16) &&
+                            (op->type == GGML_TYPE_F32 || op->type == GGML_TYPE_F16) &&
+                            (op->src[0]->type == op->type);
++                case GGML_UNARY_OP_BF16_ROUND:
++                    return op->src[0]->type == GGML_TYPE_F32 && op->type == GGML_TYPE_F32;
+                 default:
+                     return false;
+             }
+@@ -17862,6 +17968,19 @@ static bool ggml_backend_vk_device_supports_op(ggml_backend_dev_t dev, const ggm
+         case GGML_OP_RWKV_WKV6:
+         case GGML_OP_RWKV_WKV7:
+             return true; // all inputs are contiguous, see ggml.c
++        case GGML_OP_FLASH_ATTN_TRAIN:       // HOT-Step patch: flash-attn-train (Vulkan)
++        case GGML_OP_FLASH_ATTN_TRAIN_BACK:
++            {
++                const ggml_tensor * q = op->src[0];
++                const ggml_tensor * mk = op->src[3];
++                float prm[3];
++                memcpy(prm, op->op_params, sizeof(prm));
++                return device->pipeline_fa_train_fwd != nullptr &&
++                       q->ne[0] % 32 == 0 && q->ne[0] <= 256 && prm[1] == 0.0f && prm[2] == 0.0f &&
++                       q->type == GGML_TYPE_F32 && op->src[1]->type == GGML_TYPE_F32 && op->src[2]->type == GGML_TYPE_F32 &&
++                       q->nb[0] == 4 && op->src[1]->nb[0] == 4 && op->src[2]->nb[0] == 4 &&
++                       (!mk || (mk->type == GGML_TYPE_F16 && ggml_is_contiguous(mk)));
++            }
+         case GGML_OP_GATED_DELTA_NET:
+             {
+                 const uint32_t S_v = op->src[2]->ne[0];
+diff --git a/engine/ggml/src/ggml-vulkan/vulkan-shaders/fa_train_bwd_dkv.comp b/engine/ggml/src/ggml-vulkan/vulkan-shaders/fa_train_bwd_dkv.comp
+new file mode 100644
+index 00000000..0d320042
+--- /dev/null
++++ b/engine/ggml/src/ggml-vulkan/vulkan-shaders/fa_train_bwd_dkv.comp
+@@ -0,0 +1,77 @@
++#version 450
++
++// HOT-Step patch: flash-attn-train (Vulkan) — GGML_OP_FLASH_ATTN_TRAIN_BACK, pass B.
++// dK, dV for one key row per cluster, summed over the query heads that share
++// its KV head, in the CPU oracle's order (heads ascending, then rows):
++//   dV_j = sum_i P_ij dO_i,  dK_j = scale * sum_i dS_ij Q_i
++// Writes only regions pass A never touches, so the two need no barrier.
++
++#include "fa_train_common.glsl"
++
++layout(binding = 4) readonly buffer Fb { float f_d[]; };
++layout(binding = 5) readonly buffer Gb { float g_d[]; };
++layout(binding = 6) writeonly buffer Db { float d_d[]; };
++
++void main() {
++    const uint lane = gl_LocalInvocationID.x;
++    const uint j    = p.row_base + gl_WorkGroupID.x*4 + gl_LocalInvocationID.y;
++    const uint hk   = gl_WorkGroupID.y;
++    const uint b    = gl_WorkGroupID.z;
++    const uint E    = p.D/32;
++    const uint G    = p.Nh/p.Nkv;
++    if (j >= p.S_kv) {
++        return;
++    }
++
++    float k[FA_MAXE], v[FA_MAXE], dk[FA_MAXE], dv[FA_MAXE];
++    const uint kb = p.k_off + j*p.k_nb1 + hk*p.k_nb2 + b*p.k_nb3;
++    const uint vb = p.v_off + j*p.v_nb1 + hk*p.v_nb2 + b*p.v_nb3;
++    [[unroll]] for (uint e = 0; e < FA_MAXE; ++e) {
++        k[e]  = e < E ? k_d[kb + lane + 32*e] : 0.0;
++        v[e]  = e < E ? v_d[vb + lane + 32*e] : 0.0;
++        dk[e] = 0.0;
++        dv[e] = 0.0;
++    }
++
++    for (uint g = 0; g < G; ++g) {
++        const uint h = hk*G + g;
++        for (uint i = 0; i < p.S; ++i) {
++            const float mv = fa_mask(h, b, i, j);
++            if (fa_is_neg_inf(mv)) {
++                continue;
++            }
++            const uint qb = p.q_off + i*p.q_nb1 + h*p.q_nb2 + b*p.q_nb3;
++            float dot = 0.0;
++            [[unroll]] for (uint e = 0; e < FA_MAXE; ++e) {
++                if (e < E) dot += q_d[qb + lane + 32*e]*k[e];
++            }
++            const float lse = f_d[p.f_off + p.lse_off + h + p.Nh*(i + p.S*b)];
++            const float pij = exp(p.scale*fa_reduce(dot) + mv - lse);
++            if (pij == 0.0) {
++                continue;
++            }
++            const uint ob = p.D*(h + p.Nh*(i + p.S*b));
++            float dp = 0.0, di = 0.0;
++            [[unroll]] for (uint e = 0; e < FA_MAXE; ++e) {
++                if (e < E) {
++                    const float go = g_d[p.g_off + ob + lane + 32*e];
++                    dp += go*v[e];
++                    di += go*f_d[p.f_off + ob + lane + 32*e];
++                    dv[e] += pij*go;
++                }
++            }
++            const float c = p.scale*pij*(fa_reduce(dp) - fa_reduce(di));
++            [[unroll]] for (uint e = 0; e < FA_MAXE; ++e) {
++                if (e < E) dk[e] += c*q_d[qb + lane + 32*e];
++            }
++        }
++    }
++
++    const uint ob2 = p.d_off + p.D*(j + p.S_kv*(hk + p.Nkv*b));
++    [[unroll]] for (uint e = 0; e < FA_MAXE; ++e) {
++        if (e < E) {
++            d_d[ob2 + p.dk_off + lane + 32*e] = dk[e];
++            d_d[ob2 + p.dv_off + lane + 32*e] = dv[e];
++        }
++    }
++}
+diff --git a/engine/ggml/src/ggml-vulkan/vulkan-shaders/fa_train_bwd_dq.comp b/engine/ggml/src/ggml-vulkan/vulkan-shaders/fa_train_bwd_dq.comp
+new file mode 100644
+index 00000000..5ed7531f
+--- /dev/null
++++ b/engine/ggml/src/ggml-vulkan/vulkan-shaders/fa_train_bwd_dq.comp
+@@ -0,0 +1,74 @@
++#version 450
++
++// HOT-Step patch: flash-attn-train (Vulkan) — GGML_OP_FLASH_ATTN_TRAIN_BACK, pass A.
++// dQ for one query row per cluster, recomputing P from the forward's LSE:
++//   dS_ij = P_ij (dO_i . V_j - dO_i . O_i),  dQ_i = scale * sum_j dS_ij K_j
++
++#include "fa_train_common.glsl"
++
++layout(binding = 4) readonly buffer Fb { float f_d[]; };   // packed forward (O | LSE)
++layout(binding = 5) readonly buffer Gb { float g_d[]; };   // its gradient (dO | unused)
++layout(binding = 6) writeonly buffer Db { float d_d[]; };  // dQ | dK | dV
++
++void main() {
++    const uint lane = gl_LocalInvocationID.x;
++    const uint i    = p.row_base + gl_WorkGroupID.x*4 + gl_LocalInvocationID.y;
++    const uint h    = gl_WorkGroupID.y;
++    const uint b    = gl_WorkGroupID.z;
++    const uint E    = p.D/32;
++    const uint hk   = h/(p.Nh/p.Nkv);
++
++    // The two alignment gaps (dQ|dK and dK|dV), same rule as the forward.
++    if (i == 0 && h == 0 && b == 0) {
++        const uint n_q = p.D*p.S*p.Nh*p.B;
++        const uint n_k = p.D*p.S_kv*p.Nkv*p.B;
++        for (uint g = n_q + lane; g < p.dk_off; g += 32) d_d[p.d_off + g] = 0.0;
++        for (uint g = p.dk_off + n_k + lane; g < p.dv_off; g += 32) d_d[p.d_off + g] = 0.0;
++    }
++    if (i >= p.S) {
++        return;
++    }
++
++    float q[FA_MAXE], go[FA_MAXE], dq[FA_MAXE];
++    const uint qb = p.q_off + i*p.q_nb1 + h*p.q_nb2 + b*p.q_nb3;
++    const uint ob = p.D*(h + p.Nh*(i + p.S*b));
++    float di = 0.0;
++    [[unroll]] for (uint e = 0; e < FA_MAXE; ++e) {
++        q[e]  = e < E ? q_d[qb + lane + 32*e] : 0.0;
++        go[e] = e < E ? g_d[p.g_off + ob + lane + 32*e] : 0.0;
++        dq[e] = 0.0;
++        if (e < E) di += go[e]*f_d[p.f_off + ob + lane + 32*e];
++    }
++    di = fa_reduce(di);
++    const float lse = f_d[p.f_off + p.lse_off + h + p.Nh*(i + p.S*b)];
++
++    for (uint j = 0; j < p.S_kv; ++j) {
++        const float mv = fa_mask(h, b, i, j);
++        if (fa_is_neg_inf(mv)) {
++            continue;
++        }
++        const uint kb = p.k_off + j*p.k_nb1 + hk*p.k_nb2 + b*p.k_nb3;
++        float dot = 0.0;
++        [[unroll]] for (uint e = 0; e < FA_MAXE; ++e) {
++            if (e < E) dot += q[e]*k_d[kb + lane + 32*e];
++        }
++        const float pij = exp(p.scale*fa_reduce(dot) + mv - lse);
++        if (pij == 0.0) {
++            continue;
++        }
++        const uint vb = p.v_off + j*p.v_nb1 + hk*p.v_nb2 + b*p.v_nb3;
++        float dp = 0.0;
++        [[unroll]] for (uint e = 0; e < FA_MAXE; ++e) {
++            if (e < E) dp += go[e]*v_d[vb + lane + 32*e];
++        }
++        const float c = p.scale*pij*(fa_reduce(dp) - di);
++        [[unroll]] for (uint e = 0; e < FA_MAXE; ++e) {
++            if (e < E) dq[e] += c*k_d[kb + lane + 32*e];
++        }
++    }
++
++    const uint ob2 = p.d_off + p.D*(i + p.S*(h + p.Nh*b));
++    [[unroll]] for (uint e = 0; e < FA_MAXE; ++e) {
++        if (e < E) d_d[ob2 + lane + 32*e] = dq[e];
++    }
++}
+diff --git a/engine/ggml/src/ggml-vulkan/vulkan-shaders/fa_train_common.glsl b/engine/ggml/src/ggml-vulkan/vulkan-shaders/fa_train_common.glsl
+new file mode 100644
+index 00000000..cb50c0c7
+--- /dev/null
++++ b/engine/ggml/src/ggml-vulkan/vulkan-shaders/fa_train_common.glsl
+@@ -0,0 +1,59 @@
++// HOT-Step patch: flash-attn-train (Vulkan). Shared by the three kernels.
++//
++// One 32-lane cluster per row (a query row for the forward and dQ, a key row
++// for dK/dV), four rows per workgroup. Lane l holds elements l, l+32, ... of
++// the D-wide vectors, so a dot product is a per-lane partial followed by a
++// shuffle-xor reduction that never leaves the cluster. Every branch taken
++// inside the row loop depends only on the row, so a cluster never diverges.
++//
++// Layouts match the CPU oracle (ggml-cpu/ops.cpp):
++//   q [D, S, Nh, B], k/v [D, S_kv, Nkv, B], strides in floats;
++//   mask [S_kv, S, m2, m3] f16, broadcast by modulo;
++//   packed forward: O [D, Nh, S, B] at 0, LSE [Nh, S, B] at lse_off;
++//   packed backward: dQ [D, S, Nh, B] at 0, dK at dk_off, dV at dv_off.
++
++#extension GL_EXT_control_flow_attributes : enable
++#extension GL_KHR_shader_subgroup_basic : require
++#extension GL_KHR_shader_subgroup_shuffle : require
++
++#define FA_MAXE 8   // D <= 256
++
++layout(local_size_x = 32, local_size_y = 4, local_size_z = 1) in;
++
++layout(push_constant) uniform parameter {
++    uint D, S, Nh, B, S_kv, Nkv;
++    uint q_nb1, q_nb2, q_nb3;
++    uint k_nb1, k_nb2, k_nb3;
++    uint v_nb1, v_nb2, v_nb3;
++    uint m_ne0, m_ne1, m_ne2, m_ne3, has_mask;
++    float scale;
++    uint lse_off, dk_off, dv_off;
++    uint q_off, k_off, v_off, m_off, f_off, g_off, d_off;  // misalignment, in elements
++    uint row_base;  // first row of this dispatch: the host slices long ones
++} p;
++
++layout(binding = 0) readonly buffer Qb { float q_d[]; };
++layout(binding = 1) readonly buffer Kb { float k_d[]; };
++layout(binding = 2) readonly buffer Vb { float v_d[]; };
++layout(binding = 3) readonly buffer Mb { uint m_d[]; };   // f16 pairs
++
++float fa_reduce(float x) {
++    [[unroll]] for (uint s = 16; s > 0; s >>= 1) {
++        x += subgroupShuffleXor(x, s);
++    }
++    return x;
++}
++
++// Additive mask value for (head h, batch b, query i, key j); 0 without a mask.
++float fa_mask(uint h, uint b, uint i, uint j) {
++    if (p.has_mask == 0) {
++        return 0.0;
++    }
++    const uint idx = p.m_off + j + p.m_ne0*(i + p.m_ne1*((h % p.m_ne2) + p.m_ne2*(b % p.m_ne3)));
++    const vec2 pair = unpackHalf2x16(m_d[idx >> 1]);
++    return (idx & 1u) == 0u ? pair.x : pair.y;
++}
++
++bool fa_is_neg_inf(float x) {
++    return isinf(x) && x < 0.0;
++}
+diff --git a/engine/ggml/src/ggml-vulkan/vulkan-shaders/fa_train_fwd.comp b/engine/ggml/src/ggml-vulkan/vulkan-shaders/fa_train_fwd.comp
+new file mode 100644
+index 00000000..56f28258
+--- /dev/null
++++ b/engine/ggml/src/ggml-vulkan/vulkan-shaders/fa_train_fwd.comp
+@@ -0,0 +1,69 @@
++#version 450
++
++// HOT-Step patch: flash-attn-train (Vulkan) — GGML_OP_FLASH_ATTN_TRAIN.
++// Online-softmax attention for one query row per cluster; writes O and the
++// row's log-sum-exp. A fully masked row yields O = 0, LSE = 0 (not NaN).
++
++#include "fa_train_common.glsl"
++
++layout(binding = 4) writeonly buffer Db { float d_d[]; };
++
++void main() {
++    const uint lane = gl_LocalInvocationID.x;
++    const uint i    = p.row_base + gl_WorkGroupID.x*4 + gl_LocalInvocationID.y;
++    const uint h    = gl_WorkGroupID.y;
++    const uint b    = gl_WorkGroupID.z;
++    const uint E    = p.D/32;
++    const uint hk   = h/(p.Nh/p.Nkv);
++
++    // The alignment gap between O and LSE: zero-width at every real geometry,
++    // but the packed tensor's gradient is scale(packed, 0) and 0 * NaN = NaN.
++    if (i == 0 && h == 0 && b == 0) {
++        const uint n_o = p.D*p.Nh*p.S*p.B;
++        for (uint g = n_o + lane; g < p.lse_off; g += 32) {
++            d_d[p.d_off + g] = 0.0;
++        }
++    }
++    if (i >= p.S) {
++        return;
++    }
++
++    float q[FA_MAXE], acc[FA_MAXE];
++    const uint qb = p.q_off + i*p.q_nb1 + h*p.q_nb2 + b*p.q_nb3;
++    [[unroll]] for (uint e = 0; e < FA_MAXE; ++e) {
++        q[e]   = e < E ? q_d[qb + lane + 32*e] : 0.0;
++        acc[e] = 0.0;
++    }
++    float m = -1.0/0.0, l = 0.0;
++
++    for (uint j = 0; j < p.S_kv; ++j) {
++        const float mv = fa_mask(h, b, i, j);
++        if (fa_is_neg_inf(mv)) {
++            continue;
++        }
++        const uint kb = p.k_off + j*p.k_nb1 + hk*p.k_nb2 + b*p.k_nb3;
++        float dot = 0.0;
++        [[unroll]] for (uint e = 0; e < FA_MAXE; ++e) {
++            if (e < E) dot += q[e]*k_d[kb + lane + 32*e];
++        }
++        const float s     = p.scale*fa_reduce(dot) + mv;
++        const float m_new = max(m, s);
++        const float corr  = exp(m - m_new);
++        const float pj    = exp(s - m_new);
++        l = l*corr + pj;
++        const uint vb = p.v_off + j*p.v_nb1 + hk*p.v_nb2 + b*p.v_nb3;
++        [[unroll]] for (uint e = 0; e < FA_MAXE; ++e) {
++            if (e < E) acc[e] = acc[e]*corr + pj*v_d[vb + lane + 32*e];
++        }
++        m = m_new;
++    }
++
++    const uint ob = p.d_off + p.D*(h + p.Nh*(i + p.S*b));
++    const float inv = l > 0.0 ? 1.0/l : 0.0;
++    [[unroll]] for (uint e = 0; e < FA_MAXE; ++e) {
++        if (e < E) d_d[ob + lane + 32*e] = acc[e]*inv;
++    }
++    if (lane == 0) {
++        d_d[p.d_off + p.lse_off + h + p.Nh*(i + p.S*b)] = l > 0.0 ? m + log(l) : 0.0;
++    }
++}
+diff --git a/engine/ggml/src/ggml-vulkan/vulkan-shaders/unary.comp b/engine/ggml/src/ggml-vulkan/vulkan-shaders/unary.comp
+index 5ee5275d..bc5c8abe 100644
+--- a/engine/ggml/src/ggml-vulkan/vulkan-shaders/unary.comp
++++ b/engine/ggml/src/ggml-vulkan/vulkan-shaders/unary.comp
+@@ -154,6 +154,17 @@ float op_trunc(float x) {
+     return trunc(x);
+ }
+ 
++// HOT-Step patch: BF16_ROUND — round to the nearest BF16 value, ties to even,
++// NaN kept quiet; bit-identical to the CPU's GGML_FP32_TO_BF16.
++float op_bf16_round(float x) {
++    uint u = floatBitsToUint(x);
++    if ((u & 0x7fffffffu) > 0x7f800000u) {
++        return uintBitsToFloat((u | 0x00400000u) & 0xffff0000u);
++    }
++    u += 0x7fffu + ((u >> 16) & 1u);
++    return uintBitsToFloat(u & 0xffff0000u);
++}
++
+ void main() {
+     const uint idx = get_idx();
+ 
+diff --git a/engine/ggml/src/ggml-vulkan/vulkan-shaders/vulkan-shaders-gen.cpp b/engine/ggml/src/ggml-vulkan/vulkan-shaders/vulkan-shaders-gen.cpp
+index 58d347bc..5ca5e8b7 100644
+--- a/engine/ggml/src/ggml-vulkan/vulkan-shaders/vulkan-shaders-gen.cpp
++++ b/engine/ggml/src/ggml-vulkan/vulkan-shaders/vulkan-shaders-gen.cpp
+@@ -961,6 +961,7 @@ void process_shaders() {
+     string_to_spv("step_f32",       "unary.comp",       {{"A_TYPE", "float"},       {"D_TYPE", "float"},     {"OP", "op_step"}});
+     string_to_spv("round_f16",      "unary.comp",       {{"A_TYPE", "float16_t"},   {"D_TYPE", "float16_t"}, {"OP", "op_round"}});
+     string_to_spv("round_f32",      "unary.comp",       {{"A_TYPE", "float"},       {"D_TYPE", "float"},     {"OP", "op_round"}});
++    string_to_spv("bf16_round_f32", "unary.comp",       {{"A_TYPE", "float"},       {"D_TYPE", "float"},     {"OP", "op_bf16_round"}});  // HOT-Step patch: BF16_ROUND
+     string_to_spv("ceil_f16",       "unary.comp",       {{"A_TYPE", "float16_t"},   {"D_TYPE", "float16_t"}, {"OP", "op_ceil"}});
+     string_to_spv("ceil_f32",       "unary.comp",       {{"A_TYPE", "float"},       {"D_TYPE", "float"},     {"OP", "op_ceil"}});
+     string_to_spv("floor_f16",      "unary.comp",       {{"A_TYPE", "float16_t"},   {"D_TYPE", "float16_t"}, {"OP", "op_floor"}});
+@@ -1054,6 +1055,11 @@ void process_shaders() {
+ 
+     string_to_spv("rwkv_wkv6_f32", "wkv6.comp", merge_maps(base_dict, {{"A_TYPE", "float"}}));
+ 
++    // HOT-Step patch: flash-attn-train (Vulkan)
++    string_to_spv("fa_train_fwd_f32",     "fa_train_fwd.comp",     {});
++    string_to_spv("fa_train_bwd_dq_f32",  "fa_train_bwd_dq.comp",  {});
++    string_to_spv("fa_train_bwd_dkv_f32", "fa_train_bwd_dkv.comp", {});
++
+     string_to_spv("rwkv_wkv7_f32", "wkv7.comp", merge_maps(base_dict, {{"A_TYPE", "float"}}));
+ 
+     string_to_spv("gated_delta_net_f32", "gated_delta_net.comp", merge_maps(base_dict, {{"FLOAT_TYPE", "float"}, {"USE_SUBGROUP_ADD", "1"}, {"USE_SUBGROUP_CLUSTERED", "1"}}));

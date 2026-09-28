@@ -36,6 +36,10 @@ struct Yue2AitkBlockResult {
 };
 
 namespace yue2_aitk_graph {
+// Set once by the runner: true when the backend has no FLASH_ATTN_TRAIN
+// (Vulkan, Metal). The exact mul_mat -> soft_max -> mul_mat attention takes
+// its place; same maths, but it keeps the [keys, S, heads] probabilities.
+inline bool & math_attention() { static bool on = false; return on; }
 inline ggml_tensor * f32(ggml_context * ctx, ggml_tensor * x) {
     return x->type == GGML_TYPE_F32 ? x : ggml_cast(ctx, x, GGML_TYPE_F32);
 }
@@ -201,19 +205,24 @@ inline Yue2AitkBlockResult block(ggml_context * ctx, const Yue2AitkGraphConfig &
     const float root_scale = std::sqrt(1.0f/std::sqrt(float(D)));
     q = ggml_scale(ctx, ggml_cont(ctx, q), root_scale);
     k = ggml_scale(ctx, ggml_cont(ctx, k), root_scale);
-#ifdef YUE2_AITK_DIAGNOSTIC_MATH_ATTENTION
-    // Development-only quadratic graph to isolate arithmetic differences.
-    // Never enable this diagnostic in a shipped training runtime.
+    ggml_tensor * attention;
+#ifndef YUE2_AITK_DIAGNOSTIC_MATH_ATTENTION
+    if (math_attention())
+#endif
+    {
     ggml_tensor * scores = ggml_mul_mat(ctx, k, q);
     ggml_mul_mat_set_prec(scores, GGML_PREC_F32);
     ggml_tensor * probabilities = ggml_soft_max_ext(ctx, scores, mask, 1.0f, 0.0f);
     ggml_tensor * weighted = ggml_mul_mat(ctx, ggml_cont(ctx, ggml_transpose(ctx, v)), probabilities);
     ggml_mul_mat_set_prec(weighted, GGML_PREC_F32);
-    ggml_tensor * attention = round(ctx, ggml_reshape_2d(ctx, ggml_cont(ctx, ggml_permute(ctx, weighted, 0, 2, 1, 3)), Q, S));
-#else
+    attention = round(ctx, ggml_reshape_2d(ctx, ggml_cont(ctx, ggml_permute(ctx, weighted, 0, 2, 1, 3)), Q, S));
+    }
+#ifndef YUE2_AITK_DIAGNOSTIC_MATH_ATTENTION
+    else {
     ggml_tensor * packed = ggml_flash_attn_train(ctx, q, k, v, mask, 1.0f);
     ggml_flash_attn_train_set_prec(packed, c.attention_precision);
-    ggml_tensor * attention = round(ctx, ggml_reshape_2d(ctx, ggml_flash_attn_train_get_o(ctx, packed), Q, S));
+    attention = round(ctx, ggml_reshape_2d(ctx, ggml_flash_attn_train_get_o(ctx, packed), Q, S));
+    }
 #endif
     h = round(ctx, ggml_add(ctx, h, linear(ctx, w.output, attention, adapters ? &adapters->output : nullptr)));
     n = rms(ctx, h, norms.post_attention, c.rms_eps);
