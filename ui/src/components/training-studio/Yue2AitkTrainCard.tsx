@@ -209,7 +209,7 @@ const presetTime = (p: { minutes: number }) => `${Number((p.minutes / PRESETS[1]
 /** Mirror of BASE_MATCHED_DEFAULTS in server/src/services/training/yue2JointTrainRunner.ts,
  *  shown as each blank field's placeholder. The server fills blanks from its own copy. */
 const BASE_MATCHED_DEFAULTS = {
-  lr: 1e-4, weightDecay: 0.1, beta2: 0.95, abcDropout: 0.5, narCropFrames: 0, arLossWeight: 0.25,
+  lr: 1e-4, weightDecay: 0.1, beta2: 0.95, abcDropout: 0.5, narCropFrames: 1500, arLossWeight: 0.25,
   gradAccum: 4, textDropout: 0.1, lyricDropout: 0.1, bothDropout: 0.1, warmupFraction: 0.03,
 } as const;
 type PrepareForm = Yue2AitkPrepareRequest;

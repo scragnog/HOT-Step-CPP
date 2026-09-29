@@ -77,7 +77,7 @@ AdamW steps, old vs new binary, identical losses and adapter sha256s, 2026-09-27
 | CE over generated tokens and closing markers (eq. 5) | `--ar-targets base` | MUSIC_START never a target; ABC_END only when the sheet is kept | every suffix token |
 | Batch 256 | `--grad-accum` | 4 songs per update (Thorough preset 8; a "step" stays one update; each micro-step draws its own song from the same RNG stream) | 1 |
 | Text and lyrics dropped separately or together | `--text-dropout --lyric-dropout --both-dropout` | 0.1 / 0.1 / 0.1 (rates are not published) | caption dropout 0.5 instead |
-| Whole songs, no temporal split | `--nar-crop-frames 0` | whole song (about 12 GB VRAM, 11-15 s a step on a 4-minute song) | 1500 |
+| Whole songs, no temporal split | `--nar-crop-frames` | 1500 (60 s crop), a deliberate departure since 2026-09-29: a blind test scored it level with whole songs at about 40% less time. `0` trains whole songs (about 12 GB VRAM, 11-15 s a step on a 4-minute song) | 1500 |
 | No KL anchor, no stops | `--kl-weight 0`, fixed steps | the frozen teacher forward is skipped when nothing reads the KL | KL 0.2 + target |
 | Warmup + cosine | `--warmup`, `--lr-schedule cosine-floor --lr-floor 0.1` | 3% of steps, floor 0.1 | wsd |
 
