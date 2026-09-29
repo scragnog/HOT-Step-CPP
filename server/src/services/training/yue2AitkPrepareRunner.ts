@@ -7,6 +7,7 @@ import path from 'path';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import readline from 'readline';
+import { withFfmpegOnPath } from '../../config.js';
 import { aceTrainExe } from './aceTrain.js';
 import { emitProgress, finishJob, isCancelled, pushEvent, type TrainingJob } from './labelingQueue.js';
 import { log } from './yue2TrainRunner.js';
@@ -172,7 +173,7 @@ export async function runYue2AitkPrepareJob(job: TrainingJob, inlineOptions?: Re
 
   const child = spawn(exe, args, {
     windowsHide: true,
-    env: { ...process.env, CUDA_VISIBLE_DEVICES: '' },
+    env: withFfmpegOnPath({ ...process.env, CUDA_VISIBLE_DEVICES: '' }),
   });
   job.child = child;
   const tail: string[] = [];

@@ -107,6 +107,16 @@ export function getFFmpegPath(): string | null {
   return null;
 }
 
+/** `env` with the app's ffmpeg folder first on PATH. Some ace-train stages
+ *  (yue2-sheet) run plain `ffmpeg`, which a machine without a system ffmpeg
+ *  cannot find. */
+export function withFfmpegOnPath(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const ffmpeg = getFFmpegPath();
+  if (!ffmpeg) return env;
+  const key = Object.keys(env).find(k => k.toUpperCase() === 'PATH') ?? 'PATH';
+  return { ...env, [key]: `${path.dirname(ffmpeg)}${path.delimiter}${env[key] ?? ''}` };
+}
+
 
 export const config = {
   // ace-server configuration

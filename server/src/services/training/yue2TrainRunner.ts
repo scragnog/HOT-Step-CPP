@@ -40,6 +40,7 @@ import { spawn } from 'child_process';
 
 import { pushLog } from '../../routes/logs.js';
 import { buildGpuEnv } from '../gpuDevices.js';
+import { withFfmpegOnPath } from '../../config.js';
 import { restartAceServer, stopAceServer } from '../aceEngineProcess.js';
 import { YUE2_LICENSE_NOTICE } from '../backends/yue2/index.js';
 import { aceTrainExe } from './aceTrain.js';
@@ -412,7 +413,7 @@ export async function runYue2AceTrain<S extends RelayState>(
     emitProgress(job);
     pushLog(`[Training] ${kind} job ${job.id}: ${exe} ${args[0]}`);
 
-    const child = spawn(exe, args, { windowsHide: true, env: spawnEnv ?? buildGpuEnv().env });
+    const child = spawn(exe, args, { windowsHide: true, env: withFfmpegOnPath(spawnEnv ?? buildGpuEnv().env) });
     job.child = child;
 
     const sinks = openRunLog(args, wantsJsonl(kind));
