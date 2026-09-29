@@ -150,6 +150,36 @@ steps verified finite on an RTX 4090 over Vulkan, 47-95 s per song; not yet
 ear-tested, and not yet run on AMD). Model Manager's **YuE2 Joint Training Pack**
 contains the required weights; Legacy remains available on its supported backends.
 
+### Dataset profiles (Dataset-Calibrated Training, in progress)
+
+The aim is a recipe sized to the album instead of one recipe for every dataset.
+Nothing here changes training yet; the recipe side will be opt-in, and with it
+off training stays exactly as it is.
+
+`server/src/services/training/datasetProfile.ts` measures a dataset and saves
+`<training dir>/datasets/<slug>/dataset-profile.json`. It reads only what
+survives a cache cleanup: the audio (one ffmpeg pass per song for EBU R128
+loudness and range, spectral centroid, flux, flatness and frame RMS) and the
+sidecars (BPM folded into one octave, key, genre, caption words and how much the
+album's captions agree, lyric words per second). When the YuE2 cache is still on
+disk it adds lead-sheet measures from `classifyYue2Score`. A 15-song album takes
+about 2 s.
+
+`server/scripts/dataset-profile-report.ts` profiles every album with scored
+YuE2 rungs, joins the profiles with `yue2_rung_scores`, and ranks each measure
+against the ear targets (peak likeness and overall, best step, first step at
+likeness 4) within one recipe. `--calc <calc.py>` also runs a third-party
+settings calculator for comparison. The report goes to
+`docs/plans/dataset-calibration/` (local-only).
+
+First run (2026-09-29, 37 albums): under the tuned Prodigy recipe, albums with
+more minutes of audio took longer to reach likeness 4 (Spearman 0.55, n=23), and
+albums with denser lyrics got there sooner (-0.52). The third-party calculator's
+step count tracked it at 0.23. Peak scores sit at the ceiling (22 of 27 runs
+peaked at 5), so the scores can show how fast an album trains but not how well.
+Base-matched has 4 full ladders, too few to rank. The lead-sheet measures are
+confounded: only albums whose cache was never cleaned up have them.
+
 ## MiniMax-Music3 (MM3) LM adapters
 
 MM3 planner-LM adapter training is a separate pipeline from everything below
