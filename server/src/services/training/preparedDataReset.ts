@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { datasetDir, isInside } from './paths.js';
 import { tensorsRoot } from './aceTrain.js';
+import { snapshotYue2Sheets } from './datasetProfile.js';
 
 export interface PreparedCache {
   name: string;
@@ -58,6 +59,8 @@ export function listPreparedCaches(slug: string, sourceDir: string): PreparedCac
 export function clearPreparedCaches(slug: string, sourceDir: string): PreparedCache[] {
   // Complete the safety walk before removing anything.
   const caches = listPreparedCaches(slug, sourceDir);
+  try { snapshotYue2Sheets(slug); }
+  catch (err: any) { console.warn(`[Training] Could not keep the YuE2 lead sheets for ${slug}: ${err?.message || err}`); }
   for (const cache of caches) fs.rmSync(cache.path, { recursive: true, force: false });
   return caches;
 }

@@ -147,7 +147,8 @@ import { clearPreparedCaches, listPreparedCaches } from '../services/training/pr
 import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
 import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions, renderYue2JointPreview } from '../services/training/yue2JointPreview.js';
 import { runOnGpuLane } from '../services/generation/gpuLane.js';
-import { listYue2RungScores, scoreYue2Rung, yue2RungScoresCsv } from '../services/training/yue2RungScores.js';
+import { listYue2RungScores, scoreYue2Rung, yue2RungScoresCsv, getYue2AlbumScore, scoreYue2Album } from '../services/training/yue2RungScores.js';
+import { calibrateYue2Length, ensureDatasetProfile, type Yue2Calibration } from '../services/training/datasetProfile.js';
 import { planYue2Cleanup, runYue2Cleanup } from '../services/training/yue2Cleanup.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
@@ -3421,7 +3422,7 @@ router.post('/datasets/:id/yue2-train', (req: Request, res: Response) => {
  * the established Legacy NAR path. AITK requires a prepared schema1 manifest
  * and a raw ConvRot checkpoint supplied explicitly by the caller.
  */
-router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
+router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response) => {
   try {
     const ds = yue2Preflight(req, res);
     if (!ds) return;
@@ -3497,6 +3498,25 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       return;
     }
     const method: 'tuned' | 'base-matched' = b.method === 'base-matched' ? 'base-matched' : 'tuned';
+    // Dataset-Calibrated Training (opt-in): a fresh base-matched run that asks
+    // for it gets steps and saveEvery sized to the album before the recipe
+    // fills in warmup from the step count. Without calibrated: true, nothing here runs.
+    let calibration: Yue2Calibration | undefined;
+    if (b.calibrated === true && method === 'base-matched' && !(typeof b.resumeRunId === 'string' && b.resumeRunId)) {
+      const reqSteps = Number(b.steps), reqEvery = Number(b.saveEvery);
+      if (!Number.isInteger(reqSteps) || reqSteps < 1 || !Number.isInteger(reqEvery) || reqEvery < 1) {
+        res.status(400).json({ error: 'Dataset-Calibrated Training needs steps and saveEvery to scale.' });
+        return;
+      }
+      const profile = await ensureDatasetProfile(ds.slug, ds.sourceDir);
+      const minutes = profile.album.totalMin;
+      if (typeof minutes !== 'number' || minutes <= 0) {
+        res.status(400).json({ error: 'Dataset-Calibrated Training could not measure this dataset\'s audio.' });
+        return;
+      }
+      calibration = calibrateYue2Length(minutes, reqSteps, reqEvery);
+      b = { ...b, steps: calibration.steps, saveEvery: calibration.saveEvery };
+    }
     if (method === 'base-matched') b = applyBaseMatchedRecipe(b);
     const str = (key: string): string => typeof b[key] === 'string' ? (b[key] as string).trim() : '';
     const automatic = b.autoPrepare === true && !str('resume');
@@ -3814,9 +3834,11 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(resume && b.refinePlanner === true ? { unfreezePlanner: true, klCheckpointEvery: Math.max(0.01, Math.min(1, Number(b.klCheckpointEvery) || 0.1)), refineWarmup: 30, rungAdaptiveLr: true } : {}),
       ...advanced,
       ...baseMatched,
+      ...(calibration ? { calibration } : {}),
       ...(preparation ? { preparation } : {}),
     });
     res.json({ jobId: job.id, kind: job.kind, trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16', method, outDir, steps, saveEvery, preview, lyricTiming: alignmentEnabled, cursorWeight, alignment, ...baseMatched,
+      ...(calibration ? { calibration } : {}),
       optimizer, cautious, rank, alpha: alphaRaw, adapterType, ...(adapterType === 'lokr' ? { lokrDim, lokrFactor } : {}), stopMode, ...advanced,
       ...(targetLoss !== undefined ? { targetLoss } : {}), ...(targetKl !== undefined ? { targetKl } : {}), ...(targetKlMode ? { targetKlMode } : {}),
       ...(narExtraSteps !== undefined ? { narExtraSteps } : {}) });
@@ -4162,6 +4184,25 @@ router.put('/datasets/:id/yue2-rung-scores', (req: Request, res: Response) => {
     res.json({ score: scoreYue2Rung({ id: ds.id, slug: ds.slug }, { refineRun: b.refineRun, step: Number(b.step),
       ...(b.likeness !== undefined ? { likeness: b.likeness === null ? null : Number(b.likeness) } : {}),
       ...(b.corruption !== undefined ? { corruption: b.corruption === null ? null : Number(b.corruption) } : {}),
+      ...(typeof b.notes === 'string' ? { notes: b.notes } : {}) }) });
+  } catch (err: any) { res.status(400).json({ error: err?.message || String(err) }); }
+});
+/** A run's album verdict (Dataset-Calibrated Training): GET ?run=<jobId>,
+ * PUT { refineRun, score?, notes? }. */
+router.get('/datasets/:id/yue2-album-score', (req: Request, res: Response) => {
+  try {
+    if (typeof req.query.run !== 'string' || !req.query.run) { res.status(400).json({ error: 'run is required' }); return; }
+    res.json({ score: getYue2AlbumScore(req.query.run) });
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
+});
+router.put('/datasets/:id/yue2-album-score', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const b = (req.body || {}) as Record<string, unknown>;
+    if (typeof b.refineRun !== 'string') { res.status(400).json({ error: 'refineRun is required' }); return; }
+    res.json({ score: scoreYue2Album({ id: ds.id, slug: ds.slug }, { refineRun: b.refineRun,
+      ...(b.score !== undefined ? { score: b.score === null ? null : Number(b.score) } : {}),
       ...(typeof b.notes === 'string' ? { notes: b.notes } : {}) }) });
   } catch (err: any) { res.status(400).json({ error: err?.message || String(err) }); }
 });

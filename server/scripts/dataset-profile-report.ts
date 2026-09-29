@@ -19,13 +19,13 @@ import { spawnSync } from 'node:child_process';
 import Database from 'better-sqlite3';
 import { config } from '../src/config.js';
 import { datasetDir } from '../src/services/training/paths.js';
-import { buildDatasetProfile, readDatasetProfile, saveDatasetProfile, type DatasetProfile } from '../src/services/training/datasetProfile.js';
+import { buildDatasetProfile, readDatasetProfile, saveDatasetProfile, trainLogArchiveDir, type DatasetProfile } from '../src/services/training/datasetProfile.js';
 
 const arg = (k: string) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : undefined; };
 const rebuild = process.argv.includes('--rebuild');
 const all = process.argv.includes('--all');
 const calcScript = arg('--calc');
-const outDir = path.resolve(arg('--out') ?? path.join(process.cwd(), 'docs', 'plans', 'dataset-calibration'));
+const outDir = path.resolve(arg('--out') ?? path.join(import.meta.dirname, '..', '..', 'docs', 'plans', 'dataset-calibration'));
 
 const db = new Database(config.data.dbPath, { readonly: true, fileMustExist: true });
 const sourceOf = new Map((db.prepare('SELECT slug, source_dir FROM training_datasets').all() as Array<{ slug: string; source_dir: string }>).map(r => [r.slug, r.source_dir]));
@@ -37,6 +37,8 @@ type Recipe = 'base-matched' | 'tuned (Prodigy)' | 'lr-leak (invalid)' | 'other'
 function recipeOf(settings: string): Recipe {
   try {
     const s = JSON.parse(settings);
+    // Recorded since 2026-09-29; older rows are told apart by optimizer and rate.
+    if (s.method === 'base-matched') return s.lr === 0.0001 || s.lr === undefined ? 'base-matched' : 'lr-leak (invalid)';
     if (s.optimizer === 'prodigy') return 'tuned (Prodigy)';
     if (s.optimizer === 'adamw-lm') return s.lr === 0.0001 ? 'base-matched' : 'lr-leak (invalid)';
   } catch { /* fall through */ }
@@ -49,6 +51,11 @@ for (const r of rows) {
   if (!run) runs.set(r.refine_run, run = { run: r.refine_run, slug: r.dataset_slug, recipe: recipeOf(r.settings), rungs: [], segment: path.dirname(r.checkpoint_dir) });
   run.rungs.push({ step: r.step, likeness: r.likeness, corruption: r.corruption });
 }
+// The album verdict per run (1-5); the table exists from 2026-09-29 on.
+const albumScore = new Map<string, number>();
+try {
+  for (const a of db.prepare('SELECT refine_run, score FROM yue2_album_scores WHERE score IS NOT NULL').all() as Array<{ refine_run: string; score: number }>) albumScore.set(a.refine_run, a.score);
+} catch { /* older database: no album scores yet */ }
 
 // Overall = the ladder scoreboard's base: likeness and (6 - corruption), averaged.
 const overall = (g: { likeness: number; corruption: number | null }) => g.corruption == null ? g.likeness : (g.likeness + 6 - g.corruption) / 2;
@@ -58,6 +65,7 @@ function targets(run: Run): Record<string, number | null> {
   const peakLik = Math.max(...r.map(g => g.likeness));
   return {
     rungs: r.length,
+    albumScore: albumScore.get(run.run) ?? null,
     maxStep: Math.max(...r.map(g => g.step)),
     peakLikeness: peakLik,
     peakOverall: overall(best),
@@ -70,7 +78,10 @@ function targets(run: Run): Record<string, number | null> {
 /** Loss facts from the run's train.jsonl when it survived: step-1..3 CE is the base model on this album. */
 function lossFacts(run: Run): Record<string, number | null> {
   try {
-    const recs = fs.readFileSync(path.join(run.segment, 'train.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)).filter(x => x.stage === 'joint');
+    // The run folder's log, else the copy archived with the dataset when the run was finished or deleted.
+    const live = path.join(run.segment, 'train.jsonl');
+    const archived = path.join(trainLogArchiveDir(run.slug), `${run.run}-${path.basename(run.segment)}.jsonl`);
+    const recs = fs.readFileSync(fs.existsSync(live) ? live : archived, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)).filter(x => x.stage === 'joint');
     if (recs.length < 30) return {};
     const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
     const first = recs.slice(0, 3), head = recs.slice(0, 10), tail = recs.slice(-20);
@@ -151,7 +162,7 @@ for (const run of runs.values()) {
   table.push({ slug: run.slug, run: run.run, recipe: run.recipe, t: targets(run), f, calc: calc?.config });
 }
 
-const TARGETS = ['peakLikeness', 'peakOverall', 'bestStep', 'stepToLikeness4', 'corruptionAtBest'];
+const TARGETS = ['albumScore', 'peakLikeness', 'peakOverall', 'bestStep', 'stepToLikeness4', 'corruptionAtBest'];
 const MIN_N = 5;
 const lines: string[] = [`# Dataset calibration report`, '', `Built ${new Date().toISOString()} from ${rows.length} scored rungs, ${runs.size} runs, ${profiles.size} profiled albums.`, ''];
 lines.push('Spearman rank correlation between each album measure and each ear target, within one recipe.',
@@ -178,10 +189,10 @@ for (const recipe of ['base-matched', 'tuned (Prodigy)'] as Recipe[]) {
     for (const x of found.slice(0, 25)) lines.push(`| ${x.feat} | ${x.target} | ${x.rho.toFixed(2)} | ${x.n} |`);
     lines.push('');
   }
-  lines.push('| album | rungs | peak likeness | peak overall | best step | first likeness 4 | songs | min | base AR CE | calc steps |', '|---|---|---|---|---|---|---|---|---|---|');
+  lines.push('| album | album score | rungs | peak likeness | peak overall | best step | first likeness 4 | songs | min | base AR CE | calc steps |', '|---|---|---|---|---|---|---|---|---|---|---|');
   for (const r of group.sort((a, b) => a.slug.localeCompare(b.slug))) {
     const v = (x: unknown, d = 0) => typeof x === 'number' && Number.isFinite(x) ? x.toFixed(d) : '';
-    lines.push(`| ${r.slug} | ${r.t.rungs} | ${v(r.t.peakLikeness)} | ${v(r.t.peakOverall, 1)} | ${v(r.t.bestStep)} | ${v(r.t.stepToLikeness4)} | ${r.f.songs} | ${v(r.f.totalMin)} | ${v(r.f.baseArCe, 2)} | ${v(r.f.calcSteps)} |`);
+    lines.push(`| ${r.slug} | ${v(r.t.albumScore)} | ${r.t.rungs} | ${v(r.t.peakLikeness)} | ${v(r.t.peakOverall, 1)} | ${v(r.t.bestStep)} | ${v(r.t.stepToLikeness4)} | ${r.f.songs} | ${v(r.f.totalMin)} | ${v(r.f.baseArCe, 2)} | ${v(r.f.calcSteps)} |`);
   }
   lines.push('');
 }

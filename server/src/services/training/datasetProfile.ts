@@ -134,14 +134,46 @@ function yue2Caption(audio: string, sidecar: Record<string, string>): string {
   return read(`${stem}.yue2.txt`) || (sidecar.caption ?? '').trim() || read(`${stem}.mm3.txt`).replace(/\s+/g, ' ').trim();
 }
 
-/** Lead sheets by source file name, from the YuE2 cache when it is still on disk. */
+const sheetSnapshotPath = (slug: string) => path.join(datasetDir(slug), 'yue2-sheets.json');
+
+/** Lead sheets by source file name: the YuE2 cache while it is on disk, else
+ *  the snapshot clearPreparedCaches left behind. */
 function cachedSheets(slug: string): Map<string, { abc: string; lyrics: string }> {
   const out = new Map<string, { abc: string; lyrics: string }>();
-  try {
-    const m = JSON.parse(fs.readFileSync(path.join(datasetDir(slug), 'yue2-latents', 'yue2_preprocess.json'), 'utf8'));
-    for (const s of m.sources ?? []) if (s?.abc && s?.name) out.set(s.name, { abc: s.abc, lyrics: s.lyrics ?? '' });
-  } catch { /* no cache: the sheet measures are left out */ }
+  for (const file of [path.join(datasetDir(slug), 'yue2-latents', 'yue2_preprocess.json'), sheetSnapshotPath(slug)]) {
+    try {
+      const m = JSON.parse(fs.readFileSync(file, 'utf8'));
+      for (const s of m.sources ?? []) if (s?.abc && s?.name) out.set(s.name, { abc: s.abc, lyrics: s.lyrics ?? '' });
+      if (out.size) return out;
+    } catch { /* try the next source */ }
+  }
   return out;
+}
+
+/** Keep the lead sheets (a few KB of text) before the YuE2 cache is deleted:
+ *  re-running SheetSage on an album costs GPU minutes. No cache, no-op. */
+export function snapshotYue2Sheets(slug: string): void {
+  let m: { sources?: Array<{ name?: string; abc?: string; lyrics?: string }> };
+  try { m = JSON.parse(fs.readFileSync(path.join(datasetDir(slug), 'yue2-latents', 'yue2_preprocess.json'), 'utf8')); }
+  catch { return; }
+  const sources = (m.sources ?? []).filter(s => s?.name && s?.abc).map(s => ({ name: s.name, abc: s.abc, lyrics: s.lyrics ?? '' }));
+  if (sources.length) fs.writeFileSync(sheetSnapshotPath(slug), JSON.stringify({ savedAt: new Date().toISOString(), sources }));
+}
+
+export const trainLogArchiveDir = (slug: string) => path.join(datasetDir(slug), 'train-logs');
+
+/** Copy a joint run's per-segment train.jsonl into the dataset's train-logs/
+ *  as <jobId>-<segment>.jsonl, so the loss curve outlives the run folder. */
+export function archiveYue2TrainLogs(slug: string, jobId: string, output: string): void {
+  if (!slug) return;
+  let segments: string[] = [];
+  try { segments = fs.readdirSync(path.join(output, 'segments')).sort(); } catch { return; }
+  for (const seg of segments) {
+    const src = path.join(output, 'segments', seg, 'train.jsonl');
+    if (!fs.existsSync(src)) continue;
+    fs.mkdirSync(trainLogArchiveDir(slug), { recursive: true });
+    fs.copyFileSync(src, path.join(trainLogArchiveDir(slug), `${jobId}-${seg}.jsonl`));
+  }
 }
 
 async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Promise<R[]> {
@@ -223,4 +255,48 @@ export function saveDatasetProfile(p: DatasetProfile): string {
   fs.writeFileSync(tmp, JSON.stringify(p, null, 2));
   fs.renameSync(tmp, file);
   return file;
+}
+
+// ── Dataset-Calibrated Training (opt-in) ────────────────────────────────────
+//
+// Rule 1, 2026-09-29: size the run by the album's minutes of audio. Across 23
+// ear-scored ladders of the tuned recipe, the step where likeness first reached
+// 4 rose with total minutes (Spearman 0.55). The scale is set so a 45-minute
+// album (the middle of the scored set) keeps the preset's count.
+//
+// ponytail: one measure, fitted on the tuned recipe. Its ceiling is that the
+// relation is unconfirmed under base-matched; the opt-in runs are the test.
+// Replace with a rule refitted on base-matched album scores once there are
+// enough (dataset-profile-report.ts).
+export const CALIBRATION_REFERENCE_MINUTES = 45;
+const CALIBRATION_MIN_FACTOR = 0.6;
+const CALIBRATION_MAX_FACTOR = 2;
+
+export interface Yue2Calibration {
+  rule: 'minutes-v1';
+  minutes: number;
+  factor: number;
+  requestedSteps: number;
+  requestedSaveEvery: number;
+  steps: number;
+  saveEvery: number;
+}
+
+/** Scale steps and saveEvery together, so the ladder keeps its rung count. */
+export function calibrateYue2Length(minutes: number, steps: number, saveEvery: number): Yue2Calibration {
+  const factor = Math.min(CALIBRATION_MAX_FACTOR, Math.max(CALIBRATION_MIN_FACTOR, minutes / CALIBRATION_REFERENCE_MINUTES));
+  const every = Math.max(1, Math.round(saveEvery * factor));
+  const scaled = Math.max(every, Math.round(steps * factor / every) * every);
+  return { rule: 'minutes-v1', minutes: Math.round(minutes * 10) / 10, factor: Math.round(factor * 1000) / 1000,
+    requestedSteps: steps, requestedSaveEvery: saveEvery, steps: scaled, saveEvery: every };
+}
+
+/** The saved profile when it covers the same audio files, else a fresh one (saved). */
+export async function ensureDatasetProfile(slug: string, sourceDir: string): Promise<DatasetProfile> {
+  const names = yue2StemSources(sourceDir).map(f => path.basename(f)).join('|');
+  const saved = readDatasetProfile(slug);
+  if (saved && saved.songs.map(s => s.file).join('|') === names) return saved;
+  const fresh = await buildDatasetProfile(slug, sourceDir);
+  saveDatasetProfile(fresh);
+  return fresh;
 }

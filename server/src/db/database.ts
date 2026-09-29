@@ -262,6 +262,19 @@ export function initDb(): void {
       updated_at     TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_yue2_rung_scores_ds ON yue2_rung_scores(dataset_id, refine_run, step);
+
+    -- One verdict per run on how well the album trained overall (1-5), which
+    -- the rung scores cannot show once most rungs top out at likeness 5.
+    -- Dataset-Calibrated Training fits album measures against it.
+    CREATE TABLE IF NOT EXISTS yue2_album_scores (
+      refine_run   TEXT PRIMARY KEY,
+      dataset_id   TEXT NOT NULL,
+      dataset_slug TEXT NOT NULL,
+      score        INTEGER,
+      notes        TEXT NOT NULL DEFAULT '',
+      created_at   TEXT DEFAULT (datetime('now')),
+      updated_at   TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // ── Migrations — add columns that may not exist in older databases ────────

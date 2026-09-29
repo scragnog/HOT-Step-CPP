@@ -12,9 +12,10 @@ import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Toggle } from '../settings/SettingsPrimitives';
 import { PreviewPlayer } from './PreviewPlayer';
+import { ParamLabel } from '../shared/ParamLabel';
 import {
-  getYue2CleanupPlan, linkYue2JointCheckpointPreset, listYue2RungScores, renderYue2JointPreviews, runYue2Cleanup, scoreYue2Rung,
-  type Yue2AitkRunRecord, type Yue2CleanupChoice, type Yue2CleanupPlan, type Yue2JointPreviewRecord, type Yue2RungScore,
+  getYue2AlbumScore, getYue2CleanupPlan, linkYue2JointCheckpointPreset, listYue2RungScores, renderYue2JointPreviews, runYue2Cleanup, scoreYue2Album, scoreYue2Rung,
+  type Yue2AitkRunRecord, type Yue2AlbumScore, type Yue2CleanupChoice, type Yue2CleanupPlan, type Yue2JointPreviewRecord, type Yue2RungScore,
 } from '../../services/trainingApi';
 
 const input = 'px-2 py-1.5 rounded-lg text-xs bg-white/70 dark:bg-black/20 border border-zinc-300/70 dark:border-white/10 text-zinc-800 dark:text-zinc-100';
@@ -82,6 +83,19 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
   const score = async (step: number, patch: { likeness?: number | null; corruption?: number | null; notes?: string }) => {
     if (!datasetId || !runId) return;
     try { const r = await scoreYue2Rung(datasetId, { refineRun: runId, step, ...patch }); setScores(prev => ({ ...prev, [step]: r.score })); }
+    catch (err) { fail(err); }
+  };
+
+  // The album verdict: one score per run, beside the per-rung ones.
+  const [album, setAlbum] = useState<Yue2AlbumScore | null>(null);
+  const [albumNote, setAlbumNote] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    setAlbum(null); setAlbumNote(undefined);
+    if (datasetId && runId) void getYue2AlbumScore(datasetId, runId).then(r => setAlbum(r.score)).catch(() => {});
+  }, [datasetId, runId]);
+  const scoreAlbum = async (patch: { score?: number | null; notes?: string }) => {
+    if (!datasetId || !runId) return;
+    try { setAlbum((await scoreYue2Album(datasetId, { refineRun: runId, ...patch })).score); }
     catch (err) { fail(err); }
   };
 
@@ -207,6 +221,17 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
       </div>}
       {cleanupNote && <div className="text-[12px] text-emerald-700 dark:text-emerald-300">{cleanupNote}</div>}
       {ladder.length > 0 && <div className="mt-3 flex flex-col gap-3">
+        <div className="rounded-lg border border-violet-500/40 bg-violet-500/5 p-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px]">
+          <ParamLabel label={t('trainingStudio.refine.albumScore', 'How well did this album train?')}
+            info={t('trainingStudio.refine.albumScoreInfo', 'One score for the whole run, once you have heard enough of its ladder: 1 = the adapter never really caught the album, 5 = as good as the best albums you have trained. Score it against your other albums, not against this run\'s own rungs. The rung scores show how fast an album trains; this is the only score that shows how well, and Dataset-Calibrated Training learns from it.')} />
+          <div className="flex items-center gap-1">
+            {[1, 2, 3, 4, 5].map(n => <button key={n} type="button" onClick={() => void scoreAlbum({ score: album?.score === n ? null : n })}
+              className={`w-6 h-6 rounded border text-[11px] font-semibold ${album?.score === n ? 'bg-violet-500/20 border-violet-500 text-violet-700 dark:text-violet-300' : 'border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:bg-zinc-500/10'}`}>{n}</button>)}
+          </div>
+          <input className={`${input} flex-1 min-w-[240px]`} placeholder={t('trainingStudio.refine.albumNotes', 'Notes: what this album got right or never got')}
+            value={albumNote ?? album?.notes ?? ''} onChange={e => setAlbumNote(e.target.value)}
+            onBlur={e => { if (e.target.value !== (album?.notes ?? '')) void scoreAlbum({ notes: e.target.value }); }} />
+        </div>
         {ladder.map(c => {
           const stats = rungStats(c.step);
           const { mine, plannerReplans, composerReplans, hasReplanData, flaggedTakes, flagReasons, overall } = stats;

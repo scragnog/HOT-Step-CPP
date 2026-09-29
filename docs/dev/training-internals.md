@@ -153,8 +153,25 @@ contains the required weights; Legacy remains available on its supported backend
 ### Dataset profiles (Dataset-Calibrated Training, in progress)
 
 The aim is a recipe sized to the album instead of one recipe for every dataset.
-Nothing here changes training yet; the recipe side will be opt-in, and with it
-off training stays exactly as it is.
+It is opt-in: the route only acts when a fresh base-matched request sets
+`calibrated: true`, and without it no code path changes.
+
+With it on, `POST /datasets/:id/yue2-joint-train` calls `ensureDatasetProfile`
+(reuses the saved profile when it covers the same audio files) and
+`calibrateYue2Length(minutes, steps, saveEvery)`: both are scaled by
+`minutes / 45`, clamped to 0.6-2, so the rung count stays the same. This runs
+before `applyBaseMatchedRecipe`, so warmup follows the new step count. The result
+is stored as `calibration` in the run options, is logged at job start, and goes
+into each rung score's settings snapshot (which now also records `method` and
+`gradAccum`). The handler is async for this.
+
+Evidence kept for fitting: `yue2_album_scores` holds one 1-5 verdict per run
+(`GET/PUT /datasets/:id/yue2-album-score`, set above the ladder).
+`deleteYue2AitkRun` and the rung-pick cleanup copy each segment's `train.jsonl`
+to `<training dir>/datasets/<slug>/train-logs/<jobId>-<segment>.jsonl`, and
+`clearPreparedCaches` saves the lead sheets to `yue2-sheets.json` first, which
+the profile reads once the cache is gone. The report takes the album score as a
+target and reads archived loss logs.
 
 `server/src/services/training/datasetProfile.ts` measures a dataset and saves
 `<training dir>/datasets/<slug>/dataset-profile.json`. It reads only what

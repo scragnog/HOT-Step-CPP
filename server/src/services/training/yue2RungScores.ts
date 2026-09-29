@@ -67,6 +67,7 @@ export function scoreYue2Rung(ds: { id: string; slug: string }, input: { refineR
     plannerLrScale: o.plannerLrScale, narLrScale: o.narLrScale, refineWarmup: o.refineWarmup, rungAdaptiveLr: o.rungAdaptiveLr,
     unfreezePlanner: o.unfreezePlanner, reconStop: o.reconStop, spikeFactor: o.spikeFactor, optimizer: o.optimizer,
     adapterType: o.adapterType, lokrDim: o.lokrDim, lokrFactor: o.lokrFactor, alpha: o.alpha, captionDropout: o.captionDropout, steps: o.steps, saveEvery: o.saveEvery,
+    method: o.method, gradAccum: o.gradAccum, calibration: o.calibration,
   };
   const previews = listYue2JointPreviews(run.output).filter(p => p.step === input.step)
     .map(p => ({ id: p.id, kind: p.kind, seed: p.seed, seconds: p.seconds, status: p.status, endReason: p.endReason, verdict: p.score?.verdict, file: p.file,
@@ -97,4 +98,25 @@ export function yue2RungScoresCsv(rows: Yue2RungScore[]): string {
   const cols = ['datasetSlug', 'refineRun', 'sourceRun', 'step', 'kl', 'recon', 'drift', 'rung', 'frozen', 'likeness', 'corruption', 'notes', 'settings', 'previews', 'updatedAt'] as const;
   const cell = (v: unknown) => { const s = typeof v === 'string' ? v : v === null || v === undefined ? '' : JSON.stringify(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   return [cols.join(','), ...rows.map(r => cols.map(c => cell(r[c])).join(','))].join('\n') + '\n';
+}
+
+export interface Yue2AlbumScore { refineRun: string; datasetId: string; datasetSlug: string; score: number | null; notes: string; updatedAt: string }
+
+/** The listener's verdict on a whole run: how well the album trained, 1-5. */
+export function getYue2AlbumScore(refineRun: string): Yue2AlbumScore | null {
+  const r = getDb().prepare('SELECT * FROM yue2_album_scores WHERE refine_run = ?').get(refineRun) as Record<string, unknown> | undefined;
+  return r ? { refineRun: r.refine_run as string, datasetId: r.dataset_id as string, datasetSlug: r.dataset_slug as string,
+    score: r.score as number | null, notes: (r.notes as string) ?? '', updatedAt: r.updated_at as string } : null;
+}
+
+export function scoreYue2Album(ds: { id: string; slug: string }, input: { refineRun: string; score?: number | null; notes?: string }): Yue2AlbumScore {
+  if (!listYue2AitkRuns(ds.id, ds.slug).some(r => r.jobId === input.refineRun)) throw new Error('Unknown run for this dataset');
+  const prior = getYue2AlbumScore(input.refineRun);
+  const n = Number(input.score);
+  const score = input.score === undefined ? (prior?.score ?? null) : Number.isInteger(n) && n >= 1 && n <= 5 ? n : null;
+  const notes = input.notes === undefined ? (prior?.notes ?? '') : String(input.notes).slice(0, 4000);
+  getDb().prepare(`INSERT INTO yue2_album_scores (refine_run, dataset_id, dataset_slug, score, notes) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(refine_run) DO UPDATE SET score = excluded.score, notes = excluded.notes, updated_at = datetime('now')`)
+    .run(input.refineRun, ds.id, ds.slug, score, notes);
+  return getYue2AlbumScore(input.refineRun)!;
 }

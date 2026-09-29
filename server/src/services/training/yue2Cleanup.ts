@@ -9,6 +9,7 @@ import path from 'path';
 import { listPreparedCaches, clearPreparedCaches } from './preparedDataReset.js';
 import { listYue2AitkRuns, deleteYue2AitkRun, yue2RunFinished, setYue2RunFinished } from './yue2AitkRuns.js';
 import { listYue2JointPreviews, pruneYue2JointPreviews } from './yue2JointPreview.js';
+import { archiveYue2TrainLogs } from './datasetProfile.js';
 
 export interface Yue2CleanupItem { count: number; bytes: number; detail?: string[] }
 export interface Yue2CleanupPlan {
@@ -65,6 +66,10 @@ export function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string
   const plan = planYue2Cleanup(ds, runId, step);
   const { runs, run, keep } = locate(ds, runId, step);
   let freed = 0; const done: string[] = [];
+  // The chosen run's loss curve, kept with the dataset: run folders get moved
+  // and deleted by hand later, and calibration reads the curve per album.
+  try { archiveYue2TrainLogs(ds.slug, run.jobId, run.output); }
+  catch (err: any) { console.warn(`[Training] YuE2 cleanup: could not archive the loss log of ${runId}: ${err?.message || err}`); }
   if (choice.otherRuns) {
     for (const r of runs.filter(r => r.jobId !== runId && r.status !== 'running' && !yue2RunFinished(r.output))) { deleteYue2AitkRun(r.jobId); }
     freed += plan.otherRuns.bytes; done.push(`${plan.otherRuns.count} other run(s)`);

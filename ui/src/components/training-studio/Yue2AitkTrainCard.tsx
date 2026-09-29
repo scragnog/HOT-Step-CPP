@@ -1087,6 +1087,21 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
                 : t('trainingStudio.yue2.method.autoCaptionNone', 'No captioner available: add a Gemini key in Settings → AI Services or install MOSS. Tracks without a .yue2.txt train on the long ACE caption.')}
             />
           </div>
+          {form.method === 'base-matched' && <div className="flex items-center gap-2 h-4">
+            <Toggle
+              size="sm"
+              accent="amber"
+              checked={form.calibrated === true}
+              disabled={!!resumeChoice || active || preparing || starting || yue2RunAllActive}
+              onChange={checked => setForm(previous => ({ ...previous, calibrated: checked }))}
+              aria-label={t('trainingStudio.yue2.method.calibrated', 'Dataset-Calibrated Training')}
+            />
+            <ParamLabel
+              label={t('trainingStudio.yue2.method.calibrated', 'Dataset-Calibrated Training')}
+              className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+              info={t('trainingStudio.yue2.method.calibratedInfo', 'Experimental. Sizes the run to the album instead of using the preset as it is: the preset\'s updates and save interval are scaled by the album\'s minutes of audio against a 45-minute album (between 0.6× and 2×), so the ladder keeps the same number of rungs. A 53-minute album on a 200-update preset trains for 240 updates. The rule came from ear-scored ladders of the earlier recipe, where longer albums took longer to reach full likeness; runs with this on test whether it holds for this one. The training log says what it chose, and the run records it. Off: the preset runs exactly as shown. Applies to new runs, single and batch.')}
+            />
+          </div>}
           {autoCaption && <div className="flex flex-col gap-2">
             <StyledSelect
               accent="amber"

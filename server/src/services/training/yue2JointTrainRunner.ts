@@ -16,6 +16,7 @@ import { getDb } from '../../db/database.js';
 import { config } from '../../config.js';
 import { availableYue2Bases, yue2ModelDir } from './yue2Train.js';
 import { engineGpuBackend, type EngineGpuBackend } from './aceTrain.js';
+import { CALIBRATION_REFERENCE_MINUTES, type Yue2Calibration } from './datasetProfile.js';
 
 // ── Base checkpoint: ConvRot or any installed yue2-lm GGUF ────────────────
 //
@@ -187,6 +188,9 @@ export interface ResolvedYue2JointTrainOptions {
    *  the knobs below, applied by applyBaseMatchedRecipe. Recorded so the run
    *  index and the adapter card can say which. */
   method?: 'tuned' | 'base-matched';
+  /** Dataset-Calibrated Training (opt-in): how the album's profile resized
+   *  steps and saveEvery. Absent on every run that did not opt in. */
+  calibration?: Yue2Calibration;
   /** Linear warmup steps (LmOptim optimizers and the native AdamW). */
   warmup?: number;
   /** Planner CE weight against the flow loss (engine default 1.0; the base trained at 0.25). */
@@ -679,6 +683,10 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
   if (o.resume && o.companion !== companion) log(job, 'warn', `Companion decoder adapter differs from the run being resumed: was ${o.companion ?? 'not installed'}, now ${companion ?? 'not installed'}`);
   o.companion = companion;
   log(job, 'info', `Companion decoder adapter: ${companion ?? 'not installed (training on the pristine decoder)'}`);
+  if (o.calibration) {
+    const c = o.calibration;
+    log(job, 'info', `Dataset-Calibrated Training: ${c.minutes} min of audio, x${c.factor} against a ${CALIBRATION_REFERENCE_MINUTES}-minute album: ${c.requestedSteps} updates (save every ${c.requestedSaveEvery}) became ${c.steps} (save every ${c.saveEvery})`);
+  }
   let nativeAttempted = false;
   try {
     log(job, 'info', `Starting YuE2 joint training (${o.device})`);

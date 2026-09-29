@@ -650,6 +650,9 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   /** Re-caption tracks with no .yue2.txt from the audio before training
    *  (ACE + MM3 + YuE2 sidecars). false = off; absent = on, default provider. */
   autoCaption?: false | { provider: 'gemini' | 'moss'; model?: string };
+  /** Dataset-Calibrated Training (base-matched, new runs only): the server
+   *  sizes steps and saveEvery to the album's minutes of audio. Absent = off. */
+  calibrated?: boolean;
   autoPrepare?: boolean;
   preparation?: Partial<Yue2AitkPrepareRequest>;
   checkpoint: string;
@@ -2569,7 +2572,15 @@ export async function listYue2RungScores(id: string, run?: string): Promise<{ sc
 export async function scoreYue2Rung(id: string, body: { refineRun: string; step: number; likeness?: number | null; corruption?: number | null; notes?: string }): Promise<{ score: Yue2RungScore }> {
   return request(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores`, { method: 'PUT', ...jsonBody(body) });
 }
-export const yue2RungScoresExportUrl = (format: 'csv' | 'json') => `${API_BASE}/yue2-rung-scores/export?format=${format}`;
+/** A run's album verdict: how well the album trained overall, 1-5 (Dataset-Calibrated Training). */
+export interface Yue2AlbumScore { refineRun: string; datasetId: string; datasetSlug: string; score: number | null; notes: string; updatedAt: string }
+export async function getYue2AlbumScore(id: string, run: string): Promise<{ score: Yue2AlbumScore | null }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-album-score?run=${encodeURIComponent(run)}`);
+}
+export async function scoreYue2Album(id: string, body: { refineRun: string; score?: number | null; notes?: string }): Promise<{ score: Yue2AlbumScore }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-album-score`, { method: 'PUT', ...jsonBody(body) });
+}
+export const yue2RungScoresExportUrl =(format: 'csv' | 'json') => `${API_BASE}/yue2-rung-scores/export?format=${format}`;
 
 /** POST /datasets/:id/yue2-joint-previews/render — previews for one checkpoint, on demand. */
 export async function renderYue2JointPreviews(
