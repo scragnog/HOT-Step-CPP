@@ -108,7 +108,7 @@ jobs:
         if: matrix.variant == 'vulkan'
         uses: humbletim/install-vulkan-sdk@v1.2
         with:
-          version: latest
+          version: 1.4.357.0  # "latest" 404s when LunarG lists a version before publishing its config
           cache: true
 
       - name: Save glslc binary
@@ -122,7 +122,7 @@ jobs:
         if: matrix.variant == 'vulkan'
         uses: humbletim/setup-vulkan-sdk@v1.2.1
         with:
-          vulkan-query-version: latest
+          vulkan-query-version: 1.4.357.0
           vulkan-components: Vulkan-Headers, Vulkan-Loader, SPIRV-Headers
           vulkan-use-cache: true
 
@@ -158,7 +158,7 @@ jobs:
           Invoke-WebRequest -Uri $ortUrl -OutFile $ortZip -UseBasicParsing
           New-Item -ItemType Directory -Force engine/deps | Out-Null
           Expand-Archive -Path $ortZip -DestinationPath engine/deps -Force
-          Move-Item "engine/deps/$ortPkg" "engine/deps/onnxruntime"
+          Get-ChildItem engine/deps -Directory -Filter "onnxruntime-win-x64-gpu*" | Select-Object -First 1 | Move-Item -Destination engine/deps/onnxruntime  # the cuda13 archive's top folder may lack the _cuda13 suffix
 
       - name: Install Ninja build system
         uses: lukka/get-cmake@latest
@@ -398,9 +398,8 @@ jobs:
           CUDA_MAJOR=$(echo '${{ matrix.cuda_version }}' | cut -d. -f1)
           if [ "$CUDA_MAJOR" = "13" ]; then ORT_PKG="onnxruntime-linux-x64-gpu_cuda13-${{ env.ORT_VERSION }}"; else ORT_PKG="onnxruntime-linux-x64-gpu-${{ env.ORT_VERSION }}"; fi
           ORT_URL="https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ORT_VERSION }}/$ORT_PKG.tgz"
-          mkdir -p engine/deps
+          mkdir -p engine/deps/onnxruntime
           curl -sL "$ORT_URL" | tar -xz -C engine/deps
-          mv "engine/deps/$ORT_PKG" engine/deps/onnxruntime
 
       - name: Install Ninja build system
         uses: lukka/get-cmake@latest
