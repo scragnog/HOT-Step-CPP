@@ -62,21 +62,23 @@ Things to know:
 
 ## Recommended settings
 
-Pick a preset. All three are the same recipe; they differ in how many updates run, how many songs each update averages, and whether the decoder trains on whole songs or 60 s crops. Times are from a 15-track album on an RTX 5090.
+Pick a preset. All three are the same recipe and all train a dim-128 LoKr; they differ in how many updates run, how many songs each update averages, whether the decoder trains on whole songs or 60 s crops, and how often a checkpoint is saved. Times are estimates for a 15-track album on an RTX 5090, from measured per-update times.
 
-| Preset | Updates | Songs per update | Decoder | Time (card shows it relative to Balanced) | Ear test |
+| Preset | Updates | Songs per update | Decoder | Checkpoint every | Time (card shows it relative to Balanced) |
 |---|---|---|---|---|---|
-| Fast | 50 | 4 | whole songs | ~25 min | likeness 4.3, quality 5 |
-| Balanced (default) | 100 | 4 | 60 s crops | ~30 min | blind test, 3 takes: likeness 4.1, quality 4.3; ship the last checkpoint, update 70 averaged lower |
-| Thorough | 200 | 8 | whole songs | ~3.5 h | likeness 5, quality 5; the extra time bought nothing audible on the test album, but it is the run closest to the report's batch size |
+| Fast | 100 | 4 | whole songs | 10 updates | ~45 min |
+| Balanced (default) | 200 | 4 | 60 s crops | 20 updates | ~1 h |
+| Thorough | 300 | 8 | whole songs | 30 updates | ~5 h |
 
-Every preset saves a checkpoint every 10 updates, so the ladder to listen through is 5, 10 or 20 rungs long; see Picking the adapter below.
+Every preset saves ten checkpoints, so the ladder to listen through is ten rungs long; see Picking the adapter below.
+
+How the presets were chosen: the first ear test (8 songs x 200 updates, whole songs, dim-64 LoKr) reached full likeness and quality by update 90. A blind test with three takes per condition then scored 60 s decoder crops level with whole songs, at about 40% less time per update. The current values, 200 updates and dim 128 for Balanced, come from an overnight batch of albums at those settings that sounded right by ear.
 
 Defaults the card ships:
 
 | Setting | Default | Notes |
 |---|---|---|
-| Adapter type | LoKr, dim 64, factor 4, alpha 256 | About 106 MB for the AR and NAR pair; the card shows the expected size for whatever dim, factor or rank you enter. The ear test ran on this adapter. |
+| Adapter type | LoKr, dim 128, factor 4, alpha 256 | About 213 MB for the AR and NAR pair (dim 64 is about 106 MB); the card shows the expected size for whatever dim, factor or rank you enter. |
 | Learning rate | 1e-4 | Linear warmup over 3% of the updates, then cosine decay to 0.1x at the end. |
 | Weight decay | 0.1 | The report's value. |
 | Adam beta2 | 0.95 | The report's value; the old recipe used 0.999. |
@@ -84,7 +86,7 @@ Defaults the card ships:
 | Prompt dropout | 0.1 text, 0.1 lyrics, 0.1 both | Agreed guesses; the report gives no rates. |
 | ABC dropout | 0.5 | Matches the report's balanced mix of tasks with and without a score. |
 | Decoder crop | 1500 (60 s) on Balanced, 0 (whole song) on Fast and Thorough | The report packs whole songs. In a blind test the crop scored level with whole-song runs and trains about 40% faster. |
-| Save every | 10 updates | |
+| Save every | 10 / 20 / 30 updates (Fast / Balanced / Thorough) | Ten rungs per preset. |
 | Lyric timing supervision | Off | Not used by the recipe. |
 | Checkpoint previews | On, in parallel, one 300 s draft take per checkpoint | The run's ladder; see Picking the adapter. |
 | Stop the engine during training | Off | In the Checkpoint previews section. The parallel previews need the engine up, so turning it on hides "In parallel with training". Turn it on (and previews off) on a smaller card. |

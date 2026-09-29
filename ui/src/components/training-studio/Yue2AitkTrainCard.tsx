@@ -147,17 +147,18 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
   // now on top of d. The pre-fix Prodigy history — "learns too fast,
   // corrupts the AR" — was the missing bias correction, not the optimizer.
   // 2026-09-27: the base-matched recipe replaced all of the above (Rob's ear
-  // test on Dookie: "better in every way"). Balanced = 100 updates of 4 songs.
+  // test on Dookie: "better in every way"). Presets: see PRESETS.
   // The server forces the recipe's fixed parts whatever this form says
   // (applyBaseMatchedRecipe); the lines below that name tuned-only knobs are
   // history the migration in readStoredForm clears from stored forms.
   // device '' = the server picks this build's first GPU (CUDA0, Vulkan0, MTL0).
-  method: 'base-matched', steps: 100, saveEvery: 10, gradAccum: 4, narCropFrames: 1500, seed: 42, device: '', base: '', lyricTiming: false, cursorWeight: 0,
+  method: 'base-matched', steps: 200, saveEvery: 20, gradAccum: 4, narCropFrames: 1500, seed: 42, device: '', base: '', lyricTiming: false, cursorWeight: 0,
   optimizer: 'adamw-lm', cautious: false, prodigyD0: 1e-6, muonLrScale: 1, muonNsSteps: 5,
   // LoKr 64/4/256 (2026-09-22, Rob's pick after the size sweep): scale
-  // alpha/dim = 4, all four sites factorized, ~106 MB for the AR+NAR pair.
+  // all four sites factorized. 2026-09-29 (Rob): dim 128 at alpha 256 on
+  // every preset, ~213 MB for the AR+NAR pair.
   // rank stays 64 so switching back to LoRA restores the LoRA recipe.
-  rank: 64, alpha: 256, adapterType: 'lokr', lokrDim: 64, lokrFactor: 4,
+  rank: 64, alpha: 256, adapterType: 'lokr', lokrDim: 128, lokrFactor: 4,
   // LoKr under Prodigy (Rob's ear tests, 2026-09-22): LoRA's KL 1.4 overcooks
   // both halves; KL 1.0 with the planner at 0.6 and the decoder at 1.0 is the
   // tested recipe. LoRA keeps KL 1.4 with the planner at 0.3 (LORA_STOP).
@@ -186,19 +187,22 @@ const LORA_STOP = { targetKl: 1.4, plannerLrScale: 0.3, narLrScale: undefined };
 const LOKR_STOP = { targetKl: 1.0, plannerLrScale: 0.6, narLrScale: 1 };
 // Presets (2026-09-27 ear test on a full album). All three are the
 // base-matched recipe (the server applies its fixed parts); they differ in
-// updates, songs per update and decoder crop. Fast is 50 x 4 whole songs
-// (likeness 4.3); Thorough is 200 x 8 whole songs (5.0 from update 90).
-// Balanced (2026-09-29 blind test) is 100 x 4 with 60 s decoder crops: as good
-// as 150 x 2 whole songs and about 40% faster than 100 x 4 whole songs.
-// minutes = measured on the test album (5090), for the relative-time label.
+// updates, songs per update, decoder crop and checkpoint spacing; all three
+// train a dim-128 LoKr (2026-09-29, Rob, after an overnight batch at these
+// settings). Balanced is 200 x 4 with 60 s decoder crops (a blind test scored
+// crops level with whole songs, about 40% faster). Fast is 100 x 4 and
+// Thorough 300 x 8, both whole songs. Each saves ten rungs.
+// minutes = per-update times measured on a 5090 (17 s cropped at 4 songs,
+// 28 s whole at 4, 60 s whole at 8) x updates, for the relative-time label.
 const PRESETS = [
-  { key: 'fast', label: 'Fast', steps: 50, gradAccum: 4, narCropFrames: 0, minutes: 25 },
-  { key: 'balanced', label: 'Balanced', steps: 100, gradAccum: 4, narCropFrames: 1500, minutes: 29 },
-  { key: 'thorough', label: 'Thorough', steps: 200, gradAccum: 8, narCropFrames: 0, minutes: 200 },
+  { key: 'fast', label: 'Fast', steps: 100, gradAccum: 4, narCropFrames: 0, saveEvery: 10, lokrDim: 128, minutes: 47 },
+  { key: 'balanced', label: 'Balanced', steps: 200, gradAccum: 4, narCropFrames: 1500, saveEvery: 20, lokrDim: 128, minutes: 57 },
+  { key: 'thorough', label: 'Thorough', steps: 300, gradAccum: 8, narCropFrames: 0, saveEvery: 30, lokrDim: 128, minutes: 300 },
 ] as const;
-const presetValues = (p: typeof PRESETS[number]) => ({ stopMode: 'steps' as const, steps: p.steps, gradAccum: p.gradAccum, narCropFrames: p.narCropFrames, saveEvery: 10 });
+const presetValues = (p: typeof PRESETS[number]) => ({ stopMode: 'steps' as const, steps: p.steps, gradAccum: p.gradAccum,
+  narCropFrames: p.narCropFrames, saveEvery: p.saveEvery, lokrDim: p.lokrDim });
 const activePreset = (f: Yue2JointTrainRequest) => PRESETS.find(p => f.steps === p.steps && (f.gradAccum ?? 4) === p.gradAccum
-  && (f.narCropFrames ?? 0) === p.narCropFrames)?.key;
+  && (f.narCropFrames ?? 0) === p.narCropFrames && f.saveEvery === p.saveEvery && (f.adapterType !== 'lokr' || f.lokrDim === p.lokrDim))?.key;
 /** Presets show their cost relative to Balanced rather than wall-clock times
  *  that only hold for one GPU and one dataset. */
 const presetTime = (p: { minutes: number }) => `${Number((p.minutes / PRESETS[1].minutes).toFixed(1))}×`;
@@ -1106,7 +1110,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <div className="flex items-center gap-2 mb-2">
           <ParamLabel label={t('trainingStudio.yue2.method.preset', 'Preset')}
             className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
-            info={t('trainingStudio.yue2.method.presetInfo', 'All three are the same recipe; they differ in how many updates run and how many songs each update averages. Training time grows with the songs processed, so each preset shows its time relative to Balanced. For scale, Balanced took about 30 minutes on a 15-track album on an RTX 5090; a slower GPU or a longer album takes proportionally longer.')} />
+            info={t('trainingStudio.yue2.method.presetInfo', 'All three are the same recipe; they differ in how many updates run, how many songs each update averages, whether the decoder trains on whole songs or 60 s crops, and how often a checkpoint is saved (each saves ten). Each preset shows its time relative to Balanced. For scale, Balanced takes about an hour on a 15-track album on an RTX 5090; a slower GPU or a longer album takes proportionally longer.')} />
           {!activePreset(form) && !presets.some(userPresetActive) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1210,7 +1214,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           <ParamLabel
             label={t('trainingStudio.yue2.method.adapterType', 'Adapter type')}
             className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
-            info={t('trainingStudio.yue2.method.adapterTypeInfo', 'The adapter parameterization trained. LoRA is the standard low-rank pair. LoKr trains a Kronecker-factored delta per site instead, at a similar file size for more capacity, but is experimental. Switching resets rank/alpha (or dim/factor/alpha) and the KL stop to that type\'s tested defaults.')}
+            info={t('trainingStudio.yue2.method.adapterTypeInfo', 'The adapter parameterization trained. LoRA is the standard low-rank pair. LoKr trains a Kronecker-factored delta per site instead, at a similar file size for more capacity; it is the default and what every preset was tested with. Switching resets rank/alpha (or dim/factor/alpha) and the KL stop to that type\'s tested defaults.')}
           />
           <StyledSelect
             accent="amber"
@@ -1222,36 +1226,36 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               // LoKr's scale is alpha/dim, so alpha follows the dim by default
               // (LyCORIS scale 1); LoRA gets its rank/alpha defaults back.
               setForm(previous => adapterType === 'lokr'
-                ? { ...previous, adapterType, lokrDim: previous.lokrDim ?? 64, lokrFactor: previous.lokrFactor ?? 4, alpha: 4 * (previous.lokrDim ?? 64), ...LOKR_STOP }
+                ? { ...previous, adapterType, lokrDim: previous.lokrDim ?? 128, lokrFactor: previous.lokrFactor ?? 4, alpha: 256, ...LOKR_STOP }
                 : { ...previous, adapterType, alpha: previous.rank ?? 64, ...LORA_STOP });
             }}
             options={[
               { value: 'lora' as const, label: t('trainingStudio.yue2.method.adapterLora', 'LoRA') },
-              { value: 'lokr' as const, label: t('trainingStudio.yue2.method.adapterLokr', 'LoKr (experimental)') },
+              { value: 'lokr' as const, label: t('trainingStudio.yue2.method.adapterLokr', 'LoKr') },
             ]}
           />
         </label>
       </div>
       <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mt-3">
         {field(t('trainingStudio.yue2.method.steps', 'Updates'), 'steps', 'number', form, undefined,
-          t('trainingStudio.yue2.method.stepsInfo', 'How many optimizer updates to train. Each update averages "songs per update" songs, so Fast (50 × 4) sees 200 songs and Thorough (200 × 8) sees 1600. The run ends here and every tenth update is a checkpoint; pick one by ear.'),
-          t('trainingStudio.yue2.method.stepsMeta', 'Balanced 100'))}
+          t('trainingStudio.yue2.method.stepsInfo', 'How many optimizer updates to train. Each update averages "songs per update" songs, so Fast (100 × 4) sees 400 songs, Balanced (200 × 4) 800 and Thorough (300 × 8) 2400. The run ends here; pick a checkpoint by ear.'),
+          t('trainingStudio.yue2.method.stepsMeta', 'Balanced 200'))}
         {field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number', form, undefined,
-          t('trainingStudio.yue2.method.saveEveryInfo', 'How many steps between saved checkpoints. Lower gives more rungs to pick from (and more previews, if enabled) at the cost of disk space and time; higher saves less often.'),
-          t('trainingStudio.yue2.method.saveEveryMeta', 'default 25'))}
+          t('trainingStudio.yue2.method.saveEveryInfo', 'How many steps between saved checkpoints. Lower gives more rungs to pick from (and more previews, if enabled) at the cost of disk space and time; higher saves less often. The presets save ten rungs: every 10 on Fast, 20 on Balanced, 30 on Thorough.'),
+          t('trainingStudio.yue2.method.saveEveryMeta', 'Balanced 20'))}
         {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number', form, undefined,
           t('trainingStudio.yue2.method.seedInfo', 'The random seed for training (batch order, dropout, initial noise). Changing it gives a different run on the same data; keeping it fixed makes a rerun reproducible.'),
           t('trainingStudio.yue2.method.seedMeta', 'default 42'))}
         {(form.adapterType ?? 'lora') === 'lokr' ? <>
           {field(t('trainingStudio.yue2.method.lokrDim', 'LoKr dim'), 'lokrDim', 'number', form, undefined,
-            t('trainingStudio.yue2.method.lokrDimInfo', 'The size of the Kronecker-factored delta. Higher gives the adapter more capacity, at a larger file and more VRAM; the tested recipe keeps alpha at 4x this value.'),
-            t('trainingStudio.yue2.method.lokrDimMeta', 'default 64'))}
+            t('trainingStudio.yue2.method.lokrDimInfo', 'The size of the Kronecker-factored delta. Higher gives the adapter more capacity, at a larger file and more VRAM. The presets use 128 with alpha 256 (about 213 MB for both halves; 64 is about 106 MB).'),
+            t('trainingStudio.yue2.method.lokrDimMeta', 'default 128'))}
           {field(t('trainingStudio.yue2.method.lokrFactor', 'LoKr factor'), 'lokrFactor', 'number', form, undefined,
             t('trainingStudio.yue2.method.lokrFactorInfo', 'How each weight is split into two Kronecker factors: the smaller factor is at most this size. 4 is tested; 8 also fits. At factor 4, stay below dim 256, where some sites stop factorizing and ignore alpha.'),
             t('trainingStudio.yue2.method.lokrFactorMeta', 'default 4'))}
           {field(t('trainingStudio.yue2.method.lokrAlpha', 'LoKr alpha'), 'alpha', 'number', form, undefined,
-            t('trainingStudio.yue2.method.lokrAlphaInfo', 'The LoKr strength, alpha / dim. The tested default is 4x the dim; for more capacity raise dim and keep alpha at 4x dim rather than raising alpha alone.'),
-            t('trainingStudio.yue2.method.lokrAlphaMeta', 'default 256 (4x dim 64)'))}
+            t('trainingStudio.yue2.method.lokrAlphaInfo', 'The LoKr strength, alpha / dim. The presets use 256 at dim 128 (a scale of 2); the earlier dim-64 recipe used 256 at dim 64. Raise dim for more capacity rather than raising alpha alone.'),
+            t('trainingStudio.yue2.method.lokrAlphaMeta', 'default 256'))}
         </> : <>
           {field(t('trainingStudio.yue2.method.rank', 'LoRA rank'), 'rank', 'number', form, undefined,
             t('trainingStudio.yue2.method.rankInfo', 'The size of the low-rank adapter pair. Higher gives more capacity to learn the artist, at a larger file and more VRAM; lower trains a smaller, less expressive adapter.'),
@@ -1265,14 +1269,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       {(() => {
         const lokr = (form.adapterType ?? 'lora') === 'lokr';
         const half = yue2AdapterHalfBytes(lokr
-          ? { type: 'lokr', dim: Number(form.lokrDim ?? 64), factor: Number(form.lokrFactor ?? 4) }
+          ? { type: 'lokr', dim: Number(form.lokrDim ?? 128), factor: Number(form.lokrFactor ?? 4) }
           : { type: 'lora', rank: Number(form.rank ?? 64) });
-        const loraAlt = lokr ? yue2AdapterHalfBytes({ type: 'lora', rank: Number(form.lokrDim ?? 64) }) : null;
+        const loraAlt = lokr ? yue2AdapterHalfBytes({ type: 'lora', rank: Number(form.lokrDim ?? 128) }) : null;
         return <p className={`text-[11px] mt-2 ${half === null ? 'text-amber-700 dark:text-amber-300' : 'text-zinc-500'}`}>
           {half === null
             ? t('trainingStudio.yue2.method.sizeBadFactor', 'This LoKr factor does not split the attention and MLP outputs on their boundaries, so training will refuse it. Try 4 or 8.')
             : t('trainingStudio.yue2.method.sizeEstimate', 'Expected adapter size: {{total}} for both halves ({{half}} each for the planner and the decoder).', { total: formatMB(2 * half), half: formatMB(half) })}
-          {half !== null && loraAlt !== null && ` ${t('trainingStudio.yue2.method.sizeLoraCompare', 'A rank-{{rank}} LoRA would be {{lora}}.', { rank: Number(form.lokrDim ?? 64), lora: formatMB(2 * loraAlt) })}`}
+          {half !== null && loraAlt !== null && ` ${t('trainingStudio.yue2.method.sizeLoraCompare', 'A rank-{{rank}} LoRA would be {{lora}}.', { rank: Number(form.lokrDim ?? 128), lora: formatMB(2 * loraAlt) })}`}
         </p>;
       })()}
       <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
