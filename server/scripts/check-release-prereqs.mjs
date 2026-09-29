@@ -310,6 +310,23 @@ if (OFFLINE) {
   await checkTrtSdk();
 }
 
+// A release restores the engine build cache that Cache Warm saves on master
+// (tag runs can't see each other's caches). If the last warm run failed, or is
+// still running when the tag's jobs start, the CUDA jobs compile cold: ~1.5 h
+// each instead of ~10 min. Both happened for v1.3.5.
+console.log('\nCache Warm on master');
+{
+  const { spawnSync } = await import('node:child_process');
+  const r = spawnSync('gh', ['run', 'list', '--workflow', 'cache-warm.yml', '--branch', 'master', '--limit', '1',
+    '--json', 'status,conclusion,url'], { encoding: 'utf8' });
+  const run = r.status === 0 ? JSON.parse(r.stdout)[0] : null;
+  if (r.status !== 0) notes.push('gh unavailable: did not check Cache Warm');
+  else if (!run) notes.push('no Cache Warm run on master yet');
+  else if (run.status !== 'completed') problems.push(`Cache Warm is still running; wait for it before tagging or CUDA builds go cold: ${run.url}`);
+  else if (run.conclusion !== 'success') problems.push(`Cache Warm ${run.conclusion}; fix and re-run it or CUDA builds go cold: ${run.url}`);
+  else console.log('  ok');
+}
+
 console.log('\nDocumentation (tools/docs/check-docs.mjs)');
 {
   const { spawnSync } = await import('node:child_process');

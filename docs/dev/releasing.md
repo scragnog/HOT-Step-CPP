@@ -128,6 +128,12 @@ Delete any leftover test tags and their drafts (see section 1).
   saves the build dir under the **same cache keys** `release.yml` uses. Release
   runs restore it and skip the CUDA compile (the long part).
 - **Timings:** cold (no master cache) CUDA jobs ≈ 1.5h each; warm ≈ 7–13 min.
+- **Tag only after Cache Warm has finished green.** A release job restores the
+  cache once, at its start; a warm run still in flight is a miss and that job
+  compiles cold. `check-release-prereqs.mjs` fails while the latest Cache Warm
+  on `master` is running or failed (v1.3.5 hit both: Cache Warm had been
+  failing for four days, then the Windows CUDA 13.1 cache landed seven minutes
+  after the release job looked for it).
 - **If CUDA suddenly rebuilds slow:** the master cache is missing/stale. Re-warm
   it: GitHub → Actions → **Cache Warm** → *Run workflow* (on `master`). It also
   auto-runs when `engine/ggml`/`CMakeLists.txt` change.
