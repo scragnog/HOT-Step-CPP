@@ -189,15 +189,15 @@ const LOKR_STOP = { targetKl: 1.0, plannerLrScale: 0.6, narLrScale: 1 };
 // base-matched recipe (the server applies its fixed parts); they differ in
 // updates, songs per update, decoder crop and checkpoint spacing; all three
 // train a dim-128 LoKr (2026-09-29, Rob, after an overnight batch at these
-// settings). Balanced is 200 x 4 with 60 s decoder crops (a blind test scored
-// crops level with whole songs, about 40% faster). Fast is 100 x 4 and
-// Thorough 300 x 8, both whole songs. Each saves ten rungs.
-// minutes = per-update times measured on a 5090 (17 s cropped at 4 songs,
-// 28 s whole at 4, 60 s whole at 8) x updates, for the relative-time label.
+// settings). All three train the decoder on 60 s crops: a blind test scored
+// crops level with whole songs at about 40% less time, and Rob hears no gain
+// from whole songs. Fast 100 x 4, Balanced 200 x 4, Thorough 300 x 8; each
+// saves ten rungs. minutes = the measured 17 s a cropped 4-song update on a
+// 5090 (x2 for 8 songs) x updates, for the relative-time label.
 const PRESETS = [
-  { key: 'fast', label: 'Fast', steps: 100, gradAccum: 4, narCropFrames: 0, saveEvery: 10, lokrDim: 128, minutes: 47 },
+  { key: 'fast', label: 'Fast', steps: 100, gradAccum: 4, narCropFrames: 1500, saveEvery: 10, lokrDim: 128, minutes: 28 },
   { key: 'balanced', label: 'Balanced', steps: 200, gradAccum: 4, narCropFrames: 1500, saveEvery: 20, lokrDim: 128, minutes: 57 },
-  { key: 'thorough', label: 'Thorough', steps: 300, gradAccum: 8, narCropFrames: 0, saveEvery: 30, lokrDim: 128, minutes: 300 },
+  { key: 'thorough', label: 'Thorough', steps: 300, gradAccum: 8, narCropFrames: 1500, saveEvery: 30, lokrDim: 128, minutes: 170 },
 ] as const;
 const presetValues = (p: typeof PRESETS[number]) => ({ stopMode: 'steps' as const, steps: p.steps, gradAccum: p.gradAccum,
   narCropFrames: p.narCropFrames, saveEvery: p.saveEvery, lokrDim: p.lokrDim });
@@ -1110,7 +1110,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <div className="flex items-center gap-2 mb-2">
           <ParamLabel label={t('trainingStudio.yue2.method.preset', 'Preset')}
             className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
-            info={t('trainingStudio.yue2.method.presetInfo', 'All three are the same recipe; they differ in how many updates run, how many songs each update averages, whether the decoder trains on whole songs or 60 s crops, and how often a checkpoint is saved (each saves ten). Each preset shows its time relative to Balanced. For scale, Balanced takes about an hour on a 15-track album on an RTX 5090; a slower GPU or a longer album takes proportionally longer.')} />
+            info={t('trainingStudio.yue2.method.presetInfo', 'All three are the same recipe; they differ in how many updates run, how many songs each update averages, and how often a checkpoint is saved (each saves ten). All three train the decoder on 60 s crops. Each preset shows its time relative to Balanced. For scale, Balanced takes about an hour on a 15-track album on an RTX 5090; a slower GPU or a longer album takes proportionally longer.')} />
           {!activePreset(form) && !presets.some(userPresetActive) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1287,14 +1287,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             ['lr', t('trainingStudio.yue2.method.lr', 'Learning rate'), t('trainingStudio.yue2.method.bmLrInfo', 'AdamW peak learning rate for both halves. The report gives full-model rates only (3e-4 joint, annealed to 3e-5), which do not transfer to an adapter; 1e-4 is the agreed default.'), 'default 1e-4'],
             ['warmup', t('trainingStudio.yue2.method.warmup', 'Warmup steps'), t('trainingStudio.yue2.method.warmupInfo', 'Linear warmup to the peak rate, then cosine decay to a 0.1x floor at the step count. Blank = 3% of the steps, the base\'s own joint-phase warmup share.'), 'default 3% of steps'],
             ['weightDecay', t('trainingStudio.yue2.method.weightDecay', 'Weight decay'), t('trainingStudio.yue2.method.bmWeightDecayInfo', 'Decoupled weight decay, as the base\'s joint phase used.'), 'default 0.1 (report)'],
-            ['gradAccum', t('trainingStudio.yue2.method.gradAccum', 'Songs per update'), t('trainingStudio.yue2.method.gradAccumInfo', 'Gradients of this many songs are averaged before each optimizer update, so one step sees more than one song, as the base\'s batch of 256 did. Each update takes this many times longer. Fast and Balanced use 4 (about 28 s an update on the 5090 with whole songs, 17 s with the Balanced decoder crops), Thorough 8 (60 s). 1 updates on every song.'), 'default 4'],
+            ['gradAccum', t('trainingStudio.yue2.method.gradAccum', 'Songs per update'), t('trainingStudio.yue2.method.gradAccumInfo', 'Gradients of this many songs are averaged before each optimizer update, so one step sees more than one song, as the base\'s batch of 256 did. Each update takes this many times longer. Fast and Balanced use 4 (about 17 s an update on the 5090 with 60 s decoder crops, 28 s with whole songs), Thorough 8 (about twice that). 1 updates on every song.'), 'default 4'],
             ['arLossWeight', t('trainingStudio.yue2.method.arLossWeight', 'Planner loss weight'), t('trainingStudio.yue2.method.arLossWeightInfo', 'The planner\'s cross-entropy is weighted by this against the decoder\'s flow loss before the shared gradient clip, so it sets how much of the clip the planner takes. The report trains the base at 0.25; 1.0 is the tuned recipe.'), 'default 0.25 (report)'],
             ['beta2', t('trainingStudio.yue2.method.beta2', 'Adam beta2'), t('trainingStudio.yue2.method.beta2Info', 'How long the optimizer\'s second moment remembers. The report\'s joint phase used 0.95; torch\'s 0.999 is what the tuned recipe uses.'), 'default 0.95 (report)'],
             ['textDropout', t('trainingStudio.yue2.method.textDropout', 'Text dropout'), t('trainingStudio.yue2.method.textDropoutInfo', 'Share of steps trained with the style text (trigger included) removed and the lyrics kept. The report drops text and lyrics separately or together for guidance but gives no rates; 0.1 is the agreed default.'), 'default 0.1'],
             ['lyricDropout', t('trainingStudio.yue2.method.lyricDropout', 'Lyric dropout'), t('trainingStudio.yue2.method.lyricDropoutInfo', 'Share of steps trained with the lyrics removed and the style kept, written the way the official instrumental tooling sends a lyric-free request.'), 'default 0.1'],
             ['bothDropout', t('trainingStudio.yue2.method.bothDropout', 'Uncond. dropout'), t('trainingStudio.yue2.method.bothDropoutInfo', 'Share of steps trained on the bare instruction with no style or lyrics: exactly the prompt the runtime\'s guidance uses as its unconditional branch.'), 'default 0.1'],
             ['abcDropout', t('trainingStudio.yue2.method.abcDropout', 'ABC dropout'), t('trainingStudio.yue2.method.bmAbcDropoutInfo', 'Share of steps trained without the lead sheet, matching the report\'s balanced mix of tasks with and without a score.'), 'default 0.5 (report)'],
-            ['narCropFrames', t('trainingStudio.yue2.method.narCropFrames', 'Decoder crop (frames)'), t('trainingStudio.yue2.method.bmNarCropInfo', 'The decoder trains on this many frames per song (25 per second). 0 trains on the whole song, as the base did (about 12 GB of VRAM and 11-15 s a step on a 4-minute song). Balanced uses 1500, a 60 s crop: about 40% faster, and it scored as well as whole songs in a blind test. Fast and Thorough use 0.'), 'Balanced 1500, Fast/Thorough 0'],
+            ['narCropFrames', t('trainingStudio.yue2.method.narCropFrames', 'Decoder crop (frames)'), t('trainingStudio.yue2.method.bmNarCropInfo', 'The decoder trains on this many frames per song (25 per second). 0 trains on the whole song, as the base did (about 12 GB of VRAM and 11-15 s a step on a 4-minute song). Every preset uses 1500, a 60 s crop: about 40% faster, and it scored as well as whole songs in a blind test.'), 'presets 1500'],
           ] as const).map(([key, label, info, meta]) => (
             <label key={key} className="flex flex-col gap-1">
               <ParamLabel label={label} info={info} meta={meta} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider" />
