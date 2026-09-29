@@ -26,6 +26,7 @@ import { buildSamples } from './datasetScan.js';
 import { getDataset } from './datasetsRepo.js';
 import {
   emitJob, emitProgress, finishJob, isCancelled, killJobChild, pushEvent, type TrainingJob,
+  trainerLine,
 } from './labelingQueue.js';
 import { buildPreprocessManifest, writePreprocessManifest } from './preprocessManifest.js';
 
@@ -264,6 +265,7 @@ export async function runPreprocessJob(job: TrainingJob): Promise<void> {
       pushLog(`[Training] Preprocess job ${job.id}: ace-train ${included.length} songs → ${outDir}`);
 
       const child = spawn(exe, args, { windowsHide: true, env: buildGpuEnv().env });
+      trainerLine(job, `$ ${exe} ${args.join(' ')}`);
       job.child = child;
 
       const stderrTail: string[] = [];
@@ -271,6 +273,7 @@ export async function runPreprocessJob(job: TrainingJob): Promise<void> {
         for (const raw of buf.toString('utf-8').split(/[\r\n]+/)) {
           const line = raw.trim();
           if (!line) continue;
+          trainerLine(job, line);
           stderrTail.push(line);
           if (stderrTail.length > 30) stderrTail.shift();
         }
@@ -278,6 +281,7 @@ export async function runPreprocessJob(job: TrainingJob): Promise<void> {
 
       const rl = readline.createInterface({ input: child.stdout! });
       rl.on('line', (line) => {
+        trainerLine(job, line);
         try {
           const ev = JSON.parse(line) as Record<string, unknown>;
           if (ev && typeof ev === 'object') relay(job, ev, sampleIdByCacheId);

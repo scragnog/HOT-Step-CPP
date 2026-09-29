@@ -227,7 +227,8 @@ Three upstream files carry `#include` hooks into HOT-Step code (`pipeline-synth-
   `states/`), `lyrics/` (exports), `training/`.
 - A git checkout may also have a repo-root `data/` folder. It is not the live data dir.
 - Logs: `logs/YYYY-MM-DD_HH-MM-SS/` per session, holding `ace_engine.log`,
-  `node_console.log` and `generations/gen_<uuid>_<task>.log`. The newest folder is the
+  `node_console.log`, `generations/gen_<uuid>_<task>.log` and `training/<kind>_<jobId>.log`
+  (written live by `pushEvent` in `labelingQueue.ts` plus each runner's `trainerLine`). The newest folder is the
   current session.
 
 ## Related

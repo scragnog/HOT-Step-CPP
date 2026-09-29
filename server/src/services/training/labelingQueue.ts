@@ -22,6 +22,7 @@ import { randomUUID } from 'crypto';
 import { execSync, type ChildProcess } from 'child_process';
 import type { Response } from 'express';
 import { pushLog } from '../../routes/logs.js';
+import { closeTrainingLog, logTraining } from '../logger.js';
 import { config } from '../../config.js';
 import { jobsDir } from './paths.js';
 import { buildSamples, loadSidecarMetadata, sampleFromParts } from './datasetScan.js';
@@ -224,7 +225,19 @@ function broadcast(job: TrainingJob, ev: TrainingStreamEvent): void {
  * cap is also kept in reach by superseding a sample's own older event — replay
  * is keyed by sampleId, so only the latest state for each row matters.
  */
+/** A trainer's own console line, into the job's file under logs/<session>/training/. */
+export function trainerLine(job: TrainingJob, line: string): void {
+  logTraining(job.id, job.kind, `> ${line}`);
+}
+
 export function pushEvent(job: TrainingJob, ev: TrainingStreamEvent): void {
+  // Every runner's log() and every end state lands here, so the per-job file
+  // under logs/ covers all training kinds; trainers add raw lines via trainerLine.
+  if (ev.type === 'log') logTraining(job.id, job.kind, `${ev.level.toUpperCase().padEnd(5)} | ${ev.message}`);
+  else if (ev.type === 'status') {
+    logTraining(job.id, job.kind, `END   | ${ev.status}${ev.error ? `: ${ev.error}` : ''}`);
+    closeTrainingLog(job.id);
+  }
   if (ev.type === 'sample') {
     const prior = job.events.findIndex(e => e.type === 'sample' && e.sampleId === ev.sampleId);
     if (prior >= 0) job.events.splice(prior, 1);

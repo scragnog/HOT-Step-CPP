@@ -54,6 +54,7 @@ import {
 import { writeYue2RunManifest } from './yue2Runs.js';
 import {
   emitJob, emitProgress, finishJob, isCancelled, killJobChild, pushEvent, type TrainingJob,
+  trainerLine,
 } from './labelingQueue.js';
 
 export function log(job: TrainingJob, level: 'info' | 'warn' | 'error', message: string): void {
@@ -414,6 +415,7 @@ export async function runYue2AceTrain<S extends RelayState>(
     pushLog(`[Training] ${kind} job ${job.id}: ${exe} ${args[0]}`);
 
     const child = spawn(exe, args, { windowsHide: true, env: withFfmpegOnPath(spawnEnv ?? buildGpuEnv().env) });
+    trainerLine(job, `$ ${exe} ${args.join(' ')}`);
     job.child = child;
 
     const sinks = openRunLog(args, wantsJsonl(kind));
@@ -431,6 +433,7 @@ export async function runYue2AceTrain<S extends RelayState>(
     const handle = (line: string): void => {
       armKiller();
       record(sinks.console, line);
+      trainerLine(job, line);
       stderrTail.push(line);
       if (stderrTail.length > 30) stderrTail.shift();
       try { onLine(line, st); } catch { /* a bad line must never kill the run */ }

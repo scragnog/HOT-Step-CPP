@@ -26,6 +26,7 @@ import { getDataset } from './datasetsRepo.js';
 import { refreshPresetsForNewRun } from './lyricStudioExport.js';
 import {
   emitJob, emitProgress, finishJob, isCancelled, killJobChild, pushEvent, type TrainingJob,
+  trainerLine,
 } from './labelingQueue.js';
 
 /**
@@ -356,6 +357,7 @@ export async function runTrainDitJob(job: TrainingJob): Promise<void> {
       pushLog(`[Training] train-dit job ${job.id}: ace-train ${opts.adapterType} r${opts.rank} → ${opts.adapterDir}`);
 
       const child = spawn(exe, args, { windowsHide: true, env: buildGpuEnv().env });
+      trainerLine(job, `$ ${exe} ${args.join(' ')}`);
       job.child = child;
 
       const stderrTail: string[] = [];
@@ -363,6 +365,7 @@ export async function runTrainDitJob(job: TrainingJob): Promise<void> {
         for (const raw of buf.toString('utf-8').split(/[\r\n]+/)) {
           const line = raw.trim();
           if (!line) continue;
+          trainerLine(job, line);
           stderrTail.push(line);
           if (stderrTail.length > 30) stderrTail.shift();
         }
@@ -371,6 +374,7 @@ export async function runTrainDitJob(job: TrainingJob): Promise<void> {
       const state: RelayState = { fatalMessage: '', doneSeen: false };
       const rl = readline.createInterface({ input: child.stdout! });
       rl.on('line', (line) => {
+        trainerLine(job, line);
         try {
           const ev = JSON.parse(line) as Record<string, unknown>;
           if (ev && typeof ev === 'object') relay(job, ev, state);

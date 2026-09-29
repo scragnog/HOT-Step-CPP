@@ -125,10 +125,11 @@ App writes per-session logs to `logs/` at repo root:
 logs/YYYY-MM-DD_HH-MM-SS/        ← one folder per session (name-sorted = time-sorted)
   ├── ace_engine.log              ← C++ engine output
   ├── node_console.log            ← Node server output
-  └── generations/gen_<uuid>_<task>.log
+  ├── generations/gen_<uuid>_<task>.log
+  └── training/<kind>_<jobId>.log  ← per training job, written live (command line, job log, trainer output)
 ```
 
-Start with the newest session folder. Generation failures → matching `gen_*.log` first, then cross-ref `ace_engine.log` + `node_console.log`. Startup/crash → `node_console.log` + `ace_engine.log`.
+Start with the newest session folder. Training problems → `training/<kind>_<jobId>.log`. Generation failures → matching `gen_*.log` first, then cross-ref `ace_engine.log` + `node_console.log`. Startup/crash → `node_console.log` + `ace_engine.log`.
 
 ## Plugin system
 

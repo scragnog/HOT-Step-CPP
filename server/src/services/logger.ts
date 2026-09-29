@@ -4,8 +4,10 @@
 //   logs/<session-timestamp>/
 //     ├── node_console.log       — all console output (mirrored transparently)
 //     ├── ace_engine.log         — ace-server stdout/stderr
-//     └── generations/
-//         └── gen_<jobId>_<type>.log  — per-generation logs
+//     ├── generations/
+//     │   └── gen_<jobId>_<type>.log  — per-generation logs
+//     └── training/
+//         └── <kind>_<jobId>.log      — per-training-job logs, written live
 
 import fs from 'fs';
 import path from 'path';
@@ -86,6 +88,35 @@ export function logEngine(line: string): void {
   try {
     engineLogStream.write(line.endsWith('\n') ? line : line + '\n');
   } catch { /* ignore */ }
+}
+
+/** Per-training-job log files: jobId → stream, opened on the first line. */
+const trainingStreams = new Map<string, fs.WriteStream>();
+
+/**
+ * Append a line to logs/<session>/training/<kind>_<jobId>.log. Training runs
+ * last hours, so this writes as it goes rather than buffering like the
+ * generation logs. A no-op before initLogger (tests).
+ */
+export function logTraining(jobId: string, kind: string, line: string): void {
+  if (!sessionDir) return;
+  let stream = trainingStreams.get(jobId);
+  if (!stream) {
+    try {
+      const dir = path.join(sessionDir, 'training');
+      fs.mkdirSync(dir, { recursive: true });
+      stream = fs.createWriteStream(path.join(dir, `${kind}_${jobId}.log`), { flags: 'a' });
+      stream.on('error', () => { /* a full disk must not kill a run */ });
+      trainingStreams.set(jobId, stream);
+    } catch { return; }
+  }
+  stream.write(`${isoTimestamp()} | ${line}\n`);
+}
+
+/** Close a training job's log file. A later line reopens it in append mode. */
+export function closeTrainingLog(jobId: string): void {
+  trainingStreams.get(jobId)?.end();
+  trainingStreams.delete(jobId);
 }
 
 /**

@@ -16,6 +16,8 @@ logs/2026-09-25_14-03-12/
   ace_engine.log                raw output of the engine (ace-server)
   generations/
     gen_<id>_<task>.log         one per generation, e.g. gen_<id>_text2music.log
+  training/
+    <kind>_<id>.log             one per training job, e.g. yue2-joint-train_<id>.log
 ```
 
 - `node_console.log` is the best place to start. It holds the server's own lines and the
@@ -26,7 +28,12 @@ logs/2026-09-25_14-03-12/
   steps) and ends with `GENERATION COMPLETED.` or `GENERATION FAILED:` and the reason. It is
   written when the generation ends, so if the whole app dies mid-render there is no gen log for
   that job. Use `node_console.log` instead.
-- Only the gen logs have timestamps. To line up a job with engine output, search
+- A training log is written live while the job runs, so it is there to read (or send) mid-run.
+  It starts with the exact trainer command line (every setting the run used), then holds the
+  job's own messages, the trainer's raw output (loss and step lines), and the end state:
+  `END | done`, `END | failed: <reason>` or `END | cancelled`. Training that runs on another PC
+  through a training worker writes its log on that PC.
+- Only the gen and training logs have timestamps. To line up a job with engine output, search
   `node_console.log` for the job id from the gen log file name.
 - Every restart starts a new folder. When you look into a failure, take all three files from
   the same folder.

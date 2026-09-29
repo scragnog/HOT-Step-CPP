@@ -38,6 +38,10 @@ logs/YYYY-MM-DD_HH-MM-SS/
   ace_engine.log              raw ace-server child stdout+stderr
   generations/
     gen_<jobId>_<taskType>.log   one per generation; jobId = server-side UUID
+  training/
+    <kind>_<jobId>.log           one per training job, written live: `> $ <trainer command>`,
+                                 every job log line (INFO/WARN/ERROR), the trainer's raw
+                                 stdout/stderr (`> ...`), and `END | <status>`
 ```
 
 Facts you must know before reading them:

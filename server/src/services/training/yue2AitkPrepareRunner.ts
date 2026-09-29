@@ -9,7 +9,7 @@ import { promisify } from 'util';
 import readline from 'readline';
 import { withFfmpegOnPath } from '../../config.js';
 import { aceTrainExe } from './aceTrain.js';
-import { emitProgress, finishJob, isCancelled, pushEvent, type TrainingJob } from './labelingQueue.js';
+import { emitProgress, finishJob, isCancelled, pushEvent, trainerLine, type TrainingJob } from './labelingQueue.js';
 import { log } from './yue2TrainRunner.js';
 
 export type AitkPrepareModelName = 'vae' | 'semantic' | 'sheetsage';
@@ -180,6 +180,7 @@ export async function runYue2AitkPrepareJob(job: TrainingJob, inlineOptions?: Re
   const handle = (line: string): void => {
     const trimmed = line.trim();
     if (!trimmed) return;
+    trainerLine(job, trimmed);
     tail.push(trimmed);
     if (tail.length > 20) tail.shift();
     parseProgress(job, trimmed);

@@ -33,6 +33,7 @@ import { mm3AdapterRoot, writeMm3RunManifest } from './mm3Runs.js';
 import { refreshMm3PresetsForNewRun } from './lyricStudioExport.js';
 import {
   emitJob, emitProgress, finishJob, isCancelled, killJobChild, pushEvent, type TrainingJob,
+  trainerLine,
 } from './labelingQueue.js';
 import { planMm3Previews, renderMm3Preview, type Mm3PreviewPlan } from './mm3Preview.js';
 
@@ -324,6 +325,7 @@ async function runMm3AceTrain(
     pushLog(`[Training] ${kind} job ${job.id}: ${exe} ${args.slice(0, 2).join(' ')}`);
 
     const child = spawn(exe, args, { windowsHide: true, env: buildGpuEnv().env });
+    trainerLine(job, `$ ${exe} ${args.join(' ')}`);
     job.child = child;
 
     // The run's own log, beside its checkpoints. Without this the trainer's
@@ -345,6 +347,7 @@ async function runMm3AceTrain(
         const line = raw.trim();
         if (!line) continue;
         record(sinks.console, line);
+        trainerLine(job, line);
         stderrTail.push(line);
         if (stderrTail.length > 30) stderrTail.shift();
       }
@@ -353,6 +356,7 @@ async function runMm3AceTrain(
     const rl = readline.createInterface({ input: child.stdout! });
     rl.on('line', (line) => {
       record(sinks.jsonl, line);
+      trainerLine(job, line);
       try {
         const ev = JSON.parse(line) as Record<string, unknown>;
         if (ev && typeof ev === 'object') relay(job, ev, st);
