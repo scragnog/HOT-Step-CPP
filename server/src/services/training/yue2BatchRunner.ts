@@ -86,6 +86,9 @@ interface BatchState extends Yue2BatchSummary {
 
 const POLL_MS = 1500;
 const IDLE_WAIT_MS = 10 * 60_000;
+/** Captions stage re-runs while tracks are still uncaptioned (network blips), 10 min apart. */
+const CAPTION_RETRIES = 3;
+const CAPTION_RETRY_WAIT_MS = 10 * 60_000;
 const MAX_LISTED = 20;
 /** Body fields that belong to one dataset, never to a recipe. */
 /** The KL-rung refinement belongs to the tuned recipe; a base-matched run
@@ -375,6 +378,19 @@ async function runItem(state: BatchState, item: Yue2BatchItem): Promise<void> {
     await waitWhilePaused(state);
     if (state.cancelRequested) { finishStage(state, result, 'cancelled', null); break; }
     await runStage(state, item, result);
+    // A network blip fails every caption call at once (2026-09-29: 03:15-03:19,
+    // "fetch failed" on 25 tracks, and two albums lost the night). The stage
+    // only captions what is missing, so wait and run it again before the
+    // cache stage gives up on the item.
+    for (let retry = 1; result.stage === 'captions' && (result as { status: Yue2BatchItemStatus }).status === 'done' && retry <= CAPTION_RETRIES; retry++) {
+      const ds = repo.getDataset(item.datasetId);
+      if (!ds || !(await samplesMissingYue2Caption(ds)).length) break;
+      const until = Date.now() + CAPTION_RETRY_WAIT_MS;
+      while (Date.now() < until && !state.cancelRequested) await sleep(POLL_MS);
+      if (state.cancelRequested) break;
+      result.jobId = ''; result.error = null;
+      await runStage(state, item, result);
+    }
     // TS narrowed result.status at the loop head; the stage ran since then.
     const outcome = (result as { status: Yue2BatchItemStatus }).status;
     if (outcome !== 'done') {
