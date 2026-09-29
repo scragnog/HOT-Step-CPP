@@ -43,6 +43,16 @@ export const TrainingWorkerBar: React.FC = () => {
     return () => window.clearInterval(id);
   }, [workers, running]);
 
+  // The studio switches to the worker as soon as a dispatch starts, before
+  // anything has arrived there: reload its datasets and batch as each lands.
+  const loadDatasets = useTrainingStore(s => s.loadDatasets);
+  const loadBatches = useTrainingStore(s => s.loadYue2Batches);
+  const queuedHere = dispatches.find(d => d.worker === worker)?.items.filter(i => i.status === 'queued').length ?? 0;
+  useEffect(() => {
+    if (!queuedHere) return;
+    void loadDatasets(); void loadBatches();
+  }, [queuedHere, loadDatasets, loadBatches]);
+
   if (!workers.length && !worker) return null;
 
   const current = workers.find(w => w.name === worker);
