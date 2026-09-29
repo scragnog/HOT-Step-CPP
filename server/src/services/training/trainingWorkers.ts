@@ -59,7 +59,7 @@ function datasetFiles(root: string, recursive: boolean, slug: string): Record<st
 
 /** Where a relative dataset path lives on this machine. Refuses anything
  *  that climbs out of the dataset folder or its labels folder. */
-function resolveDatasetFile(root: string, slug: string, rel: string): string {
+export function resolveDatasetFile(root: string, slug: string, rel: string): string {
   const labels = rel.startsWith(LABELS_PREFIX);
   const base = labels ? labelsDir(slug) : root;
   const out = path.resolve(base, labels ? rel.slice(LABELS_PREFIX.length) : rel);
