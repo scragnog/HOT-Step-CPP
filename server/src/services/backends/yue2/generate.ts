@@ -48,7 +48,7 @@ import { yue2AdapterTrigger } from './jointAdapterContext.js';
 import type { Yue2AdapterScales, Yue2FinalDetail } from './client.js';
 import { yue2Align, yue2Synth, yue2FinalDetail, yue2Props, yue2PropsCached, splitMultipartMixed, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
 import { yue2LyricsJson } from './align.js';
-import { classifyYue2Score, type Yue2ScoreHealth, yue2PlanUsable, yue2PickPlan, yue2PlanDraws } from './scoreHealth.js';
+import { classifyYue2Score, type Yue2ScoreHealth, yue2PlanUsable, yue2PickPlan, yue2PlanDraws, readYue2StyleNorms, type Yue2StyleNorms } from './scoreHealth.js';
 import { yue2PersistedSelection } from './index.js';
 import { applyYue2StyleTemplate, splitYue2Tail, type Yue2StyleTemplate } from './style.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
@@ -588,6 +588,15 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
 // pass: the plan stage decodes its songs in lockstep, so eight scores cost
 // about what one does (2026-09-28; one at a time, ten tries of a weak
 // adapter took three minutes before the batch could start composing).
+/** The style norms of the selected planner adapter's joint run (saved in its
+ *  folder by the run's previews), or null for the base model or an adapter
+ *  with none. Checks the training sheets themselves fail are not held against
+ *  its plans. */
+function activeStyleNorms(): Yue2StyleNorms | null {
+  const { ar, nar } = yue2PersistedSelection().adapters;
+  return readYue2StyleNorms(jointRunForAdapter(ar.path || nar.path)?.output);
+}
+
 async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
   type Pending = {
     m: Yue2PreparedJob; maxAttempts: number; replanFlags: boolean; instrumental: boolean;
@@ -610,6 +619,7 @@ async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
   }
   if (!pending.length) return;
 
+  const norms = activeStyleNorms();
   const props = yue2PropsCached() ?? (await yue2Props()).props;
   const slots = Math.max(1, Number(props?.max_plan_batch ?? props?.max_lm_batch) || 1);
   const randomSeed = () => Math.floor(Math.random() * 2 ** 32);
@@ -656,7 +666,7 @@ async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
     }
     draws.forEach((d, i) => {
       const { p } = d;
-      const health = classifyYue2Score(plans[i].abc, plans[i].end_reason, p.m.req.lyrics ?? '');
+      const health = classifyYue2Score(plans[i].abc, plans[i].end_reason, p.m.req.lyrics ?? '', norms);
       const flags = health.legibility?.flags ?? [];
       const attempts = p.m.autoReplan!.attempts;
       attempts.push({ seed: d.seed, verdict: health.verdict, reason: health.reason, ...(flags.length ? { flags } : {}) });
@@ -1069,7 +1079,7 @@ async function finishYue2Job(
   {
     // Healthy-but-long vs runaway: the score says which, when there is one
     // (cot=off renders have no plan stage and no score to read).
-    const scoreHealth = finalDetail.abc ? classifyYue2Score(finalDetail.abc, finalDetail.end_reason, req.lyrics ?? '') : undefined;
+    const scoreHealth = finalDetail.abc ? classifyYue2Score(finalDetail.abc, finalDetail.end_reason, req.lyrics ?? '', activeStyleNorms()) : undefined;
     if (scoreHealth) {
       log(scoreHealth.verdict === 'runaway' ? 'WARNING' : 'INFO',
         `[YuE2] Score: ${scoreHealth.verdict} — ${scoreHealth.reason}`);
@@ -1403,7 +1413,7 @@ export async function runYue2PlanPreview(params: any, signal?: AbortSignal): Pro
     if (!body.ok) throw new Error(`YuE2 semantic result fetch failed (${body.status})`);
     semantic_ids = await body.json() as number[];
   }
-  return { abc, seed: detail.tracks?.[0]?.seed ?? planReq.seed ?? -1, end_reason, stage_end_reasons: detail.stage_end_reasons, health: classifyYue2Score(abc, end_reason, planReq.lyrics ?? ''), notes, ...(semantic_ids ? { semantic_ids } : {}) };
+  return { abc, seed: detail.tracks?.[0]?.seed ?? planReq.seed ?? -1, end_reason, stage_end_reasons: detail.stage_end_reasons, health: classifyYue2Score(abc, end_reason, planReq.lyrics ?? '', activeStyleNorms()), notes, ...(semantic_ids ? { semantic_ids } : {}) };
 }
 
 async function waitYue2PlanJob(jobId: string, signal?: AbortSignal): Promise<void> {

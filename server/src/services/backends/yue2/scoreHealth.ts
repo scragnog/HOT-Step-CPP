@@ -18,6 +18,20 @@
 // Vocal voice is measured — the instrumental line mirrors its bar count and
 // says nothing about whether anyone sings.
 
+import fs from 'node:fs';
+import path from 'node:path';
+
+/** Every check the judge makes, by name. A style can fail some of them by
+ *  nature: a rap album's own lead sheets carry almost no vocal line
+ *  (SheetSage transcribes melody, and rap has little), so a faithful adapter
+ *  plans long vocal-silent stretches (2026-09-29: all 10 training sheets of a
+ *  rap-metal album scored runaway, and its step-200 render raps throughout). */
+export type Yue2Check = 'silence' | 'thin-vocal' | 'section-loop' | 'ins-loop' | 'vocal-loop' | 'few-pitches' | 'few-chords' | 'sections';
+
+/** The checks a dataset's own sheets fail, so an adapter trained on it is not
+ *  judged for them. Built once per run from the cache's lead sheets. */
+export interface Yue2StyleNorms { exempt: Yue2Check[]; sheets: number }
+
 export interface Yue2ScoreHealth {
   verdict: 'healthy' | 'long' | 'runaway' | 'unknown';
   /** Bars in the Vocal voice (whole-bar rests counted). */
@@ -36,6 +50,8 @@ export interface Yue2ScoreHealth {
   reason: string;
   /** Render-free legibility of a plan the verdict passed. */
   legibility: Yue2ScoreLegibility;
+  /** Every verdict-level check this sheet fails, exempt or not (for norms). */
+  failed: Yue2Check[];
 }
 
 // Legibility: what a "healthy" plan can still get wrong. A planner that has
@@ -68,6 +84,8 @@ export interface Yue2ScoreLegibility {
   lyricSections?: number;
   /** Worst first. Empty = nothing to say. */
   flags: string[];
+  /** Every flag check this sheet fails, exempt or not (for norms). */
+  failed: Yue2Check[];
 }
 
 const PHRASE_BARS = 4;
@@ -99,7 +117,7 @@ function longestLoop(bars: string[]): { bars: number; period: number } {
   return best;
 }
 
-export function scoreLegibility(voices: { vocal: string[]; ins: string[] }, chords: Set<string>, sections: number, lyrics?: string): Yue2ScoreLegibility {
+export function scoreLegibility(voices: { vocal: string[]; ins: string[] }, chords: Set<string>, sections: number, lyrics?: string, exempt: ReadonlySet<Yue2Check> = new Set()): Yue2ScoreLegibility {
   const norm = (bars: string[]) => bars.map(b => stripChords(b).replace(/\s+/g, '')).filter(b => hasNote(b));
   const vocal = norm(voices.vocal);
   const ins = norm(voices.ins);
@@ -110,16 +128,17 @@ export function scoreLegibility(voices: { vocal: string[]; ins: string[] }, chor
     vocalPhraseVariety: round3(phraseVariety(vocal)), insPhraseVariety: round3(phraseVariety(ins)),
     vocalSoundingBars: vocal.length, insSoundingBars: ins.length,
     vocalLoop: longestLoop(vocal), insLoop: longestLoop(ins),
-    vocalPitches: pitches.size, chords: chords.size, sections, lyricSections, flags: [],
+    vocalPitches: pitches.size, chords: chords.size, sections, lyricSections, flags: [], failed: [],
   };
+  const flag = (check: Yue2Check, text: string) => { out.failed.push(check); if (!exempt.has(check)) out.flags.push(text); };
   const loopFlag = (name: string, loop: { bars: number; period: number }) =>
     `${name} voice repeats a ${loop.period}-bar ${loop.period === 1 ? 'figure' : 'riff'} for ${loop.bars} bars`;
-  if (out.insLoop.bars >= LOOP_BARS) out.flags.push(loopFlag('Ins', out.insLoop));
-  if (out.vocalLoop.bars >= LOOP_BARS) out.flags.push(loopFlag('Vocal', out.vocalLoop));
-  if (vocal.length && pitches.size < FEW_PITCHES) out.flags.push(`Vocal melody on ${pitches.size} pitch(es)`);
-  if (chords.size > 0 && chords.size < FEW_CHORDS) out.flags.push(`${chords.size} chord${chords.size === 1 ? '' : 's'} for the whole song`);
+  if (out.insLoop.bars >= LOOP_BARS) flag('ins-loop', loopFlag('Ins', out.insLoop));
+  if (out.vocalLoop.bars >= LOOP_BARS) flag('vocal-loop', loopFlag('Vocal', out.vocalLoop));
+  if (vocal.length && pitches.size < FEW_PITCHES) flag('few-pitches', `Vocal melody on ${pitches.size} pitch(es)`);
+  if (chords.size > 0 && chords.size < FEW_CHORDS) flag('few-chords', `${chords.size} chord${chords.size === 1 ? '' : 's'} for the whole song`);
   if (lyricSections !== undefined && lyricSections > 1 && sections < lyricSections - 1) {
-    out.flags.push(`${sections} section(s) planned for ${lyricSections} lyric section tags`);
+    flag('sections', `${sections} section(s) planned for ${lyricSections} lyric section tags`);
   }
   return out;
 }
@@ -153,7 +172,8 @@ function barsIn(segment: string): number {
   return 1;
 }
 
-export function classifyYue2Score(abc: string, endReason?: string, lyrics?: string): Yue2ScoreHealth {
+export function classifyYue2Score(abc: string, endReason?: string, lyrics?: string, norms?: Yue2StyleNorms | null): Yue2ScoreHealth {
+  const exempt = new Set<Yue2Check>(norms?.exempt ?? []);
   const sections: string[] = [];
   let tempo: number | undefined;
   let meter: string | undefined;
@@ -209,21 +229,25 @@ export function classifyYue2Score(abc: string, endReason?: string, lyrics?: stri
     const beats = Number((meter ?? '4/4').split('/')[0]) || 4;
     estSeconds = Math.round(bars * beats * 60 / tempo);
   }
-  const legibility = scoreLegibility(voices, chords, sections.length, lyrics);
-  const base = { bars, vocalBars, vocalShare: Math.round(vocalShare * 1000) / 1000, longestSilentRun, sections, tempo, meter, estSeconds, legibility };
-
-  if (!bars) return { ...base, verdict: 'unknown', reason: 'no Vocal voice bars found in the score' };
-
+  const legibility = scoreLegibility(voices, chords, sections.length, lyrics, exempt);
   // The intro>verse loop the card describes: many section markers, almost no
   // distinct names.
   const distinct = new Set(sections).size;
-  if (sections.length >= 8 && distinct <= 2) {
+  const failed: Yue2Check[] = [];
+  if (sections.length >= 8 && distinct <= 2) failed.push('section-loop');
+  if (longestSilentRun >= SILENT_RUN_RUNAWAY) failed.push('silence');
+  if (bars >= LONG_SCORE_BARS && vocalShare < THIN_VOCAL_SHARE) failed.push('thin-vocal');
+  const base = { bars, vocalBars, vocalShare: Math.round(vocalShare * 1000) / 1000, longestSilentRun, sections, tempo, meter, estSeconds, legibility, failed };
+  const fails = (check: Yue2Check) => failed.includes(check) && !exempt.has(check);
+
+  if (!bars) return { ...base, verdict: 'unknown', reason: 'no Vocal voice bars found in the score' };
+  if (fails('section-loop')) {
     return { ...base, verdict: 'runaway', reason: `${sections.length} section markers but only ${distinct} distinct name(s) — the planner is looping` };
   }
-  if (longestSilentRun >= SILENT_RUN_RUNAWAY) {
+  if (fails('silence')) {
     return { ...base, verdict: 'runaway', reason: `${longestSilentRun} consecutive bars with no vocal` };
   }
-  if (bars >= LONG_SCORE_BARS && vocalShare < THIN_VOCAL_SHARE) {
+  if (fails('thin-vocal')) {
     return { ...base, verdict: 'runaway', reason: `${bars} bars with only ${(vocalShare * 100).toFixed(0)}% carrying vocal` };
   }
   if (endReason === 'limit_hit') {
@@ -276,4 +300,46 @@ export function yue2PlanDraws(budgets: Array<{ used: number; max: number }>, slo
     if (firstRound) break;
   }
   return draws;
+}
+
+/** A check is exempt when at least half of the dataset's own sheets fail it
+ *  (and there are at least three sheets to judge by). */
+export function yue2StyleNorms(sheets: Array<{ abc: string; lyrics?: string }>): Yue2StyleNorms {
+  const counts = new Map<Yue2Check, number>();
+  for (const s of sheets) {
+    const h = classifyYue2Score(s.abc, 'eos', s.lyrics);
+    for (const c of new Set([...h.failed, ...h.legibility.failed])) counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+  const exempt = sheets.length >= 3 ? [...counts].filter(([, n]) => n * 2 >= sheets.length).map(([c]) => c).sort() : [];
+  return { exempt, sheets: sheets.length };
+}
+
+const NORMS_FILE = 'style-norms.json';
+
+/** The norms saved in a joint run's folder, or null. */
+export function readYue2StyleNorms(runDir: string | undefined): Yue2StyleNorms | null {
+  if (!runDir) return null;
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(runDir, NORMS_FILE), 'utf8')) as Yue2StyleNorms;
+    return Array.isArray(j.exempt) ? j : null;
+  } catch { return null; }
+}
+
+/** Norms for a joint run: saved in its folder on first use, built from the
+ *  lead sheets in the latent cache beside its prepared dataset (the cache can
+ *  be cleared later; the run keeps what it was judged by). */
+export function yue2StyleNormsForRun(runDir: string, preparedDataset?: string): Yue2StyleNorms | null {
+  const saved = readYue2StyleNorms(runDir);
+  if (saved || !preparedDataset) return saved;
+  try {
+    const manifest = path.join(path.dirname(path.dirname(preparedDataset)), 'yue2_preprocess.json');
+    const j = JSON.parse(fs.readFileSync(manifest, 'utf8')) as { sources?: Array<{ abc?: unknown; lyrics?: unknown }> };
+    const sheets = (j.sources ?? []).filter(s => typeof s.abc === 'string' && s.abc)
+      .map(s => ({ abc: s.abc as string, ...(typeof s.lyrics === 'string' ? { lyrics: s.lyrics } : {}) }));
+    if (!sheets.length) return null;
+    const norms = yue2StyleNorms(sheets);
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(runDir, NORMS_FILE), JSON.stringify(norms, null, 1));
+    return norms;
+  } catch { return null; }
 }

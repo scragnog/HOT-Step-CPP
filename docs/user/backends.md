@@ -168,7 +168,12 @@ What sets it apart:
   one or two pitches, or far fewer sections than the lyric. If no attempt is clean, the
   least-flagged plan renders and the song's Plan facts and the generation log say so (a
   sign the adapter is not writing good plans); if every attempt is broken outright, the last
-  one renders. Every song of a batch plans in the same pass. The first pass draws one plan
+  one renders. With a joint-trained adapter picked, plans are judged against the adapter's own
+  training sheets: a check that at least half of them fail is the style, not a fault, and is
+  skipped. A rap album's sheets carry almost no vocal melody (the transcriber writes sung
+  melody), so "no vocal line" is not held against its plans. The run keeps the result in
+  `style-norms.json` in its folder; checkpoint previews use the same file. Every song of a
+  batch plans in the same pass. The first pass draws one plan
   per song; if any song needs another try, later passes draw up to 8 plans at once, shared
   between the songs still looking, in roughly the time of two single plans. The first clean
   attempt wins, even when later ones in the same pass are clean as well. A song whose plan

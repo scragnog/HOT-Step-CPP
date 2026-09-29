@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyYue2Score, yue2PlanDraws } from './scoreHealth.js';
+import { classifyYue2Score, yue2PlanDraws, yue2StyleNorms } from './scoreHealth.js';
 
 const HEADER = 'X:1\nT:\nM:4/4\nL:1/16\nQ:1/4=120\nV: Vocal clef=treble name="Vocal Melody" snm="Vocal"\nV: Ins clef=treble name="Ins Melody" snm="Inst."\nK:C\n';
 
@@ -95,4 +95,16 @@ test('plan draws: one per song first, then every slot within each budget', () =>
   assert.deepEqual(yue2PlanDraws([{ used: 0, max: 3 }, { used: 0, max: 3 }], 8, true), [0, 1]);
   assert.deepEqual(yue2PlanDraws([{ used: 1, max: 3 }, { used: 1, max: 10 }], 8, false), [0, 1, 0, 1, 1, 1, 1, 1]);
   assert.deepEqual(yue2PlanDraws([{ used: 0, max: 3 }, { used: 0, max: 3 }, { used: 0, max: 3 }], 2, true), [0, 1]);
+});
+
+test('a check the dataset\'s own sheets fail is not held against its plans', () => {
+  // A rap album: its sheets carry almost no vocal line, so a faithful plan has none either.
+  const rap = yue2StyleNorms([1, 2, 3, 4].map(() => ({ abc: song(160, 200, ['intro', 'verse', 'chorus', 'verse']) })));
+  assert.ok(rap.exempt.includes('silence'));
+  const plan = song(160, 200, ['intro', 'verse', 'chorus', 'verse']);
+  assert.equal(classifyYue2Score(plan).verdict, 'runaway');
+  assert.equal(classifyYue2Score(plan, 'eos', undefined, rap).verdict, 'healthy');
+  // A sung album keeps the vocal checks.
+  const sung = yue2StyleNorms([1, 2, 3].map(() => ({ abc: song(120, 2, ['verse', 'chorus', 'verse', 'chorus']) })));
+  assert.ok(!sung.exempt.includes('silence') && !sung.exempt.includes('thin-vocal'));
 });

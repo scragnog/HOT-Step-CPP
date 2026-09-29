@@ -9,7 +9,7 @@ import type { Yue2JointPreviewOptions } from './types.js';
 import { aceClient } from '../aceClient.js';
 import { yue2PersistedSelection, type Yue2PersistedSelection } from '../backends/yue2/index.js';
 import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, yue2FinalDetail, splitMultipartMixed, type Yue2Selection } from '../backends/yue2/client.js';
-import { classifyYue2Score, yue2PlanUsable, yue2PickPlan, type Yue2ScoreLegibility } from '../backends/yue2/scoreHealth.js';
+import { classifyYue2Score, yue2PlanUsable, yue2PickPlan, yue2StyleNormsForRun, type Yue2ScoreLegibility } from '../backends/yue2/scoreHealth.js';
 
 export const YUE2_JOINT_PREVIEW_DEFAULTS: Yue2JointPreviewOptions = {
   enabled: false, everySteps: 0, seconds: 90, seed: 424242,
@@ -186,6 +186,8 @@ export async function renderYue2JointPreview(input: {
     poll: aceClient.pollJob.bind(aceClient), result: aceClient.getJobResult.bind(aceClient), cancel: aceClient.cancelJob.bind(aceClient), unload: yue2Unload };
   let activeJob: string | undefined;
   let activeTerminal = true;
+  // Plans are judged against the dataset's own sheets: checks they fail are the style.
+  const norms = yue2StyleNormsForRun(input.output, input.dataset);
   let caption = input.options.caption || '';
   let lyrics = input.options.lyrics || '';
   if ((!caption || !lyrics) && input.dataset) {
@@ -262,7 +264,7 @@ export async function renderYue2JointPreview(input: {
           activeTerminal = true;
           const pd = await detail(planSub.job_id);
           const abc = (pd.abc ?? '').trim();
-          const h = classifyYue2Score(abc, pd.end_reason, lyrics);
+          const h = classifyYue2Score(abc, pd.end_reason, lyrics, norms);
           attempts.push({ seed: planSeed, verdict: h.verdict, reason: h.reason, ...(h.legibility.flags.length ? { flags: h.legibility.flags } : {}) });
           sheets.push(abc);
           // A plan the judge passes can still be illegible (one chord for the
@@ -350,7 +352,7 @@ export async function renderYue2JointPreview(input: {
           }
           const abc = (t as { abc?: unknown }).abc;
           if (typeof abc === 'string' && abc.trim()) {
-            const h = classifyYue2Score(abc, t.end_reason, kind === 'control' ? undefined : lyrics);
+            const h = classifyYue2Score(abc, t.end_reason, kind === 'control' ? undefined : lyrics, kind === 'artist' ? norms : null);
             record.score = { verdict: h.verdict, reason: h.reason, bars: h.bars, vocalShare: h.vocalShare, sections: h.sections, flags: h.legibility.flags, legibility: h.legibility };
             try { fs.mkdirSync(path.join(input.output, 'previews'), { recursive: true }); fs.writeFileSync(path.join(input.output, 'previews', `${stems[i]}.score.abc`), abc); } catch { /* the verdict is already on the record */ }
           }
