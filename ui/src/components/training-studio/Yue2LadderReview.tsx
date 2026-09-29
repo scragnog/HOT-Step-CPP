@@ -156,21 +156,21 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
     const unclean = doneTakes.filter(p => p.plan && p.plan.clean === false);
     return { mine, doneTakes, plannerReplans, composerReplans, hasReplanData, flaggedTakes, flagReasons, overall, unclean };
   };
-  // Best rung by overall score, ties going to the lower (less-trained, so
-  // less likely overcooked) step. Ladder is sorted ascending, so keeping the
-  // first strictly-greater score already resolves ties that way.
+  // Best rung by overall score, ties going to the higher (more-trained)
+  // step. Ladder is sorted ascending, so keeping the last score that is
+  // greater or equal resolves ties that way.
   let bestStep: number | undefined;
   let bestOverall = -Infinity;
   for (const c of ladder) {
     const o = rungStats(c.step).overall;
-    if (o && o.overall > bestOverall) { bestOverall = o.overall; bestStep = c.step; }
+    if (o && o.overall >= bestOverall) { bestOverall = o.overall; bestStep = c.step; }
   }
   const scoreboardRows = ladder.map(c => {
     const stats = rungStats(c.step);
     const sc = scores[c.step];
     return { step: c.step, kl: c.kl, likeness: sc?.likeness ?? null, corruption: sc?.corruption ?? null, overall: stats.overall };
   }).sort((a, b) => {
-    if (a.overall && b.overall) return b.overall.overall - a.overall.overall || a.step - b.step;
+    if (a.overall && b.overall) return b.overall.overall - a.overall.overall || b.step - a.step;
     if (a.overall) return -1;
     if (b.overall) return 1;
     return a.step - b.step;

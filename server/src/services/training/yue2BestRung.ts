@@ -17,7 +17,7 @@ export function rungOverall(likeness: number | null | undefined, corruption: num
 }
 
 /** The highest-scoring complete checkpoint of a ladder run; ties go to the
- *  lower step. null when no checkpoint has both scores. */
+ *  higher (more-trained) step. null when no checkpoint has both scores. */
 export function bestScoredRung(datasetId: string, runId: string, datasetSlug?: string): { step: number; dir: string; overall: number } | null {
   const run = listYue2AitkRuns(datasetId, datasetSlug).find(r => r.jobId === runId);
   if (!run) return null;
@@ -32,7 +32,7 @@ export function bestScoredRung(datasetId: string, runId: string, datasetSlug?: s
     const own = takes.filter(p => p.sheet !== 'shared');
     const flags = own.reduce((sum, p) => sum + (p.score?.flags?.length ?? 0), 0);
     const overall = rungOverall(s?.likeness, s?.corruption, replans, takes.length, flags, own.length);
-    if (overall !== null && (!best || overall > best.overall)) best = { step: c.step, dir: c.dir, overall };
+    if (overall !== null && (!best || overall >= best.overall)) best = { step: c.step, dir: c.dir, overall };
   }
   return best;
 }
