@@ -86,6 +86,7 @@ Defaults the card ships:
 | Prompt dropout | 0.1 text, 0.1 lyrics, 0.1 both | Agreed guesses; the report gives no rates. |
 | ABC dropout | 0.5 | Matches the report's balanced mix of tasks with and without a score. |
 | Decoder crop | 1500 (60 s) on every preset | The report packs whole songs; 0 trains on them. In a blind test the crop scored level with whole-song runs and trains about 40% faster. |
+| Planner crop | 0 (whole song) | Off by default and not yet tested by ear. The planner trains on only the first this-many frames of each song (25 per second). It is the biggest speed lever, since the planner's backward pass is the largest cost of an update, but the planner never learns the rest of the song or its ending, and whole songs are what fixed endings and structure in this recipe. Only applies while the decoder crop is on. |
 | Save every | 10 / 20 / 30 updates (Fast / Balanced / Thorough) | Ten rungs per preset. |
 | Lyric timing supervision | Off | Not used by the recipe. |
 | Checkpoint previews | On, in parallel, one 300 s draft take per checkpoint | The run's ladder; see Picking the adapter. |

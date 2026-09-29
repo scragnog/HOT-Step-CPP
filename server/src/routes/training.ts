@@ -3721,6 +3721,12 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       if (!Number.isInteger(v) || v < 0 || v > 12288) { res.status(400).json({ error: 'narCropFrames must be 0 (whole song) or 1..12288 frames.' }); return; }
       narCropFrames = v;
     }
+    let arCropFrames: number | undefined;
+    if (b.arCropFrames !== undefined && b.arCropFrames !== null && b.arCropFrames !== '') {
+      const v = Number(b.arCropFrames);
+      if (!Number.isInteger(v) || v < 0 || v > 12288) { res.status(400).json({ error: 'arCropFrames must be 0 (whole song) or 1..12288 frames.' }); return; }
+      arCropFrames = v;
+    }
     // Base-matched knobs (any method may set them; absent = engine default).
     const baseMatched: { method?: 'base-matched'; warmup?: number; arLossWeight?: number; beta1?: number; beta2?: number; arTargets?: 'base'; gradAccum?: number; textDropout?: number; lyricDropout?: number; bothDropout?: number } = {};
     if (method === 'base-matched') baseMatched.method = 'base-matched';
@@ -3804,6 +3810,7 @@ router.post('/datasets/:id/yue2-joint-train', (req: Request, res: Response) => {
       ...(!resume && b.autoRefine === true ? { autoRefine: true } : {}),
       ...lrSchedule,
       ...(narCropFrames !== undefined ? { narCropFrames } : {}),
+      ...(arCropFrames ? { arCropFrames } : {}),
       ...(resume && b.refinePlanner === true ? { unfreezePlanner: true, klCheckpointEvery: Math.max(0.01, Math.min(1, Number(b.klCheckpointEvery) || 0.1)), refineWarmup: 30, rungAdaptiveLr: true } : {}),
       ...advanced,
       ...baseMatched,

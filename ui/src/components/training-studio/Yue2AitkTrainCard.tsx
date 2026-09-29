@@ -212,6 +212,7 @@ const presetTime = (p: { minutes: number }) => `${Number((p.minutes / PRESETS[1]
 const BASE_MATCHED_DEFAULTS = {
   lr: 1e-4, weightDecay: 0.1, beta2: 0.95, abcDropout: 0.5, narCropFrames: 1500, arLossWeight: 0.25,
   gradAccum: 4, textDropout: 0.1, lyricDropout: 0.1, bothDropout: 0.1, warmupFraction: 0.03,
+  arCropFrames: 0,
 } as const;
 type PrepareForm = Yue2AitkPrepareRequest;
 
@@ -1310,6 +1311,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             ['bothDropout', t('trainingStudio.yue2.method.bothDropout', 'Uncond. dropout'), t('trainingStudio.yue2.method.bothDropoutInfo', 'Share of steps trained on the bare instruction with no style or lyrics: exactly the prompt the runtime\'s guidance uses as its unconditional branch.'), 'default 0.1'],
             ['abcDropout', t('trainingStudio.yue2.method.abcDropout', 'ABC dropout'), t('trainingStudio.yue2.method.bmAbcDropoutInfo', 'Share of steps trained without the lead sheet, matching the report\'s balanced mix of tasks with and without a score.'), 'default 0.5 (report)'],
             ['narCropFrames', t('trainingStudio.yue2.method.narCropFrames', 'Decoder crop (frames)'), t('trainingStudio.yue2.method.bmNarCropInfo', 'The decoder trains on this many frames per song (25 per second). 0 trains on the whole song, as the base did (about 12 GB of VRAM and 11-15 s a step on a 4-minute song). Every preset uses 1500, a 60 s crop: about 40% faster, and it scored as well as whole songs in a blind test.'), 'presets 1500'],
+            ['arCropFrames', t('trainingStudio.yue2.method.arCropFrames', 'Planner crop (frames)'), t('trainingStudio.yue2.method.arCropInfo', 'The planner trains on only the first this-many frames of each song (25 per second) instead of the whole song. The planner backward is the largest cost of an update, so this is the biggest speed lever, but the planner then never trains on the rest of the song or its ending, and whole songs are what fixed endings and structure in this recipe. It only applies while the decoder crop is on (not 0), and a song shorter than the decoder crop still trains whole. Untested by ear. 0 or blank trains whole songs.'), 'default 0 (whole song)'],
           ] as const).map(([key, label, info, meta]) => (
             <label key={key} className="flex flex-col gap-1">
               <ParamLabel label={label} info={info} meta={meta} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider" />

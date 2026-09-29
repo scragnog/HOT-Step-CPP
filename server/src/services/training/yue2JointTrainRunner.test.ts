@@ -61,6 +61,14 @@ test('spike guard flags ride only when the factor is on', () => {
   assert.equal(buildYue2JointTrainArgs({ ...base, spikeFactor: 0, spikeStop: 3 }).includes('--spike-stop'), false);
 });
 
+test('planner crop rides only when set', () => {
+  const base = { checkpoint: 'b', dataset: 'd', outDir: 'o', steps: 100, saveEvery: 10, seed: 42, device: 'CUDA0' };
+  const on = buildYue2JointTrainArgs({ ...base, arCropFrames: 3000 });
+  assert.deepEqual(on.slice(on.indexOf('--ar-crop-frames'), on.indexOf('--ar-crop-frames') + 2), ['--ar-crop-frames', '3000']);
+  assert.equal(buildYue2JointTrainArgs({ ...base, arCropFrames: 0 }).includes('--ar-crop-frames'), false);
+  assert.equal(buildYue2JointTrainArgs(base).includes('--ar-crop-frames'), false);
+});
+
 test('paused JSON event is recognized without becoming terminal done', () => {
   assert.deepEqual(parseYue2JointEvent('{"stage":"paused","step":50,"resume":"optimizer.resume"}', 100),
     { stage: 'paused', step: 50, totalSteps: 100 });

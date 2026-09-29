@@ -174,6 +174,9 @@ export interface ResolvedYue2JointTrainOptions {
   /** Decoder training window in frames (25/s). Absent/1500 = the reference
    *  60 s crop; 0 = whole song (clamped per song to the context). */
   narCropFrames?: number;
+  /** Planner training window: the first N frames of each song. Absent/0 =
+   *  whole song. Only bites while the decoder window is a crop. */
+  arCropFrames?: number;
   /** The tokenizer's companion decoder adapter, resolved by the job runner
    *  where the engine looks for it; absent = the pristine decoder. Recorded
    *  in the run options so a resume can tell which decoder it started on. */
@@ -373,6 +376,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   }
   if (o.lrScale !== undefined && o.lrScale !== 1) args.push('--lr-scale', String(o.lrScale));
   if (o.narCropFrames !== undefined && o.narCropFrames !== 1500) args.push('--nar-crop-frames', String(o.narCropFrames));
+  if (o.arCropFrames) args.push('--ar-crop-frames', String(o.arCropFrames));
   // Base-matched knobs. Each is only passed off its engine default, so a
   // request without them builds the argument list it always did.
   if (o.warmup !== undefined && o.warmup > 0) args.push('--warmup', String(o.warmup));

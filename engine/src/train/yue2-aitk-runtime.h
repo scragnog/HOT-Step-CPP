@@ -192,6 +192,13 @@ struct Config {
     // clamped per song so prompt + lead sheet + 2 x window fits the 24576
     // context, so a long song trains on the longest window that fits.
     std::int32_t nar_crop_frames = 1500;
+    // Planner (AR) training window: the first N song frames, 0 = the whole
+    // song. The reference recipe's ar_max_tokens (yue2-aitk-batch.h build):
+    // a prefix, since the causal planner would need every earlier frame in
+    // the forward anyway. Applies only while the decoder window is a crop;
+    // a whole-song decoder keeps the whole-song planner. A cropped planner
+    // never sees MUSIC_END, so it trains no endings. Opt-in speed lever.
+    std::int32_t ar_crop_frames = 0;
     // The tokenizer's companion decoder adapter (nar_lora_joint_v9.safetensors):
     // a frozen part of the decoder while training, as the engine merges it
     // under every generation. Empty = the pristine base decoder.
@@ -282,6 +289,7 @@ inline void usage(FILE * out) {
         "[--lr-schedule cosine|cosine-floor|constant|linear|wsd|sgdr] [--lr-floor 0.1] [--lr-decay-steps 40] [--lr-decay-shape linear|cosine] [--kl-overshoot-margin 0.1 (wsd: act at once if the KL passes the target by this during the tail; 0 = off)] "
         "[--lr-cycle-steps 100] [--lr-cycle-mult 2] [--lr-scale 1.0 (multiplies the rate on every optimizer, Prodigy included)] "
         "[--nar-crop-frames 1500 (decoder training window; 0 = whole song, clamped to the context)] "
+        "[--ar-crop-frames 0 (planner trains on the first N frames; 0 = whole song; needs --cursor-weight 0)] "
         "[--companion <nar_lora_joint_v9.safetensors> (the tokenizer's companion decoder adapter, frozen)] "
         "[--ar-loss-weight 1.0 (planner CE weight against the flow loss; the base trained at 0.25)] "
         "[--beta1 0.9] [--beta2 0.999 (Adam betas; the base trained at 0.9 / 0.95)] "
@@ -516,6 +524,9 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--nar-crop-frames")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::decimal_i32(text.c_str(), &parsed.nar_crop_frames) || parsed.nar_crop_frames < 0) { if (error) *error = "--nar-crop-frames must be 0 (whole song) or a positive frame count"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--ar-crop-frames")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::decimal_i32(text.c_str(), &parsed.ar_crop_frames) || parsed.ar_crop_frames < 0) { if (error) *error = "--ar-crop-frames must be 0 (whole song) or a positive frame count"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--lr-scale")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.lr_scale) || parsed.lr_scale <= 0.0f || parsed.lr_scale > 10.0f) { if (error) *error = "--lr-scale must be in (0, 10]"; return ParseResult::error; }

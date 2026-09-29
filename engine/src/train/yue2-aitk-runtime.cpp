@@ -290,6 +290,11 @@ static int run_impl(Config config, std::string * error) {
         // accumulation path does not sum; nothing that accumulates uses it.
         fail(error, "--grad-accum above 1 needs --cursor-weight 0"); return 1;
     }
+    if (config.ar_crop_frames > 0 && config.cursor_weight > 0.0f) {
+        // The cursor binds lyric columns to every frame of the song; a
+        // truncated planner sequence no longer has them all.
+        fail(error, "--ar-crop-frames needs --cursor-weight 0"); return 1;
+    }
     const bool base_targets = config.ar_targets == "base";
     const float condition_dropout = config.text_dropout + config.lyric_dropout + config.uncond_dropout;
     if (!std::isfinite(config.text_dropout) || config.text_dropout < 0.0f || !std::isfinite(config.lyric_dropout) || config.lyric_dropout < 0.0f ||
@@ -915,7 +920,7 @@ static int run_impl(Config config, std::string * error) {
                 const size_t fit = used < yue2_aitk::dataset_detail::kMaxFrames ? (yue2_aitk::dataset_detail::kMaxFrames - used) / 2 : 1;
                 window = std::max<size_t>(1, std::min(window, fit));
             }
-            auto sampled = sampler.sample(item.song, item.prompt, window, schedule, config.abc_dropout, 0, 999, config.caption_dropout, base_targets,
+            auto sampled = sampler.sample(item.song, item.prompt, window, schedule, config.abc_dropout, (size_t) config.ar_crop_frames, 999, config.caption_dropout, base_targets,
                                           config.text_dropout, config.lyric_dropout, config.uncond_dropout);
             input = yue2_aitk_joint::Input{}; input.batch = &sampled.batch; input.noisy_latents = sampled.noisy_bf16;
             input.flow_target = sampled.target_f32; input.timestep = sampled.timestep_bf16;
