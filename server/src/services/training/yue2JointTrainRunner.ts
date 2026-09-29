@@ -264,7 +264,7 @@ function readPushedPreviewLyrics(sourceDir: string | undefined): GenerationLyric
 }
 
 export const BASE_MATCHED_FORCED = Object.freeze({
-  method: 'base-matched', optimizer: 'adamw-lm', cautious: false,
+  method: 'base-matched',
   stopMode: 'steps', targetKl: undefined, targetLoss: undefined, targetKlMode: undefined, narExtraSteps: 0,
   klWeight: 0, captionDropout: 0, plannerLrScale: 1, narLrScale: 1, cursorWeight: 0,
   spikeFactor: 0, spikeStop: 0, reconStop: 0, reconTarget: 0, reconKeepDelta: undefined,
@@ -273,6 +273,9 @@ export const BASE_MATCHED_FORCED = Object.freeze({
   lrSchedule: 'cosine-floor', lrFloor: 0.1, arTargets: 'base',
 } as const);
 export const BASE_MATCHED_DEFAULTS = Object.freeze({
+  // The optimizer is the card's choice since 2026-09-29; AdamW on the graph
+  // optimizer (the cosine-floor schedule runs on it) is the presets' pick.
+  optimizer: 'adamw-lm',
   lr: 1e-4, weightDecay: 0.1, beta1: 0.9, beta2: 0.95, abcDropout: 0.5,
   narCropFrames: 1500, arLossWeight: 0.25, gradAccum: 4,
   textDropout: 0.1, lyricDropout: 0.1, bothDropout: 0.1,

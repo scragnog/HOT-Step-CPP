@@ -6,6 +6,7 @@ import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets
 import { TrainingChart } from './TrainingChart';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Yue2LadderReview } from './Yue2LadderReview';
+import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
 import {
@@ -195,18 +196,41 @@ const LOKR_STOP = { targetKl: 1.0, plannerLrScale: 0.6, narLrScale: 1 };
 // from whole songs. Fast 100 x 4, Balanced 200 x 4, Thorough 300 x 8; each
 // saves ten rungs. minutes = the measured 17 s a cropped 4-song update on a
 // 5090 (x2 for 8 songs) x updates, for the relative-time label.
+// Legacy (2026-09-29, Rob): the tuned recipe the card shipped before
+// base-matched (v1.3.4's defaults), for anyone who wants its speed back.
+// Two deliberate gaps: lyric timing stays off (it needs stems + alignment
+// first), and a cache cut for base-matched keeps its loudness on Start.
+// It stops at the planner's KL target, so steps is a cap; minutes assumes
+// the ~250 updates of 1 song a Prodigy run took to KL 1.2.
+const LEGACY_VALUES: Partial<Yue2JointTrainRequest> = {
+  method: 'tuned', optimizer: 'prodigy', cautious: true, lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
+  stopMode: 'kl', targetKl: 1.2, targetKlMode: 'trend', narExtraSteps: 0, captionDropout: 0.5,
+  spikeFactor: 5, spikeStop: 3, spikeStopWindow: 20, adapterType: 'lokr', lokrDim: 64, lokrFactor: 4, alpha: 256,
+  // Base-matched knobs back to the engine's own defaults.
+  warmup: undefined, weightDecay: undefined, beta2: undefined, abcDropout: undefined, arLossWeight: undefined,
+  textDropout: undefined, lyricDropout: undefined, bothDropout: undefined, arCropFrames: undefined,
+};
+// Leaving Legacy: the tuned-only knobs go (the server forces them anyway)
+// and the optimizer returns to the base-matched presets' pick.
+const BASE_MATCHED_VALUES: Partial<Yue2JointTrainRequest> = {
+  method: 'base-matched', optimizer: 'adamw-lm', cautious: false, lr: undefined,
+  ...Object.fromEntries(TUNED_KEYS.map(key => [key, undefined])),
+};
 const PRESETS = [
+  { key: 'legacy', label: 'Legacy', steps: 500, gradAccum: 1, narCropFrames: 1500, saveEvery: 25, lokrDim: 64, minutes: 22 },
   { key: 'fast', label: 'Fast', steps: 100, gradAccum: 4, narCropFrames: 1500, saveEvery: 10, lokrDim: 128, minutes: 28 },
   { key: 'balanced', label: 'Balanced', steps: 200, gradAccum: 4, narCropFrames: 1500, saveEvery: 20, lokrDim: 128, minutes: 57 },
   { key: 'thorough', label: 'Thorough', steps: 300, gradAccum: 8, narCropFrames: 1500, saveEvery: 30, lokrDim: 128, minutes: 170 },
 ] as const;
-const presetValues = (p: typeof PRESETS[number]) => ({ stopMode: 'steps' as const, steps: p.steps, gradAccum: p.gradAccum,
-  narCropFrames: p.narCropFrames, saveEvery: p.saveEvery, lokrDim: p.lokrDim });
-const activePreset = (f: Yue2JointTrainRequest) => PRESETS.find(p => f.steps === p.steps && (f.gradAccum ?? 4) === p.gradAccum
+const presetValues = (p: typeof PRESETS[number]): Partial<Yue2JointTrainRequest> => ({
+  ...(p.key === 'legacy' ? LEGACY_VALUES : { ...BASE_MATCHED_VALUES, stopMode: 'steps' as const }),
+  steps: p.steps, gradAccum: p.gradAccum, narCropFrames: p.narCropFrames, saveEvery: p.saveEvery, lokrDim: p.lokrDim });
+const activePreset = (f: Yue2JointTrainRequest) => PRESETS.find(p => (f.method === 'tuned') === (p.key === 'legacy')
+  && (p.key !== 'legacy' || f.targetKl === LEGACY_VALUES.targetKl) && f.steps === p.steps && (f.gradAccum ?? 4) === p.gradAccum
   && (f.narCropFrames ?? 0) === p.narCropFrames && f.saveEvery === p.saveEvery && (f.adapterType !== 'lokr' || f.lokrDim === p.lokrDim))?.key;
 /** Presets show their cost relative to Balanced rather than wall-clock times
  *  that only hold for one GPU and one dataset. */
-const presetTime = (p: { minutes: number }) => `${Number((p.minutes / PRESETS[1].minutes).toFixed(1))}×`;
+const presetTime = (p: { minutes: number }) => `${Number((p.minutes / PRESETS[2].minutes).toFixed(1))}×`;
 /** Mirror of BASE_MATCHED_DEFAULTS in server/src/services/training/yue2JointTrainRunner.ts,
  *  shown as each blank field's placeholder. The server fills blanks from its own copy. */
 const BASE_MATCHED_DEFAULTS = {
@@ -345,7 +369,7 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
   }
   const presets = `${FORM_KEY}${datasetId}:defaults-presets`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(presets)) {
-    Object.assign(stored, presetValues(PRESETS[1]));
+    Object.assign(stored, presetValues(PRESETS[2]));
     window.localStorage.setItem(presets, '1');
   }
   const autoRefine = `${FORM_KEY}${datasetId}:defaults-auto-refine`;
@@ -389,7 +413,7 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     for (const key of TUNED_KEYS) delete (stored as Record<string, unknown>)[key];
     stored.method = 'base-matched'; stored.stopMode = 'steps'; stored.optimizer = 'adamw-lm'; stored.cautious = false;
     stored.autoRefine = false; stored.cursorWeight = 0;
-    Object.assign(stored, presetValues(PRESETS[1]));
+    Object.assign(stored, presetValues(PRESETS[2]));
     window.localStorage.setItem(baseMatched, '1');
   }
   // 2026-09-27 (Rob): the run's own ladder is previewed and scored on this
@@ -413,7 +437,8 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     window.localStorage.setItem(`${FORM_KEY}${datasetId}`, JSON.stringify(stored));
     window.localStorage.setItem(resetAll, '1');
   }
-  return { ...DEFAULT_FORM, ...stored, method: 'base-matched' };
+  // Legacy is the one preset that runs the tuned recipe; anything else is base-matched.
+  return { ...DEFAULT_FORM, ...stored, method: stored.method === 'tuned' ? 'tuned' : 'base-matched' };
 }
 function writeStored(key: string, value: unknown): void {
   if (typeof window === 'undefined') return;
@@ -1126,19 +1151,20 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <div className="flex items-center gap-2 mb-2">
           <ParamLabel label={t('trainingStudio.yue2.method.preset', 'Preset')}
             className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
-            info={t('trainingStudio.yue2.method.presetInfo', 'All three are the same recipe; they differ in how many updates run, how many songs each update averages, and how often a checkpoint is saved (each saves ten). All three train the decoder on 60 s crops. Each preset shows its time relative to Balanced. For scale, Balanced takes about an hour on a 15-track album on an RTX 5090; a slower GPU or a longer album takes proportionally longer.')} />
+            info={t('trainingStudio.yue2.method.presetInfo', 'Fast, Balanced and Thorough are the same recipe; they differ in how many updates run, how many songs each update averages, and how often a checkpoint is saved (each saves ten). All three train the decoder on 60 s crops. Legacy is the previous recipe: one song per update, stopping once the planner has moved a set distance from the base model, so it can finish sooner, but its adapters scored lower by ear than the three new presets. Each preset shows its time relative to Balanced. For scale, Balanced takes about an hour on a 15-track album on an RTX 5090; a slower GPU or a longer album takes proportionally longer.')} />
           {!activePreset(form) && !presets.some(userPresetActive) && <span className="text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.presetCustom', 'custom')}</span>}
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {PRESETS.map(p => <button key={p.key} type="button" disabled={active || starting || preparing || yue2RunAllActive}
             onClick={() => setForm(previous => ({ ...previous, ...presetValues(p) }))}
             className={`flex flex-col items-center gap-1 px-4 py-3 rounded-xl border-2 transition-colors disabled:opacity-40 ${activePreset(form) === p.key
               ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
               : 'border-zinc-300 dark:border-white/15 text-zinc-800 dark:text-zinc-100 hover:border-blue-500/50 hover:bg-blue-500/5'}`}>
             <span className="text-base font-bold">{t(`trainingStudio.yue2.method.preset_${p.key}`, p.label)}</span>
-            <span className="text-xs text-zinc-500">{p.steps} × {p.gradAccum} songs · {p.key === 'balanced' ? t('trainingStudio.yue2.method.presetBaseline', '1× time (baseline)') : t('trainingStudio.yue2.method.presetRelative', '{{ratio}} the time', { ratio: presetTime(p) })}</span>
+            <span className="text-xs text-zinc-500">{p.key === 'legacy' ? t('trainingStudio.yue2.method.presetLegacySteps', 'up to {{steps}} × 1 song', { steps: p.steps }) : `${p.steps} × ${p.gradAccum} songs`} · {p.key === 'balanced' ? t('trainingStudio.yue2.method.presetBaseline', '1× time (baseline)') : t('trainingStudio.yue2.method.presetRelative', '{{ratio}} the time', { ratio: presetTime(p) })}</span>
           </button>)}
         </div>
+        {activePreset(form) === 'legacy' && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.presetLegacyNote', 'Legacy runs the previous recipe (Prodigy, one song per update, stops at planner KL 1.2, LoKr 64). It may train faster, but quality will not be as good as the new presets: they fixed the endings, structure and late-run degradation this recipe has. Lyric timing is off and the audio cache is not re-cut for it, so it is close to the old recipe rather than exact.')}</p>}
         <div className="mt-3 flex items-center gap-2 flex-wrap">
           <ParamLabel label={t('trainingStudio.yue2.method.presets', 'Your presets')}
             className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
@@ -1297,6 +1323,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       })()}
       <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/40 dark:bg-black/5 p-3">
         <summary className="cursor-pointer text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{t('trainingStudio.yue2.method.advancedSettings', 'Advanced')}</summary>
+        <div className="mt-2 mb-3 max-w-md">
+          {resumeChoice ? <p className="text-xs text-zinc-500">{t('trainingStudio.yue2.method.optimizerRestored', 'Optimizer: {{optimizer}} (restored from the selected run)', { optimizer: form.optimizer ?? 'adamw-lm' })}</p>
+            : <Yue2OptimizerFields joint value={{ optimizer: form.optimizer ?? 'adamw-lm', prodigyD0: form.prodigyD0 ?? 1e-6, muonLrScale: form.muonLrScale ?? 1,
+                muonNsSteps: form.muonNsSteps ?? 5, cautious: form.cautious === true }}
+                onChange={patch => setForm(previous => ({ ...previous, ...patch }))} />}
+        </div>
+        {form.method === 'tuned' && <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.legacyKnobsHint', "Legacy runs the previous recipe: a blank field below uses that recipe's own value, not the grey one.")}</p>}
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.baseMatchedKnobsHint', 'Blank uses the default shown in grey. The report does not state a fine-tuning learning rate or the dropout rates, so those defaults are agreed guesses; the rest are the report\'s own values.')}</p>
         <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mt-2">
           {([

@@ -19,7 +19,7 @@ export function Yue2OptimizerFields({ value, onChange, joint = false }: {
     <label className="flex flex-col gap-1">
       <ParamLabel
         label={t('trainingStudio.yue2Optim.optimizer', 'Optimizer')}
-        info={t('trainingStudio.yue2Optim.optimizerInfo', "Which algorithm updates the adapter weights each step. Prodigy learns its own step size as it trains, so the learning-rate field is ignored, and is the tested default. AdamW uses a fixed learning rate and, in the joint trainer, a native 8-bit kernel. Muon orthogonalizes weight updates for matrices with a short side of 16 or more; smaller matrices fall back to AdamW.")}
+        info={t('trainingStudio.yue2Optim.optimizerInfo', "Which algorithm updates the adapter weights each step. Prodigy learns its own step size as it trains, so the learning-rate field is ignored; the joint trainer's Legacy preset uses it. AdamW uses a fixed learning rate and, in the joint trainer, a native 8-bit kernel with no cosine decay. AdamW (graph) is the joint trainer's default for Fast, Balanced and Thorough. Muon orthogonalizes weight updates for matrices with a short side of 16 or more; smaller matrices fall back to AdamW.")}
       />
       <StyledSelect
         accent="amber"
@@ -28,7 +28,7 @@ export function Yue2OptimizerFields({ value, onChange, joint = false }: {
         options={[
           { value: 'prodigy' as const, label: 'Prodigy' },
           { value: 'adamw' as const, label: 'AdamW' },
-          ...(joint ? [{ value: 'adamw-lm' as const, label: t('trainingStudio.yue2Optim.adamwLm', 'AdamW (graph, experimental)') }] : []),
+          ...(joint ? [{ value: 'adamw-lm' as const, label: t('trainingStudio.yue2Optim.adamwLm', 'AdamW (graph)') }] : []),
           { value: 'muon' as const, label: 'Muon' },
         ]}
         className="w-full"

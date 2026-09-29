@@ -62,15 +62,20 @@ Things to know:
 
 ## Recommended settings
 
-Pick a preset. All three are the same recipe and all train a dim-128 LoKr; they differ in how many updates run, how many songs each update averages, and how often a checkpoint is saved. All three train the decoder on 60 s crops. Times are estimates for a 15-track album on an RTX 5090, from measured per-update times.
+Pick a preset. Fast, Balanced and Thorough are the same recipe and all train a dim-128 LoKr; they differ in how many updates run, how many songs each update averages, and how often a checkpoint is saved. All three train the decoder on 60 s crops. Times are estimates for a 15-track album on an RTX 5090, from measured per-update times.
 
 | Preset | Updates | Songs per update | Decoder | Checkpoint every | Time (card shows it relative to Balanced) |
 |---|---|---|---|---|---|
+| Legacy | up to 500 (stops at planner KL 1.2) | 1 | 60 s crops | 25 updates | ~20-25 min, varies |
 | Fast | 100 | 4 | 60 s crops | 10 updates | ~30 min |
 | Balanced (default) | 200 | 4 | 60 s crops | 20 updates | ~1 h |
 | Thorough | 300 | 8 | 60 s crops | 30 updates | ~3 h |
 
-Every preset saves ten checkpoints, so the ladder to listen through is ten rungs long; see Picking the adapter below.
+**Legacy** runs the recipe the card used before the current presets: Prodigy with cautious updates, one song per update, a dim-64 LoKr, caption dropout 0.5, and a stop once the planner's KL to the base model reaches 1.2. It can finish sooner than Fast because it stops early, but its adapters scored lower by ear than the new presets, which fixed its weak endings, structure problems and late-run degradation. It is close to the old recipe, not exact: lyric timing is off (it needs vocal stems and alignment first), and an audio cache already cut for the new presets is not re-cut for it. It renders no checkpoint previews.
+
+The optimizer is a setting under **Advanced**. Fast, Balanced and Thorough default to AdamW (graph), which runs the recipe's warmup and cosine decay; Legacy defaults to Prodigy. Plain AdamW uses a flat rate after warmup, with no decay.
+
+The new presets save ten checkpoints each, so the ladder to listen through is ten rungs long; see Picking the adapter below.
 
 How the presets were chosen: the first ear test (8 songs x 200 updates, whole songs, dim-64 LoKr) reached full likeness and quality by update 90. A blind test with three takes per condition then scored 60 s decoder crops level with whole songs, at about 40% less time per update. The current values, 200 updates and dim 128 for Balanced, come from an overnight batch of albums at those settings that sounded right by ear; whole songs gave no audible gain over crops, so every preset crops.
 
