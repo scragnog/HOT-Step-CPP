@@ -3606,8 +3606,8 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       res.status(400).json({ error: 'steps and saveEvery must be positive integers, with saveEvery <= steps.' });
       return;
     }
-    if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff || !/^CUDA[0-9]+$/i.test(device)) {
-      res.status(400).json({ error: 'seed must fit uint32 and device must be an explicit CUDA device such as CUDA0.' });
+    if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff || !/^(?:(?:CUDA|Vulkan|MTL)[0-9]+|CPU)$/i.test(device)) {
+      res.status(400).json({ error: 'seed must fit uint32 and device must be an explicit ggml device such as CUDA0, Vulkan0, MTL0 or CPU.' });
       return;
     }
     const optimizerRaw = b.optimizer;
