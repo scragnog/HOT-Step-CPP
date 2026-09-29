@@ -213,6 +213,8 @@ interface TrainingState {
   yue2Batches: trainingApi.Yue2BatchSummary[];
   /** Open the dataset the running batch is on whenever it moves. */
   yue2BatchFollow: boolean;
+  /** The training worker the studio is pointed at; null = this PC. */
+  trainingWorker: string | null;
   yue2RunAllActive: boolean;
   /** Which of the five YuE2 stages (1-5) the chain is currently on or waiting
    *  to finish. Null when the chain isn't running. */
@@ -429,6 +431,8 @@ interface TrainingState {
   loadPipelines(): Promise<void>;
   setYue2BatchDraft(ids: string[] | null): void;
   setYue2BatchFollow(follow: boolean): void;
+  /** Point the whole studio at a training worker (null = this PC) and reload. */
+  setTrainingWorker(name: string | null): Promise<void>;
   loadYue2Batches(): Promise<void>;
   startYue2Batch(input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Partial<trainingApi.Yue2JointTrainRequest> }): Promise<trainingApi.Yue2BatchSummary>;
   pauseYue2Batch(id: string): Promise<void>;
@@ -471,6 +475,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   yue2BatchDraft: null,
   yue2Batches: [],
   yue2BatchFollow: true,
+  trainingWorker: trainingApi.getTrainingWorker(),
   yue2RunAllActive: false,
   yue2RunAllStage: null,
 
@@ -1255,6 +1260,12 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
 
   setYue2BatchDraft: (ids) => set({ yue2BatchDraft: ids && ids.length ? ids : null }),
   setYue2BatchFollow: (follow) => set({ yue2BatchFollow: follow }),
+  setTrainingWorker: async (name) => {
+    trainingApi.setTrainingWorker(name);
+    get().closeDataset();
+    set({ trainingWorker: name, phase: 'dataset', datasets: [], yue2Batches: [], yue2BatchDraft: null, error: null });
+    await Promise.all([get().loadCapabilities(), get().loadDatasets(), get().loadYue2Batches()]);
+  },
   loadYue2Batches: async () => {
     try { set({ yue2Batches: await trainingApi.listYue2Batches() }); }
     catch (err) { console.warn('[Training] yue2 batches failed:', errMessage(err)); }

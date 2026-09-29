@@ -4,7 +4,20 @@
 // a verbatim copy of the frozen contract shared with
 // server/src/services/training/types.ts — keep both sides in sync by hand.
 
-const API_BASE = '/api/training';
+// The studio trains on this PC or on a training worker (server
+// services/training/trainingWorkers.ts). Every call below goes through
+// API_BASE, so switching it points the whole studio at the worker's
+// datasets, batches, ladders, previews and rung scores.
+const WORKER_KEY = 'hotstep.trainingWorker';
+let trainingWorker: string | null = (() => { try { return localStorage.getItem(WORKER_KEY) || null; } catch { return null; } })();
+let API_BASE = trainingWorker ? `/api/workers/${encodeURIComponent(trainingWorker)}/api/training` : '/api/training';
+
+export const getTrainingWorker = () => trainingWorker;
+export function setTrainingWorker(name: string | null): void {
+  trainingWorker = name;
+  API_BASE = name ? `/api/workers/${encodeURIComponent(name)}/api/training` : '/api/training';
+  try { if (name) localStorage.setItem(WORKER_KEY, name); else localStorage.removeItem(WORKER_KEY); } catch { /* per-viewer convenience only */ }
+}
 
 // ── Core enums ────────────────────────────────────────────────────────────
 export type TagPosition = 'prepend' | 'append' | 'replace';
@@ -3012,6 +3025,33 @@ export async function pauseYue2Batch(id: string): Promise<void> { await request<
 export async function resumeYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}/resume`, { method: 'POST' }); }
 export async function addToYue2Batch(id: string, datasetIds: string[]): Promise<void> { await request<{ batch: Yue2BatchSummary }>(`/yue2-batch/${encodeURIComponent(id)}/items`, { method: 'POST', ...jsonBody({ datasetIds }) }); }
 export async function cancelYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}`, { method: 'DELETE' }); }
+
+// ── Training workers (/api/workers, always this PC's server) ───────────────
+
+export interface TrainingWorkerStatus { name: string; url: string; online: boolean; version?: string; versionMatch?: boolean; engine?: string; error?: string }
+export interface WorkerDispatchItem { datasetId: string; name: string; status: 'pending' | 'captioning' | 'pushing' | 'queued' | 'failed'; error: string | null; sent?: number; bytes?: number }
+export interface WorkerDispatch { worker: string; batchId: string | null; items: WorkerDispatchItem[]; running: boolean; startedAt: number }
+
+async function workersRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`/api/workers${path}`, init);
+  const data = await res.json().catch(() => ({ error: res.statusText }));
+  if (!res.ok) throw new Error(data.error || `API error: ${res.status}`);
+  return data as T;
+}
+export async function listTrainingWorkers(): Promise<TrainingWorkerStatus[]> {
+  return (await workersRequest<{ workers: TrainingWorkerStatus[] }>('')).workers;
+}
+/** Caption here, push, and queue each dataset on the worker's YuE2 batch. */
+export async function dispatchYue2Batch(worker: string, input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Partial<Yue2JointTrainRequest> }): Promise<WorkerDispatch> {
+  return (await workersRequest<{ dispatch: WorkerDispatch }>(`/${encodeURIComponent(worker)}/yue2-dispatch`, { method: 'POST', ...jsonBody(input) })).dispatch;
+}
+export async function getWorkerDispatch(worker: string): Promise<WorkerDispatch | null> {
+  return (await workersRequest<{ dispatch: WorkerDispatch | null }>(`/${encodeURIComponent(worker)}/yue2-dispatch`)).dispatch;
+}
+/** Fetch the worker's linked adapters and link them to this PC's presets. */
+export async function pullWorkerAdapters(worker: string): Promise<Array<{ slug: string; status: 'fetched' | 'current' | 'no-dataset'; bytes: number }>> {
+  return (await workersRequest<{ pulled: Array<{ slug: string; status: 'fetched' | 'current' | 'no-dataset'; bytes: number }> }>(`/${encodeURIComponent(worker)}/pull`, { method: 'POST' })).pulled;
+}
 
 export async function cancelPipeline(id: string): Promise<void> {
   await request<{ ok: boolean }>(`/pipeline/${encodeURIComponent(id)}`, { method: 'DELETE' });

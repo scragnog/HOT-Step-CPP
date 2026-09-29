@@ -21,6 +21,7 @@ import { RefinePanel } from './RefinePanel';
 import { ReviewPanel } from './ReviewPanel';
 import { PreprocessPanel } from './PreprocessPanel';
 import { TrainPanel } from './TrainPanel';
+import { TrainingWorkerBar } from './TrainingWorkerBar';
 import { Yue2BatchPanel } from './Yue2BatchPanel';
 
 // ── URL helpers ──────────────────────────────────────────────────────────────
@@ -194,6 +195,7 @@ export const TrainingStudio: React.FC = () => {
           </div>
         </div>
 
+        <TrainingWorkerBar />
         <CapabilityBanner />
         <PhaseStepper />
 

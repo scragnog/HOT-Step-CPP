@@ -204,6 +204,18 @@ Not exposed in Settings on purpose. Edit `.env`.
 | `TRAINING_UNDERSTAND_TIMEOUT_MS` | `1200000` (20 min) | Per-file timeout for the engine `/understand` call during labelling |
 | `TRAINING_MAX_SCAN_FILES` | `5000` | Scanning a dataset folder with more files than this fails with an error instead of continuing |
 
+## Training workers
+
+Exposed in Settings → Server and hot-reloaded. Code: `server/src/services/training/trainingWorkers.ts`, routes in `server/src/routes/workers.ts`.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `TRAINING_WORKERS` | empty | Workers this machine drives: `Name=http://host:3001`, comma-separated. Enables `/api/workers` and the studio's Train on / Run on controls |
+| `TRAINING_WORKER_TOKEN` | empty | Sent as `x-hotstep-worker-token` on every call to a worker |
+| `WORKER_TOKEN` | empty | Set = this machine is a worker: every `/api` request from a non-loopback address must carry this token (401 otherwise) |
+
+A worker keeps pushed datasets under `<TRAINING_DIR>/worker-datasets/<slug>`, with the controller's dataset id and slug. Every machine records the last linked YuE2 pair per slug in `<TRAINING_DIR>/yue2-linked.json`; the controller's pull reads the worker's copy.
+
 ## Other variables
 
 | Variable | Default | Read in | Effect |

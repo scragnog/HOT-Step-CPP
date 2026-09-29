@@ -53,6 +53,8 @@ This tab is a structured editor for `.env`. Fields marked "Restart" in the UI ne
 | Keep Models in VRAM | Passes `--keep-loaded` to the engine so the DiT, adapter, and VAE stay resident between generations instead of being reloaded each time. Cuts the roughly 17-second adapter precompute paid per render, at the cost of holding around 13 GB of VRAM continuously. Off by default. Restart required. This is a different control from the "Keep DiT & VAE loaded" toggle on the Performance tab, see [Tips and limits](#tips-and-limits). |
 | Server port | Port the Node server listens on. Restart required. Default `3001`. |
 | Data directory | Where the SQLite database and generated assets are stored. Restart required. Default `./data`. |
+| Training workers / Training worker token | Other PCs this one can train YuE2 batches on, as `Name=http://address:3001`, comma-separated, and the token sent to them. Applies live. See [training on another PC](../training/yue2.md#training-on-another-pc). |
+| Worker token (this PC as a worker) | Set only on a PC that trains for another. API calls from other machines must then carry this token; the PC itself and a browser on it are not affected. Applies live. |
 | Dataset labeling throughput (Essentia / Genius / caption concurrency and intervals) | Rate limits for the background dataset-labeling queue used by Training Studio. Applies live, no restart. |
 | Lyrics export directory | Where Lyric Studio exports lyric files. Applies live. |
 | MuScriptor models directory | Where MIDI Studio's transcription models live. Restart required. |

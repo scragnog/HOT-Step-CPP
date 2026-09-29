@@ -436,6 +436,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 value={envValues.SERVER_PORT || ''} onChange={handleEnvChange} type="number" placeholder="3001" />
               <EnvPathRow envKey="DATA_DIR" label={t('settings.env.dataDir')} description={t('settings.env.dataDirDesc')}
                 value={envValues.DATA_DIR || ''} onChange={handleEnvChange} onBrowse={handleBrowse} placeholder="./data" />
+              <EnvTextRow envKey="TRAINING_WORKERS" label={t('settings.env.trainingWorkers', 'Training workers')}
+                description={t('settings.env.trainingWorkersDesc', 'Other PCs running HOT-Step that this PC can train on, as Name=http://address:3001, comma-separated. They appear under "Train on" in the Training Studio.')}
+                value={envValues.TRAINING_WORKERS || ''} onChange={handleEnvChange} placeholder="LivingRoom=http://192.168.1.50:3001" />
+              <EnvPasswordRow envKey="TRAINING_WORKER_TOKEN" label={t('settings.env.trainingWorkerToken', 'Training worker token')}
+                description={t('settings.env.trainingWorkerTokenDesc', 'Sent to the training workers above. Must match the Worker token set on each worker.')}
+                value={envValues.TRAINING_WORKER_TOKEN || ''} onChange={handleEnvChange} />
+              <EnvPasswordRow envKey="WORKER_TOKEN" label={t('settings.env.workerToken', 'Worker token (this PC as a worker)')}
+                description={t('settings.env.workerTokenDesc', 'Set only on a PC that trains for another. When set, API calls from other machines must carry this token.')}
+                value={envValues.WORKER_TOKEN || ''} onChange={handleEnvChange} />
             </EnvSubsection>
 
             {/* Dataset labeling throughput */}

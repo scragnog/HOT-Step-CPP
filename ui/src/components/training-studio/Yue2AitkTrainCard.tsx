@@ -29,6 +29,7 @@ import {
   type Yue2JointPreviewOptions,
   type Yue2JointPreviewRecord,
 } from '../../services/trainingApi';
+import { dispatchYue2Batch, listTrainingWorkers, type TrainingWorkerStatus } from '../../services/trainingApi';
 import { yue2AdapterHalfBytes, formatMB } from '../../utils/yue2AdapterSize';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { descentRate, formatDurationMs } from '../../utils/trainingEta';
@@ -504,6 +505,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const setPhase = useTrainingStore(s => s.setPhase);
   const [batchStarting, setBatchStarting] = useState(false);
   const [batchClearCache, setBatchClearCache] = useState(false);
+  const trainingWorker = useTrainingStore(s => s.trainingWorker);
+  const setTrainingWorker = useTrainingStore(s => s.setTrainingWorker);
+  const [workers, setWorkers] = useState<TrainingWorkerStatus[]>([]);
+  const [runOn, setRunOn] = useState('');
+  useEffect(() => {
+    if (!batchDraft?.length || trainingWorker) return;
+    void listTrainingWorkers().then(setWorkers).catch(() => setWorkers([]));
+  }, [!!batchDraft?.length, trainingWorker]);
   // A batch draft turns this card into the recipe editor for N datasets: the
   // form is the same, Start sends it to the server-side batch instead of one
   // run, and the per-dataset paths are resolved per item by the runner.
@@ -516,6 +525,12 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       const recipe = { ...form, autoCaption: autoCaption ?? (false as const), cursorWeight: timingWeight, dataset: '', output: '', resume: '',
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
           everySteps: form.preview.parallel ? 0 : form.saveEvery, previewMaxFrames: Math.max(8, Math.min(360, form.preview.seconds || 300)) * 25 } } : {}) };
+      if (runOn) {
+        await dispatchYue2Batch(runOn, { datasetIds: batchDraft, lyricTiming, clearCache: batchClearCache, recipe });
+        setBatchDraft(null);
+        await setTrainingWorker(runOn);
+        return;
+      }
       await startBatch({ datasetIds: batchDraft, lyricTiming, clearCache: batchClearCache, recipe });
       setPhase('train');
     } catch (err) {
@@ -1421,6 +1436,21 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           label={t('trainingStudio.yue2.aitkBatch.clearCache', 'Clear out all cached data')}
           info={t('trainingStudio.yue2.aitkBatch.clearCacheHint', "Deletes each dataset's YuE2 caches (latents, codes, lead sheets, vocal stems, lyric timing, prepared datasets) before it starts, so everything is rebuilt from the audio. Source audio, captions and trained adapters are not touched. Each album then takes as long as a first-time preparation.")}
         />
+        {!trainingWorker && workers.length > 0 && <div className="mt-2 flex items-center gap-3 flex-wrap">
+          <ParamLabel
+            label={t('trainingStudio.workers.runOn', 'Run on')}
+            className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300"
+            info={t('trainingStudio.workers.runOnInfo', 'A training worker trains the batch on its own GPU. Each dataset is captioned here first (Gemini, when captioning is on), its audio and sidecars are sent to the worker (only files it does not already have), and it joins the worker\'s batch. Switch "Train on" at the top to that worker to follow the run, listen to previews and score rungs.')}
+          />
+          <StyledSelect
+            accent="amber"
+            value={runOn}
+            disabled={batchStarting}
+            onChange={value => setRunOn(String(value))}
+            options={[{ value: '', label: t('trainingStudio.workers.thisPc', 'This PC') }, ...workers.map(w => ({ value: w.name, label: w.online ? w.name : `${w.name} (offline)`, disabled: !w.online }))]}
+            className="w-48"
+          />
+        </div>}
         <div className="mt-2 flex items-center gap-3">
           <button type="button" onClick={() => void runBatch()} disabled={batchStarting || yue2RunAllActive}
             className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2">

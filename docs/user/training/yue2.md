@@ -100,6 +100,18 @@ When to move off them:
 
 "Train multiple" runs the whole chain (cache, codes, lead sheets, preparation, joint training) for several datasets in sequence with shared settings and a separate output folder each. Its dataset picker hides datasets that already have a linked YuE2 adapter pair; turn on **Show trained** to list them again for a retrain. The batch runs on the server: it survives a page reload, and after a server restart it is listed as paused so you can resume it with every finished stage kept. The batch panel above the Training Studio phases, shown only while a batch is running or paused, lists the queue, the running stage's step count, and a link back to the running training from anywhere in the studio.
 
+## Training on another PC
+
+A second PC with its own GPU can train YuE2 batches while this one does something else, managed from this PC's Training Studio.
+
+1. On the other PC, install HOT-Step at the same version, copy the YuE2 models it needs (the files under `models/yue2` and `models/supersep`), and set **Worker token** in Settings → Server to a long random string. Allow inbound TCP 3001 through its firewall, and start the app.
+2. On this PC, set **Training workers** to `Name=http://<its address>:3001` and **Training worker token** to the same string.
+3. Start **Train multiple** here and pick the worker under **Run on**. For each dataset, this PC writes any missing YuE2 captions (always with Gemini, so the worker needs no API keys), sends the audio, sidecars, labels and the preview lyrics Lyric Studio would pick, and adds the dataset to the worker's batch. The first dataset starts training while the rest are still being sent. A second send of the same dataset copies only files that changed.
+4. The studio switches **Train on** to the worker. Everything from there is the worker's: the batch panel, training charts, the ladder and its previews, which play here, and the rung scores. Finish ladders there as usual.
+5. **Fetch finished adapters** copies every adapter pair the worker has linked (by a finished ladder, "Use this rung", or the end of a run) into this PC's adapters folder, under the same relative path, and links it to the album preset here.
+
+Limits: only the Training Studio's routes reach the worker; generation still runs on this PC. The queue of datasets waiting to be captioned and sent lives in memory, so a restart of this PC's server drops it (datasets already on the worker's batch keep going); start the rest again and nothing already sent is sent twice. A dataset's files are not replaced while a job is running for it on the worker.
+
 ## Picking the adapter
 
 Every saved checkpoint is a rung of the run's ladder, shown under the run on the Train page as soon as training starts. With previews on (the default) each rung gets one 300 s draft take (12 decoder steps, the caption of the dataset's first sung track, and by default the newest lyrics generated for this artist in Lyric Studio, so each rung sings a song it never trained on; **Preview lyrics** switches to the dataset's own lyrics, and a dataset with no generations uses its own lyrics anyway. Every rung of a run, including ones rendered later with **Render**, sings the same words) rendered in parallel while training continues, so the ladder is ready to listen to when the run ends; a rung without a take yet says so, and **Render** adds one. Rendering in parallel keeps the engine running during training, which is why "Stop the engine during training" is off by default; on a smaller card turn previews off and render the ladder afterwards.
