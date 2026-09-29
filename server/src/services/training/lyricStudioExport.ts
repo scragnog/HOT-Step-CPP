@@ -338,6 +338,27 @@ export function refreshYue2PresetsForNewRun(
   return updated;
 }
 
+/** The joint pair each dataset slug was last linked to, whether or not a
+ *  preset took it. A training worker has no Lyric Studio presets, so this is
+ *  how the controlling machine learns which checkpoint to fetch back. */
+export interface Yue2LinkedPair { arPath: string; narPath: string; at: string }
+const linkedFile = () => path.join(config.training.dir, 'yue2-linked.json');
+
+export function readYue2Linked(): Record<string, Yue2LinkedPair> {
+  try { return JSON.parse(fs.readFileSync(linkedFile(), 'utf-8')) as Record<string, Yue2LinkedPair>; } catch { return {}; }
+}
+
+function recordYue2Linked(slug: string, arPath: string, narPath: string): void {
+  try {
+    const all = readYue2Linked();
+    all[slug] = { arPath, narPath, at: new Date().toISOString() };
+    fs.mkdirSync(path.dirname(linkedFile()), { recursive: true });
+    fs.writeFileSync(linkedFile(), JSON.stringify(all, null, 2), 'utf-8');
+  } catch (err: any) {
+    console.warn(`[Training] YuE2 linked-pair record failed: ${err?.message ?? err}`);
+  }
+}
+
 /** Link a joint YuE2 checkpoint as one AR/NAR pair. A preset linked to this
  * dataset is always eligible; older adapter references are eligible only when
  * both populated halves belong to this dataset. This keeps a deliberately
@@ -353,6 +374,7 @@ export function refreshYue2PresetsForJointCheckpoint(
     if (!arPath || !narPath || !fs.statSync(arPath).isFile() || !fs.statSync(narPath).isFile()) return 0;
     const slug = String(ds.slug || '').toLowerCase();
     if (!slug) return 0;
+    recordYue2Linked(slug, arPath, narPath);
     const known = new Set(knownJointPaths.map(normPath));
     const owned = (p: string): boolean => {
       if (!p) return false;

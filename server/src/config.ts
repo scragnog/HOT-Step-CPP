@@ -300,6 +300,16 @@ export const config = {
     maxScanFiles: parseInt(process.env.TRAINING_MAX_SCAN_FILES || '5000', 10),
   },
 
+  // Training on another PC (services/training/trainingWorkers.ts).
+  workers: {
+    /** This machine drives these workers: `Name=http://host:3001`, comma-separated. */
+    list: process.env.TRAINING_WORKERS || '',
+    /** Token this machine sends to its workers. */
+    token: process.env.TRAINING_WORKER_TOKEN || '',
+    /** Set = this machine IS a worker: API calls from other machines must carry it. */
+    acceptToken: process.env.WORKER_TOKEN || '',
+  },
+
   // Whisper speech-to-text (lyrics transcription)
   whisper: {
     exe: process.env.WHISPER_EXE || path.join(PROJECT_ROOT, 'tools', 'whisper', `whisper-cli${BIN_EXT}`),
@@ -339,6 +349,8 @@ export const EXPOSED_ENV_KEYS = [
   'LABEL_CAPTION_CONCURRENCY', 'LABEL_CAPTION_MIN_INTERVAL_MS',
   // Paths
   'LYRICS_EXPORT_DIR', 'MUSCRIPTOR_MODELS_DIR',
+  // Training workers
+  'TRAINING_WORKERS', 'TRAINING_WORKER_TOKEN', 'WORKER_TOKEN',
 ] as const;
 
 /**
@@ -455,6 +467,9 @@ export function reloadEnvConfig(): string[] {
     () => config.lireek.openaiCompatName);
   apply('OPENAI_COMPAT_REASONING_EFFORT', v => { config.lireek.openaiCompatReasoningEffort = v; },
     () => config.lireek.openaiCompatReasoningEffort);
+  apply('TRAINING_WORKERS', v => { config.workers.list = v; }, () => config.workers.list);
+  apply('TRAINING_WORKER_TOKEN', v => { config.workers.token = v; }, () => config.workers.token);
+  apply('WORKER_TOKEN', v => { config.workers.acceptToken = v; }, () => config.workers.acceptToken);
   apply('LYRICS_EXPORT_DIR', v => {
     config.lireek.exportDir = v || path.join(config.data.dir, 'lyrics');
   }, () => config.lireek.exportDir);

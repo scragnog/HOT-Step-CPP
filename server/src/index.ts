@@ -43,6 +43,8 @@ import profilesRoutes from './routes/profiles.js';
 import songBuilderRoutes from './routes/songBuilder.js';
 import midiStudioRoutes from './routes/midiStudio.js';
 import trainingRoutes from './routes/training.js';
+import workerRoutes, { workerRouter } from './routes/workers.js';
+import { workerTokenGate } from './services/training/trainingWorkers.js';
 import backendsRoutes from './routes/backends.js';
 import audioRoutes from './routes/audio.js';
 
@@ -68,6 +70,10 @@ const app = express();
 
 // Middleware
 app.use(cors());
+// Training on another PC: a worker checks its token first; the controller's
+// proxy goes before the body parsers so proxied bodies stream through.
+app.use('/api', workerTokenGate);
+app.use('/api/workers', workerRoutes);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -98,6 +104,7 @@ app.use('/api/seeds', seedsRoutes);
 app.use('/api/profiles', profilesRoutes);
 app.use('/api/builder', songBuilderRoutes);
 app.use('/api/midi-studio', midiStudioRoutes);
+app.use('/api/training/worker', workerRouter);
 app.use('/api/training', trainingRoutes);
 app.use('/api/audio', audioRoutes);
 // Mounted at '/api' (not '/api/backends') — the router spells its own full
