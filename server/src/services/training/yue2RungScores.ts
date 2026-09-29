@@ -6,8 +6,8 @@
 // (likeness, corruption, notes); the server fills the facts from the run
 // record and meters.json, so rows never carry hand-typed numbers.
 import { getDb } from '../../db/database.js';
-import { listYue2AitkRuns } from './yue2AitkRuns.js';
-import { listYue2JointPreviews } from './yue2JointPreview.js';
+import { listYue2AitkRuns, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
+import { listYue2JointPreviews, type Yue2JointPreviewRecord } from './yue2JointPreview.js';
 
 export interface Yue2RungScore {
   id: number;
@@ -56,8 +56,10 @@ export function listYue2RungScores(datasetId?: string, refineRun?: string): Yue2
 
 /** Upsert the judgement for one checkpoint of a run; the facts come from the
  *  run's own records. Returns the stored row. */
-export function scoreYue2Rung(ds: { id: string; slug: string }, input: { refineRun: string; step: number; likeness?: number | null; corruption?: number | null; notes?: string }): Yue2RungScore {
-  const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === input.refineRun);
+export function scoreYue2Rung(ds: { id: string; slug: string }, input: { refineRun: string; step: number; likeness?: number | null; corruption?: number | null; notes?: string },
+  /** A run held elsewhere (a training worker): its record and previews, fetched by the caller. */
+  remote?: { run: Yue2AitkRunRecord; previews: Yue2JointPreviewRecord[] }): Yue2RungScore {
+  const run = remote ? remote.run : listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === input.refineRun);
   if (!run) throw new Error('Unknown refinement run');
   const ckpt = run.checkpoints.find(c => c.step === input.step);
   if (!ckpt) throw new Error(`No checkpoint at step ${input.step}`);
@@ -69,7 +71,7 @@ export function scoreYue2Rung(ds: { id: string; slug: string }, input: { refineR
     adapterType: o.adapterType, lokrDim: o.lokrDim, lokrFactor: o.lokrFactor, alpha: o.alpha, captionDropout: o.captionDropout, steps: o.steps, saveEvery: o.saveEvery,
     method: o.method, gradAccum: o.gradAccum, calibration: o.calibration,
   };
-  const previews = listYue2JointPreviews(run.output).filter(p => p.step === input.step)
+  const previews = (remote ? remote.previews : listYue2JointPreviews(run.output)).filter(p => p.step === input.step)
     .map(p => ({ id: p.id, kind: p.kind, seed: p.seed, seconds: p.seconds, status: p.status, endReason: p.endReason, verdict: p.score?.verdict, file: p.file,
       // Legibility counts ride along so the ear score and the plan's features
       // sit in one row, whatever later happens to the run folder.
@@ -109,8 +111,10 @@ export function getYue2AlbumScore(refineRun: string): Yue2AlbumScore | null {
     score: r.score as number | null, notes: (r.notes as string) ?? '', updatedAt: r.updated_at as string } : null;
 }
 
-export function scoreYue2Album(ds: { id: string; slug: string }, input: { refineRun: string; score?: number | null; notes?: string }): Yue2AlbumScore {
-  if (!listYue2AitkRuns(ds.id, ds.slug).some(r => r.jobId === input.refineRun)) throw new Error('Unknown run for this dataset');
+export function scoreYue2Album(ds: { id: string; slug: string }, input: { refineRun: string; score?: number | null; notes?: string },
+  /** The caller has checked the run exists (on a training worker). */
+  remoteRun = false): Yue2AlbumScore {
+  if (!remoteRun && !listYue2AitkRuns(ds.id, ds.slug).some(r => r.jobId === input.refineRun)) throw new Error('Unknown run for this dataset');
   const prior = getYue2AlbumScore(input.refineRun);
   const n = Number(input.score);
   const score = input.score === undefined ? (prior?.score ?? null) : Number.isInteger(n) && n >= 1 && n <= 5 ? n : null;
@@ -119,4 +123,20 @@ export function scoreYue2Album(ds: { id: string; slug: string }, input: { refine
     ON CONFLICT(refine_run) DO UPDATE SET score = excluded.score, notes = excluded.notes, updated_at = datetime('now')`)
     .run(input.refineRun, ds.id, ds.slug, score, notes);
   return getYue2AlbumScore(input.refineRun)!;
+}
+
+/** Rows scored on a training worker before scores were kept here: inserted
+ *  as they are, never over a row this machine already holds. */
+export function importYue2RungScores(rows: Yue2RungScore[]): number {
+  const db = getDb();
+  const ins = db.prepare(`INSERT INTO yue2_rung_scores (dataset_id, dataset_slug, source_run, refine_run, checkpoint_dir, step, kl, recon, drift, rung, frozen, settings, previews, metrics, likeness, corruption, notes, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(checkpoint_dir) DO NOTHING`);
+  let n = 0;
+  for (const r of rows) {
+    if (!r?.checkpointDir || !r.refineRun) continue;
+    n += ins.run(r.datasetId, r.datasetSlug, r.sourceRun ?? '', r.refineRun, r.checkpointDir, r.step, r.kl ?? null, r.recon ?? null, r.drift ?? null, r.rung ? 1 : 0, r.frozen ? 1 : 0,
+      JSON.stringify(r.settings ?? {}), JSON.stringify(r.previews ?? []), JSON.stringify(r.metrics ?? {}), r.likeness ?? null, r.corruption ?? null, r.notes ?? '',
+      r.createdAt ?? null, r.updatedAt ?? null).changes;
+  }
+  return n;
 }

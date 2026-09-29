@@ -25,6 +25,9 @@ import { readYue2Linked, refreshYue2PresetsForJointCheckpoint } from './lyricStu
 import { latestGenerationLyrics, PUSHED_PREVIEW_LYRICS } from './yue2JointTrainRunner.js';
 import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
 import type { TrainingDatasetRow } from './types.js';
+import { getYue2AlbumScore, importYue2RungScores, listYue2RungScores, scoreYue2Album, scoreYue2Rung, type Yue2RungScore } from './yue2RungScores.js';
+import type { Yue2AitkRunRecord } from './yue2AitkRuns.js';
+import type { Yue2JointPreviewRecord } from './yue2JointPreview.js';
 
 export const TOKEN_HEADER = 'x-hotstep-worker-token';
 const LABELS_PREFIX = '__labels/';
@@ -356,6 +359,12 @@ export async function proxyToWorker(req: Request, res: Response): Promise<void> 
   const w = getWorker(req.params.name as string);
   if (!w) { res.status(404).json({ error: `No training worker named ${req.params.name}` }); return; }
   if (!req.url.startsWith('/training/')) { res.status(403).json({ error: 'Only training routes are forwarded to a worker' }); return; }
+  const score = /^\/training\/datasets\/([^/?]+)\/(yue2-rung-scores|yue2-album-score)(?:\?|$)/.exec(req.url);
+  if (score && repo.getDataset(decodeURIComponent(score[1]))) {
+    try { await scoreHere(w, req, res, decodeURIComponent(score[1]), score[2] as 'yue2-rung-scores' | 'yue2-album-score'); }
+    catch (err: any) { if (!res.headersSent) res.status(err?.status ?? 400).json({ error: err?.message || String(err) }); }
+    return;
+  }
   const ac = new AbortController();
   res.on('close', () => ac.abort());
   const headers: Record<string, string> = {};
@@ -383,4 +392,57 @@ export async function proxyToWorker(req: Request, res: Response): Promise<void> 
   }
   if (!r.body) { res.end(); return; }
   Readable.fromWeb(r.body as any).on('error', () => res.destroy()).pipe(res);
+}
+
+// Scores stay on this machine: the listener scores here, and the calibration
+// report reads this database. A worker's run facts (its record and previews)
+// are fetched to fill the row, and each write is also sent on to the worker,
+// whose Review page and Finish scored read its own copy. Worker datasets carry
+// this machine's ids, so the same dataset id works on both.
+
+async function readJsonBody(req: Request): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  for await (const c of req) chunks.push(typeof c === 'string' ? Buffer.from(c) : c);
+  const text = Buffer.concat(chunks).toString('utf8');
+  return text ? JSON.parse(text) : {};
+}
+
+async function scoreHere(w: WorkerInfo, req: Request, res: Response, datasetId: string, kind: 'yue2-rung-scores' | 'yue2-album-score'): Promise<void> {
+  const ds = repo.getDataset(datasetId)!;
+  const base = `/api/training/datasets/${encodeURIComponent(datasetId)}`;
+  const run = typeof req.query.run === 'string' ? req.query.run : undefined;
+  if (req.method === 'GET') {
+    if (kind === 'yue2-album-score') { res.json({ score: run ? getYue2AlbumScore(run) : null }); return; }
+    // Anything the worker scored before scores lived here comes across once.
+    try {
+      const theirs = await workerJson<{ scores: Yue2RungScore[] }>(w, `${base}/yue2-rung-scores${run ? `?run=${encodeURIComponent(run)}` : ''}`, { signal: AbortSignal.timeout(8000) });
+      importYue2RungScores(theirs.scores ?? []);
+    } catch { /* worker offline: this machine's scores are the ones that count */ }
+    res.json({ scores: listYue2RungScores(ds.id, run) });
+    return;
+  }
+  if (req.method !== 'PUT') { res.status(405).json({ error: 'Method not allowed' }); return; }
+  const b = await readJsonBody(req);
+  if (typeof b.refineRun !== 'string') { res.status(400).json({ error: 'refineRun is required' }); return; }
+  const { runs } = await workerJson<{ runs: Yue2AitkRunRecord[] }>(w, `${base}/yue2-joint-runs`);
+  const record = runs.find(r => r.jobId === b.refineRun);
+  if (!record) { res.status(400).json({ error: `Unknown run on ${w.name}` }); return; }
+  let stored: unknown;
+  if (kind === 'yue2-album-score') {
+    stored = scoreYue2Album({ id: ds.id, slug: ds.slug }, { refineRun: b.refineRun,
+      ...(b.score !== undefined ? { score: b.score === null ? null : Number(b.score) } : {}),
+      ...(typeof b.notes === 'string' ? { notes: b.notes } : {}) }, true);
+  } else {
+    if (!Number.isInteger(Number(b.step))) { res.status(400).json({ error: 'step is required' }); return; }
+    const { previews } = await workerJson<{ previews: Yue2JointPreviewRecord[] }>(w, `${base}/yue2-joint-previews?run=${encodeURIComponent(b.refineRun)}`);
+    stored = scoreYue2Rung({ id: ds.id, slug: ds.slug }, { refineRun: b.refineRun, step: Number(b.step),
+      ...(b.likeness !== undefined ? { likeness: b.likeness === null ? null : Number(b.likeness) } : {}),
+      ...(b.corruption !== undefined ? { corruption: b.corruption === null ? null : Number(b.corruption) } : {}),
+      ...(typeof b.notes === 'string' ? { notes: b.notes } : {}) }, { run: record, previews: previews ?? [] });
+  }
+  res.json({ score: stored });
+  // The worker's copy, for its own Review page and Finish scored. A worker
+  // too old for the album score answers 404; this machine's copy stands.
+  workerJson(w, `${base}/${kind}`, jsonInit('PUT', b))
+    .catch(err => console.warn(`[Workers] ${w.name} did not take the ${kind} write: ${err?.message || err}`));
 }

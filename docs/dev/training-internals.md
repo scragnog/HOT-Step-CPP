@@ -173,6 +173,15 @@ to `<training dir>/datasets/<slug>/train-logs/<jobId>-<segment>.jsonl`, and
 the profile reads once the cache is gone. The report takes the album score as a
 target and reads archived loss logs.
 
+Scores for a run on a training worker are kept on the controlling machine:
+`proxyToWorker` answers `/datasets/:id/yue2-rung-scores` and `/yue2-album-score`
+itself (`scoreHere` in `trainingWorkers.ts`). A write fetches the run record and
+previews from the worker, stores the row here, then forwards the same PUT to the
+worker so its Review page and Finish scored still see it. A read first imports any
+worker rows missing here (`importYue2RungScores`, never overwriting). Worker
+datasets carry the controller's dataset ids, which is what makes this work. The
+worker's loss-log archive and sheet snapshot still stay on the worker.
+
 `server/src/services/training/datasetProfile.ts` measures a dataset and saves
 `<training dir>/datasets/<slug>/dataset-profile.json`. It reads only what
 survives a cache cleanup: the audio (one ffmpeg pass per song for EBU R128
