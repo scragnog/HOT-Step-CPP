@@ -88,6 +88,9 @@ export const TrainingWorkerBar: React.FC = () => {
           </button>
         )}
       </div>
+      {worker && <p className="text-[11px] text-zinc-500">
+        {t('trainingStudio.workers.viewHint', 'Showing the datasets on {{worker}}. To send more, switch Train on to This PC, pick them for Train multiple, and choose Run on: {{worker}}.', { worker })}
+      </p>}
       {note && <p className="text-[11px] text-zinc-500 break-words">{note}</p>}
       {dispatches.filter(d => d.running || d.items.some(i => i.status === 'failed')).map(d => (
         <div key={d.worker} className="flex flex-col gap-0.5 text-[11px] text-zinc-600 dark:text-zinc-400">
