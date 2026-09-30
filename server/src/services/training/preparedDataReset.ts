@@ -36,13 +36,22 @@ function measure(target: string): { files: number; bytes: number } {
   return { files, bytes };
 }
 
-export function listPreparedCaches(slug: string, sourceDir: string): PreparedCache[] {
+/** YuE2's core prepared data: latents, codes, lead sheets, alignment and the
+ *  prepared training sets, ~40 MiB an album that costs minutes of GPU to
+ *  rebuild (lead sheets alone ~3 min). Every clear keeps it unless asked
+ *  (2026-09-30): what goes stale is rebuilt anyway, since the prepared set is
+ *  fingerprinted and a loudness or caption change re-cuts the cache. */
+export const YUE2_CORE_CACHE = 'yue2-latents';
+export interface PreparedCacheScope { includeYue2Core?: boolean }
+
+export function listPreparedCaches(slug: string, sourceDir: string, scope: PreparedCacheScope = {}): PreparedCache[] {
   const datasetRoot = datasetDir(slug);
   const tensorRoot = tensorsRoot(slug);
   const roots = [datasetRoot, tensorRoot];
   for (const root of roots) {
     if (fs.existsSync(root) && fs.lstatSync(root).isSymbolicLink()) throw new Error(`Cache root is a link: ${root}`);
   }
+  // Every path passes the safety walk, kept or not, before the scope filter.
   return preparedCachePaths(slug).flatMap(item => {
     const target = path.resolve(item.path);
     const owner = item.name === 'ACE tensor caches' ? path.dirname(tensorRoot) : datasetRoot;
@@ -53,14 +62,16 @@ export function listPreparedCaches(slug: string, sourceDir: string): PreparedCac
     const stat = fs.lstatSync(target);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unexpected cache path: ${target}`);
     return [{ ...item, ...measure(target) }];
-  });
+  }).filter(cache => scope.includeYue2Core || cache.name !== YUE2_CORE_CACHE);
 }
 
-export function clearPreparedCaches(slug: string, sourceDir: string): PreparedCache[] {
+export function clearPreparedCaches(slug: string, sourceDir: string, scope: PreparedCacheScope = {}): PreparedCache[] {
   // Complete the safety walk before removing anything.
-  const caches = listPreparedCaches(slug, sourceDir);
-  try { snapshotYue2Sheets(slug); }
-  catch (err: any) { console.warn(`[Training] Could not keep the YuE2 lead sheets for ${slug}: ${err?.message || err}`); }
+  const caches = listPreparedCaches(slug, sourceDir, scope);
+  if (caches.some(c => c.name === YUE2_CORE_CACHE)) {
+    try { snapshotYue2Sheets(slug); }
+    catch (err: any) { console.warn(`[Training] Could not keep the YuE2 lead sheets for ${slug}: ${err?.message || err}`); }
+  }
   for (const cache of caches) fs.rmSync(cache.path, { recursive: true, force: false });
   return caches;
 }

@@ -20,8 +20,12 @@ test('prepared-data reset removes generated caches but preserves labels and sour
     fs.mkdirSync(tensor, { recursive: true });
     fs.writeFileSync(path.join(tensor, 'tensor.bin'), 'data');
     fs.writeFileSync(path.join(source, 'track.wav'), 'source');
-    assert.equal(listPreparedCaches(slug, source).length, 2);
-    assert.equal(clearPreparedCaches(slug, source).length, 2);
+    // Default: YuE2's core prepared data is kept, the rest goes.
+    assert.equal(listPreparedCaches(slug, source).length, 1);
+    assert.equal(clearPreparedCaches(slug, source).length, 1);
+    assert.equal(fs.existsSync(path.join(root, 'yue2-latents', 'codes', 'track.codes')), true);
+    // Asked for: the core goes too.
+    assert.equal(clearPreparedCaches(slug, source, { includeYue2Core: true }).length, 1);
     assert.equal(fs.existsSync(path.join(root, 'yue2-latents')), false);
     assert.equal(fs.existsSync(tensor), false);
     assert.equal(fs.existsSync(path.join(root, 'labels', 'edited.json')), true);

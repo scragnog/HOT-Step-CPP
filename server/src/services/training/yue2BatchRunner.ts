@@ -363,6 +363,8 @@ async function runItem(state: BatchState, item: Yue2BatchItem): Promise<void> {
       const ds = repo.getDataset(item.datasetId);
       if (!ds) throw new Error('Dataset not found');
       // YuE2 caches only: this dataset's ACE and MM3 caches belong to other backends.
+      // The core (latents, codes, lead sheets, prepared set) is kept: stale
+      // parts are rebuilt by the stages' own checks, so this clears the stems.
       for (const cache of listPreparedCaches(ds.slug, ds.sourceDir)) {
         if (cache.name.startsWith('yue2-')) fs.rmSync(cache.path, { recursive: true, force: false });
       }

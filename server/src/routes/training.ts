@@ -143,7 +143,7 @@ import {
 import { YUE2_LICENSE_NOTICE } from '../services/backends/yue2/index.js';
 import { yue2StyleString } from '../services/backends/yue2/style.js';
 import { jointRunForAdapter, listYue2AitkRuns, yue2JointOutputDirectory, deleteYue2AitkRun, yue2ReviewComplete, setYue2ReviewComplete, yue2RunFinished } from '../services/training/yue2AitkRuns.js';
-import { clearPreparedCaches, listPreparedCaches } from '../services/training/preparedDataReset.js';
+import { clearPreparedCaches, listPreparedCaches, YUE2_CORE_CACHE } from '../services/training/preparedDataReset.js';
 import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
 import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions, renderYue2JointPreview } from '../services/training/yue2JointPreview.js';
 import { runOnGpuLane } from '../services/generation/gpuLane.js';
@@ -974,7 +974,9 @@ router.get('/datasets/:id/prepared-data', (req: Request, res: Response) => {
   try {
     const ds = repo.getDataset(req.params.id as string);
     if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
-    res.json({ slug: ds.slug, caches: listPreparedCaches(ds.slug, ds.sourceDir), busy: !!queue.activeJobForDataset(ds.id) || hasActivePipeline() });
+    // Everything, with `core` marking YuE2's kept-by-default data, so the card can show both parts.
+    const caches = listPreparedCaches(ds.slug, ds.sourceDir, { includeYue2Core: true }).map(c => ({ ...c, core: c.name === YUE2_CORE_CACHE }));
+    res.json({ slug: ds.slug, caches, busy: !!queue.activeJobForDataset(ds.id) || hasActivePipeline() });
   } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
 
@@ -986,7 +988,7 @@ router.delete('/datasets/:id/prepared-data', (req: Request, res: Response) => {
     if (queue.activeJobForDataset(ds.id) || hasActivePipeline()) {
       res.status(409).json({ error: 'A job or pipeline is queued or running for this dataset.' }); return;
     }
-    const cleared = clearPreparedCaches(ds.slug, ds.sourceDir);
+    const cleared = clearPreparedCaches(ds.slug, ds.sourceDir, { includeYue2Core: req.body?.includeYue2Core === true });
     console.log(`[Training] Cleared prepared caches for ${ds.slug}: ${cleared.map(c => c.name).join(', ') || 'none'}`);
     res.json({ cleared });
   } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }

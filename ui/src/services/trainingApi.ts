@@ -2516,13 +2516,14 @@ export async function listYue2AitkRuns(
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs`);
 }
 
-export interface PreparedCache { name: string; path: string; files: number; bytes: number }
+/** `core`: YuE2's latents, codes, lead sheets and prepared set, kept by every clear unless asked. */
+export interface PreparedCache { name: string; path: string; files: number; bytes: number; core?: boolean }
 export async function getPreparedData(id: string): Promise<{ slug: string; caches: PreparedCache[]; busy: boolean }> {
   return request(`/datasets/${encodeURIComponent(id)}/prepared-data`);
 }
-export async function clearPreparedData(id: string, slug: string): Promise<{ cleared: PreparedCache[] }> {
+export async function clearPreparedData(id: string, slug: string, includeYue2Core = false): Promise<{ cleared: PreparedCache[] }> {
   return request(`/datasets/${encodeURIComponent(id)}/prepared-data`,
-    { method: 'DELETE', ...jsonBody({ confirm: slug }) });
+    { method: 'DELETE', ...jsonBody({ confirm: slug, includeYue2Core }) });
 }
 
 /** Link a saved joint checkpoint's AR/NAR pair to this dataset's album preset. */

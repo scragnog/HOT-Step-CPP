@@ -191,7 +191,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
     return a.step - b.step;
   });
   const items: Array<{ key: keyof Yue2CleanupChoice; label: string; item?: { count: number; bytes: number; detail?: string[] } }> = cleanup ? [
-    { key: 'caches', label: t('trainingStudio.refine.cleanCaches', 'Prepared data and caches for this dataset (latents, codes, lead sheets, alignment, stems, MM3 and ACE caches)'), item: cleanup.plan.caches },
+    { key: 'caches', label: t('trainingStudio.refine.cleanCaches', 'Vocal stems and other backends\' caches (MM3, ACE) for this dataset. The YuE2 latents, codes, lead sheets and prepared set are kept: small, and slow to rebuild'), item: cleanup.plan.caches },
     { key: 'otherCheckpoints', label: t('trainingStudio.refine.cleanCheckpoints', 'The other checkpoints in this run'), item: cleanup.plan.otherCheckpoints },
     { key: 'otherRuns', label: t('trainingStudio.refine.cleanRuns', 'All other joint runs for this dataset'), item: cleanup.plan.otherRuns },
     { key: 'resume', label: t('trainingStudio.refine.cleanResume', 'This rung\'s resume file (the adapter files stay)'), item: cleanup.plan.resume },

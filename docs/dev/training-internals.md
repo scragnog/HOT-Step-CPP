@@ -178,7 +178,9 @@ Evidence kept for fitting: `yue2_album_scores` holds one 1-5 verdict per run, pl
 `deleteYue2AitkRun` and the rung-pick cleanup copy each segment's `train.jsonl`
 to `<training dir>/datasets/<slug>/train-logs/<jobId>-<segment>.jsonl`, and
 `clearPreparedCaches` saves the lead sheets to `yue2-sheets.json` first, which
-the profile reads once the cache is gone. The report takes the album score as a
+the profile reads once the cache is gone. Since 2026-09-30 every clear (rung-pick cleanup, the batch's clear-cache
+option, the card) keeps `yue2-latents` (`YUE2_CORE_CACHE`: latents, codes, sheets, alignment, prepared sets) unless
+`includeYue2Core` is passed, which only the card's opt-in toggle does; stale data is rebuilt by the stages' own checks. The report takes the album score as a
 target and reads archived loss logs.
 
 Scores for a run on a training worker are kept on the controlling machine:
