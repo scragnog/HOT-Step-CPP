@@ -632,9 +632,12 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     const timer = running ? window.setInterval(refresh, 5000) : undefined;
     return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer); };
   }, [datasetId, job?.id, job?.status, ladderNonce]);
-  // The ladder shown under the run: the run this card's job made, else the
-  // live one, else the newest. Its previews are fetched for that run.
-  const ladderRunRec = aitkRuns.find(r => r.jobId === job?.id) ?? aitkRuns.find(r => r.live) ?? [...aitkRuns].sort((a, b) => b.createdAt - a.createdAt)[0];
+  // The ladder shown under the run: the run picked (on the Review page or in
+  // the ladder's run list), else the run this card's job made, else the live
+  // one, else the newest. Its previews are fetched for that run.
+  const pickedLadderRun = useTrainingStore(s => s.refineLadderRun);
+  const setPickedLadderRun = useTrainingStore(s => s.setRefineLadderRun);
+  const ladderRunRec = aitkRuns.find(r => r.jobId === pickedLadderRun) ?? aitkRuns.find(r => r.jobId === job?.id) ?? aitkRuns.find(r => r.live) ?? [...aitkRuns].sort((a, b) => b.createdAt - a.createdAt)[0];
   const ladderRunId = ladderRunRec?.jobId;
 
   useEffect(() => {
@@ -941,6 +944,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         ...(form.resume?.trim() && !resumeChoice ? { resume: form.resume.trim() } : {}),
         ...selectedResume };
       const result = await startYue2JointTrain(datasetId, request);
+      // A new run takes the ladder over from whatever was picked before.
+      setPickedLadderRun('');
       if (typeof window !== 'undefined') window.localStorage.setItem(`${JOB_KEY}${datasetId}`, JSON.stringify(result.jobId));
       setJob(await getJob(result.jobId));
       return result.jobId;
@@ -1552,6 +1557,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       </details>}
       {ladderRunRec && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
         <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.ladderTitle', 'Checkpoint ladder')} · {new Date(ladderRunRec.createdAt).toLocaleString()}{ladderRunRec.live ? ` · ${t('trainingStudio.yue2.method.ladderLive', 'training')}` : ''}</p>
+        {aitkRuns.length > 1 && <div className="mt-2 flex flex-col gap-1 max-w-md">
+          <ParamLabel label={t('trainingStudio.yue2.method.ladderRun', 'Run')}
+            className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+            info={t('trainingStudio.yue2.method.ladderRunInfo', 'This dataset has more than one joint run. Pick which run\'s ladder to listen to and score. Each run keeps its own scores.')} />
+          <StyledSelect accent="amber" className="w-full" value={ladderRunRec.jobId} onChange={setPickedLadderRun}
+            options={[...aitkRuns].sort((a, b) => b.createdAt - a.createdAt).map(r => ({ value: r.jobId,
+              label: `${new Date(r.createdAt).toLocaleString()} · ${r.live ? t('trainingStudio.yue2.method.ladderLive', 'training') : r.status} · ${r.checkpoints.filter(c => c.arPath && c.narPath).length} ${t('trainingStudio.yue2.method.ladderRungs', 'rungs')}` }))} />
+        </div>}
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.ladderHint', 'Every saved checkpoint is a rung. Previews render while the run trains (one 300 s draft take on the dataset\'s first sung track); a rung with none yet says so, and Render adds a take. Score likeness and corruption 1-5, then press Use this rung on your pick: it becomes the dataset\'s adapter and you can clean up the rest. Scores also feed the Review page and "Finish scored" for batches.')}</p>
         <Yue2LadderReview datasetId={datasetId} datasetName={datasets.find(d => d.id === datasetId)?.name} run={ladderRunRec} previews={jointPreviews}
           renderOpts={{ seconds: form.preview?.seconds ?? 300, takes: 1, draft: (form.preview?.odeSteps ?? 12) > 0 && (form.preview?.odeSteps ?? 12) < 32 }}

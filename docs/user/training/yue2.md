@@ -130,7 +130,7 @@ Score each rung 1-5 on likeness and corruption and leave notes. The floating sco
 
 Above the rungs, **How well did this album train?** takes one 1-5 score for the whole run, with notes. Score it against your other albums, not against this run's rungs: most rungs end up at likeness 5, so the rung scores show how fast an album trains but not how well, and this score is what Dataset-Calibrated Training learns the difference from. The cleanup keeps what that learning needs: the run's loss log is copied into the dataset's `train-logs` folder when a rung is chosen or a run is deleted, and the lead sheets are saved as `yue2-sheets.json` before the prepared caches are cleared.
 
-Batches score the same way: a finished run's ladder appears on the **Review** page as soon as it has previews, with how many rungs are still unscored. Click a row to open its ladder on the Train page. Once a ladder has a scored rung, **Finish scored** links the best-scored rung and cleans up, for every ladder you tick, in one server-side batch.
+Batches score the same way: a finished run's ladder appears on the **Review** page as soon as it has previews, with how many rungs are still unscored. Click a row to open that run's ladder on the Train page. When a dataset has more than one run (a cancelled one and a retrain, say), a **Run** list above the ladder switches between them. Once a ladder has a scored rung, **Finish scored** links the best-scored rung and cleans up, for every ladder you tick, in one server-side batch.
 
 The ear test that set the recipe scored 5 on every quality criterion at every rung, so the pick there was the last rung; on other albums, listen for the point where likeness stops improving.
 
