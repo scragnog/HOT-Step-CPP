@@ -132,7 +132,7 @@ export const TrackSelector: React.FC<TrackSelectorProps> = ({
             meta={t('stem.separationLevelMeta')}
             className="text-sm font-semibold text-[#d4d4d4]"
             underline
-            onReset={sepLevel !== 1 ? () => onSepLevelChange(1 as SeparationLevel) : undefined}
+            onReset={sepLevel !== 1 && !isExtracting ? () => onSepLevelChange(1 as SeparationLevel) : undefined}
           />
           <StyledSelect
             accent="purple"
