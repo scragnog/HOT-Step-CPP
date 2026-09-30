@@ -94,6 +94,11 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
     return Number.isFinite(n) ? n : fallback;
   };
 
+  const onReset = <K extends keyof PreprocessFormState>(key: K) =>
+    (!disabled && value[key] !== PREPROCESS_DEFAULTS[key])
+      ? () => onChange({ [key]: PREPROCESS_DEFAULTS[key] } as Partial<PreprocessFormState>)
+      : undefined;
+
   /** BF16 bases carry the "training ready" note; everything else is bare. */
   const modelOptions = (names: string[], current: string) => [
     ...(current === '' ? [{ value: '', label: '—' }] : []),
@@ -168,6 +173,7 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
             label={t('trainingStudio.preprocess.maxDuration')}
             meta={t('trainingStudio.preprocess.maxDurationMeta')}
             info={t('trainingStudio.preprocess.maxDurationInfo')}
+            onReset={onReset('maxDuration')}
           />
           <input
             type="number"
@@ -193,6 +199,7 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
               label={t('trainingStudio.preprocess.normalize')}
               meta={t('trainingStudio.preprocess.normalizeMeta')}
               info={t('trainingStudio.preprocess.normalizeInfo')}
+              onReset={onReset('normalize')}
             />
             <StyledSelect
               accent="amber"
@@ -212,6 +219,7 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
               label={t('trainingStudio.preprocess.targetDb')}
               meta={t('trainingStudio.preprocess.targetDbMeta')}
               info={t('trainingStudio.preprocess.targetDbInfo')}
+              onReset={!disabled && value.normalize !== 'none' ? onReset('targetDb') : undefined}
             />
             <input
               type="number"
@@ -231,6 +239,7 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
               label={t('trainingStudio.preprocess.dtype')}
               meta={t('trainingStudio.preprocess.dtypeMeta')}
               info={t('trainingStudio.preprocess.dtypeInfo')}
+              onReset={onReset('dtype')}
             />
             <StyledSelect
               accent="amber"
@@ -250,6 +259,7 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
               label={t('trainingStudio.preprocess.compat')}
               meta={t('trainingStudio.preprocess.compatMeta')}
               info={t('trainingStudio.preprocess.compatInfo')}
+              onReset={onReset('compat')}
             />
             <StyledSelect
               accent="amber"
@@ -269,6 +279,7 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
               label={t('trainingStudio.preprocess.maxCaptionTokens')}
               meta={t('trainingStudio.preprocess.maxCaptionTokensMeta')}
               info={t('trainingStudio.preprocess.maxCaptionTokensInfo')}
+              onReset={onReset('maxCaptionTokens')}
             />
             <input
               type="number"
@@ -288,6 +299,7 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
               label={t('trainingStudio.preprocess.maxLyricTokens')}
               meta={t('trainingStudio.preprocess.maxLyricTokensMeta')}
               info={t('trainingStudio.preprocess.maxLyricTokensInfo')}
+              onReset={onReset('maxLyricTokens')}
             />
             <input
               type="number"
@@ -307,6 +319,7 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
               label={t('trainingStudio.preprocess.vaeChunk')}
               meta={t('trainingStudio.preprocess.vaeChunkMeta')}
               info={t('trainingStudio.preprocess.vaeChunkInfo')}
+              onReset={onReset('vaeChunk')}
             />
             <input
               type="number"
@@ -325,6 +338,7 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
               label={t('trainingStudio.preprocess.vaeOverlap')}
               meta={t('trainingStudio.preprocess.vaeOverlapMeta')}
               info={t('trainingStudio.preprocess.vaeOverlapInfo')}
+              onReset={onReset('vaeOverlap')}
             />
             <input
               type="number"
@@ -346,6 +360,7 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
             onChange={(v) => onChange({ overwrite: v })}
             label={t('trainingStudio.preprocess.overwrite')}
             info={t('trainingStudio.preprocess.overwriteInfo')}
+            defaultValue={PREPROCESS_DEFAULTS.overwrite}
           />
 
           <Toggle
@@ -355,6 +370,7 @@ export const PreprocessOptionsForm: React.FC<Props> = ({ capabilities, value, on
             onChange={(v) => onChange({ stopEngine: v })}
             label={t('trainingStudio.preprocess.stopEngine')}
             info={t('trainingStudio.preprocess.stopEngineInfo')}
+            defaultValue={PREPROCESS_DEFAULTS.stopEngine}
           />
         </div>
       </details>

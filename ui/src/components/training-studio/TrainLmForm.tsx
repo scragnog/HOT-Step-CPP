@@ -379,16 +379,21 @@ export const TrainLmForm: React.FC<Props> = ({
     });
   };
 
+  const D = TRAIN_LM_DEFAULTS;
+  const onReset = <K extends keyof TrainLmFormState>(key: K) =>
+    (!lock && value[key] !== D[key]) ? () => onChange({ [key]: D[key] } as Partial<TrainLmFormState>) : undefined;
+
   /** Field label + hover explanation. `key` is the i18n suffix under
    *  trainingStudio.train.*; the explanation is that key + "Info", so the two
    *  can never drift apart. `meta` is the default/range line — numbers only,
    *  which is why it is not a translated string. */
-  const P = (key: string, meta?: string, className = LABEL) => (
+  const P = (key: string, meta?: string, opts?: { className?: string; onReset?: () => void }) => (
     <ParamLabel
       label={t(`trainingStudio.train.${key}`)}
       info={t(`trainingStudio.train.${key}Info`)}
       meta={meta}
-      className={className}
+      className={opts?.className ?? LABEL}
+      onReset={opts?.onReset}
     />
   );
 
@@ -396,7 +401,9 @@ export const TrainLmForm: React.FC<Props> = ({
     <div className="flex flex-col gap-4">
       {/* ── Base size ─────────────────────────────────────────────────── */}
       <div className="flex flex-col gap-1.5">
-        {P('baseSize', 'Default 4B · 0.6B / 1.7B / 4B')}
+        {P('baseSize', 'Default 4B · 0.6B / 1.7B / 4B', {
+          onReset: !lock && value.lmSize !== D.lmSize ? () => onChange({ lmSize: D.lmSize, lmModel: '' }) : undefined,
+        })}
         <div className="flex items-center gap-1.5">
           {sizes.map(size => {
             const active = value.lmSize === size;
@@ -467,7 +474,7 @@ export const TrainLmForm: React.FC<Props> = ({
 
         {/* ── Target loss ─────────────────────────────────────────────── */}
         <label className="flex flex-col gap-1.5">
-          {P('targetLoss', 'Default 4.0 with the soft prompt (arm 05) · 1.5 for LoRA-only · lower rungs loop · 0 = no auto-stop')}
+          {P('targetLoss', 'Default 4.0 with the soft prompt (arm 05) · 1.5 for LoRA-only · lower rungs loop · 0 = no auto-stop', { onReset: onReset('targetLoss') })}
           <input
             type="number"
             min={0}
@@ -486,7 +493,7 @@ export const TrainLmForm: React.FC<Props> = ({
       {/* ── Max epochs ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="flex flex-col gap-1.5">
-          {P('maxEpochs', 'Default 150 · 1–200')}
+          {P('maxEpochs', 'Default 150 · 1–200', { onReset: onReset('epochs') })}
           <input
             type="number"
             min={1}
@@ -511,6 +518,7 @@ export const TrainLmForm: React.FC<Props> = ({
           label={t('trainingStudio.train.resumeFromLatest')}
           info={t('trainingStudio.train.resumeFromLatestInfo')}
           meta="Default on"
+          defaultValue={D.resumeFromLatest}
         />
         <Toggle
           accent="amber"
@@ -520,6 +528,7 @@ export const TrainLmForm: React.FC<Props> = ({
           label={t('trainingStudio.train.calibrate')}
           info={t('trainingStudio.train.calibrateInfo')}
           meta="Default off"
+          defaultValue={D.calibrate}
         />
         {value.calibrate && (
           <Toggle
@@ -531,6 +540,7 @@ export const TrainLmForm: React.FC<Props> = ({
             info={t('trainingStudio.train.calibrateRepointInfo')}
             meta="Default on"
             className="pl-6"
+            defaultValue={D.calibrateRepoint}
           />
         )}
       </div>
@@ -553,9 +563,12 @@ export const TrainLmForm: React.FC<Props> = ({
           label={t('trainingStudio.train.artistTokenOn')}
           info={t('trainingStudio.train.artistTokenOnInfo')}
           meta="Default on"
+          defaultValue={D.artistTokenOn}
         />
         <label className="flex flex-col gap-1.5">
-          {P('artistToken', 'Blank = the adapter name · letters, digits, _ -')}
+          {P('artistToken', 'Blank = the adapter name · letters, digits, _ -', {
+            onReset: !lock && value.artistToken !== D.artistToken ? () => onChange({ artistToken: D.artistToken }) : undefined,
+          })}
           <input
             type="text" maxLength={64} placeholder={value.adapterName.replace(/[^A-Za-z0-9_-]/g, '') || 'same as the adapter name'}
             value={value.artistToken} disabled={lock || !value.artistTokenOn}
@@ -565,17 +578,17 @@ export const TrainLmForm: React.FC<Props> = ({
         </label>
         <div className="grid grid-cols-3 gap-2">
           <label className="flex flex-col gap-1.5">
-            {P('artistTokenK', 'Default 32 · 1–256')}
+            {P('artistTokenK', 'Default 32 · 1–256', { onReset: onReset('artistTokenK') })}
             <input type="number" min={1} max={256} step={1} value={value.artistTokenK} disabled={lock || !value.artistTokenOn}
               onChange={(e) => onChange({ artistTokenK: num(e.target.value, 32) })} className={FIELD} />
           </label>
           <label className="flex flex-col gap-1.5">
-            {P('artistTokenLr', 'Default 0.005')}
+            {P('artistTokenLr', 'Default 0.005', { onReset: onReset('artistTokenLr') })}
             <input type="number" min={0} max={1} step={0.0005} value={value.artistTokenLr} disabled={lock || !value.artistTokenOn}
               onChange={(e) => onChange({ artistTokenLr: num(e.target.value, 0.005) })} className={FIELD} />
           </label>
           <label className="flex flex-col gap-1.5">
-            {P('prefixN', 'Default 8 · 0 = off · 0–64')}
+            {P('prefixN', 'Default 8 · 0 = off · 0–64', { onReset: onReset('prefixN') })}
             <input type="number" min={0} max={64} step={1} value={value.prefixN} disabled={lock}
               onChange={(e) => onChange({ prefixN: num(e.target.value, 0) })} className={FIELD} />
           </label>
@@ -591,7 +604,7 @@ export const TrainLmForm: React.FC<Props> = ({
           validated by ear. */}
       <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2.5">
         <label className="flex flex-col gap-1.5">
-          {P('captionDropout', 'Default 30% · 0–100 · 0 = off')}
+          {P('captionDropout', 'Default 30% · 0–100 · 0 = off', { onReset: onReset('captionDropout') })}
           <input
             type="number" min={0} max={100} step={1}
             value={Math.round(value.captionDropout * 100)}
@@ -609,11 +622,12 @@ export const TrainLmForm: React.FC<Props> = ({
           info={t('trainingStudio.train.priorPreservationInfo')}
           meta="Default on · every 3rd step"
           className="mt-1"
+          defaultValue={D.regEvery > 0}
         />
         {value.regEvery > 0 && (
           <div className="grid grid-cols-2 gap-3 pl-6">
             <label className="flex flex-col gap-1.5">
-              {P('regEvery', 'Default 3 · every Nth step, min 2')}
+              {P('regEvery', 'Default 3 · every Nth step, min 2', { onReset: onReset('regEvery') })}
               <input
                 type="number" min={2} max={50} step={1}
                 value={value.regEvery} disabled={lock}
@@ -622,7 +636,7 @@ export const TrainLmForm: React.FC<Props> = ({
               />
             </label>
             <label className="flex flex-col gap-1.5">
-              {P('regTopk', 'Default 64 · 1–256')}
+              {P('regTopk', 'Default 64 · 1–256', { onReset: onReset('regTopk') })}
               <input
                 type="number" min={1} max={256} step={1}
                 value={value.regTopk} disabled={lock}
@@ -631,7 +645,7 @@ export const TrainLmForm: React.FC<Props> = ({
               />
             </label>
             <label className="flex flex-col gap-1.5 col-span-2">
-              {P('regTeacher', 'Default cached')}
+              {P('regTeacher', 'Default cached', { onReset: onReset('regTeacher') })}
               <StyledSelect
                 accent="amber"
                 value={value.regTeacher}
@@ -661,6 +675,7 @@ export const TrainLmForm: React.FC<Props> = ({
           label={t('trainingStudio.train.lm.attnBackend')}
           info={t('trainingStudio.train.lm.attnBackendInfo')}
           meta="Default on · untick for the exact graph (bit-identical to older runs)"
+          defaultValue={D.attnBackend === 'flash'}
         />
         <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.train.lm.attnBackendHelp')}</span>
         {value.attnHeadBlock > 0 && (
@@ -693,7 +708,7 @@ export const TrainLmForm: React.FC<Props> = ({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            {P('lm.optimizer', 'Default Prodigy (auto step size) · Muon and AdamW supported')}
+            {P('lm.optimizer', 'Default Prodigy (auto step size) · Muon and AdamW supported', { onReset: onReset('optimizer') })}
             <StyledSelect
               accent="amber"
               value={value.optimizer}
@@ -710,7 +725,7 @@ export const TrainLmForm: React.FC<Props> = ({
 
           {value.optimizer === 'muon' && (
             <label className="flex flex-col gap-1.5">
-              {P('lm.muonLrScale', 'Default 20 · multiplies the LR for Muon params only')}
+              {P('lm.muonLrScale', 'Default 20 · multiplies the LR for Muon params only', { onReset: onReset('muonLrScale') })}
               <input
                 type="number" min={0.001} max={1000} step={1}
                 value={value.muonLrScale} disabled={lock}
@@ -721,7 +736,7 @@ export const TrainLmForm: React.FC<Props> = ({
           )}
 
           <div className="flex flex-col gap-1.5">
-            {P('lm.adapterType', 'Default LoRA')}
+            {P('lm.adapterType', 'Default LoRA', { onReset: method !== 'lora' && !lock ? () => pickMethod('lora') : undefined })}
             <div className="flex flex-wrap items-center gap-1.5">
               {(['lokr', 'lora', 'dora', 'hira', 'loha', 'hra'] as LmMethod[]).map(m => {
                 const active = method === m;
@@ -760,6 +775,7 @@ export const TrainLmForm: React.FC<Props> = ({
                 label={t('trainingStudio.train.lm.hotPizza')}
                 info={t('trainingStudio.train.lm.hotPizzaInfo')}
                 meta={method === 'lora' ? 'MM3 default; unheard here' : 'Plain LoRA only'}
+                defaultValue={D.hotPizza}
               />
               <Toggle
                 accent="amber"
@@ -769,6 +785,7 @@ export const TrainLmForm: React.FC<Props> = ({
                 label={t('trainingStudio.train.lm.pissa')}
                 info={t('trainingStudio.train.lm.pissaInfo')}
                 meta={method === 'lora' ? 'Default off' : 'Plain LoRA only'}
+                defaultValue={D.pissa}
               />
               <Toggle
                 accent="amber"
@@ -778,9 +795,10 @@ export const TrainLmForm: React.FC<Props> = ({
                 label={t('trainingStudio.train.rslora')}
                 info={t('trainingStudio.train.rsloraInfo')}
                 meta={method === 'hra' ? 'Not with HRA' : 'Default off'}
+                defaultValue={D.rslora}
               />
               <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-                {P('loraPlusRatio', 'Default 1 = off · paper 16 · AdamW/Prodigy only', CHECK_LABEL)}
+                {P('loraPlusRatio', 'Default 1 = off · paper 16 · AdamW/Prodigy only', { className: CHECK_LABEL, onReset: onReset('loraPlusRatio') })}
                 <input type="number" min={1} max={64} step={1} value={value.loraPlusRatio} disabled={lock}
                   onChange={(e) => onChange({ loraPlusRatio: Math.max(1, num(e.target.value, 1)) })} className={`${FIELD} w-20`} />
               </label>
@@ -789,7 +807,7 @@ export const TrainLmForm: React.FC<Props> = ({
 
           {value.adapterType === 'lokr' && (
             <label className="flex flex-col gap-1.5">
-              {P('lm.lokrDim', 'Default 128 · 4–4096 · keep alpha equal to it')}
+              {P('lm.lokrDim', 'Default 128 · 4–4096 · keep alpha equal to it', { onReset: onReset('lokrDim') })}
               <input
                 type="number" min={4} max={4096} step={1}
                 value={value.lokrDim} disabled={lock}
@@ -800,7 +818,7 @@ export const TrainLmForm: React.FC<Props> = ({
           )}
           {value.adapterType === 'lokr' && (
             <label className="flex flex-col gap-1.5">
-              {P('lm.lokrFactor', 'Default 6 · -1 or 2–64')}
+              {P('lm.lokrFactor', 'Default 6 · -1 or 2–64', { onReset: onReset('lokrFactor') })}
               <input
                 type="number" min={-1} max={64} step={1}
                 value={value.lokrFactor} disabled={lock}
@@ -812,7 +830,7 @@ export const TrainLmForm: React.FC<Props> = ({
 
           {value.adapterType === 'lora' && (
           <label className="flex flex-col gap-1.5">
-            {P('rank', 'Default 16 · 1–256')}
+            {P('rank', 'Default 16 · 1–256', { onReset: onReset('rank') })}
             <input
               type="number" min={1} max={256} step={1}
               value={value.rank} disabled={lock}
@@ -824,7 +842,7 @@ export const TrainLmForm: React.FC<Props> = ({
 
           {value.adapterType === 'lora' && (
           <label className="flex flex-col gap-1.5">
-            {P('alpha', 'Default 32 · 1–1024')}
+            {P('alpha', 'Default 32 · 1–1024', { onReset: onReset('alpha') })}
             <input
               type="number" min={1} max={1024} step={1}
               value={value.alpha} disabled={lock}
@@ -835,7 +853,7 @@ export const TrainLmForm: React.FC<Props> = ({
           )}
 
           <label className="flex flex-col gap-1.5">
-            {P('learningRate', value.optimizer === 'prodigy' ? 'Ignored under Prodigy (auto step size)' : 'Default 1e-4')}
+            {P('learningRate', value.optimizer === 'prodigy' ? 'Ignored under Prodigy (auto step size)' : 'Default 1e-4', { onReset: onReset('learningRate') })}
             <input
               type="number" min={0} max={1} step={0.00001}
               value={value.learningRate} disabled={lock}
@@ -845,7 +863,7 @@ export const TrainLmForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('gradAccum', 'Default 2 · 1–64')}
+            {P('gradAccum', 'Default 2 · 1–64', { onReset: onReset('gradAccum') })}
             <input
               type="number" min={1} max={64} step={1}
               value={value.gradAccum} disabled={lock}
@@ -855,7 +873,7 @@ export const TrainLmForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('gradClip', 'Default 1.0 · 0 = off')}
+            {P('gradClip', 'Default 1.0 · 0 = off', { onReset: onReset('gradClip') })}
             <input
               type="number" min={0} max={100} step={0.1}
               value={value.gradClip} disabled={lock}
@@ -865,7 +883,7 @@ export const TrainLmForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('warmupRatio', 'Default 0.05 · 0–0.5')}
+            {P('warmupRatio', 'Default 0.05 · 0–0.5', { onReset: onReset('warmupRatio') })}
             <input
               type="number" min={0} max={0.5} step={0.01}
               value={value.warmupRatio} disabled={lock}
@@ -875,7 +893,7 @@ export const TrainLmForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('weightDecay', 'Default 0.01 · 0–1')}
+            {P('weightDecay', 'Default 0.01 · 0–1', { onReset: onReset('weightDecay') })}
             <input
               type="number" min={0} max={1} step={0.005}
               value={value.weightDecay} disabled={lock}
@@ -885,7 +903,7 @@ export const TrainLmForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('maxLen', 'Default 0 (auto) · 0–16384 tokens')}
+            {P('maxLen', 'Default 0 (auto) · 0–16384 tokens', { onReset: onReset('maxLen') })}
             <input
               type="number" min={0} max={16384} step={64}
               value={value.maxLen} disabled={lock}
@@ -900,7 +918,7 @@ export const TrainLmForm: React.FC<Props> = ({
               flag entirely at that value, so leaving these alone reproduces
               today's run exactly. */}
           <div className="flex flex-col gap-1.5">
-            {P('weights')}
+            {P('weights', undefined, { onReset: onReset('weights') })}
             <StyledSelect
               accent="amber"
               value={value.weights}
@@ -915,7 +933,7 @@ export const TrainLmForm: React.FC<Props> = ({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            {P('bwd', 'Default outprod (LM)')}
+            {P('bwd', 'Default outprod (LM)', { onReset: onReset('bwd') })}
             <StyledSelect
               accent="amber"
               value={value.bwd}
@@ -942,7 +960,7 @@ export const TrainLmForm: React.FC<Props> = ({
           </div>
 
           <label className="flex flex-col gap-1.5">
-            {P('seed', 'Default 42')}
+            {P('seed', 'Default 42', { onReset: onReset('seed') })}
             <input
               type="number" min={0} step={1}
               value={value.seed} disabled={lock}
@@ -952,7 +970,7 @@ export const TrainLmForm: React.FC<Props> = ({
           </label>
 
           <div className="flex flex-col gap-1.5">
-            {P('order', 'Default shuffle')}
+            {P('order', 'Default shuffle', { onReset: onReset('order') })}
             <StyledSelect
               accent="amber"
               value={value.order}
@@ -966,7 +984,7 @@ export const TrainLmForm: React.FC<Props> = ({
           </div>
 
           <label className="flex flex-col gap-1.5">
-            {P('milestoneStep', 'Default 0 (off) · the best adapter is kept regardless')}
+            {P('milestoneStep', 'Default 0 (off) · the best adapter is kept regardless', { onReset: onReset('milestoneStep') })}
             <input
               type="number" min={0} max={5} step={0.05}
               value={value.milestoneStep} disabled={lock}
@@ -976,7 +994,7 @@ export const TrainLmForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('milestoneKeep', 'Default 6 · 0–64')}
+            {P('milestoneKeep', 'Default 6 · 0–64', { onReset: onReset('milestoneKeep') })}
             <input
               type="number" min={0} max={64} step={1}
               value={value.milestoneKeep} disabled={lock}
@@ -999,6 +1017,7 @@ export const TrainLmForm: React.FC<Props> = ({
                 onChange={(v) => toggleStage(stage, v)}
                 label={stage}
                 info={STAGE_INFO[stage]}
+                defaultValue={D.stages.includes(stage)}
               />
             ))}
           </div>
@@ -1011,6 +1030,7 @@ export const TrainLmForm: React.FC<Props> = ({
             label={t('trainingStudio.train.lossOnCot')}
             info={t('trainingStudio.train.lossOnCotInfo')}
             meta="Default on"
+            defaultValue={D.lossOnCot}
           />
 
           <Toggle
@@ -1021,6 +1041,7 @@ export const TrainLmForm: React.FC<Props> = ({
             label={t('trainingStudio.train.reextract')}
             info={t('trainingStudio.train.reextractInfo')}
             meta="Default off"
+            defaultValue={D.overwrite}
           />
 
           <Toggle
@@ -1031,6 +1052,7 @@ export const TrainLmForm: React.FC<Props> = ({
             label={t('trainingStudio.train.stopEngine')}
             info={t('trainingStudio.train.stopEngineInfo')}
             meta="Default on"
+            defaultValue={D.stopEngine}
           />
           <span className="text-[11px] text-zinc-500 pl-6">{t('trainingStudio.preprocess.stopEngineHelp')}</span>
         </div>

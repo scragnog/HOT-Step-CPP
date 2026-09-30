@@ -25,6 +25,10 @@ Training follows whichever generation backend is active (ACE-Step, MiniMax-Music
 10. For YuE2 only, every run's checkpoint ladder is previewed and scored on the Train page (see [YuE2 training](../training/yue2.md#picking-the-adapter)), and **Review** lists every dataset with a ladder still to score. The older **Refine** phase (KL-rung refinement of the earlier recipe) is hidden; Review still opens its ladders.
 11. Use **Import multiple…** from the dataset list to queue several source folders through label, build, and (for ACE) preprocess and train in one unattended run; the **Monitor** phase shows its progress as a queue of datasets, each with a chip per pipeline stage. This is separate from YuE2's own **Train multiple…**, which runs preparation, joint training and refinement over several already-created datasets instead.
 
+A small reset arrow appears beside a label whenever its value has moved from the default; click
+it to snap that one field back. A blank optional field (shown greyed out with its default as a
+placeholder) resets to blank rather than to a number, so it goes back to letting the server decide.
+
 ## Controls
 
 | Control | What it does |

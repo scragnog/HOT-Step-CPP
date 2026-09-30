@@ -149,8 +149,9 @@ export const AdaptersDropdown: React.FC = () => {
       {/* Simple / Advanced toggle. The mode decides whether the stack or the
           single adapter is sent (globalParamsStore isStack), so it resets like
           any other parameter; the paths and stack it hides stay stored. */}
-      <ParamLabel label="Adapter mode" rootClassName="flex"
+      <ParamLabel label={t('adapter.adapterMode', 'Adapter mode')} rootClassName="flex"
         className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider"
+        info={t('adapter.adapterModeInfo', 'Simple sends one adapter and its scale. Advanced sends the whole adapter stack, with per-adapter strengths and timestep windows.')}
         onReset={gp.advancedAdapters !== GLOBAL_PARAM_DEFAULTS.advancedAdapters ? () => gp.setAdvancedAdapters(GLOBAL_PARAM_DEFAULTS.advancedAdapters) : undefined} />
       <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
         <button

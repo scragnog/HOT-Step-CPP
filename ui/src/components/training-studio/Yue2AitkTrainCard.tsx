@@ -1021,9 +1021,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const active = job?.status === 'queued' || job?.status === 'running';
   const preparing = prepareJob?.status === 'queued' || prepareJob?.status === 'running';
   const input = 'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 disabled:opacity-50';
-  const field = (label: string, key: string, type = 'text', source: unknown = form, update?: (value: string) => void, info?: string, meta?: string) => (
+  const field = (label: string, key: string, type = 'text', source: unknown = form, update?: (value: string) => void, info?: string, meta?: string, onReset?: () => void) => (
     <label className="flex flex-col gap-1">
-      <ParamLabel label={label} info={info} meta={meta} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider" />
+      <ParamLabel label={label} info={info} meta={meta} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider" onReset={onReset} />
       <input className={input} type={type} value={String((source as Record<string, unknown>)[key] ?? '')} disabled={(!!resumeChoice && ['seed', 'device', 'rank', 'alpha', 'adapterType', 'lokrDim', 'lokrFactor', 'saveEvery', 'cursorWeight'].includes(key)) || active || starting || preparing || yue2RunAllActive}
         onChange={event => update ? update(event.target.value) : set(key as keyof Yue2JointTrainRequest, type === 'number' ? Number(event.target.value) : event.target.value as never)} />
     </label>
@@ -1376,7 +1376,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             ['arCropFrames', t('trainingStudio.yue2.method.arCropFrames', 'Planner crop (frames)'), t('trainingStudio.yue2.method.arCropInfo', 'The planner trains on only the first this-many frames of each song (25 per second) instead of the whole song. The planner backward is the largest cost of an update, so this is the biggest speed lever, but the planner then never trains on the rest of the song or its ending, and whole songs are what fixed endings and structure in this recipe. It only applies while the decoder crop is on (not 0), and a song shorter than the decoder crop still trains whole. Untested by ear. 0 or blank trains whole songs.'), 'default 0 (whole song)'],
           ] as const).map(([key, label, info, meta]) => (
             <label key={key} className="flex flex-col gap-1">
-              <ParamLabel label={label} info={info} meta={meta} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider" />
+              <ParamLabel label={label} info={info} meta={meta} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+                onReset={form[key] !== undefined && !busy ? () => set(key, undefined) : undefined} />
               <input className={`${input} placeholder:text-zinc-500`} type="number" step="any"
                 placeholder={String(key === 'warmup' ? Math.max(1, Math.round((Number(form.steps) || 0) * BASE_MATCHED_DEFAULTS.warmupFraction)) : BASE_MATCHED_DEFAULTS[key])}
                 value={form[key] ?? ''} disabled={active || starting || preparing || yue2RunAllActive}
@@ -1406,6 +1407,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           onChange={checked => setForm(previous => ({ ...previous, preview: { ...(previous.preview ?? defaultPreview(form.saveEvery)), enabled: checked } }))}
           label={t('trainingStudio.yue2.method.previewEnable', 'Render a preview at every saved checkpoint')}
           info={t('trainingStudio.yue2.method.previewManual', 'On by default: each checkpoint gets one draft take (12 decoder steps, 300 s) rendered while training continues, so the ladder is ready to score when the run ends. Off: render rungs by hand from the ladder below.')}
+          defaultValue={LADDER_PREVIEW.enabled}
         />
         {form.preview?.enabled && form.stopEngine === false && <Toggle
           accent="amber"
@@ -1416,19 +1418,29 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           onChange={checked => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, parallel: checked }, ...(checked ? { stopEngine: false } : {}) }))}
           label={t('trainingStudio.yue2.method.previewParallel', 'In parallel with training')}
           info={t('trainingStudio.yue2.method.previewParallelInfo', 'Render each checkpoint\'s preview while training continues; needs the engine up (this also turns "Stop the engine during training" off). Off: training pauses at each checkpoint, renders, and resumes, which fits a smaller card but takes longer.')}
+          defaultValue={LADDER_PREVIEW.parallel}
         />}
         {form.preview?.enabled && form.stopEngine !== false && <p className="mt-2 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.previewEngineStopped', 'The engine is stopped during training, so only the final checkpoint gets a preview automatically; render the other rungs from the ladder after the run.')}</p>}
         {form.preview?.enabled && <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
           {field(t('trainingStudio.yue2.method.previewSeconds', 'Preview seconds'), 'seconds', 'number', form.preview, value => setForm(previous => {
             const seconds = Math.max(8, Math.min(360, Number(value) || 300));
             return { ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seconds, previewMaxFrames: seconds * 25 } };
-          }), t('trainingStudio.yue2.method.previewSecondsInfo', 'How long the rendered preview sample is, from 8 to 120 seconds. Longer previews show more of the song but take longer to render at every checkpoint.'), t('trainingStudio.yue2.method.previewSecondsMeta', 'default 90'))}
+          }), t('trainingStudio.yue2.method.previewSecondsInfo', 'How long the rendered preview sample is, from 8 to 120 seconds. Longer previews show more of the song but take longer to render at every checkpoint.'), t('trainingStudio.yue2.method.previewSecondsMeta', 'default 90'),
+            !busy && form.preview.seconds !== LADDER_PREVIEW.seconds
+              ? () => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seconds: LADDER_PREVIEW.seconds, previewMaxFrames: LADDER_PREVIEW.seconds * 25 } }))
+              : undefined)}
           {field(t('trainingStudio.yue2.method.previewSeed', 'Preview seed'), 'seed', 'number', form.preview, value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: Number(value) } })),
-            t('trainingStudio.yue2.method.previewSeedInfo', 'The random seed used for every preview render, so previews across checkpoints are directly comparable rather than each landing on a different random take.'), t('trainingStudio.yue2.method.previewSeedMeta', 'default 424242'))}
+            t('trainingStudio.yue2.method.previewSeedInfo', 'The random seed used for every preview render, so previews across checkpoints are directly comparable rather than each landing on a different random take.'), t('trainingStudio.yue2.method.previewSeedMeta', 'default 424242'),
+            !busy && form.preview.seed !== LADDER_PREVIEW.seed
+              ? () => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: LADDER_PREVIEW.seed } }))
+              : undefined)}
           <label className="flex flex-col gap-1 md:col-span-2">
             <ParamLabel label={t('trainingStudio.yue2.method.previewLyrics', 'Preview lyrics')}
               className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
-              info={t('trainingStudio.yue2.method.previewLyricsInfo', 'Lyric Studio generation: the newest lyrics generated for this dataset\'s artist in Lyric Studio, so each rung sings a song it never trained on. Falls back to the dataset\'s lyrics when there are none. Dataset lyrics: the first sung track\'s own lyrics. Either way the caption comes from the dataset, because that is what training saw, and every rung of a run uses the same words.')} />
+              info={t('trainingStudio.yue2.method.previewLyricsInfo', 'Lyric Studio generation: the newest lyrics generated for this dataset\'s artist in Lyric Studio, so each rung sings a song it never trained on. Falls back to the dataset\'s lyrics when there are none. Dataset lyrics: the first sung track\'s own lyrics. Either way the caption comes from the dataset, because that is what training saw, and every rung of a run uses the same words.')}
+              onReset={!busy && form.preview.lyricsSource !== undefined
+                ? () => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, lyricsSource: undefined } }))
+                : undefined} />
             <StyledSelect
               accent="amber"
               value={form.preview.lyricsSource ?? 'generated'}
@@ -1450,6 +1462,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             onChange={checked => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, baseline: checked } }))}
             label={t('trainingStudio.yue2.method.previewBaseline', 'Include baseline')}
             info={t('trainingStudio.yue2.method.previewBaselineInfo', 'Also renders a take from the unmodified base model alongside the adapter, so you can hear what the adapter changed.')}
+            defaultValue={LADDER_PREVIEW.baseline}
           />
           <Toggle
             accent="amber"
@@ -1459,12 +1472,16 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             onChange={checked => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, control: checked } }))}
             label={t('trainingStudio.yue2.method.previewControl', 'Include control')}
             info={t('trainingStudio.yue2.method.previewControlInfo', 'Also renders a fixed reference take at every checkpoint, for a stable point of comparison as the adapter trains.')}
+            defaultValue={LADDER_PREVIEW.control}
           />
           <label className="md:col-span-2 flex flex-col gap-1">
             <ParamLabel
               label={t('trainingStudio.yue2.method.previewCaption', 'Caption override (optional)')}
               className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
               info={t('trainingStudio.yue2.method.previewCaptionInfo', 'Replaces the preview track\'s own caption for the rendered sample. Leave blank to use the track\'s caption as-is.')}
+              onReset={!busy && form.preview.caption !== undefined
+                ? () => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, caption: undefined } }))
+                : undefined}
             />
             <textarea className={`${input} min-h-16 resize-y`} value={form.preview.caption ?? ''} disabled={active || preparing || starting || yue2RunAllActive} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, caption: event.target.value } }))} />
           </label>
@@ -1473,6 +1490,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               label={t('trainingStudio.yue2.method.previewLyrics', 'Lyrics override (optional)')}
               className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
               info={t('trainingStudio.yue2.method.previewLyricsInfo', 'Replaces the preview track\'s own lyrics for the rendered sample. Leave blank to use the track\'s lyrics as-is.')}
+              onReset={!busy && form.preview.lyrics !== undefined
+                ? () => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, lyrics: undefined } }))
+                : undefined}
             />
             <textarea className={`${input} min-h-20 resize-y`} value={form.preview.lyrics ?? ''} disabled={active || preparing || starting || yue2RunAllActive} onChange={event => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, lyrics: event.target.value } }))} />
           </label>

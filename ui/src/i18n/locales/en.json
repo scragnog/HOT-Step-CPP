@@ -1859,6 +1859,8 @@
     "lm.cotCaptionInfo": "Rewrites your caption into a fuller style description before generation. Off: your caption is sent to the LM exactly as typed.",
     "lm.negativePrompt": "Negative Prompt",
     "adapter.adapterPath": "Adapter Path",
+    "adapter.adapterMode": "Adapter mode",
+    "adapter.adapterModeInfo": "Simple sends one adapter and its scale. Advanced sends the whole adapter stack, with per-adapter strengths and timestep windows.",
     "adapter.adapterFolder": "Adapter Folder",
     "adapter.clearAdapter": "Clear adapter",
     "adapter.deselectAdapter": "Deselect adapter",

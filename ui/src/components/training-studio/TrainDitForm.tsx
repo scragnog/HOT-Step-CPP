@@ -501,16 +501,29 @@ export const TrainDitForm: React.FC<Props> = ({
     }
   };
 
+  const isLokr = value.adapterType === 'lokr';
+
+  // The defaults to reset against: LoKR and LoRA/DoRA/HiRA/LoHa/HRA share the
+  // same form shape but different numbers for several fields, and
+  // TRAIN_DIT_LOKR_DEFAULTS already carries the right value for every one of
+  // them (it spreads TRAIN_DIT_DEFAULTS and overrides only where LoKR's
+  // validated recipe differs) — so resetting a field is just "write back D's
+  // copy of it", with no isLokr branching needed at the call site.
+  const D = isLokr ? TRAIN_DIT_LOKR_DEFAULTS : TRAIN_DIT_DEFAULTS;
+  const onReset = <K extends keyof TrainDitFormState>(key: K) =>
+    (!lock && value[key] !== D[key]) ? () => onChange({ [key]: D[key] } as Partial<TrainDitFormState>) : undefined;
+
   /** Field label + hover explanation. `key` is the i18n suffix under
    *  trainingStudio.train.dit.*; the explanation is that key + "Info", so the
    *  two cannot drift apart. `meta` is the default/range line — numbers only,
    *  which is why it is not a translated string. */
-  const P = (key: string, meta?: string, className = LABEL) => (
+  const P = (key: string, meta?: string, opts?: { className?: string; onReset?: () => void }) => (
     <ParamLabel
       label={t(`trainingStudio.train.dit.${key}`)}
       info={t(`trainingStudio.train.dit.${key}Info`)}
       meta={meta}
-      className={className}
+      className={opts?.className ?? LABEL}
+      onReset={opts?.onReset}
     />
   );
 
@@ -523,7 +536,6 @@ export const TrainDitForm: React.FC<Props> = ({
   // has to clear cropMin.
   const cropRangeOk = value.cropMax === 0 || value.cropMax >= value.cropMin;
   const tWindowOk = value.tMin < value.tMax;
-  const isLokr = value.adapterType === 'lokr';
   // Server range: -1 or [2,64] (§2.1). 0/1/negative-not-(-1) values are refused.
   const lokrFactorOk = value.lokrFactor === -1 || (value.lokrFactor >= 2 && value.lokrFactor <= 64);
   // The server accepts crop 0 (auto) or 128..8192 — the 2..126 band the stepper
@@ -541,7 +553,7 @@ export const TrainDitForm: React.FC<Props> = ({
           sit underneath. Measurements behind each hover text:
           docs/plans/adapter-parameterizations-roadmap.md. */}
       <div className="flex flex-col gap-1.5">
-        {P('adapterType', 'Default LoKR')}
+        {P('adapterType', 'Default LoKR', { onReset: method !== 'lokr' && !lock ? () => pickMethod('lokr') : undefined })}
         <div className="flex flex-wrap items-center gap-1.5">
           {(['lokr', 'lora', 'dora', 'hira', 'loha', 'hra'] as DitMethod[]).map(m => {
             const active = method === m;
@@ -574,6 +586,7 @@ export const TrainDitForm: React.FC<Props> = ({
               label={t('trainingStudio.train.dit.pissa')}
               info={t('trainingStudio.train.dit.pissaInfo')}
               meta={method === 'lora' ? 'Default off' : 'Plain LoRA only'}
+              defaultValue={D.pissa}
             />
             <Toggle
               accent="amber"
@@ -583,9 +596,10 @@ export const TrainDitForm: React.FC<Props> = ({
               label={t('trainingStudio.train.dit.rslora')}
               info={t('trainingStudio.train.dit.rsloraInfo')}
               meta={method === 'hra' ? 'Not with HRA' : 'Default off'}
+              defaultValue={D.rslora}
             />
             <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-              {P('loraPlusRatio', 'Default 1 = off · paper 16 · AdamW/Prodigy only', CHECK_LABEL)}
+              {P('loraPlusRatio', 'Default 1 = off · paper 16 · AdamW/Prodigy only', { className: CHECK_LABEL, onReset: onReset('loraPlusRatio') })}
               <input
                 type="number" min={1} max={64} step={1}
                 value={value.loraPlusRatio} disabled={lock}
@@ -612,7 +626,7 @@ export const TrainDitForm: React.FC<Props> = ({
 
       {/* ── Quality dial ──────────────────────────────────────────────── */}
       <div className="flex flex-col gap-1.5">
-        {P('quality', 'Default Balanced')}
+        {P('quality', 'Default Balanced', { onReset: value.quality !== 'balanced' && !lock ? () => pickQuality('balanced') : undefined })}
         <div className="flex items-center gap-1.5 flex-wrap">
           {QUALITIES.map(q => {
             const active = value.quality === q;
@@ -661,7 +675,7 @@ export const TrainDitForm: React.FC<Props> = ({
 
         {/* ── Target loss ─────────────────────────────────────────────── */}
         <label className="flex flex-col gap-1.5">
-          {P('targetLoss', 'Default 0.1 · 0 = no auto-stop')}
+          {P('targetLoss', 'Default 0.1 · 0 = no auto-stop', { onReset: onReset('targetLoss') })}
           <input
             type="number"
             min={0}
@@ -680,7 +694,7 @@ export const TrainDitForm: React.FC<Props> = ({
       {/* ── Max epochs ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="flex flex-col gap-1.5">
-          {P('maxEpochs', 'Default 500 · 1–2000')}
+          {P('maxEpochs', 'Default 500 · 1–2000', { onReset: onReset('epochs') })}
           <input
             type="number"
             min={1}
@@ -715,6 +729,7 @@ export const TrainDitForm: React.FC<Props> = ({
           label={t('trainingStudio.train.dit.resumeFromLatest')}
           info={t('trainingStudio.train.dit.resumeFromLatestInfo')}
           meta="Default on"
+          defaultValue={D.resumeFromLatest}
         />
         <Toggle
           accent="amber"
@@ -724,6 +739,7 @@ export const TrainDitForm: React.FC<Props> = ({
           label={t('trainingStudio.train.dit.calibrate')}
           info={t('trainingStudio.train.dit.calibrateInfo')}
           meta="Default off"
+          defaultValue={D.calibrate}
         />
         {value.calibrate && (
           <div className="pl-6">
@@ -735,6 +751,7 @@ export const TrainDitForm: React.FC<Props> = ({
               label={t('trainingStudio.train.dit.calibrateRepoint')}
               info={t('trainingStudio.train.dit.calibrateRepointInfo')}
               meta="Default on"
+              defaultValue={D.calibrateRepoint}
             />
           </div>
         )}
@@ -750,7 +767,7 @@ export const TrainDitForm: React.FC<Props> = ({
           {isLokr ? (
             <>
               <label className="flex flex-col gap-1.5">
-                {P('lokrDim', 'Default 512 · 4–4096')}
+                {P('lokrDim', 'Default 512 · 4–4096', { onReset: onReset('lokrDim') })}
                 <input
                   type="number" min={4} max={4096} step={1}
                   value={value.lokrDim} disabled={lock}
@@ -760,7 +777,7 @@ export const TrainDitForm: React.FC<Props> = ({
               </label>
 
               <label className="flex flex-col gap-1.5">
-                {P('lokrAlpha', 'Default 512 (= dim, 1×) · 0–8192')}
+                {P('lokrAlpha', 'Default 512 (= dim, 1×) · 0–8192', { onReset: onReset('lokrAlpha') })}
                 <input
                   type="number" min={0} max={8192} step={1}
                   value={value.lokrAlpha} disabled={lock}
@@ -770,7 +787,7 @@ export const TrainDitForm: React.FC<Props> = ({
               </label>
 
               <label className="flex flex-col gap-1.5">
-                {P('lokrFactor', 'Default 6 · -1 or 2–64')}
+                {P('lokrFactor', 'Default 6 · -1 or 2–64', { onReset: onReset('lokrFactor') })}
                 <input
                   type="number" min={-1} max={64} step={1}
                   value={value.lokrFactor} disabled={lock}
@@ -794,13 +811,14 @@ export const TrainDitForm: React.FC<Props> = ({
                   label={t('trainingStudio.train.dit.lokrDecomposeBoth')}
                   info={t('trainingStudio.train.dit.lokrDecomposeBothInfo')}
                   meta="Default on"
+                  defaultValue={D.lokrDecomposeBoth}
                 />
               </div>
             </>
           ) : (
             <>
               <label className="flex flex-col gap-1.5">
-                {P('rank', method === 'hra' ? 'Reflections · even · 2–256' : 'Default 128 · 1–256')}
+                {P('rank', method === 'hra' ? 'Reflections · even · 2–256' : 'Default 128 · 1–256', { onReset: onReset('rank') })}
                 <input
                   type="number" min={1} max={256} step={1}
                   value={value.rank} disabled={lock}
@@ -810,7 +828,7 @@ export const TrainDitForm: React.FC<Props> = ({
               </label>
 
               <label className="flex flex-col gap-1.5">
-                {P('alpha', 'Default 256 (2× at rank 128) · 1–1024')}
+                {P('alpha', 'Default 256 (2× at rank 128) · 1–1024', { onReset: onReset('alpha') })}
                 <input
                   type="number" min={1} max={1024} step={1}
                   value={value.alpha} disabled={lock}
@@ -822,7 +840,7 @@ export const TrainDitForm: React.FC<Props> = ({
           )}
 
           <label className="flex flex-col gap-1.5">
-            {P('layers', 'Default 0 (auto) · 0–64')}
+            {P('layers', 'Default 0 (auto) · 0–64', { onReset: onReset('layers') })}
             <input
               type="number" min={0} max={64} step={1}
               value={value.layers} disabled={lock}
@@ -834,7 +852,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <div className="flex flex-col gap-1.5">
-            {P('crop', 'Default Auto · 128–8192 frames when pinned')}
+            {P('crop', 'Default Auto · 128–8192 frames when pinned', { onReset: onReset('crop') })}
             <div className="flex items-center gap-1.5">
               {/* Fixed width lives on a wrapper, not on the trigger: the
                   trigger already carries w-full, and two conflicting width
@@ -879,7 +897,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </div>
 
           <label className="flex flex-col gap-1.5">
-            {P('cropMin', 'Default 375 frames (≈15 s) · 128–8192')}
+            {P('cropMin', 'Default 375 frames (≈15 s) · 128–8192', { onReset: onReset('cropMin') })}
             <input
               type="number" min={128} max={8192} step={1}
               value={value.cropMin} disabled={lock}
@@ -891,7 +909,7 @@ export const TrainDitForm: React.FC<Props> = ({
           <label className="flex flex-col gap-1.5">
             {P('cropMax', value.attnBackend === 'flash'
               ? '0 = auto — lifts to the dataset’s longest track · set a number to pin'
-              : 'Default 1250 frames (≈50 s) · 128–8192')}
+              : 'Default 1250 frames (≈50 s) · 128–8192', { onReset: onReset('cropMax') })}
             <input
               type="number" min={0} max={8192} step={1}
               value={value.cropMax} disabled={lock}
@@ -905,7 +923,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </span>
 
           <label className="flex flex-col gap-1.5">
-            {P('learningRate', value.optimizer === 'prodigy' ? 'Ignored under Prodigy (auto step size)' : isLokr ? 'LoKR default 0.01' : 'LoRA default 5e-4')}
+            {P('learningRate', value.optimizer === 'prodigy' ? 'Ignored under Prodigy (auto step size)' : isLokr ? 'LoKR default 0.01' : 'LoRA default 5e-4', { onReset: onReset('learningRate') })}
             <input
               type="number" min={0.00001} max={1} step={0.00001}
               value={value.learningRate} disabled={lock}
@@ -915,7 +933,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('gradAccum', isLokr ? 'LoKR default 20 micro-batches · 1–64' : 'LoRA default 4 micro-batches · 1–64')}
+            {P('gradAccum', isLokr ? 'LoKR default 20 micro-batches · 1–64' : 'LoRA default 4 micro-batches · 1–64', { onReset: onReset('gradAccum') })}
             <input
               type="number" min={1} max={64} step={1}
               value={value.gradAccum} disabled={lock}
@@ -925,7 +943,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('gradClip', 'Default 1.0 · 0 = off')}
+            {P('gradClip', 'Default 1.0 · 0 = off', { onReset: onReset('gradClip') })}
             <input
               type="number" min={0} max={100} step={0.1}
               value={value.gradClip} disabled={lock}
@@ -935,7 +953,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('warmupRatio', 'Default 0.05 · 0–0.5')}
+            {P('warmupRatio', 'Default 0.05 · 0–0.5', { onReset: onReset('warmupRatio') })}
             <input
               type="number" min={0} max={0.5} step={0.01}
               value={value.warmupRatio} disabled={lock}
@@ -945,7 +963,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('weightDecay', isLokr ? 'LoKR default 0.001 · 0–1' : 'LoRA default 0.01 · 0–1')}
+            {P('weightDecay', isLokr ? 'LoKR default 0.001 · 0–1' : 'LoRA default 0.01 · 0–1', { onReset: onReset('weightDecay') })}
             <input
               type="number" min={0} max={1} step={0.005}
               value={value.weightDecay} disabled={lock}
@@ -955,7 +973,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <div className="flex flex-col gap-1.5">
-            {P('lossWeighting', isLokr ? 'LoKR default none' : 'LoRA default flow_snr')}
+            {P('lossWeighting', isLokr ? 'LoKR default none' : 'LoRA default flow_snr', { onReset: onReset('lossWeighting') })}
             <StyledSelect
               accent="amber"
               value={value.lossWeighting}
@@ -969,7 +987,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </div>
 
           <label className="flex flex-col gap-1.5">
-            {P('snrGamma', 'Default 5.0 · 1–100 · flow_snr only')}
+            {P('snrGamma', 'Default 5.0 · 1–100 · flow_snr only', { onReset: onReset('snrGamma') })}
             <input
               type="number" min={1} max={100} step={0.5}
               value={value.snrGamma} disabled={lock}
@@ -979,7 +997,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('tBias', 'Default 0.5 · 0–4 · flow_snr only')}
+            {P('tBias', 'Default 0.5 · 0–4 · flow_snr only', { onReset: onReset('tBias') })}
             <input
               type="number" min={0} max={4} step={0.05}
               value={value.tBias} disabled={lock}
@@ -989,7 +1007,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('timestepMu', 'Default -0.4 · -4 to 4')}
+            {P('timestepMu', 'Default -0.4 · -4 to 4', { onReset: onReset('timestepMu') })}
             <input
               type="number" min={-4} max={4} step={0.05}
               value={value.timestepMu} disabled={lock}
@@ -999,7 +1017,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('timestepSigma', 'Default 1.0 · 0.01–4')}
+            {P('timestepSigma', 'Default 1.0 · 0.01–4', { onReset: onReset('timestepSigma') })}
             <input
               type="number" min={0.01} max={4} step={0.05}
               value={value.timestepSigma} disabled={lock}
@@ -1009,7 +1027,10 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <div className="flex flex-col gap-1.5 sm:col-span-2">
-            {P('tWindow', 'Default 0 → 1 (whole schedule)')}
+            {P('tWindow', 'Default 0 → 1 (whole schedule)', {
+              onReset: !lock && (value.tMin !== D.tMin || value.tMax !== D.tMax)
+                ? () => onChange({ tMin: D.tMin, tMax: D.tMax }) : undefined,
+            })}
             <div className="flex items-center gap-2">
               <input
                 type="number" min={0} max={1} step={0.01}
@@ -1028,7 +1049,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </div>
 
           <label className="flex flex-col gap-1.5">
-            {P('cfgRatio', 'Default 0.15 (15%) · 0–1')}
+            {P('cfgRatio', 'Default 0.15 (15%) · 0–1', { onReset: onReset('cfgRatio') })}
             <input
               type="number" min={0} max={1} step={0.05}
               value={value.cfgRatio} disabled={lock}
@@ -1038,7 +1059,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('genreRatio', 'Default 30% · 0–100')}
+            {P('genreRatio', 'Default 30% · 0–100', { onReset: onReset('genreRatio') })}
             <input
               type="number" min={0} max={100} step={1}
               value={value.genreRatio} disabled={lock}
@@ -1048,7 +1069,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('seed', 'Default 42 · 0–2147483647')}
+            {P('seed', 'Default 42 · 0–2147483647', { onReset: onReset('seed') })}
             <input
               type="number" min={0} max={2147483647} step={1}
               value={value.seed} disabled={lock}
@@ -1058,7 +1079,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <div className="flex flex-col gap-1.5">
-            {P('order', 'Default shuffle')}
+            {P('order', 'Default shuffle', { onReset: onReset('order') })}
             <StyledSelect
               accent="amber"
               value={value.order}
@@ -1072,7 +1093,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </div>
 
           <label className="flex flex-col gap-1.5">
-            {P('milestoneStep', 'Default 0 (off) · 0 = off')}
+            {P('milestoneStep', 'Default 0 (off) · 0 = off', { onReset: onReset('milestoneStep') })}
             <input
               type="number" min={0} max={5} step={0.05}
               value={value.milestoneStep} disabled={lock}
@@ -1082,7 +1103,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('milestoneKeep', 'Default 6 · 0–64')}
+            {P('milestoneKeep', 'Default 6 · 0–64', { onReset: onReset('milestoneKeep') })}
             <input
               type="number" min={0} max={64} step={1}
               value={value.milestoneKeep} disabled={lock}
@@ -1096,7 +1117,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </span>
 
           <label className="flex flex-col gap-1.5">
-            {P('vramReserve', 'Default 2048 MB · 0–16384')}
+            {P('vramReserve', 'Default 2048 MB · 0–16384', { onReset: onReset('vramReserveMb') })}
             <input
               type="number" min={0} max={16384} step={128}
               value={value.vramReserveMb} disabled={lock}
@@ -1106,7 +1127,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <div className="flex flex-col gap-1.5">
-            {P('mirror', 'Default BF16 + F32 compute · CUDA only')}
+            {P('mirror', 'Default BF16 + F32 compute · CUDA only', { onReset: onReset('mirror') })}
             <StyledSelect
               accent="amber"
               value={value.mirror}
@@ -1139,6 +1160,7 @@ export const TrainDitForm: React.FC<Props> = ({
               label={t('trainingStudio.train.dit.attnBackend')}
               info={t('trainingStudio.train.dit.attnBackendInfo')}
               meta="Default on · fused attention"
+              defaultValue={D.attnBackend === 'flash'}
             />
           </div>
 
@@ -1151,6 +1173,7 @@ export const TrainDitForm: React.FC<Props> = ({
               label={t('trainingStudio.train.dit.cropJitter')}
               info={t('trainingStudio.train.dit.cropJitterInfo')}
               meta="Experimental · off"
+              defaultValue={D.cropJitter}
             />
           </div>
 
@@ -1163,6 +1186,7 @@ export const TrainDitForm: React.FC<Props> = ({
               info={t('trainingStudio.train.dit.bwdInfo')}
               meta="Default mm (DiT)"
               className={LABEL}
+              onReset={onReset('bwd')}
             />
             <StyledSelect
               accent="amber"
@@ -1178,7 +1202,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            {P('optimizer', 'Default Prodigy (auto step size) · Muon and AdamW to compare')}
+            {P('optimizer', 'Default Prodigy (auto step size) · Muon and AdamW to compare', { onReset: onReset('optimizer') })}
             <StyledSelect
               accent="amber"
               value={value.optimizer}
@@ -1198,7 +1222,7 @@ export const TrainDitForm: React.FC<Props> = ({
               question of what it would do. */}
           {value.optimizer === 'muon' && (
             <label className="flex flex-col gap-1.5">
-              {P('muonLrScale', 'Default 20 · multiplies the LR for Muon params only')}
+              {P('muonLrScale', 'Default 20 · multiplies the LR for Muon params only', { onReset: onReset('muonLrScale') })}
               <input
                 type="number" min={0.001} max={1000} step={1}
                 value={value.muonLrScale} disabled={lock}
@@ -1209,7 +1233,7 @@ export const TrainDitForm: React.FC<Props> = ({
           )}
           {value.optimizer === 'muon' && (
             <label className="flex flex-col gap-1.5">
-              {P('muonNsSteps', 'Default 5 · Newton-Schulz iterations')}
+              {P('muonNsSteps', 'Default 5 · Newton-Schulz iterations', { onReset: onReset('muonNsSteps') })}
               <input
                 type="number" min={1} max={20} step={1}
                 value={value.muonNsSteps} disabled={lock}
@@ -1220,7 +1244,7 @@ export const TrainDitForm: React.FC<Props> = ({
           )}
 
           <label className="flex flex-col gap-1.5">
-            {P('batch', 'Default 1 (off) · 1–16')}
+            {P('batch', 'Default 1 (off) · 1–16', { onReset: onReset('batch') })}
             <input
               type="number" min={1} max={16} step={1}
               value={value.batch} disabled={lock}
@@ -1231,7 +1255,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <div className="flex flex-col gap-1.5">
-            {P('ckptSegments', 'Default Auto · Off, or 2–32 segments')}
+            {P('ckptSegments', 'Default Auto · Off, or 2–32 segments', { onReset: onReset('ckptSegments') })}
             <StyledSelect
               accent="amber"
               value={value.ckptSegments}
@@ -1265,6 +1289,7 @@ export const TrainDitForm: React.FC<Props> = ({
                 info={stage === 'train'
                   ? 'Runs the optimisation step of the pipeline.'
                   : 'Writes the PEFT adapter directory the app can load.'}
+                defaultValue={D.stages.includes(stage)}
               />
             ))}
           </div>
@@ -1277,6 +1302,7 @@ export const TrainDitForm: React.FC<Props> = ({
             label={t('trainingStudio.train.dit.targetMlp')}
             info={t('trainingStudio.train.dit.targetMlpInfo')}
             meta="Default on"
+            defaultValue={D.targetMlp}
           />
 
           <Toggle
@@ -1287,6 +1313,7 @@ export const TrainDitForm: React.FC<Props> = ({
             label={t('trainingStudio.train.dit.channelBalance')}
             info={t('trainingStudio.train.dit.channelBalanceInfo')}
             meta="Default on · needs channel_stats.json"
+            defaultValue={D.channelBalance}
           />
 
           <Toggle
@@ -1297,6 +1324,7 @@ export const TrainDitForm: React.FC<Props> = ({
             label={t('trainingStudio.train.dit.stopEngine')}
             info={t('trainingStudio.train.dit.stopEngineInfo')}
             meta="Default on"
+            defaultValue={D.stopEngine}
           />
         </div>
       </details>
