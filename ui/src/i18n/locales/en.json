@@ -787,6 +787,8 @@
     "trainingStudio.train.dit.timestepMu": "Timestep mu",
     "trainingStudio.train.dit.timestepSigma": "Timestep sigma",
     "trainingStudio.train.dit.tWindow": "Timestep window (min → max)",
+    "trainingStudio.train.dit.tMin": "Min",
+    "trainingStudio.train.dit.tMax": "Max",
     "trainingStudio.train.dit.cfgRatio": "Unconditional dropout",
     "trainingStudio.train.dit.genreRatio": "Genre conditioning (%)",
     "trainingStudio.train.dit.seed": "Seed",
