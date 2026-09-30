@@ -837,6 +837,8 @@ export interface Yue2JointPreviewRecord {
   /** Shared-sheet ladders: 'own' = this rung's plan; 'shared' = the ladder's lead sheet from sheetStep. */
   sheet?: 'own' | 'shared';
   sheetStep?: number;
+  /** 'fixed': the ladder's seed, the same on every rung; 'random': a fresh seed. */
+  seedKind?: 'fixed' | 'random';
   id: string;
   step: number;
   kind: 'artist' | 'baseline' | 'control';

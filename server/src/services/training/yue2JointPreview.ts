@@ -3,7 +3,7 @@
 // owns bounded, durable metadata and safe file resolution.
 import fs from 'fs';
 import path from 'path';
-import { randomUUID } from 'crypto';
+import { randomInt, randomUUID } from 'crypto';
 
 import type { Yue2JointPreviewOptions } from './types.js';
 import { aceClient } from '../aceClient.js';
@@ -50,6 +50,9 @@ export interface Yue2JointPreviewRecord {
    *  it; 'shared' = the ladder's shared lead sheet, planned at `sheetStep`,
    *  so only this rung's composer and decoder differ. */
   sheet?: 'own' | 'shared';
+  /** 'fixed': the ladder's seed, the same on every rung; 'random': a fresh
+   *  seed, a song no other rung rendered. Absent on older records. */
+  seedKind?: 'fixed' | 'random';
   sheetStep?: number;
   createdAt: number;
   updatedAt: number;
@@ -210,7 +213,7 @@ export async function renderYue2JointPreview(input: {
     // sheet (a batch would share one planner pass). Baseline and control are
     // single songs too.
     const detail = input.deps?.detail ?? yue2FinalDetail;
-    type Group = { kind: 'artist' | 'baseline' | 'control'; seeds: number[]; shared?: boolean };
+    type Group = { kind: 'artist' | 'baseline' | 'control'; seeds: number[]; shared?: boolean; seedKind?: 'fixed' | 'random' };
     const wanted = Math.max(1, input.options.takes ?? 1);
     const groups: Group[] = kinds.flatMap((kind): Group[] => {
       const takesMode = kind === 'artist' || (kind === 'baseline' && input.options.baselineOnly);
@@ -218,13 +221,16 @@ export async function renderYue2JointPreview(input: {
       // Shared sheet: take 1 is this rung's own plan, take 2 the ladder's
       // shared lead sheet, rendered together as one engine batch.
       if (kind === 'artist' && input.options.sharedSheet && wanted >= 2) return [{ kind, seeds: [input.options.seed, input.options.seed + 1], shared: true }];
-      const seeds = Array.from({ length: wanted }, (_, i) => input.options.seed + i);
+      // Take 1 is the ladder's fixed seed (like-for-like across rungs); the
+      // rest are fresh random seeds, a song no earlier rung has rendered.
+      const fixed = Math.min(wanted, input.options.fixedTakes ?? 1);
+      const seeds = Array.from({ length: wanted }, (_, i) => i < fixed ? input.options.seed : randomInt(1, 0x7fffffff));
       const out: Group[] = [];
       // One take per request: each renders its own re-planned lead sheet.
-      for (const seed of seeds) out.push({ kind, seeds: [seed] });
+      seeds.forEach((seed, i) => out.push({ kind, seeds: [seed], seedKind: i < fixed ? 'fixed' : 'random' }));
       return out;
     });
-    for (const { kind, seeds, shared } of groups) {
+    for (const { kind, seeds, shared, seedKind } of groups) {
       if (input.signal?.aborted) throw new Error('preview cancelled');
       const unity = { global: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1 };
       const selected: Yue2Selection = { lm: base.lm, lm_adapter: kind === 'baseline' ? [] : [
@@ -234,7 +240,7 @@ export async function renderYue2JointPreview(input: {
       await api.warm({ vae_variant: selected.vae_variant });
       const records: Yue2JointPreviewRecord[] = seeds.map(seed => ({ id: randomUUID(), step: input.step, kind, status: 'rendering',
         seconds: input.options.seconds, seed, previewMaxFrames: input.options.previewMaxFrames,
-        caption, lyrics, createdAt: started, updatedAt: Date.now() }));
+        ...(seedKind ? { seedKind } : {}), caption, lyrics, createdAt: started, updatedAt: Date.now() }));
       for (const r of records) recordYue2JointPreview(input.output, r);
       last = records[records.length - 1];
       // Artist takes: the app's auto re-plan (generate.ts). Plan with the

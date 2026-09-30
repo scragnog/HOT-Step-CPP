@@ -121,9 +121,10 @@ function snapshotPresetSettings(form: Yue2JointTrainRequest, lyricTiming: boolea
   return settings as Partial<Yue2JointTrainRequest>;
 }
 // 2026-09-27: every checkpoint of a run is a rung of its ladder, rendered in
-// parallel with training (everySteps 0 = no pauses): one 300 s draft take
+// parallel with training (everySteps 0 = no pauses): 300 s draft takes
 // (12 decoder steps), the same settings the Refine tab's ladders used.
-const LADDER_PREVIEW: Yue2JointPreviewOptions = { enabled: true, everySteps: 0, parallel: true, takes: 1, odeSteps: 12, narCacheRatio: 0, seconds: 300, seed: 424242,
+// 2026-09-30: two takes, one on the fixed seed and one on a fresh random seed.
+const LADDER_PREVIEW: Yue2JointPreviewOptions = { enabled: true, everySteps: 0, parallel: true, takes: 2, odeSteps: 12, narCacheRatio: 0, seconds: 300, seed: 424242,
   previewMaxFrames: 7500, baseline: false, control: false };
 function defaultPreview(_everySteps: number): Yue2JointPreviewOptions { return { ...LADDER_PREVIEW }; }
 const DEFAULT_FORM: Yue2JointTrainRequest = {
@@ -436,6 +437,14 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     }
     window.localStorage.setItem(`${FORM_KEY}${datasetId}`, JSON.stringify(stored));
     window.localStorage.setItem(resetAll, '1');
+  }
+  // 2026-09-30 (Rob): two takes per rung, a fixed-seed one to compare rungs
+  // like for like and a random-seed one that is a new song every rung.
+  const twoTakes = `${FORM_KEY}${datasetId}:defaults-ladder-two-takes-2026-09-30`;
+  if (typeof window !== 'undefined' && !window.localStorage.getItem(twoTakes)) {
+    stored.preview = { ...LADDER_PREVIEW, ...stored.preview, takes: 2 };
+    window.localStorage.setItem(`${FORM_KEY}${datasetId}`, JSON.stringify(stored));
+    window.localStorage.setItem(twoTakes, '1');
   }
   // Legacy is the one preset that runs the tuned recipe; anything else is base-matched.
   return { ...DEFAULT_FORM, ...stored, method: stored.method === 'tuned' ? 'tuned' : 'base-matched' };
@@ -1565,9 +1574,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             options={[...aitkRuns].sort((a, b) => b.createdAt - a.createdAt).map(r => ({ value: r.jobId,
               label: `${new Date(r.createdAt).toLocaleString()} · ${r.live ? t('trainingStudio.yue2.method.ladderLive', 'training') : r.status} · ${r.checkpoints.filter(c => c.arPath && c.narPath).length} ${t('trainingStudio.yue2.method.ladderRungs', 'rungs')}` }))} />
         </div>}
-        <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.ladderHint', 'Every saved checkpoint is a rung. Previews render while the run trains (one 300 s draft take on the dataset\'s first sung track); a rung with none yet says so, and Render adds a take. Score likeness and corruption 1-5, then press Use this rung on your pick: it becomes the dataset\'s adapter and you can clean up the rest. Scores also feed the Review page and "Finish scored" for batches.')}</p>
+        <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.ladderHint', 'Every saved checkpoint is a rung. Previews render while the run trains: two 300 s draft takes of the dataset\'s first sung track per rung. Take 1 uses the same seed on every rung, so the rungs sing roughly the same song and what changes between them is the training; compare rungs on it. Take 2 uses a new random seed each time, so it is a song no other rung made; it shows how the checkpoint does on a fresh draw, and catches failures the fixed seed happens to miss. A rung with no previews yet says so, and Render adds takes. Score likeness and corruption 1-5, then press Use this rung on your pick: it becomes the dataset\'s adapter and you can clean up the rest. Scores also feed the Review page and "Finish scored" for batches.')}</p>
         <Yue2LadderReview datasetId={datasetId} datasetName={datasets.find(d => d.id === datasetId)?.name} run={ladderRunRec} previews={jointPreviews}
-          renderOpts={{ seconds: form.preview?.seconds ?? 300, takes: 1, draft: (form.preview?.odeSteps ?? 12) > 0 && (form.preview?.odeSteps ?? 12) < 32 }}
+          renderOpts={{ seconds: form.preview?.seconds ?? 300, takes: form.preview?.takes ?? 2, draft: (form.preview?.odeSteps ?? 12) > 0 && (form.preview?.odeSteps ?? 12) < 32 }}
           onChanged={() => setLadderNonce(n => n + 1)} onError={setError} idPrefix="train-rung" />
       </div>}
     </div>

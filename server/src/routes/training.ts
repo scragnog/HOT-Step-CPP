@@ -4232,13 +4232,15 @@ router.post('/datasets/:id/yue2-joint-previews/render', async (req: Request, res
     if (!run || !ckpt?.arPath || !ckpt.narPath) { res.status(400).json({ error: 'No complete checkpoint at that step in that run' }); return; }
     const seconds = Math.max(8, Math.min(360, Math.round(Number(b.seconds) || 180)));
     const takes = Math.max(1, Math.min(4, Math.round(Number(b.takes) || 1)));
-    const existing = listYue2JointPreviews(run.output).filter(p => p.step === step && p.kind === 'artist').length;
     const prior = listYue2JointPreviews(run.output).find(p => p.kind === 'artist' && p.lyrics);
-    const seed = Number.isInteger(Number(b.seed)) ? Number(b.seed) : 424242 + existing;
+    const seed = Number.isInteger(Number(b.seed)) ? Number(b.seed) : 424242;
+    // Take 1 is the fixed-seed take every rung shares; once the rung has it,
+    // Render adds random-seed takes only.
+    const hasFixed = listYue2JointPreviews(run.output).some(p => p.step === step && p.kind === 'artist' && p.seed === seed && p.status === 'done' && !!p.file);
     const dataset = typeof run.options.dataset === 'string' ? run.options.dataset : undefined;
     const odeSteps = Number.isInteger(Number(b.odeSteps)) && Number(b.odeSteps) > 0 ? Math.min(64, Number(b.odeSteps)) : undefined;
     const narCacheRatio = typeof b.narCacheRatio === 'number' && b.narCacheRatio >= 0 && b.narCacheRatio <= 0.9 ? b.narCacheRatio : undefined;
-    const options = { enabled: true, everySteps: 0, takes, seconds, seed, previewMaxFrames: seconds * 25, baseline: false, control: false,
+    const options = { enabled: true, everySteps: 0, takes, fixedTakes: hasFixed ? 0 : 1, seconds, seed, previewMaxFrames: seconds * 25, baseline: false, control: false,
       ...(b.baselineOnly === true ? { baselineOnly: true } : {}),
       ...(odeSteps ? { odeSteps } : {}), ...(narCacheRatio !== undefined ? { narCacheRatio } : {}),
       // Without an override, a rung sings what the run's earlier previews sang

@@ -229,8 +229,12 @@ export interface Yue2JointPreviewOptions {
   enabled: boolean;
   /** Steps between preview pauses; 0 with a KL-rung run = one pause per rung. */
   everySteps: number;
-  /** Artist takes per preview point (seeds seed, seed+1, ...). */
+  /** Artist takes per preview point. Take 1 uses `seed` on every rung, so
+   *  rungs compare like for like; every further take gets a fresh random seed. */
   takes?: number;
+  /** On-demand renders: 0 when the rung already has its fixed-seed take, so
+   *  every take rendered is a random one. Default 1. */
+  fixedTakes?: number;
   /** Draft renders: fewer ODE steps and a higher NAR cache ratio for the
    *  decoder half only (the planner stage is what a preview judges). */
   odeSteps?: number;

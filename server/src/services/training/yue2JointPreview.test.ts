@@ -144,6 +144,25 @@ test('shared sheet: a later rung renders take 2 from the ladder sheet', async ()
   assert.equal(fs.readFileSync(path.join(f.output, 'previews', shared!.file!), 'utf8'), 'RIFF-two');
 });
 
+test('two takes: take 1 on the fixed seed, take 2 on a fresh random seed', async () => {
+  const seedsFor = async (step: number, fixedTakes?: number) => {
+    const f = previewFixture();
+    const { deps } = mockDeps();
+    await renderYue2JointPreview({ output: f.output, dataset: f.dataset, step,
+      options: { ...YUE2_JOINT_PREVIEW_DEFAULTS, enabled: true, takes: 2, ...(fixedTakes !== undefined ? { fixedTakes } : {}) },
+      arAdapter: 'ar', narAdapter: 'nar', deps });
+    return listYue2JointPreviews(f.output).filter(r => r.step === step).sort((a, b) => a.createdAt - b.createdAt || Number(a.seedKind === 'random') - Number(b.seedKind === 'random'));
+  };
+  const a = await seedsFor(10), b = await seedsFor(20);
+  for (const recs of [a, b]) assert.deepEqual(recs.map(r => r.seedKind), ['fixed', 'random']);
+  assert.equal(a[0].seed, 424242);
+  assert.equal(b[0].seed, 424242);
+  assert.notEqual(a[1].seed, 424242);
+  assert.notEqual(a[1].seed, b[1].seed);
+  // A rung that already has its fixed take: Render adds random takes only.
+  assert.deepEqual((await seedsFor(30, 0)).map(r => r.seedKind), ['random', 'random']);
+});
+
 test('renderer cancels a polling job on render failure and still unloads', async () => {
   const f = previewFixture();
   let polls = 0;
