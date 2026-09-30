@@ -10,7 +10,7 @@ import {
   Key, Database, Globe, Gauge, Image as ImageIcon
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { SUPPORTED_LANGUAGES } from '../../i18n';
+import { FALLBACK_LANGUAGE, SUPPORTED_LANGUAGES } from '../../i18n';
 import { getStemStats, deleteAllJobs, formatBytes, type StemStats } from '../../services/stemStudioApi';
 import { useAuth } from '../../context/AuthContext';
 import { songApi, settingsApi } from '../../services/api';
@@ -23,7 +23,7 @@ import {
   EnvTextRow, EnvPasswordRow, EnvPathRow, EnvSubsection,
 } from './SettingsPrimitives';
 import './SettingsPanel.css';
-import { COVER_SETS, getCoverSet, setCoverSet, type CoverSet } from '../../utils/defaultCover';
+import { COVER_SETS, FALLBACK_SET, getCoverSet, setCoverSet, type CoverSet } from '../../utils/defaultCover';
 
 export interface AppSettings {
   coResident: boolean;
@@ -775,9 +775,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           id="setting-language"
           label={t('settings.general.displayLanguage')}
           description={t('settings.general.displayLanguageDesc')}
-          value={i18n.language?.split('-')[0] || 'en'}
+          value={i18n.language?.split('-')[0] || FALLBACK_LANGUAGE}
           options={SUPPORTED_LANGUAGES.map(l => ({ value: l.code, label: `${l.flag} ${l.name}` }))}
           onChange={(v) => i18n.changeLanguage(v)}
+          defaultValue={FALLBACK_LANGUAGE}
         />
       </div>
 
@@ -797,6 +798,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           value={coverSet}
           options={COVER_SETS.map(s => ({ value: s.id, label: s.label }))}
           onChange={(v) => { setCoverSetState(v as CoverSet); setCoverSet(v as CoverSet); }}
+          defaultValue={FALLBACK_SET}
         />
 
         <div className="flex gap-1.5 mt-3">

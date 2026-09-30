@@ -264,6 +264,7 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
           onChange={onInstrumentalChange}
           label={t('contentSection.instrumental')}
           info={t('contentSection.instrumentalInfo')}
+          defaultValue={false}
         />
       </div>
 

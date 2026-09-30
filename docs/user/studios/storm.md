@@ -60,6 +60,10 @@ For DJ mode: start Deck A and Deck B independently from their own panels, each w
 | XFade | Crossfade length between slots, in beats. |
 | MaxBuf | How far ahead of playback the client is allowed to buffer, in minutes or in slot multiples (toggle with the clock/note icon). The engine pauses rendering once the buffer fills and resumes once playback catches up. |
 
+A reset arrow appears beside Precision, Cache Ratio, CFG Cutoff, LSS, XFade and any
+solver/scheduler/guider param whenever the value has moved from the default; click
+it to snap that one field back.
+
 ### Live Controls (Continuous, right column)
 
 | Control | What it does |

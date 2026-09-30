@@ -148,6 +148,7 @@ export const LabelPanel: React.FC = () => {
             onChange={setUseEssentia}
             label={t('trainingStudio.label.useEssentia')}
             info={t('trainingStudio.label.useEssentiaInfo')}
+            defaultValue={true}
           />
           {!essentiaOk && (
             <div className="ml-6 text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.caps.essentiaMissing')}</div>
@@ -160,6 +161,7 @@ export const LabelPanel: React.FC = () => {
             onChange={setUseGenius}
             label={t('trainingStudio.label.useGenius')}
             info={t('trainingStudio.label.useGeniusInfo')}
+            defaultValue={true}
           />
           {!geniusOk && (
             <div className="ml-6 text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.enhance.geniusMissing')}</div>
@@ -172,6 +174,7 @@ export const LabelPanel: React.FC = () => {
             onChange={setUseCaption}
             label={t('trainingStudio.label.useCaption')}
             info={t('trainingStudio.label.useCaptionInfo')}
+            defaultValue={true}
           />
           {effectiveCaption && (mossOk || caps?.llm.configured) && (() => {
             const cloud = caps?.llm.providers.filter(pr => pr.available) ?? [];
@@ -241,6 +244,7 @@ export const LabelPanel: React.FC = () => {
           <ParamLabel
             label={t('trainingStudio.label.mergePolicy')}
             info={t('trainingStudio.label.mergePolicyInfo')}
+            onReset={mergePolicy !== 'fill_missing' ? () => setMergePolicy('fill_missing') : undefined}
           />
           <StyledSelect
             accent="amber"

@@ -441,6 +441,7 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
               label={t('cover.language')}
               info={t('cover.languageInfo')}
               className="text-[10px] text-zinc-500 whitespace-nowrap"
+              onReset={vocalLanguage !== 'en' ? () => onVocalLanguageChange('en') : undefined}
             />
             <StyledSelect
               accent="cyan"
@@ -474,6 +475,7 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
               info={t('cover.sepLevelInfo')}
               meta={t('cover.sepLevelMeta')}
               className="text-[10px] text-zinc-500 whitespace-nowrap"
+              onReset={sepLevel !== 1 ? () => onSepLevelChange(1) : undefined}
             />
             <StyledSelect
               accent="cyan"

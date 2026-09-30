@@ -675,7 +675,7 @@ export const TrainDitForm: React.FC<Props> = ({
 
         {/* ── Target loss ─────────────────────────────────────────────── */}
         <label className="flex flex-col gap-1.5">
-          {P('targetLoss', 'Default 0.1 · 0 = no auto-stop', { onReset: onReset('targetLoss') })}
+          {P('targetLoss', 'Default 0.3 · 0 = no auto-stop', { onReset: onReset('targetLoss') })}
           <input
             type="number"
             min={0}
@@ -933,7 +933,7 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <label className="flex flex-col gap-1.5">
-            {P('gradAccum', isLokr ? 'LoKR default 20 micro-batches · 1–64' : 'LoRA default 4 micro-batches · 1–64', { onReset: onReset('gradAccum') })}
+            {P('gradAccum', isLokr ? 'LoKR default 4 micro-batches · 1–64' : 'LoRA default 4 micro-batches · 1–64', { onReset: onReset('gradAccum') })}
             <input
               type="number" min={1} max={64} step={1}
               value={value.gradAccum} disabled={lock}

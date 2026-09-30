@@ -17,7 +17,7 @@ export const COVER_SETS = [
 export type CoverSet = typeof COVER_SETS[number]['id'];
 
 const STORAGE_KEY = 'hs-coverSet';
-const FALLBACK_SET: CoverSet = 'cyber';
+export const FALLBACK_SET: CoverSet = 'cyber';
 
 // One module-level value with one listener, rather than a persisted-state hook
 // per thumbnail — a library page mounts hundreds of these.

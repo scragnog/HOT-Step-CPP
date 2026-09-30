@@ -71,6 +71,10 @@ MiniMax-Music3 or YuE2), chosen in that same bar, see [Backends](../backends.md)
 | Generate / Queue Generation | Submits the form. Disabled until there is a caption, lyrics, or Instrumental is on. Reads Queue Generation, with a count badge, once another job is already rendering. On YuE2, if "Preview the score first" is on (a toggle in the global parameter bar's YuE2 controls), this opens the lead sheet preview instead of queuing a render directly. |
 | Lead sheet preview (YuE2) | Shows the planner's lead sheet as staff notation before any audio renders, with a health verdict (healthy, long or runaway), a reason, an estimated duration, the seed and the section order. Play synthesises it in the browser, the first click is the user gesture the browser requires before it can make sound, and needs network access to fetch a soundfont. Continue renders exactly this score with its seed pinned; Retry plans a new one with a fresh seed; Cancel renders nothing. |
 
+A reset arrow appears beside Instrumental, BPM, Key, Time Signature, Vocal Gender and
+Vocal/Lyrics Language whenever the value has moved from the default; click it to snap
+that one field back.
+
 ## Tips and limits
 
 Adapters and Mastering are not on this page. Both moved to the global parameter bar, see

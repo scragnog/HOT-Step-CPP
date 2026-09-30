@@ -7,6 +7,9 @@ import zh from './locales/zh.json';
 import ja from './locales/ja.json';
 import ko from './locales/ko.json';
 
+/** i18next's own fallback when the detected/stored language isn't one of ours. */
+export const FALLBACK_LANGUAGE = 'en';
+
 /** Supported languages with display names */
 export const SUPPORTED_LANGUAGES = [
   { code: 'en', name: 'English', flag: '🇬🇧' },
@@ -32,7 +35,7 @@ i18n
       ja: { translation: ja.translation },
       ko: { translation: ko.translation },
     },
-    fallbackLng: 'en',
+    fallbackLng: FALLBACK_LANGUAGE,
     
     // We don't use a separate namespace for now, just the default one
     defaultNS: 'translation',

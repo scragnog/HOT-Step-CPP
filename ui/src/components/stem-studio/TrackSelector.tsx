@@ -39,6 +39,9 @@ interface TrackSelectorProps {
   onSepLevelChange: (level: SeparationLevel) => void;
 }
 
+/** StemStudio.tsx's own initial selectedTracks — the set a reset restores. */
+const DEFAULT_TRACKS: readonly string[] = ['vocals', 'drums', 'bass', 'guitar'];
+
 const CATEGORY_COLORS: Record<string, string> = {
   vocals: '#e879f9',
   instruments: '#60a5fa',
@@ -129,6 +132,7 @@ export const TrackSelector: React.FC<TrackSelectorProps> = ({
             meta={t('stem.separationLevelMeta')}
             className="text-sm font-semibold text-[#d4d4d4]"
             underline
+            onReset={sepLevel !== 1 ? () => onSepLevelChange(1 as SeparationLevel) : undefined}
           />
           <StyledSelect
             accent="purple"
@@ -182,6 +186,7 @@ export const TrackSelector: React.FC<TrackSelectorProps> = ({
                             label={TRACK_LABELS[track] || track}
                             info={TRACK_INFO[track]}
                             className={`text-[13px] font-medium ${selectedTracks.includes(track) ? 'text-[#d4d4d4]' : 'text-[#888]'}`}
+                            onReset={selectedTracks.includes(track) !== DEFAULT_TRACKS.includes(track) ? () => toggleTrack(track) : undefined}
                           />
                         </div>
                       ))}
@@ -209,6 +214,7 @@ export const TrackSelector: React.FC<TrackSelectorProps> = ({
                         label={TRACK_LABELS[track] || track}
                         info={TRACK_INFO[track]}
                         className={`text-[13px] font-medium ${selectedTracks.includes(track) ? 'text-[#d4d4d4]' : 'text-[#888]'}`}
+                        onReset={selectedTracks.includes(track) !== DEFAULT_TRACKS.includes(track) ? () => toggleTrack(track) : undefined}
                       />
                     </div>
                   ))}

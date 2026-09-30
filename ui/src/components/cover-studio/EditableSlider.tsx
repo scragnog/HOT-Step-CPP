@@ -1,5 +1,6 @@
 // EditableSlider.tsx — Slider with inline editable value display
 import React, { useState } from 'react';
+import { RotateCcw } from 'lucide-react';
 
 interface EditableSliderProps {
   label: string;
@@ -10,19 +11,35 @@ interface EditableSliderProps {
   onChange: (v: number) => void;
   formatDisplay?: (v: number) => string;
   helpText?: string;
+  /** The value to restore when the reset icon is clicked. Set this to show the
+   *  icon while `value` differs from it. */
+  defaultValue?: number;
 }
 
 export const EditableSlider: React.FC<EditableSliderProps> = ({
-  label, value, min, max, step, onChange, formatDisplay, helpText,
+  label, value, min, max, step, onChange, formatDisplay, helpText, defaultValue,
 }) => {
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState('');
   const display = formatDisplay ? formatDisplay(value) : value.toString();
+  const showReset = defaultValue !== undefined && value !== defaultValue;
 
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between">
-        <label className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{label}</label>
+        <span className="inline-flex items-center gap-1">
+          <label className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">{label}</label>
+          {showReset && (
+            <button
+              type="button"
+              onClick={() => onChange(defaultValue as number)}
+              title={`Reset ${label} to default`}
+              className="text-zinc-400/70 hover:text-cyan-500 transition-colors"
+            >
+              <RotateCcw size={11} />
+            </button>
+          )}
+        </span>
         {editing ? (
           <input
             autoFocus

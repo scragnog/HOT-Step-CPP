@@ -829,7 +829,8 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                   };
                   return (
                     <div key={s.key} className="flex items-center gap-2">
-                      <ParamLabel label={s.label} info={s.title} meta={s.meta} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
+                      <ParamLabel label={s.label} info={s.title} meta={s.meta} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0"
+                        onReset={val !== s.default ? () => setVal(s.default) : undefined} />
                       <input type="range" min={s.min} max={s.max} step={s.step} value={val}
                         onChange={e => setVal(Number(e.target.value))}
                         className="flex-1 accent-red-500 h-1"/>
@@ -843,7 +844,8 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                 {/* Precision */}
                 <div className="flex items-center gap-2">
                   <ParamLabel label="Precision" className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0"
-                    info="RK solver order (auto, 2 to 5). Auto ramps up as the STORM cache fills. Applies from the next Start, not live." />
+                    info="RK solver order (auto, 2 to 5). Auto ramps up as the STORM cache fills. Applies from the next Start, not live."
+                    onReset={rkOrder !== 'auto' ? () => setRkOrder('auto') : undefined} />
                   <div className="flex gap-0.5 flex-1">
                     {(['auto','2','3','4','5']).map(o => (
                       <button key={o} onClick={()=>setRkOrder(o)}
@@ -856,11 +858,12 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                 {/* C++ params divider */}
                 <div className="border-t border-zinc-800/60 pt-2 space-y-2">
                   {([
-                    { label:'Cache Ratio', min:0,   max:0.9,  step:0.05, val:cacheRatio,     set:setCacheRatio,     fmt:(v:number)=>v>0?v.toFixed(2):'off', title:'Skip redundant DiT steps. 0=off. Restart to apply.' },
-                    { label:'CFG Cutoff',  min:0.1, max:1.0,  step:0.05, val:cfgCutoffRatio, set:setCfgCutoffRatio, fmt:(v:number)=>v<1?v.toFixed(2):'off',  title:'Skip unconditional pass after ratio. 1.0=off. Restart to apply.' },
+                    { label:'Cache Ratio', min:0,   max:0.9,  step:0.05, val:cacheRatio,     set:setCacheRatio,     default:0,   fmt:(v:number)=>v>0?v.toFixed(2):'off', title:'Skip redundant DiT steps. 0=off. Restart to apply.' },
+                    { label:'CFG Cutoff',  min:0.1, max:1.0,  step:0.05, val:cfgCutoffRatio, set:setCfgCutoffRatio, default:1.0, fmt:(v:number)=>v<1?v.toFixed(2):'off',  title:'Skip unconditional pass after ratio. 1.0=off. Restart to apply.' },
                   ]).map(s => (
                     <div key={s.label} className="flex items-center gap-2">
-                      <ParamLabel label={s.label} info={s.title} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
+                      <ParamLabel label={s.label} info={s.title} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0"
+                        onReset={s.val !== s.default ? () => s.set(s.default) : undefined} />
                       <input type="range" min={s.min} max={s.max} step={s.step} value={s.val}
                         onChange={e=>s.set(Number(e.target.value))}
                         className="flex-1 accent-red-500 h-1"/>
@@ -869,7 +872,8 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                   ))}
                   <div className="flex items-center gap-2">
                     <ParamLabel label="LSS" className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0"
-                      info="Latent self-similarity strength, live-adjustable while streaming." />
+                      info="Latent self-similarity strength, live-adjustable while streaming."
+                      onReset={lssStrength !== 0.65 ? () => { setLssStrength(0.65); if (sa.isPlaying) sa.sendControl('lss_strength', 0.65); } : undefined} />
                     <input type="range" min={0} max={1} step={0.05} value={lssStrength}
                       onChange={e=>{ const v=Number(e.target.value); setLssStrength(v); if (sa.isPlaying) sa.sendControl('lss_strength',v); }}
                       className="flex-1 accent-red-500 h-1"/>
@@ -907,7 +911,10 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                     <span className="text-[9px] text-zinc-600 uppercase tracking-wider">Scheduler params</span>
                     {activeSchedulerParams.map(s => (
                       <div key={s.key} className="flex items-center gap-2">
-                        <ParamLabel label={s.label} info={s.title} meta={s.meta} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
+                        <ParamLabel label={s.label} info={s.title} meta={s.meta} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0"
+                          onReset={s.default !== undefined && extraSchedulerParams[s.key] !== undefined && extraSchedulerParams[s.key] !== s.default
+                            ? () => { const d = s.default as number|string; setExtraSchedulerParams(p=>({...p,[s.key]:d})); if (sa.isPlaying) sa.sendControl('plugin_params',{[s.key]:d}); }
+                            : undefined} />
                         {s.type === 'select' ? (
                           <StyledSelect
                             accent="pink"
@@ -935,7 +942,10 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                     <span className="text-[9px] text-zinc-600 uppercase tracking-wider">Guider params</span>
                     {activeGuiderParams.map(s => (
                       <div key={s.key} className="flex items-center gap-2">
-                        <ParamLabel label={s.label} info={s.title} meta={s.meta} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0" />
+                        <ParamLabel label={s.label} info={s.title} meta={s.meta} className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0"
+                          onReset={s.default !== undefined && extraGuiderParams[s.key] !== undefined && extraGuiderParams[s.key] !== s.default
+                            ? () => { const d = s.default as number|string; setExtraGuiderParams(p=>({...p,[s.key]:d})); if (sa.isPlaying) sa.sendControl('plugin_params',{[s.key]:d}); }
+                            : undefined} />
                         {s.type === 'select' ? (
                           <StyledSelect
                             accent="pink"
@@ -960,7 +970,8 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                 {/* XFade */}
                 <div className="flex items-center gap-2">
                   <ParamLabel label="XFade" className="text-[10px] text-zinc-500" rootClassName="w-20 shrink-0"
-                    info="Crossfade length between slots, in beats." />
+                    info="Crossfade length between slots, in beats."
+                    onReset={xfadeBeats !== 4 ? () => { setXfadeBeats(4); sa.setXfadeBeats(4); } : undefined} />
                   <input type="range" min={0} max={64} step={1} value={xfadeBeats}
                     onChange={e=>{ const v=Number(e.target.value); setXfadeBeats(v); sa.setXfadeBeats(v); }}
                     className="flex-1 accent-red-500 h-1"/>

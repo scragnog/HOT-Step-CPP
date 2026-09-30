@@ -206,6 +206,7 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
             label={t('cover.instrumental')}
             className="text-xs font-medium text-zinc-700 dark:text-zinc-300"
             info={t('cover.instrumentalHelp')}
+            onReset={instrumental ? () => onInstrumentalChange(false) : undefined}
           />
         </div>
         <Toggle accent="cyan" checked={instrumental} onChange={onInstrumentalChange} aria-label={t('cover.instrumental')} />
@@ -221,9 +222,11 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
         </div>
         <EditableSlider label="Structure Fidelity" value={audioCoverStrength} min={0} max={1} step={0.05}
           onChange={onAudioCoverStrength} formatDisplay={v => v.toFixed(2)}
+          defaultValue={0.5}
           helpText="How closely the output follows the source's arrangement" />
         <EditableSlider label={t('cover.sourcePreservation')} value={coverNoiseStrength} min={0} max={1} step={0.05}
           onChange={onCoverNoiseStrength} formatDisplay={v => v.toFixed(2)}
+          defaultValue={0}
           helpText={t('cover.sourcePreservationHelp')} />
         {coverNoiseStrength > 0 && (
           <div className="flex items-center justify-between px-1 py-1">
@@ -232,6 +235,7 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
               className="text-xs font-medium text-zinc-700 dark:text-zinc-300"
               info="How the denoising schedule is cut when the cover starts partway through it (Source Preservation above zero). Classic (Truncate) drops the early steps and runs only the remaining ones, so a strongly preserved cover gets fewer steps. Full Denoise (Rescale) keeps the full step count and squeezes the whole schedule into the remaining range, so the cover gets every step at finer spacing: slower, usually smoother, same starting point."
               meta="default Classic"
+              onReset={coverNoiseMethod !== '' ? () => onCoverNoiseMethodChange('') : undefined}
             />
             <StyledSelect
               accent="cyan"
@@ -252,11 +256,13 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
             label="NoFSQ Mode"
             className="text-xs font-medium text-zinc-700 dark:text-zinc-300"
             info="Skips FSQ quantization on the source audio, for a result closer to the source. On: more faithful reproduction of the source. Off: quantized, the default."
+            onReset={noFsq ? () => onNoFsqChange(false) : undefined}
           />
           <Toggle accent="cyan" checked={noFsq} onChange={onNoFsqChange} aria-label="NoFSQ Mode" />
         </div>
         <EditableSlider label="Tempo Scale" value={tempoScale} min={0.5} max={2.0} step={0.05}
           onChange={onTempoScale}
+          defaultValue={1.0}
           formatDisplay={v => {
             const bpm = analysis?.bpm ? Math.round(analysis.bpm * bpmCorrection) : null;
             return bpm ? `${v.toFixed(2)}x (${Math.round(bpm * v)} BPM)` : `${v.toFixed(2)}x`;
@@ -264,6 +270,7 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
           helpText={`1.0 = original tempo${analysis?.bpm ? ` (${Math.round(analysis.bpm * bpmCorrection)} BPM)` : ''}`} />
         <EditableSlider label="Pitch Shift" value={pitchShift} min={-12} max={12} step={1}
           onChange={onPitchShift}
+          defaultValue={0}
           formatDisplay={v => {
             const shifted = effectiveKey ? transposeKey(effectiveKey, v) : null;
             const sign = v > 0 ? '+' : '';

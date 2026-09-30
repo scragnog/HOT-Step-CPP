@@ -39,6 +39,9 @@ You need source audio before anything else: upload a file or pick a track alread
 | Stem Mixer: Download / Download All | Downloads one stem as WAV, or every stem in the job as a ZIP. |
 | Recent Extractions | Past jobs (both modes, mixed), each tagged Extract or SuperSep with its stem count and age. Click to reload, or delete to remove its files from disk. |
 
+A reset arrow appears beside Separation Level and each track in Select Tracks
+whenever the value has moved from the default; click it to snap that one field back.
+
 ## Tips and limits
 
 Extract is generative, not literal separation: the DiT model listens to the full mix and paints a new instrument track that fits it, so the result won't be a clean isolation of the original recording. It needs a plain base or SFT checkpoint; turbo models remain selectable but the job runs with a visible warning that extraction quality will be poor. Each selected track is a full, separate DiT render, done one after another, so extracting several tracks takes proportionally longer, and the panel always ignores the global bar's step count, adapter and LoRA settings for this mode, generating with engine defaults, a random seed, and adapters forced off.

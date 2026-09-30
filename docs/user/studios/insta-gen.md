@@ -43,6 +43,9 @@ Next to the panel, a Generations list shows songs made in Auto-Gen only, filtere
 | Generate Song (preview screen) | Queues generation with the edited caption and lyrics, plus the BPM, key, time signature and duration shown in the metadata badges. |
 | Refine in Custom-Gen (preview screen) | Copies the current caption, lyrics and metadata into Custom-Gen's fields and switches to that studio, so you can adjust generation parameters by hand before rendering. |
 
+A reset arrow appears beside Vocal Mode, Vocal Language and Caption Rewrite whenever
+the value has moved from the default; click it to snap that one field back.
+
 ## Tips and limits
 
 The song title comes from the external LLM when it supplies one, otherwise Auto-Gen derives it from the lyrics: the first line of the chorus, then verse 1, then the first verse, then whatever lyric line comes first.

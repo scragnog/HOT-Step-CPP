@@ -657,6 +657,7 @@ export const AuditionCard: React.FC<AuditionCardProps> = ({ milestoneRequest }) 
             className="text-[10px] uppercase tracking-wide text-zinc-500"
             meta={t('trainingStudio.audition.durationMeta')}
             info={t('trainingStudio.audition.durationInfo')}
+            onReset={durationSec !== 180 ? () => setDurationSec(180) : undefined}
           />
           <input
             type="number"
@@ -675,29 +676,30 @@ export const AuditionCard: React.FC<AuditionCardProps> = ({ milestoneRequest }) 
         </summary>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-2">
           {([
-            ['temperature', temperature, setTemperature, 0.1, 2, 0.05,
+            ['temperature', temperature, setTemperature, 0.1, 2, 0.05, 0.85,
               t('trainingStudio.audition.temperatureInfo')],
-            ['topP', topP, setTopP, 0.05, 1, 0.05,
+            ['topP', topP, setTopP, 0.05, 1, 0.05, 0.9,
               t('trainingStudio.audition.topPInfo')],
-            ['cfgScale', cfgScale, setCfgScale, 0, 10, 0.1,
+            ['cfgScale', cfgScale, setCfgScale, 0, 10, 0.1, 2,
               t('trainingStudio.audition.cfgScaleInfo')],
-            ['repPenalty', repPenalty, setRepPenalty, 1, 1.5, 0.01,
+            ['repPenalty', repPenalty, setRepPenalty, 1, 1.5, 0.01, 1.1,
               t('trainingStudio.audition.repPenaltyInfo')],
-            ['adapterScale', adapterScale, setAdapterScale, 0, 2, 0.05,
+            ['adapterScale', adapterScale, setAdapterScale, 0, 2, 0.05, 1,
               t('trainingStudio.audition.adapterScaleInfo')],
-            ['baseScale', baseScale, setBaseScale, 0, 2, 0.05,
+            ['baseScale', baseScale, setBaseScale, 0, 2, 0.05, 1,
               t('trainingStudio.audition.baseScaleInfo')],
             // DiT render step count — only used when the render toggle is on.
-            ['renderSteps', renderSteps, setRenderSteps, 2, 60, 1,
+            ['renderSteps', renderSteps, setRenderSteps, 2, 60, 1, 8,
               t('trainingStudio.audition.renderStepsInfo')],
-          ] as Array<[string, number, (v: number) => void, number, number, number, string]>).map(
-            ([key, val, setter, min, max, step, info]) => (
+          ] as Array<[string, number, (v: number) => void, number, number, number, number, string]>).map(
+            ([key, val, setter, min, max, step, def, info]) => (
               <label key={key} className="flex flex-col gap-1">
                 <ParamLabel
                   label={t(`trainingStudio.audition.${key}`)}
                   className="text-[10px] uppercase tracking-wide text-zinc-500"
                   meta={t(`trainingStudio.audition.${key}Meta`)}
                   info={info}
+                  onReset={val !== def ? () => setter(def) : undefined}
                 />
                 <input
                   type="number"
@@ -721,6 +723,7 @@ export const AuditionCard: React.FC<AuditionCardProps> = ({ milestoneRequest }) 
           accent="amber"
           checked={renderDit}
           onChange={setRenderDit}
+          defaultValue={false}
           label={t('trainingStudio.audition.renderDit')}
           info={t('trainingStudio.audition.renderDitHint')}
         />
@@ -732,6 +735,7 @@ export const AuditionCard: React.FC<AuditionCardProps> = ({ milestoneRequest }) 
               accent="amber"
               checked={renderDitAdapter}
               onChange={setRenderDitAdapter}
+              defaultValue={false}
               label={t('trainingStudio.audition.renderDitAdapter')}
               info={t('trainingStudio.audition.renderDitAdapterHint')}
             />

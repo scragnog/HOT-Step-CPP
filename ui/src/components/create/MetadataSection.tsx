@@ -108,7 +108,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
         {/* BPM */}
         <div>
           <Slider label={t('metadataSection.bpm')} value={bpm} onChange={onBpmChange}
-            min={0} max={240} step={1} showInput suffix=""
+            min={0} max={240} step={1} showInput suffix="" defaultValue={0}
             info={t('metadataSection.bpmInfo')} infoMeta={t('metadataSection.bpmMeta')} />
           {bpm === 0 && <span className="text-[10px] text-zinc-600">{t('metadataSection.auto')}</span>}
         </div>
@@ -155,6 +155,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
             meta={t('metadataSection.keyMeta')}
             className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
             rootClassName="block mb-1.5"
+            onReset={keyScale !== '' ? () => onKeyScaleChange('') : undefined}
           />
           <StyledSelect
             accent="pink"
@@ -174,6 +175,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
               meta={t('metadataSection.timeSigMeta')}
               className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
               rootClassName="block mb-1.5"
+              onReset={timeSignature !== '' ? () => onTimeSignatureChange('') : undefined}
             />
             <StyledSelect
               accent="pink"
@@ -194,6 +196,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
             info={t('metadataSection.vocalGenderInfo')}
             className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
             rootClassName="block mb-1.5"
+            onReset={vocalGender !== '' ? () => onVocalGenderChange('') : undefined}
           />
           <StyledSelect
             accent="pink"
@@ -219,6 +222,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
             info={mm3Mode ? t('metadataSection.lyricsLanguageHint') : t('metadataSection.vocalLanguageInfo')}
             className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
             rootClassName="block mb-1.5"
+            onReset={vocalLanguage !== 'en' ? () => onVocalLanguageChange('en') : undefined}
           />
           <StyledSelect
             accent="pink"

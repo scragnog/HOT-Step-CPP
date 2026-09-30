@@ -66,7 +66,8 @@ have to make.
 | Pitch Shift | -12 to +12 semitones, default 0. Shows the transposed target key live. |
 
 Every slider's value is click-to-edit: click the number next to a slider to type
-an exact figure instead of dragging.
+an exact figure instead of dragging. A reset arrow appears beside a label whenever
+its value has moved from the default; click it to snap that one field back.
 
 ## Tips and limits
 

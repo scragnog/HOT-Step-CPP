@@ -743,6 +743,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
             <ParamLabel
               label="Vocal Mode"
               info="How the song gets its lyrics. Instrumental: no lyrics at all. Lyrics: the built-in LM writes lyrics on its own, on a random topic. Lyrics + AI: an external LLM writes lyrics from a subject you give it, using the provider and model chosen below."
+              onReset={lyricMode !== 'lyrics' ? () => setLyricMode('lyrics') : undefined}
             />
           </label>
           <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
@@ -956,6 +957,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
               <ParamLabel
                 label={t('instaGen.languageLabel')}
                 info={t('instaGen.languageLabelInfo')}
+                onReset={vocalLanguage !== 'en' ? () => setVocalLanguage('en') : undefined}
               />
             </label>
             <StyledSelect
@@ -995,6 +997,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
             onChange={setThinking}
             label={t('instaGen.captionRewriteLabel')}
             info={t('instaGen.captionRewriteInfo')}
+            defaultValue={true}
           />
         </div>
 
