@@ -122,6 +122,10 @@ export const PluginControls: React.FC<PluginControlsProps> = ({
           {visibleParams.map(p => {
             const val = getVal(p);
             const fullKey = `${pluginName}:${p.key}`;
+            // Icon only while the value has moved from the plugin's own
+            // declared default, and only for params that declare one.
+            const showReset = p.default !== undefined && val !== String(p.default);
+            const resetParam = () => onChange(fullKey, String(p.default));
 
             switch (p.type) {
               case 'slider':
@@ -136,6 +140,7 @@ export const PluginControls: React.FC<PluginControlsProps> = ({
                       max={p.max ?? 1}
                       step={p.step ?? 0.01}
                       showInput
+                      defaultValue={p.default !== undefined ? Number(p.default) : undefined}
                     />
                   </div>
                 );
@@ -143,7 +148,8 @@ export const PluginControls: React.FC<PluginControlsProps> = ({
               case 'select':
                 return (
                   <div key={p.key}>
-                    <ParamLabel label={p.label} info={p.hint} className={`text-[10px] ${a.text}`} rootClassName="flex mb-1" />
+                    <ParamLabel label={p.label} info={p.hint} className={`text-[10px] ${a.text}`} rootClassName="flex mb-1"
+                      onReset={showReset ? resetParam : undefined} />
                     <StyledSelect
                       accent={sharedAccent}
                       value={val}
@@ -157,7 +163,8 @@ export const PluginControls: React.FC<PluginControlsProps> = ({
               case 'toggle':
                 return (
                   <div key={p.key} className="flex items-center justify-between">
-                    <ParamLabel label={p.label} info={p.hint} className="text-xs text-zinc-400" />
+                    <ParamLabel label={p.label} info={p.hint} className="text-xs text-zinc-400"
+                      onReset={showReset ? resetParam : undefined} />
                     <Toggle
                       size="sm"
                       accent={sharedAccent}
@@ -171,7 +178,8 @@ export const PluginControls: React.FC<PluginControlsProps> = ({
               case 'text':
                 return (
                   <div key={p.key}>
-                    <ParamLabel label={p.label} info={p.hint} className={`text-[10px] ${a.text}`} rootClassName="flex mb-1" />
+                    <ParamLabel label={p.label} info={p.hint} className={`text-[10px] ${a.text}`} rootClassName="flex mb-1"
+                      onReset={showReset ? resetParam : undefined} />
                     <input
                       className={inputClasses}
                       value={val}

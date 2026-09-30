@@ -28,6 +28,7 @@ import { PluginControls } from './PluginControls';
 import { ParamLabel } from '../shared/ParamLabel';
 import { EditableSlider } from '../shared/EditableSlider';
 import { StyledSelect } from '../shared/StyledSelect';
+import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
 
 // This panel's own colour, matched to the StableStep Accordion's
 // accentColor="sky" in PostProcessingDropdown.tsx (the panel this mounts
@@ -81,6 +82,7 @@ export const Sa3SamplerControls: React.FC = () => {
         value={gp.stableStepSteps}
         min={1} max={64} step={1}
         onChange={gp.setStableStepSteps}
+        defaultValue={GLOBAL_PARAM_DEFAULTS.stableStepSteps}
         tooltip="Sampler steps for the refine. 8 is the tuned default; more steps cost time roughly linearly."
       />
 
@@ -93,7 +95,8 @@ export const Sa3SamplerControls: React.FC = () => {
       {/* Solver */}
       <div>
         <ParamLabel label="Refine solver" info={solverInfo} rootClassName="flex mb-1.5"
-          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          onReset={gp.stableStepSolver !== GLOBAL_PARAM_DEFAULTS.stableStepSolver ? () => gp.setStableStepSolver(GLOBAL_PARAM_DEFAULTS.stableStepSolver) : undefined} />
         <StyledSelect
           accent={ACCENT}
           className="w-full"
@@ -122,7 +125,8 @@ export const Sa3SamplerControls: React.FC = () => {
       {/* Scheduler */}
       <div>
         <ParamLabel label="Refine schedule" info={schedInfo} rootClassName="flex mb-1.5"
-          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          onReset={gp.stableStepScheduler !== GLOBAL_PARAM_DEFAULTS.stableStepScheduler ? () => gp.setStableStepScheduler(GLOBAL_PARAM_DEFAULTS.stableStepScheduler) : undefined} />
         <StyledSelect
           accent={ACCENT}
           className="w-full"
@@ -150,7 +154,8 @@ export const Sa3SamplerControls: React.FC = () => {
       {/* Guidance */}
       <div>
         <ParamLabel label="Refine guidance" info={guideInfo} rootClassName="flex mb-1.5"
-          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          onReset={gp.stableStepGuidanceMode !== GLOBAL_PARAM_DEFAULTS.stableStepGuidanceMode ? () => gp.setStableStepGuidanceMode(GLOBAL_PARAM_DEFAULTS.stableStepGuidanceMode) : undefined} />
         <StyledSelect
           accent={ACCENT}
           className="w-full"
@@ -169,6 +174,7 @@ export const Sa3SamplerControls: React.FC = () => {
           value={gp.stableStepGuidanceScale}
           min={1.0} max={10.0} step={0.1}
           onChange={gp.setStableStepGuidanceScale}
+          defaultValue={GLOBAL_PARAM_DEFAULTS.stableStepGuidanceScale}
           tooltip="Passed to the guidance plugin. 1.0 disables guidance entirely."
         />
       )}

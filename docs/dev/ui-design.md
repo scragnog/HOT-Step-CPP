@@ -97,7 +97,7 @@ Inside a panel that closes when the pointer leaves it (the global bar's dropdown
 
 `ParamLabel` takes an `onReset` callback: pass it and a small RotateCcw icon appears after the help
 icon, which restores the field's default on click. `Slider`, `EditableSlider` and `Toggle` all take
-a `defaultValue` prop and wire it to `ParamLabel` for you — pass `onReset` directly to `ParamLabel`
+a `defaultValue` prop and wire it to `ParamLabel` for you. Pass `onReset` directly to `ParamLabel`
 only for a bare label next to a `StyledSelect` or a plain `<input>`, where there is no shared
 primitive to do the wiring.
 
@@ -106,7 +106,7 @@ primitive to do the wiring.
   defaultValue={GLOBAL_PARAM_DEFAULTS.guidanceScale} min={0} max={20} step={0.1} />
 ```
 
-Show the icon only while the value differs from its default — `Slider`/`Toggle`/`EditableSlider` do
+Show the icon only while the value differs from its default. `Slider`/`Toggle`/`EditableSlider` do
 this automatically from `defaultValue`; a bare `ParamLabel` needs the guard written by hand:
 
 ```tsx
@@ -115,13 +115,20 @@ this automatically from `defaultValue`; a bare `ParamLabel` needs the guard writ
     ? () => gp.setInferMethod(GLOBAL_PARAM_DEFAULTS.inferMethod) : undefined} />
 ```
 
-Reset through the field's own setter, never a generic `set({ field: default })` — some setters carry
+Reset through the field's own setter, never a generic `set({ field: default })`. Some setters carry
 side effects (mirroring a model choice to the server, deriving a dependent field) that a bypass would
 skip. An accordion section's existing group "Reset" button (resets every field in the panel) and a
-per-field `onReset` on one of those same fields (resets just that one) are not the same affordance —
-add the per-field icon without touching the group button. Don't add `onReset` to the header label
+per-field `onReset` on one of those same fields (resets just that one) are not the same affordance,
+so add the per-field icon without touching the group button. Don't add `onReset` to the header label
 itself when it covers several fields with no single value of its own (the group button already speaks
 for it).
+
+A schema-driven control (a backend-declared extension in `BackendExtensionControls.tsx`, a Lua
+plugin param in `PluginControls.tsx`) has no entry in `GLOBAL_PARAM_DEFAULTS`; its default is
+whatever the schema itself declares (`p.default`). Compare the current value against `p.default`
+the same way, skip the control entirely when the schema declares no default, and reset by writing
+`p.default` back through the same setter every other change in that control goes through
+(`setBackendParam`, `setPluginParam`), never a bespoke path.
 
 ## Accent colour
 

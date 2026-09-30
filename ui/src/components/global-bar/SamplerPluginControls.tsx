@@ -30,6 +30,7 @@ import { usePluginRegistry } from '../../hooks/usePluginRegistry';
 import { PluginControls } from './PluginControls';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
+import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
 
 const NATIVE = '';
 
@@ -101,7 +102,8 @@ export const SamplerPluginControls: React.FC = () => {
       {/* Solver */}
       <div>
         <ParamLabel label="Solver" info={solverInfo} rootClassName="flex mb-1.5"
-          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          onReset={gp.inferMethod !== GLOBAL_PARAM_DEFAULTS.inferMethod ? () => gp.setInferMethod(GLOBAL_PARAM_DEFAULTS.inferMethod) : undefined} />
         <StyledSelect
           accent={ACCENT}
           value={gp.inferMethod ?? NATIVE}
@@ -126,7 +128,8 @@ export const SamplerPluginControls: React.FC = () => {
       {/* Scheduler */}
       <div>
         <ParamLabel label="Schedule" info={schedInfo} rootClassName="flex mb-1.5"
-          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          onReset={gp.scheduler !== GLOBAL_PARAM_DEFAULTS.scheduler ? () => gp.setScheduler(GLOBAL_PARAM_DEFAULTS.scheduler) : undefined} />
         <StyledSelect
           accent={ACCENT}
           value={gp.scheduler ?? NATIVE}
@@ -151,7 +154,8 @@ export const SamplerPluginControls: React.FC = () => {
       {/* Guidance */}
       <div>
         <ParamLabel label="Guidance" info={guideInfo} rootClassName="flex mb-1.5"
-          className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          onReset={gp.guidanceMode !== GLOBAL_PARAM_DEFAULTS.guidanceMode ? () => gp.setGuidanceMode(GLOBAL_PARAM_DEFAULTS.guidanceMode) : undefined} />
         <StyledSelect
           accent={ACCENT}
           value={gp.guidanceMode ?? NATIVE}

@@ -66,6 +66,11 @@ export const BackendExtensionControls: React.FC<{
 
   const renderParam = (p: BackendExtensionParam): React.ReactNode => {
         const value = gp.backendParams?.[p.key] ?? p.default;
+        // Icon only while the value has moved from the schema default, and
+        // only for params that declare one — an undeclared default has
+        // nothing to reset to.
+        const showReset = p.default !== undefined && value !== p.default;
+        const resetParam = () => gp.setBackendParam?.(p.key, p.default);
         if (p.type === 'slider') {
           return (
             <div key={p.key}>
@@ -77,6 +82,7 @@ export const BackendExtensionControls: React.FC<{
                 min={p.min ?? 0}
                 max={p.max ?? 1}
                 step={p.step ?? 0.1}
+                defaultValue={typeof p.default === 'number' ? p.default : undefined}
               />
             </div>
           );
@@ -90,7 +96,8 @@ export const BackendExtensionControls: React.FC<{
             <div key={p.key} className="flex items-start justify-between gap-3">
               <div className="flex-1 min-w-0">
                 <ParamLabel label={p.label} info={p.hint}
-                  className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
+                  className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+                  onReset={showReset ? resetParam : undefined} />
               </div>
               <div className="pt-0.5">
                 <ToggleSwitch
@@ -106,7 +113,8 @@ export const BackendExtensionControls: React.FC<{
           return (
             <div key={p.key}>
               <ParamLabel label={p.label} info={p.hint} rootClassName="flex mb-1.5"
-                className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
+                className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+                onReset={showReset ? resetParam : undefined} />
               <StyledSelect
                 accent={accentColor}
                 className="w-full"
@@ -123,7 +131,8 @@ export const BackendExtensionControls: React.FC<{
           return (
             <div key={p.key}>
               <ParamLabel label={p.label} info={p.hint} rootClassName="flex mb-1.5"
-                className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
+                className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+                onReset={showReset ? resetParam : undefined} />
               <textarea
                 className={`${backendInputClasses} font-mono text-xs min-h-[6rem] resize-y`}
                 spellCheck={false}
@@ -143,7 +152,8 @@ export const BackendExtensionControls: React.FC<{
         return (
           <div key={p.key}>
             <ParamLabel label={p.label} info={p.hint} rootClassName="flex mb-1.5"
-              className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
+              className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+              onReset={showReset ? resetParam : undefined} />
             <input
               className={backendInputClasses}
               value={String(value ?? '')}
