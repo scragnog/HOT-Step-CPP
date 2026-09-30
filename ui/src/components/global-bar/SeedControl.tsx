@@ -13,6 +13,7 @@ import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { ToggleSwitch } from './BarSection';
 import { SeedManagerDrawer } from './SeedManagerDrawer';
 import { ParamLabel } from '../shared/ParamLabel';
+import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
 
 // Matches the seed range used elsewhere in the app (StormLiveControls, TrainDitForm).
 const MAX_SEED = 2147483647;
@@ -51,7 +52,8 @@ export const SeedControl: React.FC<{ inputClasses: string; hint?: string }> = ({
         </div>
         <div className="flex items-center gap-1.5">
           <ParamLabel label="Random" className="text-xs text-zinc-500"
-            info={hint ?? 'Drives audio synthesis (DiT). Varies per track during batch generation. See LM Seed for caption, lyrics and code sampling.'} />
+            info={hint ?? 'Drives audio synthesis (DiT). Varies per track during batch generation. See LM Seed for caption, lyrics and code sampling.'}
+            onReset={gp.randomSeed !== GLOBAL_PARAM_DEFAULTS.randomSeed ? () => gp.setRandomSeed(GLOBAL_PARAM_DEFAULTS.randomSeed) : undefined} />
           <ToggleSwitch checked={gp.randomSeed} onChange={gp.setRandomSeed} accentColor="sky" />
         </div>
       </div>

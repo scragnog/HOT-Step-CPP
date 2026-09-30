@@ -227,6 +227,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
               info={t('globalBar.mm3LmTriggerAuto',
                 'Adds the trigger to the caption automatically, in the position it was trained in. The identity is bound to it, so leave this on unless you are placing it yourself. A caption that already opens with the trigger is left alone.')}
               className="pt-0.5"
+              defaultValue={true}
             />
           )}
           {entry.notes && (
@@ -246,7 +247,8 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
               : t('globalBar.mm3LmModeRuntimeHint',
                   'Applied as live low-rank deltas every step — dial changes cost nothing, but planning runs ~25% slower at rank 256. Pick Merge when the dials are settled.')}
             rootClassName="flex mb-1.5"
-            className="text-xs font-medium text-zinc-500 uppercase tracking-wider" />
+            className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+            onReset={String(params[PARAM.mode] ?? 'runtime') !== 'runtime' ? () => setBackendParam(PARAM.mode, 'runtime') : undefined} />
           <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
             {(['runtime', 'merge'] as const).map(m => {
               const active = String(params[PARAM.mode] ?? 'runtime') === m;
@@ -283,6 +285,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
               label={t('globalBar.mm3LmMergeGpu', 'GPU merging')}
               info={t('globalBar.mm3LmMergeGpuHint',
                 'Use the GPU for adapter merging. Turn off to use CPU-assisted merging. Unsupported GPU formats fall back automatically.')}
+              defaultValue={true}
             />
           )}
           <Slider
@@ -293,6 +296,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
             value={num(PARAM.scale, defaults.scale)}
             onChange={v => setBackendParam(PARAM.scale, v)}
             min={0} max={2} step={0.05} showInput
+            defaultValue={defaults.scale}
           />
           <Slider
             label={t('globalBar.mm3LmAttention', 'Attention')}
@@ -301,6 +305,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
             value={num(PARAM.attn, defaults.scaleAttn)}
             onChange={v => setBackendParam(PARAM.attn, v)}
             min={0} max={2} step={0.05} showInput
+            defaultValue={defaults.scaleAttn}
           />
           <Slider
             label={t('globalBar.mm3LmMlp', 'MLP')}
@@ -309,6 +314,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
             value={num(PARAM.mlp, defaults.scaleMlp)}
             onChange={v => setBackendParam(PARAM.mlp, v)}
             min={0} max={2} step={0.05} showInput
+            defaultValue={defaults.scaleMlp}
           />
 
           <div className="flex items-center justify-between gap-2 pt-1">
@@ -349,6 +355,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
                 value={num(PARAM.early, defaults.scaleEarly)}
                 onChange={v => setBackendParam(PARAM.early, v)}
                 min={0} max={2} step={0.05} showInput
+                defaultValue={defaults.scaleEarly}
               />
               <Slider
                 label={t('globalBar.mm3LmMid', 'Middle third')}
@@ -358,6 +365,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
                 value={num(PARAM.mid, defaults.scaleMid)}
                 onChange={v => setBackendParam(PARAM.mid, v)}
                 min={0} max={2} step={0.05} showInput
+                defaultValue={defaults.scaleMid}
               />
               <Slider
                 label={t('globalBar.mm3LmLate', 'Late third')}
@@ -367,6 +375,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
                 value={num(PARAM.late, defaults.scaleLate)}
                 onChange={v => setBackendParam(PARAM.late, v)}
                 min={0} max={2} step={0.05} showInput
+                defaultValue={defaults.scaleLate}
               />
             </div>
           )}

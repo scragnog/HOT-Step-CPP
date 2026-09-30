@@ -15,6 +15,7 @@ import { ParamLabel } from '../shared/ParamLabel';
 import { ModelSelect, getModelFormat } from './ModelSelect';
 import { formatDitModel } from './modelLabels';
 import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
+import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
 import type { AdapterFile } from '../../types';
 
 // Select styling applied inline where needed
@@ -298,7 +299,8 @@ export const AdaptersDropdown: React.FC = () => {
                     className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider"
                     info={isBlend
                       ? 'Per-adapter sliders are relative weights; effective scales are normalised so they sum to the combined strength below. Total strength stays constant as you add adapters.'
-                      : 'Per-adapter sliders are absolute scales, summed directly. The total can exceed 1 to deliberately over-drive the stack.'} />
+                      : 'Per-adapter sliders are absolute scales, summed directly. The total can exceed 1 to deliberately over-drive the stack.'}
+                    onReset={gp.adapterStackMode !== GLOBAL_PARAM_DEFAULTS.adapterStackMode ? () => gp.setAdapterStackMode(GLOBAL_PARAM_DEFAULTS.adapterStackMode) : undefined} />
                   <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
                     <button
                       type="button"
@@ -323,7 +325,8 @@ export const AdaptersDropdown: React.FC = () => {
                   {/* Combined strength budget (blend mode only) */}
                   {isBlend && (
                     <Slider label={t('adapter.combinedStrength', 'Combined Strength (Σ)')} value={gp.adapterStackBudget}
-                      onChange={gp.setAdapterStackBudget} min={0} max={4} step={0.05} showInput />
+                      onChange={gp.setAdapterStackBudget} min={0} max={4} step={0.05} showInput
+                      defaultValue={GLOBAL_PARAM_DEFAULTS.adapterStackBudget} />
                   )}
                 </>
               )}
@@ -411,7 +414,8 @@ export const AdaptersDropdown: React.FC = () => {
 
                   <div className="pt-1 space-y-2">
                     <Slider label="Alignment Timing" value={gp.adapterSectionAlignAt}
-                      onChange={gp.setAdapterSectionAlignAt} min={0.2} max={0.85} step={0.05} showInput />
+                      onChange={gp.setAdapterSectionAlignAt} min={0.2} max={0.85} step={0.05} showInput
+                      defaultValue={GLOBAL_PARAM_DEFAULTS.adapterSectionAlignAt} />
                     <p className="text-[9px] text-zinc-500 leading-relaxed -mt-1">
                       When section boundaries snap to the model's real timing. Earlier locks section
                       identity sooner (less first-adapter bias); too early = fuzzier boundaries.
@@ -522,7 +526,8 @@ export const AdaptersDropdown: React.FC = () => {
         {/* Global planner strength — ALWAYS visible: like the DiT Adapter Scale,
             it also governs planner adapters supplied by Album Presets. */}
         <Slider label="Planner Strength" value={gp.lmAdapterScale}
-          onChange={gp.setLmAdapterScale} min={0} max={2} step={0.05} showInput />
+          onChange={gp.setLmAdapterScale} min={0} max={2} step={0.05} showInput
+          defaultValue={GLOBAL_PARAM_DEFAULTS.lmAdapterScale} />
         <p className="text-[9px] text-zinc-500 leading-relaxed -mt-1">
           Applies to the adapter above AND album-preset planner adapters.
           1.0 = as trained; above ~1.4 risks repetitive planning — prefer more
@@ -536,7 +541,8 @@ export const AdaptersDropdown: React.FC = () => {
           {/* Adapter Scale — simple mode only; the advanced stack has per-row scales */}
           {!gp.advancedAdapters && (
             <Slider label="Adapter Scale" value={gp.adapterScale}
-              onChange={gp.setAdapterScale} min={0} max={4} step={0.05} showInput />
+              onChange={gp.setAdapterScale} min={0} max={4} step={0.05} showInput
+              defaultValue={GLOBAL_PARAM_DEFAULTS.adapterScale} />
           )}
 
           {/* No-adapter reference render — optional 3rd output per generation */}
@@ -546,7 +552,8 @@ export const AdaptersDropdown: React.FC = () => {
                 <ParamLabel
                   label={t('adapter.noAdapterRender', 'No-adapter reference')}
                   info={t('adapter.noAdapterRenderHint', 'Adds a raw 20-step render with the DiT adapter bypassed (LM adapter kept, no post-processing) — hear the song without the adapter via the playbar switch.')}
-                  className="text-xs font-medium text-zinc-700 dark:text-zinc-300" />
+                  className="text-xs font-medium text-zinc-700 dark:text-zinc-300"
+                  onReset={gp.noAdapterRender !== GLOBAL_PARAM_DEFAULTS.noAdapterRender ? () => gp.setNoAdapterRender(GLOBAL_PARAM_DEFAULTS.noAdapterRender) : undefined} />
                 {gp.noAdapterRender && <span className="w-1.5 h-1.5 rounded-full bg-purple-400" title="Reference render active" />}
               </div>
             </div>
@@ -573,7 +580,8 @@ export const AdaptersDropdown: React.FC = () => {
                 ? "Applies raw adapter factors per step, never materializing full deltas — the lowest VRAM option (LoRA and LoKr; DoRA needs Merge). Basin re-base still works."
                 : gp.adapterMode === 'runtime'
                 ? 'Keeps base weights intact and applies the adapter per step. Same quality, slower inference, saves VRAM.'
-                : 'Merges the adapter at F32 precision. Best quality and fast inference, but uses more VRAM during synthesis.'} />
+                : 'Merges the adapter at F32 precision. Best quality and fast inference, but uses more VRAM during synthesis.'}
+              onReset={gp.adapterMode !== GLOBAL_PARAM_DEFAULTS.adapterMode ? () => gp.setAdapterMode(GLOBAL_PARAM_DEFAULTS.adapterMode) : undefined} />
             <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
               <button
                 type="button"
@@ -610,7 +618,8 @@ export const AdaptersDropdown: React.FC = () => {
             <div>
               <ParamLabel label={t('adapter.mergeVram', 'Merge VRAM')} rootClassName="flex mb-1.5"
                 className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-                info="HQ keeps merged weights at F32, which grows a Q8 base by roughly 4x in VRAM. Low re-encodes them back to the base's native quant — base-model VRAM, one extra quantization round trip. FP4 bases always take the low path." />
+                info="HQ keeps merged weights at F32, which grows a Q8 base by roughly 4x in VRAM. Low re-encodes them back to the base's native quant — base-model VRAM, one extra quantization round trip. FP4 bases always take the low path."
+                onReset={gp.adapterMergeLowVram !== GLOBAL_PARAM_DEFAULTS.adapterMergeLowVram ? () => gp.setAdapterMergeLowVram(GLOBAL_PARAM_DEFAULTS.adapterMergeLowVram) : undefined} />
               <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
                 {([
                   { v: false, label: 'HQ',      sub: 'Merged weights stored as F32 (best quality, ~4× VRAM on a Q8 base)' },
@@ -642,7 +651,8 @@ export const AdaptersDropdown: React.FC = () => {
             <div>
               <ParamLabel label={t('adapter.runtimeQuant', 'Adapter VRAM')} rootClassName="flex mb-1.5"
                 className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-                info="Quantizes the runtime adapter deltas in VRAM; nothing is written to disk. Q8 halves and Q4 quarters the VRAM per adapter, which lets more stacked adapters fit. Small quality cost, and safe when the base model is already 4-bit (NVFP4)." />
+                info="Quantizes the runtime adapter deltas in VRAM; nothing is written to disk. Q8 halves and Q4 quarters the VRAM per adapter, which lets more stacked adapters fit. Small quality cost, and safe when the base model is already 4-bit (NVFP4)."
+                onReset={gp.adapterRuntimeQuant !== GLOBAL_PARAM_DEFAULTS.adapterRuntimeQuant ? () => gp.setAdapterRuntimeQuant(GLOBAL_PARAM_DEFAULTS.adapterRuntimeQuant) : undefined} />
               <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10">
                 {([
                   { v: 'bf16', label: 'Full',   sub: 'BF16' },
@@ -697,6 +707,7 @@ export const AdaptersDropdown: React.FC = () => {
                 <>
                   <Slider label="Re-base Strength (β)" value={gp.rebaseBeta}
                     onChange={gp.setRebaseBeta} min={0} max={1} step={0.05} showInput
+                    defaultValue={GLOBAL_PARAM_DEFAULTS.rebaseBeta}
                     infoMeta="0–1"
                     info={"Nudges the loaded base toward the adapter's home base so a heavy cross-base "
                       + "adapter stays coherent at full strength. At 1 you get home-base behaviour; "
@@ -729,7 +740,8 @@ export const AdaptersDropdown: React.FC = () => {
               {GROUP_INFO.map(({ key, label, help }) => (
                 <div key={key}>
                   <Slider label={label} info={help} value={gp.adapterGroupScales[key]}
-                    onChange={v => handleGroupScaleChange(key, v)} min={0} max={4} step={0.05} showInput />
+                    onChange={v => handleGroupScaleChange(key, v)} min={0} max={4} step={0.05} showInput
+                    defaultValue={GLOBAL_PARAM_DEFAULTS.adapterGroupScales[key]} />
                 </div>
               ))}
             </div>

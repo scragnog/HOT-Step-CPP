@@ -29,6 +29,7 @@ import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { Sa3SamplerControls } from './Sa3SamplerControls';
+import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
 
 // LUFS normalization presets
 const LUFS_PRESETS = [
@@ -52,12 +53,16 @@ interface AccordionProps {
   badge?: React.ReactNode;
   accentColor: string;
   toggle?: { checked: boolean; onChange: (v: boolean) => void };
+  /** Resets the section's own on/off toggle to its default. Leaves whatever
+   *  the section contains alone — that's what its own inner group Reset (if
+   *  any) already covers. */
+  onReset?: () => void;
   persistKey: string;  // localStorage key for remembering open/closed state
   children: React.ReactNode;
 }
 
 const Accordion: React.FC<AccordionProps> = ({
-  icon, label, info, badge, accentColor, toggle, persistKey, children,
+  icon, label, info, badge, accentColor, toggle, onReset, persistKey, children,
 }) => {
   const [open, setOpen] = usePersistedState(persistKey, false);
 
@@ -84,7 +89,8 @@ const Accordion: React.FC<AccordionProps> = ({
         </span>
         <ParamLabel label={label} info={info} underline={false}
           className="text-sm text-zinc-700 dark:text-zinc-300 font-medium"
-          rootClassName="flex-1" />
+          rootClassName="flex-1"
+          onReset={onReset} />
         {badge && <span className="flex-shrink-0">{badge}</span>}
         {toggle && (
           <span onClick={e => e.stopPropagation()}>
@@ -181,6 +187,7 @@ const MasteringContent: React.FC = () => {
           rootClassName="mb-1.5"
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
           info={t('mastering.referenceTrackInfo', 'The track Mastering matches level, frequency balance and dynamics against. Upload one below, then pick it here.')}
+          onReset={gp.masteringReference !== GLOBAL_PARAM_DEFAULTS.masteringReference ? () => gp.setMasteringReference(GLOBAL_PARAM_DEFAULTS.masteringReference) : undefined}
         />
         {references.length > 0 ? (
           <StyledSelect
@@ -251,7 +258,8 @@ const MasteringContent: React.FC = () => {
               <Music2 size={14} className="text-teal-400" />
               <ParamLabel label={t('mastering.alsoTimbreRef')}
                 className="text-sm text-zinc-600 dark:text-zinc-400"
-                info="Also VAE-encodes the reference track and feeds it into the timbre conditioning pipeline, guiding the generation's tone and texture to match the reference." />
+                info="Also VAE-encodes the reference track and feeds it into the timbre conditioning pipeline, guiding the generation's tone and texture to match the reference."
+                onReset={gp.timbreReference !== GLOBAL_PARAM_DEFAULTS.timbreReference ? () => gp.setTimbreReference(GLOBAL_PARAM_DEFAULTS.timbreReference) : undefined} />
             </div>
             <ToggleSwitch checked={gp.timbreReference} onChange={gp.setTimbreReference} accentColor="amber" />
           </div>
@@ -403,6 +411,7 @@ export const PostProcessingDropdown: React.FC = () => {
         accentColor="sky"
         persistKey="hs-ppAccordion-whisper"
         toggle={{ checked: gp.whisperLyricsEnabled, onChange: gp.setWhisperLyricsEnabled }}
+        onReset={gp.whisperLyricsEnabled !== GLOBAL_PARAM_DEFAULTS.whisperLyricsEnabled ? () => gp.setWhisperLyricsEnabled(GLOBAL_PARAM_DEFAULTS.whisperLyricsEnabled) : undefined}
       >
         <div className="space-y-3 mt-2">
           {gp.whisperLyricsEnabled && (
@@ -411,7 +420,8 @@ export const PostProcessingDropdown: React.FC = () => {
               <div>
                 <ParamLabel label="Model" rootClassName="mb-1"
                   className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-                  info="Which Whisper model transcribes the render. Larger models are more accurate but slower; Large v3 Turbo is the recommended balance. Needs the matching model downloaded in the Model Manager." />
+                  info="Which Whisper model transcribes the render. Larger models are more accurate but slower; Large v3 Turbo is the recommended balance. Needs the matching model downloaded in the Model Manager."
+                  onReset={gp.whisperModel !== GLOBAL_PARAM_DEFAULTS.whisperModel ? () => gp.setWhisperModel(GLOBAL_PARAM_DEFAULTS.whisperModel) : undefined} />
                 <StyledSelect
                   accent="sky"
                   value={gp.whisperModel}
@@ -430,7 +440,8 @@ export const PostProcessingDropdown: React.FC = () => {
               <div>
                 <ParamLabel label="Language" rootClassName="mb-1"
                   className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-                  info="The language Whisper expects the vocals to be sung in. Auto-detect works for most tracks; pick a language directly if it keeps mis-detecting one." />
+                  info="The language Whisper expects the vocals to be sung in. Auto-detect works for most tracks; pick a language directly if it keeps mis-detecting one."
+                  onReset={gp.whisperLanguage !== GLOBAL_PARAM_DEFAULTS.whisperLanguage ? () => gp.setWhisperLanguage(GLOBAL_PARAM_DEFAULTS.whisperLanguage) : undefined} />
                 <StyledSelect
                   accent="sky"
                   value={gp.whisperLanguage}
@@ -455,6 +466,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 value={gp.whisperBeamSize}
                 min={1} max={10} step={1}
                 onChange={gp.setWhisperBeamSize}
+                defaultValue={GLOBAL_PARAM_DEFAULTS.whisperBeamSize}
                 formatDisplay={v => v === 1 ? 'Greedy' : `${v} beams`}
                 tooltip="Higher = more accurate but slower. 5 is recommended."
               />
@@ -466,7 +478,8 @@ export const PostProcessingDropdown: React.FC = () => {
                     className="text-sm text-zinc-600 dark:text-zinc-400"
                     info={gp.stableStepOn
                       ? "Shares StableStep's stem split — vocals are isolated once and used by both."
-                      : 'Runs stem separation to isolate vocals before transcription. May improve accuracy on busy mixes.'} />
+                      : 'Runs stem separation to isolate vocals before transcription. May improve accuracy on busy mixes.'}
+                    onReset={gp.whisperIsolateVocals !== GLOBAL_PARAM_DEFAULTS.whisperIsolateVocals ? () => gp.setWhisperIsolateVocals(GLOBAL_PARAM_DEFAULTS.whisperIsolateVocals) : undefined} />
                 </div>
                 <ToggleSwitch checked={gp.whisperIsolateVocals} onChange={gp.setWhisperIsolateVocals} accentColor="sky" />
               </div>
@@ -493,6 +506,7 @@ export const PostProcessingDropdown: React.FC = () => {
           accentColor="cyan"
           persistKey="hs-ppAccordion-tiled"
           toggle={{ checked: gp.postprocessEnabled, onChange: gp.setPostprocessEnabled }}
+          onReset={gp.postprocessEnabled !== GLOBAL_PARAM_DEFAULTS.postprocessEnabled ? () => gp.setPostprocessEnabled(GLOBAL_PARAM_DEFAULTS.postprocessEnabled) : undefined}
         >
           <div className="space-y-2 mt-2">
             {gp.postprocessEnabled && (
@@ -538,6 +552,7 @@ export const PostProcessingDropdown: React.FC = () => {
           accentColor="emerald"
           persistKey="hs-ppAccordion-ppvae"
           toggle={{ checked: gp.ppVaeReencode, onChange: gp.setPpVaeReencode }}
+          onReset={gp.ppVaeReencode !== GLOBAL_PARAM_DEFAULTS.ppVaeReencode ? () => gp.setPpVaeReencode(GLOBAL_PARAM_DEFAULTS.ppVaeReencode) : undefined}
         >
           <div className="space-y-2 mt-2">
             {gp.ppVaeReencode && (
@@ -547,6 +562,7 @@ export const PostProcessingDropdown: React.FC = () => {
                   value={gp.ppVaeBlend}
                   min={0} max={1.0} step={0.01}
                   onChange={gp.setPpVaeBlend}
+                  defaultValue={GLOBAL_PARAM_DEFAULTS.ppVaeBlend}
                   formatDisplay={v => v === 0 ? 'Full PP-VAE' : v >= 1 ? 'Original' : (v * 100).toFixed(0) + '% original'}
                   tooltip="Blend original audio back into the PP-VAE output. 0% = fully processed, 100% = fully original."
                 />
@@ -558,7 +574,8 @@ export const PostProcessingDropdown: React.FC = () => {
                       className="text-sm text-zinc-600 dark:text-zinc-400"
                       info={gp.ppVaeUseOnnx
                         ? 'ONNX Runtime with TensorRT acceleration. Falls back to GGUF when the ONNX models are missing.'
-                        : 'GGUF (GGML) backend. Slower, but proven stable.'} />
+                        : 'GGUF (GGML) backend. Slower, but proven stable.'}
+                      onReset={gp.ppVaeUseOnnx !== GLOBAL_PARAM_DEFAULTS.ppVaeUseOnnx ? () => gp.setPpVaeUseOnnx(GLOBAL_PARAM_DEFAULTS.ppVaeUseOnnx) : undefined} />
                   </div>
                   <ToggleSwitch checked={gp.ppVaeUseOnnx} onChange={gp.setPpVaeUseOnnx} accentColor="emerald" />
                 </div>
@@ -581,6 +598,7 @@ export const PostProcessingDropdown: React.FC = () => {
         toggle={stableStepAvailable
           ? { checked: gp.stableStepOn, onChange: gp.setStableStepOn }
           : undefined}
+        onReset={stableStepAvailable && gp.stableStepOn !== GLOBAL_PARAM_DEFAULTS.stableStepOn ? () => gp.setStableStepOn(GLOBAL_PARAM_DEFAULTS.stableStepOn) : undefined}
         badge={!stableStepAvailable ? (
           <span className="text-[10px] text-zinc-500 font-mono">not installed</span>
         ) : undefined}
@@ -608,6 +626,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 value={gp.stableStepStrength}
                 min={0.10} max={0.60} step={0.05}
                 onChange={gp.setStableStepStrength}
+                defaultValue={GLOBAL_PARAM_DEFAULTS.stableStepStrength}
                 formatDisplay={v => (v * 100).toFixed(0) + '%'}
                 tooltip="How much of the instrumental is re-rendered. Higher values re-interpret the instrumentation more; lower values stay closer to the original. 30% is a good balance between cleanup and faithfulness."
               />
@@ -619,7 +638,8 @@ export const PostProcessingDropdown: React.FC = () => {
                     ? 'ONNX Runtime with TensorRT (NVIDIA). The first run per song-length bucket builds the TensorRT engine — slow once, then cached.'
                     : gp.stableStepBackend === 'gguf'
                       ? 'GGML backend — runs on CUDA, Vulkan or CPU. Fastest option on NVIDIA in current testing.'
-                      : 'Auto lets the engine pick the best installed backend.'} />
+                      : 'Auto lets the engine pick the best installed backend.'}
+                  onReset={gp.stableStepBackend !== GLOBAL_PARAM_DEFAULTS.stableStepBackend ? () => gp.setStableStepBackend(GLOBAL_PARAM_DEFAULTS.stableStepBackend as 'auto' | 'onnx' | 'gguf') : undefined} />
                 <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10 bg-zinc-100 dark:bg-zinc-800">
                   {([
                     { value: 'auto' as const, label: 'Auto', installed: true },
@@ -735,6 +755,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 onChange={gp.setStableStepPreserveDynamics}
                 label="Preserve source dynamics"
                 info="The refined audio follows the original's loudness envelope — timbre from the refine, dynamics from your generation. On (default): prevents adapters trained on mastered material from producing brickwalled waveforms. Off: the refine's own dynamics are used instead."
+                defaultValue={GLOBAL_PARAM_DEFAULTS.stableStepPreserveDynamics}
               />
 
               {/* Vocal stem handling: leave the AS1.5 vocals alone, or smooth
@@ -745,6 +766,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 onChange={gp.setStableStepVocalPpVae}
                 label="Re-encode vocals through PP-VAE"
                 info="Smooths fizzy or mechanical AS1.5 vocals, but the round trip is lossy — it costs about 5 dB of air above 10 kHz and resynthesises the top octaves rather than reproducing them. Off (default): the original vocal stem is recombined with the SA3 instrumental untouched."
+                defaultValue={GLOBAL_PARAM_DEFAULTS.stableStepVocalPpVae}
               />
 
               {/* Vocal level. The server already restores the source mix's own
@@ -755,6 +777,7 @@ export const PostProcessingDropdown: React.FC = () => {
                   value={gp.stableStepVocalTrimDb ?? 0}
                   min={-6} max={6} step={0.5}
                   onChange={gp.setStableStepVocalTrimDb}
+                  defaultValue={GLOBAL_PARAM_DEFAULTS.stableStepVocalTrimDb}
                   formatDisplay={v => v === 0 ? '0 dB (source balance)' : `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`}
                   tooltip="Trim the vocal against the refined instrumental. 0 keeps the balance your generation had before separation."
                 />
@@ -769,7 +792,8 @@ export const PostProcessingDropdown: React.FC = () => {
               <div>
                 <ParamLabel label="Source blend" rootClassName="mb-1"
                   className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-                  info="How the SA3 refine and the original AS1.5 render are combined. Off (default) uses the full SA3 refine. Crossover keeps the original below a frequency and the refine above it. Mix blends the two full-band by amount." />
+                  info="How the SA3 refine and the original AS1.5 render are combined. Off (default) uses the full SA3 refine. Crossover keeps the original below a frequency and the refine above it. Mix blends the two full-band by amount."
+                  onReset={(gp.stableStepBlendMode ?? 'off') !== GLOBAL_PARAM_DEFAULTS.stableStepBlendMode ? () => gp.setStableStepBlendMode(GLOBAL_PARAM_DEFAULTS.stableStepBlendMode as 'off' | 'crossover' | 'mix') : undefined} />
                 <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10 bg-zinc-100 dark:bg-zinc-800">
                   {([
                     { value: 'off' as const, label: 'Off', tip: 'Full SA3 refine output (no source blending)' },
@@ -797,6 +821,7 @@ export const PostProcessingDropdown: React.FC = () => {
                       value={gp.stableStepCrossoverHz}
                       min={60} max={8000} step={10}
                       onChange={gp.setStableStepCrossoverHz}
+                      defaultValue={GLOBAL_PARAM_DEFAULTS.stableStepCrossoverHz}
                       formatDisplay={v => v >= 1000 ? (v / 1000).toFixed(1) + ' kHz' : v.toFixed(0) + ' Hz'}
                       tooltip="Below this: AS1.5 source. Above: SA3 refine. ~250 Hz keeps kick/bass fundamentals from the source."
                     />
@@ -805,6 +830,7 @@ export const PostProcessingDropdown: React.FC = () => {
                       value={gp.stableStepCrossoverWidthHz}
                       min={20} max={1000} step={10}
                       onChange={gp.setStableStepCrossoverWidthHz}
+                      defaultValue={GLOBAL_PARAM_DEFAULTS.stableStepCrossoverWidthHz}
                       formatDisplay={v => v.toFixed(0) + ' Hz'}
                       tooltip="Width of the transition band. Wider = smoother, softer seam; narrower = more surgical split."
                     />
@@ -817,6 +843,7 @@ export const PostProcessingDropdown: React.FC = () => {
                       value={gp.stableStepMix}
                       min={0} max={1} step={0.05}
                       onChange={gp.setStableStepMix}
+                      defaultValue={GLOBAL_PARAM_DEFAULTS.stableStepMix}
                       formatDisplay={v => (v * 100).toFixed(0) + '%'}
                       tooltip="0% = pure AS1.5 source, 100% = pure SA3 refine, in between = blend."
                     />
@@ -832,6 +859,7 @@ export const PostProcessingDropdown: React.FC = () => {
                   onChange={gp.setStableStepSeedFollowsDit}
                   label="Follow generation seed"
                   info="The refine uses the song's resolved generation seed — regenerating with the same seed reproduces the same refine. On is the default. Off: set a fixed seed for the refine that stays the same even when the generation seed changes."
+                  defaultValue={GLOBAL_PARAM_DEFAULTS.stableStepSeedFollowsDit}
                 />
                 {gp.stableStepSeedFollowsDit === false && (
                   <input
@@ -868,6 +896,7 @@ export const PostProcessingDropdown: React.FC = () => {
         accentColor="cyan"
         persistKey="hs-ppAccordion-sl"
         toggle={{ checked: gp.spectralLifterEnabled, onChange: gp.setSpectralLifterEnabled }}
+        onReset={gp.spectralLifterEnabled !== GLOBAL_PARAM_DEFAULTS.spectralLifterEnabled ? () => gp.setSpectralLifterEnabled(GLOBAL_PARAM_DEFAULTS.spectralLifterEnabled) : undefined}
       >
         <div className="space-y-3 mt-2">
           {gp.spectralLifterEnabled && (
@@ -894,6 +923,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 value={gp.slDenoiseStrength}
                 min={0} max={1.0} step={0.01}
                 onChange={gp.setSlDenoiseStrength}
+                defaultValue={GLOBAL_PARAM_DEFAULTS.slDenoiseStrength}
                 formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
                 tooltip="Spectral gate aggressiveness. Higher = more noise removal. 0 = skip denoising entirely."
               />
@@ -902,6 +932,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 value={gp.slNoiseFloor}
                 min={0.01} max={0.5} step={0.01}
                 onChange={gp.setSlNoiseFloor}
+                defaultValue={GLOBAL_PARAM_DEFAULTS.slNoiseFloor}
                 formatDisplay={v => (v * 100).toFixed(0) + '%'}
                 tooltip="Minimum signal that passes through the gate. Higher = gentler, less musical noise artifacts."
               />
@@ -910,6 +941,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 value={gp.slHfMix}
                 min={0} max={0.5} step={0.01}
                 onChange={gp.setSlHfMix}
+                defaultValue={GLOBAL_PARAM_DEFAULTS.slHfMix}
                 formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
                 tooltip="Blend amount for synthesized high-frequency content above 16kHz via spectral mirroring."
               />
@@ -918,6 +950,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 value={gp.slTransientBoost}
                 min={0} max={1.0} step={0.01}
                 onChange={gp.setSlTransientBoost}
+                defaultValue={GLOBAL_PARAM_DEFAULTS.slTransientBoost}
                 formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
                 tooltip="Percussive enhancement via harmonic-percussive separation. Adds punch to drums and transients."
               />
@@ -926,6 +959,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 value={gp.slShimmerReduction}
                 min={0} max={12} step={0.5}
                 onChange={gp.setSlShimmerReduction}
+                defaultValue={GLOBAL_PARAM_DEFAULTS.slShimmerReduction}
                 formatDisplay={v => v === 0 ? 'Off' : v.toFixed(1) + ' dB'}
                 tooltip="dB reduction applied to the 10–14kHz shimmer band. Higher = more aggressive shimmer suppression."
               />
@@ -943,6 +977,7 @@ export const PostProcessingDropdown: React.FC = () => {
         accentColor="pink"
         persistKey="hs-ppAccordion-naturalizer"
         toggle={{ checked: gp.vocalNaturalizerEnabled, onChange: gp.setVocalNaturalizerEnabled }}
+        onReset={gp.vocalNaturalizerEnabled !== GLOBAL_PARAM_DEFAULTS.vocalNaturalizerEnabled ? () => gp.setVocalNaturalizerEnabled(GLOBAL_PARAM_DEFAULTS.vocalNaturalizerEnabled) : undefined}
       >
         <div className="space-y-2 mt-2">
           {gp.vocalNaturalizerEnabled && (
@@ -981,6 +1016,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 value={gp.naturalizeAmount}
                 min={0} max={1.0} step={0.01}
                 onChange={gp.setNaturalizeAmount}
+                defaultValue={GLOBAL_PARAM_DEFAULTS.naturalizeAmount}
                 formatDisplay={v => v === 0 ? 'Off' : v <= 0.3 ? 'Subtle' : v <= 0.6 ? 'Moderate' : v <= 0.8 ? 'Strong' : 'Maximum'}
                 tooltip="Master intensity — scales all 5 naturalisation stages proportionally."
               />
@@ -989,6 +1025,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 value={gp.natVibratoRate}
                 min={3.0} max={7.0} step={0.1}
                 onChange={gp.setNatVibratoRate}
+                defaultValue={GLOBAL_PARAM_DEFAULTS.natVibratoRate}
                 formatDisplay={v => v.toFixed(1) + ' Hz'}
                 tooltip="Vibrato speed for pitch variation. Natural human vibrato is ~4–6 Hz."
               />
@@ -997,6 +1034,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 value={gp.natVibratoDepth}
                 min={0} max={1.0} step={0.01}
                 onChange={gp.setNatVibratoDepth}
+                defaultValue={GLOBAL_PARAM_DEFAULTS.natVibratoDepth}
                 formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
                 tooltip="Pitch variation intensity. Breaks rigid pitch quantization from auto-tune."
               />
@@ -1005,6 +1043,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 value={gp.natFormantStrength}
                 min={0} max={1.0} step={0.01}
                 onChange={gp.setNatFormantStrength}
+                defaultValue={GLOBAL_PARAM_DEFAULTS.natFormantStrength}
                 formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
                 tooltip="Adds subtle variation to the 200–3000 Hz formant band to humanize locked timbre."
               />
@@ -1013,6 +1052,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 value={gp.natMetallicReduction}
                 min={0} max={1.0} step={0.01}
                 onChange={gp.setNatMetallicReduction}
+                defaultValue={GLOBAL_PARAM_DEFAULTS.natMetallicReduction}
                 formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
                 tooltip="Reduces harsh digital artifacts in the 6–10 kHz range."
               />
@@ -1021,6 +1061,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 value={gp.natQuantizationMask}
                 min={0} max={1.0} step={0.01}
                 onChange={gp.setNatQuantizationMask}
+                defaultValue={GLOBAL_PARAM_DEFAULTS.natQuantizationMask}
                 formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
                 tooltip="Shaped noise (1–4 kHz) to mask pitch 'stair-stepping' from quantization."
               />
@@ -1029,6 +1070,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 value={gp.natTransitionSmooth}
                 min={0} max={1.0} step={0.01}
                 onChange={gp.setNatTransitionSmooth}
+                defaultValue={GLOBAL_PARAM_DEFAULTS.natTransitionSmooth}
                 formatDisplay={v => v === 0 ? 'Off' : (v * 100).toFixed(0) + '%'}
                 tooltip="Smooths abrupt pitch transitions into natural glides between notes."
               />
@@ -1056,6 +1098,7 @@ export const PostProcessingDropdown: React.FC = () => {
             value={gp.gainOffsetDb}
             min={-10} max={10} step={0.5}
             onChange={gp.setGainOffsetDb}
+            defaultValue={GLOBAL_PARAM_DEFAULTS.gainOffsetDb}
             formatDisplay={v => v === 0 ? '0 dB (bypass)' : `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`}
             tooltip="dB gain applied to the audio before VST chain. 0 = no change."
           />
@@ -1097,6 +1140,7 @@ export const PostProcessingDropdown: React.FC = () => {
         accentColor="amber"
         persistKey="hs-ppAccordion-master"
         toggle={{ checked: gp.masteringEnabled, onChange: gp.setMasteringEnabled }}
+        onReset={gp.masteringEnabled !== GLOBAL_PARAM_DEFAULTS.masteringEnabled ? () => gp.setMasteringEnabled(GLOBAL_PARAM_DEFAULTS.masteringEnabled) : undefined}
         badge={gp.masteringEnabled && gp.masteringReference ? (
           <span className="text-[10px] text-amber-400/60 font-mono truncate max-w-[100px]">
             {formatReferenceName(gp.masteringReference)}
@@ -1116,6 +1160,7 @@ export const PostProcessingDropdown: React.FC = () => {
           accentColor="amber"
           persistKey="hs-ppAccordion-lufs"
           toggle={{ checked: gp.lufsEnabled, onChange: gp.setLufsEnabled }}
+          onReset={gp.lufsEnabled !== GLOBAL_PARAM_DEFAULTS.lufsEnabled ? () => gp.setLufsEnabled(GLOBAL_PARAM_DEFAULTS.lufsEnabled) : undefined}
           badge={gp.lufsEnabled ? (
             <span className="text-[10px] text-amber-400/60 font-mono">
               {gp.lufsTarget} LUFS
@@ -1132,6 +1177,7 @@ export const PostProcessingDropdown: React.FC = () => {
                     rootClassName="mb-1.5"
                     className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
                     info={t('pp.lufsPresetInfo', 'Which loudness target the Final Normalizer aims for. Pick the platform you are mastering for, or Custom to set your own target below.')}
+                    onReset={gp.lufsPreset !== GLOBAL_PARAM_DEFAULTS.lufsPreset ? () => gp.setLufsPreset(GLOBAL_PARAM_DEFAULTS.lufsPreset) : undefined}
                   />
                   <StyledSelect
                     accent="amber"
@@ -1152,6 +1198,7 @@ export const PostProcessingDropdown: React.FC = () => {
                     value={gp.lufsTarget}
                     min={-30} max={-5} step={0.5}
                     onChange={gp.setLufsTarget}
+                    defaultValue={GLOBAL_PARAM_DEFAULTS.lufsTarget}
                     formatDisplay={v => `${v.toFixed(1)} LUFS`}
                     tooltip="Target integrated loudness. Lower = quieter, higher = louder."
                   />
@@ -1165,6 +1212,7 @@ export const PostProcessingDropdown: React.FC = () => {
                   value={gp.lufsCeilingDb}
                   min={-6} max={0} step={0.1}
                   onChange={gp.setLufsCeilingDb}
+                  defaultValue={GLOBAL_PARAM_DEFAULTS.lufsCeilingDb}
                   formatDisplay={v => `${v.toFixed(1)} dBFS`}
                   tooltip="Peak ceiling held by the look-ahead limiter after the loudness gain is applied. Lower this if a maximizer earlier in the chain is already close to full scale."
                 />
@@ -1188,6 +1236,7 @@ export const PostProcessingDropdown: React.FC = () => {
         accentColor="violet"
         persistKey="hs-ppAccordion-coverart"
         toggle={{ checked: gp.coverArtEnabled, onChange: gp.setCoverArtEnabled }}
+        onReset={gp.coverArtEnabled !== GLOBAL_PARAM_DEFAULTS.coverArtEnabled ? () => gp.setCoverArtEnabled(GLOBAL_PARAM_DEFAULTS.coverArtEnabled) : undefined}
         badge={gp.coverArtEnabled ? (
           <CoverArtBadge />
         ) : undefined}
@@ -1202,6 +1251,7 @@ export const PostProcessingDropdown: React.FC = () => {
         accentColor="emerald"
         persistKey="hs-ppAccordion-quality"
         toggle={{ checked: gp.qualityEvalEnabled, onChange: gp.setQualityEvalEnabled }}
+        onReset={gp.qualityEvalEnabled !== GLOBAL_PARAM_DEFAULTS.qualityEvalEnabled ? () => gp.setQualityEvalEnabled(GLOBAL_PARAM_DEFAULTS.qualityEvalEnabled) : undefined}
         badge={gp.qualityEvalEnabled ? (
           <span className="text-[10px] text-emerald-400/60 font-mono">
             {gp.qualityEvalTarget === 'both' ? 'Raw+Master' : gp.qualityEvalTarget === 'mastered' ? 'Mastered' : 'Unmastered'}

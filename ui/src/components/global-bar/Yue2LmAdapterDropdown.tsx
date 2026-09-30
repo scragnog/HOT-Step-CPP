@@ -277,6 +277,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
             value={draft.scale}
             onChange={v => setDraft(d => ({ ...d, scale: v }))}
             min={0} max={2} step={0.05} showInput
+            defaultValue={UNITY.scale}
           />
           <Slider
             label={t('globalBar.yue2AdapterAttn', 'Attention')}
@@ -285,6 +286,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
             value={draft.attn}
             onChange={v => setDraft(d => ({ ...d, attn: v }))}
             min={0} max={2} step={0.05} showInput
+            defaultValue={UNITY.attn}
           />
           <Slider
             label={t('globalBar.yue2AdapterMlp', 'MLP')}
@@ -293,6 +295,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
             value={draft.mlp}
             onChange={v => setDraft(d => ({ ...d, mlp: v }))}
             min={0} max={2} step={0.05} showInput
+            defaultValue={UNITY.mlp}
           />
 
           <div className="flex items-center justify-between gap-2 pt-1">
@@ -332,6 +335,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
                 value={draft.early}
                 onChange={v => setDraft(d => ({ ...d, early: v }))}
                 min={0} max={2} step={0.05} showInput
+                defaultValue={UNITY.early}
               />
               <Slider
                 label={t('globalBar.yue2AdapterMid', 'Middle third')}
@@ -340,6 +344,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
                 value={draft.mid}
                 onChange={v => setDraft(d => ({ ...d, mid: v }))}
                 min={0} max={2} step={0.05} showInput
+                defaultValue={UNITY.mid}
               />
               <Slider
                 label={t('globalBar.yue2AdapterLate', 'Late third')}
@@ -348,6 +353,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
                 value={draft.late}
                 onChange={v => setDraft(d => ({ ...d, late: v }))}
                 min={0} max={2} step={0.05} showInput
+                defaultValue={UNITY.late}
               />
             </div>
           )}

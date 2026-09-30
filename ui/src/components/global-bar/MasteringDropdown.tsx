@@ -13,6 +13,7 @@ import { ToggleSwitch } from './BarSection';
 import { formatReferenceName } from './modelLabels';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
+import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
 
 interface ReferenceTrack {
   name: string;
@@ -82,7 +83,8 @@ export const MasteringDropdown: React.FC = () => {
       <div>
         <ParamLabel label={t('mastering.referenceTrack')} rootClassName="flex mb-1.5"
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-          info="The generated audio is mastered to match the RMS level, frequency spectrum and dynamic characteristics of this track." />
+          info="The generated audio is mastered to match the RMS level, frequency spectrum and dynamic characteristics of this track."
+          onReset={gp.masteringReference !== GLOBAL_PARAM_DEFAULTS.masteringReference ? () => gp.setMasteringReference(GLOBAL_PARAM_DEFAULTS.masteringReference) : undefined} />
         {references.length > 0 ? (
           <StyledSelect
             accent="amber"
@@ -152,7 +154,8 @@ export const MasteringDropdown: React.FC = () => {
               <Music2 size={14} className="text-teal-400" />
               <ParamLabel label={t('mastering.alsoTimbreRef')}
                 className="text-sm text-zinc-600 dark:text-zinc-400"
-                info="Also VAE-encodes the reference track and feeds it into the timbre conditioning pipeline, guiding the generation's tone and texture to match the reference." />
+                info="Also VAE-encodes the reference track and feeds it into the timbre conditioning pipeline, guiding the generation's tone and texture to match the reference."
+                onReset={gp.timbreReference !== GLOBAL_PARAM_DEFAULTS.timbreReference ? () => gp.setTimbreReference(GLOBAL_PARAM_DEFAULTS.timbreReference) : undefined} />
             </div>
             <ToggleSwitch checked={gp.timbreReference} onChange={gp.setTimbreReference} accentColor="amber" />
           </div>

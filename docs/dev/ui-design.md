@@ -130,6 +130,13 @@ the same way, omit the reset icon (the control itself stays usable) when the sch
 `p.default` back through the same setter every other change in that control goes through
 (`setBackendParam`, `setPluginParam`), never a bespoke path.
 
+An accordion whose section is one on/off `toggle` (`PostProcessingDropdown.tsx`'s shared `Accordion`)
+takes the same `onReset` its `ParamLabel` header already renders — add it to the accordion's own
+props and pass it straight through, one level of plumbing, not a new component. Guard it on the
+toggle's own field, never on anything the section contains: an accordion's `onReset` and its
+content's own per-field resets (or an inner group "Reset" button) stay independent, each touching
+only what it says it does.
+
 ## Accent colour
 
 Match the controls around you. Pass the same `accent` to `StyledSelect` and `Toggle`.

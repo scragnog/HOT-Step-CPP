@@ -9,6 +9,7 @@ import { useGlobalParams } from '../../context/GlobalParamsContext';
 import { useAuth } from '../../context/AuthContext';
 import { ToggleSwitch } from './BarSection';
 import { ParamLabel } from '../shared/ParamLabel';
+import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -121,7 +122,8 @@ export const CoverArtContent: React.FC = () => {
       <div className="flex items-center justify-between">
         <ParamLabel label="Auto-generate after creation"
           className="text-sm text-zinc-600 dark:text-zinc-400"
-          info="Generates 1024x1024 album cover art with FLUX.2-klein-4B, using the song's subject or lyrics as the brief. Runs once audio generation finishes." />
+          info="Generates 1024x1024 album cover art with FLUX.2-klein-4B, using the song's subject or lyrics as the brief. Runs once audio generation finishes."
+          onReset={gp.coverArtEnabled !== GLOBAL_PARAM_DEFAULTS.coverArtEnabled ? () => gp.setCoverArtEnabled(GLOBAL_PARAM_DEFAULTS.coverArtEnabled) : undefined} />
         <ToggleSwitch
           checked={gp.coverArtEnabled}
           onChange={gp.setCoverArtEnabled}

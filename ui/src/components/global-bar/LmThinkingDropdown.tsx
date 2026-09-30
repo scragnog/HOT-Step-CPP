@@ -12,6 +12,7 @@ import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { SeedManagerDrawer } from './SeedManagerDrawer';
+import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
 import type { LmRepMode } from '../../types';
 
 /** One line each on what the mode costs you, since the audible trade-off is
@@ -62,27 +63,32 @@ export const LmThinkingDropdown: React.FC = () => {
           label={t('lm.cotCaption')}
           className="text-sm text-zinc-600 dark:text-zinc-400"
           info={t('lm.cotCaptionInfo', 'Rewrites your caption into a fuller style description before generation. Off: your caption is sent to the LM exactly as typed.')}
+          onReset={gp.useCotCaption !== GLOBAL_PARAM_DEFAULTS.useCotCaption ? () => gp.setUseCotCaption(GLOBAL_PARAM_DEFAULTS.useCotCaption) : undefined}
         />
         <Toggle checked={gp.useCotCaption} onChange={gp.setUseCotCaption} accent="purple" size="sm" />
       </div>
 
       <Slider label="Temperature" value={gp.lmTemperature}
         onChange={gp.setLmTemperature} min={0} max={2} step={0.01} showInput
+        defaultValue={GLOBAL_PARAM_DEFAULTS.lmTemperature}
         infoMeta="default 0.8 · range 0-2"
         info="How varied the LM's audio-code choices are. Higher makes each generation more different from the last; lower makes it more predictable and closer to the LM's single most likely output." />
 
       <Slider label="CFG Scale" value={gp.lmCfgScale}
         onChange={gp.setLmCfgScale} min={0} max={10} step={0.1} showInput
+        defaultValue={GLOBAL_PARAM_DEFAULTS.lmCfgScale}
         infoMeta="default 2.2 · range 0-10"
         info="Guidance strength for the LM itself, separate from the DiT's own CFG. Higher pushes generation harder toward the caption at the cost of variety; lower lets the LM wander further from what you asked for." />
 
       <Slider label="Top-K" value={gp.lmTopK}
         onChange={gp.setLmTopK} min={0} max={200} step={1} showInput
+        defaultValue={GLOBAL_PARAM_DEFAULTS.lmTopK}
         infoMeta="default 0 (off) · range 0-200"
         info="Limits audio-code sampling to the K most likely tokens at each step. Lower narrows the LM to safer, more predictable choices; 0 turns the limit off and lets the full distribution through." />
 
       <Slider label="Top-P" value={gp.lmTopP}
         onChange={gp.setLmTopP} min={0} max={1} step={0.01} showInput
+        defaultValue={GLOBAL_PARAM_DEFAULTS.lmTopP}
         infoMeta="default 0.92 · range 0-1"
         info="Nucleus sampling threshold: only tokens whose combined probability reaches this fraction are considered. Lower keeps only the most confident choices; higher (toward 1) lets rarer tokens through." />
 
@@ -91,6 +97,7 @@ export const LmThinkingDropdown: React.FC = () => {
           sharpen the code distribution into repetition attractors). */}
       <Slider label="Repetition Penalty" value={gp.lmRepPenalty}
         onChange={gp.setLmRepPenalty} min={1.0} max={1.5} step={0.01} showInput
+        defaultValue={GLOBAL_PARAM_DEFAULTS.lmRepPenalty}
         infoMeta="default 1.1 · range 1.0-1.5"
         info="Penalises audio codes the LM used recently, to break stuck loops. Raising it discourages repetition harder, which can also flatten intentional musical restatement; 1.0 turns the penalty off." />
       {gp.lmRepPenalty > 1.0 && (
@@ -101,6 +108,7 @@ export const LmThinkingDropdown: React.FC = () => {
               className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
               rootClassName="block mb-1.5"
               info="Which recently-used codes the repetition penalty counts against, and how it scores them. Shown only while Repetition Penalty is above 1.0; each mode's trade-off is explained below once picked."
+              onReset={gp.lmRepMode !== GLOBAL_PARAM_DEFAULTS.lmRepMode ? () => gp.setLmRepMode(GLOBAL_PARAM_DEFAULTS.lmRepMode) : undefined}
             />
             <StyledSelect
               accent="purple"
@@ -118,6 +126,7 @@ export const LmThinkingDropdown: React.FC = () => {
 
           <Slider label={`Rep. Window (codes) — ${(gp.lmRepWindow / 5).toFixed(1)}s`} value={gp.lmRepWindow}
             onChange={gp.setLmRepWindow} min={8} max={256} step={8} showInput
+            defaultValue={GLOBAL_PARAM_DEFAULTS.lmRepWindow}
             infoMeta="default 64 codes (12.8s) · range 8-256"
             info="How far back the repetition penalty looks, in audio codes (5 per second). Raising it makes the penalty catch loops over a longer span; lowering it only watches recent codes, so slower loops slip through." />
 
@@ -125,10 +134,12 @@ export const LmThinkingDropdown: React.FC = () => {
             <>
               <Slider label="DRY Base" value={gp.lmDryBase}
                 onChange={gp.setLmDryBase} min={1.05} max={4} step={0.05} showInput
+                defaultValue={GLOBAL_PARAM_DEFAULTS.lmDryBase}
                 infoMeta="default 1.75 · range 1.05-4"
                 info="How fast the DRY penalty grows with the length of a verbatim repeat. Higher shuts down a repeating loop faster once it starts; lower lets a repeat run longer before the penalty bites." />
               <Slider label={`DRY Min Match — ${(gp.lmDryMinLen / 5).toFixed(1)}s`} value={gp.lmDryMinLen}
                 onChange={gp.setLmDryMinLen} min={2} max={32} step={1} showInput
+                defaultValue={GLOBAL_PARAM_DEFAULTS.lmDryMinLen}
                 infoMeta="default 3 codes (0.6s) · range 2-32"
                 info="The shortest verbatim repeat DRY mode acts on, in audio codes (5 per second). Raise it if sustained textures or held notes get penalised as if they were loops; lower it to catch shorter repeats." />
             </>
@@ -141,6 +152,7 @@ export const LmThinkingDropdown: React.FC = () => {
           label={t('lm.negativePrompt')}
           className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5"
           info="Text describing what the LM should steer audio-code generation away from. Leave it as the default to apply no negative conditioning; replace it to push generation away from specific qualities."
+          onReset={gp.lmNegativePrompt !== GLOBAL_PARAM_DEFAULTS.lmNegativePrompt ? () => gp.setLmNegativePrompt(GLOBAL_PARAM_DEFAULTS.lmNegativePrompt) : undefined}
         />
         <input className={inputClasses} value={gp.lmNegativePrompt}
           onChange={e => gp.setLmNegativePrompt(e.target.value)}
@@ -163,6 +175,7 @@ export const LmThinkingDropdown: React.FC = () => {
               label="Step Count"
               className="text-xs text-zinc-500"
               info="On: pick an absolute number of conditioning steps (Codes Steps), unaffected by the Inference Steps setting. Off: set a fraction of the step budget instead (Strength)."
+              onReset={gp.lmCodesMode !== GLOBAL_PARAM_DEFAULTS.lmCodesMode ? () => gp.setLmCodesMode(GLOBAL_PARAM_DEFAULTS.lmCodesMode) : undefined}
             />
             <Toggle checked={gp.lmCodesMode === 'steps'}
               onChange={v => gp.setLmCodesMode(v ? 'steps' : 'ratio')} accent="sky" size="sm" />
@@ -172,11 +185,13 @@ export const LmThinkingDropdown: React.FC = () => {
           <Slider label={`Codes Steps — first ${Math.min(gp.lmCodesSteps, gp.inferenceSteps)} of ${gp.inferenceSteps}`}
             value={gp.lmCodesSteps} onChange={gp.setLmCodesSteps}
             min={0} max={gp.inferenceSteps} step={1} showInput
+            defaultValue={GLOBAL_PARAM_DEFAULTS.lmCodesSteps}
             infoMeta="default 6 steps"
             info="Codes condition exactly this many steps, regardless of the Steps setting. Raising it lets the LM's audio codes steer more of the DiT schedule; at the maximum they apply to every step." />
         ) : (
           <Slider label="Strength" value={gp.lmCodesStrength}
             onChange={gp.setLmCodesStrength} min={0} max={1} step={0.05} showInput
+            defaultValue={GLOBAL_PARAM_DEFAULTS.lmCodesStrength}
             infoMeta="default 1.0 · range 0-1"
             info="Fraction of the DiT step budget the LM's audio codes condition. Higher gives the codes more influence over generation; lower shrinks their reach, leaving more steps unconditioned by them." />
         )}
@@ -203,7 +218,8 @@ export const LmThinkingDropdown: React.FC = () => {
             <ParamLabel label="Use DiT Seed" className="text-xs text-zinc-500"
               info={gp.lmSeedFollowsDit
                 ? 'Tied to the Generation seed — a locked seed makes both deterministic, a random one makes both random.'
-                : 'Drives caption, lyric and audio-code sampling independently of the Generation seed.'} />
+                : 'Drives caption, lyric and audio-code sampling independently of the Generation seed.'}
+              onReset={gp.lmSeedFollowsDit !== GLOBAL_PARAM_DEFAULTS.lmSeedFollowsDit ? () => gp.setLmSeedFollowsDit(GLOBAL_PARAM_DEFAULTS.lmSeedFollowsDit) : undefined} />
             <Toggle checked={gp.lmSeedFollowsDit} onChange={gp.setLmSeedFollowsDit} accent="sky" size="sm" />
           </div>
         </div>
