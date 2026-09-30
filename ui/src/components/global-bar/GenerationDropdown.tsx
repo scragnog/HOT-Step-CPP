@@ -168,7 +168,7 @@ export const GenerationDropdown: React.FC = () => {
         <div className="flex items-center justify-between mb-1.5">
           <ParamLabel label="Shift" className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
             info="Timestep shift (sigma). Biases the schedule toward the noisy end, trading fine detail for structure. Auto derives it from the duration and the step count."
-            onReset={gp.shift !== -1 && gp.shift !== GLOBAL_PARAM_DEFAULTS.shift ? () => gp.setShift(GLOBAL_PARAM_DEFAULTS.shift) : undefined} />
+            onReset={gp.shift !== GLOBAL_PARAM_DEFAULTS.shift ? () => gp.setShift(GLOBAL_PARAM_DEFAULTS.shift) : undefined} />
           <button
             onClick={() => {
               if (gp.shift === -1) {
@@ -381,7 +381,8 @@ export const GenerationDropdown: React.FC = () => {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <ParamLabel label="Stage A" className="text-[10px] text-purple-400" rootClassName="flex mb-1"
-                      info="The scheduler that runs before the crossover point." />
+                      info="The scheduler that runs before the crossover point."
+                      onReset={stageA !== 'bong_tangent' ? () => update('bong_tangent', stageB, crossover, split) : undefined} />
                     <StyledSelect accent="purple" className={selectClasses} value={stageA}
                       onChange={(v: string) => update(v, stageB, crossover, split)}
                       options={registry.schedulers.length > 0 ? (
@@ -397,7 +398,8 @@ export const GenerationDropdown: React.FC = () => {
                   </div>
                   <div>
                     <ParamLabel label="Stage B" className="text-[10px] text-purple-400" rootClassName="flex mb-1"
-                      info="The scheduler that runs after the crossover point." />
+                      info="The scheduler that runs after the crossover point."
+                      onReset={stageB !== 'linear' ? () => update(stageA, 'linear', crossover, split) : undefined} />
                     <StyledSelect accent="purple" className={selectClasses} value={stageB}
                       onChange={(v: string) => update(stageA, v, crossover, split)}
                       options={registry.schedulers.length > 0 ? (
@@ -598,7 +600,8 @@ export const GenerationDropdown: React.FC = () => {
               <Toggle checked={gp.dcwEnabled} onChange={gp.setDcwEnabled} accent="emerald" />
               <ParamLabel label="DCW Correction" underline={false}
                 className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider"
-                info="Wavelet-domain SNR-t bias correction (CVPR 2026). The scaler is dynamically modulated by timestep." />
+                info="Wavelet-domain SNR-t bias correction (CVPR 2026). The scaler is dynamically modulated by timestep."
+                onReset={gp.dcwEnabled !== GLOBAL_PARAM_DEFAULTS.dcwEnabled ? () => gp.setDcwEnabled(GLOBAL_PARAM_DEFAULTS.dcwEnabled) : undefined} />
             </div>
           </div>
           {gp.dcwEnabled && (
@@ -658,7 +661,8 @@ export const GenerationDropdown: React.FC = () => {
               <Toggle checked={gp.autoTrimEnabled} onChange={gp.setAutoTrimEnabled} accent="amber" />
               <ParamLabel label="Auto-Trim Endings" underline={false}
                 className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider"
-                info="Generates extra audio beyond the requested duration, then trims at the natural song ending. The fade-out only applies when no clean ending is found and the trim is forced at the original duration." />
+                info="Generates extra audio beyond the requested duration, then trims at the natural song ending. The fade-out only applies when no clean ending is found and the trim is forced at the original duration."
+                onReset={gp.autoTrimEnabled !== GLOBAL_PARAM_DEFAULTS.autoTrimEnabled ? () => gp.setAutoTrimEnabled(GLOBAL_PARAM_DEFAULTS.autoTrimEnabled) : undefined} />
             </div>
           </div>
           {gp.autoTrimEnabled && (
@@ -744,7 +748,8 @@ export const GenerationDropdown: React.FC = () => {
               <Toggle checked={gp.denoiseStrength > 0} onChange={(on) => gp.setDenoiseStrength(on ? 0.5 : 0)} accent="amber" />
               <ParamLabel label="Denoiser" underline={false}
                 className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider"
-                info="Spectral gate that removes VAE fuzz after decode. Higher strength = more aggressive noise suppression." />
+                info="Spectral gate that removes VAE fuzz after decode. Higher strength = more aggressive noise suppression."
+                onReset={gp.denoiseStrength !== GLOBAL_PARAM_DEFAULTS.denoiseStrength ? () => gp.setDenoiseStrength(GLOBAL_PARAM_DEFAULTS.denoiseStrength) : undefined} />
             </div>
           </div>
           {gp.denoiseStrength > 0 && (
@@ -792,7 +797,8 @@ export const GenerationDropdown: React.FC = () => {
               <Toggle checked={lssStrength > 0} onChange={(on) => setLssStrength(on ? 0.65 : 0)} accent="teal" />
               <ParamLabel label="LSS" underline={false}
                 className="text-[10px] font-semibold text-teal-400 uppercase tracking-wider"
-                info="Latent Spectral Suppressor (MDMAchine): gates quiet latent channels before VAE decode. Channels below the variance threshold are attenuated toward 1 minus strength." />
+                info="Latent Spectral Suppressor (MDMAchine): gates quiet latent channels before VAE decode. Channels below the variance threshold are attenuated toward 1 minus strength."
+                onReset={lssStrength !== GLOBAL_PARAM_DEFAULTS.lssStrength ? () => setLssStrength(GLOBAL_PARAM_DEFAULTS.lssStrength) : undefined} />
             </div>
           </div>
           {lssStrength > 0 && (

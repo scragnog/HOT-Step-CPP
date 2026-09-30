@@ -186,7 +186,7 @@ export const ParamLabel: React.FC<Props> = ({
     <span
       role="button"
       tabIndex={0}
-      aria-label={t('paramLabel.resetToDefault', 'Reset to default')}
+      aria-label={t('paramLabel.resetToDefault', 'Reset {{label}} to default', { label })}
       onClick={(e) => { e.preventDefault(); e.stopPropagation(); onReset(); }}
       onKeyDown={(e) => {
         if (e.key !== 'Enter' && e.key !== ' ') return;

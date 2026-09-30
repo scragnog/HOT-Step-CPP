@@ -1,6 +1,6 @@
 {
   "translation": {
-    "paramLabel.resetToDefault": "Reset to default",
+    "paramLabel.resetToDefault": "Reset {{label}} to default",
     "trainingStudio.yue2.method.autoOutput": "Adapters are saved in your global adapters folder under yue2-joint-adapters/triggerword_date_time.",
     "trainingStudio.yue2.method.autoTrainHint": "Start training prepares the dataset automatically, then trains AR and NAR together. Unchanged prepared data is reused.",
     "trainingStudio.yue2.method.autoPrepareAdvanced": "Advanced: dataset preparation and model paths",
