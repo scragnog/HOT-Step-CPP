@@ -51,10 +51,13 @@ export interface ToggleProps {
   className?: string;
   title?: string;
   'aria-label'?: string;
+  /** The value to restore when the reset icon is clicked. Set this to show the
+   *  icon while `checked` differs from it. */
+  defaultValue?: boolean;
 }
 
 export const Toggle: React.FC<ToggleProps> = ({
-  checked, onChange, accent = 'pink', size = 'md', disabled = false, id, label, info, meta, className = '', title, 'aria-label': ariaLabel,
+  checked, onChange, accent = 'pink', size = 'md', disabled = false, id, label, info, meta, className = '', title, 'aria-label': ariaLabel, defaultValue,
 }) => {
   const s = SIZE[size];
   const button = (
@@ -84,6 +87,7 @@ export const Toggle: React.FC<ToggleProps> = ({
         underline={!!info}
         className="text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none"
         rootClassName="min-w-0"
+        onReset={defaultValue !== undefined && checked !== defaultValue && !disabled ? () => onChange(defaultValue) : undefined}
       />
     </div>
   );

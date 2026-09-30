@@ -78,6 +78,9 @@ download list in [Models](models.md).
 | Generation Seed | 0 to 2147483647 | Random | See [Seed and the Seed Manager](#seed-and-the-seed-manager). |
 | Batch Size | 1 to 9 | 1 | See [Batch size](#batch-size). |
 
+A small reset arrow appears beside a label whenever its value has moved from the default above; click
+it to snap that one field back.
+
 ### Solver, schedule and guidance
 
 These three pickers are Lua plugins, so the lists grow when a plugin is added and each

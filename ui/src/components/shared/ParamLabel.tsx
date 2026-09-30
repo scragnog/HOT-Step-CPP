@@ -36,7 +36,8 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
-import { HelpCircle } from 'lucide-react';
+import { HelpCircle, RotateCcw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 const CARD_W = 340;
 const GAP = 10;      // breathing room between the card and whatever it flanks
@@ -59,6 +60,9 @@ interface Props {
    *  headings, where the whole row is already an affordance and the underline
    *  reads as noise under uppercase tracking. */
   underline?: boolean;
+  /** Shows a reset-to-default icon after the help icon. Pass this only while
+   *  the value differs from its default — the caller decides visibility. */
+  onReset?: () => void;
 }
 
 interface CardPos {
@@ -95,7 +99,9 @@ export const ParamLabel: React.FC<Props> = ({
   className = 'text-xs font-semibold text-zinc-600 dark:text-zinc-400',
   rootClassName = '',
   underline = true,
+  onReset,
 }) => {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<CardPos | null>(null);
   const anchorRef = useRef<HTMLSpanElement>(null);
@@ -176,7 +182,33 @@ export const ParamLabel: React.FC<Props> = ({
     };
   }, [open, measure]);
 
-  if (!info) return <span className={`${className} ${rootClassName}`}>{label}</span>;
+  const resetIcon = onReset && (
+    <span
+      role="button"
+      tabIndex={0}
+      aria-label={t('paramLabel.resetToDefault', 'Reset to default')}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onReset(); }}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        e.stopPropagation();
+        onReset();
+      }}
+      className="shrink-0 inline-flex text-zinc-400/70 hover:text-amber-500 focus:text-amber-500 outline-none transition-colors cursor-pointer"
+    >
+      <RotateCcw size={12} />
+    </span>
+  );
+
+  if (!info) {
+    if (!onReset) return <span className={`${className} ${rootClassName}`}>{label}</span>;
+    return (
+      <span className={`inline-flex items-center gap-1 w-fit ${rootClassName}`}>
+        <span className={className}>{label}</span>
+        {resetIcon}
+      </span>
+    );
+  }
 
   const show = () => { cancelHide(); setOpen(true); };
 
@@ -208,6 +240,7 @@ export const ParamLabel: React.FC<Props> = ({
       >
         <HelpCircle size={12} />
       </span>
+      {resetIcon}
 
       {open && pos && ReactDOM.createPortal(
         <div

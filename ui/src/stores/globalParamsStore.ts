@@ -35,6 +35,156 @@ function writeKey<T>(key: string, value: T): void {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* full */ }
 }
 
+// -- Default values --
+//
+// Every field's localStorage fallback, in one place, so a control can show a
+// "reset to default" affordance without hard-coding the literal a second time.
+// Values here must match what readKey() below actually falls back to; this
+// table is a move, not an edit.
+export const GLOBAL_PARAM_DEFAULTS = {
+  ditModel: '',
+  lmModel: '',
+  vaeModel: '',
+  lmAdapter: '',
+  lmAdapterScale: 1.0,
+  embeddingModel: '',
+  adapter: '',
+  adapterScale: 1.0,
+  adapterStack: [] as { path: string; scale: number }[],
+  adapterStackMode: 'blend',
+  adapterStackBudget: 0.75,
+  adapterSectionAlignAt: 0.55,
+  adapterSectionIsolation: 0.5,
+  adapterMode: 'runtime',
+  adapterRuntimeQuant: 'bf16',
+  adapterMergeLowVram: false,
+  adapterGroupScales: {
+    self_attn: 1.0, cross_attn: 1.0, mlp: 1.0, cond_embed: 1.0, time_embed: 0.0, proj_in: 0.0,
+  },
+  rebaseSource: '',
+  rebaseBeta: 0.75,
+  adapterFolder: '',
+  lmAdapterFolder: '',
+  advancedAdapters: false,
+  noAdapterRender: false,
+  adaptersOpen: false,
+  inferenceSteps: 12,
+  guidanceScale: 9.0,
+  cfgCutoffRatio: 1.0,
+  lmCfgCutoffRatio: 1.0,
+  cacheRatio: 0,
+  shift: 3.0,
+  // Backend-scoped (see BACKEND_SCOPED_FIELDS below).
+  inferMethod: 'euler',
+  scheduler: 'linear',
+  guidanceMode: 'apg',
+  pluginParams: {} as Record<string, string>,
+  backendParams: {} as Record<string, unknown>,
+  seed: 42,
+  randomSeed: true,
+  lmSeed: 42,
+  lmSeedFollowsDit: true,
+  batchSize: 1,
+  storkSubsteps: 10,
+  beatStability: 0.25,
+  frequencyDamping: 0.4,
+  temporalSmoothing: 0.13,
+  apgMomentum: 0.75,
+  apgNormThreshold: 2.5,
+  dcwEnabled: false,
+  dcwMode: 'double',
+  // Legacy fallback chain lives at the hs-dcwLowScaler readKey call below; this
+  // is the value that chain ultimately falls back to.
+  dcwLowScaler: 0.2,
+  dcwHighScaler: 0.2,
+  latentShift: 0.0,
+  latentRescale: 1.0,
+  customTimesteps: '',
+  denoiseStrength: 0.0,
+  denoiseSmoothing: 0.7,
+  denoiseMix: 0.25,
+  lssStrength: 0.0,
+  lssVarThresh: 0.15,
+  lssDcRemove: true,
+  autoTrimEnabled: false,
+  durationBuffer: 15,
+  autoTrimFadeMs: 2000,
+  skipLm: false,
+  skipLrc: false,
+  useCotCaption: true,
+  lmTemperature: 0.8,
+  lmCfgScale: 2.2,
+  lmTopK: 0,
+  lmTopP: 0.92,
+  lmRepPenalty: 1.1,
+  lmRepWindow: 64,
+  lmRepMode: 'presence' as LmRepMode,
+  lmDryBase: 1.75,
+  lmDryMinLen: 3,
+  lmNegativePrompt: 'NO USER INPUT',
+  lmCodesStrength: 1.0,
+  lmCodesMode: 'ratio' as 'ratio' | 'steps',
+  lmCodesSteps: 6,
+  postProcessingEnabled: true,
+  spectralLifterEnabled: false,
+  slDenoiseStrength: 0.3,
+  slNoiseFloor: 0.1,
+  slHfMix: 0.0,
+  slTransientBoost: 0.0,
+  slShimmerReduction: 6.0,
+  masteringEnabled: false,
+  masteringReference: '',
+  timbreReference: false,
+  timbreAudioPath: '',
+  vocalNaturalizerEnabled: false,
+  gainOffsetDb: 0,
+  naturalizeAmount: 0.5,
+  natVibratoRate: 4.5,
+  natVibratoDepth: 1.0,
+  natFormantStrength: 1.0,
+  natMetallicReduction: 1.0,
+  natQuantizationMask: 0.0,
+  natTransitionSmooth: 1.0,
+  ppVaeReencode: false,
+  ppVaeBlend: 0.0,
+  ppVaeUseOnnx: true,
+  stableStepOn: false,
+  stableStepStrength: 0.3,
+  stableStepBackend: 'auto',
+  stableStepAdapters: [] as Array<{ name: string; scale: number; enabled: boolean }>,
+  stableStepPreserveDynamics: true,
+  stableStepVocalPpVae: false,
+  stableStepVocalTrimDb: 0,
+  stableStepBlendMode: 'off',
+  stableStepCrossoverHz: 250,
+  stableStepCrossoverWidthHz: 200,
+  stableStepMix: 1.0,
+  stableStepSeed: 4242,
+  stableStepSeedFollowsDit: true,
+  stableStepSteps: 8,
+  stableStepSolver: '',
+  stableStepScheduler: '',
+  stableStepGuidanceMode: '',
+  stableStepGuidanceScale: 1.0,
+  coverArtEnabled: false,
+  coverArtSubject: '',
+  qualityEvalEnabled: false,
+  qualityEvalTarget: 'unmastered',
+  whisperLyricsEnabled: false,
+  whisperModel: '',
+  whisperLanguage: 'auto',
+  whisperBeamSize: 5,
+  whisperIsolateVocals: false,
+  yue2AlignLyrics: false,
+  postprocessEnabled: false,
+  postprocessPlugin: '',
+  useOrtVae: false,
+  lufsEnabled: false,
+  lufsPreset: 'spotify',
+  lufsTarget: -14,
+  lufsCeilingDb: -1,
+};
+
 // -- Per-backend settings scope --
 //
 // A handful of fields are NOT global: they are remembered per generation
@@ -55,15 +205,15 @@ function writeKey<T>(key: string, value: T): void {
 // Adding a field here is all it takes -- the initial hydrate, the backend
 // switch and the preset/profile writer all read this table.
 const BACKEND_SCOPED_FIELDS: { field: string; key: string; fallback: unknown }[] = [
-  { field: 'inferMethod',   key: 'hs-inferMethod',   fallback: 'euler' },
-  { field: 'scheduler',     key: 'hs-scheduler',     fallback: 'linear' },
-  { field: 'guidanceMode',  key: 'hs-guidanceMode',  fallback: 'apg' },
+  { field: 'inferMethod',   key: 'hs-inferMethod',   fallback: GLOBAL_PARAM_DEFAULTS.inferMethod },
+  { field: 'scheduler',     key: 'hs-scheduler',     fallback: GLOBAL_PARAM_DEFAULTS.scheduler },
+  { field: 'guidanceMode',  key: 'hs-guidanceMode',  fallback: GLOBAL_PARAM_DEFAULTS.guidanceMode },
   // The picks' declared params travel with the picks: "stork2:substeps" may
   // want a different value on each backend's sampler.
-  { field: 'pluginParams',  key: 'hs-pluginParams',  fallback: {} as Record<string, string> },
+  { field: 'pluginParams',  key: 'hs-pluginParams',  fallback: GLOBAL_PARAM_DEFAULTS.pluginParams },
   // Backend-declared extension knobs. Per backend by definition -- two
   // backends may each declare a knob called `steps` and mean different things.
-  { field: 'backendParams', key: 'hs-backendParams', fallback: {} as Record<string, unknown> },
+  { field: 'backendParams', key: 'hs-backendParams', fallback: GLOBAL_PARAM_DEFAULTS.backendParams },
 ];
 
 const BACKEND_SCOPED_KEYS: readonly string[] = BACKEND_SCOPED_FIELDS.map(f => f.key);
@@ -137,61 +287,59 @@ function mirrorActiveModels(patch: Record<string, string>): void {
 
 export const useGlobalParamsStore = create<any>()((set, get) => ({
   // -- State (initialised from localStorage) --
-  ditModel: readKey("hs-ditModel", ''),
-  lmModel: readKey("hs-lmModel", ''),
-  vaeModel: readKey("hs-vaeModel", ''),
-  lmAdapter: readKey("hs-lmAdapter", ''),
-  lmAdapterScale: readKey("hs-lmAdapterScale", 1.0),
-  embeddingModel: readKey("hs-embeddingModel", ''),
-  adapter: readKey("hs-adapter", ''),
-  adapterScale: readKey("hs-adapterScale", 1.0),
+  ditModel: readKey("hs-ditModel", GLOBAL_PARAM_DEFAULTS.ditModel),
+  lmModel: readKey("hs-lmModel", GLOBAL_PARAM_DEFAULTS.lmModel),
+  vaeModel: readKey("hs-vaeModel", GLOBAL_PARAM_DEFAULTS.vaeModel),
+  lmAdapter: readKey("hs-lmAdapter", GLOBAL_PARAM_DEFAULTS.lmAdapter),
+  lmAdapterScale: readKey("hs-lmAdapterScale", GLOBAL_PARAM_DEFAULTS.lmAdapterScale),
+  embeddingModel: readKey("hs-embeddingModel", GLOBAL_PARAM_DEFAULTS.embeddingModel),
+  adapter: readKey("hs-adapter", GLOBAL_PARAM_DEFAULTS.adapter),
+  adapterScale: readKey("hs-adapterScale", GLOBAL_PARAM_DEFAULTS.adapterScale),
   // Multi-adapter stack: a list of { path, scale } applied together, each with
   // its own scale. When non-empty it supersedes the single `adapter`. Group
   // scales, adapter mode and basin re-base apply globally to the whole stack.
-  adapterStack: readKey("hs-adapterStack", [] as { path: string; scale: number }[]),
+  adapterStack: readKey("hs-adapterStack", GLOBAL_PARAM_DEFAULTS.adapterStack),
   // Stack scaling mode:
   //  'sum'   — each entry's `scale` is its absolute scale; the engine sums them
   //            (can deliberately over-drive: Σ scale may exceed 1).
   //  'blend' — each entry's `scale` is a relative weight; the effective scales
   //            are normalised to the budget so Σ effective = adapterStackBudget,
   //            keeping combined strength constant as adapters are added.
-  adapterStackMode: readKey("hs-adapterStackMode", 'blend'),
-  adapterStackBudget: readKey("hs-adapterStackBudget", 0.75),
+  adapterStackMode: readKey("hs-adapterStackMode", GLOBAL_PARAM_DEFAULTS.adapterStackMode),
+  adapterStackBudget: readKey("hs-adapterStackBudget", GLOBAL_PARAM_DEFAULTS.adapterStackBudget),
   // Per-section masking (P2) tuning: alignment step fraction, and 0..1 regional
   // self-attention isolation (moderate default) to stop sections inheriting the
   // first section's voice.
-  adapterSectionAlignAt: readKey("hs-adapterSectionAlignAt", 0.55),
-  adapterSectionIsolation: readKey("hs-adapterSectionIsolation", 0.5),
-  adapterMode: readKey("hs-adapterMode", 'runtime'),
+  adapterSectionAlignAt: readKey("hs-adapterSectionAlignAt", GLOBAL_PARAM_DEFAULTS.adapterSectionAlignAt),
+  adapterSectionIsolation: readKey("hs-adapterSectionIsolation", GLOBAL_PARAM_DEFAULTS.adapterSectionIsolation),
+  adapterMode: readKey("hs-adapterMode", GLOBAL_PARAM_DEFAULTS.adapterMode),
   // Runtime adapter delta VRAM precision: 'bf16' (full), 'q8_0' (~½), 'q4_k' (~¼).
   // Lets many stacked adapters fit in VRAM; runtime mode only.
-  adapterRuntimeQuant: readKey("hs-adapterRuntimeQuant", 'bf16'),
+  adapterRuntimeQuant: readKey("hs-adapterRuntimeQuant", GLOBAL_PARAM_DEFAULTS.adapterRuntimeQuant),
   // Merge (low VRAM): re-encode merged weights to the base's native quant instead
   // of F32 promotion (~¼ the merged-DiT VRAM on a Q8 base). Merge mode only.
-  adapterMergeLowVram: readKey("hs-adapterMergeLowVram", false),
-  adapterGroupScales: readKey("hs-adapterGroupScales", {
-    self_attn: 1.0, cross_attn: 1.0, mlp: 1.0, cond_embed: 1.0, time_embed: 0.0, proj_in: 0.0,
-  }),
+  adapterMergeLowVram: readKey("hs-adapterMergeLowVram", GLOBAL_PARAM_DEFAULTS.adapterMergeLowVram),
+  adapterGroupScales: readKey("hs-adapterGroupScales", GLOBAL_PARAM_DEFAULTS.adapterGroupScales),
   // Basin re-base: nudge a cross-base adapter into the basin of the model it was
   // trained on. rebaseSource = DiT model name (the adapter's "home base").
   // Merge mode only. Remembered across sessions.
-  rebaseSource: readKey("hs-rebaseSource", ''),
-  rebaseBeta: readKey("hs-rebaseBeta", 0.75),
-  adapterFolder: readKey("hs-adapterFolder", ''),
+  rebaseSource: readKey("hs-rebaseSource", GLOBAL_PARAM_DEFAULTS.rebaseSource),
+  rebaseBeta: readKey("hs-rebaseBeta", GLOBAL_PARAM_DEFAULTS.rebaseBeta),
+  adapterFolder: readKey("hs-adapterFolder", GLOBAL_PARAM_DEFAULTS.adapterFolder),
   // '' = server default (hot-step-cpp/adapters/lm). Point at your archive to
   // pick planner adapters from there, like the DiT adapter folder.
-  lmAdapterFolder: readKey("hs-lmAdapterFolder", ''),
-  advancedAdapters: readKey("hs-advancedAdapters", false),
+  lmAdapterFolder: readKey("hs-lmAdapterFolder", GLOBAL_PARAM_DEFAULTS.lmAdapterFolder),
+  advancedAdapters: readKey("hs-advancedAdapters", GLOBAL_PARAM_DEFAULTS.advancedAdapters),
   // Optional 3rd output: low-step render on the bare DiT (adapter bypassed,
   // LM adapter kept, no post-processing) for A/B-ing the DiT adapter by ear.
-  noAdapterRender: readKey("hs-noAdapterRender", false),
-  adaptersOpen: readKey("hs-adaptersOpen", false),
-  inferenceSteps: readKey("hs-inferenceSteps", 12),
-  guidanceScale: readKey("hs-guidanceScale", 9.0),
-  cfgCutoffRatio: readKey("hs-cfgCutoffRatio", 1.0),
-  lmCfgCutoffRatio: readKey("hs-lmCfgCutoffRatio", 1.0),
-  cacheRatio: readKey("hs-cacheRatio", 0),
-  shift: readKey("hs-shift", 3.0),
+  noAdapterRender: readKey("hs-noAdapterRender", GLOBAL_PARAM_DEFAULTS.noAdapterRender),
+  adaptersOpen: readKey("hs-adaptersOpen", GLOBAL_PARAM_DEFAULTS.adaptersOpen),
+  inferenceSteps: readKey("hs-inferenceSteps", GLOBAL_PARAM_DEFAULTS.inferenceSteps),
+  guidanceScale: readKey("hs-guidanceScale", GLOBAL_PARAM_DEFAULTS.guidanceScale),
+  cfgCutoffRatio: readKey("hs-cfgCutoffRatio", GLOBAL_PARAM_DEFAULTS.cfgCutoffRatio),
+  lmCfgCutoffRatio: readKey("hs-lmCfgCutoffRatio", GLOBAL_PARAM_DEFAULTS.lmCfgCutoffRatio),
+  cacheRatio: readKey("hs-cacheRatio", GLOBAL_PARAM_DEFAULTS.cacheRatio),
+  shift: readKey("hs-shift", GLOBAL_PARAM_DEFAULTS.shift),
   // DiT self-attention reach override. PARKED — the UI control is removed and
   // this is pinned to -1 (= the model's own 128). Deliberately NOT read from
   // localStorage: anyone who moved the slider while it was exposed still has a
@@ -204,8 +352,8 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   // re-read on every backend switch by the subscription at the bottom of this
   // file. Changing a solver in MiniMax-Music3 mode must not touch ACE-Step's.
   ...hydrateBackendScoped(),
-  seed: readKey("hs-seed", 42),
-  randomSeed: readKey("hs-randomSeed", true),
+  seed: readKey("hs-seed", GLOBAL_PARAM_DEFAULTS.seed),
+  randomSeed: readKey("hs-randomSeed", GLOBAL_PARAM_DEFAULTS.randomSeed),
   // `backendParams` -- backend-declared knobs (capabilities().extensions),
   // keyed by the schema's `key`. One persisted bag rather than a named field
   // per knob: the whole point of the extension mechanism is that a backend can
@@ -213,137 +361,137 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   // below. Hydrated by the ...hydrateBackendScoped() spread above (per backend).
   // LM Seed — independent of the DiT/generation seed above, unless tied
   // via lmSeedFollowsDit (default true = original tied behavior).
-  lmSeed: readKey("hs-lmSeed", 42),
-  lmSeedFollowsDit: readKey("hs-lmSeedFollowsDit", true),
-  batchSize: readKey("hs-batchSize", 1),
-  storkSubsteps: readKey("hs-storkSubsteps", 10),
-  beatStability: readKey("hs-beatStability", 0.25),
-  frequencyDamping: readKey("hs-frequencyDamping", 0.4),
-  temporalSmoothing: readKey("hs-temporalSmoothing", 0.13),
-  apgMomentum: readKey("hs-apgMomentum", 0.75),
-  apgNormThreshold: readKey("hs-apgNormThreshold", 2.5),
-  dcwEnabled: readKey("hs-dcwEnabled", false),
-  dcwMode: readKey("hs-dcwMode", 'double'),
-  dcwLowScaler: readKey("hs-dcwLowScaler", readKey("hs-dcwScaler", 0.2)),
-  dcwHighScaler: readKey("hs-dcwHighScaler", 0.2),
-  latentShift: readKey("hs-latentShift", 0.0),
-  latentRescale: readKey("hs-latentRescale", 1.0),
-  customTimesteps: readKey("hs-customTimesteps", ''),
-  denoiseStrength: readKey("hs-denoiseStrength", 0.0),
-  denoiseSmoothing: readKey("hs-denoiseSmoothing", 0.7),
-  denoiseMix: readKey("hs-denoiseMix", 0.25),
-  lssStrength: readKey("hs-lssStrength", 0.0),
-  lssVarThresh: readKey("hs-lssVarThresh", 0.15),
-  lssDcRemove: readKey("hs-lssDcRemove", true),
-  autoTrimEnabled: readKey("hs-autoTrimEnabled", false),
-  durationBuffer: readKey("hs-durationBuffer", 15),
-  autoTrimFadeMs: readKey("hs-autoTrimFadeMs", 2000),
-  skipLm: readKey("hs-skipLm", false),
-  skipLrc: readKey("hs-skipLrc", false),
-  useCotCaption: readKey("hs-useCotCaption", true),
-  lmTemperature: readKey("hs-lmTemperature", 0.8),
-  lmCfgScale: readKey("hs-lmCfgScale", 2.2),
-  lmTopK: readKey("hs-lmTopK", 0),
-  lmTopP: readKey("hs-lmTopP", 0.92),
-  lmRepPenalty: readKey("hs-lmRepPenalty", 1.1),
-  lmRepWindow: readKey("hs-lmRepWindow", 64),
-  lmRepMode: readKey<LmRepMode>("hs-lmRepMode", 'presence'),
-  lmDryBase: readKey("hs-lmDryBase", 1.75),
-  lmDryMinLen: readKey("hs-lmDryMinLen", 3),
-  lmNegativePrompt: readKey("hs-lmNegativePrompt", 'NO USER INPUT'),
-  lmCodesStrength: readKey("hs-lmCodesStrength", 1.0),
+  lmSeed: readKey("hs-lmSeed", GLOBAL_PARAM_DEFAULTS.lmSeed),
+  lmSeedFollowsDit: readKey("hs-lmSeedFollowsDit", GLOBAL_PARAM_DEFAULTS.lmSeedFollowsDit),
+  batchSize: readKey("hs-batchSize", GLOBAL_PARAM_DEFAULTS.batchSize),
+  storkSubsteps: readKey("hs-storkSubsteps", GLOBAL_PARAM_DEFAULTS.storkSubsteps),
+  beatStability: readKey("hs-beatStability", GLOBAL_PARAM_DEFAULTS.beatStability),
+  frequencyDamping: readKey("hs-frequencyDamping", GLOBAL_PARAM_DEFAULTS.frequencyDamping),
+  temporalSmoothing: readKey("hs-temporalSmoothing", GLOBAL_PARAM_DEFAULTS.temporalSmoothing),
+  apgMomentum: readKey("hs-apgMomentum", GLOBAL_PARAM_DEFAULTS.apgMomentum),
+  apgNormThreshold: readKey("hs-apgNormThreshold", GLOBAL_PARAM_DEFAULTS.apgNormThreshold),
+  dcwEnabled: readKey("hs-dcwEnabled", GLOBAL_PARAM_DEFAULTS.dcwEnabled),
+  dcwMode: readKey("hs-dcwMode", GLOBAL_PARAM_DEFAULTS.dcwMode),
+  dcwLowScaler: readKey("hs-dcwLowScaler", readKey("hs-dcwScaler", GLOBAL_PARAM_DEFAULTS.dcwLowScaler)),
+  dcwHighScaler: readKey("hs-dcwHighScaler", GLOBAL_PARAM_DEFAULTS.dcwHighScaler),
+  latentShift: readKey("hs-latentShift", GLOBAL_PARAM_DEFAULTS.latentShift),
+  latentRescale: readKey("hs-latentRescale", GLOBAL_PARAM_DEFAULTS.latentRescale),
+  customTimesteps: readKey("hs-customTimesteps", GLOBAL_PARAM_DEFAULTS.customTimesteps),
+  denoiseStrength: readKey("hs-denoiseStrength", GLOBAL_PARAM_DEFAULTS.denoiseStrength),
+  denoiseSmoothing: readKey("hs-denoiseSmoothing", GLOBAL_PARAM_DEFAULTS.denoiseSmoothing),
+  denoiseMix: readKey("hs-denoiseMix", GLOBAL_PARAM_DEFAULTS.denoiseMix),
+  lssStrength: readKey("hs-lssStrength", GLOBAL_PARAM_DEFAULTS.lssStrength),
+  lssVarThresh: readKey("hs-lssVarThresh", GLOBAL_PARAM_DEFAULTS.lssVarThresh),
+  lssDcRemove: readKey("hs-lssDcRemove", GLOBAL_PARAM_DEFAULTS.lssDcRemove),
+  autoTrimEnabled: readKey("hs-autoTrimEnabled", GLOBAL_PARAM_DEFAULTS.autoTrimEnabled),
+  durationBuffer: readKey("hs-durationBuffer", GLOBAL_PARAM_DEFAULTS.durationBuffer),
+  autoTrimFadeMs: readKey("hs-autoTrimFadeMs", GLOBAL_PARAM_DEFAULTS.autoTrimFadeMs),
+  skipLm: readKey("hs-skipLm", GLOBAL_PARAM_DEFAULTS.skipLm),
+  skipLrc: readKey("hs-skipLrc", GLOBAL_PARAM_DEFAULTS.skipLrc),
+  useCotCaption: readKey("hs-useCotCaption", GLOBAL_PARAM_DEFAULTS.useCotCaption),
+  lmTemperature: readKey("hs-lmTemperature", GLOBAL_PARAM_DEFAULTS.lmTemperature),
+  lmCfgScale: readKey("hs-lmCfgScale", GLOBAL_PARAM_DEFAULTS.lmCfgScale),
+  lmTopK: readKey("hs-lmTopK", GLOBAL_PARAM_DEFAULTS.lmTopK),
+  lmTopP: readKey("hs-lmTopP", GLOBAL_PARAM_DEFAULTS.lmTopP),
+  lmRepPenalty: readKey("hs-lmRepPenalty", GLOBAL_PARAM_DEFAULTS.lmRepPenalty),
+  lmRepWindow: readKey("hs-lmRepWindow", GLOBAL_PARAM_DEFAULTS.lmRepWindow),
+  lmRepMode: readKey<LmRepMode>("hs-lmRepMode", GLOBAL_PARAM_DEFAULTS.lmRepMode),
+  lmDryBase: readKey("hs-lmDryBase", GLOBAL_PARAM_DEFAULTS.lmDryBase),
+  lmDryMinLen: readKey("hs-lmDryMinLen", GLOBAL_PARAM_DEFAULTS.lmDryMinLen),
+  lmNegativePrompt: readKey("hs-lmNegativePrompt", GLOBAL_PARAM_DEFAULTS.lmNegativePrompt),
+  lmCodesStrength: readKey("hs-lmCodesStrength", GLOBAL_PARAM_DEFAULTS.lmCodesStrength),
   // LM codes window mode: 'ratio' scales by fraction of the step budget
   // (lmCodesStrength), 'steps' pins an absolute step count (lmCodesSteps).
   // Both collapse to audio_cover_strength at request build — no engine field.
-  lmCodesMode: readKey("hs-lmCodesMode", 'ratio' as 'ratio' | 'steps'),
-  lmCodesSteps: readKey("hs-lmCodesSteps", 6),
-  postProcessingEnabled: readKey("hs-postProcessingEnabled", true),
-  spectralLifterEnabled: readKey("hs-spectralLifterEnabled", false),
-  slDenoiseStrength: readKey("hs-slDenoiseStrength", 0.3),
-  slNoiseFloor: readKey("hs-slNoiseFloor", 0.1),
-  slHfMix: readKey("hs-slHfMix", 0.0),
-  slTransientBoost: readKey("hs-slTransientBoost", 0.0),
-  slShimmerReduction: readKey("hs-slShimmerReduction", 6.0),
-  masteringEnabled: readKey("hs-masteringEnabled", false),
-  masteringReference: readKey("hs-masteringReference", ''),
-  timbreReference: readKey("hs-timbreReference", false),
-  timbreAudioPath: readKey("hs-timbreAudioPath", ''),
-  vocalNaturalizerEnabled: readKey("hs-vocalNaturalizerEnabled", false),
-  gainOffsetDb: readKey("hs-gainOffsetDb", 0),
-  naturalizeAmount: readKey("hs-naturalizeAmount", 0.5),
-  natVibratoRate: readKey("hs-natVibratoRate", 4.5),
-  natVibratoDepth: readKey("hs-natVibratoDepth", 1.0),
-  natFormantStrength: readKey("hs-natFormantStrength", 1.0),
-  natMetallicReduction: readKey("hs-natMetallicReduction", 1.0),
-  natQuantizationMask: readKey("hs-natQuantizationMask", 0.0),
-  natTransitionSmooth: readKey("hs-natTransitionSmooth", 1.0),
-  ppVaeReencode: readKey("hs-ppVaeReencode", false),
-  ppVaeBlend: readKey("hs-ppVaeBlend", 0.0),
-  ppVaeUseOnnx: readKey("hs-ppVaeUseOnnx", true),
-  stableStepOn: readKey("hs-stableStepOn", false),
-  stableStepStrength: readKey("hs-stableStepStrength", 0.3),
+  lmCodesMode: readKey("hs-lmCodesMode", GLOBAL_PARAM_DEFAULTS.lmCodesMode),
+  lmCodesSteps: readKey("hs-lmCodesSteps", GLOBAL_PARAM_DEFAULTS.lmCodesSteps),
+  postProcessingEnabled: readKey("hs-postProcessingEnabled", GLOBAL_PARAM_DEFAULTS.postProcessingEnabled),
+  spectralLifterEnabled: readKey("hs-spectralLifterEnabled", GLOBAL_PARAM_DEFAULTS.spectralLifterEnabled),
+  slDenoiseStrength: readKey("hs-slDenoiseStrength", GLOBAL_PARAM_DEFAULTS.slDenoiseStrength),
+  slNoiseFloor: readKey("hs-slNoiseFloor", GLOBAL_PARAM_DEFAULTS.slNoiseFloor),
+  slHfMix: readKey("hs-slHfMix", GLOBAL_PARAM_DEFAULTS.slHfMix),
+  slTransientBoost: readKey("hs-slTransientBoost", GLOBAL_PARAM_DEFAULTS.slTransientBoost),
+  slShimmerReduction: readKey("hs-slShimmerReduction", GLOBAL_PARAM_DEFAULTS.slShimmerReduction),
+  masteringEnabled: readKey("hs-masteringEnabled", GLOBAL_PARAM_DEFAULTS.masteringEnabled),
+  masteringReference: readKey("hs-masteringReference", GLOBAL_PARAM_DEFAULTS.masteringReference),
+  timbreReference: readKey("hs-timbreReference", GLOBAL_PARAM_DEFAULTS.timbreReference),
+  timbreAudioPath: readKey("hs-timbreAudioPath", GLOBAL_PARAM_DEFAULTS.timbreAudioPath),
+  vocalNaturalizerEnabled: readKey("hs-vocalNaturalizerEnabled", GLOBAL_PARAM_DEFAULTS.vocalNaturalizerEnabled),
+  gainOffsetDb: readKey("hs-gainOffsetDb", GLOBAL_PARAM_DEFAULTS.gainOffsetDb),
+  naturalizeAmount: readKey("hs-naturalizeAmount", GLOBAL_PARAM_DEFAULTS.naturalizeAmount),
+  natVibratoRate: readKey("hs-natVibratoRate", GLOBAL_PARAM_DEFAULTS.natVibratoRate),
+  natVibratoDepth: readKey("hs-natVibratoDepth", GLOBAL_PARAM_DEFAULTS.natVibratoDepth),
+  natFormantStrength: readKey("hs-natFormantStrength", GLOBAL_PARAM_DEFAULTS.natFormantStrength),
+  natMetallicReduction: readKey("hs-natMetallicReduction", GLOBAL_PARAM_DEFAULTS.natMetallicReduction),
+  natQuantizationMask: readKey("hs-natQuantizationMask", GLOBAL_PARAM_DEFAULTS.natQuantizationMask),
+  natTransitionSmooth: readKey("hs-natTransitionSmooth", GLOBAL_PARAM_DEFAULTS.natTransitionSmooth),
+  ppVaeReencode: readKey("hs-ppVaeReencode", GLOBAL_PARAM_DEFAULTS.ppVaeReencode),
+  ppVaeBlend: readKey("hs-ppVaeBlend", GLOBAL_PARAM_DEFAULTS.ppVaeBlend),
+  ppVaeUseOnnx: readKey("hs-ppVaeUseOnnx", GLOBAL_PARAM_DEFAULTS.ppVaeUseOnnx),
+  stableStepOn: readKey("hs-stableStepOn", GLOBAL_PARAM_DEFAULTS.stableStepOn),
+  stableStepStrength: readKey("hs-stableStepStrength", GLOBAL_PARAM_DEFAULTS.stableStepStrength),
   // Engine backend for the SA3 refine: 'auto' (engine picks) | 'onnx'
   // (ONNX Runtime/TensorRT, NVIDIA) | 'gguf' (GGML — CUDA/Vulkan/CPU).
-  stableStepBackend: readKey("hs-stableStepBackend", 'auto'),
+  stableStepBackend: readKey("hs-stableStepBackend", GLOBAL_PARAM_DEFAULTS.stableStepBackend),
   // StableStep DoRA adapters: [{name, scale, enabled}] — persisted selection
-  stableStepAdapters: readKey("hs-stableStepAdapters", [] as Array<{ name: string; scale: number; enabled: boolean }>),
+  stableStepAdapters: readKey("hs-stableStepAdapters", GLOBAL_PARAM_DEFAULTS.stableStepAdapters),
   // Preserve source dynamics: envelope-match refined audio to the source
-  stableStepPreserveDynamics: readKey("hs-stableStepPreserveDynamics", true),
+  stableStepPreserveDynamics: readKey("hs-stableStepPreserveDynamics", GLOBAL_PARAM_DEFAULTS.stableStepPreserveDynamics),
   // PP-VAE re-encode of the vocal stem — OFF by default: the round trip is
   // lossy above ~4 kHz (see stableStepVocalPpVae in postProcessing.ts)
-  stableStepVocalPpVae: readKey("hs-stableStepVocalPpVae", false),
+  stableStepVocalPpVae: readKey("hs-stableStepVocalPpVae", GLOBAL_PARAM_DEFAULTS.stableStepVocalPpVae),
   // Taste trim on the recombined vocal. 0 keeps the source mix's own
   // vocal-to-bed ratio, which the server re-establishes after the refine.
-  stableStepVocalTrimDb: readKey("hs-stableStepVocalTrimDb", 0),
+  stableStepVocalTrimDb: readKey("hs-stableStepVocalTrimDb", GLOBAL_PARAM_DEFAULTS.stableStepVocalTrimDb),
   // Source blending: 'off' | 'crossover' (source lows + refined highs) | 'mix'
-  stableStepBlendMode: readKey("hs-stableStepBlendMode", 'off'),
-  stableStepCrossoverHz: readKey("hs-stableStepCrossoverHz", 250),
-  stableStepCrossoverWidthHz: readKey("hs-stableStepCrossoverWidthHz", 200),
-  stableStepMix: readKey("hs-stableStepMix", 1.0),
+  stableStepBlendMode: readKey("hs-stableStepBlendMode", GLOBAL_PARAM_DEFAULTS.stableStepBlendMode),
+  stableStepCrossoverHz: readKey("hs-stableStepCrossoverHz", GLOBAL_PARAM_DEFAULTS.stableStepCrossoverHz),
+  stableStepCrossoverWidthHz: readKey("hs-stableStepCrossoverWidthHz", GLOBAL_PARAM_DEFAULTS.stableStepCrossoverWidthHz),
+  stableStepMix: readKey("hs-stableStepMix", GLOBAL_PARAM_DEFAULTS.stableStepMix),
   // SA3 refine seed: follows the generation seed by default (LM-seed pattern)
-  stableStepSeed: readKey("hs-stableStepSeed", 4242),
-  stableStepSeedFollowsDit: readKey("hs-stableStepSeedFollowsDit", true),
+  stableStepSeed: readKey("hs-stableStepSeed", GLOBAL_PARAM_DEFAULTS.stableStepSeed),
+  stableStepSeedFollowsDit: readKey("hs-stableStepSeedFollowsDit", GLOBAL_PARAM_DEFAULTS.stableStepSeedFollowsDit),
   // SA3 sampler: steps + Lua solver/scheduler/guidance routing. Deliberately
   // SEPARATE fields from the generation-side inferMethod/scheduler/guidanceMode
   // — StableStep is a post-processing refine, and tying its sampler to the DiT's
   // would mean changing one silently changes the other.
-  stableStepSteps: readKey("hs-stableStepSteps", 8),
-  stableStepSolver: readKey("hs-stableStepSolver", ''),
-  stableStepScheduler: readKey("hs-stableStepScheduler", ''),
-  stableStepGuidanceMode: readKey("hs-stableStepGuidanceMode", ''),
-  stableStepGuidanceScale: readKey("hs-stableStepGuidanceScale", 1.0),
-  coverArtEnabled: readKey("hs-coverArtEnabled", false),
-  coverArtSubject: readKey("hs-coverArtSubject", ''),
-  qualityEvalEnabled: readKey("hs-qualityEvalEnabled", false),
-  qualityEvalTarget: readKey("hs-qualityEvalTarget", 'unmastered'),
+  stableStepSteps: readKey("hs-stableStepSteps", GLOBAL_PARAM_DEFAULTS.stableStepSteps),
+  stableStepSolver: readKey("hs-stableStepSolver", GLOBAL_PARAM_DEFAULTS.stableStepSolver),
+  stableStepScheduler: readKey("hs-stableStepScheduler", GLOBAL_PARAM_DEFAULTS.stableStepScheduler),
+  stableStepGuidanceMode: readKey("hs-stableStepGuidanceMode", GLOBAL_PARAM_DEFAULTS.stableStepGuidanceMode),
+  stableStepGuidanceScale: readKey("hs-stableStepGuidanceScale", GLOBAL_PARAM_DEFAULTS.stableStepGuidanceScale),
+  coverArtEnabled: readKey("hs-coverArtEnabled", GLOBAL_PARAM_DEFAULTS.coverArtEnabled),
+  coverArtSubject: readKey("hs-coverArtSubject", GLOBAL_PARAM_DEFAULTS.coverArtSubject),
+  qualityEvalEnabled: readKey("hs-qualityEvalEnabled", GLOBAL_PARAM_DEFAULTS.qualityEvalEnabled),
+  qualityEvalTarget: readKey("hs-qualityEvalTarget", GLOBAL_PARAM_DEFAULTS.qualityEvalTarget),
 
   // Dynamic Lua plugin params -- `pluginParams`, hydrated per backend by the
   // ...hydrateBackendScoped() spread above (BACKEND_SCOPED_FIELDS).
 
   // Whisper Lyrics Transcription
-  whisperLyricsEnabled: readKey("hs-whisperLyricsEnabled", false),
-  whisperModel: readKey("hs-whisperModel", ''),
-  whisperLanguage: readKey("hs-whisperLang", 'auto'),
-  whisperBeamSize: readKey("hs-whisperBeam", 5),
-  whisperIsolateVocals: readKey("hs-whisperIsolate", false),
+  whisperLyricsEnabled: readKey("hs-whisperLyricsEnabled", GLOBAL_PARAM_DEFAULTS.whisperLyricsEnabled),
+  whisperModel: readKey("hs-whisperModel", GLOBAL_PARAM_DEFAULTS.whisperModel),
+  whisperLanguage: readKey("hs-whisperLang", GLOBAL_PARAM_DEFAULTS.whisperLanguage),
+  whisperBeamSize: readKey("hs-whisperBeam", GLOBAL_PARAM_DEFAULTS.whisperBeamSize),
+  whisperIsolateVocals: readKey("hs-whisperIsolate", GLOBAL_PARAM_DEFAULTS.whisperIsolateVocals),
 
   // YuE2 forced alignment (capabilities.features.forcedAlignment). Off by
   // default: it is a second model (1.26 GB) and a second forward over the
   // whole track, which nobody should pay for without asking.
-  yue2AlignLyrics: readKey("hs-yue2AlignLyrics", false),
+  yue2AlignLyrics: readKey("hs-yue2AlignLyrics", GLOBAL_PARAM_DEFAULTS.yue2AlignLyrics),
 
   // Postprocess plugin (replaces built-in VAE tiled decoder)
-  postprocessEnabled: readKey('hs-postprocessEnabled', false),
-  postprocessPlugin: readKey('hs-postprocessPlugin', ''),
+  postprocessEnabled: readKey('hs-postprocessEnabled', GLOBAL_PARAM_DEFAULTS.postprocessEnabled),
+  postprocessPlugin: readKey('hs-postprocessPlugin', GLOBAL_PARAM_DEFAULTS.postprocessPlugin),
 
   // VAE backend selection (ONNX Runtime / TensorRT)
-  useOrtVae: readKey('hs-useOrtVae', false),
+  useOrtVae: readKey('hs-useOrtVae', GLOBAL_PARAM_DEFAULTS.useOrtVae),
 
   // Final Normalizer (LUFS) — runs last, after the VST chain and mastering
-  lufsEnabled: readKey('hs-lufsEnabled', false),
-  lufsPreset: readKey('hs-lufsPreset', 'spotify'),
-  lufsTarget: readKey('hs-lufsTarget', -14),
-  lufsCeilingDb: readKey('hs-lufsCeilingDb', -1),
+  lufsEnabled: readKey('hs-lufsEnabled', GLOBAL_PARAM_DEFAULTS.lufsEnabled),
+  lufsPreset: readKey('hs-lufsPreset', GLOBAL_PARAM_DEFAULTS.lufsPreset),
+  lufsTarget: readKey('hs-lufsTarget', GLOBAL_PARAM_DEFAULTS.lufsTarget),
+  lufsCeilingDb: readKey('hs-lufsCeilingDb', GLOBAL_PARAM_DEFAULTS.lufsCeilingDb),
 
   // -- Actions --
   setDitModel: (v: any) => { set({ ditModel: v }); writeKey("hs-ditModel", v); mirrorActiveModels({ ditModel: v }); },

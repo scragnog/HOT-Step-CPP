@@ -18,6 +18,9 @@ interface SliderProps {
   step: number;
   suffix?: string;
   showInput?: boolean;
+  /** The value to restore when the reset icon is clicked. Set this to show the
+   *  icon while `value` differs from it. */
+  defaultValue?: number;
   /** What the knob does, shown in a hover card off a "?" beside the label. */
   info?: string;
   /** Optional one-liner above the explanation — default, range, units. */
@@ -30,7 +33,7 @@ interface SliderProps {
 
 export const Slider: React.FC<SliderProps> = ({
   label, value, onChange, min, max, step, suffix = '', showInput = false, headerRight,
-  info, infoMeta,
+  info, infoMeta, defaultValue,
 }) => {
   return (
     <div>
@@ -40,6 +43,7 @@ export const Slider: React.FC<SliderProps> = ({
           info={info}
           meta={infoMeta}
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          onReset={defaultValue !== undefined && value !== defaultValue ? () => onChange(defaultValue) : undefined}
         />
         <div className="flex items-center gap-1.5">
         {showInput ? (

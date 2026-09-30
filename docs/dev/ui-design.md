@@ -93,6 +93,36 @@ end, which shapes detail" does. Keep the tone of [writing-style.md](writing-styl
 Inside a panel that closes when the pointer leaves it (the global bar's dropdowns), mark the panel
 `data-hovercard-boundary` so the card lands beside the panel instead of covering the knobs.
 
+### Reset to default
+
+`ParamLabel` takes an `onReset` callback: pass it and a small RotateCcw icon appears after the help
+icon, which restores the field's default on click. `Slider`, `EditableSlider` and `Toggle` all take
+a `defaultValue` prop and wire it to `ParamLabel` for you — pass `onReset` directly to `ParamLabel`
+only for a bare label next to a `StyledSelect` or a plain `<input>`, where there is no shared
+primitive to do the wiring.
+
+```tsx
+<Slider label="Guidance Scale" value={gp.guidanceScale} onChange={gp.setGuidanceScale}
+  defaultValue={GLOBAL_PARAM_DEFAULTS.guidanceScale} min={0} max={20} step={0.1} />
+```
+
+Show the icon only while the value differs from its default — `Slider`/`Toggle`/`EditableSlider` do
+this automatically from `defaultValue`; a bare `ParamLabel` needs the guard written by hand:
+
+```tsx
+<ParamLabel label={t('gen.solver')} info={solverMeta?.description}
+  onReset={gp.inferMethod !== GLOBAL_PARAM_DEFAULTS.inferMethod
+    ? () => gp.setInferMethod(GLOBAL_PARAM_DEFAULTS.inferMethod) : undefined} />
+```
+
+Reset through the field's own setter, never a generic `set({ field: default })` — some setters carry
+side effects (mirroring a model choice to the server, deriving a dependent field) that a bypass would
+skip. An accordion section's existing group "Reset" button (resets every field in the panel) and a
+per-field `onReset` on one of those same fields (resets just that one) are not the same affordance —
+add the per-field icon without touching the group button. Don't add `onReset` to the header label
+itself when it covers several fields with no single value of its own (the group button already speaks
+for it).
+
 ## Accent colour
 
 Match the controls around you. Pass the same `accent` to `StyledSelect` and `Toggle`.

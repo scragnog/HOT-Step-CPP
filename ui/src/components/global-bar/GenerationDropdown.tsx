@@ -19,6 +19,7 @@ import { useAuth } from '../../context/AuthContext';
 import { usePluginRegistry } from '../../hooks/usePluginRegistry';
 import { PluginControls } from './PluginControls';
 import { SeedControl } from './SeedControl';
+import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
 
 const selectClasses = "w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors cursor-pointer";
 const inputClasses = "w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 focus:border-pink-500/50 focus:ring-1 focus:ring-pink-500/20 outline-none transition-colors";
@@ -99,11 +100,13 @@ export const GenerationDropdown: React.FC = () => {
     <div className="space-y-3">
       <Slider label="Inference Steps" value={gp.inferenceSteps}
         onChange={gp.setInferenceSteps} min={1} max={300} step={1} showInput
+        defaultValue={GLOBAL_PARAM_DEFAULTS.inferenceSteps}
         infoMeta="default 12 · range 1-300"
         info="How many denoising steps the DiT takes to turn noise into audio. More steps take longer to render; past roughly 40 on ACE-Step, extra steps stop improving quality." />
 
       <Slider label="Guidance Scale" value={gp.guidanceScale}
         onChange={gp.setGuidanceScale} min={0} max={20} step={0.1} showInput
+        defaultValue={GLOBAL_PARAM_DEFAULTS.guidanceScale}
         infoMeta="default 9.0 · range 0-20"
         info="Classifier-free guidance strength: how hard the DiT is pushed toward matching the caption and lyrics. Higher follows the prompt more closely but can sound over-processed; lower drifts further from the prompt but sounds more natural." />
 
@@ -139,14 +142,17 @@ export const GenerationDropdown: React.FC = () => {
           <div className="px-3 pb-3 space-y-3 border-t border-zinc-200 dark:border-white/5">
             <Slider label="CFG Cutoff" value={gp.cfgCutoffRatio}
               onChange={gp.setCfgCutoffRatio} min={0} max={1} step={0.05} showInput
+              defaultValue={GLOBAL_PARAM_DEFAULTS.cfgCutoffRatio}
               infoMeta="0–1 · default 1"
               info="Ratio of DiT steps using full guidance. Lower = faster but may reduce prompt adherence. 0.5 ≈ 20% speedup." />
             <Slider label="LM CFG Cutoff" value={gp.lmCfgCutoffRatio}
               onChange={gp.setLmCfgCutoffRatio} min={0.3} max={1} step={0.05} showInput
+              defaultValue={GLOBAL_PARAM_DEFAULTS.lmCfgCutoffRatio}
               infoMeta="0.3–1 · default 1"
               info="Fraction of LM audio code tokens using guidance. Lower = faster but may reduce prompt adherence. 0.7 = ~15% LM speedup." />
             <Slider label="Step Cache" value={gp.cacheRatio}
               onChange={gp.setCacheRatio} min={0} max={0.7} step={0.05} showInput
+              defaultValue={GLOBAL_PARAM_DEFAULTS.cacheRatio}
               infoMeta="0–0.7 · default 0"
               info="Skip redundant forward passes by reusing velocity. Higher = faster but may reduce quality. Try 0.3–0.5." />
             <button type="button" onClick={() => { gp.setCfgCutoffRatio(1); gp.setLmCfgCutoffRatio(1); gp.setCacheRatio(0); }}
@@ -161,7 +167,8 @@ export const GenerationDropdown: React.FC = () => {
       <div>
         <div className="flex items-center justify-between mb-1.5">
           <ParamLabel label="Shift" className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-            info="Timestep shift (sigma). Biases the schedule toward the noisy end, trading fine detail for structure. Auto derives it from the duration and the step count." />
+            info="Timestep shift (sigma). Biases the schedule toward the noisy end, trading fine detail for structure. Auto derives it from the duration and the step count."
+            onReset={gp.shift !== -1 && gp.shift !== GLOBAL_PARAM_DEFAULTS.shift ? () => gp.setShift(GLOBAL_PARAM_DEFAULTS.shift) : undefined} />
           <button
             onClick={() => {
               if (gp.shift === -1) {
@@ -201,7 +208,8 @@ export const GenerationDropdown: React.FC = () => {
       <div>
         <ParamLabel label={t('gen.solver')} info={solverMeta?.description}
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-          rootClassName="flex mb-1.5" />
+          rootClassName="flex mb-1.5"
+          onReset={gp.inferMethod !== GLOBAL_PARAM_DEFAULTS.inferMethod ? () => gp.setInferMethod(GLOBAL_PARAM_DEFAULTS.inferMethod) : undefined} />
         <StyledSelect accent="sky" className={selectClasses} value={gp.inferMethod}
           onChange={gp.setInferMethod}
           options={registry.solvers.length > 0 ? [
@@ -241,7 +249,8 @@ export const GenerationDropdown: React.FC = () => {
       <div>
         <ParamLabel label={t('gen.schedule')} info={schedMeta?.description}
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-          rootClassName="flex mb-1.5" />
+          rootClassName="flex mb-1.5"
+          onReset={gp.scheduler !== GLOBAL_PARAM_DEFAULTS.scheduler ? () => gp.setScheduler(GLOBAL_PARAM_DEFAULTS.scheduler) : undefined} />
         <StyledSelect accent="sky" className={selectClasses} value={schedulerKey}
           onChange={(v: string) => {
             if (v === 'beta') gp.setScheduler('beta:0.50:0.70');
@@ -305,10 +314,12 @@ export const GenerationDropdown: React.FC = () => {
             </div>
             <Slider label="Alpha (α)" value={alpha}
               onChange={v => updateBeta(v, betaParam)} min={0.1} max={2.0} step={0.05} showInput
+              defaultValue={0.5}
               infoMeta="default 0.5 · range 0.1-2.0"
               info="Shape of the beta distribution used to space schedule steps. Lower values put more steps at the edges of the schedule (start and end); higher values spread them more evenly." />
             <Slider label="Beta (β)" value={betaParam}
               onChange={v => updateBeta(alpha, v)} min={0.1} max={2.0} step={0.05} showInput
+              defaultValue={0.7}
               infoMeta="default 0.7 · range 0.1-2.0"
               info="Second shape parameter of the beta distribution. Lower values front-load the schedule toward structure; higher values shift steps toward the detail end." />
           </div>
@@ -331,6 +342,7 @@ export const GenerationDropdown: React.FC = () => {
             </div>
             <Slider label="Exponent" value={exponent}
               onChange={v => gp.setScheduler(`power:${v.toFixed(2)}`)} min={0.25} max={4.0} step={0.05} showInput
+              defaultValue={2.0}
               infoMeta="default 2.0 · range 0.25-4.0"
               info="Exponent of the power-law schedule. Above 1 front-loads steps toward the noisy end, favouring structure; at 1 the schedule is linear; below 1 it back-loads toward the clean end, favouring detail." />
           </div>
@@ -402,10 +414,12 @@ export const GenerationDropdown: React.FC = () => {
                 </div>
                 <Slider label="Crossover" value={crossover}
                   onChange={v => update(stageA, stageB, v, split)} min={0.1} max={0.9} step={0.05} showInput
+                  defaultValue={0.5}
                   infoMeta="default 0.5 · range 0.1-0.9"
                   info="How gradually the schedule blends from Stage A to Stage B around the split point. Lower is a harder cut; higher blends more steps between the two schedulers." />
                 <Slider label="Split" value={split}
                   onChange={v => update(stageA, stageB, crossover, v)} min={0.1} max={0.9} step={0.05} showInput
+                  defaultValue={0.5}
                   infoMeta="default 0.5 · range 0.1-0.9"
                   info="Where in the step sequence the schedule crosses from Stage A to Stage B, as a fraction of the total steps." />
               </div>
@@ -418,7 +432,8 @@ export const GenerationDropdown: React.FC = () => {
       <div>
         <ParamLabel label={t('gen.guidance')} info={guideMeta?.description}
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-          rootClassName="flex mb-1.5" />
+          rootClassName="flex mb-1.5"
+          onReset={gp.guidanceMode !== GLOBAL_PARAM_DEFAULTS.guidanceMode ? () => gp.setGuidanceMode(GLOBAL_PARAM_DEFAULTS.guidanceMode) : undefined} />
         <StyledSelect accent="sky" className={selectClasses} value={gp.guidanceMode}
           onChange={gp.setGuidanceMode}
           options={registry.guidance.length > 0 ? (
@@ -447,10 +462,12 @@ export const GenerationDropdown: React.FC = () => {
           </div>
           <Slider label="Momentum" value={gp.apgMomentum}
             onChange={gp.setApgMomentum} min={0} max={1} step={0.01} showInput
+            defaultValue={GLOBAL_PARAM_DEFAULTS.apgMomentum}
             infoMeta="default 0.75 · range 0-1"
             info="Smooths the guidance signal across sampling steps by blending in the previous step's guidance. Higher values carry over more from prior steps, damping step-to-step jitter." />
           <Slider label="Norm Threshold" value={gp.apgNormThreshold}
             onChange={gp.setApgNormThreshold} min={0} max={10} step={0.1} showInput
+            defaultValue={GLOBAL_PARAM_DEFAULTS.apgNormThreshold}
             infoMeta="default 2.5 · range 0-10"
             info="Caps the guidance vector's magnitude per channel. Lower values clip more aggressively, holding guidance back; higher values let larger guidance vectors through unclipped." />
         </div>
@@ -503,7 +520,8 @@ export const GenerationDropdown: React.FC = () => {
             {timbreRefs.length > 0 ? (
               <div>
                 <ParamLabel label="Reference Track" className="text-[10px] text-teal-400" rootClassName="flex mb-1"
-                  info="Which uploaded track feeds the DiT's timbre conditioning. None uses the mastering reference instead, when Mastering is on and its 'Also use as timbre reference' switch is on." />
+                  info="Which uploaded track feeds the DiT's timbre conditioning. None uses the mastering reference instead, when Mastering is on and its 'Also use as timbre reference' switch is on."
+                  onReset={gp.timbreAudioPath !== GLOBAL_PARAM_DEFAULTS.timbreAudioPath ? () => gp.setTimbreAudioPath(GLOBAL_PARAM_DEFAULTS.timbreAudioPath) : undefined} />
                 <StyledSelect
                   accent="teal"
                   className="w-full"
@@ -598,7 +616,8 @@ export const GenerationDropdown: React.FC = () => {
           <div className="px-3 pb-3 space-y-3">
             <div>
               <ParamLabel label="Correction Mode" info={DCW_MODE_INFO[gp.dcwMode]}
-                className="text-[10px] text-emerald-400" rootClassName="flex mb-1" />
+                className="text-[10px] text-emerald-400" rootClassName="flex mb-1"
+                onReset={gp.dcwMode !== GLOBAL_PARAM_DEFAULTS.dcwMode ? () => gp.setDcwMode(GLOBAL_PARAM_DEFAULTS.dcwMode) : undefined} />
               <StyledSelect accent="emerald" className={selectClasses} value={gp.dcwMode}
                 onChange={gp.setDcwMode}
                 options={[
@@ -611,12 +630,14 @@ export const GenerationDropdown: React.FC = () => {
             {(gp.dcwMode === 'low' || gp.dcwMode === 'double' || gp.dcwMode === 'pix') && (
               <Slider label={gp.dcwMode === 'double' ? 'Low-Freq Scaler' : 'Scaler'} value={gp.dcwLowScaler}
                 onChange={gp.setDcwLowScaler} min={0} max={1} step={0.01} showInput
+                defaultValue={GLOBAL_PARAM_DEFAULTS.dcwLowScaler}
                 infoMeta="default 0.2 · range 0-1"
                 info="How strongly the correction is applied to the low-frequency band. Higher applies more correction; 0 turns that band off." />
             )}
             {(gp.dcwMode === 'high' || gp.dcwMode === 'double') && (
               <Slider label={gp.dcwMode === 'double' ? 'High-Freq Scaler' : 'Scaler'} value={gp.dcwHighScaler}
                 onChange={gp.setDcwHighScaler} min={0} max={1} step={0.01} showInput
+                defaultValue={GLOBAL_PARAM_DEFAULTS.dcwHighScaler}
                 infoMeta="default 0.2 · range 0-1"
                 info="How strongly the correction is applied to the high-frequency band. Higher applies more correction; 0 turns that band off." />
             )}
@@ -654,10 +675,12 @@ export const GenerationDropdown: React.FC = () => {
           <div className="px-3 pb-3 space-y-3">
             <Slider label="Duration Buffer (seconds)" value={gp.durationBuffer}
               onChange={gp.setDurationBuffer} min={5} max={30} step={1} showInput
+              defaultValue={GLOBAL_PARAM_DEFAULTS.durationBuffer}
               infoMeta="default 15 · range 5-30"
               info="Extra seconds rendered beyond the requested duration, giving the trim search room to find a natural ending before the requested length is forced." />
             <Slider label="Fade-Out (seconds)" value={gp.autoTrimFadeMs / 1000}
               onChange={(v: number) => gp.setAutoTrimFadeMs(Math.round(v * 1000))} min={0.5} max={5} step={0.1} showInput
+              defaultValue={GLOBAL_PARAM_DEFAULTS.autoTrimFadeMs / 1000}
               infoMeta="default 2 · range 0.5-5"
               info="How long the fade-out runs when no natural ending is found and the track is cut at the requested length." />
           </div>
@@ -688,15 +711,18 @@ export const GenerationDropdown: React.FC = () => {
           <div className="px-3 pb-3 space-y-3">
             <Slider label="Latent Shift" value={gp.latentShift}
               onChange={gp.setLatentShift} min={-2} max={2} step={0.01} showInput
+              defaultValue={GLOBAL_PARAM_DEFAULTS.latentShift}
               infoMeta="default 0 · range -2-2"
               info="Added to every value in the DiT's output latents before the VAE decodes them." />
             <Slider label="Latent Rescale" value={gp.latentRescale}
               onChange={gp.setLatentRescale} min={0.1} max={3} step={0.01} showInput
+              defaultValue={GLOBAL_PARAM_DEFAULTS.latentRescale}
               infoMeta="default 1 · range 0.1-3"
               info="Multiplies every latent value before the shift above is added." />
             <div>
               <ParamLabel label="Custom Timesteps" className="text-[10px] text-indigo-400" rootClassName="flex mb-1"
-                info="CSV of descending floats. Overrides the schedule and the step count when set." />
+                info="CSV of descending floats. Overrides the schedule and the step count when set."
+                onReset={gp.customTimesteps !== GLOBAL_PARAM_DEFAULTS.customTimesteps ? () => gp.setCustomTimesteps(GLOBAL_PARAM_DEFAULTS.customTimesteps) : undefined} />
               <input className={inputClasses} value={gp.customTimesteps}
                 onChange={e => gp.setCustomTimesteps(e.target.value)}
                 placeholder="0.97,0.76,0.615,0.5,0.395,0.28,0.18,0.085,0" />
@@ -736,14 +762,17 @@ export const GenerationDropdown: React.FC = () => {
           <div className="px-3 pb-3 space-y-3">
             <Slider label="Strength" value={gp.denoiseStrength}
               onChange={gp.setDenoiseStrength} min={0.01} max={1} step={0.01} showInput
+              defaultValue={0.5}
               infoMeta="default 0.5 · range 0.01-1"
               info="How aggressively the spectral gate suppresses VAE fuzz. Higher removes more noise but can dull detail." />
             <Slider label="Smoothing" value={gp.denoiseSmoothing}
               onChange={gp.setDenoiseSmoothing} min={0} max={1} step={0.01} showInput
+              defaultValue={GLOBAL_PARAM_DEFAULTS.denoiseSmoothing}
               infoMeta="default 0.7 · range 0-1"
               info="How sharp or smooth the gate's cutoff is. 0 is a sharp gate; 1 is very smooth." />
             <Slider label="Mix" value={gp.denoiseMix}
               onChange={gp.setDenoiseMix} min={0} max={1} step={0.01} showInput
+              defaultValue={GLOBAL_PARAM_DEFAULTS.denoiseMix}
               infoMeta="default 0.25 · range 0-1"
               info="Blends the denoised signal back with the original. 0 is fully dry (original); 1 is fully denoised." />
           </div>
@@ -781,15 +810,18 @@ export const GenerationDropdown: React.FC = () => {
           <div className="px-3 pb-3 space-y-3">
             <Slider label="Strength" value={lssStrength}
               onChange={setLssStrength} min={0.01} max={1} step={0.01} showInput
+              defaultValue={0.65}
               infoMeta="default 0.65 · range 0.01-1"
               info="How hard quiet latent channels are attenuated. The attenuation floor is 1 minus this value, so 1.0 pulls the quietest channels to silence." />
             <Slider label="Var Threshold" value={lssVarThresh}
               onChange={setLssVarThresh} min={0.01} max={0.5} step={0.01} showInput
+              defaultValue={GLOBAL_PARAM_DEFAULTS.lssVarThresh}
               infoMeta="default 0.15 · range 0.01-0.5"
               info="Channels whose variance falls below this, relative to the loudest channel, are treated as quiet and attenuated." />
             <div className="flex items-center justify-between">
               <ParamLabel label="DC Remove" className="text-xs text-zinc-500" rootClassName="flex"
-                info="Removes each latent channel's DC offset (constant bias) in addition to the variance gating above. On by default." />
+                info="Removes each latent channel's DC offset (constant bias) in addition to the variance gating above. On by default."
+                onReset={lssDcRemove !== GLOBAL_PARAM_DEFAULTS.lssDcRemove ? () => setLssDcRemove(GLOBAL_PARAM_DEFAULTS.lssDcRemove) : undefined} />
               <Toggle checked={lssDcRemove} onChange={setLssDcRemove} accent="teal" />
             </div>
           </div>
@@ -803,6 +835,7 @@ export const GenerationDropdown: React.FC = () => {
       {/* Batch */}
       <Slider label="Batch Size" value={gp.batchSize}
         onChange={gp.setBatchSize} min={1} max={9} step={1}
+        defaultValue={GLOBAL_PARAM_DEFAULTS.batchSize}
         infoMeta="default 1 · range 1-9"
         info="How many takes to render from one request. The LM plans that many variations, then the DiT renders each in turn as its own song. With the LM off, or for cover and repaint tasks, extra takes reuse the same plan with a different random seed each." />
     </div>

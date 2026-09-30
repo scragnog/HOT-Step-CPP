@@ -29,12 +29,15 @@ interface EditableSliderProps {
   autoLabel?: string;
   disabled?: boolean;
   disabledReason?: string;
+  /** The value to restore when the reset icon is clicked. Set this to show the
+   *  icon while `value` differs from it. */
+  defaultValue?: number;
 }
 
 export const EditableSlider: React.FC<EditableSliderProps> = ({
   label, value, min, max, step, onChange, onChangeCommitted,
   formatDisplay, helpText, tooltip, title = '', autoLabel = 'Auto',
-  disabled = false, disabledReason,
+  disabled = false, disabledReason, defaultValue,
 }) => {
   const [inputValue, setInputValue] = useState(value.toString());
   const [isEditing, setIsEditing] = useState(false);
@@ -82,6 +85,14 @@ export const EditableSlider: React.FC<EditableSliderProps> = ({
     }
   };
 
+  const handleReset = () => {
+    (onChangeCommitted || onChange)(defaultValue as number);
+    setDragValue(null);
+    isDragging.current = false;
+    setIsEditing(false);
+    setInputValue((defaultValue as number).toString());
+  };
+
   const displayValue = formatDisplay ? formatDisplay(effectiveValue) : (effectiveValue === min && autoLabel ? autoLabel : effectiveValue.toString());
 
   return (
@@ -92,6 +103,7 @@ export const EditableSlider: React.FC<EditableSliderProps> = ({
             label={label}
             info={tooltip}
             className="text-xs font-medium text-zinc-700 dark:text-zinc-300"
+            onReset={defaultValue !== undefined && value !== defaultValue && !disabled ? handleReset : undefined}
           />
         </div>
         {isEditing && !disabled ? (
