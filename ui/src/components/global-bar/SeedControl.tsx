@@ -44,7 +44,10 @@ export const SeedControl: React.FC<{ inputClasses: string; hint?: string }> = ({
     <div className="relative">
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-1.5">
-          <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Generation Seed</label>
+          <ParamLabel
+            label="Generation Seed"
+            className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+            onReset={!gp.randomSeed && gp.seed !== GLOBAL_PARAM_DEFAULTS.seed ? () => gp.setSeed(GLOBAL_PARAM_DEFAULTS.seed) : undefined} />
           <button onClick={() => setSeedDrawerOpen(true)} title="Seed Manager"
             className="text-zinc-500 hover:text-amber-400 transition-colors">
             <Save size={12} />

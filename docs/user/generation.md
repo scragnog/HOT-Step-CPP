@@ -79,7 +79,11 @@ download list in [Models](models.md).
 | Batch Size | 1 to 9 | 1 | See [Batch size](#batch-size). |
 
 A small reset arrow appears beside a label whenever its value has moved from the default above; click
-it to snap that one field back.
+it to snap that one field back. Seeds reset independently of the switch that gates them — the
+Generation Seed, LM Seed and StableStep refine seed each keep their own arrow regardless of the
+Random, Use DiT Seed or Follow generation seed toggle next to them. On a MiniMax-Music3 LM adapter,
+the strength dials reset to the selected adapter's own recommended scales rather than the house
+defaults, since picking a different adapter can change what "default" means.
 
 ### Solver, schedule and guidance
 

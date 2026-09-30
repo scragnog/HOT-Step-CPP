@@ -378,7 +378,10 @@ export const PostProcessingDropdown: React.FC = () => {
         <div className="flex items-center gap-2">
           <AudioWaveform size={14} className={gp.skipLrc ? 'text-zinc-500' : 'text-sky-400'} />
           <div className="flex flex-col">
-            <span className="text-sm text-zinc-700 dark:text-zinc-300 font-medium">Lyric Timestamps (LRC)</span>
+            <ParamLabel
+              label="Lyric Timestamps (LRC)"
+              className="text-sm text-zinc-700 dark:text-zinc-300 font-medium"
+              onReset={gp.skipLrc !== GLOBAL_PARAM_DEFAULTS.skipLrc ? () => gp.setSkipLrc(GLOBAL_PARAM_DEFAULTS.skipLrc) : undefined} />
             <span className="text-[10px] text-zinc-500 leading-tight">Synchronized lyric alignment for karaoke-style playback</span>
           </div>
         </div>
@@ -393,7 +396,10 @@ export const PostProcessingDropdown: React.FC = () => {
         <div className="flex items-center gap-2">
           <AudioWaveform size={14} className={gp.yue2AlignLyrics ? 'text-sky-400' : 'text-zinc-500'} />
           <div className="flex flex-col">
-            <span className="text-sm text-zinc-700 dark:text-zinc-300 font-medium">Lyric Timestamps (Forced Alignment)</span>
+            <ParamLabel
+              label="Lyric Timestamps (Forced Alignment)"
+              className="text-sm text-zinc-700 dark:text-zinc-300 font-medium"
+              onReset={gp.yue2AlignLyrics !== GLOBAL_PARAM_DEFAULTS.yue2AlignLyrics ? () => gp.setYue2AlignLyrics(GLOBAL_PARAM_DEFAULTS.yue2AlignLyrics) : undefined} />
             <span className="text-[10px] text-zinc-500 leading-tight">Aligns the render against your own lyrics for karaoke playback and section markers. Adds a pass per track; needs the YuE2 Lyric Aligner from the Model Manager.</span>
           </div>
         </div>
@@ -639,7 +645,7 @@ export const PostProcessingDropdown: React.FC = () => {
                     : gp.stableStepBackend === 'gguf'
                       ? 'GGML backend — runs on CUDA, Vulkan or CPU. Fastest option on NVIDIA in current testing.'
                       : 'Auto lets the engine pick the best installed backend.'}
-                  onReset={gp.stableStepBackend !== GLOBAL_PARAM_DEFAULTS.stableStepBackend ? () => gp.setStableStepBackend(GLOBAL_PARAM_DEFAULTS.stableStepBackend as 'auto' | 'onnx' | 'gguf') : undefined} />
+                  onReset={gp.stableStepBackend !== GLOBAL_PARAM_DEFAULTS.stableStepBackend ? () => gp.setStableStepBackend(GLOBAL_PARAM_DEFAULTS.stableStepBackend) : undefined} />
                 <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10 bg-zinc-100 dark:bg-zinc-800">
                   {([
                     { value: 'auto' as const, label: 'Auto', installed: true },
@@ -793,7 +799,7 @@ export const PostProcessingDropdown: React.FC = () => {
                 <ParamLabel label="Source blend" rootClassName="mb-1"
                   className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
                   info="How the SA3 refine and the original AS1.5 render are combined. Off (default) uses the full SA3 refine. Crossover keeps the original below a frequency and the refine above it. Mix blends the two full-band by amount."
-                  onReset={(gp.stableStepBlendMode ?? 'off') !== GLOBAL_PARAM_DEFAULTS.stableStepBlendMode ? () => gp.setStableStepBlendMode(GLOBAL_PARAM_DEFAULTS.stableStepBlendMode as 'off' | 'crossover' | 'mix') : undefined} />
+                  onReset={(gp.stableStepBlendMode ?? 'off') !== GLOBAL_PARAM_DEFAULTS.stableStepBlendMode ? () => gp.setStableStepBlendMode(GLOBAL_PARAM_DEFAULTS.stableStepBlendMode) : undefined} />
                 <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10 bg-zinc-100 dark:bg-zinc-800">
                   {([
                     { value: 'off' as const, label: 'Off', tip: 'Full SA3 refine output (no source blending)' },
@@ -862,13 +868,20 @@ export const PostProcessingDropdown: React.FC = () => {
                   defaultValue={GLOBAL_PARAM_DEFAULTS.stableStepSeedFollowsDit}
                 />
                 {gp.stableStepSeedFollowsDit === false && (
-                  <input
-                    type="number"
-                    value={gp.stableStepSeed}
-                    onChange={e => gp.setStableStepSeed(parseInt(e.target.value, 10) || 0)}
-                    className="mt-1.5 w-full px-3 py-1.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none focus:border-sky-500/50"
-                    title="Fixed SA3 refine seed"
-                  />
+                  <>
+                    <ParamLabel
+                      label="Refine seed"
+                      rootClassName="mt-1.5 mb-1"
+                      className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+                      onReset={gp.stableStepSeed !== GLOBAL_PARAM_DEFAULTS.stableStepSeed ? () => gp.setStableStepSeed(GLOBAL_PARAM_DEFAULTS.stableStepSeed) : undefined} />
+                    <input
+                      type="number"
+                      value={gp.stableStepSeed}
+                      onChange={e => gp.setStableStepSeed(parseInt(e.target.value, 10) || 0)}
+                      className="w-full px-3 py-1.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none focus:border-sky-500/50"
+                      title="Fixed SA3 refine seed"
+                    />
+                  </>
                 )}
               </div>
 
@@ -1263,7 +1276,11 @@ export const PostProcessingDropdown: React.FC = () => {
             {t('pp.qualityEvalDesc')}
           </p>
           <div>
-            <label className="text-[11px] font-medium text-zinc-500 mb-1.5 block">{t('pp.qualityEvalTarget')}</label>
+            <ParamLabel
+              label={t('pp.qualityEvalTarget')}
+              rootClassName="mb-1.5"
+              className="text-[11px] font-medium text-zinc-500"
+              onReset={gp.qualityEvalTarget !== GLOBAL_PARAM_DEFAULTS.qualityEvalTarget ? () => gp.setQualityEvalTarget(GLOBAL_PARAM_DEFAULTS.qualityEvalTarget) : undefined} />
             <div className="flex rounded-lg border border-zinc-200 dark:border-white/10 overflow-hidden">
               {(['unmastered', 'mastered', 'both'] as const).map(opt => (
                 <button

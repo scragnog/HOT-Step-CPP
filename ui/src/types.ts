@@ -98,6 +98,12 @@ export interface UnifiedRecentSong {
  *  'dry'       — penalise only codes that would extend a verbatim recent cycle. */
 export type LmRepMode = 'presence' | 'frequency' | 'dry';
 
+/** StableStep refine backend and source-blend mode — named so the store's
+ *  GLOBAL_PARAM_DEFAULTS entries can carry the setter's union without a
+ *  narrowing cast at each call site. */
+export type StableStepBackend = 'auto' | 'onnx' | 'gguf';
+export type StableStepBlendMode = 'off' | 'crossover' | 'mix';
+
 /** Parameters sent to the generation API */
 export interface GenerationParams {
   // Content
@@ -302,12 +308,12 @@ export interface GenerationParams {
   // StableStep (SA3 SDEdit refine of the instrumental)
   stableStepOn?: boolean;
   stableStepStrength?: number; // 0.10–0.60 init noise level (default 0.3)
-  stableStepBackend?: 'auto' | 'onnx' | 'gguf'; // engine backend (default 'auto')
+  stableStepBackend?: StableStepBackend; // engine backend (default 'auto')
   stableStepAdapters?: Array<{ name: string; scale: number }>; // DoRA adapters (GGML backend only)
   stableStepPreserveDynamics?: boolean; // envelope-match refined audio to source dynamics
   stableStepVocalPpVae?: boolean; // re-encode the vocal stem through PP-VAE (default off — lossy)
   stableStepVocalTrimDb?: number; // taste trim on the recombined vocal, dB (default 0)
-  stableStepBlendMode?: 'off' | 'crossover' | 'mix'; // source blending mode
+  stableStepBlendMode?: StableStepBlendMode; // source blending mode
   stableStepCrossoverHz?: number;      // crossover center (crossover mode)
   stableStepCrossoverWidthHz?: number; // transition width (crossover mode)
   stableStepMix?: number;              // 0 = pure AS1.5 .. 1 = pure SA3 (mix mode)

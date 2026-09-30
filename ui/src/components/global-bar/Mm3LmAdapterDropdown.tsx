@@ -140,6 +140,8 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
     ...(data?.adapters.find(a => a.file === file)?.recommendedScales ?? {}),
   }), [data, defaults]);
 
+  const rec = recommendedFor(selected);
+
   const onPick = (file: string) => {
     setBackendParam(PARAM.adapter, file);
     // Prefill from the sidecar on every pick (including "None", which resets
@@ -296,7 +298,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
             value={num(PARAM.scale, defaults.scale)}
             onChange={v => setBackendParam(PARAM.scale, v)}
             min={0} max={2} step={0.05} showInput
-            defaultValue={defaults.scale}
+            defaultValue={rec.scale}
           />
           <Slider
             label={t('globalBar.mm3LmAttention', 'Attention')}
@@ -305,7 +307,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
             value={num(PARAM.attn, defaults.scaleAttn)}
             onChange={v => setBackendParam(PARAM.attn, v)}
             min={0} max={2} step={0.05} showInput
-            defaultValue={defaults.scaleAttn}
+            defaultValue={rec.scaleAttn}
           />
           <Slider
             label={t('globalBar.mm3LmMlp', 'MLP')}
@@ -314,7 +316,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
             value={num(PARAM.mlp, defaults.scaleMlp)}
             onChange={v => setBackendParam(PARAM.mlp, v)}
             min={0} max={2} step={0.05} showInput
-            defaultValue={defaults.scaleMlp}
+            defaultValue={rec.scaleMlp}
           />
 
           <div className="flex items-center justify-between gap-2 pt-1">
@@ -355,7 +357,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
                 value={num(PARAM.early, defaults.scaleEarly)}
                 onChange={v => setBackendParam(PARAM.early, v)}
                 min={0} max={2} step={0.05} showInput
-                defaultValue={defaults.scaleEarly}
+                defaultValue={rec.scaleEarly}
               />
               <Slider
                 label={t('globalBar.mm3LmMid', 'Middle third')}
@@ -365,7 +367,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
                 value={num(PARAM.mid, defaults.scaleMid)}
                 onChange={v => setBackendParam(PARAM.mid, v)}
                 min={0} max={2} step={0.05} showInput
-                defaultValue={defaults.scaleMid}
+                defaultValue={rec.scaleMid}
               />
               <Slider
                 label={t('globalBar.mm3LmLate', 'Late third')}
@@ -375,7 +377,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
                 value={num(PARAM.late, defaults.scaleLate)}
                 onChange={v => setBackendParam(PARAM.late, v)}
                 min={0} max={2} step={0.05} showInput
-                defaultValue={defaults.scaleLate}
+                defaultValue={rec.scaleLate}
               />
             </div>
           )}

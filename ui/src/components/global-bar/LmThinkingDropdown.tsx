@@ -208,6 +208,7 @@ export const LmThinkingDropdown: React.FC = () => {
               label="LM Seed"
               className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
               info="The random seed for caption rewriting, lyric handling and audio-code sampling. A fixed value with Use DiT Seed off reproduces the same LM output across runs; leave Use DiT Seed on to tie it to the Generation seed instead."
+              onReset={!gp.lmSeedFollowsDit && gp.lmSeed !== GLOBAL_PARAM_DEFAULTS.lmSeed ? () => gp.setLmSeed(GLOBAL_PARAM_DEFAULTS.lmSeed) : undefined}
             />
             <button onClick={() => setSeedDrawerOpen(true)} title="Seed Manager"
               className="text-zinc-500 hover:text-amber-400 transition-colors">

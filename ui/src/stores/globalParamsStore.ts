@@ -7,7 +7,7 @@
 // Uses the SAME hs-* localStorage keys -- zero migration needed.
 
 import { create } from 'zustand';
-import type { GenerationParams, LmRepMode } from '../types';
+import type { GenerationParams, LmRepMode, StableStepBackend, StableStepBlendMode } from '../types';
 import { DEFAULT_SETTINGS, type AppSettings } from '../components/settings/SettingsPanel';
 import { useBackendStore } from './backendStore';
 
@@ -150,12 +150,12 @@ export const GLOBAL_PARAM_DEFAULTS = {
   ppVaeUseOnnx: true,
   stableStepOn: false,
   stableStepStrength: 0.3,
-  stableStepBackend: 'auto',
+  stableStepBackend: 'auto' as StableStepBackend,
   stableStepAdapters: [] as Array<{ name: string; scale: number; enabled: boolean }>,
   stableStepPreserveDynamics: true,
   stableStepVocalPpVae: false,
   stableStepVocalTrimDb: 0,
-  stableStepBlendMode: 'off',
+  stableStepBlendMode: 'off' as StableStepBlendMode,
   stableStepCrossoverHz: 250,
   stableStepCrossoverWidthHz: 200,
   stableStepMix: 1.0,
