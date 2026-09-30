@@ -25,6 +25,9 @@ See [Terminal](#terminal), [Theme, restart, and shutdown](#theme-restart-and-shu
 3. If a changed key needs a restart to take effect, the save bar shows which one and a **Restart now** button appears. Click it to restart the server and engine; the UI reconnects on its own once they are back.
 4. General, Performance, and language/theme changes apply immediately and do not need a restart.
 
+A small reset arrow appears beside a setting whenever its value has moved from the default; click
+it to snap that one field back. The reset persists like any other change — it is not a page reload.
+
 ## Controls
 
 ### General tab

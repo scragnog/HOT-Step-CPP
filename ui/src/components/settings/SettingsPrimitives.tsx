@@ -15,8 +15,8 @@ const ACCENT = 'emerald' as const;
 
 /** The shared Toggle (components/shared/Toggle.tsx); this name stays for the
  *  settings tabs. New code imports Toggle from shared. */
-export const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; id: string }> = ({ checked, onChange, id }) => (
-  <SharedToggle id={id} checked={checked} onChange={onChange} accent={ACCENT} />
+export const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; id: string; disabled?: boolean }> = ({ checked, onChange, id, disabled }) => (
+  <SharedToggle id={id} checked={checked} onChange={onChange} accent={ACCENT} disabled={disabled} />
 );
 
 /** Single setting row */
@@ -27,11 +27,19 @@ export const SettingRow: React.FC<{
   checked: boolean;
   onChange: (v: boolean) => void;
   badges?: Array<{ text: string; type: 'speed' | 'vram' | 'rebuild' }>;
-}> = ({ id, label, description, checked, onChange, badges }) => (
+  /** The value to restore when the reset icon is clicked. Set this to show the
+   *  icon while `checked` differs from it — same gating as shared/Toggle.tsx. */
+  defaultValue?: boolean;
+  disabled?: boolean;
+}> = ({ id, label, description, checked, onChange, badges, defaultValue, disabled }) => (
   <div className="setting-row">
     <div className="setting-info">
       <div className="setting-label">
-        <ParamLabel label={label} info={description} className="" />
+        <ParamLabel
+          label={label}
+          info={description}
+          className=""
+          onReset={defaultValue !== undefined && checked !== defaultValue && !disabled ? () => onChange(defaultValue) : undefined} />
         {badges?.map((b, i) => (
           <span key={i} className={`setting-badge setting-badge--${b.type}`}>
             {b.text}
@@ -39,7 +47,7 @@ export const SettingRow: React.FC<{
         ))}
       </div>
     </div>
-    <Toggle checked={checked} onChange={onChange} id={id} />
+    <Toggle checked={checked} onChange={onChange} id={id} disabled={disabled} />
   </div>
 );
 
@@ -51,10 +59,18 @@ export const SelectRow: React.FC<{
   value: string | number;
   options: Array<{ value: string | number; label: string }>;
   onChange: (v: string) => void;
-}> = ({ id, label, description, value, options, onChange }) => (
+  /** The value to restore when the reset icon is clicked. Set this to show the
+   *  icon while `value` differs from it — same gating as shared/Toggle.tsx. */
+  defaultValue?: string | number;
+  disabled?: boolean;
+}> = ({ id, label, description, value, options, onChange, defaultValue, disabled }) => (
   <div className="setting-row">
     <div className="setting-info">
-      <ParamLabel label={label} info={description} className="setting-label" />
+      <ParamLabel
+        label={label}
+        info={description}
+        className="setting-label"
+        onReset={defaultValue !== undefined && value !== defaultValue && !disabled ? () => onChange(String(defaultValue)) : undefined} />
     </div>
     <StyledSelect
       id={id}
@@ -63,6 +79,7 @@ export const SelectRow: React.FC<{
       onChange={(v) => onChange(String(v))}
       options={options}
       className="min-w-[100px]"
+      disabled={disabled}
     />
   </div>
 );

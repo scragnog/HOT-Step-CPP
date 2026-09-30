@@ -672,6 +672,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           description="Run lyrics transcription concurrently with post-processing. Whisper is CPU-only — no VRAM impact."
           checked={settings.parallelWhisper}
           onChange={(v) => update('parallelWhisper', v)}
+          defaultValue={DEFAULT_SETTINGS.parallelWhisper}
           badges={[
             { text: '~6s saved', type: 'speed' as const },
           ]}
@@ -683,6 +684,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           description="Run audio quality analysis concurrently with other stages. CPU-only — no VRAM impact."
           checked={settings.parallelQualityEval}
           onChange={(v) => update('parallelQualityEval', v)}
+          defaultValue={DEFAULT_SETTINGS.parallelQualityEval}
           badges={[
             { text: '~2s saved', type: 'speed' as const },
           ]}
@@ -694,6 +696,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           description="Start cover art generation during post-processing instead of waiting until after. Uses GPU (Flux) — may need VRAM headroom."
           checked={settings.parallelCoverArt}
           onChange={(v) => update('parallelCoverArt', v)}
+          defaultValue={DEFAULT_SETTINGS.parallelCoverArt}
           badges={[
             { text: '~5s saved', type: 'speed' as const },
             { text: 'GPU', type: 'vram' as const },
@@ -714,6 +717,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           description={t('settings.general.coResidentDesc')}
           checked={settings.coResident}
           onChange={(v) => update('coResident', v)}
+          defaultValue={DEFAULT_SETTINGS.coResident}
           badges={[
             { text: '−13s', type: 'speed' as const },
             { text: '+8GB VRAM', type: 'vram' as const },
@@ -726,6 +730,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           description={t('settings.general.cacheLmDesc')}
           checked={settings.cacheLmCodes}
           onChange={(v) => update('cacheLmCodes', v)}
+          defaultValue={DEFAULT_SETTINGS.cacheLmCodes}
           badges={[
             { text: '−12s', type: 'speed' as const },
           ]}
@@ -750,6 +755,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             { value: 360, label: '6 hours' },
           ]}
           onChange={(v) => update('generationTimeoutMinutes', parseInt(v))}
+          defaultValue={DEFAULT_SETTINGS.generationTimeoutMinutes}
         />
       </div>
       </>
@@ -813,6 +819,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           description="After generation, extract kick, snare, and hi-hat stems for beat-reactive visual effects (rainbow borders, snare flash, hi-hat particles). Takes ~60-90s extra per song."
           checked={settings.discoKickExtract}
           onChange={v => update('discoKickExtract', v)}
+          defaultValue={DEFAULT_SETTINGS.discoKickExtract}
         />
       </div>
 
@@ -835,6 +842,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             { value: 'mp3', label: 'MP3 (lossy)' },
           ]}
           onChange={(v) => update('downloadFormat', v as AppSettings['downloadFormat'])}
+          defaultValue={DEFAULT_SETTINGS.downloadFormat}
         />
 
         <SelectRow
@@ -849,6 +857,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             { value: 320, label: '320 kbps' },
           ]}
           onChange={(v) => update('downloadMp3Bitrate', parseInt(v))}
+          defaultValue={DEFAULT_SETTINGS.downloadMp3Bitrate}
         />
 
         <SelectRow
@@ -863,6 +872,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             { value: 256, label: '256 kbps' },
           ]}
           onChange={(v) => update('downloadOpusBitrate', parseInt(v))}
+          defaultValue={DEFAULT_SETTINGS.downloadOpusBitrate}
         />
 
         <SelectRow
@@ -876,6 +886,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             { value: 'both', label: t('settings.general.versionBoth') },
           ]}
           onChange={(v) => update('downloadVersion', v as AppSettings['downloadVersion'])}
+          defaultValue={DEFAULT_SETTINGS.downloadVersion}
         />
 
         <SettingRow
@@ -884,6 +895,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           description={t('settings.general.includeLatentDesc')}
           checked={settings.downloadIncludeLatent}
           onChange={(v) => update('downloadIncludeLatent', v)}
+          defaultValue={DEFAULT_SETTINGS.downloadIncludeLatent}
         />
       </div>
 
@@ -900,12 +912,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           description={t('settings.general.triggerFilenameDesc')}
           checked={settings.triggerUseFilename}
           onChange={(v) => update('triggerUseFilename', v)}
+          defaultValue={DEFAULT_SETTINGS.triggerUseFilename}
         />
 
         {settings.triggerUseFilename && (
           <div className="setting-row">
             <div className="setting-info">
-              <div className="setting-label">{t('settings.general.triggerPlacement')}</div>
+              <ParamLabel
+                label={t('settings.general.triggerPlacement')}
+                className="setting-label"
+                onReset={settings.triggerPlacement !== DEFAULT_SETTINGS.triggerPlacement ? () => update('triggerPlacement', DEFAULT_SETTINGS.triggerPlacement) : undefined} />
               <div className="setting-description">
                 {settings.triggerPlacement === 'prepend' && t('settings.general.triggerPrepend')}
                 {settings.triggerPlacement === 'append' && t('settings.general.triggerAppend')}
