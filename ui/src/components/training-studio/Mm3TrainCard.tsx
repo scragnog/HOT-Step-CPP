@@ -126,13 +126,18 @@ const MM3_METHOD_KEYS: Record<Mm3Method, { label: string; info: string }> = {
 const NumField: React.FC<{
   label: string; value: number; onChange: (v: number) => void; step?: number; info?: string; meta?: string;
   disabled?: boolean;
-}> = ({ label, value, onChange, step = 1, info, meta, disabled }) => (
+  /** The server-default value to compare against and show beside the reset
+   *  icon; the icon itself calls onReset, not a write of this value. */
+  defaultValue?: number;
+  onReset?: () => void;
+}> = ({ label, value, onChange, step = 1, info, meta, disabled, defaultValue, onReset }) => (
   <label className={`flex flex-col gap-1${disabled ? ' opacity-50' : ''}`}>
     <ParamLabel
       label={label}
       info={info}
       meta={meta}
       className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+      onReset={defaultValue !== undefined && value !== defaultValue && !disabled ? onReset : undefined}
     />
     <input
       type="number" className={INPUT} value={value} step={step} disabled={disabled}
@@ -176,7 +181,12 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
   // optimizer applied by the scale factor.
   const lrScale = status?.defaults.optimizer === 'muon' ? (status.defaults.muonLrScale ?? 1) : 1;
 
-  const form: FormState | null = status ? {
+  // `base` is what the form shows with no edits — the server's current
+  // defaults (or a recommendation, where one overrides the default), resolved
+  // fresh on every render. Resetting a field means deleting it from `edits`,
+  // not writing a value, so a later server-side default change still reaches
+  // the form for anyone who never touched that field.
+  const base: FormState | null = status ? {
     steps: status.defaults.steps ?? 800,
     stopMode: status.defaults.stopMode ?? 'steps',
     targetLoss: status.defaults.targetLoss ?? 1.0,
@@ -263,8 +273,8 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     regDatasetId: '',
     regEvery: status.defaults.regularisation?.every ?? 3,
     regTopK: status.defaults.regularisation?.topK ?? 64,
-    ...edits,
   } : null;
+  const form: FormState | null = base ? { ...base, ...edits } : null;
 
   // Peak VRAM for the CURRENT form, not for the defaults — rank is the biggest
   // single term after the base itself, so an estimate pinned to the defaults
@@ -458,6 +468,24 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setEdits(e => ({ ...e, [k]: v }));
+  // Deletes the edit rather than writing base[k] back — base is re-derived
+  // every render, so a delete keeps tracking it if the server default moves.
+  const reset = <K extends keyof FormState>(k: K) =>
+    setEdits(e => { const rest = { ...e }; delete rest[k]; return rest; });
+  // PiSSA's own onChange forces hotPizza off whenever pissa goes false (HOT-PiZZA
+  // needs PiSSA underneath it); resetting pissa back to a false base has to apply
+  // that same coupling, or hotPizza could be left on with pissa off. Resetting
+  // hotPizza has no such rule — it only ever forces pissa ON, and reset never
+  // needs to turn something on — so it stays the plain reset('hotPizza').
+  const resetPissa = () => {
+    if (!base) return;
+    setEdits(prev => {
+      const rest = { ...prev };
+      delete rest.pissa;
+      if (!base.pissa) rest.hotPizza = false;
+      return rest;
+    });
+  };
 
   // Presets are DERIVED from the fields, never stored: the row highlights
   // whichever preset the four governing fields currently equal, and shows
@@ -530,7 +558,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               {t('trainingStudio.mm3.goToCodes', 'Go to Codes')}
             </button>
           </div>
-        ) : form && (
+        ) : form && base && (
           <>
             {/* -- Codes cache (the launder gate) --------------------------
                 Only rendered when a laundered cache exists; a dataset without
@@ -594,6 +622,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     + 'reached. In target-loss mode the step count below still caps the run, so a '
                     + 'target that never arrives still ends somewhere.')}
                   className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                  onReset={form.stopMode !== base.stopMode ? () => reset('stopMode') : undefined}
                 />
                 <StyledSelect
                   accent="amber"
@@ -612,6 +641,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   : t('trainingStudio.mm3.steps', 'Steps')}
                 value={form.steps}
                 onChange={v => set('steps', v)}
+                defaultValue={base.steps} onReset={() => reset('steps')}
                 meta={t('trainingStudio.mm3.stepsMeta', 'default 800')}
                 info={form.stopMode === 'loss'
                   ? t('trainingStudio.mm3.maxStepsHint',
@@ -624,6 +654,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 <>
                   <NumField label={t('trainingStudio.mm3.targetLoss', 'Target loss')}
                     value={form.targetLoss} onChange={v => set('targetLoss', v)} step={0.05}
+                    defaultValue={base.targetLoss} onReset={() => reset('targetLoss')}
                     info={t('trainingStudio.mm3.targetLossHint',
                       'Stops as soon as the loss reaches this. Down is NOT automatically '
                       + 'better: under ~0.05 training loss the runs that got there had '
@@ -647,6 +678,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                             + 'memorising.',
                             { n: form.targetLossEpochs, songs: status?.codes ?? 0 })}
                       className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                      onReset={form.targetLossMetric !== base.targetLossMetric ? () => reset('targetLossMetric') : undefined}
                     />
                     <StyledSelect
                       accent="amber"
@@ -676,6 +708,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <NumField label={t('trainingStudio.mm3.saveEvery', 'Checkpoint every')} value={form.saveEvery}
                 onChange={v => set('saveEvery', v)}
+                defaultValue={base.saveEvery} onReset={() => reset('saveEvery')}
                 meta={t('trainingStudio.mm3.saveEveryMeta', 'default 100 steps')}
                 info={t('trainingStudio.mm3.saveEveryInfo',
                   'How many training steps between saved checkpoints. Lower saves more often, at the '
@@ -683,6 +716,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   + 'is stopped early or crashes.')} />
               <NumField label={t('trainingStudio.mm3.rank', 'Rank')} value={form.rank}
                 onChange={v => set('rank', v)}
+                defaultValue={base.rank} onReset={() => reset('rank')}
                 meta={t('trainingStudio.mm3.rankMeta', 'default 256, follows the VRAM recommendation')}
                 info={t('trainingStudio.mm3.rankInfo',
                   'The LoRA\'s capacity — how many parameters the adapter learns. Higher captures more '
@@ -690,6 +724,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   + 'lower trains faster and fits smaller cards but may undercook the likeness.')} />
               <NumField label={t('trainingStudio.mm3.maxFrames', 'Crop (frames)')} value={form.maxFrames}
                 onChange={v => set('maxFrames', v)} step={50}
+                defaultValue={base.maxFrames} onReset={() => reset('maxFrames')}
                 meta={t('trainingStudio.mm3.maxFramesMeta', 'default 1500 frames')}
                 info={t('trainingStudio.mm3.maxFramesInfo',
                   'How many frames of audio each training crop covers. Longer crops give the model more '
@@ -697,35 +732,41 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   + 'are cheaper but see less of the song at once.')} />
               <NumField label={t('trainingStudio.mm3.cropStartFrac', 'Crops at song start')}
                 value={form.cropStartFrac} onChange={v => set('cropStartFrac', v)} step={0.05}
+                defaultValue={base.cropStartFrac} onReset={() => reset('cropStartFrac')}
                 info={t('trainingStudio.mm3.cropStartFracHint',
                   'Share anchored at frame 0 — what teaches songs to OPEN like songs. '
                   + 'Too low and renders jump in mid-flow.') as string} />
               <NumField label={t('trainingStudio.mm3.cropStartTiles', 'Start tiles')}
                 value={form.cropStartTiles} onChange={v => set('cropStartTiles', v)} step={1}
+                defaultValue={base.cropStartTiles} onReset={() => reset('cropStartTiles')}
                 info={t('trainingStudio.mm3.cropStartTilesHint',
                   'Half the start share stays at frame 0; the rest lands on aligned tiles '
                   + 'after it, teaching the intro→build→verse arc under short crops. '
                   + '1 = frame 0 only.') as string} />
               <NumField label={t('trainingStudio.mm3.cropEndFrac', 'Crops at song end')}
                 value={form.cropEndFrac} onChange={v => set('cropEndFrac', v)} step={0.05}
+                defaultValue={base.cropEndFrac} onReset={() => reset('cropEndFrac')}
                 info={t('trainingStudio.mm3.cropEndFracHint',
                   'Share flush to the track end — the only place EOS is taught. The '
                   + 'REMAINDER of these two is the random share (currently '
                   + `${Math.max(0, Math.round((1 - form.cropStartFrac - form.cropEndFrac) * 100))}% mid-song crops).`) as string} />
               <NumField label={t('trainingStudio.mm3.depthLossWeight', 'Acoustic loss weight')}
                 value={form.depthLossWeight} onChange={v => set('depthLossWeight', v)} step={0.1}
+                defaultValue={base.depthLossWeight} onReset={() => reset('depthLossWeight')}
                 info={t('trainingStudio.mm3.depthLossWeightHint',
                   'Trains the adapter to keep vocal timbre intact: acoustic codebooks are '
                   + 'supervised through the frozen depth decoder. 0 disables — renders then '
                   + 'drift into chipmunk/goblin voices. Leave at 1.') as string} />
               <Toggle accent="amber" className="col-span-2" checked={form.keepResumeState}
                 onChange={v => set('keepResumeState', v)}
+                defaultValue={base.keepResumeState} onReset={() => reset('keepResumeState')}
                 label={t('trainingStudio.mm3.keepResumeState', 'Keep resume state after completion')}
                 info={t('trainingStudio.mm3.keepResumeStateHint',
                   'The optimizer state (about 4 GB) lets a finished run be continued past its step '
                   + 'count. Off: it is deleted once the run ends. A run that stops early keeps it either way.')} />
               <Toggle accent="amber" className="col-span-2" checked={form.longTracks === 'exclude'}
                 onChange={v => set('longTracks', v ? 'exclude' : 'crop')}
+                defaultValue={base.longTracks === 'exclude'} onReset={() => reset('longTracks')}
                 label={t('trainingStudio.mm3.longTracksExclude', 'Leave out tracks longer than the window')}
                 info={t('trainingStudio.mm3.longTracksHint',
                   'The recipe trains each track as one whole sequence. A track longer than the window '
@@ -733,6 +774,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   + 'trained in crops of the window instead, which is the pre-2026-09-11 behaviour.')} />
               <NumField label={t('trainingStudio.mm3.depthLossFrames', 'Acoustic frames/step')}
                 value={form.depthLossFrames} onChange={v => set('depthLossFrames', v)} step={16}
+                defaultValue={base.depthLossFrames} onReset={() => reset('depthLossFrames')}
                 info={t('trainingStudio.mm3.depthLossFramesHint',
                   'Frames sampled per step for the acoustic loss.') as string} />
             </div>
@@ -752,6 +794,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
             <Toggle accent="amber" className="mt-2" checked={form.triggerPrepend}
               onChange={v => set('triggerPrepend', v)}
               disabled={!form.trigger.trim()}
+              defaultValue={base.triggerPrepend} onReset={() => reset('triggerPrepend')}
               label={t('trainingStudio.mm3.triggerPrepend', 'Train the trigger')}
               info={t('trainingStudio.mm3.triggerPrependHint',
                 'Puts "trigger, " at the front of every training caption, in memory — your files '
@@ -781,21 +824,26 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
                 <NumField label={t('trainingStudio.mm3.previewEverySteps', 'Every N steps')}
                   value={form.previewEverySteps} onChange={v => set('previewEverySteps', v)}
+                  defaultValue={base.previewEverySteps} onReset={() => reset('previewEverySteps')}
                   step={50} info={t('trainingStudio.mm3.previewStepsHint', '0 = off') as string} />
                 <NumField label={t('trainingStudio.mm3.previewEveryMinutes', 'Or every N minutes')}
                   value={form.previewEveryMinutes} onChange={v => set('previewEveryMinutes', v)}
+                  defaultValue={base.previewEveryMinutes} onReset={() => reset('previewEveryMinutes')}
                   step={5} info={t('trainingStudio.mm3.previewMinutesHint',
                     'Whichever comes first') as string} />
                 <NumField label={t('trainingStudio.mm3.previewSeconds', 'Length (s)')}
                   value={form.previewSeconds} onChange={v => set('previewSeconds', v)}
+                  defaultValue={base.previewSeconds} onReset={() => reset('previewSeconds')}
                   step={4} info={t('trainingStudio.mm3.previewSecondsHint',
                     '24 s costs about 16 s of GPU') as string} />
                 <NumField label={t('trainingStudio.mm3.previewSeed', 'Preview seed')}
                   value={form.previewSeed} onChange={v => set('previewSeed', v)}
+                  defaultValue={base.previewSeed} onReset={() => reset('previewSeed')}
                   info={t('trainingStudio.mm3.previewSeedHint',
                     'Fixed across the run') as string} />
                 <NumField label={t('trainingStudio.mm3.previewScaleMlp', 'Preview MLP scale')}
                   value={form.previewScaleMlp} onChange={v => set('previewScaleMlp', v)}
+                  defaultValue={base.previewScaleMlp} onReset={() => reset('previewScaleMlp')}
                   step={0.05} info={t('trainingStudio.mm3.previewScaleMlpHint',
                     'How hard the adapter’s MLP delta is applied in previews only. '
                     + '1 = full, 0 = attention only.') as string} />
@@ -847,6 +895,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     + 'identity bakes in. The trigger is prepended as "trigger, " on the caption’s '
                     + 'first line, which is the exact shape the training rows use.')}
                   className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                  onReset={form.previewCaption !== base.previewCaption ? () => reset('previewCaption') : undefined}
                 />
                 <textarea
                   className={`${INPUT} font-mono text-[11px] leading-snug`} rows={3}
@@ -860,6 +909,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               <div className="flex flex-col gap-1.5 mt-3">
                 <Toggle accent="amber" checked={form.previewControl}
                   onChange={v => set('previewControl', v)}
+                  defaultValue={base.previewControl} onReset={() => reset('previewControl')}
                   label={t('trainingStudio.mm3.previewControl', 'Also render a neutral control caption')}
                   info={t('trainingStudio.mm3.previewControlHint',
                     'An off-genre prompt rendered WITH the adapter. This is the one that catches '
@@ -867,6 +917,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     + 'model and a good one both sound roughly like the artist.')} />
                 <Toggle accent="amber" checked={form.previewBaseline}
                   onChange={v => set('previewBaseline', v)}
+                  defaultValue={base.previewBaseline} onReset={() => reset('previewBaseline')}
                   label={t('trainingStudio.mm3.previewBaseline', 'Render a no-adapter reference first')}
                   info={t('trainingStudio.mm3.previewBaselineHint',
                     'Free - the engine is still up before the run starts. Without it there is '
@@ -917,10 +968,12 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 </label>
                 <NumField label={t('trainingStudio.mm3.regEvery', 'Every N steps')}
                   value={form.regEvery} onChange={v => set('regEvery', v)}
+                  defaultValue={base.regEvery} onReset={() => reset('regEvery')}
                   info={t('trainingStudio.mm3.regEveryHint',
                     '3 = one prior step per two style steps') as string} />
                 <NumField label={t('trainingStudio.mm3.regTopK', 'Classes kept')}
                   value={form.regTopK} onChange={v => set('regTopK', v)} step={64}
+                  defaultValue={base.regTopK} onReset={() => reset('regTopK')}
                   info={t('trainingStudio.mm3.regTopKHint',
                     'Coverage: 64 = 90%, 128 = 94%, 256 = 97%') as string} />
               </div>
@@ -953,6 +1006,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <NumField label={t('trainingStudio.mm3.alpha', 'Alpha')} value={form.alpha}
                     onChange={v => set('alpha', v)}
+                    defaultValue={base.alpha} onReset={() => reset('alpha')}
                     meta={t('trainingStudio.mm3.alphaMeta', 'default 256')}
                     info={t('trainingStudio.mm3.alphaInfo',
                       'Scales how strongly the LoRA\'s learned update is applied on top of the frozen '
@@ -960,6 +1014,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       + 'the adapter\'s effect, lowering it softens it.')} />
                   <NumField label={t('trainingStudio.mm3.lr', 'Learning rate')} value={form.lr}
                     onChange={v => set('lr', v)} step={1e-5}
+                    defaultValue={base.lr} onReset={() => reset('lr')}
                     meta={t('trainingStudio.mm3.lrMeta', 'default 8e-5')}
                     info={t('trainingStudio.mm3.lrInfo',
                       'How fast the adapter\'s weights move each step. Higher can learn faster but risks '
@@ -968,6 +1023,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       + 'effective step size.')} />
                   <NumField label={t('trainingStudio.mm3.gradAccum', 'Grad accum')} value={form.gradAccum}
                     onChange={v => set('gradAccum', v)}
+                    defaultValue={base.gradAccum} onReset={() => reset('gradAccum')}
                     meta={t('trainingStudio.mm3.gradAccumMeta', 'default 1')}
                     info={t('trainingStudio.mm3.gradAccumInfo',
                       'Number of steps whose gradients are summed before the weights update once, '
@@ -976,6 +1032,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       + 'accumulation.')} />
                   <NumField label={t('trainingStudio.mm3.seed', 'Seed')} value={form.seed}
                     onChange={v => set('seed', v)}
+                    defaultValue={base.seed} onReset={() => reset('seed')}
                     meta={t('trainingStudio.mm3.seedMeta', 'default 42')}
                     info={t('trainingStudio.mm3.seedInfo',
                       'The random seed for crop order and initialisation. Changing it gives a different '
@@ -1005,6 +1062,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       + 'VALIDATED BY EAR. DoRA/HiRA/LoHa/HRA are new here 2026-09-05 (see each '
                       + 'button\'s hover text); none has an MM3 measurement of its own yet.')}
                     className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                    onReset={method !== methodOf(base) ? () => pickMethod(methodOf(base)) : undefined}
                   />
                   <div className="flex flex-wrap items-center gap-1.5">
                     {(['lokr', 'lora', 'dora', 'hira', 'loha', 'hra'] as Mm3Method[]).map(m => {
@@ -1030,14 +1088,20 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-zinc-200 dark:border-white/5 px-3 py-2 mt-1">
                       <Toggle accent="amber" size="sm" checked={form.pissa && form.hotPizza} disabled={method !== 'lora'}
                         onChange={v => setEdits(prev => ({ ...prev, hotPizza: v, ...(v ? { pissa: true } : {}) }))}
+                        defaultValue={base.pissa && base.hotPizza}
+                        onReset={() => reset('hotPizza')}
                         label={t('trainingStudio.mm3.hotPizza', 'HOT-PiZZA')}
                         info={t('trainingStudio.mm3.hotPizzaInfo')} />
                       <Toggle accent="amber" size="sm" checked={form.pissa} disabled={method !== 'lora'}
                         onChange={v => setEdits(prev => ({ ...prev, pissa: v, ...(v ? {} : { hotPizza: false }) }))}
+                        defaultValue={base.pissa}
+                        onReset={resetPissa}
                         label={t('trainingStudio.mm3.pissa', 'PiSSA init')}
                         info={t('trainingStudio.mm3.pissaInfo')} />
                       <Toggle accent="amber" size="sm" checked={form.rslora} disabled={method === 'hra'}
                         onChange={v => set('rslora', v)}
+                        defaultValue={base.rslora}
+                        onReset={() => reset('rslora')}
                         label={t('trainingStudio.mm3.rslora', 'rsLoRA')}
                         info={t('trainingStudio.mm3.rsloraInfo')} />
                       <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
@@ -1045,6 +1109,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                           label={t('trainingStudio.mm3.loraPlusRatio', 'LoRA+ ratio')}
                           info={t('trainingStudio.mm3.loraPlusRatioInfo')}
                           className="text-xs text-zinc-700 dark:text-zinc-300"
+                          onReset={form.loraPlusRatio !== base.loraPlusRatio ? () => reset('loraPlusRatio') : undefined}
                         />
                         <input type="number" min={1} max={64} step={1} value={form.loraPlusRatio}
                           onChange={e => set('loraPlusRatio', Math.max(1, Number(e.target.value) || 1))}
@@ -1066,6 +1131,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                         + 'at the default LR scale of 64 it produced an adapter that rendered digital '
                         + 'silence, because that value was tuned on a different model.')}
                       className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                      onReset={form.optimizer !== base.optimizer ? () => reset('optimizer') : undefined}
                     />
                     <StyledSelect
                       accent="amber"
@@ -1083,6 +1149,8 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     checked={attnEffective === 'flash'}
                     disabled={!flashSupported}
                     onChange={v => set('attnBackend', v ? 'flash' : 'exact')}
+                    defaultValue={base.attnBackend === 'flash'}
+                    onReset={() => reset('attnBackend')}
                     label={t('trainingStudio.mm3.attnBackend', 'Flash attention')}
                     info={!flashSupported
                       ? t('trainingStudio.mm3.attnBackendUnsupported',
@@ -1100,6 +1168,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   {form.adapterType === 'lokr' && (
                     <NumField label={t('trainingStudio.mm3.lokrFactor', 'LoKr factor')}
                       value={form.lokrFactor} onChange={v => set('lokrFactor', v)}
+                      defaultValue={base.lokrFactor} onReset={() => reset('lokrFactor')}
                       info={t('trainingStudio.mm3.lokrFactorHint',
                         '6 gives ~528 MB and 264M parameters. Higher is smaller and less capable: '
                         + '8 -> 274 MB, 16 -> 109 MB.') as string} />
@@ -1107,6 +1176,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   {form.optimizer === 'muon' && (
                     <NumField label={t('trainingStudio.mm3.muonLrScale', 'Muon LR scale')}
                       value={form.muonLrScale} onChange={v => set('muonLrScale', v)}
+                      defaultValue={base.muonLrScale} onReset={() => reset('muonLrScale')}
                       info={t('trainingStudio.mm3.muonLrScaleHint',
                         '64 is the best of the values measured so far, not a tuned optimum.') as string} />
                   )}
@@ -1139,6 +1209,8 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                           ? (form.trigger.trim() || 'artist') : form.artistToken,
                       }));
                     }}
+                    defaultValue={base.artistTokenOn}
+                    onReset={() => reset('artistTokenOn')}
                     label={t('trainingStudio.mm3.artistTokenOn', 'Train an artist token')}
                     info={t('trainingStudio.mm3.artistTokenOnInfo',
                       'Adds a named token whose learned vectors sit behind a placeholder in every '
@@ -1153,12 +1225,14 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                             'The placeholder word the learned vectors attach to in captions. '
                             + 'Defaults to the trigger word if one is set.')}
                           className="text-[10px] text-zinc-500"
+                          onReset={form.artistToken !== base.artistToken ? () => reset('artistToken') : undefined}
                         />
                         <input className={INPUT} value={form.artistToken}
                           onChange={e => set('artistToken', e.target.value.replace(/[^A-Za-z0-9_-]/g, ''))} />
                       </label>
                       <NumField label={t('trainingStudio.mm3.artistTokenK', 'Token vectors (k)')}
                         value={form.artistTokenK} onChange={v => set('artistTokenK', v)}
+                        defaultValue={base.artistTokenK} onReset={() => reset('artistTokenK')}
                         meta={t('trainingStudio.mm3.artistTokenKMeta', 'default 32')}
                         info={t('trainingStudio.mm3.artistTokenKInfo',
                           'How many learned vectors the artist token adds behind its placeholder. More '
@@ -1166,6 +1240,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                           + 'parameters; fewer is cheaper but may undercapture it.')} />
                       <NumField label={t('trainingStudio.mm3.artistTokenLr', 'Token LR')}
                         value={form.artistTokenLr} onChange={v => set('artistTokenLr', v)} step={0.0005}
+                        defaultValue={base.artistTokenLr} onReset={() => reset('artistTokenLr')}
                         meta={t('trainingStudio.mm3.artistTokenLrMeta', 'default 0.005')}
                         info={t('trainingStudio.mm3.artistTokenLrInfo',
                           'The learning rate for the artist token and its vectors, separate from the '
@@ -1177,6 +1252,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                     value={form.regDatasetId ? 0 : form.prefixN}
                     onChange={v => set('prefixN', Math.max(0, Math.min(64, v)))}
                     disabled={!!form.regDatasetId}
+                    defaultValue={base.prefixN} onReset={() => reset('prefixN')}
                     info={(form.regDatasetId
                       ? t('trainingStudio.mm3.prefixNVsReg',
                           'Unavailable with a regularisation dataset: the prior capture needs an inert '
@@ -1221,11 +1297,13 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   </label>
                   <NumField label={t('trainingStudio.mm3.holdout', 'Hold-out fraction')}
                     value={form.holdout} onChange={v => set('holdout', v)} step={0.05}
+                    defaultValue={base.holdout} onReset={() => reset('holdout')}
                     info={t('trainingStudio.mm3.holdoutHint',
                       '0 disables evaluation — the training loss then cannot tell learning from '
                       + 'memorising. Ignored below 6 songs.') as string} />
                   <NumField label={t('trainingStudio.mm3.evalEvery', 'Evaluate every')}
                     value={form.evalEvery} onChange={v => set('evalEvery', v)} step={25}
+                    defaultValue={base.evalEvery} onReset={() => reset('evalEvery')}
                     info={t('trainingStudio.mm3.evalEveryHint',
                       'Steps between held-out evaluations. 0 = off. This is also the finest '
                       + 'grain a held-out target can stop on.') as string} />
@@ -1253,6 +1331,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                             + 'supervised. This is the default and the two others are each broken at '
                             + 'one end.')}
                     className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                    onReset={form.cropMode !== base.cropMode ? () => reset('cropMode') : undefined}
                   />
                   <StyledSelect
                     accent="amber"
@@ -1277,6 +1356,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       + 'drifting mid-track. "song" labels each crop with where it actually is. Runs '
                       + 'trained under the two are not comparable.')}
                     className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                    onReset={form.cropAnchor !== base.cropAnchor ? () => reset('cropAnchor') : undefined}
                   />
                   <StyledSelect
                     accent="amber"
@@ -1313,6 +1393,8 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                             + 'crop length is quadratic, so it buys context far more cheaply than a '
                             + 'longer crop does.')}
                     className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                    onReset={form.cropAnchor !== 'zero' && form.prefixFrames !== base.prefixFrames
+                      ? () => reset('prefixFrames') : undefined}
                   />
                   <div className="flex gap-2">
                     <input type="number" className={INPUT} step={50} min={0}

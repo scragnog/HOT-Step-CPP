@@ -32,12 +32,16 @@ interface EditableSliderProps {
   /** The value to restore when the reset icon is clicked. Set this to show the
    *  icon while `value` differs from it. */
   defaultValue?: number;
+  /** Called instead of onChange(defaultValue) when the reset icon is
+   *  clicked. For a server-default overlay form, resetting means deleting
+   *  the edit key rather than writing a value — the caller supplies that. */
+  onReset?: () => void;
 }
 
 export const EditableSlider: React.FC<EditableSliderProps> = ({
   label, value, min, max, step, onChange, onChangeCommitted,
   formatDisplay, helpText, tooltip, title = '', autoLabel = 'Auto',
-  disabled = false, disabledReason, defaultValue,
+  disabled = false, disabledReason, defaultValue, onReset,
 }) => {
   const [inputValue, setInputValue] = useState(value.toString());
   const [isEditing, setIsEditing] = useState(false);
@@ -86,7 +90,8 @@ export const EditableSlider: React.FC<EditableSliderProps> = ({
   };
 
   const handleReset = () => {
-    (onChangeCommitted || onChange)(defaultValue as number);
+    if (onReset) onReset();
+    else (onChangeCommitted || onChange)(defaultValue as number);
     setDragValue(null);
     isDragging.current = false;
     setIsEditing(false);

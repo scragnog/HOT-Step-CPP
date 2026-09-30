@@ -130,6 +130,19 @@ the same way, omit the reset icon (the control itself stays usable) when the sch
 `p.default` back through the same setter every other change in that control goes through
 (`setBackendParam`, `setPluginParam`), never a bespoke path.
 
+A form that overlays edits on the server's own recipe (`Mm3TrainCard.tsx`, `Yue2TrainCard.tsx`,
+`Yue2ArTrainCard.tsx` — `const base = {...}; const form = { ...base, ...edits }`, `edits` a
+`useState<Partial<FormState>>({})`) has a moving target for "default": the server can ship a new
+recipe between sessions, so `base` is re-derived from `status.defaults` on every render rather than
+captured once. Reset here means deleting the key from `edits`, never writing `base[k]` back — a
+written value freezes that field at today's default and stops following the server, which is the
+one thing a field the user never touched should keep doing. Pair the icon with a sibling
+`reset(k)` next to the existing `set(k, v)`, gated on `edits[k] !== undefined && edits[k] !== base[k]`
+(the same comparison `value !== defaultValue` reduces to once `form` is `{ ...base, ...edits }`).
+A dependent-field coupling on `onChange` (DiT method's PiSSA forcing HOT-PiZZA off, MM3 train's
+same pair) needs the identical coupling on reset — check the delta between the two would-be
+states and apply whatever the `onChange` handler would, not a delete-and-hope.
+
 An accordion whose section is one on/off `toggle` (`PostProcessingDropdown.tsx`'s shared `Accordion`)
 takes the same `onReset` its `ParamLabel` header already renders — add it to the accordion's own
 props and pass it straight through, one level of plumbing, not a new component. Guard it on the

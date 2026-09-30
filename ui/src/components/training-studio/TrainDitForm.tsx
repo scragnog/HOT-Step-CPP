@@ -1030,7 +1030,7 @@ export const TrainDitForm: React.FC<Props> = ({
             {P('tWindow', 'Default 0 → 1 (whole schedule)')}
             <div className="flex items-center gap-2">
               <div className="flex-1 min-w-0 flex flex-col gap-1">
-                <ParamLabel label={t('trainingStudio.train.dit.tMin')} className="text-[10px] text-zinc-500" onReset={onReset('tMin')} />
+                <ParamLabel label={t('trainingStudio.train.dit.tMin')} info={t('trainingStudio.train.dit.tMinInfo')} className="text-[10px] text-zinc-500" onReset={onReset('tMin')} />
                 <input
                   type="number" min={0} max={1} step={0.01}
                   value={value.tMin} disabled={lock}
@@ -1040,7 +1040,7 @@ export const TrainDitForm: React.FC<Props> = ({
               </div>
               <span className="text-xs text-zinc-500 mt-4">→</span>
               <div className="flex-1 min-w-0 flex flex-col gap-1">
-                <ParamLabel label={t('trainingStudio.train.dit.tMax')} className="text-[10px] text-zinc-500" onReset={onReset('tMax')} />
+                <ParamLabel label={t('trainingStudio.train.dit.tMax')} info={t('trainingStudio.train.dit.tMaxInfo')} className="text-[10px] text-zinc-500" onReset={onReset('tMax')} />
                 <input
                   type="number" min={0} max={1} step={0.01}
                   value={value.tMax} disabled={lock}

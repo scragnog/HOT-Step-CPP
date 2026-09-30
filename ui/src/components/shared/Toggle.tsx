@@ -54,10 +54,14 @@ export interface ToggleProps {
   /** The value to restore when the reset icon is clicked. Set this to show the
    *  icon while `checked` differs from it. */
   defaultValue?: boolean;
+  /** Called instead of onChange(defaultValue) when the reset icon is
+   *  clicked. For a server-default overlay form, resetting means deleting
+   *  the edit key rather than writing a value — the caller supplies that. */
+  onReset?: () => void;
 }
 
 export const Toggle: React.FC<ToggleProps> = ({
-  checked, onChange, accent = 'pink', size = 'md', disabled = false, id, label, info, meta, className = '', title, 'aria-label': ariaLabel, defaultValue,
+  checked, onChange, accent = 'pink', size = 'md', disabled = false, id, label, info, meta, className = '', title, 'aria-label': ariaLabel, defaultValue, onReset,
 }) => {
   const s = SIZE[size];
   const button = (
@@ -87,7 +91,7 @@ export const Toggle: React.FC<ToggleProps> = ({
         underline={!!info}
         className="text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer select-none"
         rootClassName="min-w-0"
-        onReset={defaultValue !== undefined && checked !== defaultValue && !disabled ? () => onChange(defaultValue) : undefined}
+        onReset={defaultValue !== undefined && checked !== defaultValue && !disabled ? (onReset ?? (() => onChange(defaultValue))) : undefined}
       />
     </div>
   );

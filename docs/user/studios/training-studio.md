@@ -32,6 +32,10 @@ The DiT training method, quality dial and LM base-size pickers are the exception
 reapplies that control's whole preset bundle, the same as clicking the option itself, rather than
 snapping back a single field.
 
+On the MiniMax-Music3 and YuE2 trainer cards, the arrow returns a field to the server's *current*
+default rather than a fixed number baked into the page — so if a later update changes the shipped
+recipe, an untouched field keeps following it and only fields you actually changed stay put.
+
 ## Controls
 
 | Control | What it does |

@@ -63,13 +63,18 @@ const BTN_GO = 'px-4 py-2 rounded-lg text-sm font-semibold bg-amber-500 text-bla
 const NumField: React.FC<{
   label: string; value: number; onChange: (v: number) => void; step?: number; hint?: string;
   info?: string; meta?: string; disabled?: boolean;
-}> = ({ label, value, onChange, step = 1, hint, info, meta, disabled }) => (
+  /** The server-default value to compare against; the icon calls onReset,
+   *  not a write of this value. */
+  defaultValue?: number;
+  onReset?: () => void;
+}> = ({ label, value, onChange, step = 1, hint, info, meta, disabled, defaultValue, onReset }) => (
   <label className={`flex flex-col gap-1${disabled ? ' opacity-50' : ''}`}>
     <ParamLabel
       label={label}
       info={info}
       meta={meta}
       className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+      onReset={defaultValue !== undefined && value !== defaultValue && !disabled ? onReset : undefined}
     />
     <input
       type="number" className={INPUT} value={value} step={step} disabled={disabled}
@@ -116,7 +121,9 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; o
   const mine = activeJob?.kind === 'yue2-preprocess';
 
   const d = status.defaults;
-  const form: PreprocessForm = {
+  // `base` is what the form shows with no edits — resolved fresh from the
+  // server's current defaults on every render, same pattern as Mm3TrainCard.
+  const base: PreprocessForm = {
     clipSeconds: d.clipSeconds,
     captionMode: d.captionMode,
     defaultCaption: d.defaultCaption,
@@ -127,10 +134,12 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; o
     limit: 0,
     force: true,
     acknowledgeSidecarFormat: false,
-    ...edits,
   };
+  const form: PreprocessForm = { ...base, ...edits };
   const set = <K extends keyof PreprocessForm>(k: K, v: PreprocessForm[K]) =>
     setEdits(e => ({ ...e, [k]: v }));
+  const reset = <K extends keyof PreprocessForm>(k: K) =>
+    setEdits(e => { const rest = { ...e }; delete rest[k]; return rest; });
 
   /** The two modes that carry the sidecar's lyrics into the cache. Everything
    *  downstream (cursor spans, the AR prefix) needs one of them. */
@@ -278,6 +287,7 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; o
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             <NumField label={t('trainingStudio.yue2.clipSeconds', 'Clip length (s)')}
               value={form.clipSeconds} onChange={v => set('clipSeconds', v)}
+              defaultValue={base.clipSeconds} onReset={() => reset('clipSeconds')}
               meta={t('trainingStudio.yue2.clipSecondsMeta', 'default 10 s') as string}
               info={t('trainingStudio.yue2.clipSecondsInfo',
                 'How many seconds of audio each training clip covers once cut from the cache. The trainer '
@@ -296,6 +306,7 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; o
                   + 'those stages skip every track. "Nothing" leaves only the trigger word as the style, '
                   + '"One caption I type here" repeats the same sentence on every clip, and "The raw '
                   + 'sidecar file" feeds the whole ACE sidecar in verbatim, field names included.') as string}
+                onReset={form.captionMode !== base.captionMode ? () => reset('captionMode') : undefined}
               />
               <StyledSelect
                 accent="amber"
@@ -364,6 +375,7 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; o
                   : t('trainingStudio.yue2.decodeNoFfmpegInfo',
                       'Which decoder reads the source audio before encoding. No ffmpeg in this install, '
                       + 'so only WAV and MP3 can be decoded either way.') as string}
+                onReset={form.decode !== base.decode ? () => reset('decode') : undefined}
               />
               <StyledSelect
                 accent="amber"
@@ -386,6 +398,7 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; o
                 info={t('trainingStudio.yue2.defaultCaptionInfo',
                   'The exact text used as the style prompt on every training clip, with the trigger word '
                   + 'placed in front of it. There is no per-track variation in this mode.') as string}
+                onReset={form.defaultCaption !== base.defaultCaption ? () => reset('defaultCaption') : undefined}
               />
               <input className={INPUT} value={form.defaultCaption}
                 onChange={e => set('defaultCaption', e.target.value)} />
@@ -398,6 +411,7 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; o
                 accent="amber"
                 checked={form.acknowledgeSidecarFormat}
                 onChange={v => set('acknowledgeSidecarFormat', v)}
+                defaultValue={base.acknowledgeSidecarFormat} onReset={() => reset('acknowledgeSidecarFormat')}
                 label={t('trainingStudio.yue2.ackSidecar', 'Train on the ACE sidecars as they are')}
                 info={t('trainingStudio.yue2.ackSidecarHint',
                   'The run is refused without this. Tick it only if training the style encoder on '
@@ -418,10 +432,12 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; o
             <div className="mt-3 pl-3 border-l-2 border-zinc-200 dark:border-white/10 grid grid-cols-2 md:grid-cols-4 gap-3">
               <NumField label={t('trainingStudio.yue2.tileFrames', 'Encoder tile (frames)')}
                 value={form.tileFrames} onChange={v => set('tileFrames', v)} step={50}
+                defaultValue={base.tileFrames} onReset={() => reset('tileFrames')}
                 info={t('trainingStudio.yue2.tileFramesInfo',
                   'How many frames of audio the VAE encoder processes in one pass while cutting the cache.') as string} />
               <NumField label={t('trainingStudio.yue2.haloFrames', 'Tile halo (frames)')}
                 value={form.haloFrames} onChange={v => set('haloFrames', v)}
+                defaultValue={base.haloFrames} onReset={() => reset('haloFrames')}
                 info={t('trainingStudio.yue2.haloHint',
                   'Extra frames of context added to each side of an encoder tile so neighbouring tiles '
                   + 'blend without a seam. The floor is the encoder\'s own receptive field; the engine '
@@ -433,11 +449,13 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; o
                   info={t('trainingStudio.yue2.onlyHint',
                     'Only encodes files whose name contains this text, case-insensitive. Blank encodes '
                     + 'every file the scan finds.') as string}
+                  onReset={form.only !== base.only ? () => reset('only') : undefined}
                 />
                 <input className={INPUT} value={form.only} onChange={e => set('only', e.target.value)} />
               </label>
               <NumField label={t('trainingStudio.yue2.limit', 'File limit')}
                 value={form.limit} onChange={v => set('limit', v)}
+                defaultValue={base.limit} onReset={() => reset('limit')}
                 meta={t('trainingStudio.yue2.limitMeta', '0 = no limit') as string}
                 info={t('trainingStudio.yue2.limitInfo',
                   'Caps how many files this run encodes, useful for a quick test before committing to the '
@@ -448,6 +466,7 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; o
                   checked={form.force || reCut}
                   disabled={reCut}
                   onChange={v => set('force', v)}
+                  defaultValue={base.force} onReset={() => reset('force')}
                   label={t('trainingStudio.yue2.force', 'Rewrite the manifest')}
                   info={t('trainingStudio.yue2.forceHint',
                     'On by default: re-running rewrites the manifest with the caption mode chosen above '
@@ -689,7 +708,9 @@ export const Yue2NarTrainCard: React.FC<{
   const mine = jobKind === 'yue2-nar-train';
 
   const d = status?.defaults;
-  const form: TrainForm | null = status && d ? {
+  // `base` is what the form shows with no edits — resolved fresh from the
+  // server's current defaults on every render, same pattern as Mm3TrainCard.
+  const base: TrainForm | null = status && d ? {
     lmType: d.lmType,
     // The dataset's own trigger word first, then whatever the status route
     // reports, and only then blank. Without one the adapter has no handle at
@@ -717,11 +738,13 @@ export const Yue2NarTrainCard: React.FC<{
     seed: d.seed,
     kvCache: d.kvCache,
     clipBlock: d.clipBlock,
-    ...edits,
   } : null;
+  const form: TrainForm | null = base ? { ...base, ...edits } : null;
 
   const set = <K extends keyof TrainForm>(k: K, v: TrainForm[K]) =>
     setEdits(e => ({ ...e, [k]: v }));
+  const reset = <K extends keyof TrainForm>(k: K) =>
+    setEdits(e => { const rest = { ...e }; delete rest[k]; return rest; });
 
   // Presets are DERIVED from the fields, never stored, so a hand edit shows as
   // Custom rather than misreporting a preset. Step count is the only lever
@@ -834,7 +857,7 @@ export const Yue2NarTrainCard: React.FC<{
             {t('trainingStudio.yue2.needsLatents',
               'Encode the latents first — training reads the cache, not the audio.')}
           </div>
-        ) : form && status && (
+        ) : form && base && status && (
           <>
             {presets && (
               <div className="mb-3">
@@ -881,6 +904,7 @@ export const Yue2NarTrainCard: React.FC<{
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <NumField label={t('trainingStudio.yue2.steps', 'Steps')} value={form.steps}
                 onChange={v => set('steps', v)} step={1000}
+                defaultValue={base.steps} onReset={() => reset('steps')}
                 hint={formatDurationMs(form.steps * status.vramModel.secondsPerStep * 1000)}
                 info={t('trainingStudio.yue2.stepsInfo',
                   'How many training steps to run. Step count is the only lever measured for this trainer, '
@@ -889,6 +913,7 @@ export const Yue2NarTrainCard: React.FC<{
                   + 'may undertrain.') as string} />
               <NumField label={t('trainingStudio.yue2.rank', 'Rank')} value={form.rank}
                 onChange={v => set('rank', v)} step={64}
+                defaultValue={base.rank} onReset={() => reset('rank')}
                 info={t('trainingStudio.yue2.rankHint',
                   'How much capacity the LoRA has. 256 is what was measured; 128 saves about 2.6 GB of '
                   + 'VRAM at the cost of some capacity, and the ladder between them, plus upstream\'s '
@@ -896,6 +921,7 @@ export const Yue2NarTrainCard: React.FC<{
                   + 'costs more VRAM and a larger adapter file.') as string} />
               <NumField label={t('trainingStudio.yue2.saveEvery', 'Snapshot every')}
                 value={form.saveEvery} onChange={v => set('saveEvery', v)} step={500}
+                defaultValue={base.saveEvery} onReset={() => reset('saveEvery')}
                 info={t('trainingStudio.yue2.saveEveryHint',
                   'How often, in steps, a checkpoint snapshot is written to disk. These are the rungs on '
                   + 'the ladder — and where a killed run comes back from. Lower means more frequent '
@@ -911,6 +937,7 @@ export const Yue2NarTrainCard: React.FC<{
                     + 'what the measured runs used; nar_attn_mlp_proj adds the projection layers on top of '
                     + 'that. Training more sites gives the adapter more places to change the sound, at the '
                     + 'cost of a larger file and more VRAM.') as string}
+                  onReset={form.target !== base.target ? () => reset('target') : undefined}
                 />
                 <StyledSelect
                   accent="amber"
@@ -977,12 +1004,15 @@ export const Yue2NarTrainCard: React.FC<{
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <NumField label={t('trainingStudio.yue2.alpha', 'Alpha')} value={form.alpha}
                     onChange={v => set('alpha', v)} step={64}
+                    defaultValue={base.alpha} onReset={() => reset('alpha')}
                     info={t('trainingStudio.yue2.alphaInfo',
                       'Scales how strongly the LoRA weights apply relative to the rank. Raising it makes '
                       + 'the adapter\'s effect stronger at the same rank; lowering it weakens it.') as string} />
-                  <Yue2OptimizerFields value={form} onChange={patch => setEdits(p => ({ ...p, ...patch }))} />
+                  <Yue2OptimizerFields value={form} onChange={patch => setEdits(p => ({ ...p, ...patch }))}
+                    defaults={base} onReset={reset} />
                   {form.optimizer !== 'prodigy' && (<NumField label={t('trainingStudio.yue2.lr', 'Learning rate')} value={form.lr}
                     onChange={v => set('lr', v)} step={1e-5}
+                    defaultValue={base.lr} onReset={() => reset('lr')}
                     info={t('trainingStudio.yue2.lrInfo',
                       'How big a step the optimizer takes on each update. Higher trains faster but risks '
                       + 'instability; lower is steadier but slower to converge. Only used when the '
@@ -995,6 +1025,7 @@ export const Yue2NarTrainCard: React.FC<{
                         'How the learning rate moves over the run. cosine decays it from the starting '
                         + 'rate down toward zero as training progresses; constant holds it steady for the '
                         + 'whole run.') as string}
+                      onReset={form.lrScheduler !== base.lrScheduler ? () => reset('lrScheduler') : undefined}
                     />
                     <StyledSelect
                       accent="amber"
@@ -1009,36 +1040,42 @@ export const Yue2NarTrainCard: React.FC<{
                   </label>
                   <NumField label={t('trainingStudio.yue2.warmup', 'Warmup steps')} value={form.warmup}
                     onChange={v => set('warmup', v)} step={10}
+                    defaultValue={base.warmup} onReset={() => reset('warmup')}
                     info={t('trainingStudio.yue2.warmupInfo',
                       'How many steps the learning rate ramps up from zero at the start of the run, before '
                       + 'the schedule above takes over. More warmup steps ease into training more gently; '
                       + 'fewer reach the full rate sooner but risk an unstable start.') as string} />
                   <NumField label={t('trainingStudio.yue2.gradAccum', 'Grad accum')} value={form.gradAccum}
                     onChange={v => set('gradAccum', v)}
+                    defaultValue={base.gradAccum} onReset={() => reset('gradAccum')}
                     info={t('trainingStudio.yue2.gradAccumInfo',
                       'How many steps of gradients get summed before the optimizer applies an update, '
                       + 'which behaves like a larger batch without the extra VRAM. Raising it smooths '
                       + 'updates but makes each optimizer step rarer; 1 updates every step.') as string} />
                   <NumField label={t('trainingStudio.yue2.maxGradNorm', 'Clip grad norm')}
                     value={form.maxGradNorm} onChange={v => set('maxGradNorm', v)} step={0.1}
+                    defaultValue={base.maxGradNorm} onReset={() => reset('maxGradNorm')}
                     info={t('trainingStudio.yue2.maxGradNormInfo',
                       'Caps how large the gradient is allowed to get on any one step, cutting it back to '
                       + 'this length if it is bigger. Guards against a spike destabilising the run; too '
                       + 'low a cap can slow learning by blunting every real update as well.') as string} />
                   <NumField label={t('trainingStudio.yue2.weightDecay', 'Weight decay')}
                     value={form.weightDecay} onChange={v => set('weightDecay', v)} step={0.01}
+                    defaultValue={base.weightDecay} onReset={() => reset('weightDecay')}
                     info={t('trainingStudio.yue2.weightDecayInfo',
                       'Shrinks the adapter\'s weights a little on every step, independent of the loss. '
                       + 'Higher discourages large weights, which can reduce overfitting but also blunt '
                       + 'the adapter\'s learned effect; 0 turns it off.') as string} />
                   <NumField label={t('trainingStudio.yue2.seed', 'Seed')} value={form.seed}
                     onChange={v => set('seed', v)}
+                    defaultValue={base.seed} onReset={() => reset('seed')}
                     info={t('trainingStudio.yue2.seedInfo',
                       'Seeds the random draws that choose clip order and dropout during training. Changing '
                       + 'it changes which clips and dropout draws land on which step, not the training '
                       + 'recipe itself; the same seed with the same recipe reproduces the same run.') as string} />
                   <NumField label={t('trainingStudio.yue2.captionDropout', 'Caption dropout')}
                     value={form.captionDropout} onChange={v => set('captionDropout', v)} step={0.05}
+                    defaultValue={base.captionDropout} onReset={() => reset('captionDropout')}
                     info={t('trainingStudio.yue2.captionDropoutHint',
                       'Chance of swapping in the EMPTY style prefix instead of the real caption on a given '
                       + 'step. 0 is not "more likeness": it is the trigger word ceasing to mean anything '
@@ -1046,6 +1083,7 @@ export const Yue2NarTrainCard: React.FC<{
                       + 'high leaves too little signal from the real captions.') as string} />
                   <NumField label={t('trainingStudio.yue2.abcDropout', 'ABC dropout')}
                     value={form.abcDropout} onChange={v => set('abcDropout', v)} step={0.05}
+                    defaultValue={base.abcDropout} onReset={() => reset('abcDropout')}
                     info={t('trainingStudio.yue2.abcDropoutHint',
                       'Chance a clip whose source has a lead sheet trains cot=off instead of cot=full this '
                       + 'draw. A source with no lead sheet always trains cot=off. 0.5 is upstream\'s own '
@@ -1053,12 +1091,14 @@ export const Yue2NarTrainCard: React.FC<{
                       + 'more on cot=full.') as string} />
                   <NumField label={t('trainingStudio.yue2.kvCache', 'K/V canvases')} value={form.kvCache}
                     onChange={v => set('kvCache', v)}
+                    defaultValue={base.kvCache} onReset={() => reset('kvCache')}
                     info={t('trainingStudio.yue2.kvCacheHint',
                       'How many AR-prefix caches are held at once, about 104 MB each at 10 s clips. A real '
                       + 'VRAM knob: raising it uses more VRAM but can reuse more cached prefixes; 8 is what '
                       + 'was measured.') as string} />
                   <NumField label={t('trainingStudio.yue2.clipBlock', 'Clip block')} value={form.clipBlock}
                     onChange={v => set('clipBlock', v)}
+                    defaultValue={base.clipBlock} onReset={() => reset('clipBlock')}
                     info={t('trainingStudio.yue2.clipBlockHint',
                       'How many steps one working set of clips is held for before the next block is drawn. '
                       + 'With per-clip codec ids every clip is its own conditioning, so drawing from the '
@@ -1066,6 +1106,7 @@ export const Yue2NarTrainCard: React.FC<{
                       + 'Raising it reuses the cache longer per block; 0 draws from everything.') as string} />
                   <NumField label={t('trainingStudio.yue2.logEvery', 'Log every')} value={form.logEvery}
                     onChange={v => set('logEvery', v)}
+                    defaultValue={base.logEvery} onReset={() => reset('logEvery')}
                     info={t('trainingStudio.yue2.logEveryInfo',
                       'How often, in steps, the trainer writes a log line with its metrics. Only affects '
                       + 'how closely you can watch progress, not the training itself.') as string} />
@@ -1077,6 +1118,7 @@ export const Yue2NarTrainCard: React.FC<{
                         'Which denoising timesteps get sampled during training. logit-normal biases '
                         + 'sampling toward the middle of the noise range; uniform samples every timestep '
                         + 'equally.') as string}
+                      onReset={form.tSampling !== base.tSampling ? () => reset('tSampling') : undefined}
                     />
                     <StyledSelect
                       accent="amber"

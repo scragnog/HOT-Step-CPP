@@ -29,11 +29,15 @@ interface SliderProps {
    *  For per-knob modes that aren't points on the scale — Duration's Auto,
    *  where the backend decides the number instead of the user. */
   headerRight?: React.ReactNode;
+  /** Called instead of onChange(defaultValue) when the reset icon is
+   *  clicked. For a server-default overlay form, resetting means deleting
+   *  the edit key rather than writing a value — the caller supplies that. */
+  onReset?: () => void;
 }
 
 export const Slider: React.FC<SliderProps> = ({
   label, value, onChange, min, max, step, suffix = '', showInput = false, headerRight,
-  info, infoMeta, defaultValue,
+  info, infoMeta, defaultValue, onReset,
 }) => {
   return (
     <div>
@@ -43,7 +47,7 @@ export const Slider: React.FC<SliderProps> = ({
           info={info}
           meta={infoMeta}
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-          onReset={defaultValue !== undefined && value !== defaultValue ? () => onChange(defaultValue) : undefined}
+          onReset={defaultValue !== undefined && value !== defaultValue ? (onReset ?? (() => onChange(defaultValue))) : undefined}
         />
         <div className="flex items-center gap-1.5">
         {showInput ? (
