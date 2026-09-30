@@ -126,7 +126,7 @@ for it).
 A schema-driven control (a backend-declared extension in `BackendExtensionControls.tsx`, a Lua
 plugin param in `PluginControls.tsx`) has no entry in `GLOBAL_PARAM_DEFAULTS`; its default is
 whatever the schema itself declares (`p.default`). Compare the current value against `p.default`
-the same way, skip the control entirely when the schema declares no default, and reset by writing
+the same way, omit the reset icon (the control itself stays usable) when the schema declares no default, and reset by writing
 `p.default` back through the same setter every other change in that control goes through
 (`setBackendParam`, `setPluginParam`), never a bespoke path.
 
