@@ -474,15 +474,51 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     setEdits(e => { const rest = { ...e }; delete rest[k]; return rest; });
   // PiSSA's own onChange forces hotPizza off whenever pissa goes false (HOT-PiZZA
   // needs PiSSA underneath it); resetting pissa back to a false base has to apply
-  // that same coupling, or hotPizza could be left on with pissa off. Resetting
-  // hotPizza has no such rule — it only ever forces pissa ON, and reset never
-  // needs to turn something on — so it stays the plain reset('hotPizza').
+  // that same coupling, or hotPizza could be left on with pissa off.
   const resetPissa = () => {
     if (!base) return;
     setEdits(prev => {
       const rest = { ...prev };
       delete rest.pissa;
       if (!base.pissa) rest.hotPizza = false;
+      return rest;
+    });
+  };
+  // HOT-PiZZA's own onChange forces pissa ON whenever hotPizza goes true. A plain
+  // delete of hotPizza is not enough when a PISSA OVERRIDE is sitting underneath
+  // it (pissa turned off by hand, then HOT-PiZZA reset back toward a shipped
+  // recipe where base.hotPizza is true): the displayed value is
+  // form.pissa && form.hotPizza, so with pissa still pinned false the icon never
+  // clears. Dropping the pissa override too lets it fall back to base.pissa,
+  // which is what HOT-PiZZA being on in the recipe implies.
+  const resetHotPizza = () => {
+    if (!base) return;
+    setEdits(prev => {
+      const rest = { ...prev };
+      delete rest.hotPizza;
+      if (base.hotPizza) delete rest.pissa;
+      return rest;
+    });
+  };
+  // pickMethod('lokr') writes only adapterType, but every LoRA-family method
+  // (m !== 'lokr') also pins dora/hira/loha/hra plus pissa/hotPizza/rslora into
+  // edits (see pickMethod above) — a reset that called pickMethod would leave
+  // those overrides sitting in edits even after the method itself went back to
+  // the server's, pinning them against any future default change. Delete the
+  // method-row keys outright instead, then apply the same coupling pickMethod
+  // applies, relative to the method the restored base now shows.
+  const resetMethod = () => {
+    if (!base) return;
+    setEdits(prev => {
+      const rest = { ...prev };
+      delete rest.adapterType;
+      delete rest.dora;
+      delete rest.hira;
+      delete rest.loha;
+      delete rest.hra;
+      const baseMethod = methodOf(base);
+      if (baseMethod !== 'lora') { delete rest.pissa; delete rest.hotPizza; }
+      if (baseMethod === 'hra') delete rest.rslora;
       return rest;
     });
   };
@@ -1062,7 +1098,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       + 'VALIDATED BY EAR. DoRA/HiRA/LoHa/HRA are new here 2026-09-05 (see each '
                       + 'button\'s hover text); none has an MM3 measurement of its own yet.')}
                     className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
-                    onReset={method !== methodOf(base) ? () => pickMethod(methodOf(base)) : undefined}
+                    onReset={method !== methodOf(base) ? resetMethod : undefined}
                   />
                   <div className="flex flex-wrap items-center gap-1.5">
                     {(['lokr', 'lora', 'dora', 'hira', 'loha', 'hra'] as Mm3Method[]).map(m => {
@@ -1089,7 +1125,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       <Toggle accent="amber" size="sm" checked={form.pissa && form.hotPizza} disabled={method !== 'lora'}
                         onChange={v => setEdits(prev => ({ ...prev, hotPizza: v, ...(v ? { pissa: true } : {}) }))}
                         defaultValue={base.pissa && base.hotPizza}
-                        onReset={() => reset('hotPizza')}
+                        onReset={resetHotPizza}
                         label={t('trainingStudio.mm3.hotPizza', 'HOT-PiZZA')}
                         info={t('trainingStudio.mm3.hotPizzaInfo')} />
                       <Toggle accent="amber" size="sm" checked={form.pissa} disabled={method !== 'lora'}
