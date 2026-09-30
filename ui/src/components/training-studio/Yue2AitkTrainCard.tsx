@@ -1021,10 +1021,17 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const active = job?.status === 'queued' || job?.status === 'running';
   const preparing = prepareJob?.status === 'queued' || prepareJob?.status === 'running';
   const input = 'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 disabled:opacity-50';
+  // Shared with field()'s own input below — a reset needs the same lock its
+  // input has, and 'seed' is also the resume-restored field name the preview
+  // sub-object's own seed key collides with (field() has no notion of which
+  // object it is reading from), so resumeChoice locks it too.
+  const fieldLocked = (key: string) =>
+    (!!resumeChoice && ['seed', 'device', 'rank', 'alpha', 'adapterType', 'lokrDim', 'lokrFactor', 'saveEvery', 'cursorWeight'].includes(key))
+    || active || starting || preparing || yue2RunAllActive;
   const field = (label: string, key: string, type = 'text', source: unknown = form, update?: (value: string) => void, info?: string, meta?: string, onReset?: () => void) => (
     <label className="flex flex-col gap-1">
       <ParamLabel label={label} info={info} meta={meta} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider" onReset={onReset} />
-      <input className={input} type={type} value={String((source as Record<string, unknown>)[key] ?? '')} disabled={(!!resumeChoice && ['seed', 'device', 'rank', 'alpha', 'adapterType', 'lokrDim', 'lokrFactor', 'saveEvery', 'cursorWeight'].includes(key)) || active || starting || preparing || yue2RunAllActive}
+      <input className={input} type={type} value={String((source as Record<string, unknown>)[key] ?? '')} disabled={fieldLocked(key)}
         onChange={event => update ? update(event.target.value) : set(key as keyof Yue2JointTrainRequest, type === 'number' ? Number(event.target.value) : event.target.value as never)} />
     </label>
   );
@@ -1377,7 +1384,16 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           ] as const).map(([key, label, info, meta]) => (
             <label key={key} className="flex flex-col gap-1">
               <ParamLabel label={label} info={info} meta={meta} className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
-                onReset={form[key] !== undefined && !busy ? () => set(key, undefined) : undefined} />
+                onReset={busy ? undefined
+                  // gradAccum and narCropFrames are NOT blank-default knobs — DEFAULT_FORM
+                  // populates both (4, 1500), so an untouched Balanced form already has a
+                  // value here and a blanket reset-to-undefined would both show an arrow
+                  // on a form nobody touched and, for narCropFrames, flip the preset to
+                  // Custom by clearing the decoder crop (activePreset checks it against
+                  // 0). The other nine fields are genuinely blank by default.
+                  : (key === 'gradAccum' || key === 'narCropFrames')
+                    ? (form[key] !== DEFAULT_FORM[key] ? () => set(key, DEFAULT_FORM[key]) : undefined)
+                    : (form[key] !== undefined ? () => set(key, undefined) : undefined)} />
               <input className={`${input} placeholder:text-zinc-500`} type="number" step="any"
                 placeholder={String(key === 'warmup' ? Math.max(1, Math.round((Number(form.steps) || 0) * BASE_MATCHED_DEFAULTS.warmupFraction)) : BASE_MATCHED_DEFAULTS[key])}
                 value={form[key] ?? ''} disabled={active || starting || preparing || yue2RunAllActive}
@@ -1431,7 +1447,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               : undefined)}
           {field(t('trainingStudio.yue2.method.previewSeed', 'Preview seed'), 'seed', 'number', form.preview, value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: Number(value) } })),
             t('trainingStudio.yue2.method.previewSeedInfo', 'The random seed used for every preview render, so previews across checkpoints are directly comparable rather than each landing on a different random take.'), t('trainingStudio.yue2.method.previewSeedMeta', 'default 424242'),
-            !busy && form.preview.seed !== LADDER_PREVIEW.seed
+            !fieldLocked('seed') && form.preview.seed !== LADDER_PREVIEW.seed
               ? () => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: LADDER_PREVIEW.seed } }))
               : undefined)}
           <label className="flex flex-col gap-1 md:col-span-2">
@@ -1479,7 +1495,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               label={t('trainingStudio.yue2.method.previewCaption', 'Caption override (optional)')}
               className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
               info={t('trainingStudio.yue2.method.previewCaptionInfo', 'Replaces the preview track\'s own caption for the rendered sample. Leave blank to use the track\'s caption as-is.')}
-              onReset={!busy && form.preview.caption !== undefined
+              onReset={!busy && (form.preview.caption ?? '') !== ''
                 ? () => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, caption: undefined } }))
                 : undefined}
             />
@@ -1490,7 +1506,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               label={t('trainingStudio.yue2.method.previewLyrics', 'Lyrics override (optional)')}
               className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
               info={t('trainingStudio.yue2.method.previewLyricsInfo', 'Replaces the preview track\'s own lyrics for the rendered sample. Leave blank to use the track\'s lyrics as-is.')}
-              onReset={!busy && form.preview.lyrics !== undefined
+              onReset={!busy && (form.preview.lyrics ?? '') !== ''
                 ? () => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, lyrics: undefined } }))
                 : undefined}
             />

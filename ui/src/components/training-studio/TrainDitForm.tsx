@@ -1027,24 +1027,27 @@ export const TrainDitForm: React.FC<Props> = ({
           </label>
 
           <div className="flex flex-col gap-1.5 sm:col-span-2">
-            {P('tWindow', 'Default 0 → 1 (whole schedule)', {
-              onReset: !lock && (value.tMin !== D.tMin || value.tMax !== D.tMax)
-                ? () => onChange({ tMin: D.tMin, tMax: D.tMax }) : undefined,
-            })}
+            {P('tWindow', 'Default 0 → 1 (whole schedule)')}
             <div className="flex items-center gap-2">
-              <input
-                type="number" min={0} max={1} step={0.01}
-                value={value.tMin} disabled={lock}
-                onChange={(e) => onChange({ tMin: num(e.target.value, 0) })}
-                className={`${FIELD} flex-1 min-w-0${tWindowOk ? '' : ' border-red-500/50'}`}
-              />
-              <span className="text-xs text-zinc-500">→</span>
-              <input
-                type="number" min={0} max={1} step={0.01}
-                value={value.tMax} disabled={lock}
-                onChange={(e) => onChange({ tMax: num(e.target.value, 1) })}
-                className={`${FIELD} flex-1 min-w-0${tWindowOk ? '' : ' border-red-500/50'}`}
-              />
+              <div className="flex-1 min-w-0 flex flex-col gap-1">
+                <ParamLabel label="Min" className="text-[10px] text-zinc-500" onReset={onReset('tMin')} />
+                <input
+                  type="number" min={0} max={1} step={0.01}
+                  value={value.tMin} disabled={lock}
+                  onChange={(e) => onChange({ tMin: num(e.target.value, 0) })}
+                  className={`${FIELD} w-full${tWindowOk ? '' : ' border-red-500/50'}`}
+                />
+              </div>
+              <span className="text-xs text-zinc-500 mt-4">→</span>
+              <div className="flex-1 min-w-0 flex flex-col gap-1">
+                <ParamLabel label="Max" className="text-[10px] text-zinc-500" onReset={onReset('tMax')} />
+                <input
+                  type="number" min={0} max={1} step={0.01}
+                  value={value.tMax} disabled={lock}
+                  onChange={(e) => onChange({ tMax: num(e.target.value, 1) })}
+                  className={`${FIELD} w-full${tWindowOk ? '' : ' border-red-500/50'}`}
+                />
+              </div>
             </div>
           </div>
 

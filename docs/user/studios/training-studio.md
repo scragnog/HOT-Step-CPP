@@ -28,6 +28,9 @@ Training follows whichever generation backend is active (ACE-Step, MiniMax-Music
 A small reset arrow appears beside a label whenever its value has moved from the default; click
 it to snap that one field back. A blank optional field (shown greyed out with its default as a
 placeholder) resets to blank rather than to a number, so it goes back to letting the server decide.
+The DiT training method, quality dial and LM base-size pickers are the exception: their arrow
+reapplies that control's whole preset bundle, the same as clicking the option itself, rather than
+snapping back a single field.
 
 ## Controls
 

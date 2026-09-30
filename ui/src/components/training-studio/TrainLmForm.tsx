@@ -567,7 +567,7 @@ export const TrainLmForm: React.FC<Props> = ({
         />
         <label className="flex flex-col gap-1.5">
           {P('artistToken', 'Blank = the adapter name · letters, digits, _ -', {
-            onReset: !lock && value.artistToken !== D.artistToken ? () => onChange({ artistToken: D.artistToken }) : undefined,
+            onReset: !lock && value.artistTokenOn && value.artistToken !== D.artistToken ? () => onChange({ artistToken: D.artistToken }) : undefined,
           })}
           <input
             type="text" maxLength={64} placeholder={value.adapterName.replace(/[^A-Za-z0-9_-]/g, '') || 'same as the adapter name'}
@@ -578,12 +578,12 @@ export const TrainLmForm: React.FC<Props> = ({
         </label>
         <div className="grid grid-cols-3 gap-2">
           <label className="flex flex-col gap-1.5">
-            {P('artistTokenK', 'Default 32 · 1–256', { onReset: onReset('artistTokenK') })}
+            {P('artistTokenK', 'Default 32 · 1–256', { onReset: value.artistTokenOn ? onReset('artistTokenK') : undefined })}
             <input type="number" min={1} max={256} step={1} value={value.artistTokenK} disabled={lock || !value.artistTokenOn}
               onChange={(e) => onChange({ artistTokenK: num(e.target.value, 32) })} className={FIELD} />
           </label>
           <label className="flex flex-col gap-1.5">
-            {P('artistTokenLr', 'Default 0.005', { onReset: onReset('artistTokenLr') })}
+            {P('artistTokenLr', 'Default 0.005', { onReset: value.artistTokenOn ? onReset('artistTokenLr') : undefined })}
             <input type="number" min={0} max={1} step={0.0005} value={value.artistTokenLr} disabled={lock || !value.artistTokenOn}
               onChange={(e) => onChange({ artistTokenLr: num(e.target.value, 0.005) })} className={FIELD} />
           </label>
