@@ -98,6 +98,19 @@ function lossFacts(run: Run): Record<string, number | null> {
   } catch { return {}; }
 }
 
+/** The Optimise phase's measurements, from the dataset folder's _hotstep-optimisation.json. */
+function optimiseFacts(dir: string | undefined): Record<string, number | null> {
+  if (!dir) return {};
+  try {
+    const bl = JSON.parse(fs.readFileSync(path.join(dir, '_hotstep-optimisation.json'), 'utf8')).baseLoss;
+    if (!bl?.summary) return {};
+    const ce = (bl.items ?? []).map((i: { arCe: number }) => i.arCe).filter(Number.isFinite) as number[];
+    const m = ce.reduce((a, b) => a + b, 0) / (ce.length || 1);
+    return { evalArCe: bl.summary.arCeMean, evalNarMse: bl.summary.narMseMean,
+      evalArCeSpread: ce.length > 1 ? Math.sqrt(ce.reduce((a, b) => a + (b - m) ** 2, 0) / ce.length) : null };
+  } catch { return {}; }
+}
+
 // ── Third-party calculator (optional) ───────────────────────────────────────
 function thirdPartyCalc(slug: string, dir: string): Record<string, unknown> | null {
   if (!calcScript) return null;
@@ -162,7 +175,7 @@ for (const run of runs.values()) {
   const p = profiles.get(run.slug);
   if (!p) continue;
   const calc = calcs.get(run.slug) as { config?: Record<string, unknown> } | undefined;
-  const f: Record<string, number | null> = { ...p.album, ...lossFacts(run) };
+  const f: Record<string, number | null> = { ...p.album, ...lossFacts(run), ...optimiseFacts(sourceOf.get(run.slug)) };
   if (calc?.config) { f.calcSteps = Number(calc.config.steps); f.calcLr = Number(calc.config.learning_rate); f.calcRank = Number(calc.config.rank); }
   table.push({ slug: run.slug, run: run.run, recipe: run.recipe, t: targets(run), f, calc: calc?.config });
 }
@@ -194,10 +207,10 @@ for (const recipe of ['base-matched', 'tuned (Prodigy)'] as Recipe[]) {
     for (const x of found.slice(0, 25)) lines.push(`| ${x.feat} | ${x.target} | ${x.rho.toFixed(2)} | ${x.n} |`);
     lines.push('');
   }
-  lines.push('| album | album score | rungs | peak likeness | peak overall | best step | first likeness 4 | songs | min | base AR CE | calc steps |', '|---|---|---|---|---|---|---|---|---|---|---|');
+  lines.push('| album | album score | rungs | peak likeness | peak overall | best step | first likeness 4 | songs | min | base AR CE | planner CE (Optimise) | decoder MSE (Optimise) | calc steps |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const r of group.sort((a, b) => a.slug.localeCompare(b.slug))) {
     const v = (x: unknown, d = 0) => typeof x === 'number' && Number.isFinite(x) ? x.toFixed(d) : '';
-    lines.push(`| ${r.slug} | ${v(r.t.albumScore)} | ${r.t.rungs} | ${v(r.t.peakLikeness)} | ${v(r.t.peakOverall, 1)} | ${v(r.t.bestStep)} | ${v(r.t.stepToLikeness4)} | ${r.f.songs} | ${v(r.f.totalMin)} | ${v(r.f.baseArCe, 2)} | ${v(r.f.calcSteps)} |`);
+    lines.push(`| ${r.slug} | ${v(r.t.albumScore)} | ${r.t.rungs} | ${v(r.t.peakLikeness)} | ${v(r.t.peakOverall, 1)} | ${v(r.t.bestStep)} | ${v(r.t.stepToLikeness4)} | ${r.f.songs} | ${v(r.f.totalMin)} | ${v(r.f.baseArCe, 2)} | ${v(r.f.evalArCe, 3)} | ${v(r.f.evalNarMse, 3)} | ${v(r.f.calcSteps)} |`);
   }
   lines.push('');
 }
