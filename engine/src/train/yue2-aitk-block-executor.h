@@ -91,8 +91,12 @@ inline ggml_tensor * make_mask(ggml_context * ctx, int64_t sequence, int64_t pre
 }
 inline bool supports_all(ggml_backend_t backend, ggml_cgraph * graph, std::string * error) {
     const int n = ggml_graph_n_nodes(graph); ggml_tensor ** nodes = ggml_graph_nodes(graph);
-    for (int i = 0; i < n; ++i) if (!ggml_backend_supports_op(backend, nodes[i]))
-        return fail(error, "backend does not support block graph node " + std::to_string(i));
+    for (int i = 0; i < n; ++i) if (!ggml_backend_supports_op(backend, nodes[i])) {
+        std::string what = "backend does not support block graph node " + std::to_string(i) + ": " + ggml_op_desc(nodes[i]) + " -> " + ggml_type_name(nodes[i]->type);
+        for (int s = 0; s < GGML_MAX_SRC && nodes[i]->src[s]; ++s)
+            what += std::string(s ? ", " : " from ") + ggml_type_name(nodes[i]->src[s]->type) + (ggml_is_contiguous(nodes[i]->src[s]) ? "" : " (non-contiguous)");
+        return fail(error, what);
+    }
     return true;
 }
 inline bool validate_inputs(ggml_backend_t backend, const Yue2AitkGraphConfig & c,
