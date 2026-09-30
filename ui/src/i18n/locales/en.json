@@ -121,6 +121,8 @@
     "trainingStudio.sideStepNoteTail": "— adapters trained there load here unchanged.",
     "trainingStudio.phase.dataset": "Dataset",
     "trainingStudio.phase.preprocess": "Preprocess",
+    "trainingStudio.phase.prepare": "Prepare",
+    "trainingStudio.phase.optimise": "Optimise",
     "trainingStudio.phase.train": "Train",
     "trainingStudio.phase.refine": "Refine",
     "trainingStudio.phase.review": "Review",

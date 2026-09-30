@@ -46,6 +46,14 @@ The cache stages are latent cache, codes, lead sheets, vocal stems and lyric cur
 How many tracks: the app warns below 10 files.
 <!-- TODO(verify): no track-count guidance specific to YuE2 joint training was found in code or skills. -->
 
+## Optimise (optional)
+
+The YuE2 phases run **Dataset → Prepare → Optimise → Train → Review**. Prepare holds the latent cache, codes, lead sheets and the optional lyric-timing stages; Train keeps the joint training card, **Train multiple** and the ladder, and its **Perform all stages** still runs any missing preparation first.
+
+Optimise measures the prepared album before training. Nothing on it changes training by itself. Every result is saved in the dataset's own folder, beside the audio, as `_hotstep-optimisation.json`, one section per measurement, so it can be read again later without the app.
+
+**Base model loss** measures how far the album is from what YuE2 already knows: the base model's loss on every song, with no adapter. **Planner CE** is how surprised the planner is by the album's songs, structure and lead sheets; **Decoder MSE** is how surprised the decoder is by its sound, averaged over three noise levels on the same 60 s window training uses. Higher means further from the base, but dense, busy music also reads higher, so compare albums of a similar style. The page lists every song, most unfamiliar planner first: a song far out of line with the rest is worth checking for a wrong caption or lyrics before training. The same album measures the same every time (fixed crops and noise). It runs the same preparation as training (reused when unchanged) and takes about a minute for a 20-song album on an RTX 5090, with the engine left running. Whether these numbers predict how an album trains is not yet known; they are collected so Dataset-Calibrated Training can find out.
+
 ## Training method
 
 Since 2026-09-27 Joint Training uses one recipe, taken from how the YuE2 technical report says the base model itself was trained, as far as an adapter can follow it: the planner's loss weighted at a quarter of the decoder's, AdamW with betas 0.9 / 0.95 and weight decay 0.1, the decoder trained on whole songs (the presets crop it to 60 s, which a blind test scored level with whole songs), several songs averaged into each update, the style text or lyrics dropped from the prompt on some steps, and the audio cache cut without loudness normalisation. It has no KL anchor and no early stop: the run goes to the update count, saves a checkpoint every 10 updates, and you pick the rung by ear.

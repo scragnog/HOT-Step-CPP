@@ -25,6 +25,7 @@ import { TrainingChart } from './TrainingChart';
 import { TrainingRunStats } from './TrainingRunStats';
 import { Mm3TrainCard } from './Mm3TrainCard';
 import { Yue2TrainStages } from './Yue2TrainStages';
+import { Yue2OptimisePanel } from './Yue2OptimisePanel';
 import { TRAIN_DIT_LOKR_DEFAULTS, TrainDitForm, type TrainDitFormState } from './TrainDitForm';
 import { TRAIN_LM_DEFAULTS, TrainLmForm, type TrainLmFormState } from './TrainLmForm';
 import { useTrainingStream } from './useTrainingStream';
@@ -41,7 +42,9 @@ function formatBytes(bytes: number): string {
   return `${v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
 }
 
-export const TrainPanel: React.FC = () => {
+/** `section` picks the YuE2 page this panel hosts: its Prepare and Optimise
+ *  phases share this panel's dataset gates. Other backends only use 'train'. */
+export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }> = ({ section = 'train' }) => {
   const { t } = useTranslation();
   // WHICH TRAINING, not which flag. ACE trains a DiT and a planner LM from a
   // preprocessed tensor cache; MiniMax-Music3 trains an LM from RVQ codes and
@@ -401,8 +404,13 @@ export const TrainPanel: React.FC = () => {
     <div className="flex items-start gap-3">
       <Cpu size={18} className="text-amber-500 mt-0.5 flex-shrink-0" />
       <div className="min-w-0">
-        <h2 className="text-sm font-bold text-zinc-900 dark:text-white">{t('trainingStudio.train.title')}</h2>
-        <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">{t('trainingStudio.train.subtitle')}</p>
+        <h2 className="text-sm font-bold text-zinc-900 dark:text-white">{section === 'prepare' ? t('trainingStudio.phase.prepare', 'Prepare')
+          : section === 'optimise' ? t('trainingStudio.phase.optimise', 'Optimise') : t('trainingStudio.train.title')}</h2>
+        <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">{section === 'prepare'
+          ? t('trainingStudio.yue2.prepareSubtitle', 'Turn the album into what YuE2 trains on: the latent cache, the codec codes and the lead sheets.')
+          : section === 'optimise'
+            ? t('trainingStudio.yue2.optimiseSubtitle', 'Optional measurements of the prepared album before training, saved with the dataset.')
+            : t('trainingStudio.train.subtitle')}</p>
       </div>
     </div>
   );
@@ -481,7 +489,9 @@ export const TrainPanel: React.FC = () => {
     return (
       <div className="flex flex-col gap-4">
         {header}
-        <Yue2TrainStages datasetId={detail.id} trigger={detail.customTag || ''} />
+        {section === 'optimise'
+          ? <Yue2OptimisePanel datasetId={detail.id} />
+          : <Yue2TrainStages datasetId={detail.id} trigger={detail.customTag || ''} section={section === 'prepare' ? 'prepare' : 'train'} />}
       </div>
     );
   }

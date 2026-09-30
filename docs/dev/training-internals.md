@@ -150,6 +150,14 @@ steps verified finite on an RTX 4090 over Vulkan, 47-95 s per song; not yet
 ear-tested, and not yet run on AMD). Model Manager's **YuE2 Joint Training Pack**
 contains the required weights; Legacy remains available on its supported backends.
 
+### Optimise phase and base loss (2026-09-30)
+
+YuE2's phase 2 is **Prepare** (the `preprocess` phase id, relabelled; `Yue2TrainStages section="prepare"`), then **Optimise** (`optimise`, `Yue2OptimisePanel.tsx`), then Train. The joint run-all chain takes a null training callback for prepare-only runs.
+
+Optimise results live in `<source dir>/_hotstep-optimisation.json` (`yue2Optimise.ts`: `readOptimisation`, `writeOptimisationSection`), one top-level section per measurement, never in the database. `GET /datasets/:id/yue2-optimise` returns the file and whether the cache, codes and sheets exist; `POST /datasets/:id/yue2-optimise/base-loss` starts a `yue2-base-loss` job.
+
+The job runs `ensureYue2PreparedDataset` (the same prepared dataset training uses, lyric timing off), then `ace-train yue2-joint-train --eval-base-loss` with `--cursor-weight 0 --ar-targets base --nar-crop-frames 1500 --seed 42` and the companion decoder. The engine loads the base, creates no adapter or optimizer, and for every item in dataset order prints `{"stage":"eval","item":i,...,"ar_ce","nar_mse","nar_mse_t":[...]}` and finally `{"stage":"eval_summary",...}`. Planner CE: `yue2_aitk_joint::base_ar_ce` (the frozen-teacher forward plus the head kernel at KL weight 0, full prompt, lead sheet kept). Decoder MSE: `nar_probe_prefix` + `nar_probe_predict(nar = nullptr)` against the flow target at t = 250 / 500 / 750, on a crop drawn by a per-item sampler seeded from `--seed` and the item index, so two runs agree bit for bit (checked on a 20-song album). It keeps the engine running (about 72 s for 20 songs on a 5090 beside a loaded engine). The bare `{"stage":"eval"}` event marks the start and carries no `item`.
+
 ### Dataset profiles (Dataset-Calibrated Training, in progress)
 
 The aim is a recipe sized to the album instead of one recipe for every dataset.

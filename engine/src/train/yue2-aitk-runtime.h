@@ -113,6 +113,13 @@ struct Config {
     // and reconstruction), write them to the checkpoint's meters.json, exit.
     // Scores checkpoints of a finished run; --output is a scratch directory.
     bool meter_only = false;
+    // Base-loss evaluation (Dataset-Calibrated Training's Optimise step): no
+    // adapter, no optimizer, no update. For every item, the base planner's CE
+    // (with the lead sheet, as --ar-targets says) and the base decoder's flow
+    // MSE on a seeded --nar-crop-frames crop at t = 250 / 500 / 750, one
+    // {"stage":"eval"} line each to stdout and <output>/base-loss.jsonl, then a
+    // summary. --steps and --save-every are not needed.
+    bool eval_base_loss = false;
     // Spike guard. A step whose pre-clip gradient norm exceeds spike_factor x
     // the median of the last 50 applied steps skips its update (0 = off; it
     // arms once 20 norms are in the window, and the window restarts when the
@@ -282,6 +289,7 @@ inline void usage(FILE * out) {
         "[--nar-extra-steps N (with --target-kl: freeze the planner at its KL, train the decoder N more steps)] "
         "[--nar-drift (log the decoder's drift from base and its reconstruction error at every checkpoint)] "
         "[--meter-only (with --resume: write the checkpoint's meters.json and exit)] "
+        "[--eval-base-loss (no training: per-item base planner CE and decoder flow MSE to <output>/base-loss.jsonl)] "
         "[--recon-stop F (planner frozen: stop when a line fitted through the last --recon-stop-window 3 reconstruction readings gains under F)] [--recon-reset (with --resume: empty window)] "
         "[--unfreeze-planner (with --resume: train the planner on past its freeze)] [--kl-checkpoint-every 0.1 (a checkpoint at each KL rung)] "
         "[--freeze-planner-now (with --resume and --nar-extra-steps: freeze the planner at the resumed step)] "
@@ -547,6 +555,8 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
                 !detail::decimal_i32(value_text.c_str(), &parsed.spike_stop_window) || parsed.spike_stop_window < 1) { if (error) *error = "--spike-stop-window must be a positive integer"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--nar-drift")) {
             parsed.nar_drift = true;
+        } else if (!std::strcmp(arg, "--eval-base-loss")) {
+            parsed.eval_base_loss = true;
         } else if (!std::strcmp(arg, "--meter-only")) {
             parsed.meter_only = true; parsed.nar_drift = true;
         } else if (!std::strcmp(arg, "--nar-extra-steps")) {
@@ -581,6 +591,7 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
             return ParseResult::error;
         }
     }
+    if (parsed.eval_base_loss) { if (parsed.steps <= 0) parsed.steps = 1; if (parsed.save_every <= 0 || parsed.save_every > parsed.steps) parsed.save_every = parsed.steps; }
     if (parsed.checkpoint.empty() || parsed.dataset.empty() || parsed.output.empty() ||
         parsed.steps <= 0 || parsed.save_every <= 0 || parsed.pause_at > parsed.steps) {
         if (error) *error = "--checkpoint, --dataset, --output, --steps > 0, and --save-every > 0 are required";

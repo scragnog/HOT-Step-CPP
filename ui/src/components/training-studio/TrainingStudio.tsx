@@ -43,18 +43,19 @@ function buildTrainingUrl(datasetId: string | null, phase: TrainingPhase): strin
   if (!datasetId) return TS_BASE;
   const id = encodeURIComponent(datasetId);
   if (phase === 'preprocess') return `${TS_BASE}/dataset/${id}/preprocess`;
+  if (phase === 'optimise') return `${TS_BASE}/dataset/${id}/optimise`;
   if (phase === 'train') return `${TS_BASE}/dataset/${id}/train`;
   if (phase === 'refine') return `${TS_BASE}/dataset/${id}/refine`;
   if (phase === 'review') return `${TS_BASE}/review`;
   return `${TS_BASE}/dataset/${id}`;
 }
 
-function parseTrainingUrl(path: string): { datasetId?: string; phase?: 'preprocess' | 'train' | 'refine' | 'review' | 'monitor' } {
+function parseTrainingUrl(path: string): { datasetId?: string; phase?: 'preprocess' | 'optimise' | 'train' | 'refine' | 'review' | 'monitor' } {
   if (path.startsWith(`${TS_BASE}/monitor`)) return { phase: 'monitor' };
   if (path.startsWith(`${TS_BASE}/review`)) return { phase: 'review' };
-  const m = path.match(/\/training-studio\/dataset\/([^/]+)(?:\/(preprocess|train|refine))?/);
+  const m = path.match(/\/training-studio\/dataset\/([^/]+)(?:\/(preprocess|optimise|train|refine))?/);
   if (!m) return {};
-  return { datasetId: decodeURIComponent(m[1]), phase: (m[2] as 'preprocess' | 'train' | 'refine') || undefined };
+  return { datasetId: decodeURIComponent(m[1]), phase: (m[2] as 'preprocess' | 'optimise' | 'train' | 'refine') || undefined };
 }
 
 export const TrainingStudio: React.FC = () => {
@@ -145,14 +146,13 @@ export const TrainingStudio: React.FC = () => {
     return () => window.removeEventListener('popstate', handlePopState);
   }, [openDataset, closeDataset, setPhase]);
 
-  // PreprocessPanel is ACE's tensor cache and MM3's codes; YuE2 has neither,
-  // and its own latent stage lives on the Train page. The Monitor phase is
-  // the same story: its batch pipeline only runs the preprocess-based
-  // backends. PhaseStepper drops both chips, but a user who was standing on
-  // either phase when the backend changed would otherwise be left looking at
-  // content YuE2 can never use — so move them on rather than render it.
+  // The Monitor phase's batch pipeline only runs the preprocess-based
+  // backends, and Optimise is YuE2's alone. PhaseStepper drops those chips, but
+  // a user standing on one when the backend changed would otherwise be left
+  // looking at content this backend can never use, so move them on.
   useEffect(() => {
-    if (activeBackendId === YUE2_BACKEND_ID && (phase === 'preprocess' || phase === 'monitor')) setPhase('train');
+    if (activeBackendId === YUE2_BACKEND_ID && phase === 'monitor') setPhase('train');
+    if (activeBackendId !== YUE2_BACKEND_ID && phase === 'optimise') setPhase('train');
   }, [activeBackendId, phase, setPhase]);
 
   const fatalError = error && !detail;
@@ -221,7 +221,10 @@ export const TrainingStudio: React.FC = () => {
         ) : phase === 'dataset' ? (
           selectedDatasetId ? <DatasetDetail /> : <DatasetList />
         ) : phase === 'preprocess' ? (
-          <PreprocessPanel />
+          // YuE2's phase 2 is Prepare: its own stages, not the ACE/MM3 panel.
+          activeBackendId === YUE2_BACKEND_ID ? <TrainPanel section="prepare" /> : <PreprocessPanel />
+        ) : phase === 'optimise' ? (
+          <TrainPanel section="optimise" />
         ) : phase === 'train' ? (
           <TrainPanel />
         ) : phase === 'refine' ? (

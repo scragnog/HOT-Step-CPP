@@ -380,6 +380,7 @@ function laneFor(job: TrainingJob): 'gpu' | 'net' {
     case 'yue2-sheet':       // SheetSage2 lead-sheet transcription, one track at a time
     case 'yue2-ar-train':    // whole songs to 12,288 tokens through a bf16 base
     case 'yue2-joint-train': // explicit AITK joint AR+NAR trainer
+    case 'yue2-base-loss':   // forward-only base planner + decoder over every song
       return 'gpu';
     case 'yue2-prepare-aitk': // native cache import; CPU-only, never stops ace-server
       return 'net';
@@ -1521,6 +1522,16 @@ export function startYue2JointTrainJob(datasetId: string, opts: unknown): Traini
   enqueue(job, async (j) => {
     const { runYue2JointTrainJob } = await import('./yue2JointTrainRunner.js');
     await runYue2JointTrainJob(j);
+  });
+  return job;
+}
+
+/** Optimise phase: prepare if needed, then the base-loss pass (yue2Optimise.ts). */
+export function startYue2BaseLossJob(datasetId: string, opts: unknown): TrainingJob {
+  const job = createJob('yue2-base-loss', datasetId, [], opts);
+  enqueue(job, async (j) => {
+    const { runYue2BaseLossJob } = await import('./yue2Optimise.js');
+    await runYue2BaseLossJob(j);
   });
   return job;
 }

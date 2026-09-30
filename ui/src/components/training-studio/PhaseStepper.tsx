@@ -3,25 +3,26 @@
 // All four phases ship. Monitor is the batch-pipeline queue view (see
 // MonitorPanel.tsx).
 //
-// Phase 2 is absent under YuE2: its latent cache is stage 1 of the five-stage
-// flow on the Train page (Yue2TrainStages.tsx), which the "Perform all stages"
-// button drives. A second entry point onto the same cache would be two UIs free
-// to disagree about one artifact. Monitor is absent under YuE2 too: the batch
-// pipeline it watches only runs the preprocess-based backends, and YuE2's own
-// batch queue already shows on the Train page.
+// Under YuE2, phase 2 is Prepare (2026-09-30): the latent cache, codes, lead
+// sheets and optional stems/alignment moved there from the Train page, so the
+// Optimise phase after it can measure the prepared album before training.
+// Monitor is absent under YuE2: the batch pipeline it watches only runs the
+// preprocess-based backends, and YuE2's own batch queue shows on the Train page.
 
 import React from 'react';
-import { ArrowLeft, Database, Layers, Cpu, Activity, Lock, Sparkles, ListChecks } from 'lucide-react';
+import { ArrowLeft, Database, Layers, Cpu, Activity, Lock, Sparkles, ListChecks, Gauge } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useBackendStore } from '../../stores/backendStore';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
 
-type Phase = 'dataset' | 'preprocess' | 'train' | 'refine' | 'review' | 'monitor';
+type Phase = 'dataset' | 'preprocess' | 'optimise' | 'train' | 'refine' | 'review' | 'monitor';
 
 const PHASES: Array<{ id: Phase; icon: React.ReactNode; labelKey: string; enabled: boolean }> = [
   { id: 'dataset',    icon: <Database size={14} />, labelKey: 'trainingStudio.phase.dataset',    enabled: true },
   { id: 'preprocess', icon: <Layers size={14} />,   labelKey: 'trainingStudio.phase.preprocess', enabled: true },
+  // YuE2 only: optional measurements of the prepared album before training.
+  { id: 'optimise',   icon: <Gauge size={14} />,    labelKey: 'trainingStudio.phase.optimise',   enabled: true },
   { id: 'train',      icon: <Cpu size={14} />,      labelKey: 'trainingStudio.phase.train',      enabled: true },
   // YuE2 only: push a finished adapter's planner up the KL rungs and listen.
   { id: 'refine',     icon: <Sparkles size={14} />, labelKey: 'trainingStudio.phase.refine',     enabled: true },
@@ -49,8 +50,8 @@ export const PhaseStepper: React.FC = () => {
   // ladder on the Train page. The phase itself stays reachable from Review
   // for the earlier recipe's ladders.
   const phases = backendId === YUE2_BACKEND_ID
-    ? PHASES.filter(p => p.id !== 'preprocess' && p.id !== 'monitor' && p.id !== 'refine')
-    : PHASES.filter(p => p.id !== 'refine' && p.id !== 'review');
+    ? PHASES.filter(p => p.id !== 'monitor' && p.id !== 'refine')
+    : PHASES.filter(p => p.id !== 'refine' && p.id !== 'review' && p.id !== 'optimise');
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
@@ -84,7 +85,9 @@ export const PhaseStepper: React.FC = () => {
               {p.enabled ? p.icon : <Lock size={12} />}
               {mm3Mode && p.id === 'preprocess'
                 ? t('trainingStudio.mm3.phaseCodes', 'Codes')
-                : t(p.labelKey)}
+                : backendId === YUE2_BACKEND_ID && p.id === 'preprocess'
+                  ? t('trainingStudio.phase.prepare', 'Prepare')
+                  : t(p.labelKey)}
             </button>
           </React.Fragment>
         );

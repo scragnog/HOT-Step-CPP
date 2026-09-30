@@ -253,6 +253,36 @@ inline bool nar_probe_predict(ggml_backend_t backend, const Yue2AitkModel & mode
     return true;
 }
 
+// Base planner CE on one batch (--eval-base-loss): the frozen-teacher forward
+// (no adapter, no tape) and the head kernel at KL weight 0. The kernel always
+// writes a hidden gradient; it lands in a scratch buffer and is dropped.
+inline bool base_ar_ce(ggml_backend_t backend, const Yue2AitkModel & model, const yue2_aitk::Batch & batch,
+                       double * ce_out, size_t * tokens, std::string * error) {
+    using yue2_aitk_executor_detail::fail;
+    constexpr size_t H=2048;
+    const size_t N=batch.ar.target_ids.size(), len=batch.ar.input_ids.size();
+    if(!N || !len || batch.ar.prediction_positions.size()!=N) return fail(error,"invalid AR evaluation batch");
+    for(size_t i=0;i<N;++i) if(batch.ar.prediction_positions[i]>=len || batch.ar.target_ids[i]<0 || batch.ar.target_ids[i]>=yue2_aitk::kVocabSize)
+        return fail(error,"invalid AR prediction position or target");
+    Yue2AitkEndpointHost embeds;
+    if(!Yue2AitkEndpoints::token_embedding(backend,model,batch.ar.input_ids.data(),len,&embeds,error)) return false;
+    Yue2AitkStackTape tape;
+    if(!yue2_aitk_stack::forward(backend,model,nullptr,false,embeds.values,len,nullptr,false,&tape,nullptr,error)) return false;
+    std::vector<float> zeros(tape.final_hidden.size(),0.0f);
+    Yue2AitkEndpointHost norm;
+    if(!Yue2AitkEndpoints::ar_final_norm(backend,model,tape.final_hidden.data(),zeros.data(),tape.length,&norm,error)) return false;
+    std::vector<float> selected(N*H); std::vector<uint32_t> targets(N);
+    for(size_t i=0;i<N;++i) { std::copy_n(norm.values.data()+batch.ar.prediction_positions[i]*H,H,selected.data()+i*H); targets[i]=uint32_t(batch.ar.target_ids[i]); }
+    std::vector<uint16_t> scratch(N*H); float ce=0,kl=0;
+    yue2_aitk_head_loss::Request head;
+    head.backend=backend;head.head=&model.lm_head();head.adapted_hidden=selected.data();head.base_hidden=selected.data();
+    head.targets=targets.data();head.positions=N;head.hidden=H;head.kl_weight=0.0f;
+    head.adapted_hidden_grad_bf16=scratch.data();head.ce_sum=&ce;head.kl_sum=&kl;
+    if(yue2_aitk_head_loss::compute(head,error)!=yue2_aitk_head_loss::Status::success) return false;
+    *ce_out=double(ce)/N; if(tokens)*tokens=N;
+    return std::isfinite(*ce_out) || fail(error,"nonfinite base planner CE");
+}
+
 // Reference overload for call sites that bind the native AdamW8bit optimizer
 // by name; forwards to the dispatching overload above.
 inline bool run(ggml_backend_t backend, const Yue2AitkModel & model,

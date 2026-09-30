@@ -40,7 +40,9 @@ export type TrainingJobKind =
   // in the same manifest as the other two and is independent of them (no
   // codes or cursor spans needed), so it can run before, after or alongside.
   | 'yue2-tokenize' | 'yue2-stems' | 'yue2-align' | 'yue2-ar-train' | 'yue2-sheet'
-  | 'yue2-joint-train' | 'yue2-prepare-aitk';
+  | 'yue2-joint-train' | 'yue2-prepare-aitk'
+  // Optimise phase: the base model's loss on every prepared song, no training.
+  | 'yue2-base-loss';
 
 /** Explicit YuE2 trainer family. Legacy routes never infer or switch this. */
 export type Yue2TrainingMethod = 'legacy' | 'aitk';

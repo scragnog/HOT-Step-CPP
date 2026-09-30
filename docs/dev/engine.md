@@ -341,7 +341,7 @@ usage. `ace-train --help` prints the full option list.
 | `yue2-nar-train` | Train a YuE2 NAR LoRA |
 | `yue2-ar-train` | Train a YuE2 AR (composer) LoRA |
 | `yue2-prepare-aitk`, `yue2-import-aitk-cache` | Build or import caches for joint training |
-| `yue2-joint-train` | YuE2 AR and NAR joint training |
+| `yue2-joint-train` | YuE2 AR and NAR joint training. `--eval-base-loss` trains nothing: it prints the base planner CE and decoder flow MSE per song (the Optimise phase) |
 | `yue2-optim-check` | Optimizer self-check |
 | `spike` | Phase-0 evidence runs |
 

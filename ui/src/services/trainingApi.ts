@@ -44,7 +44,9 @@ export type TrainingJobKind =
   // loss is scored on) and 'yue2-align' (cursor_words, what --cursor-weight
   // reads). Each spawns ace-train, so each owns the card.
   | 'yue2-tokenize' | 'yue2-stems' | 'yue2-align' | 'yue2-ar-train' | 'yue2-sheet'
-  | 'yue2-joint-train' | 'yue2-prepare-aitk';
+  | 'yue2-joint-train' | 'yue2-prepare-aitk'
+  // Optimise phase: the base model's loss on every prepared song.
+  | 'yue2-base-loss';
 
 export type TrainingJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -2573,6 +2575,17 @@ export async function listYue2RungScores(id: string, run?: string): Promise<{ sc
 }
 export async function scoreYue2Rung(id: string, body: { refineRun: string; step: number; likeness?: number | null; corruption?: number | null; notes?: string }): Promise<{ score: Yue2RungScore }> {
   return request(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores`, { method: 'PUT', ...jsonBody(body) });
+}
+/** Optimise phase: the dataset's _hotstep-optimisation.json and prepare readiness. */
+export interface Yue2BaseLossItem { file: string; frames: number; arTokens: number; arCe: number; narMse: number; narMseByT: number[] }
+export interface Yue2BaseLoss { measuredAt: string; base: string; companion: boolean; arTargets: string; narWindow: number; timesteps: number[]; seed: number;
+  items: Yue2BaseLossItem[]; summary: { items: number; arCeMean: number; arCeTokenMean: number; narMseMean: number } }
+export interface Yue2OptimiseStatus { file: string; data: { version: 1; baseLoss?: Yue2BaseLoss } | null; stages: { cache: boolean; codes: boolean; sheets: boolean }; missing: string[] }
+export async function getYue2Optimise(id: string): Promise<Yue2OptimiseStatus> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-optimise`);
+}
+export async function startYue2BaseLoss(id: string): Promise<{ jobId: string }> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-optimise/base-loss`, { method: 'POST', ...jsonBody({}) });
 }
 /** A run's album verdict: how well the album trained overall, 1-5 (Dataset-Calibrated Training). */
 export type Yue2TrainedDirection = 'under' | 'right' | 'over';

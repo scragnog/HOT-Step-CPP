@@ -453,8 +453,68 @@ static int run_impl(Config config, std::string * error) {
         }
         if (!(gguf_base ? model.load_gguf(config.checkpoint.c_str(), backend.value, error)
                         : model.load(config.checkpoint.c_str(), backend.value, yue2_aitk_load_embedding_bf16, error)) ||
-            (!config.companion.empty() && !model.apply_companion(config.companion.c_str(), error)) ||
-            !state.initialize(backend.value, static_cast<uint32_t>(config.seed), error,cursor_weight>0,config.rank,config.alpha,
+            (!config.companion.empty() && !model.apply_companion(config.companion.c_str(), error))) return 1;
+        if (config.eval_base_loss) {
+            // --eval-base-loss: every item once, in dataset order, no adapter.
+            // The planner CE uses the full prompt (lead sheet kept, no dropout,
+            // --ar-targets as training). The decoder MSE uses one seeded crop
+            // per item (its own sampler, so it repeats run to run) at three
+            // noise levels, conditioned by the base planner's prefix.
+            event("eval");
+            std::ofstream out(std::filesystem::u8path(config.output) / "base-loss.jsonl", std::ios::binary);
+            if (!out) { fail(error, "cannot create base-loss JSONL"); return 1; }
+            const auto esc = [](const std::string & v) { std::string r; for (char c : v) { if (c == '"' || c == '\\') r += '\\'; if ((unsigned char) c >= 0x20) r += c; } return r; };
+            const float levels[3] = {250.0f, 500.0f, 750.0f};
+            double ar_sum = 0.0, nar_sum = 0.0, ar_weighted = 0.0; size_t ar_tokens_total = 0;
+            for (size_t i = 0; i < dataset.items.size(); ++i) {
+                if (yue2_aitk_cancel_requested()) { fail(error, "cancelled"); return 1; }
+                const auto & item = dataset.items[i];
+                const auto t0 = std::chrono::steady_clock::now();
+                const size_t frames = item.song.semantic_tokens.size();
+                size_t window = config.nar_crop_frames > 0 ? (size_t) config.nar_crop_frames : frames;
+                {
+                    const auto & p = item.prompt;
+                    const size_t used = std::max({p.retained_prefix_ids.size() + p.abc_ids.size(), p.dropped_prefix_ids.size(),
+                                                  p.retained_nocap_prefix_ids.size() + p.abc_ids.size(), p.dropped_nocap_prefix_ids.size()}) + 5;
+                    const size_t fit = used < yue2_aitk::dataset_detail::kMaxFrames ? (yue2_aitk::dataset_detail::kMaxFrames - used) / 2 : 1;
+                    window = std::max<size_t>(1, std::min(window, fit));
+                }
+                double ar_ce = 0.0, nar[3] = {0, 0, 0}; size_t ar_tokens = 0;
+                Yue2AitkPrefixHost prefix;
+                for (int k = 0; k < 3; ++k) {
+                    yue2_aitk::Yue2NativeSampler item_sampler(config.seed * 1000003ull + 104729ull * (i + 1));
+                    auto sampled = item_sampler.sample(item.song, item.prompt, window, std::vector<float>{levels[k]}, 0.0f, 0, 0, 0.0f, base_targets);
+                    if (k == 0) {
+                        if (!yue2_aitk_joint::base_ar_ce(backend.value, model, sampled.batch, &ar_ce, &ar_tokens, error)) return 1;
+                        if (!yue2_aitk_joint::nar_probe_prefix(backend.value, model, sampled.batch, &prefix, error)) return 1;
+                    }
+                    std::vector<float> prediction;
+                    if (!yue2_aitk_joint::nar_probe_predict(backend.value, model, nullptr, prefix, sampled.noisy_bf16, sampled.timestep_bf16, &prediction, error)) return 1;
+                    double sq = 0.0;
+                    for (size_t j = 0; j < prediction.size(); ++j) { const double d = double(prediction[j]) - sampled.target_f32[j]; sq += d * d; }
+                    nar[k] = prediction.empty() ? 0.0 : sq / double(prediction.size());
+                }
+                const double nar_mse = (nar[0] + nar[1] + nar[2]) / 3.0;
+                if (!std::isfinite(nar_mse)) { fail(error, "nonfinite base decoder MSE"); return 1; }
+                ar_sum += ar_ce; nar_sum += nar_mse; ar_weighted += ar_ce * double(ar_tokens); ar_tokens_total += ar_tokens;
+                const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+                std::ostringstream line; line.precision(9);
+                line << "{\"stage\":\"eval\",\"item\":" << i << ",\"id\":\"" << esc(item.id) << "\",\"frames\":" << frames << ",\"window\":" << window
+                     << ",\"ar_tokens\":" << ar_tokens << ",\"ar_ce\":" << ar_ce << ",\"nar_mse\":" << nar_mse
+                     << ",\"nar_mse_t\":[" << nar[0] << "," << nar[1] << "," << nar[2] << "],\"ms\":" << ms << "}\n";
+                out << line.str() << std::flush; std::cout << line.str() << std::flush;
+            }
+            const size_t n = dataset.items.size();
+            std::ostringstream summary; summary.precision(9);
+            summary << "{\"stage\":\"eval_summary\",\"items\":" << n << ",\"ar_ce_mean\":" << (n ? ar_sum / n : 0.0)
+                    << ",\"ar_ce_token_mean\":" << (ar_tokens_total ? ar_weighted / ar_tokens_total : 0.0)
+                    << ",\"nar_mse_mean\":" << (n ? nar_sum / n : 0.0) << ",\"nar_timesteps\":[250,500,750],\"nar_window\":" << config.nar_crop_frames
+                    << ",\"ar_targets\":\"" << config.ar_targets << "\",\"companion\":" << (model.companion() ? "true" : "false") << "}\n";
+            out << summary.str() << std::flush; std::cout << summary.str() << std::flush;
+            event("done");
+            return 0;
+        }
+        if (!state.initialize(backend.value, static_cast<uint32_t>(config.seed), error,cursor_weight>0,config.rank,config.alpha,
                               lokr ? config.lokr_dim : 0, lokr ? config.lokr_factor : 0)) return 1;
         if (gguf_base) std::fprintf(stderr, "[yue2-aitk] base: GGUF %s\n", config.checkpoint.c_str());
         if (model.companion()) std::fprintf(stderr, "[yue2-aitk] companion decoder adapter: %s (frozen)\n", config.companion.c_str());

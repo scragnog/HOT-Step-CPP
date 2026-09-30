@@ -149,6 +149,7 @@ import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOp
 import { runOnGpuLane } from '../services/generation/gpuLane.js';
 import { listYue2RungScores, scoreYue2Rung, yue2RungScoresCsv, getYue2AlbumScore, scoreYue2Album } from '../services/training/yue2RungScores.js';
 import { calibrateYue2Length, ensureDatasetProfile, type Yue2Calibration } from '../services/training/datasetProfile.js';
+import { optimisationPath, readOptimisation } from '../services/training/yue2Optimise.js';
 import { planYue2Cleanup, runYue2Cleanup } from '../services/training/yue2Cleanup.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
@@ -3920,6 +3921,39 @@ function yue2AitkPrepareDefaults(ds: TrainingDatasetRow): {
     },
   };
 }
+
+/** GET /datasets/:id/yue2-optimise — the Optimise phase: what the dataset's
+ *  _hotstep-optimisation.json holds, and whether the prepare stages it needs
+ *  (latent cache, codes, lead sheets) have run. */
+router.get('/datasets/:id/yue2-optimise', (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const prep = yue2AitkPrepareDefaults(ds);
+    let manifest: Record<string, unknown> = {};
+    try { manifest = JSON.parse(fs.readFileSync(prep.options.legacyManifest, 'utf8')); } catch { /* not prepared */ }
+    const stages = { cache: fs.existsSync(prep.options.legacyManifest), codes: manifest.codec_ids_present === true, sheets: manifest.abc_present === true };
+    res.json({ file: optimisationPath(ds.sourceDir), data: readOptimisation(ds.sourceDir), stages, missing: prep.missing });
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
+});
+
+/** POST /datasets/:id/yue2-optimise/base-loss — measure the base model's loss
+ *  on every prepared song (no training) and save it as the baseLoss section. */
+router.post('/datasets/:id/yue2-optimise/base-loss', (req: Request, res: Response) => {
+  try {
+    const ds = yue2Preflight(req, res);
+    if (!ds) return;
+    const prep = yue2AitkPrepareDefaults(ds);
+    if (prep.missing.length) { res.status(400).json({ error: `Prepare the dataset first. Missing: ${prep.missing.join('; ')}` }); return; }
+    const base = resolveYue2JointBase(typeof req.body?.base === 'string' ? req.body.base : '');
+    if ('error' in base) { res.status(400).json({ error: base.error }); return; }
+    const preparation: ResolvedYue2AitkPrepareOptions = { ...prep.options, checkpoint: base.checkpoint, trigger: ds.customTag || ds.slug, lyricTiming: false };
+    const prepError = foreignYue2Manifest(ds, preparation.legacyManifest) || validateYue2AitkPrepareOptions(preparation);
+    if (prepError) { res.status(400).json({ error: prepError }); return; }
+    const job = queue.startYue2BaseLossJob(ds.id, { checkpoint: base.checkpoint, device: defaultYue2JointDevice(), preparation });
+    res.json({ jobId: job.id, kind: job.kind });
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
+});
 
 router.post('/datasets/:id/yue2-joint-prepare', (req: Request, res: Response) => {
   try {

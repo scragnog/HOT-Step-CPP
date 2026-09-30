@@ -186,7 +186,7 @@ function clearTimer(key: string): void {
 /** The four top-level phases of the studio (`PhaseStepper`). Exported so the
  *  URL-sync code in `TrainingStudio.tsx` can name it without repeating the
  *  union. */
-export type TrainingPhase = 'dataset' | 'preprocess' | 'train' | 'refine' | 'review' | 'monitor';
+export type TrainingPhase = 'dataset' | 'preprocess' | 'optimise' | 'train' | 'refine' | 'review' | 'monitor';
 
 interface TrainingState {
   // navigation
@@ -419,7 +419,7 @@ interface TrainingState {
   runYue2JointStages(
     datasetId: string,
     lyricTiming: boolean,
-    startTraining: () => Promise<string | null>,
+    startTraining: (() => Promise<string | null>) | null,
   ): Promise<void>;
   loadTrainDitStatus(q?: { variantKey?: string; adapterName?: string }): Promise<void>;
   startTrainDit(opts: TrainDitOptions): Promise<void>;
@@ -1940,7 +1940,7 @@ async function runYue2JointChain(
   datasetId: string,
   lyricTiming: boolean,
   onStage: (stage: number | null) => void,
-  startTraining: () => Promise<string | null>,
+  startTraining: (() => Promise<string | null>) | null,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     // Stage 1: latent cache — same captionMode 'yue2' rule as the legacy
@@ -2005,6 +2005,8 @@ async function runYue2JointChain(
       nextStage = 6;
     }
 
+    // Prepare page: preparation only, no training stage.
+    if (!startTraining) return { ok: true };
     // Final stage: hand off to the card's own start and follow the job it
     // returns to a terminal state.
     onStage(nextStage);

@@ -131,7 +131,10 @@ const RunAllControl: React.FC<{
   );
 };
 
-export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> = ({ datasetId, trigger }) => {
+/** `section`: 'prepare' = the Prepare phase (cache, codes, lead sheets, optional
+ *  stems and alignment); 'train' = the Train phase (joint training, batches and
+ *  the ladder). The one-click chain on Train still runs any missing preparation. */
+export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string; section?: 'prepare' | 'train' }> = ({ datasetId, trigger, section = 'train' }) => {
   const { t } = useTranslation();
   const [lyricTiming, setLyricTiming] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -146,7 +149,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
       return window.localStorage.getItem(`${LYRIC_TIMING_KEY}${datasetId}`) === 'true';
     } catch { return false; /* storage full or unavailable */ }
   });
-  const [timingLocked, setTimingLocked] = useState(false);
+  const [, setTimingLocked] = useState(false);
   const storeError = useTrainingStore(s => s.error);
   const activeJob = useTrainingStore(s => s.activeJob);
   const yue2RunAllActive = useTrainingStore(s => s.yue2RunAllActive);
@@ -218,6 +221,25 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
         3: t('trainingStudio.yue2.runAllStageName3', 'lead sheets'),
         4: jointTrainingName,
       };
+    const prepareStageNames: Record<number, string> = lyricTiming
+      ? { 1: jointStageNames[1], 2: jointStageNames[2], 3: jointStageNames[3], 4: jointStageNames[4], 5: jointStageNames[5] }
+      : { 1: jointStageNames[1], 2: jointStageNames[2], 3: jointStageNames[3] };
+    const prepareRunAllControl = (
+      <RunAllControl
+        datasetId={datasetId}
+        trigger={effectiveTrigger}
+        skipLabels={jointSkipLabels}
+        disabled={yue2RunAllActive || jobBusy}
+        jobBusyElsewhere={jobBusy}
+        runAllActive={yue2RunAllActive}
+        runAllStage={yue2RunAllStage}
+        onQueueMultiple={() => setAitkBatchOpen(true)}
+        onRun={() => void runYue2JointStages(datasetId, lyricTiming, null)}
+        stageNames={prepareStageNames}
+        preflightAll={t('trainingStudio.yue2.runAllPreparePreflight',
+          'Runs every preparation stage below in order. Training is on the Train page.')}
+      />
+    );
     const jointRunAllControl = (
       <RunAllControl
         datasetId={datasetId}
@@ -235,14 +257,44 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
           'Runs every stage below in order, ending with joint training.')}
       />
     );
+    const errorBanner = storeError && (
+      <div className="rounded-xl border border-red-500/25 bg-red-500/10 p-3 flex items-start gap-2 text-sm text-red-500">
+        <XCircle size={16} className="mt-0.5 flex-shrink-0" />
+        <span className="min-w-0 break-words">{storeError}</span>
+      </div>
+    );
+    if (section === 'prepare') {
+      return (
+        <div className="flex flex-col gap-4">
+          {errorBanner}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {prepareRunAllControl}
+            <Yue2ClearPreparedCard datasetId={datasetId} disabled={jobBusy || yue2RunAllActive} />
+          </div>
+          {yue2Status && <Yue2PreprocessCard status={yue2Status} done={!!arStatus?.stages.preprocess.done} onDone={reload} />}
+          {arStatus && <Yue2TokenizeCard status={arStatus} onDone={reload} />}
+          {arStatus && <Yue2SheetCard datasetId={datasetId} status={arStatus} onDone={reload} />}
+          <div className={CARD}>
+            <Toggle
+              accent="amber"
+              checked={lyricTiming}
+              disabled={yue2RunAllActive}
+              onChange={setAitkLyricTiming}
+              label={t('trainingStudio.yue2.method.lyricTiming', 'Lyric timing supervision')}
+              info={lyricTiming
+                ? t('trainingStudio.yue2.method.lyricTimingOn', 'Runs the vocal stem and forced-alignment stages before training. The current recipe does not use the timing loss, so this only costs time; leave it off unless you want the alignment data for something else.')
+                : t('trainingStudio.yue2.method.lyricTimingOff', 'Off: skips stems and alignment. The recipe does not use the timing loss.')}
+            />
+          </div>
+          {lyricTiming && arStatus && <Yue2StemsCard status={arStatus} onDone={reload} />}
+          {lyricTiming && arStatus && <Yue2AlignCard status={arStatus} onDone={reload} />}
+          <Yue2AitkBatchWizard open={aitkBatchOpen} onClose={() => setAitkBatchOpen(false)} />
+        </div>
+      );
+    }
     return (
       <div className="flex flex-col gap-4">
-        {storeError && (
-          <div className="rounded-xl border border-red-500/25 bg-red-500/10 p-3 flex items-start gap-2 text-sm text-red-500">
-            <XCircle size={16} className="mt-0.5 flex-shrink-0" />
-            <span className="min-w-0 break-words">{storeError}</span>
-          </div>
-        )}
+        {errorBanner}
         <div className={CARD}>
           <div className="flex items-center justify-between gap-3">
             <div>
@@ -254,27 +306,8 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string }> 
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {jointRunAllControl}
-          <Yue2ClearPreparedCard datasetId={datasetId} disabled={timingLocked || jobBusy || yue2RunAllActive} />
-        </div>
-        {yue2Status && <Yue2PreprocessCard status={yue2Status} done={!!arStatus?.stages.preprocess.done} onDone={reload} />}
-        {arStatus && <Yue2TokenizeCard status={arStatus} onDone={reload} />}
-        {arStatus && <Yue2SheetCard datasetId={datasetId} status={arStatus} onDone={reload} />}
-        <div className={CARD}>
-          <Toggle
-            accent="amber"
-            checked={lyricTiming}
-            disabled={timingLocked || yue2RunAllActive}
-            onChange={setAitkLyricTiming}
-            label={t('trainingStudio.yue2.method.lyricTiming', 'Lyric timing supervision')}
-            info={lyricTiming
-              ? t('trainingStudio.yue2.method.lyricTimingOn', 'Runs the vocal stem and forced-alignment stages before training. The current recipe does not use the timing loss, so this only costs time; leave it off unless you want the alignment data for something else.')
-              : t('trainingStudio.yue2.method.lyricTimingOff', 'Off: skips stems and alignment. The recipe does not use the timing loss.')}
-          />
-        </div>
-        {lyricTiming && arStatus && <Yue2StemsCard status={arStatus} onDone={reload} />}
-        {lyricTiming && arStatus && <Yue2AlignCard status={arStatus} onDone={reload} />}
+        {jointRunAllControl}
+        <p className="text-[11px] text-zinc-500 -mt-2">{t('trainingStudio.yue2.prepareMoved', 'Latent cache, codes, lead sheets and lyric timing are on the Prepare page. Perform all stages still runs any of them that are missing before training.')}</p>
         <Yue2AitkTrainCard key={datasetId} datasetId={datasetId} legacyManifest={arStatus?.manifestPath || yue2Status?.manifestPath}
           cursorReady={!!arStatus?.stages.align.done} lyricTiming={lyricTiming} onLyricTimingChange={setAitkLyricTiming} onTimingLockedChange={setTimingLocked}
           exposeStart={exposeJointStart} />
