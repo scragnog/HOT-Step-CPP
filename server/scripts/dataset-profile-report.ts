@@ -52,9 +52,12 @@ for (const r of rows) {
   run.rungs.push({ step: r.step, likeness: r.likeness, corruption: r.corruption });
 }
 // The album verdict per run (1-5); the table exists from 2026-09-29 on.
-const albumScore = new Map<string, number>();
+// Directions as numbers: under -1, right 0, over +1 (columns from 2026-09-30).
+const albumScore = new Map<string, { score: number | null; instruments: number | null; vocals: number | null }>();
+const dir = (v: string | null) => v === 'under' ? -1 : v === 'right' ? 0 : v === 'over' ? 1 : null;
 try {
-  for (const a of db.prepare('SELECT refine_run, score FROM yue2_album_scores WHERE score IS NOT NULL').all() as Array<{ refine_run: string; score: number }>) albumScore.set(a.refine_run, a.score);
+  for (const a of db.prepare('SELECT * FROM yue2_album_scores').all() as Array<{ refine_run: string; score: number | null; instruments?: string | null; vocals?: string | null }>)
+    albumScore.set(a.refine_run, { score: a.score, instruments: dir(a.instruments ?? null), vocals: dir(a.vocals ?? null) });
 } catch { /* older database: no album scores yet */ }
 
 // Overall = the ladder scoreboard's base: likeness and (6 - corruption), averaged.
@@ -65,7 +68,9 @@ function targets(run: Run): Record<string, number | null> {
   const peakLik = Math.max(...r.map(g => g.likeness));
   return {
     rungs: r.length,
-    albumScore: albumScore.get(run.run) ?? null,
+    albumScore: albumScore.get(run.run)?.score ?? null,
+    instrumentsDir: albumScore.get(run.run)?.instruments ?? null,
+    vocalsDir: albumScore.get(run.run)?.vocals ?? null,
     maxStep: Math.max(...r.map(g => g.step)),
     peakLikeness: peakLik,
     peakOverall: overall(best),
@@ -162,7 +167,7 @@ for (const run of runs.values()) {
   table.push({ slug: run.slug, run: run.run, recipe: run.recipe, t: targets(run), f, calc: calc?.config });
 }
 
-const TARGETS = ['albumScore', 'peakLikeness', 'peakOverall', 'bestStep', 'stepToLikeness4', 'corruptionAtBest'];
+const TARGETS = ['albumScore', 'instrumentsDir', 'vocalsDir', 'peakLikeness', 'peakOverall', 'bestStep', 'stepToLikeness4', 'corruptionAtBest'];
 const MIN_N = 5;
 const lines: string[] = [`# Dataset calibration report`, '', `Built ${new Date().toISOString()} from ${rows.length} scored rungs, ${runs.size} runs, ${profiles.size} profiled albums.`, ''];
 lines.push('Spearman rank correlation between each album measure and each ear target, within one recipe.',

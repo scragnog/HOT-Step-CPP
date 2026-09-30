@@ -15,7 +15,7 @@ import { PreviewPlayer } from './PreviewPlayer';
 import { ParamLabel } from '../shared/ParamLabel';
 import {
   getYue2AlbumScore, getYue2CleanupPlan, linkYue2JointCheckpointPreset, listYue2RungScores, renderYue2JointPreviews, runYue2Cleanup, scoreYue2Album, scoreYue2Rung,
-  type Yue2AitkRunRecord, type Yue2AlbumScore, type Yue2CleanupChoice, type Yue2CleanupPlan, type Yue2JointPreviewRecord, type Yue2RungScore,
+  type Yue2AitkRunRecord, type Yue2AlbumScore, type Yue2TrainedDirection, type Yue2CleanupChoice, type Yue2CleanupPlan, type Yue2JointPreviewRecord, type Yue2RungScore,
 } from '../../services/trainingApi';
 
 const input = 'px-2 py-1.5 rounded-lg text-xs bg-white/70 dark:bg-black/20 border border-zinc-300/70 dark:border-white/10 text-zinc-800 dark:text-zinc-100';
@@ -93,7 +93,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
     setAlbum(null); setAlbumNote(undefined);
     if (datasetId && runId) void getYue2AlbumScore(datasetId, runId).then(r => setAlbum(r.score)).catch(() => {});
   }, [datasetId, runId]);
-  const scoreAlbum = async (patch: { score?: number | null; notes?: string }) => {
+  const scoreAlbum = async (patch: { score?: number | null; instruments?: Yue2TrainedDirection | null; vocals?: Yue2TrainedDirection | null; notes?: string }) => {
     if (!datasetId || !runId) return;
     try { setAlbum((await scoreYue2Album(datasetId, { refineRun: runId, ...patch })).score); }
     catch (err) { fail(err); }
@@ -229,6 +229,16 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
             {[1, 2, 3, 4, 5].map(n => <button key={n} type="button" onClick={() => void scoreAlbum({ score: album?.score === n ? null : n })}
               className={`w-6 h-6 rounded border text-[11px] font-semibold ${album?.score === n ? 'bg-violet-500/20 border-violet-500 text-violet-700 dark:text-violet-300' : 'border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:bg-zinc-500/10'}`}>{n}</button>)}
           </div>
+          {(['instruments', 'vocals'] as const).map(half => <div key={half} className="flex items-center gap-1">
+            <ParamLabel label={half === 'instruments' ? t('trainingStudio.refine.albumInstruments', 'Instruments') : t('trainingStudio.refine.albumVocals', 'Vocals')}
+              className="text-[11px] text-zinc-500 w-20"
+              info={half === 'instruments'
+                ? t('trainingStudio.refine.albumInstrumentsInfo', 'Which way the instruments missed at the rung you would pick. Under: the band\'s sound, playing and arrangement never really arrived. Right: nothing to change. Over: overcooked, memorised riffs or the same parts in every song, a smeared or brittle mix. The score says how well; this says whether the next run should train more or less.')
+                : t('trainingStudio.refine.albumVocalsInfo', 'Which way the vocals missed at the rung you would pick. Under: the singer\'s voice and delivery never really arrived. Right: nothing to change. Over: overcooked, garbled words, one phrase or melody in every song, a strained or breaking voice. The score says how well; this says whether the next run should train more or less.')} />
+            {(['under', 'right', 'over'] as const).map(d => <button key={d} type="button" onClick={() => void scoreAlbum({ [half]: album?.[half] === d ? null : d })}
+              className={`px-2 h-6 rounded border text-[11px] font-semibold ${album?.[half] === d ? (d === 'right' ? 'bg-emerald-500/20 border-emerald-500 text-emerald-700 dark:text-emerald-300' : 'bg-violet-500/20 border-violet-500 text-violet-700 dark:text-violet-300') : 'border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:bg-zinc-500/10'}`}>
+              {d === 'under' ? t('trainingStudio.refine.dirUnder', 'Under') : d === 'right' ? t('trainingStudio.refine.dirRight', 'Right') : t('trainingStudio.refine.dirOver', 'Over')}</button>)}
+          </div>)}
           <input className={`${input} flex-1 min-w-[240px]`} placeholder={t('trainingStudio.refine.albumNotes', 'Notes: what this album got right or never got')}
             value={albumNote ?? album?.notes ?? ''} onChange={e => setAlbumNote(e.target.value)}
             onBlur={e => { if (e.target.value !== (album?.notes ?? '')) void scoreAlbum({ notes: e.target.value }); }} />

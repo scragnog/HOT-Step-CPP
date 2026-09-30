@@ -431,6 +431,8 @@ async function scoreHere(w: WorkerInfo, req: Request, res: Response, datasetId: 
   if (kind === 'yue2-album-score') {
     stored = scoreYue2Album({ id: ds.id, slug: ds.slug }, { refineRun: b.refineRun,
       ...(b.score !== undefined ? { score: b.score === null ? null : Number(b.score) } : {}),
+      ...(b.instruments !== undefined ? { instruments: b.instruments as string | null } : {}),
+      ...(b.vocals !== undefined ? { vocals: b.vocals as string | null } : {}),
       ...(typeof b.notes === 'string' ? { notes: b.notes } : {}) }, true);
   } else {
     if (!Number.isInteger(Number(b.step))) { res.status(400).json({ error: 'step is required' }); return; }

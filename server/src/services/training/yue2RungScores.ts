@@ -102,16 +102,20 @@ export function yue2RungScoresCsv(rows: Yue2RungScore[]): string {
   return [cols.join(','), ...rows.map(r => cols.map(c => cell(r[c])).join(','))].join('\n') + '\n';
 }
 
-export interface Yue2AlbumScore { refineRun: string; datasetId: string; datasetSlug: string; score: number | null; notes: string; updatedAt: string }
+export type Yue2TrainedDirection = 'under' | 'right' | 'over';
+export interface Yue2AlbumScore { refineRun: string; datasetId: string; datasetSlug: string; score: number | null;
+  /** Which way each half missed: under-trained, right, over-trained (overcooked). */
+  instruments: Yue2TrainedDirection | null; vocals: Yue2TrainedDirection | null; notes: string; updatedAt: string }
+const direction = (v: unknown): Yue2TrainedDirection | null => v === 'under' || v === 'right' || v === 'over' ? v : null;
 
 /** The listener's verdict on a whole run: how well the album trained, 1-5. */
 export function getYue2AlbumScore(refineRun: string): Yue2AlbumScore | null {
   const r = getDb().prepare('SELECT * FROM yue2_album_scores WHERE refine_run = ?').get(refineRun) as Record<string, unknown> | undefined;
   return r ? { refineRun: r.refine_run as string, datasetId: r.dataset_id as string, datasetSlug: r.dataset_slug as string,
-    score: r.score as number | null, notes: (r.notes as string) ?? '', updatedAt: r.updated_at as string } : null;
+    score: r.score as number | null, instruments: direction(r.instruments), vocals: direction(r.vocals), notes: (r.notes as string) ?? '', updatedAt: r.updated_at as string } : null;
 }
 
-export function scoreYue2Album(ds: { id: string; slug: string }, input: { refineRun: string; score?: number | null; notes?: string },
+export function scoreYue2Album(ds: { id: string; slug: string }, input: { refineRun: string; score?: number | null; instruments?: string | null; vocals?: string | null; notes?: string },
   /** The caller has checked the run exists (on a training worker). */
   remoteRun = false): Yue2AlbumScore {
   if (!remoteRun && !listYue2AitkRuns(ds.id, ds.slug).some(r => r.jobId === input.refineRun)) throw new Error('Unknown run for this dataset');
@@ -119,9 +123,11 @@ export function scoreYue2Album(ds: { id: string; slug: string }, input: { refine
   const n = Number(input.score);
   const score = input.score === undefined ? (prior?.score ?? null) : Number.isInteger(n) && n >= 1 && n <= 5 ? n : null;
   const notes = input.notes === undefined ? (prior?.notes ?? '') : String(input.notes).slice(0, 4000);
-  getDb().prepare(`INSERT INTO yue2_album_scores (refine_run, dataset_id, dataset_slug, score, notes) VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(refine_run) DO UPDATE SET score = excluded.score, notes = excluded.notes, updated_at = datetime('now')`)
-    .run(input.refineRun, ds.id, ds.slug, score, notes);
+  const instruments = input.instruments === undefined ? (prior?.instruments ?? null) : direction(input.instruments);
+  const vocals = input.vocals === undefined ? (prior?.vocals ?? null) : direction(input.vocals);
+  getDb().prepare(`INSERT INTO yue2_album_scores (refine_run, dataset_id, dataset_slug, score, instruments, vocals, notes) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(refine_run) DO UPDATE SET score = excluded.score, instruments = excluded.instruments, vocals = excluded.vocals, notes = excluded.notes, updated_at = datetime('now')`)
+    .run(input.refineRun, ds.id, ds.slug, score, instruments, vocals, notes);
   return getYue2AlbumScore(input.refineRun)!;
 }
 

@@ -299,6 +299,16 @@ export function initDb(): void {
       check: `SELECT COUNT(*) as c FROM pragma_table_info('training_datasets') WHERE name='lyrics_set_id'`,
       alter: `ALTER TABLE training_datasets ADD COLUMN lyrics_set_id INTEGER NOT NULL DEFAULT 0`,
     },
+    // Which way the album missed, per half: 'under' | 'right' | 'over'. The
+    // score says how well; these say whether the next run trains more or less.
+    {
+      check: `SELECT COUNT(*) as c FROM pragma_table_info('yue2_album_scores') WHERE name='instruments'`,
+      alter: `ALTER TABLE yue2_album_scores ADD COLUMN instruments TEXT`,
+    },
+    {
+      check: `SELECT COUNT(*) as c FROM pragma_table_info('yue2_album_scores') WHERE name='vocals'`,
+      alter: `ALTER TABLE yue2_album_scores ADD COLUMN vocals TEXT`,
+    },
   ];
   for (const m of trainingMigrations) {
     const row = db.prepare(m.check).get() as { c: number };

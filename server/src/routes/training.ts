@@ -4203,6 +4203,8 @@ router.put('/datasets/:id/yue2-album-score', (req: Request, res: Response) => {
     if (typeof b.refineRun !== 'string') { res.status(400).json({ error: 'refineRun is required' }); return; }
     res.json({ score: scoreYue2Album({ id: ds.id, slug: ds.slug }, { refineRun: b.refineRun,
       ...(b.score !== undefined ? { score: b.score === null ? null : Number(b.score) } : {}),
+      ...(b.instruments !== undefined ? { instruments: b.instruments as string | null } : {}),
+      ...(b.vocals !== undefined ? { vocals: b.vocals as string | null } : {}),
       ...(typeof b.notes === 'string' ? { notes: b.notes } : {}) }) });
   } catch (err: any) { res.status(400).json({ error: err?.message || String(err) }); }
 });

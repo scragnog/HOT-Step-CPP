@@ -2575,11 +2575,13 @@ export async function scoreYue2Rung(id: string, body: { refineRun: string; step:
   return request(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores`, { method: 'PUT', ...jsonBody(body) });
 }
 /** A run's album verdict: how well the album trained overall, 1-5 (Dataset-Calibrated Training). */
-export interface Yue2AlbumScore { refineRun: string; datasetId: string; datasetSlug: string; score: number | null; notes: string; updatedAt: string }
+export type Yue2TrainedDirection = 'under' | 'right' | 'over';
+export interface Yue2AlbumScore { refineRun: string; datasetId: string; datasetSlug: string; score: number | null;
+  instruments: Yue2TrainedDirection | null; vocals: Yue2TrainedDirection | null; notes: string; updatedAt: string }
 export async function getYue2AlbumScore(id: string, run: string): Promise<{ score: Yue2AlbumScore | null }> {
   return request(`/datasets/${encodeURIComponent(id)}/yue2-album-score?run=${encodeURIComponent(run)}`);
 }
-export async function scoreYue2Album(id: string, body: { refineRun: string; score?: number | null; notes?: string }): Promise<{ score: Yue2AlbumScore }> {
+export async function scoreYue2Album(id: string, body: { refineRun: string; score?: number | null; instruments?: Yue2TrainedDirection | null; vocals?: Yue2TrainedDirection | null; notes?: string }): Promise<{ score: Yue2AlbumScore }> {
   return request(`/datasets/${encodeURIComponent(id)}/yue2-album-score`, { method: 'PUT', ...jsonBody(body) });
 }
 export const yue2RungScoresExportUrl =(format: 'csv' | 'json') => `${API_BASE}/yue2-rung-scores/export?format=${format}`;

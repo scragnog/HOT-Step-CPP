@@ -165,7 +165,7 @@ is stored as `calibration` in the run options, is logged at job start, and goes
 into each rung score's settings snapshot (which now also records `method` and
 `gradAccum`). The handler is async for this.
 
-Evidence kept for fitting: `yue2_album_scores` holds one 1-5 verdict per run
+Evidence kept for fitting: `yue2_album_scores` holds one 1-5 verdict per run, plus `instruments` and `vocals` directions (`under` / `right` / `over`, which the report scores -1 / 0 / +1)
 (`GET/PUT /datasets/:id/yue2-album-score`, set above the ladder).
 `deleteYue2AitkRun` and the rung-pick cleanup copy each segment's `train.jsonl`
 to `<training dir>/datasets/<slug>/train-logs/<jobId>-<segment>.jsonl`, and
