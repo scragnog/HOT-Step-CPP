@@ -15,6 +15,7 @@ link to the page that explains it.
 | [Adapters](user/adapters.md) | Using LoRA and LoKr adapters: loading, stacking, section masking, trigger words |
 | [Plugins](user/plugins.md) | Solvers, schedulers and guidance modes, with the generated list of every plugin |
 | [Model files](user/models.md) | Every downloadable pack and file, generated from the registry |
+| [Driving HOT-Step with an agent (MCP)](user/mcp.md) | The `lyricstudio` and `hotstep` MCP servers: setup, security posture, a generation and training tour |
 | [Troubleshooting](user/troubleshooting.md) | Logs, common failures and fixes, how to file a good issue |
 
 ### Studios

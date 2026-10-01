@@ -11,6 +11,8 @@ The "Training" entry in the sidebar (`/training-studio`). Labeling with local BP
 
 Training follows whichever generation backend is active (ACE-Step, MiniMax-Music3, or YuE2). A pill next to the title names it when more than one backend is available, and the phases below change shape with it. Switch backends from the pill in the top bar, not from inside this studio.
 
+An external agent (Claude Code, Codex) can also drive the dataset and training pipeline through the `hotstep` MCP server. See [Driving HOT-Step with an agent](../mcp.md).
+
 ## Workflow
 
 1. Click **New dataset**, pick a source folder (recursively scanned by default), and confirm the auto-filled name, trigger word, and lyric language. HOT-Step scans the folder and shows a preview (file count, extensions, whether a `dataset.json` already exists) before anything is created.

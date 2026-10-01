@@ -420,6 +420,10 @@ re-runs from the Library wait in the same line.
 - The Queue section has Retry for failed items, Clear Done for finished ones, and Reset,
   which cancels everything active and pending on the server.
 
+An external agent (Claude Code, Codex) can also submit and poll generations through the
+`hotstep` MCP server, across all three backends. See [Driving HOT-Step with an
+agent](mcp.md).
+
 ## Task modes
 
 The engine has one generation pipeline and several task modes. The studio picks the mode;
@@ -451,3 +455,4 @@ a turbo model.
 - [Adapters](adapters.md)
 - [Getting higher quality output](quality.md)
 - [Models](models.md)
+- [Driving HOT-Step with an agent (MCP)](mcp.md)
