@@ -13,7 +13,7 @@
 // v1 files (the old export, shaped like getGlobalParams() output) are still
 // accepted via a small reverse-mapping in applyProfileData().
 
-import { useGlobalParamsStore, scopedKey } from '../stores/globalParamsStore';
+import { useGlobalParamsStore, scopedKey, normalizeModelSelection } from '../stores/globalParamsStore';
 import { writePersistedState } from '../hooks/usePersistedState';
 
 // ── Content fields (CreatePanel state, persisted via usePersistedState) ──
@@ -199,8 +199,13 @@ export function applyProfileData(raw: ProfileData): void {
   const partial: Record<string, unknown> = {};
   for (const field of PROFILE_FIELDS) {
     if (p[field] !== undefined) {
-      partial[field] = p[field];
-      try { localStorage.setItem(fieldStorageKey(field), JSON.stringify(p[field])); } catch { /* full */ }
+      const value = field === 'vaeModel'
+        ? normalizeModelSelection('vaeModel', p[field])
+        : field === 'stableStepBackend'
+          ? normalizeModelSelection('stableStepBackend', p[field])
+          : p[field];
+      partial[field] = value;
+      try { localStorage.setItem(fieldStorageKey(field), JSON.stringify(value)); } catch { /* full */ }
     }
   }
   // Profiles saved before the LM-codes step-count mode existed carry only

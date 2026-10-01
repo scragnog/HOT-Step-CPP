@@ -375,6 +375,7 @@ are stored by the server.
   Custom-Gen content fields: caption, lyrics, negative prompt, instrumental, BPM, duration,
   key, time signature, vocal language and trigger word.
 - Apply loads a profile immediately, content included, without reloading the page.
+  Older profiles that name removed ONNX VAE or StableStep choices load the current defaults.
 - Click a profile's name to expand a grouped list of every value it holds.
 - The row icons rename, overwrite with the current settings, export as JSON and delete.
   Overwrite and delete ask first.

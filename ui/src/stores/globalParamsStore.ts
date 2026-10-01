@@ -183,6 +183,15 @@ export const GLOBAL_PARAM_DEFAULTS = {
   lufsCeilingDb: -1,
 };
 
+export function normalizeModelSelection(field: 'vaeModel', value: unknown): string;
+export function normalizeModelSelection(field: 'stableStepBackend', value: unknown): StableStepBackend;
+export function normalizeModelSelection(field: 'vaeModel' | 'stableStepBackend', value: unknown): string {
+  if (field === 'vaeModel') {
+    return typeof value === 'string' && !/\.onnx$/i.test(value) ? value : GLOBAL_PARAM_DEFAULTS.vaeModel;
+  }
+  return value === 'gguf' ? 'gguf' : GLOBAL_PARAM_DEFAULTS.stableStepBackend;
+}
+
 // -- Per-backend settings scope --
 //
 // A handful of fields are NOT global: they are remembered per generation
@@ -287,10 +296,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   // -- State (initialised from localStorage) --
   ditModel: readKey("hs-ditModel", GLOBAL_PARAM_DEFAULTS.ditModel),
   lmModel: readKey("hs-lmModel", GLOBAL_PARAM_DEFAULTS.lmModel),
-  vaeModel: (() => {
-    const saved = readKey("hs-vaeModel", GLOBAL_PARAM_DEFAULTS.vaeModel);
-    return typeof saved === 'string' && !/\.onnx$/i.test(saved) ? saved : GLOBAL_PARAM_DEFAULTS.vaeModel;
-  })(),
+  vaeModel: normalizeModelSelection('vaeModel', readKey("hs-vaeModel", GLOBAL_PARAM_DEFAULTS.vaeModel)),
   lmAdapter: readKey("hs-lmAdapter", GLOBAL_PARAM_DEFAULTS.lmAdapter),
   lmAdapterScale: readKey("hs-lmAdapterScale", GLOBAL_PARAM_DEFAULTS.lmAdapterScale),
   embeddingModel: readKey("hs-embeddingModel", GLOBAL_PARAM_DEFAULTS.embeddingModel),
@@ -432,7 +438,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   stableStepStrength: readKey("hs-stableStepStrength", GLOBAL_PARAM_DEFAULTS.stableStepStrength),
   // Engine backend for the SA3 refine: 'auto' or 'gguf', both using GGML.
   // Old saved values normalize to auto, matching the server.
-  stableStepBackend: readKey("hs-stableStepBackend", GLOBAL_PARAM_DEFAULTS.stableStepBackend) === 'gguf' ? 'gguf' : 'auto',
+  stableStepBackend: normalizeModelSelection('stableStepBackend', readKey("hs-stableStepBackend", GLOBAL_PARAM_DEFAULTS.stableStepBackend)),
   // StableStep DoRA adapters: [{name, scale, enabled}] — persisted selection
   stableStepAdapters: readKey("hs-stableStepAdapters", GLOBAL_PARAM_DEFAULTS.stableStepAdapters),
   // Preserve source dynamics: envelope-match refined audio to the source
@@ -496,7 +502,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setLmAdapter: (v: any) => { set({ lmAdapter: v }); writeKey("hs-lmAdapter", v); },
   setLmAdapterScale: (v: any) => { set({ lmAdapterScale: v }); writeKey("hs-lmAdapterScale", v); },
   setVaeModel: (v: any) => {
-    const model = typeof v === 'string' && !/\.onnx$/i.test(v) ? v : GLOBAL_PARAM_DEFAULTS.vaeModel;
+    const model = normalizeModelSelection('vaeModel', v);
     set({ vaeModel: model });
     writeKey("hs-vaeModel", model);
   },
@@ -636,7 +642,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setPpVaeBlend: (v: any) => { set({ ppVaeBlend: v }); writeKey("hs-ppVaeBlend", v); },
   setStableStepOn: (v: any) => { set({ stableStepOn: v }); writeKey("hs-stableStepOn", v); },
   setStableStepStrength: (v: any) => { set({ stableStepStrength: v }); writeKey("hs-stableStepStrength", v); },
-  setStableStepBackend: (v: any) => { const backend = v === 'gguf' ? 'gguf' : 'auto'; set({ stableStepBackend: backend }); writeKey("hs-stableStepBackend", backend); },
+  setStableStepBackend: (v: any) => { const backend = normalizeModelSelection('stableStepBackend', v); set({ stableStepBackend: backend }); writeKey("hs-stableStepBackend", backend); },
   setStableStepAdapters: (v: any) => { set({ stableStepAdapters: v }); writeKey("hs-stableStepAdapters", v); },
   setStableStepPreserveDynamics: (v: any) => { set({ stableStepPreserveDynamics: v }); writeKey("hs-stableStepPreserveDynamics", v); },
   setStableStepVocalPpVae: (v: any) => { set({ stableStepVocalPpVae: v }); writeKey("hs-stableStepVocalPpVae", v); },
