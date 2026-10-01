@@ -459,7 +459,11 @@ export async function trainStart(args: TrainStartArgs): Promise<ToolOutcome> {
     // The route refuses anything but 'aitk' ("Legacy is never selected
     // implicitly"); the tool owns the value so a caller cannot pick Legacy.
     if ('trainingMethod' in body) return { kind: 'rejected', message: 'trainingMethod is set by this tool ("aitk") and cannot be passed.' };
-    // resumeStep alone would be ignored by the route and start a FRESH run.
+    // The route resumes only on a NON-EMPTY resumeRunId (training.ts:3437);
+    // resumeStep alone, or with an empty id, would start a FRESH run.
+    if (body.resumeRunId !== undefined && (typeof body.resumeRunId !== 'string' || !body.resumeRunId.trim())) {
+      return { kind: 'rejected', message: 'resumeRunId must be a non-empty run id; omit it (and resumeStep) for a fresh run.' };
+    }
     if ((body.resumeRunId === undefined) !== (body.resumeStep === undefined)) {
       return { kind: 'rejected', message: 'resumeRunId and resumeStep go together: send both to resume, neither for a fresh run.' };
     }

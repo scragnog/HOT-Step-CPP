@@ -326,7 +326,7 @@ const yue2JointPreview = z.object({
 export const yue2JointSchema = z.object({
   steps: int.describe('Total steps. Required (400 without it). On a resume it must exceed resumeStep.'),
   saveEvery: int.optional().describe('Checkpoint cadence, 1..steps. Required on a fresh run (400 without it); on a resume it is inherited from the run, except that refine may set it and refinePlanner forces it to steps.'),
-  resumeRunId: str.optional().describe('Resume a run listed by train_runs (yue2-joint). Must be sent with resumeStep. Base, seed, optimizer, adapter shape, dataset, lyricTiming and cursorWeight come from that run; only the stop target, preview and refine fields can change. A base-matched run re-applies its recipe on resume, which clears refine/refinePlanner/freezePlannerNow and the loss/KL targets (read from the code, not exercised).'),
+  resumeRunId: str.trim().min(1).optional().describe('Resume a run listed by train_runs (yue2-joint). Must be sent with resumeStep. Base, seed, optimizer, adapter shape, dataset, lyricTiming and cursorWeight come from that run; only the stop target, preview and refine fields can change. A base-matched run re-applies its recipe on resume, which clears refine/refinePlanner/freezePlannerNow and the loss/KL targets (read from the code, not exercised).'),
   resumeStep: int.optional().describe('Checkpoint step of resumeRunId that has an optimizer state. Must be sent with resumeRunId.'),
   autoPrepare: bool.optional().describe('Default false. true (fresh runs only) makes the job run joint preparation first with the readiness defaults, so `dataset` is not needed. Without it a fresh run needs `dataset`. A resume never auto-prepares.'),
   preparation: z.object({

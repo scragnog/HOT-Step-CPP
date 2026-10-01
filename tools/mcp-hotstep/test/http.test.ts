@@ -554,6 +554,8 @@ test('train_start rejects trainingMethod, a half resume, another backend\'s fiel
     { datasetId: 'ds1', backend: 'yue2-joint', yue2Joint: { steps: 10, saveEvery: 5, trainingMethod: 'legacy' } as never },
     { datasetId: 'ds1', backend: 'yue2-joint', yue2Joint: { steps: 6000, resumeStep: 4000 } },
     { datasetId: 'ds1', backend: 'yue2-joint', yue2Joint: { steps: 6000, resumeRunId: 'job-old' } },
+    { datasetId: 'ds1', backend: 'yue2-joint', yue2Joint: { steps: 200, saveEvery: 100, resumeRunId: '', resumeStep: 100, autoPrepare: true } },
+    { datasetId: 'ds1', backend: 'yue2-joint', yue2Joint: { steps: 200, saveEvery: 100, resumeRunId: '  ', resumeStep: 100 } },
     { datasetId: 'ds1', backend: 'ace-dit', aceLm: { rank: 8 } },
     { datasetId: 'ds1', backend: 'ace-lm', options: { rank: 8 } },
     { datasetId: 'ds1', backend: 'legacy' as unknown as 'ace-lm' },

@@ -80,6 +80,17 @@ test('train_start yue2-joint with trainingMethod in its fields fails schema vali
   assert.equal(trainingRequests, before);
 });
 
+test('train_start yue2-joint with an empty resumeRunId is refused before any HTTP call (it would start a fresh run)', async () => {
+  const before = trainingRequests;
+  const result = await client.callTool({
+    name: 'train_start',
+    arguments: { datasetId: 'ds1', backend: 'yue2-joint', yue2Joint: { resumeRunId: '', resumeStep: 100, steps: 200, saveEvery: 100, autoPrepare: true } },
+  }).catch((err: Error) => ({ isError: true, content: [{ type: 'text', text: err.message }] })) as CallToolResult;
+  assert.equal(result.isError, true);
+  assert.match(firstText(result), /resumeRunId/);
+  assert.equal(trainingRequests, before);
+});
+
 test('gen_submit over the wire returns the job the fixture server hands back', async () => {
   const result = await client.callTool({
     name: 'gen_submit',
