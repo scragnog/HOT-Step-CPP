@@ -184,10 +184,13 @@ One tool, three stages, all async (answer `202` with a `jobId` — poll with
 `options` is forwarded to the route **verbatim** — it is not re-typed here,
 so a field the route gains later needs no change on this side. All three
 refuse with `409` `"A job is already running for this dataset"` while one is
-active; `label` and `caption` additionally refuse with `409`
+active. `label` additionally refuses with `409`
 `"MOSS and the /understand step need the engine, which a training job owns.
 Wait for it, or caption with a cloud provider (Gemini) instead."` when the
-engine is held by a training job.
+engine is held and MOSS/understand was asked for; `caption` refuses with
+`409` `"MOSS needs the engine, which a training job owns. Wait for it, or
+caption with a cloud provider (Gemini) instead."` under the same condition —
+the two routes word it slightly differently.
 
 ### `train_jobs`, `train_job`
 `{ datasetId? }` → `GET /api/training/jobs`, optionally filtered.

@@ -170,7 +170,7 @@ export function createServer(): McpServer {
       '`stage: "label"` posts `options` as LabelOptions to /datasets/:id/label (Essentia BPM/key, Genius lyrics, LLM caption — which steps run is in `options`). ' +
       '`stage: "caption"` posts `options` as CaptionOptions to /datasets/:id/enhance/caption (re-caption with a specific provider). ' +
       '`stage: "build"` posts `options` as { outputPath? } to /datasets/:id/build (write dataset.json). ' +
-      'All three refuse with 409 "A job is already running for this dataset" while one is active; label and caption additionally refuse with 409 "MOSS and the /understand step need the engine, which a training job owns. Wait for it, or caption with a cloud provider (Gemini) instead." when the engine is held by a training job.',
+      'All three refuse with 409 "A job is already running for this dataset" while one is active. label additionally refuses with 409 "MOSS and the /understand step need the engine, which a training job owns. Wait for it, or caption with a cloud provider (Gemini) instead." when the engine is held and MOSS/understand was asked for; caption refuses with 409 "MOSS needs the engine, which a training job owns. Wait for it, or caption with a cloud provider (Gemini) instead." under the same condition.',
     {
       datasetId: z.string(),
       stage: z.enum(['label', 'caption', 'build']),
