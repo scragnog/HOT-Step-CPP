@@ -912,20 +912,20 @@ function yue2LmAdapterCatalogue(): {
   }
 
   // A joint AITK checkpoint is one training result with two loadable files.
-  // Only advertise complete pairs: selecting one half from an incomplete
-  // checkpoint would make the global picker look ready while the other slot
-  // still has no matching result. The combined adapter.safetensors is an
-  // output/inspection artifact and is intentionally not offered to either
-  // YuE2 slot.
+  // Trained checkpoints need complete pairs: selecting one half from an
+  // incomplete training result would make the global picker look ready while
+  // the other slot still has no matching result. Imports can hold one half.
+  // The combined adapter.safetensors is an output/inspection artifact and is
+  // intentionally not offered to either YuE2 slot.
   for (const run of listAllYue2AitkRuns()) {
     for (const ckpt of run.checkpoints) {
-      if (!ckpt.arPath || !ckpt.narPath) continue;
+      const imported = run.options.source === 'comfyui-import';
+      if (imported ? !ckpt.arPath && !ckpt.narPath : !ckpt.arPath || !ckpt.narPath) continue;
       const configuredSteps = Number(run.options.steps);
       const final = Number.isFinite(configuredSteps) && configuredSteps > 0 && ckpt.step === configuredSteps;
       // Several runs of one dataset list the same steps: name the run by its
       // start time (the output folder's suffix), schedule and refinement.
       const started = /_(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-\d{2}$/.exec(path.basename(run.output));
-      const imported = run.options.source === 'comfyui-import';
       const runName = [imported ? `Imported · ${String(run.options.name ?? run.jobId)}` : `AITK · ${run.datasetSlug || run.datasetId || run.jobId}`,
         started ? `${started[2]}-${started[3]} ${started[4]}:${started[5]}` : '',
         typeof run.options.lrSchedule === 'string' ? run.options.lrSchedule : '',
@@ -954,8 +954,8 @@ function yue2LmAdapterCatalogue(): {
           captionDropout: fileMeta?.captionDropout,
         };
       };
-      add('ar', ckpt.arPath);
-      add('nar', ckpt.narPath);
+      if (ckpt.arPath) add('ar', ckpt.arPath);
+      if (ckpt.narPath) add('nar', ckpt.narPath);
     }
   }
 

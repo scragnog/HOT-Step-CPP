@@ -273,19 +273,20 @@ that one to the caption yourself.
 
 ### Importing ComfyUI adapters
 
-YuE2 adapters made in ComfyUI or ai-toolkit come as one `.safetensors` file that holds both
-halves, in naming the engine does not load. **Import adapter…** converts one:
+YuE2 adapters made in ComfyUI or ai-toolkit can come as a `.safetensors` file that holds
+one or both halves, in naming the engine does not load. **Import adapter…** converts one:
 
 1. Click **Import adapter…** and pick the file.
-2. The app splits it into a NAR and an AR adapter under
-   `yue2-joint-adapters/<name>_<date>_<time>/`, lists them as **Imported · <name>** in both
-   slots and selects both. The original file is not changed.
+2. The app writes the available NAR and AR adapters under
+   `yue2-joint-adapters/<name>_<date>_<time>/`, lists each as **Imported · <name>** in its
+   slot and selects each available half. The original file is not changed.
 
 The trigger is read from the file's training tags, and the step count from its training
 info. These files carry no alpha, so the import uses the strength ComfyUI applies (alpha
 equal to the rank, scale 1.0). If the adapter sounds too strong or too weak, use the
-**Strength** dials. LoRA and LoKr adapters are both supported. Adapters trained in this
-app never need importing.
+**Strength** dials. LoRA and LoKr adapters are both supported. Import accepts fused
+and separate projection names, plus `lora_A`/`lora_B` and `lora_down`/`lora_up` names.
+Adapters trained in this app never need importing.
 
 YuE2 weights are licensed CC BY-NC 4.0, with the authors' exception for individual
 creators, and an adapter trained on them carries the same terms. The panel shows the full

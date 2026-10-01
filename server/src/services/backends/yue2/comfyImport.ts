@@ -1,18 +1,18 @@
 // comfyImport.ts — bring a ComfyUI / ai-toolkit YuE2 adapter into the app.
 //
-// Those tools save ONE file holding both halves in the upstream module tree:
+// Those tools save one or both halves in the upstream module tree:
 // `diffusion_model.model.layers.N.*` is the NAR half, `text_encoders.model.
-// layers.N.*` the AR half, with fused `self_attn.qkv_proj` and
-// `mlp.gate_up_proj`. The engine loads neither that naming nor a file that
-// spans both halves (yue2-adapter.h refuses it on purpose), so this splits it
-// into the two native files our own trainer exports, byte for byte the layout
-// of engine/src/train/yue2-aitk-native-adapter-io.h: LoRA splits the fused
+// layers.N.*` the AR half. Standalone `layers.N.*` files are AR. The upstream
+// naming may fuse qkv/gate_up or keep each projection separate. The engine
+// loads neither that naming nor a file that spans both halves
+// (yue2-adapter.h refuses it on purpose), so this writes the native files our
+// own trainer exports, byte for byte the layout of
+// engine/src/train/yue2-aitk-native-adapter-io.h: LoRA splits the fused
 // sites by B rows with A shared, LoKr by w1 rows with w2 whole. Row slicing of
 // a row-major tensor is a contiguous byte range, so no dtype is decoded except
 // a per-module alpha scalar.
 //
-// The pair lands in the joint-adapter tree and the joint-run index, so the
-// picker lists it exactly like a checkpoint trained here.
+// The available half or pair lands in the joint-adapter tree and run index.
 
 import fs from 'fs';
 import path from 'path';
@@ -20,10 +20,12 @@ import { config } from '../../../config.js';
 import { runStamp } from '../../training/adapterLayout.js';
 import { recordYue2AitkRun } from '../../training/yue2AitkRuns.js';
 
-const KEY = /^(?:model\.)?(diffusion_model|text_encoders)\.model\.layers\.(\d+)\.(self_attn\.qkv_proj|self_attn\.o_proj|mlp\.gate_up_proj|mlp\.down_proj)\.(.+)$/;
+const KEY = /^(?:(?:model\.)?(diffusion_model|text_encoders)\.model\.)?layers\.(\d+)\.(self_attn\.qkv_proj|self_attn\.o_proj|mlp\.gate_up_proj|mlp\.down_proj|[qkvo]_proj|(?:gate|up|down)_proj)\.(.+)$/;
 const SITES: Record<string, [number, number]> = {
   'self_attn.qkv_proj': [2048, 4096], 'self_attn.o_proj': [2048, 2048],
   'mlp.gate_up_proj': [2048, 12288], 'mlp.down_proj': [6144, 2048],
+  q_proj: [2048, 2048], k_proj: [2048, 1024], v_proj: [2048, 1024], o_proj: [2048, 2048],
+  gate_proj: [2048, 6144], up_proj: [2048, 6144], down_proj: [6144, 2048],
 };
 const ELEM: Record<string, number> = { F32: 4, F16: 2, BF16: 2 };
 const MAX_BYTES = 2 * 1024 ** 3;
@@ -33,6 +35,12 @@ interface Tensor { dtype: string; shape: number[]; data: Buffer }
 function splits(site: string, layer: number, ar: boolean): Array<[string, number, number]> {
   const b = `blk.${layer}.`;
   const n = ar ? '' : 'nar_';
+  const direct: Record<string, [string, number]> = {
+    q_proj: ['attn_q', 2048], k_proj: ['attn_k', 1024], v_proj: ['attn_v', 1024],
+    o_proj: ['attn_output', 2048], gate_proj: ['ffn_gate', 6144],
+    up_proj: ['ffn_up', 6144], down_proj: ['ffn_down', 2048],
+  };
+  if (direct[site]) return [[`${b}${n}${direct[site][0]}`, 0, direct[site][1]]];
   if (site === 'self_attn.qkv_proj') return [[`${b}${n}attn_q`, 0, 2048], [`${b}${n}attn_k`, 2048, 1024], [`${b}${n}attn_v`, 3072, 1024]];
   if (site === 'self_attn.o_proj') return [[`${b}${n}attn_output`, 0, 2048]];
   if (site === 'mlp.gate_up_proj') return [[`${b}${n}ffn_gate`, 0, 6144], [`${b}${n}ffn_up`, 6144, 6144]];
@@ -101,7 +109,7 @@ export function comfyTrigger(meta: Record<string, string>): string {
 }
 
 export interface Yue2ComfyImport {
-  output: string; arPath: string; narPath: string;
+  output: string; arPath?: string; narPath?: string;
   name: string; kind: 'lora' | 'lokr'; rank: number; alpha?: number; steps: number; trigger: string;
 }
 
@@ -122,8 +130,12 @@ export function importYue2ComfyAdapter(src: string, adaptersRoot = config.aceSer
     const m = KEY.exec(name);
     if (!m) { unknown.push(name); continue; }
     const id = `${m[1]}|${m[2]}|${m[3]}`;
-    if (!groups.has(id)) groups.set(id, { ar: m[1] === 'text_encoders', layer: Number(m[2]), site: m[3], parts: {} });
-    groups.get(id)!.parts[m[4]] = t;
+    if (!groups.has(id)) groups.set(id, { ar: m[1] !== 'diffusion_model', layer: Number(m[2]), site: m[3], parts: {} });
+    const part = {
+      'lora_down.weight': 'lora_A.weight', 'lora_up.weight': 'lora_B.weight',
+      lora_A: 'lora_A.weight', lora_B: 'lora_B.weight',
+    }[m[4]] ?? m[4];
+    groups.get(id)!.parts[part] = t;
   }
   if (!groups.size) throw new Error('No YuE2 adapter tensors found. Expected ComfyUI naming (diffusion_model.model.layers.* / text_encoders.model.layers.*).');
   if (unknown.length) throw new Error(`${unknown.length} tensors this importer does not recognise, e.g. ${unknown.slice(0, 3).join(', ')}`);
@@ -163,9 +175,7 @@ export function importYue2ComfyAdapter(src: string, adaptersRoot = config.aceSer
       }
     }
   }
-  if (!out.ar.length || !out.nar.length) {
-    throw new Error(`File only holds the ${out.ar.length ? 'AR' : 'NAR'} half; a joint ComfyUI adapter carries both`);
-  }
+  if (!out.ar.length && !out.nar.length) throw new Error('No YuE2 adapter tensors found');
 
   // No alpha in the file means ComfyUI merges at scale 1.0, i.e. alpha = rank.
   // Recording that keeps the app playing it the way ComfyUI does.
@@ -180,8 +190,12 @@ export function importYue2ComfyAdapter(src: string, adaptersRoot = config.aceSer
   const output = path.join(adaptersRoot, 'yue2-joint-adapters', `${name}_${stamp}`);
   const dir = path.join(output, `checkpoint-step${steps}`);
   fs.mkdirSync(dir, { recursive: true });
-  const paths = { ar: path.join(dir, 'native-ar.safetensors'), nar: path.join(dir, 'native-nar.safetensors') };
+  const paths: Record<'ar' | 'nar', string | undefined> = {
+    ar: out.ar.length ? path.join(dir, 'native-ar.safetensors') : undefined,
+    nar: out.nar.length ? path.join(dir, 'native-nar.safetensors') : undefined,
+  };
   for (const half of ['ar', 'nar'] as const) {
+    if (!paths[half]) continue;
     const md: Record<string, string> = {
       format: `yue2-${half}-${kind}-v1`, rank: String(rank), steps: String(steps),
       yue2_adapter_layout: 'native_split_v1', converted_from: 'comfyui', source_file: path.basename(src),
