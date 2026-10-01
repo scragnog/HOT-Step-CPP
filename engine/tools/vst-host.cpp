@@ -849,7 +849,7 @@ static void monitor_check_control(MonitorState & ms) {
     // Seek support: { "seek": 42.5 } = jump to 42.5 seconds
     yyjson_val * seek_val = yyjson_obj_get(root, "seek");
     if (seek_val && yyjson_is_num(seek_val)) {
-        double seek_sec = yyjson_get_real(seek_val);
+        double seek_sec = yyjson_get_num(seek_val);  // get_real reads a JSON integer as 0
         int new_pos = (int)(seek_sec * ms.sr);
         if (new_pos < 0) new_pos = 0;
         if (new_pos >= ms.T) new_pos = ms.T - 1;
