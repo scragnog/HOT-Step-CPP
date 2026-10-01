@@ -53,7 +53,8 @@ LAUNCH.bat → Node server (Express :3001)
   - Recompile **immediately** after editing any `engine/src/` or `engine/tools/` file — don't wait to be asked.
 - **NEVER `cmake --build . --clean-first`** unless the GGML/CUDA layer itself changed — CUDA kernel recompilation is **20+ min**. For stale `.obj` issues, delete only `engine/build/acestep-core.dir/` and `engine/build/Release/acestep-core.lib`.
 - **Don't `npm run build` during dev.** Only build before user testing. Type-check with:
-  - `server/` → `npx tsc --noEmit`
+  - `server/` → `npx tsc --noEmit`. This only covers `server/src/` (`server/tsconfig.json` has `include: ["src/**/*"]`) — it does **not** check `server/scripts/`.
+  - `server/scripts/` → `npx tsc --noEmit -p scripts/tsconfig.json` (run from `server/`). A touched script is not checked unless you run this too.
   - `ui/` → **`npx tsc --noEmit -p tsconfig.app.json`** (or `npx tsc -b`). A bare `npx tsc --noEmit` in `ui/` **silently checks nothing and exits 0** — `ui/tsconfig.json` is `{"files": [], "references": [...]}`, so the root project has no inputs. It is not a passing check, it is no check.
 - **`dev.bat`** = dev mode (Vite :3000 HMR + Node :3001, tsx watch auto-restart). **`LAUNCH.bat`** = prod. Use `dev.bat` for development.
 
