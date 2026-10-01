@@ -1,5 +1,5 @@
-// supersep.cpp: ONNX Runtime-based stem separation pipeline.
-// Implements the 4-stage SuperSep pipeline using ONNX models.
+// supersep.cpp: GGML stem separation pipeline.
+// Implements the SuperSep stages on GGML models.
 // Part of HOT-Step CPP. MIT license.
 
 #include "supersep.h"
@@ -1348,7 +1348,7 @@ void supersep_release_models(SuperSep * ctx) {
     if (ctx->s3_mdx23c)      { mdx_free(ctx->s3_mdx23c); delete ctx->s3_mdx23c; ctx->s3_mdx23c = nullptr; }
     if (ctx->leap_voc)  { bsr_free(ctx->leap_voc);  delete ctx->leap_voc;  ctx->leap_voc  = nullptr; }
     if (ctx->leap_inst) { bsr_free(ctx->leap_inst); delete ctx->leap_inst; ctx->leap_inst = nullptr; }
-    fprintf(stderr, "[SuperSep] Released all ONNX sessions (VRAM freed)\n");
+    fprintf(stderr, "[SuperSep] Released all models (VRAM freed)\n");
 }
 
 float * supersep_recombine(

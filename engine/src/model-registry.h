@@ -325,17 +325,14 @@ static bool registry_scan(ModelRegistry * reg, const char * models_dir) {
             count++;
         } else if (lower.find("vae_") == 0 || lower.find("vae-") == 0 ||
                    lower.find("scragvae_") == 0 || lower.find("scragvae-") == 0) {
-            reg->vae.push_back(entry);
-            fprintf(stderr, "[Registry] %s -> VAE (ONNX)\n", fname.c_str());
-            count++;
+            // ONNX VAEs and text encoders only ever ran on ONNX Runtime (removed).
+            fprintf(stderr, "[Registry] skipping %s (ONNX VAE: no runtime for it)\n", fname.c_str());
         } else if (lower.find("lm_") == 0 || lower.find("lm-") == 0) {
             reg->lm.push_back(entry);
             fprintf(stderr, "[Registry] %s -> LM (ONNX)\n", fname.c_str());
             count++;
         } else if (lower.find("text_enc") == 0 || lower.find("text-enc") == 0) {
-            reg->text_enc.push_back(entry);
-            fprintf(stderr, "[Registry] %s -> Text-Enc (ONNX)\n", fname.c_str());
-            count++;
+            fprintf(stderr, "[Registry] skipping %s (ONNX text encoder: no runtime for it)\n", fname.c_str());
         } else {
             fprintf(stderr, "[Registry] WARNING: skipping %s (unrecognized ONNX prefix)\n", fname.c_str());
         }
@@ -466,16 +463,19 @@ static bool registry_scan(ModelRegistry * reg, const char * models_dir) {
             continue;
         }
 
+        // Only the DiT and LM have a TensorRT runtime; ONNX VAEs and text
+        // encoders only ever ran on ONNX Runtime, which was removed.
+        if (type == "VAE" || type == "Text-Enc") {
+            fprintf(stderr, "[Registry] skipping %s/ (ONNX %s: no runtime for it)\n", dname.c_str(), type.c_str());
+            continue;
+        }
+
         // ModelEntry.path is the directory path. The TRT runtime finds the .onnx inside.
         ModelEntry entry = { dname, dir_path };
         if (type == "LM") {
             reg->lm.push_back(entry);
         } else if (type == "DiT") {
             reg->dit.push_back(entry);
-        } else if (type == "Text-Enc") {
-            reg->text_enc.push_back(entry);
-        } else if (type == "VAE") {
-            reg->vae.push_back(entry);
         }
 
         fprintf(stderr, "[Registry] %s/ -> %s (ONNX: %s)\n", dname.c_str(), type.c_str(), onnx_name.c_str());

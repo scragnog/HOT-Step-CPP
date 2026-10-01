@@ -26,7 +26,7 @@ toolchains, see [building.md](building.md).
 | `engine/patches/` | Patches applied to the `engine/ggml` submodule (see [The ggml patch stack](#the-ggml-patch-stack)) |
 | `engine/ggml/` | ggml submodule |
 | `engine/vendor/` | yyjson, Lua 5.4, cpp-httplib, pocketfft, VST3 SDK |
-| `engine/deps/` | Optional vendored SDKs: `tensorrt/`, `onnxruntime/` |
+| `engine/deps/` | Optional vendored SDK: `tensorrt/` |
 
 ## Binaries
 
@@ -53,8 +53,9 @@ All targets are defined in `engine/CMakeLists.txt`.
 not compiled. The shipped `ace-server` is built from `hot-step-server.cpp`.
 
 The Node server starts `ace-server` with `--models`, `--host` and `--port`, and adds
-`--adapters`, `--keep-loaded`, `--noise-profile` and `--onnx-dir` when they are
-configured (`server/src/services/aceEngineProcess.ts`). The app's default port is
+`--adapters`, `--keep-loaded` and `--noise-profile` when they are configured
+(`server/src/services/aceEngineProcess.ts`). `--onnx-dir` is still accepted for older
+launchers and ignored. The app's default port is
 8085; the binary's own default is 8080.
 
 ## How ace-server is organised
@@ -90,12 +91,13 @@ the per-request switch; it refuses when `--keep-loaded` came from the command li
               -> enriched request JSON
 
 /synth      request JSON (+ source / reference audio or latents)
-              -> text encoder (qwen3-enc.h, or text-enc-ort.h)
-              -> condition encoder (cond-enc.h, or cond-enc-ort.h)
+              -> text encoder (qwen3-enc.h)
+              -> condition encoder (cond-enc.h; for an ONNX DiT, loaded from the
+                 safetensors XL DiT folder the graph was exported from)
               -> FSQ detokenizer: codes -> 25 Hz source latents (fsq-detok.h)
               -> DiT flow matching (dit.h, dit-graph.h) driven by hot-step-sampler.h
                  or, for an ONNX DiT, hot-step-sampler-trt.h + dit-trt.h
-              -> VAE decode (vae.h, or vae-ort.h when use_ort_vae is set)
+              -> VAE decode (vae.h)
               -> optional LRC alignment (lrc-alignment.h), denoiser, PP-VAE
               -> MP3 or WAV, 48 kHz stereo
 
@@ -144,8 +146,9 @@ style + lyrics (+ optional ABC) -> tokenizer and prompt assembly (yue2-tokenizer
 
 YuE2 loads its weights itself, outside `model-store.h`. Under the default policy a
 YuE2 job first evicts every unreferenced store module (`store_evict_all`), as MM3 does,
-because the store keeps 0-byte ORT entries such as the SA3 refiner resident after use
-and their real VRAM would make the YuE2 load run out of memory (#160, #195).
+because the store keeps 0-byte entries resident after use and their real VRAM would
+make the YuE2 load run out of memory (#160, #195; the ONNX Runtime SA3 refiner was the
+case that hit it).
 
 The AR and NAR halves live in one `yue2-lm-<type>.gguf` and are resident together;
 the VAE is a separate `yue2-vae-{standard,legacy}-<type>.gguf` (`yue2-model.h`). The
@@ -287,10 +290,10 @@ Other adapter paths:
 
 The `adapter-system` skill in `.claude/skills/` covers failure modes.
 
-## TensorRT and ONNX paths
+## TensorRT paths
 
-Native TensorRT is the live integration; the ONNX Runtime one is retired. Neither
-has a switch of its own; the model path picks the backend.
+Native TensorRT is the only non-GGML runtime; it has no switch of its own, the model
+path picks it.
 
 - Native TensorRT (raw NvInfer) for the ACE-Step DiT and LM, and for the MM3 DiT. It
   was chosen over ONNX Runtime's TensorRT provider because adapter switching needs
@@ -304,12 +307,17 @@ has a switch of its own; the model path picks the backend.
   - MM3 DiT: `"dit_backend": "tensorrt"` on `/mm3/synth` uses `mm3-dit-trt.h`, which
     builds a base engine per GPU under `<models>/mm3/mm3-trt-cache/` and refits it
     per DiT GGUF and adapter stack.
-- ONNX Runtime (the VAE decoder and encoder, the text and condition encoders, and
-  the SA3 refiner's ONNX backend) is retired. `HOT_STEP_ORT_PATHS` is forced OFF in
-  `engine/CMakeLists.txt`, so no build links ONNX Runtime and those paths compile to
-  stubs that fall back to GGML. The engine never auto-selects an ONNX model:
-  `--onnx-dir` is accepted and ignored, StableStep `auto` means GGML, and
-  `backend=onnx` on `/sa3-refine` or `/pp-vae-reencode` returns 400.
+ONNX Runtime is gone from the engine: no build links it, and there is no CMake option
+for it. What used to run on it:
+
+- SA3 refine (StableStep) runs on GGML only. `backend=onnx` on `/sa3-refine` or
+  `/pp-vae-reencode` returns 400.
+- An ONNX DiT's text and condition encoders run on GGML. The condition encoder loads
+  from the safetensors XL DiT folder the FSQ fallback finds; without one the request
+  fails with a message naming the folder.
+- ONNX VAEs and ONNX text encoders are no longer registered. `/synth` with an `.onnx`
+  `vae_model`, or with `stream_mode: true` (the streaming pipeline decoded through
+  ONNX Runtime and was removed), returns 400.
 
 TensorRT support is compiled in when the SDK is found in `engine/deps/tensorrt/`
 (Windows) or installed system-wide (Linux), which defines `HOT_STEP_TRT`. On Windows,

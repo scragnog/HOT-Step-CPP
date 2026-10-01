@@ -1,5 +1,5 @@
 #pragma once
-// sa3-refine.h: Stable Audio 3 SDEdit-style refiner (ONNX Runtime or GGML)
+// sa3-refine.h: Stable Audio 3 SDEdit-style refiner (GGML)
 //
 // Post-processing module: encodes 44.1kHz stereo audio into SAME-L latent
 // space, partially re-noises it (strength = init noise level), denoises with
@@ -9,19 +9,10 @@
 //
 // The orchestration (schedule, tiled encode/decode, sampler, conditioning
 // assembly) is backend-agnostic: it drives an Sa3Backend interface with five
-// operations. Two implementations exist:
-//
-//   ONNX (Sa3Refine + Sa3OrtBackend, HOT_STEP_ORT builds only) — five
-//   ORT graphs in one directory (see tools/onnx-export/export_sa3_*.py):
-//     sa3-text_encoder.onnx     [1,256]i64 + [1,256]bool -> [1,256,768]   (fp32!)
-//     sa3-seconds_embedder.onnx [1]f32                   -> [1,768]
-//     sa3-same_encoder.onnx     [1,2,524288]             -> [1,256,128]   (static chunk)
-//     sa3-same_decoder.onnx     [1,256,128]              -> [1,2,524288]  (static chunk)
-//     sa3-dit.onnx              x[1,256,T] t[1] cross[1,257,768] glob[1,768]
-//                               local[1,257,T] pad[1,T]bool -> v[1,256,T] (dynamic T)
+// operations, implemented on GGML:
 //
 //   GGML (Sa3GgmlRefine) — four GGUFs in one directory (parity-gated vs the
-//   ONNX goldens, see tools/sa3-ggml-test.cpp):
+//   ONNX-export goldens, see tools/sa3-ggml-test.cpp):
 //     sa3-text-enc-BF16.gguf  (sa3-t5gemma-enc.h; also seconds embedder from
 //     sa3-dit-BF16.gguf)      the DiT GGUF's conditioner tensors
 //     sa3-same-enc-F16.gguf   (sa3-same-ggml.h, one 128-latent chunk)
@@ -41,8 +32,6 @@
 // tokenizer.json); the endpoint receives 256 padded token ids + valid count.
 //
 // Thread safety: none. Caller serialises access (single GPU worker thread).
-// ONNX path guarded by HOT_STEP_ORT (shared ORT dependency); the GGML
-// path is always available.
 //
 // Part of HOT-Step CPP. MIT license.
 
@@ -82,14 +71,14 @@
 #define SA3_OVERLAP_LAT    32        // tiling overlap in latent frames
 #define SA3_HEADROOM_SEC   6.0f      // schedule/padding headroom (generate() default)
 #define SA3_ALIGN_SAMPLES  (SA3_DS * 2)  // encoder chunk_size(32)/stride(16) alignment
-#define SA3_T_BUCKET       256   // latent-length bucket (~23.8s). The ORT TRT EP
-                                 // builds one engine per DiT input shape; bucketing
-                                 // caps that at ~16 engines total. padding_mask
-                                 // makes the extra padding semantically inert.
+#define SA3_T_BUCKET       256   // latent-length bucket (~23.8s). Introduced to cap
+                                 // TensorRT engine builds per input shape; kept so
+                                 // the padded length (and so the output) is
+                                 // unchanged. padding_mask makes the padding inert.
 
 // ── Backend interface ──────────────────────────────────────────────────
 //
-// Five compute ops behind which the ONNX sessions or the GGML modules sit.
+// Five compute ops behind which the GGML modules sit.
 // Layouts (all f32, channel-first / torch-contiguous, batch 1 implied):
 //   text_encode        ids[SA3_TOK_LEN] i64 + valid count -> out[256*768]
 //                      token-major (out[s*768 + h]), learned-padding rows
@@ -318,7 +307,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
     int S = (int)target;
     if (S < SA3_CHUNK_SAMPLES) S = SA3_CHUNK_SAMPLES;  // static chunk graph minimum
     int L = S / SA3_DS;
-    L = ((L + SA3_T_BUCKET - 1) / SA3_T_BUCKET) * SA3_T_BUCKET;  // TRT shape bucketing
+    L = ((L + SA3_T_BUCKET - 1) / SA3_T_BUCKET) * SA3_T_BUCKET;  // shape bucketing, see SA3_T_BUCKET
     S = L * SA3_DS;
 
     // Conditioning
@@ -597,7 +586,7 @@ static inline bool sa3_refine_run_backend(Sa3Backend * be,
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// GGML backend (always available — no ORT dependency)
+// GGML backend
 // ═══════════════════════════════════════════════════════════════════════
 
 #include "sa3-dit-ggml.h"
@@ -691,268 +680,4 @@ static inline bool sa3_refine_run_ggml(Sa3GgmlRefine * m,
                                   strength, steps, pingpong, seed, zero_noise, out, sp);
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// ONNX Runtime backend (TRT/CUDA EP), HOT_STEP_ORT builds only
-// ═══════════════════════════════════════════════════════════════════════
-
-#ifdef HOT_STEP_ORT
-
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-#endif
-
-#include <onnxruntime_cxx_api.h>
-
-// ── Context ────────────────────────────────────────────────────────────
-
-struct Sa3Refine {
-    Ort::Env      env;
-    Ort::Session *text_enc;
-    Ort::Session *seconds_emb;
-    Ort::Session *same_enc;
-    Ort::Session *same_dec;
-    Ort::Session *dit;
-    std::string   dir;
-    bool          using_trt;
-
-    Sa3Refine() : env(ORT_LOGGING_LEVEL_WARNING, "sa3-refine"),
-                  text_enc(nullptr), seconds_emb(nullptr), same_enc(nullptr),
-                  same_dec(nullptr), dit(nullptr), using_trt(false) {}
-    ~Sa3Refine() {
-        delete text_enc; delete seconds_emb; delete same_enc;
-        delete same_dec; delete dit;
-    }
-};
-
-// ── Session factory (same EP ladder as vae-ort.h: TRT -> CUDA -> CPU) ───
-
-static inline Ort::Session * sa3_make_session(Sa3Refine * ctx, const char * onnx_path,
-                                              bool trt_fp16, int device_id) {
-    Ort::SessionOptions opts;
-    opts.SetIntraOpNumThreads(1);
-    opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-
-#if defined(GGML_USE_CUDA)
-    std::string trt_cache_dir;
-    {
-        std::string p = onnx_path;
-        auto slash = p.find_last_of("/\\");
-        trt_cache_dir = (slash != std::string::npos) ? p.substr(0, slash) : ".";
-    }
-    {
-        OrtTensorRTProviderOptions trt_opts{};
-        trt_opts.device_id                    = device_id;
-        trt_opts.trt_max_partition_iterations = 1000;
-        trt_opts.trt_min_subgraph_size        = 1;
-        trt_opts.trt_max_workspace_size       = (size_t)2 << 30;
-        trt_opts.trt_fp16_enable              = trt_fp16 ? 1 : 0;
-        trt_opts.trt_engine_cache_enable      = 1;
-        trt_opts.trt_engine_cache_path        = trt_cache_dir.c_str();
-
-        const OrtApi & api = Ort::GetApi();
-        OrtStatus * status = api.SessionOptionsAppendExecutionProvider_TensorRT(opts, &trt_opts);
-        if (status) {
-            std::string msg = api.GetErrorMessage(status);
-            api.ReleaseStatus(status);
-            fprintf(stderr, "[SA3] TensorRT EP unavailable: %s — trying CUDA EP\n", msg.c_str());
-        } else {
-            ctx->using_trt = true;
-        }
-    }
-    try {
-        OrtCUDAProviderOptions cuda_opts;
-        memset(&cuda_opts, 0, sizeof(cuda_opts));
-        cuda_opts.device_id             = device_id;
-        cuda_opts.arena_extend_strategy = 1;  // kSameAsRequested
-        opts.AppendExecutionProvider_CUDA(cuda_opts);
-    } catch (const std::exception & e) {
-        fprintf(stderr, "[SA3] CUDA EP failed: %s — falling back to CPU\n", e.what());
-    }
-#endif
-
-    try {
-#ifdef _WIN32
-        int wlen = MultiByteToWideChar(CP_UTF8, 0, onnx_path, -1, nullptr, 0);
-        std::vector<wchar_t> wpath(wlen);
-        MultiByteToWideChar(CP_UTF8, 0, onnx_path, -1, wpath.data(), wlen);
-        return new Ort::Session(ctx->env, wpath.data(), opts);
-#else
-        return new Ort::Session(ctx->env, onnx_path, opts);
-#endif
-    } catch (const std::exception & e) {
-        fprintf(stderr, "[SA3] FATAL: session creation failed for %s: %s\n", onnx_path, e.what());
-        return nullptr;
-    }
-}
-
-// Load all five graphs from `dir`. Text encoder + seconds embedder stay fp32
-// in TRT (text-enc precedent: layernorm overflows in fp16); the three big
-// transformer graphs run fp16.
-static inline bool sa3_load(Sa3Refine * ctx, const char * dir, int device_id = 0) {
-    if (!ctx || !dir) return false;
-    ctx->dir = dir;
-    std::string d = dir;
-    ctx->text_enc    = sa3_make_session(ctx, (d + "/sa3-text_encoder.onnx").c_str(),     false, device_id);
-    ctx->seconds_emb = sa3_make_session(ctx, (d + "/sa3-seconds_embedder.onnx").c_str(), false, device_id);
-    // All transformer graphs fp32 under TRT. They carry deliberate fp32 casts
-    // (norms, timestep path — logsnr transform amplifies low-precision error
-    // ~380x) that trt_fp16_enable would flatten. Measured: blanket TRT fp16 =
-    // cosine 0.966, DiT-only fp32 = 0.9953, vs 0.9996 for properly-scoped
-    // torch fp16. Scoped fp16 can return via natively-converted fp16 graphs.
-    ctx->same_enc    = sa3_make_session(ctx, (d + "/sa3-same_encoder.onnx").c_str(),     false, device_id);
-    ctx->same_dec    = sa3_make_session(ctx, (d + "/sa3-same_decoder.onnx").c_str(),     false, device_id);
-    ctx->dit         = sa3_make_session(ctx, (d + "/sa3-dit.onnx").c_str(),              false, device_id);
-    bool ok = ctx->text_enc && ctx->seconds_emb && ctx->same_enc && ctx->same_dec && ctx->dit;
-    fprintf(stderr, "[SA3] Loaded 5 graphs from %s (TRT=%s): %s\n",
-            dir, ctx->using_trt ? "yes" : "no", ok ? "OK" : "FAILED");
-    return ok;
-}
-
-static inline void sa3_free_sessions(Sa3Refine * ctx) {
-    if (!ctx) return;
-    delete ctx->text_enc;    ctx->text_enc = nullptr;
-    delete ctx->seconds_emb; ctx->seconds_emb = nullptr;
-    delete ctx->same_enc;    ctx->same_enc = nullptr;
-    delete ctx->same_dec;    ctx->same_dec = nullptr;
-    delete ctx->dit;         ctx->dit = nullptr;
-}
-
-// ── Small run helpers ──────────────────────────────────────────────────
-
-struct Sa3Feed {
-    const char * name;
-    Ort::Value   value;
-};
-
-// Run a session feeding by NAME, tolerating graph-pruned inputs (the exporter
-// drops inputs the graph never uses — e.g. the DiT's cross-attention mask).
-// Returns the first output.
-static inline Ort::Value sa3_run(Ort::Session * sess, std::vector<Sa3Feed> & feeds) {
-    Ort::AllocatorWithDefaultOptions alloc;
-    size_t n_in = sess->GetInputCount();
-    std::vector<Ort::AllocatedStringPtr> name_holders;
-    std::vector<const char *> in_names;
-    std::vector<Ort::Value>   in_values;
-    for (size_t i = 0; i < n_in; i++) {
-        auto nm = sess->GetInputNameAllocated(i, alloc);
-        for (auto & f : feeds) {
-            if (strcmp(nm.get(), f.name) == 0) {
-                in_names.push_back(f.name);
-                in_values.push_back(std::move(f.value));
-                break;
-            }
-        }
-        name_holders.push_back(std::move(nm));
-    }
-    auto out_name = sess->GetOutputNameAllocated(0, alloc);
-    const char * out_names[] = { out_name.get() };
-    auto outs = sess->Run(Ort::RunOptions{nullptr},
-                          in_names.data(), in_values.data(), in_values.size(),
-                          out_names, 1);
-    return std::move(outs[0]);
-}
-
-static inline Ort::Value sa3_tensor_f32(const float * data, std::vector<int64_t> shape) {
-    Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    size_t n = 1;
-    for (auto d : shape) n *= (size_t)d;
-    return Ort::Value::CreateTensor<float>(mem, const_cast<float *>(data), n,
-                                           shape.data(), shape.size());
-}
-
-// ── ORT backend: the five ops over the validated ONNX sessions ─────────
-// Tensor shapes/layouts identical to the pre-refactor code; outputs are
-// memcpy'd into the caller's buffers (bit-identical values).
-
-struct Sa3OrtBackend final : Sa3Backend {
-    Sa3Refine * ctx;
-    explicit Sa3OrtBackend(Sa3Refine * c) : ctx(c) {}
-
-    const char * name() const override { return "onnx"; }
-
-    bool text_encode(const int64_t * ids, int n_tokens, float * out) override {
-        std::vector<int64_t> ids_v(ids, ids + SA3_TOK_LEN);
-        std::vector<char> tok_mask(SA3_TOK_LEN);
-        for (int i = 0; i < SA3_TOK_LEN; i++) tok_mask[i] = (i < n_tokens) ? 1 : 0;
-        Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-        std::vector<int64_t> ids_shape = {1, SA3_TOK_LEN};
-        std::vector<Sa3Feed> feeds;
-        feeds.push_back({"input_ids", Ort::Value::CreateTensor<int64_t>(
-            mem, ids_v.data(), ids_v.size(), ids_shape.data(), ids_shape.size())});
-        feeds.push_back({"attention_mask", Ort::Value::CreateTensor<bool>(
-            mem, reinterpret_cast<bool *>(tok_mask.data()), tok_mask.size(),
-            ids_shape.data(), ids_shape.size())});
-        Ort::Value o = sa3_run(ctx->text_enc, feeds);
-        memcpy(out, o.GetTensorData<float>(), sizeof(float) * SA3_TOK_LEN * SA3_COND_DIM);
-        return true;
-    }
-    bool seconds_embed(float seconds, float * out) override {
-        std::vector<Sa3Feed> feeds;
-        feeds.push_back({"seconds", sa3_tensor_f32(&seconds, {1})});
-        Ort::Value o = sa3_run(ctx->seconds_emb, feeds);
-        memcpy(out, o.GetTensorData<float>(), sizeof(float) * SA3_COND_DIM);
-        return true;
-    }
-    bool same_encode_chunk(const float * audio, float * latents) override {
-        std::vector<Sa3Feed> feeds;
-        feeds.push_back({"audio", sa3_tensor_f32(audio, {1, 2, SA3_CHUNK_SAMPLES})});
-        Ort::Value o = sa3_run(ctx->same_enc, feeds);
-        memcpy(latents, o.GetTensorData<float>(), sizeof(float) * SA3_LAT_CH * SA3_CHUNK_LAT);
-        return true;
-    }
-    bool same_decode_chunk(const float * latents, float * audio) override {
-        std::vector<Sa3Feed> feeds;
-        feeds.push_back({"latents", sa3_tensor_f32(latents, {1, SA3_LAT_CH, SA3_CHUNK_LAT})});
-        Ort::Value o = sa3_run(ctx->same_dec, feeds);
-        memcpy(audio, o.GetTensorData<float>(), sizeof(float) * 2 * SA3_CHUNK_SAMPLES);
-        return true;
-    }
-    bool dit_forward(const float * x, float t, const float * cross, const float * glob,
-                     const float * local, const char * pad_mask, int T, float * v) override {
-        std::vector<char> mask(pad_mask, pad_mask + T);
-        Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-        std::vector<int64_t> pad_shape = {1, T};
-        std::vector<Sa3Feed> feeds;
-        feeds.push_back({"x", sa3_tensor_f32(x, {1, SA3_LAT_CH, T})});
-        feeds.push_back({"t", sa3_tensor_f32(&t, {1})});
-        feeds.push_back({"cross_attn_cond", sa3_tensor_f32(cross, {1, SA3_TOK_LEN + 1, SA3_COND_DIM})});
-        feeds.push_back({"global_embed", sa3_tensor_f32(glob, {1, SA3_COND_DIM})});
-        feeds.push_back({"local_add_cond", sa3_tensor_f32(local, {1, SA3_LAT_CH + 1, T})});
-        feeds.push_back({"padding_mask", Ort::Value::CreateTensor<bool>(
-            mem, reinterpret_cast<bool *>(mask.data()), mask.size(),
-            pad_shape.data(), pad_shape.size())});
-        Ort::Value o = sa3_run(ctx->dit, feeds);
-        memcpy(v, o.GetTensorData<float>(), sizeof(float) * SA3_LAT_CH * (size_t)T);
-        return true;
-    }
-};
-
-// Back-compat entry point: run the refine on the ONNX sessions.
-static inline bool sa3_refine_run(Sa3Refine * ctx,
-                                  const float * audio, int T44,
-                                  const int64_t * token_ids, int n_tokens,
-                                  float strength, int steps,
-                                  bool pingpong, uint64_t seed, bool zero_noise,
-                                  std::vector<float> & out,
-                                  const Sa3PluginParams * sp = nullptr) {
-    if (!ctx || !ctx->dit) return false;
-    Sa3OrtBackend be(ctx);
-    return sa3_refine_run_backend(&be, audio, T44, token_ids, n_tokens,
-                                  strength, steps, pingpong, seed, zero_noise, out, sp);
-}
-
-#else  // !HOT_STEP_ORT — ORT stubs (GGML backend above remains available)
-
-struct Sa3Refine {};
-static inline bool sa3_load(Sa3Refine *, const char *, int = 0) { return false; }
-static inline void sa3_free_sessions(Sa3Refine *) {}
-static inline bool sa3_refine_run(Sa3Refine *, const float *, int, const int64_t *, int,
-                                  float, int, bool, uint64_t, bool,
-                                  std::vector<float> &,
-                                  const Sa3PluginParams * = nullptr) { return false; }
-
-#endif // HOT_STEP_ORT
 #endif // SA3_REFINE_H

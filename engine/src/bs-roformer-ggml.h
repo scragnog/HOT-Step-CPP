@@ -12,11 +12,11 @@
 //  1. VRAM. The time transformer attends over T (=1722 at the trained 20 s
 //     chunk) with the 90 bands folded into the batch. A materialised score
 //     tensor is 90 * 8 heads * 1722^2 * 4 B = 8.5 GB, and softmax needs the
-//     probs alive alongside it. That is what the ORT path pays (see the
+//     probs alive alongside it. That is what the old ONNX Runtime path paid (see the
 //     "~3GB per MatMul" note in supersep.cpp) and why stem separation is both
 //     slow and VRAM-hungry. ggml_flash_attn_ext never materialises it.
 //
-//  2. Portability. No onnxruntime + cuDNN dependency (~1.3 GB of DLLs), and
+//  2. Portability. No ONNX Runtime + cuDNN dependency (~1.3 GB of DLLs), and
 //     the CUDA / Vulkan / Metal / CPU backends all work.
 //
 // The reference is ZFTurbo's Music-Source-Separation-Training BSRoformer

@@ -634,111 +634,6 @@ VAEGGML * store_require_vae_dec(ModelStore * s, const ModelKey & k) {
     return m;
 }
 
-static void del_vae_dec_ort(void * p) {
-    vae_ort_free(static_cast<VaeOrt *>(p));
-    delete static_cast<VaeOrt *>(p);
-}
-
-VaeOrt * store_require_vae_dec_ort(ModelStore * s, const ModelKey & k) {
-    std::lock_guard<std::mutex> lock(s->mtx);
-    if (auto * hit = cache_hit<VaeOrt>(s, k)) {
-        return hit;
-    }
-    if (s->policy == EVICT_STRICT) {
-        evict_all_except(s, k);
-    }
-    Timer    t;
-    VaeOrt * m = new VaeOrt();
-    if (!vae_ort_load(m, k.path.c_str())) {
-        delete m;
-        return nullptr;
-    }
-    // ORT manages its own VRAM — report 0 bytes to the store budget.
-    install_entry(s, k, m, 0, "VAE-Dec-ORT", del_vae_dec_ort);
-    fprintf(stderr, "[Store] Load VAE-Dec-ORT: %.0f ms\n", t.ms());
-    return m;
-}
-
-static void del_vae_enc_ort(void * p) {
-    vae_ort_free(static_cast<VaeEncOrt *>(p));
-    delete static_cast<VaeEncOrt *>(p);
-}
-
-VaeEncOrt * store_require_vae_enc_ort(ModelStore * s, const ModelKey & k) {
-    std::lock_guard<std::mutex> lock(s->mtx);
-    if (auto * hit = cache_hit<VaeEncOrt>(s, k)) {
-        return hit;
-    }
-    if (s->policy == EVICT_STRICT) {
-        evict_all_except(s, k);
-    }
-    Timer       t;
-    VaeEncOrt * m = new VaeEncOrt();
-    if (!vae_ort_load(m, k.path.c_str())) {
-        delete m;
-        return nullptr;
-    }
-    // ORT manages its own VRAM — report 0 bytes to the store budget.
-    install_entry(s, k, m, 0, "VAE-Enc-ORT", del_vae_enc_ort);
-    fprintf(stderr, "[Store] Load VAE-Enc-ORT: %.0f ms\n", t.ms());
-    return m;
-}
-
-static void del_sa3_ort(void * p) {
-    sa3_free_sessions(static_cast<Sa3Refine *>(p));
-    delete static_cast<Sa3Refine *>(p);
-}
-
-// A failed SA3 load is remembered for the rest of the process. Nothing else in
-// the store caches a FAILURE, and for every other model kind that is right —
-// a retry is cheap. This one is not. Building the five ONNX graphs means a
-// from-scratch TensorRT engine build asking for 2 GB of workspace each
-// (sa3-refine.h), and post-processing calls it once per TAKE. In #156 two
-// takes' loads failed, were caught, and were reported as a non-fatal 500; the
-// third attempt took ace-server down with it (exit 0xC000013A, no C++
-// exception, nothing logged) — three full TRT builds back to back, interleaved
-// with SuperSep's own CUDA load/unload cycles. A load that failed once in this
-// process will not succeed on the next take, and retrying only repeats the
-// allocation burst that preceded every observed crash.
-//
-// ponytail: process-lifetime, no cooldown — installing the missing models
-// needs an engine restart to clear it, which is what the Model Manager already
-// does on install. Give it a TTL if that ever stops being true.
-static bool sa3_load_failed_before(const std::string & key, bool record) {
-    static std::mutex                 mtx;
-    static std::vector<std::string>   failed;   // one entry in practice
-    std::lock_guard<std::mutex>       lock(mtx);
-    const bool seen = std::find(failed.begin(), failed.end(), key) != failed.end();
-    if (record && !seen) failed.push_back(key);
-    return record ? true : seen;
-}
-
-Sa3Refine * store_require_sa3_ort(ModelStore * s, const ModelKey & k) {
-    std::lock_guard<std::mutex> lock(s->mtx);
-    if (auto * hit = cache_hit<Sa3Refine>(s, k)) {
-        return hit;
-    }
-    if (sa3_load_failed_before("ort:" + k.path, false)) {
-        fprintf(stderr, "[Store] SA3-Refine-ORT load failed earlier this session for %s - not retrying\n",
-                k.path.c_str());
-        return nullptr;
-    }
-    if (s->policy == EVICT_STRICT) {
-        evict_all_except(s, k);
-    }
-    Timer       t;
-    Sa3Refine * m = new Sa3Refine();
-    if (!sa3_load(m, k.path.c_str())) {  // k.path = directory holding the 5 graphs
-        delete m;
-        sa3_load_failed_before("ort:" + k.path, true);
-        return nullptr;
-    }
-    // ORT manages its own VRAM — report 0 bytes to the store budget.
-    install_entry(s, k, m, 0, "SA3-Refine-ORT", del_sa3_ort);
-    fprintf(stderr, "[Store] Load SA3-Refine-ORT: %.0f ms\n", t.ms());
-    return m;
-}
-
 static void del_sa3_ggml(void * p) {
     sa3_ggml_free(static_cast<Sa3GgmlRefine *>(p));
     delete static_cast<Sa3GgmlRefine *>(p);
@@ -800,86 +695,6 @@ Sa3GgmlRefine * store_require_sa3_ggml(ModelStore * s, const ModelKey & k) {
     return m;
 }
 
-static void del_text_enc_ort(void * p) {
-    text_enc_ort_free(static_cast<TextEncOrt *>(p));
-    delete static_cast<TextEncOrt *>(p);
-}
-
-TextEncOrt * store_require_text_enc_ort(ModelStore * s, const ModelKey & k) {
-    std::lock_guard<std::mutex> lock(s->mtx);
-    if (auto * hit = cache_hit<TextEncOrt>(s, k)) {
-        return hit;
-    }
-    if (s->policy == EVICT_STRICT) {
-        evict_all_except(s, k);
-    }
-    Timer        t;
-    TextEncOrt * m = new TextEncOrt();
-
-    // Derive embed_tokens.bin and null_condition_emb.bin paths from ONNX directory
-    std::string dir;
-    {
-        std::string p = k.path;
-        auto slash = p.find_last_of("/\\");
-        dir = (slash != std::string::npos) ? p.substr(0, slash) : ".";
-    }
-    std::string embed_path = dir + WS_SEP + "embed_tokens.bin";
-    std::string null_cond_path = dir + WS_SEP + "null_condition_emb.bin";
-
-    const char * embed_cstr = nullptr;
-    {
-        FILE * f = fopen(embed_path.c_str(), "rb");
-        if (f) { fclose(f); embed_cstr = embed_path.c_str(); }
-    }
-
-    if (!text_enc_ort_load(m, k.path.c_str(), embed_cstr)) {
-        delete m;
-        return nullptr;
-    }
-    install_entry(s, k, m, 0, "TextEnc-ORT", del_text_enc_ort);
-    fprintf(stderr, "[Store] Load TextEnc-ORT: %.0f ms\n", t.ms());
-    return m;
-}
-
-static void del_cond_enc_ort(void * p) {
-    cond_enc_ort_free(static_cast<CondEncOrt *>(p));
-    delete static_cast<CondEncOrt *>(p);
-}
-
-CondEncOrt * store_require_cond_enc_ort(ModelStore * s, const ModelKey & k) {
-    std::lock_guard<std::mutex> lock(s->mtx);
-    if (auto * hit = cache_hit<CondEncOrt>(s, k)) {
-        return hit;
-    }
-    if (s->policy == EVICT_STRICT) {
-        evict_all_except(s, k);
-    }
-    Timer        t;
-    CondEncOrt * m = new CondEncOrt();
-
-    // null_condition_emb.bin in same directory as the ONNX
-    std::string dir;
-    {
-        std::string p = k.path;
-        auto slash = p.find_last_of("/\\");
-        dir = (slash != std::string::npos) ? p.substr(0, slash) : ".";
-    }
-    std::string null_cond_path = dir + WS_SEP + "null_condition_emb.bin";
-    const char * null_cstr = nullptr;
-    {
-        FILE * f = fopen(null_cond_path.c_str(), "rb");
-        if (f) { fclose(f); null_cstr = null_cond_path.c_str(); }
-    }
-
-    if (!cond_enc_ort_load(m, k.path.c_str(), null_cstr)) {
-        delete m;
-        return nullptr;
-    }
-    install_entry(s, k, m, 0, "CondEnc-ORT", del_cond_enc_ort);
-    fprintf(stderr, "[Store] Load CondEnc-ORT: %.0f ms\n", t.ms());
-    return m;
-}
-
 TokGGML * store_require_fsq_tok(ModelStore * s, const ModelKey & k) {
     std::lock_guard<std::mutex> lock(s->mtx);
     if (auto * hit = cache_hit<TokGGML>(s, k)) {
@@ -938,11 +753,9 @@ void store_release(ModelStore * s, void * handle) {
     assert(e.refcount > 0);
     e.refcount--;
     if (e.refcount == 0 && s->policy == EVICT_STRICT) {
-        // ORT sessions report 0 bytes because they manage their own VRAM.
-        // Evicting them saves nothing in the store budget but recreating
-        // them is extremely expensive (TRT engine compilation can take
-        // 30-120s per unique input shape). Keep them alive until a real
-        // model needs the GPU and triggers evict_all_except().
+        // Entries reporting 0 bytes manage their own VRAM outside the store
+        // budget, so evicting them saves nothing here. Keep them alive until
+        // a real model needs the GPU and triggers evict_all_except().
         if (e.bytes == 0) {
             // Keep alive — will be evicted by evict_all_except() when needed.
             return;

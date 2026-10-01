@@ -57,7 +57,6 @@ void ace_synth_default_params(AceSynthParams * p) {
     p->vae_overlap       = 64;
     p->dump_dir          = NULL;
     p->pp_vae_path       = NULL;
-    p->onnx_vae_path     = NULL;
 }
 
 AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
@@ -100,7 +99,7 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
     // For GGUF/SafeTensors: sub-models share the dit_path as before.
     bool is_onnx_dit = dit_ends_with_onnx(params->dit_path);
     std::string submodel_path = is_onnx_dit
-        ? dit_sidecar_dir(params->dit_path)  // ONNX dir for future cond_enc.onnx etc.
+        ? dit_sidecar_dir(params->dit_path)
         : std::string(params->dit_path);
 
     // ModelKeys. Each path identifies its GGUF; adapter info rides with the
@@ -155,6 +154,17 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
         }
         if (fsq_path == submodel_path) {
             fprintf(stderr, "[Synth-Load] WARNING: no safetensors DiT found for FSQ — covers/passthrough may fail\n");
+        }
+        // The ONNX graph carries no condition encoder. It runs on GGML from the
+        // same safetensors XL DiT the FSQ fallback resolved (the weights the
+        // graph was exported from). An empty path makes the request fail with
+        // a message naming the missing folder (ops_encode_text).
+        if (fsq_path != submodel_path) {
+            ctx->cond_enc_key.path = fsq_path;
+            fprintf(stderr, "[Synth-Load] ONNX DiT: condition encoder on GGML from %s\n", fsq_path.c_str());
+        } else {
+            ctx->cond_enc_key.path.clear();
+            fprintf(stderr, "[Synth-Load] ONNX DiT: no safetensors XL DiT folder found for the condition encoder\n");
         }
     }
 
@@ -235,8 +245,6 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
 
     // PP-VAE: optional post-processing VAE
     ctx->have_pp_vae = false;
-    ctx->pp_vae_onnx_enc_path.clear();
-    ctx->pp_vae_onnx_dec_path.clear();
     if (params->pp_vae_path && params->pp_vae_path[0]) {
         ctx->pp_vae_enc_key.kind = MODEL_VAE_ENC;
         ctx->pp_vae_enc_key.path = params->pp_vae_path;
@@ -244,112 +252,6 @@ AceSynth * ace_synth_load(ModelStore * store, const AceSynthParams * params) {
         ctx->pp_vae_dec_key.path = params->pp_vae_path;
         ctx->have_pp_vae         = true;
         fprintf(stderr, "[Synth-Load] PP-VAE: %s\n", params->pp_vae_path);
-
-        // Auto-discover PP-VAE-specific ONNX encoder/decoder.
-        // PP-VAE is a DIFFERENT model from the main VAE (scragvae) — same
-        // Oobleck architecture but different weights. Look for pp-vae_encoder.onnx
-        // and pp-vae_decoder.onnx in the models/onnx/ directory.
-        // Try new subdirectory layout (onnx/pp-vae/) first, fall back to legacy flat layout.
-        {
-            // Derive onnx/ directory from pp_vae_path:
-            //   models/pp-vae-BF16.gguf → models/onnx/
-            std::string pp_dir;
-            {
-                std::string p = params->pp_vae_path;
-                auto slash = p.find_last_of("/\\");
-                pp_dir = (slash != std::string::npos) ? p.substr(0, slash) : ".";
-            }
-            std::string onnx_dir = pp_dir + WS_SEP + "onnx";
-
-            // Try new location first: onnx/pp-vae/pp-vae_encoder.onnx
-            std::string enc_path = onnx_dir + WS_SEP + "pp-vae" + WS_SEP + "pp-vae_encoder.onnx";
-            std::string dec_path = onnx_dir + WS_SEP + "pp-vae" + WS_SEP + "pp-vae_decoder.onnx";
-
-            FILE * f_enc = fopen(enc_path.c_str(), "rb");
-            if (!f_enc) {
-                // Fall back to legacy flat layout: onnx/pp-vae_encoder.onnx
-                enc_path = onnx_dir + WS_SEP + "pp-vae_encoder.onnx";
-                f_enc = fopen(enc_path.c_str(), "rb");
-            }
-            if (f_enc) {
-                fclose(f_enc);
-                ctx->pp_vae_onnx_enc_path      = enc_path;
-                ctx->pp_vae_enc_ort_key.kind    = MODEL_VAE_ENC_ORT;
-                ctx->pp_vae_enc_ort_key.path    = enc_path;
-                fprintf(stderr, "[Synth-Load] PP-VAE ORT encoder: %s\n", enc_path.c_str());
-            }
-
-            FILE * f_dec = fopen(dec_path.c_str(), "rb");
-            if (!f_dec) {
-                // Fall back to legacy flat layout: onnx/pp-vae_decoder.onnx
-                dec_path = onnx_dir + WS_SEP + "pp-vae_decoder.onnx";
-                f_dec = fopen(dec_path.c_str(), "rb");
-            }
-            if (f_dec) {
-                fclose(f_dec);
-                ctx->pp_vae_onnx_dec_path      = dec_path;
-                ctx->pp_vae_dec_ort_key.kind    = MODEL_VAE_DEC_ORT;
-                ctx->pp_vae_dec_ort_key.path    = dec_path;
-                fprintf(stderr, "[Synth-Load] PP-VAE ORT decoder: %s\n", dec_path.c_str());
-            }
-        }
-    }
-
-    // ORT VAE: optional ONNX Runtime VAE decoder
-    ctx->onnx_vae_path.clear();
-    if (params->onnx_vae_path && params->onnx_vae_path[0]) {
-        ctx->onnx_vae_path          = params->onnx_vae_path;
-        ctx->vae_dec_ort_key.kind   = MODEL_VAE_DEC_ORT;
-        ctx->vae_dec_ort_key.path   = params->onnx_vae_path;
-        fprintf(stderr, "[Synth-Load] ORT-VAE: %s\n", params->onnx_vae_path);
-    }
-
-    // ORT text/cond encoder: auto-discover from ONNX directory.
-    // Triggers when:
-    //   (a) DiT is ONNX → discover text_encoder.onnx + cond_encoder.onnx from dit_sidecar_dir
-    //   (b) text_encoder_path itself is .onnx → discover cond_encoder.onnx from the same dir
-    // Case (b) supports mixing GGUF DiT with ORT text encoding (e.g. NVFP4 DiT + ONNX text enc)
-    ctx->is_onnx_pipeline = false;
-    {
-        std::string te_onnx;
-        std::string ce_onnx;
-
-        if (is_onnx_dit) {
-            // Case (a): DiT is ONNX — look for text/cond encoders in the same directory
-            std::string onnx_dir = dit_sidecar_dir(params->dit_path);
-            te_onnx = onnx_dir + WS_SEP + "text_encoder.onnx";
-            ce_onnx = onnx_dir + WS_SEP + "cond_encoder.onnx";
-        } else if (params->text_encoder_path) {
-            // Case (b): text encoder path is an ONNX file
-            std::string te_path(params->text_encoder_path);
-            if (te_path.size() >= 5 && te_path.substr(te_path.size() - 5) == ".onnx") {
-                te_onnx = te_path;
-                // cond_encoder.onnx must be in the same directory
-                auto sep = te_path.find_last_of("/\\");
-                std::string onnx_dir = (sep != std::string::npos) ? te_path.substr(0, sep) : ".";
-                ce_onnx = onnx_dir + WS_SEP + "cond_encoder.onnx";
-            }
-        }
-
-        if (!te_onnx.empty()) {
-            FILE * f_te = fopen(te_onnx.c_str(), "rb");
-            FILE * f_ce = fopen(ce_onnx.c_str(), "rb");
-            if (f_te && f_ce) {
-                fclose(f_te);
-                fclose(f_ce);
-                ctx->text_enc_ort_key.kind = MODEL_TEXT_ENC_ORT;
-                ctx->text_enc_ort_key.path = te_onnx;
-                ctx->cond_enc_ort_key.kind = MODEL_COND_ENC_ORT;
-                ctx->cond_enc_ort_key.path = ce_onnx;
-                ctx->is_onnx_pipeline = true;
-                fprintf(stderr, "[Synth-Load] ONNX pipeline: TextEnc=%s, CondEnc=%s\n",
-                        te_onnx.c_str(), ce_onnx.c_str());
-            } else {
-                if (f_te) fclose(f_te);
-                if (f_ce) fclose(f_ce);
-                fprintf(stderr, "[Synth-Load] ONNX text encoder selected but cond_encoder.onnx missing — using GGML fallback\n");
-            }
-        }
     }
 
     fprintf(stderr, "[Synth-Load] Ready: turbo=%s, merge=%s, fa=%s, batch_cfg=%s\n",
@@ -603,18 +505,6 @@ static int run_tail(AceSynth *         ctx,
     ops_build_context_silence(ctx, batch_n, s);
     ops_init_noise(ctx, reqs, batch_n, s);
     diag_stats_f32("noise", s.noise.data(), s.noise.size());
-
-    // Stream mode: route through DEMON-style ring buffer pipeline
-    if (s.rr.stream_mode) {
-        fprintf(stderr, "[Synth-Run] stream_mode=true → routing to ops_stream_generate()\n");
-        if (ops_stream_generate(ctx, batch_n, s, cancel, cancel_data) != 0) {
-            return -1;
-        }
-        // Stream pipeline handles its own VAE decode internally.
-        // Still populate s.output with the final latent for downstream compatibility.
-        diag_stats_f32("dit_output (stream)", s.output.data(), s.output.size());
-        return 0;
-    }
 
     diag_vram("before DiT");
     if (ops_dit_generate(ctx, batch_n, s, cancel, cancel_data) != 0) {

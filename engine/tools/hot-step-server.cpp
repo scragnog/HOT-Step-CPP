@@ -257,7 +257,7 @@ static bool g_keep_loaded_cli = false;
 // speculative decoding: path to 0.6B draft model (auto-discovered or --draft-lm)
 static std::string g_draft_lm_path;
 
-// ONNX model directory (optional, for TensorRT/CUDA EP accelerated VAE)
+// --onnx-dir: accepted and ignored (the ONNX VAE decoder it selected is gone).
 static const char * g_onnx_dir = nullptr;
 
 // HOT-Step: pre-computed noise profile for spectral denoiser.
@@ -741,6 +741,9 @@ struct ServerFields {
     // Per-request VRAM knobs (Song Builder / low-VRAM). 0 / -1 = loaded default.
     int                vae_chunk = 0;   // >0: VAE tile size override
     int                batch_cfg = -1;  // 0: split CFG, 1: batch, -1: default
+    // stream_mode was removed with the streaming pipeline; parsed only so a
+    // request that still asks for it is refused instead of rendering normally.
+    bool               stream_mode = false;
 };
 
 static void parse_server_fields(const char * json, ServerFields * sf) {
@@ -756,6 +759,7 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
     sf->beat_stability     = 0.25f;
     sf->frequency_damping  = 0.4f;
     sf->temporal_smoothing = 0.13f;
+    sf->stream_mode        = false;
 
     yyjson_doc * doc = yyjson_read(json, strlen(json), 0);
     if (!doc) return;
@@ -768,6 +772,10 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
     if (!obj || !yyjson_is_obj(obj)) { yyjson_doc_free(doc); return; }
 
     yyjson_val * v;
+    if ((v = yyjson_obj_get(obj, "stream_mode"))) {
+        sf->stream_mode = yyjson_is_true(v) ||
+                          (yyjson_is_str(v) && (!strcmp(yyjson_get_str(v), "true") || !strcmp(yyjson_get_str(v), "1")));
+    }
     if ((v = yyjson_obj_get(obj, "vae_model")) && yyjson_is_str(v)) {
         sf->vae_model = yyjson_get_str(v);
     }
@@ -1292,23 +1300,11 @@ static void synth_worker(std::shared_ptr<Job>    job,
     p.text_encoder_path = emb_entry ? emb_entry->path.c_str() : g_registry.text_enc[0].path.c_str();
     p.dit_path          = dit->path.c_str();
     // HOT-STEP: VAE model selection. Resolve by name from registry.
-    // ONNX VAE files are decoder-only — they go through the ORT decode path,
-    // NOT the GGML encode path. If the user selects an ONNX VAE, we route it
-    // to onnx_vae_path and use the first GGUF/safetensors VAE for encoding.
     const ModelEntry * vae_entry = nullptr;
-    bool               vae_is_onnx = false;
     if (!sf.vae_model.empty()) {
         vae_entry = registry_find(g_registry.vae, sf.vae_model.c_str());
         if (!vae_entry) {
             fprintf(stderr, "[Server] VAE not found: %s, using default\n", sf.vae_model.c_str());
-        } else if (vae_entry->name.size() >= 5 &&
-                   vae_entry->name.substr(vae_entry->name.size() - 5) == ".onnx") {
-            vae_is_onnx = true;
-            // Route ONNX VAE to ORT decode path
-            p.onnx_vae_path = vae_entry->path.c_str();
-            fprintf(stderr, "[Server] ONNX VAE selected: %s → ORT decode path\n", vae_entry->name.c_str());
-            // Fall back to GGUF/safetensors for encoding
-            vae_entry = registry_find_non_onnx(g_registry.vae);
         }
     }
     if (!vae_entry) {
@@ -1915,6 +1911,19 @@ static void synth_worker(std::shared_ptr<Job>    job,
 //   batch >  1: multipart/mixed, each part is raw audio
 // Batch size = number of JSON objects (after synth_batch_size expansion, clamped to 9).
 // Metadata (seed, duration, etc) is already in the request JSON from /lm.
+// Features removed with ONNX Runtime. A request that asks for one gets a 400
+// naming the removal rather than silently rendering some other way.
+static const char * synth_removed_feature(const ServerFields & sf) {
+    if (sf.stream_mode) {
+        return "stream_mode was removed (the streaming pipeline decoded through ONNX Runtime, which is gone)";
+    }
+    const std::string & v = sf.vae_model;
+    if (v.size() >= 5 && v.compare(v.size() - 5, 5, ".onnx") == 0) {
+        return "ONNX VAE decoding was removed with ONNX Runtime; pick a GGUF or safetensors VAE";
+    }
+    return nullptr;
+}
+
 static void handle_synth(const httplib::Request & req, httplib::Response & res) {
     if (g_registry.dit.empty() || g_registry.text_enc.empty() || g_registry.vae.empty()) {
         json_error(res, 501, "No synth models in registry (need dit + text-encoder + vae)");
@@ -1950,6 +1959,10 @@ static void handle_synth(const httplib::Request & req, httplib::Response & res) 
             return;
         }
         parse_server_fields(json_body.c_str(), &sf);
+        if (const char * removed = synth_removed_feature(sf)) {
+            json_error(res, 400, removed);
+            return;
+        }
         if (!request_parse_json(&ace_req, json_body.c_str())) {
             json_error(res, 400, "Multipart: invalid JSON in 'request' part");
             return;
@@ -2043,6 +2056,10 @@ static void handle_synth(const httplib::Request & req, httplib::Response & res) 
         // plain JSON body: single object {} or array [{}, ...]
         fprintf(stderr, "[DIAG] /synth body (first 300 chars): %.300s\n", req.body.c_str());
         parse_server_fields(req.body.c_str(), &sf);
+        if (const char * removed = synth_removed_feature(sf)) {
+            json_error(res, 400, removed);
+            return;
+        }
         if (!request_parse_json_array(req.body.c_str(), &ace_reqs)) {
             json_error(res, 400, "Invalid JSON");
             return;
@@ -2312,8 +2329,7 @@ static void vae_decode_worker(std::shared_ptr<Job> job,
 
 // encode worker: VAE encode only. Encodes 48kHz interleaved stereo
 // audio into latents [T_25Hz, 64] time-major, stores raw f32 in job.
-// Prefers ONNX/TRT encoder when available (faster via TensorRT fusion),
-// falls back to GGML encoder for GGUF/safetensors VAE models.
+// GGML encoder from a GGUF/safetensors VAE.
 static void vae_encode_worker(std::shared_ptr<Job> job, AceRequest ace_req, float * src_interleaved, int src_len) {
     struct buf_guard {
         float * p;
@@ -2335,78 +2351,7 @@ static void vae_encode_worker(std::shared_ptr<Job> job, AceRequest ace_req, floa
 
     auto t_start = std::chrono::steady_clock::now();
 
-    // ── Try ONNX encoder first ─────────────────────────────────────
-    // Look for a *_encoder.onnx file matching the selected (or default) VAE.
-    // E.g., if user selected "scragvae_decoder.onnx", look for "scragvae_encoder.onnx".
-    // Also auto-detect from the onnx/ directory if no specific VAE is selected.
-    bool tried_ort = false;
     {
-        std::string enc_onnx_path;
-        // If a specific VAE was requested and it's ONNX, derive encoder path
-        if (!ace_req.vae.empty()) {
-            const ModelEntry * entry = registry_find(g_registry.vae, ace_req.vae.c_str());
-            if (entry && entry->name.size() >= 5 &&
-                entry->name.substr(entry->name.size() - 5) == ".onnx") {
-                // Replace "_decoder.onnx" with "_encoder.onnx"
-                std::string p = entry->path;
-                auto pos = p.rfind("_decoder.onnx");
-                if (pos != std::string::npos) {
-                    enc_onnx_path = p.substr(0, pos) + "_encoder.onnx";
-                }
-            }
-        }
-        // If no specific ONNX VAE selected, check the registry for any ONNX decoder
-        // and derive the encoder path from it
-        if (enc_onnx_path.empty()) {
-            for (const auto & e : g_registry.vae) {
-                if (e.name.size() >= 5 && e.name.substr(e.name.size() - 5) == ".onnx") {
-                    std::string p = e.path;
-                    auto pos = p.rfind("_decoder.onnx");
-                    if (pos != std::string::npos) {
-                        std::string candidate = p.substr(0, pos) + "_encoder.onnx";
-                        FILE * f = fopen(candidate.c_str(), "rb");
-                        if (f) {
-                            fclose(f);
-                            enc_onnx_path = candidate;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        // If we found an encoder ONNX, try ORT
-        if (!enc_onnx_path.empty()) {
-            FILE * f = fopen(enc_onnx_path.c_str(), "rb");
-            if (f) {
-                fclose(f);
-                tried_ort = true;
-                ModelKey ort_key;
-                ort_key.kind = MODEL_VAE_ENC_ORT;
-                ort_key.path = enc_onnx_path;
-
-                VaeEncOrt * enc_ort = store_require_vae_enc_ort(g_store, ort_key);
-                if (enc_ort) {
-                    ModelHandle guard(g_store, enc_ort);
-                    T_latent = vae_enc_ort_encode_tiled(enc_ort, src_interleaved, src_len,
-                                                         latent.data(), T_latent_max,
-                                                         g_synth_params.vae_chunk, g_synth_params.vae_overlap);
-                    if (T_latent >= 0) {
-                        // Extract basename for logging
-                        auto slash = enc_onnx_path.find_last_of("/\\");
-                        vae_name_used = (slash != std::string::npos) ? enc_onnx_path.substr(slash + 1) : enc_onnx_path;
-                    } else {
-                        fprintf(stderr, "[Server] encode: ORT encode failed, falling back to GGML\n");
-                    }
-                } else {
-                    fprintf(stderr, "[Server] encode: ORT session load failed, falling back to GGML\n");
-                }
-            }
-        }
-    }
-
-    // ── GGML fallback ──────────────────────────────────────────────
-    if (T_latent < 0) {
         const ModelEntry * vae_entry = registry_find_non_onnx(g_registry.vae, ace_req.vae.c_str());
         if (!vae_entry) {
             vae_entry = registry_find_non_onnx(g_registry.vae);
@@ -2808,7 +2753,8 @@ static void handle_codes_decode(const httplib::Request & req, httplib::Response 
 
     // Same treatment for the VAE, for the same two reasons. vae_decode_worker
     // resolves with plain registry_find against the sticky g_loaded_vae, so
-    // (a) an ONNX VAE — registry_scan does put those in reg->vae — would reach
+    // (a) an ONNX VAE — registry_scan no longer registers those, but the guard
+    // stays cheap — would reach
     // store_require_vae_dec and fail the job with nothing but a log line, which
     // is precisely the opaque failure the DiT check three lines up exists to
     // prevent, and (b) an empty `vae` would inherit whatever the last /synth
@@ -3147,9 +3093,6 @@ static void usage(const char * prog) {
             "  --keep-loaded           Keep models in VRAM between requests\n"
             "  --vae-chunk <N>         Latent frames per tile (default: %d)\n"
             "  --vae-overlap <N>       Overlap frames per side (default: %d)\n"
-            "\n"
-            "ONNX/TensorRT:\n"
-            "  --onnx-dir <dir>        Directory with ONNX models (e.g. vae_decoder.onnx)\n"
             "\n"
             "Speculative decoding:\n"
             "  --draft-lm <path>        Path to 0.6B draft LM (auto-discovers if omitted)\n"
@@ -3779,16 +3722,11 @@ int main(int argc, char ** argv) {
         }
         float in_rms = (float) sqrt(in_sum_sq / (double) n_total);
 
-        // ONNX discovery is retired: both paths stay empty, so encode and
-        // decode below always take the GGML branch.
-        std::string onnx_enc_path, onnx_dec_path;
-
         // Default VAE tiling params (match scragvae: same Oobleck architecture)
         int vae_chunk   = 1024;
         int vae_overlap = 64;
 
         // Phase 1: Encode (planar → interleaved → VAE encoder → latents)
-        // Prefers ORT/TRT when pp-vae_encoder.onnx exists, falls back to GGML.
         std::vector<float> latents;
         int T_latent = 0;
 
@@ -3806,23 +3744,7 @@ int main(int argc, char ** argv) {
         int max_T = (T_audio / 1920) + 64;
         latents.resize((size_t) max_T * 64);
 
-        if (!onnx_enc_path.empty()) {
-            // Try ORT encoder
-            ModelKey enc_ort_key;
-            enc_ort_key.kind = MODEL_VAE_ENC_ORT;
-            enc_ort_key.path = onnx_enc_path;
-            VaeEncOrt * enc_ort = store_require_vae_enc_ort(g_store, enc_ort_key);
-            if (enc_ort) {
-                ModelHandle enc_guard(g_store, enc_ort);
-                fprintf(stderr, "[Server] PP-VAE encoding via ORT/TRT: %s\n", onnx_enc_path.c_str());
-                T_latent = vae_enc_ort_encode_tiled(enc_ort, interleaved.data(), T_audio,
-                                                     latents.data(), max_T, vae_chunk, vae_overlap);
-            } else {
-                fprintf(stderr, "[Server] PP-VAE ORT encoder load failed, falling back to GGML\n");
-            }
-        }
-        if (T_latent <= 0) {
-            // Fall back to GGML encoder
+        {
             ModelKey enc_key;
             enc_key.kind = MODEL_VAE_ENC;
             enc_key.path = pp_vae_path;
@@ -3845,30 +3767,13 @@ int main(int argc, char ** argv) {
         fprintf(stderr, "[Server] PP-VAE encode: T_latent=%d\n", T_latent);
 
         // Phase 2: Decode (latents → VAE decoder → planar PCM)
-        // Prefers ORT/TRT when pp-vae_decoder.onnx exists, falls back to GGML.
         std::vector<float> decoded;
         int T_decoded = 0;
 
         int T_audio_max = T_latent * 1920;
         decoded.resize(2 * T_audio_max);
 
-        if (!onnx_dec_path.empty()) {
-            // Try ORT decoder
-            ModelKey dec_ort_key;
-            dec_ort_key.kind = MODEL_VAE_DEC_ORT;
-            dec_ort_key.path = onnx_dec_path;
-            VaeOrt * dec_ort = store_require_vae_dec_ort(g_store, dec_ort_key);
-            if (dec_ort) {
-                ModelHandle dec_guard(g_store, dec_ort);
-                fprintf(stderr, "[Server] PP-VAE decoding via ORT/TRT: %s\n", onnx_dec_path.c_str());
-                T_decoded = vae_ort_decode_tiled(dec_ort, latents.data(), T_latent,
-                                                  decoded.data(), T_audio_max, vae_chunk, vae_overlap);
-            } else {
-                fprintf(stderr, "[Server] PP-VAE ORT decoder load failed, falling back to GGML\n");
-            }
-        }
-        if (T_decoded <= 0) {
-            // Fall back to GGML decoder
+        {
             ModelKey dec_key;
             dec_key.kind = MODEL_VAE_DEC;
             dec_key.path = pp_vae_path;
@@ -3980,7 +3885,6 @@ int main(int argc, char ** argv) {
             json_error(res, 400, "Empty body (expected WAV audio)");
             return;
         }
-        std::string sa3_dir = std::string(models_dir) + "/onnx/sa3";
         auto file_exists = [](const std::string & p) {
             FILE * f = fopen(p.c_str(), "rb");
             if (f) { fclose(f); return true; }
@@ -4039,7 +3943,6 @@ int main(int argc, char ** argv) {
             json_error(res, 501, "SA3 GGUF models not installed (expected sa3-*.gguf in models dir)");
             return;
         }
-        const bool use_gguf = true;  // the ONNX branch below is unreachable
 
         // Params
         float strength = 0.3f;
@@ -4168,18 +4071,18 @@ int main(int argc, char ** argv) {
         }
         fprintf(stderr, "[Server] SA3 refine: %.2fs @ %dHz, strength=%.2f, steps=%d, sampler=%s, backend=%s\n",
                 (float) T_in / sr_in, sr_in, strength, steps, pingpong ? "pingpong" : "euler",
-                use_gguf ? "gguf" : "onnx");
+                "gguf");
 
         // Input RMS (for gain matching)
         double in_sum_sq = 0.0;
         for (int i = 0; i < T44 * 2; i++) in_sum_sq += (double) p44[i] * p44[i];
         float in_rms = (float) sqrt(in_sum_sq / (double)(T44 * 2));
 
-        // Acquire model (selected backend) + run
+        // Acquire model + run
         std::vector<float> out44;
         bool ok;
         Timer refine_timer;
-        if (use_gguf) {
+        {
             ModelKey k{};
             k.kind = MODEL_SA3_GGML;
             k.path = models_dir;  // 4 sa3-*.gguf in the models root
@@ -4194,23 +4097,9 @@ int main(int argc, char ** argv) {
             refine_timer.reset();
             ok = sa3_refine_run_ggml(sa3, p44, T44, ids.data(), n_tokens,
                                      strength, steps, pingpong, seed, zero_noise, out44, sp_ptr);
-        } else {
-            ModelKey k{};
-            k.kind = MODEL_SA3_ORT;
-            k.path = sa3_dir;
-            Sa3Refine * sa3 = store_require_sa3_ort(g_store, k);
-            if (!sa3) {
-                free(p44);
-                json_error(res, 500, "SA3 model load failed");
-                return;
-            }
-            ModelHandle guard(g_store, sa3);
-            refine_timer.reset();
-            ok = sa3_refine_run(sa3, p44, T44, ids.data(), n_tokens,
-                                strength, steps, pingpong, seed, zero_noise, out44, sp_ptr);
         }
         fprintf(stderr, "[Server] SA3 refine compute (%s): %.0f ms\n",
-                use_gguf ? "gguf" : "onnx", refine_timer.ms());
+                "gguf", refine_timer.ms());
         if (!ok) {
             free(p44);
             json_error(res, 500, "SA3 refine failed");
@@ -4401,7 +4290,7 @@ int main(int argc, char ** argv) {
     });
 
     // ═══════════════════════════════════════════════════════════════════
-    // SuperSep: Native stem separation via ONNX Runtime
+    // SuperSep: Native stem separation (GGML)
     // ═══════════════════════════════════════════════════════════════════
 
     // Global SuperSep context (lazy-initialized on first request)
@@ -4558,7 +4447,7 @@ int main(int argc, char ** argv) {
                         job->id.c_str(), job->error_msg.c_str());
             }
 
-            // Release ONNX sessions to reclaim VRAM immediately
+            // Release the models to reclaim VRAM immediately
             supersep_release_models(g_supersep);
         });
 

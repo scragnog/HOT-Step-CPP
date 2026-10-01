@@ -250,54 +250,13 @@ else()
     target_compile_options(lua54 PRIVATE -w)
 endif()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ONNX Runtime (StableStep's ONNX backend + the ORT VAE/encoder paths)
-# ─────────────────────────────────────────────────────────────────────────────
-# Pre-built ORT GPU package. Resolution order:
-#   1. ORT_ROOT cmake variable
-#   2. ONNXRUNTIME_ROOT environment variable
-#   3. Auto-detect from engine/deps/onnxruntime/ (populated by buildall.cmd)
-#
 # CUDAToolkit detection: the find_package at L73 is conditional on
 # CMAKE_CUDA_ARCHITECTURES, so on cached re-configures CUDAToolkit_FOUND
-# may be unset. Ensure it's always available for CUDA EP support.
+# may be unset. Ensure it's always available (SuperSep and the cudart copy
+# below test it).
 find_package(CUDAToolkit QUIET)
-# SuperSep itself is pure GGML and always built. This option controls the last
-# remaining ONNX Runtime consumers: sa3-refine.h (StableStep's ONNX backend) and
-# model-store.h's vae-ort / vae-enc-ort / cond-enc-ort / text-enc-ort.
-#
-# It was called HOT_STEP_SUPERSEP until SuperSep was rewritten on GGML and
-# stopped touching ORT, at which point the name described nothing it gated.
-#
-# Nothing in the app uses ONNX Runtime any more, so the option is forced OFF.
-# FORCE matters: a build directory configured while the default was ON keeps
-# ON in its cache, and option() never overrides a cached value.
-set(HOT_STEP_ORT_PATHS OFF CACHE BOOL "Build the ONNX Runtime paths (retired, always OFF)" FORCE)
 
-set(ORT_ROOT "" CACHE PATH "Path to ONNX Runtime pre-built package")
-if(NOT ORT_ROOT AND DEFINED ENV{ONNXRUNTIME_ROOT})
-    set(ORT_ROOT "$ENV{ONNXRUNTIME_ROOT}")
-endif()
-# Auto-detect from deps directory (buildall.cmd downloads here)
-if(NOT ORT_ROOT)
-    set(_ORT_DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/onnxruntime")
-    if(EXISTS "${_ORT_DEPS_DIR}/include/onnxruntime_cxx_api.h")
-        set(ORT_ROOT "${_ORT_DEPS_DIR}")
-        message(STATUS "ORT auto-detected at ${ORT_ROOT}")
-    endif()
-endif()
-
-set(ORT_PATHS_ENABLED FALSE)
-if(HOT_STEP_ORT_PATHS AND ORT_ROOT)
-    if(EXISTS "${ORT_ROOT}/include/onnxruntime_cxx_api.h")
-        set(ORT_PATHS_ENABLED TRUE)
-    else()
-        message(WARNING "ORT_ROOT set but onnxruntime_cxx_api.h not found at ${ORT_ROOT}/include")
-    endif()
-endif()
-
-# SuperSep library (STFT + ONNX Runtime for stages 1-4, GGML for the
-# BS-Roformer-Leap Xe pair used by SUPERSEP_STABLESTEP)
+# SuperSep library (STFT front-end + GGML stem models)
 add_library(supersep STATIC src/supersep.cpp)
 target_include_directories(supersep PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -322,8 +281,6 @@ if(CUDAToolkit_FOUND)
     target_compile_definitions(supersep PUBLIC GGML_USE_CUDA)
 endif()
 
-# ace-server still links ORT for those paths, so the runtime shared libraries
-# below are still required by a build that has them enabled.
 # TensorRT Native SDK (DiT TRT acceleration + LoRA refitting)
 # ─────────────────────────────────────────────────────────────────────────────
 # Platform-specific TRT detection:
@@ -384,23 +341,6 @@ else()
    target_link_libraries(acestep-core PUBLIC yyjson lua54 supersep)
 endif()
 link_ggml_backends(acestep-core)
-
-# ONNX Runtime for the paths that still use it: sa3-refine.h (StableStep's ONNX
-# backend) and model-store.h's vae-ort / cond-enc-ort / text-enc-ort /
-# vae-enc-ort. This used to arrive transitively from supersep, which is now
-# pure GGML — so acestep-core declares it directly.
-if(ORT_PATHS_ENABLED)
-    target_compile_definitions(acestep-core PUBLIC HOT_STEP_ORT)
-    target_include_directories(acestep-core PUBLIC "${ORT_ROOT}/include")
-    target_link_directories(acestep-core PUBLIC "${ORT_ROOT}/lib")
-    target_link_libraries(acestep-core PUBLIC onnxruntime)
-    if(APPLE)
-        target_link_libraries(acestep-core PUBLIC "-framework CoreML" "-framework Foundation")
-    endif()
-    message(STATUS "ONNX Runtime paths: ENABLED (ORT at ${ORT_ROOT})")
-else()
-    message(STATUS "ONNX Runtime paths: DISABLED (StableStep uses its GGML backend)")
-endif()
 
 # TRT native linkage for DiT acceleration (shared across platforms)
 if(TRT_ENABLED)
@@ -569,47 +509,6 @@ if(CUDAToolkit_FOUND)
     # select the correct runtime DLLs — cuBLAS/cudart/cuDNN for 12 vs 13)
     file(GENERATE OUTPUT "$<TARGET_FILE_DIR:ace-server>/.cuda-version"
          CONTENT "${CUDAToolkit_VERSION_MAJOR}")
-endif()
-
-# Copy ONNX Runtime DLLs next to ace-server at build time
-if(ORT_PATHS_ENABLED AND WIN32)
-    set(_ORT_DLL_DIR "${ORT_ROOT}/lib")
-    foreach(_dll onnxruntime.dll onnxruntime_providers_shared.dll onnxruntime_providers_cuda.dll onnxruntime_providers_tensorrt.dll)
-        if(EXISTS "${_ORT_DLL_DIR}/${_dll}")
-            add_custom_command(TARGET ace-server POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${_ORT_DLL_DIR}/${_dll}"
-                    "$<TARGET_FILE_DIR:ace-server>/${_dll}"
-                COMMENT "Copying ${_dll}"
-            )
-        endif()
-    endforeach()
-endif()
-
-# Copy ONNX Runtime dylibs next to ace-server at build time (macOS)
-if(ORT_PATHS_ENABLED AND APPLE)
-    set(_ORT_LIB_DIR "${ORT_ROOT}/lib")
-    file(GLOB _ORT_DYLIBS "${_ORT_LIB_DIR}/libonnxruntime*.dylib")
-    foreach(_dylib ${_ORT_DYLIBS})
-        add_custom_command(TARGET ace-server POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${_dylib}" "$<TARGET_FILE_DIR:ace-server>"
-            COMMENT "Copying ${_dylib}"
-        )
-    endforeach()
-endif()
-
-# Copy ONNX Runtime shared libs next to ace-server at build time (Linux)
-if(ORT_PATHS_ENABLED AND UNIX AND NOT APPLE)
-    set(_ORT_LIB_DIR "${ORT_ROOT}/lib")
-    file(GLOB _ORT_SOLIBS "${_ORT_LIB_DIR}/libonnxruntime*.so*")
-    foreach(_solib ${_ORT_SOLIBS})
-        add_custom_command(TARGET ace-server POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${_solib}" "$<TARGET_FILE_DIR:ace-server>"
-            COMMENT "Copying ${_solib}"
-        )
-    endforeach()
 endif()
 
 add_executable(ace-understand tools/ace-understand.cpp)

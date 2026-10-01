@@ -1,5 +1,5 @@
 #pragma once
-// supersep.h: Native C++ stem separation using ONNX Runtime.
+// supersep.h: Native C++ stem separation on GGML.
 //
 // Implements the SuperSep multi-stage pipeline:
 //   Stage 1: BS-RoFormer (6 primary stems)
@@ -8,7 +8,7 @@
 //   Stage 4: HTDemucs 6s (refine "other")
 //
 // Audio preprocessing (STFT/iSTFT) is handled natively in C++.
-// Models are ONNX files loaded via ONNX Runtime with CUDA EP.
+// Models are GGUF files run through GGML (bs-roformer-ggml.h, mdx23c-ggml.h).
 //
 // VRAM policy: sequential with the GGML model store. The caller must
 // ensure DiT/VAE models are evicted before calling supersep_run().
@@ -26,7 +26,7 @@ extern "C" {
 
 // ── Types ───────────────────────────────────────────────────────────────
 
-// Opaque context (holds ONNX sessions, configuration)
+// Opaque context (holds loaded models, configuration)
 typedef struct SuperSep SuperSep;
 
 // Separation levels (which stages to run)
@@ -97,7 +97,7 @@ typedef bool (*supersep_cancel_fn)(void * user_data);
 // ── API ─────────────────────────────────────────────────────────────────
 
 // Initialize SuperSep context.
-// model_dir: directory containing .onnx model files
+// model_dir: directory containing the SuperSep GGUF files
 // device_id: CUDA device ID (-1 for CPU)
 // Returns NULL on failure.
 SuperSep * supersep_init(const char * model_dir, int device_id);
@@ -123,11 +123,11 @@ SuperSepResult * supersep_run(
 // Free a result and all its stem buffers.
 void supersep_result_free(SuperSepResult * result);
 
-// Free the SuperSep context and all ONNX sessions.
+// Free the SuperSep context and all loaded models.
 void supersep_free(SuperSep * ctx);
 
-// Release all cached ONNX sessions to reclaim VRAM.
-// The context remains valid; sessions are re-loaded on next run.
+// Release all loaded models to reclaim VRAM.
+// The context remains valid; models are re-loaded on next run.
 void supersep_release_models(SuperSep * ctx);
 
 // Recombine stems with per-stem volume and mute controls.

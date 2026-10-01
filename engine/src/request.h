@@ -235,18 +235,6 @@ struct AceRequest {
     // audio output: MP3 encoder bitrate in kbps. Applies only when
     // output_format is "mp3". WAV outputs ignore this field.
     int mp3_bitrate;  // 128
-
-    // ONNX Runtime VAE decode: when true and an ONNX VAE model is available,
-    // route VAE decode through TensorRT/CUDA EP instead of the GGML tiled decoder.
-    bool use_ort_vae;  // false
-
-    // ── Streaming pipeline (DEMON-style ring buffer) ──────────────────
-    // When true, route through ops_stream_generate() instead of ops_dit_generate().
-    // Requires TRT (ONNX model). The ring buffer produces progressive audio
-    // previews via [STREAM_PREVIEW] markers on stderr.
-    bool        stream_mode;       // false
-    int         stream_depth;      // 8 (ring buffer depth, user-configurable)
-    std::string stream_chunk_dir;  // "" (directory for preview WAV files)
 };
 
 // Initialize all fields to defaults (matches Python GenerationParams defaults)
