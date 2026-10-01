@@ -289,8 +289,8 @@ The `adapter-system` skill in `.claude/skills/` covers failure modes.
 
 ## TensorRT and ONNX paths
 
-Two integrations exist and neither has a switch of its own; the model path picks
-the backend.
+Native TensorRT is the live integration; the ONNX Runtime one is retired. Neither
+has a switch of its own; the model path picks the backend.
 
 - Native TensorRT (raw NvInfer) for the ACE-Step DiT and LM, and for the MM3 DiT. It
   was chosen over ONNX Runtime's TensorRT provider because adapter switching needs
@@ -304,10 +304,12 @@ the backend.
   - MM3 DiT: `"dit_backend": "tensorrt"` on `/mm3/synth` uses `mm3-dit-trt.h`, which
     builds a base engine per GPU under `<models>/mm3/mm3-trt-cache/` and refits it
     per DiT GGUF and adapter stack.
-- ONNX Runtime, with its TensorRT or CUDA provider, for models that need no refit:
-  the VAE decoder (`vae-ort.h`, used when a request sets `use_ort_vae` and the server
-  was started with `--onnx-dir`), the text and condition encoders, and the SA3
-  refiner's ONNX backend.
+- ONNX Runtime (the VAE decoder and encoder, the text and condition encoders, and
+  the SA3 refiner's ONNX backend) is retired. `HOT_STEP_ORT_PATHS` is forced OFF in
+  `engine/CMakeLists.txt`, so no build links ONNX Runtime and those paths compile to
+  stubs that fall back to GGML. The engine never auto-selects an ONNX model:
+  `--onnx-dir` is accepted and ignored, StableStep `auto` means GGML, and
+  `backend=onnx` on `/sa3-refine` or `/pp-vae-reencode` returns 400.
 
 TensorRT support is compiled in when the SDK is found in `engine/deps/tensorrt/`
 (Windows) or installed system-wide (Linux), which defines `HOT_STEP_TRT`. On Windows,

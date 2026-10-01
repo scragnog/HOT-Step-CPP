@@ -275,8 +275,8 @@ VAE decode instead of the built-in tiled decoder.
 **`pp_vae_reencode`** (bool, default false). Round-trips the audio through the
 post-processing VAE when a PP-VAE model is installed.
 
-**`use_ort_vae`** (bool, default false). Decodes through the ONNX Runtime VAE when
-ace-server was started with `--onnx-dir` and a `vae_decoder.onnx` was found.
+**`use_ort_vae`** (bool, default false). Retired: ONNX Runtime is not compiled in
+and `--onnx-dir` no longer selects a decoder, so decode runs on GGML either way.
 
 **`stream_mode`** (bool, default false), **`stream_depth`** (int, default 8),
 **`stream_chunk_dir`** (string). Routes the DiT through the ring-buffer streaming
@@ -671,7 +671,7 @@ Notes the usage text does not cover:
 - `--max-batch` is clamped to 1..9.
 - `--models` is scanned at startup, and its `onnx/` subfolder too. `--adapters` is
   scanned for DiT adapters and its `lm/` subfolder for planner-LM adapters.
-- `--onnx-dir` looks for `vae/vae_decoder.onnx`, then `vae_decoder.onnx`.
+- `--onnx-dir` is accepted and ignored; the ONNX VAE decoder is no longer auto-selected.
 - The app starts ace-server on port 8085.
 
 | Pipeline | Needs | Enables |
@@ -751,9 +751,10 @@ Post-processing endpoints. These run synchronously on the HTTP thread, except
 SuperSep, which has its own job table.
 
 ```
-POST /pp-vae-reencode[?blend=0..1][&backend=onnx|gguf][&out_fmt=s16|s24|f32]
-                                 Body: WAV. PP-VAE round trip. blend 0 is fully
-                                 re-encoded, 1 is the original.
+POST /pp-vae-reencode[?blend=0..1][&backend=gguf][&out_fmt=s16|s24|f32]
+                                 Body: WAV. PP-VAE round trip on GGML. blend 0 is
+                                 fully re-encoded, 1 is the original.
+                                 backend=onnx is retired and returns 400.
 POST /sa3-refine?...             Body: WAV or MP3. Stable Audio 3 refine. Query
                                  parameters are documented above the handler in
                                  hot-step-server.cpp (tokens, n_tokens, strength,
@@ -761,6 +762,8 @@ POST /sa3-refine?...             Body: WAV or MP3. Stable Audio 3 refine. Query
                                  band_blend, band_freq, band_width, out_sr,
                                  backend, adapters, solver, scheduler,
                                  guidance_mode, guidance_scale, plugin_params).
+                                 backend is gguf or auto (both GGML);
+                                 backend=onnx returns 400.
 POST /supersep/separate?level=0..4
                                  Body: audio. Starts stem separation, returns {"id"}.
 GET  /supersep/progress?id=      Progress.

@@ -67,12 +67,9 @@ router.get('/pp-vae', (_req, res) => {
 });
 
 // GET /api/models/stablestep — check StableStep (SA3) model availability
-// Two engine backends exist:
-//   onnx — <modelsDir>/onnx/sa3/ ONNX set (sa3-dit.onnx + companions), runs
-//          via ONNX Runtime / TensorRT (NVIDIA only)
-//   gguf — 4 GGUF files at the models dir root, runs via GGML
-//          (CUDA / Vulkan / CPU)
-// tokenizer.json in onnx/sa3/ is required for BOTH backends (Node tokenizes).
+// GGML is the only engine backend: 4 GGUF files at the models dir root, plus
+// tokenizer.json in onnx/sa3/ (Node tokenizes). The ONNX backend is retired;
+// backends.onnx stays in the response, always false, until the UI drops it.
 // Returns { available, backends: { onnx, gguf }, files } — files lists what
 // is actually present in the sa3 directory.
 const SA3_GGUF_FILES = [
@@ -90,19 +87,17 @@ router.get('/stablestep', (_req, res) => {
       sa3Files = fs.readdirSync(sa3Dir).filter(f => !f.endsWith('.part'));
     }
     const tokenizerOk = fs.existsSync(path.join(sa3Dir, 'tokenizer.json'));
-    const onnx = tokenizerOk && fs.existsSync(path.join(sa3Dir, 'sa3-dit.onnx'));
-    const gguf = tokenizerOk &&
-      SA3_GGUF_FILES.every(f => fs.existsSync(path.join(modelsDir, f)));
+    const ggufWeights = SA3_GGUF_FILES.every(f => fs.existsSync(path.join(modelsDir, f)));
+    const gguf = tokenizerOk && ggufWeights;
     res.json({
-      available: onnx || gguf,
-      backends: { onnx, gguf },
-      // Which HALF is missing. The tokenizer is 34 MB and lives under onnx/sa3
-      // even though the GGML backend needs it too, so deleting the 12 GB ONNX
-      // set takes the GGML backend down with it — and the old answer to that
-      // was a bare "not installed" next to 5.8 GB of present GGUFs.
+      available: gguf,
+      backends: { onnx: false, gguf },
+      // Which half is missing. The tokenizer is 34 MB and lives under onnx/sa3
+      // even though the GGML backend needs it, so deleting that folder takes
+      // the backend down — and the old answer to that was a bare "not
+      // installed" next to 5.8 GB of present GGUFs.
       tokenizer: tokenizerOk,
-      ggufWeights: SA3_GGUF_FILES.every(f => fs.existsSync(path.join(modelsDir, f))),
-      onnxGraph: fs.existsSync(path.join(sa3Dir, 'sa3-dit.onnx')),
+      ggufWeights,
       files: sa3Files,
     });
   } catch (err: any) {
@@ -111,7 +106,6 @@ router.get('/stablestep', (_req, res) => {
       backends: { onnx: false, gguf: false },
       tokenizer: false,
       ggufWeights: false,
-      onnxGraph: false,
       files: [],
       error: err.message,
     });

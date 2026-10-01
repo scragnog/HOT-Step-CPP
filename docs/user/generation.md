@@ -289,7 +289,7 @@ the chain, or alongside it when Parallel Cover Art is on in Settings.
 | Lyric Timestamps (LRC) | on | Synchronised lyric timing for karaoke-style playback, taken from the DiT's lyric attention during the render. Hidden on backends that cannot provide it. |
 | Whisper Lyrics | off | Transcribes the sung lyrics with word-level timestamps, using your lyrics as a spelling guide. Model (Auto-detect, Large v3 Turbo, Large v3, Medium, Base), Language, Beam Size (1 to 10, default 5) and "Isolate vocals first". Needs a Whisper model from the Model Manager. |
 | Tiled Decoder | off | Replaces the built-in VAE decode with a tiled decode plugin (overlap crossfading, optional dual-pass merge, channel suppression and a small DSP chain). Only shown when a postprocess plugin is installed; its settings come from the plugin. |
-| PP-VAE Re-encode | off | Runs the decoded audio through a second, higher-fidelity autoencoder to clean up fizz and high-frequency noise. Adds roughly 1 to 2 seconds. Original Blend (0 to 1, default 0) mixes the unprocessed audio back in. The ONNX (ORT/TRT) switch, on by default, uses ONNX Runtime with TensorRT and falls back to GGUF when the ONNX files are missing. Only shown when the PP-VAE model is installed. |
+| PP-VAE Re-encode | off | Runs the decoded audio through a second, higher-fidelity autoencoder to clean up fizz and high-frequency noise. Adds roughly 1 to 2 seconds. Original Blend (0 to 1, default 0) mixes the unprocessed audio back in. It always runs on GGML; the ONNX (ORT/TRT) switch no longer has any effect. Only shown when the PP-VAE model is installed. |
 | StableStep | off | Re-renders the instrumental through Stable Audio 3 to replace VAE fizz with real detail. See [StableStep](#stablestep). |
 | Spectral Lifter | off | Removes AI shimmer, reduces spectral noise and can extend the high end. Denoise Strength (default 0.3), Noise Floor (0.1), HF Extension (0), Transient Boost (0), Shimmer Reduction (6 dB, applied to the 10 to 14 kHz band). |
 | Vocal Naturalizer | off | Experimental. Five DSP stages that pull back robotic and auto-tune artefacts: vibrato, formant variation, metallic cut (6 to 10 kHz), quantization masking and transition smoothing, with a master Amount (default 0.5). It processes the whole mix, so A/B it against the same render with it off. |
@@ -309,14 +309,14 @@ StableStep and the Final Normalizer work with any backend.
 StableStep splits a vocal track into vocals and instrumental, refines only the
 instrumental through Stable Audio 3, then mixes the vocal back in at the balance the
 original had. An instrumental track is refined whole. It needs its own models from the
-Model Manager's StableStep tab (GGML about 5.8 GB, or ONNX about 12 GB); until they are
+Model Manager's StableStep tab (the GGML set, about 5.8 GB); until they are
 installed the panel says "not installed" and explains what is missing.
 
 | Control | Default | What it does |
 |---|---|---|
 | Refine strength | 30% | 10% to 60%. How much of the instrumental is re-rendered. Higher re-interprets the instrumentation more. |
-| Backend | Auto | Auto, ONNX (TensorRT) or GGML. The ONNX backend builds a TensorRT engine the first time each song-length bucket is used, which is slow once and then cached. |
-| Adapters | none | StableStep adapters from `models/sa3-adapters/`, each with its own strength (0 to 200%). Any active adapter switches the refine to the GGML backend. |
+| Backend | Auto | Auto and GGML both run the GGML backend. The ONNX backend is retired: a saved ONNX choice loads as Auto. |
+| Adapters | none | StableStep adapters from `models/sa3-adapters/`, each with its own strength (0 to 200%). |
 | Preserve source dynamics | on | The refined audio follows the original's loudness envelope, so adapters trained on heavily mastered material cannot brickwall the result. |
 | Re-encode vocals through PP-VAE | off | Smooths fizzy vocals at the cost of about 5 dB of air above 10 kHz. Off leaves the vocal stem untouched. |
 | Vocal level | 0 dB | -6 to +6 dB trim of the vocal against the refined instrumental. 0 keeps the original balance. |

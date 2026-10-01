@@ -3330,27 +3330,10 @@ int main(int argc, char ** argv) {
         }
     }
 
-    // ONNX/TensorRT: auto-detect vae_decoder.onnx in --onnx-dir
-    // Try new subdirectory layout first (onnx/vae/), fall back to legacy flat layout.
-    static std::string g_onnx_vae_path_buf;
+    // ONNX VAE auto-detect is retired: the engine never picks ONNX Runtime on
+    // its own. --onnx-dir is still accepted so older launchers keep working.
     if (g_onnx_dir) {
-        // Try new location: onnx_dir/vae/vae_decoder.onnx
-        g_onnx_vae_path_buf = std::string(g_onnx_dir) + "/vae/vae_decoder.onnx";
-        FILE * f = fopen(g_onnx_vae_path_buf.c_str(), "rb");
-        if (!f) {
-            // Fall back to legacy flat layout: onnx_dir/vae_decoder.onnx
-            g_onnx_vae_path_buf = std::string(g_onnx_dir) + "/vae_decoder.onnx";
-            f = fopen(g_onnx_vae_path_buf.c_str(), "rb");
-        }
-        if (f) {
-            fclose(f);
-            g_synth_params.onnx_vae_path = g_onnx_vae_path_buf.c_str();
-            fprintf(stderr, "[Server] ONNX VAE decoder: %s\n", g_onnx_vae_path_buf.c_str());
-        } else {
-            fprintf(stderr, "[Server] WARNING: --onnx-dir specified but no vae_decoder.onnx found in %s\n",
-                    g_onnx_dir);
-            g_onnx_vae_path_buf.clear();
-        }
+        fprintf(stderr, "[Server] --onnx-dir ignored: the ONNX VAE decoder is no longer auto-selected\n");
     }
 
     // validate pipeline
@@ -3738,10 +3721,12 @@ int main(int argc, char ** argv) {
             if (blend > 1.0f) blend = 1.0f;
         }
 
-        // Parse backend preference: "onnx" = force ORT/TRT, "gguf" = force GGML, absent = auto
-        std::string backend = "auto";
-        if (req.has_param("backend")) {
-            backend = req.get_param_value("backend");
+        // Backend: "gguf" or absent (auto, which is GGML). The ONNX Runtime
+        // backend is retired; an explicit request for it is refused.
+        std::string backend = req.has_param("backend") ? req.get_param_value("backend") : "auto";
+        if (backend == "onnx") {
+            json_error(res, 400, "PP-VAE ONNX backend is no longer available; omit backend or use gguf");
+            return;
         }
 
         // Resolve PP-VAE model path from registry (prefer F32 > BF16 > F16)
@@ -3794,48 +3779,9 @@ int main(int argc, char ** argv) {
         }
         float in_rms = (float) sqrt(in_sum_sq / (double) n_total);
 
-        // Resolve PP-VAE ONNX paths for ORT/TRT acceleration.
-        // Look for pp-vae_encoder.onnx / pp-vae_decoder.onnx in models/onnx/
-        // Try new subdirectory layout (onnx/pp-vae/) first, fall back to legacy flat layout.
-        // Skipped entirely when backend=gguf.
-        std::string pp_dir;
-        {
-            std::string p = pp_vae_path;
-            auto slash = p.find_last_of("/\\");
-            pp_dir = (slash != std::string::npos) ? p.substr(0, slash) : ".";
-        }
-        std::string onnx_dir = pp_dir + "/" + "onnx";
+        // ONNX discovery is retired: both paths stay empty, so encode and
+        // decode below always take the GGML branch.
         std::string onnx_enc_path, onnx_dec_path;
-        if (backend != "gguf") {
-            {
-                // Try new location first: onnx/pp-vae/pp-vae_encoder.onnx
-                std::string ep = onnx_dir + "/" + "pp-vae" + "/" + "pp-vae_encoder.onnx";
-                FILE * f = fopen(ep.c_str(), "rb");
-                if (!f) {
-                    // Fall back to legacy flat layout
-                    ep = onnx_dir + "/" + "pp-vae_encoder.onnx";
-                    f = fopen(ep.c_str(), "rb");
-                }
-                if (f) { fclose(f); onnx_enc_path = ep; }
-            }
-            {
-                // Try new location first: onnx/pp-vae/pp-vae_decoder.onnx
-                std::string dp = onnx_dir + "/" + "pp-vae" + "/" + "pp-vae_decoder.onnx";
-                FILE * f = fopen(dp.c_str(), "rb");
-                if (!f) {
-                    // Fall back to legacy flat layout
-                    dp = onnx_dir + "/" + "pp-vae_decoder.onnx";
-                    f = fopen(dp.c_str(), "rb");
-                }
-                if (f) { fclose(f); onnx_dec_path = dp; }
-            }
-            if (backend == "onnx" && (onnx_enc_path.empty() || onnx_dec_path.empty())) {
-                fprintf(stderr, "[Server] PP-VAE backend=onnx but ONNX models not found in %s, falling back to GGML\n",
-                        onnx_dir.c_str());
-            }
-        } else {
-            fprintf(stderr, "[Server] PP-VAE backend=gguf, skipping ONNX discovery\n");
-        }
 
         // Default VAE tiling params (match scragvae: same Oobleck architecture)
         int vae_chunk   = 1024;
@@ -4015,13 +3961,11 @@ int main(int argc, char ** argv) {
     //             overlap-add (linear-phase; no IIR crossover phase seam).
     //   out_sr    output sample rate (default: input rate)
     //   debug_zero_noise  1 = deterministic validation mode (zero noise)
-    //   backend   "onnx" (5 graphs in models/onnx/sa3/) | "gguf" (4 sa3-*.gguf
-    //             in the models root) | "auto" (default: onnx if present,
-    //             else gguf). 501 if the selected backend's models are absent.
+    //   backend   "gguf" | "auto" (default; same as gguf): 4 sa3-*.gguf in the
+    //             models root, 501 if absent. "onnx" is retired and returns 400.
     //   adapters  CSV "name:strength,name:strength" — StableStep DoRA adapter
     //             GGUFs from <models>/sa3-adapters/<name>.gguf, merged into
-    //             the DiT at load. Forces the GGUF backend (ONNX graphs are
-    //             frozen). 400 if a named adapter file is missing.
+    //             the DiT at load. 400 if a named adapter file is missing.
     //   solver, scheduler, guidance_mode, guidance_scale, plugin_params
     //             Lua plugin routing, same param names and semantics as /synth.
     //             Absent/empty = the original pingpong/euler dispatch,
@@ -4042,12 +3986,15 @@ int main(int argc, char ** argv) {
             if (f) { fclose(f); return true; }
             return false;
         };
-        bool have_onnx = file_exists(sa3_dir + "/sa3-dit.onnx");
         bool have_gguf = file_exists(std::string(models_dir) + "/sa3-dit-BF16.gguf");
-        std::string backend = req.has_param("backend") ? req.get_param_value("backend") : "auto";
+        // The ONNX Runtime backend is retired: auto means gguf, and an explicit
+        // backend=onnx is refused rather than silently rerouted.
+        if (req.has_param("backend") && req.get_param_value("backend") == "onnx") {
+            json_error(res, 400, "StableStep ONNX backend is no longer available; omit backend or use gguf");
+            return;
+        }
 
-        // StableStep adapters: parse + resolve BEFORE backend selection —
-        // adapters exist only on the GGUF path, so they force it.
+        // StableStep adapters: parse + resolve (GGUF backend only).
         std::vector<std::pair<std::string, float>> adapter_specs;  // (path, scale)
         std::string adapter_sig;  // "path=scale;..." for the ModelKey
         if (req.has_param("adapters") && !req.get_param_value("adapters").empty()) {
@@ -4084,37 +4031,15 @@ int main(int argc, char ** argv) {
                     json_error(res, 501, "SA3 adapters require the GGUF backend (sa3-*.gguf not installed)");
                     return;
                 }
-                if (backend == "onnx") {
-                    json_error(res, 400, "SA3 adapters are GGUF-only — remove backend=onnx or switch to gguf");
-                    return;
-                }
-                backend = "gguf";
-                fprintf(stderr, "[Server] SA3 refine: %zu adapter(s) requested — GGUF backend forced\n",
-                        adapter_specs.size());
+                fprintf(stderr, "[Server] SA3 refine: %zu adapter(s) requested\n", adapter_specs.size());
             }
         }
 
-        bool use_gguf;
-        if (backend == "onnx") {
-            if (!have_onnx) {
-                json_error(res, 501, "SA3 ONNX models not installed (expected models/onnx/sa3/)");
-                return;
-            }
-            use_gguf = false;
-        } else if (backend == "gguf") {
-            if (!have_gguf) {
-                json_error(res, 501, "SA3 GGUF models not installed (expected sa3-*.gguf in models dir)");
-                return;
-            }
-            use_gguf = true;
-        } else {  // auto
-            if (have_onnx)      use_gguf = false;
-            else if (have_gguf) use_gguf = true;
-            else {
-                json_error(res, 501, "SA3 models not installed (expected models/onnx/sa3/ or sa3-*.gguf)");
-                return;
-            }
+        if (!have_gguf) {
+            json_error(res, 501, "SA3 GGUF models not installed (expected sa3-*.gguf in models dir)");
+            return;
         }
+        const bool use_gguf = true;  // the ONNX branch below is unreachable
 
         // Params
         float strength = 0.3f;

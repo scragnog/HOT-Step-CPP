@@ -70,7 +70,9 @@ engine\build.cmd
 1. Finds `vcvars64.bat` through `vswhere` and sources it, unless `VSCMD_VER` shows the VS
    environment is already loaded.
 2. Downloads the ONNX Runtime GPU SDK (1.25.1) into `engine/deps/onnxruntime` if it is
-   missing. Set `ONNXRUNTIME_ROOT` to use your own copy. Without ORT, SuperSep is not built.
+   missing. Set `ONNXRUNTIME_ROOT` to use your own copy. Nothing links it any more:
+   `HOT_STEP_ORT_PATHS` is forced OFF in `engine/CMakeLists.txt`, including in build
+   directories that cached it ON.
 3. Installs `nvidia-cudnn-cu12` with pip and copies `cudnn64_9.dll` into
    `engine/build/Release/` if it is missing.
 4. Runs `cmake ..` only when `engine/build/CMakeCache.txt` does not exist. The default flags

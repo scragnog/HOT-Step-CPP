@@ -18,7 +18,7 @@ import {
 } from './audioLevel.js';
 import { runVocalNaturalizer, type NaturalizerParams } from './vocalNaturalizer.js';
 import { evaluateAudioQuality, formatQualityLog, type QualityResult } from './audioQualityEvaluator.js';
-import { sa3ModelsInstalled, tokenizeForSa3, buildStableStepPrompt } from '../sa3Tokenizer.js';
+import { tokenizeForSa3, buildStableStepPrompt } from '../sa3Tokenizer.js';
 import { wavDurationSec } from '../audioCrop.js';
 import { stemCacheKey, readStemCache, writeStemCache } from './stemCache.js';
 
@@ -30,9 +30,8 @@ type StageFn = (stage: string) => void;
  *  deleting the temp file. */
 type VocalStemFn = (trackIdx: number, stemPath: string | null) => void;
 
-// StableStep GGML backend files — 4 GGUFs at the models dir root (the ONNX
-// set lives in <models>/onnx/sa3 and is checked via sa3ModelsInstalled()).
-// tokenizer.json in onnx/sa3 is required for BOTH backends (Node tokenizes).
+// StableStep GGML backend files — 4 GGUFs at the models dir root. The ONNX
+// backend is retired; tokenizer.json still lives in onnx/sa3 (Node tokenizes).
 // Keep in sync with SA3_GGUF_FILES in routes/models.ts.
 const SA3_GGUF_FILES = [
   'sa3-dit-BF16.gguf',
@@ -102,15 +101,14 @@ export interface PostProcessParams {
   postProcessingEnabled?: boolean;
   ppVaeReencode?: boolean;
   ppVaeBlend?: number;
-  ppVaeUseOnnx?: boolean;
   // StableStep — SA3 (Stable Audio 3) SDEdit refine of the instrumental
   stableStepOn?: boolean;
   stableStep?: boolean;          // preset/settings-file alias for stableStepOn
   stableStepStrength?: number;   // 0..1 init noise level (default 0.3)
   stableStepSteps?: number;      // sampler steps (engine default 8, clamped 1..64)
-  /** Engine backend for the SA3 refine: 'onnx' (ONNX Runtime/TensorRT),
-   *  'gguf' (GGML — CUDA/Vulkan/CPU) or 'auto' (engine picks, default). */
-  stableStepBackend?: 'auto' | 'onnx' | 'gguf';
+  /** Engine backend for the SA3 refine: 'gguf' (GGML — CUDA/Vulkan/CPU) or
+   *  'auto' (default, also GGML). A stored 'onnx' normalizes to 'auto'. */
+  stableStepBackend?: 'auto' | 'gguf';
   /** Lua plugin routing for the SA3 sampler loop — same registry as the ACE
    *  Generation dropdowns. Absent = the original pingpong/euler path.
    *  Naming a solver replaces the pingpong renoise; SA3 has no CFG uncond, so
@@ -313,10 +311,10 @@ export function normalizePpParams(raw: any, captions: string[]): PostProcessPara
     // "stableStep" alias) and default the strength.
     stableStepOn: !!(raw.stableStepOn ?? raw.stableStep),
     stableStepStrength: typeof raw.stableStepStrength === 'number' ? raw.stableStepStrength : 0.3,
-    // Engine backend: 'onnx' (ONNX Runtime/TensorRT) | 'gguf' (GGML) —
-    // anything else normalizes to 'auto' (engine picks).
-    stableStepBackend: (raw.stableStepBackend === 'onnx' || raw.stableStepBackend === 'gguf')
-      ? raw.stableStepBackend as 'onnx' | 'gguf' : 'auto' as const,
+    // Engine backend: only 'gguf' survives. Anything else, including a saved
+    // 'onnx' from before the ONNX backend was retired, normalizes to 'auto',
+    // which the engine resolves to GGML.
+    stableStepBackend: raw.stableStepBackend === 'gguf' ? 'gguf' as const : 'auto' as const,
     // StableStep DoRA adapters: [{name, scale}] — normalized, disabled/zero
     // entries dropped (engine forces GGUF backend when any are active).
     stableStepAdapters: Array.isArray(raw.stableStepAdapters)
@@ -435,7 +433,7 @@ export async function runPostProcessingChain(
     //     transcription overlaps the GPU work.
     // Deliberately NOT gated on ppMasterOn: the split is a service for
     // Whisper, not an audio-modifying PP stage (anyStageRan untouched).
-    const sa3Available = sa3ModelsInstalled() || sa3GgufInstalled();
+    const sa3Available = sa3GgufInstalled();
     // The split is NOT optional for a vocal track: SA3 refines instrumental
     // only, so handing it a full mix makes it hallucinate replacement vocals.
     // It is a correctness requirement, not a quality nicety.
@@ -522,11 +520,10 @@ export async function runPostProcessingChain(
       const ssStart = performance.now();
       try {
         if (!sa3Available) {
-          log('WARNING', '[StableStep] SA3 models not installed (neither models/onnx/sa3 nor root GGUFs) — skipping');
+          log('WARNING', '[StableStep] SA3 models not installed (root sa3-*.gguf + onnx/sa3/tokenizer.json) — skipping');
         } else {
-          // Engine backend: 'onnx' | 'gguf' forces one; undefined = engine auto.
-          const backend = (params.stableStepBackend === 'onnx' || params.stableStepBackend === 'gguf')
-            ? params.stableStepBackend : undefined;
+          // Engine backend: 'gguf' or undefined (engine auto, also GGML). Never 'onnx'.
+          const backend = params.stableStepBackend === 'gguf' ? 'gguf' as const : undefined;
           const adapters = (params.stableStepAdapters ?? []).filter(a => a && a.name && a.scale !== 0);
           const envMatch = params.stableStepPreserveDynamics !== false;
           const blendMode = params.stableStepBlendMode ?? 'off';
@@ -628,7 +625,7 @@ export async function runPostProcessingChain(
             // level to within 0.01 dB — measured, not assumed.
             const rawVocalsAt48k = async (): Promise<Buffer> => {
               try {
-                return await aceClient.submitPpVaeReencode(vs.vocalBuf, 1.0, undefined, 'f32');
+                return await aceClient.submitPpVaeReencode(vs.vocalBuf, 1.0, 'f32');
               } catch (rErr: any) {
                 // That endpoint 501s when no PP-VAE model is installed, even at
                 // blend=1.0. Fall back to a solo-stem recombine — it resamples,
@@ -675,7 +672,7 @@ export async function runPostProcessingChain(
               cleanVocals = vs.vocalBuf;
             } else if (params.stableStepVocalPpVae) {
               try {
-                cleanVocals = await aceClient.submitPpVaeReencode(vs.vocalBuf, 0.0, undefined, 'f32'); // 48 kHz out
+                cleanVocals = await aceClient.submitPpVaeReencode(vs.vocalBuf, 0.0, 'f32'); // 48 kHz out
               } catch (vErr: any) {
                 log('WARNING', `[StableStep] Vocal PP-VAE failed, using raw vocal stem: ${vErr.message}`);
                 cleanVocals = await rawVocalsAt48k();
@@ -766,7 +763,7 @@ export async function runPostProcessingChain(
       try {
         const wavBuf = fs.readFileSync(processedPath);
         const blend = params.ppVaeBlend ?? 0;
-        const processed = await aceClient.submitPpVaeReencode(wavBuf, blend, params.ppVaeUseOnnx, 'f32');
+        const processed = await aceClient.submitPpVaeReencode(wavBuf, blend, 'f32');
         fs.writeFileSync(processedPath, processed);
         anyStageRan = true;
         log('INFO', `[PP-VAE] Re-encoded ${audioFilename}`);

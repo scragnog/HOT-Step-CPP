@@ -646,12 +646,10 @@ export const aceClient = {
   /** POST /pp-vae-reencode — synchronous PP-VAE re-encode processing.
    *  Sends WAV audio body. Returns processed WAV buffer with RMS-matched gain.
    *  blend: 0.0 = fully PP-VAE, 1.0 = fully original (wet/dry mix). */
-  async submitPpVaeReencode(wavBuffer: Buffer, blend = 0.0, useOnnx?: boolean,
+  async submitPpVaeReencode(wavBuffer: Buffer, blend = 0.0,
                             outFmt?: WavOutFormat): Promise<Buffer> {
     const params = new URLSearchParams();
     if (blend > 0) params.set('blend', blend.toFixed(3));
-    if (useOnnx === true) params.set('backend', 'onnx');
-    else if (useOnnx === false) params.set('backend', 'gguf');
     if (outFmt) params.set('out_fmt', outFmt);
     const qs = params.toString();
     const url = qs ? `${BASE}/pp-vae-reencode?${qs}` : `${BASE}/pp-vae-reencode`;
@@ -687,9 +685,9 @@ export const aceClient = {
       seed?: number;          // uint64 RNG seed (engine default: random)
       rmsMatch?: boolean;     // match output RMS to input (engine default true)
       outSr?: number;         // output sample rate (engine default: input rate)
-      /** Engine backend: 'onnx' (ONNX Runtime/TensorRT) or 'gguf' (GGML —
-       *  CUDA/Vulkan/CPU). 'auto'/undefined lets the engine pick. */
-      backend?: 'auto' | 'onnx' | 'gguf';
+      /** Engine backend: 'gguf' (GGML — CUDA/Vulkan/CPU). 'auto'/undefined
+       *  means the same; the engine refuses 'onnx'. */
+      backend?: 'auto' | 'gguf';
       /** StableStep DoRA adapters (models/sa3-adapters/<name>.gguf), merged
        *  into the SA3 DiT at load. Forces the GGUF backend engine-side. */
       adapters?: Array<{ name: string; scale: number }>;

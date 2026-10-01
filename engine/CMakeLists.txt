@@ -268,7 +268,11 @@ find_package(CUDAToolkit QUIET)
 #
 # It was called HOT_STEP_SUPERSEP until SuperSep was rewritten on GGML and
 # stopped touching ORT, at which point the name described nothing it gated.
-option(HOT_STEP_ORT_PATHS "Build the ONNX Runtime paths (StableStep ONNX backend, ONNX VAE)" ON)
+#
+# Nothing in the app uses ONNX Runtime any more, so the option is forced OFF.
+# FORCE matters: a build directory configured while the default was ON keeps
+# ON in its cache, and option() never overrides a cached value.
+set(HOT_STEP_ORT_PATHS OFF CACHE BOOL "Build the ONNX Runtime paths (retired, always OFF)" FORCE)
 
 set(ORT_ROOT "" CACHE PATH "Path to ONNX Runtime pre-built package")
 if(NOT ORT_ROOT AND DEFINED ENV{ONNXRUNTIME_ROOT})
