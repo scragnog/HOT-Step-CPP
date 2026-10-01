@@ -236,7 +236,7 @@
       "id": "stablestep-separation",
       "family": "shared",
       "name": "StableStep Separation (Leap Xe)",
-      "description": "BS-Roformer-Leap Xe vocal + instrumental pair for the StableStep pipeline. Native GGML — does NOT need the Stem Separation Runtime. ~510 MB.",
+      "description": "BS-Roformer-Leap Xe vocal + instrumental pair for the StableStep pipeline. Native GGML, ~510 MB.",
       "fileIds": [
         "supersep-leap-xe-voc",
         "supersep-leap-xe-inst"
@@ -245,12 +245,9 @@
     {
       "id": "supersep-runtime",
       "family": "shared",
-      "name": "Stem Separation Runtime",
-      "description": "ONNX Runtime + cuDNN libraries required to run SuperSep stem separation on GPU. ~1.3 GB download.",
+      "name": "Stem Separation cuDNN Libraries",
+      "description": "cuDNN libraries for GPU stem separation.",
       "fileIds": [
-        "supersep-rt-onnxruntime",
-        "supersep-rt-ort-cuda",
-        "supersep-rt-ort-shared",
         "supersep-rt-cudnn",
         "supersep-rt-cudnn-adv",
         "supersep-rt-cudnn-cnn",
@@ -1841,21 +1838,6 @@
       ]
     },
     {
-      "id": "vae-dreamvae-onnx",
-      "filename": "vae-DreamVAE.onnx",
-      "role": "vae",
-      "family": "as1.5",
-      "displayName": "DreamVAE (ONNX)",
-      "scale": null,
-      "variant": "DreamVAE",
-      "quant": null,
-      "sizeBytes": 206905696,
-      "repo": "daydreamlive/DreamVAE",
-      "repoPath": "onnx/model.onnx",
-      "description": "DreamVAE in ONNX format — alternative decoder architecture, runs via ORT decode path.",
-      "tags": []
-    },
-    {
       "id": "vae-regrind-v7-st",
       "filename": "vae-Regrind-V7.safetensors",
       "role": "vae",
@@ -2024,108 +2006,6 @@
       "tags": []
     },
     {
-      "id": "stablestep-dit",
-      "filename": "sa3-dit.onnx",
-      "role": "stablestep",
-      "family": "shared",
-      "subdir": "onnx/sa3",
-      "displayName": "SA3 DiT (graph)",
-      "scale": null,
-      "variant": null,
-      "quant": "F32",
-      "sizeBytes": 3869792,
-      "repo": "scragnog/HOT-Step-CPP-StableStep",
-      "description": "Stable Audio 3 diffusion transformer graph — weights live in the companion .data file.",
-      "tags": [
-        "essential"
-      ]
-    },
-    {
-      "id": "stablestep-dit-data",
-      "filename": "sa3-dit.onnx.data",
-      "role": "stablestep",
-      "family": "shared",
-      "subdir": "onnx/sa3",
-      "displayName": "SA3 DiT (weights)",
-      "scale": null,
-      "variant": null,
-      "quant": "F32",
-      "sizeBytes": 5812656128,
-      "repo": "scragnog/HOT-Step-CPP-StableStep",
-      "description": "Stable Audio 3 diffusion transformer external weights — the largest file in the set.",
-      "tags": [
-        "essential"
-      ]
-    },
-    {
-      "id": "stablestep-same-encoder",
-      "filename": "sa3-same_encoder.onnx",
-      "role": "stablestep",
-      "family": "shared",
-      "subdir": "onnx/sa3",
-      "displayName": "SAME Encoder",
-      "scale": null,
-      "variant": null,
-      "quant": "F32",
-      "sizeBytes": 1920689282,
-      "repo": "scragnog/HOT-Step-CPP-StableStep",
-      "description": "Stable Audio autoencoder (encoder half) — encodes the instrumental into SA3 latents.",
-      "tags": [
-        "essential"
-      ]
-    },
-    {
-      "id": "stablestep-same-decoder",
-      "filename": "sa3-same_decoder.onnx",
-      "role": "stablestep",
-      "family": "shared",
-      "subdir": "onnx/sa3",
-      "displayName": "SAME Decoder",
-      "scale": null,
-      "variant": null,
-      "quant": "F32",
-      "sizeBytes": 1920684702,
-      "repo": "scragnog/HOT-Step-CPP-StableStep",
-      "description": "Stable Audio autoencoder (decoder half) — decodes refined SA3 latents back to audio.",
-      "tags": [
-        "essential"
-      ]
-    },
-    {
-      "id": "stablestep-text-encoder",
-      "filename": "sa3-text_encoder.onnx",
-      "role": "stablestep",
-      "family": "shared",
-      "subdir": "onnx/sa3",
-      "displayName": "T5Gemma Text Encoder",
-      "scale": null,
-      "variant": null,
-      "quant": "F32",
-      "sizeBytes": 1127009937,
-      "repo": "scragnog/HOT-Step-CPP-StableStep",
-      "description": "T5Gemma text encoder — turns the refine prompt into conditioning embeddings.",
-      "tags": [
-        "essential"
-      ]
-    },
-    {
-      "id": "stablestep-seconds-embedder",
-      "filename": "sa3-seconds_embedder.onnx",
-      "role": "stablestep",
-      "family": "shared",
-      "subdir": "onnx/sa3",
-      "displayName": "Seconds Embedder",
-      "scale": null,
-      "variant": null,
-      "quant": "F32",
-      "sizeBytes": 793127,
-      "repo": "scragnog/HOT-Step-CPP-StableStep",
-      "description": "Duration conditioning embedder — tells SA3 the target clip length.",
-      "tags": [
-        "essential"
-      ]
-    },
-    {
       "id": "stablestep-tokenizer",
       "filename": "tokenizer.json",
       "role": "stablestep",
@@ -2244,7 +2124,7 @@
       "quant": "F32",
       "sizeBytes": 698724704,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
-      "description": "Stage 1: primary 6-stem separation. Native GGML - no ONNX Runtime.",
+      "description": "Stage 1: primary 6-stem separation on native GGML.",
       "tags": [
         "essential"
       ]
@@ -2261,7 +2141,7 @@
       "quant": "F32",
       "sizeBytes": 267433600,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
-      "description": "StableStep vocal split: vocal-target BS-Roformer-Leap Xe. Runs on the native GGML engine (no ONNX Runtime). Paired with the instrumental model so both stems are direct model outputs rather than mix-minus residuals.",
+      "description": "StableStep vocal split: vocal-target BS-Roformer-Leap Xe. Runs on the native GGML engine. Paired with the instrumental model so both stems are direct model outputs rather than mix-minus residuals.",
       "tags": []
     },
     {
@@ -2276,7 +2156,7 @@
       "quant": "F32",
       "sizeBytes": 267433600,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
-      "description": "StableStep instrumental split: instrumental-target BS-Roformer-Leap Xe. Its output is what feeds the SA3 refine. Runs on the native GGML engine (no ONNX Runtime).",
+      "description": "StableStep instrumental split: instrumental-target BS-Roformer-Leap Xe. Its output feeds the SA3 refine on the native GGML engine.",
       "tags": []
     },
     {
@@ -2291,7 +2171,7 @@
       "quant": "F32",
       "sizeBytes": 912848032,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
-      "description": "Stage 2: vocal sub-separation into lead and backing. Native GGML - no ONNX Runtime.",
+      "description": "Stage 2: vocal sub-separation into lead and backing on native GGML.",
       "tags": [
         "essential"
       ]
@@ -2308,64 +2188,10 @@
       "quant": "F32",
       "sizeBytes": 437533952,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
-      "description": "Stage 3: drum sub-separation (kick, snare, toms, hi-hat, ride, crash). Native GGML - no ONNX Runtime.",
+      "description": "Stage 3: drum sub-separation (kick, snare, toms, hi-hat, ride, crash) on native GGML.",
       "tags": [
         "essential"
       ]
-    },
-    {
-      "id": "supersep-rt-onnxruntime",
-      "filename": "onnxruntime.dll",
-      "role": "runtime",
-      "family": "shared",
-      "subdir": "runtime",
-      "displayName": "ONNX Runtime",
-      "scale": null,
-      "variant": null,
-      "quant": null,
-      "sizeBytes": 15151416,
-      "repo": "scragnog/HOT-Step-CPP-SuperSep",
-      "description": "Core ONNX Runtime inference library. Required for all SuperSep stem separation.",
-      "tags": [
-        "runtime"
-      ],
-      "repoPath": "runtime/onnxruntime.dll"
-    },
-    {
-      "id": "supersep-rt-ort-cuda",
-      "filename": "onnxruntime_providers_cuda.dll",
-      "role": "runtime",
-      "family": "shared",
-      "subdir": "runtime",
-      "displayName": "ORT CUDA Provider",
-      "scale": null,
-      "variant": null,
-      "quant": null,
-      "sizeBytes": 294311736,
-      "repo": "scragnog/HOT-Step-CPP-SuperSep",
-      "description": "CUDA execution provider for GPU-accelerated stem separation.",
-      "tags": [
-        "runtime"
-      ],
-      "repoPath": "runtime/onnxruntime_providers_cuda.dll"
-    },
-    {
-      "id": "supersep-rt-ort-shared",
-      "filename": "onnxruntime_providers_shared.dll",
-      "role": "runtime",
-      "family": "shared",
-      "subdir": "runtime",
-      "displayName": "ORT Shared Provider",
-      "scale": null,
-      "variant": null,
-      "quant": null,
-      "sizeBytes": 21816,
-      "repo": "scragnog/HOT-Step-CPP-SuperSep",
-      "description": "Shared provider support library for ONNX Runtime.",
-      "tags": [
-        "runtime"
-      ],
-      "repoPath": "runtime/onnxruntime_providers_shared.dll"
     },
     {
       "id": "supersep-rt-cudnn",

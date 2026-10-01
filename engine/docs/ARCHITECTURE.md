@@ -79,11 +79,7 @@ straight to `/synth` or `ace-synth`.
     "lm_adapter_scale":     1.0,
     "postprocess_plugin":   "",
     "pp_vae_reencode":      false,
-    "get_lrc":              false,
-    "use_ort_vae":          false,
-    "stream_mode":          false,
-    "stream_depth":         8,
-    "stream_chunk_dir":     ""
+    "get_lrc":              false
 }
 ```
 
@@ -275,13 +271,6 @@ VAE decode instead of the built-in tiled decoder.
 **`pp_vae_reencode`** (bool, default false). Round-trips the audio through the
 post-processing VAE when a PP-VAE model is installed.
 
-**`use_ort_vae`** (bool, default false). Retired: ONNX Runtime is not compiled in
-and `--onnx-dir` no longer selects a decoder, so decode runs on GGML either way.
-
-**`stream_mode`** (bool, default false), **`stream_depth`** (int, default 8),
-**`stream_chunk_dir`** (string). Routes the DiT through the ring-buffer streaming
-pipeline. Needs an ONNX DiT.
-
 ### Models and adapters
 
 **`synth_model`** (string). DiT file name from the registry. Empty keeps the loaded
@@ -327,7 +316,7 @@ only the first object's sideband fields are read.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `vae_model` | `""` | VAE from the registry. An `.onnx` VAE routes decode through ONNX Runtime and encodes with the first non-ONNX VAE |
+| `vae_model` | `""` | VAE from the registry. An unavailable `.onnx` VAE is rejected |
 | `emb_model` | `""` | Text encoder from the registry |
 | `infer_method` | `"euler"` | Solver plugin name. Unknown names fall back to `euler` |
 | `scheduler` | `""` | Scheduler plugin name. Empty uses the shift schedule |
@@ -639,9 +628,6 @@ Memory control:
   --vae-chunk <N>         Latent frames per tile (default: 256)
   --vae-overlap <N>       Overlap frames per side (default: 64)
 
-ONNX/TensorRT:
-  --onnx-dir <dir>        Directory with ONNX models (e.g. vae_decoder.onnx)
-
 Speculative decoding:
   --draft-lm <path>       Path to 0.6B draft LM (auto-discovers if omitted)
   --no-draft              Disable draft model auto-discovery
@@ -671,7 +657,6 @@ Notes the usage text does not cover:
 - `--max-batch` is clamped to 1..9.
 - `--models` is scanned at startup, and its `onnx/` subfolder too. `--adapters` is
   scanned for DiT adapters and its `lm/` subfolder for planner-LM adapters.
-- `--onnx-dir` is accepted and ignored; the ONNX VAE decoder is no longer auto-selected.
 - The app starts ace-server on port 8085.
 
 | Pipeline | Needs | Enables |

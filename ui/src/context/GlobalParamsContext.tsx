@@ -153,11 +153,10 @@ export interface GlobalParams {
   // PP-VAE
   ppVaeReencode: boolean; setPpVaeReencode: (v: boolean) => void;
   ppVaeBlend: number; setPpVaeBlend: (v: number) => void;
-  ppVaeUseOnnx: boolean; setPpVaeUseOnnx: (v: boolean) => void;
   // StableStep (SA3 refine)
   stableStepOn: boolean; setStableStepOn: (v: boolean) => void;
   stableStepStrength: number; setStableStepStrength: (v: number) => void;
-  stableStepBackend: 'auto' | 'onnx' | 'gguf'; setStableStepBackend: (v: 'auto' | 'onnx' | 'gguf') => void;
+  stableStepBackend: 'auto' | 'gguf'; setStableStepBackend: (v: 'auto' | 'gguf') => void;
   stableStepAdapters: Array<{ name: string; scale: number; enabled: boolean }>;
   setStableStepAdapters: (v: Array<{ name: string; scale: number; enabled: boolean }>) => void;
   stableStepPreserveDynamics: boolean; setStableStepPreserveDynamics: (v: boolean) => void;
@@ -189,8 +188,6 @@ export interface GlobalParams {
   lufsPreset: string; setLufsPreset: (v: string) => void;
   lufsTarget: number; setLufsTarget: (v: number) => void;
   lufsCeilingDb: number; setLufsCeilingDb: (v: number) => void;
-  // VAE backend
-  useOrtVae: boolean; setUseOrtVae: (v: boolean) => void;
   // Whisper Lyrics
   whisperLyricsEnabled: boolean; setWhisperLyricsEnabled: (v: boolean) => void;
   whisperModel: string; setWhisperModel: (v: string) => void;

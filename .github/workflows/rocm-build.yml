@@ -17,9 +17,9 @@
 #     shipped; users build them with engine/buildhip.sh.
 #
 # BUILD PARITY
-#   Configured like build-linux in release.yml — ONNX Runtime present, backend
-#   DL on, all CPU variants, every target built. It used to build only
-#   `ace-server` with no ORT, which left most of the engine untested under HIP:
+#   Configured like build-linux in release.yml — backend DL on, all CPU
+#   variants, every target built. It used to build only `ace-server`, which
+#   left most of the engine untested under HIP:
 #   ace-caption broke the ordinary Linux build for twelve days in 2026-08 and
 #   this job could not have caught it, because it never compiled that target.
 #
@@ -66,9 +66,6 @@ jobs:
       # '__hip_fp8_e4m3'". Upstream's guard is a minor version too low; bumping
       # is cheaper than carrying a patch for it.
       ROCM_VERSION: '6.4.4'
-      # Matches release.yml so the ORT paths (sa3-refine, the ORT VAE/encoders)
-      # actually get compiled here.
-      ORT_VERSION: '1.25.1'
       # Single GPU arch. HIP recompiles the whole ggml-cuda kernel set per
       # target, so each extra arch is roughly another full kernel build. gfx1030
       # (RDNA2) is the same default engine/buildhip.sh falls back to.
@@ -154,25 +151,6 @@ jobs:
           /opt/rocm/llvm/bin/clang++ --version
           df -h /
 
-      # ── ONNX Runtime ───────────────────────────────────────────
-      # Same package and version release.yml's build-linux uses. CMake
-      # auto-detects it at engine/deps/onnxruntime, which turns on
-      # HOT_STEP_ORT_PATHS — sa3-refine.h and the ORT VAE/encoder paths.
-      - name: Cache ONNX Runtime
-        id: cache-ort
-        uses: actions/cache@v4
-        with:
-          path: engine/deps/onnxruntime
-          key: ort-linux-x64-gpu-${{ env.ORT_VERSION }}
-
-      - name: Download ONNX Runtime
-        if: steps.cache-ort.outputs.cache-hit != 'true'
-        run: |
-          ORT_URL="https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ORT_VERSION }}/onnxruntime-linux-x64-gpu-${{ env.ORT_VERSION }}.tgz"
-          mkdir -p engine/deps
-          curl -sL "$ORT_URL" | tar -xz -C engine/deps
-          mv "engine/deps/onnxruntime-linux-x64-gpu-${{ env.ORT_VERSION }}" engine/deps/onnxruntime
-
       # HIPCXX/HIP_PATH is the invocation ggml documents for HIP builds; without
       # it CMake's enable_language(HIP) may not find the ROCm clang.
       # GGML_STATIC must stay OFF — ggml-hip raises a hard FATAL_ERROR on it.
@@ -200,12 +178,6 @@ jobs:
           grep -q "building with AMD ROCm support" configure.log \
             || { echo "::error::ROCm gate did not fire — find_package(hip) failed inside the GGML_HIP block"; exit 1; }
           echo "GGML_HIP=ON and the ROCm gate fired"
-
-      - name: Assert the ONNX Runtime paths compiled
-        run: |
-          grep -q "ONNX Runtime paths: ENABLED" configure.log \
-            || { echo "::error::ORT paths did not compile — sa3-refine and the ORT VAE/encoders went untested"; exit 1; }
-          echo "HOT_STEP_ORT_PATHS is on"
 
       # Every target, as release.yml's build-linux does. The tools are cheap
       # next to the HIP kernels, which are already built by the time they start.

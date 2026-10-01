@@ -157,20 +157,12 @@ export function startAceServer(): ChildProcess | null {
     args.push('--vae-overlap', String(config.aceServer.vaeOverlap));
   }
 
-  // Add ONNX model directory for ORT/TRT VAE (if it exists and contains .onnx files)
-  if (config.aceServer.onnxDir && fs.existsSync(config.aceServer.onnxDir)) {
-    const hasOnnx = fs.readdirSync(config.aceServer.onnxDir).some(f => f.endsWith('.onnx'));
-    if (hasOnnx) {
-      args.push('--onnx-dir', config.aceServer.onnxDir);
-      console.log(`[Server] ONNX models: ${config.aceServer.onnxDir}`);
-    }
-  }
 
   console.log(`[Server] Starting ace-server: ${path.basename(exe)}`);
   console.log(`[Server] Models: ${config.aceServer.models}`);
   console.log(`[Server] Port: ${config.aceServer.port}`);
 
-  // Inject TensorRT libs into PATH if available (so ORT can load nvinfer_10.dll)
+  // Inject TensorRT libs into PATH if available.
   // and CUDA_VISIBLE_DEVICES for GPU selection.
   // IMPORTANT: On Windows, process.env is a case-insensitive Proxy, but spreading
   // it to a plain object creates case-sensitive keys. The key is typically 'Path'

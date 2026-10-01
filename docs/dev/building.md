@@ -69,18 +69,14 @@ engine\build.cmd
 
 1. Finds `vcvars64.bat` through `vswhere` and sources it, unless `VSCMD_VER` shows the VS
    environment is already loaded.
-2. Downloads the ONNX Runtime GPU SDK (1.25.1) into `engine/deps/onnxruntime` if it is
-   missing. Set `ONNXRUNTIME_ROOT` to use your own copy. Nothing links it any more:
-   `HOT_STEP_ORT_PATHS` is forced OFF in `engine/CMakeLists.txt`, including in build
-   directories that cached it ON.
-3. Installs `nvidia-cudnn-cu12` with pip and copies `cudnn64_9.dll` into
+2. Installs `nvidia-cudnn-cu12` with pip and copies `cudnn64_9.dll` into
    `engine/build/Release/` if it is missing.
-4. Runs `cmake ..` only when `engine/build/CMakeCache.txt` does not exist. The default flags
+3. Runs `cmake ..` only when `engine/build/CMakeCache.txt` does not exist. The default flags
    are `-DGGML_CUDA=ON -DGGML_CUDA_GRAPHS=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90;120a"
    -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_BACKEND_DL=ON`. `HOT_STEP_CMAKE_FLAGS`
    replaces the backend flags when set (`update.bat` sets it for auto-detected backends).
-5. Runs `engine\verify-hooks.ps1` and stops if a fork hook or ggml patch is missing.
-6. Builds with `cmake --build . --config Release`.
+4. Runs `engine\verify-hooks.ps1` and stops if a fork hook or ggml patch is missing.
+5. Builds with `cmake --build . --config Release`.
 
 Binaries land in `engine/build/Release/`. With the Ninja generator they land in
 `engine/build/` instead; the server looks in both.
@@ -91,7 +87,7 @@ Other Windows scripts in `engine/`:
 |---|---|---|
 | `buildcuda.cmd` | `cmake .. -DGGML_CUDA=ON`, every run | Rarely; `build.cmd` supersedes it |
 | `buildvulkan.cmd` | `cmake .. -DGGML_VULKAN=ON`, every run | Vulkan backend work |
-| `buildall.cmd` | CUDA, Vulkan and all CPU variants, every run, plus the ORT download | Release-style build. `install.bat` calls this one |
+| `buildall.cmd` | CUDA, Vulkan and all CPU variants, every run | Release-style build. `install.bat` calls this one |
 
 All of them build into the same `engine/build/` folder. The scripts that reconfigure on
 every run change the CMake cache, and switching between them can force a large part of the
@@ -317,7 +313,7 @@ Layout of a Windows package, as assembled by `release.yml`:
 | `server/server.mjs` | The server bundled with esbuild (`release/esbuild.config.mjs`) |
 | `server/ffmpeg.exe` | From the `ffmpeg-static` package |
 | `server/data/` | Everything from `server/src/data/`, copied whole |
-| `engine/` | `ace-server`, `ace-train`, `ace-caption`, `ace-midi`, `mastering`, `mp3-codec`, `neural-codec`, `quantize`, `vst-host`, the ggml DLLs for the variant, ONNX Runtime DLLs, and `engine/plugins/` |
+| `engine/` | `ace-server`, `ace-train`, `ace-caption`, `ace-midi`, `mastering`, `mp3-codec`, `neural-codec`, `quantize`, `vst-host`, the ggml DLLs for the variant, and `engine/plugins/` |
 | `plugins/` | The repo-root plugin overlay |
 | `VERSION` | The release version, shown by the app |
 | `.env.example` | Copied from the repo root |

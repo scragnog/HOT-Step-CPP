@@ -182,8 +182,6 @@ export interface AceRequest {
   plugin_params?: Record<string, string | number | boolean>;
   // Postprocess plugin: name of the Lua postprocess plugin to use for VAE decode
   postprocess_plugin?: string;
-  // VAE backend selection: true = ONNX Runtime (+TensorRT), false/undefined = GGML (default)
-  use_ort_vae?: boolean;
   // Streaming pipeline (DEMON-style ring buffer)
   stream_mode?: boolean;       // true = route through streaming pipeline
   stream_depth?: number;       // ring buffer depth (default 8)

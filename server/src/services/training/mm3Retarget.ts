@@ -7,7 +7,7 @@
 // WHY THE SEPARATION LIVES HERE. The excision must never cut through singing — a dataset lyric sheet is untimed
 // plain text, and removing sung audio without editing it teaches the model a lyric/audio mismatch. So the engine
 // needs to know where the vocals are, and that means SuperSep. But `ace-train` is deliberately standalone
-// (header-only, no acestep-core, no ONNX Runtime), and supersep.h states its VRAM policy is sequential with the
+// (header-only, no acestep-core), and supersep.h states its VRAM policy is sequential with the
 // GGML model store, which a second process cannot honour while ace-server is alive. Running it here, through the
 // engine's existing endpoint, keeps one owner of the GPU and one copy of the models.
 //

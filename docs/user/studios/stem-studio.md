@@ -48,8 +48,6 @@ Extract is generative, not literal separation: the DiT model listens to the full
 
 SuperSep needs its model files installed through Model Manager first. The "Stem Separation" pack (BS-RoFormer, Mel-Band RoFormer, MDX23C) covers Basic, Vocal Split, Full and the BS-RoFormer 2-Stem level; the separate "StableStep Separation (Leap Xe)" pack is needed for the Leap Xe 2-Stem level. Level 3 ("Maximum") was retired and no longer appears in the dropdown, though older saved jobs that used it still work.
 
-<!-- TODO(verify): the model registry also lists a "Stem Separation Runtime" pack (ONNX Runtime + cuDNN, ~1.3 GB) described as required for GPU separation, while every individual SuperSep model file's own description says "native GGML, no ONNX Runtime". Confirm with a maintainer whether that runtime pack is still needed for any current separation level before telling users to download it. -->
-
 Some SuperSep levels produce hidden intermediate stems, for example the raw combined vocal buss before it's split into lead and backing. These save to disk for debugging but never appear in the Stem Mixer or the stem count.
 
 Both modes write into the same job history and disk layout, so Recent Extractions, downloads and deletion work identically regardless of which one produced a job. Settings has a stem storage counter and a "Clear All Stems" button that deletes every job's files at once.

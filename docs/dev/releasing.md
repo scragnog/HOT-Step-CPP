@@ -200,9 +200,6 @@ itself, for that one matrix entry only.
   version before its `config.json` exists, and `latest` then 404s in
   `setup-vulkan-sdk`. To bump it, check
   `https://vulkan.lunarg.com/sdk/config/<ver>/windows/config.json` returns 200.
-- **ORT archives don't always match their file name.** The 1.26 CUDA 13 Linux
-  tarball unpacks to `onnxruntime-linux-x64-gpu-1.26.0/` (no `_cuda13`), so
-  the download steps strip or glob the top folder instead of naming it.
 - **Any pushed `v*` tag triggers the Release pipeline.** Use `vX.Y.Z` for
   releases and `-CI-Test` (or other hyphenated) tags for throwaway checks; delete
   them afterward. Don't push local feature tags that match `v*`.

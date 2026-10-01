@@ -68,9 +68,8 @@ router.get('/pp-vae', (_req, res) => {
 
 // GET /api/models/stablestep — check StableStep (SA3) model availability
 // GGML is the only engine backend: 4 GGUF files at the models dir root, plus
-// tokenizer.json in onnx/sa3/ (Node tokenizes). The ONNX backend is retired;
-// backends.onnx stays in the response, always false, until the UI drops it.
-// Returns { available, backends: { onnx, gguf }, files } — files lists what
+// tokenizer.json in onnx/sa3/ (Node tokenizes).
+// Returns { available, backends: { gguf }, files } — files lists what
 // is actually present in the sa3 directory.
 const SA3_GGUF_FILES = [
   'sa3-dit-BF16.gguf',
@@ -91,7 +90,7 @@ router.get('/stablestep', (_req, res) => {
     const gguf = tokenizerOk && ggufWeights;
     res.json({
       available: gguf,
-      backends: { onnx: false, gguf },
+      backends: { gguf },
       // Which half is missing. The tokenizer is 34 MB and lives under onnx/sa3
       // even though the GGML backend needs it, so deleting that folder takes
       // the backend down — and the old answer to that was a bare "not
@@ -103,7 +102,7 @@ router.get('/stablestep', (_req, res) => {
   } catch (err: any) {
     res.json({
       available: false,
-      backends: { onnx: false, gguf: false },
+      backends: { gguf: false },
       tokenizer: false,
       ggufWeights: false,
       files: [],

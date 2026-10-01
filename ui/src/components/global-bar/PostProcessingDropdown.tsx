@@ -307,12 +307,11 @@ export const PostProcessingDropdown: React.FC = () => {
       .catch(() => setPpVaeAvailable(false));
   }, []);
 
-  // StableStep (SA3) availability — auto-detect ONNX (models/onnx/sa3) and
-  // GGML (root GGUFs) backend installs from the extended availability endpoint.
-  const [stableStepBackends, setStableStepBackends] = useState<{ onnx: boolean; gguf: boolean }>({ onnx: false, gguf: false });
+  // StableStep (SA3) availability — GGML weights plus the tokenizer.
+  const [stableStepBackends, setStableStepBackends] = useState<{ gguf: boolean }>({ gguf: false });
   const [stableStepAvailable, setStableStepAvailable] = useState(false);
   // Why it is unavailable, not just that it is. The GGML weights (5.8 GB) and
-  // the T5Gemma tokenizer (34 MB, under onnx/sa3 because the ONNX set shares it)
+  // the T5Gemma tokenizer (34 MB, under onnx/sa3)
   // go missing independently, and "not installed" next to a full models folder
   // sends you looking in the wrong place.
   const [stableStepParts, setStableStepParts] = useState<{ tokenizer: boolean; ggufWeights: boolean }>(
@@ -322,10 +321,10 @@ export const PostProcessingDropdown: React.FC = () => {
       .then(r => r.json())
       .then(data => {
         setStableStepAvailable(!!data.available);
-        setStableStepBackends({ onnx: !!data.backends?.onnx, gguf: !!data.backends?.gguf });
+        setStableStepBackends({ gguf: !!data.backends?.gguf });
         setStableStepParts({ tokenizer: !!data.tokenizer, ggufWeights: !!data.ggufWeights });
       })
-      .catch(() => { setStableStepAvailable(false); setStableStepBackends({ onnx: false, gguf: false }); });
+      .catch(() => { setStableStepAvailable(false); setStableStepBackends({ gguf: false }); });
   }, []);
 
   // StableStep DoRA adapters (models/sa3-adapters/*.gguf) — merged into the
@@ -572,19 +571,6 @@ export const PostProcessingDropdown: React.FC = () => {
                   formatDisplay={v => v === 0 ? 'Full PP-VAE' : v >= 1 ? 'Original' : (v * 100).toFixed(0) + '% original'}
                   tooltip="Blend original audio back into the PP-VAE output. 0% = fully processed, 100% = fully original."
                 />
-                {/* Backend selector: ONNX (ORT/TRT) vs GGUF (GGML) */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Zap size={14} className={gp.ppVaeUseOnnx ? 'text-emerald-400' : 'text-zinc-500'} />
-                    <ParamLabel label="ONNX (ORT/TRT)"
-                      className="text-sm text-zinc-600 dark:text-zinc-400"
-                      info={gp.ppVaeUseOnnx
-                        ? 'ONNX Runtime with TensorRT acceleration. Falls back to GGUF when the ONNX models are missing.'
-                        : 'GGUF (GGML) backend. Slower, but proven stable.'}
-                      onReset={gp.ppVaeUseOnnx !== GLOBAL_PARAM_DEFAULTS.ppVaeUseOnnx ? () => gp.setPpVaeUseOnnx(GLOBAL_PARAM_DEFAULTS.ppVaeUseOnnx) : undefined} />
-                  </div>
-                  <ToggleSwitch checked={gp.ppVaeUseOnnx} onChange={gp.setPpVaeUseOnnx} accentColor="emerald" />
-                </div>
               </div>
             )}
           </div>
@@ -616,11 +602,11 @@ export const PostProcessingDropdown: React.FC = () => {
               <p className="text-[10px] text-sky-300/80 leading-relaxed">
                 {stableStepParts.ggufWeights && !stableStepParts.tokenizer
                   ? 'The StableStep weights are installed but the T5Gemma tokenizer is missing. '
-                    + 'Both backends need it: download tokenizer.json, tokenizer_config.json and '
+                    + 'Download tokenizer.json, tokenizer_config.json and '
                     + 'special_tokens_map.json in the Model Manager (StableStep tab, ~34 MB) to '
                     + 're-enable this feature.'
-                  : 'StableStep models are not installed — download a backend set in the '
-                    + 'Model Manager (StableStep tab; GGML ~5.8 GB or ONNX ~12 GB) to '
+                  : 'StableStep models are not installed — download the GGML weights (~5.8 GB) in the '
+                    + 'Model Manager (StableStep tab) to '
                     + 'enable this feature.'}
               </p>
             </div>
@@ -636,20 +622,17 @@ export const PostProcessingDropdown: React.FC = () => {
                 formatDisplay={v => (v * 100).toFixed(0) + '%'}
                 tooltip="How much of the instrumental is re-rendered. Higher values re-interpret the instrumentation more; lower values stay closer to the original. 30% is a good balance between cleanup and faithfulness."
               />
-              {/* Backend selector: Auto / ONNX (TensorRT) / GGML */}
+              {/* Backend selector: Auto / GGML */}
               <div>
                 <ParamLabel label="Backend" rootClassName="flex mb-1"
                   className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-                  info={gp.stableStepBackend === 'onnx'
-                    ? 'ONNX Runtime with TensorRT (NVIDIA). The first run per song-length bucket builds the TensorRT engine — slow once, then cached.'
-                    : gp.stableStepBackend === 'gguf'
+                  info={gp.stableStepBackend === 'gguf'
                       ? 'GGML backend — runs on CUDA, Vulkan or CPU. Fastest option on NVIDIA in current testing.'
-                      : 'Auto lets the engine pick the best installed backend.'}
+                      : 'Auto uses the GGML backend.'}
                   onReset={gp.stableStepBackend !== GLOBAL_PARAM_DEFAULTS.stableStepBackend ? () => gp.setStableStepBackend(GLOBAL_PARAM_DEFAULTS.stableStepBackend) : undefined} />
                 <div className="flex rounded-xl overflow-hidden border border-zinc-300 dark:border-white/10 bg-zinc-100 dark:bg-zinc-800">
                   {([
                     { value: 'auto' as const, label: 'Auto', installed: true },
-                    { value: 'onnx' as const, label: 'ONNX (TensorRT)', installed: stableStepBackends.onnx },
                     { value: 'gguf' as const, label: 'GGML', installed: stableStepBackends.gguf },
                   ]).map((opt, idx) => {
                     const selected = gp.stableStepBackend === opt.value;
@@ -662,10 +645,8 @@ export const PostProcessingDropdown: React.FC = () => {
                         title={!opt.installed
                           ? `${opt.label} models not installed — download in Model Manager (StableStep tab)`
                           : opt.value === 'auto'
-                            ? 'Let the engine pick the best installed backend'
-                            : opt.value === 'onnx'
-                              ? 'ONNX Runtime with TensorRT acceleration (NVIDIA only)'
-                              : 'GGML backend — CUDA, Vulkan or CPU'}
+                            ? 'Use the GGML backend'
+                            : 'GGML backend — CUDA, Vulkan or CPU'}
                         className={`flex-1 px-2 py-1.5 text-xs transition-colors ${idx > 0 ? 'border-l border-zinc-300 dark:border-white/10' : ''} ${
                           selected
                             ? 'bg-sky-500/20 text-sky-600 dark:text-sky-300 font-medium'

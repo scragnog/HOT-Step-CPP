@@ -101,7 +101,7 @@ export type LmRepMode = 'presence' | 'frequency' | 'dry';
 /** StableStep refine backend and source-blend mode — named so the store's
  *  GLOBAL_PARAM_DEFAULTS entries can carry the setter's union without a
  *  narrowing cast at each call site. */
-export type StableStepBackend = 'auto' | 'onnx' | 'gguf';
+export type StableStepBackend = 'auto' | 'gguf';
 export type StableStepBlendMode = 'off' | 'crossover' | 'mix';
 
 /** Parameters sent to the generation API */
@@ -177,7 +177,6 @@ export interface GenerationParams {
   lmModel: string;
   vaeModel: string;
   embeddingModel?: string;
-  useOrtVae?: boolean;  // Use ONNX Runtime VAE instead of GGML
 
   // Adapter
   loraPath: string;
@@ -303,7 +302,6 @@ export interface GenerationParams {
   // PP-VAE re-encode (spectral cleanup via post-processing VAE)
   ppVaeReencode?: boolean;
   ppVaeBlend?: number;         // 0.0 = fully PP-VAE, 1.0 = fully original
-  ppVaeUseOnnx?: boolean;      // true = prefer ONNX/TRT, false = force GGUF
 
   // StableStep (SA3 SDEdit refine of the instrumental)
   stableStepOn?: boolean;

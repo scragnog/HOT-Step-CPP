@@ -165,7 +165,10 @@ export function translateParams(params: any): AceRequest {
   // LM adapter rides the request and the user didn't set a penalty; the base
   // planner has never looped and keeps its untouched sampling.
   if (req.lm_adapter && params.lmRepPenalty === undefined) req.lm_rep_penalty = 1.05;
-  if (params.vaeModel) req.vae_model = params.vaeModel;
+  // Old profiles can still send an unavailable VAE. Empty selects the engine default.
+  if (typeof params.vaeModel === 'string' && params.vaeModel && !/\.onnx$/i.test(params.vaeModel)) {
+    req.vae_model = params.vaeModel;
+  }
   if (params.embeddingModel) req.emb_model = params.embeddingModel;
   if (params.loraPath) req.adapter = mapPath(params.loraPath);
   if (params.loraScale !== undefined) req.adapter_scale = params.loraScale;
@@ -319,9 +322,6 @@ export function translateParams(params: any): AceRequest {
   if (params.postprocessPlugin) {
     req.postprocess_plugin = params.postprocessPlugin;
   }
-
-  // VAE backend selection (ONNX Runtime / TensorRT)
-  if (params.useOrtVae) req.use_ort_vae = true;
 
   // Streaming pipeline (DEMON-style ring buffer)
   if (params.streamMode) req.stream_mode = true;

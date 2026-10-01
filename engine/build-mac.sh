@@ -10,12 +10,6 @@
 #   ./build-mac.sh          # Release build with Metal
 #   ./build-mac.sh Debug    # Debug build
 #
-# ONNX Runtime (SuperSep):
-#   To enable stem separation, download the macOS ONNX Runtime package:
-#     brew install onnxruntime
-#   Or download from: https://github.com/microsoft/onnxruntime/releases
-#   Place in engine/deps/onnxruntime-osx-arm64/ (or set ORT_ROOT)
-
 set -e
 
 cd "$(dirname "$0")"
@@ -40,18 +34,6 @@ if command -v ninja &>/dev/null; then
     echo "Generator: Ninja"
 else
     echo "Generator: Unix Makefiles (install ninja for faster builds: brew install ninja)"
-fi
-
-# Auto-detect ONNX Runtime
-ORT_FLAG=""
-if [ -n "${ORT_ROOT}" ]; then
-    echo "ONNX Runtime: ${ORT_ROOT}"
-elif [ -d "../deps/onnxruntime-osx-arm64" ]; then
-    export ORT_ROOT="../deps/onnxruntime-osx-arm64"
-    echo "ONNX Runtime: auto-detected at ${ORT_ROOT}"
-else
-    echo "ONNX Runtime: not found (SuperSep will be disabled)"
-    echo "  → To enable: brew install onnxruntime, or download manually"
 fi
 
 cmake .. \

@@ -317,8 +317,8 @@ class ModelDownloadService extends EventEmitter {
     }
 
     // Scan the StableStep (SA3) directory — lives two levels deep
-    // (<modelsDir>/onnx/sa3) and contains non-model extensions
-    // (.onnx.data, .json) that the generic scan above ignores.
+    // (<modelsDir>/onnx/sa3) and contains tokenizer JSON files that the
+    // generic scan above ignores.
     const sa3Dir = path.join(dir, 'onnx', 'sa3');
     if (fs.existsSync(sa3Dir)) {
       for (const f of fs.readdirSync(sa3Dir)) {
@@ -460,12 +460,11 @@ class ModelDownloadService extends EventEmitter {
   /** Delete a model/runtime file from disk */
   deleteFile(filename: string): boolean {
     // Safety: only known model/runtime extensions.
-    // .data / .json are StableStep (SA3) companions (sa3-dit.onnx.data,
-    // tokenizer.json etc.) living under onnx/sa3; .i32 is the YuE2 minted
+    // .json covers StableStep tokenizer files under onnx/sa3; .i32 is the YuE2 minted
     // regulariser's codes blob under yue2/, which is a catalogue download and
     // so has to be deletable like any other.
-    if (!filename.endsWith('.gguf') && !filename.endsWith('.onnx') && !filename.endsWith('.safetensors') && !filename.endsWith('.dll') && !filename.endsWith('.bin') && !filename.endsWith('.data') && !filename.endsWith('.json') && !filename.endsWith('.i32')) {
-      throw new Error('Can only delete .gguf, .onnx, .safetensors, .bin, .dll, .data, .json, or .i32 files');
+    if (!filename.endsWith('.gguf') && !filename.endsWith('.onnx') && !filename.endsWith('.safetensors') && !filename.endsWith('.dll') && !filename.endsWith('.bin') && !filename.endsWith('.json') && !filename.endsWith('.i32')) {
+      throw new Error('Can only delete .gguf, .onnx, .safetensors, .bin, .dll, .json, or .i32 files');
     }
 
     // For DLLs, check engine directory

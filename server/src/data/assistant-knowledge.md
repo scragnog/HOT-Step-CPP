@@ -284,14 +284,11 @@ Adapters fine-tune the DiT for specific styles, artists, or genres.
 ### StableStep (SA3 Refine)
 - `stableStepOn` (bool): Re-render the track's instrumental through Stable Audio 3 to replace VAE fizz with real detail
 - `stableStepStrength` (0.10-0.60, default 0.30): "Refine strength" — how much of the instrumental is re-rendered; higher values re-interpret the instrumentation more
-- `stableStepBackend` ('auto' | 'onnx' | 'gguf', default 'auto'): which engine backend runs the SA3 refine; 'auto' lets the engine pick the best installed backend
+- `stableStepBackend` ('auto' | 'gguf', default 'auto'): both choices run the GGML SA3 refine
 - `stableStepVocalPpVae` (bool, default OFF): re-encode the isolated vocal stem through the PP-VAE before remixing. It smooths fizzy/mechanical AS1.5 vocals, but the round trip is lossy — measured against a resample-only control it costs ~2 dB across the midrange rising to ~6 dB above 16 kHz, halves the energy above 10 kHz, and drops input/output coherence below 0.1 above 4 kHz (the top octaves are resynthesised, not reproduced). Left off, the original vocal stem is remixed untouched
 - How it works: the song is stem-split; the instrumental is re-rendered via Stable Audio 3 (SDEdit) at the chosen strength; the vocal stem is passed through unchanged (or through the PP-VAE if `stableStepVocalPpVae` is on); then everything is remixed
-- Where: the toggle lives in the Post-Processing dropdown in the global bar, next to PP-VAE; a "Backend" selector (Auto / ONNX (TensorRT) / GGML) appears below the strength slider when the toggle is on
-- Two engine backends exist — install either or both in Model Manager → StableStep tab (a Stability AI Community License acceptance is required before download):
-  - GGML backend: 4 GGUF files (~5.8 GB) at the models root. Runs on CUDA, Vulkan or CPU — it is the ONLY option for Vulkan/CPU builds, and in current testing it is also faster on NVIDIA (~2s vs ~29s per 30-second clip)
-  - ONNX backend: fp32 ONNX set (~12 GB, NVIDIA TensorRT only) — retained as an alternative. First use after download is slow: the TensorRT engine is built once per song-length bucket, then cached — later runs at that length are fast
-  - The tokenizer files from the ONNX set are required by BOTH backends (the server tokenizes the prompt)
+- Where: the toggle lives in the Post-Processing dropdown in the global bar, next to PP-VAE; a "Backend" selector (Auto / GGML) appears below the strength slider when the toggle is on
+- Install the four GGUF weights (~5.8 GB) and three tokenizer files in Model Manager → StableStep tab. License acceptance is required before download. The engine runs on CUDA, Vulkan or CPU; the server tokenizes the prompt.
 
 ### Duration Buffer & Auto-Trim
 - `autoTrimEnabled` (bool): Detect silence at the end and trim

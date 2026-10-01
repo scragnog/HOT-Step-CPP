@@ -57,7 +57,6 @@ In the tables below, the Settings column says where a key appears:
 | `ACESTEPCPP_EXE` | First that exists of `engine/ace-server[.exe]`, `engine/build/Release/`, `engine/build/`, `engine/build/Debug/`; else the first | env only | The engine binary to spawn. Other tools (`vst-host`, `ace-train`, `ace-midi`, `ace-caption`, `mastering`) are looked up next to it |
 | `ACESTEPCPP_MODELS` | `<root>/models` | Environment, Restart | Passed to the engine as `--models`. Also the base for the default Whisper models folder |
 | `ACESTEPCPP_ADAPTERS` | `<root>/adapters` | Environment, Restart | Passed as `--adapters`, only when the folder exists |
-| `ACESTEPCPP_ONNX_DIR` | `<root>/models/onnx` | env only | Passed as `--onnx-dir`, only when the folder exists and holds at least one `.onnx` file |
 | `ACESTEPCPP_NOISE_PROFILE` | First `.wav` in `<root>/noise_samples/`, or empty | env only | Passed as `--noise-profile` when the file exists |
 | `DATA_DIR` | `./data` | Environment, Restart | Data folder: `hotstep.db`, `audio/`, `references/`, `vst/`, `lyrics/`, `training/`. See [How DATA_DIR resolves](#how-data_dir-resolves) |
 | `LYRICS_EXPORT_DIR` | `<data dir>/lyrics` | Environment | Where Lyric Studio exports lyrics. Hot-reloaded |
@@ -107,7 +106,7 @@ Vite with `--port 3000 --host`, and `ui/vite.config.ts` sets port 3000 and host 
 | `YUE2_OVERLAP_MIN_FREE_GB` | `4` | Engine process | Free VRAM the NAR lane needs at the handoff; below it the render runs inline |
 | `ACESTEPCPP_DRAFT_LM` | empty | env only | Passed as `--draft-lm` when the file exists. Speculative decoding is off on purpose: per-call GGML overhead cancels the gain |
 | `CUDA_VISIBLE_DEVICES` | empty (all GPUs) | Environment, Restart | GPU for the engine and for `ace-train`. The Settings picker writes a GPU UUID. A value that is not a UUID is passed through as given, and the server sets `CUDA_DEVICE_ORDER=PCI_BUS_ID` so indices match `nvidia-smi`. The child environment is rebuilt from the live `config` value on every spawn, so a training job started after saving uses the new GPU |
-| `TENSORRT_LIBS` | `engine/deps/tensorrt_libs` if it contains `nvinfer_10.dll` or `libnvinfer.so.10`, else empty | env only | Prepended to the engine's `PATH` so ONNX Runtime and TensorRT can load. If a `trtllm-libs` folder exists two levels above the engine binary, it is prepended too |
+| `TENSORRT_LIBS` | `engine/deps/tensorrt_libs` if it contains `nvinfer_10.dll` or `libnvinfer.so.10`, else empty | env only | Prepended to the engine's `PATH` so TensorRT can load. If a `trtllm-libs` folder exists two levels above the engine binary, it is prepended too |
 
 ### Warm-up on startup
 
@@ -141,7 +140,6 @@ All of these are env only.
 | `--draft-lm <gguf>` | `ACESTEPCPP_DRAFT_LM` | File exists |
 | `--vae-chunk <n>` | `ACESTEPCPP_VAE_CHUNK` | Non-zero |
 | `--vae-overlap <n>` | `ACESTEPCPP_VAE_OVERLAP` | Non-zero |
-| `--onnx-dir <dir>` | `ACESTEPCPP_ONNX_DIR` | Folder exists and holds a `.onnx` file |
 
 The engine accepts more flags than these. [engine.md](engine.md) covers the engine's own
 command line.

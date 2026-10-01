@@ -42,7 +42,7 @@ const CONTENT_KEYS: Record<string, string> = {
 export const PARAM_GROUPS: { title: string; fields: string[] }[] = [
   {
     title: 'Models',
-    fields: ['ditModel', 'lmModel', 'vaeModel', 'embeddingModel', 'useOrtVae'],
+    fields: ['ditModel', 'lmModel', 'vaeModel', 'embeddingModel'],
   },
   {
     title: 'Adapters',
@@ -81,7 +81,7 @@ export const PARAM_GROUPS: { title: string; fields: string[] }[] = [
       'masteringEnabled', 'masteringReference', 'timbreReference', 'timbreAudioPath',
       'vocalNaturalizerEnabled', 'gainOffsetDb', 'naturalizeAmount', 'natVibratoRate',
       'natVibratoDepth', 'natFormantStrength', 'natMetallicReduction', 'natQuantizationMask',
-      'natTransitionSmooth', 'ppVaeReencode', 'ppVaeBlend', 'ppVaeUseOnnx',
+      'natTransitionSmooth', 'ppVaeReencode', 'ppVaeBlend',
       'stableStepOn', 'stableStepStrength', 'stableStepBackend',
       'stableStepAdapters', 'stableStepPreserveDynamics', 'stableStepVocalPpVae',
       'stableStepVocalTrimDb',
@@ -243,7 +243,6 @@ function prettifyKey(key: string): string {
     .replace(/\bLufs\b/g, 'LUFS')
     .replace(/\bCfg\b/g, 'CFG')
     .replace(/\bBpm\b/g, 'BPM')
-    .replace(/\bOrt\b/g, 'ORT')
     .replace(/\bCot\b/g, 'CoT');
 }
 

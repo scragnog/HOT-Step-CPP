@@ -730,7 +730,6 @@ export async function runAceGeneration(
           return;
         }
         if (line.text.includes('[VAE-Decode]') ||
-            line.text.includes('[VAE-ORT] Tiled decode') ||
             line.text.includes('[VAE] Tiled decode') ||
             line.text.includes('[VAE] Graph:')) {
           // Only trigger on actual decode start, not VAE model loading
@@ -753,7 +752,7 @@ export async function runAceGeneration(
             : `Decoding audio (VAE)${trackLabel}...`;
           job.progress = Math.round(trackProgressBase + progressPerTrack * 0.9);
         } else if (line.text.includes('[VAE-Decode Batch') && line.text.includes('Decode:')) {
-          // End of actual VAE decode (e.g. "[VAE-Decode Batch0] Decode: 442.0 ms (ORT)")
+          // End of actual VAE decode (e.g. "[VAE-Decode Batch0] Decode: 442.0 ms")
           vaeEndAt = now;
         } else if (line.text.includes('[VAE]') && (line.text.includes('Loaded') || line.text.includes('Backend'))) {
           // VAE model loading — update stage but don't set vaeStartAt

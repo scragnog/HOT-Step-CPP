@@ -48,7 +48,7 @@ variable, including how `DATA_DIR` resolves.
 `server/src/services/aceEngineProcess.ts` owns the `ace-server` child process. On startup
 `index.ts` calls `startAceServer()`, which passes `--models`, `--host` and `--port`, plus
 `--adapters`, `--keep-loaded`, `--noise-profile`, `--draft-lm`, `--vae-chunk`,
-`--vae-overlap` and `--onnx-dir` when their settings apply. The full list is in
+`--vae-overlap` when their settings apply. The full list is in
 [config.md](config.md#flags-passed-to-ace-server).
 
 - An abnormal exit respawns the engine after 3 seconds. Three crashes inside 30 seconds
@@ -175,7 +175,7 @@ map of top-level pieces.
 | `engine/src/lua-plugin.h`, `lua-plugin-registry.h` | Lua plugin host. Scans `engine/plugins/` and the repo-root `plugins/` overlay for solvers, schedulers, guidance and postprocess plugins |
 | `engine/src/adapter-merge.h`, `adapter-runtime.h`, `adapter-cancel.h`, `lokr-*.h` | DiT adapter loading, merge and runtime modes |
 | `engine/src/model-store.h`, `model-store.cpp`, `model-registry.h` | Model discovery and VRAM residency |
-| `engine/src/vae*.h`, `vae-ort.h` | VAE encode and decode, GGML and ONNX Runtime |
+| `engine/src/vae*.h` | VAE encode and decode on GGML |
 | `engine/src/dit-trt.h`, `lm-trt.h`, `hot-step-sampler-trt.h` | TensorRT paths |
 | `engine/src/supersep.cpp`, `spectral-lifter.h`, `sa3-*.h` | Stem separation, the Spectral Lifter, and the Stable Audio 3 refiner |
 | `engine/src/hot-step-families.h` | Registry of the extra model families hosted by `ace-server` |

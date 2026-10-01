@@ -147,7 +147,6 @@ export const GLOBAL_PARAM_DEFAULTS = {
   natTransitionSmooth: 1.0,
   ppVaeReencode: false,
   ppVaeBlend: 0.0,
-  ppVaeUseOnnx: true,
   stableStepOn: false,
   stableStepStrength: 0.3,
   stableStepBackend: 'auto' as StableStepBackend,
@@ -178,7 +177,6 @@ export const GLOBAL_PARAM_DEFAULTS = {
   yue2AlignLyrics: false,
   postprocessEnabled: false,
   postprocessPlugin: '',
-  useOrtVae: false,
   lufsEnabled: false,
   lufsPreset: 'spotify',
   lufsTarget: -14,
@@ -289,7 +287,10 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   // -- State (initialised from localStorage) --
   ditModel: readKey("hs-ditModel", GLOBAL_PARAM_DEFAULTS.ditModel),
   lmModel: readKey("hs-lmModel", GLOBAL_PARAM_DEFAULTS.lmModel),
-  vaeModel: readKey("hs-vaeModel", GLOBAL_PARAM_DEFAULTS.vaeModel),
+  vaeModel: (() => {
+    const saved = readKey("hs-vaeModel", GLOBAL_PARAM_DEFAULTS.vaeModel);
+    return typeof saved === 'string' && !/\.onnx$/i.test(saved) ? saved : GLOBAL_PARAM_DEFAULTS.vaeModel;
+  })(),
   lmAdapter: readKey("hs-lmAdapter", GLOBAL_PARAM_DEFAULTS.lmAdapter),
   lmAdapterScale: readKey("hs-lmAdapterScale", GLOBAL_PARAM_DEFAULTS.lmAdapterScale),
   embeddingModel: readKey("hs-embeddingModel", GLOBAL_PARAM_DEFAULTS.embeddingModel),
@@ -427,12 +428,11 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   natTransitionSmooth: readKey("hs-natTransitionSmooth", GLOBAL_PARAM_DEFAULTS.natTransitionSmooth),
   ppVaeReencode: readKey("hs-ppVaeReencode", GLOBAL_PARAM_DEFAULTS.ppVaeReencode),
   ppVaeBlend: readKey("hs-ppVaeBlend", GLOBAL_PARAM_DEFAULTS.ppVaeBlend),
-  ppVaeUseOnnx: readKey("hs-ppVaeUseOnnx", GLOBAL_PARAM_DEFAULTS.ppVaeUseOnnx),
   stableStepOn: readKey("hs-stableStepOn", GLOBAL_PARAM_DEFAULTS.stableStepOn),
   stableStepStrength: readKey("hs-stableStepStrength", GLOBAL_PARAM_DEFAULTS.stableStepStrength),
-  // Engine backend for the SA3 refine: 'auto' (engine picks) | 'onnx'
-  // (ONNX Runtime/TensorRT, NVIDIA) | 'gguf' (GGML — CUDA/Vulkan/CPU).
-  stableStepBackend: readKey("hs-stableStepBackend", GLOBAL_PARAM_DEFAULTS.stableStepBackend),
+  // Engine backend for the SA3 refine: 'auto' or 'gguf', both using GGML.
+  // Old saved values normalize to auto, matching the server.
+  stableStepBackend: readKey("hs-stableStepBackend", GLOBAL_PARAM_DEFAULTS.stableStepBackend) === 'gguf' ? 'gguf' : 'auto',
   // StableStep DoRA adapters: [{name, scale, enabled}] — persisted selection
   stableStepAdapters: readKey("hs-stableStepAdapters", GLOBAL_PARAM_DEFAULTS.stableStepAdapters),
   // Preserve source dynamics: envelope-match refined audio to the source
@@ -484,9 +484,6 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   postprocessEnabled: readKey('hs-postprocessEnabled', GLOBAL_PARAM_DEFAULTS.postprocessEnabled),
   postprocessPlugin: readKey('hs-postprocessPlugin', GLOBAL_PARAM_DEFAULTS.postprocessPlugin),
 
-  // VAE backend selection (ONNX Runtime / TensorRT)
-  useOrtVae: readKey('hs-useOrtVae', GLOBAL_PARAM_DEFAULTS.useOrtVae),
-
   // Final Normalizer (LUFS) — runs last, after the VST chain and mastering
   lufsEnabled: readKey('hs-lufsEnabled', GLOBAL_PARAM_DEFAULTS.lufsEnabled),
   lufsPreset: readKey('hs-lufsPreset', GLOBAL_PARAM_DEFAULTS.lufsPreset),
@@ -499,12 +496,9 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setLmAdapter: (v: any) => { set({ lmAdapter: v }); writeKey("hs-lmAdapter", v); },
   setLmAdapterScale: (v: any) => { set({ lmAdapterScale: v }); writeKey("hs-lmAdapterScale", v); },
   setVaeModel: (v: any) => {
-    set({ vaeModel: v });
-    writeKey("hs-vaeModel", v);
-    // Auto-detect ORT backend from file extension
-    const isOnnx = /\.onnx$/i.test(v || '');
-    set({ useOrtVae: isOnnx });
-    writeKey('hs-useOrtVae', isOnnx);
+    const model = typeof v === 'string' && !/\.onnx$/i.test(v) ? v : GLOBAL_PARAM_DEFAULTS.vaeModel;
+    set({ vaeModel: model });
+    writeKey("hs-vaeModel", model);
   },
   setEmbeddingModel: (v: any) => { set({ embeddingModel: v }); writeKey("hs-embeddingModel", v); },
   setAdapter: (v: any) => { set({ adapter: v }); writeKey("hs-adapter", v); },
@@ -640,10 +634,9 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setNatTransitionSmooth: (v: any) => { set({ natTransitionSmooth: v }); writeKey("hs-natTransitionSmooth", v); },
   setPpVaeReencode: (v: any) => { set({ ppVaeReencode: v }); writeKey("hs-ppVaeReencode", v); },
   setPpVaeBlend: (v: any) => { set({ ppVaeBlend: v }); writeKey("hs-ppVaeBlend", v); },
-  setPpVaeUseOnnx: (v: any) => { set({ ppVaeUseOnnx: v }); writeKey("hs-ppVaeUseOnnx", v); },
   setStableStepOn: (v: any) => { set({ stableStepOn: v }); writeKey("hs-stableStepOn", v); },
   setStableStepStrength: (v: any) => { set({ stableStepStrength: v }); writeKey("hs-stableStepStrength", v); },
-  setStableStepBackend: (v: any) => { set({ stableStepBackend: v }); writeKey("hs-stableStepBackend", v); },
+  setStableStepBackend: (v: any) => { const backend = v === 'gguf' ? 'gguf' : 'auto'; set({ stableStepBackend: backend }); writeKey("hs-stableStepBackend", backend); },
   setStableStepAdapters: (v: any) => { set({ stableStepAdapters: v }); writeKey("hs-stableStepAdapters", v); },
   setStableStepPreserveDynamics: (v: any) => { set({ stableStepPreserveDynamics: v }); writeKey("hs-stableStepPreserveDynamics", v); },
   setStableStepVocalPpVae: (v: any) => { set({ stableStepVocalPpVae: v }); writeKey("hs-stableStepVocalPpVae", v); },
@@ -671,7 +664,6 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setYue2AlignLyrics: (v: any) => { set({ yue2AlignLyrics: v }); writeKey("hs-yue2AlignLyrics", v); },
   setPostprocessEnabled: (v: any) => { set({ postprocessEnabled: v }); writeKey("hs-postprocessEnabled", v); },
   setPostprocessPlugin: (v: any) => { set({ postprocessPlugin: v }); writeKey("hs-postprocessPlugin", v); },
-  setUseOrtVae: (v: any) => { set({ useOrtVae: v }); writeKey('hs-useOrtVae', v); },
   setLufsEnabled: (v: any) => { set({ lufsEnabled: v }); writeKey('hs-lufsEnabled', v); },
   setLufsPreset: (v: any) => {
     set({ lufsPreset: v });
@@ -904,11 +896,10 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       natTransitionSmooth: (s.postProcessingEnabled && s.vocalNaturalizerEnabled) ? s.natTransitionSmooth : undefined,
       ppVaeReencode: (s.postProcessingEnabled && s.ppVaeReencode) || undefined,
       ppVaeBlend: (s.postProcessingEnabled && s.ppVaeReencode && s.ppVaeBlend > 0) ? s.ppVaeBlend : undefined,
-      ppVaeUseOnnx: (s.postProcessingEnabled && s.ppVaeReencode) ? s.ppVaeUseOnnx : undefined,
       stableStepOn: (s.postProcessingEnabled && s.stableStepOn) || undefined,
       stableStepStrength: (s.postProcessingEnabled && s.stableStepOn) ? s.stableStepStrength : undefined,
-      stableStepBackend: (s.postProcessingEnabled && s.stableStepOn && s.stableStepBackend !== 'auto')
-        ? s.stableStepBackend : undefined,
+      stableStepBackend: (s.postProcessingEnabled && s.stableStepOn && s.stableStepBackend === 'gguf')
+        ? 'gguf' : undefined,
       stableStepAdapters: (s.postProcessingEnabled && s.stableStepOn)
         ? (s.stableStepAdapters ?? [])
             .filter((a: any) => a.enabled && a.scale !== 0)
@@ -963,7 +954,6 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       lufsEnabled: (s.postProcessingEnabled && s.lufsEnabled) || undefined,
       lufsTarget: (s.postProcessingEnabled && s.lufsEnabled) ? s.lufsTarget : undefined,
       lufsCeilingDb: (s.postProcessingEnabled && s.lufsEnabled) ? s.lufsCeilingDb : undefined,
-      useOrtVae: s.useOrtVae || undefined,
       whisperLyricsEnabled: s.whisperLyricsEnabled,
       whisperModel: s.whisperLyricsEnabled ? s.whisperModel : undefined,
       whisperLanguage: s.whisperLyricsEnabled ? s.whisperLanguage : undefined,

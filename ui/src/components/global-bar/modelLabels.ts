@@ -78,7 +78,6 @@ export function formatVaeModel(filename: string): string {
   // Format badge in ModelSelect handles GGUF/ST indication — no suffix needed
   if (name === 'vae') return 'VAE';
   if (name === 'scragvae') return 'ScragVAE';
-  if (name === 'vae-DreamVAE') return 'DreamVAE';
   // Regrind family: vae-Regrind-V9b, vae-Regrind-V10b-Blend50, ... (any version)
   const regrindMatch = name.match(/^vae-Regrind-(V\w+?)(-Blend50)?$/i);
   if (regrindMatch) return `Regrind ${regrindMatch[1]}${regrindMatch[2] ? ' Blend50' : ''}`;
@@ -171,7 +170,6 @@ export function getLmModelDescription(filename: string): string {
 export function getVaeModelDescription(filename: string): string {
   if (!filename) return '';
   const name = filename.replace(/\.(gguf|safetensors|onnx)$/i, '').toLowerCase();
-  if (name.includes('dreamvae')) return 'DreamVAE — alternative decoder architecture with smoother output characteristics.';
   if (name.includes('regrind') && name.includes('blend50')) {
     if (name.includes('v10b')) return 'Regrind V10b Blend50 — 50/50 blend of V10b with stock weights. Recommended starting point for most material.';
     return 'Regrind Blend50 — 50/50 blend of a Regrind decoder with stock weights for balanced clarity.';

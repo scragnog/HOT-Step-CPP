@@ -40,7 +40,7 @@ const ROLE_FAMILY_FALLBACK: Record<RoleTab, FamilyTab> = {
 
 /** Family for one registry file, honoring an explicit `family` first. The
  *  'runtime' role has no tab of its own and splits across two families: the
- *  TensorRT DLLs are MM3-only, the CUDA/ORT runtime DLLs are shared. */
+ *  TensorRT DLLs are MM3-only, and cuDNN runtime DLLs are shared. */
 export function familyForFile(f: RegistryFile): FamilyTab {
   if (f.family) return f.family;
   if (f.role === 'runtime') return f.id.startsWith('trt-rt-') ? 'mm3' : 'shared';
@@ -116,8 +116,8 @@ const ROLE_INFO: Record<string, string> = {
   embedding: 'The text encoder (Qwen3 Embedding) converts your caption and lyrics into embeddings for the DiT. It is architecturally locked — all DiT models were trained with this exact encoder. You need exactly one.',
   vae: 'The VAE (Variational Autoencoder) decodes the DiT\'s latent output into audio waveforms. The standard VAE is required for all generation. ScragVAE is a fine-tuned decoder with improved high-frequency response — it\'s a drop-in replacement.',
   'pp-vae': 'The Post-Processing VAE performs a neural audio polish pass — running generated audio through an encode→decode round-trip to smooth artifacts and improve tonal coherence. Optional but recommended. Use F32 for best quality.',
-  stablestep: 'Stable Audio 3 refiner models for the StableStep post-processing feature. StableStep re-renders the instrumental through Stable Audio 3 to replace VAE fizz with real detail; vocals are split out, cleaned with PP-VAE, and remixed. Two engine backends are available — install either (or both): the GGML backend (4 GGUF files, ~5.8 GB) runs on CUDA, Vulkan or CPU and is the fastest option on NVIDIA in current testing; the ONNX backend (~12 GB, fp32) runs via TensorRT on NVIDIA only and is slow on first use while the TensorRT engine builds (one-time per length bucket). The tokenizer files from the ONNX set are required by BOTH backends. Powered by Stability AI.',
-  supersep: 'Stem separation models for Cover Studio. Uses a 4-stage ONNX pipeline: BS-Roformer splits audio into 6 stems, Mel-Band RoFormer separates lead/backing vocals, MDX23C isolates drum components, and HTDemucs refines the "other" stem. All 4 models are required for full separation. Models run via ONNX Runtime GPU — no Python needed.',
+  stablestep: 'Stable Audio 3 refiner models for the StableStep post-processing feature. StableStep re-renders the instrumental through Stable Audio 3 to replace VAE fizz with real detail; vocals are split out, cleaned with PP-VAE, and remixed. The GGML backend uses four GGUF weights (~5.8 GB) and three tokenizer files. It runs on CUDA, Vulkan or CPU. Powered by Stability AI.',
+  supersep: 'Native GGML stem separation models for Cover Studio. BS-Roformer splits audio into six stems, Mel-Band RoFormer separates lead and backing vocals, and MDX23C isolates drum components. Install the model files for the separation stages you use.',
   whisper: 'OpenAI Whisper models for transcribing actual sung lyrics with word-level timestamps. Enable Whisper Lyrics in Post-Processing to use.',
   moss: 'MOSS-Music-8B — the only model here that ANALYSES audio rather than generating it. It captions your own tracks locally in the Training Studio, writing what it actually hears instead of rewriting a text analysis, and emits both the ACE-Step caption format and MM3 Structured Captions from a single pass. Pick one LM (Q8_0 recommended) plus the audio tower, which is required and never quantised. Nothing else in the app depends on these — they are only used when you choose MOSS as the caption provider.',
   mm3: 'MiniMax-Music3 — a separate generation backend with its own models: a language model plus a 5-way split flow stack (depth decoder, condition encoder, DiT, vocoder — the LM and DiT are the two you must pick; the rest default to auto). All required roles load together, needing ~24 GB of VRAM. Switch to it via the Backend toggle in the top bar. A LICENSE file is fetched alongside automatically once a GGUF finishes downloading.',
@@ -533,11 +533,9 @@ const StableStepTab: React.FC<{
 
   const missing = files.filter(f => !f.installed);
 
-  // Two engine backends ship under the same repo: the GGUF files (models root)
-  // power the GGML backend; everything else is the ONNX/TensorRT set. The
-  // tokenizer JSONs in the ONNX set are required by BOTH backends.
+  // GGUF weights live at the models root; tokenizer files remain under onnx/sa3.
   const ggufFiles = files.filter(f => f.filename.endsWith('.gguf'));
-  const onnxFiles = files.filter(f => !f.filename.endsWith('.gguf'));
+  const tokenizerFiles = files.filter(f => !f.filename.endsWith('.gguf'));
 
   // Gate every download behind license acceptance.
   const gatedDownload = (fileId: string) => {
@@ -624,7 +622,7 @@ const StableStepTab: React.FC<{
       {missing.length > 0 && (
         <div className="flex items-center justify-between px-1">
           <span className="text-[11px] text-zinc-500">
-            {files.length - missing.length}/{files.length} files installed &middot; GGML set ~5.8 GB &middot; ONNX set ~12 GB
+            {files.length - missing.length}/{files.length} files installed &middot; GGML weights ~5.8 GB
           </span>
           <button
             onClick={handleDownloadAll}
@@ -642,7 +640,7 @@ const StableStepTab: React.FC<{
         </div>
       )}
 
-      {/* File list — grouped by engine backend */}
+      {/* File list — weights and tokenizer */}
       <div className={`space-y-3 ${licenseAccepted ? '' : 'opacity-60'}`}>
         {ggufFiles.length > 0 && (
           <div className="space-y-1.5">
@@ -651,9 +649,8 @@ const StableStepTab: React.FC<{
                 GGML backend (universal — CUDA/Vulkan/CPU)
               </h4>
               <p className="text-[10px] text-zinc-500 leading-relaxed">
-                4 GGUF files (~5.8 GB). Fastest option on NVIDIA in current testing
-                and the only backend for Vulkan/CPU builds. Also requires the
-                tokenizer files from the ONNX set below.
+                4 GGUF files (~5.8 GB). Runs on CUDA, Vulkan and CPU. Also
+                requires the tokenizer files below.
               </p>
             </div>
             {ggufFiles.map(f => (
@@ -669,18 +666,17 @@ const StableStepTab: React.FC<{
             ))}
           </div>
         )}
-        {onnxFiles.length > 0 && (
+        {tokenizerFiles.length > 0 && (
           <div className="space-y-1.5">
             <div className="px-1">
               <h4 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                ONNX backend (NVIDIA TensorRT)
+                Tokenizer files
               </h4>
               <p className="text-[10px] text-zinc-500 leading-relaxed">
-                fp32 ONNX set (~12 GB), NVIDIA only. The tokenizer files in this
-                set are required by BOTH backends.
+                Required for StableStep prompt tokenization.
               </p>
             </div>
-            {onnxFiles.map(f => (
+            {tokenizerFiles.map(f => (
               <ModelRow
                 key={f.id}
                 file={f}

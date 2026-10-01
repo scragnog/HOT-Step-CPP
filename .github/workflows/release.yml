@@ -21,9 +21,6 @@ permissions:
 
 env:
   NODE_VERSION: '24.18.0'
-  # 1.26 is the first release with a CUDA 13 build of the GPU package (#94);
-  # the CUDA 12 build keeps the unsuffixed name.
-  ORT_VERSION: '1.26.0'
   # TensorRT SDK for the Windows cuda13.1 variant only (see
   # docs/plans/2026-09-11-mm3-trt-dit-shipping.md and docs/dev/releasing.md
   # "TensorRT SDK for CI"). The headers+license zip is hosted; the .lib import
@@ -167,29 +164,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      # ── ONNX Runtime (SuperSep) ────────────────────────────────
-      - name: Cache ONNX Runtime
-        id: cache-ort
-        uses: actions/cache@v4
-        with:
-          path: engine/deps/onnxruntime
-          key: ort-win-x64-gpu-${{ env.ORT_VERSION }}-cuda${{ matrix.cuda_version }}
-
-      - name: Download ONNX Runtime
-        if: steps.cache-ort.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          # The CUDA 13 variants need the provider built against CUDA 13 (#94).
-          $cudaMajor = '${{ matrix.cuda_version }}'.Split('.')[0]
-          $ortPkg = if ($cudaMajor -eq '13') { "onnxruntime-win-x64-gpu_cuda13-${{ env.ORT_VERSION }}" } else { "onnxruntime-win-x64-gpu-${{ env.ORT_VERSION }}" }
-          $ortUrl = "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ORT_VERSION }}/$ortPkg.zip"
-          $ortZip = "$env:RUNNER_TEMP\ort.zip"
-          Write-Host "Downloading ORT from $ortUrl"
-          Invoke-WebRequest -Uri $ortUrl -OutFile $ortZip -UseBasicParsing
-          New-Item -ItemType Directory -Force engine/deps | Out-Null
-          Expand-Archive -Path $ortZip -DestinationPath engine/deps -Force
-          Get-ChildItem engine/deps -Directory -Filter "onnxruntime-win-x64-gpu*" | Select-Object -First 1 | Move-Item -Destination engine/deps/onnxruntime  # the cuda13 archive's top folder may lack the _cuda13 suffix
 
       # ── Portable Node.js ───────────────────────────────────────
       - name: Cache portable Node.js
@@ -550,21 +524,6 @@ jobs:
             Copy-Item $_.FullName (Join-Path $engineOut $_.Name)
           }
 
-          # ORT DLLs (for SuperSep — all variants need onnxruntime.dll for CPU inference)
-          $ortLib = "engine/deps/onnxruntime/lib"
-          if (Test-Path $ortLib) {
-            # Core runtime — needed by all variants
-            $ortCore = Join-Path $ortLib "onnxruntime.dll"
-            if (Test-Path $ortCore) { Copy-Item $ortCore (Join-Path $engineOut "onnxruntime.dll") }
-            # CUDA providers — only needed for CUDA variant
-            if ($variant -match "^cuda") {
-              foreach ($dll in @("onnxruntime_providers_shared.dll", "onnxruntime_providers_cuda.dll")) {
-                $src = Join-Path $ortLib $dll
-                if (Test-Path $src) { Copy-Item $src (Join-Path $engineOut $dll) }
-              }
-            }
-          }
-
           # Lua plugins
           if (Test-Path "engine/plugins") {
             Copy-Item -Recurse "engine/plugins" "$engineOut/plugins"
@@ -575,7 +534,7 @@ jobs:
 
           # MSVC Runtime DLLs (CRT + OpenMP)
           # CI runners have multiple Redist versions — always pick the NEWEST
-          # to avoid ABI mismatches with pre-built binaries like onnxruntime.dll.
+          # to avoid ABI mismatches with pre-built engine dependencies.
           # CRT DLLs (vcruntime, msvcp) — all live under Microsoft.VC143.CRT
           $msvcRedist = Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -Recurse -Filter "vcruntime140.dll" -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match 'x64' -and $_.FullName -notmatch 'debug' -and $_.FullName -match 'Redist' } |
@@ -1273,25 +1232,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      # ── ONNX Runtime (SuperSep) ────────────────────────────────
-      - name: Cache ONNX Runtime
-        id: cache-ort
-        uses: actions/cache@v4
-        with:
-          path: engine/deps/onnxruntime
-          key: ort-linux-x64-gpu-${{ env.ORT_VERSION }}-cuda${{ matrix.cuda_version }}
-
-      - name: Download ONNX Runtime
-        if: steps.cache-ort.outputs.cache-hit != 'true'
-        run: |
-          # The CUDA 13 variant needs the provider built against CUDA 13 (#94).
-          CUDA_MAJOR=$(echo '${{ matrix.cuda_version }}' | cut -d. -f1)
-          if [ "$CUDA_MAJOR" = "13" ]; then ORT_PKG="onnxruntime-linux-x64-gpu_cuda13-${{ env.ORT_VERSION }}"; else ORT_PKG="onnxruntime-linux-x64-gpu-${{ env.ORT_VERSION }}"; fi
-          ORT_URL="https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ORT_VERSION }}/$ORT_PKG.tgz"
-          echo "Downloading ORT from $ORT_URL"
-          mkdir -p engine/deps/onnxruntime
-          curl -sL --fail "$ORT_URL" | tar -xz -C engine/deps/onnxruntime --strip-components=1  # the cuda13 archive's top folder has no _cuda13 suffix
-
       # ── Portable Node.js ───────────────────────────────────────
       - name: Cache portable Node.js
         id: cache-node
@@ -1501,24 +1441,12 @@ jobs:
             fi
           done
 
-          # Copy shared libraries (.so files — ggml backends, ORT)
+          # Copy shared libraries (.so files — ggml backends)
           find "$BUILD_DIR" -maxdepth 1 -name "*.so" -exec cp {} "$DIST/engine/" \;
           find "$BUILD_DIR" -maxdepth 1 -name "*.so.*" -exec cp {} "$DIST/engine/" \;
 
           # CPU variant .so files (ggml-cpu-*.so from GGML_CPU_ALL_VARIANTS)
           find "$BUILD_DIR" -maxdepth 1 -name "ggml-cpu-*.so" -exec cp {} "$DIST/engine/" \;
-
-          # ORT .so files (for SuperSep — all variants need libonnxruntime.so for CPU inference)
-          ORT_LIB="engine/deps/onnxruntime/lib"
-          if [ -d "$ORT_LIB" ]; then
-            # Core runtime — needed by all variants
-            find "$ORT_LIB" -name "libonnxruntime.so*" -exec cp {} "$DIST/engine/" \;
-            # CUDA providers — only needed for CUDA variant
-            if [[ "$VARIANT" =~ ^cuda ]]; then
-              find "$ORT_LIB" -name "libonnxruntime_providers_shared.so" -exec cp {} "$DIST/engine/" \;
-              find "$ORT_LIB" -name "libonnxruntime_providers_cuda.so" -exec cp {} "$DIST/engine/" \;
-            fi
-          fi
 
           # Lua plugins
           [ -d "engine/plugins" ] && cp -r engine/plugins "$DIST/engine/plugins"

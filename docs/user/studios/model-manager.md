@@ -46,8 +46,6 @@ See [the model list](../models.md) for every file in the catalogue: exact filena
 
 **Installed means the filename matched.** The installed check looks for the right filename at the right size class of extension, not file size or contents, so a partial or corrupted file placed there by hand can still show as Installed. Anything downloaded through Model Manager itself is checked: file size against the catalogue's expected size, plus a header check for `.gguf` and `.dll` files, before it is kept.
 
-**ONNX VAEs are decode-only.** If the only VAE installed is an ONNX one, cover, repaint, and extend have no VAE available for the encode step. Keep a GGUF or safetensors VAE installed alongside it.
-
 **Downloads run concurrently.** Start as many files as you like at once; each gets its own row in the Active Downloads banner and its own progress bar, cancel, and resume control.
 
 **Runtime files install elsewhere.** CUDA/cuDNN DLLs and TensorRT builder resources install next to the engine binary, not into the models folder, even though they appear as rows and packs here. TensorRT builder resources are GPU-specific; the MiniMax-Music3 TensorRT group marks the one that matches your GPU when it can detect it.

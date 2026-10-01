@@ -30,8 +30,8 @@ type StageFn = (stage: string) => void;
  *  deleting the temp file. */
 type VocalStemFn = (trackIdx: number, stemPath: string | null) => void;
 
-// StableStep GGML backend files — 4 GGUFs at the models dir root. The ONNX
-// backend is retired; tokenizer.json still lives in onnx/sa3 (Node tokenizes).
+// StableStep GGML backend files — 4 GGUFs at the models dir root.
+// tokenizer.json still lives in onnx/sa3 (Node tokenizes).
 // Keep in sync with SA3_GGUF_FILES in routes/models.ts.
 const SA3_GGUF_FILES = [
   'sa3-dit-BF16.gguf',
@@ -49,7 +49,7 @@ function sa3GgufInstalled(): boolean {
 
 // BS-Roformer-Leap "Xe" pair (huggingface.co/pcunwa/BS-Roformer-Leap). Both are
 // single-stem models differing only in target_instrument, and both run through
-// the engine's native GGML BS-RoFormer (bs-roformer-ggml.h), not ONNX Runtime.
+// the engine's native GGML BS-RoFormer (bs-roformer-ggml.h).
 // Keep in sync with BS_MODEL_LEAP_XE_* in engine/src/supersep.cpp.
 const LEAP_XE_FILES = ['bs_leap_xe_voc-F32.gguf', 'bs_leap_xe_inst-F32.gguf'];
 
@@ -107,7 +107,7 @@ export interface PostProcessParams {
   stableStepStrength?: number;   // 0..1 init noise level (default 0.3)
   stableStepSteps?: number;      // sampler steps (engine default 8, clamped 1..64)
   /** Engine backend for the SA3 refine: 'gguf' (GGML — CUDA/Vulkan/CPU) or
-   *  'auto' (default, also GGML). A stored 'onnx' normalizes to 'auto'. */
+   *  'auto' (default, also GGML). Old saved values normalize to 'auto'. */
   stableStepBackend?: 'auto' | 'gguf';
   /** Lua plugin routing for the SA3 sampler loop — same registry as the ACE
    *  Generation dropdowns. Absent = the original pingpong/euler path.
@@ -311,9 +311,8 @@ export function normalizePpParams(raw: any, captions: string[]): PostProcessPara
     // "stableStep" alias) and default the strength.
     stableStepOn: !!(raw.stableStepOn ?? raw.stableStep),
     stableStepStrength: typeof raw.stableStepStrength === 'number' ? raw.stableStepStrength : 0.3,
-    // Engine backend: only 'gguf' survives. Anything else, including a saved
-    // 'onnx' from before the ONNX backend was retired, normalizes to 'auto',
-    // which the engine resolves to GGML.
+    // Engine backend: only 'gguf' survives. Any other saved value normalizes
+    // to 'auto', which the engine resolves to GGML.
     stableStepBackend: raw.stableStepBackend === 'gguf' ? 'gguf' as const : 'auto' as const,
     // StableStep DoRA adapters: [{name, scale}] — normalized, disabled/zero
     // entries dropped (engine forces GGUF backend when any are active).
@@ -522,7 +521,7 @@ export async function runPostProcessingChain(
         if (!sa3Available) {
           log('WARNING', '[StableStep] SA3 models not installed (root sa3-*.gguf + onnx/sa3/tokenizer.json) — skipping');
         } else {
-          // Engine backend: 'gguf' or undefined (engine auto, also GGML). Never 'onnx'.
+          // Engine backend: 'gguf' or undefined (engine auto, also GGML).
           const backend = params.stableStepBackend === 'gguf' ? 'gguf' as const : undefined;
           const adapters = (params.stableStepAdapters ?? []).filter(a => a && a.name && a.scale !== 0);
           const envMatch = params.stableStepPreserveDynamics !== false;

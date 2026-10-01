@@ -50,7 +50,7 @@ export const SEPARATION_LEVELS: { value: SeparationLevel; label: string; descrip
     value: 5,
     label: '2-Stem (Leap Xe)',
     description: '2 stems, each from its own dedicated model — no mix-minus residual. '
-      + 'Native GGML, no ONNX Runtime. Requires the Leap Xe pair from Model Manager.',
+      + 'Native GGML. Requires the Leap Xe pair from Model Manager.',
   },
 ];
 
