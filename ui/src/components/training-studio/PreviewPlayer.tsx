@@ -29,7 +29,9 @@ export const PreviewPlayer: React.FC<{ src: string; label?: string; sublabel?: s
   const jumps = duration > 0 ? [0.5, 0.67, 0.85].map(f => ({ f, t: duration * f })) : [];
   return (
     <div className="rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/60 dark:bg-black/20 px-3 py-2">
-      <audio ref={audio} src={src} preload="metadata" />
+      {/* none, not metadata: a ladder mounts dozens of these, and Chrome's 6
+          connections per host fill with WAV preloads, stalling every click. */}
+      <audio ref={audio} src={src} preload="none" />
       <div className="flex items-center gap-3">
         <button type="button" onClick={toggle} className="w-9 h-9 shrink-0 rounded-full bg-amber-500 text-black flex items-center justify-center hover:bg-amber-400" aria-label={playing ? 'Pause' : 'Play'}>
           {playing ? <Pause size={16} /> : <Play size={16} className="ml-0.5" />}
