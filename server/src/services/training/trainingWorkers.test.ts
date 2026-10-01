@@ -29,10 +29,6 @@ test('TRAINING_WORKERS parses name=url pairs and skips junk', () => {
   } finally { config.workers.list = before; }
 });
 
-// ── pullLinked: a fake worker over a real loopback HTTP server, with
-// TRAINING_DIR/ACESTEPCPP_ADAPTERS/DATA_DIR isolated to a temp root so the
-// pull never touches this checkout's real adapters, training dir or db. ──
-
 const TRAINING_SRC_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 function runPullInIsolatedRoot(root: string, script: string): void {
   const env = {
@@ -41,6 +37,38 @@ function runPullInIsolatedRoot(root: string, script: string): void {
   };
   execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], { cwd: TRAINING_SRC_ROOT, env, stdio: 'pipe' });
 }
+
+test('workerLinkedPairs reads keptStep from the checkpoint directory itself, not a misleading ancestor folder name', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-worker-keptstep-'));
+  try {
+    const script = [
+      "import fs from 'node:fs';",
+      "import path from 'node:path';",
+      "import { recordYue2AitkRun } from './src/services/training/yue2AitkRuns.js';",
+      "import { workerLinkedPairs } from './src/services/training/trainingWorkers.js';",
+      // A run folder whose own name happens to look like a checkpoint dir —
+      // yue2JointOutputDirectory's trigger sanitization does not forbid this.
+      "const runDir = path.join(process.env.ACESTEPCPP_ADAPTERS, 'yue2-joint-adapters', 'checkpoint-step999_2026-10-01_12-00-00');",
+      "const ckptDir = path.join(runDir, 'segments', 'segment-000001', 'checkpoint-step120');",
+      "fs.mkdirSync(ckptDir, { recursive: true });",
+      "const arPath = path.join(ckptDir, 'native-ar.safetensors'); const narPath = path.join(ckptDir, 'native-nar.safetensors');",
+      "fs.writeFileSync(arPath, 'AR'); fs.writeFileSync(narPath, 'NAR');",
+      "recordYue2AitkRun({ version: 1, jobId: 'job1', datasetId: 'ds1', datasetSlug: 'album', method: 'aitk', output: runDir, options: {}, status: 'done', createdAt: 1, updatedAt: 2, checkpoints: [] });",
+      "fs.mkdirSync(process.env.TRAINING_DIR, { recursive: true });",
+      "fs.writeFileSync(path.join(process.env.TRAINING_DIR, 'yue2-linked.json'), JSON.stringify({ album: { arPath, narPath, at: new Date().toISOString() } }));",
+      "const pairs = workerLinkedPairs();",
+      "if (pairs.length !== 1) throw new Error('expected one linked pair: ' + JSON.stringify(pairs));",
+      "if (pairs[0].keptStep !== 120) throw new Error('keptStep picked up the ancestor folder name, not the checkpoint dir: ' + pairs[0].keptStep);",
+    ].join('');
+    runPullInIsolatedRoot(root, script);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── pullLinked: a fake worker over a real loopback HTTP server, with
+// TRAINING_DIR/ACESTEPCPP_ADAPTERS/DATA_DIR isolated to a temp root so the
+// pull never touches this checkout's real adapters, training dir or db. ──
 
 // Shared boilerplate every pull test needs: initDb, a dataset row per slug,
 // and a tiny HTTP server standing in for the worker's /linked + /adapter-file.

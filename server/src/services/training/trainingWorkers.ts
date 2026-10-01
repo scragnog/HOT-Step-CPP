@@ -156,7 +156,11 @@ export function workerLinkedPairs(): WorkerLinkedPair[] {
     const run = jointRunForAdapter(pair.arPath);
     if (run) {
       entry.jobId = run.jobId;
-      const step = /checkpoint-step(\d+)/.exec(pair.arPath)?.[1];
+      // The checkpoint directory itself, not a substring match anywhere in the
+      // path — a run folder's own name can legally contain "checkpoint-stepN"
+      // too (yue2JointOutputDirectory sanitizes a trigger into the folder name
+      // without forbidding that), which would misreport an ancestor's step.
+      const step = /^checkpoint-step(\d+)$/.exec(path.basename(path.dirname(pair.arPath)))?.[1];
       if (step) entry.keptStep = Number(step);
       const logs = listYue2TrainLogs(run.output)
         .map(({ seg, file }) => { try { const st = fs.statSync(file); return { seg, rel: path.relative(root, file).split(path.sep).join('/'), size: st.size, mtimeMs: Math.round(st.mtimeMs) }; } catch { return null; } })
