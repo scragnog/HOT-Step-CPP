@@ -273,3 +273,167 @@ test('gen_cancel posts to the matching route and returns the server response', a
   const outcome = await toolsMod.genCancel('job-9');
   assert.deepEqual(outcome, { kind: 'ok', data: { success: true, jobId: 'job-9' } });
 });
+
+// ── training tools ───────────────────────────────────────────────────────────
+
+test('train_capabilities returns the route\'s body whole', async () => {
+  fixture.route = (req, res) => {
+    assert.equal(req.url, '/api/training/capabilities');
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ engine: { up: true } }));
+  };
+  const outcome = await toolsMod.trainCapabilities();
+  assert.deepEqual(outcome, { kind: 'ok', data: { engine: { up: true } } });
+});
+
+test('train_datasets trims each row to id/name/slug/sourceDir/sampleCount/assets', async () => {
+  fixture.route = (req, res) => {
+    assert.equal(req.url, '/api/training/datasets');
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
+      datasets: [{
+        id: 'ds1', name: 'Album', slug: 'album', sourceDir: '/x/album', sampleCount: 12,
+        assets: { labeled: true, built: false }, customTag: 'secret-settings-field', status: 'labeling',
+      }],
+    }));
+  };
+  const outcome = await toolsMod.trainDatasets();
+  assert.deepEqual(outcome, {
+    kind: 'ok',
+    data: { datasets: [{ id: 'ds1', name: 'Album', slug: 'album', sourceDir: '/x/album', sampleCount: 12, assets: { labeled: true, built: false } }] },
+  });
+});
+
+test('train_dataset returns one dataset in full', async () => {
+  fixture.route = (req, res) => {
+    assert.equal(req.url, '/api/training/datasets/ds1');
+    assert.equal(req.method, 'GET');
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: 'ds1', samples: [] }));
+  };
+  const outcome = await toolsMod.trainDataset('ds1');
+  assert.deepEqual(outcome, { kind: 'ok', data: { id: 'ds1', samples: [] } });
+});
+
+test('train_dataset_create posts the exact CreateDatasetInput body', async () => {
+  let posted: unknown;
+  fixture.route = (req, res, body) => {
+    assert.equal(req.url, '/api/training/datasets');
+    assert.equal(req.method, 'POST');
+    posted = body;
+    res.writeHead(201, { 'content-type': 'application/json' }).end(JSON.stringify({ dataset: { id: 'ds2' } }));
+  };
+  const args = {
+    name: 'Album', sourceDir: '/x/album', recursive: true, customTag: 'tag', tagPosition: 'prepend' as const,
+    genreRatio: 50, defaultArtist: 'A', defaultAlbum: 'B', defaultGenre: 'G', defaultLanguage: 'english',
+  };
+  const outcome = await toolsMod.trainDatasetCreate(args);
+  assert.equal(outcome.kind, 'ok');
+  assert.deepEqual(posted, args);
+});
+
+test('train_dataset_rescan posts to the matching route', async () => {
+  fixture.route = (req, res) => {
+    assert.equal(req.url, '/api/training/datasets/ds1/rescan');
+    assert.equal(req.method, 'POST');
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: 'ds1' }));
+  };
+  const outcome = await toolsMod.trainDatasetRescan('ds1');
+  assert.deepEqual(outcome, { kind: 'ok', data: { id: 'ds1' } });
+});
+
+test('train_dataset_label stage="label" posts options verbatim to /label', async () => {
+  let posted: unknown;
+  fixture.route = (req, res, body) => {
+    assert.equal(req.url, '/api/training/datasets/ds1/label');
+    posted = body;
+    res.writeHead(202, { 'content-type': 'application/json' }).end(JSON.stringify({ jobId: 'job-label' }));
+  };
+  const options = { useEssentia: true, scope: 'all' };
+  const outcome = await toolsMod.trainDatasetLabel({ datasetId: 'ds1', stage: 'label', options });
+  assert.deepEqual(outcome, { kind: 'ok', data: { jobId: 'job-label' } });
+  assert.deepEqual(posted, options);
+});
+
+test('train_dataset_label stage="caption" posts options verbatim to /enhance/caption', async () => {
+  let posted: unknown;
+  fixture.route = (req, res, body) => {
+    assert.equal(req.url, '/api/training/datasets/ds1/enhance/caption');
+    posted = body;
+    res.writeHead(202, { 'content-type': 'application/json' }).end(JSON.stringify({ jobId: 'job-caption' }));
+  };
+  const options = { provider: 'gemini' };
+  const outcome = await toolsMod.trainDatasetLabel({ datasetId: 'ds1', stage: 'caption', options });
+  assert.deepEqual(outcome, { kind: 'ok', data: { jobId: 'job-caption' } });
+  assert.deepEqual(posted, options);
+});
+
+test('train_dataset_label stage="build" posts options verbatim to /build', async () => {
+  let posted: unknown;
+  fixture.route = (req, res, body) => {
+    assert.equal(req.url, '/api/training/datasets/ds1/build');
+    posted = body;
+    res.writeHead(202, { 'content-type': 'application/json' }).end(JSON.stringify({ jobId: 'job-build' }));
+  };
+  const options = { outputPath: '/x/album/dataset.json' };
+  const outcome = await toolsMod.trainDatasetLabel({ datasetId: 'ds1', stage: 'build', options });
+  assert.deepEqual(outcome, { kind: 'ok', data: { jobId: 'job-build' } });
+  assert.deepEqual(posted, options);
+});
+
+test('train_dataset_label surfaces a 409 ("a job is already running") verbatim', async () => {
+  fixture.route = (_req, res) => {
+    res.writeHead(409, { 'content-type': 'application/json' }).end(JSON.stringify({ error: 'A job is already running for this dataset' }));
+  };
+  const outcome = await toolsMod.trainDatasetLabel({ datasetId: 'ds1', stage: 'label', options: {} });
+  assert.equal(outcome.kind, 'http_error');
+  assert.equal((outcome as { status: number }).status, 409);
+  assert.match((outcome as { text: string }).text, /A job is already running for this dataset/);
+});
+
+test('train_jobs lists jobs, optionally filtered by datasetId', async () => {
+  fixture.route = (req, res) => {
+    assert.equal(req.url, '/api/training/jobs?datasetId=ds1');
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jobs: [] }));
+  };
+  const outcome = await toolsMod.trainJobs('ds1');
+  assert.deepEqual(outcome, { kind: 'ok', data: { jobs: [] } });
+});
+
+test('train_job GETs status by default', async () => {
+  fixture.route = (req, res) => {
+    assert.equal(req.url, '/api/training/jobs/job-1');
+    assert.equal(req.method, 'GET');
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: 'job-1', status: 'running' }));
+  };
+  const outcome = await toolsMod.trainJob('job-1');
+  assert.deepEqual(outcome, { kind: 'ok', data: { id: 'job-1', status: 'running' } });
+});
+
+test('train_job with cancel:true DELETEs instead', async () => {
+  fixture.route = (req, res) => {
+    assert.equal(req.url, '/api/training/jobs/job-1');
+    assert.equal(req.method, 'DELETE');
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true }));
+  };
+  const outcome = await toolsMod.trainJob('job-1', true);
+  assert.deepEqual(outcome, { kind: 'ok', data: { ok: true } });
+});
+
+// train_wait shares genWait's waitForJob loop (see the four gen_wait cases
+// above, which exercise the loop itself); these two only confirm train_wait
+// wires it to the right path and terminal-status set ('done', not 'succeeded').
+
+test('train_wait: budget runs out against a non-terminal job — outcome budget, status preserved', { timeout: 5000 }, async () => {
+  fixture.route = (req, res) => {
+    assert.equal(req.url, '/api/training/jobs/job-t1');
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: 'job-t1', status: 'running' }));
+  };
+  const outcome = await toolsMod.trainWait('job-t1', 1, new AbortController().signal);
+  assert.deepEqual(outcome, { kind: 'ok', data: { jobId: 'job-t1', outcome: 'budget', status: { id: 'job-t1', status: 'running' } } });
+});
+
+test('train_wait: a "done" status ends the loop as outcome done', async () => {
+  fixture.route = (_req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ id: 'job-t2', status: 'done' }));
+  };
+  const outcome = await toolsMod.trainWait('job-t2', 5, new AbortController().signal);
+  assert.deepEqual(outcome, { kind: 'ok', data: { jobId: 'job-t2', outcome: 'done', status: { id: 'job-t2', status: 'done' } } });
+});

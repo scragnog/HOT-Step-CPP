@@ -55,12 +55,14 @@ function firstText(result: CallToolResult): string {
   return (block as { type: 'text'; text: string }).text;
 }
 
-test('lists all eight generation tools', async () => {
+test('lists all eight generation tools and nine training tools', async () => {
   const { tools } = await client.listTools();
   const names = tools.map(t => t.name).sort();
   assert.deepEqual(names, [
     'gen_backends', 'gen_cancel', 'gen_configure', 'gen_queue',
     'gen_song', 'gen_status', 'gen_submit', 'gen_wait',
+    'train_capabilities', 'train_dataset', 'train_dataset_create', 'train_dataset_label',
+    'train_dataset_rescan', 'train_datasets', 'train_job', 'train_jobs', 'train_wait',
   ]);
 });
 

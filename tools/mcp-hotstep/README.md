@@ -1,10 +1,13 @@
-# HOT-Step MCP (generation)
+# HOT-Step MCP (generation + training)
 
-An MCP server exposing HOT-Step CPP's **generation** API — submit, poll, cancel,
-inspect the queue, switch backends, look up a saved song. All three generation
-backends (ACE-Step 1.5, MiniMax-Music3, YuE2) go through the same eight tools;
-none of them is backend-specific. Training over this same server is a later
-slice — none of the tools below cover it yet.
+An MCP server exposing HOT-Step CPP's **generation** and **training dataset/job**
+APIs. Generation: submit, poll, cancel, inspect the queue, switch backends,
+look up a saved song — all three backends (ACE-Step 1.5, MiniMax-Music3, YuE2)
+go through the same eight tools, none of them backend-specific. Training:
+list/create/rescan datasets, run the labeling pipeline's three stages, list
+and control jobs — the nine `train_*` tools below, all thin wrappers over
+`server/src/routes/training.ts`. Training a *backend* (LM/DiT/YuE2 adapters)
+is a later slice; these nine cover the dataset lifecycle and job control only.
 
 Everything here talks to the running app over its HTTP API
 (`server/src/routes/`) — nothing reads the database or engine state directly.
@@ -17,8 +20,8 @@ The app's HTTP API has **no real authentication**. `GET /api/auth/auto`
 hands out a token to anyone who asks, no credentials involved — that is the
 app's existing single-user, local-machine design, not something this MCP
 server adds or weakens further. Anyone who can reach `HOTSTEP_URL` can submit
-generations and (once training ships) start training jobs that occupy the
-GPU for a long time. Keep `HOTSTEP_URL` pointed at loopback unless you have
+generations and start labeling/caption/build jobs that occupy the GPU (MOSS,
+`/understand`) or run for a long time. Keep `HOTSTEP_URL` pointed at loopback unless you have
 deliberately put something else (a firewall, a tunnel with its own auth) in
 front of the app.
 
@@ -141,6 +144,63 @@ is reconstructed from this repo's own `DATA_DIR` resolution (mirrored in
 `src/tools.ts` — see the design note below, `server/src/config.ts` is never
 imported), so it is only correct if this MCP process sees the same
 `DATA_DIR` the running server does — true for the default, unmodified setup.
+
+### `train_capabilities`
+`GET /api/training/capabilities`, returned whole: engine readiness, and
+essentia/genius/LLM/MOSS/preprocess/train-lm/train-dit availability.
+
+### `train_datasets`
+`GET /api/training/datasets`, trimmed per row to `id`, `name`, `slug`,
+`sourceDir`, `sampleCount` and the on-disk asset flags (`assets` —
+labeled/built/tensor-variant/adapter state per backend from
+`datasetAssets.ts`) — not the full row, which also carries label/caption
+settings only the UI needs. Use `train_dataset` for one dataset in full.
+
+### `train_dataset`
+`{ id }` → `GET /api/training/datasets/:id`, returned whole.
+
+### `train_dataset_create`
+Mirrors `CreateDatasetInput` (`server/src/services/training/types.ts:600`):
+`{ name, sourceDir, recursive?, customTag?, tagPosition?, genreRatio?,
+defaultArtist?, defaultAlbum?, defaultGenre?, defaultLanguage? }` →
+`POST /api/training/datasets`. Returns `201` with the created dataset.
+
+### `train_dataset_rescan`
+`{ id }` → `POST /api/training/datasets/:id/rescan`. Refuses with `409`
+("A job is already running for this dataset") while a job is active for
+this dataset.
+
+### `train_dataset_label`
+One tool, three stages, all async (answer `202` with a `jobId` — poll with
+`train_wait` or `train_job`): `{ datasetId, stage, options? }`.
+- `stage: "label"` posts `options` as `LabelOptions` (`types.ts:644`) to
+  `/datasets/:id/label` — Essentia BPM/key, Genius lyrics, LLM caption; which
+  steps run is in `options`.
+- `stage: "caption"` posts `options` as `CaptionOptions` (`types.ts:672`) to
+  `/datasets/:id/enhance/caption` — re-caption with a specific provider.
+- `stage: "build"` posts `options` as `{ outputPath? }` to
+  `/datasets/:id/build` — write `dataset.json`.
+
+`options` is forwarded to the route **verbatim** — it is not re-typed here,
+so a field the route gains later needs no change on this side. All three
+refuse with `409` `"A job is already running for this dataset"` while one is
+active; `label` and `caption` additionally refuse with `409`
+`"MOSS and the /understand step need the engine, which a training job owns.
+Wait for it, or caption with a cloud provider (Gemini) instead."` when the
+engine is held by a training job.
+
+### `train_jobs`, `train_job`
+`{ datasetId? }` → `GET /api/training/jobs`, optionally filtered.
+`{ jobId, cancel? }` → `GET /api/training/jobs/:jobId`, or `DELETE` (cancel)
+when `cancel: true`.
+
+### `train_wait`
+Same contract as `gen_wait` (see above), against
+`GET /api/training/jobs/:jobId`: `{ jobId, maxSeconds? }` →
+`{ jobId, outcome, status }`. Terminal statuses are `TrainingJobStatus`'s
+(`types.ts:50`) `done`/`failed`/`cancelled` — note `done`, not `succeeded`
+(that's generation's vocabulary, not training's). Shares its polling loop
+(`waitForJob` in `src/tools.ts`) with `gen_wait` rather than duplicating it.
 
 ## Design notes for maintainers
 

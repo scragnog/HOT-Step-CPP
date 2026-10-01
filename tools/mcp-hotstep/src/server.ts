@@ -15,6 +15,8 @@ import { z } from 'zod';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import {
   genBackends, genConfigure, genSubmit, genStatus, genCancel, genQueue, genWait, genSong,
+  trainCapabilities, trainDatasets, trainDataset, trainDatasetCreate, trainDatasetRescan,
+  trainDatasetLabel, trainJobs, trainJob, trainWait,
   WAIT_DEFAULT_SECONDS, WAIT_MAX_SECONDS,
   type ToolOutcome,
 } from './tools.js';
@@ -114,6 +116,96 @@ export function createServer(): McpServer {
       'Never returns audio bytes; a filesystem path is included only when HOTSTEP_URL points at this machine (loopback), since otherwise the path would not resolve for the caller.',
     { songId: z.string() },
     async ({ songId }) => toResult(await genSong(songId)),
+  );
+
+  server.tool(
+    'train_capabilities',
+    'Training capabilities and engine readiness for the dataset pipeline (GET /api/training/capabilities): essentia/genius/LLM/MOSS availability, preprocess/train-lm/train-dit readiness, engine model registries. Returned whole.',
+    {},
+    async () => toResult(await trainCapabilities()),
+  );
+
+  server.tool(
+    'train_datasets',
+    'List training datasets (GET /api/training/datasets), trimmed to id, name, slug, sourceDir, sampleCount and the on-disk asset flags (labeled/built/tensors/adapters per backend) — not the full rows, which also carry label/caption settings only the UI needs. Use train_dataset for one dataset in full.',
+    {},
+    async () => toResult(await trainDatasets()),
+  );
+
+  server.tool(
+    'train_dataset',
+    'Get one training dataset in full (GET /api/training/datasets/:id): settings, samples, asset state.',
+    { id: z.string() },
+    async ({ id }) => toResult(await trainDataset(id)),
+  );
+
+  server.tool(
+    'train_dataset_create',
+    'Create a training dataset from a source audio folder (POST /api/training/datasets). Returns 201 with the created dataset.',
+    {
+      name: z.string().describe('Dataset name.'),
+      sourceDir: z.string().describe('Absolute path to the source audio folder.'),
+      recursive: z.boolean().optional().describe('Scan subfolders too.'),
+      customTag: z.string().optional().describe('Trigger word woven into captions.'),
+      tagPosition: z.enum(['prepend', 'append', 'replace']).optional(),
+      genreRatio: z.number().optional().describe('0-100.'),
+      defaultArtist: z.string().optional(),
+      defaultAlbum: z.string().optional(),
+      defaultGenre: z.string().optional(),
+      defaultLanguage: z.string().optional().describe("Default 'english'."),
+    },
+    async (args) => toResult(await trainDatasetCreate(args)),
+  );
+
+  server.tool(
+    'train_dataset_rescan',
+    'Rescan a dataset\'s source folder for new/removed/changed files (POST /api/training/datasets/:id/rescan). Refuses with 409 while a job is already running for this dataset.',
+    { id: z.string() },
+    async ({ id }) => toResult(await trainDatasetRescan(id)),
+  );
+
+  server.tool(
+    'train_dataset_label',
+    'Start one stage of the dataset labeling pipeline, async — each stage answers 202 with a jobId to poll with train_wait or train_job. ' +
+      '`stage: "label"` posts `options` as LabelOptions to /datasets/:id/label (Essentia BPM/key, Genius lyrics, LLM caption — which steps run is in `options`). ' +
+      '`stage: "caption"` posts `options` as CaptionOptions to /datasets/:id/enhance/caption (re-caption with a specific provider). ' +
+      '`stage: "build"` posts `options` as { outputPath? } to /datasets/:id/build (write dataset.json). ' +
+      'All three refuse with 409 "A job is already running for this dataset" while one is active; label and caption additionally refuse with 409 "MOSS and the /understand step need the engine, which a training job owns. Wait for it, or caption with a cloud provider (Gemini) instead." when the engine is held by a training job.',
+    {
+      datasetId: z.string(),
+      stage: z.enum(['label', 'caption', 'build']),
+      options: z.record(z.unknown()).optional().describe('The stage\'s own body (LabelOptions / CaptionOptions / { outputPath? }), forwarded verbatim.'),
+    },
+    async (args) => toResult(await trainDatasetLabel(args)),
+  );
+
+  server.tool(
+    'train_jobs',
+    'List training jobs, optionally filtered to one dataset (GET /api/training/jobs?datasetId=).',
+    { datasetId: z.string().optional() },
+    async ({ datasetId }) => toResult(await trainJobs(datasetId)),
+  );
+
+  server.tool(
+    'train_job',
+    'Get one training job\'s status (GET /api/training/jobs/:jobId), or cancel it (DELETE, with cancel: true).',
+    {
+      jobId: z.string(),
+      cancel: z.boolean().optional().describe('Cancel this job instead of reading its status.'),
+    },
+    async ({ jobId, cancel }) => toResult(await trainJob(jobId, cancel)),
+  );
+
+  server.tool(
+    'train_wait',
+    `Poll a training job's status until it reaches a terminal state (done/failed/cancelled) or the time budget ends, whichever comes first. Same contract as gen_wait: default budget ${WAIT_DEFAULT_SECONDS}s, hard max ${WAIT_MAX_SECONDS}s, returns { jobId, outcome, status } with outcome one of done/budget/cancelled and status the last response obtained or null. ` +
+      'If this tool call itself is cancelled by the client, it leaves the job running on the server — it never cancels the job for you (use train_job with cancel: true for that). ' +
+      `A budget above ${WAIT_DEFAULT_SECONDS}s needs the MCP client's own request timeout raised to match.`,
+    {
+      jobId: z.string(),
+      maxSeconds: z.number().optional().describe(`Seconds to wait before returning the latest status anyway. Default ${WAIT_DEFAULT_SECONDS}, clamped to ${WAIT_MAX_SECONDS}.`),
+    },
+    async ({ jobId, maxSeconds }, extra) => toResult(await trainWait(jobId, maxSeconds, extra.signal)),
   );
 
   return server;

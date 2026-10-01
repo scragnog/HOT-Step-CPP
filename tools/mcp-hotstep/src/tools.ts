@@ -174,37 +174,52 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export type GenWaitOutcome = 'done' | 'budget' | 'cancelled';
+export type WaitOutcome = 'done' | 'budget' | 'cancelled';
 
-/** A cancelled `signal` returns the latest known status and leaves the job
- *  running server-side — this never calls cancel on the caller's behalf.
- *  Budget and signal are checked right before EVERY poll, including the
- *  first, and each poll's own request is bounded by both the signal and the
- *  remaining budget (http.ts's `signal`/`timeoutMs`): a request that is cut
- *  short by either comes back as `status: 0`, never a thrown error, ends the
- *  loop, and never overwrites the last status actually obtained — there is
- *  no unbounded fallback fetch. A real HTTP failure (>=400) still surfaces
- *  as `http_error`, same as every other tool. */
-export async function genWait(jobId: string, maxSeconds: number | undefined, signal: AbortSignal): Promise<ToolOutcome> {
+/** The polling loop behind gen_wait and train_wait: a cancelled `signal`
+ *  returns the latest known status without acting on the job (no cancel
+ *  call) — that is each caller's own job to make, not this loop's. Budget
+ *  and signal are checked right before EVERY poll, including the first, and
+ *  each poll's own request is bounded by both the signal and the remaining
+ *  budget (http.ts's `signal`/`timeoutMs`): a request that is cut short by
+ *  either comes back as `status: 0`, never a thrown error, ends the loop,
+ *  and never overwrites the last status actually obtained — there is no
+ *  unbounded fallback fetch. A real HTTP failure (>=400) is reported as
+ *  `http_error` and ends the loop immediately, same as every other tool. */
+export async function waitForJob(
+  statusPath: string,
+  isTerminal: (status: unknown) => boolean,
+  maxSeconds: number | undefined,
+  signal: AbortSignal,
+): Promise<{ lastStatus: unknown; outcome: WaitOutcome } | { httpError: { status: number; text: string } }> {
   const budgetMs = Math.min(WAIT_MAX_SECONDS, Math.max(1, maxSeconds ?? WAIT_DEFAULT_SECONDS)) * 1000;
   const deadline = Date.now() + budgetMs;
-  const statusPath = `/api/generate/status/${encodeURIComponent(jobId)}`;
   let lastStatus: unknown = null;
-  let outcome: GenWaitOutcome = 'budget';
+  let outcome: WaitOutcome = 'budget';
   for (;;) {
     if (signal.aborted) { outcome = 'cancelled'; break; }
     if (Date.now() >= deadline) { outcome = 'budget'; break; }
     const r = await request('GET', statusPath, undefined, { signal, timeoutMs: Math.max(0, deadline - Date.now()) });
     if (r.status === 0) { outcome = signal.aborted ? 'cancelled' : 'budget'; break; }
-    if (!r.ok) return fromHttp(r);
+    if (!r.ok) return { httpError: { status: r.status, text: r.text } };
     lastStatus = r.data;
-    const status = (r.data as { status?: string } | undefined)?.status;
-    if (status === 'succeeded' || status === 'failed' || status === 'cancelled') { outcome = 'done'; break; }
+    if (isTerminal(r.data)) { outcome = 'done'; break; }
     if (signal.aborted) { outcome = 'cancelled'; break; }
     if (Date.now() >= deadline) { outcome = 'budget'; break; }
     await sleep(Math.min(WAIT_POLL_MS, deadline - Date.now()), signal);
   }
-  return { kind: 'ok', data: { jobId, outcome, status: lastStatus } };
+  return { lastStatus, outcome };
+}
+
+const isTerminalGenerationStatus = (data: unknown): boolean => {
+  const status = (data as { status?: string } | undefined)?.status;
+  return status === 'succeeded' || status === 'failed' || status === 'cancelled';
+};
+
+export async function genWait(jobId: string, maxSeconds: number | undefined, signal: AbortSignal): Promise<ToolOutcome> {
+  const r = await waitForJob(`/api/generate/status/${encodeURIComponent(jobId)}`, isTerminalGenerationStatus, maxSeconds, signal);
+  if ('httpError' in r) return { kind: 'http_error', status: r.httpError.status, text: r.httpError.text };
+  return { kind: 'ok', data: { jobId, outcome: r.outcome, status: r.lastStatus } };
 }
 
 // ── gen_song ─────────────────────────────────────────────────────────────────
@@ -227,4 +242,109 @@ export async function genSong(songId: string): Promise<ToolOutcome> {
       ...(audioFilePath ? { audioFilePath } : {}),
     },
   };
+}
+
+// ── train_capabilities ──────────────────────────────────────────────────────
+
+export async function trainCapabilities(): Promise<ToolOutcome> {
+  return fromHttp(await request('GET', '/api/training/capabilities'));
+}
+
+// ── train_datasets ───────────────────────────────────────────────────────────
+
+/** Trimmed row: id/name/slug/sourceDir/sampleCount plus the on-disk asset
+ *  flags (datasetAssets.ts) a caller needs to decide what stage comes next —
+ *  not the full row (label/caption/path settings, counts the UI alone needs). */
+export async function trainDatasets(): Promise<ToolOutcome> {
+  const r = await request('GET', '/api/training/datasets');
+  if (!r.ok) return fromHttp(r);
+  const rows = (r.data as { datasets?: Array<Record<string, unknown>> } | undefined)?.datasets ?? [];
+  const datasets = rows.map(d => ({
+    id: d.id, name: d.name, slug: d.slug, sourceDir: d.sourceDir, sampleCount: d.sampleCount, assets: d.assets,
+  }));
+  return { kind: 'ok', data: { datasets } };
+}
+
+// ── train_dataset ────────────────────────────────────────────────────────────
+
+export async function trainDataset(id: string): Promise<ToolOutcome> {
+  return fromHttp(await request('GET', `/api/training/datasets/${encodeURIComponent(id)}`));
+}
+
+// ── train_dataset_create ─────────────────────────────────────────────────────
+
+// Mirrors CreateDatasetInput (server/src/services/training/types.ts:600).
+export interface TrainDatasetCreateArgs {
+  name: string;
+  sourceDir: string;
+  recursive?: boolean;
+  customTag?: string;
+  tagPosition?: 'prepend' | 'append' | 'replace';
+  genreRatio?: number;
+  defaultArtist?: string;
+  defaultAlbum?: string;
+  defaultGenre?: string;
+  defaultLanguage?: string;
+}
+
+export async function trainDatasetCreate(args: TrainDatasetCreateArgs): Promise<ToolOutcome> {
+  return fromHttp(await request('POST', '/api/training/datasets', args));
+}
+
+// ── train_dataset_rescan ─────────────────────────────────────────────────────
+
+export async function trainDatasetRescan(id: string): Promise<ToolOutcome> {
+  return fromHttp(await request('POST', `/api/training/datasets/${encodeURIComponent(id)}/rescan`));
+}
+
+// ── train_dataset_label ──────────────────────────────────────────────────────
+
+export type TrainDatasetLabelStage = 'label' | 'caption' | 'build';
+
+export interface TrainDatasetLabelArgs {
+  datasetId: string;
+  stage: TrainDatasetLabelStage;
+  /** label -> LabelOptions (types.ts:644), caption -> CaptionOptions
+   *  (types.ts:672), build -> { outputPath? }. Forwarded as the POST body
+   *  verbatim — each stage's shape is the server route's own, not re-typed
+   *  here, so a field the route gains later needs no change on this side. */
+  options?: Record<string, unknown>;
+}
+
+const LABEL_STAGE_PATH: Record<TrainDatasetLabelStage, string> = {
+  label: 'label',
+  caption: 'enhance/caption',
+  build: 'build',
+};
+
+export async function trainDatasetLabel({ datasetId, stage, options }: TrainDatasetLabelArgs): Promise<ToolOutcome> {
+  const path_ = `/api/training/datasets/${encodeURIComponent(datasetId)}/${LABEL_STAGE_PATH[stage]}`;
+  return fromHttp(await request('POST', path_, options ?? {}));
+}
+
+// ── train_jobs / train_job ───────────────────────────────────────────────────
+
+export async function trainJobs(datasetId?: string): Promise<ToolOutcome> {
+  const qs = datasetId ? `?datasetId=${encodeURIComponent(datasetId)}` : '';
+  return fromHttp(await request('GET', `/api/training/jobs${qs}`));
+}
+
+export async function trainJob(jobId: string, cancel?: boolean): Promise<ToolOutcome> {
+  const path_ = `/api/training/jobs/${encodeURIComponent(jobId)}`;
+  return fromHttp(await request(cancel ? 'DELETE' : 'GET', path_));
+}
+
+// ── train_wait ───────────────────────────────────────────────────────────────
+
+// TrainingJobStatus (server/src/services/training/types.ts:50): 'queued' |
+// 'running' | 'done' | 'failed' | 'cancelled' — the last three are terminal.
+const isTerminalTrainingStatus = (data: unknown): boolean => {
+  const status = (data as { status?: string } | undefined)?.status;
+  return status === 'done' || status === 'failed' || status === 'cancelled';
+};
+
+export async function trainWait(jobId: string, maxSeconds: number | undefined, signal: AbortSignal): Promise<ToolOutcome> {
+  const r = await waitForJob(`/api/training/jobs/${encodeURIComponent(jobId)}`, isTerminalTrainingStatus, maxSeconds, signal);
+  if ('httpError' in r) return { kind: 'http_error', status: r.httpError.status, text: r.httpError.text };
+  return { kind: 'ok', data: { jobId, outcome: r.outcome, status: r.lastStatus } };
 }
