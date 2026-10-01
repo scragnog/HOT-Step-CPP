@@ -18,7 +18,7 @@ import { getDb } from '../../db/database.js';
 import { config } from '../../config.js';
 import { availableYue2Bases, yue2ModelDir } from './yue2Train.js';
 import { engineGpuBackend, type EngineGpuBackend } from './aceTrain.js';
-import { CALIBRATION_REFERENCE_MINUTES, type Yue2Calibration } from './datasetProfile.js';
+import { CALIBRATION_REFERENCE_MINUTES, type Yue2Calibration, archiveYue2TrainLogs, noteYue2TrainLog } from './datasetProfile.js';
 
 // ── Base checkpoint: ConvRot or any installed yue2-lm GGUF ────────────────
 //
@@ -880,8 +880,15 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
     let outputExists = false;
     try { outputExists = nativeAttempted && fs.statSync(o.outDir).isDirectory(); } catch { /* child may have failed before creating output */ }
     if (outputExists) {
-      persistAitkCatalogue(job, o,
-        job.status === 'done' ? 'done' : job.status === 'cancelled' ? 'cancelled' : 'failed');
+      const endStatus = job.status === 'done' ? 'done' : job.status === 'cancelled' ? 'cancelled' : 'failed';
+      persistAitkCatalogue(job, o, endStatus);
+      if (o.datasetSlug) {
+        let archivedSegs: string[] = [];
+        try { archivedSegs = archiveYue2TrainLogs(o.datasetSlug, job.id, o.outDir); }
+        catch (err: any) { console.warn(`[Training] Could not archive the loss log of run ${job.id}: ${err?.message || err}`); }
+        try { noteYue2TrainLog(o.datasetSlug, job.id, { output: o.outDir, segments: archivedSegs, status: endStatus }); }
+        catch (err: any) { console.warn(`[Training] Could not note the loss log of run ${job.id}: ${err?.message || err}`); }
+      }
     }
   }
 }

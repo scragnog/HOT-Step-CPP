@@ -148,7 +148,7 @@ import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
 import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions, renderYue2JointPreview } from '../services/training/yue2JointPreview.js';
 import { runOnGpuLane } from '../services/generation/gpuLane.js';
 import { listYue2RungScores, scoreYue2Rung, yue2RungScoresCsv, getYue2AlbumScore, scoreYue2Album } from '../services/training/yue2RungScores.js';
-import { calibrateYue2Length, ensureDatasetProfile, type Yue2Calibration } from '../services/training/datasetProfile.js';
+import { calibrateYue2Length, ensureDatasetProfile, noteYue2TrainLog, type Yue2Calibration } from '../services/training/datasetProfile.js';
 import { optimisationPath, readOptimisation } from '../services/training/yue2Optimise.js';
 import { planYue2Cleanup, runYue2Cleanup } from '../services/training/yue2Cleanup.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
@@ -4088,6 +4088,11 @@ router.post('/datasets/:id/yue2-joint-preset', (req: Request, res: Response) => 
     const knownPaths = checkpoints.flatMap(item => [item.arPath, item.narPath].filter((value): value is string => !!value));
     const updated = refreshYue2PresetsForJointCheckpoint(
       { slug: ds.slug, lyricsSetId: ds.lyricsSetId }, checkpoint.arPath, checkpoint.narPath, knownPaths);
+    const owningRun = runs.find(run => run.checkpoints.includes(checkpoint));
+    if (owningRun) {
+      try { noteYue2TrainLog(ds.slug, owningRun.jobId, { output: owningRun.output, keptStep: checkpoint.step }); }
+      catch (err: any) { console.warn(`[Training] Could not note the loss log of run ${owningRun.jobId}: ${err?.message || err}`); }
+    }
     res.json({ updated, arPath: checkpoint.arPath, narPath: checkpoint.narPath });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });

@@ -188,7 +188,7 @@ export function deleteYue2AitkRun(jobId: string): { output: string } {
   const output = path.resolve(run.output);
   if (!/yue2-joint-adapters/i.test(output)) throw new Error(`Refusing to delete outside the joint adapters folder: ${output}`);
   try { archiveYue2TrainLogs(run.datasetSlug, run.jobId, output); }
-  catch (err: any) { console.warn(`[Training] Could not archive the loss log of run ${jobId}: ${err?.message || err}`); }
+  catch (err: any) { throw new Error(`Could not archive the loss log of run ${jobId}, refusing to delete: ${err?.message || err}`); }
   fs.rmSync(output, { recursive: true, force: true });
   writeIndex(readIndex().filter(r => r.jobId !== jobId));
   return { output };

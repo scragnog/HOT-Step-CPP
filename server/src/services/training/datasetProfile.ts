@@ -162,18 +162,65 @@ export function snapshotYue2Sheets(slug: string): void {
 
 export const trainLogArchiveDir = (slug: string) => path.join(datasetDir(slug), 'train-logs');
 
-/** Copy a joint run's per-segment train.jsonl into the dataset's train-logs/
- *  as <jobId>-<segment>.jsonl, so the loss curve outlives the run folder. */
-export function archiveYue2TrainLogs(slug: string, jobId: string, output: string): void {
-  if (!slug) return;
-  let segments: string[] = [];
-  try { segments = fs.readdirSync(path.join(output, 'segments')).sort(); } catch { return; }
-  for (const seg of segments) {
-    const src = path.join(output, 'segments', seg, 'train.jsonl');
-    if (!fs.existsSync(src)) continue;
-    fs.mkdirSync(trainLogArchiveDir(slug), { recursive: true });
-    fs.copyFileSync(src, path.join(trainLogArchiveDir(slug), `${jobId}-${seg}.jsonl`));
+/** A run's train.jsonl files as they sit under its output folder: one per
+ *  segment (`segments/<seg>/train.jsonl`), or a single root log
+ *  (`train.jsonl`, written by runs with no previews — see
+ *  yue2JointTrainRunner.ts's segment loop) keyed by the run folder's own name. */
+export function listYue2TrainLogs(output: string): Array<{ seg: string; file: string }> {
+  const out: Array<{ seg: string; file: string }> = [];
+  const root = path.join(output, 'train.jsonl');
+  if (fs.existsSync(root)) out.push({ seg: path.basename(output), file: root });
+  let segs: string[] = [];
+  try { segs = fs.readdirSync(path.join(output, 'segments')); } catch { segs = []; }
+  for (const seg of segs.sort()) {
+    const file = path.join(output, 'segments', seg, 'train.jsonl');
+    if (fs.existsSync(file)) out.push({ seg, file });
   }
+  return out;
+}
+
+/** Copy a joint run's train.jsonl file(s) into the dataset's train-logs/ as
+ *  <jobId>-<seg>.jsonl, so the loss curve outlives the run folder. Throws if a
+ *  copy fails (caller decides whether that should block further cleanup);
+ *  returns the segment names actually saved. */
+export function archiveYue2TrainLogs(slug: string, jobId: string, output: string): string[] {
+  if (!slug) return [];
+  const logs = listYue2TrainLogs(output);
+  if (!logs.length) return [];
+  fs.mkdirSync(trainLogArchiveDir(slug), { recursive: true });
+  const saved: string[] = [];
+  for (const { seg, file } of logs) {
+    const dest = path.join(trainLogArchiveDir(slug), `${jobId}-${seg}.jsonl`);
+    const tmp = `${dest}.${process.pid}.tmp`;
+    fs.copyFileSync(file, tmp);
+    fs.renameSync(tmp, dest);
+    saved.push(seg);
+  }
+  return saved;
+}
+
+export interface Yue2TrainLogNote {
+  output?: string;
+  status?: 'running' | 'done' | 'failed' | 'cancelled' | 'finished';
+  keptStep?: number;
+  segments?: string[];
+}
+
+/** Durable sidecar beside the archived log(s): which rung Rob kept, and the
+ *  run's end state, so that survives after the run folder (and its
+ *  meters.json/kept-checkpoint marker) is gone. A patch that omits keptStep
+ *  never clears a previously-noted one — fields not present in `patch` are
+ *  left as they were. */
+export function noteYue2TrainLog(slug: string, jobId: string, patch: Yue2TrainLogNote): void {
+  if (!slug || !jobId) return;
+  const file = path.join(trainLogArchiveDir(slug), `${jobId}.json`);
+  let existing: Record<string, unknown> = {};
+  try { existing = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first note for this run */ }
+  const next = { ...existing, ...patch, jobId, datasetSlug: slug, updatedAt: Date.now() };
+  fs.mkdirSync(trainLogArchiveDir(slug), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(next, null, 2));
+  fs.renameSync(tmp, file);
 }
 
 async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Promise<R[]> {
