@@ -526,14 +526,6 @@ const AppContent: React.FC = () => {
     s.items.filter(i => i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating').length
   );
 
-  // Track the active streaming job ID — for SSE connection in CreatePanel
-  const streamJobId = useAudioGenQueueSelector(s => {
-    const active = s.items.find(i =>
-      i.status === 'generating' && i.jobId && (i.globalParams as any)?.streamMode === true
-    );
-    return active?.jobId || null;
-  });
-
   // ── The live MiniMax-Music3 render, as a track ──
   //
   // A streaming render is a real, playable track before its file exists, so it
@@ -1128,7 +1120,6 @@ const AppContent: React.FC = () => {
             onGenerate={handleGenerate}
             activeJobCount={activeJobCount}
             reuseData={reuseData}
-            streamJobId={streamJobId}
           />
         </DiscoPulseWrapper>
 

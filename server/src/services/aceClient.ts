@@ -182,10 +182,6 @@ export interface AceRequest {
   plugin_params?: Record<string, string | number | boolean>;
   // Postprocess plugin: name of the Lua postprocess plugin to use for VAE decode
   postprocess_plugin?: string;
-  // Streaming pipeline (DEMON-style ring buffer)
-  stream_mode?: boolean;       // true = route through streaming pipeline
-  stream_depth?: number;       // ring buffer depth (default 8)
-  stream_chunk_dir?: string;   // directory for preview WAV files
 }
 
 /** Job status from ace-server */

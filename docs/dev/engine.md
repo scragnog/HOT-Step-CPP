@@ -316,8 +316,7 @@ for it. What used to run on it:
   from the safetensors XL DiT folder the FSQ fallback finds; without one the request
   fails with a message naming the folder.
 - ONNX VAEs and ONNX text encoders are no longer registered. `/synth` with an `.onnx`
-  `vae_model`, or with `stream_mode: true` (the streaming pipeline decoded through
-  ONNX Runtime and was removed), returns 400.
+  `vae_model` returns 400. Requests for the removed ACE preview pipeline also return 400.
 
 TensorRT support is compiled in when the SDK is found in `engine/deps/tensorrt/`
 (Windows) or installed system-wide (Linux), which defines `HOT_STEP_TRT`. On Windows,

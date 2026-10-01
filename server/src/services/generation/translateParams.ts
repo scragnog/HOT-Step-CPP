@@ -323,10 +323,5 @@ export function translateParams(params: any): AceRequest {
     req.postprocess_plugin = params.postprocessPlugin;
   }
 
-  // Streaming pipeline (DEMON-style ring buffer)
-  if (params.streamMode) req.stream_mode = true;
-  if (params.streamDepth !== undefined) req.stream_depth = params.streamDepth;
-  if (params.streamChunkDir) req.stream_chunk_dir = params.streamChunkDir;
-
   return req;
 }

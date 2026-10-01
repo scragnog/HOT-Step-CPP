@@ -500,9 +500,7 @@ async function capabilities(): Promise<BackendCapabilities> {
         // Lives here rather than as a core UI control on purpose: it is a
         // backend-specific capability (windowed rendering is what makes it
         // possible at all), and the extensions channel already carries it into
-        // getGlobalParams() with no store field, no route change and no
-        // ACE-side risk. The ACE `streamMode` block in CreatePanel.tsx is a
-        // different, shelved feature and stays shelved.
+        // getGlobalParams() with no store field or route change.
         key: 'mm3Stream',
         type: 'toggle',
         label: 'Play While Rendering',

@@ -95,14 +95,6 @@ export interface GenerationJob {
     /** Planning rounds it took (1 on the common path). */
     rounds: number;
   };
-  /** Stream preview WAV files emitted by the DEMON-style ring buffer */
-  streamPreviews?: Array<{
-    path: string;
-    step: number;
-    totalSteps: number;
-    slot: number;
-    timestamp: number;
-  }>;
 }
 
 export const ACTIVE_STATUSES = ['pending', 'running', 'lm_running', 'synth_running', 'saving'] as const;

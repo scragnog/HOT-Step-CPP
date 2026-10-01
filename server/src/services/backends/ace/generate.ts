@@ -646,13 +646,6 @@ export async function runAceGeneration(
       const synthReq = lmResults[trackIdx];
       const trackLabel = totalTracks > 1 ? ` (track ${trackIdx + 1}/${totalTracks})` : '';
 
-      // Auto-set stream_chunk_dir inside data/audio/stream/ so previews are
-      // served by the static /audio middleware. Create the directory if needed.
-      if (synthReq.stream_mode && !synthReq.stream_chunk_dir) {
-        const streamDir = path.join(config.data.audioDir, 'stream');
-        fs.mkdirSync(streamDir, { recursive: true });
-        synthReq.stream_chunk_dir = streamDir;
-      }
       const trackProgressBase = SYNTH_PROGRESS_START + trackIdx * progressPerTrack;
 
       // Vary DiT seed per track for additional variation
@@ -801,29 +794,6 @@ export async function runAceGeneration(
           if (!resolveParamsAt) resolveParamsAt = now;
         }
 
-        // ── Streaming pipeline markers ──────────────────────────────
-        // [Stream] tick N step M/S — ring buffer progress
-        const streamTick = line.text.match(/\[Stream\] tick (\d+) step (\d+)\/(\d+)/);
-        if (streamTick) {
-          if (!ditFirstStepAt) ditFirstStepAt = now;
-          ditLastStepAt = now;
-          const step = parseInt(streamTick[2], 10);
-          const total = parseInt(streamTick[3], 10);
-          job.stage = `Streaming${trackLabel}: Step ${step}/${total}`;
-          job.progress = Math.round(trackProgressBase + (step / total) * progressPerTrack * 0.8);
-        }
-        // [STREAM_PREVIEW] path=<file> step=N/M slot=K
-        const preview = line.text.match(/\[STREAM_PREVIEW\] path=(.+?) step=(\d+)\/(\d+) slot=(\d+)/);
-        if (preview) {
-          if (!job.streamPreviews) job.streamPreviews = [];
-          job.streamPreviews.push({
-            path: preview[1],
-            step: parseInt(preview[2], 10),
-            totalSteps: parseInt(preview[3], 10),
-            slot: parseInt(preview[4], 10),
-            timestamp: Date.now(),
-          });
-        }
       });
 
       let synthTrackStart = 0;

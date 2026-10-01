@@ -5,7 +5,7 @@
 // per-song content and metadata.
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Zap, ListPlus, Sparkles, Radio } from 'lucide-react';
+import { Zap, ListPlus, Sparkles } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useGlobalParams, useGlobalParamsStore } from '../../context/GlobalParamsContext';
@@ -18,9 +18,7 @@ import { LatentImport } from '../shared/LatentImport';
 import { CoverArtSubjectSection } from '../shared/CoverArtSubjectSection';
 import { AiGenerateModal, type AiGenerateResult } from './AiGenerateModal';
 import { Mm3ComposeButton } from './Mm3ComposeButton';
-import { useStreamGeneration } from '../../hooks/useStreamGeneration';
 import { useBackendStore } from '../../stores/backendStore';
-import { StreamPlayer } from '../player/StreamPlayer';
 import { expandWildcards, hasWildcards, randomWildcardSeed } from '../../utils/wildcardUtils';
 import {
   MM3_CAPTION_SOURCES_KEY, clearMm3CaptionSources, pickNearestBpmTrack,
@@ -47,17 +45,11 @@ interface CreatePanelProps {
   onGenerate: (params: Partial<GenerationParams>) => void;
   activeJobCount: number;
   reuseData?: { song: Song; timestamp: number } | null;
-  /** Currently active streaming job ID (for SSE connection) */
-  streamJobId?: string | null;
 }
 
-export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobCount, reuseData, streamJobId }) => {
+export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobCount, reuseData }) => {
   const { t } = useTranslation();
   const mm3Mode = useBackendStore(s => s.activeBackendId) === 'minimax-m3';
-
-  // ── Stream mode ──
-  const [streamMode, setStreamMode] = usePersistedState('hs-streamMode', false);
-  const stream = useStreamGeneration(streamJobId || null);
 
   // ── AI Generate modal ──
   const [aiModalOpen, setAiModalOpen] = useState(false);
@@ -467,10 +459,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     if (artist.trim()) params.artist = artist.trim();
     if (subject.trim()) params.subject = subject.trim();
     if (sourceLatentUrl) params.sourceLatentUrl = sourceLatentUrl;
-    // Stream mode — SHELVED
-    // if (streamMode) {
-    //   (params as any).streamMode = true;
-    // }
     // A pasted lead sheet (#181) is the score; previewing would plan a new one
     // and throw it away.
     if (yue2Mode && yue2PreviewScore && !yue2AbcSupplied) {
@@ -707,44 +695,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
         <CoverArtSubjectSection />
       </div>
 
-      {/* Stream Player — SHELVED: streaming not yet production-ready */}
-      {false && streamJobId && (
-        <div className="px-4 py-2 border-t border-zinc-200 dark:border-white/5">
-          <StreamPlayer
-            connected={stream.connected}
-            status={stream.status}
-            previews={stream.previews}
-            playing={stream.playing}
-            done={stream.done}
-            error={stream.error}
-            onPlay={stream.play}
-            onPause={stream.pause}
-            onStop={stream.stop}
-          />
-        </div>
-      )}
-
-      {/* Generate button + Stream toggle */}
+      {/* Generate button */}
       <div className="px-4 py-3 border-t border-zinc-200 dark:border-white/5 space-y-2">
-        {/* Stream mode toggle — SHELVED: streaming not yet production-ready */}
-        {false && <div className="flex items-center justify-between">
-          <button
-            onClick={() => setStreamMode(!streamMode)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
-              streamMode
-                ? 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20'
-                : 'text-zinc-500 hover:text-zinc-300 bg-zinc-800/50 border border-zinc-700/50'
-            }`}
-            title="Enable streaming preview — hear audio as it generates"
-          >
-            <Radio size={12} />
-            Stream
-          </button>
-          {streamMode && (
-            <span className="text-[10px] text-zinc-600 italic">Preview audio during generation</span>
-          )}
-        </div>}
-
         <button
           className="w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 hover:shadow-lg hover:shadow-pink-500/20 text-white"
           onClick={handleGenerate}

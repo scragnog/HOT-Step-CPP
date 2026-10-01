@@ -115,7 +115,7 @@ Genre-first song creation that fills in everything else. Details: [Auto-Gen](doc
 
 ## Custom-Gen
 
-Full manual control of caption, lyrics and music parameters. Details: [Custom-Gen](docs/user/studios/create.md)
+Full manual control of caption, lyrics and music parameters. ACE-Step songs play after rendering; MiniMax-Music3 can play while rendering. Details: [Custom-Gen](docs/user/studios/create.md)
 
 | Feature | What it does |
 |---|---|
