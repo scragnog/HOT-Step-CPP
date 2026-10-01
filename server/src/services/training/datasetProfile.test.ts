@@ -89,3 +89,46 @@ test('noteYue2TrainLog shallow-merges: a patch without keptStep keeps the one al
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('archiveYue2TrainLogs propagates a non-ENOENT segment-directory enumeration failure instead of treating it as no logs', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-archive-enoent-'));
+  try {
+    const script = [
+      "import fs from 'node:fs';",
+      "import path from 'node:path';",
+      "import { archiveYue2TrainLogs } from './src/services/training/datasetProfile.js';",
+      "const output = path.join(process.env.TRAINING_DIR, 'run');",
+      "fs.mkdirSync(path.join(output, 'segments', 'segment-000001'), { recursive: true });",
+      "fs.writeFileSync(path.join(output, 'segments', 'segment-000001', 'train.jsonl'), 'x');",
+      "const real = fs.readdirSync;",
+      "fs.readdirSync = (p, ...rest) => { if (String(p) === path.join(output, 'segments')) { const e = new Error('simulated'); e.code = 'EIO'; throw e; } return real(p, ...rest); };",
+      "let threw = false; try { archiveYue2TrainLogs('album', 'job1', output); } catch (err) { threw = err?.code === 'EIO'; } finally { fs.readdirSync = real; }",
+      "if (!threw) throw new Error('expected archiveYue2TrainLogs to propagate the EIO, not swallow it as no logs');",
+    ].join('');
+    runInIsolatedTrainingDir(root, script);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('noteYue2TrainLog propagates a non-ENOENT sidecar read failure and leaves the existing sidecar untouched', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-note-enoent-'));
+  try {
+    const script = [
+      "import fs from 'node:fs';",
+      "import path from 'node:path';",
+      "import { noteYue2TrainLog, trainLogArchiveDir } from './src/services/training/datasetProfile.js';",
+      "noteYue2TrainLog('album', 'job1', { keptStep: 120, status: 'done' });",
+      "const file = path.join(trainLogArchiveDir('album'), 'job1.json');",
+      "const real = fs.readFileSync;",
+      "fs.readFileSync = (p, ...rest) => { if (p === file) { const e = new Error('simulated'); e.code = 'EIO'; throw e; } return real(p, ...rest); };",
+      "let threw = false; try { noteYue2TrainLog('album', 'job1', { status: 'finished' }); } catch { threw = true; } finally { fs.readFileSync = real; }",
+      "if (!threw) throw new Error('expected noteYue2TrainLog to propagate the EIO');",
+      "const saved = JSON.parse(fs.readFileSync(file, 'utf8'));",
+      "if (saved.keptStep !== 120 || saved.status !== 'done') throw new Error('sidecar was modified despite the propagated read failure: ' + JSON.stringify(saved));",
+    ].join('');
+    runInIsolatedTrainingDir(root, script);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

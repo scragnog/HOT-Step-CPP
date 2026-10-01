@@ -171,7 +171,8 @@ export function listYue2TrainLogs(output: string): Array<{ seg: string; file: st
   const root = path.join(output, 'train.jsonl');
   if (fs.existsSync(root)) out.push({ seg: path.basename(output), file: root });
   let segs: string[] = [];
-  try { segs = fs.readdirSync(path.join(output, 'segments')); } catch { segs = []; }
+  try { segs = fs.readdirSync(path.join(output, 'segments')); }
+  catch (err: any) { if (err?.code !== 'ENOENT') throw err; segs = []; }
   for (const seg of segs.sort()) {
     const file = path.join(output, 'segments', seg, 'train.jsonl');
     if (fs.existsSync(file)) out.push({ seg, file });
@@ -204,9 +205,12 @@ export interface Yue2TrainLogNote {
   status?: 'running' | 'done' | 'failed' | 'cancelled' | 'finished';
   keptStep?: number;
   segments?: string[];
+  /** Set when the log arrived through a worker pull rather than locally. */
+  pulledFrom?: string;
+  pulledAt?: number;
 }
 
-/** Durable sidecar beside the archived log(s): which rung Rob kept, and the
+/** Durable sidecar beside the archived log(s): which rung was kept, and the
  *  run's end state, so that survives after the run folder (and its
  *  meters.json/kept-checkpoint marker) is gone. A patch that omits keptStep
  *  never clears a previously-noted one — fields not present in `patch` are
@@ -215,7 +219,10 @@ export function noteYue2TrainLog(slug: string, jobId: string, patch: Yue2TrainLo
   if (!slug || !jobId) return;
   const file = path.join(trainLogArchiveDir(slug), `${jobId}.json`);
   let existing: Record<string, unknown> = {};
-  try { existing = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first note for this run */ }
+  // Missing sidecar (first note for this run) starts empty; any other read or
+  // parse failure must not silently discard whatever was already noted.
+  try { existing = JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch (err: any) { if (err?.code !== 'ENOENT') throw err; }
   const next = { ...existing, ...patch, jobId, datasetSlug: slug, updatedAt: Date.now() };
   fs.mkdirSync(trainLogArchiveDir(slug), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
