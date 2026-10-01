@@ -270,7 +270,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
       const dataset = yue2DatasetOptions.find(d => d.id === yue2Ds.datasetId);
       return dataset?.name || dataset?.albumName || dataset?.slug || yue2Ds.datasetId;
     })();
-  const yue2SourcesActive = yue2Mode && !yue2SourcePending && yue2Tracks.length > 0;
+  const yue2SourcesActive = yue2Mode && yue2Tracks.length > 0;
   const yue2Resolved = yue2SourcesActive
     ? resolveYue2Caption(yue2Selection.customCaption ?? caption, bpm, yue2Tracks, yue2Selection)
     : null;
@@ -631,7 +631,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
                     })),
                   ]}
                 />
-                {yue2CaptionTags.length > 0 && (
+                {!yue2SourcePending && yue2CaptionTags.length > 0 && (
                   <div className="space-y-1.5 pt-1">
                     <ParamLabel
                       label={t('createPanel.yue2TagsFrom', { source: yue2TagSourceName, defaultValue: 'Tags from {{source}}' })}
