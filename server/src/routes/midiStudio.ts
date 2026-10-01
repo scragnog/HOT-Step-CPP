@@ -33,6 +33,7 @@ import {
   MUSCRIPTOR_MODELS, type MuscriptorModel,
 } from '../services/muscriptor.js';
 import { parseMidiFile } from '../services/midiParser.js';
+import { addMidiLyrics } from '../services/midiLyrics.js';
 
 const router = Router();
 
@@ -162,6 +163,28 @@ async function runTranscription(job: MidiJob): Promise<void> {
       throw new Error(`ace-midi exited with code ${code}: ${stderrTail.slice(-30).join(' | ')}`);
     }
     if (!fs.existsSync(midPath(job.id))) throw new Error('ace-midi finished but produced no MIDI file');
+
+    const lrcPath = path.join(path.dirname(srcPath), `${path.parse(srcPath).name}.lrc`);
+    if (fs.existsSync(lrcPath)) {
+      const midiPath = midPath(job.id);
+      const tempPath = path.join(dir, 'out.lyrics.tmp');
+      try {
+        const original = fs.readFileSync(midiPath);
+        const withLyrics = addMidiLyrics(original, fs.readFileSync(lrcPath, 'utf8'));
+        if (withLyrics !== original) {
+          fs.writeFileSync(tempPath, withLyrics);
+          fs.renameSync(tempPath, midiPath);
+        }
+      } catch (err: any) {
+        console.warn(`[MidiStudio] Job ${job.id}: MIDI lyric post-pass skipped (${err.message})`);
+      } finally {
+        try {
+          if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+        } catch (err: any) {
+          console.warn(`[MidiStudio] Job ${job.id}: MIDI lyric temp cleanup failed (${err.message})`);
+        }
+      }
+    }
 
     // Parse for the piano-roll preview (preview failure is non-fatal)
     let noteCount = job.noteCount;

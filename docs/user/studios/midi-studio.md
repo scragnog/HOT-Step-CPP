@@ -39,6 +39,10 @@ Before the first transcription:
    The job keeps running and appears under Transcriptions either way.
 6. Once done, expand the job to preview it, or download the `.mid`.
 
+If the source audio has a `.lrc` file beside it with the same base name,
+the downloaded MIDI includes its timestamped lines as lyric events. Section
+labels such as `[Chorus]` are skipped. The piano-roll preview shows notes only.
+
 ## Controls
 
 | Control | What it does |
