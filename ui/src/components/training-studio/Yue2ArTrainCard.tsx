@@ -1198,7 +1198,7 @@ export const Yue2ArRunsList: React.FC<{ datasetId: string; pickStep: number; rel
                         </span>
                       )}
                       {c.loss !== undefined && (
-                        <span className="shrink-0 tabular-nums">{c.loss.toFixed(4)}</span>
+                        <span className="shrink-0 tabular-nums">{t('trainingStudio.yue2ar.runsMeanLoss', '20-step mean loss: {{loss}}', { loss: c.loss.toFixed(4) })}</span>
                       )}
                       <span className="shrink-0 text-zinc-500">{gb(c.bytes)}</span>
                       <span className="shrink-0 text-zinc-500">

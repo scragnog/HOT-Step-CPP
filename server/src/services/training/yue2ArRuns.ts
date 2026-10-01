@@ -162,8 +162,8 @@ interface LogFacts {
   lastLoss?: number;
   lastLossStep?: number;
   totalSteps: number;
-  /** step -> loss, for the checkpoint ladder. */
-  milestones: Map<number, number>;
+  /** Logged step losses used for the checkpoint ladder's trailing mean. */
+  stepLosses: Map<number, number>;
   best?: { step: number; loss: number };
   ending?: 'done' | 'fatal';
   fatalMessage?: string;
@@ -175,7 +175,7 @@ interface LogFacts {
  *  emits the same vocabulary for both YuE2 trainers, and an unknown `type` is
  *  ignored so it can grow. */
 function readLog(dir: string): LogFacts {
-  const facts: LogFacts = { lastStep: 0, totalSteps: 0, milestones: new Map() };
+  const facts: LogFacts = { lastStep: 0, totalSteps: 0, stepLosses: new Map() };
   let text = '';
   try {
     text = fs.readFileSync(path.join(dir, 'train-log.jsonl'), 'utf-8');
@@ -200,6 +200,7 @@ function readLog(dir: string): LogFacts {
         if (s !== undefined) facts.lastStep = Math.max(facts.lastStep, s);
         const loss = num('loss');
         if (loss !== undefined) {
+          if (s !== undefined) facts.stepLosses.set(s, loss);
           facts.lastLoss = loss;
           facts.lastLossStep = s;
           if (!facts.best || loss < facts.best.loss) facts.best = { step: s ?? facts.lastStep, loss };
@@ -210,7 +211,6 @@ function readLog(dir: string): LogFacts {
       case 'milestone': {
         const s = num('step');
         if (s !== undefined) {
-          facts.milestones.set(s, num('loss') ?? NaN);
           facts.lastStep = Math.max(facts.lastStep, s);
         }
         break;
@@ -327,7 +327,14 @@ function dirSize(dir: string): number {
  *  YUE2_AR_ADAPTER_STEM only. A NAR run trained from the same dataset can share
  *  this root, and listing its files here would offer the picker adapters the
  *  loader refuses on `format`. */
-export function yue2ArCheckpointsIn(dir: string, milestones: Map<number, number>,
+function trailingLossMean(losses: Map<number, number>, step: number): number | undefined {
+  if (step === Number.MAX_SAFE_INTEGER) return undefined;
+  const recent = [...losses].filter(([s]) => s <= step)
+    .sort(([a], [b]) => b - a).slice(0, 20);
+  return recent.length ? recent.reduce((sum, [, loss]) => sum + loss, 0) / recent.length : undefined;
+}
+
+export function yue2ArCheckpointsIn(dir: string, losses: Map<number, number>,
                                     configuredSteps = 0): Yue2ArRunCheckpoint[] {
   const out: Yue2ArRunCheckpoint[] = [];
   let entries: fs.Dirent[];
@@ -345,7 +352,7 @@ export function yue2ArCheckpointsIn(dir: string, milestones: Map<number, number>
     const m = snap.exec(e.name);
     if (m) {
       const step = Number(m[1]);
-      const loss = milestones.get(step);
+      const loss = trailingLossMean(losses, step);
       out.push({
         step, name: e.name, path: full, bytes, final: false,
         loss: Number.isFinite(loss as number) ? loss : undefined,
@@ -375,11 +382,11 @@ export function readYue2ArRun(dir: string): Yue2ArRunSummary | null {
   const manifest = readYue2ArRunManifest(dir);
   const facts    = readLog(dir);
   const configuredSteps = manifest?.options.steps ?? facts.totalSteps ?? 0;
-  const ckpts    = yue2ArCheckpointsIn(dir, facts.milestones, configuredSteps);
+  const ckpts    = yue2ArCheckpointsIn(dir, facts.stepLosses, configuredSteps);
   for (const checkpoint of ckpts) {
-    // Final exports do not emit a milestone; use their own final-step loss.
-    if (checkpoint.final && checkpoint.step === facts.lastLossStep && Number.isFinite(facts.lastLoss)) {
-      checkpoint.loss = facts.lastLoss;
+    // Final exports have no milestone; use logged steps up to their export step.
+    if (checkpoint.final) {
+      checkpoint.loss = trailingLossMean(facts.stepLosses, checkpoint.step);
     }
   }
   const statePath = yue2ArResumeStatePath(dir);

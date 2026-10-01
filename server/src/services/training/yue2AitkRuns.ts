@@ -156,9 +156,14 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
     try { meters = JSON.parse(fs.readFileSync(path.join(dir, 'meters.json'), 'utf8')) as Record<string, unknown>; } catch { /* older checkpoints have none */ }
     const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? v : undefined;
     const kl = num(meters.kl_reading) ?? num(meters.ar_kl_mean20);
+    const step = Number(match[1]);
+    const recent = [...losses].filter(([s]) => s <= step)
+      .sort(([a], [b]) => b - a).slice(0, 20);
+    const meanLoss = recent.length
+      ? recent.reduce((sum, [, loss]) => sum + loss, 0) / recent.length : undefined;
     rows.push({
-      step: Number(match[1]), dir,
-      ...(losses.has(Number(match[1])) ? { loss: losses.get(Number(match[1])) } : {}),
+      step, dir,
+      ...(meanLoss !== undefined ? { loss: meanLoss } : {}),
       ...(kl !== undefined ? { kl } : {}),
       ...(num(meters.nar_recon) !== undefined ? { recon: num(meters.nar_recon) } : {}),
       ...(num(meters.nar_drift) !== undefined ? { drift: num(meters.nar_drift) } : {}),

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { checkpointRecords } from './yue2AitkRuns.js';
+import { readYue2ArRun } from './yue2ArRuns.js';
 
 test('AITK checkpoint discovery exposes combined and native AR/NAR outputs', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-runs-'));
@@ -27,21 +28,42 @@ test('AITK checkpoint discovery exposes combined and native AR/NAR outputs', () 
   }
 });
 
-test('AITK checkpoints use the composite loss from their exact step and segment', () => {
+test('AITK checkpoints show the trailing 20-step mean from their own segment', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-loss-'));
   try {
     for (const [segment, step, arCe] of [[1, 50, 2], [2, 100, 3]] as const) {
       const dir = path.join(root, 'segments', `segment-${String(segment).padStart(6, '0')}`);
       fs.mkdirSync(path.join(dir, `checkpoint-step${step}`), { recursive: true });
       fs.writeFileSync(path.join(dir, 'train.jsonl'), [
-        JSON.stringify({ stage: 'joint', step, ar_ce: arCe, ar_kl: 0.5, nar_mse: 1, cursor_ce: 0.25, cursor_weight: 0.08 }),
+        ...Array.from({ length: 20 }, (_, i) => JSON.stringify({
+          stage: 'joint', step: step - 19 + i,
+          ar_ce: i === 19 ? arCe + 20 : arCe,
+          ar_kl: 0.5, nar_mse: 1, cursor_ce: 0.25, cursor_weight: 0.08,
+        })),
         '{incomplete',
       ].join('\n'));
     }
     const rows = checkpointRecords(root);
     assert.deepEqual(rows.map(row => row.step), [100, 50]);
-    assert.ok(Math.abs((rows[0].loss ?? 0) - 4.12) < 1e-10);
-    assert.ok(Math.abs((rows[1].loss ?? 0) - 3.12) < 1e-10);
+    assert.ok(Math.abs((rows[0].loss ?? 0) - 5.12) < 1e-10);
+    assert.ok(Math.abs((rows[1].loss ?? 0) - 4.12) < 1e-10);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('AR checkpoint mean includes a spike only as one of the last 20 logged steps', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ar-loss-'));
+  try {
+    fs.writeFileSync(path.join(root, 'yue2_ar_lora_step25.safetensors'), 'x');
+    fs.writeFileSync(path.join(root, 'train-log.jsonl'), [
+      ...Array.from({ length: 25 }, (_, i) => JSON.stringify({
+        type: 'step', step: i + 1, loss: i === 24 ? 21 : 1,
+      })),
+      JSON.stringify({ type: 'milestone', step: 25, loss: 21 }),
+    ].join('\n'));
+    const run = readYue2ArRun(root);
+    assert.equal(run?.checkpoints[0]?.loss, 2);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

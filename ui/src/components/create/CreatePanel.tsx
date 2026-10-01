@@ -75,7 +75,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
 
   // LoRA trigger word prepended, beat intro/outro request appended
   const buildCaption = useCallback((base: string) => {
-    const loraText = loraTrigger.trim() ? `${loraTrigger.trim()}, ` : '';
+    const trigger = loraTrigger.trim();
+    const start = base.trimStart();
+    const hasTrigger = trigger.length > 0
+      && start.slice(0, trigger.length).toLowerCase() === trigger.toLowerCase()
+      && (start.length === trigger.length || /[,\s]/.test(start[trigger.length]));
+    const loraText = trigger && !hasTrigger ? `${trigger}, ` : '';
     const beatText = beatIntro ? `, with a clean ${introBars}-bar percussive intro and outro for DJ mixing` : '';
     return `${loraText}${base}${beatText}`;
   }, [loraTrigger, beatIntro, introBars]);

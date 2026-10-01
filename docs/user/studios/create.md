@@ -50,7 +50,7 @@ MiniMax-Music3 or YuE2), chosen in that same bar, see [Backends](../backends.md)
 | Control | What it does |
 |---|---|
 | Style Description | The caption sent to the model. Supports `{a|b|c}` wildcards, the `{·} expand` button resolves them once in place, `auto` resolves them at Generate time instead, using the DiT seed (or a fresh draw when the seed is randomised). Read-only, with a dataset caption showing through it, while a MiniMax-Music3 or YuE2 caption source below is locked to something other than Custom. |
-| LoRA | A trigger word prepended to the style description before it is sent, for adapters that need one typed rather than embedded in the file. |
+| LoRA | A trigger word prepended to the style description before it is sent, for adapters that need one typed rather than embedded in the file. If the description already starts with that complete trigger, it is not added again when you reuse a song. |
 | Beat I/O | Appends a request for a clean percussive intro and outro (1, 2, 4 or 8 bars) to the style description, for DJ mixing. |
 | Song Info (Artist / Title / Subject) | Optional metadata, collapsed by default. Auto-populates and expands when a song is sent here from Lyric Studio or Auto-Gen. |
 | Instrumental (no vocals) | Sends `[Instrumental]` as the lyrics and hides the Lyrics box. |

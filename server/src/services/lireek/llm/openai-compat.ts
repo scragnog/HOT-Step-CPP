@@ -122,7 +122,7 @@ export class OpenAICompatProvider extends LLMProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(300_000),
+      signal: AbortSignal.timeout(config.lireek.llmTimeoutMs),
     });
 
     // Staged fallback. NInfer hard-400s on chat_template_kwargs but DOES honour

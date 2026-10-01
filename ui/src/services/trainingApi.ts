@@ -793,6 +793,7 @@ export interface Yue2JointPreviewOptions {
 export interface Yue2AitkCheckpointRecord {
   step: number;
   dir: string;
+  loss?: number;
   /** From meters.json: planner KL reading, decoder reconstruction, frozen. */
   kl?: number;
   recon?: number;
@@ -3095,5 +3096,4 @@ export async function getTrainingDefaults(): Promise<TrainingDefaults> {
 export async function putTrainingDefaults(patch: Partial<TrainingDefaults>): Promise<TrainingDefaults> {
   return request<TrainingDefaults>('/defaults', { method: 'PUT', ...jsonBody(patch) });
 }
-
 

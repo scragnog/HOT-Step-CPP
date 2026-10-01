@@ -1069,7 +1069,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
                 { value: '', label: t('trainingStudio.yue2.method.resumeStartNew', 'Start a new run') },
                 ...aitkRuns.flatMap(run => run.checkpoints.filter(checkpoint => !!checkpoint.optimizerPath).map(checkpoint => ({
                   value: `${run.jobId}|${checkpoint.step}`,
-                  label: `${new Date(run.createdAt).toLocaleString()} · step ${checkpoint.step} · ${run.status}${run.resumeError ? ` — ${run.resumeError}` : ''}${run.live ? ' — running' : ''}`,
+                  label: `${new Date(run.createdAt).toLocaleString()} · step ${checkpoint.step}${checkpoint.loss !== undefined ? ` · 20-step mean loss ${checkpoint.loss.toFixed(4)}` : ''} · ${run.status}${run.resumeError ? ` — ${run.resumeError}` : ''}${run.live ? ' — running' : ''}`,
                   disabled: !!run.resumeError || run.live,
                 }))),
                 ...aitkRuns.filter(run => !run.checkpoints.some(checkpoint => !!checkpoint.optimizerPath)).map(run => ({
@@ -1618,4 +1618,3 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     </div>
   );
 };
-

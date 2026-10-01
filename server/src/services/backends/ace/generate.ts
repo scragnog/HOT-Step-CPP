@@ -545,7 +545,7 @@ export async function runAceGeneration(
 
         const whisperReady = await ensureWhisperCli();
         if (!whisperReady) {
-          logGeneration(job.id, 'WARNING', '[Whisper] whisper-cli not available and auto-download failed — skipping');
+          logGeneration(job.id, 'WARNING', '[Whisper] whisper-cli unavailable — skipping');
           return;
         }
         if (!findWhisperModel(job.params.whisperModel)) {

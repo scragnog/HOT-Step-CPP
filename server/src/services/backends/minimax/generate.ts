@@ -1445,7 +1445,7 @@ export async function runMinimaxGeneration(job: GenerationJob, deps: MinimaxGene
           const { reconcileLyrics } = await import('../../lyricsReconcile.js');
 
           if (!(await ensureWhisperCli())) {
-            log('WARNING', '[Whisper] whisper-cli unavailable and auto-download failed — skipping');
+            log('WARNING', '[Whisper] whisper-cli unavailable — skipping');
           } else if (!findWhisperModel(job.params.whisperModel)) {
             log('WARNING', '[Whisper] no Whisper model installed — skipping');
           } else {

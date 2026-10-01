@@ -5,7 +5,7 @@
  * timestamped text. Used for lyrics synchronisation in the player.
  *
  * Workflow:
- *   1. Locate whisper-cli.exe via config.whisper.exe
+ *   1. Locate whisper-cli via config.whisper.exe or PATH
  *   2. Find the best available GGML model in config.whisper.modelsDir
  *   3. Run whisper-cli with -oj (JSON output) and --max-len 1 (word-level)
  *   4. Parse the sidecar JSON file whisper writes, clean up, return result
@@ -19,6 +19,7 @@ import { pipeline } from 'stream/promises';
 import { config } from '../config.js';
 
 const execFileAsync = promisify(execFile);
+let resolvedWhisperExe: string | null = null;
 
 // ── Auto-download constants ─────────────────────────────────────────
 // whisper.cpp v1.8.4 CUDA 12.4 build (works with CUDA 12.x and 13.x)
@@ -158,13 +159,31 @@ function httpsDownload(url: string, dest: string): Promise<void> {
 }
 
 /**
- * Ensure whisper-cli.exe is available, downloading it if needed.
- * Downloads CUDA build first, falls back to CPU-only.
+ * Ensure whisper-cli is available. Windows downloads a binary if needed;
+ * other platforms use WHISPER_EXE or an existing PATH installation.
  * Returns true if whisper-cli is ready, false if download failed.
  */
 export async function ensureWhisperCli(): Promise<boolean> {
   const whisperExe = config.whisper.exe;
-  if (fs.existsSync(whisperExe)) return true;
+  if (fs.existsSync(whisperExe)) {
+    resolvedWhisperExe = whisperExe;
+    return true;
+  }
+
+  if (process.platform !== 'win32') {
+    for (const candidate of [whisperExe, 'whisper-cli']) {
+      try {
+        const { stdout } = await execFileAsync('which', [candidate]);
+        const found = stdout.trim().split(/\r?\n/)[0];
+        if (found && fs.existsSync(found)) {
+          resolvedWhisperExe = found;
+          return true;
+        }
+      } catch { /* try the next candidate */ }
+    }
+    console.error('[Whisper] whisper-cli not found. Set WHISPER_EXE to its executable path or install it with Homebrew: brew install whisper.cpp');
+    return false;
+  }
 
   const whisperDir = path.dirname(whisperExe);
   fs.mkdirSync(whisperDir, { recursive: true });
@@ -197,6 +216,7 @@ export async function ensureWhisperCli(): Promise<boolean> {
 
       // Check if whisper-cli.exe landed (might be in a subdirectory)
       if (fs.existsSync(whisperExe)) {
+        resolvedWhisperExe = whisperExe;
         console.log(`[Whisper] ✓ whisper-cli ready at: ${whisperExe}`);
         return true;
       }
@@ -216,6 +236,7 @@ export async function ensureWhisperCli(): Promise<boolean> {
           try { fs.rmdirSync(nestedDir); } catch {}
         }
         if (fs.existsSync(whisperExe)) {
+          resolvedWhisperExe = whisperExe;
           console.log(`[Whisper] ✓ whisper-cli ready at: ${whisperExe}`);
           return true;
         }
@@ -252,7 +273,7 @@ function findFileRecursive(dir: string, filename: string): string | null {
  */
 export function isWhisperAvailable(): boolean {
   try {
-    return fs.existsSync(config.whisper.exe);
+    return fs.existsSync(config.whisper.exe) || !!resolvedWhisperExe && fs.existsSync(resolvedWhisperExe);
   } catch {
     return false;
   }
@@ -264,7 +285,7 @@ export function isWhisperAvailable(): boolean {
  * Runs whisper.cpp with JSON output (-oj) and word-level timestamps (--max-len 1).
  * Source lyrics are passed as a vocabulary-priming --prompt to improve accuracy.
  *
- * If whisper-cli.exe is missing, attempts to auto-download it first.
+ * On Windows, downloads whisper-cli if needed. On other platforms, checks PATH.
  *
  * @param audioPath    Absolute path to the audio file (WAV/MP3)
  * @param sourceLyrics Original lyrics text for vocabulary priming
@@ -279,11 +300,10 @@ export async function transcribeWithWhisper(
   // Auto-download if needed
   const ready = await ensureWhisperCli();
   if (!ready) {
-    console.error('[Whisper] whisper-cli not available and auto-download failed');
     return null;
   }
 
-  const whisperExe = config.whisper.exe;
+  const whisperExe = resolvedWhisperExe ?? config.whisper.exe;
 
   // Find model
   const modelPath = findWhisperModel(options.model);

@@ -100,7 +100,7 @@ export class UnslothProvider extends LLMProvider {
         'Authorization': `Bearer ${token}`
       },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(300_000),
+      signal: AbortSignal.timeout(config.lireek.llmTimeoutMs),
     });
 
     if (!resp.ok) throw new Error(`Unsloth error: ${resp.status} ${await resp.text()}`);

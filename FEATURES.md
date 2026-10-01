@@ -121,7 +121,7 @@ Full manual control of caption, lyrics and music parameters. Details: [Custom-Ge
 |---|---|
 | Style and lyrics | Caption, section-tagged lyrics, negative prompt, instrumental toggle and song info. |
 | Wildcards | `{a\|b\|c}` syntax in caption and lyrics, expanded in place or at generate time from the seed. |
-| LoRA trigger box | Prepends a trigger word for adapters that do not record one. |
+| LoRA trigger box | Prepends a trigger word for adapters that do not record one, without repeating it on reuse. |
 | Beat I/O | Asks for a clean percussive intro and outro of 1 to 8 bars for DJ mixing. |
 | Generate with AI | A configured LLM writes caption, lyrics, title and metadata from a genre and subject. |
 | Compose Caption | MiniMax-Music3 Structured Caption from a plain description, with genre routing and warnings. |
@@ -296,7 +296,7 @@ Build datasets from your own audio and train adapters on your GPU, for all three
 | Preprocess and codes | Encodes audio for ACE-Step, or RVQ codes for MiniMax-Music3 with an optional cover-laundering pass. |
 | ACE-Step adapters | Planner LM LoRA (0.6B, 1.7B, 4B) and DiT LoRA. |
 | MiniMax-Music3 adapters | Planner LM LoRA trained from RVQ codes. |
-| YuE2 adapters | Five-stage chain with Perform all stages, and Joint Training of the AR and NAR pair with Prodigy, AdamW or Muon. |
+| YuE2 adapters | Five-stage chain with Perform all stages, Joint Training of the AR and NAR pair with Prodigy, AdamW or Muon, and 20-step mean checkpoint losses. |
 | Optimise phase (YuE2) | Measure a prepared album before training, starting with the base model's loss per song; results saved in the dataset folder. [Details](docs/user/training/yue2.md#optimise-optional) |
 | Training on another PC | Send YuE2 batches to a second PC's GPU, then follow, listen, score and fetch the adapters from this one. [Details](docs/user/training/yue2.md#training-on-another-pc) |
 | Quality presets | Fast, Balanced and Thorough presets on the training forms. |
