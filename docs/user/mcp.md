@@ -16,8 +16,17 @@ running app on your behalf, instead of (or alongside) you using the UI.
 ## Setup
 
 The app's server has to be running first; an MCP server with nothing to talk
-to can't do anything. Add this to the project's `.mcp.json` (adjust the path
-to where your checkout lives):
+to can't do anything. The MCP package also needs its own dependencies
+installed once, separately from the app's own `install.bat`/`install.sh`,
+which don't touch it:
+
+```
+cd tools/mcp-hotstep
+npm install
+```
+
+**Claude Code** (or another client reading `mcpServers` JSON): add this to
+the project's `.mcp.json`, adjusting the path to where your checkout lives:
 
 ```json
 {
@@ -34,6 +43,18 @@ to where your checkout lives):
     }
   }
 }
+```
+
+**Codex**: add the equivalent to its `config.toml`:
+
+```toml
+[mcp_servers.hotstep]
+command = "node"
+args = [
+  "/path/to/hot-step-cpp/tools/mcp-hotstep/node_modules/tsx/dist/cli.mjs",
+  "/path/to/hot-step-cpp/tools/mcp-hotstep/src/index.ts",
+]
+env = { HOTSTEP_URL = "http://127.0.0.1:3001" }
 ```
 
 `HOTSTEP_URL` defaults to `http://127.0.0.1:3001` if omitted; set it only if
@@ -108,17 +129,25 @@ under way does not refund the minutes already spent.
   before guessing a field name.
 
 One example per backend family, as which tool to call in which order (see
-the README's field tables for what each one actually takes):
+the README's field tables for what each one actually takes). Every step
+below answers with a job id, not a finished result: call `train_wait` on
+that id before moving to the next step, call it again if it reports
+`outcome: "budget"`, and proceed only once it reports `outcome: "done"`.
 
-- **ACE-Step 1.5**: `train_dataset_label` (build the dataset) → `train_prepare`
-  with `backend: "ace"` (encode tensors) → `train_start` with
-  `backend: "ace-lm"` or `backend: "ace-dit"` → `train_wait`.
-- **MiniMax-Music3**: `train_dataset_label` with `stage: "caption"` for its
-  own caption format → `train_prepare` with `backend: "mm3"` (encode RVQ
-  codes) → `train_start` with `backend: "mm3-lm"` → `train_wait`.
-- **YuE2**: `train_prepare` with `backend: "yue2", stage: "preprocess"`, then
-  again with `stage: "joint-prepare"` → `train_start` with
-  `backend: "yue2-joint"` → `train_wait`.
+- **ACE-Step 1.5**: `train_dataset_label` `stage: "label"` → wait → `stage:
+  "build"` (ACE's prepare step refuses an unbuilt dataset) → wait →
+  `train_prepare` `backend: "ace"` (encode tensors) → wait → `train_start`
+  with `backend: "ace-lm"` or `backend: "ace-dit"` → wait.
+- **MiniMax-Music3**: `train_dataset_label` `stage: "label"` → wait →
+  `stage: "caption"` for its own caption format → wait → `stage: "build"`
+  (its code export also refuses an unbuilt dataset) → wait → `train_prepare`
+  `backend: "mm3"` (encode RVQ codes) → wait → `train_start` with
+  `backend: "mm3-lm"` → wait.
+- **YuE2**: `train_dataset_label` `stage: "label"` for captions → wait →
+  `train_prepare` `backend: "yue2", stage: "preprocess"` (no build needed,
+  unlike the other two) → wait → `train_prepare` `backend: "yue2", stage:
+  "joint-prepare"` → wait → `train_start` with `backend: "yue2-joint"` →
+  wait.
 
 ## Limits
 
