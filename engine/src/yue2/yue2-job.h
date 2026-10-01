@@ -113,10 +113,19 @@ static JobPhase yue2_job_phase_for_stage(Yue2Stage s) {
 // g_yue2_nar_mutex is held while the lane computes. Anything that changes the
 // model's residency or weights (warm, unload, select-model, adapter merges)
 // takes it after g_yue2_mutex, so a render never sees weights move under it.
+//
+// The mutex only covers the render in flight. A render still waiting in the
+// queue was composed under the weights resident at push time and must render
+// under them too (#204), so a caller that is about to CHANGE the weights first
+// drains the lane with yue2_nar_lane_drain(). g_yue2_nar_pending counts pushed
+// renders not yet finished (queued plus active); it moves only in
+// yue2_nar_lane_push and yue2_nar_lane_main, under g_yue2_nar_qmutex.
 static std::mutex                        g_yue2_nar_mutex;
 static std::deque<std::function<void()>> g_yue2_nar_queue;
 static std::mutex                        g_yue2_nar_qmutex;
 static std::condition_variable           g_yue2_nar_cv;
+static std::condition_variable           g_yue2_nar_idle_cv;  // pending reached 0, or stop
+static int                               g_yue2_nar_pending = 0;
 static std::thread                       g_yue2_nar_thread;
 static bool                              g_yue2_nar_stop = false;
 
@@ -133,6 +142,12 @@ static void yue2_nar_lane_main() {
             g_yue2_nar_queue.pop_front();
         }
         fn();
+        {
+            std::lock_guard<std::mutex> lock(g_yue2_nar_qmutex);
+            if (--g_yue2_nar_pending == 0) {
+                g_yue2_nar_idle_cv.notify_all();
+            }
+        }
     }
 }
 
@@ -142,7 +157,29 @@ static void yue2_nar_lane_push(std::function<void()> fn) {
         g_yue2_nar_thread = std::thread(yue2_nar_lane_main);
     }
     g_yue2_nar_queue.push_back(std::move(fn));
+    g_yue2_nar_pending++;
     g_yue2_nar_cv.notify_one();
+}
+
+// Block until every render handed to the lane has finished. Call it before
+// changing weights, holding g_yue2_mutex (so nothing new can be pushed: the
+// only push site runs under it) and NOT holding g_yue2_nar_mutex (the lane
+// needs it to finish). Zero pending returns at once. Returns false if the lane
+// is stopping, whose dropped renders will never finish; the caller must then
+// leave the weights alone.
+static bool yue2_nar_lane_drain(const char * who) {
+    std::unique_lock<std::mutex> lock(g_yue2_nar_qmutex);
+    if (g_yue2_nar_pending == 0) {
+        return true;
+    }
+    fprintf(stderr, "[YuE2] %s: waiting for %d NAR render(s) before the weights change\n", who, g_yue2_nar_pending);
+    g_yue2_nar_idle_cv.wait(lock, [] { return g_yue2_nar_stop || g_yue2_nar_pending == 0; });
+    if (g_yue2_nar_pending != 0) {
+        fprintf(stderr, "[YuE2] %s: NAR lane stopping, weights left unchanged\n", who);
+        return false;
+    }
+    fprintf(stderr, "[YuE2] %s: NAR lane drained, changing weights\n", who);
+    return true;
 }
 
 // Called once at shutdown after the work thread has been joined.
@@ -152,6 +189,7 @@ static void yue2_nar_lane_stop() {
         g_yue2_nar_stop = true;
     }
     g_yue2_nar_cv.notify_one();
+    g_yue2_nar_idle_cv.notify_all();  // a drain waiter must not outlive the lane
     if (g_yue2_nar_thread.joinable()) {
         g_yue2_nar_thread.join();
     }
@@ -364,6 +402,21 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req_in) {
                     job->id.c_str(), still);
         }
     }
+    // A different VAE variant than the resident one makes yue2_load_parts free
+    // and reload the VAE, which renders still on the lane are using: drain
+    // them first and hold the lane while the weights move.
+    std::unique_lock<std::mutex> vae_swap_lock;
+    if (!evict_strict && g_yue2.vae_resident && !req->plan_only && !req->semantic_only &&
+        g_yue2.vae_loaded_variant != req->vae_variant) {
+        if (!yue2_nar_lane_drain("vae variant change")) {
+            job->result_body = "YuE2 engine is shutting down";
+            job->result_mime = "text/plain";
+            job_set_phase(*job, JobPhase::FAILED);
+            job->status.store(2);
+            return;
+        }
+        vae_swap_lock = std::unique_lock<std::mutex>(g_yue2_nar_mutex);
+    }
     if (!evict_strict &&
         !yue2_load_parts(&g_yue2, /*want_lm=*/true, /*want_vae=*/!req->plan_only && !req->semantic_only, req->vae_variant,
                          /*want_encoder=*/false, &err)) {
@@ -372,6 +425,9 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req_in) {
         job_set_phase(*job, JobPhase::FAILED);
         job->status.store(2);
         return;
+    }
+    if (vae_swap_lock.owns_lock()) {
+        vae_swap_lock.unlock();  // yue2_overlap_ok below may take g_yue2_nar_mutex itself
     }
     if (!yue2_ensure_tokenizer(&err)) {
         job->result_body = err;

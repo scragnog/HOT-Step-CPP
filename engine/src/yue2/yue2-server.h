@@ -471,7 +471,6 @@ static void yue2_handle_select_model(const httplib::Request & req, httplib::Resp
     }
 
     std::lock_guard<std::mutex> lock(g_yue2_mutex);
-    std::lock_guard<std::mutex> nar_lock(g_yue2_nar_mutex);  // the render lane must be idle before weights move
 
     // No vae_variant in the body means the caller said nothing about the VAE,
     // so the effective variant is the one already picked. Defaulting to
@@ -480,7 +479,20 @@ static void yue2_handle_select_model(const httplib::Request & req, httplib::Resp
     // overwrite the pending pick when none is resident.
     const Yue2VaeVariant variant = vae_given ? variant_req : g_yue2.vae_loaded_variant;
 
-    if (lm_type_given && lm_type_str != g_yue2.lm_type_want) {
+    // The same three comparisons the code below tears down on. A selection that
+    // moves weights waits for every render already handed to the NAR lane: each
+    // was composed under the current weights and renders under them (#204).
+    // A same-key selection moves nothing and does not wait.
+    const bool lm_type_changes = lm_type_given && lm_type_str != g_yue2.lm_type_want;
+    const bool adapter_changes = adapter_given && yue2_adapter_key(adapters) != yue2_adapter_key(g_yue2.lm_adapter_want);
+    const bool vae_changes     = g_yue2.vae_resident && variant != g_yue2.vae_loaded_variant;
+    if ((lm_type_changes || adapter_changes || vae_changes) && !yue2_nar_lane_drain("select-model")) {
+        yue2_json_error(res, 503, "YuE2 engine is shutting down");
+        return;
+    }
+    std::lock_guard<std::mutex> nar_lock(g_yue2_nar_mutex);  // the render lane must be idle before weights move
+
+    if (lm_type_changes) {
         // Full teardown: yue2_unload() drops LM+VAE together (no LM-only
         // free exists), then re-discover pins the new LM file. VAE residency
         // is lost too, but yue2_load_parts's need_vae check reloads it on the
@@ -498,7 +510,7 @@ static void yue2_handle_select_model(const httplib::Request & req, httplib::Resp
     // re-discover: the GGUF pin has not moved. The merge itself happens on the
     // next warm/synth, and a bad path or an unmergeable quant fails THAT call
     // loudly rather than this one.
-    if (adapter_given && yue2_adapter_key(adapters) != yue2_adapter_key(g_yue2.lm_adapter_want)) {
+    if (adapter_changes) {
         yue2_unload(&g_yue2);
         g_yue2.lm_adapter_want = adapters;
     }
