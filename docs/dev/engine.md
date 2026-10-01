@@ -240,6 +240,10 @@ to guidance plugins.
   in `plugin_params` as `{"pluginName:key": value}`.
 - Aliases: solver `ode` is `euler`, scheduler `karras` is `sgm_uniform`. A scheduler
   named `name:args` falls back to the plugin `name`.
+- The DiT schedule, including the scheduler plugin and `custom_timesteps`, is built
+  once in `ops_build_schedule` (`pipeline-synth-ops.cpp`). Cover's source preservation
+  then picks its start step from that schedule, and the GGML and TRT samplers run it
+  as given; they no longer rebuild it. Rescale keeps truncate's step count (#124).
 - An unknown solver falls back to `euler` and an unknown guidance mode to `apg`,
   with an error line in the log.
 - MM3's flow stage (`mm3-plugins.h`), YuE2's NAR stage and `/sa3-refine` use the same

@@ -165,17 +165,9 @@ static int dit_trt_generate(DitTrt *              trt,
     frequency_damping  = g_hotstep_params.frequency_damping;
     temporal_smoothing = g_hotstep_params.temporal_smoothing;
 
-    // ── Custom timesteps / scheduler override ───────────────────────────
-    std::vector<float> custom_ts_schedule;
-    bool custom_ts_active = sampler_parse_custom_timesteps(custom_ts_schedule, num_steps);
-    if (custom_ts_active) {
-        schedule = custom_ts_schedule.data();
-    }
-    std::vector<float> custom_schedule;
-    if (!custom_ts_active && !g_hotstep_params.scheduler.empty()) {
-        sampler_build_scheduler_override(custom_schedule, num_steps, schedule);
-        schedule = custom_schedule.data();
-    }
+    // Custom timesteps and the scheduler plugin are already applied to
+    // `schedule` by ops_build_schedule (pipeline-synth-ops.cpp). Do not
+    // rebuild it here (#124).
 
     // DiT dimensions
     const int Oc     = 64;    // output channels

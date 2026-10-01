@@ -323,26 +323,48 @@ int ops_resolve_params(const AceSynth * ctx, const AceRequest * reqs, int batch_
     return 0;
 }
 
+// Default: t_i = shift * t / (1 + (shift-1)*t) with t = 1 - i/steps
+static void ops_shift_schedule(std::vector<float> & out, int n, float shift) {
+    out.resize(n);
+    for (int i = 0; i < n; i++) {
+        float t = 1.0f - (float) i / (float) n;
+        out[i]  = shift * t / (1.0f + (shift - 1.0f) * t);
+    }
+}
+
 void ops_build_schedule(SynthState & s) {
     // Custom timesteps override: CSV floats like
     // "0.97,0.76,0.615,0.5,0.395,0.28,0.18,0.085,0". Last value is the x0
     // endpoint handled implicitly by the sampler, so we drop it and take
     // schedule = first N-1 entries, num_steps = N-1.
+    bool have_custom = false;
     if (!s.rr.custom_timesteps.empty()) {
         std::vector<float> ts = parse_csv<float>(s.rr.custom_timesteps);
         if (ts.size() >= 2) {
             s.num_steps = (int) ts.size() - 1;
             s.schedule.assign(ts.begin(), ts.end() - 1);
             fprintf(stderr, "[Build-Schedule] Custom timesteps: %d steps\n", s.num_steps);
-            return;
+            have_custom = true;
+        } else {
+            fprintf(stderr, "[Build-Schedule] WARN: custom_timesteps needs >= 2 values, falling back to shift\n");
         }
-        fprintf(stderr, "[Build-Schedule] WARN: custom_timesteps needs >= 2 values, falling back to shift\n");
     }
-    // Default: t_i = shift * t / (1 + (shift-1)*t) with t = 1 - i/steps
-    s.schedule.resize(s.num_steps);
-    for (int i = 0; i < s.num_steps; i++) {
-        float t       = 1.0f - (float) i / (float) s.num_steps;
-        s.schedule[i] = s.shift * t / (1.0f + (s.shift - 1.0f) * t);
+    if (!have_custom) {
+        ops_shift_schedule(s.schedule, s.num_steps, s.shift);
+    }
+
+    // HOT-Step sideband: custom timesteps, else the selected scheduler plugin.
+    // Resolved here, not in the samplers, so the cover blend in ops_init_noise
+    // picks its start sigma from the schedule that actually runs, and both
+    // sampler paths (GGML and TRT) receive that schedule unchanged (#124).
+    std::vector<float> ov;
+    int                n = s.num_steps;
+    if (sampler_parse_custom_timesteps(ov, n)) {
+        s.schedule  = ov;
+        s.num_steps = n;
+    } else if (!g_hotstep_params.scheduler.empty()) {
+        sampler_build_scheduler_override(ov, s.num_steps, s.schedule.data());
+        s.schedule = ov;
     }
 }
 
@@ -1216,22 +1238,39 @@ void ops_init_noise(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
         // truncate s.schedule
         bool use_rescale = (s.rr.cover_noise_method == "rescale");
 
+        // Custom timesteps are an explicit list with no shape to rebuild at a
+        // smaller step count, so they always truncate.
+        if (use_rescale && (!s.rr.custom_timesteps.empty() || !g_hotstep_params.custom_timesteps.empty())) {
+            fprintf(stderr, "[Noise] Rescale: custom timesteps set, truncating instead\n");
+            use_rescale = false;
+        }
+
         if (use_rescale) {
-            // RESCALE: rebuild schedule with full step count in [start_sigma, 0] range.
-            // Preserves the shift distribution within the reduced range.
-            float start_sigma = nearest_t;
-            float sh = s.shift;
-            for (int i = 0; i < s.num_steps; i++) {
-                float t = 1.0f - (float) i / (float) s.num_steps;
-                float sigma = sh * t / (1.0f + (sh - 1.0f) * t);
-                s.schedule[i] = sigma * start_sigma;
+            // RESCALE: the step count truncate would keep, spread over
+            // [start_sigma, 0] in the selected scheduler's shape. Same number of
+            // DiT passes as truncate at the same preservation; only the spacing
+            // differs. Keeping the full budget ran every step over a near-clean
+            // latent (#124).
+            const float        start_sigma = nearest_t;
+            const int          n           = s.num_steps - start_idx;
+            std::vector<float> shape;
+            ops_shift_schedule(shape, n, s.shift);
+            if (!g_hotstep_params.scheduler.empty()) {
+                std::vector<float> ov;
+                sampler_build_scheduler_override(ov, n, shape.data());
+                shape = ov;
             }
-            // num_steps unchanged — full step budget
+            const float top = shape[0] > 0.0f ? shape[0] : 1.0f;
+            for (int i = 0; i < n; i++) {
+                shape[i] = shape[i] * start_sigma / top;
+            }
+            s.schedule  = shape;
+            s.num_steps = n;
             if (s.cover_steps >= 0) {
                 s.cover_steps = (int) ((float) s.num_steps * s.rr.audio_cover_strength);
             }
             fprintf(stderr, "[Noise] Rescale: %d steps in [%.4f -> 0], shift=%.1f\n",
-                    s.num_steps, start_sigma, sh);
+                    s.num_steps, start_sigma, s.shift);
         } else {
             // TRUNCATE (original behavior): remove early steps
             s.schedule.erase(s.schedule.begin(), s.schedule.begin() + start_idx);

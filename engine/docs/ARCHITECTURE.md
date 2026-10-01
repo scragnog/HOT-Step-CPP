@@ -245,8 +245,9 @@ noise and the clean source latents instead of pure noise, when the task uses a
 source context. `1.0` starts close to the source.
 
 **`cover_noise_method`** (string, default `""`). How the schedule is shortened for
-`cover_noise_strength`. `""` truncates the early steps. `"rescale"` keeps the full
-step count and rescales the schedule into the reduced range.
+`cover_noise_strength`. `""` truncates the early steps. `"rescale"` runs the same
+number of steps as truncate, rebuilding the selected scheduler's schedule across the
+reduced range. With `custom_timesteps` set, `"rescale"` truncates.
 
 **`repainting_start`**, **`repainting_end`** (float seconds, defaults 0 and -1).
 Region for `repaint` and `lego`. A negative start outpaints before the source; an
@@ -336,7 +337,7 @@ only the first object's sideband fields are read.
 | `stork_substeps`, `beat_stability`, `frequency_damping`, `temporal_smoothing` | 10, 0.25, 0.4, 0.13 | Copied into the solver state |
 | `cfg_cutoff_ratio` | 1.0 | Fraction of DiT steps that run CFG |
 | `cache_ratio` | 0.0 | Fraction of middle steps that reuse the previous velocity instead of a forward pass |
-| `custom_timesteps` | `""` | Same as the request field; the sampler reads this copy |
+| `custom_timesteps` | `""` | Same as the request field; `ops_build_schedule` reads this copy |
 | `dcw_enabled`, `dcw_mode`, `dcw_scaler`, `dcw_high_scaler` | false, `"low"`, 0.1, 0.0 | Wavelet-domain sampler correction. `dcw_mode` is `low`, `high`, `double` or `pix` |
 | `latent_shift`, `latent_rescale` | 0.0, 1.0 | Same as the request fields |
 | `denoise_strength`, `denoise_smoothing`, `denoise_mix` | 0.0, 0.7, 0.25 | Post-VAE spectral denoiser. Uses the `--noise-profile` noise profile when one was loaded |
