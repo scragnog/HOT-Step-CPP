@@ -26,8 +26,9 @@ import { latestGenerationLyrics, PUSHED_PREVIEW_LYRICS } from './yue2JointTrainR
 import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
 import type { TrainingDatasetRow } from './types.js';
 import { getYue2AlbumScore, importYue2RungScores, listYue2RungScores, scoreYue2Album, scoreYue2Rung, type Yue2RungScore } from './yue2RungScores.js';
-import type { Yue2AitkRunRecord } from './yue2AitkRuns.js';
+import { jointRunForAdapter, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
 import type { Yue2JointPreviewRecord } from './yue2JointPreview.js';
+import { listYue2TrainLogs, noteYue2TrainLog, trainLogArchiveDir } from './datasetProfile.js';
 
 export const TOKEN_HEADER = 'x-hotstep-worker-token';
 const LABELS_PREFIX = '__labels/';
@@ -130,17 +131,39 @@ export async function upsertPushedDataset(id: string, row: TrainingDatasetRow): 
   syncCounters(ds, (await detailFor(ds)).samples);
 }
 
-/** Linked AR/NAR pairs under the adapters folder, relative to it. */
-export function workerLinkedPairs(): Array<{ slug: string; at: string; ar: FileStamp & { rel: string }; nar: FileStamp & { rel: string } }> {
+export interface WorkerLinkedLog { seg: string; rel: string; size: number; mtimeMs: number }
+export interface WorkerLinkedPair {
+  slug: string; at: string; ar: FileStamp & { rel: string }; nar: FileStamp & { rel: string };
+  jobId?: string; keptStep?: number; logs?: WorkerLinkedLog[];
+}
+
+/** Linked AR/NAR pairs under the adapters folder, relative to it, plus (when
+ *  the run that produced the pair is still in this worker's durable index)
+ *  the jobId, the kept checkpoint's own step, and its train.jsonl file(s) —
+ *  so the controller can pull the loss curve back through the same route
+ *  that serves the two safetensors. */
+export function workerLinkedPairs(): WorkerLinkedPair[] {
   const root = config.aceServer.adapters;
   const stamp = (p: string) => {
     if (!isInside(root, p)) return null;
     try { const st = fs.statSync(p); return { rel: path.relative(root, p).split(path.sep).join('/'), size: st.size, mtimeMs: Math.round(st.mtimeMs) }; } catch { return null; }
   };
-  const out = [];
+  const out: WorkerLinkedPair[] = [];
   for (const [slug, pair] of Object.entries(readYue2Linked())) {
     const ar = stamp(pair.arPath); const nar = stamp(pair.narPath);
-    if (ar && nar) out.push({ slug, at: pair.at, ar, nar });
+    if (!ar || !nar) continue;
+    const entry: WorkerLinkedPair = { slug, at: pair.at, ar, nar };
+    const run = jointRunForAdapter(pair.arPath);
+    if (run) {
+      entry.jobId = run.jobId;
+      const step = /checkpoint-step(\d+)/.exec(pair.arPath)?.[1];
+      if (step) entry.keptStep = Number(step);
+      const logs = listYue2TrainLogs(run.output)
+        .map(({ seg, file }) => { try { const st = fs.statSync(file); return { seg, rel: path.relative(root, file).split(path.sep).join('/'), size: st.size, mtimeMs: Math.round(st.mtimeMs) }; } catch { return null; } })
+        .filter((l): l is WorkerLinkedLog => !!l);
+      if (logs.length) entry.logs = logs;
+    }
+    out.push(entry);
   }
   return out;
 }
@@ -148,7 +171,7 @@ export function workerLinkedPairs(): Array<{ slug: string; at: string; ar: FileS
 export function workerAdapterFile(rel: string): string {
   const root = config.aceServer.adapters;
   const abs = path.resolve(root, rel);
-  if (!isInside(root, abs) || !/\.safetensors$/i.test(abs)) throw Object.assign(new Error('Refused path'), { status: 400 });
+  if (!isInside(root, abs) || !/\.(safetensors|jsonl)$/i.test(abs)) throw Object.assign(new Error('Refused path'), { status: 400 });
   return abs;
 }
 
@@ -342,9 +365,43 @@ export async function pullLinked(w: WorkerInfo): Promise<Array<{ slug: string; s
       bytes += f.size;
     }
     refreshYue2PresetsForJointCheckpoint(ds, local[0], local[1]);
+    bytes += await pullLinkedLogs(w, ds.slug, pair);
     out.push({ slug: pair.slug, status: bytes ? 'fetched' : 'current', bytes });
   }
   return out;
+}
+
+const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
+
+/** Fetch a linked pair's train.jsonl file(s) through the same adapter-file
+ *  route as the two safetensors, and note which rung was kept. An old
+ *  worker sends no jobId/logs, so this is a no-op for it. jobId is validated
+ *  once up front: noteYue2TrainLog builds its sidecar path from it too, so an
+ *  unsafe jobId must skip the whole pair, not just the per-log fetch loop. */
+async function pullLinkedLogs(w: WorkerInfo, slug: string, pair: ReturnType<typeof workerLinkedPairs>[number]): Promise<number> {
+  if (!pair.jobId) return 0;
+  if (!SAFE_NAME.test(pair.jobId) || pair.jobId === '.' || pair.jobId === '..') {
+    console.warn(`[Workers] ${w.name}: skipping train log with an unsafe jobId (${pair.jobId})`); return 0;
+  }
+  const archiveDir = path.resolve(trainLogArchiveDir(slug));
+  let bytes = 0;
+  for (const log of pair.logs ?? []) {
+    if (!SAFE_NAME.test(log.seg) || log.seg === '.' || log.seg === '..') {
+      console.warn(`[Workers] ${w.name}: skipping train log with an unsafe seg (${log.seg})`); continue;
+    }
+    const dest = path.resolve(archiveDir, `${pair.jobId}-${log.seg}.jsonl`);
+    if (!isInside(archiveDir, dest)) { console.warn(`[Workers] ${w.name}: refused train log path ${log.rel}`); continue; }
+    try { if (fs.statSync(dest).size === log.size) continue; } catch { /* not here yet */ }
+    const r = await workerFetch(w, `/api/training/worker/adapter-file?rel=${encodeURIComponent(log.rel)}`);
+    if (!r.ok || !r.body) { console.warn(`[Workers] ${w.name}: fetching ${log.rel} failed (HTTP ${r.status})`); continue; }
+    fs.mkdirSync(archiveDir, { recursive: true });
+    await pipeline(Readable.fromWeb(r.body as any), fs.createWriteStream(`${dest}.part`));
+    fs.renameSync(`${dest}.part`, dest);
+    bytes += log.size;
+  }
+  try { noteYue2TrainLog(slug, pair.jobId, { ...(pair.keptStep !== undefined ? { keptStep: pair.keptStep } : {}), pulledFrom: w.name, pulledAt: Date.now() }); }
+  catch (err: any) { console.warn(`[Workers] ${w.name}: could not note the loss log of run ${pair.jobId}: ${err?.message || err}`); }
+  return bytes;
 }
 
 // Proxy: the Training Studio's /api/training calls, sent to a worker.

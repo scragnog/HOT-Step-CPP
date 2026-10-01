@@ -190,7 +190,13 @@ previews from the worker, stores the row here, then forwards the same PUT to the
 worker so its Review page and Finish scored still see it. A read first imports any
 worker rows missing here (`importYue2RungScores`, never overwriting). Worker
 datasets carry the controller's dataset ids, which is what makes this work. The
-worker's loss-log archive and sheet snapshot still stay on the worker.
+worker's sheet snapshot stays on the worker; `pullLinked` now also brings each linked
+pair's train.jsonl (and a `<jobId>.json` sidecar noting the kept step) back through the
+same `adapter-file` route as the two safetensors, landing under `trainLogArchiveDir` here.
+Two limits: a run whose worker process was killed outright (not stopped through the app)
+never reaches the trainer's `finally` block, so there is nothing archived there for the
+pull to find either; and the pull only sees the worker's *currently linked* pairs — an
+earlier run's log that was superseded and unlinked is not fetched.
 
 `server/src/services/training/datasetProfile.ts` measures a dataset and saves
 `<training dir>/datasets/<slug>/dataset-profile.json`. It reads only what

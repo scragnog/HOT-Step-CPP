@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { config } from '../../config.js';
 import { listWorkers, resolveDatasetFile } from './trainingWorkers.js';
 import { labelsDir } from './paths.js';
@@ -23,4 +27,120 @@ test('TRAINING_WORKERS parses name=url pairs and skips junk', () => {
       { name: 'Other', url: 'https://o:1' },
     ]);
   } finally { config.workers.list = before; }
+});
+
+// ── pullLinked: a fake worker over a real loopback HTTP server, with
+// TRAINING_DIR/ACESTEPCPP_ADAPTERS/DATA_DIR isolated to a temp root so the
+// pull never touches this checkout's real adapters, training dir or db. ──
+
+const TRAINING_SRC_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+function runPullInIsolatedRoot(root: string, script: string): void {
+  const env = {
+    ...process.env, TRAINING_DIR: path.join(root, 'training'),
+    ACESTEPCPP_ADAPTERS: path.join(root, 'adapters'), DATA_DIR: path.join(root, 'data'),
+  };
+  execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], { cwd: TRAINING_SRC_ROOT, env, stdio: 'pipe' });
+}
+
+// Shared boilerplate every pull test needs: initDb, a dataset row per slug,
+// and a tiny HTTP server standing in for the worker's /linked + /adapter-file.
+const PULL_HARNESS = [
+  "import fs from 'node:fs';",
+  "import path from 'node:path';",
+  "import http from 'node:http';",
+  "import { initDb } from './src/db/database.js';",
+  "import * as repo from './src/services/training/datasetsRepo.js';",
+  "import { pullLinked } from './src/services/training/trainingWorkers.js';",
+  "import { trainLogArchiveDir } from './src/services/training/datasetProfile.js';",
+  "initDb();",
+  "const now = new Date().toISOString();",
+  "function addDataset(slug) { repo.insertDataset({ id: 'ds-' + slug, slug, name: slug, sourceDir: path.join(process.env.TRAINING_DIR, 'src-' + slug), recursive: true, customTag: '', tagPosition: 'prefix', genreRatio: 0, defaultArtist: '', defaultAlbum: '', defaultGenre: '', defaultLanguage: '', sampleCount: 0, labeledCount: 0, excludedCount: 0, status: 'draft', builtAt: '', datasetJsonPath: '', albumName: '', createdAt: now, updatedAt: now }); }",
+  "async function serve(linked, files) {",
+  "  const server = http.createServer((req, res) => {",
+  "    const u = new URL(req.url, 'http://x');",
+  "    if (u.pathname === '/api/training/worker/linked') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ linked })); return; }",
+  "    if (u.pathname === '/api/training/worker/adapter-file') { const body = files[u.searchParams.get('rel')]; if (!body) { res.statusCode = 404; res.end('{}'); return; } res.end(body); return; }",
+  "    res.statusCode = 404; res.end();",
+  "  });",
+  "  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));",
+  "  return server;",
+  "}",
+].join('');
+
+test('pullLinked fetches a linked pair\'s train log and notes the kept step', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-pull-logs-'));
+  try {
+    const script = PULL_HARNESS + [
+      "addDataset('album');",
+      "const AR = Buffer.from('AR-BYTES'); const NAR = Buffer.from('NAR-BYTES'); const LOG = Buffer.from('{\"stage\":\"joint\",\"step\":1}\\n');",
+      "const files = { 'album/ar.safetensors': AR, 'album/nar.safetensors': NAR, 'album/job1-logs/segment-000001/train.jsonl': LOG };",
+      "const linked = [{ slug: 'album', at: now, ar: { rel: 'album/ar.safetensors', size: AR.length, mtimeMs: 1 }, nar: { rel: 'album/nar.safetensors', size: NAR.length, mtimeMs: 1 }, jobId: 'job1', keptStep: 120, logs: [{ seg: 'segment-000001', rel: 'album/job1-logs/segment-000001/train.jsonl', size: LOG.length, mtimeMs: 1 }] }];",
+      "const server = await serve(linked, files);",
+      "try {",
+      "  const pulled = await pullLinked({ name: 'worker1', url: 'http://127.0.0.1:' + server.address().port });",
+      "  if (pulled.length !== 1 || pulled[0].status !== 'fetched') throw new Error('unexpected pull result: ' + JSON.stringify(pulled));",
+      "  const arDest = path.join(process.env.ACESTEPCPP_ADAPTERS, 'album', 'ar.safetensors');",
+      "  if (fs.readFileSync(arDest, 'utf8') !== AR.toString()) throw new Error('ar file missing or wrong content');",
+      "  const logDest = path.join(trainLogArchiveDir('album'), 'job1-segment-000001.jsonl');",
+      "  if (fs.readFileSync(logDest, 'utf8') !== LOG.toString()) throw new Error('log file missing or wrong content');",
+      "  const sidecar = JSON.parse(fs.readFileSync(path.join(trainLogArchiveDir('album'), 'job1.json'), 'utf8'));",
+      "  if (sidecar.keptStep !== 120 || sidecar.pulledFrom !== 'worker1') throw new Error('sidecar missing fields: ' + JSON.stringify(sidecar));",
+      "} finally { server.close(); }",
+    ].join('');
+    runPullInIsolatedRoot(root, script);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('pullLinked still pulls adapters only when the worker sends none of the new log fields', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-pull-old-worker-'));
+  try {
+    const script = PULL_HARNESS + [
+      "addDataset('album');",
+      "const AR = Buffer.from('AR-BYTES'); const NAR = Buffer.from('NAR-BYTES');",
+      "const files = { 'album/ar.safetensors': AR, 'album/nar.safetensors': NAR };",
+      "const linked = [{ slug: 'album', at: now, ar: { rel: 'album/ar.safetensors', size: AR.length, mtimeMs: 1 }, nar: { rel: 'album/nar.safetensors', size: NAR.length, mtimeMs: 1 } }];",
+      "const server = await serve(linked, files);",
+      "try {",
+      "  const pulled = await pullLinked({ name: 'worker1', url: 'http://127.0.0.1:' + server.address().port });",
+      "  if (pulled.length !== 1 || pulled[0].status !== 'fetched' || pulled[0].bytes !== AR.length + NAR.length) throw new Error('unexpected pull result: ' + JSON.stringify(pulled));",
+      "  if (fs.existsSync(trainLogArchiveDir('album'))) throw new Error('train-logs dir created for a pair with no logs');",
+      "} finally { server.close(); }",
+    ].join('');
+    runPullInIsolatedRoot(root, script);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('pullLinked rejects traversal in a linked pair\'s jobId or log seg', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-pull-traversal-'));
+  try {
+    const script = PULL_HARNESS + [
+      "addDataset('alpha'); addDataset('beta');",
+      "const AR = Buffer.from('AR'); const NAR = Buffer.from('NAR'); const LOG = Buffer.from('log');",
+      "const files = {",
+      "  'alpha/ar.safetensors': AR, 'alpha/nar.safetensors': NAR, 'alpha/escape.jsonl': LOG,",
+      "  'beta/ar.safetensors': AR, 'beta/nar.safetensors': NAR, 'beta/escape2.jsonl': LOG,",
+      "};",
+      "const linked = [",
+      "  { slug: 'alpha', at: now, ar: { rel: 'alpha/ar.safetensors', size: AR.length, mtimeMs: 1 }, nar: { rel: 'alpha/nar.safetensors', size: NAR.length, mtimeMs: 1 }, jobId: '../evil', keptStep: 1, logs: [{ seg: 'segment-000001', rel: 'alpha/escape.jsonl', size: LOG.length, mtimeMs: 1 }] },",
+      "  { slug: 'beta', at: now, ar: { rel: 'beta/ar.safetensors', size: AR.length, mtimeMs: 1 }, nar: { rel: 'beta/nar.safetensors', size: NAR.length, mtimeMs: 1 }, jobId: 'job2', keptStep: 1, logs: [{ seg: '..', rel: 'beta/escape2.jsonl', size: LOG.length, mtimeMs: 1 }] },",
+      "];",
+      "const server = await serve(linked, files);",
+      "try {",
+      "  const pulled = await pullLinked({ name: 'worker1', url: 'http://127.0.0.1:' + server.address().port });",
+      "  if (pulled.length !== 2 || pulled.some(p => p.status !== 'fetched')) throw new Error('unexpected pull result: ' + JSON.stringify(pulled));",
+      "  const trainingRoot = path.join(process.env.TRAINING_DIR);",
+      "  const escaped = fs.readdirSync(process.env.TRAINING_DIR, { recursive: true }).filter(f => String(f).includes('evil') || String(f).endsWith('..jsonl'));",
+      "  if (escaped.length) throw new Error('a log landed outside its archive dir: ' + JSON.stringify(escaped));",
+      "  if (fs.existsSync(trainLogArchiveDir('alpha')) && fs.readdirSync(trainLogArchiveDir('alpha')).some(f => f.includes('evil'))) throw new Error('unsafe jobId was not rejected');",
+      "  if (fs.existsSync(trainLogArchiveDir('beta')) && fs.readdirSync(trainLogArchiveDir('beta')).some(f => f.endsWith('-..jsonl'))) throw new Error('unsafe seg was not rejected');",
+      "} finally { server.close(); }",
+    ].join('');
+    runPullInIsolatedRoot(root, script);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
