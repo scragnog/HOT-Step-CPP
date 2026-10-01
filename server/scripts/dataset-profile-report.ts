@@ -196,10 +196,12 @@ const MILESTONE_PCTS = [50, 70, 90] as const;
 function milestoneSteps(raw: number[], smoothed: number[], recs: JointRecord[]): Record<number, number | null> {
   const early = avg(raw.slice(0, 3)), final = avg(raw.slice(-20)), drop = early - final;
   const out: Record<number, number | null> = { 50: null, 70: null, 90: null };
-  if (!Number.isFinite(drop) || drop === 0) return out;
+  // Loss must actually have fallen: a flat or rising series is not progress
+  // toward arrival, and must not report milestones by reversing the sense of "below".
+  if (!Number.isFinite(drop) || drop <= 0) return out;
   for (const pct of MILESTONE_PCTS) {
     const target = early - drop * (pct / 100);
-    const idx = smoothed.findIndex(v => drop > 0 ? v <= target : v >= target);
+    const idx = smoothed.findIndex(v => v <= target);
     out[pct] = idx >= 0 ? recs[idx].step : null;
   }
   return out;
@@ -374,23 +376,38 @@ function familyTest(targetKey: 'arriveStep' | 'turnStep'): { n: number; results:
   if (pool.length < MIN_N) return { n: pool.length, results: MEASURES.map(m => ({ measure: m, rho: NaN })), p: null };
   const rhoFor = (tgts: number[]) => MEASURES.map(m => spearman(pool.map(r => r.m[m] as number), tgts));
   const observed = rhoFor(pool.map(r => r.t[targetKey] as number));
-  const observedMax = Math.max(...observed.map(Math.abs));
-  const rng = seededRng(20261001);
-  let hits = 0;
-  const base = pool.map(r => r.t[targetKey] as number);
-  for (let s = 0; s < 1000; s++) {
-    const shuffled = base.slice();
-    for (let i = shuffled.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]; }
-    if (Math.max(...rhoFor(shuffled).map(Math.abs)) >= observedMax) hits++;
+  // A constant measure (or, in principle, a constant target) makes spearman return
+  // NaN; Math.max propagates that NaN and every shuffle comparison then silently
+  // fails, printing p = 0. Drop non-estimable measures from the max on both sides —
+  // the set is fixed by which arrays are constant, which shuffling the target can't change.
+  const estimable = observed.map(Number.isFinite);
+  const maxAbsEstimable = (rhos: number[]): number => {
+    const vals = rhos.filter((_, i) => estimable[i]).map(Math.abs);
+    return vals.length ? Math.max(...vals) : NaN;
+  };
+  const observedMax = maxAbsEstimable(observed);
+  let p: number | null = null;
+  if (estimable.some(Boolean)) {
+    const rng = seededRng(20261001);
+    let hits = 0;
+    const base = pool.map(r => r.t[targetKey] as number);
+    for (let s = 0; s < 1000; s++) {
+      const shuffled = base.slice();
+      for (let i = shuffled.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]; }
+      if (maxAbsEstimable(rhoFor(shuffled)) >= observedMax) hits++;
+    }
+    p = hits / 1000;
   }
-  return { n: pool.length, results: MEASURES.map((m, i) => ({ measure: m, rho: observed[i] })), p: hits / 1000 };
+  return { n: pool.length, results: MEASURES.map((m, i) => ({ measure: m, rho: observed[i] })), p };
 }
 function renderFamily(title: string, fam: ReturnType<typeof familyTest>): void {
   lines.push(`## ${title}`, '', `n = ${fam.n} base-matched runs with a usable log and 4+ scored rungs.`, '');
-  if (fam.p === null) { lines.push(`Not enough runs to test (need ${MIN_N}).`, ''); return; }
+  if (fam.n < MIN_N) { lines.push(`Not enough runs to test (need ${MIN_N}).`, ''); return; }
   lines.push('| measure | rho |', '|---|---|');
   for (const x of fam.results) lines.push(`| ${x.measure} | ${Number.isFinite(x.rho) ? x.rho.toFixed(2) : ''} |`);
-  lines.push('', `Family-wise p (max |rho| over the six, 1000 seeded shuffles): ${fam.p.toFixed(3)}`, '');
+  lines.push('', fam.p === null
+    ? 'Family-wise p: unavailable (every measure was constant in this pool).'
+    : `Family-wise p (max |rho| over the six, 1000 seeded shuffles): ${fam.p.toFixed(3)}`, '');
 }
 const predeclared = familyTest('arriveStep');
 renderFamily('Milestone correlations vs arriveStep (predeclared family)', predeclared);
