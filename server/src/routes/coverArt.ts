@@ -11,6 +11,7 @@ import { Router } from 'express';
 import { getUserId } from './auth.js';
 import { generateCoverArt, getCoverArtReadiness, type CoverArtResult } from '../services/coverArt/coverArtService.js';
 import { buildCoverArtPrompt } from '../services/coverArt/promptBuilder.js';
+import { resolveCoverScene } from '../services/coverArt/sceneLlm.js';
 import { coverArtDownloader } from '../services/coverArt/coverArtDownloader.js';
 
 const router = Router();
@@ -117,15 +118,22 @@ router.get('/download/progress', (req, res) => {
 // editable textarea with exactly what the engine would generate by default,
 // so the user can tweak it instead of starting from scratch.
 
-router.post('/prompt-preview', (req, res) => {
-  const { title, style, lyrics, subject } = req.body || {};
-  const prompt = buildCoverArtPrompt({
-    title: title || '',
-    style: style || '',
-    lyrics: lyrics || '',
-    subject: subject || '',
-  });
-  res.json({ prompt });
+router.post('/prompt-preview', async (req, res) => {
+  try {
+    const { title, style, lyrics, subject, prompt } = req.body || {};
+    const opts = {
+      title: title || '',
+      style: style || '',
+      lyrics: lyrics || '',
+      subject: subject || '',
+      prompt: prompt || '',
+    };
+    const scene = await resolveCoverScene(opts);
+    res.json({ prompt: buildCoverArtPrompt({ ...opts, subject: scene ?? opts.subject }) });
+  } catch (err) {
+    console.error('[CoverArt] Prompt preview failed:', err);
+    res.status(500).json({ error: 'Could not build cover art prompt' });
+  }
 });
 
 // ── POST /generate — Generate cover art for a song ──────────────────────

@@ -351,6 +351,10 @@ download of about 5.9 GB from this panel; progress and a cancel button show whil
 downloads. Cover art only runs while the Post-Processing master switch is on. Auto-Gen can
 override the subject for a single song.
 
+When both the prompt and subject are blank, the selected Caption LLM writes one short
+visual scene for the image. If it is unavailable or slow, cover art uses the existing
+lyric keywords instead.
+
 ## Adapters
 
 The Adapters section loads LoRA and LoKr adapters onto the DiT, sets their strength, and

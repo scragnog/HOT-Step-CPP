@@ -14,6 +14,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { config } from '../../config.js';
 import { getDb } from '../../db/database.js';
 import { buildCoverArtPrompt, type CoverArtPromptOpts } from './promptBuilder.js';
+import { resolveCoverScene } from './sceneLlm.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -110,8 +111,9 @@ export async function generateCoverImage(opts: GenerateCoverImageOpts): Promise<
     throw new Error(`Cover art not ready — missing: ${status.missingFiles.join(', ')}`);
   }
 
-  // Build prompt
-  const prompt = buildCoverArtPrompt(opts);
+  // Resolve a scene only when the user has not supplied a prompt or subject.
+  const scene = await resolveCoverScene(opts);
+  const prompt = buildCoverArtPrompt({ ...opts, subject: scene ?? opts.subject });
   console.log(`[CoverArt] Prompt: "${prompt}"`);
 
   // Resolve paths
