@@ -39,6 +39,10 @@ model pickers, planner controls and adapter panels, and a section the backend ha
 for says so instead of showing ACE-Step controls that would do nothing. Everything below
 describes the ACE-Step 1.5 layout. For the others, see [Backends](backends.md).
 
+In Create with YuE2 selected, the Caption source picker can use tracks from a linked
+training dataset. The tags below it come from those captions; clicking one switches
+to Custom and adds or removes that phrase from your style description.
+
 ## Models
 
 | Control | What it does |

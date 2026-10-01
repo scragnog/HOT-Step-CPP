@@ -1,5 +1,8 @@
 {
   "translation": {
+    "createPanel.yue2TagsFrom": "Tags from {{source}}",
+    "createPanel.yue2TagsInfo": "These phrases come from the selected training dataset. Click a tag to add it to your Custom caption; click it again to remove it.",
+    "createPanel.yue2NoLinkedCaptions": "This adapter has no linked training captions.",
     "paramLabel.resetToDefault": "Reset {{label}} to default",
     "trainingStudio.yue2.method.autoOutput": "Adapters are saved in your global adapters folder under yue2-joint-adapters/triggerword_date_time.",
     "trainingStudio.yue2.method.autoTrainHint": "Start training prepares the dataset automatically, then trains AR and NAR together. Unchanged prepared data is reused.",

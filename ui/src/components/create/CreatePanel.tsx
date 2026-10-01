@@ -4,7 +4,7 @@
 // have been moved to the GlobalParamBar. This panel now only handles
 // per-song content and metadata.
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Zap, ListPlus, Sparkles, Radio } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { usePersistedState } from '../../hooks/usePersistedState';
@@ -37,6 +37,7 @@ import {
   type Yue2CaptionSelection, type Yue2SourceTrack,
 } from '../../utils/yue2CaptionSource';
 import { listDatasets, type TrainingDatasetSummary } from '../../services/trainingApi';
+import { extractCaptionTags } from '../../utils/captionTags';
 import { StyledSelect } from '../shared/StyledSelect';
 import { ParamLabel } from '../shared/ParamLabel';
 import { writePersistedState } from '../../hooks/usePersistedState';
@@ -161,9 +162,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   const fetchBackendModels = useBackendStore(s => s.fetchModels);
   const [yue2Ds, setYue2Ds] = useState<{ datasetId: string; datasetName: string; tracks: Yue2SourceTrack[] }>(
     { datasetId: '', datasetName: '', tracks: [] });
+  const [yue2SourcePending, setYue2SourcePending] = useState(false);
   const [yue2DatasetChoice, setYue2DatasetChoice] = useState<string>(() => readYue2CaptionDataset());
   const [yue2DatasetOptions, setYue2DatasetOptions] = useState<TrainingDatasetSummary[]>([]);
   const [yue2Selection, setYue2Selection] = useState<Yue2CaptionSelection>({ mode: 'custom' });
+  const yue2ResolveSeq = useRef(0);
   // The caption as it stands right now, for the effect below — which must not
   // re-run on every keystroke, and so cannot have it as a dependency. Synced in
   // its own effect rather than during render, and declared FIRST so it is
@@ -189,7 +192,13 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   }, [yue2Mode]);
 
   const resolveYue2Dataset = useCallback(async () => {
-    if (!yue2Mode) { setYue2Ds({ datasetId: '', datasetName: '', tracks: [] }); return; }
+    const seq = ++yue2ResolveSeq.current;
+    if (!yue2Mode) {
+      setYue2SourcePending(false);
+      setYue2Ds({ datasetId: '', datasetName: '', tracks: [] });
+      return;
+    }
+    setYue2SourcePending(true);
     const explicit = readYue2CaptionDataset();
     setYue2DatasetChoice(explicit);
     const src = explicit
@@ -197,7 +206,10 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
       : yue2AdapterPath
         ? await ensureYue2CaptionSource({ adapter: yue2AdapterPath })
         : { datasetId: '', datasetName: '', tracks: [] };
-    setYue2Ds(src);
+    if (seq === yue2ResolveSeq.current) {
+      setYue2Ds(src);
+      setYue2SourcePending(false);
+    }
   }, [yue2Mode, yue2AdapterPath]);
 
   useEffect(() => { void resolveYue2Dataset(); }, [resolveYue2Dataset]);
@@ -252,7 +264,13 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   }, [yue2Mode, yue2Ds.datasetId]);
 
   const yue2Tracks = yue2Ds.tracks;
-  const yue2SourcesActive = yue2Mode && yue2Tracks.length > 0;
+  const yue2CaptionTags = useMemo(() => extractCaptionTags(yue2Tracks), [yue2Tracks]);
+  const yue2TagSourceName = yue2Ds.datasetName
+    || (() => {
+      const dataset = yue2DatasetOptions.find(d => d.id === yue2Ds.datasetId);
+      return dataset?.name || dataset?.albumName || dataset?.slug || yue2Ds.datasetId;
+    })();
+  const yue2SourcesActive = yue2Mode && !yue2SourcePending && yue2Tracks.length > 0;
   const yue2Resolved = yue2SourcesActive
     ? resolveYue2Caption(yue2Selection.customCaption ?? caption, bpm, yue2Tracks, yue2Selection)
     : null;
@@ -284,6 +302,28 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     setYue2Selection(next);
     if (next.mode === 'custom') setCaption(customCaption ?? '');
   }, [yue2Ds.datasetId, caption, setCaption]);
+
+  const customTagCaption = yue2CaptionLocked ? yue2Selection.customCaption ?? '' : caption;
+  const captionTagIndex = (parts: string[], phrase: string) => parts.findIndex((part, index) =>
+    index % 2 === 0 && part.trim().toLocaleLowerCase() === phrase.toLocaleLowerCase());
+  const hasCaptionTag = (phrase: string) =>
+    captionTagIndex(customTagCaption.split(/([,.])/), phrase) >= 0;
+  const toggleCaptionTag = (phrase: string) => {
+    const parts = customTagCaption.split(/([,.])/);
+    const index = captionTagIndex(parts, phrase);
+    let next: string;
+    if (index >= 0) {
+      parts[index] = '';
+      if (index + 1 < parts.length) parts[index + 1] = '';
+      else if (index > 0) parts[index - 1] = '';
+      next = parts.join('').trim().replace(/[,.]+$/, '').trim();
+    } else {
+      const base = customTagCaption.trim().replace(/[,.]\s*$/, '');
+      next = base ? `${base}, ${phrase}` : phrase;
+    }
+    if (yue2Resolved?.mode !== 'custom') setYue2CaptionMode('custom');
+    setCaption(next);
+  };
 
   // The Dataset dropdown itself — writes the explicit choice ('' for None,
   // which then falls back to the adapter-resolved dataset above) and lets the
@@ -557,6 +597,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
               ]}
             />
 
+            {!!yue2AdapterPath && !yue2Ds.datasetId && !yue2SourcePending && (
+              <p className="text-[11px] text-zinc-500">
+                {t('createPanel.yue2NoLinkedCaptions', 'This adapter has no linked training captions.')}
+              </p>
+            )}
+
             {yue2SourcesActive && yue2Resolved && (
               <>
                 <ParamLabel
@@ -585,6 +631,33 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
                     })),
                   ]}
                 />
+                {yue2CaptionTags.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <ParamLabel
+                      label={t('createPanel.yue2TagsFrom', { source: yue2TagSourceName, defaultValue: 'Tags from {{source}}' })}
+                      className="text-xs font-medium text-zinc-500 uppercase tracking-wider block"
+                      info={t('createPanel.yue2TagsInfo', 'These phrases come from the selected training dataset. Click a tag to add it to your Custom caption; click it again to remove it.')}
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {yue2CaptionTags.map(phrase => {
+                        const selected = hasCaptionTag(phrase);
+                        return (
+                          <button
+                            key={phrase.toLocaleLowerCase()}
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => toggleCaptionTag(phrase)}
+                            className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${selected
+                              ? 'border-pink-400/60 bg-pink-500/20 text-pink-200'
+                              : 'border-pink-500/25 bg-pink-500/5 text-zinc-400 hover:border-pink-400/50 hover:text-pink-200'}`}
+                          >
+                            {phrase}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 {yue2CaptionLocked && (
                   <p className="text-[10px] text-emerald-400/70">
                     {t('createPanel.yue2CaptionFromTrack', 'From dataset track')}: {yue2Resolved.fromName}
