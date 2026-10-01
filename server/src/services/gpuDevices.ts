@@ -205,6 +205,16 @@ export function resolveGpuSelection(setting: string): GpuSelection {
   };
 }
 
+/** Total VRAM (MB) of the card the engine and trainers run on, or null when
+ *  nvidia-smi cannot say (no NVIDIA GPU, or a selection it cannot resolve). */
+export function selectedGpuMemoryMB(): number | null {
+  const gpus = listGpusSync();
+  const pick = resolveGpuSelection(config.aceServer.cudaVisibleDevices).visibleDevices;
+  if (!pick) return gpus.length === 1 ? gpus[0].memoryMB : null;
+  const gpu = gpus.find((g) => g.uuid.toLowerCase() === pick.split(',')[0].trim().toLowerCase());
+  return gpu ? gpu.memoryMB : null;
+}
+
 /**
  * A child env with the GPU decision applied: CUDA_VISIBLE_DEVICES unset (in
  * any letter case Windows stored it) and then set only when the decision

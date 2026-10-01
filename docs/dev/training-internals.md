@@ -102,7 +102,7 @@ Ladder previews (2026-09-27): for a base-matched run the relay fires `state.onRu
 take per checkpoint while training continues, and `listYue2AitkRuns` flags every complete
 checkpoint of such a run as a rung so the Review route, `bestScoredRung` and the ladder cards
 treat it as one. The route clears `preview.everySteps` for a parallel base-matched preview so the
-run is not segmented. The ladder UI (`Yue2LadderReview.tsx`: cards, scores, scoreboard, "Use this
+run is not segmented. Parallel previews need a card of 28 GB or more (`PARALLEL_PREVIEW_MIN_VRAM_MB`, read from nvidia-smi for the selected GPU): training plus a render measured ~21 GB before the preview's 4-way recomposition, and on a 24 GB WDDM card the overflow spills into system RAM and both processes stall until the hang watchdog kills the run (2026-10-01). On a smaller or unknown card the runner turns `parallel` off at job start, so previews pause training (`--pause-on-kl-mark`, or `everySteps = saveEvery` for base-matched). The ladder UI (`Yue2LadderReview.tsx`: cards, scores, scoreboard, "Use this
 rung", cleanup modal) was extracted from `RefinePanel.tsx` and is shared by the training card and
 the hidden Refine tab; `finishScoredLadders` runs a base-matched ladder through `finish` only.
 

@@ -4,7 +4,9 @@
 import fs from 'fs';
 import path from 'path';
 import { emitProgress, finishJob, isCancelled, pushEvent, type TrainingJob } from './labelingQueue.js';
-import { buildGpuEnv } from '../gpuDevices.js';
+import { buildGpuEnv, selectedGpuMemoryMB } from '../gpuDevices.js';
+
+const PARALLEL_PREVIEW_MIN_VRAM_MB = 28 * 1024;
 import { log, runYue2AceTrain, YUE2_IDLE_MS, type RelayState } from './yue2TrainRunner.js';
 import { checkpointRecords, listYue2AitkRuns, recordYue2AitkRun } from './yue2AitkRuns.js';
 import { runYue2PlanCheck, type Yue2PlanCheckOptions } from './yue2PlanCheck.js';
@@ -683,6 +685,19 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
   if (o.resume && o.companion !== companion) log(job, 'warn', `Companion decoder adapter differs from the run being resumed: was ${o.companion ?? 'not installed'}, now ${companion ?? 'not installed'}`);
   o.companion = companion;
   log(job, 'info', `Companion decoder adapter: ${companion ?? 'not installed (training on the pristine decoder)'}`);
+  // Training + a parallel render measured ~21 GB, before a 4-way recomposition
+  // on top. On a 24 GB card WDDM spills into system RAM and both processes
+  // stall until the hang watchdog kills the run (2026-10-01), so smaller or
+  // unknown cards pause training for each preview instead.
+  if (o.preview?.parallel) {
+    const vramMB = selectedGpuMemoryMB();
+    if (vramMB === null || vramMB < PARALLEL_PREVIEW_MIN_VRAM_MB) {
+      // Base-matched has no KL marks to pause on: pause at each save instead.
+      const everySteps = o.method === 'base-matched' && !(o.klCheckpointEvery! > 0) && !(o.preview.everySteps > 0) ? o.saveEvery : o.preview.everySteps;
+      o.preview = { ...o.preview, parallel: false, everySteps };
+      log(job, 'info', `Previews will pause training: rendering alongside it needs ${PARALLEL_PREVIEW_MIN_VRAM_MB / 1024} GB of VRAM, this card has ${vramMB === null ? 'an unknown amount' : `${(vramMB / 1024).toFixed(0)} GB`}`);
+    }
+  }
   if (o.calibration) {
     const c = o.calibration;
     log(job, 'info', `Dataset-Calibrated Training: ${c.minutes} min of audio, x${c.factor} against a ${CALIBRATION_REFERENCE_MINUTES}-minute album: ${c.requestedSteps} updates (save every ${c.requestedSaveEvery}) became ${c.steps} (save every ${c.saveEvery})`);
