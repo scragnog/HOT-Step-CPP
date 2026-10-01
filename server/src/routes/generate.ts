@@ -61,6 +61,19 @@ setInterval(() => {
 
 // translateParams is now imported from ../services/generation/translateParams.ts
 
+/** Pure guard, kept exportable for a server-side test: a caller (the MCP
+ *  server submits one on every generation) that names which backend it
+ *  planned the request for, when that no longer matches the active one. Reads
+ *  `expectedBackend` only — `body.backend` stays the existing log-only field
+ *  envelope.ts already reads for `submittedBackendMismatch`. */
+export function expectedBackendMismatch(
+  body: unknown, activeBackendId: string,
+): { expectedBackend: string; activeBackend: string } | null {
+  const expected = (body as Record<string, unknown> | null | undefined)?.expectedBackend;
+  if (typeof expected !== 'string' || expected === activeBackendId) return null;
+  return { expectedBackend: expected, activeBackend: activeBackendId };
+}
+
 function emptyOutcome(job: GenerationJob, endReason: GenerationEndReason): GenerationOutcome {
   return {
     endReason,
@@ -271,6 +284,19 @@ router.post('/', (req, res) => {
 
   const userId = getUserId(req);
   if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+  // An MCP (or other headless) caller asserts which backend it planned the
+  // request for; the UI never sends this. `backend` stays log-only — only
+  // `expectedBackend` can block a submit, so a caller that races a backend
+  // switch fails loudly instead of training/rendering on the wrong one.
+  const mismatch = expectedBackendMismatch(req.body, getActiveBackendId());
+  if (mismatch) {
+    res.status(409).json({
+      error: `Expected backend '${mismatch.expectedBackend}' but the active backend is '${mismatch.activeBackend}'`,
+      ...mismatch,
+    });
+    return;
+  }
 
   // A profile can carry a timbre reference whose upload was deleted; the
   // synth phase would find that out minutes in. Refuse it at the form (#162).

@@ -82,6 +82,8 @@ tools/*
 !tools/onnx-export/
 !tools/mcp-lyricstudio/
 tools/mcp-lyricstudio/node_modules/
+!tools/mcp-hotstep/
+tools/mcp-hotstep/node_modules/
 !tools/discord-claude/
 !tools/lm-attr-probe/
 !tools/mm3-reg-corpus/
