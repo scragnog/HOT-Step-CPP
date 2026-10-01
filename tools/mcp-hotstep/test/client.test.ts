@@ -14,6 +14,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 let fixtureServer: http.Server;
 let client: Client;
+let trainingRequests = 0;
 
 before(async () => {
   // A minimal fixture: login, a generate submit that always accepts, and a
@@ -27,6 +28,7 @@ before(async () => {
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jobId: 'job-client-test', status: 'pending' }));
       return;
     }
+    if (req.url?.startsWith('/api/training/')) trainingRequests++;
     if (req.url?.startsWith('/api/generate/status/')) {
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jobId: 'job-client-test', status: 'running' }));
       return;
@@ -55,15 +57,27 @@ function firstText(result: CallToolResult): string {
   return (block as { type: 'text'; text: string }).text;
 }
 
-test('lists all eight generation tools and nine training tools', async () => {
+test('lists all eight generation tools and twelve training tools', async () => {
   const { tools } = await client.listTools();
   const names = tools.map(t => t.name).sort();
   assert.deepEqual(names, [
     'gen_backends', 'gen_cancel', 'gen_configure', 'gen_queue',
     'gen_song', 'gen_status', 'gen_submit', 'gen_wait',
     'train_capabilities', 'train_dataset', 'train_dataset_create', 'train_dataset_label',
-    'train_dataset_rescan', 'train_datasets', 'train_job', 'train_jobs', 'train_wait',
+    'train_dataset_rescan', 'train_datasets', 'train_job', 'train_jobs', 'train_prepare', 'train_runs',
+    'train_start', 'train_wait',
   ]);
+});
+
+test('train_start yue2-joint with trainingMethod in its fields fails schema validation before any HTTP call', async () => {
+  const before = trainingRequests;
+  const result = await client.callTool({
+    name: 'train_start',
+    arguments: { datasetId: 'ds1', backend: 'yue2-joint', yue2Joint: { steps: 10, saveEvery: 5, trainingMethod: 'legacy' } },
+  }).catch((err: Error) => ({ isError: true, content: [{ type: 'text', text: err.message }] })) as CallToolResult;
+  assert.equal(result.isError, true);
+  assert.match(firstText(result), /trainingMethod|unrecognized/i);
+  assert.equal(trainingRequests, before);
 });
 
 test('gen_submit over the wire returns the job the fixture server hands back', async () => {

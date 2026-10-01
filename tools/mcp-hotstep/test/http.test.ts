@@ -8,6 +8,7 @@ import test, { before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import type { TrainPrepareArgs, TrainStartArgs, TrainBackend } from '../src/tools.js';
 
 interface Fixture {
   loginCount: number;
@@ -436,4 +437,178 @@ test('train_wait: a "done" status ends the loop as outcome done', async () => {
   };
   const outcome = await toolsMod.trainWait('job-t2', 5, new AbortController().signal);
   assert.deepEqual(outcome, { kind: 'ok', data: { jobId: 'job-t2', outcome: 'done', status: { id: 'job-t2', status: 'done' } } });
+});
+
+// ── train_prepare / train_start / train_runs ────────────────────────────────
+
+/** Records every request that reaches a route and answers it with `reply`. */
+function recordTraining(reply: (req: http.IncomingMessage) => [number, unknown]) {
+  const calls: Array<{ method: string; url: string; body: unknown }> = [];
+  fixture.route = (req, res, body) => {
+    calls.push({ method: req.method ?? '', url: req.url ?? '', body });
+    const [status, data] = reply(req);
+    res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(data));
+  };
+  return calls;
+}
+
+test('train_prepare ace posts the exact preprocess body, options merged under the typed fields', async () => {
+  const calls = recordTraining(() => [202, { jobId: 'job-pre' }]);
+  const outcome = await toolsMod.trainPrepare({
+    datasetId: 'ds1', backend: 'ace',
+    ace: { ditModel: 'dit-a', maxDuration: 300, dtype: 'bf16', sampleIds: ['s1', 's2'] },
+    options: { futureField: 7 },
+  });
+  assert.deepEqual(outcome, { kind: 'ok', data: { jobId: 'job-pre' } });
+  assert.deepEqual(calls, [{
+    method: 'POST', url: '/api/training/datasets/ds1/preprocess',
+    body: { futureField: 7, ditModel: 'dit-a', maxDuration: 300, dtype: 'bf16', sampleIds: ['s1', 's2'] },
+  }]);
+});
+
+test('train_prepare mm3 posts launder to /mm3-codes', async () => {
+  const calls = recordTraining(() => [200, { jobId: 'job-codes', kind: 'mm3-codes' }]);
+  const outcome = await toolsMod.trainPrepare({ datasetId: 'ds1', backend: 'mm3', mm3: { launder: true, maxDuration: 240 } });
+  assert.deepEqual(outcome, { kind: 'ok', data: { jobId: 'job-codes', kind: 'mm3-codes' } });
+  assert.deepEqual(calls, [{ method: 'POST', url: '/api/training/datasets/ds1/mm3-codes', body: { launder: true, maxDuration: 240 } }]);
+});
+
+test('train_prepare yue2 routes by stage: preprocess and joint-prepare', async () => {
+  const calls = recordTraining(req => [req.url?.endsWith('joint-prepare') ? 202 : 200, { jobId: 'job-y' }]);
+  await toolsMod.trainPrepare({ datasetId: 'ds1', backend: 'yue2', stage: 'preprocess', yue2Preprocess: { vaeVariant: 'legacy', captionMode: 'yue2', loudnessLufs: 0 } });
+  await toolsMod.trainPrepare({
+    datasetId: 'ds1', backend: 'yue2', stage: 'joint-prepare',
+    yue2JointPrepare: { models: { vae: '/m/vae.gguf', semantic: '/m/sem.gguf', sheetsage: '/m/ss.gguf' }, lyricTiming: false },
+  });
+  assert.deepEqual(calls, [
+    { method: 'POST', url: '/api/training/datasets/ds1/yue2-preprocess', body: { vaeVariant: 'legacy', captionMode: 'yue2', loudnessLufs: 0 } },
+    { method: 'POST', url: '/api/training/datasets/ds1/yue2-joint-prepare', body: { models: { vae: '/m/vae.gguf', semantic: '/m/sem.gguf', sheetsage: '/m/ss.gguf' }, lyricTiming: false } },
+  ]);
+});
+
+test('train_prepare rejects a missing or misplaced stage, another backend\'s fields, a typed key in options and an unknown backend, with no HTTP call', async () => {
+  const calls = recordTraining(() => [202, { jobId: 'never' }]);
+  const cases: TrainPrepareArgs[] = [
+    { datasetId: 'ds1', backend: 'yue2' },
+    { datasetId: 'ds1', backend: 'ace', stage: 'preprocess' },
+    { datasetId: 'ds1', backend: 'ace', mm3: { launder: true } },
+    { datasetId: 'ds1', backend: 'mm3', options: { launder: true } },
+    { datasetId: 'ds1', backend: 'nope' as unknown as 'ace' },
+  ];
+  for (const args of cases) assert.equal((await toolsMod.trainPrepare(args)).kind, 'rejected', JSON.stringify(args));
+  assert.equal(calls.length, 0);
+});
+
+test('train_start ace-lm posts the exact train-lm body', async () => {
+  const calls = recordTraining(() => [202, { jobId: 'job-lm' }]);
+  const outcome = await toolsMod.trainStart({
+    datasetId: 'ds1', backend: 'ace-lm',
+    aceLm: { variantKey: 'acestep-v15-base-BF16', lmSize: '1.7B', targetLossStages: [2, 1.5], artistToken: '', initAdapter: '' },
+  });
+  assert.deepEqual(outcome, { kind: 'ok', data: { jobId: 'job-lm' } });
+  assert.deepEqual(calls, [{
+    method: 'POST', url: '/api/training/datasets/ds1/train-lm',
+    body: { variantKey: 'acestep-v15-base-BF16', lmSize: '1.7B', targetLossStages: [2, 1.5], artistToken: '', initAdapter: '' },
+  }]);
+});
+
+test('train_start ace-dit posts the exact train-dit body, variantKey included', async () => {
+  const calls = recordTraining(() => [202, { jobId: 'job-dit' }]);
+  await toolsMod.trainStart({
+    datasetId: 'ds1', backend: 'ace-dit',
+    aceDit: { variantKey: 'acestep-v15-xl-BF16', adapterType: 'lora', rank: 64, mirror: 'f32', attnBackend: 'flash' },
+  });
+  assert.deepEqual(calls, [{
+    method: 'POST', url: '/api/training/datasets/ds1/train-dit',
+    body: { variantKey: 'acestep-v15-xl-BF16', adapterType: 'lora', rank: 64, mirror: 'f32', attnBackend: 'flash' },
+  }]);
+});
+
+test('train_start mm3-lm posts launder, basePrecision and nested regularisation exactly', async () => {
+  const calls = recordTraining(() => [200, { jobId: 'job-mm3', kind: 'mm3-train-lm', runName: 'r', outDir: '/o', attnBackend: 'flash' }]);
+  const outcome = await toolsMod.trainStart({
+    datasetId: 'ds1', backend: 'mm3-lm',
+    mm3Lm: { launder: true, basePrecision: 'bf16', preset: 'thorough', steps: 800, regularisation: { datasetId: 'ds2', every: 4 } },
+  });
+  assert.equal(outcome.kind, 'ok');
+  assert.deepEqual(calls, [{
+    method: 'POST', url: '/api/training/datasets/ds1/mm3-train-lm',
+    body: { launder: true, basePrecision: 'bf16', preset: 'thorough', steps: 800, regularisation: { datasetId: 'ds2', every: 4 } },
+  }]);
+});
+
+test('train_start yue2-joint forces trainingMethod "aitk" on a fresh run and on a resume', async () => {
+  const calls = recordTraining(() => [200, { jobId: 'job-y2', trainingMethod: 'aitk' }]);
+  await toolsMod.trainStart({ datasetId: 'ds1', backend: 'yue2-joint', yue2Joint: { steps: 4000, saveEvery: 500, dataset: '/p/dataset.json', rank: 128 } });
+  await toolsMod.trainStart({ datasetId: 'ds1', backend: 'yue2-joint', yue2Joint: { steps: 6000, resumeRunId: 'job-old', resumeStep: 4000, stopMode: 'kl', targetKl: 2 } });
+  assert.deepEqual(calls, [
+    { method: 'POST', url: '/api/training/datasets/ds1/yue2-joint-train', body: { steps: 4000, saveEvery: 500, dataset: '/p/dataset.json', rank: 128, trainingMethod: 'aitk' } },
+    { method: 'POST', url: '/api/training/datasets/ds1/yue2-joint-train', body: { steps: 6000, resumeRunId: 'job-old', resumeStep: 4000, stopMode: 'kl', targetKl: 2, trainingMethod: 'aitk' } },
+  ]);
+});
+
+test('train_start rejects trainingMethod, a half resume, another backend\'s fields, a typed key in options and an unknown backend, with no HTTP call', async () => {
+  const calls = recordTraining(() => [202, { jobId: 'never' }]);
+  const cases: TrainStartArgs[] = [
+    { datasetId: 'ds1', backend: 'yue2-joint', yue2Joint: { steps: 10, saveEvery: 5 }, options: { trainingMethod: 'legacy' } },
+    { datasetId: 'ds1', backend: 'yue2-joint', yue2Joint: { steps: 10, saveEvery: 5, trainingMethod: 'legacy' } as never },
+    { datasetId: 'ds1', backend: 'yue2-joint', yue2Joint: { steps: 6000, resumeStep: 4000 } },
+    { datasetId: 'ds1', backend: 'yue2-joint', yue2Joint: { steps: 6000, resumeRunId: 'job-old' } },
+    { datasetId: 'ds1', backend: 'ace-dit', aceLm: { rank: 8 } },
+    { datasetId: 'ds1', backend: 'ace-lm', options: { rank: 8 } },
+    { datasetId: 'ds1', backend: 'legacy' as unknown as 'ace-lm' },
+  ];
+  for (const args of cases) assert.equal((await toolsMod.trainStart(args)).kind, 'rejected', JSON.stringify(args));
+  assert.equal(calls.length, 0);
+});
+
+test('train_start and train_prepare pass a 400 and a 409 through verbatim', async () => {
+  let status = 400;
+  recordTraining(() => [status, { error: status === 400 ? 'Dataset has no preprocessed tensors — run Preprocess first' : 'A job is already running for this dataset' }]);
+  const bad = await toolsMod.trainStart({ datasetId: 'ds1', backend: 'ace-lm' });
+  assert.equal(bad.kind, 'http_error');
+  assert.equal((bad as { status: number }).status, 400);
+  assert.match((bad as { text: string }).text, /run Preprocess first/);
+  status = 409;
+  const busy = await toolsMod.trainPrepare({ datasetId: 'ds1', backend: 'mm3' });
+  assert.equal(busy.kind, 'http_error');
+  assert.equal((busy as { status: number }).status, 409);
+  assert.match((busy as { text: string }).text, /A job is already running for this dataset/);
+});
+
+test('train_start does NOT retry on 401 — no second run', async () => {
+  const calls = recordTraining(() => [202, { jobId: 'job-x' }]);
+  await toolsMod.trainJobs(); // caches a token
+  calls.length = 0;
+  invalidateClientToken();
+  const loginsBefore = fixture.loginCount;
+  const outcome = await toolsMod.trainStart({ datasetId: 'ds1', backend: 'ace-dit' });
+  assert.equal(outcome.kind, 'http_error');
+  assert.equal((outcome as { status: number }).status, 401);
+  assert.equal(fixture.loginCount, loginsBefore, 'must not relogin-and-resend a training start');
+  assert.equal(calls.length, 0, 'the start must never have reached the route');
+});
+
+test('train_runs folds each backend\'s readiness GETs into one answer', async () => {
+  const calls = recordTraining(req => [200, { from: req.url }]);
+  const expected: Record<TrainBackend, { runs: string; readiness: Record<string, string> }> = {
+    'ace-lm': { runs: 'train-lm', readiness: { preprocess: 'preprocess' } },
+    'ace-dit': { runs: 'train-dit', readiness: { preprocess: 'preprocess' } },
+    'mm3-lm': { runs: 'mm3-runs', readiness: { mm3: 'mm3' } },
+    'yue2-joint': { runs: 'yue2-joint-runs', readiness: { yue2: 'yue2', jointPrepare: 'yue2-joint-prepare' } },
+  };
+  const p = (r: string) => `/api/training/datasets/ds1/${r}`;
+  for (const [backend, want] of Object.entries(expected) as Array<[TrainBackend, typeof expected['ace-lm']]>) {
+    calls.length = 0;
+    const outcome = await toolsMod.trainRuns('ds1', backend);
+    assert.deepEqual(outcome, {
+      kind: 'ok',
+      data: {
+        runs: { from: p(want.runs) },
+        readiness: Object.fromEntries(Object.entries(want.readiness).map(([k, r]) => [k, { from: p(r) }])),
+      },
+    });
+    assert.ok(calls.every(c => c.method === 'GET'));
+    assert.equal(calls.length, 1 + Object.keys(want.readiness).length);
+  }
 });

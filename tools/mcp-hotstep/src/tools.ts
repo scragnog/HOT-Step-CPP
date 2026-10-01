@@ -5,7 +5,12 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { z } from 'zod';
 import { request, hotstepBaseUrl, hotstepIsLoopback, type HttpResult } from './http.js';
+import {
+  acePreprocessSchema, mm3CodesSchema, yue2PreprocessSchema, yue2JointPrepareSchema,
+  aceLmSchema, aceDitSchema, mm3LmSchema, yue2JointSchema,
+} from './trainSchemas.js';
 
 // Mirrors server/src/config.ts's `data.dir`/`data.audioDir` resolution —
 // NOT imported directly. That module bootstraps the app on import (creates
@@ -347,4 +352,140 @@ export async function trainWait(jobId: string, maxSeconds: number | undefined, s
   const r = await waitForJob(`/api/training/jobs/${encodeURIComponent(jobId)}`, isTerminalTrainingStatus, maxSeconds, signal);
   if ('httpError' in r) return { kind: 'http_error', status: r.httpError.status, text: r.httpError.text };
   return { kind: 'ok', data: { jobId, outcome: r.outcome, status: r.lastStatus } };
+}
+
+// ── train_prepare / train_start: shared body building ───────────────────────
+
+/** One route a train_prepare/train_start call can land on: the per-backend
+ *  field object it reads (`key`), that object's schema (for the declared
+ *  field names), and the route path under /datasets/:id/. */
+interface TrainTarget { key: string; schema: z.AnyZodObject; route: string }
+
+/** Pure: picks the caller's field object for `target`, refuses one meant for
+ *  another backend, refuses an `options` key that the schema already names
+ *  (it would silently override the typed field), and merges the rest. */
+function buildTrainBody(
+  target: TrainTarget,
+  all: readonly TrainTarget[],
+  args: Record<string, unknown>,
+  options: Record<string, unknown> | undefined,
+): { body: Record<string, unknown> } | { rejected: string } {
+  for (const t of all) {
+    if (t.key !== target.key && args[t.key] !== undefined) {
+      return { rejected: `\`${t.key}\` does not apply here — this call posts to /${target.route}, which reads \`${target.key}\`.` };
+    }
+  }
+  const declared = target.schema.shape as Record<string, unknown>;
+  for (const key of Object.keys(options ?? {})) {
+    if (Object.hasOwn(declared, key)) return { rejected: `options.${key} is a typed field — pass it inside \`${target.key}\` instead.` };
+  }
+  return { body: { ...(options ?? {}), ...((args[target.key] as Record<string, unknown> | undefined) ?? {}) } };
+}
+
+/** POST a training body. Never retried on 401, same reason as gen_submit: a
+ *  silent relogin-and-resend could start the same GPU job twice. */
+async function postTrain(datasetId: string, route: string, body: Record<string, unknown>): Promise<ToolOutcome> {
+  return fromHttp(await request('POST', `/api/training/datasets/${encodeURIComponent(datasetId)}/${route}`, body, { retryOn401: false }));
+}
+
+// ── train_prepare ────────────────────────────────────────────────────────────
+
+const PREPARE_TARGETS = {
+  ace: { key: 'ace', schema: acePreprocessSchema, route: 'preprocess' },
+  mm3: { key: 'mm3', schema: mm3CodesSchema, route: 'mm3-codes' },
+  yue2Preprocess: { key: 'yue2Preprocess', schema: yue2PreprocessSchema, route: 'yue2-preprocess' },
+  yue2JointPrepare: { key: 'yue2JointPrepare', schema: yue2JointPrepareSchema, route: 'yue2-joint-prepare' },
+} as const satisfies Record<string, TrainTarget>;
+
+export interface TrainPrepareArgs {
+  datasetId: string;
+  backend: 'ace' | 'mm3' | 'yue2';
+  stage?: 'preprocess' | 'joint-prepare';
+  ace?: z.infer<typeof acePreprocessSchema>;
+  mm3?: z.infer<typeof mm3CodesSchema>;
+  yue2Preprocess?: z.infer<typeof yue2PreprocessSchema>;
+  yue2JointPrepare?: z.infer<typeof yue2JointPrepareSchema>;
+  options?: Record<string, unknown>;
+}
+
+function prepareTarget(backend: string, stage: string | undefined): TrainTarget | { rejected: string } {
+  if (backend === 'yue2') {
+    if (stage === 'preprocess') return PREPARE_TARGETS.yue2Preprocess;
+    if (stage === 'joint-prepare') return PREPARE_TARGETS.yue2JointPrepare;
+    return { rejected: 'backend yue2 needs stage: "preprocess" or "joint-prepare".' };
+  }
+  if (stage !== undefined) return { rejected: `stage applies to backend yue2 only, not ${backend}.` };
+  if (backend === 'ace') return PREPARE_TARGETS.ace;
+  if (backend === 'mm3') return PREPARE_TARGETS.mm3;
+  return { rejected: `Unknown backend '${backend}'. Supported: ace, mm3, yue2.` };
+}
+
+export async function trainPrepare(args: TrainPrepareArgs): Promise<ToolOutcome> {
+  const target = prepareTarget(args.backend, args.stage);
+  if ('rejected' in target) return { kind: 'rejected', message: target.rejected };
+  const built = buildTrainBody(target, Object.values(PREPARE_TARGETS), args as unknown as Record<string, unknown>, args.options);
+  if ('rejected' in built) return { kind: 'rejected', message: built.rejected };
+  return postTrain(args.datasetId, target.route, built.body);
+}
+
+// ── train_start ──────────────────────────────────────────────────────────────
+
+const START_TARGETS = {
+  'ace-lm': { key: 'aceLm', schema: aceLmSchema, route: 'train-lm' },
+  'ace-dit': { key: 'aceDit', schema: aceDitSchema, route: 'train-dit' },
+  'mm3-lm': { key: 'mm3Lm', schema: mm3LmSchema, route: 'mm3-train-lm' },
+  'yue2-joint': { key: 'yue2Joint', schema: yue2JointSchema, route: 'yue2-joint-train' },
+} as const satisfies Record<string, TrainTarget>;
+
+export type TrainBackend = keyof typeof START_TARGETS;
+
+export interface TrainStartArgs {
+  datasetId: string;
+  backend: TrainBackend;
+  aceLm?: z.infer<typeof aceLmSchema>;
+  aceDit?: z.infer<typeof aceDitSchema>;
+  mm3Lm?: z.infer<typeof mm3LmSchema>;
+  yue2Joint?: z.infer<typeof yue2JointSchema>;
+  options?: Record<string, unknown>;
+}
+
+export async function trainStart(args: TrainStartArgs): Promise<ToolOutcome> {
+  const target: TrainTarget | undefined = START_TARGETS[args.backend];
+  if (!target) return { kind: 'rejected', message: `Unknown backend '${args.backend}'. Supported: ${Object.keys(START_TARGETS).join(', ')}.` };
+  const built = buildTrainBody(target, Object.values(START_TARGETS), args as unknown as Record<string, unknown>, args.options);
+  if ('rejected' in built) return { kind: 'rejected', message: built.rejected };
+  const body = built.body;
+  if (args.backend === 'yue2-joint') {
+    // The route refuses anything but 'aitk' ("Legacy is never selected
+    // implicitly"); the tool owns the value so a caller cannot pick Legacy.
+    if ('trainingMethod' in body) return { kind: 'rejected', message: 'trainingMethod is set by this tool ("aitk") and cannot be passed.' };
+    // resumeStep alone would be ignored by the route and start a FRESH run.
+    if ((body.resumeRunId === undefined) !== (body.resumeStep === undefined)) {
+      return { kind: 'rejected', message: 'resumeRunId and resumeStep go together: send both to resume, neither for a fresh run.' };
+    }
+    body.trainingMethod = 'aitk';
+  }
+  return postTrain(args.datasetId, target.route, body);
+}
+
+// ── train_runs ───────────────────────────────────────────────────────────────
+
+/** Per backend: the runs GET, then the readiness GETs folded in under
+ *  `readiness`, keyed by name. */
+const RUNS_ROUTES: Record<TrainBackend, { runs: string; readiness: Record<string, string> }> = {
+  'ace-lm': { runs: 'train-lm', readiness: { preprocess: 'preprocess' } },
+  'ace-dit': { runs: 'train-dit', readiness: { preprocess: 'preprocess' } },
+  'mm3-lm': { runs: 'mm3-runs', readiness: { mm3: 'mm3' } },
+  'yue2-joint': { runs: 'yue2-joint-runs', readiness: { yue2: 'yue2', jointPrepare: 'yue2-joint-prepare' } },
+};
+
+export async function trainRuns(datasetId: string, backend: TrainBackend): Promise<ToolOutcome> {
+  const routes = RUNS_ROUTES[backend];
+  if (!routes) return { kind: 'rejected', message: `Unknown backend '${backend}'. Supported: ${Object.keys(RUNS_ROUTES).join(', ')}.` };
+  const base = `/api/training/datasets/${encodeURIComponent(datasetId)}`;
+  const names = Object.keys(routes.readiness);
+  const results = await Promise.all([routes.runs, ...Object.values(routes.readiness)].map(r => request('GET', `${base}/${r}`)));
+  for (const r of results) if (!r.ok) return fromHttp(r);
+  const readiness = Object.fromEntries(names.map((name, i) => [name, results[i + 1].data]));
+  return { kind: 'ok', data: { runs: results[0].data, readiness } };
 }

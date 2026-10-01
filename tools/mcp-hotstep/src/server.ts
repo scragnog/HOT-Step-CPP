@@ -16,10 +16,14 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import {
   genBackends, genConfigure, genSubmit, genStatus, genCancel, genQueue, genWait, genSong,
   trainCapabilities, trainDatasets, trainDataset, trainDatasetCreate, trainDatasetRescan,
-  trainDatasetLabel, trainJobs, trainJob, trainWait,
+  trainDatasetLabel, trainJobs, trainJob, trainWait, trainPrepare, trainStart, trainRuns,
   WAIT_DEFAULT_SECONDS, WAIT_MAX_SECONDS,
   type ToolOutcome,
 } from './tools.js';
+import {
+  acePreprocessSchema, mm3CodesSchema, yue2PreprocessSchema, yue2JointPrepareSchema,
+  aceLmSchema, aceDitSchema, mm3LmSchema, yue2JointSchema,
+} from './trainSchemas.js';
 
 export function createServer(): McpServer {
   const server = new McpServer({ name: 'hotstep', version: '1.0.0' });
@@ -206,6 +210,63 @@ export function createServer(): McpServer {
       maxSeconds: z.number().optional().describe(`Seconds to wait before returning the latest status anyway. Default ${WAIT_DEFAULT_SECONDS}, clamped to ${WAIT_MAX_SECONDS}.`),
     },
     async ({ jobId, maxSeconds }, extra) => toResult(await trainWait(jobId, maxSeconds, extra.signal)),
+  );
+
+  const options = z.record(z.unknown()).optional()
+    .describe('Passthrough for fields the typed object does not name; merged under it into the POST body. A key the typed object already names is rejected before any HTTP call. The server validates the rest.');
+
+  server.tool(
+    'train_prepare',
+    'Run the data-preparation stage that training needs, per backend. Async: returns the route\'s response, which carries the jobId — wait with train_wait. ace and mm3 need a built dataset (train_dataset_label stage build); yue2 preprocess reads the source folder flat. ' +
+      'backend ace: ACE tensor preprocess (POST /datasets/:id/preprocess), fields in `ace`; returns 202 { jobId }. ' +
+      'backend mm3: MiniMax-Music3 RVQ codes export (POST /datasets/:id/mm3-codes), fields in `mm3`; returns { jobId, kind }. Training also needs per-track <stem>.mm3.txt captions (train_dataset_label stage caption). ' +
+      'backend yue2 needs `stage`: "preprocess" encodes the YuE2 latent cache (POST /datasets/:id/yue2-preprocess, fields in `yue2Preprocess`); "joint-prepare" imports the existing cache stages (latents, codec ids, lead sheets) into the joint-training dataset (POST /datasets/:id/yue2-joint-prepare, fields in `yue2JointPrepare`, CPU only) and returns the `manifest` path that train_start yue2-joint takes as `dataset`. ' +
+      'Every route answers 409 "A job is already running for this dataset" while one is active, and 503 when ace-train is missing. Only the field object matching backend/stage may be sent.',
+    {
+      datasetId: z.string(),
+      backend: z.enum(['ace', 'mm3', 'yue2']),
+      stage: z.enum(['preprocess', 'joint-prepare']).optional().describe('yue2 only, and required there.'),
+      ace: acePreprocessSchema.optional(),
+      mm3: mm3CodesSchema.optional(),
+      yue2Preprocess: yue2PreprocessSchema.optional().describe('Out-of-range numbers fall back to the default silently.'),
+      yue2JointPrepare: yue2JointPrepareSchema.optional(),
+      options,
+    },
+    async (args) => toResult(await trainPrepare(args)),
+  );
+
+  server.tool(
+    'train_start',
+    'Start a training run. Async: returns the route\'s response, which carries the jobId — wait with train_wait, cancel with train_job cancel: true. Never retried on 401 (a resend could start a second run). Each field\'s description gives the route\'s own default for an absent field. ' +
+      'ace-lm: ACE planner-LM adapter (POST /datasets/:id/train-lm), fields in `aceLm`, needs train_prepare ace; 202 { jobId }. ' +
+      'ace-dit: ACE DiT adapter (POST /datasets/:id/train-dit), fields in `aceDit`, needs train_prepare ace; 202 { jobId }. ' +
+      'mm3-lm: MiniMax-Music3 LM adapter (POST /datasets/:id/mm3-train-lm), fields in `mm3Lm`, needs train_prepare mm3 and .mm3.txt captions; returns { jobId, kind, runName, outDir, attnBackend }. Out-of-range mm3 numbers fall back to the default SILENTLY rather than failing. ' +
+      'yue2-joint: YuE2 joint AR+NAR adapter (POST /datasets/:id/yue2-joint-train), fields in `yue2Joint`; trainingMethod is always "aitk", set by this tool, and cannot be passed. It does NOT auto-prepare by default: a fresh run needs `dataset` (from train_prepare yue2 joint-prepare) unless `autoPrepare: true` is sent (the Training Studio form sends it); a resume never auto-prepares. steps is required, and saveEvery on a fresh run. GET /api/training/defaults has no YuE2 section, so the field descriptions are the only defaults. Returns the resolved recipe with the jobId. ' +
+      'Every route answers 409 "A job is already running for this dataset" while one is active. Only the field object matching backend may be sent.',
+    {
+      datasetId: z.string(),
+      backend: z.enum(['ace-lm', 'ace-dit', 'mm3-lm', 'yue2-joint']),
+      aceLm: aceLmSchema.optional(),
+      aceDit: aceDitSchema.optional(),
+      mm3Lm: mm3LmSchema.optional(),
+      yue2Joint: yue2JointSchema.optional(),
+      options,
+    },
+    async (args) => toResult(await trainStart(args)),
+  );
+
+  server.tool(
+    'train_runs',
+    'Previous runs for one dataset and backend, with that backend\'s readiness folded in: { runs, readiness }. ' +
+      'ace-lm: runs = GET /datasets/:id/train-lm (newest adapter state), readiness.preprocess = GET /preprocess (tensor variants). ' +
+      'ace-dit: runs = GET /train-dit, readiness.preprocess = GET /preprocess. ' +
+      'mm3-lm: runs = GET /mm3-runs, readiness.mm3 = GET /mm3 (codes counts, missing models, installed bases, regCandidates, defaults, presets). ' +
+      'yue2-joint: runs = GET /yue2-joint-runs (each with its checkpoints and resumeError), readiness.yue2 = GET /yue2 (latent cache), readiness.jointPrepare = GET /yue2-joint-prepare (bases, defaultBase, defaultDevice, missing models). Its `ready` flag describes a fresh default output dir, so it reads false even after a prepare; the prepare job\'s own `manifest` is the path to train with.',
+    {
+      datasetId: z.string(),
+      backend: z.enum(['ace-lm', 'ace-dit', 'mm3-lm', 'yue2-joint']),
+    },
+    async ({ datasetId, backend }) => toResult(await trainRuns(datasetId, backend)),
   );
 
   return server;
