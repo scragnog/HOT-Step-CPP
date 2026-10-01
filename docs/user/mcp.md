@@ -99,8 +99,10 @@ currently active:
 1. `gen_backends` to read the active backend's id from the response.
 2. `gen_submit` with that id, a caption such as "a calm piano piece", and
    `instrumental: true`. Returns a job id.
-3. `gen_wait` with that job id. Once it reports a finished outcome, the
-   response includes the finished job's result, including the new song's id.
+3. `gen_wait` with that job id. `outcome: "done"` means the job reached a
+   terminal state, not that it succeeded, so check the returned
+   `status.status` too; only `"succeeded"` means the result (including the
+   new song's id) is there to read.
 4. `gen_song` with that song id to get the audio file's URL (and, running
    locally, its path on disk).
 
@@ -131,8 +133,11 @@ under way does not refund the minutes already spent.
 One example per backend family, as which tool to call in which order (see
 the README's field tables for what each one actually takes). Every step
 below answers with a job id, not a finished result: call `train_wait` on
-that id before moving to the next step, call it again if it reports
-`outcome: "budget"`, and proceed only once it reports `outcome: "done"`.
+that id before moving to the next step. `outcome: "done"` means the job
+reached a terminal state, not that it succeeded, so check the returned
+`status.status` too, and only proceed when that is also `"done"`. On
+`"failed"` or `"cancelled"`, stop and report the job's error instead of
+moving to the next step. On `outcome: "budget"`, call `train_wait` again.
 
 - **ACE-Step 1.5**: `train_dataset_label` `stage: "label"` → wait → `stage:
   "build"` (ACE's prepare step refuses an unbuilt dataset) → wait →
