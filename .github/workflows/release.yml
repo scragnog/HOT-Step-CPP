@@ -20,7 +20,7 @@ permissions:
   contents: write   # Required for gh release create
 
 env:
-  NODE_VERSION: '22.16.0'
+  NODE_VERSION: '24.18.0'
   # 1.26 is the first release with a CUDA 13 build of the GPU package (#94);
   # the CUDA 12 build keeps the unsuffixed name.
   ORT_VERSION: '1.26.0'
@@ -614,7 +614,7 @@ jobs:
           Copy-Item "$bsqlSrc/package.json" "$bsqlDst/package.json"
           New-Item -ItemType Directory -Force "$bsqlDst/lib" | Out-Null
           Copy-Item -Recurse "$bsqlSrc/lib/*" "$bsqlDst/lib"
-          # Copy pre-built native addon (already rebuilt for Node 22 in earlier step)
+          # Copy pre-built native addon (already rebuilt for Node 24 in earlier step)
           New-Item -ItemType Directory -Force "$bsqlDst/build/Release" | Out-Null
           Copy-Item "$bsqlSrc/build/Release/better_sqlite3.node" "$bsqlDst/build/Release/better_sqlite3.node"
 

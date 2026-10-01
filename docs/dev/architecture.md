@@ -10,7 +10,7 @@ in the source tree. Read it before you pick a file to edit.
 | Tier | Stack | Location | Role |
 |---|---|---|---|
 | Engine | C++17, CUDA/Vulkan/Metal/CPU through GGML | `engine/` | Inference binaries. `ace-server` is the HTTP server the app talks to. Other tools: `ace-train`, `ace-caption`, `ace-midi`, `mastering`, `mp3-codec`, `neural-codec`, `quantize`, `vst-host`, and the upstream CLIs `ace-lm`, `ace-synth`, `ace-understand` |
-| Server | Node 18 to 22, TypeScript, Express, better-sqlite3 | `server/src/` | Job queue, SQLite, file storage, spawns and restarts the engine, serves the built UI |
+| Server | Node 20 to 24, TypeScript, Express, better-sqlite3 | `server/src/` | Job queue, SQLite, file storage, spawns and restarts the engine, serves the built UI |
 | UI | React 19, Vite, Zustand, Tailwind | `ui/src/` | Browser frontend, one component folder per studio |
 
 ```

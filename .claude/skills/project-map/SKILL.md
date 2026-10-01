@@ -27,7 +27,7 @@ HOT-Step CPP is a desktop app for local AI music generation (caption + lyrics in
 5. **Git: all work on `master`, no branches. Never `git add -A` or `git add -f`** (re-adds gitignored `.agents/`, `checkpoints/`, `node_modules/`). Stage explicit paths. **Push requires explicit user approval.** Commit locally often. **Any pushed `v*` tag triggers a full multi-platform CI release build** — use a `-CI-Test` suffix for throwaway tags.
 6. **Three fork-hook files break on upstream sync** (see Failure signatures). After any sync run `powershell -File engine\verify-hooks.ps1`. The `pipeline-synth-ops.cpp` hook loss is SILENT — it compiles but all solvers/schedulers/guidance go dead.
 7. **Don't visually verify UI with a browser agent — ask the human user.** Browser agent is fine for API-only checks.
-8. **Node 18–22 LTS only.** Node 24+ breaks dependencies (`engines` field enforces `<24`).
+8. **Node 20 to 24 LTS, 24 recommended.** The `engines` field enforces `<25`.
 9. **PowerShell is the shell: use `;` not `&&`** (unless pwsh 7 chaining). Windows 11 environment.
 
 ## Process / port topology
@@ -138,7 +138,7 @@ powershell -File engine\verify-hooks.ps1   # After any upstream sync
 | `/api/health` or engine health flaky mid-generation | Engine is single-threaded httplib; can't answer during compute (`aceClient.ts:6-8`) | Not a bug unless it persists after the job ends |
 | Synth params vanish after LM phase (adapter/solver settings ignored) | Sideband fields don't survive the `/lm` round trip | Rebuild synth req from original `aceReq` + LM fields only (`generate.ts:312-328`) |
 | Infinite ace-server respawn + file locks during rebuild | You ran `engine\build.cmd` with the app up | Use `.\dev-rebuild.bat` |
-| npm install fails / weird dep errors | Node 24+ | Use Node 18–22 |
+| npm install fails / weird dep errors | Node outside 20 to 24, or native addon ABI mismatch | Use Node 24 and install matching dependencies |
 | Vulkan pinned-memory alloc failure in VAE | VAE chunk too large | Tune `ACESTEPCPP_VAE_CHUNK` / `ACESTEPCPP_VAE_OVERLAP` in `.env` |
 | First-launch hang "Downloading CUDA runtime" | Portable CUDA DLL bootstrap (`index.ts:318+`) | Wait or go offline → engine starts CPU-only |
 | Accidental CI release build | Pushed a `v*` tag | Use `-CI-Test` suffix for throwaways; see `docs/dev/releasing.md` |

@@ -235,9 +235,9 @@ curl -X POST http://localhost:3001/api/generate/reset-queue
 ## Node.js version
 
 Releases bundle their own Node.js in `runtime/`, so this only affects a git checkout. The
-server needs Node 18 to 22; Node 24 and newer are not supported. The usual symptom is an error
+server needs Node 20 to 24. The usual symptom is an error
 from `better_sqlite3.node` saying it `was compiled against a different Node.js version`, or
-`npm install` failing. Install Node 22 LTS (with nvm: `nvm install 22` then `nvm use 22`) and
+`npm install` failing. Install Node 24 LTS (with nvm: `nvm install 24` then `nvm use 24`) and
 see [Building from source](../dev/building.md).
 
 ## Antivirus removes files

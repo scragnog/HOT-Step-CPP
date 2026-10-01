@@ -30,7 +30,7 @@ Terms used below:
 6. **Git: all work on `master`, stage explicit paths (never `git add -A`), push only with explicit user approval.** Any pushed `v*` tag triggers a full multi-platform CI release build.
 7. **Params consumed as GPU tensors inside `hot-step-sampler.h` (masks, encoder states, constants) must be re-uploaded EVERY step** — the GGML scheduler aliases input tensor buffers as scratch space; uploading once leaves them garbage from step 2 onward ([hot-step-sampler.h:591-601](../../../engine/src/hot-step-sampler.h), re-upload sites :936, :1091). Never hoist an upload out of the step loop as an "optimization".
 8. **Never delete generated audio artifacts (`server/data/audio/*`, test outputs) based on your own judgment of quality** — the user verifies results by ear.
-9. **Node 18–22 LTS only** — Node 24+ breaks dependencies (`engines` field enforces `<24`).
+9. **Node 20 to 24 LTS, 24 recommended** — `engines` enforces `<25`.
 
 ## THE LM ECHO SIDEBAND GOTCHA (read this before touching generate.ts)
 

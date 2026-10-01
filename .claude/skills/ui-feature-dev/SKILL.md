@@ -25,7 +25,7 @@ Terms used below:
 0. **Controls come from the shared primitives — read [docs/dev/ui-design.md](../../../docs/dev/ui-design.md) before adding any.** A dropdown is `StyledSelect`, an on/off setting is `Toggle`, a parameter label is `ParamLabel` with `info`. Never a native `<select>` or `<input type="checkbox">`; `node tools/docs/check-docs.mjs` fails on a new one. WHY: the native widgets look nothing like the app (grey OS box, white text) and a knob with no explanation is a support question.
 1. **NEVER use a browser agent for visual verification — ask the human user for screenshots/feedback.** The browser agent is too slow/unreliable in this environment. It is acceptable ONLY for non-visual checks (hitting API endpoints). Workflow: make the change → confirm type-check is clean → ask the user "please check X on the /stem-studio page".
 2. **Don't `npm run build` during dev.** Vite HMR means UI edits need no build and no restart. Type-check with `npx tsc -b` from `ui\` (all tsconfigs have `noEmit: true` — nothing is emitted). Only build right before user prod testing. WHY: builds are slow and pointless mid-dev; the dev server already serves source.
-3. **Node 18–22 only.** `ui/package.json` enforces `"node": ">=18.0.0 <24.0.0"`. Node 24+ breaks dependencies.
+3. **Node 20 to 24 LTS, 24 recommended.** `ui/package.json` enforces `"node": ">=20.0.0 <25.0.0"`.
 4. **Registering a new studio requires FIVE edits** (four in `App.tsx`: the import + `viewFromUrl` + `urlForView` + the `renderContent` branch, plus one `NavItem` in `Sidebar.tsx` — see procedure below). Skipping `viewFromUrl()`/`urlForView()` gives a studio that renders but breaks on refresh/back-button.
 5. **Any new generation parameter MUST be added to `getGlobalParams()`** in `ui/src/stores/globalParamsStore.ts` (starts line 324) — that function is the SINGLE assembly point for the request body. A slider not wired there silently does nothing.
 6. **Every string through `t()`** (react-i18next) with a key in `ui/src/i18n/locales/en.json`; other locales fall back to English. Note: en.json nests everything under a top-level `"translation"` key.
@@ -149,7 +149,7 @@ Poll every 1.5 s. Progress may arrive as 0–1 OR 0–100 — normalise both, as
 
 | Symptom | Cause → fix |
 |---|---|
-| `npm install`/dev fails with dep/engine errors | Node 24+. Use Node 18–22 (`ui/package.json` engines field). |
+| `npm install`/dev fails with dep/engine errors | Check Node 20 to 24 range (`ui/package.json` engines field) and lockfile consistency. |
 | New studio renders but URL resets to `/` on refresh, or back-button breaks | Added `renderContent()` branch but missed `viewFromUrl()` and/or `urlForView()` — all three + Sidebar are required. |
 | API 404 in dev but works in prod (or vice versa) | Route prefix not proxied — only `/api`, `/audio`, `/references` are in `vite.config.ts`. Keep endpoints under `/api/...`. |
 | Songs missing audio/cover in one studio only | Endpoint bypassed `normalizeSong()` — raw snake_case leaked (api.ts:76-114). |

@@ -44,7 +44,7 @@ LAUNCH.bat → Node server (Express :3001)
 ## Environment
 
 - **Windows 11 + PowerShell.** This repo's primary dev environment is Windows. Your harness (Claude Code, Codex) may also give you a Bash (POSIX) tool — each takes its own syntax. In PowerShell use `;` not `&&`.
-- **Node 18–22 LTS only.** Node 24+ breaks dependencies (`engines` field enforces `<24`).
+- **Node 20 to 24 LTS, 24 recommended.** The `engines` field enforces `<25`.
 - **Call `.bat`/`.cmd` by absolute path.** Some agent shells run with `NoDefaultCurrentDirectoryInExePath=1`, so `cmd.exe` will not resolve `build.cmd` from the working directory — you get `'build.cmd' is not recognized` even though it is right there. Worse, `cmd.exe /c "script.bat"` can return **exit 0 having run nothing**, so never take a batch exit code as proof it ran: check the output for the script's own first line.
 
 ## Build & run rules (IMPORTANT — learned the hard way)

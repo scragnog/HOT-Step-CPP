@@ -21,7 +21,7 @@ echo "╚═══════════════════════�
 echo ""
 
 # ── Find Node.js ────────────────────────────────────────────────────
-# Priority: bundled runtime > brew node@22 > system node (if compatible)
+# Priority: bundled runtime > brew node@24 > system node (if compatible)
 find_node() {
     # 1. Bundled Node (portable release)
     if [ -x "${ROOT_DIR}/runtime/node" ]; then
@@ -29,10 +29,10 @@ find_node() {
         return 0
     fi
 
-    # 2. Brew node@22
+    # 2. Brew node@24
     local brew_paths=(
-        "/opt/homebrew/opt/node@22/bin"
-        "/usr/local/opt/node@22/bin"
+        "/opt/homebrew/opt/node@24/bin"
+        "/usr/local/opt/node@24/bin"
     )
     for bp in "${brew_paths[@]}"; do
         if [ -x "${bp}/node" ]; then
@@ -46,7 +46,7 @@ find_node() {
         local ver
         ver="$(node --version 2>/dev/null | tr -d 'v')"
         local major="${ver%%.*}"
-        if [ "$major" -ge 18 ] && [ "$major" -lt 24 ] 2>/dev/null; then
+        if [ "$major" -ge 20 ] && [ "$major" -lt 25 ] 2>/dev/null; then
             echo "$(dirname "$(command -v node)")"
             return 0
         fi
@@ -60,11 +60,11 @@ if NODE_DIR=$(find_node); then
     export PATH="${NODE_DIR}:${PATH}"
     echo "  Node.js: $(node --version) ($(which node))"
 else
-    echo "❌ No compatible Node.js found (need 18-22)."
+    echo "❌ No compatible Node.js found (need 20-24)."
     echo ""
     echo "   Your system Node: $(node --version 2>/dev/null || echo 'not installed')"
     echo ""
-    echo "   Fix: brew install node@22"
+    echo "   Fix: brew install node@24"
     echo "   Or:  Run ./install.sh to set up everything"
     echo ""
     exit 1

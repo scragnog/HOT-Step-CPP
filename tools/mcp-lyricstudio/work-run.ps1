@@ -2,11 +2,11 @@
 Run a foreground command under the Work reservation guard.
 
 The preferred runtime is the existing Node 22 collaboration environment at
-%LOCALAPPDATA%\HOT-Step\collaboration-node22.  That directory is expected to
-contain the already-installed matching node_modules; this launcher never runs
-npm, rebuilds native modules, or repairs an environment.  If it is absent,
-the workspace's Node executable is accepted only when it reports major 22 and
-the workspace has tsx and better-sqlite3 installed.
+%LOCALAPPDATA%\HOT-Step\collaboration-node22. That directory holds matching
+node_modules and remains separate from the app's Node 24 runtime. This launcher
+never runs npm or rebuilds native modules. Without the dedicated environment,
+the workspace's Node executable must report major 24 and have tsx and
+better-sqlite3 installed.
 
 The TypeScript runner uses --preserve-symlinks, --preserve-symlinks-main and
 --import tsx.  .cmd/.bat child commands are quoted by work-run.ts and reject
@@ -22,7 +22,7 @@ $packageRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $packageRoot '../..')).Path
 $callerCwd = (Get-Location).Path
 $dedicatedRoot = Join-Path $env:LOCALAPPDATA 'HOT-Step/collaboration-node22'
-$pinnedNode = Join-Path $repoRoot 'release/.node-cache/node-v22.16.0-win-x64/node.exe'
+$pinnedNode = Join-Path $repoRoot 'release/.node-cache/node-v24.18.0-win-x64/node.exe'
 
 function Get-NodeMajor([string]$NodeExecutable) {
     $value = & $NodeExecutable -p "process.versions.node.split('.')[0]" 2>$null
@@ -30,24 +30,24 @@ function Get-NodeMajor([string]$NodeExecutable) {
     return [string]$value
 }
 
-function Assert-Node22([string]$NodeExecutable, [string]$RuntimeRoot) {
+function Assert-NodeRuntime([string]$NodeExecutable, [string]$RuntimeRoot, [string]$ExpectedMajor) {
     if (!(Test-Path -LiteralPath $NodeExecutable -PathType Leaf)) {
         throw "Node executable was not found: $NodeExecutable"
     }
     $major = Get-NodeMajor $NodeExecutable
-    if ($major -ne '22') {
-        throw "work-run requires Node 22; '$NodeExecutable' reports Node $major. No npm rebuild is attempted."
+    if ($major -ne $ExpectedMajor) {
+        throw "work-run requires Node $ExpectedMajor for '$RuntimeRoot'; '$NodeExecutable' reports Node $major. No npm rebuild is attempted."
     }
     foreach ($dependency in @('tsx', 'better-sqlite3')) {
         if (!(Test-Path -LiteralPath (Join-Path $RuntimeRoot "node_modules/$dependency"))) {
-            throw "Node 22 runtime '$RuntimeRoot' is missing node_modules/$dependency. Install the matching runtime separately; work-run will not run npm."
+            throw "Node $ExpectedMajor runtime '$RuntimeRoot' is missing node_modules/$dependency. Install the matching runtime separately; work-run will not run npm."
         }
     }
     $probe = "try { const Database = require('better-sqlite3'); new Database(':memory:').close(); require.resolve('tsx'); } catch (error) { console.error(error.message); process.exit(1); }"
     Push-Location $RuntimeRoot
     try { & $NodeExecutable --preserve-symlinks --preserve-symlinks-main -e $probe } finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) {
-        throw "Node 22 dependencies in '$RuntimeRoot' do not load with '$NodeExecutable' (native ABI mismatch or incomplete install). No npm rebuild is attempted."
+        throw "Node $ExpectedMajor dependencies in '$RuntimeRoot' do not load with '$NodeExecutable' (native ABI mismatch or incomplete install). No npm rebuild is attempted."
     }
 }
 
@@ -57,9 +57,14 @@ if (Test-Path -LiteralPath $dedicatedRoot -PathType Container) {
     $runtimeRoot = $dedicatedRoot
     $portableCandidates = @(
         (Join-Path $dedicatedRoot 'node.exe'),
-        (Join-Path $dedicatedRoot 'bin/node.exe'),
-        $pinnedNode
+        (Join-Path $dedicatedRoot 'bin/node.exe')
     )
+    $nodeCache = Join-Path $repoRoot 'release/.node-cache'
+    if (Test-Path -LiteralPath $nodeCache -PathType Container) {
+        $legacyCache = Get-ChildItem -LiteralPath $nodeCache -Directory -Filter 'node-v22*-win-x64' |
+            Sort-Object Name -Descending | Select-Object -First 1
+        if ($legacyCache) { $portableCandidates += (Join-Path $legacyCache.FullName 'node.exe') }
+    }
     foreach ($candidate in $portableCandidates) {
         if (Test-Path -LiteralPath $candidate -PathType Leaf) { $nodeExecutable = $candidate; break }
     }
@@ -81,7 +86,8 @@ if (Test-Path -LiteralPath $dedicatedRoot -PathType Container) {
     if (!$nodeExecutable) { throw 'No Node executable was found for work-run.' }
 }
 
-Assert-Node22 $nodeExecutable $runtimeRoot
+$expectedMajor = if ($runtimeRoot -eq $dedicatedRoot) { '22' } else { '24' }
+Assert-NodeRuntime $nodeExecutable $runtimeRoot $expectedMajor
 $runner = Join-Path $runtimeRoot 'src/work-run.ts'
 if (!(Test-Path -LiteralPath $runner -PathType Leaf)) { throw "Runner source is missing: $runner" }
 

@@ -34,7 +34,7 @@ UI (fetch /api/*) → Express :3001 → routes/*.ts → services/*.ts
    ```powershell
    cd d:\Ace-Step-Latest\hot-step-cpp\server; npx tsc --noEmit
    ```
-2. **Node 18–22 only.** Node 24+ breaks dependencies; `server/package.json:5-7` enforces `>=18.0.0 <24.0.0`. better-sqlite3 is a native module — `postinstall` runs `npm rebuild better-sqlite3` (package.json:14).
+2. **Node 20 to 24 LTS, 24 recommended.** `server/package.json:5-7` enforces `>=20.0.0 <25.0.0`. better-sqlite3 is a native module; `postinstall` runs `npm rebuild better-sqlite3` (package.json:14).
 3. **ESM everywhere — relative imports MUST end in `.js` even though sources are `.ts`.** `server/package.json:8` sets `"type": "module"`. `import { config } from '../config.js'` — omitting `.js` may run under tsx but fails `tsc`. There is no `__dirname`; the pattern is `const __dirname = path.dirname(fileURLToPath(import.meta.url))` (config.ts:7, index.ts:46).
 4. **Never block a request on long work.** The engine is single-threaded; generations take minutes. Return a job id immediately and let the UI poll (see the worked example). The generation queue is deliberately serialized to one job at a time (generate.ts:1286-1292).
 5. **Never call `getDb()` at module import time.** `initDb()` runs at index.ts:60; a query executed during module load throws `Database not initialized. Call initDb() first.` (database.ts:17-22). Query only inside handlers/functions.
@@ -175,7 +175,7 @@ The Settings route (`POST /api/settings/env`, settings.ts:109-174 — note: the 
 | `server/src/routes/logs.ts` | 2000-line ring buffer + SSE at `GET /api/logs`; `pushLog` / `subscribeLines` |
 | `server/src/routes/settings.ts` | `.env` read/rewrite + hot-reload endpoint (`POST /api/settings/env`) |
 | `server/restart-loop.cmd` | Dev-mode tsx watch wrapper with `.restart-requested` re-entry |
-| `server/package.json` | Scripts (`dev`/`typecheck`), `"type": "module"`, Node `<24` engines pin |
+| `server/package.json` | Scripts (`dev`/`typecheck`), `"type": "module"`, Node `<25` engines pin |
 
 ## Failure signatures
 
@@ -188,7 +188,7 @@ The Settings route (`POST /api/settings/env`, settings.ts:109-174 — note: the 
 | New env setting saves but never takes effect | Key missing from the `apply(...)` list in `reloadEnvConfig()` or from `EXPOSED_ENV_KEYS` | Touch all three places in config.ts (see procedure above) |
 | Setting saved, hot-reload reports OK, engine ignores it | Key is spawn-time (in `RESTART_REQUIRED_KEYS`) | Restart the app so the engine child respawns with new args |
 | `GET /api/things/recent` → 404 with id "recent" | Static route declared after `/:id` | Reorder — static routes first (songs.ts:47) |
-| better-sqlite3 native/ABI error after `npm install` or Node switch | Node 24+ (unsupported) or skipped native rebuild | Use Node 18–22; `npm rebuild better-sqlite3` |
+| better-sqlite3 native/ABI error after `npm install` or Node switch | Addon built for a different Node ABI or skipped native rebuild | Use Node 24; `npm rebuild better-sqlite3` when the app is idle |
 | `tsc` errors on imports that run fine under tsx | Missing `.js` extension on a relative ESM import | Add `.js` to the import path |
 | Spawned engine can't find DLLs despite a PATH edit | Spreading `process.env` on Windows creates a case-sensitive duplicate (`Path` vs `PATH`) that shadows | Find the real key case-insensitively before prepending — pattern at index.ts:221-244 |
 | Multipart submit to `/synth` fails with a parse error | Sent a JSON **array** as the multipart `request` part | Engine multipart expects a single object (aceClient.ts:374-378) |

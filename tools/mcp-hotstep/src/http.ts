@@ -32,7 +32,7 @@ export function hotstepIsLoopback(): boolean {
 }
 
 /** One AbortSignal that aborts as soon as any of `signals` does — portable
- *  (AbortSignal.any needs Node 20.3+; this repo supports 18-22). */
+ *  (AbortSignal.any needs Node 20.3+; this repo still supports Node 20.0). */
 function anySignal(signals: AbortSignal[]): AbortSignal {
   const controller = new AbortController();
   for (const s of signals) {

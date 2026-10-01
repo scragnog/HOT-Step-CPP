@@ -326,7 +326,7 @@ check if the server seems to run old code.
 | `dev-rebuild.bat` exits 0 in ~2 s, prints nothing, app still running | Non-interactive shell: its `timeout /t` needs a console, so the whole script falls through — no shutdown, no build | Run the 3 phases manually (Procedure 1 → "does NOTHING from a non-interactive shell") |
 | Compile errors in a header you never touched | Unterminated string/comment in the file included *before* it — usually a `\n` written as a real newline by a heredoc | `sed -n 'A,Bp' <the file you edited> \| cat -A`; use the Edit tool for C++ with escapes |
 | Vite dead after rebuild in dev mode | dev-rebuild's shutdown kills port 3000 too (`shutdown.ts:72-98`) | Restart with `dev.bat`, not LAUNCH.bat |
-| Node server won't start / weird npm dep errors after an otherwise-good build | Wrong Node version — **Node 18–22 LTS only; Node 24+ breaks dependencies** (`engines` enforces `<24`) | `node --version`; switch Node, don't touch the engine or build cache |
+| Node server won't start / weird npm dep errors after an otherwise-good build | Wrong Node version or native addon ABI mismatch — **Node 20 to 24 LTS; 24 recommended** (`engines` enforces `<25`) | `node --version`; install dependencies for that Node version, don't touch the engine or build cache |
 | Connection refused on :8085 right after relaunch | Engine still starting — dev.bat returns before services listen | Retry `/health` up to ~30 s, then check `ace_engine.log` |
 | PATH weirdness after many rebuilds in one shell | Shouldn't happen — scripts skip vcvars when `VSCMD_VER` is set | Open a fresh shell |
 

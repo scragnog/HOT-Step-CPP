@@ -100,10 +100,10 @@ fi
 step 2 "Checking Node.js..."
 
 find_compatible_node() {
-    # Priority: brew node@22 > system node (if compatible)
+    # Priority: brew node@24 > system node (if compatible)
     local candidates=(
-        "/opt/homebrew/opt/node@22/bin/node"
-        "/usr/local/opt/node@22/bin/node"
+        "/opt/homebrew/opt/node@24/bin/node"
+        "/usr/local/opt/node@24/bin/node"
     )
 
     for candidate in "${candidates[@]}"; do
@@ -111,7 +111,7 @@ find_compatible_node() {
             local ver
             ver="$("$candidate" --version 2>/dev/null | tr -d 'v')"
             local major="${ver%%.*}"
-            if [ "$major" -ge 18 ] && [ "$major" -lt 24 ] 2>/dev/null; then
+            if [ "$major" -ge 20 ] && [ "$major" -lt 25 ] 2>/dev/null; then
                 echo "$candidate"
                 return 0
             fi
@@ -123,7 +123,7 @@ find_compatible_node() {
         local ver
         ver="$(node --version 2>/dev/null | tr -d 'v')"
         local major="${ver%%.*}"
-        if [ "$major" -ge 18 ] && [ "$major" -lt 24 ] 2>/dev/null; then
+        if [ "$major" -ge 20 ] && [ "$major" -lt 25 ] 2>/dev/null; then
             echo "$(command -v node)"
             return 0
         fi
@@ -139,17 +139,17 @@ if NODE_BIN=$(find_compatible_node); then
     ok "Node.js ${NODE_VER} at ${NODE_BIN}"
 else
     # Try to install via brew
-    echo "  Node.js 18-22 required (Node 24+ is not supported)."
+    echo "  Node.js 20-24 required."
     if command -v brew &>/dev/null; then
         echo ""
-        read -p "  Install Node.js 22 via Homebrew? [Y/n] " -n 1 -r
+        read -p "  Install Node.js 24 via Homebrew? [Y/n] " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-            echo "  Installing node@22..."
-            brew install node@22
-            NODE_BIN="/opt/homebrew/opt/node@22/bin/node"
+            echo "  Installing node@24..."
+            brew install node@24
+            NODE_BIN="/opt/homebrew/opt/node@24/bin/node"
             if [ ! -x "$NODE_BIN" ]; then
-                NODE_BIN="/usr/local/opt/node@22/bin/node"
+                NODE_BIN="/usr/local/opt/node@24/bin/node"
             fi
             if [ -x "$NODE_BIN" ]; then
                 NODE_DIR="$(dirname "$NODE_BIN")"
@@ -158,10 +158,10 @@ else
                 fail "Node.js installation failed."
             fi
         else
-            fail "Node.js 18-22 is required. Install manually:\n  brew install node@22"
+            fail "Node.js 20-24 is required. Install manually:\n  brew install node@24"
         fi
     else
-        fail "Node.js 18-22 required.\n  Install Homebrew first: https://brew.sh\n  Then: brew install node@22"
+        fail "Node.js 20-24 required.\n  Install Homebrew first: https://brew.sh\n  Then: brew install node@24"
     fi
 fi
 

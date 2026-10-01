@@ -7,7 +7,7 @@ this repo: `release.yml` and `cache-warm.yml`.
 
 ## Build matrix — exact variants and flags
 
-Pinned tool versions (release.yml:22-24): Node `22.16.0`, ONNX Runtime `1.25.1`.
+Pinned tool versions (release.yml:22-24): Node `24.18.0`, ONNX Runtime `1.25.1`.
 
 ### build-windows (release.yml:30-78) — runner `windows-2022` (pinned)
 
@@ -47,7 +47,7 @@ so a warm run finishes as many caches as it can.
 Assembled in "Assemble release" (Windows: release.yml:332-510; Linux/macOS have
 mirrored steps). Each portable package bundles:
 
-- Portable Node 22.16.0 runtime (`runtime/node.exe` on Windows, release.yml:345). **Never bump `NODE_VERSION` past 22.x** — Node 24+ breaks dependencies (repo `engines` field enforces `<24`); this pinned Node ships inside every archive, so a bump would publish broken packages.
+- Portable Node 24.18.0 runtime (`runtime/node.exe` on Windows, release.yml:345). The server and UI accept Node 20 to 24; the release pin needs a matching better-sqlite3 prebuild because it ships inside every archive.
 - Engine binaries + Lua plugins (`engine/plugins` copied in, release.yml:400-405)
 - Variant marker files (release.yml:495-504):
   - `engine/.variant` — `cuda` / `vulkan` / `cpu` (both CUDA builds are `cuda`
@@ -57,7 +57,7 @@ mirrored steps). Each portable package bundles:
 - esbuild-bundled server: `node release/esbuild.config.mjs` producing
   `server.mjs`; the job throws if it's missing (release.yml:437-441)
 - `better-sqlite3` rebuilt/prebuilt against the portable Node
-  (release.yml:307-313 Windows; `prebuild-install --target 22.16.0 --arch
+  (release.yml:307-313 Windows; `prebuild-install --target 24.18.0 --arch
   arm64` on macOS, release.yml:626)
 - ffmpeg from `ffmpeg-static`'s install script (release.yml:294-303, 461-464)
 - Prebuilt `ui/dist`, empty `models/` and `adapters/` dirs (release.yml:491-493)

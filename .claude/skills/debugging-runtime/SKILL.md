@@ -60,7 +60,7 @@ Facts you must know before reading them:
 | Generation failed (UI error) | Newest `logs/<session>/generations/gen_<uuid>_*.log` — last line is `GENERATION FAILED: <reason>` | `node_console.log` around that job; `ace_engine.log` for C++ detail | The failure reason string (table below) |
 | Engine crash | `node_console.log` | `ace_engine.log` tail | `[ace-server] Process exited with code N` + the FATAL/assert lines just before it |
 | Server 500 / API error | `node_console.log` | — | Express stack traces; `[Server] Uncaught exception` / `Unhandled rejection` (logged and swallowed — process keeps running, index.ts:576-581) |
-| Startup failure | `node --version` FIRST, then `node_console.log` | `ace_engine.log` | **Node 18–22 LTS only — Node 24+ breaks dependencies** (`engines` field in server/package.json enforces `<24`; switch Node versions, do NOT rebuild node_modules to work around native-module errors). Then: `[Server] ace-server not found at:`, CUDA-runtime download banner, `Crashed 3 times within 30s — giving up`, DB errors |
+| Startup failure | `node --version` FIRST, then `node_console.log` | `ace_engine.log` | **Node 20 to 24 LTS, 24 recommended** (`engines` in server/package.json enforces `<25`; use matching native modules). Then: `[Server] ace-server not found at:`, CUDA-runtime download banner, `Crashed 3 times within 30s — giving up`, DB errors |
 | Hang / no progress | `GET /api/generate/queue` (live), then `node_console.log` tail | `ace_engine.log` tail | Last engine line = the wedged phase. The 120 s stall watchdog usually converts hangs into a `Generation stalled` failure on its own |
 | No gen log exists at all | `node_console.log` | — | Node died mid-generation (gen logs only flush at the end) |
 

@@ -68,13 +68,13 @@ echo ""
 
 # ── Find compatible Node for the build process ──────────────────────
 find_node() {
-    for bp in "/opt/homebrew/opt/node@22/bin" "/usr/local/opt/node@22/bin"; do
+    for bp in "/opt/homebrew/opt/node@24/bin" "/usr/local/opt/node@24/bin"; do
         if [ -x "${bp}/node" ]; then echo "$bp"; return 0; fi
     done
     if command -v node &>/dev/null; then
         local ver; ver="$(node --version 2>/dev/null | tr -d 'v')"
         local major="${ver%%.*}"
-        if [ "$major" -ge 18 ] && [ "$major" -lt 24 ] 2>/dev/null; then
+        if [ "$major" -ge 20 ] && [ "$major" -lt 25 ] 2>/dev/null; then
             echo "$(dirname "$(command -v node)")"; return 0
         fi
     fi
@@ -85,7 +85,7 @@ NODE_DIR=""
 if NODE_DIR=$(find_node); then
     export PATH="${NODE_DIR}:${PATH}"
 else
-    fail "Node.js 18-22 required for building. Run: brew install node@22"
+    fail "Node.js 20-24 required for building. Run: brew install node@24"
 fi
 
 # ── Step 1: Build engine ─────────────────────────────────────────────

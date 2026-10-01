@@ -6,10 +6,9 @@ package a portable release.
 
 ## Prerequisites
 
-Every platform needs Git and Node.js 18 to 22 LTS. Node 24 and later is not supported:
-`server/package.json` and `ui/package.json` both declare `"node": ">=18.0.0 <24.0.0"`, and
-native dependencies such as better-sqlite3 break on it. CMake 3.21 or later is required
-(`engine/CMakeLists.txt`).
+Every platform needs Git and Node.js 20 to 24 LTS. Node 24 is recommended:
+`server/package.json` and `ui/package.json` both declare `"node": ">=20.0.0 <25.0.0"`.
+CMake 3.21 or later is required (`engine/CMakeLists.txt`).
 
 ### Windows
 
@@ -18,7 +17,7 @@ native dependencies such as better-sqlite3 break on it. CMake 3.21 or later is r
 | [Visual Studio 2022 Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) | "Desktop development with C++" workload. CI pins VS 2022 because newer MSVC versions are rejected by CUDA 12.8 and 13.1 `nvcc` |
 | [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) 12.x or 13.x | For NVIDIA GPUs. Select "Visual Studio Integration" during install |
 | CMake 3.21+ | Usually included with the VS Build Tools |
-| Node.js 18 to 22 LTS | Use nvm to install 22 LTS if your system Node is newer |
+| Node.js 20 to 24 LTS | Use nvm to install 24 LTS |
 | Git | Must be on `PATH`; CMake uses it to apply the ggml patches |
 | Python with pip (optional) | `engine\build.cmd` uses it to fetch cuDNN 9 for CUDA-accelerated SuperSep |
 | Vulkan SDK (optional) | Only for Vulkan builds |
@@ -29,7 +28,7 @@ native dependencies such as better-sqlite3 break on it. CMake 3.21 or later is r
 |---|---|
 | Xcode Command Line Tools 16+ | `xcode-select --install`. Provides the Metal SDK and compiler |
 | CMake 3.21+ | `brew install cmake` |
-| Node.js 18 to 22 LTS | `brew install node@22` |
+| Node.js 20 to 24 LTS | `brew install node@24` |
 | Essentia (optional) | BPM and key detection. `bash tools/essentia/build-macos.sh Essentia`, or set `ESSENTIA_BIN` |
 
 ### Linux (x86_64)
@@ -38,7 +37,7 @@ native dependencies such as better-sqlite3 break on it. CMake 3.21 or later is r
 |---|---|
 | GCC 11+ or Clang | `sudo apt install build-essential` |
 | CMake 3.21+ | |
-| Node.js 18 to 22 LTS | |
+| Node.js 20 to 24 LTS | |
 | CUDA Toolkit 12.x+ (optional) | NVIDIA GPUs |
 | Vulkan SDK (optional) | AMD, Intel or NVIDIA through Vulkan |
 | ROCm 6.1+ (optional) | AMD through HIP, built with `engine/buildhip.sh` |
@@ -312,7 +311,7 @@ Layout of a Windows package, as assembled by `release.yml`:
 
 | Path | Contents |
 |---|---|
-| `runtime/node.exe` | Portable Node 22 |
+| `runtime/node.exe` | Portable Node 24.18.0 |
 | `server/server.mjs` | The server bundled with esbuild (`release/esbuild.config.mjs`) |
 | `server/ffmpeg.exe` | From the `ffmpeg-static` package |
 | `server/data/` | Everything from `server/src/data/`, copied whole |

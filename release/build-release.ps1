@@ -7,7 +7,7 @@
 #   release/out/HOT-Step-CPP-v{version}-win-x64-{variant}.zip
 #
 # Requirements:
-#   - Node.js 22 LTS (for building with correct native module ABI)
+#   - Node.js 24 LTS (for building with correct native module ABI)
 #   - Visual Studio 2022 Build Tools with C++ workload
 #   - CUDA Toolkit 12.x (for CUDA variant)
 #   - Vulkan SDK (for Vulkan variant)
@@ -17,7 +17,7 @@ param(
     [switch]$SkipEngine,
     [switch]$SkipUI,
     [string]$Variant = "cuda",       # cuda, vulkan, cpu
-    [string]$NodeVersion = "22.16.0" # Node.js LTS version to bundle
+    [string]$NodeVersion = "24.18.0" # Node.js LTS version to bundle
 )
 
 $ErrorActionPreference = "Stop"
@@ -157,7 +157,7 @@ try {
 }
 
 # Rebuild better-sqlite3 native addon for the portable Node.js ABI
-# Dev machine may run Node 24 (ABI 137) but portable bundle ships Node 22 (ABI 127)
+# Match the staged native addon to the portable Node 24 runtime (ABI 137).
 # IMPORTANT: We backup and restore the original .node file so the dev environment
 # is not contaminated by the release build.
 Write-Host "  Rebuilding better-sqlite3 for Node $NodeVersion..."
@@ -185,7 +185,7 @@ try {
     Pop-Location
 }
 
-# Copy the Node 22 addon to staging before restoring dev version
+# Copy the Node 24 addon to staging before restoring dev version
 $stagingBsqlBuild = Join-Path $StagingDir "server\node_modules\better-sqlite3\build\Release"
 New-Item -ItemType Directory -Force $stagingBsqlBuild | Out-Null
 Copy-Item $nativeAddon (Join-Path $stagingBsqlBuild "better_sqlite3.node") -Force -ErrorAction SilentlyContinue
@@ -329,8 +329,8 @@ Copy-Item (Join-Path $bsqlSrc "package.json") (Join-Path $bsqlDst "package.json"
 New-Item -ItemType Directory -Force (Join-Path $bsqlDst "lib") | Out-Null
 Copy-Item -Recurse (Join-Path $bsqlSrc "lib\*") (Join-Path $bsqlDst "lib")
 # NOTE: Do NOT copy build/Release/better_sqlite3.node from source tree here!
-# The correct Node 22 addon was already staged at Phase 3 (line ~166).
-# Copying from $bsqlSrc would overwrite it with the restored dev addon (Node 24 ABI).
+# The correct Node 24 addon was already staged at Phase 3 (line ~166).
+# Copying from $bsqlSrc would overwrite the addon selected for the portable runtime.
 # See: https://github.com/scragnog/HOT-Step-CPP/issues/18
 
 # Copy better-sqlite3 runtime dependencies: bindings + file-uri-to-path

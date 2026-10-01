@@ -51,20 +51,19 @@ check-config: ## Check current configuration before building
 	@echo "  Environment : $(if $(filter 1,$(IS_WSL)),WSL (Windows Subsystem for Linux),Native Linux)"
 	@echo "  Backend     : $(BACKEND)"
 	@echo "  CMake Flags : $(CMAKE_FLAGS)"
-	@echo "  Node.js     : $(if $(NODE_MAJOR),v$(NODE_MAJOR) (need 18-22),not found)"
+	@echo "  Node.js     : $(if $(NODE_MAJOR),v$(NODE_MAJOR) (need 20-24),not found)"
 	@echo "  Repository  : $(REPO_DIR)"
 	@echo "========================================"
 
-check-node: ## Verify Node.js 18-22 LTS is installed
+check-node: ## Verify Node.js 20-24 LTS is installed
 	@if [ -z "$(NODE_MAJOR)" ]; then \
-		echo "ERROR: Node.js not found. Install Node 18-22 LTS, e.g. with nvm:"; \
-		echo "       https://github.com/nvm-sh/nvm  then: nvm install 22 && nvm use 22"; \
+		echo "ERROR: Node.js not found. Install Node 20-24 LTS, e.g. with nvm:"; \
+		echo "       https://github.com/nvm-sh/nvm  then: nvm install 24 && nvm use 24"; \
 		exit 1; \
 	fi
-	@if [ "$(NODE_MAJOR)" -lt 18 ] || [ "$(NODE_MAJOR)" -gt 22 ]; then \
-		echo "ERROR: Node v$(NODE_MAJOR) detected, but HOT-Step requires Node 18-22 LTS"; \
-		echo "       (Node 24+ breaks native dependencies - see README)."; \
-		echo "       With nvm: nvm install 22 && nvm use 22"; \
+	@if [ "$(NODE_MAJOR)" -lt 20 ] || [ "$(NODE_MAJOR)" -gt 24 ]; then \
+		echo "ERROR: Node v$(NODE_MAJOR) detected, but HOT-Step requires Node 20-24 LTS"; \
+		echo "       With nvm: nvm install 24 && nvm use 24"; \
 		exit 1; \
 	fi
 
@@ -72,7 +71,7 @@ setup: ## Install system dependencies (except Node - use nvm for that)
 	@echo "==> Installing system dependencies..."
 	sudo apt update && sudo apt install -y build-essential cmake git
 	@echo ""
-	@echo "==> NOTE: Node.js 18-22 LTS is also required (apt's version is often wrong)."
+	@echo "==> NOTE: Node.js 20-24 LTS is also required (apt's version is often wrong)."
 	@echo "    Recommended: install via nvm - https://github.com/nvm-sh/nvm"
 	@echo "    Then run 'make check-node' to verify."
 

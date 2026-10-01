@@ -24,13 +24,13 @@ find_node() {
     if [ -x "${ROOT_DIR}/runtime/node" ]; then
         echo "${ROOT_DIR}/runtime"; return 0
     fi
-    for bp in "/opt/homebrew/opt/node@22/bin" "/usr/local/opt/node@22/bin"; do
+    for bp in "/opt/homebrew/opt/node@24/bin" "/usr/local/opt/node@24/bin"; do
         if [ -x "${bp}/node" ]; then echo "$bp"; return 0; fi
     done
     if command -v node &>/dev/null; then
         local ver; ver="$(node --version 2>/dev/null | tr -d 'v')"
         local major="${ver%%.*}"
-        if [ "$major" -ge 18 ] && [ "$major" -lt 24 ] 2>/dev/null; then
+        if [ "$major" -ge 20 ] && [ "$major" -lt 25 ] 2>/dev/null; then
             echo "$(dirname "$(command -v node)")"; return 0
         fi
     fi
@@ -42,8 +42,8 @@ if NODE_DIR=$(find_node); then
     export PATH="${NODE_DIR}:${PATH}"
     echo "  Node.js: $(node --version)"
 else
-    echo "❌ No compatible Node.js found (need 18-22)."
-    echo "   Fix: brew install node@22"
+    echo "❌ No compatible Node.js found (need 20-24)."
+    echo "   Fix: brew install node@24"
     exit 1
 fi
 

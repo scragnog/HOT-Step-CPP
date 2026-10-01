@@ -84,7 +84,7 @@ Deep API/log detail lives in [reference.md](reference.md) in this folder.
 
 Bar: type-check clean. Zero errors.
 
-> **Node 18–22 LTS only** — Node 24+ breaks dependencies (`engines: >=18.0.0 <24.0.0`
+> **Node 20 to 24 LTS, 24 recommended** (`engines: >=20.0.0 <25.0.0`
 > in `server/package.json`). If tsc/tsx/npm fails oddly, check `node --version`
 > BEFORE blaming the change — a wrong Node version produces false validation verdicts.
 
