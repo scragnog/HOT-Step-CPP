@@ -803,18 +803,18 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
         sf->rebase_source = yyjson_get_str(v);
     }
     if ((v = yyjson_obj_get(obj, "rebase_beta")) && yyjson_is_num(v)) {
-        sf->rebase_beta = yyjson_is_real(v) ? (float) yyjson_get_real(v) : (float) yyjson_get_int(v);
+        sf->rebase_beta = (float) yyjson_get_num(v);
     }
     // APG tuning
     if ((v = yyjson_obj_get(obj, "apg_momentum")) && yyjson_is_num(v)) {
-        sf->apg_momentum = (float) yyjson_get_real(v);
+        sf->apg_momentum = (float) yyjson_get_num(v);
     }
     if ((v = yyjson_obj_get(obj, "apg_norm_threshold")) && yyjson_is_num(v)) {
-        sf->apg_norm_threshold = (float) yyjson_get_real(v);
+        sf->apg_norm_threshold = (float) yyjson_get_num(v);
     }
     // Structural seed strength (Song Builder repeated sections)
     if ((v = yyjson_obj_get(obj, "seed_strength")) && yyjson_is_num(v)) {
-        sf->seed_strength = (float) yyjson_get_real(v);
+        sf->seed_strength = (float) yyjson_get_num(v);
     }
     // Song Builder: evict the LM before synth (repaint sections don't use it)
     if ((v = yyjson_obj_get(obj, "evict_lm")) && yyjson_is_bool(v)) {
@@ -832,19 +832,19 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
         sf->stork_substeps = (int) yyjson_get_int(v);
     }
     if ((v = yyjson_obj_get(obj, "beat_stability")) && yyjson_is_num(v)) {
-        sf->beat_stability = (float) yyjson_get_real(v);
+        sf->beat_stability = (float) yyjson_get_num(v);
     }
     if ((v = yyjson_obj_get(obj, "frequency_damping")) && yyjson_is_num(v)) {
-        sf->frequency_damping = (float) yyjson_get_real(v);
+        sf->frequency_damping = (float) yyjson_get_num(v);
     }
     if ((v = yyjson_obj_get(obj, "temporal_smoothing")) && yyjson_is_num(v)) {
-        sf->temporal_smoothing = (float) yyjson_get_real(v);
+        sf->temporal_smoothing = (float) yyjson_get_num(v);
     }
     // Per-group adapter scales: {"adapter_group_scales": {"self_attn": 1.0, ...}}
-    // NOTE: JSON integer 1 vs float 1.0 — yyjson_get_real returns 0 for ints.
-    // Use a lambda that handles both.
+    // NOTE: JSON integer 1 vs float 1.0 — the real-only getter returns 0 for ints,
+    // so every numeric field in this file reads through yyjson_get_num.
     auto get_num = [](yyjson_val * val) -> float {
-        return yyjson_is_real(val) ? (float) yyjson_get_real(val) : (float) yyjson_get_int(val);
+        return (float) yyjson_get_num(val);
     };
     yyjson_val * gs_obj = yyjson_obj_get(obj, "adapter_group_scales");
     if (gs_obj && yyjson_is_obj(gs_obj)) {
@@ -949,23 +949,23 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
         sf->dcw_mode = yyjson_get_str(v);
     }
     if ((v = yyjson_obj_get(obj, "dcw_scaler")) && yyjson_is_num(v)) {
-        sf->dcw_scaler = (float) yyjson_get_real(v);
+        sf->dcw_scaler = (float) yyjson_get_num(v);
     }
     if ((v = yyjson_obj_get(obj, "dcw_high_scaler")) && yyjson_is_num(v)) {
-        sf->dcw_high_scaler = (float) yyjson_get_real(v);
+        sf->dcw_high_scaler = (float) yyjson_get_num(v);
     }
     // Latent post-processing
     if ((v = yyjson_obj_get(obj, "latent_shift")) && yyjson_is_num(v)) {
-        sf->latent_shift = (float) yyjson_get_real(v);
+        sf->latent_shift = (float) yyjson_get_num(v);
     }
     if ((v = yyjson_obj_get(obj, "latent_rescale")) && yyjson_is_num(v)) {
-        sf->latent_rescale = (float) yyjson_get_real(v);
+        sf->latent_rescale = (float) yyjson_get_num(v);
     }
     if ((v = yyjson_obj_get(obj, "cfg_cutoff_ratio")) && yyjson_is_num(v)) {
-        sf->cfg_cutoff_ratio = (float) yyjson_get_real(v);
+        sf->cfg_cutoff_ratio = (float) yyjson_get_num(v);
     }
     if ((v = yyjson_obj_get(obj, "cache_ratio")) && yyjson_is_num(v)) {
-        sf->cache_ratio = (float) yyjson_get_real(v);
+        sf->cache_ratio = (float) yyjson_get_num(v);
     }
     if ((v = yyjson_obj_get(obj, "custom_timesteps")) && yyjson_is_str(v)) {
         sf->custom_timesteps = yyjson_get_str(v);
@@ -995,7 +995,7 @@ static void parse_server_fields(const char * json, ServerFields * sf) {
             if (yyjson_is_str(pp_val)) {
                 v_str = yyjson_get_str(pp_val);
             } else if (yyjson_is_real(pp_val)) {
-                v_str = std::to_string(yyjson_get_real(pp_val));
+                v_str = std::to_string(yyjson_get_num(pp_val));
             } else if (yyjson_is_int(pp_val)) {
                 v_str = std::to_string(yyjson_get_int(pp_val));
             } else if (yyjson_is_bool(pp_val)) {
@@ -4169,7 +4169,7 @@ int main(int argc, char ** argv) {
                             sa3_sp.plugin_params[yyjson_get_str(k)] = yyjson_get_str(v);
                         } else if (yyjson_is_num(v)) {
                             char buf[32];
-                            snprintf(buf, sizeof(buf), "%g", yyjson_get_real(v));
+                            snprintf(buf, sizeof(buf), "%g", yyjson_get_num(v));
                             sa3_sp.plugin_params[yyjson_get_str(k)] = buf;
                         } else if (yyjson_is_bool(v)) {
                             sa3_sp.plugin_params[yyjson_get_str(k)] = yyjson_get_bool(v) ? "1" : "0";
