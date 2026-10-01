@@ -57,14 +57,14 @@ function firstText(result: CallToolResult): string {
   return (block as { type: 'text'; text: string }).text;
 }
 
-test('lists all eight generation tools and twelve training tools', async () => {
+test('lists all eight generation tools and thirteen training tools', async () => {
   const { tools } = await client.listTools();
   const names = tools.map(t => t.name).sort();
   assert.deepEqual(names, [
     'gen_backends', 'gen_cancel', 'gen_configure', 'gen_queue',
     'gen_song', 'gen_status', 'gen_submit', 'gen_wait',
     'train_capabilities', 'train_dataset', 'train_dataset_create', 'train_dataset_label',
-    'train_dataset_rescan', 'train_datasets', 'train_job', 'train_jobs', 'train_prepare', 'train_runs',
+    'train_dataset_rescan', 'train_datasets', 'train_fields', 'train_job', 'train_jobs', 'train_prepare', 'train_runs',
     'train_start', 'train_wait',
   ]);
 });
@@ -89,6 +89,32 @@ test('train_start yue2-joint with an empty resumeRunId is refused before any HTT
   assert.equal(result.isError, true);
   assert.match(firstText(result), /resumeRunId/);
   assert.equal(trainingRequests, before);
+});
+
+test('the serialized tool list stays under 16 KB (clients load it every session)', async () => {
+  const { tools } = await client.listTools();
+  const bytes = Buffer.byteLength(JSON.stringify(tools), 'utf8');
+  assert.ok(bytes < 16 * 1024, `tool list is ${bytes} bytes`);
+});
+
+test('train_fields lists a backend\'s fields from the validating schema, nested ones flattened', async () => {
+  const result = await client.callTool({ name: 'train_fields', arguments: { backend: 'mm3-lm' } }) as CallToolResult;
+  assert.equal(result.isError, undefined);
+  const data = JSON.parse(firstText(result));
+  assert.equal(data.argument, 'mm3Lm');
+  assert.equal(data.route, 'POST /api/training/datasets/:id/mm3-train-lm');
+  const byName = Object.fromEntries(data.fields.map((f: { name: string }) => [f.name, f]));
+  assert.deepEqual(
+    { ...byName.steps, notes: undefined },
+    { name: 'steps', type: 'number', required: false, default: "500 (or the preset's)", notes: undefined },
+  );
+  assert.equal(byName.optimizer.type, '"muon" | "adamw" | "prodigy"');
+  assert.equal(byName['regularisation.every'].default, '3');
+
+  const joint = JSON.parse(firstText(await client.callTool({ name: 'train_fields', arguments: { backend: 'yue2-joint' } }) as CallToolResult));
+  assert.deepEqual(joint.fields.find((f: { name: string }) => f.name === 'steps').required, true);
+  const bad = await client.callTool({ name: 'train_fields', arguments: { backend: 'yue2' } }) as CallToolResult;
+  assert.equal(bad.isError, true);
 });
 
 test('gen_submit over the wire returns the job the fixture server hands back', async () => {

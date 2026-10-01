@@ -5,7 +5,7 @@
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { request, hotstepBaseUrl, hotstepIsLoopback, type HttpResult } from './http.js';
 import {
   acePreprocessSchema, mm3CodesSchema, yue2PreprocessSchema, yue2JointPrepareSchema,
@@ -362,8 +362,11 @@ export async function trainWait(jobId: string, maxSeconds: number | undefined, s
 interface TrainTarget { key: string; schema: z.AnyZodObject; route: string }
 
 /** Pure: picks the caller's field object for `target`, refuses one meant for
- *  another backend, refuses an `options` key that the schema already names
- *  (it would silently override the typed field), and merges the rest. */
+ *  another backend, validates it against the target's strict schema (the
+ *  schemas are not advertised in the MCP tool list, to keep it small, so
+ *  this is where unknown keys and wrong types are caught; train_fields lists
+ *  them), refuses an `options` key that the schema already names (it would
+ *  silently override the typed field), and merges the rest. */
 function buildTrainBody(
   target: TrainTarget,
   all: readonly TrainTarget[],
@@ -375,11 +378,20 @@ function buildTrainBody(
       return { rejected: `\`${t.key}\` does not apply here — this call posts to /${target.route}, which reads \`${target.key}\`.` };
     }
   }
+  let fields: Record<string, unknown> = {};
+  if (args[target.key] !== undefined) {
+    const parsed = target.schema.safeParse(args[target.key]);
+    if (!parsed.success) {
+      const issues = parsed.error.issues.map(i => `${[target.key, ...i.path].join('.')}: ${i.message}`).join('; ');
+      return { rejected: `${issues}. train_fields lists the accepted fields.` };
+    }
+    fields = parsed.data;
+  }
   const declared = target.schema.shape as Record<string, unknown>;
   for (const key of Object.keys(options ?? {})) {
     if (Object.hasOwn(declared, key)) return { rejected: `options.${key} is a typed field — pass it inside \`${target.key}\` instead.` };
   }
-  return { body: { ...(options ?? {}), ...((args[target.key] as Record<string, unknown> | undefined) ?? {}) } };
+  return { body: { ...(options ?? {}), ...fields } };
 }
 
 /** POST a training body. Never retried on 401, same reason as gen_submit: a
@@ -401,10 +413,10 @@ export interface TrainPrepareArgs {
   datasetId: string;
   backend: 'ace' | 'mm3' | 'yue2';
   stage?: 'preprocess' | 'joint-prepare';
-  ace?: z.infer<typeof acePreprocessSchema>;
-  mm3?: z.infer<typeof mm3CodesSchema>;
-  yue2Preprocess?: z.infer<typeof yue2PreprocessSchema>;
-  yue2JointPrepare?: z.infer<typeof yue2JointPrepareSchema>;
+  ace?: Record<string, unknown>;
+  mm3?: Record<string, unknown>;
+  yue2Preprocess?: Record<string, unknown>;
+  yue2JointPrepare?: Record<string, unknown>;
   options?: Record<string, unknown>;
 }
 
@@ -442,10 +454,10 @@ export type TrainBackend = keyof typeof START_TARGETS;
 export interface TrainStartArgs {
   datasetId: string;
   backend: TrainBackend;
-  aceLm?: z.infer<typeof aceLmSchema>;
-  aceDit?: z.infer<typeof aceDitSchema>;
-  mm3Lm?: z.infer<typeof mm3LmSchema>;
-  yue2Joint?: z.infer<typeof yue2JointSchema>;
+  aceLm?: Record<string, unknown>;
+  aceDit?: Record<string, unknown>;
+  mm3Lm?: Record<string, unknown>;
+  yue2Joint?: Record<string, unknown>;
   options?: Record<string, unknown>;
 }
 
@@ -470,6 +482,51 @@ export async function trainStart(args: TrainStartArgs): Promise<ToolOutcome> {
     body.trainingMethod = 'aitk';
   }
   return postTrain(args.datasetId, target.route, body);
+}
+
+// ── train_fields ─────────────────────────────────────────────────────────────
+
+function zodType(t: z.ZodTypeAny): string {
+  const def = t._def as { typeName: string; innerType?: z.ZodTypeAny; values?: string[]; value?: unknown; options?: z.ZodTypeAny[]; type?: z.ZodTypeAny; checks?: Array<{ kind: string }> };
+  switch (def.typeName) {
+    case 'ZodOptional': return zodType(def.innerType!);
+    case 'ZodEnum': return def.values!.map(v => JSON.stringify(v)).join(' | ');
+    case 'ZodLiteral': return JSON.stringify(def.value);
+    case 'ZodUnion': return def.options!.map(zodType).join(' | ');
+    case 'ZodArray': return `${zodType(def.type!)}[]`;
+    case 'ZodNumber': return def.checks?.some(c => c.kind === 'int') ? 'integer' : 'number';
+    case 'ZodString': return 'string';
+    case 'ZodBoolean': return 'boolean';
+    case 'ZodObject': return 'object';
+    default: return 'unknown';
+  }
+}
+
+/** The field list for one schema, nested objects flattened as parent.child.
+ *  `default` is lifted from the description's "Default ..." clause (null
+ *  where the description states none); `notes` is the whole description. */
+function describeFields(schema: z.AnyZodObject, prefix = ''): Array<Record<string, unknown>> {
+  return Object.entries(schema.shape as Record<string, z.ZodTypeAny>).flatMap(([name, t]) => {
+    const notes = t.description ?? '';
+    const row = {
+      name: prefix + name, type: zodType(t), required: !t.isOptional(),
+      default: /\bDefault:?\s+((?:[^;.]|\.(?=\d))+)/.exec(notes)?.[1].trim() ?? null, notes,
+    };
+    const inner = t instanceof z.ZodOptional ? t.unwrap() : t;
+    return inner instanceof z.ZodObject ? [row, ...describeFields(inner, `${prefix}${name}.`)] : [row];
+  });
+}
+
+export function trainFields(backend: string, stage?: string): ToolOutcome {
+  let target: TrainTarget | { rejected: string };
+  if (Object.hasOwn(START_TARGETS, backend)) {
+    target = stage === undefined ? START_TARGETS[backend as TrainBackend]
+      : { rejected: `stage applies to train_prepare backend yue2 only, not ${backend}.` };
+  } else {
+    target = prepareTarget(backend, stage);
+  }
+  if ('rejected' in target) return { kind: 'rejected', message: target.rejected };
+  return { kind: 'ok', data: { argument: target.key, route: `POST /api/training/datasets/:id/${target.route}`, fields: describeFields(target.schema) } };
 }
 
 // ── train_runs ───────────────────────────────────────────────────────────────

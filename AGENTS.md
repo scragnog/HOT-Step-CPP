@@ -180,8 +180,9 @@ reservations, `work-run.ps1`, context corrections) live in
 [work channel usage](tools/mcp-lyricstudio/README.md#work-channels).
 
 A second MCP server, `hotstep` ([tools/mcp-hotstep](tools/mcp-hotstep/README.md)),
-exposes generation (and, in a later slice, training) over the app's HTTP
-API — no explicit-request gate, it's an ordinary tool. After editing either
+exposes generation and training (datasets, labeling, prepare, start, runs,
+jobs) over the app's HTTP API — no explicit-request gate, it's an ordinary
+tool. After editing either
 MCP server's source, reconnect it in the client: same rule as any MCP
 server, a connected session keeps its old tool set until reconnected.
 

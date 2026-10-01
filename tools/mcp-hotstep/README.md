@@ -6,7 +6,7 @@ look up a saved song — all three backends (ACE-Step 1.5, MiniMax-Music3, YuE2)
 go through the same eight tools, none of them backend-specific. Training:
 list/create/rescan datasets, run the labeling pipeline's three stages, list
 and control jobs, then prepare, start and inspect adapter training for ACE
-(LM and DiT), MiniMax-Music3 (LM) and YuE2 (joint): the twelve `train_*` tools
+(LM and DiT), MiniMax-Music3 (LM) and YuE2 (joint): the thirteen `train_*` tools
 below, all wrappers over `server/src/routes/training.ts`.
 
 Everything here talks to the running app over its HTTP API
@@ -212,6 +212,12 @@ stage training needs and returns the route's response, which carries the
 backend/stage may be sent. `options` is a passthrough for anything the typed
 object does not name; a key it does name is rejected before any HTTP call.
 Not retried on `401`.
+
+The field objects appear in the MCP tool list as plain objects, to keep that
+list small. The tool validates each one against its strict schema before any
+HTTP call: an unknown key, a wrong type or a value outside an enum comes back
+as an error naming the field. `train_fields` serves the same lists as the
+tables below to a client that can't read this file.
 
 | backend | stage | Route | Field object | Answers |
 |---|---|---|---|---|
@@ -624,13 +630,28 @@ HOT-PiZZA, because `pissa` defaults on and takes precedence. Send
 false even after a prepare has run. The prepare job's `manifest` is the path
 to train with.
 
+### `train_fields`
+`{ backend, stage? }`, with `backend` any `train_prepare` or `train_start`
+backend (`stage` for `yue2` prepare only). Returns `{ argument, route,
+fields }`: the name of the field object to send, the route it posts to, and
+one row per field with `name`, `type`, `required`, `default` and `notes`.
+Nested objects are flattened as `parent.child`. The rows come from the same
+zod schemas that validate the call, so they can't drift from it. `default` is
+lifted from the description's "Default ..." clause and is `null` where the
+route forwards nothing (the engine's default applies) or the description
+states none.
+
 ## Design notes for maintainers
 
 - `src/trainSchemas.ts` is a **client-side mirror** of what the six training
   start/prepare routes read from the body and what they default an absent
-  field to. The field descriptions are the documentation: the tables above
-  were generated from them. When a route gains a field or changes a fallback,
-  update the schema; until then the new field still works through `options`.
+  field to. Its descriptions are the documentation: `train_fields` serves
+  them, and the tables above were generated from them. When a route gains a
+  field or changes a fallback, update the schema and regenerate the table.
+  Until then the new field still works through `options`.
+- The tool list is capped at 16 KB by a test in `test/client.test.ts`,
+  because every MCP client loads the whole list into context each session.
+  Keep tool descriptions to a clause or two and put the detail here.
 
 - `src/http.ts` is the one place every tool's HTTP call goes through:
   auto-login on first use, one retry on a `401` after a fresh login (opt-out

@@ -29,7 +29,7 @@ test('starts cleanly over a real stdio transport with a non-loopback HOTSTEP_URL
       stderr: 'inherit',
     }));
     const { tools } = await client.listTools();
-    assert.equal(tools.length, 20, `expected all 20 tools, got: ${tools.map(t => t.name).join(', ')}`);
+    assert.equal(tools.length, 21, `expected all 21 tools, got: ${tools.map(t => t.name).join(', ')}`);
   } finally {
     await client.close();
   }

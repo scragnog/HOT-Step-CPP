@@ -1,7 +1,7 @@
 {
   "name": "mcp-hotstep",
   "version": "1.0.0",
-  "description": "MCP server for HOT-Step CPP — generation (and, in a later slice, training) over the app's HTTP API",
+  "description": "MCP server for HOT-Step CPP — generation and training over the app's HTTP API",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
