@@ -60,7 +60,7 @@ have to make.
 | Style Description | Free-text caption for genre, instruments, vocal style, production and mood. Auto-filled from the target artist, always editable. Its Generate button redrafts it with the selected Caption LLM provider on demand; the same provider fills it automatically on artist selection when no existing caption is found. |
 | Instrumental | Skips the lyrics requirement and sends the track as instrumental. |
 | Structure Fidelity | 0 to 1, default 0.5. How closely the output follows the source's arrangement. |
-| Source Preservation | 0 to 1, default 0. "0 = fresh generation from noise, 1 = closely preserve the original." Above 0, a Noise Method choice (Classic/Truncate or Full Denoise/Rescale) appears. |
+| Source Preservation | 0 to 1, default 0. "0 = fresh generation from noise, 1 = closely preserve the original." Above 0, a Noise Method choice appears. Classic (Truncate), the default, drops the early steps and runs the rest. Full Denoise (Rescale) runs the same number of steps, spaced by the selected scheduler across the remaining range. |
 | NoFSQ Mode | Toggle. Skips FSQ quantization for a result closer to the source. |
 | Tempo Scale | 0.5x to 2.0x, default 1.0. Scales the target BPM from the (corrected) source BPM. |
 | Pitch Shift | -12 to +12 semitones, default 0. Shows the transposed target key live. |
