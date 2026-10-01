@@ -289,6 +289,12 @@ static void yue2_handle_warm(const httplib::Request &, httplib::Response & res) 
 // POST /yue2/unload — free all YuE2 VRAM unconditionally. Idempotent.
 static void yue2_handle_unload(const httplib::Request &, httplib::Response & res) {
     std::lock_guard<std::mutex> lock(g_yue2_mutex);
+    // Queued renders need the resident weights; unloading between two of them
+    // would fail the later ones with "not resident" (#204).
+    if (!yue2_nar_lane_drain("unload")) {
+        yue2_json_error(res, 503, "YuE2 engine is shutting down");
+        return;
+    }
     std::lock_guard<std::mutex> nar_lock(g_yue2_nar_mutex);  // the render lane must be idle before weights move
     yue2_unload(&g_yue2);
     res.set_content("{\"unloaded\":true}", "application/json");
