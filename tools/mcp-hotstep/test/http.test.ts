@@ -129,16 +129,21 @@ test('a server error is returned verbatim, not paraphrased', async () => {
 
 // ── gen_submit: exact body per backend ───────────────────────────────────────
 
-test('gen_submit builds the exact ACE body, including the model->ditModel/lmModel translation', async () => {
+test('gen_submit builds the exact ACE body, keeping ditModel and lmModel as independent catalogue roles', async () => {
   fixture.route = (_req, res) => { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jobId: 'j1', status: 'pending' })); };
+  // Deliberately distinct values: ditModel and lmModel are separate ACE
+  // catalogues (translateParams.ts -> synth_model / lm_model), never the same
+  // scalar duplicated into both — the engine rejects an LM name absent from
+  // the LM bucket, so asserting equal values here would hide that bug.
   const outcome = await toolsMod.genSubmit({
-    backend: 'ace', caption: 'synthpop', lyrics: '[Verse]\nhi', duration: 120, seed: 7, batchSize: 2, title: 'Song', model: 'q8_0',
+    backend: 'ace', caption: 'synthpop', lyrics: '[Verse]\nhi', duration: 120, seed: 7, batchSize: 2, title: 'Song',
+    ditModel: 'dit-f16', lmModel: 'lm-q8_0',
   });
   assert.equal(outcome.kind, 'ok');
   assert.deepEqual(fixture.generateCalls[0], {
     backend: 'ace', expectedBackend: 'ace', taskType: 'text2music', caption: 'synthpop',
     lyrics: '[Verse]\nhi', duration: 120, seed: 7, batchSize: 2, title: 'Song',
-    ditModel: 'q8_0', lmModel: 'q8_0',
+    ditModel: 'dit-f16', lmModel: 'lm-q8_0',
   });
 });
 
@@ -199,6 +204,38 @@ test('gen_wait stops polling early when its signal is aborted, without cancellin
   assert.ok(Date.now() - start < 2000, 'should return promptly on abort, not ride out the 30s budget');
   assert.equal(outcome.kind, 'ok');
   assert.equal((outcome as { data: { status: string } }).data.status, 'running');
+});
+
+test('gen_wait with a slow status endpoint does not issue one more poll once the budget is already spent', { timeout: 5000 }, async () => {
+  let calls = 0;
+  fixture.route = (_req, res) => {
+    calls++;
+    const respond = () => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jobId: 'job-slow', status: 'running' }));
+    if (calls === 1) respond(); else setTimeout(respond, 2200); // only reached if the bug regresses
+  };
+  const start = Date.now();
+  const outcome = await toolsMod.genWait('job-slow', 1, new AbortController().signal);
+  const elapsed = Date.now() - start;
+  assert.equal(outcome.kind, 'ok');
+  assert.ok(elapsed < 1500, `expected to return close to the 1s budget, took ${elapsed}ms`);
+  assert.equal(calls, 1, 'a second poll means the budget check after waking from sleep did not fire');
+});
+
+test('gen_wait, aborted mid-sleep, does not issue one more poll after the signal fired', { timeout: 5000 }, async () => {
+  let calls = 0;
+  fixture.route = (_req, res) => {
+    calls++;
+    const respond = () => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jobId: 'job-slow2', status: 'running' }));
+    if (calls === 1) respond(); else setTimeout(respond, 2200); // only reached if the bug regresses
+  };
+  const ac = new AbortController();
+  setTimeout(() => ac.abort(), 50);
+  const start = Date.now();
+  const outcome = await toolsMod.genWait('job-slow2', 30, ac.signal);
+  const elapsed = Date.now() - start;
+  assert.equal(outcome.kind, 'ok');
+  assert.ok(elapsed < 1000, `expected to return promptly after abort, took ${elapsed}ms`);
+  assert.equal(calls, 1, 'a second poll means the abort check after waking from sleep did not fire');
 });
 
 // ── gen_cancel ───────────────────────────────────────────────────────────────

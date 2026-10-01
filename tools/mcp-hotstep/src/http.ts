@@ -31,6 +31,17 @@ export function hotstepIsLoopback(): boolean {
   }
 }
 
+/** One AbortSignal that aborts as soon as any of `signals` does — portable
+ *  (AbortSignal.any needs Node 20.3+; this repo supports 18-22). */
+function anySignal(signals: AbortSignal[]): AbortSignal {
+  const controller = new AbortController();
+  for (const s of signals) {
+    if (s.aborted) { controller.abort(s.reason); break; }
+    s.addEventListener('abort', () => controller.abort(s.reason), { once: true });
+  }
+  return controller.signal;
+}
+
 async function login(): Promise<string> {
   const res = await fetch(`${BASE_URL}/api/auth/auto`, { signal: AbortSignal.timeout(TIMEOUT_MS) });
   const text = await res.text();
@@ -47,7 +58,9 @@ export interface HttpResult<T = unknown> {
   status: number;
   data?: T;
   /** The raw response body — tools return this verbatim on failure rather
-   *  than paraphrasing whatever the server said. */
+   *  than paraphrasing whatever the server said. 0 status + this message is
+   *  a local abort/timeout; the request never reached (or returned from) the
+   *  server at all. */
   text: string;
 }
 
@@ -55,9 +68,13 @@ export async function request<T = unknown>(
   method: string,
   path: string,
   body?: unknown,
-  opts: { retryOn401?: boolean } = {},
+  opts: { retryOn401?: boolean; signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<HttpResult<T>> {
   if (!token) await login();
+  const fetchSignal = () => {
+    const timeout = AbortSignal.timeout(Math.max(0, opts.timeoutMs ?? TIMEOUT_MS));
+    return opts.signal ? anySignal([timeout, opts.signal]) : timeout;
+  };
   const send = () => fetch(`${BASE_URL}${path}`, {
     method,
     headers: {
@@ -65,15 +82,28 @@ export async function request<T = unknown>(
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: fetchSignal(),
   });
 
-  let res = await send();
+  let res: Response;
+  try {
+    res = await send();
+  } catch (err: any) {
+    // Caller-supplied signal fired, or the (possibly shortened) timeout did —
+    // either way there is no HTTP response to report, only that one didn't
+    // arrive in time. status 0 distinguishes this from a real server error.
+    return { ok: false, status: 0, text: err?.message || String(err) };
+  }
+
   if (res.status === 401) {
     token = null;
     if (opts.retryOn401 !== false) {
       await login();
-      res = await send();
+      try {
+        res = await send(); // a fresh signal each call — never reuses an already-elapsed/aborted one
+      } catch (err: any) {
+        return { ok: false, status: 0, text: err?.message || String(err) };
+      }
     }
   }
 

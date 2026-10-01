@@ -62,12 +62,13 @@ Switching releases the **outgoing** backend's VRAM before anything new loads
 engine *state* for MiniMax-Music3 (per-role quants: `lm`, `depth`, `cond`,
 `dit`, `voc`) and YuE2 (`lm`, `vae_variant`) — this is where you set it. ACE
 has no engine-state model selection at all: its model names travel on every
-`gen_submit` call instead (its `model` arg), so this route answers `501` for
-ACE, which the tool reports as the reason rather than an error to retry.
+`gen_submit` call instead (its `ditModel`/`lmModel` args), so this route
+answers `501` for ACE, which the tool reports as the reason rather than an
+error to retry.
 
 ### `gen_submit`
 `{ backend, operation?, caption, lyrics?, instrumental?, duration?, seed?,
-batchSize?, title?, model?, options? }` → `POST /api/generate`. Returns
+batchSize?, title?, ditModel?, lmModel?, options? }` → `POST /api/generate`. Returns
 `{ jobId, status }` immediately; poll with `gen_status` or `gen_wait`.
 
 - `backend` is sent as both `backend` (the existing log-only field) and the
@@ -83,9 +84,11 @@ batchSize?, title?, model?, options? }` → `POST /api/generate`. Returns
   as a *target* the LM aims for. MiniMax-Music3 (max 300s) treats it as a
   *ceiling only* — the model's own stop token usually ends it sooner. YuE2
   ignores `duration` entirely; it is always model-ended.
-- `model` is ACE-only shorthand: it sets **both** `ditModel` and `lmModel` to
-  the given name. It does nothing for MiniMax-Music3 or YuE2 — use
-  `gen_configure` for those.
+- `ditModel`/`lmModel` are ACE-only and independent — ACE has separate DiT
+  and LM catalogues, and a name from one is not valid in the other
+  (`translateParams.ts` maps them to `synth_model`/`lm_model`, and the engine
+  rejects an LM name it can't find in the LM bucket). Neither does anything
+  for MiniMax-Music3 or YuE2 — use `gen_configure` for those.
 - `options` is a bag of backend-specific knobs sent as **top-level** HTTP
   fields, not nested. MiniMax-Music3 only reads fields prefixed `mm3` (e.g.
   `mm3Steps`); YuE2 only reads fields prefixed `yue2`; anything else is
@@ -124,8 +127,9 @@ it never calls cancel on your behalf. Use `gen_cancel` for that.
 audio bytes. Also includes `audioFilePath` — a real filesystem path — but
 **only** when `HOTSTEP_URL` resolves to loopback (127.0.0.1/localhost), since
 otherwise the path wouldn't resolve on the machine asking for it. That path
-is reconstructed from this repo's own `server/src/config.ts` (`DATA_DIR` /
-`audioDir`), so it is only correct if this MCP process sees the same
+is reconstructed from this repo's own `DATA_DIR` resolution (mirrored in
+`src/tools.ts` — see the design note below, `server/src/config.ts` is never
+imported), so it is only correct if this MCP process sees the same
 `DATA_DIR` the running server does — true for the default, unmodified setup.
 
 ## Design notes for maintainers
@@ -149,3 +153,11 @@ is reconstructed from this repo's own `server/src/config.ts` (`DATA_DIR` /
   manifest has no such field), and this slice keeps generation strictly
   HTTP-only — so if a backend gains or loses an operation, update the mirror
   here too.
+- `src/tools.ts` never imports `server/src/config.ts`, even though that would
+  be the obvious way to get `audioDir`. That module bootstraps the app on
+  import (creates `.env` from `.env.example` on first launch, logs to
+  stdout), and this process's stdout *is* its MCP JSON-RPC wire once
+  `index.ts` connects the stdio transport — a stray non-JSON line there
+  corrupts the stream for the client. `AUDIO_DIR` is instead a small,
+  deliberately duplicated mirror of `config.ts`'s `DATA_DIR` resolution; see
+  the comment above its definition.

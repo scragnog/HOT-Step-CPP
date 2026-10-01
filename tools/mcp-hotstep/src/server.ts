@@ -66,7 +66,8 @@ export function createServer(): McpServer {
       seed: z.number().optional(),
       batchSize: z.number().optional().describe('ACE only (max 8); ignored by the other backends.'),
       title: z.string().optional(),
-      model: z.string().optional().describe('ACE only: sets BOTH ditModel and lmModel to this name. No effect on MiniMax-Music3 or YuE2 — their model/adapter choice is engine state, set through gen_configure instead.'),
+      ditModel: z.string().optional().describe('ACE only: DiT/synth catalogue entry (sent as ditModel). Independent of lmModel — ACE has separate DiT and LM catalogues, a name from one is not valid in the other. No effect on MiniMax-Music3 or YuE2 — their model/adapter choice is engine state, set through gen_configure instead.'),
+      lmModel: z.string().optional().describe('ACE only: LM catalogue entry (sent as lmModel). Independent of ditModel — see above. No effect on MiniMax-Music3 or YuE2.'),
       options: z.record(z.union([z.string(), z.number(), z.boolean()])).optional()
         .describe('Backend-specific knobs sent as top-level HTTP fields. MiniMax-Music3 only reads fields prefixed "mm3" (e.g. mm3Steps), YuE2 only reads fields prefixed "yue2" (e.g. yue2Something) — anything else is silently ignored by those two. ACE reads plain unprefixed names (e.g. guidanceScale, inferenceSteps, negativePrompt). Any name that collides with one of this tool\'s own typed args is rejected before any HTTP call is made.'),
     },

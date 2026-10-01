@@ -4,11 +4,18 @@
 // pullLinked against a fake worker.
 
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { request, hotstepBaseUrl, hotstepIsLoopback, type HttpResult } from './http.js';
-// Pure path config, not live engine/job state — safe to read directly rather
-// than over HTTP (no route exposes it). Only correct when this process sees
-// the same DATA_DIR env the running server does; see the README caveat.
-import { config as serverConfig } from '../../../server/src/config.js';
+
+// Mirrors server/src/config.ts's `data.dir`/`data.audioDir` resolution —
+// NOT imported directly. That module bootstraps the app on import (creates
+// .env from .env.example on first launch and logs to stdout), which would
+// write non-JSON bytes onto this process's stdio JSON-RPC stream. ponytail:
+// duplicated two-line resolution; update if config.ts's DATA_DIR handling
+// changes. Only correct when this process sees the same DATA_DIR env the
+// running server does — true for the default, unmodified setup.
+const SERVER_SRC_DIR = fileURLToPath(new URL('../../../server/src', import.meta.url));
+const AUDIO_DIR = path.join(path.resolve(SERVER_SRC_DIR, '..', process.env.DATA_DIR || './data'), 'audio');
 
 export type ToolOutcome =
   | { kind: 'ok'; data: unknown }
@@ -91,7 +98,13 @@ export interface GenSubmitArgs {
   seed?: number;
   batchSize?: number;
   title?: string;
-  model?: string;
+  /** ACE only: DiT/synth catalogue entry (translateParams.ts maps this to
+   *  synth_model). Independent of `lmModel` — ACE has separate DiT and LM
+   *  catalogues; a name from one bucket is not valid in the other. */
+  ditModel?: string;
+  /** ACE only: LM catalogue entry (maps to lm_model). Independent of
+   *  `ditModel` — see above. */
+  lmModel?: string;
   options?: Record<string, string | number | boolean>;
 }
 
@@ -117,7 +130,8 @@ export function buildSubmitBody(args: GenSubmitArgs): { body: Record<string, unk
     ...(args.seed !== undefined ? { seed: args.seed } : {}),
     ...(args.batchSize !== undefined ? { batchSize: args.batchSize } : {}),
     ...(args.title !== undefined ? { title: args.title } : {}),
-    ...(args.model !== undefined ? { ditModel: args.model, lmModel: args.model } : {}),
+    ...(args.ditModel !== undefined ? { ditModel: args.ditModel } : {}),
+    ...(args.lmModel !== undefined ? { lmModel: args.lmModel } : {}),
     ...(args.options ?? {}),
   };
   return { body };
@@ -161,20 +175,30 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /** A cancelled `signal` returns the latest known status and leaves the job
- *  running server-side — this never calls cancel on the caller's behalf. */
+ *  running server-side — this never calls cancel on the caller's behalf.
+ *  Budget and signal are checked right before EVERY poll, including the
+ *  first, and each HTTP request is itself bounded by both (via http.ts's
+ *  `signal`/`timeoutMs`), so neither a slow response nor waking from sleep
+ *  at the deadline can start one more request than the budget allows. */
 export async function genWait(jobId: string, maxSeconds: number | undefined, signal: AbortSignal): Promise<ToolOutcome> {
   const budgetMs = Math.min(WAIT_MAX_SECONDS, Math.max(1, maxSeconds ?? WAIT_DEFAULT_SECONDS)) * 1000;
   const deadline = Date.now() + budgetMs;
   const statusPath = `/api/generate/status/${encodeURIComponent(jobId)}`;
-  let last: HttpResult;
+  let last: HttpResult | undefined;
   for (;;) {
-    last = await request('GET', statusPath);
+    if (signal.aborted || Date.now() >= deadline) break;
+    last = await request('GET', statusPath, undefined, { signal, timeoutMs: Math.max(0, deadline - Date.now()) });
     if (!last.ok) return fromHttp(last);
     const status = (last.data as { status?: string } | undefined)?.status;
     if (status === 'succeeded' || status === 'failed' || status === 'cancelled') break;
     if (signal.aborted || Date.now() >= deadline) break;
     await sleep(Math.min(WAIT_POLL_MS, deadline - Date.now()), signal);
   }
+  // Budget/abort fired before any poll ever completed (an already-cancelled
+  // signal, or a budget under one poll's worth of time) — one unbounded,
+  // best-effort fetch so there is still something to report.
+  if (!last) last = await request('GET', statusPath);
+  if (!last.ok) return fromHttp(last);
   return { kind: 'ok', data: last.data };
 }
 
@@ -188,7 +212,7 @@ export async function genSong(songId: string): Promise<ToolOutcome> {
   const audioUrl = typeof song.audio_url === 'string' ? song.audio_url : undefined;
   const absoluteAudioUrl = audioUrl ? `${hotstepBaseUrl()}${audioUrl}` : undefined;
   const audioFilePath = audioUrl && audioUrl.startsWith('/audio/') && hotstepIsLoopback()
-    ? path.join(serverConfig.data.audioDir, audioUrl.slice('/audio/'.length))
+    ? path.join(AUDIO_DIR, audioUrl.slice('/audio/'.length))
     : undefined;
   return {
     kind: 'ok',
