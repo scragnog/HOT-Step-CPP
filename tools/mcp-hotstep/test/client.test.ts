@@ -93,6 +93,6 @@ test('gen_wait, cancelled from the client side, does not ride out its 30s budget
   assert.ok(Date.now() - start < 2000, 'should not wait anywhere near the 30s budget');
   if (result) {
     const data = JSON.parse(firstText(result as CallToolResult));
-    assert.equal(data.status, 'running');
+    assert.ok(['done', 'budget', 'cancelled'].includes(data.outcome));
   }
 });

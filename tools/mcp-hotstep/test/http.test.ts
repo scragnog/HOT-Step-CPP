@@ -12,6 +12,8 @@ import type { AddressInfo } from 'node:net';
 interface Fixture {
   loginCount: number;
   currentToken: string;
+  /** Delay before /api/auth/auto responds, for testing a slow/held login. */
+  loginDelayMs: number;
   /** Per-test route logic for everything except /api/auth/auto. Receives the
    *  parsed JSON body (or undefined) and must send the response itself. */
   route: (req: http.IncomingMessage, res: http.ServerResponse, body: unknown) => void;
@@ -21,6 +23,7 @@ interface Fixture {
 const fixture: Fixture = {
   loginCount: 0,
   currentToken: 'tok-0',
+  loginDelayMs: 0,
   route: (_req, res) => { res.writeHead(404).end('{}'); },
   generateCalls: [],
 };
@@ -53,8 +56,12 @@ before(async () => {
 
       if (req.url === '/api/auth/auto' && req.method === 'GET') {
         freshLogin();
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ user: { id: 'u1' }, token: fixture.currentToken }));
+        const respond = () => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ user: { id: 'u1' }, token: fixture.currentToken }));
+        };
+        if (fixture.loginDelayMs > 0) setTimeout(respond, fixture.loginDelayMs);
+        else respond();
         return;
       }
 
@@ -84,6 +91,7 @@ after(async () => {
 beforeEach(() => {
   httpMod.resetToken();
   fixture.generateCalls.length = 0;
+  fixture.loginDelayMs = 0;
   fixture.route = (_req, res) => { res.writeHead(404).end('{}'); };
 });
 
@@ -186,56 +194,72 @@ test('gen_submit rejects an operation the backend does not support, without call
 });
 
 // ── gen_wait ─────────────────────────────────────────────────────────────────
+//
+// "N requests" below always counts hits to the endpoint actually under test
+// in that scenario: the login attempt for the slow-login case (the status
+// endpoint is never reached), the status endpoint for the other three — not
+// a combined total, since every status poll is preceded by an incidental
+// login the first time a test's token is reset (see beforeEach).
 
-test('gen_wait returns the latest status once its budget runs out', { timeout: 5000 }, async () => {
-  fixture.route = (_req, res) => { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jobId: 'job-w', status: 'running' })); };
-  const outcome = await toolsMod.genWait('job-w', 1, new AbortController().signal);
-  assert.equal(outcome.kind, 'ok');
-  assert.equal((outcome as { data: { status: string } }).data.status, 'running');
-});
-
-test('gen_wait stops polling early when its signal is aborted, without cancelling the job', { timeout: 5000 }, async () => {
-  fixture.route = (_req, res) => { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jobId: 'job-w2', status: 'running' })); };
-  const ac = new AbortController();
-  const waitPromise = toolsMod.genWait('job-w2', 30, ac.signal);
-  setTimeout(() => ac.abort(), 50);
+test('gen_wait: a slow login does not blow the budget — outcome budget, no status, one request', { timeout: 5000 }, async () => {
+  fixture.loginDelayMs = 2200;
+  let statusCalls = 0;
+  fixture.route = (_req, res) => { statusCalls++; res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'running' })); };
+  const loginsBefore = fixture.loginCount;
   const start = Date.now();
-  const outcome = await waitPromise;
-  assert.ok(Date.now() - start < 2000, 'should return promptly on abort, not ride out the 30s budget');
-  assert.equal(outcome.kind, 'ok');
-  assert.equal((outcome as { data: { status: string } }).data.status, 'running');
-});
-
-test('gen_wait with a slow status endpoint does not issue one more poll once the budget is already spent', { timeout: 5000 }, async () => {
-  let calls = 0;
-  fixture.route = (_req, res) => {
-    calls++;
-    const respond = () => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jobId: 'job-slow', status: 'running' }));
-    if (calls === 1) respond(); else setTimeout(respond, 2200); // only reached if the bug regresses
-  };
-  const start = Date.now();
-  const outcome = await toolsMod.genWait('job-slow', 1, new AbortController().signal);
+  const outcome = await toolsMod.genWait('job-a', 1, new AbortController().signal);
   const elapsed = Date.now() - start;
-  assert.equal(outcome.kind, 'ok');
-  assert.ok(elapsed < 1500, `expected to return close to the 1s budget, took ${elapsed}ms`);
-  assert.equal(calls, 1, 'a second poll means the budget check after waking from sleep did not fire');
+  assert.ok(elapsed < 1300, `expected <1300ms, took ${elapsed}ms`);
+  assert.deepEqual(outcome, { kind: 'ok', data: { jobId: 'job-a', outcome: 'budget', status: null } });
+  assert.equal(fixture.loginCount - loginsBefore, 1, 'one login attempt');
+  assert.equal(statusCalls, 0, 'the status endpoint must never be reached while login is still pending');
 });
 
-test('gen_wait, aborted mid-sleep, does not issue one more poll after the signal fired', { timeout: 5000 }, async () => {
-  let calls = 0;
-  fixture.route = (_req, res) => {
-    calls++;
-    const respond = () => res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jobId: 'job-slow2', status: 'running' }));
-    if (calls === 1) respond(); else setTimeout(respond, 2200); // only reached if the bug regresses
-  };
+test('gen_wait: abort while the first status request is held open — outcome cancelled, no status, one request', { timeout: 5000 }, async () => {
+  let statusCalls = 0;
+  fixture.route = (_req, res) => { statusCalls++; /* held open: never responds */ void res; };
   const ac = new AbortController();
   setTimeout(() => ac.abort(), 50);
   const start = Date.now();
-  const outcome = await toolsMod.genWait('job-slow2', 30, ac.signal);
+  const outcome = await toolsMod.genWait('job-b', 30, ac.signal);
   const elapsed = Date.now() - start;
-  assert.equal(outcome.kind, 'ok');
-  assert.ok(elapsed < 1000, `expected to return promptly after abort, took ${elapsed}ms`);
-  assert.equal(calls, 1, 'a second poll means the abort check after waking from sleep did not fire');
+  assert.ok(elapsed < 300, `expected <300ms, took ${elapsed}ms`);
+  assert.deepEqual(outcome, { kind: 'ok', data: { jobId: 'job-b', outcome: 'cancelled', status: null } });
+  assert.equal(statusCalls, 1);
+});
+
+test('gen_wait: first status instant, second held open, abort 50ms into the second — outcome cancelled, status is the first response, two requests', { timeout: 5000 }, async () => {
+  let statusCalls = 0;
+  const ac = new AbortController();
+  fixture.route = (_req, res) => {
+    statusCalls++;
+    if (statusCalls === 1) {
+      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ status: 'running', seq: 1 }));
+    } else {
+      setTimeout(() => ac.abort(), 50); // abort only once the second request has actually started
+      // held open otherwise: never responds
+    }
+  };
+  const start = Date.now();
+  const outcome = await toolsMod.genWait('job-c', 30, ac.signal);
+  const elapsed = Date.now() - start;
+  assert.ok(elapsed < 3000, `expected well under the 30s budget, took ${elapsed}ms`);
+  assert.deepEqual(outcome, { kind: 'ok', data: { jobId: 'job-c', outcome: 'cancelled', status: { status: 'running', seq: 1 } } });
+  assert.equal(statusCalls, 2);
+});
+
+test('request() with a held-open response body and timeoutMs 500 returns status 0 instead of throwing', { timeout: 5000 }, async () => {
+  fixture.route = (req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.write('{"statu'); // headers + partial body sent, then held open — never calls res.end()
+    void req;
+  };
+  const start = Date.now();
+  const result = await httpMod.request('GET', '/api/generate/status/job-d', undefined, { timeoutMs: 500 });
+  const elapsed = Date.now() - start;
+  assert.ok(elapsed < 1000, `expected the 500ms timeout to bound this, took ${elapsed}ms`);
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 0);
 });
 
 // ── gen_cancel ───────────────────────────────────────────────────────────────

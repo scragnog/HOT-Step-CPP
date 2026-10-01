@@ -174,32 +174,37 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+export type GenWaitOutcome = 'done' | 'budget' | 'cancelled';
+
 /** A cancelled `signal` returns the latest known status and leaves the job
  *  running server-side — this never calls cancel on the caller's behalf.
  *  Budget and signal are checked right before EVERY poll, including the
- *  first, and each HTTP request is itself bounded by both (via http.ts's
- *  `signal`/`timeoutMs`), so neither a slow response nor waking from sleep
- *  at the deadline can start one more request than the budget allows. */
+ *  first, and each poll's own request is bounded by both the signal and the
+ *  remaining budget (http.ts's `signal`/`timeoutMs`): a request that is cut
+ *  short by either comes back as `status: 0`, never a thrown error, ends the
+ *  loop, and never overwrites the last status actually obtained — there is
+ *  no unbounded fallback fetch. A real HTTP failure (>=400) still surfaces
+ *  as `http_error`, same as every other tool. */
 export async function genWait(jobId: string, maxSeconds: number | undefined, signal: AbortSignal): Promise<ToolOutcome> {
   const budgetMs = Math.min(WAIT_MAX_SECONDS, Math.max(1, maxSeconds ?? WAIT_DEFAULT_SECONDS)) * 1000;
   const deadline = Date.now() + budgetMs;
   const statusPath = `/api/generate/status/${encodeURIComponent(jobId)}`;
-  let last: HttpResult | undefined;
+  let lastStatus: unknown = null;
+  let outcome: GenWaitOutcome = 'budget';
   for (;;) {
-    if (signal.aborted || Date.now() >= deadline) break;
-    last = await request('GET', statusPath, undefined, { signal, timeoutMs: Math.max(0, deadline - Date.now()) });
-    if (!last.ok) return fromHttp(last);
-    const status = (last.data as { status?: string } | undefined)?.status;
-    if (status === 'succeeded' || status === 'failed' || status === 'cancelled') break;
-    if (signal.aborted || Date.now() >= deadline) break;
+    if (signal.aborted) { outcome = 'cancelled'; break; }
+    if (Date.now() >= deadline) { outcome = 'budget'; break; }
+    const r = await request('GET', statusPath, undefined, { signal, timeoutMs: Math.max(0, deadline - Date.now()) });
+    if (r.status === 0) { outcome = signal.aborted ? 'cancelled' : 'budget'; break; }
+    if (!r.ok) return fromHttp(r);
+    lastStatus = r.data;
+    const status = (r.data as { status?: string } | undefined)?.status;
+    if (status === 'succeeded' || status === 'failed' || status === 'cancelled') { outcome = 'done'; break; }
+    if (signal.aborted) { outcome = 'cancelled'; break; }
+    if (Date.now() >= deadline) { outcome = 'budget'; break; }
     await sleep(Math.min(WAIT_POLL_MS, deadline - Date.now()), signal);
   }
-  // Budget/abort fired before any poll ever completed (an already-cancelled
-  // signal, or a budget under one poll's worth of time) — one unbounded,
-  // best-effort fetch so there is still something to report.
-  if (!last) last = await request('GET', statusPath);
-  if (!last.ok) return fromHttp(last);
-  return { kind: 'ok', data: last.data };
+  return { kind: 'ok', data: { jobId, outcome, status: lastStatus } };
 }
 
 // ── gen_song ─────────────────────────────────────────────────────────────────

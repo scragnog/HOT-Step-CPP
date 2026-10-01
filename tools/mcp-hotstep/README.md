@@ -117,9 +117,19 @@ your **MCP client's own request timeout raised to match** — the client will
 otherwise give up waiting on this call before the budget does, even though
 the job and the poll loop are both still fine.
 
+Returns `{ jobId, outcome, status }`:
+- `outcome` is `"done"` (reached a terminal state), `"budget"` (the time
+  budget ran out first), or `"cancelled"` (this tool call itself was
+  cancelled by the client).
+- `status` is the last status response actually obtained — or `null` if none
+  was, which happens when the budget/cancel fires before any poll completes
+  (e.g. a slow login, or an abort mid-request). A poll cut short by the
+  budget or the signal never fabricates a status and never overwrites the
+  last real one.
+
 If the tool call itself is cancelled from the client side, `gen_wait`
-returns the last known status and **leaves the job running** on the server —
-it never calls cancel on your behalf. Use `gen_cancel` for that.
+**leaves the job running** on the server — it never calls cancel on your
+behalf. Use `gen_cancel` for that.
 
 ### `gen_song`
 `{ songId }` → `GET /api/songs/:id`. Returns the song's metadata plus

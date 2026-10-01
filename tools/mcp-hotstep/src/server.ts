@@ -98,7 +98,8 @@ export function createServer(): McpServer {
   server.tool(
     'gen_wait',
     `Poll a generation job's status until it reaches a terminal state (succeeded/failed/cancelled) or the time budget ends, whichever comes first. Default budget ${WAIT_DEFAULT_SECONDS}s, hard max ${WAIT_MAX_SECONDS}s. ` +
-      'If this tool call itself is cancelled by the client, it returns the last known status and leaves the job running on the server — it never cancels the job for you (use gen_cancel for that). ' +
+      'Returns { jobId, outcome, status }: `outcome` is "done" (reached a terminal state), "budget" (the time budget ran out first), or "cancelled" (this tool call itself was cancelled by the client). `status` is the last status response actually obtained, or null if none was — a slow or interrupted poll never fabricates one. ' +
+      'If this tool call itself is cancelled by the client, it leaves the job running on the server — it never cancels the job for you (use gen_cancel for that). ' +
       `A budget above ${WAIT_DEFAULT_SECONDS}s needs the MCP client's own request timeout raised to match, or the client will give up on this call before the budget does.`,
     {
       jobId: z.string(),
