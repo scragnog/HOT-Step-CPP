@@ -142,6 +142,11 @@ style + lyrics (+ optional ABC) -> tokenizer and prompt assembly (yue2-tokenizer
   -> stitch and clamp -> 16-bit WAV (yue2-pipeline.h, yue2-job.h)
 ```
 
+YuE2 loads its weights itself, outside `model-store.h`. Under the default policy a
+YuE2 job first evicts every unreferenced store module (`store_evict_all`), as MM3 does,
+because the store keeps 0-byte ORT entries such as the SA3 refiner resident after use
+and their real VRAM would make the YuE2 load run out of memory (#160, #195).
+
 The AR and NAR halves live in one `yue2-lm-<type>.gguf` and are resident together;
 the VAE is a separate `yue2-vae-{standard,legacy}-<type>.gguf` (`yue2-model.h`). The
 NAR stage can use Lua solvers and schedulers through `infer_method` and

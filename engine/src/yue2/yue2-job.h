@@ -351,6 +351,19 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req_in) {
     const bool evict_strict = !g_keep_loaded;
     auto       req          = std::make_shared<Yue2Request>(std::move(req_in));
     req->songs_dropped      = &job->songs_dropped;
+    // YuE2 loads through its own WeightCtx, outside the ModelStore, so the
+    // store never evicts for it. Under STRICT the store still parks 0-byte
+    // ORT entries (SA3-Refine-ORT) after use, and their real VRAM makes the
+    // AR load OOM (#160, #195). Clear the store first, as mm3-job.h does;
+    // entries still referenced (a refine in flight) are skipped.
+    if (evict_strict && g_store) {
+        int still = 0;
+        store_evict_all(g_store, &still);
+        if (still > 0) {
+            fprintf(stderr, "[YuE2-Job] %s: %d store module(s) still in use, YuE2 load may not fit\n",
+                    job->id.c_str(), still);
+        }
+    }
     if (!evict_strict &&
         !yue2_load_parts(&g_yue2, /*want_lm=*/true, /*want_vae=*/!req->plan_only && !req->semantic_only, req->vae_variant,
                          /*want_encoder=*/false, &err)) {
