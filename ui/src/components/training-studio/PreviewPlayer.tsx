@@ -9,22 +9,45 @@ import { Download, Pause, Play, SkipBack } from 'lucide-react';
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
+// Only the player last started holds a connection. Chrome keeps a paused
+// <audio>'s connection open while it buffers, and with six per host a few
+// played takes stall every other request; the rest drop their src and keep
+// their position.
+const RELEASE = 'preview-player-release';
+
 export const PreviewPlayer: React.FC<{ src: string; label?: string; sublabel?: string; downloadName?: string }> = ({ src, label, sublabel, downloadName }) => {
   const audio = useRef<HTMLAudioElement | null>(null);
+  const resumeAt = useRef(0);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   useEffect(() => {
     const a = audio.current; if (!a) return;
-    const onTime = () => setTime(a.currentTime);
-    const onMeta = () => setDuration(Number.isFinite(a.duration) ? a.duration : 0);
-    const onPlay = () => setPlaying(true), onPause = () => setPlaying(false);
+    resumeAt.current = 0;
+    const loaded =() => a.hasAttribute('src');
+    const release = () => { if (!loaded()) return; resumeAt.current = a.currentTime; a.pause(); a.removeAttribute('src'); a.load(); };
+    const onTime = () => { if (loaded()) setTime(a.currentTime); };
+    const onMeta = () => { if (Number.isFinite(a.duration)) setDuration(a.duration); };
+    const onPlay = () => { setPlaying(true); window.dispatchEvent(new CustomEvent(RELEASE, { detail: a })); };
+    const onPause = () => setPlaying(false);
+    const onRelease = (e: Event) => { if ((e as CustomEvent).detail !== a) release(); };
     a.addEventListener('timeupdate', onTime); a.addEventListener('loadedmetadata', onMeta); a.addEventListener('durationchange', onMeta);
     a.addEventListener('play', onPlay); a.addEventListener('pause', onPause); a.addEventListener('ended', onPause);
-    return () => { a.removeEventListener('timeupdate', onTime); a.removeEventListener('loadedmetadata', onMeta); a.removeEventListener('durationchange', onMeta); a.removeEventListener('play', onPlay); a.removeEventListener('pause', onPause); a.removeEventListener('ended', onPause); };
+    window.addEventListener(RELEASE, onRelease);
+    return () => { a.removeEventListener('timeupdate', onTime); a.removeEventListener('loadedmetadata', onMeta); a.removeEventListener('durationchange', onMeta); a.removeEventListener('play', onPlay); a.removeEventListener('pause', onPause); a.removeEventListener('ended', onPause); window.removeEventListener(RELEASE, onRelease); release(); };
   }, [src]);
-  const seek = (t: number) => { const a = audio.current; if (!a) return; a.currentTime = Math.max(0, Math.min(duration || 0, t)); setTime(a.currentTime); };
-  const toggle = () => { const a = audio.current; if (!a) return; if (a.paused) void a.play(); else a.pause(); };
+  const seek = (t: number) => {
+    const a = audio.current; if (!a) return;
+    const to = Math.max(0, Math.min(duration || 0, t));
+    if (a.hasAttribute('src')) a.currentTime = to; else resumeAt.current = to;
+    setTime(to);
+  };
+  const toggle = () => {
+    const a = audio.current; if (!a) return;
+    if (!a.paused) { a.pause(); return; }
+    if (!a.hasAttribute('src')) { a.src = src; a.currentTime = resumeAt.current; }
+    void a.play();
+  };
   const frac = duration > 0 ? time / duration : 0;
   const jumps = duration > 0 ? [0.5, 0.67, 0.85].map(f => ({ f, t: duration * f })) : [];
   return (
