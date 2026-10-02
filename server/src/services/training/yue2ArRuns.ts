@@ -35,7 +35,7 @@ import {
   YUE2_AR_ADAPTER_STEM, yue2ArAdapterRoot,
   type ResolvedYue2ArTrainOptions,
 } from './yue2ArTrain.js';
-import { readSafetensorsMeta, type Yue2AdapterMeta } from './yue2Runs.js';
+import { readSafetensorsMeta, trailingLossMean, type Yue2AdapterMeta } from './yue2Runs.js';
 import { type Yue2CacheSummary } from './yue2Train.js';
 import type { TrainingAdapterHit } from './types.js';
 
@@ -164,6 +164,8 @@ interface LogFacts {
   totalSteps: number;
   /** Logged step losses used for the checkpoint ladder's trailing mean. */
   stepLosses: Map<number, number>;
+  /** step -> minted_val, the held-out token-grammar eval. */
+  evals: Map<number, number>;
   best?: { step: number; loss: number };
   ending?: 'done' | 'fatal';
   fatalMessage?: string;
@@ -175,7 +177,7 @@ interface LogFacts {
  *  emits the same vocabulary for both YuE2 trainers, and an unknown `type` is
  *  ignored so it can grow. */
 function readLog(dir: string): LogFacts {
-  const facts: LogFacts = { lastStep: 0, totalSteps: 0, stepLosses: new Map() };
+  const facts: LogFacts = { lastStep: 0, totalSteps: 0, stepLosses: new Map(), evals: new Map() };
   let text = '';
   try {
     text = fs.readFileSync(path.join(dir, 'train-log.jsonl'), 'utf-8');
@@ -215,6 +217,12 @@ function readLog(dir: string): LogFacts {
         }
         break;
       }
+      case 'eval': {
+        const s = num('step');
+        const v = num('mintedVal');
+        if (s !== undefined && v !== undefined) facts.evals.set(s, v);
+        break;
+      }
       case 'fatal':
         facts.ending = 'fatal';
         facts.fatalMessage = typeof ev.message === 'string' ? ev.message : 'ace-train reported a fatal error';
@@ -246,6 +254,8 @@ export interface Yue2ArRunCheckpoint {
   /** True for `<stem>.safetensors` — the end of the run, not a snapshot. */
   final: boolean;
   loss?: number;
+  /** minted_val measured at this exact step, when an eval landed on it. */
+  valLoss?: number;
   meta?: Yue2ArAdapterMeta;
 }
 
@@ -327,13 +337,6 @@ function dirSize(dir: string): number {
  *  YUE2_AR_ADAPTER_STEM only. A NAR run trained from the same dataset can share
  *  this root, and listing its files here would offer the picker adapters the
  *  loader refuses on `format`. */
-function trailingLossMean(losses: Map<number, number>, step: number): number | undefined {
-  if (step === Number.MAX_SAFE_INTEGER) return undefined;
-  const recent = [...losses].filter(([s]) => s <= step)
-    .sort(([a], [b]) => b - a).slice(0, 20);
-  return recent.length ? recent.reduce((sum, [, loss]) => sum + loss, 0) / recent.length : undefined;
-}
-
 export function yue2ArCheckpointsIn(dir: string, losses: Map<number, number>,
                                     configuredSteps = 0): Yue2ArRunCheckpoint[] {
   const out: Yue2ArRunCheckpoint[] = [];
@@ -388,6 +391,7 @@ export function readYue2ArRun(dir: string): Yue2ArRunSummary | null {
     if (checkpoint.final) {
       checkpoint.loss = trailingLossMean(facts.stepLosses, checkpoint.step);
     }
+    checkpoint.valLoss = facts.evals.get(checkpoint.step);
   }
   const statePath = yue2ArResumeStatePath(dir);
   let stateStat: fs.Stats | null = null;

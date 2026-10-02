@@ -853,7 +853,7 @@ interface Yue2CataloguedRun {
   rank?: number;
   checkpoints: ReadonlyArray<{
     step: number; path: string; bytes: number; final: boolean;
-    loss?: number; meta?: Yue2AdapterMeta;
+    loss?: number; valLoss?: number; meta?: Yue2AdapterMeta;
   }>;
 }
 
@@ -908,6 +908,7 @@ function yue2LmAdapterCatalogue(): {
         dataset: run.datasetName,
         final: ckpt.final,
         loss: ckpt.loss,
+        valLoss: ckpt.valLoss,
         styleTemplate: ckpt.meta?.styleTemplate,
         captionDropout: ckpt.meta?.captionDropout,
       };

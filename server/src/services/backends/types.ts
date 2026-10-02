@@ -202,7 +202,10 @@ export interface BackendModels {
     dataset?: string;
     /** The run's final export rather than a mid-run snapshot. */
     final?: boolean;
+    /** Mean of the last 20 logged step losses up to this checkpoint. */
     loss?: number;
+    /** Held-out minted_val at this checkpoint's step, AR only. */
+    valLoss?: number;
   }>;
   defaults?: Record<string, unknown>;
   /** Optional per-bucket display metadata (size on disk, filename), keyed

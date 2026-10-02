@@ -208,10 +208,9 @@ interface LogFacts {
   init?: Record<string, unknown>;
   lastStep: number;
   lastLoss?: number;
-  lastLossStep?: number;
   totalSteps: number;
-  /** step -> loss, for the checkpoint ladder. */
-  milestones: Map<number, number>;
+  /** step -> logged loss, for the checkpoint ladder's trailing mean. */
+  stepLosses: Map<number, number>;
   best?: { step: number; loss: number };
   ending?: 'done' | 'fatal';
   fatalMessage?: string;
@@ -223,7 +222,7 @@ interface LogFacts {
  *  per line, in the same shape mm3's engine emits — unknown `type` values are
  *  ignored so the vocabulary can grow without breaking old runs. */
 function readLog(dir: string): LogFacts {
-  const facts: LogFacts = { lastStep: 0, totalSteps: 0, milestones: new Map() };
+  const facts: LogFacts = { lastStep: 0, totalSteps: 0, stepLosses: new Map() };
   let text = '';
   try {
     text = fs.readFileSync(path.join(dir, 'train-log.jsonl'), 'utf-8');
@@ -248,8 +247,8 @@ function readLog(dir: string): LogFacts {
         if (s !== undefined) facts.lastStep = Math.max(facts.lastStep, s);
         const loss = num('loss');
         if (loss !== undefined) {
+          if (s !== undefined) facts.stepLosses.set(s, loss);
           facts.lastLoss = loss;
-          facts.lastLossStep = s;
           if (!facts.best || loss < facts.best.loss) facts.best = { step: s ?? facts.lastStep, loss };
         }
         facts.totalSteps = num('totalSteps') ?? facts.totalSteps;
@@ -258,7 +257,6 @@ function readLog(dir: string): LogFacts {
       case 'milestone': {
         const s = num('step');
         if (s !== undefined) {
-          facts.milestones.set(s, num('loss') ?? NaN);
           facts.lastStep = Math.max(facts.lastStep, s);
         }
         break;
@@ -379,7 +377,18 @@ function dirSize(dir: string): number {
  *  trained by hand with a different `--name` will show no checkpoints rather
  *  than the wrong ones, which is the safer failure: the alternative is
  *  matching any `*.safetensors` and listing files the picker cannot load. */
-export function yue2CheckpointsIn(dir: string, milestones: Map<number, number>,
+/** Mean of the last 20 logged step losses up to `step`. One step's loss is
+ *  whichever batch landed on it, and with artist dropout that swings by more
+ *  than the run ever improves; a snapshot labelled with it reads as divergence
+ *  when it is noise. */
+export function trailingLossMean(losses: Map<number, number>, step: number): number | undefined {
+  if (step === Number.MAX_SAFE_INTEGER) return undefined;
+  const recent = [...losses].filter(([s]) => s <= step)
+    .sort(([a], [b]) => b - a).slice(0, 20);
+  return recent.length ? recent.reduce((sum, [, loss]) => sum + loss, 0) / recent.length : undefined;
+}
+
+export function yue2CheckpointsIn(dir: string, losses: Map<number, number>,
                                   configuredSteps = 0): Yue2RunCheckpoint[] {
   const out: Yue2RunCheckpoint[] = [];
   let entries: fs.Dirent[];
@@ -397,7 +406,7 @@ export function yue2CheckpointsIn(dir: string, milestones: Map<number, number>,
     const m = snap.exec(e.name);
     if (m) {
       const step = Number(m[1]);
-      const loss = milestones.get(step);
+      const loss = trailingLossMean(losses, step);
       out.push({
         step, name: e.name, path: full, bytes, final: false,
         loss: Number.isFinite(loss as number) ? loss : undefined,
@@ -427,13 +436,10 @@ export function readYue2Run(dir: string): Yue2RunSummary | null {
   const manifest = readYue2RunManifest(dir);
   const facts    = readLog(dir);
   const configuredSteps = manifest?.options.steps ?? facts.totalSteps ?? 0;
-  const ckpts    = yue2CheckpointsIn(dir, facts.milestones, configuredSteps);
+  const ckpts    = yue2CheckpointsIn(dir, facts.stepLosses, configuredSteps);
   for (const checkpoint of ckpts) {
-    // The final export has no milestone event. Use its own last-step loss,
-    // never the run-wide mean or the loss of an earlier checkpoint.
-    if (checkpoint.final && checkpoint.step === facts.lastLossStep && Number.isFinite(facts.lastLoss)) {
-      checkpoint.loss = facts.lastLoss;
-    }
+    // Final exports are not matched by the snapshot pattern; same window.
+    if (checkpoint.final) checkpoint.loss = trailingLossMean(facts.stepLosses, checkpoint.step);
   }
   const statePath = yue2ResumeStatePath(dir);
   let stateStat: fs.Stats | null = null;

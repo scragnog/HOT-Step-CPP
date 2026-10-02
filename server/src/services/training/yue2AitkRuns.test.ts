@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 import { checkpointRecords } from './yue2AitkRuns.js';
 import { readYue2ArRun } from './yue2ArRuns.js';
+import { readYue2Run } from './yue2Runs.js';
 
 test('AITK checkpoint discovery exposes combined and native AR/NAR outputs', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-runs-'));
@@ -61,8 +62,27 @@ test('AR checkpoint mean includes a spike only as one of the last 20 logged step
         type: 'step', step: i + 1, loss: i === 24 ? 21 : 1,
       })),
       JSON.stringify({ type: 'milestone', step: 25, loss: 21 }),
+      JSON.stringify({ type: 'eval', step: 25, mintedVal: 3.5 }),
     ].join('\n'));
     const run = readYue2ArRun(root);
+    assert.equal(run?.checkpoints[0]?.loss, 2);
+    assert.equal(run?.checkpoints[0]?.valLoss, 3.5);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('NAR checkpoint loss is the same trailing 20-step mean', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-nar-loss-'));
+  try {
+    fs.writeFileSync(path.join(root, 'yue2_nar_lora_step25.safetensors'), 'x');
+    fs.writeFileSync(path.join(root, 'train-log.jsonl'), [
+      ...Array.from({ length: 25 }, (_, i) => JSON.stringify({
+        type: 'step', step: i + 1, loss: i === 24 ? 21 : 1,
+      })),
+      JSON.stringify({ type: 'milestone', step: 25, loss: 21 }),
+    ].join('\n'));
+    const run = readYue2Run(root);
     assert.equal(run?.checkpoints[0]?.loss, 2);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

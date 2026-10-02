@@ -210,7 +210,10 @@ export interface BackendModelCatalogue {
     bytes?: number;
     dataset?: string;
     final?: boolean;
+    /** Mean of the last 20 logged step losses up to this checkpoint. */
     loss?: number;
+    /** Held-out minted_val at this checkpoint's step, AR only. */
+    valLoss?: number;
   }>;
   /** What is actually in force right now, per bucket. */
   defaults?: Record<string, unknown>;
