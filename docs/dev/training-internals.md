@@ -4,6 +4,8 @@
 
 ## YuE2 joint training
 
+The joint run index reconciles with the configured `yue2-joint-adapters` folder at startup and when its folder set changes. Missing finished runs leave the index. Copied folders enter from `run.json`, or from a unique dataset trigger in the folder name for older runs. Every index write also saves the current record in the run folder; an unavailable adapters root leaves the index alone.
+
 The native CUDA joint trainer follows the YuE2 recipe. Each step trains
 both AR and NAR adapters, refreshes detached AR conditioning, clips the combined
 gradients and makes one AdamW8bit update. With a whole-song decoder (`--nar-crop-frames 0`)

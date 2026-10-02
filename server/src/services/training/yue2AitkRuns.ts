@@ -8,6 +8,8 @@ import { createHash } from 'crypto';
 import { trainingBaseDir } from './paths.js';
 import { archiveYue2TrainLogs } from './datasetProfile.js';
 import { runStamp } from './adapterLayout.js';
+import { config } from '../../config.js';
+import { listDatasets } from './datasetsRepo.js';
 
 export function yue2JointOutputDirectory(adaptersRoot: string, trigger: string, when = new Date()): string {
   const name = trigger.trim().replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^[. ]+|[. ]+$/g, '').slice(0, 120) || 'dataset';
@@ -17,6 +19,13 @@ export function yue2JointOutputDirectory(adaptersRoot: string, trigger: string, 
 const INDEX = path.join(trainingBaseDir, 'yue2-aitk-runs.json');
 const MAX_RECORDS = 256;
 const MAX_INDEX_BYTES = 4 * 1024 * 1024;
+const warnedRunFiles = new Set<string>();
+
+function warnRunFile(output: string, err: unknown): void {
+  if (warnedRunFiles.has(output)) return;
+  warnedRunFiles.add(output);
+  console.warn(`[YuE2] Could not write run.json in ${output}: ${String(err)}`);
+}
 
 export interface Yue2AitkCheckpointRecord {
   step: number;
@@ -113,6 +122,10 @@ function writeIndex(records: Yue2AitkRunRecord[]): void {
   const tmp = `${INDEX}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(records.slice(-MAX_RECORDS), null, 2), 'utf8');
   fs.renameSync(tmp, INDEX);
+  for (const record of records) {
+    try { fs.writeFileSync(path.join(record.output, 'run.json'), JSON.stringify(record, null, 2), 'utf8'); }
+    catch (err) { warnRunFile(record.output, err); }
+  }
 }
 
 export function aitkRunIndexPath(): string { return INDEX; }
@@ -222,6 +235,100 @@ export function moveYue2AitkRun(jobId: string, newOutput: string): void {
   writeIndex(readIndex().map(r => r.jobId === jobId ? { ...r, output: target, updatedAt: Date.now() } : r));
 }
 
+const skippedFolders = new Set<string>();
+let lastFolderSet: string | null = null;
+let lastDatasetSet: string | null = null;
+
+function datasetSetForSkipped(): string | null {
+  if (!skippedFolders.size) return null;
+  try { return listDatasets().map(ds => `${ds.id}:${ds.slug}:${ds.customTag}`).join('\n'); }
+  catch { return null; }
+}
+
+function jointFolders(): string[] | null {
+  const root = path.join(config.aceServer.adapters, 'yue2-joint-adapters');
+  try {
+    const direct = fs.readdirSync(root, { withFileTypes: true });
+    const refined = direct.some(e => e.isDirectory() && e.name === 'refined')
+      ? fs.readdirSync(path.join(root, 'refined'), { withFileTypes: true }) : [];
+    return [
+      ...direct.filter(e => e.isDirectory() && e.name !== 'refined').map(e => path.join(root, e.name)),
+      ...refined.filter(e => e.isDirectory()).map(e => path.join(root, 'refined', e.name)),
+    ].sort();
+  } catch { return null; } // An unavailable adapter drive must not erase the index.
+}
+
+function inferredDataset(output: string): { id: string; slug: string } | null {
+  const match = /^(.*)_\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d$/.exec(path.basename(output));
+  if (!match) return null;
+  const matches = listDatasets().filter(ds => {
+    const trigger = ds.customTag || ds.slug;
+    const folder = path.basename(yue2JointOutputDirectory(config.aceServer.adapters, trigger));
+    return folder.slice(0, -20) === match[1];
+  });
+  return matches.length === 1 ? { id: matches[0].id, slug: matches[0].slug } : null;
+}
+
+function importedRun(output: string): Yue2AitkRunRecord | null {
+  const file = path.join(output, 'run.json');
+  if (fs.existsSync(file)) {
+    try {
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
+      if (!isRunRecord(saved)) throw new Error('invalid run record');
+      return { ...saved, output, status: saved.status === 'running' || saved.status === 'interrupted' ? 'done' : saved.status,
+        checkpoints: checkpointRecords(output) };
+    } catch (err) {
+      if (!skippedFolders.has(output)) console.warn(`[YuE2] Skipping ${output}: ${String(err)}`);
+      skippedFolders.add(output);
+      return null;
+    }
+  }
+  const dataset = inferredDataset(output);
+  if (!dataset) {
+    if (!skippedFolders.has(output)) console.warn(`[YuE2] Skipping unrecognised joint run folder ${output}`);
+    skippedFolders.add(output);
+    return null;
+  }
+  const checkpoints = checkpointRecords(output);
+  if (!checkpoints.some(c => c.arPath && c.narPath)) return null;
+  const stamp = fs.statSync(output).mtimeMs;
+  return { version: 1, jobId: `import-${createHash('sha256').update(path.resolve(output).toLowerCase()).digest('hex').slice(0, 24)}`,
+    datasetId: dataset.id, datasetSlug: dataset.slug, method: 'aitk', output,
+    options: checkpoints.some(c => c.rung) ? {} : { method: 'base-matched' }, status: 'done',
+    createdAt: stamp, updatedAt: stamp, checkpoints };
+}
+
+function reconcileFromDisk(force = false): void {
+  const folders = jointFolders();
+  if (!folders) return;
+  for (const skipped of skippedFolders) if (!folders.includes(skipped)) skippedFolders.delete(skipped);
+  const folderSet = folders.join('\n');
+  const datasetSet = datasetSetForSkipped();
+  if (!force && folderSet === lastFolderSet && datasetSet === lastDatasetSet) return;
+  const index = readIndex();
+  const onDisk = new Set(folders.map(p => path.resolve(p).toLowerCase()));
+  const retained = index.filter(r => r.status === 'running' || r.status === 'interrupted'
+    || onDisk.has(path.resolve(r.output).toLowerCase()) || fs.existsSync(r.output));
+  const known = new Set(retained.map(r => path.resolve(r.output).toLowerCase()));
+  const jobs = new Set(retained.map(r => r.jobId));
+  for (const folder of folders) {
+    if (known.has(path.resolve(folder).toLowerCase())) continue;
+    try {
+      const run = importedRun(folder);
+      if (!run || jobs.has(run.jobId)) continue;
+      skippedFolders.delete(folder);
+      retained.push(run);
+      jobs.add(run.jobId);
+    } catch (err) {
+      if (!skippedFolders.has(folder)) console.warn(`[YuE2] Skipping ${folder}: ${String(err)}`);
+      skippedFolders.add(folder);
+    }
+  }
+  if (retained.length !== index.length || retained.some((r, i) => r !== index[i])) writeIndex(retained);
+  lastFolderSet = folderSet;
+  lastDatasetSet = datasetSetForSkipped();
+}
+
 /** At server start nothing is training, so every 'running' entry was killed
  *  with the previous process: mark it interrupted rather than lie forever. */
 export function reconcileYue2AitkRunsAtStartup(): number {
@@ -229,16 +336,17 @@ export function reconcileYue2AitkRunsAtStartup(): number {
     const index = readIndex();
     const stale = index.filter(r => r.status === 'running');
     if (stale.length) writeIndex(index.map(r => r.status === 'running' ? { ...r, status: 'interrupted' as const, updatedAt: Date.now() } : r));
+    reconcileFromDisk(true);
     return stale.length;
   } catch { return 0; }
 }
-reconcileYue2AitkRunsAtStartup();
 
 /** Per dataset: the newest joint run holding a checkpoint with both native
  *  AR and NAR weights. One index read for the whole list, and only two stats
  *  per checkpoint dir (no train.jsonl or meters parse) so the dataset grid can
  *  call it on every list request. */
 export function findYue2JointAdaptersFor(rows: Array<{ id: string; slug: string }>): Map<string, { dir: string; trainedAt: string }> {
+  reconcileFromDisk();
   const out = new Map<string, { dir: string; trainedAt: string }>();
   const bySlug = new Map(rows.map(r => [r.slug, r.id]));
   const ids = new Set(rows.map(r => r.id));
@@ -282,6 +390,7 @@ export function setYue2RunFinished(output: string, pick: Omit<Yue2FinishedPick, 
 }
 
 export function listYue2AitkRuns(datasetId: string, datasetSlug?: string): Yue2AitkRunRecord[] {
+  reconcileFromDisk();
   const index = readIndex();
   let changed = false;
   const runs = index.filter(r => r.datasetId === datasetId || (!!datasetSlug && r.datasetSlug === datasetSlug))
@@ -345,6 +454,7 @@ function rungsOf(run: Yue2AitkRunRecord, checkpoints: Yue2AitkCheckpointRecord[]
  * index and checkpoint scanner as Training Studio rather than walking a second
  * directory tree. */
 export function listAllYue2AitkRuns(): Yue2AitkRunRecord[] {
+  reconcileFromDisk();
   return readIndex()
     .map(r => ({ ...r, checkpoints: checkpointRecords(r.output) }))
     .sort((a, b) => b.updatedAt - a.updatedAt);

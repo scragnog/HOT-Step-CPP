@@ -104,7 +104,7 @@ test('AITK run catalogue writes and rereads atomically in an isolated training r
       "if (!fs.existsSync(aitkRunIndexPath())) throw new Error('catalogue missing');",
     ].join('');
     execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
-      cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, TRAINING_DIR: root }, stdio: 'pipe',
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, TRAINING_DIR: root, ACESTEPCPP_ADAPTERS: path.join(root, 'adapters') }, stdio: 'pipe',
     });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -130,7 +130,7 @@ test('moving a run renames its output directory and rewrites the index in place'
       "if (!refused) throw new Error('moving onto an existing path should have been refused');",
     ].join('');
     execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
-      cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, TRAINING_DIR: root }, stdio: 'pipe',
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, TRAINING_DIR: root, ACESTEPCPP_ADAPTERS: path.join(root, 'adapters') }, stdio: 'pipe',
     });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -154,7 +154,43 @@ test('a run folder moved by hand into refined/ is found again by the index', () 
       "if (!jointRunForAdapter(path.join(target, 'checkpoint-step9', 'native-ar.safetensors'))) throw new Error('adapter under refined/ not resolved to its run');",
     ].join('');
     execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
-      cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, TRAINING_DIR: root }, stdio: 'pipe',
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, TRAINING_DIR: root, ACESTEPCPP_ADAPTERS: path.join(root, 'adapters') }, stdio: 'pipe',
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('joint catalogue reconciles copied folders, stale records and active runs', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-reconcile-'));
+  try {
+    const script = [
+      "import fs from 'node:fs'; import path from 'node:path'; import assert from 'node:assert/strict';",
+      "import { initDb } from './src/db/database.js'; import { insertDataset } from './src/services/training/datasetsRepo.js';",
+      "import { recordYue2AitkRun, listAllYue2AitkRuns, findYue2JointAdaptersFor, reconcileYue2AitkRunsAtStartup, aitkRunIndexPath } from './src/services/training/yue2AitkRuns.js';",
+      "initDb(); const root = path.join(process.env.ACESTEPCPP_ADAPTERS, 'yue2-joint-adapters'); fs.mkdirSync(root, { recursive: true });",
+      "const now = new Date().toISOString();",
+      "function dataset(id, tag) { insertDataset({ id, slug: id, name: id, sourceDir: path.join(process.env.TRAINING_DIR, id), recursive: true, customTag: tag, tagPosition: 'prepend', genreRatio: 0, defaultArtist: '', defaultAlbum: '', defaultGenre: '', defaultLanguage: '', sampleCount: 0, labeledCount: 0, excludedCount: 0, status: 'draft', builtAt: '', datasetJsonPath: '', albumName: '', createdAt: now, updatedAt: now }); }",
+      "dataset('a', 'alpha'); dataset('b', 'beta'); dataset('c', 'shared'); dataset('d', 'shared');",
+      "function folder(name) { const out = path.join(root, name + '_2026-10-02_12-00-00'); const ckpt = path.join(out, 'checkpoint-step10'); fs.mkdirSync(ckpt, { recursive: true }); fs.writeFileSync(path.join(ckpt, 'native-ar.safetensors'), 'x'); fs.writeFileSync(path.join(ckpt, 'native-nar.safetensors'), 'x'); return out; }",
+      "const plain = folder('alpha'); const copied = folder('beta'); folder('shared'); folder('unknown');",
+      "const record = (jobId, datasetId, output, status = 'done') => ({ version: 1, jobId, datasetId, datasetSlug: datasetId, method: 'aitk', output, options: { method: 'base-matched' }, status, createdAt: 1, updatedAt: 2, checkpoints: [] });",
+      "fs.writeFileSync(path.join(copied, 'run.json'), JSON.stringify(record('remote-job', 'b', 'Z:/remote/run', 'running')));",
+      "const missing = path.join(root, 'missing_2026-10-02_12-00-00'); recordYue2AitkRun(record('stale', 'a', missing)); recordYue2AitkRun(record('active', 'a', path.join(root, 'active'), 'running')); recordYue2AitkRun(record('paused', 'a', path.join(root, 'paused'), 'interrupted'));",
+      "reconcileYue2AitkRunsAtStartup(); const runs = listAllYue2AitkRuns();",
+      "assert.equal(runs.some(r => r.jobId === 'stale'), false); assert.equal(runs.find(r => r.jobId === 'active')?.status, 'interrupted'); assert.ok(runs.some(r => r.jobId === 'paused'));",
+      "assert.equal(runs.find(r => r.jobId === 'remote-job')?.output, copied); assert.equal(runs.find(r => r.jobId === 'remote-job')?.status, 'done'); assert.equal(JSON.parse(fs.readFileSync(path.join(copied, 'run.json'))).output, copied);",
+      "assert.equal(runs.filter(r => r.datasetId === 'a' && r.output === plain).length, 1); assert.equal(runs.some(r => r.datasetId === 'c' || r.datasetId === 'd'), false);",
+      "assert.equal(JSON.parse(fs.readFileSync(aitkRunIndexPath())).length, runs.length);",
+      "dataset('e', 'unknown'); assert.ok(findYue2JointAdaptersFor([{ id: 'e', slug: 'e' }]).has('e'), 'a newly added dataset resolves an unchanged folder set');",
+      "const linked = findYue2JointAdaptersFor([{ id: 'a', slug: 'a' }, { id: 'b', slug: 'b' }]); assert.ok(linked.has('a')); assert.ok(linked.has('b'));",
+      "fs.rmSync(plain, { recursive: true }); assert.equal(findYue2JointAdaptersFor([{ id: 'a', slug: 'a' }]).has('a'), false);",
+      "const live = folder('live'); recordYue2AitkRun(record('live-job', 'a', live, 'running')); recordYue2AitkRun(record('live-job', 'a', live, 'done')); assert.equal(JSON.parse(fs.readFileSync(path.join(live, 'run.json'))).status, 'done');",
+    ].join('\n');
+    execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)),
+      env: { ...process.env, DATA_DIR: path.join(root, 'data'), TRAINING_DIR: path.join(root, 'training'), ACESTEPCPP_ADAPTERS: path.join(root, 'adapters') },
+      stdio: 'pipe',
     });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

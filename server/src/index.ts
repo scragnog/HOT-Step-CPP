@@ -45,6 +45,7 @@ import midiStudioRoutes from './routes/midiStudio.js';
 import trainingRoutes from './routes/training.js';
 import workerRoutes, { workerRouter } from './routes/workers.js';
 import { workerTokenGate } from './services/training/trainingWorkers.js';
+import { reconcileYue2AitkRunsAtStartup } from './services/training/yue2AitkRuns.js';
 import backendsRoutes from './routes/backends.js';
 import audioRoutes from './routes/audio.js';
 
@@ -63,6 +64,7 @@ console.log(`[Logger] Session logs: ${logDir}`);
 
 // Initialize databases
 initDb();
+reconcileYue2AitkRunsAtStartup();
 // lireek tables are created in initDb() — no separate init
 
 // Create Express app
@@ -462,4 +464,3 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (err) => {
   console.error('[Server] Unhandled rejection:', err);
 });
-
