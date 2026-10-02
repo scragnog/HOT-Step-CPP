@@ -9,6 +9,7 @@ import { Yue2LadderReview } from './Yue2LadderReview';
 import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
+import { usePersistedState } from '../../hooks/usePersistedState';
 import {
   cancelJob,
   captionMissingYue2,
@@ -463,6 +464,7 @@ function isPrepareJob(job: TrainingJobSummary, datasetId: string): boolean {
 
 export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: string; cursorReady?: boolean; lyricTiming: boolean; onLyricTimingChange: (value: boolean) => void; onTimingLockedChange?: (locked: boolean) => void; exposeStart?: (fn: () => Promise<string | null>) => void }> = ({ datasetId, legacyManifest, cursorReady = false, lyricTiming, onLyricTimingChange, onTimingLockedChange, exposeStart }) => {
   const { t } = useTranslation();
+  const [blindRungs] = usePersistedState('hs-yue2-blind-rungs', true);
   const [form, setForm] = useState<Yue2JointTrainRequest>(() => readStoredForm(datasetId));
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
   // Tracks with no .yue2.txt are re-captioned from the audio before training
@@ -1568,10 +1570,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </button>
         {active && <button type="button" onClick={() => void stop()} className="text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
         {job && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">{job.status} · {job.phase || 'waiting'}{progress}
-          {liveMetric?.step !== undefined && ` · step ${liveMetric.step}${liveMetric.loss !== undefined ? ` · loss ${liveMetric.loss.toFixed(4)}` : ''}`}
+          {!(ladderRunRec && blindRungs) && liveMetric?.step !== undefined && ` · step ${liveMetric.step}${liveMetric.loss !== undefined ? ` · loss ${liveMetric.loss.toFixed(4)}` : ''}`}
         </span>}
       </div>
-      {stepHistory.length > 1 && (
+      {!(ladderRunRec && blindRungs) && stepHistory.length > 1 && (
         <div className="mt-3">
           <TrainingChart
             epochs={[]}

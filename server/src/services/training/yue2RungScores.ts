@@ -28,6 +28,8 @@ export interface Yue2RungScore {
   likeness: number | null;
   corruption: number | null;
   notes: string;
+  blind: boolean;
+  blindLabel: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -41,6 +43,7 @@ function row(r: Record<string, unknown>): Yue2RungScore {
     rung: r.rung === 1, frozen: r.frozen === 1,
     settings: json(r.settings, {}) as Record<string, unknown>, previews: json(r.previews, []) as Array<Record<string, unknown>>, metrics: json(r.metrics, {}) as Record<string, unknown>,
     likeness: r.likeness as number | null, corruption: r.corruption as number | null, notes: (r.notes as string) ?? '',
+    blind: r.blind === 1, blindLabel: (r.blind_label as string) ?? '',
     createdAt: r.created_at as string, updatedAt: r.updated_at as string,
   };
 }
@@ -56,7 +59,7 @@ export function listYue2RungScores(datasetId?: string, refineRun?: string): Yue2
 
 /** Upsert the judgement for one checkpoint of a run; the facts come from the
  *  run's own records. Returns the stored row. */
-export function scoreYue2Rung(ds: { id: string; slug: string }, input: { refineRun: string; step: number; likeness?: number | null; corruption?: number | null; notes?: string },
+export function scoreYue2Rung(ds: { id: string; slug: string }, input: { refineRun: string; step: number; likeness?: number | null; corruption?: number | null; notes?: string; blind?: boolean; blindLabel?: string },
   /** A run held elsewhere (a training worker): its record and previews, fetched by the caller. */
   remote?: { run: Yue2AitkRunRecord; previews: Yue2JointPreviewRecord[] }): Yue2RungScore {
   const run = remote ? remote.run : listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === input.refineRun);
@@ -82,24 +85,29 @@ export function scoreYue2Rung(ds: { id: string; slug: string }, input: { refineR
   // Merge in code: a field the client did not send keeps its stored value
   // (a likeness click must not blank the notes), and the row always carries
   // a string for notes (the column is NOT NULL).
-  const prior = db.prepare('SELECT likeness, corruption, notes FROM yue2_rung_scores WHERE checkpoint_dir = ?').get(ckpt.dir) as { likeness: number | null; corruption: number | null; notes: string } | undefined;
+  const prior = db.prepare('SELECT likeness, corruption, notes, blind, blind_label FROM yue2_rung_scores WHERE checkpoint_dir = ?').get(ckpt.dir) as { likeness: number | null; corruption: number | null; notes: string; blind: number; blind_label: string } | undefined;
   const likeness = input.likeness === undefined ? (prior?.likeness ?? null) : clamp(input.likeness);
   const corruption = input.corruption === undefined ? (prior?.corruption ?? null) : clamp(input.corruption);
   const notes = input.notes === undefined ? (prior?.notes ?? '') : String(input.notes).slice(0, 4000);
-  db.prepare(`INSERT INTO yue2_rung_scores (dataset_id, dataset_slug, source_run, refine_run, checkpoint_dir, step, kl, recon, drift, rung, frozen, settings, previews, metrics, likeness, corruption, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  const rated = input.likeness !== undefined || input.corruption !== undefined;
+  if (rated && input.blind === true && (input.blindLabel !== run.blindLabels?.[ckpt.step] || !input.blindLabel)) throw new Error('Blind label does not match this checkpoint');
+  const blind = rated ? input.blind === true : prior?.blind === 1;
+  const blindLabel = rated ? (blind ? input.blindLabel! : '') : (prior?.blind_label ?? '');
+  db.prepare(`INSERT INTO yue2_rung_scores (dataset_id, dataset_slug, source_run, refine_run, checkpoint_dir, step, kl, recon, drift, rung, frozen, settings, previews, metrics, likeness, corruption, notes, blind, blind_label)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(checkpoint_dir) DO UPDATE SET kl = excluded.kl, recon = excluded.recon, drift = excluded.drift, rung = excluded.rung, frozen = excluded.frozen,
       settings = excluded.settings, previews = excluded.previews, metrics = excluded.metrics,
-      likeness = excluded.likeness, corruption = excluded.corruption, notes = excluded.notes, updated_at = datetime('now')`)
+      likeness = excluded.likeness, corruption = excluded.corruption, notes = excluded.notes,
+      blind = excluded.blind, blind_label = excluded.blind_label, updated_at = datetime('now')`)
     .run(ds.id, ds.slug, sourceRun, run.jobId, ckpt.dir, ckpt.step, ckpt.kl ?? null, ckpt.recon ?? null, ckpt.drift ?? null, ckpt.rung ? 1 : 0, ckpt.frozen ? 1 : 0,
-      JSON.stringify(settings), JSON.stringify(previews), JSON.stringify({}), likeness, corruption, notes);
+      JSON.stringify(settings), JSON.stringify(previews), JSON.stringify({}), likeness, corruption, notes, blind ? 1 : 0, blindLabel);
   return row(db.prepare('SELECT * FROM yue2_rung_scores WHERE checkpoint_dir = ?').get(ckpt.dir) as Record<string, unknown>);
 }
 
 export function yue2RungScoresCsv(rows: Yue2RungScore[]): string {
-  const cols = ['datasetSlug', 'refineRun', 'sourceRun', 'step', 'kl', 'recon', 'drift', 'rung', 'frozen', 'likeness', 'corruption', 'notes', 'settings', 'previews', 'updatedAt'] as const;
+  const cols = ['datasetSlug', 'refineRun', 'sourceRun', 'step', 'kl', 'recon', 'drift', 'rung', 'frozen', 'likeness', 'corruption', 'notes', 'blind', 'blind_label', 'settings', 'previews', 'updatedAt'] as const;
   const cell = (v: unknown) => { const s = typeof v === 'string' ? v : v === null || v === undefined ? '' : JSON.stringify(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  return [cols.join(','), ...rows.map(r => cols.map(c => cell(r[c])).join(','))].join('\n') + '\n';
+  return [cols.join(','), ...rows.map(r => cols.map(c => cell(c === 'blind_label' ? r.blindLabel : r[c])).join(','))].join('\n') + '\n';
 }
 
 export type Yue2TrainedDirection = 'under' | 'right' | 'over';
@@ -135,13 +143,13 @@ export function scoreYue2Album(ds: { id: string; slug: string }, input: { refine
  *  as they are, never over a row this machine already holds. */
 export function importYue2RungScores(rows: Yue2RungScore[]): number {
   const db = getDb();
-  const ins = db.prepare(`INSERT INTO yue2_rung_scores (dataset_id, dataset_slug, source_run, refine_run, checkpoint_dir, step, kl, recon, drift, rung, frozen, settings, previews, metrics, likeness, corruption, notes, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(checkpoint_dir) DO NOTHING`);
+  const ins = db.prepare(`INSERT INTO yue2_rung_scores (dataset_id, dataset_slug, source_run, refine_run, checkpoint_dir, step, kl, recon, drift, rung, frozen, settings, previews, metrics, likeness, corruption, notes, blind, blind_label, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(checkpoint_dir) DO NOTHING`);
   let n = 0;
   for (const r of rows) {
     if (!r?.checkpointDir || !r.refineRun) continue;
     n += ins.run(r.datasetId, r.datasetSlug, r.sourceRun ?? '', r.refineRun, r.checkpointDir, r.step, r.kl ?? null, r.recon ?? null, r.drift ?? null, r.rung ? 1 : 0, r.frozen ? 1 : 0,
-      JSON.stringify(r.settings ?? {}), JSON.stringify(r.previews ?? []), JSON.stringify(r.metrics ?? {}), r.likeness ?? null, r.corruption ?? null, r.notes ?? '',
+      JSON.stringify(r.settings ?? {}), JSON.stringify(r.previews ?? []), JSON.stringify(r.metrics ?? {}), r.likeness ?? null, r.corruption ?? null, r.notes ?? '', r.blind ? 1 : 0, r.blindLabel ?? '',
       r.createdAt ?? null, r.updatedAt ?? null).changes;
   }
   return n;

@@ -13,6 +13,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Toggle } from '../settings/SettingsPrimitives';
 import { PreviewPlayer } from './PreviewPlayer';
 import { ParamLabel } from '../shared/ParamLabel';
+import { usePersistedState, writePersistedState } from '../../hooks/usePersistedState';
 import {
   getYue2AlbumScore, getYue2CleanupPlan, linkYue2JointCheckpointPreset, listYue2RungScores, renderYue2JointPreviews, runYue2Cleanup, scoreYue2Album, scoreYue2Rung,
   type Yue2AitkRunRecord, type Yue2AlbumScore, type Yue2TrainedDirection, type Yue2CleanupChoice, type Yue2CleanupPlan, type Yue2JointPreviewRecord, type Yue2RungScore,
@@ -69,7 +70,15 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
 }>(({ datasetId, datasetName, run, previews, renderOpts, onChanged, onUse, onPicked, onError, idPrefix = 'ladder-rung' }, ref) => {
   const { t } = useTranslation();
   const runId = run?.jobId ?? '';
+  const [blindRungs] = usePersistedState('hs-yue2-blind-rungs', true);
+  const jointLadder = run?.options.method === 'base-matched';
+  const blind = jointLadder && blindRungs;
+  const labelFor = (step: number) => run?.blindLabels?.[step] ?? '';
+  const rungName = (step: number) => blind
+    ? t('trainingStudio.refine.blindRung', 'Rung {{label}}', { label: labelFor(step) || '?' })
+    : t('trainingStudio.refine.rungStep', 'Step {{step}}', { step });
   const ladder = run ? [...run.checkpoints].filter(c => c.arPath && c.narPath).sort((a, b) => a.step - b.step) : [];
+  const visibleLadder = blind ? [...ladder].sort((a, b) => labelFor(a.step).localeCompare(labelFor(b.step))) : ladder;
   const fail = (err: unknown) => onError?.(err instanceof Error ? err.message : String(err));
   const draftOpts = renderOpts.draft ? { odeSteps: 12, narCacheRatio: 0 } : {};
 
@@ -82,7 +91,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
   }, [datasetId, runId]);
   const score = async (step: number, patch: { likeness?: number | null; corruption?: number | null; notes?: string }) => {
     if (!datasetId || !runId) return;
-    try { const r = await scoreYue2Rung(datasetId, { refineRun: runId, step, ...patch }); setScores(prev => ({ ...prev, [step]: r.score })); }
+    try { const r = await scoreYue2Rung(datasetId, { refineRun: runId, step, ...patch, blind: !!blind, blindLabel: blind ? labelFor(step) : '' }); setScores(prev => ({ ...prev, [step]: r.score })); }
     catch (err) { fail(err); }
   };
 
@@ -110,7 +119,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
 
   // Cleanup modal after a rung is chosen: what else can go, with sizes.
   const [picked, setPicked] = useState('');
-  const [cleanup, setCleanup] = useState<{ run: string; step: number; plan: Yue2CleanupPlan } | null>(null);
+  const [cleanup, setCleanup] = useState<{ run: string; step: number; plan: Yue2CleanupPlan; blind: boolean; blindLabel: string } | null>(null);
   const [choice, setChoice] = useState<Yue2CleanupChoice>({ caches: true, otherCheckpoints: true, otherRuns: true, resume: true, otherPreviews: true });
   const [cleaning, setCleaning] = useState(false);
   const [cleanupNote, setCleanupNote] = useState('');
@@ -120,7 +129,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
     try {
       await linkYue2JointCheckpointPreset(datasetId, dir); setPicked(dir); onPicked?.(dir);
       const plan = await getYue2CleanupPlan(datasetId, pickRun, step);
-      setCleanup({ run: pickRun, step, plan });
+      setCleanup({ run: pickRun, step, plan, blind: !!blind, blindLabel: blind ? labelFor(step) : '' });
     } catch (err) { fail(err); }
   };
   useImperativeHandle(ref, () => ({ finishPick }), [datasetId]);
@@ -137,8 +146,9 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
     if (!cleanup) return;
     setCleaning(true);
     try {
-      const r = await runYue2Cleanup(datasetId, { run: cleanup.run, step: cleanup.step, ...(over ?? choice) });
-      setCleanupNote(t('trainingStudio.refine.cleanupDone', 'Removed {{what}}; about {{size}} freed.', { what: r.done.join(', ') || 'nothing', size: mib(r.freedBytes) }));
+      const r = await runYue2Cleanup(datasetId, { run: cleanup.run, step: cleanup.step, blind: cleanup.blind, blindLabel: cleanup.blindLabel, ...(over ?? choice) });
+      if (r.finishError) { fail(r.finishError); return; }
+      setCleanupNote(`${t('trainingStudio.refine.cleanupDone', 'Removed {{what}}; about {{size}} freed.', { what: r.done.join(', ') || 'nothing', size: mib(r.freedBytes) })}${cleanup.blind ? ` ${t('trainingStudio.refine.blindReveal', 'Rung {{label}} was step {{step}}.', { label: cleanup.blindLabel, step: cleanup.step })}` : ''}`);
       setCleanup(null);
       await onChanged();
     } catch (err) { fail(err); }
@@ -185,6 +195,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
     const sc = scores[c.step];
     return { step: c.step, kl: c.kl, likeness: sc?.likeness ?? null, corruption: sc?.corruption ?? null, overall: stats.overall };
   }).sort((a, b) => {
+    if (blind) return labelFor(a.step).localeCompare(labelFor(b.step));
     if (a.overall && b.overall) return b.overall.overall - a.overall.overall || b.step - a.step;
     if (a.overall) return -1;
     if (b.overall) return 1;
@@ -202,13 +213,15 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
     <>
       {cleanup && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => !cleaning && setCleanup(null)}>
         <div className="w-full max-w-xl rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={e => e.stopPropagation()}>
-          <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{t('trainingStudio.refine.cleanupTitle', 'Step {{step}} is now the adapter. Clean up around it?', { step: cleanup.step })}</div>
-          <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.refine.cleanupIntro', 'Everything below is app-generated and can be rebuilt. Source audio, sidecars, captions, labels and this rung\'s adapter files are never touched. Your rung scores are kept.')} {t('trainingStudio.refine.cleanupMovesAnyway', 'Either way the adapter\'s run folder moves to yue2-joint-adapters\\refined.')}</p>
+          <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{cleanup.blind
+            ? t('trainingStudio.refine.blindCleanupTitle', 'Rung {{label}} is now the adapter. Clean up around it?', { label: cleanup.blindLabel })
+            : t('trainingStudio.refine.cleanupTitle', 'Step {{step}} is now the adapter. Clean up around it?', { step: cleanup.step })}</div>
+          <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.refine.cleanupIntro', 'Everything below is app-generated and can be rebuilt. Source audio, sidecars, captions, labels and this rung\'s adapter files are never touched. Your rung scores are kept.')} {!cleanup.blind && t('trainingStudio.refine.cleanupMovesAnyway', 'Either way the adapter\'s run folder moves to yue2-joint-adapters\\refined.')}</p>
           <div className="mt-3 flex flex-col gap-2">
             {items.map(i => <label key={i.key} className="flex items-start gap-3 text-xs text-zinc-700 dark:text-zinc-300">
               <Toggle id={`cleanup-${idPrefix}-${i.key}`} checked={!!choice[i.key] && !!i.item?.count} onChange={v => setChoice(prev => ({ ...prev, [i.key]: v }))} />
               <span className={`flex-1 ${!i.item?.count ? 'opacity-50' : ''}`}>{i.label}<span className="ml-2 text-zinc-500 tabular-nums">{i.item ? `${i.item.count} · ${mib(i.item.bytes)}` : ''}</span>
-                {i.item?.detail?.length ? <span className="block text-[10px] text-zinc-500 truncate">{i.item.detail.join(', ')}</span> : null}</span>
+                {!cleanup.blind && i.item?.detail?.length ? <span className="block text-[10px] text-zinc-500 truncate">{i.item.detail.join(', ')}</span> : null}</span>
             </label>)}
           </div>
           <div className="mt-4 flex items-center justify-between gap-3">
@@ -222,6 +235,11 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
       </div>}
       {cleanupNote && <div className="text-[12px] text-emerald-700 dark:text-emerald-300">{cleanupNote}</div>}
       {ladder.length > 0 && <div className="mt-3 flex flex-col gap-3">
+        {jointLadder && <div className="flex items-center gap-2 text-xs">
+          <Toggle id={`blind-${idPrefix}`} checked={blindRungs} onChange={value => writePersistedState('hs-yue2-blind-rungs', value)} />
+          <ParamLabel label={t('trainingStudio.refine.blindToggle', 'Blind rungs')}
+            info={t('trainingStudio.refine.blindToggleInfo', 'Show lettered rungs while listening and scoring. The chosen step is revealed after cleanup finishes.')} />
+        </div>}
         <div className="rounded-lg border border-violet-500/40 bg-violet-500/5 p-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px]">
           <ParamLabel label={t('trainingStudio.refine.albumScore', 'How well did this album train?')}
             info={t('trainingStudio.refine.albumScoreInfo', 'One score for the whole run, once you have heard enough of its ladder: 1 = the adapter never really caught the album, 5 = as good as the best albums you have trained. Score it against your other albums, not against this run\'s own rungs. The rung scores show how fast an album trains; this is the only score that shows how well, and Dataset-Calibrated Training learns from it.')} />
@@ -243,19 +261,19 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
             value={albumNote ?? album?.notes ?? ''} onChange={e => setAlbumNote(e.target.value)}
             onBlur={e => { if (e.target.value !== (album?.notes ?? '')) void scoreAlbum({ notes: e.target.value }); }} />
         </div>
-        {ladder.map(c => {
+        {visibleLadder.map(c => {
           const stats = rungStats(c.step);
           const { mine, plannerReplans, composerReplans, hasReplanData, flaggedTakes, flagReasons, overall } = stats;
           return <div key={c.step} id={`${idPrefix}-${c.step}`}
             className={`rounded-lg border p-3 ${picked === c.dir ? 'border-emerald-500/60 bg-emerald-500/5' : c.step === bestStep ? 'border-sky-500/70' : c.rung ? 'border-amber-500/40' : 'border-zinc-300/70 dark:border-white/10'}`}>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-              <span className="font-semibold text-zinc-800 dark:text-zinc-100">{t('trainingStudio.refine.rungStep', 'Step {{step}}', { step: c.step })}</span>
-              {c.rung && c.kl !== undefined && <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-semibold">{t('trainingStudio.refine.rungBadge', 'rung')}</span>}
-              {!c.rung && <span className="text-[10px] text-zinc-500">{t('trainingStudio.refine.routineSave', 'routine save')}</span>}
+              <span className="font-semibold text-zinc-800 dark:text-zinc-100">{rungName(c.step)}</span>
+              {!blind && c.rung && c.kl !== undefined && <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-semibold">{t('trainingStudio.refine.rungBadge', 'rung')}</span>}
+              {!blind && !c.rung && <span className="text-[10px] text-zinc-500">{t('trainingStudio.refine.routineSave', 'routine save')}</span>}
               {c.step === bestStep && <span className="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-700 dark:text-sky-300 text-[10px] font-semibold">{t('trainingStudio.refine.bestBadge', 'best by score')}</span>}
-              {c.kl !== undefined && <span className="font-mono text-zinc-600 dark:text-zinc-300">KL {c.kl.toFixed(2)}{c.frozen ? ' (frozen)' : ''}</span>}
-              {c.recon !== undefined && <span className="font-mono text-zinc-600 dark:text-zinc-300">recon {c.recon.toFixed(3)}</span>}
-              {hasReplanData && <span className="font-mono text-zinc-500" title={t('trainingStudio.refine.replansInfo', 'planner / composer re-plans across this rung\'s takes; rising counts are a sign of over-training')}>{t('trainingStudio.refine.replans', 'replans {{p}}/{{c}}', { p: plannerReplans, c: composerReplans })}</span>}
+              {!blind && c.kl !== undefined && <span className="font-mono text-zinc-600 dark:text-zinc-300">KL {c.kl.toFixed(2)}{c.frozen ? ' (frozen)' : ''}</span>}
+              {!blind && c.recon !== undefined && <span className="font-mono text-zinc-600 dark:text-zinc-300">recon {c.recon.toFixed(3)}</span>}
+              {hasReplanData && <span className="font-mono text-zinc-500" title={blind ? undefined : t('trainingStudio.refine.replansInfo', 'planner / composer re-plans across this rung\'s takes; rising counts are a sign of over-training')}>{t('trainingStudio.refine.replans', 'replans {{p}}/{{c}}', { p: plannerReplans, c: composerReplans })}</span>}
               {flaggedTakes.length > 0 && <span className="font-mono text-red-600 dark:text-red-400" title={flagReasons}>{t('trainingStudio.refine.planFlags', 'plan flags {{n}}/{{takes}}', { n: flaggedTakes.length, takes: stats.doneTakes.length })}</span>}
               {overall && <span className="font-mono text-sky-700 dark:text-sky-300" title={t('trainingStudio.refine.overallInfo', 'overall = (likeness + (6 − corruption)) / 2, minus a soft penalty for replan load')}>{t('trainingStudio.refine.overall', 'overall {{n}}', { n: overall.overall.toFixed(2) })}</span>}
               <span className="flex-1" />
@@ -284,7 +302,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
             </div>}
             {mine.length > 0 && <div className="mt-2 flex flex-col gap-2">
               {mine.map((p, i) => p.audioUrl && p.status === 'done'
-                ? <PreviewPlayer key={p.id} src={p.audioUrl} downloadName={`${datasetName || 'preview'}_step${c.step}_take${i + 1}_seed${p.seed}.wav`} label={`${t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}${p.sheet === 'own' ? ` · ${t('trainingStudio.refine.sheetOwn', "this rung's plan")}` : p.sheet === 'shared' ? ` · ${t('trainingStudio.refine.sheetShared', 'shared sheet from step {{s}}', { s: p.sheetStep })}` : ''}${p.seedKind === 'fixed' ? ` · ${t('trainingStudio.refine.seedFixed', 'same seed on every rung: compare rungs on this one')}` : p.seedKind === 'random' ? ` · ${t('trainingStudio.refine.seedRandom', 'random seed: a new song, not comparable with other rungs')}` : ''}`} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}${p.score?.flags?.length ? ` · ⚠ ${p.score.flags.join('; ')}` : ''}${p.plan ? ` · planner replans ${p.plan.attempts.length - 1}` : ''}${typeof p.composerReplans === 'number' ? ` · composer replans ${p.composerReplans}` : ''}`} />
+                ? <PreviewPlayer key={p.id} src={p.audioUrl} downloadName={`${datasetName || 'preview'}_${blind ? `rung${labelFor(c.step)}` : `step${c.step}`}_take${i + 1}_seed${p.seed}.wav`} label={`${t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}${p.sheet === 'own' ? ` · ${t('trainingStudio.refine.sheetOwn', "this rung's plan")}` : p.sheet === 'shared' ? ` · ${blind ? t('trainingStudio.refine.blindSharedSheet', 'shared sheet from Rung {{label}}', { label: labelFor(p.sheetStep ?? 0) || '?' }) : t('trainingStudio.refine.sheetShared', 'shared sheet from step {{s}}', { s: p.sheetStep })}` : ''}${p.seedKind === 'fixed' ? ` · ${t('trainingStudio.refine.seedFixed', 'same seed on every rung: compare rungs on this one')}` : p.seedKind === 'random' ? ` · ${t('trainingStudio.refine.seedRandom', 'random seed: a new song, not comparable with other rungs')}` : ''}`} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}${p.score?.flags?.length ? ` · ⚠ ${p.score.flags.join('; ')}` : ''}${p.plan ? ` · planner replans ${p.plan.attempts.length - 1}` : ''}${typeof p.composerReplans === 'number' ? ` · composer replans ${p.composerReplans}` : ''}`} />
                 : <div key={p.id} className="text-[11px] text-zinc-500">{t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}: {p.status === 'done' && !p.file ? t('trainingStudio.refine.audioPruned', 'audio removed by cleanup') : p.status}{p.error ? ` — ${p.error}` : ''}{p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}{p.score?.flags?.length ? ` · ${p.score.flags[0]}` : ''}</div>)}
             </div>}
           </div>;
@@ -306,12 +324,12 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
                 className={`w-full text-left px-2 py-1 rounded-lg text-[11px] ${row.overall ? (row.step === bestStep ? 'bg-sky-500/15 text-sky-800 dark:text-sky-200' : 'hover:bg-zinc-500/10 text-zinc-700 dark:text-zinc-300') : 'text-zinc-500'}`}>
                 {row.overall ? <>
                   <div className="flex items-center justify-between gap-2">
-                    <span>{t('trainingStudio.refine.scoreboardStep', 'step {{step}}', { step: row.step })}
+                    <span>{blind ? rungName(row.step) : t('trainingStudio.refine.scoreboardStep', 'step {{step}}', { step: row.step })}
                       {row.step === bestStep && <span className="ml-1 px-1 py-0.5 rounded bg-sky-500/20 text-[9px] font-semibold">{t('trainingStudio.refine.bestChip', 'best')}</span>}</span>
                     <span className="font-bold font-mono">{row.overall.overall.toFixed(2)}</span>
                   </div>
-                  <div className="text-[10px] text-zinc-500">{row.kl !== undefined ? `KL ${row.kl.toFixed(2)} · ` : ''}L {row.likeness} · C {row.corruption} · {t('trainingStudio.refine.scoreboardReplans', 'replans {{n}}/take', { n: row.overall.replansPerTake.toFixed(2) })}</div>
-                </> : t('trainingStudio.refine.scoreboardUnscored', 'step {{step}} · unscored', { step: row.step })}
+                  <div className="text-[10px] text-zinc-500">{!blind && row.kl !== undefined ? `KL ${row.kl.toFixed(2)} · ` : ''}L {row.likeness} · C {row.corruption} · {t('trainingStudio.refine.scoreboardReplans', 'replans {{n}}/take', { n: row.overall.replansPerTake.toFixed(2) })}</div>
+                </> : blind ? `${rungName(row.step)} · ${t('trainingStudio.refine.unscored', 'unscored')}` : t('trainingStudio.refine.scoreboardUnscored', 'step {{step}} · unscored', { step: row.step })}
               </button>
             ))}
           </div>

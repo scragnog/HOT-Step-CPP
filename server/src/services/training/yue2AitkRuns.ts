@@ -4,6 +4,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'crypto';
 import { trainingBaseDir } from './paths.js';
 import { archiveYue2TrainLogs } from './datasetProfile.js';
 import { runStamp } from './adapterLayout.js';
@@ -50,6 +51,8 @@ export interface Yue2AitkRunRecord {
   updatedAt: number;
   error?: string;
   checkpoints: Yue2AitkCheckpointRecord[];
+  /** Stable, server-assigned labels keyed by canonical checkpoint step. */
+  blindLabels?: Record<string, string>;
 }
 
 function readIndex(): Yue2AitkRunRecord[] {
@@ -93,6 +96,8 @@ function isRunRecord(value: unknown): value is Yue2AitkRunRecord {
     && r.method === 'aitk' && typeof r.output === 'string' && r.output.length <= 32768
     && ['running', 'done', 'failed', 'cancelled', 'interrupted'].includes(r.status)
     && Number.isFinite(r.createdAt) && Number.isFinite(r.updatedAt)
+    && (r.blindLabels === undefined || (r.blindLabels !== null && typeof r.blindLabels === 'object'
+      && Object.entries(r.blindLabels).every(([step, label]) => /^\d+$/.test(step) && typeof label === 'string' && /^[A-Z]+$/.test(label))))
     && Array.isArray(r.checkpoints) && r.checkpoints.length <= 1024
     && r.checkpoints.every(c => !!c && Number.isInteger(c.step) && c.step >= 0
       && typeof c.dir === 'string' && c.dir.length <= 32768
@@ -179,8 +184,11 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
 
 export function recordYue2AitkRun(record: Yue2AitkRunRecord): void {
   try {
-    const prior = readIndex().filter(r => r.jobId !== record.jobId);
-    writeIndex([...prior, { ...record, checkpoints: checkpointRecords(record.output) }]);
+    const index = readIndex();
+    const prior = index.find(r => r.jobId === record.jobId);
+    writeIndex([...index.filter(r => r.jobId !== record.jobId), { ...record,
+      blindLabels: record.blindLabels ?? prior?.blindLabels,
+      checkpoints: checkpointRecords(record.output) }]);
   } catch { /* a catalogue failure must never change the training result */ }
 }
 
@@ -266,14 +274,62 @@ const FINISHED_MARKER = 'finished';
 export function yue2RunFinished(output: string): boolean {
   return /[\\/]refined[\\/]/i.test(path.resolve(output)) || fs.existsSync(path.join(output, FINISHED_MARKER));
 }
-export function setYue2RunFinished(output: string): void {
-  fs.writeFileSync(path.join(output, FINISHED_MARKER), `${new Date().toISOString()}\n`, 'utf8');
+export interface Yue2FinishedPick { pickedStep: number; pickedBlind: boolean; pickedLabel: string; at: string }
+export function setYue2RunFinished(output: string, pick: Omit<Yue2FinishedPick, 'at'>): Yue2FinishedPick {
+  const marker = { ...pick, at: new Date().toISOString() };
+  fs.writeFileSync(path.join(output, FINISHED_MARKER), JSON.stringify(marker) + '\n', 'utf8');
+  return marker;
 }
 
 export function listYue2AitkRuns(datasetId: string, datasetSlug?: string): Yue2AitkRunRecord[] {
-  return readIndex().filter(r => r.datasetId === datasetId || (!!datasetSlug && r.datasetSlug === datasetSlug))
-    .map(r => ({ ...r, checkpoints: rungsOf(r, checkpointRecords(r.output)) }))
+  const index = readIndex();
+  let changed = false;
+  const runs = index.filter(r => r.datasetId === datasetId || (!!datasetSlug && r.datasetSlug === datasetSlug))
+    .map(r => {
+      const checkpoints = rungsOf(r, checkpointRecords(r.output));
+      if (assignBlindLabels(r, checkpoints)) changed = true;
+      return { ...r, checkpoints };
+    })
     .sort((a, b) => b.updatedAt - a.updatedAt);
+  if (changed) writeIndex(index);
+  return runs;
+}
+
+function blindLetter(index: number): string {
+  let value = index + 1;
+  let label = '';
+  while (value > 0) { value--; label = String.fromCharCode(65 + value % 26) + label; value = Math.floor(value / 26); }
+  return label;
+}
+
+/** Assign new checkpoints together so directory order and reloads cannot move a label. */
+function assignBlindLabels(run: Yue2AitkRunRecord, checkpoints: Yue2AitkCheckpointRecord[]): boolean {
+  const labels = run.blindLabels ?? {};
+  const missing = checkpoints.filter(c => !labels[c.step]);
+  if (!missing.length) return false;
+  const firstAssignment = Object.keys(labels).length === 0;
+  missing.sort((a, b) => {
+    const hash = (step: number) => createHash('sha256').update(`${run.jobId}:${step}`).digest('hex');
+    return hash(a.step).localeCompare(hash(b.step));
+  });
+  const used = new Set(Object.values(labels));
+  let next = 0;
+  for (const checkpoint of missing) {
+    while (used.has(blindLetter(next))) next++;
+    labels[checkpoint.step] = blindLetter(next);
+    used.add(labels[checkpoint.step]);
+    next++;
+  }
+  if (firstAssignment && missing.length >= 3) {
+    const byStep = [...missing].sort((a, b) => a.step - b.step);
+    if (byStep.every((checkpoint, i) => labels[checkpoint.step] === blindLetter(i))) {
+      const first = labels[byStep[0].step];
+      for (let i = 0; i < byStep.length - 1; i++) labels[byStep[i].step] = labels[byStep[i + 1].step];
+      labels[byStep[byStep.length - 1].step] = first;
+    }
+  }
+  run.blindLabels = labels;
+  return true;
 }
 
 /** A base-matched run (2026-09-27) has no KL rungs: its ladder is every

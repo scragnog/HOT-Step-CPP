@@ -501,7 +501,9 @@ async function scoreHere(w: WorkerInfo, req: Request, res: Response, datasetId: 
     stored = scoreYue2Rung({ id: ds.id, slug: ds.slug }, { refineRun: b.refineRun, step: Number(b.step),
       ...(b.likeness !== undefined ? { likeness: b.likeness === null ? null : Number(b.likeness) } : {}),
       ...(b.corruption !== undefined ? { corruption: b.corruption === null ? null : Number(b.corruption) } : {}),
-      ...(typeof b.notes === 'string' ? { notes: b.notes } : {}) }, { run: record, previews: previews ?? [] });
+      ...(typeof b.notes === 'string' ? { notes: b.notes } : {}),
+      ...(typeof b.blind === 'boolean' ? { blind: b.blind } : {}),
+      ...(typeof b.blindLabel === 'string' ? { blindLabel: b.blindLabel } : {}) }, { run: record, previews: previews ?? [] });
   }
   res.json({ score: stored });
   // The worker's copy, for its own Review page and Finish scored. A worker

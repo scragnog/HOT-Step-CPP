@@ -822,6 +822,7 @@ export interface Yue2AitkRunRecord {
   updatedAt: number;
   error?: string;
   checkpoints: Yue2AitkCheckpointRecord[];
+  blindLabels?: Record<string, string>;
 }
 
 export interface Yue2JointPreviewRecord {
@@ -2543,7 +2544,7 @@ export async function listYue2JointPreviews(
 }
 
 /** Awaiting review: refinement ladders across datasets with score counts. */
-export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean }
+export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number; blindLabel: string } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean }
 export async function listYue2Review(): Promise<{ rows: Yue2ReviewRow[] }> {
   return request('/yue2-review');
 }
@@ -2555,7 +2556,7 @@ export type Yue2CleanupChoice = { caches?: boolean; otherCheckpoints?: boolean; 
 export async function getYue2CleanupPlan(id: string, run: string, step: number): Promise<Yue2CleanupPlan> {
   return request(`/datasets/${encodeURIComponent(id)}/yue2-cleanup-plan?run=${encodeURIComponent(run)}&step=${step}`);
 }
-export async function runYue2Cleanup(id: string, body: { run: string; step: number } & Yue2CleanupChoice): Promise<{ freedBytes: number; done: string[] }> {
+export async function runYue2Cleanup(id: string, body: { run: string; step: number; blind?: boolean; blindLabel?: string } & Yue2CleanupChoice): Promise<{ freedBytes: number; done: string[]; finishError?: string }> {
   return request(`/datasets/${encodeURIComponent(id)}/yue2-cleanup`, { method: 'POST', ...jsonBody(body) });
 }
 
@@ -2571,11 +2572,12 @@ export interface Yue2RungScore {
   step: number; kl: number | null; recon: number | null; drift: number | null; rung: boolean; frozen: boolean;
   settings: Record<string, unknown>; previews: Array<Record<string, unknown>>; metrics: Record<string, unknown>;
   likeness: number | null; corruption: number | null; notes: string; createdAt: string; updatedAt: string;
+  blind: boolean; blindLabel: string;
 }
 export async function listYue2RungScores(id: string, run?: string): Promise<{ scores: Yue2RungScore[] }> {
   return request(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores${run ? `?run=${encodeURIComponent(run)}` : ''}`);
 }
-export async function scoreYue2Rung(id: string, body: { refineRun: string; step: number; likeness?: number | null; corruption?: number | null; notes?: string }): Promise<{ score: Yue2RungScore }> {
+export async function scoreYue2Rung(id: string, body: { refineRun: string; step: number; likeness?: number | null; corruption?: number | null; notes?: string; blind?: boolean; blindLabel?: string }): Promise<{ score: Yue2RungScore }> {
   return request(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores`, { method: 'PUT', ...jsonBody(body) });
 }
 /** Optimise phase: the dataset's _hotstep-optimisation.json and prepare readiness. */
@@ -3096,4 +3098,3 @@ export async function getTrainingDefaults(): Promise<TrainingDefaults> {
 export async function putTrainingDefaults(patch: Partial<TrainingDefaults>): Promise<TrainingDefaults> {
   return request<TrainingDefaults>('/defaults', { method: 'PUT', ...jsonBody(patch) });
 }
-

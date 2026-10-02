@@ -4141,7 +4141,7 @@ router.get('/yue2-review', (_req: Request, res: Response) => {
         try { best = bestScoredRung(ds.id, run.jobId, ds.slug); } catch { /* stays null */ }
         rows.push({ datasetId: ds.id, datasetSlug: ds.slug, datasetName: ds.name, refineRun: run.jobId, status: run.status, createdAt: run.createdAt,
           live: active?.id === run.jobId, rungs: rungs.length, previews: previews.length, scored: scored.size,
-          unscored: rungs.filter(r => !scored.has(r.step)).length, reviewed: yue2ReviewComplete(run.output), best: best ? { step: best.step, overall: best.overall } : null,
+          unscored: rungs.filter(r => !scored.has(r.step)).length, reviewed: yue2ReviewComplete(run.output), best: best ? { step: best.step, overall: best.overall, blindLabel: run.blindLabels?.[best.step] ?? '' } : null,
           decoderOnly: (run.options as Record<string, unknown>)?.freezePlannerNow === true, klMin: kls.length ? Math.min(...kls) : null, klMax: kls.length ? Math.max(...kls) : null,
           baseMatched: (run.options as Record<string, unknown>)?.method === 'base-matched', finished: yue2RunFinished(run.output) });
       }
@@ -4185,7 +4185,8 @@ router.post('/datasets/:id/yue2-cleanup', (req: Request, res: Response) => {
     const run = String(b.run ?? ''); const step = Number(b.step);
     if (!run || !Number.isInteger(step)) { res.status(400).json({ error: 'run and step are required' }); return; }
     const choice = { caches: b.caches === true, otherCheckpoints: b.otherCheckpoints === true, otherRuns: b.otherRuns === true, resume: b.resume === true, otherPreviews: b.otherPreviews === true };
-    const result = runYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir, lyricsSetId: ds.lyricsSetId }, run, step, choice);
+    const result = runYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir, lyricsSetId: ds.lyricsSetId }, run, step, choice,
+      { blind: b.blind === true, blindLabel: typeof b.blindLabel === 'string' ? b.blindLabel : undefined });
     console.log(`[Training] Cleanup around ${ds.slug} run ${run} step ${step}: ${result.done.join(', ') || 'nothing'} (${(result.freedBytes / 1048576).toFixed(0)} MiB)`);
     res.json(result);
   } catch (err: any) { res.status(400).json({ error: err?.message || String(err) }); }
@@ -4225,7 +4226,9 @@ router.put('/datasets/:id/yue2-rung-scores', (req: Request, res: Response) => {
     res.json({ score: scoreYue2Rung({ id: ds.id, slug: ds.slug }, { refineRun: b.refineRun, step: Number(b.step),
       ...(b.likeness !== undefined ? { likeness: b.likeness === null ? null : Number(b.likeness) } : {}),
       ...(b.corruption !== undefined ? { corruption: b.corruption === null ? null : Number(b.corruption) } : {}),
-      ...(typeof b.notes === 'string' ? { notes: b.notes } : {}) }) });
+      ...(typeof b.notes === 'string' ? { notes: b.notes } : {}),
+      ...(typeof b.blind === 'boolean' ? { blind: b.blind } : {}),
+      ...(typeof b.blindLabel === 'string' ? { blindLabel: b.blindLabel } : {}) }) });
   } catch (err: any) { res.status(400).json({ error: err?.message || String(err) }); }
 });
 /** A run's album verdict (Dataset-Calibrated Training): GET ?run=<jobId>,
@@ -4256,7 +4259,7 @@ router.get('/yue2-rung-scores/export', (req: Request, res: Response) => {
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="yue2-rung-scores.csv"');
       res.send(yue2RungScoresCsv(rows));
-    } else res.json({ scores: rows });
+    } else res.json({ scores: rows.map(row => ({ ...row, blind_label: row.blindLabel })) });
   } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
 

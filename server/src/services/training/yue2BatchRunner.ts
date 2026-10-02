@@ -26,6 +26,7 @@ import { yue2LoudnessForMethod } from './yue2Train.js';
 import { listPreparedCaches } from './preparedDataReset.js';
 import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
 import { bestScoredRung } from './yue2BestRung.js';
+import { listYue2RungScores } from './yue2RungScores.js';
 import { runYue2Cleanup } from './yue2Cleanup.js';
 import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
 
@@ -267,8 +268,11 @@ function finishLadder(item: Yue2BatchItem): void {
   if (!ckpt?.arPath || !ckpt.narPath || step === undefined) throw new Error(`No complete checkpoint at step ${step} of run ${runId}`);
   const known = runs.flatMap(r => r.checkpoints).flatMap(c => [c.arPath, c.narPath].filter((v): v is string => !!v));
   refreshYue2PresetsForJointCheckpoint({ slug: ds.slug, lyricsSetId: ds.lyricsSetId }, ckpt.arPath, ckpt.narPath, known);
+  const score = item.refineRun && !narJob ? listYue2RungScores(ds.id, item.refineRun).find(r => r.step === step) : undefined;
   const result = runYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir, lyricsSetId: ds.lyricsSetId }, runId, step,
-    { caches: true, otherCheckpoints: true, otherRuns: true, resume: true, otherPreviews: true });
+    { caches: true, otherCheckpoints: true, otherRuns: true, resume: true, otherPreviews: true },
+    { blind: score?.blind ?? false, blindLabel: score?.blindLabel ?? '' });
+  if (result.finishError) throw new Error(result.finishError);
   console.log(`[Training] yue2 batch finish ${ds.slug}: linked step ${step} of ${runId}; removed ${result.done.join(', ') || 'nothing'}`);
 }
 

@@ -258,6 +258,8 @@ export function initDb(): void {
       likeness       INTEGER,
       corruption     INTEGER,
       notes          TEXT NOT NULL DEFAULT '',
+      blind          INTEGER NOT NULL DEFAULT 0,
+      blind_label    TEXT NOT NULL DEFAULT '',
       created_at     TEXT DEFAULT (datetime('now')),
       updated_at     TEXT DEFAULT (datetime('now'))
     );
@@ -280,6 +282,14 @@ export function initDb(): void {
   // ── Migrations — add columns that may not exist in older databases ────────
   // Training datasets migrations
   const trainingMigrations: Array<{ check: string; alter: string }> = [
+    {
+      check: `SELECT COUNT(*) as c FROM pragma_table_info('yue2_rung_scores') WHERE name='blind'`,
+      alter: `ALTER TABLE yue2_rung_scores ADD COLUMN blind INTEGER NOT NULL DEFAULT 0`,
+    },
+    {
+      check: `SELECT COUNT(*) as c FROM pragma_table_info('yue2_rung_scores') WHERE name='blind_label'`,
+      alter: `ALTER TABLE yue2_rung_scores ADD COLUMN blind_label TEXT NOT NULL DEFAULT ''`,
+    },
     {
       check: `SELECT COUNT(*) as c FROM pragma_table_info('training_datasets') WHERE name='default_language'`,
       alter: `ALTER TABLE training_datasets ADD COLUMN default_language TEXT NOT NULL DEFAULT 'english'`,

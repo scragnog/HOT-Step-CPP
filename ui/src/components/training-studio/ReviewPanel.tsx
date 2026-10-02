@@ -7,6 +7,7 @@ import { ListChecks, RefreshCw } from 'lucide-react';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { finishYue2Ladders, listYue2Review, type Yue2ReviewRow } from '../../services/trainingApi';
 import { Toggle } from '../shared/Toggle';
+import { usePersistedState } from '../../hooks/usePersistedState';
 
 export const ReviewPanel: React.FC = () => {
   const { t } = useTranslation();
@@ -37,6 +38,7 @@ export const ReviewPanel: React.FC = () => {
   const [skip, setSkip] = useState<Record<string, boolean>>({});
   const [finishing, setFinishing] = useState(false);
   const [knee, setKnee] = useState(true);
+  const [blindRungs] = usePersistedState('hs-yue2-blind-rungs', true);
   const finish = async () => {
     setFinishing(true); setError('');
     try {
@@ -53,7 +55,7 @@ export const ReviewPanel: React.FC = () => {
     <button type="button" onClick={() => open(r)} className="w-full text-left rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/50 dark:bg-black/10 hover:bg-amber-500/5 px-4 py-3 flex flex-wrap items-center gap-x-4 gap-y-1">
       <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 min-w-[180px]">{r.datasetName}</span>
       <span className="text-[11px] text-zinc-500">{new Date(r.createdAt).toLocaleString()}</span>
-      <span className="text-[11px] text-zinc-600 dark:text-zinc-300 tabular-nums">{t('trainingStudio.review.rungs', '{{n}} rungs', { n: r.rungs })}{r.klMin !== null && r.klMax !== null ? ` · KL ${r.klMin.toFixed(2)}–${r.klMax.toFixed(2)}` : ''} · {t('trainingStudio.review.previews', '{{n}} previews', { n: r.previews })}</span>
+      <span className="text-[11px] text-zinc-600 dark:text-zinc-300 tabular-nums">{t('trainingStudio.review.rungs', '{{n}} rungs', { n: r.rungs })}{!(r.baseMatched && blindRungs) && r.klMin !== null && r.klMax !== null ? ` · KL ${r.klMin.toFixed(2)}–${r.klMax.toFixed(2)}` : ''} · {t('trainingStudio.review.previews', '{{n}} previews', { n: r.previews })}</span>
       <span className="flex-1" />
       {r.live ? <span className="text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.review.stillRunning', 'still refining')}</span>
         : r.unscored > 0 && !r.reviewed ? <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[11px] font-semibold">{t('trainingStudio.review.toScore', '{{n}} to score', { n: r.unscored })}</span>
@@ -83,7 +85,9 @@ export const ReviewPanel: React.FC = () => {
           {finishable.map(r => <div key={r.refineRun} className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
             <Toggle size="sm" accent="amber" checked={!skip[r.refineRun]} onChange={v => setSkip(prev => ({ ...prev, [r.refineRun]: !v }))} aria-label={t('trainingStudio.review.finishInclude', 'Include {{name}} in this finish batch', { name: r.datasetName }) as string} />
             <span className="font-semibold min-w-[180px]">{r.datasetName}</span>
-            <span className="text-zinc-500">{t('trainingStudio.review.finishPick', 'step {{step}}, overall {{score}}', { step: r.best!.step, score: r.best!.overall.toFixed(2) })}{r.decoderOnly || r.baseMatched ? ` · ${t('trainingStudio.review.finishNoNar', 'linked as it is, no NAR step')}` : ''}</span>
+            <span className="text-zinc-500">{r.baseMatched && blindRungs && r.best!.blindLabel
+              ? t('trainingStudio.review.finishBlindPick', 'Rung {{label}}, overall {{score}}', { label: r.best!.blindLabel, score: r.best!.overall.toFixed(2) })
+              : t('trainingStudio.review.finishPick', 'step {{step}}, overall {{score}}', { step: r.best!.step, score: r.best!.overall.toFixed(2) })}{r.decoderOnly || r.baseMatched ? ` · ${t('trainingStudio.review.finishNoNar', 'linked as it is, no NAR step')}` : ''}</span>
           </div>)}
           <div className="flex items-center justify-end gap-3">
             <Toggle

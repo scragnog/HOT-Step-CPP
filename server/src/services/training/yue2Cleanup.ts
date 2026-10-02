@@ -62,9 +62,11 @@ export function planYue2Cleanup(ds: { id: string; slug: string; sourceDir: strin
   };
 }
 
-export function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string; lyricsSetId?: number }, runId: string, step: number, choice: Yue2CleanupChoice): { freedBytes: number; done: string[] } {
+export function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string; lyricsSetId?: number }, runId: string, step: number, choice: Yue2CleanupChoice,
+  pick: { blind?: boolean; blindLabel?: string } = {}): { freedBytes: number; done: string[]; finishError?: string } {
   const plan = planYue2Cleanup(ds, runId, step);
   const { runs, run, keep } = locate(ds, runId, step);
+  if (pick.blind && (!pick.blindLabel || pick.blindLabel !== run.blindLabels?.[step])) throw new Error('Blind label does not match the chosen checkpoint');
   let freed = 0; const done: string[] = [];
   // The chosen run's loss curve, kept with the dataset: run folders get moved
   // and deleted by hand later, and calibration reads the curve per album.
@@ -96,7 +98,11 @@ export function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string
   // Whatever the choice flags ("Keep everything" included), the ladder ends
   // here: the run stays where it is and is marked finished, which keeps it
   // off the Review page's Finish list and out of later otherRuns sweeps.
-  try { setYue2RunFinished(run.output); }
-  catch (err: any) { console.warn(`[Training] YuE2 cleanup: could not mark run ${runId} finished: ${err?.message || err}`); }
+  try { setYue2RunFinished(run.output, { pickedStep: step, pickedBlind: pick.blind === true, pickedLabel: pick.blind ? pick.blindLabel! : '' }); }
+  catch (err: any) {
+    const finishError = `Cleanup completed, but the run could not be marked finished: ${err?.message || err}`;
+    console.warn(`[Training] YuE2 cleanup: ${finishError}`);
+    return { freedBytes: freed, done, finishError };
+  }
   return { freedBytes: freed, done };
 }
