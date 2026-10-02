@@ -34,6 +34,17 @@ test('jobCover reads source identity from the envelope, not from job.params', ()
   assert.deepEqual(captured?.cover, { sourceId: 'envelope-id', sourceLabel: 'Envelope Label' });
 });
 
+test('jobCover reads full score, chord choice and rendered ABC from the envelope only', () => {
+  const job = fakeJob(
+    { yue2Cover: { sourceId: 'source', keepChords: false, fullScore: 'X:1\n"Am"C|' }, yue2Abc: 'X:1\nC|' },
+    { yue2Cover: { sourceId: 'stale', keepChords: true, fullScore: 'wrong' }, yue2Abc: 'wrong' },
+  );
+  assert.deepEqual(jobCover(job), {
+    cover: { sourceId: 'source', keepChords: false, fullScore: 'X:1\n"Am"C|' },
+    abc: 'X:1\nC|',
+  });
+});
+
 test('an ordinary (non-cover) job has no captured cover, regardless of job.params', () => {
   const job = fakeJob({ yue2Abc: 'X:1\n' }, { yue2Cover: { sourceId: 'ignored' } });
   assert.equal(jobCover(job), undefined);

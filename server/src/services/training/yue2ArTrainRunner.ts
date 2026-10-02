@@ -700,7 +700,7 @@ export async function runYue2CoverSheetJob(job: TrainingJob, audioPath: string, 
     if (missing.length) throw new Error(`The SheetSage2 transcriber is missing: ${missing.join(', ')}`);
     const { manifest, name } = writeYue2CoverSheetManifest(audioPath, jobDir);
     const opts: ResolvedYue2SheetOptions = {
-      manifest, only: '', force: false, fast: false, datasetSlug: '', melodyOnly: true,
+      manifest, only: '', force: false, fast: false, datasetSlug: '', melodyOnly: false,
     };
     const st: SheetState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
     const verify = () => {

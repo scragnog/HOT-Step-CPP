@@ -116,7 +116,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [pairMode, setPairMode] = useState<'base' | 'pair'>('base');
   const [yue2Ar, setYue2Ar] = useState('');
   const [yue2Nar, setYue2Nar] = useState('');
-  const [yue2Cot, setYue2Cot] = useState<'melody' | 'full'>('melody');
+  const [keepChords, setKeepChords] = useState(true);
   const [captionMode, setCaptionMode] = useState('custom');
   const [captionTracks, setCaptionTracks] = useState<Yue2SourceTrack[]>([]);
   const [readiness, setReadiness] = useState<Yue2CoverReadiness | null>(null);
@@ -607,8 +607,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       const params = { ...sharedParams, ...yue2Params, customMode: true, taskType: 'text2music',
         title, caption: resolvedCaption, style: resolvedCaption, lyrics: instrumental ? '' : lyrics,
         instrumental, source: 'cover-studio', sourceAudioUrl: approvedSheet.audioUrl,
-        yue2Cover: { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel },
-        yue2Abc: approvedSheet.abc, yue2Cot, yue2Pick: pair };
+        yue2Cover: { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel, keepChords },
+        yue2Abc: approvedSheet.abc, yue2Cot: keepChords ? 'full' : 'melody', yue2Pick: pair };
       const qId = addManualQueueItem({ title, artistName: '', caption: resolvedCaption });
       updateManualQueueItem(qId, { stage: _coverRunning ? 'Queued…' : 'Preparing…' });
       setIsGenerating(true);
@@ -958,7 +958,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           pairMode={pairMode} onPairMode={setPairMode}
           ar={yue2Ar} nar={yue2Nar} onAr={setYue2Ar} onNar={setYue2Nar}
           arOptions={adapterOptions('ar')} narOptions={adapterOptions('nar')}
-          cot={yue2Cot} onCot={setYue2Cot}
+          keepChords={keepChords} onKeepChords={setKeepChords}
           canGenerate={canGenerate} isGenerating={isGenerating} genProgress={genProgress} genStage={genStage}
           onGenerate={handleGenerate} onCancel={handleCancel}
         /> : <ArtistSettingsPanel

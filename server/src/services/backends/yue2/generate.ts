@@ -60,7 +60,7 @@ function jobPick(job: GenerationJob): Yue2PersistedSelection {
   return yue2PickFromModels(job.envelope.models as Record<string, string>);
 }
 
-/** A cover job's provenance and approved score, captured into
+/** A cover job's provenance and rendered score, captured into
  *  envelope.options.yue2 at submit (index.ts's resolveRequest already
  *  rejected a blank ABC or cot=off there). The only source the render and
  *  its metadata read for these fields — job.params is the raw request body

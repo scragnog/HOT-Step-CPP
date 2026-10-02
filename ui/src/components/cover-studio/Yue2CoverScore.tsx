@@ -58,11 +58,11 @@ export const Yue2CoverScore: React.FC<Props> = p => {
       <div className="flex items-center justify-between gap-2">
         <div>
           <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">YuE2 lead sheet</h3>
-          <p className="text-xs text-zinc-500">Transcribe the source melody or paste ABC, then review and approve it.</p>
+          <p className="text-xs text-zinc-500">Transcribe the source melody and chords or paste ABC, then review and approve it.</p>
         </div>
         <button onClick={p.onTranscribe} disabled={!p.sourceReady || busy || p.readiness?.ready === false}
           className="rounded-lg bg-cyan-500/20 px-3 py-1.5 text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
-          {p.abc ? 'Retry transcription' : 'Transcribe melody'}
+          {p.abc ? 'Retry transcription' : 'Transcribe full score'}
         </button>
       </div>
       {p.readiness?.message && <p className="text-xs text-amber-600 dark:text-amber-400">{p.readiness.message}</p>}

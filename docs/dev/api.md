@@ -28,7 +28,12 @@ existing training job status and progress; when it is `done`, the response inclu
 `GET /readiness` reports whether the optional SheetSage2 model is installed. Supplying
 non-empty `abc` in the POST returns it immediately with the source identity and needs
 no transcriber. Pass that `abc` as `yue2Abc` and the `sourceId`/`sourceLabel` as
-`yue2Cover` when submitting an ordinary YuE2 generation.
+`yue2Cover` when submitting an ordinary YuE2 generation. Transcription always
+returns the full score, including detected chord symbols. On generation submit,
+`yue2Cover.keepChords` defaults to true. When false, the server strips inline
+chord symbols from the rendered `yue2Abc` snapshot; the cover provenance keeps
+the reviewed full score and the choice. The song metadata records both that
+provenance and the ABC actually rendered.
 
 Cover transcription first tries with the engine running. If SheetSage2 fails to load,
 the job waits for any active render, stops the engine, retries once, and restarts the

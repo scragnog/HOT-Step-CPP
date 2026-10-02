@@ -22,8 +22,8 @@ interface Props {
   onNar: (value: string) => void;
   arOptions: Array<{ value: string; label: string }>;
   narOptions: Array<{ value: string; label: string }>;
-  cot: 'melody' | 'full';
-  onCot: (value: 'melody' | 'full') => void;
+  keepChords: boolean;
+  onKeepChords: (value: boolean) => void;
   canGenerate: boolean;
   isGenerating: boolean;
   genProgress: number;
@@ -74,13 +74,6 @@ export const Yue2CoverPanel: React.FC<Props> = p => (
       )}
     </div>
 
-    <div className="space-y-2">
-      <ParamLabel label="Score conditioning" info="Melody follows the reviewed tune and leaves harmony open. Full score also follows the chords you add to the ABC." />
-      <StyledSelect accent="pink" value={p.cot} onChange={v => p.onCot(v as 'melody' | 'full')}
-        options={[{ value: 'melody', label: 'Melody only' }, { value: 'full', label: 'Full score (fixed harmony)' }]} />
-      {p.cot === 'full' && <p className="text-xs text-zinc-500">Add chord symbols to the ABC before approval to fix the harmony.</p>}
-    </div>
-
     {p.isGenerating && (
       <div className="space-y-2 text-xs">
         <p>{p.genStage || 'Generating'} · {p.genProgress}%</p>
@@ -88,6 +81,13 @@ export const Yue2CoverPanel: React.FC<Props> = p => (
         <button onClick={p.onCancel} className="text-red-400">Cancel current render</button>
       </div>
     )}
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <ParamLabel label="Keep chords" info="Keep the reviewed score's chord symbols in the YuE2 render, or remove them and let the style decide the harmony." />
+        <Toggle accent="cyan" checked={p.keepChords} onChange={p.onKeepChords} aria-label="Keep chords" />
+      </div>
+      <p className="text-xs text-zinc-500">Keep chords for the original harmony; turn off to let the style decide.</p>
+    </div>
     <button onClick={p.onGenerate} disabled={!p.canGenerate}
       className="w-full rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-3 text-sm font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed">
       {p.isGenerating ? <><Loader2 className="inline w-4 h-4 mr-1 animate-spin" /> Add to queue</> : 'Generate YuE2 cover'}

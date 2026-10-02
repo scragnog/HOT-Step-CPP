@@ -131,6 +131,20 @@ test('yue2CoverFromSubmission requires a sourceId', () => {
   );
 });
 
+test('yue2CoverFromSubmission keeps a render chord choice and rejects invalid values', () => {
+  assert.deepEqual(yue2CoverFromSubmission({ yue2Cover: { sourceId: 'song-1', keepChords: false } }),
+    { sourceId: 'song-1', keepChords: false });
+  assert.throws(() => yue2CoverFromSubmission({ yue2Cover: { sourceId: 'song-1', keepChords: 'no' } }),
+    /keepChords must be a boolean/);
+});
+
+test('an invalid keepChords value fails the generation submit', async () => {
+  const { yue2Backend } = await import('./index.js');
+  assert.throws(() => yue2Backend.resolveRequest({
+    caption: 'c', yue2Cover: { sourceId: 'song-1', keepChords: 'no' }, yue2Abc: 'X:1\nK:C\nC|',
+  }), /keepChords must be a boolean/);
+});
+
 // A malformed truthy yue2Cover must fail the submit, never be treated as
 // "no marker" — that would let a malformed cover slip through as a plain
 // generation with its score silently dropped.

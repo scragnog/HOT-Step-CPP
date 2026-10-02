@@ -47,27 +47,30 @@ have to make.
    from Library. Detected BPM and key
    are shown for reference; they do not change the YuE2 cover request. Advanced
    Mode can split and mix stems before transcription.
-2. Click **Transcribe melody**. The score panel shows queue and transcription
+2. Click **Transcribe full score**. SheetSage2 writes the melody and detected
+   chords into ABC. The score panel shows queue and transcription
    progress, with Cancel and Retry. SheetSage2 must be registered for automatic
    transcription; if it is missing, the panel shows the model setup guidance.
    You can paste ABC in the editor instead, without SheetSage2. Neither path
    uses the source audio as an inference conditioning signal after approval.
-3. Preview the ABC, correct it in the editor, and click **Approve score**. Editing
+3. Preview the full ABC, correct it in the editor, and click **Approve score**. Editing
    the score or changing the source audio or stem mix withdraws approval. The
    Generate button stays disabled until the current source has an approved score.
 4. Paste lyrics or search by artist and title; choose **Instrumental** to render
    without lyrics. Write a YuE2 style caption. With an adapter pair, you can
    choose a caption from its training tracks or the nearest detected BPM.
 5. Choose **Base YuE2** or an explicit AR composer and NAR renderer pair.
-   **Melody only** is the default score conditioning. Choose **Full score** if
-   you have added chords to the ABC and want to follow that harmony. Click
-   **Generate YuE2 cover**; queued renders keep the selected pair, score and
-   settings from that click even if the picker changes later.
+   **Keep chords** is on by default. Turn it off to remove the score's chord
+   symbols for this render and let the style decide the harmony. The reviewed
+   full score stays available. Click **Generate YuE2 cover**; queued renders
+   keep the chord choice, selected pair, score and settings from that click
+   even if the picker changes later.
 
 YuE2 does not use ACE's fidelity, source-preservation/noise, NoFSQ, timbre,
 latent, tempo, pitch or BPM/key correction controls. A completed YuE2 cover
 uses the ordinary generation queue and appears in Library. Its saved job records
-the source identity and the ABC that was rendered.
+the source identity, the reviewed full score, the chord choice and the ABC
+actually rendered.
 
 ## ACE-Step controls
 

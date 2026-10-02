@@ -96,9 +96,10 @@ test('successful cover transcription keeps the engine and never takes the genera
   const f = coverRunFixture();
   try {
     let calls = 0;
-    const run = mockCoverRun(async (_call, stopEngine) => {
+    const run = mockCoverRun(async (_call, stopEngine, args) => {
       calls++;
       assert.equal(stopEngine, false);
+      assert.equal(args.includes('--melody-only'), false);
       assert.equal(gpuLaneOwner(), null);
       f.writeAbc();
     });
