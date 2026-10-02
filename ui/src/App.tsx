@@ -84,6 +84,8 @@ import { DiscoPulseWrapper } from './components/shared/DiscoPulseWrapper';
 
 import { HiHatParticles } from './components/shared/HiHatParticles';
 
+// Inlined: the file could not be fetched from a server that has just died.
+import serverOfflineImage from './assets/server-offline.webp?inline';
 /** Derive top-level view from the browser URL */
 function viewFromUrl(path = window.location.pathname): string {
   if (path.startsWith('/insta-gen')) return 'insta-gen';
@@ -164,7 +166,6 @@ function useServerHealthReload(startDelayMs: number, onWaiting?: () => void, onR
   }, [startDelayMs, onWaiting, onReconnected]);
 }
 
-/** Restarting overlay — polls /api/health and reloads when the server is back */
 // Which recent-songs feed the activity column shows, per view. Views that are
 // not listed — library, settings, training — show every source.
 const ACTIVITY_SOURCE: Record<string, string | undefined> = {
@@ -175,6 +176,7 @@ const ACTIVITY_SOURCE: Record<string, string | undefined> = {
   'repaint': 'repaint',
 };
 
+/** Restarting overlay — polls /api/health and reloads when the server is back */
 const RestartingOverlay: React.FC = () => {
   const { t } = useTranslation();
   const [status, setStatus] = useState(t('app.restarting.stopping'));
@@ -210,7 +212,7 @@ const ServerOfflineOverlay: React.FC = () => {
   useServerHealthReload(0);
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black">
-      <img src="/server-offline.webp" alt="Server offline. Please restart or close tab" className="max-w-[90vw] max-h-[90vh] object-contain" />
+      <img src={serverOfflineImage} alt="Server offline. Please restart or close tab" className="max-w-[90vw] max-h-[90vh] object-contain" />
     </div>
   );
 };
