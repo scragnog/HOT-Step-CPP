@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { stemPathFor } from './paths.js';
+import { hasSoundingVocalBar } from '../backends/yue2/scoreHealth.js';
 
 export function abcSidecarPath(audioPath: string): string {
   return `${stemPathFor(audioPath)}.abc`;
@@ -14,7 +15,7 @@ export function readAbcSidecar(audioPath: string): string {
 
 /** A failed or empty transcription never replaces a usable score. */
 export function writeAbcSidecar(audioPath: string, abc: string): boolean {
-  if (!abc.trim()) return false;
+  if (!hasSoundingVocalBar(abc)) return false;
   const target = abcSidecarPath(audioPath);
   const tmp = path.join(path.dirname(target), `.abc_${crypto.randomBytes(6).toString('hex')}.tmp`);
   try {

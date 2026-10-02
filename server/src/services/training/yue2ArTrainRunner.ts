@@ -37,6 +37,7 @@ import path from 'path';
 import { runOnGpuLane } from '../generation/gpuLane.js';
 import { saveDatasetCoverAbc } from '../coverDatasetSource.js';
 import { YUE2_LICENSE_NOTICE } from '../backends/yue2/index.js';
+import { EMPTY_COVER_SCORE_ERROR, hasSoundingVocalBar } from '../backends/yue2/scoreHealth.js';
 import { getDataset } from './datasetsRepo.js';
 import { refreshYue2PresetsForNewRun } from './lyricStudioExport.js';
 import { missingYue2TrainModels, readYue2PreprocessSummary } from './yue2Train.js';
@@ -714,7 +715,7 @@ export async function runYue2CoverSheetJob(job: TrainingJob, audioPath: string, 
     };
     const st: SheetState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
     const verify = () => {
-      try { readYue2CoverAbc(manifest, name); return null; }
+      try { return hasSoundingVocalBar(readYue2CoverAbc(manifest, name)) ? null : EMPTY_COVER_SCORE_ERROR; }
       catch (err) { return err instanceof Error ? err.message : String(err); }
     };
     let loadFailed = false;
@@ -740,6 +741,7 @@ export async function runYue2CoverSheetJob(job: TrainingJob, audioPath: string, 
     }
     if (isCancelled(job)) throw new Error('Cover lead-sheet transcription was cancelled');
     const abc = readYue2CoverAbc(manifest, name);
+    if (!hasSoundingVocalBar(abc)) throw new Error(EMPTY_COVER_SCORE_ERROR);
     saveDatasetCoverAbc(audioPath, abc);
     finishJob(job, 'done');
     return abc;

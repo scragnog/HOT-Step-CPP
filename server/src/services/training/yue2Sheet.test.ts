@@ -74,7 +74,7 @@ function coverRunFixture() {
   fs.writeFileSync(audio, 'audio fixture');
   const job = createJob('yue2-sheet', 'cover:test', [], {});
   const writeAbc = () => fs.writeFileSync(path.join(jobDir, 'cover-sheet.json'),
-    JSON.stringify({ sources: [{ name: 'source.wav', source: audio, abc: 'X:1\nK:C' }] }));
+    JSON.stringify({ sources: [{ name: 'source.wav', source: audio, abc: 'X:1\nK:C\nC|' }] }));
   return { root, audio, jobDir, job, writeAbc };
 }
 
@@ -104,7 +104,7 @@ test('successful cover transcription keeps the engine and never takes the genera
       f.writeAbc();
     });
     assert.equal(await runYue2CoverSheetJob(f.job, f.audio, f.jobDir,
-      { missingModels: () => [], run }), 'X:1\nK:C');
+      { missingModels: () => [], run }), 'X:1\nK:C\nC|');
     assert.equal(calls, 1);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
@@ -124,7 +124,7 @@ test('only a SheetSage2 load failure retries with the engine stopped inside the 
       f.writeAbc();
     });
     assert.equal(await runYue2CoverSheetJob(f.job, f.audio, f.jobDir,
-      { missingModels: () => [], run }), 'X:1\nK:C');
+      { missingModels: () => [], run }), 'X:1\nK:C\nC|');
     assert.deepEqual(stops, [false, true]);
     assert.equal(gpuLaneOwner(), null);
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
@@ -182,7 +182,7 @@ for (const retryThrows of [false, true]) {
       assert.equal(rendered, false);
       completeRestart();
       if (retryThrows) await assert.rejects(cover, /retry failed/);
-      else assert.equal(await cover, 'X:1\nK:C');
+      else assert.equal(await cover, 'X:1\nK:C\nC|');
       await render;
       assert.equal(rendered, true);
     } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
@@ -203,7 +203,7 @@ test('development fallback hook reruns a completed cover with force', async () =
       if (!stopEngine) f.writeAbc();
     });
     assert.equal(await runYue2CoverSheetJob(f.job, f.audio, f.jobDir,
-      { missingModels: () => [], run }), 'X:1\nK:C');
+      { missingModels: () => [], run }), 'X:1\nK:C\nC|');
     assert.deepEqual(stops, [false, true]);
   } finally {
     if (oldDev === undefined) delete process.env.HOT_STEP_DEV; else process.env.HOT_STEP_DEV = oldDev;

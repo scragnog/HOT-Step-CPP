@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { abcSidecarPath, readAbcSidecar, writeAbcSidecar } from './abcSidecar.js';
 import { seedAbcManifestFromSidecars, saveAbcManifestSidecars, buildYue2SheetArgs } from './yue2Sheet.js';
-import { runYue2SheetJob } from './yue2ArTrainRunner.js';
+import { runYue2CoverSheetJob, runYue2SheetJob } from './yue2ArTrainRunner.js';
 import { createJob } from './labelingQueue.js';
 import { runYue2AceTrain } from './yue2TrainRunner.js';
 
@@ -46,7 +46,33 @@ test('successful force result replaces the sidecar, while empty and error rows d
     assert.equal(saveAbcManifestSidecars(manifest), 1);
     assert.equal(readAbcSidecar(audio), 'X:1\nK:D\nD');
     assert.equal(writeAbcSidecar(audio, '  '), false);
+    assert.equal(writeAbcSidecar(audio, 'X:1\nV: Vocal\nZ4|z4|\nV: Ins\nC4|'), false);
     assert.equal(readAbcSidecar(audio), 'X:1\nK:D\nD');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('cover transcription fails for all-rest Vocal bars and accepts a sounding bar', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cover-sheet-job-'));
+  try {
+    const audio = path.join(dir, 'track.wav');
+    fs.writeFileSync(audio, 'audio');
+    let abc = 'X:1\nV: Vocal\nZ4|z4|\nV: Ins\nC4|';
+    const run = (async (_job, _kind, _args, _idleMs, verify) => {
+      const manifest = path.join(dir, 'cover-sheet.json');
+      const data = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+      data.sources[0].abc = abc;
+      fs.writeFileSync(manifest, JSON.stringify(data));
+      if (verify?.()) throw new Error(verify()!);
+    }) as typeof runYue2AceTrain;
+    const deps = { missingModels: () => [], run };
+    const silent = createJob('yue2-sheet', 'fixture', [], {});
+    await assert.rejects(runYue2CoverSheetJob(silent, audio, dir, deps), /The transcriber heard no melody in this source/);
+    assert.equal(silent.status, 'failed');
+    assert.equal(fs.existsSync(abcSidecarPath(audio)), false);
+    abc = 'X:1\nV: Vocal\nz4|C4|\nV: Ins\nC4|';
+    const sounding = createJob('yue2-sheet', 'fixture', [], {});
+    assert.equal(await runYue2CoverSheetJob(sounding, audio, dir, deps), abc);
+    assert.equal(sounding.status, 'done');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 

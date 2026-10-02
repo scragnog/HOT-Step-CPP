@@ -191,6 +191,22 @@ export function scoreBarSegments(line: string): string[] {
   return line.split('|').filter(segment => segment.trim());
 }
 
+/** A cover needs at least one audible melody bar. Unvoiced ABC is a single
+ * melody voice; an explicit Ins voice never counts toward this check. */
+export function hasSoundingVocalBar(abc: string): boolean {
+  let inVocal = true;
+  for (const raw of abc.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('%')) continue;
+    if (/^V:/.test(line)) { inVocal = isVocalVoice(line); continue; }
+    if (/^[A-Za-z]:/.test(line) || !inVocal) continue;
+    if (scoreBarSegments(line).some(hasNote)) return true;
+  }
+  return false;
+}
+
+export const EMPTY_COVER_SCORE_ERROR = 'The transcriber heard no melody in this source';
+
 export function classifyYue2Score(abc: string, endReason?: string, lyrics?: string, norms?: Yue2StyleNorms | null): Yue2ScoreHealth {
   const exempt = new Set<Yue2Check>(norms?.exempt ?? []);
   const sections: string[] = [];

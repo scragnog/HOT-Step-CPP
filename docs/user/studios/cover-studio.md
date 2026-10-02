@@ -53,6 +53,7 @@ have to make.
    transcription; if it is missing, the panel shows the model setup guidance.
    You can paste ABC in the editor instead, without SheetSage2. Neither path
    uses the source audio as an inference conditioning signal after approval.
+   A score with no sounding Vocal bar fails transcription or submission with "The transcriber heard no melody in this source"; add a melody note before approving or generating.
 3. Preview the full ABC, correct it in the editor, and click **Approve score**. Editing
    the score or changing the source audio or stem mix withdraws approval. The
    Generate button stays disabled until the current source has an approved score.

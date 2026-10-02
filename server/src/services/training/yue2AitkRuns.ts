@@ -9,7 +9,8 @@ import { trainingBaseDir } from './paths.js';
 import { archiveYue2TrainLogs } from './datasetProfile.js';
 import { runStamp } from './adapterLayout.js';
 import { config } from '../../config.js';
-import { listDatasets } from './datasetsRepo.js';
+import { listDatasets, updateDataset } from './datasetsRepo.js';
+import { uniqueDatasetTrigger } from './datasetTrigger.js';
 
 export function yue2JointOutputDirectory(adaptersRoot: string, trigger: string, when = new Date()): string {
   const name = trigger.trim().replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^[. ]+|[. ]+$/g, '').slice(0, 120) || 'dataset';
@@ -243,6 +244,33 @@ const skippedFolders = new Set<string>();
 let lastFolderSet: string | null = null;
 let lastDatasetSet: string | null = null;
 
+function migrateSharedTriggers(): void {
+  let datasets: ReturnType<typeof listDatasets>;
+  try { datasets = listDatasets(); }
+  catch (err) {
+    if (err instanceof Error && err.message === 'Database not initialized. Call initDb() first.') return;
+    throw err;
+  }
+  const groups = new Map<string, typeof datasets>();
+  const taken = new Set(datasets.map(ds => ds.customTag.toLowerCase()));
+  for (const ds of datasets) {
+    if (!ds.customTag) continue;
+    const key = ds.customTag.toLowerCase();
+    groups.set(key, [...(groups.get(key) ?? []), ds]);
+  }
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const ordered = group.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    const owner = ordered.find(ds => ds.slug === ds.customTag) ?? ordered[0];
+    for (const ds of ordered) {
+      if (ds.id === owner.id) continue;
+      const trigger = uniqueDatasetTrigger(ds.customTag, ds.slug, taken);
+      updateDataset(ds.id, { customTag: trigger });
+      taken.add(trigger.toLowerCase());
+    }
+  }
+}
+
 function datasetSetForSkipped(): string | null {
   if (!skippedFolders.size) return null;
   try { return listDatasets().map(ds => `${ds.id}:${ds.slug}:${ds.customTag}`).join('\n'); }
@@ -265,12 +293,16 @@ function jointFolders(): string[] | null {
 function inferredDataset(output: string): { id: string; slug: string } | null {
   const match = /^(.*)_\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d$/.exec(path.basename(output));
   if (!match) return null;
-  const matches = listDatasets().filter(ds => {
+  const datasets = listDatasets();
+  const exact = datasets.find(ds => ds.slug === match[1]);
+  if (exact) return { id: exact.id, slug: exact.slug };
+  const matches = datasets.filter(ds => {
     const trigger = ds.customTag || ds.slug;
     const folder = path.basename(yue2JointOutputDirectory(config.aceServer.adapters, trigger));
     return folder.slice(0, -20) === match[1];
   });
-  return matches.length === 1 ? { id: matches[0].id, slug: matches[0].slug } : null;
+  const owner = matches.length === 1 ? matches[0] : null;
+  return owner ? { id: owner.id, slug: owner.slug } : null;
 }
 
 function importedRun(output: string): Yue2AitkRunRecord | null {
@@ -303,6 +335,7 @@ function importedRun(output: string): Yue2AitkRunRecord | null {
 }
 
 function reconcileFromDisk(force = false): void {
+  migrateSharedTriggers();
   const folders = jointFolders();
   if (!folders) return;
   for (const skipped of skippedFolders) if (!folders.includes(skipped)) skippedFolders.delete(skipped);

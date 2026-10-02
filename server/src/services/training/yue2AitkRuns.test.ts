@@ -8,6 +8,32 @@ import test from 'node:test';
 import { checkpointRecords } from './yue2AitkRuns.js';
 import { readYue2ArRun } from './yue2ArRuns.js';
 import { readYue2Run } from './yue2Runs.js';
+import { uniqueDatasetTrigger } from './datasetTrigger.js';
+
+test('a taken trigger gains the dataset slug suffix; unique triggers stay unchanged', () => {
+  assert.equal(uniqueDatasetTrigger('base', 'base_covers', new Set(['base'])), 'base_covers');
+  assert.equal(uniqueDatasetTrigger('fresh', 'fresh_covers', new Set(['base'])), 'fresh');
+  assert.equal(uniqueDatasetTrigger('base', 'base_covers', new Set(['base', 'base_covers'])), 'base_covers_2');
+});
+
+test('dataset creation assigns a distinct trigger and leaves a unique one alone', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dataset-trigger-'));
+  try {
+    const script = [
+      "import fs from 'node:fs'; import path from 'node:path'; import assert from 'node:assert/strict';",
+      "import { initDb } from './src/db/database.js'; import { createDatasetFromFolder } from './src/services/training/datasetCreate.js';",
+      "initDb(); const root = process.env.TRAINING_DIR;",
+      "async function create(name, tag) { const sourceDir = path.join(root, name); fs.mkdirSync(sourceDir, { recursive: true }); fs.writeFileSync(path.join(sourceDir, 'track.wav'), 'audio'); return createDatasetFromFolder({ name, sourceDir, customTag: tag }); }",
+      "assert.equal((await create('Base', 'base')).customTag, 'base');",
+      "assert.equal((await create('Base Covers', 'base')).customTag, 'base_covers');",
+      "assert.equal((await create('Solo', 'solo')).customTag, 'solo');",
+    ].join('\n');
+    execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)),
+      env: { ...process.env, DATA_DIR: path.join(root, 'data'), TRAINING_DIR: path.join(root, 'training') }, stdio: 'pipe',
+    });
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 test('AITK checkpoint discovery exposes combined and native AR/NAR outputs', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-runs-'));
@@ -166,12 +192,12 @@ test('joint catalogue reconciles copied folders, stale records and active runs',
   try {
     const script = [
       "import fs from 'node:fs'; import path from 'node:path'; import assert from 'node:assert/strict';",
-      "import { initDb } from './src/db/database.js'; import { insertDataset } from './src/services/training/datasetsRepo.js';",
+      "import { initDb } from './src/db/database.js'; import { insertDataset, listDatasets } from './src/services/training/datasetsRepo.js';",
       "import { recordYue2AitkRun, listAllYue2AitkRuns, findYue2JointAdaptersFor, reconcileYue2AitkRunsAtStartup, aitkRunIndexPath } from './src/services/training/yue2AitkRuns.js';",
       "initDb(); const root = path.join(process.env.ACESTEPCPP_ADAPTERS, 'yue2-joint-adapters'); fs.mkdirSync(root, { recursive: true });",
       "const now = new Date().toISOString();",
-      "function dataset(id, tag) { insertDataset({ id, slug: id, name: id, sourceDir: path.join(process.env.TRAINING_DIR, id), recursive: true, customTag: tag, tagPosition: 'prepend', genreRatio: 0, defaultArtist: '', defaultAlbum: '', defaultGenre: '', defaultLanguage: '', sampleCount: 0, labeledCount: 0, excludedCount: 0, status: 'draft', builtAt: '', datasetJsonPath: '', albumName: '', createdAt: now, updatedAt: now }); }",
-      "dataset('a', 'alpha'); dataset('b', 'beta'); dataset('c', 'shared'); dataset('d', 'shared');",
+      "function dataset(id, tag, slug = id) { insertDataset({ id, slug, name: id, sourceDir: path.join(process.env.TRAINING_DIR, id), recursive: true, customTag: tag, tagPosition: 'prepend', genreRatio: 0, defaultArtist: '', defaultAlbum: '', defaultGenre: '', defaultLanguage: '', sampleCount: 0, labeledCount: 0, excludedCount: 0, status: 'draft', builtAt: '', datasetJsonPath: '', albumName: '', createdAt: now, updatedAt: now }); }",
+      "dataset('a', 'alpha'); dataset('b', 'beta'); dataset('9a036717', 'shared', 'shared'); dataset('e945817c', 'shared', 'shared_covers');",
       "function folder(name) { const out = path.join(root, name + '_2026-10-02_12-00-00'); const ckpt = path.join(out, 'checkpoint-step10'); fs.mkdirSync(ckpt, { recursive: true }); fs.writeFileSync(path.join(ckpt, 'native-ar.safetensors'), 'x'); fs.writeFileSync(path.join(ckpt, 'native-nar.safetensors'), 'x'); return out; }",
       "const plain = folder('alpha'); const copied = folder('beta'); folder('shared'); folder('unknown');",
       "const record = (jobId, datasetId, output, status = 'done') => ({ version: 1, jobId, datasetId, datasetSlug: datasetId, method: 'aitk', output, options: { method: 'base-matched' }, status, createdAt: 1, updatedAt: 2, checkpoints: [] });",
@@ -180,7 +206,8 @@ test('joint catalogue reconciles copied folders, stale records and active runs',
       "reconcileYue2AitkRunsAtStartup(); const runs = listAllYue2AitkRuns();",
       "assert.equal(runs.some(r => r.jobId === 'stale'), false); assert.equal(runs.find(r => r.jobId === 'active')?.status, 'interrupted'); assert.ok(runs.some(r => r.jobId === 'paused'));",
       "assert.equal(runs.find(r => r.jobId === 'remote-job')?.output, copied); assert.equal(runs.find(r => r.jobId === 'remote-job')?.status, 'done'); assert.equal(JSON.parse(fs.readFileSync(path.join(copied, 'run.json'))).output, copied);",
-      "assert.equal(runs.filter(r => r.datasetId === 'a' && r.output === plain).length, 1); assert.equal(runs.some(r => r.datasetId === 'c' || r.datasetId === 'd'), false);",
+      "assert.equal(runs.filter(r => r.datasetId === 'a' && r.output === plain).length, 1); assert.equal(runs.find(r => r.datasetId === '9a036717')?.output, path.join(root, 'shared_2026-10-02_12-00-00')); assert.equal(runs.some(r => r.datasetId === 'e945817c'), false);",
+      "assert.equal(listDatasets().find(ds => ds.id === '9a036717')?.customTag, 'shared'); assert.equal(listDatasets().find(ds => ds.id === 'e945817c')?.customTag, 'shared_covers'); assert.equal(listDatasets().find(ds => ds.id === 'a')?.customTag, 'alpha');",
       "assert.equal(JSON.parse(fs.readFileSync(aitkRunIndexPath())).length, runs.length);",
       "dataset('e', 'unknown'); assert.ok(findYue2JointAdaptersFor([{ id: 'e', slug: 'e' }]).has('e'), 'a newly added dataset resolves an unchanged folder set');",
       "const linked = findYue2JointAdaptersFor([{ id: 'a', slug: 'a' }, { id: 'b', slug: 'b' }]); assert.ok(linked.has('a')); assert.ok(linked.has('b'));",

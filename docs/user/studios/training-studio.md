@@ -16,6 +16,7 @@ An external agent (Claude Code, Codex) can also drive the dataset and training p
 ## Workflow
 
 1. Click **New dataset**, pick a source folder (recursively scanned by default), and confirm the auto-filled name, trigger word, and lyric language. HOT-Step scans the folder and shows a preview (file count, extensions, whether a `dataset.json` already exists) before anything is created.
+   If another dataset already uses that trigger, HOT-Step appends this dataset's slug suffix; the resulting trigger appears on its card so the two datasets stay distinct.
 2. On the **Label** step, run local analysis: Essentia for BPM/key, Genius for lyrics, and an AI caption (local MOSS, or a configured cloud provider) for style and genre. Scope the run to unlabeled tracks, all tracks, or a grid selection, and choose a merge policy for tracks that already have partial data.
 3. On the **Review** step, check and hand-edit every track in a spreadsheet-style grid: caption, genre, BPM, key, time signature, language, instrumental flag, lyrics, per-track trigger tag, and an exclude checkbox. Select rows for bulk edits or a scoped re-label.
 4. On the **Build** step, set the trigger word's position in the caption (prepend, append, replace) and a genre-mix ratio, then build. This writes `dataset.json` next to the audio, in the same format Side-Step's own dataset builder produces.

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   yue2ResolvePick, yue2PickFromModels, yue2CoverFromSubmission, yue2CoverPickBase,
   type Yue2PersistedSelection,
@@ -184,6 +186,29 @@ test('a cover submission with a blank ABC is rejected at submit', async () => {
     () => yue2Backend.resolveRequest({ caption: 'c', yue2Cover: { sourceId: 's' } }),
     /approved lead sheet/,
   );
+});
+
+test('a cover submission rejects a silent Vocal score', async () => {
+  const { yue2Backend } = await import('./index.js');
+  assert.throws(() => yue2Backend.resolveRequest({ caption: 'c',
+    yue2Cover: { sourceId: 's' }, yue2Abc: 'X:1\nV: Vocal\nZ4|z4|\nV: Ins\nC4|' }),
+  /The transcriber heard no melody in this source/);
+});
+
+test('a cover submission accepts one sounding Vocal bar', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-cover-submit-'));
+  try {
+    const script = [
+      "import assert from 'node:assert/strict';",
+      "import { initDb } from './src/db/database.js'; import { yue2Backend } from './src/services/backends/yue2/index.js';",
+      "initDb(); const resolved = yue2Backend.resolveRequest({ caption: 'c', yue2Cover: { sourceId: 's' }, yue2Abc: 'X:1\\nV: Vocal\\nz4|C4|\\nV: Ins\\nC4|' });",
+      "assert.ok(resolved.options.yue2Abc.includes('C4|'));",
+    ].join('\n');
+    execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
+      cwd: fileURLToPath(new URL('../../../../', import.meta.url)),
+      env: { ...process.env, DATA_DIR: path.join(root, 'data'), TRAINING_DIR: path.join(root, 'training') }, stdio: 'pipe',
+    });
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test('invalid cover score choices are rejected at the submit boundary', () => {

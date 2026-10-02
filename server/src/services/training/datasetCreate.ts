@@ -15,6 +15,7 @@ import { detailFor, syncCounters } from './datasetDetail.js';
 import { datasetLanguage } from '../languageCodes.js';
 import { scanPreview as scanPreviewFolder } from './datasetScan.js';
 import * as repo from './datasetsRepo.js';
+import { uniqueDatasetTrigger } from './datasetTrigger.js';
 import { labelsDir, slugify, uniqueSlug } from './paths.js';
 import type { CreateDatasetInput, TrainingDatasetDetail, TrainingDatasetRow } from './types.js';
 
@@ -80,6 +81,9 @@ export async function createDatasetFromFolder(input: CreateDatasetInput): Promis
   // and kept" true: the builder rewrites the same values instead of blanking
   // custom_tag / genre_ratio / default_artist / default_album on the first build.
   const priorMeta = readDatasetJsonMetadata(sourceDir);
+  const baseTrigger = typeof body.customTag === 'string'
+    ? body.customTag.trim() : (metaString(priorMeta, 'custom_tag') || slug);
+  const takenTriggers = new Set(repo.listDatasets().map(ds => ds.customTag.toLowerCase()));
   const priorTagPosition = metaString(priorMeta, 'tag_position');
   const priorGenreRatio = Number(priorMeta.genre_ratio);
 
@@ -90,9 +94,7 @@ export async function createDatasetFromFolder(input: CreateDatasetInput): Promis
     name,
     sourceDir,
     recursive,
-    customTag: typeof body.customTag === 'string'
-      ? body.customTag.trim()
-      : (metaString(priorMeta, 'custom_tag') || slug),
+    customTag: baseTrigger ? uniqueDatasetTrigger(baseTrigger, slug, takenTriggers) : '',
     tagPosition: ['prepend', 'append', 'replace'].includes(body.tagPosition)
       ? body.tagPosition
       : (['prepend', 'append', 'replace'].includes(priorTagPosition)
