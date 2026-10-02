@@ -35,6 +35,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { runOnGpuLane } from '../generation/gpuLane.js';
+import { saveDatasetCoverAbc } from '../coverDatasetSource.js';
 import { YUE2_LICENSE_NOTICE } from '../backends/yue2/index.js';
 import { getDataset } from './datasetsRepo.js';
 import { refreshYue2PresetsForNewRun } from './lyricStudioExport.js';
@@ -51,6 +52,7 @@ import {
 import {
   buildYue2SheetArgs, missingYue2SheetModels, readYue2AbcStatus,
   writeYue2CoverSheetManifest, readYue2CoverAbc,
+  seedAbcManifestFromSidecars, saveAbcManifestSidecars,
   type ResolvedYue2SheetOptions,
 } from './yue2Sheet.js';
 import {
@@ -643,7 +645,8 @@ function fatalishSheet(line: string): string {
   return m ? m[1] : '';
 }
 
-export async function runYue2SheetJob(job: TrainingJob): Promise<void> {
+export async function runYue2SheetJob(job: TrainingJob,
+  deps = { missingModels: missingYue2SheetModels, run: runYue2AceTrain }): Promise<void> {
   const opts = job.opts as ResolvedYue2SheetOptions | undefined;
   if (!opts?.manifest) {
     finishJob(job, 'failed', 'yue2-sheet job is missing its manifest path');
@@ -651,7 +654,7 @@ export async function runYue2SheetJob(job: TrainingJob): Promise<void> {
   }
   // Re-checked here as well as at the route: the route's answer can be stale by
   // the time the job reaches the head of the GPU lane.
-  const missing = missingYue2SheetModels();
+  const missing = deps.missingModels();
   if (missing.length) {
     finishJob(job, 'failed', `The SheetSage2 transcriber is missing: ${missing.join(', ')}`);
     return;
@@ -663,13 +666,15 @@ export async function runYue2SheetJob(job: TrainingJob): Promise<void> {
   }
 
   const st: SheetState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
+  let sidecarsSaved = false;
   try {
+    seedAbcManifestFromSidecars(opts.manifest);
     log(job, 'info',
       'Transcribing every source in the latent cache to a SheetSage2 lead sheet. Roughly 4% of real '
       + 'tracks decode fine but fail to render (abc_error) — that is expected, not a job failure; those '
       + 'sources train cot=off on every draw. The manifest is rewritten in place after every source.');
 
-    await runYue2AceTrain(job, 'yue2-sheet', buildYue2SheetArgs(opts), YUE2_IDLE_MS, () => {
+    await deps.run(job, 'yue2-sheet', buildYue2SheetArgs(opts), YUE2_IDLE_MS, () => {
       const s = readYue2AbcStatus(opts.manifest);
       if (!s) return 'yue2-sheet finished but the manifest could not be read back';
       return (s.sourcesWithAbc + s.sourcesWithError) > 0
@@ -678,6 +683,8 @@ export async function runYue2SheetJob(job: TrainingJob): Promise<void> {
     }, (line, state) => relaySheetLine(job, line, state), st);
 
     if (!isCancelled(job)) {
+      saveAbcManifestSidecars(opts.manifest);
+      sidecarsSaved = true;
       const s = readYue2AbcStatus(opts.manifest);
       if (s) {
         log(job, 'info',
@@ -689,6 +696,9 @@ export async function runYue2SheetJob(job: TrainingJob): Promise<void> {
     }
   } catch (err: any) {
     if (!isCancelled(job)) finishJob(job, 'failed', err?.message || String(err));
+  } finally {
+    // A partial run may have transcribed useful tracks before cancellation.
+    if (!sidecarsSaved) try { saveAbcManifestSidecars(opts.manifest); } catch { /* keep original job outcome */ }
   }
 }
 
@@ -730,6 +740,7 @@ export async function runYue2CoverSheetJob(job: TrainingJob, audioPath: string, 
     }
     if (isCancelled(job)) throw new Error('Cover lead-sheet transcription was cancelled');
     const abc = readYue2CoverAbc(manifest, name);
+    saveDatasetCoverAbc(audioPath, abc);
     finishJob(job, 'done');
     return abc;
   } catch (err) {

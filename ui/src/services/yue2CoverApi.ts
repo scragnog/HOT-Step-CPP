@@ -6,6 +6,7 @@ export interface Yue2CoverSourceInput {
   songId?: string;
   sourceLabel?: string;
   abc?: string;
+  force?: boolean;
 }
 
 export interface Yue2CoverReadiness {
@@ -30,6 +31,7 @@ export interface Yue2CoverResult {
   abc?: string;
   sourceId: string;
   sourceLabel: string;
+  scoreSource?: 'dataset';
 }
 
 export interface Yue2CoverDatasetMetadata {
@@ -41,6 +43,7 @@ export interface Yue2CoverDatasetMetadata {
   bpm?: number;
   key?: string;
   isInstrumental?: boolean;
+  abc?: string;
   lyricsSource?: 'dataset-sidecar';
 }
 

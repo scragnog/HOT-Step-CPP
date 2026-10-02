@@ -87,7 +87,7 @@ import {
   buildSamples, loadSidecarMetadata, sampleFromParts,
   scanPreview as scanPreviewFolder, ScanLimitError,
 } from '../services/training/datasetScan.js';
-import { AUDIO_EXTENSIONS, isInside, sampleIdFor, trainingBaseDir } from '../services/training/paths.js';
+import { AUDIO_EXTENSIONS, datasetDir, isInside, sampleIdFor, trainingBaseDir } from '../services/training/paths.js';
 import { resolveMossPaths } from '../services/training/mossCaption.js';
 import { samplesMissingYue2Caption } from '../services/training/yue2CaptionJob.js';
 import { bestScoredRung } from '../services/training/yue2BestRung.js';
@@ -954,6 +954,10 @@ router.delete('/datasets/:id', (req: Request, res: Response) => {
     }
     if (queue.activeJobForDataset(ds.id)) {
       res.status(409).json({ error: 'A job is running for this dataset' });
+      return;
+    }
+    if (isInside(datasetDir(ds.slug), ds.sourceDir)) {
+      res.status(409).json({ error: 'Dataset source is inside its private cache; move the source before deleting this dataset' });
       return;
     }
     // D20: the DB row and data/training/datasets/<slug>/ only. The user's audio,

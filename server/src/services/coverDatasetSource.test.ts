@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { resolveCoverDatasetSource } from './coverDatasetSource.js';
+import { resolveCoverDatasetSource, saveDatasetCoverAbc } from './coverDatasetSource.js';
+import { readAbcSidecar } from './training/abcSidecar.js';
 import { sampleIdFor } from './training/paths.js';
 import type { TrainingDatasetRow } from './training/types.js';
 
@@ -20,6 +21,8 @@ test('cover source resolves by dataset path, then exact copied bytes', () => {
     const expected = { datasetId: 'dataset-1', sampleId: sampleIdFor('track.wav'), audioPath: original };
     assert.deepEqual(resolveCoverDatasetSource(original, [dataset]), expected);
     assert.deepEqual(resolveCoverDatasetSource(copied, [dataset]), expected);
+    assert.equal(saveDatasetCoverAbc(copied, 'X:1\nK:C\nC', file => resolveCoverDatasetSource(file, [dataset])), true);
+    assert.equal(readAbcSidecar(original), 'X:1\nK:C\nC');
     fs.writeFileSync(copied, 'different source bytes');
     assert.equal(resolveCoverDatasetSource(copied, [dataset]), null);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }

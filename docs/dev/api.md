@@ -36,10 +36,13 @@ the reviewed full score and the choice. The song metadata records both that
 provenance and the ABC actually rendered.
 
 `POST /source-metadata` accepts the same source selector and returns dataset
-sidecar `lyrics`, `bpm`, `key` and `isInstrumental` when a unique source
-match exists; `matched: false` keeps the usual studio path. Matching uses the
-source's canonical path first, then an exact content hash for copied library
-or uploaded audio. A cover generation records `lyricsSource:
+sidecar `lyrics`, `bpm`, `key`, `isInstrumental` and any saved `abc` when a
+unique source match exists; `matched: false` keeps the usual studio path.
+Matching uses the source's canonical path first, then an exact content hash
+for copied library or uploaded audio. `POST /transcriptions` returns a saved
+dataset ABC immediately with `scoreSource: "dataset"` and no job. Pass
+`force: true` to transcribe again; a successful result updates `<stem>.abc`
+next to the dataset audio. A cover generation records `lyricsSource:
 "dataset-sidecar"` until the lyrics or Instrumental choice is edited.
 
 Cover transcription first tries with the engine running. If SheetSage2 fails to load,

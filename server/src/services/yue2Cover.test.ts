@@ -74,18 +74,24 @@ function fixture(missing = false, defer = false) {
     close: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 
-test('dataset sidecar supplies lyrics, tempo and key', async () => {
+test('dataset sidecar supplies lyrics, tempo, key and a cached score without a job', async () => {
   const f = fixture(true);
   try {
     const audio = path.join(f.referenceDir, f.upload);
     f.setDatasetAudio(audio);
     fs.writeFileSync(path.join(f.referenceDir, path.parse(f.upload).name + '.txt'),
       'caption: test\nbpm: 132\nkey: D minor\nis_instrumental: false\nlyrics:\nVerse line\n');
+    fs.writeFileSync(path.join(f.referenceDir, path.parse(f.upload).name + '.abc'), 'X:1\nK:Dm\nD\n');
     const input = { sourceAudioUrl: `/references/${f.upload}` };
     const metadata = await f.service.lookup(input, 'owner');
     assert.deepEqual(metadata, { matched: true, datasetId: 'dataset-1', sampleId: 'sample-1',
       metadataAvailable: true, lyrics: 'Verse line', bpm: 132, key: 'D minor', isInstrumental: false,
-      lyricsSource: 'dataset-sidecar' });
+      abc: 'X:1\nK:Dm\nD', lyricsSource: 'dataset-sidecar' });
+    const result = await f.service.start(input, 'owner');
+    assert.equal(result.status, 'done');
+    assert.equal(result.abc, 'X:1\nK:Dm\nD');
+    assert.equal(result.scoreSource, 'dataset');
+    assert.equal(f.counts().started, 0);
   } finally { f.close(); }
 });
 
@@ -106,6 +112,18 @@ test('instrumental metadata and missing or malformed sidecars preserve fallback'
     if (!instrumental.matched || !instrumental.metadataAvailable) throw new Error('Expected dataset metadata');
     assert.equal(instrumental.isInstrumental, true);
     assert.equal(instrumental.lyrics, '');
+  } finally { f.close(); }
+});
+
+test('force transcribes again even when the dataset has a cached score', async () => {
+  const f = fixture();
+  try {
+    const audio = path.join(f.referenceDir, f.upload);
+    f.setDatasetAudio(audio);
+    fs.writeFileSync(path.join(f.referenceDir, path.parse(f.upload).name + '.abc'), 'X:1\nK:C\nC');
+    const result = await f.service.start({ sourceAudioUrl: `/references/${f.upload}`, force: true }, 'owner');
+    assert.equal(result.status, 'queued');
+    assert.equal(f.counts().started, 1);
   } finally { f.close(); }
 });
 

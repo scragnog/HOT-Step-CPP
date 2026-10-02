@@ -63,6 +63,12 @@ recipe, an untouched field keeps following it and only fields you actually chang
 
 ## Tips and limits
 
+YuE2 lead sheets are also saved as plain-text `<stem>.abc` files next to the
+dataset audio and its metadata sidecar. A later lead-sheet stage reuses these
+scores instead of transcribing those tracks again; a forced transcription
+replaces a score only when it produces usable ABC. Clearing prepared caches or
+starting a fresh batch does not remove these source files.
+
 Trained adapters are written under the app's adapters folder, split by base architecture and size (for example a 4B ACE-Step planner LoRA lands under `lm-4b/<name>/<run>/`, a DiT LoRA under `dit-<base>/<name>/<run>/`), with a timestamped subfolder per run so retraining never overwrites an earlier adapter. They show up in the adapter pickers used elsewhere in the app (Create, Custom-Gen, the audition card here) without any extra step; see [Adapters](../adapters.md) for how adapters are selected, scaled, and stacked at generation time.
 
 The Preprocess and Train phases stop the local engine while `ace-train` runs and restart it afterward. Expect generation to be unavailable in the app for the duration of a preprocess or training job. Labeling does not require the engine unless MOSS captioning is selected.

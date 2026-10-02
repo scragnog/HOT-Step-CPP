@@ -180,7 +180,7 @@ AI-assisted lyric writing from a learned style profile, plus per-album render pr
 ## Cover Studio
 
 Re-style a recording with ACE-Step's audio-conditioned cover or YuE2's reviewed
-lead-sheet workflow, reusing dataset metadata when available.
+lead-sheet workflow, reusing dataset metadata and scores when available.
 Details: [Cover Studio](docs/user/studios/cover-studio.md)
 
 | Feature | What it does |

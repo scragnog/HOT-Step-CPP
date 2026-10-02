@@ -11,6 +11,7 @@ import { runYue2CoverSheetJob } from './training/yue2ArTrainRunner.js';
 import { resolveCoverDatasetSource } from './coverDatasetSource.js';
 import { readSidecar } from './training/sidecarIO.js';
 import { sidecarPathFor } from './training/paths.js';
+import { readAbcSidecar } from './training/abcSidecar.js';
 
 const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
 const MAX_AUDIO_SECONDS = 10 * 60;
@@ -23,7 +24,7 @@ export class CoverRequestError extends Error {
 
 export interface CoverSource { sourceId: string; sourceLabel: string; audioPath: string }
 type SavedSource = Pick<CoverSource, 'sourceId' | 'sourceLabel'> & { userId: string; name: string };
-type CoverInput = { sourceAudioUrl?: unknown; songId?: unknown; sourceLabel?: unknown; abc?: unknown };
+type CoverInput = { sourceAudioUrl?: unknown; songId?: unknown; sourceLabel?: unknown; abc?: unknown; force?: unknown };
 
 export function createYue2CoverService(deps = {
   queue,
@@ -92,6 +93,13 @@ export function createYue2CoverService(deps = {
       if (typeof input.abc !== 'string' || !input.abc.trim() || input.abc.length > MAX_ABC_LENGTH) throw new CoverRequestError('ABC must be non-empty and at most 64 KB.');
       return { status: 'done' as const, abc: input.abc.trim(), sourceId: selected.sourceId, sourceLabel: selected.sourceLabel };
     }
+    if (input.force !== undefined && typeof input.force !== 'boolean') throw new CoverRequestError('force must be a boolean.');
+    const matched = deps.datasetMatch(selected.audioPath);
+    if (matched && !input.force) {
+      const abc = readAbcSidecar(matched.audioPath);
+      if (abc) return { status: 'done' as const, abc, sourceId: selected.sourceId,
+        sourceLabel: selected.sourceLabel, scoreSource: 'dataset' as const };
+    }
     const ready = readiness();
     if (!ready.ready) throw new CoverRequestError(ready.message!, 400);
     const job = deps.queue.createJob('yue2-sheet', `cover:${userId}`, [], { sourceId: selected.sourceId });
@@ -123,14 +131,15 @@ export function createYue2CoverService(deps = {
     const isInstrumental = ['true', '1', 'yes'].includes(instrumental || '');
     const hasLyrics = typeof fields.lyrics === 'string' && !!fields.lyrics.trim();
     const validBpm = Number.isFinite(bpm) && bpm >= 20 && bpm <= 300;
+    const abc = readAbcSidecar(matched.audioPath);
     if (!validBpm || !key || !validInstrumental || (!hasLyrics && !isInstrumental)) {
-      return { matched: false as const };
+      return abc ? { matched: true as const, metadataAvailable: false as const, abc } : { matched: false as const };
     }
     return { matched: true as const, datasetId: matched.datasetId, sampleId: matched.sampleId,
       metadataAvailable: true as const,
       lyrics: fields.lyrics || '', bpm, key,
       isInstrumental,
-      lyricsSource: 'dataset-sidecar' as const };
+      abc, lyricsSource: 'dataset-sidecar' as const };
   }
 
   function find(jobId: string, userId: string) {

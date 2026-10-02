@@ -77,7 +77,9 @@ sidecar lyrics, BPM and key. It labels these values **from dataset**, skips the
 Genius lookup and audio analysis, and lets you edit them. An instrumental
 sidecar selects Instrumental. If the sidecar is absent or incomplete, the
 usual lookup and analysis path applies. Dataset lyrics are recorded as such in
-the cover's generation parameters until you edit them.
+the cover's generation parameters until you edit them. A saved `<stem>.abc`
+beside the dataset audio opens in the score editor without a transcription job;
+**Retry transcription** replaces that saved score after a successful run.
 
 ## ACE-Step controls
 

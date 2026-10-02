@@ -11,6 +11,7 @@ interface Props {
   preparing: boolean;
   error: string;
   abc: string;
+  scoreSource?: 'dataset' | null;
   approved: boolean;
   onAbcChange: (value: string) => void;
   onTranscribe: () => void;
@@ -73,6 +74,7 @@ export const Yue2CoverScore: React.FC<Props> = p => {
         </div>
       )}
       {p.error && <p role="alert" className="text-xs text-red-500">{p.error}</p>}
+      {p.scoreSource && <p className="text-xs text-cyan-600 dark:text-cyan-300">Score from dataset · editable</p>}
       <textarea aria-label="Editable ABC score" value={p.abc} disabled={busy} onChange={e => p.onAbcChange(e.target.value)}
         placeholder="Paste an ABC score here to skip transcription"
         className="w-full h-28 resize-y rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-xs font-mono text-zinc-900 dark:text-white" />

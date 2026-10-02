@@ -5,6 +5,7 @@ import { listDatasets } from './training/datasetsRepo.js';
 import { dedupeBySidecar, scanAudioFiles } from './training/datasetScan.js';
 import { sampleIdFor } from './training/paths.js';
 import type { TrainingDatasetRow } from './training/types.js';
+import { writeAbcSidecar } from './training/abcSidecar.js';
 
 export interface CoverDatasetSource {
   datasetId: string;
@@ -50,4 +51,13 @@ export function resolveCoverDatasetSource(
   // identical bytes may carry conflicting sidecars, so do not guess.
   const paths = new Set(matches.map(c => canonical(c.audioPath)));
   return paths.size === 1 ? matches[0] : null;
+}
+
+export function saveDatasetCoverAbc(
+  audioPath: string, abc: string, match = resolveCoverDatasetSource,
+): boolean {
+  let datasetSource: CoverDatasetSource | null;
+  try { datasetSource = match(audioPath); }
+  catch { return false; }
+  return datasetSource ? writeAbcSidecar(datasetSource.audioPath, abc) : false;
 }

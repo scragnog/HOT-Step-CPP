@@ -86,6 +86,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [lyrics, setLyrics] = useState(() => restore<string>('lyrics', ''));
   const [lyricsSource, setLyricsSource] = useState<'dataset-sidecar' | null>(() => restore('lyricsSource', null));
   const [datasetAnalysis, setDatasetAnalysis] = useState(() => restore('datasetAnalysis', false));
+  const [sheetScoreSource, setSheetScoreSource] = useState<'dataset' | null>(null);
   const sourceLookupRef = useRef(0);
   const lyricEditRef = useRef(0);
   const instrumentalEditRef = useRef(0);
@@ -235,6 +236,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
   const applyDatasetMetadata = (data: Yue2CoverDatasetMetadata, lyricEdit: number, instrumentalEdit: number): boolean => {
     if (!data.matched) return false;
+    if (data.abc) { setSheetAbc(data.abc); setSheetScoreSource('dataset'); }
     if (!data.metadataAvailable || data.bpm == null || !data.key) return false;
     if (lyricEditRef.current === lyricEdit) {
       setLyrics(data.lyrics || '');
@@ -262,7 +264,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setSourceSongId(String(s.id));
     const lookup = ++sourceLookupRef.current;
     const lyricEdit = lyricEditRef.current, instrumentalEdit = instrumentalEditRef.current;
-    setLyricsSource(null); setDatasetAnalysis(false);
+    setLyricsSource(null); setDatasetAnalysis(false); setSheetScoreSource(null);
     clearStems();
 
     // Source audio — reuse the track's server URL directly (loadSourceAudio
@@ -331,7 +333,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (!token) { showToast(t('cover.signInFirst')); return; }
     const lookup = ++sourceLookupRef.current;
     const lyricEdit = lyricEditRef.current, instrumentalEdit = instrumentalEditRef.current;
-    setLyricsSource(null); setDatasetAnalysis(false);
+    setLyricsSource(null); setDatasetAnalysis(false); setSheetScoreSource(null);
     setSourceAudioUrl(''); setSourceSongId(''); clearStems();
     setSourceFileName(file.name);
     setBpmCorrection(1);
@@ -562,14 +564,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     try {
       const source = await prepareYue2Source();
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
-      const result = await yue2CoverApi.start({ ...source, sourceLabel: sourceFileName.slice(0, 120) }, token);
+      const result = await yue2CoverApi.start({ ...source, sourceLabel: sourceFileName.slice(0, 120), force: !!sheetAbc }, token);
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) {
         if (result.jobId) await yue2CoverApi.cancel(result.jobId, token);
         return;
       }
       setSheetAudioUrl(source.audioUrl);
       if (result.jobId) { sheetJobRef.current = result.jobId; setSheetJobId(result.jobId); }
-      else if (result.abc) setSheetAbc(result.abc);
+      else if (result.abc) { setSheetAbc(result.abc); setSheetScoreSource(result.scoreSource === 'dataset' ? 'dataset' : null); }
     } catch (err: any) { if (sourceKeyRef.current === key && sheetRequestRef.current === request) setSheetError(err.message); }
     finally { if (sheetRequestRef.current === request) setSheetPreparing(false); }
   };
@@ -656,6 +658,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       const params = { ...sharedParams, ...yue2Params, customMode: true, taskType: 'text2music',
         title, caption: resolvedCaption, style: resolvedCaption, lyrics: instrumental ? '' : lyrics,
         ...(lyricsSource ? { lyricsSource } : {}),
+        ...(sheetScoreSource ? { scoreSource: 'dataset-sidecar' } : {}),
         instrumental, source: 'cover-studio', sourceAudioUrl: approvedSheet.audioUrl,
         yue2Cover: { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel, keepChords },
         yue2Abc: approvedSheet.abc, yue2Cot: keepChords ? 'full' : 'melody', yue2Pick: pair };
@@ -879,7 +882,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setSourceFileName(''); setSourceAudioUrl(''); setSourceSongId('');
     setMetadata(null); setAnalysis(null);
     setSongArtist(''); setSongTitle(''); setLyrics('');
-    setLyricsSource(null); setDatasetAnalysis(false);
+    setLyricsSource(null); setDatasetAnalysis(false); setSheetScoreSource(null);
     setBpmCorrection(1); setBpmOverride(null); setKeyOverride(null);
     // Clear stems too — releases the split job server-side.
     clearStems();
@@ -993,7 +996,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
             sourceReady={!!sourceAudioUrl && !isUploading}
             readiness={readiness} job={sheetJob} preparing={sheetPreparing} error={sheetError}
             abc={sheetAbc} approved={!!approvedSheet && approvedSheet.key === sourceKey}
-            onAbcChange={value => { sheetRequestRef.current += 1; setSheetPreparing(false); setSheetAbc(value); setApprovedSheet(null); }}
+            onAbcChange={value => { sheetRequestRef.current += 1; setSheetPreparing(false); setSheetAbc(value); setSheetScoreSource(null); setApprovedSheet(null); }}
+            scoreSource={sheetScoreSource}
             onTranscribe={handleTranscribe} onCancel={handleCancelSheet} onApprove={handleApproveSheet}
           />}
           

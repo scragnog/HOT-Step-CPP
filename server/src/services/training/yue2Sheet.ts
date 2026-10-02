@@ -28,9 +28,62 @@
 
 import fs from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
 
 import { config } from '../../config.js';
 import { yue2ModelDir } from './yue2Train.js';
+import { readAbcSidecar, writeAbcSidecar } from './abcSidecar.js';
+
+interface SheetManifestSource { name?: unknown; source?: unknown; abc?: unknown; abc_error?: unknown }
+
+function manifestSources(manifestPath: string): { manifest: Record<string, unknown>; sources: SheetManifestSource[] } {
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+  if (!Array.isArray(manifest.sources)) throw new Error('Lead-sheet manifest has no sources');
+  return { manifest, sources: manifest.sources as SheetManifestSource[] };
+}
+
+function sourceAudio(row: SheetManifestSource): string | null {
+  if (typeof row.source !== 'string' || typeof row.name !== 'string'
+      || path.basename(row.source) !== row.name) return null;
+  return row.source;
+}
+
+/** Restore scores from the source folder before the transcriber selects rows. */
+export function seedAbcManifestFromSidecars(manifestPath: string): number {
+  const { manifest, sources } = manifestSources(manifestPath);
+  let count = 0;
+  for (const row of sources) {
+    const audio = sourceAudio(row);
+    if (!audio || (typeof row.abc === 'string' && row.abc.trim())) continue;
+    const abc = readAbcSidecar(audio);
+    if (!abc) continue;
+    row.abc = abc;
+    delete row.abc_error;
+    count++;
+  }
+  if (count) {
+    const tmp = path.join(path.dirname(manifestPath), `.abc_manifest_${crypto.randomBytes(6).toString('hex')}.tmp`);
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(manifest), 'utf8');
+      fs.renameSync(tmp, manifestPath);
+    } finally { try { fs.unlinkSync(tmp); } catch { /* renamed */ } }
+  }
+  return count;
+}
+
+/** Copy successful manifest scores to permanent per-track sidecars. */
+export function saveAbcManifestSidecars(manifestPath: string): number {
+  const { sources } = manifestSources(manifestPath);
+  let count = 0;
+  for (const row of sources) {
+    const audio = sourceAudio(row);
+    if (audio && typeof row.abc === 'string' && row.abc.trim()
+        && !(typeof row.abc_error === 'string' && row.abc_error.trim())) {
+      if (writeAbcSidecar(audio, row.abc)) count++;
+    }
+  }
+  return count;
+}
 
 // ── Model files ─────────────────────────────────────────────────────────────
 
