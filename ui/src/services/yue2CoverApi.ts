@@ -32,6 +32,18 @@ export interface Yue2CoverResult {
   sourceLabel: string;
 }
 
+export interface Yue2CoverDatasetMetadata {
+  matched: boolean;
+  metadataAvailable?: boolean;
+  datasetId?: string;
+  sampleId?: string;
+  lyrics?: string;
+  bpm?: number;
+  key?: string;
+  isInstrumental?: boolean;
+  lyricsSource?: 'dataset-sidecar';
+}
+
 async function request<T>(path: string, token: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     ...init,
@@ -44,6 +56,9 @@ async function request<T>(path: string, token: string, init?: RequestInit): Prom
 
 export const yue2CoverApi = {
   readiness: (token: string) => request<Yue2CoverReadiness>('/readiness', token),
+  sourceMetadata: (input: Yue2CoverSourceInput, token: string) => request<Yue2CoverDatasetMetadata>('/source-metadata', token, {
+    method: 'POST', body: JSON.stringify(input),
+  }),
   start: (input: Yue2CoverSourceInput, token: string) => request<Yue2CoverResult>('/transcriptions', token, {
     method: 'POST', body: JSON.stringify(input),
   }),

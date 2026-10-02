@@ -32,7 +32,7 @@ import type { LatentMetadata } from '../shared/LatentImport';
 import { loadSelections, saveSelections } from '../lyric-studio/ProviderSelector';
 import { useBackendStore } from '../../stores/backendStore';
 import { fetchYue2CaptionSource, resolveYue2Caption, yue2PickAtEnqueue, type Yue2SourceTrack } from '../../utils/yue2CaptionSource';
-import { yue2CoverApi, type Yue2CoverJob, type Yue2CoverReadiness } from '../../services/yue2CoverApi';
+import { yue2CoverApi, type Yue2CoverDatasetMetadata, type Yue2CoverJob, type Yue2CoverReadiness } from '../../services/yue2CoverApi';
 import { Yue2CoverPanel } from './Yue2CoverPanel';
 import { Yue2CoverScore } from './Yue2CoverScore';
 
@@ -84,6 +84,11 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [songArtist, setSongArtist] = useState(() => restore<string>('songArtist', ''));
   const [songTitle, setSongTitle] = useState(() => restore<string>('songTitle', ''));
   const [lyrics, setLyrics] = useState(() => restore<string>('lyrics', ''));
+  const [lyricsSource, setLyricsSource] = useState<'dataset-sidecar' | null>(() => restore('lyricsSource', null));
+  const [datasetAnalysis, setDatasetAnalysis] = useState(() => restore('datasetAnalysis', false));
+  const sourceLookupRef = useRef(0);
+  const lyricEditRef = useRef(0);
+  const instrumentalEditRef = useRef(0);
   const [isSearchingLyrics, setIsSearchingLyrics] = useState(false);
 
   // ── Target artist ──
@@ -206,6 +211,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => { persist('songArtist', songArtist); }, [songArtist]);
   useEffect(() => { persist('songTitle', songTitle); }, [songTitle]);
   useEffect(() => { persist('lyrics', lyrics); }, [lyrics]);
+  useEffect(() => { persist('lyricsSource', lyricsSource); }, [lyricsSource]);
+  useEffect(() => { persist('datasetAnalysis', datasetAnalysis); }, [datasetAnalysis]);
   useEffect(() => { persist('selectedArtistId', selectedArtistId); }, [selectedArtistId]);
   useEffect(() => { persist('selectedPreset', selectedPreset); }, [selectedPreset]);
   useEffect(() => { persist('artistCaption', artistCaption); }, [artistCaption]);
@@ -226,6 +233,25 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 4000); };
 
+  const applyDatasetMetadata = (data: Yue2CoverDatasetMetadata, lyricEdit: number, instrumentalEdit: number): boolean => {
+    if (!data.matched) return false;
+    if (!data.metadataAvailable || data.bpm == null || !data.key) return false;
+    if (lyricEditRef.current === lyricEdit) {
+      setLyrics(data.lyrics || '');
+      setLyricsSource(instrumentalEditRef.current === instrumentalEdit ? 'dataset-sidecar' : null);
+    }
+    if (instrumentalEditRef.current === instrumentalEdit) setInstrumental(data.isInstrumental === true);
+    setAnalysis({ bpm: data.bpm, key: data.key, scale: data.key.split(' ')[1] });
+    setDatasetAnalysis(true);
+    return true;
+  };
+
+  const lookupDatasetMetadata = async (input: { songId?: string; sourceAudioUrl?: string }) => {
+    if (!token) return null;
+    try { return await yue2CoverApi.sourceMetadata(input, token); }
+    catch { return null; }
+  };
+
   // ── "Send to Cover Studio" — load a library track as the cover source (#61) ──
   useEffect(() => {
     if (!coverSource || coverSource.timestamp === _lastConsumedCoverTs) return;
@@ -234,6 +260,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const gpData: any = s.generationParams || s.generation_params || {};
     const audioUrl = s.audioUrl || s.audio_url || '';
     setSourceSongId(String(s.id));
+    const lookup = ++sourceLookupRef.current;
+    const lyricEdit = lyricEditRef.current, instrumentalEdit = instrumentalEditRef.current;
+    setLyricsSource(null); setDatasetAnalysis(false);
     clearStems();
 
     // Source audio — reuse the track's server URL directly (loadSourceAudio
@@ -262,19 +291,21 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     // BPM/key — (A) use the track's stored metadata, else (B) analyze the source.
     const storedBpm = s.bpm ?? gpData.bpm;
     const storedKey = s.key_scale || gpData.keyScale;
-    if (storedBpm && storedKey) {
-      setAnalysis({ bpm: Number(storedBpm), key: String(storedKey), scale: String(storedKey).split(' ')[1] });
-    } else if (audioUrl) {
-      setIsAnalyzing(true);
-      fetch('/api/analyze', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioUrl }),
-      })
-        .then(r => (r.ok ? r.json() : null))
-        .then(d => { if (d) setAnalysis({ bpm: d.bpm || 120, key: `${d.key || 'C'} ${d.scale || 'major'}`, scale: d.scale }); })
-        .catch(() => { /* leave defaults; user can override BPM/key manually */ })
-        .finally(() => setIsAnalyzing(false));
-    }
+    void (async () => {
+      const dataset = await lookupDatasetMetadata({ songId: String(s.id) });
+      if (sourceLookupRef.current !== lookup || applyDatasetMetadata(dataset || { matched: false }, lyricEdit, instrumentalEdit)) return;
+      if (storedBpm && storedKey) {
+        setAnalysis({ bpm: Number(storedBpm), key: String(storedKey), scale: String(storedKey).split(' ')[1] });
+      } else if (audioUrl) {
+        setIsAnalyzing(true);
+        try {
+          const r = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ audioUrl }) });
+          const d = r.ok ? await r.json() : null;
+          if (d && sourceLookupRef.current === lookup) setAnalysis({ bpm: d.bpm || 120, key: `${d.key || 'C'} ${d.scale || 'major'}`, scale: d.scale });
+        } catch { /* leave defaults; user can override */ }
+        finally { if (sourceLookupRef.current === lookup) setIsAnalyzing(false); }
+      }
+    })();
     showToast(t('cover.loadedFromLibrary', 'Loaded source from library'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coverSource?.timestamp]);
@@ -298,9 +329,13 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // ── File upload + analysis pipeline ──
   const handleFileSelected = async (file: File) => {
     if (!token) { showToast(t('cover.signInFirst')); return; }
+    const lookup = ++sourceLookupRef.current;
+    const lyricEdit = lyricEditRef.current, instrumentalEdit = instrumentalEditRef.current;
+    setLyricsSource(null); setDatasetAnalysis(false);
     setSourceAudioUrl(''); setSourceSongId(''); clearStems();
     setSourceFileName(file.name);
     setBpmCorrection(1);
+    setBpmOverride(null);
     setKeyOverride(null);
 
     // Check track cache
@@ -317,8 +352,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       try {
         const fd = new FormData(); fd.append('audio', file);
         const r = await fetch('/api/upload/audio', { method: 'POST', body: fd });
-        if (r.ok) { const d = await r.json(); setSourceAudioUrl(d.audio_url || ''); }
-      } catch {} finally { setIsUploading(false); }
+        if (r.ok) {
+          const d = await r.json();
+          if (sourceLookupRef.current !== lookup) return;
+          setSourceAudioUrl(d.audio_url || '');
+          const dataset = await lookupDatasetMetadata({ sourceAudioUrl: d.audio_url });
+          if (sourceLookupRef.current === lookup && dataset) applyDatasetMetadata(dataset, lyricEdit, instrumentalEdit);
+        }
+      } catch {} finally { if (sourceLookupRef.current === lookup) setIsUploading(false); }
       return;
     }
 
@@ -332,6 +373,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       const metaRes = await fetch('/api/analyze/metadata', { method: 'POST', body: metaFd });
       if (metaRes.ok) {
         const meta = await metaRes.json();
+        if (sourceLookupRef.current !== lookup) return;
         setMetadata(meta);
         extractedArtist = meta.artist || '';
         extractedTitle = meta.title || '';
@@ -345,8 +387,13 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       const upRes = await fetch('/api/upload/audio', { method: 'POST', body: upFd });
       if (!upRes.ok) throw new Error('Upload failed');
       const upData = await upRes.json();
+      if (sourceLookupRef.current !== lookup) return;
       const audioUrl = upData.audio_url || '';
       setSourceAudioUrl(audioUrl);
+
+      const dataset = await lookupDatasetMetadata({ sourceAudioUrl: audioUrl });
+      if (sourceLookupRef.current !== lookup) return;
+      if (dataset && applyDatasetMetadata(dataset, lyricEdit, instrumentalEdit)) return;
 
       // 3. Essentia analysis
       setIsUploading(false); setIsAnalyzing(true);
@@ -360,7 +407,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         const d = await anRes.json();
         bpm = d.bpm || 120; key = `${d.key || 'C'} ${d.scale || 'major'}`; scale = d.scale;
         analysed = true;
-        setAnalysis({ bpm, key, scale });
+        if (sourceLookupRef.current === lookup) setAnalysis({ bpm, key, scale });
       }
       // 4. Cache. Only a real analysis goes in: with Essentia unavailable the
       // 120 / C major fallback was cached and came back labelled "detected" on
@@ -371,16 +418,18 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       });
     } catch (err: any) {
       showToast(`Error: ${err.message}`);
-    } finally { setIsUploading(false); setIsAnalyzing(false); }
+    } finally { if (sourceLookupRef.current === lookup) { setIsUploading(false); setIsAnalyzing(false); } }
   };
 
   // ── Lyrics search ──
   const handleSearchLyrics = async () => {
     if (!songArtist.trim() || !songTitle.trim()) { showToast(t('cover.enterArtistTitle')); return; }
+    lyricEditRef.current++;
     setIsSearchingLyrics(true);
     try {
       const result = await lireekApi.searchSongLyrics(songArtist.trim(), songTitle.trim());
       setLyrics(result.lyrics);
+      setLyricsSource(null);
       if (result.title) setSongTitle(result.title);
       showToast(t('cover.lyricsFound'));
       if (sourceFileName) saveTrackCacheEntry(sourceFileName, { lyrics: result.lyrics, artist: songArtist.trim(), title: result.title || songTitle.trim() });
@@ -606,6 +655,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       const title = songArtist ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover');
       const params = { ...sharedParams, ...yue2Params, customMode: true, taskType: 'text2music',
         title, caption: resolvedCaption, style: resolvedCaption, lyrics: instrumental ? '' : lyrics,
+        ...(lyricsSource ? { lyricsSource } : {}),
         instrumental, source: 'cover-studio', sourceAudioUrl: approvedSheet.audioUrl,
         yue2Cover: { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel, keepChords },
         yue2Abc: approvedSheet.abc, yue2Cot: keepChords ? 'full' : 'melody', yue2Pick: pair };
@@ -699,6 +749,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         instrumental: instrumental,
         vocalLanguage,
         source: 'cover-studio',
+        ...(lyricsSource ? { lyricsSource } : {}),
         artistName: selectedArtist?.name || songArtist || '',
         sourceArtist: songArtist || '',
         ...(sourceLatentUrl ? { sourceLatentUrl } : {}),
@@ -824,10 +875,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
 
   const handleClearSource = () => {
+    sourceLookupRef.current++;
     setSourceFileName(''); setSourceAudioUrl(''); setSourceSongId('');
     setMetadata(null); setAnalysis(null);
     setSongArtist(''); setSongTitle(''); setLyrics('');
-    setBpmCorrection(1); setKeyOverride(null);
+    setLyricsSource(null); setDatasetAnalysis(false);
+    setBpmCorrection(1); setBpmOverride(null); setKeyOverride(null);
     // Clear stems too — releases the split job server-side.
     clearStems();
   };
@@ -876,6 +929,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         <SourcePanel
           yue2Mode={yue2Mode}
           sourceFileName={sourceFileName} metadata={metadata} analysis={analysis}
+          fromDataset={datasetAnalysis}
           isUploading={isUploading} isAnalyzing={isAnalyzing}
           onFileSelected={handleFileSelected} onClear={handleClearSource}
           bpmCorrection={bpmCorrection} onBpmCorrectionChange={setBpmCorrection}
@@ -922,17 +976,18 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
                 <input value={songTitle} onChange={e => setSongTitle(e.target.value)}
                   placeholder={t('cover.songTitlePlaceholder')} className="flex-1 px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-white placeholder-zinc-400 focus:outline-none focus:border-cyan-500" />
               </div>
-              <button onClick={handleSearchLyrics} disabled={isSearchingLyrics || !songArtist.trim() || !songTitle.trim()}
+              <button onClick={handleSearchLyrics} disabled={!!lyricsSource || isSearchingLyrics || !songArtist.trim() || !songTitle.trim()}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 text-xs font-medium transition-colors disabled:opacity-50">
                 {isSearchingLyrics ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
                 Genius
               </button>
             </div>
           </div>
-          <div className="flex-1 p-4">
-            <textarea value={lyrics} onChange={e => setLyrics(e.target.value)}
+          <div className="flex-1 min-h-0 p-4 flex flex-col gap-1">
+            {lyricsSource && <span className="text-[10px] text-cyan-600 dark:text-cyan-300">Lyrics from dataset · editable</span>}
+            <textarea value={lyrics} onChange={e => { lyricEditRef.current++; setLyrics(e.target.value); setLyricsSource(null); }}
               placeholder={t('cover.lyricsPlaceholder')}
-              className="w-full h-full resize-none bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-cyan-500 transition-colors font-mono leading-relaxed" />
+              className="w-full min-h-0 flex-1 resize-none bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-cyan-500 transition-colors font-mono leading-relaxed" />
           </div>
           {yue2Mode && <Yue2CoverScore
             sourceReady={!!sourceAudioUrl && !isUploading}
@@ -954,7 +1009,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           caption={artistCaption} onCaptionChange={setArtistCaption}
           captionMode={captionMode} onCaptionMode={setCaptionMode}
           captionTracks={captionTracks} resolvedCaption={resolvedCaption}
-          instrumental={instrumental} onInstrumentalChange={setInstrumental}
+          instrumental={instrumental} onInstrumentalChange={value => { instrumentalEditRef.current++; setInstrumental(value); setLyricsSource(null); }}
           pairMode={pairMode} onPairMode={setPairMode}
           ar={yue2Ar} nar={yue2Nar} onAr={setYue2Ar} onNar={setYue2Nar}
           arOptions={adapterOptions('ar')} narOptions={adapterOptions('nar')}
@@ -971,7 +1026,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           coverNoiseStrength={coverNoiseStrength} onCoverNoiseStrength={setCoverNoiseStrength}
           coverNoiseMethod={coverNoiseMethod} onCoverNoiseMethodChange={setCoverNoiseMethod}
           noFsq={noFsq} onNoFsqChange={setNoFsq}
-          instrumental={instrumental} onInstrumentalChange={setInstrumental}
+          instrumental={instrumental} onInstrumentalChange={value => { instrumentalEditRef.current++; setInstrumental(value); setLyricsSource(null); }}
           tempoScale={tempoScale} onTempoScale={setTempoScale}
           pitchShift={pitchShift} onPitchShift={setPitchShift}
           analysis={analysis}

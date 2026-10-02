@@ -17,6 +17,7 @@ interface SourcePanelProps {
   sourceFileName: string;
   metadata: AudioMetadata | null;
   analysis: AudioAnalysis | null;
+  fromDataset?: boolean;
   isUploading: boolean;
   isAnalyzing: boolean;
   onFileSelected: (file: File) => void;
@@ -57,7 +58,7 @@ interface SourcePanelProps {
 
 export const SourcePanel: React.FC<SourcePanelProps> = ({
   yue2Mode = false,
-  sourceFileName, metadata, analysis, isUploading, isAnalyzing,
+  sourceFileName, metadata, analysis, fromDataset = false, isUploading, isAnalyzing,
   onFileSelected, onClear,
   bpmCorrection, onBpmCorrectionChange,
   bpmOverride, onBpmOverrideChange,
@@ -343,8 +344,8 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
           <span className="text-[10px] font-medium text-zinc-500 uppercase">{t('cover.analysis')}</span>
           <div className="grid grid-cols-2 gap-2">
             <div className="rounded-lg bg-gradient-to-br from-cyan-500/10 to-teal-500/10 border border-cyan-500/20 p-3 text-center">
-              <span className="text-[10px] text-zinc-500 block">BPM</span>
-              <span className={`text-lg font-bold ${bpmIsOverridden && !yue2Mode ? 'text-amber-400' : 'text-cyan-400'}`}>{yue2Mode ? analysis.bpm : (correctedBpm ?? analysis.bpm)}</span>
+              <span className="text-[10px] text-zinc-500 block">BPM{fromDataset && !bpmIsOverridden ? ' · from dataset' : ''}</span>
+              <span className={`text-lg font-bold ${bpmIsOverridden ? 'text-amber-400' : 'text-cyan-400'}`}>{correctedBpm ?? analysis.bpm}</span>
               {!yue2Mode && (bpmIsOverridden || bpmCorrection !== 1) && (
                 <span className="text-[9px] text-zinc-500 block">
                   (detected: {analysis.bpm})
@@ -352,8 +353,8 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
               )}
             </div>
             <div className="rounded-lg bg-gradient-to-br from-teal-500/10 to-emerald-500/10 border border-teal-500/20 p-3 text-center">
-              <span className="text-[10px] text-zinc-500 block">Key</span>
-              <span className="text-lg font-bold text-teal-400">{yue2Mode ? analysis.key : (effectiveKey || analysis.key)}</span>
+              <span className="text-[10px] text-zinc-500 block">Key{fromDataset && !keyOverride ? ' · from dataset' : ''}</span>
+              <span className="text-lg font-bold text-teal-400">{effectiveKey || analysis.key}</span>
               {!yue2Mode && keyOverride && (
                 <span className="text-[9px] text-zinc-500 block">
                   (detected: {analysis.key})
@@ -361,6 +362,18 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
               )}
             </div>
           </div>
+          {yue2Mode && <div className="space-y-2">
+            <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+              BPM <input type="number" min={20} max={300} value={bpmOverride ?? analysis.bpm}
+                onChange={e => onBpmOverrideChange(Number(e.target.value) || null)}
+                className="w-20 rounded border border-zinc-300 dark:border-white/10 bg-white dark:bg-zinc-800 p-1 text-zinc-900 dark:text-white" />
+            </label>
+            <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+              Key <StyledSelect accent="cyan" value={keyOverride || analysis.key}
+                onChange={v => onKeyOverrideChange(v || null)}
+                options={ALL_KEYS.map(k => ({ value: k, label: k }))} className="flex-1" />
+            </label>
+          </div>}
           {!yue2Mode && <>{/* BPM correction — Essentia sometimes halves or doubles the tempo */}
           <div className="flex items-center gap-2">
             <ParamLabel

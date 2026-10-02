@@ -21,6 +21,11 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
   // A supplied ABC does not need the optional SheetSage2 model.
   router.get('/readiness', (_req: Request, res: Response) => { res.json(service.readiness()); });
 
+  router.post('/source-metadata', async (req: Request, res: Response) => {
+    try { res.json(await service.lookup(req.body || {}, authenticate(req)!)); }
+    catch (err) { fail(res, err); }
+  });
+
   router.post('/transcriptions', async (req: Request, res: Response) => {
     try {
       const result = await service.start(req.body || {}, authenticate(req)!);

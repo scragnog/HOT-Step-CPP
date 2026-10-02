@@ -25,6 +25,7 @@ function fixture(missing = false, defer = false) {
   let cancelled = 0;
   let runnerCalls = 0;
   let duration = 120;
+  let datasetAudio: string | null = null;
   let pending: (() => Promise<void>) | undefined;
   const fakeQueue = {
     createJob: (_kind: string, datasetId: string) => {
@@ -54,6 +55,7 @@ function fixture(missing = false, defer = false) {
     duration: async () => duration,
     missingModels: () => missing ? ['SheetSage2'] : [],
     model: () => missing ? '' : 'sheetsage2-f16.gguf',
+    datasetMatch: () => datasetAudio ? { datasetId: 'dataset-1', sampleId: 'sample-1', audioPath: datasetAudio } : null,
     song: (id, userId) => id === 'song-1' && userId === 'owner' ? { audio_url: '/audio/library.wav', title: 'Library track' } : undefined,
     run: async (job, _audioPath, dir) => {
       runnerCalls++;
@@ -67,9 +69,45 @@ function fixture(missing = false, defer = false) {
     },
   });
   return { root, referenceDir, libraryDir, upload, service, setDuration: (n: number) => { duration = n; },
+    setDatasetAudio: (audio: string | null) => { datasetAudio = audio; },
     counts: () => ({ started, cancelled, runnerCalls }), drain: async () => { await pending?.(); },
     close: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
+
+test('dataset sidecar supplies lyrics, tempo and key', async () => {
+  const f = fixture(true);
+  try {
+    const audio = path.join(f.referenceDir, f.upload);
+    f.setDatasetAudio(audio);
+    fs.writeFileSync(path.join(f.referenceDir, path.parse(f.upload).name + '.txt'),
+      'caption: test\nbpm: 132\nkey: D minor\nis_instrumental: false\nlyrics:\nVerse line\n');
+    const input = { sourceAudioUrl: `/references/${f.upload}` };
+    const metadata = await f.service.lookup(input, 'owner');
+    assert.deepEqual(metadata, { matched: true, datasetId: 'dataset-1', sampleId: 'sample-1',
+      metadataAvailable: true, lyrics: 'Verse line', bpm: 132, key: 'D minor', isInstrumental: false,
+      lyricsSource: 'dataset-sidecar' });
+  } finally { f.close(); }
+});
+
+test('instrumental metadata and missing or malformed sidecars preserve fallback', async () => {
+  const f = fixture();
+  try {
+    const input = { sourceAudioUrl: `/references/${f.upload}` };
+    assert.deepEqual(await f.service.lookup(input, 'owner'), { matched: false });
+    const audio = path.join(f.referenceDir, f.upload);
+    f.setDatasetAudio(audio);
+    assert.deepEqual(await f.service.lookup(input, 'owner'), { matched: false });
+    const sidecar = path.join(f.referenceDir, path.parse(f.upload).name + '.txt');
+    fs.writeFileSync(sidecar, 'bpm: nonsense\nkey: C major\nlyrics: line');
+    assert.deepEqual(await f.service.lookup(input, 'owner'), { matched: false });
+    fs.writeFileSync(sidecar, 'bpm: 88\nkey: C major\nis_instrumental: true\nlyrics:');
+    const instrumental = await f.service.lookup(input, 'owner');
+    assert.equal(instrumental.matched, true);
+    if (!instrumental.matched || !instrumental.metadataAvailable) throw new Error('Expected dataset metadata');
+    assert.equal(instrumental.isInstrumental, true);
+    assert.equal(instrumental.lyrics, '');
+  } finally { f.close(); }
+});
 
 test('missing SheetSage gives Model Manager guidance and creates no job', async () => {
   const f = fixture(true);

@@ -72,6 +72,13 @@ uses the ordinary generation queue and appears in Library. Its saved job records
 the source identity, the reviewed full score, the chord choice and the ABC
 actually rendered.
 
+When a source exactly matches a dataset track, Cover Studio reads that track's
+sidecar lyrics, BPM and key. It labels these values **from dataset**, skips the
+Genius lookup and audio analysis, and lets you edit them. An instrumental
+sidecar selects Instrumental. If the sidecar is absent or incomplete, the
+usual lookup and analysis path applies. Dataset lyrics are recorded as such in
+the cover's generation parameters until you edit them.
+
 ## ACE-Step controls
 
 | Control | What it does |

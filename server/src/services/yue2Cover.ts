@@ -8,6 +8,9 @@ import { jobsDir } from './training/paths.js';
 import { readDuration } from './training/audioMeta.js';
 import { missingYue2SheetModels, readYue2CoverAbc, resolveYue2SheetModel } from './training/yue2Sheet.js';
 import { runYue2CoverSheetJob } from './training/yue2ArTrainRunner.js';
+import { resolveCoverDatasetSource } from './coverDatasetSource.js';
+import { readSidecar } from './training/sidecarIO.js';
+import { sidecarPathFor } from './training/paths.js';
 
 const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
 const MAX_AUDIO_SECONDS = 10 * 60;
@@ -31,6 +34,7 @@ export function createYue2CoverService(deps = {
   missingModels: missingYue2SheetModels,
   model: resolveYue2SheetModel,
   run: runYue2CoverSheetJob,
+  datasetMatch: resolveCoverDatasetSource,
   song: (id: string, userId: string) => getDb().prepare('SELECT audio_url, title FROM songs WHERE id = ? AND user_id = ?').get(id, userId) as { audio_url: string; title: string } | undefined,
 }) {
   function readiness() {
@@ -107,6 +111,28 @@ export function createYue2CoverService(deps = {
     return { status: 'queued' as const, jobId: job.id, sourceId: selected.sourceId, sourceLabel: selected.sourceLabel };
   }
 
+  async function lookup(input: CoverInput, userId: string) {
+    const selected = await source(input, userId);
+    const matched = deps.datasetMatch(selected.audioPath);
+    if (!matched) return { matched: false as const };
+    const fields = readSidecar(sidecarPathFor(matched.audioPath));
+    const bpm = Number(fields.bpm);
+    const key = fields.key?.trim() || '';
+    const instrumental = fields.is_instrumental?.trim().toLowerCase();
+    const validInstrumental = ['true', 'false', '1', '0', 'yes', 'no'].includes(instrumental || '');
+    const isInstrumental = ['true', '1', 'yes'].includes(instrumental || '');
+    const hasLyrics = typeof fields.lyrics === 'string' && !!fields.lyrics.trim();
+    const validBpm = Number.isFinite(bpm) && bpm >= 20 && bpm <= 300;
+    if (!validBpm || !key || !validInstrumental || (!hasLyrics && !isInstrumental)) {
+      return { matched: false as const };
+    }
+    return { matched: true as const, datasetId: matched.datasetId, sampleId: matched.sampleId,
+      metadataAvailable: true as const,
+      lyrics: fields.lyrics || '', bpm, key,
+      isInstrumental,
+      lyricsSource: 'dataset-sidecar' as const };
+  }
+
   function find(jobId: string, userId: string) {
     if (!/^[0-9a-f-]{36}$/.test(jobId)) throw new CoverRequestError('Cover job not found', 404);
     let saved: SavedSource;
@@ -126,7 +152,7 @@ export function createYue2CoverService(deps = {
     return find(jobId, userId);
   }
 
-  return { readiness, source, start, find, cancel };
+  return { readiness, source, lookup, start, find, cancel };
 }
 
 export const yue2CoverService = createYue2CoverService();
