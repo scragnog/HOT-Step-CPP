@@ -15,6 +15,11 @@ precision to pick for each backend.
 Files download from Hugging Face into the app's `models/` folder. You can also drop your own
 GGUF files there; the Model Manager lists anything it recognises by role.
 
+YuE2 cover transcription uses the optional SheetSage2 model. If it cannot load
+alongside the generation engine, an active render finishes first; transcription
+then retries once with the engine paused. The engine restarts before queued renders
+continue. Supplying an approved ABC score skips the transcriber.
+
 ## Packs
 
 A pack is a named bundle of files that gets one backend working end to end. Start with the

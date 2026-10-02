@@ -34,6 +34,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import { runOnGpuLane } from '../generation/gpuLane.js';
 import { YUE2_LICENSE_NOTICE } from '../backends/yue2/index.js';
 import { getDataset } from './datasetsRepo.js';
 import { refreshYue2PresetsForNewRun } from './lyricStudioExport.js';
@@ -692,19 +693,41 @@ export async function runYue2SheetJob(job: TrainingJob): Promise<void> {
 }
 
 /** Transcribe one cover source through the same queued job relay as dataset sheets. */
-export async function runYue2CoverSheetJob(job: TrainingJob, audioPath: string, jobDir: string): Promise<string> {
+export async function runYue2CoverSheetJob(job: TrainingJob, audioPath: string, jobDir: string,
+  deps = { missingModels: missingYue2SheetModels, run: runYue2AceTrain }): Promise<string> {
   try {
-    const missing = missingYue2SheetModels();
+    const missing = deps.missingModels();
     if (missing.length) throw new Error(`The SheetSage2 transcriber is missing: ${missing.join(', ')}`);
     const { manifest, name } = writeYue2CoverSheetManifest(audioPath, jobDir);
     const opts: ResolvedYue2SheetOptions = {
       manifest, only: '', force: false, fast: false, datasetSlug: '', melodyOnly: true,
     };
     const st: SheetState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
-    await runYue2AceTrain(job, 'yue2-sheet', buildYue2SheetArgs(opts), YUE2_IDLE_MS, () => {
+    const verify = () => {
       try { readYue2CoverAbc(manifest, name); return null; }
       catch (err) { return err instanceof Error ? err.message : String(err); }
-    }, (line, state) => relaySheetLine(job, line, state), st, undefined, false);
+    };
+    let loadFailed = false;
+    try {
+      await deps.run(job, 'yue2-sheet', buildYue2SheetArgs(opts), YUE2_IDLE_MS,
+        verify, (line, state) => relaySheetLine(job, line, state), st, undefined, false);
+    } catch (err) {
+      if (!st.fatalMessage.startsWith('SheetSage2 load failed')) throw err;
+      loadFailed = true;
+    }
+    // Development hook: exercise the fallback on a card where both processes fit.
+    const forceFallback = process.env.HOT_STEP_DEV === '1'
+      && process.env.HOTSTEP_YUE2_COVER_FORCE_FALLBACK === '1';
+    if ((loadFailed || forceFallback) && !isCancelled(job)) {
+      log(job, 'info', 'The transcriber could not load beside the engine; waiting for active renders to finish.');
+      await runOnGpuLane(async () => {
+        log(job, 'info', 'Freeing the engine for transcription and restarting it afterward.');
+        const retryState: SheetState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
+        await deps.run(job, 'yue2-sheet', buildYue2SheetArgs({ ...opts, force: forceFallback }),
+          YUE2_IDLE_MS, verify, (line, state) => relaySheetLine(job, line, state),
+          retryState, undefined, true);
+      }, { label: `${job.id} cover transcription fallback`, family: 'yue2' });
+    }
     if (isCancelled(job)) throw new Error('Cover lead-sheet transcription was cancelled');
     const abc = readYue2CoverAbc(manifest, name);
     finishJob(job, 'done');
