@@ -310,7 +310,15 @@ export interface Yue2CoverSubmission {
  *  can never drift from what submit-time validation accepted. */
 export function yue2CoverFromSubmission(submission: Readonly<Record<string, unknown>>): Yue2CoverSubmission | undefined {
   const raw = submission.yue2Cover;
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  // Only a genuinely ABSENT marker means "not a cover". Anything else present
+  // (true, a string, an array, ...) is a malformed cover attempt and must
+  // fail the submit — silently treating it as "no marker" would let a
+  // malformed cover render as an ordinary generation with its score dropped,
+  // exactly what this marker exists to prevent.
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('yue2Cover must be an object with a sourceId when supplied.');
+  }
   const r = raw as Record<string, unknown>;
   const sourceId = typeof r.sourceId === 'string' ? r.sourceId.trim() : '';
   if (!sourceId) throw new Error('A cover job needs yue2Cover.sourceId identifying the source recording.');

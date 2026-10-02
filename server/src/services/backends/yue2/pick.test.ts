@@ -131,6 +131,27 @@ test('yue2CoverFromSubmission requires a sourceId', () => {
   );
 });
 
+// A malformed truthy yue2Cover must fail the submit, never be treated as
+// "no marker" — that would let a malformed cover slip through as a plain
+// generation with its score silently dropped.
+test('yue2CoverFromSubmission rejects a truthy marker of the wrong shape instead of ignoring it', () => {
+  assert.throws(() => yue2CoverFromSubmission({ yue2Cover: true }), /object/);
+  assert.throws(() => yue2CoverFromSubmission({ yue2Cover: 'song-1' }), /object/);
+  assert.throws(() => yue2CoverFromSubmission({ yue2Cover: [] }), /object/);
+  assert.throws(() => yue2CoverFromSubmission({ yue2Cover: 0 }), /object/);
+  // null and absent both mean "not a cover" — no marker to validate.
+  assert.equal(yue2CoverFromSubmission({ yue2Cover: null }), undefined);
+  assert.equal(yue2CoverFromSubmission({}), undefined);
+});
+
+test('a malformed yue2Cover is rejected at submit, not silently rendered as a plain generation', async () => {
+  const { yue2Backend } = await import('./index.js');
+  assert.throws(
+    () => yue2Backend.resolveRequest({ caption: 'c', yue2Cover: true, yue2Abc: '', yue2Cot: 'off' }),
+    /object/,
+  );
+});
+
 test('a cover submission with cot=off is rejected at submit, not silently rendered plain', async () => {
   const { yue2Backend } = await import('./index.js');
   assert.throws(
