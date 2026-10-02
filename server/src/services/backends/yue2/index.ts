@@ -1203,7 +1203,10 @@ export function yue2ResolvePick(
   }
   return {
     lm: own.lm ?? persisted.lm,
-    vae_variant: own.vae ?? persisted.vae_variant,
+    // The per-request VAE select (the yue2VaeVariant extension) is part of the
+    // job's pick, after the job's own yue2Pick and before the saved default.
+    vae_variant: own.vae ?? (submission.yue2VaeVariant === 'standard' || submission.yue2VaeVariant === 'legacy'
+      ? submission.yue2VaeVariant : persisted.vae_variant),
     adapters: resolveSlots(own, persisted.adapters).next,
   };
 }

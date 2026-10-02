@@ -89,3 +89,28 @@ test('the picker reports the saved LM and VAE, not what is resident', async () =
   // Nothing saved: what the engine resolves on its own.
   assert.deepEqual(yue2PickerLmVae({ lm: '', vae_variant: '' }, props), { lm: 'bf16', vae: 'standard' });
 });
+
+// Every pick field reaches the engine request from the captured pick, never
+// from a top-level param or the live picker.
+test('the captured VAE reaches the request', async () => {
+  const { mapYue2Params } = await import('./generate.js');
+  const pick = { ...defaults, vae_variant: 'legacy' };
+  assert.equal(mapYue2Params({ caption: 'folk' }, pick).req.vae_variant, 'legacy');
+  // The per-request VAE select is folded into the pick at submit.
+  assert.equal(yue2ResolvePick({ yue2VaeVariant: 'legacy' }, defaults).vae_variant, 'legacy');
+  assert.equal(yue2ResolvePick({ yue2VaeVariant: 'legacy', yue2Pick: { vae: 'standard' } }, defaults).vae_variant, 'standard');
+});
+
+test('the captured lm_type reaches the request', async () => {
+  const { mapYue2Params } = await import('./generate.js');
+  assert.equal(mapYue2Params({ caption: 'folk' }, { ...defaults, lm: 'Q6_K' }).req.lm_type, 'Q6_K');
+});
+
+test('the captured adapters reach the request', async () => {
+  const { mapYue2Params } = await import('./generate.js');
+  const pick = yue2ResolvePick({ yue2Pick: { lmAdapterNar: fileB, lmAdapterNarScale: 0.3 } }, defaults);
+  const wire = mapYue2Params({ caption: 'folk' }, pick).req.lm_adapter;
+  assert.deepEqual(wire?.map(a => [a.path, a.scale]), [[fileB, 0.3]]);
+  const none = yue2ResolvePick({ yue2Pick: { lmAdapterAr: '', lmAdapterNar: '' } }, defaults);
+  assert.equal(mapYue2Params({ caption: 'folk' }, none).req.lm_adapter, null);
+});

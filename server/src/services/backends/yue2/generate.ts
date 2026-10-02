@@ -348,8 +348,9 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   const chunkRaw = Number(params.yue2NarChunkSeconds);
   const nar_chunk_frames = Number.isFinite(chunkRaw) && chunkRaw > 0 ? Math.round(Math.min(chunkRaw, 600) * 25) : undefined;
 
-  const vaeRaw = typeof params.yue2VaeVariant === 'string' ? params.yue2VaeVariant : 'standard';
-  const vae_variant: Yue2SynthRequest['vae_variant'] = vaeRaw === 'legacy' ? 'legacy' : 'standard';
+  // From the job's pick (#204), which already folded in the per-request
+  // yue2VaeVariant select at submit. '' (never chosen) renders standard.
+  const vae_variant: Yue2SynthRequest['vae_variant'] = pick.vae_variant === 'legacy' ? 'legacy' : 'standard';
 
   // ── Duration: model-ended, same story as MM3 ──────────────────────────────
   // core.duration.auto = true / editable = false: the AR plan/semantic stages
