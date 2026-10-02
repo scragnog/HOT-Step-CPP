@@ -255,7 +255,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
             <p className="text-[10px] text-zinc-500 font-mono break-all">{selected}</p>
             <p className="text-[11px] text-zinc-700 dark:text-zinc-300 tabular-nums">
               {typeof entry?.loss === 'number' && Number.isFinite(entry.loss)
-                ? t('globalBar.yue2AdapterLoss', '20-step mean loss: {{loss}}', { loss: entry.loss.toFixed(4) })
+                ? t('globalBar.yue2AdapterLoss', 'Mean of last 20 logged losses: {{loss}}', { loss: entry.loss.toFixed(4) })
                 : t('globalBar.yue2AdapterLossUnknown', 'Training loss: not recorded')}
               {typeof entry?.valLoss === 'number' && Number.isFinite(entry.valLoss)
                 && ` · ${t('globalBar.yue2AdapterVal', 'Held-out val: {{val}}', { val: entry.valLoss.toFixed(4) })}`}

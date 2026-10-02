@@ -296,7 +296,7 @@ Build datasets from your own audio and train adapters on your GPU, for all three
 | Preprocess and codes | Encodes audio for ACE-Step, or RVQ codes for MiniMax-Music3 with an optional cover-laundering pass. |
 | ACE-Step adapters | Planner LM LoRA (0.6B, 1.7B, 4B) and DiT LoRA. |
 | MiniMax-Music3 adapters | Planner LM LoRA trained from RVQ codes. |
-| YuE2 adapters | Five-stage chain with Perform all stages, Joint Training of the AR and NAR pair with Prodigy, AdamW or Muon, and 20-step mean checkpoint losses. |
+| YuE2 adapters | Five-stage chain with Perform all stages, Joint Training of the AR and NAR pair with Prodigy, AdamW or Muon, and checkpoint losses averaged over the last 20 logged steps. |
 | Optimise phase (YuE2) | Measure a prepared album before training, starting with the base model's loss per song; results saved in the dataset folder. [Details](docs/user/training/yue2.md#optimise-optional) |
 | Training on another PC | Send YuE2 batches to a second PC's GPU, then follow, listen, score and fetch the adapters from this one. [Details](docs/user/training/yue2.md#training-on-another-pc) |
 | Quality presets | Fast, Balanced and Thorough presets on the training forms. |
