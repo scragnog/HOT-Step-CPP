@@ -17,6 +17,7 @@
 // every route below spells its own full sub-path.
 
 import { Router } from 'express';
+import { trackBackendRelease } from '../services/generation/backendRelease.js';
 import {
   getBackend,
   listBackends,
@@ -57,32 +58,10 @@ router.get('/backends', (_req, res) => {
 // process, so switching is model RESIDENCY, not process switching. The switch
 // itself is a settings write and answers at once; the outgoing backend's
 // `releaseVram()` runs in the background, and the next render waits for it to
-// confirm before loading weights (awaitBackendRelease, called by the
-// generation runner). A YuE2 unload can take minutes: it waits engine-side for
-// the renders already queued on its NAR lane (#204). Nothing here branches on
-// backend id.
-let pendingRelease: { from: string; release: () => Promise<void>; done: Promise<void> } | null = null;
-
-/** Wait until the last backend switch's eviction is confirmed. A failed or
- *  timed-out release is tried once more here (the engine may have finished it
- *  after the client gave up); if it still fails, this throws and keeps the
- *  release pending, so no render loads weights next to an unconfirmed family. */
-export async function awaitBackendRelease(): Promise<void> {
-  const p = pendingRelease;
-  if (!p) return;
-  try {
-    await p.done;
-  } catch {
-    try {
-      await p.release();
-    } catch (err: any) {
-      throw new Error(`The previous backend (${p.from}) has not confirmed it freed its GPU memory, so this `
-        + `render was not started: ${err?.message || err}`);
-    }
-  }
-  if (pendingRelease === p) pendingRelease = null;
-}
-
+// confirm before loading weights (services/generation/backendRelease.ts,
+// awaited by the generation runner). A YuE2 unload can take minutes: it
+// waits engine-side for the renders already queued on its NAR lane (#204).
+// Nothing here branches on backend id.
 router.post('/backends/active', (req, res) => {
   const id = req.body?.id;
   if (typeof id !== 'string' || !id.trim()) {
@@ -99,12 +78,7 @@ router.post('/backends/active', (req, res) => {
   if (previousId !== id) {
     const outgoing = getBackend(previousId);
     if (outgoing?.releaseVram) {
-      const release = () => outgoing.releaseVram!();
-      // Behind any eviction still in flight from an earlier switch.
-      const prior = pendingRelease?.done.catch(() => {}) ?? Promise.resolve();
-      const done = prior.then(release);
-      pendingRelease = { from: previousId, release, done };
-      done.catch(err => {
+      trackBackendRelease(previousId, () => outgoing.releaseVram!()).catch(err => {
         console.warn(`[backends] releaseVram not confirmed for outgoing '${previousId}':`, err?.message || err);
       });
     }

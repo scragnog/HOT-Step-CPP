@@ -19,7 +19,7 @@ import { engineReady, engineBootStatus } from '../engineState.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { pushLog } from './logs.js';
 import { getBackend, getActiveBackendId } from '../services/backends/registry.js';
-import { awaitBackendRelease } from './backends.js';
+import { awaitBackendRelease } from '../services/generation/backendRelease.js';
 import { mm3StreamUrl } from '../services/backends/minimax/client.js';
 import {
   runOnGpuLane, gpuLaneBusy, gpuLaneDepth, gpuLaneOwner, gpuLaneNextFamily, releaseGpuLane, resetGpuLane,
