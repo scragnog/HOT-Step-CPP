@@ -459,6 +459,7 @@ static void print_usage(void) {
             "                --model <sheetsage2-*.gguf>  (or --models <dir> to discover one)\n"
             "                [--only <substr>]  case-insensitive name filter\n"
             "                [--force]  re-transcribe sources that already have abc/abc_error\n"
+            "                [--melody-only]  write melody ABC without decoded harmony\n"
             "                [--threads <n>]  pin the backend's thread count for this run\n"
             "                [--fast]  skip the encoder's exact-precision load (default: exact,\n"
             "                doc 23's fix for the F16-weight matmul narrowing that otherwise\n"
@@ -4847,6 +4848,7 @@ static int cmd_yue2_sheet(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--force"))    a.force      = true;
         else if (!strcmp(argv[i], "--fast"))     a.fast       = true;
         else if (!strcmp(argv[i], "--no-repair")) a.repair    = false;
+        else if (!strcmp(argv[i], "--melody-only")) a.melody_only = true;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
         else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
     }

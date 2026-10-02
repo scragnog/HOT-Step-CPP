@@ -112,6 +112,7 @@ struct SheetSageTranscribeOptions {
     // (yue2-sheet's `--no-repair`) to get the pre-repair behavior exactly:
     // one render, and any failure is a plain soft failure.
     bool repair = true;
+    bool melody_only = false;
 };
 
 struct SheetSageTranscribeResult {
@@ -492,12 +493,12 @@ inline bool sheetsage_transcribe(const SheetSageModel & m, const float * mono24,
         ri.vocal_notes    = ni.vocal_notes;
         ri.ins_notes      = ni.ins_notes;
         Yue2SheetRepairOutcome ro =
-            yue2_sheet_notation_repair_and_generate(std::move(ri), /*melody_only=*/false);
+            yue2_sheet_notation_repair_and_generate(std::move(ri), opt.melody_only);
         abc_res  = ro.result;
         repaired = ro.repaired;
     } else {
         abc_res = yue2_sheet_notation_generate(ni.melody_midi_bytes, ni.beat_rows, ni.chord_rows, ni.key_rows,
-                                                ni.structure_rows, /*melody_only=*/false);
+                                                ni.structure_rows, opt.melody_only);
     }
     out->ms_notation = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tn0).count();
 

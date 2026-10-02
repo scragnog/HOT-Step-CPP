@@ -120,6 +120,7 @@ struct Yue2SheetArgs {
     bool        force   = false;  // --force, re-transcribe sources that already have abc/abc_error
     bool        fast    = false;  // --fast, load_opt.exact=false (default is exact=true)
     bool        repair  = true;   // --no-repair sets this false (sheetsage-repair.h's opt-out)
+    bool        melody_only = false; // --melody-only, preserve training's full-score default
 };
 
 // ── Small helpers ────────────────────────────────────────────────────────────
@@ -481,6 +482,7 @@ static int yue2_sheet_run(const Yue2SheetArgs & a) {
     topt.exact   = load_opt.exact;
     topt.threads = a.threads;
     topt.repair  = a.repair;
+    topt.melody_only = a.melody_only;
 
     // ── decode plumbing (the same two routes yue2-tokenize-run.h uses) ──────
     const std::string out_dir    = dirname_of(a.manifest);

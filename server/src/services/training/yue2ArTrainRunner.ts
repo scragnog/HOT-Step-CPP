@@ -49,6 +49,7 @@ import {
 } from './yue2Tokenize.js';
 import {
   buildYue2SheetArgs, missingYue2SheetModels, readYue2AbcStatus,
+  writeYue2CoverSheetManifest, readYue2CoverAbc,
   type ResolvedYue2SheetOptions,
 } from './yue2Sheet.js';
 import {
@@ -687,6 +688,30 @@ export async function runYue2SheetJob(job: TrainingJob): Promise<void> {
     }
   } catch (err: any) {
     if (!isCancelled(job)) finishJob(job, 'failed', err?.message || String(err));
+  }
+}
+
+/** Transcribe one cover source through the same queued job relay as dataset sheets. */
+export async function runYue2CoverSheetJob(job: TrainingJob, audioPath: string, jobDir: string): Promise<string> {
+  try {
+    const missing = missingYue2SheetModels();
+    if (missing.length) throw new Error(`The SheetSage2 transcriber is missing: ${missing.join(', ')}`);
+    const { manifest, name } = writeYue2CoverSheetManifest(audioPath, jobDir);
+    const opts: ResolvedYue2SheetOptions = {
+      manifest, only: '', force: false, fast: false, datasetSlug: '', melodyOnly: true,
+    };
+    const st: SheetState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
+    await runYue2AceTrain(job, 'yue2-sheet', buildYue2SheetArgs(opts), YUE2_IDLE_MS, () => {
+      try { readYue2CoverAbc(manifest, name); return null; }
+      catch (err) { return err instanceof Error ? err.message : String(err); }
+    }, (line, state) => relaySheetLine(job, line, state), st, undefined, false);
+    if (isCancelled(job)) throw new Error('Cover lead-sheet transcription was cancelled');
+    const abc = readYue2CoverAbc(manifest, name);
+    finishJob(job, 'done');
+    return abc;
+  } catch (err) {
+    if (!isCancelled(job)) finishJob(job, 'failed', err instanceof Error ? err.message : String(err));
+    throw err;
   }
 }
 

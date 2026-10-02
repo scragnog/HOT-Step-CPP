@@ -238,6 +238,8 @@ export interface ResolvedYue2SheetOptions {
   force: boolean;
   /** `--fast`: skip the exact-load precision fix. See YUE2_SHEET_DEFAULTS. */
   fast: boolean;
+  /** Cover transcription asks for melody without SheetSage harmony. */
+  melodyOnly?: boolean;
   /** Carried for the runner's own log lines and the run record. */
   datasetSlug: string;
 }
@@ -251,10 +253,31 @@ export function buildYue2SheetArgs(o: ResolvedYue2SheetOptions): string[] {
   if (o.only) args.push('--only', o.only);
   if (o.force) args.push('--force');
   if (o.fast) args.push('--fast');
+  if (o.melodyOnly) args.push('--melody-only');
   // Deliberately NOT emitted: --model, --threads. `--models` lets the
   // engine's quant ranking pick (and it prints which file it chose, same
   // reasoning as buildYue2TokenizeArgs skipping --tok); --threads has no
   // server-side opinion, and the engine's own default is fine for an offline
   // cache stage.
   return args;
+}
+
+/** A cover gets a private, single-source manifest; the trainer rewrites it in place. */
+export function writeYue2CoverSheetManifest(audioPath: string, jobDir: string): { manifest: string; name: string } {
+  const source = path.resolve(audioPath);
+  if (!fs.statSync(source).isFile()) throw new Error('Cover source is not a file');
+  fs.mkdirSync(jobDir, { recursive: true });
+  const name = path.basename(source);
+  const manifest = path.join(jobDir, 'cover-sheet.json');
+  fs.writeFileSync(manifest, JSON.stringify({ sources: [{ name, source }] }), { encoding: 'utf8', mode: 0o600 });
+  return { manifest, name };
+}
+
+/** Cover rendering needs usable ABC; the training stage's abc_error is not success here. */
+export function readYue2CoverAbc(manifest: string, name: string): string {
+  const source = readYue2SheetSource(manifest, name);
+  if (!source) throw new Error('The cover lead-sheet manifest could not be read');
+  if (source.abc_error.trim()) throw new Error(`Cover lead-sheet transcription failed: ${source.abc_error}`);
+  if (!source.abc.trim()) throw new Error('Cover lead-sheet transcription returned no ABC');
+  return source.abc;
 }
