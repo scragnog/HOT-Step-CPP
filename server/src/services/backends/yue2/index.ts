@@ -1038,8 +1038,7 @@ async function models(): Promise<BackendModels> {
     lmAdapters: adapters.paths,
     lmAdapterMeta: adapters.meta,
     defaults: {
-      lm: v?.lm?.selected ?? '',
-      vae: props?.files?.vae_standard?.found ? 'standard' : (props?.files?.vae_legacy?.found ? 'legacy' : ''),
+      ...yue2PickerLmVae(persisted, props ?? null),
       ...slotDefaults(persisted, props?.adapter),
       // Aggregate, kept for anything that just wants to know whether the
       // resident model is adapted at all.
@@ -1048,6 +1047,21 @@ async function models(): Promise<BackendModels> {
       lmAdapterFolder: getSetting(ADAPTER_FOLDER_SETTING, ''),
     },
     meta,
+  };
+}
+
+/** The picker's LM and VAE: the saved default for new jobs. Since saving no
+ *  longer moves engine weights (#204), what is resident can differ from it, and
+ *  reporting the resident one made the picker resend it over the saved choice.
+ *  With nothing saved, what the engine resolves on its own. */
+export function yue2PickerLmVae(
+  persisted: Pick<Yue2PersistedSelection, 'lm' | 'vae_variant'>,
+  props: Yue2Props | null,
+): { lm: string; vae: string } {
+  return {
+    lm: persisted.lm || (props?.variants?.lm?.selected ?? ''),
+    vae: persisted.vae_variant
+      || (props?.files?.vae_standard?.found ? 'standard' : (props?.files?.vae_legacy?.found ? 'legacy' : '')),
   };
 }
 

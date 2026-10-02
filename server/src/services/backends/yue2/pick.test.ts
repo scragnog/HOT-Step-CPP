@@ -81,3 +81,11 @@ test('only jobs with the same pick coalesce', () => {
   assert.notEqual(yue2CoalesceKey(job(a), req), yue2CoalesceKey(job(aScaled), req));
   assert.notEqual(yue2CoalesceKey(job(a), req), yue2CoalesceKey(job({ lm: 'q8_0' }), req));
 });
+
+test('the picker reports the saved LM and VAE, not what is resident', async () => {
+  const { yue2PickerLmVae } = await import('./index.js');
+  const props = { variants: { lm: { selected: 'bf16' } }, files: { vae_standard: { found: true } } } as any;
+  assert.deepEqual(yue2PickerLmVae({ lm: 'q8_0', vae_variant: 'legacy' }, props), { lm: 'q8_0', vae: 'legacy' });
+  // Nothing saved: what the engine resolves on its own.
+  assert.deepEqual(yue2PickerLmVae({ lm: '', vae_variant: '' }, props), { lm: 'bf16', vae: 'standard' });
+});
