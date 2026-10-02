@@ -46,10 +46,16 @@ import { readSafetensorsMeta } from '../../training/yue2Runs.js';
 import { jointRunForAdapter } from '../../training/yue2AitkRuns.js';
 import { yue2AdapterTrigger } from './jointAdapterContext.js';
 import type { Yue2AdapterScales, Yue2FinalDetail } from './client.js';
-import { yue2Align, yue2Synth, yue2FinalDetail, yue2Props, yue2PropsCached, splitMultipartMixed, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
+import { yue2Align, yue2Synth, yue2FinalDetail, yue2Props, yue2PropsCached, splitMultipartMixed, yue2AdapterWire, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
 import { yue2LyricsJson } from './align.js';
 import { classifyYue2Score, type Yue2ScoreHealth, yue2PlanUsable, yue2PickPlan, yue2PlanDraws, readYue2StyleNorms, type Yue2StyleNorms } from './scoreHealth.js';
-import { yue2PersistedSelection } from './index.js';
+import { yue2PickFromModels, yue2ResolvePick, yue2StackFrom, type Yue2PersistedSelection } from './index.js';
+
+/** The pick a queued job renders with (#204): captured at submit into
+ *  envelope.models, never the live picker. */
+function jobPick(job: GenerationJob): Yue2PersistedSelection {
+  return yue2PickFromModels(job.envelope.models as Record<string, string>);
+}
 import { applyYue2StyleTemplate, splitYue2Tail, type Yue2StyleTemplate } from './style.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
 import type { GenerationAttempt } from '../types.js';
@@ -104,11 +110,9 @@ export interface Yue2ParamMapping {
  * template x adapter x seed grid of 2026-09-14 pinned it. Every good render in
  * that campaign used a hand-composed string; this composes the same one.
  *
- * The adapter is ENGINE STATE on this backend rather than a request field
- * (index.ts, lmAdapterSelectable), so where mapMinimaxParams reads
- * params.mm3LmAdapter this reads the persisted pick the picker writes and
- * reconcileSelection replays — the one source that says what is merged into
- * the resident weights.
+ * The adapters are the JOB's pick (#204), captured when it was submitted and
+ * sent to the engine with the request, which merges them before this job
+ * renders. The live picker only sets the default for jobs submitted later.
  */
 /** What each merged half is addressed by, for the run log. One render sends ONE
  *  style sentence, so these are not two prompts — they are the two triggers the
@@ -120,10 +124,9 @@ export interface Yue2StyleHalves {
 }
 
 function yue2StyleForAdapter(
-  caption: string, params: any,
+  caption: string, params: any, picked: Yue2PersistedSelection['adapters'],
 ): { style: string; notes: string[]; halves: Yue2StyleHalves; trainedCot: string } {
   const notes: string[] = [];
-  const picked = yue2PersistedSelection().adapters;
   const halfOf = (slot: { path: string; scales: Yue2AdapterScales }) => ({
     path: slot.path,
     trigger: yue2AdapterTrigger(slot.path).trigger,
@@ -241,7 +244,9 @@ function yue2StyleForAdapter(
  * (translateParams.ts / mapMinimaxParams) on purpose: one "what to generate"
  * text field, read the same way regardless of active backend.
  */
-export function mapYue2Params(params: any): Yue2ParamMapping {
+/** `pick` is the job's own (jobPick); callers without a job (the score
+ *  preview) resolve one from the params exactly as a submit would. */
+export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2ResolvePick(params)): Yue2ParamMapping {
   const notes: string[] = [];
 
   const rawCaption: string =
@@ -250,7 +255,7 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
   // must match what the engine-side BPE wrapper expects
   // (docs/plans/yue2/06-engine-port-plan.md §2 — NFC before pre-tokenization).
   const caption = rawCaption.normalize('NFC');
-  const styled = yue2StyleForAdapter(caption, params);
+  const styled = yue2StyleForAdapter(caption, params, pick.adapters);
   const style = styled.style;
   notes.push(...styled.notes);
 
@@ -414,6 +419,10 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
   if (Object.keys(lmOverrides).length) notes.push(`LM overrides: ${Object.entries(lmOverrides).map(([k, v]) => `${k}=${v}`).join(', ')}`);
 
   const req: Yue2SynthRequest = {
+    // The pick travels with the request; the engine applies it when the job
+    // starts. null clears: no adapter in the pick means the base model.
+    lm_type: pick.lm,
+    lm_adapter: yue2AdapterWire(yue2StackFrom(pick.adapters)),
     style,
     lyrics: lyrics || undefined,
     cot,
@@ -515,7 +524,7 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
   const timing: StageTiming[] = [];
   const log: Yue2Log = (level, msg) => logGeneration(job.id, level, msg);
 
-  const { req, notes, caption, halves } = mapYue2Params(job.params);
+  const { req, notes, caption, halves } = mapYue2Params(job.params, jobPick(job));
 
   startGenerationLog(job.id, 'yue2-text2music');
   logGenerationParams(job.id, req as unknown as Record<string, unknown>);
@@ -563,8 +572,8 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
  *  (style_norms, written by the joint trainer), or null for the base model or
  *  an adapter with none. Checks the training sheets themselves fail are not
  *  held against its plans. */
-function activeStyleNorms(): Yue2StyleNorms | null {
-  const { ar, nar } = yue2PersistedSelection().adapters;
+function activeStyleNorms(pick: Yue2PersistedSelection): Yue2StyleNorms | null {
+  const { ar, nar } = pick.adapters;
   const adapter = ar.path || nar.path;
   if (!adapter) return null;
   const fromHeader = readSafetensorsMeta(adapter)?.raw.style_norms;
@@ -597,7 +606,8 @@ async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
   }
   if (!pending.length) return;
 
-  const norms = activeStyleNorms();
+  // Members of one batch share one pick (it is part of the coalescing key).
+  const norms = activeStyleNorms(jobPick(pending[0].m.job));
   const props = yue2PropsCached() ?? (await yue2Props()).props;
   const slots = Math.max(1, Number(props?.max_plan_batch ?? props?.max_lm_batch) || 1);
   const randomSeed = () => Math.floor(Math.random() * 2 ** 32);
@@ -674,7 +684,7 @@ async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
 /** Everything about a request except the song itself. Two queued jobs whose
  *  keys match can share one AR batch: same cot, guidance, samplers, NAR
  *  settings and adapters, differing only in prompt, score and seeds. */
-function yue2CoalesceKey(job: GenerationJob, req: Yue2SynthRequest): string {
+export function yue2CoalesceKey(job: GenerationJob, req: Yue2SynthRequest): string {
   const shared: Record<string, unknown> = { ...req };
   for (const k of ['style', 'lyrics', 'abc', 'seed', 'noise_seed', 'lm_batch_size', 'songs']) delete shared[k];
   const ordered = Object.fromEntries(Object.keys(shared).sort().map(k => [k, shared[k]]));
@@ -783,7 +793,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
       if (songsSoFar >= maxSongs) break;
       if (cand.status !== 'pending' || cand.coalescedInto || cand.params?.yue2Coalesce === false) continue;
       let mapped: Yue2ParamMapping;
-      try { mapped = mapYue2Params(cand.params); } catch { continue; }
+      try { mapped = mapYue2Params(cand.params, jobPick(cand)); } catch { continue; }
       if (yue2CoalesceKey(cand, mapped.req) !== key) continue;
       const need = Math.max(1, mapped.req.lm_batch_size ?? 1);
       if (songsSoFar + need > maxSongs) continue;
@@ -1057,7 +1067,7 @@ async function finishYue2Job(
   {
     // Healthy-but-long vs runaway: the score says which, when there is one
     // (cot=off renders have no plan stage and no score to read).
-    const scoreHealth = finalDetail.abc ? classifyYue2Score(finalDetail.abc, finalDetail.end_reason, req.lyrics ?? '', activeStyleNorms()) : undefined;
+    const scoreHealth = finalDetail.abc ? classifyYue2Score(finalDetail.abc, finalDetail.end_reason, req.lyrics ?? '', activeStyleNorms(jobPick(job))) : undefined;
     if (scoreHealth) {
       log(scoreHealth.verdict === 'runaway' ? 'WARNING' : 'INFO',
         `[YuE2] Score: ${scoreHealth.verdict} — ${scoreHealth.reason}`);
@@ -1370,7 +1380,8 @@ export interface Yue2PlanPreview {
 }
 
 export async function runYue2PlanPreview(params: any, signal?: AbortSignal): Promise<Yue2PlanPreview> {
-  const { req, notes } = mapYue2Params(params);
+  const pick = yue2ResolvePick(params);
+  const { req, notes } = mapYue2Params(params, pick);
   if (!req.style.trim()) throw new Error('YuE2 needs a caption — the Style Description field is empty');
   if (req.cot === 'off') throw new Error('Score preview needs Chain of Thought "melody" or "full" — cot=off has no lead sheet to preview');
   // params.semantic: run the semantic stage too and return its codec ids
@@ -1391,7 +1402,7 @@ export async function runYue2PlanPreview(params: any, signal?: AbortSignal): Pro
     if (!body.ok) throw new Error(`YuE2 semantic result fetch failed (${body.status})`);
     semantic_ids = await body.json() as number[];
   }
-  return { abc, seed: detail.tracks?.[0]?.seed ?? planReq.seed ?? -1, end_reason, stage_end_reasons: detail.stage_end_reasons, health: classifyYue2Score(abc, end_reason, planReq.lyrics ?? '', activeStyleNorms()), notes, ...(semantic_ids ? { semantic_ids } : {}) };
+  return { abc, seed: detail.tracks?.[0]?.seed ?? planReq.seed ?? -1, end_reason, stage_end_reasons: detail.stage_end_reasons, health: classifyYue2Score(abc, end_reason, planReq.lyrics ?? '', activeStyleNorms(pick)), notes, ...(semantic_ids ? { semantic_ids } : {}) };
 }
 
 async function waitYue2PlanJob(jobId: string, signal?: AbortSignal): Promise<void> {

@@ -30,7 +30,7 @@ import { listAllYue2AitkRuns } from '../../training/yue2AitkRuns.js';
 import { yue2AdapterTrigger } from './jointAdapterContext.js';
 import { runYue2Generation } from './generate.js';
 import {
-  yue2Props, yue2PropsCached, yue2SelectModel, yue2Unload,
+  yue2Props, yue2PropsCached, yue2SelectModel, yue2Unload, TIMEOUT_DRAIN,
 } from './client.js';
 import type { Yue2AdapterRef, Yue2AdapterScales, Yue2Props, Yue2Selection } from './client.js';
 import type {
@@ -251,7 +251,7 @@ function yue2EngineIsPreDials(props: Yue2Props | null): boolean {
 
 /** The stack as the engine should receive it: every slot that holds a usable
  *  file, in YUE2_ADAPTER_SLOTS order. */
-function yue2StackFrom(adapters: Record<Yue2LmAdapterKind, Yue2PersistedSlot>): Yue2AdapterRef[] {
+export function yue2StackFrom(adapters: Record<Yue2LmAdapterKind, Yue2PersistedSlot>): Yue2AdapterRef[] {
   const out: Yue2AdapterRef[] = [];
   for (const kind of YUE2_ADAPTER_SLOTS) {
     const slot = adapters[kind];
@@ -308,7 +308,10 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
     ...(typeof submission.randomSeed === 'boolean' ? { randomSeed: submission.randomSeed } : {}),
     ...(typeof submission.title === 'string' ? { title: submission.title } : {}),
   };
-  const picked = yue2PersistedSelection();
+  // The job's pick, resolved once here at submit (#204): the persisted default
+  // overlaid with the job's own yue2Pick. Everything downstream reads it back
+  // from envelope.models (yue2PickFromModels), never the live picker.
+  const picked = yue2ResolvePick(submission);
   // BackendModelSelection is string-valued, so the dials are stringified rather
   // than dropped: the snapshot records what the request was resolved against,
   // and how hard each merged adapter pushed is part of that. A slot holding
@@ -381,11 +384,11 @@ function status(): BackendLifecycleStatus {
 
 async function capabilities(): Promise<BackendCapabilities> {
   const { props, stale } = await yue2Props();
-  // Self-healing restore, same as MM3's: the UI polls this, so a crash-respawn
-  // that reset the in-memory selection is repaired without anyone reopening
-  // the picker. Fire-and-forget — capabilities must stay fast and must never
-  // fail over a residency concern.
-  void reconcileSelection(props, stale);
+  // No selection replay here any more (#204): every job carries its own pick
+  // and the engine applies it when the job starts, so the engine's resident
+  // pick is whatever the last job used. Replaying the picker's default between
+  // queued jobs would tear the model down only for the next job to reload its
+  // own. restoreYue2Selection still replays once at engine start.
   const synthReady = yue2SynthReady(props ?? null);
   const up = engineReady && !isEngineSuspended() && synthReady;
 
@@ -1117,6 +1120,104 @@ function readSlotSelection(
   };
 }
 
+/** Both slots of a selection body against a base pick, with the picker's
+ *  rules: an absent key keeps the base slot, '' clears it, a path picks it. An
+ *  explicit pick that is unusable or sits in the wrong half throws; a base
+ *  pick whose file has gone since is cleared. Shared by the picker and by a
+ *  job's own pick, so the two can never disagree about what a body means. */
+function resolveSlots(
+  routed: Record<string, string>,
+  base: Record<Yue2LmAdapterKind, Yue2PersistedSlot>,
+): { next: Record<Yue2LmAdapterKind, Yue2PersistedSlot>; anyGiven: boolean } {
+  const next: Record<Yue2LmAdapterKind, Yue2PersistedSlot> = {
+    ar: { path: '', scales: base.ar.scales },
+    nar: { path: '', scales: base.nar.scales },
+  };
+  let anyGiven = false;
+
+  for (const kind of YUE2_ADAPTER_SLOTS) {
+    const want = readSlotSelection(routed, kind, base[kind]);
+    anyGiven = anyGiven || want.given;
+    next[kind].scales = want.scales;
+    if (!want.ref) continue;
+
+    const resolved = resolveYue2Adapter(want.ref);
+    if (!resolved) {
+      if (want.given) {
+        // Fail the pick loudly (the route answers 400). Merging nothing while
+        // the UI shows an adapter is exactly the silent failure this whole path
+        // exists to avoid.
+        throw new Error(`YuE2 ${kind.toUpperCase()} adapter not usable: ${want.ref} `
+          + '(needs an absolute path to an existing .safetensors)');
+      }
+      // A persisted pick whose file has since moved or been deleted: clear it
+      // rather than wedge every later selection on a 400.
+      console.warn(`[Backends] YuE2 ${kind.toUpperCase()} adapter gone, clearing persisted pick: ${want.ref}`);
+      continue;
+    }
+    // Wrong-half guard. The engine refuses this at load anyway, on the file's
+    // own __metadata__.format — but by then the model has already been torn
+    // down, so the refusal costs a reload and reads as "generation broke".
+    // Catch it while it is still only a failed click.
+    const declared = yue2AdapterKindOf(resolved);
+    if (want.given && declared && declared !== kind) {
+      throw new Error(`That adapter trains the ${declared.toUpperCase()} half, `
+        + `so it cannot go in the ${kind.toUpperCase()} slot (the engine would refuse it at load).`);
+    }
+    next[kind].path = resolved;
+  }
+  return { next, anyGiven };
+}
+
+/** A job's model pick (#204): the persisted default at submit time, overlaid
+ *  with the job's own `yue2Pick` (the keys a picker POST uses: lm, vae,
+ *  lmAdapterAr, lmAdapterArScale, lmAdapterArScaleAttn, ...). Resolved once,
+ *  when the job is submitted; the job renders with it whatever the picker
+ *  says by the time it runs. Throws on an unusable explicit adapter, so a bad
+ *  pick fails the submit (400) rather than the render. */
+export function yue2ResolvePick(
+  submission: Readonly<Record<string, unknown>>,
+  persisted: Yue2PersistedSelection = yue2PersistedSelection(),
+): Yue2PersistedSelection {
+  const raw = submission.yue2Pick;
+  const own: Record<string, string> = {};
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v))) own[k] = String(v);
+    }
+  }
+  return {
+    lm: own.lm ?? persisted.lm,
+    vae_variant: own.vae ?? persisted.vae_variant,
+    adapters: resolveSlots(own, persisted.adapters).next,
+  };
+}
+
+/** Read a job's pick back out of envelope.models, where resolveRequest wrote
+ *  it. The one source the render, its logs and its metadata use. */
+export function yue2PickFromModels(models: Readonly<Record<string, string>>): Yue2PersistedSelection {
+  const slot = (kind: Yue2LmAdapterKind): Yue2PersistedSlot => {
+    const key = `lm_adapter_${kind}`;
+    const d = yue2DefaultScales();
+    const num = (k: string, fallback: number) => {
+      const v = Number(models[k]);
+      return models[k] !== undefined && Number.isFinite(v) ? v : fallback;
+    };
+    return {
+      path: models[key] ?? '',
+      scales: {
+        global: num(`${key}_scale`, d.global),
+        attn: num(`${key}_scale_attn`, d.attn),
+        mlp: num(`${key}_scale_mlp`, d.mlp),
+        early: num(`${key}_scale_early`, d.early),
+        mid: num(`${key}_scale_mid`, d.mid),
+        late: num(`${key}_scale_late`, d.late),
+      },
+    };
+  };
+  return { lm: models.lm ?? '', vae_variant: models.vae_variant ?? '', adapters: { ar: slot('ar'), nar: slot('nar') } };
+}
+
 async function selectModel(selection: Record<string, string>) {
   // The scan folder is a picker setting, not a model pick: save it and, when
   // that is all the caller sent, leave the engine alone.
@@ -1156,67 +1257,23 @@ async function selectModel(selection: Record<string, string>) {
     }
   }
 
-  const next: Record<Yue2LmAdapterKind, Yue2PersistedSlot> = {
-    ar: { path: '', scales: persisted.adapters.ar.scales },
-    nar: { path: '', scales: persisted.adapters.nar.scales },
-  };
-  let anyGiven = false;
-
-  for (const kind of YUE2_ADAPTER_SLOTS) {
-    const want = readSlotSelection(routed, kind, persisted.adapters[kind]);
-    anyGiven = anyGiven || want.given;
-    next[kind].scales = want.scales;
-    if (!want.ref) continue;
-
-    const resolved = resolveYue2Adapter(want.ref);
-    if (!resolved) {
-      if (want.given) {
-        // Fail the pick loudly (the route answers 400). Merging nothing while
-        // the UI shows an adapter is exactly the silent failure this whole path
-        // exists to avoid.
-        throw new Error(`YuE2 ${kind.toUpperCase()} adapter not usable: ${want.ref} `
-          + '(needs an absolute path to an existing .safetensors)');
-      }
-      // A persisted pick whose file has since moved or been deleted: clear it
-      // rather than wedge every later selection on a 400.
-      console.warn(`[Backends] YuE2 ${kind.toUpperCase()} adapter gone, clearing persisted pick: ${want.ref}`);
-      continue;
-    }
-    // Wrong-half guard. The engine refuses this at load anyway, on the file's
-    // own __metadata__.format — but by then the model has already been torn
-    // down, so the refusal costs a reload and reads as "generation broke".
-    // Catch it while it is still only a failed click.
-    const declared = yue2AdapterKindOf(resolved);
-    if (want.given && declared && declared !== kind) {
-      throw new Error(`That adapter trains the ${declared.toUpperCase()} half, `
-        + `so it cannot go in the ${kind.toUpperCase()} slot (the engine would refuse it at load).`);
-    }
-    next[kind].path = resolved;
-  }
+  const { next } = resolveSlots(routed, persisted.adapters);
 
   const wantStack = yue2StackFrom(next);
   const haveStack = yue2StackFrom(persisted.adapters);
-  // Say nothing about adapters when the caller said nothing and we hold
-  // nothing: that is the omitted case the engine's omitted-vs-null distinction
-  // exists for, and it keeps a VAE-only POST from disturbing a pick made
-  // out-of-band.
-  if (anyGiven || haveStack.length > 0) {
-    sel.lm_adapter = wantStack;
-  }
 
-  // `changed` isn't part of the engine's own response (yue2_handle_select_model
-  // returns {selected, vae_variant, lm_type_want, lm_file, lm_found} — no
-  // `changed`/`lm` field, unlike mm3SelectModel's shape); EngineBackend's
-  // interface requires it, so it's derived here from the persisted values.
+  // EngineBackend's interface requires `changed`; derived from the persisted values.
   const changed = (sel.lm ?? '') !== persisted.lm
     || (sel.vae_variant ?? '') !== persisted.vae_variant
     || yue2AdapterKey(wantStack) !== yue2AdapterKey(haveStack);
 
-  const result = await yue2SelectModel(sel);
+  // The picker sets the DEFAULT for jobs submitted from now on and nothing
+  // else (#204): queued jobs carry their own pick, and the engine applies a
+  // job's pick when that job starts. Pushing this to the engine here would
+  // tear down weights that queued renders still need.
   setSetting(LM_TYPE_SETTING, sel.lm ?? '');
   setSetting(VAE_VARIANT_SETTING, sel.vae_variant ?? '');
-  // Persist only after the engine accepted it — a refused pick that was
-  // written back would be replayed on every boot from then on.
+  // Only validated picks reach here: resolveSlots throws on a bad one.
   for (const kind of YUE2_ADAPTER_SLOTS) {
     setSetting(SLOT_PATH_SETTING[kind], next[kind].path);
     setSetting(SLOT_SCALES_SETTING[kind], JSON.stringify(next[kind].scales));
@@ -1225,10 +1282,10 @@ async function selectModel(selection: Record<string, string>) {
     const named = wantStack.length
       ? wantStack.map(a => path.basename(a.path)).join(' + ')
       : '(none)';
-    console.log(`[Backends] YuE2 models: lm_type=${result.lm_type_want || '(auto)'} vae_variant=${result.vae_variant}`
-      + ` lm_found=${result.lm_found} lm_adapter=${named}`);
+    console.log(`[Backends] YuE2 default for new jobs: lm_type=${sel.lm || '(auto)'}`
+      + ` vae_variant=${sel.vae_variant || '(auto)'} lm_adapter=${named}`);
   }
-  return { ...result, changed };
+  return { selected: true, lm_type_want: sel.lm ?? '', vae_variant: sel.vae_variant ?? '', changed };
 }
 
 // ── Persisted selection replay ──────────────────────────────────────────────
@@ -1343,9 +1400,11 @@ export const yue2Backend: EngineBackend = {
    *  switches away, so it never sits in VRAM next to another family. No
    *  keepCaches concept to preserve (no AR-cache analog in v1). */
   async releaseVram() {
-    const r = await yue2Unload();
-    if (r?.unloaded) {
-      console.log(`[Backends] YuE2 unloaded (${(r.freed_mb ?? 0).toFixed(0)} MB freed)`);
-    }
+    // The engine finishes every render already queued on the NAR lane before
+    // it unloads (#204), so give it the drain timeout, and say so if it never
+    // confirms: the next family must not load next to resident YuE2 weights.
+    const r = await yue2Unload(TIMEOUT_DRAIN);
+    if (!r?.unloaded) throw new Error('YuE2 unload was not confirmed by the engine');
+    console.log(`[Backends] YuE2 unloaded (${(r.freed_mb ?? 0).toFixed(0)} MB freed)`);
   },
 };

@@ -263,9 +263,15 @@ structure and phrasing. An adapter trained on one half is refused by the other.
 3. Set **Strength**, **Attention** and **MLP** (0 to 2), and optionally the depth thirds,
    then click **Apply strengths**.
 
-YuE2 merges adapters into the resident model, so every pick or Apply unloads the model and
-the next generation reloads it with a longer warm-up. The panel shows whether each slot is
-"Merged into the resident model now" or waiting for the next load.
+The picker sets the default for songs you queue from then on. Each song keeps the adapters
+it was queued with, including an album's own adapters when it comes from Lyric Studio, so
+changing the picker while songs wait does not change what they render with. Queued songs
+with the same adapters still render together in one batch.
+
+YuE2 merges adapters into the resident model. When a song's adapters differ from the ones
+loaded, the engine waits for the renders ahead of it to finish, then unloads and reloads
+with that song's adapters, which adds a longer warm-up. The panel shows whether each slot
+is "Merged into the resident model now" or waiting for the next load.
 
 The trigger is written into the style prompt for you. With both slots filled only the NAR
 adapter's trigger goes in; if the AR adapter was trained under a different trigger, add

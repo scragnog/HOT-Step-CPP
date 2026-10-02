@@ -46,6 +46,9 @@ const base = () => config.aceServer.url;
  *  never wait on it. 2.5 s, then fall back to the last known-good manifest. */
 const TIMEOUT_PROPS = 2_500;
 const TIMEOUT_QUICK = 15_000;   // synth submit, warm, unload, select-model
+/** An unload or a weight change waits engine-side for every render already on
+ *  the NAR lane (#204), each up to a few minutes. Long enough for a full queue. */
+export const TIMEOUT_DRAIN = 30 * 60_000;
 
 // ── Wire shapes (mirrors engine/src/yue2/yue2-server.h, per the port plan) ──
 
@@ -226,6 +229,12 @@ export interface Yue2UnloadResult {
  *  vae_variant, noise_source). `style` is the wire name for what the UI calls
  *  the caption/prompt field. */
 export interface Yue2SynthRequest {
+  /** The job's model pick (#204), captured when the job was queued. The
+   *  engine applies it when the job starts, after renders still on the NAR
+   *  lane have finished; a pick equal to the current one costs nothing.
+   *  Omitted = render with whatever the engine holds (training callers). */
+  lm_type?: string;
+  lm_adapter?: Yue2AdapterWire;
   style: string;
   lyrics?: string;
   cot: 'off' | 'melody' | 'full';
@@ -457,6 +466,29 @@ export async function yue2Unload(timeoutMs = TIMEOUT_QUICK): Promise<Yue2UnloadR
  *  distinction is the whole reason the engine parses the field the way it
  *  does. Changing the adapter set costs a full teardown + lazy reload
  *  engine-side, so a no-op repeat must stay a no-op. */
+/** An adapter stack in the engine's `lm_adapter` wire form, shared by
+ *  /yue2/select-model and /yue2/synth (yue2_parse_adapter_field). Empty means
+ *  clear, spelled as null rather than [] so the engine reads the same
+ *  explicit-clear it documents. Order is the caller's and is load-bearing: the
+ *  engine renders its change key by walking the list, so a reordered stack
+ *  reads as a different one and costs a needless model reload. */
+export type Yue2AdapterWire = Array<{
+  path: string; scale: number; scale_attn: number; scale_mlp: number;
+  scale_early: number; scale_mid: number; scale_late: number;
+}> | null;
+
+export function yue2AdapterWire(stack: readonly Yue2AdapterRef[]): Yue2AdapterWire {
+  return stack.length === 0 ? null : stack.map(a => ({
+    path: a.path,
+    scale: a.scales.global,
+    scale_attn: a.scales.attn,
+    scale_mlp: a.scales.mlp,
+    scale_early: a.scales.early,
+    scale_mid: a.scales.mid,
+    scale_late: a.scales.late,
+  }));
+}
+
 export async function yue2SelectModel(sel: Yue2Selection): Promise<Yue2SelectModelResult> {
   const body: Record<string, unknown> = {
     lm_type: sel.lm ?? '',
@@ -464,20 +496,7 @@ export async function yue2SelectModel(sel: Yue2Selection): Promise<Yue2SelectMod
   };
   if (sel.lm_adapter !== undefined) {
     if (Array.isArray(sel.lm_adapter)) {
-      // A stack. Empty means clear, spelled as null rather than [] so the
-      // engine reads the same explicit-clear it documents. Order is the
-      // caller's and is load-bearing: the engine renders its change key by
-      // walking the list, so a reordered stack reads as a different one and
-      // costs a needless model reload.
-      body.lm_adapter = sel.lm_adapter.length === 0 ? null : sel.lm_adapter.map(a => ({
-        path: a.path,
-        scale: a.scales.global,
-        scale_attn: a.scales.attn,
-        scale_mlp: a.scales.mlp,
-        scale_early: a.scales.early,
-        scale_mid: a.scales.mid,
-        scale_late: a.scales.late,
-      }));
+      body.lm_adapter = yue2AdapterWire(sel.lm_adapter);
     } else {
       // '' and null both clear; send null, which is the engine's documented
       // explicit-clear spelling and cannot be mistaken for "auto".

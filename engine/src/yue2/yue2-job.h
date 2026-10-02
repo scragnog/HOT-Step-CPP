@@ -182,6 +182,40 @@ static bool yue2_nar_lane_drain(const char * who) {
     return true;
 }
 
+// Would this pick move weights? The comparisons both the select-model route
+// and a job's own pick tear down on, and the only ones: a repeat pick (same
+// lm_type, same yue2_adapter_key) is free and keeps the resident model.
+static bool yue2_pick_changes(bool lm_type_given, const std::string & lm_type, bool adapter_given,
+                              const std::vector<Yue2AdapterSpec> & adapters) {
+    return (lm_type_given && lm_type != g_yue2.lm_type_want) ||
+           (adapter_given && yue2_adapter_key(adapters) != yue2_adapter_key(g_yue2.lm_adapter_want));
+}
+
+// Make the pick the wanted one. Caller holds g_yue2_mutex and g_yue2_nar_mutex
+// with the lane drained (yue2_nar_lane_drain).
+//
+// lm_type: full teardown. yue2_unload() drops LM+VAE together (no LM-only
+// free exists), then re-discover pins the new LM file; the next load brings
+// the VAE back as on a cold start.
+//
+// Adapter set: a real change forces the same full teardown, because that is
+// the ONLY thing standing between a second selection and a doubled merge (see
+// Yue2Model::lm_adapter_want). No re-discover: the GGUF pin has not moved. The
+// merge itself happens on the next load, and a bad path or an unmergeable
+// quant fails THAT call loudly.
+static void yue2_apply_pick(bool lm_type_given, const std::string & lm_type, bool adapter_given,
+                            const std::vector<Yue2AdapterSpec> & adapters) {
+    if (lm_type_given && lm_type != g_yue2.lm_type_want) {
+        yue2_unload(&g_yue2);
+        g_yue2.lm_type_want = lm_type;
+        yue2_discover(&g_yue2, g_yue2.models_dir.c_str(), lm_type.empty() ? nullptr : lm_type.c_str());
+    }
+    if (adapter_given && yue2_adapter_key(adapters) != yue2_adapter_key(g_yue2.lm_adapter_want)) {
+        yue2_unload(&g_yue2);
+        g_yue2.lm_adapter_want = adapters;
+    }
+}
+
 // Called once at shutdown after the work thread has been joined.
 static void yue2_nar_lane_stop() {
     {
@@ -402,13 +436,20 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req_in) {
                     job->id.c_str(), still);
         }
     }
-    // A different VAE variant than the resident one makes yue2_load_parts free
-    // and reload the VAE, which renders still on the lane are using: drain
-    // them first and hold the lane while the weights move.
+    // Weights move here in two cases, and renders still on the NAR lane were
+    // composed under the current ones, so both drain the lane first and hold
+    // it while the weights move (#204):
+    //   - the job's own pick (lm_type / adapters) differs from what is wanted
+    //     now: the pick at enqueue is the one that renders;
+    //   - a different VAE variant than the resident one makes yue2_load_parts
+    //     free and reload the VAE.
+    const bool pick_changes =
+        yue2_pick_changes(req->lm_type_given, req->lm_type, req->lm_adapter_given, req->lm_adapter);
+    const bool vae_swap = !evict_strict && g_yue2.vae_resident && !req->plan_only && !req->semantic_only &&
+                          g_yue2.vae_loaded_variant != req->vae_variant;
     std::unique_lock<std::mutex> vae_swap_lock;
-    if (!evict_strict && g_yue2.vae_resident && !req->plan_only && !req->semantic_only &&
-        g_yue2.vae_loaded_variant != req->vae_variant) {
-        if (!yue2_nar_lane_drain("vae variant change")) {
+    if (pick_changes || vae_swap) {
+        if (!yue2_nar_lane_drain(pick_changes ? "job pick" : "vae variant change")) {
             job->result_body = "YuE2 engine is shutting down";
             job->result_mime = "text/plain";
             job_set_phase(*job, JobPhase::FAILED);
@@ -416,6 +457,13 @@ static void yue2_synth_worker(std::shared_ptr<Job> job, Yue2Request req_in) {
             return;
         }
         vae_swap_lock = std::unique_lock<std::mutex>(g_yue2_nar_mutex);
+    }
+    if (pick_changes) {
+        fprintf(stderr, "[YuE2-Job] %s: applying the job's pick: lm_type=%s lm_adapter=%s\n", job->id.c_str(),
+                req->lm_type_given ? (req->lm_type.empty() ? "(auto)" : req->lm_type.c_str()) : "(unchanged)",
+                req->lm_adapter_given ? (req->lm_adapter.empty() ? "(none)" : yue2_adapter_key(req->lm_adapter).c_str())
+                                      : "(unchanged)");
+        yue2_apply_pick(req->lm_type_given, req->lm_type, req->lm_adapter_given, req->lm_adapter);
     }
     if (!evict_strict &&
         !yue2_load_parts(&g_yue2, /*want_lm=*/true, /*want_vae=*/!req->plan_only && !req->semantic_only, req->vae_variant,

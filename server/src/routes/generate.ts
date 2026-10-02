@@ -19,6 +19,7 @@ import { engineReady, engineBootStatus } from '../engineState.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { pushLog } from './logs.js';
 import { getBackend, getActiveBackendId } from '../services/backends/registry.js';
+import { awaitBackendRelease } from './backends.js';
 import { mm3StreamUrl } from '../services/backends/minimax/client.js';
 import {
   runOnGpuLane, gpuLaneBusy, gpuLaneDepth, gpuLaneOwner, gpuLaneNextFamily, releaseGpuLane, resetGpuLane,
@@ -126,6 +127,9 @@ async function runGeneration(
   const backend = backendId ? getBackend(backendId) : undefined;
   if (!backend) throw new Error(`Captured generation backend '${backendId ?? '(missing)'}' is not registered`);
   if (!lease.isCurrent()) return emptyOutcome(job, 'reset');
+  // A backend switch evicts the outgoing family in the background; no family
+  // loads weights until that eviction is confirmed.
+  await awaitBackendRelease();
   return backend.generate(job, {
     envelope: job.envelope,
     attempt,

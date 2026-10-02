@@ -45,6 +45,9 @@ export function captionForBackend(
   gen: { id?: number; bpm?: number; caption?: string | null; caption_mm3?: string | null; caption_yue2?: string | null },
   backendId: string | undefined,
   lyricsSetId?: number,
+  /** YuE2: whether the render's own pick merges an adapter (a queued song's
+   *  captured pick). Omitted = the picker's default decides. */
+  yue2AdapterInForce?: boolean,
 ): string {
   if (backendId === MM3_BACKEND_ID) {
     const resolved = resolveMm3CaptionForGeneration(gen, lyricsSetId);
@@ -57,7 +60,7 @@ export function captionForBackend(
     // distribution. The dataset-track pick remains the fallback for songs
     // written before the field existed.
     if ((gen.caption_yue2 || '').trim()) return (gen.caption_yue2 || '').trim();
-    const resolved = resolveYue2CaptionForGeneration(gen, lyricsSetId);
+    const resolved = resolveYue2CaptionForGeneration(gen, lyricsSetId, yue2AdapterInForce);
     if (resolved.caption.trim()) return resolved.caption;
   }
   return gen.caption || '';

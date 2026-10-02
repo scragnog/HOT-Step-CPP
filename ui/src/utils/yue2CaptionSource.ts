@@ -123,13 +123,14 @@ function _write(key: string, value: unknown): void {
  *  freshly selected dataset renders under its own captions without the user
  *  having to find the picker. With no dataset there is nothing to be
  *  automatic about, and the caption box is the only source there is. */
-export function defaultYue2CaptionSelection(datasetId: string): Yue2CaptionSelection {
+export function defaultYue2CaptionSelection(datasetId: string, adapterInForce?: boolean): Yue2CaptionSelection {
   // Automatic only when an adapter is in force: its training captions are the
   // in-distribution prompts this feature exists to offer. A base-model render
-  // keeps the caption the user wrote, even with a dataset linked. Both render
-  // paths apply the album's halves before resolving, so the engine's resident
-  // pick is the album's here (useAudioGeneration, audioGenQueueStore).
-  const adapter = yue2CaptionAdapterPath(
+  // keeps the caption the user wrote, even with a dataset linked. A queued song
+  // says whether its own pick has one (audioGenQueueStore, #204); otherwise the
+  // picker's default decides, which Lyric Studio's send-to-Create sets to the
+  // album's halves before resolving (useAudioGeneration).
+  const adapter = adapterInForce ?? !!yue2CaptionAdapterPath(
     useBackendStore.getState().models[YUE2_BACKEND_ID]?.defaults as Record<string, unknown> | undefined);
   return { mode: datasetId && adapter ? 'auto' : 'custom' };
 }
@@ -143,11 +144,11 @@ export function hasStoredYue2CaptionSelection(datasetId: string): boolean {
   return !!stored && (stored.mode === 'auto' || stored.mode === 'track' || stored.mode === 'custom');
 }
 
-export function readYue2CaptionSelection(datasetId: string): Yue2CaptionSelection {
+export function readYue2CaptionSelection(datasetId: string, adapterInForce?: boolean): Yue2CaptionSelection {
   if (!datasetId) return { mode: 'custom' };
   const stored = _read<Yue2CaptionSelection>(YUE2_CAPTION_SOURCE_PREFIX + datasetId);
   if (!stored || (stored.mode !== 'auto' && stored.mode !== 'track' && stored.mode !== 'custom')) {
-    return defaultYue2CaptionSelection(datasetId);
+    return defaultYue2CaptionSelection(datasetId, adapterInForce);
   }
   return stored;
 }
@@ -366,12 +367,13 @@ export function resolveYue2Caption(
 export function resolveYue2CaptionForGeneration(
   gen: { id?: number; bpm?: number; caption?: string | null },
   lyricsSetId?: number,
+  adapterInForce?: boolean,
 ): Yue2ResolvedCaption {
   const datasetId = lyricsSetId ? readYue2DatasetForLyricsSet(lyricsSetId) : readYue2CaptionDataset();
   const own = gen.caption || '';
   if (!datasetId) return { caption: own.trim(), mode: 'custom' };
   return resolveYue2Caption(
-    own, gen.bpm, readYue2SourceTracks(datasetId), readYue2SongSelection(datasetId, gen.id));
+    own, gen.bpm, readYue2SourceTracks(datasetId), readYue2SongSelection(datasetId, gen.id, adapterInForce));
 }
 
 // ── Per-song choice (Lyric Studio) ───────────────────────────────────────────
@@ -401,7 +403,7 @@ export function hasStoredYue2SongSelection(datasetId: string, genId?: number): b
   return !!stored && (stored.mode === 'auto' || stored.mode === 'track' || stored.mode === 'custom');
 }
 
-export function readYue2SongSelection(datasetId: string, genId?: number): Yue2CaptionSelection {
+export function readYue2SongSelection(datasetId: string, genId?: number, adapterInForce?: boolean): Yue2CaptionSelection {
   if (!datasetId) return { mode: 'custom' };
   if (typeof genId === 'number') {
     const stored = _read<Yue2CaptionSelection>(yue2SongKey(datasetId, genId));
@@ -409,7 +411,7 @@ export function readYue2SongSelection(datasetId: string, genId?: number): Yue2Ca
       return stored;
     }
   }
-  return readYue2CaptionSelection(datasetId);
+  return readYue2CaptionSelection(datasetId, adapterInForce);
 }
 
 export function writeYue2SongSelection(
@@ -436,6 +438,30 @@ export function writeYue2SongSelection(
  *  the user's dials, not the album's.
  *
  *  Returns true when the engine accepted the selection. Never throws. */
+/** The YuE2 model pick a queued song renders with (#204), taken when it is
+ *  QUEUED: the picker's current default (paths and all six dials per slot),
+ *  with an album preset's two halves in place of the picker's paths when the
+ *  song comes from an album; an absent half is '' (the base model, never the
+ *  previous album's). The server renders exactly this, whatever the picker
+ *  says by the time the song runs. Keys are the picker's own (POST
+ *  /api/backends/models), which the server resolves with the picker's rules. */
+export function yue2PickAtEnqueue(
+  preset: { yue2_ar_adapter_path?: string | null; yue2_nar_adapter_path?: string | null } | null | undefined,
+): Record<string, string | number> {
+  const defaults = (useBackendStore.getState().models[YUE2_BACKEND_ID]?.defaults ?? {}) as Record<string, unknown>;
+  const pick: Record<string, string | number> = {};
+  for (const [k, v] of Object.entries(defaults)) {
+    if (/^lmAdapter(Ar|Nar)(Scale(Attn|Mlp|Early|Mid|Late)?)?$/.test(k) && (typeof v === 'string' || typeof v === 'number')) {
+      pick[k] = v;
+    }
+  }
+  if (preset) {
+    pick.lmAdapterAr = String(preset.yue2_ar_adapter_path ?? '').trim();
+    pick.lmAdapterNar = String(preset.yue2_nar_adapter_path ?? '').trim();
+  }
+  return pick;
+}
+
 export async function applyYue2PresetAdapters(
   preset: { yue2_ar_adapter_path?: string | null; yue2_nar_adapter_path?: string | null } | null | undefined,
 ): Promise<boolean> {

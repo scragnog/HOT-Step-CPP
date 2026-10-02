@@ -25,7 +25,7 @@ import { resolveDuration } from '../utils/estimateDuration';
 import { createGenerationTimer, getGenerationTimeoutMinutes } from '../utils/generationTimer';
 import { captionForBackend, MM3_BACKEND_ID } from '../utils/captionForBackend';
 import {
-  applyYue2PresetAdapters, ensureYue2CaptionSource, YUE2_BACKEND_ID,
+  ensureYue2CaptionSource, yue2CaptionAdapterPath, yue2PickAtEnqueue, YUE2_BACKEND_ID,
 } from '../utils/yue2CaptionSource';
 import { ensureMm3SourceTracks } from '../utils/mm3CaptionSource';
 import { normalizeKeyScale } from '../utils/keyScale';
@@ -50,6 +50,10 @@ export interface AudioQueueItem {
   lyricsSetId: number;
   /** Snapshot of getGlobalParams() captured at enqueue time — same as Create page */
   globalParams: Partial<GenerationParams>;
+  /** YuE2 model pick captured at enqueue (yue2PickAtEnqueue): the adapters
+   *  this song renders with, whatever the picker says when it runs (#204).
+   *  Absent on items queued before this existed; they take it at run time. */
+  yue2Pick?: Record<string, string | number>;
   status: AudioQueueStatus;
   jobId?: string;
   progress?: number;
@@ -495,6 +499,10 @@ export async function enqueueAudioGen(
     const res = await lireekApi.getPreset(opts.lyricsSetId);
     preset = res.preset;
   } catch { /* no preset configured */ }
+  // The picker's dials ride in the pick; fetch them if the picker never has.
+  if (!useBackendStore.getState().models[YUE2_BACKEND_ID]) {
+    await useBackendStore.getState().fetchModels(YUE2_BACKEND_ID);
+  }
 
   const item: AudioQueueItem = {
     id: _genId(),
@@ -506,6 +514,7 @@ export async function enqueueAudioGen(
     profileId: opts.profileId,
     lyricsSetId: opts.lyricsSetId,
     globalParams,
+    yue2Pick: yue2PickAtEnqueue(preset),
     status: 'pending',
   };
 
@@ -1409,13 +1418,12 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   if (backendId === MM3_BACKEND_ID) await ensureMm3SourceTracks(item.lyricsSetId);
   // YuE2's equivalent, in two parts.
   //
-  // First the album's own adapters. YuE2 merges the delta into the resident LM
-  // rather than passing it per request, so without this every song in a queue
-  // renders through whichever album happened to be selected last — the failure
-  // the MM3 block above was written for, but persisting in the engine rather
-  // than in a param. AWAITED, not fired and forgotten: the merge has to be in
-  // force before this item is submitted, and the queue is serial, so the wait
-  // costs nothing that the model reload was not going to cost.
+  // First the song's own model pick, captured when it was queued (#204): the
+  // album's adapters at that moment, with the picker's dials. It travels with
+  // the request and the engine applies it when the job starts, so a later
+  // picker change, or a training run assigning a new adapter to the album while
+  // the song waits, does not change what it renders with. Items queued before
+  // the pick existed take it now, which is what they did before.
   //
   // Then the caption source, resolved by the album's lyrics-set id — a handle
   // that survives a moved run folder or a swept prepared cache, unlike the
@@ -1424,11 +1432,14 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   // fetchYue2CaptionSource fills, so a song generated from Lyric Studio
   // without that panel ever being opened would otherwise resolve to the
   // written caption and the album's own captions would never reach the model.
+  let yue2AdapterInForce: boolean | undefined;
   if (backendId === YUE2_BACKEND_ID) {
-    await applyYue2PresetAdapters(preset);
+    const pick = item.yue2Pick ?? yue2PickAtEnqueue(preset);
+    params.yue2Pick = pick;
+    yue2AdapterInForce = !!yue2CaptionAdapterPath(pick);
     await ensureYue2CaptionSource({ lyricsSet: item.lyricsSetId });
   }
-  params.caption = captionForBackend(gen, backendId, item.lyricsSetId);
+  params.caption = captionForBackend(gen, backendId, item.lyricsSetId, yue2AdapterInForce);
   params.title = gen.title || '';
   params.instrumental = false;
   // Duration is an ACE-only field now.

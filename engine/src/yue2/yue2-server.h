@@ -485,41 +485,19 @@ static void yue2_handle_select_model(const httplib::Request & req, httplib::Resp
     // overwrite the pending pick when none is resident.
     const Yue2VaeVariant variant = vae_given ? variant_req : g_yue2.vae_loaded_variant;
 
-    // The same three comparisons the code below tears down on. A selection that
+    // The same comparisons the code below tears down on. A selection that
     // moves weights waits for every render already handed to the NAR lane: each
     // was composed under the current weights and renders under them (#204).
     // A same-key selection moves nothing and does not wait.
-    const bool lm_type_changes = lm_type_given && lm_type_str != g_yue2.lm_type_want;
-    const bool adapter_changes = adapter_given && yue2_adapter_key(adapters) != yue2_adapter_key(g_yue2.lm_adapter_want);
-    const bool vae_changes     = g_yue2.vae_resident && variant != g_yue2.vae_loaded_variant;
-    if ((lm_type_changes || adapter_changes || vae_changes) && !yue2_nar_lane_drain("select-model")) {
+    const bool pick_changes = yue2_pick_changes(lm_type_given, lm_type_str, adapter_given, adapters);
+    const bool vae_changes  = g_yue2.vae_resident && variant != g_yue2.vae_loaded_variant;
+    if ((pick_changes || vae_changes) && !yue2_nar_lane_drain("select-model")) {
         yue2_json_error(res, 503, "YuE2 engine is shutting down");
         return;
     }
     std::lock_guard<std::mutex> nar_lock(g_yue2_nar_mutex);  // the render lane must be idle before weights move
 
-    if (lm_type_changes) {
-        // Full teardown: yue2_unload() drops LM+VAE together (no LM-only
-        // free exists), then re-discover pins the new LM file. VAE residency
-        // is lost too, but yue2_load_parts's need_vae check reloads it on the
-        // next warm/synth same as a cold start.
-        yue2_unload(&g_yue2);
-        g_yue2.lm_type_want = lm_type_str;
-        yue2_discover(&g_yue2, g_yue2.models_dir.c_str(), lm_type_str.empty() ? nullptr : lm_type_str.c_str());
-    }
-
-    // Adapter set. Compared through yue2_adapter_key so a repeat selection —
-    // the same paths at the same scales, in the same order — is free and does
-    // not evict a resident model. A real change forces the same full teardown
-    // lm_type does, because that is the ONLY thing standing between a second
-    // selection and a doubled merge (see Yue2Model::lm_adapter_want). No
-    // re-discover: the GGUF pin has not moved. The merge itself happens on the
-    // next warm/synth, and a bad path or an unmergeable quant fails THAT call
-    // loudly rather than this one.
-    if (adapter_changes) {
-        yue2_unload(&g_yue2);
-        g_yue2.lm_adapter_want = adapters;
-    }
+    yue2_apply_pick(lm_type_given, lm_type_str, adapter_given, adapters);
 
     const bool   want_vae = g_yue2.vae_resident;  // only reload if one is already resident
     std::string  err;
@@ -962,6 +940,28 @@ static void yue2_handle_synth(const httplib::Request & req, httplib::Response & 
     if (!yue2_parse_request(req.body, &preq, &err)) {
         yue2_json_error(res, 400, err);
         return;
+    }
+    // The job's own model pick (#204): lm_adapter and lm_type with exactly the
+    // select-model rules, applied by the work thread when the job starts.
+    if (yyjson_doc * d = yyjson_read(req.body.data(), req.body.size(), 0)) {
+        yyjson_val * root = yyjson_doc_get_root(d);
+        bool         ok   = true;
+        if (yyjson_is_obj(root)) {
+            ok = yue2_parse_adapter_field(root, &preq.lm_adapter, &preq.lm_adapter_given, &err);
+            yyjson_val * lt = yyjson_obj_get(root, "lm_type");
+            if (ok && lt && yyjson_is_str(lt)) {
+                preq.lm_type       = yyjson_get_str(lt);
+                preq.lm_type_given = true;
+            } else if (ok && lt && !yyjson_is_null(lt)) {
+                ok  = false;
+                err = "lm_type must be a string";
+            }
+        }
+        yyjson_doc_free(d);
+        if (!ok) {
+            yue2_json_error(res, 400, err.empty() ? "invalid lm_adapter" : err);
+            return;
+        }
     }
     auto job = job_create();
     work_push([job, preq]() mutable { yue2_synth_worker(job, std::move(preq)); });

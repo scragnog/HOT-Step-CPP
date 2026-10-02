@@ -110,6 +110,14 @@ struct Yue2Request {
     // Bit b set = song b left the batch (its queue entry was removed), so the
     // plan and compose loops end it at once and the render leaves it out.
     const std::atomic<uint32_t> * songs_dropped = nullptr;
+    // The job's model pick (#204), parsed by yue2_handle_synth with the same
+    // rules as POST /yue2/select-model. The work thread applies it at job
+    // start when it differs from what is wanted now, after the NAR lane has
+    // drained. Not given = render with the current pick (older clients).
+    std::vector<Yue2AdapterSpec> lm_adapter;
+    bool                         lm_adapter_given = false;
+    std::string                  lm_type;
+    bool                         lm_type_given = false;
 
     uint64_t seed         = 0;
     bool     seed_present = false;
