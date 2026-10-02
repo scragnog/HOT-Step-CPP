@@ -32,7 +32,8 @@ import type { LatentMetadata } from '../shared/LatentImport';
 import { loadSelections, saveSelections } from '../lyric-studio/ProviderSelector';
 import { useBackendStore } from '../../stores/backendStore';
 import { fetchYue2CaptionSource, resolveYue2Caption, yue2PickAtEnqueue, type Yue2SourceTrack } from '../../utils/yue2CaptionSource';
-import { yue2CoverApi, type Yue2CoverDatasetMetadata, type Yue2CoverJob, type Yue2CoverReadiness } from '../../services/yue2CoverApi';
+import { yue2CoverApi, type Yue2CoverDatasetMetadata, type Yue2CoverJob, type Yue2CoverReadiness,
+  type Yue2ScoreSection, type Yue2SectionReview } from '../../services/yue2CoverApi';
 import { Yue2CoverPanel } from './Yue2CoverPanel';
 import { Yue2CoverScore } from './Yue2CoverScore';
 
@@ -133,6 +134,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [sheetPreparing, setSheetPreparing] = useState(false);
   const [sheetError, setSheetError] = useState('');
   const [sheetAbc, setSheetAbc] = useState('');
+  const [scoreSections, setScoreSections] = useState<Yue2ScoreSection[]>([]);
+  const [sectionLint, setSectionLint] = useState<Yue2SectionReview['lint'] | null>(null);
   const [sheetAudioUrl, setSheetAudioUrl] = useState('');
   const [approvedSheet, setApprovedSheet] = useState<{ abc: string; sourceId: string; sourceLabel: string; audioUrl: string; key: string } | null>(null);
 
@@ -161,7 +164,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   sourceKeyRef.current = sourceKey;
   useEffect(() => {
     sheetRequestRef.current += 1;
-    setApprovedSheet(null); setSheetAbc(''); setSheetAudioUrl(''); setSheetError(''); setSheetJob(null); setSheetPreparing(false);
+    setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setSectionLint(null);
+    setSheetAudioUrl(''); setSheetError(''); setSheetJob(null); setSheetPreparing(false);
     if (sheetJobRef.current && token) void yue2CoverApi.cancel(sheetJobRef.current, token).catch(() => {});
     sheetJobRef.current = ''; setSheetJobId('');
   }, [sourceKey, token]);
@@ -190,7 +194,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         if (!live || sheetJobRef.current !== sheetJobId) return;
         setSheetJob(result.job ?? null);
         if (result.job?.status === 'done') {
-          setSheetAbc(result.abc || ''); setSheetJobId(''); sheetJobRef.current = '';
+          setSheetAbc(result.abc || ''); setScoreSections(result.sections || []);
+          setSheetJobId(''); sheetJobRef.current = '';
         } else if (result.job?.status === 'failed' || result.job?.status === 'cancelled') {
           setSheetError(result.job.error || `Transcription ${result.job.status}`);
           setSheetJobId(''); sheetJobRef.current = '';
@@ -201,6 +206,19 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const timer = setInterval(() => { void poll(); }, 1000);
     return () => { live = false; clearInterval(timer); };
   }, [sheetJobId, token]);
+
+  useEffect(() => {
+    if (!yue2Mode || !token || !sheetAbc.trim()) { setSectionLint(null); return; }
+    let live = true;
+    const timer = setTimeout(() => {
+      void yue2CoverApi.reviewSections(sheetAbc, lyrics, token).then(review => {
+        if (!live) return;
+        setScoreSections(review.sections);
+        setSectionLint(review.lint);
+      }).catch(() => { if (live) setSectionLint(null); });
+    }, 250);
+    return () => { live = false; clearTimeout(timer); };
+  }, [yue2Mode, token, sheetAbc, lyrics]);
 
 
   // ── Persist ──
@@ -236,7 +254,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
   const applyDatasetMetadata = (data: Yue2CoverDatasetMetadata, lyricEdit: number, instrumentalEdit: number): boolean => {
     if (!data.matched) return false;
-    if (data.abc) { setSheetAbc(data.abc); setSheetScoreSource('dataset'); }
+    if (data.abc) { setSheetAbc(data.abc); setScoreSections(data.sections || []); setSheetScoreSource('dataset'); }
     if (!data.metadataAvailable || data.bpm == null || !data.key) return false;
     if (lyricEditRef.current === lyricEdit) {
       setLyrics(data.lyrics || '');
@@ -560,7 +578,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (!token || !sourceAudioUrl) return;
     const key = sourceKey;
     const request = ++sheetRequestRef.current;
-    setSheetError(''); setApprovedSheet(null); setSheetAbc(''); setSheetPreparing(true);
+    setSheetError(''); setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setSheetPreparing(true);
     try {
       const source = await prepareYue2Source();
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
@@ -571,7 +589,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       }
       setSheetAudioUrl(source.audioUrl);
       if (result.jobId) { sheetJobRef.current = result.jobId; setSheetJobId(result.jobId); }
-      else if (result.abc) { setSheetAbc(result.abc); setSheetScoreSource(result.scoreSource === 'dataset' ? 'dataset' : null); }
+      else if (result.abc) {
+        setSheetAbc(result.abc); setScoreSections(result.sections || []);
+        setSheetScoreSource(result.scoreSource === 'dataset' ? 'dataset' : null);
+      }
     } catch (err: any) { if (sourceKeyRef.current === key && sheetRequestRef.current === request) setSheetError(err.message); }
     finally { if (sheetRequestRef.current === request) setSheetPreparing(false); }
   };
@@ -598,9 +619,27 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
       setApprovedSheet({ abc: result.abc || sheetAbc.trim(), sourceId: result.sourceId,
         sourceLabel: result.sourceLabel, audioUrl: source.audioUrl, key });
+      setScoreSections(result.sections || []);
       setSheetAudioUrl(source.audioUrl);
     } catch (err: any) { if (sourceKeyRef.current === key && sheetRequestRef.current === request) setSheetError(err.message); }
     finally { if (sheetRequestRef.current === request) setSheetPreparing(false); }
+  };
+
+  const handleInsertScoreTags = async () => {
+    if (!token || !sheetAbc.trim()) return;
+    const key = sourceKey, scoreRequest = sheetRequestRef.current, lyricEdit = lyricEditRef.current;
+    try {
+      const review = await yue2CoverApi.reviewSections(sheetAbc, lyrics, token);
+      if (sourceKeyRef.current !== key || sheetRequestRef.current !== scoreRequest || lyricEditRef.current !== lyricEdit) return;
+      if (!review.sections.length) return;
+      if (review.lint.lyricCount > 0 &&
+          !window.confirm('Replace the current lyric section tags with the score sections? Your lyric lines will stay under the first tag for you to arrange.')) return;
+      lyricEditRef.current++;
+      setLyrics(review.insertedLyrics);
+      setLyricsSource(null);
+      setScoreSections(review.sections);
+      setSectionLint(null);
+    } catch (err: any) { setSheetError(err.message); }
   };
 
   // ── Generation ──
@@ -992,11 +1031,27 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               placeholder={t('cover.lyricsPlaceholder')}
               className="w-full min-h-0 flex-1 resize-none bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-cyan-500 transition-colors font-mono leading-relaxed" />
           </div>
+          {yue2Mode && !!sheetAbc && <div className="flex-shrink-0 px-4 pb-3 space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Score sections</span>
+              <button type="button" onClick={() => void handleInsertScoreTags()} disabled={!scoreSections.length}
+                className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Insert tags from score</button>
+            </div>
+            {scoreSections.length > 0
+              ? <div className="flex flex-wrap gap-1">{scoreSections.map((section, index) =>
+                <span key={`${index}-${section.startBar}`} className="rounded bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-800 dark:text-cyan-200">
+                  {section.label} · bar {section.startBar}
+                </span>)}</div>
+              : <p className="text-xs text-zinc-500">No score section labels found.</p>}
+            {!instrumental && sectionLint && !sectionLint.ok &&
+              <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{sectionLint.message}</p>}
+          </div>}
           {yue2Mode && <Yue2CoverScore
             sourceReady={!!sourceAudioUrl && !isUploading}
             readiness={readiness} job={sheetJob} preparing={sheetPreparing} error={sheetError}
             abc={sheetAbc} approved={!!approvedSheet && approvedSheet.key === sourceKey}
-            onAbcChange={value => { sheetRequestRef.current += 1; setSheetPreparing(false); setSheetAbc(value); setSheetScoreSource(null); setApprovedSheet(null); }}
+            onAbcChange={value => { sheetRequestRef.current += 1; setSheetPreparing(false); setSheetAbc(value);
+              setScoreSections([]); setSectionLint(null); setSheetScoreSource(null); setApprovedSheet(null); }}
             scoreSource={sheetScoreSource}
             onTranscribe={handleTranscribe} onCancel={handleCancelSheet} onApprove={handleApproveSheet}
           />}

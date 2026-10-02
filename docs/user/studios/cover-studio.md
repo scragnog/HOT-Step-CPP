@@ -59,6 +59,11 @@ have to make.
 4. Paste lyrics or search by artist and title; choose **Instrumental** to render
    without lyrics. Write a YuE2 style caption. With an adapter pair, you can
    choose a caption from its training tracks or the nearest detected BPM.
+   The score's section strip shows each transcribed label and its starting bar.
+   A warning compares these sections with `[Tag]` headers in your lyrics, but
+   never blocks Generate. **Insert tags from score** puts the score labels in
+   order and keeps your lyric lines under the first tag for you to arrange;
+   replacing existing tags asks for confirmation.
 5. Choose **Base YuE2** or an explicit AR composer and NAR renderer pair.
    **Keep chords** is on by default. Turn it off to remove the score's chord
    symbols for this render and let the style decide the harmony. The reviewed

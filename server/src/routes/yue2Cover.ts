@@ -26,6 +26,11 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
     catch (err) { fail(res, err); }
   });
 
+  router.post('/sections/review', (req: Request, res: Response) => {
+    try { res.json(service.reviewScore(req.body || {})); }
+    catch (err) { fail(res, err); }
+  });
+
   router.post('/transcriptions', async (req: Request, res: Response) => {
     try {
       const result = await service.start(req.body || {}, authenticate(req)!);

@@ -45,6 +45,13 @@ dataset ABC immediately with `scoreSource: "dataset"` and no job. Pass
 next to the dataset audio. A cover generation records `lyricsSource:
 "dataset-sidecar"` until the lyrics or Instrumental choice is edited.
 
+Completed transcription responses, supplied-ABC responses and saved dataset
+scores include `sections: [{ label, startBar }]`. The bar number starts at 1
+and counts the Vocal voice. `POST /sections/review` accepts `{ abc, lyrics }`
+and returns those sections, a non-blocking count/order verdict for the lyric
+`[Tag]` lines, and `insertedLyrics` with the score tags in order. Existing
+lyric lines stay under the first inserted tag.
+
 Cover transcription first tries with the engine running. If SheetSage2 fails to load,
 the job waits for any active render, stops the engine, retries once, and restarts the
 engine before the next render begins. Other transcription errors fail without a retry.

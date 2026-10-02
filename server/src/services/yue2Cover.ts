@@ -12,6 +12,7 @@ import { resolveCoverDatasetSource } from './coverDatasetSource.js';
 import { readSidecar } from './training/sidecarIO.js';
 import { sidecarPathFor } from './training/paths.js';
 import { readAbcSidecar } from './training/abcSidecar.js';
+import { insertScoreSectionTags, lintScoreSections, scoreSections } from './backends/yue2/scoreSections.js';
 
 const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
 const MAX_AUDIO_SECONDS = 10 * 60;
@@ -42,6 +43,16 @@ export function createYue2CoverService(deps = {
     const missing = deps.missingModels();
     return { ready: missing.length === 0, model: missing.length ? null : path.basename(deps.model()),
       message: missing.length ? 'SheetSage2 is missing. Download the SheetSage2 Lead-Sheet Transcriber (yue2-sheetsage2-f16) in Model Manager, or supply an approved ABC score.' : null };
+  }
+
+  function reviewScore(input: { abc?: unknown; lyrics?: unknown }) {
+    if (typeof input.abc !== 'string' || input.abc.length > MAX_ABC_LENGTH ||
+        typeof input.lyrics !== 'string' || input.lyrics.length > MAX_ABC_LENGTH) {
+      throw new CoverRequestError('ABC and lyrics must be strings of at most 64 KB each.');
+    }
+    const sections = scoreSections(input.abc);
+    return { sections, lint: lintScoreSections(sections, input.lyrics),
+      insertedLyrics: insertScoreSectionTags(sections, input.lyrics) };
   }
 
   async function source(input: CoverInput, userId: string): Promise<CoverSource> {
@@ -91,13 +102,15 @@ export function createYue2CoverService(deps = {
     const selected = await source(input, userId);
     if (input.abc !== undefined) {
       if (typeof input.abc !== 'string' || !input.abc.trim() || input.abc.length > MAX_ABC_LENGTH) throw new CoverRequestError('ABC must be non-empty and at most 64 KB.');
-      return { status: 'done' as const, abc: input.abc.trim(), sourceId: selected.sourceId, sourceLabel: selected.sourceLabel };
+      const abc = input.abc.trim();
+      return { status: 'done' as const, abc, sections: scoreSections(abc),
+        sourceId: selected.sourceId, sourceLabel: selected.sourceLabel };
     }
     if (input.force !== undefined && typeof input.force !== 'boolean') throw new CoverRequestError('force must be a boolean.');
     const matched = deps.datasetMatch(selected.audioPath);
     if (matched && !input.force) {
       const abc = readAbcSidecar(matched.audioPath);
-      if (abc) return { status: 'done' as const, abc, sourceId: selected.sourceId,
+      if (abc) return { status: 'done' as const, abc, sections: scoreSections(abc), sourceId: selected.sourceId,
         sourceLabel: selected.sourceLabel, scoreSource: 'dataset' as const };
     }
     const ready = readiness();
@@ -133,13 +146,13 @@ export function createYue2CoverService(deps = {
     const validBpm = Number.isFinite(bpm) && bpm >= 20 && bpm <= 300;
     const abc = readAbcSidecar(matched.audioPath);
     if (!validBpm || !key || !validInstrumental || (!hasLyrics && !isInstrumental)) {
-      return abc ? { matched: true as const, metadataAvailable: false as const, abc } : { matched: false as const };
+      return abc ? { matched: true as const, metadataAvailable: false as const, abc, sections: scoreSections(abc) } : { matched: false as const };
     }
     return { matched: true as const, datasetId: matched.datasetId, sampleId: matched.sampleId,
       metadataAvailable: true as const,
       lyrics: fields.lyrics || '', bpm, key,
       isInstrumental,
-      abc, lyricsSource: 'dataset-sidecar' as const };
+      abc, ...(abc ? { sections: scoreSections(abc) } : {}), lyricsSource: 'dataset-sidecar' as const };
   }
 
   function find(jobId: string, userId: string) {
@@ -152,7 +165,8 @@ export function createYue2CoverService(deps = {
     const summary = job ? deps.queue.toSummary(job) : deps.queue.listJobs().find(j => j.id === jobId);
     if (!summary) throw new CoverRequestError('Cover job not found', 404);
     const abc = summary.status === 'done' ? readYue2CoverAbc(path.join(deps.jobRoot, jobId, 'cover-sheet.json'), saved.name) : undefined;
-    return { job: summary, sourceId: saved.sourceId, sourceLabel: saved.sourceLabel, ...(abc ? { abc } : {}) };
+    return { job: summary, sourceId: saved.sourceId, sourceLabel: saved.sourceLabel,
+      ...(abc ? { abc, sections: scoreSections(abc) } : {}) };
   }
 
   function cancel(jobId: string, userId: string) {
@@ -161,7 +175,7 @@ export function createYue2CoverService(deps = {
     return find(jobId, userId);
   }
 
-  return { readiness, source, lookup, start, find, cancel };
+  return { readiness, source, lookup, start, find, cancel, reviewScore };
 }
 
 export const yue2CoverService = createYue2CoverService();

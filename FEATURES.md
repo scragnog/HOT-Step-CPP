@@ -49,7 +49,7 @@ Pick the backend from a button in the global bar. The choice survives a restart,
 | Model-ended songs | The composer decides the length, up to six minutes. |
 | Chain of Thought | Full lead sheet (default), Melody only, or Off. Off skips the lead sheet but runs guidance, so it is the slowest mode. |
 | Lead sheet preview | Plans the score only and shows it as staff notation with playback and a health verdict; continue, re-plan or cancel. You can also paste your own ABC lead sheet. |
-| Cover Studio | Transcribes a source into a reviewed ABC melody, or accepts pasted ABC, then composes from that score. SheetSage2 is optional when you provide the score. |
+| Cover Studio | Transcribes a source into a reviewed ABC lead sheet, or accepts pasted ABC, then composes from that score. SheetSage2 is optional when you provide the score. |
 | Batch Size and Noise Variations | Several songs in one pass, or the same composed song rendered from different noise. |
 | Own NAR sampler | Midpoint or Wasserstein Flow solvers with Uniform or HT V3 schedules. |
 | Two adapter slots | Separate AR (composer) and NAR (renderer) adapters, merged into the loaded model with Apply. |
@@ -197,8 +197,9 @@ Details: [Cover Studio](docs/user/studios/cover-studio.md)
 | Tempo and pitch (ACE-Step) | 0.5x to 2x tempo and -12 to +12 semitones, with the target key shown. |
 | Timbre reference (ACE-Step) | A second reference track for the DiT's timbre conditioning. |
 | Stem mix | Split the source with SuperSep and mute or lower stems before generating. |
-| Lead-sheet review (YuE2) | Transcribe the melody with optional SheetSage2, or paste ABC without it. Preview, edit and approve the score before rendering. |
-| Score conditioning (YuE2) | Melody only by default, or Full to use chords added to the ABC. The source recording does not condition the audio renderer. |
+| Lead-sheet review (YuE2) | Transcribe the full melody and chord score with optional SheetSage2, or paste ABC without it. Preview, edit and approve before rendering. |
+| Section and lyric aid (YuE2) | Show score section labels and starting bars, warn when lyric tags differ, and insert score tags without discarding lyric lines. |
+| Score conditioning (YuE2) | Keep detected chords by default, or drop them at render time to let the style decide harmony. The source recording does not condition the audio renderer. |
 | Adapter pair (YuE2) | Render with the base model or an explicit AR/NAR pair captured when you queue the cover. |
 | Serial cover queue | Queue more covers while one renders. |
 

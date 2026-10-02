@@ -86,10 +86,11 @@ test('dataset sidecar supplies lyrics, tempo, key and a cached score without a j
     const metadata = await f.service.lookup(input, 'owner');
     assert.deepEqual(metadata, { matched: true, datasetId: 'dataset-1', sampleId: 'sample-1',
       metadataAvailable: true, lyrics: 'Verse line', bpm: 132, key: 'D minor', isInstrumental: false,
-      abc: 'X:1\nK:Dm\nD', lyricsSource: 'dataset-sidecar' });
+      abc: 'X:1\nK:Dm\nD', sections: [], lyricsSource: 'dataset-sidecar' });
     const result = await f.service.start(input, 'owner');
     assert.equal(result.status, 'done');
     assert.equal(result.abc, 'X:1\nK:Dm\nD');
+    assert.deepEqual(result.sections, []);
     assert.equal(result.scoreSource, 'dataset');
     assert.equal(f.counts().started, 0);
   } finally { f.close(); }
@@ -154,7 +155,8 @@ test('supplied ABC bypasses the model and runner, retaining the source identity'
   const f = fixture(true);
   try {
     const result = await f.service.start({ sourceAudioUrl: `/references/${f.upload}`, abc: ' X:1\nK:C\nC ' }, 'owner');
-    assert.deepEqual(result, { status: 'done', abc: 'X:1\nK:C\nC', sourceId: `/references/${f.upload}`, sourceLabel: f.upload });
+    assert.deepEqual(result, { status: 'done', abc: 'X:1\nK:C\nC', sections: [],
+      sourceId: `/references/${f.upload}`, sourceLabel: f.upload });
     assert.deepEqual(f.counts(), { started: 0, cancelled: 0, runnerCalls: 0 });
   } finally { f.close(); }
 });
@@ -187,6 +189,7 @@ test('completed job returns approved ABC and its source identity', async () => {
     const result = f.service.find(started.jobId!, 'owner');
     assert.equal(result.job.status, 'done');
     assert.equal(result.abc, 'X:1\nK:C\nC');
+    assert.deepEqual(result.sections, []);
     assert.equal(result.sourceId, `/references/${f.upload}`);
   } finally { f.close(); }
 });
@@ -215,6 +218,40 @@ test('unauthenticated cover request is refused before reaching the service', asy
     });
     assert.equal(response.status, 401);
     assert.deepEqual(await response.json(), { error: 'Unauthorized' });
+    assert.equal(f.counts().started, 0);
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); f.close(); }
+});
+
+test('section review uses the score and lyrics without starting transcription', () => {
+  const f = fixture(true);
+  try {
+    const result = f.service.reviewScore({ abc: 'X:1\n% verse\nV: Vocal\nC|', lyrics: '[Chorus]\nA line' });
+    assert.deepEqual(result.sections, [{ label: 'verse', startBar: 1 }]);
+    assert.match(result.lint.message, /score section 1 is verse, lyric tag 1 is Chorus/);
+    assert.equal(result.insertedLyrics, '[verse]\nA line');
+    assert.deepEqual(f.counts(), { started: 0, cancelled: 0, runnerCalls: 0 });
+    assert.throws(() => f.service.reviewScore({ abc: 5, lyrics: '' }), /ABC and lyrics must be strings/);
+  } finally { f.close(); }
+});
+
+test('section review route returns sections and rejects invalid input', async () => {
+  const f = fixture();
+  const app = express();
+  app.use(express.json());
+  app.use('/api/yue2-cover', createYue2CoverRouter(f.service, () => 'owner'));
+  const server: Server = app.listen(0);
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Expected TCP address');
+    const url = `http://127.0.0.1:${address.port}/api/yue2-cover/sections/review`;
+    const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ abc: 'X:1\n% chorus\nV: Vocal\nC|', lyrics: '[Chorus]\nline' }) });
+    assert.equal(response.status, 200);
+    const result = await response.json() as { sections: Array<{ label: string; startBar: number }>; lint: { ok: boolean } };
+    assert.deepEqual(result.sections, [{ label: 'chorus', startBar: 1 }]);
+    assert.equal(result.lint.ok, true);
+    const invalid = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ abc: 5, lyrics: '' }) });
+    assert.equal(invalid.status, 400);
     assert.equal(f.counts().started, 0);
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); f.close(); }
 });

@@ -32,6 +32,14 @@ export interface Yue2CoverResult {
   sourceId: string;
   sourceLabel: string;
   scoreSource?: 'dataset';
+  sections?: Yue2ScoreSection[];
+}
+
+export interface Yue2ScoreSection { label: string; startBar: number }
+export interface Yue2SectionReview {
+  sections: Yue2ScoreSection[];
+  lint: { ok: boolean; scoreCount: number; lyricCount: number; message: string };
+  insertedLyrics: string;
 }
 
 export interface Yue2CoverDatasetMetadata {
@@ -44,6 +52,7 @@ export interface Yue2CoverDatasetMetadata {
   key?: string;
   isInstrumental?: boolean;
   abc?: string;
+  sections?: Yue2ScoreSection[];
   lyricsSource?: 'dataset-sidecar';
 }
 
@@ -59,6 +68,9 @@ async function request<T>(path: string, token: string, init?: RequestInit): Prom
 
 export const yue2CoverApi = {
   readiness: (token: string) => request<Yue2CoverReadiness>('/readiness', token),
+  reviewSections: (abc: string, lyrics: string, token: string) => request<Yue2SectionReview>('/sections/review', token, {
+    method: 'POST', body: JSON.stringify({ abc, lyrics }),
+  }),
   sourceMetadata: (input: Yue2CoverSourceInput, token: string) => request<Yue2CoverDatasetMetadata>('/source-metadata', token, {
     method: 'POST', body: JSON.stringify(input),
   }),

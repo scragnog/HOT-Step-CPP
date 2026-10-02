@@ -117,13 +117,23 @@ function longestLoop(bars: string[]): { bars: number; period: number } {
   return best;
 }
 
+const LYRIC_SECTION_TAG = /^\s*\[([^\]\n]+)\]/gm;
+
+export function lyricSectionTags(lyrics: string): string[] {
+  return [...lyrics.matchAll(LYRIC_SECTION_TAG)].map(match => match[1].trim());
+}
+
+export function withoutLyricSectionTags(lyrics: string): string {
+  return lyrics.replace(LYRIC_SECTION_TAG, '');
+}
+
 export function scoreLegibility(voices: { vocal: string[]; ins: string[] }, chords: Set<string>, sections: number, lyrics?: string, exempt: ReadonlySet<Yue2Check> = new Set()): Yue2ScoreLegibility {
   const norm = (bars: string[]) => bars.map(b => stripChords(b).replace(/\s+/g, '')).filter(b => hasNote(b));
   const vocal = norm(voices.vocal);
   const ins = norm(voices.ins);
   const pitches = new Set<string>();
   for (const b of vocal) for (const m of b.matchAll(/[_^=]*[A-Ga-g][,']*/g)) pitches.add(m[0]);
-  const lyricSections = lyrics === undefined ? undefined : (lyrics.match(/^\s*\[[^\]\n]+\]/gm) ?? []).length;
+  const lyricSections = lyrics === undefined ? undefined : lyricSectionTags(lyrics).length;
   const out: Yue2ScoreLegibility = {
     vocalPhraseVariety: round3(phraseVariety(vocal)), insPhraseVariety: round3(phraseVariety(ins)),
     vocalSoundingBars: vocal.length, insSoundingBars: ins.length,
@@ -165,7 +175,7 @@ function hasNote(bar: string): boolean {
 }
 
 /** Number of bars a segment stands for: `Z4` is four whole-bar rests. */
-function barsIn(segment: string): number {
+export function barsIn(segment: string): number {
   const s = stripChords(segment).trim();
   const multi = s.match(/^Z(\d+)?$/);
   if (multi) return multi[1] ? Math.max(1, parseInt(multi[1], 10)) : 1;
