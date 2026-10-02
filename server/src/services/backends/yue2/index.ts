@@ -525,7 +525,7 @@ async function capabilities(): Promise<BackendCapabilities> {
       // mms-fa-f32.gguf from the Model Manager; the engine says so by name
       // when it is missing.
       forcedAlignment: true,
-      cover: false,
+      cover: true,
       repaint: false,
       lego: false,
       extract: false,

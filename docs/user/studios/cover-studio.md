@@ -10,13 +10,12 @@ recording to reinterpret, rather than a caption and lyrics to generate from scra
 ## Where to find it
 
 Sidebar: **Cover Studio**. You need to be signed in to upload a source track, and
-the active backend must support covers. Only the ACE backend does today; switching
-the [backend](../backends.md) to MiniMax-Music3 or YuE2 replaces the studio with a
-"not supported" notice. The backend switcher itself only appears once a second
+the active backend must support covers. ACE and YuE2 offer different cover workflows;
+MiniMax-Music3 shows a "not supported" notice. The [backend switcher](../backends.md) appears once a second
 backend is registered, so on a single-backend install this is not a decision you
 have to make.
 
-## Workflow
+## ACE workflow
 
 1. Drop a source track into the upload zone (MP3, WAV, FLAC, OGG, M4A, Opus, AAC),
    or send one over from [Library](library.md) with "Send to Cover Studio". A
@@ -42,6 +41,31 @@ have to make.
    artist-free cover, using the Caption LLM button to draft one if you like.
 7. Set Structure Fidelity, Source Preservation, Tempo Scale and Pitch Shift, and
    optionally a Timbre Reference track, then generate.
+
+## YuE2 workflow
+
+1. Upload a source recording or send a song from Library. Detected BPM and key
+   are shown for reference; they do not change the YuE2 cover request. Advanced
+   Mode can split and mix stems before transcription.
+2. Click **Transcribe melody**. The score panel shows queue and transcription
+   progress, with Cancel and Retry. SheetSage2 must be registered for automatic
+   transcription; if it is missing, the panel shows the model setup guidance.
+   You can paste ABC in the editor instead, without SheetSage2.
+3. Preview the ABC, correct it in the editor, and click **Approve score**. Editing
+   the score or changing the source audio or stem mix withdraws approval. The
+   Generate button stays disabled until the current source has an approved score.
+4. Paste lyrics or search by artist and title; choose **Instrumental** to render
+   without lyrics. Write a YuE2 style caption. With an adapter pair, you can
+   choose a caption from its training tracks or the nearest detected BPM.
+5. Choose **Base YuE2** or an explicit AR composer and NAR renderer pair.
+   **Melody only** is the default score conditioning. Choose **Full score** if
+   you have added chords to the ABC and want to follow that harmony. Click
+   **Generate YuE2 cover**; queued renders keep the selected pair, score and
+   settings from that click even if the picker changes later.
+
+YuE2 does not use ACE's fidelity, source-preservation/noise, NoFSQ, timbre,
+latent, tempo, pitch or BPM/key correction controls. A completed YuE2 cover
+uses the ordinary generation queue and appears in Library.
 
 ## Controls
 
@@ -71,8 +95,8 @@ its value has moved from the default; click it to snap that one field back.
 
 ## Tips and limits
 
-- Cover generation needs the ACE backend active. On MiniMax-Music3 or YuE2, the
-  studio body is replaced with a not-supported notice until you switch back.
+- Cover generation needs ACE or YuE2 active. MiniMax-Music3 replaces the studio
+  with a not-supported notice.
 - Splitting into stems is step one of two. The split by itself does not change the
   render; the mixer is where muting or lowering a stem actually removes it from
   the cover.

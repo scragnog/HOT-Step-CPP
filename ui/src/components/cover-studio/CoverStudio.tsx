@@ -1,6 +1,6 @@
 // CoverStudio.tsx — Main Cover Studio orchestrator
 // Composes: SourcePanel, ArtistSettingsPanel
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Song } from '../../types';
 import { Search, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -30,6 +30,11 @@ import {
 } from './coverStudioUtils';
 import type { LatentMetadata } from '../shared/LatentImport';
 import { loadSelections, saveSelections } from '../lyric-studio/ProviderSelector';
+import { useBackendStore } from '../../stores/backendStore';
+import { fetchYue2CaptionSource, resolveYue2Caption, yue2PickAtEnqueue, type Yue2SourceTrack } from '../../utils/yue2CaptionSource';
+import { yue2CoverApi, type Yue2CoverJob, type Yue2CoverReadiness } from '../../services/yue2CoverApi';
+import { Yue2CoverPanel } from './Yue2CoverPanel';
+import { Yue2CoverScore } from './Yue2CoverScore';
 
 // ── Serial cover-generation queue ────────────────────────────────────────────
 // Lets the user stack multiple cover generations (different settings) without
@@ -63,10 +68,13 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const { token } = useAuth();
   const gp = useGlobalParamsStore();
   const [settings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
+  const yue2Mode = useBackendStore(s => s.activeBackendId === 'yue2');
+  const yue2Models = useBackendStore(s => s.models.yue2);
 
   // ── Source audio state ──
   const [sourceFileName, setSourceFileName] = useState(() => restore<string>('sourceFileName', ''));
   const [sourceAudioUrl, setSourceAudioUrl] = useState(() => restore<string>('sourceAudioUrl', ''));
+  const [sourceSongId, setSourceSongId] = useState(() => restore<string>('sourceSongId', ''));
   const [metadata, setMetadata] = useState<AudioMetadata | null>(() => restore('metadata', null));
   const [analysis, setAnalysis] = useState<AudioAnalysis | null>(() => restore('analysis', null));
   const [isUploading, setIsUploading] = useState(false);
@@ -105,6 +113,22 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [sourceLatentUrl, setSourceLatentUrl] = useState(() => restore<string>('sourceLatentUrl', ''));
   const [vocalLanguage, setVocalLanguage] = useState(() => restore<string>('coverVocalLanguage', 'en'));
   const [timbreOverridePath, setTimbreOverridePath] = useState(() => restore<string>('coverTimbreOverride', ''));
+  const [pairMode, setPairMode] = useState<'base' | 'pair'>('base');
+  const [yue2Ar, setYue2Ar] = useState('');
+  const [yue2Nar, setYue2Nar] = useState('');
+  const [yue2Cot, setYue2Cot] = useState<'melody' | 'full'>('melody');
+  const [captionMode, setCaptionMode] = useState('custom');
+  const [captionTracks, setCaptionTracks] = useState<Yue2SourceTrack[]>([]);
+  const [readiness, setReadiness] = useState<Yue2CoverReadiness | null>(null);
+  const [sheetJob, setSheetJob] = useState<Yue2CoverJob | null>(null);
+  const [sheetJobId, setSheetJobId] = useState('');
+  const sheetJobRef = useRef('');
+  const sheetRequestRef = useRef(0);
+  const [sheetPreparing, setSheetPreparing] = useState(false);
+  const [sheetError, setSheetError] = useState('');
+  const [sheetAbc, setSheetAbc] = useState('');
+  const [sheetAudioUrl, setSheetAudioUrl] = useState('');
+  const [approvedSheet, setApprovedSheet] = useState<{ abc: string; sourceId: string; sourceLabel: string; audioUrl: string; key: string } | null>(null);
 
   // ── Generation ──
   const [isGenerating, setIsGenerating] = useState(false);
@@ -125,11 +149,58 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     sepJobId, sepStems, stemControls, showMixer, isSeparating, sepProgress, sepMessage,
     setShowMixer, setStemControls, startSeparation: startStemSeparation, clearStems,
   } = useCoverStemsStore();
+  const sourceKey = JSON.stringify([sourceAudioUrl, sourceSongId, advancedMode && sepJobId,
+    advancedMode && sepStems?.length, advancedMode && stemControls]);
+  const sourceKeyRef = useRef(sourceKey);
+  sourceKeyRef.current = sourceKey;
+  useEffect(() => {
+    sheetRequestRef.current += 1;
+    setApprovedSheet(null); setSheetAbc(''); setSheetAudioUrl(''); setSheetError(''); setSheetJob(null); setSheetPreparing(false);
+    if (sheetJobRef.current && token) void yue2CoverApi.cancel(sheetJobRef.current, token).catch(() => {});
+    sheetJobRef.current = ''; setSheetJobId('');
+  }, [sourceKey, token]);
+
+  useEffect(() => {
+    if (!yue2Mode || !token) return;
+    void useBackendStore.getState().fetchModels('yue2');
+    void yue2CoverApi.readiness(token).then(setReadiness).catch(err => setSheetError(err.message));
+  }, [yue2Mode, token]);
+
+  useEffect(() => {
+    if (!yue2Mode || pairMode !== 'pair') { setCaptionTracks([]); return; }
+    const adapter = yue2Ar || yue2Nar;
+    if (!adapter) { setCaptionTracks([]); return; }
+    let live = true;
+    void fetchYue2CaptionSource({ adapter }).then(result => { if (live) setCaptionTracks(result.tracks); });
+    return () => { live = false; };
+  }, [yue2Mode, pairMode, yue2Ar, yue2Nar]);
+
+  useEffect(() => {
+    if (!sheetJobId || !token) return;
+    let live = true;
+    const poll = async () => {
+      try {
+        const result = await yue2CoverApi.status(sheetJobId, token);
+        if (!live || sheetJobRef.current !== sheetJobId) return;
+        setSheetJob(result.job ?? null);
+        if (result.job?.status === 'done') {
+          setSheetAbc(result.abc || ''); setSheetJobId(''); sheetJobRef.current = '';
+        } else if (result.job?.status === 'failed' || result.job?.status === 'cancelled') {
+          setSheetError(result.job.error || `Transcription ${result.job.status}`);
+          setSheetJobId(''); sheetJobRef.current = '';
+        }
+      } catch (err: any) { if (live) { setSheetError(err.message); setSheetJobId(''); sheetJobRef.current = ''; } }
+    };
+    void poll();
+    const timer = setInterval(() => { void poll(); }, 1000);
+    return () => { live = false; clearInterval(timer); };
+  }, [sheetJobId, token]);
 
 
   // ── Persist ──
   useEffect(() => { persist('sourceFileName', sourceFileName); }, [sourceFileName]);
   useEffect(() => { persist('sourceAudioUrl', sourceAudioUrl); }, [sourceAudioUrl]);
+  useEffect(() => { persist('sourceSongId', sourceSongId); }, [sourceSongId]);
   useEffect(() => { persist('metadata', metadata); }, [metadata]);
   useEffect(() => { persist('analysis', analysis); }, [analysis]);
   useEffect(() => { persist('songArtist', songArtist); }, [songArtist]);
@@ -162,6 +233,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const s = coverSource.song;
     const gpData: any = s.generationParams || s.generation_params || {};
     const audioUrl = s.audioUrl || s.audio_url || '';
+    setSourceSongId(String(s.id));
+    clearStems();
 
     // Source audio — reuse the track's server URL directly (loadSourceAudio
     // resolves /audio/ paths server-side), so no re-upload is needed.
@@ -208,6 +281,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
   // ── Load artists on mount ──
   useEffect(() => {
+    if (yue2Mode) return;
     setIsLoadingArtists(true);
     lireekApi.listArtists()
       .then(res => {
@@ -219,11 +293,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       })
       .catch(() => showToast(t('cover.failedToLoadArtists')))
       .finally(() => setIsLoadingArtists(false));
-  }, []);
+  }, [yue2Mode]);
 
   // ── File upload + analysis pipeline ──
   const handleFileSelected = async (file: File) => {
     if (!token) { showToast(t('cover.signInFirst')); return; }
+    setSourceAudioUrl(''); setSourceSongId(''); clearStems();
     setSourceFileName(file.name);
     setBpmCorrection(1);
     setKeyOverride(null);
@@ -415,10 +490,111 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     finally { setIsGeneratingCaption(false); }
   };
 
+  const prepareYue2Source = async (): Promise<{ sourceAudioUrl?: string; songId?: string; audioUrl: string }> => {
+    if (advancedMode && sepStems?.length && sepJobId) {
+      const controls = stemControls.map(c => ({ index: c.index, volume: c.muted ? 0 : c.volume, muted: c.muted }));
+      const blob = await recombineStems(sepJobId, controls);
+      const fd = new FormData(); fd.append('audio', blob, 'recombined-stems.wav');
+      const response = await fetch('/api/upload/audio', { method: 'POST', body: fd });
+      if (!response.ok) throw new Error('Could not upload the recombined source');
+      const uploaded = await response.json() as { audio_url?: string };
+      if (!uploaded.audio_url) throw new Error('Recombined source has no audio URL');
+      return { sourceAudioUrl: uploaded.audio_url, audioUrl: uploaded.audio_url };
+    }
+    if (sourceSongId) return { songId: sourceSongId, audioUrl: sourceAudioUrl };
+    return { sourceAudioUrl, audioUrl: sourceAudioUrl };
+  };
+
+  const handleTranscribe = async () => {
+    if (!token || !sourceAudioUrl) return;
+    const key = sourceKey;
+    const request = ++sheetRequestRef.current;
+    setSheetError(''); setApprovedSheet(null); setSheetAbc(''); setSheetPreparing(true);
+    try {
+      const source = await prepareYue2Source();
+      if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
+      const result = await yue2CoverApi.start({ ...source, sourceLabel: sourceFileName.slice(0, 120) }, token);
+      if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) {
+        if (result.jobId) await yue2CoverApi.cancel(result.jobId, token);
+        return;
+      }
+      setSheetAudioUrl(source.audioUrl);
+      if (result.jobId) { sheetJobRef.current = result.jobId; setSheetJobId(result.jobId); }
+      else if (result.abc) setSheetAbc(result.abc);
+    } catch (err: any) { if (sourceKeyRef.current === key && sheetRequestRef.current === request) setSheetError(err.message); }
+    finally { if (sheetRequestRef.current === request) setSheetPreparing(false); }
+  };
+
+  const handleCancelSheet = async () => {
+    sheetRequestRef.current += 1;
+    const id = sheetJobRef.current;
+    sheetJobRef.current = ''; setSheetJobId(''); setSheetPreparing(false);
+    setSheetJob(null); setSheetError('Transcription cancelled');
+    if (id && token) try { await yue2CoverApi.cancel(id, token); } catch (err: any) { setSheetError(err.message); }
+  };
+
+  const handleApproveSheet = async () => {
+    if (!token || !sheetAbc.trim() || !sourceAudioUrl) return;
+    const key = sourceKey;
+    const request = ++sheetRequestRef.current;
+    setSheetError(''); setSheetPreparing(true);
+    try {
+      const source = sheetAudioUrl
+        ? { audioUrl: sheetAudioUrl, ...(sheetAudioUrl === sourceAudioUrl && sourceSongId ? { songId: sourceSongId } : { sourceAudioUrl: sheetAudioUrl }) }
+        : await prepareYue2Source();
+      if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
+      const result = await yue2CoverApi.start({ ...source, sourceLabel: sourceFileName.slice(0, 120), abc: sheetAbc }, token);
+      if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
+      setApprovedSheet({ abc: result.abc || sheetAbc.trim(), sourceId: result.sourceId,
+        sourceLabel: result.sourceLabel, audioUrl: source.audioUrl, key });
+      setSheetAudioUrl(source.audioUrl);
+    } catch (err: any) { if (sourceKeyRef.current === key && sheetRequestRef.current === request) setSheetError(err.message); }
+    finally { if (sheetRequestRef.current === request) setSheetPreparing(false); }
+  };
+
   // ── Generation ──
+  const captionSelection = captionMode === 'auto' ? { mode: 'auto' as const }
+    : captionMode.startsWith('track:') ? { mode: 'track' as const, selectedName: captionMode.slice(6) }
+    : { mode: 'custom' as const };
+  const resolvedCaption = resolveYue2Caption(artistCaption, analysis?.bpm, captionTracks, captionSelection).caption;
+  const adapterOptions = (kind: 'ar' | 'nar') => [
+    { value: '', label: `Base ${kind.toUpperCase()}` },
+    ...(yue2Models?.lmAdapters || []).filter(path =>
+      (yue2Models?.lmAdapterMeta?.[path] as { kind?: string } | undefined)?.kind === kind,
+    ).map(path => ({ value: path, label: yue2Models?.lmAdapterMeta?.[path]?.label || path.split(/[\\/]/).pop() || path })),
+  ];
+
   const handleGenerate = () => {
     if (!token || !sourceAudioUrl) { showToast(t('cover.missingSrcOrLyrics')); return; }
     if (!instrumental && !lyrics.trim()) { showToast('Enter lyrics or enable Instrumental mode'); return; }
+    if (yue2Mode) {
+      if (!approvedSheet || approvedSheet.key !== sourceKey) { showToast('Review and approve the score first'); return; }
+      if (pairMode === 'pair' && (!yue2Ar || !yue2Nar)) { showToast('Choose both YuE2 adapter halves'); return; }
+      // Take the whole request at click time; the serial queue may start it much later.
+      const engineParams = gp.getGlobalParams() as Record<string, unknown>;
+      const yue2Params = Object.fromEntries(Object.entries(engineParams).filter(([key]) => key.startsWith('yue2')));
+      const pair = { ...yue2PickAtEnqueue(null),
+        lmAdapterAr: pairMode === 'pair' ? yue2Ar : '',
+        lmAdapterNar: pairMode === 'pair' ? yue2Nar : '' };
+      const title = songArtist ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover');
+      const params = { ...yue2Params, customMode: true,
+        title, style: resolvedCaption, lyrics: instrumental ? '' : lyrics,
+        instrumental, source: 'cover-studio', sourceAudioUrl: approvedSheet.audioUrl,
+        yue2Cover: { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel },
+        yue2Abc: approvedSheet.abc, yue2Cot, yue2Pick: pair };
+      const qId = addManualQueueItem({ title, artistName: '', caption: resolvedCaption });
+      updateManualQueueItem(qId, { stage: _coverRunning ? 'Queued…' : 'Preparing…' });
+      setIsGenerating(true);
+      enqueueCoverJob(async () => {
+        try {
+          const res = await generateApi.submit(params as any, token);
+          updateManualQueueItem(qId, { jobId: res.jobId });
+          await pollJobAsync(res.jobId, qId);
+        } catch (err: any) { failManualQueueItem(qId, err.message || 'Generation failed'); }
+        finally { if (_coverQueue.length === 0) { setIsGenerating(false); setActiveJobId(null); setGenProgress(0); setGenStage(''); } }
+      });
+      return;
+    }
 
     // Show a queue item immediately ("Queued…" if a cover is already running),
     // then enqueue the work so the user can stack more without waiting (#62).
@@ -621,7 +797,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
 
   const handleClearSource = () => {
-    setSourceFileName(''); setSourceAudioUrl('');
+    setSourceFileName(''); setSourceAudioUrl(''); setSourceSongId('');
     setMetadata(null); setAnalysis(null);
     setSongArtist(''); setSongTitle(''); setLyrics('');
     setBpmCorrection(1); setKeyOverride(null);
@@ -637,7 +813,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
 
   // Always allow queuing another cover — covers stack and run one at a time (#62).
-  const canGenerate = !!sourceAudioUrl && (!!lyrics.trim() || instrumental);
+  const canGenerate = !!sourceAudioUrl && (!!lyrics.trim() || instrumental)
+    && (!yue2Mode || (!!approvedSheet && approvedSheet.key === sourceKey && (pairMode === 'base' || (!!yue2Ar && !!yue2Nar))));
 
   // ── SuperSep handlers ──
   // Split + poll now runs inside coverStemsStore.startSeparation, so it keeps
@@ -670,6 +847,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Source Audio */}
         <SourcePanel
+          yue2Mode={yue2Mode}
           sourceFileName={sourceFileName} metadata={metadata} analysis={analysis}
           isUploading={isUploading} isAnalyzing={isAnalyzing}
           onFileSelected={handleFileSelected} onClear={handleClearSource}
@@ -729,6 +907,13 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               placeholder={t('cover.lyricsPlaceholder')}
               className="w-full h-full resize-none bg-white dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-cyan-500 transition-colors font-mono leading-relaxed" />
           </div>
+          {yue2Mode && <Yue2CoverScore
+            sourceReady={!!sourceAudioUrl && !isUploading}
+            readiness={readiness} job={sheetJob} preparing={sheetPreparing} error={sheetError}
+            abc={sheetAbc} approved={!!approvedSheet && approvedSheet.key === sourceKey}
+            onAbcChange={value => { sheetRequestRef.current += 1; setSheetPreparing(false); setSheetAbc(value); setApprovedSheet(null); }}
+            onTranscribe={handleTranscribe} onCancel={handleCancelSheet} onApprove={handleApproveSheet}
+          />}
           
           {showMixer && sepStems && sepJobId && (
             <StemMixer jobId={sepJobId} stems={sepStems}
@@ -738,7 +923,18 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         </div>
 
         {/* Right: Artist + Settings */}
-        <ArtistSettingsPanel
+        {yue2Mode ? <Yue2CoverPanel
+          caption={artistCaption} onCaptionChange={setArtistCaption}
+          captionMode={captionMode} onCaptionMode={setCaptionMode}
+          captionTracks={captionTracks} resolvedCaption={resolvedCaption}
+          instrumental={instrumental} onInstrumentalChange={setInstrumental}
+          pairMode={pairMode} onPairMode={setPairMode}
+          ar={yue2Ar} nar={yue2Nar} onAr={setYue2Ar} onNar={setYue2Nar}
+          arOptions={adapterOptions('ar')} narOptions={adapterOptions('nar')}
+          cot={yue2Cot} onCot={setYue2Cot}
+          canGenerate={canGenerate} isGenerating={isGenerating} genProgress={genProgress} genStage={genStage}
+          onGenerate={handleGenerate} onCancel={handleCancel}
+        /> : <ArtistSettingsPanel
           artists={artists} isLoadingArtists={isLoadingArtists}
           selectedArtistId={selectedArtistId} onSelectArtist={handleSelectArtist}
           onClearArtist={handleClearArtist}
@@ -760,7 +956,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           onGenerate={handleGenerate} onCancel={handleCancel}
           isGeneratingCaption={isGeneratingCaption}
           onRegenerateCaption={handleRegenerateCaption}
-        />
+        />}
 
       </div>
     </div>
