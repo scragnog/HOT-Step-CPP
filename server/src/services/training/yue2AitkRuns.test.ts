@@ -185,7 +185,9 @@ test('joint catalogue reconciles copied folders, stale records and active runs',
       "dataset('e', 'unknown'); assert.ok(findYue2JointAdaptersFor([{ id: 'e', slug: 'e' }]).has('e'), 'a newly added dataset resolves an unchanged folder set');",
       "const linked = findYue2JointAdaptersFor([{ id: 'a', slug: 'a' }, { id: 'b', slug: 'b' }]); assert.ok(linked.has('a')); assert.ok(linked.has('b'));",
       "fs.rmSync(plain, { recursive: true }); assert.equal(findYue2JointAdaptersFor([{ id: 'a', slug: 'a' }]).has('a'), false);",
-      "const live = folder('live'); recordYue2AitkRun(record('live-job', 'a', live, 'running')); recordYue2AitkRun(record('live-job', 'a', live, 'done')); assert.equal(JSON.parse(fs.readFileSync(path.join(live, 'run.json'))).status, 'done');",
+      "const live = folder('live'); recordYue2AitkRun(record('live-job', 'a', live, 'running'));",
+      "const write = fs.writeFileSync; const mirrored = []; fs.writeFileSync = function(file, ...args) { if (String(file).endsWith('run.json')) mirrored.push(String(file)); return write.call(this, file, ...args); };",
+      "recordYue2AitkRun(record('live-job', 'a', live, 'done')); fs.writeFileSync = write; assert.deepEqual(mirrored, [path.join(live, 'run.json')]); assert.equal(JSON.parse(fs.readFileSync(path.join(live, 'run.json'))).status, 'done');",
     ].join('\n');
     execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
       cwd: fileURLToPath(new URL('../../../', import.meta.url)),

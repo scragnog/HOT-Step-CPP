@@ -82,7 +82,7 @@ function readIndex(): Yue2AitkRunRecord[] {
       relocated = true;
       return { ...r, output: moved, updatedAt: Date.now() };
     });
-    if (relocated) { try { writeIndex(healed); } catch { /* next read heals again */ } }
+    if (relocated) { try { writeIndex(healed, healed.filter((r, i) => r !== records[i])); } catch { /* next read heals again */ } }
     return healed;
   } catch { return []; }
 }
@@ -117,12 +117,14 @@ function isRunRecord(value: unknown): value is Yue2AitkRunRecord {
       }));
 }
 
-function writeIndex(records: Yue2AitkRunRecord[]): void {
+function writeIndex(records: Yue2AitkRunRecord[], changedRecords: Yue2AitkRunRecord[]): void {
   fs.mkdirSync(path.dirname(INDEX), { recursive: true });
   const tmp = `${INDEX}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(records.slice(-MAX_RECORDS), null, 2), 'utf8');
+  const persisted = records.slice(-MAX_RECORDS);
+  fs.writeFileSync(tmp, JSON.stringify(persisted, null, 2), 'utf8');
   fs.renameSync(tmp, INDEX);
-  for (const record of records) {
+  const changed = new Set(changedRecords);
+  for (const record of persisted.filter(r => changed.has(r))) {
     try { fs.writeFileSync(path.join(record.output, 'run.json'), JSON.stringify(record, null, 2), 'utf8'); }
     catch (err) { warnRunFile(record.output, err); }
   }
@@ -199,9 +201,10 @@ export function recordYue2AitkRun(record: Yue2AitkRunRecord): void {
   try {
     const index = readIndex();
     const prior = index.find(r => r.jobId === record.jobId);
-    writeIndex([...index.filter(r => r.jobId !== record.jobId), { ...record,
+    const updated = { ...record,
       blindLabels: record.blindLabels ?? prior?.blindLabels,
-      checkpoints: checkpointRecords(record.output) }]);
+      checkpoints: checkpointRecords(record.output) };
+    writeIndex([...index.filter(r => r.jobId !== record.jobId), updated], [updated]);
   } catch { /* a catalogue failure must never change the training result */ }
 }
 
@@ -216,7 +219,7 @@ export function deleteYue2AitkRun(jobId: string): { output: string } {
   try { archiveYue2TrainLogs(run.datasetSlug, run.jobId, output); }
   catch (err: any) { throw new Error(`Could not archive the loss log of run ${jobId}, refusing to delete: ${err?.message || err}`); }
   fs.rmSync(output, { recursive: true, force: true });
-  writeIndex(readIndex().filter(r => r.jobId !== jobId));
+  writeIndex(readIndex().filter(r => r.jobId !== jobId), []);
   return { output };
 }
 
@@ -232,7 +235,8 @@ export function moveYue2AitkRun(jobId: string, newOutput: string): void {
   if (fs.existsSync(target)) throw new Error(`Refusing to move onto an existing path: ${target}`);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.renameSync(oldOutput, target);
-  writeIndex(readIndex().map(r => r.jobId === jobId ? { ...r, output: target, updatedAt: Date.now() } : r));
+  const updated = readIndex().map(r => r.jobId === jobId ? { ...r, output: target, updatedAt: Date.now() } : r);
+  writeIndex(updated, updated.filter(r => r.jobId === jobId));
 }
 
 const skippedFolders = new Set<string>();
@@ -311,6 +315,7 @@ function reconcileFromDisk(force = false): void {
     || onDisk.has(path.resolve(r.output).toLowerCase()) || fs.existsSync(r.output));
   const known = new Set(retained.map(r => path.resolve(r.output).toLowerCase()));
   const jobs = new Set(retained.map(r => r.jobId));
+  const imported: Yue2AitkRunRecord[] = [];
   for (const folder of folders) {
     if (known.has(path.resolve(folder).toLowerCase())) continue;
     try {
@@ -318,13 +323,14 @@ function reconcileFromDisk(force = false): void {
       if (!run || jobs.has(run.jobId)) continue;
       skippedFolders.delete(folder);
       retained.push(run);
+      imported.push(run);
       jobs.add(run.jobId);
     } catch (err) {
       if (!skippedFolders.has(folder)) console.warn(`[YuE2] Skipping ${folder}: ${String(err)}`);
       skippedFolders.add(folder);
     }
   }
-  if (retained.length !== index.length || retained.some((r, i) => r !== index[i])) writeIndex(retained);
+  if (retained.length !== index.length || retained.some((r, i) => r !== index[i])) writeIndex(retained, imported);
   lastFolderSet = folderSet;
   lastDatasetSet = datasetSetForSkipped();
 }
@@ -335,7 +341,10 @@ export function reconcileYue2AitkRunsAtStartup(): number {
   try {
     const index = readIndex();
     const stale = index.filter(r => r.status === 'running');
-    if (stale.length) writeIndex(index.map(r => r.status === 'running' ? { ...r, status: 'interrupted' as const, updatedAt: Date.now() } : r));
+    if (stale.length) {
+      const updated = index.map(r => r.status === 'running' ? { ...r, status: 'interrupted' as const, updatedAt: Date.now() } : r);
+      writeIndex(updated, updated.filter(r => r.status === 'interrupted' && stale.some(s => s.jobId === r.jobId)));
+    }
     reconcileFromDisk(true);
     return stale.length;
   } catch { return 0; }
@@ -392,15 +401,15 @@ export function setYue2RunFinished(output: string, pick: Omit<Yue2FinishedPick, 
 export function listYue2AitkRuns(datasetId: string, datasetSlug?: string): Yue2AitkRunRecord[] {
   reconcileFromDisk();
   const index = readIndex();
-  let changed = false;
+  const changed: Yue2AitkRunRecord[] = [];
   const runs = index.filter(r => r.datasetId === datasetId || (!!datasetSlug && r.datasetSlug === datasetSlug))
     .map(r => {
       const checkpoints = rungsOf(r, checkpointRecords(r.output));
-      if (assignBlindLabels(r, checkpoints)) changed = true;
+      if (assignBlindLabels(r, checkpoints)) changed.push(r);
       return { ...r, checkpoints };
     })
     .sort((a, b) => b.updatedAt - a.updatedAt);
-  if (changed) writeIndex(index);
+  if (changed.length) writeIndex(index, changed);
   return runs;
 }
 
