@@ -145,24 +145,9 @@ function yue2StyleForAdapter(
 
   const name = path.basename(adapter);
   const meta = readSafetensorsMeta(adapter);
-  // Legacy exports record cot directly. Joint exports currently omit it, but
-  // their prepared dataset records which sources could draw full with the
-  // native trainer's 50% ABC dropout. Do not call a joint run "off only"
-  // merely because its safetensors header lacks the legacy field.
-  const jointRun = meta?.cot ? undefined : jointRunForAdapter(adapter);
-  let trainedCot = meta?.cot ?? (jointRun ? '' : 'off');
-  if (jointRun) {
-    const manifest = jointRun.options.dataset;
-    if (typeof manifest === 'string') {
-      try {
-        if (fs.statSync(manifest).size <= 16 * 1024 * 1024) {
-          const data = JSON.parse(fs.readFileSync(manifest, 'utf8')) as { items?: Array<{ abc_ids?: unknown[] }> };
-          if (Array.isArray(data.items)) trainedCot = data.items.some(item => Array.isArray(item.abc_ids) && item.abc_ids.length > 0)
-            ? 'off,full' : 'off';
-        }
-      } catch { /* missing prepared data leaves joint CoT capability unknown */ }
-    }
-  }
+  // The adapter's own header is the only source. A file that does not record
+  // its CoT modes (joint exports do not yet) is unknown, never guessed as "off".
+  const trainedCot = meta?.cot ?? '';
   if (other) {
     const otherTrigger = yue2AdapterTrigger(other).trigger;
     const thisTrigger = yue2AdapterTrigger(adapter).trigger;
@@ -272,33 +257,19 @@ export function mapYue2Params(params: any): Yue2ParamMapping {
   const lyricsRaw: string = params.instrumental ? '' : (params.lyrics || '');
   const lyrics = lyricsRaw.normalize('NFC');
 
-  const cotExplicit = typeof params.yue2Cot === 'string';
-  const cotRaw = cotExplicit ? params.yue2Cot : 'full';
-  let cot: Yue2SynthRequest['cot'] =
+  const cotRaw = typeof params.yue2Cot === 'string' ? params.yue2Cot : 'full';
+  const cot: Yue2SynthRequest['cot'] =
     cotRaw === 'off' || cotRaw === 'melody' || cotRaw === 'full' ? cotRaw : 'full';
   if (cotRaw !== cot) notes.push(`Invalid yue2Cot "${cotRaw}" — falling back to "full"`);
 
-  // doc 19 decision 4 / phase 5: default the request's mode to one the
-  // selected adapter actually trained, rather than always "full" — "off" is
-  // NOT the fast mode (its default CFG 1.01 doubles the semantic decode, see
-  // index.ts's Chain of Thought hint), so silently sending an untrained
-  // adapter into "full" is exactly as wrong as silently sending it into
-  // "off" would be. `styled.trainedCot` is '' only when no adapter is
-  // selected, in which case there is nothing to check against.
+  // The mode shown in the picker is the mode rendered: an unset yue2Cot is the
+  // picker's "full" default, never rewritten to suit the adapter. A mismatch
+  // with what the adapter's header says it trained is only reported.
   if (styled.trainedCot) {
     const trainedModes = styled.trainedCot.split(',').map(s => s.trim()).filter(Boolean);
     if (trainedModes.length && !trainedModes.includes(cot)) {
-      if (!cotExplicit) {
-        const fallbackRaw = trainedModes[0];
-        const fallback: Yue2SynthRequest['cot'] =
-          fallbackRaw === 'off' || fallbackRaw === 'melody' || fallbackRaw === 'full' ? fallbackRaw : cot;
-        notes.push(`Chain of Thought defaulted to "${fallback}" — the selected LM adapter trained `
-          + `${trainedModes.join('/')}, not "${cot}".`);
-        cot = fallback;
-      } else {
-        notes.push(`Chain of Thought "${cot}" requested, but the selected LM adapter trained only `
-          + `${trainedModes.join('/')} — rendering "${cot}" anyway since it was set explicitly.`);
-      }
+      notes.push(`Chain of Thought "${cot}" requested, but the selected LM adapter trained only `
+        + `${trainedModes.join('/')} — rendering "${cot}" anyway.`);
     }
   }
 
