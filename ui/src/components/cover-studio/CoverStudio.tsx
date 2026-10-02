@@ -573,12 +573,39 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       // Take the whole request at click time; the serial queue may start it much later.
       const engineParams = gp.getGlobalParams() as Record<string, unknown>;
       const yue2Params = Object.fromEntries(Object.entries(engineParams).filter(([key]) => key.startsWith('yue2')));
+      // Create sends these shared settings with its YuE2 requests too. Keep
+      // ACE model, adapter, sampler and source-audio controls out of this job.
+      const sharedParams = {
+        backend: 'yue2', seed: engineParams.seed, randomSeed: engineParams.randomSeed,
+        batchSize: engineParams.batchSize, duration: -1,
+        postProcessingEnabled: engineParams.postProcessingEnabled,
+        masteringEnabled: engineParams.masteringEnabled, masteringReference: engineParams.masteringReference,
+        lufsEnabled: engineParams.lufsEnabled, lufsTarget: engineParams.lufsTarget,
+        lufsCeilingDb: engineParams.lufsCeilingDb,
+        stableStepOn: engineParams.stableStepOn, stableStepStrength: engineParams.stableStepStrength,
+        stableStepBackend: engineParams.stableStepBackend, stableStepAdapters: engineParams.stableStepAdapters,
+        stableStepSeed: engineParams.stableStepSeed,
+        stableStepSeedFollowsDit: engineParams.stableStepSeedFollowsDit,
+        stableStepSteps: engineParams.stableStepSteps, stableStepSolver: engineParams.stableStepSolver,
+        stableStepScheduler: engineParams.stableStepScheduler,
+        stableStepGuidanceMode: engineParams.stableStepGuidanceMode,
+        stableStepGuidanceScale: engineParams.stableStepGuidanceScale,
+        stableStepPluginParams: engineParams.stableStepPluginParams,
+        whisperLyricsEnabled: engineParams.whisperLyricsEnabled, whisperModel: engineParams.whisperModel,
+        whisperLanguage: engineParams.whisperLanguage, whisperBeamSize: engineParams.whisperBeamSize,
+        whisperIsolateVocals: engineParams.whisperIsolateVocals,
+        qualityEvalEnabled: engineParams.qualityEvalEnabled, qualityEvalTarget: engineParams.qualityEvalTarget,
+        coverArtEnabled: engineParams.coverArtEnabled, coverArtSubject: engineParams.coverArtSubject,
+        coResident: settings.coResident, cacheLmCodes: settings.cacheLmCodes,
+        parallelWhisper: settings.parallelWhisper, parallelQualityEval: settings.parallelQualityEval,
+        parallelCoverArt: settings.parallelCoverArt,
+      };
       const pair = { ...yue2PickAtEnqueue(null),
         lmAdapterAr: pairMode === 'pair' ? yue2Ar : '',
         lmAdapterNar: pairMode === 'pair' ? yue2Nar : '' };
       const title = songArtist ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover');
-      const params = { ...yue2Params, customMode: true,
-        title, style: resolvedCaption, lyrics: instrumental ? '' : lyrics,
+      const params = { ...sharedParams, ...yue2Params, customMode: true, taskType: 'text2music',
+        title, caption: resolvedCaption, style: resolvedCaption, lyrics: instrumental ? '' : lyrics,
         instrumental, source: 'cover-studio', sourceAudioUrl: approvedSheet.audioUrl,
         yue2Cover: { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel },
         yue2Abc: approvedSheet.abc, yue2Cot, yue2Pick: pair };
