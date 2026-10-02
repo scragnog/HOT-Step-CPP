@@ -132,6 +132,38 @@ function urlForView(view: string): string {
   return '/';
 }
 
+/** Poll after either kind of disconnect, then reload once the server answers. */
+function useServerHealthReload(startDelayMs: number, onWaiting?: () => void, onReconnected?: () => void): void {
+  useEffect(() => {
+    let cancelled = false;
+    let checking = false;
+    let poll: number | undefined;
+    let reload: number | undefined;
+    const start = window.setTimeout(() => {
+      onWaiting?.();
+      poll = window.setInterval(async () => {
+        if (checking) return;
+        checking = true;
+        try {
+          const res = await fetch('/api/health', { signal: AbortSignal.timeout(2000) });
+          if (res.ok && !cancelled) {
+            window.clearInterval(poll);
+            onReconnected?.();
+            reload = window.setTimeout(() => window.location.reload(), 500);
+          }
+        } catch { /* The server is still offline. */ }
+        finally { checking = false; }
+      }, 2000);
+    }, startDelayMs);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(start);
+      window.clearInterval(poll);
+      window.clearTimeout(reload);
+    };
+  }, [startDelayMs, onWaiting, onReconnected]);
+}
+
 /** Restarting overlay — polls /api/health and reloads when the server is back */
 // Which recent-songs feed the activity column shows, per view. Views that are
 // not listed — library, settings, training — show every source.
@@ -156,37 +188,9 @@ const RestartingOverlay: React.FC = () => {
     return () => clearInterval(iv);
   }, []);
 
-  // Poll for server health
-  useEffect(() => {
-    let cancelled = false;
-    let attempt = 0;
-
-    // Wait a moment before polling (give the server time to die)
-    const startDelay = setTimeout(() => {
-      setStatus(t('app.restarting.waiting'));
-      const poll = setInterval(async () => {
-        attempt++;
-        try {
-          const res = await fetch('/api/health', { signal: AbortSignal.timeout(2000) });
-          if (res.ok && !cancelled) {
-            clearInterval(poll);
-            setStatus(t('app.restarting.reconnected'));
-            setTimeout(() => window.location.reload(), 500);
-          }
-        } catch {
-          // Still down — keep polling
-          if (attempt > 5 && !cancelled) {
-            setStatus(t('app.restarting.waiting'));
-          }
-        }
-      }, 2000);
-
-      // Cleanup
-      return () => { cancelled = true; clearInterval(poll); };
-    }, 3000);
-
-    return () => { cancelled = true; clearTimeout(startDelay); };
-  }, []);
+  const onWaiting = useCallback(() => setStatus(t('app.restarting.waiting')), [t]);
+  const onReconnected = useCallback(() => setStatus(t('app.restarting.reconnected')), [t]);
+  useServerHealthReload(3000, onWaiting, onReconnected);
 
   return (
     <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-white dark:bg-black text-zinc-900 dark:text-white">
@@ -198,6 +202,15 @@ const RestartingOverlay: React.FC = () => {
       <h1 className="text-2xl font-bold mb-2">{t('app.restarting.title')}</h1>
       <p className="text-zinc-600 dark:text-zinc-400 text-lg">{status}{dots}</p>
       <p className="text-zinc-600 text-sm mt-4">{t('app.restarting.message')}</p>
+    </div>
+  );
+};
+
+const ServerOfflineOverlay: React.FC = () => {
+  useServerHealthReload(0);
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black">
+      <img src="/server-offline.webp" alt="Server offline. Please restart or close tab" className="max-w-[90vw] max-h-[90vh] object-contain" />
     </div>
   );
 };
@@ -401,6 +414,7 @@ const AppContent: React.FC = () => {
 
   const [isShutdown, setIsShutdown] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
 
   // Presence beacon: the launcher asks /api/health whether any tab is already
   // open before opening a new one. SSE reconnects at the network layer, so a
@@ -410,14 +424,29 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     let es: EventSource | null = null;
     let retry: number | undefined;
+    let checking = false;
+    let disposed = false;
+    const confirmOffline = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const res = await fetch('/api/health', { signal: AbortSignal.timeout(2000) });
+        if (!res.ok && !disposed) setIsOffline(true);
+      } catch {
+        if (!disposed) setIsOffline(true);
+      } finally { checking = false; }
+    };
     const open = () => {
       es = new EventSource('/api/health/presence');
       es.onerror = () => {
-        if (es?.readyState === EventSource.CLOSED) retry = window.setTimeout(open, 3000);
+        void confirmOffline();
+        if (es?.readyState === EventSource.CLOSED && retry === undefined) {
+          retry = window.setTimeout(() => { retry = undefined; if (!disposed) open(); }, 3000);
+        }
       };
     };
     open();
-    return () => { window.clearTimeout(retry); es?.close(); };
+    return () => { disposed = true; window.clearTimeout(retry); es?.close(); };
   }, []);
 
   // Settings' own "Restart now" button posts to /api/shutdown/restart from deep
@@ -812,6 +841,9 @@ const AppContent: React.FC = () => {
 
   if (isRestarting) {
     return <RestartingOverlay />;
+  }
+  if (isOffline) {
+    return <ServerOfflineOverlay />;
   }
   // Main content renderer
   const renderContent = () => {
