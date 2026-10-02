@@ -65,16 +65,20 @@ have to make.
    order and keeps your lyric lines under the first tag for you to arrange;
    replacing existing tags asks for confirmation.
 5. Choose **Base YuE2** or an explicit AR composer and NAR renderer pair.
-   **Keep chords** is on by default. Turn it off to remove the score's chord
-   symbols for this render and let the style decide the harmony. The reviewed
-   full score stays available. Click **Generate YuE2 cover**; queued renders
-   keep the chord choice, selected pair, score and settings from that click
+   **Score to render** defaults to vocal melody only, no chord symbols, free
+   tempo and source key. Keep the instrumental line or chords to preserve more
+   of the original arrangement; retain or set tempo, or shift the key by up to
+   six semitones. Advanced **Condition strength** tightens style, lyrics and
+   score together. The reviewed full score stays available. Click
+   **Generate YuE2 cover**; queued renders keep all five choices, selected
+   pair, score and settings from that click
    even if the picker changes later.
 
 YuE2 does not use ACE's fidelity, source-preservation/noise, NoFSQ, timbre,
-latent, tempo, pitch or BPM/key correction controls. A completed YuE2 cover
+latent or BPM/key correction controls. The YuE2 score tempo and pitch controls
+change ABC before composition, rather than source audio. A completed YuE2 cover
 uses the ordinary generation queue and appears in Library. Its saved job records
-the source identity, the reviewed full score, the chord choice and the ABC
+the source identity, the reviewed full score, the five render choices and the ABC
 actually rendered.
 
 When a source exactly matches a dataset track, Cover Studio reads that track's

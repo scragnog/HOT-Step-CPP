@@ -166,10 +166,12 @@ What sets it apart:
   transcribe its melody and chords into ABC. Review and approve the full score before rendering.
   You can supply ABC yourself without installing SheetSage2. The recording does
   not condition the audio renderer: YuE2 composes from the approved score,
-  caption and lyrics. Keep chords is on by default to retain the detected
-  harmony; turn it off to render from a copy without chord symbols and let the
-  style decide. Cover jobs store the source identity, reviewed full score,
-  chord choice and ABC actually rendered.
+  caption and lyrics. By default, rendering keeps only the vocal melody,
+  removes chord symbols and the score tempo, and keeps the source key. You can
+  retain the instrumental line or chords, keep or set tempo, and transpose the
+  score within six semitones. Advanced **Condition strength** tightens style,
+  lyrics and score together. Cover jobs store the source identity, reviewed
+  full score, all five render choices and ABC actually rendered.
   Choose the base model or an explicit AR/NAR adapter pair for that job.
 - Without the preview, the app plans first anyway and redraws the seed when the lead sheet
   is a runaway, has no vocal line, or hit its cap, up to the attempt count in Settings. With

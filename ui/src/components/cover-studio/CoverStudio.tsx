@@ -123,7 +123,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [pairMode, setPairMode] = useState<'base' | 'pair'>('base');
   const [yue2Ar, setYue2Ar] = useState('');
   const [yue2Nar, setYue2Nar] = useState('');
-  const [keepChords, setKeepChords] = useState(true);
+  const [coverVoices, setCoverVoices] = useState<'vocal' | 'both'>('vocal');
+  const [keepChords, setKeepChords] = useState(false);
+  const [coverTempoMode, setCoverTempoMode] = useState<'free' | 'source' | 'set'>('free');
+  const [coverBpm, setCoverBpm] = useState(120);
+  const [coverKeyShift, setCoverKeyShift] = useState(0);
+  const [coverCfgScale, setCoverCfgScale] = useState(1);
   const [captionMode, setCaptionMode] = useState('custom');
   const [captionTracks, setCaptionTracks] = useState<Yue2SourceTrack[]>([]);
   const [readiness, setReadiness] = useState<Yue2CoverReadiness | null>(null);
@@ -694,12 +699,20 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         lmAdapterAr: pairMode === 'pair' ? yue2Ar : '',
         lmAdapterNar: pairMode === 'pair' ? yue2Nar : '' };
       const title = songArtist ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover');
-      const params = { ...sharedParams, ...yue2Params, customMode: true, taskType: 'text2music',
+      const scoreKey = approvedSheet.abc.match(/^K:\s*([A-Ga-g][#b]?(?:m|minor|major)?)\s*$/m)?.[1];
+      const keyParts = scoreKey?.match(/^([A-Ga-g][#b]?)(m|minor|major)?$/);
+      const scoreSourceKey = keyParts ? `${keyParts[1]} ${keyParts[2] === 'm' || keyParts[2] === 'minor' ? 'minor' : 'major'}` : '';
+      const movedKey = coverKeyShift && scoreSourceKey ? transposeKey(scoreSourceKey, coverKeyShift) : '';
+      const renderKey = movedKey ? movedKey.replace(/ major$/, '').replace(/ minor$/, 'm') : 'source';
+      const coverChoices = { voices: coverVoices, keepChords,
+        tempo: coverTempoMode === 'set' ? coverBpm : coverTempoMode,
+        key: renderKey, cfgScale: coverCfgScale };
+      const params = { ...sharedParams, ...yue2Params, yue2CfgScale: coverCfgScale, customMode: true, taskType: 'text2music',
         title, caption: resolvedCaption, style: resolvedCaption, lyrics: instrumental ? '' : lyrics,
         ...(lyricsSource ? { lyricsSource } : {}),
         ...(sheetScoreSource ? { scoreSource: 'dataset-sidecar' } : {}),
         instrumental, source: 'cover-studio', sourceAudioUrl: approvedSheet.audioUrl,
-        yue2Cover: { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel, keepChords },
+        yue2Cover: { sourceId: approvedSheet.sourceId, sourceLabel: approvedSheet.sourceLabel, ...coverChoices },
         yue2Abc: approvedSheet.abc, yue2Cot: keepChords ? 'full' : 'melody', yue2Pick: pair };
       const qId = addManualQueueItem({ title, artistName: '', caption: resolvedCaption });
       updateManualQueueItem(qId, { stage: _coverRunning ? 'Queued…' : 'Preparing…' });
@@ -1073,6 +1086,11 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           ar={yue2Ar} nar={yue2Nar} onAr={setYue2Ar} onNar={setYue2Nar}
           arOptions={adapterOptions('ar')} narOptions={adapterOptions('nar')}
           keepChords={keepChords} onKeepChords={setKeepChords}
+          scoreAbc={sheetAbc} voices={coverVoices} onVoices={setCoverVoices}
+          tempoMode={coverTempoMode} onTempoMode={setCoverTempoMode}
+          bpm={coverBpm} onBpm={setCoverBpm}
+          keyShift={coverKeyShift} onKeyShift={setCoverKeyShift}
+          cfgScale={coverCfgScale} onCfgScale={setCoverCfgScale}
           canGenerate={canGenerate} isGenerating={isGenerating} genProgress={genProgress} genStage={genStage}
           onGenerate={handleGenerate} onCancel={handleCancel}
         /> : <ArtistSettingsPanel

@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@lenml/tokenizers": "^3.7.2",
+    "abcjs": "^6.7.0",
     "archiver": "^7.0.1",
     "better-sqlite3": "^12.11.1",
     "cheerio": "^1.2.0",

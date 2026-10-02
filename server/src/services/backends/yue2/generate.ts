@@ -549,7 +549,8 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
   // submit, never from job.params (the raw request body) — index.ts's
   // resolveRequest already validated it there.
   const captured = jobCover(job);
-  const params = captured ? { ...job.params, yue2Abc: captured.abc } : job.params;
+  const params = captured ? { ...job.params, yue2Abc: captured.abc,
+    ...(captured.cover.cfgScale !== undefined ? { yue2CfgScale: captured.cover.cfgScale } : {}) } : job.params;
   const { req, notes, caption, halves } = mapYue2Params(params, jobPick(job));
 
   startGenerationLog(job.id, 'yue2-text2music');

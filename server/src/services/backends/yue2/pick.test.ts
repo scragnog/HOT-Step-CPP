@@ -186,6 +186,13 @@ test('a cover submission with a blank ABC is rejected at submit', async () => {
   );
 });
 
+test('invalid cover score choices are rejected at the submit boundary', () => {
+  for (const choice of [{ voices: 'ins' }, { keepChords: 'no' }, { tempo: 301 },
+    { key: '' }, { cfgScale: 0 }]) {
+    assert.throws(() => yue2CoverFromSubmission({ yue2Cover: { sourceId: 's', ...choice } }));
+  }
+});
+
 // resolveRequest itself also calls yue2PersistedSelection() (reads real
 // settings), which needs an initialized DB this file deliberately avoids —
 // same reason every other test here injects `defaults` instead of touching

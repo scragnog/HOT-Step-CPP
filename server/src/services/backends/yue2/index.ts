@@ -28,7 +28,7 @@ import { listAllYue2Runs, readSafetensorsMeta, type Yue2AdapterMeta } from '../.
 import { listAllYue2ArRuns } from '../../training/yue2ArRuns.js';
 import { listAllYue2AitkRuns } from '../../training/yue2AitkRuns.js';
 import { yue2AdapterTrigger } from './jointAdapterContext.js';
-import { coverScoreSnapshot } from './coverScore.js';
+import { coverScoreChoices, transformCoverScore, type CoverScoreChoices } from './coverScoreTransform.js';
 import { runYue2Generation } from './generate.js';
 import {
   yue2Props, yue2PropsCached, yue2SelectModel, yue2Unload, TIMEOUT_DRAIN,
@@ -293,19 +293,15 @@ function firstText(submission: Readonly<Record<string, unknown>>, keys: string[]
   return '';
 }
 
-/** A cover job carries provenance of the recording its approved lead sheet
- *  was transcribed from. The ABC itself travels on the existing `yue2Abc`
- *  field (#181) — this marker only adds the "where did this score come
- *  from" identity, and the fact that the job IS a cover at all. */
-export interface Yue2CoverSubmission {
+/** Cover provenance keeps the source, reviewed score and render choices;
+ *  the transformed ABC travels on the existing `yue2Abc` field (#181). */
+export interface Yue2CoverSubmission extends Partial<CoverScoreChoices> {
   /** Opaque identity of the source recording (a song id, an upload id —
    *  whatever the submitter has); required so provenance is never blank. */
   sourceId: string;
   /** Optional human-readable label for logs and metadata. */
   sourceLabel?: string;
-  /** Render choice captured with the source, absent on older cover jobs. */
-  keepChords?: boolean;
-  /** Reviewed full score, retained even when the rendered ABC drops chords. */
+  /** Reviewed full score, retained beside the score actually rendered. */
   fullScore?: string;
 }
 
@@ -328,12 +324,14 @@ export function yue2CoverFromSubmission(submission: Readonly<Record<string, unkn
   const sourceId = typeof r.sourceId === 'string' ? r.sourceId.trim() : '';
   if (!sourceId) throw new Error('A cover job needs yue2Cover.sourceId identifying the source recording.');
   const sourceLabel = typeof r.sourceLabel === 'string' && r.sourceLabel.trim() ? r.sourceLabel.trim() : undefined;
-  if (r.keepChords !== undefined && typeof r.keepChords !== 'boolean') {
-    throw new Error('yue2Cover.keepChords must be a boolean.');
-  }
+  const rawChoices = Object.fromEntries(
+    (['voices', 'keepChords', 'tempo', 'key', 'cfgScale'] as const)
+      .filter(key => r[key] !== undefined).map(key => [key, r[key]]));
+  // Validate marker fields even when this reads an older captured envelope.
+  coverScoreChoices(rawChoices as Partial<CoverScoreChoices>);
   const fullScore = typeof r.fullScore === 'string' ? r.fullScore : undefined;
   return { sourceId, ...(sourceLabel ? { sourceLabel } : {}),
-    ...(r.keepChords !== undefined ? { keepChords: r.keepChords } : {}),
+    ...rawChoices as Partial<CoverScoreChoices>,
     ...(fullScore !== undefined ? { fullScore } : {}) };
 }
 
@@ -373,11 +371,12 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
     if (key.startsWith('yue2')) options[key] = submission[key];
   }
   if (cover && coverAbc) {
-    const keepChords = cover.keepChords ?? true;
-    const score = coverScoreSnapshot(coverAbc, keepChords);
+    const choices = coverScoreChoices(cover);
+    const score = transformCoverScore(coverAbc, choices);
     options.yue2Cover = { sourceId: cover.sourceId, ...(cover.sourceLabel ? { sourceLabel: cover.sourceLabel } : {}),
-      keepChords, fullScore: score.fullScore } satisfies Yue2CoverSubmission;
+      ...choices, fullScore: score.fullScore } satisfies Yue2CoverSubmission;
     options.yue2Abc = score.renderedAbc;
+    options.yue2CfgScale = choices.cfgScale;
   }
   const common = {
     caption: firstText(submission, ['prompt', 'songDescription', 'caption', 'style']),

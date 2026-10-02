@@ -45,6 +45,16 @@ test('jobCover reads full score, chord choice and rendered ABC from the envelope
   });
 });
 
+test('jobCover reads all five score choices from the captured envelope', () => {
+  const cover = { sourceId: 'source', voices: 'vocal', keepChords: false,
+    tempo: 'free', key: 'F#m', cfgScale: 1.25, fullScore: 'X:1\nK:Em\n"Em"E|' };
+  const job = fakeJob(
+    { yue2Cover: cover, yue2Abc: 'X:1\nK:F#m\nF|' },
+    { yue2Cover: { ...cover, key: 'Bm', cfgScale: 2 }, yue2Abc: 'wrong' },
+  );
+  assert.deepEqual(jobCover(job), { cover, abc: 'X:1\nK:F#m\nF|' });
+});
+
 test('an ordinary (non-cover) job has no captured cover, regardless of job.params', () => {
   const job = fakeJob({ yue2Abc: 'X:1\n' }, { yue2Cover: { sourceId: 'ignored' } });
   assert.equal(jobCover(job), undefined);

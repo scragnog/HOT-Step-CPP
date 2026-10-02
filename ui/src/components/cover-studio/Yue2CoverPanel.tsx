@@ -3,6 +3,8 @@ import { Loader2 } from 'lucide-react';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
+import { EditableSlider } from '../shared/EditableSlider';
+import { transposeKey } from './coverStudioUtils';
 import type { Yue2SourceTrack } from '../../utils/yue2CaptionSource';
 
 interface Props {
@@ -24,6 +26,17 @@ interface Props {
   narOptions: Array<{ value: string; label: string }>;
   keepChords: boolean;
   onKeepChords: (value: boolean) => void;
+  scoreAbc: string;
+  voices: 'vocal' | 'both';
+  onVoices: (value: 'vocal' | 'both') => void;
+  tempoMode: 'free' | 'source' | 'set';
+  onTempoMode: (value: 'free' | 'source' | 'set') => void;
+  bpm: number;
+  onBpm: (value: number) => void;
+  keyShift: number;
+  onKeyShift: (value: number) => void;
+  cfgScale: number;
+  onCfgScale: (value: number) => void;
   canGenerate: boolean;
   isGenerating: boolean;
   genProgress: number;
@@ -32,7 +45,12 @@ interface Props {
   onCancel: () => void;
 }
 
-export const Yue2CoverPanel: React.FC<Props> = p => (
+export const Yue2CoverPanel: React.FC<Props> = p => {
+  const scoreKey = p.scoreAbc.match(/^K:\s*([A-Ga-g][#b]?(?:m|minor|major)?)\s*$/m)?.[1] ?? '';
+  const keyParts = scoreKey.match(/^([A-Ga-g][#b]?)(m|minor|major)?$/);
+  const keyLabel = keyParts ? `${keyParts[1]} ${keyParts[2] === 'm' || keyParts[2] === 'minor' ? 'minor' : 'major'}` : '';
+  const sourceBpm = Number(p.scoreAbc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1] ?? 120);
+  return (
   <div className="w-[420px] flex-shrink-0 overflow-y-auto scrollbar-hide p-4 space-y-5">
     <div className="space-y-2">
       <ParamLabel label="YuE2 style caption" info="Describe the target genre, instruments, mood and vocal style. An adapter can also use a caption from its training dataset." />
@@ -81,12 +99,32 @@ export const Yue2CoverPanel: React.FC<Props> = p => (
         <button onClick={p.onCancel} className="text-red-400">Cancel current render</button>
       </div>
     )}
-    <div className="space-y-1">
+    <div className="space-y-3 border-t border-zinc-200 dark:border-white/10 pt-4">
+      <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">Score to render</p>
+      <ParamLabel label="Voices" info="Vocal melody alone gives the new style room to choose its instruments. Both keeps the transcribed instrumental line too." />
+      <StyledSelect accent="pink" value={p.voices} onChange={v => p.onVoices(v as 'vocal' | 'both')}
+        options={[{ value: 'vocal', label: 'Vocal melody only' }, { value: 'both', label: 'Vocal + instrumental line' }]} />
       <div className="flex items-center justify-between">
-        <ParamLabel label="Keep chords" info="Keep the reviewed score's chord symbols in the YuE2 render, or remove them and let the style decide the harmony." />
+        <ParamLabel label="Keep chords" info="Retain the original harmony; off lets the style decide." />
         <Toggle accent="cyan" checked={p.keepChords} onChange={p.onKeepChords} aria-label="Keep chords" />
       </div>
-      <p className="text-xs text-zinc-500">Keep chords for the original harmony; turn off to let the style decide.</p>
+      <ParamLabel label="Tempo" info="Free removes the score tempo; Source retains it; Set writes a target BPM using the score's beat unit." />
+      <StyledSelect accent="pink" value={p.tempoMode} onChange={v => {
+        if (v === 'set' && p.tempoMode !== 'set') p.onBpm(Math.max(20, Math.min(300, sourceBpm)));
+        p.onTempoMode(v as 'free' | 'source' | 'set');
+      }} options={[{ value: 'free', label: 'Free (style decides)' }, { value: 'source', label: 'Source tempo' }, { value: 'set', label: 'Set BPM' }]} />
+      {p.tempoMode === 'set' && <EditableSlider label="Target BPM" value={p.bpm} min={20} max={300} step={1}
+        onChange={p.onBpm} helpText={`Source: ${sourceBpm} BPM`} />}
+      <EditableSlider label="Pitch Shift" value={p.keyShift} min={-6} max={6} step={1}
+        onChange={p.onKeyShift} defaultValue={0} disabled={!keyLabel}
+        formatDisplay={v => v === 0 ? 'Source key' : `${v > 0 ? '+' : ''}${v} st → ${transposeKey(keyLabel, v)}`}
+        helpText={keyLabel ? `Source: ${keyLabel}. Shift within six semitones.` : 'No supported score key found.'} />
+      <details className="text-xs text-zinc-600 dark:text-zinc-400">
+        <summary className="cursor-pointer">Advanced</summary>
+        <EditableSlider label="Condition strength" value={p.cfgScale} min={0.1} max={2} step={0.05}
+          onChange={p.onCfgScale} defaultValue={1}
+          helpText="Tightens style, lyrics and score together." />
+      </details>
     </div>
     <button onClick={p.onGenerate} disabled={!p.canGenerate}
       className="w-full rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-3 text-sm font-bold text-white disabled:opacity-40 disabled:cursor-not-allowed">
@@ -94,4 +132,5 @@ export const Yue2CoverPanel: React.FC<Props> = p => (
     </button>
     {!p.canGenerate && <p className="text-xs text-zinc-500">Choose audio, approve an ABC score, and enter lyrics or select Instrumental.</p>}
   </div>
-);
+  );
+};
