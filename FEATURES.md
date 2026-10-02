@@ -14,7 +14,7 @@ Pick the backend from a button in the global bar. The choice survives a restart,
 |---|---|
 | Three-stage pipeline | Planner LM (0.6B, 1.7B or 4B), DiT (Standard or XL) and VAE, producing 48 kHz stereo. |
 | Explicit music fields | BPM, key, time signature and a duration target from 10 to 600 seconds. |
-| Every studio | The only backend with covers, repaint, stem generation, Song Builder and STORM streaming. |
+| Every studio | Supports all studios, including audio-conditioned covers, repaint, stem generation, Song Builder and STORM streaming. |
 | Full plugin support | Every Lua solver, scheduler, guidance mode and postprocess plugin. |
 | DiT and planner adapters | LoRA and LoKr on the DiT with merge, runtime and low-rank modes, plus a planner LM adapter. |
 | Batch size | Several takes from one request, each saved as its own song. |
@@ -49,6 +49,7 @@ Pick the backend from a button in the global bar. The choice survives a restart,
 | Model-ended songs | The composer decides the length, up to six minutes. |
 | Chain of Thought | Full lead sheet (default), Melody only, or Off. Off skips the lead sheet but runs guidance, so it is the slowest mode. |
 | Lead sheet preview | Plans the score only and shows it as staff notation with playback and a health verdict; continue, re-plan or cancel. You can also paste your own ABC lead sheet. |
+| Cover Studio | Transcribes a source into a reviewed ABC melody, or accepts pasted ABC, then composes from that score. SheetSage2 is optional when you provide the score. |
 | Batch Size and Noise Variations | Several songs in one pass, or the same composed song rendered from different noise. |
 | Own NAR sampler | Midpoint or Wasserstein Flow solvers with Uniform or HT V3 schedules. |
 | Two adapter slots | Separate AR (composer) and NAR (renderer) adapters, merged into the loaded model with Apply. |
@@ -178,22 +179,26 @@ AI-assisted lyric writing from a learned style profile, plus per-album render pr
 
 ## Cover Studio
 
-Re-style an existing recording. Requires the ACE-Step backend. Details: [Cover Studio](docs/user/studios/cover-studio.md)
+Re-style a recording with ACE-Step's audio-conditioned cover or YuE2's reviewed
+lead-sheet workflow. Details: [Cover Studio](docs/user/studios/cover-studio.md)
 
 | Feature | What it does |
 |---|---|
 | Source upload | MP3, WAV, FLAC, OGG, M4A, Opus or AAC, or send a track from the Library. |
-| Latent import | Use a `.latent` or `.hslat` file and its embedded lyrics, caption, BPM and key. |
+| Latent import (ACE-Step) | Use a `.latent` or `.hslat` file and its embedded lyrics, caption, BPM and key. |
 | Essentia analysis | Local BPM and key detection, cached per browser. |
-| BPM and key fixes | Halve, double or type the tempo; override the detected key. |
+| BPM and key fixes (ACE-Step) | Halve, double or type the tempo; override the detected key. YuE2 only shows detected values for reference. |
 | Genius lyrics search | Find the source's lyrics, paste your own, or go instrumental. |
-| Target artist | Fills the style description from an artist profile, or drafts one with an LLM, and loads a matching album adapter preset. |
-| Structure Fidelity | How closely the output follows the source arrangement. |
-| Source Preservation and noise method | How much of the source survives, with Classic or Full Denoise noise methods. |
-| NoFSQ mode | Skips FSQ quantisation for a result closer to the source. |
-| Tempo and pitch | 0.5x to 2x tempo and -12 to +12 semitones, with the target key shown. |
-| Timbre reference | A second reference track for the DiT's timbre conditioning. |
+| Target artist (ACE-Step) | Fills the style description from an artist profile, or drafts one with an LLM, and loads a matching album adapter preset. |
+| Structure Fidelity (ACE-Step) | Controls how closely the output follows the source arrangement. |
+| Source Preservation and noise method (ACE-Step) | Starts from source audio with Classic or Full Denoise noise methods. |
+| NoFSQ mode (ACE-Step) | Skips FSQ quantisation in the cover path. |
+| Tempo and pitch (ACE-Step) | 0.5x to 2x tempo and -12 to +12 semitones, with the target key shown. |
+| Timbre reference (ACE-Step) | A second reference track for the DiT's timbre conditioning. |
 | Stem mix | Split the source with SuperSep and mute or lower stems before generating. |
+| Lead-sheet review (YuE2) | Transcribe the melody with optional SheetSage2, or paste ABC without it. Preview, edit and approve the score before rendering. |
+| Score conditioning (YuE2) | Melody only by default, or Full to use chords added to the ABC. The source recording does not condition the audio renderer. |
+| Adapter pair (YuE2) | Render with the base model or an explicit AR/NAR pair captured when you queue the cover. |
 | Serial cover queue | Queue more covers while one renders. |
 
 ## Repaint Studio

@@ -43,6 +43,12 @@ In Create with YuE2 selected, the Caption source picker can use tracks from a li
 training dataset. The tags below it come from those captions; clicking one switches
 to Custom and adds or removes that phrase from your style description.
 
+YuE2 Cover Studio uses the same generation queue but starts from an approved ABC
+lead sheet. SheetSage2 can transcribe the source recording, or you can supply the
+score yourself. The recording is not fed to the audio renderer. The score,
+source identity and AR/NAR adapter pair are
+captured with the job. See [Cover Studio](studios/cover-studio.md).
+
 ## Models
 
 | Control | What it does |
@@ -441,17 +447,20 @@ the bar's settings apply to all of them.
 | Task mode | What it does | Used by |
 |---|---|---|
 | text2music | A new song from a caption and lyrics. | [Custom-Gen](studios/create.md), [Auto-Gen](studios/insta-gen.md), [Lyric Studio](studios/lyric-studio.md), [STORM](studios/storm.md), the first section in [Song Builder](studios/song-builder.md) |
-| cover | Re-renders source audio through the quantised plan, a free reinterpretation. | [Cover Studio](studios/cover-studio.md) |
-| cover-nofsq | Cover from the clean source latents, closer to a faithful remix. | [Cover Studio](studios/cover-studio.md) |
+| cover | ACE-Step re-renders source audio through the quantised plan. | [Cover Studio](studios/cover-studio.md) |
+| cover-nofsq | ACE-Step covers from clean source latents. | [Cover Studio](studios/cover-studio.md) |
 | repaint | Regenerates a time region of existing audio, keeping the rest. | [Repaint](studios/repaint-studio.md) |
 | extend | Not a separate engine mode. Song Builder extends or prepends a song with a repaint whose region runs past the start or end. | [Song Builder](studios/song-builder.md) |
 | lego | Generates a new instrument track layered over an existing backing track. | [Stem Builder](studios/stem-builder.md) |
 | extract | Isolates one instrument track from a mix. | [Stem Separator](studios/stem-studio.md) |
 | complete | Fills in a mix around a single stem. | No studio uses it yet. |
 
-HOT-Step skips the LM stage for cover, cover-nofsq, repaint, lego and extract; the caption
-and lyrics go to the DiT as written. lego, extract and complete need a base or SFT DiT, not
-a turbo model.
+These task names describe ACE-Step engine modes. YuE2 Cover Studio submits an ordinary
+YuE2 generation with `yue2Cover` source identity and an approved `yue2Abc` score;
+the AR composer follows that score instead of planning a new one. It does not run
+ACE-Step's `cover` or `cover-nofsq` mode. ACE-Step skips the LM stage for cover,
+cover-nofsq, repaint, lego and extract; the caption and lyrics go to the DiT as
+written. lego, extract and complete need a base or SFT DiT, not a turbo model.
 <!-- TODO(verify): whether Stem Separator's extract jobs use any Generation-bar settings. They are submitted by the Stem Separator's own route, not the shared generation queue path. -->
 
 ## Related

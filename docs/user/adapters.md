@@ -268,6 +268,14 @@ it was queued with, including an album's own adapters when it comes from Lyric S
 changing the picker while songs wait does not change what they render with. Queued songs
 with the same adapters still render together in one batch.
 
+In [Cover Studio](studios/cover-studio.md), choose **Base YuE2** to clear both
+adapter slots for that cover, or choose an AR composer and NAR renderer pair.
+The cover captures the pair and its strength settings when you click Generate;
+changing the global picker while it waits does not change the queued job. The
+approved ABC score supplies the composition plan in either mode. An adapter
+changes how its half of the model uses that plan, but the app does not promise
+to preserve the source performance or match a particular voice.
+
 YuE2 merges adapters into the resident model. When a song's adapters differ from the ones
 loaded, the engine waits for the renders ahead of it to finish, then unloads and reloads
 with that song's adapters, which adds a longer warm-up. The panel shows whether each slot

@@ -5,8 +5,9 @@ MiniMax-Music3 and YuE2. All three run inside the same C++/GGML engine process, 
 switching between them changes which model's weights are loaded, not which program is
 running. Each one turns a style description and lyrics into a stereo song, but they
 build it differently, accept different inputs, and work with different parts of the app.
-ACE-Step 1.5 is the default and the only backend that supports every studio. The other
-two are text-to-music only.
+ACE-Step 1.5 is the default and the only backend that supports every studio.
+YuE2 also supports Cover Studio, through a reviewed lead sheet rather than audio
+conditioning. MiniMax-Music3 is text-to-music only.
 
 For which quant and settings give the best output on each backend, see
 [Getting higher quality output](quality.md), which has a per-backend cheat sheet. This
@@ -26,8 +27,8 @@ when there is only one.
   loads the new backend's models first.
 - The global bar reshapes to the active backend. The Models, Adapters, Generation and
   LM / Thinking clusters show that backend's own controls, and controls that do nothing
-  on it are hidden. Cover Studio, Repaint, Stem Builder and STORM show a "not supported
-  by the active backend" notice that points you back to ACE-Step 1.5.
+  on it are hidden. Cover Studio works under ACE-Step and YuE2; Repaint, Stem
+  Builder and STORM need ACE-Step. MiniMax-Music3 cannot open Cover Studio.
 - If the active backend's model files are not installed, the bar says so and shows a
   Get models button that opens the [Model Manager](studios/model-manager.md).
 
@@ -49,7 +50,7 @@ A small text encoder model conditions the DiT on the caption.
 
 What sets it apart from the other two:
 
-- It is the only backend with covers and reference audio (Cover Studio), repaint
+- It is the only backend with source-audio-conditioned covers, repaint
   (Repaint), stem generation (Stem Builder) and continuous streaming (STORM).
 - BPM, key, time signature and duration are real input fields. Duration is a target the
   planner aims for, from 10 to 600 seconds.
@@ -161,6 +162,13 @@ What sets it apart:
 - Preview the score first (off by default) plans the lead sheet only, shows it with
   playback, and lets you continue, re-plan with a new seed, or cancel before any audio
   is rendered. You can also paste your own ABC lead sheet to render from.
+- Cover Studio takes an uploaded or Library recording and uses SheetSage2 to
+  transcribe its melody into ABC. Review and approve the score before rendering.
+  You can supply ABC yourself without installing SheetSage2. The recording does
+  not condition the audio renderer: YuE2 composes from the approved score,
+  caption and lyrics. Melody-only conditioning is the default; Full also uses
+  chords you add to the score. Cover jobs store the source identity and score.
+  Choose the base model or an explicit AR/NAR adapter pair for that job.
 - Without the preview, the app plans first anyway and redraws the seed when the lead sheet
   is a runaway, has no vocal line, or hit its cap, up to the attempt count in Settings. With
   **Re-plan flagged scores** (on by default) it also redraws a plan that passes but is
@@ -253,7 +261,7 @@ controls the UI shows for it. "?" means not yet confirmed.
 | Caption format | Free text, plus BPM, key and time signature fields | Structured Caption | Free text; BPM and key folded into the style |
 | Duration | Set by you, 10 to 600 s | Model-ended, ceiling 300 s | Model-ended, up to 360 s, no control |
 | Songs per request | Up to 9 | 1, or up to 4 with Variations Per Render | Batch Size, capped by the engine |
-| Covers and reference audio | Yes (Cover Studio) | No | No |
+| Cover Studio | Yes, source-audio conditioning | No | Yes, reviewed ABC composition conditioning |
 | Repaint | Yes (Repaint) | No | No |
 | Extend | ? | No | No |
 | Adapters at generation | DiT LoRA and LoKr, planner LM LoRA | Planner LM LoRA, applied per render | AR and NAR LoRA and LoKr, merged at load; ComfyUI joint files via import |

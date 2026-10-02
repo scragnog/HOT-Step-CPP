@@ -1,9 +1,8 @@
 # Cover Studio
 
-Turn an existing track into a new version: upload a reference song, HOT-Step reads
-its BPM, key and tags, and you generate a re-styled cover from it, optionally in a
-trained artist's voice and production style. Reach for it when you have a source
-recording to reinterpret, rather than a caption and lyrics to generate from scratch.
+Make a new version of a recording. ACE-Step conditions its audio renderer on the
+source; YuE2 transcribes the source into a lead sheet and composes from the
+reviewed score. Both use your caption and lyrics or an Instrumental choice.
 
 ![Cover Studio](../../images/hot-step-cover-studio.webp)
 
@@ -44,13 +43,15 @@ have to make.
 
 ## YuE2 workflow
 
-1. Upload a source recording or send a song from Library. Detected BPM and key
+1. Upload a source recording of at most 100 MB and 10 minutes, or send a song
+   from Library. Detected BPM and key
    are shown for reference; they do not change the YuE2 cover request. Advanced
    Mode can split and mix stems before transcription.
 2. Click **Transcribe melody**. The score panel shows queue and transcription
    progress, with Cancel and Retry. SheetSage2 must be registered for automatic
    transcription; if it is missing, the panel shows the model setup guidance.
-   You can paste ABC in the editor instead, without SheetSage2.
+   You can paste ABC in the editor instead, without SheetSage2. Neither path
+   uses the source audio as an inference conditioning signal after approval.
 3. Preview the ABC, correct it in the editor, and click **Approve score**. Editing
    the score or changing the source audio or stem mix withdraws approval. The
    Generate button stays disabled until the current source has an approved score.
@@ -65,9 +66,10 @@ have to make.
 
 YuE2 does not use ACE's fidelity, source-preservation/noise, NoFSQ, timbre,
 latent, tempo, pitch or BPM/key correction controls. A completed YuE2 cover
-uses the ordinary generation queue and appears in Library.
+uses the ordinary generation queue and appears in Library. Its saved job records
+the source identity and the ABC that was rendered.
 
-## Controls
+## ACE-Step controls
 
 | Control | What it does |
 |---|---|
@@ -100,7 +102,7 @@ its value has moved from the default; click it to snap that one field back.
 - Splitting into stems is step one of two. The split by itself does not change the
   render; the mixer is where muting or lowering a stem actually removes it from
   the cover.
-- BPM/key detection depends on the bundled Essentia analyzer. If it returns a
+- For ACE-Step, BPM/key detection depends on the bundled Essentia analyzer. If it returns a
   wrong value, use the tempo-fix and key-fix controls above to correct it. If it
   fails outright, the source loads with no detected-BPM/key panel at all and
   generation falls back to a default of 120 BPM.
@@ -109,7 +111,7 @@ its value has moved from the default; click it to snap that one field back.
   cache.
 - Covers queue rather than block the UI: you can adjust settings and start another
   cover while one is still rendering.
-- If Whisper lyric transcription is enabled in [generation](../generation.md)
+- For ACE-Step, if Whisper lyric transcription is enabled in [generation](../generation.md)
   settings, generated covers get the same LRC-synced lyrics as any other track.
 - Finished covers save to the library tagged with their source, alongside every
   other generation; open [Library](library.md) to find, play or export one.

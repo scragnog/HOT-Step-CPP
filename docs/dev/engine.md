@@ -189,6 +189,17 @@ tokenizer head (`yue2-mert.h`, `yue2-tok-head.h`), MMS_FA forced alignment
 (`yue2-mmsfa.h`, `yue2-ctc-align.h`, also behind `POST /yue2/align`), and
 SheetSage2 (`sheetsage-*.h`).
 
+YuE2 Cover Studio uses SheetSage2 for inference transcription through
+`ace-train yue2-sheet --melody-only`, not through a `/yue2/` engine route.
+The Node cover boundary creates a private one-source manifest and runs the
+existing queued training job with progress and cancellation. It accepts only
+a non-empty ABC result with no `abc_error`, then returns that score for user
+review. An ABC supplied by the user skips this transcriber and its optional
+GGUF. YuE2 generation captures the approved score as `yue2Abc` and source
+identity as `yue2Cover`; the engine composes from the score rather than
+conditioning its audio renderer on the recording. Without `--melody-only`,
+`yue2-sheet` retains its full-score training default.
+
 ## HOT-Step hook files
 
 Upstream files are kept as close to acestep.cpp as possible so syncs stay a copy.
@@ -355,7 +366,7 @@ usage. `ace-train --help` prints the full option list.
 | `yue2-preprocess` | Audio folder to cached YuE2 VAE latents and a manifest. Skips `*.engine.wav` (old server conversion-cache leftovers, duplicates of real tracks), as the dataset scanner does |
 | `yue2-tokenize` | Fill a YuE2 manifest's codec ids |
 | `yue2-align` | Fill word timings for the AR lyric-cursor loss |
-| `yue2-sheet` | Fill the ABC lead sheet with SheetSage2 |
+| `yue2-sheet` | Fill the ABC lead sheet with SheetSage2; `--melody-only` serves cover inference, while training keeps full score by default |
 | `yue2-nar-train` | Train a YuE2 NAR LoRA |
 | `yue2-ar-train` | Train a YuE2 AR (composer) LoRA |
 | `yue2-prepare-aitk`, `yue2-import-aitk-cache` | Build or import caches for joint training |
