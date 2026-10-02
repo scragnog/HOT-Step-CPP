@@ -49,12 +49,29 @@ import type { Yue2AdapterScales, Yue2FinalDetail } from './client.js';
 import { yue2Align, yue2Synth, yue2FinalDetail, yue2Props, yue2PropsCached, splitMultipartMixed, yue2AdapterWire, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
 import { yue2LyricsJson } from './align.js';
 import { classifyYue2Score, type Yue2ScoreHealth, yue2PlanUsable, yue2PickPlan, yue2PlanDraws, readYue2StyleNorms, type Yue2StyleNorms } from './scoreHealth.js';
-import { yue2PickFromModels, yue2ResolvePick, yue2StackFrom, type Yue2PersistedSelection } from './index.js';
+import {
+  yue2PickFromModels, yue2ResolvePick, yue2StackFrom, yue2CoverFromSubmission,
+  type Yue2PersistedSelection, type Yue2CoverSubmission,
+} from './index.js';
 
 /** The pick a queued job renders with (#204): captured at submit into
  *  envelope.models, never the live picker. */
 function jobPick(job: GenerationJob): Yue2PersistedSelection {
   return yue2PickFromModels(job.envelope.models as Record<string, string>);
+}
+
+/** A cover job's provenance and approved score, captured into
+ *  envelope.options.yue2 at submit (index.ts's resolveRequest already
+ *  rejected a blank ABC or cot=off there). The only source the render and
+ *  its metadata read for these fields — job.params is the raw request body
+ *  and is never read for them. undefined for an ordinary (non-cover) job. */
+export function jobCover(job: GenerationJob): { cover: Yue2CoverSubmission; abc: string } | undefined {
+  const opts = job.envelope.options?.[job.envelope.backendId] as Record<string, unknown> | undefined;
+  if (!opts) return undefined;
+  const cover = yue2CoverFromSubmission(opts);
+  if (!cover) return undefined;
+  const abc = typeof opts.yue2Abc === 'string' ? opts.yue2Abc : '';
+  return { cover, abc };
 }
 import { applyYue2StyleTemplate, splitYue2Tail, type Yue2StyleTemplate } from './style.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
@@ -518,6 +535,9 @@ interface Yue2PreparedJob {
   /** Set on the lead only; a follower's attempt is filled in when its own
    *  lane turn returns the already-finished job (index.ts generate()). */
   attempt?: GenerationAttempt;
+  /** Cover provenance captured into the envelope at submit, undefined for an
+   *  ordinary job. */
+  cover?: Yue2CoverSubmission;
 }
 
 async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): Promise<Yue2PreparedJob> {
@@ -525,7 +545,12 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
   const timing: StageTiming[] = [];
   const log: Yue2Log = (level, msg) => logGeneration(job.id, level, msg);
 
-  const { req, notes, caption, halves } = mapYue2Params(job.params, jobPick(job));
+  // A cover job's ABC and identity come from the envelope captured at
+  // submit, never from job.params (the raw request body) — index.ts's
+  // resolveRequest already validated it there.
+  const captured = jobCover(job);
+  const params = captured ? { ...job.params, yue2Abc: captured.abc } : job.params;
+  const { req, notes, caption, halves } = mapYue2Params(params, jobPick(job));
 
   startGenerationLog(job.id, 'yue2-text2music');
   logGenerationParams(job.id, req as unknown as Record<string, unknown>);
@@ -554,7 +579,7 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
     throw new Error('YuE2 needs a caption — the Style Description field is empty');
   }
 
-  return { job, req, caption, halves, timing, pipelineStart, log, attempt };
+  return { job, req, caption, halves, timing, pipelineStart, log, attempt, cover: captured?.cover };
 }
 
 // ── Auto-replan ──
@@ -1062,7 +1087,7 @@ function yue2FinishNeedsGpu(params: any): boolean {
 async function finishYue2Job(
   p: Yue2PreparedJob, parts: Buffer[], trackDetails: Yue2TrackDetail[], finalDetail: Yue2FinalDetail,
 ): Promise<void> {
-  const { job, req, caption, halves, autoReplan, timing, pipelineStart, log } = p;
+  const { job, req, caption, halves, autoReplan, timing, pipelineStart, log, cover } = p;
   const instrumental = !req.lyrics;
   const saveStart = performance.now();
   {
@@ -1265,6 +1290,12 @@ async function finishYue2Job(
         // and the gp.lmAdapter sitting beside it belongs to ACE-Step's 4B
         // planner, which is what the details panel used to show.
         ...(halves.ar.path || halves.nar.path ? { yue2Adapters: halves } : {}),
+        // Overwrites whatever job.params.yue2Cover/yue2Abc held: req.abc is
+        // what was actually rendered (resolved from the envelope capture in
+        // prepareYue2Job), and cover's provenance is the envelope's own copy
+        // — the only sources the metadata reads for these fields.
+        ...(cover ? { yue2Cover: cover } : {}),
+        ...(req.abc ? { yue2Abc: req.abc } : {}),
         yue2Request: { ...req, seed: td.seed, noise_seed: td.noise_seed, lm_batch_size: undefined, synth_batch_size: undefined },
         yue2: {
           ode_steps: req.ode_steps,

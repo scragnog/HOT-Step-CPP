@@ -292,10 +292,61 @@ function firstText(submission: Readonly<Record<string, unknown>>, keys: string[]
   return '';
 }
 
+/** A cover job carries provenance of the recording its approved lead sheet
+ *  was transcribed from. The ABC itself travels on the existing `yue2Abc`
+ *  field (#181) — this marker only adds the "where did this score come
+ *  from" identity, and the fact that the job IS a cover at all. */
+export interface Yue2CoverSubmission {
+  /** Opaque identity of the source recording (a song id, an upload id —
+   *  whatever the submitter has); required so provenance is never blank. */
+  sourceId: string;
+  /** Optional human-readable label for logs and metadata. */
+  sourceLabel?: string;
+}
+
+/** Reads the same `yue2Cover` shape back out of envelope.options.yue2 (the
+ *  captured copy) as out of a live submission — the field layout is
+ *  identical, only the source differs. Shared so a render's provenance read
+ *  can never drift from what submit-time validation accepted. */
+export function yue2CoverFromSubmission(submission: Readonly<Record<string, unknown>>): Yue2CoverSubmission | undefined {
+  const raw = submission.yue2Cover;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  const sourceId = typeof r.sourceId === 'string' ? r.sourceId.trim() : '';
+  if (!sourceId) throw new Error('A cover job needs yue2Cover.sourceId identifying the source recording.');
+  const sourceLabel = typeof r.sourceLabel === 'string' && r.sourceLabel.trim() ? r.sourceLabel.trim() : undefined;
+  return { sourceId, ...(sourceLabel ? { sourceLabel } : {}) };
+}
+
+/** The persisted selection a cover job's pick is resolved against: same LM
+ *  and VAE default, but both adapter slots forced empty. Pure (no DB read)
+ *  so the "base mode clears, an explicit pick still wins" contract is
+ *  testable without touching persisted settings. */
+export function yue2CoverPickBase(persisted: Yue2PersistedSelection): Yue2PersistedSelection {
+  const empty = { path: '', scales: yue2DefaultScales() };
+  return { ...persisted, adapters: { ar: empty, nar: empty } };
+}
+
 /** Pure descriptive snapshot. The live mapper remains mapYue2Params(). */
 function resolveRequest(submission: Readonly<Record<string, unknown>>): ResolvedRequest {
   const instrumental = typeof submission.instrumental === 'boolean'
     ? submission.instrumental : undefined;
+  const cover = yue2CoverFromSubmission(submission);
+  if (cover) {
+    // A cover IS its approved score; rendering a plain text2music job instead
+    // (planning a fresh one, or silently dropping the score under cot=off —
+    // generate.ts's existing drop-with-note behaviour) would throw the
+    // melody away without telling anyone. Reject at submit instead.
+    const cotRaw = typeof submission.yue2Cot === 'string' ? submission.yue2Cot : 'full';
+    if (cotRaw === 'off') {
+      throw new Error('A cover needs Chain of Thought set to melody or full — "off" has no plan '
+        + 'stage to render the approved score from.');
+    }
+    const abc = typeof submission.yue2Abc === 'string' ? submission.yue2Abc.trim() : '';
+    if (!abc) {
+      throw new Error('A cover needs an approved lead sheet (yue2Abc) — none was supplied.');
+    }
+  }
   const options: Record<string, unknown> = {};
   for (const key of Object.keys(submission)) {
     if (key.startsWith('yue2')) options[key] = submission[key];
@@ -311,7 +362,14 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
   // The job's pick, resolved once here at submit (#204): the persisted default
   // overlaid with the job's own yue2Pick. Everything downstream reads it back
   // from envelope.models (yue2PickFromModels), never the live picker.
-  const picked = yue2ResolvePick(submission);
+  //
+  // A cover job is the one exception to "no pick = persisted default": base
+  // mode (no pair explicitly chosen) must render with NO adapters, not
+  // whatever the picker happens to have loaded at submit time — a cover
+  // should sound like the model the user asked for, not a silently-inherited
+  // pick meant for ordinary generation. An explicit yue2Pick on the cover
+  // submission still wins (resolveSlots), same as any other job.
+  const picked = yue2ResolvePick(submission, cover ? yue2CoverPickBase(yue2PersistedSelection()) : undefined);
   // BackendModelSelection is string-valued, so the dials are stringified rather
   // than dropped: the snapshot records what the request was resolved against,
   // and how hard each merged adapter pushed is part of that. A slot holding

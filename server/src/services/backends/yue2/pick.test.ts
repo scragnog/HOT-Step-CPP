@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { yue2ResolvePick, yue2PickFromModels, type Yue2PersistedSelection } from './index.js';
+import {
+  yue2ResolvePick, yue2PickFromModels, yue2CoverFromSubmission, yue2CoverPickBase,
+  type Yue2PersistedSelection,
+} from './index.js';
 import { yue2CoalesceKey } from './generate.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
 import type { Yue2SynthRequest } from './client.js';
@@ -113,4 +116,66 @@ test('the captured adapters reach the request', async () => {
   assert.deepEqual(wire?.map(a => [a.path, a.scale]), [[fileB, 0.3]]);
   const none = yue2ResolvePick({ yue2Pick: { lmAdapterAr: '', lmAdapterNar: '' } }, defaults);
   assert.equal(mapYue2Params({ caption: 'folk' }, none).req.lm_adapter, null);
+});
+
+// ── Cover submission (S3): yue2Cover marker, rejected at submit, provenance
+// captured into the envelope — never a silent plain generation. ──
+
+test('yue2CoverFromSubmission requires a sourceId', () => {
+  assert.equal(yue2CoverFromSubmission({}), undefined);
+  assert.throws(() => yue2CoverFromSubmission({ yue2Cover: {} }), /sourceId/);
+  assert.deepEqual(yue2CoverFromSubmission({ yue2Cover: { sourceId: 'song-1' } }), { sourceId: 'song-1' });
+  assert.deepEqual(
+    yue2CoverFromSubmission({ yue2Cover: { sourceId: 'song-1', sourceLabel: 'My Take' } }),
+    { sourceId: 'song-1', sourceLabel: 'My Take' },
+  );
+});
+
+test('a cover submission with cot=off is rejected at submit, not silently rendered plain', async () => {
+  const { yue2Backend } = await import('./index.js');
+  assert.throws(
+    () => yue2Backend.resolveRequest({ caption: 'c', yue2Cover: { sourceId: 's' }, yue2Abc: 'X:1\n', yue2Cot: 'off' }),
+    /Chain of Thought/,
+  );
+});
+
+test('a cover submission with a blank ABC is rejected at submit', async () => {
+  const { yue2Backend } = await import('./index.js');
+  assert.throws(
+    () => yue2Backend.resolveRequest({ caption: 'c', yue2Cover: { sourceId: 's' }, yue2Abc: '  ' }),
+    /approved lead sheet/,
+  );
+  assert.throws(
+    () => yue2Backend.resolveRequest({ caption: 'c', yue2Cover: { sourceId: 's' } }),
+    /approved lead sheet/,
+  );
+});
+
+// resolveRequest itself also calls yue2PersistedSelection() (reads real
+// settings), which needs an initialized DB this file deliberately avoids —
+// same reason every other test here injects `defaults` instead of touching
+// settings. So the base-mode-clearing contract is tested through the same
+// pure pieces resolveRequest is built from: yue2CoverPickBase (DB-free) feeds
+// yue2ResolvePick exactly as resolveRequest wires them.
+
+test('yue2CoverPickBase clears both slots regardless of the persisted pick', () => {
+  const base = yue2CoverPickBase(defaults);
+  assert.equal(base.adapters.ar.path, '');
+  assert.equal(base.adapters.nar.path, '');
+  assert.equal(base.lm, defaults.lm);           // LM/VAE defaults still carry through
+  assert.equal(base.vae_variant, defaults.vae_variant);
+});
+
+test('base-mode cover (no explicit pair) clears both AR and NAR slots, unlike an ordinary job', () => {
+  const pick = yue2ResolvePick({}, yue2CoverPickBase(defaults));
+  assert.equal(pick.adapters.ar.path, '');
+  assert.equal(pick.adapters.nar.path, '');
+  // The same empty submission against the ordinary (non-cover) base inherits
+  // the persisted pair — this is what cover mode deliberately does not do.
+  assert.equal(yue2ResolvePick({}, defaults).adapters.nar.path, fileA);
+});
+
+test('a pair explicitly chosen on a cover submission still renders, base-mode clearing does not override it', () => {
+  const pick = yue2ResolvePick({ yue2Pick: { lmAdapterNar: fileA } }, yue2CoverPickBase(defaults));
+  assert.equal(pick.adapters.nar.path, fileA);
 });
