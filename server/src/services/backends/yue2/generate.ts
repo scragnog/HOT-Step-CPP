@@ -559,13 +559,20 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
 // pass: the plan stage decodes its songs in lockstep, so eight scores cost
 // about what one does (2026-09-28; one at a time, ten tries of a weak
 // adapter took three minutes before the batch could start composing).
-/** The style norms of the selected planner adapter's joint run (saved in its
- *  folder by the run's previews), or null for the base model or an adapter
- *  with none. Checks the training sheets themselves fail are not held against
- *  its plans. */
+/** The style norms of the selected planner adapter, read from its own header
+ *  (style_norms, written by the joint trainer), or null for the base model or
+ *  an adapter with none. Checks the training sheets themselves fail are not
+ *  held against its plans. */
 function activeStyleNorms(): Yue2StyleNorms | null {
   const { ar, nar } = yue2PersistedSelection().adapters;
-  return readYue2StyleNorms(jointRunForAdapter(ar.path || nar.path)?.output);
+  const adapter = ar.path || nar.path;
+  if (!adapter) return null;
+  const fromHeader = readSafetensorsMeta(adapter)?.raw.style_norms;
+  if (fromHeader) {
+    try { const j = JSON.parse(fromHeader) as Yue2StyleNorms; if (Array.isArray(j.exempt)) return j; } catch { /* fall through */ }
+  }
+  // Adapters exported before the header carried them: the run folder's copy.
+  return readYue2StyleNorms(jointRunForAdapter(adapter)?.output);
 }
 
 async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {

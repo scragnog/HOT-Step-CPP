@@ -371,6 +371,20 @@ static int run_impl(Config config, std::string * error) {
     yue2_aitk::sha256::digest source_hash;
     if (!yue2_aitk::sha256::file(source_copy, source_hash, error)) return 1;
     if (source_hash.hex() != lower_hash(dataset.source_manifest_sha256)) { fail(error, "dataset source-manifest.json SHA-256 does not match source_manifest_sha256"); return 1; }
+    // What a render needs to know about this adapter travels in its own
+    // header: the CoT modes it trained (an item with a lead sheet trains full
+    // unless --abc-dropout drops every one; off comes from the dropout or an
+    // item without a sheet) and the server's style norms.
+    std::vector<std::pair<std::string, std::string>> adapter_meta;
+    {
+        bool with_abc = false, without_abc = false;
+        for (const auto & item : dataset.items) (item.prompt.abc_ids.empty() ? without_abc : with_abc) = true;
+        std::string cot;
+        if (without_abc || config.abc_dropout > 0.0f) cot = "off";
+        if (with_abc && config.abc_dropout < 1.0f) cot += cot.empty() ? "full" : ",full";
+        if (!cot.empty()) adapter_meta.push_back({"cot", cot});
+        if (!config.style_norms.empty()) adapter_meta.push_back({"style_norms", config.style_norms});
+    }
     yue2_aitk::Yue2NativeSampler sampler(config.seed);
     std::vector<size_t> order(dataset.items.size()); std::iota(order.begin(), order.end(), 0);
     size_t cursor = 0; int completed = 0;
@@ -875,7 +889,7 @@ static int run_impl(Config config, std::string * error) {
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
                 config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history, kl_mark_last, unfrozen_at, rung_lr_mult, lr_decaying_from);
             if (metadata.empty()) return false;
-            if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str(), dataset.trigger, config.caption_dropout)) return false;
+            if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / "native-ar.safetensors").u8string().c_str(), (temp_dir / "native-nar.safetensors").u8string().c_str(), dataset.trigger, config.caption_dropout, adapter_meta)) return false;
             if (use_lm) {
                 yue2_aitk::HostStateSnapshot snap; snap.step = step;
                 const auto named = state.named_tensors();

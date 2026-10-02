@@ -12,6 +12,7 @@ import { checkpointRecords, listYue2AitkRuns, recordYue2AitkRun } from './yue2Ai
 import { runYue2PlanCheck, type Yue2PlanCheckOptions } from './yue2PlanCheck.js';
 import { renderYue2JointPreview, listYue2JointPreviews, Yue2PreviewCleanupError } from './yue2JointPreview.js';
 import { yue2Unload } from '../backends/yue2/client.js';
+import { yue2StyleNormsForRun } from '../backends/yue2/scoreHealth.js';
 import { ensureYue2PreparedDataset } from './yue2AutoPrepare.js';
 import { getDataset } from './datasetsRepo.js';
 import { getDb } from '../../db/database.js';
@@ -71,6 +72,8 @@ import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
 export interface ResolvedYue2JointTrainOptions {
   checkpoint: string;
   dataset: string;
+  /** JSON style norms the trainer writes into both adapter headers. */
+  styleNorms?: string;
   outDir: string;
   steps: number;
   saveEvery: number;
@@ -350,6 +353,7 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
   if (o.klWeight !== undefined) args.push('--kl-weight', String(o.klWeight));
   if (o.abcDropout !== undefined) args.push('--abc-dropout', String(o.abcDropout));
   if (o.captionDropout !== undefined) args.push('--caption-dropout', String(o.captionDropout));
+  if (o.styleNorms) args.push('--style-norms', o.styleNorms);
   if (o.plannerLrScale !== undefined) args.push('--planner-lr-scale', String(o.plannerLrScale));
   if (o.narLrScale !== undefined && o.narLrScale !== 1 && optimizer !== 'muon') args.push('--nar-lr-scale', String(o.narLrScale));
   if (o.spikeFactor !== undefined && o.spikeFactor > 0) {
@@ -779,7 +783,8 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
         : state.targetStopped && state.lastStep > step
           ? state.lastStep : (pauseAt > 0 && pauseAt < o.steps ? pauseAt : o.steps);
       nativeAttempted = true;
-      await runYue2AceTrain(job, 'yue2-joint-train', buildYue2JointTrainArgs(segment),
+      const norms = yue2StyleNormsForRun(o.outDir, o.dataset);
+      await runYue2AceTrain(job, 'yue2-joint-train', buildYue2JointTrainArgs({ ...segment, ...(norms ? { styleNorms: JSON.stringify(norms) } : {}) }),
         YUE2_IDLE_MS, () => {
           if (!fs.existsSync(segmentOut)) return 'Joint trainer exited without creating its output directory';
           const expect = wanted();

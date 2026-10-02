@@ -69,6 +69,14 @@ test('planner crop rides only when set', () => {
   assert.equal(buildYue2JointTrainArgs(base).includes('--ar-crop-frames'), false);
 });
 
+test('style norms ride as one JSON argument only when known', () => {
+  const base = { checkpoint: 'b', dataset: 'd', outDir: 'o', steps: 100, saveEvery: 10, seed: 42, device: 'CUDA0' };
+  const json = JSON.stringify({ exempt: ['bars'], sheets: 12 });
+  const on = buildYue2JointTrainArgs({ ...base, styleNorms: json });
+  assert.deepEqual(on.slice(on.indexOf('--style-norms'), on.indexOf('--style-norms') + 2), ['--style-norms', json]);
+  assert.equal(buildYue2JointTrainArgs(base).includes('--style-norms'), false);
+});
+
 test('paused JSON event is recognized without becoming terminal done', () => {
   assert.deepEqual(parseYue2JointEvent('{"stage":"paused","step":50,"resume":"optimizer.resume"}', 100),
     { stage: 'paused', step: 50, totalSteps: 100 });

@@ -84,6 +84,11 @@ struct Config {
     // measured recipe, arms 137-140 of 2026-09-15). Needs a dataset prepared
     // with the trigger-only prefixes. 0 = off, byte-identical to before.
     float caption_dropout = 0.0f;
+    // Score-health style norms (JSON, built by the server from the dataset's
+    // lead sheets), written verbatim into both adapter headers as style_norms
+    // so a render can judge plans by them with nothing but the adapter.
+    // Metadata only: not part of the resume fingerprint. Empty = not written.
+    std::string style_norms;
     // AdamW only: the planner's learning rate as a multiple of --lr. The
     // decoder (NAR) half always trains at --lr itself. 1.0 = one rate for
     // both halves, which is what every run before this flag did.
@@ -285,7 +290,7 @@ inline void usage(FILE * out) {
         "[--optimizer adamw|adamw-lm|prodigy|muon] [--cautious] [--lr F] [--warmup N] [--weight-decay F] "
         "[--prodigy-d0 F] [--muon-lr-scale F] [--muon-ns-steps N] "
         "[--target-loss F (0 disables)] [--target-kl F (0 disables)] [--target-loss-window N] [--target-kl-mode mean|trend] "
-        "[--kl-weight 0.2] [--abc-dropout 0.5] [--caption-dropout 0] [--planner-lr-scale 1.0 (not muon)] [--nar-lr-scale 1.0 (not muon)] "
+        "[--kl-weight 0.2] [--abc-dropout 0.5] [--caption-dropout 0] [--style-norms <json>] [--planner-lr-scale 1.0 (not muon)] [--nar-lr-scale 1.0 (not muon)] "
         "[--nar-extra-steps N (with --target-kl: freeze the planner at its KL, train the decoder N more steps)] "
         "[--nar-drift (log the decoder's drift from base and its reconstruction error at every checkpoint)] "
         "[--meter-only (with --resume: write the checkpoint's meters.json and exit)] "
@@ -478,6 +483,8 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
         } else if (!std::strcmp(arg, "--caption-dropout")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.caption_dropout)) { if (error) *error = "--caption-dropout must be a finite number"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--style-norms")) {
+            if (!detail::value(arg, argc, argv, &i, &parsed.style_norms, error)) return ParseResult::error;
         } else if (!std::strcmp(arg, "--planner-lr-scale")) {
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::finite_float(text.c_str(), &parsed.planner_lr_scale)) { if (error) *error = "--planner-lr-scale must be a finite number"; return ParseResult::error; }

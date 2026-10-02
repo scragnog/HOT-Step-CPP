@@ -210,7 +210,8 @@ public:
 
     // Refreshes host F32 snapshots and invokes the installed 448-tensor BF16
     // writer. The writer enforces exact names/shapes and no-overwrite publish.
-    bool export_snapshot(const char * output_path, int64_t steps, std::string * error = nullptr, const char * ar_path = nullptr, const char * nar_path = nullptr, const std::string & trigger = {}, float caption_dropout = 0.0f) {
+    bool export_snapshot(const char * output_path, int64_t steps, std::string * error = nullptr, const char * ar_path = nullptr, const char * nar_path = nullptr, const std::string & trigger = {}, float caption_dropout = 0.0f,
+                         const std::vector<std::pair<std::string, std::string>> & meta = {}) {
         if (!initialized_) return fail(error, "train state is not initialized");
         std::vector<Yue2AitkF32Matrix> factors; factors.reserve(slots_.size());
         for (Slot & slot : slots_) {
@@ -220,11 +221,11 @@ public:
         }
         if (is_lokr()) {
             if (!yue2_aitk_write_fused_lokr(factors, lokr_dim_, lokr_factor_, alpha_, steps, output_path)) return fail(error, "fused-LoKr export failed");
-            if ((ar_path || nar_path) && !yue2_aitk_write_native_split_lokr(factors, lokr_dim_, lokr_factor_, alpha_, steps, ar_path, nar_path, trigger, caption_dropout)) return fail(error, "native AR/NAR LoKr export failed");
+            if ((ar_path || nar_path) && !yue2_aitk_write_native_split_lokr(factors, lokr_dim_, lokr_factor_, alpha_, steps, ar_path, nar_path, trigger, caption_dropout, meta)) return fail(error, "native AR/NAR LoKr export failed");
             return true;
         }
         if (!yue2_aitk_write_fused_lora(factors, rank_, alpha_, steps, output_path)) return fail(error, "fused-LoRA export failed");
-        if ((ar_path || nar_path) && !yue2_aitk_write_native_split(factors, rank_, alpha_, steps, ar_path, nar_path, trigger, caption_dropout)) return fail(error, "native AR/NAR export failed");
+        if ((ar_path || nar_path) && !yue2_aitk_write_native_split(factors, rank_, alpha_, steps, ar_path, nar_path, trigger, caption_dropout, meta)) return fail(error, "native AR/NAR export failed");
         return true;
     }
 

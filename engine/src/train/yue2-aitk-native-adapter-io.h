@@ -135,7 +135,8 @@ inline bool add_lokr(std::vector<STWTensor> & out, const std::string & module, c
 inline bool yue2_aitk_write_native_split_lokr(const std::vector<Yue2AitkNativeMatrix> & factors,
                                               int dim, int factor, float alpha, int64_t steps,
                                               const char * ar_path, const char * nar_path,
-                                              const std::string & trigger = {}, float caption_dropout = 0.0f) {
+                                              const std::string & trigger = {}, float caption_dropout = 0.0f,
+                                              const std::vector<std::pair<std::string, std::string>> & meta = {}) {
     using namespace yue2_aitk_native_detail;
     constexpr int layers = 28;
     if (factors.empty() || dim <= 0 || factor == 0 || !std::isfinite(alpha) || alpha <= 0.0f ||
@@ -187,9 +188,10 @@ inline bool yue2_aitk_write_native_split_lokr(const std::vector<Yue2AitkNativeMa
             }
         }
     }
-    const std::vector<std::pair<std::string, std::string>> extra = {
+    std::vector<std::pair<std::string, std::string>> extra = {
         {"lokr_dim", std::to_string(dim)}, {"lokr_factor", std::to_string(factor)},
     };
+    extra.insert(extra.end(), meta.begin(), meta.end());
     if (!write_one(ar_path, ar, "ar", dim, alpha, steps, trigger, caption_dropout, "lokr", extra)) return false;
     if (!write_one(nar_path, nar, "nar", dim, alpha, steps, trigger, caption_dropout, "lokr", extra)) {
         hs_remove(ar_path);
@@ -204,7 +206,8 @@ inline bool yue2_aitk_write_native_split_lokr(const std::vector<Yue2AitkNativeMa
 inline bool yue2_aitk_write_native_split(const std::vector<Yue2AitkNativeMatrix> & factors,
                                          int64_t rank, float alpha, int64_t steps,
                                          const char * ar_path, const char * nar_path, const std::string & trigger = {},
-                                         float caption_dropout = 0.0f) {
+                                         float caption_dropout = 0.0f,
+                                         const std::vector<std::pair<std::string, std::string>> & meta = {}) {
     using namespace yue2_aitk_native_detail;
     constexpr int layers = 28;
     constexpr size_t expected = 2u * layers * 4u * 2u;
@@ -256,8 +259,8 @@ inline bool yue2_aitk_write_native_split(const std::vector<Yue2AitkNativeMatrix>
             }
         }
     }
-    if (!write_one(ar_path, ar, "ar", rank, alpha, steps, trigger, caption_dropout)) return false;
-    if (!write_one(nar_path, nar, "nar", rank, alpha, steps, trigger, caption_dropout)) {
+    if (!write_one(ar_path, ar, "ar", rank, alpha, steps, trigger, caption_dropout, "lora", meta)) return false;
+    if (!write_one(nar_path, nar, "nar", rank, alpha, steps, trigger, caption_dropout, "lora", meta)) {
         hs_remove(ar_path);
         return false;
     }
