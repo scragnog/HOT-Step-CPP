@@ -45,6 +45,8 @@ test('abc_error fails cover transcription even when ABC is present', () => {
     const manifest = path.join(root, 'cover.json');
     fs.writeFileSync(manifest, JSON.stringify({ sources: [{ name: 'source', abc: 'X:1', abc_error: 'notation failed' }] }));
     assert.throws(() => readYue2CoverAbc(manifest, 'source'), /notation failed/);
+    fs.writeFileSync(manifest, JSON.stringify({ sources: [{ name: 'source', abc: 'X:1', abc_error: '  ' }] }));
+    assert.throws(() => readYue2CoverAbc(manifest, 'source'), /unknown notation error/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

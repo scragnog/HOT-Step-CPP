@@ -277,7 +277,7 @@ export function writeYue2CoverSheetManifest(audioPath: string, jobDir: string): 
 export function readYue2CoverAbc(manifest: string, name: string): string {
   const source = readYue2SheetSource(manifest, name);
   if (!source) throw new Error('The cover lead-sheet manifest could not be read');
-  if (source.abc_error.trim()) throw new Error(`Cover lead-sheet transcription failed: ${source.abc_error}`);
+  if (source.abc_error) throw new Error(`Cover lead-sheet transcription failed: ${source.abc_error.trim() || 'unknown notation error'}`);
   if (!source.abc.trim()) throw new Error('Cover lead-sheet transcription returned no ABC');
   return source.abc;
 }
