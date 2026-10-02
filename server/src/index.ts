@@ -48,6 +48,7 @@ import { workerTokenGate } from './services/training/trainingWorkers.js';
 import { reconcileYue2AitkRunsAtStartup } from './services/training/yue2AitkRuns.js';
 import backendsRoutes from './routes/backends.js';
 import audioRoutes from './routes/audio.js';
+import yue2CoverRoutes from './routes/yue2Cover.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -109,6 +110,7 @@ app.use('/api/midi-studio', midiStudioRoutes);
 app.use('/api/training/worker', workerRouter);
 app.use('/api/training', trainingRoutes);
 app.use('/api/audio', audioRoutes);
+app.use('/api/yue2-cover', yue2CoverRoutes);
 // Mounted at '/api' (not '/api/backends') — the router spells its own full
 // sub-paths (/backends, /backends/active, /capabilities) per the plan's
 // top-level /api/capabilities path (docs/plans/multi-backend-architecture.md §4.2).

@@ -1,0 +1,164 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import test from 'node:test';
+import express from 'express';
+import type { Server } from 'node:http';
+import * as realQueue from './training/labelingQueue.js';
+import type { TrainingJob } from './training/labelingQueue.js';
+import { createYue2CoverService } from './yue2Cover.js';
+import { createYue2CoverRouter } from '../routes/yue2Cover.js';
+
+function fixture(missing = false, defer = false) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-cover-api-'));
+  const referenceDir = path.join(root, 'references');
+  const libraryDir = path.join(root, 'audio');
+  const jobRoot = path.join(root, 'jobs');
+  fs.mkdirSync(referenceDir);
+  fs.mkdirSync(libraryDir);
+  const upload = `${randomUUID()}.wav`;
+  fs.writeFileSync(path.join(referenceDir, upload), 'audio');
+  const jobs = new Map<string, TrainingJob>();
+  let started = 0;
+  let cancelled = 0;
+  let runnerCalls = 0;
+  let duration = 120;
+  let pending: (() => Promise<void>) | undefined;
+  const fakeQueue = {
+    createJob: (_kind: string, datasetId: string) => {
+      started++;
+      const job = { id: randomUUID(), datasetId, kind: 'yue2-sheet', status: 'queued', phase: 'queued', controller: new AbortController() } as TrainingJob;
+      jobs.set(job.id, job);
+      return job;
+    },
+    enqueue: (job: TrainingJob, run: (job: TrainingJob) => Promise<void>) => {
+      if (defer) pending = () => run(job);
+      else void run(job);
+    },
+    getJob: (id: string) => jobs.get(id),
+    listJobs: () => [...jobs.values()].map(j => ({ id: j.id, status: j.status, phase: j.phase })),
+    toSummary: (job: TrainingJob) => ({ id: job.id, status: job.status, phase: job.phase }),
+    cancelJob: (id: string) => {
+      const job = jobs.get(id);
+      if (!job) return false;
+      cancelled++;
+      job.status = 'cancelled';
+      job.controller.abort();
+      return true;
+    },
+  } as unknown as typeof realQueue;
+  const service = createYue2CoverService({
+    queue: fakeQueue, referenceDir, libraryDir, jobRoot,
+    duration: async () => duration,
+    missingModels: () => missing ? ['SheetSage2'] : [],
+    model: () => missing ? '' : 'sheetsage2-f16.gguf',
+    song: (id, userId) => id === 'song-1' && userId === 'owner' ? { audio_url: '/audio/library.wav', title: 'Library track' } : undefined,
+    run: async (job, _audioPath, dir) => {
+      runnerCalls++;
+      job.status = 'running';
+      job.phase = 'transcribing';
+      await new Promise<void>(resolve => { job.controller.signal.addEventListener('abort', () => resolve(), { once: true }); setTimeout(resolve, 15); });
+      if (job.controller.signal.aborted) return '';
+      fs.writeFileSync(path.join(dir, 'cover-sheet.json'), JSON.stringify({ sources: [{ name: upload, abc: 'X:1\nK:C\nC' }] }));
+      job.status = 'done';
+      return 'X:1\nK:C\nC';
+    },
+  });
+  return { root, referenceDir, libraryDir, upload, service, setDuration: (n: number) => { duration = n; },
+    counts: () => ({ started, cancelled, runnerCalls }), drain: async () => { await pending?.(); },
+    close: () => fs.rmSync(root, { recursive: true, force: true }) };
+}
+
+test('missing SheetSage gives Model Manager guidance and creates no job', async () => {
+  const f = fixture(true);
+  try {
+    assert.match(f.service.readiness().message!, /yue2-sheetsage2-f16.*Model Manager/);
+    await assert.rejects(f.service.start({ sourceAudioUrl: `/references/${f.upload}` }, 'owner'), /Download.*Model Manager/);
+    assert.equal(f.counts().started, 0);
+  } finally { f.close(); }
+});
+
+test('invalid, oversized, and unreadable sources are refused before enqueue', async () => {
+  const f = fixture();
+  try {
+    await assert.rejects(f.service.start({ sourceAudioUrl: '/references/../escape.wav' }, 'owner'), /Invalid audio source/);
+    await assert.rejects(f.service.start({ songId: 'song-1' }, 'other-user'), /Library song not found/);
+    f.setDuration(601);
+    await assert.rejects(f.service.start({ sourceAudioUrl: `/references/${f.upload}` }, 'owner'), /10 minutes/);
+    f.setDuration(120);
+    fs.truncateSync(path.join(f.referenceDir, f.upload), 100 * 1024 * 1024 + 1);
+    await assert.rejects(f.service.start({ sourceAudioUrl: `/references/${f.upload}` }, 'owner'), /100 MB/);
+    assert.equal(f.counts().started, 0);
+  } finally { f.close(); }
+});
+
+test('supplied ABC bypasses the model and runner, retaining the source identity', async () => {
+  const f = fixture(true);
+  try {
+    const result = await f.service.start({ sourceAudioUrl: `/references/${f.upload}`, abc: ' X:1\nK:C\nC ' }, 'owner');
+    assert.deepEqual(result, { status: 'done', abc: 'X:1\nK:C\nC', sourceId: `/references/${f.upload}`, sourceLabel: f.upload });
+    assert.deepEqual(f.counts(), { started: 0, cancelled: 0, runnerCalls: 0 });
+  } finally { f.close(); }
+});
+
+test('queued job reports progress and cancellation uses the existing queue', async () => {
+  const f = fixture();
+  try {
+    fs.writeFileSync(path.join(f.libraryDir, 'library.wav'), 'audio');
+    const started = await f.service.start({ songId: 'song-1' }, 'owner');
+    assert.equal(started.status, 'queued');
+    assert.equal(started.sourceId, 'song-1');
+    const progress = f.service.find(started.jobId!, 'owner');
+    assert.equal(progress.job.phase, 'transcribing');
+    assert.equal(progress.sourceLabel, 'Library track');
+    assert.throws(() => f.service.find(started.jobId!, 'someone-else'), /not found/);
+    const stopped = f.service.cancel(started.jobId!, 'owner');
+    assert.equal(stopped.job.status, 'cancelled');
+    assert.equal(f.counts().cancelled, 1);
+    assert.equal(f.counts().runnerCalls, 1);
+  } finally { f.close(); }
+});
+
+test('completed job returns approved ABC and its source identity', async () => {
+  const f = fixture();
+  try {
+    const started = await f.service.start({ sourceAudioUrl: `/references/${f.upload}` }, 'owner');
+    for (let attempt = 0; attempt < 50 && f.service.find(started.jobId!, 'owner').job.status !== 'done'; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    const result = f.service.find(started.jobId!, 'owner');
+    assert.equal(result.job.status, 'done');
+    assert.equal(result.abc, 'X:1\nK:C\nC');
+    assert.equal(result.sourceId, `/references/${f.upload}`);
+  } finally { f.close(); }
+});
+
+test('cancellation before dequeue never starts transcription', async () => {
+  const f = fixture(false, true);
+  try {
+    const started = await f.service.start({ sourceAudioUrl: `/references/${f.upload}` }, 'owner');
+    f.service.cancel(started.jobId!, 'owner');
+    await f.drain();
+    assert.equal(f.counts().runnerCalls, 0);
+  } finally { f.close(); }
+});
+
+test('unauthenticated cover request is refused before reaching the service', async () => {
+  const f = fixture();
+  const app = express();
+  app.use(express.json());
+  app.use('/api/yue2-cover', createYue2CoverRouter(f.service, () => null));
+  const server: Server = app.listen(0);
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Expected TCP address');
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/yue2-cover/transcriptions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sourceAudioUrl: `/references/${f.upload}` }),
+    });
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { error: 'Unauthorized' });
+    assert.equal(f.counts().started, 0);
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); f.close(); }
+});
