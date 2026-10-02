@@ -13,6 +13,7 @@ import { HoverFullText } from '../shared/HoverFullText';
 import { SongActionsMenu } from '../shared/SongActionsMenu';
 import { CoverImage } from '../shared/CoverImage';
 import { displayTitle, songArtist, songSubject } from '../../utils/songDisplay';
+import { Yue2CoverDrift } from './Yue2CoverDrift';
 import {
   BACKEND_LABELS, buildFactGroups, buildTrackChips, songBackend,
   type Fact,
@@ -223,6 +224,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
             </div>
           </Collapsible>
         )}
+
+        {backend === 'yue2' && <Yue2CoverDrift song={song} />}
 
         {/* Lyrics */}
         {song.lyrics && (

@@ -97,6 +97,15 @@ Click a track (outside of selection mode) to open the right sidebar.
   Reproduction for MiniMax-Music3; Plan, Render, Outcome, Adapters,
   Reproduction for YuE2), and Lyrics.
 
+For a rendered YuE2 cover, **Measure drift** in the details panel aligns its
+saved audio to the lyrics used by that job, then compares each lyric tag with
+the score section in the same position. The readout shows expected and sung
+time spans, start offsets in bars, their mean absolute offset, and the first
+section more than one bar off. It flags mismatched tags and missing words.
+The measurement is saved with the song; opening details alone does not run the
+aligner. If the rendered score has free tempo, the calculation uses the
+reviewed source score's tempo and labels that fallback.
+
 Drag the handle on its left edge to resize the panel.
 
 ### Metadata editor

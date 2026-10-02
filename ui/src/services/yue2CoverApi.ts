@@ -56,6 +56,26 @@ export interface Yue2CoverDatasetMetadata {
   lyricsSource?: 'dataset-sidecar';
 }
 
+export interface Yue2CoverDriftResult {
+  tempoBpm: number;
+  meter: string;
+  secondsPerBar: number;
+  tempoSource: 'rendered-score' | 'source-score-fallback';
+  sectionWarning: string | null;
+  sections: Array<{
+    scoreLabel: string;
+    lyricTag: string | null;
+    startBar: number;
+    endBar: number;
+    expected: { start: number; end: number };
+    sung: { start: number; end: number } | null;
+    offsetBars: number | null;
+  }>;
+  meanAbsoluteOffsetBars: number | null;
+  firstOverOneBar: { index: number; label: string; offsetBars: number } | null;
+  inputHash?: string;
+}
+
 async function request<T>(path: string, token: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     ...init,
@@ -79,4 +99,6 @@ export const yue2CoverApi = {
   }),
   status: (jobId: string, token: string) => request<Yue2CoverResult>(`/transcriptions/${encodeURIComponent(jobId)}`, token),
   cancel: (jobId: string, token: string) => request<Yue2CoverResult>(`/transcriptions/${encodeURIComponent(jobId)}`, token, { method: 'DELETE' }),
+  measureDrift: (songId: string, token: string) => request<Yue2CoverDriftResult>(
+    `/drift/${encodeURIComponent(songId)}`, token, { method: 'POST' }),
 };

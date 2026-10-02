@@ -255,3 +255,44 @@ test('section review route returns sections and rejects invalid input', async ()
     assert.equal(f.counts().started, 0);
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); f.close(); }
 });
+
+test('drift route authenticates, aligns once, and persists the cached result', async () => {
+  const f = fixture();
+  const abc = 'X:1\nM:4/4\nQ:1/4=120\nK:C\n% verse\nV: Vocal\nC|D|';
+  const lyrics = '[Verse]\nsing';
+  const row = { id: 'cover-1', audio_url: '/audio/cover.wav', lyrics,
+    generation_params: JSON.stringify({ backend: 'yue2', yue2Cover: { fullScore: abc },
+      yue2Abc: abc, yue2Request: { lyrics } }) };
+  let alignCalls = 0;
+  let audioModified = 1;
+  const deps = {
+    song: (id: string, userId: string) => id === row.id && userId === 'owner' ? row : undefined,
+    save: (_id: string, _userId: string, result: object) => {
+      row.generation_params = JSON.stringify({ ...JSON.parse(row.generation_params), yue2CoverDrift: result });
+    },
+    align: async () => { alignCalls++; return { words: [{ start: 0, end: 0.5, char0: 8, char1: 12, score: 1 }] }; },
+    readAudio: () => Buffer.from('audio'),
+    statAudio: () => ({ size: 5, mtimeMs: audioModified } as fs.Stats),
+    audioDir: '/unused',
+  };
+  const app = express();
+  app.use('/api/yue2-cover', createYue2CoverRouter(f.service, req =>
+    req.headers.authorization === 'Bearer owner' ? 'owner' : null, deps));
+  const server: Server = app.listen(0);
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Expected TCP address');
+    const url = `http://127.0.0.1:${address.port}/api/yue2-cover/drift/cover-1`;
+    assert.equal((await fetch(url, { method: 'POST' })).status, 401);
+    const first = await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer owner' } });
+    assert.equal(first.status, 200);
+    const body = await first.json() as { meanAbsoluteOffsetBars: number };
+    assert.equal(body.meanAbsoluteOffsetBars, 0);
+    assert.equal((await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer owner' } })).status, 200);
+    assert.equal(alignCalls, 1);
+    audioModified++;
+    assert.equal((await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer owner' } })).status, 200);
+    assert.equal(alignCalls, 2);
+    assert.equal(f.counts().started, 0);
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); f.close(); }
+});
