@@ -182,6 +182,15 @@ export function barsIn(segment: string): number {
   return 1;
 }
 
+/** Shared SheetSage voice and bar reading for health checks and section offsets. */
+export function isVocalVoice(line: string): boolean {
+  return /vocal/i.test(line.slice(2).split(/\s+/).filter(Boolean)[0] ?? '') || /name="Vocal/i.test(line);
+}
+
+export function scoreBarSegments(line: string): string[] {
+  return line.split('|').filter(segment => segment.trim());
+}
+
 export function classifyYue2Score(abc: string, endReason?: string, lyrics?: string, norms?: Yue2StyleNorms | null): Yue2ScoreHealth {
   const exempt = new Set<Yue2Check>(norms?.exempt ?? []);
   const sections: string[] = [];
@@ -207,18 +216,17 @@ export function classifyYue2Score(abc: string, endReason?: string, lyrics?: stri
     }
     if (/^M:/.test(line)) { meter = line.slice(2).trim(); continue; }
     if (/^V:/.test(line)) {
-      inVocal = /vocal/i.test(line.slice(2).split(/\s+/).filter(Boolean)[0] ?? '') || /name="Vocal/i.test(line);
+      inVocal = isVocalVoice(line);
       continue;
     }
     if (/^[A-Za-z]:/.test(line)) continue;  // any other header field (X:, T:, L:, K:...)
     for (const m of line.matchAll(/"([^"]*)"/g)) if (m[1].trim()) chords.add(m[1].trim());
     if (!inVocal) {
-      for (const segment of line.split('|')) if (segment.trim()) voices.ins.push(segment);
+      for (const segment of scoreBarSegments(line)) voices.ins.push(segment);
       continue;
     }
 
-    for (const segment of line.split('|')) {
-      if (!segment.trim()) continue;
+    for (const segment of scoreBarSegments(line)) {
       voices.vocal.push(segment);
       const n = barsIn(segment);
       const sings = hasNote(segment);

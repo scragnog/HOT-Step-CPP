@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { insertScoreSectionTags, lintScoreSections, scoreSections } from './scoreSections.js';
+import { classifyYue2Score } from './scoreHealth.js';
 
 // Vocal lines and section markers copied from the first two groups of
 // _experiments/yue2-cover-qual-2026-10-02/approved.abc.
@@ -16,6 +17,9 @@ test('reads ordered sections and Vocal bar numbers from a transcribed score exce
   assert.deepEqual(scoreSections(transcribedExcerpt), [
     { label: 'intro', startBar: 1 }, { label: 'verse', startBar: 18 },
   ]);
+  const health = classifyYue2Score(transcribedExcerpt);
+  assert.equal(health.bars, 21);
+  assert.deepEqual(health.sections, ['intro', 'verse']);
 });
 
 test('empty score has no sections', () => {

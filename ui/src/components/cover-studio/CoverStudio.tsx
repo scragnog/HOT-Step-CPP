@@ -50,6 +50,7 @@ function enqueueCoverJob(fn: () => Promise<void>) {
   _coverQueue.push(fn);
   if (!_coverRunning) _drainCoverQueue();
 }
+
 async function _drainCoverQueue() {
   _coverRunning = true;
   while (_coverQueue.length > 0) {
@@ -57,6 +58,12 @@ async function _drainCoverQueue() {
     try { await job(); } catch { /* each job handles its own errors */ }
   }
   _coverRunning = false;
+}
+
+function coverScoreKeyLabel(abc: string): string {
+  const key = abc.match(/^K:\s*([A-Ga-g][#b]?)(m)?(?:\s+(minor|major|maj))?(?=\s|$)/m);
+  if (!key) return '';
+  return `${key[1]} ${key[2] || key[3]?.toLowerCase() === 'minor' ? 'minor' : 'major'}`;
 }
 
 interface CoverStudioProps {
@@ -699,9 +706,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         lmAdapterAr: pairMode === 'pair' ? yue2Ar : '',
         lmAdapterNar: pairMode === 'pair' ? yue2Nar : '' };
       const title = songArtist ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover');
-      const scoreKey = approvedSheet.abc.match(/^K:\s*([A-Ga-g][#b]?(?:m|minor|major)?)\s*$/m)?.[1];
-      const keyParts = scoreKey?.match(/^([A-Ga-g][#b]?)(m|minor|major)?$/);
-      const scoreSourceKey = keyParts ? `${keyParts[1]} ${keyParts[2] === 'm' || keyParts[2] === 'minor' ? 'minor' : 'major'}` : '';
+      const scoreSourceKey = coverScoreKeyLabel(approvedSheet.abc);
       const movedKey = coverKeyShift && scoreSourceKey ? transposeKey(scoreSourceKey, coverKeyShift) : '';
       const renderKey = movedKey ? movedKey.replace(/ major$/, '').replace(/ minor$/, 'm') : 'source';
       const coverChoices = { voices: coverVoices, keepChords,
@@ -1086,7 +1091,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           ar={yue2Ar} nar={yue2Nar} onAr={setYue2Ar} onNar={setYue2Nar}
           arOptions={adapterOptions('ar')} narOptions={adapterOptions('nar')}
           keepChords={keepChords} onKeepChords={setKeepChords}
-          scoreAbc={sheetAbc} voices={coverVoices} onVoices={setCoverVoices}
+          scoreAbc={sheetAbc} scoreKeyLabel={coverScoreKeyLabel(sheetAbc)}
+          voices={coverVoices} onVoices={setCoverVoices}
           tempoMode={coverTempoMode} onTempoMode={setCoverTempoMode}
           bpm={coverBpm} onBpm={setCoverBpm}
           keyShift={coverKeyShift} onKeyShift={setCoverKeyShift}

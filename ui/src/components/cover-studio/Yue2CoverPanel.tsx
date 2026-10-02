@@ -27,6 +27,7 @@ interface Props {
   keepChords: boolean;
   onKeepChords: (value: boolean) => void;
   scoreAbc: string;
+  scoreKeyLabel: string;
   voices: 'vocal' | 'both';
   onVoices: (value: 'vocal' | 'both') => void;
   tempoMode: 'free' | 'source' | 'set';
@@ -46,9 +47,7 @@ interface Props {
 }
 
 export const Yue2CoverPanel: React.FC<Props> = p => {
-  const scoreKey = p.scoreAbc.match(/^K:\s*([A-Ga-g][#b]?(?:m|minor|major)?)\s*$/m)?.[1] ?? '';
-  const keyParts = scoreKey.match(/^([A-Ga-g][#b]?)(m|minor|major)?$/);
-  const keyLabel = keyParts ? `${keyParts[1]} ${keyParts[2] === 'm' || keyParts[2] === 'minor' ? 'minor' : 'major'}` : '';
+  const keyLabel = p.scoreKeyLabel;
   const sourceBpm = Number(p.scoreAbc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1] ?? 120);
   return (
   <div className="w-[420px] flex-shrink-0 overflow-y-auto scrollbar-hide p-4 space-y-5">

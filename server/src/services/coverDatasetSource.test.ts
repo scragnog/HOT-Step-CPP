@@ -41,3 +41,35 @@ test('ambiguous byte matches do not choose a sidecar', () => {
     assert.equal(resolveCoverDatasetSource(copied, [dataset]), null);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('repeated lookup uses the canonical index and row updates invalidate it', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cover-index-'));
+  const originalReaddir = fs.readdirSync;
+  let walks = 0;
+  try {
+    const sourceDir = path.join(root, 'dataset');
+    fs.mkdirSync(sourceDir);
+    const first = path.join(sourceDir, 'first.wav');
+    fs.writeFileSync(first, 'first');
+    const dataset = { id: `index-${path.basename(root)}`, sourceDir, recursive: false,
+      updatedAt: 'one', sampleCount: 1 } as TrainingDatasetRow;
+    (fs as any).readdirSync = (...args: any[]) => { walks++; return (originalReaddir as any)(...args); };
+    assert.ok(resolveCoverDatasetSource(first, [dataset]));
+    const firstWalks = walks;
+    assert.ok(firstWalks > 0);
+    assert.ok(resolveCoverDatasetSource(first, [dataset]));
+    assert.equal(walks, firstWalks);
+    const second = path.join(sourceDir, 'second.wav');
+    fs.writeFileSync(second, 'second');
+    assert.ok(resolveCoverDatasetSource(second, [{ ...dataset, updatedAt: 'two' }]));
+    assert.ok(walks > firstWalks);
+    const secondWalks = walks;
+    const third = path.join(sourceDir, 'third.wav');
+    fs.writeFileSync(third, 'third');
+    assert.ok(resolveCoverDatasetSource(third, [{ ...dataset, updatedAt: 'two', sampleCount: 3 }]));
+    assert.ok(walks > secondWalks);
+  } finally {
+    (fs as any).readdirSync = originalReaddir;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

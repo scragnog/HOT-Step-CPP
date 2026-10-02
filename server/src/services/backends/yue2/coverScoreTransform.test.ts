@@ -49,6 +49,16 @@ test('transpose moves header and inline keys, notes, and chord root/bass; +2 and
   }
 });
 
+test('transpose preserves K: modifiers and accepts a separate mode word', () => {
+  const withClef = score.replace('K:Em', 'K:Em clef=treble');
+  const moved = coverTranspose(withClef, 'F#m');
+  assert.match(moved, /^K:F#m clef=treble$/m);
+  assert.match(moved, /^"F#m\/C#"F2 \^G2/m);
+  assert.equal(coverTranspose(moved, 'Em'), withClef);
+  const wordMode = score.replace('K:Em', 'K:E minor clef=treble');
+  assert.match(coverTranspose(wordMode, 'F#m'), /^K:F# minor clef=treble$/m);
+});
+
 test('one submit-time default set composes voices, chords, tempo, key in that order', () => {
   const choices = coverScoreChoices({});
   assert.deepEqual(choices, { voices: 'vocal', keepChords: false, tempo: 'free', key: 'source', cfgScale: 1 });

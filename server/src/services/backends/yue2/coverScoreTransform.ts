@@ -77,11 +77,12 @@ const PITCH_CLASS: Record<string, number> = {
   'A#': 10, Bb: 10, B: 11, Cb: 11,
 };
 
-function parsedKey(value: string): { pitch: number; minor: boolean } {
-  const match = value.trim().match(/^([A-Ga-g])([#b]?)(?:\s*(minor|major|maj|m))?$/i);
+function parsedKey(value: string): { pitch: number; minor: boolean; suffix: string; wordMode: boolean } {
+  const match = value.match(/^\s*([A-Ga-g])([#b]?)(m)?(?:(\s+)(minor|major|maj))?(\s+.*)?$/i);
   if (!match) throw new Error(`Unsupported cover key: ${value}`);
   const root = match[1].toUpperCase() + match[2];
-  return { pitch: PITCH_CLASS[root], minor: ['m', 'minor'].includes((match[3] || '').toLowerCase()) };
+  return { pitch: PITCH_CLASS[root], minor: !!match[3] || match[5]?.toLowerCase() === 'minor',
+    suffix: `${match[4] ?? ''}${match[5] ?? ''}${match[6] ?? ''}`, wordMode: !!match[5] };
 }
 
 /** abcjs parses the tune and moves keys, inline keys, notes and chord roots/bass together. */
@@ -100,7 +101,11 @@ export function coverTranspose(abc: string, targetKey: CoverKey): string {
   if (!changedField || parsedKey(changedField[1]).pitch !== target.pitch) {
     throw new Error('Could not transpose the cover score to the requested key.');
   }
-  return transposed;
+  // abcjs can respell a word-mode minor key enharmonically. Keep the source
+  // field's mode spelling and modifiers while using its transposed notes.
+  const targetTonic = targetKey.trim().match(/^([A-Ga-g][#b]?)/i)?.[1];
+  const header = `${targetTonic}${source.wordMode ? '' : source.minor ? 'm' : ''}${source.suffix}`;
+  return transposed.replace(/^K:[^\r\n]+/m, `K:${header}`);
 }
 
 /** The order is part of the cover contract: voices, chords, tempo, key. */

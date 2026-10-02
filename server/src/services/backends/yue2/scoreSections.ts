@@ -1,4 +1,4 @@
-import { barsIn, lyricSectionTags, withoutLyricSectionTags } from './scoreHealth.js';
+import { barsIn, isVocalVoice, lyricSectionTags, scoreBarSegments, withoutLyricSectionTags } from './scoreHealth.js';
 
 export interface Yue2ScoreSection { label: string; startBar: number }
 
@@ -16,11 +16,11 @@ export function scoreSections(abc: string): Yue2ScoreSection[] {
       continue;
     }
     if (/^V:/.test(line)) {
-      inVocal = /vocal/i.test(line.slice(2).split(/\s+/).filter(Boolean)[0] ?? '') || /name="Vocal/i.test(line);
+      inVocal = isVocalVoice(line);
       continue;
     }
     if (/^[A-Za-z]:/.test(line) || !inVocal) continue;
-    for (const segment of line.split('|')) if (segment.trim()) bars += barsIn(segment);
+    for (const segment of scoreBarSegments(line)) bars += barsIn(segment);
   }
   return sections;
 }
