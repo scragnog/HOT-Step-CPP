@@ -1,9 +1,11 @@
 // health.ts — Health check and diagnostics route
 
 import { Router } from 'express';
+import fs from 'node:fs';
 import { aceClient } from '../services/aceClient.js';
 import { APP_VERSION, config } from '../config.js';
 import { engineReady, engineBootStatus } from '../engineState.js';
+import { startupCommit, dirtyCheckout } from '../services/training/workerUpdate.js';
 
 const router = Router();
 
@@ -45,6 +47,9 @@ router.get('/', async (_req, res) => {
   res.json({
     status: 'ok',
     version: APP_VERSION,
+    commit: startupCommit,
+    dirty: dirtyCheckout(),
+    engineBuiltAt: (() => { try { return fs.statSync(config.aceServer.exe).mtime.toISOString(); } catch { return null; } })(),
     aceServer: {
       status: aceStatus,
       url: config.aceServer.url,

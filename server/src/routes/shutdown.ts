@@ -139,6 +139,12 @@ async function stopEverything(restart: boolean): Promise<void> {
   }, 1000);
 }
 
+/** Used by a completed worker bundle update after its builds have finished. */
+export function requestWorkerRestart(): void {
+  fs.writeFileSync(path.join(PROJECT_ROOT, '.restart-requested'), new Date().toISOString(), 'utf8');
+  setTimeout(() => void stopEverything(true), 300);
+}
+
 // POST /api/shutdown — terminate everything
 router.post('/', (_req, res) => {
   console.log('[Server] Shutdown requested via API');
@@ -149,15 +155,14 @@ router.post('/', (_req, res) => {
 // POST /api/restart — restart server (loop wrapper relaunches)
 router.post('/restart', (_req, res) => {
   console.log('[Server] Restart requested via API');
-  const markerPath = path.join(PROJECT_ROOT, '.restart-requested');
   try {
-    fs.writeFileSync(markerPath, new Date().toISOString(), 'utf8');
-    console.log(`[Server] Wrote restart marker: ${markerPath}`);
+    requestWorkerRestart();
+    console.log('[Server] Wrote restart marker');
+    res.json({ success: true, message: 'Restarting...' });
   } catch (err: any) {
     console.error(`[Server] Failed to write restart marker: ${err.message}`);
+    res.status(500).json({ error: err.message });
   }
-  res.json({ success: true, message: 'Restarting...' });
-  setTimeout(() => void stopEverything(true), 300);
 });
 
 export default router;

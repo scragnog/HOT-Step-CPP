@@ -7,7 +7,12 @@
 // request bodies stream through untouched; its own JSON routes parse inline.
 
 import express, { Router, type Request, type Response } from 'express';
+import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import * as repo from '../services/training/datasetsRepo.js';
+import { APP_VERSION, config } from '../config.js';
+import { aceClient } from '../services/aceClient.js';
+import { activeTraining, dirtyCheckout, getUpdate, cancelUpdate, receiveUpdate, startUpdate, startupCommit } from '../services/training/workerUpdate.js';
 import {
   getDispatch, getWorker, listWorkers, proxyToWorker, pullLinked, receiveDatasetFile, startDispatch,
   upsertPushedDataset, workerAdapterFile, workerDatasetFiles, workerLinkedPairs, workerStatus,
@@ -18,6 +23,39 @@ const fail = (res: Response, err: any) => res.status(err?.status ?? 500).json({ 
 // ── Worker side ─────────────────────────────────────────────────────────────
 
 export const workerRouter = Router();
+
+workerRouter.get('/status', async (_req: Request, res: Response) => {
+  let engineVersion = '';
+  let engineStatus = 'disconnected';
+  try {
+    const health = await aceClient.health();
+    engineStatus = health.status;
+  } catch { /* engine may be stopped while training */ }
+  try { engineVersion = String((await aceClient.props() as { version?: string }).version ?? ''); }
+  catch { /* properties may be unavailable during engine startup */ }
+  let gpu: { memoryUsedMiB: number; utilization: number } | null = null;
+  try {
+    const data = execFileSync('nvidia-smi', ['--query-gpu=memory.used,utilization.gpu', '--format=csv,noheader,nounits'], { encoding: 'utf8', timeout: 3000, windowsHide: true }).trim().split(/\r?\n/)[0]?.split(',');
+    if (data?.length === 2) gpu = { memoryUsedMiB: Number(data[0].trim()), utilization: Number(data[1].trim()) };
+  } catch { /* no NVIDIA GPU */ }
+  const job = activeTraining();
+  let engineBuiltAt: string | null = null;
+  try { engineBuiltAt = fs.statSync(config.aceServer.exe).mtime.toISOString(); } catch { /* binary absent */ }
+  res.json({ commit: startupCommit, dirty: dirtyCheckout(), version: APP_VERSION, aceServer: { status: engineStatus, version: engineVersion }, engineBuiltAt, gpu, job, idle: job === null });
+});
+
+workerRouter.post('/update', async (req: Request, res: Response) => {
+  try {
+    const base = String(req.query.base ?? '');
+    const target = String(req.query.target ?? '');
+    res.setHeader('content-type', 'application/x-ndjson');
+    await receiveUpdate(req, base, target, (line, phase) => res.write(JSON.stringify({ line, phase }) + '\n'));
+    res.end(JSON.stringify({ phase: 'done' }) + '\n');
+  } catch (err: any) {
+    if (res.headersSent) res.end(JSON.stringify({ error: err?.message || String(err) }) + '\n');
+    else fail(res, err);
+  }
+});
 
 /** GET /api/training/worker/datasets/:id/files?slug= — what this worker already holds. */
 workerRouter.get('/datasets/:id/files', (req: Request, res: Response) => {
@@ -57,6 +95,17 @@ const json = express.json({ limit: '5mb' });
 
 router.get('/', async (_req: Request, res: Response) => {
   res.json({ workers: await Promise.all(listWorkers().map(workerStatus)) });
+});
+
+router.post('/:name/update', (req: Request, res: Response) => {
+  const w = getWorker(req.params.name as string);
+  if (!w) { res.status(404).json({ error: 'No such worker' }); return; }
+  try { res.status(202).json({ update: startUpdate(w.name, w.url, config.workers.token) }); } catch (err) { fail(res, err); }
+});
+router.get('/:name/update', (req: Request, res: Response) => res.json({ update: getUpdate(req.params.name as string) }));
+router.delete('/:name/update', (req: Request, res: Response) => {
+  if (!cancelUpdate(req.params.name as string)) { res.status(409).json({ error: 'Update cannot be cancelled after upload starts' }); return; }
+  res.json({ ok: true });
 });
 
 /** POST /api/workers/:name/yue2-dispatch — the batch-start body

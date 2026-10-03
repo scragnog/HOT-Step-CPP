@@ -50,6 +50,7 @@ recipe, an untouched field keeps following it and only fields you actually chang
 | Train multiple… (YuE2 only) | Runs preparation, joint training and refinement over several already-created datasets, one after another, with one recipe. While a batch is running, the same button adds more datasets to the end of its queue, trained with the running batch's recipe. The batch runs on the server, so it survives a page reload and a server restart (resume it from the batch panel after a restart). The panel sits above every Training Studio phase while a batch is running or paused, and disappears once it has finished; it has a "Go to the running training" link, and "Follow" opens each dataset as the batch moves to it and never pulls you off a dataset you opened yourself. |
 | Train on | Shown when Settings lists a training worker. Points the whole studio at that PC: datasets, batches, charts, previews and rung scores are the worker's, and its GPU does the training while you listen and score here. **Fetch finished adapters** copies each adapter pair the worker has linked back to this PC and links it to the album preset here. See [YuE2 training](../training/yue2.md#training-on-another-pc). |
 | Run on (Train multiple, YuE2) | Sends the batch to a training worker instead of this PC. Each dataset is captioned here (Gemini), its files are sent to the worker, and it joins the worker's batch; the Train on bar shows each dataset's progress through those steps. |
+| Workers (beside Train on) | Shows each configured worker's Git commit and local-change flag, engine version and build time, GPU memory and use, and its active training job or idle state. Current, Behind by N commits, and Diverged compare the worker with this PC's commit. Update is available only for an idle worker behind this PC. |
 | Phase tabs (Dataset · Preprocess/Codes · Train · Review · Monitor) | Switches between the stages above. Preprocess/Codes and Monitor are hidden under YuE2; Review only appears under YuE2 (the earlier Refine phase is hidden since 2026-09-27). With a dataset open, **All datasets** at the left of the tabs goes straight back to the grid. |
 | Refine previews | Each rendered take has a **download** link that saves the WAV as `<dataset>_step<N>_take<M>_seed<S>.wav`. |
 | Label step: scope, sources, merge policy | Restricts labeling to unlabeled/all/selected tracks, picks which of Essentia/Genius/caption to run, and how new data merges with what a track already has. |
@@ -63,6 +64,10 @@ recipe, an untouched field keeps following it and only fields you actually chang
 | Monitor queue | Read-only view of the batch pipeline: one row per dataset, a status chip per stage, live progress on whichever stage is currently running. |
 
 ## Tips and limits
+
+### Updating a training worker
+
+Open **Workers** beside **Train on**. An idle worker marked **Behind** can receive an update from this PC. The update sends a Git bundle through the token-protected worker API, discards the worker checkout's tracked local changes, installs server or UI dependencies only when their lockfiles changed, builds the UI, and rebuilds the engine only when files under `engine/` changed. Progress and build output appear in the worker row. The launcher restarts the worker when all steps finish. Updates stop if a job is running or queued. **Diverged** means the worker has commits this PC cannot advance from; resolve that history before updating. A worker running an older version without the update endpoint needs a one-time bootstrap.
 
 YuE2 lead sheets are also saved as plain-text `<stem>.abc` files next to the
 dataset audio and its metadata sidecar. A later lead-sheet stage reuses these

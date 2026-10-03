@@ -8,6 +8,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Download, Loader2, Server } from 'lucide-react';
+import { WorkersPanel } from './WorkersPanel';
 import { useTranslation } from 'react-i18next';
 import { StyledSelect } from '../shared/StyledSelect';
 import { ParamLabel } from '../shared/ParamLabel';
@@ -29,6 +30,7 @@ export const TrainingWorkerBar: React.FC = () => {
   const [dispatches, setDispatches] = useState<WorkerDispatch[]>([]);
   const [pulling, setPulling] = useState(false);
   const [note, setNote] = useState('');
+  const [showWorkers, setShowWorkers] = useState(false);
 
   useEffect(() => { void listTrainingWorkers().then(setWorkers).catch(() => setWorkers([])); }, []);
   // A dispatch captions and pushes here for minutes before the worker's batch
@@ -88,6 +90,11 @@ export const TrainingWorkerBar: React.FC = () => {
           ]}
           className="w-56"
         />
+        <button type="button" onClick={() => setShowWorkers(v => !v)}
+          aria-expanded={showWorkers}
+          className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:underline">
+          {t('trainingStudio.workers.panel', 'Workers')}
+        </button>
         {current && !current.online && <span className="text-[11px] text-red-500">{t('trainingStudio.workers.offline', 'Unreachable: {{error}}', { error: current.error ?? '' })}</span>}
         {current?.online && current.versionMatch === false && <span className="text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.workers.versionMismatch', 'Worker runs {{version}}; update it to the same version as this PC.', { version: current.version })}</span>}
         {worker && (
@@ -102,6 +109,7 @@ export const TrainingWorkerBar: React.FC = () => {
         {t('trainingStudio.workers.viewHint', 'Showing the datasets on {{worker}}. To send more, switch Train on to This PC, pick them for Train multiple, and choose Run on: {{worker}}.', { worker })}
       </p>}
       {note && <p className="text-[11px] text-zinc-500 break-words">{note}</p>}
+      {showWorkers && <WorkersPanel />}
       {dispatches.filter(d => d.running || d.items.some(i => i.status === 'failed')).map(d => (
         <div key={d.worker} className="flex flex-col gap-0.5 text-[11px] text-zinc-600 dark:text-zinc-400">
           <span className="font-semibold">{t('trainingStudio.workers.dispatchTitle', 'Sending to {{worker}}', { worker: d.worker })}</span>

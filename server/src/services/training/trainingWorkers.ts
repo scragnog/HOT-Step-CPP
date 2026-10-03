@@ -29,6 +29,7 @@ import { getYue2AlbumScore, importYue2RungScores, listYue2RungScores, scoreYue2A
 import { jointRunForAdapter, listYue2AitkRuns, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
 import type { Yue2JointPreviewRecord } from './yue2JointPreview.js';
 import { listYue2TrainLogs, noteYue2TrainLog, trainLogArchiveDir } from './datasetProfile.js';
+import { classifyCommit, currentCommit } from './workerUpdate.js';
 
 export const TOKEN_HEADER = 'x-hotstep-worker-token';
 const LABELS_PREFIX = '__labels/';
@@ -212,11 +213,18 @@ async function workerJson<T>(w: WorkerInfo, pathAndQuery: string, init?: Request
 
 const jsonInit = (method: string, body: unknown): RequestInit => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
-export async function workerStatus(w: WorkerInfo): Promise<{ name: string; url: string; online: boolean; version?: string; versionMatch?: boolean; engine?: string; error?: string }> {
+export async function workerStatus(w: WorkerInfo): Promise<{ name: string; url: string; online: boolean; version?: string; versionMatch?: boolean; engine?: string; error?: string; commit?: string; dirty?: boolean; relation?: string; behind?: number; engineVersion?: string; engineBuiltAt?: string | null; gpu?: { memoryUsedMiB: number; utilization: number } | null; job?: { kind: string; dataset: string; done: number; total: number; status: string } | null; idle?: boolean }> {
   try {
-    const h = await workerJson<{ version?: string; aceServer?: { status?: string } }>(w, '/api/health', { signal: AbortSignal.timeout(4000) });
-    return { name: w.name, url: w.url, online: true, version: h.version, versionMatch: h.version === APP_VERSION, engine: h.aceServer?.status };
+    const h = await workerJson<{ version?: string; aceServer?: { status?: string; version?: string }; commit?: string; dirty?: boolean; engineBuiltAt?: string | null; gpu?: { memoryUsedMiB: number; utilization: number } | null; job?: { kind: string; dataset: string; done: number; total: number; status: string } | null; idle?: boolean }>(w, '/api/training/worker/status', { signal: AbortSignal.timeout(6000) });
+    const relation = h.commit ? classifyCommit(h.commit, currentCommit()) : undefined;
+    return { name: w.name, url: w.url, online: true, version: h.version, versionMatch: h.version === APP_VERSION, engine: h.aceServer?.status, engineVersion: h.aceServer?.version, engineBuiltAt: h.engineBuiltAt, commit: h.commit, dirty: h.dirty, relation: relation?.relation, behind: relation?.commits, gpu: h.gpu, job: h.job, idle: h.idle };
   } catch (err: any) {
+    if (err?.status === 404) {
+      try {
+        const old = await workerJson<{ version?: string; aceServer?: { status?: string; version?: string } }>(w, '/api/health', { signal: AbortSignal.timeout(4000) });
+        return { name: w.name, url: w.url, online: true, version: old.version, versionMatch: old.version === APP_VERSION, engine: old.aceServer?.status, engineVersion: old.aceServer?.version, error: 'Worker update API unavailable; this worker needs a one-time bootstrap' };
+      } catch { /* report the original status failure below */ }
+    }
     return { name: w.name, url: w.url, online: false, error: err?.cause?.code || err?.message || String(err) };
   }
 }

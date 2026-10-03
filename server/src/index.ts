@@ -45,6 +45,7 @@ import midiStudioRoutes from './routes/midiStudio.js';
 import trainingRoutes from './routes/training.js';
 import workerRoutes, { workerRouter } from './routes/workers.js';
 import { workerTokenGate } from './services/training/trainingWorkers.js';
+import { workerUpdateGate } from './services/training/workerUpdate.js';
 import { reconcileYue2AitkRunsAtStartup } from './services/training/yue2AitkRuns.js';
 import backendsRoutes from './routes/backends.js';
 import audioRoutes from './routes/audio.js';
@@ -76,6 +77,7 @@ app.use(cors());
 // Training on another PC: a worker checks its token first; the controller's
 // proxy goes before the body parsers so proxied bodies stream through.
 app.use('/api', workerTokenGate);
+app.use('/api', workerUpdateGate);
 app.use('/api/workers', workerRoutes);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));

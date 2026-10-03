@@ -1,0 +1,79 @@
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import http from 'node:http';
+import test from 'node:test';
+import { PROJECT_ROOT } from '../../config.js';
+import { changedSteps, currentCommit, getUpdate, runUpdatePlan, startUpdate } from './workerUpdate.js';
+import { workerStatus } from './trainingWorkers.js';
+
+const git = (...args: string[]) => execFileSync('git', args, { cwd: PROJECT_ROOT, encoding: 'utf8' }).trim();
+async function mockWorker(handler: (req: http.IncomingMessage, res: http.ServerResponse) => void) {
+  const server = http.createServer(handler);
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  return { server, url: `http://127.0.0.1:${(server.address() as { port: number }).port}` };
+}
+
+test('mocked worker status classifies current, behind and diverged commits', async () => {
+  const head = currentCommit();
+  const parent = git('rev-parse', 'HEAD~1');
+  let remote = head;
+  const { server, url } = await mockWorker((_req, res) => {
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ commit: remote, idle: true, version: 'test', aceServer: { status: 'ok', version: 'engine-test' } }));
+  });
+  try {
+    const worker = { name: 'mock', url };
+    assert.deepEqual((({ relation, behind }) => ({ relation, behind }))(await workerStatus(worker)), { relation: 'current', behind: 0 });
+    remote = parent;
+    const behind = await workerStatus(worker);
+    assert.equal(behind.relation, 'behind');
+    assert.ok((behind.behind ?? 0) >= 1);
+    remote = '0'.repeat(40);
+    assert.equal((await workerStatus(worker)).relation, 'diverged');
+  } finally { server.close(); }
+});
+
+function operations(record: string[], options: { advance?: boolean; busy?: boolean } = {}) {
+  const step = (name: string) => async () => { record.push(name); };
+  return {
+    advance: () => options.advance !== false,
+    idle: () => { if (options.busy) throw new Error('Worker has an active or queued job'); record.push('idle'); },
+    reset: step('reset'), serverInstall: step('server ci'), uiInstall: step('ui ci'),
+    uiBuild: step('ui build'), engineBuild: step('engine build'),
+    restart: () => { record.push('restart marker'); },
+  };
+}
+
+test('queued or running work and diverged history stop before reset', async () => {
+  for (const busy of [true, false]) {
+    const order: string[] = [];
+    await assert.rejects(runUpdatePlan(['engine/src/a.cpp'], operations(order, { busy, advance: busy })));
+    assert.ok(!order.includes('reset'));
+    assert.ok(!order.includes('restart marker'));
+  }
+});
+
+test('lockfile and engine changes select steps; restart marker is last', async () => {
+  assert.deepEqual(changedSteps(['server/package-lock.json', 'ui/package-lock.json', 'engine/src/a.cpp']), { serverInstall: true, uiInstall: true, engineBuild: true });
+  const withoutEngine: string[] = [];
+  await runUpdatePlan(['ui/src/App.tsx'], operations(withoutEngine));
+  assert.deepEqual(withoutEngine, ['idle', 'reset', 'ui build', 'restart marker']);
+  const all: string[] = [];
+  await runUpdatePlan(['server/package-lock.json', 'ui/package-lock.json', 'engine/src/a.cpp'], operations(all));
+  assert.deepEqual(all, ['idle', 'reset', 'server ci', 'ui ci', 'ui build', 'engine build', 'restart marker']);
+});
+
+test('mocked worker with an active job refuses update before bundle creation', async () => {
+  const { server, url } = await mockWorker((_req, res) => {
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ commit: git('rev-parse', 'HEAD~1'), idle: false }));
+  });
+  try {
+    const name = `busy-${Date.now()}`;
+    startUpdate(name, url, '');
+    for (let n = 0; n < 50 && getUpdate(name)?.status === 'preparing'; n++) await new Promise(resolve => setTimeout(resolve, 20));
+    const update = getUpdate(name);
+    assert.equal(update?.status, 'failed');
+    assert.match(update?.error ?? '', /active or queued/);
+  } finally { server.close(); }
+});
