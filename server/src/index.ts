@@ -50,6 +50,7 @@ import { reconcileYue2AitkRunsAtStartup } from './services/training/yue2AitkRuns
 import backendsRoutes from './routes/backends.js';
 import audioRoutes from './routes/audio.js';
 import yue2CoverRoutes from './routes/yue2Cover.js';
+import listeningRoutes from './routes/listening.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -128,6 +129,10 @@ app.use('/audio', express.static(config.data.audioDir, {
     }
   },
 }));
+
+// Serve ear-test score sheets from _experiments/_LISTENING/<folder>/ and
+// accept their scores.json saves — loopback-only, see routes/listening.ts.
+app.use('/listening', listeningRoutes);
 
 // Serve reference audio files from data/references/
 const refsDir = path.join(config.data.dir, 'references');

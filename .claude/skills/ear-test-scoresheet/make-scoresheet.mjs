@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PERSISTENCE_SCRIPT } from '../../../tools/listening-save.mjs';
 
 const studyPath = path.resolve(process.argv[2] ?? '');
 if (!process.argv[2] || !fs.existsSync(studyPath)) {
@@ -32,7 +33,7 @@ const template = fs.readFileSync(path.join(here, 'template.html'), 'utf8');
 // "</" inside the inlined JSON would end the <script> block early.
 const json = JSON.stringify(study).replace(/<\//g, '<\\/');
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-const html = template.replace('__TITLE__', esc(study.title)).replace('__STUDY__', () => json);
+const html = template.replace('__TITLE__', esc(study.title)).replace('__STUDY__', () => json).replace('__PERSISTENCE__', () => PERSISTENCE_SCRIPT);
 const out = path.join(path.dirname(studyPath), 'index.html');
 fs.writeFileSync(out, html);
 const missing = study.tracks.filter(t => !fs.existsSync(path.join(path.dirname(studyPath), t.file))).length;
