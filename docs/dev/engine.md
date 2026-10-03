@@ -214,7 +214,10 @@ Whisper transcripts longer than twice the supplied lyric word count are
 rejected as unreliable. The live route does not run this Whisper check.
 `server/src/services/backends/yue2/scoreClock.ts` walks each Vocal bar
 under its active `M:` and `Q:` fields; a later meter or tempo change therefore
-changes the expected section time. The offline `server/scripts/yue2-c4-sidecar.ts`
+changes the expected section time. ABC note and rest durations place the drift
+reference at the first sounding Vocal note in each section. The result also
+retains the section boundary; a section with no Vocal note is unscored. The
+offline `server/scripts/yue2-c4-sidecar.ts`
 uses that same clock to propose word-to-note matches from cached `cursor_words`
 and ABC. It marks shared notes and timing gaps uncertain. The cache has no
 original variable beat timestamps, so these matches need manual review before

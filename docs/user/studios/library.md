@@ -99,8 +99,9 @@ Click a track (outside of selection mode) to open the right sidebar.
 
 For a rendered YuE2 cover, **Measure drift** in the details panel aligns its
 saved audio to the lyrics used by that job, then matches sung lyric tags to
-like-labelled score sections in order. The readout shows expected and sung
-time spans, start offsets in bars, their mean absolute offset, and the first
+like-labelled score sections in order. The readout shows each section's first
+Vocal note, its boundary, and the sung time span. Start offsets in bars use the
+note onset; the panel also shows their mean absolute offset and the first
 section more than one bar off. It lists unmatched sung tags and why any section
 is unscored, including low word confidence. The live result uses the mix alone
 and says that vocal-stem agreement has not been checked.

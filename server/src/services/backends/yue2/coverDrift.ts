@@ -1,10 +1,10 @@
 import type { Yue2AlignWord } from './align.js';
 import { classifyYue2Score, lyricSectionTags } from './scoreHealth.js';
 import { scoreSections } from './scoreSections.js';
-import { scoreBarClock, scoreBarPosition } from './scoreClock.js';
+import { scoreBarClock, scoreBarPosition, scoreVocalNoteOnsets } from './scoreClock.js';
 import type { MatchedWhisperWord } from '../../lyricsReconcile.js';
 
-export const COVER_DRIFT_METRIC_VERSION = 3;
+export const COVER_DRIFT_METRIC_VERSION = 4;
 const MIN_WORD_CONFIDENCE = 0.2;
 
 /** Reject obvious transcription loops before using Whisper as timing evidence. */
@@ -18,10 +18,11 @@ export interface CoverDriftSection {
   lyricTag: string | null;
   startBar: number;
   endBar: number;
-  expected: { start: number; end: number };
+  expected: { start: number | null; end: number };
+  boundary: { start: number; end: number };
   sung: { start: number; end: number } | null;
   offsetBars: number | null;
-  unscoredReason: 'no_matching_lyric_tag' | 'no_aligned_words' | 'low_word_confidence' |
+  unscoredReason: 'no_matching_lyric_tag' | 'no_vocal_note' | 'no_aligned_words' | 'low_word_confidence' |
     'mix_stem_disagreement' | 'whisper_transcript_unreliable' | 'no_whisper_match' |
     'whisper_disagreement' | null;
   disagreementBars: number | null;
@@ -110,6 +111,7 @@ export function measureCoverDrift(
   const renderedClock = /^Q:/m.test(renderedScore);
   const bars = scoreBarClock(renderedClock ? renderedScore : fullScore);
   if (bars.length !== totalBars) throw new Error('Rendered and timed scores have different Vocal bar counts.');
+  const noteOnsets = scoreVocalNoteOnsets(renderedScore, bars);
   const meter = bars[0].meter;
   const secondsPerBar = bars[0].end - bars[0].start;
   const tags = lyricBlocks(lyrics);
@@ -126,12 +128,14 @@ export function measureCoverDrift(
     const stem = block && stemWords ? alignedBlock(block, stemWords) : null;
     const firstWhisper = block && whisperWords?.find(word => word.char0 >= block.start &&
       word.char0 < block.end && word.wordIndexInBlock < 5);
-    const expected = { start: bars[section.startBar - 1].start, end: bars[endBar - 1].end };
+    const boundary = { start: bars[section.startBar - 1].start, end: bars[endBar - 1].end };
+    const noteOnset = noteOnsets.slice(section.startBar - 1, endBar).find(onset => onset !== null) ?? null;
+    const expected = { start: noteOnset, end: boundary.end };
     const disagreementBars = aligned?.sung && stem?.sung
       ? Math.abs(scoreBarPosition(bars, aligned.sung.start) - scoreBarPosition(bars, stem.sung.start)) : null;
     const whisperDisagreementBars = aligned?.sung && firstWhisper
       ? Math.abs(scoreBarPosition(bars, aligned.sung.start) - scoreBarPosition(bars, firstWhisper.start)) : null;
-    const unscoredReason = !block ? 'no_matching_lyric_tag' :
+    const unscoredReason = !block ? 'no_matching_lyric_tag' : noteOnset === null ? 'no_vocal_note' :
       aligned?.reason ?? stem?.reason ??
       (disagreementBars !== null && disagreementBars > 0.5 ? 'mix_stem_disagreement' :
         whisperWords === undefined ? null :
@@ -140,7 +144,9 @@ export function measureCoverDrift(
             whisperDisagreementBars !== null && whisperDisagreementBars > 0.5 ? 'whisper_disagreement' : null);
     const sung = unscoredReason ? null : aligned?.sung ?? null;
     return { scoreLabel: section.label, lyricTag: block?.label ?? null, startBar: section.startBar,
-      endBar, expected, sung, offsetBars: sung ? scoreBarPosition(bars, sung.start) - (section.startBar - 1) : null,
+      endBar, expected, boundary, sung,
+      offsetBars: sung && noteOnset !== null
+        ? scoreBarPosition(bars, sung.start) - scoreBarPosition(bars, noteOnset) : null,
       unscoredReason, disagreementBars, whisperFirstWordSeconds: firstWhisper?.start ?? null,
       whisperDisagreementBars };
   });

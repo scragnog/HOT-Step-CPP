@@ -9,12 +9,19 @@ function seconds(value: number): string { return `${value.toFixed(1)}s`; }
 function span(value: { start: number; end: number } | null): string {
   return value ? `${seconds(value.start)}–${seconds(value.end)}` : 'Unscored';
 }
+function expectedSpan(value: { start: number | null; end: number }): string {
+  return value.start === null ? 'No vocal note' : span({ start: value.start, end: value.end });
+}
 
 const unscoredText: Record<NonNullable<Yue2CoverDriftResult['sections'][number]['unscoredReason']>, string> = {
   no_matching_lyric_tag: 'No matching sung tag',
+  no_vocal_note: 'No vocal note',
   no_aligned_words: 'No aligned words',
   low_word_confidence: 'Low word confidence',
   mix_stem_disagreement: 'Mix/stem disagreement',
+  whisper_transcript_unreliable: 'Whisper transcript unreliable',
+  no_whisper_match: 'No Whisper word match',
+  whisper_disagreement: 'Whisper disagreement',
 };
 
 /** An explicit measurement: opening a library item never starts MMS_FA. */
@@ -25,7 +32,7 @@ const Yue2CoverDriftBody: React.FC<{ song: Song }> = ({ song }) => {
   const { token } = useAuth();
   const params = song.generationParams || song.generation_params || {};
   const cached = params.yue2CoverDrift as Yue2CoverDriftResult | undefined;
-  const saved = cached?.metricVersion === 3 ? cached : undefined;
+  const saved = cached?.metricVersion === 4 ? cached : undefined;
   const [result, setResult] = React.useState<Yue2CoverDriftResult | null>(measuredThisSession.get(song.id) ?? saved ?? null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState('');
@@ -53,7 +60,7 @@ const Yue2CoverDriftBody: React.FC<{ song: Song }> = ({ song }) => {
         {busy ? 'Aligning words…' : result ? 'Refresh drift' : 'Measure drift'}
       </button>
     </div>
-    {!result && <p className="text-zinc-500">Compare sung word times with the score’s section bars.</p>}
+    {!result && <p className="text-zinc-500">Compare sung word times with the score’s first vocal notes.</p>}
     {error && <p role="alert" className="text-red-600 dark:text-red-400">{error}</p>}
     {result && <>
       <p className="font-medium text-zinc-800 dark:text-zinc-200">
@@ -75,10 +82,11 @@ const Yue2CoverDriftBody: React.FC<{ song: Song }> = ({ song }) => {
       </p>}
       <div className="overflow-x-auto">
         <table className="w-full text-left text-[11px]">
-          <thead><tr className="text-zinc-500"><th className="pr-2">Section / bars</th><th className="pr-2">Expected</th><th className="pr-2">Sung</th><th>Start offset</th></tr></thead>
+          <thead><tr className="text-zinc-500"><th className="pr-2">Section / bars</th><th className="pr-2">Expected note–end</th><th className="pr-2">Boundary–end</th><th className="pr-2">Sung</th><th>Start offset</th></tr></thead>
           <tbody>{result.sections.map((section, index) => <tr key={index} className="border-t border-zinc-200 dark:border-white/10">
             <td className="py-1 pr-2">{section.scoreLabel} · {section.startBar}–{section.endBar}{section.lyricTag && section.lyricTag.toLowerCase() !== section.scoreLabel.toLowerCase() ? ` / [${section.lyricTag}]` : ''}</td>
-            <td className="pr-2">{span(section.expected)}</td>
+            <td className="pr-2">{expectedSpan(section.expected)}</td>
+            <td className="pr-2">{span(section.boundary)}</td>
             <td className="pr-2">{span(section.sung)}</td>
             <td>{section.offsetBars === null
               ? section.unscoredReason ? unscoredText[section.unscoredReason] : 'Unscored'

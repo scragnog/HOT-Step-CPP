@@ -1,3 +1,4 @@
+import abcjs from 'abcjs';
 import { barsIn, isVocalVoice, scoreBarSegments } from './scoreHealth.js';
 
 export interface ScoreClockBar {
@@ -59,6 +60,41 @@ export function scoreBarClock(abc: string): ScoreClockBar[] {
 export function scoreSecondsAtWhole(bars: ScoreClockBar[], position: number): number {
   const bar = bars.find(item => position >= item.wholeStart - 1e-7 && position < item.wholeEnd - 1e-7) ?? bars.at(-1)!;
   return bar.start + (position - bar.wholeStart) / bar.beatWholeNotes * 60 / bar.bpm;
+}
+
+/** First sounding Vocal event in each score bar, using ABC note/rest durations. */
+export function scoreVocalNoteOnsets(abc: string, bars: ScoreClockBar[]): Array<number | null> {
+  const tune = abcjs.parseOnly(abc)[0];
+  if (!tune) throw new Error('ABC parser returned no tune.');
+  const onsets: Array<number | null> = Array(bars.length).fill(null);
+  let barIndex = 0;
+  let offset = 0;
+  let spanBars = 1;
+  for (const line of tune.lines) {
+    // SheetSage puts Vocal on the first staff; Ins is a separate staff.
+    for (const event of line.staff?.[0]?.voices?.[0] ?? []) {
+      if (event.el_type === 'note') {
+        const duration = Number(event.duration);
+        if (!(duration > 0) || !Number.isFinite(duration)) throw new Error('Invalid Vocal note duration.');
+        if (barIndex >= bars.length) throw new Error(`ABC notes extend beyond the Vocal bar grid at bar ${barIndex + 1}, char ${event.startChar}.`);
+        if (event.pitches?.length && onsets[barIndex] === null) {
+          onsets[barIndex] = scoreSecondsAtWhole(bars, bars[barIndex].wholeStart + offset);
+        }
+        if (event.rest?.type === 'multimeasure') {
+          spanBars = Number(event.rest.text);
+          if (!Number.isInteger(spanBars) || spanBars < 1) throw new Error('Invalid Vocal multibar rest.');
+        }
+        offset += duration;
+      } else if (event.el_type === 'bar' && barIndex < bars.length) {
+        // ABC's Z4 duration is not consistently meter-scaled; use its bar count.
+        barIndex += spanBars;
+        offset = 0;
+        spanBars = 1;
+      }
+    }
+  }
+  if (barIndex !== bars.length) throw new Error('ABC notes and Vocal bar grid disagree.');
+  return onsets;
 }
 
 /** Return a fractional bar index for an audio time, extrapolating at the edges. */

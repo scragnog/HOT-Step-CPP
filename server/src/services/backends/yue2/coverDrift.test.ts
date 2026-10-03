@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { measureCoverDrift as measureRaw, whisperTranscriptPlausible } from './coverDrift.js';
+import { COVER_DRIFT_METRIC_VERSION, measureCoverDrift as measureRaw, whisperTranscriptPlausible } from './coverDrift.js';
 import type { Yue2AlignWord } from './align.js';
 import { matchWhisperWordsToLyrics } from '../../lyricsReconcile.js';
 import { normaliseWhisperJson } from '../../whisperTranscribe.js';
@@ -24,12 +24,48 @@ function word(text: string, start: number, end: number): Yue2AlignWord {
 }
 
 test('perfect alignment has zero offsets on the score meter and beat grid', () => {
+  assert.equal(COVER_DRIFT_METRIC_VERSION, 4);
   const result = measureCoverDrift(score, score, lyrics, [word('first', 0, 0.5), word('second', 6, 6.5)]);
   assert.equal(result.secondsPerBar, 3); // 3/4 is six eighth notes at 120/min.
   assert.deepEqual(result.sections.map(s => [s.startBar, s.endBar]), [[1, 2], [3, 4]]);
   assert.deepEqual(result.sections.map(s => s.offsetBars), [0, 0]);
   assert.equal(result.meanAbsoluteOffsetBars, 0);
   assert.equal(result.firstOverOneBar, null);
+});
+
+test('a late-bar pickup is measured from its note onset before the next barline', () => {
+  const abc = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C',
+    '% verse', 'V: Vocal', 'z3C|D4|', ''].join('\n');
+  const result = measureCoverDrift(abc, abc, '[Verse]\nfirst',
+    [{ char0: 8, char1: 13, start: 3, end: 3.5, score: 1 }]);
+  assert.equal(result.sections[0].boundary.start, 0);
+  assert.equal(result.sections[0].expected.start, 3);
+  assert.equal(result.sections[0].offsetBars, 0);
+  assert.equal(result.sections[0].unscoredReason, null);
+});
+
+test('a rest-led section starts at its first vocal note, not its bar boundary', () => {
+  const abc = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C',
+    '% verse', 'V: Vocal', 'C4|', '% chorus', 'V: Vocal', 'z2D2|', ''].join('\n');
+  const text = '[Verse]\nfirst\n[Chorus]\nsecond';
+  const result = measureCoverDrift(abc, abc, text, [
+    { char0: 8, char1: 13, start: 0, end: 0.5, score: 1 },
+    { char0: 23, char1: 29, start: 6, end: 6.5, score: 1 },
+  ]);
+  assert.equal(result.sections[1].boundary.start, 4);
+  assert.equal(result.sections[1].expected.start, 6);
+  assert.equal(result.sections[1].offsetBars, 0);
+});
+
+test('a section without a vocal note has no fabricated expected onset', () => {
+  const abc = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C',
+    '% verse', 'V: Vocal', 'z4|', ''].join('\n');
+  const result = measureCoverDrift(abc, abc, '[Verse]\nfirst',
+    [{ char0: 8, char1: 13, start: 0, end: 0.5, score: 1 }]);
+  assert.equal(result.sections[0].expected.start, null);
+  assert.equal(result.sections[0].boundary.start, 0);
+  assert.equal(result.sections[0].unscoredReason, 'no_vocal_note');
+  assert.equal(result.sections[0].offsetBars, null);
 });
 
 test('a section one bar late reports one bar and contributes to the mean', () => {
@@ -178,7 +214,8 @@ test('qualification-style multi-bar rests put verse after the intro', () => {
   ].join('\n');
   const result = measureCoverDrift(fixture, fixture, '[Intro]\nword\n[Verse]\nword', []);
   assert.equal(result.sections[1].startBar, 18);
-  assert.ok(Math.abs(result.sections[1].expected.start - 17 * 4 * 60 / 122) < 1e-8);
+  assert.ok(Math.abs(result.sections[1].boundary.start - 17 * 4 * 60 / 122) < 1e-8);
+  assert.equal(result.sections[1].expected.start, result.sections[1].boundary.start);
 });
 
 test('meter change before a section puts its start at the sum of the bars', () => {

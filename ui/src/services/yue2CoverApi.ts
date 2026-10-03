@@ -71,11 +71,13 @@ export interface Yue2CoverDriftResult {
     lyricTag: string | null;
     startBar: number;
     endBar: number;
-    expected: { start: number; end: number };
+    expected: { start: number | null; end: number };
+    boundary: { start: number; end: number };
     sung: { start: number; end: number } | null;
     offsetBars: number | null;
-    unscoredReason: 'no_matching_lyric_tag' | 'no_aligned_words' | 'low_word_confidence' |
-      'mix_stem_disagreement' | null;
+    unscoredReason: 'no_matching_lyric_tag' | 'no_vocal_note' | 'no_aligned_words' | 'low_word_confidence' |
+      'mix_stem_disagreement' | 'whisper_transcript_unreliable' | 'no_whisper_match' |
+      'whisper_disagreement' | null;
     disagreementBars: number | null;
   }>;
   meanAbsoluteOffsetBars: number | null;

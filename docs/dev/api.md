@@ -38,7 +38,8 @@ provenance and the ABC actually rendered.
 `POST /drift/:songId` measures a saved YuE2 cover on request. It aligns that
 song's audio with the lyrics captured at generation, matches sung lyric blocks
 to like-labelled score sections in order, and returns each section's expected
-and sung spans, start offset in bars, unscored reason, mean absolute offset,
+first Vocal note through section end, its boundary span, sung span, start offset
+in bars from the note onset, unscored reason, mean absolute offset,
 and the first section more than one bar off. Unmatched sung lyric blocks are
 listed. The live route checks word confidence but has no vocal stem to compare;
 `stemChecked` is false. The result is cached on the song; a matching
