@@ -504,6 +504,15 @@ static int run_continue_check(const std::string & models_dir, const std::string 
         fprintf(stderr, "FATAL: request needs continue_codec_ids and codec_ids (%s)\n", err.c_str());
         return 1;
     }
+    // The semantic stage's END trace (p of MUSIC_END before the sampler, per
+    // step) is the logits witness for the C6 replay check below. Its path is
+    // read once per process, so it is set before the first stage runs.
+    const std::string trace_path = request_path + ".trace.tsv";
+#ifdef _WIN32
+    _putenv_s("YUE2_END_TRACE", trace_path.c_str());
+#else
+    setenv("YUE2_END_TRACE", trace_path.c_str(), 1);
+#endif
     Yue2Model m;
     yue2_discover(&m, models_dir.c_str(), g_yue2_lm_type.empty() ? nullptr : g_yue2_lm_type.c_str());
     if (!yue2_available(m) ||
@@ -546,6 +555,53 @@ static int run_continue_check(const std::string & models_dir, const std::string 
         const bool         refused = !run(long_req, false, &res, &why) && why.find("too long") != std::string::npos;
         fails += refused ? 0 : 1;
         printf("%s context cap: %s\n", refused ? "PASS" : "FAIL", why.c_str());
+    }
+    if (base.lyric_schedule.on) {
+        // Resuming under a C6 schedule must rebuild the prefix exactly as
+        // scheduled sampling did. Compose K frames freely, resume from those
+        // same K frames, and compare the first resumed step's pre-sampler
+        // p(MUSIC_END) with the free run's at step K (same rows, same masks).
+        // Resuming the same prefix without the schedule must differ, or the
+        // witness cannot see the masks at all.
+        auto p_end_at = [&](int64_t step) {
+            double p = -1.0;
+            if (FILE * f = fopen(trace_path.c_str(), "rb")) {
+                char line[512];
+                while (fgets(line, sizeof(line), f)) {
+                    long long s = -1;
+                    double    sec = 0.0, pe = 0.0;
+                    if (line[0] != '#' && sscanf(line, "%lld\t%lf\t%lf", &s, &sec, &pe) == 3 && s == step) p = pe;
+                }
+                fclose(f);
+            }
+            return p;
+        };
+        auto traced = [&](const Yue2Request & req, std::vector<int32_t> * ids) {
+            remove(trace_path.c_str());
+            Yue2PipelineResult res;
+            std::string        why;
+            const bool         ok = run(req, false, &res, &why);
+            if (ok && ids) *ids = res.tracks[0].semantic_ids;
+            if (!ok) printf("  run failed: %s\n", why.c_str());
+            return ok ? p_end_at((int64_t) n_prefix) : -1.0;
+        };
+        Yue2Request free_req = base;
+        free_req.codec_ids.clear();
+        free_req.continue_codec_ids = false;
+        std::vector<int32_t> free_ids;
+        const double p_free = traced(free_req, &free_ids);
+        Yue2Request resumed = base;
+        if (free_ids.size() > n_prefix) resumed.codec_ids.assign(free_ids.begin(), free_ids.begin() + (long) n_prefix);
+        const double p_resumed = traced(resumed, nullptr);
+        Yue2Request unscheduled = resumed;
+        unscheduled.lyric_schedule = Yue2LyricSchedule{};
+        const double p_plain = traced(unscheduled, nullptr);
+        const auto rel = [](double a, double b) { return std::fabs(a - b) / std::max(1e-30, std::max(std::fabs(a), std::fabs(b))); };
+        const bool same = p_free > 0.0 && p_resumed > 0.0 && rel(p_free, p_resumed) < 1e-3;
+        const bool seen = p_plain > 0.0 && rel(p_free, p_plain) > 1e-2;
+        fails += same && seen ? 0 : 1;
+        printf("%s scheduled replay at frame %zu: p_end free %.6g, resumed %.6g, resumed without schedule %.6g\n",
+               same && seen ? "PASS" : "FAIL", n_prefix, p_free, p_resumed, p_plain);
     }
     yue2_unload(&m);
     printf("%s: %d failure(s)\n", fails ? "FAIL" : "PASS", fails);

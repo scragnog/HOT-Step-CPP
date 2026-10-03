@@ -717,15 +717,38 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         Yue2SongState & sg = songs[0];
         supplied_ids.reserve((size_t) supplied_n);
         for (int32_t c : req.codec_ids) supplied_ids.push_back(c + YUE2_CODEC_OFFSET);
-        Yue2ArForwardResult pre;
-        const std::vector<int64_t> keep = resume ? std::vector<int64_t>{ supplied_n - 1 } : std::vector<int64_t>{};
-        if (!yue2_ar_prefill(m, cache, supplied_ids, keep, {}, &pre, err, sg.cond_set)) {
-            yue2_ar_kv_cache_free(&cache);
-            return false;
+        if (resume && lsched.on) {
+            // A C6 schedule changes the attention of every codec row, so the
+            // prefix is replayed through the scheduled decode one frame at a
+            // time, as sampling would have run it: token i under the spans
+            // due at frame i + 1. A plain prefill would build unmasked rows.
+            sg.codec_ids.clear();
+            for (int64_t i = 0; i < supplied_n; i++) {
+                if (cancel && cancel->load()) {
+                    if (err) *err = "cancelled";
+                    yue2_ar_kv_cache_free(&cache);
+                    return false;
+                }
+                sg.codec_ids.push_back(req.codec_ids[(size_t) i]);
+                cache.prompt_bias.assign((size_t) S, {});
+                yue2_schedule_spans(lsched, lsched_rows, (double) sg.codec_ids.size() * 0.04,
+                                    &cache.prompt_bias[(size_t) sg.cond_set]);
+                if (!yue2_ar_decode_batch(m, cache, &supplied_ids[(size_t) i], &logits, err, S)) {
+                    yue2_ar_kv_cache_free(&cache);
+                    return false;
+                }
+            }
+        } else {
+            Yue2ArForwardResult pre;
+            const std::vector<int64_t> keep = resume ? std::vector<int64_t>{ supplied_n - 1 } : std::vector<int64_t>{};
+            if (!yue2_ar_prefill(m, cache, supplied_ids, keep, {}, &pre, err, sg.cond_set)) {
+                yue2_ar_kv_cache_free(&cache);
+                return false;
+            }
+            if (resume) logits = pre.logits;  // S == 1: the next frame's row
         }
         sg.codec_ids = req.codec_ids;
         if (resume) {
-            logits = pre.logits;  // S == 1: the next frame's row
             fprintf(stderr, "[YuE2] continuing after a %lld-frame codec prefix (hash %016llx)\n", (long long) supplied_n,
                     (unsigned long long) yue2_token_hash(sg.codec_ids));
         }
