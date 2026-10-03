@@ -2,9 +2,16 @@ import type { Yue2AlignWord } from './align.js';
 import { classifyYue2Score, lyricSectionTags } from './scoreHealth.js';
 import { scoreSections } from './scoreSections.js';
 import { scoreBarClock, scoreBarPosition } from './scoreClock.js';
+import type { MatchedWhisperWord } from '../../lyricsReconcile.js';
 
 export const COVER_DRIFT_METRIC_VERSION = 3;
 const MIN_WORD_CONFIDENCE = 0.2;
+
+/** Reject obvious transcription loops before using Whisper as timing evidence. */
+export function whisperTranscriptPlausible(recognizedWords: number, lyricWords: number): boolean {
+  return Number.isInteger(recognizedWords) && Number.isInteger(lyricWords) &&
+    lyricWords > 0 && recognizedWords >= 0 && recognizedWords <= lyricWords * 2;
+}
 
 export interface CoverDriftSection {
   scoreLabel: string;
@@ -15,8 +22,11 @@ export interface CoverDriftSection {
   sung: { start: number; end: number } | null;
   offsetBars: number | null;
   unscoredReason: 'no_matching_lyric_tag' | 'no_aligned_words' | 'low_word_confidence' |
-    'mix_stem_disagreement' | null;
+    'mix_stem_disagreement' | 'whisper_transcript_unreliable' | 'no_whisper_match' |
+    'whisper_disagreement' | null;
   disagreementBars: number | null;
+  whisperFirstWordSeconds: number | null;
+  whisperDisagreementBars: number | null;
 }
 
 export interface CoverDriftResult {
@@ -25,6 +35,7 @@ export interface CoverDriftResult {
   secondsPerBar: number;
   tempoSource: 'rendered-score' | 'source-score-fallback';
   stemChecked: boolean;
+  whisperChecked: boolean;
   sectionWarning: string | null;
   sungLyricBlocks: number;
   unmatchedLyricBlocks: Array<{ index: number; label: string }>;
@@ -91,6 +102,7 @@ function alignedBlock(block: { start: number; end: number }, words: Yue2AlignWor
 export function measureCoverDrift(
   renderedScore: string, fullScore: string, lyrics: string, words: Yue2AlignWord[],
   stemWords?: Yue2AlignWord[],
+  whisperWords?: MatchedWhisperWord[] | null,
 ): CoverDriftResult {
   const sections = scoreSections(renderedScore);
   const totalBars = classifyYue2Score(renderedScore).bars;
@@ -112,16 +124,25 @@ export function measureCoverDrift(
     if (match >= 0) { nextTag = match + 1; usedTags.add(match); }
     const aligned = block ? alignedBlock(block, words) : null;
     const stem = block && stemWords ? alignedBlock(block, stemWords) : null;
+    const firstWhisper = block && whisperWords?.find(word => word.char0 >= block.start &&
+      word.char0 < block.end && word.wordIndexInBlock < 5);
     const expected = { start: bars[section.startBar - 1].start, end: bars[endBar - 1].end };
     const disagreementBars = aligned?.sung && stem?.sung
       ? Math.abs(scoreBarPosition(bars, aligned.sung.start) - scoreBarPosition(bars, stem.sung.start)) : null;
+    const whisperDisagreementBars = aligned?.sung && firstWhisper
+      ? Math.abs(scoreBarPosition(bars, aligned.sung.start) - scoreBarPosition(bars, firstWhisper.start)) : null;
     const unscoredReason = !block ? 'no_matching_lyric_tag' :
       aligned?.reason ?? stem?.reason ??
-      (disagreementBars !== null && disagreementBars > 0.5 ? 'mix_stem_disagreement' : null);
+      (disagreementBars !== null && disagreementBars > 0.5 ? 'mix_stem_disagreement' :
+        whisperWords === undefined ? null :
+          whisperWords === null ? 'whisper_transcript_unreliable' :
+          !firstWhisper ? 'no_whisper_match' :
+            whisperDisagreementBars !== null && whisperDisagreementBars > 0.5 ? 'whisper_disagreement' : null);
     const sung = unscoredReason ? null : aligned?.sung ?? null;
     return { scoreLabel: section.label, lyricTag: block?.label ?? null, startBar: section.startBar,
       endBar, expected, sung, offsetBars: sung ? scoreBarPosition(bars, sung.start) - (section.startBar - 1) : null,
-      unscoredReason, disagreementBars };
+      unscoredReason, disagreementBars, whisperFirstWordSeconds: firstWhisper?.start ?? null,
+      whisperDisagreementBars };
   });
   const sungLyricBlocks = tags.filter(tag => tag.hasLyrics).length;
   const unmatchedLyricBlocks = tags.flatMap((tag, index) =>
@@ -133,6 +154,7 @@ export function measureCoverDrift(
     ? measured.reduce((sum, row) => sum + Math.abs(row.offsetBars!), 0) / measured.length : null;
   const first = rows.findIndex(row => row.offsetBars !== null && Math.abs(row.offsetBars) > 1);
   return { tempoBpm: bars[0].bpm, meter, secondsPerBar, stemChecked: stemWords !== undefined,
+    whisperChecked: whisperWords !== undefined,
     tempoSource: renderedClock ? 'rendered-score' : 'source-score-fallback',
     sectionWarning: unmatchedScoreSections || unmatchedLyricBlocks.length
       ? `${unmatchedScoreSections} score sections lack a matching sung tag; ${unmatchedLyricBlocks.length} sung lyric tags unused.`

@@ -422,7 +422,7 @@ export async function transcribeWithWhisper(
  *
  * We normalise this into our simpler WhisperResult format.
  */
-function normaliseWhisperJson(raw: any): WhisperResult {
+export function normaliseWhisperJson(raw: any): WhisperResult {
   const segments: WhisperSegment[] = [];
 
   const transcription = raw?.transcription;

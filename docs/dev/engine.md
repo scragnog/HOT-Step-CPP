@@ -206,6 +206,12 @@ blocks. A section is unscored when its opening or full-block median MMS_FA word
 score is below 0.2, or when supplied mix and vocal-stem alignments disagree by
 more than half a bar. The live route currently has mix audio only, so its result
 states that stem agreement was not checked; offline calibration can supply both.
+For the offline alignment gate, Whisper's word timestamps from a saved vocal
+stem provide a separate decoder. Exact recognized words are matched to source
+lyrics in order, and a section is unscored if its first matched word among the
+first five source words differs from MMS_FA by more than half a score bar.
+Whisper transcripts longer than twice the supplied lyric word count are
+rejected as unreliable. The live route does not run this Whisper check.
 `server/src/services/backends/yue2/scoreClock.ts` walks each Vocal bar
 under its active `M:` and `Q:` fields; a later meter or tempo change therefore
 changes the expected section time. The offline `server/scripts/yue2-c4-sidecar.ts`

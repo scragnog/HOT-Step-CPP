@@ -203,6 +203,40 @@ export function needlemanWunsch(
   return pairs;
 }
 
+export interface MatchedWhisperWord {
+  char0: number;
+  char1: number;
+  wordIndexInBlock: number;
+  start: number;
+  end: number;
+}
+
+/** Keep only exact recognized words, with their source-lyric codepoint offsets. */
+export function matchWhisperWordsToLyrics(result: WhisperResult, lyrics: string): MatchedWhisperWord[] {
+  const source: Array<{ text: string; char0: number; char1: number; wordIndexInBlock: number }> = [];
+  let offset = 0;
+  let wordIndexInBlock = 0;
+  for (const line of lyrics.replace(/\r\n?/g, '\n').split('\n')) {
+    if (/^\s*\[[^\]\n]+\]/.test(line)) wordIndexInBlock = 0;
+    else for (const match of line.matchAll(/[\p{L}\p{N}][\p{L}\p{M}\p{N}'’\-]*/gu)) {
+      const char0 = offset + Array.from(line.slice(0, match.index)).length;
+      source.push({ text: match[0].toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''), char0,
+        char1: char0 + Array.from(match[0]).length, wordIndexInBlock: wordIndexInBlock++ });
+    }
+    offset += Array.from(line).length + 1;
+  }
+  const heard = result.segments.flatMap(segment => segment.words ?? []).filter(word =>
+    Number.isFinite(word.start) && Number.isFinite(word.end) && word.end > word.start);
+  const normalized = heard.map(word => word.word.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''));
+  const pairs = needlemanWunsch(source.map(word => word.text), normalized);
+  return pairs.flatMap(pair => {
+    if (pair.sourceIdx === null || pair.whisperIdx === null || pair.score !== 2) return [];
+    const { char0, char1, wordIndexInBlock } = source[pair.sourceIdx];
+    const { start, end } = heard[pair.whisperIdx];
+    return [{ char0, char1, wordIndexInBlock, start, end }];
+  });
+}
+
 // ──────────────────────────────────────────────
 // Section marker regex — [Verse], [Chorus], etc.
 // ──────────────────────────────────────────────

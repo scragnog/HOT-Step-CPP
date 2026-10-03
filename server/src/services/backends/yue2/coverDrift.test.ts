@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { measureCoverDrift } from './coverDrift.js';
+import { measureCoverDrift as measureRaw, whisperTranscriptPlausible } from './coverDrift.js';
 import type { Yue2AlignWord } from './align.js';
+import { matchWhisperWordsToLyrics } from '../../lyricsReconcile.js';
+import { normaliseWhisperJson } from '../../whisperTranscribe.js';
+
+function measureCoverDrift(rendered: string, full: string, text: string, words: Yue2AlignWord[],
+  stemWords?: Yue2AlignWord[]) {
+  return measureRaw(rendered, full, text, words, stemWords,
+    words.map(word => ({ char0: word.char0, char1: word.char1, wordIndexInBlock: 0,
+      start: word.start, end: word.end })));
+}
 
 const score = [
   'X:1', 'M:3/4', 'L:1/8', 'Q:1/8=120', 'K:C',
@@ -101,6 +110,63 @@ test('low confidence anywhere in a section rejects a plausible opening with a fo
   const result = measureCoverDrift(score, score, lyrics, [word('first', 0, 0.5), second, ...tail]);
   assert.equal(result.sections[1].unscoredReason, 'low_word_confidence');
   assert.equal(result.sections[1].sung, null);
+});
+
+test('Whisper exact matches retain codepoint offsets and block order', () => {
+  const text = '[Verse]\nhi 😀 world\n[Chorus]\nworld again';
+  const heard = { segments: [{ start: 1, end: 3, text: 'Hi world', words: [
+    { word: 'Hi', start: 1, end: 1.3, probability: 1 },
+    { word: 'world', start: 1.5, end: 2, probability: 1 },
+    { word: 'wrong', start: 2.1, end: 2.4, probability: 1 },
+    { word: 'again', start: 2.6, end: 3, probability: 1 },
+  ] }] };
+  const matched = matchWhisperWordsToLyrics(heard, text);
+  assert.deepEqual(matched.map(word => [word.char0, word.wordIndexInBlock, word.start]),
+    [[8, 0, 1], [13, 1, 1.5], [34, 1, 2.6]]);
+});
+
+test('the app Whisper JSON parser supplies real first-word timestamps to the metric', () => {
+  const raw = { transcription: [
+    { text: ' first', offsets: { from: 6000, to: 6500 } },
+    { text: ' second', offsets: { from: 7500, to: 8000 } },
+  ] };
+  const matched = matchWhisperWordsToLyrics(normaliseWhisperJson(raw), lyrics);
+  const result = measureRaw(score, score, lyrics,
+    [word('first', 0, 0.5), word('second', 6, 6.5)], undefined, matched);
+  assert.deepEqual(result.sections.map(row => row.unscoredReason),
+    ['whisper_disagreement', null]);
+  assert.equal(result.sections[1].whisperFirstWordSeconds, 7.5);
+});
+
+test('Whisper checks its first matched word within half a bar when supplied offline', () => {
+  const words = [word('first', 0, 0.5), word('second', 6, 6.5)];
+  const liveMixOnly = measureRaw(score, score, lyrics, words);
+  assert.equal(liveMixOnly.whisperChecked, false);
+  assert.deepEqual(liveMixOnly.sections.map(row => row.offsetBars), [0, 0]);
+  const matched = words.map(w => ({ char0: w.char0, char1: w.char1, wordIndexInBlock: 0,
+    start: w.start, end: w.end }));
+  const atBoundary = measureRaw(score, score, lyrics, words, undefined,
+    [{ ...matched[0] }, { ...matched[1], start: 7.5, end: 8 }]);
+  assert.equal(atBoundary.sections[1].whisperDisagreementBars, 0.5);
+  assert.equal(atBoundary.sections[1].unscoredReason, null);
+  const disputed = measureRaw(score, score, lyrics, words, undefined,
+    [{ ...matched[0] }, { ...matched[1], start: 9, end: 9.5 }]);
+  assert.equal(disputed.sections[1].unscoredReason, 'whisper_disagreement');
+  assert.equal(disputed.sections[1].sung, null);
+  assert.equal(disputed.meanAbsoluteOffsetBars, 0);
+  const missing = measureRaw(score, score, lyrics, words, undefined,
+    [{ ...matched[0] }, { ...matched[1], wordIndexInBlock: 5 }]);
+  assert.equal(missing.sections[1].unscoredReason, 'no_whisper_match');
+  const unreliable = measureRaw(score, score, lyrics, words, undefined, null);
+  assert.deepEqual(unreliable.sections.map(row => row.unscoredReason),
+    ['whisper_transcript_unreliable', 'whisper_transcript_unreliable']);
+  assert.equal(unreliable.meanAbsoluteOffsetBars, null);
+});
+
+test('a transcription loop cannot confirm section timing', () => {
+  assert.equal(whisperTranscriptPlausible(560, 280), true);
+  assert.equal(whisperTranscriptPlausible(561, 280), false);
+  assert.equal(whisperTranscriptPlausible(20, 0), false);
 });
 
 test('qualification-style multi-bar rests put verse after the intro', () => {
