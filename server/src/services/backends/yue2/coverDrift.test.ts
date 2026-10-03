@@ -121,6 +121,24 @@ test('lists sung lyric blocks that cannot match a score label or order', () => {
   assert.match(result.sectionWarning!, /2 sung lyric tags unused/);
 });
 
+test('D2 tag order keeps Pre-Chorus blocks out of score Chorus sections', () => {
+  const labels = ['intro', 'verse', 'chorus', 'interlude', 'verse', 'chorus',
+    'interlude', 'bridge', 'chorus', 'interlude'];
+  const abc = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C',
+    ...labels.flatMap(label => [`% ${label}`, 'V: Vocal',
+      label === 'intro' || label === 'interlude' ? 'Z|' : 'C4|']), ''].join('\n');
+  const text = ['[Intro - Instrumental]', '[Verse 1]', 'verse one',
+    '[Pre-Chorus]', 'pre one', '[Chorus]', 'chorus one',
+    '[Verse 2]', 'verse two', '[Pre-Chorus]', 'pre two',
+    '[Chorus]', 'chorus two', '[Bridge]', 'bridge',
+    '[Chorus]', 'chorus three', '[Outro - Instrumental]'].join('\n');
+  const result = measureCoverDrift(abc, abc, text, []);
+  assert.deepEqual(result.sections.map(row => row.lyricTag),
+    [null, 'Verse 1', 'Chorus', null, 'Verse 2', 'Chorus', null, 'Bridge', 'Chorus', null]);
+  assert.deepEqual(result.unmatchedLyricBlocks,
+    [{ index: 3, label: 'Pre-Chorus' }, { index: 6, label: 'Pre-Chorus' }]);
+});
+
 test('low-confidence force-fit and mix/stem disagreement leave rows unscored', () => {
   const good = word('first', 0, 0.5);
   const low = { ...word('second', 6, 6.5), score: 0.01 };
