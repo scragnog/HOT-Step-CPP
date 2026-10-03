@@ -57,10 +57,17 @@ export function changedSteps(files: string[]) {
   };
 }
 
-export async function runUpdatePlan(files: string[], ops: {
+export const ggmlPointerChanged = (base: string, target: string, read = (rev: string) => git(['rev-parse', rev])) =>
+  read(`${base}:engine/ggml`) !== read(`${target}:engine/ggml`);
+
+export const ggmlPatches = (directory = path.join(PROJECT_ROOT, 'engine', 'patches')) =>
+  fs.readdirSync(directory).filter(file => file.endsWith('.patch')).sort();
+
+export async function runUpdatePlan(files: string[], ggmlPointerChanged: boolean, ops: {
   advance: () => boolean;
   idle: () => void;
   reset: () => Promise<void>;
+  recoverGgml: () => Promise<void>;
   serverInstall: () => Promise<void>;
   uiInstall: () => Promise<void>;
   uiBuild: () => Promise<void>;
@@ -71,6 +78,7 @@ export async function runUpdatePlan(files: string[], ops: {
   ops.idle(); // The last check before a destructive reset.
   await ops.reset();
   const steps = changedSteps(files);
+  if (ggmlPointerChanged) await ops.recoverGgml();
   if (steps.serverInstall) await ops.serverInstall();
   if (steps.uiInstall) await ops.uiInstall();
   await ops.uiBuild();
@@ -115,13 +123,32 @@ export async function receiveUpdate(body: NodeJS.ReadableStream, base: string, t
     await command('git', ['fetch', '--no-tags', bundle, 'master'], PROJECT_ROOT, line => log(line));
     if (git(['rev-parse', 'FETCH_HEAD']) !== target) throw new Error('Bundle target did not match requested commit');
     const files = git(['diff', '--name-only', `${base}..${target}`]).split(/\r?\n/).filter(Boolean).map(f => f.replaceAll('\\', '/'));
-    await runUpdatePlan(files, {
+    const pointerChanged = ggmlPointerChanged(base, target);
+    await runUpdatePlan(files, pointerChanged, {
       advance: () => classifyCommit(base, target).relation === 'behind' && currentCommit() === base,
       idle: assertIdle,
       reset: async () => {
         log(`Resetting to ${target.slice(0, 8)}; discarding worker checkout changes`, 'resetting');
         resetStarted = true;
         await command('git', ['-c', 'submodule.recurse=false', 'reset', '--hard', target], PROJECT_ROOT, line => log(line));
+      },
+      recoverGgml: async () => {
+        log('Updating ggml submodule and restoring patches', 'engine-patches');
+        await command('git', ['-c', 'submodule.recurse=false', 'submodule', 'update', '--init', '--checkout', '--force', '--', 'engine/ggml'], PROJECT_ROOT, line => log(line));
+        const cuda = path.join(PROJECT_ROOT, 'engine', 'ggml', 'src', 'ggml-cuda');
+        for (const file of ['convrot8.cu', 'convrot8.cuh', 'fattn-train.cu', 'fattn-train.cuh']) fs.rmSync(path.join(cuda, file), { force: true });
+        const shaders = path.join(PROJECT_ROOT, 'engine', 'ggml', 'src', 'ggml-vulkan', 'vulkan-shaders');
+        for (const file of fs.readdirSync(shaders).filter(file => file.startsWith('fa_train_'))) fs.rmSync(path.join(shaders, file), { force: true });
+        for (const patch of ggmlPatches()) {
+          log(`Applying ${patch}`);
+          await command('git', ['apply', '--verbose', `engine/patches/${patch}`], PROJECT_ROOT, line => log(line));
+        }
+        let hookFailed = false;
+        await command('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(PROJECT_ROOT, 'engine', 'verify-hooks.ps1')], PROJECT_ROOT, line => {
+          if (line.includes('[FAIL]')) hookFailed = true;
+          log(line);
+        });
+        if (hookFailed) throw new Error('Engine hook verification failed after ggml recovery');
       },
       serverInstall: async () => { log('Installing server dependencies', 'server-install'); await command('cmd.exe', ['/d', '/c', 'npm ci'], path.join(PROJECT_ROOT, 'server'), line => log(line)); },
       uiInstall: async () => { log('Installing UI dependencies', 'ui-install'); await command('cmd.exe', ['/d', '/c', 'npm ci'], path.join(PROJECT_ROOT, 'ui'), line => log(line)); },
@@ -138,7 +165,7 @@ export async function receiveUpdate(body: NodeJS.ReadableStream, base: string, t
 }
 
 export interface WorkerUpdateJob {
-  id: string; worker: string; status: 'preparing' | 'uploading' | 'verifying' | 'resetting' | 'server-install' | 'ui-install' | 'ui-build' | 'engine-build' | 'restarting' | 'done' | 'failed' | 'cancelled';
+  id: string; worker: string; status: 'preparing' | 'uploading' | 'verifying' | 'resetting' | 'engine-patches' | 'server-install' | 'ui-install' | 'ui-build' | 'engine-build' | 'restarting' | 'done' | 'failed' | 'cancelled';
   cancellable: boolean; lines: string[]; error?: string;
 }
 const updates = new Map<string, WorkerUpdateJob & { controller: AbortController }>();

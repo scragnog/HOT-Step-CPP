@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { PROJECT_ROOT } from '../../config.js';
-import { changedSteps, currentCommit, getUpdate, runUpdatePlan, startUpdate } from './workerUpdate.js';
+import { changedSteps, currentCommit, getUpdate, ggmlPatches, ggmlPointerChanged, runUpdatePlan, startUpdate } from './workerUpdate.js';
 import { workerStatus } from './trainingWorkers.js';
 
 const git = (...args: string[]) => execFileSync('git', args, { cwd: PROJECT_ROOT, encoding: 'utf8' }).trim();
@@ -33,12 +36,13 @@ test('mocked worker status classifies current, behind and diverged commits', asy
   } finally { server.close(); }
 });
 
-function operations(record: string[], options: { advance?: boolean; busy?: boolean } = {}) {
+function operations(record: string[], options: { advance?: boolean; busy?: boolean; hooksFail?: boolean } = {}) {
   const step = (name: string) => async () => { record.push(name); };
   return {
     advance: () => options.advance !== false,
     idle: () => { if (options.busy) throw new Error('Worker has an active or queued job'); record.push('idle'); },
-    reset: step('reset'), serverInstall: step('server ci'), uiInstall: step('ui ci'),
+    reset: step('reset'), recoverGgml: async () => { record.push('ggml recovery'); if (options.hooksFail) throw new Error('Engine hook verification failed'); },
+    serverInstall: step('server ci'), uiInstall: step('ui ci'),
     uiBuild: step('ui build'), engineBuild: step('engine build'),
     restart: () => { record.push('restart marker'); },
   };
@@ -47,7 +51,7 @@ function operations(record: string[], options: { advance?: boolean; busy?: boole
 test('queued or running work and diverged history stop before reset', async () => {
   for (const busy of [true, false]) {
     const order: string[] = [];
-    await assert.rejects(runUpdatePlan(['engine/src/a.cpp'], operations(order, { busy, advance: busy })));
+    await assert.rejects(runUpdatePlan(['engine/src/a.cpp'], false, operations(order, { busy, advance: busy })));
     assert.ok(!order.includes('reset'));
     assert.ok(!order.includes('restart marker'));
   }
@@ -56,11 +60,53 @@ test('queued or running work and diverged history stop before reset', async () =
 test('lockfile and engine changes select steps; restart marker is last', async () => {
   assert.deepEqual(changedSteps(['server/package-lock.json', 'ui/package-lock.json', 'engine/src/a.cpp']), { serverInstall: true, uiInstall: true, engineBuild: true });
   const withoutEngine: string[] = [];
-  await runUpdatePlan(['ui/src/App.tsx'], operations(withoutEngine));
+  await runUpdatePlan(['ui/src/App.tsx'], false, operations(withoutEngine));
   assert.deepEqual(withoutEngine, ['idle', 'reset', 'ui build', 'restart marker']);
   const all: string[] = [];
-  await runUpdatePlan(['server/package-lock.json', 'ui/package-lock.json', 'engine/src/a.cpp'], operations(all));
+  await runUpdatePlan(['server/package-lock.json', 'ui/package-lock.json', 'engine/src/a.cpp'], false, operations(all));
   assert.deepEqual(all, ['idle', 'reset', 'server ci', 'ui ci', 'ui build', 'engine build', 'restart marker']);
+});
+
+test('ggml pointer change recovers after reset; hook failure stops before engine build', async () => {
+  assert.equal(ggmlPointerChanged('base', 'target', rev => rev === 'base:engine/ggml' ? 'old' : 'new'), true);
+  assert.equal(ggmlPointerChanged('base', 'target', () => 'same'), false);
+  const changed: string[] = [];
+  await runUpdatePlan(['engine/ggml'], true, operations(changed));
+  assert.deepEqual(changed, ['idle', 'reset', 'ggml recovery', 'ui build', 'engine build', 'restart marker']);
+  const failed: string[] = [];
+  await assert.rejects(runUpdatePlan(['engine/ggml'], true, operations(failed, { hooksFail: true })), /hook verification failed/);
+  assert.deepEqual(failed, ['idle', 'reset', 'ggml recovery']);
+});
+
+test('ggml recovery selects every patch in name order', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hotstep-patches-'));
+  try {
+    for (const name of ['z.patch', 'README.md', 'a.patch', 'middle.patch']) fs.writeFileSync(path.join(directory, name), '');
+    assert.deepEqual(ggmlPatches(directory), ['a.patch', 'middle.patch', 'z.patch']);
+    assert.ok(ggmlPatches().length > 3);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('non-recursive reset preserves tracked ggml changes', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hotstep-submodule-reset-'));
+  const source = path.join(root, 'source');
+  const parent = path.join(root, 'parent');
+  const run = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' }).trim();
+  const commit = (cwd: string) => run(cwd, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture');
+  try {
+    fs.mkdirSync(source); fs.mkdirSync(parent);
+    run(source, 'init');
+    fs.writeFileSync(path.join(source, 'tracked.txt'), 'base');
+    run(source, 'add', 'tracked.txt'); commit(source);
+    run(parent, 'init');
+    run(parent, '-c', 'protocol.file.allow=always', 'submodule', 'add', source, 'engine/ggml');
+    commit(parent);
+    run(parent, 'config', 'submodule.recurse', 'true');
+    const tracked = path.join(parent, 'engine', 'ggml', 'tracked.txt');
+    fs.writeFileSync(tracked, 'worker patch');
+    run(parent, '-c', 'submodule.recurse=false', 'reset', '--hard', 'HEAD');
+    assert.equal(fs.readFileSync(tracked, 'utf8'), 'worker patch');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 test('mocked worker with an active job refuses update before bundle creation', async () => {
