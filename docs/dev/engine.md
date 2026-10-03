@@ -200,6 +200,16 @@ identity as `yue2Cover`; the engine composes from the score rather than
 conditioning its audio renderer on the recording. Without `--melody-only`,
 `yue2-sheet` retains its full-score training default.
 
+The post-render cover drift check compares forced-aligned lyric words with score
+sections. `server/src/services/backends/yue2/scoreClock.ts` walks each Vocal bar
+under its active `M:` and `Q:` fields; a later meter or tempo change therefore
+changes the expected section time. The offline `server/scripts/yue2-c4-sidecar.ts`
+uses that same clock to propose word-to-note matches from cached `cursor_words`
+and ABC. It marks shared notes and timing gaps uncertain. The cache has no
+original variable beat timestamps, so these matches need manual review before
+use as training data. Drift results include a metric version in their saved
+cache key; older results are recomputed when requested.
+
 ## HOT-Step hook files
 
 Upstream files are kept as close to acestep.cpp as possible so syncs stay a copy.

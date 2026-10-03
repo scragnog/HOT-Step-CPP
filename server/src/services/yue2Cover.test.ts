@@ -286,13 +286,19 @@ test('drift route authenticates, aligns once, and persists the cached result', a
     assert.equal((await fetch(url, { method: 'POST' })).status, 401);
     const first = await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer owner' } });
     assert.equal(first.status, 200);
-    const body = await first.json() as { meanAbsoluteOffsetBars: number };
+    const body = await first.json() as { meanAbsoluteOffsetBars: number; metricVersion: number; inputHash: string };
     assert.equal(body.meanAbsoluteOffsetBars, 0);
+    assert.equal(body.metricVersion, 2);
     assert.equal((await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer owner' } })).status, 200);
     assert.equal(alignCalls, 1);
+    row.generation_params = JSON.stringify({ ...JSON.parse(row.generation_params),
+      yue2CoverDrift: { ...body, metricVersion: undefined, meanAbsoluteOffsetBars: 99 } });
+    const refreshed = await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer owner' } });
+    assert.equal((await refreshed.json() as { meanAbsoluteOffsetBars: number }).meanAbsoluteOffsetBars, 0);
+    assert.equal(alignCalls, 2);
     audioModified++;
     assert.equal((await fetch(url, { method: 'POST', headers: { Authorization: 'Bearer owner' } })).status, 200);
-    assert.equal(alignCalls, 2);
+    assert.equal(alignCalls, 3);
     assert.equal(f.counts().started, 0);
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); f.close(); }
 });

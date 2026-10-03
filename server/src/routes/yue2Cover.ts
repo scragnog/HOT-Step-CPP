@@ -9,7 +9,7 @@ import { config } from '../config.js';
 import { getDb } from '../db/database.js';
 import { yue2Align } from '../services/backends/yue2/client.js';
 import type { Yue2AlignWord } from '../services/backends/yue2/align.js';
-import { measureCoverDrift } from '../services/backends/yue2/coverDrift.js';
+import { COVER_DRIFT_METRIC_VERSION, measureCoverDrift } from '../services/backends/yue2/coverDrift.js';
 
 type CoverService = typeof yue2CoverService;
 type DriftSong = { id: string; audio_url: string; lyrics: string; generation_params: string };
@@ -81,13 +81,15 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
       catch { throw new CoverRequestError('Cover audio is missing.', 404); }
       const alignText = lyrics.replace(/\r\n?/g, '\n');
       const inputHash = createHash('sha256').update(JSON.stringify([
-        song.audio_url, stat.size, stat.mtimeMs, alignText, rendered, full,
+        COVER_DRIFT_METRIC_VERSION, song.audio_url, stat.size, stat.mtimeMs, alignText, rendered, full,
       ])).digest('hex');
-      if (params.yue2CoverDrift?.inputHash === inputHash) { res.json(params.yue2CoverDrift); return; }
+      if (params.yue2CoverDrift?.metricVersion === COVER_DRIFT_METRIC_VERSION &&
+          params.yue2CoverDrift.inputHash === inputHash) { res.json(params.yue2CoverDrift); return; }
       try { measureCoverDrift(rendered, full, alignText, []); }
       catch (err) { throw new CoverRequestError((err as Error).message, 422); }
       const aligned = await drift.align(drift.readAudio(audioPath), alignText);
-      const result = { ...measureCoverDrift(rendered, full, alignText, aligned.words), inputHash };
+      const result = { ...measureCoverDrift(rendered, full, alignText, aligned.words),
+        metricVersion: COVER_DRIFT_METRIC_VERSION, inputHash };
       drift.save(id, userId, result);
       res.json(result);
     } catch (err) { fail(res, err); }

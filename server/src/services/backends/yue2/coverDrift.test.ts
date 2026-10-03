@@ -58,3 +58,37 @@ test('qualification-style multi-bar rests put verse after the intro', () => {
   assert.equal(result.sections[1].startBar, 18);
   assert.ok(Math.abs(result.sections[1].expected.start - 17 * 4 * 60 / 122) < 1e-8);
 });
+
+test('meter change before a section puts its start at the sum of the bars', () => {
+  const abc = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C', '% verse',
+    'V: Vocal', 'C4|', 'M:1/4', 'D|', 'M:4/4', '% chorus', 'V: Vocal', 'E4|', ''].join('\n');
+  const result = measureCoverDrift(abc, abc, '[Verse]\nfirst\n[Chorus]\nsecond', [
+    { char0: 8, char1: 13, start: 0, end: 0.5, score: 1 },
+    { char0: 23, char1: 29, start: 5, end: 5.5, score: 1 },
+  ]);
+  assert.equal(result.sections[1].expected.start, 5);
+  assert.equal(result.sections[1].offsetBars, 0);
+});
+
+test('tempo change within a section changes later bar and section times', () => {
+  const abc = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C', '% verse',
+    'V: Vocal', 'C4|', 'Q:1/4=120', 'D4|', '% chorus', 'V: Vocal', 'E4|', ''].join('\n');
+  const result = measureCoverDrift(abc, abc, '[Verse]\nfirst\n[Chorus]\nsecond', [
+    { char0: 8, char1: 13, start: 0, end: 0.5, score: 1 },
+    { char0: 23, char1: 29, start: 6, end: 6.5, score: 1 },
+  ]);
+  assert.equal(result.sections[0].expected.end, 6);
+  assert.equal(result.sections[1].expected.start, 6);
+  assert.equal(result.sections[1].offsetBars, 0);
+});
+
+test('meter change inside a section changes its end and following start', () => {
+  const abc = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C', '% verse',
+    'V: Vocal', 'C4|', 'M:1/4', 'D|', 'E|', 'M:4/4', '% chorus', 'V: Vocal', 'F4|', ''].join('\n');
+  const result = measureCoverDrift(abc, abc, '[Verse]\nfirst\n[Chorus]\nsecond', [
+    { char0: 8, char1: 13, start: 0, end: 0.5, score: 1 },
+    { char0: 23, char1: 29, start: 6, end: 6.5, score: 1 },
+  ]);
+  assert.equal(result.sections[0].expected.end, 6);
+  assert.equal(result.sections[1].expected.start, 6);
+});
