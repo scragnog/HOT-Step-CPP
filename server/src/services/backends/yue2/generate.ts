@@ -669,7 +669,7 @@ async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
     // UI slider (index.ts's yue2ReplanAttempts extension) clamps to [1, 10].
     const attemptsRaw = Number(job.params.yue2ReplanAttempts);
     const maxAttempts = Number.isInteger(attemptsRaw) && attemptsRaw >= 1 && attemptsRaw <= 10 ? attemptsRaw : 3;
-    // Plan flags (2026-09-27, Rob): a plan the judge passes can still be
+    // Plan flags (2026-09-27): a plan the judge passes can still be
     // illegible (one chord for the whole song, a looped riff, a melody on two
     // pitches). On by default like the runaway re-plans; the same tries.
     const replanFlags = job.params.yue2ReplanFlags !== false;
