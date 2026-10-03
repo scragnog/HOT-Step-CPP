@@ -22,18 +22,38 @@ export const PERSISTENCE_SCRIPT = `
 try{merge(JSON.parse(localStorage.getItem(LS)||"{}"));}catch{}
 const LISTENING_FOLDER=(()=>{const m=location.pathname.match(/^\\/listening\\/([^/]+)\\//);return m?m[1]:null;})();
 const SCORES_POST_URL=(location.protocol.startsWith("http")&&LISTENING_FOLDER)?("/listening/"+LISTENING_FOLDER+"/scores"):null;
-if(SCORES_POST_URL){
-  fetch("/listening/"+LISTENING_FOLDER+"/scores.json").then(r=>r.ok?r.json():null).then(d=>{if(d){merge(d);render();}}).catch(()=>{});
+// A fresh page has nothing in localStorage, so the remote scores.json (other
+// sessions' work) only exists on the server. Autosave must not POST until
+// that GET has landed and been merged in, or an edit made before it resolves
+// gets written as a full snapshot that's missing everything the GET would
+// have added, overwriting the file with less than it had.
+let loadState=SCORES_POST_URL?"pending":"ready";
+function loadInitial(){
+  if(!SCORES_POST_URL)return;
+  loadState="pending";
+  fetch("/listening/"+LISTENING_FOLDER+"/scores.json").then(r=>{
+    if(r.status===404){loadState="ready";return;}
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    return r.json();
+  }).then(d=>{if(d)merge(d);loadState="ready";render();})
+  .catch(e=>{loadState="failed";say("Could not load existing scores.json: "+e.message+". Not saving until this is resolved — edits are kept in this browser.",true);});
 }
+loadInitial();
 const idb=()=>new Promise((ok,no)=>{const r=indexedDB.open("scoresheet",1);r.onupgradeneeded=()=>r.result.createObjectStore("handles");r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error);});
 async function idbDo(mode,fn){const db=await idb();return new Promise((ok,no)=>{const tx=db.transaction("handles",mode);const q=fn(tx.objectStore("handles"));tx.oncomplete=()=>ok(q?.result);tx.onerror=()=>no(tx.error);});}
 let writing=false, again=false, timer=null;
 function persist(){
   try{localStorage.setItem(LS,JSON.stringify(snapshot()));}catch{}
-  clearTimeout(timer);timer=setTimeout(writeFile,400);
+  clearTimeout(timer);timer=setTimeout(trigger,400);
+}
+function trigger(){
+  if(SCORES_POST_URL&&loadState==="pending"){timer=setTimeout(trigger,250);return;}
+  if(SCORES_POST_URL&&loadState==="failed"){loadInitial();timer=setTimeout(trigger,2000);return;}
+  writeFile();
 }
 async function writeFile(){
   if(SCORES_POST_URL){
+    if(loadState!=="ready"){trigger();return;}
     if(writing){again=true;return;}
     writing=true;
     try{const r=await fetch(SCORES_POST_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(snapshot(),null,1)});if(!r.ok)throw new Error("HTTP "+r.status);say("Saved scores.json at "+new Date().toLocaleTimeString());}

@@ -1,11 +1,15 @@
 // Path confinement for the ear-test score sheet routes (routes/listening.ts):
 // traversal, an out-of-root symlink, and a real scores.json write+rename.
+// Router-level tests (actual HTTP, Origin/body validation) live in
+// listening-http.test.ts — they need HOT_STEP_ROOT set before config.ts
+// loads, which a static import here (hoisted above any top-level code) would
+// defeat.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { resolveConfined } from '../src/routes/listening.js';
+import { resolveConfined, isTrustedOrigin, isScoreEnvelope } from '../src/routes/listening.js';
 
 function withTmpRoot(fn: (root: string) => void) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'listening-test-'));
@@ -65,4 +69,26 @@ test('scores.json writes via temp file + rename (no partial file visible)', () =
     assert.equal(fs.existsSync(tmp), false);
     assert.deepEqual(JSON.parse(fs.readFileSync(target!, 'utf8')), { scores: { x: 1 } });
   });
+});
+
+// ── isTrustedOrigin / isScoreEnvelope: unit coverage for the CSRF/body guards ──
+
+test('isTrustedOrigin allows no Origin header (same-origin / direct tools)', () => {
+  assert.equal(isTrustedOrigin(undefined, 3001), true);
+});
+test('isTrustedOrigin allows the server\'s own localhost/127.0.0.1 origin', () => {
+  assert.equal(isTrustedOrigin('http://localhost:3001', 3001), true);
+  assert.equal(isTrustedOrigin('http://127.0.0.1:3001', 3001), true);
+});
+test('isTrustedOrigin rejects a foreign origin', () => {
+  assert.equal(isTrustedOrigin('https://untrusted.example', 3001), false);
+  assert.equal(isTrustedOrigin('http://localhost:3000', 3001), false); // Vite dev port, different origin
+});
+test('isScoreEnvelope requires a scores object', () => {
+  assert.equal(isScoreEnvelope({ scores: { a: 1 } }), true);
+  assert.equal(isScoreEnvelope({}), false);
+  assert.equal(isScoreEnvelope({ scores: [] }), false);
+  assert.equal(isScoreEnvelope(null), false);
+  assert.equal(isScoreEnvelope('junk=1'), false);
+  assert.equal(isScoreEnvelope(undefined), false);
 });

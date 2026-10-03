@@ -11,11 +11,19 @@
 // '..' segments are rejected outright, and a symlink anywhere in the chain
 // that resolves outside the root is rejected too (SAFE_NAME + realpath walk
 // in resolveConfined).
+//
+// Loopback alone is not enough: the app enables CORS '*' (index.ts), and a
+// same-machine browser with an unrelated malicious tab open can still POST
+// to http://localhost:<port>/listening/... — the request's socket is
+// loopback regardless of which page's JS sent it. The POST route also checks
+// Origin against this server's own origin (a cross-origin fetch always sets
+// Origin; same-origin requests may omit it) and validates the body looks
+// like an actual score snapshot before it's allowed to replace scores.json.
 import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { PROJECT_ROOT } from '../config.js';
+import { PROJECT_ROOT, config } from '../config.js';
 
 const router = Router();
 
@@ -30,6 +38,23 @@ router.use((req, res, next) => {
   }
   next();
 });
+
+/** True unless `origin` is present and names a different host/port — a
+ *  cross-origin fetch always sets Origin, so a present-but-foreign value is
+ *  the CSRF signature; same-origin requests may omit the header entirely. */
+export function isTrustedOrigin(origin: string | undefined, port: number): boolean {
+  if (!origin) return true;
+  return origin === `http://localhost:${port}` || origin === `http://127.0.0.1:${port}`;
+}
+
+/** A score snapshot is `{scores: {...}, picks?: {...}, ...}` — reject
+ *  anything else (a stray form POST, an empty body) before it can clobber a
+ *  real scores.json. */
+export function isScoreEnvelope(body: unknown): body is { scores: Record<string, unknown> } {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return false;
+  const scores = (body as any).scores;
+  return typeof scores === 'object' && scores !== null && !Array.isArray(scores);
+}
 
 /** Resolves `<folder>/<segments...>` under `root`, or null if the
  *  folder/segments look unsafe or the path (lexically or via a symlink)
@@ -74,6 +99,14 @@ router.get('/:folder/{*splat}', (req, res) => {
 });
 
 router.post('/:folder/scores', (req, res) => {
+  if (!isTrustedOrigin(req.get('origin') ?? undefined, config.server.port)) {
+    res.status(403).json({ error: 'Cross-origin save rejected' });
+    return;
+  }
+  if (!isScoreEnvelope(req.body)) {
+    res.status(400).json({ error: 'Body is not a score snapshot ({scores: {...}})' });
+    return;
+  }
   const target = resolveConfined(LISTENING_ROOT, req.params.folder, ['scores.json']);
   if (!target) {
     res.status(400).json({ error: 'Invalid path' });
