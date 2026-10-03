@@ -905,9 +905,9 @@ async function capabilities(): Promise<BackendCapabilities> {
         visible_when: { key: 'yue2Cot', not_equals: 'off' },
       },
       {
-        // #… Lead approved 2026-10-03: soft bias on by default for a cover
-        // with an approved score — Rob's ear went from 2/11 on-time sections
-        // to 11/11 with it (RESEARCH/YUE2_ALIGNMENT_GATE_SET.md:1064).
+        // Lead approved 2026-10-03: soft bias on by default for a cover
+        // with an approved score — an ear test went from 2/11 on-time
+        // sections to 11/11 with it (RESEARCH/YUE2_ALIGNMENT_GATE_SET.md:1064).
         key: 'yue2LyricSchedule',
         type: 'select',
         section: 'Lead sheet',

@@ -162,6 +162,14 @@ What sets it apart:
 - Preview the score first (off by default) plans the lead sheet only, shows it with
   playback, and lets you continue, re-plan with a new seed, or cancel before any audio
   is rendered. You can also paste your own ABC lead sheet to render from.
+- Lyric Timing (Lead sheet section) ties each sung lyric block to its score section's
+  first Vocal note, once a score and lyrics are supplied. Soft is the default: it nudges
+  the composer toward that timing. Hard hides a section's lyrics, and optionally its
+  score lines, from the composer until then. Off turns it off. It needs CFG 1 — the
+  engine's own default for Full and Melody only — so an explicit CFG elsewhere skips it
+  with a note and renders at the requested CFG instead; a score it can't build a
+  schedule from (unlabelled sections, no tempo, no matching timed lyric block) also
+  renders without it, and the generation log says why.
 - Cover Studio takes an uploaded or Library recording and uses SheetSage2 to
   transcribe its melody and chords into ABC. Review and approve the full score before rendering.
   You can supply ABC yourself without installing SheetSage2. The recording does

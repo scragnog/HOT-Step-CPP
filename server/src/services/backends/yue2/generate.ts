@@ -399,7 +399,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
 
   // C6 lyric schedule: ties each sung lyric block to its score section's
   // timing. Soft (bias, -4) is the default for a render with an approved
-  // score — Rob's ear went from 2/11 on-time sections to 11/11 with it
+  // score — an ear test went from 2/11 on-time sections to 11/11 with it
   // (RESEARCH/YUE2_ALIGNMENT_GATE_SET.md:1064). Hard (mask) stays selectable
   // but is never the default. An explicit 'off' (current or saved) always
   // wins. A schedule that cannot be built (no tempo, unlabelled sections, no
@@ -409,10 +409,18 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
     : params.yue2LyricSchedule === 'mask' ? 'mask'
     : params.yue2LyricSchedule === 'bias' || params.yue2LyricSchedule === undefined ? 'bias'
     : undefined;
+  // The engine only schedules the no-guidance set (yue2-pipeline.h: "needs
+  // cfg_scale 1 (no rule for the guidance set)"); cot is never 'off' here
+  // (abc requires it), so the engine's own default CFG is 1.0 unless
+  // overridden above.
+  const effectiveCfg = cfg_scale ?? 1.0;
   let lyric_schedule: Yue2SynthRequest['lyric_schedule'];
   if (scheduleMode) {
     if (!abc || !lyrics) {
       notes.push(`Lyric schedule (${scheduleMode}) needs a supplied score and lyrics — rendering without it.`);
+    } else if (effectiveCfg !== 1) {
+      notes.push(`Lyric schedule (${scheduleMode}) skipped — CFG ${effectiveCfg} is not 1 `
+        + '(the engine only schedules the no-guidance set); rendering without it at the requested CFG.');
     } else {
       const num = (value: unknown, fallback: number) =>
         value === undefined || value === null || value === '' ? fallback : Number(value);

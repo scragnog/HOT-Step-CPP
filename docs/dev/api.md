@@ -49,7 +49,7 @@ tempo, the source score's tempo is used and the response flags the fallback.
 A YuE2 generation with a supplied score (and lyrics) ties each sung lyric
 block to the first Vocal note of its score section, using the same score
 clock and section matching as the drift metric. `yue2LyricSchedule: "bias"` is
-the default (Rob's ear went from 2/11 on-time sections to 11/11 with it,
+the default (an ear test went from 2/11 on-time sections to 11/11 with it,
 `RESEARCH/YUE2_ALIGNMENT_GATE_SET.md:1064`): while composing, the engine adds
 `yue2LyricScheduleBias` (default -4) to the attention on a section's lyric
 tokens until that note. `"mask"` stays selectable (uses -inf instead) but is
@@ -59,9 +59,12 @@ well (off by default). Field lines such as `M:`, `Q:`, `K:` and `V:` stay
 visible. `yue2LyricScheduleLeadSec` reveals a section that many seconds early
 (default 0). `yue2LyricScheduleBehind: n` also hides sections more than n
 sections back (default -1, never). The schedule needs a score with a `Q:`
-tempo, lyrics with `\n` line endings, CFG 1 and one prompt per batch; a
-request that can't build one (missing score/lyrics, no tempo, unlabelled
-sections, no matching timed lyric block, ...) renders without it instead of
+tempo, lyrics with `\n` line endings, CFG 1 (the engine's own default for
+Chain of Thought melody/full; an explicit `yue2CfgScale` other than 1 skips
+the schedule with a note instead, rendering at the requested CFG) and one
+prompt per batch; a request that can't build one (missing score/lyrics, no
+tempo, unlabelled sections, no matching timed lyric block, ...) renders
+without it instead of
 failing the job — the notes say why. Scheduled jobs share an engine batch
 only with jobs that have the identical prompt. Lyric blocks with no timed
 section are never hidden, and the job notes name them. The engine logs each

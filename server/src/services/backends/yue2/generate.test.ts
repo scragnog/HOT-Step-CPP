@@ -97,6 +97,16 @@ test('hard mask stays selectable but is never the default', () => {
   assert.equal(req.lyric_schedule?.mode, 'mask');
 });
 
+test('an explicit CFG other than 1 skips the schedule instead of the engine rejecting the job', () => {
+  // yue2-pipeline.h:596 refuses lyric_schedule outright once CFG is on
+  // ("needs cfg_scale 1 (no rule for the guidance set)"); the mapper must
+  // never emit a schedule the engine will reject.
+  const { req, notes } = mapYue2Params({ caption: 'folk', lyrics, yue2Abc: abc, yue2CfgScale: '1.2' }, pick);
+  assert.equal(req.lyric_schedule, undefined);
+  assert.equal(req.cfg_scale, 1.2);
+  assert.ok(notes.some(n => n.includes('skipped') && n.includes('CFG 1.2')));
+});
+
 test('a schedule that cannot be built falls back instead of failing the render', () => {
   // No "% section" label line: buildYue2LyricSchedule throws "needs a score
   // with labelled sections" — the render must still go ahead without C6.
