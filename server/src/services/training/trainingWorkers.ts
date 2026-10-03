@@ -26,7 +26,7 @@ import { latestGenerationLyrics, PUSHED_PREVIEW_LYRICS } from './yue2JointTrainR
 import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
 import type { TrainingDatasetRow } from './types.js';
 import { getYue2AlbumScore, importYue2RungScores, listYue2RungScores, scoreYue2Album, scoreYue2Rung, type Yue2RungScore } from './yue2RungScores.js';
-import { jointRunForAdapter, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
+import { jointRunForAdapter, listYue2AitkRuns, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
 import type { Yue2JointPreviewRecord } from './yue2JointPreview.js';
 import { listYue2TrainLogs, noteYue2TrainLog, trainLogArchiveDir } from './datasetProfile.js';
 
@@ -472,19 +472,32 @@ async function scoreHere(w: WorkerInfo, req: Request, res: Response, datasetId: 
   const ds = repo.getDataset(datasetId)!;
   const base = `/api/training/datasets/${encodeURIComponent(datasetId)}`;
   const run = typeof req.query.run === 'string' ? req.query.run : undefined;
+  // A run this machine already has in its own index is reviewed and scored
+  // from here — /api/training directly, never through a worker. The UI no
+  // longer calls this route for such a run; this guard is for anything that
+  // still does (an older client, a worker calling back here).
+  const knownLocally = (refineRun: string | undefined) =>
+    !!refineRun && listYue2AitkRuns(ds.id, ds.slug).some(r => r.jobId === refineRun);
   if (req.method === 'GET') {
     if (kind === 'yue2-album-score') { res.json({ score: run ? getYue2AlbumScore(run) : null }); return; }
-    // Anything the worker scored before scores lived here comes across once.
-    try {
-      const theirs = await workerJson<{ scores: Yue2RungScore[] }>(w, `${base}/yue2-rung-scores${run ? `?run=${encodeURIComponent(run)}` : ''}`, { signal: AbortSignal.timeout(8000) });
-      importYue2RungScores(theirs.scores ?? []);
-    } catch { /* worker offline: this machine's scores are the ones that count */ }
+    // Anything the worker scored before scores lived here comes across once,
+    // unless this machine already has the run — then its own copy is final.
+    if (!knownLocally(run)) {
+      try {
+        const theirs = await workerJson<{ scores: Yue2RungScore[] }>(w, `${base}/yue2-rung-scores${run ? `?run=${encodeURIComponent(run)}` : ''}`, { signal: AbortSignal.timeout(8000) });
+        importYue2RungScores(theirs.scores ?? []);
+      } catch { /* worker offline: this machine's scores are the ones that count */ }
+    }
     res.json({ scores: listYue2RungScores(ds.id, run) });
     return;
   }
   if (req.method !== 'PUT') { res.status(405).json({ error: 'Method not allowed' }); return; }
   const b = await readJsonBody(req);
   if (typeof b.refineRun !== 'string') { res.status(400).json({ error: 'refineRun is required' }); return; }
+  if (knownLocally(b.refineRun)) {
+    res.status(409).json({ error: `Run ${b.refineRun} is already known on this machine — score it through /api/training, not a worker.` });
+    return;
+  }
   const { runs } = await workerJson<{ runs: Yue2AitkRunRecord[] }>(w, `${base}/yue2-joint-runs`);
   const record = runs.find(r => r.jobId === b.refineRun);
   if (!record) { res.status(400).json({ error: `Unknown run on ${w.name}` }); return; }

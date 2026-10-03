@@ -185,13 +185,28 @@ option, the card) keeps `yue2-latents` (`YUE2_CORE_CACHE`: latents, codes, sheet
 `includeYue2Core` is passed, which only the card's opt-in toggle does; stale data is rebuilt by the stages' own checks. The report takes the album score as a
 target and reads archived loss logs.
 
-Scores for a run on a training worker are kept on the controlling machine:
-`proxyToWorker` answers `/datasets/:id/yue2-rung-scores` and `/yue2-album-score`
-itself (`scoreHere` in `trainingWorkers.ts`). A write fetches the run record and
-previews from the worker, stores the row here, then forwards the same PUT to the
-worker so its Review page and Finish scored still see it. A read first imports any
-worker rows missing here (`importYue2RungScores`, never overwriting). Worker
-datasets carry the controller's dataset ids, which is what makes this work. The
+`ui/src/services/trainingApi.ts` splits every training call into two bases:
+`request()` (job control — start/cancel/status and the live previews of a run
+still training on a worker, via the switchable `API_BASE`) and `localRequest()`
+(run records, ladder review, finished-run previews, rung/album scores, cleanup
+and finish, always `/api/training` on this machine). A worker only trains;
+reviewing and scoring a run — even one a worker trained — always happens here,
+so a worker with no `blindLabels` set yet can never make the Review page list a
+blind ladder in step order (`Yue2LadderReview.tsx`'s `labelsPending` guard
+refuses to render a blind ladder at all until the run's own labels are in).
+
+The UI no longer calls the worker-proxied score route. `proxyToWorker` still
+answers `/datasets/:id/yue2-rung-scores` and `/yue2-album-score` itself
+(`scoreHere` in `trainingWorkers.ts`) for backwards compatibility, but
+`scoreHere` now refuses (409) to score a run already in this machine's own
+index (`listYue2AitkRuns`) — a run known locally is scored through
+`/api/training` directly, not through this path. For a run still unknown
+locally, a write fetches the run record and previews from the worker, stores
+the row here, then forwards the same PUT to the worker so its Review page and
+Finish scored still see it. A read first imports any worker rows missing here
+(`importYue2RungScores`, never overwriting), skipped once the run is known
+locally. Worker datasets carry the controller's dataset ids, which is what
+makes this work. The
 worker's sheet snapshot stays on the worker; `pullLinked` now also brings each linked
 pair's train.jsonl (and a `<jobId>.json` sidecar noting the kept step) back through the
 same `adapter-file` route as the two safetensors, landing under `trainLogArchiveDir` here.

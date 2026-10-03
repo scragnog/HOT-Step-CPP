@@ -72,12 +72,16 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
   const runId = run?.jobId ?? '';
   const [blindRungs] = usePersistedState('hs-yue2-blind-rungs', true);
   const jointLadder = run?.options.method === 'base-matched';
-  const blind = jointLadder && blindRungs;
+  // Labels pending: the run is known (locally) but hasn't been given blind
+  // letters yet. Blind mode must never fall back to listing steps in their
+  // real, revealing order just because every label reads empty.
+  const labelsPending = jointLadder && blindRungs && run != null && !run.blindLabels;
+  const blind = jointLadder && blindRungs && !labelsPending;
   const labelFor = (step: number) => run?.blindLabels?.[step] ?? '';
   const rungName = (step: number) => blind
     ? t('trainingStudio.refine.blindRung', 'Rung {{label}}', { label: labelFor(step) || '?' })
     : t('trainingStudio.refine.rungStep', 'Step {{step}}', { step });
-  const ladder = run ? [...run.checkpoints].filter(c => c.arPath && c.narPath).sort((a, b) => a.step - b.step) : [];
+  const ladder = run && !labelsPending ? [...run.checkpoints].filter(c => c.arPath && c.narPath).sort((a, b) => a.step - b.step) : [];
   const visibleLadder = blind ? [...ladder].sort((a, b) => labelFor(a.step).localeCompare(labelFor(b.step))) : ladder;
   const fail = (err: unknown) => onError?.(err instanceof Error ? err.message : String(err));
   const draftOpts = renderOpts.draft ? { odeSteps: 12, narCacheRatio: 0 } : {};
@@ -234,6 +238,9 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
         </div>
       </div>}
       {cleanupNote && <div className="text-[12px] text-emerald-700 dark:text-emerald-300">{cleanupNote}</div>}
+      {labelsPending && <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-200">
+        {t('trainingStudio.refine.labelsPending', 'Blind labels for this run are not in yet — scoring opens once they are.')}
+      </div>}
       {ladder.length > 0 && <div className="mt-3 flex flex-col gap-3">
         {jointLadder && <div className="flex items-center gap-2 text-xs">
           <Toggle id={`blind-${idPrefix}`} checked={blindRungs} onChange={value => writePersistedState('hs-yue2-blind-rungs', value)} />

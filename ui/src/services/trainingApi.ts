@@ -5,12 +5,23 @@
 // server/src/services/training/types.ts — keep both sides in sync by hand.
 
 // The studio trains on this PC or on a training worker (server
-// services/training/trainingWorkers.ts). Every call below goes through
-// API_BASE, so switching it points the whole studio at the worker's
-// datasets, batches, ladders, previews and rung scores.
+// services/training/trainingWorkers.ts). API_BASE follows "Train on" and is
+// for JOB CONTROL ONLY: start/cancel/status of a job and the live previews
+// of a job still in progress there — calls made through `request()`.
+//
+// Everything else — run records, ladder review, previews of a FINISHED run,
+// rung/album scores, cleanup and finish — always reads and writes this
+// machine's own index, via LOCAL_BASE / `localRequest()`, never API_BASE.
+// Finished runs are always reviewed and scored from this machine, never from
+// a worker (even a worker's own run lands in this machine's index once its
+// folder is on shared storage) — a worker trains, nothing else. Calls using
+// `localRequest` are the LOCAL half of that split; calls using `request` are
+// the JOB_CONTROL half. See trainingWorkers.ts's `scoreHere` for the
+// server-side guard that backs this up.
 const WORKER_KEY = 'hotstep.trainingWorker';
 let trainingWorker: string | null = (() => { try { return localStorage.getItem(WORKER_KEY) || null; } catch { return null; } })();
 let API_BASE = trainingWorker ? `/api/workers/${encodeURIComponent(trainingWorker)}/api/training` : '/api/training';
+const LOCAL_BASE = '/api/training';
 
 export const getTrainingWorker = () => trainingWorker;
 export function setTrainingWorker(name: string | null): void {
@@ -2290,6 +2301,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+/** Same as `request`, but always this machine — never "Train on". Use for
+ *  run records, ladder review, finished-run previews, rung/album scores,
+ *  cleanup and finish. See the API_BASE comment above. */
+async function localRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${LOCAL_BASE}${path}`, init);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || `API error: ${res.status}`);
+  }
+  return res.json();
+}
+
 function jsonBody(body: unknown): RequestInit {
   return { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) };
 }
@@ -2446,7 +2469,7 @@ export async function startMm3TrainLm(
 /** Previous MM3 LM runs for a dataset, newest first. Read off disk each time —
  *  a run directory is the source of truth, not a database row. */
 export async function listMm3Runs(id: string): Promise<{ runs: Mm3RunSummary[]; busy: boolean }> {
-  return request<{ runs: Mm3RunSummary[]; busy: boolean }>(
+  return localRequest<{ runs: Mm3RunSummary[]; busy: boolean }>(
     `/datasets/${encodeURIComponent(id)}/mm3-runs`,
   );
 }
@@ -2511,11 +2534,13 @@ export async function captionMissingYue2(
   return request(`/datasets/${encodeURIComponent(id)}/yue2-captions-missing`, { method: 'POST', ...jsonBody(opts) });
 }
 
-/** Native AITK joint runs and their split AR/NAR checkpoint files. */
+/** Native AITK joint runs and their split AR/NAR checkpoint files. Always
+ *  this machine's own index — a run record (and its blindLabels) is reviewed
+ *  and scored from here, never from the worker that may have trained it. */
 export async function listYue2AitkRuns(
   id: string,
 ): Promise<{ runs: Yue2AitkRunRecord[]; activeJob: TrainingJobSummary | null }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs`);
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs`);
 }
 
 /** `core`: YuE2's latents, codes, lead sheets and prepared set, kept by every clear unless asked. */
@@ -2532,10 +2557,14 @@ export async function clearPreparedData(id: string, slug: string, includeYue2Cor
 export async function linkYue2JointCheckpointPreset(
   id: string, checkpointDir: string,
 ): Promise<{ updated: number; arPath: string; narPath: string }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-preset`,
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-preset`,
     { method: 'POST', ...jsonBody({ checkpointDir }) });
 }
 
+/** Live previews of a run still training ON A WORKER, before it has landed
+ *  in this machine's own index — the only reason this one stays worker-aware.
+ *  Once the run shows up in `listYue2AitkRuns`, use `listYue2JointPreviewsLocal`
+ *  instead; never this one, or a stale/incomplete worker copy can win. */
 export async function listYue2JointPreviews(
   id: string, run?: string,
 ): Promise<{ run: string; output: string; previews: Yue2JointPreviewRecord[] }> {
@@ -2543,10 +2572,19 @@ export async function listYue2JointPreviews(
   return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews${query}`);
 }
 
+/** Previews of a run already in this machine's own index (finished, or a
+ *  worker run that has synced down) — same endpoint, always local. */
+export async function listYue2JointPreviewsLocal(
+  id: string, run?: string,
+): Promise<{ run: string; output: string; previews: Yue2JointPreviewRecord[] }> {
+  const query = run ? `?run=${encodeURIComponent(run)}` : '';
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews${query}`);
+}
+
 /** Awaiting review: refinement ladders across datasets with score counts. */
 export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number; blindLabel: string } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean }
 export async function listYue2Review(): Promise<{ rows: Yue2ReviewRow[] }> {
-  return request('/yue2-review');
+  return localRequest('/yue2-review');
 }
 
 /** Cleanup around a chosen refinement rung. */
@@ -2554,15 +2592,15 @@ export interface Yue2CleanupItem { count: number; bytes: number; detail?: string
 export interface Yue2CleanupPlan { run: string; step: number; keep: string; caches: Yue2CleanupItem; otherCheckpoints: Yue2CleanupItem; otherRuns: Yue2CleanupItem; resume: Yue2CleanupItem; otherPreviews: Yue2CleanupItem }
 export type Yue2CleanupChoice = { caches?: boolean; otherCheckpoints?: boolean; otherRuns?: boolean; resume?: boolean; otherPreviews?: boolean };
 export async function getYue2CleanupPlan(id: string, run: string, step: number): Promise<Yue2CleanupPlan> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-cleanup-plan?run=${encodeURIComponent(run)}&step=${step}`);
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-cleanup-plan?run=${encodeURIComponent(run)}&step=${step}`);
 }
 export async function runYue2Cleanup(id: string, body: { run: string; step: number; blind?: boolean; blindLabel?: string } & Yue2CleanupChoice): Promise<{ freedBytes: number; done: string[]; finishError?: string }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-cleanup`, { method: 'POST', ...jsonBody(body) });
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-cleanup`, { method: 'POST', ...jsonBody(body) });
 }
 
 /** DELETE /datasets/:id/yue2-joint-runs/:jobId — a finished run and its checkpoints. */
 export async function deleteYue2AitkRun(id: string, jobId: string): Promise<{ output: string }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-runs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
 }
 
 /** Refinement rung scores (Refine tab): the listener's judgement per rung
@@ -2575,10 +2613,10 @@ export interface Yue2RungScore {
   blind: boolean; blindLabel: string;
 }
 export async function listYue2RungScores(id: string, run?: string): Promise<{ scores: Yue2RungScore[] }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores${run ? `?run=${encodeURIComponent(run)}` : ''}`);
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores${run ? `?run=${encodeURIComponent(run)}` : ''}`);
 }
 export async function scoreYue2Rung(id: string, body: { refineRun: string; step: number; likeness?: number | null; corruption?: number | null; notes?: string; blind?: boolean; blindLabel?: string }): Promise<{ score: Yue2RungScore }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores`, { method: 'PUT', ...jsonBody(body) });
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-rung-scores`, { method: 'PUT', ...jsonBody(body) });
 }
 /** Optimise phase: the dataset's _hotstep-optimisation.json and prepare readiness. */
 export interface Yue2BaseLossItem { file: string; frames: number; arTokens: number; arCe: number; narMse: number; narMseByT: number[] }
@@ -2596,18 +2634,18 @@ export type Yue2TrainedDirection = 'under' | 'right' | 'over';
 export interface Yue2AlbumScore { refineRun: string; datasetId: string; datasetSlug: string; score: number | null;
   instruments: Yue2TrainedDirection | null; vocals: Yue2TrainedDirection | null; notes: string; updatedAt: string }
 export async function getYue2AlbumScore(id: string, run: string): Promise<{ score: Yue2AlbumScore | null }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-album-score?run=${encodeURIComponent(run)}`);
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-album-score?run=${encodeURIComponent(run)}`);
 }
 export async function scoreYue2Album(id: string, body: { refineRun: string; score?: number | null; instruments?: Yue2TrainedDirection | null; vocals?: Yue2TrainedDirection | null; notes?: string }): Promise<{ score: Yue2AlbumScore }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-album-score`, { method: 'PUT', ...jsonBody(body) });
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-album-score`, { method: 'PUT', ...jsonBody(body) });
 }
-export const yue2RungScoresExportUrl =(format: 'csv' | 'json') => `${API_BASE}/yue2-rung-scores/export?format=${format}`;
+export const yue2RungScoresExportUrl = (format: 'csv' | 'json') => `${LOCAL_BASE}/yue2-rung-scores/export?format=${format}`;
 
 /** POST /datasets/:id/yue2-joint-previews/render — previews for one checkpoint, on demand. */
 export async function renderYue2JointPreviews(
   id: string, body: { run: string; step: number; seconds?: number; seed?: number; takes?: number; caption?: string; lyrics?: string; odeSteps?: number; narCacheRatio?: number },
 ): Promise<{ run: string; step: number; previews: Yue2JointPreviewRecord[] }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews/render`, { method: 'POST', ...jsonBody(body) });
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews/render`, { method: 'POST', ...jsonBody(body) });
 }
 
 /** POST /api/training/datasets/:id/yue2-joint-prepare (CPU-only import). */
@@ -2634,7 +2672,7 @@ export async function getYue2AitkPrepare(
 export async function listYue2Runs(
   id: string,
 ): Promise<{ runs: Yue2RunSummary[]; busy: boolean; adapterRoot: string }> {
-  return request<{ runs: Yue2RunSummary[]; busy: boolean; adapterRoot: string }>(
+  return localRequest<{ runs: Yue2RunSummary[]; busy: boolean; adapterRoot: string }>(
     `/datasets/${encodeURIComponent(id)}/yue2-runs`,
   );
 }
@@ -2729,7 +2767,7 @@ export async function startYue2ArTrain(
 export async function listYue2ArRuns(
   id: string,
 ): Promise<{ runs: Yue2ArRunSummary[]; busy: boolean; adapterRoot: string }> {
-  return request<{ runs: Yue2ArRunSummary[]; busy: boolean; adapterRoot: string }>(
+  return localRequest<{ runs: Yue2ArRunSummary[]; busy: boolean; adapterRoot: string }>(
     `/datasets/${encodeURIComponent(id)}/yue2-ar-runs`,
   );
 }
@@ -3048,7 +3086,7 @@ export async function listYue2Batches(): Promise<Yue2BatchSummary[]> {
   return data.batches;
 }
 export async function setYue2ReviewComplete(id: string, run: string, complete: boolean): Promise<{ reviewComplete: boolean }> {
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-review-complete`, { method: 'POST', ...jsonBody({ run, complete }) });
+  return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-review-complete`, { method: 'POST', ...jsonBody({ run, complete }) });
 }
 /** NAR further training from each ladder's best-scored rung, then link + cleanup. */
 export async function finishYue2Ladders(entries: Array<{ datasetId: string; refineRun: string }>, knee = true): Promise<Yue2BatchSummary> {
@@ -3062,7 +3100,12 @@ export async function cancelYue2Batch(id: string): Promise<void> { await request
 
 // ── Training workers (/api/workers, always this PC's server) ───────────────
 
-export interface TrainingWorkerStatus { name: string; url: string; online: boolean; version?: string; versionMatch?: boolean; engine?: string; error?: string }
+export interface TrainingWorkerStatus {
+  name: string; url: string; online: boolean; version?: string; versionMatch?: boolean; engine?: string; error?: string;
+  commit?: string; dirty?: boolean; relation?: 'current' | 'behind' | 'diverged'; behind?: number;
+  engineVersion?: string; engineBuiltAt?: string | null; gpu?: { memoryUsedMiB: number; utilization: number } | null;
+  job?: { kind: string; dataset: string; done: number; total: number; status: string } | null; idle?: boolean;
+}
 export interface WorkerDispatchItem { datasetId: string; name: string; status: 'pending' | 'captioning' | 'pushing' | 'queued' | 'failed'; error: string | null; sent?: number; bytes?: number }
 export interface WorkerDispatch { worker: string; batchId: string | null; items: WorkerDispatchItem[]; running: boolean; startedAt: number }
 
@@ -3093,6 +3136,21 @@ export async function cancelPipeline(id: string): Promise<void> {
 
 export async function getTrainingDefaults(): Promise<TrainingDefaults> {
   return request<TrainingDefaults>('/defaults');
+}
+
+// Worker update jobs always live on this PC, even while Training Studio is
+// viewing a remote worker through the training proxy.
+export interface WorkerUpdateStatus {
+  id: string; worker: string; status: string; cancellable: boolean; lines: string[]; error?: string;
+}
+export async function getWorkerUpdate(worker: string): Promise<WorkerUpdateStatus | null> {
+  return (await workersRequest<{ update: WorkerUpdateStatus | null }>(`/${encodeURIComponent(worker)}/update`)).update;
+}
+export async function startWorkerUpdate(worker: string): Promise<WorkerUpdateStatus> {
+  return (await workersRequest<{ update: WorkerUpdateStatus }>(`/${encodeURIComponent(worker)}/update`, { method: 'POST' })).update;
+}
+export async function cancelWorkerUpdate(worker: string): Promise<void> {
+  await workersRequest(`/${encodeURIComponent(worker)}/update`, { method: 'DELETE' });
 }
 
 export async function putTrainingDefaults(patch: Partial<TrainingDefaults>): Promise<TrainingDefaults> {

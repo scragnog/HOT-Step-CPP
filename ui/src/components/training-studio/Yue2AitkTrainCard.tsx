@@ -17,6 +17,7 @@ import {
   getYue2AitkPrepare,
   listYue2AitkRuns,
   listYue2JointPreviews,
+  listYue2JointPreviewsLocal,
   listJobs,
   jobStreamUrl,
   startYue2AitkPrepare,
@@ -650,11 +651,17 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const setPickedLadderRun = useTrainingStore(s => s.setRefineLadderRun);
   const ladderRunRec = aitkRuns.find(r => r.jobId === pickedLadderRun) ?? aitkRuns.find(r => r.jobId === job?.id) ?? aitkRuns.find(r => r.live) ?? [...aitkRuns].sort((a, b) => b.createdAt - a.createdAt)[0];
   const ladderRunId = ladderRunRec?.jobId;
+  // A job still training on a worker has no local run record yet (the local
+  // index picks it up once its folder reconciles); this is the only case a
+  // run key comes from the job itself rather than aitkRuns, and the only
+  // case previews are read from the worker instead of this machine.
+  const liveOnlyJobId = !ladderRunRec && job && isJointJob(job, datasetId) && (job.status === 'queued' || job.status === 'running') ? job.id : undefined;
+  const previewsKey = ladderRunId ?? liveOnlyJobId;
 
   useEffect(() => {
     let cancelled = false;
-    if (!ladderRunId) { setJointPreviews([]); return; }
-    const refresh = () => listYue2JointPreviews(datasetId, ladderRunId)
+    if (!previewsKey) { setJointPreviews([]); return; }
+    const refresh = () => (ladderRunId ? listYue2JointPreviewsLocal : listYue2JointPreviews)(datasetId, previewsKey)
       .then(result => { if (!cancelled) setJointPreviews(result.previews); })
       .catch(() => { if (!cancelled) setJointPreviews([]); });
     void refresh();
@@ -664,7 +671,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     const timer = job?.status === 'queued' || job?.status === 'running' || fresh || ladderRunRec?.live
       ? window.setInterval(refresh, 5000) : undefined;
     return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer); };
-  }, [datasetId, ladderRunId, job?.status, ladderNonce]);
+  }, [datasetId, previewsKey, ladderRunId, job?.status, ladderNonce]);
 
   useEffect(() => {
     setLiveMetric(null);
@@ -1542,7 +1549,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           <ParamLabel
             label={t('trainingStudio.workers.runOn', 'Run on')}
             className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300"
-            info={t('trainingStudio.workers.runOnInfo', 'A training worker trains the batch on its own GPU. Each dataset is captioned here first (Gemini, when captioning is on), its audio and sidecars are sent to the worker (only files it does not already have), and it joins the worker\'s batch. Switch "Train on" at the top to that worker to follow the run, listen to previews and score rungs.')}
+            info={t('trainingStudio.workers.runOnInfo', 'A training worker trains the batch on its own GPU. Each dataset is captioned here first (Gemini, when captioning is on), its audio and sidecars are sent to the worker (only files it does not already have), and it joins the worker\'s batch. Switch "Train on" at the top to that worker to follow the run. The ladder, its previews and scoring stay here: they open on this run once it lands in this machine\'s own index.')}
           />
           <StyledSelect
             accent="amber"
@@ -1602,6 +1609,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <summary className="cursor-pointer text-[11px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.yue2.method.showLogs', 'Show training log (last 100 lines)')}</summary>
         <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-zinc-950 p-2 text-[10px] leading-4 text-zinc-300 whitespace-pre-wrap">{jobLogs.join('\n')}</pre>
       </details>}
+      {!ladderRunRec && liveOnlyJobId && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
+        <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.ladderLiveOnly', 'Training — scoring opens once the run is home')}</p>
+        <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.ladderLiveOnlyHint', '{{count}} preview(s) rendered so far. The ladder, blind labels and scoring open once this run lands in the local index.', { count: jointPreviews.filter(p => p.status === 'done').length })}</p>
+      </div>}
       {ladderRunRec && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
         <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.ladderTitle', 'Checkpoint ladder')} · {new Date(ladderRunRec.createdAt).toLocaleString()}{ladderRunRec.live ? ` · ${t('trainingStudio.yue2.method.ladderLive', 'training')}` : ''}</p>
         {aitkRuns.length > 1 && <div className="mt-2 flex flex-col gap-1 max-w-md">
