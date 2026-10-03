@@ -904,6 +904,27 @@ async function capabilities(): Promise<BackendCapabilities> {
         default: '',
         visible_when: { key: 'yue2Cot', not_equals: 'off' },
       },
+      {
+        // #… Lead approved 2026-10-03: soft bias on by default for a cover
+        // with an approved score — Rob's ear went from 2/11 on-time sections
+        // to 11/11 with it (RESEARCH/YUE2_ALIGNMENT_GATE_SET.md:1064).
+        key: 'yue2LyricSchedule',
+        type: 'select',
+        section: 'Lead sheet',
+        label: 'Lyric Timing (C6)',
+        hint: 'Ties each lyric block to its score section\'s timing. Soft nudges the composer toward '
+            + 'that timing without hiding anything; Hard hides a section\'s lyrics (and score lines, '
+            + 'if enabled below) from the composer until its first Vocal note. Needs an approved '
+            + 'score. A score the schedule cannot be built from (no tempo, unlabelled sections, ...) '
+            + 'renders without it — check the log for why.',
+        default: 'bias',
+        options: [
+          { value: 'bias', label: 'Soft (bias toward the score\'s timing)' },
+          { value: 'mask', label: 'Hard (hide lyrics until timed)' },
+          { value: 'off', label: 'Off' },
+        ],
+        visible_when: { key: 'yue2Cot', not_equals: 'off' },
+      },
     ],
   };
 }

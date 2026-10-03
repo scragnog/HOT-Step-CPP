@@ -397,26 +397,39 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   const abc = abcRaw && cot !== 'off' ? abcRaw : undefined;
   if (abcRaw && !abc) notes.push('A previewed score was supplied but Chain of Thought is "off" — the score was ignored.');
 
-  // C6 lyric schedule, off unless asked for: hide each section's lyrics (and
-  // optionally its score lines) from the composer until its first Vocal note.
-  // A requested schedule that cannot be built fails the job rather than
-  // quietly rendering the unscheduled baseline.
-  const scheduleMode = params.yue2LyricSchedule === 'bias' || params.yue2LyricSchedule === 'mask'
-    ? params.yue2LyricSchedule as 'bias' | 'mask' : undefined;
+  // C6 lyric schedule: ties each sung lyric block to its score section's
+  // timing. Soft (bias, -4) is the default for a render with an approved
+  // score — Rob's ear went from 2/11 on-time sections to 11/11 with it
+  // (RESEARCH/YUE2_ALIGNMENT_GATE_SET.md:1064). Hard (mask) stays selectable
+  // but is never the default. An explicit 'off' (current or saved) always
+  // wins. A schedule that cannot be built (no tempo, unlabelled sections, no
+  // matching timed lyric block, ...) must never fail the render — it logs
+  // why and falls back to the unscheduled baseline instead.
+  const scheduleMode = params.yue2LyricSchedule === 'off' ? undefined
+    : params.yue2LyricSchedule === 'mask' ? 'mask'
+    : params.yue2LyricSchedule === 'bias' || params.yue2LyricSchedule === undefined ? 'bias'
+    : undefined;
   let lyric_schedule: Yue2SynthRequest['lyric_schedule'];
   if (scheduleMode) {
-    if (!abc || !lyrics) throw new Error('yue2LyricSchedule needs a supplied score (yue2Abc) and lyrics.');
-    const num = (value: unknown, fallback: number) =>
-      value === undefined || value === null || value === '' ? fallback : Number(value);
-    const built = buildYue2LyricSchedule(abc, lyrics, {
-      mode: scheduleMode, bias: num(params.yue2LyricScheduleBias, -4),
-      abc: params.yue2LyricScheduleAbc === true, leadSec: num(params.yue2LyricScheduleLeadSec, 0),
-      behind: num(params.yue2LyricScheduleBehind, -1),
-    });
-    lyric_schedule = built.wire;
-    notes.push(`Lyric schedule: ${scheduleMode}${scheduleMode === 'bias' ? ` ${built.wire.bias}` : ''}, `
-      + `${built.wire.sections.length} timed section(s)${built.wire.abc ? ', score lines too' : ''}`
-      + (built.untimed.length ? `; never hidden (no timed section): ${built.untimed.join(', ')}` : ''));
+    if (!abc || !lyrics) {
+      notes.push(`Lyric schedule (${scheduleMode}) needs a supplied score and lyrics — rendering without it.`);
+    } else {
+      const num = (value: unknown, fallback: number) =>
+        value === undefined || value === null || value === '' ? fallback : Number(value);
+      try {
+        const built = buildYue2LyricSchedule(abc, lyrics, {
+          mode: scheduleMode, bias: num(params.yue2LyricScheduleBias, -4),
+          abc: params.yue2LyricScheduleAbc === true, leadSec: num(params.yue2LyricScheduleLeadSec, 0),
+          behind: num(params.yue2LyricScheduleBehind, -1),
+        });
+        lyric_schedule = built.wire;
+        notes.push(`Lyric schedule: ${scheduleMode}${scheduleMode === 'bias' ? ` ${built.wire.bias}` : ''}, `
+          + `${built.wire.sections.length} timed section(s)${built.wire.abc ? ', score lines too' : ''}`
+          + (built.untimed.length ? `; never hidden (no timed section): ${built.untimed.join(', ')}` : ''));
+      } catch (err: any) {
+        notes.push(`Lyric schedule (${scheduleMode}) not built — rendering without it: ${err?.message || err}`);
+      }
+    }
   }
 
   // Batching (docs/plans/yue2/30-upstream-backports.md #6): the shared Batch

@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jobCover } from './generate.js';
+import { jobCover, mapYue2Params } from './generate.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
+import type { Yue2PersistedSelection } from './index.js';
 
 // #S3: a cover job's source identity and approved ABC are captured into the
 // envelope at submit (index.ts's resolveRequest) and read ONLY from there —
@@ -63,4 +64,49 @@ test('an ordinary (non-cover) job has no captured cover, regardless of job.param
 test('a job with no envelope options for this backend has no captured cover', () => {
   const job = fakeJob(undefined, {});
   assert.equal(jobCover(job), undefined);
+});
+
+// Lead approved 2026-10-03: soft bias on by default for a render with a
+// supplied score and lyrics (RESEARCH/YUE2_ALIGNMENT_GATE_SET.md:1064). Hard
+// mask stays selectable but never the default, an explicit off always wins,
+// and a schedule that cannot be built must never fail the render.
+
+const scales = { global: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1 };
+const pick: Yue2PersistedSelection = {
+  lm: '', vae_variant: '',
+  adapters: { ar: { path: '', scales }, nar: { path: '', scales } },
+};
+const abc = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C', '% verse', 'V: Vocal', 'C4|', ''].join('\n');
+const lyrics = '[Verse]\nfirst line';
+
+test('yue2LyricSchedule defaults to soft bias when a score and lyrics are supplied', () => {
+  const { req, notes } = mapYue2Params({ caption: 'folk', lyrics, yue2Abc: abc }, pick);
+  assert.equal(req.lyric_schedule?.mode, 'bias');
+  assert.equal(req.lyric_schedule?.bias, -4);
+  assert.ok(notes.some(n => n.startsWith('Lyric schedule: bias')));
+});
+
+test('an explicit "off" is honoured even with a usable score', () => {
+  const { req, notes } = mapYue2Params({ caption: 'folk', lyrics, yue2Abc: abc, yue2LyricSchedule: 'off' }, pick);
+  assert.equal(req.lyric_schedule, undefined);
+  assert.ok(!notes.some(n => n.startsWith('Lyric schedule')));
+});
+
+test('hard mask stays selectable but is never the default', () => {
+  const { req } = mapYue2Params({ caption: 'folk', lyrics, yue2Abc: abc, yue2LyricSchedule: 'mask' }, pick);
+  assert.equal(req.lyric_schedule?.mode, 'mask');
+});
+
+test('a schedule that cannot be built falls back instead of failing the render', () => {
+  // No "% section" label line: buildYue2LyricSchedule throws "needs a score
+  // with labelled sections" — the render must still go ahead without C6.
+  const unlabelled = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C', 'C4|', ''].join('\n');
+  const { req, notes } = mapYue2Params({ caption: 'folk', lyrics, yue2Abc: unlabelled }, pick);
+  assert.equal(req.lyric_schedule, undefined);
+  assert.ok(notes.some(n => n.includes('not built') && n.includes('rendering without it')));
+});
+
+test('no score or lyrics: the default never fires and never fails', () => {
+  const { req } = mapYue2Params({ caption: 'folk' }, pick);
+  assert.equal(req.lyric_schedule, undefined);
 });
