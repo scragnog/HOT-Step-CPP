@@ -45,6 +45,20 @@ export function rungOverall(args: {
   return { overall: Math.round((base - penalty) * 100) / 100, replansPerTake };
 }
 
+/** Blind-ladder visibility for a run: labels pending (known locally, no blind
+ *  letters yet) must never fall back to listing rungs in their real, revealing
+ *  step order just because every label reads empty — no ladder renders, no
+ *  scoring, until the labels land. Pure so it's unit-testable without React. */
+export function ladderVisibility(run: Yue2AitkRunRecord | undefined, blindRungs: boolean) {
+  const jointLadder = run?.options.method === 'base-matched';
+  const labelsPending = !!jointLadder && blindRungs && run != null && !run.blindLabels;
+  const blind = !!jointLadder && blindRungs && !labelsPending;
+  const labelFor = (step: number) => run?.blindLabels?.[step] ?? '';
+  const ladder = run && !labelsPending ? [...run.checkpoints].filter(c => c.arPath && c.narPath).sort((a, b) => a.step - b.step) : [];
+  const visibleLadder = blind ? [...ladder].sort((a, b) => labelFor(a.step).localeCompare(labelFor(b.step))) : ladder;
+  return { jointLadder, labelsPending, blind, labelFor, ladder, visibleLadder };
+}
+
 export interface Yue2LadderReviewHandle {
   /** Link `dir` (step `step` of `run`) as the adapter and open the cleanup modal. */
   finishPick: (run: string, dir: string, step: number) => Promise<void>;
@@ -71,18 +85,10 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
   const { t } = useTranslation();
   const runId = run?.jobId ?? '';
   const [blindRungs] = usePersistedState('hs-yue2-blind-rungs', true);
-  const jointLadder = run?.options.method === 'base-matched';
-  // Labels pending: the run is known (locally) but hasn't been given blind
-  // letters yet. Blind mode must never fall back to listing steps in their
-  // real, revealing order just because every label reads empty.
-  const labelsPending = jointLadder && blindRungs && run != null && !run.blindLabels;
-  const blind = jointLadder && blindRungs && !labelsPending;
-  const labelFor = (step: number) => run?.blindLabels?.[step] ?? '';
+  const { jointLadder, labelsPending, blind, labelFor, ladder, visibleLadder } = ladderVisibility(run, blindRungs);
   const rungName = (step: number) => blind
     ? t('trainingStudio.refine.blindRung', 'Rung {{label}}', { label: labelFor(step) || '?' })
     : t('trainingStudio.refine.rungStep', 'Step {{step}}', { step });
-  const ladder = run && !labelsPending ? [...run.checkpoints].filter(c => c.arPath && c.narPath).sort((a, b) => a.step - b.step) : [];
-  const visibleLadder = blind ? [...ladder].sort((a, b) => labelFor(a.step).localeCompare(labelFor(b.step))) : ladder;
   const fail = (err: unknown) => onError?.(err instanceof Error ? err.message : String(err));
   const draftOpts = renderOpts.draft ? { odeSteps: 12, narCacheRatio: 0 } : {};
 

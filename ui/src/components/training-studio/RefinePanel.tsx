@@ -16,7 +16,7 @@ import { Toggle } from '../settings/SettingsPrimitives';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { Yue2JointRunChart } from './Yue2JointRunChart';
 import {
-  cancelJob, getJob, listYue2AitkRuns, listYue2JointPreviews, listYue2JointPreviewsLocal, startYue2JointTrain, yue2RungScoresExportUrl, deleteYue2AitkRun,
+  cancelJob, getJob, listYue2AitkRuns, startYue2JointTrain, yue2JointPreviewsReader, yue2RungScoresExportUrl, deleteYue2AitkRun,
   setYue2ReviewComplete, type TrainingJobSummary, type Yue2AitkRunRecord, type Yue2JointPreviewRecord, type Yue2JointTrainRequest,
 } from '../../services/trainingApi';
 import { Yue2LadderReview, type Yue2LadderReviewHandle } from './Yue2LadderReview';
@@ -75,11 +75,11 @@ export const RefinePanel: React.FC = () => {
   // follow-up) steals the selection once, even while some other run is
   // currently picked, without fighting the user's own picks afterwards.
   const lastAutoSelectedLive = useRef('');
-  // Live previews come from the worker only while the run hasn't landed in
-  // `runs` (this machine's own index) yet; once it has, read the local copy
-  // so a worker 404/offline or a stale remote render can't win.
-  const readPreviews = (ds: string, run: string) =>
-    (runs.find(r => r.jobId === run)?.live ? listYue2JointPreviews : listYue2JointPreviewsLocal)(ds, run);
+  // A run's own `live` flag means this machine's queue (training.ts
+  // listYue2AitkRuns), not "still on a worker" — every run already present
+  // in `runs` reads previews locally regardless of that flag. The worker
+  // reader is only for a job that hasn't landed in `runs` at all yet.
+  const readPreviews = (ds: string, run: string) => yue2JointPreviewsReader(runs.some(r => r.jobId === run))(ds, run);
   const refreshRuns = async () => {
     if (!datasetId) return;
     try {

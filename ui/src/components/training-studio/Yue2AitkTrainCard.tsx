@@ -16,12 +16,12 @@ import {
   getJob,
   getYue2AitkPrepare,
   listYue2AitkRuns,
-  listYue2JointPreviews,
-  listYue2JointPreviewsLocal,
   listJobs,
   jobStreamUrl,
+  pickLadderRun,
   startYue2AitkPrepare,
   startYue2JointTrain,
+  yue2JointPreviewsReader,
   type Yue2AitkPrepareRequest,
   type TrainingJobSummary,
   type TrainingMetricEvent,
@@ -654,9 +654,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   // explicit pick still wins, but there's no history to fall back to: an
   // older local run must not silently stand in for the live one underway.
   const activeJob = job && isJointJob(job, datasetId) && (job.status === 'queued' || job.status === 'running') ? job : undefined;
-  const activeJobIndexed = !activeJob || aitkRuns.some(r => r.jobId === activeJob.id);
-  const ladderRunRec = aitkRuns.find(r => r.jobId === pickedLadderRun)
-    ?? (activeJobIndexed ? aitkRuns.find(r => r.jobId === job?.id) ?? aitkRuns.find(r => r.live) ?? [...aitkRuns].sort((a, b) => b.createdAt - a.createdAt)[0] : undefined);
+  const ladderRunRec = pickLadderRun(aitkRuns, pickedLadderRun, activeJob?.id);
   const ladderRunId = ladderRunRec?.jobId;
   // This is the only case a run key comes from the job itself rather than
   // aitkRuns, and the only case previews are read from the worker instead of
@@ -667,7 +665,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   useEffect(() => {
     let cancelled = false;
     if (!previewsKey) { setJointPreviews([]); return; }
-    const refresh = () => (ladderRunId ? listYue2JointPreviewsLocal : listYue2JointPreviews)(datasetId, previewsKey)
+    const refresh = () => yue2JointPreviewsReader(!!ladderRunId)(datasetId, previewsKey)
       .then(result => { if (!cancelled) setJointPreviews(result.previews); })
       .catch(() => { if (!cancelled) setJointPreviews([]); });
     void refresh();

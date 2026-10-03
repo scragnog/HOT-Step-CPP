@@ -2581,6 +2581,28 @@ export async function listYue2JointPreviewsLocal(
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews${query}`);
 }
 
+/** The routing rule above, as one function both the training card and the
+ *  Refine tab call: local once a run is indexed in the caller's own run
+ *  list, the worker reader only while it's still an unindexed worker job. */
+export function yue2JointPreviewsReader(indexedLocally: boolean) {
+  return indexedLocally ? listYue2JointPreviewsLocal : listYue2JointPreviews;
+}
+
+/** Which run a ladder view shows: an explicit pick first, then the run
+ *  behind the active job, then the live one, then the newest with history —
+ *  but only once the active job (if any) is indexed locally. While it isn't,
+ *  there is no history to fall back to: an older local run must never stand
+ *  in for a live job that hasn't landed yet. */
+export function pickLadderRun<T extends { jobId: string; live?: boolean; createdAt: number }>(
+  runs: T[], pickedRun: string | undefined, activeJobId: string | undefined,
+): T | undefined {
+  const byId = (id: string | undefined) => runs.find(r => r.jobId === id);
+  const picked = byId(pickedRun);
+  if (picked) return picked;
+  if (activeJobId && !byId(activeJobId)) return undefined;
+  return byId(activeJobId) ?? runs.find(r => r.live) ?? [...runs].sort((a, b) => b.createdAt - a.createdAt)[0];
+}
+
 /** Awaiting review: refinement ladders across datasets with score counts. */
 export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number; blindLabel: string } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean }
 export async function listYue2Review(): Promise<{ rows: Yue2ReviewRow[] }> {

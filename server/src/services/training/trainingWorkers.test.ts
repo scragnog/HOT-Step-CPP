@@ -142,6 +142,36 @@ test('pullLinked still pulls adapters only when the worker sends none of the new
   }
 });
 
+test('scoring a run already known locally through a worker is refused with 409', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-score-local-guard-'));
+  try {
+    const script = [
+      "import path from 'node:path';",
+      "import { Readable } from 'node:stream';",
+      "import { initDb } from './src/db/database.js';",
+      "import * as repo from './src/services/training/datasetsRepo.js';",
+      "import { recordYue2AitkRun } from './src/services/training/yue2AitkRuns.js';",
+      "import { proxyToWorker } from './src/services/training/trainingWorkers.js';",
+      "import { config } from './src/config.js';",
+      "initDb();",
+      "const now = new Date().toISOString();",
+      "config.workers.list = 'Mock=http://127.0.0.1:1';",
+      "repo.insertDataset({ id: 'ds-album', slug: 'album', name: 'album', sourceDir: path.join(process.env.TRAINING_DIR, 'src-album'), recursive: true, customTag: '', tagPosition: 'prefix', genreRatio: 0, defaultArtist: '', defaultAlbum: '', defaultGenre: '', defaultLanguage: '', sampleCount: 0, labeledCount: 0, excludedCount: 0, status: 'draft', builtAt: '', datasetJsonPath: '', albumName: '', createdAt: now, updatedAt: now });",
+      "recordYue2AitkRun({ version: 1, jobId: 'local-run', datasetId: 'ds-album', datasetSlug: 'album', method: 'aitk', output: path.join(process.env.TRAINING_DIR, 'out'), options: {}, status: 'done', createdAt: 1, updatedAt: 2, checkpoints: [] });",
+      "const req = Readable.from([Buffer.from(JSON.stringify({ refineRun: 'local-run', step: 10, likeness: 4 }))]);",
+      "Object.assign(req, { url: '/training/datasets/ds-album/yue2-rung-scores', method: 'PUT', params: { name: 'Mock' }, query: {}, headers: {} });",
+      "let status = 0; let payload;",
+      "const res = { status(c) { status = c; return this; }, json(p) { payload = p; }, headersSent: false, on() {} };",
+      "await proxyToWorker(req, res);",
+      "if (status !== 409) throw new Error('expected 409, got ' + status + ' ' + JSON.stringify(payload));",
+      "if (!/already known on this machine/.test(payload?.error ?? '')) throw new Error('unexpected message: ' + JSON.stringify(payload));",
+    ].join('');
+    runPullInIsolatedRoot(root, script);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('pullLinked rejects traversal in a linked pair\'s jobId or log seg', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-pull-traversal-'));
   try {
