@@ -195,7 +195,7 @@ test('a cover submission rejects a silent Vocal score', async () => {
   /The transcriber heard no melody in this source/);
 });
 
-test('a cover submission accepts one sounding Vocal bar', () => {
+test('cover submission captures both voices by default and preserves explicit vocal-only', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-cover-submit-'));
   try {
     const script = [
@@ -203,6 +203,11 @@ test('a cover submission accepts one sounding Vocal bar', () => {
       "import { initDb } from './src/db/database.js'; import { yue2Backend } from './src/services/backends/yue2/index.js';",
       "initDb(); const resolved = yue2Backend.resolveRequest({ caption: 'c', yue2Cover: { sourceId: 's' }, yue2Abc: 'X:1\\nV: Vocal\\nz4|C4|\\nV: Ins\\nC4|' });",
       "assert.ok(resolved.options.yue2Abc.includes('C4|'));",
+      "assert.equal(resolved.options.yue2Cover.voices, 'both');",
+      "assert.ok(resolved.options.yue2Abc.includes('V: Ins'));",
+      "const vocal = yue2Backend.resolveRequest({ caption: 'c', yue2Cover: { sourceId: 's', voices: 'vocal' }, yue2Abc: 'X:1\\nV: Vocal\\nz4|C4|\\nV: Ins\\nC4|' });",
+      "assert.equal(vocal.options.yue2Cover.voices, 'vocal');",
+      "assert.equal(vocal.options.yue2Abc.includes('V: Ins'), false);",
     ].join('\n');
     execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
       cwd: fileURLToPath(new URL('../../../../', import.meta.url)),

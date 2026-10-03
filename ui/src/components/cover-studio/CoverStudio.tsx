@@ -130,7 +130,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [pairMode, setPairMode] = useState<'base' | 'pair'>('base');
   const [yue2Ar, setYue2Ar] = useState('');
   const [yue2Nar, setYue2Nar] = useState('');
-  const [coverVoices, setCoverVoices] = useState<'vocal' | 'both'>('vocal');
+  const [coverVoices, setCoverVoices] = useState<'vocal' | 'both'>('both');
   const [keepChords, setKeepChords] = useState(false);
   const [coverTempoMode, setCoverTempoMode] = useState<'free' | 'source' | 'set'>('free');
   const [coverBpm, setCoverBpm] = useState(120);

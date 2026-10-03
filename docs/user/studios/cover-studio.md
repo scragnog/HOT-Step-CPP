@@ -66,9 +66,10 @@ have to make.
    order and keeps your lyric lines under the first tag for you to arrange;
    replacing existing tags asks for confirmation.
 5. Choose **Base YuE2** or an explicit AR composer and NAR renderer pair.
-   **Score to render** defaults to vocal melody only, no chord symbols, free
-   tempo and source key. Keep the instrumental line or chords to preserve more
-   of the original arrangement; retain or set tempo, or shift the key by up to
+   **Score to render** defaults to both the vocal and instrumental lines, no
+   chord symbols, free tempo and source key. Choose vocal melody only if you
+   want to omit the transcribed instrumental line; keep chords to preserve more
+   of the original arrangement, retain or set tempo, or shift the key by up to
    six semitones. Advanced **Condition strength** tightens style, lyrics and
    score together. The reviewed full score stays available. Click
    **Generate YuE2 cover**; queued renders keep all five choices, selected

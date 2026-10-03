@@ -199,7 +199,7 @@ Details: [Cover Studio](docs/user/studios/cover-studio.md)
 | Stem mix | Split the source with SuperSep and mute or lower stems before generating. |
 | Lead-sheet review (YuE2) | Transcribe the full melody and chord score with optional SheetSage2, or paste ABC without it. Preview, edit and approve before rendering. |
 | Section and lyric aid (YuE2) | Show score section labels and starting bars, warn when lyric tags differ, and insert score tags without discarding lyric lines. |
-| Score conditioning (YuE2) | Keep detected chords by default, or drop them at render time to let the style decide harmony. The source recording does not condition the audio renderer. |
+| Score conditioning (YuE2) | Render both vocal and instrumental score lines by default, or choose vocal melody only. Chord symbols are off by default; the source recording does not condition the audio renderer. |
 | Adapter pair (YuE2) | Render with the base model or an explicit AR/NAR pair captured when you queue the cover. |
 | Serial cover queue | Queue more covers while one renders. |
 

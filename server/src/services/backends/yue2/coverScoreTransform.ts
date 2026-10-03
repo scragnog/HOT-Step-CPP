@@ -15,7 +15,7 @@ export interface CoverScoreChoices {
 
 /** Submit-time defaults; every captured cover writes all five choices. */
 export const COVER_SCORE_DEFAULTS: CoverScoreChoices = {
-  voices: 'vocal', keepChords: false, tempo: 'free', key: 'source', cfgScale: 1,
+  voices: 'both', keepChords: false, tempo: 'free', key: 'source', cfgScale: 1,
 };
 
 export function coverScoreChoices(raw: Partial<CoverScoreChoices>): CoverScoreChoices {

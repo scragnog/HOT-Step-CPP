@@ -59,12 +59,12 @@ test('transpose preserves K: modifiers and accepts a separate mode word', () => 
   assert.match(coverTranspose(wordMode, 'F#m'), /^K:F# minor clef=treble$/m);
 });
 
-test('one submit-time default set composes voices, chords, tempo, key in that order', () => {
+test('submit-time defaults retain both score voices, then apply chords, tempo, key in order', () => {
   const choices = coverScoreChoices({});
-  assert.deepEqual(choices, { voices: 'vocal', keepChords: false, tempo: 'free', key: 'source', cfgScale: 1 });
+  assert.deepEqual(choices, { voices: 'both', keepChords: false, tempo: 'free', key: 'source', cfgScale: 1 });
   const result = transformCoverScore(score, choices);
   assert.equal(result.fullScore, score);
-  assert.equal(result.renderedAbc.includes('V: Ins'), false);
+  assert.equal(result.renderedAbc.includes('V: Ins'), true);
   assert.equal(result.renderedAbc.includes('"Em/B"'), false);
   assert.equal(result.renderedAbc.includes('Q:'), false);
   assert.match(result.renderedAbc, /^K:Em$/m);
@@ -74,4 +74,13 @@ test('one submit-time default set composes voices, chords, tempo, key in that or
   assert.equal(transformCoverScore(rendered, changed).renderedAbc, rendered);
   assert.throws(() => coverScoreChoices({ tempo: 301 }), /tempo must/);
   assert.throws(() => coverScoreChoices({ cfgScale: 0 }), /cfgScale must/);
+});
+
+test('explicit vocal-only choice remains available and removes the instrumental voice', () => {
+  const choices = coverScoreChoices({ voices: 'vocal' });
+  assert.equal(choices.voices, 'vocal');
+  const result = transformCoverScore(score, choices);
+  assert.equal(result.fullScore, score);
+  assert.equal(result.renderedAbc.includes('V: Ins'), false);
+  assert.equal(result.renderedAbc.includes('V: Vocal'), true);
 });
