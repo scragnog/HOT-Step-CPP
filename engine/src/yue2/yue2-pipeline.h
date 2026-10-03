@@ -629,6 +629,11 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         if (err) *err = "codec_ids needs a single song and cfg_scale 1 (the stream is not sampled)";
         return false;
     }
+    const bool resume = supplied_n > 0 && req.continue_codec_ids;
+    if (resume && req.semantic_retries > 0) {
+        if (err) *err = "continue_codec_ids cannot be combined with semantic_retries (a retry redraws the whole stream)";
+        return false;
+    }
     // The supplied stream is prefilled in one graph at positions after the
     // prefix; past the trained context that is RoPE positions the model never
     // saw, and a huge array is a VRAM exhaustion, not a render.
@@ -642,6 +647,11 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     for (int b = 0; b < B; b++) {
         cap[(size_t) b] = yue2_plan_cap_frames(req, sp, songs[(size_t) b].score_abc);
         max_cap         = std::max(max_cap, cap[(size_t) b]);
+    }
+    if (resume && supplied_n >= std::min<int64_t>(cap[0], sp.max_tokens)) {
+        if (err) *err = "continue_codec_ids: the " + std::to_string(supplied_n) + "-frame prefix already reaches the stage cap of " +
+                        std::to_string(std::min<int64_t>(cap[0], sp.max_tokens)) + " frames";
+        return false;
     }
     // Rows per set: the prompt plus the longest stream any set may reach.
     const int64_t rows = max_prefix + std::max<int64_t>(max_cap, supplied_n) + 4;
@@ -699,19 +709,29 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         logits.insert(logits.end(), pre.logits.begin(), pre.logits.end());
     }
 
+    std::vector<int32_t> supplied_ids;  // with CODEC_OFFSET
     if (supplied_n > 0) {
         // Round trip: forward the supplied stream teacher-forced, exactly the
         // rows sampling would have left in the cache, and skip the draw.
+        // continue_codec_ids keeps the last row's logits and samples on.
         Yue2SongState & sg = songs[0];
-        std::vector<int32_t> ids;
-        ids.reserve((size_t) supplied_n);
-        for (int32_t c : req.codec_ids) ids.push_back(c + YUE2_CODEC_OFFSET);
-        Yue2ArForwardResult dummy;
-        if (!yue2_ar_prefill(m, cache, ids, {}, {}, &dummy, err, sg.cond_set)) {
+        supplied_ids.reserve((size_t) supplied_n);
+        for (int32_t c : req.codec_ids) supplied_ids.push_back(c + YUE2_CODEC_OFFSET);
+        Yue2ArForwardResult pre;
+        const std::vector<int64_t> keep = resume ? std::vector<int64_t>{ supplied_n - 1 } : std::vector<int64_t>{};
+        if (!yue2_ar_prefill(m, cache, supplied_ids, keep, {}, &pre, err, sg.cond_set)) {
             yue2_ar_kv_cache_free(&cache);
             return false;
         }
         sg.codec_ids = req.codec_ids;
+        if (resume) {
+            logits = pre.logits;  // S == 1: the next frame's row
+            fprintf(stderr, "[YuE2] continuing after a %lld-frame codec prefix (hash %016llx)\n", (long long) supplied_n,
+                    (unsigned long long) yue2_token_hash(sg.codec_ids));
+        }
+    }
+    if (supplied_n > 0 && !resume) {
+        Yue2SongState & sg = songs[0];
         sg.stage_end_reason[YUE2_STAGE_SEMANTIC] = "supplied";
         fprintf(stderr, "[YuE2-AR-Tokens] semantic song=0 n=%zu hash=%016llx (supplied)\n", sg.codec_ids.size(),
                 (unsigned long long) yue2_token_hash(sg.codec_ids));
@@ -734,6 +754,12 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     static const char * end_trace_path = std::getenv("YUE2_END_TRACE");
     const bool trace = end_trace_path && *end_trace_path && B == 1;
     int64_t step = 0;
+    if (resume) {
+        // Frame clock, caps, min_tokens and the repetition window all carry on
+        // from the prefix as if this stream had sampled it.
+        history[0] = supplied_ids;
+        step       = supplied_n;
+    }
     for (; step < sp.max_tokens; step++) {
         if (cancel && cancel->load()) {
             if (err) {
@@ -924,6 +950,12 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
     }
 
     cache.prompt_bias.clear();
+    if (resume && (songs[0].codec_ids.size() < req.codec_ids.size() ||
+                   !std::equal(req.codec_ids.begin(), req.codec_ids.end(), songs[0].codec_ids.begin()))) {
+        if (err) *err = "continue_codec_ids: the composed stream does not start with the supplied prefix (internal error)";
+        yue2_ar_kv_cache_free(&cache);
+        return false;
+    }
     for (int b = 0; b < B; b++) {
         Yue2SongState & sg = songs[(size_t) b];
         sg.stage_end_reason[YUE2_STAGE_SEMANTIC] =

@@ -9,6 +9,7 @@
 //   yue2-probe --tokenizer-check <expected-ids.json> [--models <dir>] [--tokenizer-dir <dir>]
 //   yue2-probe --prefix-check <fixture-root-dir> [--models <dir>] [--tokenizer-dir <dir>]
 //   yue2-probe --schedule-check <request.json> [--models <dir>] [--tokenizer-dir <dir>]
+//   yue2-probe --continue-check <request.json> --models <dir> [--frames <n>]
 //   yue2-probe --ar-parity <fixture-root-dir> --stage plan|semantic --models <dir> [--dump-dir <dir>]
 //   yue2-probe --sampler-parity <fixture-root-dir> --stage plan|semantic --models <dir>
 //   yue2-probe --decode-parity <fixture-root-dir> --stage plan|semantic --models <dir>
@@ -70,6 +71,7 @@
 #include "yue2/sheetsage-pipeline.h"
 #include "yue2/yue2-lm-graph.h"
 #include "yue2/yue2-lyric-schedule.h"
+#include "yue2/yue2-pipeline.h"
 #include "yue2/yue2-mert.h"
 #include "yue2/yue2-mmsfa.h"
 #include "yue2/yue2-model.h"
@@ -108,6 +110,7 @@ static void usage() {
             "       yue2-probe --tokenize <text-file> [--models <dir>] [--tokenizer-dir <dir>]\n"
             "       yue2-probe --tokenizer-check <expected-ids.json> [--models <dir>] [--tokenizer-dir <dir>]\n"
             "       yue2-probe --schedule-check <request.json> [--models <dir>] [--tokenizer-dir <dir>]\n"
+            "       yue2-probe --continue-check <request.json> --models <dir> [--frames <n>]\n"
             "       yue2-probe --prefix-check <fixture-root-dir> [--models <dir>] [--tokenizer-dir <dir>]\n"
             "       yue2-probe --ar-parity <fixture-root-dir> --stage plan|semantic --models <dir>\n"
             "       yue2-probe --sampler-parity <fixture-root-dir> --stage plan|semantic --models <dir>\n"
@@ -478,6 +481,77 @@ static int run_tokenize(const std::string & models_dir, const std::string & toke
 // section onto the semantic prefix, checks that its rows decode to text that
 // covers the section's lyric (and ABC) span, and that the section is hidden one
 // frame before start_sec - lead_sec and visible from then on.
+// --continue-check: sample-after-codec-prefix on a real /yue2 request body
+// with continue_codec_ids. Composes `extra` frames past the prefix (semantic
+// stage only) and checks the stream starts with the exact prefix and grew;
+// then that a preset cancel stops the stage and an over-long prefix is refused.
+static int run_continue_check(const std::string & models_dir, const std::string & tokenizer_dir_arg,
+                              const std::string & request_path, int extra) {
+    BPETokenizer tok;
+    std::string  source, err, body;
+    if (!yue2_probe_load_tokenizer(models_dir, tokenizer_dir_arg, &tok, &source)) {
+        fprintf(stderr, "FATAL: could not load a tokenizer (tried --tokenizer-dir / --models)\n");
+        return 1;
+    }
+    if (FILE * f = fopen(request_path.c_str(), "rb")) {
+        char   buf[65536];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) body.append(buf, n);
+        fclose(f);
+    }
+    Yue2Request base;
+    if (!yue2_parse_request(body, &base, &err) || !base.continue_codec_ids) {
+        fprintf(stderr, "FATAL: request needs continue_codec_ids and codec_ids (%s)\n", err.c_str());
+        return 1;
+    }
+    Yue2Model m;
+    yue2_discover(&m, models_dir.c_str(), g_yue2_lm_type.empty() ? nullptr : g_yue2_lm_type.c_str());
+    if (!yue2_available(m) ||
+        !yue2_load_parts(&m, /*want_lm=*/true, /*want_vae=*/false, YUE2_VAE_STANDARD, /*want_encoder=*/false, &err)) {
+        fprintf(stderr, "FATAL: LM load failed: %s\n", err.c_str());
+        return 1;
+    }
+    const size_t n_prefix = base.codec_ids.size();
+    int fails = 0;
+    auto run = [&](Yue2Request req, bool cancelled, Yue2PipelineResult * res, std::string * why) {
+        req.semantic_only      = true;
+        req.preview_max_frames = (int) n_prefix + extra;
+        std::atomic<bool> cancel(cancelled);
+        return yue2_pipeline_run(m, tok, req, {}, &cancel, res, why);
+    };
+    {
+        Yue2PipelineResult res;
+        std::string        why;
+        const auto         t0 = std::chrono::steady_clock::now();
+        const bool         ok = run(base, false, &res, &why);
+        const std::vector<int32_t> & ids = ok && !res.tracks.empty() ? res.tracks[0].semantic_ids : std::vector<int32_t>{};
+        const bool same = ids.size() > n_prefix && std::equal(base.codec_ids.begin(), base.codec_ids.end(), ids.begin());
+        fails += same ? 0 : 1;
+        printf("%s prefix identity: %zu supplied, %zu out, %s, %.1fs%s%s\n", same ? "PASS" : "FAIL", n_prefix, ids.size(),
+               ok ? res.tracks[0].stage_end_reason[YUE2_STAGE_SEMANTIC].c_str() : "failed",
+               std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(), ok ? "" : ": ", why.c_str());
+    }
+    {
+        Yue2PipelineResult res;
+        std::string        why;
+        const bool         stopped = !run(base, true, &res, &why) && why == "cancelled";
+        fails += stopped ? 0 : 1;
+        printf("%s preset cancel: %s\n", stopped ? "PASS" : "FAIL", why.empty() ? "(ran to completion)" : why.c_str());
+    }
+    {
+        Yue2Request long_req = base;
+        long_req.codec_ids.assign((size_t) m.lm_cfg.context_length, base.codec_ids[0]);
+        Yue2PipelineResult res;
+        std::string        why;
+        const bool         refused = !run(long_req, false, &res, &why) && why.find("too long") != std::string::npos;
+        fails += refused ? 0 : 1;
+        printf("%s context cap: %s\n", refused ? "PASS" : "FAIL", why.c_str());
+    }
+    yue2_unload(&m);
+    printf("%s: %d failure(s)\n", fails ? "FAIL" : "PASS", fails);
+    return fails ? 1 : 0;
+}
+
 static int run_schedule_check(const std::string & models_dir, const std::string & tokenizer_dir_arg,
                               const std::string & request_path) {
     BPETokenizer tok;
@@ -5254,6 +5328,8 @@ int main(int argc, char ** argv) {
     bool            do_load       = false;
     std::string     tokenize_path;
     std::string     schedule_check_path;
+    std::string     continue_check_path;
+    int             continue_frames = 25;
     std::string     tokenizer_check_path;
     std::string     prefix_check_dir;
     std::string     ar_parity_dir;
@@ -5299,6 +5375,10 @@ int main(int argc, char ** argv) {
             tokenize_path = argv[++i];
         } else if (!strcmp(argv[i], "--tokenizer-check") && i + 1 < argc) {
             tokenizer_check_path = argv[++i];
+        } else if (!strcmp(argv[i], "--continue-check") && i + 1 < argc) {
+            continue_check_path = argv[++i];
+        } else if (!strcmp(argv[i], "--frames") && i + 1 < argc) {
+            continue_frames = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--schedule-check") && i + 1 < argc) {
             schedule_check_path = argv[++i];
         } else if (!strcmp(argv[i], "--prefix-check") && i + 1 < argc) {
@@ -5440,6 +5520,9 @@ int main(int argc, char ** argv) {
         }
     }
 
+    if (!continue_check_path.empty()) {
+        return run_continue_check(models_dir, tokenizer_dir_arg, continue_check_path, std::max(1, continue_frames));
+    }
     if (!schedule_check_path.empty()) {
         return run_schedule_check(models_dir, tokenizer_dir_arg, schedule_check_path);
     }

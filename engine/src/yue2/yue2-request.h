@@ -182,6 +182,12 @@ struct Yue2Request {
     // (decoder A/B, e.g. with or without the tokenizer's companion adapter).
     // Single song, single variation. Empty = normal generation.
     std::vector<int32_t> codec_ids;
+    // With codec_ids: keep composing after them instead of stopping. The
+    // supplied codes are a prefix (a saved render cut at a section boundary),
+    // prefilled under the unchanged prompt and score; sampling picks up at
+    // frame codec_ids.size(). Needs a single song, cfg_scale 1 and no
+    // semantic_retries.
+    bool continue_codec_ids = false;
 
     // ── Ending controls, semantic stage only (2026-09-15) ────────────────
     // Measured on the adapter ladders (_LISTENING/2026-09-14/RESULTS.md, 77/83):
@@ -583,6 +589,14 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
             }
             out->codec_ids.push_back((int32_t) yyjson_get_sint(x));
         }
+    }
+    if (yyjson_val * v = yyjson_obj_get(root, "continue_codec_ids"); v && !yyjson_is_null(v)) {
+        if (!yyjson_is_bool(v) || (yyjson_get_bool(v) && out->codec_ids.empty())) {
+            if (err) *err = "continue_codec_ids must be a boolean, and true needs a non-empty codec_ids prefix";
+            yyjson_doc_free(doc);
+            return false;
+        }
+        out->continue_codec_ids = yyjson_get_bool(v);
     }
 
     if (!yue2_req_num(root, "preview_max_frames", &num, &present, err)) {

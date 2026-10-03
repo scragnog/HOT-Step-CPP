@@ -144,6 +144,21 @@ style + lyrics (+ optional ABC) -> tokenizer and prompt assembly (yue2-tokenizer
   -> stitch and clamp -> 16-bit WAV (yue2-pipeline.h, yue2-job.h)
 ```
 
+`codec_ids` on a `/yue2/synth` request supplies the composer's codec stream (raw ids,
+0..32767), which is prefilled instead of sampled. With `continue_codec_ids: true` the
+stream is treated as a prefix: it is prefilled under the unchanged prompt and score,
+then the composer keeps sampling from frame `codec_ids.length`. Use it to keep a
+render's codecs up to a section boundary and recompose the rest. The frame clock, caps,
+`min_tokens` and the repetition window carry on from the prefix. The request needs one
+song, `cfg_scale` 1 and no `semantic_retries`, and the prefix must stay under both the
+context and the stage cap. The stage fails if the output does not begin with the exact
+prefix. The NAR and VAE then render the whole stream again, prefix included. Prefix
+noise is the same for the same `noise_seed`, but the NAR attends both ways across its
+chunk, so the prefix audio is close to the original render without being identical.
+Render the whole song; do not splice old prefix audio onto the new suffix.
+`yue2-probe --continue-check <request.json>` checks prefix identity, cancellation and
+the context cap on any backend.
+
 YuE2 loads its weights itself, outside `model-store.h`. Under the default policy a
 YuE2 job first evicts every unreferenced store module (`store_evict_all`), as MM3 does,
 because the store keeps 0-byte entries resident after use and their real VRAM would
