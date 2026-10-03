@@ -28,6 +28,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <utility>
 #include <cmath>
 #include <random>
 #include <string>
@@ -79,7 +80,7 @@ struct Yue2SongSpec {
 struct Yue2LyricSection {
     double  start_sec = 0.0;             // first Vocal note on the score clock
     int64_t lyric_c0 = 0, lyric_c1 = 0;  // codepoints into the request lyrics
-    int64_t abc_c0 = -1, abc_c1 = -1;    // codepoints into the request abc; -1 = none
+    std::vector<std::pair<int64_t, int64_t>> abc;  // codepoint spans into the request abc (section lines, no fields)
 };
 
 struct Yue2LyricSchedule {
@@ -641,10 +642,19 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
                 Yue2LyricSection sec;
                 yyjson_val * st = yyjson_is_obj(e) ? yyjson_obj_get(e, "start_sec") : nullptr;
                 yyjson_val * ab = yyjson_is_obj(e) ? yyjson_obj_get(e, "abc") : nullptr;
+                bool abc_ok = !ab || yyjson_is_null(ab) || (yyjson_is_arr(ab) && yyjson_arr_size(ab) <= 4096);
+                if (abc_ok && yyjson_is_arr(ab)) {
+                    size_t ai = 0, amax = 0;
+                    yyjson_val * a = nullptr;
+                    yyjson_arr_foreach(ab, ai, amax, a) {
+                        int64_t c0 = 0, c1 = 0;
+                        if (!span(a, &c0, &c1)) { abc_ok = false; break; }
+                        sec.abc.emplace_back(c0, c1);
+                    }
+                }
                 if (!yyjson_is_num(st) || !std::isfinite(yyjson_get_num(st)) || yyjson_get_num(st) < 0 ||
-                    !span(yyjson_obj_get(e, "lyric"), &sec.lyric_c0, &sec.lyric_c1) ||
-                    (ab && !yyjson_is_null(ab) && !span(ab, &sec.abc_c0, &sec.abc_c1))) {
-                    why = "sections[" + std::to_string(idx) + "] needs start_sec >= 0, lyric [c0,c1] and optional abc [c0,c1] with c1 > c0";
+                    !span(yyjson_obj_get(e, "lyric"), &sec.lyric_c0, &sec.lyric_c1) || !abc_ok) {
+                    why = "sections[" + std::to_string(idx) + "] needs start_sec >= 0, lyric [c0,c1] and optional abc [[c0,c1],...] with c1 > c0";
                     break;
                 }
                 sec.start_sec = yyjson_get_num(st);

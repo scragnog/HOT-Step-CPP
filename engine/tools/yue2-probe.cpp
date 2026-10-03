@@ -522,13 +522,21 @@ static int run_schedule_check(const std::string & models_dir, const std::string 
     };
     for (size_t k = 0; k < sc.sections.size(); k++) {
         const Yue2LyricSection & sec = sc.sections[k];
-        const std::string want[2] = { slice(req.lyrics, sec.lyric_c0, sec.lyric_c1),
-                                      sec.abc_c0 >= 0 ? slice(req.abc, sec.abc_c0, sec.abc_c1) : std::string() };
+        std::vector<std::string> want = { slice(req.lyrics, sec.lyric_c0, sec.lyric_c1) };
+        for (const auto & a : sec.abc) want.push_back(slice(req.abc, a.first, a.second));
+        if (rows.rows[k].size() != (sc.abc ? want.size() : 1)) {
+            fails++;
+            printf("FAIL section %zu: %zu row ranges for %zu spans\n", k, rows.rows[k].size(), want.size());
+            continue;
+        }
         for (size_t j = 0; j < rows.rows[k].size(); j++) {
             const auto & r = rows.rows[k][j];
             std::vector<int32_t> ids(prefix.begin() + r.first, prefix.begin() + r.second);
             const std::string got = yue2_bpe_decode(&tok, ids);
-            const bool ok = got.find(want[j]) != std::string::npos && got.size() < want[j].size() + 32;
+            // Lyric rows cover their span (boundary tokens included); score
+            // rows lie wholly inside theirs, so field lines stay visible.
+            const bool ok = j == 0 ? got.find(want[j]) != std::string::npos && got.size() < want[j].size() + 32
+                                   : want[j].find(got) != std::string::npos && got.size() + 16 >= want[j].size();
             fails += ok ? 0 : 1;
             printf("%s section %zu %s rows [%lld,%lld) %zu bytes for a %zu-byte span\n", ok ? "PASS" : "FAIL", k,
                    j ? "abc" : "lyric", (long long) r.first, (long long) r.second, got.size(), want[j].size());

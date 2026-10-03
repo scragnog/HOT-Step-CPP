@@ -52,11 +52,13 @@ block to the first Vocal note of its score section, using the same score clock
 and section matching as the drift metric. While composing, the engine adds
 `yue2LyricScheduleBias` (default -4) to the attention on a section's lyric
 tokens until that note. `"mask"` uses -inf instead.
-`yue2LyricScheduleAbc: true` hides the section's score lines as well.
+`yue2LyricScheduleAbc: true` hides the section's label and music lines as
+well. Field lines such as `M:`, `Q:`, `K:` and `V:` stay visible.
 `yue2LyricScheduleLeadSec` reveals a section that many seconds early (default
 0). `yue2LyricScheduleBehind: n` also hides sections more than n sections back
 (default -1, never). The schedule needs a score with a `Q:` tempo, lyrics with
-`\n` line endings, CFG 1 and one prompt per batch, or the job fails. Lyric
+`\n` line endings, CFG 1 and one prompt per batch, or the job fails. Scheduled jobs share an
+engine batch only with jobs that have the identical prompt. Lyric
 blocks with no timed section are never hidden, and the job notes name them.
 The engine logs each section's prompt rows as `[YuE2-C6]`.
 `yue2-probe --schedule-check <request.json>` verifies a request's mapping

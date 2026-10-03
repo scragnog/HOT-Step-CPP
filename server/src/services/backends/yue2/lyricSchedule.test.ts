@@ -32,8 +32,9 @@ test('each section is revealed at the S13 v4 first Vocal note onset', () => {
 test('spans cover the exact lyric block and the section score lines', () => {
   const { wire, untimed } = buildYue2LyricSchedule(abc, lyrics, options);
   assert.deepEqual(wire.sections.map(s => cps(lyrics, s.lyric)), ['[Verse]\nfirst line', '[Chorus]\nsecond line']);
-  assert.deepEqual(wire.sections.map(s => cps(abc, s.abc!)),
-    ['% verse\nV: Vocal\nz2C2|\nM:1/4\nD|\nM:4/4\n', '% chorus\nV: Vocal\nz1E3|F4|\n']);
+  // Field lines (V:, M:, Q:, K:) stay visible: they outlive their section.
+  assert.deepEqual(wire.sections.map(s => s.abc!.map(span => cps(abc, span))),
+    [['% verse\n', 'z2C2|\n', 'D|\n'], ['% chorus\n', 'z1E3|F4|\n']]);
   assert.deepEqual(untimed, ['Outro']);
   assert.deepEqual(wire, { mode: 'bias', bias: -4, abc: true, sections: wire.sections });
 });

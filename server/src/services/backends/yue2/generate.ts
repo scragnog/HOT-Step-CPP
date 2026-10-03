@@ -737,7 +737,11 @@ async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
  *  settings and adapters, differing only in prompt, score and seeds. */
 export function yue2CoalesceKey(job: GenerationJob, req: Yue2SynthRequest): string {
   const shared: Record<string, unknown> = { ...req };
-  for (const k of ['style', 'lyrics', 'abc', 'seed', 'noise_seed', 'lm_batch_size', 'songs']) delete shared[k];
+  // A lyric schedule maps spans of one exact prompt, so scheduled jobs share
+  // a batch only when style, lyrics and score are identical too.
+  const own = req.lyric_schedule ? ['seed', 'noise_seed', 'lm_batch_size', 'songs']
+    : ['style', 'lyrics', 'abc', 'seed', 'noise_seed', 'lm_batch_size', 'songs'];
+  for (const k of own) delete shared[k];
   const ordered = Object.fromEntries(Object.keys(shared).sort().map(k => [k, shared[k]]));
   return JSON.stringify([job.userId, job.envelope.models, ordered]);
 }

@@ -6,7 +6,7 @@ import { scoreSections } from './scoreSections.js';
 export interface Yue2LyricScheduleSection {
   start_sec: number;
   lyric: [number, number];
-  abc?: [number, number];
+  abc?: Array<[number, number]>;
 }
 
 export interface Yue2LyricScheduleWire {
@@ -43,15 +43,24 @@ export function buildYue2LyricSchedule(abc: string, lyrics: string, options: Yue
   const onsets = scoreVocalNoteOnsets(abc, bars);
   const sections = scoreSections(abc);
   if (!sections.length) throw new Error('lyric schedule needs a score with labelled sections');
-  // Codepoint start of each "% label" line, in the order scoreSections reads them.
-  const labelStarts: number[] = [];
+  // Per score section, the codepoint spans of its own lines: the "% label"
+  // line and its music, never a field line (M:, Q:, K:, V: ...), which stays
+  // in force past the section and so must stay visible.
+  const abcEnd = codepoints(abc);
+  const abcSpans: Array<Array<[number, number]>> = [];
   let at = 0;
   for (const line of abc.split('\n')) {
-    if (line.trim().startsWith('%') && line.trim().slice(1).trim()) labelStarts.push(at);
-    at += codepoints(line) + 1;
+    const trimmed = line.trim();
+    const next = Math.min(at + codepoints(line) + 1, abcEnd);
+    if (trimmed.startsWith('%') && trimmed.slice(1).trim()) abcSpans.push([]);
+    const spans = abcSpans.at(-1);
+    if (spans && trimmed && !/^[A-Za-z+]:/.test(trimmed)) {
+      const last = spans.at(-1);
+      if (last && last[1] === at) last[1] = next; else spans.push([at, next]);
+    }
+    at = next;
   }
-  if (labelStarts.length !== sections.length) throw new Error('lyric schedule could not locate the score section lines');
-  const abcEnd = codepoints(abc);
+  if (abcSpans.length !== sections.length) throw new Error('lyric schedule could not locate the score section lines');
   const lyricChars = Array.from(lyrics);
   const tags = lyricBlocks(lyrics);
   let nextTag = 0;
@@ -72,7 +81,7 @@ export function buildYue2LyricSchedule(abc: string, lyrics: string, options: Yue
     wire.push({
       start_sec: Math.round(onset * 1000) / 1000,
       lyric: [tags[match].start, end],
-      ...(options.abc ? { abc: [labelStarts[index], labelStarts[index + 1] ?? abcEnd] as [number, number] } : {}),
+      ...(options.abc && abcSpans[index].length ? { abc: abcSpans[index] } : {}),
     });
   });
   if (!wire.length) throw new Error('lyric schedule found no sung lyric block with a timed score section');

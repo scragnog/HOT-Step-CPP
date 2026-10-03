@@ -44,15 +44,17 @@ static inline int64_t yue2_cp_to_byte(const std::string & s, int64_t cp) {
 }
 
 // Token rows of `ids` (placed at prefix position `base`) whose bytes overlap
-// [b0, b1) of the text they encode. Token bytes come from decoding each id
-// alone; byte-level BPE makes those concatenate to the exact text.
+// [b0, b1) of the text they encode, or with `inside` only those wholly within
+// it (a token shared with a neighbouring line stays visible). Token bytes come
+// from decoding each id alone; byte-level BPE makes those concatenate to the
+// exact text.
 static inline bool yue2_rows_for_bytes(const BPETokenizer * tok, const std::vector<int> & ids, int64_t base,
-                                       size_t text_bytes, int64_t b0, int64_t b1,
+                                       size_t text_bytes, int64_t b0, int64_t b1, bool inside,
                                        std::pair<int64_t, int64_t> * out, std::string * err) {
     int64_t off = 0, first = -1, last = -1;
     for (size_t i = 0; i < ids.size(); i++) {
         const int64_t len = (int64_t) yue2_bpe_decode(tok, { (int32_t) ids[i] }).size();
-        if (off < b1 && off + len > b0) {
+        if (inside ? (off >= b0 && off + len <= b1) : (off < b1 && off + len > b0)) {
             if (first < 0) first = (int64_t) i;
             last = (int64_t) i;
         }
@@ -84,15 +86,17 @@ static inline bool yue2_schedule_rows(const BPETokenizer * tok, const Yue2LyricS
             return false;
         }
         std::pair<int64_t, int64_t> r;
-        if (!yue2_rows_for_bytes(tok, tids, 1, text.size(), lyric_at + l0, lyric_at + l1, &r, err)) return false;
+        if (!yue2_rows_for_bytes(tok, tids, 1, text.size(), lyric_at + l0, lyric_at + l1, false, &r, err)) return false;
         out->rows[k].push_back(r);
-        if (sc.abc && s.abc_c0 >= 0) {
-            const int64_t a0 = yue2_cp_to_byte(abc_text, s.abc_c0), a1 = yue2_cp_to_byte(abc_text, s.abc_c1);
+        // Score lines: the caller leaves field lines (M:, Q:, K:, V:) out of
+        // these spans, and only tokens wholly inside a span are hidden.
+        for (size_t j = 0; sc.abc && j < s.abc.size(); j++) {
+            const int64_t a0 = yue2_cp_to_byte(abc_text, s.abc[j].first), a1 = yue2_cp_to_byte(abc_text, s.abc[j].second);
             if (a0 < 0 || a1 < 0 || a1 <= a0) {
                 if (err) *err = "lyric_schedule: section " + std::to_string(k) + " abc span is outside the score";
                 return false;
             }
-            if (!yue2_rows_for_bytes(tok, abc_ids, abc_base, abc_text.size(), a0, a1, &r, err)) return false;
+            if (!yue2_rows_for_bytes(tok, abc_ids, abc_base, abc_text.size(), a0, a1, true, &r, err)) return false;
             out->rows[k].push_back(r);
         }
     }

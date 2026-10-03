@@ -87,6 +87,22 @@ test('only jobs with the same pick coalesce', () => {
   assert.notEqual(yue2CoalesceKey(job(a), req), yue2CoalesceKey(job({ lm: 'q8_0' }), req));
 });
 
+test('scheduled jobs coalesce only with the identical prompt', () => {
+  const job = { userId: 'u', envelope: { models: { lm: 'q8_0' } } } as unknown as GenerationJob;
+  const lyric_schedule = { mode: 'bias' as const, bias: -4, sections: [{ start_sec: 1, lyric: [0, 8] as [number, number] }] };
+  const base = { style: 's', cot: 'full', vae_variant: 'standard', abc: 'X:1', lyric_schedule } as Yue2SynthRequest;
+  const key = (r: Partial<Yue2SynthRequest>) => yue2CoalesceKey(job, { ...base, ...r });
+  // Same length, different words: equal spans, different token rows.
+  assert.notEqual(key({ lyrics: '[Verse]\nfirst line\n\n[Chorus]\nsecond line' }),
+    key({ lyrics: '[Verse]\nother text\n\n[Chorus]\nthird words' }));
+  assert.notEqual(key({ lyrics: 'x', style: 's' }), key({ lyrics: 'x', style: 't' }));
+  assert.notEqual(key({ lyrics: 'x', abc: 'X:1' }), key({ lyrics: 'x', abc: 'X:2' }));
+  assert.equal(key({ lyrics: 'x', seed: 1 }), key({ lyrics: 'x', seed: 2 }));
+  // Unscheduled jobs still share a batch across prompts.
+  const plain = { ...base, lyric_schedule: undefined };
+  assert.equal(yue2CoalesceKey(job, { ...plain, lyrics: 'a' }), yue2CoalesceKey(job, { ...plain, lyrics: 'b', style: 't' }));
+});
+
 test('the picker reports the saved LM and VAE, not what is resident', async () => {
   const { yue2PickerLmVae } = await import('./index.js');
   const props = { variants: { lm: { selected: 'bf16' } }, files: { vae_standard: { found: true } } } as any;
