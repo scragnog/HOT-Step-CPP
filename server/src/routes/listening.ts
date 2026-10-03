@@ -29,7 +29,9 @@ const router = Router();
 
 const LISTENING_ROOT = path.resolve(PROJECT_ROOT, '_experiments', '_LISTENING');
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+// Leading underscore allowed — this repo's own convention for scratch/hidden
+// study folders (_LISTENING itself, a throwaway _save-test copy).
+const SAFE_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
 
 router.use((req, res, next) => {
   if (!LOOPBACK.has(req.socket.remoteAddress ?? '')) {

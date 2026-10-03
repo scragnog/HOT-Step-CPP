@@ -25,6 +25,15 @@ test('resolves a normal file inside the root', () => {
   });
 });
 
+test('resolves a folder name with a leading underscore (e.g. a _save-test scratch copy)', () => {
+  withTmpRoot((root) => {
+    fs.mkdirSync(path.join(root, '_save-test'));
+    fs.writeFileSync(path.join(root, '_save-test', 'index.html'), '<html></html>');
+    const target = resolveConfined(root, '_save-test', ['index.html']);
+    assert.equal(target, path.join(root, '_save-test', 'index.html'));
+  });
+});
+
 test('rejects a folder name that escapes via ..', () => {
   withTmpRoot((root) => {
     assert.equal(resolveConfined(root, '..', ['secret.txt']), null);
