@@ -98,10 +98,12 @@ Click a track (outside of selection mode) to open the right sidebar.
   Reproduction for YuE2), and Lyrics.
 
 For a rendered YuE2 cover, **Measure drift** in the details panel aligns its
-saved audio to the lyrics used by that job, then compares each lyric tag with
-the score section in the same position. The readout shows expected and sung
+saved audio to the lyrics used by that job, then matches sung lyric tags to
+like-labelled score sections in order. The readout shows expected and sung
 time spans, start offsets in bars, their mean absolute offset, and the first
-section more than one bar off. It flags mismatched tags and missing words.
+section more than one bar off. It lists unmatched sung tags and why any section
+is unscored, including low word confidence. The live result uses the mix alone
+and says that vocal-stem agreement has not been checked.
 The measurement is saved with the song; opening details alone does not run the
 aligner. If the rendered score has free tempo, the calculation uses the
 reviewed source score's tempo and labels that fallback.

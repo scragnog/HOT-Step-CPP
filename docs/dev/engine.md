@@ -200,8 +200,13 @@ identity as `yue2Cover`; the engine composes from the score rather than
 conditioning its audio renderer on the recording. Without `--melody-only`,
 `yue2-sheet` retains its full-score training default.
 
-The post-render cover drift check compares forced-aligned lyric words with score
-sections. `server/src/services/backends/yue2/scoreClock.ts` walks each Vocal bar
+The post-render cover drift check matches sung lyric blocks to like-labelled
+score sections in order, skipping instrumental tags and listing unmatched sung
+blocks. A section is unscored when its opening or full-block median MMS_FA word
+score is below 0.2, or when supplied mix and vocal-stem alignments disagree by
+more than half a bar. The live route currently has mix audio only, so its result
+states that stem agreement was not checked; offline calibration can supply both.
+`server/src/services/backends/yue2/scoreClock.ts` walks each Vocal bar
 under its active `M:` and `Q:` fields; a later meter or tempo change therefore
 changes the expected section time. The offline `server/scripts/yue2-c4-sidecar.ts`
 uses that same clock to propose word-to-note matches from cached `cursor_words`

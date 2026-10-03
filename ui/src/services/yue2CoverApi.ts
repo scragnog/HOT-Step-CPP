@@ -57,11 +57,15 @@ export interface Yue2CoverDatasetMetadata {
 }
 
 export interface Yue2CoverDriftResult {
+  metricVersion: number;
   tempoBpm: number;
   meter: string;
   secondsPerBar: number;
   tempoSource: 'rendered-score' | 'source-score-fallback';
+  stemChecked: boolean;
   sectionWarning: string | null;
+  sungLyricBlocks: number;
+  unmatchedLyricBlocks: Array<{ index: number; label: string }>;
   sections: Array<{
     scoreLabel: string;
     lyricTag: string | null;
@@ -70,6 +74,9 @@ export interface Yue2CoverDriftResult {
     expected: { start: number; end: number };
     sung: { start: number; end: number } | null;
     offsetBars: number | null;
+    unscoredReason: 'no_matching_lyric_tag' | 'no_aligned_words' | 'low_word_confidence' |
+      'mix_stem_disagreement' | null;
+    disagreementBars: number | null;
   }>;
   meanAbsoluteOffsetBars: number | null;
   firstOverOneBar: { index: number; label: string; offsetBars: number } | null;

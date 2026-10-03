@@ -36,10 +36,12 @@ the reviewed full score and the choice. The song metadata records both that
 provenance and the ABC actually rendered.
 
 `POST /drift/:songId` measures a saved YuE2 cover on request. It aligns that
-song's audio with the lyrics captured at generation, compares word times with
-the rendered score's labelled bar ranges, and returns each section's expected
-and sung spans, start offset in bars, mean absolute offset and the first
-section more than one bar off. The result is cached on the song; a matching
+song's audio with the lyrics captured at generation, matches sung lyric blocks
+to like-labelled score sections in order, and returns each section's expected
+and sung spans, start offset in bars, unscored reason, mean absolute offset,
+and the first section more than one bar off. Unmatched sung lyric blocks are
+listed. The live route checks word confidence but has no vocal stem to compare;
+`stemChecked` is false. The result is cached on the song; a matching
 request returns it without another alignment. If the rendered score has no
 tempo, the source score's tempo is used and the response flags the fallback.
 

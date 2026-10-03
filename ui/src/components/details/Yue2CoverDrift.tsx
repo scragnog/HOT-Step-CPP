@@ -7,19 +7,29 @@ const measuredThisSession = new Map<string, Yue2CoverDriftResult>();
 
 function seconds(value: number): string { return `${value.toFixed(1)}s`; }
 function span(value: { start: number; end: number } | null): string {
-  return value ? `${seconds(value.start)}–${seconds(value.end)}` : 'No aligned words';
+  return value ? `${seconds(value.start)}–${seconds(value.end)}` : 'Unscored';
 }
 
+const unscoredText: Record<NonNullable<Yue2CoverDriftResult['sections'][number]['unscoredReason']>, string> = {
+  no_matching_lyric_tag: 'No matching sung tag',
+  no_aligned_words: 'No aligned words',
+  low_word_confidence: 'Low word confidence',
+  mix_stem_disagreement: 'Mix/stem disagreement',
+};
+
 /** An explicit measurement: opening a library item never starts MMS_FA. */
-export const Yue2CoverDrift: React.FC<{ song: Song }> = ({ song }) => {
+export const Yue2CoverDrift: React.FC<{ song: Song }> = ({ song }) =>
+  <Yue2CoverDriftBody key={song.id} song={song} />;
+
+const Yue2CoverDriftBody: React.FC<{ song: Song }> = ({ song }) => {
   const { token } = useAuth();
   const params = song.generationParams || song.generation_params || {};
-  const saved = params.yue2CoverDrift as Yue2CoverDriftResult | undefined;
+  const cached = params.yue2CoverDrift as Yue2CoverDriftResult | undefined;
+  const saved = cached?.metricVersion === 3 ? cached : undefined;
   const [result, setResult] = React.useState<Yue2CoverDriftResult | null>(measuredThisSession.get(song.id) ?? saved ?? null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState('');
 
-  React.useEffect(() => { setResult(measuredThisSession.get(song.id) ?? saved ?? null); setBusy(false); setError(''); }, [song.id, saved]);
   if (!params.yue2Cover || !params.yue2Abc) return null;
 
   const measure = async () => {
@@ -53,7 +63,13 @@ export const Yue2CoverDrift: React.FC<{ song: Song }> = ({ song }) => {
         {result.tempoBpm} BPM · {result.meter} · {result.tempoSource === 'source-score-fallback'
           ? 'Source tempo fallback: rendered score had free tempo' : 'Rendered score tempo'}
       </p>
+      <p className="text-zinc-500">{result.stemChecked ? 'Mix and vocal stem compared' : 'Mix only; vocal stem not checked'}
+        {' · '}{result.sections.filter(section => section.offsetBars !== null).length}/{result.sections.length} sections scored
+      </p>
       {result.sectionWarning && <p className="text-amber-700 dark:text-amber-300">{result.sectionWarning}</p>}
+      {result.unmatchedLyricBlocks.length > 0 && <p className="text-amber-700 dark:text-amber-300">
+        Unmatched sung lyric tags: {result.unmatchedLyricBlocks.map(block => `${block.index} [${block.label}]`).join(', ')}
+      </p>}
       {result.firstOverOneBar && <p className="text-amber-700 dark:text-amber-300">
         First over one bar: section {result.firstOverOneBar.index} ({result.firstOverOneBar.label})
       </p>}
@@ -64,7 +80,9 @@ export const Yue2CoverDrift: React.FC<{ song: Song }> = ({ song }) => {
             <td className="py-1 pr-2">{section.scoreLabel} · {section.startBar}–{section.endBar}{section.lyricTag && section.lyricTag.toLowerCase() !== section.scoreLabel.toLowerCase() ? ` / [${section.lyricTag}]` : ''}</td>
             <td className="pr-2">{span(section.expected)}</td>
             <td className="pr-2">{span(section.sung)}</td>
-            <td>{section.offsetBars === null ? 'Missing' : `${section.offsetBars >= 0 ? '+' : ''}${section.offsetBars.toFixed(2)} bars`}</td>
+            <td>{section.offsetBars === null
+              ? section.unscoredReason ? unscoredText[section.unscoredReason] : 'Unscored'
+              : `${section.offsetBars >= 0 ? '+' : ''}${section.offsetBars.toFixed(2)} bars`}</td>
           </tr>)}</tbody>
         </table>
       </div>

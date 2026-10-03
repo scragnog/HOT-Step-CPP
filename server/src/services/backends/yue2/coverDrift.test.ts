@@ -44,7 +44,63 @@ test('missing words and a mismatched tag are reported without inventing a time',
   const result = measureCoverDrift(score, score, wrong, [word('first', 0, 0.5)]);
   assert.equal(result.sections[1].sung, null);
   assert.equal(result.sections[1].offsetBars, null);
-  assert.match(result.sectionWarning!, /score section 2 is chorus, lyric tag 2 is Verse 2/);
+  assert.equal(result.sections[1].unscoredReason, 'no_matching_lyric_tag');
+  assert.match(result.sectionWarning!, /1 score sections lack a matching sung tag/);
+});
+
+test('matches sung labels in order while skipping instrumental tags and score gaps', () => {
+  const abc = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C',
+    '% verse', 'V: Vocal', 'C4|', '% interlude', 'V: Vocal', 'z4|',
+    '% chorus', 'V: Vocal', 'D4|', '% verse', 'V: Vocal', 'E4|', ''].join('\n');
+  const text = '[Verse 1]\none\n[Instrumental Break]\n[Chorus]\ntwo\n[Guitar Solo]\n[Verse 2]\nthree';
+  const at = (value: string, start: number): Yue2AlignWord => {
+    const char0 = Array.from(text.slice(0, text.indexOf(value))).length;
+    return { char0, char1: char0 + value.length, start, end: start + 0.5, score: 0.9 };
+  };
+  const result = measureCoverDrift(abc, abc, text, [at('one', 0), at('two', 8), at('three', 12)]);
+  assert.deepEqual(result.sections.map(row => row.lyricTag), ['Verse 1', null, 'Chorus', 'Verse 2']);
+  assert.deepEqual(result.sections.map(row => row.unscoredReason),
+    [null, 'no_matching_lyric_tag', null, null]);
+  assert.deepEqual(result.sections.map(row => row.offsetBars), [0, null, 0, 0]);
+  assert.equal(result.sungLyricBlocks, 3);
+  assert.deepEqual(result.unmatchedLyricBlocks, []);
+});
+
+test('lists sung lyric blocks that cannot match a score label or order', () => {
+  const text = '[Verse]\nfirst\n[Bridge]\nextra\n[Instrumental Break]\nstray words\n[Chorus]\nsecond\n[Outro - Instrumental]';
+  const result = measureCoverDrift(score, score, text, []);
+  assert.deepEqual(result.sections.map(row => row.lyricTag), ['Verse', 'Chorus']);
+  assert.equal(result.sungLyricBlocks, 4);
+  assert.deepEqual(result.unmatchedLyricBlocks,
+    [{ index: 2, label: 'Bridge' }, { index: 3, label: 'Instrumental Break' }]);
+  assert.match(result.sectionWarning!, /2 sung lyric tags unused/);
+});
+
+test('low-confidence force-fit and mix/stem disagreement leave rows unscored', () => {
+  const good = word('first', 0, 0.5);
+  const low = { ...word('second', 6, 6.5), score: 0.01 };
+  const lowResult = measureCoverDrift(score, score, lyrics, [good, low]);
+  assert.equal(lowResult.sections[1].unscoredReason, 'low_word_confidence');
+  assert.equal(lowResult.sections[1].sung, null);
+  assert.equal(lowResult.meanAbsoluteOffsetBars, 0);
+  const disputed = measureCoverDrift(score, score, lyrics, [good, word('second', 6, 6.5)],
+    [good, word('second', 9, 9.5)]);
+  assert.equal(disputed.sections[1].disagreementBars, 1);
+  assert.equal(disputed.sections[1].unscoredReason, 'mix_stem_disagreement');
+  assert.equal(disputed.sections[1].offsetBars, null);
+  const boundary = measureCoverDrift(score, score, lyrics, [good, word('second', 6, 6.5)],
+    [good, word('second', 7.5, 8)]);
+  assert.equal(boundary.sections[1].disagreementBars, 0.5);
+  assert.equal(boundary.sections[1].unscoredReason, null);
+});
+
+test('low confidence anywhere in a section rejects a plausible opening with a force-fitted tail', () => {
+  const second = word('second', 6, 6.5);
+  const tail = Array.from({ length: 8 }, (_, index) =>
+    ({ ...second, start: 10 + index, end: 10.5 + index, score: 0.01 }));
+  const result = measureCoverDrift(score, score, lyrics, [word('first', 0, 0.5), second, ...tail]);
+  assert.equal(result.sections[1].unscoredReason, 'low_word_confidence');
+  assert.equal(result.sections[1].sung, null);
 });
 
 test('qualification-style multi-bar rests put verse after the intro', () => {
