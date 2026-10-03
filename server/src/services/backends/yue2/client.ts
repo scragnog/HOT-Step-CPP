@@ -39,6 +39,7 @@
 
 import { config } from '../../../config.js';
 import type { Yue2AlignWord } from './align.js';
+import type { Yue2LyricScheduleWire } from './lyricSchedule.js';
 
 const base = () => config.aceServer.url;
 
@@ -307,6 +308,10 @@ export interface Yue2SynthRequest {
   end_bias?: number;
   end_bias_from_sec?: number;
   end_bias_ramp_sec?: number;
+  /** C6 lyric schedule (lyricSchedule.ts): hide each timed section's lyrics,
+   *  and optionally its score lines, from the composer until its first Vocal
+   *  note. Absent = off. Needs abc, one prompt for the batch and cfg_scale 1. */
+  lyric_schedule?: Yue2LyricScheduleWire;
 }
 
 export interface Yue2StageDefaults {

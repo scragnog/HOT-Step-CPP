@@ -8,6 +8,7 @@
 //   yue2-probe --tokenize <utf8-text-file> [--models <dir>] [--tokenizer-dir <dir>]
 //   yue2-probe --tokenizer-check <expected-ids.json> [--models <dir>] [--tokenizer-dir <dir>]
 //   yue2-probe --prefix-check <fixture-root-dir> [--models <dir>] [--tokenizer-dir <dir>]
+//   yue2-probe --schedule-check <request.json> [--models <dir>] [--tokenizer-dir <dir>]
 //   yue2-probe --ar-parity <fixture-root-dir> --stage plan|semantic --models <dir> [--dump-dir <dir>]
 //   yue2-probe --sampler-parity <fixture-root-dir> --stage plan|semantic --models <dir>
 //   yue2-probe --decode-parity <fixture-root-dir> --stage plan|semantic --models <dir>
@@ -68,6 +69,7 @@
 #include "yue2/sheetsage-model.h"
 #include "yue2/sheetsage-pipeline.h"
 #include "yue2/yue2-lm-graph.h"
+#include "yue2/yue2-lyric-schedule.h"
 #include "yue2/yue2-mert.h"
 #include "yue2/yue2-mmsfa.h"
 #include "yue2/yue2-model.h"
@@ -105,6 +107,7 @@ static void usage() {
             "       (--lm-type pins yue2-lm-<token>.gguf instead of best-first discovery, e.g. Q4_K_M)\n"
             "       yue2-probe --tokenize <text-file> [--models <dir>] [--tokenizer-dir <dir>]\n"
             "       yue2-probe --tokenizer-check <expected-ids.json> [--models <dir>] [--tokenizer-dir <dir>]\n"
+            "       yue2-probe --schedule-check <request.json> [--models <dir>] [--tokenizer-dir <dir>]\n"
             "       yue2-probe --prefix-check <fixture-root-dir> [--models <dir>] [--tokenizer-dir <dir>]\n"
             "       yue2-probe --ar-parity <fixture-root-dir> --stage plan|semantic --models <dir>\n"
             "       yue2-probe --sampler-parity <fixture-root-dir> --stage plan|semantic --models <dir>\n"
@@ -469,6 +472,83 @@ static int run_tokenize(const std::string & models_dir, const std::string & toke
     }
     printf("\n");
     return 0;
+}
+
+// --schedule-check: C6 lyric schedule of a real /yue2 request body. Maps every
+// section onto the semantic prefix, checks that its rows decode to text that
+// covers the section's lyric (and ABC) span, and that the section is hidden one
+// frame before start_sec - lead_sec and visible from then on.
+static int run_schedule_check(const std::string & models_dir, const std::string & tokenizer_dir_arg,
+                              const std::string & request_path) {
+    BPETokenizer tok;
+    std::string  source;
+    if (!yue2_probe_load_tokenizer(models_dir, tokenizer_dir_arg, &tok, &source)) {
+        fprintf(stderr, "FATAL: could not load a tokenizer (tried --tokenizer-dir / --models)\n");
+        return 1;
+    }
+    std::string body;
+    if (FILE * f = fopen(request_path.c_str(), "rb")) {
+        char   buf[65536];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) body.append(buf, n);
+        fclose(f);
+    } else {
+        fprintf(stderr, "FATAL: cannot open %s\n", request_path.c_str());
+        return 1;
+    }
+    Yue2Request req;
+    std::string err;
+    if (!yue2_parse_request(body, &req, &err)) {
+        fprintf(stderr, "FATAL: request: %s\n", err.c_str());
+        return 1;
+    }
+    if (!req.lyric_schedule.on || !req.abc_provided || req.cot == YUE2_COT_OFF) {
+        fprintf(stderr, "FATAL: request needs lyric_schedule, abc and cot melody/full\n");
+        return 1;
+    }
+    const Yue2LyricSchedule & sc = req.lyric_schedule;
+    const std::vector<int> abc_ids = yue2_bpe_encode(&tok, req.abc);
+    const std::vector<int> prefix  = yue2_token_prefixes(&tok, req.style, req.lyrics, req.cot, &abc_ids);
+    Yue2ScheduleRows rows;
+    if (!yue2_schedule_rows(&tok, sc, req.style, req.lyrics, req.cot, req.abc, abc_ids, &rows, &err)) {
+        fprintf(stderr, "FATAL: %s\n", err.c_str());
+        return 1;
+    }
+    printf("tokenizer source: %s, prefix %zu ids, %zu sections\n", source.c_str(), prefix.size(), sc.sections.size());
+    int fails = 0;
+    auto slice = [](const std::string & s, int64_t c0, int64_t c1) {
+        const int64_t b0 = yue2_cp_to_byte(s, c0), b1 = yue2_cp_to_byte(s, c1);
+        return s.substr((size_t) b0, (size_t) (b1 - b0));
+    };
+    for (size_t k = 0; k < sc.sections.size(); k++) {
+        const Yue2LyricSection & sec = sc.sections[k];
+        const std::string want[2] = { slice(req.lyrics, sec.lyric_c0, sec.lyric_c1),
+                                      sec.abc_c0 >= 0 ? slice(req.abc, sec.abc_c0, sec.abc_c1) : std::string() };
+        for (size_t j = 0; j < rows.rows[k].size(); j++) {
+            const auto & r = rows.rows[k][j];
+            std::vector<int32_t> ids(prefix.begin() + r.first, prefix.begin() + r.second);
+            const std::string got = yue2_bpe_decode(&tok, ids);
+            const bool ok = got.find(want[j]) != std::string::npos && got.size() < want[j].size() + 32;
+            fails += ok ? 0 : 1;
+            printf("%s section %zu %s rows [%lld,%lld) %zu bytes for a %zu-byte span\n", ok ? "PASS" : "FAIL", k,
+                   j ? "abc" : "lyric", (long long) r.first, (long long) r.second, got.size(), want[j].size());
+        }
+        // Hidden one frame before its reveal time, visible from the reveal on.
+        const double reveal = sec.start_sec - sc.lead_sec;
+        std::vector<Yue2MaskSpan> spans;
+        auto hidden = [&](double t) {
+            yue2_schedule_spans(sc, rows, t, &spans);
+            for (const auto & sp : spans)
+                if (sp.a == rows.rows[k][0].first && sp.b == rows.rows[k][0].second) return true;
+            return false;
+        };
+        const bool before = reveal < 0.04 || hidden(reveal - 0.04), at = !hidden(std::max(0.0, reveal));
+        fails += before && at ? 0 : 1;
+        printf("%s section %zu first note %.3fs: hidden before %.3fs, shown from it\n", before && at ? "PASS" : "FAIL", k,
+               sec.start_sec, reveal);
+    }
+    printf("%s: %d failure(s)\n", fails ? "FAIL" : "PASS", fails);
+    return fails ? 1 : 0;
 }
 
 static void print_first_diff(const std::vector<int> & got, const std::vector<int> & expected) {
@@ -5165,6 +5245,7 @@ int main(int argc, char ** argv) {
     bool            do_info       = false;
     bool            do_load       = false;
     std::string     tokenize_path;
+    std::string     schedule_check_path;
     std::string     tokenizer_check_path;
     std::string     prefix_check_dir;
     std::string     ar_parity_dir;
@@ -5210,6 +5291,8 @@ int main(int argc, char ** argv) {
             tokenize_path = argv[++i];
         } else if (!strcmp(argv[i], "--tokenizer-check") && i + 1 < argc) {
             tokenizer_check_path = argv[++i];
+        } else if (!strcmp(argv[i], "--schedule-check") && i + 1 < argc) {
+            schedule_check_path = argv[++i];
         } else if (!strcmp(argv[i], "--prefix-check") && i + 1 < argc) {
             prefix_check_dir = argv[++i];
         } else if (!strcmp(argv[i], "--ar-parity") && i + 1 < argc) {
@@ -5349,6 +5432,9 @@ int main(int argc, char ** argv) {
         }
     }
 
+    if (!schedule_check_path.empty()) {
+        return run_schedule_check(models_dir, tokenizer_dir_arg, schedule_check_path);
+    }
     if (!tokenize_path.empty()) {
         return run_tokenize(models_dir, tokenizer_dir_arg, tokenize_path);
     }

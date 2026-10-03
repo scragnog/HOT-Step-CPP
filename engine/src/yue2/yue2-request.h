@@ -74,6 +74,23 @@ struct Yue2SongSpec {
     bool        noise_seed_present = false;
 };
 
+// C6 lyric schedule (yue2-lyric-schedule.h): one entry per timed score
+// section. Off unless the request carries "lyric_schedule".
+struct Yue2LyricSection {
+    double  start_sec = 0.0;             // first Vocal note on the score clock
+    int64_t lyric_c0 = 0, lyric_c1 = 0;  // codepoints into the request lyrics
+    int64_t abc_c0 = -1, abc_c1 = -1;    // codepoints into the request abc; -1 = none
+};
+
+struct Yue2LyricSchedule {
+    bool   on       = false;
+    float  bias     = -INFINITY;  // additive attention bias on hidden rows; -inf = hard mask
+    bool   abc      = false;      // also hide the section's ABC lines
+    double lead_sec = 0.0;        // reveal a section this long before its first note
+    int    behind   = -1;         // hide sections this many before the current one; -1 = never
+    std::vector<Yue2LyricSection> sections;
+};
+
 struct Yue2Request {
     std::string id = "yue2";
     Yue2StageOverride plan;      // ABC / lead-sheet stage
@@ -177,6 +194,8 @@ struct Yue2Request {
     //                  end_bias_from_sec of generated audio and ramping
     //                  linearly to full strength over end_bias_ramp_sec. 0 = off.
     // Both respect min_tokens (END stays blocked before it).
+    Yue2LyricSchedule lyric_schedule;
+
     float end_threshold    = 0.0f;
     float end_bias         = 0.0f;
     float end_bias_from_sec = 0.0f;
@@ -574,6 +593,74 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
             yyjson_doc_free(doc); return false;
         }
         out->preview_max_frames = static_cast<int>(num);
+    }
+
+    // "lyric_schedule": {"mode": "bias"|"mask", "bias"?: <0, "abc"?: bool,
+    //   "lead_sec"?: s, "behind"?: n, "sections": [{"start_sec", "lyric": [c0,c1], "abc"?: [c0,c1]}]}
+    if (yyjson_val * ls = yyjson_obj_get(root, "lyric_schedule"); ls && !yyjson_is_null(ls)) {
+        std::string why;
+        Yue2LyricSchedule & sc = out->lyric_schedule;
+        std::string mode;
+        bool        p = false;
+        double      x = 0.0;
+        auto span = [](yyjson_val * a, int64_t * c0, int64_t * c1) {
+            if (!yyjson_is_arr(a) || yyjson_arr_size(a) != 2) return false;
+            yyjson_val * x0 = yyjson_arr_get(a, 0), * x1 = yyjson_arr_get(a, 1);
+            if (!yyjson_is_int(x0) || !yyjson_is_int(x1)) return false;
+            *c0 = yyjson_get_sint(x0);
+            *c1 = yyjson_get_sint(x1);
+            return *c0 >= 0 && *c1 > *c0;
+        };
+        yyjson_val * secs = yyjson_is_obj(ls) ? yyjson_obj_get(ls, "sections") : nullptr;
+        if (!yyjson_is_obj(ls)) why = "must be an object";
+        else if (!yue2_req_str(ls, "mode", &mode, &p, err)) why = "mode must be a string";
+        else if (mode != "bias" && mode != "mask") why = "mode must be \"bias\" or \"mask\"";
+        else if (!yyjson_is_arr(secs) || yyjson_arr_size(secs) < 1 || yyjson_arr_size(secs) > 256) why = "sections must hold 1..256 entries";
+        if (why.empty() && mode == "bias") {
+            if (!yue2_req_num(ls, "bias", &x, &p, err) || !p || !(x < 0.0 && x >= -60.0)) why = "bias must be in [-60, 0) for mode \"bias\"";
+            else sc.bias = (float) x;
+        }
+        if (why.empty()) {
+            if (yyjson_val * a = yyjson_obj_get(ls, "abc"); a && !yyjson_is_null(a)) {
+                if (!yyjson_is_bool(a)) why = "abc must be a boolean";
+                else sc.abc = yyjson_get_bool(a);
+            }
+        }
+        if (why.empty()) {
+            if (!yue2_req_num(ls, "lead_sec", &x, &p, err) || (p && !(x >= 0.0 && x <= 30.0))) why = "lead_sec must be in [0, 30]";
+            else if (p) sc.lead_sec = x;
+        }
+        if (why.empty()) {
+            if (!yue2_req_num(ls, "behind", &x, &p, err) || (p && !(x >= -1 && x <= 256 && std::floor(x) == x))) why = "behind must be an integer in [-1, 256]";
+            else if (p) sc.behind = (int) x;
+        }
+        if (why.empty()) {
+            size_t idx = 0, max = 0;
+            yyjson_val * e = nullptr;
+            yyjson_arr_foreach(secs, idx, max, e) {
+                Yue2LyricSection sec;
+                yyjson_val * st = yyjson_is_obj(e) ? yyjson_obj_get(e, "start_sec") : nullptr;
+                yyjson_val * ab = yyjson_is_obj(e) ? yyjson_obj_get(e, "abc") : nullptr;
+                if (!yyjson_is_num(st) || !std::isfinite(yyjson_get_num(st)) || yyjson_get_num(st) < 0 ||
+                    !span(yyjson_obj_get(e, "lyric"), &sec.lyric_c0, &sec.lyric_c1) ||
+                    (ab && !yyjson_is_null(ab) && !span(ab, &sec.abc_c0, &sec.abc_c1))) {
+                    why = "sections[" + std::to_string(idx) + "] needs start_sec >= 0, lyric [c0,c1] and optional abc [c0,c1] with c1 > c0";
+                    break;
+                }
+                sec.start_sec = yyjson_get_num(st);
+                if (!sc.sections.empty() && sec.start_sec < sc.sections.back().start_sec) {
+                    why = "sections must be in score order (start_sec non-decreasing)";
+                    break;
+                }
+                sc.sections.push_back(sec);
+            }
+        }
+        if (!why.empty()) {
+            if (err) *err = "lyric_schedule: " + why;
+            yyjson_doc_free(doc);
+            return false;
+        }
+        sc.on = true;
     }
 
     // Ending controls (see the struct). Range-checked here so a typo is a

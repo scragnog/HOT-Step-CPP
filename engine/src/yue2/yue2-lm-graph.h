@@ -663,6 +663,13 @@ static void yue2_ar_decode_graph_free(Yue2ArDecodeGraph * d) {
     *d = {};
 }
 
+// Extra additive attention bias on prompt rows [a, b) of one set, applied by
+// yue2_ar_decode_batch on top of the causal mask (C6, yue2-lyric-schedule.h).
+struct Yue2MaskSpan {
+    int64_t a = 0, b = 0;
+    float   bias = 0.0f;
+};
+
 struct Yue2ArKvCache {
     int64_t                    capacity = 0;  // rows per set
     int64_t                    n_sets   = 0;
@@ -676,6 +683,8 @@ struct Yue2ArKvCache {
     ggml_backend_buffer_t       buf      = nullptr;
     std::vector<ggml_tensor *> k, v;          // one F16 [D,capacity,Nkv,S] tensor per layer
     Yue2ArDecodeGraph dec;                   // stable within each (bucket, S, head window)
+    // Per set, rewritten by the caller before each decode step; empty = plain causal mask.
+    std::vector<std::vector<Yue2MaskSpan>> prompt_bias;
 };
 
 static bool yue2_ar_kv_cache_alloc(const Yue2Model & m, int64_t capacity, Yue2ArKvCache * out, std::string * err,
@@ -1190,6 +1199,12 @@ static bool yue2_ar_decode_batch(const Yue2Model & m, Yue2ArKvCache & cache, con
         auto col = d.mask_host.begin() + (size_t) (s * n_kv_pad);
         std::fill(col, col + (size_t) (pos + 1), zero);
         std::fill(col + (size_t) (pos + 1), col + (size_t) n_kv_pad, hidden);
+        if ((size_t) s < cache.prompt_bias.size()) {
+            for (const Yue2MaskSpan & sp : cache.prompt_bias[(size_t) s]) {
+                const int64_t lo = std::max<int64_t>(0, sp.a), hi = std::min<int64_t>(sp.b, pos + 1);
+                if (lo < hi) std::fill(col + (size_t) lo, col + (size_t) hi, ggml_fp32_to_fp16(sp.bias));
+            }
+        }
     }
     ggml_backend_tensor_set(d.in_ids, ids, 0, (size_t) S * sizeof(int32_t));
     ggml_backend_tensor_set(d.in_pos, pos_host.data(), 0, (size_t) S * sizeof(int32_t));

@@ -45,7 +45,7 @@ export interface CoverDriftResult {
   firstOverOneBar: { index: number; label: string; offsetBars: number } | null;
 }
 
-function lyricBlocks(lyrics: string): Array<{ label: string; start: number; end: number; hasLyrics: boolean }> {
+export function lyricBlocks(lyrics: string): Array<{ label: string; start: number; end: number; hasLyrics: boolean }> {
   // The same S10 tag matcher decides which lines are section headers. Work in
   // codepoints because MMS_FA's char0/char1 offsets are not UTF-16 indices.
   const normalized = lyrics.replace(/\r\n?/g, '\n');
@@ -68,13 +68,13 @@ function lyricBlocks(lyrics: string): Array<{ label: string; start: number; end:
   });
 }
 
-function sectionKind(label: string): string {
+export function sectionKind(label: string): string {
   const normalized = label.toLowerCase().replace(/[_–—]/g, '-');
   if (/\bpre[ -]?chorus\b/.test(normalized)) return 'pre-chorus';
   return /\b(verse|chorus|bridge|intro|outro|interlude)\b/.exec(normalized)?.[1] ?? normalized.trim();
 }
 
-function instrumental(label: string): boolean {
+export function instrumental(label: string): boolean {
   return /\b(instrumental|solo|break|interlude)\b/i.test(label);
 }
 

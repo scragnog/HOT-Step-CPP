@@ -48,6 +48,7 @@ import { yue2AdapterTrigger } from './jointAdapterContext.js';
 import type { Yue2AdapterScales, Yue2FinalDetail } from './client.js';
 import { yue2Align, yue2Synth, yue2FinalDetail, yue2Props, yue2PropsCached, splitMultipartMixed, yue2AdapterWire, type Yue2SynthRequest, type Yue2TrackDetail } from './client.js';
 import { yue2LyricsJson } from './align.js';
+import { buildYue2LyricSchedule } from './lyricSchedule.js';
 import { classifyYue2Score, type Yue2ScoreHealth, yue2PlanUsable, yue2PickPlan, yue2PlanDraws, readYue2StyleNorms, type Yue2StyleNorms } from './scoreHealth.js';
 import {
   yue2PickFromModels, yue2ResolvePick, yue2StackFrom, yue2CoverFromSubmission,
@@ -396,6 +397,28 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   const abc = abcRaw && cot !== 'off' ? abcRaw : undefined;
   if (abcRaw && !abc) notes.push('A previewed score was supplied but Chain of Thought is "off" — the score was ignored.');
 
+  // C6 lyric schedule, off unless asked for: hide each section's lyrics (and
+  // optionally its score lines) from the composer until its first Vocal note.
+  // A requested schedule that cannot be built fails the job rather than
+  // quietly rendering the unscheduled baseline.
+  const scheduleMode = params.yue2LyricSchedule === 'bias' || params.yue2LyricSchedule === 'mask'
+    ? params.yue2LyricSchedule as 'bias' | 'mask' : undefined;
+  let lyric_schedule: Yue2SynthRequest['lyric_schedule'];
+  if (scheduleMode) {
+    if (!abc || !lyrics) throw new Error('yue2LyricSchedule needs a supplied score (yue2Abc) and lyrics.');
+    const num = (value: unknown, fallback: number) =>
+      value === undefined || value === null || value === '' ? fallback : Number(value);
+    const built = buildYue2LyricSchedule(abc, lyrics, {
+      mode: scheduleMode, bias: num(params.yue2LyricScheduleBias, -4),
+      abc: params.yue2LyricScheduleAbc === true, leadSec: num(params.yue2LyricScheduleLeadSec, 0),
+      behind: num(params.yue2LyricScheduleBehind, -1),
+    });
+    lyric_schedule = built.wire;
+    notes.push(`Lyric schedule: ${scheduleMode}${scheduleMode === 'bias' ? ` ${built.wire.bias}` : ''}, `
+      + `${built.wire.sections.length} timed section(s)${built.wire.abc ? ', score lines too' : ''}`
+      + (built.untimed.length ? `; never hidden (no timed section): ${built.untimed.join(', ')}` : ''));
+  }
+
   // Batching (docs/plans/yue2/30-upstream-backports.md #6): the shared Batch
   // Size control is songs (own plan, own seed); yue2Variations is NAR noise
   // variations per song. Both omitted at 1 so a plain render's wire request
@@ -449,6 +472,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
     ...(synth_batch_size > 1 ? { synth_batch_size } : {}),
     ...(noise_seed !== undefined ? { noise_seed } : {}),
     ...(abc ? { abc } : {}),
+    ...(lyric_schedule ? { lyric_schedule } : {}),
     ...(cfg_scale !== undefined ? { cfg_scale } : {}),
     ode_steps,
     ...(nar_cache_ratio !== undefined ? { nar_cache_ratio } : {}),

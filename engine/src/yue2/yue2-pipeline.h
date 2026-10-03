@@ -28,6 +28,7 @@
 //   batch; each set carries its own absolute positions.
 
 #include "yue2-lm-graph.h"
+#include "yue2-lyric-schedule.h"
 #include "yue2-model.h"
 #include "yue2-nar-graph.h"
 #include "yue2-request.h"
@@ -587,6 +588,34 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         if (use_cfg) max_prefix = std::max<int64_t>(max_prefix, (int64_t) neg_prefix[(size_t) b].size());
     }
 
+    // C6: map the lyric schedule onto prompt rows once; the decode loop picks
+    // the hidden rows per frame. Every stream must share the one prompt.
+    const Yue2LyricSchedule & lsched = req.lyric_schedule;
+    Yue2ScheduleRows          lsched_rows;
+    if (lsched.on) {
+        const char * why = use_cfg ? "needs cfg_scale 1 (no rule for the guidance set)"
+                           : !have_abc || !songs[0].abc_given ? "needs a supplied score (abc)"
+                           : nullptr;
+        for (int b = 1; !why && b < B; b++) {
+            if (songs[(size_t) b].prefix_ids != songs[0].prefix_ids) why = "needs every song of the batch to share one prompt";
+        }
+        if (why) {
+            if (err) *err = std::string("lyric_schedule ") + why;
+            return false;
+        }
+        const Yue2SongState & s0 = songs[0];
+        if (!yue2_schedule_rows(&tok, lsched, s0.style, s0.lyrics, req.cot, s0.abc_text, s0.abc_ids, &lsched_rows, err)) {
+            return false;
+        }
+        for (size_t k = 0; k < lsched.sections.size(); k++) {
+            std::string r;
+            for (const auto & x : lsched_rows.rows[k]) r += " [" + std::to_string(x.first) + "," + std::to_string(x.second) + ")";
+            fprintf(stderr, "[YuE2-C6] section %zu first note %.3fs rows%s\n", k, lsched.sections[k].start_sec, r.c_str());
+        }
+        fprintf(stderr, "[YuE2-C6] bias %g, abc %s, lead %.3fs, behind %d, prefix %zu\n", (double) lsched.bias,
+                lsched.abc ? "on" : "off", lsched.lead_sec, lsched.behind, s0.prefix_ids.size());
+    }
+
     Yue2SamplingParams sp = yue2_stage_params(m.lm_cfg.semantic, req.semantic);
     const bool preview_capped = req.preview_max_frames > 0 && req.preview_max_frames < sp.max_tokens;
     if (preview_capped) sp.max_tokens = req.preview_max_frames;
@@ -876,6 +905,15 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
                 next_ids[(size_t) (i * per + k)] = done[(size_t) b] ? YUE2_MUSIC_END : next_tok[(size_t) b];
             }
         }
+        // C6: the rows hidden while composing each live stream's next frame.
+        if (lsched.on) {
+            cache.prompt_bias.assign((size_t) S, {});
+            for (int i = 0; i < n_slots; i++) {
+                const Yue2SongState & sg = songs[(size_t) slot_song[(size_t) i]];
+                yue2_schedule_spans(lsched, lsched_rows, (double) sg.codec_ids.size() * 0.04,
+                                    &cache.prompt_bias[(size_t) sg.cond_set]);
+            }
+        }
         // The last content token is forwarded even on the final step so the
         // cache holds every codec row the NAR reads (upstream 2d21090f found
         // the budget-capped case reading a stale row without this).
@@ -885,6 +923,7 @@ static bool yue2_run_semantic_stage(Yue2Model & m, const BPETokenizer & tok, con
         }
     }
 
+    cache.prompt_bias.clear();
     for (int b = 0; b < B; b++) {
         Yue2SongState & sg = songs[(size_t) b];
         sg.stage_end_reason[YUE2_STAGE_SEMANTIC] =
