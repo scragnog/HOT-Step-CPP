@@ -16,7 +16,7 @@ import { Toggle } from '../settings/SettingsPrimitives';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { Yue2JointRunChart } from './Yue2JointRunChart';
 import {
-  cancelJob, getJob, listYue2AitkRuns, listYue2JointPreviews, startYue2JointTrain, yue2RungScoresExportUrl, deleteYue2AitkRun,
+  cancelJob, getJob, listYue2AitkRuns, listYue2JointPreviews, listYue2JointPreviewsLocal, startYue2JointTrain, yue2RungScoresExportUrl, deleteYue2AitkRun,
   setYue2ReviewComplete, type TrainingJobSummary, type Yue2AitkRunRecord, type Yue2JointPreviewRecord, type Yue2JointTrainRequest,
 } from '../../services/trainingApi';
 import { Yue2LadderReview, type Yue2LadderReviewHandle } from './Yue2LadderReview';
@@ -75,6 +75,11 @@ export const RefinePanel: React.FC = () => {
   // follow-up) steals the selection once, even while some other run is
   // currently picked, without fighting the user's own picks afterwards.
   const lastAutoSelectedLive = useRef('');
+  // Live previews come from the worker only while the run hasn't landed in
+  // `runs` (this machine's own index) yet; once it has, read the local copy
+  // so a worker 404/offline or a stale remote render can't win.
+  const readPreviews = (ds: string, run: string) =>
+    (runs.find(r => r.jobId === run)?.live ? listYue2JointPreviews : listYue2JointPreviewsLocal)(ds, run);
   const refreshRuns = async () => {
     if (!datasetId) return;
     try {
@@ -111,13 +116,13 @@ export const RefinePanel: React.FC = () => {
     const id = window.setInterval(() => {
       void getJob(job.id).then(next => { setJob(next); void refreshRuns(); }).catch(() => {});
       // Rung previews land while the job runs: keep the ladder's players current.
-      if (datasetId && ladderRun) void listYue2JointPreviews(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => {});
+      if (datasetId && ladderRun) void readPreviews(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => {});
     }, 5000);
     return () => window.clearInterval(id);
   }, [job?.id, job?.status, datasetId, ladderRun]);
   useEffect(() => {
     if (!datasetId || !ladderRun) { setPreviews([]); return; }
-    void listYue2JointPreviews(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => setPreviews([]));
+    void readPreviews(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => setPreviews([]));
   }, [datasetId, ladderRun, job?.status]);
 
   const finished = useMemo(() => runs.filter(r => !r.live && !r.resumeError && r.checkpoints.some(c => !!c.optimizerPath)), [runs]);
@@ -371,7 +376,7 @@ export const RefinePanel: React.FC = () => {
         {cleanupNote && <div className="mt-2 text-[12px] text-emerald-700 dark:text-emerald-300">{cleanupNote}</div>}
         <Yue2LadderReview ref={ladderRef} datasetId={datasetId} datasetName={datasetName} run={ladderRunRec} previews={previews}
           renderOpts={{ seconds, takes, draft }} onUse={onUse} onPicked={setPicked} onError={setError} idPrefix="refine-rung"
-          onChanged={() => { void refreshRuns(); if (datasetId && ladderRun) void listYue2JointPreviews(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => {}); }} />
+          onChanged={() => { void refreshRuns(); if (datasetId && ladderRun) void readPreviews(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => {}); }} />
       </div>
 
     </div>

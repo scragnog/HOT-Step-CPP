@@ -3090,8 +3090,16 @@ export async function setYue2ReviewComplete(id: string, run: string, complete: b
 }
 /** NAR further training from each ladder's best-scored rung, then link + cleanup. */
 export async function finishYue2Ladders(entries: Array<{ datasetId: string; refineRun: string }>, knee = true): Promise<Yue2BatchSummary> {
-  const data = await request<{ batch: Yue2BatchSummary }>('/yue2-batch/finish', { method: 'POST', ...jsonBody({ entries, knee }) });
+  const data = await localRequest<{ batch: Yue2BatchSummary }>('/yue2-batch/finish', { method: 'POST', ...jsonBody({ entries, knee }) });
   return data.batch;
+}
+/** The batch `finishYue2Ladders` just started/joined: always local (NAR
+ *  further training + link + cleanup run on this machine, never a worker),
+ *  so it must be read back from the local base too — the worker-aware
+ *  `listYue2Batches` below never sees it. */
+export async function listYue2BatchesLocal(): Promise<Yue2BatchSummary[]> {
+  const data = await localRequest<{ batches: Yue2BatchSummary[] }>('/yue2-batch');
+  return data.batches;
 }
 export async function pauseYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}/pause`, { method: 'POST' }); }
 export async function resumeYue2Batch(id: string): Promise<void> { await request<{ ok: boolean }>(`/yue2-batch/${encodeURIComponent(id)}/resume`, { method: 'POST' }); }

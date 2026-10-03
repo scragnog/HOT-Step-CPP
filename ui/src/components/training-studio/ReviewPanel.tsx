@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ListChecks, RefreshCw } from 'lucide-react';
 import { useTrainingStore } from '../../stores/trainingStore';
-import { finishYue2Ladders, listYue2Review, type Yue2ReviewRow } from '../../services/trainingApi';
+import { finishYue2Ladders, listYue2BatchesLocal, listYue2Review, type Yue2BatchSummary, type Yue2ReviewRow } from '../../services/trainingApi';
 import { Toggle } from '../shared/Toggle';
 import { usePersistedState } from '../../hooks/usePersistedState';
 
@@ -29,8 +29,12 @@ export const ReviewPanel: React.FC = () => {
   const rest = rows.filter(r => !awaiting(r));
   // Scored ladders can be finished in one go on the server: NAR further
   // training from the best-scored rung, then link + cleanup (yue2BatchRunner).
-  const batches = useTrainingStore(s => s.yue2Batches);
-  const loadBatches = useTrainingStore(s => s.loadYue2Batches);
+  // Finish always runs on this machine, so its batch is read from the local
+  // base — the store's `yue2Batches` tracks job control on "Train on" worker
+  // and would never see this one.
+  const [batches, setBatches] = useState<Yue2BatchSummary[]>([]);
+  const loadBatches = async () => { try { setBatches(await listYue2BatchesLocal()); } catch { /* keep the last list */ } };
+  useEffect(() => { void loadBatches(); const id = window.setInterval(() => void loadBatches(), 10_000); return () => window.clearInterval(id); }, []);
   const queued = new Set(batches.filter(b => b.status === 'running' || b.status === 'paused')
     .flatMap(b => b.items.filter(i => i.refineRun && (i.status === 'pending' || i.status === 'running')).map(i => i.refineRun)));
   const finishable = rest.filter(r => r.best && !r.finished && !r.live && r.status !== 'running' && !queued.has(r.refineRun));

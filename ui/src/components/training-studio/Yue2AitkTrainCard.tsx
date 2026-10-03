@@ -649,13 +649,19 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   // one, else the newest. Its previews are fetched for that run.
   const pickedLadderRun = useTrainingStore(s => s.refineLadderRun);
   const setPickedLadderRun = useTrainingStore(s => s.setRefineLadderRun);
-  const ladderRunRec = aitkRuns.find(r => r.jobId === pickedLadderRun) ?? aitkRuns.find(r => r.jobId === job?.id) ?? aitkRuns.find(r => r.live) ?? [...aitkRuns].sort((a, b) => b.createdAt - a.createdAt)[0];
-  const ladderRunId = ladderRunRec?.jobId;
   // A job still training on a worker has no local run record yet (the local
-  // index picks it up once its folder reconciles); this is the only case a
-  // run key comes from the job itself rather than aitkRuns, and the only
-  // case previews are read from the worker instead of this machine.
-  const liveOnlyJobId = !ladderRunRec && job && isJointJob(job, datasetId) && (job.status === 'queued' || job.status === 'running') ? job.id : undefined;
+  // index picks it up once its folder reconciles). While that's true, an
+  // explicit pick still wins, but there's no history to fall back to: an
+  // older local run must not silently stand in for the live one underway.
+  const activeJob = job && isJointJob(job, datasetId) && (job.status === 'queued' || job.status === 'running') ? job : undefined;
+  const activeJobIndexed = !activeJob || aitkRuns.some(r => r.jobId === activeJob.id);
+  const ladderRunRec = aitkRuns.find(r => r.jobId === pickedLadderRun)
+    ?? (activeJobIndexed ? aitkRuns.find(r => r.jobId === job?.id) ?? aitkRuns.find(r => r.live) ?? [...aitkRuns].sort((a, b) => b.createdAt - a.createdAt)[0] : undefined);
+  const ladderRunId = ladderRunRec?.jobId;
+  // This is the only case a run key comes from the job itself rather than
+  // aitkRuns, and the only case previews are read from the worker instead of
+  // this machine.
+  const liveOnlyJobId = !ladderRunRec && activeJob ? activeJob.id : undefined;
   const previewsKey = ladderRunId ?? liveOnlyJobId;
 
   useEffect(() => {
