@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { listPreparedCaches, clearPreparedCaches } from './preparedDataReset.js';
 import { listAllYue2AitkRuns, listYue2AitkRuns, deleteYue2AitkRun, yue2RunFinished, setYue2RunFinished, recordYue2AitkRun, moveYue2AitkRun,
-  freeYue2RunDirectory, yue2RemoteRunDirectory, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
+  freeYue2RunDirectory, withYue2RunLock, yue2RemoteRunDirectory, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
 import { rebaseYue2JointLinks } from './lyricStudioExport.js';
 import { getDataset } from './datasetsRepo.js';
 import { config } from '../../config.js';
@@ -66,8 +66,8 @@ export function planYue2Cleanup(ds: { id: string; slug: string; sourceDir: strin
   };
 }
 
-export function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string; lyricsSetId?: number }, runId: string, step: number, choice: Yue2CleanupChoice,
-  pick: { blind?: boolean; blindLabel?: string } = {}): { freedBytes: number; done: string[]; finishError?: string; moveError?: string } {
+export async function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string; lyricsSetId?: number }, runId: string, step: number, choice: Yue2CleanupChoice,
+  pick: { blind?: boolean; blindLabel?: string } = {}): Promise<{ freedBytes: number; done: string[]; finishError?: string; moveError?: string }> {
   const plan = planYue2Cleanup(ds, runId, step);
   const { runs, run, keep } = locate(ds, runId, step);
   if (pick.blind && (!pick.blindLabel || pick.blindLabel !== run.blindLabels?.[step])) throw new Error('Blind label does not match the chosen checkpoint');
@@ -122,7 +122,7 @@ export function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string
   // A pulled ladder leaves its staging folder for the name a local run gets.
   // The run is already finished; a failed rename only leaves it where it was.
   if (run.origin) {
-    try { const to = settleYue2RemoteRun(run); if (to) done.push(`moved to ${path.basename(to)}`); }
+    try { const to = await settleYue2RemoteRun(run.jobId); if (to) done.push(`moved to ${path.basename(to)}`); }
     catch (err: any) {
       const moveError = `The run folder could not be renamed and stays at ${run.output}: ${err?.message || err}`;
       console.warn(`[Training] YuE2 cleanup: ${moveError}`);
@@ -148,25 +148,31 @@ export function plannedYue2RemoteMove(run: Yue2AitkRunRecord, taken?: Set<string
 }
 
 /** Move a pulled run to plannedYue2RemoteMove's folder and repoint the run
- *  index, yue2-linked.json, album presets and the loss-log note. Any failure
- *  puts the folder and every record back and rethrows. Returns the new folder,
- *  or null when nothing needed to move. */
-export function settleYue2RemoteRun(run: Yue2AitkRunRecord): string | null {
-  const target = plannedYue2RemoteMove(run);
-  if (!target) return null;
-  const from = path.resolve(run.output);
-  moveYue2AitkRun(run.jobId, target);
-  try { rebaseYue2JointLinks(from, target); }
-  catch (err) {
-    try { moveYue2AitkRun(run.jobId, from); }
-    catch (back: any) { console.error(`[Training] YuE2: could not move ${target} back to ${from}: ${back?.message || back}`); }
-    throw err;
-  }
-  // Informational only: the archived loss log notes where its run lives.
-  try {
-    if (fs.existsSync(path.join(trainLogArchiveDir(run.datasetSlug), `${run.jobId}.json`))) noteYue2TrainLog(run.datasetSlug, run.jobId, { output: target });
-  } catch (err: any) { console.warn(`[Training] YuE2: could not note the new folder of ${run.jobId}: ${err?.message || err}`); }
-  return target;
+ *  index, yue2-linked.json, album presets, rung scores and the loss-log note.
+ *  Holds the run's lock, so no pull or checkpoint fetch of the same run is
+ *  writing into the folder meanwhile, and plans from the index as it stands
+ *  once the lock is held. Any failure puts the folder and every record back
+ *  and rethrows. Returns the new folder, or null when nothing needed to move. */
+export function settleYue2RemoteRun(jobId: string): Promise<string | null> {
+  return withYue2RunLock(jobId, async () => {
+    const run = listAllYue2AitkRuns().find(r => r.jobId === jobId);
+    if (!run) throw new Error('Unknown run');
+    const target = plannedYue2RemoteMove(run);
+    if (!target) return null;
+    const from = path.resolve(run.output);
+    moveYue2AitkRun(run.jobId, target);
+    try { rebaseYue2JointLinks(from, target); }
+    catch (err) {
+      try { moveYue2AitkRun(run.jobId, from); }
+      catch (back: any) { console.error(`[Training] YuE2: could not move ${target} back to ${from}: ${back?.message || back}`); }
+      throw err;
+    }
+    // Informational only: the archived loss log notes where its run lives.
+    try {
+      if (fs.existsSync(path.join(trainLogArchiveDir(run.datasetSlug), `${run.jobId}.json`))) noteYue2TrainLog(run.datasetSlug, run.jobId, { output: target });
+    } catch (err: any) { console.warn(`[Training] YuE2: could not note the new folder of ${run.jobId}: ${err?.message || err}`); }
+    return target;
+  });
 }
 
 export interface Yue2RemoteFolderMove { jobId: string; dataset: string; finished: boolean; from: string; to: string; error?: string }
@@ -174,7 +180,7 @@ export interface Yue2RemoteFolderMove { jobId: string; dataset: string; finished
 /** One-shot tidy of pulled runs still in the old `remote-<worker>-<uuid>`
  *  folders (or anywhere else they don't belong): finished runs get the local
  *  name, the rest the staging name. `apply: false` only lists the moves. */
-export function migrateYue2RemoteFolders(apply: boolean): Yue2RemoteFolderMove[] {
+export async function migrateYue2RemoteFolders(apply: boolean): Promise<Yue2RemoteFolderMove[]> {
   const out: Yue2RemoteFolderMove[] = [];
   const taken = new Set<string>();
   const runs = listAllYue2AitkRuns().filter(r => r.origin).sort((a, b) => a.createdAt - b.createdAt);
@@ -184,7 +190,7 @@ export function migrateYue2RemoteFolders(apply: boolean): Yue2RemoteFolderMove[]
     taken.add(path.resolve(to).toLowerCase());
     const row: Yue2RemoteFolderMove = { jobId: run.jobId, dataset: run.datasetSlug, finished: yue2RunFinished(run.output), from: run.output, to };
     if (apply) {
-      try { row.to = settleYue2RemoteRun(run) ?? run.output; }
+      try { row.to = (await settleYue2RemoteRun(run.jobId)) ?? run.output; }
       catch (err: any) { row.error = err?.message || String(err); }
     }
     out.push(row);

@@ -64,7 +64,7 @@ test('blind labels survive checkpoint changes, scores capture rating mode, and c
     assert.equal(listYue2RungScores(ds.id).length, 2);
     assert.match(yue2RungScoresCsv([notes]), /blind,blind_label/);
     assert.equal(JSON.parse(JSON.stringify(notes)).blindLabel, pickedLabel);
-    const result = runYue2Cleanup(ds, 'blind-job', pickedStep,
+    const result = await runYue2Cleanup(ds, 'blind-job', pickedStep,
       { caches: false, otherCheckpoints: false, otherRuns: false, resume: false, otherPreviews: false },
       { blind: true, blindLabel: pickedLabel });
     assert.equal(result.finishError, undefined);
@@ -79,7 +79,7 @@ test('blind labels survive checkpoint changes, scores capture rating mode, and c
       return write(file, data, options);
     }) as typeof fs.writeFileSync;
     try {
-      const failed = runYue2Cleanup(ds, 'blind-job', pickedStep,
+      const failed = await runYue2Cleanup(ds, 'blind-job', pickedStep,
         { caches: false, otherCheckpoints: false, otherRuns: false, resume: false, otherPreviews: false },
         { blind: true, blindLabel: pickedLabel });
       assert.match(failed.finishError ?? '', /marker disk failure/);

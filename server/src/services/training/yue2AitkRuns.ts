@@ -17,6 +17,21 @@ export function yue2JointOutputDirectory(adaptersRoot: string, trigger: string, 
   return path.join(adaptersRoot, 'yue2-joint-adapters', `${name}_${runStamp(when)}`);
 }
 
+/** One chain of work per run, so a pull, a checkpoint fetch and a folder
+ *  move of the same run never interleave: a move mid-pull would let the pull
+ *  recreate the old folder and point the index back at it. In-process only,
+ *  which is why the remote-folder migration runs inside the app. The map
+ *  entry is dropped once nothing is waiting. */
+const runLocks = new Map<string, Promise<unknown>>();
+export function withYue2RunLock<T>(jobId: string, fn: () => Promise<T>): Promise<T> {
+  const prior = runLocks.get(jobId) ?? Promise.resolve();
+  const next = prior.then(fn, fn);
+  const settled = next.then(() => {}, () => {});
+  runLocks.set(jobId, settled);
+  void settled.finally(() => { if (runLocks.get(jobId) === settled) runLocks.delete(jobId); });
+  return next;
+}
+
 /** Pulled ladders wait here, out of the local run list's way, until a rung is
  *  chosen: `yue2-joint-adapters/_remote/<worker>/<trigger>_<stamp>`. */
 export const YUE2_REMOTE_STAGING = '_remote';

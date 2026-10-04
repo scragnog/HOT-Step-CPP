@@ -218,8 +218,10 @@ earlier run's log that was superseded and unlinked is not fetched.
 A worker's ladder does not wait for the `scoreHere` fallback above: `pullYue2Ladders`
 (`trainingWorkers.ts`), run manually (`POST /api/workers/:name/pull-ladders`), copies
 every rung-bearing run's facts and rendered preview audio — never its checkpoint
-weights — into a worker-namespaced local run (`remote-<worker>-<jobId>`,
-`origin: { worker, remoteJobId }`). Its checkpoints carry `availability: 'remote'`
+weights — into a local run with `origin: { worker, remoteJobId }`, staged in
+`yue2-joint-adapters/_remote/<worker>/<trigger>_<stamp>` (`yue2RemoteRunDirectory`, the
+stamp being the run's start on the worker; a repull reuses whatever folder the index
+already records, and `jointFolders` never imports `_remote` itself). Its checkpoints carry `availability: 'remote'`
 instead of `arPath`/`narPath`; `yue2BestRung.ts` and `GET /yue2-review`'s rung filter
 both treat that the same as a local pair for listening and scoring (listening and
 scoring need the previews and meters, not the weights — those are only needed to link
@@ -235,8 +237,8 @@ real, observed failure mode pulling LivingRoom's own previews. The root cause (R
 2026-10-04, commit `dbe2464d`) turned out to be local, not the network: two overlapping
 pulls for the same worker/run shared one `${dest}.part` filename and raced each other's
 write, hash, and rename. Fixed by giving each transfer attempt its own temp filename and
-by serializing pulls and checkpoint hydrates per worker/run through `withRunLock`, so a
-second concurrent call waits instead of racing; the retry loop stays as real-network
+by serializing pulls, checkpoint hydrates and folder moves per run through
+`withYue2RunLock` (`yue2AitkRuns.ts`), so a second concurrent call waits instead of racing; the retry loop stays as real-network
 insurance on top of that, not as the fix for this race.
 `hydrateYue2LadderCheckpoint`'s checkpoint-file fetch (next) uses the same helper and lock.
 A preview whose manifest entry has no `sha256` this round (the worker can omit
@@ -254,6 +256,22 @@ restarting does not change. Pulling never deletes anything on the worker itself
 (deleting its run.json here would make its own `reconcileFromDisk` re-import the folder
 under a fresh id on its next restart, orphaning `remoteJobId`) — dropping the worker's
 copies happens once a chosen rung's checkpoint has been fetched and linked, below.
+
+When cleanup finishes a pulled run (`runYue2Cleanup`, which manual cleanup and Finish
+scored both call), `settleYue2RemoteRun` (`yue2Cleanup.ts`) moves its folder out of
+staging to `<trigger>_<stamp>`, the name `yue2JointOutputDirectory` gives a local run,
+adding `-N` when the name is taken (`freeYue2RunDirectory`). It holds the run lock and plans
+from the index as it stands once the lock is held. `moveYue2AitkRun` renames the folder and
+repoints the index, checkpoint paths included, renaming back if the index write fails;
+`rebaseYue2JointLinks` (`lyricStudioExport.ts`) then repoints album presets and
+`yue2_rung_scores.checkpoint_dir` in one database transaction (score ids and ratings kept)
+and replaces `yue2-linked.json` by atomic rename. If any of that fails, the records and the
+folder go back, the run stays finished where it was, and cleanup returns `moveError`, which
+the Review cleanup note shows. Runs pulled before this naming (`remote-<worker>-<jobId>`)
+are moved by `POST /api/training/yue2-remote-folders/migrate` (`migrateYue2RemoteFolders`):
+`{ "apply": false }` lists the moves, `{ "apply": true }` makes them and refuses while a
+job, pipeline or batch is queued or running. It runs inside the app so each move shares
+the run lock with pulls; it is idempotent.
 
 The UI side (`ui/src/components/training-studio/ReviewPanel.tsx`) triggers
 `pullWorkerYue2Ladders` (`POST /api/workers/:name/pull-ladders`) for the selected
@@ -276,8 +294,9 @@ hash-verified the same way `pullOneYue2Ladder` verifies previews (`workerYue2Lad
 reports a manifest with a sha256 per file; a missing required file, a failed transfer or a
 hash mismatch returns `'error'` before anything links, and leaves the destination
 untouched — a file that already matches the manifest is kept, not re-fetched, so a retry
-resumes). It writes straight into the checkpoint's already-stable `dir`
-(`<output>/checkpoint-step<N>`, fixed since the pull), so the ordinary local disk scan
+resumes). It writes straight into the checkpoint's `dir` (`<output>/checkpoint-step<N>`),
+re-read from the index once the run lock is held, since a folder move may have run first,
+so the ordinary local disk scan
 (`checkpointRecords`) picks it up on the next read and the step stops being
 `availability: 'remote'` on its own — no index write in the hydrate call itself.
 `POST /datasets/:id/yue2-joint-preset` (manual "Use this rung") and

@@ -439,6 +439,7 @@ const FOLDERS = [
   "import { getOrCreateArtist, saveLyricsSet, upsertPreset, getAllPresets } from './src/db/lireekDb.js';",
   "import { readYue2Linked } from './src/services/training/lyricStudioExport.js';",
   "import { migrateYue2RemoteFolders } from './src/services/training/yue2Cleanup.js';",
+  "import { scoreYue2Rung, listYue2RungScores } from './src/services/training/yue2RungScores.js';",
   "import { setYue2RunFinished } from './src/services/training/yue2AitkRuns.js';",
   "const joint = path.join(config.aceServer.adapters, 'yue2-joint-adapters');",
   "const stamp = runStamp(new Date(now));",
@@ -509,7 +510,7 @@ test('a move whose link records cannot be rewritten puts the folder and the inde
       "  if (fs.readFileSync(linkedFile, 'utf8') !== linkedBefore) throw new Error('yue2-linked.json changed');",
       "  if (presetOf(setId).yue2_ar_adapter_path !== path.join(dir, 'native-ar.safetensors')) throw new Error('preset changed');",
       // Run again later (here, via the migration) and it moves cleanly.
-      "  const moved = migrateYue2RemoteFolders(true);",
+      "  const moved = await migrateYue2RemoteFolders(true);",
       "  if (moved.length !== 1 || moved[0].error || moved[0].to !== path.join(joint, 'album_' + stamp)) throw new Error('retry did not move it: ' + JSON.stringify(moved));",
     ]));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -524,19 +525,62 @@ test('the migration lists then moves old remote-<worker>-<id> folders: finished 
       "const open = recordPulledRun('remote:W:job2', 'job2', 'W', 20);",
       "for (const d of [done, open]) { fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'native-ar.safetensors'), 'AR'); fs.writeFileSync(path.join(d, 'native-nar.safetensors'), 'NAR'); }",
       "setYue2RunFinished(path.dirname(done), { pickedStep: 10, pickedBlind: false, pickedLabel: '' });",
-      "const dry = migrateYue2RemoteFolders(false);",
+      "const dry = await migrateYue2RemoteFolders(false);",
       "if (dry.length !== 2) throw new Error('dry run should list both: ' + JSON.stringify(dry));",
       "if (!fs.existsSync(done) || !fs.existsSync(open)) throw new Error('a dry run moved something');",
       "const finishedTo = path.join(joint, 'album_' + stamp), stagedTo = path.join(joint, '_remote', 'w', 'album_' + stamp);",
       "const byJob = Object.fromEntries(dry.map(r => [r.jobId, r]));",
       "if (byJob['remote:W:job1'].to !== finishedTo || byJob['remote:W:job2'].to !== stagedTo) throw new Error('unexpected targets: ' + JSON.stringify(dry));",
-      "const applied = migrateYue2RemoteFolders(true);",
+      "const applied = await migrateYue2RemoteFolders(true);",
       "if (applied.some(r => r.error)) throw new Error('apply failed: ' + JSON.stringify(applied));",
       "if (!fs.existsSync(path.join(finishedTo, 'checkpoint-step10', 'native-ar.safetensors')) || !fs.existsSync(path.join(stagedTo, 'checkpoint-step20', 'native-nar.safetensors'))) throw new Error('files did not move');",
       "const outputs = listYue2AitkRuns('ds-album', 'album').map(r => r.output).sort();",
       "if (JSON.stringify(outputs) !== JSON.stringify([finishedTo, stagedTo].sort())) throw new Error('index not repointed: ' + JSON.stringify(outputs));",
-      "if (migrateYue2RemoteFolders(false).length) throw new Error('a second run should find nothing to move');",
+      "if ((await migrateYue2RemoteFolders(false)).length) throw new Error('a second run should find nothing to move');",
     ].join('');
     runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+// Reviewer, 800dd701 P1: the link file write dies part way. The old file must
+// survive whole, and the folder, index, presets and scores go back.
+test('a link file write that dies part way leaves yue2-linked.json, folder, index, preset and score as they were', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-remote-folder-partial-link-'));
+  try {
+    runInIsolatedRoot(root, folderScript([
+      "  scoreYue2Rung({ id: 'ds-album', slug: 'album' }, { refineRun: 'remote:W:job1', step: 10, likeness: 4, corruption: 5, notes: 'kept' });",
+      "  const linkedFile = path.join(process.env.TRAINING_DIR, 'yue2-linked.json');",
+      "  const linkedBefore = fs.readFileSync(linkedFile, 'utf8');",
+      "  const write = fs.writeFileSync;",
+      "  fs.writeFileSync = function (file, data, opts) { if (path.basename(String(file)).startsWith('yue2-linked.json')) { write.call(fs, file, '{'); throw Object.assign(new Error('test: disk full'), { code: 'EIO' }); } return write.apply(fs, arguments); };",
+      "  let body;",
+      "  try { body = await (await post('yue2-cleanup', { run: 'remote:W:job1', step: 10 })).json(); } finally { fs.writeFileSync = write; }",
+      "  if (!body.moveError) throw new Error('expected a reported move failure: ' + JSON.stringify(body));",
+      "  if (fs.readFileSync(linkedFile, 'utf8') !== linkedBefore) throw new Error('yue2-linked.json was damaged');",
+      "  if (fs.readdirSync(process.env.TRAINING_DIR).some(f => f.startsWith('yue2-linked.json.'))) throw new Error('a temp file was left behind');",
+      "  if (listYue2AitkRuns('ds-album', 'album')[0].output !== path.dirname(dir) || !fs.existsSync(dir)) throw new Error('folder or index not restored');",
+      "  if (presetOf(setId).yue2_ar_adapter_path !== path.join(dir, 'native-ar.safetensors')) throw new Error('preset not restored');",
+      "  const scores = listYue2RungScores('ds-album');",
+      "  if (scores.length !== 1 || scores[0].checkpointDir !== dir) throw new Error('score not restored: ' + JSON.stringify(scores));",
+    ]));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+// Reviewer, 800dd701 P2: a rung scored before the move keeps its one row,
+// id and ratings when it is rated again afterwards.
+test('a rung scored before a move is edited in place afterwards: one row, same id, ratings kept', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-remote-folder-scores-'));
+  try {
+    runInIsolatedRoot(root, folderScript([
+      "  const before = scoreYue2Rung({ id: 'ds-album', slug: 'album' }, { refineRun: 'remote:W:job1', step: 10, likeness: 4, corruption: 5, notes: 'kept' });",
+      "  const cleanup = await post('yue2-cleanup', { run: 'remote:W:job1', step: 10 });",
+      "  const body = await cleanup.json();",
+      "  if (!cleanup.ok || body.moveError) throw new Error('cleanup failed: ' + JSON.stringify(body));",
+      "  const after = scoreYue2Rung({ id: 'ds-album', slug: 'album' }, { refineRun: 'remote:W:job1', step: 10, likeness: 3 });",
+      "  const rows = listYue2RungScores('ds-album');",
+      "  if (rows.length !== 1) throw new Error('expected one score row, got ' + JSON.stringify(rows));",
+      "  if (after.id !== before.id || after.likeness !== 3 || after.corruption !== 5 || after.notes !== 'kept') throw new Error('ratings lost: ' + JSON.stringify(after));",
+      "  if (after.checkpointDir !== path.join(joint, 'album_' + stamp, 'checkpoint-step10')) throw new Error('score not repointed: ' + after.checkpointDir);",
+    ]));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

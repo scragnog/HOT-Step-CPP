@@ -18,6 +18,7 @@
 import fs from 'fs';
 import path from 'path';
 import { config } from '../../config.js';
+import { getDb } from '../../db/database.js';
 import {
   findArtistByName, findLyricsSetByAlbum, getAllPresets, getOrCreateArtist, getPreset,
   replaceLyricsSetSongs, saveLyricsSet, updateArtistImage, upsertPreset,
@@ -355,7 +356,7 @@ function recordYue2Linked(slug: string, arPath: string, narPath: string): void {
   const all = readYue2Linked();
   all[slug] = { arPath, narPath, at: new Date().toISOString() };
   fs.mkdirSync(path.dirname(linkedFile()), { recursive: true });
-  fs.writeFileSync(linkedFile(), JSON.stringify(all, null, 2), 'utf-8');
+  writeYue2LinkedAtomic(all);
 }
 
 export interface Yue2PresetRefreshResult { linked: boolean; updated: number; error?: string }
@@ -414,39 +415,58 @@ export function refreshYue2PresetsForJointCheckpoint(
   return { linked: true, updated };
 }
 
+/** Replace yue2-linked.json in one rename, so a failed write leaves the old
+ *  file whole rather than truncated. */
+function writeYue2LinkedAtomic(all: Record<string, Yue2LinkedPair>): void {
+  const tmp = `${linkedFile()}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(all, null, 2), 'utf-8');
+    fs.renameSync(tmp, linkedFile());
+  } finally { fs.rmSync(tmp, { force: true }); }
+}
+
 /** A joint run folder moved from `oldDir` to `newDir`: repoint every
- *  yue2-linked.json pair and album preset that named a file inside it.
- *  Returns an undo that puts every changed record back. On any failure the
- *  records already changed are restored and the error is rethrown. */
+ *  yue2-linked.json pair, album preset and rung score that named a path
+ *  inside it. Presets and scores change in one database transaction (score
+ *  rows keep their ids and ratings); the link file is replaced atomically.
+ *  Returns an undo that puts all of it back. On failure nothing is left
+ *  changed and the error is rethrown. */
 export function rebaseYue2JointLinks(oldDir: string, newDir: string): () => void {
   const from = normPath(oldDir);
-  const rebase = (p: string | null | undefined): string | null => {
+  const rebase = (p: string | null | undefined, to: string, base: string): string | null => {
     if (!p) return null;
     const n = normPath(p);
-    return n.startsWith(from + path.sep) ? path.join(newDir, path.resolve(p).slice(from.length + 1)) : null;
+    return n === base || n.startsWith(base + path.sep) ? path.join(to, path.resolve(p).slice(base.length)) : null;
   };
-  const undo: Array<() => void> = [];
-  const undoAll = () => { for (const u of undo.reverse()) { try { u(); } catch (err: any) { console.warn(`[Training] Could not restore a YuE2 link: ${err?.message ?? err}`); } } };
-  try {
-    const before = readYue2Linked();
-    const after = Object.fromEntries(Object.entries(before).map(([slug, pair]) =>
-      [slug, { ...pair, arPath: rebase(pair.arPath) ?? pair.arPath, narPath: rebase(pair.narPath) ?? pair.narPath }]));
-    if (JSON.stringify(after) !== JSON.stringify(before)) {
-      fs.writeFileSync(linkedFile(), JSON.stringify(after, null, 2), 'utf-8');
-      undo.push(() => fs.writeFileSync(linkedFile(), JSON.stringify(before, null, 2), 'utf-8'));
-    }
+  const db = getDb();
+  const rewriteDb = (fromDir: string, toDir: string) => db.transaction(() => {
+    const base = normPath(fromDir);
     for (const preset of getAllPresets()) {
-      const ar = rebase(preset.yue2_ar_adapter_path), nar = rebase(preset.yue2_nar_adapter_path);
+      const ar = rebase(preset.yue2_ar_adapter_path, toDir, base), nar = rebase(preset.yue2_nar_adapter_path, toDir, base);
       if (!ar && !nar) continue;
       const data = presetDataFromRow(preset);
-      const prior = { ...data };
       if (ar) data.yue2ArAdapterPath = ar;
       if (nar) data.yue2NarAdapterPath = nar;
       upsertPreset(preset.lyrics_set_id, data);
-      undo.push(() => upsertPreset(preset.lyrics_set_id, prior));
     }
-  } catch (err) { undoAll(); throw err; }
-  return undoAll;
+    const scores = db.prepare('SELECT id, checkpoint_dir FROM yue2_rung_scores').all() as Array<{ id: number; checkpoint_dir: string }>;
+    const move = db.prepare('UPDATE yue2_rung_scores SET checkpoint_dir = ? WHERE id = ?');
+    for (const row of scores) {
+      const to = rebase(row.checkpoint_dir, toDir, base);
+      if (to) move.run(to, row.id);
+    }
+  })();
+  rewriteDb(oldDir, newDir);
+  const before = readYue2Linked();
+  const after = Object.fromEntries(Object.entries(before).map(([slug, pair]) =>
+    [slug, { ...pair, arPath: rebase(pair.arPath, newDir, from) ?? pair.arPath, narPath: rebase(pair.narPath, newDir, from) ?? pair.narPath }]));
+  const linkChanged = JSON.stringify(after) !== JSON.stringify(before);
+  try { if (linkChanged) writeYue2LinkedAtomic(after); }
+  catch (err) { rewriteDb(newDir, oldDir); throw err; }
+  return () => {
+    if (linkChanged) writeYue2LinkedAtomic(before);
+    rewriteDb(newDir, oldDir);
+  };
 }
 
 /** The run directory an MM3 adapter reference belongs to: the first segment

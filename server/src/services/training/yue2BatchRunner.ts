@@ -298,7 +298,7 @@ async function finishLadder(item: Yue2BatchItem): Promise<void> {
   // never run off an unlinked checkpoint (Reviewer, blocker #1).
   if (!refreshed.linked) throw new Error(`Could not record this checkpoint as linked: ${refreshed.error || 'unknown error'}`);
   const score = item.refineRun && !narJob ? listYue2RungScores(ds.id, item.refineRun).find(r => r.step === step) : undefined;
-  const result = runYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir, lyricsSetId: ds.lyricsSetId }, runId, step,
+  const result = await runYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir, lyricsSetId: ds.lyricsSetId }, runId, step,
     { caches: true, otherCheckpoints: true, otherRuns: true, resume: true, otherPreviews: true },
     { blind: score?.blind ?? false, blindLabel: score?.blindLabel ?? '' });
   // The link just succeeded: best-effort, never turns a successful local

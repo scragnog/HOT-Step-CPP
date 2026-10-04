@@ -458,3 +458,45 @@ test('no dataset for the worker\'s ladder is reported, not guessed at', () => {
     runInIsolatedRoot(root, script);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+// Reviewer, 800dd701 P1: a folder move that lands while a pull of the same
+// run is mid-transfer must wait for it, so the pull cannot recreate the old
+// folder or point the index back at it.
+test('a folder move waits for an in-flight pull of the same run', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-pull-during-move-'));
+  try {
+    const hash1 = sha256Hex('WAV-BYTES-1'); const hash2 = sha256Hex('WAV-BYTES-2');
+    const script = LADDER_HARNESS + [
+      "import { setYue2RunFinished } from './src/services/training/yue2AitkRuns.js';",
+      "import { settleYue2RemoteRun } from './src/services/training/yue2Cleanup.js';",
+      "import { runStamp } from './src/services/training/adapterLayout.js';",
+      "import { config } from './src/config.js';",
+      "addDataset('album');",
+      `const ladder = { jobId: 'job1', datasetId: 'ds-album', datasetSlug: 'album', status: 'done', createdAt: now, updatedAt: now, options: {}, checkpoints: [{ step: 10, kl: 1.0, rung: true }], previews: [preview('p1', 10, 'p1.wav', buf1(), '${hash1}')] };`,
+      "function buf1() { return Buffer.from('WAV-BYTES-1'); }",
+      "const state = { ladders: [ladder], files: { 'job1/p1.wav': { buf: buf1() } }, deleted: [] };",
+      "const server = await serve(state);",
+      "const w = { name: 'W', url: 'http://127.0.0.1:' + server.address().port };",
+      "try {",
+      "  await pullYue2Ladders(w);",
+      "  const staged = listYue2AitkRuns('ds-album', 'album')[0].output;",
+      "  setYue2RunFinished(staged, { pickedStep: 10, pickedBlind: false, pickedLabel: '' });",
+      // A second preview arrives slowly; the move is asked for while it is in flight.
+      `  ladder.previews.push(preview('p2', 10, 'p2.wav', Buffer.from('WAV-BYTES-2'), '${hash2}'));`,
+      "  state.files['job1/p2.wav'] = { buf: Buffer.from('WAV-BYTES-2'), delayMs: 400 };",
+      "  const pulling = pullYue2Ladders(w);",
+      "  while (!state.attempts?.['job1/p2.wav']) await new Promise(r => setTimeout(r, 10));",
+      "  const moved = await settleYue2RemoteRun('remote:W:job1');",
+      "  const pulled = await pulling;",
+      "  const final = path.join(config.aceServer.adapters, 'yue2-joint-adapters', 'album_' + runStamp(new Date(now)));",
+      "  if (moved !== final) throw new Error('unexpected move target: ' + moved);",
+      "  if (pulled[0].status !== 'pulled') throw new Error('pull failed: ' + JSON.stringify(pulled));",
+      "  if (fs.existsSync(staged)) throw new Error('the old folder was recreated');",
+      "  const run = listYue2AitkRuns('ds-album', 'album')[0];",
+      "  if (run.output !== final) throw new Error('index points away from the moved folder: ' + run.output);",
+      "  if (!fs.existsSync(path.join(final, 'previews', 'p2.wav'))) throw new Error('the in-flight preview did not land in the moved folder');",
+      "} finally { server.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

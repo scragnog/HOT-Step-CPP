@@ -32,7 +32,7 @@ import { latestGenerationLyrics, PUSHED_PREVIEW_LYRICS } from './yue2JointTrainR
 import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
 import type { TrainingDatasetRow } from './types.js';
 import { getYue2AlbumScore, importYue2RungScores, listYue2RungScores, scoreYue2Album, scoreYue2Rung, type Yue2RungScore } from './yue2RungScores.js';
-import { freeYue2RunDirectory, jointRunForAdapter, listYue2AitkRuns, recordYue2AitkRun, yue2RemoteRunDirectory, type Yue2AitkCheckpointRecord, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
+import { freeYue2RunDirectory, jointRunForAdapter, listYue2AitkRuns, recordYue2AitkRun, withYue2RunLock, yue2RemoteRunDirectory, type Yue2AitkCheckpointRecord, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
 import { listYue2JointPreviews, recordYue2JointPreview, resolveYue2JointPreview, type Yue2JointPreviewRecord } from './yue2JointPreview.js';
 import { listYue2TrainLogs, noteYue2TrainLog, trainLogArchiveDir } from './datasetProfile.js';
 import { classifyCommit, currentCommit } from './workerUpdate.js';
@@ -579,29 +579,11 @@ function hashFile(file: string): string | null {
 
 const TRANSFER_ATTEMPTS = 3;
 
-/** Serialize async work sharing a key — a second pull or hydrate for the same
- *  worker/run/step waits for the first instead of racing it on disk (Reviewer,
- *  dbe2464d: overlapping Review/API pulls stomped on each other's `.part`
- *  file and metadata writes). One pending chain per key; the map entry is
- *  dropped once nothing is waiting so it never grows unbounded. */
-const runLocks = new Map<string, Promise<unknown>>();
-function withRunLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  const prior = runLocks.get(key) ?? Promise.resolve();
-  const next = prior.then(fn, fn);
-  // The entry stored in the map is this settle-tracking wrapper, not `next`
-  // itself — comparing against `next` here always failed, so a completed
-  // lock's entry never cleared (Reviewer, round 3 nit).
-  const settled = next.then(() => {}, () => {});
-  runLocks.set(key, settled);
-  void settled.finally(() => { if (runLocks.get(key) === settled) runLocks.delete(key); });
-  return next;
-}
-
 /** Fetch one file to `dest` and hash-verify it, retrying the whole
  *  fetch-and-hash a few times on a mismatch before giving up (seen pulling
  *  LivingRoom's overnight ladders, 2026-10-04). Reviewer's repro at dbe2464d
  *  proved a local write race between overlapping pulls — fixed by
- *  `withRunLock` above and the unique temp filename below — is a real,
+ *  `withYue2RunLock` and the unique temp filename below — is a real,
  *  reproducible cause of a "corrupt" landing; it did not establish how many
  *  of that night's specific failures were this race versus the network or
  *  the worker's data. Each attempt is a fresh request; a hash match on any
@@ -639,7 +621,7 @@ async function fetchAndVerifyFile(w: WorkerInfo, url: string, dest: string, sha2
  *  API call is also in flight, say) waits for the first instead of racing it
  *  on the same destination files and metadata (Reviewer, dbe2464d). */
 function pullOneYue2Ladder(w: WorkerInfo, ds: { id: string; slug: string; customTag?: string }, ladder: WorkerLadder): Promise<Yue2LadderPullResult> {
-  return withRunLock(`pull:${w.name}:${ladder.jobId}`, () => pullOneYue2LadderLocked(w, ds, ladder));
+  return withYue2RunLock(localYue2LadderJobId(w.name, ladder.jobId), () => pullOneYue2LadderLocked(w, ds, ladder));
 }
 async function pullOneYue2LadderLocked(w: WorkerInfo, ds: { id: string; slug: string; customTag?: string }, ladder: WorkerLadder): Promise<Yue2LadderPullResult> {
   const errors: string[] = [];
@@ -723,9 +705,11 @@ export interface Yue2LadderHydrateResult { status: 'hydrated' | 'already-local' 
  *  batch runner and an API call landing together) waits for the first rather
  *  than racing it on the same checkpoint files (Reviewer, dbe2464d). */
 export function hydrateYue2LadderCheckpoint(run: Yue2AitkRunRecord, step: number): Promise<Yue2LadderHydrateResult> {
-  return withRunLock(`hydrate:${run.jobId}:${step}`, () => hydrateYue2LadderCheckpointLocked(run, step));
+  return withYue2RunLock(run.jobId, () => hydrateYue2LadderCheckpointLocked(run, step));
 }
-async function hydrateYue2LadderCheckpointLocked(run: Yue2AitkRunRecord, step: number): Promise<Yue2LadderHydrateResult> {
+async function hydrateYue2LadderCheckpointLocked(stale: Yue2AitkRunRecord, step: number): Promise<Yue2LadderHydrateResult> {
+  // The caller's copy may predate a folder move that held the lock first.
+  const run = listYue2AitkRuns(stale.datasetId, stale.datasetSlug).find(r => r.jobId === stale.jobId) ?? stale;
   const ckpt = run.checkpoints.find(c => c.step === step);
   if (!ckpt) return { status: 'error', errors: [`No checkpoint at step ${step}`] };
   if (!run.origin) {
