@@ -21,9 +21,10 @@ MiniMax-Music3 or YuE2), chosen in that same bar, see [Backends](../backends.md)
 
 ## Workflow
 
-1. Write a **Style Description**, optionally add a **LoRA** trigger word and turn on **Beat I/O**
-   for a percussive intro/outro. Both `{a|b|c}` wildcard syntax and the LoRA trigger prefix apply
-   here.
+1. Write a **Style Description** — or pick a **Style preset** for a ready-made ensemble
+   description and edit it from there — optionally add a **LoRA** trigger word and turn on
+   **Beat I/O** for a percussive intro/outro. Both `{a|b|c}` wildcard syntax and the LoRA trigger
+   prefix apply here.
 2. Optionally expand **Song Info** to set an Artist, Title and Subject.
 3. Turn on **Instrumental**, or leave it off and write **Lyrics** (with `[Verse]`, `[Chorus]` and
    the other section tags).
@@ -50,6 +51,7 @@ MiniMax-Music3 or YuE2), chosen in that same bar, see [Backends](../backends.md)
 | Control | What it does |
 |---|---|
 | Style Description | The caption sent to the model. Supports `{a|b|c}` wildcards, the `{·} expand` button resolves them once in place, `auto` resolves them at Generate time instead, using the DiT seed (or a fresh draw when the seed is randomised). Read-only, with a dataset caption showing through it, while a MiniMax-Music3 or YuE2 caption source below is locked to something other than Custom. |
+| Style preset | A dropdown of twelve ready-made ensemble descriptions — one sentence of instrumentation and mood each, from a smoky jazz quartet to a heavy metal band. Picking one writes it into the Style Description, replacing what was there; typing in the box afterwards clears the selection. Hidden while a caption source is locked. Handy with a lead sheet, where the melody and chords are already fixed and only the arrangement is left to say. |
 | LoRA | A trigger word prepended to the style description before it is sent, for adapters that need one typed rather than embedded in the file. If the description already starts with that complete trigger, it is not added again when you reuse a song. |
 | Beat I/O | Appends a request for a clean percussive intro and outro (1, 2, 4 or 8 bars) to the style description, for DJ mixing. |
 | Song Info (Artist / Title / Subject) | Optional metadata, collapsed by default. Auto-populates and expands when a song is sent here from Lyric Studio or Auto-Gen. |
@@ -69,7 +71,7 @@ MiniMax-Music3 or YuE2), chosen in that same bar, see [Backends](../backends.md)
 | Cover Art | Override the auto-generated cover art image subject while keeping the automatic art direction (genre visuals, quality modifiers). Only shown when cover art generation is enabled in post-processing settings. |
 | Generate with AI | Opens a modal to have a configured LLM provider write the caption, lyrics, title, subject, BPM, key, time signature, duration and vocal language in one shot, from a genre/style and a subject you give it (or a random one). Requires at least one LLM provider configured and reachable; disabled otherwise. Turns Instrumental off. |
 | Generate / Queue Generation | Submits the form. Disabled until there is a caption, lyrics, or Instrumental is on. Reads Queue Generation, with a count badge, once another job is already rendering. On YuE2, if "Preview the score first" is on (a toggle in the global parameter bar's YuE2 controls), this opens the lead sheet preview instead of queuing a render directly. |
-| Lead sheet preview (YuE2) | Shows the planner's lead sheet as staff notation before any audio renders, with a health verdict (healthy, long or runaway), a reason, an estimated duration, the seed and the section order. Play synthesises it in the browser, the first click is the user gesture the browser requires before it can make sound, and needs network access to fetch a soundfont. Continue renders exactly this score with its seed pinned; Retry plans a new one with a fresh seed; Cancel renders nothing. |
+| Lead sheet preview (YuE2) | Shows the planner's lead sheet as staff notation before any audio renders, with a health verdict (healthy, long or runaway), a reason, an estimated duration, the seed and the section order. Play synthesises it in the browser, the first click is the user gesture the browser requires before it can make sound, and needs network access to fetch a soundfont. Continue renders exactly this score with its seed pinned; Retry plans a new one with a fresh seed; Cancel renders nothing. Download .abc saves the score to a text file named after its title line, for editing in MuseScore or EasyABC and dropping back into the global bar's Lead sheet (ABC) box. |
 
 A reset arrow appears beside Instrumental, BPM, Key, Time Signature, Vocal Gender and
 Vocal/Lyrics Language whenever the value has moved from the default; click it to snap

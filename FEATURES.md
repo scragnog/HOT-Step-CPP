@@ -122,6 +122,7 @@ Full manual control of caption, lyrics and music parameters. ACE-Step songs play
 |---|---|
 | Style and lyrics | Caption, section-tagged lyrics, negative prompt, instrumental toggle and song info. |
 | Wildcards | `{a\|b\|c}` syntax in caption and lyrics, expanded in place or at generate time from the seed. |
+| Style presets | Twelve one-sentence ensemble descriptions, each instrumentation plus mood, written straight into the caption. |
 | LoRA trigger box | Prepends a trigger word for adapters that do not record one, without repeating it on reuse. |
 | Beat I/O | Asks for a clean percussive intro and outro of 1 to 8 bars for DJ mixing. |
 | Generate with AI | A configured LLM writes caption, lyrics, title and metadata from a genre and subject. |
@@ -129,7 +130,7 @@ Full manual control of caption, lyrics and music parameters. ACE-Step songs play
 | Caption source | On MiniMax-Music3 and YuE2, borrow a training dataset's caption: nearest tempo, a named track, or your own. |
 | Latent import | Continue from a saved `.latent` file, with its embedded metadata. |
 | Backend-aware fields | BPM, duration, key, time signature, vocal gender and language show only where the active backend uses them. |
-| YuE2 lead sheet preview | Opens before render when "Preview the score first" is on. |
+| YuE2 lead sheet preview | Opens before render when "Preview the score first" is on, and the score can be downloaded as `.abc`. |
 
 ## Library, player and playlists
 

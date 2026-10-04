@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { hasWildcards, expandInPlace, randomWildcardSeed } from '../../utils/wildcardUtils';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
+import { StylePresetSelect } from './StylePresetSelect';
 
 interface ContentSectionProps {
   caption: string;
@@ -130,6 +131,13 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
           onChange={e => onCaptionChange(e.target.value)}
           rows={captionReadOnly ? 8 : 3}
         />
+
+        {/* Style presets write an ensemble description straight into the caption. */}
+        {!captionReadOnly && (
+          <div className="mt-1.5">
+            <StylePresetSelect caption={caption} onCaptionChange={onCaptionChange} />
+          </div>
+        )}
       </div>
 
       {/* LoRA trigger word + Beat intro/outro — compose-time caption helpers */}

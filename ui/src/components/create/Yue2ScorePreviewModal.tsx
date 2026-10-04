@@ -15,7 +15,7 @@
 import React, { useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Download, Loader2, RefreshCw, X } from 'lucide-react';
 import abcjs from 'abcjs';
 import 'abcjs/abcjs-audio.css';
 import { followNoteInBox } from '../../utils/abcFollow';
@@ -71,6 +71,24 @@ export const Yue2ScorePreviewModal: React.FC<Props> = ({ open, data, error, onCo
     // playing on its own AudioContext unless it is told to stop.
     return () => { try { control.pause(); } catch { /* nothing was playing */ } };
   }, [open, data?.abc]);
+
+  // The whole score is already in the client, so this needs no server round-trip.
+  // MuseScore, EasyABC and abcjs all read plain ABC, so a text blob is enough.
+  const downloadAbc = () => {
+    if (!data?.abc) return;
+    const title = data.abc.match(/^T:(.+)$/m)?.[1]?.trim() || 'lead-sheet';
+    // Anything that is not a letter, number, underscore or hyphen becomes a
+    // hyphen — so accented titles survive and slashes never reach the OS.
+    const slug = (title.replace(/[^\p{L}\p{N}_-]+/gu, '-').replace(/^-+|-+$/g, '') || 'lead-sheet').slice(0, 60);
+    const url = URL.createObjectURL(new Blob([data.abc], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${slug}.abc`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   if (!open) return null;
 
@@ -138,6 +156,10 @@ export const Yue2ScorePreviewModal: React.FC<Props> = ({ open, data, error, onCo
           <button onClick={onCancel}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-zinc-300 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5">
             {t('common.cancel', 'Cancel')}
+          </button>
+          <button onClick={downloadAbc} disabled={!data}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-zinc-300 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 disabled:opacity-40 flex items-center gap-1.5">
+            <Download size={12} /> {t('createPanel.yue2ScoreDownload', 'Download .abc')}
           </button>
           <button onClick={onRetry} disabled={!data && !error}
             className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-40 flex items-center gap-1.5">
