@@ -36,6 +36,16 @@ export function previewsEffectDeps(datasetId: string | null | undefined, ladderR
   return [datasetId, ladderRun, jobStatus, indexedLocally];
 }
 
+/** "Use this rung" with Further training for NAR on: a decoder-only run
+ *  never gets a second follow-up chained onto it, nor does a remote-origin
+ *  run — its prepared dataset lives on its own worker, under a path this
+ *  machine cannot resolve, so resuming it here isn't supported yet
+ *  (Reviewer, slice 3 blocker #6; the batch runner's equivalent check is
+ *  yue2BatchRunner.ts's skipNarFurther). Exported for a direct unit test. */
+export function skipNarFurther(run: Pick<Yue2AitkRunRecord, 'options' | 'origin'> | undefined): boolean {
+  return (run?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true || !!run?.origin;
+}
+
 export const RefinePanel: React.FC = () => {
   const { t } = useTranslation();
   const detail = useTrainingStore(s => s.detail);
@@ -200,11 +210,16 @@ export const RefinePanel: React.FC = () => {
   const onUse = async (_dir: string, step: number): Promise<boolean> => {
     if (!datasetId || !ladderRun) return true;
     setError(''); setCleanupNote('');
-    // A decoder-only run (its own "further training" follow-up) never gets
-    // another decoder follow-up chained onto it — that rung finishes here.
     const run = runs.find(r => r.jobId === ladderRun);
-    const isDecoderOnly = (run?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true;
-    if (!narFurther || isDecoderOnly) return false;
+    if (!narFurther) return false;
+    if (skipNarFurther(run)) {
+      if (run?.origin) {
+        setCleanupNote(t('trainingStudio.refine.narRemoteUnsupported',
+          'NAR further training on a ladder pulled from {{worker}} is not supported yet; finishing this rung directly instead.',
+          { worker: run.origin.worker }));
+      }
+      return false;
+    }
     try {
       // Decoder on from this rung, planner frozen; the result becomes the adapter.
       const result = await startYue2JointTrain(datasetId, { trainingMethod: 'aitk', refine: true, resumeRunId: ladderRun, resumeStep: step,

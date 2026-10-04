@@ -20,7 +20,7 @@ import { config } from '../../config.js';
 import * as repo from './datasetsRepo.js';
 import * as queue from './labelingQueue.js';
 import { trainingBaseDir } from './paths.js';
-import { listYue2AitkRuns } from './yue2AitkRuns.js';
+import { listYue2AitkRuns, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
 import { autoRefineRequest } from './yue2JointTrainRunner.js';
 import { yue2LoudnessForMethod } from './yue2Train.js';
 import { listPreparedCaches } from './preparedDataReset.js';
@@ -232,6 +232,15 @@ export function finishScoredLadders(entries: Array<{ datasetId: string; refineRu
   persist(state);
   setImmediate(() => void runBatch(state));
   return toSummary(state);
+}
+
+/** A decoder-only follow-up gets no second one, as on the Refine tab. Nor
+ *  does a remote-origin run: its prepared dataset lives on its own worker,
+ *  under a path this machine cannot resolve, so resuming it here isn't
+ *  supported yet (Reviewer, slice 3 blocker #6 — the same gap RefinePanel.tsx's
+ *  onUse checks for manual use). Exported for a direct unit test. */
+export function skipNarFurther(run: Pick<Yue2AitkRunRecord, 'options' | 'origin'> | undefined): boolean {
+  return (run?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true || !!run?.origin;
 }
 
 /** The Refine tab's "Further training for NAR" request, at its defaults. */
@@ -470,9 +479,8 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
     const best = item.refineRun ? bestScoredRung(item.datasetId, item.refineRun, ds?.slug) : null;
     if (!best) throw new Error('No rung of this ladder has both a likeness and a corruption score');
     item.pickStep = best.step; persist(state);
-    // A decoder-only follow-up gets no second one, as on the Refine tab.
     const run = listYue2AitkRuns(item.datasetId, ds?.slug).find(r => r.jobId === item.refineRun);
-    if ((run?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true) return null;
+    if (skipNarFurther(run)) return null;
     return narFurtherRequest(item.refineRun!, best.step, item.narKnee !== false);
   }
   if (stage === 'finish') { await finishLadder(item); return null; }
