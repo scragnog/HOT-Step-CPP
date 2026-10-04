@@ -4123,8 +4123,14 @@ router.post('/datasets/:id/yue2-joint-preset', async (req: Request, res: Respons
       res.status(400).json({ error: 'Select a complete joint checkpoint belonging to this dataset' }); return;
     }
     const knownPaths = runs.flatMap(run => run.checkpoints).flatMap(item => [item.arPath, item.narPath].filter((value): value is string => !!value));
-    const updated = refreshYue2PresetsForJointCheckpoint(
+    const refreshed = refreshYue2PresetsForJointCheckpoint(
       { slug: ds.slug, lyricsSetId: ds.lyricsSetId }, checkpoint.arPath, checkpoint.narPath, knownPaths);
+    // The durable link record is the only proof the checkpoint is now the
+    // record of truth — `updated` (how many presets changed) can be 0 on a
+    // real success, so it is never read as pass/fail (Reviewer, blocker #1).
+    if (!refreshed.linked) {
+      res.status(500).json({ error: `Could not record this checkpoint as linked: ${refreshed.error || 'unknown error'}` }); return;
+    }
     if (owningRun) {
       try { noteYue2TrainLog(ds.slug, owningRun.jobId, { output: owningRun.output, keptStep: checkpoint.step }); }
       catch (err: any) { console.warn(`[Training] Could not note the loss log of run ${owningRun.jobId}: ${err?.message || err}`); }
@@ -4137,7 +4143,7 @@ router.post('/datasets/:id/yue2-joint-preset', async (req: Request, res: Respons
       try { await deleteWorkerYue2Ladder(owningRun.origin.worker, ds.id, owningRun.origin.remoteJobId); }
       catch (err: any) { console.warn(`[Training] Could not delete ${owningRun.origin.worker}'s copy of ${owningRun.origin.remoteJobId}: ${err?.message || err}`); }
     }
-    res.json({ updated, arPath: checkpoint.arPath, narPath: checkpoint.narPath });
+    res.json({ updated: refreshed.updated, arPath: checkpoint.arPath, narPath: checkpoint.narPath });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

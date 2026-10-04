@@ -283,14 +283,25 @@ export function workerYue2LadderCheckpointFile(datasetId: string, jobId: string,
 /** Drop a whole ladder's folder on this worker — every rung, every preview,
  *  run.json. Called once the controller has hydrated and linked its chosen
  *  rung locally, or when the user discards the ladder outright with no rung
- *  chosen. Refuses while the run is still training. */
+ *  chosen. Refuses while the run is still training, or while any other job
+ *  for this dataset is queued or running on the worker — a NAR follow-up or
+ *  GPU preview job can read this run's checkpoint/output while the run
+ *  record itself already shows 'done' (Reviewer, blocker #2); dataset-scoped
+ *  because the reading job's own record rarely points back at this folder.
+ *  Also refuses a run whose `output` resolves outside the worker's own
+ *  ladder tree, guarding against a corrupted index entry. */
 export function deleteWorkerYue2LadderFolder(datasetId: string, jobId: string): void {
   const ds = repo.getDataset(datasetId);
   if (!ds) throw Object.assign(new Error('Dataset not found'), { status: 404 });
   const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === jobId);
   if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
   if (run.status === 'running') throw Object.assign(new Error('Run is still training'), { status: 409 });
-  fs.rmSync(run.output, { recursive: true, force: true });
+  if (queue.activeJobForDataset(datasetId)) throw Object.assign(new Error('A job is running for this dataset on the worker'), { status: 409 });
+  const output = path.resolve(run.output);
+  if (!isInside(path.join(config.aceServer.adapters, 'yue2-joint-adapters'), output)) {
+    throw Object.assign(new Error(`Refusing to delete outside the joint adapters folder: ${output}`), { status: 400 });
+  }
+  fs.rmSync(output, { recursive: true, force: true });
 }
 
 // ── Controller side ─────────────────────────────────────────────────────────

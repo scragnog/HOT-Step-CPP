@@ -348,32 +348,42 @@ export function readYue2Linked(): Record<string, Yue2LinkedPair> {
   try { return JSON.parse(fs.readFileSync(linkedFile(), 'utf-8')) as Record<string, Yue2LinkedPair>; } catch { return {}; }
 }
 
+/** Throws on failure — callers that gate an irreversible step (like telling
+ *  a worker to delete its copy) on this record actually succeeding need to
+ *  tell that apart from "nothing needed changing" (Reviewer, blocker #1). */
 function recordYue2Linked(slug: string, arPath: string, narPath: string): void {
-  try {
-    const all = readYue2Linked();
-    all[slug] = { arPath, narPath, at: new Date().toISOString() };
-    fs.mkdirSync(path.dirname(linkedFile()), { recursive: true });
-    fs.writeFileSync(linkedFile(), JSON.stringify(all, null, 2), 'utf-8');
-  } catch (err: any) {
-    console.warn(`[Training] YuE2 linked-pair record failed: ${err?.message ?? err}`);
-  }
+  const all = readYue2Linked();
+  all[slug] = { arPath, narPath, at: new Date().toISOString() };
+  fs.mkdirSync(path.dirname(linkedFile()), { recursive: true });
+  fs.writeFileSync(linkedFile(), JSON.stringify(all, null, 2), 'utf-8');
 }
+
+export interface Yue2PresetRefreshResult { linked: boolean; updated: number; error?: string }
 
 /** Link a joint YuE2 checkpoint as one AR/NAR pair. A preset linked to this
  * dataset is always eligible; older adapter references are eligible only when
  * both populated halves belong to this dataset. This keeps a deliberately
- * mixed-artist preset from being silently replaced. */
+ * mixed-artist preset from being silently replaced.
+ *
+ * `linked` is the durable yue2-linked.json record succeeding, which is the
+ * only thing a caller may safely treat as "this checkpoint is now the
+ * record of truth" before doing anything irreversible (like telling a
+ * worker to delete its copy) — `updated` can legitimately be 0 even on a
+ * full success (no preset needed the new pair), so it is never a success
+ * signal on its own (Reviewer, slice 3 blocker #1). */
 export function refreshYue2PresetsForJointCheckpoint(
   ds: { slug: string; lyricsSetId?: number },
   arPath: string,
   narPath: string,
   knownJointPaths: readonly string[] = [],
-): number {
+): Yue2PresetRefreshResult {
   let updated = 0;
   try {
-    if (!arPath || !narPath || !fs.statSync(arPath).isFile() || !fs.statSync(narPath).isFile()) return 0;
+    if (!arPath || !narPath || !fs.statSync(arPath).isFile() || !fs.statSync(narPath).isFile()) {
+      return { linked: false, updated: 0, error: 'Missing or incomplete checkpoint files' };
+    }
     const slug = String(ds.slug || '').toLowerCase();
-    if (!slug) return 0;
+    if (!slug) return { linked: false, updated: 0, error: 'Dataset has no slug' };
     recordYue2Linked(slug, arPath, narPath);
     const known = new Set(knownJointPaths.map(normPath));
     const owned = (p: string): boolean => {
@@ -399,8 +409,9 @@ export function refreshYue2PresetsForJointCheckpoint(
     }
   } catch (err: any) {
     console.warn(`[Training] YuE2 joint preset refresh failed: ${err?.message ?? err}`);
+    return { linked: false, updated, error: err?.message || String(err) };
   }
-  return updated;
+  return { linked: true, updated };
 }
 
 /** The run directory an MM3 adapter reference belongs to: the first segment

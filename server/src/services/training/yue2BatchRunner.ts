@@ -282,7 +282,11 @@ async function finishLadder(item: Yue2BatchItem): Promise<void> {
   }
   if (!ckpt?.arPath || !ckpt.narPath) throw new Error(`No complete checkpoint at step ${step} of run ${runId}`);
   const known = runs.flatMap(r => r.checkpoints).flatMap(c => [c.arPath, c.narPath].filter((v): v is string => !!v));
-  refreshYue2PresetsForJointCheckpoint({ slug: ds.slug, lyricsSetId: ds.lyricsSetId }, ckpt.arPath, ckpt.narPath, known);
+  const refreshed = refreshYue2PresetsForJointCheckpoint({ slug: ds.slug, lyricsSetId: ds.lyricsSetId }, ckpt.arPath, ckpt.narPath, known);
+  // The durable link record, not the preset count, is proof the checkpoint
+  // is now the record of truth — cleanup and the worker delete below must
+  // never run off an unlinked checkpoint (Reviewer, blocker #1).
+  if (!refreshed.linked) throw new Error(`Could not record this checkpoint as linked: ${refreshed.error || 'unknown error'}`);
   const score = item.refineRun && !narJob ? listYue2RungScores(ds.id, item.refineRun).find(r => r.step === step) : undefined;
   const result = runYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir, lyricsSetId: ds.lyricsSetId }, runId, step,
     { caches: true, otherCheckpoints: true, otherRuns: true, resume: true, otherPreviews: true },

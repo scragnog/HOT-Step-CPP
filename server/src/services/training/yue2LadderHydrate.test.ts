@@ -217,6 +217,34 @@ test('a corrupt local file left by a prior attempt is caught and repaired, never
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('a failed durable link write stops before the worker delete, even though the preset count is 0', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-hydrate-link-write-fail-'));
+  try {
+    // Reviewer, blocker #1: make yue2-linked.json a directory so the write
+    // throws. No preset is linked to this dataset either, so `updated` was
+    // always going to be 0 — the old code read that as success and still
+    // told the worker to drop its copy. The fix must distinguish "nothing
+    // needed updating" from "the record write failed" and must never delete.
+    const ar = Buffer.from('AR-BYTES'); const nar = Buffer.from('NAR-BYTES');
+    const hashAr = sha256Hex('AR-BYTES'); const hashNar = sha256Hex('NAR-BYTES');
+    const script = HARNESS + [
+      "addDataset('album');",
+      "const dir = recordPulledRun('remote:W:job1', 'job1', 'W', 10);",
+      "fs.mkdirSync(path.join(process.env.TRAINING_DIR, 'yue2-linked.json'), { recursive: true });",
+      `const state = { manifest: [{ name: 'native-ar.safetensors', sha256: '${hashAr}', bytes: ${ar.length} }, { name: 'native-nar.safetensors', sha256: '${hashNar}', bytes: ${nar.length} }], files: { 'native-ar.safetensors': Buffer.from('AR-BYTES'), 'native-nar.safetensors': Buffer.from('NAR-BYTES') }, deleted: [] };`,
+      "const workerServer = await serve(state);",
+      "config.workers.list = 'W=http://127.0.0.1:' + workerServer.address().port;",
+      "const app = await appServer();",
+      "try {",
+      "  const res = await fetch('http://127.0.0.1:' + app.address().port + '/api/training/datasets/ds-album/yue2-joint-preset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkpointDir: dir }) });",
+      "  if (res.ok) throw new Error('expected a non-2xx response when the link record cannot be written');",
+      "  if (state.deleted.length) throw new Error('no worker delete when the durable link write failed: ' + JSON.stringify(state.deleted));",
+      "} finally { workerServer.close(); app.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('a worker manifest missing the nar file is refused before any fetch attempt', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-hydrate-partial-manifest-'));
   try {

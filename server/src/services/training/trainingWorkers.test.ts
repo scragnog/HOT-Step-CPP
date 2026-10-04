@@ -172,6 +172,66 @@ test('scoring a run already known locally through a worker is refused with 409',
   }
 });
 
+test('deleting a worker ladder folder is refused while another job for the dataset is active', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-delete-active-job-'));
+  try {
+    const script = [
+      "import fs from 'node:fs';",
+      "import path from 'node:path';",
+      "import { initDb } from './src/db/database.js';",
+      "import * as repo from './src/services/training/datasetsRepo.js';",
+      "import { recordYue2AitkRun } from './src/services/training/yue2AitkRuns.js';",
+      "import { deleteWorkerYue2LadderFolder } from './src/services/training/trainingWorkers.js';",
+      "import * as queue from './src/services/training/labelingQueue.js';",
+      "initDb();",
+      "const now = new Date().toISOString();",
+      "repo.insertDataset({ id: 'ds-album', slug: 'album', name: 'album', sourceDir: path.join(process.env.TRAINING_DIR, 'src-album'), recursive: true, customTag: '', tagPosition: 'prefix', genreRatio: 0, defaultArtist: '', defaultAlbum: '', defaultGenre: '', defaultLanguage: '', sampleCount: 0, labeledCount: 0, excludedCount: 0, status: 'draft', builtAt: '', datasetJsonPath: '', albumName: '', createdAt: now, updatedAt: now });",
+      // The ladder itself reports 'done' — only a *different* job for the
+      // same dataset (a NAR follow-up resuming from this checkpoint, or GPU
+      // preview work) is still active (Reviewer, blocker #2).
+      "const output = path.join(process.env.ACESTEPCPP_ADAPTERS, 'yue2-joint-adapters', 'job1');",
+      "fs.mkdirSync(output, { recursive: true });",
+      "recordYue2AitkRun({ version: 1, jobId: 'job1', datasetId: 'ds-album', datasetSlug: 'album', method: 'aitk', output, options: {}, status: 'done', createdAt: 1, updatedAt: 2, checkpoints: [] });",
+      "queue.createJob('yue2-ar-train', 'ds-album', [], {});",
+      "let threw = false;",
+      "try { deleteWorkerYue2LadderFolder('ds-album', 'job1'); } catch (err) { threw = true; if (err?.status !== 409) throw new Error('expected 409, got ' + err?.status); }",
+      "if (!threw) throw new Error('expected the delete to be refused while another job is active');",
+      "if (!fs.existsSync(output)) throw new Error('fixture bug: output should still be here');",
+    ].join('');
+    runPullInIsolatedRoot(root, script);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('deleting a worker ladder folder refuses a run record whose output points outside the ladder tree', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-delete-containment-'));
+  try {
+    const script = [
+      "import fs from 'node:fs';",
+      "import path from 'node:path';",
+      "import { initDb } from './src/db/database.js';",
+      "import * as repo from './src/services/training/datasetsRepo.js';",
+      "import { recordYue2AitkRun } from './src/services/training/yue2AitkRuns.js';",
+      "import { deleteWorkerYue2LadderFolder } from './src/services/training/trainingWorkers.js';",
+      "initDb();",
+      "const now = new Date().toISOString();",
+      "repo.insertDataset({ id: 'ds-album', slug: 'album', name: 'album', sourceDir: path.join(process.env.TRAINING_DIR, 'src-album'), recursive: true, customTag: '', tagPosition: 'prefix', genreRatio: 0, defaultArtist: '', defaultAlbum: '', defaultGenre: '', defaultLanguage: '', sampleCount: 0, labeledCount: 0, excludedCount: 0, status: 'draft', builtAt: '', datasetJsonPath: '', albumName: '', createdAt: now, updatedAt: now });",
+      // A corrupted index entry pointing outside the ladder tree entirely.
+      "const outside = path.join(process.env.TRAINING_DIR, 'not-a-ladder-folder');",
+      "fs.mkdirSync(outside, { recursive: true }); fs.writeFileSync(path.join(outside, 'keep.txt'), 'x');",
+      "recordYue2AitkRun({ version: 1, jobId: 'job1', datasetId: 'ds-album', datasetSlug: 'album', method: 'aitk', output: outside, options: {}, status: 'done', createdAt: 1, updatedAt: 2, checkpoints: [] });",
+      "let threw = false;",
+      "try { deleteWorkerYue2LadderFolder('ds-album', 'job1'); } catch (err) { threw = true; }",
+      "if (!threw) throw new Error('expected the delete to be refused for a path outside the ladder tree');",
+      "if (!fs.existsSync(path.join(outside, 'keep.txt'))) throw new Error('the outside folder must never be touched');",
+    ].join('');
+    runPullInIsolatedRoot(root, script);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('pullLinked rejects traversal in a linked pair\'s jobId or log seg', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-pull-traversal-'));
   try {
