@@ -12,6 +12,16 @@ import {
 import { Toggle } from '../shared/Toggle';
 import { usePersistedState } from '../../hooks/usePersistedState';
 
+/** Scored, not-yet-finished, not-already-queued rows eligible for "Finish
+ *  scored". A remote-origin row is eligible too — finishing it fetches and
+ *  verifies just the chosen rung from its worker first (yue2BatchRunner.ts's
+ *  finishLadder), so it is never excluded here (Reviewer, slice 3 blocker
+ *  #5). Exported for a direct unit test since this logic has no UI to click
+ *  through in CI. */
+export function selectFinishable(rest: readonly Yue2ReviewRow[], queued: ReadonlySet<string | undefined>): Yue2ReviewRow[] {
+  return rest.filter(r => r.best && !r.finished && !r.live && r.status !== 'running' && !queued.has(r.refineRun));
+}
+
 export const ReviewPanel: React.FC = () => {
   const { t } = useTranslation();
   const openDataset = useTrainingStore(s => s.openDataset);
@@ -55,9 +65,7 @@ export const ReviewPanel: React.FC = () => {
   useEffect(() => { void loadBatches(); const id = window.setInterval(() => void loadBatches(), 10_000); return () => window.clearInterval(id); }, []);
   const queued = new Set(batches.filter(b => b.status === 'running' || b.status === 'paused')
     .flatMap(b => b.items.filter(i => i.refineRun && (i.status === 'pending' || i.status === 'running')).map(i => i.refineRun)));
-  // A pulled ladder's best rung has no local checkpoint yet (that fetch is a
-  // later slice) — Finish scored stays local-only runs until then.
-  const finishable = rest.filter(r => r.best && !r.finished && !r.live && r.status !== 'running' && !queued.has(r.refineRun) && !r.origin);
+  const finishable = selectFinishable(rest, queued);
   const [finishOpen, setFinishOpen] = useState(false);
   const [skip, setSkip] = useState<Record<string, boolean>>({});
   const [finishing, setFinishing] = useState(false);
