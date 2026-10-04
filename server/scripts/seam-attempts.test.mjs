@@ -41,6 +41,12 @@ function envelopeFor(backendId, maxAttempts = 2) {
   });
 }
 
+function loadModule(file) {
+  const module = { exports: {} };
+  vm.runInNewContext(transpile(read(file), file), { ...baseContext, module, exports: module.exports }, { filename: file });
+  return module.exports;
+}
+
 async function execute({ backendId = 'ace', actions, maxAttempts = 2, params = { seed: 123, randomSeed: false }, mm3TakeSeeds, exactSeed }) {
   const lane = loadLane();
   lane.resetGpuLane();
@@ -69,7 +75,15 @@ async function execute({ backendId = 'ace', actions, maxAttempts = 2, params = {
   const effectiveSeed = extract('effectiveSeed');
   const finalizeAttempt = extract('finalizeAttempt', { effectiveSeed });
   const emptyOutcome = extract('emptyOutcome');
-  const run = extract('runGeneration', { getBackend, emptyOutcome, pollUntilDone: () => 'poller' });
+  // runGeneration's free identifiers must all be in the VM context, including
+  // the backend-release guard and the lane helpers the mocked backend never
+  // calls. Missing them makes the retry loop fail on a ReferenceError.
+  const run = extract('runGeneration', {
+    getBackend, emptyOutcome, pollUntilDone: () => 'poller',
+    awaitBackendRelease: loadModule('server/src/services/generation/backendRelease.ts').awaitBackendRelease,
+    jobs: new Map(), releaseGpuLane: lane.releaseGpuLane,
+    gpuLaneNextFamily: lane.gpuLaneNextFamily, runOnGpuLane: lane.runOnGpuLane,
+  });
   const routeContext = {
     runGeneration: run, finalizeAttempt, runOnGpuLane: lane.runOnGpuLane,
     gpuLaneBusy: lane.gpuLaneBusy, gpuLaneDepth: lane.gpuLaneDepth,

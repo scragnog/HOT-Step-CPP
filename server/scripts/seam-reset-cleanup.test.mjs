@@ -61,7 +61,15 @@ function generationFixture(lane, residency, jobs, backend, setTimeoutImpl = call
   const finalizeAttempt = extractFunction(routeFile, 'finalizeAttempt', { effectiveSeed });
   const getBackend = () => backend;
   const emptyOutcome = extractFunction(routeFile, 'emptyOutcome');
-  const runGeneration = extractFunction(routeFile, 'runGeneration', { getBackend, emptyOutcome, pollUntilDone: () => 'poller' });
+  const runGeneration = extractFunction(routeFile, 'runGeneration', {
+    getBackend, emptyOutcome, pollUntilDone: () => 'poller',
+    // The guard and lane helpers runGeneration references are supplied too:
+    // without them the VM throws a ReferenceError and the fixtures never reach
+    // the mocked backend.
+    awaitBackendRelease: loadCommonJs('server/src/services/generation/backendRelease.ts').awaitBackendRelease,
+    jobs, releaseGpuLane: lane.releaseGpuLane,
+    gpuLaneNextFamily: lane.gpuLaneNextFamily, runOnGpuLane: lane.runOnGpuLane,
+  });
   const { isActiveJob } = loadCommonJs('server/src/services/generation/jobTypes.ts');
   const context = {
     runGeneration, finalizeAttempt, runOnGpuLane: lane.runOnGpuLane,

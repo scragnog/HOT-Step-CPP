@@ -30,7 +30,9 @@ function extractFunction(file, name, context = {}) {
   const declaration = ast.statements.find(statement =>
     ts.isFunctionDeclaration(statement) && statement.name?.text === name);
   assert.ok(declaration, `${name} was not found in ${file}`);
-  const code = transpile(`(${source.slice(declaration.getStart(ast), declaration.end)})`, file);
+  // `export` would make the transpiled slice an assignment statement, which is
+  // not a valid expression for the `(fn)` wrapper.
+  const code = transpile(`(${source.slice(declaration.getStart(ast), declaration.end).replace(/^export\s+/, '')})`, file);
   return vm.runInNewContext(code, { ...cloneContext, ...context }, { filename: file });
 }
 
@@ -59,7 +61,10 @@ function makeEnvelopeFixture() {
   };
   backends.ace = { operations: ['text2music'], resolveRequest: resolver };
   backends['minimax-m3'] = { operations: ['text2music'], resolveRequest: resolver };
-  return { ...envelope, backends, calls, setActive: id => { active = id; }, shared, modelSelection };
+  return {
+    ...envelope, backends, calls, setActive: id => { active = id; },
+    getActiveBackendId: registry.getActiveBackendId, shared, modelSelection,
+  };
 }
 
 test('envelope captures a deep immutable snapshot and routes by active backend', () => {
@@ -100,6 +105,12 @@ test('POST keeps mutable working parameters separate from the immutable submissi
     ...cloneContext, isEngineSuspended: () => false, engineReady: true, getUserId: () => 'u',
     uuidv4: () => 'post-job', buildEnvelope: fixture.buildEnvelope,
     GenerationEnvelopeError: fixture.GenerationEnvelopeError, jobs: new Map(),
+    // The handler's guards are production code too — the real
+    // expectedBackendMismatch is extracted; the timbre check is mocked because
+    // it walks the data directory.
+    getActiveBackendId: fixture.getActiveBackendId,
+    expectedBackendMismatch: extractFunction('server/src/routes/generate.ts', 'expectedBackendMismatch'),
+    timbreReferenceMissing: () => false,
     enqueueGeneration: job => { queued = job; },
   });
   const raw = { caption: 'input', seed: 12, nested: { value: 3 } };
@@ -158,6 +169,9 @@ test('queued jobs retain captured ACE/MM3 backends across selector changes', asy
   const routeContext = {
     getBackend: id => backends[id], finalizeAttempt, runGeneration: extractFunction('server/src/routes/generate.ts', 'runGeneration', {
       getBackend: id => backends[id], emptyOutcome, pollUntilDone: () => 'poller',
+      awaitBackendRelease: loadCommonJs('server/src/services/generation/backendRelease.ts').awaitBackendRelease,
+      jobs: new Map(), releaseGpuLane: lane.releaseGpuLane,
+      gpuLaneNextFamily: lane.gpuLaneNextFamily, runOnGpuLane: lane.runOnGpuLane,
     }), runOnGpuLane: lane.runOnGpuLane, gpuLaneBusy: lane.gpuLaneBusy, gpuLaneDepth: lane.gpuLaneDepth,
     noteEnqueued: family => enqueued.push(family), noteFinished: family => {
       finished.push(family); if (finished.length === 2) finishResolve();
