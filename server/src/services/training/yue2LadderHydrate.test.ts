@@ -99,6 +99,61 @@ test('Use this rung fetches, verifies and links a remote-only checkpoint, then t
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('using an already-verified, now worker-deleted rung again revalidates locally instead of asking a worker that is gone', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-hydrate-retired-'));
+  try {
+    // Reviewer, round 3 P2: after a successful "Use this rung" link, the
+    // worker's whole ladder folder is deleted (deleteWorkerYue2Ladder).
+    // Using the same rung again — Finish scored's direct link path hits the
+    // same route — must not require a live worker manifest, since the
+    // worker legitimately has nothing left to report.
+    const ar = Buffer.from('AR-BYTES'); const nar = Buffer.from('NAR-BYTES');
+    const hashAr = sha256Hex('AR-BYTES'); const hashNar = sha256Hex('NAR-BYTES');
+    const script = HARNESS + [
+      "addDataset('album');",
+      "const dir = recordPulledRun('remote:W:job1', 'job1', 'W', 10);",
+      `const state = { manifest: [{ name: 'native-ar.safetensors', sha256: '${hashAr}', bytes: ${ar.length} }, { name: 'native-nar.safetensors', sha256: '${hashNar}', bytes: ${nar.length} }], files: { 'native-ar.safetensors': Buffer.from('AR-BYTES'), 'native-nar.safetensors': Buffer.from('NAR-BYTES') }, deleted: [] };`,
+      "const workerServer = await serve(state);",
+      "config.workers.list = 'W=http://127.0.0.1:' + workerServer.address().port;",
+      "const app = await appServer();",
+      "try {",
+      "  const first = await fetch('http://127.0.0.1:' + app.address().port + '/api/training/datasets/ds-album/yue2-joint-preset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkpointDir: dir }) });",
+      "  if (!first.ok) throw new Error('expected the first use to succeed: ' + JSON.stringify(await first.json()));",
+      "  if (state.deleted.length !== 1) throw new Error('expected the worker ladder to be dropped after the first successful link');",
+      // The worker's copy is gone now: every route 404s, as deleteWorkerYue2LadderFolder leaves it.
+      "  state.manifest = []; state.files = {};",
+      "  const second = await fetch('http://127.0.0.1:' + app.address().port + '/api/training/datasets/ds-album/yue2-joint-preset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkpointDir: dir }) });",
+      "  const body = await second.json();",
+      "  if (!second.ok) throw new Error('expected the second use to succeed from the persisted verified record: ' + JSON.stringify(body));",
+      "  if (!fs.readFileSync(path.join(dir, 'native-ar.safetensors')).equals(Buffer.from('AR-BYTES'))) throw new Error('ar bytes changed unexpectedly');",
+      "} finally { workerServer.close(); app.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a corrupt local file with no verified record and a dead worker is refused, not trusted', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-hydrate-dead-worker-'));
+  try {
+    const script = HARNESS + [
+      "addDataset('album');",
+      "const dir = recordPulledRun('remote:W:job1', 'job1', 'W', 10);",
+      // No manifest/files at all: the worker is simply gone, and this
+      // checkpoint was never verified before (no prior successful hydrate).
+      "const state = { manifest: [], files: {}, deleted: [] };",
+      "const workerServer = await serve(state);",
+      "config.workers.list = 'W=http://127.0.0.1:' + workerServer.address().port;",
+      "const app = await appServer();",
+      "try {",
+      "  const res = await fetch('http://127.0.0.1:' + app.address().port + '/api/training/datasets/ds-album/yue2-joint-preset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkpointDir: dir }) });",
+      "  if (res.ok) throw new Error('expected a non-2xx response: nothing was ever verified and the worker has nothing to serve');",
+      "  if (fs.existsSync(path.join(dir, 'native-ar.safetensors'))) throw new Error('nothing should have been written');",
+      "} finally { workerServer.close(); app.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('a failed fetch links nothing and never asks the worker to delete', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-hydrate-fail-'));
   try {

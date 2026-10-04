@@ -234,13 +234,14 @@ export function finishScoredLadders(entries: Array<{ datasetId: string; refineRu
   return toSummary(state);
 }
 
-/** A decoder-only follow-up gets no second one, as on the Refine tab. Nor
- *  does a remote-origin run: its prepared dataset lives on its own worker,
- *  under a path this machine cannot resolve, so resuming it here isn't
- *  supported yet (Reviewer, slice 3 blocker #6 — the same gap RefinePanel.tsx's
- *  onUse checks for manual use). Exported for a direct unit test. */
-export function skipNarFurther(run: Pick<Yue2AitkRunRecord, 'options' | 'origin'> | undefined): boolean {
-  return (run?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true || !!run?.origin;
+/** A decoder-only follow-up gets no second one, as on the Refine tab — a
+ *  legitimate skip. (A remote-origin run is a separate, rejected case,
+ *  checked by the caller before this: it must stop the whole batch item
+ *  rather than silently fall through to 'finish', see stageRequest's 'nar'
+ *  branch and RefinePanel.tsx's equivalent check.) Exported for a direct
+ *  unit test. */
+export function skipNarFurther(run: Pick<Yue2AitkRunRecord, 'options'> | undefined): boolean {
+  return (run?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true;
 }
 
 /** The Refine tab's "Further training for NAR" request, at its defaults. */
@@ -480,6 +481,13 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
     if (!best) throw new Error('No rung of this ladder has both a likeness and a corruption score');
     item.pickStep = best.step; persist(state);
     const run = listYue2AitkRuns(item.datasetId, ds?.slug).find(r => r.jobId === item.refineRun);
+    // A decoder-only follow-up legitimately gets no second one (nothing to
+    // reject — this stage is correctly "done"). A remote-origin run is a
+    // different case: NAR further training on it isn't supported yet (see
+    // RefinePanel.tsx's onUse), so this must stop the item here with a clear
+    // reason rather than silently skip to 'finish' and mark NAR done when it
+    // never ran (Reviewer/Lead, round 3 #4 — no silent substitute).
+    if (run?.origin) throw new Error(`NAR further training on a ladder pulled from ${run.origin.worker} is not supported yet; this batch item needs manual handling.`);
     if (skipNarFurther(run)) return null;
     return narFurtherRequest(item.refineRun!, best.step, item.narKnee !== false);
   }

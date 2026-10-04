@@ -37,13 +37,27 @@ export function previewsEffectDeps(datasetId: string | null | undefined, ladderR
 }
 
 /** "Use this rung" with Further training for NAR on: a decoder-only run
- *  never gets a second follow-up chained onto it, nor does a remote-origin
- *  run — its prepared dataset lives on its own worker, under a path this
- *  machine cannot resolve, so resuming it here isn't supported yet
- *  (Reviewer, slice 3 blocker #6; the batch runner's equivalent check is
- *  yue2BatchRunner.ts's skipNarFurther). Exported for a direct unit test. */
-export function skipNarFurther(run: Pick<Yue2AitkRunRecord, 'options' | 'origin'> | undefined): boolean {
-  return (run?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true || !!run?.origin;
+ *  never gets a second follow-up chained onto it — that rung finishes here,
+ *  a legitimate skip. (A remote-origin run is a separate, rejected case —
+ *  checked by the caller before this, since it must stop the whole action
+ *  rather than silently fall through to finishing; see onUse and
+ *  yue2BatchRunner.ts's equivalent check.) Exported for a direct unit test. */
+export function skipNarFurther(run: Pick<Yue2AitkRunRecord, 'options'> | undefined): boolean {
+  return (run?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true;
+}
+
+/** "Use this rung" with Further training for NAR on, the three outcomes:
+ *  'reject' stops here with an error, nothing finishes/links/deletes either
+ *  (remote-origin — unsupported, see skipNarFurther); 'skip' is a
+ *  legitimate no-op, the caller's normal finish path is correct (decoder-
+ *  only, or the toggle is off); 'chain' starts the NAR follow-up. Exported
+ *  for a direct unit test — onUse itself is an async closure that also
+ *  calls the network. */
+export function narOnUseOutcome(run: Pick<Yue2AitkRunRecord, 'options' | 'origin'> | undefined, narFurther: boolean): 'reject' | 'skip' | 'chain' {
+  if (!narFurther) return 'skip';
+  if (run?.origin) return 'reject';
+  if (skipNarFurther(run)) return 'skip';
+  return 'chain';
 }
 
 export const RefinePanel: React.FC = () => {
@@ -211,14 +225,18 @@ export const RefinePanel: React.FC = () => {
     if (!datasetId || !ladderRun) return true;
     setError(''); setCleanupNote('');
     const run = runs.find(r => r.jobId === ladderRun);
-    if (!narFurther) return false;
-    if (skipNarFurther(run)) {
-      if (run?.origin) {
-        setCleanupNote(t('trainingStudio.refine.narRemoteUnsupported',
-          'NAR further training on a ladder pulled from {{worker}} is not supported yet; finishing this rung directly instead.',
-          { worker: run.origin.worker }));
-      }
-      return false;
+    const outcome = narOnUseOutcome(run, narFurther);
+    if (outcome === 'skip') return false;
+    if (outcome === 'reject') {
+      // Remote-origin NAR further training isn't supported yet (Reviewer/
+      // Lead, round 3 #4) — reject outright rather than silently finishing/
+      // linking/deleting instead, which would produce a different result
+      // than what the user asked for with no clear sign anything was
+      // skipped. Returning true tells the caller nothing further should run.
+      setError(t('trainingStudio.refine.narRemoteUnsupported',
+        'NAR further training on a ladder pulled from {{worker}} is not supported yet. Turn off Further training for NAR to finish this rung directly, or pick a different rung.',
+        { worker: run?.origin?.worker }));
+      return true;
     }
     try {
       // Decoder on from this rung, planner frozen; the result becomes the adapter.

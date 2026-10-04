@@ -36,6 +36,7 @@ import { jointRunForAdapter, listYue2AitkRuns, recordYue2AitkRun, type Yue2AitkC
 import { listYue2JointPreviews, recordYue2JointPreview, resolveYue2JointPreview, type Yue2JointPreviewRecord } from './yue2JointPreview.js';
 import { listYue2TrainLogs, noteYue2TrainLog, trainLogArchiveDir } from './datasetProfile.js';
 import { classifyCommit, currentCommit } from './workerUpdate.js';
+import { gpuLaneBusy, gpuLaneDepth } from '../generation/gpuLane.js';
 
 export const TOKEN_HEADER = 'x-hotstep-worker-token';
 const LABELS_PREFIX = '__labels/';
@@ -297,8 +298,18 @@ export function deleteWorkerYue2LadderFolder(datasetId: string, jobId: string): 
   if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
   if (run.status === 'running') throw Object.assign(new Error('Run is still training'), { status: 409 });
   if (queue.activeJobForDataset(datasetId)) throw Object.assign(new Error('A job is running for this dataset on the worker'), { status: 409 });
+  // A manual preview render (training.ts:4360) runs on the GPU lane directly,
+  // not through the labeling queue, so activeJobForDataset above never sees
+  // it (Reviewer, round 3 P1). The lane is a single worker-wide resource with
+  // no per-dataset tag, so any current or queued reader blocks any delete.
+  if (gpuLaneBusy() || gpuLaneDepth() > 0) throw Object.assign(new Error('The GPU is busy rendering on this worker'), { status: 409 });
+  const ladderRoot = path.resolve(path.join(config.aceServer.adapters, 'yue2-joint-adapters'));
   const output = path.resolve(run.output);
-  if (!isInside(path.join(config.aceServer.adapters, 'yue2-joint-adapters'), output)) {
+  // Strict descendant only — isInside treats the root itself as "inside" by
+  // design for its other callers, which would let a corrupted run record
+  // whose output IS the ladder root recursively delete every ladder
+  // (Reviewer, round 3 P1).
+  if (output === ladderRoot || !isInside(ladderRoot, output)) {
     throw Object.assign(new Error(`Refusing to delete outside the joint adapters folder: ${output}`), { status: 400 });
   }
   fs.rmSync(output, { recursive: true, force: true });
@@ -576,18 +587,26 @@ const runLocks = new Map<string, Promise<unknown>>();
 function withRunLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const prior = runLocks.get(key) ?? Promise.resolve();
   const next = prior.then(fn, fn);
-  runLocks.set(key, next.then(() => {}, () => {}).finally(() => { if (runLocks.get(key) === next) runLocks.delete(key); }));
+  // The entry stored in the map is this settle-tracking wrapper, not `next`
+  // itself — comparing against `next` here always failed, so a completed
+  // lock's entry never cleared (Reviewer, round 3 nit).
+  const settled = next.then(() => {}, () => {});
+  runLocks.set(key, settled);
+  void settled.finally(() => { if (runLocks.get(key) === settled) runLocks.delete(key); });
   return next;
 }
 
 /** Fetch one file to `dest` and hash-verify it, retrying the whole
  *  fetch-and-hash a few times on a mismatch before giving up (seen pulling
- *  LivingRoom's overnight ladders, 2026-10-04: most "corrupt" landings were a
- *  local write race between overlapping pulls, not the network or the
- *  worker's data — see `withRunLock` above and Reviewer's repro at
- *  dbe2464d). Each attempt is a fresh request; a hash match on any attempt
- *  wins. The temp file is unique to this call so two overlapping transfers to
- *  the same `dest` never share, truncate, or delete each other's `.part`
+ *  LivingRoom's overnight ladders, 2026-10-04). Reviewer's repro at dbe2464d
+ *  proved a local write race between overlapping pulls — fixed by
+ *  `withRunLock` above and the unique temp filename below — is a real,
+ *  reproducible cause of a "corrupt" landing; it did not establish how many
+ *  of that night's specific failures were this race versus the network or
+ *  the worker's data. Each attempt is a fresh request; a hash match on any
+ *  attempt wins. The temp file is unique to this call so two overlapping
+ *  transfers to the same `dest` never share, truncate, or delete each
+ *  other's `.part`
  *  file. */
 async function fetchAndVerifyFile(w: WorkerInfo, url: string, dest: string, sha256: string): Promise<{ ok: true; bytes: number } | { ok: false; error: string }> {
   const part = `${dest}.part-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -713,21 +732,43 @@ async function hydrateYue2LadderCheckpointLocked(run: Yue2AitkRunRecord, step: n
     // downloaded, so there is no worker manifest to re-verify against.
     return ckpt.arPath && ckpt.narPath ? { status: 'already-local', errors: [] } : { status: 'error', errors: [`No checkpoint at step ${step}`] };
   }
-  // Remote-origin: always re-check against a fresh manifest, even if the
-  // checkpoint record already reports local paths — those files could have
-  // been left behind by a previous partial/corrupt attempt.
+  // A checkpoint already hash-verified against a worker manifest once
+  // (persisted in verifiedSha256, Reviewer round 3 P2) is re-checked against
+  // that record, not a fresh worker round-trip — the worker's own copy is
+  // routinely deleted right after a successful link (deleteWorkerYue2Ladder),
+  // so demanding a live manifest on every later use would make an already
+  // "done" checkpoint unusable forever once that cleanup has run. Only a
+  // checkpoint never verified this way falls through to asking the worker.
+  if (ckpt.verifiedSha256) {
+    const required: LadderCheckpointFile[] = ['native-ar.safetensors', 'native-nar.safetensors'];
+    const entries = Object.entries(ckpt.verifiedSha256);
+    const allMatch = entries.length > 0 && entries.every(([name, sha]) => {
+      const dest = path.join(ckpt.dir, name);
+      return isInside(ckpt.dir, dest) && fs.existsSync(dest) && hashFile(dest) === sha;
+    });
+    if (allMatch && required.every(name => ckpt.verifiedSha256![name])) return { status: 'already-local', errors: [] };
+    // Something no longer matches its verified record — fall through and
+    // try the worker as a repair path; if it is gone too, that failure below
+    // is now an honest "cannot repair," not a silent trust of bad bytes.
+  }
   const w = getWorker(run.origin.worker);
   if (!w) return { status: 'error', errors: [`No configured worker named ${run.origin.worker}`] };
   let manifest: WorkerLadderCheckpointFile[];
   try {
     manifest = await workerJson<WorkerLadderCheckpointFile[]>(w,
       `/api/training/worker/yue2-ladder-checkpoint?datasetId=${encodeURIComponent(run.datasetId)}&run=${encodeURIComponent(run.origin.remoteJobId)}&step=${step}`);
-  } catch (err: any) { return { status: 'error', errors: [err?.message || String(err)] }; }
+  } catch (err: any) {
+    if (ckpt.verifiedSha256) {
+      return { status: 'error', errors: [`The local checkpoint no longer matches its verified checksum and the worker is unavailable to re-fetch from: ${err?.message || String(err)}`] };
+    }
+    return { status: 'error', errors: [err?.message || String(err)] };
+  }
   const required: LadderCheckpointFile[] = ['native-ar.safetensors', 'native-nar.safetensors'];
   if (required.some(name => !manifest.some(f => f.name === name))) return { status: 'error', errors: ['The worker has no ar/nar checkpoint at this step'] };
   fs.mkdirSync(ckpt.dir, { recursive: true });
   const errors: string[] = [];
   let fetched = false;
+  const verified: Record<string, string> = {};
   for (const f of manifest) {
     // Outside the fixed filename set entirely: not a file we ever asked for
     // or need, so a buggy/malicious extra manifest entry is dropped quietly
@@ -735,15 +776,20 @@ async function hydrateYue2LadderCheckpointLocked(run: Yue2AitkRunRecord, step: n
     if (!(LADDER_CHECKPOINT_FILES as readonly string[]).includes(f.name)) { console.warn(`[Training] Refused unknown checkpoint filename from ${w.name}: ${f.name}`); continue; }
     const dest = path.join(ckpt.dir, f.name);
     if (!isInside(ckpt.dir, dest)) { console.warn(`[Training] Refused checkpoint path outside the checkpoint dir from ${w.name}: ${f.name}`); continue; }
-    if (fs.existsSync(dest) && hashFile(dest) === f.sha256) continue;
+    if (fs.existsSync(dest) && hashFile(dest) === f.sha256) { verified[f.name] = f.sha256; continue; }
     fetched = true;
     const result = await fetchAndVerifyFile(w,
       `/api/training/worker/yue2-ladder-checkpoint-file?datasetId=${encodeURIComponent(run.datasetId)}&run=${encodeURIComponent(run.origin.remoteJobId)}&step=${step}&file=${encodeURIComponent(f.name)}`,
       dest, f.sha256);
     if (!result.ok) errors.push(`${f.name}: ${result.error}`);
+    else verified[f.name] = f.sha256;
   }
   const landed = required.every(name => fs.existsSync(path.join(ckpt.dir, name)) && hashFile(path.join(ckpt.dir, name)) === manifest.find(f => f.name === name)!.sha256);
   if (!landed) return { status: 'error', errors: errors.length ? errors : ['the ar/nar checkpoint did not land'] };
+  // Persist what was actually verified this round so a later call — even
+  // after the worker's copy is gone — can check local files against this
+  // record instead of asking a worker that may no longer exist.
+  recordYue2AitkRun({ ...run, checkpoints: run.checkpoints.map(c => c.step === step ? { ...c, verifiedSha256: verified } : c) });
   if (errors.length) return { status: 'partial', errors };
   return { status: fetched ? 'hydrated' : 'already-local', errors };
 }
