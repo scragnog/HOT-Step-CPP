@@ -412,7 +412,7 @@ export function reconcileYue2AitkRunsAtStartup(): number {
     // on this process — this machine restarting says nothing about that.
     const stale = index.filter(r => r.status === 'running' && !r.origin);
     if (stale.length) {
-      const updated = index.map(r => r.status === 'running' ? { ...r, status: 'interrupted' as const, updatedAt: Date.now() } : r);
+      const updated = index.map(r => r.status === 'running' && !r.origin ? { ...r, status: 'interrupted' as const, updatedAt: Date.now() } : r);
       writeIndex(updated, updated.filter(r => r.status === 'interrupted' && stale.some(s => s.jobId === r.jobId)));
     }
     reconcileFromDisk(true);

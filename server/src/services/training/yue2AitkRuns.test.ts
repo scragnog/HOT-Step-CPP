@@ -225,3 +225,32 @@ test('joint catalogue reconciles copied folders, stale records and active runs',
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('startup reconcile only interrupts a local running row, never a remote-origin one sitting beside it', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-reconcile-mixed-'));
+  try {
+    const script = [
+      "import path from 'node:path'; import assert from 'node:assert/strict';",
+      "import { initDb } from './src/db/database.js'; import { insertDataset } from './src/services/training/datasetsRepo.js';",
+      "import { recordYue2AitkRun, listAllYue2AitkRuns, reconcileYue2AitkRunsAtStartup } from './src/services/training/yue2AitkRuns.js';",
+      "initDb();",
+      "const now = new Date().toISOString();",
+      "insertDataset({ id: 'a', slug: 'a', name: 'a', sourceDir: path.join(process.env.TRAINING_DIR, 'a'), recursive: true, customTag: '', tagPosition: 'prefix', genreRatio: 0, defaultArtist: '', defaultAlbum: '', defaultGenre: '', defaultLanguage: '', sampleCount: 0, labeledCount: 0, excludedCount: 0, status: 'draft', builtAt: '', datasetJsonPath: '', albumName: '', createdAt: now, updatedAt: now });",
+      "const record = (jobId, output, extra = {}) => ({ version: 1, jobId, datasetId: 'a', datasetSlug: 'a', method: 'aitk', output, options: {}, status: 'running', createdAt: 1, updatedAt: 2, checkpoints: [], ...extra });",
+      "recordYue2AitkRun(record('local-job', path.join(process.env.ACESTEPCPP_ADAPTERS, 'yue2-joint-adapters', 'local-job')));",
+      "recordYue2AitkRun(record('remote-job', path.join(process.env.ACESTEPCPP_ADAPTERS, 'yue2-joint-adapters', 'remote-job'), { origin: { worker: 'W', remoteJobId: 'r1' } }));",
+      "const stale = reconcileYue2AitkRunsAtStartup();",
+      "assert.equal(stale, 1, 'only the local row counts as interrupted-by-restart');",
+      "const runs = listAllYue2AitkRuns();",
+      "assert.equal(runs.find(r => r.jobId === 'local-job')?.status, 'interrupted');",
+      "assert.equal(runs.find(r => r.jobId === 'remote-job')?.status, 'running');",
+    ].join('\n');
+    execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)),
+      env: { ...process.env, DATA_DIR: path.join(root, 'data'), TRAINING_DIR: path.join(root, 'training'), ACESTEPCPP_ADAPTERS: path.join(root, 'adapters') },
+      stdio: 'pipe',
+    });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

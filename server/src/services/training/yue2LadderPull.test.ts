@@ -30,11 +30,13 @@ function runInIsolatedRoot(root: string, script: string): void {
 }
 
 // Shared boilerplate: initDb, a dataset row, and a fake worker HTTP server
-// standing in for /yue2-ladders, /yue2-ladder-file and the DELETE cleanup
-// route. `state.ladders`/`state.files` are mutated by each test between
-// pulls to simulate rungs or previews landing later; `state.deleted` records
-// every jobId the puller asked the worker to drop. `preview(...)`'s sha256
-// is a literal hex string this file computed, never recomputed in-process.
+// standing in for /yue2-ladders and /yue2-ladder-file. `state.deleted` keeps
+// recording any DELETE the puller sends (there is no such route any more —
+// slice 1 never touches the worker's files — so every test can assert it
+// stays empty as a regression guard). `state.ladders`/`state.files` are
+// mutated by each test between pulls to simulate rungs or previews landing
+// later. `preview(...)`'s sha256 is a literal hex string this file computed,
+// never recomputed in-process.
 const LADDER_HARNESS = [
   "import fs from 'node:fs';",
   "import path from 'node:path';",
@@ -58,10 +60,7 @@ const LADDER_HARNESS = [
   "      if (body.truncate) { res.setHeader('content-length', String(body.buf.length)); res.write(body.buf.subarray(0, 3)); res.destroy(); return; }",
   "      res.end(body.buf); return;",
   "    }",
-  "    if (req.method === 'DELETE' && u.pathname.startsWith('/api/training/worker/yue2-ladders/')) {",
-  "      state.deleted.push(decodeURIComponent(u.pathname.split('/').pop()));",
-  "      res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: true })); return;",
-  "    }",
+  "    if (req.method === 'DELETE') { state.deleted.push(u.pathname); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: true })); return; }",
   "    res.statusCode = 404; res.end();",
   "  });",
   "  return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server)));",
@@ -69,7 +68,7 @@ const LADDER_HARNESS = [
   "function preview(id, step, file, buf, sha256) { return { id, step, kind: 'artist', status: 'done', file, seconds: 30, seed: 1, previewMaxFrames: 100, createdAt: now, updatedAt: now, ...(sha256 !== undefined ? { sha256 } : {}), bytes: buf.length }; }",
 ].join('');
 
-test('pulls a preview-only ladder: listable without weights, previews byte-identical, worker copies dropped', () => {
+test('pulls a preview-only ladder: listable without weights, previews byte-identical, worker left untouched', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-pull-basic-'));
   try {
     const hash = sha256Hex('WAV-BYTES-1');
@@ -91,7 +90,7 @@ test('pulls a preview-only ladder: listable without weights, previews byte-ident
       "  const previews = listYue2JointPreviews(run.output);",
       "  if (previews.length !== 1 || !previews[0].file) throw new Error('preview not recorded: ' + JSON.stringify(previews));",
       "  if (!fs.readFileSync(path.join(run.output, 'previews', previews[0].file)).equals(buf)) throw new Error('preview bytes do not match');",
-      "  if (state.deleted.length !== 1 || state.deleted[0] !== 'job1') throw new Error('worker copies were not asked to be deleted: ' + JSON.stringify(state.deleted));",
+      "  if (state.deleted.length) throw new Error('slice 1 must never delete anything on the worker: ' + JSON.stringify(state.deleted));",
       "} finally { server.close(); }",
     ].join('');
     runInIsolatedRoot(root, script);
@@ -219,6 +218,54 @@ test('a pulled ladder still training on its worker survives this machine restart
       "  if (stale !== 0) throw new Error('a pulled ladder must not count as a local job this process killed');",
       "  const after = listYue2AitkRuns('ds-album', 'album')[0];",
       "  if (after.status !== 'running') throw new Error('restart flipped a worker-owned run to interrupted: ' + after.status);",
+      "} finally { server.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a remote-reported preview filename cannot escape the previews directory', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-pull-traversal-'));
+  try {
+    const buf = Buffer.from('EVIL');
+    const hash = sha256Hex('EVIL');
+    const script = LADDER_HARNESS + [
+      "addDataset('album');",
+      `const ladder = { jobId: 'job1', datasetId: 'ds-album', datasetSlug: 'album', status: 'done', createdAt: now, updatedAt: now, options: {}, checkpoints: [{ step: 10, kl: 1.0, rung: true }], previews: [preview('p1', 10, '../../escaped.json', Buffer.from('EVIL'), '${hash}')] };`,
+      "const state = { ladders: [ladder], files: { 'job1/../../escaped.json': { buf: Buffer.from('EVIL') } }, deleted: [] };",
+      "const server = await serve(state);",
+      "try {",
+      "  const pulled = await pullYue2Ladders({ name: 'W', url: 'http://127.0.0.1:' + server.address().port });",
+      "  if (pulled[0].status !== 'partial' || !pulled[0].errors.length) throw new Error('expected an unsafe filename to be refused with an error: ' + JSON.stringify(pulled));",
+      "  const run = listYue2AitkRuns('ds-album', 'album')[0];",
+      "  const adaptersRoot = path.resolve(process.env.ACESTEPCPP_ADAPTERS);",
+      "  if (fs.existsSync(path.join(adaptersRoot, 'escaped.json')) || fs.existsSync(path.join(path.dirname(adaptersRoot), 'escaped.json'))) throw new Error('a file landed outside the previews directory');",
+      "  const rec = listYue2JointPreviews(run.output)[0];",
+      "  if (rec.file) throw new Error('an unsafe filename must never be published as available');",
+      "} finally { server.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a preview corrupted at rest between pulls is re-fetched and repaired, not trusted because it exists', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-pull-repair-'));
+  try {
+    const hash = sha256Hex('WAV-BYTES-1');
+    const script = LADDER_HARNESS + [
+      "addDataset('album');",
+      "const buf = Buffer.from('WAV-BYTES-1');",
+      `const ladder = { jobId: 'job1', datasetId: 'ds-album', datasetSlug: 'album', status: 'done', createdAt: now, updatedAt: now, options: {}, checkpoints: [{ step: 10, kl: 1.0, rung: true }], previews: [preview('p1', 10, 'p1.wav', buf, '${hash}')] };`,
+      "const state = { ladders: [ladder], files: { 'job1/p1.wav': { buf } }, deleted: [] };",
+      "const server = await serve(state);",
+      "try {",
+      "  await pullYue2Ladders({ name: 'W', url: 'http://127.0.0.1:' + server.address().port });",
+      "  const run = listYue2AitkRuns('ds-album', 'album')[0];",
+      "  const dest = path.join(run.output, 'previews', 'p1.wav');",
+      "  fs.writeFileSync(dest, Buffer.from('CORRUPTED-ON-DISK'));",
+      "  const pulled = await pullYue2Ladders({ name: 'W', url: 'http://127.0.0.1:' + server.address().port });",
+      "  if (pulled[0].status !== 'pulled' || pulled[0].previewsFetched !== 1) throw new Error('expected the corrupted file to be refetched: ' + JSON.stringify(pulled));",
+      "  if (!fs.readFileSync(dest).equals(buf)) throw new Error('the repaired file does not match the worker\\'s bytes');",
       "} finally { server.close(); }",
     ].join('');
     runInIsolatedRoot(root, script);

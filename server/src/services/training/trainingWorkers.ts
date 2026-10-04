@@ -240,20 +240,6 @@ export function workerYue2LadderFile(datasetId: string, jobId: string, file: str
   return resolved;
 }
 
-/** Rob 2026-10-04: once the controller has verified every preview and
- *  written its own index entry, this worker's previews and run.json are
- *  deleted — never the checkpoint directories (a later slice still needs
- *  those to fetch the chosen rung). Refuses while the run is still training. */
-export function deleteWorkerYue2Ladder(datasetId: string, jobId: string): void {
-  const ds = repo.getDataset(datasetId);
-  if (!ds) throw Object.assign(new Error('Dataset not found'), { status: 404 });
-  const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === jobId);
-  if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
-  if (run.status === 'running') throw Object.assign(new Error('Run is still training'), { status: 409 });
-  fs.rmSync(path.join(run.output, 'previews'), { recursive: true, force: true });
-  fs.rmSync(path.join(run.output, 'run.json'), { force: true });
-}
-
 // ── Controller side ─────────────────────────────────────────────────────────
 
 export interface WorkerInfo { name: string; url: string }
@@ -506,12 +492,20 @@ function localYue2LadderDir(workerName: string, remoteJobId: string): string {
   return path.join(config.aceServer.adapters, 'yue2-joint-adapters', `remote-${slugify(workerName)}-${slugify(remoteJobId)}`);
 }
 
+/** A flat filename only — the same shape `resolveYue2JointPreview` accepts —
+ *  so a remote-reported `file` can never be joined onto a path and climb out
+ *  of this ladder's own previews folder. */
+const SAFE_PREVIEW_FILE = /^[A-Za-z0-9._-]+\.wav$/i;
+
+function hashFile(file: string): string | null {
+  try { return createHash('sha256').update(fs.readFileSync(file)).digest('hex'); } catch { return null; }
+}
+
 /** One ladder: fetch and hash-verify every rendered preview not already here
- *  (or already pruned here — a pruned preview is never re-fetched), write the
- *  local previews catalogue and run record, then tell the worker it can drop
- *  its own previews/run.json. A preview that fails to fetch or verify is
- *  simply left absent (retried on the next pull); its ladder's worker copies
- *  are not deleted this round. */
+ *  (or already pruned here — a pruned preview is never re-fetched), then
+ *  write the local previews catalogue and run record. Deleting the worker's
+ *  own copies is slice 3's job, once a chosen rung's checkpoint has also been
+ *  pulled and linked — nothing here ever touches the worker's files. */
 async function pullOneYue2Ladder(w: WorkerInfo, ds: { id: string; slug: string }, ladder: WorkerLadder): Promise<Yue2LadderPullResult> {
   const errors: string[] = [];
   let bytes = 0, previewsFetched = 0;
@@ -521,20 +515,23 @@ async function pullOneYue2Ladder(w: WorkerInfo, ds: { id: string; slug: string }
   const verified = new Set<string>();
   for (const p of ladder.previews) {
     if (p.status !== 'done' || !p.file) continue;
+    if (!SAFE_PREVIEW_FILE.test(p.file)) { errors.push(`${p.file}: refused unsafe filename from ${w.name}`); continue; }
     const prior = priorByFile.get(p.id);
     if (prior && prior.status === 'done' && !prior.file) continue; // pruned locally: never resurrected
     const dest = path.join(output, 'previews', p.file);
-    // Already on this disk from an earlier pull — its hash was checked when
-    // it landed, so a later pull where the worker sent no checksum (or none
-    // changed) must not blank out a preview this machine already has.
-    if (fs.existsSync(dest)) { verified.add(p.file); continue; }
-    if (!p.sha256) { errors.push(`${p.file}: worker sent no checksum`); continue; }
+    // A file already on this disk still has to match the worker's current
+    // manifest hash every pull — a local byte flip (disk corruption, a bad
+    // edit) must be caught and repaired, not trusted just because it exists.
+    if (fs.existsSync(dest)) {
+      if (!p.sha256 || hashFile(dest) === p.sha256) { verified.add(p.file); continue; }
+      // falls through to refetch and overwrite a file that no longer matches
+    } else if (!p.sha256) { errors.push(`${p.file}: worker sent no checksum`); continue; }
     const part = `${dest}.part`;
     try {
       const r = await workerFetch(w, `/api/training/worker/yue2-ladder-file?datasetId=${encodeURIComponent(ds.id)}&run=${encodeURIComponent(ladder.jobId)}&file=${encodeURIComponent(p.file)}`);
       if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
       await pipeline(Readable.fromWeb(r.body as any), fs.createWriteStream(part));
-      const got = createHash('sha256').update(fs.readFileSync(part)).digest('hex');
+      const got = hashFile(part);
       if (got !== p.sha256) throw new Error('hash mismatch after transfer');
       fs.renameSync(part, dest);
       bytes += fs.statSync(dest).size;
@@ -567,13 +564,6 @@ async function pullOneYue2Ladder(w: WorkerInfo, ds: { id: string; slug: string }
   });
   const landed = listYue2AitkRuns(ds.id, ds.slug).some(r => r.jobId === jobId && r.updatedAt === updatedAt);
   if (!landed) errors.push('local index write did not land');
-  // Delete the worker's own copies only once everything above is verified on
-  // this disk and the index write landed, and only for a ladder that is not
-  // still training (never touch a run the worker is actively writing to).
-  if (ladder.status !== 'running' && !errors.length) {
-    try { await workerJson(w, `/api/training/worker/yue2-ladders/${encodeURIComponent(ladder.jobId)}?datasetId=${encodeURIComponent(ds.id)}`, { method: 'DELETE' }); }
-    catch (err: any) { errors.push(`worker cleanup: ${err?.message || err}`); }
-  }
   return { worker: w.name, jobId: ladder.jobId, datasetSlug: ds.slug, status: errors.length ? 'partial' : 'pulled', previewsFetched, bytes, errors };
 }
 

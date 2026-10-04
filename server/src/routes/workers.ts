@@ -14,7 +14,7 @@ import { APP_VERSION, config } from '../config.js';
 import { aceClient } from '../services/aceClient.js';
 import { activeTraining, dirtyCheckout, getUpdate, cancelUpdate, receiveUpdate, startUpdate, startupCommit } from '../services/training/workerUpdate.js';
 import {
-  deleteWorkerYue2Ladder, getDispatch, getWorker, listWorkers, proxyToWorker, pullLinked, pullYue2Ladders, receiveDatasetFile, startDispatch,
+  getDispatch, getWorker, listWorkers, proxyToWorker, pullLinked, pullYue2Ladders, receiveDatasetFile, startDispatch,
   upsertPushedDataset, workerAdapterFile, workerDatasetFiles, workerLinkedPairs, workerStatus, workerYue2LadderFile, workerYue2Ladders,
 } from '../services/training/trainingWorkers.js';
 
@@ -101,13 +101,9 @@ workerRouter.get('/yue2-ladder-file', (req: Request, res: Response) => {
   catch (err) { fail(res, err); }
 });
 
-/** DELETE /api/training/worker/yue2-ladders/:jobId?datasetId= — the
- *  controller calls this once it has verified and indexed the ladder; drops
- *  this worker's previews and run.json, never its checkpoint directories. */
-workerRouter.delete('/yue2-ladders/:jobId', (req: Request, res: Response) => {
-  try { deleteWorkerYue2Ladder(String(req.query.datasetId ?? ''), req.params.jobId as string); res.json({ ok: true }); }
-  catch (err) { fail(res, err); }
-});
+// Deleting a worker's ladder is slice 3's job, once its chosen rung's
+// checkpoint has also been pulled and linked locally — this slice never
+// removes anything from the worker.
 
 // ── Controller side ─────────────────────────────────────────────────────────
 

@@ -225,19 +225,20 @@ both treat that the same as a local pair for listening and scoring (listening an
 scoring need the previews and meters, not the weights — those are only needed to link
 or further-train a rung, not yet pulled). Each preview is hash-verified (`WorkerLadder`'s
 `sha256`, computed on the worker from the actual file, never trusted from size alone)
-before it is written here; a mismatched or interrupted transfer is dropped and retried
-on the next pull, never renamed into place. A repull merges in the worker's newest
-checkpoints and previews without touching anything already decided locally — blind
-labels, rung scores (keyed by checkpoint dir, stable across repulls), review-complete
-and finished markers, and a preview already pruned locally is never re-fetched
-(`yue2AitkRuns.ts`'s `mergeCheckpoints`, `recordYue2AitkRun`'s `prior?.blindLabels` precedence,
-`pullOneYue2Ladder`'s pruned-preview check). `reconcileYue2AitkRunsAtStartup` skips any
-run with `origin` set — its `running` status means the worker is still training, which
-this machine restarting does not change. The worker's own previews and `run.json` are
-deleted (`DELETE /api/training/worker/yue2-ladders/:jobId`) only once every file above
-is verified here and the local index write has landed, and never while the run is still
-training; its checkpoint directories are left for a later slice to fetch just the
-chosen rung.
+before it is written here; a mismatched, interrupted, or on-disk-corrupted transfer
+(an existing file is re-hashed against the worker's current manifest every pull, never
+just trusted for existing) is dropped and retried on the next pull, never renamed into
+place. A repull merges in the worker's newest checkpoints and previews without touching
+anything already decided locally — blind labels, rung scores (keyed by checkpoint dir,
+stable across repulls), review-complete and finished markers, and a preview already
+pruned locally is never re-fetched (`yue2AitkRuns.ts`'s `mergeCheckpoints`,
+`recordYue2AitkRun`'s `prior?.blindLabels` precedence, `pullOneYue2Ladder`'s
+pruned-preview check). `reconcileYue2AitkRunsAtStartup` skips any run with `origin`
+set — its `running` status means the worker is still training, which this machine
+restarting does not change. This slice never deletes anything on the worker (deleting
+its run.json here would make its own `reconcileFromDisk` re-import the folder under a
+fresh id on its next restart, orphaning `remoteJobId`); dropping the worker's copies is
+a later slice's job, once a chosen rung's checkpoint has also been pulled and linked.
 
 `server/src/services/training/datasetProfile.ts` measures a dataset and saves
 `<training dir>/datasets/<slug>/dataset-profile.json`. It reads only what
