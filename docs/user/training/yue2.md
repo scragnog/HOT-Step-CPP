@@ -70,6 +70,8 @@ Things to know:
 
 ## Recommended settings
 
+On an NVIDIA build, Joint Training can choose a GPU for each run. Leave **Training GPU** on **Settings GPU** to use the card selected in Settings. A chosen card is pinned by UUID and appears as CUDA0 inside the trainer.
+
 Pick a preset. Fast, Balanced and Thorough are the same recipe and all train a dim-128 LoKr; they differ in how many updates run, how many songs each update averages, and how often a checkpoint is saved. All three train the decoder on 60 s crops. Times are estimates for a 15-track album on an RTX 5090, from measured per-update times.
 
 | Preset | Updates | Songs per update | Decoder | Checkpoint every | Time (card shows it relative to Balanced) |

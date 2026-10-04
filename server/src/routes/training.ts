@@ -3545,7 +3545,19 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
     const steps = integer('steps', 0);
     const saveEvery = integer('saveEvery', 0);
     const seed = integer('seed', 42);
-    const device = str('device') || defaultYue2JointDevice();
+    if (b.gpuUuid !== undefined && typeof b.gpuUuid !== 'string') {
+      res.status(400).json({ error: 'gpuUuid must be a GPU UUID from Settings.' });
+      return;
+    }
+    const gpuUuid = str('gpuUuid');
+    let gpuEnv: NodeJS.ProcessEnv;
+    try {
+      gpuEnv = buildGpuEnv(process.env, gpuUuid || undefined).env;
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      return;
+    }
+    const device = gpuUuid ? 'CUDA0' : str('device') || defaultYue2JointDevice();
     if (!checkpoint || !fs.existsSync(checkpoint) || !fs.statSync(checkpoint).isFile()) {
       res.status(400).json({ error: `base checkpoint is missing: ${checkpoint || '(empty)'}. Install it, or pick another base.` });
       return;
@@ -3811,8 +3823,9 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
     const alignment: Yue2AlignmentOptions = { enabled: alignmentEnabled && cursorWeight > 0, cursorWeight };
     const job = queue.startYue2JointTrainJob(ds.id, {
       checkpoint, dataset, outDir, steps, saveEvery, seed, device,
+      ...(gpuUuid ? { gpuUuid } : {}),
       ...(resume ? { resume } : {}), datasetSlug: ds.slug,
-      spawnEnv: buildGpuEnv().env,
+      spawnEnv: gpuEnv,
       trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16',
       preview: preview.enabled && (preview.everySteps > 0 || b.refinePlanner === true || (method === 'base-matched' && preview.parallel)) ? preview : { ...preview, enabled: false },
       alignment,

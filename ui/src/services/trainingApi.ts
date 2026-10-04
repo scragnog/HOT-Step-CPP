@@ -675,6 +675,8 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   saveEvery: number;
   seed: number;
   device: string;
+  /** Physical NVIDIA GPU for this job; omitted follows Settings. */
+  gpuUuid?: string;
   resume?: string;
   resumeRunId?: string;
   resumeStep?: number;

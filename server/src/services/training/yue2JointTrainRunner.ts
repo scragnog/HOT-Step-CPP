@@ -79,6 +79,7 @@ export interface ResolvedYue2JointTrainOptions {
   saveEvery: number;
   seed: number;
   device: string;
+  gpuUuid?: string;
   resume?: string;
   datasetSlug?: string;
   spawnEnv?: NodeJS.ProcessEnv;
@@ -473,7 +474,7 @@ function validateOptions(o: ResolvedYue2JointTrainOptions): string | null {
   if (dropouts.some(v => v > 0) && (o.captionDropout ?? 0) > 0) return 'the condition dropouts and captionDropout are two recipes for the same prompt slot; use one';
   if (dropouts.some(v => v > 0) && o.alignment?.enabled) return 'the condition dropouts need lyric timing off (cursorWeight 0)';
   if (o.resume && (!fs.existsSync(o.resume) || !fs.statSync(o.resume).isFile())) return `resume record is missing: ${o.resume}`;
-  if (!o.spawnEnv) o.spawnEnv = buildGpuEnv().env;
+  if (!o.spawnEnv) o.spawnEnv = buildGpuEnv(process.env, o.gpuUuid).env;
   return null;
 }
 
@@ -694,7 +695,7 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
   // stall until the hang watchdog kills the run (2026-10-01), so smaller or
   // unknown cards pause training for each preview instead.
   if (o.preview?.parallel) {
-    const vramMB = selectedGpuMemoryMB();
+    const vramMB = selectedGpuMemoryMB(o.gpuUuid);
     if (vramMB === null || vramMB < PARALLEL_PREVIEW_MIN_VRAM_MB) {
       // Base-matched has no KL marks to pause on: pause at each save instead.
       const everySteps = o.method === 'base-matched' && !(o.klCheckpointEvery! > 0) && !(o.preview.everySteps > 0) ? o.saveEvery : o.preview.everySteps;

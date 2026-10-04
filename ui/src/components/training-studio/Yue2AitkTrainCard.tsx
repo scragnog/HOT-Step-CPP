@@ -10,6 +10,7 @@ import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
 import { usePersistedState } from '../../hooks/usePersistedState';
+import { settingsApi } from '../../services/api';
 import {
   cancelJob,
   captionMissingYue2,
@@ -111,7 +112,7 @@ function jointEta(points: JointStepPoint[], form: Yue2JointTrainRequest): string
  *  (dataset/checkpoint/output paths, resume record) are deliberately not part
  *  of a preset: a preset answers "how do I train", never "against which run". */
 const PRESET_EXCLUDED_KEYS: ReadonlySet<keyof Yue2JointTrainRequest> = new Set([
-  'trainingMethod', 'autoPrepare', 'preparation', 'checkpoint', 'dataset', 'output', 'resume', 'alignmentEnabled',
+  'trainingMethod', 'autoPrepare', 'preparation', 'checkpoint', 'dataset', 'output', 'resume', 'alignmentEnabled', 'gpuUuid',
 ]);
 function snapshotPresetSettings(form: Yue2JointTrainRequest, lyricTiming: boolean): Partial<Yue2JointTrainRequest> {
   const settings: Record<string, unknown> = {};
@@ -529,6 +530,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [bases, setBases] = useState<Yue2JointBaseInfo[]>([]);
   const [defaultBase, setDefaultBase] = useState('');
   const [defaultDevice, setDefaultDevice] = useState('');
+  const [nvidiaGpus, setNvidiaGpus] = useState<Array<{ index: number; uuid: string; name: string; memoryMB: number }>>([]);
   const [prepareJob, setPrepareJob] = useState<TrainingJobSummary | null>(null);
   const [prepareManifest, setPrepareManifest] = useState('');
   const [appliedPrepareJobId, setAppliedPrepareJobId] = useState(() => readStored<string>(`${PREP_KEY}${datasetId}:applied`, ''));
@@ -560,7 +562,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     try {
       const timingWeight = lyricTiming
         ? (typeof form.cursorWeight === 'number' && Number.isFinite(form.cursorWeight) ? form.cursorWeight : 0.08) : 0;
-      const recipe = { ...form, autoCaption: autoCaption ?? (false as const), cursorWeight: timingWeight, dataset: '', output: '', resume: '',
+      const recipe = { ...form, gpuUuid: runOn ? undefined : form.gpuUuid,
+        device: runOn ? '' : defaultDevice === 'CUDA0' ? 'CUDA0' : form.device,
+        autoCaption: autoCaption ?? (false as const), cursorWeight: timingWeight, dataset: '', output: '', resume: '',
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
           everySteps: form.preview.parallel ? 0 : form.saveEvery, previewMaxFrames: Math.max(8, Math.min(360, form.preview.seconds || 300)) * 25 } } : {}) };
       if (runOn) {
@@ -632,6 +636,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     }).catch(() => { /* Defaults are advisory; manual paths remain available. */ });
     return () => { cancelled = true; };
   }, [datasetId, defaultsRevision]);
+
+  useEffect(() => {
+    if (defaultDevice !== 'CUDA0') return;
+    let cancelled = false;
+    void settingsApi.getGpus().then(({ gpus }) => { if (!cancelled) setNvidiaGpus(gpus); })
+      .catch(() => { if (!cancelled) setNvidiaGpus([]); });
+    return () => { cancelled = true; };
+  }, [defaultDevice]);
 
   useEffect(() => {
     let cancelled = false;
@@ -958,7 +970,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       const [resumeRunId, resumeStepText] = resumeChoice.split('|');
       const selectedResume = resumeRunId && resumeStepText ? { resumeRunId, resumeStep: Number(resumeStepText) } : {};
       if (!resumeChoice && !form.resume?.trim()) await captionMissing();
-      const request = { ...form, autoCaption: undefined, lyricTiming, alignmentEnabled: lyricTiming, cursorWeight: timingWeight,
+      const request = { ...form, device: defaultDevice === 'CUDA0' ? 'CUDA0' : form.device,
+        autoCaption: undefined, lyricTiming, alignmentEnabled: lyricTiming, cursorWeight: timingWeight,
         autoPrepare: !resumeChoice && !form.resume?.trim(), preparation: prepare,
         checkpoint: '', output: '',
         ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
@@ -1298,8 +1311,28 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             }))}
           />
         </label>
-        {field(t('trainingStudio.yue2.method.device', 'Device'), 'device', 'text', form, undefined,
-          t('trainingStudio.yue2.method.deviceInfo', 'Which GPU trains this run, for a machine with more than one: CUDA0, CUDA1 on an NVIDIA build, Vulkan0, Vulkan1 on a Vulkan build. Leave empty for the first GPU.'),
+        {defaultDevice === 'CUDA0' ? <label className="flex flex-col gap-1">
+          <ParamLabel
+            label={t('trainingStudio.yue2.method.trainingGpu', 'Training GPU')}
+            className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
+            info={t('trainingStudio.yue2.method.trainingGpuInfo', 'Choose the NVIDIA card for this run. Settings uses the GPU selected in the Settings page. CUDA names the chosen card CUDA0 inside the trainer.')}
+          />
+          <StyledSelect
+            accent="amber"
+            value={nvidiaGpus.find(gpu => gpu.uuid.toLowerCase() === form.gpuUuid?.toLowerCase())?.uuid ?? form.gpuUuid ?? ''}
+            disabled={!!resumeChoice || active || starting || preparing || yue2RunAllActive}
+            className="w-full"
+            onChange={value => set('gpuUuid', value)}
+            options={[
+              { value: '', label: t('trainingStudio.yue2.method.trainingGpuSettings', 'Settings GPU') },
+              ...nvidiaGpus.map(gpu => ({ value: gpu.uuid, label: `GPU ${gpu.index}: ${gpu.name} (${Math.round(gpu.memoryMB / 1024)} GB)` })),
+              ...(form.gpuUuid && !nvidiaGpus.some(gpu => gpu.uuid.toLowerCase() === form.gpuUuid?.toLowerCase())
+                ? [{ value: form.gpuUuid, label: t('trainingStudio.yue2.method.trainingGpuUnavailable', 'Unavailable GPU: {{uuid}}', { uuid: form.gpuUuid }) }]
+                : []),
+            ]}
+          />
+        </label> : field(t('trainingStudio.yue2.method.device', 'Device'), 'device', 'text', form, undefined,
+          t('trainingStudio.yue2.method.deviceInfo', 'The ggml device for this run, such as Vulkan0 or Vulkan1. Leave empty for the first GPU.'),
           t('trainingStudio.yue2.method.deviceMeta', 'default {{device}}', { device: defaultDevice || 'CUDA0' }))}
         <label className="flex flex-col gap-1">
           <ParamLabel

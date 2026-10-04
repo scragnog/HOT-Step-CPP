@@ -133,9 +133,8 @@ function isDeviceId(value: string): boolean {
  * `setting` is config.aceServer.cudaVisibleDevices — whatever the Settings UI
  * or the user's .env put there. Empty means "Auto".
  */
-export function resolveGpuSelection(setting: string): GpuSelection {
+export function resolveGpuSelection(setting: string, gpus: NvidiaGpu[] = listGpusSync()): GpuSelection {
   const raw = (setting || '').trim();
-  const gpus = listGpusSync();
 
   // ── Auto ────────────────────────────────────────────────────────────────
   if (!raw) {
@@ -205,11 +204,22 @@ export function resolveGpuSelection(setting: string): GpuSelection {
   };
 }
 
-/** Total VRAM (MB) of the card the engine and trainers run on, or null when
- *  nvidia-smi cannot say (no NVIDIA GPU, or a selection it cannot resolve). */
-export function selectedGpuMemoryMB(): number | null {
-  const gpus = listGpusSync();
-  const pick = resolveGpuSelection(config.aceServer.cudaVisibleDevices).visibleDevices;
+/** A training job may override Settings with one physical NVIDIA card. */
+export function resolveJobGpuSelection(setting: string, gpuUuid?: string, gpus: NvidiaGpu[] = listGpusSync()): GpuSelection {
+  if (!gpuUuid) return resolveGpuSelection(setting, gpus);
+  const gpu = gpus.find((item) => item.uuid.toLowerCase() === gpuUuid.toLowerCase());
+  if (!gpu) throw new Error(`Unknown training GPU UUID: ${gpuUuid}`);
+  return {
+    visibleDevices: gpu.uuid,
+    forcePciOrder: false,
+    log: `[Training] GPU: GPU ${gpu.index} ${gpu.name} (${gb(gpu.memoryMB)} GB); CUDA_VISIBLE_DEVICES=${gpu.uuid}`,
+  };
+}
+
+/** Total VRAM (MB) of the selected card, or null when nvidia-smi cannot say.
+ *  A training UUID overrides the Settings selection for this measurement. */
+export function selectedGpuMemoryMB(gpuUuid?: string, gpus: NvidiaGpu[] = listGpusSync()): number | null {
+  const pick = resolveJobGpuSelection(config.aceServer.cudaVisibleDevices, gpuUuid, gpus).visibleDevices;
   if (!pick) return gpus.length === 1 ? gpus[0].memoryMB : null;
   const gpu = gpus.find((g) => g.uuid.toLowerCase() === pick.split(',')[0].trim().toLowerCase());
   return gpu ? gpu.memoryMB : null;
@@ -220,13 +230,13 @@ export function selectedGpuMemoryMB(): number | null {
  * any letter case Windows stored it) and then set only when the decision
  * names a device, plus CUDA_DEVICE_ORDER=PCI_BUS_ID when indices survive and
  * the user has not pinned an order themselves. Used for ace-server and every
- * ace-train child, so training lands on the same card as generation (#153).
+ * ace-train child; a training UUID overrides Settings for that child alone.
  */
-export function buildGpuEnv(base: NodeJS.ProcessEnv = process.env): { env: NodeJS.ProcessEnv; selection: GpuSelection } {
+export function buildGpuEnv(base: NodeJS.ProcessEnv = process.env, gpuUuid?: string, gpus: NvidiaGpu[] = listGpusSync()): { env: NodeJS.ProcessEnv; selection: GpuSelection } {
   const env: NodeJS.ProcessEnv = { ...base };
   // config.aceServer.cudaVisibleDevices tracks Settings edits live; process.env
   // only holds what .env said at boot.
-  const selection = resolveGpuSelection(config.aceServer.cudaVisibleDevices);
+  const selection = resolveJobGpuSelection(config.aceServer.cudaVisibleDevices, gpuUuid, gpus);
   for (const k of Object.keys(env)) {
     if (k.toUpperCase() === 'CUDA_VISIBLE_DEVICES') delete env[k];
   }

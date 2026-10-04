@@ -58,6 +58,7 @@ recipe, an untouched field keeps following it and only fields you actually chang
 | Build: trigger position, genre ratio, Build | Where the trigger word sits in the built caption, and the mix ratio between genre-style and literal captions, then writes `dataset.json`. |
 | Preprocess / Codes form | Base model pickers plus an Advanced drawer for encoding settings; MiniMax-Music3 shows an RVQ codes export instead, including an optional cover-laundering pass for dense mixes. |
 | LM card / DiT card (Train) | Adapter name, a handful of always-visible settings, an Advanced drawer, and a Start button. Running shows a live chart, stats, and a done-state summary with the adapter's output path once finished. |
+| Training GPU (YuE2 Joint Training) | On NVIDIA builds, pick a card for this run or use the GPU selected in Settings. The choice applies to the training child; see [YuE2 training](../training/yue2.md#recommended-settings). |
 | Milestone badges | Appear once a run has saved checkpoints; click one to audition that checkpoint. |
 | Audition card | Same-seed A/B between the base planner and the trained adapter, with an optional DiT render pass. |
 | Send to Lyric Studio (Build step) | Exports the dataset's artist/album metadata into Lyric Studio, optionally linking the dataset's trained adapters and a reference track as that album's generation preset. |
