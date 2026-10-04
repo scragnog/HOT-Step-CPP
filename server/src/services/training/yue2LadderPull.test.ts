@@ -272,6 +272,34 @@ test('a preview corrupted at rest between pulls is re-fetched and repaired, not 
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('a repull with no checksum never verifies a byte-flipped local file just because it is present', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-pull-no-checksum-'));
+  try {
+    const hash = sha256Hex('WAV-BYTES-1');
+    const script = LADDER_HARNESS + [
+      "addDataset('album');",
+      "const buf = Buffer.from('WAV-BYTES-1');",
+      `const ladder = { jobId: 'job1', datasetId: 'ds-album', datasetSlug: 'album', status: 'done', createdAt: now, updatedAt: now, options: {}, checkpoints: [{ step: 10, kl: 1.0, rung: true }], previews: [preview('p1', 10, 'p1.wav', buf, '${hash}')] };`,
+      "const state = { ladders: [ladder], files: { 'job1/p1.wav': { buf } }, deleted: [] };",
+      "const server = await serve(state);",
+      "try {",
+      "  await pullYue2Ladders({ name: 'W', url: 'http://127.0.0.1:' + server.address().port });",
+      "  const run = listYue2AitkRuns('ds-album', 'album')[0];",
+      "  const dest = path.join(run.output, 'previews', 'p1.wav');",
+      "  fs.writeFileSync(dest, Buffer.from('CORRUPTED-ON-DISK'));",
+      "  delete ladder.previews[0].sha256;", // the worker's manifest omits the checksum this round (e.g. a read failure there)
+      "  const pulled = await pullYue2Ladders({ name: 'W', url: 'http://127.0.0.1:' + server.address().port });",
+      "  if (pulled[0].status !== 'partial' || !pulled[0].errors.length) throw new Error('expected a partial result with errors: ' + JSON.stringify(pulled));",
+      "  if (pulled[0].previewsFetched !== 0) throw new Error('no checksum means no fetch attempt: ' + JSON.stringify(pulled));",
+      "  if (fs.readFileSync(dest).toString() !== 'CORRUPTED-ON-DISK') throw new Error('the corrupted file must not be silently left in place as if fine, nor repaired without a checksum to repair against');",
+      "  const rec = listYue2JointPreviews(run.output)[0];",
+      "  if (rec.file) throw new Error('a preview this machine cannot currently verify must not be published as available');",
+      "} finally { server.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('no dataset for the worker\'s ladder is reported, not guessed at', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-pull-no-dataset-'));
   try {

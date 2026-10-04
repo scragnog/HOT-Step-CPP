@@ -519,13 +519,14 @@ async function pullOneYue2Ladder(w: WorkerInfo, ds: { id: string; slug: string }
     const prior = priorByFile.get(p.id);
     if (prior && prior.status === 'done' && !prior.file) continue; // pruned locally: never resurrected
     const dest = path.join(output, 'previews', p.file);
+    if (!p.sha256) { errors.push(`${p.file}: worker sent no checksum`); continue; }
     // A file already on this disk still has to match the worker's current
     // manifest hash every pull — a local byte flip (disk corruption, a bad
     // edit) must be caught and repaired, not trusted just because it exists.
-    if (fs.existsSync(dest)) {
-      if (!p.sha256 || hashFile(dest) === p.sha256) { verified.add(p.file); continue; }
-      // falls through to refetch and overwrite a file that no longer matches
-    } else if (!p.sha256) { errors.push(`${p.file}: worker sent no checksum`); continue; }
+    // No checksum this round means no way to confirm it, so it is never
+    // added to `verified` even when the bytes happen to still be there.
+    if (fs.existsSync(dest) && hashFile(dest) === p.sha256) { verified.add(p.file); continue; }
+    // falls through to (re)fetch: missing, or present but no longer matching
     const part = `${dest}.part`;
     try {
       const r = await workerFetch(w, `/api/training/worker/yue2-ladder-file?datasetId=${encodeURIComponent(ds.id)}&run=${encodeURIComponent(ladder.jobId)}&file=${encodeURIComponent(p.file)}`);

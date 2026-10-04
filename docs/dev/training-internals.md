@@ -228,7 +228,11 @@ or further-train a rung, not yet pulled). Each preview is hash-verified (`Worker
 before it is written here; a mismatched, interrupted, or on-disk-corrupted transfer
 (an existing file is re-hashed against the worker's current manifest every pull, never
 just trusted for existing) is dropped and retried on the next pull, never renamed into
-place. A repull merges in the worker's newest checkpoints and previews without touching
+place. A preview whose manifest entry has no `sha256` this round (the worker can omit
+it after a read failure there) is never added to `verified` either, even when this
+machine's own copy is still sitting there untouched — nothing to check it against means
+the ladder comes back `partial`, not `pulled`, until the worker reports a hash again. A
+repull merges in the worker's newest checkpoints and previews without touching
 anything already decided locally — blind labels, rung scores (keyed by checkpoint dir,
 stable across repulls), review-complete and finished markers, and a preview already
 pruned locally is never re-fetched (`yue2AitkRuns.ts`'s `mergeCheckpoints`,
