@@ -143,6 +143,7 @@ import {
 import { YUE2_LICENSE_NOTICE } from '../services/backends/yue2/index.js';
 import { yue2StyleString } from '../services/backends/yue2/style.js';
 import { jointRunForAdapter, listYue2AitkRuns, yue2JointOutputDirectory, deleteYue2AitkRun, yue2ReviewComplete, setYue2ReviewComplete, yue2RunFinished } from '../services/training/yue2AitkRuns.js';
+import { deleteWorkerYue2Ladder, hydrateYue2LadderCheckpoint } from '../services/training/trainingWorkers.js';
 import { clearPreparedCaches, listPreparedCaches, YUE2_CORE_CACHE } from '../services/training/preparedDataReset.js';
 import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
 import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions, renderYue2JointPreview } from '../services/training/yue2JointPreview.js';
@@ -4092,25 +4093,46 @@ router.get('/datasets/:id/yue2-joint-runs', (req: Request, res: Response) => {
 /** POST /datasets/:id/yue2-joint-preset — link one saved AR/NAR pair to this
  * dataset's Lyric Studio album preset. Works for a stopped run as well as a
  * completed run, but only with a checkpoint in this dataset's durable index. */
-router.post('/datasets/:id/yue2-joint-preset', (req: Request, res: Response) => {
+router.post('/datasets/:id/yue2-joint-preset', async (req: Request, res: Response) => {
   try {
     const ds = repo.getDataset(req.params.id as string);
     if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
     const selected = typeof req.body?.checkpointDir === 'string' ? req.body.checkpointDir.trim() : '';
     if (!selected) { res.status(400).json({ error: 'Select a joint checkpoint' }); return; }
-    const runs = listYue2AitkRuns(ds.id, ds.slug);
-    const checkpoints = runs.flatMap(run => run.checkpoints);
-    const checkpoint = checkpoints.find(item => path.resolve(item.dir).toLowerCase() === path.resolve(selected).toLowerCase());
+    const matches = (r: ReturnType<typeof listYue2AitkRuns>[number]) => r.checkpoints.find(c => path.resolve(c.dir).toLowerCase() === path.resolve(selected).toLowerCase());
+    let runs = listYue2AitkRuns(ds.id, ds.slug);
+    let owningRun = runs.find(matches);
+    let checkpoint = owningRun && matches(owningRun);
+    if (!checkpoint) { res.status(400).json({ error: 'Select a joint checkpoint belonging to this dataset' }); return; }
+    // A remote-only rung (pulled from a worker, no local weights yet): fetch
+    // just this one step's checkpoint before linking — never the rest of the
+    // ladder. A failed or partial fetch stops here; nothing is linked and
+    // the worker's copy is never touched.
+    if ((!checkpoint.arPath || !checkpoint.narPath) && owningRun?.origin) {
+      const hydrated = await hydrateYue2LadderCheckpoint(owningRun, checkpoint.step);
+      if (hydrated.status === 'error') { res.status(400).json({ error: `Could not fetch this rung from ${owningRun.origin.worker}: ${hydrated.errors.join('; ') || 'unknown error'}` }); return; }
+      if (hydrated.status === 'partial') { res.status(409).json({ error: `Only part of this rung arrived from ${owningRun.origin.worker}: ${hydrated.errors.join('; ')}. Try again.` }); return; }
+      runs = listYue2AitkRuns(ds.id, ds.slug);
+      owningRun = runs.find(r => r.jobId === owningRun!.jobId);
+      checkpoint = owningRun && owningRun.checkpoints.find(c => c.step === checkpoint!.step);
+    }
     if (!checkpoint?.arPath || !checkpoint.narPath) {
       res.status(400).json({ error: 'Select a complete joint checkpoint belonging to this dataset' }); return;
     }
-    const knownPaths = checkpoints.flatMap(item => [item.arPath, item.narPath].filter((value): value is string => !!value));
+    const knownPaths = runs.flatMap(run => run.checkpoints).flatMap(item => [item.arPath, item.narPath].filter((value): value is string => !!value));
     const updated = refreshYue2PresetsForJointCheckpoint(
       { slug: ds.slug, lyricsSetId: ds.lyricsSetId }, checkpoint.arPath, checkpoint.narPath, knownPaths);
-    const owningRun = runs.find(run => run.checkpoints.includes(checkpoint));
     if (owningRun) {
       try { noteYue2TrainLog(ds.slug, owningRun.jobId, { output: owningRun.output, keptStep: checkpoint.step }); }
       catch (err: any) { console.warn(`[Training] Could not note the loss log of run ${owningRun.jobId}: ${err?.message || err}`); }
+    }
+    // The link just succeeded: this rung's checkpoint is verified on disk
+    // here, so the worker's whole ladder folder (every rung, every preview)
+    // can go. Best-effort — a worker offline or already cleaned up must
+    // never turn a successful local link into a failed response.
+    if (owningRun?.origin) {
+      try { await deleteWorkerYue2Ladder(owningRun.origin.worker, ds.id, owningRun.origin.remoteJobId); }
+      catch (err: any) { console.warn(`[Training] Could not delete ${owningRun.origin.worker}'s copy of ${owningRun.origin.remoteJobId}: ${err?.message || err}`); }
     }
     res.json({ updated, arPath: checkpoint.arPath, narPath: checkpoint.narPath });
   } catch (err: any) {
@@ -4219,8 +4241,11 @@ router.post('/datasets/:id/yue2-cleanup', (req: Request, res: Response) => {
 });
 
 /** DELETE /datasets/:id/yue2-joint-runs/:jobId — remove a finished run's
- * catalogue entry and its checkpoints from disk. A live run is refused. */
-router.delete('/datasets/:id/yue2-joint-runs/:jobId', (req: Request, res: Response) => {
+ * catalogue entry and its checkpoints from disk. A live run is refused.
+ * A pulled ladder's own discard action: also tells its worker to drop the
+ * whole folder (every rung, every preview) — best-effort, since the worker
+ * being offline or already clear of it must never block the local delete. */
+router.delete('/datasets/:id/yue2-joint-runs/:jobId', async (req: Request, res: Response) => {
   try {
     const ds = repo.getDataset(req.params.id as string);
     if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
@@ -4229,6 +4254,10 @@ router.delete('/datasets/:id/yue2-joint-runs/:jobId', (req: Request, res: Respon
     if (!run) { res.status(404).json({ error: 'Run not found for this dataset' }); return; }
     const active = queue.activeJobForDataset(ds.id);
     if (active?.id === jobId || run.status === 'running') { res.status(409).json({ error: 'That run is still training; stop it first' }); return; }
+    if (run.origin) {
+      try { await deleteWorkerYue2Ladder(run.origin.worker, ds.id, run.origin.remoteJobId); }
+      catch (err: any) { console.warn(`[Training] Could not delete ${run.origin.worker}'s copy of ${run.origin.remoteJobId}: ${err?.message || err}`); }
+    }
     res.json(deleteYue2AitkRun(jobId));
   } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });

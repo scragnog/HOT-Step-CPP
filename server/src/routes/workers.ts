@@ -14,8 +14,9 @@ import { APP_VERSION, config } from '../config.js';
 import { aceClient } from '../services/aceClient.js';
 import { activeTraining, dirtyCheckout, getUpdate, cancelUpdate, receiveUpdate, startUpdate, startupCommit } from '../services/training/workerUpdate.js';
 import {
-  getDispatch, getWorker, listWorkers, proxyToWorker, pullLinked, pullYue2Ladders, receiveDatasetFile, startDispatch,
-  upsertPushedDataset, workerAdapterFile, workerDatasetFiles, workerLinkedPairs, workerStatus, workerYue2LadderFile, workerYue2Ladders,
+  deleteWorkerYue2LadderFolder, getDispatch, getWorker, listWorkers, proxyToWorker, pullLinked, pullYue2Ladders, receiveDatasetFile, startDispatch,
+  upsertPushedDataset, workerAdapterFile, workerDatasetFiles, workerLinkedPairs, workerStatus, workerYue2LadderCheckpoint, workerYue2LadderCheckpointFile,
+  workerYue2LadderFile, workerYue2Ladders,
 } from '../services/training/trainingWorkers.js';
 
 const fail = (res: Response, err: any) => res.status(err?.status ?? 500).json({ error: err?.message || String(err) });
@@ -101,9 +102,28 @@ workerRouter.get('/yue2-ladder-file', (req: Request, res: Response) => {
   catch (err) { fail(res, err); }
 });
 
-// Deleting a worker's ladder is slice 3's job, once its chosen rung's
-// checkpoint has also been pulled and linked locally — this slice never
-// removes anything from the worker.
+/** GET /api/training/worker/yue2-ladder-checkpoint?datasetId=&run=&step= —
+ *  one rung's checkpoint files, with a checksum each. Never the whole ladder. */
+workerRouter.get('/yue2-ladder-checkpoint', (req: Request, res: Response) => {
+  try { res.json(workerYue2LadderCheckpoint(String(req.query.datasetId ?? ''), String(req.query.run ?? ''), Number(req.query.step))); }
+  catch (err) { fail(res, err); }
+});
+
+/** GET /api/training/worker/yue2-ladder-checkpoint-file?datasetId=&run=&step=&file=
+ *  — one checkpoint file's bytes, `file` restricted to the fixed known set. */
+workerRouter.get('/yue2-ladder-checkpoint-file', (req: Request, res: Response) => {
+  try { res.sendFile(workerYue2LadderCheckpointFile(String(req.query.datasetId ?? ''), String(req.query.run ?? ''), Number(req.query.step), String(req.query.file ?? ''))); }
+  catch (err) { fail(res, err); }
+});
+
+/** DELETE /api/training/worker/yue2-ladders/:jobId?datasetId= — the whole
+ *  ladder folder, every rung and preview. Called once the controller has
+ *  hydrated and linked its chosen rung, or the user discarded the ladder
+ *  outright. Refuses while the run is still training. */
+workerRouter.delete('/yue2-ladders/:jobId', (req: Request, res: Response) => {
+  try { deleteWorkerYue2LadderFolder(String(req.query.datasetId ?? ''), req.params.jobId as string); res.json({ ok: true }); }
+  catch (err) { fail(res, err); }
+});
 
 // ── Controller side ─────────────────────────────────────────────────────────
 

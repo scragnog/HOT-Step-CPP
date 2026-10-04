@@ -240,6 +240,59 @@ export function workerYue2LadderFile(datasetId: string, jobId: string, file: str
   return resolved;
 }
 
+const LADDER_CHECKPOINT_FILES = ['native-ar.safetensors', 'native-nar.safetensors', 'optimizer.resume', 'meters.json'] as const;
+export type LadderCheckpointFile = typeof LADDER_CHECKPOINT_FILES[number];
+export interface WorkerLadderCheckpointFile { name: LadderCheckpointFile; sha256: string; bytes: number }
+
+function findLadderCheckpoint(datasetId: string, jobId: string, step: number) {
+  const ds = repo.getDataset(datasetId);
+  if (!ds) throw Object.assign(new Error('Dataset not found'), { status: 404 });
+  const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === jobId);
+  if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
+  const ckpt = run.checkpoints.find(c => c.step === step);
+  if (!ckpt) throw Object.assign(new Error(`No checkpoint at step ${step}`), { status: 404 });
+  return { run, ckpt };
+}
+
+/** One rung's checkpoint files on this worker — never the whole ladder, so
+ *  "Use this rung" never pulls the weights of a step the user did not pick.
+ *  Filenames are the fixed, known set; sha256 lets the controller verify a
+ *  transfer before it trusts and keeps it. */
+export function workerYue2LadderCheckpoint(datasetId: string, jobId: string, step: number): WorkerLadderCheckpointFile[] {
+  const { ckpt } = findLadderCheckpoint(datasetId, jobId, step);
+  const out: WorkerLadderCheckpointFile[] = [];
+  for (const name of LADDER_CHECKPOINT_FILES) {
+    try {
+      const bytes = fs.readFileSync(path.join(ckpt.dir, name));
+      out.push({ name, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length });
+    } catch { /* this checkpoint predates the file, or the method doesn't use it */ }
+  }
+  return out;
+}
+
+/** One checkpoint file's bytes, `file` restricted to the fixed known set —
+ *  never a bare join of a caller-supplied name onto the checkpoint dir. */
+export function workerYue2LadderCheckpointFile(datasetId: string, jobId: string, step: number, file: string): string {
+  if (!(LADDER_CHECKPOINT_FILES as readonly string[]).includes(file)) throw Object.assign(new Error('Unknown checkpoint file'), { status: 400 });
+  const { ckpt } = findLadderCheckpoint(datasetId, jobId, step);
+  const abs = path.join(ckpt.dir, file);
+  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) throw Object.assign(new Error('Checkpoint file not found'), { status: 404 });
+  return abs;
+}
+
+/** Drop a whole ladder's folder on this worker — every rung, every preview,
+ *  run.json. Called once the controller has hydrated and linked its chosen
+ *  rung locally, or when the user discards the ladder outright with no rung
+ *  chosen. Refuses while the run is still training. */
+export function deleteWorkerYue2LadderFolder(datasetId: string, jobId: string): void {
+  const ds = repo.getDataset(datasetId);
+  if (!ds) throw Object.assign(new Error('Dataset not found'), { status: 404 });
+  const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === jobId);
+  if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
+  if (run.status === 'running') throw Object.assign(new Error('Run is still training'), { status: 409 });
+  fs.rmSync(run.output, { recursive: true, force: true });
+}
+
 // ── Controller side ─────────────────────────────────────────────────────────
 
 export interface WorkerInfo { name: string; url: string }
@@ -583,6 +636,62 @@ export async function pullYue2Ladders(w: WorkerInfo): Promise<Yue2LadderPullResu
     catch (err: any) { out.push({ worker: w.name, jobId: ladder.jobId, datasetSlug: ds.slug, status: 'error', previewsFetched: 0, bytes: 0, errors: [err?.message || String(err)] }); }
   }
   return out;
+}
+
+export interface Yue2LadderHydrateResult { status: 'hydrated' | 'already-local' | 'partial' | 'error'; errors: string[] }
+
+/** The one rung a user picked — never the rest of the ladder: fetch and
+ *  hash-verify that step's checkpoint files from the run's own worker, then
+ *  leave them at the checkpoint's already-stable `dir` so the ordinary local
+ *  disk scan (yue2AitkRuns.ts's checkpointRecords) finds them next read and
+ *  the step stops being `availability: 'remote'` on its own — no index write
+ *  here. Used by "Use this rung" and by Finish scored's direct link, so a
+ *  pulled ladder's finish path needs nothing worker-specific beyond this. */
+export async function hydrateYue2LadderCheckpoint(run: Yue2AitkRunRecord, step: number): Promise<Yue2LadderHydrateResult> {
+  const ckpt = run.checkpoints.find(c => c.step === step);
+  if (!ckpt) return { status: 'error', errors: [`No checkpoint at step ${step}`] };
+  if (ckpt.arPath && ckpt.narPath) return { status: 'already-local', errors: [] };
+  if (!run.origin) return { status: 'error', errors: ['This run has no training worker to fetch from'] };
+  const w = getWorker(run.origin.worker);
+  if (!w) return { status: 'error', errors: [`No configured worker named ${run.origin.worker}`] };
+  let manifest: WorkerLadderCheckpointFile[];
+  try {
+    manifest = await workerJson<WorkerLadderCheckpointFile[]>(w,
+      `/api/training/worker/yue2-ladder-checkpoint?datasetId=${encodeURIComponent(run.datasetId)}&run=${encodeURIComponent(run.origin.remoteJobId)}&step=${step}`);
+  } catch (err: any) { return { status: 'error', errors: [err?.message || String(err)] }; }
+  const required: LadderCheckpointFile[] = ['native-ar.safetensors', 'native-nar.safetensors'];
+  if (required.some(name => !manifest.some(f => f.name === name))) return { status: 'error', errors: ['The worker has no ar/nar checkpoint at this step'] };
+  fs.mkdirSync(ckpt.dir, { recursive: true });
+  const errors: string[] = [];
+  for (const f of manifest) {
+    const dest = path.join(ckpt.dir, f.name);
+    if (fs.existsSync(dest) && hashFile(dest) === f.sha256) continue;
+    const part = `${dest}.part`;
+    try {
+      const r = await workerFetch(w, `/api/training/worker/yue2-ladder-checkpoint-file?datasetId=${encodeURIComponent(run.datasetId)}&run=${encodeURIComponent(run.origin.remoteJobId)}&step=${step}&file=${encodeURIComponent(f.name)}`);
+      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+      await pipeline(Readable.fromWeb(r.body as any), fs.createWriteStream(part));
+      const got = hashFile(part);
+      if (got !== f.sha256) throw new Error('hash mismatch after transfer');
+      fs.renameSync(part, dest);
+    } catch (err: any) {
+      try { fs.rmSync(part, { force: true }); } catch { /* best effort */ }
+      errors.push(`${f.name}: ${err?.message || err}`);
+    }
+  }
+  const landed = required.every(name => fs.existsSync(path.join(ckpt.dir, name)));
+  if (!landed) return { status: 'error', errors: errors.length ? errors : ['the ar/nar checkpoint did not land'] };
+  return { status: errors.length ? 'partial' : 'hydrated', errors };
+}
+
+/** Tell a worker to drop a whole ladder folder — once its chosen rung has
+ *  been hydrated and linked locally, or because the user discarded the
+ *  ladder with no rung chosen. Never called before that: the caller decides
+ *  when it's safe, this just makes the request. */
+export async function deleteWorkerYue2Ladder(worker: string, datasetId: string, remoteJobId: string): Promise<void> {
+  const w = getWorker(worker);
+  if (!w) throw new Error(`No configured worker named ${worker}`);
+  await workerJson(w, `/api/training/worker/yue2-ladders/${encodeURIComponent(remoteJobId)}?datasetId=${encodeURIComponent(datasetId)}`, { method: 'DELETE' });
 }
 
 // Proxy: the Training Studio's /api/training calls, sent to a worker.

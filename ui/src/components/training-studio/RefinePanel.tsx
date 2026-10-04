@@ -377,7 +377,10 @@ export const RefinePanel: React.FC = () => {
                   placeholder={t('trainingStudio.refine.pickLadder', 'Pick a refinement run')}
                   options={runs.filter(r => r.checkpoints.some(c => c.kl !== undefined)).map(r => ({ value: r.jobId, label: runLabel(r), hint: `${r.checkpoints.filter(c => c.rung).length} rungs · ${r.checkpoints.length} checkpoints` }))} />
               </div>
-              <button type="button" onClick={() => void remove(ladderRun)} disabled={!ladderRun || !!runs.find(r => r.jobId === ladderRun)?.live} title={t('trainingStudio.refine.deleteRun', 'Delete run')}
+              <button type="button" onClick={() => void remove(ladderRun)} disabled={!ladderRun || !!runs.find(r => r.jobId === ladderRun)?.live}
+                title={ladderRunRec?.origin
+                  ? t('trainingStudio.refine.discardOnWorker', 'Discard on {{worker}} — no rung from this ladder, free its checkpoints and previews there too', { worker: ladderRunRec.origin.worker })
+                  : t('trainingStudio.refine.deleteRun', 'Delete run')}
                 className="p-2 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:text-red-500 hover:border-red-500/40 disabled:opacity-40"><Trash2 size={14} /></button>
               {ladderRunRec?.origin && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300"
                 title={t('trainingStudio.review.originInfo', 'Pulled from this training worker; previews and scoring run here.') as string}>{ladderRunRec.origin.worker}</span>}

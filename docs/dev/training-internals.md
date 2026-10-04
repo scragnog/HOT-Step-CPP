@@ -239,10 +239,10 @@ pruned locally is never re-fetched (`yue2AitkRuns.ts`'s `mergeCheckpoints`,
 `recordYue2AitkRun`'s `prior?.blindLabels` precedence, `pullOneYue2Ladder`'s
 pruned-preview check). `reconcileYue2AitkRunsAtStartup` skips any run with `origin`
 set — its `running` status means the worker is still training, which this machine
-restarting does not change. This slice never deletes anything on the worker (deleting
-its run.json here would make its own `reconcileFromDisk` re-import the folder under a
-fresh id on its next restart, orphaning `remoteJobId`); dropping the worker's copies is
-a later slice's job, once a chosen rung's checkpoint has also been pulled and linked.
+restarting does not change. Pulling never deletes anything on the worker itself
+(deleting its run.json here would make its own `reconcileFromDisk` re-import the folder
+under a fresh id on its next restart, orphaning `remoteJobId`) — dropping the worker's
+copies happens once a chosen rung's checkpoint has been fetched and linked, below.
 
 The UI side (`ui/src/components/training-studio/ReviewPanel.tsx`) triggers
 `pullWorkerYue2Ladders` (`POST /api/workers/:name/pull-ladders`) for the selected
@@ -254,8 +254,33 @@ badge when `run.origin` is set, from the same `origin: run.origin?.worker ?? nul
 GET /yue2-review now sends. `Yue2LadderReview.tsx`'s `ladderVisibility` accepts a
 checkpoint with `availability === 'remote'` as a rung the same as one with both
 `arPath` and `narPath` — listening and scoring work from the pulled previews and
-meters — but its "Render more" and "Use this rung" buttons stay disabled on one
-("not pulled" badge) until a later slice fetches its checkpoint.
+meters. "Render more" stays disabled on one ("not pulled" badge) — a new preview
+needs the weights and the engine, not just a transfer — but "Use this rung" is live:
+clicking it fetches that one step's checkpoint before linking (next).
+
+"Use this rung" never pulls the rest of a pulled ladder: `hydrateYue2LadderCheckpoint`
+(`trainingWorkers.ts`) fetches one run's one step's `native-ar.safetensors`,
+`native-nar.safetensors`, and `optimizer.resume`/`meters.json` when the worker has them,
+hash-verified the same way `pullOneYue2Ladder` verifies previews (`workerYue2LadderCheckpoint`
+reports a manifest with a sha256 per file; a missing required file, a failed transfer or a
+hash mismatch returns `'error'` before anything links, and leaves the destination
+untouched — a file that already matches the manifest is kept, not re-fetched, so a retry
+resumes). It writes straight into the checkpoint's already-stable `dir`
+(`<output>/checkpoint-step<N>`, fixed since the pull), so the ordinary local disk scan
+(`checkpointRecords`) picks it up on the next read and the step stops being
+`availability: 'remote'` on its own — no index write in the hydrate call itself.
+`POST /datasets/:id/yue2-joint-preset` (manual "Use this rung") and
+`yue2BatchRunner.ts`'s `finishLadder` (Finish scored, base-matched ladders only — a NAR
+further-training run is always local, so that path is unaffected) both call it before
+their existing arPath/narPath check, so each gained exactly one branch rather than a
+parallel implementation. Only once the link call that follows actually succeeds does
+either call `deleteWorkerYue2Ladder`, which asks the worker to drop the *whole* ladder
+folder — every rung, every preview — in one step; a failed or partial hydrate returns
+before that line, so nothing on the worker is ever touched when the link doesn't happen.
+The existing `DELETE /datasets/:id/yue2-joint-runs/:jobId` ("Delete run", RefinePanel's
+trash icon) gained the same worker-drop as a best-effort side effect when `run.origin`
+is set — a rejected ladder's explicit "discard on worker" action, reusing the delete
+button that already removes the local copy rather than adding new UI.
 
 `server/src/services/training/datasetProfile.ts` measures a dataset and saves
 `<training dir>/datasets/<slug>/dataset-profile.json`. It reads only what

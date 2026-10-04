@@ -29,6 +29,7 @@ import { bestScoredRung } from './yue2BestRung.js';
 import { listYue2RungScores } from './yue2RungScores.js';
 import { runYue2Cleanup } from './yue2Cleanup.js';
 import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
+import { deleteWorkerYue2Ladder, hydrateYue2LadderCheckpoint } from './trainingWorkers.js';
 
 export type Yue2BatchStage = 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine' | 'nar' | 'finish';
 export type Yue2BatchStatus = 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
@@ -245,10 +246,10 @@ function narFurtherRequest(runId: string, step: number, knee = true): Record<str
 
 /** Link the finished checkpoint (the NAR run's last, or the picked rung when
  *  NAR was skipped) to the album preset, then clean up around it. */
-function finishLadder(item: Yue2BatchItem): void {
+async function finishLadder(item: Yue2BatchItem): Promise<void> {
   const ds = repo.getDataset(item.datasetId);
   if (!ds) throw new Error('Dataset not found');
-  const runs = listYue2AitkRuns(ds.id, ds.slug);
+  let runs = listYue2AitkRuns(ds.id, ds.slug);
   const narJob = item.stages.find(s => s.stage === 'nar')?.jobId;
   let runId = item.refineRun ?? '';
   let step = item.pickStep;
@@ -264,14 +265,33 @@ function finishLadder(item: Yue2BatchItem): void {
     if (!nar || !last) throw new Error('The NAR further-training run left no complete checkpoint');
     runId = nar.jobId; step = last.step;
   }
-  const ckpt = runs.find(r => r.jobId === runId)?.checkpoints.find(c => c.step === step);
-  if (!ckpt?.arPath || !ckpt.narPath || step === undefined) throw new Error(`No complete checkpoint at step ${step} of run ${runId}`);
+  let ckpt = runs.find(r => r.jobId === runId)?.checkpoints.find(c => c.step === step);
+  if (!ckpt || step === undefined) throw new Error(`No checkpoint at step ${step} of run ${runId}`);
+  // A remote-only rung (pulled from a worker, base-matched ladders only — a
+  // NAR further-training run is always a local job): fetch just this one
+  // step's checkpoint before linking, never the rest of the ladder.
+  let owningRun = runs.find(r => r.jobId === runId);
+  if ((!ckpt.arPath || !ckpt.narPath) && !narJob && owningRun?.origin) {
+    const hydrated = await hydrateYue2LadderCheckpoint(owningRun, step);
+    if (hydrated.status === 'error') throw new Error(`Could not fetch this rung from ${owningRun.origin.worker}: ${hydrated.errors.join('; ') || 'unknown error'}`);
+    if (hydrated.status === 'partial') throw new Error(`Only part of this rung arrived from ${owningRun.origin.worker}: ${hydrated.errors.join('; ')}`);
+    runs = listYue2AitkRuns(ds.id, ds.slug);
+    owningRun = runs.find(r => r.jobId === runId);
+    ckpt = owningRun?.checkpoints.find(c => c.step === step);
+  }
+  if (!ckpt?.arPath || !ckpt.narPath) throw new Error(`No complete checkpoint at step ${step} of run ${runId}`);
   const known = runs.flatMap(r => r.checkpoints).flatMap(c => [c.arPath, c.narPath].filter((v): v is string => !!v));
   refreshYue2PresetsForJointCheckpoint({ slug: ds.slug, lyricsSetId: ds.lyricsSetId }, ckpt.arPath, ckpt.narPath, known);
   const score = item.refineRun && !narJob ? listYue2RungScores(ds.id, item.refineRun).find(r => r.step === step) : undefined;
   const result = runYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir, lyricsSetId: ds.lyricsSetId }, runId, step,
     { caches: true, otherCheckpoints: true, otherRuns: true, resume: true, otherPreviews: true },
     { blind: score?.blind ?? false, blindLabel: score?.blindLabel ?? '' });
+  // The link just succeeded: best-effort, never turns a successful local
+  // link into a failed batch item.
+  if (owningRun?.origin) {
+    try { await deleteWorkerYue2Ladder(owningRun.origin.worker, ds.id, owningRun.origin.remoteJobId); }
+    catch (err: any) { console.warn(`[Training] Could not delete ${owningRun.origin.worker}'s copy of ${owningRun.origin.remoteJobId}: ${err?.message || err}`); }
+  }
   if (result.finishError) throw new Error(result.finishError);
   console.log(`[Training] yue2 batch finish ${ds.slug}: linked step ${step} of ${runId}; removed ${result.done.join(', ') || 'nothing'}`);
 }
@@ -450,7 +470,7 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
     if ((run?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true) return null;
     return narFurtherRequest(item.refineRun!, best.step, item.narKnee !== false);
   }
-  if (stage === 'finish') { finishLadder(item); return null; }
+  if (stage === 'finish') { await finishLadder(item); return null; }
   if (stage === 'captions') {
     const c = state.recipe.autoCaption as { provider?: string; model?: string } | undefined;
     return c ? { provider: c.provider, ...(c.model ? { model: c.model } : {}) } : null;
