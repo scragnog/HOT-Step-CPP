@@ -584,3 +584,24 @@ test('a rung scored before a move is edited in place afterwards: one row, same i
     ]));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+// Reviewer, 1a352f2f P2: rollback restores only the rows the move changed. A
+// preset that already pointed at the destination before the move keeps its
+// paths when the move fails and is undone.
+test('a failed move leaves an unrelated preset that already named the destination untouched', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-remote-folder-rollback-target-'));
+  try {
+    runInIsolatedRoot(root, folderScript([
+      "  const dest = path.join(joint, 'album_' + stamp, 'checkpoint-step10');",
+      "  const other = (() => { const artist = getOrCreateArtist('C'); const set = saveLyricsSet(artist.id, 'D', 1, []); upsertPreset(Number(set.id), { yue2ArAdapterPath: path.join(dest, 'native-ar.safetensors'), yue2NarAdapterPath: path.join(dest, 'native-nar.safetensors') }); return Number(set.id); })();",
+      "  const write = fs.writeFileSync;",
+      "  fs.writeFileSync = function (file, data, opts) { if (path.basename(String(file)).startsWith('yue2-linked.json')) throw Object.assign(new Error('test: disk full'), { code: 'EIO' }); return write.apply(fs, arguments); };",
+      "  let body;",
+      "  try { body = await (await post('yue2-cleanup', { run: 'remote:W:job1', step: 10 })).json(); } finally { fs.writeFileSync = write; }",
+      "  if (!body.moveError) throw new Error('expected a reported move failure: ' + JSON.stringify(body));",
+      "  const p = presetOf(other);",
+      "  if (p.yue2_ar_adapter_path !== path.join(dest, 'native-ar.safetensors') || p.yue2_nar_adapter_path !== path.join(dest, 'native-nar.safetensors')) throw new Error('the unrelated preset was rewritten: ' + JSON.stringify(p));",
+      "  if (presetOf(setId).yue2_ar_adapter_path !== path.join(dir, 'native-ar.safetensors')) throw new Error('the preset of the moved run was not restored');",
+    ]));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

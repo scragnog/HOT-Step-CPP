@@ -439,33 +439,43 @@ export function rebaseYue2JointLinks(oldDir: string, newDir: string): () => void
     return n === base || n.startsWith(base + path.sep) ? path.join(to, path.resolve(p).slice(base.length)) : null;
   };
   const db = getDb();
-  const rewriteDb = (fromDir: string, toDir: string) => db.transaction(() => {
-    const base = normPath(fromDir);
+  // Rollback restores exactly the rows this move changed, from a snapshot,
+  // never by rewriting the new prefix back: a row that already pointed at the
+  // destination before the move must stay as it was.
+  const presetsBefore: Array<[number, ReturnType<typeof presetDataFromRow>]> = [];
+  const scoresBefore: Array<[number, string]> = [];
+  const moveScore = db.prepare('UPDATE yue2_rung_scores SET checkpoint_dir = ? WHERE id = ?');
+  db.transaction(() => {
     for (const preset of getAllPresets()) {
-      const ar = rebase(preset.yue2_ar_adapter_path, toDir, base), nar = rebase(preset.yue2_nar_adapter_path, toDir, base);
+      const ar = rebase(preset.yue2_ar_adapter_path, newDir, from), nar = rebase(preset.yue2_nar_adapter_path, newDir, from);
       if (!ar && !nar) continue;
       const data = presetDataFromRow(preset);
+      presetsBefore.push([preset.lyrics_set_id, { ...data }]);
       if (ar) data.yue2ArAdapterPath = ar;
       if (nar) data.yue2NarAdapterPath = nar;
       upsertPreset(preset.lyrics_set_id, data);
     }
     const scores = db.prepare('SELECT id, checkpoint_dir FROM yue2_rung_scores').all() as Array<{ id: number; checkpoint_dir: string }>;
-    const move = db.prepare('UPDATE yue2_rung_scores SET checkpoint_dir = ? WHERE id = ?');
     for (const row of scores) {
-      const to = rebase(row.checkpoint_dir, toDir, base);
-      if (to) move.run(to, row.id);
+      const to = rebase(row.checkpoint_dir, newDir, from);
+      if (!to) continue;
+      scoresBefore.push([row.id, row.checkpoint_dir]);
+      moveScore.run(to, row.id);
     }
   })();
-  rewriteDb(oldDir, newDir);
+  const restoreDb = () => db.transaction(() => {
+    for (const [id, data] of presetsBefore) upsertPreset(id, data);
+    for (const [id, dir] of scoresBefore) moveScore.run(dir, id);
+  })();
   const before = readYue2Linked();
   const after = Object.fromEntries(Object.entries(before).map(([slug, pair]) =>
     [slug, { ...pair, arPath: rebase(pair.arPath, newDir, from) ?? pair.arPath, narPath: rebase(pair.narPath, newDir, from) ?? pair.narPath }]));
   const linkChanged = JSON.stringify(after) !== JSON.stringify(before);
   try { if (linkChanged) writeYue2LinkedAtomic(after); }
-  catch (err) { rewriteDb(newDir, oldDir); throw err; }
+  catch (err) { restoreDb(); throw err; }
   return () => {
     if (linkChanged) writeYue2LinkedAtomic(before);
-    rewriteDb(newDir, oldDir);
+    restoreDb();
   };
 }
 
