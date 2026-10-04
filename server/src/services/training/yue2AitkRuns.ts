@@ -54,15 +54,17 @@ export interface Yue2AitkCheckpointRecord {
    *  (the default) means a real local checkpoint: `checkpointRecords` found
    *  it on disk. */
   availability?: 'remote';
-  /** sha256 of each checkpoint file, recorded the one time a remote-origin
-   *  checkpoint was fetched and hash-verified against its worker's manifest
-   *  (hydrateYue2LadderCheckpoint). Once that worker's own copy is gone —
-   *  deleted after a successful link, as deleteWorkerYue2Ladder does — there
-   *  is no live manifest left to re-verify against; a later hydrate call
-   *  checks the local files against this persisted record instead of
-   *  trusting their mere presence (Reviewer, round 3 P2). Keyed by filename
-   *  (LADDER_CHECKPOINT_FILES), never derived from a disk scan. */
-  verifiedSha256?: Record<string, string>;
+  /** sha256 of every file the worker's manifest declared for this remote-
+   *  origin checkpoint, written by hydrateYue2LadderCheckpoint only once ALL
+   *  of them are verified on this disk — a partial transfer writes nothing,
+   *  so presence means complete. Once the worker's own copy is gone (deleted
+   *  after a successful link) this is what a later use revalidates against.
+   *  Keyed by filename (LADDER_CHECKPOINT_FILES), never derived from a disk scan. */
+  manifestSha256?: Record<string, string>;
+  /** Optional files of that manifest this machine deleted on purpose
+   *  (cleanup's resume prune), so revalidation stops demanding them and a
+   *  repair never fetches them back. Never includes the ar/nar weights. */
+  prunedFiles?: string[];
 }
 
 export interface Yue2AitkRunRecord {
@@ -155,13 +157,14 @@ function isRunRecord(value: unknown): value is Yue2AitkRunRecord {
 function mergeCheckpoints(local: Yue2AitkCheckpointRecord[], incoming: Yue2AitkCheckpointRecord[]): Yue2AitkCheckpointRecord[] {
   if (!incoming.length) return local;
   const incomingByStep = new Map(incoming.map(c => [c.step, c]));
-  // verifiedSha256 is never derivable from the disk scan that produced
-  // `local` (it records a one-time worker-manifest comparison, not a file's
-  // mere presence) — carry it over from whatever was already persisted for
-  // this step, or it would vanish on every subsequent pull/list.
+  // manifestSha256/prunedFiles are never derivable from the disk scan that
+  // produced `local` — carry them over from whatever was already persisted
+  // for this step unless `local` brings its own, or they would vanish on
+  // every subsequent pull/list.
   const merged = local.map(c => {
     const prior = incomingByStep.get(c.step);
-    return prior?.verifiedSha256 ? { ...c, verifiedSha256: prior.verifiedSha256 } : c;
+    const manifestSha256 = c.manifestSha256 ?? prior?.manifestSha256, prunedFiles = c.prunedFiles ?? prior?.prunedFiles;
+    return { ...c, ...(manifestSha256 && { manifestSha256 }), ...(prunedFiles && { prunedFiles }) };
   });
   const localSteps = new Set(local.map(c => c.step));
   const remoteOnly = incoming.filter(c => c.availability === 'remote' && !localSteps.has(c.step));
@@ -255,9 +258,9 @@ export function recordYue2AitkRun(record: Yue2AitkRunRecord): void {
     // A repull must never let the worker's facts overwrite labels this
     // machine already assigned (or inherited on first pull) — prior wins
     // whenever it has any, remote/incoming only seeds a brand new record.
-    // verifiedSha256 is likewise carried from whatever this machine already
-    // persisted for a step, since a caller recording fresh pull data has no
-    // reason to know about it (mergeCheckpoints only sees one "incoming" side).
+    // manifestSha256/prunedFiles are likewise carried from whatever this
+    // machine already persisted for a step, since a caller recording fresh
+    // pull data has no reason to know about them.
     const incoming = prior ? mergeCheckpoints(record.checkpoints, prior.checkpoints) : record.checkpoints;
     const updated = { ...record,
       blindLabels: prior?.blindLabels ?? record.blindLabels,

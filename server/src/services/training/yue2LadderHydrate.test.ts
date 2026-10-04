@@ -323,3 +323,73 @@ test('a worker manifest missing the nar file is refused before any fetch attempt
     runInIsolatedRoot(root, script);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+// Reviewer, 135990e3 P1: the worker declares an optimizer.resume it cannot
+// serve. The first use is partial; a retry must stay partial too (asking the
+// worker again), never link the ar/nar subset and retire the worker's copy.
+test('a partial transfer stays partial on retry: nothing links and the worker keeps its copy', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-hydrate-partial-retry-'));
+  try {
+    const hashAr = sha256Hex('AR-BYTES'); const hashNar = sha256Hex('NAR-BYTES'); const hashOpt = sha256Hex('OPT-BYTES');
+    const script = HARNESS + [
+      "addDataset('album');",
+      "const dir = recordPulledRun('remote:W:job1', 'job1', 'W', 10);",
+      `const state = { manifest: [{ name: 'native-ar.safetensors', sha256: '${hashAr}', bytes: 8 }, { name: 'native-nar.safetensors', sha256: '${hashNar}', bytes: 9 }, { name: 'optimizer.resume', sha256: '${hashOpt}', bytes: 9 }], files: { 'native-ar.safetensors': Buffer.from('AR-BYTES'), 'native-nar.safetensors': Buffer.from('NAR-BYTES') }, deleted: [] };`,
+      "const workerServer = await serve(state);",
+      "config.workers.list = 'W=http://127.0.0.1:' + workerServer.address().port;",
+      "const app = await appServer();",
+      "const use = () => fetch('http://127.0.0.1:' + app.address().port + '/api/training/datasets/ds-album/yue2-joint-preset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkpointDir: dir }) });",
+      "try {",
+      "  const first = await use();",
+      "  if (first.ok) throw new Error('expected the first use to be partial: ' + JSON.stringify(await first.json()));",
+      "  if (listYue2AitkRuns('ds-album', 'album')[0].checkpoints[0].manifestSha256) throw new Error('a partial transfer must record no manifest');",
+      "  const second = await use();",
+      "  if (second.ok) throw new Error('expected the retry to stay partial: ' + JSON.stringify(await second.json()));",
+      "  if (state.deleted.length) throw new Error('the worker copy must not be retired while optimizer.resume is missing: ' + JSON.stringify(state.deleted));",
+      // Once the worker can serve it, the same rung completes and links.
+      "  state.files['optimizer.resume'] = Buffer.from('OPT-BYTES');",
+      "  const third = await use();",
+      "  if (!third.ok) throw new Error('expected the complete transfer to link: ' + JSON.stringify(await third.json()));",
+      "  if (!fs.readFileSync(path.join(dir, 'optimizer.resume')).equals(Buffer.from('OPT-BYTES'))) throw new Error('optimizer.resume did not land');",
+      "  if (state.deleted.length !== 1) throw new Error('expected the worker ladder to be dropped once complete: ' + JSON.stringify(state.deleted));",
+      "} finally { workerServer.close(); app.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+// Reviewer, 135990e3 P2: cleanup prunes optimizer.resume on purpose. After
+// the worker has retired its copy, using the rung again must revalidate the
+// retained ar/nar weights against the record and not demand the pruned file.
+test('use, cleanup with the resume file pruned, then reuse after the worker is retired', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-hydrate-cleanup-reuse-'));
+  try {
+    const hashAr = sha256Hex('AR-BYTES'); const hashNar = sha256Hex('NAR-BYTES'); const hashOpt = sha256Hex('OPT-BYTES');
+    const script = HARNESS + [
+      "addDataset('album');",
+      "const dir = recordPulledRun('remote:W:job1', 'job1', 'W', 10);",
+      `const state = { manifest: [{ name: 'native-ar.safetensors', sha256: '${hashAr}', bytes: 8 }, { name: 'native-nar.safetensors', sha256: '${hashNar}', bytes: 9 }, { name: 'optimizer.resume', sha256: '${hashOpt}', bytes: 9 }], files: { 'native-ar.safetensors': Buffer.from('AR-BYTES'), 'native-nar.safetensors': Buffer.from('NAR-BYTES'), 'optimizer.resume': Buffer.from('OPT-BYTES') }, deleted: [] };`,
+      "const workerServer = await serve(state);",
+      "config.workers.list = 'W=http://127.0.0.1:' + workerServer.address().port;",
+      "const app = await appServer();",
+      "const base = 'http://127.0.0.1:' + app.address().port + '/api/training/datasets/ds-album/';",
+      "const use = () => fetch(base + 'yue2-joint-preset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkpointDir: dir }) });",
+      "try {",
+      "  const first = await use();",
+      "  if (!first.ok) throw new Error('expected the first use to succeed: ' + JSON.stringify(await first.json()));",
+      "  const cleanup = await fetch(base + 'yue2-cleanup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ run: 'remote:W:job1', step: 10, resume: true }) });",
+      "  if (!cleanup.ok) throw new Error('cleanup failed: ' + JSON.stringify(await cleanup.json()));",
+      "  if (fs.existsSync(path.join(dir, 'optimizer.resume'))) throw new Error('cleanup did not prune the resume file');",
+      "  state.manifest = []; state.files = {};",
+      "  const second = await use();",
+      "  if (!second.ok) throw new Error('expected reuse to revalidate locally: ' + JSON.stringify(await second.json()));",
+      "  if (fs.existsSync(path.join(dir, 'optimizer.resume'))) throw new Error('a pruned file must not come back');",
+      // The retained weights are still checked: a flipped byte is refused, not trusted.
+      "  fs.writeFileSync(path.join(dir, 'native-ar.safetensors'), Buffer.from('AR-XXXXX'));",
+      "  const third = await use();",
+      "  if (third.ok) throw new Error('a corrupt retained weight must be refused once the worker is gone');",
+      "} finally { workerServer.close(); app.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

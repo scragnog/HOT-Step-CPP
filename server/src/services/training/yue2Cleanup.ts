@@ -7,7 +7,7 @@
 import fs from 'fs';
 import path from 'path';
 import { listPreparedCaches, clearPreparedCaches } from './preparedDataReset.js';
-import { listYue2AitkRuns, deleteYue2AitkRun, yue2RunFinished, setYue2RunFinished } from './yue2AitkRuns.js';
+import { listYue2AitkRuns, deleteYue2AitkRun, yue2RunFinished, setYue2RunFinished, recordYue2AitkRun } from './yue2AitkRuns.js';
 import { listYue2JointPreviews, pruneYue2JointPreviews } from './yue2JointPreview.js';
 import { archiveYue2TrainLogs, noteYue2TrainLog } from './datasetProfile.js';
 
@@ -88,6 +88,10 @@ export function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string
     freed += plan.otherPreviews.bytes; done.push(`${plan.otherPreviews.count} other preview(s)`);
   }
   if (choice.resume && keep.optimizerPath) {
+    // A pulled rung revalidates against its worker manifest once the worker's
+    // copy is gone; record the prune first so that check stops demanding it.
+    if (run.origin) recordYue2AitkRun({ ...run, checkpoints: run.checkpoints.map(c => c.step === step
+      ? { ...c, prunedFiles: [...new Set([...(c.prunedFiles ?? []), path.basename(keep.optimizerPath!)])] } : c) });
     fs.rmSync(keep.optimizerPath, { force: true });
     freed += plan.resume.bytes; done.push('resume file');
   }

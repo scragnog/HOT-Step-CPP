@@ -732,21 +732,23 @@ async function hydrateYue2LadderCheckpointLocked(run: Yue2AitkRunRecord, step: n
     // downloaded, so there is no worker manifest to re-verify against.
     return ckpt.arPath && ckpt.narPath ? { status: 'already-local', errors: [] } : { status: 'error', errors: [`No checkpoint at step ${step}`] };
   }
-  // A checkpoint already hash-verified against a worker manifest once
-  // (persisted in verifiedSha256, Reviewer round 3 P2) is re-checked against
-  // that record, not a fresh worker round-trip — the worker's own copy is
-  // routinely deleted right after a successful link (deleteWorkerYue2Ladder),
-  // so demanding a live manifest on every later use would make an already
-  // "done" checkpoint unusable forever once that cleanup has run. Only a
-  // checkpoint never verified this way falls through to asking the worker.
-  if (ckpt.verifiedSha256) {
-    const required: LadderCheckpointFile[] = ['native-ar.safetensors', 'native-nar.safetensors'];
-    const entries = Object.entries(ckpt.verifiedSha256);
-    const allMatch = entries.length > 0 && entries.every(([name, sha]) => {
+  // A checkpoint whose whole worker manifest was verified once (persisted in
+  // manifestSha256, written only for a complete transfer) is re-checked
+  // against that record, not a fresh worker round-trip — the worker's own
+  // copy is routinely deleted right after a successful link
+  // (deleteWorkerYue2Ladder). Optional files this machine pruned on purpose
+  // (prunedFiles) are no longer demanded; the ar/nar weights always are.
+  // Only a checkpoint never completely verified falls through to the worker.
+  const required: LadderCheckpointFile[] = ['native-ar.safetensors', 'native-nar.safetensors'];
+  const pruned = new Set((ckpt.prunedFiles ?? []).filter(name => !(required as string[]).includes(name)));
+  if (ckpt.manifestSha256) {
+    const recorded = ckpt.manifestSha256;
+    const allMatch = required.every(name => recorded[name]) && Object.entries(recorded).every(([name, sha]) => {
+      if (pruned.has(name)) return true;
       const dest = path.join(ckpt.dir, name);
       return isInside(ckpt.dir, dest) && fs.existsSync(dest) && hashFile(dest) === sha;
     });
-    if (allMatch && required.every(name => ckpt.verifiedSha256![name])) return { status: 'already-local', errors: [] };
+    if (allMatch) return { status: 'already-local', errors: [] };
     // Something no longer matches its verified record — fall through and
     // try the worker as a repair path; if it is gone too, that failure below
     // is now an honest "cannot repair," not a silent trust of bad bytes.
@@ -758,17 +760,16 @@ async function hydrateYue2LadderCheckpointLocked(run: Yue2AitkRunRecord, step: n
     manifest = await workerJson<WorkerLadderCheckpointFile[]>(w,
       `/api/training/worker/yue2-ladder-checkpoint?datasetId=${encodeURIComponent(run.datasetId)}&run=${encodeURIComponent(run.origin.remoteJobId)}&step=${step}`);
   } catch (err: any) {
-    if (ckpt.verifiedSha256) {
+    if (ckpt.manifestSha256) {
       return { status: 'error', errors: [`The local checkpoint no longer matches its verified checksum and the worker is unavailable to re-fetch from: ${err?.message || String(err)}`] };
     }
     return { status: 'error', errors: [err?.message || String(err)] };
   }
-  const required: LadderCheckpointFile[] = ['native-ar.safetensors', 'native-nar.safetensors'];
   if (required.some(name => !manifest.some(f => f.name === name))) return { status: 'error', errors: ['The worker has no ar/nar checkpoint at this step'] };
   fs.mkdirSync(ckpt.dir, { recursive: true });
   const errors: string[] = [];
   let fetched = false;
-  const verified: Record<string, string> = {};
+  const declared: Record<string, string> = {};
   for (const f of manifest) {
     // Outside the fixed filename set entirely: not a file we ever asked for
     // or need, so a buggy/malicious extra manifest entry is dropped quietly
@@ -776,21 +777,27 @@ async function hydrateYue2LadderCheckpointLocked(run: Yue2AitkRunRecord, step: n
     if (!(LADDER_CHECKPOINT_FILES as readonly string[]).includes(f.name)) { console.warn(`[Training] Refused unknown checkpoint filename from ${w.name}: ${f.name}`); continue; }
     const dest = path.join(ckpt.dir, f.name);
     if (!isInside(ckpt.dir, dest)) { console.warn(`[Training] Refused checkpoint path outside the checkpoint dir from ${w.name}: ${f.name}`); continue; }
-    if (fs.existsSync(dest) && hashFile(dest) === f.sha256) { verified[f.name] = f.sha256; continue; }
+    declared[f.name] = f.sha256;
+    if (pruned.has(f.name)) continue; // deleted here on purpose: never fetched back
+    if (fs.existsSync(dest) && hashFile(dest) === f.sha256) continue;
     fetched = true;
     const result = await fetchAndVerifyFile(w,
       `/api/training/worker/yue2-ladder-checkpoint-file?datasetId=${encodeURIComponent(run.datasetId)}&run=${encodeURIComponent(run.origin.remoteJobId)}&step=${step}&file=${encodeURIComponent(f.name)}`,
       dest, f.sha256);
     if (!result.ok) errors.push(`${f.name}: ${result.error}`);
-    else verified[f.name] = f.sha256;
   }
   const landed = required.every(name => fs.existsSync(path.join(ckpt.dir, name)) && hashFile(path.join(ckpt.dir, name)) === manifest.find(f => f.name === name)!.sha256);
   if (!landed) return { status: 'error', errors: errors.length ? errors : ['the ar/nar checkpoint did not land'] };
-  // Persist what was actually verified this round so a later call — even
-  // after the worker's copy is gone — can check local files against this
-  // record instead of asking a worker that may no longer exist.
-  recordYue2AitkRun({ ...run, checkpoints: run.checkpoints.map(c => c.step === step ? { ...c, verifiedSha256: verified } : c) });
+  // Still partial until every declared file is verified: nothing is recorded,
+  // so a retry asks the worker again instead of trusting a subset (Reviewer,
+  // 135990e3 P1). Once complete, the whole manifest is persisted so a later
+  // use — even after the worker's copy is gone — revalidates against it.
   if (errors.length) return { status: 'partial', errors };
+  recordYue2AitkRun({ ...run, checkpoints: run.checkpoints.map(c => c.step === step ? { ...c, manifestSha256: declared } : c) });
+  // recordYue2AitkRun swallows its own write failures; without this record
+  // the worker's copy must not be retired, so the caller is told it is partial.
+  const recorded = listYue2AitkRuns(run.datasetId, run.datasetSlug).find(r => r.jobId === run.jobId)?.checkpoints.find(c => c.step === step)?.manifestSha256;
+  if (JSON.stringify(recorded) !== JSON.stringify(declared)) return { status: 'partial', errors: ['the verified checksums could not be recorded locally'] };
   return { status: fetched ? 'hydrated' : 'already-local', errors };
 }
 
