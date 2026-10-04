@@ -4104,11 +4104,14 @@ router.post('/datasets/:id/yue2-joint-preset', async (req: Request, res: Respons
     let owningRun = runs.find(matches);
     let checkpoint = owningRun && matches(owningRun);
     if (!checkpoint) { res.status(400).json({ error: 'Select a joint checkpoint belonging to this dataset' }); return; }
-    // A remote-only rung (pulled from a worker, no local weights yet): fetch
-    // just this one step's checkpoint before linking — never the rest of the
-    // ladder. A failed or partial fetch stops here; nothing is linked and
-    // the worker's copy is never touched.
-    if ((!checkpoint.arPath || !checkpoint.narPath) && owningRun?.origin) {
+    // A remote-origin rung: always re-verify against a fresh worker manifest
+    // before linking, even if arPath/narPath already look present — a local
+    // disk scan only checks the files exist, not that they still match the
+    // worker's hash, so a file left corrupt by an earlier partial attempt
+    // would otherwise get linked unverified. Never the rest of the ladder. A
+    // failed or partial fetch stops here; nothing is linked and the worker's
+    // copy is never touched.
+    if (owningRun?.origin) {
       const hydrated = await hydrateYue2LadderCheckpoint(owningRun, checkpoint.step);
       if (hydrated.status === 'error') { res.status(400).json({ error: `Could not fetch this rung from ${owningRun.origin.worker}: ${hydrated.errors.join('; ') || 'unknown error'}` }); return; }
       if (hydrated.status === 'partial') { res.status(409).json({ error: `Only part of this rung arrived from ${owningRun.origin.worker}: ${hydrated.errors.join('; ')}. Try again.` }); return; }

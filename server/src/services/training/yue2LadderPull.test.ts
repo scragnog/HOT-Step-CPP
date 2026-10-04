@@ -74,6 +74,7 @@ const LADDER_HARNESS = [
   "      if (body.corruptAttempts && state.attempts[key] <= body.corruptAttempts) {",
   "        const bad = Buffer.from(body.buf); bad[0] = bad[0] ^ 0xff; res.end(bad); return;",
   "      }",
+  "      if (body.delayMs) { setTimeout(() => res.end(body.buf), body.delayMs); return; }",
   "      res.end(body.buf); return;",
   "    }",
   "    if (req.method === 'DELETE') { state.deleted.push(u.pathname); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: true })); return; }",
@@ -395,6 +396,42 @@ test('a preview that lands corrupt on every attempt exhausts its retries and is 
       "  if (state.deleted.length) throw new Error('no delete when every retry fails');",
       "  const run = listYue2AitkRuns('ds-album', 'album')[0];",
       "  if (run.checkpoints[0].arPath) throw new Error('nothing should have linked');",
+      "} finally { server.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('two overlapping pulls of the same worker/run never race each other\'s transfer or metadata', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-pull-concurrent-'));
+  try {
+    // Reviewer, dbe2464d: two real requests for the same destination shared
+    // one `${dest}.part` file and raced its hash/rename/remove. Both requests
+    // here carry identical correct bytes, so a race (not a bad payload) is
+    // the only way this could fail — a delay widens the window so the two
+    // pulls' writes genuinely overlap instead of finishing one at a time by
+    // luck. withRunLock (trainingWorkers.ts) should serialize them instead.
+    const hash = sha256Hex(fillPattern(55 * 1024 * 1024));
+    const script = LADDER_HARNESS + [
+      FILL_PATTERN_SOURCE + ';',
+      "const buf = fillPattern(55 * 1024 * 1024);",
+      `const hash = '${hash}';`,
+      "addDataset('album');",
+      "const ladder = { jobId: 'job1', datasetId: 'ds-album', datasetSlug: 'album', status: 'done', createdAt: now, updatedAt: now, options: {}, checkpoints: [{ step: 10, kl: 1.0, rung: true }], previews: [preview('p1', 10, 'p1.wav', buf, hash)] };",
+      "const state = { ladders: [ladder], files: { 'job1/p1.wav': { buf, delayMs: 30 } }, deleted: [] };",
+      "const server = await serve(state);",
+      "try {",
+      "  const w = { name: 'W', url: 'http://127.0.0.1:' + server.address().port };",
+      "  const [a, b] = await Promise.all([pullYue2Ladders(w), pullYue2Ladders(w)]);",
+      // The lock serializes the two calls, so whichever runs second finds the
+      // file already landed and correct and skips re-fetching it (0 is fine);
+      // both must still report 'pulled', never 'partial' from a stomped race.
+      "  for (const pulled of [a, b]) { if (pulled[0].status !== 'pulled') throw new Error('expected both overlapping pulls to land clean: ' + JSON.stringify([a, b])); }",
+      "  const run = listYue2AitkRuns('ds-album', 'album')[0];",
+      "  const landed = fs.readFileSync(path.join(run.output, 'previews', 'p1.wav'));",
+      "  if (!landed.equals(buf)) throw new Error('landed bytes do not match the source after overlapping pulls');",
+      "  const leftovers = fs.readdirSync(path.join(run.output, 'previews')).filter(f => f.includes('.part'));",
+      "  if (leftovers.length) throw new Error('a .part leftover means the two pulls stomped on each other: ' + leftovers.join(','));",
       "} finally { server.close(); }",
     ].join('');
     runInIsolatedRoot(root, script);

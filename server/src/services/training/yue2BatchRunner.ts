@@ -267,11 +267,12 @@ async function finishLadder(item: Yue2BatchItem): Promise<void> {
   }
   let ckpt = runs.find(r => r.jobId === runId)?.checkpoints.find(c => c.step === step);
   if (!ckpt || step === undefined) throw new Error(`No checkpoint at step ${step} of run ${runId}`);
-  // A remote-only rung (pulled from a worker, base-matched ladders only — a
-  // NAR further-training run is always a local job): fetch just this one
-  // step's checkpoint before linking, never the rest of the ladder.
+  // A remote-origin rung (base-matched ladders only — a NAR further-training
+  // run is always a local job): always re-verify against a fresh worker
+  // manifest before linking, even if arPath/narPath already look present —
+  // see the matching comment in routes/training.ts's yue2-joint-preset route.
   let owningRun = runs.find(r => r.jobId === runId);
-  if ((!ckpt.arPath || !ckpt.narPath) && !narJob && owningRun?.origin) {
+  if (!narJob && owningRun?.origin) {
     const hydrated = await hydrateYue2LadderCheckpoint(owningRun, step);
     if (hydrated.status === 'error') throw new Error(`Could not fetch this rung from ${owningRun.origin.worker}: ${hydrated.errors.join('; ') || 'unknown error'}`);
     if (hydrated.status === 'partial') throw new Error(`Only part of this rung arrived from ${owningRun.origin.worker}: ${hydrated.errors.join('; ')}`);

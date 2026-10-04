@@ -157,6 +157,66 @@ test('a hash mismatch links nothing and never asks the worker to delete', () => 
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('a manifest entry outside the fixed checkpoint filename set is refused, never written to disk', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-hydrate-bad-name-'));
+  try {
+    // Reviewer, blocker #3: an unvalidated f.name let a malicious/buggy
+    // manifest entry escape ckpt.dir via path.join. Ar/nar are still valid
+    // and complete, so the rung must still link — only the bad entry drops.
+    const ar = Buffer.from('AR-BYTES'); const nar = Buffer.from('NAR-BYTES');
+    const hashAr = sha256Hex('AR-BYTES'); const hashNar = sha256Hex('NAR-BYTES');
+    const script = HARNESS + [
+      "addDataset('album');",
+      "const dir = recordPulledRun('remote:W:job1', 'job1', 'W', 10);",
+      `const state = { manifest: [{ name: 'native-ar.safetensors', sha256: '${hashAr}', bytes: ${ar.length} }, { name: 'native-nar.safetensors', sha256: '${hashNar}', bytes: ${nar.length} }, { name: '../../escaped.json', sha256: '${hashAr}', bytes: ${ar.length} }], files: { 'native-ar.safetensors': Buffer.from('AR-BYTES'), 'native-nar.safetensors': Buffer.from('NAR-BYTES'), '../../escaped.json': Buffer.from('AR-BYTES') }, deleted: [] };`,
+      "const workerServer = await serve(state);",
+      "config.workers.list = 'W=http://127.0.0.1:' + workerServer.address().port;",
+      "const app = await appServer();",
+      "try {",
+      "  const res = await fetch('http://127.0.0.1:' + app.address().port + '/api/training/datasets/ds-album/yue2-joint-preset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkpointDir: dir }) });",
+      "  const body = await res.json();",
+      "  if (!res.ok) throw new Error('expected success despite the one bad entry: ' + JSON.stringify(body));",
+      "  if (fs.existsSync(path.join(dir, '..', '..', 'escaped.json'))) throw new Error('the unsafe filename must never be written outside the checkpoint dir');",
+      "  if (fs.existsSync(path.join(path.dirname(path.dirname(dir)), 'escaped.json'))) throw new Error('the unsafe filename must never land one level up either');",
+      "  const run = listYue2AitkRuns('ds-album', 'album')[0];",
+      "  if (!run.checkpoints[0].arPath || !run.checkpoints[0].narPath) throw new Error('the valid half of the manifest must still link: ' + JSON.stringify(run.checkpoints));",
+      "} finally { workerServer.close(); app.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a corrupt local file left by a prior attempt is caught and repaired, never linked as-is', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-hydrate-stale-corrupt-'));
+  try {
+    // Reviewer, blocker #4: the old code trusted an existing arPath/narPath
+    // without re-checking the worker's manifest, so a file corrupted after a
+    // prior partial attempt would be linked unverified. The fix always
+    // re-fetches a fresh manifest and re-hashes every file, even ones
+    // already present, before considering the checkpoint ready.
+    const hashAr = sha256Hex('AR-BYTES'); const hashNar = sha256Hex('NAR-BYTES');
+    const script = HARNESS + [
+      "addDataset('album');",
+      "const dir = recordPulledRun('remote:W:job1', 'job1', 'W', 10);",
+      // A stale, corrupt ar file already sitting on disk from an earlier attempt.
+      "fs.mkdirSync(dir, { recursive: true });",
+      "fs.writeFileSync(path.join(dir, 'native-ar.safetensors'), Buffer.from('CORRUPT!'));",
+      "fs.writeFileSync(path.join(dir, 'native-nar.safetensors'), Buffer.from('NAR-BYTES'));",
+      `const state = { manifest: [{ name: 'native-ar.safetensors', sha256: '${hashAr}', bytes: 8 }, { name: 'native-nar.safetensors', sha256: '${hashNar}', bytes: 9 }], files: { 'native-ar.safetensors': Buffer.from('AR-BYTES'), 'native-nar.safetensors': Buffer.from('NAR-BYTES') }, deleted: [] };`,
+      "const workerServer = await serve(state);",
+      "config.workers.list = 'W=http://127.0.0.1:' + workerServer.address().port;",
+      "const app = await appServer();",
+      "try {",
+      "  const res = await fetch('http://127.0.0.1:' + app.address().port + '/api/training/datasets/ds-album/yue2-joint-preset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkpointDir: dir }) });",
+      "  const body = await res.json();",
+      "  if (!res.ok) throw new Error('expected the repair to succeed: ' + JSON.stringify(body));",
+      "  if (!fs.readFileSync(path.join(dir, 'native-ar.safetensors')).equals(Buffer.from('AR-BYTES'))) throw new Error('the stale corrupt ar file was linked instead of repaired');",
+      "} finally { workerServer.close(); app.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('a worker manifest missing the nar file is refused before any fetch attempt', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-hydrate-partial-manifest-'));
   try {

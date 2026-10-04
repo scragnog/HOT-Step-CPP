@@ -556,15 +556,30 @@ function hashFile(file: string): string | null {
 
 const TRANSFER_ATTEMPTS = 3;
 
+/** Serialize async work sharing a key — a second pull or hydrate for the same
+ *  worker/run/step waits for the first instead of racing it on disk (Reviewer,
+ *  dbe2464d: overlapping Review/API pulls stomped on each other's `.part`
+ *  file and metadata writes). One pending chain per key; the map entry is
+ *  dropped once nothing is waiting so it never grows unbounded. */
+const runLocks = new Map<string, Promise<unknown>>();
+function withRunLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prior = runLocks.get(key) ?? Promise.resolve();
+  const next = prior.then(fn, fn);
+  runLocks.set(key, next.then(() => {}, () => {}).finally(() => { if (runLocks.get(key) === next) runLocks.delete(key); }));
+  return next;
+}
+
 /** Fetch one file to `dest` and hash-verify it, retrying the whole
- *  fetch-and-hash a few times on a mismatch before giving up — a large
- *  transfer over a real network occasionally lands corrupt with the same
- *  byte count (seen pulling LivingRoom's overnight ladders, 2026-10-04: the
- *  worker's own bytes and hash were fine on a direct re-fetch, so this is a
- *  transient transfer fault, not bad source data). Each attempt is a fresh
- *  request; a hash match on any attempt wins. */
+ *  fetch-and-hash a few times on a mismatch before giving up (seen pulling
+ *  LivingRoom's overnight ladders, 2026-10-04: most "corrupt" landings were a
+ *  local write race between overlapping pulls, not the network or the
+ *  worker's data — see `withRunLock` above and Reviewer's repro at
+ *  dbe2464d). Each attempt is a fresh request; a hash match on any attempt
+ *  wins. The temp file is unique to this call so two overlapping transfers to
+ *  the same `dest` never share, truncate, or delete each other's `.part`
+ *  file. */
 async function fetchAndVerifyFile(w: WorkerInfo, url: string, dest: string, sha256: string): Promise<{ ok: true; bytes: number } | { ok: false; error: string }> {
-  const part = `${dest}.part`;
+  const part = `${dest}.part-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   let lastError = 'unknown error';
   for (let attempt = 1; attempt <= TRANSFER_ATTEMPTS; attempt++) {
     try {
@@ -580,6 +595,7 @@ async function fetchAndVerifyFile(w: WorkerInfo, url: string, dest: string, sha2
       try { fs.rmSync(part, { force: true }); } catch { /* best effort */ }
     }
   }
+  try { fs.rmSync(part, { force: true }); } catch { /* best effort */ }
   return { ok: false, error: lastError };
 }
 
@@ -587,8 +603,14 @@ async function fetchAndVerifyFile(w: WorkerInfo, url: string, dest: string, sha2
  *  (or already pruned here — a pruned preview is never re-fetched), then
  *  write the local previews catalogue and run record. Deleting the worker's
  *  own copies is slice 3's job, once a chosen rung's checkpoint has also been
- *  pulled and linked — nothing here ever touches the worker's files. */
-async function pullOneYue2Ladder(w: WorkerInfo, ds: { id: string; slug: string }, ladder: WorkerLadder): Promise<Yue2LadderPullResult> {
+ *  pulled and linked — nothing here ever touches the worker's files. A
+ *  second concurrent pull of the same worker/run (Review polling it while an
+ *  API call is also in flight, say) waits for the first instead of racing it
+ *  on the same destination files and metadata (Reviewer, dbe2464d). */
+function pullOneYue2Ladder(w: WorkerInfo, ds: { id: string; slug: string }, ladder: WorkerLadder): Promise<Yue2LadderPullResult> {
+  return withRunLock(`pull:${w.name}:${ladder.jobId}`, () => pullOneYue2LadderLocked(w, ds, ladder));
+}
+async function pullOneYue2LadderLocked(w: WorkerInfo, ds: { id: string; slug: string }, ladder: WorkerLadder): Promise<Yue2LadderPullResult> {
   const errors: string[] = [];
   let bytes = 0, previewsFetched = 0;
   const output = localYue2LadderDir(w.name, ladder.jobId);
@@ -665,12 +687,24 @@ export interface Yue2LadderHydrateResult { status: 'hydrated' | 'already-local' 
  *  disk scan (yue2AitkRuns.ts's checkpointRecords) finds them next read and
  *  the step stops being `availability: 'remote'` on its own — no index write
  *  here. Used by "Use this rung" and by Finish scored's direct link, so a
- *  pulled ladder's finish path needs nothing worker-specific beyond this. */
-export async function hydrateYue2LadderCheckpoint(run: Yue2AitkRunRecord, step: number): Promise<Yue2LadderHydrateResult> {
+ *  pulled ladder's finish path needs nothing worker-specific beyond this. A
+ *  second concurrent hydrate of the same run/step (a double-click, or the
+ *  batch runner and an API call landing together) waits for the first rather
+ *  than racing it on the same checkpoint files (Reviewer, dbe2464d). */
+export function hydrateYue2LadderCheckpoint(run: Yue2AitkRunRecord, step: number): Promise<Yue2LadderHydrateResult> {
+  return withRunLock(`hydrate:${run.jobId}:${step}`, () => hydrateYue2LadderCheckpointLocked(run, step));
+}
+async function hydrateYue2LadderCheckpointLocked(run: Yue2AitkRunRecord, step: number): Promise<Yue2LadderHydrateResult> {
   const ckpt = run.checkpoints.find(c => c.step === step);
   if (!ckpt) return { status: 'error', errors: [`No checkpoint at step ${step}`] };
-  if (ckpt.arPath && ckpt.narPath) return { status: 'already-local', errors: [] };
-  if (!run.origin) return { status: 'error', errors: ['This run has no training worker to fetch from'] };
+  if (!run.origin) {
+    // Trained on this PC: the files are the only copy and were never
+    // downloaded, so there is no worker manifest to re-verify against.
+    return ckpt.arPath && ckpt.narPath ? { status: 'already-local', errors: [] } : { status: 'error', errors: [`No checkpoint at step ${step}`] };
+  }
+  // Remote-origin: always re-check against a fresh manifest, even if the
+  // checkpoint record already reports local paths — those files could have
+  // been left behind by a previous partial/corrupt attempt.
   const w = getWorker(run.origin.worker);
   if (!w) return { status: 'error', errors: [`No configured worker named ${run.origin.worker}`] };
   let manifest: WorkerLadderCheckpointFile[];
@@ -682,17 +716,25 @@ export async function hydrateYue2LadderCheckpoint(run: Yue2AitkRunRecord, step: 
   if (required.some(name => !manifest.some(f => f.name === name))) return { status: 'error', errors: ['The worker has no ar/nar checkpoint at this step'] };
   fs.mkdirSync(ckpt.dir, { recursive: true });
   const errors: string[] = [];
+  let fetched = false;
   for (const f of manifest) {
+    // Outside the fixed filename set entirely: not a file we ever asked for
+    // or need, so a buggy/malicious extra manifest entry is dropped quietly
+    // rather than downgrading an otherwise-complete checkpoint to 'partial'.
+    if (!(LADDER_CHECKPOINT_FILES as readonly string[]).includes(f.name)) { console.warn(`[Training] Refused unknown checkpoint filename from ${w.name}: ${f.name}`); continue; }
     const dest = path.join(ckpt.dir, f.name);
+    if (!isInside(ckpt.dir, dest)) { console.warn(`[Training] Refused checkpoint path outside the checkpoint dir from ${w.name}: ${f.name}`); continue; }
     if (fs.existsSync(dest) && hashFile(dest) === f.sha256) continue;
+    fetched = true;
     const result = await fetchAndVerifyFile(w,
       `/api/training/worker/yue2-ladder-checkpoint-file?datasetId=${encodeURIComponent(run.datasetId)}&run=${encodeURIComponent(run.origin.remoteJobId)}&step=${step}&file=${encodeURIComponent(f.name)}`,
       dest, f.sha256);
     if (!result.ok) errors.push(`${f.name}: ${result.error}`);
   }
-  const landed = required.every(name => fs.existsSync(path.join(ckpt.dir, name)));
+  const landed = required.every(name => fs.existsSync(path.join(ckpt.dir, name)) && hashFile(path.join(ckpt.dir, name)) === manifest.find(f => f.name === name)!.sha256);
   if (!landed) return { status: 'error', errors: errors.length ? errors : ['the ar/nar checkpoint did not land'] };
-  return { status: errors.length ? 'partial' : 'hydrated', errors };
+  if (errors.length) return { status: 'partial', errors };
+  return { status: fetched ? 'hydrated' : 'already-local', errors };
 }
 
 /** Tell a worker to drop a whole ladder folder — once its chosen rung has
