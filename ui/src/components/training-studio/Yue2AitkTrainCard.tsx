@@ -1618,14 +1618,16 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.ladderLiveOnlyHint', '{{count}} preview(s) rendered so far. The ladder, blind labels and scoring open once this run lands in the local index.', { count: jointPreviews.filter(p => p.status === 'done').length })}</p>
       </div>}
       {ladderRunRec && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
-        <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.ladderTitle', 'Checkpoint ladder')} · {new Date(ladderRunRec.createdAt).toLocaleString()}{ladderRunRec.live ? ` · ${t('trainingStudio.yue2.method.ladderLive', 'training')}` : ''}</p>
+        <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">{t('trainingStudio.yue2.method.ladderTitle', 'Checkpoint ladder')} · {new Date(ladderRunRec.createdAt).toLocaleString()}{ladderRunRec.live ? ` · ${t('trainingStudio.yue2.method.ladderLive', 'training')}` : ''}
+          {ladderRunRec.origin && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300"
+            title={t('trainingStudio.review.originInfo', 'Pulled from this training worker; previews and scoring run here.') as string}>{ladderRunRec.origin.worker}</span>}</p>
         {aitkRuns.length > 1 && <div className="mt-2 flex flex-col gap-1 max-w-md">
           <ParamLabel label={t('trainingStudio.yue2.method.ladderRun', 'Run')}
             className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
             info={t('trainingStudio.yue2.method.ladderRunInfo', 'This dataset has more than one joint run. Pick which run\'s ladder to listen to and score. Each run keeps its own scores.')} />
           <StyledSelect accent="amber" className="w-full" value={ladderRunRec.jobId} onChange={setPickedLadderRun}
             options={[...aitkRuns].sort((a, b) => b.createdAt - a.createdAt).map(r => ({ value: r.jobId,
-              label: `${new Date(r.createdAt).toLocaleString()} · ${r.live ? t('trainingStudio.yue2.method.ladderLive', 'training') : r.status} · ${r.checkpoints.filter(c => c.arPath && c.narPath).length} ${t('trainingStudio.yue2.method.ladderRungs', 'rungs')}` }))} />
+              label: `${new Date(r.createdAt).toLocaleString()} · ${r.live ? t('trainingStudio.yue2.method.ladderLive', 'training') : r.status} · ${r.checkpoints.filter(c => (c.arPath && c.narPath) || c.availability === 'remote').length} ${t('trainingStudio.yue2.method.ladderRungs', 'rungs')}${r.origin ? ` · ${r.origin.worker}` : ''}` }))} />
         </div>}
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.ladderHint', 'Every saved checkpoint is a rung. Previews render while the run trains: two 300 s draft takes of the dataset\'s first sung track per rung. Take 1 uses the same seed on every rung, so the rungs sing roughly the same song and what changes between them is the training; compare rungs on it. Take 2 uses a new random seed each time, so it is a song no other rung made; it shows how the checkpoint does on a fresh draw, and catches failures the fixed seed happens to miss. A rung with no previews yet says so, and Render adds takes. Score likeness and corruption 1-5, then press Use this rung on your pick: it becomes the dataset\'s adapter and you can clean up the rest. Scores also feed the Review page and "Finish scored" for batches.')}</p>
         <Yue2LadderReview datasetId={datasetId} datasetName={datasets.find(d => d.id === datasetId)?.name} run={ladderRunRec} previews={jointPreviews}

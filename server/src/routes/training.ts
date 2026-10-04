@@ -4062,7 +4062,9 @@ router.get('/datasets/:id/yue2-joint-runs', (req: Request, res: Response) => {
     const active = queue.activeJobForDataset(ds.id);
     const activeJoint = active?.kind === 'yue2-joint-train' ? active : undefined;
     res.json({
-      runs: runs.map(run => ({ ...run, live: activeJoint?.id === run.jobId, reviewComplete: yue2ReviewComplete(run.output),
+      // A pulled ladder's own queue lives on its worker, not this machine's
+      // active job — "still refining" tracks the worker's own status.
+      runs: runs.map(run => ({ ...run, live: activeJoint?.id === run.jobId || (run.status === 'running' && !!run.origin), reviewComplete: yue2ReviewComplete(run.output),
         resumeError: typeof run.options.dataset !== 'string' || !fs.existsSync(run.options.dataset)
           ? 'Prepared dataset was cleared or is missing'
           : !run.checkpoints.some(checkpoint => !!checkpoint.optimizerPath)
@@ -4150,6 +4152,7 @@ router.get('/yue2-review', (_req: Request, res: Response) => {
         // `active` job — "still refining" tracks the worker's own status.
         const live = active?.id === run.jobId || (run.status === 'running' && !!run.origin);
         rows.push({ datasetId: ds.id, datasetSlug: ds.slug, datasetName: ds.name, refineRun: run.jobId, status: run.status, createdAt: run.createdAt,
+          origin: run.origin?.worker ?? null,
           live, rungs: rungs.length, previews: previews.length, scored: scored.size,
           unscored: rungs.filter(r => !scored.has(r.step)).length, reviewed: yue2ReviewComplete(run.output), best: best ? { step: best.step, overall: best.overall, blindLabel: run.blindLabels?.[best.step] ?? '' } : null,
           decoderOnly: (run.options as Record<string, unknown>)?.freezePlannerNow === true, klMin: kls.length ? Math.min(...kls) : null, klMax: kls.length ? Math.max(...kls) : null,

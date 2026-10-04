@@ -54,7 +54,9 @@ export function ladderVisibility(run: Yue2AitkRunRecord | undefined, blindRungs:
   const labelsPending = !!jointLadder && blindRungs && run != null && !run.blindLabels;
   const blind = !!jointLadder && blindRungs && !labelsPending;
   const labelFor = (step: number) => run?.blindLabels?.[step] ?? '';
-  const ladder = run && !labelsPending ? [...run.checkpoints].filter(c => c.arPath && c.narPath).sort((a, b) => a.step - b.step) : [];
+  // A remote-only rung (pulled from a worker, no local weights yet) is still
+  // listenable and scoreable from its previews and meters.
+  const ladder = run && !labelsPending ? [...run.checkpoints].filter(c => (c.arPath && c.narPath) || c.availability === 'remote').sort((a, b) => a.step - b.step) : [];
   const visibleLadder = blind ? [...ladder].sort((a, b) => labelFor(a.step).localeCompare(labelFor(b.step))) : ladder;
   return { jointLadder, labelsPending, blind, labelFor, ladder, visibleLadder };
 }
@@ -277,6 +279,10 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
         {visibleLadder.map(c => {
           const stats = rungStats(c.step);
           const { mine, plannerReplans, composerReplans, hasReplanData, flaggedTakes, flagReasons, overall } = stats;
+          // Pulled from a worker, no local weight file yet: listenable and
+          // scoreable from its previews, but rendering more and linking it
+          // both need the checkpoint itself, not fetched by this slice.
+          const remoteOnly = c.availability === 'remote';
           return <div key={c.step} id={`${idPrefix}-${c.step}`}
             className={`rounded-lg border p-3 ${picked === c.dir ? 'border-emerald-500/60 bg-emerald-500/5' : c.step === bestStep ? 'border-sky-500/70' : c.rung ? 'border-amber-500/40' : 'border-zinc-300/70 dark:border-white/10'}`}>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
@@ -290,12 +296,17 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
               {flaggedTakes.length > 0 && <span className="font-mono text-red-600 dark:text-red-400" title={flagReasons}>{t('trainingStudio.refine.planFlags', 'plan flags {{n}}/{{takes}}', { n: flaggedTakes.length, takes: stats.doneTakes.length })}</span>}
               {overall && <span className="font-mono text-sky-700 dark:text-sky-300" title={t('trainingStudio.refine.overallInfo', 'overall = (likeness + (6 − corruption)) / 2, minus a soft penalty for replan load')}>{t('trainingStudio.refine.overall', 'overall {{n}}', { n: overall.overall.toFixed(2) })}</span>}
               <span className="flex-1" />
-              <button type="button" onClick={() => void render(c.step)} disabled={rendering !== null}
+              {remoteOnly && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300"
+                title={t('trainingStudio.refine.remoteOnlyInfo', 'Not fetched from its training worker yet — listen and score from the previews; Render and Use this rung need its checkpoint.') as string}>
+                {t('trainingStudio.refine.remoteOnly', 'not pulled')}</span>}
+              <button type="button" onClick={() => void render(c.step)} disabled={rendering !== null || remoteOnly}
+                title={remoteOnly ? t('trainingStudio.refine.remoteOnlyInfo', 'Not fetched from its training worker yet — listen and score from the previews; Render and Use this rung need its checkpoint.') as string : undefined}
                 className="px-2 py-1 rounded-lg text-[11px] border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 disabled:opacity-40">
                 {rendering === c.step ? t('trainingStudio.refine.rendering', 'Rendering…') : mine.length ? t('trainingStudio.refine.render', 'Render more') : t('trainingStudio.refine.renderFirst', 'Render')}
               </button>
-              <button type="button" onClick={() => void use(c.dir, c.step)}
-                className={`px-2 py-1 rounded-lg text-[11px] font-semibold border ${picked === c.dir ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300' : 'border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10'}`}>
+              <button type="button" onClick={() => void use(c.dir, c.step)} disabled={remoteOnly}
+                title={remoteOnly ? t('trainingStudio.refine.remoteOnlyInfo', 'Not fetched from its training worker yet — listen and score from the previews; Render and Use this rung need its checkpoint.') as string : undefined}
+                className={`px-2 py-1 rounded-lg text-[11px] font-semibold border disabled:opacity-40 ${picked === c.dir ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300' : 'border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10'}`}>
                 {picked === c.dir ? t('trainingStudio.refine.picked', 'In use') : t('trainingStudio.refine.use', 'Use this rung')}
               </button>
             </div>

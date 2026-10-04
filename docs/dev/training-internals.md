@@ -244,6 +244,19 @@ its run.json here would make its own `reconcileFromDisk` re-import the folder un
 fresh id on its next restart, orphaning `remoteJobId`); dropping the worker's copies is
 a later slice's job, once a chosen rung's checkpoint has also been pulled and linked.
 
+The UI side (`ui/src/components/training-studio/ReviewPanel.tsx`) triggers
+`pullWorkerYue2Ladders` (`POST /api/workers/:name/pull-ladders`) for the selected
+"Train on" worker on Review's own mount and on a manual button, then reloads
+`listYue2Review`; a `partial`/`error` result shows as a small amber note (the ladder
+still lists — a dropped preview just retries next pull). ReviewPanel, RefinePanel's
+run picker and Yue2AitkTrainCard's ladder header all show the worker's name as a
+badge when `run.origin` is set, from the same `origin: run.origin?.worker ?? null`
+GET /yue2-review now sends. `Yue2LadderReview.tsx`'s `ladderVisibility` accepts a
+checkpoint with `availability === 'remote'` as a rung the same as one with both
+`arPath` and `narPath` — listening and scoring work from the pulled previews and
+meters — but its "Render more" and "Use this rung" buttons stay disabled on one
+("not pulled" badge) until a later slice fetches its checkpoint.
+
 `server/src/services/training/datasetProfile.ts` measures a dataset and saves
 `<training dir>/datasets/<slug>/dataset-profile.json`. It reads only what
 survives a cache cleanup: the audio (one ffmpeg pass per song for EBU R128

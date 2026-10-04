@@ -815,6 +815,11 @@ export interface Yue2AitkCheckpointRecord {
   optimizerPath?: string;
   arPath?: string;
   narPath?: string;
+  /** Which `segments/segment-NNNNNN` folder this checkpoint lives under. */
+  segment?: string;
+  /** 'remote': pulled from a training worker, no weight file here yet —
+   *  listable, previewable and scoreable, not yet linkable or trainable on. */
+  availability?: 'remote';
 }
 
 export interface Yue2AitkRunRecord {
@@ -834,6 +839,9 @@ export interface Yue2AitkRunRecord {
   error?: string;
   checkpoints: Yue2AitkCheckpointRecord[];
   blindLabels?: Record<string, string>;
+  /** Set when this run was pulled from a training worker rather than
+   *  trained here. */
+  origin?: { worker: string; remoteJobId: string };
 }
 
 export interface Yue2JointPreviewRecord {
@@ -2604,7 +2612,7 @@ export function pickLadderRun<T extends { jobId: string; live?: boolean; created
 }
 
 /** Awaiting review: refinement ladders across datasets with score counts. */
-export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number; blindLabel: string } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean }
+export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number; blindLabel: string } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean; /** Pulled from this training worker; absent/null = trained here. */ origin?: string | null }
 export async function listYue2Review(): Promise<{ rows: Yue2ReviewRow[] }> {
   return localRequest('/yue2-review');
 }
@@ -3158,6 +3166,12 @@ export async function getWorkerDispatch(worker: string): Promise<WorkerDispatch 
 /** Fetch the worker's linked adapters and link them to this PC's presets. */
 export async function pullWorkerAdapters(worker: string): Promise<Array<{ slug: string; status: 'fetched' | 'current' | 'no-dataset'; bytes: number }>> {
   return (await workersRequest<{ pulled: Array<{ slug: string; status: 'fetched' | 'current' | 'no-dataset'; bytes: number }> }>(`/${encodeURIComponent(worker)}/pull`, { method: 'POST' })).pulled;
+}
+export interface Yue2LadderPullResult { worker: string; jobId: string; datasetSlug: string; status: 'pulled' | 'partial' | 'no-dataset' | 'error'; previewsFetched: number; bytes: number; errors: string[] }
+/** Copy every rung-bearing ladder on `worker` (run facts + hash-verified
+ *  previews, never the checkpoint weights) into this machine's own index. */
+export async function pullWorkerYue2Ladders(worker: string): Promise<Yue2LadderPullResult[]> {
+  return (await workersRequest<{ pulled: Yue2LadderPullResult[] }>(`/${encodeURIComponent(worker)}/pull-ladders`, { method: 'POST' })).pulled;
 }
 
 export async function cancelPipeline(id: string): Promise<void> {

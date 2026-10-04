@@ -300,6 +300,40 @@ test('a repull with no checksum never verifies a byte-flipped local file just be
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('a pulled ladder appears on the real Review route, awaiting review', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-pull-review-route-'));
+  try {
+    const hash = sha256Hex('WAV-BYTES-1');
+    const script = LADDER_HARNESS + [
+      "import express from 'express';",
+      "import trainingRoutes from './src/routes/training.js';",
+      "addDataset('album');",
+      "const buf = Buffer.from('WAV-BYTES-1');",
+      `const ladder = { jobId: 'job1', datasetId: 'ds-album', datasetSlug: 'album', status: 'done', createdAt: now, updatedAt: now, options: { method: 'base-matched' }, blindLabels: { '10': 'A' }, checkpoints: [{ step: 10, kl: 1.5, rung: true }], previews: [preview('p1', 10, 'p1.wav', buf, '${hash}')] };`,
+      "const state = { ladders: [ladder], files: { 'job1/p1.wav': { buf } }, deleted: [] };",
+      "const workerServer = await serve(state);",
+      "try {",
+      "  const pulled = await pullYue2Ladders({ name: 'LivingRoom', url: 'http://127.0.0.1:' + workerServer.address().port });",
+      "  if (pulled[0]?.status !== 'pulled') throw new Error('setup: pull did not succeed: ' + JSON.stringify(pulled));",
+      "  const app = express(); app.use('/api/training', trainingRoutes);",
+      "  const reviewServer = await new Promise(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });",
+      "  try {",
+      "    const res = await fetch('http://127.0.0.1:' + reviewServer.address().port + '/api/training/yue2-review');",
+      "    if (!res.ok) throw new Error('route failed: HTTP ' + res.status);",
+      "    const { rows } = await res.json();",
+      "    const row = rows.find(r => r.datasetId === 'ds-album');",
+      "    if (!row) throw new Error('pulled ladder is missing from /yue2-review: ' + JSON.stringify(rows));",
+      "    if (row.origin !== 'LivingRoom') throw new Error('row is missing its worker origin: ' + JSON.stringify(row));",
+      "    if (row.rungs !== 1 || row.previews !== 1) throw new Error('row did not count the remote-availability rung/preview: ' + JSON.stringify(row));",
+      "    const awaiting = row.unscored > 0 && row.previews > 0 && !row.reviewed;",
+      "    if (!awaiting) throw new Error('pulled ladder did not land in Review\\'s awaiting list: ' + JSON.stringify(row));",
+      "  } finally { await new Promise(resolve => reviewServer.close(resolve)); }",
+      "} finally { workerServer.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('no dataset for the worker\'s ladder is reported, not guessed at', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-pull-no-dataset-'));
   try {

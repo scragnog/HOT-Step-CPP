@@ -170,7 +170,7 @@ export const RefinePanel: React.FC = () => {
   const runLabel = (r: Yue2AitkRunRecord) => {
     const last = lastOf(r); const d = new Date(r.createdAt);
     const when = `${d.toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' })} ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
-    return `${when} · s${last?.step ?? '?'}${last?.kl !== undefined ? ` KL${last.kl.toFixed(2)}` : ''} · ${r.checkpoints.length}ck · ${r.live ? 'running' : r.status}`;
+    return `${when} · s${last?.step ?? '?'}${last?.kl !== undefined ? ` KL${last.kl.toFixed(2)}` : ''} · ${r.checkpoints.length}ck · ${r.live ? 'running' : r.status}${r.origin ? ` · ${r.origin.worker}` : ''}`;
   };
   // "Use this rung": with Further training for NAR on, the decoder trains on
   // from the rung first and the ladder finishes when it stops; otherwise the
@@ -359,6 +359,8 @@ export const RefinePanel: React.FC = () => {
               </div>
               <button type="button" onClick={() => void remove(ladderRun)} disabled={!ladderRun || !!runs.find(r => r.jobId === ladderRun)?.live} title={t('trainingStudio.refine.deleteRun', 'Delete run')}
                 className="p-2 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:text-red-500 hover:border-red-500/40 disabled:opacity-40"><Trash2 size={14} /></button>
+              {ladderRunRec?.origin && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300"
+                title={t('trainingStudio.review.originInfo', 'Pulled from this training worker; previews and scoring run here.') as string}>{ladderRunRec.origin.worker}</span>}
               {ladderRunRec && <button type="button" onClick={() => void toggleReviewed()}
                 title={t('trainingStudio.refine.reviewCompleteInfo', 'You have found the winner and will not score the other rungs. The Review tab then counts this ladder as scored and offers it to Finish scored, which uses the best-scored rung.')}
                 className={`px-3 py-2 rounded-lg text-xs font-semibold border ${ladderRunRec.reviewComplete ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10' : 'border-zinc-300/70 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10'}`}>
