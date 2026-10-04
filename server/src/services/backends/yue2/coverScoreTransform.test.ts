@@ -76,6 +76,31 @@ test('submit-time defaults retain both score voices, then apply chords, tempo, k
   assert.throws(() => coverScoreChoices({ cfgScale: 0 }), /cfgScale must/);
 });
 
+test('every combination of voices/chords/tempo/key reaches the wire together, nothing silently dropped', () => {
+  // Both voices + chords kept + a non-source tempo + a non-source key, all at
+  // once: each selected part must still be present AND correctly transformed
+  // by the others, not just "not crash". This is the combination a real
+  // cover job sends when nothing is toggled off.
+  const keepAll = coverScoreChoices({ voices: 'both', keepChords: true, tempo: 96, key: 'F#m' });
+  const keepAllResult = transformCoverScore(score, keepAll).renderedAbc;
+  assert.equal(keepAllResult.includes('V: Ins'), true); // voices: both -> Ins voice present
+  assert.ok(keepAllResult.includes('"F#m/C#"')); // chords: kept -> transposed chord root/bass, not stripped
+  assert.match(keepAllResult, /^Q:1\/4=96$/m); // tempo: set
+  assert.match(keepAllResult, /^K:F#m$/m); // key: changed
+  assert.match(keepAllResult, /^"F#m\/C#"F2 \^G2/m); // melody itself moved too, under the new key
+
+  // vocal-only + chords stripped + free tempo + a non-source key: the three
+  // "off" choices must each take effect without blocking the key change.
+  const dropAll = coverScoreChoices({ voices: 'vocal', keepChords: false, tempo: 'free', key: 'Bm' });
+  const dropAllResult = transformCoverScore(score, dropAll).renderedAbc;
+  assert.equal(dropAllResult.includes('V: Ins'), false); // voices: vocal -> Ins voice gone
+  // chords: stripped -> neither original chord symbol survives, transposed or not
+  assert.equal(dropAllResult.includes('Em/B'), false);
+  assert.equal(dropAllResult.includes('G/D'), false);
+  assert.equal(dropAllResult.includes('Q:'), false); // tempo: free -> no Q: field
+  assert.match(dropAllResult, /^K:Bm$/m); // key: still changed despite every other toggle being off
+});
+
 test('explicit vocal-only choice remains available and removes the instrumental voice', () => {
   const choices = coverScoreChoices({ voices: 'vocal' });
   assert.equal(choices.voices, 'vocal');
