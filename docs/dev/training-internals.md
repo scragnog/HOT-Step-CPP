@@ -228,7 +228,14 @@ or further-train a rung, not yet pulled). Each preview is hash-verified (`Worker
 before it is written here; a mismatched, interrupted, or on-disk-corrupted transfer
 (an existing file is re-hashed against the worker's current manifest every pull, never
 just trusted for existing) is dropped and retried on the next pull, never renamed into
-place. A preview whose manifest entry has no `sha256` this round (the worker can omit
+place. `fetchAndVerifyFile` (`trainingWorkers.ts`) also retries the fetch itself up to 3
+times within one pull before giving up — a large file (tens to hundreds of MB) landing
+byte-identical in length but wrong in content on one attempt and correct on the next is a
+real, observed failure mode pulling LivingRoom's own previews over its real network, not
+a theoretical one; the worker's and this machine's hashing were both confirmed correct by
+hand, so it is the transfer itself that occasionally corrupts, not the source or the
+check. `hydrateYue2LadderCheckpoint`'s checkpoint-file fetch (next) uses the same helper.
+A preview whose manifest entry has no `sha256` this round (the worker can omit
 it after a read failure there) is never added to `verified` either, even when this
 machine's own copy is still sitting there untouched — nothing to check it against means
 the ladder comes back `partial`, not `pulled`, until the worker reports a hash again. A

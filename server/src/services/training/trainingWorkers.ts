@@ -554,6 +554,35 @@ function hashFile(file: string): string | null {
   try { return createHash('sha256').update(fs.readFileSync(file)).digest('hex'); } catch { return null; }
 }
 
+const TRANSFER_ATTEMPTS = 3;
+
+/** Fetch one file to `dest` and hash-verify it, retrying the whole
+ *  fetch-and-hash a few times on a mismatch before giving up — a large
+ *  transfer over a real network occasionally lands corrupt with the same
+ *  byte count (seen pulling LivingRoom's overnight ladders, 2026-10-04: the
+ *  worker's own bytes and hash were fine on a direct re-fetch, so this is a
+ *  transient transfer fault, not bad source data). Each attempt is a fresh
+ *  request; a hash match on any attempt wins. */
+async function fetchAndVerifyFile(w: WorkerInfo, url: string, dest: string, sha256: string): Promise<{ ok: true; bytes: number } | { ok: false; error: string }> {
+  const part = `${dest}.part`;
+  let lastError = 'unknown error';
+  for (let attempt = 1; attempt <= TRANSFER_ATTEMPTS; attempt++) {
+    try {
+      const r = await workerFetch(w, url);
+      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+      await pipeline(Readable.fromWeb(r.body as any), fs.createWriteStream(part));
+      const got = hashFile(part);
+      if (got !== sha256) throw new Error(attempt < TRANSFER_ATTEMPTS ? `hash mismatch after transfer, retrying (${attempt}/${TRANSFER_ATTEMPTS})` : 'hash mismatch after transfer');
+      fs.renameSync(part, dest);
+      return { ok: true, bytes: fs.statSync(dest).size };
+    } catch (err: any) {
+      lastError = err?.message || String(err);
+      try { fs.rmSync(part, { force: true }); } catch { /* best effort */ }
+    }
+  }
+  return { ok: false, error: lastError };
+}
+
 /** One ladder: fetch and hash-verify every rendered preview not already here
  *  (or already pruned here — a pruned preview is never re-fetched), then
  *  write the local previews catalogue and run record. Deleting the worker's
@@ -580,21 +609,11 @@ async function pullOneYue2Ladder(w: WorkerInfo, ds: { id: string; slug: string }
     // added to `verified` even when the bytes happen to still be there.
     if (fs.existsSync(dest) && hashFile(dest) === p.sha256) { verified.add(p.file); continue; }
     // falls through to (re)fetch: missing, or present but no longer matching
-    const part = `${dest}.part`;
-    try {
-      const r = await workerFetch(w, `/api/training/worker/yue2-ladder-file?datasetId=${encodeURIComponent(ds.id)}&run=${encodeURIComponent(ladder.jobId)}&file=${encodeURIComponent(p.file)}`);
-      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
-      await pipeline(Readable.fromWeb(r.body as any), fs.createWriteStream(part));
-      const got = hashFile(part);
-      if (got !== p.sha256) throw new Error('hash mismatch after transfer');
-      fs.renameSync(part, dest);
-      bytes += fs.statSync(dest).size;
-      previewsFetched++;
-      verified.add(p.file);
-    } catch (err: any) {
-      try { fs.rmSync(part, { force: true }); } catch { /* best effort */ }
-      errors.push(`${p.file}: ${err?.message || err}`);
-    }
+    const result = await fetchAndVerifyFile(w,
+      `/api/training/worker/yue2-ladder-file?datasetId=${encodeURIComponent(ds.id)}&run=${encodeURIComponent(ladder.jobId)}&file=${encodeURIComponent(p.file)}`,
+      dest, p.sha256);
+    if (result.ok) { bytes += result.bytes; previewsFetched++; verified.add(p.file); }
+    else errors.push(`${p.file}: ${result.error}`);
   }
   for (const p of ladder.previews) {
     const prior = priorByFile.get(p.id);
@@ -666,18 +685,10 @@ export async function hydrateYue2LadderCheckpoint(run: Yue2AitkRunRecord, step: 
   for (const f of manifest) {
     const dest = path.join(ckpt.dir, f.name);
     if (fs.existsSync(dest) && hashFile(dest) === f.sha256) continue;
-    const part = `${dest}.part`;
-    try {
-      const r = await workerFetch(w, `/api/training/worker/yue2-ladder-checkpoint-file?datasetId=${encodeURIComponent(run.datasetId)}&run=${encodeURIComponent(run.origin.remoteJobId)}&step=${step}&file=${encodeURIComponent(f.name)}`);
-      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
-      await pipeline(Readable.fromWeb(r.body as any), fs.createWriteStream(part));
-      const got = hashFile(part);
-      if (got !== f.sha256) throw new Error('hash mismatch after transfer');
-      fs.renameSync(part, dest);
-    } catch (err: any) {
-      try { fs.rmSync(part, { force: true }); } catch { /* best effort */ }
-      errors.push(`${f.name}: ${err?.message || err}`);
-    }
+    const result = await fetchAndVerifyFile(w,
+      `/api/training/worker/yue2-ladder-checkpoint-file?datasetId=${encodeURIComponent(run.datasetId)}&run=${encodeURIComponent(run.origin.remoteJobId)}&step=${step}&file=${encodeURIComponent(f.name)}`,
+      dest, f.sha256);
+    if (!result.ok) errors.push(`${f.name}: ${result.error}`);
   }
   const landed = required.every(name => fs.existsSync(path.join(ckpt.dir, name)));
   if (!landed) return { status: 'error', errors: errors.length ? errors : ['the ar/nar checkpoint did not land'] };

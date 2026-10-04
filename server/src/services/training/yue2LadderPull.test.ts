@@ -18,7 +18,18 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
-const sha256Hex = (s: string): string => createHash('sha256').update(s).digest('hex');
+const sha256Hex = (s: string | Buffer): string => createHash('sha256').update(s).digest('hex');
+
+// A large, deterministic buffer — generated identically here (to hash) and
+// inside the eval'd script (to serve), so neither side needs 'crypto' in the
+// eval'd text (see the header comment) and no 55 MB literal has to travel
+// through the generated script string.
+function fillPattern(bytes: number): Buffer {
+  const buf = Buffer.alloc(bytes);
+  for (let i = 0; i < buf.length; i += 4) buf.writeUInt32LE((i >>> 2) % 4294967295, i);
+  return buf;
+}
+const FILL_PATTERN_SOURCE = "function fillPattern(bytes) { const buf = Buffer.alloc(bytes); for (let i = 0; i < buf.length; i += 4) buf.writeUInt32LE((i >>> 2) % 4294967295, i); return buf; }";
 
 const TRAINING_SRC_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 function runInIsolatedRoot(root: string, script: string): void {
@@ -58,6 +69,11 @@ const LADDER_HARNESS = [
   "      const body = state.files[key];",
   "      if (!body) { res.statusCode = 404; res.end('{}'); return; }",
   "      if (body.truncate) { res.setHeader('content-length', String(body.buf.length)); res.write(body.buf.subarray(0, 3)); res.destroy(); return; }",
+  "      state.attempts = state.attempts || {};",
+  "      state.attempts[key] = (state.attempts[key] || 0) + 1;",
+  "      if (body.corruptAttempts && state.attempts[key] <= body.corruptAttempts) {",
+  "        const bad = Buffer.from(body.buf); bad[0] = bad[0] ^ 0xff; res.end(bad); return;",
+  "      }",
   "      res.end(body.buf); return;",
   "    }",
   "    if (req.method === 'DELETE') { state.deleted.push(u.pathname); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: true })); return; }",
@@ -329,6 +345,57 @@ test('a pulled ladder appears on the real Review route, awaiting review', () => 
       "    if (!awaiting) throw new Error('pulled ladder did not land in Review\\'s awaiting list: ' + JSON.stringify(row));",
       "  } finally { await new Promise(resolve => reviewServer.close(resolve)); }",
       "} finally { workerServer.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a large preview that lands corrupt twice in a row is retried and lands correct on the third attempt', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-pull-large-retry-'));
+  try {
+    // 55 MB, well past anything a unit test would normally push through a
+    // pipe — this is the size class (tens-to-hundreds of MB) that actually
+    // failed pulling LivingRoom's real previews over a real network.
+    const hash = sha256Hex(fillPattern(55 * 1024 * 1024));
+    const script = LADDER_HARNESS + [
+      FILL_PATTERN_SOURCE + ';',
+      "const buf = fillPattern(55 * 1024 * 1024);",
+      `const hash = '${hash}';`,
+      "addDataset('album');",
+      "const ladder = { jobId: 'job1', datasetId: 'ds-album', datasetSlug: 'album', status: 'done', createdAt: now, updatedAt: now, options: {}, checkpoints: [{ step: 10, kl: 1.0, rung: true }], previews: [preview('p1', 10, 'p1.wav', buf, hash)] };",
+      "const state = { ladders: [ladder], files: { 'job1/p1.wav': { buf, corruptAttempts: 2 } }, deleted: [] };",
+      "const server = await serve(state);",
+      "try {",
+      "  const pulled = await pullYue2Ladders({ name: 'W', url: 'http://127.0.0.1:' + server.address().port });",
+      "  if (pulled[0].status !== 'pulled' || pulled[0].previewsFetched !== 1) throw new Error('expected the retry to recover: ' + JSON.stringify(pulled));",
+      "  const run = listYue2AitkRuns('ds-album', 'album')[0];",
+      "  const landed = fs.readFileSync(path.join(run.output, 'previews', 'p1.wav'));",
+      "  if (!landed.equals(buf)) throw new Error('landed bytes do not match the source after retry');",
+      "  if (state.attempts['job1/p1.wav'] !== 3) throw new Error('expected exactly 3 attempts (2 corrupt + 1 good), got ' + state.attempts['job1/p1.wav']);",
+      "} finally { server.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a preview that lands corrupt on every attempt exhausts its retries and is never linked or deleted', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-pull-exhausted-retries-'));
+  try {
+    const hash = sha256Hex('WAV-BYTES-1');
+    const script = LADDER_HARNESS + [
+      "addDataset('album');",
+      "const buf = Buffer.from('WAV-BYTES-1');",
+      `const ladder = { jobId: 'job1', datasetId: 'ds-album', datasetSlug: 'album', status: 'done', createdAt: now, updatedAt: now, options: {}, checkpoints: [{ step: 10, kl: 1.0, rung: true }], previews: [preview('p1', 10, 'p1.wav', buf, '${hash}')] };`,
+      "const state = { ladders: [ladder], files: { 'job1/p1.wav': { buf, corruptAttempts: 99 } }, deleted: [] };",
+      "const server = await serve(state);",
+      "try {",
+      "  const pulled = await pullYue2Ladders({ name: 'W', url: 'http://127.0.0.1:' + server.address().port });",
+      "  if (pulled[0].status !== 'partial' || !pulled[0].errors.length) throw new Error('expected a partial result with errors: ' + JSON.stringify(pulled));",
+      "  if (state.attempts['job1/p1.wav'] !== 3) throw new Error('expected all 3 attempts to be used, got ' + state.attempts['job1/p1.wav']);",
+      "  if (state.deleted.length) throw new Error('no delete when every retry fails');",
+      "  const run = listYue2AitkRuns('ds-album', 'album')[0];",
+      "  if (run.checkpoints[0].arPath) throw new Error('nothing should have linked');",
+      "} finally { server.close(); }",
     ].join('');
     runInIsolatedRoot(root, script);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
