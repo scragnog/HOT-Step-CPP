@@ -96,7 +96,7 @@ ONNX export tooling: `tools/onnx-export/` — `export_dit.py`, `export_fp8_dit.p
 - Dedicated CUDA streams (DiT `dit-trt.h:562`; LM has its own stream too).
 - C++ wall-clock timing markers + flush (ground truth vs Node table skew).
 - Raw TRT LM end-to-end (works; slower than GGUF at last measurement).
-- ORT+TRT-EP VAE / PP-VAE / text-enc / cond-enc; ONNX auto-discovery (`--onnx-dir`, sibling-file detection).
+- ORT+TRT-EP VAE / PP-VAE / text-enc / cond-enc, and ONNX auto-discovery via a directory argument — all retired: the engine no longer links ONNX Runtime, the launch flag that pointed at it is gone, and the registry scan of the `onnx/` subdirectory plus sibling-file detection is what remains.
 - Streaming ring buffer (previews disabled); per-arch engine caching; build heartbeat.
 - Server timing table incl. TRT-specific stages (`generate.ts:1257`).
 - CFG cutoff, LM CFG cutoff, step cache; co-resident `EVICT_NEVER`.
@@ -115,7 +115,7 @@ ONNX export tooling: `tools/onnx-export/` — `export_dit.py`, `export_fp8_dit.p
 **REVERTED / DEAD / superseded:**
 - TRT-LLM Executor on native Windows (CMake-disabled 2026-06-02; code kept).
 - "Skip constant re-uploads" in the GGML sampler — a local plan doc marks it implemented, but `hot-step-sampler.h:593` re-uploads every step: "Confirmed: skipping these produces blank output" (scheduler aliases input buffers as scratch). Code wins.
-- "Approach B (ORT+TRT EP) for the DiT" from the 2026-05-30 design — shipped DiT uses Approach A (native TRT) because LoRA refit requires `IRefitter`. ORT+TRT-EP kept only for refit-free models. The design's `--onnx-dir` + `use_ort_vae` did land as designed.
+- "Approach B (ORT+TRT EP) for the DiT" from the 2026-05-30 design — shipped DiT uses Approach A (native TRT) because LoRA refit requires `IRefitter`. ORT+TRT-EP kept only for refit-free models. The design's ONNX directory flag and `use_ort_vae` landed as designed, then went with the ONNX VAE decoder: neither is in the engine now.
 
 ## 10. Open questions / not verified
 

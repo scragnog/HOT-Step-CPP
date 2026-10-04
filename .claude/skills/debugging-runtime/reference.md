@@ -120,10 +120,10 @@ loading_vae, vae_decode, encoding_output, done, failed, cancelled
 ```
 ace-server.exe --models <dir> --host 127.0.0.1 --port 8085
                [--adapters <dir>] [--keep-loaded] [--noise-profile <wav>]
-               [--draft-lm <path>] [--vae-chunk N] [--vae-overlap N] [--onnx-dir <dir>]
+               [--draft-lm <path>] [--vae-chunk N] [--vae-overlap N]
 ```
 
-Exe candidates in order (config.ts:46-52): `engine/ace-server.exe` (portable), `engine/build/Release/ace-server.exe` (VS), `engine/build/ace-server.exe` (Ninja), `engine/build/Debug/ace-server.exe`. Env overrides in `.env`: `ACESTEPCPP_EXE`, `ACESTEPCPP_MODELS`, `ACESTEPCPP_PORT`, `ACESTEPCPP_HOST`, `ACESTEPCPP_ADAPTERS`, `ACESTEPCPP_KEEP_LOADED`, `ACESTEPCPP_DRAFT_LM`, `ACESTEPCPP_VAE_CHUNK`, `ACESTEPCPP_VAE_OVERLAP`, `ACESTEPCPP_ONNX_DIR`, `CUDA_VISIBLE_DEVICES`.
+Exe candidates in order (config.ts:46-52): `engine/ace-server.exe` (portable), `engine/build/Release/ace-server.exe` (VS), `engine/build/ace-server.exe` (Ninja), `engine/build/Debug/ace-server.exe`. Env overrides in `.env`: `ACESTEPCPP_EXE`, `ACESTEPCPP_MODELS`, `ACESTEPCPP_PORT`, `ACESTEPCPP_HOST`, `ACESTEPCPP_ADAPTERS`, `ACESTEPCPP_KEEP_LOADED`, `ACESTEPCPP_DRAFT_LM`, `ACESTEPCPP_VAE_CHUNK`, `ACESTEPCPP_VAE_OVERLAP`, `CUDA_VISIBLE_DEVICES`.
 
 ## Windows exit codes seen in `Process exited with code N`
 

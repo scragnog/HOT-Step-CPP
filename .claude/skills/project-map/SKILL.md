@@ -43,7 +43,7 @@ Dev mode adds Vite on :3000 (HMR); vite.config.ts proxies /api, /audio, /referen
 tsx watch auto-restarts the Node server on server-code changes.
 ```
 
-- Engine spawn args built in `index.ts:166-213`: `--models --host --port`, plus conditional `--adapters`, `--keep-loaded`, `--noise-profile`, `--draft-lm` (deliberately disabled by default — `config.ts:117-122`), `--vae-chunk`, `--vae-overlap`, `--onnx-dir`.
+- Engine spawn args built in `index.ts:166-213`: `--models --host --port`, plus conditional `--adapters`, `--keep-loaded`, `--noise-profile`, `--draft-lm` (deliberately disabled by default — `config.ts:117-122`), `--vae-chunk`, `--vae-overlap`.
 - Crash respawn limiter (`index.ts:284-308`): abnormal exit → restart after 3 s; ≥3 crashes in 30 s → give up, engine marked not-ready ("check logs for missing DLLs").
 - Portable-mode first launch downloads cuBLAS/cudart DLLs from HuggingFace before starting the engine (`index.ts:318` onward).
 - Config comes from `.env` at repo root, auto-bootstrapped from `.env.example` (`config.ts:20-30`). Settings UI can only edit whitelisted `EXPOSED_ENV_KEYS` (`config.ts:265-286`); keys in `RESTART_REQUIRED_KEYS` (`config.ts:289-294`) never hot-apply; the rest hot-reload via `reloadEnvConfig()` (`config.ts:300`).

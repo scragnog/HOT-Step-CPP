@@ -54,7 +54,7 @@ Triggers:
 
 - **DiT:** selected DiT model path ends in (or its directory contains) `.onnx` → `dit_ends_with_onnx` gate at `engine/src/pipeline-synth-ops.cpp:1225` → `dit-trt.h`. Engine file = same name with `.engine`; **built on first use if missing (5–30 min), else loaded from cache**.
 - **LM:** if `<model_path>/lm_full.onnx` exists → raw TRT LM (`lm-trt.h`), engine `lm_full.engine` built if missing (`engine/src/pipeline-lm.cpp:1159`). A TRT-LLM engine dir (`trtllm-engine-*`) is checked first but TRT-LLM is compile-time **disabled** (see ledger).
-- **VAE decode:** request flag `use_ort_vae` (`engine/src/request.h:169`) AND server started with `--onnx-dir` containing `vae/vae_decoder.onnx` (`engine/tools/hot-step-server.cpp:2568-2587`). UI plumbing: `useOrtVae` → `server/src/services/generation/translateParams.ts:186`.
+- **VAE decode:** GGML only. The ONNX Runtime VAE decoder and the `use_ort_vae` request flag are gone; the registry takes the first non-ONNX VAE (`registry_find_non_onnx`, `engine/tools/hot-step-server.cpp:1311`). There is no `useOrtVae` in `translateParams.ts` any more.
 - **Text/cond encoders + PP-VAE:** auto-discovered ONNX files alongside the DiT / in `models/onnx/pp-vae/` — no user action.
 - **Streaming** (`stream_mode` request): requires an ONNX DiT (`pipeline-synth-ops.cpp:2098`); ring-buffer batched generation, previews currently hard-disabled (`:2251` sets `preview_interval = 0` — partially-denoised latents through the VAE = scrambled audio).
 
@@ -90,7 +90,6 @@ There is **no dedicated bench tool** — instrumentation is log-based. Logs land
 | **Step Cache** (`cache_ratio`, default 0.0, UI max 0.7) | `hot-step-params.h:176`; GGML `hot-step-sampler.h`; TRT `hot-step-sampler-trt.h:484` | Skips middle-step forward passes, reusing last velocity; first/last steps protected. Try 0.3–0.5. Stacks with CFG cutoff. |
 | **Steps / model tier** | `num_steps`; turbo (8) vs base/SFT (50) | Linear cost. Biggest single lever. |
 | **Quantization** | GGUF variants in `models\` (Q4_K_M → Q8_0 → BF16, plus NVFP4/MXFP4) | VRAM vs dequant overhead vs quality. |
-| **ORT VAE** (`use_ort_vae` + server `--onnx-dir`) | see triggers above | TRT VAE decode ~0.8s vs 1.3s GGML; quality nominally identical. |
 | **Co-resident models** (`coResident` → engine `EVICT_NEVER`) | `generate.ts:302/584`; `pipeline-synth-ops.cpp:1390` | Keeps DiT (including multi-GB TRT engine) + VAE in VRAM between jobs — saves ~7.5s reload per back-to-back run, costs GBs of VRAM. Default `EVICT_STRICT` frees after every generation. |
 | **Batched CFG** (`use_batch_cfg`) | request | One 2N-batch forward vs two N passes; faster but doubles activation VRAM. |
 | **Flash attention** (`use_fa`) | request | GGML paths. |
@@ -118,7 +117,7 @@ There is **no dedicated bench tool** — instrumentation is log-based. Logs land
 | `engine/src/pipeline-synth-ops.cpp` | Backend dispatch: TRT-vs-GGML gate `:1225`, eviction policy `:1390`, ORT VAE gate `:1589`, streaming `:2095` |
 | `engine/src/pipeline-lm.cpp` | LM backend dispatch (TRT-LLM → raw TRT → GGML probe order `:1110-1193`), speculative decoding `:790` |
 | `engine/src/hot-step-params.h` | `cfg_cutoff_ratio:170`, `cache_ratio:176` |
-| `engine/tools/hot-step-server.cpp` | `--onnx-dir` parsing + VAE/PP-VAE ONNX discovery (`:2568`, `:2947`) |
+| `engine/tools/hot-step-server.cpp` | CLI parsing; registry scan (including the `onnx/` subdirectory) and PP-VAE auto-detect |
 | `engine/CMakeLists.txt` | `HOT_STEP_TRT` define `:302`; TRT-LLM disable block `:342-371` |
 | `server/src/routes/generate.ts` | Timing table `:1257`, stream markers `:787-798`, coResident `:302` |
 | `server/src/services/generation/translateParams.ts` | UI param → engine request mapping (`useOrtVae:186`) |

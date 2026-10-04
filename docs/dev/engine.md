@@ -54,8 +54,7 @@ not compiled. The shipped `ace-server` is built from `hot-step-server.cpp`.
 
 The Node server starts `ace-server` with `--models`, `--host` and `--port`, and adds
 `--adapters`, `--keep-loaded` and `--noise-profile` when they are configured
-(`server/src/services/aceEngineProcess.ts`). `--onnx-dir` is still accepted for older
-launchers and ignored. The app's default port is
+(`server/src/services/aceEngineProcess.ts`). The app's default port is
 8085; the binary's own default is 8080.
 
 ## How ace-server is organised

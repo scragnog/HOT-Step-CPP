@@ -257,9 +257,6 @@ static bool g_keep_loaded_cli = false;
 // speculative decoding: path to 0.6B draft model (auto-discovered or --draft-lm)
 static std::string g_draft_lm_path;
 
-// --onnx-dir: accepted and ignored (the ONNX VAE decoder it selected is gone).
-static const char * g_onnx_dir = nullptr;
-
 // HOT-Step: pre-computed noise profile for spectral denoiser.
 // Loaded once at startup from a reference noise sample WAV.
 static NoiseProfile g_noise_profile;
@@ -3180,9 +3177,6 @@ int main(int argc, char ** argv) {
         } else if (!strcmp(argv[i], "--no-draft")) {
             g_draft_lm_path = "none";
 
-        } else if (!strcmp(argv[i], "--onnx-dir") && i + 1 < argc) {
-            g_onnx_dir = argv[++i];
-
         } else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             usage(argv[0]);
             return 0;
@@ -3271,12 +3265,6 @@ int main(int argc, char ** argv) {
         } else {
             fprintf(stderr, "[Server] WARNING: could not read noise profile WAV: %s\n", noise_profile_path);
         }
-    }
-
-    // ONNX VAE auto-detect is retired: the engine never picks ONNX Runtime on
-    // its own. --onnx-dir is still accepted so older launchers keep working.
-    if (g_onnx_dir) {
-        fprintf(stderr, "[Server] --onnx-dir ignored: the ONNX VAE decoder is no longer auto-selected\n");
     }
 
     // validate pipeline

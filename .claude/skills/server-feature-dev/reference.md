@@ -46,7 +46,7 @@ Adding a field: extend the interface here, then map it in `services/generation/t
 
 ## 2. Engine child-process lifecycle (`server/src/index.ts:146-316`)
 
-- Spawn args built at index.ts:166-213: `--models`, `--host`, `--port` always; `--adapters` if the dir exists; `--keep-loaded` if `config.aceServer.keepLoaded`; `--noise-profile`, `--draft-lm`, `--vae-chunk`, `--vae-overlap`, `--onnx-dir` conditionally.
+- Spawn args built at index.ts:166-213: `--models`, `--host`, `--port` always; `--adapters` if the dir exists; `--keep-loaded` if `config.aceServer.keepLoaded`; `--noise-profile`, `--draft-lm`, `--vae-chunk`, `--vae-overlap` conditionally.
 - Custom env only when TensorRT libs or `CUDA_VISIBLE_DEVICES` are configured (index.ts:228-258). The Windows `Path`-key gotcha and its fix live at :221-244.
 - stdout/stderr piped to console (with GGML noise filtered: `CUDA graph warmup`, `CUDA Graph id`, `ggml_backend_cuda_graph_compute` — since 2026-07-17 these are also dropped at the engine source by `acestep_ggml_log` in engine/src/backend.h, which discards GGML DEBUG-level lines unless `HOTSTEP_GGML_DEBUG=1`; the Node filter is belt-and-braces), plus `logEngine()` → `ace_engine.log` and `pushLog(line, 'engine')` → UI SSE stream (index.ts:262-282).
 - Crash respawn: non-clean exit → restart after 3 s, capped at 3 crashes per 30 s window; on cap, `setEngineReady(false, '...')` and give up (index.ts:284-309). Note `setEngineReady(ready, status)` takes **two** args (engineState.ts:13-16).
