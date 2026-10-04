@@ -26,6 +26,16 @@ const input = 'px-2 py-1.5 rounded-lg text-xs bg-white/70 dark:bg-black/20 borde
 // rungOverall lives with the ladder component now; re-exported for callers.
 export { rungOverall } from './Yue2LadderReview';
 
+/** The ladder's previews-reload effect dependencies: must carry
+ *  `indexedLocally`, not just the run and job, so a ladder handed off from
+ *  Review — its id selected before the local run list lands — retries once
+ *  ownership resolves, instead of reading the worker once with this
+ *  machine's own namespaced run id (meaningless there) and never again.
+ *  Exported so this contract is directly testable without React. */
+export function previewsEffectDeps(datasetId: string | null | undefined, ladderRun: string, jobStatus: string | undefined, indexedLocally: boolean): readonly unknown[] {
+  return [datasetId, ladderRun, jobStatus, indexedLocally];
+}
+
 export const RefinePanel: React.FC = () => {
   const { t } = useTranslation();
   const detail = useTrainingStore(s => s.detail);
@@ -79,6 +89,7 @@ export const RefinePanel: React.FC = () => {
   // listYue2AitkRuns), not "still on a worker" — every run already present
   // in `runs` reads previews locally regardless of that flag. The worker
   // reader is only for a job that hasn't landed in `runs` at all yet.
+  const indexedLocally = runs.some(r => r.jobId === ladderRun);
   const readPreviews = (ds: string, run: string) => yue2JointPreviewsReader(runs.some(r => r.jobId === run))(ds, run);
   const refreshRuns = async () => {
     if (!datasetId) return;
@@ -119,11 +130,20 @@ export const RefinePanel: React.FC = () => {
       if (datasetId && ladderRun) void readPreviews(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => {});
     }, 5000);
     return () => window.clearInterval(id);
-  }, [job?.id, job?.status, datasetId, ladderRun]);
+  }, [job?.id, job?.status, datasetId, ladderRun, indexedLocally]);
   useEffect(() => {
     if (!datasetId || !ladderRun) { setPreviews([]); return; }
-    void readPreviews(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => setPreviews([]));
-  }, [datasetId, ladderRun, job?.status]);
+    // `runs` (and so `indexedLocally`) starts empty and lands asynchronously
+    // after this mounts — a ladder handed off from Review already has its
+    // id selected before that arrives. Without `indexedLocally` in the deps,
+    // the first run reads via the worker with this machine's own namespaced
+    // id (meaningless to the worker) and never retries once the real local
+    // record shows up. `cancelled` drops that first, now-stale response if
+    // it resolves after the retriggered one.
+    let cancelled = false;
+    void readPreviews(datasetId, ladderRun).then(r => { if (!cancelled) setPreviews(r.previews); }).catch(() => { if (!cancelled) setPreviews([]); });
+    return () => { cancelled = true; };
+  }, previewsEffectDeps(datasetId, ladderRun, job?.status, indexedLocally));
 
   const finished = useMemo(() => runs.filter(r => !r.live && !r.resumeError && r.checkpoints.some(c => !!c.optimizerPath)), [runs]);
   const lastOf = (r: Yue2AitkRunRecord) => r.checkpoints.filter(c => !!c.optimizerPath).sort((a, b) => b.step - a.step)[0];
