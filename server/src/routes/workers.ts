@@ -14,8 +14,8 @@ import { APP_VERSION, config } from '../config.js';
 import { aceClient } from '../services/aceClient.js';
 import { activeTraining, dirtyCheckout, getUpdate, cancelUpdate, receiveUpdate, startUpdate, startupCommit } from '../services/training/workerUpdate.js';
 import {
-  getDispatch, getWorker, listWorkers, proxyToWorker, pullLinked, receiveDatasetFile, startDispatch,
-  upsertPushedDataset, workerAdapterFile, workerDatasetFiles, workerLinkedPairs, workerStatus,
+  deleteWorkerYue2Ladder, getDispatch, getWorker, listWorkers, proxyToWorker, pullLinked, pullYue2Ladders, receiveDatasetFile, startDispatch,
+  upsertPushedDataset, workerAdapterFile, workerDatasetFiles, workerLinkedPairs, workerStatus, workerYue2LadderFile, workerYue2Ladders,
 } from '../services/training/trainingWorkers.js';
 
 const fail = (res: Response, err: any) => res.status(err?.status ?? 500).json({ error: err?.message || String(err) });
@@ -88,6 +88,27 @@ workerRouter.get('/adapter-file', (req: Request, res: Response) => {
   try { res.sendFile(workerAdapterFile(String(req.query.rel ?? ''))); } catch (err) { fail(res, err); }
 });
 
+/** GET /api/training/worker/yue2-ladders — every rung-bearing run this
+ *  worker knows of, with a checksum per rendered preview. */
+workerRouter.get('/yue2-ladders', (_req: Request, res: Response) => {
+  try { res.json({ ladders: workerYue2Ladders() }); } catch (err) { fail(res, err); }
+});
+
+/** GET /api/training/worker/yue2-ladder-file?datasetId=&run=&file= — one
+ *  rung's preview audio, validated the same way local playback resolves it. */
+workerRouter.get('/yue2-ladder-file', (req: Request, res: Response) => {
+  try { res.sendFile(workerYue2LadderFile(String(req.query.datasetId ?? ''), String(req.query.run ?? ''), String(req.query.file ?? ''))); }
+  catch (err) { fail(res, err); }
+});
+
+/** DELETE /api/training/worker/yue2-ladders/:jobId?datasetId= — the
+ *  controller calls this once it has verified and indexed the ladder; drops
+ *  this worker's previews and run.json, never its checkpoint directories. */
+workerRouter.delete('/yue2-ladders/:jobId', (req: Request, res: Response) => {
+  try { deleteWorkerYue2Ladder(String(req.query.datasetId ?? ''), req.params.jobId as string); res.json({ ok: true }); }
+  catch (err) { fail(res, err); }
+});
+
 // ── Controller side ─────────────────────────────────────────────────────────
 
 const router = Router();
@@ -130,6 +151,14 @@ router.post('/:name/pull', async (req: Request, res: Response) => {
   const w = getWorker(req.params.name as string);
   if (!w) { res.status(404).json({ error: 'No such worker' }); return; }
   try { res.json({ pulled: await pullLinked(w) }); } catch (err) { fail(res, err); }
+});
+
+/** POST /api/workers/:name/pull-ladders — pull every rung-bearing ladder
+ *  (finished or still rendering) into this machine's own index. */
+router.post('/:name/pull-ladders', async (req: Request, res: Response) => {
+  const w = getWorker(req.params.name as string);
+  if (!w) { res.status(404).json({ error: 'No such worker' }); return; }
+  try { res.json({ pulled: await pullYue2Ladders(w) }); } catch (err) { fail(res, err); }
 });
 
 router.use('/:name/api', (req: Request, res: Response) => { void proxyToWorker(req, res); });

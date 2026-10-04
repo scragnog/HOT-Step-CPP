@@ -4136,15 +4136,21 @@ router.get('/yue2-review', (_req: Request, res: Response) => {
     for (const ds of repo.listDatasets()) {
       const active = queue.activeJobForDataset(ds.id);
       for (const run of listYue2AitkRuns(ds.id, ds.slug)) {
-        const rungs = run.checkpoints.filter(c => c.rung && c.arPath && c.narPath);
+        // A remote-only rung (pulled from a worker, no local weights yet) is
+        // still a usable rung here — listening and scoring need its
+        // previews and meters, not the weight file.
+        const rungs = run.checkpoints.filter(c => c.rung && ((c.arPath && c.narPath) || c.availability === 'remote'));
         if (!rungs.length) continue;
         const previews = listYue2JointPreviews(run.output).filter(p => p.status === 'done' && rungs.some(r => r.step === p.step));
         const scored = new Set(listYue2RungScores(ds.id, run.jobId).filter(s => s.likeness !== null || s.corruption !== null || s.notes).map(s => s.step));
         const kls = rungs.map(r => r.kl).filter((k): k is number => typeof k === 'number');
         let best: ReturnType<typeof bestScoredRung> = null;
         try { best = bestScoredRung(ds.id, run.jobId, ds.slug); } catch { /* stays null */ }
+        // A pulled run's own queue lives on its worker, not this machine's
+        // `active` job — "still refining" tracks the worker's own status.
+        const live = active?.id === run.jobId || (run.status === 'running' && !!run.origin);
         rows.push({ datasetId: ds.id, datasetSlug: ds.slug, datasetName: ds.name, refineRun: run.jobId, status: run.status, createdAt: run.createdAt,
-          live: active?.id === run.jobId, rungs: rungs.length, previews: previews.length, scored: scored.size,
+          live, rungs: rungs.length, previews: previews.length, scored: scored.size,
           unscored: rungs.filter(r => !scored.has(r.step)).length, reviewed: yue2ReviewComplete(run.output), best: best ? { step: best.step, overall: best.overall, blindLabel: run.blindLabels?.[best.step] ?? '' } : null,
           decoderOnly: (run.options as Record<string, unknown>)?.freezePlannerNow === true, klMin: kls.length ? Math.min(...kls) : null, klMax: kls.length ? Math.max(...kls) : null,
           baseMatched: (run.options as Record<string, unknown>)?.method === 'base-matched', finished: yue2RunFinished(run.output) });

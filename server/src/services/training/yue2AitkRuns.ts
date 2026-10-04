@@ -44,6 +44,16 @@ export interface Yue2AitkCheckpointRecord {
   optimizerPath?: string;
   arPath?: string;
   narPath?: string;
+  /** Which `segments/segment-NNNNNN` folder this checkpoint lives under, for
+   *  a parallel/sharded run. Absent for a checkpoint directly under `output`. */
+  segment?: string;
+  /** 'remote': this step's meters came from a training worker's ladder pull
+   *  (yue2LadderPull.ts) and no weight file is on this disk yet — it can be
+   *  listed, previewed and scored, but not linked or used for NAR follow-up
+   *  until its checkpoint is fetched (hydrateYue2LadderCheckpoint). Absent
+   *  (the default) means a real local checkpoint: `checkpointRecords` found
+   *  it on disk. */
+  availability?: 'remote';
 }
 
 export interface Yue2AitkRunRecord {
@@ -63,6 +73,11 @@ export interface Yue2AitkRunRecord {
   checkpoints: Yue2AitkCheckpointRecord[];
   /** Stable, server-assigned labels keyed by canonical checkpoint step. */
   blindLabels?: Record<string, string>;
+  /** Set once by a ladder pull: this run was trained on `worker`, not here.
+   *  `remoteJobId` is the worker's own jobId for the same run, needed to ask
+   *  it for anything not yet local (a chosen rung's weights, in a later
+   *  slice). Never set for a run trained on this machine. */
+  origin?: { worker: string; remoteJobId: string };
 }
 
 function readIndex(): Yue2AitkRunRecord[] {
@@ -108,14 +123,31 @@ function isRunRecord(value: unknown): value is Yue2AitkRunRecord {
     && Number.isFinite(r.createdAt) && Number.isFinite(r.updatedAt)
     && (r.blindLabels === undefined || (r.blindLabels !== null && typeof r.blindLabels === 'object'
       && Object.entries(r.blindLabels).every(([step, label]) => /^\d+$/.test(step) && typeof label === 'string' && /^[A-Z]+$/.test(label))))
+    && (r.origin === undefined || (!!r.origin && typeof r.origin === 'object'
+      && typeof r.origin.worker === 'string' && r.origin.worker.length <= 128
+      && typeof r.origin.remoteJobId === 'string' && r.origin.remoteJobId.length <= 128))
     && Array.isArray(r.checkpoints) && r.checkpoints.length <= 1024
     && r.checkpoints.every(c => !!c && Number.isInteger(c.step) && c.step >= 0
       && typeof c.dir === 'string' && c.dir.length <= 32768
       && (c.loss === undefined || (typeof c.loss === 'number' && Number.isFinite(c.loss)))
+      && (c.segment === undefined || (typeof c.segment === 'string' && c.segment.length <= 64))
+      && (c.availability === undefined || c.availability === 'remote')
       && ['adapterPath', 'optimizerPath', 'arPath', 'narPath'].every(k => {
         const v = c[k as keyof Yue2AitkCheckpointRecord];
         return v === undefined || (typeof v === 'string' && v.length <= 32768);
       }));
+}
+
+/** A checkpoint step known only from a worker's ladder pull (no local weight
+ *  file) is kept alongside whatever `checkpointRecords` actually finds on
+ *  this disk, never in place of it — a step this machine has for real (local
+ *  training, or a later-slice hydration) always wins over its remote-only
+ *  shadow. */
+function mergeCheckpoints(local: Yue2AitkCheckpointRecord[], incoming: Yue2AitkCheckpointRecord[]): Yue2AitkCheckpointRecord[] {
+  if (!incoming.length) return local;
+  const localSteps = new Set(local.map(c => c.step));
+  const remoteOnly = incoming.filter(c => c.availability === 'remote' && !localSteps.has(c.step));
+  return [...local, ...remoteOnly].sort((a, b) => b.step - a.step);
 }
 
 function writeIndex(records: Yue2AitkRunRecord[], changedRecords: Yue2AitkRunRecord[]): void {
@@ -202,9 +234,12 @@ export function recordYue2AitkRun(record: Yue2AitkRunRecord): void {
   try {
     const index = readIndex();
     const prior = index.find(r => r.jobId === record.jobId);
+    // A repull must never let the worker's facts overwrite labels this
+    // machine already assigned (or inherited on first pull) — prior wins
+    // whenever it has any, remote/incoming only seeds a brand new record.
     const updated = { ...record,
-      blindLabels: record.blindLabels ?? prior?.blindLabels,
-      checkpoints: checkpointRecords(record.output) };
+      blindLabels: prior?.blindLabels ?? record.blindLabels,
+      checkpoints: mergeCheckpoints(checkpointRecords(record.output), record.checkpoints) };
     writeIndex([...index.filter(r => r.jobId !== record.jobId), updated], [updated]);
   } catch { /* a catalogue failure must never change the training result */ }
 }
@@ -373,7 +408,9 @@ function reconcileFromDisk(force = false): void {
 export function reconcileYue2AitkRunsAtStartup(): number {
   try {
     const index = readIndex();
-    const stale = index.filter(r => r.status === 'running');
+    // A pulled ladder's `running` means "still training on its worker", not
+    // on this process — this machine restarting says nothing about that.
+    const stale = index.filter(r => r.status === 'running' && !r.origin);
     if (stale.length) {
       const updated = index.map(r => r.status === 'running' ? { ...r, status: 'interrupted' as const, updatedAt: Date.now() } : r);
       writeIndex(updated, updated.filter(r => r.status === 'interrupted' && stale.some(s => s.jobId === r.jobId)));
@@ -437,7 +474,7 @@ export function listYue2AitkRuns(datasetId: string, datasetSlug?: string): Yue2A
   const changed: Yue2AitkRunRecord[] = [];
   const runs = index.filter(r => r.datasetId === datasetId || (!!datasetSlug && r.datasetSlug === datasetSlug))
     .map(r => {
-      const checkpoints = rungsOf(r, checkpointRecords(r.output));
+      const checkpoints = rungsOf(r, mergeCheckpoints(checkpointRecords(r.output), r.checkpoints));
       if (assignBlindLabels(r, checkpoints)) changed.push(r);
       return { ...r, checkpoints };
     })
@@ -498,7 +535,7 @@ function rungsOf(run: Yue2AitkRunRecord, checkpoints: Yue2AitkCheckpointRecord[]
 export function listAllYue2AitkRuns(): Yue2AitkRunRecord[] {
   reconcileFromDisk();
   return readIndex()
-    .map(r => ({ ...r, checkpoints: checkpointRecords(r.output) }))
+    .map(r => ({ ...r, checkpoints: mergeCheckpoints(checkpointRecords(r.output), r.checkpoints) }))
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 

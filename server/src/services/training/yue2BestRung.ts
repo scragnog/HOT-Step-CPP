@@ -24,7 +24,9 @@ export function bestScoredRung(datasetId: string, runId: string, datasetSlug?: s
   const scores = new Map(listYue2RungScores(datasetId, runId).map(s => [s.step, s]));
   const previews = listYue2JointPreviews(run.output).filter(p => p.status === 'done');
   let best: { step: number; dir: string; overall: number } | null = null;
-  for (const c of run.checkpoints.filter(c => c.arPath && c.narPath).sort((a, b) => a.step - b.step)) {
+  // A remote-only rung (pulled from a worker, no local weights yet) is still
+  // scoreable from its previews — exclude only a step with neither.
+  for (const c of run.checkpoints.filter(c => (c.arPath && c.narPath) || c.availability === 'remote').sort((a, b) => a.step - b.step)) {
     const takes = previews.filter(p => p.step === c.step);
     const replans = takes.reduce((sum, p) => sum + (p.plan ? p.plan.attempts.length - 1 : 0)
       + (typeof p.composerReplans === 'number' ? p.composerReplans : 0), 0);

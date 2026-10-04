@@ -5,14 +5,20 @@
 // dataset here, pushes its files to the worker under the same dataset id and
 // slug, and queues it on the worker's own YuE2 batch. Every path the pipeline
 // passes to ace-train, the engine and the run catalogue stays local to the
-// machine that trains; nothing is path-mapped. The Training Studio reaches the
-// worker through proxyToWorker, so its batches, ladders, previews and rung
-// scores are the worker's. pullLinked brings each linked AR/NAR pair back and
-// points this machine's Lyric Studio presets at it.
-
+// machine that trains; nothing is path-mapped.
+//
+// The worker only trains. Everything else — review, previews, blind labels,
+// scoring — runs on this machine against this machine's own index
+// (ui/src/services/trainingApi.ts's LOCAL_BASE), so a ladder still training
+// or awaiting review on a worker is pulled here first: pullYue2Ladders copies
+// its run facts and rendered previews (never the weight files) into a
+// worker-namespaced local run, tagged `origin`, so Review/RefinePanel/
+// Yue2AitkTrainCard see it the same as a run trained here (yue2AitkRuns.ts's
+// `availability: 'remote'`). pullLinked brings back only the one checkpoint a
+// ladder finish already chose and linked on the worker.
 import fs from 'fs';
 import path from 'path';
-import { timingSafeEqual } from 'crypto';
+import { timingSafeEqual, createHash } from 'crypto';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import type { NextFunction, Request, Response } from 'express';
@@ -26,8 +32,8 @@ import { latestGenerationLyrics, PUSHED_PREVIEW_LYRICS } from './yue2JointTrainR
 import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
 import type { TrainingDatasetRow } from './types.js';
 import { getYue2AlbumScore, importYue2RungScores, listYue2RungScores, scoreYue2Album, scoreYue2Rung, type Yue2RungScore } from './yue2RungScores.js';
-import { jointRunForAdapter, listYue2AitkRuns, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
-import type { Yue2JointPreviewRecord } from './yue2JointPreview.js';
+import { jointRunForAdapter, listYue2AitkRuns, recordYue2AitkRun, type Yue2AitkCheckpointRecord, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
+import { listYue2JointPreviews, recordYue2JointPreview, resolveYue2JointPreview, type Yue2JointPreviewRecord } from './yue2JointPreview.js';
 import { listYue2TrainLogs, noteYue2TrainLog, trainLogArchiveDir } from './datasetProfile.js';
 import { classifyCommit, currentCommit } from './workerUpdate.js';
 
@@ -178,6 +184,74 @@ export function workerAdapterFile(rel: string): string {
   const abs = path.resolve(root, rel);
   if (!isInside(root, abs) || !/\.(safetensors|jsonl)$/i.test(abs)) throw Object.assign(new Error('Refused path'), { status: 400 });
   return abs;
+}
+
+export interface WorkerLadderCheckpoint { step: number; kl?: number; recon?: number; drift?: number; frozen?: boolean; rung?: boolean; segment?: string }
+export interface WorkerLadderPreview extends Yue2JointPreviewRecord { sha256?: string; bytes?: number }
+export interface WorkerLadder {
+  jobId: string; datasetId: string; datasetSlug: string; status: Yue2AitkRunRecord['status'];
+  createdAt: number; updatedAt: number; options: Record<string, unknown>; blindLabels?: Record<string, string>;
+  checkpoints: WorkerLadderCheckpoint[]; previews: WorkerLadderPreview[];
+}
+
+const SEGMENT_RE = /[\\/]segments[\\/](segment-\d{6})[\\/]/;
+
+/** Every rung-bearing ladder this worker knows of, across every dataset,
+ *  with a sha256 of each rendered preview's audio so the controller can
+ *  verify a transfer bit-for-bit before it trusts and keeps it. Checkpoint
+ *  weight paths are never included — a worker only ever hands over metadata
+ *  and previews through this route; `workerAdapterFile`/`/linked` are the
+ *  only routes that serve a safetensors. */
+export function workerYue2Ladders(): WorkerLadder[] {
+  const out: WorkerLadder[] = [];
+  for (const ds of repo.listDatasets()) {
+    for (const run of listYue2AitkRuns(ds.id, ds.slug)) {
+      const rungs = run.checkpoints.filter(c => c.rung);
+      if (!rungs.length) continue;
+      const previews: WorkerLadderPreview[] = listYue2JointPreviews(run.output).map(p => {
+        const file = p.file ? resolveYue2JointPreview(run.output, p.file) : null;
+        if (!file) return { ...p };
+        try {
+          const bytes = fs.readFileSync(file);
+          return { ...p, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length };
+        } catch { return { ...p }; }
+      });
+      out.push({
+        jobId: run.jobId, datasetId: run.datasetId, datasetSlug: run.datasetSlug, status: run.status,
+        createdAt: run.createdAt, updatedAt: run.updatedAt, options: run.options, blindLabels: run.blindLabels,
+        checkpoints: rungs.map(c => ({ step: c.step, kl: c.kl, recon: c.recon, drift: c.drift, frozen: c.frozen, rung: c.rung,
+          segment: SEGMENT_RE.exec(c.dir)?.[1] })),
+        previews,
+      });
+    }
+  }
+  return out;
+}
+
+/** A specific ladder's preview audio, validated the same way the browser's
+ *  own playback route resolves it — never a bare path join. */
+export function workerYue2LadderFile(datasetId: string, jobId: string, file: string): string {
+  const ds = repo.getDataset(datasetId);
+  if (!ds) throw Object.assign(new Error('Dataset not found'), { status: 404 });
+  const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === jobId);
+  if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
+  const resolved = resolveYue2JointPreview(run.output, file);
+  if (!resolved) throw Object.assign(new Error('Preview file not found'), { status: 404 });
+  return resolved;
+}
+
+/** Rob 2026-10-04: once the controller has verified every preview and
+ *  written its own index entry, this worker's previews and run.json are
+ *  deleted — never the checkpoint directories (a later slice still needs
+ *  those to fetch the chosen rung). Refuses while the run is still training. */
+export function deleteWorkerYue2Ladder(datasetId: string, jobId: string): void {
+  const ds = repo.getDataset(datasetId);
+  if (!ds) throw Object.assign(new Error('Dataset not found'), { status: 404 });
+  const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === jobId);
+  if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
+  if (run.status === 'running') throw Object.assign(new Error('Run is still training'), { status: 409 });
+  fs.rmSync(path.join(run.output, 'previews'), { recursive: true, force: true });
+  fs.rmSync(path.join(run.output, 'run.json'), { force: true });
 }
 
 // ── Controller side ─────────────────────────────────────────────────────────
@@ -414,6 +488,110 @@ async function pullLinkedLogs(w: WorkerInfo, slug: string, pair: ReturnType<type
   try { noteYue2TrainLog(slug, pair.jobId, { ...(pair.keptStep !== undefined ? { keptStep: pair.keptStep } : {}), pulledFrom: w.name, pulledAt: Date.now() }); }
   catch (err: any) { console.warn(`[Workers] ${w.name}: could not note the loss log of run ${pair.jobId}: ${err?.message || err}`); }
   return bytes;
+}
+
+export interface Yue2LadderPullResult { worker: string; jobId: string; datasetSlug: string; status: 'pulled' | 'partial' | 'no-dataset' | 'error'; previewsFetched: number; bytes: number; errors: string[] }
+
+/** This worker's own run jobId, prefixed so it can never collide with a
+ *  jobId trained on this machine or pulled from a different worker. */
+function localYue2LadderJobId(workerName: string, remoteJobId: string): string {
+  return `remote:${workerName}:${remoteJobId}`;
+}
+
+/** Where a pulled ladder lives on this machine: a flat child of
+ *  yue2-joint-adapters (so the usual startup scan finds and skips it once
+ *  it's in the index, the same as any other run folder), namespaced by
+ *  worker so two workers' runs can never land on the same path. */
+function localYue2LadderDir(workerName: string, remoteJobId: string): string {
+  return path.join(config.aceServer.adapters, 'yue2-joint-adapters', `remote-${slugify(workerName)}-${slugify(remoteJobId)}`);
+}
+
+/** One ladder: fetch and hash-verify every rendered preview not already here
+ *  (or already pruned here — a pruned preview is never re-fetched), write the
+ *  local previews catalogue and run record, then tell the worker it can drop
+ *  its own previews/run.json. A preview that fails to fetch or verify is
+ *  simply left absent (retried on the next pull); its ladder's worker copies
+ *  are not deleted this round. */
+async function pullOneYue2Ladder(w: WorkerInfo, ds: { id: string; slug: string }, ladder: WorkerLadder): Promise<Yue2LadderPullResult> {
+  const errors: string[] = [];
+  let bytes = 0, previewsFetched = 0;
+  const output = localYue2LadderDir(w.name, ladder.jobId);
+  fs.mkdirSync(path.join(output, 'previews'), { recursive: true });
+  const priorByFile = new Map(listYue2JointPreviews(output).map(p => [p.id, p]));
+  const verified = new Set<string>();
+  for (const p of ladder.previews) {
+    if (p.status !== 'done' || !p.file) continue;
+    const prior = priorByFile.get(p.id);
+    if (prior && prior.status === 'done' && !prior.file) continue; // pruned locally: never resurrected
+    const dest = path.join(output, 'previews', p.file);
+    // Already on this disk from an earlier pull — its hash was checked when
+    // it landed, so a later pull where the worker sent no checksum (or none
+    // changed) must not blank out a preview this machine already has.
+    if (fs.existsSync(dest)) { verified.add(p.file); continue; }
+    if (!p.sha256) { errors.push(`${p.file}: worker sent no checksum`); continue; }
+    const part = `${dest}.part`;
+    try {
+      const r = await workerFetch(w, `/api/training/worker/yue2-ladder-file?datasetId=${encodeURIComponent(ds.id)}&run=${encodeURIComponent(ladder.jobId)}&file=${encodeURIComponent(p.file)}`);
+      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+      await pipeline(Readable.fromWeb(r.body as any), fs.createWriteStream(part));
+      const got = createHash('sha256').update(fs.readFileSync(part)).digest('hex');
+      if (got !== p.sha256) throw new Error('hash mismatch after transfer');
+      fs.renameSync(part, dest);
+      bytes += fs.statSync(dest).size;
+      previewsFetched++;
+      verified.add(p.file);
+    } catch (err: any) {
+      try { fs.rmSync(part, { force: true }); } catch { /* best effort */ }
+      errors.push(`${p.file}: ${err?.message || err}`);
+    }
+  }
+  for (const p of ladder.previews) {
+    const prior = priorByFile.get(p.id);
+    const pruned = !!prior && prior.status === 'done' && !prior.file;
+    const { sha256: _sha, bytes: _bytes, ...rest } = p;
+    const record: Yue2JointPreviewRecord = pruned ? { ...rest, file: undefined }
+      : p.file && !verified.has(p.file) ? { ...rest, status: 'failed', file: undefined, error: 'Not yet pulled from the worker' }
+      : rest;
+    recordYue2JointPreview(output, record);
+  }
+  const checkpoints: Yue2AitkCheckpointRecord[] = ladder.checkpoints.map(c => ({
+    step: c.step, dir: path.join(output, `checkpoint-step${c.step}`), kl: c.kl, recon: c.recon, drift: c.drift, frozen: c.frozen, rung: c.rung,
+    segment: c.segment, availability: 'remote',
+  }));
+  const jobId = localYue2LadderJobId(w.name, ladder.jobId);
+  const updatedAt = Date.now();
+  recordYue2AitkRun({
+    version: 1, jobId, datasetId: ds.id, datasetSlug: ds.slug, method: 'aitk', output, options: ladder.options,
+    status: ladder.status, createdAt: ladder.createdAt, updatedAt, checkpoints, blindLabels: ladder.blindLabels,
+    origin: { worker: w.name, remoteJobId: ladder.jobId },
+  });
+  const landed = listYue2AitkRuns(ds.id, ds.slug).some(r => r.jobId === jobId && r.updatedAt === updatedAt);
+  if (!landed) errors.push('local index write did not land');
+  // Delete the worker's own copies only once everything above is verified on
+  // this disk and the index write landed, and only for a ladder that is not
+  // still training (never touch a run the worker is actively writing to).
+  if (ladder.status !== 'running' && !errors.length) {
+    try { await workerJson(w, `/api/training/worker/yue2-ladders/${encodeURIComponent(ladder.jobId)}?datasetId=${encodeURIComponent(ds.id)}`, { method: 'DELETE' }); }
+    catch (err: any) { errors.push(`worker cleanup: ${err?.message || err}`); }
+  }
+  return { worker: w.name, jobId: ladder.jobId, datasetSlug: ds.slug, status: errors.length ? 'partial' : 'pulled', previewsFetched, bytes, errors };
+}
+
+/** Every rung-bearing ladder on `w`, finished or still rendering, pulled into
+ *  this machine's own index (see pullOneYue2Ladder). A dataset this machine
+ *  does not have is reported and skipped, never guessed at. */
+export async function pullYue2Ladders(w: WorkerInfo): Promise<Yue2LadderPullResult[]> {
+  let ladders: WorkerLadder[];
+  try { ladders = (await workerJson<{ ladders: WorkerLadder[] }>(w, '/api/training/worker/yue2-ladders')).ladders; }
+  catch (err: any) { return [{ worker: w.name, jobId: '', datasetSlug: '', status: 'error', previewsFetched: 0, bytes: 0, errors: [err?.message || String(err)] }]; }
+  const out: Yue2LadderPullResult[] = [];
+  for (const ladder of ladders) {
+    const ds = repo.listDatasets().find(d => d.id === ladder.datasetId || d.slug === ladder.datasetSlug);
+    if (!ds) { out.push({ worker: w.name, jobId: ladder.jobId, datasetSlug: ladder.datasetSlug, status: 'no-dataset', previewsFetched: 0, bytes: 0, errors: [] }); continue; }
+    try { out.push(await pullOneYue2Ladder(w, ds, ladder)); }
+    catch (err: any) { out.push({ worker: w.name, jobId: ladder.jobId, datasetSlug: ds.slug, status: 'error', previewsFetched: 0, bytes: 0, errors: [err?.message || String(err)] }); }
+  }
+  return out;
 }
 
 // Proxy: the Training Studio's /api/training calls, sent to a worker.
