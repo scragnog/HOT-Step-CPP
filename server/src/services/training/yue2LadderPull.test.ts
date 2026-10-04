@@ -103,6 +103,8 @@ test('pulls a preview-only ladder: listable without weights, previews byte-ident
       "  const run = runs[0];",
       "  if (run.jobId !== 'remote:W:job1') throw new Error('unexpected jobId: ' + run.jobId);",
       "  if (run.origin?.worker !== 'W' || run.origin?.remoteJobId !== 'job1') throw new Error('missing origin: ' + JSON.stringify(run.origin));",
+      "  const { runStamp } = await import('./src/services/training/adapterLayout.js'); const { config } = await import('./src/config.js');",
+      "  if (run.output !== path.join(config.aceServer.adapters, 'yue2-joint-adapters', '_remote', 'w', 'album_' + runStamp(new Date(now)))) throw new Error('not in its readable staging folder: ' + run.output);",
       "  if (run.checkpoints.length !== 1 || run.checkpoints[0].availability !== 'remote' || run.checkpoints[0].arPath) throw new Error('unexpected checkpoints: ' + JSON.stringify(run.checkpoints));",
       "  const previews = listYue2JointPreviews(run.output);",
       "  if (previews.length !== 1 || !previews[0].file) throw new Error('preview not recorded: ' + JSON.stringify(previews));",

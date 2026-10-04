@@ -414,6 +414,41 @@ export function refreshYue2PresetsForJointCheckpoint(
   return { linked: true, updated };
 }
 
+/** A joint run folder moved from `oldDir` to `newDir`: repoint every
+ *  yue2-linked.json pair and album preset that named a file inside it.
+ *  Returns an undo that puts every changed record back. On any failure the
+ *  records already changed are restored and the error is rethrown. */
+export function rebaseYue2JointLinks(oldDir: string, newDir: string): () => void {
+  const from = normPath(oldDir);
+  const rebase = (p: string | null | undefined): string | null => {
+    if (!p) return null;
+    const n = normPath(p);
+    return n.startsWith(from + path.sep) ? path.join(newDir, path.resolve(p).slice(from.length + 1)) : null;
+  };
+  const undo: Array<() => void> = [];
+  const undoAll = () => { for (const u of undo.reverse()) { try { u(); } catch (err: any) { console.warn(`[Training] Could not restore a YuE2 link: ${err?.message ?? err}`); } } };
+  try {
+    const before = readYue2Linked();
+    const after = Object.fromEntries(Object.entries(before).map(([slug, pair]) =>
+      [slug, { ...pair, arPath: rebase(pair.arPath) ?? pair.arPath, narPath: rebase(pair.narPath) ?? pair.narPath }]));
+    if (JSON.stringify(after) !== JSON.stringify(before)) {
+      fs.writeFileSync(linkedFile(), JSON.stringify(after, null, 2), 'utf-8');
+      undo.push(() => fs.writeFileSync(linkedFile(), JSON.stringify(before, null, 2), 'utf-8'));
+    }
+    for (const preset of getAllPresets()) {
+      const ar = rebase(preset.yue2_ar_adapter_path), nar = rebase(preset.yue2_nar_adapter_path);
+      if (!ar && !nar) continue;
+      const data = presetDataFromRow(preset);
+      const prior = { ...data };
+      if (ar) data.yue2ArAdapterPath = ar;
+      if (nar) data.yue2NarAdapterPath = nar;
+      upsertPreset(preset.lyrics_set_id, data);
+      undo.push(() => upsertPreset(preset.lyrics_set_id, prior));
+    }
+  } catch (err) { undoAll(); throw err; }
+  return undoAll;
+}
+
 /** The run directory an MM3 adapter reference belongs to: the first segment
  *  of `<run>/ckpt-N/adapter_model.safetensors`, lower-cased, either slash. */
 function mm3RunOf(ref: string): string {

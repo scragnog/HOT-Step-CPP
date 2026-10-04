@@ -32,7 +32,7 @@ import { latestGenerationLyrics, PUSHED_PREVIEW_LYRICS } from './yue2JointTrainR
 import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
 import type { TrainingDatasetRow } from './types.js';
 import { getYue2AlbumScore, importYue2RungScores, listYue2RungScores, scoreYue2Album, scoreYue2Rung, type Yue2RungScore } from './yue2RungScores.js';
-import { jointRunForAdapter, listYue2AitkRuns, recordYue2AitkRun, type Yue2AitkCheckpointRecord, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
+import { freeYue2RunDirectory, jointRunForAdapter, listYue2AitkRuns, recordYue2AitkRun, yue2RemoteRunDirectory, type Yue2AitkCheckpointRecord, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
 import { listYue2JointPreviews, recordYue2JointPreview, resolveYue2JointPreview, type Yue2JointPreviewRecord } from './yue2JointPreview.js';
 import { listYue2TrainLogs, noteYue2TrainLog, trainLogArchiveDir } from './datasetProfile.js';
 import { classifyCommit, currentCommit } from './workerUpdate.js';
@@ -559,12 +559,13 @@ function localYue2LadderJobId(workerName: string, remoteJobId: string): string {
   return `remote:${workerName}:${remoteJobId}`;
 }
 
-/** Where a pulled ladder lives on this machine: a flat child of
- *  yue2-joint-adapters (so the usual startup scan finds and skips it once
- *  it's in the index, the same as any other run folder), namespaced by
- *  worker so two workers' runs can never land on the same path. */
-function localYue2LadderDir(workerName: string, remoteJobId: string): string {
-  return path.join(config.aceServer.adapters, 'yue2-joint-adapters', `remote-${slugify(workerName)}-${slugify(remoteJobId)}`);
+/** Where a pulled ladder lives on this machine: wherever its index record
+ *  already points (it may have been moved to its final name), else a fresh
+ *  readable staging folder, `_remote/<worker>/<trigger>_<worker start time>`. */
+function localYue2LadderDir(w: WorkerInfo, ds: { id: string; slug: string; customTag?: string }, ladder: WorkerLadder): string {
+  const known = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === localYue2LadderJobId(w.name, ladder.jobId));
+  if (known) return known.output;
+  return freeYue2RunDirectory(yue2RemoteRunDirectory(config.aceServer.adapters, ds.customTag || ds.slug, w.name, ladder.createdAt, false));
 }
 
 /** A flat filename only — the same shape `resolveYue2JointPreview` accepts —
@@ -637,13 +638,13 @@ async function fetchAndVerifyFile(w: WorkerInfo, url: string, dest: string, sha2
  *  second concurrent pull of the same worker/run (Review polling it while an
  *  API call is also in flight, say) waits for the first instead of racing it
  *  on the same destination files and metadata (Reviewer, dbe2464d). */
-function pullOneYue2Ladder(w: WorkerInfo, ds: { id: string; slug: string }, ladder: WorkerLadder): Promise<Yue2LadderPullResult> {
+function pullOneYue2Ladder(w: WorkerInfo, ds: { id: string; slug: string; customTag?: string }, ladder: WorkerLadder): Promise<Yue2LadderPullResult> {
   return withRunLock(`pull:${w.name}:${ladder.jobId}`, () => pullOneYue2LadderLocked(w, ds, ladder));
 }
-async function pullOneYue2LadderLocked(w: WorkerInfo, ds: { id: string; slug: string }, ladder: WorkerLadder): Promise<Yue2LadderPullResult> {
+async function pullOneYue2LadderLocked(w: WorkerInfo, ds: { id: string; slug: string; customTag?: string }, ladder: WorkerLadder): Promise<Yue2LadderPullResult> {
   const errors: string[] = [];
   let bytes = 0, previewsFetched = 0;
-  const output = localYue2LadderDir(w.name, ladder.jobId);
+  const output = localYue2LadderDir(w, ds, ladder);
   fs.mkdirSync(path.join(output, 'previews'), { recursive: true });
   const priorByFile = new Map(listYue2JointPreviews(output).map(p => [p.id, p]));
   const verified = new Set<string>();

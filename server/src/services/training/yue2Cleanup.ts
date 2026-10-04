@@ -7,9 +7,13 @@
 import fs from 'fs';
 import path from 'path';
 import { listPreparedCaches, clearPreparedCaches } from './preparedDataReset.js';
-import { listYue2AitkRuns, deleteYue2AitkRun, yue2RunFinished, setYue2RunFinished, recordYue2AitkRun } from './yue2AitkRuns.js';
+import { listAllYue2AitkRuns, listYue2AitkRuns, deleteYue2AitkRun, yue2RunFinished, setYue2RunFinished, recordYue2AitkRun, moveYue2AitkRun,
+  freeYue2RunDirectory, yue2RemoteRunDirectory, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
+import { rebaseYue2JointLinks } from './lyricStudioExport.js';
+import { getDataset } from './datasetsRepo.js';
+import { config } from '../../config.js';
 import { listYue2JointPreviews, pruneYue2JointPreviews } from './yue2JointPreview.js';
-import { archiveYue2TrainLogs, noteYue2TrainLog } from './datasetProfile.js';
+import { archiveYue2TrainLogs, noteYue2TrainLog, trainLogArchiveDir } from './datasetProfile.js';
 
 export interface Yue2CleanupItem { count: number; bytes: number; detail?: string[] }
 export interface Yue2CleanupPlan {
@@ -63,7 +67,7 @@ export function planYue2Cleanup(ds: { id: string; slug: string; sourceDir: strin
 }
 
 export function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string; lyricsSetId?: number }, runId: string, step: number, choice: Yue2CleanupChoice,
-  pick: { blind?: boolean; blindLabel?: string } = {}): { freedBytes: number; done: string[]; finishError?: string } {
+  pick: { blind?: boolean; blindLabel?: string } = {}): { freedBytes: number; done: string[]; finishError?: string; moveError?: string } {
   const plan = planYue2Cleanup(ds, runId, step);
   const { runs, run, keep } = locate(ds, runId, step);
   if (pick.blind && (!pick.blindLabel || pick.blindLabel !== run.blindLabels?.[step])) throw new Error('Blind label does not match the chosen checkpoint');
@@ -115,5 +119,75 @@ export function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string
     console.warn(`[Training] YuE2 cleanup: ${finishError}`);
     return { freedBytes: freed, done, finishError };
   }
+  // A pulled ladder leaves its staging folder for the name a local run gets.
+  // The run is already finished; a failed rename only leaves it where it was.
+  if (run.origin) {
+    try { const to = settleYue2RemoteRun(run); if (to) done.push(`moved to ${path.basename(to)}`); }
+    catch (err: any) {
+      const moveError = `The run folder could not be renamed and stays at ${run.output}: ${err?.message || err}`;
+      console.warn(`[Training] YuE2 cleanup: ${moveError}`);
+      return { freedBytes: freed, done, moveError };
+    }
+  }
   return { freedBytes: freed, done };
+}
+
+/** Where a pulled run's folder belongs now (staging while under review, the
+ *  local `<trigger>_<stamp>` name once finished), or null when it is already
+ *  there, `-N` collision suffix included. */
+export function plannedYue2RemoteMove(run: Yue2AitkRunRecord, taken?: Set<string>): string | null {
+  if (!run.origin) return null;
+  const ds = getDataset(run.datasetId);
+  const wanted = path.resolve(yue2RemoteRunDirectory(config.aceServer.adapters, ds?.customTag || ds?.slug || run.datasetSlug,
+    run.origin.worker, run.createdAt, yue2RunFinished(run.output)));
+  const current = path.resolve(run.output);
+  const name = path.basename(current).toLowerCase(), base = path.basename(wanted).toLowerCase();
+  const settled = path.dirname(current).toLowerCase() === path.dirname(wanted).toLowerCase()
+    && (name === base || (name.startsWith(`${base}-`) && /^\d+$/.test(name.slice(base.length + 1))));
+  return settled ? null : freeYue2RunDirectory(wanted, taken);
+}
+
+/** Move a pulled run to plannedYue2RemoteMove's folder and repoint the run
+ *  index, yue2-linked.json, album presets and the loss-log note. Any failure
+ *  puts the folder and every record back and rethrows. Returns the new folder,
+ *  or null when nothing needed to move. */
+export function settleYue2RemoteRun(run: Yue2AitkRunRecord): string | null {
+  const target = plannedYue2RemoteMove(run);
+  if (!target) return null;
+  const from = path.resolve(run.output);
+  moveYue2AitkRun(run.jobId, target);
+  try { rebaseYue2JointLinks(from, target); }
+  catch (err) {
+    try { moveYue2AitkRun(run.jobId, from); }
+    catch (back: any) { console.error(`[Training] YuE2: could not move ${target} back to ${from}: ${back?.message || back}`); }
+    throw err;
+  }
+  // Informational only: the archived loss log notes where its run lives.
+  try {
+    if (fs.existsSync(path.join(trainLogArchiveDir(run.datasetSlug), `${run.jobId}.json`))) noteYue2TrainLog(run.datasetSlug, run.jobId, { output: target });
+  } catch (err: any) { console.warn(`[Training] YuE2: could not note the new folder of ${run.jobId}: ${err?.message || err}`); }
+  return target;
+}
+
+export interface Yue2RemoteFolderMove { jobId: string; dataset: string; finished: boolean; from: string; to: string; error?: string }
+
+/** One-shot tidy of pulled runs still in the old `remote-<worker>-<uuid>`
+ *  folders (or anywhere else they don't belong): finished runs get the local
+ *  name, the rest the staging name. `apply: false` only lists the moves. */
+export function migrateYue2RemoteFolders(apply: boolean): Yue2RemoteFolderMove[] {
+  const out: Yue2RemoteFolderMove[] = [];
+  const taken = new Set<string>();
+  const runs = listAllYue2AitkRuns().filter(r => r.origin).sort((a, b) => a.createdAt - b.createdAt);
+  for (const run of runs) {
+    const to = plannedYue2RemoteMove(run, taken);
+    if (!to) continue;
+    taken.add(path.resolve(to).toLowerCase());
+    const row: Yue2RemoteFolderMove = { jobId: run.jobId, dataset: run.datasetSlug, finished: yue2RunFinished(run.output), from: run.output, to };
+    if (apply) {
+      try { row.to = settleYue2RemoteRun(run) ?? run.output; }
+      catch (err: any) { row.error = err?.message || String(err); }
+    }
+    out.push(row);
+  }
+  return out;
 }

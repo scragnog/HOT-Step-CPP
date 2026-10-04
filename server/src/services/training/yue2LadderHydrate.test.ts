@@ -373,19 +373,22 @@ test('use, cleanup with the resume file pruned, then reuse after the worker is r
       "config.workers.list = 'W=http://127.0.0.1:' + workerServer.address().port;",
       "const app = await appServer();",
       "const base = 'http://127.0.0.1:' + app.address().port + '/api/training/datasets/ds-album/';",
-      "const use = () => fetch(base + 'yue2-joint-preset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkpointDir: dir }) });",
+      "let dir2 = dir;",
+      "const use = () => fetch(base + 'yue2-joint-preset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkpointDir: dir2 }) });",
       "try {",
       "  const first = await use();",
       "  if (!first.ok) throw new Error('expected the first use to succeed: ' + JSON.stringify(await first.json()));",
       "  const cleanup = await fetch(base + 'yue2-cleanup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ run: 'remote:W:job1', step: 10, resume: true }) });",
       "  if (!cleanup.ok) throw new Error('cleanup failed: ' + JSON.stringify(await cleanup.json()));",
-      "  if (fs.existsSync(path.join(dir, 'optimizer.resume'))) throw new Error('cleanup did not prune the resume file');",
+      // A finished pulled run moves to its local name; follow it through the index.
+      "  dir2 = listYue2AitkRuns('ds-album', 'album')[0].checkpoints.find(c => c.step === 10).dir;",
+      "  if (fs.existsSync(path.join(dir2, 'optimizer.resume'))) throw new Error('cleanup did not prune the resume file');",
       "  state.manifest = []; state.files = {};",
       "  const second = await use();",
       "  if (!second.ok) throw new Error('expected reuse to revalidate locally: ' + JSON.stringify(await second.json()));",
-      "  if (fs.existsSync(path.join(dir, 'optimizer.resume'))) throw new Error('a pruned file must not come back');",
+      "  if (fs.existsSync(path.join(dir2, 'optimizer.resume'))) throw new Error('a pruned file must not come back');",
       // The retained weights are still checked: a flipped byte is refused, not trusted.
-      "  fs.writeFileSync(path.join(dir, 'native-ar.safetensors'), Buffer.from('AR-XXXXX'));",
+      "  fs.writeFileSync(path.join(dir2, 'native-ar.safetensors'), Buffer.from('AR-XXXXX'));",
       "  const third = await use();",
       "  if (third.ok) throw new Error('a corrupt retained weight must be refused once the worker is gone');",
       "} finally { workerServer.close(); app.close(); }",
@@ -423,6 +426,116 @@ test('cleanup keeps the resume file and fails when the prune record cannot be wr
       "  const second = await use();",
       "  if (!second.ok) throw new Error('expected reuse to revalidate locally: ' + JSON.stringify(await second.json()));",
       "} finally { fs.renameSync = rename; workerServer.close(); app.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+// Pulled runs keep readable folders: a finished one moves from staging to the
+// local `<trigger>_<stamp>` name, taking a -2 suffix when a local run already
+// owns that name, and every record that named its files follows it.
+const FOLDERS = [
+  "import { runStamp } from './src/services/training/adapterLayout.js';",
+  "import { getOrCreateArtist, saveLyricsSet, upsertPreset, getAllPresets } from './src/db/lireekDb.js';",
+  "import { readYue2Linked } from './src/services/training/lyricStudioExport.js';",
+  "import { migrateYue2RemoteFolders } from './src/services/training/yue2Cleanup.js';",
+  "import { setYue2RunFinished } from './src/services/training/yue2AitkRuns.js';",
+  "const joint = path.join(config.aceServer.adapters, 'yue2-joint-adapters');",
+  "const stamp = runStamp(new Date(now));",
+  "function presetFor(ar, nar) { const artist = getOrCreateArtist('A'); const set = saveLyricsSet(artist.id, 'B', 1, []); upsertPreset(Number(set.id), { yue2ArAdapterPath: ar, yue2NarAdapterPath: nar }); return Number(set.id); }",
+  "const presetOf = id => getAllPresets().find(p => p.lyrics_set_id === id);",
+].join('');
+
+function folderScript(body: string[]): string {
+  const hashAr = sha256Hex('AR-BYTES'); const hashNar = sha256Hex('NAR-BYTES');
+  return HARNESS + FOLDERS + [
+    "addDataset('album');",
+    "const dir = recordPulledRun('remote:W:job1', 'job1', 'W', 10);",
+    `const state = { manifest: [{ name: 'native-ar.safetensors', sha256: '${hashAr}', bytes: 8 }, { name: 'native-nar.safetensors', sha256: '${hashNar}', bytes: 9 }], files: { 'native-ar.safetensors': Buffer.from('AR-BYTES'), 'native-nar.safetensors': Buffer.from('NAR-BYTES') }, deleted: [] };`,
+    "const workerServer = await serve(state);",
+    "config.workers.list = 'W=http://127.0.0.1:' + workerServer.address().port;",
+    "const app = await appServer();",
+    "const base = 'http://127.0.0.1:' + app.address().port + '/api/training/datasets/ds-album/';",
+    "const post = (route, body) => fetch(base + route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });",
+    "try {",
+    "  const first = await post('yue2-joint-preset', { checkpointDir: dir });",
+    "  if (!first.ok) throw new Error('expected the first use to succeed: ' + JSON.stringify(await first.json()));",
+    "  const setId = presetFor(path.join(dir, 'native-ar.safetensors'), path.join(dir, 'native-nar.safetensors'));",
+    ...body,
+    "} finally { workerServer.close(); app.close(); }",
+  ].join('');
+}
+
+test('cleanup moves a finished pulled run to its local name, -2 on a collision, and repoints index, link and preset', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-remote-folder-move-'));
+  try {
+    runInIsolatedRoot(root, folderScript([
+      // A local run already owns the plain name.
+      "  fs.mkdirSync(path.join(joint, 'album_' + stamp), { recursive: true });",
+      "  const cleanup = await post('yue2-cleanup', { run: 'remote:W:job1', step: 10 });",
+      "  const body = await cleanup.json();",
+      "  if (!cleanup.ok || body.moveError) throw new Error('cleanup failed: ' + JSON.stringify(body));",
+      "  const want = path.join(joint, 'album_' + stamp + '-2');",
+      "  const run = listYue2AitkRuns('ds-album', 'album')[0];",
+      "  if (run.output !== want) throw new Error('run not at its local name: ' + run.output);",
+      "  if (fs.existsSync(path.dirname(dir))) throw new Error('the staging folder is still there');",
+      "  if (!fs.existsSync(path.join(joint, 'album_' + stamp))) throw new Error('the local run that owned the name was touched');",
+      "  const ckpt = run.checkpoints.find(c => c.step === 10);",
+      "  if (ckpt.dir !== path.join(want, 'checkpoint-step10') || !ckpt.arPath) throw new Error('checkpoint not repointed: ' + JSON.stringify(ckpt));",
+      "  const linked = readYue2Linked().album;",
+      "  if (linked.arPath !== path.join(want, 'checkpoint-step10', 'native-ar.safetensors')) throw new Error('yue2-linked.json not repointed: ' + JSON.stringify(linked));",
+      "  if (presetOf(setId).yue2_nar_adapter_path !== path.join(want, 'checkpoint-step10', 'native-nar.safetensors')) throw new Error('preset not repointed: ' + JSON.stringify(presetOf(setId)));",
+      "  state.manifest = []; state.files = {};",
+      "  const again = await post('yue2-joint-preset', { checkpointDir: ckpt.dir });",
+      "  if (!again.ok) throw new Error('the moved rung no longer links: ' + JSON.stringify(await again.json()));",
+    ]));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a move whose link records cannot be rewritten puts the folder and the index back', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-remote-folder-move-fail-'));
+  try {
+    runInIsolatedRoot(root, folderScript([
+      "  const linkedFile = path.join(process.env.TRAINING_DIR, 'yue2-linked.json');",
+      "  const linkedBefore = fs.readFileSync(linkedFile, 'utf8');",
+      "  fs.chmodSync(linkedFile, 0o444);",
+      "  const cleanup = await post('yue2-cleanup', { run: 'remote:W:job1', step: 10 });",
+      "  fs.chmodSync(linkedFile, 0o644);",
+      "  const body = await cleanup.json();",
+      "  if (!cleanup.ok || !body.moveError) throw new Error('expected a finished cleanup that reports the failed move: ' + JSON.stringify(body));",
+      "  const run = listYue2AitkRuns('ds-album', 'album')[0];",
+      "  if (run.output !== path.dirname(dir) || !fs.existsSync(path.join(dir, 'native-ar.safetensors'))) throw new Error('the folder did not stay where it was: ' + run.output);",
+      "  if (fs.existsSync(path.join(joint, 'album_' + stamp))) throw new Error('a half-moved folder was left behind');",
+      "  if (fs.readFileSync(linkedFile, 'utf8') !== linkedBefore) throw new Error('yue2-linked.json changed');",
+      "  if (presetOf(setId).yue2_ar_adapter_path !== path.join(dir, 'native-ar.safetensors')) throw new Error('preset changed');",
+      // Run again later (here, via the migration) and it moves cleanly.
+      "  const moved = migrateYue2RemoteFolders(true);",
+      "  if (moved.length !== 1 || moved[0].error || moved[0].to !== path.join(joint, 'album_' + stamp)) throw new Error('retry did not move it: ' + JSON.stringify(moved));",
+    ]));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('the migration lists then moves old remote-<worker>-<id> folders: finished to the local name, the rest to staging', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-remote-folder-migrate-'));
+  try {
+    const script = HARNESS + FOLDERS + [
+      "addDataset('album');",
+      "const done = recordPulledRun('remote:W:job1', 'job1', 'W', 10);",
+      "const open = recordPulledRun('remote:W:job2', 'job2', 'W', 20);",
+      "for (const d of [done, open]) { fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'native-ar.safetensors'), 'AR'); fs.writeFileSync(path.join(d, 'native-nar.safetensors'), 'NAR'); }",
+      "setYue2RunFinished(path.dirname(done), { pickedStep: 10, pickedBlind: false, pickedLabel: '' });",
+      "const dry = migrateYue2RemoteFolders(false);",
+      "if (dry.length !== 2) throw new Error('dry run should list both: ' + JSON.stringify(dry));",
+      "if (!fs.existsSync(done) || !fs.existsSync(open)) throw new Error('a dry run moved something');",
+      "const finishedTo = path.join(joint, 'album_' + stamp), stagedTo = path.join(joint, '_remote', 'w', 'album_' + stamp);",
+      "const byJob = Object.fromEntries(dry.map(r => [r.jobId, r]));",
+      "if (byJob['remote:W:job1'].to !== finishedTo || byJob['remote:W:job2'].to !== stagedTo) throw new Error('unexpected targets: ' + JSON.stringify(dry));",
+      "const applied = migrateYue2RemoteFolders(true);",
+      "if (applied.some(r => r.error)) throw new Error('apply failed: ' + JSON.stringify(applied));",
+      "if (!fs.existsSync(path.join(finishedTo, 'checkpoint-step10', 'native-ar.safetensors')) || !fs.existsSync(path.join(stagedTo, 'checkpoint-step20', 'native-nar.safetensors'))) throw new Error('files did not move');",
+      "const outputs = listYue2AitkRuns('ds-album', 'album').map(r => r.output).sort();",
+      "if (JSON.stringify(outputs) !== JSON.stringify([finishedTo, stagedTo].sort())) throw new Error('index not repointed: ' + JSON.stringify(outputs));",
+      "if (migrateYue2RemoteFolders(false).length) throw new Error('a second run should find nothing to move');",
     ].join('');
     runInIsolatedRoot(root, script);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }

@@ -17,6 +17,29 @@ export function yue2JointOutputDirectory(adaptersRoot: string, trigger: string, 
   return path.join(adaptersRoot, 'yue2-joint-adapters', `${name}_${runStamp(when)}`);
 }
 
+/** Pulled ladders wait here, out of the local run list's way, until a rung is
+ *  chosen: `yue2-joint-adapters/_remote/<worker>/<trigger>_<stamp>`. */
+export const YUE2_REMOTE_STAGING = '_remote';
+
+/** Where a run pulled from `worker` belongs: the staging folder while it is
+ *  under review, then the same `<trigger>_<stamp>` name a local run gets once
+ *  finished. The stamp is the run's start time on the worker. */
+export function yue2RemoteRunDirectory(adaptersRoot: string, trigger: string, worker: string, createdAt: number, finished: boolean): string {
+  const local = yue2JointOutputDirectory(adaptersRoot, trigger, new Date(createdAt));
+  if (finished) return local;
+  const folder = worker.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '_').replace(/^[._]+|[._]+$/g, '') || 'worker';
+  return path.join(path.dirname(local), YUE2_REMOTE_STAGING, folder, path.basename(local));
+}
+
+/** `wanted`, or `wanted-2`, `wanted-3`... when another run already owns it
+ *  (on disk, or in `taken`, which a dry run uses to see its own claims). */
+export function freeYue2RunDirectory(wanted: string, taken?: Set<string>): string {
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? wanted : `${wanted}-${n}`;
+    if (!fs.existsSync(candidate) && !taken?.has(path.resolve(candidate).toLowerCase())) return candidate;
+  }
+}
+
 const INDEX = path.join(trainingBaseDir, 'yue2-aitk-runs.json');
 const MAX_RECORDS = 256;
 const MAX_INDEX_BYTES = 4 * 1024 * 1024;
@@ -284,20 +307,27 @@ export function deleteYue2AitkRun(jobId: string): { output: string } {
   return { output };
 }
 
-/** Rename a finished run's output directory (e.g. into a `refined/`
- *  subfolder after a cleanup) and repoint the durable index at the new path.
- *  Refuses to land on an existing path so a move never silently merges two
- *  runs. */
+/** Rename a run's output directory and repoint the durable index at the new
+ *  path, checkpoint paths included. Refuses to land on an existing path so a
+ *  move never silently merges two runs; if the index cannot be written the
+ *  folder is renamed back, so a failed move leaves everything where it was. */
 export function moveYue2AitkRun(jobId: string, newOutput: string): void {
-  const run = readIndex().find(r => r.jobId === jobId);
+  const index = readIndex();
+  const run = index.find(r => r.jobId === jobId);
   if (!run) throw new Error('Unknown run');
   const oldOutput = path.resolve(run.output);
   const target = path.resolve(newOutput);
   if (fs.existsSync(target)) throw new Error(`Refusing to move onto an existing path: ${target}`);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.renameSync(oldOutput, target);
-  const updated = readIndex().map(r => r.jobId === jobId ? { ...r, output: target, updatedAt: Date.now() } : r);
-  writeIndex(updated, updated.filter(r => r.jobId === jobId));
+  const prefix = oldOutput.toLowerCase() + path.sep;
+  const rebase = <T extends string | undefined>(p: T): T =>
+    (p && path.resolve(p).toLowerCase().startsWith(prefix) ? path.join(target, path.resolve(p).slice(prefix.length)) : p) as T;
+  const moved: Yue2AitkRunRecord = { ...run, output: target, updatedAt: Date.now(),
+    checkpoints: run.checkpoints.map(c => ({ ...c, dir: rebase(c.dir), adapterPath: rebase(c.adapterPath),
+      optimizerPath: rebase(c.optimizerPath), arPath: rebase(c.arPath), narPath: rebase(c.narPath) })) };
+  try { writeIndex(index.map(r => r.jobId === jobId ? moved : r), [moved]); }
+  catch (err) { fs.renameSync(target, oldOutput); throw err; }
 }
 
 const skippedFolders = new Set<string>();
@@ -344,7 +374,8 @@ function jointFolders(): string[] | null {
     const refined = direct.some(e => e.isDirectory() && e.name === 'refined')
       ? fs.readdirSync(path.join(root, 'refined'), { withFileTypes: true }) : [];
     return [
-      ...direct.filter(e => e.isDirectory() && e.name !== 'refined').map(e => path.join(root, e.name)),
+      // _remote holds pulled ladders, each found through the index, never imported as a run itself.
+      ...direct.filter(e => e.isDirectory() && e.name !== 'refined' && e.name !== YUE2_REMOTE_STAGING).map(e => path.join(root, e.name)),
       ...refined.filter(e => e.isDirectory()).map(e => path.join(root, 'refined', e.name)),
     ].sort();
   } catch { return null; } // An unavailable adapter drive must not erase the index.
