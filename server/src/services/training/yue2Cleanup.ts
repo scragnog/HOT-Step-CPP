@@ -67,6 +67,17 @@ export function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string
   const plan = planYue2Cleanup(ds, runId, step);
   const { runs, run, keep } = locate(ds, runId, step);
   if (pick.blind && (!pick.blindLabel || pick.blindLabel !== run.blindLabels?.[step])) throw new Error('Blind label does not match the chosen checkpoint');
+  if (choice.resume && keep.optimizerPath && run.origin) {
+    // A pulled rung revalidates against its worker manifest once the worker's
+    // copy is gone, so the prune is recorded and read back before anything is
+    // deleted: recordYue2AitkRun swallows write failures, and a resume file
+    // deleted without this record would make the rung unusable offline.
+    const name = path.basename(keep.optimizerPath);
+    recordYue2AitkRun({ ...run, checkpoints: run.checkpoints.map(c => c.step === step
+      ? { ...c, prunedFiles: [...new Set([...(c.prunedFiles ?? []), name])] } : c) });
+    const landed = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === run.jobId)?.checkpoints.find(c => c.step === step)?.prunedFiles?.includes(name);
+    if (!landed) throw new Error('Could not record the resume-file prune in the run index; nothing was deleted');
+  }
   let freed = 0; const done: string[] = [];
   // The chosen run's loss curve, kept with the dataset: run folders get moved
   // and deleted by hand later, and calibration reads the curve per album.
@@ -88,10 +99,6 @@ export function runYue2Cleanup(ds: { id: string; slug: string; sourceDir: string
     freed += plan.otherPreviews.bytes; done.push(`${plan.otherPreviews.count} other preview(s)`);
   }
   if (choice.resume && keep.optimizerPath) {
-    // A pulled rung revalidates against its worker manifest once the worker's
-    // copy is gone; record the prune first so that check stops demanding it.
-    if (run.origin) recordYue2AitkRun({ ...run, checkpoints: run.checkpoints.map(c => c.step === step
-      ? { ...c, prunedFiles: [...new Set([...(c.prunedFiles ?? []), path.basename(keep.optimizerPath!)])] } : c) });
     fs.rmSync(keep.optimizerPath, { force: true });
     freed += plan.resume.bytes; done.push('resume file');
   }

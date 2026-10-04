@@ -393,3 +393,37 @@ test('use, cleanup with the resume file pruned, then reuse after the worker is r
     runInIsolatedRoot(root, script);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+// Reviewer, 84b3edf6 P2: the run index write that records the prune fails
+// (recordYue2AitkRun swallows it). Cleanup must refuse and keep the resume
+// file, so reuse after the worker is retired still validates.
+test('cleanup keeps the resume file and fails when the prune record cannot be written', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-hydrate-prune-write-fail-'));
+  try {
+    const hashAr = sha256Hex('AR-BYTES'); const hashNar = sha256Hex('NAR-BYTES'); const hashOpt = sha256Hex('OPT-BYTES');
+    const script = HARNESS + [
+      "addDataset('album');",
+      "const dir = recordPulledRun('remote:W:job1', 'job1', 'W', 10);",
+      `const state = { manifest: [{ name: 'native-ar.safetensors', sha256: '${hashAr}', bytes: 8 }, { name: 'native-nar.safetensors', sha256: '${hashNar}', bytes: 9 }, { name: 'optimizer.resume', sha256: '${hashOpt}', bytes: 9 }], files: { 'native-ar.safetensors': Buffer.from('AR-BYTES'), 'native-nar.safetensors': Buffer.from('NAR-BYTES'), 'optimizer.resume': Buffer.from('OPT-BYTES') }, deleted: [] };`,
+      "const workerServer = await serve(state);",
+      "config.workers.list = 'W=http://127.0.0.1:' + workerServer.address().port;",
+      "const app = await appServer();",
+      "const base = 'http://127.0.0.1:' + app.address().port + '/api/training/datasets/ds-album/';",
+      "const use = () => fetch(base + 'yue2-joint-preset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ checkpointDir: dir }) });",
+      "const rename = fs.renameSync;",
+      "try {",
+      "  const first = await use();",
+      "  if (!first.ok) throw new Error('expected the first use to succeed: ' + JSON.stringify(await first.json()));",
+      "  fs.renameSync = function (from, to) { if (String(to).endsWith('yue2-aitk-runs.json')) throw Object.assign(new Error('test: index write denied'), { code: 'EACCES' }); return rename.apply(this, arguments); };",
+      "  const cleanup = await fetch(base + 'yue2-cleanup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ run: 'remote:W:job1', step: 10, resume: true }) });",
+      "  fs.renameSync = rename;",
+      "  if (cleanup.ok) throw new Error('cleanup must fail when the prune cannot be recorded: ' + JSON.stringify(await cleanup.json()));",
+      "  if (!fs.existsSync(path.join(dir, 'optimizer.resume'))) throw new Error('the resume file must be kept when its prune was not recorded');",
+      "  state.manifest = []; state.files = {};",
+      "  const second = await use();",
+      "  if (!second.ok) throw new Error('expected reuse to revalidate locally: ' + JSON.stringify(await second.json()));",
+      "} finally { fs.renameSync = rename; workerServer.close(); app.close(); }",
+    ].join('');
+    runInIsolatedRoot(root, script);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
