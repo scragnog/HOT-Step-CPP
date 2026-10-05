@@ -540,6 +540,14 @@ add_executable(fattn-train-test tools/fattn-train-test.cpp)
 target_link_libraries(fattn-train-test PRIVATE yyjson)
 link_ggml_backends(fattn-train-test)
 
+# convrot-graph-probe: ConvRot8 forward/backward under repeated CUDA graph
+# capture and replay, with a cuBLAS API log check for stream resets. CUDA only.
+if(GGML_CUDA AND CUDAToolkit_FOUND)
+    add_executable(convrot-graph-probe tools/convrot-graph-probe.cpp)
+    link_ggml_backends(convrot-graph-probe)
+    target_link_libraries(convrot-graph-probe PRIVATE CUDA::cublas CUDA::cudart)
+endif()
+
 # moss-ggml-test: parity tests for the MOSS-Music captioning port vs fp32
 # fixtures (engine/tools/moss-numpy-ref.py documents the same maths in numpy).
 add_executable(moss-ggml-test tools/moss-ggml-test.cpp)
