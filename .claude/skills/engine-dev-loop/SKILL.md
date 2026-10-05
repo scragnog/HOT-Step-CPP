@@ -10,7 +10,9 @@ without triggering the respawn/file-lock loop that this repo learned about the h
 
 **Context for readers with zero prior exposure:** the app has three tiers. A Node/Express
 server (port 3001) spawns the C++ inference engine `ace-server.exe` (port 8085) as a managed
-child process and serves the React UI. The engine runs the generation pipeline
+child process and serves the React UI. Agents run it in dev mode with `dev.bat` detached and
+work through the Vite dev server at `http://localhost:3000`; `LAUNCH.bat`/`:3001` is the
+end-user prod path. The engine runs the generation pipeline
 LM → DiT → VAE (LM = language model that plans the song; DiT = Diffusion Transformer that
 denoises latent audio; VAE = decoder that turns latents into 48 kHz stereo audio).
 All commands below are Windows PowerShell (use `;` to chain, never `&&` in old
@@ -57,7 +59,9 @@ Windows PowerShell 5; this repo's convention is `;`).
 
 5. **`dev-rebuild.bat` does NOT check the build result and does NOT restart the app.**
    It prints "Done. Start the app with LAUNCH.bat" even if MSBuild failed. Read the build
-   output yourself, then relaunch (`dev.bat` for dev, `LAUNCH.bat` for prod).
+   output yourself, then relaunch with `dev.bat` (detached) and check `http://localhost:3000`
+   — the script's message names `LAUNCH.bat`, which is the end-user prod path, not the one
+   agents use.
 
 ## Procedure 1 — Standard rebuild after a C++ edit
 
@@ -75,9 +79,9 @@ Windows PowerShell 5; this repo's convention is `;`).
 #    (b) a fresh LastWriteTime on the exe:
 Get-Item "D:\Ace-Step-Latest\hot-step-cpp\engine\build\Release\ace-server.exe" | Select-Object LastWriteTime
 
-# 3. Relaunch the app (dev-rebuild does NOT do this):
+# 3. Relaunch the app (dev-rebuild does NOT do this) — detached, then check http://localhost:3000:
 & "D:\Ace-Step-Latest\hot-step-cpp\dev.bat"       # dev mode (Vite :3000 HMR + tsx watch :3001)
-# or LAUNCH.bat for prod mode
+# LAUNCH.bat is the end-user prod launcher — agents don't run it
 ```
 
 Note: dev-rebuild's shutdown also kills the Vite dev server on port 3000
@@ -123,8 +127,9 @@ Run the three phases yourself instead. This is the same sequence the script perf
 it is safe for the reason Procedure 1 explains — Node initiates the kill, so no respawn:
 
 ```powershell
-# 1. graceful shutdown (Node kills ace-server, Vite, then itself)
-try { Invoke-RestMethod -Method Post -Uri "http://localhost:3001/api/shutdown" -TimeoutSec 10 | Out-Null } catch {}
+# 1. graceful shutdown (Node kills ace-server, Vite, then itself).
+#    Use the dev address; if Vite is already down, fall back to the raw server on :3001.
+try { Invoke-RestMethod -Method Post -Uri "http://localhost:3000/api/shutdown" -TimeoutSec 10 | Out-Null } catch {}
 
 # 2. wait for the binary lock to actually clear — never skip this, it is what
 #    prevents LNK1104 and the respawn loop
@@ -210,8 +215,8 @@ loss into a build failure.
 
 ## Procedure 4 — Smoke-testing after a rebuild
 
-Relaunch the app, then probe the engine directly. **ace-server takes a few seconds to come
-up after `dev.bat` returns** (the script just `start`s detached windows) — retry `/health`
+Relaunch with `dev.bat` (detached), confirm the app answers at `http://localhost:3000/api/health`,
+then probe the engine directly. **ace-server takes a few seconds to come up after `dev.bat` returns** (the script just `start`s detached windows) — retry `/health`
 for up to ~30 s; connection refused immediately after launch is normal, not a build failure.
 (Use `curl.exe` to be safe — in legacy Windows PowerShell 5.1 bare `curl` is an alias for
 `Invoke-WebRequest`; in PowerShell 7 it resolves to the real curl.exe.)

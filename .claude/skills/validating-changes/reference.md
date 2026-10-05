@@ -6,7 +6,7 @@ re-verify before relying on exact positions.
 
 ## 1. Health endpoints
 
-`GET http://localhost:3001/api/health` (`server/src/routes/health.ts:11-46`) returns:
+`GET http://localhost:3000/api/health` (dev app — :3001 is the raw prod server) (`server/src/routes/health.ts:11-46`) returns:
 
 ```json
 {
@@ -116,7 +116,7 @@ Per successful track, written into `server\data\audio\` (`generate.ts:839-1034`)
 
 | File | When |
 |---|---|
-| `<uuid>.wav` (or `.mp3`) | always — served at `http://localhost:3001/audio/<uuid>.wav` |
+| `<uuid>.wav` (or `.mp3`) | always — served at `http://localhost:3000/audio/<uuid>.wav` in dev |
 | `<uuid>.lrc` | only if lyrics + engine alignment (skipped for instrumental) |
 | `<uuid>.latent` | HSLAT post-DiT latent companion |
 | `<uuid>_mastered.wav` | only if post-processing/mastering enabled |
@@ -166,7 +166,8 @@ externally while the app runs: the respawned exe locks the file the linker needs
 (`server/src/routes/shutdown.ts` — kills ace-server by port, Vite, then itself),
 poll `tasklist` for `ace-server.exe` up to 10 s, `taskkill /F` at 10 s, abort at
 15 s, then `call engine\build.cmd`. Final message: *"Start the app with LAUNCH.bat
-to pick up changes"* — it does **not** relaunch; use `dev.bat` in dev.
+to pick up changes"* — it does **not** relaunch; relaunch with `dev.bat` (detached) and
+check `http://localhost:3000`. `LAUNCH.bat` is the end-user prod path.
 
 ## 9. LM echo sideband gotcha (regression trap for param changes)
 

@@ -160,8 +160,8 @@ npx tsc --noEmit                                    # type-check server/UI (neve
 .\dev-rebuild.bat                                   # the ONLY sanctioned way to rebuild C++, always
 powershell -File engine\verify-hooks.ps1            # after any upstream sync
 Get-ChildItem logs | Sort-Object Name -Descending | Select-Object -First 1   # newest session log folder
-Invoke-RestMethod http://localhost:3001/api/generate/queue                   # queue health
-Invoke-RestMethod -Method Post http://localhost:3001/api/generate/reset-queue # unwedge the queue
+Invoke-RestMethod http://localhost:3000/api/generate/queue                   # queue health (dev app; :3001 is the prod port)
+Invoke-RestMethod -Method Post http://localhost:3000/api/generate/reset-queue # unwedge the queue
 ```
 
 ## Deeper reading

@@ -159,8 +159,8 @@ the model does not exist for anyone but you.
 Routes in `server/src/routes/modelManager.ts`, mounted at `/api/model-manager`:
 
 ```powershell
-Invoke-RestMethod http://localhost:3001/api/model-manager/registry            # catalogue + installed flags
-Invoke-RestMethod -Method Post -Uri http://localhost:3001/api/model-manager/download -ContentType 'application/json' -Body '{"fileId":"<id>"}'
+Invoke-RestMethod http://localhost:3000/api/model-manager/registry            # catalogue + installed flags (dev app)
+Invoke-RestMethod -Method Post -Uri http://localhost:3000/api/model-manager/download -ContentType 'application/json' -Body '{"fileId":"<id>"}'
 # GET /downloads = SSE progress stream; POST /download/<jobId>/cancel | /resume; DELETE /files/<filename>
 ```
 

@@ -5,7 +5,7 @@ description: Diagnoses HOT-Step CPP generation failures, engine crashes, hangs, 
 
 # Debugging generation failures & crashes (log-driven playbook)
 
-HOT-Step CPP has two runtime processes: the **Node server** (Express, port 3001) and its child **ace-server.exe** (the C++ inference engine, port 8085). The Node server orchestrates every generation: it optionally calls the engine's LM (language model that expands your caption/lyrics into audio codes), then submits synthesis (DiT — the Diffusion Transformer that generates audio latents — followed by VAE decode to a WAV), polls until done, then saves the result to SQLite. Almost every runtime problem is diagnosable from the per-session log folders under `logs/` at the repo root. This skill tells you which file to open first for each symptom, what the real failure strings mean, and how to correlate the three log files.
+HOT-Step CPP has two runtime processes: the **Node server** (Express, port 3001) and its child **ace-server.exe** (the C++ inference engine, port 8085). Agents work in dev mode (`dev.bat`), where the Vite dev server on **3000** fronts the app and proxies `/api`, `/audio` and `/references` to 3001 — every URL below is the 3000 address. The Node server orchestrates every generation: it optionally calls the engine's LM (language model that expands your caption/lyrics into audio codes), then submits synthesis (DiT — the Diffusion Transformer that generates audio latents — followed by VAE decode to a WAV), polls until done, then saves the result to SQLite. Almost every runtime problem is diagnosable from the per-session log folders under `logs/` at the repo root. This skill tells you which file to open first for each symptom, what the real failure strings mean, and how to correlate the three log files.
 
 All `path:line` references verified against the code on 2026-07-02.
 
@@ -20,7 +20,7 @@ All `path:line` references verified against the code on 2026-07-02.
 
 ## Golden rules
 
-1. **NEVER kill ace-server.exe externally (Task Manager / `taskkill` / `Stop-Process`) while the Node server is running.** The Node server auto-respawns the engine on non-zero exit ([server/src/index.ts:284-309](../../../server/src/index.ts)); if crashes are spaced more than 30 s apart, the crash limiter's window resets and the respawn loop continues indefinitely, holding file locks on the exe. To rebuild the engine, use `dev-rebuild.bat` at the repo root — it shuts the whole app down cleanly first, then builds. To just stop the engine, use `Invoke-RestMethod -Method Post http://localhost:3001/api/shutdown` (kills engine + server + Vite).
+1. **NEVER kill ace-server.exe externally (Task Manager / `taskkill` / `Stop-Process`) while the Node server is running.** The Node server auto-respawns the engine on non-zero exit ([server/src/index.ts:284-309](../../../server/src/index.ts)); if crashes are spaced more than 30 s apart, the crash limiter's window resets and the respawn loop continues indefinitely, holding file locks on the exe. To rebuild the engine, use `dev-rebuild.bat` at the repo root — it shuts the whole app down cleanly first, then builds. To just stop the engine, use `Invoke-RestMethod -Method Post http://localhost:3000/api/shutdown` (kills engine + server + Vite).
 2. **Never rebuild the C++ engine via `engine/build.cmd` directly, under any circumstances** — you cannot reliably tell whether the app is running; same respawn/file-lock reason. `dev-rebuild.bat` wraps it safely (and is a harmless no-op shutdown when nothing runs).
 3. **Never `cmake --build . --clean-first`** — CUDA kernel recompilation takes 20+ minutes. For stale `.obj` problems, delete only `engine/build/acestep-core.dir/` and `engine/build/Release/acestep-core.lib`.
 4. **Do not assume the engine is dead because HTTP to :8085 hangs.** ace-server uses single-threaded httplib; during DiT steps, adapter merges, or VAE decode it *cannot* answer any HTTP request ([server/src/services/aceClient.ts:6-19](../../../server/src/services/aceClient.ts)). Check the tail of `ace_engine.log` for advancing `[DiT] Step N/M` lines before declaring it hung.
@@ -51,7 +51,7 @@ Facts you must know before reading them:
 - **`gen_*.log` is buffered in RAM and only written to disk when the generation completes or fails** (`finishGenerationLog` / `failGenerationLog`, logger.ts:139-178 — both do a single `fs.writeFileSync`). Failed and cancelled generations DO get their log written. **If Node itself crashes or is hard-killed mid-generation, the gen log is never written.** A missing `gen_*.log` for a generation you know started = Node died mid-flight; fall back to `node_console.log`.
 - `<taskType>` in the filename comes from the engine request's `task_type`: `text2music` (default), `cover`, `cover-nofsq`, `repaint`, `lego`, `extract` (generate.ts:208-213). The retry-exhausted final-failure path writes taskType `'unknown'` (generate.ts:1335), but the earlier per-attempt failure (generate.ts:1275/1281) already flushed and deleted the buffer, so `gen_<id>_unknown.log` is usually a silent no-op.
 - Repetitive GGML noise (`CUDA graph warmup`, `CUDA Graph id`, `ggml_backend_cuda_graph_compute`) is dropped **at the engine source since 2026-07-17**: `acestep_ggml_log` (engine/src/backend.h) discards all GGML DEBUG-level messages (set `HOTSTEP_GGML_DEBUG=1` to pass them through) and digit-insensitively dedups consecutive near-identical lines, so these no longer reach ANY log file. The Node-side filters (index.ts `isNoise()`, [server/src/routes/logs.ts:27-31](../../../server/src/routes/logs.ts)) remain as belt-and-braces for older engine binaries. If you need CUDA-graph-layer logging, use the env var.
-- Live tail without touching files: `GET http://localhost:3001/api/logs` is an SSE stream backed by a 2000-line ring buffer, each line tagged `source: 'engine' | 'server'` (logs.ts:21-52).
+- Live tail without touching files: `GET http://localhost:3000/api/logs` is an SSE stream backed by a 2000-line ring buffer, each line tagged `source: 'engine' | 'server'` (logs.ts:21-52).
 
 ## Which log to open first, per symptom
 
@@ -83,13 +83,13 @@ No session folder at all → the server never reached `initLogger()`; run `npx t
    ```
 5. For live triage while the app runs:
    ```powershell
-   Invoke-RestMethod http://localhost:3001/api/health | ConvertTo-Json -Depth 4
-   Invoke-RestMethod http://localhost:3001/api/generate/queue
+   Invoke-RestMethod http://localhost:3000/api/health | ConvertTo-Json -Depth 4
+   Invoke-RestMethod http://localhost:3000/api/generate/queue
    ```
    `/api/health` reports `aceServer.status` (`ok`/`disconnected`) and `engine.{ready, bootStatus}` ([server/src/routes/health.ts:11-46](../../../server/src/routes/health.ts)). Remember rule 4: a `disconnected` aceServer during heavy compute can be a busy single-threaded engine, not a dead one.
 6. To unwedge a stuck queue without restarting:
    ```powershell
-   Invoke-RestMethod -Method Post http://localhost:3001/api/generate/reset-queue
+   Invoke-RestMethod -Method Post http://localhost:3000/api/generate/reset-queue
    ```
    This cancels all non-terminal jobs (they fail with `Queue reset by user`) and drains the pending queue (generate.ts:1469-1500). Also available: `POST /api/generate/cancel/:id`, `POST /api/generate/cancel-all`.
 7. To search all history for a pattern:
@@ -128,8 +128,8 @@ No session folder at all → the server never reached `initLogger()`; run `npx t
 
 - **Spawn**: `startAceServer()` (index.ts:158-316) launches `config.aceServer.exe` with `--models`, `--host`, `--port` (default **8085**, [server/src/config.ts:102](../../../server/src/config.ts)) plus optional `--adapters`, `--keep-loaded`, `--noise-profile`, `--draft-lm`, `--vae-chunk`, `--vae-overlap`. The exe is auto-detected among `engine/ace-server.exe`, `engine/build/Release/ace-server.exe`, `engine/build/ace-server.exe`, `engine/build/Debug/ace-server.exe` (config.ts:46-52); override with `ACESTEPCPP_EXE` in `.env`.
 - **Respawn**: child exit with non-zero code (and signal not SIGTERM/SIGINT) → respawn after 3 s. **Crash limiter**: 3 crashes within a rolling 30 s window → give up, set `engineReady=false` with bootStatus `Engine crashed 3 times — check logs for missing DLLs` (index.ts:152-156, 284-309). Crashes spaced >30 s apart reset the window, so slow-cycle crashes (e.g. crash-on-first-request) still loop forever — hence Golden rule 1.
-- **Clean shutdown**: Ctrl-C → `shutdown()` uses `taskkill /PID <child> /T /F` (index.ts:549). `POST /api/shutdown` kills ace-server by port 8085 via netstat ([server/src/routes/shutdown.ts:24-44](../../../server/src/routes/shutdown.ts)), then Vite (:3000), then its own process tree. `POST /api/restart` writes a `.restart-requested` marker (shutdown.ts:161); `LAUNCH.bat` loops and relaunches when it sees the marker.
-- **`dev-rebuild.bat`** = POST `/api/shutdown` → wait up to 10 s for ace-server.exe to die (force-kill at 10 s, abort at 15 s) → `engine\build.cmd`. It does **not** restart the app — run `LAUNCH.bat` (or `dev.bat`) afterwards.
+- **Clean shutdown**: Ctrl-C → `shutdown()` uses `taskkill /PID <child> /T /F` (index.ts:549). `POST /api/shutdown` kills ace-server by port 8085 via netstat ([server/src/routes/shutdown.ts:24-44](../../../server/src/routes/shutdown.ts)), then Vite (:3000), then its own process tree. `POST /api/restart` writes a `.restart-requested` marker (shutdown.ts:161); in dev mode `server/restart-loop.cmd` loops on it and relaunches Node (`LAUNCH.bat` is the end-user prod equivalent).
+- **`dev-rebuild.bat`** = POST `/api/shutdown` → wait up to 10 s for ace-server.exe to die (force-kill at 10 s, abort at 15 s) → `engine\build.cmd`. It does **not** restart the app — run `dev.bat` afterwards (agents never use `LAUNCH.bat`).
 - **Bootstrap gate**: on portable Windows CUDA builds, the server first downloads cuBLAS DLLs from HuggingFace before the engine is usable; until then `POST /api/generate` returns 503 `Engine not ready: <bootStatus>`. No internet → CPU-only start with a banner in `node_console.log`.
 
 ## Generation orchestration facts that change your diagnosis
@@ -168,7 +168,8 @@ Dev-mode note: under `dev.bat` (tsx watch), every source-change auto-restart cre
 | `server/src/config.ts` | Engine exe auto-detect, port 8085, env-var overrides |
 | `engine/tools/hot-step-server.cpp` | C++ engine HTTP server; FATAL emit sites; 413/payload limits |
 | `dev-rebuild.bat` | The ONLY sanctioned way to rebuild the engine, always |
-| `LAUNCH.bat` / `dev.bat` | Prod launcher (with restart loop) / dev mode (Vite HMR + tsx watch) |
+| `dev.bat` | The launcher agents use: dev mode (Vite :3000 HMR + tsx watch on :3001), started detached |
+| `LAUNCH.bat` | End-user prod launcher (Node :3001 serving `ui/dist/`) — agents don't run it |
 
 ## Institutional knowledge
 

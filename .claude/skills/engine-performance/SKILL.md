@@ -64,7 +64,7 @@ Build requirement: the vendored TRT SDK at `engine/deps/tensorrt/` (present: `in
 
 There is **no dedicated bench tool** — instrumentation is log-based. Logs land in `logs\YYYY-MM-DD_HH-MM-SS\` per session (name-sorted = time-sorted).
 
-1. Run a generation normally (via the UI, `dev.bat` or `LAUNCH.bat`).
+1. Run a generation normally, through the UI at `http://localhost:3000` (app started detached with `dev.bat`).
 2. Read the **server-side timing table** — best single overview. It is in `logs\<newest>\generations\gen_<uuid>_<task>.log` as a `[Timing] ── Pipeline Breakdown ──` block (rendered by `server/src/routes/generate.ts:1257`) with per-stage seconds/percent bars: LM Phase, model loads, FSQ Detokenize, Adapter Refit/Merge, DiT Denoising, VAE Decode, Text Encoding, plus gap rows (HTTP→Engine, DiT Model Load, etc.).
 3. Cross-check against **engine-side ground truth** in `logs\<newest>\ace_engine.log` (see Golden rule 6). Key markers:
    - `[DiT-Generate] TRT Total: X ms (Y ms/sample)` (`pipeline-synth-ops.cpp:1384`) or the GGML equivalent `[DiT-Generate] Total: ...`

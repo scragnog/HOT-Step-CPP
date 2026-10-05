@@ -1,6 +1,8 @@
 # HTTP API index
 
-The Node server on port 3001 exposes everything the UI does as JSON over HTTP. This page is
+The Node server on port 3001 exposes everything the UI does as JSON over HTTP. Agents run the
+app with `dev.bat` detached, so they reach these routes through `http://localhost:3000` — the
+Vite dev server proxies `/api`, `/audio` and `/references` to 3001. This page is
 the generated index of every route, grouped by mount prefix, with the file that defines it.
 It is rebuilt by `node tools/docs/build-docs.mjs` from the mounts in `server/src/index.ts`
 and the `router.<verb>(...)` calls in `server/src/routes/`. For request and response shapes,

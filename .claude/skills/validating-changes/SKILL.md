@@ -7,7 +7,9 @@ description: Defines the verification bar every HOT-Step CPP change must clear b
 
 HOT-Step CPP is a 3-tier app: a C++17/CUDA/GGML **engine** (`engine/`, spawned as
 `ace-server.exe` on port 8085), a Node/TypeScript/Express **server** (`server/src/`,
-port 3001), and a React 19 **UI** (`ui/src/`, Vite dev server on port 3000). A change
+port 3001), and a React 19 **UI** (`ui/src/`, Vite dev server on port 3000). Agents run the
+app with `dev.bat`, detached, and verify through `http://localhost:3000`; :3001 is the
+end-user prod address. A change
 is NOT done until it clears the bar for **every tier it touches**. This skill defines
 those bars, how to run a headless end-to-end smoke generation, and how to report
 results honestly.
@@ -117,8 +119,9 @@ Bar: rebuild compiles AND the engine starts clean after relaunch (log check).
    `ace-server.exe` to exit, force-kills at 10 s, aborts at 15 s, then runs
    `engine\build.cmd`.
 
-2. **The rebuild does NOT restart the app.** Relaunch (`dev.bat` for dev,
-   `LAUNCH.bat` for prod) before any runtime verification.
+2. **The rebuild does NOT restart the app.** Relaunch with `dev.bat` (detached) and check
+   `http://localhost:3000` before any runtime verification. `LAUNCH.bat` is the end-user prod
+   launcher — agents don't run it.
 
 3. Clean-start check — read the newest `logs/<session>/ace_engine.log` and confirm:
    - model registry scan ran (`[Server] Scanning models in ...` / `[Registry] ...` lines),
@@ -159,7 +162,7 @@ user to look and wait for their screenshot/feedback.
 
 Bar: **the human's ear.** There is no mechanical substitute — see Golden rules 1–2.
 Your job ends at: generation succeeded mechanically, here is the file path
-(`server/data/audio/<uuid>.wav` or `http://localhost:3001/audio/<uuid>.wav`), here
+(`server/data/audio/<uuid>.wav` or `http://localhost:3000/audio/<uuid>.wav` in dev), here
 are the seed and params for reproduction. Then wait.
 
 ## Tier 5 — End-to-end headless smoke generation
@@ -172,20 +175,20 @@ Full request/response/log detail: [reference.md](reference.md).
 1. **Pre-flight health** — require `engine.ready -eq $true`:
 
    ```powershell
-   Invoke-RestMethod http://localhost:3001/api/health
+   Invoke-RestMethod http://localhost:3000/api/health
    ```
 
 2. **Check the queue is free** (don't queue behind/ahead of the user silently):
 
    ```powershell
-   Invoke-RestMethod http://localhost:3001/api/generate/queue
+   Invoke-RestMethod http://localhost:3000/api/generate/queue
    ```
 
 3. **Get an auth token** (`POST /api/generate` returns 401 without a Bearer token;
    tokens are in-memory and reset on server restart):
 
    ```powershell
-   $auth = Invoke-RestMethod http://localhost:3001/api/auth/auto
+   $auth = Invoke-RestMethod http://localhost:3000/api/auth/auto
    $hdr = @{ Authorization = "Bearer $($auth.token)" }
    ```
 
@@ -203,7 +206,7 @@ Full request/response/log detail: [reference.md](reference.md).
      inferenceSteps = 8
      seed           = 42      # fixed seed = reproducible; or randomSeed = $true
    } | ConvertTo-Json
-   $job = Invoke-RestMethod -Method Post -Uri http://localhost:3001/api/generate -Headers $hdr -ContentType 'application/json' -Body $body
+   $job = Invoke-RestMethod -Method Post -Uri http://localhost:3000/api/generate -Headers $hdr -ContentType 'application/json' -Body $body
    $job.jobId
    ```
 
@@ -214,7 +217,7 @@ Full request/response/log detail: [reference.md](reference.md).
    saving | succeeded | failed | cancelled`):
 
    ```powershell
-   do { Start-Sleep 3; $s = Invoke-RestMethod "http://localhost:3001/api/generate/status/$($job.jobId)";
+   do { Start-Sleep 3; $s = Invoke-RestMethod "http://localhost:3000/api/generate/status/$($job.jobId)";
         "{0} {1}% {2}" -f $s.status, $s.progress, $s.stage
    } while ($s.status -notin 'succeeded','failed','cancelled')
    $s | ConvertTo-Json -Depth 5

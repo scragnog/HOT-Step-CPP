@@ -154,9 +154,12 @@ macOS and Linux: `install.sh`, or the same two `npm install` commands.
 
 ## Run
 
+Agents always run `dev.bat`, detached, and open the app at `http://localhost:3000`. The prod
+launchers below are the end-user path.
+
 | Command | Mode | What starts |
 |---|---|---|
-| `LAUNCH.bat` | Production (Windows) | Builds `ui/dist` if it is missing, then runs `npx tsx src/index.ts` in `server/` in a restart loop. Open `http://localhost:3001` |
+| `LAUNCH.bat` | Production (Windows) | Builds `ui/dist` if it is missing, then runs `npx tsx src/index.ts` in `server/` in a restart loop. Open `http://localhost:3001`. End-user path — agents use `dev.bat` |
 | `dev.bat` | Development (Windows) | Two minimised windows: the server through `server/restart-loop.cmd` (`npx tsx watch src/index.ts`, with `HOT_STEP_DEV=1`), and Vite with `npx vite --port 3000 --host`. Open `http://localhost:3000` |
 | `launch.sh` | Production (macOS, Linux) | The Node server, using a bundled, Homebrew or system Node in that order |
 | `dev.sh` | Development (macOS) | Vite HMR plus `tsx watch` |
@@ -196,8 +199,8 @@ respawn and file-lock loop.
   `http://localhost:3001/api/shutdown` so Node stops the engine, Vite and itself; waits for
   `ace-server.exe` to exit, force-killing it after 10 seconds and giving up after 15; then
   calls `engine\build.cmd`. It is safe when the app is not running.
-- **It does not restart the app.** Start it again with `dev.bat` (the shutdown also killed
-  Vite) or `LAUNCH.bat`.
+- **It does not restart the app.** Start it again with `dev.bat`, detached (the shutdown also
+  killed Vite); `LAUNCH.bat` is the end-user prod launcher.
 - **Check the build yourself.** Look for `error C` or `error LNK` lines in the output and
   confirm `engine\build\Release\ace-server.exe` has a fresh timestamp. The exit code is not
   a reliable signal.
@@ -207,7 +210,7 @@ respawn and file-lock loop.
   three steps by hand:
 
   ```powershell
-  try { Invoke-RestMethod -Method Post -Uri http://localhost:3001/api/shutdown -TimeoutSec 10 | Out-Null } catch {}
+  try { Invoke-RestMethod -Method Post -Uri http://localhost:3000/api/shutdown -TimeoutSec 10 | Out-Null } catch {}   # :3001 only if Vite is already down
   $n = 0; while ((Get-Process ace-server -ErrorAction SilentlyContinue) -and $n -lt 20) { Start-Sleep 1; $n++ }
   & cmd.exe /c "D:\path\to\HOT-Step-CPP\engine\build.cmd"
   ```

@@ -15,8 +15,8 @@ in the source tree. Read it before you pick a file to edit.
 
 ```
 Browser
-  |  dev:  http://localhost:3000  (Vite HMR, proxies /api /audio /references to :3001)
-  |  prod: http://localhost:3001
+  |  dev (agents):  http://localhost:3000  (Vite HMR, proxies /api /audio /references to :3001)
+  |  prod (end users): http://localhost:3001
   v
 Node server   server/src/index.ts   Express on 0.0.0.0:3001
   |-- /api/*         route files in server/src/routes/
@@ -37,7 +37,7 @@ ace-server    engine/tools/hot-step-server.cpp   127.0.0.1:8085
 | Service | Default port | Set by |
 |---|---|---|
 | Node server | 3001 | `SERVER_PORT` |
-| Vite dev server | 3000 | hard-coded in `ui/vite.config.ts` and `dev.bat` |
+| Vite dev server | 3000 | hard-coded in `ui/vite.config.ts` and `dev.bat` — the address agents use |
 | ace-server | 8085 | `ACESTEPCPP_PORT` |
 
 The `<data dir>` is `server/data/` in a git checkout. [config.md](config.md) has every

@@ -15,7 +15,7 @@ The Node server (`server/src/`) is the middle tier of HOT-Step CPP, a local AI m
 - **Adapter** — a LoRA/LoKr fine-tune applied to the DiT at generation time.
 
 ```
-UI (fetch /api/*) → Express :3001 → routes/*.ts → services/*.ts
+UI (fetch /api/*) → Express :3001 (dev: Vite on :3000 proxies /api to it) → routes/*.ts → services/*.ts
                                         ├→ getDb()  (better-sqlite3, synchronous)
                                         └→ aceClient (HTTP → ace-server :8085)
 ```
@@ -47,7 +47,7 @@ UI (fetch /api/*) → Express :3001 → routes/*.ts → services/*.ts
 
 ## Dev loop
 
-1. Start dev mode: `d:\Ace-Step-Latest\hot-step-cpp\dev.bat` — runs Vite (UI, :3000, HMR) plus `server\restart-loop.cmd`, which loops `npx tsx watch src/index.ts` (restart-loop.cmd:6). Prod mode is `LAUNCH.bat` (Node :3001 serving prebuilt `ui/dist/`).
+1. Start dev mode: `d:\Ace-Step-Latest\hot-step-cpp\dev.bat` — runs Vite (UI, :3000, HMR) plus `server\restart-loop.cmd`, which loops `npx tsx watch src/index.ts` (restart-loop.cmd:6). Develop against `http://localhost:3000`. `LAUNCH.bat` (Node :3001 serving prebuilt `ui/dist/`) is the end-user prod path — agents don't run it.
 2. Save any `server/src/**/*.ts` file → tsx watch restarts the **whole Node process**, which kills and respawns ace-server too (it's a child process). Expect a few seconds of engine downtime after every save; a generation in flight will die.
 3. The restart loop re-enters if a `.restart-requested` marker file exists at repo root — this is how the in-app "restart server" works without killing Vite.
 4. Type-check before committing: `cd d:\Ace-Step-Latest\hot-step-cpp\server; npx tsc --noEmit`.

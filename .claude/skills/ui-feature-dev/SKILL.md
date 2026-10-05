@@ -37,10 +37,10 @@ Terms used below:
 ## Dev loop (PowerShell, from repo root)
 
 ```powershell
-.\dev.bat
+.\dev.bat     # run it detached; the app then lives at http://localhost:3000
 ```
 
-This starts BOTH tiers (verified `dev.bat`): the Node server via `server\restart-loop.cmd` on **:3001** (tsx watch, auto-restart) and `npx vite --port 3000 --host` in `ui\`. Develop against **http://localhost:3000** — Vite proxies `/api`, `/audio`, and `/references` to :3001 (`ui/vite.config.ts:10-24`). `LAUNCH.bat` = prod mode, serving prebuilt `ui/dist/` from :3001 (`server/src/index.ts:126`).
+This starts BOTH tiers (verified `dev.bat`): the Node server via `server\restart-loop.cmd` on **:3001** (tsx watch, auto-restart) and `npx vite --port 3000 --host` in `ui\`. Develop against **http://localhost:3000** — Vite proxies `/api`, `/audio`, and `/references` to :3001 (`ui/vite.config.ts:10-24`). `LAUNCH.bat` is the end-user prod launcher (Node :3001 serving prebuilt `ui/dist/`, `server/src/index.ts:126`) — agents never run it.
 
 Checks while developing:
 

@@ -20,7 +20,7 @@ HOT-Step CPP is a desktop app for local AI music generation (caption + lyrics in
 
 ## Golden rules (hard constraints — each prevents expensive damage)
 
-1. **C++ changes: rebuild with `.\dev-rebuild.bat` at repo root, NEVER `engine\build.cmd` directly, under any circumstances.** WHY: you cannot reliably tell whether the app is running; the Node server auto-respawns `ace-server.exe` on crash (`server/src/index.ts:284-308`); killing the engine mid-run causes an infinite respawn + file-lock loop that blocks the build. `dev-rebuild.bat` POSTs `/api/shutdown`, waits for the process (force-kills at 10 s), then builds. It does NOT relaunch — restart with `.\dev.bat` or `.\LAUNCH.bat` yourself. Recompile immediately after editing any `engine/src/` or `engine/tools/` file.
+1. **C++ changes: rebuild with `.\dev-rebuild.bat` at repo root, NEVER `engine\build.cmd` directly, under any circumstances.** WHY: you cannot reliably tell whether the app is running; the Node server auto-respawns `ace-server.exe` on crash (`server/src/index.ts:284-308`); killing the engine mid-run causes an infinite respawn + file-lock loop that blocks the build. `dev-rebuild.bat` POSTs `/api/shutdown`, waits for the process (force-kills at 10 s), then builds. It does NOT relaunch — restart it yourself with `.\dev.bat` (detached) and work at `http://localhost:3000`. `LAUNCH.bat` is the end-user prod path; agents do not run it. Recompile immediately after editing any `engine/src/` or `engine/tools/` file.
 2. **NEVER `cmake --build . --clean-first`** unless the GGML/CUDA layer itself changed. WHY: CUDA kernel recompilation takes 20+ minutes. For stale `.obj` issues delete only `engine\build\acestep-core.dir\` and `engine\build\Release\acestep-core.lib`.
 3. **Engine HTTP/API changes go in `engine/tools/hot-step-server.cpp`, NOT `engine/tools/ace-server.cpp`.** WHY: upstream `ace-server.cpp` is kept as reference and is NOT compiled — the `ace-server` binary is built from `hot-step-server.cpp` (`engine/CMakeLists.txt:416-419`). Edits to `ace-server.cpp` silently do nothing.
 4. **Don't `npm run build` during dev.** Type-check with `npx tsc --noEmit` (run in `server\` and `ui\`). Only build before user testing.
@@ -33,7 +33,8 @@ HOT-Step CPP is a desktop app for local AI music generation (caption + lyrics in
 ## Process / port topology
 
 ```
-LAUNCH.bat (prod) or dev.bat (dev)
+dev.bat (agents — run detached, app at http://localhost:3000)
+  (LAUNCH.bat = end-user prod launcher; agents don't use it)
   └─ Node server  server/src/index.ts → Express :3001 (host 0.0.0.0, config.ts:186-187)
        ├─ serves prebuilt ui/dist/ with SPA fallback (index.ts:123-140)
        ├─ /api/* routes → SQLite server/data/hotstep.db
@@ -117,8 +118,8 @@ API mounts are all registered in `server/src/index.ts:72-95`. Route files in `se
 ## Exact commands (PowerShell)
 
 ```powershell
-.\dev.bat                       # Dev: Vite :3000 HMR + Node :3001 tsx watch
-.\LAUNCH.bat                    # Prod
+.\dev.bat                       # The launcher agents use: Vite :3000 HMR + Node :3001 tsx watch; run detached, check http://localhost:3000
+.\LAUNCH.bat                    # Prod launcher for end users — agents never run it
 .\dev-rebuild.bat               # C++ rebuild: graceful shutdown -> wait -> build (then relaunch yourself)
 npx tsc --noEmit -p server      # Type-check server, from repo root (do NOT npm run build in dev)
 npx tsc --noEmit -p ui          # Type-check UI, from repo root

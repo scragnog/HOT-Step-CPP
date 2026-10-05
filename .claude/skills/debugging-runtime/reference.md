@@ -24,22 +24,25 @@ Select-String -Path "$s\node_console.log" -Pattern "exited with code|Crashed|FAT
 # Trace one job end-to-end (paste the full UUID from the gen filename)
 Select-String -Path "$s\node_console.log" -Pattern "Job <uuid>"
 
-# Live health / queue (Node server, :3001)
-Invoke-RestMethod http://localhost:3001/api/health | ConvertTo-Json -Depth 4
-Invoke-RestMethod http://localhost:3001/api/generate/queue
+# Live health / queue (dev app: Vite :3000 proxies /api to the Node server on :3001)
+Invoke-RestMethod http://localhost:3000/api/health | ConvertTo-Json -Depth 4
+Invoke-RestMethod http://localhost:3000/api/generate/queue
 
 # Engine direct (:8085) — WARNING: may hang mid-compute (single-threaded httplib); that is normal, not a crash
 Invoke-RestMethod http://localhost:8085/health
 
 # Unwedge
-Invoke-RestMethod -Method Post http://localhost:3001/api/generate/cancel-all
-Invoke-RestMethod -Method Post http://localhost:3001/api/generate/reset-queue
+Invoke-RestMethod -Method Post http://localhost:3000/api/generate/cancel-all
+Invoke-RestMethod -Method Post http://localhost:3000/api/generate/reset-queue
 
 # Clean full shutdown (engine + Vite + Node)
-Invoke-RestMethod -Method Post http://localhost:3001/api/shutdown
+Invoke-RestMethod -Method Post http://localhost:3000/api/shutdown
 ```
 
-If the server never started (no session folder), run it in the foreground to see the error:
+If the app never started, restart it detached with `dev.bat` and read the newest
+`logs/<session>/node_console.log`. If there is no session folder at all, run the Node
+server in the foreground for one diagnostic pass to see the error (this bypasses dev mode
+— do not use it as the normal way to run the app):
 
 ```powershell
 Set-Location server; npx tsx src/index.ts

@@ -148,6 +148,6 @@ Select-String -Path "$($s.FullName)\ace_engine.log" -Pattern '\[DiT\] (Solver|Gu
 Select-String -Path "$($s.FullName)\ace_engine.log" -Pattern 'Parsed \d+ plugin_params'
 
 # Dump your plugin's schema as the UI sees it
-(Invoke-RestMethod http://localhost:3001/api/plugins).solvers |
+(Invoke-RestMethod http://localhost:3000/api/plugins).solvers |
   Where-Object { $_.name -eq 'my_solver' } | ConvertTo-Json -Depth 6
 ```
