@@ -1,7 +1,6 @@
-// ReviewPanel.test.ts — a remote-origin ladder must stay reachable through
-// "Finish scored" (Reviewer, slice 3 blocker #5: the old filter excluded
-// every row with an `origin`, making a finished, scored remote ladder
-// unreachable from this UI). No UI test runner is wired up for this project;
+// ReviewPanel.test.ts — a ladder mirrored from a worker must stay reachable
+// through "Finish scored" (an earlier filter excluded every row with an
+// `origin`). No UI test runner is wired up for this project;
 // run with the server's tsx:
 //   (cd server && node --import tsx --test ../ui/src/components/training-studio/ReviewPanel.test.ts)
 import assert from 'node:assert/strict';
@@ -18,7 +17,7 @@ function row(over: Partial<Yue2ReviewRow>): Yue2ReviewRow {
   };
 }
 
-test('a scored, finished, remote-origin row is still finishable', () => {
+test('a scored, finished, worker-origin row is still finishable', () => {
   const out = selectFinishable([row({ origin: 'LivingRoom' })], new Set());
   assert.equal(out.length, 1);
 });

@@ -142,8 +142,8 @@ import {
 } from '../services/training/yue2ArRuns.js';
 import { YUE2_LICENSE_NOTICE } from '../services/backends/yue2/index.js';
 import { yue2StyleString } from '../services/backends/yue2/style.js';
-import { jointRunForAdapter, listYue2AitkRuns, yue2JointOutputDirectory, deleteYue2AitkRun, yue2ReviewComplete, setYue2ReviewComplete, yue2RunFinished } from '../services/training/yue2AitkRuns.js';
-import { deleteWorkerYue2Ladder, hydrateYue2LadderCheckpoint } from '../services/training/trainingWorkers.js';
+import { jointRunForAdapter, listYue2AitkRuns, yue2JointOutputDirectory, yue2ReviewComplete, setYue2ReviewComplete, yue2RunFinished } from '../services/training/yue2AitkRuns.js';
+import { deleteYue2Run } from '../services/training/yue2Mirror.js';
 import { clearPreparedCaches, listPreparedCaches, YUE2_CORE_CACHE } from '../services/training/preparedDataReset.js';
 import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
 import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions, renderYue2JointPreview } from '../services/training/yue2JointPreview.js';
@@ -151,7 +151,7 @@ import { runOnGpuLane } from '../services/generation/gpuLane.js';
 import { listYue2RungScores, scoreYue2Rung, yue2RungScoresCsv, getYue2AlbumScore, scoreYue2Album } from '../services/training/yue2RungScores.js';
 import { calibrateYue2Length, ensureDatasetProfile, noteYue2TrainLog, type Yue2Calibration } from '../services/training/datasetProfile.js';
 import { optimisationPath, readOptimisation } from '../services/training/yue2Optimise.js';
-import { migrateYue2RemoteFolders, planYue2Cleanup, runYue2Cleanup } from '../services/training/yue2Cleanup.js';
+import { planYue2Cleanup, runYue2Cleanup } from '../services/training/yue2Cleanup.js';
 import { listMm3LmAdapters } from '../services/backends/minimax/lmAdapter.js';
 import { listMm3PreviewCandidates } from '../services/training/mm3Preview.js';
 import { writeSidecar } from '../services/training/sidecarIO.js';
@@ -166,7 +166,7 @@ import {
 } from '../services/training/yue2AitkPrepareRunner.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { parseYue2JointStopMode, applyBaseMatchedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint } from '../services/training/yue2JointTrainRunner.js';
-import { appendToBatch as appendToYue2Batch, finishScoredLadders, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, hasActiveBatch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
+import { appendToBatch as appendToYue2Batch, finishScoredLadders, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
 import {
   aceTrainExe, engineGpuBackend, engineSupportsFlashAttnTraining,
   findRegCorpora, getModelSnapshot, pickBf16, pickDitBaseFor, pickLmFor, refreshModelSnapshot,
@@ -4076,8 +4076,8 @@ router.get('/datasets/:id/yue2-joint-runs', (req: Request, res: Response) => {
     const active = queue.activeJobForDataset(ds.id);
     const activeJoint = active?.kind === 'yue2-joint-train' ? active : undefined;
     res.json({
-      // A pulled ladder's own queue lives on its worker, not this machine's
-      // active job — "still refining" tracks the worker's own status.
+      // A mirrored run's own queue lives on its worker, not this machine's
+      // active job — "still refining" tracks the worker's status as mirrored.
       runs: runs.map(run => ({ ...run, live: activeJoint?.id === run.jobId || (run.status === 'running' && !!run.origin), reviewComplete: yue2ReviewComplete(run.output),
         resumeError: typeof run.options.dataset !== 'string' || !fs.existsSync(run.options.dataset)
           ? 'Prepared dataset was cleared or is missing'
@@ -4100,26 +4100,11 @@ router.post('/datasets/:id/yue2-joint-preset', async (req: Request, res: Respons
     const selected = typeof req.body?.checkpointDir === 'string' ? req.body.checkpointDir.trim() : '';
     if (!selected) { res.status(400).json({ error: 'Select a joint checkpoint' }); return; }
     const matches = (r: ReturnType<typeof listYue2AitkRuns>[number]) => r.checkpoints.find(c => path.resolve(c.dir).toLowerCase() === path.resolve(selected).toLowerCase());
-    let runs = listYue2AitkRuns(ds.id, ds.slug);
-    let owningRun = runs.find(matches);
-    let checkpoint = owningRun && matches(owningRun);
+    const runs = listYue2AitkRuns(ds.id, ds.slug);
+    const owningRun = runs.find(matches);
+    const checkpoint = owningRun && matches(owningRun);
     if (!checkpoint) { res.status(400).json({ error: 'Select a joint checkpoint belonging to this dataset' }); return; }
-    // A remote-origin rung: always re-verify against a fresh worker manifest
-    // before linking, even if arPath/narPath already look present — a local
-    // disk scan only checks the files exist, not that they still match the
-    // worker's hash, so a file left corrupt by an earlier partial attempt
-    // would otherwise get linked unverified. Never the rest of the ladder. A
-    // failed or partial fetch stops here; nothing is linked and the worker's
-    // copy is never touched.
-    if (owningRun?.origin) {
-      const hydrated = await hydrateYue2LadderCheckpoint(owningRun, checkpoint.step);
-      if (hydrated.status === 'error') { res.status(400).json({ error: `Could not fetch this rung from ${owningRun.origin.worker}: ${hydrated.errors.join('; ') || 'unknown error'}` }); return; }
-      if (hydrated.status === 'partial') { res.status(409).json({ error: `Only part of this rung arrived from ${owningRun.origin.worker}: ${hydrated.errors.join('; ')}. Try again.` }); return; }
-      runs = listYue2AitkRuns(ds.id, ds.slug);
-      owningRun = runs.find(r => r.jobId === owningRun!.jobId);
-      checkpoint = owningRun && owningRun.checkpoints.find(c => c.step === checkpoint!.step);
-    }
-    if (!checkpoint?.arPath || !checkpoint.narPath) {
+    if (!checkpoint.arPath || !checkpoint.narPath) {
       res.status(400).json({ error: 'Select a complete joint checkpoint belonging to this dataset' }); return;
     }
     const knownPaths = runs.flatMap(run => run.checkpoints).flatMap(item => [item.arPath, item.narPath].filter((value): value is string => !!value));
@@ -4134,14 +4119,6 @@ router.post('/datasets/:id/yue2-joint-preset', async (req: Request, res: Respons
     if (owningRun) {
       try { noteYue2TrainLog(ds.slug, owningRun.jobId, { output: owningRun.output, keptStep: checkpoint.step }); }
       catch (err: any) { console.warn(`[Training] Could not note the loss log of run ${owningRun.jobId}: ${err?.message || err}`); }
-    }
-    // The link just succeeded: this rung's checkpoint is verified on disk
-    // here, so the worker's whole ladder folder (every rung, every preview)
-    // can go. Best-effort — a worker offline or already cleaned up must
-    // never turn a successful local link into a failed response.
-    if (owningRun?.origin) {
-      try { await deleteWorkerYue2Ladder(owningRun.origin.worker, ds.id, owningRun.origin.remoteJobId); }
-      catch (err: any) { console.warn(`[Training] Could not delete ${owningRun.origin.worker}'s copy of ${owningRun.origin.remoteJobId}: ${err?.message || err}`); }
     }
     res.json({ updated: refreshed.updated, arPath: checkpoint.arPath, narPath: checkpoint.narPath });
   } catch (err: any) {
@@ -4182,18 +4159,15 @@ router.get('/yue2-review', (_req: Request, res: Response) => {
     for (const ds of repo.listDatasets()) {
       const active = queue.activeJobForDataset(ds.id);
       for (const run of listYue2AitkRuns(ds.id, ds.slug)) {
-        // A remote-only rung (pulled from a worker, no local weights yet) is
-        // still a usable rung here — listening and scoring need its
-        // previews and meters, not the weight file.
-        const rungs = run.checkpoints.filter(c => c.rung && ((c.arPath && c.narPath) || c.availability === 'remote'));
+        const rungs = run.checkpoints.filter(c => c.rung && c.arPath && c.narPath);
         if (!rungs.length) continue;
         const previews = listYue2JointPreviews(run.output).filter(p => p.status === 'done' && rungs.some(r => r.step === p.step));
         const scored = new Set(listYue2RungScores(ds.id, run.jobId).filter(s => s.likeness !== null || s.corruption !== null || s.notes).map(s => s.step));
         const kls = rungs.map(r => r.kl).filter((k): k is number => typeof k === 'number');
         let best: ReturnType<typeof bestScoredRung> = null;
         try { best = bestScoredRung(ds.id, run.jobId, ds.slug); } catch { /* stays null */ }
-        // A pulled run's own queue lives on its worker, not this machine's
-        // `active` job — "still refining" tracks the worker's own status.
+        // A mirrored run's own queue lives on its worker, not this machine's
+        // `active` job — "still refining" tracks the worker's status as mirrored.
         const live = active?.id === run.jobId || (run.status === 'running' && !!run.origin);
         rows.push({ datasetId: ds.id, datasetSlug: ds.slug, datasetName: ds.name, refineRun: run.jobId, status: run.status, createdAt: run.createdAt,
           origin: run.origin?.worker ?? null,
@@ -4224,20 +4198,6 @@ router.post('/datasets/:id/yue2-review-complete', (req: Request, res: Response) 
 
 /** Cleanup around a chosen rung (Refine tab): GET the plan with sizes, POST
  * the chosen items. Refused while a job or pipeline is active for the dataset. */
-/** One-shot move of pulled ladders out of the old remote-<worker>-<id>
- *  folders (docs/dev/training-internals.md). Runs in the app so each move
- *  shares the per-run lock with pulls and checkpoint fetches. `apply` other
- *  than true only lists the moves; applying refuses while anything trains. */
-router.post('/yue2-remote-folders/migrate', async (req: Request, res: Response) => {
-  try {
-    const apply = req.body?.apply === true;
-    if (apply && (queue.listJobs().some(j => j.status === 'running' || j.status === 'queued') || hasActivePipeline() || hasActiveBatch())) {
-      res.status(409).json({ error: 'A training job, pipeline or batch is queued or running.' }); return;
-    }
-    res.json({ apply, moves: await migrateYue2RemoteFolders(apply) });
-  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
-});
-
 router.get('/datasets/:id/yue2-cleanup-plan', (req: Request, res: Response) => {
   try {
     const ds = repo.getDataset(req.params.id as string);
@@ -4264,10 +4224,9 @@ router.post('/datasets/:id/yue2-cleanup', async (req: Request, res: Response) =>
 });
 
 /** DELETE /datasets/:id/yue2-joint-runs/:jobId — remove a finished run's
- * catalogue entry and its checkpoints from disk. A live run is refused.
- * A pulled ladder's own discard action: also tells its worker to drop the
- * whole folder (every rung, every preview) — best-effort, since the worker
- * being offline or already clear of it must never block the local delete. */
+ * catalogue entry and its checkpoints from disk. A live run is refused. A
+ * mirrored run is tombstoned so the mirror never brings it back, and its
+ * worker copy is dropped best-effort (yue2Mirror.ts's deleteYue2Run). */
 router.delete('/datasets/:id/yue2-joint-runs/:jobId', async (req: Request, res: Response) => {
   try {
     const ds = repo.getDataset(req.params.id as string);
@@ -4277,11 +4236,7 @@ router.delete('/datasets/:id/yue2-joint-runs/:jobId', async (req: Request, res: 
     if (!run) { res.status(404).json({ error: 'Run not found for this dataset' }); return; }
     const active = queue.activeJobForDataset(ds.id);
     if (active?.id === jobId || run.status === 'running') { res.status(409).json({ error: 'That run is still training; stop it first' }); return; }
-    if (run.origin) {
-      try { await deleteWorkerYue2Ladder(run.origin.worker, ds.id, run.origin.remoteJobId); }
-      catch (err: any) { console.warn(`[Training] Could not delete ${run.origin.worker}'s copy of ${run.origin.remoteJobId}: ${err?.message || err}`); }
-    }
-    res.json(deleteYue2AitkRun(jobId));
+    res.json(await deleteYue2Run(jobId));
   } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });
 

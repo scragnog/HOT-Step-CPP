@@ -29,7 +29,6 @@ import { bestScoredRung } from './yue2BestRung.js';
 import { listYue2RungScores } from './yue2RungScores.js';
 import { runYue2Cleanup } from './yue2Cleanup.js';
 import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
-import { deleteWorkerYue2Ladder, hydrateYue2LadderCheckpoint } from './trainingWorkers.js';
 
 export type Yue2BatchStage = 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine' | 'nar' | 'finish';
 export type Yue2BatchStatus = 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
@@ -259,7 +258,7 @@ function narFurtherRequest(runId: string, step: number, knee = true): Record<str
 async function finishLadder(item: Yue2BatchItem): Promise<void> {
   const ds = repo.getDataset(item.datasetId);
   if (!ds) throw new Error('Dataset not found');
-  let runs = listYue2AitkRuns(ds.id, ds.slug);
+  const runs = listYue2AitkRuns(ds.id, ds.slug);
   const narJob = item.stages.find(s => s.stage === 'nar')?.jobId;
   let runId = item.refineRun ?? '';
   let step = item.pickStep;
@@ -275,38 +274,19 @@ async function finishLadder(item: Yue2BatchItem): Promise<void> {
     if (!nar || !last) throw new Error('The NAR further-training run left no complete checkpoint');
     runId = nar.jobId; step = last.step;
   }
-  let ckpt = runs.find(r => r.jobId === runId)?.checkpoints.find(c => c.step === step);
+  const ckpt = runs.find(r => r.jobId === runId)?.checkpoints.find(c => c.step === step);
   if (!ckpt || step === undefined) throw new Error(`No checkpoint at step ${step} of run ${runId}`);
-  // A remote-origin rung (base-matched ladders only — a NAR further-training
-  // run is always a local job): always re-verify against a fresh worker
-  // manifest before linking, even if arPath/narPath already look present —
-  // see the matching comment in routes/training.ts's yue2-joint-preset route.
-  let owningRun = runs.find(r => r.jobId === runId);
-  if (!narJob && owningRun?.origin) {
-    const hydrated = await hydrateYue2LadderCheckpoint(owningRun, step);
-    if (hydrated.status === 'error') throw new Error(`Could not fetch this rung from ${owningRun.origin.worker}: ${hydrated.errors.join('; ') || 'unknown error'}`);
-    if (hydrated.status === 'partial') throw new Error(`Only part of this rung arrived from ${owningRun.origin.worker}: ${hydrated.errors.join('; ')}`);
-    runs = listYue2AitkRuns(ds.id, ds.slug);
-    owningRun = runs.find(r => r.jobId === runId);
-    ckpt = owningRun?.checkpoints.find(c => c.step === step);
-  }
-  if (!ckpt?.arPath || !ckpt.narPath) throw new Error(`No complete checkpoint at step ${step} of run ${runId}`);
+  if (!ckpt.arPath || !ckpt.narPath) throw new Error(`No complete checkpoint at step ${step} of run ${runId}`);
   const known = runs.flatMap(r => r.checkpoints).flatMap(c => [c.arPath, c.narPath].filter((v): v is string => !!v));
   const refreshed = refreshYue2PresetsForJointCheckpoint({ slug: ds.slug, lyricsSetId: ds.lyricsSetId }, ckpt.arPath, ckpt.narPath, known);
   // The durable link record, not the preset count, is proof the checkpoint
-  // is now the record of truth — cleanup and the worker delete below must
-  // never run off an unlinked checkpoint (Reviewer, blocker #1).
+  // is now the record of truth — cleanup below must never run off an
+  // unlinked checkpoint (Reviewer, blocker #1).
   if (!refreshed.linked) throw new Error(`Could not record this checkpoint as linked: ${refreshed.error || 'unknown error'}`);
   const score = item.refineRun && !narJob ? listYue2RungScores(ds.id, item.refineRun).find(r => r.step === step) : undefined;
   const result = await runYue2Cleanup({ id: ds.id, slug: ds.slug, sourceDir: ds.sourceDir, lyricsSetId: ds.lyricsSetId }, runId, step,
     { caches: true, otherCheckpoints: true, otherRuns: true, resume: true, otherPreviews: true },
     { blind: score?.blind ?? false, blindLabel: score?.blindLabel ?? '' });
-  // The link just succeeded: best-effort, never turns a successful local
-  // link into a failed batch item.
-  if (owningRun?.origin) {
-    try { await deleteWorkerYue2Ladder(owningRun.origin.worker, ds.id, owningRun.origin.remoteJobId); }
-    catch (err: any) { console.warn(`[Training] Could not delete ${owningRun.origin.worker}'s copy of ${owningRun.origin.remoteJobId}: ${err?.message || err}`); }
-  }
   if (result.finishError) throw new Error(result.finishError);
   console.log(`[Training] yue2 batch finish ${ds.slug}: linked step ${step} of ${runId}; removed ${result.done.join(', ') || 'nothing'}`);
 }
@@ -482,12 +462,12 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
     item.pickStep = best.step; persist(state);
     const run = listYue2AitkRuns(item.datasetId, ds?.slug).find(r => r.jobId === item.refineRun);
     // A decoder-only follow-up legitimately gets no second one (nothing to
-    // reject — this stage is correctly "done"). A remote-origin run is a
-    // different case: NAR further training on it isn't supported yet (see
-    // RefinePanel.tsx's onUse), so this must stop the item here with a clear
-    // reason rather than silently skip to 'finish' and mark NAR done when it
-    // never ran (Reviewer/Lead, round 3 #4 — no silent substitute).
-    if (run?.origin) throw new Error(`NAR further training on a ladder pulled from ${run.origin.worker} is not supported yet; this batch item needs manual handling.`);
+    // reject — this stage is correctly "done"). A mirrored run is a different
+    // case: NAR further training resumes from the rung's optimizer.resume and
+    // the run's prepared dataset, and the mirror copies neither, so this stops
+    // the item with a clear reason rather than skip to 'finish' and mark NAR
+    // done when it never ran.
+    if (run?.origin) throw new Error(`NAR further training needs the optimizer state, which stays on ${run.origin.worker}; this batch item needs manual handling.`);
     if (skipNarFurther(run)) return null;
     return narFurtherRequest(item.refineRun!, best.step, item.narKnee !== false);
   }

@@ -137,35 +137,6 @@ test('AITK run catalogue writes and rereads atomically in an isolated training r
   }
 });
 
-test('manifestSha256 and prunedFiles survive a later recordYue2AitkRun call that knows nothing about them', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-verified-sha-'));
-  try {
-    // Reviewer, round 3 P2: a later pull (pullOneYue2Ladder) or hydrate call
-    // builds its own fresh checkpoints array with no idea manifestSha256
-    // exists — it must not wipe out what an earlier hydrate persisted.
-    const script = [
-      "import fs from 'node:fs';",
-      "import path from 'node:path';",
-      "import { recordYue2AitkRun, listYue2AitkRuns } from './src/services/training/yue2AitkRuns.js';",
-      "const out = path.join(process.env.TRAINING_DIR, 'run'); fs.mkdirSync(path.join(out, 'checkpoint-step10'), { recursive: true });",
-      "fs.writeFileSync(path.join(out, 'checkpoint-step10', 'native-ar.safetensors'), 'AR');",
-      "fs.writeFileSync(path.join(out, 'checkpoint-step10', 'native-nar.safetensors'), 'NAR');",
-      "const base = { version: 1, jobId: 'job-test', datasetId: 'ds-test', datasetSlug: 'slug-test', method: 'aitk', output: out, options: {}, status: 'done', createdAt: 1, updatedAt: 2, origin: { worker: 'W', remoteJobId: 'r1' } };",
-      "recordYue2AitkRun({ ...base, checkpoints: [{ step: 10, dir: path.join(out, 'checkpoint-step10'), manifestSha256: { 'native-ar.safetensors': 'hash-ar', 'native-nar.safetensors': 'hash-nar' }, prunedFiles: ['optimizer.resume'] }] });",
-      "if (listYue2AitkRuns('ds-test')[0].checkpoints[0].manifestSha256?.['native-ar.safetensors'] !== 'hash-ar') throw new Error('manifestSha256 did not persist on first write');",
-      // A fresh pull/record call for the same jobId, same shape pullOneYue2Ladder produces: neither field at all.
-      "recordYue2AitkRun({ ...base, updatedAt: 3, checkpoints: [{ step: 10, dir: path.join(out, 'checkpoint-step10') }] });",
-      "const after = listYue2AitkRuns('ds-test')[0].checkpoints[0];",
-      "if (after.manifestSha256?.['native-ar.safetensors'] !== 'hash-ar' || after.manifestSha256?.['native-nar.safetensors'] !== 'hash-nar' || after.prunedFiles?.[0] !== 'optimizer.resume') throw new Error('manifestSha256/prunedFiles were lost on a later record call: ' + JSON.stringify(after));",
-    ].join('');
-    execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
-      cwd: fileURLToPath(new URL('../../../', import.meta.url)), env: { ...process.env, TRAINING_DIR: root, ACESTEPCPP_ADAPTERS: path.join(root, 'adapters') }, stdio: 'pipe',
-    });
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test('moving a run renames its output directory and rewrites the index in place', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-move-'));
   try {

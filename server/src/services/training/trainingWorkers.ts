@@ -7,15 +7,12 @@
 // passes to ace-train, the engine and the run catalogue stays local to the
 // machine that trains; nothing is path-mapped.
 //
-// The worker only trains. Everything else — review, previews, blind labels,
-// scoring — runs on this machine against this machine's own index
-// (ui/src/services/trainingApi.ts's LOCAL_BASE), so a ladder still training
-// or awaiting review on a worker is pulled here first: pullYue2Ladders copies
-// its run facts and rendered previews (never the weight files) into a
-// worker-namespaced local run, tagged `origin`, so Review/RefinePanel/
-// Yue2AitkTrainCard see it the same as a run trained here (yue2AitkRuns.ts's
-// `availability: 'remote'`). pullLinked brings back only the one checkpoint a
-// ladder finish already chose and linked on the worker.
+// The worker only trains and renders previews. Everything else — review,
+// scoring, blind labels, linking — runs on this machine against its own index
+// (ui/src/services/trainingApi.ts's LOCAL_BASE): yue2Mirror.ts copies each
+// worker run here as its checkpoints and previews land, after which it is an
+// ordinary local run tagged `origin`. pullLinked brings back a pair a ladder
+// finish linked on the worker itself.
 import fs from 'fs';
 import path from 'path';
 import { timingSafeEqual, createHash } from 'crypto';
@@ -31,11 +28,11 @@ import { readYue2Linked, refreshYue2PresetsForJointCheckpoint } from './lyricStu
 import { latestGenerationLyrics, PUSHED_PREVIEW_LYRICS } from './yue2JointTrainRunner.js';
 import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
 import type { TrainingDatasetRow } from './types.js';
-import { getYue2AlbumScore, importYue2RungScores, listYue2RungScores, scoreYue2Album, scoreYue2Rung, type Yue2RungScore } from './yue2RungScores.js';
-import { freeYue2RunDirectory, jointRunForAdapter, listYue2AitkRuns, recordYue2AitkRun, withYue2RunLock, yue2RemoteRunDirectory, type Yue2AitkCheckpointRecord, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
-import { listYue2JointPreviews, recordYue2JointPreview, resolveYue2JointPreview, type Yue2JointPreviewRecord } from './yue2JointPreview.js';
+import { deleteYue2AitkRun, jointRunForAdapter, listAllYue2AitkRuns, yue2RunFinished, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
+import { listYue2JointPreviews, resolveYue2JointPreview, type Yue2JointPreviewRecord } from './yue2JointPreview.js';
 import { listYue2TrainLogs, noteYue2TrainLog, trainLogArchiveDir } from './datasetProfile.js';
 import { classifyCommit, currentCommit } from './workerUpdate.js';
+import { hasActiveBatch } from './yue2BatchRunner.js';
 import { gpuLaneBusy, gpuLaneDepth } from '../generation/gpuLane.js';
 
 export const TOKEN_HEADER = 'x-hotstep-worker-token';
@@ -187,132 +184,139 @@ export function workerAdapterFile(rel: string): string {
   return abs;
 }
 
-export interface WorkerLadderCheckpoint { step: number; kl?: number; recon?: number; drift?: number; frozen?: boolean; rung?: boolean; segment?: string }
-export interface WorkerLadderPreview extends Yue2JointPreviewRecord { sha256?: string; bytes?: number }
-export interface WorkerLadder {
-  jobId: string; datasetId: string; datasetSlug: string; status: Yue2AitkRunRecord['status'];
-  createdAt: number; updatedAt: number; options: Record<string, unknown>; blindLabels?: Record<string, string>;
-  checkpoints: WorkerLadderCheckpoint[]; previews: WorkerLadderPreview[];
+// The mirror (yue2Mirror.ts on the controller) copies each run down here file
+// by file as it lands: the manifest says what exists, the file route serves
+// one entry of it, the delete route drops the worker's copy once mirrored.
+
+export interface MirrorFile { rel: string; size: number; mtimeMs: number }
+export interface MirrorRun {
+  jobId: string; datasetId: string; datasetSlug: string;
+  /** Basename of the run's output folder on the worker. */
+  folder: string;
+  status: Yue2AitkRunRecord['status'];
+  createdAt: number; updatedAt: number;
+  options: Record<string, unknown>; blindLabels?: Record<string, string>;
+  /** A preview of this run is still rendering on the worker right now. */
+  previewsBusy: boolean;
+  /** Forward-slash paths relative to the run folder. */
+  files: MirrorFile[];
+  previews: Yue2JointPreviewRecord[];
 }
 
-const SEGMENT_RE = /[\\/]segments[\\/](segment-\d{6})[\\/]/;
-
-/** Every rung-bearing ladder this worker knows of, across every dataset,
- *  with a sha256 of each rendered preview's audio so the controller can
- *  verify a transfer bit-for-bit before it trusts and keeps it. Checkpoint
- *  weight paths are never included — a worker only ever hands over metadata
- *  and previews through this route; `workerAdapterFile`/`/linked` are the
- *  only routes that serve a safetensors. */
-export function workerYue2Ladders(): WorkerLadder[] {
-  const out: WorkerLadder[] = [];
-  for (const ds of repo.listDatasets()) {
-    for (const run of listYue2AitkRuns(ds.id, ds.slug)) {
-      const rungs = run.checkpoints.filter(c => c.rung);
-      if (!rungs.length) continue;
-      const previews: WorkerLadderPreview[] = listYue2JointPreviews(run.output).map(p => {
-        const file = p.file ? resolveYue2JointPreview(run.output, p.file) : null;
-        if (!file) return { ...p };
-        try {
-          const bytes = fs.readFileSync(file);
-          return { ...p, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length };
-        } catch { return { ...p }; }
-      });
-      out.push({
-        jobId: run.jobId, datasetId: run.datasetId, datasetSlug: run.datasetSlug, status: run.status,
-        createdAt: run.createdAt, updatedAt: run.updatedAt, options: run.options, blindLabels: run.blindLabels,
-        checkpoints: rungs.map(c => ({ step: c.step, kl: c.kl, recon: c.recon, drift: c.drift, frozen: c.frozen, rung: c.rung,
-          segment: SEGMENT_RE.exec(c.dir)?.[1] })),
-        previews,
-      });
-    }
-  }
-  return out;
-}
-
-/** A specific ladder's preview audio, validated the same way the browser's
- *  own playback route resolves it — never a bare path join. */
-export function workerYue2LadderFile(datasetId: string, jobId: string, file: string): string {
-  const ds = repo.getDataset(datasetId);
-  if (!ds) throw Object.assign(new Error('Dataset not found'), { status: 404 });
-  const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === jobId);
-  if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
-  const resolved = resolveYue2JointPreview(run.output, file);
-  if (!resolved) throw Object.assign(new Error('Preview file not found'), { status: 404 });
-  return resolved;
-}
-
-const LADDER_CHECKPOINT_FILES = ['native-ar.safetensors', 'native-nar.safetensors', 'optimizer.resume', 'meters.json'] as const;
-export type LadderCheckpointFile = typeof LADDER_CHECKPOINT_FILES[number];
-export interface WorkerLadderCheckpointFile { name: LadderCheckpointFile; sha256: string; bytes: number }
-
-function findLadderCheckpoint(datasetId: string, jobId: string, step: number) {
-  const ds = repo.getDataset(datasetId);
-  if (!ds) throw Object.assign(new Error('Dataset not found'), { status: 404 });
-  const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === jobId);
-  if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
-  const ckpt = run.checkpoints.find(c => c.step === step);
-  if (!ckpt) throw Object.assign(new Error(`No checkpoint at step ${step}`), { status: 404 });
-  return { run, ckpt };
-}
-
-/** One rung's checkpoint files on this worker — never the whole ladder, so
- *  "Use this rung" never pulls the weights of a step the user did not pick.
- *  Filenames are the fixed, known set; sha256 lets the controller verify a
- *  transfer before it trusts and keeps it. */
-export function workerYue2LadderCheckpoint(datasetId: string, jobId: string, step: number): WorkerLadderCheckpointFile[] {
-  const { ckpt } = findLadderCheckpoint(datasetId, jobId, step);
-  const out: WorkerLadderCheckpointFile[] = [];
-  for (const name of LADDER_CHECKPOINT_FILES) {
+/** What the controller needs of a run: its loss logs, style norms, every
+ *  complete checkpoint's weights and meters, and every rendered preview. Never
+ *  optimizer.resume or adapter.safetensors: nothing on the controller reads
+ *  them. ace-train writes a checkpoint into a temp folder and renames it into
+ *  place (yue2-aitk-runtime.cpp, save_checkpoint), so a checkpoint folder
+ *  holding both weight files is complete. */
+function mirrorFiles(run: Yue2AitkRunRecord, previews: Yue2JointPreviewRecord[]): MirrorFile[] {
+  const out: MirrorFile[] = [];
+  const add = (abs: string) => {
     try {
-      const bytes = fs.readFileSync(path.join(ckpt.dir, name));
-      out.push({ name, sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length });
-    } catch { /* this checkpoint predates the file, or the method doesn't use it */ }
+      const st = fs.statSync(abs);
+      if (st.isFile()) out.push({ rel: path.relative(run.output, abs).split(path.sep).join('/'), size: st.size, mtimeMs: Math.round(st.mtimeMs) });
+    } catch { /* not there (yet) */ }
+  };
+  for (const log of listYue2TrainLogs(run.output)) add(log.file);
+  add(path.join(run.output, 'style-norms.json'));
+  for (const c of run.checkpoints) {
+    if (!c.arPath || !c.narPath) continue;
+    for (const name of ['native-ar.safetensors', 'native-nar.safetensors', 'meters.json']) add(path.join(c.dir, name));
+  }
+  for (const p of previews) {
+    const wav = p.status === 'done' && p.file ? resolveYue2JointPreview(run.output, p.file) : null;
+    if (!wav) continue;
+    add(wav);
+    add(wav.replace(/\.wav$/i, '.score.abc'));
   }
   return out;
 }
 
-/** One checkpoint file's bytes, `file` restricted to the fixed known set —
- *  never a bare join of a caller-supplied name onto the checkpoint dir. */
-export function workerYue2LadderCheckpointFile(datasetId: string, jobId: string, step: number, file: string): string {
-  if (!(LADDER_CHECKPOINT_FILES as readonly string[]).includes(file)) throw Object.assign(new Error('Unknown checkpoint file'), { status: 400 });
-  const { ckpt } = findLadderCheckpoint(datasetId, jobId, step);
-  const abs = path.join(ckpt.dir, file);
-  if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) throw Object.assign(new Error('Checkpoint file not found'), { status: 404 });
-  return abs;
+/** Every run still in play on this worker. A run already finished here (a
+ *  `finished` marker, or a NAR-further run under refined/) is left out: the
+ *  controller would land it as an ordinary unfinished ladder, which its next
+ *  cleanup sweeps away, and the worker would drop its own copy. Such a pair
+ *  reaches the controller through pullLinked instead. */
+export function workerMirrorManifest(): MirrorRun[] {
+  return listAllYue2AitkRuns().filter(run => !yue2RunFinished(run.output)).map(run => {
+    // Previews render inside the run's training job or on the GPU lane. A
+    // 'rendering' record with neither alive was cut off by a restart or crash
+    // and will never finish: report it failed, so it neither shows as
+    // rendering forever on the controller nor keeps the run from retiring.
+    const live = !!queue.activeJobForDataset(run.datasetId) || gpuLaneBusy() || gpuLaneDepth() > 0;
+    const previews = listYue2JointPreviews(run.output).map(p => p.status === 'rendering' && !live
+      ? { ...p, status: 'failed' as const, error: p.error ?? 'Render interrupted on the worker' } : p);
+    return {
+      jobId: run.jobId, datasetId: run.datasetId, datasetSlug: run.datasetSlug, folder: path.basename(run.output),
+      status: run.status, createdAt: run.createdAt, updatedAt: run.updatedAt, options: run.options, blindLabels: run.blindLabels,
+      previewsBusy: previews.some(p => p.status === 'rendering'), files: mirrorFiles(run, previews), previews,
+    };
+  });
 }
 
-/** Drop a whole ladder's folder on this worker — every rung, every preview,
- *  run.json. Called once the controller has hydrated and linked its chosen
- *  rung locally, or when the user discards the ladder outright with no rung
- *  chosen. Refuses while the run is still training, or while any other job
- *  for this dataset is queued or running on the worker — a NAR follow-up or
- *  GPU preview job can read this run's checkpoint/output while the run
- *  record itself already shows 'done' (Reviewer, blocker #2); dataset-scoped
- *  because the reading job's own record rarely points back at this folder.
- *  Also refuses a run whose `output` resolves outside the worker's own
- *  ladder tree, guarding against a corrupted index entry. */
-export function deleteWorkerYue2LadderFolder(datasetId: string, jobId: string): void {
-  const ds = repo.getDataset(datasetId);
-  if (!ds) throw Object.assign(new Error('Dataset not found'), { status: 404 });
-  const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === jobId);
+const mirrorHashes = new Map<string, string>();
+
+/** sha256 of the first `size` bytes, streamed so a large file never blocks
+ *  the event loop, and cached per file state: hashed once per worker process. A log
+ *  still growing is served (and hashed) only up to the size it had when asked. */
+async function mirrorHash(abs: string, size: number, mtimeMs: number): Promise<string> {
+  const key = `${abs}|${size}|${mtimeMs}`;
+  const known = mirrorHashes.get(key);
+  if (known) return known;
+  const hash = createHash('sha256');
+  if (size > 0) for await (const chunk of fs.createReadStream(abs, { start: 0, end: size - 1 })) hash.update(chunk as Buffer);
+  const hex = hash.digest('hex');
+  mirrorHashes.set(key, hex);
+  return hex;
+}
+
+/** One manifest entry of one run, re-derived from the worker's own index:
+ *  `rel` is matched against the list, never joined onto a path. */
+export async function workerMirrorFile(jobId: string, rel: string): Promise<{ abs: string; size: number; mtimeMs: number; sha256: string }> {
+  const run = listAllYue2AitkRuns().find(r => r.jobId === jobId);
+  if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
+  const entry = mirrorFiles(run, listYue2JointPreviews(run.output)).find(f => f.rel === rel);
+  if (!entry) throw Object.assign(new Error('Not a mirrored file of this run'), { status: 404 });
+  const abs = path.join(run.output, ...entry.rel.split('/'));
+  const st = fs.statSync(abs);
+  const mtimeMs = Math.round(st.mtimeMs);
+  return { abs, size: st.size, mtimeMs, sha256: await mirrorHash(abs, st.size, mtimeMs) };
+}
+
+/** A run that just ended may be about to seed a chained stage: a batch's
+ *  refine stage, or the training runner's automatic refinement (posted 1.5 s
+ *  after the job ends). Both resume from its optimizer.resume. */
+const CHAIN_GRACE_MS = 2 * 60_000;
+
+/** Drop a run's folder and index entry on this worker once the controller
+ *  has mirrored it (or discarded it). Refuses while the run is still
+ *  training, while a batch is active or the run ended moments ago (the next
+ *  chained stage may resume from it), or while any other job for its dataset
+ *  is queued or running —
+ *  a NAR follow-up or GPU preview job can read this run's checkpoint/output
+ *  while the run record itself already shows 'done'; dataset-scoped because
+ *  the reading job's own record rarely points back at this folder. Also
+ *  refuses a run whose `output` resolves outside the worker's own ladder
+ *  tree, guarding against a corrupted index entry. */
+export function deleteWorkerMirrorRun(jobId: string): void {
+  const run = listAllYue2AitkRuns().find(r => r.jobId === jobId);
   if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
   if (run.status === 'running') throw Object.assign(new Error('Run is still training'), { status: 409 });
-  if (queue.activeJobForDataset(datasetId)) throw Object.assign(new Error('A job is running for this dataset on the worker'), { status: 409 });
-  // A manual preview render (training.ts:4360) runs on the GPU lane directly,
-  // not through the labeling queue, so activeJobForDataset above never sees
-  // it (Reviewer, round 3 P1). The lane is a single worker-wide resource with
-  // no per-dataset tag, so any current or queued reader blocks any delete.
+  if (hasActiveBatch() || Date.now() - run.updatedAt < CHAIN_GRACE_MS) throw Object.assign(new Error('A chained training stage may still resume from this run'), { status: 409 });
+  if (queue.activeJobForDataset(run.datasetId)) throw Object.assign(new Error('A job is running for this dataset on the worker'), { status: 409 });
+  // A manual preview render (training.ts's yue2-joint-previews/render) runs on
+  // the GPU lane directly, not through the labeling queue, so
+  // activeJobForDataset above never sees it. The lane has no per-dataset
+  // tag, so any current or queued reader blocks any delete.
   if (gpuLaneBusy() || gpuLaneDepth() > 0) throw Object.assign(new Error('The GPU is busy rendering on this worker'), { status: 409 });
   const ladderRoot = path.resolve(path.join(config.aceServer.adapters, 'yue2-joint-adapters'));
   const output = path.resolve(run.output);
-  // Strict descendant only — isInside treats the root itself as "inside" by
-  // design for its other callers, which would let a corrupted run record
-  // whose output IS the ladder root recursively delete every ladder
-  // (Reviewer, round 3 P1).
+  // Strict descendant only — isInside treats the root itself as "inside", which
+  // would let a corrupted record whose output IS the root delete every ladder.
   if (output === ladderRoot || !isInside(ladderRoot, output)) {
     throw Object.assign(new Error(`Refusing to delete outside the joint adapters folder: ${output}`), { status: 400 });
   }
-  fs.rmSync(output, { recursive: true, force: true });
+  deleteYue2AitkRun(jobId);
 }
 
 // ── Controller side ─────────────────────────────────────────────────────────
@@ -333,13 +337,13 @@ export function listWorkers(): WorkerInfo[] {
 
 export const getWorker = (name: string) => listWorkers().find(w => w.name === name);
 
-function workerFetch(w: WorkerInfo, pathAndQuery: string, init: RequestInit & { duplex?: 'half' } = {}): Promise<globalThis.Response> {
+export function workerFetch(w: WorkerInfo, pathAndQuery: string, init: RequestInit & { duplex?: 'half' } = {}): Promise<globalThis.Response> {
   const headers = new Headers(init.headers);
   if (config.workers.token) headers.set(TOKEN_HEADER, config.workers.token);
   return fetch(`${w.url}${pathAndQuery}`, { ...init, headers });
 }
 
-async function workerJson<T>(w: WorkerInfo, pathAndQuery: string, init?: RequestInit): Promise<T> {
+export async function workerJson<T>(w: WorkerInfo, pathAndQuery: string, init?: RequestInit): Promise<T> {
   const r = await workerFetch(w, pathAndQuery, init);
   const body = await r.json().catch(() => ({})) as T & { error?: string };
   if (!r.ok) throw Object.assign(new Error(`${w.name}: ${body.error || `HTTP ${r.status}`}`), { status: r.status });
@@ -551,251 +555,6 @@ async function pullLinkedLogs(w: WorkerInfo, slug: string, pair: ReturnType<type
   return bytes;
 }
 
-export interface Yue2LadderPullResult { worker: string; jobId: string; datasetSlug: string; status: 'pulled' | 'partial' | 'no-dataset' | 'error'; previewsFetched: number; bytes: number; errors: string[] }
-
-/** This worker's own run jobId, prefixed so it can never collide with a
- *  jobId trained on this machine or pulled from a different worker. */
-function localYue2LadderJobId(workerName: string, remoteJobId: string): string {
-  return `remote:${workerName}:${remoteJobId}`;
-}
-
-/** Where a pulled ladder lives on this machine: wherever its index record
- *  already points (it may have been moved to its final name), else a fresh
- *  readable staging folder, `_remote/<worker>/<trigger>_<worker start time>`. */
-function localYue2LadderDir(w: WorkerInfo, ds: { id: string; slug: string; customTag?: string }, ladder: WorkerLadder): string {
-  const known = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === localYue2LadderJobId(w.name, ladder.jobId));
-  if (known) return known.output;
-  return freeYue2RunDirectory(yue2RemoteRunDirectory(config.aceServer.adapters, ds.customTag || ds.slug, w.name, ladder.createdAt, false));
-}
-
-/** A flat filename only — the same shape `resolveYue2JointPreview` accepts —
- *  so a remote-reported `file` can never be joined onto a path and climb out
- *  of this ladder's own previews folder. */
-const SAFE_PREVIEW_FILE = /^[A-Za-z0-9._-]+\.wav$/i;
-
-function hashFile(file: string): string | null {
-  try { return createHash('sha256').update(fs.readFileSync(file)).digest('hex'); } catch { return null; }
-}
-
-const TRANSFER_ATTEMPTS = 3;
-
-/** Fetch one file to `dest` and hash-verify it, retrying the whole
- *  fetch-and-hash a few times on a mismatch before giving up (seen pulling
- *  LivingRoom's overnight ladders, 2026-10-04). Reviewer's repro at dbe2464d
- *  proved a local write race between overlapping pulls — fixed by
- *  `withYue2RunLock` and the unique temp filename below — is a real,
- *  reproducible cause of a "corrupt" landing; it did not establish how many
- *  of that night's specific failures were this race versus the network or
- *  the worker's data. Each attempt is a fresh request; a hash match on any
- *  attempt wins. The temp file is unique to this call so two overlapping
- *  transfers to the same `dest` never share, truncate, or delete each
- *  other's `.part`
- *  file. */
-async function fetchAndVerifyFile(w: WorkerInfo, url: string, dest: string, sha256: string): Promise<{ ok: true; bytes: number } | { ok: false; error: string }> {
-  const part = `${dest}.part-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  let lastError = 'unknown error';
-  for (let attempt = 1; attempt <= TRANSFER_ATTEMPTS; attempt++) {
-    try {
-      const r = await workerFetch(w, url);
-      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
-      await pipeline(Readable.fromWeb(r.body as any), fs.createWriteStream(part));
-      const got = hashFile(part);
-      if (got !== sha256) throw new Error(attempt < TRANSFER_ATTEMPTS ? `hash mismatch after transfer, retrying (${attempt}/${TRANSFER_ATTEMPTS})` : 'hash mismatch after transfer');
-      fs.renameSync(part, dest);
-      return { ok: true, bytes: fs.statSync(dest).size };
-    } catch (err: any) {
-      lastError = err?.message || String(err);
-      try { fs.rmSync(part, { force: true }); } catch { /* best effort */ }
-    }
-  }
-  try { fs.rmSync(part, { force: true }); } catch { /* best effort */ }
-  return { ok: false, error: lastError };
-}
-
-/** One ladder: fetch and hash-verify every rendered preview not already here
- *  (or already pruned here — a pruned preview is never re-fetched), then
- *  write the local previews catalogue and run record. Deleting the worker's
- *  own copies is slice 3's job, once a chosen rung's checkpoint has also been
- *  pulled and linked — nothing here ever touches the worker's files. A
- *  second concurrent pull of the same worker/run (Review polling it while an
- *  API call is also in flight, say) waits for the first instead of racing it
- *  on the same destination files and metadata (Reviewer, dbe2464d). */
-function pullOneYue2Ladder(w: WorkerInfo, ds: { id: string; slug: string; customTag?: string }, ladder: WorkerLadder): Promise<Yue2LadderPullResult> {
-  return withYue2RunLock(localYue2LadderJobId(w.name, ladder.jobId), () => pullOneYue2LadderLocked(w, ds, ladder));
-}
-async function pullOneYue2LadderLocked(w: WorkerInfo, ds: { id: string; slug: string; customTag?: string }, ladder: WorkerLadder): Promise<Yue2LadderPullResult> {
-  const errors: string[] = [];
-  let bytes = 0, previewsFetched = 0;
-  const output = localYue2LadderDir(w, ds, ladder);
-  fs.mkdirSync(path.join(output, 'previews'), { recursive: true });
-  const priorByFile = new Map(listYue2JointPreviews(output).map(p => [p.id, p]));
-  const verified = new Set<string>();
-  for (const p of ladder.previews) {
-    if (p.status !== 'done' || !p.file) continue;
-    if (!SAFE_PREVIEW_FILE.test(p.file)) { errors.push(`${p.file}: refused unsafe filename from ${w.name}`); continue; }
-    const prior = priorByFile.get(p.id);
-    if (prior && prior.status === 'done' && !prior.file) continue; // pruned locally: never resurrected
-    const dest = path.join(output, 'previews', p.file);
-    if (!p.sha256) { errors.push(`${p.file}: worker sent no checksum`); continue; }
-    // A file already on this disk still has to match the worker's current
-    // manifest hash every pull — a local byte flip (disk corruption, a bad
-    // edit) must be caught and repaired, not trusted just because it exists.
-    // No checksum this round means no way to confirm it, so it is never
-    // added to `verified` even when the bytes happen to still be there.
-    if (fs.existsSync(dest) && hashFile(dest) === p.sha256) { verified.add(p.file); continue; }
-    // falls through to (re)fetch: missing, or present but no longer matching
-    const result = await fetchAndVerifyFile(w,
-      `/api/training/worker/yue2-ladder-file?datasetId=${encodeURIComponent(ds.id)}&run=${encodeURIComponent(ladder.jobId)}&file=${encodeURIComponent(p.file)}`,
-      dest, p.sha256);
-    if (result.ok) { bytes += result.bytes; previewsFetched++; verified.add(p.file); }
-    else errors.push(`${p.file}: ${result.error}`);
-  }
-  for (const p of ladder.previews) {
-    const prior = priorByFile.get(p.id);
-    const pruned = !!prior && prior.status === 'done' && !prior.file;
-    const { sha256: _sha, bytes: _bytes, ...rest } = p;
-    const record: Yue2JointPreviewRecord = pruned ? { ...rest, file: undefined }
-      : p.file && !verified.has(p.file) ? { ...rest, status: 'failed', file: undefined, error: 'Not yet pulled from the worker' }
-      : rest;
-    recordYue2JointPreview(output, record);
-  }
-  const checkpoints: Yue2AitkCheckpointRecord[] = ladder.checkpoints.map(c => ({
-    step: c.step, dir: path.join(output, `checkpoint-step${c.step}`), kl: c.kl, recon: c.recon, drift: c.drift, frozen: c.frozen, rung: c.rung,
-    segment: c.segment, availability: 'remote',
-  }));
-  const jobId = localYue2LadderJobId(w.name, ladder.jobId);
-  const updatedAt = Date.now();
-  recordYue2AitkRun({
-    version: 1, jobId, datasetId: ds.id, datasetSlug: ds.slug, method: 'aitk', output, options: ladder.options,
-    status: ladder.status, createdAt: ladder.createdAt, updatedAt, checkpoints, blindLabels: ladder.blindLabels,
-    origin: { worker: w.name, remoteJobId: ladder.jobId },
-  });
-  const landed = listYue2AitkRuns(ds.id, ds.slug).some(r => r.jobId === jobId && r.updatedAt === updatedAt);
-  if (!landed) errors.push('local index write did not land');
-  return { worker: w.name, jobId: ladder.jobId, datasetSlug: ds.slug, status: errors.length ? 'partial' : 'pulled', previewsFetched, bytes, errors };
-}
-
-/** Every rung-bearing ladder on `w`, finished or still rendering, pulled into
- *  this machine's own index (see pullOneYue2Ladder). A dataset this machine
- *  does not have is reported and skipped, never guessed at. */
-export async function pullYue2Ladders(w: WorkerInfo): Promise<Yue2LadderPullResult[]> {
-  let ladders: WorkerLadder[];
-  try { ladders = (await workerJson<{ ladders: WorkerLadder[] }>(w, '/api/training/worker/yue2-ladders')).ladders; }
-  catch (err: any) { return [{ worker: w.name, jobId: '', datasetSlug: '', status: 'error', previewsFetched: 0, bytes: 0, errors: [err?.message || String(err)] }]; }
-  const out: Yue2LadderPullResult[] = [];
-  for (const ladder of ladders) {
-    const ds = repo.listDatasets().find(d => d.id === ladder.datasetId || d.slug === ladder.datasetSlug);
-    if (!ds) { out.push({ worker: w.name, jobId: ladder.jobId, datasetSlug: ladder.datasetSlug, status: 'no-dataset', previewsFetched: 0, bytes: 0, errors: [] }); continue; }
-    try { out.push(await pullOneYue2Ladder(w, ds, ladder)); }
-    catch (err: any) { out.push({ worker: w.name, jobId: ladder.jobId, datasetSlug: ds.slug, status: 'error', previewsFetched: 0, bytes: 0, errors: [err?.message || String(err)] }); }
-  }
-  return out;
-}
-
-export interface Yue2LadderHydrateResult { status: 'hydrated' | 'already-local' | 'partial' | 'error'; errors: string[] }
-
-/** The one rung a user picked — never the rest of the ladder: fetch and
- *  hash-verify that step's checkpoint files from the run's own worker, then
- *  leave them at the checkpoint's already-stable `dir` so the ordinary local
- *  disk scan (yue2AitkRuns.ts's checkpointRecords) finds them next read and
- *  the step stops being `availability: 'remote'` on its own — no index write
- *  here. Used by "Use this rung" and by Finish scored's direct link, so a
- *  pulled ladder's finish path needs nothing worker-specific beyond this. A
- *  second concurrent hydrate of the same run/step (a double-click, or the
- *  batch runner and an API call landing together) waits for the first rather
- *  than racing it on the same checkpoint files (Reviewer, dbe2464d). */
-export function hydrateYue2LadderCheckpoint(run: Yue2AitkRunRecord, step: number): Promise<Yue2LadderHydrateResult> {
-  return withYue2RunLock(run.jobId, () => hydrateYue2LadderCheckpointLocked(run, step));
-}
-async function hydrateYue2LadderCheckpointLocked(stale: Yue2AitkRunRecord, step: number): Promise<Yue2LadderHydrateResult> {
-  // The caller's copy may predate a folder move that held the lock first.
-  const run = listYue2AitkRuns(stale.datasetId, stale.datasetSlug).find(r => r.jobId === stale.jobId) ?? stale;
-  const ckpt = run.checkpoints.find(c => c.step === step);
-  if (!ckpt) return { status: 'error', errors: [`No checkpoint at step ${step}`] };
-  if (!run.origin) {
-    // Trained on this PC: the files are the only copy and were never
-    // downloaded, so there is no worker manifest to re-verify against.
-    return ckpt.arPath && ckpt.narPath ? { status: 'already-local', errors: [] } : { status: 'error', errors: [`No checkpoint at step ${step}`] };
-  }
-  // A checkpoint whose whole worker manifest was verified once (persisted in
-  // manifestSha256, written only for a complete transfer) is re-checked
-  // against that record, not a fresh worker round-trip — the worker's own
-  // copy is routinely deleted right after a successful link
-  // (deleteWorkerYue2Ladder). Optional files this machine pruned on purpose
-  // (prunedFiles) are no longer demanded; the ar/nar weights always are.
-  // Only a checkpoint never completely verified falls through to the worker.
-  const required: LadderCheckpointFile[] = ['native-ar.safetensors', 'native-nar.safetensors'];
-  const pruned = new Set((ckpt.prunedFiles ?? []).filter(name => !(required as string[]).includes(name)));
-  if (ckpt.manifestSha256) {
-    const recorded = ckpt.manifestSha256;
-    const allMatch = required.every(name => recorded[name]) && Object.entries(recorded).every(([name, sha]) => {
-      if (pruned.has(name)) return true;
-      const dest = path.join(ckpt.dir, name);
-      return isInside(ckpt.dir, dest) && fs.existsSync(dest) && hashFile(dest) === sha;
-    });
-    if (allMatch) return { status: 'already-local', errors: [] };
-    // Something no longer matches its verified record — fall through and
-    // try the worker as a repair path; if it is gone too, that failure below
-    // is now an honest "cannot repair," not a silent trust of bad bytes.
-  }
-  const w = getWorker(run.origin.worker);
-  if (!w) return { status: 'error', errors: [`No configured worker named ${run.origin.worker}`] };
-  let manifest: WorkerLadderCheckpointFile[];
-  try {
-    manifest = await workerJson<WorkerLadderCheckpointFile[]>(w,
-      `/api/training/worker/yue2-ladder-checkpoint?datasetId=${encodeURIComponent(run.datasetId)}&run=${encodeURIComponent(run.origin.remoteJobId)}&step=${step}`);
-  } catch (err: any) {
-    if (ckpt.manifestSha256) {
-      return { status: 'error', errors: [`The local checkpoint no longer matches its verified checksum and the worker is unavailable to re-fetch from: ${err?.message || String(err)}`] };
-    }
-    return { status: 'error', errors: [err?.message || String(err)] };
-  }
-  if (required.some(name => !manifest.some(f => f.name === name))) return { status: 'error', errors: ['The worker has no ar/nar checkpoint at this step'] };
-  fs.mkdirSync(ckpt.dir, { recursive: true });
-  const errors: string[] = [];
-  let fetched = false;
-  const declared: Record<string, string> = {};
-  for (const f of manifest) {
-    // Outside the fixed filename set entirely: not a file we ever asked for
-    // or need, so a buggy/malicious extra manifest entry is dropped quietly
-    // rather than downgrading an otherwise-complete checkpoint to 'partial'.
-    if (!(LADDER_CHECKPOINT_FILES as readonly string[]).includes(f.name)) { console.warn(`[Training] Refused unknown checkpoint filename from ${w.name}: ${f.name}`); continue; }
-    const dest = path.join(ckpt.dir, f.name);
-    if (!isInside(ckpt.dir, dest)) { console.warn(`[Training] Refused checkpoint path outside the checkpoint dir from ${w.name}: ${f.name}`); continue; }
-    declared[f.name] = f.sha256;
-    if (pruned.has(f.name)) continue; // deleted here on purpose: never fetched back
-    if (fs.existsSync(dest) && hashFile(dest) === f.sha256) continue;
-    fetched = true;
-    const result = await fetchAndVerifyFile(w,
-      `/api/training/worker/yue2-ladder-checkpoint-file?datasetId=${encodeURIComponent(run.datasetId)}&run=${encodeURIComponent(run.origin.remoteJobId)}&step=${step}&file=${encodeURIComponent(f.name)}`,
-      dest, f.sha256);
-    if (!result.ok) errors.push(`${f.name}: ${result.error}`);
-  }
-  const landed = required.every(name => fs.existsSync(path.join(ckpt.dir, name)) && hashFile(path.join(ckpt.dir, name)) === manifest.find(f => f.name === name)!.sha256);
-  if (!landed) return { status: 'error', errors: errors.length ? errors : ['the ar/nar checkpoint did not land'] };
-  // Still partial until every declared file is verified: nothing is recorded,
-  // so a retry asks the worker again instead of trusting a subset (Reviewer,
-  // 135990e3 P1). Once complete, the whole manifest is persisted so a later
-  // use — even after the worker's copy is gone — revalidates against it.
-  if (errors.length) return { status: 'partial', errors };
-  recordYue2AitkRun({ ...run, checkpoints: run.checkpoints.map(c => c.step === step ? { ...c, manifestSha256: declared } : c) });
-  // recordYue2AitkRun swallows its own write failures; without this record
-  // the worker's copy must not be retired, so the caller is told it is partial.
-  const recorded = listYue2AitkRuns(run.datasetId, run.datasetSlug).find(r => r.jobId === run.jobId)?.checkpoints.find(c => c.step === step)?.manifestSha256;
-  if (JSON.stringify(recorded) !== JSON.stringify(declared)) return { status: 'partial', errors: ['the verified checksums could not be recorded locally'] };
-  return { status: fetched ? 'hydrated' : 'already-local', errors };
-}
-
-/** Tell a worker to drop a whole ladder folder — once its chosen rung has
- *  been hydrated and linked locally, or because the user discarded the
- *  ladder with no rung chosen. Never called before that: the caller decides
- *  when it's safe, this just makes the request. */
-export async function deleteWorkerYue2Ladder(worker: string, datasetId: string, remoteJobId: string): Promise<void> {
-  const w = getWorker(worker);
-  if (!w) throw new Error(`No configured worker named ${worker}`);
-  await workerJson(w, `/api/training/worker/yue2-ladders/${encodeURIComponent(remoteJobId)}?datasetId=${encodeURIComponent(datasetId)}`, { method: 'DELETE' });
-}
-
 // Proxy: the Training Studio's /api/training calls, sent to a worker.
 
 const DROP_REQUEST = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'keep-alive', 'upgrade', 'accept-encoding', TOKEN_HEADER]);
@@ -808,12 +567,6 @@ export async function proxyToWorker(req: Request, res: Response): Promise<void> 
   const w = getWorker(req.params.name as string);
   if (!w) { res.status(404).json({ error: `No training worker named ${req.params.name}` }); return; }
   if (!req.url.startsWith('/training/')) { res.status(403).json({ error: 'Only training routes are forwarded to a worker' }); return; }
-  const score = /^\/training\/datasets\/([^/?]+)\/(yue2-rung-scores|yue2-album-score)(?:\?|$)/.exec(req.url);
-  if (score && repo.getDataset(decodeURIComponent(score[1]))) {
-    try { await scoreHere(w, req, res, decodeURIComponent(score[1]), score[2] as 'yue2-rung-scores' | 'yue2-album-score'); }
-    catch (err: any) { if (!res.headersSent) res.status(err?.status ?? 400).json({ error: err?.message || String(err) }); }
-    return;
-  }
   const ac = new AbortController();
   res.on('close', () => ac.abort());
   const headers: Record<string, string> = {};
@@ -843,72 +596,3 @@ export async function proxyToWorker(req: Request, res: Response): Promise<void> 
   Readable.fromWeb(r.body as any).on('error', () => res.destroy()).pipe(res);
 }
 
-// Scores stay on this machine: the listener scores here, and the calibration
-// report reads this database. A worker's run facts (its record and previews)
-// are fetched to fill the row, and each write is also sent on to the worker,
-// whose Review page and Finish scored read its own copy. Worker datasets carry
-// this machine's ids, so the same dataset id works on both.
-
-async function readJsonBody(req: Request): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(typeof c === 'string' ? Buffer.from(c) : c);
-  const text = Buffer.concat(chunks).toString('utf8');
-  return text ? JSON.parse(text) : {};
-}
-
-async function scoreHere(w: WorkerInfo, req: Request, res: Response, datasetId: string, kind: 'yue2-rung-scores' | 'yue2-album-score'): Promise<void> {
-  const ds = repo.getDataset(datasetId)!;
-  const base = `/api/training/datasets/${encodeURIComponent(datasetId)}`;
-  const run = typeof req.query.run === 'string' ? req.query.run : undefined;
-  // A run this machine already has in its own index is reviewed and scored
-  // from here — /api/training directly, never through a worker. The UI no
-  // longer calls this route for such a run; this guard is for anything that
-  // still does (an older client, a worker calling back here).
-  const knownLocally = (refineRun: string | undefined) =>
-    !!refineRun && listYue2AitkRuns(ds.id, ds.slug).some(r => r.jobId === refineRun);
-  if (req.method === 'GET') {
-    if (kind === 'yue2-album-score') { res.json({ score: run ? getYue2AlbumScore(run) : null }); return; }
-    // Anything the worker scored before scores lived here comes across once,
-    // unless this machine already has the run — then its own copy is final.
-    if (!knownLocally(run)) {
-      try {
-        const theirs = await workerJson<{ scores: Yue2RungScore[] }>(w, `${base}/yue2-rung-scores${run ? `?run=${encodeURIComponent(run)}` : ''}`, { signal: AbortSignal.timeout(8000) });
-        importYue2RungScores(theirs.scores ?? []);
-      } catch { /* worker offline: this machine's scores are the ones that count */ }
-    }
-    res.json({ scores: listYue2RungScores(ds.id, run) });
-    return;
-  }
-  if (req.method !== 'PUT') { res.status(405).json({ error: 'Method not allowed' }); return; }
-  const b = await readJsonBody(req);
-  if (typeof b.refineRun !== 'string') { res.status(400).json({ error: 'refineRun is required' }); return; }
-  if (knownLocally(b.refineRun)) {
-    res.status(409).json({ error: `Run ${b.refineRun} is already known on this machine — score it through /api/training, not a worker.` });
-    return;
-  }
-  const { runs } = await workerJson<{ runs: Yue2AitkRunRecord[] }>(w, `${base}/yue2-joint-runs`);
-  const record = runs.find(r => r.jobId === b.refineRun);
-  if (!record) { res.status(400).json({ error: `Unknown run on ${w.name}` }); return; }
-  let stored: unknown;
-  if (kind === 'yue2-album-score') {
-    stored = scoreYue2Album({ id: ds.id, slug: ds.slug }, { refineRun: b.refineRun,
-      ...(b.score !== undefined ? { score: b.score === null ? null : Number(b.score) } : {}),
-      ...(b.instruments !== undefined ? { instruments: b.instruments as string | null } : {}),
-      ...(b.vocals !== undefined ? { vocals: b.vocals as string | null } : {}),
-      ...(typeof b.notes === 'string' ? { notes: b.notes } : {}) }, true);
-  } else {
-    if (!Number.isInteger(Number(b.step))) { res.status(400).json({ error: 'step is required' }); return; }
-    const { previews } = await workerJson<{ previews: Yue2JointPreviewRecord[] }>(w, `${base}/yue2-joint-previews?run=${encodeURIComponent(b.refineRun)}`);
-    stored = scoreYue2Rung({ id: ds.id, slug: ds.slug }, { refineRun: b.refineRun, step: Number(b.step),
-      ...(b.likeness !== undefined ? { likeness: b.likeness === null ? null : Number(b.likeness) } : {}),
-      ...(b.corruption !== undefined ? { corruption: b.corruption === null ? null : Number(b.corruption) } : {}),
-      ...(typeof b.notes === 'string' ? { notes: b.notes } : {}),
-      ...(typeof b.blind === 'boolean' ? { blind: b.blind } : {}),
-      ...(typeof b.blindLabel === 'string' ? { blindLabel: b.blindLabel } : {}) }, { run: record, previews: previews ?? [] });
-  }
-  res.json({ score: stored });
-  // The worker's copy, for its own Review page and Finish scored. A worker
-  // too old for the album score answers 404; this machine's copy stands.
-  workerJson(w, `${base}/${kind}`, jsonInit('PUT', b))
-    .catch(err => console.warn(`[Workers] ${w.name} did not take the ${kind} write: ${err?.message || err}`));
-}

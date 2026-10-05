@@ -2,22 +2,23 @@
 //
 // Two routers. `workerRouter` (/api/training/worker) is what a worker exposes
 // to the machine driving it. The default router (/api/workers) is that
-// driving machine's side: status, dispatch, pull, and the proxy the Training
+// driving machine's side: status, dispatch, pull, the mirror, and the proxy the Training
 // Studio talks through. It is mounted before the body parsers so proxied
 // request bodies stream through untouched; its own JSON routes parse inline.
 
 import express, { Router, type Request, type Response } from 'express';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { pipeline } from 'node:stream/promises';
 import * as repo from '../services/training/datasetsRepo.js';
 import { APP_VERSION, config } from '../config.js';
 import { aceClient } from '../services/aceClient.js';
 import { activeTraining, dirtyCheckout, getUpdate, cancelUpdate, receiveUpdate, startUpdate, startupCommit } from '../services/training/workerUpdate.js';
 import {
-  deleteWorkerYue2LadderFolder, getDispatch, getWorker, listWorkers, proxyToWorker, pullLinked, pullYue2Ladders, receiveDatasetFile, startDispatch,
-  upsertPushedDataset, workerAdapterFile, workerDatasetFiles, workerLinkedPairs, workerStatus, workerYue2LadderCheckpoint, workerYue2LadderCheckpointFile,
-  workerYue2LadderFile, workerYue2Ladders,
+  deleteWorkerMirrorRun, getDispatch, getWorker, listWorkers, proxyToWorker, pullLinked, receiveDatasetFile, startDispatch,
+  upsertPushedDataset, workerAdapterFile, workerDatasetFiles, workerLinkedPairs, workerMirrorFile, workerMirrorManifest, workerStatus,
 } from '../services/training/trainingWorkers.js';
+import { syncYue2Mirror, yue2MirrorStatus } from '../services/training/yue2Mirror.js';
 
 const fail = (res: Response, err: any) => res.status(err?.status ?? 500).json({ error: err?.message || String(err) });
 
@@ -89,39 +90,33 @@ workerRouter.get('/adapter-file', (req: Request, res: Response) => {
   try { res.sendFile(workerAdapterFile(String(req.query.rel ?? ''))); } catch (err) { fail(res, err); }
 });
 
-/** GET /api/training/worker/yue2-ladders — every rung-bearing run this
- *  worker knows of, with a checksum per rendered preview. */
-workerRouter.get('/yue2-ladders', (_req: Request, res: Response) => {
-  try { res.json({ ladders: workerYue2Ladders() }); } catch (err) { fail(res, err); }
+/** GET /api/training/worker/yue2-mirror — every run on this worker and the
+ *  files the controller's mirror copies, by size and mtime. No hashing. */
+workerRouter.get('/yue2-mirror', (_req: Request, res: Response) => {
+  try { res.json({ runs: workerMirrorManifest() }); } catch (err) { fail(res, err); }
 });
 
-/** GET /api/training/worker/yue2-ladder-file?datasetId=&run=&file= — one
- *  rung's preview audio, validated the same way local playback resolves it. */
-workerRouter.get('/yue2-ladder-file', (req: Request, res: Response) => {
-  try { res.sendFile(workerYue2LadderFile(String(req.query.datasetId ?? ''), String(req.query.run ?? ''), String(req.query.file ?? ''))); }
-  catch (err) { fail(res, err); }
+/** GET /api/training/worker/yue2-mirror-file?jobId=&rel= — one manifest entry,
+ *  with its sha256 in x-sha256 and the mtime it was served at in x-mtime.
+ *  HEAD returns the same headers without the body. */
+workerRouter.get('/yue2-mirror-file', async (req: Request, res: Response) => {
+  try {
+    const f = await workerMirrorFile(String(req.query.jobId ?? ''), String(req.query.rel ?? ''));
+    res.setHeader('content-type', 'application/octet-stream');
+    res.setHeader('content-length', String(f.size));
+    res.setHeader('x-sha256', f.sha256);
+    res.setHeader('x-mtime', String(f.mtimeMs));
+    // HEAD (the mirror checking a file it already holds): the hash, no body.
+    if (!f.size || req.method === 'HEAD') { res.end(); return; }
+    await pipeline(fs.createReadStream(f.abs, { start: 0, end: f.size - 1 }), res);
+  } catch (err) { if (!res.headersSent) fail(res, err); else res.destroy(); }
 });
 
-/** GET /api/training/worker/yue2-ladder-checkpoint?datasetId=&run=&step= —
- *  one rung's checkpoint files, with a checksum each. Never the whole ladder. */
-workerRouter.get('/yue2-ladder-checkpoint', (req: Request, res: Response) => {
-  try { res.json(workerYue2LadderCheckpoint(String(req.query.datasetId ?? ''), String(req.query.run ?? ''), Number(req.query.step))); }
-  catch (err) { fail(res, err); }
-});
-
-/** GET /api/training/worker/yue2-ladder-checkpoint-file?datasetId=&run=&step=&file=
- *  — one checkpoint file's bytes, `file` restricted to the fixed known set. */
-workerRouter.get('/yue2-ladder-checkpoint-file', (req: Request, res: Response) => {
-  try { res.sendFile(workerYue2LadderCheckpointFile(String(req.query.datasetId ?? ''), String(req.query.run ?? ''), Number(req.query.step), String(req.query.file ?? ''))); }
-  catch (err) { fail(res, err); }
-});
-
-/** DELETE /api/training/worker/yue2-ladders/:jobId?datasetId= — the whole
- *  ladder folder, every rung and preview. Called once the controller has
- *  hydrated and linked its chosen rung, or the user discarded the ladder
- *  outright. Refuses while the run is still training. */
-workerRouter.delete('/yue2-ladders/:jobId', (req: Request, res: Response) => {
-  try { deleteWorkerYue2LadderFolder(String(req.query.datasetId ?? ''), req.params.jobId as string); res.json({ ok: true }); }
+/** DELETE /api/training/worker/yue2-mirror/:jobId — the run's folder and index
+ *  entry, once the controller holds a full copy. 409 while anything may still
+ *  read it. */
+workerRouter.delete('/yue2-mirror/:jobId', (req: Request, res: Response) => {
+  try { deleteWorkerMirrorRun(req.params.jobId as string); res.json({ ok: true }); }
   catch (err) { fail(res, err); }
 });
 
@@ -169,12 +164,17 @@ router.post('/:name/pull', async (req: Request, res: Response) => {
   try { res.json({ pulled: await pullLinked(w) }); } catch (err) { fail(res, err); }
 });
 
-/** POST /api/workers/:name/pull-ladders — pull every rung-bearing ladder
- *  (finished or still rendering) into this machine's own index. */
-router.post('/:name/pull-ladders', async (req: Request, res: Response) => {
+/** GET /api/workers/:name/mirror — the background mirror's last pass, or null. */
+router.get('/:name/mirror', (req: Request, res: Response) => {
+  if (!getWorker(req.params.name as string)) { res.status(404).json({ error: 'No such worker' }); return; }
+  res.json({ mirror: yue2MirrorStatus(req.params.name as string) });
+});
+
+/** POST /api/workers/:name/mirror — run a pass now (or join the one running). */
+router.post('/:name/mirror', async (req: Request, res: Response) => {
   const w = getWorker(req.params.name as string);
   if (!w) { res.status(404).json({ error: 'No such worker' }); return; }
-  try { res.json({ pulled: await pullYue2Ladders(w) }); } catch (err) { fail(res, err); }
+  try { res.json({ mirror: await syncYue2Mirror(w) }); } catch (err) { fail(res, err); }
 });
 
 router.use('/:name/api', (req: Request, res: Response) => { void proxyToWorker(req, res); });

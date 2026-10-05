@@ -4,8 +4,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  finishYue2Ladders, getJob, listYue2AitkRuns, listYue2BatchesLocal, listYue2JointPreviews,
-  listYue2JointPreviewsLocal, pickLadderRun, scoreYue2Rung, setTrainingWorker, yue2JointPreviewsReader,
+  finishYue2Ladders, getJob, getWorkerMirror, listYue2AitkRuns, listYue2BatchesLocal,
+  listYue2JointPreviewsLocal, pickLadderRun, scoreYue2Rung, setTrainingWorker, syncWorkerMirror,
 } from './trainingApi.js';
 
 function mockFetch(urls: string[]) {
@@ -17,7 +17,7 @@ function mockFetch(urls: string[]) {
   return () => { globalThis.fetch = real; };
 }
 
-test('with a worker selected, run records/scores/finish/local previews hit the local base; job control hits the worker base', async () => {
+test('with a worker selected, run records/scores/finish/previews hit the local base; job control hits the worker base', async () => {
   const urls: string[] = [];
   const restore = mockFetch(urls);
   try {
@@ -31,15 +31,24 @@ test('with a worker selected, run records/scores/finish/local previews hit the l
     assert.ok(urls.every(u => u.startsWith('/api/training/') && !u.includes('/api/workers/')), `expected only local-base calls, got ${JSON.stringify(urls)}`);
 
     await getJob('job1');
-    await listYue2JointPreviews('ds1', 'run1');
-    assert.equal(urls.length, localCalls + 2);
+    assert.equal(urls.length, localCalls + 1);
     for (const u of urls.slice(localCalls)) assert.match(u, /^\/api\/workers\/LivingRoom\/api\/training\//);
   } finally { restore(); setTrainingWorker(null); }
 });
 
-test('yue2JointPreviewsReader: local once a run is indexed, worker reader only while unindexed', () => {
-  assert.equal(yue2JointPreviewsReader(true), listYue2JointPreviewsLocal);
-  assert.equal(yue2JointPreviewsReader(false), listYue2JointPreviews);
+test('mirror status and sync go to the local workers route, never through the worker proxy', async () => {
+  const urls: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    urls.push(`${init?.method ?? 'GET'} ${url}`);
+    return new Response(JSON.stringify({ mirror: null }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  try {
+    setTrainingWorker('LivingRoom');
+    await getWorkerMirror('LivingRoom');
+    await syncWorkerMirror('LivingRoom');
+    assert.deepEqual(urls, ['GET /api/workers/LivingRoom/mirror', 'POST /api/workers/LivingRoom/mirror']);
+  } finally { globalThis.fetch = real; setTrainingWorker(null); }
 });
 
 test('pickLadderRun: an explicit pick always wins', () => {

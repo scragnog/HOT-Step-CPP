@@ -142,37 +142,7 @@ test('pullLinked still pulls adapters only when the worker sends none of the new
   }
 });
 
-test('scoring a run already known locally through a worker is refused with 409', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-score-local-guard-'));
-  try {
-    const script = [
-      "import path from 'node:path';",
-      "import { Readable } from 'node:stream';",
-      "import { initDb } from './src/db/database.js';",
-      "import * as repo from './src/services/training/datasetsRepo.js';",
-      "import { recordYue2AitkRun } from './src/services/training/yue2AitkRuns.js';",
-      "import { proxyToWorker } from './src/services/training/trainingWorkers.js';",
-      "import { config } from './src/config.js';",
-      "initDb();",
-      "const now = new Date().toISOString();",
-      "config.workers.list = 'Mock=http://127.0.0.1:1';",
-      "repo.insertDataset({ id: 'ds-album', slug: 'album', name: 'album', sourceDir: path.join(process.env.TRAINING_DIR, 'src-album'), recursive: true, customTag: '', tagPosition: 'prefix', genreRatio: 0, defaultArtist: '', defaultAlbum: '', defaultGenre: '', defaultLanguage: '', sampleCount: 0, labeledCount: 0, excludedCount: 0, status: 'draft', builtAt: '', datasetJsonPath: '', albumName: '', createdAt: now, updatedAt: now });",
-      "recordYue2AitkRun({ version: 1, jobId: 'local-run', datasetId: 'ds-album', datasetSlug: 'album', method: 'aitk', output: path.join(process.env.TRAINING_DIR, 'out'), options: {}, status: 'done', createdAt: 1, updatedAt: 2, checkpoints: [] });",
-      "const req = Readable.from([Buffer.from(JSON.stringify({ refineRun: 'local-run', step: 10, likeness: 4 }))]);",
-      "Object.assign(req, { url: '/training/datasets/ds-album/yue2-rung-scores', method: 'PUT', params: { name: 'Mock' }, query: {}, headers: {} });",
-      "let status = 0; let payload;",
-      "const res = { status(c) { status = c; return this; }, json(p) { payload = p; }, headersSent: false, on() {} };",
-      "await proxyToWorker(req, res);",
-      "if (status !== 409) throw new Error('expected 409, got ' + status + ' ' + JSON.stringify(payload));",
-      "if (!/already known on this machine/.test(payload?.error ?? '')) throw new Error('unexpected message: ' + JSON.stringify(payload));",
-    ].join('');
-    runPullInIsolatedRoot(root, script);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('deleting a worker ladder folder is refused while another job for the dataset is active', () => {
+test('deleting a worker run is refused while another job for the dataset is active', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-delete-active-job-'));
   try {
     const script = [
@@ -181,7 +151,7 @@ test('deleting a worker ladder folder is refused while another job for the datas
       "import { initDb } from './src/db/database.js';",
       "import * as repo from './src/services/training/datasetsRepo.js';",
       "import { recordYue2AitkRun } from './src/services/training/yue2AitkRuns.js';",
-      "import { deleteWorkerYue2LadderFolder } from './src/services/training/trainingWorkers.js';",
+      "import { deleteWorkerMirrorRun } from './src/services/training/trainingWorkers.js';",
       "import * as queue from './src/services/training/labelingQueue.js';",
       "initDb();",
       "const now = new Date().toISOString();",
@@ -194,7 +164,7 @@ test('deleting a worker ladder folder is refused while another job for the datas
       "recordYue2AitkRun({ version: 1, jobId: 'job1', datasetId: 'ds-album', datasetSlug: 'album', method: 'aitk', output, options: {}, status: 'done', createdAt: 1, updatedAt: 2, checkpoints: [] });",
       "queue.createJob('yue2-ar-train', 'ds-album', [], {});",
       "let threw = false;",
-      "try { deleteWorkerYue2LadderFolder('ds-album', 'job1'); } catch (err) { threw = true; if (err?.status !== 409) throw new Error('expected 409, got ' + err?.status); }",
+      "try { deleteWorkerMirrorRun('job1'); } catch (err) { threw = true; if (err?.status !== 409) throw new Error('expected 409, got ' + err?.status); }",
       "if (!threw) throw new Error('expected the delete to be refused while another job is active');",
       "if (!fs.existsSync(output)) throw new Error('fixture bug: output should still be here');",
     ].join('');
@@ -204,7 +174,36 @@ test('deleting a worker ladder folder is refused while another job for the datas
   }
 });
 
-test('deleting a worker ladder folder is refused while the GPU lane is busy or queued (a manual preview render)', () => {
+test('deleting a worker run is refused right after it ends: a chained refine stage may resume from it', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-delete-grace-'));
+  try {
+    const script = [
+      "import fs from 'node:fs';",
+      "import path from 'node:path';",
+      "import { initDb } from './src/db/database.js';",
+      "import * as repo from './src/services/training/datasetsRepo.js';",
+      "import { recordYue2AitkRun } from './src/services/training/yue2AitkRuns.js';",
+      "import { deleteWorkerMirrorRun } from './src/services/training/trainingWorkers.js';",
+      "initDb();",
+      "const now = new Date().toISOString();",
+      "repo.insertDataset({ id: 'ds-album', slug: 'album', name: 'album', sourceDir: path.join(process.env.TRAINING_DIR, 'src-album'), recursive: true, customTag: '', tagPosition: 'prefix', genreRatio: 0, defaultArtist: '', defaultAlbum: '', defaultGenre: '', defaultLanguage: '', sampleCount: 0, labeledCount: 0, excludedCount: 0, status: 'draft', builtAt: '', datasetJsonPath: '', albumName: '', createdAt: now, updatedAt: now });",
+      // Done, no job active, GPU idle: the gap before a batch's refine stage
+      // or the runner's automatic refinement is queued.
+      "const output = path.join(process.env.ACESTEPCPP_ADAPTERS, 'yue2-joint-adapters', 'job1');",
+      "fs.mkdirSync(output, { recursive: true });",
+      "recordYue2AitkRun({ version: 1, jobId: 'job1', datasetId: 'ds-album', datasetSlug: 'album', method: 'aitk', output, options: {}, status: 'done', createdAt: 1, updatedAt: Date.now(), checkpoints: [] });",
+      "let threw = false;",
+      "try { deleteWorkerMirrorRun('job1'); } catch (err) { threw = true; if (err?.status !== 409) throw new Error('expected 409, got ' + err?.status); }",
+      "if (!threw) throw new Error('expected the delete to be refused for a run that just ended');",
+      "if (!fs.existsSync(output)) throw new Error('the run folder must survive');",
+    ].join('');
+    runPullInIsolatedRoot(root, script);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('deleting a worker run is refused while the GPU lane is busy or queued (a manual preview render)', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-delete-gpu-lane-'));
   try {
     const script = [
@@ -213,7 +212,7 @@ test('deleting a worker ladder folder is refused while the GPU lane is busy or q
       "import { initDb } from './src/db/database.js';",
       "import * as repo from './src/services/training/datasetsRepo.js';",
       "import { recordYue2AitkRun } from './src/services/training/yue2AitkRuns.js';",
-      "import { deleteWorkerYue2LadderFolder } from './src/services/training/trainingWorkers.js';",
+      "import { deleteWorkerMirrorRun } from './src/services/training/trainingWorkers.js';",
       "import { runOnGpuLane } from './src/services/generation/gpuLane.js';",
       "initDb();",
       "const now = new Date().toISOString();",
@@ -227,7 +226,7 @@ test('deleting a worker ladder folder is refused while the GPU lane is busy or q
       "void runOnGpuLane(() => new Promise(() => {}), { label: 'manual preview' });",
       "await new Promise(resolve => setImmediate(resolve));",
       "let threw = false;",
-      "try { deleteWorkerYue2LadderFolder('ds-album', 'job1'); } catch (err) { threw = true; if (err?.status !== 409) throw new Error('expected 409, got ' + err?.status); }",
+      "try { deleteWorkerMirrorRun('job1'); } catch (err) { threw = true; if (err?.status !== 409) throw new Error('expected 409, got ' + err?.status); }",
       "if (!threw) throw new Error('expected the delete to be refused while the GPU lane is held');",
       "if (!fs.existsSync(output)) throw new Error('fixture bug: output should still be here');",
     ].join('');
@@ -237,7 +236,7 @@ test('deleting a worker ladder folder is refused while the GPU lane is busy or q
   }
 });
 
-test('deleting a worker ladder folder refuses a run record whose output IS the ladder root itself', () => {
+test('deleting a worker run refuses a run record whose output IS the ladder root itself', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-delete-root-'));
   try {
     const script = [
@@ -246,7 +245,7 @@ test('deleting a worker ladder folder refuses a run record whose output IS the l
       "import { initDb } from './src/db/database.js';",
       "import * as repo from './src/services/training/datasetsRepo.js';",
       "import { recordYue2AitkRun } from './src/services/training/yue2AitkRuns.js';",
-      "import { deleteWorkerYue2LadderFolder } from './src/services/training/trainingWorkers.js';",
+      "import { deleteWorkerMirrorRun } from './src/services/training/trainingWorkers.js';",
       "initDb();",
       "const now = new Date().toISOString();",
       "repo.insertDataset({ id: 'ds-album', slug: 'album', name: 'album', sourceDir: path.join(process.env.TRAINING_DIR, 'src-album'), recursive: true, customTag: '', tagPosition: 'prefix', genreRatio: 0, defaultArtist: '', defaultAlbum: '', defaultGenre: '', defaultLanguage: '', sampleCount: 0, labeledCount: 0, excludedCount: 0, status: 'draft', builtAt: '', datasetJsonPath: '', albumName: '', createdAt: now, updatedAt: now });",
@@ -260,7 +259,7 @@ test('deleting a worker ladder folder refuses a run record whose output IS the l
       "fs.writeFileSync(marker, 'x');",
       "recordYue2AitkRun({ version: 1, jobId: 'job1', datasetId: 'ds-album', datasetSlug: 'album', method: 'aitk', output: ladderRoot, options: {}, status: 'done', createdAt: 1, updatedAt: 2, checkpoints: [] });",
       "let threw = false;",
-      "try { deleteWorkerYue2LadderFolder('ds-album', 'job1'); } catch (err) { threw = true; }",
+      "try { deleteWorkerMirrorRun('job1'); } catch (err) { threw = true; }",
       "if (!threw) throw new Error('expected the delete to be refused when output is the ladder root itself');",
       "if (!fs.existsSync(marker)) throw new Error('the sibling marker must survive: the whole ladder tree must never be wiped');",
     ].join('');
@@ -270,7 +269,7 @@ test('deleting a worker ladder folder refuses a run record whose output IS the l
   }
 });
 
-test('deleting a worker ladder folder refuses a run record whose output points outside the ladder tree', () => {
+test('deleting a worker run refuses a run record whose output points outside the ladder tree', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-delete-containment-'));
   try {
     const script = [
@@ -279,7 +278,7 @@ test('deleting a worker ladder folder refuses a run record whose output points o
       "import { initDb } from './src/db/database.js';",
       "import * as repo from './src/services/training/datasetsRepo.js';",
       "import { recordYue2AitkRun } from './src/services/training/yue2AitkRuns.js';",
-      "import { deleteWorkerYue2LadderFolder } from './src/services/training/trainingWorkers.js';",
+      "import { deleteWorkerMirrorRun } from './src/services/training/trainingWorkers.js';",
       "initDb();",
       "const now = new Date().toISOString();",
       "repo.insertDataset({ id: 'ds-album', slug: 'album', name: 'album', sourceDir: path.join(process.env.TRAINING_DIR, 'src-album'), recursive: true, customTag: '', tagPosition: 'prefix', genreRatio: 0, defaultArtist: '', defaultAlbum: '', defaultGenre: '', defaultLanguage: '', sampleCount: 0, labeledCount: 0, excludedCount: 0, status: 'draft', builtAt: '', datasetJsonPath: '', albumName: '', createdAt: now, updatedAt: now });",
@@ -288,7 +287,7 @@ test('deleting a worker ladder folder refuses a run record whose output points o
       "fs.mkdirSync(outside, { recursive: true }); fs.writeFileSync(path.join(outside, 'keep.txt'), 'x');",
       "recordYue2AitkRun({ version: 1, jobId: 'job1', datasetId: 'ds-album', datasetSlug: 'album', method: 'aitk', output: outside, options: {}, status: 'done', createdAt: 1, updatedAt: 2, checkpoints: [] });",
       "let threw = false;",
-      "try { deleteWorkerYue2LadderFolder('ds-album', 'job1'); } catch (err) { threw = true; }",
+      "try { deleteWorkerMirrorRun('job1'); } catch (err) { threw = true; }",
       "if (!threw) throw new Error('expected the delete to be refused for a path outside the ladder tree');",
       "if (!fs.existsSync(path.join(outside, 'keep.txt'))) throw new Error('the outside folder must never be touched');",
     ].join('');

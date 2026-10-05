@@ -56,7 +56,7 @@ export function ladderVisibility(run: Yue2AitkRunRecord | undefined, blindRungs:
   const labelFor = (step: number) => run?.blindLabels?.[step] ?? '';
   // A remote-only rung (pulled from a worker, no local weights yet) is still
   // listenable and scoreable from its previews and meters.
-  const ladder = run && !labelsPending ? [...run.checkpoints].filter(c => (c.arPath && c.narPath) || c.availability === 'remote').sort((a, b) => a.step - b.step) : [];
+  const ladder = run && !labelsPending ? [...run.checkpoints].filter(c => c.arPath && c.narPath).sort((a, b) => a.step - b.step) : [];
   const visibleLadder = blind ? [...ladder].sort((a, b) => labelFor(a.step).localeCompare(labelFor(b.step))) : ladder;
   return { jointLadder, labelsPending, blind, labelFor, ladder, visibleLadder };
 }
@@ -145,19 +145,15 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
     } catch (err) { fail(err); }
   };
   useImperativeHandle(ref, () => ({ finishPick }), [datasetId]);
-  // A remote-only rung's "Use this rung" fetches its checkpoint server-side
-  // before linking (see yue2-joint-preset's hydrateYue2LadderCheckpoint
-  // call) — a few seconds to tens of seconds over the network, not instant
-  // like a local link, hence a distinct busy state here.
-  const [fetchingStep, setFetchingStep] = useState<number | null>(null);
+  const [usingStep, setUsingStep] = useState<number | null>(null);
   const use = async (dir: string, step: number) => {
     if (!runId) return;
-    setCleanupNote(''); setFetchingStep(step);
+    setCleanupNote(''); setUsingStep(step);
     try {
       if (onUse && await onUse(dir, step)) return;
       await finishPick(runId, dir, step);
     } catch (err) { fail(err); }
-    finally { setFetchingStep(null); }
+    finally { setUsingStep(null); }
   };
   const noCleanupChoice: Yue2CleanupChoice = { caches: false, otherCheckpoints: false, otherRuns: false, resume: false, otherPreviews: false };
   const doCleanup = async (over?: Yue2CleanupChoice) => {
@@ -166,7 +162,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
     try {
       const r = await runYue2Cleanup(datasetId, { run: cleanup.run, step: cleanup.step, blind: cleanup.blind, blindLabel: cleanup.blindLabel, ...(over ?? choice) });
       if (r.finishError) { fail(r.finishError); return; }
-      setCleanupNote(`${t('trainingStudio.refine.cleanupDone', 'Removed {{what}}; about {{size}} freed.', { what: r.done.join(', ') || 'nothing', size: mib(r.freedBytes) })}${cleanup.blind ? ` ${t('trainingStudio.refine.blindReveal', 'Rung {{label}} was step {{step}}.', { label: cleanup.blindLabel, step: cleanup.step })}` : ''}${r.moveError ? ` ${r.moveError}` : ''}`);
+      setCleanupNote(`${t('trainingStudio.refine.cleanupDone', 'Removed {{what}}; about {{size}} freed.', { what: r.done.join(', ') || 'nothing', size: mib(r.freedBytes) })}${cleanup.blind ? ` ${t('trainingStudio.refine.blindReveal', 'Rung {{label}} was step {{step}}.', { label: cleanup.blindLabel, step: cleanup.step })}` : ''}`);
       setCleanup(null);
       await onChanged();
     } catch (err) { fail(err); }
@@ -285,12 +281,6 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
         {visibleLadder.map(c => {
           const stats = rungStats(c.step);
           const { mine, plannerReplans, composerReplans, hasReplanData, flaggedTakes, flagReasons, overall } = stats;
-          // Pulled from a worker, no local weight file yet: listenable and
-          // scoreable from its previews. Use this rung fetches just this
-          // step's checkpoint on click (server-side, before linking);
-          // Render more still needs it already local — rendering a NEW
-          // preview needs the weights and the engine, not just a transfer.
-          const remoteOnly = c.availability === 'remote';
           return <div key={c.step} id={`${idPrefix}-${c.step}`}
             className={`rounded-lg border p-3 ${picked === c.dir ? 'border-emerald-500/60 bg-emerald-500/5' : c.step === bestStep ? 'border-sky-500/70' : c.rung ? 'border-amber-500/40' : 'border-zinc-300/70 dark:border-white/10'}`}>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
@@ -304,18 +294,13 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
               {flaggedTakes.length > 0 && <span className="font-mono text-red-600 dark:text-red-400" title={flagReasons}>{t('trainingStudio.refine.planFlags', 'plan flags {{n}}/{{takes}}', { n: flaggedTakes.length, takes: stats.doneTakes.length })}</span>}
               {overall && <span className="font-mono text-sky-700 dark:text-sky-300" title={t('trainingStudio.refine.overallInfo', 'overall = (likeness + (6 − corruption)) / 2, minus a soft penalty for replan load')}>{t('trainingStudio.refine.overall', 'overall {{n}}', { n: overall.overall.toFixed(2) })}</span>}
               <span className="flex-1" />
-              {remoteOnly && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300"
-                title={t('trainingStudio.refine.remoteOnlyInfo', 'Not fetched from its training worker yet — listen and score from the previews. Use this rung fetches just this step before linking it.') as string}>
-                {t('trainingStudio.refine.remoteOnly', 'not pulled')}</span>}
-              <button type="button" onClick={() => void render(c.step)} disabled={rendering !== null || remoteOnly}
-                title={remoteOnly ? t('trainingStudio.refine.renderNeedsLocal', 'Rendering a new preview needs this checkpoint already on this machine — use "Use this rung" to fetch it first.') as string : undefined}
+              <button type="button" onClick={() => void render(c.step)} disabled={rendering !== null}
                 className="px-2 py-1 rounded-lg text-[11px] border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 disabled:opacity-40">
                 {rendering === c.step ? t('trainingStudio.refine.rendering', 'Rendering…') : mine.length ? t('trainingStudio.refine.render', 'Render more') : t('trainingStudio.refine.renderFirst', 'Render')}
               </button>
-              <button type="button" onClick={() => void use(c.dir, c.step)} disabled={fetchingStep !== null}
-                title={remoteOnly ? t('trainingStudio.refine.useFetchesFirst', 'Fetches this step\'s checkpoint from its training worker, verifies it, then links it.') as string : undefined}
+              <button type="button" onClick={() => void use(c.dir, c.step)} disabled={usingStep !== null}
                 className={`px-2 py-1 rounded-lg text-[11px] font-semibold border disabled:opacity-40 ${picked === c.dir ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300' : 'border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10'}`}>
-                {fetchingStep === c.step ? t('trainingStudio.refine.fetching', 'Fetching…') : picked === c.dir ? t('trainingStudio.refine.picked', 'In use') : t('trainingStudio.refine.use', 'Use this rung')}
+                {picked === c.dir ? t('trainingStudio.refine.picked', 'In use') : t('trainingStudio.refine.use', 'Use this rung')}
               </button>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px]">

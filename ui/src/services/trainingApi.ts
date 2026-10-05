@@ -6,18 +6,15 @@
 
 // The studio trains on this PC or on a training worker (server
 // services/training/trainingWorkers.ts). API_BASE follows "Train on" and is
-// for JOB CONTROL ONLY: start/cancel/status of a job and the live previews
-// of a job still in progress there — calls made through `request()`.
+// for JOB CONTROL ONLY: start/cancel/status of a job running there — calls
+// made through `request()`.
 //
-// Everything else — run records, ladder review, previews of a FINISHED run,
-// rung/album scores, cleanup and finish — always reads and writes this
-// machine's own index, via LOCAL_BASE / `localRequest()`, never API_BASE.
-// Finished runs are always reviewed and scored from this machine, never from
-// a worker (even a worker's own run lands in this machine's index once its
-// folder is on shared storage) — a worker trains, nothing else. Calls using
-// `localRequest` are the LOCAL half of that split; calls using `request` are
-// the JOB_CONTROL half. See trainingWorkers.ts's `scoreHere` for the
-// server-side guard that backs this up.
+// Everything else — run records, previews, ladder review, rung/album scores,
+// cleanup and finish — always reads and writes this machine's own index, via
+// LOCAL_BASE / `localRequest()`, never API_BASE. A worker trains, nothing
+// else: this PC's server mirrors each worker run's checkpoints and previews
+// into its own folders as they land (services/training/yue2Mirror.ts), so a
+// worker run is an ordinary local run here.
 const WORKER_KEY = 'hotstep.trainingWorker';
 let trainingWorker: string | null = (() => { try { return localStorage.getItem(WORKER_KEY) || null; } catch { return null; } })();
 let API_BASE = trainingWorker ? `/api/workers/${encodeURIComponent(trainingWorker)}/api/training` : '/api/training';
@@ -819,9 +816,6 @@ export interface Yue2AitkCheckpointRecord {
   narPath?: string;
   /** Which `segments/segment-NNNNNN` folder this checkpoint lives under. */
   segment?: string;
-  /** 'remote': pulled from a training worker, no weight file here yet —
-   *  listable, previewable and scoreable, not yet linkable or trainable on. */
-  availability?: 'remote';
 }
 
 export interface Yue2AitkRunRecord {
@@ -2571,31 +2565,13 @@ export async function linkYue2JointCheckpointPreset(
     { method: 'POST', ...jsonBody({ checkpointDir }) });
 }
 
-/** Live previews of a run still training ON A WORKER, before it has landed
- *  in this machine's own index — the only reason this one stays worker-aware.
- *  Once the run shows up in `listYue2AitkRuns`, use `listYue2JointPreviewsLocal`
- *  instead; never this one, or a stale/incomplete worker copy can win. */
-export async function listYue2JointPreviews(
-  id: string, run?: string,
-): Promise<{ run: string; output: string; previews: Yue2JointPreviewRecord[] }> {
-  const query = run ? `?run=${encodeURIComponent(run)}` : '';
-  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews${query}`);
-}
-
-/** Previews of a run already in this machine's own index (finished, or a
- *  worker run that has synced down) — same endpoint, always local. */
+/** Previews of a run in this machine's own index (trained here, or mirrored
+ *  down from a worker). */
 export async function listYue2JointPreviewsLocal(
   id: string, run?: string,
 ): Promise<{ run: string; output: string; previews: Yue2JointPreviewRecord[] }> {
   const query = run ? `?run=${encodeURIComponent(run)}` : '';
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-joint-previews${query}`);
-}
-
-/** The routing rule above, as one function both the training card and the
- *  Refine tab call: local once a run is indexed in the caller's own run
- *  list, the worker reader only while it's still an unindexed worker job. */
-export function yue2JointPreviewsReader(indexedLocally: boolean) {
-  return indexedLocally ? listYue2JointPreviewsLocal : listYue2JointPreviews;
 }
 
 /** Which run a ladder view shows: an explicit pick first, then the run
@@ -2614,7 +2590,7 @@ export function pickLadderRun<T extends { jobId: string; live?: boolean; created
 }
 
 /** Awaiting review: refinement ladders across datasets with score counts. */
-export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number; blindLabel: string } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean; /** Pulled from this training worker; absent/null = trained here. */ origin?: string | null }
+export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number; blindLabel: string } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean; /** Mirrored from this training worker; absent/null = trained here. */ origin?: string | null }
 export async function listYue2Review(): Promise<{ rows: Yue2ReviewRow[] }> {
   return localRequest('/yue2-review');
 }
@@ -2626,7 +2602,7 @@ export type Yue2CleanupChoice = { caches?: boolean; otherCheckpoints?: boolean; 
 export async function getYue2CleanupPlan(id: string, run: string, step: number): Promise<Yue2CleanupPlan> {
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-cleanup-plan?run=${encodeURIComponent(run)}&step=${step}`);
 }
-export async function runYue2Cleanup(id: string, body: { run: string; step: number; blind?: boolean; blindLabel?: string } & Yue2CleanupChoice): Promise<{ freedBytes: number; done: string[]; finishError?: string; moveError?: string }> {
+export async function runYue2Cleanup(id: string, body: { run: string; step: number; blind?: boolean; blindLabel?: string } & Yue2CleanupChoice): Promise<{ freedBytes: number; done: string[]; finishError?: string }> {
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-cleanup`, { method: 'POST', ...jsonBody(body) });
 }
 
@@ -3169,11 +3145,14 @@ export async function getWorkerDispatch(worker: string): Promise<WorkerDispatch 
 export async function pullWorkerAdapters(worker: string): Promise<Array<{ slug: string; status: 'fetched' | 'current' | 'no-dataset'; bytes: number }>> {
   return (await workersRequest<{ pulled: Array<{ slug: string; status: 'fetched' | 'current' | 'no-dataset'; bytes: number }> }>(`/${encodeURIComponent(worker)}/pull`, { method: 'POST' })).pulled;
 }
-export interface Yue2LadderPullResult { worker: string; jobId: string; datasetSlug: string; status: 'pulled' | 'partial' | 'no-dataset' | 'error'; previewsFetched: number; bytes: number; errors: string[] }
-/** Copy every rung-bearing ladder on `worker` (run facts + hash-verified
- *  previews, never the checkpoint weights) into this machine's own index. */
-export async function pullWorkerYue2Ladders(worker: string): Promise<Yue2LadderPullResult[]> {
-  return (await workersRequest<{ pulled: Yue2LadderPullResult[] }>(`/${encodeURIComponent(worker)}/pull-ladders`, { method: 'POST' })).pulled;
+/** One worker's background mirror: runs it trains are copied down here file by file. */
+export interface MirrorStatus { worker: string; running: boolean; lastPassAt: number | null; lastError: string | null; online: boolean; pendingFiles: number; pendingBytes: number; runs: number }
+export async function getWorkerMirror(worker: string): Promise<MirrorStatus | null> {
+  return (await workersRequest<{ mirror: MirrorStatus | null }>(`/${encodeURIComponent(worker)}/mirror`)).mirror;
+}
+/** Run one mirror pass now; resolves when the pass ends. */
+export async function syncWorkerMirror(worker: string): Promise<MirrorStatus> {
+  return (await workersRequest<{ mirror: MirrorStatus }>(`/${encodeURIComponent(worker)}/mirror`, { method: 'POST' })).mirror;
 }
 
 export async function cancelPipeline(id: string): Promise<void> {

@@ -47,6 +47,7 @@ import workerRoutes, { workerRouter } from './routes/workers.js';
 import { workerTokenGate } from './services/training/trainingWorkers.js';
 import { workerUpdateGate } from './services/training/workerUpdate.js';
 import { reconcileYue2AitkRunsAtStartup } from './services/training/yue2AitkRuns.js';
+import { startYue2Mirror } from './services/training/yue2Mirror.js';
 import backendsRoutes from './routes/backends.js';
 import audioRoutes from './routes/audio.js';
 import yue2CoverRoutes from './routes/yue2Cover.js';
@@ -68,6 +69,8 @@ console.log(`[Logger] Session logs: ${logDir}`);
 // Initialize databases
 initDb();
 reconcileYue2AitkRunsAtStartup();
+// Moves any old pulled ladders out of _remote, then copies each worker's runs here as they land.
+void startYue2Mirror();
 // lireek tables are created in initDb() — no separate init
 
 // Create Express app

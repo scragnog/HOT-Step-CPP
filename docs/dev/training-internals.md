@@ -185,133 +185,6 @@ option, the card) keeps `yue2-latents` (`YUE2_CORE_CACHE`: latents, codes, sheet
 `includeYue2Core` is passed, which only the card's opt-in toggle does; stale data is rebuilt by the stages' own checks. The report takes the album score as a
 target and reads archived loss logs.
 
-`ui/src/services/trainingApi.ts` splits every training call into two bases:
-`request()` (job control — start/cancel/status and the live previews of a run
-still training on a worker, via the switchable `API_BASE`) and `localRequest()`
-(run records, ladder review, finished-run previews, rung/album scores, cleanup
-and finish, always `/api/training` on this machine). A worker only trains;
-reviewing and scoring a run — even one a worker trained — always happens here,
-so a worker with no `blindLabels` set yet can never make the Review page list a
-blind ladder in step order (`Yue2LadderReview.tsx`'s `labelsPending` guard
-refuses to render a blind ladder at all until the run's own labels are in).
-
-The UI no longer calls the worker-proxied score route. `proxyToWorker` still
-answers `/datasets/:id/yue2-rung-scores` and `/yue2-album-score` itself
-(`scoreHere` in `trainingWorkers.ts`) for backwards compatibility, but
-`scoreHere` now refuses (409) to score a run already in this machine's own
-index (`listYue2AitkRuns`) — a run known locally is scored through
-`/api/training` directly, not through this path. For a run still unknown
-locally, a write fetches the run record and previews from the worker, stores
-the row here, then forwards the same PUT to the worker so its Review page and
-Finish scored still see it. A read first imports any worker rows missing here
-(`importYue2RungScores`, never overwriting), skipped once the run is known
-locally. Worker datasets carry the controller's dataset ids, which is what
-makes this work. The
-worker's sheet snapshot stays on the worker; `pullLinked` now also brings each linked
-pair's train.jsonl (and a `<jobId>.json` sidecar noting the kept step) back through the
-same `adapter-file` route as the two safetensors, landing under `trainLogArchiveDir` here.
-Two limits: a run whose worker process was killed outright (not stopped through the app)
-never reaches the trainer's `finally` block, so there is nothing archived there for the
-pull to find either; and the pull only sees the worker's *currently linked* pairs — an
-earlier run's log that was superseded and unlinked is not fetched.
-
-A worker's ladder does not wait for the `scoreHere` fallback above: `pullYue2Ladders`
-(`trainingWorkers.ts`), run manually (`POST /api/workers/:name/pull-ladders`), copies
-every rung-bearing run's facts and rendered preview audio — never its checkpoint
-weights — into a local run with `origin: { worker, remoteJobId }`, staged in
-`yue2-joint-adapters/_remote/<worker>/<trigger>_<stamp>` (`yue2RemoteRunDirectory`, the
-stamp being the run's start on the worker; a repull reuses whatever folder the index
-already records, and `jointFolders` never imports `_remote` itself). Its checkpoints carry `availability: 'remote'`
-instead of `arPath`/`narPath`; `yue2BestRung.ts` and `GET /yue2-review`'s rung filter
-both treat that the same as a local pair for listening and scoring (listening and
-scoring need the previews and meters, not the weights — those are only needed to link
-or further-train a rung, not yet pulled). Each preview is hash-verified (`WorkerLadder`'s
-`sha256`, computed on the worker from the actual file, never trusted from size alone)
-before it is written here; a mismatched, interrupted, or on-disk-corrupted transfer
-(an existing file is re-hashed against the worker's current manifest every pull, never
-just trusted for existing) is dropped and retried on the next pull, never renamed into
-place. `fetchAndVerifyFile` (`trainingWorkers.ts`) also retries the fetch itself up to 3
-times within one pull before giving up — a large file (tens to hundreds of MB) landing
-byte-identical in length but wrong in content on one attempt and correct on the next was a
-real, observed failure mode pulling LivingRoom's own previews. The root cause (Reviewer,
-2026-10-04, commit `dbe2464d`) turned out to be local, not the network: two overlapping
-pulls for the same worker/run shared one `${dest}.part` filename and raced each other's
-write, hash, and rename. Fixed by giving each transfer attempt its own temp filename and
-by serializing pulls, checkpoint hydrates and folder moves per run through
-`withYue2RunLock` (`yue2AitkRuns.ts`), so a second concurrent call waits instead of racing; the retry loop stays as real-network
-insurance on top of that, not as the fix for this race.
-`hydrateYue2LadderCheckpoint`'s checkpoint-file fetch (next) uses the same helper and lock.
-A preview whose manifest entry has no `sha256` this round (the worker can omit
-it after a read failure there) is never added to `verified` either, even when this
-machine's own copy is still sitting there untouched — nothing to check it against means
-the ladder comes back `partial`, not `pulled`, until the worker reports a hash again. A
-repull merges in the worker's newest checkpoints and previews without touching
-anything already decided locally — blind labels, rung scores (keyed by checkpoint dir,
-stable across repulls), review-complete and finished markers, and a preview already
-pruned locally is never re-fetched (`yue2AitkRuns.ts`'s `mergeCheckpoints`,
-`recordYue2AitkRun`'s `prior?.blindLabels` precedence, `pullOneYue2Ladder`'s
-pruned-preview check). `reconcileYue2AitkRunsAtStartup` skips any run with `origin`
-set — its `running` status means the worker is still training, which this machine
-restarting does not change. Pulling never deletes anything on the worker itself
-(deleting its run.json here would make its own `reconcileFromDisk` re-import the folder
-under a fresh id on its next restart, orphaning `remoteJobId`) — dropping the worker's
-copies happens once a chosen rung's checkpoint has been fetched and linked, below.
-
-When cleanup finishes a pulled run (`runYue2Cleanup`, which manual cleanup and Finish
-scored both call), `settleYue2RemoteRun` (`yue2Cleanup.ts`) moves its folder out of
-staging to `<trigger>_<stamp>`, the name `yue2JointOutputDirectory` gives a local run,
-adding `-N` when the name is taken (`freeYue2RunDirectory`). It holds the run lock and plans
-from the index as it stands once the lock is held. `moveYue2AitkRun` renames the folder and
-repoints the index, checkpoint paths included, renaming back if the index write fails;
-`rebaseYue2JointLinks` (`lyricStudioExport.ts`) then repoints album presets and
-`yue2_rung_scores.checkpoint_dir` in one database transaction (score ids and ratings kept)
-and replaces `yue2-linked.json` by atomic rename. If any of that fails, the records and the
-folder go back, the run stays finished where it was, and cleanup returns `moveError`, which
-the Review cleanup note shows. Runs pulled before this naming (`remote-<worker>-<jobId>`)
-are moved by `POST /api/training/yue2-remote-folders/migrate` (`migrateYue2RemoteFolders`):
-`{ "apply": false }` lists the moves, `{ "apply": true }` makes them and refuses while a
-job, pipeline or batch is queued or running. It runs inside the app so each move shares
-the run lock with pulls; it is idempotent.
-
-The UI side (`ui/src/components/training-studio/ReviewPanel.tsx`) triggers
-`pullWorkerYue2Ladders` (`POST /api/workers/:name/pull-ladders`) for the selected
-"Train on" worker on Review's own mount and on a manual button, then reloads
-`listYue2Review`; a `partial`/`error` result shows as a small amber note (the ladder
-still lists — a dropped preview just retries next pull). ReviewPanel, RefinePanel's
-run picker and Yue2AitkTrainCard's ladder header all show the worker's name as a
-badge when `run.origin` is set, from the same `origin: run.origin?.worker ?? null`
-GET /yue2-review now sends. `Yue2LadderReview.tsx`'s `ladderVisibility` accepts a
-checkpoint with `availability === 'remote'` as a rung the same as one with both
-`arPath` and `narPath` — listening and scoring work from the pulled previews and
-meters. "Render more" stays disabled on one ("not pulled" badge) — a new preview
-needs the weights and the engine, not just a transfer — but "Use this rung" is live:
-clicking it fetches that one step's checkpoint before linking (next).
-
-"Use this rung" never pulls the rest of a pulled ladder: `hydrateYue2LadderCheckpoint`
-(`trainingWorkers.ts`) fetches one run's one step's `native-ar.safetensors`,
-`native-nar.safetensors`, and `optimizer.resume`/`meters.json` when the worker has them,
-hash-verified the same way `pullOneYue2Ladder` verifies previews (`workerYue2LadderCheckpoint`
-reports a manifest with a sha256 per file; a missing required file, a failed transfer or a
-hash mismatch returns `'error'` before anything links, and leaves the destination
-untouched — a file that already matches the manifest is kept, not re-fetched, so a retry
-resumes). It writes straight into the checkpoint's `dir` (`<output>/checkpoint-step<N>`),
-re-read from the index once the run lock is held, since a folder move may have run first,
-so the ordinary local disk scan
-(`checkpointRecords`) picks it up on the next read and the step stops being
-`availability: 'remote'` on its own — no index write in the hydrate call itself.
-`POST /datasets/:id/yue2-joint-preset` (manual "Use this rung") and
-`yue2BatchRunner.ts`'s `finishLadder` (Finish scored, base-matched ladders only — a NAR
-further-training run is always local, so that path is unaffected) both call it before
-their existing arPath/narPath check, so each gained exactly one branch rather than a
-parallel implementation. Only once the link call that follows actually succeeds does
-either call `deleteWorkerYue2Ladder`, which asks the worker to drop the *whole* ladder
-folder — every rung, every preview — in one step; a failed or partial hydrate returns
-before that line, so nothing on the worker is ever touched when the link doesn't happen.
-The existing `DELETE /datasets/:id/yue2-joint-runs/:jobId` ("Delete run", RefinePanel's
-trash icon) gained the same worker-drop as a best-effort side effect when `run.origin`
-is set — a rejected ladder's explicit "discard on worker" action, reusing the delete
-button that already removes the local copy rather than adding new UI.
-
 `server/src/services/training/datasetProfile.ts` measures a dataset and saves
 `<training dir>/datasets/<slug>/dataset-profile.json`. It reads only what
 survives a cache cleanup: the audio (one ffmpeg pass per song for EBU R128
@@ -335,6 +208,110 @@ step count tracked it at 0.23. Peak scores sit at the ceiling (22 of 27 runs
 peaked at 5), so the scores can show how fast an album trains but not how well.
 Base-matched has 4 full ladders, too few to rank. The lead-sheet measures are
 confounded: only albums whose cache was never cleaned up have them.
+
+### Training workers and the mirror
+
+`ui/src/services/trainingApi.ts` splits every training call into two bases:
+`request()` (job control — start/cancel/status, via the switchable `API_BASE`)
+and `localRequest()`
+(run records, ladder review, finished-run previews, rung/album scores, cleanup
+and finish, always `/api/training` on this machine). A worker only trains;
+reviewing and scoring a run — even one a worker trained — always happens here,
+so a worker with no `blindLabels` set yet can never make the Review page list a
+blind ladder in step order (`Yue2LadderReview.tsx`'s `labelsPending` guard
+refuses to render a blind ladder at all until the run's own labels are in).
+
+`pullLinked` (`POST /api/workers/:name/pull`, the Train on bar's "Fetch finished
+adapters") copies each AR/NAR pair the worker itself has linked, plus its train.jsonl
+file(s) and a `<jobId>.json` sidecar noting the kept step, through the worker's
+`adapter-file` route into `trainLogArchiveDir` here. It only sees the worker's
+*currently linked* pairs.
+
+`server/src/services/training/yue2Mirror.ts` copies every run a worker holds into this
+machine's own `yue2-joint-adapters/<folder>` as its files land, so a worker run becomes an
+ordinary local run tagged `origin: { worker, remoteJobId }`. Review, scoring, Use this
+rung, cleanup, Finish scored and linking never touch a worker. `startYue2Mirror()` runs
+one loop per configured worker (every 15 s while a run is training, has previews
+rendering or has files left to copy, otherwise every 120 s; an offline worker is logged
+once per outage). `POST /api/workers/:name/mirror` runs a pass now, or joins the one
+running, and returns its `MirrorStatus`; `GET` returns the last one.
+
+The worker side is three routes in `routes/workers.ts`'s `workerRouter`, backed by
+`trainingWorkers.ts`:
+
+- `GET /api/training/worker/yue2-mirror` (`workerMirrorManifest`): every unfinished run
+  in the worker's index with its status, options, blind labels, preview catalogue, a
+  `previewsBusy` flag, and `files` (forward-slash path, size, mtime; no hashing). The
+  files are the run's `train.jsonl` logs, `style-norms.json`, each complete checkpoint's
+  `native-ar.safetensors`, `native-nar.safetensors` and `meters.json`, and each done
+  preview's `.wav` and `.score.abc`. Never `optimizer.resume` or `adapter.safetensors`:
+  nothing here reads them. ace-train writes a checkpoint into `.checkpoint-stepN.tmp` and
+  renames it into place (`yue2-aitk-runtime.cpp`, `save_checkpoint`), so a checkpoint
+  folder holding both weight files is complete. A run finished on the worker (a
+  `finished` marker, or a NAR-further run under `refined/`) is left out: landed here it
+  would look like an ordinary unfinished ladder, which the next cleanup sweeps away.
+  Previews render inside the run's training job or on the GPU lane; a `rendering` record
+  with neither alive was cut off by a worker restart and is reported `failed`, so it
+  neither holds the run nor shows as rendering forever.
+- `GET /api/training/worker/yue2-mirror-file?jobId=&rel=` (`workerMirrorFile`): `rel` is
+  matched against that run's manifest entries, never joined onto a path. The sha256 goes
+  in `x-sha256`, hashed by streaming and cached per path, size and mtime, so each file is
+  hashed once per worker process; only the first `size` bytes are hashed and served, so a
+  log still growing stays consistent. `x-mtime` is the mtime served. `HEAD` returns the
+  same headers with no body.
+- `DELETE /api/training/worker/yue2-mirror/:jobId` (`deleteWorkerMirrorRun`): drops the
+  folder and index entry. 409 while the run is training, while a batch is active or the
+  run ended under two minutes ago (a batch's refine stage and the runner's automatic
+  refinement resume from its `optimizer.resume`, queued a moment after it ends), while
+  any job for its dataset is queued or running, or while the GPU lane is busy (a manual preview render bypasses the
+  labeling queue); 400 for an `output` that is not a strict descendant of the ladder root.
+
+A pass takes each manifest run under `withYue2RunLock` of its local jobId, so cleanup
+(which holds the same lock throughout) and deletes never interleave with it. A run with no
+dataset here is skipped and logged once. The local record is found by `origin`, else
+created at `freeYue2RunDirectory(yue2-joint-adapters/<worker folder>)` under the worker's
+own jobId, and recorded in the index before any file lands so the disk reconcile never
+imports the folder as a run of its own. Every manifest `rel` must match a fixed pattern
+(`MIRROR_REL`). A file is fetched when it is missing, its size differs, or its mtime differs
+from `<output>/.mirror.json`, the ledger of `{ size, mtimeMs, sha256 }` per file; files
+already recorded are never re-hashed. A file already here at the worker's size but not in
+the ledger (a migrated run, or a pass cut off between rename and ledger write) is hashed
+locally once and compared with the worker's hash from a `HEAD`; a match is recorded
+instead of downloaded. The first pass over each run folder in a process removes the
+`.part-<uuid>` and `.mirror.json.<uuid>.tmp` files a restart left behind. Each download goes to a unique `.part`, is hashed
+while it streams, compared with `x-sha256`, and renamed into place, with one retry on a
+mismatch. Small files go first, so meters land before weights and previews before
+checkpoints. The preview catalogue is rewritten from the worker's, with a done preview
+whose audio has not landed shown as `rendering`; previews rendered on this machine keep
+their own records. Checkpoints come from the local disk scan, as for any run. Once the
+worker status is `done`, `failed` or `cancelled`, no preview is rendering, and every file
+is copied and verified, the pass asks the worker to delete its copy; a 409 is retried next
+pass. `interrupted` runs are kept on the worker so they can resume there.
+
+A run marked finished here is never fetched again (cleanup may have deleted its other
+checkpoints and previews); the pass only asks the worker to drop it. Discarding a mirrored
+run here (`DELETE /datasets/:id/yue2-joint-runs/:jobId`, or cleanup's other-runs sweep,
+both through `deleteYue2Run`) appends `{ worker, remoteJobId }` to
+`<training dir>/yue2-mirror-tombstones.json` first, so no pass recreates it; passes keep
+asking the worker to delete a tombstoned run until it agrees.
+
+NAR further training stays refused for a mirrored run (`yue2BatchRunner.ts`'s `nar`
+stage): it resumes from the rung's `optimizer.resume` and the run's prepared dataset
+(`yue2-joint-train`'s `resumeRunId` branch), and neither is copied.
+`reconcileYue2AitkRunsAtStartup` skips any run with `origin`: its `running` status is the
+worker's, which this machine restarting does not change. The `live` flag on the run list
+and Review rows follows that mirrored status.
+
+`migrateYue2OriginRuns()` converts runs copied by the older ladder pull, which kept a
+`remote:<worker>:<id>` jobId (rung scores are keyed by it, so it stays) and staged
+unfinished runs under `yue2-joint-adapters/_remote/<worker>/`. It moves each staged folder
+to `yue2-joint-adapters/<name>` (`-N` on a clash) with `moveYue2AitkRun`, repoints album
+presets, `yue2_rung_scores.checkpoint_dir` and `yue2-linked.json` with
+`rebaseYue2JointLinks` (folder and records go back on failure), notes the new folder on the
+archived loss log, rewrites each record from the disk scan (dropping the pull's
+per-checkpoint fields), and removes the empty `_remote` tree. It is idempotent.
+`startYue2Mirror()` awaits it before the first pass, so no pass writes into a folder about
+to move. The first mirror pass then fills in the rung weights the worker still holds.
 
 ## MiniMax-Music3 (MM3) LM adapters
 

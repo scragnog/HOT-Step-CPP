@@ -17,11 +17,10 @@ export function yue2JointOutputDirectory(adaptersRoot: string, trigger: string, 
   return path.join(adaptersRoot, 'yue2-joint-adapters', `${name}_${runStamp(when)}`);
 }
 
-/** One chain of work per run, so a pull, a checkpoint fetch and a folder
- *  move of the same run never interleave: a move mid-pull would let the pull
- *  recreate the old folder and point the index back at it. In-process only,
- *  which is why the remote-folder migration runs inside the app. The map
- *  entry is dropped once nothing is waiting. */
+/** One chain of work per run, so a mirror pass, a cleanup and a folder move
+ *  of the same run never interleave: a move mid-pass would let the pass
+ *  recreate the old folder and point the index back at it. In-process only.
+ *  The map entry is dropped once nothing is waiting. */
 const runLocks = new Map<string, Promise<unknown>>();
 export function withYue2RunLock<T>(jobId: string, fn: () => Promise<T>): Promise<T> {
   const prior = runLocks.get(jobId) ?? Promise.resolve();
@@ -30,20 +29,6 @@ export function withYue2RunLock<T>(jobId: string, fn: () => Promise<T>): Promise
   runLocks.set(jobId, settled);
   void settled.finally(() => { if (runLocks.get(jobId) === settled) runLocks.delete(jobId); });
   return next;
-}
-
-/** Pulled ladders wait here, out of the local run list's way, until a rung is
- *  chosen: `yue2-joint-adapters/_remote/<worker>/<trigger>_<stamp>`. */
-export const YUE2_REMOTE_STAGING = '_remote';
-
-/** Where a run pulled from `worker` belongs: the staging folder while it is
- *  under review, then the same `<trigger>_<stamp>` name a local run gets once
- *  finished. The stamp is the run's start time on the worker. */
-export function yue2RemoteRunDirectory(adaptersRoot: string, trigger: string, worker: string, createdAt: number, finished: boolean): string {
-  const local = yue2JointOutputDirectory(adaptersRoot, trigger, new Date(createdAt));
-  if (finished) return local;
-  const folder = worker.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, '_').replace(/^[._]+|[._]+$/g, '') || 'worker';
-  return path.join(path.dirname(local), YUE2_REMOTE_STAGING, folder, path.basename(local));
 }
 
 /** `wanted`, or `wanted-2`, `wanted-3`... when another run already owns it
@@ -85,24 +70,6 @@ export interface Yue2AitkCheckpointRecord {
   /** Which `segments/segment-NNNNNN` folder this checkpoint lives under, for
    *  a parallel/sharded run. Absent for a checkpoint directly under `output`. */
   segment?: string;
-  /** 'remote': this step's meters came from a training worker's ladder pull
-   *  (yue2LadderPull.ts) and no weight file is on this disk yet — it can be
-   *  listed, previewed and scored, but not linked or used for NAR follow-up
-   *  until its checkpoint is fetched (hydrateYue2LadderCheckpoint). Absent
-   *  (the default) means a real local checkpoint: `checkpointRecords` found
-   *  it on disk. */
-  availability?: 'remote';
-  /** sha256 of every file the worker's manifest declared for this remote-
-   *  origin checkpoint, written by hydrateYue2LadderCheckpoint only once ALL
-   *  of them are verified on this disk — a partial transfer writes nothing,
-   *  so presence means complete. Once the worker's own copy is gone (deleted
-   *  after a successful link) this is what a later use revalidates against.
-   *  Keyed by filename (LADDER_CHECKPOINT_FILES), never derived from a disk scan. */
-  manifestSha256?: Record<string, string>;
-  /** Optional files of that manifest this machine deleted on purpose
-   *  (cleanup's resume prune), so revalidation stops demanding them and a
-   *  repair never fetches them back. Never includes the ar/nar weights. */
-  prunedFiles?: string[];
 }
 
 export interface Yue2AitkRunRecord {
@@ -122,10 +89,9 @@ export interface Yue2AitkRunRecord {
   checkpoints: Yue2AitkCheckpointRecord[];
   /** Stable, server-assigned labels keyed by canonical checkpoint step. */
   blindLabels?: Record<string, string>;
-  /** Set once by a ladder pull: this run was trained on `worker`, not here.
-   *  `remoteJobId` is the worker's own jobId for the same run, needed to ask
-   *  it for anything not yet local (a chosen rung's weights, in a later
-   *  slice). Never set for a run trained on this machine. */
+  /** Set by the worker mirror (yue2Mirror.ts): this run was trained on
+   *  `worker`, not here, and `remoteJobId` is the worker's jobId for it — the
+   *  key the mirror finds the local copy by. Never set for a run trained here. */
   origin?: { worker: string; remoteJobId: string };
 }
 
@@ -180,33 +146,10 @@ function isRunRecord(value: unknown): value is Yue2AitkRunRecord {
       && typeof c.dir === 'string' && c.dir.length <= 32768
       && (c.loss === undefined || (typeof c.loss === 'number' && Number.isFinite(c.loss)))
       && (c.segment === undefined || (typeof c.segment === 'string' && c.segment.length <= 64))
-      && (c.availability === undefined || c.availability === 'remote')
       && ['adapterPath', 'optimizerPath', 'arPath', 'narPath'].every(k => {
         const v = c[k as keyof Yue2AitkCheckpointRecord];
         return v === undefined || (typeof v === 'string' && v.length <= 32768);
       }));
-}
-
-/** A checkpoint step known only from a worker's ladder pull (no local weight
- *  file) is kept alongside whatever `checkpointRecords` actually finds on
- *  this disk, never in place of it — a step this machine has for real (local
- *  training, or a later-slice hydration) always wins over its remote-only
- *  shadow. */
-function mergeCheckpoints(local: Yue2AitkCheckpointRecord[], incoming: Yue2AitkCheckpointRecord[]): Yue2AitkCheckpointRecord[] {
-  if (!incoming.length) return local;
-  const incomingByStep = new Map(incoming.map(c => [c.step, c]));
-  // manifestSha256/prunedFiles are never derivable from the disk scan that
-  // produced `local` — carry them over from whatever was already persisted
-  // for this step unless `local` brings its own, or they would vanish on
-  // every subsequent pull/list.
-  const merged = local.map(c => {
-    const prior = incomingByStep.get(c.step);
-    const manifestSha256 = c.manifestSha256 ?? prior?.manifestSha256, prunedFiles = c.prunedFiles ?? prior?.prunedFiles;
-    return { ...c, ...(manifestSha256 && { manifestSha256 }), ...(prunedFiles && { prunedFiles }) };
-  });
-  const localSteps = new Set(local.map(c => c.step));
-  const remoteOnly = incoming.filter(c => c.availability === 'remote' && !localSteps.has(c.step));
-  return [...merged, ...remoteOnly].sort((a, b) => b.step - a.step);
 }
 
 function writeIndex(records: Yue2AitkRunRecord[], changedRecords: Yue2AitkRunRecord[]): void {
@@ -293,16 +236,10 @@ export function recordYue2AitkRun(record: Yue2AitkRunRecord): void {
   try {
     const index = readIndex();
     const prior = index.find(r => r.jobId === record.jobId);
-    // A repull must never let the worker's facts overwrite labels this
-    // machine already assigned (or inherited on first pull) — prior wins
-    // whenever it has any, remote/incoming only seeds a brand new record.
-    // manifestSha256/prunedFiles are likewise carried from whatever this
-    // machine already persisted for a step, since a caller recording fresh
-    // pull data has no reason to know about them.
-    const incoming = prior ? mergeCheckpoints(record.checkpoints, prior.checkpoints) : record.checkpoints;
-    const updated = { ...record,
-      blindLabels: prior?.blindLabels ?? record.blindLabels,
-      checkpoints: mergeCheckpoints(checkpointRecords(record.output), incoming) };
+    // A mirror pass must never let the worker's facts overwrite labels this
+    // machine already assigned (or inherited on first pass) — prior wins
+    // whenever it has any; incoming only seeds a brand new record.
+    const updated = { ...record, blindLabels: prior?.blindLabels ?? record.blindLabels, checkpoints: checkpointRecords(record.output) };
     writeIndex([...index.filter(r => r.jobId !== record.jobId), updated], [updated]);
   } catch { /* a catalogue failure must never change the training result */ }
 }
@@ -389,8 +326,7 @@ function jointFolders(): string[] | null {
     const refined = direct.some(e => e.isDirectory() && e.name === 'refined')
       ? fs.readdirSync(path.join(root, 'refined'), { withFileTypes: true }) : [];
     return [
-      // _remote holds pulled ladders, each found through the index, never imported as a run itself.
-      ...direct.filter(e => e.isDirectory() && e.name !== 'refined' && e.name !== YUE2_REMOTE_STAGING).map(e => path.join(root, e.name)),
+      ...direct.filter(e => e.isDirectory() && e.name !== 'refined').map(e => path.join(root, e.name)),
       ...refined.filter(e => e.isDirectory()).map(e => path.join(root, 'refined', e.name)),
     ].sort();
   } catch { return null; } // An unavailable adapter drive must not erase the index.
@@ -479,7 +415,7 @@ function reconcileFromDisk(force = false): void {
 export function reconcileYue2AitkRunsAtStartup(): number {
   try {
     const index = readIndex();
-    // A pulled ladder's `running` means "still training on its worker", not
+    // A mirrored run's `running` means "still training on its worker", not
     // on this process — this machine restarting says nothing about that.
     const stale = index.filter(r => r.status === 'running' && !r.origin);
     if (stale.length) {
@@ -545,7 +481,7 @@ export function listYue2AitkRuns(datasetId: string, datasetSlug?: string): Yue2A
   const changed: Yue2AitkRunRecord[] = [];
   const runs = index.filter(r => r.datasetId === datasetId || (!!datasetSlug && r.datasetSlug === datasetSlug))
     .map(r => {
-      const checkpoints = rungsOf(r, mergeCheckpoints(checkpointRecords(r.output), r.checkpoints));
+      const checkpoints = rungsOf(r, checkpointRecords(r.output));
       if (assignBlindLabels(r, checkpoints)) changed.push(r);
       return { ...r, checkpoints };
     })
@@ -606,7 +542,7 @@ function rungsOf(run: Yue2AitkRunRecord, checkpoints: Yue2AitkCheckpointRecord[]
 export function listAllYue2AitkRuns(): Yue2AitkRunRecord[] {
   reconcileFromDisk();
   return readIndex()
-    .map(r => ({ ...r, checkpoints: mergeCheckpoints(checkpointRecords(r.output), r.checkpoints) }))
+    .map(r => ({ ...r, checkpoints: checkpointRecords(r.output) }))
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 

@@ -16,7 +16,7 @@ import { Toggle } from '../settings/SettingsPrimitives';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { Yue2JointRunChart } from './Yue2JointRunChart';
 import {
-  cancelJob, getJob, listYue2AitkRuns, startYue2JointTrain, yue2JointPreviewsReader, yue2RungScoresExportUrl, deleteYue2AitkRun,
+  cancelJob, getJob, listYue2AitkRuns, startYue2JointTrain, listYue2JointPreviewsLocal, yue2RungScoresExportUrl, deleteYue2AitkRun,
   setYue2ReviewComplete, type TrainingJobSummary, type Yue2AitkRunRecord, type Yue2JointPreviewRecord, type Yue2JointTrainRequest,
 } from '../../services/trainingApi';
 import { Yue2LadderReview, type Yue2LadderReviewHandle } from './Yue2LadderReview';
@@ -25,16 +25,6 @@ const input = 'px-2 py-1.5 rounded-lg text-xs bg-white/70 dark:bg-black/20 borde
 
 // rungOverall lives with the ladder component now; re-exported for callers.
 export { rungOverall } from './Yue2LadderReview';
-
-/** The ladder's previews-reload effect dependencies: must carry
- *  `indexedLocally`, not just the run and job, so a ladder handed off from
- *  Review — its id selected before the local run list lands — retries once
- *  ownership resolves, instead of reading the worker once with this
- *  machine's own namespaced run id (meaningless there) and never again.
- *  Exported so this contract is directly testable without React. */
-export function previewsEffectDeps(datasetId: string | null | undefined, ladderRun: string, jobStatus: string | undefined, indexedLocally: boolean): readonly unknown[] {
-  return [datasetId, ladderRun, jobStatus, indexedLocally];
-}
 
 /** "Use this rung" with Further training for NAR on: a decoder-only run
  *  never gets a second follow-up chained onto it — that rung finishes here,
@@ -98,6 +88,7 @@ export const RefinePanel: React.FC = () => {
   // The review page hands over a ladder by calling setRefineLadderRun; this IS
   // the tab's selection, so it survives navigating away and back.
   const ladderRun = useTrainingStore(s => s.refineLadderRun);
+  const trainingWorker = useTrainingStore(s => s.trainingWorker);
   const setLadderRun = useTrainingStore(s => s.setRefineLadderRun);
   const [previews, setPreviews] = useState<Yue2JointPreviewRecord[]>([]);
   const [error, setError] = useState('');
@@ -109,12 +100,6 @@ export const RefinePanel: React.FC = () => {
   // follow-up) steals the selection once, even while some other run is
   // currently picked, without fighting the user's own picks afterwards.
   const lastAutoSelectedLive = useRef('');
-  // A run's own `live` flag means this machine's queue (training.ts
-  // listYue2AitkRuns), not "still on a worker" — every run already present
-  // in `runs` reads previews locally regardless of that flag. The worker
-  // reader is only for a job that hasn't landed in `runs` at all yet.
-  const indexedLocally = runs.some(r => r.jobId === ladderRun);
-  const readPreviews = (ds: string, run: string) => yue2JointPreviewsReader(runs.some(r => r.jobId === run))(ds, run);
   const refreshRuns = async () => {
     if (!datasetId) return;
     try {
@@ -151,23 +136,16 @@ export const RefinePanel: React.FC = () => {
     const id = window.setInterval(() => {
       void getJob(job.id).then(next => { setJob(next); void refreshRuns(); }).catch(() => {});
       // Rung previews land while the job runs: keep the ladder's players current.
-      if (datasetId && ladderRun) void readPreviews(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => {});
+      if (datasetId && ladderRun) void listYue2JointPreviewsLocal(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => {});
     }, 5000);
     return () => window.clearInterval(id);
-  }, [job?.id, job?.status, datasetId, ladderRun, indexedLocally]);
+  }, [job?.id, job?.status, datasetId, ladderRun]);
   useEffect(() => {
     if (!datasetId || !ladderRun) { setPreviews([]); return; }
-    // `runs` (and so `indexedLocally`) starts empty and lands asynchronously
-    // after this mounts — a ladder handed off from Review already has its
-    // id selected before that arrives. Without `indexedLocally` in the deps,
-    // the first run reads via the worker with this machine's own namespaced
-    // id (meaningless to the worker) and never retries once the real local
-    // record shows up. `cancelled` drops that first, now-stale response if
-    // it resolves after the retriggered one.
     let cancelled = false;
-    void readPreviews(datasetId, ladderRun).then(r => { if (!cancelled) setPreviews(r.previews); }).catch(() => { if (!cancelled) setPreviews([]); });
+    void listYue2JointPreviewsLocal(datasetId, ladderRun).then(r => { if (!cancelled) setPreviews(r.previews); }).catch(() => { if (!cancelled) setPreviews([]); });
     return () => { cancelled = true; };
-  }, previewsEffectDeps(datasetId, ladderRun, job?.status, indexedLocally));
+  }, [datasetId, ladderRun, job?.status]);
 
   const finished = useMemo(() => runs.filter(r => !r.live && !r.resumeError && r.checkpoints.some(c => !!c.optimizerPath)), [runs]);
   const lastOf = (r: Yue2AitkRunRecord) => r.checkpoints.filter(c => !!c.optimizerPath).sort((a, b) => b.step - a.step)[0];
@@ -234,7 +212,7 @@ export const RefinePanel: React.FC = () => {
       // than what the user asked for with no clear sign anything was
       // skipped. Returning true tells the caller nothing further should run.
       setError(t('trainingStudio.refine.narRemoteUnsupported',
-        'NAR further training on a ladder pulled from {{worker}} is not supported yet. Turn off Further training for NAR to finish this rung directly, or pick a different rung.',
+        'NAR further training on a ladder trained on {{worker}} is not supported yet. Turn off Further training for NAR to finish this rung directly, or pick a different rung.',
         { worker: run?.origin?.worker }));
       return true;
     }
@@ -397,6 +375,9 @@ export const RefinePanel: React.FC = () => {
           {job && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">{job.status} · {job.phase || 'waiting'}{job.total ? ` · step ${job.done} / ${job.total}` : ''}</span>}
         </div>
         {error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</div>}
+        {active && trainingWorker && !runs.some(r => r.jobId === job?.id) && <div className="mt-2 text-[11px] text-sky-700 dark:text-sky-300">
+          {t('trainingStudio.yue2.method.awaitingMirror', 'Waiting for the first sync from {{worker}}', { worker: trainingWorker })}
+        </div>}
         {job && <div className="mt-3"><Yue2JointRunChart job={job} totalSteps={job.total || 0} klTarget={ceiling} /></div>}
       </div>
 
@@ -416,7 +397,7 @@ export const RefinePanel: React.FC = () => {
                   : t('trainingStudio.refine.deleteRun', 'Delete run')}
                 className="p-2 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:text-red-500 hover:border-red-500/40 disabled:opacity-40"><Trash2 size={14} /></button>
               {ladderRunRec?.origin && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300"
-                title={t('trainingStudio.review.originInfo', 'Pulled from this training worker; previews and scoring run here.') as string}>{ladderRunRec.origin.worker}</span>}
+                title={t('trainingStudio.review.originInfo', 'Trained on this worker and mirrored here; previews and scoring run here.') as string}>{ladderRunRec.origin.worker}</span>}
               {ladderRunRec && <button type="button" onClick={() => void toggleReviewed()}
                 title={t('trainingStudio.refine.reviewCompleteInfo', 'You have found the winner and will not score the other rungs. The Review tab then counts this ladder as scored and offers it to Finish scored, which uses the best-scored rung.')}
                 className={`px-3 py-2 rounded-lg text-xs font-semibold border ${ladderRunRec.reviewComplete ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300 bg-emerald-500/10' : 'border-zinc-300/70 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-500/10'}`}>
@@ -434,7 +415,7 @@ export const RefinePanel: React.FC = () => {
         {cleanupNote && <div className="mt-2 text-[12px] text-emerald-700 dark:text-emerald-300">{cleanupNote}</div>}
         <Yue2LadderReview ref={ladderRef} datasetId={datasetId} datasetName={datasetName} run={ladderRunRec} previews={previews}
           renderOpts={{ seconds, takes, draft }} onUse={onUse} onPicked={setPicked} onError={setError} idPrefix="refine-rung"
-          onChanged={() => { void refreshRuns(); if (datasetId && ladderRun) void readPreviews(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => {}); }} />
+          onChanged={() => { void refreshRuns(); if (datasetId && ladderRun) void listYue2JointPreviewsLocal(datasetId, ladderRun).then(r => setPreviews(r.previews)).catch(() => {}); }} />
       </div>
 
     </div>

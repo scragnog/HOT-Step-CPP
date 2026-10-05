@@ -17,12 +17,12 @@ import {
   getJob,
   getYue2AitkPrepare,
   listYue2AitkRuns,
+  listYue2JointPreviewsLocal,
   listJobs,
   jobStreamUrl,
   pickLadderRun,
   startYue2AitkPrepare,
   startYue2JointTrain,
-  yue2JointPreviewsReader,
   type Yue2AitkPrepareRequest,
   type TrainingJobSummary,
   type TrainingMetricEvent,
@@ -661,23 +661,19 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   // one, else the newest. Its previews are fetched for that run.
   const pickedLadderRun = useTrainingStore(s => s.refineLadderRun);
   const setPickedLadderRun = useTrainingStore(s => s.setRefineLadderRun);
-  // A job still training on a worker has no local run record yet (the local
-  // index picks it up once its folder reconciles). While that's true, an
-  // explicit pick still wins, but there's no history to fall back to: an
-  // older local run must not silently stand in for the live one underway.
+  // A job training on a worker has no local run record until the mirror's
+  // first pass lands it. While that's true, an explicit pick still wins, but
+  // there's no history to fall back to: an older local run must not silently
+  // stand in for the live one underway.
   const activeJob = job && isJointJob(job, datasetId) && (job.status === 'queued' || job.status === 'running') ? job : undefined;
   const ladderRunRec = pickLadderRun(aitkRuns, pickedLadderRun, activeJob?.id);
   const ladderRunId = ladderRunRec?.jobId;
-  // This is the only case a run key comes from the job itself rather than
-  // aitkRuns, and the only case previews are read from the worker instead of
-  // this machine.
-  const liveOnlyJobId = !ladderRunRec && activeJob ? activeJob.id : undefined;
-  const previewsKey = ladderRunId ?? liveOnlyJobId;
+  const awaitingMirror = !ladderRunRec && !!activeJob && !!trainingWorker;
 
   useEffect(() => {
     let cancelled = false;
-    if (!previewsKey) { setJointPreviews([]); return; }
-    const refresh = () => yue2JointPreviewsReader(!!ladderRunId)(datasetId, previewsKey)
+    if (!ladderRunId) { setJointPreviews([]); return; }
+    const refresh = () => listYue2JointPreviewsLocal(datasetId, ladderRunId)
       .then(result => { if (!cancelled) setJointPreviews(result.previews); })
       .catch(() => { if (!cancelled) setJointPreviews([]); });
     void refresh();
@@ -687,7 +683,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     const timer = job?.status === 'queued' || job?.status === 'running' || fresh || ladderRunRec?.live
       ? window.setInterval(refresh, 5000) : undefined;
     return () => { cancelled = true; if (timer !== undefined) window.clearInterval(timer); };
-  }, [datasetId, previewsKey, ladderRunId, job?.status, ladderNonce]);
+  }, [datasetId, ladderRunId, job?.status, ladderNonce]);
 
   useEffect(() => {
     setLiveMetric(null);
@@ -1646,21 +1642,20 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <summary className="cursor-pointer text-[11px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.yue2.method.showLogs', 'Show training log (last 100 lines)')}</summary>
         <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-zinc-950 p-2 text-[10px] leading-4 text-zinc-300 whitespace-pre-wrap">{jobLogs.join('\n')}</pre>
       </details>}
-      {!ladderRunRec && liveOnlyJobId && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
-        <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.ladderLiveOnly', 'Training — scoring opens once the run is home')}</p>
-        <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.ladderLiveOnlyHint', '{{count}} preview(s) rendered so far. The ladder, blind labels and scoring open once this run lands in the local index.', { count: jointPreviews.filter(p => p.status === 'done').length })}</p>
+      {awaitingMirror && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
+        <p className="text-xs text-zinc-700 dark:text-zinc-300">{t('trainingStudio.yue2.method.awaitingMirror', 'Waiting for the first sync from {{worker}}', { worker: trainingWorker })}</p>
       </div>}
       {ladderRunRec && <div className="mt-3 rounded-lg border border-sky-500/30 bg-sky-500/5 p-3">
         <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">{t('trainingStudio.yue2.method.ladderTitle', 'Checkpoint ladder')} · {new Date(ladderRunRec.createdAt).toLocaleString()}{ladderRunRec.live ? ` · ${t('trainingStudio.yue2.method.ladderLive', 'training')}` : ''}
           {ladderRunRec.origin && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300"
-            title={t('trainingStudio.review.originInfo', 'Pulled from this training worker; previews and scoring run here.') as string}>{ladderRunRec.origin.worker}</span>}</p>
+            title={t('trainingStudio.review.originInfo', 'Trained on this worker and mirrored here; previews and scoring run here.') as string}>{ladderRunRec.origin.worker}</span>}</p>
         {aitkRuns.length > 1 && <div className="mt-2 flex flex-col gap-1 max-w-md">
           <ParamLabel label={t('trainingStudio.yue2.method.ladderRun', 'Run')}
             className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
             info={t('trainingStudio.yue2.method.ladderRunInfo', 'This dataset has more than one joint run. Pick which run\'s ladder to listen to and score. Each run keeps its own scores.')} />
           <StyledSelect accent="amber" className="w-full" value={ladderRunRec.jobId} onChange={setPickedLadderRun}
             options={[...aitkRuns].sort((a, b) => b.createdAt - a.createdAt).map(r => ({ value: r.jobId,
-              label: `${new Date(r.createdAt).toLocaleString()} · ${r.live ? t('trainingStudio.yue2.method.ladderLive', 'training') : r.status} · ${r.checkpoints.filter(c => (c.arPath && c.narPath) || c.availability === 'remote').length} ${t('trainingStudio.yue2.method.ladderRungs', 'rungs')}${r.origin ? ` · ${r.origin.worker}` : ''}` }))} />
+              label: `${new Date(r.createdAt).toLocaleString()} · ${r.live ? t('trainingStudio.yue2.method.ladderLive', 'training') : r.status} · ${r.checkpoints.filter(c => c.arPath && c.narPath).length} ${t('trainingStudio.yue2.method.ladderRungs', 'rungs')}${r.origin ? ` · ${r.origin.worker}` : ''}` }))} />
         </div>}
         <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.ladderHint', 'Every saved checkpoint is a rung. Previews render while the run trains: two 300 s draft takes of the dataset\'s first sung track per rung. Take 1 uses the same seed on every rung, so the rungs sing roughly the same song and what changes between them is the training; compare rungs on it. Take 2 uses a new random seed each time, so it is a song no other rung made; it shows how the checkpoint does on a fresh draw, and catches failures the fixed seed happens to miss. A rung with no previews yet says so, and Render adds takes. Score likeness and corruption 1-5, then press Use this rung on your pick: it becomes the dataset\'s adapter and you can clean up the rest. Scores also feed the Review page and "Finish scored" for batches.')}</p>
         <Yue2LadderReview datasetId={datasetId} datasetName={datasets.find(d => d.id === datasetId)?.name} run={ladderRunRec} previews={jointPreviews}
