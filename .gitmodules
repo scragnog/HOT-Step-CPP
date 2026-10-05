@@ -4,4 +4,4 @@
 [submodule "engine/ggml"]
 	path = engine/ggml
 	url = https://github.com/scragnog/HOT-ggml.git
-	branch = hot-step
+	branch = hot-step-neutral
