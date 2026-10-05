@@ -148,14 +148,62 @@ else
     echo "  Working tree is clean."
 fi
 
-# engine/ggml must be clean before anything moves, except for one known state:
-# an install from before the HOT-ggml fork, whose engine/ggml carries the old
-# engine/patches overlay as uncommitted edits plus eight untracked kernel files.
-# That overlay is recognised by its exact file set and only those files are
-# restored after the pull. Anything else in engine/ggml (a local edit, a stray
-# file) stops the update here, before the pull, with every file left in place.
+# engine/ggml must be clean before anything moves, except for one exact state:
+# an install from before the HOT-ggml fork, whose engine/ggml is the old pin
+# c044c6f0 with the engine/patches overlay applied (26 edited files plus eight
+# untracked kernel files). That state is accepted only when the base commit is
+# c044c6f0 and every one of the 34 files matches the overlay's known content
+# (sha256 after stripping CR, so CRLF checkouts match). Then, and only then,
+# exactly those files are restored after the pull. Anything else in engine/ggml
+# (a local edit, an extra edit inside an overlay file, a partial overlay, a
+# stray file, another base) stops the update here, before the pull, with every
+# file left in place.
+GGML_OVERLAY_BASE="c044c6f03892f9d5e98213b05f8afea1f8b0d3c9"
 GGML_OVERLAY_TRACKED="include/ggml-rpc.h include/ggml.h src/ggml-alloc.c src/ggml-backend-meta.cpp src/ggml-backend.cpp src/ggml-cpu/ggml-cpu.c src/ggml-cpu/ggml-cpu.cpp src/ggml-cpu/ops.cpp src/ggml-cpu/ops.h src/ggml-cuda/CMakeLists.txt src/ggml-cuda/cpy.cu src/ggml-cuda/cpy.cuh src/ggml-cuda/ggml-cuda.cu src/ggml-cuda/out-prod.cu src/ggml-cuda/unary.cu src/ggml-cuda/unary.cuh src/ggml-hip/CMakeLists.txt src/ggml-metal/ggml-metal-device.cpp src/ggml-metal/ggml-metal-device.h src/ggml-metal/ggml-metal-ops.cpp src/ggml-metal/ggml-metal.metal src/ggml-musa/CMakeLists.txt src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/vulkan-shaders/unary.comp src/ggml-vulkan/vulkan-shaders/vulkan-shaders-gen.cpp src/ggml.c"
 GGML_OVERLAY_NEW="src/ggml-cuda/convrot8.cu src/ggml-cuda/convrot8.cuh src/ggml-cuda/fattn-train.cu src/ggml-cuda/fattn-train.cuh src/ggml-vulkan/vulkan-shaders/fa_train_bwd_dkv.comp src/ggml-vulkan/vulkan-shaders/fa_train_bwd_dq.comp src/ggml-vulkan/vulkan-shaders/fa_train_common.glsl src/ggml-vulkan/vulkan-shaders/fa_train_fwd.comp"
+GGML_OVERLAY_SHA256="
+54e097e2f54a0a6874ac6da34910f05738e5aa9c780a447f25f85641ff48d499 include/ggml-rpc.h
+28603404395a9293da16ee552ddbd25ffd65d7db06c95315847e8dd26c859285 include/ggml.h
+0a5175e1ba169c9a7b6ada3d637e9af75fac0ff02c503ace6f0ed77df1d260e9 src/ggml-alloc.c
+fea0b35d80f1592041a64d14bb16697aa589879a76aa54153288b02323f2f158 src/ggml-backend-meta.cpp
+4958ef48f11be667546c33c54f5028e4b4271b06a0b4adef7a10294023d871e6 src/ggml-backend.cpp
+4f87e04e947eadd4bb01ee5dff4cd79a5209cb7f368f19ef135ac765953086a8 src/ggml-cpu/ggml-cpu.c
+d3f614f0695bd123007d27b95f6130ac617a09fa89c6acde9220a0cc5cef7ee5 src/ggml-cpu/ggml-cpu.cpp
+3e70ed8d52990b067c91dc7b769b5b3fb38b08fb02fca944db120ba29814a332 src/ggml-cpu/ops.cpp
+dedb188e9f187fd89216c27c90889140ae63655ee5ca58686754f59dab2d0523 src/ggml-cpu/ops.h
+d6f42a9eec46c1e828b10256110e9d21394ca3168ae9da0ae1ec604e99e15da4 src/ggml-cuda/CMakeLists.txt
+697be95992b30190250e5edee00cd6612e2d6a1284a9c2da09044cce295cc3af src/ggml-cuda/convrot8.cu
+d6db00cd1d973c7de46c2b8ccc83ac273c9a4f30642ec8e62cf6508db8741005 src/ggml-cuda/convrot8.cuh
+89d89c749b3667aa541aeefb818436df3a4b282b209803947796915a0743bed8 src/ggml-cuda/cpy.cu
+648bd317d9b980de8ade995e3f5b2323c720336de123733e5fdeedc1912ba9af src/ggml-cuda/cpy.cuh
+e22cfad8df782c6fa4e42e972a11ae935abfb91f745e98bf5335b19a8f304660 src/ggml-cuda/fattn-train.cu
+92ce96329ab084ef4ae8882c75a24661bd2d89175dd3548c542e33cfac432dca src/ggml-cuda/fattn-train.cuh
+857a1e030c92e7aa985aac0205796e4b242876caabc3e70ebba07d11c3b2f3c1 src/ggml-cuda/ggml-cuda.cu
+fba28be9a58f851ea3e7e4df7305d1ea90589537e57ef1363efc60e98aa457d0 src/ggml-cuda/out-prod.cu
+0b4b5ff52b6aad57e4774023cfb8068a5e2551b98266bdb86fc09cb6f9e0cf89 src/ggml-cuda/unary.cu
+f77920497798b8d6d6e338d12901f84baedaecdc33412be04a25080130355ead src/ggml-cuda/unary.cuh
+32f0bedd7775c8117efd87f139a003b18fa367627ff14e772371858e35d443b4 src/ggml-hip/CMakeLists.txt
+1562b93c826e1017872f9dfcb51b4b527a3f73c2a77fbe8a64402656c197fdd1 src/ggml-metal/ggml-metal-device.cpp
+6a253e5b44756162b0b9d03c3bbeb7f27209088468b532c9c004fbfec8b5c483 src/ggml-metal/ggml-metal-device.h
+795cdcdbbc3ada0b150345d0eaeeda7582c5d624884402dbe740d1f93c610035 src/ggml-metal/ggml-metal-ops.cpp
+51b72ed95ca4e79e46d67bd80da4f6e5645f9433f88bd01f5aa7203850629cb8 src/ggml-metal/ggml-metal.metal
+2adfa5007f429cdb71e78066d587d1e942f5e6d3daefde3814f859bbed2e82c3 src/ggml-musa/CMakeLists.txt
+2c1ff93f645ee28a08acc643203273560cad58a13b13efd191a29e2ab5c3f97d src/ggml-vulkan/ggml-vulkan.cpp
+cc659c1c46ee2964cb20dea408951ee12144850f30f9e5a7880db2b767dbca2f src/ggml-vulkan/vulkan-shaders/fa_train_bwd_dkv.comp
+576409fdc697cc58dfffc9f2ca44299f258b91f6636cb5ca6d1050516c40aa59 src/ggml-vulkan/vulkan-shaders/fa_train_bwd_dq.comp
+d6e66ba8d75bad1fa6a6c85c4e87252c7da4a1a66f46e72d8477248d6f492fc2 src/ggml-vulkan/vulkan-shaders/fa_train_common.glsl
+ec25fce777e748c4da65a1e7f5e3139fdb337a928ee3a72aaaed20fb27559074 src/ggml-vulkan/vulkan-shaders/fa_train_fwd.comp
+8b018353eef8fc4b34ac559f77a32a1944b1450d2f608c8fb23760de5751f944 src/ggml-vulkan/vulkan-shaders/unary.comp
+4432d0084e3a053367e75a76051f4371af1143b589bc351e3229a7b140d8ce45 src/ggml-vulkan/vulkan-shaders/vulkan-shaders-gen.cpp
+24484864b88f541e66a62e379249a23f4c8acce9084bb9c3a32d18eee34697c0 src/ggml.c
+"
+ggml_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        tr -d '\r' < "$1" | sha256sum | cut -c1-64
+    else
+        tr -d '\r' < "$1" | shasum -a 256 | cut -c1-64
+    fi
+}
 GGML_RESTORE_OVERLAY=0
 if [ -e engine/ggml/.git ]; then
     if ! GGML_DIRTY=$(git -C engine/ggml status --porcelain --untracked-files=all); then
@@ -163,7 +211,9 @@ if [ -e engine/ggml/.git ]; then
         exit 1
     fi
     if [ -n "$GGML_DIRTY" ]; then
-        GGML_FOREIGN=""
+        GGML_PROBLEMS=""
+        # 1. Only the overlay's own paths may differ: edited tracked files or
+        #    its eight new files, nothing staged, deleted or elsewhere.
         while IFS= read -r line; do
             code="${line:0:2}"; path="${line:3}"
             case "$code" in
@@ -173,17 +223,37 @@ if [ -e engine/ggml/.git ]; then
             esac
             case " $list " in
                 *" $path "*) ;;
-                *) GGML_FOREIGN="$GGML_FOREIGN    $line"$'\n' ;;
+                *) GGML_PROBLEMS="$GGML_PROBLEMS    $line"$'\n' ;;
             esac
         done <<< "$GGML_DIRTY"
+        # 2. The base must be the old pin and the URL the pre-fork one.
+        if ! GGML_BASE_NOW=$(git -C engine/ggml rev-parse HEAD); then
+            echo -e "  ${RED}ERROR: cannot read engine/ggml HEAD.${NC}"
+            exit 1
+        fi
+        if [ "$GGML_BASE_NOW" != "$GGML_OVERLAY_BASE" ]; then
+            GGML_PROBLEMS="$GGML_PROBLEMS    base is $GGML_BASE_NOW, not $GGML_OVERLAY_BASE"$'\n'
+        fi
         OLD_GGML_URL=$(git config -f .gitmodules --get submodule.engine/ggml.url 2>/dev/null || echo "")
-        if [ -z "$GGML_FOREIGN" ] && [[ "$OLD_GGML_URL" == *"ggml-org/ggml"* ]]; then
-            echo "  engine/ggml carries the pre-fork patch overlay; it will be restored after the pull."
+        if [[ "$OLD_GGML_URL" != *"ggml-org/ggml"* ]]; then
+            GGML_PROBLEMS="$GGML_PROBLEMS    submodule URL is $OLD_GGML_URL, not the pre-fork ggml-org one"$'\n'
+        fi
+        # 3. Every overlay file must be present with exactly the overlay's content.
+        while read -r want path; do
+            [ -n "$path" ] || continue
+            if [ ! -f "engine/ggml/$path" ]; then
+                GGML_PROBLEMS="$GGML_PROBLEMS    missing overlay file $path"$'\n'
+            elif [ "$(ggml_sha256 "engine/ggml/$path")" != "$want" ]; then
+                GGML_PROBLEMS="$GGML_PROBLEMS    $path differs from the known overlay"$'\n'
+            fi
+        done <<< "$GGML_OVERLAY_SHA256"
+        if [ -z "$GGML_PROBLEMS" ]; then
+            echo "  engine/ggml carries the exact pre-fork patch overlay; it will be restored after the pull."
             GGML_RESTORE_OVERLAY=1
         else
             echo ""
             echo -e "  ${RED}ERROR: engine/ggml has local changes this updater will not touch:${NC}"
-            if [ -n "$GGML_FOREIGN" ]; then printf '%s' "$GGML_FOREIGN"; else printf '%s\n' "$GGML_DIRTY" | sed 's/^/    /'; fi
+            printf '%s' "$GGML_PROBLEMS"
             echo ""
             echo "  ggml changes belong on the HOT-ggml fork (docs/dev/ggml-fork.md)."
             echo "  Move or commit them, then check with: git -C engine/ggml status"
