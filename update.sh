@@ -131,7 +131,9 @@ if ! git diff --quiet --ignore-submodules=dirty 2>/dev/null || ! git diff --cach
         echo "  Resetting tracked files..."
         # reset --hard restores tracked files only. Never add "git clean" here:
         # it deletes untracked files, and that once wiped a user's adapters/.
-        git reset --hard
+        # submodule.recurse=false: engine/ggml is checked on its own below, and
+        # a recursive reset would silently discard anything inside it.
+        git -c submodule.recurse=false reset --hard
     else
         echo ""
         echo -e "  ${RED}ERROR: You have uncommitted changes to tracked files:${NC}"
@@ -289,7 +291,11 @@ fi
 echo ""
 echo -e "${CYAN}[3/5] Pulling latest code...${NC}"
 
-if ! git pull --ff-only origin master; then
+# submodule.recurse=false: with recursion on (this repo's own checkouts set
+# it), the pull would check out the new engine/ggml pin itself, before the
+# overlay restore and URL sync below, and fail on the pre-fork overlay or the
+# stale ggml-org URL. engine/ggml is moved explicitly after the pull.
+if ! git -c submodule.recurse=false pull --ff-only origin master; then
     echo ""
     echo -e "  ${RED}ERROR: git pull --ff-only failed.${NC}"
     echo "  This usually means your local branch has diverged from origin/master."
