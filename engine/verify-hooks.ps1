@@ -159,177 +159,112 @@ if ($content -match 'hotstep_sampler_linked_') {
     $errors++
 }
 
-# ── Hook 7: ggml-cuda's out_prod must carry the BF16 patch ────────────
-#            engine/ggml is a SUBMODULE, so a submodule update reverts it.
-$outProd = "$ggml\src\ggml-cuda\out-prod.cu"
-if (Test-Path $outProd) {
-    $content = Get-Content $outProd -Raw
-    if ($content -match 'HOT-Step patch: BF16 out_prod') {
-        Write-Host "  [OK] ggml-cuda/out-prod.cu has the BF16 patch" -ForegroundColor Green
-    } else {
-        Write-Host "  [FAIL] ggml-cuda/out-prod.cu is missing the BF16 out_prod patch" -ForegroundColor Red
-        Write-Host "         Without it, train-dit --mirror bf16 aborts on the first backward pass." -ForegroundColor Yellow
-        Write-Host "         Fix (from the repo root): git apply engine\patches\bf16-out-prod.patch" -ForegroundColor Yellow
-        $errors++
-    }
-} else {
-    Write-Host "  [WARN] $outProd not found - ggml submodule not checked out?" -ForegroundColor Yellow
-}
+# ── Hooks 7-16: engine/ggml must be HOT-ggml with its HOT-Step changes ──────
+#    engine/ggml is pinned to HOT-ggml's hot-step branch, which carries these
+#    changes as commits (docs/dev/ggml-fork.md). Each hook greps for the
+#    capability itself, so a stock ggml-org checkout (usually a submodule URL
+#    cached from before the fork) fails here in seconds instead of twenty
+#    minutes into a CUDA compile. The fix for every one of them is the same:
+#        git submodule sync -- engine/ggml
+#        git submodule update --init engine/ggml
+#    A hook passing proves the source is present, not that a backend runs it.
+$ggmlFix = "Fix (from the repo root): git submodule sync -- engine/ggml; git submodule update --init engine/ggml"
 
-# -- Hook 8: ggml.c's MUL_MAT backward must carry the mm-backward patch ------
-#            Also a SUBMODULE file, so a submodule update reverts it.
-$ggmlC = "$ggml\src\ggml.c"
-if (Test-Path $ggmlC) {
-    $content = Get-Content $ggmlC -Raw
-    if ($content -match 'HOT-Step patch: mm-backward') {
-        Write-Host "  [OK] ggml/src/ggml.c has the mm-backward patch" -ForegroundColor Green
-    } else {
-        Write-Host "  [FAIL] ggml/src/ggml.c is missing the mm-backward patch" -ForegroundColor Red
-        Write-Host "         Without it, ace-train --bwd mm silently runs the slow out_prod path" -ForegroundColor Yellow
-        Write-Host "         and train-dit --mirror bf16 loses its tensor-core backward." -ForegroundColor Yellow
-        Write-Host "         Fix (from the repo root): git apply engine\patches\mm-backward.patch" -ForegroundColor Yellow
-        $errors++
-    }
-} else {
-    Write-Host "  [WARN] $ggmlC not found - ggml submodule not checked out?" -ForegroundColor Yellow
-}
-
-# -- Hook 9: ggml-cuda's quant->F32 copies must carry the occupancy patch -----
-#            Also a SUBMODULE file. This one fails SILENTLY: without it every
-#            quantized-base training run still produces correct numbers, just
-#            ~3x slower, so nothing crashes to tell you it is gone.
-$cpyCu = "$ggml\src\ggml-cuda\cpy.cu"
-if (Test-Path $cpyCu) {
-    $content = Get-Content $cpyCu -Raw
-    if ($content -match 'HOT-Step patch: cpy-q-occupancy') {
-        Write-Host "  [OK] ggml-cuda/cpy.cu has the quant-copy occupancy patch" -ForegroundColor Green
-    } else {
-        Write-Host "  [FAIL] ggml-cuda/cpy.cu is missing the cpy-q-occupancy patch" -ForegroundColor Red
-        Write-Host "         SILENT: quantized-base LM training stays correct but runs ~3x slower" -ForegroundColor Yellow
-        Write-Host "         (every quant->F32 dequant launches 1 thread per CUDA block)." -ForegroundColor Yellow
-        Write-Host "         Fix (from the repo root): git apply engine\patches\cpy-q-occupancy.patch" -ForegroundColor Yellow
-        $errors++
-    }
-} else {
-    Write-Host "  [WARN] $cpyCu not found - ggml submodule not checked out?" -ForegroundColor Yellow
-}
-
-# -- Hook 10: ggml-cuda's CPY must reach the generic quant->F32 converter -----
-#             Also a SUBMODULE file. Without it, K-quant / MXFP4 / IQ bases are
-#             rejected by supports_op and LM training on anything below q8_0 is
-#             impossible - which puts the VRAM floor back above 22 GB.
-$cpyH = "$ggml\src\ggml-cuda\cpy.cuh"
-if (Test-Path $cpyH) {
-    $content = Get-Content $cpyH -Raw
-    if ($content -match 'HOT-Step patch: quant-cpy-generic') {
-        Write-Host "  [OK] ggml-cuda/cpy.cuh has the generic quant->F32 copy patch" -ForegroundColor Green
-    } else {
-        Write-Host "  [FAIL] ggml-cuda/cpy.cuh is missing the quant-cpy-generic patch" -ForegroundColor Red
-        Write-Host "         Without it, only Q4_0/Q4_1/Q5_0/Q5_1/Q8_0 bases can be trained -" -ForegroundColor Yellow
-        Write-Host "         every K-quant, MXFP4 and IQ base fails at graph build." -ForegroundColor Yellow
-        Write-Host "         Fix (from the repo root): git apply engine\patches\quant-cpy-kquant.patch" -ForegroundColor Yellow
-        $errors++
-    }
-} else {
-    Write-Host "  [WARN] $cpyH not found - ggml submodule not checked out?" -ForegroundColor Yellow
-}
-
-# -- Hook 11: ggml-cuda's F16 GEMM must accumulate in F32 --------------------
-#             Also a SUBMODULE file, and the WORST of the silent failures:
-#             without it, f16 weights run under CUBLAS_COMPUTE_16F, which
-#             accumulates and writes dst in half precision. Any partial sum
-#             past 65504 becomes +inf and everything after it NaN. Nothing
-#             errors - the GEMM succeeds and the render comes out garbled.
-#             The MM3 LM trips this whenever an LM adapter is loaded.
-$cudaCu = "$ggml\src\ggml-cuda\ggml-cuda.cu"
-if (Test-Path $cudaCu) {
-    $content = Get-Content $cudaCu -Raw
-    if ($content -match 'HOT-Step patch: f16-f32-accumulate') {
-        Write-Host "  [OK] ggml-cuda/ggml-cuda.cu has the F16 F32-accumulate patch" -ForegroundColor Green
-    } else {
-        Write-Host "  [FAIL] ggml-cuda/ggml-cuda.cu is missing the f16-f32-accumulate patch" -ForegroundColor Red
-        Write-Host "         SILENT: f16 + an LM adapter renders noise instead of music," -ForegroundColor Yellow
-        Write-Host "         because the f16 GEMM overflows its own half-precision accumulator." -ForegroundColor Yellow
-        Write-Host "         Fix (from the repo root): git apply engine\patches\f16-f32-accumulate.patch" -ForegroundColor Yellow
-        $errors++
-    }
-} else {
-    Write-Host "  [WARN] $cudaCu not found - ggml submodule not checked out?" -ForegroundColor Yellow
-}
-
-# -- Hook 12: ggml.c must carry the flash-attn-train autodiff case -----------
-#             SUBMODULE file. The two fused attention ops the DiT trainer's
-#             --attn flash mode runs on are registered in three places: the
-#             enum and constructors here, the CPU reference in ops.cpp, and
-#             the CUDA kernels in the two NEW files ggml-cuda/fattn-train.{cu,cuh}.
-#             Those two are new files, so a submodule re-checkout deletes them
-#             outright rather than reverting them - but the autodiff case in
-#             ggml.c is the piece that cannot be reconstructed from them.
-#             Failure is loud (ace-train stops compiling, or the trainer's
-#             supports_op probe aborts with attn-unsupported), so this hook is
-#             here to name the cause before someone spends a build cycle on it.
-$ggmlC2 = "$ggml\src\ggml.c"
-$fattnCu = "$ggml\src\ggml-cuda\fattn-train.cu"
-if (Test-Path $ggmlC2) {
-    $content = Get-Content $ggmlC2 -Raw
-    if ($content -match 'HOT-Step patch: flash-attn-train') {
-        if (Test-Path $fattnCu) {
-            Write-Host "  [OK] ggml.c has the flash-attn-train ops, and fattn-train.cu is present" -ForegroundColor Green
-        } else {
-            Write-Host "  [FAIL] ggml.c has the flash-attn-train ops but ggml-cuda/fattn-train.cu is GONE" -ForegroundColor Red
-            Write-Host "         The CUDA kernels are new files, so a submodule re-checkout deletes them." -ForegroundColor Yellow
-            Write-Host "         Fix (from the repo root): git apply engine\patches\flash-attn-train.patch" -ForegroundColor Yellow
-            $errors++
+function Test-GgmlHook([string]$Label, [string[]]$Files, [string[]]$Patterns, [string]$LostMsg) {
+    foreach ($f in $Files) {
+        if (-not (Test-Path $f)) {
+            Write-Host "  [FAIL] $Label - $f is missing" -ForegroundColor Red
+            Write-Host "         $LostMsg" -ForegroundColor Yellow
+            Write-Host "         $ggmlFix" -ForegroundColor Yellow
+            $script:errors++
+            return
         }
-    } else {
-        Write-Host "  [FAIL] ggml.c is missing the flash-attn-train patch" -ForegroundColor Red
-        Write-Host "         ace-train will not compile, and train-dit --attn flash is gone." -ForegroundColor Yellow
-        Write-Host "         Fix (from the repo root): git apply engine\patches\flash-attn-train.patch" -ForegroundColor Yellow
-        $errors++
     }
-} else {
-    Write-Host "  [WARN] $ggmlC2 not found - ggml submodule not checked out?" -ForegroundColor Yellow
+    $content = ($Files | ForEach-Object { Get-Content $_ -Raw }) -join "`n"
+    foreach ($p in $Patterns) {
+        if ($content -notmatch $p) {
+            Write-Host "  [FAIL] $Label - pattern not found: $p" -ForegroundColor Red
+            Write-Host "         $LostMsg" -ForegroundColor Yellow
+            Write-Host "         $ggmlFix" -ForegroundColor Yellow
+            $script:errors++
+            return
+        }
+    }
+    Write-Host "  [OK] $Label" -ForegroundColor Green
 }
 
-# -- Hook 13: ggml-alloc.c must carry the enlarged free-block table ----------
-#             SUBMODULE file. MAX_FREE_BLOCKS 256 -> 1024. Without it the DiT
-#             trainer's LoKR at dim 256 (a ~19k-node graph) trips
-#             "out of free blocks" in ggml_dyn_tallocr_insert_block a few
-#             epochs in. Failure is loud (GGML_ASSERT), but it only shows on
-#             that configuration, so a lost patch looks like a LoKR bug.
-$ggmlAlloc = "$ggml\src\ggml-alloc.c"
-if (Test-Path $ggmlAlloc) {
-    $content = Get-Content $ggmlAlloc -Raw
-    if ($content -match 'HOT-Step patch: alloc-free-blocks') {
-        Write-Host "  [OK] ggml-alloc.c has the alloc-free-blocks patch" -ForegroundColor Green
-    } else {
-        Write-Host "  [FAIL] ggml-alloc.c is missing the alloc-free-blocks patch" -ForegroundColor Red
-        Write-Host "         LoKR dim 256 training will abort with 'out of free blocks'." -ForegroundColor Yellow
-        Write-Host "         Fix (from the repo root): git apply engine\patches\alloc-free-blocks.patch" -ForegroundColor Yellow
-        $errors++
-    }
-} else {
-    Write-Host "  [WARN] $ggmlAlloc not found - ggml submodule not checked out?" -ForegroundColor Yellow
-}
+$cuda = "$ggml\src\ggml-cuda"
+$vk   = "$ggml\src\ggml-vulkan"
 
-# -- Hook 14: ggml-vulkan must carry the training ops (BF16_ROUND, fused attention)
-#             SUBMODULE file. Without them the YuE2 joint trainer on a Vulkan
-#             build refuses to start (BF16_ROUND unsupported) or, worse, falls
-#             back to exact attention, whose memory rules out whole songs.
-$ggmlVk = "$ggml\src\ggml-vulkan\ggml-vulkan.cpp"
-if (Test-Path $ggmlVk) {
-    $content = Get-Content $ggmlVk -Raw
-    if ($content -match 'HOT-Step patch: flash-attn-train \(Vulkan\)' -and $content -match 'HOT-Step patch: BF16_ROUND' -and
-        (Test-Path "$ggml\src\ggml-vulkan\vulkan-shaders\fa_train_fwd.comp")) {
-        Write-Host "  [OK] ggml-vulkan has the training ops and their shaders" -ForegroundColor Green
-    } else {
-        Write-Host "  [FAIL] ggml-vulkan is missing the zzzz-vulkan-train-ops patch (or its shader files)" -ForegroundColor Red
-        Write-Host "         YuE2 joint training on Vulkan will refuse to start or lose fused attention." -ForegroundColor Yellow
-        Write-Host "         Fix (from the repo root): git apply engine\patches\zzzz-vulkan-train-ops.patch" -ForegroundColor Yellow
-        $errors++
-    }
+# Hook 7: BF16 src0 in ggml-cuda's OUT_PROD.
+Test-GgmlHook "ggml-cuda out_prod accepts BF16 (Hook 7)" @("$cuda\out-prod.cu") @('HOT-Step patch: BF16 out_prod') `
+    "Without it, train-dit --mirror bf16 aborts on the first backward pass."
+
+# Hook 8: env-gated mul_mat formulation of the MUL_MAT backward.
+Test-GgmlHook "ggml.c mm-backward (Hook 8)" @("$ggml\src\ggml.c") @('HOT-Step patch: mm-backward') `
+    "Without it, ace-train --bwd mm silently runs the slow out_prod path and --mirror bf16 loses its tensor-core backward."
+
+# Hook 9: quant->F32 copies launch CUDA_CPY_BLOCK_SIZE threads per block.
+#   This is upstream since ggml-org b64fb805, so there is no HOT-Step marker:
+#   the hook checks the launch shape itself. SILENT if lost: quantized-base
+#   LM training stays correct but runs ~3x slower.
+Test-GgmlHook "ggml-cuda quant->F32 copy occupancy (Hook 9)" @("$cuda\cpy.cu") `
+    @('cpy_q_f32<cpy_blck_q8_0_f32,\s*QK8_0><<<num_blocks,\s*CUDA_CPY_BLOCK_SIZE') `
+    "SILENT: quantized-base LM training stays correct but runs ~3x slower (one thread per CUDA block)."
+
+# Hook 10: CPY reaches the generic quant->F32 converter (K-quant/IQ/MXFP4 bases).
+Test-GgmlHook "ggml-cuda generic quant->F32 copy (Hook 10)" @("$cuda\cpy.cuh") @('HOT-Step patch: quant-cpy-generic') `
+    "Without it, only Q4_0/Q4_1/Q5_0/Q5_1/Q8_0 bases can be trained; every K-quant, MXFP4 and IQ base fails at graph build."
+
+# Hook 11: F16 cuBLAS GEMMs accumulate and write F32. The worst silent failure:
+#   f16 + an LM adapter renders noise because the GEMM overflows its half accumulator.
+Test-GgmlHook "ggml-cuda F16 GEMM accumulates in F32 (Hook 11)" @("$cuda\ggml-cuda.cu") @('HOT-Step patch: f16-f32-accumulate') `
+    "SILENT: f16 + an LM adapter renders noise instead of music."
+
+# Hook 12: fused training attention - op, autodiff case and CUDA kernels.
+Test-GgmlHook "flash-attn-train ops, autodiff and CUDA kernels (Hook 12)" @("$ggml\src\ggml.c", "$cuda\fattn-train.cu") `
+    @('HOT-Step patch: flash-attn-train') `
+    "ace-train will not compile, and train-dit --attn flash is gone."
+
+# Hook 13: ggml-alloc's per-chunk free-block table is 1024, not 256.
+Test-GgmlHook "ggml-alloc free-block table (Hook 13)" @("$ggml\src\ggml-alloc.c") @('HOT-Step patch: alloc-free-blocks') `
+    "LoKR dim 256 training will abort with 'out of free blocks'."
+
+# Hook 14: Vulkan training ops. Upstream split ggml-vulkan.cpp, so the pipeline
+#   fields now live in ggml-vulkan-types.h; check both files and a shader.
+Test-GgmlHook "ggml-vulkan training ops (Hook 14)" `
+    @("$vk\ggml-vulkan.cpp", "$vk\ggml-vulkan-types.h", "$vk\vulkan-shaders\fa_train_fwd.comp") `
+    @('HOT-Step patch: flash-attn-train \(Vulkan\)', 'HOT-Step patch: BF16_ROUND', 'pipeline_fa_train_fwd', 'pipeline_bf16_round') `
+    "YuE2 joint training on Vulkan will refuse to start or lose fused attention."
+
+# Hook 15: ConvRot8, the CUDA int8 training op YuE2 adapters on int8 bases use.
+Test-GgmlHook "ConvRot8 op and CUDA kernels (Hook 15)" @("$ggml\include\ggml.h", "$cuda\ggml-cuda.cu", "$cuda\convrot8.cu") `
+    @('GGML_OP_CONVROT8,', 'ggml_cuda_op_convrot8\s*\(') `
+    "YuE2 training on an int8 base will not compile or will refuse the op."
+
+# Hook 16: BF16_ROUND on CUDA (Hook 14 covers the Vulkan half).
+Test-GgmlHook "BF16_ROUND unary op on CUDA (Hook 16)" @("$ggml\include\ggml.h", "$cuda\unary.cu", "$cuda\ggml-cuda.cu") `
+    @('GGML_UNARY_OP_BF16_ROUND', 'op_bf16_round') `
+    "The YuE2 joint trainer refuses to start on CUDA."
+
+# Hook 17: engine/ggml is clean and at the commit this repo pins. The fork is
+#   the only place ggml changes live now; local edits in engine/ggml are lost
+#   on the next submodule update and are not what CI or a user builds.
+$pin = (git -C "$PSScriptRoot\.." rev-parse ":engine/ggml" 2>$null)
+$head = (git -C $ggml rev-parse HEAD 2>$null)
+$dirty = (git -C $ggml status --porcelain --untracked-files=no 2>$null)
+if (-not $pin -or -not $head) {
+    Write-Host "  [WARN] could not read the engine/ggml pin or HEAD (not a git checkout?) (Hook 17)" -ForegroundColor Yellow
+} elseif ($pin -ne $head) {
+    Write-Host "  [FAIL] engine/ggml is at $head but this repo pins $pin (Hook 17)" -ForegroundColor Red
+    Write-Host "         $ggmlFix" -ForegroundColor Yellow
+    $errors++
+} elseif ($dirty) {
+    Write-Host "  [FAIL] engine/ggml has local changes to tracked files (Hook 17)" -ForegroundColor Red
+    Write-Host "         ggml changes belong on HOT-ggml's hot-step branch (docs/dev/ggml-fork.md)." -ForegroundColor Yellow
+    $errors++
 } else {
-    Write-Host "  [WARN] $ggmlVk not found - ggml submodule not checked out?" -ForegroundColor Yellow
+    Write-Host "  [OK] engine/ggml is clean at the pinned commit $($pin.Substring(0, 8)) (Hook 17)" -ForegroundColor Green
 }
 
 # ── Summary ───────────────────────────────────────────────────────────

@@ -3,4 +3,5 @@
 	url = https://github.com/steinbergmedia/vst3sdk.git
 [submodule "engine/ggml"]
 	path = engine/ggml
-	url = https://github.com/ggml-org/ggml.git
+	url = https://github.com/scragnog/HOT-ggml.git
+	branch = hot-step

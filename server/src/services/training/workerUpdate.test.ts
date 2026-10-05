@@ -83,7 +83,6 @@ test('ggml recovery selects every patch in name order', () => {
   try {
     for (const name of ['z.patch', 'README.md', 'a.patch', 'middle.patch']) fs.writeFileSync(path.join(directory, name), '');
     assert.deepEqual(ggmlPatches(directory), ['a.patch', 'middle.patch', 'z.patch']);
-    assert.ok(ggmlPatches().length > 3);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 

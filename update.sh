@@ -106,10 +106,11 @@ OLD_GGML=$(git rev-parse HEAD:engine/ggml 2>/dev/null || echo "unknown")
 
 # Check for uncommitted changes to TRACKED files only.
 #
-#   --ignore-submodules=dirty: engine/ggml is a submodule that every build
-#   modifies on purpose — CMake applies engine/patches/*.patch into it at
-#   configure time. Without this flag git reports " m engine/ggml" on every
-#   source builder's machine and the update refuses to run.
+#   --ignore-submodules=dirty: engine/ggml used to carry HOT-Step's ggml
+#   changes as uncommitted edits, so an install updated from before the
+#   HOT-ggml fork still has a dirty engine/ggml. Without this flag git reports
+#   " m engine/ggml" there and the update refuses to run; the step after the
+#   pull restores that tree.
 #
 #   Untracked files never count. adapters/, models/, data/ and anything else
 #   the app writes are not "changes" and this script never deletes them.
@@ -187,11 +188,12 @@ if ! git pull --ff-only origin master; then
     exit 1
 fi
 
-# engine/ggml carries HOT-Step's patches as uncommitted edits (plus two new
-# files from flash-attn-train.patch). If the pull moved the submodule pointer,
-# git checkout would refuse to switch over those edits, so restore the pristine
-# tree first. This runs INSIDE engine/ggml only — it cannot touch anything else
-# in the repo. The patches are reapplied just below.
+# engine/ggml now follows HOT-ggml (docs/dev/ggml-fork.md), which carries
+# HOT-Step's ggml changes as commits. An install from before the fork has them
+# as uncommitted edits plus untracked kernel files that the fork now tracks, so
+# when the pull moved the submodule pointer, restore the pristine tree first or
+# the checkout refuses to overwrite them. This runs INSIDE engine/ggml only; it
+# cannot touch anything else in the repo.
 NEW_GGML=$(git rev-parse HEAD:engine/ggml 2>/dev/null || echo "unknown")
 if [ "$OLD_GGML" != "$NEW_GGML" ] && [ -e engine/ggml/.git ]; then
     echo "  ggml submodule moved — restoring its pristine tree before checkout..."
@@ -199,31 +201,11 @@ if [ "$OLD_GGML" != "$NEW_GGML" ] && [ -e engine/ggml/.git ]; then
     git -C engine/ggml clean -fd || true
 fi
 
+# The submodule URL is cached in .git/config at first init, so an install from
+# before the fork would keep fetching stock ggml-org and never find the pinned
+# commit. sync copies the URL from .gitmodules first.
+git submodule sync --recursive || echo "  WARNING: Submodule sync had issues."
 git submodule update --init --recursive || echo "  WARNING: Submodule update had issues."
-
-# Reapply the ggml patches (same idempotent loop CMake runs at configure time,
-# but configure does not always rerun after a pull). A patch that reverses
-# cleanly is already in and is skipped.
-PATCHES_APPLIED=0
-PATCHES_FAILED=0
-for p in engine/patches/*.patch; do
-    [ -e "$p" ] || continue
-    if git apply --reverse --check --ignore-whitespace "$p" >/dev/null 2>&1; then
-        continue
-    fi
-    if git apply --ignore-whitespace "$p" >/dev/null 2>&1; then
-        echo "  Applied $p"
-        PATCHES_APPLIED=$((PATCHES_APPLIED + 1))
-    else
-        echo -e "  ${YELLOW}WARNING: $p neither applies nor is already present.${NC}"
-        PATCHES_FAILED=$((PATCHES_FAILED + 1))
-    fi
-done
-if [ "$PATCHES_FAILED" -gt 0 ]; then
-    echo "  See engine/patches/README.md — the engine build may fail without them."
-elif [ "$PATCHES_APPLIED" -eq 0 ]; then
-    echo "  ggml patches already in place."
-fi
 
 # Show what changed
 NEW_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "unknown")

@@ -25,7 +25,6 @@ on:
     paths:
       - 'engine/ggml'
       - 'engine/CMakeLists.txt'
-      - 'engine/patches/**'
       - '.github/workflows/cache-warm.yml'
 
 concurrency:
@@ -146,7 +145,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: engine/build
-          key: cmake-windows-2022-${{ matrix.variant }}-${{ hashFiles('engine/ggml/**', 'engine/patches/**', 'engine/CMakeLists.txt') }}
+          key: cmake-windows-2022-${{ matrix.variant }}-${{ hashFiles('engine/ggml/**', 'engine/CMakeLists.txt') }}
           restore-keys: |
             cmake-windows-2022-${{ matrix.variant }}-
 
@@ -183,34 +182,6 @@ jobs:
           else
             find engine/src engine/tools -type f -exec touch {} +
             echo "Stale-cache guard: no valid .built-commit stamp — touched all engine sources"
-          fi
-
-      - name: Apply engine patches
-        shell: bash
-        run: |
-          # HOT-Step keeps the engine/ggml submodule upstream-clean; local
-          # modifications live as patch files in engine/patches/. MUST run
-          # after "Restore source file timestamps": patched files get a
-          # fresh mtime so their cached objects rebuild (content changed).
-          # See engine/patches/README.md.
-          for p in engine/patches/*.patch; do
-            echo "== $p"
-            git apply --stat    "$p"
-            git apply --verbose "$p"
-          done
-          # git apply gives every patched file a fresh mtime, and ggml.h is one
-          # of them, so every run recompiled all of ggml/CUDA even on a cache
-          # hit. When neither the patch stack nor ggml changed since the cached
-          # build, give patched files the stack's last commit time (older than
-          # any cached object) so Ninja keeps those objects.
-          if [ -f engine/build/.built-commit ] && \
-             base="$(cat engine/build/.built-commit)" && \
-             git cat-file -e "$base^{commit}" 2>/dev/null && \
-             git diff --quiet "$base" HEAD -- engine/patches engine/ggml; then
-            ts="$(git log -1 --format=%at -- engine/patches)"
-            python3 -c "import os,sys; t=int(sys.argv[1]); [os.utime(f,(t,t)) for f in sys.argv[2:] if os.path.isfile(f)]" \
-              "$ts" $(sed -n 's#^+++ b/##p' engine/patches/*.patch | sort -u)
-            echo "Patched files set to patch-stack time $ts (unchanged since $base)"
           fi
 
       - name: Build C++ engine
@@ -370,7 +341,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: engine/build
-          key: cmake-linux-${{ matrix.variant }}-${{ hashFiles('engine/ggml/**', 'engine/patches/**', 'engine/CMakeLists.txt') }}
+          key: cmake-linux-${{ matrix.variant }}-${{ hashFiles('engine/ggml/**', 'engine/CMakeLists.txt') }}
           restore-keys: |
             cmake-linux-${{ matrix.variant }}-
 
@@ -406,34 +377,6 @@ jobs:
           else
             find engine/src engine/tools -type f -exec touch {} +
             echo "Stale-cache guard: no valid .built-commit stamp — touched all engine sources"
-          fi
-
-      - name: Apply engine patches
-        shell: bash
-        run: |
-          # HOT-Step keeps the engine/ggml submodule upstream-clean; local
-          # modifications live as patch files in engine/patches/. MUST run
-          # after "Restore source file timestamps": patched files get a
-          # fresh mtime so their cached objects rebuild (content changed).
-          # See engine/patches/README.md.
-          for p in engine/patches/*.patch; do
-            echo "== $p"
-            git apply --stat    "$p"
-            git apply --verbose "$p"
-          done
-          # git apply gives every patched file a fresh mtime, and ggml.h is one
-          # of them, so every run recompiled all of ggml/CUDA even on a cache
-          # hit. When neither the patch stack nor ggml changed since the cached
-          # build, give patched files the stack's last commit time (older than
-          # any cached object) so Ninja keeps those objects.
-          if [ -f engine/build/.built-commit ] && \
-             base="$(cat engine/build/.built-commit)" && \
-             git cat-file -e "$base^{commit}" 2>/dev/null && \
-             git diff --quiet "$base" HEAD -- engine/patches engine/ggml; then
-            ts="$(git log -1 --format=%at -- engine/patches)"
-            python3 -c "import os,sys; t=int(sys.argv[1]); [os.utime(f,(t,t)) for f in sys.argv[2:] if os.path.isfile(f)]" \
-              "$ts" $(sed -n 's#^+++ b/##p' engine/patches/*.patch | sort -u)
-            echo "Patched files set to patch-stack time $ts (unchanged since $base)"
           fi
 
       - name: Build C++ engine
