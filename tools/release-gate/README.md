@@ -7,8 +7,8 @@ it makes is staged for the ear test at the end.
 ```
 node tools/release-gate/run.mjs --zip release/out/HOT-Step-CPP-vX.Y.Z-win-x64-cuda.zip   # the real pre-tag run
 node tools/release-gate/run.mjs --url http://localhost:3000                                 # attach to the dev app agents use (default --url is :3001)
-node tools/release-gate/run.mjs --tiers 0-3                                                 # the half-hour subset
-node tools/release-gate/run.mjs --update-goldens --tiers 7                                  # rewrite the tier 7 references
+node tools/release-gate/run.mjs --url http://localhost:3000 --tiers 0-3                     # the half-hour subset
+node tools/release-gate/run.mjs --url http://localhost:3000 --update-goldens --tiers 7       # rewrite the tier 7 references
 ```
 
 Exit 0 is GO, exit 1 is NO-GO, exit 2 means it could not run (app busy, boot
