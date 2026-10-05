@@ -249,22 +249,40 @@ Test-GgmlHook "BF16_ROUND unary op on CUDA (Hook 16)" @("$ggml\include\ggml.h", 
 
 # Hook 17: engine/ggml is clean and at the commit this repo pins. The fork is
 #   the only place ggml changes live now; local edits in engine/ggml are lost
-#   on the next submodule update and are not what CI or a user builds.
-$pin = (git -C "$PSScriptRoot\.." rev-parse ":engine/ggml" 2>$null)
-$head = (git -C $ggml rev-parse HEAD 2>$null)
-$dirty = (git -C $ggml status --porcelain --untracked-files=no 2>$null)
-if (-not $pin -or -not $head) {
-    Write-Host "  [WARN] could not read the engine/ggml pin or HEAD (not a git checkout?) (Hook 17)" -ForegroundColor Yellow
-} elseif ($pin -ne $head) {
-    Write-Host "  [FAIL] engine/ggml is at $head but this repo pins $pin (Hook 17)" -ForegroundColor Red
-    Write-Host "         $ggmlFix" -ForegroundColor Yellow
-    $errors++
-} elseif ($dirty) {
-    Write-Host "  [FAIL] engine/ggml has local changes to tracked files (Hook 17)" -ForegroundColor Red
-    Write-Host "         ggml changes belong on HOT-ggml's hot-step branch (docs/dev/ggml-fork.md)." -ForegroundColor Yellow
-    $errors++
+#   on the next submodule update and are not what CI or a user builds. Untracked
+#   files count too: ggml-cuda's CMakeLists globs *.cu, so a stray kernel file
+#   is compiled in. Fails closed: in a git checkout, any git command that does
+#   not succeed is a failure, never a pass.
+$repoRoot = Split-Path -Parent $PSScriptRoot
+if (-not (Test-Path (Join-Path $repoRoot ".git"))) {
+    Write-Host "  [WARN] not a git checkout, engine/ggml pin not checked (Hook 17)" -ForegroundColor Yellow
 } else {
-    Write-Host "  [OK] engine/ggml is clean at the pinned commit $($pin.Substring(0, 8)) (Hook 17)" -ForegroundColor Green
+    $hook17 = $null
+    try {
+        $pin = (& git -C $repoRoot rev-parse ":engine/ggml" 2>&1)
+        if ($LASTEXITCODE -ne 0) { throw "git rev-parse :engine/ggml failed (exit $LASTEXITCODE): $pin" }
+        $head = (& git -C $ggml rev-parse HEAD 2>&1)
+        if ($LASTEXITCODE -ne 0) { throw "git -C engine/ggml rev-parse HEAD failed (exit $LASTEXITCODE): $head" }
+        $dirty = (& git -C $ggml status --porcelain --untracked-files=all 2>&1)
+        if ($LASTEXITCODE -ne 0) { throw "git -C engine/ggml status failed (exit $LASTEXITCODE): $dirty" }
+        $pin = "$pin".Trim(); $head = "$head".Trim()
+        if ($pin -notmatch '^[0-9a-f]{40}$' -or $head -notmatch '^[0-9a-f]{40}$') { throw "unexpected pin/HEAD '$pin' / '$head'" }
+        if ($pin -ne $head) {
+            $hook17 = "engine/ggml is at $head but this repo pins $pin"
+        } elseif ($dirty) {
+            $hook17 = "engine/ggml has local changes or untracked files:`n" + (($dirty | ForEach-Object { "           $_" }) -join "`n")
+        }
+    } catch {
+        $hook17 = "could not verify the engine/ggml pin: $_"
+    }
+    if ($hook17) {
+        Write-Host "  [FAIL] $hook17 (Hook 17)" -ForegroundColor Red
+        Write-Host "         ggml changes belong on HOT-ggml's hot-step branch (docs/dev/ggml-fork.md)." -ForegroundColor Yellow
+        Write-Host "         $ggmlFix" -ForegroundColor Yellow
+        $errors++
+    } else {
+        Write-Host "  [OK] engine/ggml is clean at the pinned commit $($pin.Substring(0, 8)) (Hook 17)" -ForegroundColor Green
+    }
 }
 
 # ── Summary ───────────────────────────────────────────────────────────

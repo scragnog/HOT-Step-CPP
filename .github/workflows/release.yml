@@ -309,6 +309,27 @@ jobs:
             find engine/src engine/tools -type f -exec touch {} +
             echo "Stale-cache guard: no valid .built-commit stamp — touched all engine sources"
           fi
+          # ggml (the HOT-ggml fork): the diff above excludes the submodule, and
+          # its file mtimes come from the fork's own history, so a fork file that
+          # changed since the cached build can still look older than its cached
+          # object. Compare the cached gitlink with the current one and touch
+          # what changed; when the cached ggml commit cannot be resolved, touch
+          # all of engine/ggml (full ggml rebuild, never a stale object).
+          new_ggml="$(git rev-parse HEAD:engine/ggml)"
+          old_ggml=""
+          if [ -n "${base:-}" ]; then
+            old_ggml="$(git rev-parse "$base:engine/ggml" 2>/dev/null || true)"
+          fi
+          if [ -n "$old_ggml" ] && [ "$old_ggml" = "$new_ggml" ]; then
+            echo "Stale-cache guard: engine/ggml unchanged since cached commit ($new_ggml)"
+          elif [ -n "$old_ggml" ] && git -C engine/ggml cat-file -e "$old_ggml^{commit}" 2>/dev/null; then
+            git -C engine/ggml diff --name-only "$old_ggml" "$new_ggml" | \
+              while read -r f; do [ -f "engine/ggml/$f" ] && touch "engine/ggml/$f"; done
+            echo "Stale-cache guard: touched engine/ggml files changed $old_ggml..$new_ggml"
+          else
+            find engine/ggml -path engine/ggml/.git -prune -o -type f -exec touch {} +
+            echo "Stale-cache guard: cached ggml commit unknown — touched all of engine/ggml"
+          fi
 
       - name: Build C++ engine
         shell: pwsh
@@ -782,6 +803,27 @@ jobs:
             find engine/src engine/tools -type f -exec touch {} +
             echo "Stale-cache guard: no valid .built-commit stamp — touched all engine sources"
           fi
+          # ggml (the HOT-ggml fork): the diff above excludes the submodule, and
+          # its file mtimes come from the fork's own history, so a fork file that
+          # changed since the cached build can still look older than its cached
+          # object. Compare the cached gitlink with the current one and touch
+          # what changed; when the cached ggml commit cannot be resolved, touch
+          # all of engine/ggml (full ggml rebuild, never a stale object).
+          new_ggml="$(git rev-parse HEAD:engine/ggml)"
+          old_ggml=""
+          if [ -n "${base:-}" ]; then
+            old_ggml="$(git rev-parse "$base:engine/ggml" 2>/dev/null || true)"
+          fi
+          if [ -n "$old_ggml" ] && [ "$old_ggml" = "$new_ggml" ]; then
+            echo "Stale-cache guard: engine/ggml unchanged since cached commit ($new_ggml)"
+          elif [ -n "$old_ggml" ] && git -C engine/ggml cat-file -e "$old_ggml^{commit}" 2>/dev/null; then
+            git -C engine/ggml diff --name-only "$old_ggml" "$new_ggml" | \
+              while read -r f; do [ -f "engine/ggml/$f" ] && touch "engine/ggml/$f"; done
+            echo "Stale-cache guard: touched engine/ggml files changed $old_ggml..$new_ggml"
+          else
+            find engine/ggml -path engine/ggml/.git -prune -o -type f -exec touch {} +
+            echo "Stale-cache guard: cached ggml commit unknown — touched all of engine/ggml"
+          fi
 
       - name: Build C++ engine
         run: |
@@ -1248,6 +1290,27 @@ jobs:
           else
             find engine/src engine/tools -type f -exec touch {} +
             echo "Stale-cache guard: no valid .built-commit stamp — touched all engine sources"
+          fi
+          # ggml (the HOT-ggml fork): the diff above excludes the submodule, and
+          # its file mtimes come from the fork's own history, so a fork file that
+          # changed since the cached build can still look older than its cached
+          # object. Compare the cached gitlink with the current one and touch
+          # what changed; when the cached ggml commit cannot be resolved, touch
+          # all of engine/ggml (full ggml rebuild, never a stale object).
+          new_ggml="$(git rev-parse HEAD:engine/ggml)"
+          old_ggml=""
+          if [ -n "${base:-}" ]; then
+            old_ggml="$(git rev-parse "$base:engine/ggml" 2>/dev/null || true)"
+          fi
+          if [ -n "$old_ggml" ] && [ "$old_ggml" = "$new_ggml" ]; then
+            echo "Stale-cache guard: engine/ggml unchanged since cached commit ($new_ggml)"
+          elif [ -n "$old_ggml" ] && git -C engine/ggml cat-file -e "$old_ggml^{commit}" 2>/dev/null; then
+            git -C engine/ggml diff --name-only "$old_ggml" "$new_ggml" | \
+              while read -r f; do [ -f "engine/ggml/$f" ] && touch "engine/ggml/$f"; done
+            echo "Stale-cache guard: touched engine/ggml files changed $old_ggml..$new_ggml"
+          else
+            find engine/ggml -path engine/ggml/.git -prune -o -type f -exec touch {} +
+            echo "Stale-cache guard: cached ggml commit unknown — touched all of engine/ggml"
           fi
 
       - name: Build C++ engine

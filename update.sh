@@ -148,6 +148,51 @@ else
     echo "  Working tree is clean."
 fi
 
+# engine/ggml must be clean before anything moves, except for one known state:
+# an install from before the HOT-ggml fork, whose engine/ggml carries the old
+# engine/patches overlay as uncommitted edits plus eight untracked kernel files.
+# That overlay is recognised by its exact file set and only those files are
+# restored after the pull. Anything else in engine/ggml (a local edit, a stray
+# file) stops the update here, before the pull, with every file left in place.
+GGML_OVERLAY_TRACKED="include/ggml-rpc.h include/ggml.h src/ggml-alloc.c src/ggml-backend-meta.cpp src/ggml-backend.cpp src/ggml-cpu/ggml-cpu.c src/ggml-cpu/ggml-cpu.cpp src/ggml-cpu/ops.cpp src/ggml-cpu/ops.h src/ggml-cuda/CMakeLists.txt src/ggml-cuda/cpy.cu src/ggml-cuda/cpy.cuh src/ggml-cuda/ggml-cuda.cu src/ggml-cuda/out-prod.cu src/ggml-cuda/unary.cu src/ggml-cuda/unary.cuh src/ggml-hip/CMakeLists.txt src/ggml-metal/ggml-metal-device.cpp src/ggml-metal/ggml-metal-device.h src/ggml-metal/ggml-metal-ops.cpp src/ggml-metal/ggml-metal.metal src/ggml-musa/CMakeLists.txt src/ggml-vulkan/ggml-vulkan.cpp src/ggml-vulkan/vulkan-shaders/unary.comp src/ggml-vulkan/vulkan-shaders/vulkan-shaders-gen.cpp src/ggml.c"
+GGML_OVERLAY_NEW="src/ggml-cuda/convrot8.cu src/ggml-cuda/convrot8.cuh src/ggml-cuda/fattn-train.cu src/ggml-cuda/fattn-train.cuh src/ggml-vulkan/vulkan-shaders/fa_train_bwd_dkv.comp src/ggml-vulkan/vulkan-shaders/fa_train_bwd_dq.comp src/ggml-vulkan/vulkan-shaders/fa_train_common.glsl src/ggml-vulkan/vulkan-shaders/fa_train_fwd.comp"
+GGML_RESTORE_OVERLAY=0
+if [ -e engine/ggml/.git ]; then
+    if ! GGML_DIRTY=$(git -C engine/ggml status --porcelain --untracked-files=all); then
+        echo -e "  ${RED}ERROR: cannot read engine/ggml status.${NC}"
+        exit 1
+    fi
+    if [ -n "$GGML_DIRTY" ]; then
+        GGML_FOREIGN=""
+        while IFS= read -r line; do
+            code="${line:0:2}"; path="${line:3}"
+            case "$code" in
+                " M") list="$GGML_OVERLAY_TRACKED" ;;
+                "??") list="$GGML_OVERLAY_NEW" ;;
+                *)    list="" ;;
+            esac
+            case " $list " in
+                *" $path "*) ;;
+                *) GGML_FOREIGN="$GGML_FOREIGN    $line"$'\n' ;;
+            esac
+        done <<< "$GGML_DIRTY"
+        OLD_GGML_URL=$(git config -f .gitmodules --get submodule.engine/ggml.url 2>/dev/null || echo "")
+        if [ -z "$GGML_FOREIGN" ] && [[ "$OLD_GGML_URL" == *"ggml-org/ggml"* ]]; then
+            echo "  engine/ggml carries the pre-fork patch overlay; it will be restored after the pull."
+            GGML_RESTORE_OVERLAY=1
+        else
+            echo ""
+            echo -e "  ${RED}ERROR: engine/ggml has local changes this updater will not touch:${NC}"
+            if [ -n "$GGML_FOREIGN" ]; then printf '%s' "$GGML_FOREIGN"; else printf '%s\n' "$GGML_DIRTY" | sed 's/^/    /'; fi
+            echo ""
+            echo "  ggml changes belong on the HOT-ggml fork (docs/dev/ggml-fork.md)."
+            echo "  Move or commit them, then check with: git -C engine/ggml status"
+            echo "  Nothing has been changed."
+            exit 1
+        fi
+    fi
+fi
+
 # Shut down running server (if any)
 echo "  Checking for running server..."
 STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/status 2>/dev/null || echo "000")
@@ -189,23 +234,52 @@ if ! git pull --ff-only origin master; then
 fi
 
 # engine/ggml now follows HOT-ggml (docs/dev/ggml-fork.md), which carries
-# HOT-Step's ggml changes as commits. An install from before the fork has them
-# as uncommitted edits plus untracked kernel files that the fork now tracks, so
-# when the pull moved the submodule pointer, restore the pristine tree first or
-# the checkout refuses to overwrite them. This runs INSIDE engine/ggml only; it
-# cannot touch anything else in the repo.
-NEW_GGML=$(git rev-parse HEAD:engine/ggml 2>/dev/null || echo "unknown")
-if [ "$OLD_GGML" != "$NEW_GGML" ] && [ -e engine/ggml/.git ]; then
-    echo "  ggml submodule moved — restoring its pristine tree before checkout..."
-    git -C engine/ggml checkout -- . || true
-    git -C engine/ggml clean -fd || true
+# HOT-Step's ggml changes as commits. A pre-fork install has them as the old
+# overlay (detected in pre-flight); restore exactly those files so the checkout
+# can take the fork's tracked versions. Nothing else in engine/ggml is touched.
+if [ "$GGML_RESTORE_OVERLAY" = "1" ]; then
+    echo "  Restoring the pre-fork overlay files in engine/ggml..."
+    # shellcheck disable=SC2086
+    if ! git -C engine/ggml checkout -- $GGML_OVERLAY_TRACKED 2>/dev/null; then
+        # Not every listed file is modified; restore the ones that are.
+        for f in $GGML_OVERLAY_TRACKED; do
+            if ! git -C engine/ggml diff --quiet -- "$f"; then
+                git -C engine/ggml checkout -- "$f" || { echo -e "  ${RED}ERROR: could not restore engine/ggml/$f${NC}"; exit 1; }
+            fi
+        done
+    fi
+    for f in $GGML_OVERLAY_NEW; do
+        rm -f "engine/ggml/$f" || { echo -e "  ${RED}ERROR: could not remove engine/ggml/$f${NC}"; exit 1; }
+    done
 fi
 
 # The submodule URL is cached in .git/config at first init, so an install from
 # before the fork would keep fetching stock ggml-org and never find the pinned
-# commit. sync copies the URL from .gitmodules first.
-git submodule sync --recursive || echo "  WARNING: Submodule sync had issues."
-git submodule update --init --recursive || echo "  WARNING: Submodule update had issues."
+# commit. sync copies the URL from .gitmodules first. Both must succeed.
+if ! git submodule sync --recursive; then
+    echo -e "  ${RED}ERROR: git submodule sync failed. Nothing was built.${NC}"
+    exit 1
+fi
+if ! git submodule update --init --recursive; then
+    echo -e "  ${RED}ERROR: git submodule update failed. Nothing was built.${NC}"
+    echo "  Check your connection, then rerun ./update.sh"
+    exit 1
+fi
+
+# Build only what this commit pins: engine/ggml at the gitlink, with no local
+# changes or untracked files (ggml-cuda globs *.cu, so a stray file is compiled).
+GGML_PIN=$(git rev-parse HEAD:engine/ggml) || { echo -e "  ${RED}ERROR: cannot read the engine/ggml pin.${NC}"; exit 1; }
+GGML_NOW=$(git -C engine/ggml rev-parse HEAD) || { echo -e "  ${RED}ERROR: cannot read engine/ggml HEAD.${NC}"; exit 1; }
+if [ "$GGML_PIN" != "$GGML_NOW" ]; then
+    echo -e "  ${RED}ERROR: engine/ggml is at $GGML_NOW, but this version pins $GGML_PIN.${NC}"
+    exit 1
+fi
+if ! GGML_DIRTY=$(git -C engine/ggml status --porcelain --untracked-files=all) || [ -n "$GGML_DIRTY" ]; then
+    echo -e "  ${RED}ERROR: engine/ggml is not clean after the update:${NC}"
+    printf '%s\n' "$GGML_DIRTY" | sed 's/^/    /'
+    exit 1
+fi
+echo "  engine/ggml is at the pinned commit ${GGML_PIN:0:8}, clean."
 
 # Show what changed
 NEW_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
