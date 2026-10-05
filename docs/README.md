@@ -56,7 +56,7 @@ In sidebar order.
 | [Architecture](dev/architecture.md) | Three tiers, ports, request path, feature to file map |
 | [Building](dev/building.md) | Prerequisites, full build, dev loop, engine rebuild rules, type checks, packaging |
 | [Configuration](dev/config.md) | Every environment variable and setting, with defaults |
-| [Engine](dev/engine.md) | Binaries, per-backend pipeline, hook files, plugin host, adapters, TensorRT, training, ggml patches |
+| [Engine](dev/engine.md) | Binaries, per-backend pipeline, hook files, plugin host, adapters, TensorRT, training, the ggml fork |
 | [Engine request and CLI reference](../engine/docs/ARCHITECTURE.md) | Request JSON fields, generation modes, binary flags, engine endpoints |
 | [HTTP API index](dev/api.md) | Every Node route, generated |
 | [Plugin authoring](dev/plugins-authoring.md) | Writing a Lua solver, scheduler, guidance or postprocess plugin |

@@ -18,7 +18,7 @@ CMake 3.21 or later is required (`engine/CMakeLists.txt`).
 | [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) 12.x or 13.x | For NVIDIA GPUs. Select "Visual Studio Integration" during install |
 | CMake 3.21+ | Usually included with the VS Build Tools |
 | Node.js 20 to 24 LTS | Use nvm to install 24 LTS |
-| Git | Must be on `PATH`; CMake uses it to apply the ggml patches |
+| Git | Must be on `PATH` to fetch the submodules |
 | Python with pip (optional) | `engine\build.cmd` uses it to fetch cuDNN 9 for CUDA-accelerated SuperSep |
 | Vulkan SDK (optional) | Only for Vulkan builds |
 
@@ -55,9 +55,9 @@ the `engine/ggml` and `engine/vendor/vst3sdk` submodules.
 
 ## Build the engine
 
-CMake applies the patches in `engine/patches/` to the ggml submodule at configure time, so
-a normal build needs nothing beyond Git on `PATH`. See
-[The ggml patch stack](#the-ggml-patch-stack) if configure or the build complains.
+`engine/ggml` is pinned to the HOT-ggml fork, which carries HOT-Step's ggml changes as
+commits, so a normal build needs no extra step. See [The ggml fork](#the-ggml-fork) if
+configure or the build complains.
 
 ### Windows
 
@@ -75,7 +75,8 @@ engine\build.cmd
    are `-DGGML_CUDA=ON -DGGML_CUDA_GRAPHS=ON -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90;120a"
    -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON -DGGML_BACKEND_DL=ON`. `HOT_STEP_CMAKE_FLAGS`
    replaces the backend flags when set (`update.bat` sets it for auto-detected backends).
-4. Runs `engine\verify-hooks.ps1` and stops if a fork hook or ggml patch is missing.
+4. Runs `engine\verify-hooks.ps1` and stops if a fork hook or a HOT-ggml change is missing,
+   or `engine/ggml` is dirty or off its pinned commit.
 5. Builds with `cmake --build . --config Release`.
 
 Binaries land in `engine/build/Release/`. With the Ninja generator they land in
@@ -237,43 +238,35 @@ Lua plugins (solvers, schedulers, guidance, postprocess) need no rebuild. They a
 from `engine/plugins/` and the repo-root `plugins/` at engine start. See
 [plugins-authoring.md](plugins-authoring.md).
 
-## The ggml patch stack
+## The ggml fork
 
-`engine/ggml` is a git submodule kept at upstream. HOT-Step's changes to it live as patch
-files in `engine/patches/` (training ops, BF16 and quant copies, F32 accumulation for F16
-GEMMs, the fused flash-attention training ops, YuE2 ops and others).
-`engine/patches/README.md` explains each one.
+`engine/ggml` is a git submodule pinned to the `hot-step` branch of HOT-ggml, a fork of
+ggml-org/ggml that carries HOT-Step's changes as commits (training ops, BF16 and quant
+copies, F32 accumulation for F16 GEMMs, the fused flash-attention training ops, YuE2 ops and
+others). [ggml-fork.md](ggml-fork.md) lists each one and explains why it exists.
 
-- **At configure time**, `engine/CMakeLists.txt` applies every `engine/patches/*.patch` in
-  sorted order (option `HOT_STEP_APPLY_PATCHES`, on by default). A patch that reverses
-  cleanly is treated as already applied.
-- **That check is not reliable.** `flash-attn-train.patch` and `zz-yue2-convrot8.patch`
-  add to the same enum in `ggml.h`, so once both are in, neither reverses on its own.
-  CMake logs "neither applies nor reverses cleanly" for `flash-attn-train` on every healthy
-  build. That warning is expected.
+- **A build leaves `engine/ggml` clean.** Nothing is applied at configure time. Change ggml
+  on the fork, as a commit, and move the gitlink here.
+- **`engine/CMakeLists.txt` refuses a stock ggml.** If `engine/ggml/include/ggml.h` has no
+  `GGML_OP_FLASH_ATTN_TRAIN`, configure stops and prints the fix.
 - **`engine/verify-hooks.ps1` is the check to trust.** It greps for the symbols and marker
   comments themselves: the three upstream include hooks (`pipeline-synth-ops.cpp` includes
   `hot-step-sampler.h`, `model-store.h` includes `hot-step-params.h`, `dit.h` includes
   `adapter-merge.h` and `adapter-runtime.h`), the MiniMax-Music3 and YuE2 route hooks in
-  `hot-step-server.cpp`, the `hotstep_sampler_linked_` linker sentinel, and one marker per
-  ggml patch. Exit 0 means all present. `build.cmd` runs it before every compile.
+  `hot-step-server.cpp`, the `hotstep_sampler_linked_` linker sentinel, one check per
+  HOT-ggml change (hooks 7-16), and that `engine/ggml` is clean at the pinned commit
+  (Hook 17). Exit 0 means all present. `build.cmd` runs it before every compile.
 
   ```
   powershell -File engine\verify-hooks.ps1
   ```
 
-- **Patches need LF sources.** A tree checked out with `core.autocrlf=true` makes every
-  hunk fail. Build scratch trees with
-  `git -c core.autocrlf=false -c core.eol=lf archive HEAD`.
-- **Never `git reset --hard`.** This checkout sets `submodule.recurse=true`, so a hard reset
-  also resets `engine/ggml` and removes the patches. The two patches that create new files
-  then fail on the next configure with "already exists in working directory", and the CUDA
-  build fails on undefined `GGML_OP_CONVROT8` or `ggml_flash_attn_train_*`. To recover:
+- **A stock or stale `engine/ggml` has one fix.** The submodule URL is cached in
+  `.git/config` at first init, so a checkout from before the fork keeps fetching ggml-org:
 
   ```
-  del engine\ggml\src\ggml-cuda\convrot8.* engine\ggml\src\ggml-cuda\fattn-train.*
-  git apply --ignore-whitespace engine\patches\flash-attn-train.patch
-  git apply --ignore-whitespace engine\patches\zz-yue2-convrot8.patch
+  git submodule sync -- engine/ggml
+  git submodule update --init engine/ggml
   powershell -File engine\verify-hooks.ps1
   ```
 
@@ -284,7 +277,7 @@ GEMMs, the fused flash-attention training ops, YuE2 ops and others).
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `release.yml` | Push of any `v*` tag | Builds every platform, packages portable archives, smoke-tests the packaged engine (`/health`, `/props`, `/plugins`), and drafts a GitHub Release |
-| `cache-warm.yml` | Push to `master` touching `engine/ggml`, `engine/CMakeLists.txt` or `engine/patches/`, or manual | Builds the engine on `master` so tag builds can reuse the CMake cache. No packaging |
+| `cache-warm.yml` | Push to `master` touching `engine/ggml` or `engine/CMakeLists.txt`, or manual | Builds the engine on `master` so tag builds can reuse the CMake cache. No packaging |
 | `rocm-build.yml` | Push or PR touching `engine/`, or manual | Compile-only ROCm/HIP check. Marked `continue-on-error`, so check the job, not the run colour |
 | `essentia.yml` | Called by `release.yml`, or manual | Builds the Essentia bundle for Linux and macOS |
 
@@ -298,8 +291,7 @@ GEMMs, the fused flash-attention training ops, YuE2 ops and others).
 
 <!-- TODO(verify): rocm-build.yml says ROCm builds are not shipped, but release.yml's Linux matrix has a rocm variant and the release job collects every build artifact. Confirm whether a ROCm archive is published. -->
 
-Each build job applies the patch stack with the same glob loop
-(`for p in engine/patches/*.patch; do git apply --verbose "$p"; done`) before it builds.
+Each build job checks out `engine/ggml` at the pinned HOT-ggml commit and builds it as is.
 Windows and Linux build with Ninja; macOS uses the default generator. Any pushed `v*` tag starts a full release build, so use a `-CI-Test` suffix for
 throwaway compile checks. [releasing.md](releasing.md) is the full runbook.
 
@@ -379,4 +371,4 @@ To build a package locally:
 - [config.md](config.md)
 - [releasing.md](releasing.md)
 - [plugins-authoring.md](plugins-authoring.md)
-- `engine/patches/README.md`
+- [ggml-fork.md](ggml-fork.md)

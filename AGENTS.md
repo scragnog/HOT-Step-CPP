@@ -66,7 +66,7 @@ path; agents never launch it and never check the app on 3001.
 
 - **All work on `master`. No feature branches, ever.**
 - **Never `git add -A`** (re-adds gitignored dirs: `.agents/`, `checkpoints/`, `node_modules/`, etc.). **Never `git add -f`** on gitignored paths. Stage explicit paths.
-- **Never `git reset --hard`.** This checkout sets `submodule.recurse=true`, so a hard reset in the superproject **also resets `engine/ggml`** and silently wipes the whole `engine/patches/` stack out of its tracked files. The next build looks like a broken engine change, not a git accident: CMake re-applies the stack, but the three patches that *create* files (`flash-attn-train`, `zz-yue2-convrot8`, `zzzz-vulkan-train-ops`) fail with "already exists in working directory" — their `.cu`/`.cuh`/`.comp` files are untracked, so the reset left them behind. You then get hundreds of CUDA errors about undefined `GGML_OP_CONVROT8` / `ggml_flash_attn_train_*`, because the orphaned kernels reference ops that are no longer declared. To undo an unwanted working-tree change, use `git checkout -- <path>` or `git restore <path>` on explicit paths. To recover from a hard reset: delete `engine/ggml/src/ggml-cuda/{convrot8,fattn-train}.{cu,cuh}` and `engine/ggml/src/ggml-vulkan/vulkan-shaders/fa_train_*`, re-apply those three patches, then run `engine/verify-hooks.ps1`.
+- **Never `git reset --hard`.** It discards uncommitted work for good, and this checkout sets `submodule.recurse=true`, so it resets `engine/ggml` too. To undo a working-tree change, use `git checkout -- <path>` or `git restore <path>` on explicit paths.
 - **Push requires explicit user approval — always ask first.**
 - Commit to local git **often** (data has been lost before to uncommitted files).
 - **Releases:** push a `vX.Y.Z` tag → the `Release` workflow builds all platforms and drafts a GitHub Release. **Any pushed `v*` tag triggers a build** — use a `-CI-Test` suffix for throwaway compile checks, and don't push local feature tags matching `v*`. Full process + gotchas: [docs/dev/releasing.md](docs/dev/releasing.md).
@@ -113,9 +113,9 @@ The C++ engine is a patched fork of acestep.cpp. Three upstream files carry HOT-
 | `model-store.h` | `hot-step-params.h` | compile error |
 | `dit.h` | `adapter-merge.h` + `adapter-runtime.h` | compile error |
 
-After any sync: run `engine/verify-hooks.ps1`. `build.cmd` also runs it before every compile and stops the build if a hook or ggml patch is missing — a missing op costs ten seconds to spot there and twenty minutes of CUDA compile to spot the other way.
+After any sync: run `engine/verify-hooks.ps1`. `build.cmd` also runs it before every compile and stops the build if a hook or a HOT-ggml change is missing, or `engine/ggml` is dirty or off its pinned commit — a missing op costs ten seconds to spot there and twenty minutes of CUDA compile to spot the other way.
 
-**The ggml patch stack has no reliable "already applied" check.** CMake tests it with `git apply --reverse --check`, which cannot work for patches that touch the same lines: `flash-attn-train` and `zz-yue2-convrot8` both add to the same enum in `ggml.h`, so once both are applied neither reverses in isolation. CMake logs "neither applies nor reverses" for `flash-attn-train` on **every healthy build** — that warning is expected and is not evidence of anything. `verify-hooks.ps1` greps for the symbols themselves and is the only trustworthy answer.
+**`engine/ggml` is the HOT-ggml fork, not stock ggml.** HOT-Step's ggml changes (training ops, BF16/quant copies, F16 accumulation, YuE2 ops) are commits on HOT-ggml's `hot-step` branch, and the submodule is pinned to one of them. Never edit `engine/ggml` in place: commit to the fork and move the gitlink ([docs/dev/ggml-fork.md](docs/dev/ggml-fork.md)). A checkout from before the fork caches the old ggml-org URL, so `git submodule update` cannot find the pinned commit until `git submodule sync -- engine/ggml` has run; CMake and `verify-hooks.ps1` both stop with that fix.
 
 ## UI / browser verification
 

@@ -107,7 +107,7 @@ struct LmExportMeta {
     std::string weights = "f32-window";
     int         batch   = 1;
 
-    // MUL_MAT activation-gradient formulation (engine/patches/mm-backward.patch).
+    // MUL_MAT activation-gradient formulation (HOT-ggml mm-backward).
     // Additive; readers default it to "outprod". Unlike `weights` this does NOT
     // change the quantity being computed — both arms compute the same gradient,
     // one via out_prod and one via mul_mat — so it is NOT a resume barrier.

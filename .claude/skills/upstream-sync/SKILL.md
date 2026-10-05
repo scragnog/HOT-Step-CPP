@@ -27,6 +27,15 @@ description: Safely pulls upstream acestep.cpp changes into the HOT-Step engine 
 
 The full workflow doc lives at `docs/plans/upstream-sync-workflow.md`, which is **gitignored (local-only)** — other machines will not have it. This skill is the portable distillation, with two known errors in that doc corrected (see [reference.md](reference.md)).
 
+## ggml is not part of this sync
+
+acestep.cpp pins its own ggml (ServeurpersoCom/ggml). HOT-Step does not follow that pin:
+`engine/ggml` is pinned to HOT-ggml's `hot-step` branch, which is ggml-org master plus
+HOT-Step's ggml changes as commits ([docs/dev/ggml-fork.md](../../../docs/dev/ggml-fork.md)).
+Copying acestep.cpp files never touches `engine/ggml`. If a synced file needs a newer ggml
+op or fix, land it on HOT-ggml first (cherry-pick from ServeurpersoCom/ggml or ggml-org),
+then move the gitlink, then rerun `engine/verify-hooks.ps1` (hooks 7-17 cover the fork).
+
 ## Golden rules (hard constraints)
 
 1. **NEVER direct-copy the 3 Modified Upstream Zone files** (`pipeline-synth-ops.cpp`, `model-store.h`, `dit.h`). WHY: copying `pipeline-synth-ops.cpp` wholesale is the *silent* failure — it compiles clean but kills every HOT-Step sampler feature (see hook table below). This actually happened once; the whole defense system exists because of it.

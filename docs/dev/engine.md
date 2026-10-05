@@ -23,8 +23,7 @@ toolchains, see [building.md](building.md).
 | `engine/src/solvers/`, `schedulers/`, `guidance/` | Older C++ sampler registries. The live sampler resolves solvers, schedulers and guidance through the Lua plugin registry instead; `guidance/apg-core.h` is still used for the native `apg()` bridge |
 | `engine/tools/` | One `.cpp` per binary, plus Python converters (`convert-*.py`) and fixture scripts |
 | `engine/plugins/` | Bundled Lua plugins: `solvers/`, `schedulers/`, `guidance/` |
-| `engine/patches/` | Patches applied to the `engine/ggml` submodule (see [The ggml patch stack](#the-ggml-patch-stack)) |
-| `engine/ggml/` | ggml submodule |
+| `engine/ggml/` | ggml submodule, pinned to the HOT-ggml fork (see [The ggml fork](#the-ggml-fork)) |
 | `engine/vendor/` | yyjson, LuaJIT 2.1, cpp-httplib, pocketfft, VST3 SDK |
 | `engine/deps/` | Optional vendored SDK: `tensorrt/` |
 
@@ -277,7 +276,7 @@ registration call each: `minimax/mm3-server.h` plus `minimax/mm3-job.h`
 (`mm3_register_routes`, `mm3_register_job_routes`) and `yue2/yue2-server.h`
 (`yue2_register_routes`).
 
-`engine/verify-hooks.ps1` checks all of these, the sentinel, and the ggml patches.
+`engine/verify-hooks.ps1` checks all of these, the sentinel, and the HOT-ggml changes.
 `build.cmd` runs it before every compile. Run it after any upstream sync; the
 procedure is in `.claude/skills/upstream-sync/SKILL.md`, and `engine/UPSTREAM_SYNC`
 records the last upstream commit synced.
@@ -427,48 +426,47 @@ usage. `ace-train --help` prints the full option list.
 | `yue2-optim-check` | Optimizer self-check |
 | `spike` | Phase-0 evidence runs |
 
-The flash-attention training ops these trainers use come from the ggml patch stack
+The flash-attention training ops these trainers use come from the HOT-ggml fork
 below. How the Training Studio drives these subcommands, and the design decisions
 behind them, are in [training-internals.md](training-internals.md).
 
-## The ggml patch stack
+## The ggml fork
 
-`engine/ggml` is a pristine submodule checkout. `engine/patches/*.patch` holds every
-HOT-Step change to it, and CMake applies them in sorted order at configure time
-(`HOT_STEP_APPLY_PATCHES`, on by default). A patch that already reverses cleanly is
-skipped.
+`engine/ggml` is a submodule pinned to the `hot-step` branch of HOT-ggml, a fork of
+ggml-org/ggml. Every HOT-Step change to ggml is a commit on that branch, so a checkout and
+build leave `engine/ggml` clean and nothing is applied at configure time.
 
-| Patch | What it changes |
+| Change | What it changes |
 |---|---|
-| `alloc-free-blocks.patch` | Raises ggml-alloc's per-chunk free-block table from 256 to 1024 entries |
-| `bf16-out-prod.patch` | CUDA `out_prod` accepts a BF16 `src0` |
-| `cpy-q-occupancy.patch` | Fixes the launch geometry of CUDA quant-to-F32 copies |
-| `cudagraph-log.patch` | Env-gated trace of CUDA graph decisions |
-| `f16-f32-accumulate.patch` | CUDA F16 GEMMs accumulate and write in F32 on every architecture |
-| `flash-attn-train.patch` | Adds `GGML_OP_FLASH_ATTN_TRAIN` and `_BACK`, with new `ggml-cuda/fattn-train.{cu,cuh}` |
-| `metal-bin-threads.patch` | Raises the Metal binary-op threadgroup cap |
-| `metal-im2col-ic.patch` | Adds a separate Metal im2col kernel for the VAE's 1D convolutions |
-| `mm-backward.patch` | Env-gated dtype-agnostic `MUL_MAT` backward (`GGML_BACKWARD_MM=1`) |
-| `quant-cpy-kquant.patch` | CUDA `CPY` reaches ggml's generic quant-to-F32 converter, so K-quants can be cast |
-| `zz-yue2-convrot8.patch` | Adds the CUDA-only `GGML_OP_CONVROT8` and `_BACK` ops for YuE2 ConvRot training, with new `ggml-cuda/convrot8.{cu,cuh}` |
-| `zzz-yue2-bf16-round.patch` | Adds the `GGML_UNARY_OP_BF16_ROUND` unary op |
-| `sched-unplaced-log.patch` | Logs the node no backend accepts before the scheduler's `cur_backend_id != -1` assert |
-| `zzzz-vulkan-train-ops.patch` | Vulkan `BF16_ROUND` and `FLASH_ATTN_TRAIN`/`_BACK`, with new `vulkan-shaders/fa_train_*` files; what the YuE2 joint trainer needs off CUDA |
+| CPU fused snake | One CPU kernel for the mul → sin → sqr → mul → add snake chain |
+| `alloc-free-blocks` | Raises ggml-alloc's per-chunk free-block table from 256 to 1024 entries |
+| `bf16-out-prod` | CUDA `out_prod` accepts a BF16 `src0` |
+| `cudagraph-log` | Env-gated trace of CUDA graph decisions |
+| `f16-f32-accumulate` | CUDA F16 GEMMs accumulate and write in F32 on every architecture |
+| `flash-attn-train` | Adds `GGML_OP_FLASH_ATTN_TRAIN` and `_BACK`, with `ggml-cuda/fattn-train.{cu,cuh}` |
+| `metal-acc-set-cpy` | Metal non-inplace `ACC`/`SET` copy every column |
+| `metal-bin-threads` | Raises the Metal binary-op threadgroup cap |
+| `metal-im2col-ic` | Adds a separate Metal im2col kernel for the VAE's 1D convolutions |
+| `mm-backward` | Env-gated dtype-agnostic `MUL_MAT` backward (`GGML_BACKWARD_MM=1`) |
+| `quant-cpy-kquant` | CUDA `CPY` reaches ggml's generic quant-to-F32 converter, so K-quants can be cast |
+| `sched-unplaced-log` | Logs the node no backend accepts before the scheduler's `cur_backend_id != -1` assert |
+| `zz-yue2-convrot8` | Adds the CUDA-only `GGML_OP_CONVROT8` and `_BACK` ops for YuE2 ConvRot training, with `ggml-cuda/convrot8.{cu,cuh}` |
+| `zzz-yue2-bf16-round` | Adds the `GGML_UNARY_OP_BF16_ROUND` unary op |
+| `zzzz-vulkan-train-ops` | Vulkan `BF16_ROUND` and `FLASH_ATTN_TRAIN`/`_BACK`, with `vulkan-shaders/fa_train_*`; what the YuE2 joint trainer needs off CUDA |
+| RPC patch-level check | The RPC client refuses a server without the fork's ops |
 
-`engine/patches/README.md` explains each one in depth, with the measurements behind
-it.
+The quant-to-F32 copy launch fix that used to be `cpy-q-occupancy` is upstream now.
+[ggml-fork.md](ggml-fork.md) explains each change in depth, with the measurements behind it,
+and how to change ggml.
 
 Two rules that bite:
 
-- `flash-attn-train` and `zz-yue2-convrot8` both add to the same enum in `ggml.h`,
-  so once both are applied neither reverses on its own. CMake then logs "neither
-  applies nor reverses" for `flash-attn-train` on every healthy build. That warning
-  is expected. `verify-hooks.ps1` checks the symbols themselves and is the reliable
-  answer.
-- Never `git reset --hard` in the superproject. With `submodule.recurse=true` it also
-  resets `engine/ggml`, the two patches that create files then refuse to reapply,
-  and the build fails with hundreds of CUDA errors. Recovery steps are in
-  [AGENTS.md](../../AGENTS.md#git-rules).
+- Never edit `engine/ggml` in place. A change there is not what CI or users build, and
+  `verify-hooks.ps1` (Hook 17) refuses a dirty or off-pin submodule. Commit it to the fork
+  and move the gitlink.
+- A checkout from before the fork caches the old ggml-org URL in `.git/config`, so a plain
+  `git submodule update` cannot find the pinned commit. Run
+  `git submodule sync -- engine/ggml` first.
 
 ## HOT-Step endpoints
 

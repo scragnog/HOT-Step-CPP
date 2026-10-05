@@ -15,7 +15,7 @@
 // F32 on all three tensors. So every weight in a gradient-carrying layer must be
 // F32, LoRA site or not.
 //
-// ...unless out_prod itself takes BF16. engine/patches/bf16-out-prod.patch adds
+// ...unless out_prod itself takes BF16. The bf16-out-prod change on HOT-ggml adds
 // exactly that to the CUDA kernel, which is what DIT_MIRROR_BF16 below trades on:
 // the per-layer MATMUL weights — the ~99 % of the mirror by bytes — then stay in
 // their native BF16 and the mirror roughly halves. Everything else (norms,

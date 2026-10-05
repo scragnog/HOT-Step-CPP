@@ -142,7 +142,7 @@ struct LmTrainArgs {
     std::string weights = "f32-window";  // f32-window|bf16  (Lever A)
     std::string batch   = "1";           // 1..8|auto        (Lever B)
 
-    // MUL_MAT activation-gradient formulation (engine/patches/mm-backward.patch):
+    // MUL_MAT activation-gradient formulation (HOT-ggml mm-backward):
     //   "outprod" = ggml upstream, out_prod(src0, transpose(grad)) — F32-only on CUDA
     //   "mm"      = mul_mat(cont(transpose(src0)), grad) — dtype-agnostic, BF16
     //               tensor cores. ~1.7-1.8x per layer per step on an RTX 5090.
@@ -393,7 +393,7 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         std::string fallback_reason;
         if (strncmp(ggml_backend_name(lm.backend), "CUDA", 4) != 0) {
             // Gate BEFORE the graph is ever built: only ggml-cuda's out_prod
-            // carries the BF16 patch (engine/patches/bf16-out-prod.patch);
+            // carries the BF16 change (HOT-ggml bf16-out-prod);
             // CPU/Vulkan would GGML_ABORT mid-backward-pass instead of
             // failing cleanly.
             char b[192];

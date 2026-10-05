@@ -185,10 +185,10 @@ map of top-level pieces.
 | `engine/src/train/` | Training code behind `ace-train` (ACE-Step DiT and LM, MM3, YuE2) |
 | `engine/tools/ace-train.cpp` | Training CLI. Subcommands include `preprocess`, `train-dit`, `train-lm`, `mm3-lm-train`, `mm3-train-dit`, `yue2-joint-train` and others |
 | `engine/plugins/` | Built-in Lua solvers, schedulers and guidance modes. See [plugins-authoring.md](plugins-authoring.md) |
-| `engine/patches/` | Patches applied to the `engine/ggml` submodule. See [building.md](building.md#the-ggml-patch-stack) |
+| `engine/ggml` | Submodule pinned to the HOT-ggml fork. See [ggml-fork.md](ggml-fork.md) |
 
 Three upstream files carry `#include` hooks into HOT-Step code (`pipeline-synth-ops.cpp`,
-`model-store.h`, `dit.h`). `engine/verify-hooks.ps1` checks them along with the ggml patches.
+`model-store.h`, `dit.h`). `engine/verify-hooks.ps1` checks them along with the HOT-ggml changes.
 
 ## Server source layout
 

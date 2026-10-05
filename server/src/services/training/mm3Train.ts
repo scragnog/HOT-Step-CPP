@@ -25,7 +25,7 @@ import type { Mm3PreviewOptions } from './types.js';
  *  dequantize-per-matmul, and it now works.
  *
  *  The base is a CHOICE. It used to be a real trade; since the
- *  cpy-q-occupancy patch (engine/patches/) it is not (5090, production recipe):
+ *  cpy-q-occupancy fix (upstream ggml since b64fb805) it is not (5090, production recipe):
  *
  *                     base    VRAM used        free      s/step
  *      f16       16.0 GB   31.0/32.6 GB    1.5 GB    3.7   (idle card)

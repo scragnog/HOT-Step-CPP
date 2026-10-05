@@ -45,7 +45,7 @@ differently; exact checkpoint equivalence requires the same attention mode.
 `convrot_cuda.cu` implements rotation, activation quantization, actual int8
 cuBLAS multiplication, output scaling and straight-through input gradients.
 The separate GGML integration is shipped in
-`engine/patches/zz-yue2-convrot8.patch`. Its graph probe checks explicit input
+the HOT-ggml `zz-yue2-convrot8` change. Its graph probe checks explicit input
 gradients against autograd and confirms frozen parameters receive no gradients.
 Full joint training is not implemented by these probes.
 

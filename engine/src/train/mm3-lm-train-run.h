@@ -409,7 +409,7 @@ struct MM3LmTrainArgs {
      *  cores; `f32-window` is the shipped path, which dequantizes each weight to
      *  F32 in-graph because ggml_out_prod is F32-only.
      *
-     *  Requires CUDA (only ggml-cuda carries engine/patches/bf16-out-prod.patch)
+     *  Requires CUDA (only ggml-cuda carries the HOT-ggml bf16-out-prod change)
      *  AND a BF16-native base (mm3-lm-bf16.gguf, from convert-mm3.py --quant
      *  bf16). Both are checked below and FALL BACK with a warning rather than
      *  failing, because a run that silently ran F32 under a bf16 label is worse

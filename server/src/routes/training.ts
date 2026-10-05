@@ -6109,7 +6109,7 @@ router.post('/datasets/:id/train-dit', async (req: Request, res: Response) => {
       return;
     }
     // Same rule for the MUL_MAT activation-gradient formulation: refused, not
-    // coerced. Default is 'mm' (engine/patches/mm-backward.patch), not
+    // coerced. Default is 'mm' (HOT-ggml mm-backward), not
     // ace-train's own 'outprod'.
     if (body.optimizer !== undefined && body.optimizer !== 'adamw' && body.optimizer !== 'muon'
         && body.optimizer !== 'prodigy') {

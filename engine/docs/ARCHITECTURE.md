@@ -2,7 +2,7 @@
 
 This page is the reference for the engine's request JSON, generation modes, CLI
 flags and HTTP endpoints. For how the engine is put together (binaries, pipelines,
-hook files, plugins, adapters, TensorRT, training, the ggml patch stack), read the
+hook files, plugins, adapters, TensorRT, training, the HOT-ggml fork), read the
 engine guide: [docs/dev/engine.md](../../docs/dev/engine.md).
 
 Building the engine: [docs/dev/building.md](../../docs/dev/building.md).

@@ -395,7 +395,7 @@ export interface ResolvedTrainLmOptions {
   weights: 'f32-window' | 'bf16';
   /** Micro-batch size 1..8, or 'auto'. 1 is the CLI default; >1 implies low-VRAM. */
   batch: number | 'auto';
-  /** MUL_MAT activation-gradient formulation (engine/patches/mm-backward.patch).
+  /** MUL_MAT activation-gradient formulation (HOT-ggml mm-backward).
    *  'outprod' = upstream ggml out_prod, F32-only on CUDA. 'mm' =
    *  mul_mat(cont(transpose(W)), grad) — identical maths, dtype-agnostic, so a
    *  BF16 weight uses BF16 tensor cores (~1.7-1.8x per layer on an RTX 5090).

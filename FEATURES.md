@@ -384,7 +384,7 @@ The C++17 engine behind every backend. Details: [Plugins](docs/user/plugins.md),
 | Quantize tool | K-quants, IQ quants, MXFP4 and NVFP4, with importance-matrix support. |
 | TensorRT paths | MiniMax-Music3 flow DiT, PP-VAE and StableStep through TensorRT on NVIDIA. |
 | Flash-attention training ops | Custom fused attention forward and backward in the ggml CUDA backend. |
-| Upstream hooks | Fork hooks and a patch stack checked by `engine/verify-hooks.ps1` before every build. |
+| Upstream hooks | Fork hooks and the HOT-ggml fork checked by `engine/verify-hooks.ps1` before every build. |
 
 ## Developer tooling
 

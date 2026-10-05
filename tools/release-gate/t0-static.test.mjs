@@ -18,7 +18,7 @@ test('ui type-checks (tsc --noEmit -p tsconfig.app.json)', { timeout: 10 * MIN }
   assert.equal(r.status, 0, tail(r.out));
 });
 
-test('engine fork hooks and ggml patches intact (verify-hooks.ps1)', { timeout: 2 * MIN }, (t) => {
+test('engine fork hooks and HOT-ggml changes intact (verify-hooks.ps1)', { timeout: 2 * MIN }, (t) => {
   if (process.platform !== 'win32') return t.skip('verify-hooks.ps1 is a Windows script');
   const r = sh('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(REPO, 'engine', 'verify-hooks.ps1')]);
   assert.equal(r.status, 0, tail(r.out));

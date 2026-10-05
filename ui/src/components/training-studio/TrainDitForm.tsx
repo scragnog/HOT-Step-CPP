@@ -88,7 +88,7 @@ export interface TrainDitFormState {
   /** Frozen-weight mirror precision — storage and compute are separate choices
    *  (see trainingApi.ts). 'bf16-f32' is bf16 storage with f32 arithmetic. */
   mirror: 'f32' | 'bf16' | 'bf16-f32';
-  /** MUL_MAT activation-gradient formulation (engine/patches/mm-backward.patch).
+  /** MUL_MAT activation-gradient formulation (HOT-ggml mm-backward).
    *  'mm' is the fast tensor-core backward and the server default. */
   bwd: 'outprod' | 'mm';
   /** Attention backend (2026-09-01, docs/plans/2026-09-01-flash-attn-backward.md).

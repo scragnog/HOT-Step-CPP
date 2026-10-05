@@ -62,7 +62,7 @@ export interface TrainLmFormState {
   weights: 'f32-window' | 'bf16';
   /** Micro-batch size (speed lever B). 1 is the shipped path. */
   batch: number | 'auto';
-  /** MUL_MAT activation-gradient formulation (engine/patches/mm-backward.patch).
+  /** MUL_MAT activation-gradient formulation (HOT-ggml mm-backward).
    *  'mm' is the fast tensor-core backward and the server default. */
   bwd: 'outprod' | 'mm';
   /** Fraction of style steps trained with the caption dropped, forcing the

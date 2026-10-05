@@ -172,7 +172,7 @@ struct DitTrainArgs {
     // Frozen-weight mirror precision:
     //   "f32"      shipped — every trainable-layer weight promoted to F32.
     //   "bf16"     halves the mirror; needs the patched CUDA out_prod
-    //              (engine/patches/bf16-out-prod.patch). Stores AND computes bf16.
+    //              (HOT-ggml bf16-out-prod). Stores AND computes bf16.
     //   "bf16-f32" bf16 storage, f32 compute (2026-09-02): same mirror bytes as
     //              "bf16", but each trainable-layer weight is cast to F32 in the
     //              graph at its mul_mat site, so activations and gradients are
@@ -181,7 +181,7 @@ struct DitTrainArgs {
     //              f32 mirror's ~8 GB (and the crop it costs).
     std::string mirror = "f32";
 
-    // MUL_MAT activation-gradient formulation (engine/patches/mm-backward.patch):
+    // MUL_MAT activation-gradient formulation (HOT-ggml mm-backward):
     //   "outprod" = ggml upstream, out_prod(src0, transpose(grad)) — F32-only on CUDA
     //   "mm"      = mul_mat(cont(transpose(src0)), grad) — dtype-agnostic, BF16
     //               tensor cores. ~1.7-1.8x per layer per step on an RTX 5090.
@@ -668,7 +668,7 @@ static int dit_train_stage(const DitTrainArgs & a, DitTrainLog * log, DitTrainOu
                  "%s mirror requires CUDA — falling back to f32 mirror (this run picked '%s'; %s).",
                  dit_mirror_mode_name(mirror_mode), ggml_backend_name(M.backend),
                  mirror_mode == DIT_MIRROR_BF16
-                     ? "only ggml-cuda's out_prod carries the BF16 patch — see engine/patches/bf16-out-prod.patch"
+                     ? "only ggml-cuda's out_prod carries the BF16 change — see bf16-out-prod in docs/dev/ggml-fork.md"
                      : "only ggml-cuda is known to run the in-graph BF16 -> F32 weight cast on the device");
         lm_log("warn", b);
         mirror_mode  = DIT_MIRROR_F32;

@@ -459,7 +459,7 @@ depth f16 9.4 → q8_0 6.4 → **NVFP4 4.9 ms/frame** (Blackwell-native kernels;
 better than q8_0 — K-quant dequant cost eats the bandwidth win in mmv). Zero code, per-role
 picker. Acoustic codes = timbre: ear-check on multiple seeds before adopting. Diagnostics that
 found all this and stay available: `MM3_DEPTH_PROF=1` (phase timing per frame, mm3-depth-graph.h)
-and `GGML_CUDA_GRAPH_LOG=1` (per-compute capture decisions, engine/patches/cudagraph-log.patch).
+and `GGML_CUDA_GRAPH_LOG=1` (per-compute capture decisions, the HOT-ggml cudagraph-log change).
 
 **select-model trap: a role OMITTED from the body means auto (= best-first = f16), not "keep".**
 Raw-API partial bodies like `{"depth":"q8_0"}` silently reset the LM to f16 — measured as a

@@ -817,8 +817,8 @@ static void print_usage(void) {
             "                                                      identical maths, dtype-agnostic, so a\n"
             "                                                      BF16 weight uses BF16 tensor cores.\n"
             "                                                      ~1.7-1.8x per layer per step on an\n"
-            "                                                      RTX 5090. Needs the vendored patch\n"
-            "                                                      engine/patches/mm-backward.patch.\n"
+            "                                                      RTX 5090. Needs the HOT-ggml\n"
+            "                                                      mm-backward change.\n"
             "    --attn <exact|flash|flash-f32>  exact   attention formulation.\n"
             "                                            exact = the shipped manual chain (mul_mat ->\n"
             "                                                    soft_max_ext -> mul_mat), which retains\n"
@@ -1248,7 +1248,7 @@ static void print_usage(void) {
             "                                            bf16      = those weights stay in the base's\n"
             "                                                        native BF16, roughly halving the\n"
             "                                                        mirror. CUDA only\n"
-            "                                                        (engine/patches/bf16-out-prod.patch).\n"
+            "                                                        (HOT-ggml bf16-out-prod).\n"
             "                                                        Note this also rounds ACTIVATIONS\n"
             "                                                        and GRADIENTS to bf16 at every\n"
             "                                                        trainable-layer GEMM.\n"
@@ -1268,8 +1268,8 @@ static void print_usage(void) {
             "                                                      identical maths, dtype-agnostic, so a\n"
             "                                                      BF16 mirror uses BF16 tensor cores.\n"
             "                                                      ~1.7-1.8x per layer per step on an\n"
-            "                                                      RTX 5090. Needs the vendored patch\n"
-            "                                                      engine/patches/mm-backward.patch.\n"
+            "                                                      RTX 5090. Needs the HOT-ggml\n"
+            "                                                      mm-backward change.\n"
             "    --attn <exact|flash|        exact       attention formulation.\n"
             "            flash-f32>\n"
             "                                            exact = dit_attn_f32 (mul_mat / soft_max_ext /\n"
@@ -1881,7 +1881,7 @@ static int cmd_preprocess(int argc, char ** argv) {
 
 // ─── --bwd: MUL_MAT activation-gradient formulation ─────────────────────────
 //
-// engine/patches/mm-backward.patch teaches ggml_compute_backward a second way to
+// HOT-ggml's mm-backward change teaches ggml_compute_backward a second way to
 // emit the gradient wrt src1 of a MUL_MAT:
 //     mm      : mul_mat(cont(transpose(src0)), grad)
 //     outprod : out_prod(src0, transpose(grad))          <- upstream ggml
@@ -4515,8 +4515,8 @@ static int cmd_mm3_train_dit(int argc, char ** argv) {
     // THE mul_mat BACKWARD REFORMULATION. Without it every LoRA weight gradient
     // is an OUT_PROD, ggml-cuda cannot take it, and all 146 of them run on the
     // CPU with a round trip each way -- measured as 292 backend crossings and
-    // 46 s per step at crop 344 while the GPU sat at 6%. engine/patches/
-    // mm-backward.patch rewrites out_prod(W, transpose(grad)) into the provably
+    // 46 s per step at crop 344 while the GPU sat at 6%. HOT-ggml's
+    // mm-backward change rewrites out_prod(W, transpose(grad)) into the provably
     // identical mul_mat(cont(transpose(W)), grad), which CUDA does implement.
     //
     // Must be set BEFORE any backward is built: the patch latches it into a
@@ -4537,8 +4537,8 @@ static int cmd_mm3_train_dit(int argc, char ** argv) {
 // the two environment latches, which are NOT optional here either:
 //
 //   * GGML_BACKWARD_MM=1 rewrites the activation-gradient arm of MUL_MAT's
-//     backward from OUT_PROD into an equivalent mul_mat (engine/patches/
-//     mm-backward.patch). ggml-cuda implements OUT_PROD F32-only, so without
+//     backward from OUT_PROD into an equivalent mul_mat (HOT-ggml
+//     mm-backward). ggml-cuda implements OUT_PROD F32-only, so without
 //     it every frozen-weight backward falls to the CPU with a round trip each
 //     way — 46 s/step on MM3. The patch latches it into a static on FIRST USE,
 //     so it has to be set before any backward is built.

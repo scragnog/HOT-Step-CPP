@@ -864,7 +864,7 @@ export interface TrainLmOptions {
   /** Micro-batch size 1..8, or 'auto' (largest of {1,2,4} that fits without
    *  dropping a song). >1 forces low-VRAM mode. */
   batch?: number | 'auto';           // default 1
-  /** MUL_MAT activation-gradient formulation (engine/patches/mm-backward.patch).
+  /** MUL_MAT activation-gradient formulation (HOT-ggml mm-backward).
    *  'outprod' is upstream ggml — out_prod(W, transpose(grad)) — which ggml-cuda
    *  implements F32-only, forcing an F32 weight and dragging the forward mul_mat
    *  onto TF32 too. 'mm' emits mul_mat(cont(transpose(W)), grad) instead:
@@ -1086,7 +1086,7 @@ export interface TrainDitOptions {
    *  The bf16 half needs the CUDA backend either way; on CPU/Vulkan the engine
    *  warns and falls back to 'f32' itself (dit-train-run.h). */
   mirror?: 'f32' | 'bf16' | 'bf16-f32';   // server default 'bf16'; the UI sends 'bf16-f32'
-  /** MUL_MAT activation-gradient formulation (engine/patches/mm-backward.patch).
+  /** MUL_MAT activation-gradient formulation (HOT-ggml mm-backward).
    *  'outprod' is upstream ggml — out_prod(W, transpose(grad)) — which ggml-cuda
    *  implements F32-only, forcing an F32 weight and dragging the forward mul_mat
    *  onto TF32 too. 'mm' emits mul_mat(cont(transpose(W)), grad) instead:
