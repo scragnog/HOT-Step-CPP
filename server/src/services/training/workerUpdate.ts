@@ -114,6 +114,8 @@ async function verifyGgmlHooks(root: string, log: (line: string) => void): Promi
 
 export async function updateGgml(root: string, log: (line: string) => void, verify = verifyGgmlHooks): Promise<void> {
   await command('git', ['submodule', 'sync', '--', 'engine/ggml'], root, log);
+  // Older checkouts track only the fork's deleted master branch, which makes every fetch fail.
+  await command('git', ['-C', 'engine/ggml', 'config', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*'], root, log);
   await command('git', ['-c', 'submodule.recurse=false', 'submodule', 'update', '--init', '--checkout', '--force', '--', 'engine/ggml'], root, log);
   await verify(root, log);
 }
@@ -132,7 +134,8 @@ export async function receiveUpdate(body: NodeJS.ReadableStream, base: string, t
     assertIdle();
     log('Verifying bundle', 'verifying');
     await command('git', ['bundle', 'verify', bundle], PROJECT_ROOT, line => log(line));
-    await command('git', ['fetch', '--no-tags', bundle, 'master'], PROJECT_ROOT, line => log(line));
+    // The bundle carries no submodule objects; recursing would fetch ggml from its remote here.
+    await command('git', ['fetch', '--no-tags', '--no-recurse-submodules', bundle, 'master'], PROJECT_ROOT, line => log(line));
     if (git(['rev-parse', 'FETCH_HEAD']) !== target) throw new Error('Bundle target did not match requested commit');
     const files = git(['diff', '--name-only', `${base}..${target}`]).split(/\r?\n/).filter(Boolean).map(f => f.replaceAll('\\', '/'));
     const pointerChanged = ggmlPointerChanged(base, target);
