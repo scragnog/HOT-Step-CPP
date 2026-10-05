@@ -1869,13 +1869,13 @@ int main(int argc, char ** argv) {
         // --bench times the CUDA backend only, both arms — the question is
         // "fused vs manual on the GPU", not CPU-vs-CUDA (that is what
         // --backend cuda without --bench already answers), and its tf32 arm
-        // is a CUDA tensor-core comparison that means nothing on Vulkan.
-        // --backend cpu/cuda (default or explicit) both resolve to CUDA here;
-        // --backend vulkan is rejected rather than silently ignored — it used
-        // to fall through to ggml_backend_dev_by_type(GPU), which could hand
-        // back a Vulkan device under a "CUDA" label with no indication asked
-        // for.
-        if (backend_explicit && want_backend == "vulkan") {
+        // is a CUDA tensor-core comparison that means nothing on CPU or
+        // Vulkan. Bare --bench (no --backend) still defaults to CUDA; any
+        // OTHER backend asked for explicitly is rejected rather than
+        // silently ignored — it used to fall through to
+        // ggml_backend_dev_by_type(GPU), which could hand back a Vulkan
+        // device under a "CUDA" label with no indication asked for.
+        if (backend_explicit && want_backend != "cuda") {
             fprintf(stderr, "[fattn-train-test] --bench only runs the CUDA comparison (its "
                             "tf32 arm is a CUDA tensor-core question); drop --backend or pass "
                             "--backend cuda\n");

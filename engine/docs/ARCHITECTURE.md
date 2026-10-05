@@ -872,3 +872,33 @@ Usage: mp3-codec -i <input> -o <output> [options]
 mp3-codec -i song.wav -o song.mp3 -b 192
 mp3-codec -i song.mp3 -o song.wav --format wav32
 ```
+
+## fattn-train-test reference
+
+Parity harness for `GGML_OP_FLASH_ATTN_TRAIN{,_BACK}`: compares the fused op
+against the autodiff'd reference attention chain. See
+[flash-attn-training skill](../../.claude/skills/flash-attn-training/SKILL.md)
+for the full ops/patch background.
+
+```
+Usage: fattn-train-test [--backend cpu|cuda|vulkan] [--prec f32|tf32] [--extra]
+                         [--large] [--cheap] [--quick] [--fwd-only]
+                         [--threads N] [--bench] [--bench-tr] [--bench-lm]
+
+  --backend   cpu (default), cuda or vulkan. Resolved by registry device
+              name, never "first GPU device found" — a CUDA request
+              cannot land on Vulkan or vice versa. Missing requested
+              backend: hard failure (prints loaded devices), never a
+              silent CPU fallback.
+  --prec      f32 (default) or tf32. tf32 is CUDA-only; requesting it on
+              CPU or Vulkan is an error, not an ignore.
+  --bench     Times fused vs manual attention on CUDA only (the tf32 arm
+              is a CUDA tensor-core question). Defaults to CUDA with no
+              --backend; any OTHER explicit --backend is rejected.
+```
+
+```bash
+fattn-train-test --backend cuda
+fattn-train-test --backend vulkan --prec f32
+fattn-train-test --bench
+```
