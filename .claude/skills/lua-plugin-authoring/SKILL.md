@@ -5,7 +5,7 @@ description: Explains how to write, test, and debug HOT-Step Lua plugins (solver
 
 # Writing Lua plugins for HOT-Step CPP
 
-Solvers, schedulers, guidance modes, and postprocess (VAE-decode replacement) are **Lua 5.4 plugins** loaded by the C++ engine at startup. Adding one = drop a `.lua` file in the right directory and restart the app. **No C++ rebuild.**
+Solvers, schedulers, guidance modes, and postprocess (VAE-decode replacement) are **Lua plugins (LuaJIT 2.1)** loaded by the C++ engine at startup. Adding one = drop a `.lua` file in the right directory and restart the app. **No C++ rebuild.**
 
 Glossary (used throughout):
 - **DiT** — the diffusion transformer that denoises audio latents over N steps. A **solver** decides how the latent `xt` advances each step given the model's predicted velocity `vt`. A **scheduler** decides the timestep values. A **guidance** mode combines the conditional and unconditional model predictions (classifier-free guidance, CFG). A **postprocess** plugin replaces the built-in tiled VAE (variational autoencoder) latent-to-audio decode.

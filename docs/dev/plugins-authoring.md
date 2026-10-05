@@ -346,7 +346,7 @@ Read-only arrays (like `pred_cond` and `pred_uncond` in guidance) will raise an 
 generation (and before every `sample()` of a full-loop solver) the engine calls
 `math.randomseed(seed)` on the plugin's Lua state, so `math.random()` is a pure
 function of the job seed and identical payloads render identically. Do **not**
-re-seed from a clock or leave the RNG unseeded: Lua 5.4 seeds `math.random`
+re-seed from a clock or leave the RNG unseeded: the engine seeds `math.random`
 from the clock when the state is created, and plugin states live for the whole
 ace-server process, so an unseeded plugin makes every render irreproducible.
 Deriving your own stream from the `seed` global is fine (and recommended if you
@@ -366,11 +366,13 @@ want a stream that is independent of what else the plugin drew).
 
 ## Sandbox
 
-Each plugin runs in an isolated Lua 5.4 VM with:
+Each plugin runs in an isolated LuaJIT 2.1 VM (Lua 5.1 with LuaJIT's Lua 5.2 extensions, including `goto`) with:
 
 **Available:** `math`, `string`, `table`, `print`, `type`, `pairs`, `ipairs`, `tonumber`, `tostring`, `require` (for companion data files)
 
-**Blocked:** `os`, `io`, `debug`, `dofile`, `loadfile` — no filesystem access, no shell commands, no process control.
+**Blocked:** `os`, `io`, `debug`, `dofile`, `loadfile`, `ffi`, `jit`, `package.loadlib` — no filesystem access, no shell commands, no process control, no raw memory.
+
+**Float arrays** (`xt`, `vt` and the rest) are indexed from 0 and support `#xt`. Out-of-range indexes and writes to read-only inputs raise an error. Plain `for i = 0, n - 1 do ... end` loops over them are compiled by the JIT, so there is no need to batch work into helper calls. There is no integer type: numbers are doubles, and `string.format("%d", x)` truncates a non-integer `x` rather than raising an error.
 
 The `require()` function works for loading companion Lua data files (e.g., precomputed constants in a separate `.lua` file in the same directory), but cannot load C modules.
 

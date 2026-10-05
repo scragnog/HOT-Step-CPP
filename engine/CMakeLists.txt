@@ -238,16 +238,55 @@ else()
     target_compile_options(yyjson PRIVATE -w)
 endif()
 
-# Lua 5.4 (MIT, embedded scripting for plugin system)
-# All .c files except lua.c (standalone interpreter) and luac.c (compiler)
-file(GLOB LUA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/vendor/lua/*.c")
-list(FILTER LUA_SOURCES EXCLUDE REGEX "(lua|luac)\\.c$")
-add_library(lua54 STATIC ${LUA_SOURCES})
-target_include_directories(lua54 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor/lua)
+# LuaJIT 2.1 (MIT, embedded scripting for the plugin system). vendor/luajit is
+# an unmodified source snapshot; it is copied into the build tree and built
+# there with its own scripts (msvcbuild.bat / make), so the source stays clean.
+# lua52compat gives views a working #; the plugin host is lua-plugin.h.
+set(LUAJIT_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/luajit)
+set(LUAJIT_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR}/luajit)
+file(GLOB_RECURSE LUAJIT_INPUTS CONFIGURE_DEPENDS ${LUAJIT_SRC_DIR}/src/*.c ${LUAJIT_SRC_DIR}/src/*.h ${LUAJIT_SRC_DIR}/src/*.dasc)
 if(MSVC)
-    target_compile_options(lua54 PRIVATE /W0)
+    set(LUAJIT_LIB ${LUAJIT_BUILD_DIR}/src/lua51.lib)
+    # cl reads extra options from %CL%: match the engine's MSVC runtime.
+    if(CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "DLL$" OR NOT CMAKE_MSVC_RUNTIME_LIBRARY)
+        set(LUAJIT_CRT /MD)
+    else()
+        set(LUAJIT_CRT /MT)
+    endif()
+    # msvcbuild.bat runs its helpers from the current directory, which
+    # NoDefaultCurrentDirectoryInExePath (set in some agent shells) forbids.
+    set(LUAJIT_BUILD_CMD ${CMAKE_COMMAND} -E env --unset=NoDefaultCurrentDirectoryInExePath CL=${LUAJIT_CRT}
+        cmd /c "cd /d ${LUAJIT_BUILD_DIR}/src && msvcbuild.bat lua52compat static")
 else()
-    target_compile_options(lua54 PRIVATE -w)
+    set(LUAJIT_LIB ${LUAJIT_BUILD_DIR}/src/libluajit.a)
+    set(LUAJIT_ENV)
+    if(APPLE)
+        set(LUAJIT_MACOS_TARGET ${CMAKE_OSX_DEPLOYMENT_TARGET})
+        if(NOT LUAJIT_MACOS_TARGET)
+            set(LUAJIT_MACOS_TARGET 11.0)
+        endif()
+        set(LUAJIT_ENV MACOSX_DEPLOYMENT_TARGET=${LUAJIT_MACOS_TARGET})
+    endif()
+    set(LUAJIT_BUILD_CMD ${CMAKE_COMMAND} -E env ${LUAJIT_ENV}
+        make -C ${LUAJIT_BUILD_DIR}/src libluajit.a BUILDMODE=static CC=${CMAKE_C_COMPILER}
+        "XCFLAGS=-DLUAJIT_ENABLE_LUA52COMPAT -fPIC")
+endif()
+add_custom_command(
+    OUTPUT ${LUAJIT_LIB}
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${LUAJIT_BUILD_DIR}
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${LUAJIT_SRC_DIR} ${LUAJIT_BUILD_DIR}
+    COMMAND ${LUAJIT_BUILD_CMD}
+    WORKING_DIRECTORY ${LUAJIT_BUILD_DIR}/..
+    DEPENDS ${LUAJIT_INPUTS}
+    COMMENT "Building LuaJIT"
+    VERBATIM)
+add_custom_target(luajit-build DEPENDS ${LUAJIT_LIB})
+add_library(luajit STATIC IMPORTED GLOBAL)
+set_target_properties(luajit PROPERTIES IMPORTED_LOCATION ${LUAJIT_LIB})
+target_include_directories(luajit INTERFACE ${LUAJIT_SRC_DIR}/src)
+add_dependencies(luajit luajit-build)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(luajit INTERFACE m dl)
 endif()
 
 # CUDAToolkit detection: the find_package at L73 is conditional on
@@ -336,9 +375,9 @@ add_library(acestep-core STATIC
     src/pipeline-understand.cpp
 )
 if(hip_FOUND)
-   target_link_libraries(acestep-core PUBLIC yyjson lua54 supersep hip::host)
+   target_link_libraries(acestep-core PUBLIC yyjson luajit supersep hip::host)
 else()
-   target_link_libraries(acestep-core PUBLIC yyjson lua54 supersep)
+   target_link_libraries(acestep-core PUBLIC yyjson luajit supersep)
 endif()
 link_ggml_backends(acestep-core)
 
@@ -557,7 +596,7 @@ link_ggml_backends(ace-caption)
 add_executable(yue2-probe tools/yue2-probe.cpp)
 # yue2-nar-graph.h also contains the optional Lua sampler dispatch. The probe
 # includes that header for parity fixtures even though it uses native midpoint.
-target_link_libraries(yue2-probe PRIVATE yyjson lua54)
+target_link_libraries(yue2-probe PRIVATE yyjson luajit)
 link_ggml_backends(yue2-probe)
 
 # bs-roformer-test: parity test for the GGML BS-RoFormer (SuperSep StableStep
@@ -585,12 +624,12 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/src/train/aitk-runtime.cmake)
 if(MSVC)
   target_compile_options(ace-train PRIVATE /bigobj)
 endif()
-# lua54 is not used by the trainer directly. It is needed because ace-train
+# luajit is not used by the trainer directly. It is needed because ace-train
 # includes minimax/mm3-request.h, which reaches lua-plugin.h transitively via
-# mm3-pipeline.h -> mm3-plugins.h, and lua54 is what carries vendor/lua on its
-# PUBLIC include path. Every other target that pulls this chain gets it by
+# mm3-pipeline.h -> mm3-plugins.h, and luajit is what carries vendor/luajit on
+# its include path. Every other target that pulls this chain gets it by
 # linking acestep-core; ace-train deliberately does not link acestep-core (the
-# comment above), so it has to name lua54 itself. Without this the build fails
+# comment above), so it has to name luajit itself. Without this the build fails
 # with "Cannot open include file: 'lua.h'" from lua-plugin.h.
 #
 # The YuE2 NAR trainer (train/yue2-nar-train-run.h, subcommand yue2-nar-train)
@@ -599,7 +638,7 @@ endif()
 # library dependency it drags in — yyjson, via yue2-tokenizer.h -> bpe.h — is
 # already named here. yue2-probe links exactly yyjson + ggml, so ace-train's
 # dependency set is a strict superset.
-target_link_libraries(ace-train PRIVATE yyjson lua54)
+target_link_libraries(ace-train PRIVATE yyjson luajit)
 link_ggml_backends(ace-train)
 
 # mp3-codec: MP3 encoder/decoder (standalone, no ggml needed)

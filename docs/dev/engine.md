@@ -25,7 +25,7 @@ toolchains, see [building.md](building.md).
 | `engine/plugins/` | Bundled Lua plugins: `solvers/`, `schedulers/`, `guidance/` |
 | `engine/patches/` | Patches applied to the `engine/ggml` submodule (see [The ggml patch stack](#the-ggml-patch-stack)) |
 | `engine/ggml/` | ggml submodule |
-| `engine/vendor/` | yyjson, Lua 5.4, cpp-httplib, pocketfft, VST3 SDK |
+| `engine/vendor/` | yyjson, LuaJIT 2.1, cpp-httplib, pocketfft, VST3 SDK |
 | `engine/deps/` | Optional vendored SDK: `tensorrt/` |
 
 ## Binaries
@@ -276,8 +276,15 @@ records the last upstream commit synced.
 
 ## Lua plugin host
 
-Solvers, schedulers, guidance modes and VAE-decode postprocessors are Lua 5.4
-plugins. `PluginRegistry::init` (`lua-plugin-registry.h`) scans
+Solvers, schedulers, guidance modes and VAE-decode postprocessors are Lua
+plugins, run by LuaJIT 2.1 (`engine/vendor/luajit`, an unmodified snapshot that
+CMake copies into the build tree and builds with its own `msvcbuild.bat` or
+`make`, with Lua 5.2 compatibility on). Float arrays reach a plugin as a view
+that a host prelude in `lua-plugin.h` builds over an FFI pointer: element loops
+compile to machine code (an md_wasserstein step on a 6000-frame YuE2 latent went
+from about 135 ms to about 2 ms), while bounds and read-only checks stay and the
+pointer itself is never reachable. `math.random` is a port of Lua 5.4's
+xoshiro256** generator, so seeded plugins draw the same numbers as before. `PluginRegistry::init` (`lua-plugin-registry.h`) scans
 `engine/plugins/{solvers,schedulers,guidance,postprocess}/` and then the same four
 folders under the project root `plugins/`, once at startup. `ace-server` and
 `ace-synth` both call it. `lua-plugin.h` runs each file in its own sandboxed VM,

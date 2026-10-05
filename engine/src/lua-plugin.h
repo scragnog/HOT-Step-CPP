@@ -3,12 +3,14 @@
 //
 // Provides:
 //   - Sandboxed Lua VM per plugin file
-//   - Zero-copy float array bridge (C float* â†” Lua userdata)
+//   - Zero-copy float array bridge (C float* to a bounds-checked LuaJIT FFI view)
 //   - Plugin metadata + param schema extraction
 //   - Wrapper functions matching C solver/scheduler/guidance signatures
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <ctime>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -29,61 +31,150 @@ extern "C" {
 // Float array userdata â€” zero-copy bridge between C++ and Lua
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-struct LuaFloatArray {
-    float * data;
-    int     n;
-    bool    readonly;
-};
+// The runtime is LuaJIT. Element loops in plugins compile to machine code only
+// when the array is an FFI pointer, but a raw pointer would let a plugin read
+// or write any memory. So the host builds each view in a private prelude: a
+// table whose metamethods index a float* held in upvalues, with bounds and
+// read-only checks. Plugins see xt[i], #xt and nothing else; the prelude then
+// removes ffi and jit from the state, so no plugin can reach either.
+static const char * LUA_HOST_PRELUDE = R"LUA(
+local ffi = require('ffi')
+local setmetatable, error, cast = setmetatable, error, ffi.cast
+local ptrs = setmetatable({}, { __mode = 'k' })
+local function view(p, n, ro)
+  local d = cast('float*', p)
+  local v = setmetatable({}, {
+    __index = function(_, i)
+      if i < 0 or i >= n then error('float array index ' .. tostring(i) .. ' out of range [0, ' .. n .. ')', 2) end
+      return d[i]
+    end,
+    __newindex = function(_, i, x)
+      if ro then error('float array is read-only', 2) end
+      if i < 0 or i >= n then error('float array index ' .. tostring(i) .. ' out of range [0, ' .. n .. ')', 2) end
+      d[i] = x
+    end,
+    __len = function() return n end,
+    __metatable = false,
+  })
+  ptrs[v] = p
+  return v
+end
+local function unwrap(v)
+  local p = ptrs[v]
+  if p == nil then error('expected a float array', 3) end
+  return p
+end
+return view, unwrap
+)LUA";
 
-static const char * LUA_FLOAT_ARRAY_MT = "FloatArray";
+static const char * LUA_VIEW_KEY   = "hot_step.float_view";
+static const char * LUA_UNWRAP_KEY = "hot_step.float_unwrap";
 
-static int lua_floatarray_index(lua_State * L) {
-    LuaFloatArray * a = (LuaFloatArray *) luaL_checkudata(L, 1, LUA_FLOAT_ARRAY_MT);
-    int idx = (int) luaL_checkinteger(L, 2);
-    if (idx < 0 || idx >= a->n) {
-        return luaL_error(L, "FloatArray index %d out of range [0, %d)", idx, a->n);
+// Push a view of n floats at data. The view is valid for the duration of the
+// call it is passed to; the host owns the memory.
+static void lua_push_floatarray(lua_State * L, float * data, int n, bool readonly) {
+    lua_getfield(L, LUA_REGISTRYINDEX, LUA_VIEW_KEY);
+    lua_pushlightuserdata(L, data);
+    lua_pushinteger(L, n);
+    lua_pushboolean(L, readonly ? 1 : 0);
+    lua_call(L, 3, 1);
+}
+
+// The float* behind a view the host pushed; raises a Lua error for anything else.
+static float * lua_check_floatarray(lua_State * L, int idx) {
+    lua_pushvalue(L, idx);
+    lua_getfield(L, LUA_REGISTRYINDEX, LUA_UNWRAP_KEY);
+    lua_insert(L, -2);
+    lua_call(L, 1, 1);
+    float * data = (float *) lua_touserdata(L, -1);
+    lua_pop(L, 1);
+    return data;
+}
+
+// math.random / math.randomseed with Lua 5.4.7's generator (xoshiro256**,
+// lmathlib.c), so a plugin draws the same numbers for the same job seed as it
+// did before the move to LuaJIT. The state lives in a userdata upvalue.
+struct LuaRandState { uint64_t s[4]; };
+
+static uint64_t lua_rand_rotl(uint64_t x, int n) { return (x << n) | (x >> (64 - n)); }
+
+static uint64_t lua_rand_next(LuaRandState * st) {
+    uint64_t * s = st->s;
+    const uint64_t s0 = s[0], s1 = s[1], s2 = s[2] ^ s0, s3 = s[3] ^ s1;
+    const uint64_t res = lua_rand_rotl(s1 * 5, 7) * 9;
+    s[0] = s0 ^ s3;
+    s[1] = s1 ^ s2;
+    s[2] = s2 ^ (s1 << 17);
+    s[3] = lua_rand_rotl(s3, 45);
+    return res;
+}
+
+static void lua_rand_seed(LuaRandState * st, uint64_t n1, uint64_t n2) {
+    st->s[0] = n1;
+    st->s[1] = 0xff;
+    st->s[2] = n2;
+    st->s[3] = 0;
+    for (int i = 0; i < 16; i++) lua_rand_next(st);
+}
+
+static int lua_math_random(lua_State * L) {
+    LuaRandState * st = (LuaRandState *) lua_touserdata(L, lua_upvalueindex(1));
+    uint64_t rv = lua_rand_next(st);
+    int64_t low, up;
+    switch (lua_gettop(L)) {
+        case 0: {
+            // Top 53 bits as a double in [0, 1), as lmathlib's I2d.
+            lua_pushnumber(L, (double) (rv >> 11) * (0.5 / (double) (1ull << 52)));
+            return 1;
+        }
+        case 1:
+            low = 1;
+            up  = (int64_t) luaL_checknumber(L, 1);
+            if (up == 0) { lua_pushnumber(L, (double) (int64_t) rv); return 1; }
+            break;
+        case 2:
+            low = (int64_t) luaL_checknumber(L, 1);
+            up  = (int64_t) luaL_checknumber(L, 2);
+            break;
+        default: return luaL_error(L, "wrong number of arguments");
     }
-    lua_pushnumber(L, (double) a->data[idx]);
+    luaL_argcheck(L, low <= up, 1, "interval is empty");
+    const uint64_t n = (uint64_t) up - (uint64_t) low;
+    uint64_t ran = rv;
+    if ((n & (n + 1)) == 0) ran &= n;
+    else {
+        uint64_t lim = n;
+        lim |= lim >> 1; lim |= lim >> 2; lim |= lim >> 4;
+        lim |= lim >> 8; lim |= lim >> 16; lim |= lim >> 32;
+        while ((ran &= lim) > n) ran = lua_rand_next(st);
+    }
+    lua_pushnumber(L, (double) (int64_t) (ran + (uint64_t) low));
     return 1;
 }
 
-static int lua_floatarray_newindex(lua_State * L) {
-    LuaFloatArray * a = (LuaFloatArray *) luaL_checkudata(L, 1, LUA_FLOAT_ARRAY_MT);
-    if (a->readonly) {
-        return luaL_error(L, "FloatArray is read-only");
-    }
-    int idx = (int) luaL_checkinteger(L, 2);
-    if (idx < 0 || idx >= a->n) {
-        return luaL_error(L, "FloatArray index %d out of range [0, %d)", idx, a->n);
-    }
-    a->data[idx] = (float) luaL_checknumber(L, 3);
+static int lua_math_randomseed(lua_State * L) {
+    LuaRandState * st = (LuaRandState *) lua_touserdata(L, lua_upvalueindex(1));
+    const uint64_t n1 = lua_isnoneornil(L, 1) ? (uint64_t) time(nullptr) : (uint64_t) (int64_t) luaL_checknumber(L, 1);
+    const uint64_t n2 = lua_isnoneornil(L, 1) ? (uint64_t) (size_t) L : (uint64_t) (int64_t) luaL_optnumber(L, 2, 0);
+    lua_rand_seed(st, n1, n2);
     return 0;
 }
 
-static int lua_floatarray_len(lua_State * L) {
-    LuaFloatArray * a = (LuaFloatArray *) luaL_checkudata(L, 1, LUA_FLOAT_ARRAY_MT);
-    lua_pushinteger(L, a->n);
-    return 1;
-}
+static const char * LUA_RAND_KEY = "hot_step.rand_state";
 
-static void lua_push_floatarray(lua_State * L, float * data, int n, bool readonly) {
-    LuaFloatArray * a = (LuaFloatArray *) lua_newuserdata(L, sizeof(LuaFloatArray));
-    a->data     = data;
-    a->n        = n;
-    a->readonly = readonly;
-    luaL_getmetatable(L, LUA_FLOAT_ARRAY_MT);
-    lua_setmetatable(L, -2);
-}
-
-static void lua_register_floatarray(lua_State * L) {
-    luaL_newmetatable(L, LUA_FLOAT_ARRAY_MT);
-    lua_pushcfunction(L, lua_floatarray_index);
-    lua_setfield(L, -2, "__index");
-    lua_pushcfunction(L, lua_floatarray_newindex);
-    lua_setfield(L, -2, "__newindex");
-    lua_pushcfunction(L, lua_floatarray_len);
-    lua_setfield(L, -2, "__len");
-    lua_pop(L, 1);
+static void lua_register_random(lua_State * L) {
+    LuaRandState * st = (LuaRandState *) lua_newuserdata(L, sizeof(LuaRandState));
+    lua_rand_seed(st, (uint64_t) time(nullptr), (uint64_t) (size_t) L);
+    lua_pushvalue(L, -1);
+    lua_setfield(L, LUA_REGISTRYINDEX, LUA_RAND_KEY);
+    lua_getglobal(L, "math");
+    lua_pushvalue(L, -2);
+    lua_pushcclosure(L, lua_math_random, 1);
+    lua_setfield(L, -2, "random");
+    lua_pushvalue(L, -2);
+    lua_pushcclosure(L, lua_math_randomseed, 1);
+    lua_setfield(L, -2, "randomseed");
+    lua_pop(L, 2);
 }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -184,14 +275,43 @@ static void lua_setup_sandbox(lua_State * L) {
     // Remove dangerous modules
     // Note: "package" is kept (needed for require() of companion data files).
     // Security: cpath is set to "" during load to block C module loading.
-    const char * blacklist[] = {"os", "io", "debug", "dofile", "loadfile"};
+    const char * blacklist[] = {"os", "io", "debug", "dofile", "loadfile", "ffi"};
     for (const char * mod : blacklist) {
         lua_pushnil(L);
         lua_setglobal(L, mod);
     }
 
-    // Register float array metatable
-    lua_register_floatarray(L);
+    // Host prelude: needs ffi, so it runs before ffi is removed below.
+    if (luaL_loadstring(L, LUA_HOST_PRELUDE) != 0 || lua_pcall(L, 0, 2, 0) != 0) {
+        fprintf(stderr, "[Plugins] ERROR: host prelude failed: %s\n", lua_tostring(L, -1));
+        lua_pop(L, 1);
+    } else {
+        lua_setfield(L, LUA_REGISTRYINDEX, LUA_UNWRAP_KEY);
+        lua_setfield(L, LUA_REGISTRYINDEX, LUA_VIEW_KEY);
+    }
+    lua_register_random(L);
+
+    // Removing the globals is not enough: require() also finds modules through
+    // package.loaded and package.preload, and package.loadlib opens any DLL.
+    const char * hidden[] = {"os", "io", "debug", "ffi", "jit"};
+    lua_getglobal(L, "package");
+    if (lua_istable(L, -1)) {
+        for (const char * field : {"loaded", "preload"}) {
+            lua_getfield(L, -1, field);
+            if (lua_istable(L, -1)) {
+                for (const char * mod : hidden) {
+                    lua_pushnil(L);
+                    lua_setfield(L, -2, mod);
+                }
+            }
+            lua_pop(L, 1);
+        }
+        lua_pushnil(L);
+        lua_setfield(L, -2, "loadlib");
+    }
+    lua_pop(L, 1);
+    lua_pushnil(L);
+    lua_setglobal(L, "jit");
 }
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -222,7 +342,7 @@ static bool lua_get_bool(lua_State * L, int idx, const char * field, bool def = 
 
 static int lua_get_int(lua_State * L, int idx, const char * field, int def = 0) {
     lua_getfield(L, idx, field);
-    int v = lua_isinteger(L, -1) ? (int) lua_tointeger(L, -1) : (lua_isnumber(L, -1) ? (int) lua_tonumber(L, -1) : def);
+    int v = lua_isnumber(L, -1) ? (int) lua_tonumber(L, -1) : def;
     lua_pop(L, 1);
     return v;
 }
@@ -251,7 +371,7 @@ static ParamSchema lua_extract_param(lua_State * L, int idx) {
             p.default_str = lua_get_string(L, idx, "default");
             lua_getfield(L, idx, "options");
             if (lua_istable(L, -1)) {
-                int n = (int) luaL_len(L, -1);
+                int n = (int) lua_objlen(L, -1);
                 for (int i = 1; i <= n; i++) {
                     lua_rawgeti(L, -1, i);
                     if (lua_istable(L, -1)) {
@@ -294,7 +414,7 @@ static std::vector<ParamSchema> lua_extract_params(lua_State * L, int table_idx)
     std::vector<ParamSchema> params;
     lua_getfield(L, table_idx, "params");
     if (lua_istable(L, -1)) {
-        int n = (int) luaL_len(L, -1);
+        int n = (int) lua_objlen(L, -1);
         for (int i = 1; i <= n; i++) {
             lua_rawgeti(L, -1, i);
             if (lua_istable(L, -1)) {
@@ -477,19 +597,11 @@ static void lua_inject_model_context(lua_State * L, const LuaModelContext & ctx)
 // while leaving its distribution (xoshiro256**) untouched.
 static void lua_seed_plugin_rng(lua_State * L, int64_t seed, const char * plugin_name) {
     if (!L) return;
-    lua_getglobal(L, "math");
-    if (!lua_istable(L, -1)) { lua_pop(L, 1); return; }
-    lua_getfield(L, -1, "randomseed");
-    if (!lua_isfunction(L, -1)) { lua_pop(L, 2); return; }
-    lua_pushinteger(L, (lua_Integer) seed);
-    if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
-        fprintf(stderr, "[Plugins] WARNING: math.randomseed(%lld) failed for '%s': %s\n",
-                (long long) seed, plugin_name ? plugin_name : "?", lua_tostring(L, -1));
-        lua_pop(L, 1);
-        lua_pop(L, 1);  // math
-        return;
-    }
-    lua_pop(L, 1);  // math
+    lua_getfield(L, LUA_REGISTRYINDEX, LUA_RAND_KEY);
+    LuaRandState * st = (LuaRandState *) lua_touserdata(L, -1);
+    lua_pop(L, 1);
+    if (!st) return;
+    lua_rand_seed(st, (uint64_t) seed, 0);  // math.randomseed(seed) in Lua 5.4
     fprintf(stderr, "[Plugins] solver '%s' RNG seeded from job seed %lld\n",
             plugin_name ? plugin_name : "?", (long long) seed);
 }
@@ -548,9 +660,9 @@ static void lua_call_solver_step(LuaPlugin & plugin,
         lua_pushcclosure(L, [](lua_State * Ls) -> int {
             auto * fn = (SolverModelFn *) lua_touserdata(Ls, lua_upvalueindex(1));
             // First arg: xt_tmp (FloatArray), second: t_val (number)
-            LuaFloatArray * arr = (LuaFloatArray *) luaL_checkudata(Ls, 1, LUA_FLOAT_ARRAY_MT);
+            float * data = lua_check_floatarray(Ls, 1);
             float t_val = (float) luaL_checknumber(Ls, 2);
-            (*fn)(arr->data, t_val);
+            (*fn)(data, t_val);
             return 0;
         }, 1);
         lua_push_floatarray(L, vt_buf, n, false);
@@ -663,9 +775,9 @@ static void lua_call_solver_loop(
     lua_pushlightuserdata(L, mfn_ptr);
     lua_pushcclosure(L, [](lua_State * Ls) -> int {
         auto * fn = (LoopModelFn *) lua_touserdata(Ls, lua_upvalueindex(1));
-        LuaFloatArray * arr = (LuaFloatArray *) luaL_checkudata(Ls, 1, LUA_FLOAT_ARRAY_MT);
+        float * data = lua_check_floatarray(Ls, 1);
         float t_val = (float) luaL_checknumber(Ls, 2);
-        (*fn)(arr->data, t_val);
+        (*fn)(data, t_val);
         return 0;
     }, 1);
 
@@ -721,10 +833,10 @@ static void lua_call_scheduler(LuaPlugin & plugin,
 static int lua_apg_closure(lua_State * L) {
     // Args: pred_cond (FloatArray), pred_uncond (FloatArray), scale (number),
     //       result (FloatArray), Oc (int), T (int), norm_threshold (number)
-    LuaFloatArray * cond   = (LuaFloatArray *) luaL_checkudata(L, 1, LUA_FLOAT_ARRAY_MT);
-    LuaFloatArray * uncond = (LuaFloatArray *) luaL_checkudata(L, 2, LUA_FLOAT_ARRAY_MT);
+    float * cond           = lua_check_floatarray(L, 1);
+    float * uncond         = lua_check_floatarray(L, 2);
     float scale            = (float) luaL_checknumber(L, 3);
-    LuaFloatArray * result = (LuaFloatArray *) luaL_checkudata(L, 4, LUA_FLOAT_ARRAY_MT);
+    float * result         = lua_check_floatarray(L, 4);
     int Oc                 = (int) luaL_checkinteger(L, 5);
     int T                  = (int) luaL_checkinteger(L, 6);
     float norm_threshold   = (float) luaL_optnumber(L, 7, 2.5);
@@ -738,7 +850,7 @@ static int lua_apg_closure(lua_State * L) {
         return luaL_error(L, "apg(): no momentum buffer available (internal error)");
     }
 
-    apg_forward(cond->data, uncond->data, scale, *mbuf, result->data, Oc, T, norm_threshold);
+    apg_forward(cond, uncond, scale, *mbuf, result, Oc, T, norm_threshold);
     return 0;
 }
 
@@ -851,9 +963,9 @@ static void lua_call_post_step(LuaPlugin & plugin,
     lua_pushlightuserdata(L, cond_ptr);
     lua_pushcclosure(L, [](lua_State * Ls) -> int {
         auto * fn = (PostStepModelFn *) lua_touserdata(Ls, lua_upvalueindex(1));
-        LuaFloatArray * arr = (LuaFloatArray *) luaL_checkudata(Ls, 1, LUA_FLOAT_ARRAY_MT);
+        float * data = lua_check_floatarray(Ls, 1);
         float t = (float) luaL_checknumber(Ls, 2);
-        (*fn)(arr->data, t);
+        (*fn)(data, t);
         return 0;
     }, 1);
 
@@ -862,9 +974,9 @@ static void lua_call_post_step(LuaPlugin & plugin,
     lua_pushlightuserdata(L, uncond_ptr);
     lua_pushcclosure(L, [](lua_State * Ls) -> int {
         auto * fn = (PostStepModelFn *) lua_touserdata(Ls, lua_upvalueindex(1));
-        LuaFloatArray * arr = (LuaFloatArray *) luaL_checkudata(Ls, 1, LUA_FLOAT_ARRAY_MT);
+        float * data = lua_check_floatarray(Ls, 1);
         float t = (float) luaL_checknumber(Ls, 2);
-        (*fn)(arr->data, t);
+        (*fn)(data, t);
         return 0;
     }, 1);
 
