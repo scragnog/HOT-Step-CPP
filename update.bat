@@ -116,7 +116,7 @@ if "%DIFF_ERR%%STAGED_ERR%" neq "00" (
     if "%FORCE%"=="1" (
         echo.
         echo   WARNING: You have uncommitted changes to tracked files.
-        echo   --force will DISCARD them. Untracked files (adapters, models, data) are kept.
+        echo   --force will DISCARD them. Untracked files ^(adapters, models, data^) are kept.
         echo.
         echo   Modified files:
         git status --short --ignore-submodules=dirty --untracked-files=no
@@ -139,7 +139,7 @@ if "%DIFF_ERR%%STAGED_ERR%" neq "00" (
         echo.
         echo   Options:
         echo     1. Commit or stash your changes first
-        echo     2. Run: update.bat --force  (discards changes to tracked files only)
+        echo     2. Run: update.bat --force  ^(discards changes to tracked files only^)
         echo.
         goto :fail
     )
@@ -211,7 +211,7 @@ if errorlevel 1 (
     echo   This usually means your local branch has diverged from origin/master.
     echo   Options:
     echo     1. Run: git rebase origin/master
-    echo     2. Run: update.bat --force  (discards local changes)
+    echo     2. Run: update.bat --force  ^(discards local changes^)
     echo.
     goto :fail
 )
@@ -298,7 +298,7 @@ popd
 
 REM --- Engine build ---
 if "%SKIP_ENGINE%"=="1" (
-    echo   Skipping engine build (--skip-engine flag).
+    echo   Skipping engine build ^(--skip-engine flag^).
     goto :build_ui
 )
 
@@ -358,8 +358,8 @@ if errorlevel 1 (
     echo   Check the output above for errors.
     echo   Common fixes:
     echo     - Install "Desktop development with C++" workload
-    echo     - Ensure CUDA Toolkit is in PATH (if using CUDA)
-    echo     - Try: update.bat --clean  (forces fresh cmake config)
+    echo     - Ensure CUDA Toolkit is in PATH ^(if using CUDA^)
+    echo     - Try: update.bat --clean  ^(forces fresh cmake config^)
     goto :fail
 )
 echo   Engine build complete.
@@ -409,7 +409,7 @@ echo.
 if "%OLD_HEAD%" neq "%NEW_HEAD%" (
     echo   Updated: %OLD_HEAD:~0,8% -> %NEW_HEAD:~0,8%
 ) else (
-    echo   No new commits (rebuild only).
+    echo   No new commits ^(rebuild only^).
 )
 echo.
 echo   Run LAUNCH.bat to start the application.
