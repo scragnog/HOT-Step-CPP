@@ -142,6 +142,40 @@ test('pullLinked still pulls adapters only when the worker sends none of the new
   }
 });
 
+test('pullLinked drops the pair a later worker pick in the same run replaced, and nothing else', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-pull-superseded-'));
+  try {
+    const script = PULL_HARNESS + [
+      "addDataset('album');",
+      "const AR = Buffer.from('AR-BYTES'); const NAR = Buffer.from('NAR-BYTES');",
+      "const A = process.env.ACESTEPCPP_ADAPTERS;",
+      "const ck = (run, seg, step) => run + '/segments/segment-' + seg + '/checkpoint-step' + step;",
+      "async function pullAt(dir, at) {",
+      "  const files = { [dir + '/native-ar.safetensors']: AR, [dir + '/native-nar.safetensors']: NAR };",
+      "  const linked = [{ slug: 'album', at, ar: { rel: dir + '/native-ar.safetensors', size: AR.length, mtimeMs: 1 }, nar: { rel: dir + '/native-nar.safetensors', size: NAR.length, mtimeMs: 1 } }];",
+      "  const server = await serve(linked, files);",
+      "  try { await pullLinked({ name: 'worker1', url: 'http://127.0.0.1:' + server.address().port }); } finally { server.close(); }",
+      "}",
+      "const has = rel => fs.existsSync(path.join(A, rel, 'native-ar.safetensors'));",
+      "const last = ck('run', '000010', 200), pick = ck('run', '000006', 120);",
+      // Pulled before the pick, then again after it: only the pick stays.
+      "await pullAt(last, '2000-01-01T00:00:00.000Z');",
+      "await pullAt(pick, '2099-01-01T00:00:00.000Z');",
+      "if (has(last) || fs.existsSync(path.join(A, 'run/segments/segment-000010'))) throw new Error('superseded pair or its empty folders survived');",
+      "if (!has(pick)) throw new Error('picked pair missing');",
+      // A worker link older than this machine's own link never deletes it.
+      "await pullAt(last, '2000-01-01T00:00:00.000Z');",
+      "if (!has(pick) || !has(last)) throw new Error('an older worker link removed a newer local one');",
+      // A pair in another run folder is never touched.
+      "await pullAt(ck('other', '000001', 20), '2099-01-02T00:00:00.000Z');",
+      "if (!has(last)) throw new Error('a pull into another run folder removed this run\\'s pair');",
+    ].join('');
+    runPullInIsolatedRoot(root, script);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('deleting a worker run is refused while another job for the dataset is active', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ladder-delete-active-job-'));
   try {

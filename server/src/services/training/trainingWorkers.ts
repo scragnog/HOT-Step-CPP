@@ -24,7 +24,8 @@ import * as repo from './datasetsRepo.js';
 import * as queue from './labelingQueue.js';
 import { isInside, labelsDir, slugify, trainingBaseDir } from './paths.js';
 import { detailFor, syncCounters } from './datasetDetail.js';
-import { readYue2Linked, refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
+import { readYue2Linked, refreshYue2PresetsForJointCheckpoint, type Yue2LinkedPair } from './lyricStudioExport.js';
+import { getAllPresets } from '../../db/lireekDb.js';
 import { latestGenerationLyrics, PUSHED_PREVIEW_LYRICS } from './yue2JointTrainRunner.js';
 import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
 import type { TrainingDatasetRow } from './types.js';
@@ -492,6 +493,33 @@ async function queueOnWorker(w: WorkerInfo, state: DispatchState & { input: Disp
   state.batchId = active.id;
 }
 
+/** A pull taken before the rung pick brings the worker's provisional link
+ *  (the last rung); the pull after the pick brings the chosen rung into the
+ *  same run folder. Drop the old pair so the folder keeps only the linked
+ *  checkpoint, but only when the worker linked the new pair after this
+ *  machine linked the old one (a later local pick is never undone), the old
+ *  pair is inside the adapters root and in the new pair's own run folder,
+ *  and no link or album preset still names it. */
+function dropSupersededPull(root: string, old: Yue2LinkedPair | undefined, newAr: string, newAt: string): void {
+  if (!old?.arPath || !old.narPath || !(Date.parse(newAt) > Date.parse(old.at))) return;
+  const id = (p: string) => path.resolve(p).toLowerCase();
+  const oldDir = path.dirname(old.arPath);
+  if (id(path.dirname(old.narPath)) !== id(oldDir) || id(oldDir) === id(path.dirname(newAr))) return;
+  const runOf = (p: string) => path.relative(root, p).split(/[\\/]/)[0].toLowerCase();
+  if (!isInside(root, old.arPath) || !isInside(root, old.narPath) || !runOf(newAr) || runOf(old.arPath) !== runOf(newAr)) return;
+  const named = new Set([
+    ...Object.values(readYue2Linked()).flatMap(p => [p.arPath, p.narPath]),
+    ...getAllPresets().flatMap(p => [p.yue2_ar_adapter_path, p.yue2_nar_adapter_path]),
+  ].filter((p): p is string => typeof p === 'string' && !!p).map(id));
+  if (named.has(id(old.arPath)) || named.has(id(old.narPath))) return;
+  for (const f of [old.arPath, old.narPath]) fs.rmSync(f, { force: true });
+  // Empty checkpoint and segment folders go too; anything else stops it.
+  const runDir = id(path.join(root, runOf(newAr)));
+  for (let d = oldDir; id(d) !== runDir && isInside(root, d); d = path.dirname(d)) {
+    try { fs.rmdirSync(d); } catch { break; }
+  }
+}
+
 /** Fetch every linked pair whose dataset exists here and link it to this
  *  machine's presets. Files already here at the same size are not re-sent. */
 export async function pullLinked(w: WorkerInfo): Promise<Array<{ slug: string; status: 'fetched' | 'current' | 'no-dataset'; bytes: number }>> {
@@ -515,7 +543,11 @@ export async function pullLinked(w: WorkerInfo): Promise<Array<{ slug: string; s
       fs.renameSync(`${dest}.part`, dest);
       bytes += f.size;
     }
-    refreshYue2PresetsForJointCheckpoint(ds, local[0], local[1]);
+    const before = readYue2Linked()[ds.slug.toLowerCase()];
+    if (refreshYue2PresetsForJointCheckpoint(ds, local[0], local[1]).linked) {
+      try { dropSupersededPull(root, before, local[0], pair.at); }
+      catch (err: any) { console.warn(`[Training] ${w.name} pull ${ds.slug}: could not remove the superseded pair: ${err?.message || err}`); }
+    }
     bytes += await pullLinkedLogs(w, ds.slug, pair);
     out.push({ slug: pair.slug, status: bytes ? 'fetched' : 'current', bytes });
   }
