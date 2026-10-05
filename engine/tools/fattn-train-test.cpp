@@ -1734,7 +1734,8 @@ int main(int argc, char ** argv) {
     std::vector<int64_t> lm_S;
     std::string          lm_only;
     int         nth   = 0;
-    std::string want_backend = "cpu";
+    std::string want_backend     = "cpu";
+    bool        backend_explicit = false;   // true only if --backend was actually passed
     // DEFAULTS TO f32, and that is not a preference: the recorded regression
     // check is `fattn-train-test --backend cuda`, and a tf32 default would
     // silently change both the kernel and the bar for anyone re-running it.
@@ -1817,7 +1818,8 @@ int main(int argc, char ** argv) {
         } else if (a == "--threads" && i + 1 < argc) {
             nth = atoi(argv[++i]);
         } else if (a == "--backend" && i + 1 < argc) {
-            want_backend = argv[++i];
+            want_backend     = argv[++i];
+            backend_explicit = true;
             if (want_backend != "cpu" && want_backend != "cuda" && want_backend != "vulkan") {
                 fprintf(stderr, "[fattn-train-test] --backend takes cpu, cuda or vulkan\n");
                 return 2;
@@ -1866,15 +1868,36 @@ int main(int argc, char ** argv) {
     if (bench) {
         // --bench times the CUDA backend only, both arms — the question is
         // "fused vs manual on the GPU", not CPU-vs-CUDA (that is what
-        // --backend cuda without --bench already answers). --backend is
-        // ignored in this mode.
-        ggml_backend_load_all();
-        ggml_backend_t be_cuda = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_GPU, nullptr);
-        if (!be_cuda) {
-            fprintf(stderr, "[fattn-train-test] --bench requires a CUDA backend "
-                            "(is ggml-cuda.dll beside the exe?)\n");
+        // --backend cuda without --bench already answers), and its tf32 arm
+        // is a CUDA tensor-core comparison that means nothing on Vulkan.
+        // --backend cpu/cuda (default or explicit) both resolve to CUDA here;
+        // --backend vulkan is rejected rather than silently ignored — it used
+        // to fall through to ggml_backend_dev_by_type(GPU), which could hand
+        // back a Vulkan device under a "CUDA" label with no indication asked
+        // for.
+        if (backend_explicit && want_backend == "vulkan") {
+            fprintf(stderr, "[fattn-train-test] --bench only runs the CUDA comparison (its "
+                            "tf32 arm is a CUDA tensor-core question); drop --backend or pass "
+                            "--backend cuda\n");
             return 2;
         }
+        ggml_backend_load_all();
+        ggml_backend_dev_t dev_cuda = find_device_by_prefix("CUDA");
+        if (!dev_cuda) {
+            fprintf(stderr, "[fattn-train-test] --bench requires a CUDA backend "
+                            "(is ggml-cuda.dll beside the exe?). Loaded devices:");
+            list_devices(stderr);
+            fprintf(stderr, "\n");
+            return 2;
+        }
+        ggml_backend_t be_cuda = ggml_backend_dev_init(dev_cuda, nullptr);
+        if (!be_cuda) {
+            fprintf(stderr, "[fattn-train-test] found device %s but it failed to initialize\n",
+                    ggml_backend_dev_name(dev_cuda));
+            return 2;
+        }
+        fprintf(stderr, "[fattn-train-test] backend: %s (device %s)\n",
+                ggml_backend_name(be_cuda), ggml_backend_dev_name(dev_cuda));
         // Same resolved-kernel query the parity grid uses, so the bench's own
         // `prec` column reports what ran rather than what was requested.
         {

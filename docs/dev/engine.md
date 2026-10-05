@@ -49,6 +49,14 @@ All targets are defined in `engine/CMakeLists.txt`.
 | `yue2-probe` | `tools/yue2-probe.cpp` | YuE2 bring-up and parity CLI (`--info`, `--load`, `--tokenize`, `--ar-parity` and more) |
 | `sa3-ggml-test`, `fattn-train-test`, `moss-ggml-test`, `bs-roformer-test`, `mdx23c-test` | `tools/*-test.cpp` | Parity tests against reference outputs |
 
+`fattn-train-test --backend cpu\|cuda\|vulkan` (default `cpu`, both arms on CPU) resolves the
+requested GPU backend by registry device name, never by "first GPU device found" — with CUDA
+and Vulkan both loaded, `--backend cuda` cannot land on Vulkan or vice versa. A requested
+backend that is not loaded is a hard failure (prints the loaded device list), never a silent
+CPU fallback. `--prec tf32` stays CUDA-only; Vulkan runs f32 at the same 1e-4 tolerance as CPU.
+`--bench`/`--bench-lm`/`--bench-tr` always target CUDA specifically (the tf32 arm is a
+tensor-core question) and reject `--backend vulkan` rather than silently ignoring it.
+
 `tools/ace-server.cpp` is upstream's server, kept as a reference for syncs. It is
 not compiled. The shipped `ace-server` is built from `hot-step-server.cpp`.
 
