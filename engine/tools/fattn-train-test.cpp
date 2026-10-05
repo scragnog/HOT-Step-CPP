@@ -26,7 +26,7 @@
 // Masks come from dit_sa_mask / dit_ca_mask in train/dit-data.h — the very
 // functions the trainer ships — never hand-rolled here.
 //
-// Usage: fattn-train-test [--backend cpu|cuda] [--prec f32|tf32] [--extra]
+// Usage: fattn-train-test [--backend cpu|cuda|vulkan] [--prec f32|tf32] [--extra]
 //                         [--large] [--cheap] [--quick] [--fwd-only]
 //                         [--threads N] [--bench]
 //   --prec      f32 (default) runs v1's scalar kernels and gates at 1e-4; tf32
@@ -37,15 +37,21 @@
 //               they meant. --prec tf32 without --backend cuda is an error, not
 //               an ignore: the CPU impl ignores the flag by design, so it would
 //               print a tf32 header over a run that never touched a tensor core.
-//   --backend cuda  run arm B on the GPU backend; arm A (the reference chain)
-//                   stays on the CPU backend, so the comparison is genuinely
-//                   CPU-vs-CUDA. Whether the gradients are compared too is NOT
-//                   hardcoded: the tool probes ggml_backend_supports_op for
-//                   GGML_OP_FLASH_ATTN_TRAIN_BACK per case and drops to a
-//                   forward-only comparison when the backward has no kernel
-//                   there. In this mode every case also runs the flash arm
-//                   TWICE and requires O, LSE, dQ, dK and dV to be bitwise
-//                   identical.
+//   --backend   cpu (default) runs both arms on the CPU backend. cuda or
+//               vulkan run arm B on that GPU backend by its registry device
+//               name (ggml_backend_dev_by_type's "first GPU found" is NOT
+//               used, so a CUDA request can never silently land on Vulkan or
+//               vice versa); arm A (the reference chain) always stays on the
+//               CPU backend, so the comparison is genuinely CPU-vs-GPU. A
+//               requested GPU backend that is not loaded is a hard failure,
+//               never a silent fallback to CPU. Whether the gradients are
+//               compared too is NOT hardcoded: the tool probes
+//               ggml_backend_supports_op for GGML_OP_FLASH_ATTN_TRAIN_BACK per
+//               case and drops to a forward-only comparison when the backward
+//               has no kernel there. On either GPU backend every case also
+//               runs the flash arm TWICE and requires O, LSE, dQ, dK and dV to
+//               be bitwise identical. --prec tf32 is CUDA-only; Vulkan runs
+//               f32 only, gated at the same 1e-4 as CPU.
 //   --extra     append the cases the plan doc\'s gate-1 grid does not carry:
 //               S_kv != S (the cross-attention shape, spec 7.2), hand-built
 //               fully-masked query rows (spec 4.4 / 7.3.9), and the three
@@ -112,6 +118,7 @@
 
 #include "train/dit-data.h"  // dit_sa_mask, dit_ca_mask
 
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -1667,6 +1674,43 @@ static std::string cell(bool have, float x) {
     return std::string(b);
 }
 
+// Resolve a GPU backend by registry device name, never by "first device of
+// this type": ggml_backend_dev_by_type(GPU) returns whichever backend the
+// registry happens to list first, so with both CUDA and Vulkan loaded a run
+// asking for one could silently execute on the other (ggml upgrade plan
+// slice 2). Matched case-insensitively against the device name's prefix
+// (ggml's own naming: "CPU", "CUDA0", "CUDA1", ..., "Vulkan0", ...). No
+// fallback: the caller decides what a miss means.
+static ggml_backend_dev_t find_device_by_prefix(const char * prefix) {
+    const size_t n    = ggml_backend_dev_count();
+    const size_t plen = strlen(prefix);
+    for (size_t i = 0; i < n; i++) {
+        ggml_backend_dev_t d    = ggml_backend_dev_get(i);
+        const char *       name = ggml_backend_dev_name(d);
+        if (!name || strlen(name) < plen) {
+            continue;
+        }
+        bool match = true;
+        for (size_t j = 0; j < plen; j++) {
+            if (std::tolower((unsigned char) name[j]) != std::tolower((unsigned char) prefix[j])) {
+                match = false;
+                break;
+            }
+        }
+        if (match) {
+            return d;
+        }
+    }
+    return nullptr;
+}
+
+static void list_devices(FILE * f) {
+    const size_t n = ggml_backend_dev_count();
+    for (size_t i = 0; i < n; i++) {
+        fprintf(f, " %s", ggml_backend_dev_name(ggml_backend_dev_get(i)));
+    }
+}
+
 int main(int argc, char ** argv) {
     bool        cheap = false;
     bool        quick = false;
@@ -1774,8 +1818,8 @@ int main(int argc, char ** argv) {
             nth = atoi(argv[++i]);
         } else if (a == "--backend" && i + 1 < argc) {
             want_backend = argv[++i];
-            if (want_backend != "cpu" && want_backend != "cuda") {
-                fprintf(stderr, "[fattn-train-test] --backend takes cpu or cuda\n");
+            if (want_backend != "cpu" && want_backend != "cuda" && want_backend != "vulkan") {
+                fprintf(stderr, "[fattn-train-test] --backend takes cpu, cuda or vulkan\n");
                 return 2;
             }
         } else if (a == "--prec" && i + 1 < argc) {
@@ -1785,7 +1829,7 @@ int main(int argc, char ** argv) {
                 return 2;
             }
         } else {
-            fprintf(stderr, "usage: fattn-train-test [--backend cpu|cuda] [--prec f32|tf32] [--extra]"
+            fprintf(stderr, "usage: fattn-train-test [--backend cpu|cuda|vulkan] [--prec f32|tf32] [--extra]"
                             " [--large] [--cheap] [--quick] [--fwd-only] [--threads N] [--bench]\n"
                             "       [--bench-lm [--lm-S 1024,2113,3500] [--lm-small] [--lm-nh N]"
                             " [--lm-nkv N] [--lm-gq N] [--lm-layers N]\n"
@@ -1865,26 +1909,49 @@ int main(int argc, char ** argv) {
         return 2;
     }
 
-    // Arm B's backend. Arm A stays on `be` (CPU) whatever this is.
-    ggml_backend_t be_flash = be;
-    if (want_backend == "cuda") {
-        be_flash = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_GPU, nullptr);
+    // Arm B's backend. Arm A stays on `be` (CPU) whatever this is. Resolution
+    // is BY NAME (find_device_by_prefix), never "first GPU device found" —
+    // see that function's comment. No fallback: a requested backend that is
+    // not present is a hard failure, not a quiet downgrade to CPU.
+    const bool          is_cuda   = (want_backend == "cuda");
+    const bool          is_vulkan = (want_backend == "vulkan");
+    ggml_backend_dev_t  dev_flash = dev;
+    ggml_backend_t      be_flash  = be;
+    if (is_cuda || is_vulkan) {
+        const char * prefix = is_cuda ? "CUDA" : "Vulkan";
+        dev_flash            = find_device_by_prefix(prefix);
+        if (!dev_flash) {
+            fprintf(stderr, "[fattn-train-test] no %s backend available (requested --backend %s)."
+                            " Loaded devices:", prefix, want_backend.c_str());
+            list_devices(stderr);
+            fprintf(stderr, "\n");
+            ggml_backend_free(be);
+            return 2;
+        }
+        be_flash = ggml_backend_dev_init(dev_flash, nullptr);
         if (!be_flash) {
-            fprintf(stderr, "[fattn-train-test] no GPU backend available "
-                            "(is ggml-cuda.dll beside the exe?)\n");
+            fprintf(stderr, "[fattn-train-test] found device %s but it failed to initialize\n",
+                    ggml_backend_dev_name(dev_flash));
             ggml_backend_free(be);
             return 2;
         }
     }
-    const bool cuda_mode = (be_flash != be);
+    // gpu_mode covers CUDA and Vulkan alike: the determinism double-run check
+    // further down is a property of running arm B off the CPU, not of CUDA
+    // specifically. is_cuda stays its own flag for the CUDA-only precision
+    // path right below.
+    const bool gpu_mode = (be_flash != be);
+    fprintf(stderr, "[fattn-train-test] backend: %s (device %s)\n",
+            ggml_backend_name(be_flash), ggml_backend_dev_name(dev_flash));
 
-    // --prec tf32 on a non-CUDA flash arm is a HARD ERROR, never an ignore:
-    // ignoring it prints a tf32 header and a green table having never touched a
-    // tensor core, which is a non-run that reports as a pass (design 5.3).
+    // --prec tf32 on anything but CUDA is a HARD ERROR, never an ignore:
+    // ignoring it prints a tf32 header and a green table having never touched
+    // a tensor core, which is a non-run that reports as a pass (design 5.3).
+    // Vulkan has no TF32 kernel here any more than CPU does.
     if (want_prec == "tf32") {
-        if (!cuda_mode) {
+        if (!is_cuda) {
             fprintf(stderr, "[fattn-train-test] --prec tf32 needs --backend cuda "
-                            "(the CPU impl ignores the flag and always computes in f32)\n");
+                            "(the CPU and Vulkan paths ignore the flag and always compute in f32)\n");
             if (be_flash != be) {
                 ggml_backend_free(be_flash);
             }
@@ -1897,8 +1964,9 @@ int main(int argc, char ** argv) {
     }
 
     // The resolved-kernel query lives in the CUDA backend, which is a loadable
-    // module -- reached through the registry, never linked.
-    if (cuda_mode) {
+    // module -- reached through the registry, never linked. CUDA-only: Vulkan
+    // exports no equivalent, and last_prec() already prints "n/a" without one.
+    if (is_cuda) {
         ggml_backend_dev_t fdev = ggml_backend_get_device(be_flash);
         ggml_backend_reg_t freg = fdev ? ggml_backend_dev_backend_reg(fdev) : nullptr;
         if (freg) {
@@ -2100,7 +2168,7 @@ int main(int argc, char ** argv) {
     }
     printf("Nh=%lld D=%lld   prec=%s   tol=%.0e%s   cases=%zu   determinism check: %s\n",
            (long long) Nh, (long long) D, want_prec.c_str(), (double) PASS_REL,
-           PASS_FLOOR > 0.0f ? "  floor=1e-05" : "", cases.size(), yn(cuda_mode));
+           PASS_FLOOR > 0.0f ? "  floor=1e-05" : "", cases.size(), yn(gpu_mode));
     if (want_prec == "tf32") {
         printf("the tf32 bar is the CUDA exact path's OWN measured rounding: its attention "
                "mul_mats have always\nrun on cuBLAS TF32 (3.0e-3 on the SF1 selftest "
@@ -2129,7 +2197,7 @@ int main(int argc, char ** argv) {
     Result large_res;
     for (size_t i = 0; i < cases.size(); i++) {
         const Case & c = cases[i];
-        const Result r = run_case(c, be, be_flash, cuda_mode);
+        const Result r = run_case(c, be, be_flash, gpu_mode);
         if (!r.ok) {
             failed++;
         }
@@ -2180,7 +2248,7 @@ int main(int argc, char ** argv) {
         }
     }
 
-    if (cuda_mode) {
+    if (is_cuda) {
         // The two labels the DISPATCH produced, not the flag it was handed.
         // They can differ: the backward has one constraint the forward does not
         // (its dK/dV kernel stages dO with 8-byte loads), and a forward that
