@@ -100,10 +100,10 @@ for /f "tokens=*" %%h in ('git rev-parse HEAD:engine/ggml 2^>nul') do set "OLD_G
 
 REM Check for uncommitted changes to TRACKED files only.
 REM
-REM   --ignore-submodules=dirty: engine/ggml is a submodule that every build
-REM   modifies on purpose — CMake applies engine/patches/*.patch into it at
-REM   configure time. Without this flag git reports " m engine/ggml" on every
-REM   source builder's machine and the update refuses to run.
+REM   --ignore-submodules=dirty: engine/ggml is checked on its own just below.
+REM   An install from before the HOT-ggml fork carries the old patch overlay as
+REM   uncommitted edits there, and without this flag git reports
+REM   " m engine/ggml" and the update refuses to run before that check.
 REM
 REM   Untracked files never count. adapters/, models/, data/ and anything else
 REM   the app writes are not "changes" and this script never deletes them.
@@ -129,7 +129,8 @@ if "%DIFF_ERR%%STAGED_ERR%" neq "00" (
         echo   Resetting tracked files...
         REM reset --hard restores tracked files only. Never add "git clean" here:
         REM it deletes untracked files, and that once wiped a user's adapters/.
-        git reset --hard
+        REM submodule.recurse=false: engine/ggml is checked on its own below.
+        git -c submodule.recurse=false reset --hard
     ) else (
         echo.
         echo   ERROR: You have uncommitted changes to tracked files:
@@ -144,6 +145,22 @@ if "%DIFF_ERR%%STAGED_ERR%" neq "00" (
     )
 ) else (
     echo   Working tree is clean.
+)
+
+REM engine/ggml must be clean, or exactly the pre-fork patch overlay (base
+REM c044c6f0, all 34 files at their known content). engine\ggml-pre-fork-overlay.ps1
+REM decides: exit 0 clean, 2 exact overlay (restored after the pull), 1 anything
+REM else, which stops here with every file left in place.
+set "GGML_RESTORE_OVERLAY=0"
+if exist "engine\ggml-pre-fork-overlay.ps1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "engine\ggml-pre-fork-overlay.ps1" -Mode Check
+    set "GGML_STATE=!errorlevel!"
+    if "!GGML_STATE!"=="2" (
+        echo   engine/ggml carries the exact pre-fork patch overlay; it will be restored after the pull.
+        set "GGML_RESTORE_OVERLAY=1"
+    ) else if "!GGML_STATE!" neq "0" (
+        goto :fail
+    )
 )
 
 REM Shut down running server (if any) to avoid file locks
@@ -184,7 +201,10 @@ REM ── Phase 2: Code sync ────────────────�
 echo.
 echo [3/5] Pulling latest code...
 
-git pull --ff-only origin master
+REM submodule.recurse=false: with recursion on, the pull would check out the
+REM new engine/ggml pin itself, before the overlay restore and URL sync below,
+REM and fail on the pre-fork overlay or the stale ggml-org URL.
+git -c submodule.recurse=false pull --ff-only origin master
 if errorlevel 1 (
     echo.
     echo   ERROR: git pull --ff-only failed.
@@ -196,47 +216,29 @@ if errorlevel 1 (
     goto :fail
 )
 
-REM engine/ggml carries HOT-Step's patches as uncommitted edits (plus two new
-REM files from flash-attn-train.patch). If the pull moved the submodule
-REM pointer, git checkout would refuse to switch over those edits, so restore
-REM the pristine tree first. This runs INSIDE engine\ggml only — it cannot
-REM touch anything else in the repo. The patches are reapplied just below.
-for /f "tokens=*" %%h in ('git rev-parse HEAD:engine/ggml 2^>nul') do set "NEW_GGML=%%h"
-if "%OLD_GGML%" neq "%NEW_GGML%" (
-    if exist "engine\ggml\.git" (
-        echo   ggml submodule moved — restoring its pristine tree before checkout...
-        git -C engine\ggml checkout -- .
-        git -C engine\ggml clean -fd
-    )
+REM engine/ggml now follows HOT-ggml (docs/dev/ggml-fork.md), which carries
+REM HOT-Step's ggml changes as commits. Restore exactly the pre-fork overlay
+REM files when pre-flight recognised them; nothing else in engine/ggml is touched.
+if "%GGML_RESTORE_OVERLAY%"=="1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "engine\ggml-pre-fork-overlay.ps1" -Mode Restore
+    if errorlevel 1 goto :fail
 )
 
+REM The submodule URL is cached in .git/config at first init, so an install from
+REM before the fork would keep fetching stock ggml-org and never find the pinned
+REM commit. sync copies the URL from .gitmodules first. Both must succeed;
+REM verify-hooks.ps1 (Hook 17) then requires engine/ggml clean at the pin
+REM before anything is built.
+git submodule sync --recursive
+if errorlevel 1 (
+    echo   ERROR: git submodule sync failed. Nothing was built.
+    goto :fail
+)
 git submodule update --init --recursive
 if errorlevel 1 (
-    echo   WARNING: Submodule update had issues. Build may fail.
-)
-
-REM Reapply the ggml patches (same idempotent loop CMake runs at configure
-REM time, but configure does not always rerun after a pull). A patch that
-REM reverses cleanly is already in and is skipped.
-set "PATCHES_APPLIED=0"
-set "PATCHES_FAILED=0"
-for %%p in ("engine\patches\*.patch") do (
-    git apply --reverse --check --ignore-whitespace "%%~p" >nul 2>&1
-    if errorlevel 1 (
-        git apply --ignore-whitespace "%%~p" >nul 2>&1
-        if errorlevel 1 (
-            echo   WARNING: engine\patches\%%~nxp neither applies nor is already present.
-            set /A PATCHES_FAILED+=1
-        ) else (
-            echo   Applied engine\patches\%%~nxp
-            set /A PATCHES_APPLIED+=1
-        )
-    )
-)
-if "!PATCHES_FAILED!" neq "0" (
-    echo   See engine\patches\README.md — the engine build may fail without them.
-) else if "!PATCHES_APPLIED!"=="0" (
-    echo   ggml patches already in place.
+    echo   ERROR: git submodule update failed. Nothing was built.
+    echo   Check your connection, then rerun update.bat
+    goto :fail
 )
 
 REM Show what changed
@@ -266,7 +268,8 @@ if exist "engine\verify-hooks.ps1" (
         goto :fail
     )
 ) else (
-    echo   verify-hooks.ps1 not found — skipping hook check.
+    echo   ERROR: engine\verify-hooks.ps1 not found. Nothing was built.
+    goto :fail
 )
 
 REM ── Phase 4: Build ──────────────────────────────────────────────────
