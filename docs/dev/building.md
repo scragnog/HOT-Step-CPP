@@ -210,7 +210,7 @@ respawn and file-lock loop.
   three steps by hand:
 
   ```powershell
-  try { Invoke-RestMethod -Method Post -Uri http://localhost:3000/api/shutdown -TimeoutSec 10 | Out-Null } catch {}   # :3001 only if Vite is already down
+  try { Invoke-RestMethod -Method Post -Uri http://localhost:3000/api/shutdown -TimeoutSec 10 | Out-Null } catch {}
   $n = 0; while ((Get-Process ace-server -ErrorAction SilentlyContinue) -and $n -lt 20) { Start-Sleep 1; $n++ }
   & cmd.exe /c "D:\path\to\HOT-Step-CPP\engine\build.cmd"
   ```

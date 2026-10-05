@@ -127,8 +127,7 @@ Run the three phases yourself instead. This is the same sequence the script perf
 it is safe for the reason Procedure 1 explains — Node initiates the kill, so no respawn:
 
 ```powershell
-# 1. graceful shutdown (Node kills ace-server, Vite, then itself).
-#    Use the dev address; if Vite is already down, fall back to the raw server on :3001.
+# 1. graceful shutdown (Node kills ace-server, Vite, then itself)
 try { Invoke-RestMethod -Method Post -Uri "http://localhost:3000/api/shutdown" -TimeoutSec 10 | Out-Null } catch {}
 
 # 2. wait for the binary lock to actually clear — never skip this, it is what

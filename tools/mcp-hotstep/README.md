@@ -38,9 +38,11 @@ Registered in the repo root's `.mcp.json` as `hotstep`. Env:
 |---|---|---|
 | `HOTSTEP_URL` | `http://127.0.0.1:3001` | Base URL of the running HOT-Step server. |
 
-After editing this package's source, **reconnect the `hotstep` MCP server in
-your client** — same rule as any MCP server: a connected session keeps its
-old tool set until reconnected.
+Agents run the app with `dev.bat` and work through the Vite dev server, not the
+raw Node port: override `HOTSTEP_URL` to `http://127.0.0.1:3000` in `.mcp.json`'s
+`hotstep` env block, then reconnect the `hotstep` MCP server in your client — same
+rule as any MCP server: a connected session keeps its old tool set until
+reconnected. (That reconnect is also required after editing this package's source.)
 
 ## Scripts
 

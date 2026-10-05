@@ -6,7 +6,7 @@ it makes is staged for the ear test at the end.
 
 ```
 node tools/release-gate/run.mjs --zip release/out/HOT-Step-CPP-vX.Y.Z-win-x64-cuda.zip   # the real pre-tag run
-node tools/release-gate/run.mjs                                                             # attach to the dev app on :3001
+node tools/release-gate/run.mjs --url http://localhost:3000                                 # attach to the dev app agents use (default --url is :3001)
 node tools/release-gate/run.mjs --tiers 0-3                                                 # the half-hour subset
 node tools/release-gate/run.mjs --update-goldens --tiers 7                                  # rewrite the tier 7 references
 ```
@@ -20,7 +20,7 @@ and one TAP file per tier sit beside it, and the renders land in
 
 | Flag | App under test |
 |---|---|
-| none | Attaches to `--url` (default `http://localhost:3001`). Refuses to start if a generation or training job is running. Preprocess and training will stop and restart the engine, as they do from the UI. |
+| none | Attaches to `--url` (default `http://localhost:3001`). Agents pass `--url http://localhost:3000` to attach through the Vite dev server instead of the raw Node port. Refuses to start if a generation or training job is running. Preprocess and training will stop and restart the engine, as they do from the UI. |
 | `--zip <file>` or `--dir <folder>` | Extracts or uses a release build, boots its bundled Node on `--port` 3199 with the engine on `--engine-port` 18085, and points it at this checkout's `models/` and `adapters/` (`--models`, `--adapters` to change). The data directory is the extracted folder's own, so it starts as a fresh install. Shut down at the end unless `--keep`. |
 | `--dev` | Spawns `tsx src/index.ts` from this tree on :3199 with an empty data directory under the run folder. |
 
