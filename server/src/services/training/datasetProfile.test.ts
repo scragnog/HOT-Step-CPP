@@ -90,6 +90,23 @@ test('noteYue2TrainLog shallow-merges: a patch without keptStep keeps the one al
   }
 });
 
+test('noteYue2TrainLog writes a pulled run (remote:<worker>:<id>) under a colon-free name', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-note-remote-'));
+  try {
+    const script = [
+      "import fs from 'node:fs';",
+      "import path from 'node:path';",
+      "import { noteYue2TrainLog, trainLogArchiveDir } from './src/services/training/datasetProfile.js';",
+      "noteYue2TrainLog('album', 'remote:Box:job1', { keptStep: 180 });",
+      "const saved = JSON.parse(fs.readFileSync(path.join(trainLogArchiveDir('album'), 'remote_Box_job1.json'), 'utf8'));",
+      "if (saved.keptStep !== 180 || saved.jobId !== 'remote:Box:job1') throw new Error('bad note: ' + JSON.stringify(saved));",
+    ].join('');
+    runInIsolatedTrainingDir(root, script);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('archiveYue2TrainLogs propagates a non-ENOENT segment-directory enumeration failure instead of treating it as no logs', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-archive-enoent-'));
   try {

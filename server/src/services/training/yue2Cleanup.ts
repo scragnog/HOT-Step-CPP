@@ -13,7 +13,7 @@ import { rebaseYue2JointLinks } from './lyricStudioExport.js';
 import { getDataset } from './datasetsRepo.js';
 import { config } from '../../config.js';
 import { listYue2JointPreviews, pruneYue2JointPreviews } from './yue2JointPreview.js';
-import { archiveYue2TrainLogs, noteYue2TrainLog, trainLogArchiveDir } from './datasetProfile.js';
+import { archiveYue2TrainLogs, noteYue2TrainLog, trainLogArchiveDir, trainLogName } from './datasetProfile.js';
 
 export interface Yue2CleanupItem { count: number; bytes: number; detail?: string[] }
 export interface Yue2CleanupPlan {
@@ -160,7 +160,16 @@ export function settleYue2RemoteRun(jobId: string): Promise<string | null> {
     const target = plannedYue2RemoteMove(run);
     if (!target) return null;
     const from = path.resolve(run.output);
-    moveYue2AitkRun(run.jobId, target);
+    // Cleanup has just deleted most of this folder; Windows refuses the rename
+    // (EPERM/EBUSY) while a scanner or a pending delete still holds a handle
+    // inside it, for a second or so. The failed rename has changed nothing.
+    for (let wait = 250; ; wait *= 2) {
+      try { moveYue2AitkRun(run.jobId, target); break; }
+      catch (err: any) {
+        if (!['EPERM', 'EBUSY', 'EACCES'].includes(err?.code) || wait > 8000) throw err;
+        await new Promise(r => setTimeout(r, wait));
+      }
+    }
     try { rebaseYue2JointLinks(from, target); }
     catch (err) {
       try { moveYue2AitkRun(run.jobId, from); }
@@ -169,7 +178,7 @@ export function settleYue2RemoteRun(jobId: string): Promise<string | null> {
     }
     // Informational only: the archived loss log notes where its run lives.
     try {
-      if (fs.existsSync(path.join(trainLogArchiveDir(run.datasetSlug), `${run.jobId}.json`))) noteYue2TrainLog(run.datasetSlug, run.jobId, { output: target });
+      if (fs.existsSync(path.join(trainLogArchiveDir(run.datasetSlug), `${trainLogName(run.jobId)}.json`))) noteYue2TrainLog(run.datasetSlug, run.jobId, { output: target });
     } catch (err: any) { console.warn(`[Training] YuE2: could not note the new folder of ${run.jobId}: ${err?.message || err}`); }
     return target;
   });

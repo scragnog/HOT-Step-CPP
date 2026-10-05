@@ -161,6 +161,9 @@ export function snapshotYue2Sheets(slug: string): void {
 }
 
 export const trainLogArchiveDir = (slug: string) => path.join(datasetDir(slug), 'train-logs');
+/** A jobId as a file name: a pulled run's `remote:<worker>:<id>` has colons,
+ *  which Windows reads as an alternate data stream and refuses. */
+export const trainLogName = (jobId: string) => jobId.replace(/:/g, '_');
 
 /** A run's train.jsonl files as they sit under its output folder: one per
  *  segment (`segments/<seg>/train.jsonl`), or a single root log
@@ -191,7 +194,7 @@ export function archiveYue2TrainLogs(slug: string, jobId: string, output: string
   fs.mkdirSync(trainLogArchiveDir(slug), { recursive: true });
   const saved: string[] = [];
   for (const { seg, file } of logs) {
-    const dest = path.join(trainLogArchiveDir(slug), `${jobId}-${seg}.jsonl`);
+    const dest = path.join(trainLogArchiveDir(slug), `${trainLogName(jobId)}-${seg}.jsonl`);
     const tmp = `${dest}.${process.pid}.tmp`;
     fs.copyFileSync(file, tmp);
     fs.renameSync(tmp, dest);
@@ -217,7 +220,7 @@ export interface Yue2TrainLogNote {
  *  left as they were. */
 export function noteYue2TrainLog(slug: string, jobId: string, patch: Yue2TrainLogNote): void {
   if (!slug || !jobId) return;
-  const file = path.join(trainLogArchiveDir(slug), `${jobId}.json`);
+  const file = path.join(trainLogArchiveDir(slug), `${trainLogName(jobId)}.json`);
   let existing: Record<string, unknown> = {};
   // Missing sidecar (first note for this run) starts empty; any other read or
   // parse failure must not silently discard whatever was already noted.
