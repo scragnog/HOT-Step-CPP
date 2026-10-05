@@ -226,17 +226,14 @@ if [ -e engine/ggml/.git ]; then
                 *) GGML_PROBLEMS="$GGML_PROBLEMS    $line"$'\n' ;;
             esac
         done <<< "$GGML_DIRTY"
-        # 2. The base must be the old pin and the URL the pre-fork one.
+        # 2. The base must be the old pin. The URL is not checked: after a manual
+        #    git pull it is already the fork's, and base + content is the proof.
         if ! GGML_BASE_NOW=$(git -C engine/ggml rev-parse HEAD); then
             echo -e "  ${RED}ERROR: cannot read engine/ggml HEAD.${NC}"
             exit 1
         fi
         if [ "$GGML_BASE_NOW" != "$GGML_OVERLAY_BASE" ]; then
             GGML_PROBLEMS="$GGML_PROBLEMS    base is $GGML_BASE_NOW, not $GGML_OVERLAY_BASE"$'\n'
-        fi
-        OLD_GGML_URL=$(git config -f .gitmodules --get submodule.engine/ggml.url 2>/dev/null || echo "")
-        if [[ "$OLD_GGML_URL" != *"ggml-org/ggml"* ]]; then
-            GGML_PROBLEMS="$GGML_PROBLEMS    submodule URL is $OLD_GGML_URL, not the pre-fork ggml-org one"$'\n'
         fi
         # 3. Every overlay file must be present with exactly the overlay's content.
         while read -r want path; do
