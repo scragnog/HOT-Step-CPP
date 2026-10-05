@@ -142,7 +142,7 @@ if(NOT DEFINED GGML_CUDA_GRAPHS)
     set(GGML_CUDA_GRAPHS_DEFAULT ON)
 endif()
 # ── HOT-Step's ggml fork ─────────────────────────────────────────────────────
-# engine/ggml is pinned to HOT-ggml's hot-step branch, which carries the ggml
+# engine/ggml is pinned to HOT-ggml's hot-step-neutral branch, which carries the ggml
 # changes the engine needs (training ops, BF16 out_prod, quant copies ...) as
 # commits; see docs/dev/ggml-fork.md. A plain ggml-org checkout lacks them and
 # fails much later, at ace-train's link step, so refuse it here. The usual

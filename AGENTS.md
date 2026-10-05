@@ -115,7 +115,7 @@ The C++ engine is a patched fork of acestep.cpp. Three upstream files carry HOT-
 
 After any sync: run `engine/verify-hooks.ps1`. `build.cmd` also runs it before every compile and stops the build if a hook or a HOT-ggml change is missing, or `engine/ggml` is dirty or off its pinned commit — a missing op costs ten seconds to spot there and twenty minutes of CUDA compile to spot the other way.
 
-**`engine/ggml` is the HOT-ggml fork, not stock ggml.** HOT-Step's ggml changes (training ops, BF16/quant copies, F16 accumulation, YuE2 ops) are commits on HOT-ggml's `hot-step` branch, and the submodule is pinned to one of them. Never edit `engine/ggml` in place: commit to the fork and move the gitlink ([docs/dev/ggml-fork.md](docs/dev/ggml-fork.md)). A checkout from before the fork caches the old ggml-org URL, so `git submodule update` cannot find the pinned commit until `git submodule sync -- engine/ggml` has run; CMake and `verify-hooks.ps1` both stop with that fix.
+**`engine/ggml` is the HOT-ggml fork, not stock ggml.** HOT-Step's ggml changes (training ops, BF16/quant copies, F16 accumulation, YuE2 ops) are commits on HOT-ggml's `hot-step-neutral` branch, and the submodule is pinned to one of them. Never edit `engine/ggml` in place: commit to the fork and move the gitlink ([docs/dev/ggml-fork.md](docs/dev/ggml-fork.md)). A checkout from before the fork caches the old ggml-org URL, so `git submodule update` cannot find the pinned commit until `git submodule sync -- engine/ggml` has run; CMake and `verify-hooks.ps1` both stop with that fix.
 
 ## UI / browser verification
 

@@ -160,7 +160,7 @@ if ($content -match 'hotstep_sampler_linked_') {
 }
 
 # ── Hooks 7-16: engine/ggml must be HOT-ggml with its HOT-Step changes ──────
-#    engine/ggml is pinned to HOT-ggml's hot-step branch, which carries these
+#    engine/ggml is pinned to HOT-ggml's hot-step-neutral branch, which carries these
 #    changes as commits (docs/dev/ggml-fork.md). Each hook greps for the
 #    capability itself, so a stock ggml-org checkout (usually a submodule URL
 #    cached from before the fork) fails here in seconds instead of twenty
@@ -277,7 +277,7 @@ if (-not (Test-Path (Join-Path $repoRoot ".git"))) {
     }
     if ($hook17) {
         Write-Host "  [FAIL] $hook17 (Hook 17)" -ForegroundColor Red
-        Write-Host "         ggml changes belong on HOT-ggml's hot-step branch (docs/dev/ggml-fork.md)." -ForegroundColor Yellow
+        Write-Host "         ggml changes belong on HOT-ggml's hot-step-neutral branch (docs/dev/ggml-fork.md)." -ForegroundColor Yellow
         Write-Host "         $ggmlFix" -ForegroundColor Yellow
         $errors++
     } else {

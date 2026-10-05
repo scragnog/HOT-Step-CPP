@@ -30,7 +30,7 @@ The full workflow doc lives at `docs/plans/upstream-sync-workflow.md`, which is 
 ## ggml is not part of this sync
 
 acestep.cpp pins its own ggml (ServeurpersoCom/ggml). HOT-Step does not follow that pin:
-`engine/ggml` is pinned to HOT-ggml's `hot-step` branch, which is ggml-org master plus
+`engine/ggml` is pinned to HOT-ggml's `hot-step-neutral` branch, which is ggml-org master plus
 HOT-Step's ggml changes as commits ([docs/dev/ggml-fork.md](../../../docs/dev/ggml-fork.md)).
 Copying acestep.cpp files never touches `engine/ggml`. If a synced file needs a newer ggml
 op or fix, land it on HOT-ggml first (cherry-pick from ServeurpersoCom/ggml or ggml-org),

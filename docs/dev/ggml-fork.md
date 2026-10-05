@@ -1,6 +1,6 @@
 # The HOT-ggml fork
 
-`engine/ggml` is a submodule pinned to the `hot-step` branch of **HOT-ggml**, a fork of
+`engine/ggml` is a submodule pinned to the `hot-step-neutral` branch of **HOT-ggml**, a fork of
 [ggml-org/ggml](https://github.com/ggml-org/ggml). The branch is upstream master plus
 HOT-Step's ggml changes, one commit each, with the rationale in every commit message. A
 normal checkout and build leave `engine/ggml` clean; there is no patch step. Until
@@ -32,10 +32,10 @@ and at the pinned commit.
 
 ## Changing ggml
 
-Make the change on HOT-ggml's `hot-step` branch as its own commit, with the rationale in the
+Make the change on HOT-ggml's `hot-step-neutral` branch as its own commit, with the rationale in the
 message, then move the gitlink in this repo. Never leave edits in `engine/ggml`: they are not
 what CI or users build, and the next submodule update discards them. To take a newer ggml-org
-master, rebase or replay `hot-step` onto it, rebuild, and rerun the parity checks the
+master, rebase or replay `hot-step-neutral` onto it, rebuild, and rerun the parity checks the
 original changes were measured with (below).
 
 If `engine/ggml` is a stock ggml-org checkout, the submodule URL is cached from before the

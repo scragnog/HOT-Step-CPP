@@ -433,7 +433,7 @@ behind them, are in [training-internals.md](training-internals.md).
 
 ## The ggml fork
 
-`engine/ggml` is a submodule pinned to the `hot-step` branch of HOT-ggml, a fork of
+`engine/ggml` is a submodule pinned to the `hot-step-neutral` branch of HOT-ggml, a fork of
 ggml-org/ggml. Every HOT-Step change to ggml is a commit on that branch, so a checkout and
 build leave `engine/ggml` clean and nothing is applied at configure time.
 

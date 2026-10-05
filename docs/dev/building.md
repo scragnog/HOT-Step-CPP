@@ -240,7 +240,7 @@ from `engine/plugins/` and the repo-root `plugins/` at engine start. See
 
 ## The ggml fork
 
-`engine/ggml` is a git submodule pinned to the `hot-step` branch of HOT-ggml, a fork of
+`engine/ggml` is a git submodule pinned to the `hot-step-neutral` branch of HOT-ggml, a fork of
 ggml-org/ggml that carries HOT-Step's changes as commits (training ops, BF16 and quant
 copies, F32 accumulation for F16 GEMMs, the fused flash-attention training ops, YuE2 ops and
 others). [ggml-fork.md](ggml-fork.md) lists each one and explains why it exists.
