@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { PROJECT_ROOT } from '../../config.js';
-import { changedSteps, currentCommit, getUpdate, ggmlPatches, ggmlPointerChanged, runUpdatePlan, startUpdate } from './workerUpdate.js';
+import { changedSteps, currentCommit, getUpdate, ggmlPointerChanged, runUpdatePlan, startUpdate, updateGgml } from './workerUpdate.js';
 import { workerStatus } from './trainingWorkers.js';
 
 const git = (...args: string[]) => execFileSync('git', args, { cwd: PROJECT_ROOT, encoding: 'utf8' }).trim();
@@ -78,12 +78,97 @@ test('ggml pointer change recovers after reset; hook failure stops before engine
   assert.deepEqual(failed, ['idle', 'reset', 'ggml recovery']);
 });
 
-test('ggml recovery selects every patch in name order', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hotstep-patches-'));
+function forkFixture(missingObject = false) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hotstep-fork-update-'));
+  const source = path.join(root, 'source');
+  const fork = path.join(root, 'fork');
+  const worker = path.join(root, 'worker');
+  const run = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' }).trim();
+  const commit = (cwd: string) => run(cwd, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture');
+  fs.mkdirSync(source); fs.mkdirSync(worker);
+  run(source, 'init');
+  fs.writeFileSync(path.join(source, 'tracked.txt'), 'original');
+  run(source, 'add', 'tracked.txt'); commit(source);
+  run(root, 'clone', source, fork);
+  run(worker, 'init');
+  run(worker, '-c', 'protocol.file.allow=always', 'submodule', 'add', source, 'engine/ggml');
+  commit(worker);
+  const oldPointer = run(worker, 'rev-parse', 'HEAD:engine/ggml');
+  const kernelFiles = [
+    'src/ggml-cuda/convrot8.cu', 'src/ggml-cuda/convrot8.cuh',
+    'src/ggml-cuda/fattn-train.cu', 'src/ggml-cuda/fattn-train.cuh',
+    'src/ggml-vulkan/vulkan-shaders/fa_train_test.comp',
+  ];
+  for (const file of kernelFiles) {
+    const full = path.join(fork, ...file.split('/'));
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, `committed ${file}`);
+  }
+  run(fork, 'add', '.'); commit(fork);
+  const forkPointer = run(fork, 'rev-parse', 'HEAD');
+  run(worker, 'config', '-f', '.gitmodules', 'submodule.engine/ggml.url', fork.replaceAll('\\', '/'));
+  run(worker, 'add', '.gitmodules');
+  run(worker, 'update-index', '--add', '--cacheinfo', `160000,${missingObject ? 'a'.repeat(40) : forkPointer},engine/ggml`);
+  commit(worker);
+  return { root, worker, source, fork, oldPointer, forkPointer, kernelFiles, run };
+}
+
+test('pointer-changing fork update syncs the URL and retains committed kernels from a dirty submodule', async () => {
+  const fixture = forkFixture();
+  const { root, worker, source, fork, oldPointer, forkPointer, kernelFiles, run } = fixture;
+  const previousProtocol = process.env.GIT_ALLOW_PROTOCOL;
+  process.env.GIT_ALLOW_PROTOCOL = 'file';
   try {
-    for (const name of ['z.patch', 'README.md', 'a.patch', 'middle.patch']) fs.writeFileSync(path.join(directory, name), '');
-    assert.deepEqual(ggmlPatches(directory), ['a.patch', 'middle.patch', 'z.patch']);
-  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+    assert.equal(ggmlPointerChanged(`${run(worker, 'rev-parse', 'HEAD^')}`, `${run(worker, 'rev-parse', 'HEAD')}`, rev => run(worker, 'rev-parse', rev)), true);
+    assert.equal(run(path.join(worker, 'engine/ggml'), 'rev-parse', 'HEAD'), oldPointer);
+    assert.equal(run(worker, 'config', '--get', 'submodule.engine/ggml.url').replaceAll('\\', '/'), source.replaceAll('\\', '/'));
+    fs.writeFileSync(path.join(worker, 'engine/ggml/tracked.txt'), 'dirty worker edit');
+    const events: string[] = [];
+    try {
+      await updateGgml(worker, line => events.push(line), async () => { events.push('hooks'); });
+    } catch (error) {
+      assert.fail(`${error}; git output: ${events.join(' | ')}`);
+    }
+    assert.equal(run(worker, 'config', '--get', 'submodule.engine/ggml.url').replaceAll('\\', '/'), fork.replaceAll('\\', '/'));
+    assert.equal(run(path.join(worker, 'engine/ggml'), 'rev-parse', 'HEAD'), forkPointer);
+    assert.equal(run(path.join(worker, 'engine/ggml'), 'status', '--porcelain'), '');
+    assert.equal(fs.readFileSync(path.join(worker, 'engine/ggml/tracked.txt'), 'utf8'), 'original');
+    for (const file of kernelFiles) assert.equal(fs.readFileSync(path.join(worker, 'engine/ggml', ...file.split('/')), 'utf8'), `committed ${file}`);
+    assert.equal(events.at(-1), 'hooks');
+  } finally {
+    if (previousProtocol === undefined) delete process.env.GIT_ALLOW_PROTOCOL;
+    else process.env.GIT_ALLOW_PROTOCOL = previousProtocol;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('missing fork object fails before hook verification', async () => {
+  const { root, worker } = forkFixture(true);
+  const previousProtocol = process.env.GIT_ALLOW_PROTOCOL;
+  process.env.GIT_ALLOW_PROTOCOL = 'file';
+  try {
+    let verified = false;
+    await assert.rejects(updateGgml(worker, () => {}, async () => { verified = true; }), /git exited/);
+    assert.equal(verified, false);
+  } finally {
+    if (previousProtocol === undefined) delete process.env.GIT_ALLOW_PROTOCOL;
+    else process.env.GIT_ALLOW_PROTOCOL = previousProtocol;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('hook failure after a fork checkout stops the update', async () => {
+  const { root, worker } = forkFixture();
+  const previousProtocol = process.env.GIT_ALLOW_PROTOCOL;
+  process.env.GIT_ALLOW_PROTOCOL = 'file';
+  try {
+    fs.writeFileSync(path.join(worker, 'engine/verify-hooks.ps1'), "Write-Output '[FAIL] fixture hook'\n");
+    await assert.rejects(updateGgml(worker, () => {}), /hook verification failed/);
+  } finally {
+    if (previousProtocol === undefined) delete process.env.GIT_ALLOW_PROTOCOL;
+    else process.env.GIT_ALLOW_PROTOCOL = previousProtocol;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('non-recursive reset preserves tracked ggml changes', () => {

@@ -60,9 +60,6 @@ export function changedSteps(files: string[]) {
 export const ggmlPointerChanged = (base: string, target: string, read = (rev: string) => git(['rev-parse', rev])) =>
   read(`${base}:engine/ggml`) !== read(`${target}:engine/ggml`);
 
-export const ggmlPatches = (directory = path.join(PROJECT_ROOT, 'engine', 'patches')) =>
-  fs.readdirSync(directory).filter(file => file.endsWith('.patch')).sort();
-
 export async function runUpdatePlan(files: string[], ggmlPointerChanged: boolean, ops: {
   advance: () => boolean;
   idle: () => void;
@@ -106,6 +103,21 @@ async function command(file: string, args: string[], cwd: string, log: (line: st
   });
 }
 
+async function verifyGgmlHooks(root: string, log: (line: string) => void): Promise<void> {
+  let hookFailed = false;
+  await command('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'engine', 'verify-hooks.ps1')], root, line => {
+    if (line.includes('[FAIL]')) hookFailed = true;
+    log(line);
+  });
+  if (hookFailed) throw new Error('Engine hook verification failed after ggml update');
+}
+
+export async function updateGgml(root: string, log: (line: string) => void, verify = verifyGgmlHooks): Promise<void> {
+  await command('git', ['submodule', 'sync', '--', 'engine/ggml'], root, log);
+  await command('git', ['-c', 'submodule.recurse=false', 'submodule', 'update', '--init', '--checkout', '--force', '--', 'engine/ggml'], root, log);
+  await verify(root, log);
+}
+
 export async function receiveUpdate(body: NodeJS.ReadableStream, base: string, target: string, log: (line: string, phase?: string) => void): Promise<void> {
   if (applying) throw Object.assign(new Error('Worker update already running'), { status: 409 });
   assertIdle();
@@ -133,22 +145,8 @@ export async function receiveUpdate(body: NodeJS.ReadableStream, base: string, t
         await command('git', ['-c', 'submodule.recurse=false', 'reset', '--hard', target], PROJECT_ROOT, line => log(line));
       },
       recoverGgml: async () => {
-        log('Updating ggml submodule and restoring patches', 'engine-patches');
-        await command('git', ['-c', 'submodule.recurse=false', 'submodule', 'update', '--init', '--checkout', '--force', '--', 'engine/ggml'], PROJECT_ROOT, line => log(line));
-        const cuda = path.join(PROJECT_ROOT, 'engine', 'ggml', 'src', 'ggml-cuda');
-        for (const file of ['convrot8.cu', 'convrot8.cuh', 'fattn-train.cu', 'fattn-train.cuh']) fs.rmSync(path.join(cuda, file), { force: true });
-        const shaders = path.join(PROJECT_ROOT, 'engine', 'ggml', 'src', 'ggml-vulkan', 'vulkan-shaders');
-        for (const file of fs.readdirSync(shaders).filter(file => file.startsWith('fa_train_'))) fs.rmSync(path.join(shaders, file), { force: true });
-        for (const patch of ggmlPatches()) {
-          log(`Applying ${patch}`);
-          await command('git', ['apply', '--verbose', `engine/patches/${patch}`], PROJECT_ROOT, line => log(line));
-        }
-        let hookFailed = false;
-        await command('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(PROJECT_ROOT, 'engine', 'verify-hooks.ps1')], PROJECT_ROOT, line => {
-          if (line.includes('[FAIL]')) hookFailed = true;
-          log(line);
-        });
-        if (hookFailed) throw new Error('Engine hook verification failed after ggml recovery');
+        log('Updating committed ggml submodule', 'engine-submodule');
+        await updateGgml(PROJECT_ROOT, line => log(line));
       },
       serverInstall: async () => { log('Installing server dependencies', 'server-install'); await command('cmd.exe', ['/d', '/c', 'npm ci'], path.join(PROJECT_ROOT, 'server'), line => log(line)); },
       uiInstall: async () => { log('Installing UI dependencies', 'ui-install'); await command('cmd.exe', ['/d', '/c', 'npm ci'], path.join(PROJECT_ROOT, 'ui'), line => log(line)); },
@@ -165,7 +163,7 @@ export async function receiveUpdate(body: NodeJS.ReadableStream, base: string, t
 }
 
 export interface WorkerUpdateJob {
-  id: string; worker: string; status: 'preparing' | 'uploading' | 'verifying' | 'resetting' | 'engine-patches' | 'server-install' | 'ui-install' | 'ui-build' | 'engine-build' | 'restarting' | 'done' | 'failed' | 'cancelled';
+  id: string; worker: string; status: 'preparing' | 'uploading' | 'verifying' | 'resetting' | 'engine-submodule' | 'server-install' | 'ui-install' | 'ui-build' | 'engine-build' | 'restarting' | 'done' | 'failed' | 'cancelled';
   cancellable: boolean; lines: string[]; error?: string;
 }
 const updates = new Map<string, WorkerUpdateJob & { controller: AbortController }>();
