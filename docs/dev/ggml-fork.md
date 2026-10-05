@@ -43,6 +43,31 @@ fork. From the repo root: `git submodule sync -- engine/ggml`, then
 `git submodule update --init engine/ggml`. `engine/CMakeLists.txt` refuses to configure
 without the fork's ops, and `engine/verify-hooks.ps1` names the missing piece.
 
+### ConvRot8 graph-replay probe
+
+`convrot-graph-probe` (`engine/tools/convrot-graph-probe.cpp`, CUDA builds only) runs
+YuE2-shaped ConvRot8 forward and its autodiff gradient on the CUDA backend with CUDA graphs on.
+Each cycle builds fresh graphs, and every phase runs a direct compute, a capture and then
+replays, flipping the input pointer between phases to force a re-capture. One graph is ConvRot
+alone; the other puts F32 cuBLAS GEMMs before and after ConvRot on the same stream's handle.
+It fails on any non-finite, all-zero or non-bitwise-identical output or gradient, on a
+"replay" that still calls cuBLAS (graphs not in use), and on any `cublasSetStream` outside
+handle creation, counted from cuBLAS's own API log after a positive control. A workspace-loss
+capture failure aborts inside ggml-cuda, so any run that ends without a `RESULT` line is a fail.
+
+```bat
+rem from engine\
+build\convrot-graph-probe.exe --device CUDA0
+build\convrot-graph-probe.exe --device CUDA0 --cycles 5 --phases 4 --computes 8 --rows 1024
+```
+
+Exit codes: 0 pass, 1 a check failed, 2 setup error. `--fp32` runs ConvRot without BF16, and
+`GGML_CUDA_GRAPH_LOG=1` adds ggml-cuda's per-compute graph decision line. On the pre-fork
+patch overlay the stream-reset check is expected to fail, because the old `StreamGuard` and
+old ggml's cuBLAS mul_mat and out_prod each call `cublasSetStream` per op; the per-graph counts
+separate the two. To build it there, cherry-pick the commit that adds the probe (the tool and
+its `engine/CMakeLists.txt` block only) onto that checkout.
+
 ## Why each change exists
 
 The sections below are the measurements and reasoning behind each change, kept from the
