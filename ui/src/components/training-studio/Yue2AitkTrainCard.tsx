@@ -188,7 +188,7 @@ const DEFAULT_FORM: Yue2JointTrainRequest = {
 // stored forms so a saved value from before 2026-09-27 cannot linger.
 const TUNED_KEYS = ['targetKl', 'targetLoss', 'targetKlMode', 'narExtraSteps', 'klWeight', 'captionDropout', 'plannerLrScale', 'narLrScale',
   'spikeFactor', 'spikeStop', 'spikeStopWindow', 'reconStop', 'reconStopWindow', 'reconTarget', 'lrSchedule', 'lrFloor', 'lrDecaySteps',
-  'lrDecayShape', 'klOvershootMargin', 'lrCycleSteps', 'lrCycleMult', 'klCheckpointEvery', 'refineWarmup', 'rungAdaptiveLr'] as const;
+  'lrDecayShape', 'klOvershootMargin', 'lrCycleSteps', 'lrCycleMult', 'klCheckpointEvery', 'refineWarmup', 'rungAdaptiveLr', 'reconKeepDelta'] as const;
 const LORA_STOP = { targetKl: 1.4, plannerLrScale: 0.3, narLrScale: undefined };
 const LOKR_STOP = { targetKl: 1.0, plannerLrScale: 0.6, narLrScale: 1 };
 // Presets (2026-09-27 ear test on a full album). All three are the
@@ -1443,6 +1443,125 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             </label>
           ))}
         </div>
+        {/* Legacy (tuned) recipe knobs. The server forces its own values under
+            base-matched, so the block stays visible but locked there. */}
+        {(() => {
+          const off = form.method !== 'tuned' || busy;
+          const kl = (form.stopMode ?? 'steps') === 'kl';
+          const label = 'text-[10px] font-medium text-zinc-500 uppercase tracking-wider';
+          const num = (key: keyof Yue2JointTrainRequest, name: string, info: string, meta: string) => (
+            <label key={key} className="flex flex-col gap-1">
+              <ParamLabel label={name} info={info} meta={meta || undefined} className={label}
+                onReset={off || form[key] === undefined ? undefined : () => set(key, undefined)} />
+              <input className={`${input} placeholder:text-zinc-500`} type="number" step="any" placeholder="recipe default"
+                value={String(form[key] ?? '')} disabled={off}
+                onChange={event => set(key, (event.target.value === '' ? undefined : Number(event.target.value)) as never)} />
+            </label>
+          );
+          const decoderOn = kl && (form.narExtraSteps ?? 0) > 0;
+          return <div className={`mt-4 pt-3 border-t border-zinc-300/70 dark:border-white/10 ${form.method !== 'tuned' ? 'opacity-50' : ''}`}>
+            <span className={label}>{t('trainingStudio.yue2.method.legacyTitle', 'Legacy recipe')}</span>
+            <p className="mt-1 text-[11px] text-zinc-500">{form.method === 'tuned'
+              ? t('trainingStudio.yue2.method.legacyHint', "The knobs only the Legacy recipe reads. Blank uses the recipe's own value.")
+              : t('trainingStudio.yue2.method.legacyLockedHint', 'Only the Legacy preset uses these; base-matched fixes its own values.')}</p>
+            <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mt-2">
+              <label className="flex flex-col gap-1">
+                <ParamLabel label={t('trainingStudio.yue2.method.stopMode', 'Train until')} className={label}
+                  info={t('trainingStudio.yue2.method.stopModeInfo', 'What ends the run: an AR KL target (the planner has moved a set distance from the base model), a plain step count, or a target loss. Legacy uses the KL target, the tested stop. Updates is the cap either way.')} />
+                <StyledSelect accent="amber" value={form.stopMode ?? 'steps'} disabled={off} className="w-full"
+                  onChange={value => set('stopMode', value)}
+                  options={[
+                    { value: 'kl' as const, label: t('trainingStudio.yue2.method.stopKl', 'AR KL target') },
+                    { value: 'steps' as const, label: t('trainingStudio.yue2.method.stopSteps', 'Step count') },
+                    { value: 'loss' as const, label: t('trainingStudio.yue2.method.stopLoss', 'Target loss') },
+                  ]} />
+              </label>
+              {kl && num('targetKl', t('trainingStudio.yue2.method.targetKl', 'AR KL target'),
+                t('trainingStudio.yue2.method.targetKlFieldInfo', 'How far the planner may move from the base model before the run stops (or the planner freezes, with the decoder phase below on). Higher trains a stronger likeness but risks planner damage (looping outros); lower stays safer but weaker.'),
+                t('trainingStudio.yue2.method.targetKlLegacyMeta', 'Legacy 1.2'))}
+              {kl && <label className="flex flex-col gap-1">
+                <ParamLabel label={t('trainingStudio.yue2.method.targetKlMode', 'KL reading')} className={label}
+                  info={t('trainingStudio.yue2.method.targetKlModeInfo', 'How the KL target is read off the training curve. The 30-step trend line reacts at once to where the curve is heading; the 20-step mean is smoother but lags about 10 steps, so the run trains a little past the target before it notices.')} />
+                <StyledSelect accent="amber" value={form.targetKlMode ?? 'mean'} disabled={off} className="w-full"
+                  onChange={value => set('targetKlMode', value)}
+                  options={[
+                    { value: 'trend' as const, label: t('trainingStudio.yue2.method.targetKlTrend', '30-step trend') },
+                    { value: 'mean' as const, label: t('trainingStudio.yue2.method.targetKlMean', '20-step mean') },
+                  ]} />
+              </label>}
+              {(form.stopMode ?? 'steps') === 'loss' && num('targetLoss', t('trainingStudio.yue2.method.targetLoss', 'Target loss'),
+                t('trainingStudio.yue2.method.targetLossInfo', 'Stops the run once the trailing 20-step mean of the composite loss (AR CE + KL weight × AR KL + NAR flow MSE) is at or below this. Lower trains longer.'), '')}
+              {num('plannerLrScale', t('trainingStudio.yue2.method.plannerLrScale', 'Planner LR scale'),
+                t('trainingStudio.yue2.method.plannerLrScaleInfo', 'The planner (AR) half trains at the learning rate × this. Higher reaches the KL target sooner; lower is gentler and less prone to planner damage.'), 'Legacy 0.6')}
+              {num('narLrScale', t('trainingStudio.yue2.method.narLrScale', 'Decoder LR scale'),
+                t('trainingStudio.yue2.method.narLrScaleInfo', 'The decoder (NAR, where timbre and likeness live) half trains at the learning rate × this. Lower it if renders garble words or lose audio quality.'), 'Legacy 1')}
+              {num('klWeight', t('trainingStudio.yue2.method.klWeight', 'KL anchor'),
+                t('trainingStudio.yue2.method.klWeightInfo', 'How strongly the planner loss is pulled back toward the base model each step. Higher keeps the planner closer to the base (safer, less likeness); lower lets it drift further per step.'), 'default 0.2')}
+              {num('captionDropout', t('trainingStudio.yue2.method.captionDropout', 'Caption dropout'),
+                t('trainingStudio.yue2.method.captionDropoutInfo', "The share of steps trained on the trigger word alone instead of the song's full caption, so a new caption at generation time still lands on the artist. 0 trains on the caption every step."), 'Legacy 0.5')}
+              {num('spikeFactor', t('trainingStudio.yue2.method.spikeFactor', 'Spike guard'),
+                t('trainingStudio.yue2.method.spikeFactorInfo', 'Skip any update whose gradient norm is over this many times the recent median, so one bad step cannot corrupt the adapter. 0 turns the guard off.'), 'Legacy 5')}
+              {num('spikeStop', t('trainingStudio.yue2.method.spikeStop', 'Stop after spikes'),
+                t('trainingStudio.yue2.method.spikeStopInfo', 'End the run when this many updates are skipped within the window, keeping the last pre-spike weights. 0 never stops on spikes alone.'), 'Legacy 3')}
+              {num('spikeStopWindow', t('trainingStudio.yue2.method.spikeStopWindow', 'Spike window'),
+                t('trainingStudio.yue2.method.spikeStopWindowInfo', 'How many steps the skipped updates must fall within to end the run.'), 'Legacy 20')}
+              <label className="flex flex-col gap-1">
+                <ParamLabel label={t('trainingStudio.yue2.method.lrSchedule', 'LR schedule')} className={label}
+                  info={t('trainingStudio.yue2.method.lrScheduleInfo', 'How the learning rate changes over the run. cosine and linear decay to zero at the step cap, so a run that stops early on its KL keeps the weights mid-decay. wsd stays flat until a stop is near, then decays for a set number of steps so the kept weights are annealed. constant stays flat. sgdr cycles the rate in growing loops.')} />
+                <StyledSelect accent="amber" value={form.lrSchedule ?? 'cosine'} disabled={off} className="w-full"
+                  onChange={value => set('lrSchedule', value)}
+                  options={[
+                    { value: 'cosine' as const, label: 'cosine' },
+                    { value: 'cosine-floor' as const, label: 'cosine to a floor' },
+                    { value: 'constant' as const, label: 'constant' },
+                    { value: 'linear' as const, label: 'linear' },
+                    { value: 'wsd' as const, label: 'wsd' },
+                    { value: 'sgdr' as const, label: 'sgdr' },
+                  ]} />
+              </label>
+              {form.lrSchedule === 'cosine-floor' && num('lrFloor', t('trainingStudio.yue2.method.lrFloor', 'LR floor'),
+                t('trainingStudio.yue2.method.lrFloorInfo', 'Where the cosine decay ends, as a fraction of the learning rate, instead of zero.'), '')}
+              {form.lrSchedule === 'wsd' && num('lrDecaySteps', t('trainingStudio.yue2.method.lrDecaySteps', 'Decay steps'),
+                t('trainingStudio.yue2.method.lrDecayStepsInfo', 'How many steps the wsd decay lasts once a stop triggers it. Longer is a gentler anneal.'), '')}
+              {form.lrSchedule === 'wsd' && kl && num('klOvershootMargin', t('trainingStudio.yue2.method.klOvershootMargin', 'KL overshoot'),
+                t('trainingStudio.yue2.method.klOvershootMarginInfo', 'How far the KL may pass the target during the decay before the stop acts at once instead of waiting for the decay to finish.'), 'default 0.1')}
+              {form.lrSchedule === 'wsd' && <label className="flex flex-col gap-1">
+                <ParamLabel label={t('trainingStudio.yue2.method.lrDecayShape', 'Decay shape')} className={label}
+                  info={t('trainingStudio.yue2.method.lrDecayShapeInfo', 'The curve of the wsd decay: linear steps down evenly; cosine eases in and out.')} />
+                <StyledSelect accent="amber" value={form.lrDecayShape ?? 'linear'} disabled={off} className="w-full"
+                  onChange={value => set('lrDecayShape', value)}
+                  options={[{ value: 'linear' as const, label: 'linear' }, { value: 'cosine' as const, label: 'cosine' }]} />
+              </label>}
+              {form.lrSchedule === 'sgdr' && num('lrCycleSteps', t('trainingStudio.yue2.method.lrCycleSteps', 'First cycle'),
+                t('trainingStudio.yue2.method.lrCycleStepsInfo', 'The length of the first sgdr cycle, in steps.'), '')}
+              {form.lrSchedule === 'sgdr' && num('lrCycleMult', t('trainingStudio.yue2.method.lrCycleMult', 'Cycle growth'),
+                t('trainingStudio.yue2.method.lrCycleMultInfo', 'How much longer each sgdr cycle is than the last. 1 keeps them equal.'), '')}
+            </div>
+            <Toggle
+              accent="amber"
+              className="mt-3"
+              checked={decoderOn}
+              disabled={off || !kl}
+              onChange={checked => setForm(previous => checked
+                ? { ...previous, narExtraSteps: 250, reconStop: previous.reconStop ?? 0.005, reconStopWindow: previous.reconStopWindow ?? 10, reconKeepDelta: previous.reconKeepDelta ?? 0.003 }
+                : { ...previous, narExtraSteps: 0 })}
+              label={t('trainingStudio.yue2.method.decoderPhase', 'Train the decoder on after the KL stop')}
+              info={t('trainingStudio.yue2.method.decoderPhaseInfo', 'At the KL target the planner freezes instead of the run ending, and the decoder (timbre, where likeness lives) trains alone until its reconstruction meter flattens: the gain over the last few checkpoints, read off a fitted line, drops under the minimum below. It is the plateau test the Refine page used. A decoder checkpoint whose reconstruction did not beat the best so far by the keep threshold is deleted, so the ladder keeps only real gains. Updates is still the cap. Needs "Train until" on the AR KL target.')}
+            />
+            {decoderOn && <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mt-2">
+              {num('narExtraSteps', t('trainingStudio.yue2.method.narExtraSteps', 'Decoder budget'),
+                t('trainingStudio.yue2.method.narExtraStepsInfo', 'The most steps the decoder trains alone after the freeze. The plateau stop usually ends it sooner; Updates caps it too.'), 'default 250')}
+              {num('reconStop', t('trainingStudio.yue2.method.reconStop', 'Plateau: min gain'),
+                t('trainingStudio.yue2.method.reconStopInfo', 'Stop once the reconstruction meter improves by less than this fraction over the window. 0 trains to the budget.'), 'default 0.005')}
+              {num('reconStopWindow', t('trainingStudio.yue2.method.reconStopWindow', 'Plateau window'),
+                t('trainingStudio.yue2.method.reconStopWindowInfo', 'How many checkpoints the gain line is fitted over. Wider smooths noise but reacts later.'), 'default 10')}
+              {num('reconKeepDelta', t('trainingStudio.yue2.method.reconKeepDelta', 'Keep threshold'),
+                t('trainingStudio.yue2.method.reconKeepDeltaInfo', 'A decoder-phase checkpoint is kept only if its reconstruction beats the best so far by at least this much. 0 keeps every checkpoint.'), 'default 0.003')}
+              {num('reconTarget', t('trainingStudio.yue2.method.reconTarget', 'Recon target'),
+                t('trainingStudio.yue2.method.reconTargetInfo', 'Also stop once the reconstruction meter is at or under this. Blank: the plateau alone decides.'), 'off')}
+            </div>}
+          </div>;
+        })()}
       </details>
       <details className="mt-3 rounded-lg border border-zinc-300/70 dark:border-white/10 bg-white/30 dark:bg-black/10 p-3">
         <summary className="cursor-pointer text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">

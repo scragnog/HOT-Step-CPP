@@ -81,9 +81,15 @@ Pick a preset. Fast, Balanced and Thorough are the same recipe and all train a d
 | Balanced (default) | 200 | 4 | 60 s crops | 20 updates | ~1 h |
 | Thorough | 300 | 8 | 60 s crops | 30 updates | ~3 h |
 
-**Legacy** runs the recipe the card used before the current presets: Prodigy with cautious updates, one song per update, a dim-64 LoKr, caption dropout 0.5, and a stop once the planner's KL to the base model reaches 1.2. It can finish sooner than Fast because it stops early, but its adapters scored lower by ear than the new presets, which fixed its weak endings, structure problems and late-run degradation. It is close to the old recipe, not exact: lyric timing is off (it needs vocal stems and alignment first), and an audio cache already cut for the new presets is not re-cut for it. It renders no checkpoint previews.
+**Legacy** runs the recipe the card used before the current presets: Prodigy with cautious updates, one song per update, a dim-64 LoKr, caption dropout 0.5, and a stop once the planner's KL to the base model reaches 1.2. It can finish sooner than Fast because it stops early, but its adapters scored lower by ear than the new presets, which fixed its weak endings, structure problems and late-run degradation. It is close to the old recipe, not exact: lyric timing is off (it needs vocal stems and alignment first), and an audio cache already cut for the new presets is not re-cut for it. With checkpoint previews on, it renders a preview at every saved checkpoint, as the other presets do.
 
 The optimizer is a setting under **Advanced**. Fast, Balanced and Thorough default to AdamW (graph), which runs the recipe's warmup and cosine decay; Legacy defaults to Prodigy. Plain AdamW uses a flat rate after warmup, with no decay.
+
+**Advanced** also has a **Legacy recipe** section with the knobs only Legacy reads: what ends the run (AR KL target, step count or target loss), the KL target and how it is read, planner and decoder learning-rate scales, the KL anchor, caption dropout, the spike guard and its stop, and the learning-rate schedule. Under the other presets the section is greyed out, because they fix their own values. A blank field uses the recipe's own value.
+
+**Train the decoder on after the KL stop** (Legacy, KL target only): at the KL target the planner freezes instead of the run ending, and the decoder trains alone until its reconstruction meter flattens. That is the plateau test the Refine page used: a line fitted through the last 10 checkpoints must gain at least 0.5% across them, or the run stops. A decoder checkpoint is kept only if its reconstruction beats the best so far by 0.003, so the ladder shows real gains. The decoder budget (250 steps by default) and **Updates** both cap it, so raise Updates if the KL stop comes late. An optional reconstruction target also stops it.
+
+Every joint run, whatever the preset, logs the planner's KL to the base model at every update and the decoder's reconstruction and drift meters at every checkpoint, so runs can be compared. The KL reading costs about 7% of each update under the new presets, which do not otherwise read it.
 
 The new presets save ten checkpoints each, so the ladder to listen through is ten rungs long; see Picking the adapter below.
 
