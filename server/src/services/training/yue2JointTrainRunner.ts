@@ -323,11 +323,11 @@ export function buildYue2JointTrainArgs(o: ResolvedYue2JointTrainOptions): strin
     '--output', o.outDir, '--steps', String(o.steps), '--save-every', String(o.saveEvery),
     '--seed', String(o.seed), '--device', o.device,
   ];
-  // Decoder drift meter at every checkpoint (meters.json): ~5 s a reading.
-  // Not for base-matched: nothing there reads the KL or the meters, and the
-  // flag alone made the engine keep the frozen-teacher forward, 7% of every
-  // update (Dookie, 2026-09-27).
-  if (o.method !== 'base-matched') args.push('--nar-drift');
+  // Decoder drift and reconstruction meters at every checkpoint (meters.json),
+  // ~5 s a reading. The flag also keeps the frozen-teacher forward running
+  // for the planner's KL to base, about 7% of every update; base-matched
+  // pays it too, for reference (2026-10-06).
+  args.push('--nar-drift');
   if (o.rank !== undefined) args.push('--rank', String(o.rank));
   if (o.alpha !== undefined) args.push('--alpha', String(o.alpha));
   if (o.adapterType === 'lokr') {
