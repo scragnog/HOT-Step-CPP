@@ -20,6 +20,7 @@ import type { Song } from '../../types';
 import { downloadTrack } from '../../utils/downloadTrack';
 import { usePlaylist } from './playlistStore';
 import { playFromList, songToTrack } from '../../stores/playbackStore';
+import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 
 interface SongGroup {
   generation: Generation;
@@ -35,14 +36,18 @@ interface RecordingsTabProps {
   onSongCountChange?: (count: number) => void;
   refreshKey?: number;
   artistName?: string;
+  /** The album being viewed: lists only recordings rendered as it, plus songs
+   *  from other albums rendered as it. */
+  lyricsSetId?: number;
   onDeleteComplete?: () => void;
 }
 
 export const RecordingsTab: React.FC<RecordingsTabProps> = ({
-  generations, showToast, filterGenerationId, onClearFilter, onSongCountChange, refreshKey = 0, artistName, onDeleteComplete,
+  generations, showToast, filterGenerationId, onClearFilter, onSongCountChange, refreshKey = 0, artistName, lyricsSetId, onDeleteComplete,
 }) => {
   const { token } = useAuth();
   const { t } = useTranslation();
+  const { disguiseArtist } = useDisguiseMode();
   const [groups, setGroups] = useState<SongGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedGenId, setExpandedGenId] = useState<number | null>(null);
@@ -53,8 +58,8 @@ export const RecordingsTab: React.FC<RecordingsTabProps> = ({
 
   const genKey = useMemo(() => {
     const ids = generations.map(g => g.id).sort().join(',');
-    return `${ids}|${filterGenerationId ?? 'all'}|${refreshKey}|${localRefreshKey}`;
-  }, [generations, filterGenerationId, refreshKey, localRefreshKey]);
+    return `${ids}|${filterGenerationId ?? 'all'}|${refreshKey}|${localRefreshKey}|${lyricsSetId ?? ''}`;
+  }, [generations, filterGenerationId, refreshKey, localRefreshKey, lyricsSetId]);
 
   const filteredGenerations = useMemo(() =>
     filterGenerationId
@@ -74,14 +79,21 @@ export const RecordingsTab: React.FC<RecordingsTabProps> = ({
 
     const load = async () => {
       try {
-        const gens = filterGenerationId
+        let gens = filterGenerationId
           ? generationsRef.current.filter(g => g.id === filterGenerationId)
           : generationsRef.current;
+        // Songs from other albums rendered as this one ("Render as"/"Render from").
+        if (lyricsSetId && !filterGenerationId) {
+          try {
+            const { generations: foreign } = await lireekApi.getRenderedAs(lyricsSetId);
+            gens = [...gens, ...foreign];
+          } catch { /* older server: own songs only */ }
+        }
 
         const results: SongGroup[] = [];
         for (const gen of gens) {
           try {
-            const res = await lireekApi.getAudioGenerations(gen.id);
+            const res = await lireekApi.getAudioGenerations(gen.id, lyricsSetId);
             if (res.audio_generations.length > 0) {
               const songs: Song[] = [];
               for (const ag of res.audio_generations) {
@@ -224,7 +236,14 @@ export const RecordingsTab: React.FC<RecordingsTabProps> = ({
                     ? <ChevronDown className="w-4 h-4 text-zinc-500 flex-shrink-0" />
                     : <ChevronRight className="w-4 h-4 text-zinc-500 flex-shrink-0" />}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">{group.generation.title || 'Untitled'}</p>
+                    <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">
+                      {group.generation.title || 'Untitled'}
+                      {group.generation.lyrics_set_id && group.generation.lyrics_set_id !== lyricsSetId && group.generation.artist_name && (
+                        <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-pink-500/15 text-pink-300 align-middle">
+                          {t('lyric.renderedFrom', 'from')} {disguiseArtist(group.generation.artist_name)}{group.generation.album ? ` — ${group.generation.album}` : ''}
+                        </span>
+                      )}
+                    </p>
                     <p className="text-xs text-zinc-500 mt-0.5">
                       {group.generation.subject || group.generation.caption?.slice(0, 60) || 'No caption'}
                     </p>

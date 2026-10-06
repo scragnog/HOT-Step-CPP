@@ -460,6 +460,10 @@ export function initDb(): void {
     db.exec('ALTER TABLE generations ADD COLUMN first_downloaded_at TEXT');
   }
   try { db.exec('ALTER TABLE audio_generations ADD COLUMN downloaded_at TEXT'); } catch { /* exists */ }
+  // The album a recording was rendered AS (Lyric Studio "Render as"/"Render
+  // from"): its preset, adapters and caption source, and the album it is
+  // listed under. NULL on older rows means the lyrics' own album.
+  try { db.exec('ALTER TABLE audio_generations ADD COLUMN lyrics_set_id INTEGER'); } catch { /* exists */ }
   if (needsGeneratedBackfill) {
     const filled = db.prepare(`
       UPDATE generations SET

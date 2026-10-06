@@ -120,10 +120,12 @@ export interface Generation {
    *  and counted per track rather than per click. 0 / undefined = none kept. */
   download_count?: number;
   first_downloaded_at?: string;
-  // Context fields (from /generations/all)
+  // Context fields (from /generations/all and /lyrics-sets/:id/rendered-as)
   artist_id?: number;
   artist_name?: string;
   album?: string;
+  /** The lyrics' own album. */
+  lyrics_set_id?: number;
 }
 
 export interface AlbumPreset {
@@ -378,11 +380,17 @@ export const lireekApi = {
     api('/api/lireek/purge-profiles', { method: 'POST' }),
 
   // ── Audio Generations ───────────────────────────────────────────────────
-  linkAudio: (generationId: number, jobId: string): Promise<any> =>
-    api(`/api/lireek/generations/${generationId}/audio`, { method: 'POST', body: { job_id: jobId } }),
+  /** `lyricsSetId`: the album the recording was rendered as (and is listed under). */
+  linkAudio: (generationId: number, jobId: string, lyricsSetId?: number): Promise<any> =>
+    api(`/api/lireek/generations/${generationId}/audio`, { method: 'POST', body: { job_id: jobId, lyrics_set_id: lyricsSetId || null } }),
 
-  getAudioGenerations: (generationId: number): Promise<{ audio_generations: AudioGeneration[] }> =>
-    api(`/api/lireek/generations/${generationId}/audio`),
+  /** `lyricsSetId` limits the list to recordings listed under that album. */
+  getAudioGenerations: (generationId: number, lyricsSetId?: number): Promise<{ audio_generations: AudioGeneration[] }> =>
+    api(`/api/lireek/generations/${generationId}/audio${lyricsSetId ? `?lyrics_set_id=${lyricsSetId}` : ''}`),
+
+  /** Lyrics from other albums that have recordings rendered as this album. */
+  getRenderedAs: (lyricsSetId: number): Promise<{ generations: Generation[] }> =>
+    api(`/api/lireek/lyrics-sets/${lyricsSetId}/rendered-as`),
 
   deleteAudioGeneration: (agId: number): Promise<{ deleted: boolean }> =>
     api(`/api/lireek/audio-generations/${agId}`, { method: 'DELETE' }),

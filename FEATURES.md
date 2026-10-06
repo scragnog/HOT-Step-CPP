@@ -170,6 +170,7 @@ AI-assisted lyric writing from a learned style profile, plus per-album render pr
 | Caption source picker | Borrow a caption from the album's captioned training tracks. |
 | Generate Audio | Queue a render through the active backend with the album's preset. |
 | Send to Custom-Gen | Opens Custom-Gen with lyrics, caption, metadata and adapter preset filled in. |
+| Render as / Render from | Render a song written for one album with another album's preset and caption source; the recording is listed under that album. |
 | Album presets | DiT and planner adapters with group scales and a reference track on ACE-Step; one LM adapter on MiniMax-Music3; AR and NAR adapters on YuE2. |
 | Editable system prompts | Override the generation, metadata, profiler and refinement prompts per provider. |
 | Per-role providers | Separate provider and model for profiling, generation and refinement. |

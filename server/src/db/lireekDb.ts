@@ -303,7 +303,7 @@ export function getGenerations(profileId?: number, lyricsSetId?: number): Record
 
 export function getAllGenerationsWithContext(): Record<string, any>[] {
   return getDb().prepare(
-    `SELECT g.*, a.name AS artist_name, ls.album, ls.artist_id
+    `SELECT g.*, a.name AS artist_name, ls.album, ls.artist_id, ls.id AS lyrics_set_id
      FROM generations g
      JOIN profiles p ON p.id = g.profile_id
      JOIN lyrics_sets ls ON ls.id = p.lyrics_set_id
@@ -447,21 +447,44 @@ export function deletePreset(lyricsSetId: number): boolean {
 
 // ── Audio Generations ───────────────────────────────────────────────────────
 
-export function linkAudioGeneration(generationId: number, jobId: string): Record<string, any> {
+/** `lyricsSetId` is the album the recording was rendered as; omitted means the
+ *  lyrics' own album. */
+export function linkAudioGeneration(generationId: number, jobId: string, lyricsSetId?: number | null): Record<string, any> {
   const now = new Date().toISOString();
   const result = getDb().prepare(
-    'INSERT INTO audio_generations (generation_id, hotstep_job_id, created_at) VALUES (?, ?, ?)'
-  ).run(generationId, jobId, now);
-  return { id: result.lastInsertRowid, generation_id: generationId, hotstep_job_id: jobId, created_at: now };
+    'INSERT INTO audio_generations (generation_id, hotstep_job_id, created_at, lyrics_set_id) VALUES (?, ?, ?, ?)'
+  ).run(generationId, jobId, now, lyricsSetId ?? null);
+  return { id: result.lastInsertRowid, generation_id: generationId, hotstep_job_id: jobId, created_at: now, lyrics_set_id: lyricsSetId ?? null };
 }
 
-export function getAudioGenerations(generationId: number): Record<string, any>[] {
+/** With `lyricsSetId`, only the recordings listed under that album: the ones
+ *  rendered as it, plus older rows (no album recorded) when it is the lyrics' own. */
+export function getAudioGenerations(generationId: number, lyricsSetId?: number): Record<string, any>[] {
   return getDb().prepare(
     `SELECT ag.*, s.mastered_audio_url
      FROM audio_generations ag
+     JOIN generations g ON g.id = ag.generation_id
+     JOIN profiles p ON p.id = g.profile_id
      LEFT JOIN songs s ON s.audio_url = ag.audio_url
-     WHERE ag.generation_id = ? ORDER BY ag.created_at DESC`
-  ).all(generationId) as any[];
+     WHERE ag.generation_id = ?
+       AND (? IS NULL OR COALESCE(ag.lyrics_set_id, p.lyrics_set_id) = ?)
+     ORDER BY ag.created_at DESC`
+  ).all(generationId, lyricsSetId ?? null, lyricsSetId ?? null) as any[];
+}
+
+/** Lyrics from OTHER albums that have recordings rendered as this album, with
+ *  their own artist/album for the "from" label. */
+export function getGenerationsRenderedAs(lyricsSetId: number): Record<string, any>[] {
+  return getDb().prepare(
+    `SELECT DISTINCT g.*, a.name AS artist_name, ls.album, ls.artist_id, ls.id AS lyrics_set_id
+     FROM audio_generations ag
+     JOIN generations g ON g.id = ag.generation_id
+     JOIN profiles p ON p.id = g.profile_id
+     JOIN lyrics_sets ls ON ls.id = p.lyrics_set_id
+     JOIN artists a ON a.id = ls.artist_id
+     WHERE ag.lyrics_set_id = ? AND p.lyrics_set_id != ?
+     ORDER BY g.created_at DESC`
+  ).all(lyricsSetId, lyricsSetId) as any[];
 }
 
 export function resolveAudioGeneration(jobId: string, audioUrl: string, coverUrl?: string): void {
@@ -543,7 +566,7 @@ export function getRecentGenerationsWithAudio(limit = 50): Record<string, any>[]
      FROM audio_generations ag
      JOIN generations g ON g.id = ag.generation_id
      JOIN profiles p ON p.id = g.profile_id
-     JOIN lyrics_sets ls ON ls.id = p.lyrics_set_id
+     JOIN lyrics_sets ls ON ls.id = COALESCE(ag.lyrics_set_id, p.lyrics_set_id)
      JOIN artists a ON a.id = ls.artist_id
      LEFT JOIN songs s ON s.audio_url = ag.audio_url
      WHERE ag.audio_url IS NOT NULL

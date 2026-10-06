@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Trash2, Pencil, Music2, Wand2, Play, Loader2, ChevronDown, ChevronRight, Send, FileText, Headphones, Sparkles, Zap, Download } from 'lucide-react';
+import { Trash2, Pencil, Music2, Wand2, Play, Loader2, ChevronDown, ChevronRight, Send, FileText, Headphones, Sparkles, Zap, Download, Shuffle } from 'lucide-react';
 import { lireekApi, streamRefine, skipThinking } from '../../services/lireekApi';
 import type { Generation, Profile } from '../../services/lireekApi';
 import { StreamingPanel } from './StreamingPanel';
@@ -339,6 +339,10 @@ interface WrittenSongsTabProps {
   onRefresh: () => void;
   onGenerateAudio: (gen: Generation) => void;
   onSendToCreate?: (gen: Generation) => void;
+  /** Open the "Render as another album" picker for this song. */
+  onRenderAs?: (gen: Generation) => void;
+  /** Open the "Render a song from another album" picker for this album. */
+  onRenderFrom?: () => void;
   onViewRecordings?: (genId: number) => void;
   showToast: (msg: string) => void;
   generationModel: { provider: string; model?: string };
@@ -347,7 +351,7 @@ interface WrittenSongsTabProps {
 
 export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
   generations, profiles, lyricsSetId, mm3SourceTracks = [], onRefresh, onGenerateAudio,
-  onSendToCreate, onViewRecordings, showToast, generationModel, refinementModel,
+  onSendToCreate, onRenderAs, onRenderFrom, onViewRecordings, showToast, generationModel, refinementModel,
 }) => {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const { t } = useTranslation();
@@ -559,6 +563,16 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
         </div>
         {profiles.length === 0 && (
           <span className="text-xs text-amber-400/60">{t('lyric.buildProfileFirst')}</span>
+        )}
+        {onRenderFrom && (
+          <button
+            onClick={onRenderFrom}
+            title={t('lyric.renderFromHint', "Render a song written for another album with this album's preset and caption source")}
+            className="ml-auto flex items-center gap-2 px-3 py-2 rounded-xl bg-pink-500/15 text-pink-300 hover:bg-pink-500/25 text-sm font-medium transition-colors border border-pink-500/20"
+          >
+            <Shuffle className="w-4 h-4" />
+            {t('lyric.renderFromButton', 'Render from…')}
+          </button>
         )}
       </div>
       {/* Optional subject input */}
@@ -802,6 +816,16 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
                           <Play className="w-3.5 h-3.5" />
                           {t('lyric.generateAudio')}
                         </button>
+                        {onRenderAs && (
+                          <button
+                            onClick={() => onRenderAs(gen)}
+                            title={t('lyric.renderAsHint', "Render these lyrics with another album's preset and caption source")}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-pink-500/15 text-pink-300 hover:bg-pink-500/25 text-sm font-medium transition-colors border border-pink-500/20"
+                          >
+                            <Shuffle className="w-3.5 h-3.5" />
+                            {t('lyric.renderAsButton', 'Render as…')}
+                          </button>
+                        )}
                         <button
                           onClick={() => handleRefine(gen)}
                           disabled={refiningId === gen.id}

@@ -424,9 +424,9 @@ export function registerCrudRoutes(router: Router): void {
   router.post('/generations/:id/audio', (req: Request, res: Response) => {
     try {
       const id = intParam(req, 'id');
-      const { job_id } = req.body;
+      const { job_id, lyrics_set_id } = req.body;
       if (!job_id) { res.status(400).json({ error: 'job_id required' }); return; }
-      const link = db.linkAudioGeneration(id, job_id);
+      const link = db.linkAudioGeneration(id, job_id, Number(lyrics_set_id) || null);
       res.json(link);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -436,8 +436,18 @@ export function registerCrudRoutes(router: Router): void {
   router.get('/generations/:id/audio', (req: Request, res: Response) => {
     try {
       const id = intParam(req, 'id');
-      const rows = db.getAudioGenerations(id);
+      const lyricsSetId = req.query.lyrics_set_id ? parseInt(req.query.lyrics_set_id as string, 10) : undefined;
+      const rows = db.getAudioGenerations(id, lyricsSetId);
       res.json({ audio_generations: rows });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Lyrics from other albums with recordings rendered as this album.
+  router.get('/lyrics-sets/:id/rendered-as', (req: Request, res: Response) => {
+    try {
+      res.json({ generations: db.getGenerationsRenderedAs(intParam(req, 'id')) });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

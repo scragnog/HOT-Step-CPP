@@ -314,7 +314,7 @@ function enrichFromLireek(audioUrl: string): { artistName?: string; album?: stri
        FROM audio_generations ag
        JOIN generations g ON g.id = ag.generation_id
        JOIN profiles p ON p.id = g.profile_id
-       JOIN lyrics_sets ls ON ls.id = p.lyrics_set_id
+       JOIN lyrics_sets ls ON ls.id = COALESCE(ag.lyrics_set_id, p.lyrics_set_id)
        JOIN artists a ON a.id = ls.artist_id
        WHERE ag.audio_url = ?`
     ).get(audioUrl) as any;

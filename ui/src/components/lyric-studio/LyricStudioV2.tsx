@@ -33,6 +33,8 @@ import { SourceLyricsTab } from './SourceLyricsTab';
 import { ProfilesTab } from './ProfilesTab';
 import { WrittenSongsTab } from './WrittenSongsTab';
 import { RecordingsTab } from './RecordingsTab';
+import { RenderAcrossModal } from './RenderAcrossModal';
+import type { RenderTarget } from './RenderAcrossModal';
 import { useAudioGeneration } from './useAudioGeneration';
 import { enqueueAudioGen, useResumeQueue, useAudioGenQueueSelector } from '../../stores/audioGenQueueStore';
 import { usePlaybackSelector } from '../../stores/playbackStore';
@@ -456,23 +458,41 @@ export const LyricStudioV2: React.FC = () => {
   const { sendToCreate } = useAudioGeneration({ profiles, showToast });
   const globalParams = useGlobalParamsStore();
 
-  const handleGenerateAudio = useCallback(async (gen: Generation) => {
+  /** `renderAs`: render with another album's preset and caption source, and
+   *  list the recording there ("Render as" / "Render from"). */
+  const handleGenerateAudio = useCallback(async (gen: Generation, renderAs?: RenderTarget) => {
     if (!token) { showToast('Not authenticated'); return; }
     const profile = profiles.find(p => p.id === gen.profile_id);
-    if (!profile) { showToast('Profile not found'); return; }
+    const sourceLyricsSetId = profile?.lyrics_set_id ?? gen.lyrics_set_id;
+    if (!renderAs && !profile) { showToast('Profile not found'); return; }
     // Capture globalParams snapshot NOW — same as Create page's getGlobalParams().
     // This ensures every engine param (solver, guidance, DCW, latent, LM, etc.)
     // flows through identically to the Create page path.
     const paramsSnapshot = globalParams.getGlobalParams();
-    await enqueueAudioGen(gen, {
+    await enqueueAudioGen(gen, renderAs ? {
+      ...renderAs,
+      profileId: gen.profile_id,
+      sourceLyricsSetId,
+    } : {
       artistId: nav.selectedArtist?.id || 0,
       artistName: nav.selectedArtist?.name || 'Unknown',
       artistImageUrl: nav.selectedArtist?.image_url || '',
-      profileId: profile.id,
-      lyricsSetId: profile.lyrics_set_id,
+      profileId: profile!.id,
+      lyricsSetId: profile!.lyrics_set_id,
     }, paramsSnapshot, token);
-    showToast(`Queued: ${gen.title || 'Untitled'}`);
-  }, [token, profiles, nav.selectedArtist, globalParams, showToast]);
+    showToast(renderAs
+      ? `Queued: ${gen.title || 'Untitled'} as ${disguiseArtist(renderAs.artistName)}`
+      : `Queued: ${gen.title || 'Untitled'}`);
+  }, [token, profiles, nav.selectedArtist, globalParams, showToast, disguiseArtist]);
+
+  // ── Render as / Render from ──
+  const [renderAcross, setRenderAcross] = useState<{ mode: 'as' | 'from'; gen?: Generation } | null>(null);
+  const currentTarget = useMemo<RenderTarget | null>(() => (nav.selectedArtist && nav.selectedAlbum ? {
+    lyricsSetId: nav.selectedAlbum.id,
+    artistId: nav.selectedArtist.id,
+    artistName: nav.selectedArtist.name,
+    artistImageUrl: nav.selectedArtist.image_url || '',
+  } : null), [nav.selectedArtist, nav.selectedAlbum]);
 
   // Refresh album data on audio queue completions
   useEffect(() => {
@@ -482,10 +502,10 @@ export const LyricStudioV2: React.FC = () => {
     }
   }, [completionCounter]);
 
-  const handleSendToCreate = useCallback(async (gen: Generation) => {
+  const handleSendToCreate = useCallback(async (gen: Generation, renderAs?: RenderTarget) => {
     // Inject artist name — gen from getAlbumFullDetail doesn't include it
     const enriched = { ...gen, artist_name: gen.artist_name || nav.selectedArtist?.name || '' };
-    await sendToCreate(enriched);
+    await sendToCreate(enriched, renderAs);
   }, [sendToCreate, nav.selectedArtist]);
 
   const openFetchForArtist = useCallback(() => {
@@ -717,6 +737,8 @@ export const LyricStudioV2: React.FC = () => {
                         mm3SourceTracks={mm3SourceTracks}
                         onRefresh={refreshAlbumData} onGenerateAudio={handleGenerateAudio}
                         onSendToCreate={handleSendToCreate}
+                        onRenderAs={(gen) => setRenderAcross({ mode: 'as', gen })}
+                        onRenderFrom={() => setRenderAcross({ mode: 'from' })}
                         onViewRecordings={(genId) => {
                           setRecordingsFilter(genId);
                           setActiveTab('recordings');
@@ -733,6 +755,7 @@ export const LyricStudioV2: React.FC = () => {
                         onClearFilter={() => setRecordingsFilter(null)}
                         onSongCountChange={setSongCount}
                         refreshKey={recordingsRefreshKey}
+                        lyricsSetId={nav.selectedAlbum.id}
                         artistName={nav.selectedArtist?.name}
                         onDeleteComplete={() => setRecordingsRefreshKey(k => k + 1)}
                       />
@@ -755,6 +778,19 @@ export const LyricStudioV2: React.FC = () => {
         <PresetSettingsModal isOpen={presetModalOpen} lyricsSetId={nav.selectedAlbum.id}
           albumName={nav.selectedAlbum.album || 'Top Songs'} onClose={() => setPresetModalOpen(false)}
           showToast={showToast} />
+      )}
+
+      {/* Render as / Render from */}
+      {nav.selectedAlbum && (
+        <RenderAcrossModal
+          mode={renderAcross?.mode ?? null}
+          gen={renderAcross?.gen}
+          target={currentTarget}
+          currentLyricsSetId={nav.selectedAlbum.id}
+          onClose={() => setRenderAcross(null)}
+          onRender={(gen, target) => { handleGenerateAudio(gen, target); }}
+          onSendToCreate={(gen, target) => { handleSendToCreate(gen, target); }}
+        />
       )}
 
       {/* Queue modal */}

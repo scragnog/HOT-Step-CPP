@@ -48,10 +48,18 @@ export function captionForBackend(
   /** YuE2: whether the render's own pick merges an adapter (a queued song's
    *  captured pick). Omitted = the picker's default decides. */
   yue2AdapterInForce?: boolean,
+  /** The song is rendered as ANOTHER album (Lyric Studio "Render as"). On
+   *  YuE2 the target album's dataset pick then leads, since the song's own
+   *  caption describes its own album's sound, not the adapter's. */
+  renderingAs?: boolean,
 ): string {
   if (backendId === MM3_BACKEND_ID) {
     const resolved = resolveMm3CaptionForGeneration(gen, lyricsSetId);
     if (resolved.caption.trim()) return resolved.caption;
+  }
+  if (backendId === YUE2_BACKEND_ID && renderingAs) {
+    const resolved = resolveYue2CaptionForGeneration(gen, lyricsSetId, yue2AdapterInForce);
+    if (resolved.mode !== 'custom' && resolved.caption.trim()) return resolved.caption;
   }
   if (backendId === YUE2_BACKEND_ID) {
     // A song that carries its own YuE2 caption (2026-09-20) is prompted with

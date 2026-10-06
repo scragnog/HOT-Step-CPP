@@ -40,12 +40,19 @@ interface UseAudioGenerationOptions {
 
 export function useAudioGeneration({ profiles, showToast: _showToast }: UseAudioGenerationOptions) {
 
-  const sendToCreate = useCallback(async (gen: Generation): Promise<void> => {
+  /** `renderAs`: load another album's preset and caption source instead of
+   *  the lyrics' own (Lyric Studio "Render as" / "Render from"). */
+  const sendToCreate = useCallback(async (
+    gen: Generation, renderAs?: { lyricsSetId: number; artistName: string },
+  ): Promise<void> => {
     const profile = profiles.find(p => p.id === gen.profile_id);
+    const lyricsSetId = renderAs?.lyricsSetId ?? profile?.lyrics_set_id ?? gen.lyrics_set_id;
+    const renderingAs = !!renderAs && renderAs.lyricsSetId !== (profile?.lyrics_set_id ?? gen.lyrics_set_id);
+    if (renderAs) gen = { ...gen, artist_name: renderAs.artistName };
     let preset: AlbumPreset | null = null;
-    if (profile) {
+    if (lyricsSetId) {
       try {
-        const res = await lireekApi.getPreset(profile.lyrics_set_id);
+        const res = await lireekApi.getPreset(lyricsSetId);
         preset = res.preset;
       } catch { /* ignore */ }
     }
@@ -57,7 +64,6 @@ export function useAudioGeneration({ profiles, showToast: _showToast }: UseAudio
     // Content. The caption box holds ONE caption, so which of the generation's
     // two goes in it depends on the backend that is about to render it.
     const backendId = useBackendStore.getState().activeBackendId;
-    const lyricsSetId = profile?.lyrics_set_id;
     if (backendId === MM3_BACKEND_ID) await ensureMm3SourceTracks(lyricsSetId);
     // YuE2's equivalent, in the order the queue runner uses for the same reason
     // (audioGenQueueStore._executeItem).
@@ -88,7 +94,7 @@ export function useAudioGeneration({ profiles, showToast: _showToast }: UseAudio
         };
       }
     }
-    write('hs-caption', captionForBackend(gen, backendId, lyricsSetId));
+    write('hs-caption', captionForBackend(gen, backendId, lyricsSetId, undefined, renderingAs));
     write('hs-lyrics', gen.lyrics || '');
 
     // MM3 caption SOURCE — hand the Create panel everything it needs to offer

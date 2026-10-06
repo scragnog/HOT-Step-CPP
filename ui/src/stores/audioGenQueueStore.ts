@@ -47,7 +47,11 @@ export interface AudioQueueItem {
   coverUrl?: string;
   preset: AlbumPreset | null;
   profileId: number;
+  /** The album this renders AS: its preset, adapters and caption source, and
+   *  the album the recording is listed under. */
   lyricsSetId: number;
+  /** The lyrics' own album, when it differs from `lyricsSetId` ("Render as"). */
+  sourceLyricsSetId?: number;
   /** Snapshot of getGlobalParams() captured at enqueue time — same as Create page */
   globalParams: Partial<GenerationParams>;
   /** YuE2 model pick captured at enqueue (yue2PickAtEnqueue): the adapters
@@ -490,7 +494,7 @@ let _lastToken: string | null = null;
 
 export async function enqueueAudioGen(
   gen: Generation,
-  opts: { artistId: number; artistName: string; artistImageUrl?: string; profileId: number; lyricsSetId: number },
+  opts: { artistId: number; artistName: string; artistImageUrl?: string; profileId: number; lyricsSetId: number; sourceLyricsSetId?: number },
   globalParams: Partial<GenerationParams>,
   token: string,
 ): Promise<void> {
@@ -513,6 +517,7 @@ export async function enqueueAudioGen(
     preset,
     profileId: opts.profileId,
     lyricsSetId: opts.lyricsSetId,
+    sourceLyricsSetId: opts.sourceLyricsSetId,
     globalParams,
     yue2Pick: yue2PickAtEnqueue(preset),
     status: 'pending',
@@ -1439,7 +1444,8 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
     yue2AdapterInForce = !!yue2CaptionAdapterPath(pick);
     await ensureYue2CaptionSource({ lyricsSet: item.lyricsSetId });
   }
-  params.caption = captionForBackend(gen, backendId, item.lyricsSetId, yue2AdapterInForce);
+  const renderingAs = !!item.sourceLyricsSetId && item.sourceLyricsSetId !== item.lyricsSetId;
+  params.caption = captionForBackend(gen, backendId, item.lyricsSetId, yue2AdapterInForce, renderingAs);
   params.title = gen.title || '';
   params.instrumental = false;
   // Duration is an ACE-only field now.
@@ -1611,7 +1617,7 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
 
   // 6) Link audio to Lireek generation
   if (jobId) {
-    await lireekApi.linkAudio(gen.id, jobId);
+    await lireekApi.linkAudio(gen.id, jobId, item.lyricsSetId);
   }
 
   // 7) Poll until done
