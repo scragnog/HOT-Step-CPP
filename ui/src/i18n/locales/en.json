@@ -1,5 +1,9 @@
 {
   "translation": {
+    "errorBoundary.title": "Something went wrong on this page",
+    "errorBoundary.message": "The page hit an error and stopped drawing. Jobs running on the server are not affected. The full details are in the browser console (F12).",
+    "errorBoundary.retry": "Try again",
+    "errorBoundary.reload": "Reload page",
     "trainingStudio.refine.blindRung": "Rung {{label}}",
     "trainingStudio.refine.blindToggle": "Blind rungs",
     "trainingStudio.refine.blindToggleInfo": "Show lettered rungs while listening and scoring. The chosen step is revealed after cleanup finishes.",

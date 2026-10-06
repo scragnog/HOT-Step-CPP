@@ -20,6 +20,7 @@ import { StreamWaveform } from './components/player/StreamWaveform';
 import { mm3StreamEnsureTakes, useMm3StreamAudio } from './stores/mm3StreamStore';
 import { enqueueSimpleGen, useResumeQueue, useAudioGenQueueSelector, clearFinishedFromAudioQueue } from './stores/audioGenQueueStore';
 import { RestoredQueueBanner } from './components/shared/RestoredQueueBanner';
+import { ErrorBoundary } from './components/shared/ErrorBoundary';
 import { clearRecentSongsCache } from './components/shared/UnifiedRecentSongs';
 import { PostProcessDock } from './components/shared/PostProcessActivity';
 import { ActivitySidebar } from './components/shared/ActivitySidebar';
@@ -1324,7 +1325,9 @@ const AppContent: React.FC = () => {
             column runs the full height and the transport stops at its edge. */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <main className="flex-1 flex overflow-hidden relative">
-          {renderContent()}
+          <ErrorBoundary resetKey={activeView}>
+            {renderContent()}
+          </ErrorBoundary>
         </main>
 
           {/* ── Bottom Player Area: Markers → Waveform → Transport ── */}

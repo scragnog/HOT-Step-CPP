@@ -150,6 +150,15 @@ toggle's own field, never on anything the section contains: an accordion's `onRe
 content's own per-field resets (or an inner group "Reset" button) stay independent, each touching
 only what it says it does.
 
+## Error boundaries
+
+A render-time throw no longer blanks the tab. `ErrorBoundary`
+(`ui/src/components/shared/ErrorBoundary.tsx`) wraps the whole app in `main.tsx`, and the studio
+area in `App.tsx` with `resetKey={activeView}`. A broken studio shows the error with Try again and
+Reload, the sidebar and player keep working, and switching studio clears it. Wrap a new
+independent region in its own boundary only if one failing part should not take its neighbours
+with it.
+
 ## Accent colour
 
 Match the controls around you. Pass the same `accent` to `StyledSelect` and `Toggle`.
