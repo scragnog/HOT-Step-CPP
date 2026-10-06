@@ -784,7 +784,10 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
         : state.targetStopped && state.lastStep > step
           ? state.lastStep : (pauseAt > 0 && pauseAt < o.steps ? pauseAt : o.steps);
       nativeAttempted = true;
-      const norms = yue2StyleNormsForRun(o.outDir, o.dataset);
+      // The engine refuses an output folder that already exists, so a run
+      // trained straight into outDir saves its norms only once it has made it.
+      const intoOutDir = segmentOut === o.outDir;
+      const norms = yue2StyleNormsForRun(o.outDir, o.dataset, !intoOutDir);
       await runYue2AceTrain(job, 'yue2-joint-train', buildYue2JointTrainArgs({ ...segment, ...(norms ? { styleNorms: JSON.stringify(norms) } : {}) }),
         YUE2_IDLE_MS, () => {
           if (!fs.existsSync(segmentOut)) return 'Joint trainer exited without creating its output directory';
@@ -795,6 +798,7 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
             .some(name => !fs.existsSync(path.join(checkpoint, name)))) return `Joint-training checkpoint-step${expect} is incomplete`;
           return null;
         }, (line, current) => relayJsonLine(job, line, current, clock, thinning), state, o.spawnEnv, o.stopEngine !== false);
+      if (intoOutDir) yue2StyleNormsForRun(o.outDir, o.dataset);
       if (isCancelled(job)) return;
       if (state.frozenAt !== undefined) plannerFrozen = true;
       if (!state.pausedAt || !segmented || state.pausedAt >= o.steps) break;

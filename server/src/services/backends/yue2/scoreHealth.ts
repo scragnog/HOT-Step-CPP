@@ -361,8 +361,9 @@ export function readYue2StyleNorms(runDir: string | undefined): Yue2StyleNorms |
 
 /** Norms for a joint run: saved in its folder on first use, built from the
  *  lead sheets in the latent cache beside its prepared dataset (the cache can
- *  be cleared later; the run keeps what it was judged by). */
-export function yue2StyleNormsForRun(runDir: string, preparedDataset?: string): Yue2StyleNorms | null {
+ *  be cleared later; the run keeps what it was judged by). persist=false
+ *  builds them without touching the folder. */
+export function yue2StyleNormsForRun(runDir: string, preparedDataset?: string, persist = true): Yue2StyleNorms | null {
   const saved = readYue2StyleNorms(runDir);
   if (saved || !preparedDataset) return saved;
   try {
@@ -372,8 +373,10 @@ export function yue2StyleNormsForRun(runDir: string, preparedDataset?: string): 
       .map(s => ({ abc: s.abc as string, ...(typeof s.lyrics === 'string' ? { lyrics: s.lyrics } : {}) }));
     if (!sheets.length) return null;
     const norms = yue2StyleNorms(sheets);
-    fs.mkdirSync(runDir, { recursive: true });
-    fs.writeFileSync(path.join(runDir, NORMS_FILE), JSON.stringify(norms, null, 1));
+    if (persist) {
+      fs.mkdirSync(runDir, { recursive: true });
+      fs.writeFileSync(path.join(runDir, NORMS_FILE), JSON.stringify(norms, null, 1));
+    }
     return norms;
   } catch { return null; }
 }
