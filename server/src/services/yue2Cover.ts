@@ -8,7 +8,9 @@ import { jobsDir } from './training/paths.js';
 import { readDuration } from './training/audioMeta.js';
 import { missingYue2SheetModels, readYue2CoverAbc, resolveYue2SheetModel } from './training/yue2Sheet.js';
 import { runYue2CoverSheetJob } from './training/yue2ArTrainRunner.js';
-import { resolveCoverDatasetSource } from './coverDatasetSource.js';
+import { resolveCoverDatasetSource, type CoverDatasetSource } from './coverDatasetSource.js';
+import { getDataset } from './training/datasetsRepo.js';
+import { patchLabel } from './training/labelStore.js';
 import { readSidecar, writeSidecar } from './training/sidecarIO.js';
 import { loadSidecarMetadata } from './training/datasetScan.js';
 import { createHash } from 'node:crypto';
@@ -18,7 +20,7 @@ import type { Yue2AlignWord } from './backends/yue2/align.js';
 import { matchSectionsToScore } from './backends/yue2/sectionMatch.js';
 import { sidecarPathFor } from './training/paths.js';
 import { readAbcSidecar } from './training/abcSidecar.js';
-import { insertScoreSectionTags, lintScoreSections, scoreSections } from './backends/yue2/scoreSections.js';
+import { lintScoreSections, scoreSections } from './backends/yue2/scoreSections.js';
 
 const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
 const MAX_AUDIO_SECONDS = 10 * 60;
@@ -58,9 +60,12 @@ export function createYue2CoverService(deps = {
   },
   align: (audio: Buffer, lyrics: string): Promise<{ words: Yue2AlignWord[] }> => yue2Align(audio, lyrics),
   // The same merged read as a sample edit, so split caption/lyrics files
-  // are folded into <stem>.txt rather than shadowing the new lyrics.
-  saveLyrics: async (audioPath: string, lyrics: string) => {
-    await writeSidecar(sidecarPathFor(audioPath), { ...loadSidecarMetadata(audioPath), lyrics }, { keepBackups: true });
+  // are folded into <stem>.txt rather than shadowing the new lyrics. Like a
+  // sample edit, the label then records these fields as set by the user.
+  saveDetails: async (matched: CoverDatasetSource, fields: Record<string, string>) => {
+    await writeSidecar(sidecarPathFor(matched.audioPath), { ...loadSidecarMetadata(matched.audioPath), ...fields }, { keepBackups: true });
+    const slug = getDataset(matched.datasetId)?.slug;
+    if (slug) patchLabel(slug, matched.sampleId, { sources: Object.fromEntries(Object.keys(fields).map(field => [field, 'user' as const])) });
   },
   song: (id: string, userId: string) => getDb().prepare('SELECT audio_url, title FROM songs WHERE id = ? AND user_id = ?').get(id, userId) as { audio_url: string; title: string } | undefined,
 }) {
@@ -76,8 +81,7 @@ export function createYue2CoverService(deps = {
       throw new CoverRequestError('ABC and lyrics must be strings of at most 64 KB each.');
     }
     const sections = scoreSections(input.abc);
-    return { sections, lint: lintScoreSections(sections, input.lyrics),
-      insertedLyrics: insertScoreSectionTags(sections, input.lyrics) };
+    return { sections, lint: lintScoreSections(sections, input.lyrics) };
   }
 
   async function source(input: CoverInput, userId: string): Promise<CoverSource> {
@@ -223,23 +227,36 @@ export function createYue2CoverService(deps = {
     return { ...result, datasetSong: !!deps.datasetMatch(selected.audioPath) };
   }
 
-  /** Write lyrics into the matched dataset song's sidecar (.txt); the sidecar
-   *  writer keeps the previous file as .txt.bak, or a timestamped .bak
-   *  when one is already there. */
-  async function saveDatasetLyrics(input: CoverInput & { lyrics?: unknown }, userId: string) {
-    if (typeof input.lyrics !== 'string' || !input.lyrics.trim() || input.lyrics.length > MAX_ABC_LENGTH) {
-      throw new CoverRequestError('Lyrics must be a non-empty string of at most 64 KB.');
+  /** Write lyrics, or the score's tempo and key, into the matched dataset
+   *  song's sidecar (.txt); the sidecar writer keeps the previous file as
+   *  .txt.bak, or a timestamped .bak when one is already there. */
+  async function saveDatasetDetails(input: CoverInput & { lyrics?: unknown; bpm?: unknown; key?: unknown }, userId: string) {
+    const { lyrics, bpm, key, ...rest } = input;
+    const fields: Record<string, string> = {};
+    if (lyrics !== undefined) {
+      if (typeof lyrics !== 'string' || !lyrics.trim() || lyrics.length > MAX_ABC_LENGTH) {
+        throw new CoverRequestError('Lyrics must be a non-empty string of at most 64 KB.');
+      }
+      fields.lyrics = lyrics.replace(/\r\n?/g, '\n');
     }
-    const { lyrics, ...rest } = input;
+    if (bpm !== undefined || key !== undefined) {
+      if (typeof bpm !== 'number' || !Number.isFinite(bpm) || bpm < 20 || bpm > 300 ||
+          typeof key !== 'string' || !/^[A-G][#b]? (Major|Minor)$/.test(key)) {
+        throw new CoverRequestError('Tempo must be 20–300 BPM and key like "E Major" or "B Minor".');
+      }
+      fields.bpm = String(Math.round(bpm));
+      fields.key = key;
+    }
+    if (!Object.keys(fields).length) throw new CoverRequestError('Nothing to save.');
     const selected = await source(rest, userId);
     const matched = deps.datasetMatch(selected.audioPath);
     if (!matched) throw new CoverRequestError('This source is not a dataset song.', 404);
-    await deps.saveLyrics(matched.audioPath, lyrics.replace(/\r\n?/g, '\n'));
+    await deps.saveDetails(matched, fields);
     return { saved: true as const, datasetId: matched.datasetId, sampleId: matched.sampleId,
       file: path.basename(sidecarPathFor(matched.audioPath)) };
   }
 
-  return { readiness, source, lookup, start, find, cancel, reviewScore, matchSections, saveDatasetLyrics };
+  return { readiness, source, lookup, start, find, cancel, reviewScore, matchSections, saveDatasetDetails };
 }
 
 export const yue2CoverService = createYue2CoverService();

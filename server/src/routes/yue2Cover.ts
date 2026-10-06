@@ -59,7 +59,7 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
   });
 
   router.post('/sections/save-dataset', async (req: Request, res: Response) => {
-    try { res.json(await service.saveDatasetLyrics(req.body || {}, authenticate(req)!)); }
+    try { res.json(await service.saveDatasetDetails(req.body || {}, authenticate(req)!)); }
     catch (err) { fail(res, err); }
   });
 

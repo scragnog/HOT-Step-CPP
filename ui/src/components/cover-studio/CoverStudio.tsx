@@ -156,6 +156,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [sectionMatching, setSectionMatching] = useState(false);
   const [sectionSaving, setSectionSaving] = useState(false);
   const [sectionSaveConfirm, setSectionSaveConfirm] = useState(false);
+  const [scoreDetailsSaving, setScoreDetailsSaving] = useState(false);
+  const [scoreDetailsConfirm, setScoreDetailsConfirm] = useState(false);
   const [sheetAudioUrl, setSheetAudioUrl] = useState('');
   const [approvedSheet, setApprovedSheet] = useState<{ abc: string; sourceId: string; sourceLabel: string; audioUrl: string; key: string } | null>(null);
 
@@ -645,23 +647,6 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     finally { if (sheetRequestRef.current === request) setSheetPreparing(false); }
   };
 
-  const handleInsertScoreTags = async () => {
-    if (!token || !sheetAbc.trim()) return;
-    const key = sourceKey, scoreRequest = sheetRequestRef.current, lyricEdit = lyricEditRef.current;
-    try {
-      const review = await yue2CoverApi.reviewSections(sheetAbc, lyrics, token);
-      if (sourceKeyRef.current !== key || sheetRequestRef.current !== scoreRequest || lyricEditRef.current !== lyricEdit) return;
-      if (!review.sections.length) return;
-      if (review.lint.lyricCount > 0 &&
-          !window.confirm('Replace the current lyric section tags with the score sections? Your lyric lines will stay under the first tag for you to arrange.')) return;
-      lyricEditRef.current++;
-      setLyrics(review.insertedLyrics);
-      setLyricsSource(null);
-      setScoreSections(review.sections);
-      setSectionLint(null);
-    } catch (err: any) { setSheetError(err.message); }
-  };
-
   // The original source, never a recombined mix: its vocal stem is what the
   // aligner reads, and its path is what finds the dataset song.
   const sectionSource = () => sourceSongId ? { songId: sourceSongId } : { sourceAudioUrl };
@@ -688,11 +673,31 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (!token || !sectionMatch || sectionMatchStale) return;
     setSectionSaving(true);
     try {
-      await yue2CoverApi.saveDatasetLyrics({ ...sectionSource(), lyrics: sectionMatch.match.lyrics }, token);
+      await yue2CoverApi.saveDatasetDetails({ ...sectionSource(), lyrics: sectionMatch.match.lyrics }, token);
       if (sourceKeyRef.current === sectionMatch.key) applySectionMatch();
       showToast('Lyrics saved to the dataset');
     } catch (err: any) { setSheetError(`Save to dataset: ${err.message}`); }
     finally { setSectionSaving(false); }
+  };
+
+  // The score's tempo and key, offered for a dataset song whose .txt differs.
+  const scoreBpm = Math.round(Number(sheetAbc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1]) || 0);
+  const scoreKey = coverScoreKeyLabel(sheetAbc).replace(/(major|minor)$/, m => m[0].toUpperCase() + m.slice(1));
+  const scoreDetailsDiffer = yue2Mode && datasetAnalysis && !!analysis && scoreBpm > 0 && !!scoreKey &&
+    (Math.round(analysis.bpm) !== scoreBpm || analysis.key.toLowerCase() !== scoreKey.toLowerCase());
+  const saveScoreDetails = async () => {
+    if (!token || !scoreDetailsDiffer) return;
+    const key = sourceKey, bpm = scoreBpm, musicalKey = scoreKey;
+    setScoreDetailsSaving(true);
+    try {
+      await yue2CoverApi.saveDatasetDetails({ ...sectionSource(), bpm, key: musicalKey }, token);
+      if (sourceKeyRef.current === key) {
+        setAnalysis({ bpm, key: musicalKey, scale: musicalKey.split(' ')[1] });
+        setBpmOverride(null); setKeyOverride(null);
+      }
+      showToast('Tempo and key saved to the dataset');
+    } catch (err: any) { setSheetError(`Save to dataset: ${err.message}`); }
+    finally { setScoreDetailsSaving(false); }
   };
 
   // ── Generation ──
@@ -1032,6 +1037,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           yue2Mode={yue2Mode}
           sourceFileName={sourceFileName} metadata={metadata} analysis={analysis}
           fromDataset={datasetAnalysis}
+          scoreDetails={scoreDetailsDiffer ? { bpm: scoreBpm, key: scoreKey, saving: scoreDetailsSaving,
+            onSave: () => setScoreDetailsConfirm(true) } : null}
           isUploading={isUploading} isAnalyzing={isAnalyzing}
           onFileSelected={handleFileSelected} onClear={handleClearSource}
           bpmCorrection={bpmCorrection} onBpmCorrectionChange={setBpmCorrection}
@@ -1094,8 +1101,6 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           {yue2Mode && !!sheetAbc && <div className="flex-shrink-0 px-4 pb-3 space-y-1">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Score sections</span>
-              <button type="button" onClick={() => void handleInsertScoreTags()} disabled={!scoreSections.length}
-                className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Insert tags from score</button>
               <button type="button" onClick={() => void handleMatchSections()}
                 disabled={!scoreSections.length || !lyrics.trim() || instrumental || sectionMatching}
                 title="Align the lyrics on the source's vocal stem and retag each block with the score section it is sung in. Shows the changes before applying."
@@ -1109,6 +1114,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               message="Write these lyrics into the dataset song’s .txt? The current file is kept as a backup."
               confirmLabel="Save" onCancel={() => setSectionSaveConfirm(false)}
               onConfirm={() => { setSectionSaveConfirm(false); void saveSectionMatch(); }} />
+            <ConfirmDialog isOpen={scoreDetailsConfirm} title="Save tempo and key to dataset"
+              message={`Replace the dataset song’s tempo and key with the score’s (${scoreBpm} BPM, ${scoreKey})? The current .txt is kept as a backup.`}
+              confirmLabel="Save" onCancel={() => setScoreDetailsConfirm(false)}
+              onConfirm={() => { setScoreDetailsConfirm(false); void saveScoreDetails(); }} />
             {scoreSections.length > 0
               ? <div className="flex flex-wrap gap-1">{scoreSections.map((section, index) =>
                 <span key={`${index}-${section.startBar}`} className="rounded bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-800 dark:text-cyan-200">

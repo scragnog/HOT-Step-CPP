@@ -62,9 +62,7 @@ have to make.
    choose a caption from its training tracks or the nearest detected BPM.
    The score's section strip shows each transcribed label and its starting bar.
    A warning compares these sections with `[Tag]` headers in your lyrics, but
-   never blocks Generate. **Insert tags from score** puts the score labels in
-   order and keeps your lyric lines under the first tag for you to arrange;
-   replacing existing tags asks for confirmation.
+   never blocks Generate.
    **Match sections to score** does the arranging for you. It separates the
    source's vocal (once per source, then cached), finds where each lyric block
    is sung, and retags each block with the score section it starts in. It
@@ -84,6 +82,9 @@ have to make.
    song's `.txt` after a confirmation. The previous file is kept as `.txt.bak`.
    If a `.txt.bak` is already there, it is left alone and the previous file
    goes to `.txt.<date>-<time>.bak` instead, so no save loses a backup.
+   When a dataset song's tempo or key differs from the score's, Analysis
+   shows the score's values with **Save to dataset**. After a confirmation it
+   replaces the BPM and key in the song's `.txt`, keeping a backup the same way.
 5. Choose **Base YuE2** or an explicit AR composer and NAR renderer pair.
    **Score to render** defaults to both the vocal and instrumental lines, no
    chord symbols, free tempo and source key. Choose vocal melody only if you

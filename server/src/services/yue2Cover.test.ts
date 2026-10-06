@@ -63,9 +63,9 @@ function fixture(missing = false, defer = false) {
       const char0 = lyrics.indexOf(text);
       return { char0, char1: char0 + text.length, start, end: start + 0.4, score: 0.9 };
     }) }),
-    saveLyrics: async (audioPath: string, lyrics: string) => {
+    saveDetails: async ({ audioPath }: { audioPath: string }, fields: Record<string, string>) => {
       const file = sidecarPathFor(audioPath);
-      await writeSidecar(file, { ...readSidecar(file), lyrics }, { keepBackups: true });
+      await writeSidecar(file, { ...readSidecar(file), ...fields }, { keepBackups: true });
     },
     datasetMatch: () => datasetAudio ? { datasetId: 'dataset-1', sampleId: 'sample-1', audioPath: datasetAudio } : null,
     song: (id, userId) => id === 'song-1' && userId === 'owner' ? { audio_url: '/audio/library.wav', title: 'Library track' } : undefined,
@@ -241,7 +241,6 @@ test('section review uses the score and lyrics without starting transcription', 
     const result = f.service.reviewScore({ abc: 'X:1\n% verse\nV: Vocal\nC|', lyrics: '[Chorus]\nA line' });
     assert.deepEqual(result.sections, [{ label: 'verse', startBar: 1 }]);
     assert.match(result.lint.message, /score section 1 is verse, lyric tag 1 is Chorus/);
-    assert.equal(result.insertedLyrics, '[verse]\nA line');
     assert.deepEqual(f.counts(), { started: 0, cancelled: 0, runnerCalls: 0 });
     assert.throws(() => f.service.reviewScore({ abc: 5, lyrics: '' }), /ABC and lyrics must be strings/);
   } finally { f.close(); }
@@ -327,15 +326,24 @@ test('match sections retags from aligned times; save writes the dataset sidecar 
     const matched = await f.service.matchSections({ ...input, abc, lyrics }, 'owner');
     assert.equal(matched.lyrics, '[verse]\nfirst line\n\n[chorus]\nsecond line');
     assert.equal(matched.datasetSong, false);
-    await assert.rejects(f.service.saveDatasetLyrics({ ...input, lyrics: matched.lyrics }, 'owner'), /not a dataset song/);
+    await assert.rejects(f.service.saveDatasetDetails({ ...input, lyrics: matched.lyrics }, 'owner'), /not a dataset song/);
     f.setDatasetAudio(path.join(f.referenceDir, f.upload));
     const sidecar = path.join(f.referenceDir, path.parse(f.upload).name + '.txt');
-    fs.writeFileSync(sidecar, `caption: test\nbpm: 120\nlyrics:\n${lyrics}\n`);
-    const saved = await f.service.saveDatasetLyrics({ ...input, lyrics: matched.lyrics }, 'owner');
+    fs.writeFileSync(sidecar, `caption: test\nbpm: 120\nkey: E Major\nlyrics:\n${lyrics}\n`);
+    const saved = await f.service.saveDatasetDetails({ ...input, lyrics: matched.lyrics }, 'owner');
     assert.equal(saved.saved, true);
     assert.equal(readSidecar(sidecar).lyrics, matched.lyrics);
     assert.equal(readSidecar(sidecar).caption, 'test');
     assert.equal(readSidecar(`${sidecar}.bak`).lyrics, lyrics);
+
+    // The score's tempo and key replace the sidecar's; lyrics stay.
+    await assert.rejects(f.service.saveDatasetDetails({ ...input, bpm: 125, key: 'Bm' }, 'owner'), /key like/);
+    await assert.rejects(f.service.saveDatasetDetails({ ...input, bpm: 125 }, 'owner'), /key like/);
+    await assert.rejects(f.service.saveDatasetDetails(input, 'owner'), /Nothing to save/);
+    await f.service.saveDatasetDetails({ ...input, bpm: 125.4, key: 'B Minor' }, 'owner');
+    assert.equal(readSidecar(sidecar).bpm, '125');
+    assert.equal(readSidecar(sidecar).key, 'B Minor');
+    assert.equal(readSidecar(sidecar).lyrics, matched.lyrics);
   } finally { f.close(); }
 });
 

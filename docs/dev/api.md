@@ -87,9 +87,10 @@ next to the dataset audio. A cover generation records `lyricsSource:
 Completed transcription responses, supplied-ABC responses and saved dataset
 scores include `sections: [{ label, startBar }]`. The bar number starts at 1
 and counts the Vocal voice. `POST /sections/review` accepts `{ abc, lyrics }`
-and returns those sections, a non-blocking count/order verdict for the lyric
-`[Tag]` lines, and `insertedLyrics` with the score tags in order. Existing
-lyric lines stay under the first inserted tag.
+and returns those sections and a non-blocking count/order verdict for the
+lyric `[Tag]` lines. `POST /sections/save-dataset` writes `lyrics`, or `bpm`
+with `key` (such as `"B Minor"`), into the matched dataset song's sidecar and
+marks those label fields as user-set.
 
 Cover transcription first tries with the engine running. If SheetSage2 fails to load,
 the job waits for any active render, stops the engine, retries once, and restarts the

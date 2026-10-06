@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { insertScoreSectionTags, lintScoreSections, scoreSections } from './scoreSections.js';
+import { lintScoreSections, scoreSections } from './scoreSections.js';
 import { classifyYue2Score } from './scoreHealth.js';
 
 // Vocal lines and section markers copied from the first two groups of
@@ -36,12 +36,4 @@ test('lint reports count and order mismatches, and passes matching tags', () => 
   const order = lintScoreSections(sections, '[Verse]\nhello\n[Intro]\nworld');
   assert.equal(order.ok, false);
   assert.match(order.message, /score section 1 is intro, lyric tag 1 is Verse/);
-});
-
-test('insert writes score tags in order and keeps all lyric text under the first', () => {
-  const sections = scoreSections(transcribedExcerpt);
-  assert.equal(insertScoreSectionTags(sections, 'first line\nsecond line'),
-    '[intro]\nfirst line\nsecond line\n\n[verse]');
-  assert.equal(insertScoreSectionTags(sections, '[Old]\nfirst line\n[Other]\nsecond line'),
-    '[intro]\nfirst line\n\nsecond line\n\n[verse]');
 });

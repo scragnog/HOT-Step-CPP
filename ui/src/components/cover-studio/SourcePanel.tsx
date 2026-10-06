@@ -18,6 +18,8 @@ interface SourcePanelProps {
   metadata: AudioMetadata | null;
   analysis: AudioAnalysis | null;
   fromDataset?: boolean;
+  /** The score's tempo and key when they differ from the dataset song's. */
+  scoreDetails?: { bpm: number; key: string; saving: boolean; onSave: () => void } | null;
   isUploading: boolean;
   isAnalyzing: boolean;
   onFileSelected: (file: File) => void;
@@ -58,7 +60,7 @@ interface SourcePanelProps {
 
 export const SourcePanel: React.FC<SourcePanelProps> = ({
   yue2Mode = false,
-  sourceFileName, metadata, analysis, fromDataset = false, isUploading, isAnalyzing,
+  sourceFileName, metadata, analysis, fromDataset = false, scoreDetails, isUploading, isAnalyzing,
   onFileSelected, onClear,
   bpmCorrection, onBpmCorrectionChange,
   bpmOverride, onBpmOverrideChange,
@@ -363,6 +365,12 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
             </div>
           </div>
           {yue2Mode && <div className="space-y-2">
+            {scoreDetails && <div className="flex items-center justify-between gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+              <span>Score: {scoreDetails.bpm} BPM · {scoreDetails.key}</span>
+              <button type="button" onClick={scoreDetails.onSave} disabled={scoreDetails.saving}
+                title="Replace the dataset song's tempo and key with the score's. The current .txt is kept as a backup."
+                className="text-cyan-700 dark:text-cyan-300 disabled:opacity-40">{scoreDetails.saving ? 'Saving…' : 'Save to dataset'}</button>
+            </div>}
             <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
               BPM <input type="number" min={20} max={300} value={bpmOverride ?? analysis.bpm}
                 onChange={e => onBpmOverrideChange(Number(e.target.value) || null)}

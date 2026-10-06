@@ -39,7 +39,6 @@ export interface Yue2ScoreSection { label: string; startBar: number }
 export interface Yue2SectionReview {
   sections: Yue2ScoreSection[];
   lint: { ok: boolean; scoreCount: number; lyricCount: number; message: string };
-  insertedLyrics: string;
 }
 
 /** POST /sections/match: lyrics retagged from where the source vocal sings each block. */
@@ -112,7 +111,8 @@ export const yue2CoverApi = {
   }),
   matchSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>
     request<Yue2SectionMatch>('/sections/match', token, { method: 'POST', body: JSON.stringify(input) }),
-  saveDatasetLyrics: (input: Yue2CoverSourceInput & { lyrics: string }, token: string) =>
+  /** Lyrics, or the score's tempo and key, into the dataset song's .txt. */
+  saveDatasetDetails: (input: Yue2CoverSourceInput & ({ lyrics: string } | { bpm: number; key: string }), token: string) =>
     request<{ saved: true; file: string }>('/sections/save-dataset', token, { method: 'POST', body: JSON.stringify(input) }),
   sourceMetadata: (input: Yue2CoverSourceInput, token: string) => request<Yue2CoverDatasetMetadata>('/source-metadata', token, {
     method: 'POST', body: JSON.stringify(input),

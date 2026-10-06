@@ -1,4 +1,4 @@
-import { barsIn, isVocalVoice, lyricSectionTags, scoreBarSegments, withoutLyricSectionTags } from './scoreHealth.js';
+import { barsIn, isVocalVoice, lyricSectionTags, scoreBarSegments } from './scoreHealth.js';
 
 export interface Yue2ScoreSection { label: string; startBar: number }
 
@@ -43,12 +43,4 @@ export function lintScoreSections(sections: Yue2ScoreSection[], lyrics: string):
   const detail = firstMismatch < 0 ? ''
     : `; score section ${firstMismatch + 1} is ${sections[firstMismatch]?.label ?? 'missing'}, lyric tag ${firstMismatch + 1} is ${tags[firstMismatch] ?? 'missing'}`;
   return { ok: false, scoreCount, lyricCount, message: countText + detail };
-}
-
-/** Place every lyric line below the first new tag for manual redistribution. */
-export function insertScoreSectionTags(sections: Yue2ScoreSection[], lyrics: string): string {
-  if (!sections.length) return lyrics;
-  const body = withoutLyricSectionTags(lyrics).trim();
-  const [first, ...rest] = sections.map(section => `[${section.label}]`);
-  return `${first}${body ? `\n${body}` : ''}${rest.length ? `\n\n${rest.join('\n\n')}` : ''}`;
 }
