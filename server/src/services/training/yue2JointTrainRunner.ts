@@ -568,7 +568,7 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
       const saved = checkpointRecords(opts.outDir).find(c => c.step === step && c.arPath && c.narPath);
       if (saved) pushEvent(job, { type: 'metric', metric: 'milestone', ts: Date.now(), step,
         loss: state.lastLoss, path: saved.dir });
-      if (saved && opts.method === 'base-matched') state.onRung?.(step);
+      if (saved && (opts.method === 'base-matched' || !(opts.klCheckpointEvery! > 0))) state.onRung?.(step);
       if (thinning?.pendingDrop?.step === step) {
         // The folder exists under its final name now (see pendingDrop).
         if (saved) thinning.disposable = { step, dir: saved.dir, recon: thinning.pendingDrop.recon };
@@ -697,8 +697,8 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
   if (o.preview?.parallel) {
     const vramMB = selectedGpuMemoryMB(o.gpuUuid);
     if (vramMB === null || vramMB < PARALLEL_PREVIEW_MIN_VRAM_MB) {
-      // Base-matched has no KL marks to pause on: pause at each save instead.
-      const everySteps = o.method === 'base-matched' && !(o.klCheckpointEvery! > 0) && !(o.preview.everySteps > 0) ? o.saveEvery : o.preview.everySteps;
+      // No KL marks to pause on: pause at each save instead.
+      const everySteps = !(o.klCheckpointEvery! > 0) && !(o.preview.everySteps > 0) ? o.saveEvery : o.preview.everySteps;
       o.preview = { ...o.preview, parallel: false, everySteps };
       log(job, 'info', `Previews will pause training: rendering alongside it needs ${PARALLEL_PREVIEW_MIN_VRAM_MB / 1024} GB of VRAM, this card has ${vramMB === null ? 'an unknown amount' : `${(vramMB / 1024).toFixed(0)} GB`}`);
     }
@@ -711,12 +711,11 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
   try {
     log(job, 'info', `Starting YuE2 joint training (${o.device})`);
     nativeAttempted = true;
-    // Previews pause the run every N steps, or at every KL rung of a planner
-    // refinement (the engine pauses after each rung checkpoint).
-    // A base-matched run has no KL rungs: every saved checkpoint is one, and
-    // the relay fires onRung from the checkpoint event (2026-09-27).
-    const rungPreviews = (o.klCheckpointEvery ?? 0) > 0 || o.method === 'base-matched';
-    const preview = withGeneratedPreviewLyrics(job, o.preview?.enabled && (o.preview.everySteps > 0 || rungPreviews) ? o.preview : undefined);
+    // Previews pause the run every N steps, or render alongside it at every
+    // rung: a KL rung of a planner refinement, or, for a run without KL rungs
+    // (base-matched, or Legacy without a refinement), every saved checkpoint,
+    // which the relay fires onRung for (2026-09-27, Legacy 2026-10-06).
+    const preview = withGeneratedPreviewLyrics(job, o.preview?.enabled && (o.preview.everySteps > 0 || o.preview.parallel || (o.klCheckpointEvery ?? 0) > 0 || o.method === 'base-matched') ? o.preview : undefined);
     // Plan checks pause the run like previews do; the pause cadence is the
     // check's while the planner is live, the preview's once it is frozen.
     const planCheck = o.planCheck && o.planCheck.every > 0 && (o.narExtraSteps ?? 0) > 0 ? o.planCheck : undefined;
@@ -764,7 +763,7 @@ export async function runYue2JointTrainJob(job: TrainingJob): Promise<void> {
       const segment = { ...o, outDir: segmentOut, resume: resume || undefined, pauseAt: pauseAt < o.steps ? pauseAt : undefined, freezePlannerNow: freezeNext };
       freezeNext = false;
       const state: RelayState = { fatalMessage: '', doneSeen: false, lastStep: step, targetStopped: false, totalSteps: o.steps };
-      if (preview?.parallel && rungPreviews) {
+      if (preview?.parallel) {
         // Parallel rung previews: render each rung's takes while training
         // goes on, one render at a time, and settle the chain before the job ends.
         state.onRung = rungStep => {

@@ -3812,9 +3812,9 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
     // keeps the existing AITK recipe fast while making the checkpoint contract
     // fully recorded for runs that choose it.
     const preview = parseYue2JointPreviewOptions(b.preview, saveEvery);
-    // Base-matched ladders render in parallel at every checkpoint; a pause
-    // cadence would segment the run for nothing, so it is cleared here.
-    if (method === 'base-matched' && preview.enabled && preview.parallel) preview.everySteps = 0;
+    // Parallel ladders render at every checkpoint; a pause cadence would
+    // segment the run for nothing, so it is cleared here.
+    if (preview.enabled && preview.parallel) preview.everySteps = 0;
     const alignmentEnabled = b.lyricTiming === undefined
       ? (b.alignmentEnabled === undefined ? true : b.alignmentEnabled === true)
       : b.lyricTiming === true;
@@ -3828,7 +3828,7 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       ...(resume ? { resume } : {}), datasetSlug: ds.slug,
       spawnEnv: gpuEnv,
       trainingMethod: 'aitk', recipeVersion: 'aitk-yue2-2026-09-16',
-      preview: preview.enabled && (preview.everySteps > 0 || b.refinePlanner === true || (method === 'base-matched' && preview.parallel)) ? preview : { ...preview, enabled: false },
+      preview: preview.enabled && (preview.everySteps > 0 || b.refinePlanner === true || preview.parallel) ? preview : { ...preview, enabled: false },
       alignment,
       rank, alpha: alphaRaw,
       ...(adapterType === 'lokr' ? { adapterType, ...(lokrDim !== undefined ? { lokrDim } : {}), ...(lokrFactor !== undefined ? { lokrFactor } : {}) } : {}),
