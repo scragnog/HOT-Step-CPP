@@ -6,8 +6,9 @@ import test from 'node:test';
 import {
   YUE2_JOINT_PREVIEW_DEFAULTS,
   listYue2JointPreviews, parseYue2JointPreviewOptions, recordYue2JointPreview,
-  renderYue2JointPreview, resolveYue2JointPreview, Yue2PreviewCleanupError,
+  pruneYue2JointPreviews, renderYue2JointPreview, resolveYue2JointPreview, Yue2PreviewCleanupError, yue2JointPreviewMp3,
 } from './yue2JointPreview.js';
+import { getFFmpegPath } from '../../config.js';
 import { checkpointRecords } from './yue2AitkRuns.js';
 
 test('preview options default off and clamp bounded values', () => {
@@ -183,4 +184,27 @@ test('renderer aborts before synth and reports cleanup failure', async () => {
     (err: unknown) => err instanceof Yue2PreviewCleanupError);
   assert.equal(calls.some(c => c.name === 'synth'), false);
   assert.equal(calls.some(c => c.name === 'unload'), true);
+});
+
+test('a preview gets one cached MP3 beside its WAV, and pruning removes both', async () => {
+  if (!getFFmpegPath()) return;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-mp3-'));
+  fs.mkdirSync(path.join(root, 'previews'));
+  const rate = 48000, frames = rate / 2;
+  const wav = Buffer.alloc(44 + frames * 2);
+  wav.write('RIFF', 0); wav.writeUInt32LE(36 + frames * 2, 4); wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(rate, 24); wav.writeUInt32LE(rate * 2, 28); wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34);
+  wav.write('data', 36); wav.writeUInt32LE(frames * 2, 40);
+  const file = path.join(root, 'previews', 'step-10-artist.wav');
+  fs.writeFileSync(file, wav);
+  const [a, b] = await Promise.all([yue2JointPreviewMp3(file), yue2JointPreviewMp3(file)]);
+  assert.equal(a, file.replace(/\.wav$/, '.mp3'));
+  assert.equal(b, a);
+  assert.ok(fs.statSync(a!).size > 0);
+  recordYue2JointPreview(root, { id: 'p1', step: 10, kind: 'artist', status: 'done', file: 'step-10-artist.wav', seconds: 1, seed: 1, previewMaxFrames: 25, createdAt: 1, updatedAt: 1 } as Parameters<typeof recordYue2JointPreview>[1]);
+  pruneYue2JointPreviews(root, 20);
+  assert.equal(fs.existsSync(file), false);
+  assert.equal(fs.existsSync(a!), false);
+  fs.rmSync(root, { recursive: true, force: true });
 });

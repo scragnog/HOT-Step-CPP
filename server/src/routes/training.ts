@@ -146,7 +146,7 @@ import { jointRunForAdapter, listYue2AitkRuns, yue2JointOutputDirectory, yue2Rev
 import { deleteYue2Run } from '../services/training/yue2Mirror.js';
 import { clearPreparedCaches, listPreparedCaches, YUE2_CORE_CACHE } from '../services/training/preparedDataReset.js';
 import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
-import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions, renderYue2JointPreview } from '../services/training/yue2JointPreview.js';
+import { listYue2JointPreviews, resolveYue2JointPreview, parseYue2JointPreviewOptions, renderYue2JointPreview, yue2JointPreviewMp3 } from '../services/training/yue2JointPreview.js';
 import { runOnGpuLane } from '../services/generation/gpuLane.js';
 import { listYue2RungScores, scoreYue2Rung, yue2RungScoresCsv, getYue2AlbumScore, scoreYue2Album } from '../services/training/yue2RungScores.js';
 import { calibrateYue2Length, ensureDatasetProfile, noteYue2TrainLog, type Yue2Calibration } from '../services/training/datasetProfile.js';
@@ -4333,8 +4333,9 @@ router.post('/datasets/:id/yue2-joint-previews/render', async (req: Request, res
   }
 });
 
-/** GET /datasets/:id/yue2-joint-previews/audio — Range-capable WAV stream. */
-router.get('/datasets/:id/yue2-joint-previews/audio', (req: Request, res: Response) => {
+/** GET /datasets/:id/yue2-joint-previews/audio — Range-capable WAV stream;
+ * `format=mp3` serves the cached 192 kbps copy the ladder player uses. */
+router.get('/datasets/:id/yue2-joint-previews/audio', async (req: Request, res: Response) => {
   try {
     const ds = repo.getDataset(req.params.id as string);
     if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
@@ -4343,6 +4344,10 @@ router.get('/datasets/:id/yue2-joint-previews/audio', (req: Request, res: Respon
     const run = listYue2AitkRuns(ds.id, ds.slug).find(r => r.jobId === asked);
     const resolved = run ? resolveYue2JointPreview(run.output, file) : null;
     if (!resolved) { res.status(404).json({ error: 'Preview audio not found' }); return; }
+    if (req.query.format === 'mp3') {
+      const mp3 = await yue2JointPreviewMp3(resolved);
+      if (mp3) { res.type('audio/mpeg').sendFile(mp3); return; }
+    }
     res.type('audio/wav').sendFile(resolved);
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });

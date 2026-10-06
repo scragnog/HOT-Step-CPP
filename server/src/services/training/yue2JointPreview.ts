@@ -4,9 +4,12 @@
 import fs from 'fs';
 import path from 'path';
 import { randomInt, randomUUID } from 'crypto';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 
 import type { Yue2JointPreviewOptions } from './types.js';
 import { aceClient } from '../aceClient.js';
+import { getFFmpegPath } from '../../config.js';
 import { yue2PersistedSelection, type Yue2PersistedSelection } from '../backends/yue2/index.js';
 import { yue2SelectModel, yue2Synth, yue2Warm, yue2Unload, yue2FinalDetail, splitMultipartMixed, type Yue2Selection } from '../backends/yue2/client.js';
 import { classifyYue2Score, yue2PlanUsable, yue2PickPlan, yue2StyleNormsForRun, type Yue2ScoreLegibility } from '../backends/yue2/scoreHealth.js';
@@ -138,6 +141,7 @@ export function pruneYue2JointPreviews(output: string, keepStep: number): number
   for (const r of all) {
     if (r.step === keepStep || !r.file) continue;
     fs.rmSync(path.join(output, 'previews', r.file), { force: true });
+    fs.rmSync(path.join(output, 'previews', r.file.replace(/\.wav$/i, '.mp3')), { force: true });
     delete r.file;
     r.updatedAt = Date.now();
     gone++;
@@ -147,6 +151,30 @@ export function pruneYue2JointPreviews(output: string, keepStep: number): number
 }
 export function listYue2JointPreviews(output: string): Yue2JointPreviewRecord[] {
   return read(output).sort((a, b) => b.step - a.step || b.updatedAt - a.updatedAt);
+}
+const execFileAsync = promisify(execFile);
+const mp3Encodes = new Map<string, Promise<string | null>>();
+/** A preview as a 192 kbps MP3 beside its WAV, for the ladder player. A 300 s
+ *  float WAV is ~47 MB and holds one of Chrome's six connections per host for
+ *  as long as it streams, which queued every other request on the page. Encoded
+ *  on first request and kept; null without ffmpeg or on failure, so the caller
+ *  serves the WAV. Scoring, cleanup and downloads keep using the WAV. */
+export function yue2JointPreviewMp3(wav: string): Promise<string | null> {
+  const mp3 = wav.replace(/\.wav$/i, '.mp3');
+  try { if (fs.statSync(mp3).mtimeMs >= fs.statSync(wav).mtimeMs) return Promise.resolve(mp3); } catch { /* not encoded yet */ }
+  let pending = mp3Encodes.get(mp3);
+  if (!pending) {
+    const ffmpeg = getFFmpegPath();
+    const tmp = `${mp3}.${process.pid}.tmp`;
+    pending = (ffmpeg
+      ? execFileAsync(ffmpeg, ['-y', '-loglevel', 'error', '-i', wav, '-c:a', 'libmp3lame', '-b:a', '192k', '-f', 'mp3', tmp], { timeout: 120_000 })
+        .then(() => { fs.renameSync(tmp, mp3); return mp3; })
+        .catch(() => { fs.rmSync(tmp, { force: true }); return null; })
+      : Promise.resolve(null))
+      .finally(() => mp3Encodes.delete(mp3));
+    mp3Encodes.set(mp3, pending);
+  }
+  return pending;
 }
 export function resolveYue2JointPreview(output: string, file: string): string | null {
   if (!/^[A-Za-z0-9._-]+\.wav$/i.test(file)) return null;

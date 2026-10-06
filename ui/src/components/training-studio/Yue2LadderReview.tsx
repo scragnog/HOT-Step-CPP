@@ -7,7 +7,7 @@
 // and the Refine tab (KL-rung ladders of the earlier recipe). Extracted from
 // RefinePanel; the scoring maths mirrors server/src/services/training/
 // yue2BestRung.ts, so change both together.
-import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Toggle } from '../settings/SettingsPrimitives';
@@ -96,6 +96,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
 
   // Scores per rung (by step); notes are saved on blur.
   const [scores, setScores] = useState<Record<number, Yue2RungScore>>({});
+  const scoreSeq = useRef<Record<number, number>>({});
   const [noteDraft, setNoteDraft] = useState<Record<number, string>>({});
   useEffect(() => {
     setScores({}); setNoteDraft({});
@@ -103,8 +104,19 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
   }, [datasetId, runId]);
   const score = async (step: number, patch: { likeness?: number | null; corruption?: number | null; notes?: string }) => {
     if (!datasetId || !runId) return;
-    try { const r = await scoreYue2Rung(datasetId, { refineRun: runId, step, ...patch, blind: !!blind, blindLabel: blind ? labelFor(step) : '' }); setScores(prev => ({ ...prev, [step]: r.score })); }
-    catch (err) { fail(err); }
+    // Show the click at once: the save can queue behind other requests for
+    // seconds. Only the newest save for a rung writes back, so an earlier
+    // reply cannot undo a later click; a failure reloads the stored scores.
+    const seq = (scoreSeq.current[step] ?? 0) + 1;
+    scoreSeq.current[step] = seq;
+    setScores(prev => ({ ...prev, [step]: { ...prev[step], ...patch } as Yue2RungScore }));
+    try {
+      const r = await scoreYue2Rung(datasetId, { refineRun: runId, step, ...patch, blind: !!blind, blindLabel: blind ? labelFor(step) : '' });
+      if (scoreSeq.current[step] === seq) setScores(prev => ({ ...prev, [step]: r.score }));
+    } catch (err) {
+      fail(err);
+      void listYue2RungScores(datasetId, runId).then(r => setScores(Object.fromEntries(r.scores.map(s => [s.step, s])))).catch(() => {});
+    }
   };
 
   // The album verdict: one score per run, beside the per-rung ones.
@@ -319,7 +331,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
             </div>}
             {mine.length > 0 && <div className="mt-2 flex flex-col gap-2">
               {mine.map((p, i) => p.audioUrl && p.status === 'done'
-                ? <PreviewPlayer key={p.id} src={p.audioUrl} downloadName={`${datasetName || 'preview'}_${blind ? `rung${labelFor(c.step)}` : `step${c.step}`}_take${i + 1}_seed${p.seed}.wav`} label={`${t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}${p.sheet === 'own' ? ` · ${t('trainingStudio.refine.sheetOwn', "this rung's plan")}` : p.sheet === 'shared' ? ` · ${blind ? t('trainingStudio.refine.blindSharedSheet', 'shared sheet from Rung {{label}}', { label: labelFor(p.sheetStep ?? 0) || '?' }) : t('trainingStudio.refine.sheetShared', 'shared sheet from step {{s}}', { s: p.sheetStep })}` : ''}${p.seedKind === 'fixed' ? ` · ${t('trainingStudio.refine.seedFixed', 'same seed on every rung: compare rungs on this one')}` : p.seedKind === 'random' ? ` · ${t('trainingStudio.refine.seedRandom', 'random seed: a new song, not comparable with other rungs')}` : ''}`} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}${p.score?.flags?.length ? ` · ⚠ ${p.score.flags.join('; ')}` : ''}${p.plan ? ` · planner replans ${p.plan.attempts.length - 1}` : ''}${typeof p.composerReplans === 'number' ? ` · composer replans ${p.composerReplans}` : ''}`} />
+                ? <PreviewPlayer key={p.id} src={`${p.audioUrl}&format=mp3`} downloadSrc={p.audioUrl} downloadName={`${datasetName || 'preview'}_${blind ? `rung${labelFor(c.step)}` : `step${c.step}`}_take${i + 1}_seed${p.seed}.wav`} label={`${t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}${p.sheet === 'own' ? ` · ${t('trainingStudio.refine.sheetOwn', "this rung's plan")}` : p.sheet === 'shared' ? ` · ${blind ? t('trainingStudio.refine.blindSharedSheet', 'shared sheet from Rung {{label}}', { label: labelFor(p.sheetStep ?? 0) || '?' }) : t('trainingStudio.refine.sheetShared', 'shared sheet from step {{s}}', { s: p.sheetStep })}` : ''}${p.seedKind === 'fixed' ? ` · ${t('trainingStudio.refine.seedFixed', 'same seed on every rung: compare rungs on this one')}` : p.seedKind === 'random' ? ` · ${t('trainingStudio.refine.seedRandom', 'random seed: a new song, not comparable with other rungs')}` : ''}`} sublabel={`${p.seconds} s · seed ${p.seed}${p.endReason && p.endReason !== 'completed' ? ` · ${p.endReason}` : ''}${p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}${p.score?.flags?.length ? ` · ⚠ ${p.score.flags.join('; ')}` : ''}${p.plan ? ` · planner replans ${p.plan.attempts.length - 1}` : ''}${typeof p.composerReplans === 'number' ? ` · composer replans ${p.composerReplans}` : ''}`} />
                 : <div key={p.id} className="text-[11px] text-zinc-500">{t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}: {p.status === 'done' && !p.file ? t('trainingStudio.refine.audioPruned', 'audio removed by cleanup') : p.status}{p.error ? ` — ${p.error}` : ''}{p.score?.verdict ? ` · plan ${p.score.verdict}` : ''}{p.score?.flags?.length ? ` · ${p.score.flags[0]}` : ''}</div>)}
             </div>}
           </div>;

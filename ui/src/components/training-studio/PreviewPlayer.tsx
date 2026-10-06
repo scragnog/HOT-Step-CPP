@@ -15,7 +15,9 @@ const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).p
 // their position.
 const RELEASE = 'preview-player-release';
 
-export const PreviewPlayer: React.FC<{ src: string; label?: string; sublabel?: string; downloadName?: string }> = ({ src, label, sublabel, downloadName }) => {
+// `downloadSrc` lets the player stream a small MP3 while the download link
+// still saves the original WAV.
+export const PreviewPlayer: React.FC<{ src: string; label?: string; sublabel?: string; downloadName?: string; downloadSrc?: string }> = ({ src, label, sublabel, downloadName, downloadSrc }) => {
   const audio = useRef<HTMLAudioElement | null>(null);
   const resumeAt = useRef(0);
   const [playing, setPlaying] = useState(false);
@@ -79,7 +81,7 @@ export const PreviewPlayer: React.FC<{ src: string; label?: string; sublabel?: s
         <button type="button" onClick={() => seek(time + 15)} className="px-2 py-0.5 rounded border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10">+15 s</button>
         {jumps.map(j => <button key={j.f} type="button" onClick={() => seek(j.t)} className="px-2 py-0.5 rounded border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10">{fmt(j.t)}</button>)}
         <span className="ml-1 text-zinc-500">shaded = last third</span>
-        {downloadName && <a href={src} download={downloadName} className="ml-auto px-2 py-0.5 rounded border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 flex items-center gap-1"><Download size={10} />download</a>}
+        {downloadName && <a href={downloadSrc ?? src} download={downloadName} className="ml-auto px-2 py-0.5 rounded border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 flex items-center gap-1"><Download size={10} />download</a>}
       </div>
     </div>
   );
