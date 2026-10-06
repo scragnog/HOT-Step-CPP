@@ -205,10 +205,11 @@ const LOKR_STOP = { targetKl: 1.0, plannerLrScale: 0.6, narLrScale: 1 };
 // Two deliberate gaps: lyric timing stays off (it needs stems + alignment
 // first), and a cache cut for base-matched keeps its loudness on Start.
 // It stops at the planner's KL target, so steps is a cap; minutes assumes
-// the ~250 updates of 1 song a Prodigy run took to KL 1.2.
+// the ~250 updates of 1 song a Prodigy run took to KL 1.2. Target 1.0
+// since 2026-10-06: past ~1 the planner lost the lead sheet's tempo late in a take.
 const LEGACY_VALUES: Partial<Yue2JointTrainRequest> = {
   method: 'tuned', optimizer: 'prodigy', cautious: true, lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
-  stopMode: 'kl', targetKl: 1.2, targetKlMode: 'trend', captionDropout: 0.5,
+  stopMode: 'kl', targetKl: 1.0, targetKlMode: 'trend', captionDropout: 0.5,
   // Decoder phase on by default (2026-10-06): the planner freezes at the KL
   // target and the decoder trains on to the reconstruction plateau.
   narExtraSteps: 250, reconStop: 0.005, reconStopWindow: 10, reconKeepDelta: 0.003,
@@ -1225,7 +1226,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             <span className="text-xs text-zinc-500">{p.key === 'legacy' ? t('trainingStudio.yue2.method.presetLegacySteps', 'up to {{steps}} × 1 song', { steps: p.steps }) : `${p.steps} × ${p.gradAccum} songs`} · {p.key === 'balanced' ? t('trainingStudio.yue2.method.presetBaseline', '1× time (baseline)') : t('trainingStudio.yue2.method.presetRelative', '{{ratio}} the time', { ratio: presetTime(p) })}</span>
           </button>)}
         </div>
-        {activePreset(form) === 'legacy' && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.presetLegacyNote', 'Legacy runs the previous recipe (Prodigy, one song per update, stops at planner KL 1.2, LoKr 64). It may train faster, but quality will not be as good as the new presets: they fixed the endings, structure and late-run degradation this recipe has. Lyric timing is off and the audio cache is not re-cut for it, so it is close to the old recipe rather than exact.')}</p>}
+        {activePreset(form) === 'legacy' && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.presetLegacyNote', 'Legacy runs the previous recipe (Prodigy, one song per update, stops at planner KL 1.0, LoKr 256). It may train faster, but quality will not be as good as the new presets: they fixed the endings, structure and late-run degradation this recipe has. Lyric timing is off and the audio cache is not re-cut for it, so it is close to the old recipe rather than exact.')}</p>}
         <div className="mt-3 flex items-center gap-2 flex-wrap">
           <ParamLabel label={t('trainingStudio.yue2.method.presets', 'Your presets')}
             className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
@@ -1481,7 +1482,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               </label>
               {kl && num('targetKl', t('trainingStudio.yue2.method.targetKl', 'AR KL target'),
                 t('trainingStudio.yue2.method.targetKlFieldInfo', 'How far the planner may move from the base model before the run stops (or the planner freezes, with the decoder phase below on). Higher trains a stronger likeness but risks planner damage (looping outros); lower stays safer but weaker.'),
-                t('trainingStudio.yue2.method.targetKlLegacyMeta', 'Legacy 1.2'))}
+                t('trainingStudio.yue2.method.targetKlLegacyMeta', 'Legacy 1.0'))}
               {kl && <label className="flex flex-col gap-1">
                 <ParamLabel label={t('trainingStudio.yue2.method.targetKlMode', 'KL reading')} className={label}
                   info={t('trainingStudio.yue2.method.targetKlModeInfo', 'How the KL target is read off the training curve. The 30-step trend line reacts at once to where the curve is heading; the 20-step mean is smoother but lags about 10 steps, so the run trains a little past the target before it notices.')} />

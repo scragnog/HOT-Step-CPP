@@ -76,7 +76,7 @@ Pick a preset. Fast, Balanced and Thorough are the same recipe and all train a d
 
 | Preset | Updates | Songs per update | Decoder | Checkpoint every | Time (card shows it relative to Balanced) |
 |---|---|---|---|---|---|
-| Legacy | up to 500 (stops at planner KL 1.2) | 1 | 60 s crops | 25 updates | ~20-25 min, varies |
+| Legacy | up to 500 (stops at planner KL 1.0) | 1 | 60 s crops | 25 updates | ~20-25 min, varies |
 | Fast | 100 | 4 | 60 s crops | 10 updates | ~30 min |
 | Balanced (default) | 200 | 4 | 60 s crops | 20 updates | ~1 h |
 | Thorough | 300 | 8 | 60 s crops | 30 updates | ~3 h |
