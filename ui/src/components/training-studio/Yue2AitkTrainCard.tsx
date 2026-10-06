@@ -212,7 +212,7 @@ const LEGACY_VALUES: Partial<Yue2JointTrainRequest> = {
   // Decoder phase on by default (2026-10-06): the planner freezes at the KL
   // target and the decoder trains on to the reconstruction plateau.
   narExtraSteps: 250, reconStop: 0.005, reconStopWindow: 10, reconKeepDelta: 0.003,
-  spikeFactor: 5, spikeStop: 3, spikeStopWindow: 20, adapterType: 'lokr', lokrDim: 64, lokrFactor: 4, alpha: 256,
+  spikeFactor: 5, spikeStop: 3, spikeStopWindow: 20, adapterType: 'lokr', lokrDim: 256, lokrFactor: 4, alpha: 256,
   // Base-matched knobs back to the engine's own defaults.
   warmup: undefined, weightDecay: undefined, beta2: undefined, abcDropout: undefined, arLossWeight: undefined,
   textDropout: undefined, lyricDropout: undefined, bothDropout: undefined, arCropFrames: undefined,
@@ -224,7 +224,7 @@ const BASE_MATCHED_VALUES: Partial<Yue2JointTrainRequest> = {
   ...Object.fromEntries(TUNED_KEYS.map(key => [key, undefined])),
 };
 const PRESETS = [
-  { key: 'legacy', label: 'Legacy', steps: 500, gradAccum: 1, narCropFrames: 1500, saveEvery: 25, lokrDim: 64, minutes: 22 },
+  { key: 'legacy', label: 'Legacy', steps: 500, gradAccum: 1, narCropFrames: 1500, saveEvery: 25, lokrDim: 256, minutes: 22 },
   { key: 'fast', label: 'Fast', steps: 100, gradAccum: 4, narCropFrames: 1500, saveEvery: 10, lokrDim: 128, minutes: 28 },
   { key: 'balanced', label: 'Balanced', steps: 200, gradAccum: 4, narCropFrames: 1500, saveEvery: 20, lokrDim: 128, minutes: 57 },
   { key: 'thorough', label: 'Thorough', steps: 300, gradAccum: 8, narCropFrames: 1500, saveEvery: 30, lokrDim: 128, minutes: 170 },
