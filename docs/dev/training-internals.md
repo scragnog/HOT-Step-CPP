@@ -81,7 +81,7 @@ AdamW steps, old vs new binary, identical losses and adapter sha256s, 2026-09-27
 | Text and lyrics dropped separately or together | `--text-dropout --lyric-dropout --both-dropout` | 0.1 / 0.1 / 0.1 (rates are not published) | caption dropout 0.5 instead |
 | Whole songs, no temporal split | `--nar-crop-frames` | 1500 (60 s crop), a deliberate departure since 2026-09-29: a blind test scored it level with whole songs at about 40% less time. `0` trains whole songs (about 12 GB VRAM, 11-15 s a step on a 4-minute song) | 1500 |
 | Whole songs for the planner | `--ar-crop-frames` | 0 (whole song). Opt-in speed lever: the planner trains on the first N frames only (the reference trainer's `ar_max_tokens`, a prefix because the causal forward needs every earlier frame anyway). It never sees `MUSIC_END`, so it trains no endings. Ignored when the decoder trains whole songs (`--nar-crop-frames 0`) or the song is shorter than the decoder crop; refuses `--cursor-weight` above 0. Unheard | 0 |
-| No KL anchor, no stops | `--kl-weight 0`, fixed steps | the frozen teacher forward is skipped when nothing reads the KL | KL 0.2 + target |
+| No KL anchor, no stops | `--kl-weight 0`, fixed steps | `--nar-drift` is passed anyway (since 2026-10-06), so the frozen teacher still runs for the planner's KL reading and the checkpoint meters (recon, drift): about 7% of every update, read-only | KL 0.2 + target |
 | Warmup + cosine | `--warmup`, `--lr-schedule cosine-floor --lr-floor 0.1` | 3% of steps, floor 0.1 | wsd |
 
 Condition dropout needs prefix variants the importer now always emits (`prefix_{full,off}_{nolyrics,notext,uncond}_ids`);
