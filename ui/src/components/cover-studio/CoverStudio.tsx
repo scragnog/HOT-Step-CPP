@@ -1025,7 +1025,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       )}
 
       {/* Main workspace */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* Scrolls sideways when the three panels' minimum widths don't fit. */}
+      <div className="flex-1 flex overflow-x-auto overflow-y-hidden">
         {/* Left: Source Audio */}
         <SourcePanel
           yue2Mode={yue2Mode}
