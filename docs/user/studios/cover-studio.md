@@ -68,13 +68,15 @@ have to make.
    **Match sections to score** does the arranging for you. It separates the
    source's vocal (once per source, then cached), finds where each lyric block
    is sung, and retags each block with the score section it starts in. It
-   never changes a word. A tag that already names the right kind of section
-   stays as it is, so `[Verse 1]` over a `verse` section is left alone. A
+   never changes a word. Tags are written exactly as the score labels them,
+   so `[Verse 1]` over a `verse` section becomes `[verse]` and the result
+   passes the section check. A
    chorus (or refrain or hook) the lyrics wrote only once is copied into the
    later sections of that kind. Verses are never copied: each has its own words.
-   Sections with no vocal get an empty tag such as `[Interlude]`, which
-   replaces the lyrics' own empty tags. New tags follow the case your lyrics
-   already use. A block that starts late in a section, starts in a section
+   Sections with no vocal get an empty tag such as `[interlude]`, which
+   replaces the lyrics' own empty tags. A note held over into a section's
+   first bar, such as the last word of a chorus ringing into the outro, does
+   not count as singing there. A block that starts late in a section, starts in a section
    where the score has no vocal, or that the aligner could not place, keeps its
    tag and position and is listed for you to check.
    Nothing changes until you press **Apply** in the before/after view. For a

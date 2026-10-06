@@ -325,7 +325,7 @@ test('match sections retags from aligned times; save writes the dataset sidecar 
     const lyrics = '[Verse 1]\nfirst line\n[Hook]\nsecond line';
     f.setAlign([['first', 0.2], ['second', 6.1]]);
     const matched = await f.service.matchSections({ ...input, abc, lyrics }, 'owner');
-    assert.equal(matched.lyrics, '[Verse 1]\nfirst line\n\n[Chorus]\nsecond line');
+    assert.equal(matched.lyrics, '[verse]\nfirst line\n\n[chorus]\nsecond line');
     assert.equal(matched.datasetSong, false);
     await assert.rejects(f.service.saveDatasetLyrics({ ...input, lyrics: matched.lyrics }, 'owner'), /not a dataset song/);
     f.setDatasetAudio(path.join(f.referenceDir, f.upload));

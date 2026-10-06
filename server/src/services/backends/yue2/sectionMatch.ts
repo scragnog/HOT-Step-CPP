@@ -2,15 +2,17 @@
 // lyric blocks with the ABC score's section labels, using where each block is
 // actually sung in the SOURCE vocal stem (MMS_FA word times, POST /yue2/align).
 //
-// Words are never edited. A block keeps its tag when it already names the
-// same kind of section; a block the aligner is unsure of keeps its tag and
-// its place and is flagged, and so does a block that seems to start in a
-// section with no Vocal note. A sung chorus-type section (chorus, refrain,
+// Words are never edited. Every placed block gets the score's label exactly
+// as written ([verse], not [Verse 1]), so the result passes the section
+// check; a block the aligner is unsure of keeps its tag and its place and is
+// flagged, and so does a block that seems to start in a section with no
+// Vocal note. A sung chorus-type section (chorus, refrain,
 // hook) with no block gets a copy of the last block of that kind, a chorus the
 // lyrics wrote once, but only when no unsure block sits in that gap, since
 // that block may be the one sung there. Verses are never copied: each has its
 // own words. Sections with no Vocal note get an empty tag, and the lyrics' own
-// empty tags are dropped in their favour.
+// empty tags are dropped in their favour. A section's first bar does not count
+// as sung: it often holds the previous section's last note.
 
 import type { Yue2AlignWord } from './align.js';
 import { sectionKind } from './coverDrift.js';
@@ -88,13 +90,6 @@ function firstWord(block: Block, words: Yue2AlignWord[]): number | null {
   return median(timed.slice(0, 3).map(word => word.start));
 }
 
-/** Write a score label in the lyrics' own tag style: Title Case when most
- *  existing tags start upper-case, else the score's lower case. Every lyric
- *  reader here matches tags case-blind, so this is cosmetic. */
-function styled(label: string, titleCase: boolean): string {
-  return titleCase ? label.replace(/(^|[\s-])(\p{L})/gu, (_, sep, ch) => sep + ch.toUpperCase()) : label;
-}
-
 export function matchSectionsToScore(abc: string, lyrics: string, words: Yue2AlignWord[]): SectionMatchResult {
   const sections = scoreSections(abc);
   if (!sections.length) throw new Error('The score has no section labels.');
@@ -102,14 +97,13 @@ export function matchSectionsToScore(abc: string, lyrics: string, words: Yue2Ali
   const onsets = scoreVocalNoteOnsets(abc, bars);
   const spans = sections.map((section, i) => {
     const endBar = i + 1 < sections.length ? sections[i + 1].startBar - 1 : bars.length;
+    const firstSungBar = endBar > section.startBar ? section.startBar : section.startBar - 1;
     return { label: section.label.trim(), start: bars[section.startBar - 1]?.start ?? 0,
-      sung: onsets.slice(section.startBar - 1, endBar).some(onset => onset !== null) };
+      sung: onsets.slice(firstSungBar, endBar).some(onset => onset !== null) };
   });
   const barSeconds = bars[0].end - bars[0].start;
   const blocks = splitLyricBlocks(lyrics);
-  const tags = blocks.flatMap(block => block.tag ? [block.tag] : []);
-  const titleCase = tags.filter(tag => /^\p{Lu}/u.test(tag)).length * 2 > tags.length;
-  const label = (i: number) => styled(spans[i].label, titleCase);
+  const label = (i: number) => spans[i].label;
   const songEnd = bars[bars.length - 1].end;
   const spanEnd = (i: number) => i + 1 < spans.length ? spans[i + 1].start : songEnd;
   // Index of the section a time falls in.
@@ -170,8 +164,9 @@ export function matchSectionsToScore(abc: string, lyrics: string, words: Yue2Ali
     // but only straight after it: never under an unsure block or a filler.
     const mergeable = p.section !== null && p.section === current && lastWasPlaced;
     if (p.section === null || (p.section === current && !mergeable)) {
-      // Instrumental sections before where it seems to start come first.
-      if (p.sung !== null) fill(containing(p.sung), true);
+      // Instrumental sections up to where it seems to start, including the
+      // one it lands in, come first.
+      if (p.sung !== null) fill(containing(p.sung + PICKUP_BARS * barSeconds) + 1, true);
       out.push(block.tag ? `[${block.tag}]\n${block.body}` : block.body);
       report.push({ index: i + 1, tag: block.tag, newTag: block.tag, section: null, firstWordSeconds: p.sung,
         status: 'unsure' });
@@ -186,8 +181,8 @@ export function matchSectionsToScore(abc: string, lyrics: string, words: Yue2Ali
       return;
     }
     fill(s);
-    const keep = !!block.tag && sectionKind(block.tag) === sectionKind(spans[s].label);
-    const newTag = keep ? block.tag! : label(s);
+    const newTag = label(s);
+    const keep = block.tag === newTag;
     out.push(`[${newTag}]\n${block.body}`);
     report.push({ index: i + 1, tag: block.tag, newTag, section: s + 1, firstWordSeconds: p.sung,
       status: keep ? 'kept' : 'renamed' });

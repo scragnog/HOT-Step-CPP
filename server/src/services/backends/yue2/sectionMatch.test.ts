@@ -22,12 +22,12 @@ function words(lyrics: string, times: Array<[string, number, number?]>): Yue2Ali
   });
 }
 
-test('retags by sung time, keeps same-kind tags, fills a missing chorus and instrumental tags', () => {
-  const lyrics = '[Intro]\n\n[Verse 1]\nfirst line\n\n[Hook]\nsecond line\n\n[Verse 2]\nthird line';
+test('retags by sung time with the score labels as written, fills a missing chorus and instrumental tags', () => {
+  const lyrics = '[Intro]\n\n[Verse 1]\nfirst line\n\n[Hook]\nsecond line\n\n[verse]\nthird line';
   // "second" lands half a bar before the chorus: a pickup into it.
   const result = matchSectionsToScore(score, lyrics, words(lyrics, [['first', 6.2], ['second', 11.5], ['third', 18.3]]));
-  assert.equal(result.lyrics, '[Intro]\n\n[Verse 1]\nfirst line\n\n[Chorus]\nsecond line\n\n[Verse 2]\nthird line\n\n[Chorus]\nsecond line\n\n[Outro]');
-  assert.deepEqual(result.blocks.map(b => b.status), ['dropped', 'kept', 'renamed', 'kept']);
+  assert.equal(result.lyrics, '[intro]\n\n[verse]\nfirst line\n\n[chorus]\nsecond line\n\n[verse]\nthird line\n\n[chorus]\nsecond line\n\n[outro]');
+  assert.deepEqual(result.blocks.map(b => b.status), ['dropped', 'renamed', 'renamed', 'kept']);
   assert.deepEqual(result.filled.map(f => [f.section, f.copiedFrom]), [[1, null], [5, 3], [6, null]]);
   assert.equal(result.unchanged, false);
 });
@@ -44,13 +44,13 @@ test('a block after an unsure one is never merged under the unsure tag', () => {
   const lyrics = '[Verse]\nfirst line\n\n[Bridge]\nlost line\n\n[Verse 2]\nthird line';
   const result = matchSectionsToScore(score, lyrics, words(lyrics, [['first', 6.1], ['third', 7.5]]));
   assert.equal(result.lyrics.includes('[Bridge]\nlost line\n\n[Verse 2]\nthird line'), true);
-  assert.deepEqual(result.blocks.map(b => b.status), ['kept', 'unsure', 'unsure']);
+  assert.deepEqual(result.blocks.map(b => b.status), ['renamed', 'unsure', 'unsure']);
 });
 
 test('two blocks sung in one section share one tag; words are untouched', () => {
   const lyrics = 'first line\n\n[Pre]\nsecond line';
   const result = matchSectionsToScore(score, lyrics, words(lyrics, [['first', 6.1], ['second', 7.5]]));
-  assert.equal(result.lyrics.startsWith('[Intro]\n\n[Verse]\nfirst line\n\nsecond line'), true);
+  assert.equal(result.lyrics.startsWith('[intro]\n\n[verse]\nfirst line\n\nsecond line'), true);
   assert.deepEqual(result.blocks.map(b => b.status), ['renamed', 'merged']);
 });
 
@@ -58,15 +58,25 @@ test('only chorus-type sections get copies, and a block sung where the score has
   // A verse the lyrics leave out stays empty-handed; the chorus is copied.
   const twoBlocks = '[Verse 1]\nfirst line\n\n[Chorus]\nsecond line';
   const copied = matchSectionsToScore(score, twoBlocks, words(twoBlocks, [['first', 6.2], ['second', 12.1]]));
-  assert.equal(copied.lyrics, '[Intro]\n\n[Verse 1]\nfirst line\n\n[Chorus]\nsecond line\n\n[Chorus]\nsecond line\n\n[Outro]');
+  assert.equal(copied.lyrics, '[intro]\n\n[verse]\nfirst line\n\n[chorus]\nsecond line\n\n[chorus]\nsecond line\n\n[outro]');
   assert.deepEqual(copied.filled.map(f => [f.section, f.copiedFrom]), [[1, null], [5, 2], [6, null]]);
 
-  // "third" starts in the outro, which has no Vocal note: tag and place kept, flagged.
+  // "third" starts in the outro, which has no Vocal note: tag and place kept,
+  // flagged, and the outro still gets its own empty tag before it.
   const lyrics = '[Verse 1]\nfirst line\n\n[Chorus]\nsecond line\n\n[Verse 2]\nthird line';
   const result = matchSectionsToScore(score, lyrics, words(lyrics, [['first', 6.2], ['second', 12.1], ['third', 30.2]]));
-  assert.deepEqual(result.blocks.map(b => b.status), ['kept', 'kept', 'unsure']);
+  assert.deepEqual(result.blocks.map(b => b.status), ['renamed', 'renamed', 'unsure']);
   assert.equal(result.blocks[2].newTag, 'Verse 2');
-  assert.equal(result.lyrics.includes('[Verse 2]\nthird line'), true);
-  assert.equal(result.lyrics.includes('[Outro]\nthird line'), false);
+  assert.equal(result.lyrics.endsWith('[outro]\n\n[Verse 2]\nthird line'), true);
   assert.equal(result.filled.some(f => f.copiedFrom === 1), false);
+});
+
+test('a note held over into a section\'s first bar does not make it sung', () => {
+  // The outro opens on the last chorus's held note; it still gets its tag.
+  const held = score.replace('% outro\nV: Vocal\nz6|z6|', '% outro\nV: Vocal\nF6|z6|');
+  const lyrics = '[verse]\nfirst line\n\n[chorus]\nsecond line\n\n[verse]\nthird line\n\n[chorus]\nfourth line';
+  const result = matchSectionsToScore(held, lyrics,
+    words(lyrics, [['first', 6.2], ['second', 12.1], ['third', 18.3], ['fourth', 24.2]]));
+  assert.notEqual(held, score);
+  assert.equal(result.lyrics, `[intro]\n\n${lyrics}\n\n[outro]`);
 });
