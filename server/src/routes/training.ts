@@ -3853,6 +3853,10 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       ...(narCropFrames !== undefined ? { narCropFrames } : {}),
       ...(arCropFrames ? { arCropFrames } : {}),
       ...(resume && b.refinePlanner === true ? { unfreezePlanner: true, klCheckpointEvery: Math.max(0.01, Math.min(1, Number(b.klCheckpointEvery) || 0.1)), refineWarmup: 30, rungAdaptiveLr: true } : {}),
+      // Legacy "save every KL": a rung every klCheckpointEvery of planner KL
+      // below the target; saveEvery stays the step cadence after the freeze.
+      ...(b.refinePlanner !== true && method === 'tuned' && stopMode === 'kl' && Number(b.klCheckpointEvery) > 0
+        ? { klCheckpointEvery: Math.max(0.01, Math.min(1, Number(b.klCheckpointEvery))) } : {}),
       ...advanced,
       ...baseMatched,
       ...(calibration ? { calibration } : {}),

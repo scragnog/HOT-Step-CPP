@@ -531,7 +531,11 @@ function assignBlindLabels(run: Yue2AitkRunRecord, checkpoints: Yue2AitkCheckpoi
  *  complete checkpoint, so each one is flagged as a rung for the Review page,
  *  the best-rung pick and the ladder cards. Other runs keep meters.json's flag. */
 function rungsOf(run: Yue2AitkRunRecord, checkpoints: Yue2AitkCheckpointRecord[]): Yue2AitkCheckpointRecord[] {
-  if ((run.options as Record<string, unknown> | undefined)?.method !== 'base-matched') return checkpoints;
+  const o = run.options as Record<string, unknown> | undefined;
+  // Legacy saving every KL step: past the freeze the decoder-phase saves are
+  // the rungs (they get the previews), since the KL no longer moves.
+  if (Number(o?.klCheckpointEvery) > 0 && o?.refinePlanner !== true) return checkpoints.map(c => c.frozen ? { ...c, rung: true } : c);
+  if (o?.method !== 'base-matched') return checkpoints;
   return checkpoints.map(c => c.arPath && c.narPath ? { ...c, rung: true } : c);
 }
 

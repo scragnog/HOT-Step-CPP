@@ -568,7 +568,9 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
       const saved = checkpointRecords(opts.outDir).find(c => c.step === step && c.arPath && c.narPath);
       if (saved) pushEvent(job, { type: 'metric', metric: 'milestone', ts: Date.now(), step,
         loss: state.lastLoss, path: saved.dir });
-      if (saved && (opts.method === 'base-matched' || !(opts.klCheckpointEvery! > 0))) state.onRung?.(step);
+      // KL rungs preview on kl_mark; once the planner is frozen the KL stops
+      // moving, so the decoder phase previews every step-cadence save.
+      if (saved && (opts.method === 'base-matched' || !(opts.klCheckpointEvery! > 0) || state.frozenAt !== undefined)) state.onRung?.(step);
       if (thinning?.pendingDrop?.step === step) {
         // The folder exists under its final name now (see pendingDrop).
         if (saved) thinning.disposable = { step, dir: saved.dir, recon: thinning.pendingDrop.recon };
@@ -609,6 +611,9 @@ function relayJsonLine(job: TrainingJob, line: string, state: RelayState, clock?
     log(job, 'info', `Learning-rate tail started at step ${step}; the stop acts when it ends`);
   } else if (stage === 'planner_frozen' && step !== undefined) {
     state.frozenAt = step;
+    // The freeze checkpoint is the KL target itself: no kl_mark fires there
+    // (rungs stop below the target), and its checkpoint event came first.
+    if (opts && opts.klCheckpointEvery! > 0) state.onRung?.(step);
     log(job, 'info', `Planner reached its KL target at step ${step}; frozen there, decoder keeps training`);
   } else if (stage === 'target' && step !== undefined) {
     state.targetStopped = true;

@@ -1364,7 +1364,27 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {field(t('trainingStudio.yue2.method.steps', 'Updates'), 'steps', 'number', form, undefined,
           t('trainingStudio.yue2.method.stepsInfo', 'How many optimizer updates to train. Each update averages "songs per update" songs, so Fast (100 × 4) sees 400 songs, Balanced (200 × 4) 800 and Thorough (300 × 8) 2400. The run ends here; pick a checkpoint by ear.'),
           t('trainingStudio.yue2.method.stepsMeta', 'Balanced 200'))}
-        {field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number', form, undefined,
+        {form.method === 'tuned' && form.stopMode === 'kl' ? (
+          // Legacy: save by steps or by planner KL. In KL mode saveEvery stays
+          // the step cadence for the decoder phase, where the KL is frozen.
+          <label className="flex flex-col gap-1">
+            <ParamLabel label={t('trainingStudio.yue2.method.saveEvery', 'Save every')}
+              info={t('trainingStudio.yue2.method.saveEveryKlInfo', 'Steps saves a checkpoint every N steps. AR KL saves a rung each time the planner KL crosses the next multiple of the value, up to the KL target, with previews on each. Once the planner freezes at the target the KL stops moving, so the decoder phase saves (and previews) every {{steps}} steps.', { steps: form.saveEvery })}
+              meta={form.klCheckpointEvery! > 0 ? t('trainingStudio.yue2.method.saveEveryKlMeta', 'default 0.15') : t('trainingStudio.yue2.method.saveEveryStepsMeta', 'default 25')}
+              className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider" />
+            <StyledSelect accent="amber" className="w-full" value={form.klCheckpointEvery! > 0 ? 'kl' : 'steps'} disabled={fieldLocked('saveEvery')}
+              onChange={value => setForm(previous => ({ ...previous, klCheckpointEvery: value === 'kl' ? 0.15 : undefined }))}
+              options={[
+                { value: 'steps' as const, label: t('trainingStudio.yue2.method.saveEverySteps', 'Steps') },
+                { value: 'kl' as const, label: t('trainingStudio.yue2.method.saveEveryKl', 'AR KL') },
+              ]} />
+            {form.klCheckpointEvery! > 0
+              ? <input className={input} type="number" step="0.05" min="0.01" max="1" value={form.klCheckpointEvery} disabled={fieldLocked('saveEvery')}
+                  onChange={event => set('klCheckpointEvery', Number(event.target.value))} />
+              : <input className={input} type="number" value={String(form.saveEvery ?? '')} disabled={fieldLocked('saveEvery')}
+                  onChange={event => set('saveEvery', Number(event.target.value))} />}
+          </label>
+        ) : field(t('trainingStudio.yue2.method.saveEvery', 'Save every'), 'saveEvery', 'number', form, undefined,
           t('trainingStudio.yue2.method.saveEveryInfo', 'How many steps between saved checkpoints. Lower gives more rungs to pick from (and more previews, if enabled) at the cost of disk space and time; higher saves less often. The presets save ten rungs: every 10 on Fast, 20 on Balanced, 30 on Thorough.'),
           t('trainingStudio.yue2.method.saveEveryMeta', 'Balanced 20'))}
         {field(t('trainingStudio.yue2.method.seed', 'Seed'), 'seed', 'number', form, undefined,
