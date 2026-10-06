@@ -208,7 +208,10 @@ const LOKR_STOP = { targetKl: 1.0, plannerLrScale: 0.6, narLrScale: 1 };
 // the ~250 updates of 1 song a Prodigy run took to KL 1.2.
 const LEGACY_VALUES: Partial<Yue2JointTrainRequest> = {
   method: 'tuned', optimizer: 'prodigy', cautious: true, lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
-  stopMode: 'kl', targetKl: 1.2, targetKlMode: 'trend', narExtraSteps: 0, captionDropout: 0.5,
+  stopMode: 'kl', targetKl: 1.2, targetKlMode: 'trend', captionDropout: 0.5,
+  // Decoder phase on by default (2026-10-06): the planner freezes at the KL
+  // target and the decoder trains on to the reconstruction plateau.
+  narExtraSteps: 250, reconStop: 0.005, reconStopWindow: 10, reconKeepDelta: 0.003,
   spikeFactor: 5, spikeStop: 3, spikeStopWindow: 20, adapterType: 'lokr', lokrDim: 64, lokrFactor: 4, alpha: 256,
   // Base-matched knobs back to the engine's own defaults.
   warmup: undefined, weightDecay: undefined, beta2: undefined, abcDropout: undefined, arLossWeight: undefined,
