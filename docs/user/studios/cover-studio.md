@@ -79,8 +79,9 @@ have to make.
    tag and position and is listed for you to check.
    Nothing changes until you press **Apply** in the before/after view. For a
    dataset song, **Apply and save to dataset** also writes the lyrics into the
-   song's `.txt` after a confirmation. The previous file is kept as `.txt.bak`
-   and is replaced on the next save.
+   song's `.txt` after a confirmation. The previous file is kept as `.txt.bak`.
+   If a `.txt.bak` is already there, it is left alone and the previous file
+   goes to `.txt.<date>-<time>.bak` instead, so no save loses a backup.
 5. Choose **Base YuE2** or an explicit AR composer and NAR renderer pair.
    **Score to render** defaults to both the vocal and instrumental lines, no
    chord symbols, free tempo and source key. Choose vocal melody only if you

@@ -65,7 +65,7 @@ function fixture(missing = false, defer = false) {
     }) }),
     saveLyrics: async (audioPath: string, lyrics: string) => {
       const file = sidecarPathFor(audioPath);
-      await writeSidecar(file, { ...readSidecar(file), lyrics });
+      await writeSidecar(file, { ...readSidecar(file), lyrics }, { keepBackups: true });
     },
     datasetMatch: () => datasetAudio ? { datasetId: 'dataset-1', sampleId: 'sample-1', audioPath: datasetAudio } : null,
     song: (id, userId) => id === 'song-1' && userId === 'owner' ? { audio_url: '/audio/library.wav', title: 'Library track' } : undefined,
@@ -339,3 +339,18 @@ test('match sections retags from aligned times; save writes the dataset sidecar 
   } finally { f.close(); }
 });
 
+
+test('saving with keepBackups never replaces an existing .bak', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sidecar-bak-'));
+  try {
+    const file = path.join(dir, 'song.txt');
+    fs.writeFileSync(file, 'caption: now\nlyrics:\ncurrent words\n');
+    fs.writeFileSync(`${file}.bak`, 'caption: old\nlyrics:\nolder words\n');
+    await writeSidecar(file, { ...readSidecar(file), lyrics: 'new words' }, { keepBackups: true });
+    assert.equal(readSidecar(file).lyrics, 'new words');
+    assert.equal(readSidecar(`${file}.bak`).lyrics, 'older words');
+    const stamped = fs.readdirSync(dir).filter(name => /^song\.txt\.\d{8}-\d{6}\.bak$/.test(name));
+    assert.equal(stamped.length, 1);
+    assert.equal(readSidecar(path.join(dir, stamped[0])).lyrics, 'current words');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

@@ -60,7 +60,7 @@ export function createYue2CoverService(deps = {
   // The same merged read as a sample edit, so split caption/lyrics files
   // are folded into <stem>.txt rather than shadowing the new lyrics.
   saveLyrics: async (audioPath: string, lyrics: string) => {
-    await writeSidecar(sidecarPathFor(audioPath), { ...loadSidecarMetadata(audioPath), lyrics });
+    await writeSidecar(sidecarPathFor(audioPath), { ...loadSidecarMetadata(audioPath), lyrics }, { keepBackups: true });
   },
   song: (id: string, userId: string) => getDb().prepare('SELECT audio_url, title FROM songs WHERE id = ? AND user_id = ?').get(id, userId) as { audio_url: string; title: string } | undefined,
 }) {
@@ -224,7 +224,8 @@ export function createYue2CoverService(deps = {
   }
 
   /** Write lyrics into the matched dataset song's sidecar (.txt); the sidecar
-   *  writer keeps the previous file as .txt.bak. */
+   *  writer keeps the previous file as .txt.bak, or a timestamped .bak
+   *  when one is already there. */
   async function saveDatasetLyrics(input: CoverInput & { lyrics?: unknown }, userId: string) {
     if (typeof input.lyrics !== 'string' || !input.lyrics.trim() || input.lyrics.length > MAX_ABC_LENGTH) {
       throw new CoverRequestError('Lyrics must be a non-empty string of at most 64 KB.');

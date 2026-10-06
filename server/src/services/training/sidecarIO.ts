@@ -127,15 +127,31 @@ function normalizeValue(v: unknown): string {
   return String(v ?? '');
 }
 
+/** Where a sidecar's previous contents go: `<sidecar>.bak`, or with
+ *  `keepBackups` and a `.bak` already there, `<sidecar>.<yyyymmdd-hhmmss>.bak`. */
+export function backupPath(sidecarPath: string, keepBackups: boolean, now = new Date()): string {
+  const plain = `${sidecarPath}.bak`;
+  if (!keepBackups || !fs.existsSync(plain)) return plain;
+  const p = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+  return `${sidecarPath}.${stamp}.bak`;
+}
+
 /**
  * Rewrite a sidecar in full: `.bak` copy, the six ordered fields, sorted extras,
  * then `lyrics:` last. Atomic (temp file in the same directory + rename).
+ * `keepBackups` never replaces an existing backup, so every such write keeps
+ * the file it replaced (see backupPath).
  */
-export async function writeSidecar(sidecarPath: string, data: Record<string, string>): Promise<void> {
+export async function writeSidecar(sidecarPath: string, data: Record<string, string>,
+  opts: { keepBackups?: boolean } = {}): Promise<void> {
   // 1. Best-effort backup of the previous contents
   try {
-    if (fs.existsSync(sidecarPath)) fs.copyFileSync(sidecarPath, `${sidecarPath}.bak`);
-  } catch { /* backup is best-effort */ }
+    if (fs.existsSync(sidecarPath)) fs.copyFileSync(sidecarPath, backupPath(sidecarPath, !!opts.keepBackups));
+  } catch (err) {
+    if (opts.keepBackups) throw err;  // promised a backup: no write without one
+    /* otherwise best-effort */
+  }
 
   const lines: string[] = [];
 

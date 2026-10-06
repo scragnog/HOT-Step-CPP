@@ -37,6 +37,7 @@ import { yue2CoverApi, type Yue2CoverDatasetMetadata, type Yue2CoverJob, type Yu
 import { Yue2CoverPanel } from './Yue2CoverPanel';
 import { Yue2CoverScore } from './Yue2CoverScore';
 import { SectionMatchReview } from './SectionMatchReview';
+import { ConfirmDialog } from '../shared/ConfirmDialog';
 import type { Yue2SectionMatch } from '../../services/yue2CoverApi';
 
 // ── Serial cover-generation queue ────────────────────────────────────────────
@@ -154,6 +155,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [sectionMatch, setSectionMatch] = useState<{ match: Yue2SectionMatch; before: string; key: string } | null>(null);
   const [sectionMatching, setSectionMatching] = useState(false);
   const [sectionSaving, setSectionSaving] = useState(false);
+  const [sectionSaveConfirm, setSectionSaveConfirm] = useState(false);
   const [sheetAudioUrl, setSheetAudioUrl] = useState('');
   const [approvedSheet, setApprovedSheet] = useState<{ abc: string; sourceId: string; sourceLabel: string; audioUrl: string; key: string } | null>(null);
 
@@ -684,7 +686,6 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
   const saveSectionMatch = async () => {
     if (!token || !sectionMatch || sectionMatchStale) return;
-    if (!window.confirm('Write these lyrics into the dataset song’s .txt? The current file is kept as .txt.bak.')) return;
     setSectionSaving(true);
     try {
       await yue2CoverApi.saveDatasetLyrics({ ...sectionSource(), lyrics: sectionMatch.match.lyrics }, token);
@@ -1101,7 +1102,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
                 {sectionMatching ? 'Matching… (separating vocals the first time)' : 'Match sections to score'}</button>
             </div>
             {sectionMatch && sectionMatch.key === sourceKey && <SectionMatchReview before={sectionMatch.before} match={sectionMatch.match} stale={sectionMatchStale}
-              saving={sectionSaving} onApply={applySectionMatch} onSave={() => void saveSectionMatch()} onDiscard={() => setSectionMatch(null)} />}
+              saving={sectionSaving} onApply={applySectionMatch} onSave={() => setSectionSaveConfirm(true)} onDiscard={() => setSectionMatch(null)} />}
+            {/* In-page, not window.confirm: a native dialog stalls browser automation. */}
+            <ConfirmDialog isOpen={sectionSaveConfirm} title="Save lyrics to dataset"
+              message="Write these lyrics into the dataset song’s .txt? The current file is kept as a backup."
+              confirmLabel="Save" onCancel={() => setSectionSaveConfirm(false)}
+              onConfirm={() => { setSectionSaveConfirm(false); void saveSectionMatch(); }} />
             {scoreSections.length > 0
               ? <div className="flex flex-wrap gap-1">{scoreSections.map((section, index) =>
                 <span key={`${index}-${section.startBar}`} className="rounded bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-800 dark:text-cyan-200">
