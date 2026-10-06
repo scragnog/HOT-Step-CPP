@@ -15,9 +15,9 @@
  *   custom  the generation's own `caption_mm3`, exactly as before this existed.
  *
  * The choice lives in localStorage — there is no column for it — keyed by
- * generation id. The album's captioned tracks are cached alongside, keyed by
+ * generation id. The album's captioned tracks are cached in memory, keyed by
  * lyrics-set id, so the two non-React render paths (the Lyric Studio audio
- * queue and Send-to-Create) can resolve a caption without an API call.
+ * queue and Send-to-Create) can resolve a caption synchronously.
  *
  * Nothing here touches ACE-Step: every entry point is gated on the MM3 backend
  * being the active one.
@@ -74,6 +74,17 @@ function _write(key: string, value: unknown): void {
   }
 }
 
+// The album's captioned tracks are a copy of server data, so they live in
+// memory: every render path calls ensureMm3SourceTracks first, which refetches
+// on a miss. They used to sit in localStorage, one entry per album ever opened,
+// and filled the quota. Clear what earlier builds left there.
+const sourceTracks = new Map<number, Mm3SourceTrack[]>();
+try {
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith(MM3_SOURCE_TRACKS_PREFIX)) localStorage.removeItem(key);
+  }
+} catch { /* storage unavailable */ }
+
 export function readMm3CaptionSelection(generationId: number): Mm3CaptionSelection {
   const stored = _read<Mm3CaptionSelection>(MM3_CAPTION_SOURCE_PREFIX + generationId);
   if (!stored || (stored.mode !== 'auto' && stored.mode !== 'track' && stored.mode !== 'custom')) {
@@ -88,7 +99,7 @@ export function writeMm3CaptionSelection(generationId: number, sel: Mm3CaptionSe
 
 export function readMm3SourceTracks(lyricsSetId: number | undefined): Mm3SourceTrack[] {
   if (!lyricsSetId) return [];
-  return _read<Mm3SourceTrack[]>(MM3_SOURCE_TRACKS_PREFIX + lyricsSetId) ?? [];
+  return sourceTracks.get(lyricsSetId) ?? [];
 }
 
 /** The render paths are plain modules that may run before the album's detail
@@ -115,7 +126,7 @@ export async function ensureMm3SourceTracks(lyricsSetId: number | undefined): Pr
 /** Cache the album's captioned tracks so the render paths can resolve without
  *  an API call. Called whenever an album's detail data is loaded. */
 export function cacheMm3SourceTracks(lyricsSetId: number, tracks: Mm3SourceTrack[]): void {
-  _write(MM3_SOURCE_TRACKS_PREFIX + lyricsSetId, tracks);
+  sourceTracks.set(lyricsSetId, tracks);
 }
 
 /** Keep only the source songs that actually carry an MM3 caption, in album

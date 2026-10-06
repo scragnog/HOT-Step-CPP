@@ -79,12 +79,6 @@ export interface Yue2CaptionSourcesHandoff extends Yue2CaptionSelection {
 
 /** `hs-yue2CaptionSource:ds:<dataset id>` → Yue2CaptionSelection */
 export const YUE2_CAPTION_SOURCE_PREFIX = 'hs-yue2CaptionSource:ds:';
-/** `hs-yue2SourceTracks3:ds:<dataset id>` → Yue2SourceTrack[]
- *
- *  The `3` is a cache bust: the previous prefixes were keyed by adapter path,
- *  and a client that already cached one of those under the old key must not
- *  go on reading it now that the key means a dataset id. */
-export const YUE2_SOURCE_TRACKS_PREFIX = 'hs-yue2SourceTracks3:ds:';
 /** `hs-yue2DatasetForLyricsSet:<lyrics set id>` → dataset id.
  *
  *  A written song only carries a lyrics-set id, not a dataset id — the link
@@ -118,6 +112,18 @@ function _write(key: string, value: unknown): void {
     /* storage full or unavailable — the choice simply won't persist */
   }
 }
+
+// The dataset's captioned tracks are a copy of server data, so they live in
+// memory: every render path calls ensureYue2CaptionSource first, which
+// refetches on a miss. They used to sit in localStorage, one entry per dataset
+// ever opened, and filled the quota. Clear what earlier builds left there,
+// including the adapter-keyed hs-yue2SourceTracks: and hs-yue2SourceTracks2:.
+const sourceTracks = new Map<string, Yue2SourceTrack[]>();
+try {
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith('hs-yue2SourceTracks')) localStorage.removeItem(key);
+  }
+} catch { /* storage unavailable */ }
 
 /** The choice when nothing has been stored for this dataset. Automatic, so a
  *  freshly selected dataset renders under its own captions without the user
@@ -160,12 +166,12 @@ export function writeYue2CaptionSelection(datasetId: string, sel: Yue2CaptionSel
 
 export function readYue2SourceTracks(datasetId: string): Yue2SourceTrack[] {
   if (!datasetId) return [];
-  return _read<Yue2SourceTrack[]>(YUE2_SOURCE_TRACKS_PREFIX + datasetId) ?? [];
+  return sourceTracks.get(datasetId) ?? [];
 }
 
 export function cacheYue2SourceTracks(datasetId: string, tracks: Yue2SourceTrack[]): void {
   if (!datasetId) return;
-  _write(YUE2_SOURCE_TRACKS_PREFIX + datasetId, tracks);
+  sourceTracks.set(datasetId, tracks);
 }
 
 function readYue2DatasetForLyricsSet(lyricsSetId: number): string {
