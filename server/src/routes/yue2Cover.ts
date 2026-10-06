@@ -53,6 +53,16 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
     catch (err) { fail(res, err); }
   });
 
+  router.post('/sections/match', async (req: Request, res: Response) => {
+    try { res.json(await service.matchSections(req.body || {}, authenticate(req)!)); }
+    catch (err) { fail(res, err); }
+  });
+
+  router.post('/sections/save-dataset', async (req: Request, res: Response) => {
+    try { res.json(await service.saveDatasetLyrics(req.body || {}, authenticate(req)!)); }
+    catch (err) { fail(res, err); }
+  });
+
   // Explicitly requested from a saved cover's details. The result is cached
   // on that song row; opening details never starts an aligner or a render.
   router.post('/drift/:songId', async (req: Request, res: Response) => {

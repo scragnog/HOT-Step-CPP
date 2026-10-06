@@ -36,6 +36,8 @@ import { yue2CoverApi, type Yue2CoverDatasetMetadata, type Yue2CoverJob, type Yu
   type Yue2ScoreSection, type Yue2SectionReview } from '../../services/yue2CoverApi';
 import { Yue2CoverPanel } from './Yue2CoverPanel';
 import { Yue2CoverScore } from './Yue2CoverScore';
+import { SectionMatchReview } from './SectionMatchReview';
+import type { Yue2SectionMatch } from '../../services/yue2CoverApi';
 
 // ── Serial cover-generation queue ────────────────────────────────────────────
 // Lets the user stack multiple cover generations (different settings) without
@@ -148,6 +150,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [sheetAbc, setSheetAbc] = useState('');
   const [scoreSections, setScoreSections] = useState<Yue2ScoreSection[]>([]);
   const [sectionLint, setSectionLint] = useState<Yue2SectionReview['lint'] | null>(null);
+  // Match sections to score: the proposal and the lyrics it was made from.
+  const [sectionMatch, setSectionMatch] = useState<{ match: Yue2SectionMatch; before: string; key: string } | null>(null);
+  const [sectionMatching, setSectionMatching] = useState(false);
+  const [sectionSaving, setSectionSaving] = useState(false);
   const [sheetAudioUrl, setSheetAudioUrl] = useState('');
   const [approvedSheet, setApprovedSheet] = useState<{ abc: string; sourceId: string; sourceLabel: string; audioUrl: string; key: string } | null>(null);
 
@@ -176,7 +182,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   sourceKeyRef.current = sourceKey;
   useEffect(() => {
     sheetRequestRef.current += 1;
-    setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setSectionLint(null);
+    setApprovedSheet(null); setSheetAbc(''); setScoreSections([]); setSectionLint(null); setSectionMatch(null);
     setSheetAudioUrl(''); setSheetError(''); setSheetJob(null); setSheetPreparing(false);
     if (sheetJobRef.current && token) void yue2CoverApi.cancel(sheetJobRef.current, token).catch(() => {});
     sheetJobRef.current = ''; setSheetJobId('');
@@ -654,6 +660,40 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     } catch (err: any) { setSheetError(err.message); }
   };
 
+  // The original source, never a recombined mix: its vocal stem is what the
+  // aligner reads, and its path is what finds the dataset song.
+  const sectionSource = () => sourceSongId ? { songId: sourceSongId } : { sourceAudioUrl };
+  const handleMatchSections = async () => {
+    if (!token || !sheetAbc.trim() || !lyrics.trim() || !sourceAudioUrl) return;
+    const key = sourceKey, before = lyrics;
+    setSheetError(''); setSectionMatch(null); setSectionMatching(true);
+    try {
+      const match = await yue2CoverApi.matchSections({ ...sectionSource(), abc: sheetAbc, lyrics: before }, token);
+      if (sourceKeyRef.current === key) setSectionMatch({ match, before, key });
+    } catch (err: any) { if (sourceKeyRef.current === key) setSheetError(`Match sections: ${err.message}`); }
+    finally { setSectionMatching(false); }
+  };
+  // The proposal is for the lyrics it was made from; edits since void it.
+  const sectionMatchStale = !!sectionMatch && sectionMatch.before !== lyrics;
+  const applySectionMatch = () => {
+    if (!sectionMatch || sectionMatchStale) return;
+    lyricEditRef.current++;
+    setLyrics(sectionMatch.match.lyrics);
+    setLyricsSource(null);
+    setSectionMatch(null);
+  };
+  const saveSectionMatch = async () => {
+    if (!token || !sectionMatch || sectionMatchStale) return;
+    if (!window.confirm('Write these lyrics into the dataset song’s .txt? The current file is kept as .txt.bak.')) return;
+    setSectionSaving(true);
+    try {
+      await yue2CoverApi.saveDatasetLyrics({ ...sectionSource(), lyrics: sectionMatch.match.lyrics }, token);
+      if (sourceKeyRef.current === sectionMatch.key) applySectionMatch();
+      showToast('Lyrics saved to the dataset');
+    } catch (err: any) { setSheetError(`Save to dataset: ${err.message}`); }
+    finally { setSectionSaving(false); }
+  };
+
   // ── Generation ──
   const captionSelection = captionMode === 'auto' ? { mode: 'auto' as const }
     : captionMode.startsWith('track:') ? { mode: 'track' as const, selectedName: captionMode.slice(6) }
@@ -1054,7 +1094,14 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               <span className="text-xs font-medium text-zinc-600 dark:text-zinc-400">Score sections</span>
               <button type="button" onClick={() => void handleInsertScoreTags()} disabled={!scoreSections.length}
                 className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">Insert tags from score</button>
+              <button type="button" onClick={() => void handleMatchSections()}
+                disabled={!scoreSections.length || !lyrics.trim() || instrumental || sectionMatching}
+                title="Align the lyrics on the source's vocal stem and retag each block with the score section it is sung in. Shows the changes before applying."
+                className="text-xs text-cyan-700 dark:text-cyan-300 disabled:opacity-40">
+                {sectionMatching ? 'Matching… (separating vocals the first time)' : 'Match sections to score'}</button>
             </div>
+            {sectionMatch && sectionMatch.key === sourceKey && <SectionMatchReview before={sectionMatch.before} match={sectionMatch.match} stale={sectionMatchStale}
+              saving={sectionSaving} onApply={applySectionMatch} onSave={() => void saveSectionMatch()} onDiscard={() => setSectionMatch(null)} />}
             {scoreSections.length > 0
               ? <div className="flex flex-wrap gap-1">{scoreSections.map((section, index) =>
                 <span key={`${index}-${section.startBar}`} className="rounded bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-800 dark:text-cyan-200">

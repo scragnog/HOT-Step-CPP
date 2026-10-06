@@ -65,6 +65,20 @@ have to make.
    never blocks Generate. **Insert tags from score** puts the score labels in
    order and keeps your lyric lines under the first tag for you to arrange;
    replacing existing tags asks for confirmation.
+   **Match sections to score** does the arranging for you. It separates the
+   source's vocal (once per source, then cached), finds where each lyric block
+   is sung, and retags each block with the score section it starts in. It
+   never changes a word. A tag that already names the right kind of section
+   stays as it is, so `[Verse 1]` over a `verse` section is left alone. A
+   chorus the lyrics wrote only once is copied into the later chorus sections,
+   and sections with no vocal get an empty tag such as `[Interlude]`, which
+   replaces the lyrics' own empty tags. New tags follow the case your lyrics
+   already use. A block that starts late in a section, or that the aligner
+   could not place, keeps its tag and position and is listed for you to check.
+   Nothing changes until you press **Apply** in the before/after view. For a
+   dataset song, **Apply and save to dataset** also writes the lyrics into the
+   song's `.txt` after a confirmation. The previous file is kept as `.txt.bak`
+   and is replaced on the next save.
 5. Choose **Base YuE2** or an explicit AR composer and NAR renderer pair.
    **Score to render** defaults to both the vocal and instrumental lines, no
    chord symbols, free tempo and source key. Choose vocal melody only if you

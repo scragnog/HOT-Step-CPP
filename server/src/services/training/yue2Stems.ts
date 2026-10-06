@@ -93,9 +93,9 @@ export function yue2NoVocalsPath(stemsDir: string, sourceFile: string): string {
   return path.join(stemsDir, yue2StemName(sourceFile), 'no-vocals');
 }
 
-class NoVocalsError extends Error {}
+export class NoVocalsError extends Error {}
 
-async function separateOne(
+export async function separateOne(
   srcPath: string,
   outPath: string,
   level: number,

@@ -42,6 +42,16 @@ export interface Yue2SectionReview {
   insertedLyrics: string;
 }
 
+/** POST /sections/match: lyrics retagged from where the source vocal sings each block. */
+export interface Yue2SectionMatch {
+  lyrics: string;
+  blocks: Array<{ index: number; tag: string | null; newTag: string | null; section: number | null;
+    firstWordSeconds: number | null; status: 'kept' | 'renamed' | 'merged' | 'unsure' | 'dropped' }>;
+  filled: Array<{ section: number; label: string; copiedFrom: number | null }>;
+  unchanged: boolean;
+  datasetSong: boolean;
+}
+
 export interface Yue2CoverDatasetMetadata {
   matched: boolean;
   metadataAvailable?: boolean;
@@ -100,6 +110,10 @@ export const yue2CoverApi = {
   reviewSections: (abc: string, lyrics: string, token: string) => request<Yue2SectionReview>('/sections/review', token, {
     method: 'POST', body: JSON.stringify({ abc, lyrics }),
   }),
+  matchSections: (input: Yue2CoverSourceInput & { abc: string; lyrics: string }, token: string) =>
+    request<Yue2SectionMatch>('/sections/match', token, { method: 'POST', body: JSON.stringify(input) }),
+  saveDatasetLyrics: (input: Yue2CoverSourceInput & { lyrics: string }, token: string) =>
+    request<{ saved: true; file: string }>('/sections/save-dataset', token, { method: 'POST', body: JSON.stringify(input) }),
   sourceMetadata: (input: Yue2CoverSourceInput, token: string) => request<Yue2CoverDatasetMetadata>('/source-metadata', token, {
     method: 'POST', body: JSON.stringify(input),
   }),

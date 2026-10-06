@@ -9,7 +9,13 @@ import { readDuration } from './training/audioMeta.js';
 import { missingYue2SheetModels, readYue2CoverAbc, resolveYue2SheetModel } from './training/yue2Sheet.js';
 import { runYue2CoverSheetJob } from './training/yue2ArTrainRunner.js';
 import { resolveCoverDatasetSource } from './coverDatasetSource.js';
-import { readSidecar } from './training/sidecarIO.js';
+import { readSidecar, writeSidecar } from './training/sidecarIO.js';
+import { loadSidecarMetadata } from './training/datasetScan.js';
+import { createHash } from 'node:crypto';
+import { NoVocalsError, separateOne, YUE2_STEMS_DEFAULT_LEVEL } from './training/yue2Stems.js';
+import { yue2Align } from './backends/yue2/client.js';
+import type { Yue2AlignWord } from './backends/yue2/align.js';
+import { matchSectionsToScore } from './backends/yue2/sectionMatch.js';
 import { sidecarPathFor } from './training/paths.js';
 import { readAbcSidecar } from './training/abcSidecar.js';
 import { insertScoreSectionTags, lintScoreSections, scoreSections } from './backends/yue2/scoreSections.js';
@@ -37,6 +43,25 @@ export function createYue2CoverService(deps = {
   model: resolveYue2SheetModel,
   run: runYue2CoverSheetJob,
   datasetMatch: resolveCoverDatasetSource,
+  // The source's vocal stem, separated once and cached by path, size and
+  // mtime: MMS_FA places words reliably on a stem, not on the full mix.
+  vocalStem: async (audioPath: string): Promise<string> => {
+    const stat = fs.statSync(audioPath);
+    const key = createHash('sha256').update(JSON.stringify([audioPath, stat.size, stat.mtimeMs])).digest('hex').slice(0, 32);
+    const out = path.join(config.data.dir, 'tmp', 'cover-vocals', `${key}.wav`);
+    if (!fs.existsSync(out)) {
+      // Renamed into place so a separation cut short is never cached.
+      await separateOne(audioPath, `${out}.part`, YUE2_STEMS_DEFAULT_LEVEL, () => {});
+      fs.renameSync(`${out}.part`, out);
+    }
+    return out;
+  },
+  align: (audio: Buffer, lyrics: string): Promise<{ words: Yue2AlignWord[] }> => yue2Align(audio, lyrics),
+  // The same merged read as a sample edit, so split caption/lyrics files
+  // are folded into <stem>.txt rather than shadowing the new lyrics.
+  saveLyrics: async (audioPath: string, lyrics: string) => {
+    await writeSidecar(sidecarPathFor(audioPath), { ...loadSidecarMetadata(audioPath), lyrics });
+  },
   song: (id: string, userId: string) => getDb().prepare('SELECT audio_url, title FROM songs WHERE id = ? AND user_id = ?').get(id, userId) as { audio_url: string; title: string } | undefined,
 }) {
   function readiness() {
@@ -175,7 +200,45 @@ export function createYue2CoverService(deps = {
     return find(jobId, userId);
   }
 
-  return { readiness, source, lookup, start, find, cancel, reviewScore };
+  /** Retag the lyrics with the score's sections where the source vocal sings
+   *  each block. Nothing is saved; the client shows the diff first. */
+  async function matchSections(input: CoverInput & { lyrics?: unknown }, userId: string) {
+    if (typeof input.abc !== 'string' || !input.abc.trim() || input.abc.length > MAX_ABC_LENGTH ||
+        typeof input.lyrics !== 'string' || !input.lyrics.trim() || input.lyrics.length > MAX_ABC_LENGTH) {
+      throw new CoverRequestError('ABC and lyrics must be non-empty strings of at most 64 KB each.');
+    }
+    const { abc: _abc, lyrics: _lyrics, ...rest } = input;
+    const selected = await source(rest, userId);
+    let stem: string;
+    try { stem = await deps.vocalStem(selected.audioPath); }
+    catch (err) {
+      if (err instanceof NoVocalsError) throw new CoverRequestError('The source has no vocals to align.', 422);
+      throw err;
+    }
+    const lyrics = input.lyrics.replace(/\r\n?/g, '\n');
+    const aligned = await deps.align(fs.readFileSync(stem), lyrics);
+    let result;
+    try { result = matchSectionsToScore(input.abc, lyrics, aligned.words); }
+    catch (err) { throw new CoverRequestError((err as Error).message, 422); }
+    return { ...result, datasetSong: !!deps.datasetMatch(selected.audioPath) };
+  }
+
+  /** Write lyrics into the matched dataset song's sidecar (.txt); the sidecar
+   *  writer keeps the previous file as .txt.bak. */
+  async function saveDatasetLyrics(input: CoverInput & { lyrics?: unknown }, userId: string) {
+    if (typeof input.lyrics !== 'string' || !input.lyrics.trim() || input.lyrics.length > MAX_ABC_LENGTH) {
+      throw new CoverRequestError('Lyrics must be a non-empty string of at most 64 KB.');
+    }
+    const { lyrics, ...rest } = input;
+    const selected = await source(rest, userId);
+    const matched = deps.datasetMatch(selected.audioPath);
+    if (!matched) throw new CoverRequestError('This source is not a dataset song.', 404);
+    await deps.saveLyrics(matched.audioPath, lyrics.replace(/\r\n?/g, '\n'));
+    return { saved: true as const, datasetId: matched.datasetId, sampleId: matched.sampleId,
+      file: path.basename(sidecarPathFor(matched.audioPath)) };
+  }
+
+  return { readiness, source, lookup, start, find, cancel, reviewScore, matchSections, saveDatasetLyrics };
 }
 
 export const yue2CoverService = createYue2CoverService();

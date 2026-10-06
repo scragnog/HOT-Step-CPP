@@ -10,6 +10,8 @@ import * as realQueue from './training/labelingQueue.js';
 import type { TrainingJob } from './training/labelingQueue.js';
 import { createYue2CoverService } from './yue2Cover.js';
 import { createYue2CoverRouter } from '../routes/yue2Cover.js';
+import { readSidecar, writeSidecar } from './training/sidecarIO.js';
+import { sidecarPathFor } from './training/paths.js';
 
 function fixture(missing = false, defer = false) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-cover-api-'));
@@ -27,6 +29,7 @@ function fixture(missing = false, defer = false) {
   let duration = 120;
   let datasetAudio: string | null = null;
   let pending: (() => Promise<void>) | undefined;
+  let alignTimes: Array<[string, number]> = [];
   const fakeQueue = {
     createJob: (_kind: string, datasetId: string) => {
       started++;
@@ -55,6 +58,15 @@ function fixture(missing = false, defer = false) {
     duration: async () => duration,
     missingModels: () => missing ? ['SheetSage2'] : [],
     model: () => missing ? '' : 'sheetsage2-f16.gguf',
+    vocalStem: async (audioPath: string) => audioPath,
+    align: async (_audio: Buffer, lyrics: string) => ({ words: alignTimes.map(([text, start]) => {
+      const char0 = lyrics.indexOf(text);
+      return { char0, char1: char0 + text.length, start, end: start + 0.4, score: 0.9 };
+    }) }),
+    saveLyrics: async (audioPath: string, lyrics: string) => {
+      const file = sidecarPathFor(audioPath);
+      await writeSidecar(file, { ...readSidecar(file), lyrics });
+    },
     datasetMatch: () => datasetAudio ? { datasetId: 'dataset-1', sampleId: 'sample-1', audioPath: datasetAudio } : null,
     song: (id, userId) => id === 'song-1' && userId === 'owner' ? { audio_url: '/audio/library.wav', title: 'Library track' } : undefined,
     run: async (job, _audioPath, dir) => {
@@ -70,6 +82,7 @@ function fixture(missing = false, defer = false) {
   });
   return { root, referenceDir, libraryDir, upload, service, setDuration: (n: number) => { duration = n; },
     setDatasetAudio: (audio: string | null) => { datasetAudio = audio; },
+    setAlign: (times: Array<[string, number]>) => { alignTimes = times; },
     counts: () => ({ started, cancelled, runnerCalls }), drain: async () => { await pending?.(); },
     close: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
@@ -302,3 +315,27 @@ test('drift route authenticates, aligns once, and persists the cached result', a
     assert.equal(f.counts().started, 0);
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); f.close(); }
 });
+
+test('match sections retags from aligned times; save writes the dataset sidecar with a .bak', async () => {
+  const f = fixture();
+  try {
+    const input = { sourceAudioUrl: `/references/${f.upload}` };
+    const abc = ['X:1', 'M:3/4', 'L:1/8', 'Q:1/8=120', 'K:C', '% verse', 'V: Vocal', 'C6|D6|',
+      '% chorus', 'V: Vocal', 'E6|F6|', ''].join('\n');
+    const lyrics = '[Verse 1]\nfirst line\n[Hook]\nsecond line';
+    f.setAlign([['first', 0.2], ['second', 6.1]]);
+    const matched = await f.service.matchSections({ ...input, abc, lyrics }, 'owner');
+    assert.equal(matched.lyrics, '[Verse 1]\nfirst line\n\n[Chorus]\nsecond line');
+    assert.equal(matched.datasetSong, false);
+    await assert.rejects(f.service.saveDatasetLyrics({ ...input, lyrics: matched.lyrics }, 'owner'), /not a dataset song/);
+    f.setDatasetAudio(path.join(f.referenceDir, f.upload));
+    const sidecar = path.join(f.referenceDir, path.parse(f.upload).name + '.txt');
+    fs.writeFileSync(sidecar, `caption: test\nbpm: 120\nlyrics:\n${lyrics}\n`);
+    const saved = await f.service.saveDatasetLyrics({ ...input, lyrics: matched.lyrics }, 'owner');
+    assert.equal(saved.saved, true);
+    assert.equal(readSidecar(sidecar).lyrics, matched.lyrics);
+    assert.equal(readSidecar(sidecar).caption, 'test');
+    assert.equal(readSidecar(`${sidecar}.bak`).lyrics, lyrics);
+  } finally { f.close(); }
+});
+
