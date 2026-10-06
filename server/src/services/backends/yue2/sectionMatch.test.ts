@@ -53,3 +53,20 @@ test('two blocks sung in one section share one tag; words are untouched', () => 
   assert.equal(result.lyrics.startsWith('[Intro]\n\n[Verse]\nfirst line\n\nsecond line'), true);
   assert.deepEqual(result.blocks.map(b => b.status), ['renamed', 'merged']);
 });
+
+test('only chorus-type sections get copies, and a block sung where the score has no Vocal stays unsure', () => {
+  // A verse the lyrics leave out stays empty-handed; the chorus is copied.
+  const twoBlocks = '[Verse 1]\nfirst line\n\n[Chorus]\nsecond line';
+  const copied = matchSectionsToScore(score, twoBlocks, words(twoBlocks, [['first', 6.2], ['second', 12.1]]));
+  assert.equal(copied.lyrics, '[Intro]\n\n[Verse 1]\nfirst line\n\n[Chorus]\nsecond line\n\n[Chorus]\nsecond line\n\n[Outro]');
+  assert.deepEqual(copied.filled.map(f => [f.section, f.copiedFrom]), [[1, null], [5, 2], [6, null]]);
+
+  // "third" starts in the outro, which has no Vocal note: tag and place kept, flagged.
+  const lyrics = '[Verse 1]\nfirst line\n\n[Chorus]\nsecond line\n\n[Verse 2]\nthird line';
+  const result = matchSectionsToScore(score, lyrics, words(lyrics, [['first', 6.2], ['second', 12.1], ['third', 30.2]]));
+  assert.deepEqual(result.blocks.map(b => b.status), ['kept', 'kept', 'unsure']);
+  assert.equal(result.blocks[2].newTag, 'Verse 2');
+  assert.equal(result.lyrics.includes('[Verse 2]\nthird line'), true);
+  assert.equal(result.lyrics.includes('[Outro]\nthird line'), false);
+  assert.equal(result.filled.some(f => f.copiedFrom === 1), false);
+});

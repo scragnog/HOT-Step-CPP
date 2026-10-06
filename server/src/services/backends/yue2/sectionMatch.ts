@@ -4,10 +4,12 @@
 //
 // Words are never edited. A block keeps its tag when it already names the
 // same kind of section; a block the aligner is unsure of keeps its tag and
-// its place and is flagged. A sung score section with no block gets a copy of
-// the last block of the same kind (a chorus the lyrics wrote once), but only
-// when no unsure block sits in that gap, since that block may be the one sung
-// there. Sections with no Vocal note get an empty tag, and the lyrics' own
+// its place and is flagged, and so does a block that seems to start in a
+// section with no Vocal note. A sung chorus-type section (chorus, refrain,
+// hook) with no block gets a copy of the last block of that kind, a chorus the
+// lyrics wrote once, but only when no unsure block sits in that gap, since
+// that block may be the one sung there. Verses are never copied: each has its
+// own words. Sections with no Vocal note get an empty tag, and the lyrics' own
 // empty tags are dropped in their favour.
 
 import type { Yue2AlignWord } from './align.js';
@@ -22,6 +24,8 @@ const PICKUP_BARS = 1;
 // up to 10 s in on real songs), but a block starting in the last quarter of
 // a section is more likely misplaced than late, so it stays unsure.
 const MAX_SECTION_FRACTION = 0.75;
+// Kinds whose words repeat, so a missing one can be copied from the last.
+const REPEATS = /^(chorus|refrain|hook)\b/;
 const TAG_LINE = /^\s*\[([^\]\n]+)\]\s*$/;
 
 export interface SectionMatchBlock {
@@ -125,6 +129,8 @@ export function matchSectionsToScore(abc: string, lyrics: string, words: Yue2Ali
       // under the same tag; one opening a section must start in its first half.
       const late = (sung - spans[s].start) / (spanEnd(s) - spans[s].start) > MAX_SECTION_FRACTION;
       section = s === last || !late ? s : null;
+      // The score hears no singing there: the score or the aligner is wrong.
+      if (section !== null && !spans[section].sung) section = null;
     }
     // The aligner is monotonic; a block placed before its predecessor is unsure, not moved.
     if (section !== null && section < last) section = null;
@@ -144,7 +150,7 @@ export function matchSectionsToScore(abc: string, lyrics: string, words: Yue2Ali
     for (let s = current + 1; s < upTo; s++) {
       if (emitted.has(s) || (instrumentalOnly && spans[s].sung)) continue;
       const kind = sectionKind(spans[s].label);
-      const source = spans[s].sung && !unsureSince ? lastOfKind.get(kind) : undefined;
+      const source = spans[s].sung && !unsureSince && REPEATS.test(kind) ? lastOfKind.get(kind) : undefined;
       if (spans[s].sung && source === undefined) continue;  // leave it; nothing safe to copy
       const body = source === undefined ? '' : blocks[source].body;
       out.push(`[${label(s)}]${body ? `\n${body}` : ''}`);

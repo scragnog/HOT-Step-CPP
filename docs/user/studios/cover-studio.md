@@ -70,11 +70,13 @@ have to make.
    is sung, and retags each block with the score section it starts in. It
    never changes a word. A tag that already names the right kind of section
    stays as it is, so `[Verse 1]` over a `verse` section is left alone. A
-   chorus the lyrics wrote only once is copied into the later chorus sections,
-   and sections with no vocal get an empty tag such as `[Interlude]`, which
+   chorus (or refrain or hook) the lyrics wrote only once is copied into the
+   later sections of that kind. Verses are never copied: each has its own words.
+   Sections with no vocal get an empty tag such as `[Interlude]`, which
    replaces the lyrics' own empty tags. New tags follow the case your lyrics
-   already use. A block that starts late in a section, or that the aligner
-   could not place, keeps its tag and position and is listed for you to check.
+   already use. A block that starts late in a section, starts in a section
+   where the score has no vocal, or that the aligner could not place, keeps its
+   tag and position and is listed for you to check.
    Nothing changes until you press **Apply** in the before/after view. For a
    dataset song, **Apply and save to dataset** also writes the lyrics into the
    song's `.txt` after a confirmation. The previous file is kept as `.txt.bak`
