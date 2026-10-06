@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { TrainingChart } from './TrainingChart';
 import { jobStreamUrl, type TrainingJobSummary, type TrainingStreamEvent } from '../../services/trainingApi';
 import { formatDurationMs } from '../../utils/trainingEta';
+import { subscribeEventSource } from '../../services/sharedEventSource';
 
 type Point = { step: number; ep: number; loss?: number; arKl?: number; narMse?: number; narRecon?: number; frozen?: boolean; gradNorm?: number; stepMs?: number; elapsedMs?: number; ma5?: number; klStop?: number };
 const CAP = 2000;
@@ -29,10 +30,9 @@ export const Yue2JointRunChart: React.FC<{ job: TrainingJobSummary | null; total
   useEffect(() => {
     setHistory([]);
     if (!job?.id) return;
-    const stream = new EventSource(jobStreamUrl(job.id));
-    stream.onmessage = event => {
+    return subscribeEventSource(jobStreamUrl(job.id), { message: data => {
       try {
-        const item = JSON.parse(event.data) as TrainingStreamEvent;
+        const item = JSON.parse(data) as TrainingStreamEvent;
         if (item.type !== 'metric' || item.metric !== 'step' || typeof item.step !== 'number') return;
         setHistory(previous => {
           const existing = previous.find(p => p.step === item.step);
@@ -52,8 +52,7 @@ export const Yue2JointRunChart: React.FC<{ job: TrainingJobSummary | null; total
           return next.map((p, i) => p.loss === undefined ? p : { ...p, ma5: mean(next.slice(Math.max(0, i - 4), i + 1)) });
         });
       } catch { /* malformed event */ }
-    };
-    return () => stream.close();
+    } });
   }, [job?.id]);
 
   const chartSteps = useMemo(() => {

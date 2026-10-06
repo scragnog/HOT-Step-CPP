@@ -6,6 +6,7 @@
 
 import { Router, Request, Response } from 'express';
 import { config } from '../config.js';
+import { countPresence } from './health.js';
 
 const router = Router();
 
@@ -60,6 +61,10 @@ router.get('/', (req: Request, res: Response) => {
     'Connection': 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
+
+  res.write('retry: 2000\n\n');
+  // Each tab's one stream doubles as its presence beacon (see health.ts).
+  countPresence(req);
 
   // Send backlog
   const afterId = req.query.after ? parseInt(req.query.after as string, 10) : -1;

@@ -9,9 +9,15 @@ import { startupCommit, dirtyCheckout } from '../services/training/workerUpdate.
 
 const router = Router();
 
-// Open browser tabs hold this SSE stream (App.tsx). open-browser-if-needed.ps1
-// reads `clients` from /api/health to decide whether to open a new tab.
+// Open browser tabs hold an SSE stream: /api/logs since a tab keeps one
+// connection for both (App.tsx), /presence from tabs loaded before that.
+// open-browser-if-needed.ps1 reads `clients` from /api/health to decide
+// whether to open a new tab.
 let presence = 0;
+export function countPresence(req: { on(event: 'close', cb: () => void): unknown }): void {
+  presence++;
+  req.on('close', () => { presence--; });
+}
 router.get('/presence', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -20,8 +26,7 @@ router.get('/presence', (req, res) => {
     'X-Accel-Buffering': 'no',
   });
   res.write('retry: 2000\n\n');
-  presence++;
-  req.on('close', () => { presence--; });
+  countPresence(req);
 });
 
 // GET /api/health — overall system health

@@ -36,6 +36,7 @@ import {
 import { dispatchYue2Batch, listTrainingWorkers, type TrainingWorkerStatus } from '../../services/trainingApi';
 import { yue2AdapterHalfBytes, formatMB } from '../../utils/yue2AdapterSize';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { subscribeEventSource } from '../../services/sharedEventSource';
 import { descentRate, formatDurationMs } from '../../utils/trainingEta';
 
 const JOB_KEY = 'hs-yue2-aitk-job:';
@@ -707,10 +708,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     if (saved.steps?.length) setStepHistory(saved.steps);
     const savedMilestones = readStored<JointMilestone[]>(`${metricKey}:milestones`, saved.milestones ?? []);
     if (savedMilestones.length) setMilestones(savedMilestones);
-    const stream = new EventSource(jobStreamUrl(job.id));
-    stream.onmessage = event => {
+    const stop = subscribeEventSource(jobStreamUrl(job.id), { message: data => {
       try {
-        const item = JSON.parse(event.data) as TrainingStreamEvent;
+        const item = JSON.parse(data) as TrainingStreamEvent;
         if (item.type === 'metric' && item.metric === 'step') {
           setLiveMetric(item);
           if (typeof item.step === 'number' && Number.isFinite(item.step)) {
@@ -758,12 +758,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           const stamp = new Date(item.ts).toLocaleTimeString();
           setJobLogs(previous => [...previous, `${stamp} ${item.level}: ${item.message}`].slice(-100));
         } else if (item.type === 'status' && !['queued', 'running'].includes(item.status)) {
-          stream.close();
+          stop();
         }
       } catch { /* Ignore malformed replay frames; polling remains authoritative. */ }
-    };
-    stream.onerror = () => { /* EventSource reconnects; job polling handles terminal state. */ };
-    return () => stream.close();
+    } });
+    return stop;
   }, [job?.id, job?.startedAt]);
 
   useEffect(() => {

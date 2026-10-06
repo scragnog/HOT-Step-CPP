@@ -84,6 +84,7 @@ import { useDiscoMode, toggleDiscoMode, setDiscoPlaying, setDiscoDataUrl, syncSt
 import { DiscoPulseWrapper } from './components/shared/DiscoPulseWrapper';
 
 import { HiHatParticles } from './components/shared/HiHatParticles';
+import { subscribeEventSource } from './services/sharedEventSource';
 
 // Inlined: the file could not be fetched from a server that has just died.
 import serverOfflineImage from './assets/server-offline.webp?inline';
@@ -420,13 +421,13 @@ const AppContent: React.FC = () => {
   const [isOffline, setIsOffline] = useState(false);
 
   // Presence beacon: the launcher asks /api/health whether any tab is already
-  // open before opening a new one. SSE reconnects at the network layer, so a
-  // background tab (whose timers Chrome throttles) still re-registers within
-  // seconds of the server coming back. A non-200 (Vite proxy error while the
-  // server is down) closes an EventSource for good, hence the manual reopen.
+  // open before opening a new one. The server counts each tab's /api/logs
+  // stream, the one the Terminal reads, so a tab holds a single connection
+  // (Chrome allows six per host across all tabs). SSE reconnects at the
+  // network layer, so a background tab (whose timers Chrome throttles) still
+  // re-registers within seconds of the server coming back; the shared stream
+  // reopens itself after a non-200 (Vite proxy error while the server is down).
   useEffect(() => {
-    let es: EventSource | null = null;
-    let retry: number | undefined;
     let checking = false;
     let disposed = false;
     const confirmOffline = async () => {
@@ -439,17 +440,8 @@ const AppContent: React.FC = () => {
         if (!disposed) setIsOffline(true);
       } finally { checking = false; }
     };
-    const open = () => {
-      es = new EventSource('/api/health/presence');
-      es.onerror = () => {
-        void confirmOffline();
-        if (es?.readyState === EventSource.CLOSED && retry === undefined) {
-          retry = window.setTimeout(() => { retry = undefined; if (!disposed) open(); }, 3000);
-        }
-      };
-    };
-    open();
-    return () => { disposed = true; window.clearTimeout(retry); es?.close(); };
+    const unsubscribe = subscribeEventSource('/api/logs', { error: () => void confirmOffline() }, { reconnect: true });
+    return () => { disposed = true; unsubscribe(); };
   }, []);
 
   // Settings' own "Restart now" button posts to /api/shutdown/restart from deep
