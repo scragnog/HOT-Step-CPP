@@ -270,7 +270,7 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     if (stored.saveEvery === 250) stored.saveEvery = 50;
     if (stored.rank === 32) stored.rank = 64;
     if (stored.alpha === 32) stored.alpha = 64;
-    window.localStorage.setItem(migration, '1');
+    writeStored(migration, 1);
   }
   // Recipe A (2026-09-20): values still sitting on the old defaults move to
   // the new ones; anything the user changed on purpose stays.
@@ -284,7 +284,7 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     if (stored.lr === undefined) stored.lr = 1e-4;
     if (stored.plannerLrScale === undefined) stored.plannerLrScale = 0.6;
     if (stored.preview?.enabled) stored.preview = { ...stored.preview, enabled: false };
-    window.localStorage.setItem(recipeA, '1');
+    writeStored(recipeA, 1);
   }
   // NAR budget (2026-09-21): forms still sitting on Recipe A's values move to
   // the new defaults; anything the user set deliberately stays put.
@@ -295,14 +295,14 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     if (stored.steps === 500) stored.steps = 750;
     if (stored.lr === 1e-4) stored.lr = 2e-4;
     if (stored.plannerLrScale === 0.6) stored.plannerLrScale = 0.3;
-    window.localStorage.setItem(narBudget, '1');
+    writeStored(narBudget, 1);
   }
   // Prodigy default (2026-09-21): Recipe A had moved everyone to adamw, so a
   // stored adamw is the old default, not a choice, and moves with it.
   const prodigy = `${FORM_KEY}${datasetId}:defaults-prodigy`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(prodigy)) {
     if (stored.optimizer === 'adamw') stored.optimizer = 'prodigy';
-    window.localStorage.setItem(prodigy, '1');
+    writeStored(prodigy, 1);
   }
   // LoKr default (2026-09-22): a form that never chose an adapter type was on
   // the LoRA default, so it moves; its alpha moves only if it was still the
@@ -313,7 +313,7 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
       stored.adapterType = 'lokr'; stored.lokrDim = 64; stored.lokrFactor = 4;
       if (stored.alpha === undefined || stored.alpha === 64) stored.alpha = 256;
     }
-    window.localStorage.setItem(lokrDefault, '1');
+    writeStored(lokrDefault, 1);
   }
   // LoKr stop recipe (2026-09-22): a LoKr form still on LoRA's KL 1.4 moves to
   // the LoKr pair; a deliberately edited target stays.
@@ -323,7 +323,7 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
       if (stored.targetKl === undefined || stored.targetKl === 1.4) stored.targetKl = LOKR_STOP.targetKl;
       if (stored.narLrScale === undefined) stored.narLrScale = LOKR_STOP.narLrScale;
     }
-    window.localStorage.setItem(lokrStop, '1');
+    writeStored(lokrStop, 1);
   }
   // LoKr recipe 2 (2026-09-22): planner 0.3 -> 0.6, decoder 0.5 -> 1.0, for
   // LoKr forms still on the first recipe's values.
@@ -333,19 +333,19 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
       if (stored.plannerLrScale === undefined || stored.plannerLrScale === 0.3) stored.plannerLrScale = LOKR_STOP.plannerLrScale;
       if (stored.narLrScale === undefined || stored.narLrScale === 0.5) stored.narLrScale = LOKR_STOP.narLrScale;
     }
-    window.localStorage.setItem(lokrRecipe2, '1');
+    writeStored(lokrRecipe2, 1);
   }
   // LoKr recipe 3 (2026-09-22): target KL 0.9 -> 1.0.
   const lokrRecipe3 = `${FORM_KEY}${datasetId}:defaults-lokr-recipe-3`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(lokrRecipe3)) {
     if (stored.adapterType === 'lokr' && stored.targetKl === 0.9) stored.targetKl = LOKR_STOP.targetKl;
-    window.localStorage.setItem(lokrRecipe3, '1');
+    writeStored(lokrRecipe3, 1);
   }
   // Preview 90 s (2026-09-22): a form still on the old 40 s default moves.
   const preview90 = `${FORM_KEY}${datasetId}:defaults-preview-90`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(preview90)) {
     if (stored.preview && stored.preview.seconds === 40) stored.preview = { ...stored.preview, seconds: 90, previewMaxFrames: 2250 };
-    window.localStorage.setItem(preview90, '1');
+    writeStored(preview90, 1);
   }
   // 2026-09-23 defaults: save every 25, cautious on, LoKr KL 1.1. Values still
   // on the previous defaults move; deliberate ones stay.
@@ -354,7 +354,7 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     if (stored.saveEvery === 50) stored.saveEvery = 25;
     if (stored.optimizer !== 'adamw' && (stored.cautious === undefined || stored.cautious === false)) stored.cautious = true;
     if (stored.adapterType === 'lokr' && stored.targetKl === 1.0) stored.targetKl = LOKR_STOP.targetKl;
-    window.localStorage.setItem(d0923, '1');
+    writeStored(d0923, 1);
   }
   // Planner freeze + caption dropout (2026-09-23): fields a form never set
   // take the new defaults; deliberate values stay.
@@ -362,36 +362,36 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
   if (typeof window !== 'undefined' && !window.localStorage.getItem(freeze)) {
     if (stored.narExtraSteps === undefined) stored.narExtraSteps = DEFAULT_FORM.narExtraSteps;
     if (stored.captionDropout === undefined) stored.captionDropout = DEFAULT_FORM.captionDropout;
-    window.localStorage.setItem(freeze, '1');
+    writeStored(freeze, 1);
   }
   // Presets (2026-09-24): stored forms move to Balanced once.
   // 2026-09-24: presets end at the KL; the decoder trains on during refinement.
   const klEnd = `${FORM_KEY}${datasetId}:defaults-kl-end`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(klEnd)) {
     if (stored.stopMode === 'kl' && stored.narExtraSteps === stored.steps) stored.narExtraSteps = 0;
-    window.localStorage.setItem(klEnd, '1');
+    writeStored(klEnd, 1);
   }
   const presets = `${FORM_KEY}${datasetId}:defaults-presets`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(presets)) {
     Object.assign(stored, presetValues(PRESETS[2]));
-    window.localStorage.setItem(presets, '1');
+    writeStored(presets, 1);
   }
   const autoRefine = `${FORM_KEY}${datasetId}:defaults-auto-refine`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(autoRefine)) {
     if (stored.autoRefine === undefined) stored.autoRefine = DEFAULT_FORM.autoRefine;
-    window.localStorage.setItem(autoRefine, '1');
+    writeStored(autoRefine, 1);
   }
   const recon = `${FORM_KEY}${datasetId}:defaults-recon-stop`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(recon)) {
     if (stored.reconStop === undefined) { stored.reconStop = DEFAULT_FORM.reconStop; stored.reconStopWindow = DEFAULT_FORM.reconStopWindow; }
     // The old two-point knee shipped with 3; the fitted knee needs 10 points.
     if (stored.reconStopWindow === 3) stored.reconStopWindow = DEFAULT_FORM.reconStopWindow;
-    window.localStorage.setItem(recon, '1');
+    writeStored(recon, 1);
   }
   const spike = `${FORM_KEY}${datasetId}:defaults-spike-guard`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(spike)) {
     if (stored.spikeFactor === undefined) { stored.spikeFactor = DEFAULT_FORM.spikeFactor; stored.spikeStop = DEFAULT_FORM.spikeStop; stored.spikeStopWindow = DEFAULT_FORM.spikeStopWindow; }
-    window.localStorage.setItem(spike, '1');
+    writeStored(spike, 1);
   }
   // 2026-09-25 defaults: wsd schedule, AR KL target 1.0. A form that never
   // touched the schedule, or is still sitting on the old KL 1.2, moves;
@@ -400,14 +400,14 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
   if (typeof window !== 'undefined' && !window.localStorage.getItem(d0925)) {
     if (stored.lrSchedule === undefined) stored.lrSchedule = 'wsd';
     if (stored.targetKl === 1.2) stored.targetKl = 1.0;
-    window.localStorage.setItem(d0925, '1');
+    writeStored(d0925, 1);
   }
   // 2026-09-25 (Rob): checkpoint previews are the Refine tab's job; a primary
   // run renders none by default. Turned off once; tick it again to keep it.
   const previewOff = `${FORM_KEY}${datasetId}:defaults-2026-09-25-preview-off`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(previewOff)) {
     if (stored.preview?.enabled) stored.preview = { ...stored.preview, enabled: false };
-    window.localStorage.setItem(previewOff, '1');
+    writeStored(previewOff, 1);
   }
   // 2026-09-27 (Rob): the base-matched recipe replaces the tuned one. Every
   // stored form moves to it once, on the Balanced preset; the tuned-only
@@ -418,7 +418,7 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     stored.method = 'base-matched'; stored.stopMode = 'steps'; stored.optimizer = 'adamw-lm'; stored.cautious = false;
     stored.autoRefine = false; stored.cursorWeight = 0;
     Object.assign(stored, presetValues(PRESETS[2]));
-    window.localStorage.setItem(baseMatched, '1');
+    writeStored(baseMatched, 1);
   }
   // 2026-09-27 (Rob): the run's own ladder is previewed and scored on this
   // page, so previews are on and the engine stays up. Turned on once.
@@ -426,7 +426,7 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
   if (typeof window !== 'undefined' && !window.localStorage.getItem(ladderPreviews)) {
     stored.preview = { ...LADDER_PREVIEW, ...(stored.preview?.caption ? { caption: stored.preview.caption } : {}), ...(stored.preview?.lyrics ? { lyrics: stored.preview.lyrics } : {}) };
     stored.stopEngine = false;
-    window.localStorage.setItem(ladderPreviews, '1');
+    writeStored(ladderPreviews, 1);
   }
   // 2026-09-28 reset: the chain above runs on every new dataset's empty form
   // too, and Recipe A (lr undefined -> 1e-4) plus NAR budget (1e-4 -> 2e-4)
@@ -438,16 +438,16 @@ function readStoredForm(datasetId: string): Yue2JointTrainRequest {
     for (const key of Object.keys(stored) as (keyof Yue2JointTrainRequest)[]) {
       if (!PRESET_EXCLUDED_KEYS.has(key)) delete stored[key];
     }
-    window.localStorage.setItem(`${FORM_KEY}${datasetId}`, JSON.stringify(stored));
-    window.localStorage.setItem(resetAll, '1');
+    writeStored(`${FORM_KEY}${datasetId}`, stored);
+    writeStored(resetAll, 1);
   }
   // 2026-09-30 (Rob): two takes per rung, a fixed-seed one to compare rungs
   // like for like and a random-seed one that is a new song every rung.
   const twoTakes = `${FORM_KEY}${datasetId}:defaults-ladder-two-takes-2026-09-30`;
   if (typeof window !== 'undefined' && !window.localStorage.getItem(twoTakes)) {
     stored.preview = { ...LADDER_PREVIEW, ...stored.preview, takes: 2 };
-    window.localStorage.setItem(`${FORM_KEY}${datasetId}`, JSON.stringify(stored));
-    window.localStorage.setItem(twoTakes, '1');
+    writeStored(`${FORM_KEY}${datasetId}`, stored);
+    writeStored(twoTakes, 1);
   }
   // Legacy is the one preset that runs the tuned recipe; anything else is base-matched.
   return { ...DEFAULT_FORM, ...stored, method: stored.method === 'tuned' ? 'tuned' : 'base-matched' };
@@ -511,8 +511,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       const { lr: _lr, ...settings } = p.settings;
       return { ...p, settings };
     });
-    window.localStorage.setItem(YUE2_JOINT_PRESETS_KEY, JSON.stringify(cleaned));
-    window.localStorage.setItem(flag, '1');
+    writeStored(YUE2_JOINT_PRESETS_KEY, cleaned);
+    writeStored(flag, 1);
     return cleaned;
   });
   const [presetName, setPresetName] = useState('');
@@ -797,14 +797,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           .sort((a, b) => b.createdAt - a.createdAt)[0];
         if (!cancelled && latestPrepare) {
           setPrepareJob(latestPrepare);
-          window.localStorage.setItem(`${PREP_KEY}${datasetId}:job`, JSON.stringify(latestPrepare.id));
+          writeStored(`${PREP_KEY}${datasetId}:job`, latestPrepare.id);
         }
         const latest = result
           .filter(item => isJointJob(item, datasetId))
           .sort((a, b) => b.createdAt - a.createdAt)[0];
         if (!cancelled && latest) {
           setJob(latest);
-          window.localStorage.setItem(`${JOB_KEY}${datasetId}`, JSON.stringify(latest.id));
+          writeStored(`${JOB_KEY}${datasetId}`, latest.id);
         }
       } catch { /* The form remains usable when history is unavailable. */ }
     };
@@ -814,21 +814,21 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(`${FORM_KEY}${datasetId}`, JSON.stringify(form));
+      writeStored(`${FORM_KEY}${datasetId}`, form);
     }
   }, [datasetId, form]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(`${PREP_KEY}${datasetId}`, JSON.stringify(prepare));
-      if (prepareJob) window.localStorage.setItem(`${PREP_KEY}${datasetId}:job`, JSON.stringify(prepareJob.id));
-      if (prepareManifest) window.localStorage.setItem(`${PREP_KEY}${datasetId}:manifest`, JSON.stringify(prepareManifest));
-      window.localStorage.setItem(`${PREP_KEY}${datasetId}:applied`, JSON.stringify(appliedPrepareJobId));
+      writeStored(`${PREP_KEY}${datasetId}`, prepare);
+      if (prepareJob) writeStored(`${PREP_KEY}${datasetId}:job`, prepareJob.id);
+      if (prepareManifest) writeStored(`${PREP_KEY}${datasetId}:manifest`, prepareManifest);
+      writeStored(`${PREP_KEY}${datasetId}:applied`, appliedPrepareJobId);
     }
   }, [datasetId, prepare, prepareJob, prepareManifest, appliedPrepareJobId]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') window.localStorage.setItem(YUE2_JOINT_PRESETS_KEY, JSON.stringify(presets));
+    if (typeof window !== 'undefined') writeStored(YUE2_JOINT_PRESETS_KEY, presets);
   }, [presets]);
 
   // "Perform all stages" runs in the store and can outlive this card: after a
@@ -838,7 +838,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   useEffect(() => {
     if (!storeJob || !isJointJob(storeJob, datasetId) || storeJob.id === job?.id) return;
     setJob(storeJob);
-    window.localStorage.setItem(`${JOB_KEY}${datasetId}`, JSON.stringify(storeJob.id));
+    writeStored(`${JOB_KEY}${datasetId}`, storeJob.id);
   }, [datasetId, storeJob?.id]);
 
   useEffect(() => {
@@ -977,7 +977,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       const result = await startYue2JointTrain(datasetId, request);
       // A new run takes the ladder over from whatever was picked before.
       setPickedLadderRun('');
-      if (typeof window !== 'undefined') window.localStorage.setItem(`${JOB_KEY}${datasetId}`, JSON.stringify(result.jobId));
+      if (typeof window !== 'undefined') writeStored(`${JOB_KEY}${datasetId}`, result.jobId);
       setJob(await getJob(result.jobId));
       return result.jobId;
     } catch (err) {
