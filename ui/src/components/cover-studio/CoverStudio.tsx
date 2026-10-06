@@ -1066,8 +1066,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           onCoverCaptionModelChange={handleCoverModelChange}
         />
 
-        {/* Center: Lyrics */}
-        <div className="flex-1 flex flex-col overflow-hidden border-r border-zinc-200 dark:border-white/5">
+        {/* Center: Lyrics. The side panels shrink before it does. */}
+        <div className="flex-1 min-w-[320px] flex flex-col overflow-hidden border-r border-zinc-200 dark:border-white/5">
           <div className="flex-shrink-0 px-4 py-3 border-b border-zinc-200 dark:border-white/5">
             <div className="flex items-center justify-between gap-2">
               {/* Artist + Title inputs */}

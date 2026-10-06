@@ -65,7 +65,7 @@ export const ArtistSettingsPanel: React.FC<ArtistSettingsPanelProps> = (props) =
   const effectiveKey = keyOverride || analysis?.key || null;
 
   return (
-    <div className="w-[540px] flex-shrink-0 overflow-y-auto scrollbar-hide p-4 space-y-4">
+    <div className="w-[540px] min-w-[320px] overflow-y-auto scrollbar-hide p-4 space-y-4">
       {/* Target Artist */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-zinc-700 dark:text-zinc-300">

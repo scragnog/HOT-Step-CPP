@@ -50,7 +50,7 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
   const keyLabel = p.scoreKeyLabel;
   const sourceBpm = Number(p.scoreAbc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1] ?? 120);
   return (
-  <div className="w-[420px] flex-shrink-0 overflow-y-auto scrollbar-hide p-4 space-y-5">
+  <div className="w-[420px] min-w-[300px] overflow-y-auto scrollbar-hide p-4 space-y-5">
     <div className="space-y-2">
       <ParamLabel label="YuE2 style caption" info="Describe the target genre, instruments, mood and vocal style. An adapter can also use a caption from its training dataset." />
       {p.captionTracks.length > 0 && p.pairMode === 'pair' && (

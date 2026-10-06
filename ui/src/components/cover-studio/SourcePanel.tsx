@@ -134,7 +134,7 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
   const bpmIsOverridden = bpmOverride != null;
 
   return (
-    <div className="w-[320px] flex-shrink-0 overflow-y-auto scrollbar-hide border-r border-zinc-200 dark:border-white/5 p-4 space-y-4">
+    <div className="w-[320px] min-w-[240px] overflow-y-auto scrollbar-hide border-r border-zinc-200 dark:border-white/5 p-4 space-y-4">
       {/* Upload zone */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
