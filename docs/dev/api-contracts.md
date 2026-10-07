@@ -210,8 +210,14 @@ everywhere; changes to the manifest are proposed separately before they land her
 `POST /api/resolve/preview` builds the body Create or the Lyric Studio queue would send to
 `/api/generate`, without queuing anything. Node resolves the caption, wildcards, compose
 helpers, duration and the album preset overlay; the client submits the returned `request`
-unchanged. It needs the bearer token (`401` without it) and answers `400` with zod `issues` for
-a malformed intent or an unknown engine, and `404` for an unknown generation.
+unchanged. It needs the bearer token (`401` without it). It answers `400` with zod `issues`
+for a malformed intent, and `400` for an unknown engine or for `params.expectedBackend` naming a
+different engine than the one being resolved. It answers `404` for an unknown generation.
+
+The engine is the intent's `engine`, or the active one. Every returned `request` carries
+`expectedBackend` set to that engine. So if the active engine changes between preview and
+submit, `/api/generate` refuses the body with `409` instead of running content resolved for
+one engine on another.
 
 The schemas are zod 4, in `server/src/contracts/resolution.ts`; TypeScript clients import the
 inferred types from there. Two intents:
@@ -273,6 +279,12 @@ The response is `{ request, provenance, warnings, uiEffects, version }`:
   version)` (`server/src/services/generation/resolve/resolveIntent.ts`) checks that a body is
   exactly the previewed one.
 
-`node`-side parity with the browser is checked by `npx tsx scripts/resolve-parity.mjs` (from
-`server/`). It runs the ports against the UI modules on generated inputs, and against the
-browser capture fixtures when they are present, using a temporary copy of the database.
+Parity with the browser is checked by `npx tsx scripts/resolve-parity.mjs`, run from
+`server/`.
+- It runs the ports against the UI modules on generated inputs.
+- When the browser capture fixtures are present, it rebuilds each one's intent and resolves it
+  through the real loader, using a temporary copy of the database. It then compares the whole
+  body against what the browser sent.
+- Two differences are expected: the pinned `expectedBackend`, and the caption and lyrics of a
+  random-seed wildcard draw. Those are checked as valid expansions instead.
+- The script prints which inputs each case had to reconstruct.

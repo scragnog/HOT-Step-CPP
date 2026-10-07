@@ -33,6 +33,19 @@ export interface ResolvedIntent {
   uiEffects: Array<{ key: string; value: unknown }>;
 }
 
+/** The body asserts which engine it was resolved for. /api/generate refuses
+ *  it with a 409 when the active engine differs (expectedBackendMismatch), so
+ *  a preview made for one engine can never run on another after a switch. */
+export class ResolveConflictError extends Error {}
+
+function pinEngine(params: Record<string, unknown>, engine: string): void {
+  const asserted = params.expectedBackend;
+  if (asserted !== undefined && asserted !== engine) {
+    throw new ResolveConflictError(`The request asserts expectedBackend '${String(asserted)}' but is being resolved for '${engine}'`);
+  }
+  params.expectedBackend = engine;
+}
+
 /** sha256 of the request with keys sorted at every level. */
 export function requestVersion(request: Record<string, unknown>): string {
   const canon = (v: unknown): unknown => {
@@ -113,6 +126,7 @@ export function resolveCreateIntent(intent: CreateIntent, engine: string, data: 
     duration = { source: 'request', value: params.duration };
   }
 
+  pinEngine(params, engine);
   return {
     request: params,
     provenance: {
@@ -243,6 +257,7 @@ export function resolveWrittenSongIntent(intent: WrittenSongIntent, engine: stri
 
   params.taskType = 'text2music';
   params.source = 'lyric-studio';
+  pinEngine(params, engine);
 
   return {
     request: params,

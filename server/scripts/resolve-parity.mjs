@@ -75,6 +75,26 @@ const same = (label, a, b) => {
   if (ja !== jb) failures.push(`${label}\n    browser: ${jb}\n    node:    ${ja}`);
 };
 
+/** The whole effective body, key by key. Documented exceptions:
+ *  - `expectedBackend`: the resolver pins it to the engine (the browser sends
+ *    none), so the body cannot run on another engine after a switch.
+ *  - keys in `nondeterministic`: a fresh random draw on each side, checked by
+ *    the caller as valid expansions instead. */
+const exceptionsSeen = { expectedBackend: 0, nondeterministic: 0 };
+function compareBody(label, resolved, captured, engine, nondeterministic = new Set()) {
+  for (const k of new Set([...Object.keys(resolved), ...Object.keys(captured)])) {
+    if (k === 'expectedBackend' && !(k in captured)) {
+      exceptionsSeen.expectedBackend++;
+      same(`${label}: expectedBackend pinned`, resolved[k], engine);
+      continue;
+    }
+    if (nondeterministic.has(k)) { exceptionsSeen.nondeterministic++; continue; }
+    // JSON drops undefined, so a key the resolver set to undefined equals an
+    // absent one on the wire.
+    same(`${label}: ${k}`, resolved[k] === undefined ? null : resolved[k], captured[k] === undefined ? null : captured[k]);
+  }
+}
+
 // ── 1. Differential ─────────────────────────────────────────────────────────
 
 let rngState = 12345;
@@ -261,11 +281,7 @@ if (!fs.existsSync(indexFile)) {
           intent.yue2Selection = hit ? { mode: 'track', selectedName: hit.name } : { mode: 'custom' };
         }
         const r = node.intent.resolveWrittenSongIntent(intent, engine, data);
-        for (const k of ['caption', 'lyrics', 'title', 'artist', 'subject', 'duration', 'bpm', 'keyScale', 'instrumental', 'taskType', 'source',
-          'loraPath', 'loraStack', 'triggerWord', 'triggerWords', 'triggerPlacement', 'mm3LmAdapter', 'yue2Pick',
-          'masteringReference', 'timbreReference', 'timeSignature', 'vocalLanguage']) {
-          same(`${label}: ${k}`, r.request[k], body[k]);
-        }
+        compareBody(label, r.request, body, engine);
         // Auto branches: the pick the resolver makes unprompted must be the one captured.
         if (/Auto/.test(f.branch)) {
           const auto = node.intent.resolveWrittenSongIntent({ ...intent, mm3Selection: undefined, yue2Selection: undefined }, engine, data);
@@ -273,52 +289,84 @@ if (!fs.existsSync(indexFile)) {
         }
         report.push(`${failures.length === before ? 'PASS' : 'FAIL'} ${label} -> ${savedOwn ? 'captured song caption restored; ' : ''}gen ${gen.id}, album ${target}${target !== own ? ` (as, own ${own})` : ''}, caption ${r.provenance.caption.source}${r.provenance.caption.fromTrack ? ` "${r.provenance.caption.fromTrack}"` : ''}`);
       } else {
-        // Create: duration rule, wildcard and compose steps, caption source.
-        same(`${label}: duration`, engine === 'minimax-m3' ? -1 : body.duration, body.duration);
+        // Create: rebuild the intent the panel would send, run the real loader
+        // and resolver, compare the whole body.
+        //
+        // What the capture did not record is reconstructed, and each case says
+        // which:
+        //   typed caption  for a Custom box, the captured caption with the
+        //                  compose trigger and beat tail removed; for a wildcard
+        //                  case, the recorded template (index.supplement)
+        //   compose        trigger "fixture-trigger" when the caption starts
+        //                  with it; the beat tail and its bar count when present;
+        //                  autoExpand for the expanded cases
+        //   caption source the dataset or album whose track the caption is,
+        //                  found by search; mode from the branch
+        const notes = [];
         const trig = body.caption.startsWith('fixture-trigger, ') ? 'fixture-trigger' : '';
         const beat = / with a clean (\d+)-bar percussive intro and outro for DJ mixing$/.exec(body.caption);
         let core = trig ? body.caption.slice(trig.length + 2) : body.caption;
         if (beat) core = core.slice(0, core.length - beat[0].length - 1);
-        same(`${label}: compose round-trip`, node.content.composeCreateCaption(core, { loraTrigger: trig, beatIntro: !!beat, introBars: beat ? Number(beat[1]) : undefined }), body.caption);
-        let how = `compose${trig ? '+trigger' : ''}${beat ? '+beat' : ''}`;
-        if (/auto-expanded|expanded/.test(f.branch)) {
-          const [capT, lyrT] = index.supplement.wildcardInputs.map(s => s.replace(/\\n/g, '\n'));
-          const options = t => { const out = new Set(); for (let s = 0; s < 400; s++) out.add(node.content.expandWildcards(t, s)); return out; };
-          if (!/Track caption overrides/.test(f.branch)) {
-            checks++;
-            if (!options(capT).has(core)) failures.push(`${label}: caption "${core}" is not an expansion of "${capT}"`);
-          }
-          checks++;
-          if (!options(lyrT).has(body.lyrics)) failures.push(`${label}: lyrics are not an expansion of the template`);
-          how += '+wildcards';
-        } else if (/literal wildcard/.test(f.branch)) {
-          checks++;
-          if (!node.content.hasWildcards(body.caption)) failures.push(`${label}: literal wildcards were expanded`);
-        }
+        const expanded = /expanded/.test(f.branch);
+        const [capT, lyrT] = (index.supplement?.wildcardInputs ?? []).map(s => s.replace(/\\n/g, '\n'));
+        const intent = {
+          kind: 'create', engine,
+          params: { ...body, caption: expanded ? capT : core, lyrics: expanded ? lyrT : body.lyrics },
+          compose: { autoExpand: expanded, loraTrigger: trig, beatIntro: !!beat, ...(beat ? { introBars: Number(beat[1]) } : {}) },
+        };
+        notes.push(expanded ? 'typed=template' : 'typed=caption minus compose');
         if (engine === 'yue2' && /Auto|Track/.test(f.branch)) {
           const all = await datasetsFor();
-          const hits = [...all].flatMap(([id, tracks]) => tracks.filter(t => node.src.yue2TrackCaption(t) === core).map(t => [id, t]));
-          checks++;
-          if (!hits.length) failures.push(`${label}: no dataset track carries the captured caption`);
-          else if (/Auto/.test(f.branch)) {
-            const ok = hits.some(([id]) => node.src.resolveYue2Caption('typed', body.bpm, all.get(id), { mode: 'auto' }).caption === core);
-            checks++;
-            if (!ok) failures.push(`${label}: auto pick by tempo does not land on the captured track`);
-          }
-          how += `+dataset(${hits.length ? 'found' : 'missing'})`;
+          const hits = [...all].flatMap(([id, tracks]) => tracks.filter(t => node.src.yue2TrackCaption(t) === core).map(t => ({ id, t })));
+          const mode = /Auto/.test(f.branch) ? 'auto' : 'track';
+          // For auto, the dataset whose tempo pick is this track (several albums
+          // can share a sidecar text).
+          const hit = mode === 'auto'
+            ? hits.find(h => node.src.resolveYue2Caption('', body.bpm, all.get(h.id), { mode: 'auto' }).caption === core)
+            : hits[0];
+          if (!hit) { failures.push(`${label}: no dataset ${mode === 'auto' ? 'auto-picks' : 'carries'} the captured caption`); report.push(`FAIL ${label}`); continue; }
+          intent.captionSource = { engine: 'yue2', datasetId: hit.id, adapterInForce: true,
+            selection: mode === 'auto' ? { mode: 'auto' } : { mode: 'track', selectedName: hit.t.name } };
+          if (!expanded) { intent.params.caption = ''; notes[0] = 'typed=empty (box locked to the source)'; }
+          notes.push(`yue2 ${mode} source by search`);
         }
-        if (engine === 'minimax-m3' && /handoff (Auto|Track)/.test(f.branch)) {
+        if (engine === 'minimax-m3' && /handoff/.test(f.branch)) {
+          const mode = /Auto/.test(f.branch) ? 'auto' : /Track/.test(f.branch) ? 'track' : 'custom';
           const hits = [...albumMm3].filter(([, tracks]) => tracks.some(t => t.caption === core));
-          checks++;
-          if (!hits.length) failures.push(`${label}: no album track carries the captured caption`);
-          else if (/Auto/.test(f.branch)) {
-            const ok = hits.some(([, tracks]) => node.src.resolveMm3Caption({ bpm: body.bpm, caption_mm3: '' }, tracks, { mode: 'auto' }).caption === core);
-            checks++;
-            if (!ok) failures.push(`${label}: auto pick by tempo does not land on the captured track`);
-          }
-          how += `+album(${hits.length ? 'found' : 'missing'})`;
+          const hit = mode === 'auto'
+            ? hits.find(([, tracks]) => node.src.resolveMm3Caption({ bpm: body.bpm, caption_mm3: '' }, tracks, { mode: 'auto' }).caption === core)
+            : hits[0];
+          if (mode !== 'custom' && !hit) { failures.push(`${label}: no album ${mode === 'auto' ? 'auto-picks' : 'carries'} the captured caption`); report.push(`FAIL ${label}`); continue; }
+          intent.captionSource = mode === 'custom'
+            ? { engine: 'minimax-m3', customCaption: core, selection: { mode: 'custom' }, tracks: [] }
+            : { engine: 'minimax-m3', customCaption: '', lyricsSetId: hit[0],
+                selection: mode === 'auto' ? { mode: 'auto' } : { mode: 'track', selectedTitle: hit[1].find(t => t.caption === core).title } };
+          if (mode !== 'custom') { intent.params.caption = ''; notes[0] = 'typed=empty (box locked to the source)'; }
+          notes.push(`mm3 handoff ${mode}${mode === 'custom' ? '' : ' source by search'}`);
         }
-        report.push(`${failures.length === before ? 'PASS' : 'FAIL'} ${label} -> ${how}`);
+        const parsed = (await import('../src/contracts/resolution.ts')).resolveIntentSchema.safeParse(intent);
+        if (!parsed.success) { failures.push(`${label}: reconstructed intent fails the schema: ${parsed.error.message}`); report.push(`FAIL ${label}`); continue; }
+        const data = await node.load.loadCreateData(parsed.data, engine);
+        const r = node.intent.resolveCreateIntent(parsed.data, engine, data);
+        // A random-seed expansion is a fresh draw on each side: those fields
+        // must both be valid expansions, not equal.
+        const random = expanded && body.randomSeed === true;
+        const nondeterministic = new Set();
+        if (random) {
+          const opts = (t, wrap) => { const out = new Set(); for (let s = 0; s < 400; s++) out.add(wrap(node.content.expandWildcards(t, s))); return out; };
+          const composeOpts = { loraTrigger: trig, beatIntro: !!beat, introBars: beat ? Number(beat[1]) : undefined };
+          const captionSet = intent.captionSource ? new Set([r.request.caption]) : opts(capT, x => node.content.composeCreateCaption(x, composeOpts));
+          const lyricSet = opts(lyrT, x => x);
+          for (const [k, set] of [['caption', captionSet], ['lyrics', lyricSet]]) {
+            checks += 2;
+            if (!set.has(body[k])) failures.push(`${label}: captured ${k} is not a valid expansion`);
+            if (!set.has(r.request[k])) failures.push(`${label}: resolved ${k} is not a valid expansion`);
+            if (!(k === 'caption' && intent.captionSource)) nondeterministic.add(k);
+          }
+          notes.push(`random draw: ${[...nondeterministic].join(', ')} checked as valid expansions`);
+        }
+        compareBody(label, r.request, body, engine, nondeterministic);
+        report.push(`${failures.length === before ? 'PASS' : 'FAIL'} ${label} -> ${notes.join('; ')}`);
       }
     } catch (err) {
       failures.push(`${label}: ${err?.stack || err}`);
@@ -330,7 +378,7 @@ if (!fs.existsSync(indexFile)) {
 
 console.log(`differential: ${differentialChecks} checks`);
 console.log(report.join('\n'));
-console.log(`\n${checks} checks, ${failures.length} mismatch(es)`);
+console.log(`\n${checks} checks, ${failures.length} mismatch(es); exceptions: expectedBackend pinned ${exceptionsSeen.expectedBackend}x, random-draw fields ${exceptionsSeen.nondeterministic}x`);
 if (failures.length) console.log(failures.slice(0, 40).join('\n'));
 try { fs.rmSync(tmpData, { recursive: true, force: true }); } catch { /* db handle still open on Windows */ }
 process.exit(failures.length ? 1 : 0);

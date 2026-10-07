@@ -10,8 +10,11 @@ import {
   composeCreateCaption, createWildcardSeed, estimateDuration, expandWildcards, hasWildcards, resolveDuration,
 } from './content.js';
 import {
-  requestVersion, resolveCreateIntent, resolveWrittenSongIntent, verifyResolvedRequest, type WrittenSongData,
+  requestVersion, resolveCreateIntent, resolveWrittenSongIntent, verifyResolvedRequest, ResolveConflictError, type WrittenSongData,
 } from './resolveIntent.js';
+import { IntentDataError, loadCreateData, loadWrittenSongData, type IntentDataSources } from './loadIntentData.js';
+import { createResolveRouter } from '../../../routes/resolve.js';
+import { expectedBackendMismatch } from '../../../routes/generate.js';
 import type { Mm3SourceTrack, Yue2SourceTrack, WrittenSongIntent, CreateIntent } from '../../../contracts/resolution.js';
 import { resolveIntentSchema } from '../../../contracts/resolution.js';
 
@@ -368,21 +371,118 @@ test('schema accepts both intents and rejects malformed ones', () => {
   assert.ok(!resolveIntentSchema.safeParse({ kind: 'other', params: {} }).success);
 });
 
+// ── Engine pin ───────────────────────────────────────────────────────────────
+
+test('every resolved body pins expectedBackend to the engine it was resolved for', () => {
+  assert.equal(resolveCreateIntent({ kind: 'create', params: { ...createParams } }, 'yue2').request.expectedBackend, 'yue2');
+  assert.equal(resolveWrittenSongIntent(base, 'minimax-m3', { gen, preset: null }).request.expectedBackend, 'minimax-m3');
+  assert.equal(resolveCreateIntent({ kind: 'create', params: { ...createParams, expectedBackend: 'ace' } }, 'ace').request.expectedBackend, 'ace');
+});
+
+test('a conflicting supplied expectedBackend is refused', () => {
+  assert.throws(() => resolveCreateIntent({ kind: 'create', params: { ...createParams, expectedBackend: 'ace' } }, 'yue2'), ResolveConflictError);
+  assert.throws(() => resolveWrittenSongIntent({ ...base, params: { ...snapshot, expectedBackend: 'yue2' } }, 'ace', { gen, preset: null }), ResolveConflictError);
+});
+
+test('preview for an inactive engine, then submit: the generate guard refuses it', () => {
+  // Resolved for YuE2 while ACE is active, or after a switch away from YuE2.
+  const body = resolveWrittenSongIntent(base, 'yue2', { gen, preset: null, yue2Dataset: { datasetId: 'ds1', tracks: yue2Tracks } }).request;
+  assert.deepEqual(expectedBackendMismatch(body, 'ace'), { expectedBackend: 'yue2', activeBackend: 'ace' });
+  assert.equal(expectedBackendMismatch(body, 'yue2'), null);
+});
+
+// ── Loader source selection ──────────────────────────────────────────────────
+
+function fakeSources() {
+  const calls: string[] = [];
+  const sources: IntentDataSources = {
+    getGeneration: id => { calls.push(`gen:${id}`); return id === 7 ? { ...gen } : null; },
+    getPreset: id => { calls.push(`preset:${id}`); return id === 3 ? { adapter_path: 'own.safetensors' } : id === 9 ? { adapter_path: 'target.safetensors' } : null; },
+    getLyricsSet: id => { calls.push(`set:${id}`); return { songs: JSON.stringify([{ title: `T${id}`, bpm: 120, mm3Caption: `mm3 of ${id}` }]) }; },
+    yue2DatasetCaptions: async by => {
+      calls.push(`ds:${JSON.stringify(by)}`);
+      return { datasetId: 'ds-x', datasetSlug: '', datasetName: '', tracks: [{ name: 'n', caption: `yue2 via ${JSON.stringify(by)}`, genre: '', bpm: '', key: '', styled: '' }] };
+    },
+  };
+  return { sources, calls };
+}
+
+test('written-song loader reads the Render-as target album, never the own one', async () => {
+  const { sources, calls } = fakeSources();
+  const intent: WrittenSongIntent = { ...base, lyricsSetId: 9, sourceLyricsSetId: 3 };
+  const mm3 = await loadWrittenSongData(intent, 'minimax-m3', sources);
+  assert.equal(mm3.preset?.adapter_path, 'target.safetensors');
+  assert.deepEqual(mm3.mm3Tracks?.map(t => t.caption), ['mm3 of 9']);
+  const y = await loadWrittenSongData(intent, 'yue2', sources);
+  assert.equal(y.yue2Dataset?.datasetId, 'ds-x');
+  assert.deepEqual(calls, ['gen:7', 'preset:9', 'set:9', 'gen:7', 'preset:9', 'ds:{"lyricsSet":9}']);
+});
+
+test('written-song loader: ACE reads no caption sources; an unknown song is a 404', async () => {
+  const { sources, calls } = fakeSources();
+  const d = await loadWrittenSongData(base, 'ace', sources);
+  assert.equal(d.mm3Tracks, undefined);
+  assert.equal(d.yue2Dataset, undefined);
+  assert.deepEqual(calls, ['gen:7', 'preset:3']);
+  await assert.rejects(loadWrittenSongData({ ...base, generationId: 99 }, 'ace', sources),
+    (e: unknown) => e instanceof IntentDataError && e.status === 404);
+});
+
+test('create loader: YuE2 by dataset id, MM3 by lyrics set or handed tracks, nothing for another engine', async () => {
+  const { sources, calls } = fakeSources();
+  const y = await loadCreateData({ kind: 'create', params: {}, captionSource: { engine: 'yue2', datasetId: 'd1', adapterInForce: true } }, 'yue2', sources);
+  assert.equal(y.yue2Tracks?.[0].caption, 'yue2 via {"dataset":"d1"}');
+  const m = await loadCreateData({ kind: 'create', params: {}, captionSource: { engine: 'minimax-m3', customCaption: '', lyricsSetId: 4 } }, 'minimax-m3', sources);
+  assert.deepEqual(m.mm3Tracks?.map(t => t.caption), ['mm3 of 4']);
+  const handed = await loadCreateData({ kind: 'create', params: {},
+    captionSource: { engine: 'minimax-m3', customCaption: '', tracks: [{ title: 'h', caption: 'handed' }] } }, 'minimax-m3', sources);
+  assert.deepEqual(handed.mm3Tracks?.map(t => t.caption), ['handed']);
+  assert.deepEqual(await loadCreateData({ kind: 'create', params: {},
+    captionSource: { engine: 'yue2', datasetId: 'd1', adapterInForce: true } }, 'ace', sources), {});
+  assert.deepEqual(calls, ['ds:{"dataset":"d1"}', 'set:4']);
+});
+
 // ── Route ────────────────────────────────────────────────────────────────────
 
-test('preview route: auth, validation and an unknown engine', async () => {
-  const { default: router } = await import('../../../routes/resolve.js');
+async function withRouter(run: (post: (body: unknown, token?: string) => Promise<Response>) => Promise<void>) {
+  const { sources } = fakeSources();
   const app = express();
   app.use(express.json());
-  app.use('/api/resolve', router);
+  app.use('/api/resolve', createResolveRouter({
+    userId: req => (req.headers.authorization === 'Bearer good' ? 'u' : null),
+    activeEngine: () => 'ace',
+    isEngine: id => ['ace', 'minimax-m3', 'yue2'].includes(id),
+    sources,
+  }));
   const server: Server = await new Promise(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/resolve/preview`;
   const post = (body: unknown, token?: string) => fetch(url, { method: 'POST',
     headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) });
-  try {
+  try { await run(post); } finally { await new Promise(resolve => server.close(resolve)); }
+}
+
+test('preview route: auth, validation, unknown engine, unknown song, conflicting assertion', async () => {
+  await withRouter(async post => {
     assert.equal((await post({ kind: 'create', params: {} })).status, 401);
     assert.equal((await post({ kind: 'create', params: {} }, 'stale')).status, 401);
-  } finally {
-    await new Promise(resolve => server.close(resolve));
-  }
+    assert.equal((await post({ kind: 'nope' }, 'good')).status, 400);
+    assert.equal((await post({ kind: 'create', engine: 'other', params: {} }, 'good')).status, 400);
+    assert.equal((await post({ ...base, generationId: 99 }, 'good')).status, 404);
+    assert.equal((await post({ kind: 'create', engine: 'yue2', params: { expectedBackend: 'ace' } }, 'good')).status, 400);
+  });
+});
+
+test('preview route: an explicit inactive engine resolves from its own sources and pins it', async () => {
+  await withRouter(async post => {
+    const res = await post({ ...base, engine: 'minimax-m3', lyricsSetId: 9, sourceLyricsSetId: 3 }, 'good');
+    assert.equal(res.status, 200);
+    const out = await res.json() as { request: Record<string, unknown>; version: string };
+    assert.equal(out.request.expectedBackend, 'minimax-m3');
+    assert.equal(out.request.caption, 'mm3 of 9');
+    assert.equal(out.request.loraPath, 'target.safetensors');
+    assert.equal(out.version, requestVersion(out.request));
+    // No engine named: the active one, pinned.
+    const def = await (await post({ ...base }, 'good')).json() as { request: Record<string, unknown> };
+    assert.equal(def.request.expectedBackend, 'ace');
+  });
 });

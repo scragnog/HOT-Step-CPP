@@ -13,32 +13,55 @@ export class IntentDataError extends Error {
   constructor(readonly status: 400 | 404, message: string) { super(message); }
 }
 
-function mm3TracksForLyricsSet(lyricsSetId: number | undefined) {
+/** The reads, injectable so tests can see which source each intent reaches. */
+export interface IntentDataSources {
+  getGeneration: (id: number) => Record<string, any> | null;
+  getPreset: (lyricsSetId: number) => Record<string, any> | null;
+  getLyricsSet: (id: number) => Record<string, any> | null;
+  yue2DatasetCaptions: typeof yue2DatasetCaptions;
+}
+
+export const defaultIntentDataSources: IntentDataSources = {
+  getGeneration: id => lireekDb.getGeneration(id),
+  getPreset: id => lireekDb.getPreset(id),
+  getLyricsSet: id => lireekDb.getLyricsSet(id),
+  yue2DatasetCaptions,
+};
+
+function mm3TracksForLyricsSet(src: IntentDataSources, lyricsSetId: number | undefined) {
   if (!lyricsSetId) return [];
-  const set = lireekDb.getLyricsSet(lyricsSetId);
+  const set = src.getLyricsSet(lyricsSetId);
   const songs = set ? (typeof set.songs === 'string' ? JSON.parse(set.songs) : set.songs || []) : [];
   return collectMm3SourceTracks(songs);
 }
 
-export async function loadCreateData(intent: CreateIntent, engine: string): Promise<CreateData> {
-  const src = intent.captionSource;
-  if (src?.engine === YUE2_ENGINE_ID && engine === YUE2_ENGINE_ID && src.datasetId) {
-    return { yue2Tracks: (await yue2DatasetCaptions({ dataset: src.datasetId })).tracks };
+/** Create: the caption source's tracks, only for the engine it names. YuE2 by
+ *  dataset id; MM3 by the album's lyrics set, else the tracks handed over. */
+export async function loadCreateData(
+  intent: CreateIntent, engine: string, src: IntentDataSources = defaultIntentDataSources,
+): Promise<CreateData> {
+  const cs = intent.captionSource;
+  if (cs?.engine === YUE2_ENGINE_ID && engine === YUE2_ENGINE_ID && cs.datasetId) {
+    return { yue2Tracks: (await src.yue2DatasetCaptions({ dataset: cs.datasetId })).tracks };
   }
-  if (src?.engine === MM3_ENGINE_ID && engine === MM3_ENGINE_ID) {
-    return { mm3Tracks: src.lyricsSetId ? mm3TracksForLyricsSet(src.lyricsSetId) : src.tracks ?? [] };
+  if (cs?.engine === MM3_ENGINE_ID && engine === MM3_ENGINE_ID) {
+    return { mm3Tracks: cs.lyricsSetId ? mm3TracksForLyricsSet(src, cs.lyricsSetId) : cs.tracks ?? [] };
   }
   return {};
 }
 
-export async function loadWrittenSongData(intent: WrittenSongIntent, engine: string): Promise<WrittenSongData> {
-  const gen = lireekDb.getGeneration(intent.generationId);
+/** Written song: the song row, and the preset and caption sources of the album
+ *  it renders AS (`lyricsSetId`), never of its own album when they differ. */
+export async function loadWrittenSongData(
+  intent: WrittenSongIntent, engine: string, src: IntentDataSources = defaultIntentDataSources,
+): Promise<WrittenSongData> {
+  const gen = src.getGeneration(intent.generationId);
   if (!gen) throw new IntentDataError(404, `Generation ${intent.generationId} not found`);
-  const preset = intent.lyricsSetId ? lireekDb.getPreset(intent.lyricsSetId) : null;
+  const preset = intent.lyricsSetId ? src.getPreset(intent.lyricsSetId) : null;
   const data: WrittenSongData = { gen, preset };
-  if (engine === MM3_ENGINE_ID) data.mm3Tracks = mm3TracksForLyricsSet(intent.lyricsSetId);
+  if (engine === MM3_ENGINE_ID) data.mm3Tracks = mm3TracksForLyricsSet(src, intent.lyricsSetId);
   if (engine === YUE2_ENGINE_ID) {
-    const ds = intent.lyricsSetId ? await yue2DatasetCaptions({ lyricsSet: intent.lyricsSetId }) : null;
+    const ds = intent.lyricsSetId ? await src.yue2DatasetCaptions({ lyricsSet: intent.lyricsSetId }) : null;
     data.yue2Dataset = { datasetId: ds?.datasetId ?? '', tracks: ds?.tracks ?? [] };
   }
   return data;
