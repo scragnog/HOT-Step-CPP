@@ -44,6 +44,54 @@ function harness(db = new Database(':memory:')) {
 
 const req = (extra: Record<string, unknown> = {}) => ({ caption: 'c', lyrics: 'l', seed: 1, expectedBackend: 'yue2', ...extra });
 
+test('browser import is atomic, idempotent, validates items, and resumes only chosen pending work', async () => {
+  const h = harness();
+  const input = { backupId: 'e5726199-d56b-4528-87de-37af04662579', choice: 'hold' as const, items: [
+    { legacyId: 'pending-1', status: 'pending' as const, request: req(), meta: {} },
+    { legacyId: 'sent-1', status: 'generating' as const, jobId: 'old-job', meta: {} },
+  ] };
+  const first = h.queue.importLegacy(input, 'u');
+  assert.equal(first.imported, 2);
+  assert.deepEqual(h.queue.importLegacy(input, 'u'), first);
+  assert.equal(h.queue.list().length, 2);
+  assert.equal(h.queue.get(first.items[0].itemId).status, 'held');
+  assert.equal(h.queue.get(first.items[1].itemId).status, 'interrupted');
+  await h.queue.tick();
+  assert.equal(h.submits.length, 0);
+  h.queue.resumeHeld([first.items[0].itemId]);
+  await h.queue.tick();
+  assert.equal(h.submits.length, 1);
+  assert.deepEqual(h.submits[0].body, req());
+  assert.throws(() => h.queue.importLegacy({ ...input, backupId: 'e5726199-d56b-4528-87de-37af04662580', items: [
+    { legacyId: 'bad', status: 'pending', meta: {} },
+  ] }, 'u'), /needs a resolved request/);
+  assert.equal(h.queue.list().length, 2);
+  h.queue.setPaused(true);
+  const sent = h.queue.get(first.items[0].itemId);
+  assert.equal(sent.status, 'submitted');
+  assert.equal(sent.jobId, 'job-1');
+  await h.queue.tick();
+  assert.equal(h.submits.length, 1);
+});
+
+test('rollback pause preserves submitted job ids and never replays them', async () => {
+  const h = harness();
+  const receipt = h.queue.importLegacy({
+    backupId: 'e5726199-d56b-4528-87de-37af04662581', choice: 'resume',
+    items: [{ legacyId: 'pending', status: 'pending', request: req(), meta: {} }],
+  }, 'u');
+  await h.queue.tick();
+  const id = receipt.items[0].itemId;
+  const jobId = h.queue.get(id).jobId;
+  assert.equal(jobId, 'job-1');
+  h.queue.setPaused(true);
+  const exported = h.queue.list();
+  assert.equal(exported[0].status, 'submitted');
+  assert.equal(exported[0].jobId, jobId);
+  await h.queue.tick();
+  assert.equal(h.submits.length, 1);
+});
+
 test('double submit with one key queues and renders once; another request under it is refused', async () => {
   const h = harness();
   const a = h.queue.enqueue({ idempotencyKey: 'song-1', request: req() }, 'u1');

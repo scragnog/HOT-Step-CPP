@@ -20,6 +20,7 @@ import { StreamWaveform } from './components/player/StreamWaveform';
 import { mm3StreamEnsureTakes, useMm3StreamAudio } from './stores/mm3StreamStore';
 import { enqueueSimpleGen, useResumeQueue, useAudioGenQueueSelector, clearFinishedFromAudioQueue } from './stores/audioGenQueueStore';
 import { RestoredQueueBanner } from './components/shared/RestoredQueueBanner';
+import { AudioQueueMigrationBanner } from './components/shared/AudioQueueMigrationBanner';
 import { ErrorBoundary } from './components/shared/ErrorBoundary';
 import { clearRecentSongsCache } from './components/shared/UnifiedRecentSongs';
 import { PostProcessDock } from './components/shared/PostProcessActivity';
@@ -1278,6 +1279,7 @@ const AppContent: React.FC = () => {
           session, rather than starting it unattended (issue #100). Renders
           nothing when there is nothing waiting. */}
       <RestoredQueueBanner />
+      <AudioQueueMigrationBanner />
 
       <div className="flex-1 flex overflow-hidden">
         <DiscoPulseWrapper hue={DISCO.sidebar}>

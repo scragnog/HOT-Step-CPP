@@ -24,6 +24,7 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { AudioIntentItem, AudioIntentStatus, AudioQueueState } from '../../contracts/audioQueue.js';
+import type { ImportAudioQueue } from '../../contracts/audioQueue.js';
 import { requestVersion } from '../generation/resolve/resolveIntent.js';
 
 export const MAX_IN_FLIGHT = 4;
@@ -77,6 +78,7 @@ export function ensureAudioQueueSchema(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS audio_intents_status ON audio_intents(status, created_at);
     CREATE TABLE IF NOT EXISTS audio_queue_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS audio_queue_imports (backup_id TEXT PRIMARY KEY, receipt TEXT NOT NULL);
   `);
 }
 
@@ -114,11 +116,90 @@ export class AudioIntentQueue {
     return toItem(r);
   }
 
+  dismiss(id: string): void {
+    const r = this.row(id);
+    if (!r) throw new AudioQueueError(404, `Queue item ${id} not found`);
+    if (!TERMINAL.includes(r.status)) throw new AudioQueueError(409, 'Only a finished queue item can be removed');
+    this.db.prepare('DELETE FROM audio_intents WHERE id = ?').run(id);
+  }
+
   list(status?: AudioIntentStatus): AudioIntentItem[] {
     const rows = status
       ? this.db.prepare('SELECT * FROM audio_intents WHERE status = ? ORDER BY created_at, rowid').all(status)
       : this.db.prepare('SELECT * FROM audio_intents ORDER BY created_at, rowid').all();
     return (rows as Row[]).map(toItem);
+  }
+
+  /** Import a verified browser backup atomically. A submitted legacy job is
+   *  followed by id, never sent again; an unknown job is interrupted. */
+  importLegacy(input: ImportAudioQueue, userId: string): { backupId: string; imported: number; existing: number; items: { legacyId: string; itemId: string; status: AudioIntentStatus }[] } {
+    const prior = this.db.prepare('SELECT receipt FROM audio_queue_imports WHERE backup_id = ?').get(input.backupId) as { receipt: string } | undefined;
+    if (prior) return JSON.parse(prior.receipt);
+    const seen = new Set<string>();
+    for (const item of input.items) {
+      if (seen.has(item.legacyId)) throw new AudioQueueError(400, `Duplicate legacy item id: ${item.legacyId}`);
+      seen.add(item.legacyId);
+      const sibling = (item.meta.view as Record<string, unknown> | undefined)?.mm3TakeOf;
+      if (item.status === 'pending' && !item.jobId && !item.request && !sibling) {
+        throw new AudioQueueError(400, `Item ${item.legacyId} needs a resolved request before import`);
+      }
+      if (item.request && Object.keys(item.request).length === 0) throw new AudioQueueError(400, `Item ${item.legacyId} has an empty request`);
+      if (item.request?.expectedBackend !== undefined && (typeof item.request.expectedBackend !== 'string' || !this.deps.isEngine(item.request.expectedBackend))) {
+        throw new AudioQueueError(400, `Item ${item.legacyId} has an invalid expectedBackend`);
+      }
+    }
+    return this.db.transaction(() => {
+      const receipt: { backupId: string; imported: number; existing: number; items: { legacyId: string; itemId: string; status: AudioIntentStatus }[] } = {
+        backupId: input.backupId, imported: 0, existing: 0, items: [],
+      };
+      for (const old of input.items) {
+        const key = `browser:${old.legacyId}`;
+        const existing = this.db.prepare('SELECT * FROM audio_intents WHERE idempotency_key = ?').get(key) as Row | undefined;
+        if (existing) {
+          if (existing.meta && (JSON.parse(existing.meta) as Record<string, unknown>).legacyId !== old.legacyId) {
+            throw new AudioQueueError(409, `Imported item ${old.legacyId} conflicts with an existing queue item`);
+          }
+          if (old.request && requestVersion({ ...old.request, expectedBackend: existing.engine }) !== existing.request_hash) {
+            throw new AudioQueueError(409, `Imported item ${old.legacyId} has changed since its first import`);
+          }
+          receipt.existing++;
+          receipt.items.push({ legacyId: old.legacyId, itemId: existing.id, status: existing.status });
+          continue;
+        }
+        const request = structuredClone(old.request ?? {});
+        const engine = typeof request.expectedBackend === 'string' ? request.expectedBackend : this.deps.activeEngine();
+        request.expectedBackend = engine;
+        const job = old.jobId ? this.deps.getJob(old.jobId) : undefined;
+        let status: AudioIntentStatus;
+        if (old.status === 'succeeded' || old.status === 'failed') status = old.status;
+        else if ((old.meta.view as Record<string, unknown> | undefined)?.mm3TakeOf && !old.jobId) status = 'interrupted';
+        else if (old.jobId) status = job ? 'submitted' : 'interrupted';
+        else if (old.status !== 'pending') status = 'interrupted';
+        else status = input.choice === 'hold' ? 'held' : input.choice === 'discard' ? 'cancelled' : 'pending';
+        const id = randomUUID();
+        const t = this.now();
+        this.db.prepare(`INSERT INTO audio_intents (id, idempotency_key, user_id, status, engine, request, request_hash, meta,
+          job_id, error, result, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+          id, key, userId, status, engine, JSON.stringify(request), requestVersion(request),
+          JSON.stringify({ ...old.meta, legacyId: old.legacyId, backupId: input.backupId }),
+          old.jobId ?? null, old.error ?? null, old.result ? JSON.stringify(old.result) : null, t, t,
+        );
+        receipt.imported++;
+        receipt.items.push({ legacyId: old.legacyId, itemId: id, status });
+      }
+      this.db.prepare('INSERT INTO audio_queue_imports (backup_id, receipt) VALUES (?, ?)').run(input.backupId, JSON.stringify(receipt));
+      return receipt;
+    })();
+  }
+
+  resumeHeld(ids: string[]): AudioIntentItem[] {
+    const change = this.db.transaction(() => ids.map(id => {
+      const done = this.db.prepare(`UPDATE audio_intents SET status = 'pending', waiting = NULL, updated_at = ? WHERE id = ? AND status = 'held'`)
+        .run(this.now(), id);
+      if (done.changes !== 1) throw new AudioQueueError(409, `Queue item ${id} is not held`);
+      return this.get(id);
+    }));
+    return change();
   }
 
   /** Queue a request, or return the item already queued under this key. */
@@ -168,9 +249,9 @@ export class AudioIntentQueue {
     if (!r) throw new AudioQueueError(404, `Queue item ${id} not found`);
     if (TERMINAL.includes(r.status)) throw new AudioQueueError(409, `Queue item is already ${r.status}`);
     const t = this.now();
-    if (r.status === 'pending') {
+    if (r.status === 'pending' || r.status === 'held') {
       // Guarded: the executor may have claimed it a moment ago.
-      const done = this.db.prepare(`UPDATE audio_intents SET status = 'cancelled', waiting = NULL, updated_at = ? WHERE id = ? AND status = 'pending'`).run(t, id);
+      const done = this.db.prepare(`UPDATE audio_intents SET status = 'cancelled', waiting = NULL, updated_at = ? WHERE id = ? AND status IN ('pending','held')`).run(t, id);
       if (done.changes === 1) return this.get(id);
     }
     this.db.prepare('UPDATE audio_intents SET cancel_requested = 1, updated_at = ? WHERE id = ?').run(t, id);
@@ -191,6 +272,9 @@ export class AudioIntentQueue {
     if (!r) throw new AudioQueueError(404, `Queue item ${id} not found`);
     if (!['failed', 'cancelled', 'interrupted'].includes(r.status)) {
       throw new AudioQueueError(409, `Only a failed, cancelled or interrupted item can be retried; this one is ${r.status}`);
+    }
+    if (Object.keys(JSON.parse(r.request) as Record<string, unknown>).every(key => key === 'expectedBackend')) {
+      throw new AudioQueueError(409, 'This imported item has no resolved request to retry');
     }
     const previous = JSON.parse(r.previous_job_ids) as string[];
     if (r.job_id) previous.push(r.job_id);

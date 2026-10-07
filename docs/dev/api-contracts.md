@@ -315,6 +315,10 @@ bearer token.
 | `POST /items/:id/cancel` | Cancel; `409` for a finished item |
 | `POST /items/:id/retry` | Queue a failed, cancelled or interrupted item again as a new attempt; `409` otherwise |
 | `GET /state`, `POST /pause`, `POST /resume` | `{ paused, maxInFlight, counts }` |
+| `POST /migration/import` | Import a verified browser backup by `backupId` with `choice: hold`, `resume`, or `discard`; returns a persistent receipt with each legacy and server item id. A repeated backup id returns the same receipt. Invalid items return `400` with field paths or item ids; conflicting items return `409` |
+| `POST /migration/resume-held` | Explicitly release imported held ids and resume the executor |
+| `POST /migration/rollback-export` | Pause submissions and export all items, job ids, and state. Returns `409` while a submission is in flight; retry after it settles |
+| `DELETE /items/:id` | Dismiss a terminal item; `409` while active |
 
 `request` is the exact body for `/api/generate`, normally a resolve preview's `request`. It is
 captured once and never re-resolved. Its engine is its `expectedBackend`. A request without one
@@ -330,6 +334,7 @@ Item `status`:
 | Status | Meaning |
 |---|---|
 | `pending` | Not sent yet. `waiting` says why, when it is held back |
+| `held` | Imported browser item awaiting the user's resume or discard choice |
 | `submitting` | Claimed by the executor, with the submit in flight |
 | `submitted` | Accepted; `jobId` is the generation job, followed until it ends |
 | `succeeded`, `failed`, `cancelled` | The job's outcome. `result` holds the job result; `error` holds the reason |
@@ -353,3 +358,13 @@ How each transition happens:
 
 Items live in the `audio_intents` table, created on first use; the paused flag is in
 `audio_queue_state`.
+
+The browser migration saves a versioned export of both the legacy localStorage queue and the
+IndexedDB queue, including item and job ids. It reads the saved copy back before importing,
+downloads it, and retains the original browser records after the server receipt is stored.
+New queue items then go to `/api/audio-queue`; the browser reads its status, takes and job
+results. Reloads and other tabs read the same server list. To roll back, the browser pauses
+the server, exports and verifies its current items, reconciles submitted and terminal job ids
+into the saved browser queue, and holds pending work for an explicit resume. A submitting
+item cannot be exported until its submission settles. Submitted or interrupted jobs are
+never automatically replayed by the browser.

@@ -16,9 +16,9 @@ import { getDb } from '../db/database.js';
 import { getActiveBackendId, getBackend } from '../services/backends/registry.js';
 import { cancelGenerationJob, getGenerationJob, submitGeneration } from './generate.js';
 import { AudioIntentQueue, AudioQueueError } from '../services/audioQueue/intentQueue.js';
-import { enqueueAudioIntentSchema, type AudioIntentStatus } from '../contracts/audioQueue.js';
+import { enqueueAudioIntentSchema, importAudioQueueSchema, type AudioIntentStatus } from '../contracts/audioQueue.js';
 
-const STATUSES = new Set(['pending', 'submitting', 'submitted', 'succeeded', 'failed', 'cancelled', 'interrupted']);
+const STATUSES = new Set(['held', 'pending', 'submitting', 'submitted', 'succeeded', 'failed', 'cancelled', 'interrupted']);
 
 export function createAudioQueueRouter(queue: AudioIntentQueue, userIdOf: (req: Request) => string | null): Router {
   const router = Router();
@@ -53,8 +53,29 @@ export function createAudioQueueRouter(queue: AudioIntentQueue, userIdOf: (req: 
     return { items: queue.list(s as AudioIntentStatus | undefined) };
   }));
   router.get('/items/:id', handle(req => ({ item: queue.get(String(req.params.id)) })));
+  router.delete('/items/:id', handle(req => { queue.dismiss(String(req.params.id)); return { removed: true }; }));
   router.post('/items/:id/cancel', handle(req => ({ item: queue.cancel(String(req.params.id)) })));
   router.post('/items/:id/retry', handle(req => { const item = queue.retry(String(req.params.id)); void queue.tick(); return { item }; }));
+  router.post('/migration/import', (req, res) => {
+    const parsed = importAudioQueueSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid queue import', issues: parsed.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })) });
+      return;
+    }
+    handle(() => { const receipt = queue.importLegacy(parsed.data, userIdOf(req)!); if (parsed.data.choice === 'resume') { queue.setPaused(false); void queue.tick(); } return receipt; })(req, res);
+  });
+  router.post('/migration/resume-held', (req, res) => {
+    const ids = req.body?.ids;
+    if (!Array.isArray(ids) || !ids.every((id: unknown) => typeof id === 'string')) {
+      res.status(400).json({ error: 'ids must be an array of queue item ids' }); return;
+    }
+    handle(() => { const items = queue.resumeHeld(ids); queue.setPaused(false); void queue.tick(); return { items }; })(req, res);
+  });
+  router.post('/migration/rollback-export', handle(() => {
+    queue.setPaused(true);
+    if (queue.list('submitting').length) throw new AudioQueueError(409, 'Submission still in flight; retry export when it settles');
+    return { version: 1, exportedAt: Date.now(), state: queue.state(), items: queue.list() };
+  }));
   router.get('/state', handle(() => queue.state()));
   router.post('/pause', handle(() => queue.setPaused(true)));
   router.post('/resume', handle(() => { const s = queue.setPaused(false); void queue.tick(); return s; }));

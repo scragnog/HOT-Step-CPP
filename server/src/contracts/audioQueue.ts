@@ -18,6 +18,7 @@ export const enqueueAudioIntentSchema = z.object({
 export type EnqueueAudioIntent = z.infer<typeof enqueueAudioIntentSchema>;
 
 export type AudioIntentStatus =
+  | 'held'         // imported browser item awaiting its resume/discard choice
   | 'pending'      // waiting to be submitted
   | 'submitting'   // claimed; the submit call is in flight
   | 'submitted'    // accepted by /api/generate; job running or queued
@@ -52,3 +53,19 @@ export interface AudioQueueState {
   maxInFlight: number;
   counts: Partial<Record<AudioIntentStatus, number>>;
 }
+
+/** Browser queue import after the caller has saved and verified a backup. */
+export const importAudioQueueSchema = z.object({
+  backupId: z.string().uuid(),
+  choice: z.enum(['hold', 'resume', 'discard']),
+  items: z.array(z.object({
+    legacyId: z.string().min(1).max(200),
+    request: z.record(z.string(), z.unknown()).optional(),
+    meta: z.record(z.string(), z.unknown()),
+    status: z.enum(['pending', 'loading-adapter', 'generating', 'succeeded', 'failed']),
+    jobId: z.string().min(1).optional(),
+    result: z.record(z.string(), z.unknown()).optional(),
+    error: z.string().optional(),
+  })).max(10000),
+});
+export type ImportAudioQueue = z.infer<typeof importAudioQueueSchema>;
