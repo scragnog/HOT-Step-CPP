@@ -288,3 +288,59 @@ Parity with the browser is checked by `npx tsx scripts/resolve-parity.mjs`, run 
 - Two differences are expected: the pinned `expectedBackend`, and the caption and lyrics of a
   random-seed wildcard draw. Those are checked as valid expansions instead.
 - The script prints which inputs each case had to reconstruct.
+
+## Durable audio queue
+
+`/api/audio-queue` keeps a queue of renders in the database and submits them from the Node
+process. Pending work therefore survives a closed browser and a server restart, and two
+clients cannot render the same item twice. It submits through the same code as
+`POST /api/generate` (`submitGeneration` in `server/src/routes/generate.ts`), so items go
+through the same checks, job list and GPU lane as any other render. All routes need the
+bearer token.
+
+| Route | Does |
+|---|---|
+| `POST /items` | Queue `{ idempotencyKey, request, meta? }`. `201 { item, created: true }` for a new item. The same key with the same request answers `200 { item, created: false }`. The same key with a different request answers `409` |
+| `GET /items[?status=]` | All items, oldest first |
+| `GET /items/:id` | One item, or `404` |
+| `POST /items/:id/cancel` | Cancel; `409` for a finished item |
+| `POST /items/:id/retry` | Queue a failed, cancelled or interrupted item again as a new attempt; `409` otherwise |
+| `GET /state`, `POST /pause`, `POST /resume` | `{ paused, maxInFlight, counts }` |
+
+`request` is the exact body for `/api/generate`, normally a resolve preview's `request`. It is
+captured once and never re-resolved. Its engine is its `expectedBackend`. A request without one
+is pinned to the engine active when it is queued.
+
+An item is submitted only while its engine is active. After a backend switch it stays pending
+with a `waiting` message, and the queue does not switch engines itself. At most `maxInFlight`
+(4) items are submitted at once, so YuE2 can still render queued songs as one batch. Pause
+stops new submissions; submitted items carry on.
+
+Item `status`:
+
+| Status | Meaning |
+|---|---|
+| `pending` | Not sent yet. `waiting` says why, when it is held back |
+| `submitting` | Claimed by the executor, with the submit in flight |
+| `submitted` | Accepted; `jobId` is the generation job, followed until it ends |
+| `succeeded`, `failed`, `cancelled` | The job's outcome. `result` holds the job result; `error` holds the reason |
+| `interrupted` | The server stopped while the item was submitting or submitted, or its job disappeared from the generation queue. Whether it rendered is unknown |
+
+How each transition happens:
+- **Submit.** A claim (pending to submitting) is one guarded update, so a cancel racing a
+  submit, or two executors, cannot both act on an item.
+- **Submit refused.**
+  - A `409` (engine switched) or `503` (engine not ready) puts the item back to pending with
+    the reason in `waiting`.
+  - Any other refusal marks it failed.
+- **Cancel.**
+  - A pending item is cancelled at once.
+  - A submitting item is cancelled as soon as its submit returns, including its new job.
+  - A submitted item cancels its job.
+- **Restart.** On startup, items left submitting or submitted become `interrupted`. Their
+  jobs lived in the old process's memory, so the queue cannot tell whether they rendered.
+  Nothing is resubmitted automatically. Only `retry` renders an item again. It keeps the
+  earlier job ids in `previousJobIds` and counts the attempt in `attempt`.
+
+Items live in the `audio_intents` table, created on first use; the paused flag is in
+`audio_queue_state`.

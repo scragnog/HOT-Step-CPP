@@ -52,6 +52,8 @@ import backendsRoutes from './routes/backends.js';
 import audioRoutes from './routes/audio.js';
 import yue2CoverRoutes from './routes/yue2Cover.js';
 import resolveRoutes from './routes/resolve.js';
+import audioQueueRoutes from './routes/audioQueue.js';
+import { startAudioIntentQueue } from './routes/audioQueue.js';
 import listeningRoutes from './routes/listening.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -119,6 +121,7 @@ app.use('/api/training', trainingRoutes);
 app.use('/api/audio', audioRoutes);
 app.use('/api/yue2-cover', yue2CoverRoutes);
 app.use('/api/resolve', resolveRoutes);
+app.use('/api/audio-queue', audioQueueRoutes);
 // Mounted at '/api' (not '/api/backends') — the router spells its own full
 // sub-paths (/backends, /backends/active, /capabilities) per the plan's
 // top-level /api/capabilities path (docs/plans/multi-backend-architecture.md §4.2).
@@ -431,6 +434,9 @@ const server = app.listen(config.server.port, config.server.host, () => {
   console.log('');
   console.log(`  🎵 Open http://localhost:${config.server.port} in your browser`);
   console.log('');
+  // Durable audio queue: surface items a previous process left mid-submit,
+  // then start submitting pending ones.
+  startAudioIntentQueue();
 });
 
 // Graceful shutdown

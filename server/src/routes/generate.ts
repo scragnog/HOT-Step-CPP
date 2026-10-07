@@ -285,59 +285,60 @@ const generateCapture = createGenerateCapture({
   checkout: () => checkoutState(),
 });
 
-router.post('/', generateCapture, async (req, res) => {
+export type SubmitGenerationResult =
+  | { ok: true; jobId: string; status: GenerationJob['status'] }
+  | { ok: false; status: number; body: Record<string, unknown> };
+
+/** Validate and queue one generation, exactly as POST /api/generate does.
+ *  Exported so the durable audio intent queue (services/audioQueue) submits
+ *  through the same checks, job map and GPU lane instead of a second path. */
+export async function submitGeneration(raw: any, userId: string | null): Promise<SubmitGenerationResult> {
   // The engine is deliberately stopped while a training preprocess job owns the
   // GPU — say so instead of the generic "not ready" boot message.
   if (isEngineSuspended()) {
-    res.status(503).json({ error: 'Engine is paused for training preprocessing — try again when the job finishes' });
-    return;
+    return { ok: false, status: 503, body: { error: 'Engine is paused for training preprocessing — try again when the job finishes' } };
   }
 
   // Reject requests while engine is still bootstrapping (downloading DLLs, etc.)
   if (!engineReady) {
-    res.status(503).json({
+    return { ok: false, status: 503, body: {
       error: `Engine not ready: ${engineBootStatus}`,
       detail: 'The CUDA runtime is still being set up. Please wait a moment and try again.',
-    });
-    return;
+    } };
   }
 
-  const userId = getUserId(req);
-  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+  if (!userId) return { ok: false, status: 401, body: { error: 'Unauthorized' } };
 
   // An MCP (or other headless) caller asserts which backend it planned the
   // request for; the UI never sends this. `backend` stays log-only — only
   // `expectedBackend` can block a submit, so a caller that races a backend
   // switch fails loudly instead of training/rendering on the wrong one.
   const mismatch = expectedBackendMismatch(
-    isGenerationIntent(req.body) ? req.body.input : req.body,
+    isGenerationIntent(raw) ? raw.input : raw,
     getActiveBackendId(),
   );
   if (mismatch) {
-    res.status(409).json({
+    return { ok: false, status: 409, body: {
       error: `Expected backend '${mismatch.expectedBackend}' but the active backend is '${mismatch.activeBackend}'`,
       ...mismatch,
-    });
-    return;
+    } };
   }
 
-  let submission = req.body;
-  if (isGenerationIntent(req.body)) {
+  let submission = raw;
+  if (isGenerationIntent(raw)) {
     try {
       const backendId = getActiveBackendId();
       const backend = getBackend(backendId);
       if (!backend) throw new Error(`Active generation backend '${backendId}' is not registered`);
       const capabilities = await backend.capabilities();
       if (getActiveBackendId() !== backendId) {
-        res.status(409).json({ error: `Active backend changed while resolving generation intent`, activeBackend: getActiveBackendId() });
-        return;
+        return { ok: false, status: 409, body: { error: `Active backend changed while resolving generation intent`, activeBackend: getActiveBackendId() } };
       }
-      submission = resolveGenerationIntent(req.body, backendId, capabilities.extensions);
+      submission = resolveGenerationIntent(raw, backendId, capabilities.extensions);
     } catch (err) {
-      res.status(err instanceof GenerationIntentError ? 400 : 500).json({
+      return { ok: false, status: err instanceof GenerationIntentError ? 400 : 500, body: {
         error: err instanceof Error ? err.message : 'Cannot resolve generation intent',
-      });
-      return;
+      } };
     }
   }
 
@@ -346,8 +347,7 @@ router.post('/', generateCapture, async (req, res) => {
   if (!submission?.backend || submission.backend === 'ace') {
     const missing = timbreReferenceMissing(submission);
     if (missing) {
-      res.status(400).json({ error: `Timbre reference file is missing (${missing}). The upload it referred to is gone; re-upload it or clear the reference.` });
-      return;
+      return { ok: false, status: 400, body: { error: `Timbre reference file is missing (${missing}). The upload it referred to is gone; re-upload it or clear the reference.` } };
     }
   }
 
@@ -358,8 +358,7 @@ router.post('/', generateCapture, async (req, res) => {
     envelope = buildEnvelope(submission, userId, jobId, enqueuedAt);
   } catch (err) {
     const clientError = err instanceof GenerationEnvelopeError && err.code !== 'unknown_backend';
-    res.status(clientError ? 400 : 500).json({ error: err instanceof Error ? err.message : 'Cannot resolve generation request' });
-    return;
+    return { ok: false, status: clientError ? 400 : 500, body: { error: err instanceof Error ? err.message : 'Cannot resolve generation request' } };
   }
   const job: GenerationJob = {
     id: jobId,
@@ -383,10 +382,18 @@ router.post('/', generateCapture, async (req, res) => {
   // otherwise waits until the current job finishes.
   enqueueGeneration(job);
 
-  res.json({
-    jobId: job.id,
-    status: job.status,
-  });
+  return { ok: true, jobId: job.id, status: job.status };
+}
+
+/** The in-memory job, while it is still held (terminal jobs go after an hour). */
+export function getGenerationJob(id: string): GenerationJob | undefined {
+  return jobs.get(id);
+}
+
+router.post('/', generateCapture, async (req, res) => {
+  const result = await submitGeneration(req.body, getUserId(req));
+  if (!result.ok) { res.status(result.status).json(result.body); return; }
+  res.json({ jobId: result.jobId, status: result.status });
 });
 
 // GET /api/generate/status/:id — poll job status
@@ -502,21 +509,25 @@ router.get('/mm3/stream/:id', async (req, res) => {
 });
 
 // POST /api/generate/cancel/:id — cancel a running job
-router.post('/cancel/:id', (req, res) => {
-  const job = jobs.get(req.params.id);
-  if (!job) { res.status(404).json({ error: 'Job not found' }); return; }
-
+/** Cancel one job; false when the id is unknown. Shared with the audio queue. */
+export function cancelGenerationJob(id: string): boolean {
+  const job = jobs.get(id);
+  if (!job) return false;
   job.status = 'cancelled';
   // One song of a running YuE2 batch: the engine drops it, the rest carry on.
-  if (dropYue2BatchMember(job)) { res.json({ success: true, jobId: job.id }); return; }
+  if (dropYue2BatchMember(job)) return true;
   if (job.aceJobId) {
     aceClient.cancelJob(job.aceJobId).catch(() => {});
   }
   if ((job as any)._abort) {
     (job as any)._abort.abort();
   }
+  return true;
+}
 
-  res.json({ success: true, jobId: job.id });
+router.post('/cancel/:id', (req, res) => {
+  if (!cancelGenerationJob(req.params.id)) { res.status(404).json({ error: 'Job not found' }); return; }
+  res.json({ success: true, jobId: req.params.id });
 });
 
 // POST /api/generate/cancel-all — cancel all running jobs
