@@ -204,3 +204,75 @@ manifest, cached for 10 seconds. If the probe fails it returns an all-false mani
 
 Shared code should branch on these flags, not on a backend id. The UI does not yet do this
 everywhere; changes to the manifest are proposed separately before they land here.
+
+## Caption and content resolution
+
+`POST /api/resolve/preview` builds the body Create or the Lyric Studio queue would send to
+`/api/generate`, without queuing anything. Node resolves the caption, wildcards, compose
+helpers, duration and the album preset overlay; the client submits the returned `request`
+unchanged. It needs the bearer token (`401` without it) and answers `400` with zod `issues` for
+a malformed intent or an unknown engine, and `404` for an unknown generation.
+
+The schemas are zod 4, in `server/src/contracts/resolution.ts`; TypeScript clients import the
+inferred types from there. Two intents:
+
+| `kind` | Fields | Resolves like |
+|---|---|---|
+| `create` | `params` (the Create body, with `caption` and `lyrics` as typed), optional `engine`, `compose { autoExpand, loraTrigger, beatIntro, introBars }`, `captionSource` | `CreatePanel.tsx` Generate |
+| `written-song` | `generationId`, `lyricsSetId` (the album it renders as), optional `sourceLyricsSetId`, `artistName`, `params` (the queue item's parameter snapshot), `settings`, `mm3Selection`, `yue2Selection`, `yue2Pick`, `yue2Defaults` | `audioGenQueueStore.ts` `_executeItem` |
+
+The browser state those paths read from local storage arrives as explicit fields:
+- the caption source choice (`captionSource`, `mm3Selection`, `yue2Selection`)
+- "Use LLM duration" (`settings.useLlmDuration`, default true)
+- "Use LM adapter" (`settings.useLmAdapter`, default false)
+- filename trigger settings (`settings.triggerUseFilename`, `settings.triggerPlacement`)
+- randomized timbre (`settings.randomizeTimbreRef`)
+- the stored time signature and language
+- the app flags (`settings.app`)
+
+Node never reads or writes a stored selection. The selection writes the browser makes on the
+written-song path (top-bar adapter, LM adapter, mastering reference, MM3 adapter) are
+returned in `uiEffects` and are not applied.
+
+Resolution rules, unchanged from the browser:
+
+- **Caption, written song.**
+  - On MiniMax-Music3: the song's own MM3 caption when the choice is Custom and it has one,
+    else a picked album track, else the album track nearest the song's tempo, else the song's
+    own MM3 caption.
+  - On YuE2: when rendering as another album, a non-Custom dataset pick first. Then the
+    song's own YuE2 caption, then the dataset pick. The default choice is Automatic only when
+    a dataset is linked and the pick holds an adapter.
+  - Anything that comes out empty, and every ACE render, uses the song's ACE caption.
+- **Caption, Create.**
+  - A caption source for the active engine with tracks to offer replaces the box, unless the
+    choice is Custom.
+  - Then wildcards are expanded, when `autoExpand` is set.
+  - Then the trigger is prepended, unless the caption already starts with it as a whole word,
+    and the beat intro request is appended.
+- **Wildcards** use the DiT seed when the seed is fixed, zero included, and a fresh random
+  seed when it is random. The seed used is in `provenance.wildcards`.
+- **Duration.**
+  - MiniMax-Music3: always `-1`.
+  - A written song: the LLM's duration when allowed and positive, else the lyric estimate
+    (90 to 360 s, BPM 120 when the song has none), else 180.
+  - Create: the duration as sent.
+- **Preset overlay**, written songs:
+  - A preset adapter replaces the stack with one entry at the snapshot's `loraScale`
+    (default 1). It also clears the global trigger words, and re-derives them from the adapter
+    file name when filename triggers are on.
+  - The preset LM adapter applies only with `useLmAdapter`; without it `lmAdapter` is removed.
+  - On MiniMax-Music3 the preset adapter, or none, replaces the global one.
+  - A preset reference track becomes the mastering reference, and also the timbre reference
+    unless the snapshot names a dedicated one.
+
+The response is `{ request, provenance, warnings, uiEffects, version }`:
+- `provenance` says where the caption, duration and trigger came from, and which preset paths
+  applied.
+- `version` is the sha256 of the request with keys sorted. `verifyResolvedRequest(body,
+  version)` (`server/src/services/generation/resolve/resolveIntent.ts`) checks that a body is
+  exactly the previewed one.
+
+`node`-side parity with the browser is checked by `npx tsx scripts/resolve-parity.mjs` (from
+`server/`). It runs the ports against the UI modules on generated inputs, and against the
+browser capture fixtures when they are present, using a temporary copy of the database.
