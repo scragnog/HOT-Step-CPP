@@ -33,6 +33,7 @@ import { timbreReferenceMissing } from '../services/generation/sourceAudio.js';
 import { buildEnvelope, GenerationEnvelopeError } from '../services/generation/envelope.js';
 import { noteEnqueued, noteFinished } from '../services/generation/residency.js';
 import { runYue2PlanPreview } from '../services/backends/yue2/generate.js';
+import { generateCaptureMode, recordGenerateRequest } from '../services/generation/requestCapture.js';
 import type {
   GenerationAttempt,
   GenerationEndReason,
@@ -73,6 +74,12 @@ export function expectedBackendMismatch(
   const expected = (body as Record<string, unknown> | null | undefined)?.expectedBackend;
   if (typeof expected !== 'string' || expected === activeBackendId) return null;
   return { expectedBackend: expected, activeBackend: activeBackendId };
+}
+
+/** The page path from a Referer header, without host or query. */
+function refererPath(referer: string | undefined): string | undefined {
+  if (!referer) return undefined;
+  try { return new URL(referer).pathname; } catch { return undefined; }
 }
 
 function emptyOutcome(job: GenerationJob, endReason: GenerationEndReason): GenerationOutcome {
@@ -270,6 +277,29 @@ router.post('/yue2/plan', async (req, res) => {
 });
 
 router.post('/', (req, res) => {
+  // Dev-only fixture capture (HOTSTEP_GENERATE_CAPTURE; off by default). It
+  // runs first, so the body is recorded exactly as the caller sent it, and it
+  // records from a deep copy. capture-only returns here: no job, no GPU work.
+  const captureMode = generateCaptureMode();
+  if (captureMode !== 'off') {
+    let captured: ReturnType<typeof recordGenerateRequest>;
+    try {
+      captured = recordGenerateRequest(req.body, {
+        mode: captureMode,
+        activeBackendId: getActiveBackendId(),
+        callerLabel: req.get('x-hotstep-capture-caller'),
+        refererPath: refererPath(req.get('referer')),
+      });
+    } catch (err) {
+      res.status(500).json({ error: `Request capture failed: ${err instanceof Error ? err.message : String(err)}` });
+      return;
+    }
+    if (captureMode === 'capture-only') {
+      res.json({ jobId: null, status: 'captured', captureId: captured.fixture.id });
+      return;
+    }
+  }
+
   // The engine is deliberately stopped while a training preprocess job owns the
   // GPU — say so instead of the generic "not ready" boot message.
   if (isEngineSuspended()) {

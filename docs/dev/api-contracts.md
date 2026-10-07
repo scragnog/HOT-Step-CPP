@@ -1,0 +1,176 @@
+# Generation API contracts (frozen baseline)
+
+This page records the contracts a client relies on to render a song through the Node server
+today: the request, response, error, local auth, job and media rules for `POST /api/generate`,
+and the engine capability manifest. It is the baseline the frontend-decoupling work compares
+against, so it describes current behaviour, including the parts that are awkward. Nothing
+here changes behaviour. Line references are to commit `7c711f64`.
+
+For the full route list see the generated [HTTP API index](api.md).
+
+## Versioning
+
+The consumer HTTP contract has no version number yet. The internal generation envelope's
+`version: 1` (`GENERATION_ENVELOPE_VERSION`, `server/src/services/backends/types.ts`) versions the
+server's own job snapshot, not this API. New fields are additive; a client must ignore
+response fields it does not know.
+
+## Local auth
+
+| Step | Contract |
+|---|---|
+| Get a token | `GET /api/auth/auto` returns `{ user, token }`. It creates the single local user on first use. No credentials are asked for (`server/src/routes/auth.ts:36-41`). |
+| Use it | `Authorization: Bearer <token>` on routes that call `getUserId` (`auth.ts:98-102`), including `POST /api/generate`. |
+| Lifetime | Tokens live in server memory only. Every server restart invalidates them; the next call answers `401 { "error": "Unauthorized" }` and the client fetches a new token from `/api/auth/auto`. |
+| Unauthenticated routes | Job status (`GET /api/generate/status/:id`), cancel, queue and the media mounts below do not check the token. |
+
+Exposure today: the Node server binds `SERVER_HOST`, default `0.0.0.0` (`server/src/config.ts:221-224`),
+CORS is open (`server/src/index.ts:80`), and the Vite dev server binds `0.0.0.0:3000`
+(`ui/vite.config.ts`). Only the training-worker token gate checks the caller's address
+(`server/src/services/training/trainingWorkers.ts:92-96`), and only when a worker token is set.
+So the local auth contract identifies the installation's single user; it does not restrict
+who can reach the server. Changing that belongs to the separately approved auth and route
+policy work, not to this baseline.
+
+## Generate request
+
+`POST /api/generate` with a JSON object body.
+
+- The body is the UI's `GenerationParams` shape (`ui/src/types.ts:108-371`), camelCase, plus
+  caller-specific extras. Two callers matter for the baseline:
+  - Create (`ui/src/App.tsx:651-670`) merges the global parameters, the Create form and
+    `source: "create"` plus a few settings (`coResident`, `cacheLmCodes`, `parallelWhisper`,
+    `parallelQualityEval`, `parallelCoverArt`).
+  - A written song from Lyric Studio (`_executeItem`, `ui/src/stores/audioGenQueueStore.ts:1382-1613`) builds
+    its body from the album preset and sets `taskType: "text2music"` and
+    `source: "lyric-studio"`.
+- `withTimeout` in `ui/src/services/api.ts:208-211` adds `generationTimeoutMinutes` from Settings when the caller
+  did not set it.
+- The server, not the body, chooses the backend: the active backend from `/api/backends`
+  (`server/src/services/generation/envelope.ts:97-127`). `backend` in the body is log-only; a
+  mismatch is recorded on the job as `submittedBackendMismatch`.
+- `expectedBackend` (optional, sent by the MCP server, never by the UI) makes the request fail
+  with `409` when it differs from the active backend (`server/src/routes/generate.ts:70-76`).
+- Unknown fields are kept. The whole body is frozen into the job's envelope as `submission`, and
+  each backend's `resolveRequest` reads what it understands. Backend-specific knobs travel as
+  prefixed keys (`yue2*`, `mm3*`) or in `backendParams`.
+- Seeds: `seed` with `randomSeed`. When `randomSeed` is true the backend picks a seed. A
+  retried attempt can be reseeded (`envelope.policy.retry.reseedOnRetry`), and the seed it
+  actually used is reported per attempt in `attempts[].effective.seed`. MM3 seeds are decimal
+  strings, because they are 64-bit.
+- For ACE (or a body without `backend`), a timbre reference that no longer exists on disk is
+  refused before queuing (`generate.ts:307-313` at the baseline commit).
+
+## Generate response
+
+| Case | Status | Body |
+|---|---|---|
+| Queued | `200` | `{ "jobId": "<uuid>", "status": "pending" }` |
+| Capture-only mode (dev) | `200` | `{ "jobId": null, "status": "captured", "captureId": "<uuid>" }` |
+
+## Errors
+
+Every error is JSON with an `error` string, and sometimes extra fields:
+
+| Status | When | Extra fields |
+|---|---|---|
+| `400` | Body is not an object, `backend` is not a string, the active backend does not support the requested operation, a missing timbre reference | none |
+| `401` | Missing or stale token | none |
+| `409` | `expectedBackend` differs from the active backend | `expectedBackend`, `activeBackend` |
+| `500` | Request capture failed (dev only), or the active backend is not registered | none |
+| `503` | Engine still booting, or paused for training preprocessing | `detail` on the boot case |
+
+Failures after queuing are not HTTP errors. They show up in the job status.
+
+## Jobs
+
+| Route | Contract |
+|---|---|
+| `GET /api/generate/status/:id` | `{ jobId, status, stage, progress, result, error, attempts, ace_job_id, ace_phase, ace_phase_progress, batch, mm3_streaming, mm3_interleaved, mm3_duration, mm3_takes, mm3_take_seeds, mm3_ending }` (`generate.ts`, status route). `404` when the id is unknown. |
+| `POST /api/generate/cancel/:id` | `{ success: true, jobId }`. Marks the job cancelled and cancels the engine job. |
+| `POST /api/generate/cancel-all` | `{ success: true, cancelled }` |
+| `GET /api/generate/queue` | `{ depth, running, owner, draining, current, pending }` |
+| `POST /api/generate/reset-queue` | `{ success: true, cancelled, drained }` |
+
+`status` is one of `pending`, `running`, `lm_running`, `synth_running`, `saving` (active) or
+`succeeded`, `failed`, `cancelled` (terminal) (`server/src/services/generation/jobTypes.ts`).
+
+- Jobs live in server memory. A terminal job is pruned an hour after creation.
+- A server restart loses every job, queued or running. Status then answers `404`, so a
+  client must treat `404` on a job it submitted as "lost", not "never existed".
+- Jobs run one at a time on the shared GPU lane. YuE2 can render several queued jobs in one
+  engine batch; `batch` names the lead and its members.
+
+On success `result` carries:
+- `audioUrls`, with `songIds` index-aligned (one per take)
+- optional `bpm`, `duration`, `keyScale`, `timeSignature`
+- per-take `durations`, `masteredAudioUrls` and `noAdapterAudioUrls`
+- `timing` and `totalMs`
+
+## Media
+
+| Mount | Serves | Auth |
+|---|---|---|
+| `/audio/<file>` | Rendered audio and latents from the data directory's audio folder (`server/src/index.ts:126-135`) | none |
+| `/references/<file>` | Uploaded reference audio (`index.ts:143-153`) | none |
+
+Result URLs are root-relative (`/audio/<file>`). A client on another origin must prefix the
+server origin itself; the dev UI relies on the Vite proxy for `/api`, `/audio` and `/references`.
+
+## Fixture capture (dev only)
+
+`POST /api/generate` can record each incoming body as a fixture, for comparing a later
+server-side resolver against what the UI sends today. It is off unless the server process
+was started by `dev.bat` (which sets `HOT_STEP_DEV`) with `HOTSTEP_GENERATE_CAPTURE` set in
+the environment it inherits. No launcher sets the capture variable, and the end-user launchers
+never set `HOT_STEP_DEV`, so it cannot turn on in an installed copy.
+
+| Value | Effect |
+|---|---|
+| `record` | Record, then handle the request as normal |
+| `capture-only` | Record and return `{ jobId: null, status: "captured", captureId }`. No job is created and the GPU is not touched. The UI's queue will not find the job, so expect the queue item to fail. |
+
+Where and what it records:
+- The capture runs first in the handler, before the engine-ready checks, auth, envelope
+  construction or any normalization, so every body is recorded exactly as it arrived.
+- It records from a deep copy and never writes to the request (`server/src/services/generation/requestCapture.ts`).
+- Fixtures go to `<data dir>/dev-captures/generate/`, one JSON file each, outside git.
+- Each fixture (`schema: "hotstep.generate-capture/1"`) holds:
+  - `commit` and whether the checkout was `dirty`
+  - `caller`: the body's `source`, an optional `X-HotStep-Capture-Caller` header for headless
+    harnesses, and the Referer path
+  - `settings`: the active backend and the body's `backend` field
+  - `seed`: `seed`, `randomSeed` and `lmSeed`
+  - the redacted `body`, with the list of `redactedPaths`
+
+Credentials are never recorded:
+- No request header is stored.
+- Body keys that name a credential (`apiKey`, `secret`, `password`, `authorization`, `cookie`,
+  `credential`, or ending in `token`) are replaced with `"[redacted]"`. Keys ending in
+  `tokens`, such as `maxTokens`, are kept.
+
+The same function is the comparison point for the resolved-request work: a server-resolved
+request must produce a legacy-shaped body that passes through this capture before envelope
+construction, so old and new can be diffed fixture against fixture.
+
+## Engine capability manifest
+
+`GET /api/capabilities?backend=<id>` (default: the active backend) returns the backend's
+manifest, cached for 10 seconds. If the probe fails it returns an all-false manifest with
+`up: false` rather than an error (`server/src/routes/backends.ts:153-188`). The shape is
+`BackendCapabilities` (`server/src/services/backends/types.ts:160-177`):
+
+| Field | Meaning |
+|---|---|
+| `backend` | Backend id: `ace`, `minimax-m3` or `yue2` |
+| `up` | Whether the backend answered its probe |
+| `core` | Model-agnostic parameters it honours: `duration { max, auto, editable? }`, `bpm`, `keyscale`, `negativePrompt`, `batch { max }`, `seed`, plus backend-declared extras |
+| `features` | One boolean per feature or studio, such as `cover`, `repaint`, `stems`, `streaming`, `adapters`, `lmAdapters`, `lmAdapterSelectable`, `whisper`, `forcedAlignment` |
+| `extensions` | Backend-declared knobs, rendered by the shared plugin-parameter renderer and grouped by `group` (`generation` or `lm`) and optional `section` |
+| `license` | Optional licence text, shown verbatim |
+
+`GET /api/backends` lists `{ id, displayName, resourcePool, active }` and `activeId`.
+`POST /api/backends/active { id }` switches backends.
+
+Shared code should branch on these flags, not on a backend id. The UI does not yet do this
+everywhere; changes to the manifest are proposed separately before they land here.

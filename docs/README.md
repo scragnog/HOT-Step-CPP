@@ -59,6 +59,7 @@ In sidebar order.
 | [Engine](dev/engine.md) | Binaries, per-backend pipeline, hook files, plugin host, adapters, TensorRT, training, the ggml fork |
 | [Engine request and CLI reference](../engine/docs/ARCHITECTURE.md) | Request JSON fields, generation modes, binary flags, engine endpoints |
 | [HTTP API index](dev/api.md) | Every Node route, generated |
+| [Generation API contracts](dev/api-contracts.md) | Generate request, errors, auth, jobs, media, capability manifest |
 | [Plugin authoring](dev/plugins-authoring.md) | Writing a Lua solver, scheduler, guidance or postprocess plugin |
 | [Training internals](dev/training-internals.md) | Trainer architecture, measured numbers, open decisions |
 | [Releasing](dev/releasing.md) | Cutting and publishing a release, CI caching, gotchas |

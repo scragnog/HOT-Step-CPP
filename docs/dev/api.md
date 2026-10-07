@@ -8,6 +8,10 @@ It is rebuilt by `node tools/docs/build-docs.mjs` from the mounts in `server/src
 and the `router.<verb>(...)` calls in `server/src/routes/`. For request and response shapes,
 open the route file; each handler is short and the types live next to it.
 
+Request, response, error, auth, job and media contracts for generation, the dev-only
+request capture, and the engine capability manifest are in
+[Generation API contracts](api-contracts.md).
+
 The C++ engine has its own HTTP API on port 8085, used only by the Node server. Its request
 format is documented in [engine/docs/ARCHITECTURE.md](../../engine/docs/ARCHITECTURE.md).
 
