@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import abcjs from 'abcjs';
 import {
   coverScoreChoices, coverTempo, coverTranspose, coverVocalOnly, transformCoverScore,
 } from './coverScoreTransform.js';
@@ -57,6 +58,17 @@ test('transpose preserves K: modifiers and accepts a separate mode word', () => 
   assert.equal(coverTranspose(moved, 'Em'), withClef);
   const wordMode = score.replace('K:Em', 'K:E minor clef=treble');
   assert.match(coverTranspose(wordMode, 'F#m'), /^K:F# minor clef=treble$/m);
+});
+
+test('transpose keeps the signature abcjs spelled the notes for, so every pitch moves by the interval', () => {
+  const pitches = (abc: string) => (abcjs.parseOnly(abc)[0] as any).setUpAudio().tracks
+    .flatMap((track: any[]) => track.filter(e => e.cmd === 'note').map(e => e.pitch));
+  const inB = 'X:1\nL:1/8\nK:B\n"B"B c d e f g a b|"E"E F G A B c d e|\n';
+  for (const [target, header, steps] of [['C#', 'K:Db', 2], ['A#', 'K:Bb', -1]] as const) {
+    const moved = coverTranspose(inB, target);
+    assert.match(moved, new RegExp(`^${header}$`, 'm'));
+    assert.deepEqual(pitches(moved), pitches(inB).map((p: number) => p + steps));
+  }
 });
 
 test('submit-time defaults retain both score voices, then apply chords, tempo, key in order', () => {

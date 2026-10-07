@@ -101,11 +101,34 @@ export function coverTranspose(abc: string, targetKey: CoverKey): string {
   if (!changedField || parsedKey(changedField[1]).pitch !== target.pitch) {
     throw new Error('Could not transpose the cover score to the requested key.');
   }
-  // abcjs can respell a word-mode minor key enharmonically. Keep the source
-  // field's mode spelling and modifiers while using its transposed notes.
-  const targetTonic = targetKey.trim().match(/^([A-Ga-g][#b]?)/i)?.[1];
-  const header = `${targetTonic}${source.wordMode ? '' : source.minor ? 'm' : ''}${source.suffix}`;
-  return transposed.replace(/^K:[^\r\n]+/m, `K:${header}`);
+  // The K: we write must be the signature the notes were spelled for: writing
+  // C# over notes spelled for Db sharpens every flat. abcjs's own header can
+  // be a nonstandard spelling (Gb minor), so try it and its enharmonic, keep
+  // standard key names only, and take the first whose every note sounds
+  // exactly `steps` away from the source. Mode spelling and modifiers carry over.
+  const abcjsTonic = changedField[1].trim().match(/^[A-G][#b]?/)![0];
+  const sourcePitches = soundingPitches(abc);
+  for (const tonic of [abcjsTonic, ENHARMONIC[abcjsTonic]]) {
+    if (!tonic || !(source.minor ? STANDARD_MINOR : STANDARD_MAJOR).includes(tonic)) continue;
+    const header = `${tonic}${source.wordMode ? '' : source.minor ? 'm' : ''}${source.suffix}`;
+    const result = transposed.replace(/^K:[^\r\n]+/m, `K:${header}`);
+    const moved = soundingPitches(result);
+    if (moved.length === sourcePitches.length && moved.every((track, i) => track.length === sourcePitches[i].length &&
+      track.every((pitch, j) => (pitch - sourcePitches[i][j] - steps) % 12 === 0))) return result;
+  }
+  throw new Error('Could not transpose the cover score to the requested key.');
+}
+
+const STANDARD_MAJOR = ['C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Cb'];
+const STANDARD_MINOR = ['A', 'E', 'B', 'F#', 'C#', 'G#', 'D#', 'A#', 'D', 'G', 'C', 'F', 'Bb', 'Eb', 'Ab'];
+const ENHARMONIC: Record<string, string> = {
+  'C#': 'Db', Db: 'C#', 'D#': 'Eb', Eb: 'D#', 'F#': 'Gb', Gb: 'F#', 'G#': 'Ab', Ab: 'G#', 'A#': 'Bb', Bb: 'A#', B: 'Cb', Cb: 'B',
+};
+
+/** Sounding MIDI pitch of every note and chord tone, per track, as abcjs reads the text. */
+function soundingPitches(abc: string): number[][] {
+  const tune = abcjs.parseOnly(abc)[0] as any;
+  return tune.setUpAudio().tracks.map((track: any[]) => track.filter(e => e.cmd === 'note').map(e => e.pitch));
 }
 
 /** The order is part of the cover contract: voices, chords, tempo, key. */
