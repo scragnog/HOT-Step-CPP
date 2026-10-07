@@ -31,6 +31,8 @@ import { dropYue2BatchMember } from '../services/backends/yue2/generate.js';
 import { translateParams } from '../services/generation/translateParams.js';
 import { timbreReferenceMissing } from '../services/generation/sourceAudio.js';
 import { buildEnvelope, GenerationEnvelopeError } from '../services/generation/envelope.js';
+import { isGenerationIntent } from '../contracts/generation.js';
+import { GenerationIntentError, resolveGenerationIntent } from '../services/generation/intent.js';
 import { noteEnqueued, noteFinished } from '../services/generation/residency.js';
 import { runYue2PlanPreview } from '../services/backends/yue2/generate.js';
 import {
@@ -283,7 +285,7 @@ const generateCapture = createGenerateCapture({
   checkout: () => checkoutState(),
 });
 
-router.post('/', generateCapture, (req, res) => {
+router.post('/', generateCapture, async (req, res) => {
   // The engine is deliberately stopped while a training preprocess job owns the
   // GPU — say so instead of the generic "not ready" boot message.
   if (isEngineSuspended()) {
@@ -307,7 +309,10 @@ router.post('/', generateCapture, (req, res) => {
   // request for; the UI never sends this. `backend` stays log-only — only
   // `expectedBackend` can block a submit, so a caller that races a backend
   // switch fails loudly instead of training/rendering on the wrong one.
-  const mismatch = expectedBackendMismatch(req.body, getActiveBackendId());
+  const mismatch = expectedBackendMismatch(
+    isGenerationIntent(req.body) ? req.body.input : req.body,
+    getActiveBackendId(),
+  );
   if (mismatch) {
     res.status(409).json({
       error: `Expected backend '${mismatch.expectedBackend}' but the active backend is '${mismatch.activeBackend}'`,
@@ -316,10 +321,30 @@ router.post('/', generateCapture, (req, res) => {
     return;
   }
 
+  let submission = req.body;
+  if (isGenerationIntent(req.body)) {
+    try {
+      const backendId = getActiveBackendId();
+      const backend = getBackend(backendId);
+      if (!backend) throw new Error(`Active generation backend '${backendId}' is not registered`);
+      const capabilities = await backend.capabilities();
+      if (getActiveBackendId() !== backendId) {
+        res.status(409).json({ error: `Active backend changed while resolving generation intent`, activeBackend: getActiveBackendId() });
+        return;
+      }
+      submission = resolveGenerationIntent(req.body, backendId, capabilities.extensions);
+    } catch (err) {
+      res.status(err instanceof GenerationIntentError ? 400 : 500).json({
+        error: err instanceof Error ? err.message : 'Cannot resolve generation intent',
+      });
+      return;
+    }
+  }
+
   // A profile can carry a timbre reference whose upload was deleted; the
   // synth phase would find that out minutes in. Refuse it at the form (#162).
-  if (!req.body?.backend || req.body.backend === 'ace') {
-    const missing = timbreReferenceMissing(req.body);
+  if (!submission?.backend || submission.backend === 'ace') {
+    const missing = timbreReferenceMissing(submission);
     if (missing) {
       res.status(400).json({ error: `Timbre reference file is missing (${missing}). The upload it referred to is gone; re-upload it or clear the reference.` });
       return;
@@ -330,7 +355,7 @@ router.post('/', generateCapture, (req, res) => {
   const enqueuedAt = Date.now();
   let envelope: ReturnType<typeof buildEnvelope>;
   try {
-    envelope = buildEnvelope(req.body, userId, jobId, enqueuedAt);
+    envelope = buildEnvelope(submission, userId, jobId, enqueuedAt);
   } catch (err) {
     const clientError = err instanceof GenerationEnvelopeError && err.code !== 'unknown_backend';
     res.status(clientError ? 400 : 500).json({ error: err instanceof Error ? err.message : 'Cannot resolve generation request' });
@@ -343,7 +368,7 @@ router.post('/', generateCapture, (req, res) => {
     status: 'pending',
     stage: 'Queued',
     progress: 0,
-    params: structuredClone(req.body),
+    params: structuredClone(submission),
     attempts: [],
     createdAt: enqueuedAt,
   };

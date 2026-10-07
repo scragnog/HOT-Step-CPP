@@ -1,10 +1,10 @@
-# Generation API contracts (frozen baseline)
+# Generation API contracts
 
 This page records the contracts a client relies on to render a song through the Node server
 today: the request, response, error, local auth, job and media rules for `POST /api/generate`,
-and the engine capability manifest. It is the baseline the frontend-decoupling work compares
-against, so it describes current behaviour, including the parts that are awkward. Nothing
-here changes behaviour. Line references are to commit `7c711f64`.
+and the engine capability manifest. The flat request remains the frozen baseline for
+frontend decoupling; the intent section documents the additive server resolver.
+Baseline line references are to commit `7c711f64`.
 
 For the full route list see the generated [HTTP API index](api.md).
 
@@ -35,6 +35,19 @@ policy work, not to this baseline.
 ## Generate request
 
 `POST /api/generate` with a JSON object body.
+
+The route also accepts `generation-intent/1` bodies for clients moving generation
+policy into Node. An intent has `{ "contract": "generation-intent/1", "params":
+{ ... }, "input": { ... }, "settings": { ... } }`. `params` is the persisted generation-control state;
+`input` holds the form's caption, lyrics, task and caller fields. Node fills
+missing control defaults, computes the adapter stack and conditional fields,
+and then overlays `input` as the existing Create caller does. Optional `settings`
+carries `triggerUseFilename` and `triggerPlacement` for filename trigger fallback. Backend-specific
+controls belong in `params.backendParams`; Node reads their keys, defaults and
+value constraints from the active backend's capability manifest. An unknown
+or invalid extension value returns `400`. The active backend still selects the
+engine, and a flat legacy body keeps its existing handling. The original body
+is captured before intent resolution when dev capture is enabled.
 
 - The body is the UI's `GenerationParams` shape (`ui/src/types.ts:108-371`), camelCase, plus
   caller-specific extras. Two callers matter for the baseline:
