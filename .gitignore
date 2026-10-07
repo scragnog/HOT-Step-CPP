@@ -17,6 +17,7 @@ server/server/data/
 /adapters/
 # Local machine config
 /.mcp.json
+/.codegraph/
 /SafeSettings.json
 *.db
 *.db-shm
