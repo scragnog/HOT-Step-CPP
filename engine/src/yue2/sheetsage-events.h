@@ -917,6 +917,111 @@ inline std::string yue2_sheet_rhythm_json(const Yue2SheetEvent & e) {
 // 21 §6.5). `field` selects which of structure/key/chord to read.
 struct Yue2SheetIntervalRow { double start; double end; std::string value; };
 
+// Local-key chord spelling, chord_spelling_sheetsage2.py (upstream e8b16e3e,
+// 55bfe14e): each chord root is respelled to the letter whose chord tones sit
+// closest to the local key on the circle of fifths. Pitches never change.
+namespace yue2_sheet_spelling {
+
+// (letter 0..6 = C..B, accidental offset)
+struct Spelled { int letter; int acc; };
+
+inline int natural_pc(int letter) { static const int pc[7] = {0, 2, 4, 5, 7, 9, 11}; return pc[letter]; }
+inline int fifths_pos(int letter) { static const int inv[7] = {1, 3, 5, 0, 2, 4, 6}; return inv[letter]; }
+inline int mod(int a, int m) { return ((a % m) + m) % m; }
+inline int floor_div(int a, int b) { return (a - mod(a, b)) / b; }
+
+inline bool parse_name(const std::string & name, Spelled & out) {
+    static const std::string letters = "CDEFGAB";
+    if (name.empty() || letters.find(name[0]) == std::string::npos) return false;
+    out = {(int) letters.find(name[0]), 0};
+    for (size_t i = 1; i < name.size(); ++i) {
+        if (name[i] == '#') ++out.acc;
+        else if (name[i] == 'b') --out.acc;
+        else return false;
+    }
+    return true;
+}
+inline int pitch_class(const Spelled & s) { return mod(natural_pc(s.letter) + s.acc, 12); }
+
+// QUALITIES chroma -> DEFAULT_SPELLING degrees, for the 15 qualities the
+// vocabulary can decode (FULL_CHORD_QUALITIES). Degree is 0-based.
+inline const std::vector<Spelled> * quality_intervals(const std::string & quality) {
+    static const Spelled degree[12] = {{0,0},{1,-1},{1,0},{2,-1},{2,0},{3,0},{4,-1},{4,0},{4,1},{5,0},{6,-1},{6,0}};
+    static const std::vector<std::pair<std::string, std::vector<int>>> chroma = {
+        {"maj", {0,4,7}}, {"min", {0,3,7}}, {"aug", {0,4,8}}, {"dim", {0,3,6}},
+        {"sus4", {0,5,7}}, {"sus4(b7)", {0,5,7,10}}, {"sus2", {0,2,7}}, {"7", {0,4,7,10}},
+        {"maj7", {0,4,7,11}}, {"min7", {0,3,7,10}}, {"minmaj7", {0,3,7,11}}, {"maj6", {0,4,7,9}},
+        {"min6", {0,3,7,9}}, {"dim7", {0,3,6,9}}, {"hdim7", {0,3,6,10}},
+    };
+    static const auto table = [] {
+        std::vector<std::pair<std::string, std::vector<Spelled>>> t;
+        for (const auto & [q, pcs] : chroma) {
+            std::vector<Spelled> v;
+            // dim7's 6th is spelled bb7 (get_chord_spelling_table)
+            for (int pc : pcs) v.push_back(q == "dim7" && pc == 9 ? Spelled{6, -2} : degree[pc]);
+            t.push_back({q, v});
+        }
+        return t;
+    }();
+    for (const auto & [q, v] : table) if (q == quality) return &v;
+    return nullptr;
+}
+
+// spell_chord_tones + score_spelling_under_key
+inline int score_root(const Spelled & root, const std::vector<Spelled> & intervals, const Spelled & key) {
+    static const int major_scale_fifths[7] = {0, 2, 4, -1, 1, 3, 5};
+    const int key_pos = fifths_pos(key.letter) + key.acc * 7;
+    const int root_pos = fifths_pos(root.letter) + root.acc * 7;
+    int total = 0, root_score = 0;
+    for (size_t i = 0; i < intervals.size(); ++i) {
+        const int letter = (root.letter + intervals[i].letter) % 7;
+        const int tone_pos = root_pos + major_scale_fifths[intervals[i].letter] + intervals[i].acc * 7;
+        const int acc = floor_div(tone_pos - fifths_pos(letter), 7);
+        const int rel = std::max(std::abs(fifths_pos(letter) + acc * 7 - (key_pos + 2)) - 3, 0);
+        total += rel;
+        if (i == 0) root_score = rel;  // root matters more
+    }
+    return total + root_score;
+}
+
+// correct_chord_spelling(label, key_name)
+inline std::string correct_chord(const std::string & label, const std::string & key_name) {
+    if (label == "N" || label == "X") return label;
+    const size_t key_colon = key_name.find(':');
+    Spelled tonic;
+    if (key_colon == std::string::npos || !parse_name(key_name.substr(0, key_colon), tonic)) return label;
+    const std::string mode = key_name.substr(key_colon + 1);
+    if (mode != "major" && mode != "minor") return label;
+    // Key signature tonic: KEY_MAP[0][scale_semitone], the relative major.
+    static const char * major_names[12] = {"C","Db","D","Eb","E","F","F#","G","Ab","A","Bb","B"};
+    Spelled key;
+    parse_name(major_names[mod(pitch_class(tonic) - (mode == "minor" ? 9 : 0), 12)], key);
+
+    std::string chord = label, inversion;
+    const size_t slash = chord.find('/');
+    if (slash != std::string::npos) { inversion = chord.substr(slash); chord = chord.substr(0, slash); }
+    const size_t colon = chord.find(':');
+    Spelled root;
+    if (colon == std::string::npos || !parse_name(chord.substr(0, colon), root)) return label;
+    const std::string quality = chord.substr(colon + 1);
+    const std::vector<Spelled> * intervals = quality_intervals(quality);
+    if (!intervals) return label;
+
+    const int root_pc = pitch_class(root);
+    Spelled best{0, 0};
+    int best_score = 0;
+    for (int letter = 0; letter < 7; ++letter) {
+        const Spelled candidate{letter, mod(root_pc - natural_pc(letter) + 6, 12) - 6};
+        const int s = score_root(candidate, *intervals, key);
+        if (letter == 0 || s < best_score) { best = candidate; best_score = s; }  // argmin: first wins
+    }
+    std::string name(1, "CDEFGAB"[best.letter]);
+    name += std::string(std::abs(best.acc), best.acc < 0 ? 'b' : '#');
+    return name + ":" + quality + inversion;
+}
+
+}  // namespace yue2_sheet_spelling
+
 inline std::vector<Yue2SheetIntervalRow> yue2_sheet_interval_rows(const std::vector<Yue2SheetEvent> & events,
                                                                    Yue2SheetField field, double duration) {
     std::vector<Yue2SheetIntervalRow> rows;
@@ -932,6 +1037,19 @@ inline std::vector<Yue2SheetIntervalRow> yue2_sheet_interval_rows(const std::vec
     }
     std::vector<Yue2SheetIntervalRow> kept;
     for (auto & r : rows) if (r.end > r.start) kept.push_back(r);
+    // correct_chord_rows: spell each chord under the key at its midpoint
+    // (searchsorted left over key ends, edges extended). No key: unchanged.
+    if (field == Yue2SheetField::Chord) {
+        const std::vector<Yue2SheetIntervalRow> keys = yue2_sheet_interval_rows(events, Yue2SheetField::Key, duration);
+        if (!keys.empty()) {
+            for (auto & r : kept) {
+                const double mid = (r.start + r.end) / 2.0;
+                size_t k = 0;
+                while (k + 1 < keys.size() && keys[k].end < mid) ++k;
+                r.value = yue2_sheet_spelling::correct_chord(r.value, keys[k].value);
+            }
+        }
+    }
     return kept;
 }
 

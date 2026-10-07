@@ -570,11 +570,15 @@ inline int32_t yue2_sheet_full_chord_id(const SheetSage2Tokens & t, const std::s
 }
 
 // key: key_id = mode_id*12 + tonic_id (tokenization_sheetsage2.py:328-336,
-// :495-498). Returns "{tonic}:{major|minor}".
+// :495-498). Returns "{tonic}:{major|minor}" in upstream's canonical spelling
+// (normalize_key_name, chord_spelling_sheetsage2.py, upstream e8b16e3e):
+// KEY_MAP rows 0 and 5 re-indexed by tonic, so C# major is Db, A# minor Bb.
 inline std::string yue2_sheet_key_label(int32_t key_id) {
+    static const std::array<std::string, 12> major = {"C","Db","D","Eb","E","F","F#","G","Ab","A","Bb","B"};
+    static const std::array<std::string, 12> minor_ = {"C","C#","D","D#","E","F","F#","G","G#","A","Bb","B"};
     const bool minor = key_id >= 12;
     const int32_t tonic_id = key_id % 12;
-    return yue2_sheet_detail::chromatic_sharps()[tonic_id] + ":" + (minor ? "minor" : "major");
+    return (minor ? minor_ : major)[tonic_id] + ":" + (minor ? "minor" : "major");
 }
 
 // pitch: pitch_id -> (pitch 0..127, track 0/1) (tokenization_sheetsage2.py:523-524).
