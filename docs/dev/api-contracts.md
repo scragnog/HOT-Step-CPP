@@ -131,23 +131,40 @@ never set `HOT_STEP_DEV`, so it cannot turn on in an installed copy.
 | `capture-only` | Record and return `{ jobId: null, status: "captured", captureId }`. No job is created and the GPU is not touched. The UI's queue will not find the job, so expect the queue item to fail. |
 
 Where and what it records:
-- The capture runs first in the handler, before the engine-ready checks, auth, envelope
-  construction or any normalization, so every body is recorded exactly as it arrived.
-- It records from a deep copy and never writes to the request (`server/src/services/generation/requestCapture.ts`).
+- The capture is middleware ahead of the generate handler
+  (`server/src/services/generation/requestCapture.ts`, mounted in `server/src/routes/generate.ts`).
+  It runs before the engine-ready checks, envelope construction and any normalization, so
+  every body is recorded exactly as it arrived.
+- It needs the same bearer token as the handler. A missing or stale token gets
+  `401 { "error": "Unauthorized" }`, and nothing is written. An authenticated `capture-only`
+  request skips the engine-ready checks, so it works while the engine is down.
+- It records from a deep copy and never writes to the request.
 - Fixtures go to `<data dir>/dev-captures/generate/`, one JSON file each, outside git.
 - Each fixture (`schema: "hotstep.generate-capture/1"`) holds:
-  - `commit` and whether the checkout was `dirty`
-  - `caller`: the body's `source`, an optional `X-HotStep-Capture-Caller` header for headless
-    harnesses, and the Referer path
+  - `commit` and whether the checkout was `dirty`, read from git at the moment of capture
+  - `caller`: the body's `source`, an optional `X-HotStep-Capture-Caller` header for
+    headless harnesses, and the Referer path
   - `settings`: the active backend and the body's `backend` field
   - `seed`: `seed`, `randomSeed` and `lmSeed`
   - the redacted `body`, with the list of `redactedPaths`
 
-Credentials are never recorded:
-- No request header is stored.
-- Body keys that name a credential (`apiKey`, `secret`, `password`, `authorization`, `cookie`,
-  `credential`, or ending in `token`) are replaced with `"[redacted]"`. Keys ending in
-  `tokens`, such as `maxTokens`, are kept.
+What is kept out, and what cannot be:
+- Request headers are not stored, with two exceptions, each kept only when it passes a strict
+  check and dropped otherwise:
+  - the caller header, kept only as a short identifier (letters, digits, `.`, `_`, `-`, at most
+    64 characters)
+  - the Referer, kept only as its path (no host, query or fragment), of at most 128 plain
+    characters
+
+  The body's `source` and `backend` are stored under `caller` and `settings` by the same rule.
+- Body keys that name a credential are replaced with `"[redacted]"`. Keys are compared
+  case-insensitively, ignoring `-` and `_`. A key matches when it:
+  - ends in `token`; keys ending in `tokens`, such as `maxTokens`, are kept
+  - or contains one of `apikey`, `secret`, `password`, `passwd`, `passphrase`,
+    `authorization`, `cookie`, `credential`, `privatekey`, `accesskey`, `signingkey`,
+    `clientkey` or `bearer`
+- Redaction goes by key name only. Free-text values, such as the caption and lyrics, are
+  stored as sent; a secret pasted into one of them would be recorded.
 
 The same function is the comparison point for the resolved-request work: a server-resolved
 request must produce a legacy-shaped body that passes through this capture before envelope
