@@ -162,6 +162,16 @@ static bool g_fwd_only = false;   // debug: skip the backward expansion entirely
 typedef const char * (*fa_last_prec_fn)(int dir);
 static fa_last_prec_fn g_last_prec = nullptr;
 
+// HOT-Step patch: --bench-yue2. Bench knobs kept global so bench_build/bench_run
+// keep their signatures. kv_grad_start > 0 is set on the fused op exactly as
+// yue2-aitk-graph.h:243 does for the NAR prefix canvas (B1); iters default to the
+// historical 10 warm-up + 50 timed.
+static int32_t g_bench_kv_grad_start = 0;
+static int     g_bench_warm          = 10;
+static int     g_bench_iters         = 50;
+static bool    g_bench_iters_given   = false;
+static double  g_bench_yue2_scale    = 1.0;   // --yue2-scale F: shrink S, S_kv, prefix by F
+
 static const char * last_prec(int dir) {
     return g_last_prec ? g_last_prec(dir) : "n/a";
 }
@@ -788,6 +798,12 @@ static bool bench_build(BenchArm & a, int arm, int64_t S, int64_t S_kv, int64_t 
     if (flash) {
         ggml_tensor * pkd = ggml_flash_attn_train(a.ctx, q, k, v, m, scale);
         ggml_flash_attn_train_set_prec(pkd, arm == 2 ? GGML_PREC_DEFAULT : GGML_PREC_F32);
+        if (g_bench_kv_grad_start > 0) {
+            ggml_flash_attn_train_set_kv_grad_start(pkd, g_bench_kv_grad_start);
+        }
+        if (mk == BENCH_MASK_CAUSAL && S_kv == S && !getenv("FATTN_NO_CAUSAL_HINT")) {
+            ggml_flash_attn_train_set_causal(pkd, 0);   // B6: bench's causal mask is exactly col <= row
+        }
         o                 = ggml_flash_attn_train_get_o(a.ctx, pkd);
     } else if (arm == 3) {
         // lm_attn_head_blocked, on this tool's already-permuted layout.
@@ -947,21 +963,21 @@ static BenchResult bench_run(int arm, int64_t S, int64_t S_kv, int64_t B, int64_
     r.built = true;
     r.buf   = a.buf ? ggml_backend_buffer_get_size(a.buf) : 0;
 
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < g_bench_warm; i++) {
         if (ggml_backend_graph_compute(be, a.gf) != GGML_STATUS_SUCCESS) {
             r.note = "graph compute failed during warm-up";
             return r;
         }
     }
     const int64_t t0 = ggml_time_us();
-    for (int i = 0; i < 50; i++) {
+    for (int i = 0; i < g_bench_iters; i++) {
         if (ggml_backend_graph_compute(be, a.gf) != GGML_STATUS_SUCCESS) {
             r.note = "graph compute failed during timed run";
             return r;
         }
     }
     const int64_t t1 = ggml_time_us();
-    r.ms            = (double) (t1 - t0) / 1000.0 / 50.0;
+    r.ms            = (double) (t1 - t0) / 1000.0 / (double) g_bench_iters;
     r.ok            = true;
     // Only the fused arms have a resolved kernel to report; last_prec() is a
     // global "what ran last", so asking it after a cuBLAS arm would print the
@@ -1239,6 +1255,289 @@ static int run_bench_lm(ggml_backend_t be_cuda, const std::vector<int64_t> & S_l
     return 0;
 }
 
+// HOT-Step patch: --bench-yue2. The YuE2 joint-training attention shapes on the
+// GPU backend actually present (Metal on the M1 Max; arm 1 = the scalar fused f32
+// kernels, the ones a step really runs). Per case: forward ms, backward ms
+// (= fwd+bwd graph minus fwd-only graph, same subtraction as --bench-tr) and the
+// nominal TFLOPS. Shapes come from docs/perf-notes/fa-train-optimization-backlog.md:
+// 16 Q / 8 KV heads, D = 128; NAR non-causal Q 9502 x KV 24573 (prefix 15071 rows,
+// the dK/dV prefix skip B1 is case "nar", "nar-noskip" is the pre-B1 kernel work);
+// AR causal S 15496. Nominal flops: fwd 4*Nh*D*pairs, bwd 2.5x that (5 vs 2
+// matmuls, recompute included) -- NOT corrected for the prefix skip, so "nar"
+// shows a higher nominal number than it computes.
+static int run_bench_yue2(ggml_backend_t be, const char * only) {
+    const int64_t B = 1, Nh = 16, Nkv = 8, D = 128;
+    struct Geo { const char * name; int64_t S, S_kv; BenchMask mk; int32_t kvgs; };
+    const Geo geos[] = {
+        { "nar",        9502, 24573, BENCH_MASK_NONE,   15071 },
+        { "nar-noskip", 9502, 24573, BENCH_MASK_NONE,   0     },
+        { "ar",         15496, 15496, BENCH_MASK_CAUSAL, 0     },
+    };
+    printf("fattn-train-test --bench-yue2 -- YuE2 joint-training attention on %s\n", ggml_backend_name(be));
+    printf("B=%lld Nh=%lld Nkv=%lld D=%lld  %d warm-up + %d timed iters (arm: fused f32)\n\n",
+           (long long) B, (long long) Nh, (long long) Nkv, (long long) D, g_bench_warm, g_bench_iters);
+    printf("%-11s %8s %8s %-7s %10s %10s %10s %10s\n",
+           "case", "Q", "KV", "mask", "fwd ms", "bwd ms", "fwd TFLOP", "bwd TFLOP");
+    auto sc = [](int64_t n) -> int64_t {
+        const int64_t r = (int64_t) ((double) n * g_bench_yue2_scale) / 16 * 16;
+        return r < 16 ? 16 : r;
+    };
+    for (const Geo & g0 : geos) {
+        if (only && *only && strcmp(only, g0.name) != 0) {
+            continue;
+        }
+        Geo g = g0;
+        if (g_bench_yue2_scale < 1.0) {   // causal AR needs S_kv == S, so scale them together
+            g.S = sc(g0.S);
+            g.S_kv = g0.mk == BENCH_MASK_CAUSAL ? g.S : sc(g0.S_kv);
+            g.kvgs = g0.kvgs ? (int32_t) sc(g0.kvgs) : 0;
+        }
+        g_bench_kv_grad_start = g.kvgs;
+        printf("[%s] running (%d warm-up + %d timed, fwd-only then fwd+bwd) ...\n", g.name, g_bench_warm, g_bench_iters);
+        fflush(stdout);
+        const BenchResult fwd = bench_run(1, g.S, g.S_kv, B, Nh, Nkv, D, be, g.mk, 1.0, /*fwd_only=*/true);
+        const BenchResult tot = bench_run(1, g.S, g.S_kv, B, Nh, Nkv, D, be, g.mk, 1.0, /*fwd_only=*/false);
+        if (!fwd.ok || !tot.ok) {
+            printf("%-11s n/a  %s\n", g.name, fwd.ok ? tot.note.c_str() : fwd.note.c_str());
+            continue;
+        }
+        const double pairs = g.mk == BENCH_MASK_CAUSAL ? 0.5 * (double) g.S * ((double) g.S + 1.0)
+                                                      : (double) g.S * (double) g.S_kv;
+        const double ffl   = 4.0 * (double) Nh * (double) D * pairs;
+        const double bwd   = tot.ms - fwd.ms;
+        printf("%-11s %8lld %8lld %-7s %10.2f %10.2f %10.3f %10.3f\n", g.name, (long long) g.S,
+               (long long) g.S_kv, g.mk == BENCH_MASK_CAUSAL ? "causal" : "none", fwd.ms, bwd,
+               ffl / (fwd.ms * 1e-3) / 1e12, 2.5 * ffl / (bwd * 1e-3) / 1e12);
+        fflush(stdout);
+    }
+    g_bench_kv_grad_start = 0;
+    printf("\nPer layer, one call. A step runs these once per layer (+ a recompute fwd inside bwd already counted).\n"
+           "Compare against the ~10.4 TFLOPS FP32 peak and the 0.33-0.36 TFLOPS estimated in the backlog.\n");
+    return 0;
+}
+
+
+// ─── --saved-check (YuE2 B2) ────────────────────────────────────────────────
+//
+// ggml_flash_attn_train_set_saved() attaches the packed O+LSE of an earlier compute
+// of the same forward node as src[4]. The Metal backend then copies it instead of
+// running the forward kernel; other backends ignore it and recompute. This checks:
+//   1. the copy path is really taken on Metal (a poisoned slot shows up in the output),
+//      and on a backend that ignores it the output is the plain forward;
+//   2. forward + backward with the slot holding the true forward result is BITWISE
+//      identical to forward + backward without it (packed, dQ, dK, dV).
+struct SavedRun {
+    bool                ok = false;
+    std::string         err;
+    std::vector<float>  packed, dq, dk, dv;
+};
+
+static bool g_saved_causal_hint = false;   // --saved-check: set the B6 causal hint on causal cases
+static bool g_saved_nomask      = false;   // --dsw-check: non-causal cases pass NO mask tensor (all visible), like the YuE2 NAR graph
+
+static SavedRun saved_run(ggml_backend_t be, int64_t S, int64_t S_kv, int64_t Nh, int64_t Nkv, int64_t D,
+                          bool causal, int32_t kvgs, const std::vector<float> * saved_vals, bool fwd_only) {
+    SavedRun r;
+    const float scale = 1.0f / std::sqrt((float) D);
+    const size_t mem = ggml_tensor_overhead() * 512 + ggml_graph_overhead_custom(4096, true) + (1u << 20);
+    ggml_init_params ip = {};
+    ip.mem_size = mem; ip.mem_buffer = nullptr; ip.no_alloc = true;
+    ggml_context * ctx = ggml_init(ip);
+    if (!ctx) { r.err = "ggml_init failed"; return r; }
+
+    ggml_tensor * q = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, D, S,    Nh,  1);
+    ggml_tensor * k = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, D, S_kv, Nkv, 1);
+    ggml_tensor * v = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, D, S_kv, Nkv, 1);
+    ggml_tensor * w = ggml_new_tensor_4d(ctx, GGML_TYPE_F32, D, Nh,   S,   1);
+    ggml_set_param(q); ggml_set_param(k); ggml_set_param(v); ggml_set_input(w);
+    ggml_tensor * m = (g_saved_nomask && !causal) ? nullptr : ggml_new_tensor_4d(ctx, GGML_TYPE_F16, S_kv, S, 1, 1);
+    if (m) ggml_set_input(m);
+
+    ggml_tensor * pkd = ggml_flash_attn_train(ctx, q, k, v, m, scale);
+    ggml_flash_attn_train_set_prec(pkd, GGML_PREC_F32);
+    if (kvgs > 0) ggml_flash_attn_train_set_kv_grad_start(pkd, kvgs);
+    if (causal && g_saved_causal_hint) ggml_flash_attn_train_set_causal(pkd, 0);
+    ggml_tensor * sv = nullptr;
+    if (saved_vals) {
+        sv = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, ggml_nelements(pkd));
+        ggml_set_input(sv);
+        ggml_flash_attn_train_set_saved(pkd, sv);
+    }
+    ggml_set_output(pkd);
+
+    ggml_cgraph * gf = ggml_new_graph_custom(ctx, 4096, true);
+    if (fwd_only) {
+        ggml_build_forward_expand(gf, pkd);
+    } else {
+        ggml_tensor * o    = ggml_flash_attn_train_get_o(ctx, pkd);
+        ggml_tensor * loss = ggml_sum(ctx, ggml_mul(ctx, o, w));
+        ggml_build_forward_expand(gf, loss);
+        ggml_set_loss(loss);
+        ggml_build_backward_expand(ctx, gf, nullptr);
+    }
+    ggml_backend_buffer_t buf = ggml_backend_alloc_ctx_tensors(ctx, be);
+    if (!buf) { r.err = "backend allocation failed"; ggml_free(ctx); return r; }
+
+    auto up = [&](ggml_tensor * t, uint64_t seed) {
+        std::vector<float> h((size_t) ggml_nelements(t));
+        fill(h, seed);
+        ggml_backend_tensor_set(t, h.data(), 0, ggml_nbytes(t));
+    };
+    up(q, 11); up(k, 12); up(v, 13); up(w, 14);
+    if (m) {
+        std::vector<uint16_t> mh((size_t) (S_kv * S), ggml_fp32_to_fp16(0.0f));
+        if (causal) {
+            for (int64_t i = 0; i < S; i++) for (int64_t j = i + 1; j < S_kv; j++) mh[(size_t) (i * S_kv + j)] = ggml_fp32_to_fp16(-INFINITY);
+        }
+        ggml_backend_tensor_set(m, mh.data(), 0, ggml_nbytes(m));
+    }
+    if (sv) ggml_backend_tensor_set(sv, saved_vals->data(), 0, ggml_nbytes(sv));
+
+    if (!fwd_only) ggml_graph_reset(gf);
+    if (ggml_backend_graph_compute(be, gf) != GGML_STATUS_SUCCESS) {
+        r.err = "graph compute failed"; ggml_backend_buffer_free(buf); ggml_free(ctx); return r;
+    }
+    auto get = [&](ggml_tensor * t, std::vector<float> & out) {
+        out.resize((size_t) ggml_nelements(t));
+        ggml_backend_tensor_get(t, out.data(), 0, ggml_nbytes(t));
+    };
+    get(pkd, r.packed);
+    if (!fwd_only) {
+        get(ggml_graph_get_grad(gf, q), r.dq);
+        get(ggml_graph_get_grad(gf, k), r.dk);
+        get(ggml_graph_get_grad(gf, v), r.dv);
+    }
+    r.ok = true;
+    ggml_backend_buffer_free(buf);
+    ggml_free(ctx);
+    return r;
+}
+
+static bool same_bits(const std::vector<float> & a, const std::vector<float> & b) {
+    return a.size() == b.size() && (a.empty() || memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0);
+}
+
+static int run_saved_check(ggml_backend_t be) {
+    const bool metal = strncmp(ggml_backend_name(be), "MTL", 3) == 0;
+    struct G { const char * name; int64_t S, S_kv; bool causal; int32_t kvgs; };
+    const G gs[] = {
+        { "causal S=S_kv=192",           192, 192, true,  0   },
+        { "noncausal S=160 KV=288 kvgs=128", 160, 288, false, 128 },
+    };
+    printf("fattn-train-test --saved-check on %s (Nh=16 Nkv=8 D=128)\n", ggml_backend_name(be));
+    int fails = 0;
+    for (const G & g : gs) {
+        const int64_t Nh = 16, Nkv = 8, D = 128;
+        SavedRun ref  = saved_run(be, g.S, g.S_kv, Nh, Nkv, D, g.causal, g.kvgs, nullptr, false);
+        if (!ref.ok) { printf("[%s] FAIL reference: %s\n", g.name, ref.err.c_str()); fails++; continue; }
+
+        // 1. poisoned slot, forward only
+        const std::vector<float> poison(ref.packed.size(), 1.0f);
+        SavedRun pz = saved_run(be, g.S, g.S_kv, Nh, Nkv, D, g.causal, g.kvgs, &poison, true);
+        if (!pz.ok) { printf("[%s] FAIL poison run: %s\n", g.name, pz.err.c_str()); fails++; continue; }
+        const bool consumed = same_bits(pz.packed, poison);
+        const bool recomputed = same_bits(pz.packed, ref.packed);
+        bool poison_ok = metal ? consumed : (recomputed || consumed);
+        printf("[%s] poisoned slot: %s -> %s\n", g.name,
+               consumed ? "copied from src[4]" : (recomputed ? "ignored (recomputed)" : "neither!"),
+               poison_ok ? "PASS" : "FAIL");
+        if (!poison_ok) fails++;
+
+        // 2. slot holds the true forward result: everything bitwise equal
+        SavedRun sv = saved_run(be, g.S, g.S_kv, Nh, Nkv, D, g.causal, g.kvgs, &ref.packed, false);
+        if (!sv.ok) { printf("[%s] FAIL saved run: %s\n", g.name, sv.err.c_str()); fails++; continue; }
+        const bool eq = same_bits(sv.packed, ref.packed) && same_bits(sv.dq, ref.dq) &&
+                        same_bits(sv.dk, ref.dk) && same_bits(sv.dv, ref.dv);
+        printf("[%s] packed/dQ/dK/dV with saved slot vs recompute: %s\n", g.name, eq ? "bitwise PASS" : "FAIL");
+        if (!eq) fails++;
+
+        // 3. B6 causal hint: a TRUE hint must not change a single bit (packed, dQ, dK, dV)
+        if (g.causal) {
+            g_saved_causal_hint = true;
+            SavedRun hn = saved_run(be, g.S, g.S_kv, Nh, Nkv, D, g.causal, g.kvgs, nullptr, false);
+            g_saved_causal_hint = false;
+            if (!hn.ok) { printf("[%s] FAIL hint run: %s\n", g.name, hn.err.c_str()); fails++; continue; }
+            const bool heq = same_bits(hn.packed, ref.packed) && same_bits(hn.dq, ref.dq) &&
+                             same_bits(hn.dk, ref.dk) && same_bits(hn.dv, ref.dv);
+            printf("[%s] causal hint vs no hint: %s\n", g.name, heq ? "bitwise PASS" : "FAIL");
+            if (!heq) fails++;
+        }
+    }
+    printf("\n%s\n", fails ? "saved-check: FAIL" : "saved-check: all PASS");
+    return fails ? 1 : 0;
+}
+
+// --dsw-check: dS-materialization backward (GGML_METAL_FA_TRAIN_DSW=1, causal, kv_grad_start 0) must be
+// BITWISE identical to the default kernels for packed, dQ, dK, dV. Several sizes (incl. S not a multiple of
+// 8 / 48 / 64) and kv-head group sizes (GGML_METAL_FA_TRAIN_DSW_HKG 1,2,3: 8 % 3 != 0) and reader shapes.
+static int run_dsw_check(ggml_backend_t be) {
+    const int64_t Nh = 16, Nkv = 8, D = 128;
+    struct Case { int64_t S, S_kv; bool causal; int32_t kvgs; };
+    const Case cases[] = {
+        { 8, 8, true, 0 }, { 48, 48, true, 0 }, { 64, 64, true, 0 }, { 100, 100, true, 0 }, { 192, 192, true, 0 },
+        { 333, 333, true, 0 }, { 1000, 1000, true, 0 }, { 1537, 1537, true, 0 },
+        // NAR: non-causal, NO mask tensor, detached prefix (kv_grad_start) -> prefix pass + reader
+        { 160, 288, false, 128 }, { 100, 400, false, 47 }, { 96, 400, false, 48 }, { 333, 700, false, 500 },
+        { 64, 200, false, 0 }, { 1000, 2500, false, 1500 }, { 520, 1701, false, 1000 },
+    };
+    printf("fattn-train-test --dsw-check on %s (Nh=16 Nkv=8 D=128; causal + hint, and non-causal without mask)\n", ggml_backend_name(be));
+    int fails = 0;
+    g_saved_nomask = true;
+    for (const Case & cs : cases) {
+        const int64_t S = cs.S, S_kv = cs.S_kv;
+        g_saved_causal_hint = cs.causal;
+        setenv("GGML_METAL_FA_TRAIN_DSW", "0", 1);
+        SavedRun ref = saved_run(be, S, S_kv, Nh, Nkv, D, cs.causal, cs.kvgs, nullptr, false);
+        if (!ref.ok) { printf("[S=%lld KV=%lld] FAIL reference: %s\n", (long long) S, (long long) S_kv, ref.err.c_str()); fails++; continue; }
+        bool shown_diag = false;
+        const char * hkgs[] = { "1", "2", "3" };
+        const char * ncs[]  = { "8", "16", "32" };
+        const char * nsgs[] = { "4", "8" };
+        for (const char * hkg : hkgs) for (const char * nc : ncs) for (const char * nsg : nsgs) {
+            if (S > 400 && !(strcmp(nc, "16") == 0 || strcmp(hkg, "2") == 0)) continue;   // keep the grid short for big S
+            setenv("GGML_METAL_FA_TRAIN_DSW", "1", 1);
+            setenv("GGML_METAL_FA_TRAIN_DSW_HKG", hkg, 1);
+            setenv("GGML_METAL_FA_TRAIN_DSW_NC", nc, 1);
+            setenv("GGML_METAL_FA_TRAIN_DSW_NSG", nsg, 1);
+            SavedRun on = saved_run(be, S, S_kv, Nh, Nkv, D, cs.causal, cs.kvgs, nullptr, false);
+            setenv("GGML_METAL_FA_TRAIN_DSW", "0", 1);
+            if (!on.ok) { printf("[S=%lld KV=%lld hkg=%s nc=%s nsg=%s] FAIL run: %s\n", (long long) S, (long long) S_kv, hkg, nc, nsg, on.err.c_str()); fails++; continue; }
+            const bool eq = same_bits(on.packed, ref.packed) && same_bits(on.dq, ref.dq) &&
+                            same_bits(on.dk, ref.dk) && same_bits(on.dv, ref.dv);
+            auto cnt = [](const std::vector<float> & a, const std::vector<float> & b) {
+                size_t n = 0; for (size_t i = 0; i < a.size() && i < b.size(); i++) n += memcmp(&a[i], &b[i], 4) != 0; return n; };
+            printf("[%s S=%-5lld KV=%-5lld kvgs=%-5d hkg=%s nc=%-2s nsg=%s] dq/dk/dv/packed diffs: %zu/%zu/%zu/%zu  %s\n", cs.causal ? "causal " : "nar    ",
+                   (long long) S, (long long) S_kv, (int) cs.kvgs, hkg, nc, nsg,
+                   cnt(on.dq, ref.dq), cnt(on.dk, ref.dk), cnt(on.dv, ref.dv), cnt(on.packed, ref.packed), eq ? "bitwise PASS" : "FAIL");
+            if (!eq) {
+                fails++;
+                if (!shown_diag) {   // first failing config: where and how big
+                    shown_diag = true;
+                    size_t first = (size_t) -1; double maxabs = 0, maxref = 0; size_t rows_bad = 0;
+                    std::vector<char> rowbad((size_t) (S * Nh), 0);
+                    for (size_t i = 0; i < on.dq.size(); i++) {
+                        if (memcmp(&on.dq[i], &ref.dq[i], 4) == 0) continue;
+                        if (first == (size_t) -1) first = i;
+                        maxabs = std::max(maxabs, fabs((double) on.dq[i] - (double) ref.dq[i])); maxref = std::max(maxref, (double) fabs(ref.dq[i]));
+                        rowbad[i / (size_t) D] = 1;
+                    }
+                    for (size_t r = 0; r < rowbad.size(); r++) if (rowbad[r]) rows_bad++;
+                    if (first != (size_t) -1) {
+                        const size_t row = first / (size_t) D;
+                        printf("   diag dQ: first diff d=%zu i=%zu h=%zu (ref %.9g on %.9g); rows with diffs %zu/%lld; max|diff| %.3g max|ref| %.3g\n",
+                               first % (size_t) D, row % (size_t) S, row / (size_t) S, (double) ref.dq[first], (double) on.dq[first], rows_bad, (long long) (S * Nh), maxabs, maxref);
+                    }
+                }
+            }
+        }
+    }
+    g_saved_causal_hint = false;
+    g_saved_nomask = false;
+    unsetenv("GGML_METAL_FA_TRAIN_DSW"); unsetenv("GGML_METAL_FA_TRAIN_DSW_HKG"); unsetenv("GGML_METAL_FA_TRAIN_DSW_NC"); unsetenv("GGML_METAL_FA_TRAIN_DSW_NSG");
+    printf("\n%s\n", fails ? "dsw-check: FAIL" : "dsw-check: all PASS");
+    return fails ? 1 : 0;
+}
+
 static int run_bench(ggml_backend_t be_cuda) {
     const int64_t S_list[] = { 625, 1250, 3000 };
     const int64_t B = 1, Nh = 32, Nkv = 8, D = 128;
@@ -1433,7 +1732,7 @@ static Result run_case(const Case & c, ggml_backend_t be_ref, ggml_backend_t be_
     // still pass every tolerance above and still make an A/B against
     // --attn exact uninterpretable, so the second run compares the WHOLE packed
     // output — O, LSE, dQ, dK, dV — byte for byte, not just the forward.
-    if (det) {
+    if (det && !getenv("FATTN_SKIP_DET")) {   // FATTN_SKIP_DET=1: debugging aid, see accuracy even when not bitwise
         std::vector<float> fo2, fdq2, fdk2, fdv2, flse2;
         Arm fl2;
         if (!arm_run(fl2, true, with_grads, c, mask_ne1, mask_ne3, hq, hk, hv, hw, hm,
@@ -1718,6 +2017,10 @@ int main(int argc, char ** argv) {
     bool        large = false;
     bool        bench = false;
     bool        bench_tr = false;
+    bool        bench_yue2 = false;
+    bool        saved_check = false;
+    bool        dsw_check   = false;
+    std::string yue2_only;
     int64_t     tr_S   = 625;
     int64_t     tr_enc = 1877;
     double      tr_real = 1.0;
@@ -1755,6 +2058,25 @@ int main(int argc, char ** argv) {
             large = true;
         } else if (a == "--bench") {
             bench = true;
+        } else if (a == "--saved-check") {
+            bench = true;   // shares the bench path's backend setup (--backend is ignored)
+            saved_check = true;
+        } else if (a == "--dsw-check") {
+            bench = true;
+            dsw_check = true;
+        } else if (a == "--bench-yue2") {
+            bench      = true;
+            bench_yue2 = true;
+        } else if (a == "--yue2-only" && i + 1 < argc) {
+            yue2_only = argv[++i];
+        } else if (a == "--yue2-scale" && i + 1 < argc) {
+            g_bench_yue2_scale = atof(argv[++i]);
+            if (g_bench_yue2_scale <= 0.0 || g_bench_yue2_scale > 1.0) g_bench_yue2_scale = 1.0;
+        } else if (a == "--bench-iters" && i + 1 < argc) {
+            g_bench_iters_given = true;
+            g_bench_iters = atoi(argv[++i]);
+            if (g_bench_iters < 1) g_bench_iters = 1;
+            g_bench_warm = g_bench_iters < 10 ? 2 : 10;
         } else if (a == "--bench-tr") {
             bench    = true;
             bench_tr = true;
@@ -1820,8 +2142,8 @@ int main(int argc, char ** argv) {
         } else if (a == "--backend" && i + 1 < argc) {
             want_backend     = argv[++i];
             backend_explicit = true;
-            if (want_backend != "cpu" && want_backend != "cuda" && want_backend != "vulkan") {
-                fprintf(stderr, "[fattn-train-test] --backend takes cpu, cuda or vulkan\n");
+            if (want_backend != "cpu" && want_backend != "cuda" && want_backend != "vulkan" && want_backend != "metal") {
+                fprintf(stderr, "[fattn-train-test] --backend takes cpu, cuda, vulkan or metal\n");
                 return 2;
             }
         } else if (a == "--prec" && i + 1 < argc) {
@@ -1831,8 +2153,11 @@ int main(int argc, char ** argv) {
                 return 2;
             }
         } else {
-            fprintf(stderr, "usage: fattn-train-test [--backend cpu|cuda|vulkan] [--prec f32|tf32] [--extra]"
+            fprintf(stderr, "usage: fattn-train-test [--backend cpu|cuda|vulkan|metal] [--prec f32|tf32] [--extra]"
                             " [--large] [--cheap] [--quick] [--fwd-only] [--threads N] [--bench]\n"
+                            "       [--bench-yue2 [--yue2-only nar|nar-noskip|ar] [--yue2-scale 0.25]] [--bench-iters N]\n"
+                            "       [--dsw-check]     (dS-materialization backward bitwise vs default, GGML_METAL_FA_TRAIN_DSW, Metal)\n"
+                            "       [--saved-check]   (B2: saved forward result in src[4], Metal/any GPU)\n"
                             "       [--bench-lm [--lm-S 1024,2113,3500] [--lm-small] [--lm-nh N]"
                             " [--lm-nkv N] [--lm-gq N] [--lm-layers N]\n"
                             "        [--lm-only manual|blocked|fused]]\n");
@@ -1875,17 +2200,21 @@ int main(int argc, char ** argv) {
         // silently ignored — it used to fall through to
         // ggml_backend_dev_by_type(GPU), which could hand back a Vulkan
         // device under a "CUDA" label with no indication asked for.
-        if (backend_explicit && want_backend != "cuda") {
+        // HOT-Step: --backend metal is the one exception, for the Metal FA-train
+        // checks and benchmarks (--dsw-check, --saved-check, --bench-yue2, ...).
+        if (backend_explicit && want_backend != "cuda" && want_backend != "metal") {
             fprintf(stderr, "[fattn-train-test] --bench only runs the CUDA comparison (its "
                             "tf32 arm is a CUDA tensor-core question); drop --backend or pass "
-                            "--backend cuda\n");
+                            "--backend cuda (or --backend metal for the Metal checks)\n");
             return 2;
         }
         ggml_backend_load_all();
-        ggml_backend_dev_t dev_cuda = find_device_by_prefix("CUDA");
+        const bool bench_metal = (want_backend == "metal");
+        ggml_backend_dev_t dev_cuda = find_device_by_prefix(bench_metal ? "MTL" : "CUDA");
         if (!dev_cuda) {
-            fprintf(stderr, "[fattn-train-test] --bench requires a CUDA backend "
-                            "(is ggml-cuda.dll beside the exe?). Loaded devices:");
+            fprintf(stderr, "[fattn-train-test] --bench requires a %s backend "
+                            "(is ggml-cuda.dll beside the exe?). Loaded devices:",
+                    bench_metal ? "Metal" : "CUDA");
             list_devices(stderr);
             fprintf(stderr, "\n");
             return 2;
@@ -1909,7 +2238,15 @@ int main(int argc, char ** argv) {
             }
         }
         int rc;
-        if (bench_lm) {
+        if (dsw_check) {
+            rc = run_dsw_check(be_cuda);
+        } else if (saved_check) {
+            rc = run_saved_check(be_cuda);
+        } else if (bench_yue2) {
+            // One NAR call is ~5 s fwd + ~20 s bwd per layer: 10+50 iters would be ~30 min per case.
+            if (!g_bench_iters_given) { g_bench_warm = 1; g_bench_iters = 3; }
+            rc = run_bench_yue2(be_cuda, yue2_only.c_str());
+        } else if (bench_lm) {
             rc = run_bench_lm(be_cuda, lm_S, lm_nh, lm_nkv, lm_gq, lm_layers, lm_only.c_str());
         } else if (bench_tr) {
             rc = run_bench_trainer(be_cuda, tr_S, tr_enc, tr_real, tr_only.c_str(), tr_fused_only);
@@ -1938,10 +2275,11 @@ int main(int argc, char ** argv) {
     // not present is a hard failure, not a quiet downgrade to CPU.
     const bool          is_cuda   = (want_backend == "cuda");
     const bool          is_vulkan = (want_backend == "vulkan");
+    const bool          is_metal  = (want_backend == "metal");
     ggml_backend_dev_t  dev_flash = dev;
     ggml_backend_t      be_flash  = be;
-    if (is_cuda || is_vulkan) {
-        const char * prefix = is_cuda ? "CUDA" : "Vulkan";
+    if (is_cuda || is_vulkan || is_metal) {
+        const char * prefix = is_cuda ? "CUDA" : is_vulkan ? "Vulkan" : "MTL";
         dev_flash            = find_device_by_prefix(prefix);
         if (!dev_flash) {
             fprintf(stderr, "[fattn-train-test] no %s backend available (requested --backend %s)."
