@@ -19,7 +19,7 @@ interface SourcePanelProps {
   analysis: AudioAnalysis | null;
   fromDataset?: boolean;
   /** The score's tempo and key when they differ from the dataset song's. */
-  scoreDetails?: { bpm: number; key: string; saving: boolean; onSave: () => void } | null;
+  scoreDetails?: { bpm: number; key: string; saving: boolean; onScale: (by: number) => void; onSave: () => void } | null;
   isUploading: boolean;
   isAnalyzing: boolean;
   onFileSelected: (file: File) => void;
@@ -366,7 +366,12 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
           </div>
           {yue2Mode && <div className="space-y-2">
             {scoreDetails && <div className="flex items-center justify-between gap-2 text-xs text-zinc-600 dark:text-zinc-400">
-              <span>Score: {scoreDetails.bpm} BPM · {scoreDetails.key}</span>
+              <span className="flex items-center gap-1">Score: {scoreDetails.bpm} BPM
+                {[[0.5, '½×', 'Halve'], [2, '2×', 'Double']].map(([by, label, verb]) =>
+                  <button key={label} type="button" onClick={() => scoreDetails.onScale(by as number)} disabled={scoreDetails.saving}
+                    title={`${verb} the tempo that Save to dataset writes`}
+                    className="rounded border border-zinc-300 dark:border-white/10 px-1 text-[10px] disabled:opacity-40">{label}</button>)}
+                · {scoreDetails.key}</span>
               <button type="button" onClick={scoreDetails.onSave} disabled={scoreDetails.saving}
                 title="Replace the dataset song's tempo and key with the score's. The current .txt is kept as a backup."
                 className="text-cyan-700 dark:text-cyan-300 disabled:opacity-40">{scoreDetails.saving ? 'Saving…' : 'Save to dataset'}</button>

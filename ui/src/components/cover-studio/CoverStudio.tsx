@@ -157,6 +157,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [sectionSaving, setSectionSaving] = useState(false);
   const [sectionSaveConfirm, setSectionSaveConfirm] = useState(false);
   const [scoreDetailsSaving, setScoreDetailsSaving] = useState(false);
+  // ½×/2× on the score tempo, for when the transcriber counted half or double time.
+  const [scoreTempoScale, setScoreTempoScale] = useState({ abc: '', factor: 1 });
   const [scoreDetailsConfirm, setScoreDetailsConfirm] = useState(false);
   const [sheetAudioUrl, setSheetAudioUrl] = useState('');
   const [approvedSheet, setApprovedSheet] = useState<{ abc: string; sourceId: string; sourceLabel: string; audioUrl: string; key: string } | null>(null);
@@ -682,12 +684,15 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
   // The score's tempo and key, offered for a dataset song whose .txt differs.
   const scoreBpm = Math.round(Number(sheetAbc.match(/^Q:[^=\r\n]*=\s*(\d+(?:\.\d+)?)/m)?.[1]) || 0);
+  const scoreTempoFactor = scoreTempoScale.abc === sheetAbc ? scoreTempoScale.factor : 1;
+  const scaledScoreBpm = Math.round(scoreBpm * scoreTempoFactor);
+  const scaleScoreTempo = (by: number) => setScoreTempoScale({ abc: sheetAbc, factor: scoreTempoFactor * by });
   const scoreKey = coverScoreKeyLabel(sheetAbc).replace(/(major|minor)$/, m => m[0].toUpperCase() + m.slice(1));
   const scoreDetailsDiffer = yue2Mode && datasetAnalysis && !!analysis && scoreBpm > 0 && !!scoreKey &&
     (Math.round(analysis.bpm) !== scoreBpm || analysis.key.toLowerCase() !== scoreKey.toLowerCase());
   const saveScoreDetails = async () => {
     if (!token || !scoreDetailsDiffer) return;
-    const key = sourceKey, bpm = scoreBpm, musicalKey = scoreKey;
+    const key = sourceKey, bpm = scaledScoreBpm, musicalKey = scoreKey;
     setScoreDetailsSaving(true);
     try {
       await yue2CoverApi.saveDatasetDetails({ ...sectionSource(), bpm, key: musicalKey }, token);
@@ -1037,8 +1042,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           yue2Mode={yue2Mode}
           sourceFileName={sourceFileName} metadata={metadata} analysis={analysis}
           fromDataset={datasetAnalysis}
-          scoreDetails={scoreDetailsDiffer ? { bpm: scoreBpm, key: scoreKey, saving: scoreDetailsSaving,
-            onSave: () => setScoreDetailsConfirm(true) } : null}
+          scoreDetails={scoreDetailsDiffer ? { bpm: scaledScoreBpm, key: scoreKey, saving: scoreDetailsSaving,
+            onScale: scaleScoreTempo, onSave: () => setScoreDetailsConfirm(true) } : null}
           isUploading={isUploading} isAnalyzing={isAnalyzing}
           onFileSelected={handleFileSelected} onClear={handleClearSource}
           bpmCorrection={bpmCorrection} onBpmCorrectionChange={setBpmCorrection}
@@ -1115,7 +1120,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               confirmLabel="Save" onCancel={() => setSectionSaveConfirm(false)}
               onConfirm={() => { setSectionSaveConfirm(false); void saveSectionMatch(); }} />
             <ConfirmDialog isOpen={scoreDetailsConfirm} title="Save tempo and key to dataset"
-              message={`Replace the dataset song’s tempo and key with the score’s (${scoreBpm} BPM, ${scoreKey})? The current .txt is kept as a backup.`}
+              message={`Replace the dataset song’s tempo and key with the score’s (${scaledScoreBpm} BPM, ${scoreKey})? The current .txt is kept as a backup.`}
               confirmLabel="Save" onCancel={() => setScoreDetailsConfirm(false)}
               onConfirm={() => { setScoreDetailsConfirm(false); void saveScoreDetails(); }} />
             {scoreSections.length > 0

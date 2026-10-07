@@ -85,6 +85,8 @@ have to make.
    When a dataset song's tempo or key differs from the score's, Analysis
    shows the score's values with **Save to dataset**. After a confirmation it
    replaces the BPM and key in the song's `.txt`, keeping a backup the same way.
+   If the transcriber counted half or double time, use **½×** or **2×** next
+   to the score tempo first; the button saves the adjusted value.
 5. Choose **Base YuE2** or an explicit AR composer and NAR renderer pair.
    **Score to render** defaults to both the vocal and instrumental lines, no
    chord symbols, free tempo and source key. Choose vocal melody only if you
