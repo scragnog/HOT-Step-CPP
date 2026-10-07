@@ -364,7 +364,8 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
   // The choice has no column to live in, so it is per-generation localStorage.
   // This map is only a render mirror of that: absent means "not touched this
   // session", and the stored value (default Automatic) is read on demand.
-  const mm3Mode = useBackendStore(s => s.activeBackendId) === MM3_BACKEND_ID;
+  const mm3Mode = useBackendStore(s => s.activeBackendId === MM3_BACKEND_ID
+    && (s.capabilities[s.activeBackendId]?.core.captionSource ?? 'mm3-tracks') === 'mm3-tracks');
   const [captionSelections, setCaptionSelections] = useState<Record<number, Mm3CaptionSelection>>({});
 
   // ── YuE2 caption source ──
@@ -381,7 +382,8 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
   //
   // One lookup serves every card; the per-song CHOICE is stored per
   // (dataset, song) instead.
-  const yue2Mode = useBackendStore(s => s.activeBackendId) === YUE2_BACKEND_ID;
+  const yue2Mode = useBackendStore(s => s.activeBackendId === YUE2_BACKEND_ID
+    && (s.capabilities[s.activeBackendId]?.core.captionSource ?? 'yue2-dataset') === 'yue2-dataset');
   const yue2Catalogue = useBackendStore(s => s.models[YUE2_BACKEND_ID] ?? null);
   const fetchBackendModels = useBackendStore(s => s.fetchModels);
   const [yue2Tracks, setYue2Tracks] = useState<Yue2SourceTrack[]>([]);

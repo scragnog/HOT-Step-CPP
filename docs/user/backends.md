@@ -5,6 +5,8 @@ MiniMax-Music3 and YuE2. All three run inside the same C++/GGML engine process, 
 switching between them changes which model's weights are loaded, not which program is
 running. Each one turns a style description and lyrics into a stereo song, but they
 build it differently, accept different inputs, and work with different parts of the app.
+Their capability manifests also declare which Create and Lyric Studio caption source
+picker applies (`none`, MM3 tracks, or YuE2 dataset).
 ACE-Step 1.5 is the default and the only backend that supports every studio.
 YuE2 also supports Cover Studio, through a reviewed lead sheet rather than audio
 conditioning. MiniMax-Music3 is text-to-music only.

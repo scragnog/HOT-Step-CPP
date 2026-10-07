@@ -76,6 +76,7 @@ import {
   play as pbPlay,
 } from './stores/playbackStore';
 import type { Song, GenerationParams } from './types';
+import type { CreateIntent } from '../../server/src/contracts/resolution';
 import { addToPlaylist } from './components/lyric-studio/playlistStore';
 import { DisguiseModeProvider } from './hooks/useDisguiseMode';
 import { ABCompareModal } from './components/shared/ABCompareModal';
@@ -648,7 +649,7 @@ const AppContent: React.FC = () => {
   const globalParams = useGlobalParams();
 
   // Handle generation — merges content params (from CreatePanel) with global engine params (from context)
-  const handleGenerate = useCallback((contentParams: Partial<GenerationParams>) => {
+  const handleGenerate = useCallback((contentParams: Partial<GenerationParams>, contentIntent?: CreateIntent) => {
     if (!token) return;
     // Merge: global engine params + content-specific params + settings
     const engineParams = globalParams.getGlobalParams();
@@ -667,6 +668,10 @@ const AppContent: React.FC = () => {
       enrichedParams,
       token,
       handleSongCreated,
+      contentIntent ? { ...contentIntent, params: { ...engineParams, ...contentIntent.params,
+        source: 'create', coResident: settings.coResident, cacheLmCodes: settings.cacheLmCodes,
+        parallelWhisper: settings.parallelWhisper, parallelQualityEval: settings.parallelQualityEval,
+        parallelCoverArt: settings.parallelCoverArt } } : undefined,
     );
   }, [token, settings, globalParams, handleSongCreated]);
 

@@ -31,6 +31,10 @@ import { ensureMm3SourceTracks } from '../utils/mm3CaptionSource';
 import { normalizeKeyScale } from '../utils/keyScale';
 import { useLmAdapterEnabled } from '../utils/lmAdapterPref';
 import { useBackendStore } from './backendStore';
+import type { CreateIntent, WrittenSongIntent } from '../../../server/src/contracts/resolution';
+import { readMm3CaptionSelection } from '../utils/mm3CaptionSource';
+import { readYue2SongSelection, readYue2DatasetForLyricsSet } from '../utils/yue2CaptionSource';
+import { getUseLlmDuration } from '../utils/estimateDuration';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -849,6 +853,7 @@ export async function enqueueSimpleGen(
   params: Record<string, any>,
   token: string,
   onSongCreated?: (song: any) => void,
+  intent?: CreateIntent,
 ): Promise<void> {
   const title = (params.title as string) || 'Untitled';
   const id = _genId();
@@ -872,7 +877,8 @@ export async function enqueueSimpleGen(
   _emit(true);
 
   try {
-    const res = await generateApi.submit(params as any, token);
+    const preview = intent ? await generateApi.resolveIfSelected(intent, token) : null;
+    const res = await generateApi.submit((preview?.request ?? params) as GenerationParams, token);
     item.jobId = res.jobId;
     item.stage = 'Queued…';
     _emit(true);
@@ -1403,6 +1409,63 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   const snapshot = item.globalParams && Object.keys(item.globalParams).length > 0
     ? item.globalParams
     : useGlobalParamsStore.getState().getGlobalParams();
+  const backendId = useBackendStore.getState().activeBackendId;
+  if ((await generateApi.selectedPath(token)) === 'resolved') {
+    if (backendId === YUE2_BACKEND_ID) await ensureYue2CaptionSource({ lyricsSet: item.lyricsSetId });
+    const appSettings = (() => {
+      try { return JSON.parse(localStorage.getItem('ace-settings') || '{}') as Record<string, unknown>; }
+      catch { return {} as Record<string, unknown>; }
+    })();
+    const storedSetting = (key: string, fallback: string) => {
+      try { return JSON.parse(localStorage.getItem(key) || '') as string; }
+      catch { return fallback; }
+    };
+    const datasetId = backendId === YUE2_BACKEND_ID ? readYue2DatasetForLyricsSet(item.lyricsSetId) : '';
+    const intent: WrittenSongIntent = {
+      kind: 'written-song', engine: backendId, generationId: gen.id,
+      lyricsSetId: item.lyricsSetId,
+      sourceLyricsSetId: item.sourceLyricsSetId,
+      artistName: item.artistName,
+      params: snapshot,
+      settings: {
+        useLlmDuration: getUseLlmDuration(), useLmAdapter: useLmAdapterEnabled(),
+        triggerUseFilename: appSettings.triggerUseFilename === true,
+        triggerPlacement: appSettings.triggerPlacement === 'append' || appSettings.triggerPlacement === 'replace'
+          ? appSettings.triggerPlacement : 'prepend',
+        randomizeTimbreRef: (() => {
+          try { return JSON.parse(localStorage.getItem('lireek-randomizeTimbreRef') || 'false') === true; }
+          catch { return false; }
+        })(),
+        timeSignature: storedSetting('hs-timeSignature', ''),
+        vocalLanguage: storedSetting('hs-vocalLanguage', 'en'),
+        app: appSettings,
+      },
+      ...(backendId === MM3_BACKEND_ID ? { mm3Selection: readMm3CaptionSelection(gen.id) } : {}),
+      ...(datasetId ? { yue2Selection: readYue2SongSelection(datasetId, gen.id,
+        !!yue2CaptionAdapterPath(item.yue2Pick ?? yue2PickAtEnqueue(preset))) } : {}),
+      ...(backendId === YUE2_BACKEND_ID ? {
+        yue2Pick: item.yue2Pick ?? yue2PickAtEnqueue(preset),
+        yue2Defaults: useBackendStore.getState().models[YUE2_BACKEND_ID]?.defaults ?? {},
+      } : {}),
+    };
+    const preview = await generateApi.previewIntent(intent, token);
+    for (const effect of preview.uiEffects) {
+      if (effect.key === 'backendParams.mm3LmAdapter') {
+        try { useGlobalParamsStore.getState().setBackendParam('mm3LmAdapter', effect.value); } catch { /* store not ready */ }
+      } else if (typeof effect.value === 'string' || typeof effect.value === 'boolean') {
+        writePersistedState(effect.key, effect.value);
+      }
+    }
+    item.status = 'generating';
+    item.stage = 'Submitting to audio engine…';
+    _emit(true);
+    const res = await generateApi.submit(preview.request as unknown as GenerationParams, token);
+    item.jobId = res.jobId;
+    _emit(true);
+    if (res.jobId) await lireekApi.linkAudio(gen.id, res.jobId, item.lyricsSetId);
+    await _pollUntilDone(item, token);
+    return;
+  }
   const params: Record<string, any> = { ...snapshot };
 
   // 2) Overlay content fields from the written song
@@ -1419,7 +1482,6 @@ async function _executeItem(item: AudioQueueItem, token: string): Promise<void> 
   // specific track, or the song's own caption (utils/mm3CaptionSource.ts).
   // Items from Create/Cover Studio carry lyricsSetId 0 and simply get the
   // song's own caption.
-  const backendId = useBackendStore.getState().activeBackendId;
   if (backendId === MM3_BACKEND_ID) await ensureMm3SourceTracks(item.lyricsSetId);
   // YuE2's equivalent, in two parts.
   //

@@ -444,7 +444,7 @@ test('create loader: YuE2 by dataset id, MM3 by lyrics set or handed tracks, not
 
 // ── Route ────────────────────────────────────────────────────────────────────
 
-async function withRouter(run: (post: (body: unknown, token?: string) => Promise<Response>) => Promise<void>) {
+async function withRouter(run: (post: (body: unknown, token?: string) => Promise<Response>, pathGet: (token?: string) => Promise<Response>) => Promise<void>) {
   const { sources } = fakeSources();
   const app = express();
   app.use(express.json());
@@ -458,8 +458,29 @@ async function withRouter(run: (post: (body: unknown, token?: string) => Promise
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/resolve/preview`;
   const post = (body: unknown, token?: string) => fetch(url, { method: 'POST',
     headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) });
-  try { await run(post); } finally { await new Promise(resolve => server.close(resolve)); }
+  const pathGet = (token?: string) => fetch(url.replace('/preview', '/path'), {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+  try { await run(post, pathGet); } finally { await new Promise(resolve => server.close(resolve)); }
 }
+
+test('path switch is authenticated and defaults to old unless explicitly resolved', async () => {
+  const previous = process.env.GENERATION_INTENT_PATH;
+  try {
+    await withRouter(async (_post, pathGet) => {
+      delete process.env.GENERATION_INTENT_PATH;
+      assert.equal((await pathGet()).status, 401);
+      assert.deepEqual(await (await pathGet('good')).json(), { path: 'old' });
+      process.env.GENERATION_INTENT_PATH = 'resolved';
+      assert.deepEqual(await (await pathGet('good')).json(), { path: 'resolved' });
+      process.env.GENERATION_INTENT_PATH = 'other';
+      assert.deepEqual(await (await pathGet('good')).json(), { path: 'old' });
+    });
+  } finally {
+    if (previous === undefined) delete process.env.GENERATION_INTENT_PATH;
+    else process.env.GENERATION_INTENT_PATH = previous;
+  }
+});
 
 test('preview route: auth, validation, unknown engine, unknown song, conflicting assertion', async () => {
   await withRouter(async post => {

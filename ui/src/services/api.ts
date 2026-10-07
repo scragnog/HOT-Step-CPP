@@ -5,6 +5,7 @@
 
 import type { Song, UnifiedRecentSong, GenerationParams, GenerationJob, AuthState, AceModels, BrowseEntry, AdapterFile, ModelRegistry } from '../types';
 import { getGenerationTimeoutMinutes } from '../utils/generationTimer';
+import type { ResolveIntent, ResolvePreviewResponse } from '../../../server/src/contracts/resolution';
 
 const BASE = '/api';
 
@@ -211,6 +212,30 @@ function withTimeout(params: GenerationParams): GenerationParams {
 }
 
 export const generateApi = {
+  preview: (intent: ResolveIntent, token: string) =>
+    post<ResolvePreviewResponse>('/resolve/preview', intent, token),
+  /** A missing switch endpoint is an older server and keeps the legacy path. */
+  selectedPath: async (token: string): Promise<'old' | 'resolved'> => {
+    const response = await fetch('/api/resolve/path', { headers: { Authorization: `Bearer ${token}` } });
+    if (response.status === 404) return 'old';
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Cannot read generation path');
+    const { path } = await response.json() as { path: string };
+    return path === 'resolved' ? 'resolved' : 'old';
+  },
+  previewIntent: (intent: ResolveIntent, token: string): Promise<ResolvePreviewResponse> => {
+    const timeout = getGenerationTimeoutMinutes();
+    const params = typeof intent.params.generationTimeoutMinutes === 'number'
+      ? intent.params : { ...intent.params, generationTimeoutMinutes: timeout };
+    const selected = intent.kind === 'written-song'
+      ? { ...intent, params, settings: { ...intent.settings,
+          app: { ...intent.settings?.app, generationTimeoutMinutes:
+            typeof intent.settings?.app?.generationTimeoutMinutes === 'number'
+              ? intent.settings.app.generationTimeoutMinutes : timeout } } }
+      : { ...intent, params };
+    return generateApi.preview(selected, token);
+  },
+  resolveIfSelected: async (intent: ResolveIntent, token: string): Promise<ResolvePreviewResponse | null> =>
+    (await generateApi.selectedPath(token)) === 'resolved' ? generateApi.previewIntent(intent, token) : null,
   submit: (params: GenerationParams, token: string) =>
     post<{ jobId: string; status: string }>('/generate', withTimeout(params), token),
   /** YuE2 score preview: plan the lead sheet only and return it, no audio.

@@ -513,6 +513,7 @@ async function capabilities(): Promise<BackendCapabilities> {
       batch: { max: Math.max(1, Number(props?.max_lm_batch) || 1) },
       seed: true,
       captionFormat: 'freeform',
+      captionSource: 'yue2-dataset',
       timeSignature: false,
       languageMeans: 'lyrics',
       modelsMissing,

@@ -42,6 +42,9 @@ async function capabilities(): Promise<BackendCapabilities> {
       // No auto: the LM is TOLD a length and the FSM aims for it — there is
       // no stop token that ends the song where it wants to end.
       duration: { max: 600, auto: false },
+      captionSource: 'none',
+      timeSignature: true,
+      languageMeans: 'vocal',
       bpm: true,
       keyscale: true,
       negativePrompt: true,

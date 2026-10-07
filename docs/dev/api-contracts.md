@@ -194,6 +194,7 @@ manifest, cached for 10 seconds. If the probe fails it returns an all-false mani
 |---|---|
 | `backend` | Backend id: `ace`, `minimax-m3` or `yue2` |
 | `up` | Whether the backend answered its probe |
+| `core.captionSource` | `none`, `mm3-tracks` or `yue2-dataset`; gates the existing Create and Lyric Studio caption source controls |
 | `core` | Model-agnostic parameters it honours: `duration { max, auto, editable? }`, `bpm`, `keyscale`, `negativePrompt`, `batch { max }`, `seed`, plus backend-declared extras |
 | `features` | One boolean per feature or studio, such as `cover`, `repaint`, `stems`, `streaming`, `adapters`, `lmAdapters`, `lmAdapterSelectable`, `whisper`, `forcedAlignment` |
 | `extensions` | Backend-declared knobs, rendered by the shared plugin-parameter renderer and grouped by `group` (`generation` or `lm`) and optional `section` |
@@ -206,6 +207,14 @@ Shared code should branch on these flags, not on a backend id. The UI does not y
 everywhere; changes to the manifest are proposed separately before they land here.
 
 ## Caption and content resolution
+
+`GET /api/resolve/path` returns `{ "path": "old" | "resolved" }` to an authenticated
+client. The server setting `GENERATION_INTENT_PATH` defaults to `old`; only the exact value
+`resolved` selects the new path. Create and the Lyric Studio written-song queue read this
+before each submission. A missing path endpoint on an older server selects the old path.
+Changing the setting does not replay existing jobs or rewrite browser drafts. A selected
+resolved path previews a typed intent and submits its returned request; preview errors stop
+that submission. The queue remains browser-owned in this slice.
 
 `POST /api/resolve/preview` builds the body Create or the Lyric Studio queue would send to
 `/api/generate`, without queuing anything. Node resolves the caption, wildcards, compose

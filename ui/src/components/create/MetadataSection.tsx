@@ -119,7 +119,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
             before the planner's own ending. Every MM3 render is auto, enforced
             server-side (backends/minimax/generate.ts), and a control whose
             single setting is "Auto" is a control worth removing. */}
-        {!mm3Mode && (
+        {(capabilities?.core.duration.editable ?? !mm3Mode) && (
         <div>
           {durationAuto ? (
             isAutoDuration ? (
@@ -167,7 +167,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
         </div>
 
         {/* Time Signature — no path to MiniMax-Music3 or YuE2, so hidden there */}
-        {!mm3Mode && !yue2Mode && (
+        {(capabilities?.core.timeSignature ?? (!mm3Mode && !yue2Mode)) && (
           <div>
             <ParamLabel
               label={t('metadataSection.timeSig')}
@@ -189,7 +189,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
 
         {/* Vocal Gender — written into the caption's Vocal Details in MM3 mode,
             and nowhere at all on YuE2 */}
-        {!yue2Mode && (
+        {(capabilities?.core.languageMeans !== 'lyrics' || mm3Mode) && (
         <div>
           <ParamLabel
             label={t('metadataSection.vocalGender')}
@@ -215,7 +215,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
         )}
 
         {/* Language — YuE2 infers it from the lyrics; there is no field for it */}
-        {!yue2Mode && (
+        {(capabilities?.core.languageMeans !== 'lyrics' || mm3Mode) && (
         <div className="col-span-2">
           <ParamLabel
             label={mm3Mode ? t('metadataSection.lyricsLanguage') : t('metadataSection.vocalLanguage')}

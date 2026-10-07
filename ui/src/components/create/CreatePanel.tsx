@@ -40,16 +40,18 @@ import { StyledSelect } from '../shared/StyledSelect';
 import { ParamLabel } from '../shared/ParamLabel';
 import { writePersistedState } from '../../hooks/usePersistedState';
 import type { GenerationParams, Song } from '../../types';
+import type { CreateIntent } from '../../../../server/src/contracts/resolution';
 
 interface CreatePanelProps {
-  onGenerate: (params: Partial<GenerationParams>) => void;
+  onGenerate: (params: Partial<GenerationParams>, intent?: CreateIntent) => void;
   activeJobCount: number;
   reuseData?: { song: Song; timestamp: number } | null;
 }
 
 export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobCount, reuseData }) => {
   const { t } = useTranslation();
-  const mm3Mode = useBackendStore(s => s.activeBackendId) === 'minimax-m3';
+  const mm3Mode = useBackendStore(s => s.activeBackendId === 'minimax-m3'
+    && (s.capabilities[s.activeBackendId]?.core.captionSource ?? 'mm3-tracks') === 'mm3-tracks');
 
   // ── AI Generate modal ──
   const [aiModalOpen, setAiModalOpen] = useState(false);
@@ -147,7 +149,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   // dropdown below — and when it is empty this falls back to whatever dataset
   // the engine's resident adapter was trained on, without writing that guess
   // back, so a later handoff still wins outright.
-  const yue2Mode = useBackendStore(s => s.activeBackendId) === YUE2_BACKEND_ID;
+  const yue2Mode = useBackendStore(s => s.activeBackendId === YUE2_BACKEND_ID
+    && (s.capabilities[s.activeBackendId]?.core.captionSource ?? 'yue2-dataset') === 'yue2-dataset');
   const yue2AdapterPath = useBackendStore(
     s => yue2CaptionAdapterPath(s.models[YUE2_BACKEND_ID]?.defaults as Record<string, unknown> | undefined));
   const yue2HasCatalogue = useBackendStore(s => !!s.models[YUE2_BACKEND_ID]);
@@ -465,8 +468,25 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
       void planScore(params, false);
       return;
     }
-    onGenerate(params);
+    onGenerate(params, createIntent(params));
   };
+
+  const createIntent = (legacyParams: Partial<GenerationParams>): CreateIntent => ({
+    kind: 'create',
+    params: { ...legacyParams, caption, lyrics },
+    compose: { autoExpand, loraTrigger, beatIntro, introBars },
+    ...(mm3SourcesActive ? { captionSource: {
+      engine: 'minimax-m3' as const,
+      customCaption: mm3Sources!.customCaption,
+      selection: { mode: mm3Sources!.mode, selectedTitle: mm3Sources!.selectedTitle },
+      tracks: mm3Sources!.tracks,
+    } } : yue2SourcesActive ? { captionSource: {
+      engine: 'yue2' as const,
+      datasetId: yue2Ds.datasetId,
+      adapterInForce: !!yue2AdapterPath,
+      selection: { mode: yue2Selection.mode, selectedName: yue2Selection.selectedName },
+    } } : {}),
+  });
 
   return (
     <div className="h-full flex flex-col bg-zinc-50 dark:bg-suno">
@@ -738,7 +758,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
           const { params, data } = scorePreview;
           setScorePreview({ open: false, params: null, data: null, error: null });
           if (!params || !data) return;
-          onGenerate({ ...params, yue2Abc: data.abc, seed: data.seed, randomSeed: false } as Partial<GenerationParams>);
+          const approved = { ...params, yue2Abc: data.abc, seed: data.seed, randomSeed: false } as Partial<GenerationParams>;
+          onGenerate(approved, createIntent(approved));
         }}
       />
     </div>

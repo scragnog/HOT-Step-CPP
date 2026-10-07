@@ -47,7 +47,8 @@ export interface BackendCoreCapabilities {
   /** `auto`: the backend picks the length itself when none is asked for (MM3's
    *  planner LM stops on its own EOS token). Optional because a manifest cached
    *  from a server older than the flag has no such field. */
-  duration: { max: number; auto?: boolean };
+  duration: { max: number; auto?: boolean; editable?: boolean };
+  captionSource?: 'none' | 'mm3-tracks' | 'yue2-dataset';
   bpm: boolean;
   keyscale: boolean;
   negativePrompt: boolean;

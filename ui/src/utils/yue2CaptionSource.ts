@@ -174,7 +174,7 @@ export function cacheYue2SourceTracks(datasetId: string, tracks: Yue2SourceTrack
   sourceTracks.set(datasetId, tracks);
 }
 
-function readYue2DatasetForLyricsSet(lyricsSetId: number): string {
+export function readYue2DatasetForLyricsSet(lyricsSetId: number): string {
   return _read<string>(YUE2_DATASET_FOR_LYRICS_SET_PREFIX + lyricsSetId) ?? '';
 }
 

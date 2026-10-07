@@ -85,6 +85,10 @@ Adapters and Mastering are not on this page. Both moved to the global parameter 
 ACE-Step songs become playable when generation finishes. MiniMax-Music3 has a separate
 **Play While Rendering** option in its backend controls for listening during a render.
 
+The server selects whether Create submits through its original request builder or its
+generation intent resolver. The switch defaults to the original path; the controls and
+saved form fields work the same way on either path.
+
 Vocal Gender is a dead control everywhere except through Compose Caption on MiniMax-Music3, see
 the Controls table.
 

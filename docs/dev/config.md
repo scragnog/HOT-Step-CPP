@@ -89,6 +89,7 @@ A repo-root `data/` folder is not the live data folder in either layout.
 |---|---|---|---|
 | `SERVER_PORT` | `3001` | Environment, Restart | Port the Node server listens on. The Vite proxy in `ui/vite.config.ts` is hard-coded to `3001`, so dev mode breaks if you change it |
 | `SERVER_HOST` | `0.0.0.0` | env only | Interface the Node server binds to |
+| `GENERATION_INTENT_PATH` | `old` | Environment, Restart | `resolved` sends Create and written-song requests through Node intent resolution; other values keep the legacy client builder |
 | `ACESTEPCPP_PORT` | `8085` | Environment, Restart | Engine port. Passed as `--port`; the server connects to `http://<host>:<port>` |
 | `ACESTEPCPP_HOST` | `127.0.0.1` | Environment, Restart | Engine bind address, passed as `--host`, and the host the server connects to |
 
