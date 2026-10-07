@@ -237,6 +237,26 @@ test('pause stops submissions but keeps following; resume continues; state persi
   assert.equal(h.submits.length, 2);
 });
 
+test('a pause that lands while a submit is held open stops the rest of that pass', async () => {
+  const h = harness();
+  const items = [1, 2, 3].map(seed => h.queue.enqueue({ idempotencyKey: `k${seed}`, request: req({ seed }) }, 'u').item);
+  const release = h.hold();
+  const pass = h.queue.tick();
+  await new Promise(r => setImmediate(r));
+  assert.equal(h.submits.length, 1);           // the first submit is in flight
+  h.queue.setPaused(true);                     // /pause completes now
+  release();
+  await pass;
+  assert.deepEqual(h.submits.map(s => s.body.seed), [1]);
+  assert.equal(h.queue.get(items[0].id).status, 'submitted');
+  assert.deepEqual([items[1], items[2]].map(i => h.queue.get(i.id).status), ['pending', 'pending']);
+  await h.queue.tick();
+  assert.equal(h.submits.length, 1);           // still paused
+  h.queue.setPaused(false);
+  await h.queue.tick();
+  assert.deepEqual(h.submits.map(s => s.body.seed), [1, 2, 3]);
+});
+
 test('at most MAX_IN_FLIGHT are submitted at once; engine not ready stops the pass', async () => {
   const h = harness();
   for (let i = 0; i < MAX_IN_FLIGHT + 2; i++) h.queue.enqueue({ idempotencyKey: `k${i}`, request: req({ seed: i }) }, 'u');

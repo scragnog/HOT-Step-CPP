@@ -281,11 +281,14 @@ export class AudioIntentQueue {
   }
 
   /** Claim, submit, record. Returns true when submission should stop for this
-   *  pass (the engine is not taking work). */
+   *  pass (the engine is not taking work, or the queue was paused meanwhile). */
   private async submitOne(r: Row): Promise<boolean> {
+    // The pause check is part of the claim itself: a pause that lands while
+    // an earlier submit in this pass is awaiting stops every later claim.
     const claim = this.db.prepare(`UPDATE audio_intents SET status = 'submitting', waiting = NULL, updated_at = ?
-      WHERE id = ? AND status = 'pending' AND cancel_requested = 0`).run(this.now(), r.id);
-    if (claim.changes !== 1) return false;
+      WHERE id = ? AND status = 'pending' AND cancel_requested = 0
+        AND NOT EXISTS (SELECT 1 FROM audio_queue_state WHERE key = 'paused' AND value = '1')`).run(this.now(), r.id);
+    if (claim.changes !== 1) return this.paused();
     let result: Awaited<ReturnType<AudioQueueDeps['submit']>>;
     try {
       result = await this.deps.submit(JSON.parse(r.request), r.user_id);
