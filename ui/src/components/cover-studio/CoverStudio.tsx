@@ -28,6 +28,7 @@ import {
   persist, restore, getTrackCache, saveTrackCacheEntry, transposeKey,
   type AudioMetadata, type AudioAnalysis,
 } from './coverStudioUtils';
+import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 import type { LatentMetadata } from '../shared/LatentImport';
 import { loadSelections, saveSelections } from '../lyric-studio/ProviderSelector';
 import { useBackendStore } from '../../stores/backendStore';
@@ -285,6 +286,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => { persist('coverVocalLanguage', vocalLanguage); }, [vocalLanguage]);
   useEffect(() => { persist('coverTimbreOverride', timbreOverridePath); }, [timbreOverridePath]);
   useEffect(() => { persist('sepLevel', sepLevel); }, [sepLevel]);
+  // The editing fields, mirrored into this browser's revisioned server draft.
+  // coverDraftId/Revision stay local: they point at the workflow's cover-draft.
+  const draftError = useStudioDraftMirror('cover', token, { 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel },
+    { ...(sourceAssetId ? { sourceAssetId } : {}), ...(sourceSongId ? { sourceSongId } : {}) });
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 4000); };
 
@@ -1232,6 +1237,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     <BackendCapabilityGate feature="cover">
     <div className="flex flex-col w-full h-full bg-zinc-50 dark:bg-suno overflow-hidden">
       {/* Toast */}
+      {draftError && <p className="px-4 py-1 text-[11px] text-amber-600 dark:text-amber-400">{draftError}</p>}
       {toast && (
         <div className="absolute top-16 right-6 z-50 px-4 py-2 rounded-xl bg-white dark:bg-zinc-900 text-white text-sm shadow-xl border border-zinc-300 dark:border-white/10 animate-in fade-in slide-in-from-top-2">
           {toast}

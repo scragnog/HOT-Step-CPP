@@ -23,6 +23,7 @@ import {
 } from '../../stores/audioGenQueueStore';
 import type { Song } from '../../types';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
+import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 
 // ── Persist helpers (same pattern as CoverStudio) ──
 function persist(key: string, value: unknown) {
@@ -91,6 +92,9 @@ export const RepaintStudio: React.FC = () => {
   useEffect(() => { persist('repaintMode', repaintMode); }, [repaintMode]);
   useEffect(() => { persist('crossfadeFrames', crossfadeFrames); }, [crossfadeFrames]);
   useEffect(() => { persist('styleCaption', styleCaption); }, [styleCaption]);
+  // The same fields, mirrored into this browser's revisioned server draft.
+  const draftError = useStudioDraftMirror('repaint', token, { 'hs-repaint-sourceSong': sourceSong, 'hs-repaint-sourceAssetId': sourceAssetId, 'hs-repaint-sourceAudioUrl': sourceAudioUrl, 'hs-repaint-sourceName': sourceName, 'hs-repaint-regionStart': regionStart, 'hs-repaint-regionEnd': regionEnd, 'hs-repaint-lyrics': lyrics, 'hs-repaint-repaintMode': repaintMode, 'hs-repaint-crossfadeFrames': crossfadeFrames, 'hs-repaint-styleCaption': styleCaption },
+    sourceAssetId ? { sourceAssetId } : {});
 
   useEffect(() => {
     const id = localStorage.getItem('hs-repaint-workflowJob');
@@ -290,6 +294,7 @@ export const RepaintStudio: React.FC = () => {
     <BackendCapabilityGate feature="repaint">
     <div className="flex flex-col w-full h-full bg-zinc-50 dark:bg-suno overflow-hidden">
       {/* Toast */}
+      {draftError && <p className="px-4 py-1 text-[11px] text-amber-600 dark:text-amber-400">{draftError}</p>}
       {toast && (
         <div className="absolute top-16 right-6 z-50 px-4 py-2 rounded-xl bg-white dark:bg-zinc-900 text-white text-sm shadow-xl border border-zinc-300 dark:border-white/10 animate-in fade-in slide-in-from-top-2">
           {toast}

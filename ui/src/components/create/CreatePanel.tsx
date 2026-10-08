@@ -19,6 +19,7 @@ import { CoverArtSubjectSection } from '../shared/CoverArtSubjectSection';
 import { AiGenerateModal, type AiGenerateResult } from './AiGenerateModal';
 import { Mm3ComposeButton } from './Mm3ComposeButton';
 import { TrainingDraftBar } from './TrainingDraftBar';
+import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 import { useBackendStore } from '../../stores/backendStore';
 import { expandWildcards, hasWildcards, randomWildcardSeed } from '../../utils/wildcardUtils';
 import {
@@ -337,6 +338,17 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   // plans the lead sheet first, shows it, and only enqueues the render once
   // the user says Continue — with THAT score and THAT seed pinned.
   const { token } = useAuth();
+  // The form and its caption choices, mirrored into this browser's server draft.
+  const activeBackendId = useBackendStore(s => s.activeBackendId);
+  const draftError = useStudioDraftMirror('create', token, {
+    'hs-caption': caption, 'hs-lyrics': lyrics, 'hs-negative-prompt': negativePrompt, 'hs-instrumental': instrumental,
+    'hs-lora-trigger': loraTrigger, 'hs-beat-intro': beatIntro, 'hs-intro-bars': introBars,
+    'hs-title': title, 'hs-artist': artist, 'hs-subject': subject, 'hs-bpm': bpm, 'hs-keyScale': keyScale,
+    'hs-timeSignature': timeSignature, 'hs-duration': duration, 'hs-vocalLanguage': vocalLanguage,
+    'hs-vocalGender': vocalGender, 'hs-sourceLatentUrl': sourceLatentUrl,
+    'hs-mm3CaptionSources': mm3Sources, 'hs-yue2CaptionDataset': yue2DatasetChoice,
+    ...(yue2Ds.datasetId ? { [`hs-yue2CaptionSource:ds:${yue2Ds.datasetId}`]: yue2Selection } : {}),
+  }, activeBackendId ? { backendId: activeBackendId } : {});
   const yue2PreviewScore = useGlobalParamsStore((s: any) => !!s.backendParams?.yue2PreviewScore);
   const yue2AbcSupplied = useGlobalParamsStore((s: any) => typeof s.backendParams?.yue2Abc === 'string' && !!s.backendParams.yue2Abc.trim());
   const [scorePreview, setScorePreview] = useState<{ open: boolean; params: Partial<GenerationParams> | null; data: Yue2ScorePreviewData | null; error: string | null }>(
@@ -492,6 +504,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   return (
     <div className="h-full flex flex-col bg-zinc-50 dark:bg-suno">
       <TrainingDraftBar />
+      {draftError && <p className="px-4 py-1 text-[11px] text-amber-600 dark:text-amber-400">{draftError}</p>}
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/5">
         <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{t('createPanel.title')}</h2>
