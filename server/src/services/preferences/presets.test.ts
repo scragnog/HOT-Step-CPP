@@ -4,16 +4,15 @@ import Database from 'better-sqlite3';
 import { WorkflowError } from '../workflows/workflowJobs.js';
 import { TypedDocuments, WorkflowDocuments, type TypedDocumentKind } from '../workflows/revisions.js';
 import { getSingleton, importPreset, importSingleton, LOCAL_OWNER, upsertSingleton } from './presets.js';
-import { scaleOverridePresetBodySchema, type ScaleOverridePresetBody } from '../../contracts/preferences.js';
-import { aiContinueTemplateBodySchema, type AiContinueTemplateBody } from '../../contracts/preferences.js';
+import { aiContinuePresetBodySchema, aiContinueTemplateBodySchema, type AiContinuePresetBody, type AiContinueTemplateBody } from '../../contracts/preferences.js';
 
 const uniq = (() => { let n = 0; return () => `t.preset-test-${process.pid}-${n++}`; })();
 const uniqSingleton = (() => { let n = 0; return () => `t.singleton-test-${process.pid}-${n++}`; })();
 
-function presetStore(): TypedDocuments<ScaleOverridePresetBody> {
+function presetStore(): TypedDocuments<AiContinuePresetBody> {
   const db = new Database(':memory:');
-  const def: TypedDocumentKind<ScaleOverridePresetBody> = {
-    kind: uniq(), scope: 'installation', schemaVersion: 1, schema: scaleOverridePresetBodySchema,
+  const def: TypedDocumentKind<AiContinuePresetBody> = {
+    kind: uniq(), scope: 'installation', schemaVersion: 1, schema: aiContinuePresetBodySchema,
   };
   return new TypedDocuments(new WorkflowDocuments(db), db, def);
 }
@@ -24,9 +23,9 @@ function singletonStore(): TypedDocuments<AiContinueTemplateBody> {
   };
   return new TypedDocuments(new WorkflowDocuments(db), db, def);
 }
-const nameOf = (b: ScaleOverridePresetBody) => b.name;
-const preset = (name: string, overallScale = 1): ScaleOverridePresetBody =>
-  ({ name, overallScale, groupScales: { self_attn: 1, cross_attn: 1, mlp: 1, cond_embed: 1 } });
+const nameOf = (b: AiContinuePresetBody) => b.label;
+const preset = (label: string, value: string = 'v1'): AiContinuePresetBody =>
+  ({ label, value });
 
 test('importPreset: a fresh name imports; retrying the same source is a no-op, not a duplicate', () => {
   const td = presetStore();
@@ -41,34 +40,34 @@ test('importPreset: a fresh name imports; retrying the same source is a no-op, n
 
 test('importPreset: same name, different content refuses without a resolution; nothing is written', () => {
   const td = presetStore();
-  importPreset(td, nameOf, { storageKey: 'k1', sourceHash: 'sha256:a', body: preset('Light touch', 0.5) });
-  const conflict = importPreset(td, nameOf, { storageKey: 'k2', sourceHash: 'sha256:b', body: preset('Light touch', 0.9) });
+  importPreset(td, nameOf, { storageKey: 'k1', sourceHash: 'sha256:a', body: preset('Light touch', '0.5') });
+  const conflict = importPreset(td, nameOf, { storageKey: 'k2', sourceHash: 'sha256:b', body: preset('Light touch', '0.9') });
   assert.equal(conflict.outcome, 'name-conflict');
   assert.equal(td.list(LOCAL_OWNER).length, 1);
-  assert.equal(td.list(LOCAL_OWNER)[0]!.body.overallScale, 0.5);
+  assert.equal(td.list(LOCAL_OWNER)[0]!.body.value, '0.5');
 });
 
 test('importPreset: resolution "replace" updates the existing document in place', () => {
   const td = presetStore();
-  const original = importPreset(td, nameOf, { storageKey: 'k1', sourceHash: 'sha256:a', body: preset('Light touch', 0.5) });
+  const original = importPreset(td, nameOf, { storageKey: 'k1', sourceHash: 'sha256:a', body: preset('Light touch', '0.5') });
   const replaced = importPreset(td, nameOf, {
-    storageKey: 'k2', sourceHash: 'sha256:b', body: preset('Light touch', 0.9), resolution: 'replace',
+    storageKey: 'k2', sourceHash: 'sha256:b', body: preset('Light touch', '0.9'), resolution: 'replace',
   });
   assert.equal(replaced.outcome, 'replaced');
   assert.equal(replaced.documentId, original.documentId);
   assert.equal(td.list(LOCAL_OWNER).length, 1);
-  assert.equal(td.list(LOCAL_OWNER)[0]!.body.overallScale, 0.9);
+  assert.equal(td.list(LOCAL_OWNER)[0]!.body.value, '0.9');
 });
 
 test('importPreset: resolution "keep-both" imports a second document under the same name', () => {
   const td = presetStore();
-  importPreset(td, nameOf, { storageKey: 'k1', sourceHash: 'sha256:a', body: preset('Light touch', 0.5) });
+  importPreset(td, nameOf, { storageKey: 'k1', sourceHash: 'sha256:a', body: preset('Light touch', '0.5') });
   const kept = importPreset(td, nameOf, {
-    storageKey: 'k2', sourceHash: 'sha256:b', body: preset('Light touch', 0.9), resolution: 'keep-both',
+    storageKey: 'k2', sourceHash: 'sha256:b', body: preset('Light touch', '0.9'), resolution: 'keep-both',
   });
   assert.equal(kept.outcome, 'imported');
   assert.equal(td.list(LOCAL_OWNER).length, 2);
-  assert.deepEqual(td.list(LOCAL_OWNER).map(d => d.body.overallScale).sort(), [0.5, 0.9]);
+  assert.deepEqual(td.list(LOCAL_OWNER).map(d => d.body.value).sort(), ['0.5', '0.9']);
 });
 
 test('importPreset: a credential-free body that fails its own schema is refused before anything is written', () => {

@@ -1,6 +1,6 @@
 // contracts/preferences.ts — wire schemas for Batch 4 slice 7a: named VST,
-// scale-override, AI-continue and YuE2 joint presets, plus STORM's
-// operational tuning knobs. zod 4; clients import the types.
+// AI-continue and YuE2 joint presets, plus STORM's operational tuning
+// knobs. zod 4; clients import the types.
 //
 // Every kind here is installation-scoped (contracts/workflow.ts
 // DocumentScope): none of the source browser keys carry a user id, so there
@@ -26,22 +26,6 @@ export const vstChainPresetBodySchema = z.object({
   entries: z.array(vstChainPresetEntrySchema).max(500),
 });
 export type VstChainPresetBody = z.infer<typeof vstChainPresetBodySchema>;
-
-// ── Scale override presets (adapter group-scale sliders) ───────────────────
-
-export const scaleGroupScalesSchema = z.object({
-  self_attn: z.number(),
-  cross_attn: z.number(),
-  mlp: z.number(),
-  cond_embed: z.number(),
-}).passthrough(); // a caller may pass extra group scales (e.g. time_embed, proj_in); they survive
-
-export const scaleOverridePresetBodySchema = z.object({
-  name: z.string().min(1).max(200),
-  overallScale: z.number(),
-  groupScales: scaleGroupScalesSchema,
-});
-export type ScaleOverridePresetBody = z.infer<typeof scaleOverridePresetBodySchema>;
 
 // ── AI continue presets (STORM lyric/style continuation) ───────────────────
 //

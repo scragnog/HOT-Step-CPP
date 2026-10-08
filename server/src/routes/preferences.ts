@@ -6,7 +6,7 @@
 //   PUT    /presets/:family/:id          { expectedRevision, body }
 //   DELETE /presets/:family/:id?expectedRevision=N
 //   POST   /presets/:family/import       { items }  batch import, see contracts/preferences.ts
-// family: vst-chain | scale-override | ai-continue-style | ai-continue-lyric | yue2-joint
+// family: vst-chain | ai-continue-style | ai-continue-lyric | yue2-joint
 //
 // Singleton settings families (one current-value document per installation):
 //   GET    /settings/:family                         the document, or { document: null }

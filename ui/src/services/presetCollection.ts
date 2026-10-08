@@ -1,7 +1,6 @@
 // presetCollection.ts — one named-preset family from /api/preferences, as the
-// UI edits it. The VST chain store, the scale-override presets and the AI
-// continue preset modal all render one of these and call its methods; the
-// tests drive the same objects.
+// UI edits it. The VST chain store and the AI continue preset modal render
+// one of these and call its methods; the tests drive the same objects.
 //
 // Rules (Batch 4, 7a):
 // - Entries are keyed by document id (a temporary key until the create

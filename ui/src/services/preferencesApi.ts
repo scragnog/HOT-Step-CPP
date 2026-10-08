@@ -7,13 +7,13 @@
 // per-item outcomes.
 import type {
   AiContinuePresetBody, AiContinueTemplateBody, ImportPreferenceItem, ImportPreferenceResult,
-  ScaleOverridePresetBody, StormTuningBody, VstChainPresetBody, Yue2JointPresetBody,
+  StormTuningBody, VstChainPresetBody, Yue2JointPresetBody,
 } from '../../../server/src/contracts/preferences';
 import type { TypedDocument } from '../../../server/src/contracts/workflow';
 import { WorkflowRequestError } from './workflowApi';
 
 export type { ImportPreferenceItem, ImportPreferenceResult };
-export type PresetFamily = 'vst-chain' | 'scale-override' | 'ai-continue-style' | 'ai-continue-lyric' | 'yue2-joint';
+export type PresetFamily = 'vst-chain' | 'ai-continue-style' | 'ai-continue-lyric' | 'yue2-joint';
 export type SettingsFamily = 'ai-continue-template' | 'storm-tuning';
 
 async function request<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
@@ -57,4 +57,4 @@ export const preferencesApi = {
   },
 };
 
-export type { VstChainPresetBody, ScaleOverridePresetBody, AiContinuePresetBody, AiContinueTemplateBody, Yue2JointPresetBody, StormTuningBody };
+export type { VstChainPresetBody, AiContinuePresetBody, AiContinueTemplateBody, Yue2JointPresetBody, StormTuningBody };

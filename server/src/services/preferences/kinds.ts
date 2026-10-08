@@ -3,17 +3,14 @@
 // before any request; touches no database (registerDocumentKind is pure).
 import { registerDocumentKind, type TypedDocumentKind } from '../workflows/revisions.js';
 import {
-  aiContinuePresetBodySchema, aiContinueTemplateBodySchema, scaleOverridePresetBodySchema,
+  aiContinuePresetBodySchema, aiContinueTemplateBodySchema,
   stormTuningBodySchema, vstChainPresetBodySchema, yue2JointPresetBodySchema,
-  type AiContinuePresetBody, type AiContinueTemplateBody, type ScaleOverridePresetBody,
+  type AiContinuePresetBody, type AiContinueTemplateBody,
   type StormTuningBody, type VstChainPresetBody, type Yue2JointPresetBody,
 } from '../../contracts/preferences.js';
 
 export const VST_CHAIN_PRESET = registerDocumentKind<VstChainPresetBody>({
   kind: 'preferences.vst-chain-preset', scope: 'installation', schemaVersion: 1, schema: vstChainPresetBodySchema,
-});
-export const SCALE_OVERRIDE_PRESET = registerDocumentKind<ScaleOverridePresetBody>({
-  kind: 'preferences.scale-override-preset', scope: 'installation', schemaVersion: 1, schema: scaleOverridePresetBodySchema,
 });
 export const AI_CONTINUE_STYLE_PRESET = registerDocumentKind<AiContinuePresetBody>({
   kind: 'preferences.ai-continue-style-preset', scope: 'installation', schemaVersion: 1, schema: aiContinuePresetBodySchema,
@@ -48,12 +45,11 @@ const erasePreset = <T extends Record<string, unknown>>(def: TypedDocumentKind<T
  *  for import conflict detection. */
 export const PRESET_FAMILIES: Record<string, ErasedPresetFamily> = {
   'vst-chain': erasePreset(VST_CHAIN_PRESET, b => b.name),
-  'scale-override': erasePreset(SCALE_OVERRIDE_PRESET, b => b.name),
   'ai-continue-style': erasePreset(AI_CONTINUE_STYLE_PRESET, b => b.label),
   'ai-continue-lyric': erasePreset(AI_CONTINUE_LYRIC_PRESET, b => b.label),
   'yue2-joint': erasePreset(YUE2_JOINT_PRESET, b => b.name),
 };
-export type PresetFamily = 'vst-chain' | 'scale-override' | 'ai-continue-style' | 'ai-continue-lyric' | 'yue2-joint';
+export type PresetFamily = 'vst-chain' | 'ai-continue-style' | 'ai-continue-lyric' | 'yue2-joint';
 
 /** Singleton families: one document per installation, current value only
  *  (no named collection). Same erasure, no `nameOf`. */

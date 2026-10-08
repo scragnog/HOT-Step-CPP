@@ -200,7 +200,7 @@ For the main generation pipeline instead, use `generateApi` (`api.ts:148+`): `su
 
 ## 6. Shared components inventory (`ui/src/components/shared/`)
 
-`ABCompareModal`, `Accordion`, `ActivitySidebar` (exports **`Section`** — props `title: string`, `icon: ReactNode`, `count?: number`, `countColor?: string`, `defaultOpen?: boolean`, `children`; verified ActivitySidebar.tsx:21-31), `ConfirmDialog`, `CoverArtSubjectSection`, `DiscoPulseWrapper`, `EditableSlider`, `FileBrowserModal`, `HiHatParticles`, `HoverFullText`, `LatentImport`, `ScaleOverridePresets`, `Slider`, `SnareFlashOverlay`, `StemMixer`, `Toast` (`ToastType = 'success' | 'error' | 'info' | 'warning'`), `UnifiedRecentSongs`, `VramIndicator`.
+`ABCompareModal`, `Accordion`, `ActivitySidebar` (exports **`Section`** — props `title: string`, `icon: ReactNode`, `count?: number`, `countColor?: string`, `defaultOpen?: boolean`, `children`; verified ActivitySidebar.tsx:21-31), `ConfirmDialog`, `CoverArtSubjectSection`, `DiscoPulseWrapper`, `EditableSlider`, `FileBrowserModal`, `HiHatParticles`, `HoverFullText`, `LatentImport`, `Slider`, `SnareFlashOverlay`, `StemMixer`, `Toast` (`ToastType = 'success' | 'error' | 'info' | 'warning'`), `UnifiedRecentSongs`, `VramIndicator`.
 
 Hooks (`ui/src/hooks/`): `usePersistedState`, `useEventSource` (SSE), `usePolling`, `useTheme`, `usePluginRegistry`, `useStreamGeneration`, `useDisguiseMode`, `useAssistantActions`.
 
