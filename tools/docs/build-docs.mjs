@@ -7,7 +7,8 @@
 // Outputs:
 //   docs/user/plugins.md          solver / scheduler / guidance / postprocess tables (engine/plugins + plugins/)
 //   docs/user/models.md           model registry tables (server/src/data/model-registry.json)
-//   docs/dev/api.md               HTTP route index (server/src/index.ts mounts + router.<verb> calls)
+//   docs/dev/api.md               HTTP route index (server/src/index.ts mounts + router.<verb> calls,
+//                                 plus the training operation domains registered in services/training)
 //   server/src/data/assistant-knowledge.md   marked blocks refreshed from docs/user
 //
 // Generated regions are delimited by <!-- generated:start NAME --> … <!-- generated:end NAME -->.
@@ -15,7 +16,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CHECK = process.argv.includes('--check');
@@ -95,6 +96,51 @@ function modelTables() {
   return { out, families };
 }
 
+// ── Training operation domains ───────────────────────────────────────────────
+// /api/training/ops/<domain>/... is not a router.<verb> list in routes/: each
+// domain calls registerTrainingOperations('<domain>', mountFn) in
+// server/src/services/training, and mountFn adds its routes to the router it
+// is given. Read those calls. A path built from a loop variable is expanded
+// from the literal array the loop walks; anything else is an error, never a guess.
+function functionBody(src, name, file) {
+  const start = src.search(new RegExp(`function ${name}\\s*\\(`));
+  if (start < 0) throw new Error(`${file}: registerTrainingOperations names ${name}, which is not a function in that file`);
+  let depth = 0;
+  for (let i = src.indexOf('{', src.indexOf(')', start)); i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}' && --depth === 0) return src.slice(start, i + 1);
+  }
+  throw new Error(`${file}: unbalanced braces in ${name}`);
+}
+export function trainingOperationRoutes(root = ROOT) {
+  const at = (p) => path.join(root, p);
+  const index = read(at('server/src/index.ts'));
+  const trainingVar = index.match(/^import (\w+) from '\.\/routes\/training\.js';/m)?.[1];
+  const trainingPrefix = trainingVar && index.match(new RegExp(`^app\\.use\\('([^']+)',\\s*${trainingVar}\\);`, 'm'))?.[1];
+  const opsMount = read(at('server/src/routes/training.ts')).match(/router\.use\('([^']+)',\s*trainingOperationsRouter\)/)?.[1];
+  if (!trainingPrefix || !opsMount) throw new Error('Cannot find the training router mount or its trainingOperationsRouter mount');
+  const rows = [];
+  for (const file of walk(at('server/src/services/training'), (p) => p.endsWith('.ts') && !p.endsWith('.test.ts')).sort()) {
+    const src = read(file);
+    const where = path.relative(root, file).replaceAll('\\', '/');
+    for (const [, domain, mountFn] of src.matchAll(/^registerTrainingOperations\('([a-z][a-z0-9-]*)',\s*(\w+)\)/gm)) {
+      const body = functionBody(src, mountFn, where);
+      for (const m of body.matchAll(/router\.(get|post|put|delete|patch)\(\s*(['"`])([^'"`]*)\2/g)) {
+        const [, verb, quote, raw] = m;
+        let paths = [raw];
+        for (const [token, name] of quote === '`' ? raw.matchAll(/\$\{(\w+)\}/g) : []) {
+          const loop = [...body.slice(0, m.index).matchAll(new RegExp(`for \\(const ${name} of \\[([^\\]]*)\\]`, 'g'))].pop();
+          if (!loop) throw new Error(`${where}: ${verb} ${raw} uses ${token} without a literal loop array`);
+          const values = [...loop[1].matchAll(/'([^']*)'/g)].map((v) => v[1]);
+          paths = paths.flatMap((p) => values.map((value) => p.replaceAll(token, value)));
+        }
+        for (const p of paths) rows.push({ verb: verb.toUpperCase(), path: `${trainingPrefix}${opsMount}/${domain}${p === '/' ? '' : p}`, file: where });
+      }
+    }
+  }
+  return rows;
+}
+
 // ── API routes ───────────────────────────────────────────────────────────────
 function routeIndex() {
   const index = read(path.join(ROOT, 'server/src/index.ts'));
@@ -109,6 +155,11 @@ function routeIndex() {
     const rows = routes.map((r) => [`\`${r.verb}\``, `\`${(prefix + (r.path === '/' ? '' : r.path)) || '/'}\``, `\`${r.file}\``]);
     return `### \`${prefix}\`\n\n${table(['Method', 'Path', 'Defined in'], rows)}`;
   });
+  const ops = trainingOperationRoutes();
+  if (ops.length) {
+    sections.push(`### \`${ops[0].path.slice(0, ops[0].path.indexOf('/ops/') + 4)}\` (training operation domains)\n\n${table(['Method', 'Path', 'Defined in'],
+      ops.map((r) => [`\`${r.verb}\``, `\`${r.path}\``, `\`${r.file}\``]))}`);
+  }
   return { routes: sections.join('\n\n'), count: sections.reduce((n, s) => n + (s.split('\n').length - 4), 0) };
 }
 
@@ -141,6 +192,8 @@ function assistantBlocks(plugins) {
 }
 
 // ── Run ──────────────────────────────────────────────────────────────────────
+// Only when run as a script: importing this file (build-docs.test.mjs) runs nothing.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
 const plugins = pluginTables();
 fill(path.join(ROOT, 'docs/user/plugins.md'), plugins);
 
@@ -169,4 +222,5 @@ if (CHECK) {
   console.log('[build-docs] generated docs are current');
 } else {
   console.log(changed.length ? `[build-docs] updated: ${changed.join(', ')}` : '[build-docs] nothing changed');
+}
 }
