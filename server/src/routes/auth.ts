@@ -6,6 +6,7 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getDb } from '../db/database.js';
+import type { AuthUser, AutoLoginResponse, MeResponse, UsernameUpdateResponse } from '../contracts/auth.js';
 
 const router = Router();
 
@@ -13,14 +14,14 @@ const router = Router();
 const tokens = new Map<string, string>();
 
 /** Get or create the default local user */
-function getOrCreateUser() {
+function getOrCreateUser(): AuthUser {
   const db = getDb();
 
-  let user = db.prepare('SELECT * FROM users LIMIT 1').get() as any;
+  let user = db.prepare('SELECT * FROM users LIMIT 1').get() as AuthUser | undefined;
   if (!user) {
     const id = uuidv4();
     db.prepare('INSERT INTO users (id, username) VALUES (?, ?)').run(id, 'Producer');
-    user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as AuthUser;
   }
   return user;
 }
@@ -36,7 +37,7 @@ function createToken(userId: string): string {
 router.get('/auto', (_req, res) => {
   const user = getOrCreateUser();
   const token = createToken(user.id);
-  res.json({ user, token });
+  res.json({ user, token } satisfies AutoLoginResponse);
 });
 
 // POST /api/auth/setup — set username on first launch
@@ -49,9 +50,9 @@ router.post('/setup', (req, res) => {
 
   const user = getOrCreateUser();
   getDb().prepare('UPDATE users SET username = ? WHERE id = ?').run(username.trim(), user.id);
-  const updated = getDb().prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  const updated = getDb().prepare('SELECT * FROM users WHERE id = ?').get(user.id) as AuthUser;
   const token = createToken(user.id);
-  res.json({ user: updated, token });
+  res.json({ user: updated, token } satisfies UsernameUpdateResponse);
 });
 
 // GET /api/auth/me — get current user
@@ -62,12 +63,12 @@ router.get('/me', (req, res) => {
     return;
   }
   const userId = tokens.get(token)!;
-  const user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  const user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId) as AuthUser | undefined;
   if (!user) {
     res.status(404).json({ error: 'User not found' });
     return;
   }
-  res.json({ user });
+  res.json({ user } satisfies MeResponse);
 });
 
 // PATCH /api/auth/username — update username
@@ -84,9 +85,9 @@ router.patch('/username', (req, res) => {
   }
   const userId = tokens.get(token)!;
   getDb().prepare('UPDATE users SET username = ? WHERE id = ?').run(username.trim(), userId);
-  const user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  const user = getDb().prepare('SELECT * FROM users WHERE id = ?').get(userId) as AuthUser;
   const newToken = createToken(userId);
-  res.json({ user, token: newToken });
+  res.json({ user, token: newToken } satisfies UsernameUpdateResponse);
 });
 
 // POST /api/auth/logout

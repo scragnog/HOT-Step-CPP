@@ -427,19 +427,14 @@ export interface GenerationJob {
   } | null;
 }
 
-/** User profile */
-export interface User {
-  id: string;
-  username: string;
-  bio: string;
-  avatar_url: string;
-  banner_url: string;
-  created_at: string;
-}
+// User profile shape is shared with the server (server/src/contracts/auth.ts)
+// so it can't drift from what GET /api/auth/* actually returns.
+import type { AuthUser } from '../../server/src/contracts/auth';
+export type { AuthUser as User } from '../../server/src/contracts/auth';
 
 /** Auth state from auto-login */
 export interface AuthState {
-  user: User | null;
+  user: AuthUser | null;
   token: string | null;
 }
 
@@ -483,65 +478,12 @@ export interface AdapterFile {
   triggerPosition?: 'prepend' | 'append' | 'replace' | '';
 }
 
-/** Model registry file entry */
-export interface RegistryFile {
-  id: string;
-  filename: string;
-  // 'moss' is the odd one out: an ANALYSIS model (audio -> caption), not a
-  // generation component. It is in this registry because it downloads the same
-  // way, but nothing in the generation pipeline reads it.
-  role: 'dit' | 'lm' | 'embedding' | 'vae' | 'pp-vae' | 'supersep' | 'whisper' | 'stablestep' | 'runtime' | 'mm3' | 'moss' | 'yue2';
-  subdir?: string;
-  displayName: string;
-  scale?: 'standard' | 'xl' | null;
-  variant?: string | null;
-  quant: string;
-  sizeBytes: number;
-  repo: string;
-  description: string;
-  tags: string[];
-  installed: boolean;
-  /** Installed, but not the bytes the registry now describes — the file was
-   *  republished under the same name. Only ever true for entries that declare
-   *  a sha256; everything else has no way to tell. */
-  outdated?: boolean;
-  /** TensorRT builder-resource entries only: the CUDA compute capability
-   *  (MAJOR*10+MINOR, e.g. 120 for Blackwell consumer) this DLL builds
-   *  engines for. Matched against dit_runtime.sm to mark the one a user
-   *  actually needs. Absent on every other entry. */
-  sm?: number;
-  /** Which generation backend this file belongs to (or "shared" across
-   *  several). Drives the top-level family tab in the Model Manager catalogue.
-   *  Optional — a hand-edited or pre-family registry entry falls back to a
-   *  role→family mapping (see ModelCatalogueTab's familyForFile). */
-  family?: 'as1.5' | 'mm3' | 'yue2' | 'shared';
-}
-
-/** Starter pack definition */
-export interface StarterPack {
-  id: string;
-  name: string;
-  description: string;
-  fileIds: string[];
-  /** See RegistryFile.family — same fallback rules when absent. */
-  family?: 'as1.5' | 'mm3' | 'yue2' | 'shared';
-}
-
-/** Model registry response from server */
-export interface ModelRegistry {
-  packs: StarterPack[];
-  files: RegistryFile[];
-  modelsDir: string;
-}
-
-/** Download job status */
-export interface DownloadJob {
-  jobId: string;
-  fileId: string;
-  filename: string;
-  status: 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'cancelled';
-  bytesDownloaded: number;
-  totalBytes: number;
-  speed: number;
-  error?: string;
-}
+// Model registry types (RegistryFile, StarterPack, DownloadJob) and the
+// ModelRegistry response shape are shared with the server — they used to be
+// a second, independently hand-kept copy here, and had already drifted
+// (missing repoPath/sha256/companions, and the registry response's own
+// variant/cudaMajor fields). See server/src/contracts/modelManager.ts.
+export type {
+  RegistryFile, StarterPack, DownloadJob,
+  ModelRegistryResponse as ModelRegistry,
+} from '../../server/src/contracts/modelManager';

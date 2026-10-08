@@ -14,6 +14,7 @@ import http from 'http';
 import { createHash, randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { config, PORTABLE_MODE, PROJECT_ROOT } from '../config.js';
+import type { RegistryFileEntry as RegistryFile, ModelRegistryResponse } from '../contracts/modelManager.js';
 
 // Load registry - resolve path based on mode:
 // - Dev mode: relative to source file (../data/model-registry.json from services/)
@@ -131,45 +132,9 @@ interface InternalJob extends DownloadJob {
   hfToken?: string;   // Optional Hugging Face token for gated repos
 }
 
-/** A small non-model file (license, readme, ...) that should land next to its
- *  parent once the parent finishes downloading. Not tracked as its own job —
- *  no progress/resume, best-effort, generic (not tied to any one model). */
-interface RegistryCompanion {
-  filename: string;
-  repoPath?: string;   // Path within the HuggingFace repo; defaults to filename
-}
-
-interface RegistryFile {
-  id: string;
-  filename: string;
-  role: string;
-  subdir?: string;
-  repoPath?: string;     // Path within the HuggingFace repo (e.g. "runtime/cublas64_13.dll")
-  displayName: string;
-  scale: string | null;
-  variant: string | null;
-  quant: string;
-  sizeBytes: number;
-  /** Optional sha256 of the published file, lowercase hex.
-   *
-   *  Declare it on any entry whose CONTENT can change under a reused
-   *  filename -- a model that gets retrained and republished at the same
-   *  name. Without it the only staleness check is the file's existence, so
-   *  an install that already holds the old bytes keeps them forever while
-   *  fresh installs get the new ones. See _matchesRegistry. */
-  sha256?: string;
-  repo: string;
-  description: string;
-  tags: string[];
-  companions?: RegistryCompanion[];
-  /** TensorRT builder-resource entries only — see ui/src/types.ts RegistryFile
-   *  for the matching UI-side field. */
-  sm?: number;
-  /** Which generation backend (or "shared" across several) this file belongs
-   *  to. Optional — absent on entries added before this field existed; the UI
-   *  falls back to a role→family mapping in that case. */
-  family?: 'as1.5' | 'mm3' | 'yue2' | 'shared';
-}
+// RegistryFile (the catalogue entry, before installed-status enrichment) and
+// RegistryCompanion are imported from contracts/modelManager.ts — that file
+// also documents the companion-file behavior this interface used to.
 
 // ── Service ─────────────────────────────────────────────────
 
@@ -199,7 +164,7 @@ class ModelDownloadService extends EventEmitter {
 
   /** Get all files in the registry, enriched with installed status.
    *  Filters out CUDA-specific entries for non-CUDA engine variants. */
-  getRegistry(): { packs: any[]; files: (RegistryFile & { installed: boolean; outdated: boolean })[]; modelsDir: string; variant: string; cudaMajor: number } {
+  getRegistry(): ModelRegistryResponse {
     const installed = this.getInstalledFiles();
     const isCuda = ENGINE_VARIANT === 'cuda';
     const wrongCudaTag = CUDA_MAJOR <= 12 ? 'cuda13' : 'cuda12';
