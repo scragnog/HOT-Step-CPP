@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronRight, ListOrdered, Code2, Download, Clock, Shuffle, Brain } from 'lucide-react';
 import type { Artist } from '../../services/lireekApi';
-import { TripleProviderSelector, type ModelSelections, loadSelections, saveSelections } from './ProviderSelector';
+import { TripleProviderSelector, type ModelSelections } from './ProviderSelector';
 import { LLM_DURATION_KEY } from '../../utils/estimateDuration';
 import { USE_LM_ADAPTER_KEY } from '../../utils/lmAdapterPref';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
@@ -33,17 +33,18 @@ interface ArtistPageSidebarProps {
   albumCount?: number;
   onOpenQueue: () => void;
   onOpenPromptEditor: () => void;
+  modelSelections: ModelSelections;
+  onModelSelectionsChange: (sel: ModelSelections) => void;
 }
 
 export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
-  artist, albumCount, onOpenQueue, onOpenPromptEditor,
+  artist, albumCount, onOpenQueue, onOpenPromptEditor, modelSelections, onModelSelectionsChange,
 }) => {
   const [imageError, setImageError] = useState(false);
   const { t } = useTranslation();
   const { disguiseArtist, disguiseImageUrl } = useDisguiseMode();
 
   // ── LLM Models ──
-  const [modelSelections, setModelSelections] = useState<ModelSelections>(loadSelections);
   const [llmExpanded, setLlmExpanded] = useState(false);
 
   // ── Download filename prepend ──
@@ -202,10 +203,7 @@ export const ArtistPageSidebar: React.FC<ArtistPageSidebarProps> = ({
             <div className="mt-2 animate-in slide-in-from-top-1 duration-150">
               <TripleProviderSelector
                 selections={modelSelections}
-                onSelectionsChange={(sel) => {
-                  setModelSelections(sel);
-                  saveSelections(sel);
-                }}
+                onSelectionsChange={onModelSelectionsChange}
               />
             </div>
           )}

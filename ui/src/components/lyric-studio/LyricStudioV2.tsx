@@ -43,7 +43,7 @@ import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { QueuePanel } from './QueuePanel';
 import { PromptEditor } from './PromptEditor';
 import { restoreLyricQueue } from '../../stores/streamingStore';
-import { loadSelections } from './ProviderSelector';
+import { loadSelections, saveSelections, type ModelSelections } from './ProviderSelector';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { cacheMm3SourceTracks, collectMm3SourceTracks } from '../../utils/mm3CaptionSource';
 
@@ -120,6 +120,16 @@ export const LyricStudioV2: React.FC = () => {
   const [fetchModalPrefill, setFetchModalPrefill] = useState<string | undefined>();
   const [presetModalOpen, setPresetModalOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
+  // Single source of truth for the provider/model picker: AlbumHeader and
+  // ArtistPageSidebar used to each keep their own copy loaded from
+  // localStorage, so picking a provider there never re-rendered this
+  // component — the tabs/QueuePanel below kept submitting whatever
+  // loadSelections() had returned on LyricStudioV2's last unrelated render.
+  const [modelSelections, setModelSelections] = useState<ModelSelections>(loadSelections);
+  const handleSelectionsChange = useCallback((sel: ModelSelections) => {
+    setModelSelections(sel);
+    saveSelections(sel);
+  }, []);
   const [promptEditorOpen, setPromptEditorOpen] = useState(false);
   const [addArtistModalOpen, setAddArtistModalOpen] = useState(false);
   const [addAlbumModalOpen, setAddAlbumModalOpen] = useState(false);
@@ -634,7 +644,8 @@ export const LyricStudioV2: React.FC = () => {
               </div>
               <div className="flex-1 flex min-h-0">
                 <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden">
-                  <ArtistPageSidebar onOpenQueue={openQueuePanel} onOpenPromptEditor={() => setPromptEditorOpen(true)} />
+                  <ArtistPageSidebar onOpenQueue={openQueuePanel} onOpenPromptEditor={() => setPromptEditorOpen(true)}
+                    modelSelections={modelSelections} onModelSelectionsChange={handleSelectionsChange} />
                 </div>
                 <div className="flex-1 overflow-y-auto">
                   <ArtistGrid
@@ -669,7 +680,8 @@ export const LyricStudioV2: React.FC = () => {
               <div className="flex-1 flex min-h-0">
                 <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden">
                   <ArtistPageSidebar artist={nav.selectedArtist} albumCount={albums.length}
-                    onOpenQueue={openQueuePanel} onOpenPromptEditor={() => setPromptEditorOpen(true)} />
+                    onOpenQueue={openQueuePanel} onOpenPromptEditor={() => setPromptEditorOpen(true)}
+                    modelSelections={modelSelections} onModelSelectionsChange={handleSelectionsChange} />
                 </div>
                 <div className="flex-1 overflow-y-auto">
                   <AlbumGrid
@@ -700,6 +712,7 @@ export const LyricStudioV2: React.FC = () => {
                     artist={nav.selectedArtist} album={nav.selectedAlbum}
                     onBack={handleBackToAlbums} onOpenPreset={() => setPresetModalOpen(true)}
                     profileCount={profiles.length} generationCount={generations.length} songCount={songCount}
+                    modelSelections={modelSelections} onModelSelectionsChange={handleSelectionsChange}
                   />
                 </div>
               </div>
@@ -730,7 +743,7 @@ export const LyricStudioV2: React.FC = () => {
                     {activeTab === 'profiles' && (
                       <ProfilesTab lyricsSetId={nav.selectedAlbum.id} profiles={profiles}
                         onRefresh={refreshAlbumData} showToast={showToast}
-                        profilingModel={loadSelections().profiling} />
+                        profilingModel={modelSelections.profiling} />
                     )}
                     {activeTab === 'written-songs' && (
                       <WrittenSongsTab generations={generations} profiles={profiles}
@@ -745,8 +758,8 @@ export const LyricStudioV2: React.FC = () => {
                           setActiveTab('recordings');
                           pushUrl(nav.selectedArtist?.id, nav.selectedAlbum?.id, 'recordings');
                         }}
-                        showToast={showToast} generationModel={loadSelections().generation}
-                        refinementModel={loadSelections().refinement} />
+                        showToast={showToast} generationModel={modelSelections.generation}
+                        refinementModel={modelSelections.refinement} />
                     )}
                     {activeTab === 'recordings' && (
                       <RecordingsTab
@@ -797,8 +810,8 @@ export const LyricStudioV2: React.FC = () => {
       {/* Queue modal */}
       <QueuePanel open={queueOpen} onClose={() => setQueueOpen(false)}
         artists={artists} lyricsSets={allLyricsSets} profiles={allProfiles}
-        profilingModel={loadSelections().profiling} generationModel={loadSelections().generation}
-        refinementModel={loadSelections().refinement} showToast={showToast}
+        profilingModel={modelSelections.profiling} generationModel={modelSelections.generation}
+        refinementModel={modelSelections.refinement} showToast={showToast}
         onFetchComplete={async () => {
           await loadArtists();
           if (nav.selectedArtist) loadAlbums(nav.selectedArtist.id);

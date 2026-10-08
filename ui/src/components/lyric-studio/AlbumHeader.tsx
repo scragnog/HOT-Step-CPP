@@ -1,7 +1,7 @@
 import React from 'react';
 import { ChevronLeft, ChevronDown, ChevronRight, Settings2, FileText, Users, Music2, Headphones } from 'lucide-react';
 import type { Artist, LyricsSet, SongLyric } from '../../services/lireekApi';
-import { TripleProviderSelector, type ModelSelections, loadSelections, saveSelections } from './ProviderSelector';
+import { TripleProviderSelector, type ModelSelections } from './ProviderSelector';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 
 function parseSongs(songs: SongLyric[] | string): SongLyric[] {
@@ -19,13 +19,15 @@ interface AlbumHeaderProps {
   profileCount?: number;
   generationCount?: number;
   songCount?: number;
+  modelSelections: ModelSelections;
+  onModelSelectionsChange: (sel: ModelSelections) => void;
 }
 
 export const AlbumHeader: React.FC<AlbumHeaderProps> = ({
   artist, album, onBack, onOpenPreset, profileCount = 0, generationCount = 0, songCount = 0,
+  modelSelections, onModelSelectionsChange,
 }) => {
   const [imageError, setImageError] = React.useState(false);
-  const [modelSelections, setModelSelections] = React.useState<ModelSelections>(loadSelections);
   const [llmExpanded, setLlmExpanded] = React.useState(false);
   const songs = parseSongs(album.songs);
   const { disguiseArtist, disguiseAlbum, disguiseImageUrl } = useDisguiseMode();
@@ -131,10 +133,7 @@ export const AlbumHeader: React.FC<AlbumHeaderProps> = ({
           <div className="mt-2 animate-in slide-in-from-top-1 duration-150">
             <TripleProviderSelector
               selections={modelSelections}
-              onSelectionsChange={(sel) => {
-                setModelSelections(sel);
-                saveSelections(sel);
-              }}
+              onSelectionsChange={onModelSelectionsChange}
             />
           </div>
         )}
