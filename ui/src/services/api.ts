@@ -211,6 +211,20 @@ function withTimeout(params: GenerationParams): GenerationParams {
   return { ...params, generationTimeoutMinutes: getGenerationTimeoutMinutes() } as GenerationParams;
 }
 
+/** The same default for an intent the server resolves, in its params and, for
+ *  a written song, its app settings. Values the intent already has stay. */
+export function withIntentTimeout<T extends ResolveIntent>(intent: T): T {
+  const timeout = getGenerationTimeoutMinutes();
+  const params = typeof intent.params.generationTimeoutMinutes === 'number'
+    ? intent.params : { ...intent.params, generationTimeoutMinutes: timeout };
+  return intent.kind === 'written-song'
+    ? { ...intent, params, settings: { ...intent.settings,
+        app: { ...intent.settings?.app, generationTimeoutMinutes:
+          typeof intent.settings?.app?.generationTimeoutMinutes === 'number'
+            ? intent.settings.app.generationTimeoutMinutes : timeout } } }
+    : { ...intent, params };
+}
+
 export const generateApi = {
   preview: (intent: ResolveIntent, token: string) =>
     post<ResolvePreviewResponse>('/resolve/preview', intent, token),
@@ -222,18 +236,8 @@ export const generateApi = {
     const { path } = await response.json() as { path: string };
     return path === 'resolved' ? 'resolved' : 'old';
   },
-  previewIntent: (intent: ResolveIntent, token: string): Promise<ResolvePreviewResponse> => {
-    const timeout = getGenerationTimeoutMinutes();
-    const params = typeof intent.params.generationTimeoutMinutes === 'number'
-      ? intent.params : { ...intent.params, generationTimeoutMinutes: timeout };
-    const selected = intent.kind === 'written-song'
-      ? { ...intent, params, settings: { ...intent.settings,
-          app: { ...intent.settings?.app, generationTimeoutMinutes:
-            typeof intent.settings?.app?.generationTimeoutMinutes === 'number'
-              ? intent.settings.app.generationTimeoutMinutes : timeout } } }
-      : { ...intent, params };
-    return generateApi.preview(selected, token);
-  },
+  previewIntent: (intent: ResolveIntent, token: string): Promise<ResolvePreviewResponse> =>
+    generateApi.preview(withIntentTimeout(intent), token),
   resolveIfSelected: async (intent: ResolveIntent, token: string): Promise<ResolvePreviewResponse | null> =>
     (await generateApi.selectedPath(token)) === 'resolved' ? generateApi.previewIntent(intent, token) : null,
   submit: (params: GenerationParams, token: string) =>

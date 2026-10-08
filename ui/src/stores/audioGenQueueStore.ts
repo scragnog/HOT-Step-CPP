@@ -15,7 +15,7 @@
 
 import { useSyncExternalStore, useEffect, useRef, useCallback } from 'react';
 import { lireekApi } from '../services/lireekApi';
-import { generateApi, songApi, healthApi } from '../services/api';
+import { generateApi, songApi, healthApi, withIntentTimeout } from '../services/api';
 import { useGlobalParamsStore } from './globalParamsStore';
 import { writePersistedState } from '../hooks/usePersistedState';
 import type { Generation, AlbumPreset } from '../services/lireekApi';
@@ -419,38 +419,44 @@ async function resolvedRequestForImport(item: AudioQueueItem, token: string): Pr
   if (item.jobId || item.status === 'succeeded' || item.status === 'failed') return undefined;
   if (item.generation.provider === 'create') return item.globalParams as Record<string, unknown>;
   if (item.generation.id && item.lyricsSetId) {
-    const backendId = typeof item.globalParams.backend === 'string'
-      ? item.globalParams.backend : useBackendStore.getState().activeBackendId;
-    const appSettings = JSON.parse(localStorage.getItem('ace-settings') || '{}') as Record<string, unknown>;
-    const readSetting = (key: string, fallback: string) => {
-      try { return JSON.parse(localStorage.getItem(key) || '') as string; }
-      catch { return fallback; }
-    };
-    const datasetId = backendId === YUE2_BACKEND_ID ? readYue2DatasetForLyricsSet(item.lyricsSetId) : '';
-    const intent: WrittenSongIntent = {
-      kind: 'written-song', engine: backendId, generationId: item.generation.id,
-      lyricsSetId: item.lyricsSetId, sourceLyricsSetId: item.sourceLyricsSetId,
-      artistName: item.artistName, params: item.globalParams,
-      settings: {
-        useLlmDuration: getUseLlmDuration(), useLmAdapter: useLmAdapterEnabled(),
-        triggerUseFilename: appSettings.triggerUseFilename === true,
-        triggerPlacement: appSettings.triggerPlacement === 'append' || appSettings.triggerPlacement === 'replace'
-          ? appSettings.triggerPlacement : 'prepend',
-        randomizeTimbreRef: localStorage.getItem('lireek-randomizeTimbreRef') === 'true',
-        timeSignature: readSetting('hs-timeSignature', ''),
-        vocalLanguage: readSetting('hs-vocalLanguage', 'en'), app: appSettings,
-      },
-      ...(backendId === MM3_BACKEND_ID ? { mm3Selection: readMm3CaptionSelection(item.generation.id) } : {}),
-      ...(datasetId ? { yue2Selection: readYue2SongSelection(datasetId, item.generation.id,
-        !!yue2CaptionAdapterPath(item.yue2Pick ?? yue2PickAtEnqueue(item.preset))) } : {}),
-      ...(backendId === YUE2_BACKEND_ID ? {
-        yue2Pick: item.yue2Pick ?? yue2PickAtEnqueue(item.preset),
-        yue2Defaults: useBackendStore.getState().models[YUE2_BACKEND_ID]?.defaults ?? {},
-      } : {}),
-    };
-    return (await generateApi.previewIntent(intent, token)).request;
+    return (await generateApi.previewIntent(writtenSongIntentFor(item), token)).request;
   }
   throw new Error(`Queue item ${item.id} has no render request; review it before migration`);
+}
+
+/** The written-song intent for a queue item: everything the server resolver
+ *  cannot read itself (browser settings, the backend pick and dials, caption
+ *  selections) captured now. */
+function writtenSongIntentFor(item: AudioQueueItem): WrittenSongIntent {
+  const backendId = typeof item.globalParams.backend === 'string'
+    ? item.globalParams.backend : useBackendStore.getState().activeBackendId;
+  const appSettings = JSON.parse(localStorage.getItem('ace-settings') || '{}') as Record<string, unknown>;
+  const readSetting = (key: string, fallback: string) => {
+    try { return JSON.parse(localStorage.getItem(key) || '') as string; }
+    catch { return fallback; }
+  };
+  const datasetId = backendId === YUE2_BACKEND_ID ? readYue2DatasetForLyricsSet(item.lyricsSetId) : '';
+  return {
+    kind: 'written-song', engine: backendId, generationId: item.generation.id,
+    lyricsSetId: item.lyricsSetId, sourceLyricsSetId: item.sourceLyricsSetId,
+    artistName: item.artistName, params: item.globalParams,
+    settings: {
+      useLlmDuration: getUseLlmDuration(), useLmAdapter: useLmAdapterEnabled(),
+      triggerUseFilename: appSettings.triggerUseFilename === true,
+      triggerPlacement: appSettings.triggerPlacement === 'append' || appSettings.triggerPlacement === 'replace'
+        ? appSettings.triggerPlacement : 'prepend',
+      randomizeTimbreRef: localStorage.getItem('lireek-randomizeTimbreRef') === 'true',
+      timeSignature: readSetting('hs-timeSignature', ''),
+      vocalLanguage: readSetting('hs-vocalLanguage', 'en'), app: appSettings,
+    },
+    ...(backendId === MM3_BACKEND_ID ? { mm3Selection: readMm3CaptionSelection(item.generation.id) } : {}),
+    ...(datasetId ? { yue2Selection: readYue2SongSelection(datasetId, item.generation.id,
+      !!yue2CaptionAdapterPath(item.yue2Pick ?? yue2PickAtEnqueue(item.preset))) } : {}),
+    ...(backendId === YUE2_BACKEND_ID ? {
+      yue2Pick: item.yue2Pick ?? yue2PickAtEnqueue(item.preset),
+      yue2Defaults: useBackendStore.getState().models[YUE2_BACKEND_ID]?.defaults ?? {},
+    } : {}),
+  };
 }
 
 /** Explicit handoff. Browser originals are retained; no server item can run
@@ -765,36 +771,24 @@ let _lastToken: string | null = null;
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
+type LyricQueueOpts = { artistId: number; artistName: string; artistImageUrl?: string; profileId: number; lyricsSetId: number; sourceLyricsSetId?: number };
+
+/** Capture what enqueueAudioGen would send for this song, as an intent the
+ *  server resolves itself (resolveWrittenSongIntent). For server-side bulk
+ *  renders: capture one per song at submit time, resolve each when it runs. */
+export async function captureWrittenSongIntent(
+  gen: Generation, opts: LyricQueueOpts, globalParams: Partial<GenerationParams>,
+): Promise<WrittenSongIntent> {
+  return withIntentTimeout(writtenSongIntentFor(await newLyricQueueItem(gen, opts, globalParams)));
+}
+
 export async function enqueueAudioGen(
   gen: Generation,
-  opts: { artistId: number; artistName: string; artistImageUrl?: string; profileId: number; lyricsSetId: number; sourceLyricsSetId?: number },
+  opts: LyricQueueOpts,
   globalParams: Partial<GenerationParams>,
   token: string,
 ): Promise<void> {
-  let preset: AlbumPreset | null = null;
-  try {
-    const res = await lireekApi.getPreset(opts.lyricsSetId);
-    preset = res.preset;
-  } catch { /* no preset configured */ }
-  // The picker's dials ride in the pick; fetch them if the picker never has.
-  if (!useBackendStore.getState().models[YUE2_BACKEND_ID]) {
-    await useBackendStore.getState().fetchModels(YUE2_BACKEND_ID);
-  }
-
-  const item: AudioQueueItem = {
-    id: _genId(),
-    generation: gen,
-    artistId: opts.artistId,
-    artistName: opts.artistName,
-    artistImageUrl: opts.artistImageUrl,
-    preset,
-    profileId: opts.profileId,
-    lyricsSetId: opts.lyricsSetId,
-    sourceLyricsSetId: opts.sourceLyricsSetId,
-    globalParams,
-    yue2Pick: yue2PickAtEnqueue(preset),
-    status: 'pending',
-  };
+  const item = await newLyricQueueItem(gen, opts, globalParams);
 
   if (queueOwner() === 'migrating') throw new Error('Audio queue migration is in progress');
   if (queueOwner() === 'server') {
@@ -811,6 +805,35 @@ export async function enqueueAudioGen(
   _emit(true);
   _lastToken = token;
   _processQueue(token);
+}
+
+async function newLyricQueueItem(
+  gen: Generation, opts: LyricQueueOpts, globalParams: Partial<GenerationParams>,
+): Promise<AudioQueueItem> {
+  let preset: AlbumPreset | null = null;
+  try {
+    const res = await lireekApi.getPreset(opts.lyricsSetId);
+    preset = res.preset;
+  } catch { /* no preset configured */ }
+  // The picker's dials ride in the pick; fetch them if the picker never has.
+  if (!useBackendStore.getState().models[YUE2_BACKEND_ID]) {
+    await useBackendStore.getState().fetchModels(YUE2_BACKEND_ID);
+  }
+
+  return {
+    id: _genId(),
+    generation: gen,
+    artistId: opts.artistId,
+    artistName: opts.artistName,
+    artistImageUrl: opts.artistImageUrl,
+    preset,
+    profileId: opts.profileId,
+    lyricsSetId: opts.lyricsSetId,
+    sourceLyricsSetId: opts.sourceLyricsSetId,
+    globalParams,
+    yue2Pick: yue2PickAtEnqueue(preset),
+    status: 'pending',
+  };
 }
 
 export function removeFromAudioQueue(id: string): void {
