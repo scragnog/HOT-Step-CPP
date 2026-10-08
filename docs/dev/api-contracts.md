@@ -495,14 +495,23 @@ Jobs and events live in `workflow_jobs` and `workflow_events`, documents in
 ## UI transport client
 
 `ui/src/services/httpClient.ts` is the one configurable client for every route above: a base
-URL (default `/api`), bearer auth, `AbortSignal` cancellation, JSON `get/post/patch/put/delete`,
-a multipart `upload()` (XHR, so it can report progress fetch cannot), `streamUrl()` for an
-EventSource URL under the client's base, and `mediaUrl()` for `/audio` and `/references` src
-attributes. It is the transport underneath `api.ts`; studios with their own client file
-(`lireekApi.ts`, `trainingApi.ts`, `stemStudioApi.ts`, and the other per-studio clients) keep
-their current fetch wrappers and move onto it incrementally in later slices, not in one pass.
-SSE connection sharing is not reimplemented here — `sharedEventSource.ts` already dedupes one
-`EventSource` per URL per tab; this client only builds the URL a caller hands it.
+URL (default `/api`) and a separate `mediaRoot` (default `''`, same origin) for `mediaUrl()`,
+bearer auth, `AbortSignal` cancellation, JSON `get/post/patch/put/delete`, and a multipart
+`upload()` (XHR, so it can report progress fetch cannot). It is the transport underneath
+`api.ts`; studios with their own client file (`lireekApi.ts`, `trainingApi.ts`,
+`stemStudioApi.ts`, and the other per-studio clients) keep their current fetch wrappers and move
+onto it incrementally in later slices, not in one pass.
+
+Two ways to read an SSE route, picked by whether the route checks the bearer token:
+- `eventSourceUrl(path)` + `sharedEventSource.ts` for routes that don't (model-manager download
+  progress, logs) — `EventSource` cannot set a header, so this is honest about carrying no auth
+  rather than smuggling a token into the query string, which `getUserId` (`routes/auth.ts`)
+  would not read anyway.
+- `streamEvents(path, onData, opts)` for routes that do — a `fetch` with `Authorization`,
+  reading the response body and splitting `data:` frames the same way `workflowApi.ts`'s
+  `followJob` already does for `/api/workflows`. `onData` gets each frame's raw payload; this
+  method does no protocol-specific parsing of its own. Cancellable via `opts.signal`, unlike
+  `sharedEventSource`'s auto-reconnecting streams.
 
 Every non-OK response throws `ApiError(status, message, body, currentRevision?, reason?)` — a
 superset of `workflowApi.ts`'s `WorkflowRequestError`, so a revisioned caller (document/job
@@ -518,3 +527,34 @@ error shape (`builderOp`'s `WorkflowRequestError`, the post-processing endpoints
 flag, `vstApi.updateChain`'s no-throw `.then(r => r.json())`) are left untouched rather than
 folded in and risking a silent behavior change; they are candidates for a later slice once each
 one's special case has an equivalent on `ApiError` or its own typed subclass.
+
+### Shared contracts for legacy routes
+
+Most domains below already have a `server/src/contracts/*.ts` module the client imports types
+from. Two routes that predate that pattern had drifted into two independently hand-kept
+copies of the same shape — exactly the bug class shared contracts exist to prevent:
+
+- **Auth** (`server/src/routes/auth.ts`, `server/src/contracts/auth.ts`). `GET /api/auth/auto`
+  returns `AutoLoginResponse` (`{ user, token }`); `GET /me` returns `MeResponse` (`{ user }`,
+  `401`/`404` on a missing/unknown token); `POST /setup` and `PATCH /username` both return
+  `UsernameUpdateResponse` (`{ user, token }` — username changes mint a fresh token). `AuthUser`
+  is the `users` table row (`id`, `username`, `bio`, `avatar_url`, `banner_url`, `created_at`).
+  `ui/src/types.ts`'s `User`/`AuthState` now re-export `AuthUser` instead of keeping their own
+  copy.
+- **Model manager** (`server/src/routes/modelManager.ts`,
+  `server/src/contracts/modelManager.ts`). `GET /registry` returns `ModelRegistryResponse`
+  (`{ packs, files, modelsDir, variant, cudaMajor }`); `files` are `RegistryFile` — a catalogue
+  `RegistryFileEntry` (`id`, `role`, `displayName`, `scale`, `variant`, `quant`, `sizeBytes`,
+  `sha256?`, `companions?`, `sm?`, `family?`, ...) plus this install's `installed`/`outdated`.
+  `POST /download` returns `DownloadStartResponse` (`{ jobId }`); `GET /downloads` streams
+  `{ jobs: DownloadJob[] }` frames (unauthenticated, via `eventSourceUrl`/`sharedEventSource`);
+  `POST /download/:id/{cancel,resume}` and `DELETE /files/:filename` are untyped acks, unchanged.
+  `ui/src/types.ts` previously kept a second, hand-written `RegistryFile`/`StarterPack` pair that
+  was missing `repoPath`, `sha256` and `companions`, and a `ModelRegistry` missing `variant` and
+  `cudaMajor` — nothing currently reads those gaps, but a future consumer would have silently
+  gotten `undefined`. It now re-exports the server's types instead of keeping its own.
+
+Other legacy inline-shaped routes (`health`, `shutdown`, `settings`, `profiles`, `mastering`,
+`adapters`, `vst`, `seeds`) have the same pattern — an ad-hoc inline type in `api.ts` with no
+server-side counterpart — and are left for a later slice; `api.ts`'s per-call inline types for
+them are unchanged here.
