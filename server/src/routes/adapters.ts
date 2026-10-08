@@ -10,6 +10,7 @@ import path from 'path';
 import { config } from '../config.js';
 import { readAdapterTrigger } from '../services/adapters/stMetadata.js';
 import { lmAdapterRoots } from '../services/training/adapterLayout.js';
+import type { BrowseResponse, BrowseErrorResponse, ScanResponse, LmAdapterEntry, LmAdaptersResponse } from '../contracts/adapters.js';
 
 const router = Router();
 
@@ -47,7 +48,7 @@ router.get('/browse', (req, res) => {
 
   // Verify path exists and is a directory
   if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
-    res.status(404).json({ error: 'Directory not found', current: dirPath, entries: [] });
+    res.status(404).json({ error: 'Directory not found', current: dirPath, entries: [] } satisfies BrowseErrorResponse);
     return;
   }
 
@@ -86,9 +87,9 @@ router.get('/browse', (req, res) => {
       }
     }
 
-    res.json({ current: dirPath, entries });
+    res.json({ current: dirPath, entries } satisfies BrowseResponse);
   } catch (err: any) {
-    res.status(500).json({ error: err.message, current: dirPath, entries: [] });
+    res.status(500).json({ error: err.message, current: dirPath, entries: [] } satisfies BrowseErrorResponse);
   }
 });
 
@@ -113,13 +114,13 @@ router.get('/browse', (req, res) => {
 router.post('/scan', (req, res) => {
   const folder = req.body?.folder;
   if (!folder || typeof folder !== 'string') {
-    res.json({ files: [] });
+    res.json({ files: [] } satisfies ScanResponse);
     return;
   }
 
   const dirPath = path.resolve(folder);
   if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
-    res.json({ files: [] });
+    res.json({ files: [] } satisfies ScanResponse);
     return;
   }
 
@@ -188,9 +189,9 @@ router.post('/scan', (req, res) => {
     }
     files.sort((a, b) => a.name.localeCompare(b.name));
 
-    res.json({ files });
+    res.json({ files } satisfies ScanResponse);
   } catch {
-    res.json({ files: [] });
+    res.json({ files: [] } satisfies ScanResponse);
   }
 });
 
@@ -208,22 +209,7 @@ router.post('/scan', (req, res) => {
  */
 router.get('/lm', (req, res) => {
   const folderParam = (req.query.folder as string) || '';
-  type LmAdapterEntry = {
-    name: string; path: string; kind: 'peft' | 'lokr' | 'safetensors'; size: number; mtime: number;
-    /** '0.6B' | '1.7B' | '4B' — from the lm-<size> parent folder, else the
-     *  legacy -<size> name suffix, else ''. */
-    lmSize: string;
-    /** Training-run stamp (YYYY-MM-DD_HH-MM-SS subfolder); '' for an
-     *  unversioned/legacy adapter. Every run of an artist is listed. */
-    run: string;
-    trigger: string; triggerPosition: 'prepend' | 'append' | 'replace' | '';
-    /** From the dir's hot_step_eval.json sidecar (lm-adapter-rollout.ts):
-     *  marginal+transition JS distance to the artist's ground truth — LOWER =
-     *  closer to the artist. null when the adapter was never evaluated. */
-    evalScore: number | null;
-    /** 'toward' | 'away' | 'inconclusive' | '' — the eval verdict. */
-    evalVerdict: string;
-  };
+  // LmAdapterEntry is now contracts/adapters.ts's shared definition.
   const adapters: LmAdapterEntry[] = [];
 
   const readEvalSidecar = (dir: string): { evalScore: number | null; evalVerdict: string } => {
@@ -309,9 +295,9 @@ router.get('/lm', (req, res) => {
     // Alphabetical by artist; within an artist, newest run first.
     adapters.sort((a, b) =>
       a.name.localeCompare(b.name) || a.lmSize.localeCompare(b.lmSize) || b.run.localeCompare(a.run));
-    res.json({ root, adapters });
+    res.json({ root, adapters } satisfies LmAdaptersResponse);
   } catch (err: any) {
-    res.json({ root: folderParam || config.aceServer.adapters, adapters: [], error: err.message });
+    res.json({ root: folderParam || config.aceServer.adapters, adapters: [], error: err.message } satisfies LmAdaptersResponse);
   }
 });
 

@@ -16,6 +16,9 @@ import { config, getFFmpegPath } from '../config.js';
 import { getUserId } from './auth.js';
 import { precomputePeaks } from '../services/audio/peaks.js';
 import { getDb } from '../db/database.js';
+import type {
+  UploadReferenceResponse, ListReferencesResponse, DeleteReferenceResponse, RunMasteringResponse,
+} from '../contracts/mastering.js';
 
 const execFileAsync = promisify(execFile);
 const router = Router();
@@ -216,7 +219,7 @@ router.post('/upload-reference', upload.single('file'), async (req, res) => {
       name: finalName,
       path: finalPath,
       url: `/references/${finalName}`,
-    });
+    } satisfies UploadReferenceResponse);
   } catch (err: any) {
     console.error(`[Mastering] Upload failed:`, err.message);
     // Clean up temp file on error
@@ -238,9 +241,9 @@ router.get('/references', (_req, res) => {
         size: fs.statSync(path.join(refsDir, f)).size,
         url: `/references/${f}`,
       }));
-    res.json({ references: files });
+    res.json({ references: files } satisfies ListReferencesResponse);
   } catch {
-    res.json({ references: [] });
+    res.json({ references: [] } satisfies ListReferencesResponse);
   }
 });
 
@@ -263,7 +266,7 @@ router.delete('/references/:name', (req, res) => {
 
   fs.unlinkSync(filePath);
   console.log(`[Mastering] Reference deleted: ${req.params.name}`);
-  res.json({ ok: true });
+  res.json({ ok: true } satisfies DeleteReferenceResponse);
 });
 
 // ── POST /run — Run mastering on existing song ──────────────
@@ -320,7 +323,7 @@ router.post('/run', async (req, res) => {
       ok: true,
       masteredUrl,
       songId,
-    });
+    } satisfies RunMasteringResponse);
   } catch (err: any) {
     console.error(`[Mastering] Failed:`, err.message);
     res.status(500).json({ error: err.message });
