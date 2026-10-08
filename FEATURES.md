@@ -91,7 +91,7 @@ Everything runs on a copy of the render, in a fixed order, under one master swit
 | PP-VAE re-encode | Second autoencoder pass against fizz, with an original-blend slider and an ONNX/TensorRT path. |
 | Spectral Lifter | Denoise, noise floor, high-frequency extension, transient boost and shimmer reduction. |
 | Vocal Naturalizer | Experimental five-stage DSP pass against robotic vocal artefacts, skipped on instrumentals. |
-| VST3 chain | Your own VST3 plugins, reorderable, with native editor windows, presets, live monitoring and a pre-chain gain offset. |
+| VST3 chain | Your own VST3 plugins, reorderable, with native editor windows, presets, live monitoring and a pre-chain gain offset. Named chain presets save with server revisions; an older browser preset set is imported once and kept as a fallback. |
 | Mastering | Matches level, EQ and dynamics to a reference track, which can double as the timbre reference. |
 | Final normalizer | LUFS targets for streaming, broadcast or club playback with a look-ahead peak limiter. |
 | Whisper lyrics | Word-level lyric transcription, guided by your lyrics, optionally on an isolated vocal. |
@@ -269,7 +269,7 @@ Live streaming performance with crossfaded slots. Requires the ACE-Step backend.
 | Live controls | Change style, lyrics, seed, BPM, guidance, steps and length for the next slot without stopping. |
 | Sticky fields | Pin a style or lyric change so it stays for every following slot. |
 | Lyric advance | Loop, cycle or shuffle through lyric sections as slots play. |
-| AI continuation | An external LLM continues the lyrics every 1, 2 or 4 slots. |
+| AI continuation | An external LLM continues the lyrics every 1, 2 or 4 slots. Named style/lyric direction presets and the prompt template save with server revisions; an older browser preset set is imported once and kept as a fallback. |
 | Stream sampler overrides | Per-stream solver, scheduler and guider, changeable live. |
 | Buffering | Crossfade length in beats and a maximum look-ahead buffer. |
 | DJ mode | Two decks with a crossfader, Camelot key compatibility, cuts, nudges and beat quantize. |

@@ -223,6 +223,12 @@ Three upstream files carry `#include` hooks into HOT-Step code (`pipeline-synth-
   Tables include `songs`, `playlists`, `artists`, `lyrics_sets`, `profiles`, `generations`,
   `settings`, `album_presets`, `builder_projects`, `training_datasets` and others; the schema
   is in `server/src/db/database.ts`.
+- `workflow_documents` holds typed, schema-versioned, optimistically-revisioned client state:
+  named VST/scale/AI-continue/YuE2-joint presets, STORM tuning, ordered playlist snapshots and
+  Create/Cover/Repaint/STORM/Stem drafts (`server/src/services/workflows/revisions.ts`,
+  `server/src/services/preferences/`, `server/src/services/studioDrafts/`). A browser's legacy
+  `localStorage` copy is imported into it once, by exact key and content hash
+  (`document_import_receipts`), never overwritten afterward.
 - Files under the data dir: `audio/` (outputs), `references/`, `vst/` (`chain.json`,
   `states/`), `lyrics/` (exports), `training/`.
 - A git checkout may also have a repo-root `data/` folder. It is not the live data dir.

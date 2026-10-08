@@ -5,17 +5,39 @@
 
 import { create } from 'zustand';
 import { vstApi, type VstPlugin, type VstChainEntry } from '../services/api';
+import { hashImportValue, preferencesApi, type VstChainPresetBody } from '../services/preferencesApi';
 
-// ── Preset helpers (named chain snapshots, persisted to localStorage) ────────
+// ── Preset helpers (named chain snapshots) ───────────────────────────────────
+//
+// Presets now live on the server (preferences.vst-chain-preset, installation
+// scope — one shared owner per machine, same as the active chain). The
+// browser key is kept as a one-time import source and is never written to
+// again; `presets` is hydrated from the server on first use.
 
 const PRESETS_KEY = 'vst-chain-presets';
+const MIGRATED_FLAG = 'vst-chain-presets:server-migrated';
 
-function loadPresetsFromStorage(): Record<string, VstChainEntry[]> {
+function loadLegacyPresetsFromStorage(): Record<string, VstChainEntry[]> {
   try { return JSON.parse(localStorage.getItem(PRESETS_KEY) || '{}'); } catch { return {}; }
 }
 
-function savePresetsToStorage(presets: Record<string, VstChainEntry[]>): void {
-  try { localStorage.setItem(PRESETS_KEY, JSON.stringify(presets)); } catch {}
+/** Import every legacy localStorage preset once (per name+content). Runs at
+ *  most once per browser profile; failures are retried on the next load
+ *  since the flag is only set after the import call returns. */
+async function importLegacyPresetsOnce(): Promise<void> {
+  if (localStorage.getItem(MIGRATED_FLAG)) return;
+  const legacy = loadLegacyPresetsFromStorage();
+  const names = Object.keys(legacy);
+  if (names.length > 0) {
+    const items = await Promise.all(names.map(async name => {
+      const body: VstChainPresetBody = { name, entries: legacy[name]! as VstChainPresetBody['entries'] };
+      const raw = JSON.stringify(body);
+      return { storageKey: `${PRESETS_KEY}:${name}`, sourceHash: await hashImportValue(raw), name, body };
+    }));
+    // A name collision from a prior partial import keeps both rather than guessing which is current.
+    await preferencesApi.presets.import('vst-chain', items.map(i => ({ ...i, resolution: 'keep-both' as const })));
+  }
+  try { localStorage.setItem(MIGRATED_FLAG, '1'); } catch {}
 }
 
 interface VstChainState {
@@ -41,8 +63,11 @@ interface VstChainState {
   // track currently loaded in monitor — needed for restart
   monitorTrackPath: string;
 
-  // Named chain snapshots — persisted to localStorage
+  // Named chain snapshots — persisted server-side (preferences.vst-chain-preset)
   presets: Record<string, VstChainEntry[]>;
+  presetsLoaded: boolean;
+  /** Document id + revision per preset name, for update/delete. Not public API. */
+  presetDocs: Record<string, { id: string; revision: number }>;
 
   // Actions
   scanPlugins: () => Promise<void>;
@@ -62,9 +87,10 @@ interface VstChainState {
   switchMonitorTrack: (trackPath: string) => Promise<void>;
   seekMonitor: (position: number) => Promise<void>;
   pollMonitorStatus: () => Promise<void>;
-  savePreset: (name: string) => void;
+  loadPresets: () => Promise<void>;
+  savePreset: (name: string) => Promise<void>;
   loadPreset: (name: string) => Promise<void>;
-  deletePreset: (name: string) => void;
+  deletePreset: (name: string) => Promise<void>;
 }
 
 export const useVstChainStore = create<VstChainState>((set, get) => ({
@@ -80,7 +106,23 @@ export const useVstChainStore = create<VstChainState>((set, get) => ({
   monitorPosition: 0,
   monitorDuration: 0,
   monitorTrackPath: '',
-  presets: loadPresetsFromStorage(),
+  presets: loadLegacyPresetsFromStorage(),
+  presetsLoaded: false,
+  presetDocs: {},
+
+  loadPresets: async () => {
+    try {
+      await importLegacyPresetsOnce();
+      const { documents } = await preferencesApi.presets.list<VstChainPresetBody>('vst-chain');
+      const presets: Record<string, VstChainEntry[]> = {};
+      const presetDocs: Record<string, { id: string; revision: number }> = {};
+      for (const d of documents) { presets[d.body.name] = d.body.entries; presetDocs[d.body.name] = { id: d.id, revision: d.revision }; }
+      set({ presets, presetDocs, presetsLoaded: true });
+    } catch (err) {
+      console.error('[VST] Failed to load presets:', err);
+      set({ presetsLoaded: true });
+    }
+  },
 
   scanPlugins: async () => {
     set({ scanning: true, scanError: null });
@@ -278,11 +320,20 @@ export const useVstChainStore = create<VstChainState>((set, get) => ({
     }
   },
 
-  savePreset: (name: string) => {
-    const { chain, presets } = get();
-    const newPresets = { ...presets, [name]: chain.map(p => ({ ...p })) };
-    set({ presets: newPresets });
-    savePresetsToStorage(newPresets);
+  savePreset: async (name: string) => {
+    const { chain, presets, presetDocs } = get();
+    const entries = chain.map(p => ({ ...p }));
+    set({ presets: { ...presets, [name]: entries } });
+    try {
+      const existing = presetDocs[name];
+      const body: VstChainPresetBody = { name, entries };
+      const { document } = existing
+        ? await preferencesApi.presets.update('vst-chain', existing.id, existing.revision, body)
+        : await preferencesApi.presets.create('vst-chain', body);
+      set(s => ({ presetDocs: { ...s.presetDocs, [name]: { id: document.id, revision: document.revision } } }));
+    } catch (err) {
+      console.error('[VST] Failed to save preset:', err);
+    }
   },
 
   loadPreset: async (name: string) => {
@@ -298,11 +349,20 @@ export const useVstChainStore = create<VstChainState>((set, get) => ({
     }
   },
 
-  deletePreset: (name: string) => {
-    const { presets } = get();
+  deletePreset: async (name: string) => {
+    const { presets, presetDocs } = get();
     const newPresets = { ...presets };
     delete newPresets[name];
     set({ presets: newPresets });
-    savePresetsToStorage(newPresets);
+    const existing = presetDocs[name];
+    if (!existing) return;
+    try {
+      await preferencesApi.presets.remove('vst-chain', existing.id, existing.revision);
+      set(s => { const docs = { ...s.presetDocs }; delete docs[name]; return { presetDocs: docs }; });
+    } catch (err) {
+      console.error('[VST] Failed to delete preset:', err);
+    }
   },
 }));
+
+useVstChainStore.getState().loadPresets();

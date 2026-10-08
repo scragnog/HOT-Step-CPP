@@ -3,6 +3,7 @@
 
 import React from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
+import { hashImportValue, preferencesApi, type AiContinuePresetBody, type AiContinueTemplateBody } from '../../services/preferencesApi';
 
 // ── Preset types ──────────────────────────────────────────────────────────────
 export interface AiPreset {
@@ -51,18 +52,78 @@ Existing lyrics:
 const TEMPLATE_KEY    = 'hs-ai-continue-template';
 const USER_STYLE_KEY  = 'hs-ai-continue-user-style';
 const USER_LYRIC_KEY  = 'hs-ai-continue-user-lyric';
+const PRESET_FAMILY: Record<PresetCategory, 'ai-continue-style' | 'ai-continue-lyric'> = {
+  style: 'ai-continue-style', lyric: 'ai-continue-lyric',
+};
+const MIGRATED_FLAG: Record<PresetCategory, string> = {
+  style: `${USER_STYLE_KEY}:server-migrated`, lyric: `${USER_LYRIC_KEY}:server-migrated`,
+};
 
-function loadUserPresets(key: string): AiPreset[] {
+function loadLegacyUserPresets(key: string): AiPreset[] {
   try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
 }
-function saveUserPresets(key: string, presets: AiPreset[]) {
-  try { localStorage.setItem(key, JSON.stringify(presets)); } catch {}
+
+interface PresetDoc { id: string; revision: number; preset: AiPreset }
+
+/** Named presets now live server-side (preferences.ai-continue-{style,lyric}-preset,
+ *  installation scope). The legacy browser keys are imported once and kept,
+ *  but no longer written to. */
+async function loadServerPresets(category: PresetCategory): Promise<PresetDoc[]> {
+  const family = PRESET_FAMILY[category];
+  const flag = MIGRATED_FLAG[category];
+  if (!localStorage.getItem(flag)) {
+    const legacy = loadLegacyUserPresets(category === 'style' ? USER_STYLE_KEY : USER_LYRIC_KEY);
+    if (legacy.length > 0) {
+      const items = await Promise.all(legacy.map(async p => {
+        const body: AiContinuePresetBody = { label: p.label, value: p.value };
+        return { storageKey: `${category === 'style' ? USER_STYLE_KEY : USER_LYRIC_KEY}:${p.id}`, sourceHash: await hashImportValue(JSON.stringify(body)), name: p.label, body, resolution: 'keep-both' as const };
+      }));
+      await preferencesApi.presets.import(family, items);
+    }
+    try { localStorage.setItem(flag, '1'); } catch {}
+  }
+  const { documents } = await preferencesApi.presets.list<AiContinuePresetBody>(family);
+  return documents.map(d => ({ id: d.id, revision: d.revision, preset: { id: d.id, label: d.body.label, value: d.body.value } }));
 }
+
+/** The continuation prompt template. `loadTemplate`/synchronous localStorage
+ *  stays the fast path for other readers (StormLiveControls.tsx); the server
+ *  document (preferences.ai-continue-template) is the durable copy this
+ *  modal keeps in sync on every change and imports from once. */
 export function loadTemplate(): string {
   try { return localStorage.getItem(TEMPLATE_KEY) || DEFAULT_TEMPLATE; } catch { return DEFAULT_TEMPLATE; }
 }
-function saveTemplate(t: string) {
+function saveTemplateLocal(t: string) {
   try { localStorage.setItem(TEMPLATE_KEY, t); } catch {}
+}
+let templateDoc: { id: string; revision: number } | null = null;
+async function syncTemplateToServer(t: string): Promise<void> {
+  try {
+    if (!templateDoc) {
+      const { document: existing } = await preferencesApi.settings.get<AiContinueTemplateBody>('ai-continue-template');
+      if (!existing) {
+        const flag = `${TEMPLATE_KEY}:server-migrated`;
+        if (!localStorage.getItem(flag)) {
+          const result = await preferencesApi.settings.import('ai-continue-template', {
+            storageKey: TEMPLATE_KEY, sourceHash: await hashImportValue(t), body: { template: t },
+          });
+          try { localStorage.setItem(flag, '1'); } catch {}
+          if (result.documentId) templateDoc = { id: result.documentId, revision: 1 };
+        }
+        if (!templateDoc) {
+          const { document } = await preferencesApi.settings.upsert<AiContinueTemplateBody>('ai-continue-template', undefined, { template: t });
+          templateDoc = { id: document.id, revision: document.revision };
+        }
+        return;
+      }
+      templateDoc = { id: existing.id, revision: existing.revision };
+    }
+    const { document } = await preferencesApi.settings.upsert<AiContinueTemplateBody>('ai-continue-template', templateDoc.revision, { template: t });
+    templateDoc = { id: document.id, revision: document.revision };
+  } catch (err) {
+    console.error('[AiContinuePresetModal] Failed to sync template:', err);
+    templateDoc = null; // re-fetch the current revision next time rather than retry with a stale one
+  }
 }
 
 // ── Props ────────────────────────────────────────────────────────────────────
@@ -79,9 +140,11 @@ interface AiContinuePresetModalProps {
 export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
   isOpen, onClose, onPresetFire, onTemplateChange,
 }) => {
-  const [tab, setTab]                   = React.useState<'style' | 'lyric' | 'template'>('style');
-  const [userStylePresets, setUserStyle] = React.useState<AiPreset[]>(() => loadUserPresets(USER_STYLE_KEY));
-  const [userLyricPresets, setUserLyric] = React.useState<AiPreset[]>(() => loadUserPresets(USER_LYRIC_KEY));
+  const [tab, setTab]                     = React.useState<'style' | 'lyric' | 'template'>('style');
+  const [userStyleDocs, setUserStyleDocs] = React.useState<PresetDoc[]>([]);
+  const [userLyricDocs, setUserLyricDocs] = React.useState<PresetDoc[]>([]);
+  const userStylePresets = userStyleDocs.map(d => d.preset);
+  const userLyricPresets = userLyricDocs.map(d => d.preset);
   const [template, setTemplate]         = React.useState(() => loadTemplate());
   const [newLabel, setNewLabel]         = React.useState('');
   const [newValue, setNewValue]         = React.useState('');
@@ -89,27 +152,35 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
 
   React.useEffect(() => { if (!isOpen) { setNewLabel(''); setNewValue(''); } }, [isOpen]);
 
+  React.useEffect(() => {
+    loadServerPresets('style').then(setUserStyleDocs).catch(err => console.error('[AiContinuePresetModal] Failed to load style presets:', err));
+    loadServerPresets('lyric').then(setUserLyricDocs).catch(err => console.error('[AiContinuePresetModal] Failed to load lyric presets:', err));
+  }, []);
+
   const addPreset = (category: PresetCategory) => {
-    if (!newLabel.trim() || !newValue.trim()) return;
-    const p: AiPreset = { id: `user-${Date.now()}`, label: newLabel.trim(), value: newValue.trim() };
-    if (category === 'style') {
-      const next = [...userStylePresets, p];
-      setUserStyle(next); saveUserPresets(USER_STYLE_KEY, next);
-    } else {
-      const next = [...userLyricPresets, p];
-      setUserLyric(next); saveUserPresets(USER_LYRIC_KEY, next);
-    }
+    const label = newLabel.trim(), value = newValue.trim();
+    if (!label || !value) return;
+    const tempId = `user-${Date.now()}`;
+    const setDocs = category === 'style' ? setUserStyleDocs : setUserLyricDocs;
+    setDocs(prev => [...prev, { id: tempId, revision: 0, preset: { id: tempId, label, value } }]);
+    preferencesApi.presets.create<AiContinuePresetBody>(PRESET_FAMILY[category], { label, value })
+      .then(({ document }) => setDocs(prev => prev.map(d => d.id === tempId
+        ? { id: document.id, revision: document.revision, preset: { id: document.id, label, value } } : d)))
+      .catch(err => {
+        console.error('[AiContinuePresetModal] Failed to save preset:', err);
+        setDocs(prev => prev.filter(d => d.id !== tempId));
+      });
     setNewLabel(''); setNewValue('');
   };
 
   const deletePreset = (category: PresetCategory, id: string) => {
-    if (category === 'style') {
-      const next = userStylePresets.filter(p => p.id !== id);
-      setUserStyle(next); saveUserPresets(USER_STYLE_KEY, next);
-    } else {
-      const next = userLyricPresets.filter(p => p.id !== id);
-      setUserLyric(next); saveUserPresets(USER_LYRIC_KEY, next);
-    }
+    const docs = category === 'style' ? userStyleDocs : userLyricDocs;
+    const setDocs = category === 'style' ? setUserStyleDocs : setUserLyricDocs;
+    const doc = docs.find(d => d.id === id);
+    setDocs(prev => prev.filter(d => d.id !== id));
+    if (!doc || doc.revision === 0) return; // create is still in flight; nothing saved to delete yet
+    preferencesApi.presets.remove(PRESET_FAMILY[category], doc.id, doc.revision)
+      .catch(err => console.error('[AiContinuePresetModal] Failed to delete preset:', err));
   };
 
   const firePreset = (preset: AiPreset, category: PresetCategory) => {
@@ -120,7 +191,8 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
 
   const handleTemplateChange = (val: string) => {
     setTemplate(val);
-    saveTemplate(val);
+    saveTemplateLocal(val);
+    void syncTemplateToServer(val);
     onTemplateChange(val);
   };
 
@@ -134,7 +206,7 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
     </button>
   );
 
-  const PresetPill = ({ preset, category }: { preset: AiPreset; category: PresetCategory }) => (
+  const PresetPill = ({ preset, category, isUser }: { preset: AiPreset; category: PresetCategory; isUser?: boolean }) => (
     <div className="flex items-center gap-0.5 group">
       <button
         onClick={() => firePreset(preset, category)}
@@ -145,13 +217,12 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
         {firedId === preset.id ? '✓ fired' : preset.label}
       </button>
       {/* delete button for user presets */}
-      {preset.id.startsWith('user-') && (
+      {isUser ? (
         <button onClick={() => deletePreset(category, preset.id)}
           className="text-[9px] px-1 py-0.5 rounded-r-md bg-zinc-800 text-zinc-700 hover:bg-red-900/40 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100">
           <Trash2 size={8} />
         </button>
-      )}
-      {!preset.id.startsWith('user-') && (
+      ) : (
         <span className="w-0 rounded-r-md bg-zinc-800" /> // keep pill shape consistent
       )}
     </div>
@@ -173,7 +244,7 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
         <div className="text-[9px] text-zinc-600 uppercase tracking-wider mb-1.5">My Presets</div>
         {user.length > 0 && (
           <div className="flex flex-wrap gap-1 mb-2">
-            {user.map(p => <PresetPill key={p.id} preset={p} category={category} />)}
+            {user.map(p => <PresetPill key={p.id} preset={p} category={category} isUser />)}
           </div>
         )}
         {/* Add new */}
