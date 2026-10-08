@@ -234,7 +234,10 @@ export class WorkflowJobs {
 
   // ── Commands ──────────────────────────────────────────────────────────────
 
-  submit(input: SubmitWorkflowJob, userId: string): { job: WorkflowJob; created: boolean } {
+  /** `defer` leaves the job pending without starting it, for a caller that
+   *  submits inside its own transaction (a run must not start before that
+   *  commits); the caller calls pump() afterwards. */
+  submit(input: SubmitWorkflowJob, userId: string, opts: { defer?: boolean } = {}): { job: WorkflowJob; created: boolean } {
     const def = this.kinds.get(input.kind);
     if (!def) throw new WorkflowError(400, `Unknown workflow kind '${input.kind}'`);
     const parsed = def.input.safeParse(input.input);
@@ -266,7 +269,7 @@ export class WorkflowJobs {
       if (String(err?.code).startsWith('SQLITE_CONSTRAINT')) return same(find()!);
       throw err;
     }
-    this.pump();
+    if (!opts.defer) this.pump();
     return { job: this.get(id), created: true };
   }
 

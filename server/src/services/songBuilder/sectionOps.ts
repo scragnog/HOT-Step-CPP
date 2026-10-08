@@ -30,6 +30,7 @@ import { WorkflowError, type WorkflowJobs, type WorkflowKind } from '../workflow
 import { requestVersion } from '../generation/resolve/resolveIntent.js';
 
 export const SECTION_KIND = 'builder-section';
+const MAX_VARIANTS = 16;
 
 /** POST /api/builder/projects/:id/sections/generate */
 export const generateSectionSchema = z.object({
@@ -56,6 +57,8 @@ export const generateSectionSchema = z.object({
   /** The head's measured length, used only when its song row stores 0
    *  (older repaint sections were saved that way). */
   headDuration: z.number().min(0).optional(),
+  /** The engine the browser had active at submit; must still be active. */
+  expectedBackend: z.string().min(1),
   /** getGlobalParams() at submit, captured like any other request. */
   engineParams: z.record(z.string(), z.unknown()),
 });
@@ -64,7 +67,7 @@ export type GenerateSection = z.infer<typeof generateSectionSchema>;
 const sectionJobSchema = z.object({
   projectId: z.string(),
   sectionId: z.string(),
-  variants: z.number().int().min(1).max(16),
+  variants: z.number().int().min(1).max(MAX_VARIANTS),
   request: z.record(z.string(), z.unknown()),
   /** The submitted body, for the idempotency check. */
   client: z.record(z.string(), z.unknown()),
@@ -202,11 +205,13 @@ export function planSection(db: Database.Database, project: ProjectRow, input: G
   const position = input.direction === 'prepend'
     ? ((db.prepare('SELECT MIN(position) AS lo FROM builder_sections WHERE project_id = ?').get(project.id) as { lo: number | null }).lo ?? 0) - 1
     : ((db.prepare('SELECT MAX(position) AS hi FROM builder_sections WHERE project_id = ?').get(project.id) as { hi: number | null }).hi ?? -1) + 1;
-  return { request, sectionLength, position, variants: Math.max(1, project.variant_count || 4) };
+  const variants = Math.max(1, project.variant_count || 4);
+  if (variants > MAX_VARIANTS) throw new WorkflowError(400, `A section renders at most ${MAX_VARIANTS} variants; this project asks for ${variants}`);
+  return { request, sectionLength, position, variants };
 }
 
 /** Create the section and its job, or return the ones this key already made. */
-export function generateSection(db: Database.Database, jobs: WorkflowJobs, userId: string, projectId: string, input: GenerateSection) {
+export function generateSection(db: Database.Database, jobs: WorkflowJobs, userId: string, projectId: string, input: GenerateSection, activeEngine: string) {
   const project = ownedProject(db, projectId, userId);
   const prior = db.prepare('SELECT id, input FROM workflow_jobs WHERE user_id = ? AND kind = ? AND idempotency_key = ?')
     .get(userId, SECTION_KIND, input.idempotencyKey) as { id: string; input: string } | undefined;
@@ -217,24 +222,31 @@ export function generateSection(db: Database.Database, jobs: WorkflowJobs, userI
     }
     return { job: jobs.get(prior.id), sectionId: captured.sectionId, created: false };
   }
+  // The engine is pinned now, as the browser saw it: a section that starts
+  // after a switch waits for this engine instead of rendering on another.
+  if (input.expectedBackend !== activeEngine) {
+    throw new WorkflowError(409, `The active engine is now ${activeEngine}, not ${input.expectedBackend}; reload and generate again`);
+  }
   const sectionId = randomUUID();
-  const plan = db.transaction(() => {
+  // Revision, section, job and their link land together or not at all; the
+  // job starts only after the commit.
+  const jobId = db.transaction(() => {
     bumpRevision(db, 'builder_projects', project.id, input.expectedRevision, userId);
     const p = planSection(db, project, input);
+    p.request.expectedBackend = input.expectedBackend;
     db.prepare(`INSERT INTO builder_sections (id, project_id, position, label, lyrics, direction, section_length, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'generating')`)
       .run(sectionId, project.id, p.position, input.label, input.lyrics, input.direction, p.sectionLength);
     db.prepare(`UPDATE builder_projects SET updated_at = datetime('now') WHERE id = ?`).run(project.id);
-    return p;
+    const { job } = jobs.submit({
+      kind: SECTION_KIND, idempotencyKey: input.idempotencyKey,
+      input: { projectId: project.id, sectionId, variants: p.variants, request: p.request, client: input },
+    }, userId, { defer: true });
+    db.prepare('UPDATE builder_sections SET job_id = ? WHERE id = ?').run(job.id, sectionId);
+    return job.id;
   })();
-  // Synchronous from the check above, so no other request interleaves. If
-  // the process dies before job_id is set, the next read settles the section.
-  const { job } = jobs.submit({
-    kind: SECTION_KIND, idempotencyKey: input.idempotencyKey,
-    input: { projectId: project.id, sectionId, variants: plan.variants, request: plan.request, client: input },
-  }, userId);
-  db.prepare('UPDATE builder_sections SET job_id = ? WHERE id = ?').run(job.id, sectionId);
-  return { job: jobs.get(job.id), sectionId, created: true };
+  jobs.pump();
+  return { job: jobs.get(jobId), sectionId, created: true };
 }
 
 /** Add landed songs to a section's candidates. A deleted section stays

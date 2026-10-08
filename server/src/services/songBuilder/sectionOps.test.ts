@@ -27,7 +27,7 @@ function fakeAudio() {
   return { audio, items, land };
 }
 
-function setup(db = new Database(':memory:'), audio = fakeAudio()) {
+function setup(db = new Database(':memory:'), audio = fakeAudio(), register = true) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS songs (id TEXT PRIMARY KEY, duration REAL DEFAULT 0, bpm INTEGER DEFAULT 0, key_scale TEXT DEFAULT '',
       latent_url TEXT DEFAULT '', audio_url TEXT DEFAULT '');
@@ -42,13 +42,15 @@ function setup(db = new Database(':memory:'), audio = fakeAudio()) {
     INSERT OR IGNORE INTO builder_projects (id, user_id, title, style) VALUES ('p', 'u', 'Song', 'synthpop');
   `);
   const jobs = new WorkflowJobs({ db, audio: audio.audio, audioPollMs: 5 });
-  jobs.register(sectionKind(() => db));
+  if (register) jobs.register(sectionKind(() => db));
   return { db, jobs, audio };
 }
 
+const gen = (db: Database.Database, jobs: WorkflowJobs, b: GenerateSection, engine = 'ace') => generateSection(db, jobs, 'u', 'p', b, engine);
+
 const body = (over: Partial<Record<keyof GenerateSection, unknown>> = {}): GenerateSection => generateSectionSchema.parse({
   idempotencyKey: `k-${Math.random()}`, expectedRevision: 0, direction: 'first', label: 'Intro', lyrics: '',
-  length: { seconds: 20 }, engineParams: { inferenceSteps: 8 }, ...over,
+  length: { seconds: 20 }, expectedBackend: 'ace', engineParams: { inferenceSteps: 8 }, ...over,
 });
 const revision = (db: Database.Database) => (db.prepare(`SELECT revision FROM builder_projects WHERE id = 'p'`).get() as { revision: number }).revision;
 const section = (db: Database.Database, id: string) => db.prepare('SELECT * FROM builder_sections WHERE id = ?').get(id) as any;
@@ -69,7 +71,7 @@ function withHead(db: Database.Database, duration: number, extra: { id?: string;
 
 test('first section: one transaction makes the section and bumps the revision; candidates stream in, then ready', async () => {
   const { db, jobs, audio } = setup();
-  const out = generateSection(db, jobs, 'u', 'p', body());
+  const out = gen(db, jobs, body());
   assert.equal(revision(db), 1);
   const s = section(db, out.sectionId);
   assert.equal(s.status, 'generating');
@@ -97,7 +99,7 @@ test('first section: one transaction makes the section and bumps the revision; c
 test('append, prepend and clip points match the old studio geometry; overlap is clamped', async () => {
   const { db, jobs, audio } = setup();
   withHead(db, 60, { lyrics: 'verse one' });
-  const reqOf = (b: GenerateSection) => { const n = audio.items.size; const out = generateSection(db, jobs, 'u', 'p', b); return { req: [...audio.items.values()][n].request, out }; };
+  const reqOf = (b: GenerateSection) => { const n = audio.items.size; const out = gen(db, jobs, b); return { req: [...audio.items.values()][n].request, out }; };
 
   let { req, out } = reqOf(body({ direction: 'append', label: 'Chorus', lyrics: 'oh oh', expectedRevision: 0 }));
   assert.equal(req.taskType, 'repaint');
@@ -136,7 +138,7 @@ test('a head stored with duration 0 uses the measured length; a structural seed 
   const { db, jobs, audio } = setup();
   withHead(db, 0, { id: 'old', position: 0 });
   withHead(db, 0, { id: 'h', position: 1 });
-  generateSection(db, jobs, 'u', 'p', body({ direction: 'append', headDuration: 3, seedSectionId: 's-old', seedStrength: 0.5 }));
+  gen(db, jobs, body({ direction: 'append', headDuration: 3, seedSectionId: 's-old', seedStrength: 0.5 }));
   const req = [...audio.items.values()][0].request;
   assert.equal(req.sourceLatentUrl, '/l/h');  // the newest chosen section is the head
   assert.equal(req.repaintingStart, 1);       // overlap min(4, 3 - 1, 20) = 2
@@ -149,26 +151,26 @@ test('a head stored with duration 0 uses the measured length; a structural seed 
 
 test('direction must fit the song: first only when empty, extensions only with a head', async () => {
   const { db, jobs } = setup();
-  assert.throws(() => generateSection(db, jobs, 'u', 'p', body({ direction: 'append' })), /Choose a section first/);
+  assert.throws(() => gen(db, jobs, body({ direction: 'append' })), /Choose a section first/);
   withHead(db, 30);
-  assert.throws(() => generateSection(db, jobs, 'u', 'p', body({ direction: 'first' })), /already has a section/);
+  assert.throws(() => gen(db, jobs, body({ direction: 'first' })), /already has a section/);
   assert.equal(revision(db), 0);  // the failed plan rolled the bump back
-  assert.throws(() => generateSection(db, jobs, 'u', 'p', body({ direction: 'append', length: { bars: 4 } })), /Bars need the project BPM/);
+  assert.throws(() => gen(db, jobs, body({ direction: 'append', length: { bars: 4 } })), /Bars need the project BPM/);
   await finish(jobs);
 });
 
 test('idempotent submit: the same key returns the same section and job even after the revision moved; another body is a 409', async () => {
   const { db, jobs, audio } = setup();
   const b = body();
-  const first = generateSection(db, jobs, 'u', 'p', b);
-  const again = generateSection(db, jobs, 'u', 'p', generateSectionSchema.parse(JSON.parse(JSON.stringify(b))));
+  const first = gen(db, jobs, b);
+  const again = gen(db, jobs, generateSectionSchema.parse(JSON.parse(JSON.stringify(b))));
   assert.equal(again.created, false);
   assert.equal(again.job.id, first.job.id);
   assert.equal(again.sectionId, first.sectionId);
   assert.equal(revision(db), 1);
   assert.equal(audio.items.size, 2);
   assert.equal((db.prepare('SELECT COUNT(*) AS n FROM builder_sections').get() as { n: number }).n, 1);
-  assert.throws(() => generateSection(db, jobs, 'u', 'p', { ...b, label: 'Other' }), (e: any) => e.status === 409);
+  assert.throws(() => gen(db, jobs, { ...b, label: 'Other' }), (e: any) => e.status === 409);
   await finish(jobs);
 });
 
@@ -178,7 +180,7 @@ test('stale two-client edits get a 409 and change nothing', async () => {
   editSection(db, 'u', 's-h', { lyrics: 'client A' }, 0);
   assert.throws(() => editSection(db, 'u', 's-h', { lyrics: 'client B' }, 0), (e: any) => e.status === 409 && e.extra.currentRevision === 1);
   assert.equal(section(db, 's-h').lyrics, 'client A');
-  assert.throws(() => generateSection(db, jobs, 'u', 'p', body({ direction: 'append', expectedRevision: 0 })), (e: any) => e.status === 409);
+  assert.throws(() => gen(db, jobs, body({ direction: 'append', expectedRevision: 0 })), (e: any) => e.status === 409);
   assert.equal((db.prepare('SELECT COUNT(*) AS n FROM builder_sections').get() as { n: number }).n, 1);
   assert.throws(() => deleteSection(db, jobs, 'u', 's-h', 0), (e: any) => e.status === 409);
   assert.ok(section(db, 's-h'));
@@ -188,7 +190,7 @@ test('stale two-client edits get a 409 and change nothing', async () => {
 
 test('choosing a candidate stops the rest, fills auto BPM/key, and a late completion cannot change the choice', async () => {
   const { db, jobs, audio } = setup();
-  const out = generateSection(db, jobs, 'u', 'p', body());
+  const out = gen(db, jobs, body());
   const [a, b] = [...audio.items.values()];
   db.prepare(`INSERT INTO songs (id, duration, bpm, key_scale) VALUES ('c1', 20, 97.6, 'D minor')`).run();
   audio.land(a.id, 'c1');
@@ -212,7 +214,7 @@ test('choosing a candidate stops the rest, fills auto BPM/key, and a late comple
 
 test('stop keeps the candidates that landed; delete mid-render stops it and nothing recreates the section', async () => {
   const { db, jobs, audio } = setup();
-  const out = generateSection(db, jobs, 'u', 'p', body());
+  const out = gen(db, jobs, body());
   audio.land([...audio.items.values()][0].id, 'c1');
   await tick();
   stopSection(db, jobs, 'u', out.sectionId, 1);
@@ -220,7 +222,7 @@ test('stop keeps the candidates that landed; delete mid-render stops it and noth
   assert.deepEqual(JSON.parse(section(db, out.sectionId).candidate_song_ids), ['c1']);
   await jobs.settled();
 
-  const two = generateSection(db, jobs, 'u', 'p', body({ direction: 'first', expectedRevision: 2 }));
+  const two = gen(db, jobs, body({ direction: 'first', expectedRevision: 2 }));
   const pending = [...audio.items.values()].slice(2);
   deleteSection(db, jobs, 'u', two.sectionId, 3);
   assert.equal(section(db, two.sectionId), undefined);
@@ -232,7 +234,7 @@ test('stop keeps the candidates that landed; delete mid-render stops it and noth
 
 test('a job cancelled elsewhere settles its section on the next read', async () => {
   const { db, jobs } = setup();
-  const out = generateSection(db, jobs, 'u', 'p', body());
+  const out = gen(db, jobs, body());
   jobs.cancel(out.job.id, 'u');
   await jobs.settled();
   assert.equal(section(db, out.sectionId).status, 'generating');
@@ -244,7 +246,7 @@ test('restart: the job is interrupted, never rerun, the section settles, and a r
   const db = new Database(':memory:');
   const audio = fakeAudio();
   const before = setup(db, audio);
-  const out = generateSection(db, before.jobs, 'u', 'p', body());
+  const out = gen(db, before.jobs, body());
   audio.land([...audio.items.values()][0].id, 'c1');
   await tick();
   // A new process on the same database; the old one's run is gone.
@@ -264,7 +266,7 @@ test('restart: the job is interrupted, never rerun, the section settles, and a r
 
 test('a reconnecting reader replays the variant events after its cursor', async () => {
   const { db, jobs, audio } = setup();
-  const out = generateSection(db, jobs, 'u', 'p', body());
+  const out = gen(db, jobs, body());
   const cursor = jobs.get(out.job.id).lastSeq;
   for (const [i, item] of [...audio.items.values()].entries()) audio.land(item.id, `c${i}`);
   await jobs.settled();
@@ -274,4 +276,39 @@ test('a reconnecting reader replays the variant events after its cursor', async 
   assert.deepEqual(variants, ['c0', 'c1']);
   assert.equal(replay.events.at(-1)!.type, 'status');
   assert.equal(section(db, out.sectionId).status, 'ready');
+});
+
+test('the engine is pinned at submit: a switch before submit is a 409, a start after a switch keeps the old engine', async () => {
+  const { db, jobs, audio } = setup(undefined, undefined, false);
+  // Every slot busy, so a new job waits pending.
+  const kind = { ...sectionKind(() => db), maxConcurrent: 0 };
+  jobs.register(kind);
+  assert.throws(() => gen(db, jobs, body({ expectedBackend: 'yue2' }), 'ace'), (e: any) => e.status === 409);
+  assert.equal(revision(db), 0);
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM builder_sections').get() as { n: number }).n, 0);
+  // The engine switches while it waits; when a slot frees it still asks
+  // the audio queue for the engine it captured.
+  const out = gen(db, jobs, body(), 'ace');
+  assert.equal(jobs.get(out.job.id).status, 'pending');
+  assert.equal(audio.items.size, 0);
+  kind.maxConcurrent = 16;
+  jobs.pump();
+  const [item] = [...audio.items.values()];
+  assert.equal(item.request.expectedBackend, 'ace');
+  await finish(jobs);
+});
+
+test('a rejected submission rolls back: no section, no job, no revision bump, and the same key stays unused', () => {
+  const { db, jobs } = setup();
+  db.prepare(`UPDATE builder_projects SET variant_count = 17 WHERE id = 'p'`).run();
+  const b = body();
+  for (let i = 0; i < 2; i++) assert.throws(() => gen(db, jobs, b), (e: any) => e.status === 400);
+  assert.equal(revision(db), 0);
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM builder_sections').get() as { n: number }).n, 0);
+  assert.equal((db.prepare('SELECT COUNT(*) AS n FROM workflow_jobs').get() as { n: number }).n, 0);
+  db.prepare(`UPDATE builder_projects SET variant_count = 2 WHERE id = 'p'`).run();
+  const out = gen(db, jobs, b);
+  assert.equal(section(db, out.sectionId).job_id, out.job.id);
+  assert.equal(revision(db), 1);
+  return finish(jobs);
 });

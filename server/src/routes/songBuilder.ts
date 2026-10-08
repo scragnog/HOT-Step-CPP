@@ -15,6 +15,7 @@ import { randomUUID } from 'crypto';
 import { getDb } from '../db/database.js';
 import { getUserId } from './auth.js';
 import { registerWorkflowKind, workflowJobs } from './workflows.js';
+import { getActiveBackendId } from '../services/backends/registry.js';
 import { WorkflowError } from '../services/workflows/workflowJobs.js';
 import {
   generateSectionSchema, generateSection, chooseCandidate, stopSection, deleteSection, editSection,
@@ -213,7 +214,7 @@ router.post('/projects/:id/sections/generate', (req, res) => {
     return;
   }
   try {
-    const out = generateSection(getDb(), workflowJobs(), userId, req.params.id, parsed.data);
+    const out = generateSection(getDb(), workflowJobs(), userId, req.params.id, parsed.data, getActiveBackendId());
     res.json({ ...projectView(req.params.id), jobId: out.job.id, sectionId: out.sectionId });
   } catch (err) {
     if (err instanceof WorkflowError) { res.status(err.status).json({ error: err.message, ...err.extra }); return; }

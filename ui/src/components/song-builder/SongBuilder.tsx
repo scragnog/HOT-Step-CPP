@@ -20,7 +20,9 @@ import { useAuth } from '../../context/AuthContext';
 import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { builderApi } from '../../services/api';
 import type { BuilderProject, BuilderSection, BuilderDirection } from '../../services/api';
-import { followJob, WorkflowRequestError } from '../../services/workflowApi';
+import { WorkflowRequestError } from '../../services/workflowApi';
+import { followSection as followSectionJob } from './followSection';
+import { useBackendStore } from '../../stores/backendStore';
 import { getGenerationTimeoutMinutes } from '../../utils/generationTimer';
 import { play, playFromList, togglePlay, usePlaybackSelector, songToTrack } from '../../stores/playbackStore';
 import type { Song } from '../../types';
@@ -119,8 +121,10 @@ export const SongBuilder: React.FC = () => {
   const [genStage, setGenStage] = useState('');
   // The section job being followed (its renders run on the server either way).
   const followRef = useRef<AbortController | null>(null);
-  // Set below; openProject is declared before followSection.
-  const followSectionRef = useRef<(jobId: string) => void>(() => {});
+  // The open project's id, set when it is opened, created or left. Async
+  // callbacks read this, never a render's `project`, which is stale (or null,
+  // right after opening from the list) by the time they run.
+  const projectIdRef = useRef<string | null>(null);
 
   // Per-section lyric editing (correct the sheet fed forward when the DiT alters lines)
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
@@ -178,19 +182,55 @@ export const SongBuilder: React.FC = () => {
   // it whenever either changes so a stale point can't leak into a new extension.
   useEffect(() => { setClipPoint(null); setSeedSectionId(null); }, [head?.id, direction]);
 
+  const loadView = useCallback((projectId: string) => builderApi.getProject(projectId, token!), [token]);
+
+  // Follow a section job: each variant event reloads the project, so its
+  // candidates appear as they land.
+  const followSection = useCallback((projectId: string, jobId: string) => {
+    if (!token) return;
+    followRef.current?.abort();
+    const ctl = new AbortController();
+    followRef.current = ctl;
+    setIsGenerating(true);
+    void followSectionJob(token, projectId, jobId, {
+      load: loadView,
+      isCurrent: id => projectIdRef.current === id,
+      onView: v => { setProject(v.project); setSections(v.sections); },
+      onProgress: ({ finished, landed, total }) => {
+        setGenProgress(Math.round((finished / total) * 100));
+        setGenStage(`Generated ${landed} of ${total}…`);
+      },
+      onEnd: (status, landed) => {
+        followRef.current = null;
+        setIsGenerating(false); setGenProgress(0);
+        setGenStage(landed ? 'Pick a variant' : '');
+        if (status === 'succeeded' && !landed) showToast('All variants failed');
+        else if (status === 'interrupted') showToast('The server restarted during this section; keep what landed or generate again');
+      },
+      onError: e => {
+        followRef.current = null;
+        setIsGenerating(false);
+        showToast(`Lost the section job: ${e.message}`);
+      },
+    }, ctl.signal);
+  }, [token, loadView]);
+
   // ── Project open / create / delete ──
   const openProject = useCallback(async (id: string) => {
     if (!token) return;
     setLoading(true);
     try {
       const { project: p, sections: secs } = await builderApi.getProject(id, token);
+      followRef.current?.abort(); followRef.current = null;
+      projectIdRef.current = p.id;
       setProject(p); setSections(secs); setNewStyle(p.style);
+      setIsGenerating(false); setGenProgress(0); setGenStage('');
       // Reopened while a section was rendering: pick its job back up.
       const running = secs.find(s => s.status === 'generating' && s.job_id);
-      if (running?.job_id) followSectionRef.current(running.job_id);
+      if (running?.job_id) followSection(p.id, running.job_id);
     } catch (e: any) { showToast(`Failed to open: ${e.message}`); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [token, followSection]);
 
   const createProject = useCallback(async () => {
     if (!token) return;
@@ -201,6 +241,7 @@ export const SongBuilder: React.FC = () => {
           bpm: newBpm || 0, keyScale: newKey, timeSignature: newTimeSig,
           variantCount: 4, sectionLength: 30,
         }, token);
+      projectIdRef.current = p.id;
       setProject(p); setSections([]); setNewTitle('');
       setProjects(prev => [p, ...prev]);
     } catch (e: any) { showToast(`Create failed: ${e.message}`); }
@@ -223,15 +264,17 @@ export const SongBuilder: React.FC = () => {
 
   const backToList = useCallback(() => {
     followRef.current?.abort(); followRef.current = null;
+    projectIdRef.current = null;
     setProject(null); setSections([]); setIsGenerating(false);
     if (token) builderApi.listProjects(token).then(r => setProjects(r.projects)).catch(() => {});
   }, [token]);
 
   const refresh = useCallback(async () => {
-    if (!project || !token) return;
-    const { project: p, sections: secs } = await builderApi.getProject(project.id, token);
-    setProject(p); setSections(secs);
-  }, [project, token]);
+    const id = projectIdRef.current;
+    if (!id || !token) return;
+    const { project: p, sections: secs } = await loadView(id);
+    if (projectIdRef.current === id) { setProject(p); setSections(secs); }
+  }, [token, loadView]);
 
   // ── Build the cumulative lyric sheet for the section about to be generated ──
   const cumulativeLyrics = useMemo(() => {
@@ -278,6 +321,7 @@ export const SongBuilder: React.FC = () => {
   }, [bpm, beatsPerBar]);
 
   const applyView = useCallback((v: { project: BuilderProject; sections: BuilderSection[] }) => {
+    if (projectIdRef.current !== v.project.id) return;  // the user moved on
     setProject(v.project); setSections(v.sections);
   }, []);
 
@@ -298,43 +342,6 @@ export const SongBuilder: React.FC = () => {
     followRef.current?.abort(); followRef.current = null;
     setIsGenerating(false); setGenProgress(0); setGenStage('');
   }, []);
-
-  // Follow a section job: each variant event refreshes the candidates. The
-  // stream replays from the start on every (re)connect, so the counts stay
-  // right after a reload or a dropped connection.
-  const followSection = useCallback((jobId: string) => {
-    if (!token) return;
-    followRef.current?.abort();
-    const ctl = new AbortController();
-    followRef.current = ctl;
-    setIsGenerating(true);
-    let total = 1, finished = 0, landed = 0;
-    void followJob(token, jobId, {
-      onSnapshot: job => { total = Number((job.input as { variants?: number }).variants) || 1; },
-      onEvent: e => {
-        if (e.type !== 'variant') return;
-        finished++;
-        if (((e.data as { songIds?: string[] } | null)?.songIds?.length ?? 0) > 0) landed++;
-        setGenProgress(Math.round((finished / total) * 100));
-        setGenStage(`Generated ${landed} of ${total}…`);
-        void refresh().catch(() => {});
-      },
-    }, { signal: ctl.signal }).then(async status => {
-      if (ctl.signal.aborted) return;
-      followRef.current = null;
-      setIsGenerating(false); setGenProgress(0);
-      setGenStage(landed ? 'Pick a variant' : '');
-      if (status === 'succeeded' && !landed) showToast('All variants failed');
-      else if (status === 'interrupted') showToast('The server restarted during this section; keep what landed or generate again');
-      await refresh().catch(() => {});
-    }).catch(e => {
-      if (ctl.signal.aborted) return;
-      followRef.current = null;
-      setIsGenerating(false);
-      showToast(`Lost the section job: ${e.message}`);
-    });
-  }, [token, refresh]);
-  followSectionRef.current = followSection;
 
   useEffect(() => () => followRef.current?.abort(), []);
 
@@ -359,6 +366,7 @@ export const SongBuilder: React.FC = () => {
       const v = await builderApi.generateSection(project.id, {
         idempotencyKey: crypto.randomUUID(),
         expectedRevision: project.revision,
+        expectedBackend: useBackendStore.getState().activeBackendId,
         direction, label: nextLabel, lyrics: nextLyrics,
         length: lengthMode === 'bars' && bpm > 0 ? { bars: nextBars } : { seconds: nextLength },
         overlap: transitionOverlap, clipPoint, seedSectionId, seedStrength, previewMastering, coResident,
@@ -366,7 +374,7 @@ export const SongBuilder: React.FC = () => {
         engineParams,
       }, token);
       applyView(v);
-      followSection(v.jobId);
+      followSection(project.id, v.jobId);
     } catch (e: any) {
       setIsGenerating(false); setGenStage('');
       if (e instanceof WorkflowRequestError && e.status === 409) {

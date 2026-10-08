@@ -322,6 +322,8 @@ function normalizeSection(s: any): BuilderSection {
 export interface GenerateSectionInput {
   idempotencyKey: string;
   expectedRevision: number;
+  /** The engine active when the user pressed Generate. */
+  expectedBackend: string;
   direction: BuilderDirection;
   label: string;
   lyrics: string;
