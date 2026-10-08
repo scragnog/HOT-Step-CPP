@@ -575,8 +575,10 @@ imports the same type instead of its own copy. Errors across all of them are the
 - **Settings** (`contracts/settings.ts`). `GET /settings/env` takes no input and returns
   `EnvResponse` (`{ values, restartKeys }`, unset keys backfilled with their resolved default).
   `POST /settings/env` takes `{ values: Record<string, string> }`; keys outside
-  `EXPOSED_ENV_KEYS` or non-string values are silently dropped rather than rejected, and an
-  empty/missing/non-object `values` is `400 { error }`; on success it returns
+  `EXPOSED_ENV_KEYS` or non-string values are silently dropped rather than rejected; a
+  missing/non-object `values` is `400 { error }`, but an empty `values: {}` (or one with no
+  exposed keys) is a no-op `200 { updated: [], restartRequired: false }`, not an error. On a
+  non-empty update it returns
   `EnvUpdateResponse` (`{ updated, restartRequired }`, `restartRequired` true if any updated key
   is in `RESTART_REQUIRED_KEYS`), or `500 { error }` if writing `.env` fails. `GET
   /settings/gpus` takes no input and returns `GpusResponse` (`{ gpus: GpuInfo[] }`, empty array
@@ -595,13 +597,14 @@ imports the same type instead of its own copy. Errors across all of them are the
   success it returns `RenameProfileResponse` (`{ ok, name }`), or `500 { error }` on a write/
   unlink failure. `DELETE /profiles/:name` takes no body, `404 { error }` if missing, else
   `DeleteProfileResponse` (`{ ok, deleted }`) or `500 { error }` on an unlink failure.
-- **Mastering** (`contracts/mastering.ts`, bearer-token auth on every route). `POST
-  /mastering/upload-reference` is multipart with a `file` field; no bearer token is
+- **Mastering** (`contracts/mastering.ts`, bearer-token auth on every mutation — list is open).
+  `POST /mastering/upload-reference` is multipart with a `file` field; no bearer token is
   `401 { error }`, no file is `400 { error }`; non-WAV/MP3 formats are transcoded to WAV on
   upload (ffmpeg missing or conversion failure surfaces as `500 { error }`); on success it
   returns `UploadReferenceResponse` (`{ name, path, url }`). `GET /mastering/references` takes
-  no input and always returns `200 { references: [] }` on a read failure rather than erroring.
-  `DELETE /mastering/references/:name` needs a bearer token (`401` if missing), `404 { error }`
+  no input and no auth check, and always returns `200 { references: [] }` on a read failure
+  rather than erroring. `DELETE /mastering/references/:name` needs a bearer token (`401` if
+  missing), `404 { error }`
   if the file doesn't exist, `400 { error }` if path resolution would escape the references
   directory, else `DeleteReferenceResponse` (`{ ok: true }`). `POST /mastering/run` needs a
   bearer token (`401`) and body `{ songId: string, referenceName: string }` (missing either is
@@ -654,11 +657,15 @@ imports the same type instead of its own copy. Errors across all of them are the
   `POST /vst/monitor/restart` takes no input; no track currently loaded or a missing exe is
   `400`/`503`, an empty enabled-plugin chain is `400`, else `MonitorRestartResponse`
   (`{ ok, pid, plugins }`).
-- **Seeds** (`contracts/seeds.ts`). Every route takes an optional `?subdir=` query param
-  scoping to a subfolder (the UI currently always uses the flat default). `GET /seeds` returns
-  `ListSeedsResponse`, inlining each seed's metadata. `GET /seeds/favorites` returns
-  `ListFavoritesResponse` (favorites outside the flat default dir are silently skipped — it
-  reads without a `subdir`). `GET /seeds/random` is `404 { error }` if the dir has no seeds or
+- **Seeds** (`contracts/seeds.ts`). Subdir scoping is per operation, not uniform: `GET /seeds`,
+  `GET /seeds/random`, `GET /seeds/:name` and `DELETE /seeds/:name` take an optional `?subdir=`
+  query param scoping to a subfolder (the UI currently always uses the flat default); `POST
+  /seeds` instead reads `subdir` from the request body (see below); `GET /seeds/favorites` and
+  `POST /seeds/:name/favorite` ignore subdir entirely and always operate against the flat
+  default dir. `GET /seeds` returns `ListSeedsResponse`, inlining each seed's metadata. `GET
+  /seeds/favorites` returns `ListFavoritesResponse` (a favorite saved under a subdir is
+  silently skipped here, since lookup always reads the flat default). `GET /seeds/random` is
+  `404 { error }` if the dir has no seeds or
   the picked file can't be read, else `RandomSeedResponse`. `GET /seeds/:name` is `404 { error
   }` if missing, else `GetSeedResponse`. `POST /seeds` takes `{ name: string, seed: number,
   description?: string, tags?: string[], subdir?: string }`; a missing/blank `name` or a
