@@ -6,6 +6,7 @@
 import type { Song, UnifiedRecentSong, GenerationParams, GenerationJob, AuthState, AceModels, BrowseEntry, AdapterFile, ModelRegistry } from '../types';
 import { getGenerationTimeoutMinutes } from '../utils/generationTimer';
 import type { ResolveIntent, ResolvePreviewResponse } from '../../../server/src/contracts/resolution';
+import { WorkflowRequestError } from './workflowApi';
 
 const BASE = '/api';
 
@@ -282,6 +283,8 @@ export interface BuilderProject {
   created_at: string;
   updated_at: string;
   section_count?: number;
+  /** Bumped by every edit; section edits send the one they were based on. */
+  revision: number;
 }
 
 export type BuilderDirection = 'first' | 'append' | 'prepend';
@@ -314,16 +317,38 @@ function normalizeSection(s: any): BuilderSection {
   };
 }
 
-export interface BuilderSectionInput {
-  position?: number;
-  label?: string;
-  lyrics?: string;
-  direction?: BuilderDirection;
-  sectionLength?: number;
-  candidateSongIds?: string[];
-  chosenSongId?: string | null;
-  jobId?: string | null;
-  status?: BuilderSectionStatus;
+/** The composer's captured state for the next section; Node works out the
+ *  geometry and the request (server/src/services/songBuilder/sectionOps.ts). */
+export interface GenerateSectionInput {
+  idempotencyKey: string;
+  expectedRevision: number;
+  direction: BuilderDirection;
+  label: string;
+  lyrics: string;
+  length: { bars: number } | { seconds: number };
+  overlap: number;
+  clipPoint: number | null;
+  seedSectionId: string | null;
+  seedStrength: number;
+  previewMastering: boolean;
+  coResident: boolean;
+  headDuration?: number;
+  engineParams: Record<string, unknown>;
+}
+
+type BuilderView = { project: BuilderProject; sections: BuilderSection[] };
+
+/** Section operations throw WorkflowRequestError, so a stale revision (409)
+ *  can be told apart and the project reloaded. */
+async function builderOp<T extends { project: BuilderProject; sections: any[] }>(path: string, method: string, token: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE}/builder${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const value = await res.json().catch(() => ({}));
+  if (!res.ok) throw new WorkflowRequestError(res.status, value.error || `API error: ${res.status}`, value.currentRevision);
+  return { ...value, sections: value.sections.map(normalizeSection) };
 }
 
 export const builderApi = {
@@ -341,15 +366,17 @@ export const builderApi = {
   },
   deleteProject: (id: string, token: string) => del<{ ok: boolean }>(`/builder/projects/${id}`, token),
 
-  createSection: async (projectId: string, body: BuilderSectionInput, token: string) => {
-    const data = await post<{ section: any }>(`/builder/projects/${projectId}/sections`, body, token);
-    return { section: normalizeSection(data.section) };
-  },
-  updateSection: async (sectionId: string, body: BuilderSectionInput, token: string) => {
-    const data = await patch<{ section: any }>(`/builder/sections/${sectionId}`, body, token);
-    return { section: normalizeSection(data.section) };
-  },
-  deleteSection: (sectionId: string, token: string) => del<{ ok: boolean }>(`/builder/sections/${sectionId}`, token),
+  /** Start the next section; follow `jobId` with followJob. */
+  generateSection: (projectId: string, body: GenerateSectionInput, token: string) =>
+    builderOp<BuilderView & { jobId: string; sectionId: string }>(`/projects/${projectId}/sections/generate`, 'POST', token, body),
+  chooseCandidate: (sectionId: string, songId: string, expectedRevision: number, token: string) =>
+    builderOp<BuilderView>(`/sections/${sectionId}/choose`, 'POST', token, { songId, expectedRevision }),
+  stopSection: (sectionId: string, expectedRevision: number, token: string) =>
+    builderOp<BuilderView>(`/sections/${sectionId}/stop`, 'POST', token, { expectedRevision }),
+  editSection: (sectionId: string, edit: { label?: string; lyrics?: string }, expectedRevision: number, token: string) =>
+    builderOp<BuilderView>(`/sections/${sectionId}`, 'PATCH', token, { ...edit, expectedRevision }),
+  deleteSection: (sectionId: string, expectedRevision: number, token: string) =>
+    builderOp<BuilderView>(`/sections/${sectionId}?expectedRevision=${expectedRevision}`, 'DELETE', token),
 };
 
 // ── Models ──────────────────────────────────────────────────

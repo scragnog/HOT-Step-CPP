@@ -28,6 +28,9 @@ support the repaint task every section after the first depends on (see
 3. Variants stream in one at a time (one job per variant, so the GPU worker finishes them
    in sequence rather than all at once). Play each candidate in the global play bar and
    click Use on the one you want. You can also stop early and pick from whatever finished.
+   The variants render on the server, so closing the tab does not stop them; reopen the
+   project to pick up where it is. If the song was changed in another tab meanwhile, your
+   edit is refused and the project reloads instead of overwriting the other change.
 4. Once a section is chosen, the composer switches to Append (continue after the chosen
    section) or Prepend (add before it, e.g. an intro in front of an already-built verse).
    Each new section generates as a repaint extension of the whole song built so far, not a

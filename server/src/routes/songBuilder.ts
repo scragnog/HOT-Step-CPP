@@ -6,13 +6,22 @@
 // previously chosen variant's latent for every section after). The user picks
 // one variant per section; that pick becomes the source for the next section.
 //
-// This router is pure bookkeeping. Generation runs through /api/generate; the
-// UI records the returned jobId/songIds here and tracks the chosen variant.
+// Projects are plain CRUD. Sections are Node-owned operations: geometry,
+// variant renders and candidates live in services/songBuilder/sectionOps.ts,
+// and each section's renders run as a builder-section workflow job.
 
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { randomUUID } from 'crypto';
 import { getDb } from '../db/database.js';
 import { getUserId } from './auth.js';
+import { registerWorkflowKind, workflowJobs } from './workflows.js';
+import { WorkflowError } from '../services/workflows/workflowJobs.js';
+import {
+  generateSectionSchema, generateSection, chooseCandidate, stopSection, deleteSection, editSection,
+  reconcileSections, sectionKind,
+} from '../services/songBuilder/sectionOps.js';
+
+registerWorkflowKind(sectionKind(getDb));
 
 const router = Router();
 
@@ -54,19 +63,14 @@ function ownedProject(projectId: string, userId: string): any | null {
   return p || null;
 }
 
-/** Verify a section belongs to a project owned by the user; returns {section, project} or null. */
-function ownedSection(sectionId: string, userId: string): { section: any; project: any } | null {
-  const section = getDb()
-    .prepare(`SELECT * FROM builder_sections WHERE id = ?`)
-    .get(sectionId) as any;
-  if (!section) return null;
-  const project = ownedProject(section.project_id, userId);
-  if (!project) return null;
-  return { section, project };
+/** The project and its sections, after settling any whose job has ended. */
+function projectView(projectId: string): { project: any; sections: any[] } {
+  reconcileSections(getDb(), workflowJobs(), projectId);
+  return {
+    project: getDb().prepare(`SELECT * FROM builder_projects WHERE id = ?`).get(projectId),
+    sections: loadSections(projectId),
+  };
 }
-
-const touchProject = (id: string) =>
-  getDb().prepare(`UPDATE builder_projects SET updated_at = datetime('now') WHERE id = ?`).run(id);
 
 // ── Project routes ───────────────────────────────────────────────────────────
 
@@ -93,7 +97,7 @@ router.get('/projects/:id', (req, res) => {
   const project = ownedProject(req.params.id, userId);
   if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
 
-  res.json({ project, sections: loadSections(project.id) });
+  res.json(projectView(project.id));
 });
 
 // POST /api/builder/projects — create a project
@@ -146,13 +150,14 @@ router.patch('/projects/:id', (req, res) => {
   }
   if (b.genParams !== undefined) { sets.push(`gen_params = ?`); vals.push(JSON.stringify(b.genParams)); }
   if (sets.length) {
-    sets.push(`updated_at = datetime('now')`);
+    // Last write wins per field, as before, but other clients' section edits
+    // based on the old settings now see a newer revision.
+    sets.push(`updated_at = datetime('now')`, `revision = revision + 1`);
     vals.push(project.id);
     getDb().prepare(`UPDATE builder_projects SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
   }
 
-  const updated = getDb().prepare(`SELECT * FROM builder_projects WHERE id = ?`).get(project.id);
-  res.json({ project: updated, sections: loadSections(project.id) });
+  res.json(projectView(project.id));
 });
 
 // DELETE /api/builder/projects/:id
@@ -170,99 +175,83 @@ router.delete('/projects/:id', (req, res) => {
 });
 
 // ── Section routes ───────────────────────────────────────────────────────────
+// Node owns section geometry, the variant renders and candidate insertion
+// (services/songBuilder/sectionOps.ts). Every edit names the project revision
+// it was based on; a stale one is a 409 carrying currentRevision.
 
-// POST /api/builder/projects/:id/sections — create a section record
-// Called by the UI right after it kicks off generation via /api/generate.
-router.post('/projects/:id/sections', (req, res) => {
+/** Run an operation and answer with the whole project, or its error. */
+function sectionOp(fn: (req: Request, userId: string) => string) {
+  return (req: Request, res: Response) => {
+    const userId = getUserId(req);
+    if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    try {
+      const projectId = fn(req, userId);
+      res.json(projectView(projectId));
+    } catch (err) {
+      if (err instanceof WorkflowError) { res.status(err.status).json({ error: err.message, ...err.extra }); return; }
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  };
+}
+
+const revisionOf = (req: Request) => {
+  const r = Number(req.body?.expectedRevision ?? req.query.expectedRevision);
+  if (!Number.isInteger(r) || r < 0) throw new WorkflowError(400, 'expectedRevision is required');
+  return r;
+};
+const projectOfSection = (id: string) =>
+  (getDb().prepare(`SELECT project_id FROM builder_sections WHERE id = ?`).get(id) as { project_id: string } | undefined)?.project_id;
+
+// POST /api/builder/projects/:id/sections/generate — create the next section
+// and start its variants. Returns the project plus { jobId, sectionId }.
+router.post('/projects/:id/sections/generate', (req, res) => {
   const userId = getUserId(req);
   if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+  const parsed = generateSectionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid section request', issues: parsed.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })) });
+    return;
+  }
+  try {
+    const out = generateSection(getDb(), workflowJobs(), userId, req.params.id, parsed.data);
+    res.json({ ...projectView(req.params.id), jobId: out.job.id, sectionId: out.sectionId });
+  } catch (err) {
+    if (err instanceof WorkflowError) { res.status(err.status).json({ error: err.message, ...err.extra }); return; }
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
 
-  const project = ownedProject(req.params.id, userId);
-  if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
+// POST /api/builder/sections/:id/choose { songId, expectedRevision }
+router.post('/sections/:id/choose', sectionOp((req, userId) => {
+  const projectId = projectOfSection(String(req.params.id));
+  if (typeof req.body?.songId !== 'string') throw new WorkflowError(400, 'songId is required');
+  chooseCandidate(getDb(), workflowJobs(), userId, String(req.params.id), req.body.songId, revisionOf(req));
+  return projectId!;
+}));
 
+// POST /api/builder/sections/:id/stop { expectedRevision } — keep what landed
+router.post('/sections/:id/stop', sectionOp((req, userId) => {
+  const projectId = projectOfSection(String(req.params.id));
+  stopSection(getDb(), workflowJobs(), userId, String(req.params.id), revisionOf(req));
+  return projectId!;
+}));
+
+// PATCH /api/builder/sections/:id { label?, lyrics?, expectedRevision }
+router.patch('/sections/:id', sectionOp((req, userId) => {
+  const projectId = projectOfSection(String(req.params.id));
   const b = req.body || {};
-  const id = randomUUID();
-
-  // Default position: append after the current max (or before the min for prepend).
-  let position = b.position;
-  if (position === undefined) {
-    const agg = getDb()
-      .prepare(`SELECT MIN(position) AS lo, MAX(position) AS hi FROM builder_sections WHERE project_id = ?`)
-      .get(project.id) as any;
-    if (b.direction === 'prepend') position = (agg.lo ?? 0) - 1;
-    else position = (agg.hi ?? -1) + 1;
+  if ((b.label !== undefined && typeof b.label !== 'string') || (b.lyrics !== undefined && typeof b.lyrics !== 'string')) {
+    throw new WorkflowError(400, 'label and lyrics must be strings');
   }
+  editSection(getDb(), userId, String(req.params.id), { label: b.label, lyrics: b.lyrics }, revisionOf(req));
+  return projectId!;
+}));
 
-  getDb().prepare(`
-    INSERT INTO builder_sections
-      (id, project_id, position, label, lyrics, direction, section_length,
-       candidate_song_ids, chosen_song_id, job_id, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id, project.id, position,
-    b.label || '',
-    b.lyrics || '',
-    b.direction || 'append',
-    b.sectionLength ?? project.section_length ?? 30,
-    JSON.stringify(b.candidateSongIds || []),
-    b.chosenSongId || null,
-    b.jobId || null,
-    b.status || (b.jobId ? 'generating' : 'pending'),
-  );
-  touchProject(project.id);
-
-  const section = loadSections(project.id).find(s => s.id === id);
-  res.json({ section });
-});
-
-// PATCH /api/builder/sections/:id — update a section
-// Used to record candidate song ids when a job completes, to choose a variant,
-// and to edit label/lyrics.
-router.patch('/sections/:id', (req, res) => {
-  const userId = getUserId(req);
-  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
-
-  const owned = ownedSection(req.params.id, userId);
-  if (!owned) { res.status(404).json({ error: 'Section not found' }); return; }
-
-  const b = req.body || {};
-  const sets: string[] = [];
-  const vals: any[] = [];
-
-  if (b.label !== undefined) { sets.push(`label = ?`); vals.push(b.label); }
-  if (b.lyrics !== undefined) { sets.push(`lyrics = ?`); vals.push(b.lyrics); }
-  if (b.position !== undefined) { sets.push(`position = ?`); vals.push(b.position); }
-  if (b.sectionLength !== undefined) { sets.push(`section_length = ?`); vals.push(b.sectionLength); }
-  if (b.jobId !== undefined) { sets.push(`job_id = ?`); vals.push(b.jobId); }
-  if (b.candidateSongIds !== undefined) {
-    sets.push(`candidate_song_ids = ?`);
-    vals.push(JSON.stringify(b.candidateSongIds));
-  }
-  if (b.chosenSongId !== undefined) { sets.push(`chosen_song_id = ?`); vals.push(b.chosenSongId); }
-  if (b.status !== undefined) { sets.push(`status = ?`); vals.push(b.status); }
-
-  if (sets.length) {
-    sets.push(`updated_at = datetime('now')`);
-    vals.push(owned.section.id);
-    getDb().prepare(`UPDATE builder_sections SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
-    touchProject(owned.project.id);
-  }
-
-  const section = loadSections(owned.project.id).find(s => s.id === owned.section.id);
-  res.json({ section });
-});
-
-// DELETE /api/builder/sections/:id
-router.delete('/sections/:id', (req, res) => {
-  const userId = getUserId(req);
-  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
-
-  const owned = ownedSection(req.params.id, userId);
-  if (!owned) { res.status(404).json({ error: 'Section not found' }); return; }
-
-  getDb().prepare(`DELETE FROM builder_sections WHERE id = ?`).run(owned.section.id);
-  touchProject(owned.project.id);
-  res.json({ ok: true });
-});
+// DELETE /api/builder/sections/:id?expectedRevision=N — also stops its variants
+router.delete('/sections/:id', sectionOp((req, userId) => {
+  const projectId = projectOfSection(String(req.params.id));
+  deleteSection(getDb(), workflowJobs(), userId, String(req.params.id), revisionOf(req));
+  return projectId!;
+}));
 
 export default router;
