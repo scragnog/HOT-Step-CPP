@@ -262,3 +262,20 @@ test('concurrent exports are capped and a released slot is reusable', async () =
     assert.throws(() => sessions.admitExport(), /Too many/);
   } finally { done(); }
 });
+
+test('export cleanup that cannot delete its temp file never throws and frees the slot', async (t) => {
+  const { sessions, done } = store({ maxConcurrentExports: 1 });
+  try {
+    const s = sessions.open('storm', { streamId: 'x' })!;
+    s.record('start'); s.chunk(fixture(0.05, 120)); s.record('stop');
+    const first = await s.exportTo('wav');
+    const rm = t.mock.method(fs, 'rmSync', () => { throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' }); });
+    t.mock.method(console, 'warn', () => {});
+    assert.doesNotThrow(() => first.cleanup());
+    assert.equal(rm.mock.callCount(), 1);
+    rm.mock.restore();
+    const second = await s.exportTo('wav');
+    second.cleanup();
+    fs.rmSync(first.file, { force: true });
+  } finally { done(); }
+});

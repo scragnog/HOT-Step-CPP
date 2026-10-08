@@ -140,7 +140,7 @@ export class StreamSession {
     }
     if (action === 'stop') { if (r.status === 'recording') r.status = 'stopped'; return; }
     this.recording = StreamSession.idle();
-    if (r.file) void r.writes.then(() => fs.promises.rm(r.file, { force: true }));
+    if (r.file) void r.writes.then(() => fs.promises.rm(r.file, { force: true })).catch(warnRemove(r.file));
   }
 
   private fail(message: string): void {
@@ -168,8 +168,9 @@ export class StreamSession {
     const cleanup = () => {
       if (cleaned) return;
       cleaned = true;
-      for (const f of cleanups) fs.rmSync(f, { force: true });
-      release();
+      // Never throws: it runs in the route's download/close callbacks, and a
+      // locked temp file must not keep the export slot taken.
+      try { for (const f of cleanups) removeQuietly(f); } finally { release(); }
     };
     try {
       fs.writeFileSync(wavFile, wavHeader(r.format, r.bytes));
@@ -202,8 +203,16 @@ export class StreamSession {
   /** Delete the recording file (eviction/expiry). */
   dispose(): void {
     const r = this.recording;
-    if (r.file) void r.writes.then(() => fs.promises.rm(r.file, { force: true }));
+    if (r.file) void r.writes.then(() => fs.promises.rm(r.file, { force: true })).catch(warnRemove(r.file));
   }
+}
+
+function warnRemove(file: string) {
+  return (err: unknown) => console.warn(`[stream-sessions] could not delete ${file}: ${(err as Error).message}`);
+}
+
+function removeQuietly(file: string): void {
+  try { fs.rmSync(file, { force: true }); } catch (err) { warnRemove(file)(err); }
 }
 
 export type Transcoder = (wavFile: string, format: Exclude<StreamExportFormat, 'wav'>, bitrate: number | undefined, out: string) => Promise<void>;
