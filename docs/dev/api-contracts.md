@@ -130,6 +130,52 @@ On success `result` carries:
 Result URLs are root-relative (`/audio/<file>`). A client on another origin must prefix the
 server origin itself; the dev UI relies on the Vite proxy for `/api`, `/audio` and `/references`.
 
+## Stream sessions
+
+Node keeps a session for each engine audio stream it proxies: STORM (`POST
+/api/generate/storm/stream`) and MM3 (`GET /api/generate/mm3/stream/:id`). The stream response
+names its session in the `X-Stream-Session` header. Types are in
+`server/src/contracts/streamSessions.ts`, the client in `ui/src/services/streamSessionsApi.ts`.
+
+| Method | Path | Does |
+|---|---|---|
+| `GET` | `/api/stream-sessions` | Sessions, newest first |
+| `GET` | `/api/stream-sessions/:id` | Status, per-chunk analysis, recording state |
+| `POST` | `/api/stream-sessions/:id/recording` | `{ action: 'start' \| 'stop' \| 'discard' }` |
+| `GET` | `/api/stream-sessions/:id/recording/export?format=wav\|flac\|mp3\|opus&bitrate=` | The stopped recording as a download |
+
+Analysis: each chunk (STORM slot, MM3 window) gets BPM, key and first onset from
+`server/src/services/streamSessions/analysis.ts`, the same code the STORM player imports for
+its crossfade timing, run on channel 0 at the chunk's own sample rate. The last 64 chunks are kept.
+
+Recording: between start and stop, Node appends each chunk's samples to a file exactly as the
+engine produced them. The export is that concatenation with a fresh WAV header, transcoded by
+ffmpeg for FLAC, MP3 (default 320 kbps) and Opus (default 160 kbps). No client mix,
+crossfade or device is in the path, so the export of an MM3 take is the song as rendered,
+while STORM slots are joined end to end without the player's crossfades. Device capture
+(the STORM player's MediaRecorder button) is separate and unchanged.
+
+Lifetime and caps (`LIMITS` in `services/streamSessions/index.ts`):
+
+- At most 16 sessions. At the cap the oldest ended session is evicted; if all are live, a new
+  stream plays without a session.
+- A recording stops itself at 2 GiB (`capped`); what it holds stays exportable.
+- At most 2 exports are built or downloaded at once; another gets 429. Exports stream from
+  disk, so a large recording is never held in memory.
+- A session with no chunk for 2 hours is ended. An ended session and its recording are deleted
+  30 minutes after it ends (`expiresAt`). Recordings left by an earlier server run are deleted
+  when the session store first loads.
+- A chunk that cannot be parsed, or that changes the audio format mid-recording, fails the
+  recording (`failed`, with `error`), as does a disk write that fails after stop; discard it to
+  start again. If Node cannot open a session at all, the stream plays without one.
+
+Stop, cancel and reconnect: the session ends when its stream ends, whether it finished or was
+stopped or aborted. Start fails with 409 after that, but stopping, exporting and discarding
+still work until the session expires. A reconnect opens a new stream and so a new session;
+recordings do not carry across.
+
+Access follows the stream routes: installation-scoped, no per-user check.
+
 ## Fixture capture (dev only)
 
 `POST /api/generate` can record each incoming body as a fixture, for comparing a later
