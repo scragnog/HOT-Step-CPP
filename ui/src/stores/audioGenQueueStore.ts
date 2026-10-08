@@ -468,14 +468,14 @@ export async function migrateAudioQueue(token: string, choice: 'hold' | 'resume'
   localStorage.setItem(OWNER_KEY, 'migrating');
   try {
     const items: ImportAudioQueue['items'] = [];
-    for (const item of backupItems(backup)) {
+    // Finished items are already reflected in the library; nothing needs to
+    // re-run them, so skip importing them into the live server queue.
+    for (const item of backupItems(backup).filter(i => i.status !== 'succeeded' && i.status !== 'failed')) {
       items.push({
         legacyId: item.id,
         request: await resolvedRequestForImport(item, token),
         meta: { view: item }, status: item.status, jobId: item.jobId,
         error: item.error,
-        ...(item.status === 'succeeded' ? { result: { audioUrls: item.audioUrl ? [item.audioUrl] : [],
-          songIds: item.songId ? [item.songId] : [] } } : {}),
       });
     }
     const receipt = await audioQueueApi.importLegacy(token, { backupId: backup.id, choice, items });
