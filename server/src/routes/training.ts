@@ -198,6 +198,7 @@ import {
 } from '../services/training/lyricStudioExport.js';
 import { datasetLanguage } from '../services/languageCodes.js';
 import { getGenerations, getLyricsSet } from '../db/lireekDb.js';
+import { trainingOperationsRouter } from '../services/training/operations.js';
 import type {
   AuditionListResponse, AuditionOptions, AuditionSideSpec,
   BulkSetInput, CaptionOptions, CreateDatasetInput, FieldSource, GeniusOptions, LabelOptions, LmSize,
@@ -210,6 +211,10 @@ import type {
 } from '../services/training/types.js';
 
 const router = Router();
+
+// Node-owned training operations (recipes, preparation, review): each domain
+// registers its handlers in services/training/operations.ts, not here.
+router.use('/ops', trainingOperationsRouter);
 
 const MIME_BY_EXT: Record<string, string> = {
   '.wav': 'audio/wav',

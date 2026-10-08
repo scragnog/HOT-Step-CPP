@@ -599,6 +599,12 @@ export async function proxyToWorker(req: Request, res: Response): Promise<void> 
   const w = getWorker(req.params.name as string);
   if (!w) { res.status(404).json({ error: `No training worker named ${req.params.name}` }); return; }
   if (!req.url.startsWith('/training/')) { res.status(403).json({ error: 'Only training routes are forwarded to a worker' }); return; }
+  // An operation names its worker in its body and is accepted here; it never
+  // travels through "Train on" (contracts/trainingOperation.ts).
+  if (/^\/training\/ops(\/|\?|$)/.test(req.url)) {
+    res.status(403).json({ error: 'Training operations go to this machine with an explicit worker, not through the worker proxy' });
+    return;
+  }
   const ac = new AbortController();
   res.on('close', () => ac.abort());
   const headers: Record<string, string> = {};
