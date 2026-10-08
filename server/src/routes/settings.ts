@@ -15,6 +15,7 @@ import {
   config,
 } from '../config.js';
 import { listGpus } from '../services/gpuDevices.js';
+import type { EnvResponse, EnvUpdateResponse, GpusResponse } from '../contracts/settings.js';
 
 const router = Router();
 
@@ -94,7 +95,7 @@ router.get('/env', (_req, res) => {
     res.json({
       values,
       restartKeys: [...RESTART_REQUIRED_KEYS],
-    });
+    } satisfies EnvResponse);
   } catch (err: any) {
     console.error('[Settings] Failed to read .env:', err.message);
     res.status(500).json({ error: err.message });
@@ -124,7 +125,7 @@ router.post('/env', (req, res) => {
     }
 
     if (Object.keys(safeUpdates).length === 0) {
-      res.json({ updated: [], restartRequired: false });
+      res.json({ updated: [], restartRequired: false } satisfies EnvUpdateResponse);
       return;
     }
 
@@ -167,7 +168,7 @@ router.post('/env', (req, res) => {
     res.json({
       updated: [...updatedKeys],
       restartRequired,
-    });
+    } satisfies EnvUpdateResponse);
   } catch (err: any) {
     console.error('[Settings] Failed to update .env:', err.message);
     res.status(500).json({ error: err.message });
@@ -188,7 +189,7 @@ router.post('/env', (req, res) => {
  * (issue #153). UUIDs have no ordering to get wrong.
  */
 router.get('/gpus', async (_req, res) => {
-  res.json({ gpus: await listGpus() });
+  res.json({ gpus: await listGpus() } satisfies GpusResponse);
 });
 
 export default router;

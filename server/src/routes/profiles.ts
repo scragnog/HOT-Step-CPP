@@ -17,6 +17,9 @@ import { Router } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { config } from '../config.js';
+import type {
+  ProfileFile, ListProfilesResponse, SaveProfileResponse, RenameProfileResponse, DeleteProfileResponse,
+} from '../contracts/profiles.js';
 
 const router = Router();
 
@@ -33,12 +36,6 @@ function safeName(name: string): string {
 
 function profilePath(name: string): string {
   return path.join(profilesDir(), `${safeName(name)}.json`);
-}
-
-interface ProfileFile {
-  name: string;
-  saved_at: string;
-  data: Record<string, unknown>;
 }
 
 function readProfile(name: string): ProfileFile | null {
@@ -64,7 +61,7 @@ router.get('/', (_req, res) => {
     const profiles = names
       .map(name => readProfile(name))
       .filter((p): p is ProfileFile => p !== null && !!p.data);
-    res.json({ profiles, count: profiles.length });
+    res.json({ profiles, count: profiles.length } satisfies ListProfilesResponse);
   } catch (err: any) {
     console.error('[Profiles] list failed:', err.message);
     res.status(500).json({ error: err.message });
@@ -100,7 +97,7 @@ router.post('/', (req, res) => {
   try {
     fs.writeFileSync(profilePath(name), JSON.stringify(profile, null, 2), 'utf8');
     console.log(`[Profiles] Saved '${profile.name}'`);
-    res.json({ ok: true, name: profile.name, saved_at: profile.saved_at });
+    res.json({ ok: true, name: profile.name, saved_at: profile.saved_at } satisfies SaveProfileResponse);
   } catch (err: any) {
     console.error('[Profiles] save failed:', err.message);
     res.status(500).json({ error: 'failed to write profile' });
@@ -137,7 +134,7 @@ router.patch('/:name', (req, res) => {
     fs.writeFileSync(dst, JSON.stringify(profile, null, 2), 'utf8');
     if (!sameFile) fs.unlinkSync(src);
     console.log(`[Profiles] Renamed '${oldName}' -> '${dstName}'`);
-    res.json({ ok: true, name: dstName });
+    res.json({ ok: true, name: dstName } satisfies RenameProfileResponse);
   } catch (err: any) {
     console.error('[Profiles] rename failed:', err.message);
     res.status(500).json({ error: 'failed to rename profile' });
@@ -154,7 +151,7 @@ router.delete('/:name', (req, res) => {
   try {
     fs.unlinkSync(p);
     console.log(`[Profiles] Deleted '${req.params.name}'`);
-    res.json({ ok: true, deleted: req.params.name });
+    res.json({ ok: true, deleted: req.params.name } satisfies DeleteProfileResponse);
   } catch (err: any) {
     console.error('[Profiles] delete failed:', err.message);
     res.status(500).json({ error: 'delete failed' });
