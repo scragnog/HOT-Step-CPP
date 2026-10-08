@@ -70,9 +70,12 @@ export const RecentExtractions: React.FC<RecentExtractionsProps> = ({ onSelectJo
 
       <div style={styles.list}>
         {jobs.map(job => (
-          <button
+          <div
             key={job.id}
+            role="button"
+            tabIndex={0}
             onClick={() => onSelectJob(job.id)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectJob(job.id); } }}
             style={{
               ...styles.jobItem,
               background: activeJobId === job.id ? 'rgba(167,139,250,0.12)' : 'rgba(255,255,255,0.02)',
@@ -101,7 +104,7 @@ export const RecentExtractions: React.FC<RecentExtractionsProps> = ({ onSelectJo
                 <Trash2 size={12} />
               </button>
             </div>
-          </button>
+          </div>
         ))}
       </div>
     </div>

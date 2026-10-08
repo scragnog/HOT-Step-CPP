@@ -8,6 +8,7 @@ import type { Generation, Profile } from '../../services/lireekApi';
 import { StreamingPanel } from './StreamingPanel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { ParamLabel } from '../shared/ParamLabel';
+import { getCachedProviders } from './ProviderSelector';
 import { useStreamingStore, startStreamGenerate } from '../../stores/streamingStore';
 import { useBackendStore } from '../../stores/backendStore';
 import { MM3_BACKEND_ID } from '../../utils/captionForBackend';
@@ -330,6 +331,19 @@ const Yue2PlannerCaptionField: React.FC<{ gen: Generation; onSave: (value: strin
   </div>
 );
 
+/** Falls back to the first cached provider when the wired-in selection is
+ *  still empty — covers first-load clicks that land before the picker's own
+ *  provider fetch resolves. Pure, so it's tested without the network. */
+export function resolveGenerationProvider(
+  model: { provider: string; model?: string },
+  cachedProviders: Array<{ id: string; default_model: string }>,
+): { provider: string; model?: string } {
+  if (model.provider) return model;
+  const first = cachedProviders[0];
+  if (!first) return model;
+  return { provider: first.id, model: model.model || first.default_model };
+}
+
 interface WrittenSongsTabProps {
   generations: Generation[];
   profiles: Profile[];
@@ -441,12 +455,24 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
 
     const profile = profiles[0];
     try {
+        // generationModel comes from the lifted selection in LyricStudioV2,
+        // which the picker only fills in once its own provider fetch resolves.
+        // On first load the button is clickable before that happens, so fall
+        // back to the same cache the picker uses rather than send an empty
+        // provider the server will reject.
+        const resolved = generationModel.provider
+          ? generationModel
+          : resolveGenerationProvider(generationModel, await getCachedProviders());
+        if (!resolved.provider) {
+          showToast('No LLM provider available');
+          return;
+        }
         await startStreamGenerate(
           profile.id,
           {
             profile_id: profile.id,
-            provider: generationModel.provider,
-            model: generationModel.model,
+            provider: resolved.provider,
+            model: resolved.model,
             user_subject: userSubject.trim() || undefined,
             no_think: noThink || undefined,
             count: genCount,
@@ -650,9 +676,12 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
                 className={`rounded-xl border border-zinc-200 dark:border-white/5 hover:border-zinc-300 dark:border-white/10 overflow-hidden transition-colors ls2-card-in ls2-stagger-${Math.min(idx + 1, 11)}`}
               >
                 {/* Header */}
-                <button
-                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors cursor-pointer"
                   onClick={() => setExpandedId(isExpanded ? null : gen.id)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpandedId(isExpanded ? null : gen.id); } }}
                 >
                   {isExpanded
                     ? <ChevronDown className="w-4 h-4 text-zinc-500 flex-shrink-0" />
@@ -704,7 +733,7 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
                       <span className="text-[11px] text-zinc-500 font-mono">{gen.key}</span>
                     ) : null}
                   </div>
-                </button>
+                </div>
 
                 {/* Expanded content */}
                 {isExpanded && (

@@ -21,7 +21,7 @@ let _providerCache: LlmProviderInfo[] | null = null;
 let _providerCacheTime = 0;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-async function getCachedProviders(forceRefresh = false): Promise<LlmProviderInfo[]> {
+export async function getCachedProviders(forceRefresh = false): Promise<LlmProviderInfo[]> {
   const now = Date.now();
   if (!forceRefresh && _providerCache && (now - _providerCacheTime) < CACHE_TTL_MS) {
     return _providerCache;
