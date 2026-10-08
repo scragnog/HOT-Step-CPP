@@ -31,6 +31,10 @@ export interface PresetEntry<B> {
   /** The last body known on the server, or null if there is none (not
    *  created yet, or deleted elsewhere). */
   serverBody: B | null;
+  /** False after a conflict whose read-back failed: revision and serverBody
+   *  are then only the last known values, and reapply refreshes first rather
+   *  than deciding from them. */
+  serverKnown: boolean;
   status: PresetEntryStatus;
   /** What reapply will send, for a 'failed' or 'conflict' entry. */
   pendingOp: 'create' | 'update' | 'delete' | null;
@@ -172,11 +176,11 @@ export class PresetCollection<B extends Record<string, unknown>> {
     const localById = new Map(local.filter(e => e.id).map(e => [e.id!, e]));
     const entries: PresetEntry<B>[] = documents.map(d => {
       const mine = localById.get(d.id);
-      return mine ? { ...mine, revision: d.revision, serverBody: d.body } : fromDocument(d);
+      return mine ? { ...mine, revision: d.revision, serverBody: d.body, serverKnown: true } : fromDocument(d);
     });
     for (const e of local) {
       if (!e.id) entries.push(e);
-      else if (!byId.has(e.id)) entries.push({ ...e, serverBody: null, error: e.error ?? 'This preset was deleted elsewhere' });
+      else if (!byId.has(e.id)) entries.push({ ...e, serverBody: null, serverKnown: true, error: 'This preset was deleted elsewhere' });
     }
     this.set({ entries });
   }
@@ -188,7 +192,7 @@ export class PresetCollection<B extends Record<string, unknown>> {
   async create(body: B): Promise<string> {
     const key = `tmp-${++this.tempSeq}`;
     this.set({ entries: [...this.snap.entries, {
-      key, id: null, revision: 0, body, serverBody: null, status: 'creating', pendingOp: 'create', error: null,
+      key, id: null, revision: 0, body, serverBody: null, serverKnown: true, status: 'creating', pendingOp: 'create', error: null,
     }] });
     return this.runCreate(key);
   }
@@ -272,8 +276,17 @@ export class PresetCollection<B extends Record<string, unknown>> {
   /** Send the entry's pending create, update or delete again, at the
    *  revision last read from the server. */
   async reapply(key: string): Promise<void> {
-    const e = this.entry(key);
+    let e = this.entry(key);
     if (!e?.pendingOp) return;
+    if (!e.serverKnown) {
+      // Decide from a confirmed server state, never from a failed read.
+      try { await this.refresh(); } catch (err) {
+        this.patch(key, { error: `Could not read the current version: ${message(err)}. Try again.` });
+        return;
+      }
+      e = this.entry(key);
+      if (!e?.pendingOp) return;
+    }
     if (e.pendingOp === 'create' || (e.pendingOp === 'update' && e.serverBody === null)) {
       // Never created, or deleted elsewhere: create it again from the edit.
       this.patch(key, { id: null, revision: 0, status: 'creating', pendingOp: 'create' });
@@ -295,6 +308,8 @@ export class PresetCollection<B extends Record<string, unknown>> {
     if (!e) return;
     if (!e.id || e.serverBody === null) { this.drop(key); return; }
     this.patch(key, { body: e.serverBody, status: 'saved', pendingOp: null, error: null });
+    // A last-known copy (the read-back failed) is replaced by the server's.
+    if (!e.serverKnown) void this.refresh().catch(() => {});
   }
 
   /** A failed write: a conflict when the document moved on (or is gone),
@@ -308,18 +323,28 @@ export class PresetCollection<B extends Record<string, unknown>> {
       this.patch(key, { status: 'failed', pendingOp: op, error: `${op === 'delete' ? 'Delete' : 'Save'} failed: ${message(err)}` });
       return;
     }
-    let current: TypedDocument<B> | undefined;
-    try { current = (await this.api.list<B>(this.opts.family)).documents.find(d => d.id === e.id); } catch { /* keep what we know */ }
+    if (status === 404) {
+      this.patch(key, { status: 'conflict', pendingOp: op, serverBody: null, serverKnown: true, error: 'This preset was deleted elsewhere.' });
+      return;
+    }
+    // A 409: read the current version back. If that read fails the server
+    // state is unknown, not absent: keep the last known copy and say so.
+    let documents: TypedDocument<B>[] | null = null;
+    try { documents = (await this.api.list<B>(this.opts.family)).documents; } catch { /* unknown */ }
+    const current = documents?.find(d => d.id === e.id);
     this.patch(key, {
       status: 'conflict', pendingOp: op,
-      ...(current ? { revision: current.revision, serverBody: current.body } : { serverBody: null }),
-      error: current ? 'Changed elsewhere. Refresh to see it, or reapply your change over it.' : 'This preset was deleted elsewhere.',
+      ...(documents === null ? { serverKnown: false }
+        : current ? { revision: current.revision, serverBody: current.body, serverKnown: true }
+        : { serverBody: null, serverKnown: true }),
+      error: documents === null ? 'Changed elsewhere, and the current version could not be read. Refresh before reapplying.'
+        : current ? 'Changed elsewhere. Refresh to see it, or reapply your change over it.' : 'This preset was deleted elsewhere.',
     });
   }
 }
 
 function fromDocument<B>(d: TypedDocument<B>): PresetEntry<B> {
-  return { key: d.id, id: d.id, revision: d.revision, body: d.body, serverBody: d.body, status: 'saved', pendingOp: null, error: null };
+  return { key: d.id, id: d.id, revision: d.revision, body: d.body, serverBody: d.body, serverKnown: true, status: 'saved', pendingOp: null, error: null };
 }
 
 function readFlag(key: string): boolean {

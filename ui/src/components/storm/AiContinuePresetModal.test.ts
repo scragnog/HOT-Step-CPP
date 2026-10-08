@@ -134,3 +134,90 @@ test('presets: a failed create keeps its label and value; a failed delete stays 
     assert.equal(style.getSnapshot().entries.some(e => e.key === saved.key), false);
   });
 });
+
+test('a failed save never resends an older value over a newer edit, and waits for retry', async () => {
+  await withBrowser(async fake => {
+    _resetAiContinueStateForTests();
+    fake.seed('ai-continue-template', { template: 'base' });
+    const { template } = aiContinueState();
+    await template.hydrate();
+    fake.failNext(isPut, 500);
+    const release = fake.hold(isPut);
+    template.edit('older');
+    await tick();
+    template.edit('latest');
+    release();
+    await template.settled();
+    assert.deepEqual(fake.calls.filter(isPut).map(c => c.body.body.template), ['older']);
+    assert.equal(template.getSnapshot().status, 'failed');
+    assert.equal(template.getSnapshot().value, 'latest');
+    assert.equal(serverTemplate(fake)!.body.template, 'base');
+
+    await template.reapply();
+    assert.equal(template.getSnapshot().status, 'idle');
+    assert.equal(serverTemplate(fake)!.body.template, 'latest');
+  });
+});
+
+test('a 409 pauses saving even when reading the current value back fails', async () => {
+  await withBrowser(async fake => {
+    _resetAiContinueStateForTests();
+    const doc = fake.seed('ai-continue-template', { template: 'base' });
+    const { template } = aiContinueState();
+    await template.hydrate();
+    fake.touch(doc.id, { template: 'theirs' });
+    fake.failNext(c => isGet(c), 500);
+    template.edit('mine');
+    await template.settled();
+    assert.equal(template.getSnapshot().status, 'conflict');
+    assert.equal(template.getSnapshot().serverValue, null);
+    template.edit('mine 2');
+    await template.settled();
+    assert.equal(fake.count('PUT'), 1);
+    assert.equal(serverTemplate(fake)!.body.template, 'theirs');
+  });
+});
+
+test('presets: a conflict whose read-back fails is not taken as a deletion; reapply refreshes first', async () => {
+  await withBrowser(async fake => {
+    _resetAiContinueStateForTests();
+    const d = fake.seed('ai-continue-style', { label: 'One', value: 'base' });
+    const { style } = aiContinueState();
+    await style.load();
+    fake.touch(d.id, { label: 'One', value: 'theirs' });
+    fake.failNext(c => c.method === 'GET' && c.path.includes('/presets/'), 500);
+    style.update(d.id, { label: 'One', value: 'mine' });
+    await tick(); await tick();
+    const e = style.getSnapshot().entries.find(x => x.key === d.id)!;
+    assert.equal(e.status, 'conflict');
+    assert.equal(e.serverKnown, false);
+    assert.equal(e.id, d.id);
+    assert.doesNotMatch(e.error!, /deleted/);
+
+    await style.reapply(d.id);
+    assert.equal(fake.docs.filter(x => x.family === 'ai-continue-style').length, 1);
+    assert.equal((fake.docs[0]!.body as any).value, 'mine');
+    assert.equal(style.getSnapshot().entries.find(x => x.key === d.id)!.status, 'saved');
+  });
+});
+
+test('presets: a pending delete whose conflict read-back fails is not dropped until the server confirms', async () => {
+  await withBrowser(async fake => {
+    _resetAiContinueStateForTests();
+    const d = fake.seed('ai-continue-style', { label: 'One', value: 'base' });
+    const { style } = aiContinueState();
+    await style.load();
+    fake.touch(d.id, { label: 'One', value: 'theirs' });
+    fake.failNext(c => c.method === 'GET' && c.path.includes('/presets/'), 500);
+    await style.remove(d.id);
+    // Reapply while the server still cannot be read: nothing is decided.
+    fake.failNext(c => c.method === 'GET' && c.path.includes('/presets/'), 500);
+    await style.reapply(d.id);
+    assert.equal(style.getSnapshot().entries.some(x => x.key === d.id), true);
+    assert.equal(fake.docs.length, 1);
+    // Once it can be read, the delete goes through at the current revision.
+    await style.reapply(d.id);
+    assert.equal(style.getSnapshot().entries.some(x => x.key === d.id), false);
+    assert.equal(fake.docs.length, 0);
+  });
+});

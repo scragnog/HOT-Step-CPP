@@ -295,7 +295,7 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
                 {templateSnap.error && (
                   <div className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg bg-red-950/40 border border-red-900 text-[10px] text-red-300" role="alert">
                     <span className="flex-1">{templateSnap.error} Your edit is still shown below{templateSnap.status === 'conflict' ? ' and is not being saved' : ''}.</span>
-                    {templateSnap.status === 'conflict' && (
+                    {templateSnap.status === 'conflict' && templateSnap.serverValue !== null && (
                       <button onClick={() => server.template.useServer()} className="underline flex-shrink-0">Use theirs</button>
                     )}
                     <button onClick={() => void server.template.reapply()} className="underline flex-shrink-0">

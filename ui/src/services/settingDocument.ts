@@ -13,6 +13,7 @@
 //   The user then takes the server's value or reapplies theirs over it.
 import type { ImportPreferenceItem, SettingsFamily } from './preferencesApi';
 import { hashImportValue, preferencesApi } from './preferencesApi';
+import { WorkflowRequestError } from './workflowApi';
 
 export type SettingStatus = 'loading' | 'idle' | 'saving' | 'conflict' | 'failed';
 
@@ -128,7 +129,8 @@ export class SettingDocument {
   }
 
   private async flush(): Promise<void> {
-    if (this.pending === undefined || this.snap.status === 'conflict') return;
+    // After a failure, saves wait for retry (reapply) or a new edit.
+    if (this.pending === undefined || this.snap.status === 'conflict' || this.snap.status === 'failed') return;
     const value = this.pending;
     this.pending = undefined;
     try {
@@ -136,15 +138,18 @@ export class SettingDocument {
       this.revision = document.revision;
       if (this.pending === undefined) this.set({ status: 'idle', serverValue: null, error: null });
     } catch (err) {
-      this.pending = value;
+      // What retry will send: the latest edit, never an older value over it.
+      this.pending = undefined;
+      const is409 = err instanceof WorkflowRequestError && err.status === 409;
       // Moved on elsewhere (or created by another client first): a conflict.
       let current: { revision: number; body: Record<string, unknown> } | null = null;
-      try { current = (await this.api.get<Record<string, unknown>>(this.opts.family)).document; } catch { /* unknown: treat as a plain failure */ }
-      if (current && current.revision !== this.revision) {
-        this.revision = current.revision;
-        this.pending = undefined;
-        this.set({ status: 'conflict', serverValue: this.opts.read(current.body),
-          error: 'This setting was changed elsewhere. Use theirs, or reapply yours over it.' });
+      let readBack = true;
+      try { current = (await this.api.get<Record<string, unknown>>(this.opts.family)).document; } catch { readBack = false; }
+      if (is409 || (current && current.revision !== this.revision)) {
+        if (current) this.revision = current.revision;
+        this.set({ status: 'conflict', serverValue: current ? this.opts.read(current.body) : null,
+          error: readBack ? 'This setting was changed elsewhere. Use theirs, or reapply yours over it.'
+            : 'This setting was changed elsewhere, and its current value could not be read. Reapply to try again.' });
       } else {
         this.set({ status: 'failed', error: `Save failed: ${message(err)}` });
       }
