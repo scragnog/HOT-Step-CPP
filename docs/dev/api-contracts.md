@@ -491,3 +491,30 @@ or neither does.
 
 Jobs and events live in `workflow_jobs` and `workflow_events`, documents in
 `workflow_documents`, all created on first use.
+
+## UI transport client
+
+`ui/src/services/httpClient.ts` is the one configurable client for every route above: a base
+URL (default `/api`), bearer auth, `AbortSignal` cancellation, JSON `get/post/patch/put/delete`,
+a multipart `upload()` (XHR, so it can report progress fetch cannot), `streamUrl()` for an
+EventSource URL under the client's base, and `mediaUrl()` for `/audio` and `/references` src
+attributes. It is the transport underneath `api.ts`; studios with their own client file
+(`lireekApi.ts`, `trainingApi.ts`, `stemStudioApi.ts`, and the other per-studio clients) keep
+their current fetch wrappers and move onto it incrementally in later slices, not in one pass.
+SSE connection sharing is not reimplemented here — `sharedEventSource.ts` already dedupes one
+`EventSource` per URL per tab; this client only builds the URL a caller hands it.
+
+Every non-OK response throws `ApiError(status, message, body, currentRevision?, reason?)` — a
+superset of `workflowApi.ts`'s `WorkflowRequestError`, so a revisioned caller (document/job
+writes, song-builder sections) can switch to this client later without losing the stale-revision
+or unsupported-version detail. `message` is the server's `error` field, or `API error: <status>`
+when the body is not JSON. A caller that already does `catch (e) { ... e.message }` needs no
+change, since `ApiError extends Error`.
+
+Compatibility: this client changes no request body, header or route — it is a drop-in
+replacement for the fetch calls it wraps. `api.ts`'s own `get/post/patch/del` now delegate to it;
+`generateApi.selectedPath` keeps its 404-means-legacy-server fallback. Call sites with their own
+error shape (`builderOp`'s `WorkflowRequestError`, the post-processing endpoints' `alreadyProcessed`
+flag, `vstApi.updateChain`'s no-throw `.then(r => r.json())`) are left untouched rather than
+folded in and risking a silent behavior change; they are candidates for a later slice once each
+one's special case has an equivalent on `ApiError` or its own typed subclass.

@@ -213,7 +213,7 @@ Three upstream files carry `#include` hooks into HOT-Step code (`pipeline-synth-
 | `ui/src/App.tsx` | View routing. Views: create (default), `insta-gen`, `lyric-studio`, `cover-studio`, `stem-studio`, `stem-builder`, `song-builder`, `storm`, `midi-studio`, `training-studio`, `repaint`, `library`, `settings` |
 | `ui/src/components/<studio>/` | One folder per studio or panel. `global-bar/` is the parameter bar shared by all generation views; `shared/` holds reusable pieces |
 | `ui/src/stores/` | Zustand stores. `globalParamsStore.ts` holds generation params; others cover playback, backends, streaming, training, VST chain, post-processing |
-| `ui/src/services/` | Fetch wrappers. `api.ts` is the main one (base `/api`); studios with large surfaces have their own (`lireekApi.ts`, `trainingApi.ts`, `stemStudioApi.ts` and so on) |
+| `ui/src/services/` | Fetch wrappers. `httpClient.ts` is the shared transport (JSON/multipart/auth/cancellation/typed `ApiError`); `api.ts` is the main caller (base `/api`). Studios with large surfaces still have their own client file (`lireekApi.ts`, `trainingApi.ts`, `stemStudioApi.ts` and so on), moving onto `httpClient.ts` incrementally rather than in one pass |
 | `ui/src/hooks/` | Shared hooks such as `useCapabilities.ts` and `usePluginRegistry.ts` |
 | `ui/src/i18n/locales/` | UI strings. `en.json` is the source for control labels |
 
