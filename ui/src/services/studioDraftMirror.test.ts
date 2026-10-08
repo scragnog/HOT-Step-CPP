@@ -30,8 +30,14 @@ function harness(failNext?: (call: string) => Error | null) {
       return { document: { id, revision: doc.revision, body } };
     },
   };
-  const mirror = createDraftMirror({ api: api as never, pointer: { read: () => pointer, write: v => { pointer = v; } }, onError: m => { error = m; } });
-  return { mirror, docs, calls, pointer: () => pointer, error: () => error };
+  const store = { read: () => pointer, write: (v: DraftPointer) => { pointer = v; } };
+  const mirror = createDraftMirror({ api: api as never, pointer: store, onError: m => { error = m; } });
+  /** Another editor (a second tab) on the same browser pointer and server. */
+  const another = () => {
+    let own = '';
+    return { mirror: createDraftMirror({ api: api as never, pointer: store, onError: m => { own = m; } }), error: () => own };
+  };
+  return { mirror, docs, calls, another, pointer: () => pointer, error: () => error };
 }
 
 const body = (fields: Record<string, unknown>): StudioDraftBody => ({ studio: 'create', fields });
@@ -51,13 +57,46 @@ test('first save creates, later saves update with the expected revision, unchang
 test('a conflict keeps both: the other writer keeps its draft, this edit becomes a new one', async () => {
   const h = harness();
   await h.mirror.save('t', body({ 'hs-caption': 'mine' }));
-  // Another client (or a headless caller) writes the same draft.
+  // A headless caller writes the same draft.
   h.docs.get('d1')!.revision = 5; h.docs.get('d1')!.body = body({ 'hs-caption': 'theirs' });
   await h.mirror.save('t', body({ 'hs-caption': 'mine, edited' }));
   assert.deepEqual(h.docs.get('d1')!.body.fields, { 'hs-caption': 'theirs' });
   assert.deepEqual(h.docs.get('d2')!.body.fields, { 'hs-caption': 'mine, edited' });
   assert.equal(h.pointer()!.id, 'd2');
   assert.match(h.error(), /new draft/);
+});
+
+test('two editors sharing one browser pointer never overwrite each other', async () => {
+  const h = harness();
+  await h.mirror.save('t', body({ 'hs-caption': 'start' }));
+  // Two tabs open from the same pointer (d1 at revision 1).
+  const tabA = h.another(), tabB = h.another();
+  await tabA.mirror.save('t', body({ 'hs-caption': 'A' }));
+  assert.equal(h.pointer()!.revision, 2);
+  // B still holds the form it opened with; the shared pointer must not lend it A's revision.
+  await tabB.mirror.save('t', body({ 'hs-caption': 'B' }));
+  assert.deepEqual(h.docs.get('d1')!.body.fields, { 'hs-caption': 'A' });
+  assert.deepEqual(h.docs.get('d2')!.body.fields, { 'hs-caption': 'B' });
+  assert.ok(h.calls.includes('update d1@1'));
+  assert.match(tabB.error(), /new draft/);
+});
+
+test('loading a draft adopts it and drops the old form queued and in-flight saves', async () => {
+  const h = harness();
+  await h.mirror.save('t', body({ 'hs-caption': 'old' }));
+  const other = { id: 'd9', revision: 4, body: body({ 'hs-caption': 'loaded' }) };
+  h.docs.set('d9', { revision: 4, body: other.body });
+  const inFlight = h.mirror.save('t', body({ 'hs-caption': 'old, edited' }));
+  void h.mirror.save('t', body({ 'hs-caption': 'old, edited again' }));
+  assert.equal(h.mirror.unsaved(body({ 'hs-caption': 'old, edited again' })), true);
+  h.mirror.adopt(other as never);
+  await inFlight;
+  assert.deepEqual(h.pointer(), { id: 'd9', revision: 4, saved: JSON.stringify(other.body) });
+  assert.equal(h.mirror.unsaved(other.body), false);
+  // The loaded form saves into the loaded draft at its revision.
+  await h.mirror.save('t', body({ 'hs-caption': 'loaded, edited' }));
+  assert.deepEqual(h.docs.get('d9')!.body.fields, { 'hs-caption': 'loaded, edited' });
+  assert.equal(h.calls.at(-1), 'update d9@4');
 });
 
 test('a failed save shows an error, keeps the pointer and retries with the next edit', async () => {

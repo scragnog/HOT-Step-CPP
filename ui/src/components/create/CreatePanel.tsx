@@ -19,7 +19,9 @@ import { CoverArtSubjectSection } from '../shared/CoverArtSubjectSection';
 import { AiGenerateModal, type AiGenerateResult } from './AiGenerateModal';
 import { Mm3ComposeButton } from './Mm3ComposeButton';
 import { TrainingDraftBar } from './TrainingDraftBar';
+import { createContentParams } from './createContent';
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
+import { StudioDraftPicker } from '../shared/StudioDraftPicker';
 import { useBackendStore } from '../../stores/backendStore';
 import { expandWildcards, hasWildcards, randomWildcardSeed } from '../../utils/wildcardUtils';
 import {
@@ -70,17 +72,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   const [introBars, setIntroBars] = usePersistedState('hs-intro-bars', 2);
   const [autoExpand, setAutoExpand] = usePersistedState('hs-main-auto-expand', false);
 
-  // LoRA trigger word prepended, beat intro/outro request appended
-  const buildCaption = useCallback((base: string) => {
-    const trigger = loraTrigger.trim();
-    const start = base.trimStart();
-    const hasTrigger = trigger.length > 0
-      && start.slice(0, trigger.length).toLowerCase() === trigger.toLowerCase()
-      && (start.length === trigger.length || /[,\s]/.test(start[trigger.length]));
-    const loraText = trigger && !hasTrigger ? `${trigger}, ` : '';
-    const beatText = beatIntro ? `, with a clean ${introBars}-bar percussive intro and outro for DJ mixing` : '';
-    return `${loraText}${base}${beatText}`;
-  }, [loraTrigger, beatIntro, introBars]);
 
   // ── Song Info (optional, auto-populated from Lyric Studio Send to Create) ──
   const [title, setTitle] = usePersistedState('hs-title', '');
@@ -340,7 +331,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   const { token } = useAuth();
   // The form and its caption choices, mirrored into this browser's server draft.
   const activeBackendId = useBackendStore(s => s.activeBackendId);
-  const draftError = useStudioDraftMirror('create', token, {
+  const draft = useStudioDraftMirror('create', token, {
     'hs-caption': caption, 'hs-lyrics': lyrics, 'hs-negative-prompt': negativePrompt, 'hs-instrumental': instrumental,
     'hs-lora-trigger': loraTrigger, 'hs-beat-intro': beatIntro, 'hs-intro-bars': introBars,
     'hs-title': title, 'hs-artist': artist, 'hs-subject': subject, 'hs-bpm': bpm, 'hs-keyScale': keyScale,
@@ -349,6 +340,13 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     'hs-mm3CaptionSources': mm3Sources, 'hs-yue2CaptionDataset': yue2DatasetChoice,
     ...(yue2Ds.datasetId ? { [`hs-yue2CaptionSource:ds:${yue2Ds.datasetId}`]: yue2Selection } : {}),
   }, activeBackendId ? { backendId: activeBackendId } : {});
+  // A loaded draft goes through the same persisted keys the form reads, so
+  // every field and caption choice updates as if typed. Nothing is generated.
+  const applyDraft = useCallback((body: { fields: Record<string, unknown> }) => {
+    for (const [key, value] of Object.entries(body.fields)) if (key.startsWith('hs-')) writePersistedState(key, value);
+    const selection = yue2Ds.datasetId ? body.fields[`hs-yue2CaptionSource:ds:${yue2Ds.datasetId}`] : undefined;
+    if (selection && typeof selection === 'object') setYue2Selection(selection as Yue2CaptionSelection);
+  }, [yue2Ds.datasetId]);
   const yue2PreviewScore = useGlobalParamsStore((s: any) => !!s.backendParams?.yue2PreviewScore);
   const yue2AbcSupplied = useGlobalParamsStore((s: any) => typeof s.backendParams?.yue2Abc === 'string' && !!s.backendParams.yue2Abc.trim());
   const [scorePreview, setScorePreview] = useState<{ open: boolean; params: Partial<GenerationParams> | null; data: Yue2ScorePreviewData | null; error: string | null }>(
@@ -452,29 +450,10 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     const resolvedLyrics = autoExpand && hasWildcards(lyrics)
       ? expandWildcards(lyrics, wcSeed, 0) : lyrics;
 
-    const params: Partial<GenerationParams> = {
-      caption: buildCaption(resolvedCaption),
-      lyrics: instrumental ? '[Instrumental]' : resolvedLyrics,
-      ...(negativePrompt.trim() ? { negative_prompt: negativePrompt.trim() } : {}),
-      instrumental,
-      bpm, keyScale, timeSignature, vocalLanguage,
-      // MM3 has no length input — a duration there is a frame cap that can only
-      // truncate the planner's own ending, so every MM3 render is auto. The
-      // control is hidden in MM3 mode (MetadataSection), and this stops the
-      // persisted ACE value riding along behind it. The backend enforces the
-      // same thing, so a stale row or a direct API call cannot reinstate a cap.
-      duration: mm3Mode ? -1 : duration,
-      // vocalGender is deliberately NOT sent: neither backend has a wire field
-      // for it. It reaches the model only by being written into the caption's
-      // Vocal Details section by Mm3ComposeButton, and the caption is what
-      // travels. Adding it to the request would create another dead knob.
-      taskType: 'text2music',
-    };
-    // Optional song info fields — only include if populated
-    if (title.trim()) params.title = title.trim();
-    if (artist.trim()) params.artist = artist.trim();
-    if (subject.trim()) params.subject = subject.trim();
-    if (sourceLatentUrl) params.sourceLatentUrl = sourceLatentUrl;
+    const params = createContentParams({
+      caption, lyrics, negativePrompt, instrumental, loraTrigger, beatIntro, introBars,
+      title, artist, subject, bpm, keyScale, timeSignature, duration, vocalLanguage, sourceLatentUrl,
+    }, { mm3Mode, resolvedCaption, resolvedLyrics });
     // A pasted lead sheet (#181) is the score; previewing would plan a new one
     // and throw it away.
     if (yue2Mode && yue2PreviewScore && !yue2AbcSupplied) {
@@ -504,7 +483,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   return (
     <div className="h-full flex flex-col bg-zinc-50 dark:bg-suno">
       <TrainingDraftBar />
-      {draftError && <p className="px-4 py-1 text-[11px] text-amber-600 dark:text-amber-400">{draftError}</p>}
+      <StudioDraftPicker control={draft} textKey="hs-title" apply={applyDraft} />
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/5">
         <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{t('createPanel.title')}</h2>

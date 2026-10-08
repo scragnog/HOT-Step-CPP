@@ -1,5 +1,6 @@
 // Slice I consumer parity: what Create, Cover and Repaint mirror into their
 // drafts, and the training-to-Create handoff read through the drafts adapter.
+// Request parity for resumed and applied drafts: ui/src/components/create/createContent.test.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
@@ -91,3 +92,4 @@ test('a training handoff reads back unchanged through the drafts adapter, resets
   }
   assert.throws(() => drafts.handoff('other-user', docs.list('u', 'training-audition-create')[0].id));
 });
+

@@ -29,6 +29,7 @@ import {
   type AudioMetadata, type AudioAnalysis,
 } from './coverStudioUtils';
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
+import { StudioDraftPicker } from '../shared/StudioDraftPicker';
 import type { LatentMetadata } from '../shared/LatentImport';
 import { loadSelections, saveSelections } from '../lyric-studio/ProviderSelector';
 import { useBackendStore } from '../../stores/backendStore';
@@ -288,8 +289,51 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => { persist('sepLevel', sepLevel); }, [sepLevel]);
   // The editing fields, mirrored into this browser's revisioned server draft.
   // coverDraftId/Revision stay local: they point at the workflow's cover-draft.
-  const draftError = useStudioDraftMirror('cover', token, { 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel },
+  const draft = useStudioDraftMirror('cover', token, { 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel },
     { ...(sourceAssetId ? { sourceAssetId } : {}), ...(sourceSongId ? { sourceSongId } : {}) });
+  // Loading a draft sets the same state the controls edit. Its uploaded source
+  // gets a fresh cover-draft from the stored analysis (no re-analysis, no job
+  // beyond opening the source); nothing is generated.
+  const applyDraft = (body: { fields: Record<string, unknown> }) => {
+    const f = body.fields;
+    sourceLookupRef.current++;
+    captionRequestRef.current++;
+    setCoverDraftId(''); setCoverDraftRevision(0);
+    if (Object.hasOwn(f, 'cover-studio-sourceFileName')) setSourceFileName(f['cover-studio-sourceFileName'] as never);
+    if (Object.hasOwn(f, 'cover-studio-sourceAudioUrl')) setSourceAudioUrl(f['cover-studio-sourceAudioUrl'] as never);
+    if (Object.hasOwn(f, 'cover-studio-sourceAssetId')) setSourceAssetId(f['cover-studio-sourceAssetId'] as never);
+    if (Object.hasOwn(f, 'cover-studio-sourceSongId')) setSourceSongId(f['cover-studio-sourceSongId'] as never);
+    if (Object.hasOwn(f, 'cover-studio-metadata')) setMetadata(f['cover-studio-metadata'] as never);
+    if (Object.hasOwn(f, 'cover-studio-analysis')) setAnalysis(f['cover-studio-analysis'] as never);
+    if (Object.hasOwn(f, 'cover-studio-songArtist')) setSongArtist(f['cover-studio-songArtist'] as never);
+    if (Object.hasOwn(f, 'cover-studio-songTitle')) setSongTitle(f['cover-studio-songTitle'] as never);
+    if (Object.hasOwn(f, 'cover-studio-lyrics')) setLyrics(f['cover-studio-lyrics'] as never);
+    if (Object.hasOwn(f, 'cover-studio-lyricsSource')) setLyricsSource(f['cover-studio-lyricsSource'] as never);
+    if (Object.hasOwn(f, 'cover-studio-datasetAnalysis')) setDatasetAnalysis(f['cover-studio-datasetAnalysis'] as never);
+    if (Object.hasOwn(f, 'cover-studio-selectedArtistId')) setSelectedArtistId(f['cover-studio-selectedArtistId'] as never);
+    if (Object.hasOwn(f, 'cover-studio-selectedPreset')) setSelectedPreset(f['cover-studio-selectedPreset'] as never);
+    if (Object.hasOwn(f, 'cover-studio-artistCaption')) setArtistCaption(f['cover-studio-artistCaption'] as never);
+    if (Object.hasOwn(f, 'cover-studio-audioCoverStrength')) setAudioCoverStrength(f['cover-studio-audioCoverStrength'] as never);
+    if (Object.hasOwn(f, 'cover-studio-coverNoiseStrength')) setCoverNoiseStrength(f['cover-studio-coverNoiseStrength'] as never);
+    if (Object.hasOwn(f, 'cover-studio-coverNoiseMethod')) setCoverNoiseMethod(f['cover-studio-coverNoiseMethod'] as never);
+    if (Object.hasOwn(f, 'cover-studio-tempoScale')) setTempoScale(f['cover-studio-tempoScale'] as never);
+    if (Object.hasOwn(f, 'cover-studio-pitchShift')) setPitchShift(f['cover-studio-pitchShift'] as never);
+    if (Object.hasOwn(f, 'cover-studio-bpmCorrection')) setBpmCorrection(f['cover-studio-bpmCorrection'] as never);
+    if (Object.hasOwn(f, 'cover-studio-bpmOverride')) setBpmOverride(f['cover-studio-bpmOverride'] as never);
+    if (Object.hasOwn(f, 'cover-studio-keyOverride')) setKeyOverride(f['cover-studio-keyOverride'] as never);
+    if (Object.hasOwn(f, 'cover-studio-noFsq')) setNoFsq(f['cover-studio-noFsq'] as never);
+    if (Object.hasOwn(f, 'cover-studio-coverInstrumental')) setInstrumental(f['cover-studio-coverInstrumental'] as never);
+    if (Object.hasOwn(f, 'cover-studio-sourceLatentUrl')) setSourceLatentUrl(f['cover-studio-sourceLatentUrl'] as never);
+    if (Object.hasOwn(f, 'cover-studio-coverVocalLanguage')) setVocalLanguage(f['cover-studio-coverVocalLanguage'] as never);
+    if (Object.hasOwn(f, 'cover-studio-coverTimbreOverride')) setTimbreOverridePath(f['cover-studio-coverTimbreOverride'] as never);
+    if (Object.hasOwn(f, 'cover-studio-sepLevel')) setSepLevel(f['cover-studio-sepLevel'] as never);
+    const assetId = f['cover-studio-sourceAssetId'];
+    if (typeof assetId === 'string' && assetId) {
+      const meta = f['cover-studio-metadata'] as AudioMetadata | null, found = f['cover-studio-analysis'] as AudioAnalysis | null;
+      void openUploadedAsset(assetId, sourceLookupRef.current, meta && found ? { metadata: meta, analysis: found } : undefined)
+        .catch(err => showToast(String((err as Error).message)));
+    }
+  };
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 4000); };
 
@@ -1237,7 +1281,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     <BackendCapabilityGate feature="cover">
     <div className="flex flex-col w-full h-full bg-zinc-50 dark:bg-suno overflow-hidden">
       {/* Toast */}
-      {draftError && <p className="px-4 py-1 text-[11px] text-amber-600 dark:text-amber-400">{draftError}</p>}
+      <StudioDraftPicker control={draft} textKey="cover-studio-songTitle" apply={applyDraft} />
       {toast && (
         <div className="absolute top-16 right-6 z-50 px-4 py-2 rounded-xl bg-white dark:bg-zinc-900 text-white text-sm shadow-xl border border-zinc-300 dark:border-white/10 animate-in fade-in slide-in-from-top-2">
           {toast}
