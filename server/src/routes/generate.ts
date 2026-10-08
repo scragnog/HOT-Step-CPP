@@ -63,6 +63,18 @@ function withLedger(what: string, fn: (ledger: GenerationJobLedger) => void): vo
   }
 }
 
+/** Tests only: run the ledger on a test database instead of the app's. */
+export function setGenerationJobLedgerForTests(ledger: GenerationJobLedger | null): void {
+  ledgerInstance = ledger;
+}
+
+/** Mark a job cancelled, in memory and in the ledger. A pending job may never
+ *  reach its lane (a restart first), so the lane's own ledger write is not enough. */
+export function markGenerationJobCancelled(job: GenerationJob): void {
+  job.status = 'cancelled';
+  withLedger('cancel', ledger => ledger.finished(job));
+}
+
 // TTL cleanup: prune terminal jobs older than 1 hour every 10 minutes.
 // Prevents unbounded memory growth during long batch sessions.
 const JOB_TTL_MS = 60 * 60 * 1000; // 1 hour
@@ -546,7 +558,7 @@ router.get('/mm3/stream/:id', async (req, res) => {
 export function cancelGenerationJob(id: string): boolean {
   const job = jobs.get(id);
   if (!job) return false;
-  job.status = 'cancelled';
+  markGenerationJobCancelled(job);
   // One song of a running YuE2 batch: the engine drops it, the rest carry on.
   if (dropYue2BatchMember(job)) return true;
   if (job.aceJobId) {
@@ -568,7 +580,7 @@ router.post('/cancel-all', (req, res) => {
   let cancelled = 0;
   for (const [, job] of jobs) {
     if (isActiveJob(job)) {
-      job.status = 'cancelled';
+      markGenerationJobCancelled(job);
       if (job.aceJobId) {
         aceClient.cancelJob(job.aceJobId).catch(() => {});
       }
