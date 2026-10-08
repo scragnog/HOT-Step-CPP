@@ -43,8 +43,7 @@ import type {
   GenerationEndReason,
   GenerationOutcome,
 } from '../services/backends/types.js';
-import { getStreamSessions, type StreamSession } from '../services/streamSessions/index.js';
-import { WavSplitter } from '../services/streamSessions/wav.js';
+import { openStreamSession, type StreamSession } from '../services/streamSessions/index.js';
 
 export type { GenerationJob, StageTiming } from '../services/generation/jobTypes.js';
 
@@ -493,16 +492,15 @@ router.get('/mm3/stream/:id', async (req, res) => {
     res.setHeader('X-Accel-Buffering', 'no');
     // Node's copy for analysis and explicit recording (services/streamSessions).
     // It sees only what this pipe forwards and can never hold the pipe up.
-    session = getStreamSessions().open('mm3', { jobId: job.id, take });
+    session = openStreamSession('mm3', { jobId: job.id, take });
     if (session) res.setHeader('X-Stream-Session', session.id);
-    const splitter = new WavSplitter();
 
     const reader = eng.body.getReader();
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       const forwarded = res.write(Buffer.from(value));
-      if (session) for (const wav of splitter.push(value)) session.chunk(wav);
+      session?.feed(value);
       if (!forwarded) {
         // Respect backpressure: a browser that is not draining fast enough
         // must slow the pipe rather than grow an unbounded Node-side buffer.
@@ -709,8 +707,10 @@ router.post('/storm/stream', async (req, res) => {
   res.setHeader('Content-Type', 'audio/wav');
   res.setHeader('Transfer-Encoding', 'chunked');
   // Node's copy of each slot for analysis and explicit recording (services/streamSessions).
-  const session = getStreamSessions().open('storm', { streamId });
+  const session = openStreamSession('storm', { streamId });
   if (session) res.setHeader('X-Stream-Session', session.id);
+  // Ends the session on every exit, including a throw before the slot loop's finally.
+  res.on('close', () => session?.end());
 
   // Browser tab closed / fetch aborted without POST /stop — stop generating.
   // Must watch res, not req: on Node >=16 the request stream emits 'close' as

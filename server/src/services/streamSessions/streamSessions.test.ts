@@ -212,3 +212,53 @@ test('route: 404 for unknown, 400 for bad input, start/stop/export round trip', 
     assert.deepEqual(list.sessions.map(x => x.id), [s.id]);
   } finally { server.close(); done(); }
 });
+
+test('a write that fails after stop or end fails the recording and export refuses it', async (t) => {
+  for (const after of ['stop', 'end'] as const) {
+    const { sessions, done } = store();
+    try {
+      const s = sessions.open('storm', { streamId: 'x' })!;
+      s.record('start');
+      s.chunk(fixture(0.05, 120));
+      let reject!: (err: Error) => void;
+      const append = t.mock.method(fs.promises, 'appendFile', () => new Promise<void>((_, r) => { reject = r; }));
+      s.chunk(fixture(0.05, 120));
+      if (after === 'stop') s.record('stop'); else s.end();
+      assert.equal(s.summary().recording.status, 'stopped');
+      await new Promise(r => setImmediate(r));
+      reject(new Error('disk full'));
+      append.mock.restore();
+      await assert.rejects(s.exportTo('wav'), /disk full/);
+      assert.equal(s.summary().recording.status, 'failed');
+    } finally { done(); }
+  }
+});
+
+test('stream routes get no session, not an error, when the store cannot open one', async () => {
+  const { openStreamSession } = await import('./index.js');
+  assert.equal(openStreamSession('storm', { streamId: 'x' }, () => { throw new Error('EPERM'); }), null);
+  const { sessions, done } = store();
+  try {
+    const s = openStreamSession('mm3', { jobId: 'j', take: 0 }, () => sessions)!;
+    const a = fixture(0.05, 120), b = fixture(0.05, 120);
+    const both = new Uint8Array(a.length + b.length); both.set(a); both.set(b, a.length);
+    s.feed(both.subarray(0, 100)); s.feed(both.subarray(100));
+    assert.equal(s.summary().chunkCount, 2);
+  } finally { done(); }
+});
+
+test('concurrent exports are capped and a released slot is reusable', async () => {
+  const { sessions, done } = store({ maxConcurrentExports: 1 });
+  try {
+    const s = sessions.open('storm', { streamId: 'x' })!;
+    s.record('start'); s.chunk(fixture(0.05, 120)); s.record('stop');
+    const first = await s.exportTo('wav');
+    await assert.rejects(s.exportTo('wav'), (e: unknown) => e instanceof StreamSessionError && e.status === 429);
+    first.cleanup(); first.cleanup();
+    const second = await s.exportTo('flac');
+    second.cleanup();
+    // The double cleanup above released once: one slot, not two.
+    sessions.admitExport();
+    assert.throws(() => sessions.admitExport(), /Too many/);
+  } finally { done(); }
+});

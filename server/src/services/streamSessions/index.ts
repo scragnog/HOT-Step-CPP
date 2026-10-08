@@ -18,16 +18,18 @@
 // evicted first; when all are live a new stream simply gets no session); a
 // recording stops itself at MAX_RECORDING_BYTES ('capped'); an ended session
 // and its file are deleted ENDED_TTL_MS after the stream ends; a live session
-// with no chunk for LIVE_IDLE_MS is treated as ended.
+// with no chunk for LIVE_IDLE_MS is treated as ended; at most
+// MAX_CONCURRENT_EXPORTS exports run at once (429 beyond).
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { pipeline } from 'stream/promises';
 import type { StreamChunkAnalysis, StreamExportFormat, StreamSessionSummary } from '../../contracts/streamSessions.js';
 import { config, getFFmpegPath } from '../../config.js';
 import { detectBpm, detectKey } from './analysis.js';
-import { channel0, parseWav, sameFormat, wavHeader, type WavFormat } from './wav.js';
+import { channel0, parseWav, sameFormat, WavSplitter, wavHeader, type WavFormat } from './wav.js';
 
 export const LIMITS = {
   maxSessions: 16,
@@ -35,6 +37,8 @@ export const LIMITS = {
   endedTtlMs: 30 * 60_000,
   liveIdleMs: 2 * 60 * 60_000,
   keptChunkAnalyses: 64,
+  /** Exports being built or downloaded at once; each holds temp files and maybe an ffmpeg. */
+  maxConcurrentExports: 2,
 };
 
 export class StreamSessionError extends Error {
@@ -73,8 +77,21 @@ export class StreamSession {
   }
   get live(): boolean { return this.endedAt === null; }
 
+  /** Raw bytes of a stream made of concatenated WAVs (MM3). Never throws. */
+  feed(bytes: Uint8Array): void {
+    if (!this.live) return;
+    try { for (const wav of this.splitter.push(bytes)) this.chunk(wav); } catch (err) {
+      this.fail(`Stream framing failed: ${(err as Error).message}`);
+    }
+  }
+  private readonly splitter = new WavSplitter();
+
   /** One whole WAV as it went to the client. Never throws. */
   chunk(bytes: Uint8Array): void {
+    try { this.take(bytes); } catch (err) { this.fail(`Chunk handling failed: ${(err as Error).message}`); }
+  }
+
+  private take(bytes: Uint8Array): void {
     if (!this.live) return;
     const index = this.chunkCount++;
     this.lastChunkAt = this.owner.now();
@@ -98,8 +115,10 @@ export class StreamSession {
     r.toChunk = index;
     r.bytes += wav.data.length;
     const data = Buffer.from(wav.data);
+    // A write can fail after stop, end or the cap: it still loses bytes the
+    // header would claim, so it fails this recording whatever its status.
     r.writes = r.writes.then(() => fs.promises.appendFile(r.file, data)).catch(err => {
-      if (this.recording === r) this.fail(`Recording write failed: ${(err as Error).message}`);
+      StreamSession.failRecording(r, `Recording write failed: ${(err as Error).message}`);
     });
   }
 
@@ -125,7 +144,13 @@ export class StreamSession {
   }
 
   private fail(message: string): void {
-    if (this.recording.status === 'recording') { this.recording.status = 'failed'; this.recording.error = message; }
+    if (this.recording.status === 'recording') StreamSession.failRecording(this.recording, message);
+  }
+
+  private static failRecording(r: Recording, message: string): void {
+    if (r.status === 'failed') return;
+    r.status = 'failed';
+    r.error = message;
   }
 
   /** A finished recording as WAV/FLAC/MP3/Opus in a temporary file the caller deletes. */
@@ -135,13 +160,21 @@ export class StreamSession {
     if (!r.format || r.bytes === 0) throw new StreamSessionError(409, 'Nothing has been recorded');
     await r.writes;
     if (r.status === 'failed') throw new StreamSessionError(409, r.error ?? 'Recording failed');
+    const release = this.owner.admitExport();
     const stem = path.join(this.owner.dir, `${this.id}-${randomUUID()}`);
     const wavFile = `${stem}.wav`;
     const cleanups = [wavFile];
-    const cleanup = () => { for (const f of cleanups) fs.rmSync(f, { force: true }); };
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      for (const f of cleanups) fs.rmSync(f, { force: true });
+      release();
+    };
     try {
       fs.writeFileSync(wavFile, wavHeader(r.format, r.bytes));
-      await fs.promises.appendFile(wavFile, await fs.promises.readFile(r.file));
+      // Streamed, so a 2 GiB recording never sits in memory.
+      await pipeline(fs.createReadStream(r.file, { start: 0, end: r.bytes - 1 }), fs.createWriteStream(wavFile, { flags: 'a' }));
       if (format === 'wav') return { file: wavFile, cleanup };
       const out = `${stem}.${format}`;
       cleanups.push(out);
@@ -177,6 +210,7 @@ export type Transcoder = (wavFile: string, format: Exclude<StreamExportFormat, '
 
 export class StreamSessions {
   private readonly sessions = new Map<string, StreamSession>();
+  private exportsInFlight = 0;
   constructor(readonly dir: string, readonly transcode: Transcoder,
     readonly limits = LIMITS, readonly now: () => number = Date.now) {}
 
@@ -191,6 +225,14 @@ export class StreamSessions {
     const session = new StreamSession(this, kind, source);
     this.sessions.set(session.id, session);
     return session;
+  }
+
+  /** Reserve an export slot (429 when full). Call the returned release exactly once. */
+  admitExport(): () => void {
+    if (this.exportsInFlight >= this.limits.maxConcurrentExports)
+      throw new StreamSessionError(429, 'Too many recording exports in progress; try again shortly');
+    this.exportsInFlight++;
+    return () => { this.exportsInFlight--; };
   }
 
   get(id: string): StreamSession {
@@ -237,10 +279,23 @@ let instance: StreamSessions | undefined;
 export function getStreamSessions(): StreamSessions {
   if (!instance) {
     const dir = path.join(config.data.dir, 'stream-sessions');
-    // Recordings never outlive the process that owns their sessions.
-    fs.rmSync(dir, { recursive: true, force: true });
+    // Recordings never outlive the process that owns their sessions. A locked
+    // leftover only wastes disk; new files get fresh names.
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (err) {
+      console.warn(`[stream-sessions] could not clear ${dir}: ${(err as Error).message}`);
+    }
     instance = new StreamSessions(dir, ffmpegTranscode);
     setInterval(() => instance!.sweep(), 60_000).unref();
   }
   return instance;
+}
+
+/** For the stream routes: a session, or null if one cannot be opened for any
+ *  reason. Playback must never depend on Node's copy. */
+export function openStreamSession(kind: 'storm' | 'mm3', source: StreamSessionSummary['source'],
+  store: () => StreamSessions = getStreamSessions): StreamSession | null {
+  try { return store().open(kind, source); } catch (err) {
+    console.warn(`[stream-sessions] no session for ${kind} stream: ${(err as Error).message}`);
+    return null;
+  }
 }
