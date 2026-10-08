@@ -72,3 +72,28 @@ test('followJob resumes after a dropped stream without losing or repeating event
     await http.close();
   }
 });
+
+test('followJob on a retried job ends at the current attempt, not the first failure', async () => {
+  const http = await startWorkflowTestServer();
+  http.jobs.register({
+    kind: 'flaky', input: z.object({}),
+    run: async ctx => { if (ctx.attempt === 1) throw new Error('first try fails'); return 'ok'; },
+  });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = ((url: string, init?: RequestInit) => realFetch(http.origin + url, init)) as typeof fetch;
+  try {
+    const { job } = await workflowApi.submit('t', 'flaky', 'k', {});
+    await http.jobs.settled();
+    await workflowApi.retry('t', job.id);
+    await http.jobs.settled();
+    const seen: string[] = [];
+    const status = await followJob('t', job.id, {
+      onEvent: e => { if (e.type === 'status') seen.push((e.data as { status: string }).status); },
+    });
+    assert.equal(status, 'succeeded');
+    assert.deepEqual(seen, ['pending', 'running', 'failed', 'pending', 'running', 'succeeded']);
+  } finally {
+    globalThis.fetch = realFetch;
+    await http.close();
+  }
+});

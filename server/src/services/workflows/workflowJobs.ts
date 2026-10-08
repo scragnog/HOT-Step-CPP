@@ -13,8 +13,12 @@
 //     cancel racing a start, or two passes, cannot both act on one job.
 //   - Cancel is acknowledged at once: a pending job is cancelled outright; a
 //     running one gets cancelRequested, a 'cancel-requested' event, an aborted
-//     signal and its audio items cancelled, and ends `cancelled` when its step
-//     returns, whatever that step produced. Terminal jobs refuse a cancel.
+//     signal and its audio items cancelled, and ends `cancelled` without
+//     waiting for its step. Terminal jobs refuse a cancel. A timeout ends a
+//     run the same way, as `failed`.
+//   - Each run holds a claim id. A step's writes and its completion count
+//     only while that claim is current, so a step that ignored its signal, or
+//     the old process's step after a restart and retry, changes nothing.
 //   - Nothing that started is run again automatically. After a restart a
 //     job caught running is `interrupted`; only an explicit retry reruns it.
 //   - Audio never runs here. A step queues it on the audio intent queue
@@ -93,7 +97,7 @@ export interface WorkflowDeps {
 
 interface Row {
   id: string; user_id: string; kind: string; idempotency_key: string; status: WorkflowJobStatus;
-  input: string; input_hash: string; attempt: number; cancel_requested: number; audio_intent_ids: string;
+  input: string; input_hash: string; attempt: number; cancel_requested: number; claim_id: string | null; audio_intent_ids: string;
   result: string | null; error: string | null; last_seq: number;
   created_at: number; started_at: number | null; finished_at: number | null; updated_at: number;
 }
@@ -110,6 +114,7 @@ export function ensureWorkflowSchema(db: Database.Database): void {
       input_hash TEXT NOT NULL,
       attempt INTEGER NOT NULL DEFAULT 1,
       cancel_requested INTEGER NOT NULL DEFAULT 0,
+      claim_id TEXT,
       audio_intent_ids TEXT NOT NULL DEFAULT '[]',
       result TEXT,
       error TEXT,
@@ -130,6 +135,9 @@ export function ensureWorkflowSchema(db: Database.Database): void {
       PRIMARY KEY (job_id, seq)
     );
   `);
+  // Databases from before claim_id was added.
+  const hasClaim = (db.prepare(`SELECT COUNT(*) AS c FROM pragma_table_info('workflow_jobs') WHERE name = 'claim_id'`).get() as { c: number }).c;
+  if (!hasClaim) db.exec('ALTER TABLE workflow_jobs ADD COLUMN claim_id TEXT');
 }
 
 function toJob(r: Row): WorkflowJob {
@@ -148,9 +156,10 @@ export class WorkflowJobs {
   private readonly db: Database.Database;
   private readonly now: () => number;
   private readonly kinds = new Map<string, WorkflowKind<any>>();
-  private readonly running = new Map<string, AbortController>();
+  /** Runs in this process, by job id. */
+  private readonly running = new Map<string, { controller: AbortController; kind: string }>();
   private readonly events = new EventEmitter();
-  /** Settles when the job's run has finished and been recorded (tests, shutdown). */
+  /** Settles when a run (by claim id) has finished and been recorded (tests, shutdown). */
   private readonly runs = new Map<string, Promise<void>>();
 
   constructor(private readonly deps: WorkflowDeps) {
@@ -277,7 +286,7 @@ export class WorkflowJobs {
     });
     const now = this.row(id);
     if (now.status === 'running') {
-      this.running.get(id)?.abort(new WorkflowError(409, 'Cancelled'));
+      this.running.get(id)?.controller.abort(new WorkflowError(409, 'Cancelled'));
       for (const intentId of JSON.parse(now.audio_intent_ids) as string[]) {
         try { this.deps.audio.cancel(intentId); } catch { /* already finished */ }
       }
@@ -293,7 +302,7 @@ export class WorkflowJobs {
       throw new WorkflowError(409, `Only a failed, cancelled or interrupted job can be retried; this one is ${r.status}`);
     }
     this.change(id, () => {
-      const done = this.db.prepare(`UPDATE workflow_jobs SET status = 'pending', attempt = attempt + 1, cancel_requested = 0,
+      const done = this.db.prepare(`UPDATE workflow_jobs SET status = 'pending', attempt = attempt + 1, cancel_requested = 0, claim_id = NULL,
         result = NULL, error = NULL, started_at = NULL, finished_at = NULL, updated_at = ? WHERE id = ? AND status = ?`)
         .run(this.now(), id, r.status);
       if (done.changes !== 1) throw new WorkflowError(409, 'Workflow job changed while retrying; reload it');
@@ -314,7 +323,7 @@ export class WorkflowJobs {
     const error = 'The server stopped while this job was running. Its last step may or may not have finished; retry it to run it again.';
     for (const { id } of rows) {
       this.change(id, () => {
-        this.db.prepare(`UPDATE workflow_jobs SET status = 'interrupted', error = ?, finished_at = ?, updated_at = ? WHERE id = ? AND status = 'running'`)
+        this.db.prepare(`UPDATE workflow_jobs SET status = 'interrupted', claim_id = NULL, error = ?, finished_at = ?, updated_at = ? WHERE id = ? AND status = 'running'`)
           .run(error, t, t, id);
         return [this.append(id, 'status', { status: 'interrupted', error })];
       });
@@ -330,30 +339,37 @@ export class WorkflowJobs {
     for (const r of pending) {
       const def = this.kinds.get(r.kind);
       if (!def) continue;
-      const busy = [...this.running.keys()].filter(id => this.row(id).kind === r.kind).length;
+      const busy = [...this.running.values()].filter(x => x.kind === r.kind).length;
       if (busy >= (def.maxConcurrent ?? 1)) continue;
       const t = this.now();
+      const claimId = randomUUID();
       let claimed = false;
       this.change(r.id, () => {
-        const claim = this.db.prepare(`UPDATE workflow_jobs SET status = 'running', started_at = ?, updated_at = ?
-          WHERE id = ? AND status = 'pending' AND cancel_requested = 0`).run(t, t, r.id);
+        const claim = this.db.prepare(`UPDATE workflow_jobs SET status = 'running', claim_id = ?, started_at = ?, updated_at = ?
+          WHERE id = ? AND status = 'pending' AND cancel_requested = 0`).run(claimId, t, t, r.id);
         claimed = claim.changes === 1;
         return claimed ? [this.append(r.id, 'status', { status: 'running', attempt: r.attempt })] : [];
       });
-      if (claimed) this.launch(def, r);
+      if (claimed) this.launch(def, r, claimId);
     }
   }
 
-  private launch(def: WorkflowKind<any>, r: Row): void {
+  /** True while `claimId` is the job's current run. Every write a step makes,
+   *  and its completion, checks this, so a step that outlived its run (after
+   *  a cancel, a timeout, or a restart and retry) cannot touch the job. */
+  private owns(id: string, claimId: string): boolean {
+    const r = this.row(id);
+    return r.status === 'running' && r.claim_id === claimId;
+  }
+
+  private launch(def: WorkflowKind<any>, r: Row, claimId: string): void {
     const controller = new AbortController();
-    this.running.set(r.id, controller);
+    this.running.set(r.id, { controller, kind: r.kind });
     const timeoutMs = def.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const timer = setTimeout(() => controller.abort(new Error(`Timed out after ${Math.round(timeoutMs / 1000)} s`)), timeoutMs);
     timer.unref?.();
     const signal = controller.signal;
-    // A step that outlives its job (a leaked promise, or the old process
-    // after a restart) must not add to it.
-    const live = () => { if (this.row(r.id).status !== 'running') throw new Error(`Workflow job ${r.id} is no longer running`); };
+    const live = () => { if (!this.owns(r.id, claimId)) throw new Error(`Workflow job ${r.id} is no longer running this step`); };
     const throwIfCancelled = () => { if (signal.aborted) throw signal.reason; };
     const ctx: WorkflowContext<any> = {
       jobId: r.id, userId: r.user_id, input: JSON.parse(r.input), attempt: r.attempt, signal, throwIfCancelled,
@@ -366,6 +382,7 @@ export class WorkflowJobs {
             idempotencyKey: `workflow:${r.id}:${key}`, request, meta: { ...meta, workflowJobId: r.id, workflowKey: key },
           }, r.user_id);
           this.change(r.id, () => {
+            live();
             const ids = JSON.parse(this.row(r.id).audio_intent_ids) as string[];
             if (ids.includes(item.id)) return [];
             ids.push(item.id);
@@ -388,40 +405,41 @@ export class WorkflowJobs {
         },
       },
     };
-    const run = (async () => {
-      let outcome: { ok: true; result: unknown } | { ok: false; error: string };
-      try {
-        outcome = { ok: true, result: await def.run(ctx) };
-      } catch (err) {
-        outcome = { ok: false, error: message(signal.aborted ? signal.reason : err) };
-      }
+    type Outcome = { ok: true; result: unknown } | { ok: false; error: string };
+    // A cancel or timeout ends the run at once, whether or not the step
+    // listens to the signal. A step that ignores it keeps running in the
+    // background, fenced off by owns(); its slot is free and its result unused.
+    const aborted = new Promise<Outcome>(resolve => signal.addEventListener('abort',
+      () => resolve({ ok: false, error: message(signal.reason) }), { once: true }));
+    // Started synchronously, as a claim is followed by its first step at once.
+    let started: Promise<unknown>;
+    try { started = Promise.resolve(def.run(ctx)); } catch (err) { started = Promise.reject(err); }
+    const stepped = started.then(
+      (result): Outcome => ({ ok: true, result }),
+      (err): Outcome => ({ ok: false, error: message(signal.aborted ? signal.reason : err) }));
+    const run = Promise.race([stepped, aborted]).then(outcome => {
       clearTimeout(timer);
-      this.running.delete(r.id);
-      this.finish(r.id, outcome);
-    })().finally(() => { this.runs.delete(r.id); this.pump(); });
-    this.runs.set(r.id, run);
+      if (this.running.get(r.id)?.controller === controller) this.running.delete(r.id);
+      this.finish(r.id, claimId, outcome);
+    }).finally(() => { this.runs.delete(claimId); this.pump(); });
+    this.runs.set(claimId, run);
   }
 
-  private finish(id: string, outcome: { ok: true; result: unknown } | { ok: false; error: string }): void {
+  private finish(id: string, claimId: string, outcome: { ok: true; result: unknown } | { ok: false; error: string }): void {
     const t = this.now();
     this.change(id, () => {
-      const r = this.row(id);
-      if (r.status !== 'running') return [];
-      if (r.cancel_requested === 1) {
-        this.db.prepare(`UPDATE workflow_jobs SET status = 'cancelled', finished_at = ?, updated_at = ? WHERE id = ? AND status = 'running'`).run(t, t, id);
-        return [this.append(id, 'status', { status: 'cancelled' })];
-      }
-      if (outcome.ok) {
-        let result: string | null;
-        try { result = outcome.result === undefined ? null : JSON.stringify(outcome.result); }
-        catch (err) { outcome = { ok: false, error: `Result is not JSON: ${message(err)}` }; result = null; }
-        if (outcome.ok) {
-          this.db.prepare(`UPDATE workflow_jobs SET status = 'succeeded', result = ?, finished_at = ?, updated_at = ? WHERE id = ?`).run(result, t, t, id);
-          return [this.append(id, 'status', { status: 'succeeded' })];
-        }
-      }
-      this.db.prepare(`UPDATE workflow_jobs SET status = 'failed', error = ?, finished_at = ?, updated_at = ? WHERE id = ?`).run(outcome.error, t, t, id);
-      return [this.append(id, 'status', { status: 'failed', error: outcome.error })];
+      if (!this.owns(id, claimId)) return [];
+      const end = (status: WorkflowJobStatus, result: string | null, error: string | null) => {
+        this.db.prepare(`UPDATE workflow_jobs SET status = ?, result = ?, error = ?, claim_id = NULL, finished_at = ?, updated_at = ?
+          WHERE id = ? AND claim_id = ?`).run(status, result, error, t, t, id, claimId);
+        return [this.append(id, 'status', error ? { status, error } : { status })];
+      };
+      if (this.row(id).cancel_requested === 1) return end('cancelled', null, null);
+      if (!outcome.ok) return end('failed', null, outcome.error);
+      let result: string | null;
+      try { result = outcome.result === undefined ? null : JSON.stringify(outcome.result); }
+      catch (err) { return end('failed', null, `Result is not JSON: ${message(err)}`); }
+      return end('succeeded', result, null);
     });
   }
 

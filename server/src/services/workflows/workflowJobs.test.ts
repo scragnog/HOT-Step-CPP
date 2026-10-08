@@ -143,13 +143,90 @@ test('cancel racing completion: a step that ignores the signal and returns still
   assert.deepEqual([after.status, after.result], ['cancelled', null]);
 });
 
-test('a step over its time limit is aborted and fails', async () => {
+test('a timeout ends the run even when the step ignores the signal; its late result and writes are discarded', async () => {
   const { jobs } = setup();
-  jobs.register(echo({ timeoutMs: 20, run: ctx => new Promise((_, reject) => ctx.signal.addEventListener('abort', () => reject(ctx.signal.reason))) }));
-  const job = jobs.submit({ kind: 'echo', idempotencyKey: 'k', input: { text: 'a' } }, 'u').job;
+  const late: string[] = [];
+  jobs.register(echo({
+    timeoutMs: 5,
+    run: async ctx => {
+      if (ctx.input.text === 'forever') return new Promise(() => {});
+      if (ctx.input.text === 'quick') return 'fast';
+      await new Promise(r => setTimeout(r, 30));
+      try { ctx.emit('late', {}); } catch (err) { late.push((err as Error).message); }
+      return 'late result';
+    },
+  }));
+  const slow = jobs.submit({ kind: 'echo', idempotencyKey: 'slow', input: { text: 'slow' } }, 'u').job;
+  const stuck = jobs.submit({ kind: 'echo', idempotencyKey: 'stuck', input: { text: 'forever' } }, 'u').job;
   await jobs.settled();
-  assert.equal(jobs.get(job.id).status, 'failed');
-  assert.match(jobs.get(job.id).error ?? '', /Timed out/);
+  for (const id of [slow.id, stuck.id]) {
+    assert.equal(jobs.get(id).status, 'failed');
+    assert.match(jobs.get(id).error ?? '', /Timed out/);
+  }
+  await new Promise(r => setTimeout(r, 50));
+  assert.deepEqual([jobs.get(slow.id).status, jobs.get(slow.id).result], ['failed', null], 'the late return changed nothing');
+  assert.equal(late.length, 1, 'the late emit was refused');
+  assert.ok(!types(jobs, slow.id).includes('late'));
+  // The never-settling step does not hold its slot: the next job runs.
+  const next = jobs.submit({ kind: 'echo', idempotencyKey: 'next', input: { text: 'quick' } }, 'u').job;
+  await jobs.settled();
+  assert.equal(jobs.get(next.id).status, 'succeeded');
+});
+
+test('restart then retry before the old step ends: only the new attempt can write or finish', async () => {
+  const db = new Database(':memory:');
+  const audio = fakeAudio();
+  const oldStep = gate();
+  const newStep = gate();
+  const refused: string[] = [];
+  const kind = (which: 'OLD' | 'NEW', g: ReturnType<typeof gate>) => echo({
+    run: async ctx => {
+      await g.opened;
+      try { ctx.emit('progress', { from: which }); } catch (err) { refused.push(`${which}: ${(err as Error).message}`); }
+      return which;
+    },
+  });
+  const before = setup(db, audio);
+  before.jobs.register(kind('OLD', oldStep));
+  const job = before.jobs.submit({ kind: 'echo', idempotencyKey: 'k', input: { text: 'a' } }, 'u').job;
+  assert.equal(before.jobs.get(job.id).status, 'running');
+
+  const after = setup(db, audio);
+  after.jobs.reconcileAfterRestart();
+  after.jobs.register(kind('NEW', newStep));
+  assert.equal(after.jobs.retry(job.id).status, 'running', 'attempt 2 starts at once');
+
+  oldStep.open();
+  await before.jobs.settled();
+  assert.equal(after.jobs.get(job.id).status, 'running', 'the old step finishing did not end attempt 2');
+  newStep.open();
+  await after.jobs.settled();
+  const done = after.jobs.get(job.id);
+  assert.deepEqual([done.status, done.attempt, done.result], ['succeeded', 2, 'NEW']);
+  const progress = after.jobs.replay(job.id, undefined).events.filter(e => e.type === 'progress').map(e => (e.data as { from: string }).from);
+  assert.deepEqual(progress, ['NEW']);
+  assert.equal(refused.length, 1);
+  assert.match(refused[0], /^OLD: /);
+});
+
+test('HTTP: a retried job replays from 0 through its current end, not the first attempt\'s', async () => {
+  const { jobs } = setup();
+  jobs.register(echo({ run: async ctx => { if (ctx.attempt === 1) throw new Error('first try fails'); return 'ok'; } }));
+  const server = await startWorkflowTestServer({ jobs });
+  try {
+    const { job } = jobs.submit({ kind: 'echo', idempotencyKey: 'k', input: { text: 'a' } }, 'u');
+    await jobs.settled();
+    assert.equal(jobs.get(job.id).status, 'failed');
+    jobs.retry(job.id);
+    await jobs.settled();
+    const frames = await readFrames(`${server.origin}/api/workflows/jobs/${job.id}/events?after=0`, { Authorization: 'Bearer t' }, () => false);
+    assert.equal(frames[0].job.status, 'succeeded');
+    const statuses = frames.filter(f => f.event?.type === 'status').map(f => f.event.data.status);
+    assert.deepEqual(statuses, ['pending', 'running', 'failed', 'pending', 'running', 'succeeded']);
+    assert.equal(frames.at(-1).id, jobs.get(job.id).lastSeq);
+  } finally {
+    await server.close();
+  }
 });
 
 test('restart: a running job becomes interrupted and is not rerun; pending starts; retry reruns and reuses its audio', async () => {

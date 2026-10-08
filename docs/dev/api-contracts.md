@@ -388,7 +388,7 @@ in `server/src/contracts/workflow.ts`, and the UI client is `ui/src/services/wor
 | `POST /jobs` | Submit `{ kind, idempotencyKey, input }`. `201 { job, created: true }` for a new job. The same key and input within (user, kind) answers `200 { job, created: false }`. The same key with another input is a `409`. An unknown kind, or input the kind's schema rejects, is a `400` with field paths |
 | `GET /jobs[?kind=&status=]` | The user's jobs, newest first, at most 200 |
 | `GET /jobs/:id[?after=N]` | `{ job, events, gap }`: the events after sequence `N` |
-| `GET /jobs/:id/events[?after=N]` | Server-sent events: a snapshot frame `{ type: 'snapshot', job, gap }`, then `{ type: 'event', event }` frames with `id:` set to the event's sequence, so `Last-Event-ID` resumes. The stream ends after the job's final status |
+| `GET /jobs/:id/events[?after=N]` | Server-sent events: a snapshot frame `{ type: 'snapshot', job, gap }`, then `{ type: 'event', event }` frames with `id:` set to the event's sequence, so `Last-Event-ID` resumes. The stream ends at the job's current final status; a retried job's stream carries on past the earlier attempt's |
 | `POST /jobs/:id/cancel` | Acknowledge a cancel. `409` for a finished job |
 | `POST /jobs/:id/retry` | Run a failed, cancelled or interrupted job again as a new attempt; `409` otherwise |
 | `POST /documents` | Create `{ kind, data }` at revision 1 |
@@ -413,14 +413,17 @@ How each transition happens:
 - **Cancel.**
   - A pending job is cancelled at once and never runs.
   - A running job gets `cancelRequested`, a `cancel-requested` event, an aborted `ctx.signal`,
-    and its audio items cancelled. It ends `cancelled` when its step returns, even if the step
-    finished its work: that result is discarded.
-- **Timeout.** A step that runs past `timeoutMs` is aborted and the job fails.
+    and its audio items cancelled. It ends `cancelled` at once, without waiting for its step.
+    Whatever the step returns afterwards is discarded.
+- **Timeout.** A run past `timeoutMs` is aborted and the job fails at once, whether or not
+  the step listens to its signal. Its slot is freed for the next job.
+- **Fencing.** Each run holds a claim id. A step's events, audio items and completion count
+  only while that claim is current. A step that ignored its signal, or a step from the old
+  process after a restart and retry, can't write to the job.
 - **Restart.** On startup, jobs left running become `interrupted` with a message. Nothing that
   started is rerun automatically. Pending jobs never started, so they start normally. Only
   `retry` runs a job again; it counts the attempt in `attempt`.
   An interrupted job's audio items are left to the audio queue, which reports their own state.
-  A step from the old process can't write to the job any more.
 
 Audio never runs in a workflow step. `ctx.audio.enqueue(key, request)` queues a captured
 `/api/generate` body on the durable audio queue, which owns GPU admission, under the key

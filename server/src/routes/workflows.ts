@@ -100,7 +100,12 @@ export function createWorkflowRouter(jobs: WorkflowJobs, docs: WorkflowDocuments
       if (e.seq <= last || res.writableEnded) return;
       last = e.seq;
       res.write(`id: ${e.seq}\ndata: ${JSON.stringify({ type: 'event', event: e })}\n\n`);
-      if (e.type === 'status' && FINAL.has((e.data as { status?: string } | null)?.status ?? '')) close();
+      // Close only at the job's current end: a retried job's stream also
+      // carries the earlier attempt's final status.
+      if (e.type === 'status' && FINAL.has((e.data as { status?: string } | null)?.status ?? '')) {
+        const now = jobs.get(jobId);
+        if (FINAL.has(now.status) && now.lastSeq <= e.seq) close();
+      }
     };
     res.write(`data: ${JSON.stringify({ type: 'snapshot', job: replay.job, gap: replay.gap })}\n\n`);
     for (const e of [...replay.events, ...live]) send(e);

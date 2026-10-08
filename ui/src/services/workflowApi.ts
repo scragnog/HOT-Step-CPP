@@ -110,7 +110,8 @@ export async function followJob(token: string, jobId: string, handlers: FollowHa
             last = event.seq;
             handlers.onEvent(event);
             const status = (event.data as { status?: WorkflowJobStatus } | null)?.status;
-            if (event.type === 'status' && status && FINAL.has(status)) finalStatus = status;
+            // A retry follows an earlier final status with a new attempt.
+            if (event.type === 'status' && status) finalStatus = FINAL.has(status) ? status : null;
           }
         }
       }
