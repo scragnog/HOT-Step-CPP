@@ -92,30 +92,38 @@ test('envelope captures a deep immutable snapshot and routes by active backend',
   }
 });
 
-test('POST keeps mutable working parameters separate from the immutable submission', () => {
+test('POST keeps mutable working parameters separate from the immutable submission', async () => {
   const fixture = makeEnvelopeFixture();
   const source = read('server/src/routes/generate.ts');
   const ast = ts.createSourceFile('generate.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const post = ast.statements.find(s => ts.isExpressionStatement(s) && ts.isCallExpression(s.expression)
     && s.expression.expression.getText(ast) === 'router.post' && s.expression.arguments[0]?.text === '/');
   assert(post);
-  const callback = post.expression.arguments[1];
+  // The handler is the last argument; any before it are middleware (the
+  // request capture). It calls submitGeneration, where the checks and the
+  // job construction live, so that is extracted as production code too.
+  const callback = post.expression.arguments.at(-1);
   let queued;
-  const handler = vm.runInNewContext(transpile(`(${callback.getText(ast)})`, 'generate.ts'), {
+  const context = {
     ...cloneContext, isEngineSuspended: () => false, engineReady: true, getUserId: () => 'u',
     uuidv4: () => 'post-job', buildEnvelope: fixture.buildEnvelope,
     GenerationEnvelopeError: fixture.GenerationEnvelopeError, jobs: new Map(),
-    // The handler's guards are production code too — the real
-    // expectedBackendMismatch is extracted; the timbre check is mocked because
+    // The guards are production code too — the real expectedBackendMismatch
+    // and isGenerationIntent are extracted; the timbre check is mocked because
     // it walks the data directory.
     getActiveBackendId: fixture.getActiveBackendId,
     expectedBackendMismatch: extractFunction('server/src/routes/generate.ts', 'expectedBackendMismatch'),
+    isGenerationIntent: extractFunction('server/src/contracts/generation.ts', 'isGenerationIntent'),
     timbreReferenceMissing: () => false,
     enqueueGeneration: job => { queued = job; },
-  });
+  };
+  context.submitGeneration = extractFunction('server/src/routes/generate.ts', 'submitGeneration', context);
+  const handler = vm.runInNewContext(transpile(`(${callback.getText(ast)})`, 'generate.ts'), context);
   const raw = { caption: 'input', seed: 12, nested: { value: 3 } };
   const original = JSON.stringify(raw);
-  handler({ body: raw }, { json() {}, status() { throw Error('Unexpected rejection'); } });
+  let answered;
+  await handler({ body: raw }, { json(v) { answered = v; }, status() { throw Error('Unexpected rejection'); } });
+  assert.equal(JSON.stringify(answered), JSON.stringify({ jobId: 'post-job', status: 'pending' }));  // vm realm: compare by value
   assert.equal(JSON.stringify(queued.params), original);
   assert.notEqual(queued.params, raw);
   assert.notEqual(queued.params.nested, raw.nested);
