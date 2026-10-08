@@ -181,12 +181,10 @@ export class TypedDocuments<T extends Record<string, unknown>> {
     return this.read(this.mine(id, userId));
   }
 
+  /** A document this build cannot read fails the list with its 409 (naming
+   *  it), rather than the list quietly looking empty or complete. */
   list(userId: string): TypedDocument<T>[] {
-    // A document this build cannot read is left out of a list rather than
-    // failing it; get() on it reports why.
-    return this.docs.list(this.owner(userId), this.def.kind).flatMap(doc => {
-      try { return [this.read(doc)]; } catch (err) { if (err instanceof WorkflowError) return []; throw err; }
-    });
+    return this.docs.list(this.owner(userId), this.def.kind).map(doc => this.read(doc));
   }
 
   /** Replace the body if the document is still at expectedRevision. `body`
@@ -271,7 +269,11 @@ export class TypedDocuments<T extends Record<string, unknown>> {
   }
 
   private read(doc: WorkflowDocument): TypedDocument<T> {
-    const env = this.unwrap(doc.data);
+    let env: ReturnType<TypedDocuments<T>['unwrap']>;
+    try { env = this.unwrap(doc.data); } catch (err) {
+      if (err instanceof WorkflowError) err.extra.documentId = doc.id;
+      throw err;
+    }
     return { id: doc.id, kind: doc.kind, revision: doc.revision, ...env, createdAt: doc.createdAt, updatedAt: doc.updatedAt };
   }
 }

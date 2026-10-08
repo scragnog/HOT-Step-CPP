@@ -84,13 +84,14 @@ test('typed documents: an older body is upgraded on read; a newer one is refused
   assert.equal(read.storedSchemaVersion, 1);
   const newer = v2.create('u', { name: 'from the future' }, client);
 
-  // A build that only knows v1 cannot read v2, cannot list it, and cannot
-  // write or delete over it; the stored content stays.
-  failsWith(() => v1.get(newer.id, 'u'), 409, { reason: 'unsupported-version', schemaVersion: 2, supportedVersion: 1 });
-  assert.deepEqual(v1.list('u').map(d => d.id), [old.id]);
+  // A build that only knows v1 cannot read v2, and a list containing it
+  // fails visibly, naming it, rather than looking complete. Nor can it write
+  // over it; the stored rows stay as they were.
+  const before = v2.list('u').map(d => [d.id, d.revision, d.body.name]);
+  failsWith(() => v1.get(newer.id, 'u'), 409, { reason: 'unsupported-version', documentId: newer.id, schemaVersion: 2, supportedVersion: 1 });
+  failsWith(() => v1.list('u'), 409, { reason: 'unsupported-version', documentId: newer.id });
   failsWith(() => v1.update(newer.id, 'u', 1, { name: 'clobber' }, client), 409, { reason: 'unsupported-version' });
-  assert.equal(v2.get(newer.id, 'u').body.name, 'from the future');
-  assert.equal(v2.get(newer.id, 'u').revision, 1);
+  assert.deepEqual(v2.list('u').map(d => [d.id, d.revision, d.body.name]), before);
 
   // No upgrade function: an older version is refused the same way.
   const strict = new TypedDocuments(new WorkflowDocuments(db), db, kindDef('t.versions', { schemaVersion: 2 }));

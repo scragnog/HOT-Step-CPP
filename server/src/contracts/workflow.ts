@@ -163,6 +163,8 @@ export interface DocumentImportReceipt {
 export interface UnsupportedDocumentVersion {
   error: string;
   reason: 'unsupported-version';
+  /** The document that could not be read. */
+  documentId: string;
   schemaVersion: number;
   supportedVersion: number;
 }
