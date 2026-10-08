@@ -7,64 +7,18 @@ import type { Song, UnifiedRecentSong, GenerationParams, GenerationJob, AuthStat
 import { getGenerationTimeoutMinutes } from '../utils/generationTimer';
 import type { ResolveIntent, ResolvePreviewResponse } from '../../../server/src/contracts/resolution';
 import { WorkflowRequestError } from './workflowApi';
+import { apiClient, ApiError } from './httpClient';
 
 const BASE = '/api';
 
-async function get<T>(path: string, token?: string | null): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(`${BASE}${path}`, { headers });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `API error: ${res.status}`);
-  }
-  return res.json();
-}
-
-async function post<T>(path: string, body?: unknown, token?: string | null): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `API error: ${res.status}`);
-  }
-  return res.json();
-}
-
-async function patch<T>(path: string, body: unknown, token?: string | null): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `API error: ${res.status}`);
-  }
-  return res.json();
-}
-
-async function del<T>(path: string, token?: string | null): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const res = await fetch(`${BASE}${path}`, { method: 'DELETE', headers });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `API error: ${res.status}`);
-  }
-  return res.json();
-}
+// get/post/patch/del delegate to the shared client (httpClient.ts) — same
+// signatures and error text ("<server error> | API error: <status>") every
+// caller in this file already expects. ApiError is a plain Error subclass,
+// so existing `catch (e) { ... e.message }` call sites need no change.
+const get = <T>(path: string, token?: string | null): Promise<T> => apiClient.get<T>(path, { token });
+const post = <T>(path: string, body?: unknown, token?: string | null): Promise<T> => apiClient.post<T>(path, body, { token });
+const patch = <T>(path: string, body: unknown, token?: string | null): Promise<T> => apiClient.patch<T>(path, body, { token });
+const del = <T>(path: string, token?: string | null): Promise<T> => apiClient.delete<T>(path, { token });
 
 // ── Auth ────────────────────────────────────────────────────
 export const authApi = {
@@ -231,11 +185,16 @@ export const generateApi = {
     post<ResolvePreviewResponse>('/resolve/preview', intent, token),
   /** A missing switch endpoint is an older server and keeps the legacy path. */
   selectedPath: async (token: string): Promise<'old' | 'resolved'> => {
-    const response = await fetch('/api/resolve/path', { headers: { Authorization: `Bearer ${token}` } });
-    if (response.status === 404) return 'old';
-    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Cannot read generation path');
-    const { path } = await response.json() as { path: string };
-    return path === 'resolved' ? 'resolved' : 'old';
+    try {
+      const { path } = await apiClient.get<{ path: string }>('/resolve/path', { token });
+      return path === 'resolved' ? 'resolved' : 'old';
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 404) return 'old';
+        throw new Error((err.body as { error?: string } | null)?.error || 'Cannot read generation path');
+      }
+      throw err;
+    }
   },
   previewIntent: (intent: ResolveIntent, token: string): Promise<ResolvePreviewResponse> =>
     generateApi.preview(withIntentTimeout(intent), token),
