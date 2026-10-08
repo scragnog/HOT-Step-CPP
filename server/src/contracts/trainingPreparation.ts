@@ -34,3 +34,14 @@ export interface Yue2PreparationSummary {
   updatedAt: number;
   error: string | null;
 }
+
+// ── Responses of /api/training/ops/preparation/* ──
+/** GET /context/:datasetId: the revisions a preparation command must carry. */
+export interface Yue2PreparationContext {
+  dataset: { id: string; revision: string };
+  source: { kind: 'dataset-sources'; id: string; revision: string };
+}
+/** POST /, GET /:id and POST /:id/{pause,resume,retry,cancel}. */
+export interface Yue2PreparationResponse { pipeline: Yue2PreparationSummary }
+/** GET /?datasetId=. */
+export interface Yue2PreparationList { pipelines: Yue2PreparationSummary[] }
