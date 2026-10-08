@@ -6,10 +6,13 @@
 import { Router, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import multer from 'multer';
 import { config } from '../config.js';
 import { readHslat } from '../services/latentFormat.js';
+import { getDb } from '../db/database.js';
+import { getUserId } from './auth.js';
+import { recordAudioAsset } from '../services/assets/audioAssets.js';
 
 const router = Router();
 
@@ -31,7 +34,9 @@ const upload = multer({
 /**
  * POST /api/upload/audio
  * Multipart form: field "audio" with audio file
- * Returns: { audio_url: "/references/<uuid>.<ext>", filename: "original.mp3" }
+ * Returns: { audio_url: "/references/<uuid>.<ext>", filename: "original.mp3", asset_id }
+ * asset_id names the upload for Node workflows (services/assets/audioAssets.ts);
+ * it is owned by the bearer token's user, so send one to use it there.
  */
 router.post('/audio', upload.single('audio'), (req: Request, res: Response) => {
   try {
@@ -52,9 +57,15 @@ router.post('/audio', upload.single('audio'), (req: Request, res: Response) => {
 
     console.log(`[upload] Saved ${req.file.originalname} (${(req.file.size / 1024 / 1024).toFixed(1)} MB) → ${filename}`);
 
+    const asset = recordAudioAsset(getDb(), {
+      userId: getUserId(req), url: `/references/${filename}`, filename: req.file.originalname,
+      size: req.file.size, sha256: createHash('sha256').update(req.file.buffer).digest('hex'),
+    });
+
     res.json({
-      audio_url: `/references/${filename}`,
+      audio_url: asset.url,
       filename: req.file.originalname,
+      asset_id: asset.id,
     });
   } catch (err: any) {
     console.error('[upload] Failed:', err.message);
