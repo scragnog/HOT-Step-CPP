@@ -65,6 +65,16 @@ export function loadSelections(): ModelSelections {
   return defaults;
 }
 
+/** Pure: returns a new ModelSelections with only `role` changed — the other
+ *  roles are untouched. Used by TripleProviderSelector's updateRole, and
+ *  tested directly so a future edit can't make one role's pick bleed into
+ *  another or drop a sibling role. */
+export function updateModelSelection(
+  current: ModelSelections, role: keyof ModelSelections, provider: string, model: string,
+): ModelSelections {
+  return { ...current, [role]: { provider, model } };
+}
+
 export function saveSelections(sel: ModelSelections) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(sel));
 }
@@ -161,10 +171,7 @@ export const TripleProviderSelector: React.FC<TripleProviderSelectorProps> = ({
   }, []);
 
   const updateRole = (role: keyof ModelSelections, provider: string, model: string) => {
-    const updated = {
-      ...selectionsRef.current,
-      [role]: { provider, model },
-    };
+    const updated = updateModelSelection(selectionsRef.current, role, provider, model);
     onSelectionsChange(updated);
     saveSelections(updated);
   };
