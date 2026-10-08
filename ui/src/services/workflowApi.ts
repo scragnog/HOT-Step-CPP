@@ -9,29 +9,43 @@ import type {
   WorkflowDocument, WorkflowEvent, WorkflowJob, WorkflowJobStatus, WorkflowReplay,
 } from '../../../server/src/contracts/workflow';
 
+export type {
+  DocumentImportReceipt, DocumentProvenance, DocumentScope, TypedDocument, UnsupportedDocumentVersion,
+} from '../../../server/src/contracts/workflow';
+
 export class WorkflowRequestError extends Error {
   readonly status: number;
   /** Set on a 409 caused by a stale revision. */
   readonly currentRevision?: number;
-  constructor(status: number, message: string, currentRevision?: number) {
+  /** 'unsupported-version' on a 409 for a stored document this build cannot
+   *  read; the server left it unchanged. */
+  readonly reason?: string;
+  constructor(status: number, message: string, currentRevision?: number, reason?: string) {
     super(message);
     this.status = status;
     this.currentRevision = currentRevision;
+    this.reason = reason;
   }
 }
 
-async function call<T>(token: string, path: string, method = 'GET', body?: unknown): Promise<T> {
-  const response = await fetch(`/api/workflows${path}`, {
+/** A JSON request with the bearer token that throws WorkflowRequestError,
+ *  carrying the stale revision or unsupported-version reason. Shared by the
+ *  typed-document domain clients, whose routes live outside /api/workflows. */
+export async function revisionedRequest<T>(token: string, url: string, method = 'GET', body?: unknown): Promise<T> {
+  const response = await fetch(url, {
     method,
     headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const value = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new WorkflowRequestError(response.status, value.error || `Workflow request failed (${response.status})`, value.currentRevision);
+    throw new WorkflowRequestError(response.status, value.error || `Request failed (${response.status})`, value.currentRevision, value.reason);
   }
   return value as T;
 }
+
+const call = <T>(token: string, path: string, method = 'GET', body?: unknown): Promise<T> =>
+  revisionedRequest<T>(token, `/api/workflows${path}`, method, body);
 
 const id = (v: string) => encodeURIComponent(v);
 const FINAL = new Set<WorkflowJobStatus>(['succeeded', 'failed', 'cancelled', 'interrupted']);

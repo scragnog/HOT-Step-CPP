@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { startWorkflowTestServer, z } from '../../../server/src/services/workflows/testServer';
 import type { WorkflowEvent } from '../../../server/src/contracts/workflow';
-import { followJob, workflowApi, WorkflowRequestError } from './workflowApi';
+import { followJob, revisionedRequest, workflowApi, WorkflowRequestError } from './workflowApi';
 
 test('followJob resumes after a dropped stream without losing or repeating events', async () => {
   const http = await startWorkflowTestServer();
@@ -95,5 +95,34 @@ test('followJob on a retried job ends at the current attempt, not the first fail
   } finally {
     globalThis.fetch = realFetch;
     await http.close();
+  }
+});
+
+test('revisionedRequest carries the stale revision and the unsupported-version reason', async () => {
+  const realFetch = globalThis.fetch;
+  const replies: Array<[number, unknown]> = [
+    [409, { error: 'Stale revision', currentRevision: 4 }],
+    [409, { error: 'Saved as version 3', reason: 'unsupported-version', schemaVersion: 3, supportedVersion: 2 }],
+    [200, { ok: true }],
+  ];
+  const seen: Array<{ url: string; init?: RequestInit }> = [];
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    seen.push({ url, init });
+    const [status, body] = replies.shift()!;
+    return new Response(JSON.stringify(body), { status });
+  }) as typeof fetch;
+  try {
+    const stale = await revisionedRequest('tok', '/api/presets/x', 'PUT', { expectedRevision: 3 }).catch(e => e);
+    assert.ok(stale instanceof WorkflowRequestError);
+    assert.equal(stale.status, 409);
+    assert.equal(stale.currentRevision, 4);
+    const newer = await revisionedRequest('tok', '/api/presets/y').catch(e => e);
+    assert.equal(newer.reason, 'unsupported-version');
+    assert.equal(newer.message, 'Saved as version 3');
+    assert.deepEqual(await revisionedRequest('tok', '/api/presets/z'), { ok: true });
+    assert.equal((seen[0].init?.headers as Record<string, string>).Authorization, 'Bearer tok');
+    assert.equal(seen[0].init?.body, JSON.stringify({ expectedRevision: 3 }));
+  } finally {
+    globalThis.fetch = realFetch;
   }
 });

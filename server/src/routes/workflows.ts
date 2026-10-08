@@ -15,6 +15,9 @@
 //   PUT    /documents/:id           { expectedRevision, data }; 409 if stale
 //   DELETE /documents/:id?expectedRevision=N
 //
+// Typed kinds (registerDocumentKind) are served by their domain's routes
+// only; these document routes refuse them (400).
+//
 // Studios add job kinds with registerWorkflowKind() from their own modules.
 
 import { Router } from 'express';
@@ -23,7 +26,7 @@ import { getUserId } from './auth.js';
 import { getDb } from '../db/database.js';
 import { audioIntentQueue } from './audioQueue.js';
 import { WorkflowError, WorkflowJobs, type WorkflowKind } from '../services/workflows/workflowJobs.js';
-import { WorkflowDocuments } from '../services/workflows/revisions.js';
+import { TypedDocuments, WorkflowDocuments, isTypedDocumentKind, type TypedDocumentKind } from '../services/workflows/revisions.js';
 import {
   createWorkflowDocumentSchema, submitWorkflowJobSchema, updateWorkflowDocumentSchema,
   type WorkflowEvent, type WorkflowJobStatus,
@@ -56,6 +59,15 @@ export function createWorkflowRouter(jobs: WorkflowJobs, docs: WorkflowDocuments
   };
   const user = (req: Request) => userIdOf(req)!;
   const id = (req: Request) => String(req.params.id);
+  const untyped = (kind: string) => {
+    if (isTypedDocumentKind(kind)) throw new WorkflowError(400, `Documents of kind '${kind}' are served by their own API`);
+  };
+  /** The caller's document, refused if it is of a typed kind. */
+  const plainDoc = (req: Request) => {
+    const doc = docs.get(id(req), user(req));
+    untyped(doc.kind);
+    return doc;
+  };
 
   // ── Jobs ──────────────────────────────────────────────────────────────────
 
@@ -119,21 +131,23 @@ export function createWorkflowRouter(jobs: WorkflowJobs, docs: WorkflowDocuments
   router.post('/documents', (req, res) => {
     const parsed = createWorkflowDocumentSchema.safeParse(req.body);
     if (!parsed.success) { invalid(res, 'document', parsed.error.issues); return; }
-    handle(() => { res.status(201); return { document: docs.create(user(req), parsed.data.kind, parsed.data.data) }; })(req, res);
+    handle(() => { untyped(parsed.data.kind); res.status(201); return { document: docs.create(user(req), parsed.data.kind, parsed.data.data) }; })(req, res);
   });
   router.get('/documents', handle(req => {
     if (typeof req.query.kind !== 'string' || !req.query.kind) throw new WorkflowError(400, 'kind is required');
+    untyped(req.query.kind);
     return { documents: docs.list(user(req), req.query.kind) };
   }));
-  router.get('/documents/:id', handle(req => ({ document: docs.get(id(req), user(req)) })));
+  router.get('/documents/:id', handle(req => ({ document: plainDoc(req) })));
   router.put('/documents/:id', (req, res) => {
     const parsed = updateWorkflowDocumentSchema.safeParse(req.body);
     if (!parsed.success) { invalid(res, 'document update', parsed.error.issues); return; }
-    handle(() => ({ document: docs.update(id(req), user(req), parsed.data.expectedRevision, parsed.data.data) }))(req, res);
+    handle(() => { plainDoc(req); return { document: docs.update(id(req), user(req), parsed.data.expectedRevision, parsed.data.data) }; })(req, res);
   });
   router.delete('/documents/:id', handle(req => {
     const expected = Number(req.query.expectedRevision);
     if (!Number.isInteger(expected) || expected < 1) throw new WorkflowError(400, 'expectedRevision is required');
+    plainDoc(req);
     docs.remove(id(req), user(req), expected);
     return { removed: true };
   }));
@@ -179,6 +193,17 @@ export function workflowJobs(): WorkflowJobs {
 
 export function workflowDocuments(): WorkflowDocuments {
   return docsInstance ??= new WorkflowDocuments(getDb());
+}
+
+const typedInstances = new Map<string, TypedDocuments<any>>();
+
+/** The process's store for a typed kind, on the app database. Built on first
+ *  use (after initDb()), so a domain may call it from its handlers but not
+ *  at import. */
+export function typedDocuments<T extends Record<string, unknown>>(def: TypedDocumentKind<T>): TypedDocuments<T> {
+  let store = typedInstances.get(def.kind);
+  if (!store) typedInstances.set(def.kind, store = new TypedDocuments<T>(workflowDocuments(), getDb(), def));
+  return store;
 }
 
 /** Called once the server listens: reconciles, then starts pending jobs. */
