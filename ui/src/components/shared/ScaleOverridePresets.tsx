@@ -28,8 +28,8 @@ export interface ScalePreset {
   groupScales: GroupScales;
 }
 
-const STORAGE_KEY = 'hs-scaleOverridePresets';
-const MIGRATED_FLAG = 'hs-scaleOverridePresets:server-migrated';
+export const STORAGE_KEY = 'hs-scaleOverridePresets';
+export const MIGRATED_FLAG = 'hs-scaleOverridePresets:server-migrated';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -46,18 +46,27 @@ function loadLegacyPresets(): ScalePreset[] {
 
 interface PresetDoc { id: string; revision: number; preset: ScalePreset }
 
-async function loadServerPresets(): Promise<PresetDoc[]> {
+/** Migrates every legacy preset once. A same-name, different-content
+ *  collision against an already-imported preset is left unresolved — it is
+ *  reported, never duplicated with a guessed keep-both/replace — so the flag
+ *  stays unset and the batch retries on the next load until that preset is
+ *  resolved explicitly. */
+export async function loadServerPresets(): Promise<PresetDoc[]> {
   if (!localStorage.getItem(MIGRATED_FLAG)) {
     const legacy = loadLegacyPresets();
     if (legacy.length > 0) {
       const items = await Promise.all(legacy.map(async p => {
         const body = p as ScaleOverridePresetBody;
         const raw = JSON.stringify(body);
-        return { storageKey: `${STORAGE_KEY}:${p.name}`, sourceHash: await hashImportValue(raw), name: p.name, body, resolution: 'keep-both' as const };
+        return { storageKey: `${STORAGE_KEY}:${p.name}`, sourceHash: await hashImportValue(raw), name: p.name, body };
       }));
-      await preferencesApi.presets.import('scale-override', items);
+      const { results } = await preferencesApi.presets.import('scale-override', items);
+      const conflicts = results.filter(r => r.outcome === 'name-conflict');
+      if (conflicts.length > 0) console.warn('[ScaleOverridePresets] Presets need an explicit import choice:', conflicts.map(c => c.storedName));
+      else try { localStorage.setItem(MIGRATED_FLAG, '1'); } catch {}
+    } else {
+      try { localStorage.setItem(MIGRATED_FLAG, '1'); } catch {}
     }
-    try { localStorage.setItem(MIGRATED_FLAG, '1'); } catch {}
   }
   const { documents } = await preferencesApi.presets.list<ScaleOverridePresetBody>('scale-override');
   return documents.map(d => ({ id: d.id, revision: d.revision, preset: d.body }));
@@ -84,6 +93,7 @@ export const ScaleOverridePresets: React.FC<ScaleOverridePresetsProps> = ({
   const [selectedIdx, setSelectedIdx] = useState<number>(-1);
   const [saving, setSaving] = useState(false);
   const [newName, setNewName] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadServerPresets().then(setDocs).catch(err => console.error('[ScaleOverridePresets] Failed to load:', err));
@@ -113,6 +123,7 @@ export const ScaleOverridePresets: React.FC<ScaleOverridePresetsProps> = ({
     const existingIdx = docs.findIndex(d => d.preset.name.toLowerCase() === name.toLowerCase());
     setNewName('');
     setSaving(false);
+    setError(null);
 
     (existingIdx >= 0
       ? preferencesApi.presets.update('scale-override', docs[existingIdx]!.id, docs[existingIdx]!.revision, preset)
@@ -125,17 +136,28 @@ export const ScaleOverridePresets: React.FC<ScaleOverridePresetsProps> = ({
         else { next.push(doc); setSelectedIdx(next.length - 1); }
         return next;
       });
-    }).catch(err => console.error('[ScaleOverridePresets] Failed to save:', err));
+    }).catch(err => {
+      console.error('[ScaleOverridePresets] Failed to save:', err);
+      setError(`Save failed for "${name}": ${err instanceof Error ? err.message : String(err)}`);
+    });
   }, [newName, currentOverallScale, currentGroupScales, docs]);
 
   // ── Delete selected preset ──
   const handleDelete = useCallback(() => {
     if (selectedIdx < 0 || selectedIdx >= docs.length) return;
     const doc = docs[selectedIdx]!;
+    const removedIdx = selectedIdx;
     setDocs(docs.filter((_, i) => i !== selectedIdx));
     setSelectedIdx(-1);
+    setError(null);
     preferencesApi.presets.remove('scale-override', doc.id, doc.revision)
-      .catch(err => console.error('[ScaleOverridePresets] Failed to delete:', err));
+      .catch(err => {
+        console.error('[ScaleOverridePresets] Failed to delete:', err);
+        setError(`Delete failed for "${doc.preset.name}": ${err instanceof Error ? err.message : String(err)}`);
+        // Restore the preset — a failed delete (stale revision, offline) must not disappear from the list.
+        setDocs(prev => prev.some(d => d.id === doc.id) ? prev :
+          [...prev.slice(0, removedIdx), doc, ...prev.slice(removedIdx)]);
+      });
   }, [selectedIdx, docs]);
 
   const textSize = compact ? 'text-[10px]' : 'text-xs';
@@ -144,7 +166,7 @@ export const ScaleOverridePresets: React.FC<ScaleOverridePresetsProps> = ({
     <div className="space-y-1.5">
       <ParamLabel
         label="Adapter scale presets"
-        info="Save the overall scale and the four per-group scale sliders above (Self-Attn, Cross-Attn, MLP, Conditioning) as a named preset, then load them back later. Presets are stored in this browser only — they are not saved with the song or the adapter file, and are not visible on another device or after clearing site data."
+        info="Save the overall scale and the four per-group scale sliders above (Self-Attn, Cross-Attn, MLP, Conditioning) as a named preset, then load them back later. Presets save to this installation — they are not saved with the song or the adapter file. An older browser-only preset set is imported once and kept."
         className={`${textSize} font-semibold text-zinc-600 dark:text-zinc-400`}
       />
       <div className="flex items-center gap-1.5">
@@ -214,6 +236,15 @@ export const ScaleOverridePresets: React.FC<ScaleOverridePresetsProps> = ({
             title="Cancel"
           >
             <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-center justify-between gap-2 text-[9px] text-red-500 dark:text-red-400" role="alert">
+          <span className="flex-1">{error}</span>
+          <button onClick={() => setError(null)} className="hover:text-red-700 dark:hover:text-red-300">
+            <X className="w-3 h-3" />
           </button>
         </div>
       )}

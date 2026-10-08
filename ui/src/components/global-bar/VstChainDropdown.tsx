@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next';
 import {
   Plus, Trash2, ExternalLink, Search,
   ChevronUp, ChevronDown, Power, Headphones, Square,
-  BookmarkPlus, Check, RefreshCw, AlertTriangle,
+  BookmarkPlus, Check, RefreshCw, AlertTriangle, X,
 } from 'lucide-react';
 import { useVstChainStore } from '../../stores/vstChainStore';
 import { ParamLabel } from '../shared/ParamLabel';
@@ -138,7 +138,7 @@ const PluginSearch: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 // Save / load / delete named chain snapshots (localStorage).
 
 const PresetManager: React.FC = () => {
-  const { presets, savePreset, loadPreset, deletePreset, chain } = useVstChainStore();
+  const { presets, savePreset, loadPreset, deletePreset, chain, presetError, clearPresetError } = useVstChainStore();
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [newName, setNewName] = useState('');
@@ -152,9 +152,10 @@ const PresetManager: React.FC = () => {
     setSaving(false);
   };
 
-  if (names.length === 0 && !saving && chain.length === 0) return null;
+  if (names.length === 0 && !saving && chain.length === 0 && !presetError) return null;
 
   return (
+    <div className="space-y-1">
     <div className="flex items-center gap-1.5 flex-wrap">
       {names.length > 0 && (
         <StyledSelect
@@ -214,6 +215,15 @@ const PresetManager: React.FC = () => {
           </button>
         )
       )}
+    </div>
+    {presetError && (
+      <div className="flex items-center justify-between gap-2 px-2 py-1 rounded-md bg-red-500/10 border border-red-500/20 text-[10px] text-red-500 dark:text-red-400" role="alert">
+        <span className="flex-1">{presetError}</span>
+        <button onClick={clearPresetError} className="hover:text-red-700 dark:hover:text-red-300 flex-shrink-0">
+          <X size={10} />
+        </button>
+      </div>
+    )}
     </div>
   );
 };

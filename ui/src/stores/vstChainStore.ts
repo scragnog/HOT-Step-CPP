@@ -14,30 +14,33 @@ import { hashImportValue, preferencesApi, type VstChainPresetBody } from '../ser
 // browser key is kept as a one-time import source and is never written to
 // again; `presets` is hydrated from the server on first use.
 
-const PRESETS_KEY = 'vst-chain-presets';
-const MIGRATED_FLAG = 'vst-chain-presets:server-migrated';
+export const PRESETS_KEY = 'vst-chain-presets';
+export const MIGRATED_FLAG = 'vst-chain-presets:server-migrated';
 
 function loadLegacyPresetsFromStorage(): Record<string, VstChainEntry[]> {
   try { return JSON.parse(localStorage.getItem(PRESETS_KEY) || '{}'); } catch { return {}; }
 }
 
 /** Import every legacy localStorage preset once (per name+content). Runs at
- *  most once per browser profile; failures are retried on the next load
- *  since the flag is only set after the import call returns. */
-async function importLegacyPresetsOnce(): Promise<void> {
+ *  most once per browser profile. A same-name, different-content collision
+ *  against an already-imported preset is left unresolved — reported, never
+ *  duplicated with a guessed keep-both/replace — so the flag stays unset
+ *  and that preset's import retries on the next load until it is resolved
+ *  explicitly. */
+export async function importLegacyPresetsOnce(): Promise<void> {
   if (localStorage.getItem(MIGRATED_FLAG)) return;
   const legacy = loadLegacyPresetsFromStorage();
   const names = Object.keys(legacy);
-  if (names.length > 0) {
-    const items = await Promise.all(names.map(async name => {
-      const body: VstChainPresetBody = { name, entries: legacy[name]! as VstChainPresetBody['entries'] };
-      const raw = JSON.stringify(body);
-      return { storageKey: `${PRESETS_KEY}:${name}`, sourceHash: await hashImportValue(raw), name, body };
-    }));
-    // A name collision from a prior partial import keeps both rather than guessing which is current.
-    await preferencesApi.presets.import('vst-chain', items.map(i => ({ ...i, resolution: 'keep-both' as const })));
-  }
-  try { localStorage.setItem(MIGRATED_FLAG, '1'); } catch {}
+  if (names.length === 0) { try { localStorage.setItem(MIGRATED_FLAG, '1'); } catch {} return; }
+  const items = await Promise.all(names.map(async name => {
+    const body: VstChainPresetBody = { name, entries: legacy[name]! as VstChainPresetBody['entries'] };
+    const raw = JSON.stringify(body);
+    return { storageKey: `${PRESETS_KEY}:${name}`, sourceHash: await hashImportValue(raw), name, body };
+  }));
+  const { results } = await preferencesApi.presets.import('vst-chain', items);
+  const conflicts = results.filter(r => r.outcome === 'name-conflict');
+  if (conflicts.length > 0) console.warn('[VST] Presets need an explicit import choice:', conflicts.map(c => c.storedName));
+  else try { localStorage.setItem(MIGRATED_FLAG, '1'); } catch {}
 }
 
 interface VstChainState {
@@ -68,6 +71,9 @@ interface VstChainState {
   presetsLoaded: boolean;
   /** Document id + revision per preset name, for update/delete. Not public API. */
   presetDocs: Record<string, { id: string; revision: number }>;
+  /** Last failed preset save/delete, for a visible retry/dismiss affordance. */
+  presetError: string | null;
+  clearPresetError: () => void;
 
   // Actions
   scanPlugins: () => Promise<void>;
@@ -109,6 +115,8 @@ export const useVstChainStore = create<VstChainState>((set, get) => ({
   presets: loadLegacyPresetsFromStorage(),
   presetsLoaded: false,
   presetDocs: {},
+  presetError: null,
+  clearPresetError: () => set({ presetError: null }),
 
   loadPresets: async () => {
     try {
@@ -323,7 +331,8 @@ export const useVstChainStore = create<VstChainState>((set, get) => ({
   savePreset: async (name: string) => {
     const { chain, presets, presetDocs } = get();
     const entries = chain.map(p => ({ ...p }));
-    set({ presets: { ...presets, [name]: entries } });
+    const previous = presets[name];
+    set({ presets: { ...presets, [name]: entries }, presetError: null });
     try {
       const existing = presetDocs[name];
       const body: VstChainPresetBody = { name, entries };
@@ -333,6 +342,12 @@ export const useVstChainStore = create<VstChainState>((set, get) => ({
       set(s => ({ presetDocs: { ...s.presetDocs, [name]: { id: document.id, revision: document.revision } } }));
     } catch (err) {
       console.error('[VST] Failed to save preset:', err);
+      // The optimistic entry never actually saved — don't leave it looking saved.
+      set(s => {
+        const next = { ...s.presets };
+        if (previous) next[name] = previous; else delete next[name];
+        return { presets: next, presetError: `Failed to save preset "${name}": ${err instanceof Error ? err.message : String(err)}` };
+      });
     }
   },
 
@@ -351,9 +366,10 @@ export const useVstChainStore = create<VstChainState>((set, get) => ({
 
   deletePreset: async (name: string) => {
     const { presets, presetDocs } = get();
+    const previous = presets[name];
     const newPresets = { ...presets };
     delete newPresets[name];
-    set({ presets: newPresets });
+    set({ presets: newPresets, presetError: null });
     const existing = presetDocs[name];
     if (!existing) return;
     try {
@@ -361,6 +377,8 @@ export const useVstChainStore = create<VstChainState>((set, get) => ({
       set(s => { const docs = { ...s.presetDocs }; delete docs[name]; return { presetDocs: docs }; });
     } catch (err) {
       console.error('[VST] Failed to delete preset:', err);
+      // A failed delete (stale revision, offline) must not disappear from the list.
+      set(s => ({ presets: { ...s.presets, [name]: previous! }, presetError: `Failed to delete preset "${name}": ${err instanceof Error ? err.message : String(err)}` }));
     }
   },
 }));
