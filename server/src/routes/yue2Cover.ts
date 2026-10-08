@@ -10,6 +10,10 @@ import { getDb } from '../db/database.js';
 import { yue2Align } from '../services/backends/yue2/client.js';
 import type { Yue2AlignWord } from '../services/backends/yue2/align.js';
 import { COVER_DRIFT_METRIC_VERSION, measureCoverDrift } from '../services/backends/yue2/coverDrift.js';
+import { coverScoreDetails, registerCoverWorkflows } from '../services/workflows/coverWorkflow.js';
+import { workflowDocuments } from './workflows.js';
+import { resolveAudioAsset } from '../services/assets/audioAssets.js';
+import { WorkflowError } from '../services/workflows/workflowJobs.js';
 
 type CoverService = typeof yue2CoverService;
 type DriftSong = { id: string; audio_url: string; lyrics: string; generation_params: string };
@@ -46,6 +50,57 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
   router.post('/source-metadata', async (req: Request, res: Response) => {
     try { res.json(await service.lookup(req.body || {}, authenticate(req)!)); }
     catch (err) { fail(res, err); }
+  });
+
+  // Score editing stays in the studio. Approval is a revisioned server write
+  // bound to the source asset, so a late transcript cannot approve itself.
+  router.post('/drafts/:id/approve-score', async (req: Request, res: Response) => {
+    try {
+      const userId = authenticate(req)!;
+      const revision = req.body?.revision;
+      const abc = req.body?.abc;
+      if (!Number.isInteger(revision) || revision < 1 || typeof abc !== 'string' || !abc.trim()) {
+        throw new WorkflowError(400, 'revision and non-empty ABC are required');
+      }
+      const docs = workflowDocuments();
+      const document = docs.get(String(req.params.id), userId);
+      if (document.kind !== 'cover-draft') throw new WorkflowError(400, 'Document is not a cover draft');
+      if (document.revision !== revision) throw new WorkflowError(409, 'Stale cover draft revision');
+      const assetId = document.data.assetId;
+      if (typeof assetId !== 'string') throw new WorkflowError(400, 'Cover draft has no asset id');
+      const asset = resolveAudioAsset(getDb(), assetId, userId, config.data.dir);
+      const result = await service.start({ sourceAudioUrl: asset.url, abc, sourceLabel: asset.filename.slice(0, 120) }, userId);
+      const updated = docs.update(document.id, userId, revision, current => {
+        if (current.assetId !== assetId) throw new WorkflowError(409, 'Cover source changed');
+        return { ...current, abc: result.abc || abc.trim(), approvedAbc: result.abc || abc.trim() };
+      });
+      res.json({ document: updated, sourceId: result.sourceId, sourceLabel: result.sourceLabel, abc: result.abc });
+    } catch (err) {
+      if (err instanceof WorkflowError) { res.status(err.status).json({ error: err.message, ...err.extra }); return; }
+      fail(res, err);
+    }
+  });
+
+  router.post('/drafts/:id/save-score-details', async (req: Request, res: Response) => {
+    try {
+      const userId = authenticate(req)!;
+      const { revision, abc, factor } = req.body || {};
+      if (!Number.isInteger(revision) || revision < 1 || typeof abc !== 'string') {
+        throw new WorkflowError(400, 'revision and ABC are required');
+      }
+      const document = workflowDocuments().get(String(req.params.id), userId);
+      if (document.kind !== 'cover-draft') throw new WorkflowError(400, 'Document is not a cover draft');
+      if (document.revision !== revision) throw new WorkflowError(409, 'Stale cover draft revision');
+      const assetId = document.data.assetId;
+      if (typeof assetId !== 'string') throw new WorkflowError(400, 'Cover draft has no asset id');
+      const asset = resolveAudioAsset(getDb(), assetId, userId, config.data.dir);
+      const { bpm, key } = coverScoreDetails(abc, factor);
+      const saved = await service.saveDatasetDetails({ sourceAudioUrl: asset.url, bpm, key }, userId);
+      res.json({ ...saved, bpm, key });
+    } catch (err) {
+      if (err instanceof WorkflowError) { res.status(err.status).json({ error: err.message, ...err.extra }); return; }
+      fail(res, err);
+    }
   });
 
   router.post('/sections/review', (req: Request, res: Response) => {
@@ -124,4 +179,5 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
   return router;
 }
 
+registerCoverWorkflows();
 export default createYue2CoverRouter();

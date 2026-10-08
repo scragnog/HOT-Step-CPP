@@ -24,6 +24,8 @@ have to make.
 2. The upload runs metadata extraction (artist/title/album/duration) and Essentia
    BPM/key analysis automatically. Re-adding a file you already analysed in this
    browser reuses the cached result instead of re-analysing.
+   An uploaded source is saved as a cover draft on the server. If you close and
+   reopen Cover Studio, the draft keeps its source identity and analysis.
 3. Fix the analysis if Essentia got it wrong: the ÷2 / Detected / ×2 buttons and a
    free-text BPM box correct tempo halving or doubling, and a key dropdown
    overrides the detected key.
@@ -57,6 +59,9 @@ have to make.
 3. Preview the full ABC, correct it in the editor, and click **Approve score**. Editing
    the score or changing the source audio or stem mix withdraws approval. The
    Generate button stays disabled until the current source has an approved score.
+   For uploaded sources, transcription and approval use the draft's revision;
+   a result from an older source or a cancelled transcription cannot replace the
+   current score.
 4. Paste lyrics or search by artist and title; choose **Instrumental** to render
    without lyrics. Write a YuE2 style caption. With an adapter pair, you can
    choose a caption from its training tracks or the nearest detected BPM.
@@ -86,7 +91,9 @@ have to make.
    shows the score's values with **Save to dataset**. After a confirmation it
    replaces the BPM and key in the song's `.txt`, keeping a backup the same way.
    If the transcriber counted half or double time, use **½×** or **2×** next
-   to the score tempo first; the button saves the adjusted value.
+   to the score tempo first; the button saves the adjusted value. For uploaded
+   sources, the server calculates that tempo and key from the current ABC and
+   applies the confirmed dataset save.
 5. Choose **Base YuE2** or an explicit AR composer and NAR renderer pair.
    **Score to render** defaults to both the vocal and instrumental lines, no
    chord symbols, free tempo and source key. Choose vocal melody only if you
