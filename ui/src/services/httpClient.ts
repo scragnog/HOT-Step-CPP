@@ -41,6 +41,16 @@ export interface ClientOptions {
   signal?: AbortSignal;
 }
 
+export interface ApiClientConfig {
+  baseUrl?: string;
+  /** Root for `mediaUrl()` — `/audio` and `/references` src attributes.
+   *  Defaults to '' (same origin as the page), which is what the Vite dev
+   *  proxy and the prod server both want today. A client built for a
+   *  separate frontend origin (a future remote/phone client) sets this to
+   *  that server's origin instead. */
+  mediaRoot?: string;
+}
+
 function authHeaders(token?: string | null): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
@@ -57,8 +67,10 @@ async function throwIfNotOk(res: Response): Promise<void> {
 
 export class ApiClient {
   private readonly base: string;
-  constructor(opts: ClientOptions = {}) {
+  private readonly mediaRoot: string;
+  constructor(opts: ApiClientConfig = {}) {
     this.base = opts.baseUrl ?? '/api';
+    this.mediaRoot = opts.mediaRoot ?? '';
   }
 
   private url(path: string): string {
@@ -124,10 +136,22 @@ export class ApiClient {
         opts.signal.addEventListener('abort', () => xhr.abort());
       }
       xhr.onload = () => {
-        let parsed: any = {};
+        let parsed: unknown;
         try { parsed = JSON.parse(xhr.responseText); } catch { /* non-JSON error page */ }
-        if (xhr.status >= 200 && xhr.status < 300) resolve(parsed);
-        else reject(new ApiError(xhr.status, parsed.error || `Upload failed (HTTP ${xhr.status})`, parsed));
+        // JSON.parse accepts `null`/numbers/strings as top-level values, so a
+        // non-object body (or one that failed to parse) must not be read as
+        // `{ error }` directly — that threw inside this handler, outside any
+        // try/catch the Promise executor can see, leaving the call pending
+        // forever instead of rejecting.
+        const obj = (parsed && typeof parsed === 'object') ? parsed as Record<string, unknown> : {};
+        if (xhr.status >= 200 && xhr.status < 300) { resolve(parsed as T); return; }
+        reject(new ApiError(
+          xhr.status,
+          (obj.error as string) || `Upload failed (HTTP ${xhr.status})`,
+          parsed ?? null,
+          obj.currentRevision as number | undefined,
+          obj.reason as string | undefined,
+        ));
       };
       xhr.onerror = () => reject(new ApiError(0, 'Upload failed — the server closed the connection', null));
       xhr.onabort = () => reject(new DOMException('Aborted', 'AbortError'));
@@ -136,20 +160,50 @@ export class ApiClient {
   }
 
   /** The URL to pass to EventSource/sharedEventSource for a streaming route
-   *  under this client's base. Opening the connection stays the caller's
-   *  job — SSE auth here is a query param, never a header, since EventSource
-   *  cannot set one. */
-  streamUrl(path: string, opts: { token?: string | null } = {}): string {
-    const url = this.url(path);
-    if (!opts.token) return url;
-    const sep = url.includes('?') ? '&' : '?';
-    return `${url}${sep}token=${encodeURIComponent(opts.token)}`;
+   *  under this client's base. Only for routes that don't check the bearer
+   *  token: EventSource cannot set a header, and the server reads auth from
+   *  `Authorization` only (`server/src/routes/auth.ts` getUserId) — a token
+   *  query param here would silently 401 against any authenticated SSE
+   *  route. An authenticated stream needs `streamEvents()` below instead. */
+  eventSourceUrl(path: string): string {
+    return this.url(path);
   }
 
-  /** A `/audio` or `/references` URL for `<audio>`/`<img>` src — these are
-   *  served from the app root, not under this client's `/api` base. */
+  /** Read a Server-Sent-Events route that needs the bearer token, via fetch
+   *  rather than EventSource (which cannot send one). Splits frames the same
+   *  way `workflowApi.ts`'s `followJob` does; `onData` gets each frame's raw
+   *  `data:` payload to parse. Resolves when the server ends the stream;
+   *  rejects on an aborted `signal` or a non-OK response (after throwing the
+   *  same ApiError a JSON call would). Cancellation closes the underlying
+   *  connection, unlike sharedEventSource's auto-reconnect streams. */
+  async streamEvents(path: string, onData: (data: string) => void, opts: ClientOptions = {}): Promise<void> {
+    const res = await fetch(this.url(path), { headers: authHeaders(opts.token), signal: opts.signal });
+    if (!res.ok) { await throwIfNotOk(res); return; }
+    if (!res.body) return;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let at;
+      while ((at = buffer.indexOf('\n\n')) >= 0) {
+        const frame = buffer.slice(0, at);
+        buffer = buffer.slice(at + 2);
+        const line = frame.split('\n').find(l => l.startsWith('data: '));
+        if (line) onData(line.slice(6));
+      }
+    }
+  }
+
+  /** A `/audio` or `/references` URL for `<audio>`/`<img>` src. Relative to
+   *  `mediaRoot` (default '', same origin as the page) rather than this
+   *  client's JSON `base` — a remote frontend origin configures `mediaRoot`
+   *  separately, since media is served outside `/api`. */
   mediaUrl(path: string): string {
-    return path.startsWith('http') || path.startsWith('/') ? path : `/${path}`;
+    if (path.startsWith('http')) return path;
+    return `${this.mediaRoot}${path.startsWith('/') ? path : `/${path}`}`;
   }
 }
 

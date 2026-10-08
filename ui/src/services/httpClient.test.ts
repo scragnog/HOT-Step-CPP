@@ -113,14 +113,28 @@ test('upload sends fields before files, reports progress, and resolves the parse
   assert.deepEqual(progress, [0.5]);
 });
 
-test('upload rejects with ApiError on a non-2xx response', async () => {
+test('upload rejects with ApiError on a non-2xx response, carrying currentRevision/reason', async () => {
   const client = new ApiClient();
   const result = client.upload('/import', [{ field: 'audio', file: new File([], 'a.wav') }]);
-  FakeXhr.made.at(-1)!.respond(422, { error: 'bad file' });
+  FakeXhr.made.at(-1)!.respond(409, { error: 'stale', currentRevision: 3, reason: 'conflict' });
   await assert.rejects(result, (err: unknown) => {
     assert.ok(err instanceof ApiError);
-    assert.equal(err.status, 422);
-    assert.equal(err.message, 'bad file');
+    assert.equal(err.status, 409);
+    assert.equal(err.message, 'stale');
+    assert.equal(err.currentRevision, 3);
+    assert.equal(err.reason, 'conflict');
+    return true;
+  });
+});
+
+test('upload rejects instead of hanging when a non-2xx body is JSON null or not an object', async () => {
+  const client = new ApiClient();
+  const result = client.upload('/import', [{ field: 'audio', file: new File([], 'a.wav') }]);
+  FakeXhr.made.at(-1)!.respond(500, null);
+  await assert.rejects(result, (err: unknown) => {
+    assert.ok(err instanceof ApiError);
+    assert.equal(err.status, 500);
+    assert.equal(err.message, 'Upload failed (HTTP 500)');
     return true;
   });
 });
@@ -135,16 +149,49 @@ test('aborting the signal before send rejects without touching the fake XHR tran
   );
 });
 
-test('streamUrl appends the token as a query param, never a header', () => {
+test('eventSourceUrl builds under the base and carries no auth', () => {
   const client = new ApiClient();
-  assert.equal(client.streamUrl('/logs'), '/api/logs');
-  assert.equal(client.streamUrl('/logs', { token: 'tok' }), '/api/logs?token=tok');
-  assert.equal(client.streamUrl('/logs?level=info', { token: 'tok' }), '/api/logs?level=info&token=tok');
+  assert.equal(client.eventSourceUrl('/logs'), '/api/logs');
+  assert.equal(client.eventSourceUrl('/logs?level=info'), '/api/logs?level=info');
 });
 
-test('mediaUrl leaves absolute/rooted paths alone and roots a bare name', () => {
+test('mediaUrl leaves absolute paths alone, roots a bare name, and honors a configured mediaRoot', () => {
   const client = new ApiClient();
   assert.equal(client.mediaUrl('/audio/a.wav'), '/audio/a.wav');
   assert.equal(client.mediaUrl('https://example.com/a.wav'), 'https://example.com/a.wav');
   assert.equal(client.mediaUrl('a.wav'), '/a.wav');
+
+  const remote = new ApiClient({ mediaRoot: 'https://studio.example.com' });
+  assert.equal(remote.mediaUrl('/audio/a.wav'), 'https://studio.example.com/audio/a.wav');
+});
+
+test('streamEvents sends the bearer token in a header, parses frames, and resolves when the body ends', async () => {
+  const frames = ['data: {"n":1}\n\n', 'data: {"n":2}\n\n'];
+  const encoder = new TextEncoder();
+  let sent: { url: string; headers: HeadersInit | undefined } | undefined;
+  (globalThis as any).fetch = async (url: string, init: RequestInit) => {
+    sent = { url, headers: init.headers };
+    let i = 0;
+    const body = {
+      getReader: () => ({
+        read: async () => i < frames.length
+          ? { value: encoder.encode(frames[i++]), done: false }
+          : { value: undefined, done: true },
+      }),
+    };
+    return { ok: true, status: 200, statusText: 'x', body, json: async () => ({}) };
+  };
+  const client = new ApiClient();
+  const seen: string[] = [];
+  await client.streamEvents('/workflows/jobs/1/events', d => seen.push(d), { token: 'tok' });
+  assert.deepEqual(sent?.headers, { Authorization: 'Bearer tok' });
+  assert.equal(sent?.url, '/api/workflows/jobs/1/events');
+  assert.deepEqual(seen, ['{"n":1}', '{"n":2}']);
+});
+
+test('streamEvents rejects with ApiError on a non-OK response instead of reading a stream', async () => {
+  (globalThis as any).fetch = async () => ({ ok: false, status: 401, statusText: 'x', json: async () => ({ error: 'Unauthorized' }) });
+  const client = new ApiClient();
+  await assert.rejects(client.streamEvents('/workflows/jobs/1/events', () => {}, { token: 'bad' }),
+    (err: unknown) => { assert.ok(err instanceof ApiError); assert.equal(err.status, 401); return true; });
 });
