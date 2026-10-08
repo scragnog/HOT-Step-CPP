@@ -16,25 +16,23 @@ import { usePersistedState } from '../../hooks/usePersistedState';
 import { GenreSelector } from './GenreSelector';
 import { InspirePreview } from './InspirePreview';
 import {
-  runInspireAndWait,
-  runLlmInspire,
   fetchInspireProviders,
-  generateRandomSubject,
   fetchInstagenPrompt,
   saveInstagenPrompt,
   resetInstagenPrompt,
+  instaWorkflowApi,
+  followJob,
+  type InstaWorkflowInput,
   type InspireResult,
   type InspireProvider,
 } from '../../services/inspireApi';
-import { generateApi, songApi } from '../../services/api';
-import { createGenerationTimer, getGenerationTimeoutMinutes } from '../../utils/generationTimer';
+import { songApi } from '../../services/api';
 import {
   addManualQueueItem,
   updateManualQueueItem,
   completeManualQueueItem,
   failManualQueueItem,
 } from '../../stores/audioGenQueueStore';
-import type { GenerationParams } from '../../types';
 import { VOCAL_LANGUAGES } from '../../constants/languages';
 import { useBackendStore } from '../../stores/backendStore';
 import { MM3_BACKEND_ID } from '../../utils/captionForBackend';
@@ -64,72 +62,6 @@ interface InstaGenPanelProps {
   onNavigate?: (view: string) => void;
 }
 
-/** Derive a song title from lyrics. Prefers [Chorus] first line, then [Verse 1], then first lyric line. */
-function deriveTitleFromLyrics(lyrics: string): string {
-  if (!lyrics || lyrics === '[Instrumental]') return '';
-
-  const lines = lyrics.split(/\r?\n/);
-  const sectionRe = /^\s*\[(.+?)\]\s*$/;
-
-  // Build a map of section → first meaningful lyric line
-  const sections: Record<string, string> = {};
-  let currentSection = '';
-  for (const line of lines) {
-    const m = line.match(sectionRe);
-    if (m) {
-      currentSection = m[1].trim().toLowerCase();
-      continue;
-    }
-    const trimmed = line.trim();
-    // Skip empty lines, parenthetical backing vocals, and "[Instrumental]" markers
-    if (!trimmed || trimmed.startsWith('(') || trimmed.toLowerCase() === '[instrumental]') continue;
-    if (currentSection && !sections[currentSection]) {
-      sections[currentSection] = trimmed;
-    }
-  }
-
-  // Priority: chorus → verse 1 → verse → first any section
-  const chorusKey = Object.keys(sections).find(k => k.startsWith('chorus'));
-  if (chorusKey) return cleanTitle(sections[chorusKey]);
-
-  const verse1Key = Object.keys(sections).find(k => k === 'verse 1');
-  if (verse1Key) return cleanTitle(sections[verse1Key]);
-
-  const verseKey = Object.keys(sections).find(k => k.startsWith('verse'));
-  if (verseKey) return cleanTitle(sections[verseKey]);
-
-  // Fallback: first value in any section
-  const firstVal = Object.values(sections)[0];
-  return firstVal ? cleanTitle(firstVal) : '';
-}
-
-/** Clean up a lyric line for use as a title */
-function cleanTitle(line: string): string {
-  // Remove trailing punctuation, parenthetical asides, and limit length
-  let t = line.replace(/\s*\(.*?\)\s*/g, '').trim();
-  t = t.replace(/[,.!?;:]+$/, '').trim();
-  if (t.length > 60) t = t.substring(0, 57) + '...';
-  return t;
-}
-
-// ── Module-level serial queue ──
-// Ensures InstaGen jobs run one at a time (inspire → generate → poll → next).
-// Without this, concurrent inspire calls stomp on each other's engine logs.
-const _instaQueue: Array<() => Promise<void>> = [];
-let _instaRunning = false;
-function enqueueInstaJob(fn: () => Promise<void>) {
-  _instaQueue.push(fn);
-  if (!_instaRunning) _drainInstaQueue();
-}
-async function _drainInstaQueue() {
-  _instaRunning = true;
-  while (_instaQueue.length > 0) {
-    const job = _instaQueue.shift()!;
-    await job();
-  }
-  _instaRunning = false;
-}
-
 export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, activeJobCount: _activeJobCount, onNavigate }) => {
   const { t } = useTranslation();
   const { token } = useAuth();
@@ -152,6 +84,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
   const [editedLyrics, setEditedLyrics] = useState('');
   const [editedCaption, setEditedCaption] = useState('');
   const [inspireProgress, setInspireProgress] = useState('');
+  const [activePreviewJob, setActivePreviewJob] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [providers, setProviders] = useState<InspireProvider[]>([]);
   const [providersLoaded, setProvidersLoaded] = useState(false);
@@ -211,466 +144,138 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
     return true;
   }, [selectedGenres, additionalCaption, lyricMode, subject, selectedProvider, randomSubject]);
 
-  // ── Build generation params ──
-  const buildParams = useCallback((lyrics: string, caption: string): Partial<GenerationParams> => ({
-    caption: caption || computedCaption,
-    lyrics,
-    instrumental: lyricMode === 'instrumental',
-    vocalLanguage: lyricMode === 'instrumental' ? undefined : vocalLanguage,
-    source: 'insta-gen',
-    useCotCaption: thinking,
-    skipLm: false, // InstaGen always needs the LM for metadata (BPM/key/timesig)
-  }), [computedCaption, lyricMode, vocalLanguage, thinking]);
-
   // ── Random subject toggle ──
   const handleRandomSubject = useCallback(() => {
     setRandomSubject(true);
     setSubject('');
   }, [setSubject]);
 
-  // ── Inspire flow (preview ON) ──
-  const handleInspire = useCallback(async () => {
-    if (!canSubmit) return;
-    setError('');
-    setPhase('inspiring');
+  const [previewDocument, setPreviewDocument] = useState<{ id: string; revision: number; lyrics: string; caption: string } | null>(null);
+  // Recover a saved preview after a browser reconnect. The server document
+  // remains authoritative, including edits made by another client.
+  useEffect(() => {
+    if (!token) return;
+    const id = localStorage.getItem('hs-instagen-preview-document');
+    if (!id) return;
+    let alive = true;
+    instaWorkflowApi.getDocument(token, id).then(({ document }) => {
+      if (!alive || document.kind !== 'insta-preview') return;
+      const data = document.data as { result: InspireResult; edits: { lyrics: string; caption: string } };
+      setPreviewDocument({ id, revision: document.revision, lyrics: data.edits.lyrics, caption: data.edits.caption });
+      setInspireResult(data.result);
+      setEditedLyrics(data.edits.lyrics);
+      setEditedCaption(data.edits.caption);
+      setPhase('preview');
+    }).catch(() => { localStorage.removeItem('hs-instagen-preview-document'); });
+    return () => { alive = false; };
+  }, [token]);
 
+  const captureInput = useCallback((): InstaWorkflowInput => {
+    let settings: Record<string, unknown> = {};
+    try { settings = JSON.parse(localStorage.getItem('ace-settings') || '{}'); } catch { /* defaults */ }
+    return {
+      caption: computedCaption, genres: [...selectedGenres], lyricMode, subject: subject.trim(),
+      randomSubject, provider: selectedProvider, model: selectedModel, vocalLanguage, thinking,
+      engineParams: { ...globalParams.getGlobalParams() },
+      expectedBackend: useBackendStore.getState().activeBackendId,
+      coResident: typeof settings.coResident === 'boolean' ? settings.coResident : false,
+      cacheLmCodes: typeof settings.cacheLmCodes === 'boolean' ? settings.cacheLmCodes : true,
+    };
+  }, [computedCaption, selectedGenres, lyricMode, subject, randomSubject, selectedProvider, selectedModel, vocalLanguage, thinking, globalParams]);
+
+  const trackRender = useCallback(async (jobId: string, queueId: string, capturedToken: string) => {
+    updateManualQueueItem(queueId, { workflowJob: { id: jobId, token: capturedToken }, stage: 'Preparing song...' });
     try {
-      if (lyricMode === 'lyrics-ai') {
-        // ── External LLM path ──
-        // If random subject mode, generate a subject first
-        let effectiveSubject = subject.trim();
-        if (randomSubject || !effectiveSubject) {
-          setInspireProgress('Generating random subject...');
-          effectiveSubject = await generateRandomSubject(
-            { provider: selectedProvider, model: selectedModel || undefined, genres: selectedGenres },
-            token || undefined,
-          );
-        }
-        setInspireProgress('Generating lyrics via AI...');
-        const llmResult = await runLlmInspire(
-          {
-            provider: selectedProvider,
-            model: selectedModel || undefined,
-            genres: selectedGenres,
-            subject: effectiveSubject,
-            language: vocalLanguage,
-          },
-          token || undefined,
-        );
-
-        let result: InspireResult;
-
-        if (llmResult.structured && llmResult.bpm) {
-          // ── Structured path: LLM returned full metadata, skip inspire ──
-          console.log('[InstaGen] Structured LLM response — skipping inspire step');
-          result = {
-            caption: llmResult.caption || computedCaption,
-            lyrics: llmResult.lyrics,
-            title: llmResult.title,
-            bpm: llmResult.bpm,
-            duration: llmResult.duration || 200,
-            keyScale: llmResult.key || 'C major',
-            timeSignature: llmResult.timeSignature || '4/4',
-            vocalLanguage,
-          };
-        } else {
-          // ── Legacy path: run inspire for metadata ──
-          setInspireProgress('Resolving song metadata...');
-          const metaResult = await runInspireAndWait(
-            {
-              caption: llmResult.caption || computedCaption,
-              lyrics: llmResult.lyrics,
-              vocalLanguage,
-              useCotCaption: thinking,
-              lmModel: globalParams.lmModel || undefined,
-              lmTemperature: globalParams.lmTemperature,
-              lmCfgScale: globalParams.lmCfgScale,
-              lmTopP: globalParams.lmTopP,
-            },
-            token || undefined,
-            (stage, _progress) => setInspireProgress(stage),
-          );
-
-          result = {
-            caption: llmResult.caption || computedCaption,
-            lyrics: llmResult.lyrics,
-            title: llmResult.title,
-            bpm: metaResult.bpm,
-            duration: metaResult.duration,
-            keyScale: metaResult.keyScale,
-            timeSignature: metaResult.timeSignature,
-            vocalLanguage,
-          };
-        }
-
-        setInspireResult(result);
-        setEditedLyrics(result.lyrics);
-        setEditedCaption(result.caption);
-        setPhase('preview');
-
-      } else {
-        // ── Built-in LM path ──
-        setInspireProgress('Starting...');
-        const result = await runInspireAndWait(
-          {
-            caption: computedCaption,
-            vocalLanguage,
-            useCotCaption: thinking,
-            lmModel: globalParams.lmModel || undefined,
-            lmTemperature: globalParams.lmTemperature,
-            lmCfgScale: globalParams.lmCfgScale,
-            lmTopP: globalParams.lmTopP,
-          },
-          token || undefined,
-          (stage, _progress) => setInspireProgress(stage),
-        );
-
-        setInspireResult(result);
-        setEditedLyrics(result.lyrics);
-        setEditedCaption(thinking ? result.caption : computedCaption);
-        setPhase('preview');
+      await followJob(capturedToken, jobId, {
+        onSnapshot: job => {
+          if (job.status === 'interrupted') updateManualQueueItem(queueId, { stage: 'Interrupted by server restart' });
+        },
+        onEvent: event => {
+          if (event.type === 'stage') {
+            const stage = (event.data as { stage?: string } | null)?.stage;
+            if (stage) updateManualQueueItem(queueId, { stage });
+          }
+          if (event.type === 'request') {
+            const title = (event.data as { title?: string } | null)?.title;
+            if (title) updateManualQueueItem(queueId, { title, stage: 'Generating audio...' });
+          }
+        },
+      });
+      const { job } = await instaWorkflowApi.get(capturedToken, jobId);
+      if (job.status !== 'succeeded') throw new Error(job.error || `Song ${job.status}`);
+      const output = job.result as { audio?: { audioUrls?: string[]; songIds?: string[]; masteredAudioUrl?: string; noAdapterAudioUrl?: string; duration?: number } };
+      const audio = output.audio || {};
+      const songId = audio.songIds?.[0];
+      completeManualQueueItem(queueId, {
+        audioUrl: audio.audioUrls?.[0] || '', songId,
+        masteredAudioUrl: audio.masteredAudioUrl, noAdapterAudioUrl: audio.noAdapterAudioUrl,
+        audioDuration: audio.duration,
+      });
+      if (songId) {
+        try { const { song } = await songApi.get(songId); onSongCreated?.(song); } catch { /* library refresh still runs */ }
       }
     } catch (err: any) {
-      setError(err.message || 'Inspire failed');
-      setPhase('input');
+      failManualQueueItem(queueId, err.message || 'Generation failed');
     }
-  }, [canSubmit, lyricMode, selectedProvider, selectedModel, selectedGenres, subject, vocalLanguage, computedCaption, thinking, globalParams, token]);
+  }, [onSongCreated]);
 
-  // ── Generate from preview ──
-  const handleGenerateFromPreview = useCallback(() => {
-    if (!inspireResult || !token) return;
-    const params = buildParams(editedLyrics, editedCaption);
-    // Prefer LLM-generated title, then derive from lyrics, then caption
-    params.title = inspireResult.title || deriveTitleFromLyrics(editedLyrics) || computedCaption;
-    // Include metadata from inspire result
-    if (inspireResult.bpm) params.bpm = inspireResult.bpm;
-    if (inspireResult.duration && !isMm3Render()) params.duration = inspireResult.duration;
-    if (inspireResult.keyScale) params.keyScale = inspireResult.keyScale;
-    if (inspireResult.timeSignature) params.timeSignature = inspireResult.timeSignature;
-
-    const capturedToken = token;
-
-    // Create queue item immediately
-    const queueId = addManualQueueItem({
-      title: params.title || computedCaption || 'Auto-Gen',
-      caption: editedCaption,
-    });
-
-    // Submit via serial queue
-    enqueueInstaJob(async () => {
-      try {
-        updateManualQueueItem(queueId, { stage: 'Submitting to engine…' });
-        const engineParams = globalParams.getGlobalParams();
-        const enrichedParams = {
-          ...engineParams,
-          ...params,
-          source: 'insta-gen',
-          coResident: (() => { try { return JSON.parse(localStorage.getItem('ace-settings') || '{}').coResident; } catch { return false; } })(),
-          cacheLmCodes: (() => { try { return JSON.parse(localStorage.getItem('ace-settings') || '{}').cacheLmCodes; } catch { return true; } })(),
-        };
-
-        const res = await generateApi.submit(enrichedParams as any, capturedToken);
-        updateManualQueueItem(queueId, { jobId: res.jobId, stage: 'Generating audio…' });
-
-        // Poll until done — clock ignores server-queue wait.
-        const timer = createGenerationTimer();
-        while (true) {
-          await new Promise(r => setTimeout(r, 1500));
-          const status = await generateApi.status(res.jobId);
-          const t = timer.tick(status.status);
-          const progress = status.progress !== undefined
-            ? Math.min(100, Math.max(0, (status.progress > 1 ? status.progress / 100 : status.progress) * 100))
-            : undefined;
-          updateManualQueueItem(queueId, {
-            progress,
-            stage: status.stage || 'Generating…',
-            elapsed: t.elapsed,
-          });
-
-          if (status.status === 'succeeded') {
-            const audioUrl = status.result?.audioUrls?.[0] || '';
-            const songId = status.result?.songIds?.[0];
-            completeManualQueueItem(queueId, {
-              audioUrl,
-              songId,
-              masteredAudioUrl: status.result?.masteredAudioUrl,
-              noAdapterAudioUrl: status.result?.noAdapterAudioUrl,
-              audioDuration: status.result?.duration,
-            });
-            // Notify App to refresh library
-            if (songId) {
-              try {
-                const { song } = await songApi.get(songId);
-                onSongCreated?.(song);
-              } catch { /* non-fatal */ }
-            }
-            break;
-          }
-          if (status.status === 'failed' || status.status === 'cancelled') {
-            failManualQueueItem(queueId, status.error || 'Generation failed');
-            break;
-          }
-          if (t.timedOut) {
-            failManualQueueItem(queueId, `Generation timed out after ${getGenerationTimeoutMinutes()} minutes`);
-            break;
-          }
-        }
-      } catch (err: any) {
-        failManualQueueItem(queueId, err.message || 'Generation failed');
-      }
-    });
-
-    // Return to input after queuing
-    setPhase('input');
-    setInspireResult(null);
-  }, [inspireResult, editedLyrics, editedCaption, computedCaption, buildParams, token, globalParams, onSongCreated]);
-
-  // ── Direct generate (preview OFF) ──
-  // Non-blocking: creates a queue item immediately, runs inspire + generate
-  // in the background. User can queue more items without waiting.
-  const handleDirectGenerate = useCallback(() => {
+  // Preview only resolves metadata and creates a revisioned document. The
+  // render is a separate approval against that document's exact revision.
+  const handleInspire = useCallback(async () => {
     if (!canSubmit || !token) return;
+    setError(''); setPhase('inspiring'); setInspireProgress('Starting...');
+    try {
+      const { job } = await instaWorkflowApi.preview(token, captureInput());
+      setActivePreviewJob(job.id);
+      await followJob(token, job.id, {
+        onEvent: event => {
+          if (event.type === 'stage') setInspireProgress((event.data as { stage?: string } | null)?.stage || 'Working...');
+        },
+      });
+      const { job: finished } = await instaWorkflowApi.get(token, job.id);
+      if (finished.status !== 'succeeded') throw new Error(finished.error || `Preview ${finished.status}`);
+      const output = finished.result as { documentId: string; revision: number; result: InspireResult };
+      localStorage.setItem('hs-instagen-preview-document', output.documentId);
+      setPreviewDocument({ id: output.documentId, revision: output.revision, lyrics: output.result.lyrics, caption: output.result.caption });
+      setInspireResult(output.result);
+      setEditedLyrics(output.result.lyrics);
+      setEditedCaption(output.result.caption);
+      setPhase('preview');
+    } catch (err: any) { setError(err.message || 'Preview failed'); setPhase('input'); }
+    finally { setActivePreviewJob(null); }
+  }, [canSubmit, token, captureInput]);
 
-    // Capture current state for async closure
-    const capturedCaption = computedCaption;
-    const capturedLyricMode = lyricMode;
-    const capturedThinking = thinking;
-    const capturedVocalLang = vocalLanguage;
-    const capturedProvider = selectedProvider;
-    const capturedModel = selectedModel;
-    const capturedGenres = [...selectedGenres];
-    const capturedSubject = subject.trim();
-    const capturedRandomSubject = randomSubject;
-    const capturedGlobalParams = { ...globalParams };
-    const capturedToken = token;
-
-    // Create queue item immediately — user sees it right away
-    const queueId = addManualQueueItem({
-      title: capturedCaption || 'Auto-Gen',
-      caption: capturedCaption,
-    });
-    updateManualQueueItem(queueId, {
-      stage: _instaRunning ? 'Queued…' : (capturedLyricMode === 'lyrics' ? 'Generating lyrics…' : 'Preparing…'),
-    });
-
-    // Run the full pipeline via serial queue (one at a time)
-    enqueueInstaJob(async () => {
-      try {
-        // Step 1: Resolve lyrics
-        let resolvedLyrics = '';
-        let resolvedCaption = capturedCaption;
-        let llmTitle = '';
-
-        if (capturedLyricMode === 'instrumental') {
-          resolvedLyrics = '[Instrumental]';
-        } else if (capturedLyricMode === 'lyrics-ai') {
-          // If random subject mode, generate a subject first
-          let effectiveSubject = capturedSubject;
-          if (capturedRandomSubject || !effectiveSubject) {
-            updateManualQueueItem(queueId, { stage: 'Generating random subject…' });
-            effectiveSubject = await generateRandomSubject(
-              { provider: capturedProvider, model: capturedModel || undefined, genres: capturedGenres },
-              capturedToken,
-            );
-          }
-          updateManualQueueItem(queueId, { stage: 'Generating lyrics via AI…' });
-          const llmResult = await runLlmInspire(
-            {
-              provider: capturedProvider,
-              model: capturedModel || undefined,
-              genres: capturedGenres,
-              subject: effectiveSubject,
-              language: capturedVocalLang,
-            },
-            capturedToken,
-          );
-          resolvedLyrics = llmResult.lyrics;
-          resolvedCaption = llmResult.caption || capturedCaption;
-          llmTitle = llmResult.title || '';
-
-          // If structured response, use LLM metadata directly — skip inspire
-          if (llmResult.structured && llmResult.bpm) {
-            console.log('[InstaGen] Structured LLM response — skipping inspire step');
-            const finalLyrics = resolvedLyrics;
-            const params = buildParams(finalLyrics, resolvedCaption);
-            params.title = llmTitle || deriveTitleFromLyrics(finalLyrics) || resolvedCaption;
-            if (llmResult.bpm) params.bpm = llmResult.bpm;
-            if (llmResult.duration && !isMm3Render()) params.duration = llmResult.duration;
-            if (llmResult.key) params.keyScale = llmResult.key;
-            if (llmResult.timeSignature) params.timeSignature = llmResult.timeSignature;
-
-            updateManualQueueItem(queueId, {
-              title: params.title || resolvedCaption,
-              stage: 'Submitting to engine…',
-            });
-
-            // Merge with global engine params and submit
-            const engineParams = globalParams.getGlobalParams();
-            const enrichedParams = {
-              ...engineParams,
-              ...params,
-              source: 'insta-gen',
-              coResident: ((): boolean => {
-                try { return JSON.parse(localStorage.getItem('ace-settings') || '{}').coResident; }
-                catch { return false; }
-              })(),
-              cacheLmCodes: ((): boolean => {
-                try { return JSON.parse(localStorage.getItem('ace-settings') || '{}').cacheLmCodes; }
-                catch { return true; }
-              })(),
-            };
-
-            const res = await generateApi.submit(enrichedParams as any, capturedToken);
-            updateManualQueueItem(queueId, { jobId: res.jobId, stage: 'Generating audio…' });
-
-            // Poll until done — clock ignores server-queue wait.
-            const timer = createGenerationTimer();
-            while (true) {
-              await new Promise(r => setTimeout(r, 1500));
-              const status = await generateApi.status(res.jobId);
-              const t = timer.tick(status.status);
-              const progress = status.progress !== undefined
-                ? Math.min(100, Math.max(0, (status.progress > 1 ? status.progress / 100 : status.progress) * 100))
-                : undefined;
-              updateManualQueueItem(queueId, {
-                progress,
-                stage: status.stage || 'Generating…',
-                elapsed: t.elapsed,
-              });
-
-              if (status.status === 'succeeded') {
-                const audioUrl = status.result?.audioUrls?.[0] || '';
-                const songId = status.result?.songIds?.[0];
-                completeManualQueueItem(queueId, {
-                  audioUrl,
-                  songId,
-                  masteredAudioUrl: status.result?.masteredAudioUrl,
-                  audioDuration: status.result?.duration,
-                });
-                if (songId) {
-                  try {
-                    const { song } = await songApi.get(songId);
-                    onSongCreated?.(song);
-                  } catch { /* non-fatal */ }
-                }
-                return;
-              }
-              if (status.status === 'failed' || status.status === 'cancelled') {
-                throw new Error(status.error || 'Generation failed');
-              }
-              if (t.timedOut) {
-                throw new Error(`Generation timed out after ${getGenerationTimeoutMinutes()} minutes`);
-              }
-            }
-          }
-        }
-
-        // Step 2: Run inspire for metadata (+ lyrics if not resolved)
-        updateManualQueueItem(queueId, {
-          stage: capturedLyricMode === 'lyrics' ? 'Generating lyrics…' : 'Resolving metadata…',
+  const handleGenerateFromPreview = useCallback(async () => {
+    if (!inspireResult || !previewDocument || !token) return;
+    setError(''); setPhase('generating');
+    try {
+      let revision = previewDocument.revision;
+      if (editedLyrics !== previewDocument.lyrics || editedCaption !== previewDocument.caption) {
+        const current = await instaWorkflowApi.getDocument(token, previewDocument.id);
+        if (current.document.revision !== revision) throw new Error('Preview changed elsewhere; reopen it before generating');
+        const { document } = await instaWorkflowApi.updateDocument(token, previewDocument.id, revision, {
+          ...current.document.data, edits: { lyrics: editedLyrics, caption: editedCaption },
         });
-        const inspireParams: any = {
-          caption: resolvedCaption,
-          vocalLanguage: capturedVocalLang,
-          useCotCaption: capturedThinking,
-          lmModel: capturedGlobalParams.lmModel || undefined,
-          lmTemperature: capturedGlobalParams.lmTemperature,
-          lmCfgScale: capturedGlobalParams.lmCfgScale,
-          lmTopP: capturedGlobalParams.lmTopP,
-        };
-        if (resolvedLyrics) inspireParams.lyrics = resolvedLyrics;
-        if (capturedLyricMode === 'instrumental') inspireParams.instrumental = true;
-
-        const inspireResult = await runInspireAndWait(
-          inspireParams,
-          capturedToken,
-          (stage) => updateManualQueueItem(queueId, { stage }),
-        );
-
-        // Step 3: Build generation params
-        const finalLyrics = resolvedLyrics || inspireResult.lyrics;
-        // Caption rewrite ON → use inspire's rich caption; OFF → user's original
-        const finalCaption = capturedThinking
-          ? (inspireResult.caption || resolvedCaption)
-          : resolvedCaption;
-        const params = buildParams(finalLyrics, finalCaption);
-        params.title = llmTitle || deriveTitleFromLyrics(finalLyrics) || resolvedCaption;
-        if (inspireResult.bpm) params.bpm = inspireResult.bpm;
-        if (inspireResult.duration && !isMm3Render()) params.duration = inspireResult.duration;
-        if (inspireResult.keyScale) params.keyScale = inspireResult.keyScale;
-        if (inspireResult.timeSignature) params.timeSignature = inspireResult.timeSignature;
-
-        // Update queue item title now we have lyrics
-        updateManualQueueItem(queueId, {
-          title: params.title || resolvedCaption,
-          stage: 'Submitting to engine…',
-        });
-
-        // Step 4: Merge with global engine params and submit
-        const engineParams = globalParams.getGlobalParams();
-        const enrichedParams = {
-          ...engineParams,
-          ...params,
-          source: 'insta-gen',
-          coResident: ((): boolean => {
-            try { return JSON.parse(localStorage.getItem('ace-settings') || '{}').coResident; }
-            catch { return false; }
-          })(),
-          cacheLmCodes: ((): boolean => {
-            try { return JSON.parse(localStorage.getItem('ace-settings') || '{}').cacheLmCodes; }
-            catch { return true; }
-          })(),
-        };
-
-        const res = await generateApi.submit(enrichedParams as any, capturedToken);
-        updateManualQueueItem(queueId, { jobId: res.jobId, stage: 'Generating audio…' });
-
-        // Step 5: Poll until done — clock ignores server-queue wait.
-        const timer = createGenerationTimer();
-        while (true) {
-          await new Promise(r => setTimeout(r, 1500));
-          const status = await generateApi.status(res.jobId);
-          const t = timer.tick(status.status);
-          const progress = status.progress !== undefined
-            ? Math.min(100, Math.max(0, (status.progress > 1 ? status.progress / 100 : status.progress) * 100))
-            : undefined;
-          updateManualQueueItem(queueId, {
-            progress,
-            stage: status.stage || 'Generating…',
-            elapsed: t.elapsed,
-          });
-
-          if (status.status === 'succeeded') {
-            const audioUrl = status.result?.audioUrls?.[0] || '';
-            const songId = status.result?.songIds?.[0];
-            completeManualQueueItem(queueId, {
-              audioUrl,
-              songId,
-              masteredAudioUrl: status.result?.masteredAudioUrl,
-              noAdapterAudioUrl: status.result?.noAdapterAudioUrl,
-              audioDuration: status.result?.duration,
-            });
-            // Notify App to refresh library
-            if (songId) {
-              try {
-                const { song } = await songApi.get(songId);
-                onSongCreated?.(song);
-              } catch { /* non-fatal */ }
-            }
-            return;
-          }
-          if (status.status === 'failed' || status.status === 'cancelled') {
-            throw new Error(status.error || 'Generation failed');
-          }
-          if (t.timedOut) {
-            throw new Error(`Generation timed out after ${getGenerationTimeoutMinutes()} minutes`);
-          }
-        }
-      } catch (err: any) {
-        failManualQueueItem(queueId, err.message || 'Generation failed');
+        revision = document.revision;
       }
-    });
-  }, [canSubmit, token, lyricMode, selectedProvider, selectedModel, selectedGenres, subject, vocalLanguage, computedCaption, thinking, buildParams, globalParams, onSongCreated]);
+      const { job } = await instaWorkflowApi.approve(token, previewDocument.id, revision);
+      const queueId = addManualQueueItem({ title: inspireResult.title || editedCaption || 'Auto-Gen', caption: editedCaption });
+      void trackRender(job.id, queueId, token);
+      localStorage.removeItem('hs-instagen-preview-document');
+      setPhase('input'); setInspireResult(null); setPreviewDocument(null);
+    } catch (err: any) { setError(err.message || 'Approval failed'); setPhase('preview'); }
+  }, [inspireResult, previewDocument, token, editedLyrics, editedCaption, trackRender]);
+
+  const handleDirectGenerate = useCallback(async () => {
+    if (!canSubmit || !token) return;
+    const input = captureInput();
+    setError('');
+    try {
+      const { job } = await instaWorkflowApi.direct(token, input);
+      const queueId = addManualQueueItem({ title: input.caption || 'Auto-Gen', caption: input.caption });
+      void trackRender(job.id, queueId, token);
+    } catch (err: any) { setError(err.message || 'Generation failed'); }
+  }, [canSubmit, token, captureInput, trackRender]);
 
   // ── Refine in Custom-Gen — write preview data to CreatePanel's persisted state ──
   const handleRefineInCustomGen = useCallback(() => {
@@ -694,6 +299,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
       if (title) localStorage.setItem('hs-title', JSON.stringify(title));
     } catch { /* ignore storage errors */ }
 
+    localStorage.removeItem('hs-instagen-preview-document');
     setPhase('input');
     setInspireResult(null);
     onNavigate?.('create');
@@ -701,6 +307,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
 
   // ── Back to input from preview ──
   const handleBack = useCallback(() => {
+    localStorage.removeItem('hs-instagen-preview-document');
     setPhase('input');
   }, []);
 
@@ -1032,6 +639,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
               <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
               {inspireProgress || t('instaGen.inspireLoading')}
             </button>
+            {activePreviewJob && <button onClick={() => { if (token) void instaWorkflowApi.cancel(token, activePreviewJob); }} className="w-full py-2 text-sm text-zinc-400 hover:text-white">{t('common.cancel')}</button>}
           </div>
         ) : lyricMode !== 'instrumental' && previewEnabled ? (
           <button

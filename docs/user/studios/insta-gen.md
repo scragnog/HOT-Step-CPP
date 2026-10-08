@@ -20,8 +20,8 @@ Next to the panel, a Generations list shows songs made in Auto-Gen only, filtere
 3. For Lyrics + AI, enter a **Song Subject** or click its **Random** button to have the LLM invent one, then pick an **LLM Provider** and **Model**.
 4. Optionally add **Additional style tags** and, unless the mode is Instrumental, a **Vocal Language**.
 5. Leave **Preview lyrics first** on to review and edit before committing, or turn it off to generate straight through.
-6. Click the action button. With preview on, this runs Inspire (or the AI lyric step) and stops at a preview of the lyrics, caption and metadata; click **Generate Song** there to queue the render, or **Refine in Custom-Gen** to send the same lyrics, caption and metadata into Custom-Gen instead. With preview off, the button queues generation directly.
-7. Watch progress in the Generations list beside the panel. Queue more songs while one is still running; Auto-Gen runs its own jobs one at a time and marks later ones "Queued…".
+6. Click the action button. With preview on, Auto-Gen saves the resolved lyrics and metadata as a preview. Edit its lyrics and caption, then choose **Generate Song** to approve that exact revision for rendering. **Refine in Custom-Gen** copies the preview into Custom-Gen. Instrumental mode and preview off submit the sequence directly.
+7. Watch progress in the Generations list beside the panel. The server keeps jobs and progress events across browser reconnects. A server restart marks an active workflow interrupted instead of silently rerunning it. The audio queue controls render admission.
 
 ## Controls
 
@@ -40,7 +40,7 @@ Next to the panel, a Generations list shows songs made in Auto-Gen only, filtere
 | Preview lyrics first | When on, the action button stops at a preview of the generated lyrics and metadata before you commit. When off, it queues generation immediately. |
 | Action button | Labelled Inspire, Generate Lyrics, or Auto-Gen depending on Vocal Mode and the preview toggle. Runs the lyric/metadata step, or queues generation straight away. |
 | Edit Caption / Generated Lyrics (preview screen) | Editable text of the caption and lyrics Auto-Gen produced. Changes here are what actually gets generated. |
-| Generate Song (preview screen) | Queues generation with the edited caption and lyrics, plus the BPM, key, time signature and duration shown in the metadata badges. |
+| Generate Song (preview screen) | Approves the saved preview revision with its edited caption and lyrics plus resolved metadata. A stale revision or changed backend cannot render. |
 | Refine in Custom-Gen (preview screen) | Copies the current caption, lyrics and metadata into Custom-Gen's fields and switches to that studio, so you can adjust generation parameters by hand before rendering. |
 
 A reset arrow appears beside Vocal Mode, Vocal Language and Caption Rewrite whenever
@@ -50,7 +50,7 @@ the value has moved from the default; click it to snap that one field back.
 
 The song title comes from the external LLM when it supplies one, otherwise Auto-Gen derives it from the lyrics: the first line of the chorus, then verse 1, then the first verse, then whatever lyric line comes first.
 
-When the active backend is MiniMax-Music3, the estimated duration from the lyric/metadata step is dropped rather than sent, since MM3 has no duration input of its own; length comes from the planner instead.
+When the active backend reports that duration is not editable, Auto-Gen omits the estimated duration from the render request. It captures the backend at submission; a backend switch before rendering stops the workflow.
 
 <!-- TODO(verify): confirm whether Auto-Gen enforces any minimum genre/caption length beyond "at least one genre or a typed style tag", and whether any backend other than MM3 changes its behaviour. -->
 

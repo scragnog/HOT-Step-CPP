@@ -17,6 +17,7 @@ import { getProvider, listProviders } from '../services/lireek/llm/registry.js';
 import { stripThinkingBlocks, postprocessLyrics, fixSectionLabels, enforceLineCounts, fixAPrefix } from '../services/lireek/llm/postprocess.js';
 import { INSTAGEN_LYRIC_SYSTEM_PROMPT, INSTAGEN_FULL_SYSTEM_PROMPT } from '../services/lireek/prompts.js';
 import { getSetting, setSetting } from '../db/lireekDb.js';
+import { registerInstaGenWorkflows, type InstaResult } from '../services/workflows/instaGenWorkflow.js';
 
 const router = Router();
 
@@ -89,6 +90,7 @@ async function runInspire(job: InspireJob, params: any): Promise<void> {
   const aceReq = translateParams(params);
   const abortController = new AbortController();
   (job as any)._abort = abortController;
+  let unsubscribeLogs: (() => void) | undefined;
 
   try {
     job.status = 'running';
@@ -99,7 +101,7 @@ async function runInspire(job: InspireJob, params: any): Promise<void> {
     console.log(`[Inspire] Job ${job.id} — caption: ${(params.caption || '').substring(0, 80)}, lang: ${params.vocalLanguage}`);
 
     // Subscribe to engine logs for LM Phase 1 progress
-    const unsub = subscribeLines((line) => {
+    unsubscribeLogs = subscribeLines((line) => {
       if (line.source !== 'engine') return;
       const lm1 = line.text.match(/\[LM-Phase1\] Step (\d+).*?([\d.]+) tok\/s/);
       if (lm1) {
@@ -125,8 +127,6 @@ async function runInspire(job: InspireJob, params: any): Promise<void> {
     // Fetch inspire results
     const resultRes = await aceClient.getJobResult(lmJobId);
     const lmResults = await resultRes.json() as AceRequest[];
-
-    unsub();
 
     if (!lmResults || lmResults.length === 0) {
       throw new Error('No results from inspire mode');
@@ -159,6 +159,8 @@ async function runInspire(job: InspireJob, params: any): Promise<void> {
       job.stage = 'Failed';
       console.error(`[Inspire] Job ${job.id} failed:`, err.message);
     }
+  } finally {
+    unsubscribeLogs?.();
   }
 }
 
@@ -524,4 +526,33 @@ function parseStructuredLlmResponse(raw: string): StructuredLlmResult | null {
   return null;
 }
 
+// The durable workflows reuse the same engine inspire path as the standalone
+// endpoint. Cancellation reaches both the polling loop and ace-server.
+registerInstaGenWorkflows({
+  async inspire(params, signal, progress): Promise<InstaResult> {
+    const job: InspireJob = { id: uuidv4(), status: 'pending', createdAt: Date.now() };
+    const cancel = () => {
+      job.status = 'cancelled';
+      (job as any)._abort?.abort();
+      if (job.aceJobId) void aceClient.cancelJob(job.aceJobId).catch(() => {});
+    };
+    signal.addEventListener('abort', cancel, { once: true });
+    let lastStage = '';
+    const progressTimer = setInterval(() => {
+      if (signal.aborted || !job.stage || job.stage === lastStage) return;
+      lastStage = job.stage;
+      try { progress(job.stage); } catch { /* the job was cancelled or its claim ended */ }
+    }, 500);
+    try {
+      if (signal.aborted) throw new Error('Cancelled');
+      await runInspire(job, params);
+      if (signal.aborted || job.status === 'cancelled') throw new Error('Cancelled');
+      if (job.status !== 'succeeded' || !job.result) throw new Error(job.error || 'Inspire failed');
+      return job.result;
+    } finally {
+      clearInterval(progressTimer);
+      signal.removeEventListener('abort', cancel);
+    }
+  },
+});
 export default router;

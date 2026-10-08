@@ -237,3 +237,29 @@ export async function resetInstagenPrompt(): Promise<void> {
     throw new Error(err.error || `Reset failed (${res.status})`);
   }
 }
+
+// Durable Insta-Gen workflows. The preview document is the authority for
+// edits; approval names its exact revision.
+import { workflowApi, followJob } from './workflowApi';
+export { followJob };
+
+export interface InstaWorkflowInput {
+  caption: string; genres: string[]; lyricMode: 'instrumental' | 'lyrics' | 'lyrics-ai';
+  subject: string; randomSubject: boolean; provider: string; model: string;
+  vocalLanguage: string; thinking: boolean; engineParams: Record<string, unknown>;
+  expectedBackend: string; coResident: boolean; cacheLmCodes: boolean;
+}
+
+export const instaWorkflowApi = {
+  preview: (token: string, input: InstaWorkflowInput, key = crypto.randomUUID()) =>
+    workflowApi.submit(token, 'insta-preview', key, input as unknown as Record<string, unknown>),
+  direct: (token: string, input: InstaWorkflowInput, key = crypto.randomUUID()) =>
+    workflowApi.submit(token, 'insta-direct', key, input as unknown as Record<string, unknown>),
+  approve: (token: string, documentId: string, revision: number, key = `approve:${documentId}:${revision}`) =>
+    workflowApi.submit(token, 'insta-approve', key, { documentId, revision }),
+  get: workflowApi.get,
+  list: workflowApi.list,
+  cancel: workflowApi.cancel,
+  getDocument: workflowApi.getDocument,
+  updateDocument: workflowApi.updateDocument,
+};
