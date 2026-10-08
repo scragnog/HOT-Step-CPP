@@ -11,8 +11,9 @@ import { createTrainingCreateDraft, mirroredGenerationDraft } from '../../../../
 import { resolveGenerationIntent } from '../../../../server/src/services/generation/intent.js';
 import type { BackendExtensionParam } from '../../../../server/src/services/backends/types.js';
 import type { AuditionPreview, AuditionSideResult } from '../../../../server/src/services/training/types.js';
-import { createContentFromDraft, createContentParams } from './createContent';
+import { applyCreateDraft, createContentFromDraft, createContentParams, createDraftBackendRefusal } from './createContent';
 import { applyTrainingCreateDraft, type TrainingCreateDraftData } from './trainingCreateDraft';
+import { createDraftMirror } from '../../services/studioDraftMirror';
 
 // better-sqlite3 is a server dependency; resolve it from there.
 const Database = createRequire(new URL('../../../../server/package.json', import.meta.url))('better-sqlite3') as typeof import('better-sqlite3');
@@ -48,7 +49,7 @@ interface GoldenCase { id: string; engine: string; branch: string;
 const golden = JSON.parse(readFileSync(new URL('../../../../server/src/services/generation/fixtures/batch1-intent-golden.json', import.meta.url), 'utf8')) as GoldenCase[];
 const CONTENT_KEYS = ['caption', 'lyrics', 'instrumental', 'bpm', 'keyScale', 'timeSignature', 'vocalLanguage', 'duration', 'taskType', 'title', 'artist', 'subject'];
 
-test('resumed Create drafts reproduce every captured Create request', () => {
+test('resumed Create drafts reproduce every captured Create request', async () => {
   const store = new StudioDrafts(new Database(':memory:'));
   const cases = golden.filter(c => c.intent.input.source === 'create');
   assert.ok(cases.length >= 15, `only ${cases.length} Create cases`);
@@ -62,7 +63,33 @@ test('resumed Create drafts reproduce every captured Create request', () => {
       'hs-title': text('title'), 'hs-artist': text('artist'), 'hs-subject': text('subject') };
     const saved = store.drafts.create('u', { studio: 'create', backendId: c.engine, fields }, { origin: 'client' });
     const resumed = store.drafts.get(saved.id, 'u').body;
-    const content = createContentParams(createContentFromDraft(resumed.fields), { mm3Mode: c.engine === 'minimax-m3' }) as Record<string, unknown>;
+    // CreatePanel's load path: the mirror's load with CreatePanel's refusal and
+    // applier. Another active backend refuses it and writes nothing; its own
+    // backend applies it through the persisted keys, read back by the form's
+    // mapping with the active backend's rules (not the fixture's engine).
+    const loadAs = async (active: string) => {
+      const storage = new Map<string, unknown>();
+      let error = '';
+      const mirror = createDraftMirror({ api: {} as never, pointer: { read: () => null, write: () => {} }, onError: m => { error = m; } });
+      const loaded = await mirror.load('t', saved.id, {
+        get: async () => ({ document: { ...saved, body: resumed }, sourceError: null }),
+        current: () => ({ studio: 'create', fields: {} }), confirm: () => true,
+        refuse: draft => createDraftBackendRefusal(draft, active, id => `name:${id}`),
+        apply: draft => applyCreateDraft(draft, (key, value) => storage.set(key, value)),
+      });
+      return { loaded, storage, error };
+    };
+    for (const other of ['ace', 'yue2', 'minimax-m3'].filter(id => id !== c.engine)) {
+      const refused = await loadAs(other);
+      assert.equal(refused.loaded, false);
+      assert.equal(refused.storage.size, 0);
+      assert.equal(refused.error, `This draft was saved for name:${c.engine}. Switch the backend to name:${c.engine} to load it.`);
+    }
+    const active = c.engine;
+    const { loaded, storage } = await loadAs(active);
+    assert.equal(loaded, true);
+    const content = createContentParams(createContentFromDraft(Object.fromEntries(storage)),
+      { mm3Mode: active === 'minimax-m3' }) as Record<string, unknown>;
     for (const key of Object.keys(content)) assert.ok(CONTENT_KEYS.includes(key) && Object.hasOwn(input, key), `${c.id}: unexpected ${key}`);
     const resumedInput = { ...input, ...content };
     assert.deepEqual(resumedInput, input, `${c.id} (${c.branch})`);

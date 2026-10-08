@@ -121,3 +121,56 @@ test('edits made while a save is in flight are written last, once', async () => 
   assert.deepEqual(h.calls, ['create', 'update d1@1']);
   assert.deepEqual(h.docs.get('d1')!.body.fields, { 'hs-caption': '3' });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(r => { resolve = r; });
+  return { promise, resolve };
+}
+const doc = (id: string, revision: number, fields: Record<string, unknown>) => ({ document: { id, revision, body: body(fields) } as never, sourceError: null });
+
+test('load decides after the fetch: an edit made while the draft loads is protected', async () => {
+  const h = harness();
+  await h.mirror.save('t', body({ 'hs-caption': 'clean' }));
+  let form = body({ 'hs-caption': 'clean' });
+  const get = deferred<ReturnType<typeof doc>>();
+  const applied: StudioDraftBody[] = [];
+  const asked: string[] = [];
+  const loading = h.mirror.load('t', 'd7', { get: () => get.promise, current: () => form,
+    confirm: m => { asked.push(m); return false; }, apply: b => applied.push(b) });
+  form = body({ 'hs-caption': 'typed while loading' });   // clean at selection, dirty when the GET lands
+  get.resolve(doc('d7', 3, { 'hs-caption': 'saved draft' }));
+  assert.equal(await loading, false);
+  assert.equal(asked.length, 1);
+  assert.deepEqual(applied, []);
+  assert.equal(h.pointer()!.id, 'd1');
+});
+
+test('competing loads: the last one chosen wins, whatever order the fetches finish in', async () => {
+  const h = harness();
+  const first = deferred<ReturnType<typeof doc>>(), second = deferred<ReturnType<typeof doc>>();
+  const applied: unknown[] = [];
+  const hooks = (p: Promise<ReturnType<typeof doc>>) => ({ get: () => p, current: () => body({}), confirm: () => true,
+    apply: (b: StudioDraftBody) => applied.push(b.fields['hs-caption']) });
+  const a = h.mirror.load('t', 'dA', hooks(first.promise));
+  const b = h.mirror.load('t', 'dB', hooks(second.promise));
+  second.resolve(doc('dB', 2, { 'hs-caption': 'B' }));
+  assert.equal(await b, true);
+  first.resolve(doc('dA', 5, { 'hs-caption': 'A' }));
+  assert.equal(await a, false);
+  assert.deepEqual(applied, ['B']);
+  assert.equal(h.pointer()!.id, 'dB');
+});
+
+test('a refused draft (wrong backend) changes nothing and says why', async () => {
+  const h = harness();
+  await h.mirror.save('t', body({ 'hs-caption': 'mine' }));
+  const applied: unknown[] = [];
+  const ok = await h.mirror.load('t', 'd5', { get: async () => doc('d5', 1, { 'hs-caption': 'mm3 draft' }),
+    current: () => body({ 'hs-caption': 'mine' }), confirm: () => true, apply: b => applied.push(b),
+    refuse: () => 'This draft was saved for MiniMax-Music3. Switch the backend to MiniMax-Music3 to load it.' });
+  assert.equal(ok, false);
+  assert.deepEqual(applied, []);
+  assert.equal(h.pointer()!.id, 'd1');
+  assert.match(h.error(), /saved for MiniMax-Music3/);
+});

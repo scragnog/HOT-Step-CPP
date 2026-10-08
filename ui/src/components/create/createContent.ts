@@ -65,3 +65,18 @@ export function createContentFromDraft(fields: Record<string, unknown>): CreateC
     sourceLatentUrl: get('hs-sourceLatentUrl', ''),
   };
 }
+
+/** A Create draft resumes only on the backend it was saved with: its duration,
+ *  caption and request rules depend on it, and switching the active backend is
+ *  an app-wide setting a draft load must not change. '' accepts the draft. */
+export function createDraftBackendRefusal(body: { backendId?: string }, activeBackendId: string | null | undefined,
+  nameOf: (backendId: string) => string): string {
+  if (!body.backendId || body.backendId === activeBackendId) return '';
+  const name = nameOf(body.backendId);
+  return `This draft was saved for ${name}. Switch the backend to ${name} to load it.`;
+}
+
+/** Apply an accepted Create draft through the same persisted keys the form reads. */
+export function applyCreateDraft(body: { fields: Record<string, unknown> }, write: (key: string, value: unknown) => void): void {
+  for (const [key, value] of Object.entries(body.fields)) if (key.startsWith('hs-')) write(key, value);
+}

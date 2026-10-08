@@ -30,6 +30,7 @@ export function createDraftMirror(deps: DraftMirrorDeps) {
   let pending: { token: string; body: StudioDraftBody } | null = null;
   let running: Promise<void> | null = null;
   let epoch = 0;
+  let loadSeq = 0;
 
   async function drain(): Promise<void> {
     while (pending) {
@@ -80,7 +81,40 @@ export function createDraftMirror(deps: DraftMirrorDeps) {
       deps.pointer.write(current);
       deps.onError('');
     },
+    /** Load a draft into this editor. Everything is decided after the fetch:
+     *  a later load wins, a refusal (e.g. another backend) changes nothing, and
+     *  the live form (not the form at selection time) decides whether to ask
+     *  before replacing unsaved edits. Resolves true when the draft was applied. */
+    async load(token: string, id: string, h: LoadHooks): Promise<boolean> {
+      const seq = ++loadSeq;
+      try {
+        const { document, sourceError } = await h.get(token, id);
+        if (seq !== loadSeq) return false;
+        const refusal = h.refuse?.(document.body);
+        if (refusal) { deps.onError(refusal); return false; }
+        if (this.unsaved(h.current()) && !h.confirm(REPLACE_PROMPT)) return false;
+        this.adopt(document);
+        h.apply(document.body);
+        if (sourceError) deps.onError(sourceError);
+        return true;
+      } catch (err) {
+        if (seq === loadSeq) deps.onError(`Draft not loaded: ${messageOf(err)}`);
+        return false;
+      }
+    },
   };
+}
+
+const REPLACE_PROMPT = 'Replace the current form with the saved draft? Edits not yet saved to a draft will be lost.';
+
+export interface LoadHooks {
+  get(token: string, id: string): Promise<{ document: StudioDraftDocument; sourceError: string | null }>;
+  /** The form as it is now. */
+  current(): StudioDraftBody;
+  confirm(message: string): boolean;
+  /** A reason this editor cannot take the draft, or '' to accept it. */
+  refuse?(body: StudioDraftBody): string;
+  apply(body: StudioDraftBody): void;
 }
 
 const pointerKey = (studio: string) => `hs-studioDraft:${studio}`;
@@ -101,9 +135,9 @@ export interface StudioDraftControl {
   /** The last save or load problem, '' when none. */
   error: string;
   list(): Promise<StudioDraftDocument[]>;
-  /** Fetch a draft and hand its fields to `apply`, after confirming if this
-   *  editor has unsaved edits. Resolves false when nothing was applied. */
-  load(id: string, apply: (body: StudioDraftBody) => void): Promise<boolean>;
+  /** Fetch a draft and hand its fields to `apply`, unless `refuse` names a
+   *  reason or the user keeps unsaved edits. Resolves false when nothing was applied. */
+  load(id: string, apply: (body: StudioDraftBody) => void, refuse?: (body: StudioDraftBody) => string): Promise<boolean>;
 }
 
 /** Mirror `fields` into this editor's draft for `studio`. */
@@ -119,20 +153,15 @@ export function useStudioDraftMirror(studio: StudioDraftBody['studio'], token: s
     return () => window.clearTimeout(timer.current);
   }, [mirror, token, body]);
   const list = useCallback(async () => token ? (await studioDraftsApi.list(token, studio)).documents : [], [token, studio]);
-  const load = useCallback(async (id: string, apply: (draft: StudioDraftBody) => void) => {
+  const bodyRef = useRef(body);
+  bodyRef.current = body;
+  const load = useCallback(async (id: string, apply: (draft: StudioDraftBody) => void, refuse?: (draft: StudioDraftBody) => string) => {
     if (!token) return false;
-    try {
-      const { document, sourceError } = await studioDraftsApi.get(token, id);
-      if (mirror.unsaved(JSON.parse(body)) && !window.confirm('Replace the current form with the saved draft? Edits not yet saved to a draft will be lost.')) return false;
-      window.clearTimeout(timer.current);
-      mirror.adopt(document);
-      apply(document.body);
-      if (sourceError) setError(sourceError);
-      return true;
-    } catch (err) {
-      setError(`Draft not loaded: ${messageOf(err)}`);
-      return false;
-    }
-  }, [token, mirror, body]);
+    return mirror.load(token, id, {
+      get: studioDraftsApi.get, current: () => JSON.parse(bodyRef.current), refuse,
+      confirm: message => window.confirm(message),
+      apply: draft => { window.clearTimeout(timer.current); apply(draft); },
+    });
+  }, [token, mirror]);
   return { error, list, load };
 }
