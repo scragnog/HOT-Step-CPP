@@ -57,6 +57,33 @@ test('direct start captures one joint-only operation with the current source and
   assert.equal(typeof snapshot.payload.recipes.joint.version, 'number');
 });
 
+test('direct start keeps the clicked worker and form while context is pending', async () => {
+  const overrides = { steps: 71, preview: { seconds: 12 } };
+  let releaseContext!: (context: Awaited<ReturnType<Parameters<typeof submitJointStart>[2]['getContext']>>) => void;
+  const context = new Promise<Awaited<ReturnType<Parameters<typeof submitJointStart>[2]['getContext']>>>(resolve => {
+    releaseContext = resolve;
+  });
+  let submitted: ReturnType<typeof import('./yue2JointCommand').captureJointStart> | undefined;
+  let selectedWorker = { kind: 'remote' as const, name: 'worker-a' };
+  const pending = submitJointStart('album', overrides, {
+    getContext: async () => context,
+    start: async snapshot => {
+      submitted = snapshot;
+      return { id: 'pipeline-1' } as Yue2PreparationSummary;
+    },
+  }, 'clicked', selectedWorker);
+  selectedWorker = { kind: 'remote', name: 'worker-b' };
+  overrides.steps = 99;
+  overrides.preview.seconds = 60;
+  releaseContext({ dataset: { id: 'album', revision: 7 },
+    source: { kind: 'dataset-sources', id: 'album', revision: 'source-3' } });
+  await pending;
+  assert.equal(selectedWorker.name, 'worker-b');
+  assert.deepEqual(submitted?.worker, { kind: 'remote', name: 'worker-a' });
+  assert.deepEqual(submitted?.payload.recipes.joint.overrides.preview, { seconds: 12 });
+  assert.equal(submitted?.payload.recipes.joint.overrides.steps, 71);
+});
+
 test('direct start surfaces context and admission failures without a second submission', async () => {
   let calls = 0;
   const failContext = { getContext: async () => { throw new Error('stale source'); },

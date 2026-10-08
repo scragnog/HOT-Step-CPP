@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 
 import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
 import { captureJointOverrides, submitJointStart } from './yue2JointCommand';
+import { currentWorkerRef } from '../../services/trainingOperations';
 import * as preparationApi from '../../services/trainingPreparationApi';
 import { TrainingChart } from './TrainingChart';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -915,17 +916,19 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const userPresetActive = (preset: Yue2JointPreset) => Object.entries(preset.settings)
     .every(([key, value]) => JSON.stringify(value) === JSON.stringify(current[key]));
   const captureJointRequest = async (): Promise<Record<string, unknown>> => {
+    const request = captureJointOverrides(form, prepare, lyricTiming, defaultDevice, resumeChoice);
     if (!resumeChoice && !form.resume?.trim()) await captionMissing();
-    return captureJointOverrides(form, prepare, lyricTiming, defaultDevice, resumeChoice);
+    return request;
   };
   const run = async (): Promise<string | null> => {
+    const worker = currentWorkerRef();
     setStarting(true); setError('');
     try {
       const request = await captureJointRequest();
       const pipeline = await submitJointStart(datasetId, request, {
         getContext: preparationApi.getYue2PreparationContext,
         start: preparationApi.startYue2Preparation,
-      });
+      }, undefined, worker);
       // A new run takes the ladder over from whatever was picked before.
       setPickedLadderRun('');
       setJointPipelineId(pipeline.id);
