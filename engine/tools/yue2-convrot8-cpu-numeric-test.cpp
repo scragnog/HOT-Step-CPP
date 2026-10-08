@@ -132,7 +132,9 @@ bool run_case(const Case & c) {
     ggml_build_forward_expand(graph, forward);
     ggml_build_forward_expand(graph, back);
 
-    ggml_backend_t cpu = ggml_backend_cpu_init();
+    // By type, not ggml_backend_cpu_init(): with GGML_BACKEND_DL (the Windows
+    // build) the CPU backend is a loaded module, so that symbol is not linkable.
+    ggml_backend_t cpu = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
     if (!cpu) { std::fprintf(stderr, "[%s] CPU backend init failed\n", c.name); ggml_free(ctx); return false; }
 
     ggml_backend_buffer_t buffer = ggml_backend_alloc_ctx_tensors(ctx, cpu);
@@ -181,6 +183,7 @@ bool run_case(const Case & c) {
 } // namespace
 
 int main() {
+    ggml_backend_load_all();
     bool all_ok = true;
     for (const auto & c : kCases) {
         if (!run_case(c)) all_ok = false;

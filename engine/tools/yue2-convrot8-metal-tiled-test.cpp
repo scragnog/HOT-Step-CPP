@@ -36,6 +36,11 @@
 #include <random>
 #include <string>
 #include <vector>
+#ifdef _WIN32
+// MSVC has no setenv/unsetenv; every call here overwrites, as _putenv_s does.
+static int setenv(const char * name, const char * value, int) { return _putenv_s(name, value); }
+static int unsetenv(const char * name) { return _putenv_s(name, ""); }
+#endif
 
 namespace {
 

@@ -127,6 +127,11 @@
 #include <string>
 #include <thread>
 #include <vector>
+#ifdef _WIN32
+// MSVC has no setenv/unsetenv; every call here overwrites, as _putenv_s does.
+static int setenv(const char * name, const char * value, int) { return _putenv_s(name, value); }
+static int unsetenv(const char * name) { return _putenv_s(name, ""); }
+#endif
 
 // train/lm-common.h (pulled in by dit-data.h) forward-declares the trainer's
 // JSONL sink and leaves it to the TU to define; ace-train.cpp is where the real
