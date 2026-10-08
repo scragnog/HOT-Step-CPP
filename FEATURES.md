@@ -154,7 +154,7 @@ Every render and import lands here. Details: [Library](docs/user/studios/library
 | Rate and pitch preview | Playback speed from 0.5x to 2x, and a 48k/44.1k toggle that hears a render clocked at 44.1 kHz. |
 | Variant switch | No Adapter, Unmastered and Mastered versions, each with its own download. |
 | Waveform tools | Trim and crop in and out points, section markers and a synced LRC lyrics bar. |
-| Playlist queue | One browser-local play queue with reorder, Play All and Download All. |
+| Playlist queue | One browser-local play queue with reorder, Play All and Download All. Ordered playlist snapshots save with server revisions. A browser playlist can be imported explicitly; a failed save keeps the local edit visible for reapplication. |
 
 ## Lyric Studio
 

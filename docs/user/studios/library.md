@@ -68,16 +68,22 @@ synced lyrics bar, and, when both slots are filled, the A/B mini-bar.
 
 ## Playlists
 
-The playlist is a play queue, not a saved collection: it lives in the
-browser's local storage, not the server database, so it does not sync
-between devices and is lost if site data is cleared. There is one queue, not
-multiple named playlists.
+The playlist is a play queue, not a saved collection. There is one queue, not
+multiple named playlists. Playback position and device settings stay local to
+the browser, but the queue's order and track variants save to the server as a
+revisioned snapshot, and track variant URLs need no live song row, so a
+deleted or re-rendered song does not break the queue.
 
 Find it in the right-hand Activity column (Playlist tab, alongside Recent
 Songs). Add a track with the list-plus icon next to it anywhere in the app,
 or "Add to Playlist" from its action menu. From the playlist itself:
 reorder with the up/down arrows, remove a track with the x, or use the
 footer's Play All, Download All, and Clear.
+
+If the panel finds an older browser-local playlist, choose **Import browser
+playlist** to move that snapshot to server storage; the browser copy stays in
+place. A save error shows under the header, and **Reload and reapply** retries
+the pending edit against the latest saved revision.
 
 ## Song details
 
@@ -171,8 +177,9 @@ editor instead.
 
 - Deleting one track from its menu happens immediately, with no
   confirmation. Bulk delete (via Select) does ask first.
-- The playlist queue is per-browser. It is not the place to keep a track
-  safe. Use the library itself, or download the file, for that.
+- The playlist queue's local pointer is per-browser, even though its order
+  now saves to the server. It is not the place to keep a track safe. Use the
+  library itself, or download the file, for that.
 - "How it was made" only ever shows the fields the track's own backend
   used. A YuE2 or MiniMax-Music3 song will not show ACE-Step's step count or
   CFG scale, because those fields were never read for that render.

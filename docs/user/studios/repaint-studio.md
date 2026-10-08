@@ -24,6 +24,17 @@ either a song from the [Library](library.md) or an uploaded audio file.
 
 1. Load a source track: drag an audio file onto the drop zone or click it to
    browse, or click Pick from Library and choose a song.
+   The studio's fields also save to a server draft about a second after each
+   change. This browser's copy is still the one you edit. The draft belongs
+   to this browser: another browser or tool that edits the same draft never
+   overwrites your fields. If that happens, your next change is saved as a
+   new draft and a short note under the header says so. If a save fails, a
+   note says the draft wasn't saved; your edits stay in this browser, and the
+   next change tries again. To go back to a saved draft, open **Load a saved
+   draft** under the header and pick one; if the form has edits not yet saved
+   to a draft, you are asked first. A draft whose uploaded source has gone
+   missing is reported as unavailable, so you can reupload it. Loading a
+   draft never starts a job.
 2. Set the region to regenerate by dragging the waveform's two handles, the
    range slider below it, or the Start/End fields directly. The region
    defaults to the middle third of the track when a source first loads.

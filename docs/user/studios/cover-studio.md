@@ -26,6 +26,17 @@ have to make.
    browser reuses the cached result instead of re-analysing.
    An uploaded source is saved as a cover draft on the server. If you close and
    reopen Cover Studio, the draft keeps its source identity and analysis.
+   The studio's fields also save to a server draft about a second after each
+   change. This browser's copy is still the one you edit. The draft belongs
+   to this browser: another browser or tool that edits the same draft never
+   overwrites your fields. If that happens, your next change is saved as a
+   new draft and a short note under the header says so. If a save fails, a
+   note says the draft wasn't saved; your edits stay in this browser, and the
+   next change tries again. To go back to a saved draft, open **Load a saved
+   draft** under the header and pick one; if the form has edits not yet saved
+   to a draft, you are asked first. A draft whose uploaded source has gone
+   missing is reported as unavailable, so you can reupload it. Loading a
+   draft never starts a job.
 3. Fix the analysis if Essentia got it wrong: the ÷2 / Detected / ×2 buttons and a
    free-text BPM box correct tempo halving or doubling, and a key dropdown
    overrides the detected key.

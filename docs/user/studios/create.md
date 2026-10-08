@@ -46,6 +46,13 @@ MiniMax-Music3 or YuE2), chosen in that same bar, see [Backends](../backends.md)
 11. The song appears in [Library](library.md) once it finishes, tagged as having come from
     Custom-Gen.
 
+The form's content, metadata and caption-source choices (MiniMax-Music3 track pick, YuE2
+dataset and track pick) also save to a server draft, together with the active backend. Saving
+and **Load a saved draft** follow the same rules as Cover and Repaint: the draft belongs to this
+browser, a conflicting edit elsewhere becomes a new draft, and a failed save keeps your edits
+here. Training Studio's **Send to Custom-Gen** drafts keep working as before, including the
+reset trigger, the cleared adapter stack and LM code caching turned off.
+
 ## Controls
 
 | Control | What it does |

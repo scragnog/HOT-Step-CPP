@@ -228,7 +228,17 @@ Three upstream files carry `#include` hooks into HOT-Step code (`pipeline-synth-
   Create/Cover/Repaint/STORM/Stem drafts (`server/src/services/workflows/revisions.ts`,
   `server/src/services/preferences/`, `server/src/services/studioDrafts/`). A browser's legacy
   `localStorage` copy is imported into it once, by exact key and content hash
-  (`document_import_receipts`), never overwritten afterward.
+  (`document_import_receipts`), never overwritten afterward. The playlist stores ordered
+  snapshots independently of `playlists` and `playlist_songs`, so queue item IDs and variant
+  URLs need no live song row. `server/src/services/studioDrafts/` validates draft fields and
+  browser import keys. Existing `cover-draft` and `training-audition-create` IDs remain
+  readable through the handoff adapter. The UI's selected draft ID stays local. Create, Cover
+  and Repaint mirror their autosaved fields through `ui/src/services/studioDraftMirror.ts`.
+  Each editor keeps its own draft id and expected revision; the per-browser pointer
+  `hs-studioDraft:<studio>` only seeds a newly opened editor. A 409 creates a new draft and
+  never overwrites the other writer's content. `StudioDraftPicker` loads a draft after a
+  confirm if the editor has unsaved edits. Create's request content comes from
+  `ui/src/components/create/createContent.ts`, shared by Generate and draft resume.
 - Files under the data dir: `audio/` (outputs), `references/`, `vst/` (`chain.json`,
   `states/`), `lyrics/` (exports), `training/`.
 - A git checkout may also have a repo-root `data/` folder. It is not the live data dir.

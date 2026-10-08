@@ -154,6 +154,13 @@ steps verified finite on an RTX 4090 over Vulkan, 47-95 s per song; not yet
 ear-tested, and not yet run on AMD). Model Manager's **YuE2 Joint Training Pack**
 contains the required weights; Legacy remains available on its supported backends.
 
+### YuE2 preparation operations
+
+`stages: ['joint']` with `mode: 'train-after-preparation'` is direct Start-training.
+`Yue2PreparationPipeline.start` reads the artifacts before admission and returns 409 if
+latents, codes or sheets are missing, plus stems and align when `lyricTiming` is set. No
+preparation job is queued. Joint combined with other stages still requires `latents`.
+
 ### Optimise phase and base loss (2026-09-30)
 
 YuE2's phase 2 is **Prepare** (the `preprocess` phase id, relabelled; `Yue2TrainStages section="prepare"`), then **Optimise** (`optimise`, `Yue2OptimisePanel.tsx`), then Train. The joint run-all chain takes a null training callback for prepare-only runs.
