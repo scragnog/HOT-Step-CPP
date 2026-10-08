@@ -12,13 +12,16 @@
 //   - Source audio required
 //   - Single track name required
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Upload, X, Loader2, Info, AlertTriangle, Layers, Clock, ListOrdered } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
 import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { usePersistedState } from '../../hooks/usePersistedState';
-import { generateApi, modelApi } from '../../services/api';
+import { modelApi } from '../../services/api';
+import { submitStudioRender, followStudioRender, type SourceRef } from '../../services/repaintLayerWorkflowApi';
+import { workflowApi } from '../../services/workflowApi';
+import { useBackendStore } from '../../stores/backendStore';
 import { TrackPicker, type TrackName } from './TrackPicker';
 import { LayerStack, type LayerInfo } from './LayerStack';
 import { RecentBuilds } from './RecentBuilds';
@@ -45,6 +48,11 @@ export const StemBuilder: React.FC = () => {
 
   // ── Source audio ──
   const [sourceAudioUrl, setSourceAudioUrl] = useState(() => localStorage.getItem('hs-sb-sourceUrl') || '');
+  const [sourceRef, setSourceRef] = useState<SourceRef | null>(() => {
+    try { return JSON.parse(localStorage.getItem('hs-sb-sourceRef') || 'null'); } catch { return null; }
+  });
+  const sourceUrlRef = useRef(sourceAudioUrl);
+  sourceUrlRef.current = sourceAudioUrl;
   const [sourceFileName, setSourceFileName] = useState(() => localStorage.getItem('hs-sb-sourceFile') || '');
   const [isUploading, setIsUploading] = useState(false);
 
@@ -61,9 +69,9 @@ export const StemBuilder: React.FC = () => {
 
   // ── Generation state ──
   const [isGenerating, setIsGenerating] = useState(false);
-  const [genProgress, setGenProgress] = useState(0);
   const [genStage, setGenStage] = useState('');
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const submissionKeyRef = useRef<string | null>(null);
 
   // ── Iterative composition ──
   const [layers, setLayers] = useState<LayerInfo[]>([]);
@@ -86,7 +94,37 @@ export const StemBuilder: React.FC = () => {
 
   // ── Persist source ──
   useEffect(() => { localStorage.setItem('hs-sb-sourceUrl', sourceAudioUrl); }, [sourceAudioUrl]);
+  useEffect(() => { localStorage.setItem('hs-sb-sourceRef', JSON.stringify(sourceRef)); }, [sourceRef]);
   useEffect(() => { localStorage.setItem('hs-sb-sourceFile', sourceFileName); }, [sourceFileName]);
+
+  useEffect(() => {
+    const id = localStorage.getItem('hs-sb-workflowJob');
+    if (!id || !token) return;
+    let mounted = true;
+    setIsGenerating(true);
+    setActiveJobId(id);
+    void followStudioRender(token, id, stage => { if (mounted) setGenStage(stage); })
+      .then(async result => {
+        if (!mounted) return;
+        const { job } = await workflowApi.get(token, id);
+        if (!mounted) return;
+        const captured = job.input as { source?: SourceRef; trackName?: string; caption?: string };
+        const audioUrl = result.audio?.audioUrls?.[0];
+        setRefreshTrigger(p => p + 1);
+        if (audioUrl && captured.source?.expectedUrl === sourceUrlRef.current) {
+          setLayers(prev => [...prev, { trackName: captured.trackName || 'stem', caption: captured.caption || '',
+            audioUrl, songId: result.audio?.songIds?.[0], timestamp: Date.now() }]);
+          setPreviewStemUrl(audioUrl);
+          setPreviewLabel((captured.trackName || 'stem').replace('_', ' '));
+        }
+        showToast('Layer complete!');
+      }).catch(err => { if (mounted) showToast(`Layer ${String((err as Error).message)}`); })
+      .finally(() => {
+        if (localStorage.getItem('hs-sb-workflowJob') === id) localStorage.removeItem('hs-sb-workflowJob');
+        if (mounted) { setIsGenerating(false); setActiveJobId(null); }
+      });
+    return () => { mounted = false; };
+  }, [token]);
 
   // ── Persist model ──
   useEffect(() => {
@@ -115,26 +153,29 @@ export const StemBuilder: React.FC = () => {
     e.target.value = ''; // reset so same file can be re-selected
 
     setSourceFileName(file.name);
+    setSourceRef(null);
     setIsUploading(true);
     setLayers([]); // reset layer stack on new source
 
     try {
       const fd = new FormData();
       fd.append('audio', file);
-      const res = await fetch('/api/upload/audio', { method: 'POST', body: fd });
+      const res = await fetch('/api/upload/audio', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd });
       if (!res.ok) throw new Error('Upload failed');
       const data = await res.json();
       setSourceAudioUrl(data.audio_url || '');
+      setSourceRef(data.asset_id ? { kind: 'asset', id: data.asset_id, expectedUrl: data.audio_url } : null);
       showToast('Source audio uploaded!');
     } catch (err: any) {
       showToast(`Upload failed: ${err.message}`);
     } finally {
       setIsUploading(false);
     }
-  }, []);
+  }, [token]);
 
   const handleClearSource = () => {
     setSourceAudioUrl('');
+    setSourceRef(null);
     setSourceFileName('');
     setLayers([]);
     setSelectedTrack(null);
@@ -144,6 +185,7 @@ export const StemBuilder: React.FC = () => {
   // ── Use layer output as new source (iterative composition) ──
   const handleUseAsSource = useCallback((layer: LayerInfo) => {
     setSourceAudioUrl(layer.audioUrl);
+    setSourceRef(layer.songId ? { kind: 'song', id: layer.songId, expectedUrl: layer.audioUrl } : null);
     setSourceFileName(`Layer: ${layer.trackName}`);
     setSelectedTrack(null);
     setCaption('');
@@ -157,8 +199,9 @@ export const StemBuilder: React.FC = () => {
   }, []);
 
   // ── Use recent build as source ──
-  const handleUseRecentAsSource = useCallback((build: { audioUrl: string; title: string }) => {
+  const handleUseRecentAsSource = useCallback((build: { id: string; audioUrl: string; title: string }) => {
     setSourceAudioUrl(build.audioUrl);
+    setSourceRef({ kind: 'song', id: build.id, expectedUrl: build.audioUrl });
     setSourceFileName(build.title);
     setLayers([]);
     setSelectedTrack(null);
@@ -173,157 +216,67 @@ export const StemBuilder: React.FC = () => {
 
   // ── Generate ──
   const handleGenerate = async () => {
-    if (!token || !sourceAudioUrl || !selectedTrack || !buildModel) {
-      showToast('Missing source audio, track, or model');
+    if (submissionKeyRef.current || localStorage.getItem('hs-sb-workflowJob')) return;
+    if (!token || !sourceAudioUrl || !sourceRef || sourceRef.expectedUrl !== sourceAudioUrl ||
+        !selectedTrack || !buildModel) {
+      showToast('Select a source, track, and model');
       return;
     }
-
+    const key = crypto.randomUUID();
+    submissionKeyRef.current = key;
     setIsGenerating(true);
-    setGenProgress(0);
     setGenStage('Submitting...');
-
+    let submittedJobId: string | null = null;
     try {
-      const engineParams = gp.getGlobalParams();
-
-      const params: Record<string, any> = {
-        ...engineParams,
-        customMode: true,
-        taskType: 'lego',
-        trackName: selectedTrack,
-        sourceAudioUrl,
-        caption: caption || '',
-        lyrics: selectedTrack === 'vocals' ? '' : '[Instrumental]',
-        duration: 0,      // locked to source length by engine
-        instrumental: selectedTrack !== 'vocals',
-        source: 'stem-builder',
-        title: `${selectedTrack.replace('_', ' ')} layer`,
-        // Force base model — override whatever's in global params
-        ditModel: buildModel,
-        // ── Force-disable adapters (same isolation as StemStudio extract) ──
-        loraPath: '',
-        loraScale: 0,
-        adapterGroupScales: undefined,
-        adapterMode: undefined,
-        // ── Force-disable mastering/timbre (not applicable to lego) ──
-        masteringEnabled: false,
-        masteringReference: undefined,
-        timbreReference: undefined,
-        // ── Force the lego generation regime (matches engine examples/lego.json) ──
-        // The global UI defaults — notably CFG 9 — collapse the source-conditioned
-        // lego latent to near-silence (issue #56). lego wants near-zero guidance and
-        // a minimal schedule shift. At scale 1.0 the guidance term is exactly zero
-        // (apg result = pred_cond + (scale-1)*orth), so the mode is moot but pinned
-        // to the reference default. Inference steps are left to the user's choice.
-        guidanceScale: 1.0,    // pure conditional — CFG amplification (was 9) is the garbage cause
-        guidanceMode: 'apg',   // engine default / lego reference (no vanilla-CFG mode exists; inert at scale 1.0)
-        shift: 1.0,            // lego.json reference — source-conditioned base-model task
-        useCotCaption: false,  // lego is driven by the engine's fixed instruction + source audio
-        inferMethod: 'euler',  // simple, stable solver
-        scheduler: 'linear',
-        // ── Deliver a raw stem — disable the whole post-processing FX chain ──
-        postProcessingEnabled: false,
-        vocalNaturalizerEnabled: false,
-        spectralLifterEnabled: false,
-        ppVaeReencode: false,
-        stableStepOn: false,
-        denoiseStrength: 0,
-        // ── Force-neutralise the sampler knobs that were still leaking ──
-        // guidanceScale 1.0 algebraically cancels APG, but it does NOT cancel
-        // any of these, and every one of them passes straight through from the
-        // user's global settings. A lego run therefore still inherited whatever
-        // DCW, latent shift, custom schedule or step-skipping the user happened
-        // to have set for text2music, which is the remaining "rhythmic but
-        // musically wrong" output in issue #56. Inference steps stays the one
-        // knob deliberately left to the user.
-        dcwEnabled: false,
-        dcwMode: undefined,
-        dcwLowScaler: undefined,
-        dcwHighScaler: undefined,
-        latentShift: 0.0,
-        latentRescale: 1.0,
-        customTimesteps: '',
-        cfgCutoffRatio: 1.0,      // 1.0 = guidance over the whole schedule
-        lmCfgCutoffRatio: 1.0,
-        cacheRatio: 0,            // no velocity reuse — every step is computed
-        // ── Source conditioning ──
-        audioCoverStrength: 1.0,  // full source conditioning for lego
-        // ── Clear metadata — let engine infer from source audio ──
-        bpm: 0,
-        keyScale: '',
-        timeSignature: '',
-      };
-
-      const res = await generateApi.submit(params as any, token);
-      const jobId = res.jobId;
-      setActiveJobId(jobId);
+      const { job } = await submitStudioRender(token, 'layer-render', {
+        source: sourceRef, expectedBackend: useBackendStore.getState().activeBackendId,
+        engineParams: gp.getGlobalParams(), trackName: selectedTrack, buildModel, caption,
+      }, key);
+      if (submissionKeyRef.current !== key) { await workflowApi.cancel(token, job.id); return; }
+      setActiveJobId(job.id);
+      submittedJobId = job.id;
+      localStorage.setItem('hs-sb-workflowJob', job.id);
       showToast(`Building ${selectedTrack} layer...`);
-
-      // Poll for progress
-      const iv = setInterval(async () => {
-        try {
-          const s = await generateApi.status(jobId);
-          const rawProg = s.progress;
-          const pct = rawProg != null
-            ? Math.min(100, Math.max(0, Math.round(rawProg > 1 ? rawProg : rawProg * 100)))
-            : undefined;
-          if (pct != null) setGenProgress(pct);
-          if (s.stage) setGenStage(s.stage);
-
-          if (s.status === 'succeeded') {
-            clearInterval(iv);
-            setGenProgress(100);
-            setGenStage('Complete!');
-            setIsGenerating(false);
-            setActiveJobId(null);
-            setRefreshTrigger(p => p + 1);
-
-            // Add to layer stack + auto-open preview
-            const audioUrl = s.result?.audioUrls?.[0] || '';
-            if (audioUrl) {
-              setLayers(prev => [...prev, {
-                trackName: selectedTrack,
-                caption,
-                audioUrl,
-                songId: s.result?.songIds?.[0],
-                timestamp: Date.now(),
-              }]);
-              // Auto-open preview player with the new stem
-              setPreviewStemUrl(audioUrl);
-              setPreviewLabel(selectedTrack.replace('_', ' '));
-            }
-
-            showToast(`${selectedTrack} layer complete!`);
-            setTimeout(() => { setGenProgress(0); setGenStage(''); }, 3000);
-          } else if (s.status === 'failed') {
-            clearInterval(iv);
-            setIsGenerating(false);
-            setActiveJobId(null);
-            setGenProgress(0);
-            setGenStage('');
-            showToast(`Failed: ${s.error || 'Unknown error'}`);
-          }
-        } catch { /* polling error — keep trying */ }
-      }, 2000);
-
-      // Safety timeout
-      setTimeout(() => clearInterval(iv), 1_800_000);
+      const result = await followStudioRender(token, job.id, stage => setGenStage(stage));
+      const audio = result.audio || {};
+      setGenStage('Complete!');
+      setRefreshTrigger(p => p + 1);
+      const audioUrl = audio.audioUrls?.[0] || '';
+      if (audioUrl && sourceUrlRef.current === sourceAudioUrl) {
+        setLayers(prev => [...prev, {
+          trackName: selectedTrack, caption, audioUrl,
+          songId: audio.songIds?.[0], timestamp: Date.now(),
+        }]);
+        setPreviewStemUrl(audioUrl);
+        setPreviewLabel(selectedTrack.replace('_', ' '));
+      }
+      showToast(`${selectedTrack} layer complete!`);
+      setTimeout(() => setGenStage(''), 3000);
     } catch (err: any) {
       showToast(`Generation failed: ${err.message}`);
-      setIsGenerating(false);
+      setGenStage('');
+    } finally {
+      if (submissionKeyRef.current === key) {
+        submissionKeyRef.current = null;
+        if (localStorage.getItem('hs-sb-workflowJob') === submittedJobId) localStorage.removeItem('hs-sb-workflowJob');
+        setIsGenerating(false);
+        setActiveJobId(null);
+      }
     }
   };
 
   const handleCancel = async () => {
-    if (activeJobId) {
-      try { await generateApi.cancel(activeJobId); } catch { /* ignore */ }
+    submissionKeyRef.current = null;
+    if (activeJobId && token) {
+      try { await workflowApi.cancel(token, activeJobId); } catch { /* ignore */ }
     }
+    localStorage.removeItem('hs-sb-workflowJob');
     setIsGenerating(false);
     setActiveJobId(null);
-    setGenProgress(0);
     setGenStage('');
   };
 
-  const canGenerate = !!sourceAudioUrl && !!selectedTrack && !!buildModel && !isGenerating;
+  const canGenerate = !!sourceAudioUrl && !!sourceRef && !!selectedTrack && !!buildModel && !isGenerating;
 
   // ── Sidebar resize ──
   const handleSidebarResize = useCallback((e: React.MouseEvent) => {
@@ -506,19 +459,13 @@ export const StemBuilder: React.FC = () => {
             )}
           </div>
 
-          {/* Progress */}
+          {/* Render stage */}
           {isGenerating && (
             <div className="flex items-center gap-3">
+              <Loader2 size={14} className="animate-spin text-amber-400" />
               <div className="text-xs text-amber-400 font-medium whitespace-nowrap">
                 {genStage || 'Generating...'}
               </div>
-              <div className="flex-1 h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-300"
-                  style={{ width: `${genProgress}%` }}
-                />
-              </div>
-              <span className="text-[11px] text-zinc-500 font-mono w-8 text-right">{genProgress}%</span>
             </div>
           )}
 

@@ -56,6 +56,7 @@ import audioQueueRoutes from './routes/audioQueue.js';
 import { startAudioIntentQueue } from './routes/audioQueue.js';
 import workflowRoutes from './routes/workflows.js';
 import { startWorkflowJobs } from './routes/workflows.js';
+import { registerRepaintLayerWorkflows } from './services/workflows/repaintLayerWorkflow.js';
 import listeningRoutes from './routes/listening.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -125,6 +126,8 @@ app.use('/api/yue2-cover', yue2CoverRoutes);
 app.use('/api/resolve', resolveRoutes);
 app.use('/api/audio-queue', audioQueueRoutes);
 app.use('/api/workflows', workflowRoutes);
+// Repaint and Stem Builder kinds have no route of their own to register from.
+registerRepaintLayerWorkflows();
 // Mounted at '/api' (not '/api/backends') — the router spells its own full
 // sub-paths (/backends, /backends/active, /capabilities) per the plan's
 // top-level /api/capabilities path (docs/plans/multi-backend-architecture.md §4.2).

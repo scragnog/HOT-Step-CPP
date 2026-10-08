@@ -17,7 +17,6 @@ interface RepaintSettingsProps {
   // Generation state
   canGenerate: boolean;
   isGenerating: boolean;
-  genProgress: number;
   genStage: string;
   onGenerate: () => void;
   onCancel: () => void;
@@ -38,7 +37,6 @@ export const RepaintSettings: React.FC<RepaintSettingsProps> = ({
   onStyleCaptionChange,
   canGenerate,
   isGenerating,
-  genProgress,
   genStage,
   onGenerate,
   onCancel,
@@ -120,19 +118,11 @@ export const RepaintSettings: React.FC<RepaintSettingsProps> = ({
       <div className="flex-shrink-0 p-4 border-t border-white/5">
         {isGenerating ? (
           <div className="space-y-3">
-            {/* Progress bar */}
-            <div className="relative h-2 bg-white/5 rounded-full overflow-hidden">
-              <div
-                className="absolute inset-y-0 left-0 bg-gradient-to-r from-pink-500 to-purple-500 rounded-full transition-all duration-500"
-                style={{ width: `${genProgress}%` }}
-              />
-            </div>
-            <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center text-xs">
               <span className="text-zinc-400 flex items-center gap-2">
                 <Loader2 size={12} className="animate-spin text-pink-400" />
                 {genStage || 'Generating...'}
               </span>
-              <span className="font-mono text-zinc-500">{genProgress}%</span>
             </div>
             <button
               onClick={onCancel}

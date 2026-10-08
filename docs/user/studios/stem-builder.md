@@ -38,7 +38,9 @@ Stem Builder needs:
    "tight house drums, warm vintage tone".
 5. Click Build. The button label follows your track choice, for example
    "Build drums".
-6. The progress bar and stage text track the render; Cancel stops it.
+6. The stage text shows when the render is queued and generating; Cancel stops
+   the workflow and its audio request. A server restart marks an active
+   workflow interrupted rather than starting a second render.
 7. When it finishes, the new stem opens in the preview player next to the
    source and is added to the Layer Stack.
 8. To add another layer on top, use the Source button on the newest Layer
@@ -63,6 +65,10 @@ Stem Builder needs:
 
 Duration is not a control here: the rendered stem always matches the length
 of the source track.
+
+Node checks that the selected upload or Library song belongs to you and still
+exists before queueing a layer. An older saved upload without an ownership
+record needs to be uploaded again.
 
 A Stem Builder render skips mastering, the post-processing effects chain and
 any loaded adapter, so what comes out is the raw stem, not the fully

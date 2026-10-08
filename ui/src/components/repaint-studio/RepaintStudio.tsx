@@ -4,19 +4,21 @@
 // Allows users to select a region of an existing track and regenerate it
 // with optionally modified lyrics.
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Upload, Loader2, X, Music, FolderOpen, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
-import { generateApi, songApi } from '../../services/api';
-import { createGenerationTimer, getGenerationTimeoutMinutes } from '../../utils/generationTimer';
+import { songApi } from '../../services/api';
+import { submitStudioRender, followStudioRender } from '../../services/repaintLayerWorkflowApi';
+import { workflowApi } from '../../services/workflowApi';
+import { useBackendStore } from '../../stores/backendStore';
 import { fetchLrc } from '../../utils/lrcUtils';
 import { RepaintWaveform } from './RepaintWaveform';
 import { RegionLyricsEditor } from './RegionLyricsEditor';
 import { RepaintSettings } from './RepaintSettings';
 import { BackendCapabilityGate } from '../shared/BackendCapabilityGate';
 import {
-  addManualQueueItem, updateManualQueueItem,
+  addManualQueueItem,
   completeManualQueueItem, failManualQueueItem,
 } from '../../stores/audioGenQueueStore';
 import type { Song } from '../../types';
@@ -41,6 +43,7 @@ export const RepaintStudio: React.FC = () => {
 
   // ── Source song state ──
   const [sourceSong, setSourceSong] = useState<Song | null>(() => restore('sourceSong', null));
+  const [sourceAssetId, setSourceAssetId] = useState(() => restore<string>('sourceAssetId', ''));
   const [sourceAudioUrl, setSourceAudioUrl] = useState(() => restore<string>('sourceAudioUrl', ''));
   const [sourceName, setSourceName] = useState(() => restore<string>('sourceName', ''));
   const [isUploading, setIsUploading] = useState(false);
@@ -63,10 +66,10 @@ export const RepaintStudio: React.FC = () => {
 
   // ── Generation state ──
   const [isGenerating, setIsGenerating] = useState(false);
-  const [genProgress, setGenProgress] = useState(0);
   const [genStage, setGenStage] = useState('');
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [queueItemId, setQueueItemId] = useState<string | null>(null);
+  const submissionKeyRef = useRef<string | null>(null);
   const [toast, setToast] = useState('');
   const [wipDismissed, setWipDismissed] = useState(false);
 
@@ -79,6 +82,7 @@ export const RepaintStudio: React.FC = () => {
 
   // ── Persist ──
   useEffect(() => { persist('sourceSong', sourceSong); }, [sourceSong]);
+  useEffect(() => { persist('sourceAssetId', sourceAssetId); }, [sourceAssetId]);
   useEffect(() => { persist('sourceAudioUrl', sourceAudioUrl); }, [sourceAudioUrl]);
   useEffect(() => { persist('sourceName', sourceName); }, [sourceName]);
   useEffect(() => { persist('regionStart', regionStart); }, [regionStart]);
@@ -87,6 +91,33 @@ export const RepaintStudio: React.FC = () => {
   useEffect(() => { persist('repaintMode', repaintMode); }, [repaintMode]);
   useEffect(() => { persist('crossfadeFrames', crossfadeFrames); }, [crossfadeFrames]);
   useEffect(() => { persist('styleCaption', styleCaption); }, [styleCaption]);
+
+  useEffect(() => {
+    const id = localStorage.getItem('hs-repaint-workflowJob');
+    if (!id || !token) return;
+    let mounted = true;
+    setIsGenerating(true);
+    setActiveJobId(id);
+    void followStudioRender(token, id, stage => { if (mounted) setGenStage(stage); })
+      .then(async result => {
+        if (!mounted) return;
+        const { job } = await workflowApi.get(token, id);
+        if (!mounted) return;
+        const captured = job.input as { sourceName?: string; styleCaption?: string };
+        const qId = addManualQueueItem({ title: captured.sourceName ? `${captured.sourceName} (Repaint)` : 'Repaint',
+          artistName: '', caption: captured.styleCaption || '' });
+        const audio = result.audio || {};
+        completeManualQueueItem(qId, { audioUrl: audio.audioUrls?.[0] || '', songId: audio.songIds?.[0],
+          masteredAudioUrl: audio.masteredAudioUrl, noAdapterAudioUrl: audio.noAdapterAudioUrl,
+          audioDuration: audio.duration });
+        showToast('Repaint complete!');
+      }).catch(err => { if (mounted) showToast(`Repaint ${String((err as Error).message)}`); })
+      .finally(() => {
+        if (localStorage.getItem('hs-repaint-workflowJob') === id) localStorage.removeItem('hs-repaint-workflowJob');
+        if (mounted) { setIsGenerating(false); setActiveJobId(null); }
+      });
+    return () => { mounted = false; };
+  }, [token]);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 4000); };
 
@@ -118,6 +149,7 @@ export const RepaintStudio: React.FC = () => {
   // ── Select song from library ──
   const handleSelectSong = useCallback((song: Song) => {
     setSourceSong(song);
+    setSourceAssetId('');
     setSourceAudioUrl(song.audioUrl || song.audio_url || '');
     setSourceName(song.title || 'Library Track');
     setLyrics(song.lyrics || '');
@@ -134,10 +166,11 @@ export const RepaintStudio: React.FC = () => {
     try {
       const fd = new FormData();
       fd.append('audio', file);
-      const res = await fetch('/api/upload/audio', { method: 'POST', body: fd });
+      const res = await fetch('/api/upload/audio', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
       if (!res.ok) throw new Error('Upload failed');
-      const { audio_url } = await res.json();
+      const { audio_url, asset_id } = await res.json();
       setSourceAudioUrl(audio_url);
+      setSourceAssetId(asset_id);
       setSourceName(file.name);
       setSourceSong(null);
       setRegionStart(0);
@@ -159,6 +192,7 @@ export const RepaintStudio: React.FC = () => {
   // ── Clear source ──
   const handleClear = useCallback(() => {
     setSourceSong(null);
+    setSourceAssetId('');
     setSourceAudioUrl('');
     setSourceName('');
     setLyrics('');
@@ -177,143 +211,74 @@ export const RepaintStudio: React.FC = () => {
 
   // ── Generate ──
   const handleGenerate = useCallback(async () => {
+    if (submissionKeyRef.current || localStorage.getItem('hs-repaint-workflowJob')) return;
     if (!token || !sourceAudioUrl) { showToast('Load source audio first'); return; }
-
+    const source = sourceSong?.id
+      ? { kind: 'song' as const, id: String(sourceSong.id), expectedUrl: sourceAudioUrl }
+      : sourceAssetId
+        ? { kind: 'asset' as const, id: sourceAssetId, expectedUrl: sourceAudioUrl }
+        : null;
+    if (!source) { showToast('Select the source again to verify ownership'); return; }
     const effEnd = regionEnd > 0 ? regionEnd : duration;
     if (effEnd <= regionStart) { showToast('Invalid region — end must be after start'); return; }
-
+    const key = crypto.randomUUID();
+    submissionKeyRef.current = key;
     setIsGenerating(true);
+    let submittedJobId: string | null = null;
     try {
-      // Map repaint mode to injection ratio
-      const modeRatios: Record<string, number> = {
-        conservative: 0.7,
-        balanced: 0.5,
-        aggressive: 0.3,
-      };
-
       const engineParams = gp.getGlobalParams();
-      const params: Record<string, any> = {
-        ...engineParams,
-        customMode: true,
-        taskType: 'repaint',
-        sourceAudioUrl,
-        repaintingStart: regionStart,
-        repaintingEnd: effEnd,
-        lyrics: lyrics || '[Instrumental]',
-        style: styleCaption || engineParams.style || '',
-        title: sourceName ? `${sourceName} (Repaint)` : 'Repaint',
-        duration: 0, // engine determines from source
-        source: 'repaint',
-        // Repaint-specific params passed to engine via translateParams
-        repaintCrossfadeFrames: crossfadeFrames,
-        repaintInjectionRatio: modeRatios[repaintMode] ?? 0.5,
-      };
-
-      // Carry latent URL if available from source song
-      if (sourceSong?.latentUrl || sourceSong?.latent_url) {
-        params.sourceLatentUrl = sourceSong.latentUrl || sourceSong.latent_url;
-      }
-
-      const res = await generateApi.submit(params as any, token);
-      const jobId = res.jobId;
-      setActiveJobId(jobId);
+      const { job } = await submitStudioRender(token, 'repaint-render', {
+        source, expectedBackend: useBackendStore.getState().activeBackendId,
+        engineParams, regionStart, regionEnd: effEnd, lyrics, styleCaption,
+        sourceName, repaintMode: repaintMode as 'conservative' | 'balanced' | 'aggressive',
+        crossfadeFrames,
+      }, key);
+      if (submissionKeyRef.current !== key) { await workflowApi.cancel(token, job.id); return; }
+      setActiveJobId(job.id);
+      submittedJobId = job.id;
+      localStorage.setItem('hs-repaint-workflowJob', job.id);
       showToast('Repaint generation started!');
-
-      // Add to queue
       const qId = addManualQueueItem({
-        title: params.title,
+        title: sourceName ? `${sourceName} (Repaint)` : 'Repaint',
         artistName: sourceSong?.artistName || '',
-        caption: params.style,
+        caption: styleCaption || String(engineParams.style || ''),
       });
       setQueueItemId(qId);
-      updateManualQueueItem(qId, { jobId });
-
-      pollJob(jobId, qId);
+      await followStudioRender(token, job.id, stage => setGenStage(stage)).then(result => {
+        setGenStage('Complete!');
+        const audio = result.audio || {};
+        completeManualQueueItem(qId, {
+          audioUrl: audio.audioUrls?.[0] || '', songId: audio.songIds?.[0],
+          masteredAudioUrl: audio.masteredAudioUrl, noAdapterAudioUrl: audio.noAdapterAudioUrl,
+          audioDuration: audio.duration,
+        });
+        showToast('Repaint complete!');
+      }).catch(err => {
+        failManualQueueItem(qId, (err as Error).message);
+        showToast(`Failed: ${(err as Error).message}`);
+      });
     } catch (err: any) {
       showToast(`Generation failed: ${err.message}`);
-      setIsGenerating(false);
+    } finally {
+      if (submissionKeyRef.current === key) {
+        submissionKeyRef.current = null;
+        if (localStorage.getItem('hs-repaint-workflowJob') === submittedJobId) localStorage.removeItem('hs-repaint-workflowJob');
+        setIsGenerating(false);
+        setActiveJobId(null);
+        setQueueItemId(null);
+      }
     }
-  }, [token, sourceAudioUrl, regionStart, regionEnd, duration, lyrics, styleCaption,
-    repaintMode, crossfadeFrames, sourceSong, sourceName, gp]);
-
-  const pollJob = (jobId: string, qId: string) => {
-    setGenProgress(0);
-    setGenStage('Queued...');
-    // Clock ignores server-queue wait — only real generation time counts.
-    const timer = createGenerationTimer();
-    const iv = setInterval(async () => {
-      try {
-        const s = await generateApi.status(jobId);
-        const t = timer.tick(s.status);
-        const rawProg = s.progress;
-        const pct = rawProg != null
-          ? Math.min(100, Math.max(0, Math.round(rawProg > 1 ? rawProg : rawProg * 100)))
-          : undefined;
-        if (pct != null) setGenProgress(pct);
-        if (s.stage) setGenStage(s.stage);
-
-        updateManualQueueItem(qId, {
-          progress: pct,
-          stage: s.stage || 'Generating...',
-          elapsed: t.elapsed,
-        });
-
-        if (t.timedOut) {
-          clearInterval(iv);
-          setIsGenerating(false);
-          setActiveJobId(null);
-          setQueueItemId(null);
-          setGenProgress(0);
-          setGenStage('');
-          showToast(`Generation timed out after ${getGenerationTimeoutMinutes()} minutes`);
-          failManualQueueItem(qId, 'Generation timed out');
-          return;
-        }
-
-        if (s.status === 'succeeded') {
-          clearInterval(iv);
-          setGenProgress(100);
-          setGenStage('Complete!');
-          setIsGenerating(false);
-          setActiveJobId(null);
-          setQueueItemId(null);
-          showToast('Repaint complete!');
-          setTimeout(() => { setGenProgress(0); setGenStage(''); }, 3000);
-
-          const audioUrl = s.result?.audioUrls?.[0] || '';
-          const songId = s.result?.songIds?.[0];
-          completeManualQueueItem(qId, {
-            audioUrl,
-            songId,
-            masteredAudioUrl: s.result?.masteredAudioUrl,
-            noAdapterAudioUrl: s.result?.noAdapterAudioUrl,
-            audioDuration: s.result?.duration,
-          });
-        } else if (s.status === 'failed') {
-          clearInterval(iv);
-          setIsGenerating(false);
-          setActiveJobId(null);
-          setQueueItemId(null);
-          setGenProgress(0);
-          setGenStage('');
-          showToast(`Failed: ${s.error || 'Unknown error'}`);
-          failManualQueueItem(qId, s.error || 'Unknown error');
-        }
-      } catch {}
-    }, 2000);
-    // Absolute backstop so polling can't run forever if the job wedges in the
-    // queue / server goes unreachable. Generous so it never pre-empts the
-    // generation-start timer above. (timer.timedOut is the functional timeout.)
-    setTimeout(() => clearInterval(iv), (getGenerationTimeoutMinutes() + 30) * 60_000);
-  };
+  }, [token, sourceAudioUrl, sourceSong, sourceAssetId, regionStart, regionEnd, duration,
+    lyrics, styleCaption, sourceName, repaintMode, crossfadeFrames, gp]);
 
   const handleCancel = async () => {
-    if (activeJobId) { try { await generateApi.cancel(activeJobId); } catch {} }
+    submissionKeyRef.current = null;
+    if (activeJobId && token) { try { await workflowApi.cancel(token, activeJobId); } catch {} }
+    localStorage.removeItem('hs-repaint-workflowJob');
     if (queueItemId) failManualQueueItem(queueItemId, 'Cancelled by user');
     setIsGenerating(false);
     setActiveJobId(null);
     setQueueItemId(null);
-    setGenProgress(0);
     setGenStage('');
   };
 
@@ -481,7 +446,6 @@ export const RepaintStudio: React.FC = () => {
             onStyleCaptionChange={setStyleCaption}
             canGenerate={canGenerate}
             isGenerating={isGenerating}
-            genProgress={genProgress}
             genStage={genStage}
             onGenerate={handleGenerate}
             onCancel={handleCancel}
