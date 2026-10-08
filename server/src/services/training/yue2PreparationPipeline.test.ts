@@ -221,3 +221,27 @@ test('an unreadable durable record fails closed on the next start', async () => 
     await assert.rejects(restarted.start(snapshot(['latents']), {}), /unreadable/);
   } finally { f.cleanup(); }
 });
+
+test('joint alone trains on prepared inputs and refuses missing preparation before any job', async () => {
+  const f = fixture();
+  try {
+    await assert.rejects(f.runner.start(snapshot(['joint'], 'train-after-preparation'), { joint: { steps: 7 } }),
+      /latent cache, codes, lead sheets, vocal stems, lyric cursor spans are missing/);
+    assert.equal(f.started.length, 0);
+    assert.equal(f.runner.list('dataset').length, 0);
+  } finally { f.cleanup(); }
+  const ready = artifacts();
+  ready.preprocess = { done: true, captionModeOk: true };
+  ready.tokenize.done = true; ready.sheet.done = true;
+  const g = fixture({ artifacts: ready });
+  try {
+    const timed = snapshot(['joint'], 'train-after-preparation', 'timed');
+    await assert.rejects(g.runner.start(timed, { joint: { steps: 7 } }), /vocal stems, lyric cursor spans are missing/);
+    const s = snapshot(['joint'], 'train-after-preparation');
+    s.payload.lyricTiming = false;
+    const run = await g.runner.start(s, { joint: { steps: 7 } });
+    await until(() => g.runner.get(run.id)?.status === 'done');
+    assert.deepEqual(g.started.map(x => x.stage), ['joint']);
+    assert.deepEqual(g.started[0].body, { steps: 7 });
+  } finally { g.cleanup(); }
+});

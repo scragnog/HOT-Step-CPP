@@ -17,7 +17,8 @@ function requireStageShape(stages: string[], mode: string, forms: Record<string,
   if (mode === 'train-after-preparation' && !trainStages.length) throw new TrainingOperationFailure(400, { error: 'Train mode needs a training stage' });
   if (trainStages.includes('joint') && trainStages.length > 1) throw new TrainingOperationFailure(400, { error: 'Joint training cannot be combined with separate NAR or AR training' });
   for (const stage of trainStages) if (!forms[stage]) throw new TrainingOperationFailure(400, { error: `Missing accepted ${stage} form` });
-  if (stages.includes('joint') && !stages.includes('latents')) throw new TrainingOperationFailure(400, { error: 'Joint training requires a latent preparation stage' });
+  // Joint alone is direct Start-training on prepared inputs (the pipeline checks them).
+  if (stages.includes('joint') && stages.length > 1 && !stages.includes('latents')) throw new TrainingOperationFailure(400, { error: 'Joint training requires a latent preparation stage' });
 }
 
 export function mountYue2Preparation(router: Router, deps: TrainingOperationDeps): void {

@@ -50,6 +50,9 @@ interface RecordFile {
 
 const ORDER: readonly Yue2PreparationStage[] = ['latents', 'codes', 'sheet', 'stems', 'align', 'nar', 'ar', 'joint'];
 const POLL_MS = 1500;
+const PREPARED_NAME: Partial<Record<Yue2PreparationStage, string>> = {
+  latents: 'latent cache', codes: 'codes', sheet: 'lead sheets', stems: 'vocal stems', align: 'lyric cursor spans',
+};
 const terminal = (s: Status) => s === 'done' || s === 'failed' || s === 'cancelled' || s === 'interrupted';
 const active = (s: Status) => !terminal(s);
 
@@ -142,6 +145,14 @@ export class Yue2PreparationPipeline {
     if (source.revision !== await this.adapter.sourceRevision(snapshot)) throw new Yue2PreparationConflict('Dataset sources changed; reload preparation');
     if (this.list(datasetId).some(s => active(s.status)) || hasActivePipeline() || hasActiveBatch() || activeJobForDataset(datasetId)) {
       throw new Yue2PreparationConflict('A pipeline or job is already active for this dataset');
+    }
+    // Joint alone is direct Start-training: it trains on prepared inputs and
+    // never adds a preparation stage, so missing preparation is refused here.
+    if (snapshot.payload.stages.length === 1 && snapshot.payload.stages[0] === 'joint') {
+      const a = await this.adapter.artifacts(snapshot, workerUrl);
+      const needed: Yue2PreparationStage[] = snapshot.payload.lyricTiming ? ['latents', 'codes', 'sheet', 'stems', 'align'] : ['latents', 'codes', 'sheet'];
+      const missing = needed.filter(stage => !this.skip(stage, a)).map(stage => PREPARED_NAME[stage]);
+      if (missing.length) throw new Yue2PreparationConflict(`Prepare this dataset before starting joint training: ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} missing. Use Perform all stages or the Prepare page.`);
     }
     await this.adapter.admission(snapshot, workerUrl);
     if (snapshot.dataset!.revision !== await this.adapter.datasetRevision(snapshot)) {
