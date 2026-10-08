@@ -6,6 +6,7 @@ import { AlertTriangle, Download, Loader2, Play, RotateCcw, Save, Upload, X } fr
 import { useTranslation } from 'react-i18next';
 
 import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
+import { captureJointOverrides } from './yue2JointCommand';
 import { TrainingChart } from './TrainingChart';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Yue2LadderReview } from './Yue2LadderReview';
@@ -394,7 +395,7 @@ function isPrepareJob(job: TrainingJobSummary, datasetId: string): boolean {
   return job.datasetId === datasetId && job.kind === 'yue2-prepare-aitk';
 }
 
-export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: string; cursorReady?: boolean; lyricTiming: boolean; onLyricTimingChange: (value: boolean) => void; onTimingLockedChange?: (locked: boolean) => void; exposeStart?: (fn: () => Promise<string | null>) => void }> = ({ datasetId, legacyManifest, cursorReady = false, lyricTiming, onLyricTimingChange, onTimingLockedChange, exposeStart }) => {
+export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: string; cursorReady?: boolean; lyricTiming: boolean; onLyricTimingChange: (value: boolean) => void; onTimingLockedChange?: (locked: boolean) => void; exposeStart?: (fn: () => Promise<Record<string, unknown>>) => void }> = ({ datasetId, legacyManifest, cursorReady = false, lyricTiming, onLyricTimingChange, onTimingLockedChange, exposeStart }) => {
   const { t } = useTranslation();
   const [blindRungs] = usePersistedState('hs-yue2-blind-rungs', true);
   const [form, setForm] = useState<Yue2JointTrainRequest>(() => readStoredForm(datasetId));
@@ -885,23 +886,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const current = snapshotPresetSettings(form, lyricTiming) as Record<string, unknown>;
   const userPresetActive = (preset: Yue2JointPreset) => Object.entries(preset.settings)
     .every(([key, value]) => JSON.stringify(value) === JSON.stringify(current[key]));
+  const captureJointRequest = async (): Promise<Record<string, unknown>> => {
+    if (!resumeChoice && !form.resume?.trim()) await captionMissing();
+    return captureJointOverrides(form, prepare, lyricTiming, defaultDevice, resumeChoice);
+  };
   const run = async (): Promise<string | null> => {
     setStarting(true); setError('');
     try {
-      const timingWeight = lyricTiming
-        ? (typeof form.cursorWeight === 'number' && Number.isFinite(form.cursorWeight) ? form.cursorWeight : 0.08)
-        : 0;
-      const [resumeRunId, resumeStepText] = resumeChoice.split('|');
-      const selectedResume = resumeRunId && resumeStepText ? { resumeRunId, resumeStep: Number(resumeStepText) } : {};
-      if (!resumeChoice && !form.resume?.trim()) await captionMissing();
-      const request = { ...form, device: defaultDevice === 'CUDA0' ? 'CUDA0' : form.device,
-        autoCaption: undefined, lyricTiming, alignmentEnabled: lyricTiming, cursorWeight: timingWeight,
-        autoPrepare: !resumeChoice && !form.resume?.trim(), preparation: prepare,
-        checkpoint: '', output: '',
-        ...(form.preview ? { preview: { ...defaultPreview(form.saveEvery), ...form.preview,
-          everySteps: form.preview.parallel ? 0 : form.saveEvery, previewMaxFrames: Math.max(8, Math.min(360, form.preview.seconds || 300)) * 25 } } : {}),
-        ...(form.resume?.trim() && !resumeChoice ? { resume: form.resume.trim() } : {}),
-        ...selectedResume };
+      const request = await captureJointRequest();
       const recipe = await resolveTrainingRecipe<Yue2JointTrainRequest>('yue2-joint', request);
       assertRecipeWorker(recipe);
       const result = await startYue2JointTrain(datasetId, recipe.execution as unknown as Yue2JointTrainRequest);
@@ -915,13 +907,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       return null;
     } finally { setStarting(false); }
   };
-  // "Perform all stages" (Yue2TrainStages) drives its final training stage
-  // through this card's own start so it always trains with the form the user
-  // sees. The card hands out the freshest `run` after every render.
-  const startRef = useRef<(() => Promise<string | null>) | null>(null);
+  // The preparation command captures this form before any stage starts.
+  const startRef = useRef<(() => Promise<Record<string, unknown>>) | null>(null);
   useEffect(() => {
-    startRef.current = run;
-    if (exposeStart) exposeStart(() => startRef.current ? startRef.current() : Promise.resolve(null));
+    startRef.current = captureJointRequest;
+    if (exposeStart) exposeStart(() => startRef.current ? startRef.current() : Promise.reject(new Error('Joint form is unavailable')));
   });
   const prepareDataset = async () => {
     setStarting(true); setError('');

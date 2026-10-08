@@ -11,8 +11,8 @@
 // useYue2ArStatus() call every stage reads from, so seven cards never
 // independently re-fetch the same two payloads; the licence banner and the
 // status-fetch error banner, both rendered once, above every stage; and the
-// "Perform all stages" control — identical top and bottom — that drives the
-// store's runYue2AllStages chain.
+// "Perform all stages" control — identical top and bottom — submits a
+// captured server preparation command.
 //
 // THE RELOAD CALLBACK REFRESHES BOTH HOOKS. Stage 1 (latents) and stage 4
 // (NAR training) change what useYue2ArStatus considers blocked for stages 2,
@@ -21,19 +21,15 @@
 // reading if anything here still read it. Two stale copies of "is the cache
 // ready" is how a card starts lying, so both hooks reload together.
 //
-// THE PREFLIGHT LINE ABOVE EACH RUN-ALL BUTTON is its own small poll of
-// listYue2Runs / listYue2ArRuns (useYue2LatestOutcomes below) — advisory only.
-// It can go stale by a few seconds after a stage finishes elsewhere; the chain
-// itself (trainingStore.runYue2AllStages) re-checks every skip predicate
-// fresh, immediately before starting each stage, so a stale preview here never
-// produces a stale skip decision, only a preview line that catches up a beat
-// late.
+// The preflight line is advisory; the server checks current artifacts before
+// each accepted stage. The status panel polls the durable command on reconnect.
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ListChecks, Loader2, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { useTrainingStore } from '../../stores/trainingStore';
+import { commandYue2Preparation, listYue2Preparations, type Yue2PreparationSummary } from '../../services/trainingPreparationApi';
 import { Toggle } from '../shared/Toggle';
 import {
   Yue2StemsCard, Yue2AlignCard, Yue2SheetCard, Yue2TokenizeCard,
@@ -59,9 +55,7 @@ const RunAllControl: React.FC<{
   runAllActive: boolean;
   runAllStage: number | null;
   onQueueMultiple: () => void;
-  /** Joint Training chain: the button calls this instead of the legacy
-   *  runYue2AllStages, whose final stage is the legacy NAR/AR trainers —
-   *  the joint chain's final stage is the training card's own start. */
+  /** Joint Training submits the card's current form in the server command. */
   onRun?: () => void;
   /** Joint Training's shorter stage list; overrides the legacy seven-name map. */
   stageNames?: Record<number, string>;
@@ -98,8 +92,7 @@ const RunAllControl: React.FC<{
       </p>
       <p className="text-[10px] text-zinc-500 leading-snug mb-3">
         {t('trainingStudio.yue2.runAllReloadWarning',
-          'This chain runs in this browser tab, not on the server — it does not survive a page reload. '
-          + 'Switching between Training Studio phases is fine; closing or reloading the tab stops it.')}
+          'Preparation continues on the server if you close or reload this page. Return here to see its status.')}
       </p>
       <button
         onClick={() => { if (onRun) onRun(); else void runYue2AllStages(datasetId, trigger); }}
@@ -157,11 +150,41 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string; se
   const runYue2JointStages = useTrainingStore(s => s.runYue2JointStages);
 
   // The Joint Training card hands its own start function out through this
-  // ref (see Yue2AitkTrainCard's exposeStart), so the joint run-all chain
-  // below can train with the card's current form instead of duplicating the
-  // request builder on this page.
-  const jointStartRef = React.useRef<(() => Promise<string | null>) | null>(null);
-  const exposeJointStart = React.useCallback((fn: () => Promise<string | null>) => { jointStartRef.current = fn; }, []);
+  // Capture the card's current form before submitting the whole chain.
+  const jointStartRef = React.useRef<(() => Promise<Record<string, unknown>>) | null>(null);
+  const exposeJointStart = React.useCallback((fn: () => Promise<Record<string, unknown>>) => { jointStartRef.current = fn; }, []);
+  const [captureError, setCaptureError] = useState<string | null>(null);
+  const [preparation, setPreparation] = useState<Yue2PreparationSummary | null>(null);
+  useEffect(() => {
+    let live = true;
+    const refresh = async () => {
+      try {
+        const list = await listYue2Preparations(datasetId);
+        if (live) setPreparation(list[0] ?? null);
+      } catch (error) {
+        if (live) setCaptureError(error instanceof Error ? error.message : String(error));
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => { void refresh(); }, 1500);
+    return () => { live = false; window.clearInterval(timer); };
+  }, [datasetId]);
+  const controlPreparation = async (action: 'pause' | 'resume' | 'cancel' | 'retry') => {
+    if (!preparation) return;
+    setCaptureError(null);
+    try { setPreparation(await commandYue2Preparation(preparation.id, action)); }
+    catch (error) { setCaptureError(error instanceof Error ? error.message : String(error)); }
+  };
+  const startJointChain = async () => {
+    setCaptureError(null);
+    try {
+      if (!jointStartRef.current) throw new Error('Joint training form is unavailable');
+      const overrides = await jointStartRef.current();
+      await runYue2JointStages(datasetId, lyricTiming, overrides);
+    } catch (error) {
+      setCaptureError(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   const { status: yue2Status, error: yue2StatusError, reload: reloadYue2Status } = useYue2Status(datasetId);
   const { status: arStatus, error: arStatusError, reload: reloadArStatus } = useYue2ArStatus(datasetId);
@@ -175,6 +198,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string; se
 
   const jobStatus = activeJob?.status;
   const jobBusy = jobStatus === 'queued' || jobStatus === 'running';
+  const preparationBusy = !!preparation && ['running', 'pausing', 'paused', 'cancelling'].includes(preparation.status);
 
   const effectiveTrigger = trigger ?? '';
 
@@ -229,12 +253,12 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string; se
         datasetId={datasetId}
         trigger={effectiveTrigger}
         skipLabels={jointSkipLabels}
-        disabled={yue2RunAllActive || jobBusy}
+        disabled={yue2RunAllActive || jobBusy || preparationBusy}
         jobBusyElsewhere={jobBusy}
         runAllActive={yue2RunAllActive}
         runAllStage={yue2RunAllStage}
         onQueueMultiple={() => setAitkBatchOpen(true)}
-        onRun={() => void runYue2JointStages(datasetId, lyricTiming, null)}
+        onRun={() => void runYue2JointStages(datasetId, lyricTiming)}
         stageNames={prepareStageNames}
         preflightAll={t('trainingStudio.yue2.runAllPreparePreflight',
           'Runs every preparation stage below in order. Training is on the Train page.')}
@@ -245,28 +269,48 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string; se
         datasetId={datasetId}
         trigger={effectiveTrigger}
         skipLabels={jointSkipLabels}
-        disabled={yue2RunAllActive || jobBusy}
+        disabled={yue2RunAllActive || jobBusy || preparationBusy}
         jobBusyElsewhere={jobBusy}
         runAllActive={yue2RunAllActive}
         runAllStage={yue2RunAllStage}
         onQueueMultiple={() => setAitkBatchOpen(true)}
-        onRun={() => void runYue2JointStages(datasetId, lyricTiming,
-          () => (jointStartRef.current ? jointStartRef.current() : Promise.resolve(null)))}
+        onRun={() => void startJointChain()}
         stageNames={jointStageNames}
         preflightAll={t('trainingStudio.yue2.runAllJointPreflight',
           'Runs every stage below in order, ending with joint training.')}
       />
     );
-    const errorBanner = storeError && (
+    const errorBanner = (storeError || captureError) && (
       <div className="rounded-xl border border-red-500/25 bg-red-500/10 p-3 flex items-start gap-2 text-sm text-red-500">
         <XCircle size={16} className="mt-0.5 flex-shrink-0" />
-        <span className="min-w-0 break-words">{storeError}</span>
+        <span className="min-w-0 break-words">{captureError || storeError}</span>
+      </div>
+    );
+    const preparationStatus = preparation && (
+      <div className={CARD}>
+        <p className="text-xs font-semibold text-zinc-900 dark:text-white">
+          {t('trainingStudio.yue2.preparationStatus', 'Preparation')}: {preparation.status}
+        </p>
+        <div className="mt-1 text-[11px] text-zinc-500">
+          {preparation.stages.map(stage => <p key={stage.stage}>
+            {stage.stage}: {stage.status}{stage.jobId ? ` · ${stage.jobId}` : ''}
+            {stage.error ? ` · ${stage.error}` : ''}
+          </p>)}
+        </div>
+        {preparation.error && <p className="mt-1 text-xs text-red-500">{preparation.error}</p>}
+        <div className="mt-2 flex gap-2 text-xs">
+          {preparation.status === 'running' && <button className="text-amber-600 hover:underline" onClick={() => void controlPreparation('pause')}>{t('trainingStudio.yue2.preparationPause', 'Pause')}</button>}
+          {(preparation.status === 'paused' || preparation.status === 'pausing') && <button className="text-amber-600 hover:underline" onClick={() => void controlPreparation('resume')}>{t('trainingStudio.yue2.preparationResume', 'Resume')}</button>}
+          {['running', 'pausing', 'paused'].includes(preparation.status) && <button className="text-red-500 hover:underline" onClick={() => void controlPreparation('cancel')}>{t('trainingStudio.yue2.preparationCancel', 'Cancel')}</button>}
+          {['failed', 'interrupted'].includes(preparation.status) && <button className="text-amber-600 hover:underline" onClick={() => void controlPreparation('retry')}>{t('trainingStudio.yue2.preparationRetry', 'Retry')}</button>}
+        </div>
       </div>
     );
     if (section === 'prepare') {
       return (
         <div className="flex flex-col gap-4">
           {errorBanner}
+          {preparationStatus}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {prepareRunAllControl}
             <Yue2ClearPreparedCard datasetId={datasetId} disabled={jobBusy || yue2RunAllActive} />
@@ -295,6 +339,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string; se
     return (
       <div className="flex flex-col gap-4">
         {errorBanner}
+        {preparationStatus}
         <div className={CARD}>
           <div className="flex items-center justify-between gap-3">
             <div>

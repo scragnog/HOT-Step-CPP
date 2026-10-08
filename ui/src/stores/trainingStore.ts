@@ -8,6 +8,7 @@
 import { create } from 'zustand';
 import * as trainingApi from '../services/trainingApi';
 import * as preparationApi from '../services/trainingPreparationApi';
+import type { Yue2PreparationPayload } from '../services/trainingPreparationApi';
 import { snapshotFor } from '../services/trainingOperations';
 import { TRAINING_RECIPE_VERSION } from '../../../server/src/contracts/trainingRecipes';
 import { computeTrainingEta, type TrainingEta } from '../utils/trainingEta';
@@ -395,13 +396,10 @@ interface TrainingState {
   startYue2ArTrain(opts?: trainingApi.Yue2ArTrainRequest): Promise<string[]>;
   /** Start the durable Node-owned YuE2 stage chain and project its status. */
   runYue2AllStages(datasetId: string, trigger: string, stages?: Yue2StageSet): Promise<void>;
-  /** Start durable joint preparation. The card's form callback remains until
-   *  its 6c-2 ownership handoff supplies the captured training recipe. */
-  runYue2JointStages(
-    datasetId: string,
-    lyricTiming: boolean,
-    startTraining: (() => Promise<string | null>) | null,
-  ): Promise<void>;
+  /** Start durable joint preparation. With `jointOverrides` (the card's
+   *  captured form) the server chain ends in joint training from that
+   *  snapshot; without them it only prepares. */
+  runYue2JointStages(datasetId: string, lyricTiming: boolean, jointOverrides?: Record<string, unknown>): Promise<void>;
   loadTrainDitStatus(q?: { variantKey?: string; adapterName?: string }): Promise<void>;
   startTrainDit(opts: TrainDitOptions): Promise<void>;
   loadAuditions(): Promise<void>;
@@ -1090,7 +1088,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     }
   },
 
-  runYue2JointStages: async (datasetId, lyricTiming, startTraining) => {
+  runYue2JointStages: async (datasetId, lyricTiming, jointOverrides) => {
     if (get().yue2RunAllActive) return;
     const running = get().activeJob;
     if (running && (running.status === 'queued' || running.status === 'running')) {
@@ -1100,31 +1098,16 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     set({ yue2RunAllActive: true, yue2RunAllStage: null, error: null });
     try {
       const context = await preparationApi.getYue2PreparationContext(datasetId);
-      const stages: Yue2StageKey[] = lyricTiming
+      const stages: Yue2PreparationPayload['stages'] = lyricTiming
         ? ['latents', 'codes', 'sheet', 'stems', 'align'] : ['latents', 'codes', 'sheet'];
+      if (jointOverrides) stages.push('joint');
       const pipeline = await preparationApi.startYue2Preparation(snapshotFor({
         kind: 'yue2-preparation', idempotencyKey: crypto.randomUUID(),
         dataset: context.dataset, sources: [context.source],
-        payload: { mode: 'prepare-only', stages, trigger: '', lyricTiming, recipes: {} },
+        payload: { mode: jointOverrides ? 'train-after-preparation' : 'prepare-only', stages, trigger: '', lyricTiming,
+          recipes: jointOverrides ? { joint: { version: TRAINING_RECIPE_VERSION, overrides: jointOverrides } } : {} },
       }));
-      const prepared = await followYue2Preparation(set, get, pipeline.id);
-      if (prepared && startTraining) {
-        // The card owns the unsaved joint form until 6c-2 transfers it as a
-        // captured recipe. Keep its existing start callback in that handoff.
-        const jobId = await startTraining();
-        if (!jobId) throw new Error('Joint training did not start.');
-        set({ jobLog: [], error: null });
-        for (;;) {
-          const job = await trainingApi.getJob(jobId);
-          set({ activeJob: job });
-          if (job.status !== 'queued' && job.status !== 'running') {
-            refreshAfterJob(get, job.id);
-            if (job.status !== 'done') throw new Error(job.error || `Joint training ${job.status}`);
-            break;
-          }
-          await sleep(1500);
-        }
-      }
+      await followYue2Preparation(set, get, pipeline.id);
     } catch (err) {
       set({ error: errMessage(err) });
     } finally {
