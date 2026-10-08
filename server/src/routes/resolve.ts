@@ -31,7 +31,8 @@ export function createResolveRouter(deps: ResolveRouterDeps): Router {
   const router = Router();
   router.get('/path', (req, res) => {
     if (!deps.userId(req)) { res.status(401).json({ error: 'Unauthorized' }); return; }
-    res.json({ path: process.env.GENERATION_INTENT_PATH === 'resolved' ? 'resolved' : 'old' });
+    // 'old' is the only explicit rollback; unset or any other value selects resolved.
+    res.json({ path: process.env.GENERATION_INTENT_PATH === 'old' ? 'old' : 'resolved' });
   });
   router.post('/preview', async (req, res) => {
     if (!deps.userId(req)) { res.status(401).json({ error: 'Unauthorized' }); return; }

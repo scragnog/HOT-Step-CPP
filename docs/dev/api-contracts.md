@@ -209,9 +209,10 @@ everywhere; changes to the manifest are proposed separately before they land her
 ## Caption and content resolution
 
 `GET /api/resolve/path` returns `{ "path": "old" | "resolved" }` to an authenticated
-client. The server setting `GENERATION_INTENT_PATH` defaults to `old`; only the exact value
-`resolved` selects the new path. Create and the Lyric Studio written-song queue read this
-before each submission. A missing path endpoint on an older server selects the old path.
+client. The server setting `GENERATION_INTENT_PATH` defaults to `resolved`; only the exact
+value `old` rolls back to the legacy client builder, and any other value (including unset)
+selects resolved. Create and the Lyric Studio written-song queue read this before each
+submission. A missing path endpoint on an older server selects the old path.
 Changing the setting does not replay existing jobs or rewrite browser drafts. A selected
 resolved path previews a typed intent and submits its returned request; preview errors stop
 that submission. The queue remains browser-owned in this slice.
