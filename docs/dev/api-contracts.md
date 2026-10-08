@@ -369,3 +369,76 @@ the server, exports and verifies its current items, reconciles submitted and ter
 into the saved browser queue, and holds pending work for an explicit resume. A submitting
 item cannot be exported until its submission settles. Submitted or interrupted jobs are
 never automatically replayed by the browser.
+
+## Workflow jobs and revisions
+
+`/api/workflows` runs multi-step studio operations in the Node process, such as a lyric refine
+sequence, an approved preview or a cover analysis. A closed tab, a reconnect or a server restart
+can't lose such an operation or run it twice. It also stores drafts that two clients can edit
+safely. All routes need the bearer token, and every job and document belongs to one user.
+
+A studio adds a job kind from its own module with `registerWorkflowKind` (in
+`server/src/routes/workflows.ts`). A kind has an input schema (zod), a `run(ctx)` function, an
+optional `maxConcurrent` (default 1) and `timeoutMs` (default 30 minutes). The kind owns the
+domain policy; the service (`server/src/services/workflows/`) owns the lifecycle. Wire types are
+in `server/src/contracts/workflow.ts`, and the UI client is `ui/src/services/workflowApi.ts`.
+
+| Route | Does |
+|---|---|
+| `POST /jobs` | Submit `{ kind, idempotencyKey, input }`. `201 { job, created: true }` for a new job. The same key and input within (user, kind) answers `200 { job, created: false }`. The same key with another input is a `409`. An unknown kind, or input the kind's schema rejects, is a `400` with field paths |
+| `GET /jobs[?kind=&status=]` | The user's jobs, newest first, at most 200 |
+| `GET /jobs/:id[?after=N]` | `{ job, events, gap }`: the events after sequence `N` |
+| `GET /jobs/:id/events[?after=N]` | Server-sent events: a snapshot frame `{ type: 'snapshot', job, gap }`, then `{ type: 'event', event }` frames with `id:` set to the event's sequence, so `Last-Event-ID` resumes. The stream ends after the job's final status |
+| `POST /jobs/:id/cancel` | Acknowledge a cancel. `409` for a finished job |
+| `POST /jobs/:id/retry` | Run a failed, cancelled or interrupted job again as a new attempt; `409` otherwise |
+| `POST /documents` | Create `{ kind, data }` at revision 1 |
+| `GET /documents?kind=`, `GET /documents/:id` | Read documents |
+| `PUT /documents/:id` | `{ expectedRevision, data }`. Lands only if the stored revision still matches; otherwise `409 { error, currentRevision }` |
+| `DELETE /documents/:id?expectedRevision=N` | Delete, with the same check |
+
+Job `status`:
+
+| Status | Meaning |
+|---|---|
+| `pending` | Accepted, not started |
+| `running` | Its step is running in this process. `cancelRequested` may be set |
+| `succeeded`, `failed`, `cancelled` | The outcome. `result` holds what the step returned; `error` holds the reason |
+| `interrupted` | The server stopped while the job was running. Its last step may or may not have finished |
+
+How each transition happens:
+- **Submit.** The input is validated by the kind's schema and captured once. The job runs from
+  that copy, never from client state.
+- **Start.** A claim (pending to running) is one guarded update. Jobs of one kind start oldest
+  first, up to its `maxConcurrent`.
+- **Cancel.**
+  - A pending job is cancelled at once and never runs.
+  - A running job gets `cancelRequested`, a `cancel-requested` event, an aborted `ctx.signal`,
+    and its audio items cancelled. It ends `cancelled` when its step returns, even if the step
+    finished its work: that result is discarded.
+- **Timeout.** A step that runs past `timeoutMs` is aborted and the job fails.
+- **Restart.** On startup, jobs left running become `interrupted` with a message. Nothing that
+  started is rerun automatically. Pending jobs never started, so they start normally. Only
+  `retry` runs a job again; it counts the attempt in `attempt`.
+  An interrupted job's audio items are left to the audio queue, which reports their own state.
+  A step from the old process can't write to the job any more.
+
+Audio never runs in a workflow step. `ctx.audio.enqueue(key, request)` queues a captured
+`/api/generate` body on the durable audio queue, which owns GPU admission, under the key
+`workflow:<jobId>:<key>`. `ctx.audio.wait(id)` resolves when that item finishes. A retried job
+gets the same audio items back instead of rendering twice, unless the kind includes
+`ctx.attempt` in the key.
+
+Each state change is also an event, numbered from 1 per job with no holes. A step adds its own
+with `ctx.emit(type, data)` (at most 64 KB each). Only the newest 500 events per job are kept.
+A reader whose cursor fell behind that window gets `gap: true` and should rebuild its view
+from `job`. `followJob` in the UI client reconnects after a drop and resumes from the last
+event it saw.
+
+Revisions use one guarded update (`WHERE revision = ?`). Of two writes based on the same
+revision, exactly one lands, and the other gets the current revision. `bumpRevision` applies
+the same check to a domain table with a `revision` column (`workflow_documents`,
+`builder_projects`). Call it inside the transaction that makes the domain change, so both land
+or neither does.
+
+Jobs and events live in `workflow_jobs` and `workflow_events`, documents in
+`workflow_documents`, all created on first use.

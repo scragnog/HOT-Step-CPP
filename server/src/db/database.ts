@@ -377,6 +377,12 @@ export function initDb(): void {
       check: `SELECT COUNT(*) as c FROM pragma_table_info('songs') WHERE name='backend'`,
       alter: `ALTER TABLE songs ADD COLUMN backend TEXT DEFAULT 'ace'`,
     },
+    {
+      // Optimistic revision for Song Builder projects: every project edit and
+      // late render result goes through bumpRevision (services/workflows/revisions.ts).
+      check: `SELECT COUNT(*) as c FROM pragma_table_info('builder_projects') WHERE name='revision'`,
+      alter: `ALTER TABLE builder_projects ADD COLUMN revision INTEGER NOT NULL DEFAULT 0`,
+    },
   ];
   for (const m of songsMigrations) {
     const row = db.prepare(m.check).get() as any;

@@ -1,0 +1,74 @@
+// workflowApi.test.ts — followJob against the real /api/workflows router: a
+// stream that drops mid-job resumes from the last event, with nothing lost or
+// repeated. No UI test runner is wired up; run with the server's tsx:
+//   (cd server && node --import tsx --test ../ui/src/services/workflowApi.test.ts)
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { startWorkflowTestServer, z } from '../../../server/src/services/workflows/testServer';
+import type { WorkflowEvent } from '../../../server/src/contracts/workflow';
+import { followJob, workflowApi, WorkflowRequestError } from './workflowApi';
+
+test('followJob resumes after a dropped stream without losing or repeating events', async () => {
+  const http = await startWorkflowTestServer();
+  const { jobs } = http;
+  let release!: () => void;
+  const step = new Promise<void>(r => { release = r; });
+  jobs.register({
+    kind: 'count', input: z.object({ n: z.number() }),
+    run: async ctx => {
+      ctx.emit('progress', { i: 1 });
+      await step;
+      for (let i = 2; i <= ctx.input.n; i++) ctx.emit('progress', { i });
+      return 'done';
+    },
+  });
+  const base = http.origin;
+
+  // Relative URLs go to the test server; the first stream is cut after its first event.
+  const realFetch = globalThis.fetch;
+  let streams = 0;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    const response = await realFetch(base + url, init);
+    if (!url.includes('/events') || streams++ > 0) return response;
+    const reader = response.body!.getReader();
+    let seen = '';
+    const cut = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        const { value, done } = await reader.read();
+        if (done) { controller.close(); return; }
+        controller.enqueue(value);
+        seen += new TextDecoder().decode(value);
+        if (seen.includes('"progress"')) { void reader.cancel(); controller.error(new Error('network dropped')); }
+      },
+    });
+    return new Response(cut, { status: response.status, headers: response.headers });
+  }) as typeof fetch;
+
+  try {
+    const { job } = await workflowApi.submit('t', 'count', 'k', { n: 5 });
+    const events: WorkflowEvent[] = [];
+    const errors: unknown[] = [];
+    const snapshots: boolean[] = [];
+    const done = followJob('t', job.id, {
+      onEvent: e => { events.push(e); if (e.type === 'progress' && (e.data as { i: number }).i === 1) setTimeout(release, 20); },
+      onSnapshot: (_, gap) => snapshots.push(gap),
+      onError: e => errors.push(e),
+    }, { retryMs: 10 });
+    assert.equal(await done, 'succeeded');
+    assert.equal(errors.length, 1, 'one drop');
+    assert.deepEqual(snapshots, [false, false]);
+    const total = jobs.get(job.id).lastSeq;
+    assert.deepEqual(events.map(e => e.seq), Array.from({ length: total }, (_, i) => i + 1));
+
+    // A stale document write surfaces the current revision.
+    const { document } = await workflowApi.createDocument('t', 'draft', { a: 1 });
+    await workflowApi.updateDocument('t', document.id, 1, { a: 2 });
+    await assert.rejects(workflowApi.updateDocument('t', document.id, 1, { a: 3 }),
+      (e: unknown) => e instanceof WorkflowRequestError && e.status === 409 && e.currentRevision === 2);
+    await assert.rejects(followJob('t', 'missing', { onEvent: () => {} }),
+      (e: unknown) => e instanceof WorkflowRequestError && e.status === 404);
+  } finally {
+    globalThis.fetch = realFetch;
+    await http.close();
+  }
+});
