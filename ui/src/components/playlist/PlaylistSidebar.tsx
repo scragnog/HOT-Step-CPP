@@ -113,6 +113,22 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose, embed
       </div>
       )}
 
+      {playlist.needsImport && (
+        <div className="px-3 py-2 border-b border-zinc-200 dark:border-white/10 text-xs text-zinc-600 dark:text-zinc-300">
+          <p>Browser playlist found. Import it to save the ordered list on this installation.</p>
+          <button className="mt-1 text-pink-500 hover:text-pink-400 underline" onClick={() => void playlist.importBrowserPlaylist()}>
+            {playlist.replacingServer ? 'Import and replace saved playlist' : 'Import browser playlist'}{playlist.saveError ? ' (retry)' : ''}
+          </button>
+        </div>
+      )}
+      {playlist.saveError && (
+        <div className="px-3 py-2 border-b border-red-300 dark:border-red-900 text-xs text-red-600 dark:text-red-300" role="alert">
+          <p>Playlist save failed: {playlist.saveError}. Your local edit is still visible.</p>
+          {!playlist.needsImport && <button className="mt-1 underline" onClick={() => void playlist.retryPlaylistSave()}>Reload and reapply</button>}
+        </div>
+      )}
+      {playlist.saving && <div className="px-3 py-1 text-xs text-zinc-500" role="status">Saving playlist…</div>}
+
       {/* Track list */}
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-hide">
         {playlist.items.length === 0 ? (
