@@ -33,7 +33,7 @@ export async function listProviders(): Promise<ProviderInfo[]> {
 
   const promises = Object.values(providers).map(async (p): Promise<ProviderInfo> => {
     try {
-      if (p instanceof GeminiProvider || p instanceof OllamaProvider || p instanceof LMStudioProvider || p instanceof UnslothProvider || p instanceof LlamaCppProvider || p instanceof OpenAICompatProvider) {
+      if (p instanceof GeminiProvider || p instanceof AnthropicProvider || p instanceof OllamaProvider || p instanceof LMStudioProvider || p instanceof UnslothProvider || p instanceof LlamaCppProvider || p instanceof OpenAICompatProvider) {
         // Race against a timeout so one dead provider can't block the rest
         const info = await Promise.race([
           p.toInfoAsync(),

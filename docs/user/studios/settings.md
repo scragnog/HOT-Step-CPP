@@ -72,6 +72,8 @@ This tab is a structured editor for `.env`. Fields marked "Restart" in the UI ne
 | Provider model overrides | One text field per provider (Gemini, OpenAI, Anthropic, Ollama, LM Studio, Unsloth, llama.cpp, OpenAI-compatible) naming which model to request. Leave blank to use the provider's built-in default. |
 | Provider endpoints and credentials | For the self-hosted providers (Ollama, LM Studio, Unsloth, llama.cpp) and the generic OpenAI-compatible slot: a base URL, plus an API key, username/password, or display name where that provider needs one. Ollama and llama.cpp need only a URL; LM Studio and the OpenAI-compatible slot also take an API key; Unsloth takes a username and password. |
 
+With an Anthropic API key set, Claude model choices come from Anthropic's current model list. If that list cannot be reached, the picker shows a built-in list. The default Claude model is Haiku 4.5 unless you set `ANTHROPIC_MODEL`.
+
 ### Performance tab
 
 | Control | What it does |

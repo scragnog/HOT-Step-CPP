@@ -256,7 +256,7 @@ export const config = {
     defaultProvider: process.env.DEFAULT_LLM_PROVIDER || 'gemini',
     geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
     openaiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-    anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-20241022',
+    anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-haiku-4-5-20251001',
     ollamaModel: process.env.OLLAMA_MODEL || 'llama3',
     lmstudioModel: process.env.LMSTUDIO_MODEL || '',
     unslothModel: process.env.UNSLOTH_MODEL || '',
@@ -453,7 +453,7 @@ export function reloadEnvConfig(): string[] {
     () => config.lireek.geminiModel);
   apply('OPENAI_MODEL', v => { config.lireek.openaiModel = v || 'gpt-4o-mini'; },
     () => config.lireek.openaiModel);
-  apply('ANTHROPIC_MODEL', v => { config.lireek.anthropicModel = v || 'claude-3-5-haiku-20241022'; },
+  apply('ANTHROPIC_MODEL', v => { config.lireek.anthropicModel = v || 'claude-haiku-4-5-20251001'; },
     () => config.lireek.anthropicModel);
   apply('OLLAMA_MODEL', v => { config.lireek.ollamaModel = v || 'llama3'; },
     () => config.lireek.ollamaModel);

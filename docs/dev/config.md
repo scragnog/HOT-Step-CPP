@@ -160,7 +160,7 @@ them are hot-reloaded when saved from Settings.
 | `OPENAI_API_KEY` | empty | AI Services | OpenAI key |
 | `OPENAI_MODEL` | `gpt-4o-mini` | AI Services | OpenAI model |
 | `ANTHROPIC_API_KEY` | empty | AI Services | Anthropic key |
-| `ANTHROPIC_MODEL` | `claude-3-5-haiku-20241022` | AI Services | Anthropic model |
+| `ANTHROPIC_MODEL` | `claude-haiku-4-5-20251001` | AI Services | Anthropic model |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | AI Services | Ollama server |
 | `OLLAMA_MODEL` | `llama3` | AI Services | Ollama model |
 | `LMSTUDIO_BASE_URL` | `http://localhost:1234/v1` | AI Services | LM Studio server |
