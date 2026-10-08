@@ -36,6 +36,7 @@ import { readMm3CaptionSelection } from '../utils/mm3CaptionSource';
 import { readYue2SongSelection, readYue2DatasetForLyricsSet } from '../utils/yue2CaptionSource';
 import { getUseLlmDuration } from '../utils/estimateDuration';
 import { audioQueueApi } from '../services/audioQueueApi';
+import { workflowApi } from '../services/workflowApi';
 import { exportQueueBackup, restoreQueueBackup, type QueueBackup, type QueueBackupStore } from './audioQueueMigration';
 import type { AudioIntentItem, ImportAudioQueue } from '../../../server/src/contracts/audioQueue';
 
@@ -67,6 +68,8 @@ export interface AudioQueueItem {
   yue2Pick?: Record<string, string | number>;
   status: AudioQueueStatus;
   jobId?: string;
+  /** Manual rows run by a workflow job (Insta-Gen); cancel goes there. */
+  workflowJobId?: string;
   serverQueueId?: string;
   progress?: number;
   stage?: string;
@@ -855,15 +858,20 @@ export function removeFromAudioQueue(id: string): void {
 /** Force-dismiss an active/generating item (user clicked X).
  *  Also calls the server cancel API to stop the generation and C++ engine. */
 export function forceFailQueueItem(id: string): void {
-  if (queueOwner() === 'server') {
-    const serverId = _state.items.find(item => item.id === id)?.serverQueueId;
+  const item = _state.items.find(i => i.id === id);
+  // A workflow-backed manual row (Insta-Gen): cancelling the workflow job also
+  // cancels its audio intents, whichever side owns the queue.
+  const workflowJobId = item?.workflowJobId;
+  if (queueOwner() === 'server' && !workflowJobId) {
+    const serverId = item?.serverQueueId;
     if (serverId && _lastToken) void audioQueueApi.cancel(_lastToken, serverId).then(() => refreshServerProjection(_lastToken!));
     return;
   }
-  const item = _state.items.find(i => i.id === id);
   if (item && (item.status === 'generating' || item.status === 'loading-adapter')) {
-    // Cancel on the server → triggers abort controller → cancels C++ engine job
-    if (item.jobId) {
+    if (workflowJobId) {
+      if (_lastToken) workflowApi.cancel(_lastToken, workflowJobId).catch(() => {});
+    } else if (item.jobId) {
+      // Cancel on the server → triggers abort controller → cancels C++ engine job
       generateApi.cancel(item.jobId).catch(() => {});
     }
     item.status = 'failed';
@@ -949,6 +957,8 @@ export function addManualQueueItem(opts: {
 export function updateManualQueueItem(id: string, update: {
   title?: string;
   jobId?: string;
+  /** Workflow job behind the row; X cancels it through workflowApi. */
+  workflowJob?: { id: string; token: string };
   progress?: number;
   stage?: string;
   elapsed?: number;
@@ -958,6 +968,10 @@ export function updateManualQueueItem(id: string, update: {
   if (!item) return;
   if (update.title !== undefined) item.generation.title = update.title;
   if (update.jobId !== undefined) item.jobId = update.jobId;
+  if (update.workflowJob) {
+    item.workflowJobId = update.workflowJob.id;
+    _lastToken = update.workflowJob.token;
+  }
   if (update.progress !== undefined) item.progress = update.progress;
   if (update.stage !== undefined) item.stage = update.stage;
   if (update.elapsed !== undefined) item.elapsed = update.elapsed;
