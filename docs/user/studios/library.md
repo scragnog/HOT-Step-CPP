@@ -71,8 +71,8 @@ synced lyrics bar, and, when both slots are filled, the A/B mini-bar.
 The playlist is a play queue, not a saved collection. There is one queue, not
 multiple named playlists. Playback position and device settings stay local to
 the browser, but the queue's order and track variants save to the server as a
-revisioned snapshot, and track variant URLs need no live song row, so a
-deleted or re-rendered song does not break the queue.
+revisioned snapshot. Queue entries retain their order and variant URLs without
+a live song row. Deleting the underlying audio makes that entry unavailable.
 
 Find it in the right-hand Activity column (Playlist tab, alongside Recent
 Songs). Add a track with the list-plus icon next to it anywhere in the app,
