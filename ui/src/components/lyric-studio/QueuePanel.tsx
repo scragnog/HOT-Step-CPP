@@ -34,7 +34,8 @@ import type { QueueItemType } from '../../stores/streamingStore';
 import { lireekApi } from '../../services/lireekApi';
 import { adapterApi } from '../../services/api';
 import type { Artist, LyricsSet, Profile, AlbumPreset, Generation } from '../../services/lireekApi';
-import { enqueueAudioGen } from '../../stores/audioGenQueueStore';
+import { captureWrittenSongIntent } from '../../stores/audioGenQueueStore';
+import { lyricWorkflowApi } from '../../services/lyricWorkflowApi';
 import { useGlobalParamsStore } from '../../stores/globalParamsStore';
 import { useAuth } from '../../context/AuthContext';
 import { FileBrowserModal } from '../shared/FileBrowserModal';
@@ -178,7 +179,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
   const [fetchMaxSongs, setFetchMaxSongs] = useState(50);
   const [fetchQueue, setFetchQueue] = useState<FetchQueueItem[]>([]);
   const [fetchRunning, setFetchRunning] = useState(false);
-  const fetchAbortRef = useRef(false);
+  const fetchJobRef = useRef<string | null>(null);
 
   const loadPresets = useCallback(async () => {
     setPresetsLoading(true);
@@ -326,6 +327,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
   };
 
   const startFetchQueue = async () => {
+    if (!token) { showToast?.('Not authenticated'); return; }
     const entries = fetchInputMode === 'paste' ? parsePasteText(pasteText) : structuredRows.filter(r => r.artist.trim().length > 0);
     if (entries.length === 0) { showToast?.('No valid entries to fetch'); return; }
 
@@ -341,25 +343,46 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
 
     setFetchQueue(items);
     setFetchRunning(true);
-    fetchAbortRef.current = false;
-    let completed = 0, failed = 0, skipped = 0;
-
-    for (let i = 0; i < items.length; i++) {
-      if (fetchAbortRef.current) break;
-      const item = items[i];
-      if (item.status === 'skipped') { skipped++; continue; }
-      setFetchQueue(prev => prev.map((q, qi) => qi === i ? { ...q, status: 'running' } : q));
-      try {
-        const res = await lireekApi.fetchLyrics({ artist: item.artist, album: item.album || undefined, max_songs: fetchMaxSongs });
-        completed++;
-        setFetchQueue(prev => prev.map((q, qi) => qi === i ? { ...q, status: 'done', songsFetched: res.songs_fetched } : q));
-      } catch (err: any) {
-        failed++;
-        setFetchQueue(prev => prev.map((q, qi) => qi === i ? { ...q, status: 'error', error: err.message || 'Fetch failed' } : q));
+    const pending = items.map((item, index) => ({ item, index })).filter(({ item }) => item.status === 'pending');
+    let completed = 0, failed = 0;
+    const skipped = items.length - pending.length;
+    try {
+      if (pending.length) {
+        const job = await lyricWorkflowApi.submitBatch(token, pending.map(({ item }) => ({ type: 'fetch', artist: item.artist, album: item.album, maxSongs: fetchMaxSongs })));
+        fetchJobRef.current = job.id;
+        const status = await lyricWorkflowApi.follow(token, job.id, {
+          onEvent: event => {
+            const data = event.data as { index?: number; value?: { songs_fetched?: number }; error?: string } | null;
+            const row = data?.index === undefined ? undefined : pending[data.index];
+            if (!row) return;
+            if (event.type === 'item-start') setFetchQueue(prev => prev.map((q, i) => i === row.index ? { ...q, status: 'running' } : q));
+            if (event.type === 'item-result') { completed++; setFetchQueue(prev => prev.map((q, i) => i === row.index ? { ...q, status: 'done', songsFetched: data?.value?.songs_fetched } : q)); }
+            if (event.type === 'item-error') { failed++; setFetchQueue(prev => prev.map((q, i) => i === row.index ? { ...q, status: 'error', error: data?.error || 'Fetch failed' } : q)); }
+          },
+        });
+        if (status === 'succeeded') {
+          const final = await lyricWorkflowApi.get(token, job.id);
+          const results = (final.job.result as { results?: Array<{ index: number; status: 'done' | 'error'; value?: { songs_fetched?: number }; error?: string }> } | null)?.results || [];
+          completed = results.filter(result => result.status === 'done').length;
+          failed = results.filter(result => result.status === 'error').length;
+          setFetchQueue(prev => prev.map((q, i) => {
+            const index = pending.findIndex(row => row.index === i);
+            const result = results.find(r => r.index === index);
+            return result ? { ...q, status: result.status, songsFetched: result.value?.songs_fetched, error: result.error } : q;
+          }));
+        } else {
+          setFetchQueue(prev => prev.map(q => q.status === 'pending' || q.status === 'running'
+            ? { ...q, status: 'error', error: `Workflow ${status}` } : q));
+          showToast?.(`Fetch workflow ${status}`);
+        }
       }
+    } catch (err: any) {
+      failed += pending.length;
+      setFetchQueue(prev => prev.map(q => q.status === 'pending' || q.status === 'running' ? { ...q, status: 'error', error: err.message || 'Fetch failed' } : q));
+    } finally {
+      fetchJobRef.current = null;
+      setFetchRunning(false);
     }
-
-    setFetchRunning(false);
     const parts = [];
     if (completed > 0) parts.push(`${completed} fetched`);
     if (skipped > 0) parts.push(`${skipped} skipped`);
@@ -368,7 +391,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
     onFetchComplete?.();
   };
 
-  const stopFetchQueue = () => { fetchAbortRef.current = true; };
+  const stopFetchQueue = () => { if (token && fetchJobRef.current) void lyricWorkflowApi.cancel(token, fetchJobRef.current); };
   const clearFetchQueue = () => { if (!fetchRunning) setFetchQueue([]); };
 
   const fetchQueuePending = fetchQueue.filter(q => q.status === 'pending').length;
@@ -413,10 +436,11 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
   const handleQueue = () => {
     if (selected.size === 0) return;
     if (mode === 'profile') {
+      if (!token) { showToast?.('Not authenticated'); return; }
       addBulkToQueue(Array.from(selected).map(lsId => {
         const ls = lyricsSets.find(l => l.id === lsId);
         return { type: 'profile' as QueueItemType, targetId: lsId, label: `Profile: ${ls?.artist_name || '?'} — ${ls?.album || 'Unknown'}`, provider: profilingModel.provider, model: profilingModel.model };
-      }));
+      }), token);
     } else {
       const items = Array.from(selected).map(profileId => {
         const profile = profiles.find(p => p.id === profileId);
@@ -434,7 +458,8 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
         };
       }).filter(item => item.count > 0);
       if (items.length === 0) { showToast?.('All selected profiles already at or above target'); return; }
-      addBulkToQueue(items);
+      if (!token) { showToast?.('Not authenticated'); return; }
+      addBulkToQueue(items, token);
     }
     setSelected(new Set());
   };
@@ -455,23 +480,37 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
     const paramsSnapshot = globalParams.getGlobalParams();
     const artistMap = new Map(artists.map(a => [a.id, a]));
 
-    let queued = 0, failed = 0;
+    let failed = 0;
+    const intents = [];
     for (let i = 0; i < jobs.length; i++) {
       const { row, gen } = jobs[i];
       try {
-        await enqueueAudioGen(gen, {
+        intents.push(await captureWrittenSongIntent(gen, {
           artistId: row.artistId,
           artistName: row.artistName,
           artistImageUrl: artistMap.get(row.artistId)?.image_url || '',
           profileId: gen.profile_id,
           lyricsSetId: row.lyricsSetId,
-        }, paramsSnapshot, token);
-        queued++;
+        }, paramsSnapshot));
       } catch (err) {
         failed++;
-        console.error(`[QueuePanel] Failed to enqueue generation ${gen.id}:`, err);
+        console.error(`[QueuePanel] Failed to capture generation ${gen.id}:`, err);
       }
       setAudioProgress({ current: i + 1, total: jobs.length });
+    }
+
+    let queued = 0;
+    if (intents.length) {
+      try {
+        const job = await lyricWorkflowApi.submitRenders(token, intents);
+        queued = intents.length;
+        void lyricWorkflowApi.follow(token, job.id, { onEvent: event => {
+          if (event.type === 'item-error') showToast?.(`Render failed: ${(event.data as { error?: string })?.error || 'Unknown error'}`);
+        } }).catch(err => showToast?.(`Render status unavailable: ${err.message}`));
+      } catch (err) {
+        failed += intents.length;
+        console.error('[QueuePanel] Failed to submit render batch:', err);
+      }
     }
 
     showToast?.(failed === 0

@@ -9,6 +9,8 @@
 
 import { useSyncExternalStore } from 'react';
 import { skipThinking } from '../services/lireekApi';
+import { lyricWorkflowApi, runLyricOperation, type LyricBatchRequest, type LyricBatchResult } from '../services/lyricWorkflowApi';
+import type { WorkflowJob } from '../../../server/src/contracts/workflow';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,6 +30,7 @@ export interface QueueItem {
   userSubject?: string;
   /** Suppress LLM reasoning for this run (see CallOptions.noThink server-side). */
   noThink?: boolean;
+  jobId?: string;
 }
 
 export interface StreamingState {
@@ -109,106 +112,25 @@ function finishStream() {
   _emit();
 }
 
-interface StreamCallbacks {
-  onChunk: (text: string) => void;
-  onPhase: (phase: string) => void;
-  onResult?: (data: any) => void;
-  onError?: (msg: string) => void;
-}
-
-function makeCallbacks(onResult?: (data: any) => void, onError?: (msg: string) => void): StreamCallbacks {
-  return { onChunk: appendChunk, onPhase: setPhase, onResult, onError };
-}
-
-// ── SSE consumer helper ──────────────────────────────────────────────────────
-
-async function consumeSSE(url: string, body: any, callbacks: StreamCallbacks): Promise<void> {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `HTTP ${res.status}`);
-  }
-  const reader = res.body?.getReader();
-  if (!reader) throw new Error('No response body');
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let currentEventType = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-    for (const line of lines) {
-      const trimmed = line.trim();
-
-      // Track named event types: "event: chunk", "event: phase", "event: complete"
-      if (trimmed.startsWith('event: ')) {
-        currentEventType = trimmed.slice(7).trim();
-        continue;
-      }
-
-      if (trimmed.startsWith('data: ')) {
-        try {
-          const data = JSON.parse(trimmed.slice(6));
-          const eventType = currentEventType || '';
-          currentEventType = ''; // Reset after use
-
-          if (data.error) {
-            callbacks.onError?.(data.error);
-            throw new Error(data.error);
-          }
-
-          // Dispatch by named event type first, then fall back to inline field detection
-          switch (eventType) {
-            case 'phase':
-              callbacks.onPhase(data.phase || data.text || '');
-              break;
-            case 'chunk':
-              callbacks.onChunk(data.text || data.chunk || '');
-              break;
-            case 'complete':
-            case 'result':
-              callbacks.onResult?.(data);
-              break;
-            case 'error':
-              callbacks.onError?.(data.error || data.message || 'Unknown error');
-              break;
-            default:
-              // Fallback: detect by inline fields (for servers that don't send event: lines)
-              if (data.phase) callbacks.onPhase(data.phase);
-              else if (data.text || data.chunk) callbacks.onChunk(data.text || data.chunk);
-              else if (data.result) callbacks.onResult?.(data.result);
-              break;
-          }
-        } catch (e) {
-          // Re-throw server errors, only swallow JSON parse failures
-          if (e instanceof Error && !e.message.includes('JSON')) throw e;
-        }
-      }
-    }
-  }
-}
-
 // ── Queue system ─────────────────────────────────────────────────────────────
 
 let _queueRunning = false;
+let _lastToken: string | null = null;
+const _following = new Set<string>();
 
 function _nextId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
-export function addToQueue(item: Omit<QueueItem, 'id' | 'status'>): void {
+export function addToQueue(item: Omit<QueueItem, 'id' | 'status'>, token: string): void {
+  _lastToken = token;
   _state.queue.push({ ...item, id: _nextId(), status: 'pending' });
   _emit();
   _processQueue();
 }
 
-export function addBulkToQueue(items: Omit<QueueItem, 'id' | 'status'>[]): void {
+export function addBulkToQueue(items: Omit<QueueItem, 'id' | 'status'>[], token: string): void {
+  _lastToken = token;
   for (const item of items) {
     _state.queue.push({ ...item, id: _nextId(), status: 'pending' });
   }
@@ -217,77 +139,101 @@ export function addBulkToQueue(items: Omit<QueueItem, 'id' | 'status'>[]): void 
 }
 
 export function removeFromQueue(id: string): void {
-  _state.queue = _state.queue.filter(q => q.id !== id || q.status === 'running');
+  const item = _state.queue.find(q => q.id === id);
+  if (item?.jobId && _lastToken && item.status === 'running' &&
+      !_state.queue.some(q => q.id !== id && q.jobId === item.jobId && q.status === 'running')) {
+    void lyricWorkflowApi.cancel(_lastToken, item.jobId);
+  }
+  _state.queue = _state.queue.filter(q => q.id !== id);
   _emit();
 }
 
 export function clearQueue(): void {
-  _state.queue = _state.queue.filter(q => q.status === 'running');
+  _state.queue = _state.queue.filter(q => q.status === 'running' || q.status === 'pending');
   _emit();
 }
 
 async function _processQueue(): Promise<void> {
   if (_queueRunning) return;
+  if (!_lastToken) return;
   _queueRunning = true;
-
-  while (true) {
-    const next = _state.queue.find(q => q.status === 'pending');
-    if (!next) break;
-
-    next.status = 'running';
+  const pending = _state.queue.filter(q => q.status === 'pending');
+  if (pending.length === 0) { _queueRunning = false; return; }
+  const expanded = pending.flatMap(item => Array.from({ length: item.count || 1 }, () => item));
+  const requests: LyricBatchRequest[] = pending.map(item => ({
+    type: item.type, targetId: item.targetId, provider: item.provider, model: item.model,
+    userSubject: item.userSubject, noThink: item.noThink, count: item.count || 1,
+  }));
+  try {
+    const job = await lyricWorkflowApi.submitBatch(_lastToken, requests);
+    for (const item of pending) { item.jobId = job.id; item.status = 'running'; }
     _emit();
-
-    try {
-      await _executeQueueItem(next);
-      next.status = 'done';
-    } catch (err) {
-      next.status = 'error';
-      next.error = (err as Error).message;
-    }
+    _following.add(job.id);
+    try { await followQueueJob(_lastToken, job, expanded); }
+    finally { _following.delete(job.id); }
+  } catch (err) {
+    for (const item of pending) { item.status = 'error'; item.error = (err as Error).message; }
     _emit();
+  } finally {
+    _queueRunning = false;
+    if (_state.queue.some(q => q.status === 'pending')) void _processQueue();
   }
-
-  _queueRunning = false;
 }
 
-async function _executeQueueItem(item: QueueItem): Promise<void> {
-  const totalCount = item.count || 1;
-
-  for (let i = 0; i < totalCount; i++) {
-    const runLabel = totalCount > 1
-      ? `${item.label} (${i + 1}/${totalCount})`
-      : item.label;
-    resetStream(runLabel);
-    item.countCompleted = i;
+/** Reattach after a page reload. The service replays the bounded event log. */
+export async function restoreLyricQueue(token: string): Promise<void> {
+  _lastToken = token;
+  const { jobs } = await lyricWorkflowApi.list(token);
+  for (const job of jobs) {
+    if (job.status !== 'pending' && job.status !== 'running') continue;
+    if (_following.has(job.id)) continue;
+    const raw = (job.input as { items?: Array<{ type: QueueItemType | 'fetch' | 'render'; sourceId?: number; provider?: string; model?: string }> }).items || [];
+    if (!raw.length || raw.some(item => !['profile', 'generate', 'refine'].includes(item.type))) continue;
+    const items = raw.map(item => ({ id: _nextId(), type: item.type as QueueItemType, targetId: item.sourceId!,
+      label: `${item.type}: ${item.sourceId}`, provider: item.provider || '', model: item.model,
+      status: 'running' as const, jobId: job.id }));
+    _state.queue.push(...items);
     _emit();
-
-    switch (item.type) {
-      case 'profile':
-        await consumeSSE(
-          `/api/lireek/lyrics-sets/${item.targetId}/build-profile-stream`,
-          { provider_name: item.provider, model: item.model },
-          makeCallbacks(),
-        );
-        break;
-      case 'generate':
-        await consumeSSE(
-          `/api/lireek/profiles/${item.targetId}/generate-stream`,
-          { provider_name: item.provider, model: item.model, user_subject: item.userSubject, no_think: item.noThink },
-          makeCallbacks(),
-        );
-        break;
-      case 'refine':
-        await consumeSSE(
-          `/api/lireek/generations/${item.targetId}/refine-stream`,
-          { provider_name: item.provider, model: item.model },
-          makeCallbacks(),
-        );
-        break;
-    }
-    finishStream();
+    _following.add(job.id);
+    void followQueueJob(token, job, items).finally(() => { _following.delete(job.id); });
   }
-  item.countCompleted = totalCount;
-  _emit();
+}
+
+async function followQueueJob(token: string, job: WorkflowJob, expanded: QueueItem[]): Promise<void> {
+  const status = await lyricWorkflowApi.follow(token, job.id, {
+    onSnapshot: (snapshot, gap) => {
+      if (gap) setPhase('Earlier progress was trimmed; waiting for current status');
+      if (snapshot.status === 'interrupted') {
+        for (const item of expanded) { item.status = 'error'; item.error = 'Interrupted by server restart'; }
+        _emit();
+      }
+    },
+    onEvent: event => {
+      const data = event.data as { index?: number; phase?: string; text?: string; error?: string } | null;
+      const item = data?.index === undefined ? null : expanded[data.index];
+      if (event.type === 'item-start' && item) resetStream(item.label);
+      if (event.type === 'phase' && data?.phase) setPhase(data.phase);
+      if (event.type === 'chunk' && data?.text) appendChunk(data.text);
+      if (event.type === 'item-result' && item) { item.countCompleted = (item.countCompleted || 0) + 1; if (item.countCompleted >= (item.count || 1) && item.status !== 'error') item.status = 'done'; finishStream(); _emit(); }
+      if (event.type === 'item-error' && item) { item.status = 'error'; item.error = data?.error || 'Item failed'; item.countCompleted = (item.countCompleted || 0) + 1; finishStream(); _emit(); }
+    },
+  });
+  if (status === 'succeeded') {
+    const final = await lyricWorkflowApi.get(token, job.id);
+    const results = (final.job.result as LyricBatchResult | null)?.results || [];
+    for (const result of results) {
+      const item = expanded[result.index];
+      if (!item) continue;
+      if (result.status === 'error') { item.status = 'error'; item.error = result.error; }
+      else if (item.status !== 'error') item.status = 'done';
+      item.countCompleted = Math.max(item.countCompleted || 0, item.count || 1);
+    }
+    _emit();
+  }
+  if (status !== 'succeeded') {
+    for (const item of expanded) if (item.status === 'running') { item.status = 'error'; item.error = `Workflow ${status}`; }
+    _emit();
+  }
 }
 
 // ── Standalone streaming (non-queue, immediate) ──────────────────────────────
@@ -295,18 +241,17 @@ async function _executeQueueItem(item: QueueItem): Promise<void> {
 export async function startStreamBuildProfile(
   lyricsSetId: number,
   req: { provider: string; model?: string },
+  token: string,
   onComplete?: () => void,
 ): Promise<void> {
   resetStream('Building profile…');
   try {
-    await consumeSSE(
-      `/api/lireek/lyrics-sets/${lyricsSetId}/build-profile-stream`,
-      { provider_name: req.provider, model: req.model },
-      makeCallbacks(() => onComplete?.(), (msg) => { _state.text += `\n⚠ Error: ${msg}`; _emit(); }),
-    );
+    await runLyricOperation(token, { type: 'profile', targetId: lyricsSetId, provider: req.provider, model: req.model },
+      { onChunk: appendChunk, onPhase: setPhase, onResult: () => onComplete?.() });
   } catch (err) {
     _state.text += `\n⚠ Error: ${(err as Error).message}`;
     _emit();
+    throw err;
   } finally {
     finishStream();
   }
@@ -314,19 +259,19 @@ export async function startStreamBuildProfile(
 
 export async function startStreamGenerate(
   _profileId: number,
-  req: { profile_id: number; provider: string; model?: string; extra_instructions?: string; user_subject?: string; no_think?: boolean },
+  req: { profile_id: number; provider: string; model?: string; extra_instructions?: string; user_subject?: string; no_think?: boolean; count?: number },
+  token: string,
   onComplete?: () => void,
 ): Promise<void> {
   resetStream('Generating lyrics…');
   try {
-    await consumeSSE(
-      `/api/lireek/profiles/${req.profile_id}/generate-stream`,
-      { provider_name: req.provider, model: req.model, extra_instructions: req.extra_instructions, user_subject: req.user_subject, no_think: req.no_think },
-      makeCallbacks(() => onComplete?.(), (msg) => { _state.text += `\n⚠ Error: ${msg}`; _emit(); }),
-    );
+    await runLyricOperation(token, { type: 'generate', targetId: req.profile_id, provider: req.provider, model: req.model,
+      extraInstructions: req.extra_instructions, userSubject: req.user_subject, noThink: req.no_think, count: req.count },
+      { onChunk: appendChunk, onPhase: setPhase, onResult: () => onComplete?.() });
   } catch (err) {
     _state.text += `\n⚠ Error: ${(err as Error).message}`;
     _emit();
+    throw err;
   } finally {
     finishStream();
   }
@@ -335,18 +280,17 @@ export async function startStreamGenerate(
 export async function startStreamRefine(
   generationId: number,
   req: { provider: string; model?: string },
+  token: string,
   onComplete?: () => void,
 ): Promise<void> {
   resetStream('Refining lyrics…');
   try {
-    await consumeSSE(
-      `/api/lireek/generations/${generationId}/refine-stream`,
-      { provider_name: req.provider, model: req.model },
-      makeCallbacks(() => onComplete?.(), (msg) => { _state.text += `\n⚠ Error: ${msg}`; _emit(); }),
-    );
+    await runLyricOperation(token, { type: 'refine', targetId: generationId, provider: req.provider, model: req.model },
+      { onChunk: appendChunk, onPhase: setPhase, onResult: () => onComplete?.() });
   } catch (err) {
     _state.text += `\n⚠ Error: ${(err as Error).message}`;
     _emit();
+    throw err;
   } finally {
     finishStream();
   }

@@ -19,6 +19,11 @@ import {
 import { registerCrudRoutes } from './lireek/crudRoutes.js';
 import { registerLlmRoutes } from './lireek/llmRoutes.js';
 import { registerMm3Routes } from './lireek/mm3Routes.js';
+import { captureLyricItems, captureRenderItems, type LyricRequest } from '../services/lireek/lyricWorkflow.js';
+import type { WrittenSongIntent } from '../contracts/resolution.js';
+import { workflowJobs } from './workflows.js';
+import { getUserId } from './auth.js';
+import { randomUUID } from 'node:crypto';
 
 const router = Router();
 
@@ -32,6 +37,38 @@ function param(req: Request, name: string): string {
 registerCrudRoutes(router);
 registerLlmRoutes(router);
 registerMm3Routes(router);
+
+// Capture the DB sources and form choices before starting a durable batch.
+// Single-item endpoints remain available for API and MCP callers.
+router.post('/workflow-batches', (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+  try {
+    if (!Array.isArray(req.body?.items)) { res.status(400).json({ error: 'items must be an array' }); return; }
+    const input = captureLyricItems(req.body.items as LyricRequest[]);
+    const key = typeof req.body.idempotencyKey === 'string' && req.body.idempotencyKey.length > 0
+      ? req.body.idempotencyKey : randomUUID();
+    const out = workflowJobs().submit({ kind: 'lyric-batch', idempotencyKey: key, input }, userId);
+    res.status(out.created ? 201 : 200).json(out);
+  } catch (error: any) {
+    res.status(error?.status === 409 ? 409 : 400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+router.post('/workflow-renders', async (req: Request, res: Response) => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+  try {
+    if (!Array.isArray(req.body?.intents)) { res.status(400).json({ error: 'intents must be an array' }); return; }
+    const input = await captureRenderItems(req.body.intents as WrittenSongIntent[]);
+    const key = typeof req.body.idempotencyKey === 'string' && req.body.idempotencyKey.length > 0
+      ? req.body.idempotencyKey : randomUUID();
+    const out = workflowJobs().submit({ kind: 'lyric-batch', idempotencyKey: key, input }, userId);
+    res.status(out.created ? 201 : 200).json(out);
+  } catch (error: any) {
+    res.status(error?.status === 409 ? 409 : 400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
 
 // ── Slop Scanner ────────────────────────────────────────────────────────────
 

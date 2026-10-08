@@ -1,7 +1,9 @@
 import React, { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2, Loader2, Users, Sparkles, ChevronDown, ChevronRight } from 'lucide-react';
-import { lireekApi, streamBuildProfile, skipThinking } from '../../services/lireekApi';
+import { lireekApi, skipThinking } from '../../services/lireekApi';
+import { runLyricOperation } from '../../services/lyricWorkflowApi';
+import { useAuth } from '../../context/AuthContext';
 import type { Profile } from '../../services/lireekApi';
 import { StreamingPanel } from './StreamingPanel';
 
@@ -18,6 +20,7 @@ export const ProfilesTab: React.FC<ProfilesTabProps> = ({
 }) => {
   const [building, setBuilding] = useState(false);
   const { t } = useTranslation();
+  const { token } = useAuth();
   const [selectedProfile, setSelectedProfile] = useState<Profile | null>(null);
 
   // Inline streaming state (replaces zustand streamingStore)
@@ -30,6 +33,7 @@ export const ProfilesTab: React.FC<ProfilesTabProps> = ({
   const model = profilingModel.model || '';
 
   const handleBuild = useCallback(async () => {
+    if (!token) { showToast('Not authenticated'); return; }
     setBuilding(true);
     setStreamVisible(true);
     setStreamText('');
@@ -37,7 +41,7 @@ export const ProfilesTab: React.FC<ProfilesTabProps> = ({
     setStreamDone(false);
 
     try {
-      await streamBuildProfile(lyricsSetId, { provider, model: model || undefined }, {
+      await runLyricOperation(token, { type: 'profile', targetId: lyricsSetId, provider, model: model || undefined }, {
         onChunk: (text) => setStreamText(prev => {
             const next = prev + text;
             return next.length > 200_000 ? '\u2026(earlier output trimmed)\u2026\n' + next.slice(-200_000) : next;
@@ -49,18 +53,13 @@ export const ProfilesTab: React.FC<ProfilesTabProps> = ({
           onRefresh();
           showToast('Profile built successfully');
         },
-        onError: (err) => {
-          setStreamDone(true);
-          setBuilding(false);
-          showToast(`Build failed: ${err}`);
-        },
       });
     } catch (err: any) {
       showToast(`Build failed: ${err.message}`);
       setBuilding(false);
       setStreamDone(true);
     }
-  }, [lyricsSetId, provider, model, onRefresh, showToast]);
+  }, [lyricsSetId, provider, model, onRefresh, showToast, token]);
 
   const handleDelete = async (profile: Profile) => {
     if (!confirm('Delete this profile?')) return;

@@ -1,7 +1,9 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2, Pencil, Music2, Wand2, Play, Loader2, ChevronDown, ChevronRight, Send, FileText, Headphones, Sparkles, Zap, Download, Shuffle } from 'lucide-react';
-import { lireekApi, streamRefine, skipThinking } from '../../services/lireekApi';
+import { lireekApi, skipThinking } from '../../services/lireekApi';
+import { runLyricOperation } from '../../services/lyricWorkflowApi';
+import { useAuth } from '../../context/AuthContext';
 import type { Generation, Profile } from '../../services/lireekApi';
 import { StreamingPanel } from './StreamingPanel';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -355,6 +357,7 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
 }) => {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const { t } = useTranslation();
+  const { token } = useAuth();
   const [generating, setGenerating] = useState(false);
   const [refiningId, setRefiningId] = useState<number | null>(null);
   const [genCount, setGenCount] = useState(1);
@@ -429,6 +432,7 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
   const [refineStreamDone, setRefineStreamDone] = useState(false);
 
   const handleQuickGenerate = useCallback(async (noThink = false) => {
+    if (!token) { showToast('Not authenticated'); return; }
     if (profiles.length === 0) {
       showToast('Build a profile first');
       return;
@@ -437,7 +441,6 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
 
     const profile = profiles[0];
     try {
-      for (let i = 0; i < genCount; i++) {
         await startStreamGenerate(
           profile.id,
           {
@@ -446,19 +449,21 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
             model: generationModel.model,
             user_subject: userSubject.trim() || undefined,
             no_think: noThink || undefined,
+            count: genCount,
           },
+          token,
           () => onRefresh(),
         );
-      }
       showToast(`Generated ${genCount} new song${genCount > 1 ? 's' : ''}`);
     } catch (err: any) {
       showToast(`Failed: ${err.message}`);
     } finally {
       setGenerating(false);
     }
-  }, [profiles, genCount, generationModel, onRefresh, showToast, userSubject]);
+  }, [profiles, genCount, generationModel, onRefresh, showToast, userSubject, token]);
 
   const handleRefine = async (gen: Generation) => {
+    if (!token) { showToast('Not authenticated'); return; }
     const { provider, model } = refinementModel;
     if (!provider) {
       showToast('Select a refinement model first');
@@ -470,9 +475,9 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
     setRefineStreamPhase('');
     setRefineStreamDone(false);
     try {
-      await streamRefine(
-        gen.id,
-        { provider, model },
+      await runLyricOperation(
+        token,
+        { type: 'refine', targetId: gen.id, provider, model },
         {
           onChunk: (text) => setRefineStreamText(prev => {
             const next = prev + text;
@@ -484,7 +489,6 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
             showToast(`Refined: ${gen.title || 'Untitled'}`);
             onRefresh();
           },
-          onError: (err) => showToast(`Refinement failed: ${err}`),
         },
       );
       setRefineStreamDone(true);

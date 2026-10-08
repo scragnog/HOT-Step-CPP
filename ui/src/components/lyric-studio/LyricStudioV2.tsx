@@ -42,7 +42,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
 import { QueuePanel } from './QueuePanel';
 import { PromptEditor } from './PromptEditor';
-// streamingStore used via queue panel
+import { restoreLyricQueue } from '../../stores/streamingStore';
 import { loadSelections } from './ProviderSelector';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { cacheMm3SourceTracks, collectMm3SourceTracks } from '../../utils/mm3CaptionSource';
@@ -142,6 +142,7 @@ export const LyricStudioV2: React.FC = () => {
 
   // ── Audio generation ──
   useResumeQueue(token || undefined);
+  useEffect(() => { if (token) void restoreLyricQueue(token).catch(console.error); }, [token]);
   const completionCounter = useAudioGenQueueSelector(s => s.completionCounter);
 
   // ── Toast ──
