@@ -13,6 +13,11 @@ import path from 'path';
 import { execFile, spawn, ChildProcess } from 'child_process';
 import { promisify } from 'util';
 import { config } from '../config.js';
+import type {
+  VstPlugin, ChainEntry, ChainConfig, ScanPluginsResponse, GetChainResponse, UpdateChainResponse,
+  GuiResponse, ProcessResponse, MonitorStartResponse, MonitorStopResponse, MonitorSwitchResponse,
+  MonitorStatusResponse, MonitorSeekResponse, MonitorPauseResponse, MonitorResumeResponse, MonitorRestartResponse,
+} from '../contracts/vst.js';
 
 const execFileAsync = promisify(execFile);
 // macOS objc runtime prints 'Class X is implemented in both A and B' for every
@@ -22,29 +27,8 @@ const isObjcNoise = (line: string): boolean => /^objc\[\d+\]: Class .* is implem
 
 const router = Router();
 
-// ── Types ───────────────────────────────────────────────────
-
-export interface VstPlugin {
-  name: string;
-  vendor: string;
-  version: string;
-  path: string;
-  uid: string;
-  subcategories: string;
-}
-
-export interface ChainEntry {
-  uid: string;
-  name: string;
-  vendor: string;
-  path: string;       // .vst3 module path
-  enabled: boolean;
-  statePath: string;   // .vststate file path (may not exist yet)
-}
-
-interface ChainConfig {
-  plugins: ChainEntry[];
-}
+// VstPlugin, ChainEntry and ChainConfig are now contracts/vst.ts's shared
+// definitions — this file used to declare its own copy, next to api.ts's.
 
 // ── Helpers ─────────────────────────────────────────────────
 
@@ -105,14 +89,14 @@ router.get('/scan', async (_req, res) => {
 
     if (!stdout || stdout.trim().length === 0) {
       cachedPlugins = [];
-      res.json({ plugins: [] });
+      res.json({ plugins: [] } satisfies ScanPluginsResponse);
       return;
     }
 
     const plugins: VstPlugin[] = JSON.parse(stdout);
     cachedPlugins = plugins;
     console.log(`[VST] Found ${plugins.length} plugin(s)`);
-    res.json({ plugins });
+    res.json({ plugins } satisfies ScanPluginsResponse);
   } catch (err: any) {
     console.error('[VST] Scan failed:', err.message);
     res.status(500).json({ error: err.message });
@@ -123,7 +107,7 @@ router.get('/scan', async (_req, res) => {
 
 router.get('/chain', (_req, res) => {
   const chain = loadChain();
-  res.json(chain);
+  res.json(chain satisfies GetChainResponse);
 });
 
 // ── PUT /chain — Update chain config ────────────────────────
@@ -148,7 +132,7 @@ router.put('/chain', (req, res) => {
   const chain: ChainConfig = { plugins: validated };
   saveChain(chain);
   console.log(`[VST] Chain updated: ${validated.length} plugin(s), ${validated.filter(p => p.enabled).length} enabled`);
-  res.json(chain);
+  res.json(chain satisfies UpdateChainResponse);
 });
 
 // ── POST /gui — Launch plugin GUI ───────────────────────────
@@ -181,7 +165,7 @@ router.post('/gui', (req, res) => {
   });
   child.unref();
 
-  res.json({ ok: true, pid: child.pid });
+  res.json({ ok: true, pid: child.pid } satisfies GuiResponse);
 });
 
 // ── POST /process — Process audio through the VST chain ─────
@@ -211,7 +195,7 @@ router.post('/process', async (req, res) => {
     if (enabled.length === 0) {
       // No plugins enabled — just copy
       fs.copyFileSync(inputPath, outputPath);
-      res.json({ ok: true, skipped: true });
+      res.json({ ok: true, skipped: true } satisfies ProcessResponse);
       return;
     }
 
@@ -251,7 +235,7 @@ router.post('/process', async (req, res) => {
     try { fs.unlinkSync(tempChainFile); } catch {}
 
     console.log(`[VST] Processing complete in ${elapsed}s → ${path.basename(outputPath)}`);
-    res.json({ ok: true, elapsed: parseFloat(elapsed) });
+    res.json({ ok: true, elapsed: parseFloat(elapsed) } satisfies ProcessResponse);
   } catch (err: any) {
     console.error('[VST] Process failed:', err.message);
     res.status(500).json({ error: err.message });
@@ -382,13 +366,13 @@ router.post('/monitor/start', (req, res) => {
     try { fs.unlinkSync(tempChainFile); } catch {}
   });
 
-  res.json({ ok: true, pid: child.pid, plugins: enabled.length });
+  res.json({ ok: true, pid: child.pid, plugins: enabled.length } satisfies MonitorStartResponse);
 });
 
 // POST /monitor/stop — Stop monitoring
 router.post('/monitor/stop', (_req, res) => {
   if (!isMonitorAlive()) {
-    res.json({ ok: true, wasRunning: false });
+    res.json({ ok: true, wasRunning: false } satisfies MonitorStopResponse);
     return;
   }
   writeMonitorControl({ action: 'stop' });
@@ -401,7 +385,7 @@ router.post('/monitor/stop', (_req, res) => {
       monitorProcess = null;
     }
   }, 3000);
-  res.json({ ok: true, wasRunning: true });
+  res.json({ ok: true, wasRunning: true } satisfies MonitorStopResponse);
 });
 
 // POST /monitor/switch — Switch to a different track
@@ -425,7 +409,7 @@ router.post('/monitor/switch', (req, res) => {
 
   console.log(`[VST] Monitor switching track → ${path.basename(absTrackPath)}`);
   writeMonitorControl({ track: absTrackPath, action: 'play' });
-  res.json({ ok: true });
+  res.json({ ok: true } satisfies MonitorSwitchResponse);
 });
 
 // GET /monitor/status — Is the monitor running? Returns position too.
@@ -444,7 +428,7 @@ router.get('/monitor/status', (_req, res) => {
       }
     } catch { /* ignore parse errors */ }
   }
-  res.json({ running, paused: monitorPaused, pid: monitorProcess?.pid || null, position, duration });
+  res.json({ running, paused: monitorPaused, pid: monitorProcess?.pid || null, position, duration } satisfies MonitorStatusResponse);
 });
 
 // POST /monitor/seek — Seek to a position in seconds
@@ -468,7 +452,7 @@ router.post('/monitor/seek', (req, res) => {
   controlData.seek = position;
   writeMonitorControl(controlData);
 
-  res.json({ ok: true, position });
+  res.json({ ok: true, position } satisfies MonitorSeekResponse);
 });
 
 
@@ -480,7 +464,7 @@ router.post('/monitor/pause', (_req, res) => {
   }
   monitorPaused = true;
   writeMonitorControl({ action: 'pause' });
-  res.json({ ok: true });
+  res.json({ ok: true } satisfies MonitorPauseResponse);
 });
 
 // POST /monitor/resume — resume playback
@@ -496,7 +480,7 @@ router.post('/monitor/resume', (_req, res) => {
     ctrl = JSON.parse(raw);
   } catch { /* start fresh */ }
   writeMonitorControl({ ...ctrl, action: 'play' });
-  res.json({ ok: true });
+  res.json({ ok: true } satisfies MonitorResumeResponse);
 });
 
 // POST /monitor/restart — kill and restart monitor, reloading state files from disk
@@ -569,7 +553,7 @@ router.post('/monitor/restart', async (_req, res) => {
     try { fs.unlinkSync(tempChainFile); } catch {}
   });
 
-  res.json({ ok: true, pid: child.pid, plugins: enabled.length });
+  res.json({ ok: true, pid: child.pid, plugins: enabled.length } satisfies MonitorRestartResponse);
 });
 
 
