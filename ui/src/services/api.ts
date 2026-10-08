@@ -3,10 +3,25 @@
 // Thin wrapper around fetch() for all server endpoints.
 // Each method is standalone — import only what you need.
 
-import type { Song, UnifiedRecentSong, GenerationParams, GenerationJob, AuthState, AceModels, BrowseEntry, AdapterFile, ModelRegistry } from '../types';
+import type { Song, UnifiedRecentSong, GenerationParams, GenerationJob, AuthState, AceModels, ModelRegistry } from '../types';
 import { getGenerationTimeoutMinutes } from '../utils/generationTimer';
 import type { ResolveIntent, ResolvePreviewResponse } from '../../../server/src/contracts/resolution';
 import type { DownloadStartResponse } from '../../../server/src/contracts/modelManager';
+import type { HealthResponse } from '../../../server/src/contracts/health';
+import type { ShutdownResponse } from '../../../server/src/contracts/shutdown';
+import type {
+  UploadReferenceResponse, ListReferencesResponse, DeleteReferenceResponse, RunMasteringResponse,
+} from '../../../server/src/contracts/mastering';
+import type { BrowseResponse, ScanResponse, LmAdaptersResponse } from '../../../server/src/contracts/adapters';
+import type {
+  VstPlugin, ChainEntry, ScanPluginsResponse, GetChainResponse, UpdateChainResponse,
+  GuiResponse, MonitorStartResponse, MonitorStopResponse, MonitorSwitchResponse,
+  MonitorStatusResponse, MonitorSeekResponse,
+} from '../../../server/src/contracts/vst';
+import type { EnvResponse, EnvUpdateResponse, GpusResponse } from '../../../server/src/contracts/settings';
+import type {
+  ProfileFile, ListProfilesResponse, SaveProfileResponse, RenameProfileResponse, DeleteProfileResponse,
+} from '../../../server/src/contracts/profiles';
 import { WorkflowRequestError } from './workflowApi';
 import { apiClient, ApiError } from './httpClient';
 
@@ -349,22 +364,17 @@ export const modelApi = {
 
 // ── Health ──────────────────────────────────────────────────
 export const healthApi = {
-  check: () => get<{
-    status: string;
-    aceServer: { status: string; url: string; version: string };
-    server: { port: number; uptime: number };
-    engine?: { ready: boolean; bootStatus: string };
-  }>('/health'),
+  check: () => get<HealthResponse>('/health'),
 };
 
 // ── Shutdown ────────────────────────────────────────────────
 export const shutdownApi = {
-  quit: () => post<{ success: boolean; message: string }>('/shutdown'),
+  quit: () => post<ShutdownResponse>('/shutdown'),
 };
 // ── Mastering ───────────────────────────────────────────────
 export const masteringApi = {
   /** Upload a reference track */
-  uploadReference: async (file: File, token: string): Promise<{ name: string; path: string; url: string }> => {
+  uploadReference: async (file: File, token: string): Promise<UploadReferenceResponse> => {
     const form = new FormData();
     form.append('file', file);
     const res = await fetch(`${BASE}/mastering/upload-reference`, {
@@ -379,123 +389,102 @@ export const masteringApi = {
     return res.json();
   },
   /** List uploaded reference tracks */
-  listReferences: () => get<{ references: Array<{ name: string; size: number; url: string }> }>('/mastering/references'),
+  listReferences: () => get<ListReferencesResponse>('/mastering/references'),
   /** Delete a reference track */
-  deleteReference: (name: string, token: string) => del<{ ok: boolean }>(`/mastering/references/${name}`, token),
+  deleteReference: (name: string, token: string) => del<DeleteReferenceResponse>(`/mastering/references/${name}`, token),
   /** Run mastering on an existing song */
   run: (songId: string, referenceName: string, token: string) =>
-    post<{ ok: boolean; masteredUrl: string; songId: string }>('/mastering/run', { songId, referenceName }, token),
+    post<RunMasteringResponse>('/mastering/run', { songId, referenceName }, token),
 };
 
 // ── Adapters ────────────────────────────────────────────────
 export const adapterApi = {
   /** Browse directory — returns entries (dirs + filtered files) */
   browse: (dirPath: string, filter?: string) =>
-    get<{ current: string; entries: BrowseEntry[] }>(
+    get<BrowseResponse>(
       `/adapters/browse?path=${encodeURIComponent(dirPath)}${filter ? `&filter=${encodeURIComponent(filter)}` : ''}`
     ),
   /** Scan folder for .safetensors files */
   scan: (folder: string) =>
-    post<{ files: AdapterFile[] }>('/adapters/scan', { folder }),
+    post<ScanResponse>('/adapters/scan', { folder }),
   /** Planner-LM adapters (local HOT-Step feature). Scans `folder` when given,
    *  else every per-size root (lm-06b/lm-17b/lm-4b) plus the legacy flat lm/.
    *  `lmSize` comes from the parent folder (new layout) or the legacy -<size>
    *  name suffix; `trigger` is the embedded trigger word when present. */
   lmList: (folder?: string) =>
-    get<{ root: string; adapters: {
-      name: string; path: string; kind: 'peft' | 'lokr' | 'safetensors'; size: number; mtime: number;
-      /** Eval-score sidecar (hot_step_eval.json): marginal+transition JS to the
-       *  artist — LOWER = closer. null = never evaluated. */
-      evalScore: number | null;
-      evalVerdict: string;
-      lmSize?: string; run?: string; trigger?: string; triggerPosition?: 'prepend' | 'append' | 'replace' | '';
-    }[] }>(
+    get<LmAdaptersResponse>(
       `/adapters/lm${folder ? `?folder=${encodeURIComponent(folder)}` : ''}`),
 };
 
 // ── VST3 Post-Processing ────────────────────────────────────
-export interface VstPlugin {
-  name: string;
-  vendor: string;
-  version: string;
-  path: string;
-  uid: string;
-  subcategories: string;
-}
-
-export interface VstChainEntry {
-  uid: string;
-  name: string;
-  vendor: string;
-  path: string;
-  enabled: boolean;
-  statePath: string;
-}
+// VstPlugin and ChainEntry are shared with the server
+// (server/src/contracts/vst.ts); re-exported under VstChainEntry, this
+// file's existing public name for it.
+export type { VstPlugin };
+export type VstChainEntry = ChainEntry;
 
 export const vstApi = {
   /** Scan for installed VST3 plugins */
-  scan: () => get<{ plugins: VstPlugin[] }>('/vst/scan'),
+  scan: () => get<ScanPluginsResponse>('/vst/scan'),
   /** Get current chain config */
-  getChain: () => get<{ plugins: VstChainEntry[] }>('/vst/chain'),
+  getChain: () => get<GetChainResponse>('/vst/chain'),
   /** Update chain config */
   updateChain: (plugins: VstChainEntry[]) =>
     fetch(`${BASE}/vst/chain`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ plugins }),
-    }).then(r => r.json()) as Promise<{ plugins: VstChainEntry[] }>,
+    }).then(r => r.json()) as Promise<UpdateChainResponse>,
   /** Launch plugin GUI */
   openGui: (pluginPath: string, uid?: string) =>
-    post<{ ok: boolean; pid: number }>('/vst/gui', { pluginPath, uid }),
+    post<GuiResponse>('/vst/gui', { pluginPath, uid }),
   /** Start real-time monitor */
   monitorStart: (trackPath: string) =>
-    post<{ ok: boolean; pid: number; plugins: number }>('/vst/monitor/start', { trackPath }),
+    post<MonitorStartResponse>('/vst/monitor/start', { trackPath }),
   /** Stop monitor */
   monitorStop: () =>
-    post<{ ok: boolean; wasRunning: boolean }>('/vst/monitor/stop', {}),
+    post<MonitorStopResponse>('/vst/monitor/stop', {}),
   /** Switch monitor to a different track */
   monitorSwitch: (trackPath: string) =>
-    post<{ ok: boolean }>('/vst/monitor/switch', { trackPath }),
+    post<MonitorSwitchResponse>('/vst/monitor/switch', { trackPath }),
   /** Get monitor status */
   monitorStatus: () =>
-    get<{ running: boolean; pid: number | null; position: number; duration: number }>('/vst/monitor/status'),
+    get<MonitorStatusResponse>('/vst/monitor/status'),
   /** Seek monitor to a position */
   monitorSeek: (position: number) =>
-    post<{ ok: boolean }>('/vst/monitor/seek', { position }),
+    post<MonitorSeekResponse>('/vst/monitor/seek', { position }),
 };
 
 // ── Settings / .env ─────────────────────────────────────────
 export const settingsApi = {
   /** Read current .env values for exposed keys */
-  getEnv: () => get<{ values: Record<string, string>; restartKeys: string[] }>('/settings/env'),
+  getEnv: () => get<EnvResponse>('/settings/env'),
   /** Update .env values (partial — only send changed keys) */
   updateEnv: (values: Record<string, string>) =>
-    post<{ updated: string[]; restartRequired: boolean }>('/settings/env', { values }),
+    post<EnvUpdateResponse>('/settings/env', { values }),
   /** Detect available GPUs via nvidia-smi. `uuid` is what the picker stores in
    *  CUDA_VISIBLE_DEVICES — the index is display-only, because nvidia-smi and
    *  CUDA number GPUs differently (issue #153). */
-  getGpus: () => get<{ gpus: Array<{ index: number; uuid: string; name: string; memoryMB: number }> }>('/settings/gpus'),
+  getGpus: () => get<GpusResponse>('/settings/gpus'),
 };
 
 // ── Parameter Profiles ──────────────────────────────────────
-export interface ParamProfile {
-  name: string;
-  saved_at: string;
-  data: Record<string, unknown>;
-}
+// ParamProfile is shared with the server (server/src/contracts/profiles.ts),
+// re-exported under this file's existing public name for it.
+export type ParamProfile = ProfileFile;
 
 export const profileApi = {
   /** List all saved profiles (full data inline) */
-  list: () => get<{ profiles: ParamProfile[]; count: number }>('/profiles'),
+  list: () => get<ListProfilesResponse>('/profiles'),
   /** Save or overwrite a named profile */
   save: (name: string, data: Record<string, unknown>) =>
-    post<{ ok: boolean; name: string; saved_at: string }>('/profiles', { name, data }),
+    post<SaveProfileResponse>('/profiles', { name, data }),
   /** Rename a profile (data unchanged) */
   rename: (name: string, newName: string) =>
-    patch<{ ok: boolean; name: string }>(`/profiles/${encodeURIComponent(name)}`, { newName }),
+    patch<RenameProfileResponse>(`/profiles/${encodeURIComponent(name)}`, { newName }),
   /** Delete a profile */
   remove: (name: string) =>
-    del<{ ok: boolean; deleted: string }>(`/profiles/${encodeURIComponent(name)}`),
+    del<DeleteProfileResponse>(`/profiles/${encodeURIComponent(name)}`),
 };
 
 // ── Model Manager ───────────────────────────────────────────
@@ -509,7 +498,7 @@ export const modelManagerApi = {
   /** Cancel an active download */
   cancel: (jobId: string) => post<{ ok: boolean }>(`/model-manager/download/${jobId}/cancel`),
   /** Resume a paused/failed download */
-  resume: (jobId: string) => post<{ jobId: string }>(`/model-manager/download/${jobId}/resume`),
+  resume: (jobId: string) => post<DownloadStartResponse>(`/model-manager/download/${jobId}/resume`),
   /** Delete an installed model file */
   deleteFile: (filename: string) => del<{ ok: boolean }>(`/model-manager/files/${encodeURIComponent(filename)}`),
   /** SSE endpoint URL for download progress */

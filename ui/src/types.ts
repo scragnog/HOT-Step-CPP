@@ -456,27 +456,9 @@ export interface AceModels {
   defaults: Record<string, unknown>;
 }
 
-/** File or directory entry from the adapter browser */
-export interface BrowseEntry {
-  name: string;
-  path: string;
-  type: 'dir' | 'file';
-  size?: number;
-}
-
-/** Adapter file from folder scan */
-export interface AdapterFile {
-  name: string;
-  path: string;
-  size: number;
-  /** Trigger word embedded in the adapter's safetensors metadata ('' = none). */
-  trigger?: string;
-  /**
-   * The position that trigger sat at in the training captions. 'replace' means
-   * the trigger WAS the whole caption, so inference must drop the caption too.
-   */
-  triggerPosition?: 'prepend' | 'append' | 'replace' | '';
-}
+// BrowseEntry and AdapterFile are shared with the server
+// (server/src/contracts/adapters.ts) instead of a second hand-kept copy.
+export type { BrowseEntry, AdapterFile } from '../../server/src/contracts/adapters';
 
 // Model registry types (RegistryFile, StarterPack, DownloadJob) and the
 // ModelRegistry response shape are shared with the server — they used to be
