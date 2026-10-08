@@ -68,8 +68,9 @@ export async function detailFor(ds: TrainingDatasetRow): Promise<TrainingDataset
   };
 }
 
-/** Refresh the cached counters after a scan. */
-export function syncCounters(ds: TrainingDatasetRow, samples: TrainingSample[]): void {
+/** Refresh the cached counters (and album) after a scan. Returns the dataset
+ *  revision after those writes, for a response built before them. */
+export function syncCounters(ds: TrainingDatasetRow, samples: TrainingSample[]): string {
   const labeled = samples.filter(s => !!s.caption.trim()).length;
   const excluded = samples.filter(s => s.excluded).length;
   const status = computeStatus(ds, samples);
@@ -86,4 +87,5 @@ export function syncCounters(ds: TrainingDatasetRow, samples: TrainingSample[]):
   } catch (err: any) {
     console.warn(`[Training] Counter sync failed: ${err.message}`);
   }
+  return repo.getDataset(ds.id)?.updatedAt ?? ds.updatedAt;
 }

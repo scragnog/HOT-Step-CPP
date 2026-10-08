@@ -181,6 +181,12 @@ export function updateDataset(id: string, patch: Partial<TrainingDatasetRow>): v
   getDb().prepare(`UPDATE training_datasets SET ${sets.join(', ')} WHERE id = @id`).run(params);
 }
 
+/** Cache the album name detected from tags. Display-only, so it is not an
+ *  edit: updated_at (the dataset revision) stays put. */
+export function cacheAlbumName(id: string, album: string): void {
+  getDb().prepare('UPDATE training_datasets SET album_name = ? WHERE id = ?').run(album, id);
+}
+
 export function updateCounters(
   id: string,
   c: { sampleCount: number; labeledCount: number; excludedCount: number; status: string },
@@ -190,6 +196,10 @@ export function updateCounters(
        SET sample_count = @sample_count, labeled_count = @labeled_count,
            excluded_count = @excluded_count, status = @status, updated_at = @updated_at
      WHERE id = @id
+       -- Unchanged counters are not an edit: updated_at is the dataset's
+       -- revision, and a read-only view must not invalidate accepted work.
+       AND (sample_count IS NOT @sample_count OR labeled_count IS NOT @labeled_count
+            OR excluded_count IS NOT @excluded_count OR status IS NOT @status)
   `).run({
     id,
     sample_count: c.sampleCount,

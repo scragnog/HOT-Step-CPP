@@ -269,7 +269,7 @@ export function albumFromSamples(ds: TrainingDatasetRow, samples: TrainingSample
 function cacheAlbum(ds: TrainingDatasetRow, album: string): void {
   if (!album || album === ds.albumName) return;
   ds.albumName = album;
-  try { repo.updateDataset(ds.id, { albumName: album }); } catch { /* display-only */ }
+  try { repo.cacheAlbumName(ds.id, album); } catch { /* display-only */ }
 }
 
 /** Refresh the cached album from a scan that already has the samples — free,

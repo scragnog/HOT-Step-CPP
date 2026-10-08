@@ -847,7 +847,7 @@ router.get('/datasets/:id', async (req: Request, res: Response) => {
       return;
     }
     const detail = await detailFor(ds);
-    syncCounters(ds, detail.samples);
+    detail.updatedAt = syncCounters(ds, detail.samples);
     res.json(detail);
   } catch (err: any) {
     if (err instanceof ScanLimitError) {
@@ -945,7 +945,7 @@ router.post('/datasets/:id/rescan', async (req: Request, res: Response) => {
     }
     if (pruned) detail = await detailFor(ds);
 
-    syncCounters(ds, detail.samples);
+    detail.updatedAt = syncCounters(ds, detail.samples);
     res.json(detail);
   } catch (err: any) {
     if (err instanceof ScanLimitError) {
