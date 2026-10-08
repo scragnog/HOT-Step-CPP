@@ -40,6 +40,7 @@ import { CoverArtSubjectSection } from '../shared/CoverArtSubjectSection';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
+import { resolveInstaDuration } from './instaDuration';
 
 type LyricMode = 'instrumental' | 'lyrics' | 'lyrics-ai';
 type Phase = 'input' | 'inspiring' | 'preview' | 'generating';
@@ -176,7 +177,7 @@ export const InstaGenPanel: React.FC<InstaGenPanelProps> = ({ onSongCreated, act
     return {
       caption: computedCaption, genres: [...selectedGenres], lyricMode, subject: subject.trim(),
       randomSubject, provider: selectedProvider, model: selectedModel, vocalLanguage, thinking,
-      engineParams: { ...globalParams.getGlobalParams() },
+      engineParams: { ...globalParams.getGlobalParams(), duration: resolveInstaDuration(isMm3Render()) },
       expectedBackend: useBackendStore.getState().activeBackendId,
       coResident: typeof settings.coResident === 'boolean' ? settings.coResident : false,
       cacheLmCodes: typeof settings.cacheLmCodes === 'boolean' ? settings.cacheLmCodes : true,
