@@ -80,3 +80,9 @@ export function createDraftBackendRefusal(body: { backendId?: string }, activeBa
 export function applyCreateDraft(body: { fields: Record<string, unknown> }, write: (key: string, value: unknown) => void): void {
   for (const [key, value] of Object.entries(body.fields)) if (key.startsWith('hs-')) write(key, value);
 }
+
+/** A refusal check that reads the active backend when it runs, which is after
+ *  a draft's fetch finishes, so a backend switched mid-load is the one checked. */
+export function liveBackendRefusal(activeBackendId: () => string | null | undefined, nameOf: (backendId: string) => string) {
+  return (body: { backendId?: string }) => createDraftBackendRefusal(body, activeBackendId(), nameOf);
+}

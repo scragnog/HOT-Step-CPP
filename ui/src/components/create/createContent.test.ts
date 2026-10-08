@@ -11,7 +11,7 @@ import { createTrainingCreateDraft, mirroredGenerationDraft } from '../../../../
 import { resolveGenerationIntent } from '../../../../server/src/services/generation/intent.js';
 import type { BackendExtensionParam } from '../../../../server/src/services/backends/types.js';
 import type { AuditionPreview, AuditionSideResult } from '../../../../server/src/services/training/types.js';
-import { applyCreateDraft, createContentFromDraft, createContentParams, createDraftBackendRefusal } from './createContent';
+import { applyCreateDraft, createContentFromDraft, createContentParams, createDraftBackendRefusal, liveBackendRefusal } from './createContent';
 import { applyTrainingCreateDraft, type TrainingCreateDraftData } from './trainingCreateDraft';
 import { createDraftMirror } from '../../services/studioDraftMirror';
 
@@ -141,4 +141,24 @@ test('applying a saved training handoff writes the former handoff exactly', () =
     const request = createContentParams(createContentFromDraft(content), { mm3Mode: false });
     assert.equal(request.caption, fixture.content['hs-caption']);
   }
+});
+
+test('switching backend while a draft loads: the backend at apply time decides', async () => {
+  let active = 'minimax-m3';
+  let error = '';
+  const writes = new Map<string, unknown>();
+  let finish!: (value: { document: never; sourceError: null }) => void;
+  const fetched = new Promise<{ document: never; sourceError: null }>(r => { finish = r; });
+  const mirror = createDraftMirror({ api: {} as never, pointer: { read: () => null, write: () => {} }, onError: m => { error = m; } });
+  const loading = mirror.load('t', 'd1', {
+    get: () => fetched, current: () => ({ studio: 'create', fields: {} }), confirm: () => true,
+    // CreatePanel's check, chosen while MiniMax-Music3 was active.
+    refuse: liveBackendRefusal(() => active, id => (id === 'minimax-m3' ? 'MiniMax-Music3' : id)),
+    apply: draft => applyCreateDraft(draft, (key, value) => writes.set(key, value)),
+  });
+  active = 'ace';  // the user switches before the fetch lands
+  finish({ document: { id: 'd1', revision: 1, body: { studio: 'create', backendId: 'minimax-m3', fields: { 'hs-caption': 'mm3', 'hs-duration': 200 } } } as never, sourceError: null });
+  assert.equal(await loading, false);
+  assert.equal(writes.size, 0);
+  assert.equal(error, 'This draft was saved for MiniMax-Music3. Switch the backend to MiniMax-Music3 to load it.');
 });

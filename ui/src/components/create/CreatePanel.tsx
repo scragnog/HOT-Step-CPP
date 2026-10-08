@@ -19,7 +19,7 @@ import { CoverArtSubjectSection } from '../shared/CoverArtSubjectSection';
 import { AiGenerateModal, type AiGenerateResult } from './AiGenerateModal';
 import { Mm3ComposeButton } from './Mm3ComposeButton';
 import { TrainingDraftBar } from './TrainingDraftBar';
-import { applyCreateDraft, createContentParams, createDraftBackendRefusal } from './createContent';
+import { applyCreateDraft, createContentParams, liveBackendRefusal } from './createContent';
 import { useStudioDraftMirror } from '../../services/studioDraftMirror';
 import { StudioDraftPicker } from '../shared/StudioDraftPicker';
 import { useBackendStore } from '../../stores/backendStore';
@@ -342,9 +342,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   }, activeBackendId ? { backendId: activeBackendId } : {});
   // A loaded draft goes through the same persisted keys the form reads, so
   // every field and caption choice updates as if typed. Nothing is generated.
-  const backendNames = useBackendStore(s => s.backends);
-  const refuseDraft = useCallback((body: { backendId?: string }) => createDraftBackendRefusal(body, activeBackendId,
-    id => backendNames.find(b => b.id === id)?.displayName ?? id), [activeBackendId, backendNames]);
+  // Read from the store when the check runs (after the draft's fetch), not from this render.
+  const refuseDraft = useMemo(() => liveBackendRefusal(() => useBackendStore.getState().activeBackendId,
+    id => useBackendStore.getState().backends.find(b => b.id === id)?.displayName ?? id), []);
   const applyDraft = useCallback((body: { fields: Record<string, unknown> }) => {
     applyCreateDraft(body, writePersistedState);
     const selection = yue2Ds.datasetId ? body.fields[`hs-yue2CaptionSource:ds:${yue2Ds.datasetId}`] : undefined;
