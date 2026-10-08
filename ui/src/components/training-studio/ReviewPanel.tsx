@@ -6,10 +6,11 @@ import { useTranslation } from 'react-i18next';
 import { ListChecks, RefreshCw } from 'lucide-react';
 import { useTrainingStore } from '../../stores/trainingStore';
 import {
-  finishYue2Ladders, getWorkerMirror, listYue2BatchesLocal, listYue2Review, syncWorkerMirror,
+  getWorkerMirror, listYue2BatchesLocal, listYue2Review, syncWorkerMirror,
   type MirrorStatus, type Yue2BatchSummary, type Yue2ReviewRow,
 } from '../../services/trainingApi';
 import { formatBytes } from '../../services/stemStudioApi';
+import { finishReviewBatch, getReviewLadder, pickFromLadder, type ReviewPick } from '../../services/trainingReviewApi';
 import { Toggle } from '../shared/Toggle';
 import { usePersistedState } from '../../hooks/usePersistedState';
 
@@ -69,15 +70,33 @@ export const ReviewPanel: React.FC = () => {
     .flatMap(b => b.items.filter(i => i.refineRun && (i.status === 'pending' || i.status === 'running')).map(i => i.refineRun)));
   const finishable = selectFinishable(rest, queued);
   const [finishOpen, setFinishOpen] = useState(false);
+  const [approved, setApproved] = useState<Array<{ pick: ReviewPick; name: string; score: number; decoderOnly: boolean; baseMatched: boolean }>>([]);
+  const [preparing, setPreparing] = useState(false);
   const [skip, setSkip] = useState<Record<string, boolean>>({});
   const [finishing, setFinishing] = useState(false);
   const [knee, setKnee] = useState(true);
   const [blindRungs] = usePersistedState('hs-yue2-blind-rungs', true);
+  const prepareFinish = async () => {
+    if (finishOpen) { setFinishOpen(false); setApproved([]); return; }
+    setPreparing(true); setError('');
+    try {
+      const ladders = await Promise.all(finishable.map(r => getReviewLadder(r.datasetId, r.refineRun)));
+      setApproved(ladders.map((ladder, index) => {
+        if (!ladder.best || ladder.best.overall === null) throw new Error('A ladder has no fully scored rung. Reload Review before finishing.');
+        return { pick: pickFromLadder(ladder, ladder.best.step), name: finishable[index].datasetName,
+          score: ladder.best.overall, decoderOnly: finishable[index].decoderOnly,
+          baseMatched: finishable[index].baseMatched === true };
+      }));
+      setFinishOpen(true);
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+    finally { setPreparing(false); }
+  };
   const finish = async () => {
     setFinishing(true); setError('');
     try {
-      await finishYue2Ladders(finishable.filter(r => !skip[r.refineRun]).map(r => ({ datasetId: r.datasetId, refineRun: r.refineRun })), knee);
-      setFinishOpen(false); setSkip({});
+      const picks = approved.filter(item => !skip[item.pick.runId]).map(item => item.pick);
+      await finishReviewBatch(picks, knee);
+      setFinishOpen(false); setApproved([]); setSkip({});
       await loadBatches();
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setFinishing(false); }
@@ -128,17 +147,17 @@ export const ReviewPanel: React.FC = () => {
       {finishable.length > 0 && <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 flex flex-col gap-2">
         <div className="flex items-center gap-2">
           <span className="text-xs text-zinc-700 dark:text-zinc-300 flex-1">{t('trainingStudio.review.finishIntro', '{{n}} scored ladder(s) ready to finish: link the best-scored rung to the album preset and clean up (all cleanup options, caches included). Ladders of the earlier recipe get NAR further training from that rung first.', { n: finishable.length })}</span>
-          <button type="button" onClick={() => setFinishOpen(v => !v)} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-500">
-            {t('trainingStudio.review.finishCta', 'Finish scored ({{n}})', { n: finishable.length })}
+          <button type="button" onClick={() => void prepareFinish()} disabled={preparing || finishing} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40">
+            {preparing ? t('trainingStudio.review.finishPreparing', 'Loading picks…') : t('trainingStudio.review.finishCta', 'Finish scored ({{n}})', { n: finishable.length })}
           </button>
         </div>
         {finishOpen && <>
-          {finishable.map(r => <div key={r.refineRun} className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
-            <Toggle size="sm" accent="amber" checked={!skip[r.refineRun]} onChange={v => setSkip(prev => ({ ...prev, [r.refineRun]: !v }))} aria-label={t('trainingStudio.review.finishInclude', 'Include {{name}} in this finish batch', { name: r.datasetName }) as string} />
-            <span className="font-semibold min-w-[180px]">{r.datasetName}</span>
-            <span className="text-zinc-500">{r.baseMatched && blindRungs && r.best!.blindLabel
-              ? t('trainingStudio.review.finishBlindPick', 'Rung {{label}}, overall {{score}}', { label: r.best!.blindLabel, score: r.best!.overall.toFixed(2) })
-              : t('trainingStudio.review.finishPick', 'step {{step}}, overall {{score}}', { step: r.best!.step, score: r.best!.overall.toFixed(2) })}{r.decoderOnly || r.baseMatched ? ` · ${t('trainingStudio.review.finishNoNar', 'linked as it is, no NAR step')}` : ''}</span>
+          {approved.map(({ pick, name, score, decoderOnly, baseMatched }) => <div key={pick.runId} className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300">
+            <Toggle size="sm" accent="amber" checked={!skip[pick.runId]} onChange={v => setSkip(prev => ({ ...prev, [pick.runId]: !v }))} aria-label={t('trainingStudio.review.finishInclude', 'Include {{name}} in this finish batch', { name }) as string} />
+            <span className="font-semibold min-w-[180px]">{name}</span>
+            <span className="text-zinc-500">{baseMatched && blindRungs && pick.blindLabel
+              ? t('trainingStudio.review.finishBlindPick', 'Rung {{label}}, overall {{score}}', { label: pick.blindLabel, score: score.toFixed(2) })
+              : t('trainingStudio.review.finishPick', 'step {{step}}, overall {{score}}', { step: pick.step, score: score.toFixed(2) })}{decoderOnly || baseMatched ? ` · ${t('trainingStudio.review.finishNoNar', 'linked as it is, no NAR step')}` : ''}</span>
           </div>)}
           <div className="flex items-center justify-end gap-3">
             <Toggle
@@ -149,7 +168,7 @@ export const ReviewPanel: React.FC = () => {
               label={t('trainingStudio.review.finishKnee', 'Stop NAR at the plateau')}
               info={t('trainingStudio.review.finishKneeInfo', 'Stop NAR further training once a line fitted through its last 10 checkpoints gains under 0.5%. Off: train to the 250-step budget or the recon target.')}
             />
-            <button type="button" disabled={finishing || finishable.every(r => skip[r.refineRun])} onClick={() => void finish()}
+            <button type="button" disabled={finishing || approved.every(item => skip[item.pick.runId])} onClick={() => void finish()}
               className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40">
               {finishing ? t('trainingStudio.review.finishStarting', 'Starting…') : t('trainingStudio.review.finishGo', 'Start')}
             </button>

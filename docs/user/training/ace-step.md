@@ -113,6 +113,10 @@ Ways to get more than one candidate:
 
 The final judge is a real generation with both adapters loaded.
 
+## Sending an audition to Create
+
+Send to Custom-Gen creates a server draft from the saved audition preview and opens Create with an Apply or Dismiss choice. Apply mirrors the preview recipe into Create; Dismiss leaves the form as it was. Sending does not start a generation. If the draft cannot be created or loaded, the current form stays in place.
+
 ## Using the result
 
 New adapters are available straight away, with no restart. Planner adapters appear in the Planner Adapter dropdown and sound adapters in the Adapters dropdown. The trigger word is stored inside the adapter file and the server adds it to your caption at generation time; if your caption already contains it, it is not added a second time. Strength, stacking and per-section control are covered in [Adapters](../adapters.md).

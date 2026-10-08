@@ -14,6 +14,7 @@ import { StyledSelect } from '../shared/StyledSelect';
 import { ParamLabel } from '../shared/ParamLabel';
 import { Toggle } from '../settings/SettingsPrimitives';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { decideReviewUse, getReviewLadder, pickFromLadder } from '../../services/trainingReviewApi';
 import { Yue2JointRunChart } from './Yue2JointRunChart';
 import {
   cancelJob, getJob, listYue2AitkRuns, startYue2JointTrain, listYue2JointPreviewsLocal, yue2RungScoresExportUrl, deleteYue2AitkRun,
@@ -23,32 +24,6 @@ import { Yue2LadderReview, type Yue2LadderReviewHandle } from './Yue2LadderRevie
 
 const input = 'px-2 py-1.5 rounded-lg text-xs bg-white/70 dark:bg-black/20 border border-zinc-300/70 dark:border-white/10 text-zinc-800 dark:text-zinc-100';
 
-// rungOverall lives with the ladder component now; re-exported for callers.
-export { rungOverall } from './Yue2LadderReview';
-
-/** "Use this rung" with Further training for NAR on: a decoder-only run
- *  never gets a second follow-up chained onto it — that rung finishes here,
- *  a legitimate skip. (A remote-origin run is a separate, rejected case —
- *  checked by the caller before this, since it must stop the whole action
- *  rather than silently fall through to finishing; see onUse and
- *  yue2BatchRunner.ts's equivalent check.) Exported for a direct unit test. */
-export function skipNarFurther(run: Pick<Yue2AitkRunRecord, 'options'> | undefined): boolean {
-  return (run?.options as Record<string, unknown> | undefined)?.freezePlannerNow === true;
-}
-
-/** "Use this rung" with Further training for NAR on, the three outcomes:
- *  'reject' stops here with an error, nothing finishes/links/deletes either
- *  (remote-origin — unsupported, see skipNarFurther); 'skip' is a
- *  legitimate no-op, the caller's normal finish path is correct (decoder-
- *  only, or the toggle is off); 'chain' starts the NAR follow-up. Exported
- *  for a direct unit test — onUse itself is an async closure that also
- *  calls the network. */
-export function narOnUseOutcome(run: Pick<Yue2AitkRunRecord, 'options' | 'origin'> | undefined, narFurther: boolean): 'reject' | 'skip' | 'chain' {
-  if (!narFurther) return 'skip';
-  if (run?.origin) return 'reject';
-  if (skipNarFurther(run)) return 'skip';
-  return 'chain';
-}
 
 export const RefinePanel: React.FC = () => {
   const { t } = useTranslation();
@@ -202,10 +177,14 @@ export const RefinePanel: React.FC = () => {
   const onUse = async (_dir: string, step: number): Promise<boolean> => {
     if (!datasetId || !ladderRun) return true;
     setError(''); setCleanupNote('');
-    const run = runs.find(r => r.jobId === ladderRun);
-    const outcome = narOnUseOutcome(run, narFurther);
-    if (outcome === 'skip') return false;
-    if (outcome === 'reject') {
+    try {
+      const ladder = await getReviewLadder(datasetId, ladderRun);
+      const pick = pickFromLadder(ladder, step);
+      if (pick.checkpointDir !== _dir) throw new Error('The selected checkpoint changed. Reload the ladder.');
+      const decision = await decideReviewUse(pick, narFurther, { budget: narBudget, lrScale: narLrScale,
+        keepDelta: narKeepDelta, target: narTarget === '' ? null : narTarget, knee: narKnee });
+      if (decision.outcome === 'skip') return false;
+      if (decision.outcome === 'reject') {
       // Remote-origin NAR further training isn't supported yet (Reviewer/
       // Lead, round 3 #4) — reject outright rather than silently finishing/
       // linking/deleting instead, which would produce a different result
@@ -213,18 +192,13 @@ export const RefinePanel: React.FC = () => {
       // skipped. Returning true tells the caller nothing further should run.
       setError(t('trainingStudio.refine.narRemoteUnsupported',
         'NAR further training on a ladder trained on {{worker}} is not supported yet. Turn off Further training for NAR to finish this rung directly, or pick a different rung.',
-        { worker: run?.origin?.worker }));
-      return true;
-    }
-    try {
-      // Decoder on from this rung, planner frozen; the result becomes the adapter.
-      const result = await startYue2JointTrain(datasetId, { trainingMethod: 'aitk', refine: true, resumeRunId: ladderRun, resumeStep: step,
-        steps: step + narBudget, saveEvery: 10, stopMode: 'kl', narExtraSteps: step + narBudget, freezePlannerNow: true, narLrScale,
-        reconStop: narKnee ? 0.005 : 0, reconStopWindow: 10, reconKeepDelta: narKeepDelta, ...(narTarget !== '' ? { reconTarget: narTarget } : {}), stopEngine: false,
-        lyricTiming: true, alignmentEnabled: true, autoPrepare: false, checkpoint: '', output: '',
-        preview: { enabled: false, everySteps: 0, seconds: 90, seed: 424242, previewMaxFrames: 2250, baseline: false, control: false } } as unknown as Yue2JointTrainRequest);
-      setNarJob({ jobId: result.jobId, step });
-      setJob(await getJob(result.jobId));
+        { worker: decision.worker }));
+        return true;
+      }
+      // Node admitted the captured decoder continuation after rechecking the rung.
+      if (!decision.jobId) throw new Error('The review server did not start decoder training.');
+      setNarJob({ jobId: decision.jobId, step });
+      setJob(await getJob(decision.jobId));
       setCleanupNote(t('trainingStudio.refine.narStarted', 'Decoder training on from step {{step}}; the adapter is linked when it stops.', { step }));
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     return true;

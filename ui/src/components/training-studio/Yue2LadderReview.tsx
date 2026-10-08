@@ -15,35 +15,13 @@ import { PreviewPlayer } from './PreviewPlayer';
 import { ParamLabel } from '../shared/ParamLabel';
 import { usePersistedState, writePersistedState } from '../../hooks/usePersistedState';
 import {
-  getYue2AlbumScore, getYue2CleanupPlan, linkYue2JointCheckpointPreset, listYue2RungScores, renderYue2JointPreviews, runYue2Cleanup, scoreYue2Album, scoreYue2Rung,
+  getYue2AlbumScore, listYue2RungScores, renderYue2JointPreviews, scoreYue2Album, scoreYue2Rung,
   type Yue2AitkRunRecord, type Yue2AlbumScore, type Yue2TrainedDirection, type Yue2CleanupChoice, type Yue2CleanupPlan, type Yue2JointPreviewRecord, type Yue2RungScore,
 } from '../../services/trainingApi';
 
-const input = 'px-2 py-1.5 rounded-lg text-xs bg-white/70 dark:bg-black/20 border border-zinc-300/70 dark:border-white/10 text-zinc-800 dark:text-zinc-100';
+import { cleanupReviewRung, getReviewLadder, pickFromLadder, selectReviewRung, type ReviewLadder, type ReviewPick } from '../../services/trainingReviewApi';
 
-// A rung's overall score for the scoreboard: base is likeness and inverted
-// corruption averaged onto the same 1..5 scale as ((6 − corruption) mirrors
-// likeness's direction), then a soft penalty for replan load — the app
-// auto-replans on its own, so a high count is a smell, not a verdict — capped
-// at 1 point so it can never flip the ranking on its own.
-export function rungOverall(args: {
-  likeness: number | null | undefined;
-  corruption: number | null | undefined;
-  plannerReplans: number;
-  composerReplans: number;
-  takes: number;
-  /** Plan legibility flags on takes this rung planned itself (not a shared
-   *  sheet), and how many such takes there were. Weighted under replans. */
-  planFlags?: number;
-  ownTakes?: number;
-}): { overall: number; replansPerTake: number } | null {
-  const { likeness, corruption, plannerReplans, composerReplans, takes, planFlags = 0, ownTakes = takes } = args;
-  if (typeof likeness !== 'number' || typeof corruption !== 'number') return null;
-  const base = (likeness + (6 - corruption)) / 2;
-  const replansPerTake = (plannerReplans + composerReplans) / Math.max(1, takes);
-  const penalty = Math.min(1, 0.25 * replansPerTake + 0.1 * planFlags / Math.max(1, ownTakes));
-  return { overall: Math.round((base - penalty) * 100) / 100, replansPerTake };
-}
+const input = 'px-2 py-1.5 rounded-lg text-xs bg-white/70 dark:bg-black/20 border border-zinc-300/70 dark:border-white/10 text-zinc-800 dark:text-zinc-100';
 
 /** Blind-ladder visibility for a run: labels pending (known locally, no blind
  *  letters yet) must never fall back to listing rungs in their real, revealing
@@ -86,6 +64,9 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
 }>(({ datasetId, datasetName, run, previews, renderOpts, onChanged, onUse, onPicked, onError, idPrefix = 'ladder-rung' }, ref) => {
   const { t } = useTranslation();
   const runId = run?.jobId ?? '';
+  const [review, setReview] = useState<ReviewLadder | null>(null);
+  const refreshReview = async () => { if (datasetId && runId) setReview(await getReviewLadder(datasetId, runId)); };
+  useEffect(() => { setReview(null); void refreshReview().catch(() => {}); }, [datasetId, runId]);
   const [blindRungs] = usePersistedState('hs-yue2-blind-rungs', true);
   const { jointLadder, labelsPending, blind, labelFor, ladder, visibleLadder } = ladderVisibility(run, blindRungs);
   const rungName = (step: number) => blind
@@ -113,6 +94,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
     try {
       const r = await scoreYue2Rung(datasetId, { refineRun: runId, step, ...patch, blind: !!blind, blindLabel: blind ? labelFor(step) : '' });
       if (scoreSeq.current[step] === seq) setScores(prev => ({ ...prev, [step]: r.score }));
+      await refreshReview();
     } catch (err) {
       fail(err);
       void listYue2RungScores(datasetId, runId).then(r => setScores(Object.fromEntries(r.scores.map(s => [s.step, s])))).catch(() => {});
@@ -136,14 +118,14 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
   const render = async (step: number) => {
     if (!datasetId || !runId) return;
     setRendering(step);
-    try { await renderYue2JointPreviews(datasetId, { run: runId, step, seconds: renderOpts.seconds, takes: renderOpts.takes, ...draftOpts }); await onChanged(); }
+    try { await renderYue2JointPreviews(datasetId, { run: runId, step, seconds: renderOpts.seconds, takes: renderOpts.takes, ...draftOpts }); await onChanged(); await refreshReview(); }
     catch (err) { fail(err); }
     finally { setRendering(null); }
   };
 
   // Cleanup modal after a rung is chosen: what else can go, with sizes.
   const [picked, setPicked] = useState('');
-  const [cleanup, setCleanup] = useState<{ run: string; step: number; plan: Yue2CleanupPlan; blind: boolean; blindLabel: string } | null>(null);
+  const [cleanup, setCleanup] = useState<{ pick: ReviewPick; plan: Yue2CleanupPlan; blind: boolean; blindLabel: string } | null>(null);
   const [choice, setChoice] = useState<Yue2CleanupChoice>({ caches: true, otherCheckpoints: true, otherRuns: true, resume: true, otherPreviews: true });
   const [cleaning, setCleaning] = useState(false);
   const [cleanupNote, setCleanupNote] = useState('');
@@ -151,9 +133,12 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
   const mib = (b: number) => b >= 1073741824 ? `${(b / 1073741824).toFixed(2)} GiB` : `${(b / 1048576).toFixed(0)} MiB`;
   const finishPick = async (pickRun: string, dir: string, step: number) => {
     try {
-      await linkYue2JointCheckpointPreset(datasetId, dir); setPicked(dir); onPicked?.(dir);
-      const plan = await getYue2CleanupPlan(datasetId, pickRun, step);
-      setCleanup({ run: pickRun, step, plan, blind: !!blind, blindLabel: blind ? labelFor(step) : '' });
+      const fresh = await getReviewLadder(datasetId, pickRun);
+      const pick = pickFromLadder(fresh, step);
+      if (pick.checkpointDir !== dir) throw new Error('The selected checkpoint changed. Reload the ladder.');
+      const { plan } = await selectReviewRung(pick);
+      setPicked(dir); onPicked?.(dir); setReview(fresh);
+      setCleanup({ pick, plan, blind: !!blind, blindLabel: blind ? labelFor(step) : '' });
     } catch (err) { fail(err); }
   };
   useImperativeHandle(ref, () => ({ finishPick }), [datasetId]);
@@ -172,9 +157,9 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
     if (!cleanup) return;
     setCleaning(true);
     try {
-      const r = await runYue2Cleanup(datasetId, { run: cleanup.run, step: cleanup.step, blind: cleanup.blind, blindLabel: cleanup.blindLabel, ...(over ?? choice) });
+      const r = await cleanupReviewRung(cleanup.pick, over ?? choice);
       if (r.finishError) { fail(r.finishError); return; }
-      setCleanupNote(`${t('trainingStudio.refine.cleanupDone', 'Removed {{what}}; about {{size}} freed.', { what: r.done.join(', ') || 'nothing', size: mib(r.freedBytes) })}${cleanup.blind ? ` ${t('trainingStudio.refine.blindReveal', 'Rung {{label}} was step {{step}}.', { label: cleanup.blindLabel, step: cleanup.step })}` : ''}`);
+      setCleanupNote(`${t('trainingStudio.refine.cleanupDone', 'Removed {{what}}; about {{size}} freed.', { what: r.done.join(', ') || 'nothing', size: mib(r.freedBytes) })}${cleanup.blind ? ` ${t('trainingStudio.refine.blindReveal', 'Rung {{label}} was step {{step}}.', { label: cleanup.blindLabel, step: cleanup.pick.step })}` : ''}`);
       setCleanup(null);
       await onChanged();
     } catch (err) { fail(err); }
@@ -197,25 +182,15 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
     // been checked against them.
     const flaggedTakes = doneTakes.filter(p => p.sheet !== 'shared' && p.score?.flags?.length);
     const flagReasons = flaggedTakes.flatMap(p => (p.score?.flags ?? []).map(f => `take ${mine.indexOf(p) + 1}: ${f}`)).join('\n');
-    const sc = scores[step];
     // A shared-sheet take's plan is not this rung's, so its flags do not count.
-    const ownPlanned = doneTakes.filter(p => p.sheet !== 'shared');
-    const planFlags = ownPlanned.reduce((sum, p) => sum + (p.score?.flags?.length ?? 0), 0);
-    const overall = rungOverall({ likeness: sc?.likeness, corruption: sc?.corruption, plannerReplans, composerReplans, takes: doneTakes.length, planFlags, ownTakes: ownPlanned.length });
+    const fact = review?.facts.find(f => f.step === step);
+    const overall = fact?.overall === null || fact?.overall === undefined ? null : { overall: fact.overall, replansPerTake: fact.replansPerTake };
     // Takes whose re-plan loop ran out without a clean plan (plan flags or a
     // broken verdict on every attempt): the checkpoint itself is suspect.
     const unclean = doneTakes.filter(p => p.plan && p.plan.clean === false);
     return { mine, doneTakes, plannerReplans, composerReplans, hasReplanData, flaggedTakes, flagReasons, overall, unclean };
   };
-  // Best rung by overall score, ties going to the earlier step (it drifted
-  // less). Ladder is sorted ascending, so only a strictly greater score
-  // replaces the best.
-  let bestStep: number | undefined;
-  let bestOverall = -Infinity;
-  for (const c of ladder) {
-    const o = rungStats(c.step).overall;
-    if (o && o.overall > bestOverall) { bestOverall = o.overall; bestStep = c.step; }
-  }
+  const bestStep = review?.best?.step;
   const scoreboardRows = ladder.map(c => {
     const stats = rungStats(c.step);
     const sc = scores[c.step];
@@ -241,7 +216,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
         <div className="w-full max-w-xl rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={e => e.stopPropagation()}>
           <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{cleanup.blind
             ? t('trainingStudio.refine.blindCleanupTitle', 'Rung {{label}} is now the adapter. Clean up around it?', { label: cleanup.blindLabel })
-            : t('trainingStudio.refine.cleanupTitle', 'Step {{step}} is now the adapter. Clean up around it?', { step: cleanup.step })}</div>
+            : t('trainingStudio.refine.cleanupTitle', 'Step {{step}} is now the adapter. Clean up around it?', { step: cleanup.pick.step })}</div>
           <p className="mt-1 text-[12px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.refine.cleanupIntro', 'Everything below is app-generated and can be rebuilt. Source audio, sidecars, captions, labels and this rung\'s adapter files are never touched. Your rung scores are kept.')} {!cleanup.blind && t('trainingStudio.refine.cleanupMovesAnyway', 'Either way the adapter\'s run folder moves to yue2-joint-adapters\\refined.')}</p>
           <div className="mt-3 flex flex-col gap-2">
             {items.map(i => <label key={i.key} className="flex items-start gap-3 text-xs text-zinc-700 dark:text-zinc-300">

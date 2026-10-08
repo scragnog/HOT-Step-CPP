@@ -7,9 +7,10 @@
 // The honest hint (C20) is rendered HERE, by the player itself, so it cannot be
 // forgotten at a call site. It is never collapsible and never a tooltip.
 
-import React from 'react';
+import React, { useState } from 'react';
 import { AlertTriangle, Music4, SendHorizonal, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useAuth } from '../../context/AuthContext';
 import type { AuditionPreview, AuditionSideResult } from '../../services/trainingApi';
 import { sendAuditionToCustomGen, type AuditionRenderCell } from './sendAuditionToCustomGen';
 
@@ -33,12 +34,30 @@ export const AuditionPlayer: React.FC<AuditionPlayerProps> = ({
   side, hintPosition = 'above', identicalCodes = false, preview,
 }) => {
   const { t } = useTranslation();
+  const { token } = useAuth();
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+
+  // The handoff navigates to Create itself, and only once the server draft exists.
+  const send = async (cell: AuditionRenderCell) => {
+    if (!preview) return;
+    setSending(true); setSendError(null);
+    try {
+      if (!token) throw new Error(t('createPanel.trainingDraft.signIn', 'Sign in to open this audition setup.'));
+      await sendAuditionToCustomGen(preview, side, cell, token);
+    } catch (e) {
+      setSendError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSending(false);
+    }
+  };
 
   const sendButton = (cell: AuditionRenderCell) => preview && (
     <button
-      onClick={() => sendAuditionToCustomGen(preview, side, cell)}
+      onClick={() => send(cell)}
+      disabled={sending}
       title={t('trainingStudio.audition.sendToCustomGenHint')}
-      className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold normal-case tracking-normal text-zinc-500 hover:text-amber-500 hover:bg-amber-500/10 transition-colors flex-shrink-0"
+      className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold normal-case tracking-normal text-zinc-500 hover:text-amber-500 hover:bg-amber-500/10 disabled:opacity-50 transition-colors flex-shrink-0"
     >
       <SendHorizonal size={11} />
       {t('trainingStudio.audition.sendToCustomGen')}
@@ -228,6 +247,13 @@ export const AuditionPlayer: React.FC<AuditionPlayerProps> = ({
             </details>
           )}
         </>
+      )}
+
+      {sendError && (
+        <div className="flex items-start gap-2 px-3 py-2 rounded-lg border border-red-500/25 bg-red-500/10 text-[11px] text-red-500 dark:text-red-400">
+          <XCircle size={12} className="mt-0.5 flex-shrink-0" />
+          <span className="min-w-0 break-words">{sendError}</span>
+        </div>
       )}
 
       {hintPosition === 'below' && hint}

@@ -452,8 +452,6 @@ Total: <!-- generated:start route-count -->
 
 ### `/api/training`
 
-Recipe operations: `GET /api/training/ops/recipes/` lists families; `GET /api/training/ops/recipes/:family` returns the selected worker's recipe (`worker` and `preset` are optional queries); `POST /api/training/ops/recipes/resolve` accepts a training snapshot carrying `family`, optional `preset` and `overrides`. The response includes the recipe version, built-in and stored layers, resolved form, execution body, field provenance, deferred values, and accepted worker. Resolution does not start training.
-
 | Method | Path | Defined in |
 |---|---|---|
 | `GET` | `/api/training/capabilities` | `server/src/routes/training.ts` |

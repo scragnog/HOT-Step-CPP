@@ -167,6 +167,7 @@ import {
 } from '../services/training/yue2AitkPrepareRunner.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { parseYue2JointStopMode, applyBaseMatchedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint } from '../services/training/yue2JointTrainRunner.js';
+import { jointAdmissionError, takeJointAdmission } from '../services/training/yue2JointAdmission.js';
 import { appendToBatch as appendToYue2Batch, finishScoredLadders, cancelBatch as cancelYue2Batch, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
 import {
   aceTrainExe, engineGpuBackend, engineSupportsFlashAttnTraining,
@@ -201,6 +202,7 @@ import { getGenerations, getLyricsSet } from '../db/lireekDb.js';
 import { trainingOperationsRouter } from '../services/training/operations.js';
 // Training operation domains register themselves at import (operations.ts).
 import '../services/training/recipes/operations.js';
+import '../services/training/review/operations.js';
 import type {
   AuditionListResponse, AuditionOptions, AuditionSideSpec,
   BulkSetInput, CaptionOptions, CreateDatasetInput, FieldSource, GeniusOptions, LabelOptions, LmSize,
@@ -3443,6 +3445,13 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
     const ds = yue2Preflight(req, res);
     if (!ds) return;
     let b = (req.body || {}) as Record<string, unknown>;
+    // A continuation decided by a Node operation (yue2JointAdmission.ts):
+    // its guard re-checks that decision just before the job is queued.
+    const admissionGuard = b.admission === undefined ? undefined : takeJointAdmission(b.admission);
+    if (b.admission !== undefined && !admissionGuard) {
+      res.status(409).json({ error: 'This continuation was not admitted, or was already used.' });
+      return;
+    }
     if (b.trainingMethod !== 'aitk') {
       res.status(400).json({ error: 'Joint training requires trainingMethod="aitk"; Legacy is never selected implicitly.' });
       return;
@@ -3830,6 +3839,9 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
     const cursorWeight = Number.isFinite(rawCursor) && rawCursor >= 0 && rawCursor <= 10
       ? rawCursor : (alignmentEnabled ? 0.08 : 0);
     const alignment: Yue2AlignmentOptions = { enabled: alignmentEnabled && cursorWeight > 0, cursorWeight };
+    // Synchronous with the enqueue below: nothing can change the run between.
+    const refused = admissionGuard ? jointAdmissionError(admissionGuard) : null;
+    if (refused) { res.status(409).json({ error: refused }); return; }
     const job = queue.startYue2JointTrainJob(ds.id, {
       checkpoint, dataset, outDir, steps, saveEvery, seed, device,
       ...(gpuUuid ? { gpuUuid } : {}),

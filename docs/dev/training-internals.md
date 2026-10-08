@@ -626,6 +626,12 @@ Side-Step (`D:\Ace-Step-Latest\Side-Step`, local) is the Python reference implem
 | Audition | `POST /codes-decode` on **ace-server** (`hot-step-server.cpp`, ~174 lines) | `audition{Service,Runner,Store}.ts` | `AuditionCard.tsx`, `AuditionPlayer.tsx`, `LmAdapterPicker.tsx` |
 | Engine lifecycle | — | `services/aceEngineProcess.ts` (stop/restart with epoch-guarded respawn cancellation) | engine-paused banners |
 
+### Training review and audition drafts
+
+The review endpoint returns Node-computed rung scores, eligibility, blind labels, the earliest-step best rung and a revision. Finish and manual selection send an explicit run and checkpoint with captured dataset and review revisions; stale or incomplete selections are refused. Node decides whether Further NAR is skipped, rejected or chained, then rechecks the captured pick at job admission before starting a continuation. Selection and cleanup share a dataset lock. Finished runs cannot be linked or cleaned up twice.
+
+Audition-to-Create creates a user-owned server draft from a stored preview. Create retrieves it with authentication and mirrors the recipe only when the user presses Apply. Creating the draft does not generate audio or change the open Create form.
+
 ### Training recipes
 
 `GET /api/training/ops/recipes/` lists the ACE LM/DiT, MM3 LM, YuE2 NAR/AR and YuE2 joint families. `GET /api/training/ops/recipes/:family` returns a family's built-in defaults, stored partial defaults, resolved values, execution projection, provenance and engine-deferred fields. A `worker` query selects that worker's recipe; a `preset` query selects a supported preset. `POST /api/training/ops/recipes/resolve` accepts the training operation snapshot with `family`, optional `preset` and form `overrides`, and returns the captured worker and resolved request. The form keeps unsaved edits locally and sends overrides for resolution immediately before the existing trainer start route.

@@ -18,6 +18,7 @@ import { LatentImport } from '../shared/LatentImport';
 import { CoverArtSubjectSection } from '../shared/CoverArtSubjectSection';
 import { AiGenerateModal, type AiGenerateResult } from './AiGenerateModal';
 import { Mm3ComposeButton } from './Mm3ComposeButton';
+import { TrainingDraftBar } from './TrainingDraftBar';
 import { useBackendStore } from '../../stores/backendStore';
 import { expandWildcards, hasWildcards, randomWildcardSeed } from '../../utils/wildcardUtils';
 import {
@@ -490,6 +491,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
 
   return (
     <div className="h-full flex flex-col bg-zinc-50 dark:bg-suno">
+      <TrainingDraftBar />
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-white/5">
         <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{t('createPanel.title')}</h2>
