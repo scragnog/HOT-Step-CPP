@@ -3,7 +3,10 @@
 
 import React from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
-import { hashImportValue, preferencesApi, type AiContinuePresetBody, type AiContinueTemplateBody } from '../../services/preferencesApi';
+import { hashImportValue, type AiContinuePresetBody } from '../../services/preferencesApi';
+import { PresetCollection } from '../../services/presetCollection';
+import { SettingDocument } from '../../services/settingDocument';
+import { PresetSyncNotices } from '../shared/PresetSyncNotices';
 
 // ── Preset types ──────────────────────────────────────────────────────────────
 export interface AiPreset {
@@ -59,129 +62,53 @@ export const MIGRATED_FLAG: Record<PresetCategory, string> = {
   style: `${USER_STYLE_KEY}:server-migrated`, lyric: `${USER_LYRIC_KEY}:server-migrated`,
 };
 
-/** Test-only: module-level template state (`templateDoc`, the save chain)
- *  otherwise persists across a test file's test cases. */
-export function _resetTemplateStateForTests(): void {
-  templateDoc = null;
-  templateSaveChain = Promise.resolve();
-}
-
 function loadLegacyUserPresets(key: string): AiPreset[] {
-  try { return JSON.parse(localStorage.getItem(key) || '[]'); } catch { return []; }
+  try { const v = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
 }
 
-interface PresetDoc { id: string; revision: number; preset: AiPreset }
+const legacyKey = (category: PresetCategory) => category === 'style' ? USER_STYLE_KEY : USER_LYRIC_KEY;
 
-/** Named presets now live server-side (preferences.ai-continue-{style,lyric}-preset,
- *  installation scope). The legacy browser keys are imported once and kept,
- *  but no longer written to. A same-name, different-content collision
- *  against an already-imported preset is left unresolved — reported, never
- *  duplicated with a guessed keep-both/replace — so the flag stays unset
- *  and that preset retries on the next load until it is resolved
- *  explicitly. */
-export async function loadServerPresets(category: PresetCategory): Promise<PresetDoc[]> {
-  const family = PRESET_FAMILY[category];
-  const flag = MIGRATED_FLAG[category];
-  if (!localStorage.getItem(flag)) {
-    const legacy = loadLegacyUserPresets(category === 'style' ? USER_STYLE_KEY : USER_LYRIC_KEY);
-    if (legacy.length > 0) {
-      const items = await Promise.all(legacy.map(async p => {
-        const body: AiContinuePresetBody = { label: p.label, value: p.value };
-        return { storageKey: `${category === 'style' ? USER_STYLE_KEY : USER_LYRIC_KEY}:${p.id}`, sourceHash: await hashImportValue(JSON.stringify(body)), name: p.label, body };
-      }));
-      const { results } = await preferencesApi.presets.import(family, items);
-      const conflicts = results.filter(r => r.outcome === 'name-conflict');
-      if (conflicts.length > 0) console.warn(`[AiContinuePresetModal] ${category} presets need an explicit import choice:`, conflicts.map(c => c.storedName));
-      else try { localStorage.setItem(flag, '1'); } catch {}
-    } else {
-      try { localStorage.setItem(flag, '1'); } catch {}
-    }
-  }
-  const { documents } = await preferencesApi.presets.list<AiContinuePresetBody>(family);
-  return documents.map(d => ({ id: d.id, revision: d.revision, preset: { id: d.id, label: d.body.label, value: d.body.value } }));
-}
-
-/** The continuation prompt template. `loadTemplate`/synchronous localStorage
- *  stays the fast initial-render path for other readers (StormLiveControls.tsx);
- *  the server document (preferences.ai-continue-template) is the durable copy.
- *  `hydrateTemplateFromServer` pulls it down (and mirrors it into localStorage)
- *  so a second browser sees the saved value instead of falling back to
- *  DEFAULT_TEMPLATE; `queueTemplateSave` is this modal's write path. */
-export function loadTemplate(): string {
-  try { return localStorage.getItem(TEMPLATE_KEY) || DEFAULT_TEMPLATE; } catch { return DEFAULT_TEMPLATE; }
-}
-function saveTemplateLocal(t: string) {
-  try { localStorage.setItem(TEMPLATE_KEY, t); } catch {}
-}
-let templateDoc: { id: string; revision: number } | null = null;
-
-/** Returns the server's saved template, or null if none exists yet (in
- *  which case the legacy browser value, if non-default, is imported once). */
-export async function hydrateTemplateFromServer(): Promise<string | null> {
-  try {
-    const { document } = await preferencesApi.settings.get<AiContinueTemplateBody>('ai-continue-template');
-    if (document) {
-      templateDoc = { id: document.id, revision: document.revision };
-      saveTemplateLocal(document.body.template);
-      return document.body.template;
-    }
-    const flag = `${TEMPLATE_KEY}:server-migrated`;
-    const local = loadTemplate();
-    if (!localStorage.getItem(flag) && local !== DEFAULT_TEMPLATE) {
-      try {
-        const result = await preferencesApi.settings.import('ai-continue-template', {
-          storageKey: TEMPLATE_KEY, sourceHash: await hashImportValue(local), body: { template: local },
-        });
-        try { localStorage.setItem(flag, '1'); } catch {}
-        if (result.documentId) templateDoc = { id: result.documentId, revision: 1 };
-      } catch (err) { console.error('[AiContinuePresetModal] Failed to import legacy template:', err); }
-    }
-    return null;
-  } catch (err) {
-    console.error('[AiContinuePresetModal] Failed to load template:', err);
-    return null;
-  }
-}
-
-// Saves are chained through this promise so two edits in quick succession
-// never race: the second always waits for the first's revision update,
-// instead of both firing at the same stale revision and one 409ing silently.
-let templateSaveChain: Promise<void> = Promise.resolve();
-export function queueTemplateSave(t: string, onError: (message: string) => void): void {
-  templateSaveChain = templateSaveChain.then(async () => {
-    try {
-      if (!templateDoc) {
-        const { document: existing } = await preferencesApi.settings.get<AiContinueTemplateBody>('ai-continue-template');
-        templateDoc = existing ? { id: existing.id, revision: existing.revision } : null;
-      }
-      const { document } = await preferencesApi.settings.upsert<AiContinueTemplateBody>(
-        'ai-continue-template', templateDoc?.revision, { template: t });
-      templateDoc = { id: document.id, revision: document.revision };
-    } catch (err) {
-      console.error('[AiContinuePresetModal] Failed to sync template:', err);
-      templateDoc = null; // re-fetch the current revision next time rather than retry with a stale one
-      onError(err instanceof Error ? err.message : String(err));
-    }
+/** Named presets live server-side (preferences, installation scope); each
+ *  category is one PresetCollection, keyed by document id. The legacy
+ *  browser keys are imported once and kept, but no longer written to. */
+export function createPresetCollection(category: PresetCategory): PresetCollection<AiContinuePresetBody> {
+  return new PresetCollection<AiContinuePresetBody>({
+    family: PRESET_FAMILY[category],
+    migratedFlag: MIGRATED_FLAG[category],
+    legacyItems: () => Promise.all(loadLegacyUserPresets(legacyKey(category)).map(async p => {
+      const body: AiContinuePresetBody = { label: p.label, value: p.value };
+      return { storageKey: `${legacyKey(category)}:${p.id}`, sourceHash: await hashImportValue(JSON.stringify(body)), name: p.label, body };
+    })),
   });
 }
 
-/** A preset create and a delete of the same (still-unsaved) row can race:
- *  the user deletes it before the create resolves. `wasDeletedMeanwhile`
- *  is checked only after `create` settles, so this always sees the final
- *  decision; if it returns true, the document that just landed is deleted
- *  instead of being kept — the create's result never silently reappears
- *  on reload after the user already deleted it. */
-export async function resolvePresetCreate(
-  create: () => Promise<{ document: { id: string; revision: number } }>,
-  remove: (id: string, revision: number) => Promise<unknown>,
-  wasDeletedMeanwhile: () => boolean,
-): Promise<{ id: string; revision: number } | 'deleted'> {
-  const { document } = await create();
-  if (wasDeletedMeanwhile()) {
-    await remove(document.id, document.revision).catch(() => {});
-    return 'deleted';
-  }
-  return { id: document.id, revision: document.revision };
+/** The continuation prompt template (preferences.ai-continue-template).
+ *  `loadTemplate` stays the synchronous first-render path for other readers
+ *  (StormLiveControls.tsx); the modal keeps them in step through
+ *  onTemplateChange. */
+export function createTemplateSetting(): SettingDocument {
+  return new SettingDocument({
+    family: 'ai-continue-template', localKey: TEMPLATE_KEY, fallback: DEFAULT_TEMPLATE,
+    migratedFlag: `${TEMPLATE_KEY}:server-migrated`,
+    read: body => typeof body.template === 'string' && body.template ? body.template : DEFAULT_TEMPLATE,
+    write: template => ({ template }),
+  });
+}
+
+let state: { style: PresetCollection<AiContinuePresetBody>; lyric: PresetCollection<AiContinuePresetBody>; template: SettingDocument } | null = null;
+
+/** The modal's server state, shared by every mount of it. */
+export function aiContinueState() {
+  return state ??= { style: createPresetCollection('style'), lyric: createPresetCollection('lyric'), template: createTemplateSetting() };
+}
+
+/** Test-only: start from a fresh browser state. */
+export function _resetAiContinueStateForTests(): void {
+  state = null;
+}
+
+export function loadTemplate(): string {
+  try { return localStorage.getItem(TEMPLATE_KEY) || DEFAULT_TEMPLATE; } catch { return DEFAULT_TEMPLATE; }
 }
 
 // ── Props ────────────────────────────────────────────────────────────────────
@@ -198,75 +125,42 @@ interface AiContinuePresetModalProps {
 export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
   isOpen, onClose, onPresetFire, onTemplateChange,
 }) => {
+  const server = aiContinueState();
+  const styleSnap    = React.useSyncExternalStore(server.style.subscribe, server.style.getSnapshot);
+  const lyricSnap    = React.useSyncExternalStore(server.lyric.subscribe, server.lyric.getSnapshot);
+  const templateSnap = React.useSyncExternalStore(server.template.subscribe, server.template.getSnapshot);
   const [tab, setTab]                     = React.useState<'style' | 'lyric' | 'template'>('style');
-  const [userStyleDocs, setUserStyleDocs] = React.useState<PresetDoc[]>([]);
-  const [userLyricDocs, setUserLyricDocs] = React.useState<PresetDoc[]>([]);
-  const userStylePresets = userStyleDocs.map(d => d.preset);
-  const userLyricPresets = userLyricDocs.map(d => d.preset);
-  const [template, setTemplate]         = React.useState(() => loadTemplate());
-  const [templateError, setTemplateError] = React.useState<string | null>(null);
-  const templateDirtyRef                = React.useRef(false);
+  const template = templateSnap.value;
   const [newLabel, setNewLabel]         = React.useState('');
   const [newValue, setNewValue]         = React.useState('');
   const [firedId,  setFiredId]          = React.useState<string | null>(null);
-  const [presetError, setPresetError]   = React.useState<string | null>(null);
-  // tempIds whose create is still in flight when the user deletes them —
-  // the delete is queued against the eventual server id/revision instead
-  // of being dropped (which would let the create's document reappear later).
-  const pendingDeletesRef               = React.useRef<Set<string>>(new Set());
 
   React.useEffect(() => { if (!isOpen) { setNewLabel(''); setNewValue(''); } }, [isOpen]);
 
   React.useEffect(() => {
-    loadServerPresets('style').then(setUserStyleDocs).catch(err => console.error('[AiContinuePresetModal] Failed to load style presets:', err));
-    loadServerPresets('lyric').then(setUserLyricDocs).catch(err => console.error('[AiContinuePresetModal] Failed to load lyric presets:', err));
-    // Hydrate from the server so a second browser sees the saved template
-    // instead of DEFAULT_TEMPLATE. Skipped if the user already started typing.
-    hydrateTemplateFromServer().then(t => {
-      if (t === null || templateDirtyRef.current) return;
-      setTemplate(t);
-      onTemplateChange(t); // keep StormLiveControls' own loadTemplate()-seeded state in step
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void server.style.load();
+    void server.lyric.load();
+    void server.template.hydrate();
+  }, [server]);
+
+  // Keep StormLiveControls' own loadTemplate()-seeded copy in step with the
+  // hydrated or edited value.
+  React.useEffect(() => { onTemplateChange(template); }, [template]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const userPresets = (snap: typeof styleSnap): AiPreset[] => snap.entries.map(e => ({ id: e.key, label: e.body.label, value: e.body.value }));
+  const userStylePresets = userPresets(styleSnap);
+  const userLyricPresets = userPresets(lyricSnap);
 
   const addPreset = (category: PresetCategory) => {
     const label = newLabel.trim(), value = newValue.trim();
     if (!label || !value) return;
-    const tempId = `user-${Date.now()}`;
-    const setDocs = category === 'style' ? setUserStyleDocs : setUserLyricDocs;
-    setDocs(prev => [...prev, { id: tempId, revision: 0, preset: { id: tempId, label, value } }]);
-    resolvePresetCreate(
-      () => preferencesApi.presets.create<AiContinuePresetBody>(PRESET_FAMILY[category], { label, value }),
-      (id, revision) => preferencesApi.presets.remove(PRESET_FAMILY[category], id, revision),
-      () => pendingDeletesRef.current.delete(tempId),
-    ).then(result => {
-      if (result === 'deleted') return;
-      setDocs(prev => prev.map(d => d.id === tempId
-        ? { id: result.id, revision: result.revision, preset: { id: result.id, label, value } } : d));
-    }).catch(err => {
-      console.error('[AiContinuePresetModal] Failed to save preset:', err);
-      pendingDeletesRef.current.delete(tempId);
-      setDocs(prev => prev.filter(d => d.id !== tempId));
-      setPresetError(`Failed to save "${label}": ${err instanceof Error ? err.message : String(err)}`);
-    });
+    // A failed create stays in the list with its content, to reapply or discard.
+    void server[category].create({ label, value });
     setNewLabel(''); setNewValue('');
   };
 
-  const deletePreset = (category: PresetCategory, id: string) => {
-    const docs = category === 'style' ? userStyleDocs : userLyricDocs;
-    const setDocs = category === 'style' ? setUserStyleDocs : setUserLyricDocs;
-    const doc = docs.find(d => d.id === id);
-    setDocs(prev => prev.filter(d => d.id !== id));
-    if (!doc) return;
-    if (doc.revision === 0) { pendingDeletesRef.current.add(id); return; } // create still in flight
-    preferencesApi.presets.remove(PRESET_FAMILY[category], doc.id, doc.revision)
-      .catch(err => {
-        console.error('[AiContinuePresetModal] Failed to delete preset:', err);
-        setPresetError(`Failed to delete "${doc.preset.label}": ${err instanceof Error ? err.message : String(err)}`);
-        // A failed delete (stale revision, offline) must not disappear from the list.
-        setDocs(prev => prev.some(d => d.id === doc.id) ? prev : [...prev, doc]);
-      });
+  const deletePreset = (category: PresetCategory, key: string) => {
+    void server[category].remove(key);
   };
 
   const firePreset = (preset: AiPreset, category: PresetCategory) => {
@@ -276,12 +170,7 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
   };
 
   const handleTemplateChange = (val: string) => {
-    templateDirtyRef.current = true;
-    setTemplate(val);
-    saveTemplateLocal(val);
-    setTemplateError(null);
-    queueTemplateSave(val, setTemplateError);
-    onTemplateChange(val);
+    server.template.edit(val);
   };
 
   if (!isOpen) return null;
@@ -382,10 +271,9 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
 
           {/* Body */}
           <div className="px-4 py-3 max-h-[60vh] overflow-y-auto">
-            {presetError && tab !== 'template' && (
-              <div className="mb-2 flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg bg-red-950/40 border border-red-900 text-[10px] text-red-300" role="alert">
-                <span className="flex-1">{presetError}</span>
-                <button onClick={() => setPresetError(null)} className="hover:text-red-100"><X size={10} /></button>
+            {tab !== 'template' && (
+              <div className="mb-2">
+                <PresetSyncNotices collection={server[tab]} snapshot={tab === 'style' ? styleSnap : lyricSnap} labelOf={b => b.label} />
               </div>
             )}
             {tab === 'style' && (
@@ -404,10 +292,15 @@ export const AiContinuePresetModal: React.FC<AiContinuePresetModalProps> = ({
             )}
             {tab === 'template' && (
               <div className="space-y-2">
-                {templateError && (
+                {templateSnap.error && (
                   <div className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg bg-red-950/40 border border-red-900 text-[10px] text-red-300" role="alert">
-                    <span className="flex-1">Template save failed: {templateError}. Your edit is still shown above.</span>
-                    <button onClick={() => { setTemplateError(null); queueTemplateSave(template, setTemplateError); }} className="underline flex-shrink-0">Retry</button>
+                    <span className="flex-1">{templateSnap.error} Your edit is still shown below{templateSnap.status === 'conflict' ? ' and is not being saved' : ''}.</span>
+                    {templateSnap.status === 'conflict' && (
+                      <button onClick={() => server.template.useServer()} className="underline flex-shrink-0">Use theirs</button>
+                    )}
+                    <button onClick={() => void server.template.reapply()} className="underline flex-shrink-0">
+                      {templateSnap.status === 'conflict' ? 'Reapply mine' : 'Retry'}
+                    </button>
                   </div>
                 )}
                 <p className="text-[10px] text-zinc-500 leading-relaxed">

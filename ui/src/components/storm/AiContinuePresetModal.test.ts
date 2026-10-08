@@ -1,112 +1,136 @@
-// AiContinuePresetModal.test.ts — template hydration/save serialization,
-// preset import conflicts, and a pending-create deleted before it resolves.
-// Run with the server's tsx:
-//   (cd ui && npx tsx --test src/components/storm/AiContinuePresetModal.test.ts)
+// AiContinuePresetModal.test.ts — the modal's server state (aiContinueState(),
+// which the modal renders and edits through) against an in-memory
+// /api/preferences:
+//   (cd server && node --import tsx --test ../ui/src/components/storm/AiContinuePresetModal.test.ts)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  hydrateTemplateFromServer, queueTemplateSave, loadServerPresets, resolvePresetCreate,
-  _resetTemplateStateForTests, TEMPLATE_KEY, USER_STYLE_KEY, MIGRATED_FLAG,
-} from './AiContinuePresetModal.js';
+import { aiContinueState, _resetAiContinueStateForTests, TEMPLATE_KEY, USER_STYLE_KEY, DEFAULT_TEMPLATE, loadTemplate } from './AiContinuePresetModal';
+import { tick, withBrowser } from '../../services/preferencesTestFake';
 
-class MemoryStorage {
-  private store = new Map<string, string>();
-  getItem(key: string): string | null { return this.store.has(key) ? this.store.get(key)! : null; }
-  setItem(key: string, value: string): void { this.store.set(key, value); }
-  removeItem(key: string): void { this.store.delete(key); }
-  clear(): void { this.store.clear(); }
-}
+const isGet = (c: { method: string; path: string }) => c.method === 'GET' && c.path.endsWith('/settings/ai-continue-template');
+const isPut = (c: { method: string; path: string }) => c.method === 'PUT' && c.path.endsWith('/settings/ai-continue-template');
+const serverTemplate = (fake: { docs: Array<{ family: string; body: any; revision: number }> }) =>
+  fake.docs.find(d => d.family === 'ai-continue-template');
 
-function withFetch<T>(handler: (url: string, init?: RequestInit) => { status: number; body: unknown },
-  run: () => Promise<T>): Promise<T> {
-  const saved = globalThis.fetch;
-  globalThis.fetch = (async (url: string, init?: RequestInit) => {
-    const { status, body } = handler(url, init);
-    return new Response(JSON.stringify(body), { status });
-  }) as typeof fetch;
-  return run().finally(() => { globalThis.fetch = saved; });
-}
-
-function withStorage<T>(run: (storage: MemoryStorage) => Promise<T>): Promise<T> {
-  const saved = (globalThis as { localStorage?: Storage }).localStorage;
-  const storage = new MemoryStorage();
-  (globalThis as { localStorage?: unknown }).localStorage = storage;
-  return run(storage).finally(() => { (globalThis as { localStorage?: unknown }).localStorage = saved; });
-}
-
-test('a second browser hydrates the server template instead of falling back to the default', async () => {
-  await withStorage(async storage => {
-    _resetTemplateStateForTests();
-    const result = await withFetch(url => {
-      if (url.endsWith('/settings/ai-continue-template')) return { status: 200, body: { document: { id: 'doc-t', revision: 3, body: { template: 'saved on another browser' } } } };
-      return { status: 404, body: { error: `unexpected call to ${url}` } };
-    }, () => hydrateTemplateFromServer());
-
-    assert.equal(result, 'saved on another browser');
-    assert.equal(storage.getItem(TEMPLATE_KEY), 'saved on another browser'); // mirrored for the sync readers
+test('a second browser hydrates the saved template and mirrors it for other readers', async () => {
+  await withBrowser(async fake => {
+    _resetAiContinueStateForTests();
+    fake.seed('ai-continue-template', { template: 'Saved elsewhere {lyrics}' });
+    const { template } = aiContinueState();
+    assert.equal(template.getSnapshot().value, DEFAULT_TEMPLATE);
+    await template.hydrate();
+    assert.equal(template.getSnapshot().value, 'Saved elsewhere {lyrics}');
+    assert.equal(loadTemplate(), 'Saved elsewhere {lyrics}');
   });
 });
 
-test('two quick template edits serialize: the second waits for the first instead of racing a stale revision', async () => {
-  await withStorage(async () => {
-    _resetTemplateStateForTests();
-    const puts: Array<{ expectedRevision?: number }> = [];
-    let revision = 0;
-    const errors: string[] = [];
-    await withFetch((url, init) => {
-      if (!url.endsWith('/settings/ai-continue-template')) return { status: 404, body: { error: `unexpected call to ${url}` } };
-      if (!init || init.method === 'GET') return { status: 200, body: { document: null } };
-      const parsed = JSON.parse(String(init.body));
-      puts.push(parsed);
-      revision += 1;
-      return { status: 200, body: { document: { id: 'doc-t', revision, body: parsed.body } } };
-    }, async () => {
-      queueTemplateSave('first', m => errors.push(m));
-      queueTemplateSave('second', m => errors.push(m));
-      await new Promise(r => setTimeout(r, 20));
-    });
-
-    assert.deepEqual(errors, []);
-    assert.equal(puts.length, 2);
-    assert.equal(puts[0]!.expectedRevision, undefined); // first write: no document yet
-    assert.equal(puts[1]!.expectedRevision, 1); // waited for the first write's revision instead of also sending stale/undefined
+test('an edit made while the first read is slow is not overwritten by it, and saves at the read revision', async () => {
+  await withBrowser(async (fake, storage) => {
+    _resetAiContinueStateForTests();
+    storage.setItem(TEMPLATE_KEY, 'Base {lyrics}');
+    fake.seed('ai-continue-template', { template: 'Base {lyrics}' });
+    const release = fake.hold(isGet);
+    const { template } = aiContinueState();
+    const hydrating = template.hydrate();
+    await tick();
+    template.edit('Mine {lyrics}');
+    release();
+    await hydrating; await template.settled();
+    assert.equal(template.getSnapshot().value, 'Mine {lyrics}');
+    assert.equal(template.getSnapshot().status, 'idle');
+    assert.equal(storage.getItem(TEMPLATE_KEY), 'Mine {lyrics}');
+    assert.equal(serverTemplate(fake)!.body.template, 'Mine {lyrics}');
+    assert.equal(serverTemplate(fake)!.revision, 2);
   });
 });
 
-test('a same-name preset import conflict is reported, never duplicated with a guessed keep-both', async () => {
-  await withStorage(async storage => {
-    storage.setItem(USER_STYLE_KEY, JSON.stringify([{ id: 'u1', label: 'Lead', value: 'go darker' }]));
-    const importCalls: Array<Array<{ resolution?: string }>> = [];
-    await withFetch((url, init) => {
-      if (url.endsWith('/import')) {
-        importCalls.push(JSON.parse(String(init?.body)).items);
-        return { status: 200, body: { results: [{ storageKey: `${USER_STYLE_KEY}:u1`, outcome: 'name-conflict', documentId: 'doc1', storedName: 'Lead' }] } };
-      }
-      return { status: 200, body: { documents: [] } };
-    }, () => loadServerPresets('style'));
-
-    assert.equal(importCalls.length, 1);
-    assert.equal('resolution' in importCalls[0]![0]!, false); // no hardcoded keep-both sent
-    assert.equal(storage.getItem(MIGRATED_FLAG.style), null); // unresolved conflict leaves the flag unset
+test('an edit of a stale copy is not sent over a newer server value; the user chooses', async () => {
+  await withBrowser(async (fake, storage) => {
+    _resetAiContinueStateForTests();
+    storage.setItem(TEMPLATE_KEY, 'Old {lyrics}');
+    fake.seed('ai-continue-template', { template: 'Newer {lyrics}' });
+    const release = fake.hold(isGet);
+    const { template } = aiContinueState();
+    const hydrating = template.hydrate();
+    await tick();
+    template.edit('Mine {lyrics}');
+    release();
+    await hydrating; await template.settled();
+    assert.equal(template.getSnapshot().status, 'conflict');
+    assert.equal(template.getSnapshot().serverValue, 'Newer {lyrics}');
+    assert.equal(fake.count('PUT'), 0);
+    assert.equal(storage.getItem(TEMPLATE_KEY), 'Mine {lyrics}');
+    template.useServer();
+    assert.equal(template.getSnapshot().value, 'Newer {lyrics}');
+    assert.equal(storage.getItem(TEMPLATE_KEY), 'Newer {lyrics}');
   });
 });
 
-test('deleting a pending create removes the eventual server document instead of letting it reappear', async () => {
-  const removed: Array<{ id: string; revision: number }> = [];
-  const result = await resolvePresetCreate(
-    async () => ({ document: { id: 'doc-new', revision: 1 } }),
-    async (id, revision) => { removed.push({ id, revision }); },
-    () => true, // the row was deleted while the create was still in flight
-  );
-  assert.equal(result, 'deleted');
-  assert.deepEqual(removed, [{ id: 'doc-new', revision: 1 }]);
+test('fast edits are saved in order and coalesced: the last one wins, revisions only move forward', async () => {
+  await withBrowser(async fake => {
+    _resetAiContinueStateForTests();
+    fake.seed('ai-continue-template', { template: 'v0' });
+    const { template } = aiContinueState();
+    await template.hydrate();
+    const release = fake.hold(isPut);
+    template.edit('a');
+    await tick();
+    template.edit('b');
+    template.edit('c');
+    release();
+    await template.settled();
+    assert.deepEqual(fake.calls.filter(isPut).map(c => c.body.body.template), ['a', 'c']);
+    assert.deepEqual(fake.calls.filter(isPut).map(c => c.body.expectedRevision), [1, 2]);
+    assert.equal(serverTemplate(fake)!.body.template, 'c');
+    assert.equal(template.getSnapshot().status, 'idle');
+  });
 });
 
-test('a create that was not deleted meanwhile settles normally', async () => {
-  const result = await resolvePresetCreate(
-    async () => ({ document: { id: 'doc-new', revision: 1 } }),
-    async () => { throw new Error('should not be called'); },
-    () => false,
-  );
-  assert.deepEqual(result, { id: 'doc-new', revision: 1 });
+test('a 409 pauses saving until reapply; edits made meanwhile are kept and sent then', async () => {
+  await withBrowser(async fake => {
+    _resetAiContinueStateForTests();
+    const doc = fake.seed('ai-continue-template', { template: 'v0' });
+    const { template } = aiContinueState();
+    await template.hydrate();
+    fake.touch(doc.id, { template: 'theirs' });
+    template.edit('mine');
+    await template.settled();
+    assert.equal(template.getSnapshot().status, 'conflict');
+    assert.equal(template.getSnapshot().serverValue, 'theirs');
+
+    template.edit('mine, edited');
+    await template.settled();
+    assert.equal(fake.count('PUT'), 1);
+
+    await template.reapply();
+    assert.equal(template.getSnapshot().status, 'idle');
+    assert.equal(serverTemplate(fake)!.body.template, 'mine, edited');
+    assert.equal(fake.calls.filter(isPut).at(-1)!.body.expectedRevision, 2);
+  });
+});
+
+test('presets: a failed create keeps its label and value; a failed delete stays listed; import collisions wait', async () => {
+  await withBrowser(async (fake, storage) => {
+    _resetAiContinueStateForTests();
+    fake.seed('ai-continue-style', { label: 'Jazz', value: 'more swing' });
+    storage.setItem(USER_STYLE_KEY, JSON.stringify([{ id: 'u1', label: 'Jazz', value: 'less swing' }]));
+    const { style } = aiContinueState();
+    await style.load();
+    assert.equal(style.getSnapshot().importConflicts.length, 1);
+
+    fake.failNext(c => c.method === 'POST' && c.path === '/api/preferences/presets/ai-continue-style');
+    await style.create({ label: 'Calm', value: 'slow down' });
+    const failed = style.getSnapshot().entries.find(e => e.body.label === 'Calm')!;
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.body.value, 'slow down');
+
+    const saved = style.getSnapshot().entries.find(e => e.body.label === 'Jazz')!;
+    fake.failNext(c => c.method === 'DELETE');
+    await style.remove(saved.key);
+    const still = style.getSnapshot().entries.find(e => e.key === saved.key)!;
+    assert.equal(still.status, 'failed');
+    assert.match(still.error!, /Delete failed/);
+    await style.reapply(saved.key);
+    assert.equal(style.getSnapshot().entries.some(e => e.key === saved.key), false);
+  });
 });

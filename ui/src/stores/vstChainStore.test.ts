@@ -1,90 +1,130 @@
-// vstChainStore.test.ts — preset migration conflicts and failed save/delete
-// CRUD, against a mocked /api/preferences. Run with the server's tsx:
-//   (cd ui && npx tsx --test src/stores/vstChainStore.test.ts)
+// vstChainStore.test.ts — the VST preset paths the global bar uses, through
+// the real store against an in-memory /api/preferences:
+//   (cd server && node --import tsx --test ../ui/src/stores/vstChainStore.test.ts)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { importLegacyPresetsOnce, useVstChainStore, PRESETS_KEY, MIGRATED_FLAG } from './vstChainStore.js';
+import { useVstChainStore, _resetVstPresetsForTests, PRESETS_KEY, MIGRATED_FLAG } from './vstChainStore';
+import { tick, withBrowser } from '../services/preferencesTestFake';
 
-class MemoryStorage {
-  private store = new Map<string, string>();
-  getItem(key: string): string | null { return this.store.has(key) ? this.store.get(key)! : null; }
-  setItem(key: string, value: string): void { this.store.set(key, value); }
-  removeItem(key: string): void { this.store.delete(key); }
-  clear(): void { this.store.clear(); }
-}
+const plugin = (uid: string) => ({ uid, name: `Plugin ${uid}`, vendor: 'V', path: `/p/${uid}`, enabled: true, statePath: `/s/${uid}` });
+const store = () => useVstChainStore.getState();
+const entries = () => store().presetSnapshot.entries;
 
-function withFetch<T>(handler: (url: string, init?: RequestInit) => { status: number; body: unknown },
-  run: () => Promise<T>): Promise<T> {
-  const saved = globalThis.fetch;
-  globalThis.fetch = (async (url: string, init?: RequestInit) => {
-    const { status, body } = handler(url, init);
-    return new Response(JSON.stringify(body), { status });
-  }) as typeof fetch;
-  return run().finally(() => { globalThis.fetch = saved; });
-}
+test('a colliding browser preset waits for the user: keep both shows two entries keyed by id', async () => {
+  await withBrowser(async (fake, storage) => {
+    _resetVstPresetsForTests();
+    const saved = fake.seed('vst-chain', { name: 'Warm', entries: [plugin('a')] });
+    storage.setItem(PRESETS_KEY, JSON.stringify({ Warm: [plugin('b')], Bright: [plugin('c')] }));
+    await store().loadPresets();
 
-function withStorage<T>(run: (storage: MemoryStorage) => Promise<T>): Promise<T> {
-  const saved = (globalThis as { localStorage?: Storage }).localStorage;
-  const storage = new MemoryStorage();
-  (globalThis as { localStorage?: unknown }).localStorage = storage;
-  return run(storage).finally(() => { (globalThis as { localStorage?: unknown }).localStorage = saved; });
-}
+    // The non-colliding preset came in on its own; the collision did not.
+    assert.deepEqual(entries().map(e => e.body.name).sort(), ['Bright', 'Warm']);
+    assert.deepEqual(store().presetSnapshot.importConflicts.map(c => [c.name, c.existingId]), [['Warm', saved.id]]);
+    assert.equal(storage.getItem(MIGRATED_FLAG), null);
 
-const entry = (uid: string) => ({ uid, name: `Plugin ${uid}`, vendor: 'V', path: `/p/${uid}`, enabled: true, statePath: `/s/${uid}` });
-
-test('a same-name import conflict is reported, never duplicated with a guessed keep-both', async () => {
-  await withStorage(async storage => {
-    storage.setItem(PRESETS_KEY, JSON.stringify({ Lead: [entry('a')] }));
-    const importCalls: Array<Array<{ resolution?: string }>> = [];
-    await withFetch((url, init) => {
-      if (url.endsWith('/import')) {
-        importCalls.push(JSON.parse(String(init?.body)).items);
-        return { status: 200, body: { results: [{ storageKey: `${PRESETS_KEY}:Lead`, outcome: 'name-conflict', documentId: 'doc1', storedName: 'Lead' }] } };
-      }
-      return { status: 404, body: { error: `unexpected call to ${url}` } };
-    }, () => importLegacyPresetsOnce());
-
-    assert.equal(importCalls.length, 1);
-    assert.equal('resolution' in importCalls[0]![0]!, false); // no hardcoded keep-both sent
-    assert.equal(storage.getItem(MIGRATED_FLAG), null); // unresolved conflict leaves the flag unset
-  });
-});
-
-test('an import with no conflicts commits the migrated flag', async () => {
-  await withStorage(async storage => {
-    storage.setItem(PRESETS_KEY, JSON.stringify({ Fresh: [entry('b')] }));
-    await withFetch((url) => {
-      if (url.endsWith('/import')) return { status: 200, body: { results: [{ storageKey: `${PRESETS_KEY}:Fresh`, outcome: 'imported', documentId: 'doc2', storedName: 'Fresh' }] } };
-      return { status: 404, body: { error: `unexpected call to ${url}` } };
-    }, () => importLegacyPresetsOnce());
-
+    await store().presetCollection.resolveImport(`${PRESETS_KEY}:Warm`, 'keep-both');
+    const warm = entries().filter(e => e.body.name === 'Warm');
+    assert.equal(warm.length, 2);
+    assert.notEqual(warm[0]!.key, warm[1]!.key);
+    assert.equal(warm.every(e => e.key === e.id), true);
+    assert.deepEqual(store().presetSnapshot.importConflicts, []);
     assert.equal(storage.getItem(MIGRATED_FLAG), '1');
+
+    // Each same-name entry applies its own chain.
+    const legacy = warm.find(e => e.body.entries[0]!.uid === 'b')!;
+    await store().loadPreset(legacy.key);
+    assert.equal(store().chain[0]!.uid, 'b');
   });
 });
 
-test('a failed save reverts the optimistic preset and reports it, instead of looking saved', async () => {
-  await withStorage(async () => {
-    useVstChainStore.setState({ chain: [entry('c')], presets: {}, presetDocs: {}, presetError: null });
-    await withFetch(() => ({ status: 409, body: { error: 'Preset changed elsewhere' } }),
-      () => useVstChainStore.getState().savePreset('My Chain'));
-
-    const state = useVstChainStore.getState();
-    assert.equal(state.presets['My Chain'], undefined); // never looked saved after the write actually failed
-    assert.match(state.presetError ?? '', /My Chain/);
+test('replace overwrites the saved preset in place', async () => {
+  await withBrowser(async (fake, storage) => {
+    _resetVstPresetsForTests();
+    const saved = fake.seed('vst-chain', { name: 'Warm', entries: [plugin('a')] });
+    storage.setItem(PRESETS_KEY, JSON.stringify({ Warm: [plugin('b')] }));
+    await store().loadPresets();
+    await store().presetCollection.resolveImport(`${PRESETS_KEY}:Warm`, 'replace');
+    assert.deepEqual(entries().map(e => [e.id, e.body.entries[0]!.uid]), [[saved.id, 'b']]);
   });
 });
 
-test('a failed delete restores the preset instead of leaving it hidden', async () => {
-  await withStorage(async () => {
-    const existing = [entry('d')];
-    useVstChainStore.setState({
-      presets: { Keeper: existing }, presetDocs: { Keeper: { id: 'doc3', revision: 2 } }, presetError: null,
-    });
-    await withFetch(() => ({ status: 409, body: { error: 'Preset changed elsewhere', currentRevision: 3 } }),
-      () => useVstChainStore.getState().deletePreset('Keeper'));
+test('a failed save keeps the chain in the entry; reapply saves it', async () => {
+  await withBrowser(async fake => {
+    _resetVstPresetsForTests();
+    await store().loadPresets();
+    useVstChainStore.setState({ chain: [plugin('x')] });
+    fake.failNext(c => c.method === 'POST' && c.path === '/api/preferences/presets/vst-chain');
+    await store().savePreset('Live');
+    const failed = entries()[0]!;
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.body.entries[0]!.uid, 'x');
+    assert.match(failed.error!, /Save failed/);
 
-    const state = useVstChainStore.getState();
-    assert.deepEqual(state.presets['Keeper'], existing); // restored, not silently dropped
-    assert.match(state.presetError ?? '', /Keeper/);
+    await store().presetCollection.reapply(failed.key);
+    assert.equal(entries()[0]!.status, 'saved');
+    assert.equal(fake.docs.length, 1);
+  });
+});
+
+test('a save refused because another client changed the preset pauses until reapply', async () => {
+  await withBrowser(async fake => {
+    _resetVstPresetsForTests();
+    const doc = fake.seed('vst-chain', { name: 'Live', entries: [plugin('a')] });
+    await store().loadPresets();
+    fake.touch(doc.id, { name: 'Live', entries: [plugin('other')] });
+
+    useVstChainStore.setState({ chain: [plugin('mine')] });
+    await store().savePreset('Live');
+    await tick(); await tick();
+    let e = entries()[0]!;
+    assert.equal(e.status, 'conflict');
+    assert.equal(e.revision, 2);
+    assert.equal((e.serverBody as any).entries[0].uid, 'other');
+    assert.equal(e.body.entries[0]!.uid, 'mine');
+
+    // A further edit while paused is kept but not sent.
+    const puts = fake.count('PUT');
+    useVstChainStore.setState({ chain: [plugin('mine2')] });
+    await store().savePreset('Live');
+    await tick();
+    assert.equal(fake.count('PUT'), puts);
+
+    await store().presetCollection.reapply(e.key);
+    e = entries()[0]!;
+    assert.equal(e.status, 'saved');
+    assert.equal(fake.docs[0]!.revision, 3);
+    assert.equal((fake.docs[0]!.body as any).entries[0].uid, 'mine2');
+  });
+});
+
+test('deleting a preset while its create is in flight deletes the created document; a failed delete is shown', async () => {
+  await withBrowser(async fake => {
+    _resetVstPresetsForTests();
+    await store().loadPresets();
+    useVstChainStore.setState({ chain: [plugin('x')] });
+
+    const release = fake.hold(c => c.method === 'POST' && c.path === '/api/preferences/presets/vst-chain');
+    const saving = store().savePreset('Gone');
+    await tick();
+    await store().deletePreset(entries()[0]!.key);
+    release();
+    await saving; await tick();
+    assert.deepEqual(entries(), []);
+    assert.equal(fake.docs.length, 0);
+    assert.equal(fake.count('DELETE'), 1);
+
+    // Same race, but the follow-up delete fails: the entry stays, with its id and the error.
+    const release2 = fake.hold(c => c.method === 'POST' && c.path === '/api/preferences/presets/vst-chain');
+    fake.failNext(c => c.method === 'DELETE');
+    const saving2 = store().savePreset('Stays');
+    await tick();
+    await store().deletePreset(entries()[0]!.key);
+    release2();
+    await saving2; await tick();
+    const left = entries()[0]!;
+    assert.equal(left.id, fake.docs[0]!.id);
+    assert.equal(left.status, 'failed');
+    assert.equal(left.pendingOp, 'delete');
+    assert.match(left.error!, /Delete failed/);
   });
 });

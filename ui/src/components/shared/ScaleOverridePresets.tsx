@@ -7,11 +7,13 @@
  * Used in both the Create page and Lyric Studio sidebar.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 import { Save, Trash2, X, Check } from 'lucide-react';
 import { StyledSelect } from './StyledSelect';
 import { ParamLabel } from './ParamLabel';
-import { hashImportValue, preferencesApi, type ScaleOverridePresetBody } from '../../services/preferencesApi';
+import { hashImportValue, type ScaleOverridePresetBody } from '../../services/preferencesApi';
+import { PresetCollection } from '../../services/presetCollection';
+import { PresetSyncNotices } from './PresetSyncNotices';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,33 +46,27 @@ function loadLegacyPresets(): ScalePreset[] {
   }
 }
 
-interface PresetDoc { id: string; revision: number; preset: ScalePreset }
-
-/** Migrates every legacy preset once. A same-name, different-content
- *  collision against an already-imported preset is left unresolved — it is
- *  reported, never duplicated with a guessed keep-both/replace — so the flag
- *  stays unset and the batch retries on the next load until that preset is
- *  resolved explicitly. */
-export async function loadServerPresets(): Promise<PresetDoc[]> {
-  if (!localStorage.getItem(MIGRATED_FLAG)) {
-    const legacy = loadLegacyPresets();
-    if (legacy.length > 0) {
-      const items = await Promise.all(legacy.map(async p => {
-        const body = p as ScaleOverridePresetBody;
-        const raw = JSON.stringify(body);
-        return { storageKey: `${STORAGE_KEY}:${p.name}`, sourceHash: await hashImportValue(raw), name: p.name, body };
-      }));
-      const { results } = await preferencesApi.presets.import('scale-override', items);
-      const conflicts = results.filter(r => r.outcome === 'name-conflict');
-      if (conflicts.length > 0) console.warn('[ScaleOverridePresets] Presets need an explicit import choice:', conflicts.map(c => c.storedName));
-      else try { localStorage.setItem(MIGRATED_FLAG, '1'); } catch {}
-    } else {
-      try { localStorage.setItem(MIGRATED_FLAG, '1'); } catch {}
-    }
-  }
-  const { documents } = await preferencesApi.presets.list<ScaleOverridePresetBody>('scale-override');
-  return documents.map(d => ({ id: d.id, revision: d.revision, preset: d.body }));
+/** Server presets as a PresetCollection keyed by document id. The legacy
+ *  key is imported once; a same-name collision waits for the user's
+ *  keep-both or replace. */
+export function createScalePresetCollection(): PresetCollection<ScaleOverridePresetBody> {
+  return new PresetCollection<ScaleOverridePresetBody>({
+    family: 'scale-override',
+    migratedFlag: MIGRATED_FLAG,
+    legacyItems: () => Promise.all(loadLegacyPresets().map(async p => {
+      const body = p as unknown as ScaleOverridePresetBody;
+      return { storageKey: `${STORAGE_KEY}:${p.name}`, sourceHash: await hashImportValue(JSON.stringify(body)), name: p.name, body };
+    })),
+  });
 }
+
+let collection: PresetCollection<ScaleOverridePresetBody> | null = null;
+/** Shared by every mount (Create and Lyric Studio). */
+export function scalePresetCollection(): PresetCollection<ScaleOverridePresetBody> {
+  return collection ??= createScalePresetCollection();
+}
+/** Test-only: start from a fresh browser state. */
+export function _resetScalePresetsForTests(): void { collection = null; }
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -88,77 +84,46 @@ export const ScaleOverridePresets: React.FC<ScaleOverridePresetsProps> = ({
   onLoad,
   compact = false,
 }) => {
-  const [docs, setDocs] = useState<PresetDoc[]>([]);
-  const presets = docs.map(d => d.preset);
-  const [selectedIdx, setSelectedIdx] = useState<number>(-1);
+  const presetsCollection = scalePresetCollection();
+  const snapshot = useSyncExternalStore(presetsCollection.subscribe, presetsCollection.getSnapshot);
+  const entries = snapshot.entries;
+  const presets: ScalePreset[] = entries.map(e => e.body as unknown as ScalePreset);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selectedIdx = entries.findIndex(e => e.key === selectedKey);
   const [saving, setSaving] = useState(false);
   const [newName, setNewName] = useState('');
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadServerPresets().then(setDocs).catch(err => console.error('[ScaleOverridePresets] Failed to load:', err));
-  }, []);
+  useEffect(() => { void presetsCollection.load(); }, [presetsCollection]);
 
   // ── Select & load ──
   const handleSelect = useCallback((idx: number) => {
-    setSelectedIdx(idx);
-    if (idx >= 0 && idx < presets.length) {
-      const p = presets[idx];
-      onLoad(p.overallScale, { ...p.groupScales });
+    const entry = entries[idx];
+    setSelectedKey(entry ? entry.key : null);
+    if (entry) {
+      const p = entry.body;
+      onLoad(p.overallScale, { ...(p.groupScales as GroupScales) });
     }
-  }, [presets, onLoad]);
+  }, [entries, onLoad]);
 
   // ── Save current as preset ──
   const handleSave = useCallback(() => {
     const name = newName.trim();
     if (!name) return;
-
-    const preset: ScalePreset = {
-      name,
-      overallScale: currentOverallScale,
-      groupScales: { ...currentGroupScales },
-    };
-
-    // Overwrite if name already exists
-    const existingIdx = docs.findIndex(d => d.preset.name.toLowerCase() === name.toLowerCase());
+    const body: ScaleOverridePresetBody = { name, overallScale: currentOverallScale, groupScales: { ...currentGroupScales } };
     setNewName('');
     setSaving(false);
-    setError(null);
-
-    (existingIdx >= 0
-      ? preferencesApi.presets.update('scale-override', docs[existingIdx]!.id, docs[existingIdx]!.revision, preset)
-      : preferencesApi.presets.create('scale-override', preset)
-    ).then(({ document }) => {
-      setDocs(prev => {
-        const next = [...prev];
-        const doc = { id: document.id, revision: document.revision, preset };
-        if (existingIdx >= 0) { next[existingIdx] = doc; setSelectedIdx(existingIdx); }
-        else { next.push(doc); setSelectedIdx(next.length - 1); }
-        return next;
-      });
-    }).catch(err => {
-      console.error('[ScaleOverridePresets] Failed to save:', err);
-      setError(`Save failed for "${name}": ${err instanceof Error ? err.message : String(err)}`);
-    });
-  }, [newName, currentOverallScale, currentGroupScales, docs]);
+    // Overwrite the one preset with this name; with none (or several), add one.
+    const same = entries.filter(e => e.body.name.toLowerCase() === name.toLowerCase());
+    if (same.length === 1) { presetsCollection.update(same[0]!.key, body); setSelectedKey(same[0]!.key); }
+    else void presetsCollection.create(body).then(key => setSelectedKey(key));
+  }, [newName, currentOverallScale, currentGroupScales, entries, presetsCollection]);
 
   // ── Delete selected preset ──
   const handleDelete = useCallback(() => {
-    if (selectedIdx < 0 || selectedIdx >= docs.length) return;
-    const doc = docs[selectedIdx]!;
-    const removedIdx = selectedIdx;
-    setDocs(docs.filter((_, i) => i !== selectedIdx));
-    setSelectedIdx(-1);
-    setError(null);
-    preferencesApi.presets.remove('scale-override', doc.id, doc.revision)
-      .catch(err => {
-        console.error('[ScaleOverridePresets] Failed to delete:', err);
-        setError(`Delete failed for "${doc.preset.name}": ${err instanceof Error ? err.message : String(err)}`);
-        // Restore the preset — a failed delete (stale revision, offline) must not disappear from the list.
-        setDocs(prev => prev.some(d => d.id === doc.id) ? prev :
-          [...prev.slice(0, removedIdx), doc, ...prev.slice(removedIdx)]);
-      });
-  }, [selectedIdx, docs]);
+    if (!selectedKey) return;
+    void presetsCollection.remove(selectedKey);
+    setSelectedKey(null);
+  }, [selectedKey, presetsCollection]);
 
   const textSize = compact ? 'text-[10px]' : 'text-xs';
 
@@ -240,14 +205,7 @@ export const ScaleOverridePresets: React.FC<ScaleOverridePresetsProps> = ({
         </div>
       )}
 
-      {error && (
-        <div className="flex items-center justify-between gap-2 text-[9px] text-red-500 dark:text-red-400" role="alert">
-          <span className="flex-1">{error}</span>
-          <button onClick={() => setError(null)} className="hover:text-red-700 dark:hover:text-red-300">
-            <X className="w-3 h-3" />
-          </button>
-        </div>
-      )}
+      <PresetSyncNotices collection={presetsCollection} snapshot={snapshot} labelOf={b => b.name} compact />
 
       {/* Preview of selected preset values */}
       {selectedIdx >= 0 && selectedIdx < presets.length && !saving && (
