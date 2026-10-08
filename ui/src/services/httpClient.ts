@@ -181,19 +181,28 @@ export class ApiClient {
     if (!res.ok) { await throwIfNotOk(res); return; }
     if (!res.body) return;
     const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let at;
-      while ((at = buffer.indexOf('\n\n')) >= 0) {
-        const frame = buffer.slice(0, at);
-        buffer = buffer.slice(at + 2);
-        const line = frame.split('\n').find(l => l.startsWith('data: '));
-        if (line) onData(line.slice(6));
+    // A throwing onData (or a read error) must not leave the body locked and
+    // the connection open — cancel() first (closes the underlying stream;
+    // a no-op if it already ended on its own), then release the lock so a
+    // caller that wraps the body elsewhere isn't stuck behind this reader.
+    try {
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let at;
+        while ((at = buffer.indexOf('\n\n')) >= 0) {
+          const frame = buffer.slice(0, at);
+          buffer = buffer.slice(at + 2);
+          const line = frame.split('\n').find(l => l.startsWith('data: '));
+          if (line) onData(line.slice(6));
+        }
       }
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
     }
   }
 

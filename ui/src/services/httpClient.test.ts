@@ -165,21 +165,30 @@ test('mediaUrl leaves absolute paths alone, roots a bare name, and honors a conf
   assert.equal(remote.mediaUrl('/audio/a.wav'), 'https://studio.example.com/audio/a.wav');
 });
 
+/** A fake ReadableStream reader that records cancel()/releaseLock() calls,
+ *  so a test can assert streamEvents cleans up instead of leaking a locked,
+ *  still-open body. */
+function fakeReader(frames: string[]) {
+  const encoder = new TextEncoder();
+  let i = 0;
+  const log: string[] = [];
+  const reader = {
+    read: async () => i < frames.length
+      ? { value: encoder.encode(frames[i++]), done: false }
+      : { value: undefined, done: true },
+    cancel: async () => { log.push('cancel'); },
+    releaseLock: () => { log.push('releaseLock'); },
+  };
+  return { body: { getReader: () => reader }, log };
+}
+
 test('streamEvents sends the bearer token in a header, parses frames, and resolves when the body ends', async () => {
   const frames = ['data: {"n":1}\n\n', 'data: {"n":2}\n\n'];
-  const encoder = new TextEncoder();
+  const fake = fakeReader(frames);
   let sent: { url: string; headers: HeadersInit | undefined } | undefined;
   (globalThis as any).fetch = async (url: string, init: RequestInit) => {
     sent = { url, headers: init.headers };
-    let i = 0;
-    const body = {
-      getReader: () => ({
-        read: async () => i < frames.length
-          ? { value: encoder.encode(frames[i++]), done: false }
-          : { value: undefined, done: true },
-      }),
-    };
-    return { ok: true, status: 200, statusText: 'x', body, json: async () => ({}) };
+    return { ok: true, status: 200, statusText: 'x', body: fake.body, json: async () => ({}) };
   };
   const client = new ApiClient();
   const seen: string[] = [];
@@ -187,6 +196,20 @@ test('streamEvents sends the bearer token in a header, parses frames, and resolv
   assert.deepEqual(sent?.headers, { Authorization: 'Bearer tok' });
   assert.equal(sent?.url, '/api/workflows/jobs/1/events');
   assert.deepEqual(seen, ['{"n":1}', '{"n":2}']);
+  // The stream ended on its own; cleanup still runs (cancel on an already-done
+  // reader is a documented no-op, but releaseLock must happen every time).
+  assert.deepEqual(fake.log, ['cancel', 'releaseLock']);
+});
+
+test('a throwing onData still cancels the reader and releases its lock, instead of leaking an open connection', async () => {
+  const fake = fakeReader(['data: {"n":1}\n\n', 'data: {"n":2}\n\n']);
+  (globalThis as any).fetch = async () => ({ ok: true, status: 200, statusText: 'x', body: fake.body, json: async () => ({}) });
+  const client = new ApiClient();
+  await assert.rejects(
+    client.streamEvents('/workflows/jobs/1/events', () => { throw new Error('bad frame'); }),
+    /bad frame/,
+  );
+  assert.deepEqual(fake.log, ['cancel', 'releaseLock']);
 });
 
 test('streamEvents rejects with ApiError on a non-OK response instead of reading a stream', async () => {
