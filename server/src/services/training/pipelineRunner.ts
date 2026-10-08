@@ -193,7 +193,16 @@ recoverStalePipelines();
 
 // ── Public API ───────────────────────────────────────────────────────────
 
+let hasActiveYue2Preparation: () => boolean = () => false;
+
+/** The YuE2 operation registers its durable activity without making the
+ *  legacy batch runner depend on its implementation. Both share admission. */
+export function registerYue2PreparationActivity(check: () => boolean): void {
+  hasActiveYue2Preparation = check;
+}
+
 export function hasActivePipeline(): boolean {
+  if (hasActiveYue2Preparation()) return true;
   for (const state of pipelines.values()) {
     if (isActive(state.status)) return true;
   }

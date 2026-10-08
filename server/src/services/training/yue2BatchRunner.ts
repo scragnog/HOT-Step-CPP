@@ -29,6 +29,7 @@ import { bestScoredRung } from './yue2BestRung.js';
 import { listYue2RungScores } from './yue2RungScores.js';
 import { runYue2Cleanup } from './yue2Cleanup.js';
 import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
+import { hasActivePipeline } from './pipelineRunner.js';
 
 export type Yue2BatchStage = 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine' | 'nar' | 'finish';
 export type Yue2BatchStatus = 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
@@ -169,6 +170,8 @@ export function getBatch(id: string): Yue2BatchSummary | undefined {
 
 export function startBatch(input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Record<string, unknown> }): Yue2BatchSummary | { error: string } {
   if (hasActiveBatch()) return { error: 'A YuE2 batch is already running' };
+  // A captured YuE2 preparation may not have queued a job yet, so check it too.
+  if (hasActivePipeline()) return { error: 'A training pipeline or YuE2 preparation is already running' };
   const items: Yue2BatchItem[] = [];
   for (const id of input.datasetIds) {
     const ds = repo.getDataset(id);
@@ -246,6 +249,7 @@ export function finishScoredLadders(entries: Array<{ datasetId: string; refineRu
     persist(live);
     return toSummary(live);
   }
+  if (hasActivePipeline()) return { error: 'A training pipeline or YuE2 preparation is already running' };
   const state: BatchState = { id: randomUUID(), status: 'running', items, currentDatasetId: null, lyricTiming: true, recipe: {},
     createdAt: Date.now(), finishedAt: null, pauseRequested: false, cancelRequested: false };
   batches.set(state.id, state);
@@ -327,7 +331,7 @@ export function resumeBatch(id: string): 'ok' | 'not_found' | 'busy' {
   if (live && live.status === 'paused') { live.pauseRequested = false; live.status = 'running'; persist(live); return 'ok'; }
   const snap = getBatch(id);
   if (!snap) return 'not_found';
-  if (hasActiveBatch()) return 'busy';
+  if (hasActiveBatch() || hasActivePipeline()) return 'busy';
   for (const item of snap.items) {
     if (item.status === 'done') continue;
     item.status = 'pending'; item.currentStage = null; item.error = null;

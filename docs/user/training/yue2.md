@@ -43,6 +43,8 @@ Files named `*.engine.wav` in a dataset folder are ignored. Older versions left 
 
 The cache stages are latent cache, codes, lead sheets, vocal stems and lyric cursor spans. The last two are only needed for lyric timing supervision, and appear once its toggle (its own card, between lead sheets and the stems) is on. "Perform all stages" runs them in order; beside it, the clear card deletes the vocal stems and the dataset's MM3 and ACE caches. It keeps the YuE2 latents, codes, lead sheets and prepared set (about 40 MiB an album, but minutes of GPU to rebuild; they are rebuilt anyway when the audio, captions or loudness change) unless you turn on **Also delete the YuE2 latents, codes, lead sheets and prepared set**. Source files, labels and adapters are always kept. Each stage card opens collapsed: its run button stays visible (it reads "... again" once the stage is complete), and clicking the title shows the explanation, status and settings. Lead sheets can be previewed as each source finishes, not only when the stage ends. You do not have to prepare anything by hand: Start training prepares the dataset automatically and reuses prepared data that has not changed.
 
+The legacy seven-stage Perform all stages command keeps running on the server after you close the Training Studio. It saves the selected worker, stages and training settings when you start. The current card does not yet show that saved run after a reload. The card update will add reconnect and pause/retry controls. If the server restarts, the run waits for an explicit retry; it does not start another training job on its own.
+
 How many tracks: the app warns below 10 files.
 <!-- TODO(verify): no track-count guidance specific to YuE2 joint training was found in code or skills. -->
 

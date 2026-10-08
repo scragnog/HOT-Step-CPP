@@ -203,6 +203,7 @@ import { trainingOperationsRouter } from '../services/training/operations.js';
 // Training operation domains register themselves at import (operations.ts).
 import '../services/training/recipes/operations.js';
 import '../services/training/review/operations.js';
+import '../services/training/yue2PreparationOperations.js';
 import type {
   AuditionListResponse, AuditionOptions, AuditionSideSpec,
   BulkSetInput, CaptionOptions, CreateDatasetInput, FieldSource, GeniusOptions, LabelOptions, LmSize,
