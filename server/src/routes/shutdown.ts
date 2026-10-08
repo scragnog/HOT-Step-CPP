@@ -14,6 +14,7 @@ import path from 'path';
 import { PROJECT_ROOT, PORTABLE_MODE } from '../config.js';
 import { killActiveChildren } from '../services/training/labelingQueue.js';
 import { stopAceServer } from '../services/aceEngineProcess.js';
+import type { ShutdownResponse, RestartResponse } from '../contracts/shutdown.js';
 
 const router = Router();
 
@@ -148,7 +149,7 @@ export function requestWorkerRestart(): void {
 // POST /api/shutdown — terminate everything
 router.post('/', (_req, res) => {
   console.log('[Server] Shutdown requested via API');
-  res.json({ success: true, message: 'Shutting down...' });
+  res.json({ success: true, message: 'Shutting down...' } satisfies ShutdownResponse);
   setTimeout(() => void stopEverything(false), 300);
 });
 
@@ -158,7 +159,7 @@ router.post('/restart', (_req, res) => {
   try {
     requestWorkerRestart();
     console.log('[Server] Wrote restart marker');
-    res.json({ success: true, message: 'Restarting...' });
+    res.json({ success: true, message: 'Restarting...' } satisfies RestartResponse);
   } catch (err: any) {
     console.error(`[Server] Failed to write restart marker: ${err.message}`);
     res.status(500).json({ error: err.message });

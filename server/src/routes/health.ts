@@ -6,6 +6,7 @@ import { aceClient } from '../services/aceClient.js';
 import { APP_VERSION, config } from '../config.js';
 import { engineReady, engineBootStatus } from '../engineState.js';
 import { startupCommit, dirtyCheckout } from '../services/training/workerUpdate.js';
+import type { HealthResponse } from '../contracts/health.js';
 
 const router = Router();
 
@@ -69,7 +70,7 @@ router.get('/', async (_req, res) => {
       ready: engineReady,
       bootStatus: engineBootStatus,
     },
-  });
+  } satisfies HealthResponse);
 });
 
 export default router;
