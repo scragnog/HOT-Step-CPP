@@ -9,13 +9,14 @@
 
 import { Router } from 'express';
 import { modelDownloadService } from '../services/modelDownloadService.js';
+import type { ModelRegistryResponse, DownloadStartResponse } from '../contracts/modelManager.js';
 
 const router = Router();
 
 // GET /api/model-manager/registry
 router.get('/registry', (_req, res) => {
   try {
-    const data = modelDownloadService.getRegistry();
+    const data: ModelRegistryResponse = modelDownloadService.getRegistry();
     res.json(data);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -37,7 +38,7 @@ router.post('/download', (req, res) => {
       fileId,
       typeof hfToken === 'string' ? hfToken : undefined,
     );
-    res.json({ jobId });
+    res.json({ jobId } satisfies DownloadStartResponse);
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
@@ -83,7 +84,7 @@ router.post('/download/:jobId/cancel', (req, res) => {
 router.post('/download/:jobId/resume', (req, res) => {
   try {
     const jobId = modelDownloadService.resumeDownload(req.params.jobId);
-    res.json({ jobId });
+    res.json({ jobId } satisfies DownloadStartResponse);
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
