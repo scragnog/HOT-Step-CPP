@@ -96,6 +96,8 @@ export interface Mm3StreamState {
   /** Bumped whenever the waveform grows, so canvases can redraw cheaply without
    *  the peaks themselves being React state. */
   peaksVersion: number;
+  /** Node's stream session for this take (X-Stream-Session), null if Node opened none. */
+  sessionId: string | null;
 }
 
 /** Pre-buffer before playback starts, seconds; also the amount re-buffered
@@ -110,7 +112,7 @@ const PEAK_RATE = 40;
 const INITIAL: Mm3StreamState = {
   jobId: null, take: 0, takeCount: 1, connected: false, done: false, playing: false,
   position: 0, received: 0, expected: 0, chunks: 0, underruns: 0,
-  needsGesture: false, volume: 1.0, error: null, peaksVersion: 0,
+  needsGesture: false, volume: 1.0, error: null, peaksVersion: 0, sessionId: null,
 };
 
 let state: Mm3StreamState = INITIAL;
@@ -131,7 +133,7 @@ function emitActive(extra: Partial<Mm3StreamState> = {}): void {
     jobId: r.jobId, take: r.take, takeCount: takeCountFor(r.jobId),
     connected: r.connected, done: r.done, received: r.received, expected: r.expected,
     chunks: r.chunks, underruns: r.underruns, error: r.error,
-    peaksVersion: r.peaksVersion,
+    peaksVersion: r.peaksVersion, sessionId: r.sessionId,
     ...extra,
   });
 }
@@ -188,6 +190,7 @@ interface Receiver {
   abort: AbortController | null;
   netOpen: boolean;
   peaksVersion: number;
+  sessionId: string | null;
 }
 
 const receivers = new Map<string, Receiver>();
@@ -203,7 +206,7 @@ function newReceiver(jobId: string, take: number, expected: number): Receiver {
     peaks: new Float32Array(0), peakCount: 0, pausedFrame: 0,
     connected: false, done: false, received: 0, expected,
     chunks: 0, underruns: 0, error: null, abort: null, netOpen: false,
-    peaksVersion: 0,
+    peaksVersion: 0, sessionId: null,
   };
 }
 
@@ -457,6 +460,7 @@ async function open(jobId: string, take: number, expected: number, autoPlay: boo
       throw new Error(msg);
     }
 
+    r.sessionId = res.headers.get('X-Stream-Session');
     const reader = res.body.getReader();
     let buf: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
 
@@ -661,6 +665,11 @@ export function mm3StreamSelect(jobId: string, take: number): void {
 }
 
 /** Which take is audible, so a card can show itself as the one playing. */
+/** Node's stream session id for a take (services/streamSessionsApi), or null. */
+export function mm3StreamSessionId(jobId: string, take = 0): string | null {
+  return receivers.get(rkey(jobId, take))?.sessionId ?? null;
+}
+
 export function mm3StreamActiveTake(): { jobId: string; take: number } | null {
   const r = cur();
   return r ? { jobId: r.jobId, take: r.take } : null;

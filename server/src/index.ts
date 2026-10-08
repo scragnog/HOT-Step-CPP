@@ -60,6 +60,7 @@ import { registerRepaintLayerWorkflows } from './services/workflows/repaintLayer
 import listeningRoutes from './routes/listening.js';
 import preferencesRoutes from './routes/preferences.js';
 import studioDraftsRoutes from './routes/studioDrafts.js';
+import streamSessionsRoutes from './routes/streamSessions.js';
 import exportImportRoutes from './routes/exportImport.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -131,6 +132,7 @@ app.use('/api/audio-queue', audioQueueRoutes);
 app.use('/api/workflows', workflowRoutes);
 app.use('/api/preferences', preferencesRoutes);
 app.use('/api/studio-drafts', studioDraftsRoutes);
+app.use('/api/stream-sessions', streamSessionsRoutes);
 app.use('/api/export-import', exportImportRoutes);
 // Repaint and Stem Builder kinds have no route of their own to register from.
 registerRepaintLayerWorkflows();

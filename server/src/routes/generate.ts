@@ -43,6 +43,8 @@ import type {
   GenerationEndReason,
   GenerationOutcome,
 } from '../services/backends/types.js';
+import { getStreamSessions, type StreamSession } from '../services/streamSessions/index.js';
+import { WavSplitter } from '../services/streamSessions/wav.js';
 
 export type { GenerationJob, StageTiming } from '../services/generation/jobTypes.js';
 
@@ -474,6 +476,7 @@ router.get('/mm3/stream/:id', async (req, res) => {
   // can be open at once and all advance together. Omitted means take 0, which
   // is what a one-take render has always served.
   const take = Math.max(0, Number(req.query.take) || 0);
+  let session: StreamSession | null = null;
 
   try {
     const engUrl = take > 0
@@ -488,12 +491,19 @@ router.get('/mm3/stream/:id', async (req, res) => {
     res.setHeader('Content-Type', 'audio/wav');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('X-Accel-Buffering', 'no');
+    // Node's copy for analysis and explicit recording (services/streamSessions).
+    // It sees only what this pipe forwards and can never hold the pipe up.
+    session = getStreamSessions().open('mm3', { jobId: job.id, take });
+    if (session) res.setHeader('X-Stream-Session', session.id);
+    const splitter = new WavSplitter();
 
     const reader = eng.body.getReader();
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (!res.write(Buffer.from(value))) {
+      const forwarded = res.write(Buffer.from(value));
+      if (session) for (const wav of splitter.push(value)) session.chunk(wav);
+      if (!forwarded) {
         // Respect backpressure: a browser that is not draining fast enough
         // must slow the pipe rather than grow an unbounded Node-side buffer.
         await new Promise<void>(resolve => res.once('drain', () => resolve()));
@@ -505,6 +515,8 @@ router.get('/mm3/stream/:id', async (req, res) => {
     console.warn(`[MM3 Stream] job ${job.id}: ${err?.message ?? err}`);
     if (!res.headersSent) res.status(502).json({ error: String(err?.message ?? err) });
     else { try { res.end(); } catch {} }
+  } finally {
+    session?.end();
   }
 });
 
@@ -696,6 +708,9 @@ router.post('/storm/stream', async (req, res) => {
 
   res.setHeader('Content-Type', 'audio/wav');
   res.setHeader('Transfer-Encoding', 'chunked');
+  // Node's copy of each slot for analysis and explicit recording (services/streamSessions).
+  const session = getStreamSessions().open('storm', { streamId });
+  if (session) res.setHeader('X-Stream-Session', session.id);
 
   // Browser tab closed / fetch aborted without POST /stop — stop generating.
   // Must watch res, not req: on Node >=16 the request stream emits 'close' as
@@ -819,6 +834,7 @@ router.post('/storm/stream', async (req, res) => {
       }
       const wavBuf = Buffer.from(await audioRes.arrayBuffer());
       res.write(wavBuf);
+      session?.chunk(wavBuf);
       slotIdx++;
     }
   } catch (err) {
@@ -826,6 +842,7 @@ router.post('/storm/stream', async (req, res) => {
   } finally {
     stopStream(streamId);
     streamControl.delete(streamId);
+    session?.end();
     console.log(`[STORM ${streamId}] stream ended after ${slotIdx} slot(s)`);
     pushLog(`[STORM ${streamId}] stream ended after ${slotIdx} slot(s)`);
     res.end();
