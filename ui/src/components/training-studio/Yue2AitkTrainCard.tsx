@@ -398,6 +398,19 @@ function isPrepareJob(job: TrainingJobSummary, datasetId: string): boolean {
   return job.datasetId === datasetId && job.kind === 'yue2-prepare-aitk';
 }
 
+export function createPresetLoadGate() {
+  let pending = false;
+  return {
+    get pending() { return pending; },
+    begin() { if (pending) return false; pending = true; return true; },
+    release() { pending = false; },
+    capture<T>(fn: () => T): T {
+      if (pending) throw new Error('Wait for the preset to finish loading before starting training.');
+      return fn();
+    },
+  };
+}
+
 export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: string; cursorReady?: boolean; lyricTiming: boolean; onLyricTimingChange: (value: boolean) => void; onTimingLockedChange?: (locked: boolean) => void; exposeStart?: (fn: () => Promise<Record<string, unknown>>) => void }> = ({ datasetId, legacyManifest, cursorReady = false, lyricTiming, onLyricTimingChange, onTimingLockedChange, exposeStart }) => {
   const { t } = useTranslation();
   const [blindRungs] = usePersistedState('hs-yue2-blind-rungs', true);
@@ -458,6 +471,16 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [presetName, setPresetName] = useState('');
   const [presetError, setPresetError] = useState('');
   const [presetLoading, setPresetLoading] = useState(false);
+  const presetLoadGate = useRef(createPresetLoadGate());
+  const pendingPresetApplication = useRef<{ form: Yue2JointTrainRequest; lyricTiming: boolean } | null>(null);
+  useEffect(() => {
+    const pending = pendingPresetApplication.current;
+    if (pending && form === pending.form && lyricTiming === pending.lyricTiming) {
+      pendingPresetApplication.current = null;
+      presetLoadGate.current.release();
+      setPresetLoading(false);
+    }
+  }, [form, lyricTiming]);
   // The saved form, with the dataset's own manifest over whatever was saved:
   // a saved path that differs came from another dataset and trained its album.
   const readPrepare = (): PrepareForm => {
@@ -498,7 +521,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   // form is the same, Start sends it to the server-side batch instead of one
   // run, and the per-dataset paths are resolved per item by the runner.
   const runBatch = async () => {
-    if (!batchDraft?.length) return;
+    if (!batchDraft?.length || presetLoadGate.current.pending) return;
     setBatchStarting(true); setError('');
     try {
       const timingWeight = lyricTiming
@@ -904,9 +927,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     if (lyricTiming) onLyricTimingChange(false);
   };
   const loadPreset = async (preset: Yue2JointPreset) => {
+    if (!presetLoadGate.current.begin()) return;
     const request = ++presetLoadRequest.current;
     setPresetLoading(true);
     setPresetError('');
+    let applying = false;
     try {
       const { result } = await preferencesApi.presets.resolveYue2Joint(preset, form, lyricTiming);
       if (request !== presetLoadRequest.current) return;
@@ -914,6 +939,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         throw new Error(t('trainingStudio.yue2.method.presetFormChanged',
           'The form changed while the preset was loading. Choose the preset again.'));
       }
+      pendingPresetApplication.current = { form: result.effectiveForm, lyricTiming: result.lyricTiming };
+      applying = true;
       setForm(result.effectiveForm);
       onLyricTimingChange(result.lyricTiming);
     } catch (err) {
@@ -921,7 +948,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       setPresetError(t('trainingStudio.yue2.method.presetLoadFailed', 'Could not load preset: {{error}}',
         { error: err instanceof Error ? err.message : String(err) }));
     } finally {
-      if (request === presetLoadRequest.current) setPresetLoading(false);
+      if (!applying && request === presetLoadRequest.current) {
+        presetLoadGate.current.release();
+        setPresetLoading(false);
+      }
     }
   };
   const removePreset = (name: string) => {
@@ -938,11 +968,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const userPresetActive = (preset: Yue2JointPreset) => Object.entries(preset.settings)
     .every(([key, value]) => JSON.stringify(value) === JSON.stringify(current[key]));
   const captureJointRequest = async (): Promise<Record<string, unknown>> => {
-    const request = captureJointOverrides(form, prepare, lyricTiming, defaultDevice, resumeChoice);
+    const request = presetLoadGate.current.capture(() =>
+      captureJointOverrides(form, prepare, lyricTiming, defaultDevice, resumeChoice));
     if (!resumeChoice && !form.resume?.trim()) await captionMissing();
     return request;
   };
   const run = async (): Promise<string | null> => {
+    if (presetLoadGate.current.pending) return null;
     const worker = currentWorkerRef();
     setStarting(true); setError('');
     try {
@@ -967,6 +999,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     if (exposeStart) exposeStart(() => startRef.current ? startRef.current() : Promise.reject(new Error('Joint form is unavailable')));
   });
   const prepareDataset = async () => {
+    if (presetLoadGate.current.pending) return;
     setStarting(true); setError('');
     try {
       const result = await startYue2AitkPrepare(datasetId, { ...prepare, lyricTiming });
@@ -1174,7 +1207,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           {form.resume?.trim() && field(t('trainingStudio.yue2.method.resumeDataset', 'Prepared manifest for resume'), 'dataset', 'text', form, undefined,
             t('trainingStudio.yue2.method.resumeDatasetInfo', 'The prepared dataset manifest that matches the run being resumed by record below. Filled in automatically when a resume record is set; only needed if you are pointing at a different prepared copy.'))}
         </div>
-        <button type="button" onClick={() => void prepareDataset()} disabled={preparing || active || starting || yue2RunAllActive || !prepare.legacyManifest || !prepare.checkpoint || !prepare.tokenizer || !prepare.output || !prepare.models.vae || !prepare.models.semantic || !prepare.models.sheetsage}
+        <button type="button" onClick={() => void prepareDataset()} disabled={presetLoading || preparing || active || starting || yue2RunAllActive || !prepare.legacyManifest || !prepare.checkpoint || !prepare.tokenizer || !prepare.output || !prepare.models.vae || !prepare.models.semantic || !prepare.models.sheetsage}
           className="mt-3 px-3 py-1.5 rounded-lg text-xs font-semibold border border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">
           {preparing ? t('trainingStudio.yue2.method.preparing', 'Preparing dataset…') : t('trainingStudio.yue2.method.prepare', 'Prepare native dataset')}
         </button>
@@ -1710,7 +1743,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           />
         </div>}
         <div className="mt-2 flex items-center gap-3">
-          <button type="button" onClick={() => void runBatch()} disabled={batchStarting || yue2RunAllActive}
+          <button type="button" onClick={() => void runBatch()} disabled={presetLoading || batchStarting || yue2RunAllActive}
             className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2">
             {batchStarting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
             {t('trainingStudio.yue2.aitkBatch.start', 'Start batch ({{count}})', { count: batchDraft.length })}
@@ -1719,7 +1752,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </div>
       </div>}
       <div className="mt-4 flex items-center gap-3 flex-wrap">
-        <button type="button" onClick={() => void run()} disabled={!!batchDraft?.length || active || preparing || starting || !!jointPipelineId || yue2RunAllActive}
+        <button type="button" onClick={() => void run()} disabled={presetLoading || !!batchDraft?.length || active || preparing || starting || !!jointPipelineId || yue2RunAllActive}
           className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2">
           {starting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
           {jointPipelineId && !job ? t('trainingStudio.yue2.method.admitting', 'Starting joint training…') : active ? (job?.phase === 'preparing' ? t('trainingStudio.yue2.method.preparing', 'Preparing dataset…') : t('trainingStudio.yue2.method.running', 'Joint training is running')) : t('trainingStudio.yue2.method.start', 'Start joint training')}
