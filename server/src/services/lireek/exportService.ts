@@ -35,7 +35,7 @@ export function exportGeneration(data: ExportData): { jsonPath: string; txtPath:
   fs.mkdirSync(exportDir, { recursive: true });
 
   // Build safe filename: "Artist - Title" or "Artist - Album - Title"
-  const safeName = (s: string) => s.replace(/[<>:"/\\|?*]/g, '_').trim();
+  const safeName = (s: string) => s.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').trim().slice(0, 100) || 'Untitled';
   const parts = [safeName(data.artistName)];
   if (data.albumName) parts.push(safeName(data.albumName));
   parts.push(safeName(data.title || 'Untitled'));

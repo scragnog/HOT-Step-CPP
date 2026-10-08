@@ -137,6 +137,12 @@ version instead. Selecting tracks and choosing Download in the bulk action
 bar downloads them one at a time, staggered so the browser doesn't block
 them, not as a single archive.
 
+The server chooses the available versions for a bulk download. If the
+preferred mastered version is missing, it uses the original. With Both
+selected, it downloads the original and the mastered version when both
+exist. A failed track is reported separately, so other selected tracks
+can still download.
+
 Export Params, on the track menu, downloads that render's parameters as a
 JSON preset file, separate from the audio and not affected by the
 Settings page format.
@@ -152,6 +158,11 @@ Upload into Library (header button, and in the empty-state) accepts
 `.aiff`, and `.aif`. No generation is involved: an imported track becomes
 an ordinary library row and gets everything a render has: post-processing,
 downloads, playlists, metadata editing.
+
+The browser uploads each chosen file, then asks the server to import the
+uploaded assets. A failed file appears in the import result without
+stopping the other files. The server never reads a path from the device;
+choose each file in the picker.
 
 The optional description field is used as the file's genre tag when it has
 none of its own, and as the target caption if you also opt into "Run

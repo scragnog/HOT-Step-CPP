@@ -13,7 +13,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { X, Upload, Loader2, FileAudio, AlertTriangle, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { songApi } from '../../services/api';
+import { uploadImportAsset, importAssets } from '../../services/exportImportApi';
 import { useAuth } from '../../context/AuthContext';
 import { startPostProcessing } from '../../stores/postProcessStore';
 import { Toggle } from '../shared/Toggle';
@@ -127,15 +127,25 @@ export const ImportTracksModal: React.FC = () => {
     setProgress(0);
 
     try {
-      const { songs, errors } = await songApi.importTracks(files, token, {
-        description,
-        onProgress: (fraction) => {
-          setProgress(fraction);
-          // The upload finishing is the server starting work, and conversion is
-          // the part with no progress to report.
-          if (fraction >= 1) setPhase('converting');
-        },
-      });
+      const uploaded: { file: File; assetId: string }[] = [];
+      const errors: { file: string; error: string }[] = [];
+      for (const [index, file] of files.entries()) {
+        try {
+          uploaded.push({
+            file,
+            assetId: await uploadImportAsset(file, token, (fraction) => setProgress((index + fraction) / files.length)),
+          });
+        }
+        catch (err) { errors.push({ file: file.name, error: (err as Error).message }); }
+        setProgress((index + 1) / files.length);
+      }
+      setPhase('converting');
+      const results = uploaded.length
+        ? await importAssets(uploaded.map(({ assetId }) => ({ assetId, description })), token) : [];
+      const songs = results.flatMap((result) => result.song ? [result.song] : []);
+      for (const result of results) {
+        if (result.error) errors.push({ file: uploaded[result.index]?.file.name || result.assetId, error: result.error });
+      }
 
       // App keeps the library list; it already listens for this.
       for (const song of songs) {

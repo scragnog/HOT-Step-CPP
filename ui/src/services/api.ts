@@ -76,7 +76,7 @@ export const authApi = {
 
 // ── Song Normalizer ─────────────────────────────────────────
 /** Map DB snake_case fields to camelCase for component consumption */
-function normalizeSong(s: any): Song {
+export function normalizeSong(s: any): Song {
   const gp = (() => {
     if (s.generationParams) return s.generationParams;
     if (s.generation_params) {

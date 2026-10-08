@@ -10,6 +10,8 @@ import { createPortal } from 'react-dom';
 import { Bookmark, Check, ChevronDown, ChevronRight, Download, Pencil, RefreshCw, Save, Trash2, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { profileApi, type ParamProfile } from '../../services/api';
+import { validateProfileImport } from '../../services/exportImportApi';
+import { useAuth } from '../../context/AuthContext';
 import { applyProfileData, collectProfileData, describeProfileGroups, summarizeProfile } from '../../utils/paramProfiles';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { Toggle } from '../shared/Toggle';
@@ -20,6 +22,7 @@ interface ProfilesModalProps {
 
 export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
   const { t } = useTranslation();
+  const { token } = useAuth();
   const [profiles, setProfiles] = useState<ParamProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -112,24 +115,21 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
 
   const handleImportFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !token) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
-        let parsed = JSON.parse(reader.result as string);
-        // Tolerate a full profile wrapper ({ name, saved_at, data }) as well as bare preset JSON
-        if (parsed && typeof parsed === 'object' && parsed._format === undefined && parsed.data?._format === 'hot-step-preset') {
-          parsed = parsed.data;
-        }
+        const parsed = JSON.parse(reader.result as string);
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
           setError(t('profiles.importInvalid'));
           return;
         }
-        const name = file.name.replace(/\.json$/i, '').trim() || 'imported';
+        // The server unwraps a full profile wrapper ({ name, saved_at, data }) and checks the shape
+        const { name, data } = await validateProfileImport(file.name, parsed, token);
         if (profiles.some(p => p.name.toLowerCase() === name.toLowerCase())) {
-          setConfirmAction({ kind: 'import', name, data: parsed });
+          setConfirmAction({ kind: 'import', name, data });
         } else {
-          importAs(name, parsed);
+          importAs(name, data);
         }
       } catch {
         setError(t('profiles.importInvalid'));
@@ -137,7 +137,7 @@ export const ProfilesModal: React.FC<ProfilesModalProps> = ({ onClose }) => {
     };
     reader.readAsText(file);
     e.target.value = '';
-  }, [profiles, importAs, t]);
+  }, [profiles, importAs, t, token]);
 
   // Portal to body: the global bar's backdrop-filter makes it the containing
   // block for fixed descendants, which would pin this overlay to the bar.

@@ -101,7 +101,14 @@ export interface ImportOptions {
  */
 export async function importTrackFile(opts: ImportOptions): Promise<any> {
   const { userId, sourcePath, originalName } = opts;
-  const description = (opts.description || '').trim().slice(0, 1000);
+  if (typeof userId !== 'string' || !userId) throw new Error('User is required');
+  if (typeof originalName !== 'string' || !originalName || path.basename(originalName) !== originalName) {
+    throw new Error('Invalid source filename');
+  }
+  if (opts.description !== undefined && (typeof opts.description !== 'string' || opts.description.length > 1000)) {
+    throw new Error('Description must be at most 1000 characters');
+  }
+  const description = (opts.description || '').trim();
 
   const ext = path.extname(originalName).toLowerCase();
   if (!IMPORT_EXTENSIONS.includes(ext)) {

@@ -15,6 +15,7 @@ import { useMm3StreamAudio, mm3StreamTakeState } from '../../stores/mm3StreamSto
 import { useABCompareSelector, playAB, openModal as openABModal, clear as clearAB } from '../../stores/abCompareStore';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { downloadAll } from '../../utils/downloadTrack';
+import { useAuth } from '../../context/AuthContext';
 import { HoverFullText } from '../shared/HoverFullText';
 import { SongActionsMenu } from '../shared/SongActionsMenu';
 import { openImportTracks } from './ImportTracksModal';
@@ -235,18 +236,22 @@ export const SongList: React.FC<SongListProps> = ({
   }, [selectedIds, onBulkDelete, exitSelectionMode]);
 
   const [bulkDownloading, setBulkDownloading] = useState(false);
+  const { token } = useAuth();
 
   const handleBulkDownload = useCallback(async () => {
-    if (selectedIds.size === 0 || bulkDownloading) return;
+    if (selectedIds.size === 0 || bulkDownloading || !token) return;
     const selected = filteredSongs.filter(s => selectedIds.has(s.id));
     if (selected.length === 0) return;
     setBulkDownloading(true);
     try {
-      await downloadAll(selected);
+      const failures = await downloadAll(selected, token);
+      if (failures.length) window.alert(`Some downloads failed:\n${failures.join('\n')}`);
+    } catch (err) {
+      window.alert(`Download failed: ${(err as Error).message}`);
     } finally {
       setBulkDownloading(false);
     }
-  }, [selectedIds, filteredSongs, bulkDownloading]);
+  }, [selectedIds, filteredSongs, bulkDownloading, token]);
 
   if (songs.length === 0) {
     return (

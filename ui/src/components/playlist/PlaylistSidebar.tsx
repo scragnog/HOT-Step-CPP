@@ -14,6 +14,7 @@ import {
 import { usePlaylist, type PlaylistItem } from '../lyric-studio/playlistStore';
 import { playFromList, playlistItemToTrack, usePlaybackSelector } from '../../stores/playbackStore';
 import { downloadTrack, downloadAll } from '../../utils/downloadTrack';
+import { useAuth } from '../../context/AuthContext';
 import type { Song } from '../../types';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { SongActionsMenu, songFromPlaylistItem } from '../shared/SongActionsMenu';
@@ -32,6 +33,7 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose, embed
   const currentSongId = usePlaybackSelector(s => s.currentTrack?.id ?? null);
   const { disguiseArtist, disguiseTitle } = useDisguiseMode();
   const [downloading, setDownloading] = useState(false);
+  const { token } = useAuth();
 
   /** Convert a PlaylistItem to a Song shape for the download utility. */
   const playlistItemToSong = useCallback((item: PlaylistItem): Song => ({
@@ -49,15 +51,18 @@ export const PlaylistSidebar: React.FC<PlaylistSidebarProps> = ({ onClose, embed
   }), []);
 
   const handleDownloadAll = useCallback(async () => {
-    if (downloading || playlist.items.length === 0) return;
+    if (downloading || playlist.items.length === 0 || !token) return;
     setDownloading(true);
     try {
       const songs = playlist.items.map(playlistItemToSong);
-      await downloadAll(songs);
+      const failures = await downloadAll(songs, token);
+      if (failures.length) window.alert(`Some downloads failed:\n${failures.join('\n')}`);
+    } catch (err) {
+      window.alert(`Download failed: ${(err as Error).message}`);
     } finally {
       setDownloading(false);
     }
-  }, [playlist.items, downloading, playlistItemToSong]);
+  }, [playlist.items, downloading, playlistItemToSong, token]);
 
   const handlePlay = useCallback((item: PlaylistItem) => {
     const allTracks = playlist.items.map(playlistItemToTrack);
