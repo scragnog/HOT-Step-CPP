@@ -310,6 +310,7 @@ Build datasets from your own audio and train adapters on your GPU, for all three
 | Optimise phase (YuE2) | Measure a prepared album before training, starting with the base model's loss per song; results saved in the dataset folder. [Details](docs/user/training/yue2.md#optimise-optional) |
 | Training on another PC | Send YuE2 batches to a second PC's GPU, then follow, listen, score and fetch the adapters from this one. [Details](docs/user/training/yue2.md#training-on-another-pc) |
 | Quality presets | Fast, Balanced and Thorough presets on the training forms. |
+| YuE2 saved presets | Named training settings load with server-resolved legacy defaults while current dataset and output paths stay in place. [Details](docs/user/training/yue2.md#recommended-settings) |
 | Adapter methods | DoRA, rsLoRA, LoRA+, HiRA, LoHa, PiSSA and HRA, plus learned artist tokens and a trainable KV prefix on the LM trainers. |
 | Small PiSSA adapters | The base model's own directions ship once, so each adapter carries only what it learned. |
 | Quantized-base training | Train against a K-quant or MXFP4 base for a much lower VRAM floor. |

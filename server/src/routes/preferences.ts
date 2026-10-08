@@ -27,8 +27,9 @@ import { typedDocuments } from './workflows.js';
 import { PRESET_FAMILIES, SINGLETON_FAMILIES, type PresetFamily, type SingletonFamily } from '../services/preferences/kinds.js';
 import { getSingleton, importPreset, importSingleton, upsertSingleton, LOCAL_OWNER } from '../services/preferences/presets.js';
 import {
-  createPreferenceSchema, importPreferenceBatchSchema, updatePreferenceSchema,
+  createPreferenceSchema, importPreferenceBatchSchema, resolveYue2PresetSchema, updatePreferenceSchema,
 } from '../contracts/preferences.js';
+import { resolveYue2Preset } from '../services/preferences/yue2PresetPolicy.js';
 
 const router = Router();
 
@@ -56,6 +57,12 @@ const singletonFamily = (req: Request) => {
 };
 
 // ── Named presets ───────────────────────────────────────────────────────────
+
+router.post('/presets/yue2-joint/resolve', (req, res) => {
+  const parsed = resolveYue2PresetSchema.safeParse(req.body);
+  if (!parsed.success) { invalid(res, 'YuE2 preset application', parsed.error.issues); return; }
+  res.json({ result: resolveYue2Preset(parsed.data) });
+});
 
 router.get('/presets/:family', handle(req => {
   const { def } = presetFamily(req);

@@ -49,15 +49,28 @@ export type AiContinueTemplateBody = z.infer<typeof aiContinueTemplateBodySchema
 // `version: 2` marks the current preset shape; its absence marks a legacy
 // preset. That is a business-level version inside the body, not this
 // document's schemaVersion — the legacy-upgrade behavior (adapterType,
-// LoRA stop defaults, dropping a stale `lr`) is Yue2AitkTrainCard's own
-// load-time logic (Slice J) and is preserved here by not reshaping `settings`.
+// LoRA stop defaults) is resolved by the server when a preset is applied.
+// Raw settings remain unchanged for import, export and editing.
 
 export const yue2JointPresetBodySchema = z.object({
   name: z.string().min(1).max(200),
-  version: z.literal(2).optional(),
+  version: z.union([z.literal(1), z.literal(2)]).optional(),
   settings: z.record(z.string(), z.unknown()),
 });
 export type Yue2JointPresetBody = z.infer<typeof yue2JointPresetBodySchema>;
+
+/** POST /api/preferences/presets/yue2-joint/resolve. The caller supplies its
+ * current form because presets intentionally omit per-run paths and fields. */
+export const resolveYue2PresetSchema = z.object({
+  preset: yue2JointPresetBodySchema,
+  currentForm: z.record(z.string(), z.unknown()),
+  lyricTiming: z.boolean(),
+});
+export type ResolveYue2PresetRequest = z.infer<typeof resolveYue2PresetSchema>;
+export interface ResolveYue2PresetResult {
+  effectiveForm: Record<string, unknown>;
+  lyricTiming: boolean;
+}
 
 // ── STORM tuning (operational settings, one current-value document) ────────
 //

@@ -8,6 +8,7 @@
 import type {
   AiContinuePresetBody, AiContinueTemplateBody, ImportPreferenceItem, ImportPreferenceResult,
   StormTuningBody, VstChainPresetBody, Yue2JointPresetBody,
+  ResolveYue2PresetResult,
 } from '../../../server/src/contracts/preferences';
 import type { TypedDocument } from '../../../server/src/contracts/workflow';
 import { WorkflowRequestError } from './workflowApi';
@@ -38,6 +39,9 @@ export async function hashImportValue(raw: string): Promise<string> {
 
 export const preferencesApi = {
   presets: {
+    resolveYue2Joint: <T extends object>(preset: { name: string; version?: 1 | 2; settings: object }, currentForm: T, lyricTiming: boolean) =>
+      request<{ result: Omit<ResolveYue2PresetResult, 'effectiveForm'> & { effectiveForm: T } }>(
+        '/api/preferences/presets/yue2-joint/resolve', 'POST', { preset, currentForm, lyricTiming }),
     list: <T>(family: PresetFamily) => request<{ documents: TypedDocument<T>[] }>(`/api/preferences/presets/${family}`),
     create: <T>(family: PresetFamily, body: T) => request<{ document: TypedDocument<T> }>(`/api/preferences/presets/${family}`, 'POST', { body }),
     update: <T>(family: PresetFamily, docId: string, expectedRevision: number, body: T) =>

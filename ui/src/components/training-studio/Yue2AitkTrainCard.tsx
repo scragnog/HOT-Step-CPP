@@ -5,6 +5,7 @@ import { AlertTriangle, Download, Loader2, Play, RotateCcw, Save, Upload, X } fr
 import { useTranslation } from 'react-i18next';
 
 import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
+import { preferencesApi } from '../../services/preferencesApi';
 import { captureJointOverrides, submitJointStart } from './yue2JointCommand';
 import { currentWorkerRef } from '../../services/trainingOperations';
 import * as preparationApi from '../../services/trainingPreparationApi';
@@ -401,6 +402,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const { t } = useTranslation();
   const [blindRungs] = usePersistedState('hs-yue2-blind-rungs', true);
   const [form, setForm] = useState<Yue2JointTrainRequest>(() => readStoredForm(datasetId));
+  const latestForm = useRef(form);
+  latestForm.current = form;
+  const latestLyricTiming = useRef(lyricTiming);
+  latestLyricTiming.current = lyricTiming;
+  const presetLoadRequest = useRef(0);
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
   const [jointPipelineId, setJointPipelineId] = useState('');
   // Tracks with no .yue2.txt are re-captioned from the audio before training
@@ -451,6 +457,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   });
   const [presetName, setPresetName] = useState('');
   const [presetError, setPresetError] = useState('');
+  const [presetLoading, setPresetLoading] = useState(false);
   // The saved form, with the dataset's own manifest over whatever was saved:
   // a saved path that differs came from another dataset and trained its album.
   const readPrepare = (): PrepareForm => {
@@ -896,11 +903,26 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     });
     if (lyricTiming) onLyricTimingChange(false);
   };
-  const loadPreset = (preset: Yue2JointPreset) => {
-    // A preset saved before adapter types existed was a LoRA recipe; without
-    // this it would load its LoRA alpha onto the LoKr default.
-    setForm(previous => ({ ...previous, adapterType: 'lora', ...LORA_STOP, cautious: false, ...preset.settings }));
-    if (preset.version === 2 && typeof preset.settings.lyricTiming === 'boolean') onLyricTimingChange(preset.settings.lyricTiming);
+  const loadPreset = async (preset: Yue2JointPreset) => {
+    const request = ++presetLoadRequest.current;
+    setPresetLoading(true);
+    setPresetError('');
+    try {
+      const { result } = await preferencesApi.presets.resolveYue2Joint(preset, form, lyricTiming);
+      if (request !== presetLoadRequest.current) return;
+      if (latestForm.current !== form || latestLyricTiming.current !== lyricTiming) {
+        throw new Error(t('trainingStudio.yue2.method.presetFormChanged',
+          'The form changed while the preset was loading. Choose the preset again.'));
+      }
+      setForm(result.effectiveForm);
+      onLyricTimingChange(result.lyricTiming);
+    } catch (err) {
+      if (request !== presetLoadRequest.current) return;
+      setPresetError(t('trainingStudio.yue2.method.presetLoadFailed', 'Could not load preset: {{error}}',
+        { error: err instanceof Error ? err.message : String(err) }));
+    } finally {
+      if (request === presetLoadRequest.current) setPresetLoading(false);
+    }
   };
   const removePreset = (name: string) => {
     if (!window.confirm(t('trainingStudio.yue2.method.presetDeleteConfirm', 'Delete the preset "{{name}}"?', { name }))) return;
@@ -1187,7 +1209,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             return <span key={preset.name} className={`inline-flex items-center gap-1 rounded-lg border-2 pl-3 pr-1 py-1 text-xs ${on
               ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
               : 'border-zinc-300 dark:border-white/15 text-zinc-800 dark:text-zinc-100'}`}>
-              <button type="button" onClick={() => loadPreset(preset)} disabled={busy}
+              <button type="button" onClick={() => void loadPreset(preset)} disabled={busy || presetLoading}
                 title={t('trainingStudio.yue2.method.presetLoad', 'Load this preset into the form')}
                 className="font-semibold hover:underline disabled:no-underline disabled:opacity-40">{preset.name}</button>
               <button type="button" onClick={() => updatePreset(preset)} disabled={busy}
