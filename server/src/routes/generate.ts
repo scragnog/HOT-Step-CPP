@@ -44,12 +44,24 @@ import type {
   GenerationOutcome,
 } from '../services/backends/types.js';
 import { openStreamSession, type StreamSession } from '../services/streamSessions/index.js';
+import { getDb } from '../db/database.js';
+import { GenerationJobLedger, ledgerStatusBody, type LedgerEntry } from '../services/generation/jobLedger.js';
 
 export type { GenerationJob, StageTiming } from '../services/generation/jobTypes.js';
 
 const router = Router();
 
 const jobs = new Map<string, GenerationJob>();
+
+// Each job's outcome, kept in the database so /status can still answer after a
+// restart empties `jobs` (services/generation/jobLedger.ts). Best-effort: a
+// ledger failure is logged and never blocks or fails a generation.
+let ledgerInstance: GenerationJobLedger | null = null;
+function withLedger(what: string, fn: (ledger: GenerationJobLedger) => void): void {
+  try { fn(ledgerInstance ??= new GenerationJobLedger(getDb())); } catch (err) {
+    console.warn(`[Generate] job ledger ${what} failed: ${(err as Error).message}`);
+  }
+}
 
 // TTL cleanup: prune terminal jobs older than 1 hour every 10 minutes.
 // Prevents unbounded memory growth during long batch sessions.
@@ -235,7 +247,10 @@ function enqueueGeneration(job: GenerationJob): void {
     // The retry loop above swallows every generation failure, so reaching here
     // means the lane itself broke. Never leave that silent.
     console.error(`[Generate] Job ${job.id} lane error:`, err?.message || err);
-  }).finally(() => noteFinished(family));
+  }).finally(() => {
+    noteFinished(family);
+    withLedger('finish', ledger => ledger.finished(job));
+  });
 }
 
 // POST /api/generate — start a generation job
@@ -378,6 +393,7 @@ export async function submitGeneration(raw: any, userId: string | null): Promise
   }
 
   jobs.set(job.id, job);
+  withLedger('open', ledger => ledger.opened(job));
 
   // Enqueue — runs immediately if nothing else is generating,
   // otherwise waits until the current job finishes.
@@ -400,7 +416,14 @@ router.post('/', generateCapture, async (req, res) => {
 // GET /api/generate/status/:id — poll job status
 router.get('/status/:id', (req, res) => {
   const job = jobs.get(req.params.id);
-  if (!job) { res.status(404).json({ error: 'Job not found' }); return; }
+  if (!job) {
+    // Gone from memory: a restart, or the one-hour prune. The ledger says how it ended.
+    let entry: LedgerEntry | null = null;
+    withLedger('read', ledger => { entry = ledger.get(req.params.id); });
+    if (entry) { res.json(ledgerStatusBody(entry)); return; }
+    res.status(404).json({ error: 'Job not found' });
+    return;
+  }
 
   res.json({
     jobId: job.id,
@@ -592,6 +615,7 @@ router.post('/reset-queue', (_req, res) => {
       job.status = 'failed';
       job.error = 'Queue reset by user';
       job.stage = 'Reset';
+      withLedger('finish', ledger => ledger.finished(job));
       if (job.aceJobId) {
         aceClient.cancelJob(job.aceJobId).catch(() => {});
       }
