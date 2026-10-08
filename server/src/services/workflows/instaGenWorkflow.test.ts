@@ -83,6 +83,14 @@ test('instrumental and missing metadata keep old request defaults', () => {
   assert.equal(noDuration.duration, undefined, 'a backend without editable duration never gets the estimate');
 });
 
+test('a user-set duration wins over the LM estimate; auto (-1) still falls back to it', () => {
+  const userSet = { ...input, engineParams: { ...input.engineParams, duration: 10 } };
+  assert.equal(effectiveInstaRequest(userSet, result).duration, 10, 'Custom-Gen duration must not be overwritten by the LM result');
+  const auto = { ...input, engineParams: { ...input.engineParams, duration: -1 } };
+  assert.equal(effectiveInstaRequest(auto, result).duration, 190, 'the -1 auto sentinel still defers to the LM estimate');
+  assert.equal(effectiveInstaRequest(input, result).duration, 190, 'no engineParams duration also falls back to the LM estimate');
+});
+
 test('approval uses its document revision; edits and backend changes cannot silently alter an accepted render', async () => {
   const s = setup();
   const preview = s.submit('insta-preview', 'p', input as unknown as Record<string, unknown>);

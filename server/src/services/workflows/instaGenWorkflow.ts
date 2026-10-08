@@ -62,7 +62,12 @@ export function effectiveInstaRequest(input: InstaInput, result: InstaResult, ed
     expectedBackend: input.expectedBackend,
   };
   if (result.bpm) request.bpm = result.bpm;
-  if (result.duration && editableDuration) request.duration = result.duration;
+  // A user-set duration (engineParams.duration, already spread onto request
+  // above) wins; the LM's estimate is only a fallback when the user left it
+  // on auto (absent, or the app's -1 "auto" sentinel).
+  const userDuration = input.engineParams.duration;
+  const hasUserDuration = typeof userDuration === 'number' && userDuration > 0;
+  if (result.duration && editableDuration && !hasUserDuration) request.duration = result.duration;
   if (result.keyScale) request.keyScale = result.keyScale;
   if (result.timeSignature) request.timeSignature = result.timeSignature;
   return request;
