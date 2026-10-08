@@ -75,7 +75,7 @@ export const RecentExtractions: React.FC<RecentExtractionsProps> = ({ onSelectJo
             role="button"
             tabIndex={0}
             onClick={() => onSelectJob(job.id)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectJob(job.id); } }}
+            onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onSelectJob(job.id); } }}
             style={{
               ...styles.jobItem,
               background: activeJobId === job.id ? 'rgba(167,139,250,0.12)' : 'rgba(255,255,255,0.02)',

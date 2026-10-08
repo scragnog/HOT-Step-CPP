@@ -681,7 +681,7 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
                   tabIndex={0}
                   className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors cursor-pointer"
                   onClick={() => setExpandedId(isExpanded ? null : gen.id)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpandedId(isExpanded ? null : gen.id); } }}
+                  onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setExpandedId(isExpanded ? null : gen.id); } }}
                 >
                   {isExpanded
                     ? <ChevronDown className="w-4 h-4 text-zinc-500 flex-shrink-0" />
