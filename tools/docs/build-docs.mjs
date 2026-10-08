@@ -125,11 +125,18 @@ export function trainingOperationRoutes(root = ROOT) {
     const where = path.relative(root, file).replaceAll('\\', '/');
     for (const [, domain, mountFn] of src.matchAll(/^registerTrainingOperations\('([a-z][a-z0-9-]*)',\s*(\w+)\)/gm)) {
       const body = functionBody(src, mountFn, where);
-      for (const m of body.matchAll(/router\.(get|post|put|delete|patch)\(\s*(['"`])([^'"`]*)\2/g)) {
-        const [, verb, quote, raw] = m;
+      // Every call on the mount's router parameter, whatever it is named. Only
+      // a verb with a string literal path is understood; anything else throws.
+      const router = body.match(/^function \w+\s*\(\s*(\w+)/)?.[1];
+      if (!router) throw new Error(`${where}: ${mountFn} takes no router parameter`);
+      for (const call of body.matchAll(new RegExp(`\\b${router}\\s*\\.\\s*(\\w+)\\s*\\(`, 'g'))) {
+        const after = body.slice(call.index + call[0].length);
+        const m = /^(get|post|put|delete|patch)$/.test(call[1]) ? after.match(/^\s*(['"`])([^'"`]*)\1/) : null;
+        if (!m) throw new Error(`${where}: cannot index ${router}.${call[1]}(${after.slice(0, 40).split('\n')[0]}…); use a verb with a literal path`);
+        const [verb, quote, raw] = [call[1], m[1], m[2]];
         let paths = [raw];
         for (const [token, name] of quote === '`' ? raw.matchAll(/\$\{(\w+)\}/g) : []) {
-          const loop = [...body.slice(0, m.index).matchAll(new RegExp(`for \\(const ${name} of \\[([^\\]]*)\\]`, 'g'))].pop();
+          const loop = [...body.slice(0, call.index).matchAll(new RegExp(`for \\(const ${name} of \\[([^\\]]*)\\]`, 'g'))].pop();
           if (!loop) throw new Error(`${where}: ${verb} ${raw} uses ${token} without a literal loop array`);
           const values = [...loop[1].matchAll(/'([^']*)'/g)].map((v) => v[1]);
           paths = paths.flatMap((p) => values.map((value) => p.replaceAll(token, value)));

@@ -6,8 +6,9 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import express, { type Router } from 'express';
 
-// Preparation keeps its records under the training dir; never the real one.
-process.env.TRAINING_DIR ||= fs.mkdtempSync(path.join(os.tmpdir(), 'training-starts-'));
+// Always a fresh training dir, even when the caller set one: importing the
+// preparation domain opens its pipeline, which marks active records interrupted.
+process.env.TRAINING_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'training-starts-'));
 
 const { TRAINING_JOB_ROUTES, TRAINING_STARTS, jointStartRequest, recipeResolveRequest, trainingStartBase, trainingStartPath } =
   await import('./trainingStarts.js');

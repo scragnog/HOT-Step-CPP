@@ -69,7 +69,7 @@ Resolving writes nothing and starts nothing. Before starting, check that the wor
 |---|---|---|---|
 | `ace-lm` | `POST /datasets/:id/train-lm` | 202 `{ jobId }` | The dataset is built (`POST /datasets/:id/build`) and preprocessed (`POST /datasets/:id/preprocess`, which writes the tensors); an LM base model is installed. |
 | `ace-dit` | `POST /datasets/:id/train-dit` | 202 `{ jobId }` | Built and preprocessed, the requested preprocess variant exists, the DiT base is installed. |
-| `mm3-lm` | `POST /datasets/:id/mm3-train-lm` | 200 `{ jobId, kind, runName, outDir, attnBackend }` | MM3 models installed, MM3 codes written (`POST /datasets/:id/mm3-codes`), a `.mm3.txt` caption for each sample. A shared caption file is refused. |
+| `mm3-lm` | `POST /datasets/:id/mm3-train-lm` | 200 `{ jobId, kind, runName, outDir, attnBackend }` | MM3 models installed, MM3 codes written (`POST /datasets/:id/mm3-codes`), and at least one track with a `.mm3.txt` caption beside its audio. The trainer skips tracks without one; with none at all the route answers 400. A shared caption file is refused. |
 | `yue2-nar` | `POST /datasets/:id/yue2-train` | 200 `{ jobId, kind, runName, outDir, clips, … }` | YuE2 models installed, the latent cache built (`POST /datasets/:id/yue2-preprocess`), a trigger word unless `allowNoTrigger`. |
 | `yue2-ar` | `POST /datasets/:id/yue2-ar-train` | 200 `{ jobId, kind, runName, outDir, warnings, … }` | As NAR, plus the minted pack unless `allowNoMinted`, cursor spans when `cursorWeight` is set, and `steps` within the overtrain limit unless `allowOvertrain`. |
 

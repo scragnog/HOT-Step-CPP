@@ -37,7 +37,7 @@ test('registered domains are read from their mount functions, loops expanded', (
       "registerTrainingOperations('things', mountThings);",
     ].join('\n'),
     'server/src/services/training/deep/other.ts':
-      "function mountOther(router) { router.delete('/:id', h); }\nregisterTrainingOperations('other', mountOther);\n",
+      "function mountOther(r: Router) { r.delete('/:id', h); }\nregisterTrainingOperations('other', mountOther);\n",
     'server/src/services/training/things.test.ts': "registerTrainingOperations('test-only', mountThings);\n",
   });
   try {
@@ -55,6 +55,9 @@ test('a path it cannot expand, or a mount function it cannot find, is an error',
   for (const [file, pattern] of [
     ["function mountX(router) { router.get(`/${kind}`, h); }\nregisterTrainingOperations('x', mountX);\n", /without a literal loop array/],
     ["registerTrainingOperations('x', mountElsewhere);\n", /not a function in that file/],
+    // A path held in a variable, or any non-verb call, is never skipped silently.
+    ["function mountX(router) { const route = '/start'; router.post(route, h); }\nregisterTrainingOperations('x', mountX);\n", /cannot index router\.post\(route/],
+    ["function mountX(router) { router.use('/sub', other); }\nregisterTrainingOperations('x', mountX);\n", /cannot index router\.use/],
   ]) {
     const root = fixture({ 'server/src/services/training/x.ts': file });
     try { assert.throws(() => trainingOperationRoutes(root), pattern); }

@@ -151,8 +151,9 @@ export interface TrainingStartResponses {
 }
 
 /** A start route's refusal. 400 for a bad or unusable body, 404 for an
- *  unknown dataset, 409 when a job already runs for the dataset (or the joint
- *  admission is missing or used), 503 when the trainer binary is missing. */
+ *  unknown dataset, 409 when a job already runs for the dataset (or a joint
+ *  body carries an admission that was never issued or was already used; a
+ *  body without one is accepted), 503 when the trainer binary is missing. */
 export interface TrainingStartError { error: string }
 
 /** GET /api/training/jobs/:jobId. */
