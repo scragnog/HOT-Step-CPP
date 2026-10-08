@@ -162,7 +162,9 @@ its value has moved from the default; click it to snap that one field back.
   re-uploading a track you already analysed here skips analysis and reuses the
   cache.
 - Covers queue rather than block the UI: you can adjust settings and start another
-  cover while one is still rendering.
+  cover while one is still rendering. Uploaded-source covers are submitted to the
+  server as soon as you start them, so a queued cover remains there if you close
+  or reload the page.
 - For ACE-Step, if Whisper lyric transcription is enabled in [generation](../generation.md)
   settings, generated covers get the same LRC-synced lyrics as any other track.
 - Finished covers save to the library tagged with their source, alongside every

@@ -300,8 +300,10 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     const source = asset(data.assetId, ctx.userId);
     if (source.sha256 !== data.sha256) throw new WorkflowError(409, 'Cover source changed');
     if (!await (deps.capability || defaultCapability)(input.expectedBackend)) throw new WorkflowError(400, 'Backend does not support covers');
-    const request = effectiveCoverRequest(input, data, source.url);
     ctx.throwIfCancelled();
+    const current = draft(docs(), input.documentId, input.revision, ctx.userId);
+    if (current.assetId !== data.assetId || current.sha256 !== source.sha256) throw new WorkflowError(409, 'Cover source changed');
+    const request = effectiveCoverRequest(input, current, source.url);
     const item = ctx.audio.enqueue('render', request, { source: 'cover-studio', workflowJobId: ctx.jobId });
     const finished = await ctx.audio.wait(item.id);
     ctx.throwIfCancelled();

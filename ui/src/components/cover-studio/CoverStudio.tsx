@@ -873,9 +873,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const qId = addManualQueueItem({ title: songArtist
       ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover'),
       artistName: artists.find(a => a.id === selectedArtistId)?.name || '', caption: artistCaption });
-    updateManualQueueItem(qId, { stage: _coverRunning ? 'Queued…' : 'Preparing…' });
+    updateManualQueueItem(qId, { stage: 'Preparing…' });
     setIsGenerating(true);
-    enqueueCoverJob(async () => {
+    void (async () => {
     let workflowId = '';
     try {
       const { job } = await coverWorkflowApi.render(token, input);
@@ -896,10 +896,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     } catch (err: any) {
       failManualQueueItem(qId, err.message || 'Generation failed');
     } finally {
-      if (_coverQueue.length === 0) { setIsGenerating(false); setActiveJobId(null); setQueueItemId(null); }
+      if (coverRenderJobRef.current === workflowId) {
+        setIsGenerating(false); setActiveJobId(null); setQueueItemId(null);
+      }
       if (workflowId && coverRenderJobRef.current === workflowId) coverRenderJobRef.current = '';
     }
-    });
+    })();
   };
 
   const handleGenerate = () => {

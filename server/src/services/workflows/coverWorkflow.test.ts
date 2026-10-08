@@ -25,7 +25,7 @@ const input: CoverRenderInput = {
 };
 
 function setup(opts: { transcribe?: (signal: AbortSignal) => Promise<{ abc: string }>;
-  audioStatus?: 'pending' | 'succeeded' } = {}) {
+  audioStatus?: 'pending' | 'succeeded'; capability?: (backend: string) => Promise<boolean> } = {}) {
   const db = new Database(':memory:');
   const documents = new WorkflowDocuments(db);
   const items = new Map<string, AudioIntentItem>();
@@ -52,7 +52,7 @@ function setup(opts: { transcribe?: (signal: AbortSignal) => Promise<{ abc: stri
     metadata: async () => ({ artist: '', title: '', album: '', duration: null }),
     analyze: async () => ({ bpm: 100, key: 'C', scale: 'minor' }),
     transcribe: async (_url, _label, _user, signal) => opts.transcribe?.(signal) || { abc: 'X:1\nK:C\nC|' },
-    capability: async backend => backend === 'ace' || backend === 'yue2',
+    capability: opts.capability || (async backend => backend === 'ace' || backend === 'yue2'),
     caption: async () => ({ text: 'Resolved style' }),
   })) jobs.register(kind);
   const submit = (kind: string, key: string, body: Record<string, unknown>) =>
@@ -189,6 +189,48 @@ test('approved ACE render uses the captured asset and returns the audio result',
   assert.deepEqual(result.audio.songIds, ['song-1']);
   assert.equal(result.request.sourceAudioUrl, '/references/source.wav');
   assert.equal(result.request.expectedBackend, 'ace');
+});
+
+test('render rejects edit and deletion during capability lookup before audio enqueue', async () => {
+  for (const change of ['edit', 'delete'] as const) {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const s = setup({ capability: async () => { await gate; return true; } });
+    const opened = await s.open();
+    const job = s.submit('cover-render', change, { ...input, ...opened }).job;
+    const current = s.documents.get(opened.documentId, 'owner');
+    if (change === 'edit') s.documents.update(opened.documentId, 'owner', opened.revision,
+      { ...current.data, caption: 'New caption' });
+    else s.db.prepare('DELETE FROM workflow_documents WHERE id = ?').run(opened.documentId);
+    release();
+    await s.jobs.settled();
+    assert.equal(s.jobs.get(job.id).status, 'failed');
+    assert.equal(s.items.size, 0);
+  }
+});
+
+test('two cover submissions survive a browser disconnect and server restart', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const s = setup({ capability: async () => { await gate; return true; } });
+  const opened = await s.open();
+  const first = s.submit('cover-render', 'first', { ...input, ...opened }).job;
+  const second = s.submit('cover-render', 'second', { ...input, ...opened,
+    title: 'Second cover' }).job;
+  assert.equal(s.items.size, 0);
+  assert.equal(s.jobs.get(first.id).status, 'running');
+  assert.equal(s.jobs.get(second.id).status, 'pending');
+  const restarted = new WorkflowJobs({ db: s.db, audio: {
+    enqueue: () => { throw new Error('must not resubmit'); },
+    get: () => { throw new Error('must not poll'); },
+    cancel: () => { throw new Error('must not cancel'); },
+  } });
+  restarted.reconcileAfterRestart();
+  assert.equal(restarted.get(first.id).status, 'interrupted');
+  assert.equal(restarted.get(second.id).status, 'pending');
+  assert.equal((restarted.get(second.id).input as CoverRenderInput).title, 'Second cover');
+  release();
+  await s.jobs.settled();
 });
 
 test('render cancellation cancels the audio intent', async () => {
