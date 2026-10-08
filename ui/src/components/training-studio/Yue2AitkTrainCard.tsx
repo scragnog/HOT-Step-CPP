@@ -1,12 +1,12 @@
 import { YUE2_JOINT_LADDER_PREVIEW, YUE2_JOINT_TUNED_KEYS, YUE2_JOINT_LORA_STOP, YUE2_JOINT_LOKR_STOP, YUE2_JOINT_LEGACY_VALUES, YUE2_JOINT_BASE_MATCHED_VALUES, YUE2_JOINT_PRESETS, YUE2_JOINT_BASE_MATCHED_DEFAULTS } from '../../../../server/src/contracts/trainingRecipes';
-import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
 import { YUE2_JOINT_FORM_DEFAULTS } from '../../../../server/src/contracts/trainingRecipes';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Download, Loader2, Play, RotateCcw, Save, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
-import { captureJointOverrides } from './yue2JointCommand';
+import { captureJointOverrides, submitJointStart } from './yue2JointCommand';
+import * as preparationApi from '../../services/trainingPreparationApi';
 import { TrainingChart } from './TrainingChart';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Yue2LadderReview } from './Yue2LadderReview';
@@ -26,7 +26,6 @@ import {
   jobStreamUrl,
   pickLadderRun,
   startYue2AitkPrepare,
-  startYue2JointTrain,
   type Yue2AitkPrepareRequest,
   type TrainingJobSummary,
   type TrainingMetricEvent,
@@ -46,6 +45,8 @@ import { descentRate, formatDurationMs } from '../../utils/trainingEta';
 const JOB_KEY = 'hs-yue2-aitk-job:';
 export const FORM_KEY = 'hs-yue2-aitk-form:';
 export const PREP_KEY = 'hs-yue2-aitk-prepare:';
+// These dataset-scoped keys are local editing drafts; the accepted operation
+// carries its own captured form and source revisions.
 const METRIC_CAP = 2000;
 // Chart caches (~120 KB a run) were never deleted and filled the 5 MB storage
 // quota, after which every unguarded write on the Train page threw and blanked
@@ -400,6 +401,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const [blindRungs] = usePersistedState('hs-yue2-blind-rungs', true);
   const [form, setForm] = useState<Yue2JointTrainRequest>(() => readStoredForm(datasetId));
   const [job, setJob] = useState<TrainingJobSummary | null>(null);
+  const [jointPipelineId, setJointPipelineId] = useState('');
   // Tracks with no .yue2.txt are re-captioned from the audio before training
   // (on by default): otherwise they train on the long ACE caption. Gemini's
   // model list is the live one the Label panel uses.
@@ -697,6 +699,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     setPrepare(readPrepare());
     setPrepareManifest(readStored<string>(`${PREP_KEY}${datasetId}:manifest`, ''));
     setJob(null);
+    setJointPipelineId('');
     setPrepareJob(null);
     setAppliedPrepareJobId(readStored<string>(`${PREP_KEY}${datasetId}:applied`, ''));
     setError('');
@@ -780,6 +783,31 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     }, 1500);
     return () => window.clearInterval(timer);
   }, [datasetId, job?.id, job?.status]);
+
+  useEffect(() => {
+    if (!jointPipelineId) return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const pipeline = await preparationApi.getYue2Preparation(jointPipelineId);
+        const current = await preparationApi.getYue2PreparationJob<TrainingJobSummary>(jointPipelineId);
+        if (cancelled) return;
+        if (current && isJointJob(current, datasetId)) {
+          setJob(current);
+          writeStored(`${JOB_KEY}${datasetId}`, current.id);
+        }
+        if (['done', 'failed', 'cancelled', 'interrupted'].includes(pipeline.status)) {
+          if (pipeline.error) setError(pipeline.error);
+          setJointPipelineId('');
+        }
+      } catch (err) {
+        if (!cancelled) { setError(err instanceof Error ? err.message : String(err)); setJointPipelineId(''); }
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 1500);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [datasetId, jointPipelineId]);
 
   useEffect(() => {
     if (!prepareJob || !['queued', 'running'].includes(prepareJob.status)) return;
@@ -894,14 +922,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     setStarting(true); setError('');
     try {
       const request = await captureJointRequest();
-      const recipe = await resolveTrainingRecipe<Yue2JointTrainRequest>('yue2-joint', request);
-      assertRecipeWorker(recipe);
-      const result = await startYue2JointTrain(datasetId, recipe.execution as unknown as Yue2JointTrainRequest);
+      const pipeline = await submitJointStart(datasetId, request, {
+        getContext: preparationApi.getYue2PreparationContext,
+        start: preparationApi.startYue2Preparation,
+      });
       // A new run takes the ladder over from whatever was picked before.
       setPickedLadderRun('');
-      if (typeof window !== 'undefined') writeStored(`${JOB_KEY}${datasetId}`, result.jobId);
-      setJob(await getJob(result.jobId));
-      return result.jobId;
+      setJointPipelineId(pipeline.id);
+      return pipeline.id;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       return null;
@@ -925,11 +953,15 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     } finally { setStarting(false); }
   };
   const stop = async () => {
-    if (!job) return;
+    if (!job && !jointPipelineId) return;
     setError('');
     try {
-      await cancelJob(job.id);
-      setJob(await getJob(job.id));
+      if (jointPipelineId) {
+        await preparationApi.commandYue2Preparation(jointPipelineId, 'cancel');
+      } else if (job) {
+        await cancelJob(job.id);
+        setJob(await getJob(job.id));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -960,7 +992,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       cursorWeight: saved.alignment?.cursorWeight ?? previous.cursorWeight }));
     if (saved.alignment) onLyricTimingChange(saved.alignment.enabled === true);
   };
-  const active = job?.status === 'queued' || job?.status === 'running';
+  const active = !!jointPipelineId || job?.status === 'queued' || job?.status === 'running';
   const preparing = prepareJob?.status === 'queued' || prepareJob?.status === 'running';
   const input = 'w-full px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20 disabled:opacity-50';
   // Shared with field()'s own input below — a reset needs the same lock its
@@ -1662,10 +1694,10 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </div>
       </div>}
       <div className="mt-4 flex items-center gap-3 flex-wrap">
-        <button type="button" onClick={() => void run()} disabled={!!batchDraft?.length || active || preparing || starting || yue2RunAllActive || (resumeChoice || form.resume?.trim() ? !form.dataset : (!prepare.legacyManifest || !prepare.tokenizer)) || (!resumeChoice && lyricTiming && !cursorReady)}
+        <button type="button" onClick={() => void run()} disabled={!!batchDraft?.length || active || preparing || starting || !!jointPipelineId || yue2RunAllActive}
           className="px-4 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 flex items-center gap-2">
           {starting ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-          {active ? (job?.phase === 'preparing' ? t('trainingStudio.yue2.method.preparing', 'Preparing dataset…') : t('trainingStudio.yue2.method.running', 'Joint training is running')) : t('trainingStudio.yue2.method.start', 'Start joint training')}
+          {jointPipelineId && !job ? t('trainingStudio.yue2.method.admitting', 'Starting joint training…') : active ? (job?.phase === 'preparing' ? t('trainingStudio.yue2.method.preparing', 'Preparing dataset…') : t('trainingStudio.yue2.method.running', 'Joint training is running')) : t('trainingStudio.yue2.method.start', 'Start joint training')}
         </button>
         {active && <button type="button" onClick={() => void stop()} className="text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
         {job && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">{job.status} · {job.phase || 'waiting'}{!(ladderRunRec && blindRungs) && progress}

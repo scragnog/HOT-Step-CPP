@@ -1,5 +1,10 @@
 import { YUE2_JOINT_LADDER_PREVIEW } from '../../../../server/src/contracts/trainingRecipes';
 import type { Yue2AitkPrepareRequest, Yue2JointTrainRequest, Yue2JointPreviewOptions } from '../../services/trainingApi';
+import { TRAINING_RECIPE_VERSION } from '../../../../server/src/contracts/trainingRecipes';
+import { snapshotFor } from '../../services/trainingOperations';
+import type { TrainingDatasetRef, TrainingSourceRef } from '../../../../server/src/contracts/trainingOperation';
+import type { Yue2PreparationPayload } from '../../services/trainingPreparationApi';
+import type { Yue2PreparationSummary } from '../../services/trainingPreparationApi';
 
 /** Capture the visible joint form before submitting a preparation chain. */
 export function captureJointOverrides(
@@ -20,4 +25,22 @@ export function captureJointOverrides(
     ...(form.resume?.trim() && !resumeChoice ? { resume: form.resume.trim() } : {}),
     ...selectedResume };
   return structuredClone(request);
+}
+
+/** A direct Start uses prepared inputs and admits only the joint train stage. */
+export function captureJointStart(dataset: TrainingDatasetRef, source: TrainingSourceRef,
+  overrides: Record<string, unknown>, idempotencyKey: string) {
+  return snapshotFor({ kind: 'yue2-preparation', idempotencyKey, dataset, sources: [source],
+    payload: { mode: 'train-after-preparation', stages: ['joint'], trigger: '',
+      lyricTiming: Boolean(overrides.lyricTiming),
+      recipes: { joint: { version: TRAINING_RECIPE_VERSION, overrides: structuredClone(overrides) } } } as Yue2PreparationPayload });
+}
+
+export async function submitJointStart(datasetId: string, overrides: Record<string, unknown>,
+  runner: {
+    getContext: (id: string) => Promise<{ dataset: TrainingDatasetRef; source: TrainingSourceRef }>;
+    start: (snapshot: ReturnType<typeof captureJointStart>) => Promise<Yue2PreparationSummary>;
+  }, idempotencyKey = crypto.randomUUID()): Promise<Yue2PreparationSummary> {
+  const { dataset, source } = await runner.getContext(datasetId);
+  return runner.start(captureJointStart(dataset, source, overrides, idempotencyKey));
 }
