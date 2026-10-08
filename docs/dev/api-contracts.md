@@ -546,15 +546,78 @@ copies of the same shape — exactly the bug class shared contracts exist to pre
   (`{ packs, files, modelsDir, variant, cudaMajor }`); `files` are `RegistryFile` — a catalogue
   `RegistryFileEntry` (`id`, `role`, `displayName`, `scale`, `variant`, `quant`, `sizeBytes`,
   `sha256?`, `companions?`, `sm?`, `family?`, ...) plus this install's `installed`/`outdated`.
-  `POST /download` returns `DownloadStartResponse` (`{ jobId }`); `GET /downloads` streams
-  `{ jobs: DownloadJob[] }` frames (unauthenticated, via `eventSourceUrl`/`sharedEventSource`);
-  `POST /download/:id/{cancel,resume}` and `DELETE /files/:filename` are untyped acks, unchanged.
-  `ui/src/types.ts` previously kept a second, hand-written `RegistryFile`/`StarterPack` pair that
-  was missing `repoPath`, `sha256` and `companions`, and a `ModelRegistry` missing `variant` and
-  `cudaMajor` — nothing currently reads those gaps, but a future consumer would have silently
-  gotten `undefined`. It now re-exports the server's types instead of keeping its own.
+  `POST /download` and `POST /download/:id/resume` both return `DownloadStartResponse`
+  (`{ jobId }`); `GET /downloads` streams `{ jobs: DownloadJob[] }` frames (unauthenticated, via
+  `eventSourceUrl`/`sharedEventSource`); `POST /download/:id/cancel` and
+  `DELETE /files/:filename` are untyped `{ ok: boolean }` acks, unchanged. `ui/src/types.ts`
+  previously kept a second, hand-written `RegistryFile`/`StarterPack` pair that was missing
+  `repoPath`, `sha256` and `companions`, and a `ModelRegistry` missing `variant` and `cudaMajor`
+  — nothing currently reads those gaps, but a future consumer would have silently gotten
+  `undefined`. It now re-exports the server's types instead of keeping its own.
 
-Other legacy inline-shaped routes (`health`, `shutdown`, `settings`, `profiles`, `mastering`,
-`adapters`, `vst`, `seeds`) have the same pattern — an ad-hoc inline type in `api.ts` with no
-server-side counterpart — and are left for a later slice; `api.ts`'s per-call inline types for
-them are unchanged here.
+The remaining legacy domains predated the contracts pattern entirely — one ad-hoc inline type in
+`api.ts`, no server-side counterpart. Each now has a `server/src/contracts/<domain>.ts`; the
+route returns against it (`satisfies`, type-only, no logic or validation change) and `api.ts`
+imports the same type instead of its own copy. Errors across all of them are the ordinary
+`{ error: string }` shape `ApiError` already unwraps — only the success payloads are listed here.
+
+- **Health** (`contracts/health.ts`). `GET /health` returns `HealthResponse`: `status`,
+  `version`, `commit`, `dirty`, `engineBuiltAt` (ace-server.exe's mtime, or `null`), nested
+  `aceServer`/`server`/`engine` status, and `clients` (open SSE-holding tabs). `api.ts`'s
+  previous inline type was missing `version`, `commit`, `dirty`, `engineBuiltAt` and `clients`,
+  and marked `engine` optional when the route always sends it. `GET /presence` is a raw SSE
+  keepalive with no JSON frames and has no response type.
+- **Shutdown** (`contracts/shutdown.ts`). `POST /shutdown` and `POST /restart` both return
+  `{ success: boolean; message: string }` (`ShutdownResponse`/`RestartResponse`, identical
+  shape, named separately for the two operations). A restart-marker write failure is `500
+  { error }`.
+- **Settings** (`contracts/settings.ts`). `GET /settings/env` returns `EnvResponse`
+  (`{ values, restartKeys }`, unset keys backfilled with their resolved default); `POST
+  /settings/env` returns `EnvUpdateResponse` (`{ updated, restartRequired }`); `GET
+  /settings/gpus` returns `GpusResponse` (`{ gpus: GpuInfo[] }`), where `GpuInfo` re-exports
+  `services/gpuDevices.ts`'s existing `NvidiaGpu` rather than a third copy of the same shape.
+- **Profiles** (`contracts/profiles.ts`). A profile is `ProfileFile` (`{ name, saved_at, data }`
+  — the same shape as an exported preset JSON, so one can be dropped into the profiles folder by
+  hand). `GET /profiles` returns `ListProfilesResponse`; `GET /profiles/:name` returns a bare
+  `ProfileFile`, `404` if missing; `POST /profiles` returns `SaveProfileResponse`; `PATCH
+  /profiles/:name` returns `RenameProfileResponse`, `409` on a name collision; `DELETE
+  /profiles/:name` returns `DeleteProfileResponse`.
+- **Mastering** (`contracts/mastering.ts`). `POST /mastering/upload-reference` (multipart,
+  bearer token) returns `UploadReferenceResponse` (`{ name, path, url }`); `GET
+  /mastering/references` returns `ListReferencesResponse`; `DELETE
+  /mastering/references/:name` returns `DeleteReferenceResponse`; `POST /mastering/run` returns
+  `RunMasteringResponse` (`{ ok, masteredUrl, songId }`), `404` for a missing song/reference.
+- **Adapters** (`contracts/adapters.ts`). `GET /adapters/browse` returns `BrowseResponse`
+  (`{ current, entries: BrowseEntry[] }`) or, on a missing directory or a read error,
+  `BrowseErrorResponse` (the same shape plus `error`) at `404`/`500` — the entries array stays
+  present either way so a caller that skips the status code still gets something to render.
+  `POST /adapters/scan` returns `ScanResponse` (`{ files: AdapterFile[] }`), always `200`
+  (an empty array for a missing/empty folder). `GET /adapters/lm` returns `LmAdaptersResponse`
+  (`{ root, adapters: LmAdapterEntry[], error? }`) — also always `200`; a scan failure sets
+  `error` rather than changing status, so the picker can still show whatever root it resolved.
+  `LmAdapterEntry` carries the per-adapter eval sidecar (`evalScore`, `evalVerdict`).
+  `api.ts`'s previous inline copy of `LmAdapterEntry` marked `lmSize`/`run`/`trigger`/
+  `triggerPosition` optional; the route always sends them, now reflected in the shared type.
+- **VST** (`contracts/vst.ts`). `VstPlugin` and `ChainEntry` used to be declared once in the
+  route file and copied again in `api.ts` (as `VstPlugin`/`VstChainEntry`) — now one definition,
+  re-exported from `api.ts` under its existing names so nothing importing from there changes.
+  `GET /vst/scan` returns `ScanPluginsResponse`; `GET`/`PUT /vst/chain` return `ChainConfig`
+  directly (`GetChainResponse`/`UpdateChainResponse`); `POST /vst/gui` returns `GuiResponse`;
+  `POST /vst/process` returns `ProcessResponse` (`{ ok, skipped? }` when no plugin is enabled,
+  else `{ ok, elapsed }`). The monitor sub-routes
+  (`start`/`stop`/`switch`/`status`/`seek`/`pause`/`resume`/`restart`) each get their own
+  response type; `api.ts`'s previous inline `monitorStatus()` type was missing `paused`, which
+  the route always sends.
+- **Seeds** (`contracts/seeds.ts`). File format matches MD_Nodes/SeedSaver (ComfyUI) —
+  `{ seed, saved_at, metadata }` — so a ComfyUI `seeds/` directory drops in and loads
+  immediately. `GET /seeds` returns `ListSeedsResponse`; `GET /seeds/favorites` returns
+  `ListFavoritesResponse`; `GET /seeds/random` returns `RandomSeedResponse`, `404` if none
+  saved; `GET /seeds/:name` returns `GetSeedResponse`, `404` if missing; `POST /seeds` returns
+  `SaveSeedResponse`; `DELETE /seeds/:name` returns `DeleteSeedResponse`; `POST
+  /seeds/:name/favorite` returns `ToggleFavoriteResponse`.
+
+Compatibility for all of the above: every change here is a type annotation (`satisfies` on an
+existing `res.json(...)` call, or a `: Type` on an existing variable) and an import swap on the
+client side. No route logic, validation, status code or response field changed; the point was
+closing the gap between what each route actually sends and what the client's type claimed it
+sends, not altering either.
