@@ -199,6 +199,8 @@ import {
 import { datasetLanguage } from '../services/languageCodes.js';
 import { getGenerations, getLyricsSet } from '../db/lireekDb.js';
 import { trainingOperationsRouter } from '../services/training/operations.js';
+// Training operation domains register themselves at import (operations.ts).
+import '../services/training/recipes/operations.js';
 import type {
   AuditionListResponse, AuditionOptions, AuditionSideSpec,
   BulkSetInput, CaptionOptions, CreateDatasetInput, FieldSource, GeniusOptions, LabelOptions, LmSize,

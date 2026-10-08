@@ -27,6 +27,7 @@ import { Mm3TrainCard } from './Mm3TrainCard';
 import { Yue2TrainStages } from './Yue2TrainStages';
 import { Yue2OptimisePanel } from './Yue2OptimisePanel';
 import { TRAIN_DIT_LOKR_DEFAULTS, TrainDitForm, type TrainDitFormState } from './TrainDitForm';
+import { assertRecipeWorker, getTrainingRecipe, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
 import { TRAIN_LM_DEFAULTS, TrainLmForm, type TrainLmFormState } from './TrainLmForm';
 import { useTrainingStream } from './useTrainingStream';
 
@@ -83,10 +84,33 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
   const startTrainLm = useTrainingStore(s => s.startTrainLm);
   const loadTrainDitStatus = useTrainingStore(s => s.loadTrainDitStatus);
   const startTrainDit = useTrainingStore(s => s.startTrainDit);
+  const trainingWorker = useTrainingStore(s => s.trainingWorker);
 
   const [form, setForm] = useState<TrainLmFormState>(TRAIN_LM_DEFAULTS);
   // K1: LoKR is the form's initial state — Rob's validated default preference.
   const [ditForm, setDitForm] = useState<TrainDitFormState>(TRAIN_DIT_LOKR_DEFAULTS);
+  const lmRecipeRef = useRef(TRAIN_LM_DEFAULTS);
+  const ditRecipeRef = useRef(TRAIN_DIT_LOKR_DEFAULTS);
+
+  // Refresh untouched fields from Node. A field edited while the request is
+  // in flight stays local; resets still use the shared recipe seed.
+  useEffect(() => {
+    let live = true;
+    const apply = <T extends object>(current: T, seed: T, incoming: T): T => {
+      const next = { ...current } as Record<string, unknown>;
+      for (const [key, value] of Object.entries(incoming)) {
+        if (Object.is((current as Record<string, unknown>)[key], (seed as Record<string, unknown>)[key])) next[key] = value;
+      }
+      return next as T;
+    };
+    void getTrainingRecipe<TrainLmFormState>('ace-lm').then(recipe => {
+      if (live) { setForm(current => apply(current, lmRecipeRef.current, (recipe.resolved ?? recipe.builtin))); lmRecipeRef.current = recipe.resolved ?? recipe.builtin; }
+    }).catch(err => { if (live) useTrainingStore.setState({ error: err instanceof Error ? err.message : String(err) }); });
+    void getTrainingRecipe<TrainDitFormState>('ace-dit').then(recipe => {
+      if (live) { setDitForm(current => apply(current, ditRecipeRef.current, (recipe.resolved ?? recipe.builtin))); ditRecipeRef.current = recipe.resolved ?? recipe.builtin; }
+    }).catch(err => { if (live) useTrainingStore.setState({ error: err instanceof Error ? err.message : String(err) }); });
+    return () => { live = false; };
+  }, [trainingWorker]);
   const [starting, setStarting] = useState(false);
   const [ditStarting, setDitStarting] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -212,174 +236,25 @@ export const TrainPanel: React.FC<{ section?: 'prepare' | 'optimise' | 'train' }
   const patchDitForm = (patch: Partial<TrainDitFormState>) => setDitForm(f => ({ ...f, ...patch }));
 
   const handleStart = async () => {
-    const opts: TrainLmOptions = {
-      lmSize: form.lmSize,
-      // §2.7: OMITTED means "let the server pick the BF16 base for this size".
-      // Sending '' would be forwarded as `--lm ''` and ace-train exits 2.
-      ...(form.lmModel ? { lmModel: form.lmModel } : {}),
-      ...(trainLmStatus?.variantKey ? { variantKey: trainLmStatus.variantKey } : {}),
-      adapterName: form.adapterName.trim(),
-      targetLoss: form.targetLoss,
-      epochs: form.epochs,
-      rank: form.rank,
-      alpha: form.alpha,
-      learningRate: form.learningRate,
-      gradAccum: form.gradAccum,
-      gradClip: form.gradClip,
-      warmupRatio: form.warmupRatio,
-      weightDecay: form.weightDecay,
-      maxLen: form.maxLen,
-      seed: form.seed,
-      lossOnCot: form.lossOnCot,
-      order: form.order,
-      milestoneStep: form.milestoneStep,
-      milestoneKeep: form.milestoneKeep,
-      stages: form.stages,
-      overwrite: form.overwrite,
-      stopEngine: form.stopEngine,
-      // Resume + post-training calibration (2026-08-10). 'latest' = the server
-      // resolves the newest non-calibrated run of this adapter name.
-      //
-      // ALWAYS SENT, both ways. Since 2026-08-12 an OMITTED initAdapter means
-      // 'latest' on the LM route (so the batch pipeline's empty body resumes),
-      // which makes '' the only way to say "from scratch" — unticking the box
-      // would otherwise be a no-op.
-      initAdapter: form.resumeFromLatest ? 'latest' : '',
-      calibrate: form.calibrate,
-      calibrateRepoint: form.calibrateRepoint,
-      // Speed levers. Sent only when the user moved them off the shipped
-      // default, so a normal start posts the same body it always did — and an
-      // engine without the flags never sees them.
-      ...(form.weights !== 'f32-window' ? { weights: form.weights } : {}),
-      ...(form.batch !== 1 ? { batch: form.batch } : {}),
-      // ALWAYS sent, unlike the two above: the server default ('mm') is not the
-      // CLI default ('outprod'), so omitting it would hide which formulation ran
-      // and make the drawer's 'outprod' option indistinguishable from "unset".
-      bwd: form.bwd,
-      adapterType: form.adapterType,
-      optimizer: form.optimizer,
-      ...(form.optimizer === 'muon' ? { muonLrScale: form.muonLrScale } : {}),
-      ...(form.adapterType === 'lokr'
-        ? { lokrDim: form.lokrDim, lokrAlpha: form.lokrAlpha, lokrFactor: form.lokrFactor }
-        : {}),
-      // Caption dropout + prior preservation (2026-09-02). Sent only when
-      // moved off default, same rule as the speed levers above — a normal
-      // start posts the same body it always did.
-      ...(form.captionDropout > 0 ? { captionDropout: form.captionDropout } : {}),
-      // Parameterization + soft prompt (2026-09-04): only when moved off
-      // default, LoRA type only — the server ignores them under lokr anyway.
-      // dora/hira/loha/pissa/hra (2026-09-05) use the SAME exclusion guards as
-      // handleStartDit below — TrainLmForm's pickMethod already makes the
-      // illegal combination unrepresentable, these are the payload-level
-      // safety net, textually identical so the two trainers never disagree
-      // about which flag a given boolean set resolves to.
-      ...(form.adapterType === 'lora' && form.dora ? { dora: true } : {}),
-      ...(form.adapterType === 'lora' && form.hira ? { hira: true } : {}),
-      ...(form.adapterType === 'lora' && form.loha ? { loha: true } : {}),
-      ...(form.adapterType === 'lora' && form.rslora ? { rslora: true } : {}),
-      ...(form.adapterType === 'lora' && form.pissa && !form.dora && !form.hira && !form.loha ? { pissa: true } : {}),
-      ...(form.adapterType === 'lora' && form.hra && !form.dora && !form.hira && !form.loha && !form.pissa ? { hra: true } : {}),
-      ...(form.adapterType === 'lora' && form.loraPlusRatio !== 1 ? { loraPlusRatio: form.loraPlusRatio } : {}),
-      // The token is on by default server-side too; an explicit '' is the off switch.
-      ...(form.adapterType === 'lora' && form.artistTokenOn
-        ? { artistToken: form.artistToken || form.adapterName, artistTokenK: form.artistTokenK, artistTokenLr: form.artistTokenLr }
-        : { artistToken: '' }),
-      ...(form.adapterType === 'lora' && form.prefixN > 0 ? { prefixN: form.prefixN } : {}),
-      ...(form.regEvery > 0
-        ? {
-            regEvery: form.regEvery, regTopk: form.regTopk, regSongs: form.regSongs,
-            ...(form.regTeacher !== 'cached' ? { regTeacher: form.regTeacher } : {}),
-          }
-        : {}),
-      // Attention backend (2026-09-02). Sent only when moved off default, same
-      // rule as the speed levers above — an ace-train build that predates the
-      // LM's --attn parsing never sees the flag on a normal (exact) run.
-      // A KV prefix needs exact attention; the route coerces too, this keeps the request honest.
-      ...(form.attnBackend !== 'exact' && !(form.artistTokenOn && form.prefixN > 0) ? { attnBackend: form.attnBackend } : {}),
-    };
     setStarting(true);
-    try { await startTrainLm(opts); } finally { setStarting(false); }
+    try {
+      const recipe = await resolveTrainingRecipe<TrainLmFormState>('ace-lm', {
+        ...form, ...(trainLmStatus?.variantKey ? { variantKey: trainLmStatus.variantKey } : {}),
+      });
+      assertRecipeWorker(recipe);
+      await startTrainLm(recipe.execution as TrainLmOptions);
+    } catch (err) { useTrainingStore.setState({ error: err instanceof Error ? err.message : String(err) }); } finally { setStarting(false); }
   };
 
   const handleStartDit = async () => {
-    const opts: TrainDitOptions = {
-      // The base is NOT sent — the server resolves --dit from the variant's
-      // preprocess_meta.json, because the cached latents are that model's output.
-      ...(trainDitStatus?.variantKey ? { variantKey: trainDitStatus.variantKey } : {}),
-      adapterName: ditForm.adapterName.trim(),
-      adapterType: ditForm.adapterType,
-      // §2.1: lora trains via rank/alpha, lokr via the four lokr* fields — the
-      // server ignores whichever side doesn't match adapterType, but sending
-      // only the relevant one keeps the request body honest about what ran.
-      ...(ditForm.adapterType === 'lokr'
-        ? {
-            lokrDim: ditForm.lokrDim,
-            lokrAlpha: ditForm.lokrAlpha,
-            lokrFactor: ditForm.lokrFactor,
-            lokrDecomposeBoth: ditForm.lokrDecomposeBoth,
-          }
-        : { rank: ditForm.rank, alpha: ditForm.alpha }),
-      targetMlp: ditForm.targetMlp,
-      ...(ditForm.adapterType === 'lora' && ditForm.dora ? { dora: true } : {}),
-      ...(ditForm.adapterType === 'lora' && ditForm.hira ? { hira: true } : {}),
-      ...(ditForm.adapterType === 'lora' && ditForm.loha ? { loha: true } : {}),
-      ...(ditForm.adapterType === 'lora' && ditForm.rslora ? { rslora: true } : {}),
-      ...(ditForm.adapterType === 'lora' && ditForm.pissa && !ditForm.dora && !ditForm.hira && !ditForm.loha ? { pissa: true } : {}),
-      ...(ditForm.adapterType === 'lora' && ditForm.hra && !ditForm.dora && !ditForm.hira && !ditForm.loha && !ditForm.pissa ? { hra: true } : {}),
-      ...(ditForm.adapterType === 'lora' && ditForm.loraPlusRatio !== 1 ? { loraPlusRatio: ditForm.loraPlusRatio } : {}),
-      layers: ditForm.layers,
-      crop: ditForm.crop,
-      cropMin: ditForm.cropMin,
-      cropMax: ditForm.cropMax,
-      targetLoss: ditForm.targetLoss,
-      epochs: ditForm.epochs,
-      learningRate: ditForm.learningRate,
-      gradAccum: ditForm.gradAccum,
-      gradClip: ditForm.gradClip,
-      warmupRatio: ditForm.warmupRatio,
-      weightDecay: ditForm.weightDecay,
-      lossWeighting: ditForm.lossWeighting,
-      snrGamma: ditForm.snrGamma,
-      tBias: ditForm.tBias,
-      channelBalance: ditForm.channelBalance,
-      timestepMu: ditForm.timestepMu,
-      timestepSigma: ditForm.timestepSigma,
-      tMin: ditForm.tMin,
-      tMax: ditForm.tMax,
-      cfgRatio: ditForm.cfgRatio,
-      genreRatio: ditForm.genreRatio,
-      seed: ditForm.seed,
-      order: ditForm.order,
-      // Resume + post-training calibration, same shape as train-lm.
-      //
-      // ALWAYS SENT, both ways. Since 2026-08-13 an OMITTED initAdapter means
-      // 'latest' on the DiT route too (so the batch pipeline's empty body
-      // resumes), which makes '' the only way to say "from scratch" —
-      // unticking the box would otherwise be a no-op.
-      initAdapter: ditForm.resumeFromLatest ? 'latest' : '',
-      calibrate: ditForm.calibrate,
-      calibrateRepoint: ditForm.calibrateRepoint,
-      milestoneStep: ditForm.milestoneStep,
-      milestoneKeep: ditForm.milestoneKeep,
-      vramReserveMb: ditForm.vramReserveMb,
-      mirror: ditForm.mirror,
-      bwd: ditForm.bwd,
-      attnBackend: ditForm.attnBackend,
-      // Muon knobs go over the wire only when Muon is selected; the route
-      // defaults them anyway, and this keeps an AdamW request byte-identical
-      // to what it was before the optimizer field existed.
-      optimizer: ditForm.optimizer,
-      ...(ditForm.optimizer === 'muon'
-        ? { muonLrScale: ditForm.muonLrScale, muonNsSteps: ditForm.muonNsSteps }
-        : {}),
-      batch: ditForm.batch,
-      ckptSegments: ditForm.ckptSegments,
-      stages: ditForm.stages,
-      overwrite: ditForm.overwrite,
-      stopEngine: ditForm.stopEngine,
-    };
     setDitStarting(true);
-    try { await startTrainDit(opts); } finally { setDitStarting(false); }
+    try {
+      const recipe = await resolveTrainingRecipe<TrainDitFormState>('ace-dit', {
+        ...ditForm, ...(trainDitStatus?.variantKey ? { variantKey: trainDitStatus.variantKey } : {}),
+      }, ditForm.adapterType);
+      assertRecipeWorker(recipe);
+      await startTrainDit(recipe.execution as TrainDitOptions);
+    } catch (err) { useTrainingStore.setState({ error: err instanceof Error ? err.message : String(err) }); } finally { setDitStarting(false); }
   };
 
   const copyAdapterDir = () => {

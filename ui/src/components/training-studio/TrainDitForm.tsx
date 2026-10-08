@@ -1,3 +1,5 @@
+import { ACE_DIT_QUALITY_PRESETS, ACE_DIT_LOKR_TARGET_LOSS, ACE_DIT_LOKR_EPOCHS } from '../../../../server/src/contracts/trainingRecipes';
+import { ACE_DIT_FORM_DEFAULTS, ACE_DIT_LOKR_FORM_DEFAULTS } from '../../../../server/src/contracts/trainingRecipes';
 // TrainDitForm.tsx — the DiT LoRA training controls
 //
 // Structural sibling of TrainLmForm: four visible controls (name, quality dial,
@@ -122,116 +124,7 @@ export interface TrainDitFormState {
  *  genre conditioning and the MLP projections trained. Kept in lockstep with
  *  the train-dit route's own numOpt fallbacks (server/src/routes/training.ts)
  *  and DitTrainArgs (engine/src/train/dit-train-run.h). */
-export const TRAIN_DIT_DEFAULTS: TrainDitFormState = {
-  adapterName: '',
-  quality: 'balanced',
-  // 0.1 / 500 (Rob, 2026-08-13) — targetLoss was 0.2 from 2026-07-30. Both are
-  // deliberately beyond what a run typically reaches: the run always leaves the
-  // BEST adapter behind, so an unreached target costs nothing and simply means
-  // "use the whole horizon". The train-dit route's own fallback tracks this
-  // number so a batch-pipeline run (which POSTs an empty option bag) stops at
-  // the same loss a manual run does.
-  targetLoss: 0.3,
-  epochs: 500,
-  adapterType: 'lora',
-  rank: 128,
-  alpha: 256,
-  // Inert while adapterType==='lora'; kept at the K2 values so a toggle to
-  // 'lokr' via TRAIN_DIT_LOKR_DEFAULTS below is the only place they change.
-  lokrDim: 512,
-  lokrAlpha: 512,
-  lokrFactor: 6,
-  lokrDecomposeBoth: true,
-  targetMlp: true,
-  dora: false,
-  rslora: false,
-  hira: false,
-  loha: false,
-  pissa: false,
-  hra: false,
-  loraPlusRatio: 1,
-  layers: 0,
-  crop: 0,
-  cropMin: 375,
-  // 0 = no pin: the engine lifts the cap to the dataset's longest track in
-  // flash mode. A number pins it in either mode (flash included).
-  cropMax: 0,
-  learningRate: 0.0005,
-  gradAccum: 4,
-  gradClip: 1.0,
-  warmupRatio: 0.05,
-  weightDecay: 0.01,
-  lossWeighting: 'flow_snr',
-  snrGamma: 5.0,
-  tBias: 0.5,
-  channelBalance: true,
-  timestepMu: -0.4,
-  timestepSigma: 1.0,
-  tMin: 0,
-  tMax: 1,
-  cfgRatio: 0.15,
-  genreRatio: 30,
-  seed: 42,
-  order: 'shuffle',
-  // Milestones OFF by default (Rob, 2026-07-30) — the best adapter is now
-  // always what lands in the run dir, so mid-run snapshots are opt-in.
-  milestoneStep: 0,
-  milestoneKeep: 6,
-  vramReserveMb: 2048,
-  // 'bf16-f32' (Rob, 2026-09-02). Supersedes the 2026-09-01 plain-'bf16'
-  // default, which was taken on VRAM alone: bf16 storage is lossless (the GGUF
-  // is BF16), but bf16 COMPUTE also rounded the activations and the gradients
-  // at every trainable-layer GEMM, and adapters trained that way rendered
-  // coarse and "bitty" where the same recipe at 'f32' did not. 'bf16-f32'
-  // keeps bf16's storage — so the flash-mode crop stays long (1556 vs f32's
-  // 610 on mika_lifeincartoonmotion) — and casts each weight to F32 in the
-  // graph, which measured bit-identical loss and gnorm to the f32 mirror over
-  // three epochs. TRAIN_DIT_LOKR_DEFAULTS spreads this object, so LoKR
-  // inherits it too.
-  mirror: 'bf16-f32',
-  // MUL_MAT activation-gradient formulation. 'mm' mirrors the server default
-  // (2026-07-29): identical maths to out_prod but dtype-agnostic, so the BF16
-  // mirror above rides BF16 tensor cores instead of being promoted to F32.
-  bwd: 'mm',
-  // 'flash' by default (2026-09-01, Rob-directed after the smoke test): fused
-  // attention, full-song crops via the lifted crop cap. Unchecking the box
-  // returns to the byte-identical exact graph AND restores the exact-mode
-  // companions (f32 mirror, cropMax 1250) — see the checkbox handler.
-  attnBackend: 'flash',
-  cropJitter: false,
-  // Prodigy is the DEFAULT (the 2026-07-30 Muon note below is history: Muon won
-  // the epoch race then, Prodigy replaced it as the shipped default and the
-  // route's absent-field fallback agrees). Kept for the record:
-  // Muon was the default from 2026-07-30. The 10-epoch comparison that suggested
-  // parity was too short a window: over a full run Muon reached ma5 0.6 in 161
-  // epochs against AdamW's 227, and once the Newton-Schulz was bucketed that
-  // became ~1.23x on wall-clock. Ear-validated before the flip.
-  // muonMomentum/muonMinDim/muonBucket are left to the engine defaults.
-  // Prodigy (Rob, 2026-09-03): automatic step size, so learningRate is ignored
-  // under it. Muon (ear-validated 2026-07-30) and AdamW remain selectable.
-  optimizer: 'prodigy',
-  muonLrScale: 20,
-  muonNsSteps: 5,
-  // Micro-batching + checkpointing defaults (design §2.2 / C3/C5) — the engine's
-  // own train-dit defaults. batch 1 = OFF (2026-07-29, measured): batching is
-  // ~2.5x SLOWER at full depth on a 32 GB card and ~2.4x faster on shallow /
-  // partial-depth runs, so it is opt-in for the latter. ckptSegments 1 = auto,
-  // which resolves to a single (i.e. unsegmented) run whenever full depth fits.
-  batch: 1,
-  ckptSegments: 1,
-  stages: ['train', 'export'],
-  overwrite: false,
-  stopEngine: true,
-  // Resume ON, calibrate OFF (Rob, 2026-08-13) — the inverse of the 2026-08-11
-  // seed, matching the LM form's 2026-08-12 flip. With target loss at 0.1 a
-  // re-run is almost always "keep going", not "start over", and resume is soft
-  // on the server: an adapter name with no previous run trains from scratch
-  // rather than failing. TRAIN_DIT_LOKR_DEFAULTS spreads this object and
-  // doesn't override either flag, so LoKR inherits both.
-  resumeFromLatest: true,
-  calibrate: false,
-  calibrateRepoint: true,
-};
+export const TRAIN_DIT_DEFAULTS: TrainDitFormState = ACE_DIT_FORM_DEFAULTS as TrainDitFormState;
 
 /** K1/K2 (lokr-dit-training plan §0): LoKR is the UI's DEFAULT adapter type —
  *  Rob's validated preference (Uber-LoKR-4). Same base as TRAIN_DIT_DEFAULTS,
@@ -250,43 +143,7 @@ export const TRAIN_DIT_DEFAULTS: TrainDitFormState = {
  *  lands when the user leaves auto. */
 export const DIT_LOKR_CROP_FRAMES = 1500;   // 60 s at 25 latent fps
 
-export const TRAIN_DIT_LOKR_DEFAULTS: TrainDitFormState = {
-  ...TRAIN_DIT_DEFAULTS,
-  adapterType: 'lokr',
-  lokrDim: 512,
-  lokrAlpha: 512,
-  lokrFactor: 6,
-  lokrDecomposeBoth: true,
-  // 2026-07-30 retune, from a five-run A/B on gunship_unicorn (14 songs, XL
-  // thirds). GA 20 @ 1e-2 was Side-Step's effective batch of 20 reached by
-  // accumulation; GA 4 @ 2e-3 is the same effective LR per sample by linear
-  // scaling, and measured IDENTICAL epochs-to-target (227 vs 228) with strictly
-  // better-behaved gradients: median grad-norm 0.062 vs 0.031 (the sqrt(5) the
-  // smaller batch predicts) and NO warmup spike — the GA 20 run peaked at 13.5
-  // on epoch 1, which is the same cliff three LoKR runs fell off on 2026-07-29.
-  // The LR must move WITH the accumulation; 2e-3 without GA 4 is a different,
-  // untested config. Mirrored by the train-dit route's isLokr fallbacks.
-  learningRate: 0.002,
-  gradAccum: 4,
-  // 250, not 400: every 400-horizon run stopped with the cosine only halfway
-  // down (LR still ~50% of peak at the stop), so the schedule never decayed
-  // INTO the target. Shortening the horizon cut epochs-to-0.6 from 228 to 203
-  // (-11%) and audio-seconds-to-target by 14% — the only knob of five tested
-  // that reduced the work required rather than rearranging it. Don't shorten
-  // much further: that run used 203 of its 250, and a horizon below the epochs
-  // actually needed leaves the LR at its 10% floor with the tail unfinished.
-  // 500 / 0.2 (Rob, 2026-07-30), overriding the 250/0.6 that the horizon study
-  // landed on. That study's point stands — a horizon SHORTER than the epochs
-  // actually needed leaves the LR pinned at its 10% floor — but it was written
-  // when an unreached target meant shipping the LAST adapter. Now the run keeps
-  // the best, so a long horizon plus an ambitious target is the safe direction:
-  // you get the whole cosine decay and still keep the best point on it.
-  epochs: 500,
-  lossWeighting: 'none',
-  targetLoss: 0.3,
-  weightDecay: 0.001,
-  crop: 0,
-};
+export const TRAIN_DIT_LOKR_DEFAULTS: TrainDitFormState = ACE_DIT_LOKR_FORM_DEFAULTS as TrainDitFormState;
 
 /** Which unit to show `crop` in. State, not a pure derivation: once the box holds
  *  a number, seconds and frames are the same value and only the user's last
@@ -330,22 +187,14 @@ const deriveCropMode = (state: TrainDitFormState): CropMode => {
 // Target-loss ladder re-spaced 2026-08-13 around the new 0.1 default (was
 // 0.3/0.2/0.15): Balanced must equal TRAIN_DIT_DEFAULTS.targetLoss, and
 // Thorough has to stay below it to keep the dial monotone.
-const DIT_QUALITY_PRESETS: Record<DitQuality, Partial<TrainDitFormState>> = {
-  // cropMax 0 = the engine's cap (800 since 2026-09-03); the old 750/1250 pins
-  // went with the long-crop regression. Targets 0.3/0.3/0.2 (Rob, same day).
-  fast:     { epochs: 150, cropMax: 0, milestoneStep: 0, targetLoss: 0.3 },
-  balanced: { epochs: 500, cropMax: 0, milestoneStep: 0, targetLoss: 0.3 },
-  thorough: { epochs: 900, cropMax: 0, milestoneStep: 0, targetLoss: 0.2 },
-};
+const DIT_QUALITY_PRESETS: Record<DitQuality, Partial<TrainDitFormState>> = ACE_DIT_QUALITY_PRESETS;
 
 /** LoKR's targets were 0.6/0.6/0.5 — its validated auto-stop under the old
  *  "unreached target ships the LAST adapter" rule. With the best adapter now
  *  always kept, LoKR tracks the same ambitious targets as LoRA. Balanced MUST
  *  equal TRAIN_DIT_LOKR_DEFAULTS.targetLoss so the already-highlighted button
  *  is a no-op. */
-const DIT_LOKR_TARGET_LOSS: Record<DitQuality, number> = {
-  fast: 0.3, balanced: 0.3, thorough: 0.2,
-};
+const DIT_LOKR_TARGET_LOSS: Record<DitQuality, number> = ACE_DIT_LOKR_TARGET_LOSS;
 
 /** Same reasoning for the epoch counts: the presets above are LoRA's 100/400/800,
  *  and LoKR's validated horizon is 250 (2026-07-30 A/B — see the epochs comment
@@ -353,9 +202,7 @@ const DIT_LOKR_TARGET_LOSS: Record<DitQuality, number> = {
  *  is 400 there: it is the default state, so clicking the already-highlighted
  *  button has to be a no-op rather than a silent undo of the retune. Fast and
  *  Thorough keep the dial monotone around it. */
-const DIT_LOKR_EPOCHS: Record<DitQuality, number> = {
-  fast: 150, balanced: 500, thorough: 900,
-};
+const DIT_LOKR_EPOCHS: Record<DitQuality, number> = ACE_DIT_LOKR_EPOCHS;
 
 const ALL_STAGES: TrainDitStage[] = ['train', 'export'];
 const QUALITIES: DitQuality[] = ['fast', 'balanced', 'thorough'];

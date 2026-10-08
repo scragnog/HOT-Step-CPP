@@ -71,3 +71,18 @@ export function setTrainingDefaults(patch: Partial<TrainingDefaults>): TrainingD
   ).run(SETTINGS_KEY, JSON.stringify(merged));
   return merged;
 }
+
+/** Keep the three layers visible while resolving a recipe. A stored section
+ *  is partial, and an explicit zero, false or empty string is still an edit. */
+export function resolveTrainingDefaultLayers<T extends Record<string, unknown>>(
+  builtin: T, stored: Record<string, unknown>, overrides: Record<string, unknown>,
+): { builtin: T; stored: Record<string, unknown>; resolved: Record<string, unknown>;
+  provenance: Record<string, 'builtin' | 'stored' | 'override'> } {
+  const resolved = { ...builtin, ...stored, ...overrides };
+  const provenance: Record<string, 'builtin' | 'stored' | 'override'> = {};
+  for (const key of Object.keys(resolved)) {
+    provenance[key] = Object.prototype.hasOwnProperty.call(overrides, key) ? 'override'
+      : Object.prototype.hasOwnProperty.call(stored, key) ? 'stored' : 'builtin';
+  }
+  return { builtin, stored, resolved, provenance };
+}

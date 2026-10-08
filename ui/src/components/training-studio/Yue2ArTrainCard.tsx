@@ -1,3 +1,4 @@
+import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
 import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 import type { Yue2OptimOptions } from '../../services/trainingApi';
 // Yue2ArTrainCard.tsx — Training Studio phase 3, the YuE2 AR half: stages 2,
@@ -1363,33 +1364,12 @@ export const Yue2ArTrainStageCard: React.FC<{
     setBusy(true);
     setWarnings([]);
     try {
-      const body: Yue2ArTrainRequest = {
-        lmType: form.lmType,
-        ...(form.trigger.trim() ? { trigger: form.trigger.trim() } : { allowNoTrigger: true }),
-        styleTemplate: form.styleTemplate,
-        ...(form.style.trim() ? { style: form.style.trim() } : {}),
-        ...(form.lyrics.trim() ? { lyrics: form.lyrics.trim() } : {}),
-        sidecars: form.sidecars,
-        target: form.target,
-        rank: form.rank, alpha: form.alpha,
-        optimizer: form.optimizer, prodigyD0: form.prodigyD0,
-        muonLrScale: form.muonLrScale, muonNsSteps: form.muonNsSteps,
-        lr: form.lr, lrScheduler: form.lrScheduler,
-        schedSteps: form.schedSteps, warmup: form.warmup,
-        steps: form.steps,
-        ...(overtrain ? { allowOvertrain: true } : {}),
-        gradAccum: form.gradAccum, maxGradNorm: form.maxGradNorm,
-        weightDecay: form.weightDecay,
-        artistFrac: form.artistFrac,
-        adamBeta1: form.adamBeta1, adamBeta2: form.adamBeta2,
-        captionDropout: form.captionDropout,
-        attn: form.attn, maxLen: form.maxLen, chunk: form.chunk,
-        cursorWeight: form.cursorWeight, abcDropout: form.abcDropout, seed: form.seed,
-        ckptFrom: form.ckptFrom, saveEvery: form.saveEvery,
-        evalEvery: form.evalEvery, logEvery: form.logEvery,
-        ...(mintedMissing ? { allowNoMinted: true } : {}),
-      };
+      const recipe = await resolveTrainingRecipe<Record<string, unknown>>('yue2-ar', { ...form, overtrain, mintedMissing });
+      const body = recipe.execution as Yue2ArTrainRequest;
+      assertRecipeWorker(recipe);
       setWarnings(await startYue2ArTrain(body));
+    } catch (err) {
+      useTrainingStore.setState({ error: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(false);
       reload();

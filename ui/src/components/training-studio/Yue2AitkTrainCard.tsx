@@ -1,3 +1,6 @@
+import { YUE2_JOINT_LADDER_PREVIEW, YUE2_JOINT_TUNED_KEYS, YUE2_JOINT_LORA_STOP, YUE2_JOINT_LOKR_STOP, YUE2_JOINT_LEGACY_VALUES, YUE2_JOINT_BASE_MATCHED_VALUES, YUE2_JOINT_PRESETS, YUE2_JOINT_BASE_MATCHED_DEFAULTS } from '../../../../server/src/contracts/trainingRecipes';
+import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
+import { YUE2_JOINT_FORM_DEFAULTS } from '../../../../server/src/contracts/trainingRecipes';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Download, Loader2, Play, RotateCcw, Save, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -128,70 +131,14 @@ function snapshotPresetSettings(form: Yue2JointTrainRequest, lyricTiming: boolea
 // parallel with training (everySteps 0 = no pauses): 300 s draft takes
 // (12 decoder steps), the same settings the Refine tab's ladders used.
 // 2026-09-30: two takes, one on the fixed seed and one on a fresh random seed.
-const LADDER_PREVIEW: Yue2JointPreviewOptions = { enabled: true, everySteps: 0, parallel: true, takes: 2, odeSteps: 12, narCacheRatio: 0, seconds: 300, seed: 424242,
-  previewMaxFrames: 7500, baseline: false, control: false };
+const LADDER_PREVIEW: Yue2JointPreviewOptions = YUE2_JOINT_LADDER_PREVIEW as Yue2JointPreviewOptions;
 function defaultPreview(_everySteps: number): Yue2JointPreviewOptions { return { ...LADDER_PREVIEW }; }
-const DEFAULT_FORM: Yue2JointTrainRequest = {
-  trainingMethod: 'aitk', checkpoint: '', dataset: '', output: '',
-  // NAR budget recipe (2026-09-21): the run still ends on the planner's KL to
-  // base, but the decoder gets twice the learning rate on the way there.
-  // lr 2e-4 with the planner at 0.3x leaves the planner's ABSOLUTE rate at
-  // 6e-5 — the same 1e-4 x 0.6 Recipe A used — so the AR walks an unchanged
-  // path to KL 1.4 while the decoder, which is where likeness lives, moves
-  // twice as far per step. The two halves are independent: the NAR's
-  // conditioning prefix is a detached recompute and NAR backward only ever
-  // uploads to the NAR adapters (yue2-aitk-joint-step.h), so the decoder's
-  // rate cannot perturb the planner's KL. Gen-time NAR strength 2.0 was
-  // beating 1.0 by ear; this is that, trained in rather than dialled in.
-  // 750 is a cap, not a target — an artist that has not reached KL 1.4 by
-  // then is not going to.
-  //
-  // Prodigy by default (2026-09-21, later the same day): once its weight
-  // update was bias-corrected (lm-optim.h) it beat this AdamW recipe by ear
-  // AND by clock on the same album — KL 1.4 in 214 steps against AdamW's
-  // 308, d settling at ~1e-3 where AdamW had been told 2e-4. `lr` is ignored
-  // under Prodigy (base_lr is gamma = 1.0); the planner scale still applies,
-  // now on top of d. The pre-fix Prodigy history — "learns too fast,
-  // corrupts the AR" — was the missing bias correction, not the optimizer.
-  // 2026-09-27: the base-matched recipe replaced all of the above (Rob's ear
-  // test on Dookie: "better in every way"). Presets: see PRESETS.
-  // The server forces the recipe's fixed parts whatever this form says
-  // (applyBaseMatchedRecipe); the lines below that name tuned-only knobs are
-  // history the migration in readStoredForm clears from stored forms.
-  // device '' = the server picks this build's first GPU (CUDA0, Vulkan0, MTL0).
-  method: 'base-matched', steps: 200, saveEvery: 20, gradAccum: 4, narCropFrames: 1500, seed: 42, device: '', base: '', lyricTiming: false, cursorWeight: 0,
-  optimizer: 'adamw-lm', cautious: false, prodigyD0: 1e-6, muonLrScale: 1, muonNsSteps: 5,
-  // LoKr 64/4/256 (2026-09-22, Rob's pick after the size sweep): scale
-  // all four sites factorized. 2026-09-29 (Rob): dim 128 at alpha 256 on
-  // every preset, ~213 MB for the AR+NAR pair.
-  // rank stays 64 so switching back to LoRA restores the LoRA recipe.
-  rank: 64, alpha: 256, adapterType: 'lokr', lokrDim: 128, lokrFactor: 4,
-  // LoKr under Prodigy (Rob's ear tests, 2026-09-22): LoRA's KL 1.4 overcooks
-  // both halves; KL 1.0 with the planner at 0.6 and the decoder at 1.0 is the
-  // tested recipe. LoRA keeps KL 1.4 with the planner at 0.3 (LORA_STOP).
-  // Trend (2026-09-22): the 20-step mean lagged the KL trend by ~10 steps.
-  // Presets (2026-09-24, Rob): Balanced is the default. The KL target stops
-  // the planner; the decoder trains on to the step cap.
-  stopMode: 'steps',
-  // Planner freeze (2026-09-23): the KL target used to end the whole run, so
-  // the decoder, which carries timbre, stopped wherever the planner did. The
-  // checkpoint-mix ear test (AR200+NAR150 over AR200+NAR100) said the decoder
-  // wants more. Now the planner freezes at its KL and the decoder trains 100
-  // more steps; the KL checkpoint is still saved, so the old stop point is
-  // one of the rungs. Caption dropout 0.5: the measured recipe, so a new
-  // caption lands on the artist rather than beside one memorised track.
-  narExtraSteps: 0, captionDropout: 0,
-  autoRefine: false,
-  // The ladder's previews render while training runs, so the engine stays up.
-  preview: LADDER_PREVIEW, stopEngine: false,
-};
+const DEFAULT_FORM: Yue2JointTrainRequest = YUE2_JOINT_FORM_DEFAULTS as Yue2JointTrainRequest;
 // Tuned-recipe knobs the server forces under base-matched; cleared from
 // stored forms so a saved value from before 2026-09-27 cannot linger.
-const TUNED_KEYS = ['targetKl', 'targetLoss', 'targetKlMode', 'narExtraSteps', 'klWeight', 'captionDropout', 'plannerLrScale', 'narLrScale',
-  'spikeFactor', 'spikeStop', 'spikeStopWindow', 'reconStop', 'reconStopWindow', 'reconTarget', 'lrSchedule', 'lrFloor', 'lrDecaySteps',
-  'lrDecayShape', 'klOvershootMargin', 'lrCycleSteps', 'lrCycleMult', 'klCheckpointEvery', 'refineWarmup', 'rungAdaptiveLr', 'reconKeepDelta'] as const;
-const LORA_STOP = { targetKl: 1.4, plannerLrScale: 0.3, narLrScale: undefined };
-const LOKR_STOP = { targetKl: 1.0, plannerLrScale: 0.6, narLrScale: 1 };
+const TUNED_KEYS = YUE2_JOINT_TUNED_KEYS;
+const LORA_STOP = YUE2_JOINT_LORA_STOP;
+const LOKR_STOP = YUE2_JOINT_LOKR_STOP;
 // Presets (2026-09-27 ear test on a full album). All three are the
 // base-matched recipe (the server applies its fixed parts); they differ in
 // updates, songs per update, decoder crop and checkpoint spacing; all three
@@ -208,29 +155,11 @@ const LOKR_STOP = { targetKl: 1.0, plannerLrScale: 0.6, narLrScale: 1 };
 // It stops at the planner's KL target, so steps is a cap; minutes assumes
 // the ~250 updates of 1 song a Prodigy run took to KL 1.2. Target 1.0
 // since 2026-10-06: past ~1 the planner lost the lead sheet's tempo late in a take.
-const LEGACY_VALUES: Partial<Yue2JointTrainRequest> = {
-  method: 'tuned', optimizer: 'prodigy', cautious: true, lr: 2e-4, plannerLrScale: 0.6, narLrScale: 1,
-  stopMode: 'kl', targetKl: 1.0, targetKlMode: 'trend', captionDropout: 0.5,
-  // Decoder phase on by default (2026-10-06): the planner freezes at the KL
-  // target and the decoder trains on to the reconstruction plateau.
-  narExtraSteps: 250, reconStop: 0.005, reconStopWindow: 10, reconKeepDelta: 0.003,
-  spikeFactor: 5, spikeStop: 3, spikeStopWindow: 20, adapterType: 'lokr', lokrDim: 256, lokrFactor: 4, alpha: 256,
-  // Base-matched knobs back to the engine's own defaults.
-  warmup: undefined, weightDecay: undefined, beta2: undefined, abcDropout: undefined, arLossWeight: undefined,
-  textDropout: undefined, lyricDropout: undefined, bothDropout: undefined, arCropFrames: undefined,
-};
+const LEGACY_VALUES: Partial<Yue2JointTrainRequest> = YUE2_JOINT_LEGACY_VALUES as Partial<Yue2JointTrainRequest>;
 // Leaving Legacy: the tuned-only knobs go (the server forces them anyway)
 // and the optimizer returns to the base-matched presets' pick.
-const BASE_MATCHED_VALUES: Partial<Yue2JointTrainRequest> = {
-  method: 'base-matched', optimizer: 'adamw-lm', cautious: false, lr: undefined,
-  ...Object.fromEntries(TUNED_KEYS.map(key => [key, undefined])),
-};
-const PRESETS = [
-  { key: 'legacy', label: 'Legacy', steps: 500, gradAccum: 1, narCropFrames: 1500, saveEvery: 25, lokrDim: 256, minutes: 22 },
-  { key: 'fast', label: 'Fast', steps: 100, gradAccum: 4, narCropFrames: 1500, saveEvery: 10, lokrDim: 128, minutes: 28 },
-  { key: 'balanced', label: 'Balanced', steps: 200, gradAccum: 4, narCropFrames: 1500, saveEvery: 20, lokrDim: 128, minutes: 57 },
-  { key: 'thorough', label: 'Thorough', steps: 300, gradAccum: 8, narCropFrames: 1500, saveEvery: 30, lokrDim: 128, minutes: 170 },
-] as const;
+const BASE_MATCHED_VALUES: Partial<Yue2JointTrainRequest> = YUE2_JOINT_BASE_MATCHED_VALUES as Partial<Yue2JointTrainRequest>;
+const PRESETS = YUE2_JOINT_PRESETS;
 const presetValues = (p: typeof PRESETS[number]): Partial<Yue2JointTrainRequest> => ({
   ...(p.key === 'legacy' ? LEGACY_VALUES : { ...BASE_MATCHED_VALUES, stopMode: 'steps' as const }),
   steps: p.steps, gradAccum: p.gradAccum, narCropFrames: p.narCropFrames, saveEvery: p.saveEvery, lokrDim: p.lokrDim });
@@ -242,11 +171,7 @@ const activePreset = (f: Yue2JointTrainRequest) => PRESETS.find(p => (f.method =
 const presetTime = (p: { minutes: number }) => `${Number((p.minutes / PRESETS[2].minutes).toFixed(1))}×`;
 /** Mirror of BASE_MATCHED_DEFAULTS in server/src/services/training/yue2JointTrainRunner.ts,
  *  shown as each blank field's placeholder. The server fills blanks from its own copy. */
-const BASE_MATCHED_DEFAULTS = {
-  lr: 1e-4, weightDecay: 0.1, beta2: 0.95, abcDropout: 0.5, narCropFrames: 1500, arLossWeight: 0.25,
-  gradAccum: 4, textDropout: 0.1, lyricDropout: 0.1, bothDropout: 0.1, warmupFraction: 0.03,
-  arCropFrames: 0,
-} as const;
+const BASE_MATCHED_DEFAULTS = YUE2_JOINT_BASE_MATCHED_DEFAULTS;
 type PrepareForm = Yue2AitkPrepareRequest;
 
 
@@ -977,7 +902,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           everySteps: form.preview.parallel ? 0 : form.saveEvery, previewMaxFrames: Math.max(8, Math.min(360, form.preview.seconds || 300)) * 25 } } : {}),
         ...(form.resume?.trim() && !resumeChoice ? { resume: form.resume.trim() } : {}),
         ...selectedResume };
-      const result = await startYue2JointTrain(datasetId, request);
+      const recipe = await resolveTrainingRecipe<Yue2JointTrainRequest>('yue2-joint', request);
+      assertRecipeWorker(recipe);
+      const result = await startYue2JointTrain(datasetId, recipe.execution as unknown as Yue2JointTrainRequest);
       // A new run takes the ladder over from whatever was picked before.
       setPickedLadderRun('');
       if (typeof window !== 'undefined') writeStored(`${JOB_KEY}${datasetId}`, result.jobId);

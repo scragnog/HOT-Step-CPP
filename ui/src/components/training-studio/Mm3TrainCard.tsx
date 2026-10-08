@@ -1,3 +1,4 @@
+import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
 // Mm3TrainCard.tsx — Training Studio phase 3, MiniMax-Music3 branch.
 //
 // Rendered instead of the ACE LM/DiT cards when the active backend is
@@ -350,109 +351,14 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     if (!form) return;
     setBusy(true);
     try {
-      const body: Mm3TrainLmRequest = {
-        steps: form.steps, saveEvery: form.saveEvery, keepResumeState: form.keepResumeState,
-        longTracks: form.longTracks,
-        rank: form.rank, alpha: form.alpha,
-        lr: form.lr, maxFrames: form.maxFrames, cropMode: form.cropMode,
-        // Informational: the fields above already carry the recipe. The
-        // route lays a named preset UNDER them, so this changes nothing here
-        // and only tells a log reader which recipe the user started from.
-        preset: activePreset === 'custom' ? undefined : activePreset,
-        cropStartFrac: form.cropStartFrac, cropEndFrac: form.cropEndFrac,
-        cropStartTiles: form.cropStartTiles,
-        depthLossWeight: form.depthLossWeight, depthLossFrames: form.depthLossFrames,
-        optimizer: form.optimizer, muonLrScale: form.muonLrScale,
-        adapterType: form.adapterType, lokrFactor: form.lokrFactor,
-        gradAccum: form.gradAccum, seed: form.seed,
-        basePrecision: form.basePrecision, holdout: form.holdout, evalEvery: form.evalEvery,
-        cropAnchor: form.cropAnchor,
-        // `steps` above is the cap in BOTH modes, so nothing about it changes
-        // here — only whether a target is allowed to end the run sooner.
-        stopMode: form.stopMode,
-        ...(form.stopMode === 'loss' ? {
-          targetLoss: form.targetLoss,
-          targetLossMetric: form.targetLossMetric,
-          targetLossEpochs: form.targetLossEpochs,
-        } : {}),
-        // ALWAYS sent, 0 included, and 0 under `zero` anchoring where the
-        // engine refuses a prefix outright. The route resolves a MISSING key to
-        // its default, which was 4096 until the whole-song recipe landed, so
-        // every omission here was a run trained with 164 s of history the form
-        // said was off (#142).
-        prefixFrames: form.cropAnchor === 'song' ? Math.max(0, form.prefixFrames) : 0,
-        ...(form.trigger.trim()
-          ? { trigger: form.trigger.trim(), triggerPrepend: form.triggerPrepend }
-          : {}),
-        ...(form.regDatasetId ? {
-          regularisation: {
-            datasetId: form.regDatasetId,
-            every: form.regEvery,
-            topK: form.regTopK,
-          },
-        } : {}),
-        ...(trainLaunder ? { launder: true } : {}),
-        ...(form.previewEverySteps > 0 || form.previewEveryMinutes > 0 ? {
-          preview: {
-            everySteps: form.previewEverySteps,
-            everyMinutes: form.previewEveryMinutes,
-            seconds: form.previewSeconds,
-            seed: form.previewSeed,
-            control: form.previewControl,
-            baseline: form.previewBaseline,
-            scaleMlp: form.previewScaleMlp,
-            ...(form.previewCaption.trim() ? { caption: form.previewCaption.trim() } : {}),
-            // Explicit pick wins over the caption box above only because the
-            // form never lets both be non-empty at once (picking a song clears
-            // the caption box's relevance) — the server resolves it into
-            // caption/lyrics through the same override path either way.
-            ...(!form.previewCaption.trim() && form.previewSongId
-              ? { previewSongId: form.previewSongId } : {}),
-          },
-        } : {}),
-        // Flag-contract parity fields (2026-09-05). EVERY ONE IS SENT, ALWAYS,
-        // including the falses and the zeros.
-        //
-        // They used to be spread in only when switched on, on an "an older
-        // engine never sees it" rule that does not apply here: this body goes
-        // to our own route, and it is the ARG BUILDER, not the request, that
-        // decides which flags an older ace-train sees. What omission actually
-        // bought was a class of dead checkboxes — the route reads a missing key
-        // as "use the default", so unticking anything whose default is ON left
-        // the default standing. attnBackend (default flash since 2026-09-06)
-        // was refused by the trainer on an AMD card with the box unticked
-        // (#149); PiSSA/HOT-PiZZA (default on) was the same bug one line down.
-        //
-        // NOT gated on adapterType: --attn is orthogonal to the adapter
-        // parameterization and mm3-lm-train accepts it under LoKr too, where the
-        // VRAM saving is identical.
-        // Forced to 'exact' when the engine build has no fused-attention kernel
-        // (Vulkan/Metal): the trainer refuses to start there, and the checkbox
-        // is disabled with that reason shown.
-        attnBackend: flashSupported ? form.attnBackend : 'exact',
-        // The LoRA-family group is meaningless under LoKr, so it is sent as all
-        // off there rather than omitted — the route's defaults would otherwise
-        // reinstate HOT-PiZZA under a LoKr request.
-        dora:   form.adapterType === 'lora' && form.dora,
-        hira:   form.adapterType === 'lora' && form.hira,
-        loha:   form.adapterType === 'lora' && form.loha,
-        rslora: form.adapterType === 'lora' && form.rslora,
-        pissa:    form.adapterType === 'lora' && form.pissa
-                  && !form.dora && !form.hira && !form.loha,
-        hotPizza: form.adapterType === 'lora' && form.pissa && form.hotPizza
-                  && !form.dora && !form.hira && !form.loha,
-        hra: form.adapterType === 'lora' && form.hra
-             && !form.dora && !form.hira && !form.loha && !form.pissa,
-        loraPlusRatio: form.adapterType === 'lora' ? form.loraPlusRatio : 1,
-        artistToken: form.adapterType === 'lora' && form.artistTokenOn ? form.artistToken : '',
-        artistTokenK: form.artistTokenK,
-        artistTokenLr: form.artistTokenLr,
-        // 0 alongside a regularisation corpus — the engine refuses the pair and
-        // the route 400s on it. The control is disabled there too.
-        prefixN: form.adapterType === 'lora' && !form.regDatasetId
-          ? Math.max(0, form.prefixN) : 0,
-      };
+      const recipe = await resolveTrainingRecipe<FormState>('mm3-lm', {
+        ...form, activePreset, trainLaunder, flashSupported,
+      }, activePreset === 'custom' ? undefined : activePreset);
+      const body = recipe.execution as Mm3TrainLmRequest;
+      assertRecipeWorker(recipe);
       await startMm3TrainLm(body);
+    } catch (err) {
+      useTrainingStore.setState({ error: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(false);
     }

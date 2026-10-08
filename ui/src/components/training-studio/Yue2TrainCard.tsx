@@ -1,3 +1,4 @@
+import { assertRecipeWorker, resolveTrainingRecipe } from '../../services/trainingRecipesApi';
 import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 import type { Yue2OptimOptions } from '../../services/trainingApi';
 // Yue2TrainCard.tsx — Training Studio phase 3, YuE2 branch: stages 1 and 4.
@@ -795,28 +796,12 @@ export const Yue2NarTrainCard: React.FC<{
     if (!form) return;
     setBusy(true);
     try {
-      const body: Yue2TrainRequest = {
-        // Informational: the fields below already carry the recipe, and the
-        // route lays a named preset UNDER them. It only tells a log reader
-        // which recipe the user started from.
-        ...(activePreset === 'custom' ? {} : { preset: activePreset }),
-        lmType: form.lmType,
-        rank: form.rank, alpha: form.alpha, target: form.target,
-        optimizer: form.optimizer, prodigyD0: form.prodigyD0,
-        muonLrScale: form.muonLrScale, muonNsSteps: form.muonNsSteps,
-        lr: form.lr, lrScheduler: form.lrScheduler,
-        steps: form.steps, warmup: form.warmup,
-        saveEvery: form.saveEvery, logEvery: form.logEvery,
-        gradAccum: form.gradAccum, maxGradNorm: form.maxGradNorm,
-        weightDecay: form.weightDecay, captionDropout: form.captionDropout,
-        abcDropout: form.abcDropout,
-        tSampling: form.tSampling, seed: form.seed, kvCache: form.kvCache,
-        clipBlock: form.clipBlock,
-        // Sent only when there is one: the route falls back to the dataset's
-        // own trigger word, and sending '' would look like an answer.
-        ...(form.trigger.trim() ? { trigger: form.trigger.trim() } : {}),
-      };
+      const recipe = await resolveTrainingRecipe<Record<string, unknown>>('yue2-nar', { ...form, activePreset });
+      const body = recipe.execution as Yue2TrainRequest;
+      assertRecipeWorker(recipe);
       await startYue2Train(body);
+    } catch (err) {
+      useTrainingStore.setState({ error: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(false);
       reload();

@@ -626,6 +626,12 @@ Side-Step (`D:\Ace-Step-Latest\Side-Step`, local) is the Python reference implem
 | Audition | `POST /codes-decode` on **ace-server** (`hot-step-server.cpp`, ~174 lines) | `audition{Service,Runner,Store}.ts` | `AuditionCard.tsx`, `AuditionPlayer.tsx`, `LmAdapterPicker.tsx` |
 | Engine lifecycle | — | `services/aceEngineProcess.ts` (stop/restart with epoch-guarded respawn cancellation) | engine-paused banners |
 
+### Training recipes
+
+`GET /api/training/ops/recipes/` lists the ACE LM/DiT, MM3 LM, YuE2 NAR/AR and YuE2 joint families. `GET /api/training/ops/recipes/:family` returns a family's built-in defaults, stored partial defaults, resolved values, execution projection, provenance and engine-deferred fields. A `worker` query selects that worker's recipe; a `preset` query selects a supported preset. `POST /api/training/ops/recipes/resolve` accepts the training operation snapshot with `family`, optional `preset` and form `overrides`, and returns the captured worker and resolved request. The form keeps unsaved edits locally and sends overrides for resolution immediately before the existing trainer start route.
+
+For ACE, stored defaults are a separate partial layer used by the batch pipeline. The interactive request projects the resolved form once; it must not spread stored pipeline values underneath fields omitted by the interactive projection. Explicit zero and false overrides remain values, not missing fields. Engine-selected model, device and other deferred values are reported as deferred rather than guessed by the browser.
+
 Frozen contracts (types, routes, JSONL event schemas, CLI) are duplicated verbatim between `server/src/services/training/types.ts` and `ui/src/services/trainingApi.ts` — **kept in sync by hand, deliberately**.
 
 Job model: one global promise-chain queue (`labelingQueue.ts`), SSE streams with replayable capped buffers, `_meta.json` persistence, `TrainingMetricEvent` for training numbers. GPU jobs stop the ace-server child first (`stopEngine`, default on) and restart it in a `finally`.
