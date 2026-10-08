@@ -567,32 +567,58 @@ imports the same type instead of its own copy. Errors across all of them are the
   previous inline type was missing `version`, `commit`, `dirty`, `engineBuiltAt` and `clients`,
   and marked `engine` optional when the route always sends it. `GET /presence` is a raw SSE
   keepalive with no JSON frames and has no response type.
-- **Shutdown** (`contracts/shutdown.ts`). `POST /shutdown` and `POST /restart` both return
-  `{ success: boolean; message: string }` (`ShutdownResponse`/`RestartResponse`, identical
-  shape, named separately for the two operations). A restart-marker write failure is `500
-  { error }`.
-- **Settings** (`contracts/settings.ts`). `GET /settings/env` returns `EnvResponse`
-  (`{ values, restartKeys }`, unset keys backfilled with their resolved default); `POST
-  /settings/env` returns `EnvUpdateResponse` (`{ updated, restartRequired }`); `GET
-  /settings/gpus` returns `GpusResponse` (`{ gpus: GpuInfo[] }`), where `GpuInfo` re-exports
-  `services/gpuDevices.ts`'s existing `NvidiaGpu` rather than a third copy of the same shape.
+- **Shutdown** (`contracts/shutdown.ts`, mounted at `/api/shutdown`). No request body. `POST
+  /api/shutdown` always returns `200 { success: true, message }` (`ShutdownResponse`) before
+  tearing the process down 300ms later. `POST /api/shutdown/restart` returns `200
+  { success: true, message }` (`RestartResponse`) after writing the `.restart-requested`
+  marker for the loop wrapper to pick up; a write failure is `500 { error }`.
+- **Settings** (`contracts/settings.ts`). `GET /settings/env` takes no input and returns
+  `EnvResponse` (`{ values, restartKeys }`, unset keys backfilled with their resolved default).
+  `POST /settings/env` takes `{ values: Record<string, string> }`; keys outside
+  `EXPOSED_ENV_KEYS` or non-string values are silently dropped rather than rejected, and an
+  empty/missing/non-object `values` is `400 { error }`; on success it returns
+  `EnvUpdateResponse` (`{ updated, restartRequired }`, `restartRequired` true if any updated key
+  is in `RESTART_REQUIRED_KEYS`), or `500 { error }` if writing `.env` fails. `GET
+  /settings/gpus` takes no input and returns `GpusResponse` (`{ gpus: GpuInfo[] }`, empty array
+  when `nvidia-smi` is unavailable), where `GpuInfo` re-exports `services/gpuDevices.ts`'s
+  existing `NvidiaGpu` rather than a third copy of the same shape.
 - **Profiles** (`contracts/profiles.ts`). A profile is `ProfileFile` (`{ name, saved_at, data }`
   — the same shape as an exported preset JSON, so one can be dropped into the profiles folder by
-  hand). `GET /profiles` returns `ListProfilesResponse`; `GET /profiles/:name` returns a bare
-  `ProfileFile`, `404` if missing; `POST /profiles` returns `SaveProfileResponse`; `PATCH
-  /profiles/:name` returns `RenameProfileResponse`, `409` on a name collision; `DELETE
-  /profiles/:name` returns `DeleteProfileResponse`.
-- **Mastering** (`contracts/mastering.ts`). `POST /mastering/upload-reference` (multipart,
-  bearer token) returns `UploadReferenceResponse` (`{ name, path, url }`); `GET
-  /mastering/references` returns `ListReferencesResponse`; `DELETE
-  /mastering/references/:name` returns `DeleteReferenceResponse`; `POST /mastering/run` returns
-  `RunMasteringResponse` (`{ ok, masteredUrl, songId }`), `404` for a missing song/reference.
-- **Adapters** (`contracts/adapters.ts`). `GET /adapters/browse` returns `BrowseResponse`
-  (`{ current, entries: BrowseEntry[] }`) or, on a missing directory or a read error,
-  `BrowseErrorResponse` (the same shape plus `error`) at `404`/`500` — the entries array stays
-  present either way so a caller that skips the status code still gets something to render.
-  `POST /adapters/scan` returns `ScanResponse` (`{ files: AdapterFile[] }`), always `200`
-  (an empty array for a missing/empty folder). `GET /adapters/lm` returns `LmAdaptersResponse`
+  hand). `GET /profiles` takes no input, returns `ListProfilesResponse`. `GET /profiles/:name`
+  returns a bare `ProfileFile`, `404 { error }` if missing. `POST /profiles` takes
+  `{ name: string, data: object }`; a missing/blank `name` or a `data` that isn't a plain
+  object is `400 { error }`; on success it overwrites any existing profile of that name and
+  returns `SaveProfileResponse` (`{ ok, name, saved_at }`), or `500 { error }` on a write
+  failure. `PATCH /profiles/:name` takes `{ newName: string }`; a missing/blank `newName` is
+  `400 { error }`, a missing source profile is `404 { error }`, an existing profile already at
+  `newName` is `409 { error }` (renaming onto itself is a no-op success, not a conflict); on
+  success it returns `RenameProfileResponse` (`{ ok, name }`), or `500 { error }` on a write/
+  unlink failure. `DELETE /profiles/:name` takes no body, `404 { error }` if missing, else
+  `DeleteProfileResponse` (`{ ok, deleted }`) or `500 { error }` on an unlink failure.
+- **Mastering** (`contracts/mastering.ts`, bearer-token auth on every route). `POST
+  /mastering/upload-reference` is multipart with a `file` field; no bearer token is
+  `401 { error }`, no file is `400 { error }`; non-WAV/MP3 formats are transcoded to WAV on
+  upload (ffmpeg missing or conversion failure surfaces as `500 { error }`); on success it
+  returns `UploadReferenceResponse` (`{ name, path, url }`). `GET /mastering/references` takes
+  no input and always returns `200 { references: [] }` on a read failure rather than erroring.
+  `DELETE /mastering/references/:name` needs a bearer token (`401` if missing), `404 { error }`
+  if the file doesn't exist, `400 { error }` if path resolution would escape the references
+  directory, else `DeleteReferenceResponse` (`{ ok: true }`). `POST /mastering/run` needs a
+  bearer token (`401`) and body `{ songId: string, referenceName: string }` (missing either is
+  `400 { error }`); `404 { error }` for an unknown `songId`, a missing audio file on disk, or a
+  missing reference file; a mastering-binary failure is `500 { error }`; on success it returns
+  `RunMasteringResponse` (`{ ok, masteredUrl, songId }`) and writes `masteredUrl` to the song
+  row.
+- **Adapters** (`contracts/adapters.ts`). `GET /adapters/browse?path=&filter=` (both optional;
+  `filter` is `adapters`/`audio`/`trainingAudio`, anything else means unfiltered) returns
+  `BrowseResponse` (`{ current, entries: BrowseEntry[] }`); an unresolvable `path` is
+  `400 { error }`, a missing/non-directory path is `404` with `BrowseErrorResponse` (the same
+  shape plus `error`), and a read failure mid-listing is `500` with `BrowseErrorResponse` — the
+  entries array stays present either way so a caller that skips the status code still gets
+  something to render. `POST /adapters/scan` takes `{ folder: string }`; a missing/non-string
+  `folder` or a missing/non-directory path is a quiet `200 { files: [] }` rather than an error,
+  and so is any scan exception — always `200`. `GET /adapters/lm?folder=` (optional; defaults to
+  every configured planner-adapter root) returns `LmAdaptersResponse`
   (`{ root, adapters: LmAdapterEntry[], error? }`) — also always `200`; a scan failure sets
   `error` rather than changing status, so the picker can still show whatever root it resolved.
   `LmAdapterEntry` carries the per-adapter eval sidecar (`evalScore`, `evalVerdict`).
@@ -601,20 +627,52 @@ imports the same type instead of its own copy. Errors across all of them are the
 - **VST** (`contracts/vst.ts`). `VstPlugin` and `ChainEntry` used to be declared once in the
   route file and copied again in `api.ts` (as `VstPlugin`/`VstChainEntry`) — now one definition,
   re-exported from `api.ts` under its existing names so nothing importing from there changes.
-  `GET /vst/scan` returns `ScanPluginsResponse`; `GET`/`PUT /vst/chain` return `ChainConfig`
-  directly (`GetChainResponse`/`UpdateChainResponse`); `POST /vst/gui` returns `GuiResponse`;
-  `POST /vst/process` returns `ProcessResponse` (`{ ok, skipped? }` when no plugin is enabled,
-  else `{ ok, elapsed }`). The monitor sub-routes
-  (`start`/`stop`/`switch`/`status`/`seek`/`pause`/`resume`/`restart`) each get their own
-  response type; `api.ts`'s previous inline `monitorStatus()` type was missing `paused`, which
-  the route always sends.
-- **Seeds** (`contracts/seeds.ts`). File format matches MD_Nodes/SeedSaver (ComfyUI) —
-  `{ seed, saved_at, metadata }` — so a ComfyUI `seeds/` directory drops in and loads
-  immediately. `GET /seeds` returns `ListSeedsResponse`; `GET /seeds/favorites` returns
-  `ListFavoritesResponse`; `GET /seeds/random` returns `RandomSeedResponse`, `404` if none
-  saved; `GET /seeds/:name` returns `GetSeedResponse`, `404` if missing; `POST /seeds` returns
-  `SaveSeedResponse`; `DELETE /seeds/:name` returns `DeleteSeedResponse`; `POST
-  /seeds/:name/favorite` returns `ToggleFavoriteResponse`.
+  `GET /vst/scan` takes no input; a missing `vst-host.exe` is `503 { error, hint }`, a scan
+  failure is `500 { error }`, else `ScanPluginsResponse` (`{ plugins }`). `GET /vst/chain` takes
+  no input and always returns `ChainConfig` (`GetChainResponse`) — an empty `{ plugins: [] }` if
+  no chain file exists yet or it fails to parse. `PUT /vst/chain` takes `{ plugins: ChainEntry[]
+  }`; a non-array `plugins` is `400 { error }`, else it saves and echoes back `ChainConfig`
+  (`UpdateChainResponse`). `POST /vst/gui` takes `{ pluginPath: string, uid?: string }`; a
+  missing `pluginPath` is `400 { error }`, a missing `vst-host.exe` is `503 { error }`, else
+  `GuiResponse` (`{ ok, pid }`). `POST /vst/process` takes `{ inputPath: string, outputPath:
+  string }`; missing either is `400 { error }`, a missing `vst-host.exe` is `503 { error }`, a
+  missing `inputPath` file is `404 { error }`, a processing failure is `500 { error }`, else
+  `ProcessResponse` (`{ ok, skipped: true }` when no plugin is enabled — input copied through
+  unprocessed — else `{ ok, elapsed }`). Monitor sub-routes, all under `vst-host.exe`'s control
+  file/status file pair: `POST /vst/monitor/start` takes `{ trackPath: string }` — missing is
+  `400`, an unresolved track file is `404`, a missing exe is `503`, an empty enabled-plugin chain
+  is `400`, else `MonitorStartResponse` (`{ ok, pid, plugins }`). `POST /vst/monitor/stop` takes
+  no input, always `200` — `MonitorStopResponse` (`{ ok, wasRunning }`). `POST
+  /vst/monitor/switch` takes `{ trackPath: string }` — missing is `400`, no monitor running is
+  `400`, an unresolved track is `404`, else `MonitorSwitchResponse` (`{ ok: true }`). `GET
+  /vst/monitor/status` takes no input, always `200` — `MonitorStatusResponse`
+  (`{ running, paused, pid, position, duration }`); `api.ts`'s previous inline type was missing
+  `paused`, which the route always sends. `POST /vst/monitor/seek` takes `{ position: number }`
+  — a non-number `position` or no monitor running is `400`, else `MonitorSeekResponse`
+  (`{ ok, position }`). `POST /vst/monitor/pause` and `/vst/monitor/resume` take no input, `400`
+  if no monitor is running, else `MonitorPauseResponse`/`MonitorResumeResponse` (`{ ok: true }`).
+  `POST /vst/monitor/restart` takes no input; no track currently loaded or a missing exe is
+  `400`/`503`, an empty enabled-plugin chain is `400`, else `MonitorRestartResponse`
+  (`{ ok, pid, plugins }`).
+- **Seeds** (`contracts/seeds.ts`). Every route takes an optional `?subdir=` query param
+  scoping to a subfolder (the UI currently always uses the flat default). `GET /seeds` returns
+  `ListSeedsResponse`, inlining each seed's metadata. `GET /seeds/favorites` returns
+  `ListFavoritesResponse` (favorites outside the flat default dir are silently skipped — it
+  reads without a `subdir`). `GET /seeds/random` is `404 { error }` if the dir has no seeds or
+  the picked file can't be read, else `RandomSeedResponse`. `GET /seeds/:name` is `404 { error
+  }` if missing, else `GetSeedResponse`. `POST /seeds` takes `{ name: string, seed: number,
+  description?: string, tags?: string[], subdir?: string }`; a missing/blank `name` or a
+  non-numeric `seed` is `400 { error }`; `seed` is clamped to `[0, Number.MAX_SAFE_INTEGER]` and
+  `description` truncated to 500 chars; a write failure is `500 { error }`; on success it
+  returns `SaveSeedResponse` (`{ ok, name, seed }`). `DELETE /seeds/:name` is `404 { error }` if
+  missing, `500 { error }` on an unlink failure, else `DeleteSeedResponse` (`{ ok, deleted }`)
+  and also drops the name from favorites. `POST /seeds/:name/favorite` takes no body, always
+  `200` — `ToggleFavoriteResponse` (`{ ok, name, favorite }`, flipping membership in the
+  favorites list).
+- **Download resume** (`contracts/modelManager.ts`, `POST
+  /model-manager/download/:jobId/resume`). No body; a resume failure (unknown/non-resumable job)
+  is `400 { error }`, else `DownloadStartResponse` (`{ jobId }`) — same contract as the initial
+  `POST /download`.
 
 Compatibility for all of the above: every change here is a type annotation (`satisfies` on an
 existing `res.json(...)` call, or a `: Type` on an existing variable) and an import swap on the
