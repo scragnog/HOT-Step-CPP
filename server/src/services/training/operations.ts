@@ -78,15 +78,23 @@ export async function acceptTrainingSnapshot<P extends z.ZodType>(
     });
   }
   const snapshot = parsed.data as TrainingSnapshot<z.infer<P>>;
-  if (snapshot.dataset) {
-    const current = deps.datasetRevision(snapshot.dataset.id);
-    if (current === null) throw new TrainingOperationFailure(404, { reason: 'missing-dataset', error: `Dataset ${snapshot.dataset.id} not found` });
-    if (current !== snapshot.dataset.revision) {
-      throw new TrainingOperationFailure(409, { reason: 'stale-dataset', currentRevision: current, error: 'The dataset changed since this was prepared; reload it and try again' });
-    }
-  }
+  // The worker check awaits the network; the dataset is checked after it,
+  // synchronously, so an edit made meanwhile is caught rather than accepted.
   const worker = await resolveTrainingWorker(snapshot.worker, capability, deps);
+  assertDatasetCurrent(snapshot, deps);
   return { snapshot, worker };
+}
+
+/** Throw 404/409 unless the snapshot's dataset is still at its revision. A
+ *  domain that awaits anything between accepting and committing (a job
+ *  claim, a stage start) calls this again, synchronously, in that commit. */
+export function assertDatasetCurrent(snapshot: Pick<TrainingSnapshot<unknown>, 'dataset'>, deps: Pick<TrainingOperationDeps, 'datasetRevision'>): void {
+  if (!snapshot.dataset) return;
+  const current = deps.datasetRevision(snapshot.dataset.id);
+  if (current === null) throw new TrainingOperationFailure(404, { reason: 'missing-dataset', error: `Dataset ${snapshot.dataset.id} not found` });
+  if (current !== snapshot.dataset.revision) {
+    throw new TrainingOperationFailure(409, { reason: 'stale-dataset', currentRevision: current, error: 'The dataset changed since this was prepared; reload it and try again' });
+  }
 }
 
 // ── Domain handlers ─────────────────────────────────────────────────────────

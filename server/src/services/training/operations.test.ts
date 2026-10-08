@@ -4,7 +4,7 @@ import express, { Router } from 'express';
 import type { Server } from 'node:http';
 import { z } from 'zod/v4';
 import {
-  acceptTrainingSnapshot, registerTrainingOperations, resolveTrainingWorker, trainingOp, trainingOperationsRouter,
+  acceptTrainingSnapshot, assertDatasetCurrent, registerTrainingOperations, resolveTrainingWorker, trainingOp, trainingOperationsRouter,
   TrainingOperationFailure, type TrainingOperationDeps,
 } from './operations.js';
 import { proxyToWorker } from './trainingWorkers.js';
@@ -118,4 +118,26 @@ test('the worker proxy refuses operations, so "Train on" cannot redirect one', a
       assert.match((body as { error: string }).error, /explicit worker/);
     }
   } finally { config.workers.list = saved; }
+});
+
+test('accept: a dataset changed or deleted while the worker is being checked is refused', async () => {
+  let rev: string | null = 'r1';
+  const deps = fakeDeps({
+    datasetRevision: () => rev,
+    workerStatus: async () => { rev = next; return { online: true, version: 'v1' }; },
+  });
+  let next: string | null = 'r2';  // another client edits it during the health check
+  const remote = envelope({ worker: { kind: 'remote', name: 'Den' }, dataset: { id: 'ds', revision: 'r1' } });
+  await assert.rejects(acceptTrainingSnapshot(remote, payload, 'train', deps),
+    (e: unknown) => failsWith(409, 'stale-dataset')(e) && (e as TrainingOperationFailure).body.currentRevision === 'r2');
+  rev = 'r1'; next = null;  // ...or deletes it
+  await assert.rejects(acceptTrainingSnapshot(remote, payload, 'train', deps), failsWith(404, 'missing-dataset'));
+  rev = 'r1'; next = 'r1';  // unchanged: accepted
+  assert.equal((await acceptTrainingSnapshot(remote, payload, 'train', deps)).snapshot.dataset?.revision, 'r1');
+});
+
+test('assertDatasetCurrent re-checks at commit time and passes without a dataset', () => {
+  assert.doesNotThrow(() => assertDatasetCurrent({}, fakeDeps()));
+  assert.doesNotThrow(() => assertDatasetCurrent({ dataset: { id: 'ds', revision: 'rev-2' } }, fakeDeps()));
+  assert.throws(() => assertDatasetCurrent({ dataset: { id: 'ds', revision: 'rev-1' } }, fakeDeps()), failsWith(409, 'stale-dataset'));
 });
