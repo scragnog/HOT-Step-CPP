@@ -14,7 +14,7 @@ import http from 'http';
 import { createHash, randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { config, PORTABLE_MODE, PROJECT_ROOT } from '../config.js';
-import type { RegistryFileEntry as RegistryFile, ModelRegistryResponse } from '../contracts/modelManager.js';
+import type { RegistryFileEntry as RegistryFile, ModelRegistryResponse, DownloadStatus, DownloadJob } from '../contracts/modelManager.js';
 
 // Load registry - resolve path based on mode:
 // - Dev mode: relative to source file (../data/model-registry.json from services/)
@@ -112,19 +112,9 @@ function isWindowsOnlyFile(f: { filename?: string }): boolean {
 const CUDA_ONLY_PACKS = ['cuda-runtime', 'cuda12-runtime', 'supersep-runtime', 'blackwell'];
 
 // ── Types ───────────────────────────────────────────────────
-
-export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'cancelled';
-
-export interface DownloadJob {
-  jobId: string;
-  fileId: string;
-  filename: string;
-  status: DownloadStatus;
-  bytesDownloaded: number;
-  totalBytes: number;
-  speed: number;        // bytes/sec rolling average
-  error?: string;
-}
+// DownloadStatus and DownloadJob are shared with the client — imported above
+// from contracts/modelManager.ts — so this service's job shape can't drift
+// from what GET /api/model-manager/downloads actually streams.
 
 interface InternalJob extends DownloadJob {
   abortController?: AbortController;

@@ -6,6 +6,7 @@
 import type { Song, UnifiedRecentSong, GenerationParams, GenerationJob, AuthState, AceModels, BrowseEntry, AdapterFile, ModelRegistry } from '../types';
 import { getGenerationTimeoutMinutes } from '../utils/generationTimer';
 import type { ResolveIntent, ResolvePreviewResponse } from '../../../server/src/contracts/resolution';
+import type { DownloadStartResponse } from '../../../server/src/contracts/modelManager';
 import { WorkflowRequestError } from './workflowApi';
 import { apiClient, ApiError } from './httpClient';
 
@@ -504,7 +505,7 @@ export const modelManagerApi = {
   /** Start downloading a model file. Optional hfToken is forwarded to
    *  huggingface.co as a Bearer token (gated repos only). */
   download: (fileId: string, hfToken?: string) =>
-    post<{ jobId: string }>('/model-manager/download', hfToken ? { fileId, hfToken } : { fileId }),
+    post<DownloadStartResponse>('/model-manager/download', hfToken ? { fileId, hfToken } : { fileId }),
   /** Cancel an active download */
   cancel: (jobId: string) => post<{ ok: boolean }>(`/model-manager/download/${jobId}/cancel`),
   /** Resume a paused/failed download */

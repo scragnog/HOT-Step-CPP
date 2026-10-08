@@ -75,11 +75,13 @@ export interface ModelRegistryResponse {
 
 export interface DownloadStartResponse { jobId: string }
 
+export type DownloadStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'cancelled';
+
 export interface DownloadJob {
   jobId: string;
   fileId: string;
   filename: string;
-  status: 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'cancelled';
+  status: DownloadStatus;
   bytesDownloaded: number;
   totalBytes: number;
   speed: number;
