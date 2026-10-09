@@ -193,6 +193,31 @@ runtime (`defaults.ts:184,250`).
 | `cacheRatio` | `0` (off) | ace | sent only when `> 0` |
 | `ditSlidingWindow` | unset (full attention) | ace | `0` = full attention on all layers; omitted uses the model's own `128` |
 
+### Latent, denoise, DCW and auto-trim (ACE-only)
+
+None of these are read by `backends/yue2/generate.ts` or
+`backends/minimax/generate.ts` (checked by grep against both files) — they
+are ACE-specific DiT-latent/VAE-level knobs with no cross-backend analogue.
+MM3 explicitly does not apply the auto-trim buffer concept at all
+(`backends/minimax/generate.ts:416-417`: *"The ACE duration buffer
+(autoTrimEnabled + durationBuffer) is deliberately NOT added: nothing trims
+it back off on this path."*).
+
+| Field | Default | Note |
+|---|---|---|
+| `dcwEnabled` | `false` | sent unconditionally; gates the rest |
+| `dcwMode` | `'double'` | `'low' \| 'double' \| 'high' \| 'pix'`, sent only when `dcwEnabled` |
+| `dcwLowScaler`, `dcwHighScaler` | `0.2`, `0.2` | combined into a single `dcwScaler` wire value (`dcwMode === 'high'` uses the high scaler × 0.02, otherwise the low scaler × 0.05); `dcwHighScaler` is also sent on its own, but only in `'double'` mode |
+| `latentShift` | `0.0` | sent only when `!== 0` |
+| `latentRescale` | `1.0` | sent only when `!== 1` |
+| `customTimesteps` | `''` | sent only when non-empty |
+| `denoiseStrength` | `0.0` | post-VAE spectral denoiser; sent only when `> 0` |
+| `denoiseSmoothing`, `denoiseMix` | `0.7`, `0.25` | sent only when `denoiseStrength > 0` |
+| `lssStrength` | `0.0` | Latent Spectral Suppressor (pre-VAE latent channel gate); sent only when `> 0` |
+| `lssVarThresh`, `lssDcRemove` | `0.15`, `true` | sent only when `lssStrength > 0` |
+| `autoTrimEnabled` | `false` | sent only when true |
+| `durationBuffer`, `autoTrimFadeMs` | `15`, `2000` | sent only when `autoTrimEnabled` |
+
 ### Seeding and batching
 
 | Field | Default | Backends | Note |
@@ -232,7 +257,8 @@ its own enable toggle gating its sub-fields:
 | Field | Default | Backends | Note |
 |---|---|---|---|
 | `spectralLifterEnabled` + `slDenoiseStrength`, `slNoiseFloor`, `slHfMix`, `slTransientBoost`, `slShimmerReduction` | `false`; `0.3`, `0.1`, `0.0`, `0.0`, `6.0` | ace | |
-| `masteringEnabled` + `masteringReference`, `timbreReference` | `false`; `''`, `false` | ace, yue2, minimax-m3 (shared post-process, per `features.postProcess`) | reads the WAV's own sample rate, not tied to one backend's native rate |
+| `masteringEnabled` + `masteringReference`, `timbreReference`, `timbreAudioPath` | `false`; `''`, `false`, `''` | ace, yue2, minimax-m3 (shared post-process, per `features.postProcess`) | reads the WAV's own sample rate, not tied to one backend's native rate. `timbreAudioPath` is folded INTO the `timbreReference` wire value (sent as that string) rather than its own key; without it, `timbreReference` is sent as `true` only when mastering is also on and a reference is set |
+| `postprocessEnabled` + `postprocessPlugin` | `false`; `''` | ace | replaces the built-in tiled VAE decoder with a Lua plugin; sent only when both are set AND `postProcessingEnabled`. Note: the legacy ACE path (`translateParams.ts:322-324`) sends `postprocessPlugin` whenever it is non-empty, without checking `postprocessEnabled` — a documented idiom difference between the two submission shapes, not a bug introduced here |
 | `vocalNaturalizerEnabled` + `gainOffsetDb`, `naturalizeAmount`, `natVibratoRate`, `natVibratoDepth`, `natFormantStrength`, `natMetallicReduction`, `natQuantizationMask`, `natTransitionSmooth` | `false`; `0`, `0.5`, `4.5`, `1.0`, `1.0`, `1.0`, `0.0`, `1.0` | ace, yue2, minimax-m3 | |
 | `ppVaeReencode`, `ppVaeBlend` | `false`, `0.0` | ace | ACE-VAE-coupled; no analogue on backends without that VAE |
 | `coverArtEnabled`, `coverArtSubject` | `false`, `''` | ace, yue2, minimax-m3 | |
@@ -243,8 +269,9 @@ its own enable toggle gating its sub-fields:
 
 ### StableStep (SA3) refinement
 
-Gated on `postProcessingEnabled && stableStepOn` (both default
-`false`/`false`); SA3 is natively 44.1kHz and backend-agnostic
+Gated on `postProcessingEnabled && stableStepOn` (default `true`/`false` —
+`postProcessingEnabled` defaults ON, `stableStepOn` defaults OFF,
+`defaults.ts:88,110`); SA3 is natively 44.1kHz and backend-agnostic
 (`features.stableStep`).
 
 | Field | Default | Note |

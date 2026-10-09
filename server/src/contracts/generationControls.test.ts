@@ -76,3 +76,24 @@ test('backendParams and pluginParams stay free-form extension channels', () => {
 test('an empty params object (every field omitted) is valid — defaults apply downstream, not here', () => {
   assert.equal(generationControlsSchema.safeParse({}).success, true);
 });
+
+test('type-mismatched and null values on known fields parse identically under both schemas (no silent tightening)', () => {
+  // Tester's repro from the 0520f902 review: a typed zod field (z.number(),
+  // z.boolean(), z.record(string, string)) rejects these even though the
+  // live route and generationIntentSchema's record(unknown) both accept
+  // them — every known field here must stay z.unknown() so this can't recur.
+  const mismatches = [
+    { inferenceSteps: '12' },
+    { skipLm: null },
+    { pluginParams: { 'future:value': 3 } },
+  ];
+  for (const fixture of mismatches) {
+    const oldResult = generationIntentSchema.safeParse({ contract: 'generation-intent/1', params: fixture });
+    const newResult = generationControlsSchema.safeParse(fixture);
+    assert.equal(oldResult.success, true, `${JSON.stringify(fixture)} unexpectedly rejected by generationIntentSchema`);
+    assert.equal(
+      newResult.success, oldResult.success,
+      `${JSON.stringify(fixture)}: generationControlsSchema (${newResult.success}) diverged from generationIntentSchema (${oldResult.success})`,
+    );
+  }
+});
