@@ -141,6 +141,7 @@ export async function startFakeServer(): Promise<FakeServer> {
   const settingsRoutes = (await import('../../src/routes/settings.js')).default;
   const uploadRoutes = (await import('../../src/routes/upload.js')).default;
   const resolveRoutes = (await import('../../src/routes/resolve.js')).default;
+  const downloadRoutes = (await import('../../src/routes/download.js')).default;
   // Insta-Gen's and Cover's WorkflowKinds register as an IMPORT SIDE EFFECT
   // of these two route modules (inspire.ts:531, yue2Cover.ts:182) — there is
   // no separate registerXWorkflows() call anywhere else to make instead, so
@@ -169,6 +170,17 @@ export async function startFakeServer(): Promise<FakeServer> {
   app.use('/api/settings', settingsRoutes);
   app.use('/api/upload', uploadRoutes);
   app.use('/api/resolve', resolveRoutes);
+  // download.ts's main (song-found) branch always gathers metadata
+  // (audioMetadata.ts's gatherSongMetadata never returns falsy), so it
+  // always re-encodes through ffmpeg regardless of requested format — no
+  // injectable seam (convertAudio takes no deps param). client.library.test.ts
+  // therefore only exercises the queue-only fallback branch (download.ts
+  // :164-205: an id with no matching song row, found by its audioUrl query
+  // param instead), which is the documented "a render that exists only in
+  // the queue" path (docs/dev/frontend-media.md) and does a raw file copy
+  // with zero subprocess calls for wav. The song-found + metadata branch is
+  // reported as a blocked workflow, not faked.
+  app.use('/api/download', downloadRoutes);
   app.use('/api/inspire', inspireRoutes);
   app.use('/api/yue2-cover', yue2CoverRoutes);
   // Mounted at '/api', not '/api/backends' — this router spells its own full
