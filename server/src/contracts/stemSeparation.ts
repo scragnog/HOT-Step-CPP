@@ -22,28 +22,34 @@ export const STEM_TRACK_NAMES = [
 
 /** POST /api/stem-studio/extract. Runs each track as a sequential DiT
  *  generation against the source; 400 `Invalid track names: ...` lists every
- *  name outside STEM_TRACK_NAMES, not just the first. Returns `{ id }` (202
- *  semantics: the pipeline runs after the response, tracked via `/progress`). */
+ *  name outside STEM_TRACK_NAMES, not just the first — that check runs
+ *  after this schema, against whatever `tracks` contains, so a non-string
+ *  entry fails there (`Invalid track names: 5`), not here. Returns `{ id }`
+ *  (202 semantics: the pipeline runs after the response, tracked via
+ *  `/progress`). `sourceFileName`/`style`/`lyrics`/`ditSettings` are only
+ *  ever used behind `|| <default>` (`'unknown'`/`''`/`''`/`{}`), so `null`
+ *  and every other falsy value are accepted exactly like an absent key —
+ *  this schema does not type-check them beyond that. */
 export const stemExtractRequestSchema = z.object({
   sourceAudioUrl: z.string().min(1),
-  sourceFileName: z.string().optional(),
-  tracks: z.array(z.string()).min(1),
-  style: z.string().optional(),
-  lyrics: z.string().optional(),
-  ditSettings: z.record(z.string(), z.unknown()).optional(),
+  sourceFileName: z.unknown(),
+  tracks: z.array(z.unknown()).min(1),
+  style: z.unknown(),
+  lyrics: z.unknown(),
+  ditSettings: z.unknown(),
 });
 export type StemExtractRequest = z.infer<typeof stemExtractRequestSchema>;
 
 /** POST /api/stem-studio/supersep. Runs the neural separator in-process and
  *  saves every returned stem to disk, including hidden debug stems (not
- *  listed in the job's `tracks`). `level` is parsed with `parseInt(...,
- *  10)`; a non-numeric value becomes `NaN`, not a validation error — the
- *  route does not reject it today. Returns `{ id }`, same polling contract
- *  as `/extract`. */
+ *  listed in the job's `tracks`). `level` is parsed with
+ *  `parseInt(String(level ?? '0'), 10)` — any value, including `null`,
+ *  flows through `String()`; a non-numeric result becomes `NaN`, not a
+ *  validation error. Returns `{ id }`, same polling contract as `/extract`. */
 export const stemSupersepRequestSchema = z.object({
   sourceAudioUrl: z.string().min(1),
-  sourceFileName: z.string().optional(),
-  level: z.union([z.string(), z.number()]).optional(),
+  sourceFileName: z.unknown(),
+  level: z.unknown(),
 });
 export type StemSupersepRequest = z.infer<typeof stemSupersepRequestSchema>;
 
@@ -91,12 +97,50 @@ export interface StemStorageStats { totalBytes: number; jobCount: number; stemCo
 export const supersepSeparateRequestSchema = z.object({ audioUrl: z.string().min(1) });
 export type SupersepSeparateRequest = z.infer<typeof supersepSeparateRequestSchema>;
 
-/** GET /api/supersep/:jobId/progress, GET .../result, POST .../release, and
- *  POST /api/supersep/recombine are unvalidated proxies: Node forwards the
- *  path param or raw JSON body to the matching ace-server `/supersep/*`
- *  endpoint and relays its status/body (or binary WAV, for `/stem/:index`
- *  and `/recombine`) back unchanged. There is no Node-side schema for
- *  ace-server's own request/response shapes; see engine/src/supersep.h. */
+/** GET /api/supersep/:jobId/progress. Node does not check ace-server's HTTP
+ *  status here — it decodes the upstream JSON and always replies 200 with
+ *  that body, even if ace-server itself replied with an error status. A
+ *  body ace-server sent that isn't valid JSON throws and becomes this
+ *  route's own 500. */
 export interface SupersepProgressResponse { status: string; progress: number; message: string; error?: string }
+
+/** POST /api/supersep/:jobId/release. Unlike the other proxies, Node
+ *  discards ace-server's response body (`{"released":true}` or a JSON
+ *  error) entirely and always replies with its own `{ ok }`, at status 200
+ *  if ace-server's reply was 2xx, or ace-server's own status otherwise. */
+export interface SupersepReleaseResponse { ok: boolean }
+
+/** GET /api/supersep/:jobId/result. On a 2xx this forwards ace-server's
+ *  JSON body unchanged at status 200; on a non-2xx it forwards ace-server's
+ *  status and JSON error body unchanged (both legs pass through as-is). */
 export interface SupersepStemMeta { name: string; category: string; index: number; stage?: number; hidden?: boolean }
 export interface SupersepResultResponse { stems: SupersepStemMeta[] }
+
+/** GET /api/supersep/:jobId/stem/:index. On success, streams ace-server's
+ *  WAV bytes with `Content-Type: audio/wav` and a Node-generated
+ *  `Content-Disposition` naming the file `stem_<index>.wav` — ace-server's
+ *  own headers are not forwarded. On failure this does NOT pass through
+ *  ace-server's error body: it replies with ace-server's status and a fixed
+ *  `{ error: 'Failed to fetch stem' }`, discarding whatever ace-server
+ *  actually said. */
+
+/** POST /api/supersep/recombine. Forwarded to ace-server's
+ *  `/supersep/recombine` verbatim — Node applies no schema to the request.
+ *  The real wire shape ace-server requires (engine/tools/hot-step-server.cpp
+ *  `svr.Post("/supersep/recombine", ...)`) is `{ id, stems: [{ index,
+ *  volume?, muted? }] }`: 400 `Missing id` without `id`; a `stems` entry
+ *  with no `index` is silently skipped, and an out-of-range `index` is
+ *  silently ignored (clamped to the job's real stem count, not rejected);
+ *  404 `Job not found`; 409 `Job not complete` if the separation job this
+ *  `id` names hasn't finished. On a non-2xx, Node forwards ace-server's
+ *  status and JSON body unchanged; on success it streams the resulting WAV
+ *  with `Content-Type: audio/wav` and no `Content-Disposition`. */
+export const supersepRecombineRequestSchema = z.object({
+  id: z.string().min(1),
+  stems: z.array(z.object({
+    index: z.number().int().min(0),
+    volume: z.number().finite().optional(),
+    muted: z.boolean().optional(),
+  })).optional(),
+});
+export type SupersepRecombineRequest = z.infer<typeof supersepRecombineRequestSchema>;

@@ -11,7 +11,7 @@ process.env.DATA_DIR = DATA_DIR;
 const express = (await import('express')).default;
 const stemStudioRoutes = (await import('../routes/stemStudio.js')).default;
 const supersepRoutes = (await import('../routes/supersep.js')).default;
-const { STEM_TRACK_NAMES, stemExtractRequestSchema, stemSupersepRequestSchema, supersepSeparateRequestSchema } = await import('./stemSeparation.js');
+const { STEM_TRACK_NAMES, stemExtractRequestSchema, stemSupersepRequestSchema, supersepSeparateRequestSchema, supersepRecombineRequestSchema } = await import('./stemSeparation.js');
 
 const app = express();
 app.use(express.json());
@@ -33,22 +33,39 @@ const get = async (p: string) => {
 
 // ── Fixture schema parity: the route rejects exactly what the schema rejects ──
 
-test('stemExtractRequestSchema: sourceAudioUrl and a non-empty tracks array are required', () => {
+test('stemExtractRequestSchema: sourceAudioUrl and a non-empty tracks array are required; everything else is pass-through, including null', () => {
   assert.equal(stemExtractRequestSchema.safeParse({ sourceAudioUrl: '/references/a.wav', tracks: ['vocals'] }).success, true);
   assert.equal(stemExtractRequestSchema.safeParse({ tracks: ['vocals'] }).success, false);
   assert.equal(stemExtractRequestSchema.safeParse({ sourceAudioUrl: '/references/a.wav', tracks: [] }).success, false);
   assert.equal(stemExtractRequestSchema.safeParse({ sourceAudioUrl: '/references/a.wav' }).success, false);
+  // Old behavior: sourceFileName/style/lyrics/ditSettings are only ever used
+  // behind `|| <default>`, so null (and any other falsy value) must pass.
+  assert.equal(stemExtractRequestSchema.safeParse({
+    sourceAudioUrl: '/references/a.wav', tracks: ['vocals'],
+    sourceFileName: null, style: null, lyrics: null, ditSettings: null,
+  }).success, true);
+  // A non-string track entry is not a schema rejection — it reaches the
+  // route's own VALID_TRACKS filter, same as it always did.
+  assert.equal(stemExtractRequestSchema.safeParse({ sourceAudioUrl: '/references/a.wav', tracks: ['vocals', 5] }).success, true);
 });
 
-test('stemSupersepRequestSchema: sourceAudioUrl required, level optional', () => {
+test('stemSupersepRequestSchema: sourceAudioUrl required, sourceFileName/level pass through including null', () => {
   assert.equal(stemSupersepRequestSchema.safeParse({ sourceAudioUrl: '/references/a.wav' }).success, true);
   assert.equal(stemSupersepRequestSchema.safeParse({ sourceAudioUrl: '/references/a.wav', level: 2 }).success, true);
+  assert.equal(stemSupersepRequestSchema.safeParse({ sourceAudioUrl: '/references/a.wav', sourceFileName: null, level: null }).success, true);
   assert.equal(stemSupersepRequestSchema.safeParse({}).success, false);
 });
 
 test('supersepSeparateRequestSchema: audioUrl required', () => {
   assert.equal(supersepSeparateRequestSchema.safeParse({ audioUrl: '/references/a.wav' }).success, true);
   assert.equal(supersepSeparateRequestSchema.safeParse({}).success, false);
+});
+
+test('supersepRecombineRequestSchema: id and stems[].index required; volume/muted optional', () => {
+  assert.equal(supersepRecombineRequestSchema.safeParse({ id: 'job-1', stems: [{ index: 0, volume: 0.8, muted: false }] }).success, true);
+  assert.equal(supersepRecombineRequestSchema.safeParse({ id: 'job-1' }).success, true, 'stems is optional, matching the engine silently defaulting it');
+  assert.equal(supersepRecombineRequestSchema.safeParse({ stems: [{ index: 0 }] }).success, false, 'id is required, matching the engine 400');
+  assert.equal(supersepRecombineRequestSchema.safeParse({ id: 'job-1', stems: [{}] }).success, false);
 });
 
 // ── HTTP: stemStudio.ts input validation (synchronous; no engine call reached) ─
@@ -62,10 +79,28 @@ test('POST /extract: missing source, missing/empty tracks, and unknown track nam
   assert.equal(bad.status, 400);
 });
 
-test('POST /supersep: missing sourceAudioUrl is refused', async () => {
+test('POST /extract: null optional fields and a non-string track entry behave exactly as before (old guards, not new rejections)', async () => {
+  // null sourceFileName/style/lyrics/ditSettings must reach the pipeline
+  // (not 400 here) — accepted via the route's own `|| <default>` fallback.
+  // 202-style jobs run async, so just confirm the request itself is admitted.
+  const ok = await post('/api/stem-studio/extract', {
+    sourceAudioUrl: '/references/a.wav', tracks: ['vocals'],
+    sourceFileName: null, style: null, lyrics: null, ditSettings: null,
+  });
+  assert.equal(ok.status, 200);
+  assert.match(ok.body.id, /^[0-9a-f-]{36}$/);
+  // A non-string entry fails the VALID_TRACKS filter (old error), not the schema.
+  const mixed = await post('/api/stem-studio/extract', { sourceAudioUrl: '/references/a.wav', tracks: ['vocals', 5] });
+  assert.deepEqual(mixed.body, { error: 'Invalid track names: 5' });
+});
+
+test('POST /supersep: missing sourceAudioUrl is refused; null sourceFileName/level are accepted like before', async () => {
   const bad = await post('/api/stem-studio/supersep', {});
   assert.deepEqual(bad.body, { error: 'sourceAudioUrl is required' });
   assert.equal(bad.status, 400);
+  const ok = await post('/api/stem-studio/supersep', { sourceAudioUrl: '/references/a.wav', sourceFileName: null, level: null });
+  assert.equal(ok.status, 200);
+  assert.match(ok.body.id, /^[0-9a-f-]{36}$/);
 });
 
 test('POST /api/supersep/separate: missing audioUrl is refused before any file read', async () => {
@@ -153,39 +188,86 @@ test('DELETE /all clears every job directory', async () => {
 
 // ── HTTP: supersep.ts proxy — fake ace-server, no network ──────────────────
 
-test('supersep.ts proxies progress/result/stem/release/recombine to ace-server and relays the response unchanged', async (t) => {
-  const seen: string[] = [];
+function fakeAceServer(responses: Record<string, Response | ((init?: any) => Response)>) {
+  const seen: Array<{ method: string; url: string; body?: string }> = [];
   const realFetch = globalThis.fetch;
-  t.after(() => { globalThis.fetch = realFetch; });
   globalThis.fetch = (async (url: string, init?: any) => {
     if (url.startsWith(base)) return realFetch(url, init); // the test's own HTTP calls into our app
-    seen.push(`${init?.method || 'GET'} ${url}`);
-    if (url.includes('/supersep/progress')) return new Response(JSON.stringify({ status: 'running', progress: 42, message: 'Separating' }));
-    if (url.includes('/supersep/release')) return new Response(JSON.stringify({}), { status: 200 });
-    if (url.includes('/supersep/result')) return new Response(JSON.stringify({ stems: [{ name: 'vocals', category: 'vocal', index: 0 }] }));
-    if (url.includes('/supersep/serve')) return new Response(Buffer.from([9, 9, 9]), { headers: { 'Content-Type': 'audio/wav' } });
-    if (url.includes('/supersep/recombine')) return new Response(Buffer.from([7, 7]), { headers: { 'Content-Type': 'audio/wav' } });
+    seen.push({ method: init?.method || 'GET', url, body: init?.body });
+    for (const [match, respond] of Object.entries(responses)) {
+      if (url.includes(match)) return typeof respond === 'function' ? respond(init) : respond;
+    }
     throw new Error(`unexpected fetch ${url}`);
   }) as typeof fetch;
+  return { seen, restore: () => { globalThis.fetch = realFetch; } };
+}
 
+test('GET /:jobId/progress always replies 200 with the decoded body, even when ace-server itself errored', async (t) => {
+  const fake = fakeAceServer({ '/supersep/progress': () => new Response(JSON.stringify({ error: 'worker crashed' }), { status: 500 }) });
+  t.after(fake.restore);
   const progress = await get('/api/supersep/job-1/progress');
-  assert.deepEqual(progress.body, { status: 'running', progress: 42, message: 'Separating' });
+  assert.equal(progress.status, 200, 'Node does not check ace-server\'s status for this route');
+  assert.deepEqual(progress.body, { error: 'worker crashed' });
+});
 
-  const release = await fetch(`${base}/api/supersep/job-1/release`, { method: 'POST' });
-  assert.equal(release.status, 200);
+test('POST /:jobId/release always replies with Node\'s own { ok }, discarding ace-server\'s body', async (t) => {
+  const okFake = fakeAceServer({ '/supersep/release': () => new Response('{"released":true}', { status: 200 }) });
+  const ok = await fetch(`${base}/api/supersep/job-1/release`, { method: 'POST' });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { ok: true });
+  okFake.restore();
 
-  const result = await get('/api/supersep/job-1/result');
-  assert.deepEqual(result.body, { stems: [{ name: 'vocals', category: 'vocal', index: 0 }] });
+  const failFake = fakeAceServer({ '/supersep/release': () => new Response(JSON.stringify({ error: 'not found' }), { status: 404 }) });
+  t.after(failFake.restore);
+  const failed = await fetch(`${base}/api/supersep/job-1/release`, { method: 'POST' });
+  assert.equal(failed.status, 404);
+  assert.deepEqual(await failed.json(), { ok: false });
+});
 
+test('GET /:jobId/result forwards ace-server\'s status and body unchanged, success or failure', async (t) => {
+  const okFake = fakeAceServer({ '/supersep/result': () => new Response(JSON.stringify({ stems: [{ name: 'vocals', category: 'vocal', index: 0 }] })) });
+  const ok = await get('/api/supersep/job-1/result');
+  assert.equal(ok.status, 200);
+  assert.deepEqual(ok.body, { stems: [{ name: 'vocals', category: 'vocal', index: 0 }] });
+  okFake.restore();
+
+  const failFake = fakeAceServer({ '/supersep/result': () => new Response(JSON.stringify({ error: 'Job not found' }), { status: 404 }) });
+  t.after(failFake.restore);
+  const failed = await get('/api/supersep/job-1/result');
+  assert.equal(failed.status, 404);
+  assert.deepEqual(failed.body, { error: 'Job not found' });
+});
+
+test('GET /:jobId/stem/:index streams the WAV on success, but replaces ace-server\'s error body on failure', async (t) => {
+  const okFake = fakeAceServer({ '/supersep/serve': () => new Response(Buffer.from([9, 9, 9]), { headers: { 'Content-Type': 'audio/wav' } }) });
   const stem = await fetch(`${base}/api/supersep/job-1/stem/0`);
   assert.equal(stem.status, 200);
   assert.equal(stem.headers.get('content-type'), 'audio/wav');
   assert.deepEqual([...new Uint8Array(await stem.arrayBuffer())], [9, 9, 9]);
+  okFake.restore();
 
-  const recombine = await fetch(`${base}/api/supersep/recombine`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stems: [{ index: 0, volume: 1, muted: false }] }) });
-  assert.equal(recombine.status, 200);
-  assert.deepEqual([...new Uint8Array(await recombine.arrayBuffer())], [7, 7]);
-  assert.ok(seen.some(s => s.startsWith('POST') && s.includes('/supersep/recombine')));
+  const failFake = fakeAceServer({ '/supersep/serve': () => new Response(JSON.stringify({ error: 'stem index out of range' }), { status: 400 }) });
+  t.after(failFake.restore);
+  const failed = await fetch(`${base}/api/supersep/job-1/stem/99`);
+  assert.equal(failed.status, 400);
+  assert.deepEqual(await failed.json(), { error: 'Failed to fetch stem' }, 'the real ace-server message is discarded, not forwarded');
+});
+
+test('POST /recombine forwards the real { id, stems } payload and relays success/failure unchanged', async (t) => {
+  const okFake = fakeAceServer({ '/supersep/recombine': () => new Response(Buffer.from([7, 7]), { headers: { 'Content-Type': 'audio/wav' } }) });
+  const payload = { id: 'job-1', stems: [{ index: 0, volume: 1, muted: false }] };
+  assert.equal(supersepRecombineRequestSchema.safeParse(payload).success, true);
+  const ok = await fetch(`${base}/api/supersep/recombine`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  assert.equal(ok.status, 200);
+  assert.deepEqual([...new Uint8Array(await ok.arrayBuffer())], [7, 7]);
+  assert.deepEqual(JSON.parse(okFake.seen.find(s => s.url.includes('/supersep/recombine'))!.body!), payload, 'the real id+stems payload reaches ace-server, not a partial one');
+  okFake.restore();
+
+  const failFake = fakeAceServer({ '/supersep/recombine': () => new Response(JSON.stringify({ error: 'Job not complete' }), { status: 409 }) });
+  t.after(failFake.restore);
+  const failed = await fetch(`${base}/api/supersep/recombine`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  assert.equal(failed.status, 409);
+  assert.deepEqual(await failed.json(), { error: 'Job not complete' });
 });
 
 test('STEM_TRACK_NAMES matches the twelve tracks the UI and layer-render both rely on', () => {

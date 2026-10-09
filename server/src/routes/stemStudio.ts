@@ -373,7 +373,12 @@ router.post('/extract', (req: Request, res: Response) => {
     res.status(400).json({ error: missingSource ? 'sourceAudioUrl is required' : missingTracks ? 'tracks must be a non-empty array' : 'Invalid request' });
     return;
   }
-  const { sourceAudioUrl, sourceFileName, tracks, style, lyrics, ditSettings } = parsed.data;
+  // Everything but sourceAudioUrl/tracks' presence is schema-unchecked —
+  // the pipeline below applies its own `|| <default>` fallbacks, same as
+  // when this was a bare req.body destructure.
+  const { sourceAudioUrl, sourceFileName, tracks, style, lyrics, ditSettings } = parsed.data as {
+    sourceAudioUrl: string; sourceFileName?: string; tracks: string[]; style?: string; lyrics?: string; ditSettings?: Record<string, unknown>;
+  };
   const invalidTracks = tracks.filter((t: string) => !VALID_TRACKS.includes(t));
   if (invalidTracks.length > 0) {
     res.status(400).json({ error: `Invalid track names: ${invalidTracks.join(', ')}` });
@@ -411,7 +416,9 @@ router.post('/supersep', (req: Request, res: Response) => {
     res.status(400).json({ error: 'sourceAudioUrl is required' });
     return;
   }
-  const { sourceAudioUrl, sourceFileName, level } = parsed.data;
+  const { sourceAudioUrl, sourceFileName, level } = parsed.data as {
+    sourceAudioUrl: string; sourceFileName?: string; level?: string | number;
+  };
   const sepLevel = parseInt(String(level ?? '0'), 10);
 
   const job: StemJob = {

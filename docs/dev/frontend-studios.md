@@ -201,23 +201,38 @@ Stem Studio runs its own pipeline and keeps every result on disk under
 ### SuperSep proxy (`/api/supersep`)
 
 A separate, thinner route used by Cover Studio's splitter: no job
-persistence, Node just forwards to ace-server's own `/supersep/*` endpoints
-and relays the response (or binary WAV) back unchanged.
+persistence, Node forwards to ace-server's own `/supersep/*` endpoints. The
+five handlers below do NOT all relay the response the same way — each is
+documented on its own because Node reshapes some of them:
 
 - `POST /separate?level=0..5` with `{ audioUrl }` — reads that file off disk
   (`/references/...` or `/audio/...`), converts it to an engine-compatible
   format (400 `Audio conversion failed: ...` if that fails), and forwards
   the bytes to ace-server. 400 `audioUrl required in request body` if
   missing. Returns ace-server's own response verbatim.
-- `GET /:jobId/progress` and `GET /:jobId/result` proxy ace-server's
-  `/supersep/progress` and `/supersep/result` directly — same shapes as
-  Stem Studio's SuperSep pipeline reads internally
-  (`{ status, progress, message, error? }` and `{ stems: [...] }`).
-- `POST /:jobId/release` tells ace-server to drop a finished job from its
-  resident pool (it never evicts on its own).
+- `GET /:jobId/progress` always replies 200 with ace-server's decoded JSON
+  body (`{ status, progress, message, error? }`) — Node does not check
+  ace-server's HTTP status here, so an upstream error still arrives as a 200.
+- `POST /:jobId/release` discards ace-server's response body entirely and
+  always replies with Node's own `{ ok }`, at 200 if ace-server's reply was
+  2xx or ace-server's status otherwise. Tells ace-server to drop a finished
+  job from its resident pool (it never evicts on its own).
+- `GET /:jobId/result` forwards ace-server's status and JSON body unchanged
+  in both directions — 2xx `{ stems: [...] }` or the non-2xx error as-is.
 - `GET /:jobId/stem/:index` proxies a single stem's WAV by its numeric
-  index, not its name.
-- `POST /recombine` forwards the request body as-is to ace-server's
-  `/supersep/recombine` and streams back the resulting WAV. Node applies no
-  schema to this body — see `engine/src/supersep.h` for the shape ace-server
-  expects.
+  index, not its name. On success it streams the WAV with a Node-generated
+  `Content-Disposition`; on failure it does NOT forward ace-server's error
+  body — it replies with ace-server's status and a fixed `{ error: 'Failed
+  to fetch stem' }`.
+- `POST /recombine` forwards the request body as-is — Node applies no
+  schema. ace-server's real shape (`engine/tools/hot-step-server.cpp`,
+  `/supersep/recombine`) is `{ id, stems?: [{ index, volume?, muted? }] }`:
+  400 `Missing id` without `id`; an out-of-range or missing `index` in a
+  `stems` entry is silently skipped, not rejected; 404 `Job not found`; 409
+  `Job not complete` if that job hasn't finished separating. On a non-2xx,
+  Node forwards ace-server's status and JSON body unchanged; on success it
+  streams the resulting WAV (`Content-Type: audio/wav`, no
+  `Content-Disposition`). See
+  [contracts/stemSeparation.ts](../../server/src/contracts/stemSeparation.ts)'s
+  `supersepRecombineRequestSchema` for the documented shape — Node does not
+  validate against it, ace-server does.
