@@ -132,7 +132,11 @@ bool run_case(const Case & c) {
     ggml_build_forward_expand(graph, forward);
     ggml_build_forward_expand(graph, back);
 
-    ggml_backend_t cpu = ggml_backend_cpu_init();
+    // CPU is a loadable module under GGML_BACKEND_DL=ON (CI), so ggml_backend_cpu_init
+    // is not linkable; go through the registry like fattn-train-test does.
+    static const bool backends_loaded = (ggml_backend_load_all(), true);
+    (void) backends_loaded;
+    ggml_backend_t cpu = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
     if (!cpu) { std::fprintf(stderr, "[%s] CPU backend init failed\n", c.name); ggml_free(ctx); return false; }
 
     ggml_backend_buffer_t buffer = ggml_backend_alloc_ctx_tensors(ctx, cpu);
