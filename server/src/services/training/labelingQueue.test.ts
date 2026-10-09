@@ -47,3 +47,23 @@ test('after a restart, queued and running jobs read back failed "Server restarte
   assert.equal(after.getJob(running.id), undefined, 'nothing is resumed');
   assert.equal(after.activeJobForDataset('ds-b'), undefined, 'the dataset is free for a new job');
 });
+
+test('a meta write that fails part-way leaves the previous record whole, and a restart still finds the job', async (t) => {
+  const job = q.createJob('train-lm', 'ds-c', [], {});
+  const dir = path.join(process.env.TRAINING_DIR!, 'jobs', job.id);
+  const before = fs.readFileSync(path.join(dir, '_meta.json'), 'utf8');
+  // The next write leaves a truncated file behind, then fails.
+  const real = fs.writeFileSync;
+  const write = t.mock.method(fs, 'writeFileSync', (file: fs.PathOrFileDescriptor, ...rest: unknown[]) => {
+    if (String(file).includes(job.id)) { real(file, '{'); throw new Error('disk full'); }
+    return (real as (...a: unknown[]) => void)(file, ...rest);
+  });
+  job.status = 'running';
+  q.emitJob(job);
+  write.mock.restore();
+  assert.equal(fs.readFileSync(path.join(dir, '_meta.json'), 'utf8'), before, 'the queued record survives');
+  assert.deepEqual(fs.readdirSync(dir), ['_meta.json'], 'no temp file left behind');
+  const after = await restart();
+  const meta = after.listJobs('ds-c').find(j => j.id === job.id);
+  assert.deepEqual([meta?.status, meta?.error], ['failed', 'Server restarted']);
+});

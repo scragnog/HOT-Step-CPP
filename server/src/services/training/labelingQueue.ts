@@ -320,11 +320,24 @@ export function attachStream(job: TrainingJob, res: Response): void {
 
 // ── Persistence (§7.9) ───────────────────────────────────────────────────
 
+/** Replace a job's _meta.json through a temp file and a rename, so a write
+ *  that fails part-way leaves the previous record whole, never truncated. */
+function writeMetaFile(metaPath: string, summary: TrainingJobSummary): void {
+  const temp = `${metaPath}.${randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temp, JSON.stringify(summary, null, 2), 'utf-8');
+    fs.renameSync(temp, metaPath);
+  } catch (err) {
+    try { fs.rmSync(temp, { force: true }); } catch { /* already gone */ }
+    throw err;
+  }
+}
+
 function persistMeta(job: TrainingJob): void {
   try {
     const dir = path.join(jobsDir(), job.id);
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, '_meta.json'), JSON.stringify(toSummary(job), null, 2), 'utf-8');
+    writeMetaFile(path.join(dir, '_meta.json'), toSummary(job));
   } catch (err: any) {
     console.warn(`[Training] Could not persist job ${job.id}: ${err.message}`);
   }
@@ -345,7 +358,7 @@ function recoverStaleJobs(): void {
         meta.status = 'failed';
         meta.error = 'Server restarted';
         meta.finishedAt = Date.now();
-        fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+        writeMetaFile(metaPath, meta);
       } catch { /* skip corrupted meta */ }
     }
   } catch { /* jobs dir unreadable */ }
