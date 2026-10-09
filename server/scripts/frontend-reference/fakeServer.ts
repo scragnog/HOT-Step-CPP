@@ -44,11 +44,14 @@ export interface FakeServer {
  *  in-memory job map and the audio/workflow job pumps are shared across every
  *  request this server receives, exactly as they are in the real app) — not
  *  once per test case. */
-export async function startFakeServer(): Promise<FakeServer> {
+/** `dataDir`: reuse this data dir (database, uploads, training records)
+ *  instead of a fresh temp one, and leave it in place on close. A restart
+ *  test starts a second process on the dir the first one used. */
+export async function startFakeServer(options: { dataDir?: string } = {}): Promise<FakeServer> {
   const engine = await startFakeAceEngine();
   const engineUrl = new URL(engine.origin);
 
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'frontend-reference-'));
+  const dataDir = options.dataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'frontend-reference-'));
   process.env.DATA_DIR = dataDir;
   // The server's own port, chosen now: some services call Node's routes over
   // loopback at config.server.port (the YuE2 preparation pipeline's stages,
@@ -217,7 +220,7 @@ export async function startFakeServer(): Promise<FakeServer> {
       await new Promise<void>(resolve => server.close(() => resolve()));
       await engine.close();
       closeDb();
-      fs.rmSync(dataDir, { recursive: true, force: true });
+      if (!options.dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
       fs.rmSync(process.env.HOT_STEP_ROOT!, { recursive: true, force: true });
     },
   };
