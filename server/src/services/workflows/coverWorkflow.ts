@@ -203,7 +203,19 @@ function draft(docs: WorkflowDocuments, id: string, revision: number, user: stri
   if (!data.assetId) throw new WorkflowError(400, 'Cover draft has no asset id');
   return data;
 }
+/** Overrides for the Cover kinds routes/yue2Cover.ts registers at import,
+ *  read each time a step runs. Only an isolated harness sets them (the
+ *  frontend reference suite, which must never reach a real LLM or the YuE2
+ *  transcriber); production never calls this, so every default stands.
+ *  Returns the function that clears them. */
+let runtimeOverrides: CoverDeps = {};
+export function overrideCoverWorkflowDeps(overrides: CoverDeps): () => void {
+  runtimeOverrides = overrides;
+  return () => { runtimeOverrides = {}; };
+}
+
 export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
+  const dep = <K extends keyof CoverDeps>(key: K): CoverDeps[K] => runtimeOverrides[key] ?? deps[key];
   const docs = () => deps.documents || workflowDocuments();
   const asset = deps.asset || defaultAsset;
   return [{ kind: 'cover-open', input: open, async run(ctx) {
@@ -212,8 +224,8 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     const source = asset(assetId, ctx.userId);
     ctx.emit('stage', { stage: 'Analyzing source' });
     const [metadata, result] = input.cached ? [input.cached.metadata, null] : await Promise.all([
-      (deps.metadata || defaultMetadata)(source.path),
-      (deps.analyze || analyzeWithEssentia)(source.path, ctx.signal),
+      (dep('metadata') || defaultMetadata)(source.path),
+      (dep('analyze') || analyzeWithEssentia)(source.path, ctx.signal),
     ]);
     ctx.throwIfCancelled();
     const analysis = input.cached?.analysis || (result
@@ -230,7 +242,7 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     const source = asset(data.assetId, ctx.userId);
     if (source.sha256 !== data.sha256) throw new WorkflowError(409, 'Cover source changed');
     ctx.emit('stage', { stage: 'Resolving cover caption' });
-    const result = await (deps.caption || defaultCaption)(input.artistId, input.provider, input.model, input.force, ctx.signal);
+    const result = await (dep('caption') || defaultCaption)(input.artistId, input.provider, input.model, input.force, ctx.signal);
     ctx.throwIfCancelled();
     const updated = docs().update(input.documentId, ctx.userId, input.revision, current => {
       if (current.assetId !== data.assetId) throw new WorkflowError(409, 'Cover source changed');
@@ -250,7 +262,7 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     const source = asset(data.assetId, ctx.userId);
     if (source.sha256 !== data.sha256) throw new WorkflowError(409, 'Cover source changed');
     ctx.emit('stage', { stage: 'Transcribing score' });
-    const result = await (deps.transcribe || defaultTranscribe)(source.url, data.sourceLabel || source.filename,
+    const result = await (dep('transcribe') || defaultTranscribe)(source.url, data.sourceLabel || source.filename,
       ctx.userId, ctx.signal, input.force);
     ctx.throwIfCancelled();
     const updated = docs().update(input.documentId, ctx.userId, input.revision, current => {
@@ -264,7 +276,7 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     const data = draft(docs(), input.documentId, input.revision, ctx.userId);
     const source = asset(data.assetId, ctx.userId);
     if (source.sha256 !== data.sha256) throw new WorkflowError(409, 'Cover source changed');
-    if (!await (deps.capability || defaultCapability)(input.expectedBackend)) throw new WorkflowError(400, 'Backend does not support covers');
+    if (!await (dep('capability') || defaultCapability)(input.expectedBackend)) throw new WorkflowError(400, 'Backend does not support covers');
     ctx.throwIfCancelled();
     const current = draft(docs(), input.documentId, input.revision, ctx.userId);
     if (current.assetId !== data.assetId || current.sha256 !== source.sha256) throw new WorkflowError(409, 'Cover source changed');
