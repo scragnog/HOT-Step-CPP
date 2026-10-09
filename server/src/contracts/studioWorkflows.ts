@@ -177,13 +177,18 @@ export interface RepaintLayerResult { request: Record<string, unknown>; audioInt
 export const lyricItemBase = z.object({ provider: z.string().min(1), model: z.string().optional() });
 const lyricProfileItem = lyricItemBase.extend({ type: z.literal('profile'), sourceId: z.number().int().positive(), sourceRevision: z.string(), artist: z.string(), songs: z.array(z.any()) });
 const lyricHistorySchema = z.object({ usedSubjects: z.array(z.string()), usedBpms: z.array(z.number()), usedKeys: z.array(z.string()), usedTitles: z.array(z.string()), usedDurations: z.array(z.number()) });
-const lyricGenerateItem = lyricItemBase.extend({ type: z.literal('generate'), sourceId: z.number().int().positive(), sourceRevision: z.string(), lyricsSetId: z.number().int().positive().optional(), lyricsSetRevision: z.string().optional(), profileData: z.record(z.string(), z.any()), artistId: z.number().int().positive().optional(), extraInstructions: z.string().optional(), userSubject: z.string().optional(), noThink: z.boolean().optional(), history: lyricHistorySchema });
+const lyricGenerateItem = lyricItemBase.extend({ type: z.literal('generate'), sourceId: z.number().int().positive(), sourceRevision: z.string(), lyricsSetId: z.number().int().positive().optional(), lyricsSetRevision: z.string().optional(), profileData: z.record(z.string(), z.any()).optional(), artistId: z.number().int().positive().optional(), extraInstructions: z.string().optional(), userSubject: z.string().optional(), noThink: z.boolean().optional(), history: lyricHistorySchema.optional() });
 const lyricRefineItem = lyricItemBase.extend({ type: z.literal('refine'), sourceId: z.number().int().positive(), sourceRevision: z.string(), profileId: z.number().int().positive().optional(), profileRevision: z.string().optional(), source: z.record(z.string(), z.any()), profileData: z.record(z.string(), z.any()).optional(), artist: z.string() });
 export const lyricFetchItem = z.object({ type: z.literal('fetch'), artist: z.string().trim().min(1), album: z.string().optional(), maxSongs: z.number().int().min(1).max(200) });
 export const lyricRenderItem = z.object({ type: z.literal('render'), intent: writtenSongIntentSchema, sourceRevision: z.string() });
 const lyricPreflightItem = z.object({ type: z.literal('preflight-error'), error: z.string() });
+// Generate items share one copy of each profile (keyed by profile id) and
+// each artist's history (keyed by artist id). Jobs captured before that
+// carry profileData and history inline on every item.
 export const lyricBatchInputSchema = z.object({
-  items: z.array(z.discriminatedUnion('type', [lyricProfileItem, lyricGenerateItem, lyricRefineItem, lyricFetchItem, lyricRenderItem, lyricPreflightItem])).min(1).max(200),
+  items: z.array(z.discriminatedUnion('type', [lyricProfileItem, lyricGenerateItem, lyricRefineItem, lyricFetchItem, lyricRenderItem, lyricPreflightItem])).min(1).max(10_000),
+  profiles: z.record(z.string(), z.record(z.string(), z.any())).optional(),
+  histories: z.record(z.string(), lyricHistorySchema).optional(),
 });
 export type LyricBatchInput = z.infer<typeof lyricBatchInputSchema>;
 

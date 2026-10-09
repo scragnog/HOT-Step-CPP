@@ -60,8 +60,10 @@ function captureHistory(artistId: number | undefined) {
 }
 
 export function captureLyricItems(requested: LyricRequest[]): LyricBatchInput {
-  if (requested.length < 1 || requested.length > 200) throw new Error('Batch must contain 1 to 200 items');
+  if (requested.length < 1 || requested.length > 1000) throw new Error('Batch must contain 1 to 1000 items');
   const items: Item[] = [];
+  const profiles: NonNullable<LyricBatchInput['profiles']> = {};
+  const histories: NonNullable<LyricBatchInput['histories']> = {};
   for (const req of requested) {
     try {
     if (!['profile', 'generate', 'refine', 'fetch'].includes(req.type)) throw new Error('Unknown Lyric Studio operation');
@@ -81,9 +83,13 @@ export function captureLyricItems(requested: LyricRequest[]): LyricBatchInput {
       const source = db.getProfile(id);
       if (!source) throw new Error(`Profile ${id} not found`);
       const set = db.getLyricsSet(source.lyrics_set_id);
-      const profileData = structuredClone(source.profile_data);
-      if (set) profileData.audio_enrichment = computeAlbumEnrichment(set.songs);
-      captured = { ...options, type: 'generate', sourceId: id, sourceRevision: revision(source), lyricsSetId: set?.id, lyricsSetRevision: set ? revision(set) : undefined, profileData, artistId: set?.artist_id, extraInstructions: req.extraInstructions, userSubject: req.userSubject, noThink: req.noThink, history: captureHistory(set?.artist_id) };
+      if (!profiles[id]) {
+        const profileData = structuredClone(source.profile_data);
+        if (set) profileData.audio_enrichment = computeAlbumEnrichment(set.songs);
+        profiles[id] = profileData;
+      }
+      histories[set?.artist_id ?? 0] ??= captureHistory(set?.artist_id);
+      captured = { ...options, type: 'generate', sourceId: id, sourceRevision: revision(source), lyricsSetId: set?.id, lyricsSetRevision: set ? revision(set) : undefined, artistId: set?.artist_id, extraInstructions: req.extraInstructions, userSubject: req.userSubject, noThink: req.noThink };
     } else {
       const source = db.getGeneration(id);
       if (!source) throw new Error(`Generation ${id} not found`);
@@ -100,7 +106,15 @@ export function captureLyricItems(requested: LyricRequest[]): LyricBatchInput {
       for (let i = 0; i < count; i++) items.push({ type: 'preflight-error', error: error instanceof Error ? error.message : String(error) });
     }
   }
-  return lyricBatchInput.parse({ items });
+  if (items.length > 10_000) throw new Error(`Batch has ${items.length} songs; the limit is 10000`);
+  return lyricBatchInput.parse({ items, profiles, histories });
+}
+
+/** The artist history a generate item writes against: shared per batch, or
+ *  inline on items captured before histories were shared. */
+function historyFor(input: LyricBatchInput, item: Extract<Item, { type: 'generate' }>) {
+  return item.history ?? input.histories?.[item.artistId ?? 0]
+    ?? { usedSubjects: [], usedBpms: [], usedKeys: [], usedTitles: [], usedDurations: [] };
 }
 
 export async function captureRenderItems(intents: WrittenSongIntent[]): Promise<LyricBatchInput> {
@@ -211,9 +225,11 @@ async function execute(item: Item, ctx: WorkflowContext<LyricBatchInput>, index:
     });
   }
   if (item.type === 'generate') {
-    const h = item.history;
+    const h = historyFor(ctx.input, item);
+    const profileData = item.profileData ?? ctx.input.profiles?.[item.sourceId];
+    if (!profileData) throw new Error(`Profile ${item.sourceId} missing from batch input`);
     llm.resetSkipThinking();
-    const result = await dep('generateLyricsStreaming')(item.profileData as LyricsProfile, item.provider, item.model, item.extraInstructions, h.usedSubjects, h.usedBpms, h.usedKeys, h.usedTitles, h.usedDurations, chunk, phase, item.userSubject, item.noThink ? { noThink: true } : undefined);
+    const result = await dep('generateLyricsStreaming')(profileData as LyricsProfile, item.provider, item.model, item.extraInstructions, h.usedSubjects, h.usedBpms, h.usedKeys, h.usedTitles, h.usedDurations, chunk, phase, item.userSubject, item.noThink ? { noThink: true } : undefined);
     ctx.throwIfCancelled();
     if (!sourceUnchanged()) throw new Error('Source changed during generation');
     return saveItem(ctx.jobId, index, () => {
@@ -257,13 +273,16 @@ export async function runLyricBatch(ctx: WorkflowContext<LyricBatchInput>) {
       ctx.emit('item-result', result);
       if (item.type === 'generate') {
         const saved = value as { subject?: string; bpm?: number; key?: string; title?: string; duration?: number };
-        for (const later of ctx.input.items.slice(index + 1)) {
-          if (later.type !== 'generate' || later.artistId !== item.artistId) continue;
-          if (saved.subject) later.history.usedSubjects.push(saved.subject);
-          if (saved.bpm) later.history.usedBpms.push(saved.bpm);
-          if (saved.key) later.history.usedKeys.push(saved.key);
-          if (saved.title) later.history.usedTitles.push(saved.title);
-          if (saved.duration) later.history.usedDurations.push(saved.duration);
+        // One shared history per artist, or each later item's inline copy.
+        const histories = item.history
+          ? ctx.input.items.slice(index + 1).flatMap(later => later.type === 'generate' && later.artistId === item.artistId && later.history ? [later.history] : [])
+          : [historyFor(ctx.input, item)];
+        for (const history of histories) {
+          if (saved.subject) history.usedSubjects.push(saved.subject);
+          if (saved.bpm) history.usedBpms.push(saved.bpm);
+          if (saved.key) history.usedKeys.push(saved.key);
+          if (saved.title) history.usedTitles.push(saved.title);
+          if (saved.duration) history.usedDurations.push(saved.duration);
         }
       }
     } catch (error) {

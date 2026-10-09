@@ -94,7 +94,9 @@ adapter and reference-track preset across multiple albums at once).
 Profile builds, lyric writing, refinement, bulk lyric fetches and bulk audio
 renders run as server jobs. Closing the panel does not stop a submitted job;
 the lyric queue reconnects to unfinished jobs when Lyric Studio opens again.
-Each batch reports which items succeeded or failed. Stop on a bulk fetch
+Each batch reports which items succeeded or failed, with the reason next to a
+failed item in the queue. One lyric batch takes up to 1000 queue entries and
+10000 songs in total. Stop on a bulk fetch
 requests cancellation. A server restart marks an active job interrupted; it
 does not silently rerun. Form changes after submission apply to the
 next job; the current job uses its captured provider, model and render settings.
