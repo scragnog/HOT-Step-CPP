@@ -8,8 +8,9 @@ shapes live in
 [contracts/studioWorkflows.ts](../../server/src/contracts/studioWorkflows.ts);
 the services under `services/workflows/` and `services/lireek/` import those
 schemas rather than redefining them, so this page and the code cannot drift
-apart silently. Stem separation and Create's full control dictionary are
-published on their own pages; this one does not cover them.
+apart silently. Stem separation is its own section below, on the same plain
+Express routes it has always used (not a `WorkflowKind`). Create's full
+control dictionary is published on its own page; this one does not cover it.
 
 ## The shared envelope
 
@@ -148,3 +149,75 @@ before any of them are awaited, so a full-render batch is admitted as one
 unit. Cancellation and retry use the shared job endpoints; retry skips items
 a prior attempt already completed (recorded per `(jobId, index)`), so a
 partial batch resumes rather than restarting from item 0.
+
+## Stem separation
+
+Unlike the kinds above, stem separation is plain Express on
+[routes/stemStudio.ts](../../server/src/routes/stemStudio.ts) and
+[routes/supersep.ts](../../server/src/routes/supersep.ts) — no `/api/workflows`
+envelope, no auth (this is a local single-user app), no job document. Wire
+shapes are in
+[contracts/stemSeparation.ts](../../server/src/contracts/stemSeparation.ts);
+both route files import the request schemas from there.
+
+### Stem Studio (`/api/stem-studio`)
+
+Stem Studio runs its own pipeline and keeps every result on disk under
+`data/stems/<jobId>/`, independent of ace-server's job pool.
+
+- `POST /extract` with `{ sourceAudioUrl, sourceFileName?, tracks, style?,
+  lyrics?, ditSettings? }` — `tracks` is 1+ names from the twelve
+  `STEM_TRACK_NAMES` (also used by `layer-render`); an unknown name is 400
+  `Invalid track names: <names>`, listing every bad one, not just the first.
+  Runs each track as a sequential DiT generation against the source and
+  returns `{ id }` immediately — the pipeline keeps running after the
+  response; poll it.
+- `POST /supersep` with `{ sourceAudioUrl, sourceFileName?, level? }` runs the
+  neural separator in-process and saves every stem the engine returns,
+  including hidden debug stems the UI never lists. Also returns `{ id }`
+  immediately.
+- `GET /:jobId/progress` returns `{ status, progress, currentTrack,
+  completedStems, totalTracks, warning?, error?, sepMessage? }`. Progress is
+  phase-weighted for SuperSep (separation 0-80%, saving 80-100%) and
+  per-track for Extract. A job whose process restarted mid-run is not
+  resumed: it is gone from memory, so this 404s rather than reporting a
+  phase forever; a job that finished before the restart still reports `done`
+  by reading `_meta.json` off disk.
+- `GET /:jobId/result` returns `{ id, type, stems: [{ trackName, category?,
+  audioUrl, durationSec, index, sizeBytes, stage? }] }`; 404 `Job not found
+  or not complete` until the job has a `_meta.json`. `category`/`stage` are
+  present only for SuperSep stems.
+- `GET /:jobId/stem/:trackName` streams that stem's WAV. `GET
+  /:jobId/download-all` streams every completed stem as one ZIP.
+- `GET /jobs` lists every job on disk (not the in-memory map, so it survives
+  a restart), newest first. `GET /stats` returns `{ totalBytes, jobCount,
+  stemCount }` for the Settings page.
+- `DELETE /:jobId` cancels it if still running and deletes its directory;
+  404 if the job directory never existed. `DELETE /all` cancels every
+  running job and wipes `data/stems/` entirely — used by "Clear All Stems"
+  in Settings. There is no per-item error list for either pipeline: a
+  failure is the job's own `status: 'failed'` and `error` string.
+
+### SuperSep proxy (`/api/supersep`)
+
+A separate, thinner route used by Cover Studio's splitter: no job
+persistence, Node just forwards to ace-server's own `/supersep/*` endpoints
+and relays the response (or binary WAV) back unchanged.
+
+- `POST /separate?level=0..5` with `{ audioUrl }` — reads that file off disk
+  (`/references/...` or `/audio/...`), converts it to an engine-compatible
+  format (400 `Audio conversion failed: ...` if that fails), and forwards
+  the bytes to ace-server. 400 `audioUrl required in request body` if
+  missing. Returns ace-server's own response verbatim.
+- `GET /:jobId/progress` and `GET /:jobId/result` proxy ace-server's
+  `/supersep/progress` and `/supersep/result` directly — same shapes as
+  Stem Studio's SuperSep pipeline reads internally
+  (`{ status, progress, message, error? }` and `{ stems: [...] }`).
+- `POST /:jobId/release` tells ace-server to drop a finished job from its
+  resident pool (it never evicts on its own).
+- `GET /:jobId/stem/:index` proxies a single stem's WAV by its numeric
+  index, not its name.
+- `POST /recombine` forwards the request body as-is to ace-server's
+  `/supersep/recombine` and streams back the resulting WAV. Node applies no
+  schema to this body — see `engine/src/supersep.h` for the shape ace-server
+  expects.

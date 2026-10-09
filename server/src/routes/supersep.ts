@@ -11,6 +11,7 @@ import { Router } from 'express';
 import { config } from '../config.js';
 import { ensureEngineFormat } from '../services/audioConvert.js';
 import path from 'path';
+import { supersepSeparateRequestSchema } from '../contracts/stemSeparation.js';
 
 const router = Router();
 
@@ -26,11 +27,11 @@ const ACE_URL = config.aceServer.url;
 router.post('/separate', async (req, res) => {
   try {
     const level = parseInt(String(req.query.level ?? '0'), 10);
-    const { audioUrl } = req.body || {};
-
-    if (!audioUrl || typeof audioUrl !== 'string') {
+    const parsed = supersepSeparateRequestSchema.safeParse(req.body);
+    if (!parsed.success) {
       return res.status(400).json({ error: 'audioUrl required in request body' });
     }
+    const { audioUrl } = parsed.data;
 
     // Resolve server-side file path from URL
     // audioUrl is like "/references/uuid.flac" → data/references/uuid.flac
