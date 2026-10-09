@@ -60,6 +60,13 @@ In sidebar order.
 | [Engine request and CLI reference](../engine/docs/ARCHITECTURE.md) | Request JSON fields, generation modes, binary flags, engine endpoints |
 | [HTTP API index](dev/api.md) | Every Node route, generated |
 | [Generation API contracts](dev/api-contracts.md) | Generate request, errors, auth, jobs, media, capability manifest |
+| [Building a replacement frontend](dev/build-a-frontend.md) | Entry point for a client built on the HTTP contracts alone: origin/auth/media, discovery, errors/versioning, job polling and resume, Create's queue ownership, and the full workflow catalogue |
+| [Create's control dictionary](dev/frontend-create-controls.md) | The generation parameter dictionary for a frontend client: submission shapes, task modes, defaults |
+| [Studio workflows for frontend clients](dev/frontend-studios.md) | Insta-Gen, Cover, Repaint, Lego layer, Lyric Studio batch and stem separation wire contracts |
+| [Training for frontend clients](dev/frontend-training.md) | ACE/MM3/YuE2 recipes, starting a run, following a job, restarts, review |
+| [Library, playlist, drafts and Song Builder](dev/frontend-library.md) | Song, playlist, studio draft and Song Builder wire contracts |
+| [Preference presets](dev/frontend-presets.md) | Preference families, import, YuE2 joint preset resolution |
+| [Media for frontend clients](dev/frontend-media.md) | Import, export and the two live audio streams |
 | [Plugin authoring](dev/plugins-authoring.md) | Writing a Lua solver, scheduler, guidance or postprocess plugin |
 | [Training internals](dev/training-internals.md) | Trainer architecture, measured numbers, open decisions |
 | [Releasing](dev/releasing.md) | Cutting and publishing a release, CI caching, gotchas |

@@ -96,7 +96,7 @@ The response is `Content-Type: audio/wav`, and the stream's Node session is name
   - 404: the job is unknown.
   - 409: the job has not reached the engine yet (poll and reopen), is not streaming, or the engine refused. The engine refuses when the take has finished or already has a reader; it allows one reader per take.
   - 502: the engine stream failed.
-- Closing the connection drops the engine connection too. The render itself carries on as a normal job.
+- Closing the connection drops the engine connection too. The render itself carries on as a normal job: cancel it the same way as any other generation, `POST /api/generate/cancel/:id` ([Jobs](api-contracts.md#jobs)), which also ends any stream still reading it.
 
 ### Reading the frames
 

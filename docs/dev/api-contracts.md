@@ -6,7 +6,9 @@ and the engine capability manifest. The flat request remains the frozen baseline
 frontend decoupling; the intent section documents the additive server resolver.
 Baseline line references are to commit `7c711f64`.
 
-For the full route list see the generated [HTTP API index](api.md).
+For the full route list see the generated [HTTP API index](api.md). For a short entry point
+linking every domain's contracts and worked call sequences, including Create's queue
+ownership rules, see [Building a replacement frontend](build-a-frontend.md).
 
 ## Versioning
 
