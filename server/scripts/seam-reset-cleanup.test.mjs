@@ -78,11 +78,15 @@ function generationFixture(lane, residency, jobs, backend, setTimeoutImpl = call
     logGeneration() {}, failGenerationLog() {}, AbortController,
     setTimeout: setTimeoutImpl,
     Math: { random: () => 0.5, floor: Math.floor }, structuredClone,
+    // The job ledger (services/generation/jobLedger.ts) is best-effort
+    // persistence outside what these tests check.
+    withLedger() {},
   };
   return {
     enqueue: extractFunction(routeFile, 'enqueueGeneration', context),
     reset: extractResetHandler({ jobs, isActiveJob,
-      aceClient: { cancelJob: () => Promise.resolve() }, resetGpuLane: lane.resetGpuLane, console: base.console }),
+      aceClient: { cancelJob: () => Promise.resolve() }, resetGpuLane: lane.resetGpuLane, console: base.console,
+      withLedger() {} }),
   };
 }
 

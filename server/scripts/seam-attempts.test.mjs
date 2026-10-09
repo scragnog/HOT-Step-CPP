@@ -91,6 +91,7 @@ async function execute({ backendId = 'ace', actions, maxAttempts = 2, params = {
     logGeneration() {}, failGenerationLog() {}, AbortController,
     setTimeout: callback => { queueMicrotask(callback); return 0; },
     Math: { random: () => 0.5, floor: Math.floor }, structuredClone,
+    withLedger() {},   // best-effort job ledger, outside these tests
   };
   const enqueue = extract('enqueueGeneration', routeContext);
   const job = {

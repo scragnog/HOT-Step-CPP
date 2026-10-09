@@ -108,6 +108,9 @@ test('POST keeps mutable working parameters separate from the immutable submissi
     ...cloneContext, isEngineSuspended: () => false, engineReady: true, getUserId: () => 'u',
     uuidv4: () => 'post-job', buildEnvelope: fixture.buildEnvelope,
     GenerationEnvelopeError: fixture.GenerationEnvelopeError, jobs: new Map(),
+    // The job ledger (services/generation/jobLedger.ts) is best-effort
+    // persistence outside what this test checks.
+    withLedger() {},
     // The guards are production code too — the real expectedBackendMismatch
     // and isGenerationIntent are extracted; the timbre check is mocked because
     // it walks the data directory.
@@ -185,6 +188,7 @@ test('queued jobs retain captured ACE/MM3 backends across selector changes', asy
       finished.push(family); if (finished.length === 2) finishResolve();
     }, MAX_RETRIES: 1, logGeneration: () => {}, failGenerationLog: () => {},
     AbortController, setTimeout, console,
+    withLedger() {},   // best-effort job ledger, outside this test
   };
   const enqueue = extractFunction('server/src/routes/generate.ts', 'enqueueGeneration', routeContext);
   let release;
