@@ -9,26 +9,12 @@ import { getActiveBackendId, getBackend } from '../backends/registry.js';
 import { readDuration } from '../training/audioMeta.js';
 import { registerWorkflowKind } from '../../routes/workflows.js';
 import { WorkflowError, type WorkflowContext, type WorkflowKind } from './workflowJobs.js';
+import {
+  repaintLayerSourceSchema as source, repaintRenderSchema as repaint, layerRenderSchema as layer,
+  type RepaintInput, type LayerInput,
+} from '../../contracts/studioWorkflows.js';
 
-const source = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('asset'), id: z.string().uuid(), expectedUrl: z.string().min(1) }),
-  z.object({ kind: z.literal('song'), id: z.string().min(1), expectedUrl: z.string().min(1) }),
-]);
-const common = z.object({
-  source, expectedBackend: z.string().min(1), engineParams: z.record(z.string(), z.unknown()),
-});
-const repaint = common.extend({
-  regionStart: z.number().finite().nonnegative(), regionEnd: z.number().finite().positive(),
-  lyrics: z.string(), styleCaption: z.string(), sourceName: z.string(),
-  repaintMode: z.enum(['conservative', 'balanced', 'aggressive']),
-  crossfadeFrames: z.number().int().nonnegative(),
-});
-const layer = common.extend({
-  trackName: z.enum(['vocals', 'backing_vocals', 'drums', 'bass', 'guitar', 'keyboard', 'percussion', 'strings', 'synth', 'fx', 'brass', 'woodwinds']),
-  buildModel: z.string().regex(/^acestep-v15-(?:xl-)?base-/, 'A plain Base DiT model is required'), caption: z.string(),
-});
-export type RepaintInput = z.infer<typeof repaint>;
-export type LayerInput = z.infer<typeof layer>;
+export type { RepaintInput, LayerInput };
 
 export interface ResolvedSource { url: string; latentUrl?: string; path: string }
 

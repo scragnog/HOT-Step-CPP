@@ -7,25 +7,9 @@ import { getSetting } from '../../db/lireekDb.js';
 import type { WorkflowDocuments } from './revisions.js';
 import { registerWorkflowKind, workflowDocuments } from '../../routes/workflows.js';
 import { WorkflowError, type WorkflowContext, type WorkflowKind } from './workflowJobs.js';
+import { instaInputSchema as base, instaApproveSchema as approve, type InstaInput, type InstaResult } from '../../contracts/studioWorkflows.js';
 
-const mode = z.enum(['instrumental', 'lyrics', 'lyrics-ai']);
-const base = z.object({
-  caption: z.string().min(1), genres: z.array(z.string()), lyricMode: mode,
-  subject: z.string(), randomSubject: z.boolean(), provider: z.string(), model: z.string(),
-  vocalLanguage: z.string(), thinking: z.boolean(),
-  engineParams: z.record(z.string(), z.unknown()), expectedBackend: z.string().min(1),
-  coResident: z.boolean(), cacheLmCodes: z.boolean(),
-  systemPrompt: z.string().optional(),
-}).superRefine((input, ctx) => {
-  if (input.lyricMode === 'lyrics-ai' && !input.provider) ctx.addIssue({ code: 'custom', path: ['provider'], message: 'An LLM provider is required' });
-  if (input.lyricMode === 'lyrics-ai' && !input.randomSubject && !input.subject.trim()) ctx.addIssue({ code: 'custom', path: ['subject'], message: 'A subject is required' });
-});
-export type InstaInput = z.infer<typeof base>;
-export interface InstaResult {
-  caption: string; lyrics: string; title?: string; bpm?: number; duration?: number;
-  keyScale?: string; timeSignature?: string; vocalLanguage: string;
-}
-const approve = z.object({ documentId: z.string().uuid(), revision: z.number().int().min(1) });
+export type { InstaInput, InstaResult };
 
 export function deriveInstaTitle(lyrics: string): string {
   if (!lyrics || lyrics === '[Instrumental]') return '';

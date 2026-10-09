@@ -14,48 +14,13 @@ import { STYLE_CAPTION_PROMPT } from '../lireek/prompts.js';
 import { registerWorkflowKind, workflowDocuments } from '../../routes/workflows.js';
 import { WorkflowError, type WorkflowKind } from './workflowJobs.js';
 import type { WorkflowDocuments } from './revisions.js';
+import {
+  coverDraftRefSchema as ref, coverOpenSchema as open, coverTranscribeSchema as transcribe,
+  coverCaptionSchema as captionInput, coverRenderSchema as render,
+  type CoverRenderInput, type CoverDraft,
+} from '../../contracts/studioWorkflows.js';
 
-const ref = z.object({ documentId: z.string().uuid(), revision: z.number().int().min(1) });
-const open = z.object({ assetId: z.string().uuid(), cached: z.object({
-  metadata: z.object({ artist: z.string(), title: z.string(), album: z.string(),
-    duration: z.number().finite().nullable() }),
-  analysis: z.object({ bpm: z.number().finite(), key: z.string(), scale: z.string().optional() }),
-}).optional() });
-const transcribe = ref.extend({ force: z.boolean().default(false) });
-const captionInput = ref.extend({
-  artistId: z.number().int().positive(), provider: z.string(), model: z.string(), force: z.boolean(),
-});
-const render = ref.extend({
-  expectedBackend: z.enum(['ace', 'yue2']), engineParams: z.record(z.string(), z.unknown()),
-  title: z.string(), artistName: z.string(), targetArtistName: z.string(),
-  lyrics: z.string(), caption: z.string(),
-  instrumental: z.boolean(), lyricsSource: z.string().nullable(),
-  scoreSource: z.enum(['dataset']).nullable(),
-  analysis: z.object({ bpm: z.number().finite(), key: z.string(), scale: z.string().optional() }).nullable().optional(),
-  settings: z.record(z.string(), z.unknown()),
-  controls: z.object({
-    bpmOverride: z.number().finite().positive().nullable(), bpmCorrection: z.number().finite().positive(),
-    keyOverride: z.string().nullable(), tempoScale: z.number().finite().positive(),
-    pitchShift: z.number().int().min(-12).max(12), noFsq: z.boolean(),
-    audioCoverStrength: z.number().finite(), coverNoiseStrength: z.number().finite(),
-    coverNoiseMethod: z.string(), vocalLanguage: z.string(), sourceLatentUrl: z.string(),
-    timbreOverridePath: z.string(), presetAdapterPath: z.string(), presetReferencePath: z.string(),
-    triggerUseFilename: z.boolean(), triggerPlacement: z.string(),
-    voices: z.enum(['vocal', 'both']), keepChords: z.boolean(),
-    tempoMode: z.enum(['free', 'source', 'set']), coverBpm: z.number().finite().positive(),
-    keyShift: z.number().int().min(-6).max(6), cfgScale: z.number().finite(),
-    lmAdapterAr: z.string(), lmAdapterNar: z.string(), pairMode: z.enum(['base', 'pair']),
-    yue2Pick: z.record(z.string(), z.union([z.string(), z.number()])),
-    captionMode: z.string(), captionTracks: z.array(z.object({
-      name: z.string(), styled: z.string().optional(), caption: z.string().optional(),
-      bpm: z.union([z.string(), z.number()]).optional(),
-    })),
-  }),
-});
-export type CoverRenderInput = z.infer<typeof render>;
-export interface CoverDraft { assetId: string; sha256: string; sourceLabel?: string;
-  analysis?: { bpm: number; key: string; scale?: string } | null;
-  abc?: string; approvedAbc?: string; scoreSource?: string }
+export type { CoverRenderInput, CoverDraft };
 
 const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const INDEX: Record<string, number> = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3,
