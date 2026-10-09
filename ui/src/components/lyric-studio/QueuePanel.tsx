@@ -126,6 +126,15 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
   const [genFillMode, setGenFillMode] = useState(false);
   const [genFillTarget, setGenFillTarget] = useState(10);
   const [genNoThink, setGenNoThink] = useState(false);
+  // Artists run side by side in a bulk profile/lyric run (per browser).
+  const [lyricConcurrency, setLyricConcurrency] = useState(() => {
+    try { return Math.max(1, Math.min(16, parseInt(localStorage.getItem('hs-lyricConcurrency') || '1') || 1)); } catch { return 1; }
+  });
+  const changeLyricConcurrency = (value: number) => {
+    const next = Math.max(1, Math.min(16, value || 1));
+    setLyricConcurrency(next);
+    try { localStorage.setItem('hs-lyricConcurrency', String(next)); } catch { /* per-browser convenience only */ }
+  };
 
   // Generation counts for the "generate" tab
   const [genCountsMap, setGenCountsMap] = useState<Map<number, number>>(new Map());
@@ -440,7 +449,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
       addBulkToQueue(Array.from(selected).map(lsId => {
         const ls = lyricsSets.find(l => l.id === lsId);
         return { type: 'profile' as QueueItemType, targetId: lsId, label: `Profile: ${ls?.artist_name || '?'} — ${ls?.album || 'Unknown'}`, provider: profilingModel.provider, model: profilingModel.model };
-      }), token);
+      }), token, lyricConcurrency);
     } else {
       const items = Array.from(selected).map(profileId => {
         const profile = profiles.find(p => p.id === profileId);
@@ -459,7 +468,7 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
       }).filter(item => item.count > 0);
       if (items.length === 0) { showToast?.('All selected profiles already at or above target'); return; }
       if (!token) { showToast?.('Not authenticated'); return; }
-      addBulkToQueue(items, token);
+      addBulkToQueue(items, token, lyricConcurrency);
     }
     setSelected(new Set());
   };
@@ -1051,6 +1060,19 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                 )}
                 {genCountsLoading && <Loader2 className="w-3 h-3 animate-spin text-zinc-500" />}
               </div>
+            </div>
+          )}
+
+          {(mode === 'profile' || mode === 'generate') && (
+            <div className="px-6 py-2 flex items-center gap-3">
+              <ParamLabel
+                label={t('lyric.concurrentArtists')}
+                info={t('lyric.concurrentArtistsInfo')}
+                className="text-xs text-zinc-600 dark:text-zinc-400"
+              />
+              <input type="number" min={1} max={16} value={lyricConcurrency}
+                onChange={e => changeLyricConcurrency(parseInt(e.target.value))}
+                className="w-16 px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-sm text-white text-center focus:outline-none focus:border-green-500/50" />
             </div>
           )}
 

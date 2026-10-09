@@ -45,7 +45,7 @@ router.post('/workflow-batches', (req: Request, res: Response) => {
   if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
   try {
     if (!Array.isArray(req.body?.items)) { res.status(400).json({ error: 'items must be an array' }); return; }
-    const input = captureLyricItems(req.body.items as LyricRequest[]);
+    const input = captureLyricItems(req.body.items as LyricRequest[], req.body.concurrency);
     const key = typeof req.body.idempotencyKey === 'string' && req.body.idempotencyKey.length > 0
       ? req.body.idempotencyKey : randomUUID();
     const out = workflowJobs().submit({ kind: 'lyric-batch', idempotencyKey: key, input }, userId);

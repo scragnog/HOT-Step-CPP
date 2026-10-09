@@ -1538,6 +1538,8 @@
     "lyric.plannerAdapterApply": "Planner Adapter (LM) to Apply",
     "lyric.plannerAdapterApplyInfo": "Sets every selected album's planner-LM adapter to this one when you click Apply. Leave it on \"Keep existing / none\" to apply the DiT adapter or reference track above without touching an album's current planner adapter.",
     "lyric.keepExistingLmAdapter": "Keep existing / none",
+    "lyric.concurrentArtists": "Artists at once",
+    "lyric.concurrentArtistsInfo": "How many artists the queue works on at the same time. Songs for one artist always run one after another, so each still avoids the subjects, keys and titles the earlier ones picked. Higher is faster with a cloud provider but sends that many requests at once, which counts against its rate limits; a local model usually runs one request at a time, so leave it at 1 there. Applies to the next run you queue.",
     "lyric.fillToTargetInfo": "Instead of queueing a fixed number of generations for every selected profile, tops each one up to a chosen total — a profile already at or above the target gets none queued. On: the number below is that total. Off: the number below is a flat count queued for every selected profile, regardless of how many it already has.",
     "lyric.filterPlaceholder": "Filter by artist or album.",
     "lyric.adapterPlaceholder": "Path to .safetensors adapter file",

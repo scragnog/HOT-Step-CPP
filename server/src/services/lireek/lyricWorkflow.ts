@@ -59,7 +59,7 @@ function captureHistory(artistId: number | undefined) {
   };
 }
 
-export function captureLyricItems(requested: LyricRequest[]): LyricBatchInput {
+export function captureLyricItems(requested: LyricRequest[], concurrency?: number): LyricBatchInput {
   if (requested.length < 1 || requested.length > 1000) throw new Error('Batch must contain 1 to 1000 items');
   const items: Item[] = [];
   const profiles: NonNullable<LyricBatchInput['profiles']> = {};
@@ -107,7 +107,7 @@ export function captureLyricItems(requested: LyricRequest[]): LyricBatchInput {
     }
   }
   if (items.length > 10_000) throw new Error(`Batch has ${items.length} songs; the limit is 10000`);
-  return lyricBatchInput.parse({ items, profiles, histories });
+  return lyricBatchInput.parse({ items, profiles, histories, concurrency });
 }
 
 /** The artist history a generate item writes against: shared per batch, or
@@ -213,8 +213,8 @@ async function execute(item: Item, ctx: WorkflowContext<LyricBatchInput>, index:
     && (item.type !== 'generate' || !item.lyricsSetId || revision(db.getLyricsSet(item.lyricsSetId)) === item.lyricsSetRevision)
     && (item.type !== 'refine' || !item.profileId || revision(db.getProfile(item.profileId)) === item.profileRevision);
   if (!sourceUnchanged()) throw new Error('Source changed since submission');
-  const chunk = (text: string) => ctx.emit('chunk', { text });
-  const phase = (text: string) => ctx.emit('phase', { phase: text });
+  const chunk = (text: string) => ctx.emit('chunk', { index, text });
+  const phase = (text: string) => ctx.emit('phase', { index, phase: text });
   if (item.type === 'profile') {
     const data = await dep('buildProfile')(item.artist, null, item.songs, item.provider, item.model, phase, chunk);
     ctx.throwIfCancelled();
@@ -248,6 +248,12 @@ async function execute(item: Item, ctx: WorkflowContext<LyricBatchInput>, index:
   });
 }
 
+function laneKey(item: Item, index: number): string {
+  if (item.type === 'generate') return `artist:${item.artistId ?? 'none'}`;
+  if (item.type === 'profile' || item.type === 'refine' || item.type === 'fetch') return `name:${item.artist.toLowerCase()}`;
+  return `item:${index}`;
+}
+
 export async function runLyricBatch(ctx: WorkflowContext<LyricBatchInput>) {
   const results: Array<{ index: number; status: 'done' | 'error'; value?: unknown; error?: string }> = [];
   // Queue all bulk renders before waiting so the audio queue can admit a
@@ -260,7 +266,7 @@ export async function runLyricBatch(ctx: WorkflowContext<LyricBatchInput>) {
       catch (error) { ctx.throwIfCancelled(); prepared.set(index, error instanceof Error ? error : new Error(String(error))); }
     }
   }
-  for (const [index, item] of ctx.input.items.entries()) {
+  const runOne = async (index: number, item: Item) => {
     ctx.throwIfCancelled();
     ctx.emit('item-start', { index, type: item.type });
     try {
@@ -291,7 +297,25 @@ export async function runLyricBatch(ctx: WorkflowContext<LyricBatchInput>) {
       results.push(result);
       ctx.emit('item-error', result);
     }
+  };
+  // One lane per artist, run in order, so each song sees the subjects, keys and
+  // titles the earlier ones picked. Up to `concurrency` lanes run at once.
+  const lanes = new Map<string, number[]>();
+  for (const [index, item] of ctx.input.items.entries()) {
+    const key = laneKey(item, index);
+    const lane = lanes.get(key);
+    if (lane) lane.push(index); else lanes.set(key, [index]);
   }
+  const waiting = [...lanes.values()];
+  const worker = async () => {
+    for (let lane = waiting.shift(); lane; lane = waiting.shift()) {
+      for (const index of lane) await runOne(index, ctx.input.items[index]);
+    }
+  };
+  const settled = await Promise.allSettled(Array.from({ length: Math.min(ctx.input.concurrency ?? 1, waiting.length) }, worker));
+  const failed = settled.find(s => s.status === 'rejected');
+  if (failed) throw failed.reason;
+  results.sort((a, b) => a.index - b.index);
   return { results };
 }
 

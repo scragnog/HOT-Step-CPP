@@ -116,6 +116,7 @@ function finishStream() {
 
 let _queueRunning = false;
 let _lastToken: string | null = null;
+let _concurrency = 1;
 const _following = new Set<string>();
 
 function _nextId(): string {
@@ -129,8 +130,10 @@ export function addToQueue(item: Omit<QueueItem, 'id' | 'status'>, token: string
   _processQueue();
 }
 
-export function addBulkToQueue(items: Omit<QueueItem, 'id' | 'status'>[], token: string): void {
+/** `concurrency`: how many artists the batch runs side by side. */
+export function addBulkToQueue(items: Omit<QueueItem, 'id' | 'status'>[], token: string, concurrency?: number): void {
   _lastToken = token;
+  if (concurrency) _concurrency = concurrency;
   for (const item of items) {
     _state.queue.push({ ...item, id: _nextId(), status: 'pending' });
   }
@@ -165,7 +168,7 @@ async function _processQueue(): Promise<void> {
     userSubject: item.userSubject, noThink: item.noThink, count: item.count || 1,
   }));
   try {
-    const job = await lyricWorkflowApi.submitBatch(_lastToken, requests);
+    const job = await lyricWorkflowApi.submitBatch(_lastToken, requests, { concurrency: _concurrency });
     for (const item of pending) { item.jobId = job.id; item.status = 'running'; }
     _emit();
     _following.add(job.id);
@@ -200,6 +203,7 @@ export async function restoreLyricQueue(token: string): Promise<void> {
 }
 
 async function followQueueJob(token: string, job: WorkflowJob, expanded: QueueItem[]): Promise<void> {
+  let shown: number | null = null;
   const status = await lyricWorkflowApi.follow(token, job.id, {
     onSnapshot: (snapshot, gap) => {
       if (gap) setPhase('Earlier progress was trimmed; waiting for current status');
@@ -211,11 +215,16 @@ async function followQueueJob(token: string, job: WorkflowJob, expanded: QueueIt
     onEvent: event => {
       const data = event.data as { index?: number; phase?: string; text?: string; error?: string } | null;
       const item = data?.index === undefined ? null : expanded[data.index];
-      if (event.type === 'item-start' && item) resetStream(item.label);
-      if (event.type === 'phase' && data?.phase) setPhase(data.phase);
-      if (event.type === 'chunk' && data?.text) appendChunk(data.text);
-      if (event.type === 'item-result' && item) { item.countCompleted = (item.countCompleted || 0) + 1; if (item.countCompleted >= (item.count || 1) && item.status !== 'error') item.status = 'done'; finishStream(); _emit(); }
-      if (event.type === 'item-error' && item) { item.status = 'error'; item.error = data?.error || 'Item failed'; item.countCompleted = (item.countCompleted || 0) + 1; finishStream(); _emit(); }
+      // Songs can run in parallel; the live pane follows one at a time.
+      // Events from jobs captured before chunks carried an index always show.
+      const mine = data?.index === undefined || data.index === shown;
+      if (event.type === 'item-start' && item && shown === null) { shown = data!.index!; resetStream(item.label); }
+      if (event.type === 'phase' && data?.phase && mine) setPhase(data.phase);
+      if (event.type === 'chunk' && data?.text && mine) appendChunk(data.text);
+      const ended = (event.type === 'item-result' || event.type === 'item-error') && item;
+      if (event.type === 'item-result' && item) { item.countCompleted = (item.countCompleted || 0) + 1; if (item.countCompleted >= (item.count || 1) && item.status !== 'error') item.status = 'done'; }
+      if (event.type === 'item-error' && item) { item.status = 'error'; item.error = data?.error || 'Item failed'; item.countCompleted = (item.countCompleted || 0) + 1; }
+      if (ended) { if (data!.index === shown) { finishStream(); shown = null; } _emit(); }
     },
   });
   if (status === 'succeeded') {

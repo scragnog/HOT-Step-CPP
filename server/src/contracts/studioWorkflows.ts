@@ -189,6 +189,8 @@ export const lyricBatchInputSchema = z.object({
   items: z.array(z.discriminatedUnion('type', [lyricProfileItem, lyricGenerateItem, lyricRefineItem, lyricFetchItem, lyricRenderItem, lyricPreflightItem])).min(1).max(10_000),
   profiles: z.record(z.string(), z.record(z.string(), z.any())).optional(),
   histories: z.record(z.string(), lyricHistorySchema).optional(),
+  // How many artists run side by side; one artist's songs always run in order.
+  concurrency: z.number().int().min(1).max(16).optional(),
 });
 export type LyricBatchInput = z.infer<typeof lyricBatchInputSchema>;
 

@@ -96,7 +96,12 @@ renders run as server jobs. Closing the panel does not stop a submitted job;
 the lyric queue reconnects to unfinished jobs when Lyric Studio opens again.
 Each batch reports which items succeeded or failed, with the reason next to a
 failed item in the queue. One lyric batch takes up to 1000 queue entries and
-10000 songs in total. Stop on a bulk fetch
+10000 songs in total. **Artists at once** (Build Profiles and Generate Lyrics,
+remembered per browser) sets how many artists a run works on at the same time,
+1 to 16. One artist's songs always run in order, so each still avoids the
+subjects, keys and titles its predecessors picked. Raise it for a cloud
+provider; it sends that many requests at once, which counts against the
+provider's rate limits. The live output pane follows one song at a time. Stop on a bulk fetch
 requests cancellation. A server restart marks an active job interrupted; it
 does not silently rerun. Form changes after submission apply to the
 next job; the current job uses its captured provider, model and render settings.

@@ -24,8 +24,8 @@ async function submit(token: string, path: string, body: unknown): Promise<Workf
 }
 
 export const lyricWorkflowApi = {
-  submitBatch: (token: string, items: LyricBatchRequest[], idempotencyKey = crypto.randomUUID()) =>
-    submit(token, 'workflow-batches', { items, idempotencyKey }),
+  submitBatch: (token: string, items: LyricBatchRequest[], options: { concurrency?: number } = {}, idempotencyKey = crypto.randomUUID()) =>
+    submit(token, 'workflow-batches', { items, idempotencyKey, concurrency: options.concurrency }),
   submitRenders: (token: string, intents: WrittenSongIntent[], idempotencyKey = crypto.randomUUID()) =>
     submit(token, 'workflow-renders', { intents, idempotencyKey }),
   cancel: (token: string, id: string) => workflowApi.cancel(token, id),
