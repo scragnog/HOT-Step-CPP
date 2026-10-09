@@ -38,6 +38,7 @@ import { getUseLlmDuration } from '../utils/estimateDuration';
 import { audioQueueApi } from '../services/audioQueueApi';
 import { workflowApi } from '../services/workflowApi';
 import { exportQueueBackup, restoreQueueBackup, type QueueBackup, type QueueBackupStore } from './audioQueueMigration';
+import { decideQueueOwnerAction } from './audioQueueOwnerDecision';
 import type { AudioIntentItem, ImportAudioQueue } from '../../../server/src/contracts/audioQueue';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -1350,11 +1351,15 @@ export async function enqueueSimpleGen(
   }
 }
 
-/** One-time, silent owner decision for a browser that has never chosen.
- *  A missing/unrecognised OWNER_KEY (never decided) with nothing pending
- *  goes straight to server-owned — a fresh profile has nothing to lose.
- *  One with pending items migrates itself via the existing `resume` choice,
- *  no download and no held-for-review step; a failure leaves it on
+/** One-time, silent owner decision for a browser that has never chosen, or
+ *  whose last migration attempt never finished (page closed/reloaded with
+ *  OWNER_KEY stuck at `'migrating'`). `migrateAudioQueue`'s per-item import
+ *  is keyed by each item's legacyId (`intentQueue.importLegacy`), so a
+ *  replay is idempotent even if the interrupted attempt already reached the
+ *  server — already-imported items come back as `existing`, never
+ *  duplicated. No pending items goes straight to server-owned — nothing to
+ *  lose. Pending items migrate via the existing `resume` choice, no
+ *  download and no held-for-review step; a failure leaves it on
  *  `'browser'` exactly as `migrateAudioQueue`'s own catch already does, so
  *  the queue keeps working and the banner is the only sign anything happened.
  *  Idempotent and safe to call from both `resumeQueue()` and the banner. */
@@ -1363,10 +1368,11 @@ export function ensureQueueOwnerDecided(token: string): Promise<void> {
   if (!_ownerDecision) {
     _ownerDecision = (async () => {
       await _idbReady;
-      const raw = localStorage.getItem(OWNER_KEY);
-      if (raw === 'server' || raw === 'migrating' || raw === 'browser') return;
       const hasPending = _state.items.some(item => item.status !== 'succeeded' && item.status !== 'failed');
-      if (!hasPending) { localStorage.setItem(OWNER_KEY, 'server'); _emit(true); return; }
+      const action = decideQueueOwnerAction(localStorage.getItem(OWNER_KEY), hasPending);
+      if (action === 'none') return;
+      if (action === 'set-server') { localStorage.setItem(OWNER_KEY, 'server'); _emit(true); return; }
+      localStorage.setItem(OWNER_KEY, 'browser'); // clears a stuck 'migrating' so the guard below passes
       try { await migrateAudioQueue(token, 'resume', false); }
       catch (e) { console.error('[AudioGenQueue] automatic migration failed:', e); }
     })();
