@@ -9,7 +9,7 @@ import type { WorkflowJob } from '../../src/contracts/workflow.js';
 import { randomUUID } from 'node:crypto';
 
 export class ClientError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public body?: unknown) { super(message); }
 }
 
 async function asJson<T>(res: Response): Promise<T> {
@@ -20,7 +20,7 @@ async function asJson<T>(res: Response): Promise<T> {
     const message = typeof body === 'object' && body && 'error' in (body as Record<string, unknown>)
       ? String((body as Record<string, unknown>).error)
       : text;
-    throw new ClientError(res.status, message);
+    throw new ClientError(res.status, message, body);
   }
   return body as T;
 }

@@ -58,17 +58,33 @@ test('Song Builder: create a project, generate a section, choose a candidate', a
   assert.equal((chosenSection.chosen as { id: string }).id, candidate.id);
 });
 
-test('Song Builder: a stale project revision on a section command is 409 with currentRevision', async () => {
+test('Song Builder: a stale project revision on a section command is 409 with currentRevision, state unchanged, retry with the fetched revision succeeds', async () => {
   const { project } = await client.createBuilderProject({ title: 'Stale Test' });
   const generated = await client.generateBuilderSection(project.id as string, {
     idempotencyKey: randomUUID(), expectedRevision: project.revision, direction: 'first',
     length: { seconds: 1 }, expectedBackend: 'ace', engineParams: { skipLm: true },
   });
   await client.waitForWorkflowJob(generated.jobId);
+  const before = await client.getBuilderProject(project.id as string);
+  const beforeRevision = (before.project as Record<string, unknown>).revision as number;
+
+  let currentRevision: number | undefined;
   await assert.rejects(
-    () => client.stopBuilderSection(generated.sectionId, (project.revision as number) + 99),
-    (err: unknown) => err instanceof ClientError && err.status === 409,
+    () => client.stopBuilderSection(generated.sectionId, beforeRevision + 99),
+    (err: unknown) => {
+      if (!(err instanceof ClientError) || err.status !== 409) return false;
+      currentRevision = (err.body as { currentRevision: number }).currentRevision;
+      return true;
+    },
   );
+  assert.equal(currentRevision, beforeRevision);
+
+  const unchanged = await client.getBuilderProject(project.id as string);
+  assert.equal((unchanged.project as Record<string, unknown>).revision, beforeRevision);
+
+  const retried = await client.stopBuilderSection(generated.sectionId, currentRevision as number);
+  const retriedSection = (retried.sections as Array<Record<string, unknown>>)[0];
+  assert.equal(retriedSection.status, 'ready');
 });
 
 test('Song Builder: deleting a project removes it, candidate songs stay in the library', async () => {
@@ -136,6 +152,11 @@ test('Library: upload accepts a fixture file and returns an asset id', async () 
   assert.ok(asset.assetId);
 });
 
+test('Library: auth failure — no bearer token is 401', async () => {
+  const res = await fetch(`${server.origin}/api/songs`);
+  assert.equal(res.status, 401);
+});
+
 // ── Playlist ─────────────────────────────────────────────────────────────
 
 test('Playlist: null before the first command, then add/reorder/update/remove/clear', async () => {
@@ -162,13 +183,28 @@ test('Playlist: null before the first command, then add/reorder/update/remove/cl
   assert.equal((cleared.document.body.items as unknown[]).length, 0);
 });
 
-test('Playlist: a stale expectedRevision is 409 with currentRevision and changes nothing', async () => {
+test('Playlist: a stale expectedRevision is 409 with currentRevision, changes nothing, and the documented retry (reload, reapply, resend) succeeds', async () => {
   const before = await client.getPlaylist();
   const baseRevision = before.document?.revision ?? 0;
+  const baseItems = before.document?.body.items ?? [];
+
+  let currentRevision: number | undefined;
   await assert.rejects(
     () => client.playlistCommand(baseRevision + 99, { operation: 'add', item: { id: 'x', title: 'X', audioUrl: '/audio/x.wav' } }),
-    (err: unknown) => err instanceof ClientError && err.status === 409,
+    (err: unknown) => {
+      if (!(err instanceof ClientError) || err.status !== 409) return false;
+      currentRevision = (err.body as { currentRevision: number }).currentRevision;
+      return true;
+    },
   );
+  assert.equal(currentRevision, baseRevision);
+
+  const unchanged = await client.getPlaylist();
+  assert.equal(unchanged.document?.revision ?? 0, baseRevision);
+  assert.deepEqual(unchanged.document?.body.items ?? [], baseItems);
+
+  const retried = await client.playlistCommand(currentRevision as number, { operation: 'add', item: { id: 'x', title: 'X', audioUrl: '/audio/x.wav' } });
+  assert.equal(retried.document.revision, baseRevision + 1);
 });
 
 test('Playlist: a malformed command (reorder missing an item) is 400', async () => {
@@ -177,6 +213,11 @@ test('Playlist: a malformed command (reorder missing an item) is 400', async () 
     body: JSON.stringify({ expectedRevision: 0, command: { operation: 'reorder' } }),
   });
   assert.equal(res.status, 400);
+});
+
+test('Playlist: auth failure — no bearer token is 401', async () => {
+  const res = await fetch(`${server.origin}/api/studio-drafts/playlist`);
+  assert.equal(res.status, 401);
 });
 
 // ── Studio drafts ────────────────────────────────────────────────────────
@@ -205,12 +246,25 @@ test('Studio drafts: a key from another studio is 400', async () => {
   );
 });
 
-test('Studio drafts: a stale revision on PUT is 409 with currentRevision', async () => {
+test('Studio drafts: a stale revision on PUT is 409 with currentRevision, state unchanged, retry with the fetched revision succeeds', async () => {
   const created = await client.createDraft({ studio: 'create', fields: { 'hs-caption': 'v1' } });
+
+  let currentRevision: number | undefined;
   await assert.rejects(
     () => client.putDraft(created.document.id, 99, { studio: 'create', fields: { 'hs-caption': 'v2' } }),
-    (err: unknown) => err instanceof ClientError && err.status === 409,
+    (err: unknown) => {
+      if (!(err instanceof ClientError) || err.status !== 409) return false;
+      currentRevision = (err.body as { currentRevision: number }).currentRevision;
+      return true;
+    },
   );
+  assert.equal(currentRevision, created.document.revision);
+
+  const unchanged = await client.getDraft(created.document.id);
+  assert.equal(unchanged.document.revision, created.document.revision);
+
+  const retried = await client.putDraft(created.document.id, currentRevision as number, { studio: 'create', fields: { 'hs-caption': 'v2' } });
+  assert.equal(retried.document.revision, created.document.revision + 1);
 });
 
 test('Studio drafts: import moves a browser value into a new draft', async () => {
@@ -236,6 +290,11 @@ test('Studio drafts: an unknown handoff id is 404', async () => {
   await assert.rejects(() => client.getHandoff(randomUUID()), (err: unknown) => err instanceof ClientError && err.status === 404);
 });
 
+test('Studio drafts: auth failure — no bearer token is 401', async () => {
+  const res = await fetch(`${server.origin}/api/studio-drafts/drafts`);
+  assert.equal(res.status, 401);
+});
+
 // ── Presets (installation-scoped, no token) ─────────────────────────────
 
 test('Presets: create, list, update and delete a named preset', async () => {
@@ -252,12 +311,27 @@ test('Presets: create, list, update and delete a named preset', async () => {
   assert.equal(removed.removed, true);
 });
 
-test('Presets: a stale revision on PUT is 409 with currentRevision', async () => {
+test('Presets: a stale revision on PUT is 409 with currentRevision, state unchanged, retry with the fetched revision succeeds', async () => {
   const created = await client.createPreset('ai-continue-lyric', { label: 'L', value: 'v' });
+
+  let currentRevision: number | undefined;
   await assert.rejects(
     () => client.putPreset('ai-continue-lyric', created.document.id, 99, { label: 'L', value: 'v2' }),
-    (err: unknown) => err instanceof ClientError && err.status === 409,
+    (err: unknown) => {
+      if (!(err instanceof ClientError) || err.status !== 409) return false;
+      currentRevision = (err.body as { currentRevision: number }).currentRevision;
+      return true;
+    },
   );
+  assert.equal(currentRevision, created.document.revision);
+
+  const { documents } = await client.listPresets('ai-continue-lyric');
+  const unchanged = documents.find(d => d.id === created.document.id);
+  assert.equal(unchanged?.revision, created.document.revision);
+  assert.deepEqual(unchanged?.body, { label: 'L', value: 'v' });
+
+  const retried = await client.putPreset('ai-continue-lyric', created.document.id, currentRevision as number, { label: 'L', value: 'v2' });
+  assert.equal(retried.document.revision, created.document.revision + 1);
 });
 
 test('Presets: rejected input — an unknown family is 404', async () => {
@@ -357,6 +431,56 @@ test('Export/import: resolve a queue-only item, then download it with zero subpr
 
 test('Export/import: a malformed export request (no items) is 400', async () => {
   await assert.rejects(() => client.resolveExport({ items: [] }), (err: unknown) => err instanceof ClientError && err.status === 400);
+});
+
+test('Export/import: a per-item export failure sits alongside a valid item, ordered, with no url on the failure', async () => {
+  // Same queue-only fixture setup as the single-item export test above: a
+  // real file under DATA_DIR/audio so the valid item's "ok" status isn't
+  // itself a false negative from a missing file (operations.ts:36-38).
+  const filename = `${randomUUID()}.wav`;
+  fs.mkdirSync(path.join(server.dataDir, 'audio'), { recursive: true });
+  fs.writeFileSync(path.join(server.dataDir, 'audio', filename), makeFixtureWav(1));
+  const resolved = await client.resolveExport({
+    items: [{ songId: 'export-ok-item', audioUrl: `/audio/${filename}` }, { songId: 'does-not-exist' }],
+    format: 'wav',
+  });
+  assert.equal(resolved.items.length, 2);
+  const [ok, failed] = resolved.items as Array<{ index: number; url?: string; error?: string }>;
+  assert.equal(ok.index, 0);
+  assert.ok(ok.url);
+  assert.equal(ok.error, undefined);
+  assert.equal(failed.index, 1);
+  assert.equal(failed.url, undefined);
+  assert.ok(failed.error);
+});
+
+// A real successful import can't be exercised here without triggering
+// importTrackFile()'s unconditional ffmpeg re-encode (importTrack.ts:53-66,
+// the same blocked seam noted on the upload test above). resolveAudioAsset
+// 404s on a missing assetId before that encoder ever runs (audioAssets.ts:
+// 56-62), so two distinct missing-asset items still exercise importAssets()'s
+// per-item ordering without a subprocess.
+test('Export/import: per-item import failures (two missing assets) stay ordered by index', async () => {
+  const first = randomUUID();
+  const second = randomUUID();
+  const result = await client.importAssets([{ assetId: first }, { assetId: second }]);
+  assert.equal(result.items.length, 2);
+  const [a, b] = result.items as Array<{ index: number; assetId: string; song?: unknown; error?: string }>;
+  assert.equal(a.index, 0);
+  assert.equal(a.assetId, first);
+  assert.ok(a.error);
+  assert.equal(a.song, undefined);
+  assert.equal(b.index, 1);
+  assert.equal(b.assetId, second);
+  assert.ok(b.error);
+  assert.equal(b.song, undefined);
+});
+
+test('Export/import: auth failure — no bearer token is 401', async () => {
+  const res = await fetch(`${server.origin}/api/export-import/exports/resolve`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: [] }),
+  });
+  assert.equal(res.status, 401);
 });
 
 test('Export/import: validate a bare preset profile file', async () => {
