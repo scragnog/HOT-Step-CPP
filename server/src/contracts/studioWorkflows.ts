@@ -10,15 +10,19 @@
 // separately; this file does not cover them.
 
 import { z } from 'zod/v4';
+import { writtenSongIntentSchema } from './resolution.js';
 
 // ── Insta-Gen (kinds: insta-preview, insta-direct, insta-approve) ──────────
 
 const instaMode = z.enum(['instrumental', 'lyrics', 'lyrics-ai']);
 
 /** POST /api/workflows/jobs { kind: 'insta-preview' | 'insta-direct', input }.
- *  `systemPrompt` and a defaulted `model` are filled server-side from the
- *  caller's saved prompt/provider before this schema ever sees them; the
- *  wire body may omit both. */
+ *  `model` is a required field — it must be present, though `''` satisfies
+ *  this schema — and `systemPrompt` is genuinely optional. Validation runs
+ *  first; only after it passes does createInstaGenKinds' `.transform` fill
+ *  a falsy `model` from the caller's saved provider default and a missing
+ *  `systemPrompt` from their saved prompt. A request missing the `model`
+ *  key outright is still rejected here. */
 export const instaInputSchema = z.object({
   caption: z.string().min(1), genres: z.array(z.string()), lyricMode: instaMode,
   subject: z.string(), randomSubject: z.boolean(), provider: z.string(), model: z.string(),
@@ -165,9 +169,23 @@ export interface RepaintLayerResult { request: Record<string, unknown>; audioInt
 // by services/lireek/lyricWorkflow.ts (captureLyricItems/captureRenderItems).
 // That capture step, not this file, is the real input boundary: it is what
 // turns a client's loose request (ids, provider, free-text subject) into
-// the exact pinned item this schema accepts. Re-exported here, not
-// redefined, so the published shape is the one validated on submit.
-export { lyricBatchInput as lyricBatchInputSchema, type LyricBatchInput } from '../services/lireek/lyricWorkflow.js';
+// the exact pinned item this schema accepts. The schema itself lives here,
+// not there, so importing it never pulls in the DB/LLM services or the
+// registerWorkflowKind side effect lyricWorkflow.ts carries at module load;
+// that module imports it back from here as `lyricBatchInput`.
+
+export const lyricItemBase = z.object({ provider: z.string().min(1), model: z.string().optional() });
+const lyricProfileItem = lyricItemBase.extend({ type: z.literal('profile'), sourceId: z.number().int().positive(), sourceRevision: z.string(), artist: z.string(), songs: z.array(z.any()) });
+const lyricHistorySchema = z.object({ usedSubjects: z.array(z.string()), usedBpms: z.array(z.number()), usedKeys: z.array(z.string()), usedTitles: z.array(z.string()), usedDurations: z.array(z.number()) });
+const lyricGenerateItem = lyricItemBase.extend({ type: z.literal('generate'), sourceId: z.number().int().positive(), sourceRevision: z.string(), lyricsSetId: z.number().int().positive().optional(), lyricsSetRevision: z.string().optional(), profileData: z.record(z.string(), z.any()), artistId: z.number().int().positive().optional(), extraInstructions: z.string().optional(), userSubject: z.string().optional(), noThink: z.boolean().optional(), history: lyricHistorySchema });
+const lyricRefineItem = lyricItemBase.extend({ type: z.literal('refine'), sourceId: z.number().int().positive(), sourceRevision: z.string(), profileId: z.number().int().positive().optional(), profileRevision: z.string().optional(), source: z.record(z.string(), z.any()), profileData: z.record(z.string(), z.any()).optional(), artist: z.string() });
+export const lyricFetchItem = z.object({ type: z.literal('fetch'), artist: z.string().trim().min(1), album: z.string().optional(), maxSongs: z.number().int().min(1).max(200) });
+export const lyricRenderItem = z.object({ type: z.literal('render'), intent: writtenSongIntentSchema, sourceRevision: z.string() });
+const lyricPreflightItem = z.object({ type: z.literal('preflight-error'), error: z.string() });
+export const lyricBatchInputSchema = z.object({
+  items: z.array(z.discriminatedUnion('type', [lyricProfileItem, lyricGenerateItem, lyricRefineItem, lyricFetchItem, lyricRenderItem, lyricPreflightItem])).min(1).max(200),
+});
+export type LyricBatchInput = z.infer<typeof lyricBatchInputSchema>;
 
 /** One `lyric-batch` result entry (the job's `result.results[]`). `value`'s
  *  shape depends on the item's type: `{ id, ... }` for profile/generate,

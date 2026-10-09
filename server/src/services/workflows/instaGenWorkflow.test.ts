@@ -109,6 +109,26 @@ test('approval uses its document revision; edits and backend changes cannot sile
   assert.equal(s.submitted, 0);
 });
 
+test('the GET -> PUT edits -> approve sequence renders the edited lyrics, not the original preview', async () => {
+  const s = setup();
+  const preview = s.submit('insta-preview', 'edit-preview', input as unknown as Record<string, unknown>);
+  await s.jobs.settled();
+  const { documentId, revision } = s.jobs.get(preview.job.id).result as { documentId: string; revision: number };
+  // GET: the client reads the full stored body, not just `result`.
+  const fetched = s.documents.get(documentId, 'u');
+  assert.deepEqual(fetched.data.edits, { lyrics: result.lyrics, caption: result.caption }, 'edits starts as a copy of result');
+  // PUT: resend input/result unchanged, only edits differs; data is replaced wholesale.
+  const edited = s.documents.update(documentId, 'u', revision, {
+    ...fetched.data as object, edits: { lyrics: '[Verse 1]\nNew street\n\n[Chorus]\nEdited tonight', caption: 'Edited caption' },
+  });
+  const approved = s.submit('insta-approve', 'edit-approve', { documentId, revision: edited.revision });
+  await s.jobs.settled();
+  assert.equal(s.jobs.get(approved.job.id).status, 'succeeded');
+  const request = (s.jobs.get(approved.job.id).result as any).request;
+  assert.equal(request.lyrics, '[Verse 1]\nNew street\n\n[Chorus]\nEdited tonight');
+  assert.equal(request.title, 'Edited tonight');
+});
+
 test('idempotency, cancel, restart interruption and cursor replay hold for Insta-Gen', async () => {
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });

@@ -14,17 +14,12 @@ import type { LyricsProfile } from './profilerService.js';
 import { registerWorkflowKind } from '../../routes/workflows.js';
 import type { WorkflowContext } from '../workflows/workflowJobs.js';
 import type { AudioIntentItem } from '../../contracts/audioQueue.js';
+import {
+  lyricBatchInputSchema as lyricBatchInput, lyricItemBase as base,
+  lyricFetchItem as fetchItem, lyricRenderItem as render, type LyricBatchInput,
+} from '../../contracts/studioWorkflows.js';
 
-const base = z.object({ provider: z.string().min(1), model: z.string().optional() });
-const profile = base.extend({ type: z.literal('profile'), sourceId: z.number().int().positive(), sourceRevision: z.string(), artist: z.string(), songs: z.array(z.any()) });
-const historySchema = z.object({ usedSubjects: z.array(z.string()), usedBpms: z.array(z.number()), usedKeys: z.array(z.string()), usedTitles: z.array(z.string()), usedDurations: z.array(z.number()) });
-const generate = base.extend({ type: z.literal('generate'), sourceId: z.number().int().positive(), sourceRevision: z.string(), lyricsSetId: z.number().int().positive().optional(), lyricsSetRevision: z.string().optional(), profileData: z.record(z.string(), z.any()), artistId: z.number().int().positive().optional(), extraInstructions: z.string().optional(), userSubject: z.string().optional(), noThink: z.boolean().optional(), history: historySchema });
-const refine = base.extend({ type: z.literal('refine'), sourceId: z.number().int().positive(), sourceRevision: z.string(), profileId: z.number().int().positive().optional(), profileRevision: z.string().optional(), source: z.record(z.string(), z.any()), profileData: z.record(z.string(), z.any()).optional(), artist: z.string() });
-const fetchItem = z.object({ type: z.literal('fetch'), artist: z.string().trim().min(1), album: z.string().optional(), maxSongs: z.number().int().min(1).max(200) });
-const render = z.object({ type: z.literal('render'), intent: writtenSongIntentSchema, sourceRevision: z.string() });
-const preflight = z.object({ type: z.literal('preflight-error'), error: z.string() });
-export const lyricBatchInput = z.object({ items: z.array(z.discriminatedUnion('type', [profile, generate, refine, fetchItem, render, preflight])).min(1).max(200) });
-export type LyricBatchInput = z.infer<typeof lyricBatchInput>;
+export { lyricBatchInput, type LyricBatchInput };
 type Item = LyricBatchInput['items'][number];
 export type LyricRequest = { type: Item['type']; targetId?: number; provider?: string; model?: string; count?: number; extraInstructions?: string; userSubject?: string; noThink?: boolean; artist?: string; album?: string; maxSongs?: number };
 const revision = (value: unknown) => requestVersion(value as Record<string, unknown>);

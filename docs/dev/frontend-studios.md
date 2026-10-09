@@ -59,17 +59,22 @@ backend — a 409 if it changed before the job could run). `lyricMode:
 'lyrics-ai'` requires `provider`, and a non-empty `subject` unless
 `randomSubject` is set.
 
-- `insta-preview` resolves caption/lyrics/metadata without rendering, saves
-  them as an `insta-preview` document, and returns `{ documentId, revision,
-  result: InstaResult }`. Edit `result.lyrics`/`result.caption` client-side,
-  then approve.
+- `insta-preview` resolves caption/lyrics/metadata without rendering and
+  returns `{ documentId, revision, result: InstaResult }`. It also creates
+  the `insta-preview` document with body `{ input, result, edits: { lyrics:
+  result.lyrics, caption: result.caption } }` — `edits` starts as a copy of
+  `result`, not `result` itself.
 - `insta-direct` resolves and renders in one job: `{ request, audioIntentId,
   audio }`, where `audio` is the finished `/api/audio-queue` item's result.
-- `insta-approve` takes `{ documentId, revision }` (409 `Stale preview
-  revision N` if the document moved), rebuilds the render request from the
-  document's result and — if the client supplied edited lyrics/caption when
-  the document was created — those edits, then renders the same as
-  `insta-direct`.
+- `insta-approve` renders from the document's `edits`, not its `result` — to
+  change what renders, edit before approving: `GET
+  /api/workflows/documents/:id` for the current `{ input, result, edits }`
+  and `revision`; `PUT .../documents/:id` with `{ expectedRevision: revision,
+  data: { input, result, edits: { lyrics, caption } } }` (the route replaces
+  `data` wholesale, so resend `input`/`result` unchanged); then
+  `insta-approve` with `{ documentId, revision: <the PUT's new revision> }`
+  (409 `Stale preview revision N` on a mismatch). It renders the same as
+  `insta-direct`, using the approved `edits` in place of `result`.
 
 Per-item errors: none of these are batched, so a failure is the job's own
 `error` field, not a per-item list. No explicit cancellation point beyond the

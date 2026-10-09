@@ -30,6 +30,12 @@ test('insta-preview/insta-direct: lyrics-ai requires a provider, and a subject u
   bad(instaInputSchema, { ...instaBase, caption: '' });
 });
 
+test('insta-preview/insta-direct: model must be present (empty string is fine), systemPrompt may be omitted', () => {
+  ok(instaInputSchema, { ...instaBase, model: '' });
+  const { model, ...withoutModel } = instaBase;
+  bad(instaInputSchema, withoutModel);
+});
+
 test('insta-approve: a document reference, revision at least 1', () => {
   ok(instaApproveSchema, { documentId: '123e4567-e89b-12d3-a456-426614174000', revision: 1 });
   bad(instaApproveSchema, { documentId: 'not-a-uuid', revision: 1 });
