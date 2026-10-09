@@ -434,6 +434,12 @@ re-runs from the Library wait in the same line.
   offers Resume or Discard. Nothing restarts on its own.
 - The Queue section has Retry for failed items, Clear Done for finished ones, and Reset,
   which cancels everything active and pending on the server.
+- The queue itself lives either in your browser or on the server; a fresh install is
+  server-owned from the start. An older browser-owned queue with pending work moves to
+  the server automatically the next time you load the app, keeping each item's state
+  (queued work keeps running, nothing needs a manual Resume); finished history stays
+  where it is. A versioned backup is kept regardless, and nothing is deleted. You only
+  see a banner about this if the move fails, with a button to retry it.
 
 An external agent (Claude Code, Codex) can also submit and poll generations through the
 `hotstep` MCP server, across all three backends. See [Driving HOT-Step with an

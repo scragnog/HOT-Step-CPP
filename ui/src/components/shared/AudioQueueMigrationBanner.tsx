@@ -1,19 +1,31 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
-  getAudioQueueOwner, migrateAudioQueue, rollbackAudioQueue,
+  ensureQueueOwnerDecided, getAudioQueueOwner, migrateAudioQueue, rollbackAudioQueue,
   useAudioGenQueueSelector,
 } from '../../stores/audioGenQueueStore';
 
 export const AudioQueueMigrationBanner: React.FC = () => {
   const { token } = useAuth();
   const count = useAudioGenQueueSelector(s => s.items.length);
+  const [ready, setReady] = useState(false);
   const [owner, setOwner] = useState(getAudioQueueOwner());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [receipt, setReceipt] = useState('');
 
-  if (!token || (owner === 'browser' && count === 0)) return null;
+  // A never-decided browser migrates (or opts into server ownership) silently
+  // on load — don't render the manual prompt until that decision has landed.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    void ensureQueueOwnerDecided(token).finally(() => {
+      if (!cancelled) { setOwner(getAudioQueueOwner()); setReady(true); }
+    });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  if (!token || !ready || (owner === 'browser' && count === 0)) return null;
   const run = async (action: () => Promise<void>) => {
     setBusy(true); setError('');
     try { await action(); setOwner(getAudioQueueOwner()); }

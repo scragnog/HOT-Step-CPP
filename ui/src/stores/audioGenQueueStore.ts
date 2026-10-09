@@ -464,7 +464,7 @@ function writtenSongIntentFor(item: AudioQueueItem): WrittenSongIntent {
 
 /** Explicit handoff. Browser originals are retained; no server item can run
  * until the backup is saved, read back, and the browser executor is frozen. */
-export async function migrateAudioQueue(token: string, choice: 'hold' | 'resume' | 'discard' = 'hold'): Promise<{
+export async function migrateAudioQueue(token: string, choice: 'hold' | 'resume' | 'discard' = 'hold', download = true): Promise<{
   backup: QueueBackup; receipt: Awaited<ReturnType<typeof audioQueueApi.importLegacy>>;
 }> {
   await _idbReady;
@@ -473,7 +473,7 @@ export async function migrateAudioQueue(token: string, choice: 'hold' | 'resume'
     throw new Error('Wait for active browser generations to finish before moving the queue');
   }
   const backup = await exportQueueBackup(migrationStore());
-  downloadQueueExport(`audio-queue-backup-${backup.id}.json`, backup);
+  if (download) downloadQueueExport(`audio-queue-backup-${backup.id}.json`, backup);
   localStorage.setItem(OWNER_KEY, 'migrating');
   try {
     const items: ImportAudioQueue['items'] = [];
@@ -1350,6 +1350,30 @@ export async function enqueueSimpleGen(
   }
 }
 
+/** One-time, silent owner decision for a browser that has never chosen.
+ *  A missing/unrecognised OWNER_KEY (never decided) with nothing pending
+ *  goes straight to server-owned — a fresh profile has nothing to lose.
+ *  One with pending items migrates itself via the existing `resume` choice,
+ *  no download and no held-for-review step; a failure leaves it on
+ *  `'browser'` exactly as `migrateAudioQueue`'s own catch already does, so
+ *  the queue keeps working and the banner is the only sign anything happened.
+ *  Idempotent and safe to call from both `resumeQueue()` and the banner. */
+let _ownerDecision: Promise<void> | null = null;
+export function ensureQueueOwnerDecided(token: string): Promise<void> {
+  if (!_ownerDecision) {
+    _ownerDecision = (async () => {
+      await _idbReady;
+      const raw = localStorage.getItem(OWNER_KEY);
+      if (raw === 'server' || raw === 'migrating' || raw === 'browser') return;
+      const hasPending = _state.items.some(item => item.status !== 'succeeded' && item.status !== 'failed');
+      if (!hasPending) { localStorage.setItem(OWNER_KEY, 'server'); _emit(true); return; }
+      try { await migrateAudioQueue(token, 'resume', false); }
+      catch (e) { console.error('[AudioGenQueue] automatic migration failed:', e); }
+    })();
+  }
+  return _ownerDecision;
+}
+
 export async function resumeQueue(token: string): Promise<void> {
   if (_resumeCalled) return;
   _resumeCalled = true;
@@ -1357,6 +1381,7 @@ export async function resumeQueue(token: string): Promise<void> {
 
   // Wait for IndexedDB restore to complete before processing
   await _idbReady;
+  await ensureQueueOwnerDecided(token);
 
   if (queueOwner() === 'server') { _startServerProjection(token); return; }
   if (queueOwner() === 'migrating') return;
