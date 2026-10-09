@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
-import { z } from 'zod/v4';
-import { importDraftSchema, playlistSchema, studioDraftSchema, type PlaylistBody, type PlaylistItem, type StudioDraftBody } from '../../contracts/studioDrafts.js';
+import { importDraftSchema, playlistCommandSchema, playlistSchema, studioDraftSchema, type PlaylistBody, type PlaylistItem, type StudioDraftBody } from '../../contracts/studioDrafts.js';
+import { DRAFT_SOURCE_FIELDS, DRAFT_SOURCE_RESULT_FIELDS, RAW_STRING_DRAFT_KEYS, studioForDraftKey, validDraftField } from '../../contracts/studioDraftFields.js';
 import { TypedDocuments, WorkflowDocuments, registerDocumentKind } from '../workflows/revisions.js';
 import { WorkflowError } from '../workflows/workflowJobs.js';
 import { resolveAudioAsset } from '../assets/audioAssets.js';
@@ -9,45 +9,13 @@ import { resolveAudioAsset } from '../assets/audioAssets.js';
 export const playlistKind = registerDocumentKind({ kind: 'studio.playlist', scope: 'user', schemaVersion: 1, schema: playlistSchema });
 export const draftKind = registerDocumentKind({ kind: 'studio.draft', scope: 'user', schemaVersion: 1, schema: studioDraftSchema });
 
-const CREATE = new Set('caption lyrics negative-prompt instrumental lora-trigger beat-intro intro-bars title artist subject bpm keyScale timeSignature duration vocalLanguage vocalGender sourceLatentUrl'.split(' ').map(x => `hs-${x}`));
-const COVER = new Set('sourceFileName sourceAudioUrl sourceAssetId sourceSongId metadata analysis songArtist songTitle lyrics lyricsSource datasetAnalysis selectedArtistId selectedPreset artistCaption audioCoverStrength coverNoiseStrength coverNoiseMethod tempoScale pitchShift bpmCorrection bpmOverride keyOverride noFsq coverInstrumental sourceLatentUrl coverVocalLanguage coverTimbreOverride sepLevel'.split(' ').map(x => `cover-studio-${x}`));
-const REPAINT = new Set('sourceSong sourceAssetId sourceAudioUrl sourceName regionStart regionEnd lyrics repaintMode crossfadeFrames styleCaption'.split(' ').map(x => `hs-repaint-${x}`));
-const STORM = new Set('caption lyrics neg lora instrumental beat-intro intro-bars bpm duration-v2 deck-a-caption deck-a-lyrics deck-a-bpm deck-b-caption deck-b-lyrics deck-b-bpm'.split(' ').map(x => `hs-storm-${x}`));
-const STEM = new Set('hs-stem-sourceUrl hs-stem-sourceFile hs-stem-sepLevel hs-stem-extractModel'.split(' '));
-const BUILDER = new Set('hs-sb-sourceUrl hs-sb-sourceRef hs-sb-sourceFile hs-sb-model'.split(' '));
-const CAPTION = /^(hs-mm3CaptionSource:[^:]+|hs-mm3CaptionSources|hs-yue2CaptionSource:ds:[^:]+|hs-yue2CaptionSource:ds:song:[^:]+:[^:]+|hs-yue2CaptionDataset|hs-yue2CaptionSources)$/;
-const RAW = new Set([...STEM, ...BUILDER].filter(x => x !== 'hs-sb-sourceRef'));
-const BOOLEAN = new Set('hs-instrumental hs-beat-intro cover-studio-datasetAnalysis cover-studio-noFsq cover-studio-coverInstrumental hs-storm-instrumental hs-storm-beat-intro'.split(' '));
-const NUMBER = new Set('hs-bpm hs-duration hs-intro-bars cover-studio-audioCoverStrength cover-studio-coverNoiseStrength cover-studio-tempoScale cover-studio-pitchShift cover-studio-bpmCorrection cover-studio-sepLevel hs-repaint-regionStart hs-repaint-regionEnd hs-repaint-crossfadeFrames hs-storm-intro-bars hs-storm-bpm hs-storm-duration-v2 hs-storm-deck-a-bpm hs-storm-deck-b-bpm'.split(' '));
-const NULLABLE_NUMBER = new Set('cover-studio-selectedArtistId cover-studio-bpmOverride'.split(' '));
-const NULLABLE_STRING = new Set('cover-studio-lyricsSource cover-studio-keyOverride'.split(' '));
-const OBJECT = new Set('cover-studio-metadata cover-studio-analysis cover-studio-selectedPreset hs-repaint-sourceSong hs-sb-sourceRef'.split(' '));
-
-function validField(key: string, value: unknown): boolean {
-  if (BOOLEAN.has(key)) return typeof value === 'boolean';
-  if (NUMBER.has(key)) return typeof value === 'number' && Number.isFinite(value);
-  if (NULLABLE_NUMBER.has(key)) return value === null || (typeof value === 'number' && Number.isFinite(value));
-  if (NULLABLE_STRING.has(key)) return value === null || typeof value === 'string';
-  if (OBJECT.has(key) || key.startsWith('hs-mm3CaptionSource:') || key === 'hs-mm3CaptionSources' ||
-    key.startsWith('hs-yue2CaptionSource:') || key === 'hs-yue2CaptionSources')
-    return value === null || (typeof value === 'object' && !Array.isArray(value));
-  return typeof value === 'string';
-}
-
-export function studioForKey(key: string): StudioDraftBody['studio'] | null {
-  if (CREATE.has(key) || CAPTION.test(key)) return 'create';
-  if (COVER.has(key)) return 'cover';
-  if (REPAINT.has(key)) return 'repaint';
-  if (STORM.has(key)) return 'storm';
-  if (STEM.has(key)) return 'stem-studio';
-  if (BUILDER.has(key)) return 'stem-builder';
-  return null;
-}
+/** The studio a draft key belongs to (contracts/studioDraftFields.ts). */
+export const studioForKey = studioForDraftKey;
 
 export function validateDraft(body: StudioDraftBody): void {
   for (const key of Object.keys(body.fields)) {
     if (studioForKey(key) !== body.studio) throw new WorkflowError(400, `Unsupported ${body.studio} draft field: ${key}`);
-    if (!validField(key, body.fields[key])) throw new WorkflowError(400, `Invalid value for ${key}`);
+    if (!validDraftField(key, body.fields[key])) throw new WorkflowError(400, `Invalid value for ${key}`);
   }
   const assetKey = body.studio === 'cover' ? 'cover-studio-sourceAssetId' : body.studio === 'repaint' ? 'hs-repaint-sourceAssetId' : null;
   if (assetKey && body.sourceAssetId !== undefined && body.fields[assetKey] !== undefined && body.sourceAssetId !== body.fields[assetKey])
@@ -60,33 +28,17 @@ export function validateDraft(body: StudioDraftBody): void {
 /** A source switch makes analysis and generated caption text from the old
  * source inapplicable. Keep the user's own lyrics and tuning choices. */
 export function withoutStaleSourceResults(current: StudioDraftBody, next: StudioDraftBody): StudioDraftBody {
-  const sourceKeys = current.studio === 'cover'
-    ? ['cover-studio-sourceAssetId', 'cover-studio-sourceSongId', 'cover-studio-sourceAudioUrl']
-    : current.studio === 'repaint'
-      ? ['hs-repaint-sourceAssetId', 'hs-repaint-sourceSong', 'hs-repaint-sourceAudioUrl']
-      : current.studio === 'create' ? ['hs-sourceLatentUrl'] : [];
+  const sourceKeys = DRAFT_SOURCE_FIELDS[current.studio] ?? [];
   const changed = current.sourceAssetId !== next.sourceAssetId || current.sourceSongId !== next.sourceSongId ||
     current.sourceRevision !== next.sourceRevision || sourceKeys.some(key =>
       JSON.stringify(current.fields[key]) !== JSON.stringify(next.fields[key]));
   if (!changed) return next;
   const fields = { ...next.fields };
-  if (next.studio === 'cover') {
-    for (const key of ['cover-studio-analysis', 'cover-studio-metadata', 'cover-studio-artistCaption', 'cover-studio-lyricsSource']) delete fields[key];
-  }
-  if (next.studio === 'create') {
-    for (const key of ['hs-mm3CaptionSources', 'hs-yue2CaptionSources']) delete fields[key];
-  }
+  for (const key of DRAFT_SOURCE_RESULT_FIELDS[next.studio] ?? []) delete fields[key];
   return { ...next, fields };
 }
 
-const commandSchema = z.discriminatedUnion('operation', [
-  z.object({ operation: z.literal('add'), item: playlistSchema.shape.items.element }),
-  z.object({ operation: z.literal('remove'), id: z.string().min(1) }),
-  z.object({ operation: z.literal('clear') }),
-  z.object({ operation: z.literal('reorder'), ids: z.array(z.string().min(1)) }),
-  z.object({ operation: z.literal('update'), id: z.string().min(1), patch: z.record(z.string(), z.unknown()) }),
-]);
-export type PlaylistCommand = z.infer<typeof commandSchema>;
+export type { PlaylistCommand } from '../../contracts/studioDrafts.js';
 
 export class StudioDrafts {
   readonly playlists: TypedDocuments<PlaylistBody>;
@@ -119,7 +71,7 @@ export class StudioDrafts {
   }
 
   command(userId: string, expectedRevision: number, input: unknown) {
-    const parsed = commandSchema.safeParse(input);
+    const parsed = playlistCommandSchema.safeParse(input);
     if (!parsed.success) throw new WorkflowError(400, 'Invalid playlist command');
     const cmd = parsed.data;
     return this.db.transaction(() => {
@@ -152,7 +104,7 @@ export class StudioDrafts {
     if (`sha256:${createHash('sha256').update(raw).digest('hex')}` !== sourceHash) throw new WorkflowError(400, 'Import hash does not match source value');
     const source = { storageKey, sourceHash };
     let value: unknown;
-    try { value = RAW.has(storageKey) ? raw : JSON.parse(raw); } catch { throw new WorkflowError(400, 'Invalid browser value'); }
+    try { value = RAW_STRING_DRAFT_KEYS.has(storageKey) ? raw : JSON.parse(raw); } catch { throw new WorkflowError(400, 'Invalid browser value'); }
     if (storageKey === 'lireek-playQueue') {
       const body = playlistSchema.safeParse({ items: value });
       if (!body.success) throw new WorkflowError(400, 'Invalid playlist snapshot');

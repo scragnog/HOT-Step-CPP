@@ -32,37 +32,9 @@ import { requestVersion } from '../generation/resolve/resolveIntent.js';
 export const SECTION_KIND = 'builder-section';
 const MAX_VARIANTS = 16;
 
-/** POST /api/builder/projects/:id/sections/generate */
-export const generateSectionSchema = z.object({
-  idempotencyKey: z.string().min(1).max(200),
-  expectedRevision: z.number().int().min(0),
-  direction: z.enum(['first', 'append', 'prepend']),
-  label: z.string().max(200).default(''),
-  lyrics: z.string().max(20_000).default(''),
-  /** Bars need the project's BPM; seconds are used as given. */
-  length: z.union([
-    z.object({ bars: z.number().int().min(1).max(512) }),
-    z.object({ seconds: z.number().positive().max(600) }),
-  ]),
-  /** Seconds of existing audio the extension overwrites at the seam. */
-  overlap: z.number().min(0).max(120).default(4),
-  /** Extend-from (append) or connect-at (prepend) point on the song so far;
-   *  null = the very end (append) or start (prepend). */
-  clipPoint: z.number().min(0).nullable().default(null),
-  seedSectionId: z.string().nullable().default(null),
-  seedStrength: z.number().min(0).max(1).default(0.4),
-  previewMastering: z.boolean().default(false),
-  /** The browser's "Keep Models in VRAM" setting at submit. */
-  coResident: z.boolean().default(false),
-  /** The head's measured length, used only when its song row stores 0
-   *  (older repaint sections were saved that way). */
-  headDuration: z.number().min(0).optional(),
-  /** The engine the browser had active at submit; must still be active. */
-  expectedBackend: z.string().min(1),
-  /** getGlobalParams() at submit, captured like any other request. */
-  engineParams: z.record(z.string(), z.unknown()),
-});
-export type GenerateSection = z.infer<typeof generateSectionSchema>;
+// The request schema is published in contracts/songBuilder.ts.
+export { generateSectionSchema, type GenerateSection } from '../../contracts/songBuilder.js';
+import type { GenerateSection } from '../../contracts/songBuilder.js';
 
 const sectionJobSchema = z.object({
   projectId: z.string(),

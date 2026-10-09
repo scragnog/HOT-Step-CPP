@@ -17,6 +17,7 @@ import {
   getRePostProcessJob, findRePostProcessJobBySong,
 } from '../services/generation/rePostProcess.js';
 import { importTrackFile, IMPORT_EXTENSIONS } from '../services/library/importTrack.js';
+import { SONG_EDITABLE_FIELDS } from '../contracts/songs.js';
 
 const router = Router();
 
@@ -259,10 +260,7 @@ router.patch('/:id', (req, res) => {
   if (!song) { res.status(404).json({ error: 'Song not found' }); return; }
 
   const updates = req.body;
-  const allowed = ['title', 'lyrics', 'style', 'caption', 'cover_url', 'is_public',
-    'bpm', 'key_scale', 'time_signature', 'dit_model', 'cover_art_subject'];
-
-  for (const key of allowed) {
+  for (const key of SONG_EDITABLE_FIELDS) {
     if (updates[key] !== undefined) {
       const value = key === 'is_public' ? (updates[key] ? 1 : 0) : updates[key];
       getDb().prepare(`UPDATE songs SET ${key} = ? WHERE id = ?`).run(value, req.params.id);

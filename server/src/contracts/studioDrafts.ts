@@ -1,5 +1,6 @@
 // Typed document contracts for ordered playlist snapshots and studio drafts.
 import { z } from 'zod/v4';
+import type { TypedDocument } from './workflow.js';
 
 export const playlistItemSchema = z.object({
   id: z.string().min(1).max(200),
@@ -48,3 +49,30 @@ export const importDraftSchema = z.object({
   expectedRevision: z.number().int().nonnegative(),
   resolution: z.enum(['keep-both', 'replace']).optional(),
 });
+
+/** POST /api/studio-drafts/playlist/commands `command`. `add` ignores an id
+ *  already present; `remove` and `update` ignore an unknown id; `reorder`
+ *  must name every current item exactly once. */
+export const playlistCommandSchema = z.discriminatedUnion('operation', [
+  z.object({ operation: z.literal('add'), item: playlistSchema.shape.items.element }),
+  z.object({ operation: z.literal('remove'), id: z.string().min(1) }),
+  z.object({ operation: z.literal('clear') }),
+  z.object({ operation: z.literal('reorder'), ids: z.array(z.string().min(1)) }),
+  z.object({ operation: z.literal('update'), id: z.string().min(1), patch: z.record(z.string(), z.unknown()) }),
+]);
+export type PlaylistCommand = z.infer<typeof playlistCommandSchema>;
+
+// ── Responses of /api/studio-drafts (docs/dev/frontend-library.md) ──
+// Documents are TypedDocument<T> (contracts/workflow.ts): { id, kind,
+// revision, schemaVersion, provenance, body, createdAt, updatedAt }.
+/** GET /playlist (null before the first command) and POST /playlist/commands. */
+export interface PlaylistResponse { document: TypedDocument<PlaylistBody> | null }
+/** GET /drafts[?studio=]. */
+export interface StudioDraftList { documents: Array<TypedDocument<StudioDraftBody>> }
+/** POST /drafts (201) and PUT /drafts/:id. */
+export interface StudioDraftResponse { document: TypedDocument<StudioDraftBody> }
+/** GET /drafts/:id. `sourceError` is set when the draft's source asset is gone:
+ *  the draft still loads, and the user reuploads the source. */
+export interface StudioDraftRead extends StudioDraftResponse { sourceError: string | null }
+/** A refused change. `currentRevision` comes with a stale revision (409). */
+export interface StudioDraftError { error: string; currentRevision?: number }
