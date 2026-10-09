@@ -43,7 +43,8 @@ import { requestVersion } from '../generation/resolve/resolveIntent.js';
 
 const TERMINAL: WorkflowJobStatus[] = ['succeeded', 'failed', 'cancelled', 'interrupted'];
 const AUDIO_TERMINAL = new Set(['succeeded', 'failed', 'cancelled', 'interrupted']);
-const MAX_INPUT_BYTES = 1_000_000;
+// A 200-item lyric batch with a full profile per item reaches ~12 MB.
+const MAX_INPUT_BYTES = 16_000_000;
 const MAX_EVENT_BYTES = 64_000;
 const DEFAULT_TIMEOUT_MS = 30 * 60_000;
 

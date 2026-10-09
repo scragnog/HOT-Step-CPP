@@ -51,6 +51,7 @@ router.post('/workflow-batches', (req: Request, res: Response) => {
     const out = workflowJobs().submit({ kind: 'lyric-batch', idempotencyKey: key, input }, userId);
     res.status(out.created ? 201 : 200).json(out);
   } catch (error: any) {
+    console.error(`[Lireek] Lyric batch rejected: ${error instanceof Error ? error.message : String(error)}`);
     res.status(error?.status === 409 ? 409 : 400).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });

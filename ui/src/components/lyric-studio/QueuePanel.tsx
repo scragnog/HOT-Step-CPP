@@ -1151,7 +1151,10 @@ export const QueuePanel: React.FC<QueuePanelProps> = ({
                     {item.status === 'running' && <Loader2 className="w-3 h-3 animate-spin text-pink-400" />}
                     {item.status === 'done' && <CheckCircle className="w-3 h-3 text-green-400" />}
                     {item.status === 'error' && <AlertCircle className="w-3 h-3 text-red-400" />}
-                    <span className="text-zinc-700 dark:text-zinc-300 flex-1 truncate">{item.label}</span>
+                    <span className="text-zinc-700 dark:text-zinc-300 flex-1 truncate" title={item.error}>
+                      {item.label}
+                      {item.error && <span className="text-red-400"> · {item.error}</span>}
+                    </span>
                     {item.count && item.count > 1 && <span className="text-[10px] text-zinc-500">{item.countCompleted || 0}/{item.count}</span>}
                     {item.status === 'pending' && (
                       <button onClick={() => removeFromQueue(item.id)} className="p-0.5 rounded hover:bg-red-500/20 text-zinc-500 hover:text-red-400 transition-colors">
