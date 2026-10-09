@@ -86,11 +86,11 @@ its three values are an existing browser decision this documentation does not ch
 client does not migrate another client's queue, and nothing here is a contract to add a
 fourth value or move the default.
 
-Both submission paths are exercised with fake execution in the reference client
-(`client.test.ts`'s Create group for the browser/legacy path, `client.library.test.ts`'s
-import/export group's fixtures for the durable path's request shape). Node cannot prove
-which `localStorage` value a real browser would read or write; that remains a UI-side
-behavioural gate, not something an HTTP-only client can demonstrate for itself.
+Both submission paths are exercised with fake execution in `client.test.ts`: the legacy
+direct-submit path and the resolved durable-queue path (`client.test.ts:58`, resolve ->
+`/api/audio-queue` -> a finished generation). Node cannot prove which `localStorage` value a
+real browser would read or write; that remains a UI-side behavioural gate, not something an
+HTTP-only client can demonstrate for itself.
 
 ## Import and export
 
@@ -107,7 +107,7 @@ Every audited workflow group, its contract page and its reference-client coverag
 |---|---|---|
 | Create | [Create's control dictionary](frontend-create-controls.md), [Generate request](api-contracts.md#generate-request) | `client.test.ts` |
 | Insta-Gen | [Studio workflows](frontend-studios.md#insta-gen-insta-preview-insta-direct-insta-approve) | `client.test.ts` |
-| Lyric Studio | [Studio workflows](frontend-studios.md#lyric-studio-batch-lyric-batch) | `client.test.ts` |
+| Lyric Studio | [Studio workflows](frontend-studios.md#lyric-studio-batch-lyric-batch) | `client.lyric.test.ts` (partial — see "What this page cannot prove") |
 | Cover | [Studio workflows](frontend-studios.md#cover-cover-open-cover-caption-cover-transcribe-cover-render) | `client.test.ts` (open only), `client.cover.test.ts` (full chain) |
 | Repaint | [Studio workflows](frontend-studios.md#repaint-and-lego-layer-repaint-render-layer-render) | `client.test.ts` |
 | Stem separation | [Studio workflows](frontend-studios.md#stem-separation) | `client.test.ts` |
@@ -129,6 +129,13 @@ against the real training-job and workflow-job persistence, not simulated.
 
 ## What this page cannot prove
 
+- **Lyric Studio's generate, refine and fetch steps.** `generate`/`refine` call a real LLM
+  provider and `fetch` calls the real Genius API, neither with an injectable seam
+  (`lyricWorkflow.ts`). `render` needs a Generation row that in production only exists after
+  a successful generate/refine, so it is blocked transitively. `client.lyric.test.ts` proves
+  submission, validation, per-item error ordering and cancel/retry for real, plus one real
+  execution failure (`profile` against an unknown provider, which fails before any network
+  call) — not a successful generate, refine, fetch or render.
 - **Browser-only behaviour.** Which `localStorage` value a real browser reads, writes or
   migrates; crossfade/gapless playback; device-capture recording. These need a browser, not
   an HTTP client.

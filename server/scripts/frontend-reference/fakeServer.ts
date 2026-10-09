@@ -152,6 +152,7 @@ export async function startFakeServer(options: { dataDir?: string } = {}): Promi
   // /api/workflows/jobs, never /api/inspire or /api/yue2-cover directly.
   const inspireRoutes = (await import('../../src/routes/inspire.js')).default;
   const yue2CoverRoutes = (await import('../../src/routes/yue2Cover.js')).default;
+  const lireekRoutes = (await import('../../src/routes/lireek.js')).default;
 
   const app = express();
   app.use(express.json({ limit: '50mb' }));
@@ -186,6 +187,13 @@ export async function startFakeServer(options: { dataDir?: string } = {}): Promi
   app.use('/api/download', downloadRoutes);
   app.use('/api/inspire', inspireRoutes);
   app.use('/api/yue2-cover', yue2CoverRoutes);
+  // Lyric Studio batches (lyric-batch) land here. generate/refine (llmService)
+  // and fetch (geniusService) reach a real LLM provider or the real Genius
+  // API with no deps parameter to inject a fixture — see client.lyric.test.ts's
+  // header for the exact blocked call sites and proposed seam. profile is
+  // partially real: buildProfile() throws on an unknown provider name before
+  // any provider call, so that failure path is exercised for real.
+  app.use('/api/lireek', lireekRoutes);
   // Mounted at '/api', not '/api/backends' — this router spells its own full
   // sub-paths (/backends, /capabilities, ...), same as index.ts:142.
   app.use('/api', backendsRoutes);

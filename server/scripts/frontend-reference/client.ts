@@ -478,4 +478,24 @@ export class ReferenceClient {
     const qs = backend ? `?backend=${encodeURIComponent(backend)}` : '';
     return asJson(await fetch(`${this.origin}/api/capabilities${qs}`));
   }
+
+  // ── Lyric Studio (/api/lireek) ──────────────────────────────────────────
+  // No token needed (crudRoutes.ts), unlike the two workflow-capture routes
+  // below.
+  async createLyricsSet(body: { artist_name: string; album?: string | null; songs?: unknown[] }): Promise<{ lyrics_set: Record<string, unknown> }> {
+    return asJson(await fetch(`${this.origin}/api/lireek/lyrics-sets/create`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }));
+  }
+
+  /** Captures `items` server-side into a lyric-batch workflow job
+   *  (lyricWorkflow.ts's captureLyricItems: profile/generate/refine/fetch
+   *  requests, each resolved against the library or turned into a
+   *  preflight-error item) and submits it. */
+  async submitLyricBatch(items: Array<Record<string, unknown>>, idempotencyKey: string = randomUUID()): Promise<WorkflowJob> {
+    const body = await asJson<{ job: WorkflowJob }>(await fetch(`${this.origin}/api/lireek/workflow-batches`, {
+      method: 'POST', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ items, idempotencyKey }),
+    }));
+    return body.job;
+  }
 }
