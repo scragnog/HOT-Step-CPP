@@ -129,13 +129,14 @@ against the real training-job and workflow-job persistence, not simulated.
 
 ## What this page cannot prove
 
-- **Lyric Studio's generate, refine and fetch steps.** `generate`/`refine` call a real LLM
-  provider and `fetch` calls the real Genius API, neither with an injectable seam
-  (`lyricWorkflow.ts`). `render` needs a Generation row that in production only exists after
-  a successful generate/refine, so it is blocked transitively. `client.lyric.test.ts` proves
-  submission, validation, per-item error ordering and cancel/retry for real, plus one real
-  execution failure (`profile` against an unknown provider, which fails before any network
-  call) — not a successful generate, refine, fetch or render.
+- **Lyric Studio's generate, refine and fetch steps, plus retry and stale-revision.**
+  `generate`/`refine` call a real LLM provider and `fetch` calls the real Genius API, neither
+  with an injectable seam (`lyricWorkflow.ts`). `render` needs a Generation row that in
+  production only exists after a successful generate/refine, so it is blocked transitively,
+  and so is a successful `profile`. `client.lyric.test.ts` proves submission, validation,
+  per-item error ordering, idempotency conflict, and that cancelling an already-finished or
+  unknown job is refused (409/404) — not a successful generate, refine, fetch, render, or
+  profile, and not retry or stale-revision handling, which this harness has no test for.
 - **Browser-only behaviour.** Which `localStorage` value a real browser reads, writes or
   migrates; crossfade/gapless playback; device-capture recording. These need a browser, not
   an HTTP client.
