@@ -391,6 +391,15 @@ function laneFor(job: TrainingJob): 'gpu' | 'net' {
   }
 }
 
+/** Runners that replace a job kind's real one. Only an isolated harness sets
+ *  them (the frontend reference suite, which must never spawn a trainer);
+ *  production never calls overrideTrainingRunner, so every real runner
+ *  stands. A replacement runs on the same lane, after the same route checks. */
+const runnerOverrides = new Map<TrainingJobKind, (j: TrainingJob) => Promise<void>>();
+export function overrideTrainingRunner(kind: TrainingJobKind, run: ((j: TrainingJob) => Promise<void>) | null): void {
+  if (run) runnerOverrides.set(kind, run); else runnerOverrides.delete(kind);
+}
+
 /**
  * Append to this job's lane. The two lanes run concurrently; each is serial
  * internally. Per-dataset exclusivity is unaffected — the route layer still
@@ -398,6 +407,7 @@ function laneFor(job: TrainingJob): 'gpu' | 'net' {
  */
 export function enqueue(job: TrainingJob, run: (j: TrainingJob) => Promise<void>): void {
   const swallow = () => { /* runners handle their own errors */ };
+  run = runnerOverrides.get(job.kind) ?? run;
   if (laneFor(job) === 'gpu') {
     gpuTail = gpuTail.then(() => run(job)).catch(swallow);
   } else {
