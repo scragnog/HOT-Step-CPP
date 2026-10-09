@@ -47,13 +47,23 @@ test('stemExtractRequestSchema: sourceAudioUrl and a non-empty tracks array are 
   // A non-string track entry is not a schema rejection — it reaches the
   // route's own VALID_TRACKS filter, same as it always did.
   assert.equal(stemExtractRequestSchema.safeParse({ sourceAudioUrl: '/references/a.wav', tracks: ['vocals', 5] }).success, true);
+  // Old guard was a bare `if (!sourceAudioUrl)` — any truthy value passes,
+  // not just a non-empty string.
+  for (const truthy of [1, true, {}, [1]]) {
+    assert.equal(stemExtractRequestSchema.safeParse({ sourceAudioUrl: truthy, tracks: ['vocals'] }).success, true, JSON.stringify(truthy));
+  }
+  for (const falsy of [0, false, '', null, undefined]) {
+    assert.equal(stemExtractRequestSchema.safeParse({ sourceAudioUrl: falsy, tracks: ['vocals'] }).success, false, JSON.stringify(falsy));
+  }
 });
 
-test('stemSupersepRequestSchema: sourceAudioUrl required, sourceFileName/level pass through including null', () => {
+test('stemSupersepRequestSchema: sourceAudioUrl required (truthy, not string), sourceFileName/level pass through including null', () => {
   assert.equal(stemSupersepRequestSchema.safeParse({ sourceAudioUrl: '/references/a.wav' }).success, true);
   assert.equal(stemSupersepRequestSchema.safeParse({ sourceAudioUrl: '/references/a.wav', level: 2 }).success, true);
   assert.equal(stemSupersepRequestSchema.safeParse({ sourceAudioUrl: '/references/a.wav', sourceFileName: null, level: null }).success, true);
   assert.equal(stemSupersepRequestSchema.safeParse({}).success, false);
+  assert.equal(stemSupersepRequestSchema.safeParse({ sourceAudioUrl: 1 }).success, true, 'old guard was truthiness, not a string type check');
+  assert.equal(stemSupersepRequestSchema.safeParse({ sourceAudioUrl: 0 }).success, false);
 });
 
 test('supersepSeparateRequestSchema: audioUrl required', () => {
@@ -89,6 +99,11 @@ test('POST /extract: null optional fields and a non-string track entry behave ex
   });
   assert.equal(ok.status, 200);
   assert.match(ok.body.id, /^[0-9a-f-]{36}$/);
+  // A truthy non-string sourceAudioUrl is accepted by the old guard; with an
+  // empty tracks array this must still report the tracks error, matching
+  // the old code's check order (sourceAudioUrl first, then tracks).
+  const truthySource = await post('/api/stem-studio/extract', { sourceAudioUrl: 1, tracks: [] });
+  assert.deepEqual(truthySource.body, { error: 'tracks must be a non-empty array' });
   // A non-string entry fails the VALID_TRACKS filter (old error), not the schema.
   const mixed = await post('/api/stem-studio/extract', { sourceAudioUrl: '/references/a.wav', tracks: ['vocals', 5] });
   assert.deepEqual(mixed.body, { error: 'Invalid track names: 5' });

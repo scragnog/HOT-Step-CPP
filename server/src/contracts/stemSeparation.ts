@@ -10,6 +10,13 @@
 
 import { z } from 'zod/v4';
 
+/** Both Stem Studio handlers check `sourceAudioUrl` with a bare `if
+ *  (!sourceAudioUrl)` — any truthy value passes, including a number or an
+ *  object, not just a non-empty string. `supersepSeparateRequestSchema`
+ *  below is different: that route's own guard is `!audioUrl || typeof
+ *  audioUrl !== 'string'`, so it genuinely requires a string. */
+const truthyRequired = z.unknown().refine(Boolean, { message: 'required' });
+
 /** The twelve DiT extraction tracks `/extract` and SuperSep's in-app track
  *  list are drawn from (also used by the `layer-render` workflow kind in
  *  studioWorkflows.ts). */
@@ -31,7 +38,7 @@ export const STEM_TRACK_NAMES = [
  *  and every other falsy value are accepted exactly like an absent key —
  *  this schema does not type-check them beyond that. */
 export const stemExtractRequestSchema = z.object({
-  sourceAudioUrl: z.string().min(1),
+  sourceAudioUrl: truthyRequired,
   sourceFileName: z.unknown(),
   tracks: z.array(z.unknown()).min(1),
   style: z.unknown(),
@@ -47,7 +54,7 @@ export type StemExtractRequest = z.infer<typeof stemExtractRequestSchema>;
  *  flows through `String()`; a non-numeric result becomes `NaN`, not a
  *  validation error. Returns `{ id }`, same polling contract as `/extract`. */
 export const stemSupersepRequestSchema = z.object({
-  sourceAudioUrl: z.string().min(1),
+  sourceAudioUrl: truthyRequired,
   sourceFileName: z.unknown(),
   level: z.unknown(),
 });
