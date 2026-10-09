@@ -18,6 +18,7 @@
 
 import express, { type Express } from 'express';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import type { Server } from 'node:http';
@@ -49,6 +50,17 @@ export async function startFakeServer(): Promise<FakeServer> {
 
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'frontend-reference-'));
   process.env.DATA_DIR = dataDir;
+  // The server's own port, chosen now: some services call Node's routes over
+  // loopback at config.server.port (the YuE2 preparation pipeline's stages,
+  // yue2PreparationPipeline.ts), and config reads SERVER_PORT once, at import.
+  // The app listens on exactly this port below.
+  const serverPort = await new Promise<number>((resolve, reject) => {
+    const probe = net.createServer().once('error', reject).listen(0, '127.0.0.1', () => {
+      const { port } = probe.address() as { port: number };
+      probe.close(() => resolve(port));
+    });
+  });
+  process.env.SERVER_PORT = String(serverPort);
   process.env.ACESTEPCPP_HOST = engineUrl.hostname;
   process.env.ACESTEPCPP_PORT = engineUrl.port;
 
@@ -168,7 +180,7 @@ export async function startFakeServer(): Promise<FakeServer> {
   registerRepaintLayerWorkflows();
 
   const server: Server = await new Promise(resolve => {
-    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+    const s = app.listen(serverPort, '127.0.0.1', () => resolve(s));
   });
   const port = (server.address() as { port: number }).port;
   const origin = `http://127.0.0.1:${port}`;
