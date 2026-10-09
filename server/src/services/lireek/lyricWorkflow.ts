@@ -120,6 +120,33 @@ export async function captureRenderItems(intents: WrittenSongIntent[]): Promise<
   return lyricBatchInput.parse({ items });
 }
 
+/** The calls a lyric batch makes outside Node: Genius, the profiler's LLM
+ *  pass and the lyric LLM. */
+export interface LyricWorkflowDeps {
+  fetchLyrics: typeof genius.fetchLyrics;
+  getArtistImageUrl: typeof genius.getArtistImageUrl;
+  getAlbumImageUrl: typeof genius.getAlbumImageUrl;
+  buildProfile: typeof profiler.buildProfile;
+  generateLyricsStreaming: typeof llm.generateLyricsStreaming;
+  refineLyricsStreaming: typeof llm.refineLyricsStreaming;
+}
+/** Overrides read each time a step runs. Only an isolated harness sets them
+ *  (the frontend reference suite, which must never reach Genius or an LLM);
+ *  production never calls this, so every real call stands. Returns the
+ *  function that clears them. */
+let runtimeOverrides: Partial<LyricWorkflowDeps> = {};
+export function overrideLyricWorkflowDeps(overrides: Partial<LyricWorkflowDeps>): () => void {
+  runtimeOverrides = overrides;
+  return () => { runtimeOverrides = {}; };
+}
+const defaultDeps: LyricWorkflowDeps = {
+  fetchLyrics: genius.fetchLyrics, getArtistImageUrl: genius.getArtistImageUrl, getAlbumImageUrl: genius.getAlbumImageUrl,
+  buildProfile: profiler.buildProfile, generateLyricsStreaming: llm.generateLyricsStreaming,
+  refineLyricsStreaming: llm.refineLyricsStreaming,
+};
+const dep = <K extends keyof LyricWorkflowDeps>(key: K): LyricWorkflowDeps[K] =>
+  (runtimeOverrides[key] ?? defaultDeps[key]) as LyricWorkflowDeps[K];
+
 async function queueRender(item: z.infer<typeof render>, ctx: WorkflowContext<LyricBatchInput>, index: number): Promise<AudioIntentItem> {
   const engine = item.intent.engine!;
   const data = await loadWrittenSongData(item.intent, engine);
@@ -151,13 +178,13 @@ async function execute(item: Item, ctx: WorkflowContext<LyricBatchInput>, index:
     });
   }
   if (item.type === 'fetch') {
-    const result = await genius.fetchLyrics(item.artist, item.album || null, item.maxSongs);
+    const result = await dep('fetchLyrics')(item.artist, item.album || null, item.maxSongs);
     ctx.throwIfCancelled();
     let image: string | null = null;
     let artistImage: string | null = null;
-    try { artistImage = await genius.getArtistImageUrl(result.artist); } catch { /* optional art */ }
+    try { artistImage = await dep('getArtistImageUrl')(result.artist); } catch { /* optional art */ }
     if (result.album) {
-      try { image = await genius.getAlbumImageUrl(result.album, result.artist); } catch { /* optional art */ }
+      try { image = await dep('getAlbumImageUrl')(result.album, result.artist); } catch { /* optional art */ }
     }
     ctx.throwIfCancelled();
     return saveItem(ctx.jobId, index, () => {
@@ -175,7 +202,7 @@ async function execute(item: Item, ctx: WorkflowContext<LyricBatchInput>, index:
   const chunk = (text: string) => ctx.emit('chunk', { text });
   const phase = (text: string) => ctx.emit('phase', { phase: text });
   if (item.type === 'profile') {
-    const data = await profiler.buildProfile(item.artist, null, item.songs, item.provider, item.model, phase, chunk);
+    const data = await dep('buildProfile')(item.artist, null, item.songs, item.provider, item.model, phase, chunk);
     ctx.throwIfCancelled();
     if (!sourceUnchanged()) throw new Error('Source changed during profile build');
     return saveItem(ctx.jobId, index, () => {
@@ -186,7 +213,7 @@ async function execute(item: Item, ctx: WorkflowContext<LyricBatchInput>, index:
   if (item.type === 'generate') {
     const h = item.history;
     llm.resetSkipThinking();
-    const result = await llm.generateLyricsStreaming(item.profileData as LyricsProfile, item.provider, item.model, item.extraInstructions, h.usedSubjects, h.usedBpms, h.usedKeys, h.usedTitles, h.usedDurations, chunk, phase, item.userSubject, item.noThink ? { noThink: true } : undefined);
+    const result = await dep('generateLyricsStreaming')(item.profileData as LyricsProfile, item.provider, item.model, item.extraInstructions, h.usedSubjects, h.usedBpms, h.usedKeys, h.usedTitles, h.usedDurations, chunk, phase, item.userSubject, item.noThink ? { noThink: true } : undefined);
     ctx.throwIfCancelled();
     if (!sourceUnchanged()) throw new Error('Source changed during generation');
     return saveItem(ctx.jobId, index, () => {
@@ -196,7 +223,7 @@ async function execute(item: Item, ctx: WorkflowContext<LyricBatchInput>, index:
   }
   const s = item.source;
   llm.resetSkipThinking();
-  const result = await llm.refineLyricsStreaming(s.lyrics, item.artist, s.title, item.provider, item.model, item.profileData as LyricsProfile | undefined, chunk);
+  const result = await dep('refineLyricsStreaming')(s.lyrics, item.artist, s.title, item.provider, item.model, item.profileData as LyricsProfile | undefined, chunk);
   ctx.throwIfCancelled();
   if (!sourceUnchanged()) throw new Error('Source changed during refinement');
   return saveItem(ctx.jobId, index, () => {
