@@ -163,6 +163,9 @@ export function createJob(
     controller: new AbortController(),
   };
   jobs.set(job.id, job);
+  // On disk from the start, not only once it ends: a job the server dies
+  // during must still be there for recoverStaleJobs to mark failed.
+  persistMeta(job);
   return job;
 }
 
@@ -261,6 +264,9 @@ export function pushEvent(job: TrainingJob, ev: TrainingStreamEvent): void {
 
 export function emitJob(job: TrainingJob): void {
   pushEvent(job, { type: 'job', job: toSummary(job) });
+  // Keep an active job's meta current (running, startedAt, phase); finishJob
+  // and cancelJob write the final one themselves.
+  if (job.status === 'queued' || job.status === 'running') persistMeta(job);
 }
 
 export function emitProgress(job: TrainingJob): void {
