@@ -83,7 +83,20 @@ export function installNetworkGuard(): void {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     let origin: string | null = null;
-    try { origin = new URL(raw).origin; } catch { /* relative URL: same-origin, allowed */ }
+    try {
+      origin = new URL(raw).origin;
+    } catch {
+      // Not an absolute URL — could be a legitimate relative path (resolves
+      // against some base, so same-origin and allowed) or genuinely
+      // malformed (reaches native fetch, which rejects it anyway, but with
+      // no violation recorded — Reviewer's 7f-1 nit). Tell those apart by
+      // trying the relative parse explicitly rather than assuming "not
+      // absolute" means "relative".
+      try { new URL(raw, 'http://127.0.0.1'); } catch {
+        violations.push(`fetch(malformed: ${raw})`);
+        throw new Error(`[safety-guard] fetch to malformed URL '${raw}' blocked`);
+      }
+    }
     if (origin && !allowedOrigins.has(origin)) {
       violations.push(`fetch(${raw})`);
       throw new Error(`[safety-guard] fetch to '${raw}' blocked — only ${[...allowedOrigins].join(', ') || '(nothing yet)'} are allowed in this fixture`);

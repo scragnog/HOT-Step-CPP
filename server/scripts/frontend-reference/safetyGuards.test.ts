@@ -62,6 +62,36 @@ test('Network guard: a blocked fetch to an unlisted origin still records a viola
   assert.match(violations[0], /fetch/);
 });
 
+test('Network guard: a malformed URL is rejected and recorded, not left to native fetch', async () => {
+  // Fails both an absolute parse and a relative-against-base parse (an
+  // unterminated IPv6 literal) — genuinely malformed, not just a relative
+  // path. A string that only fails the absolute parse (most relative paths)
+  // must NOT hit this branch; that's the same-origin case below.
+  let caught = false;
+  try { await fetch('http://[::1'); } catch { caught = true; }
+  assert.equal(caught, true);
+  assert.equal(violations.length, 1);
+  assert.match(violations[0], /malformed/);
+});
+
+test('Network guard: a relative path is not mistaken for malformed', async () => {
+  const server = http.createServer((_req, res) => res.end('ok')).listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  const port = (server.address() as { port: number }).port;
+  const origin = `http://127.0.0.1:${port}`;
+  allowedOrigins.add(origin);
+  try {
+    // A truly relative fetch has no origin to resolve against in Node (no
+    // document base URL) — same-origin-shaped strings here still need an
+    // origin; this just proves one isn't wrongly flagged as malformed.
+    await assert.rejects(() => fetch('/just-a-path'), /Failed to parse URL/);
+    assert.equal(violations.length, 0);
+  } finally {
+    allowedOrigins.delete(origin);
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('Network guard: a real local service on an unlisted 127.0.0.1 port is blocked, not just a different hostname', async () => {
   const server = http.createServer((_req, res) => res.end('not a fixture')).listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
