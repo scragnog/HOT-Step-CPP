@@ -190,6 +190,28 @@ tool. After editing either
 MCP server's source, reconnect it in the client: same rule as any MCP
 server, a connected session keeps its old tool set until reconnected.
 
+## Delegating to Codex
+
+When the user asks to hand work to Codex (the `codex` plugin: `codex:rescue`,
+`/codex:rescue`), Claude picks the model and effort by tier and states the
+choice in one line before sending. These rules count as an explicit request, so
+pass `--model` and `--effort` every time. A model or effort the user names wins.
+
+| Tier | Typical work | Model | Effort |
+|---|---|---|---|
+| Mechanical | Renames, doc fixes, one-file edits, "find and report" | `gpt-6-luna` | `low` |
+| Standard | Bug fix with a clear repro, a server/UI feature, tests, a contained refactor | `gpt-6.1-sol` | `medium` |
+| Hard | C++ engine, GGML/CUDA, trainers, concurrency, cross-tier bugs with no repro | `gpt-6-astra` | `high` |
+| Second opinion | Claude is stuck, design review, adversarial review, root cause after a failed fix | `gpt-6-astra` | `xhigh` |
+
+- Tier by the hardest part of the task, not its size. Unsure → Standard.
+- Effort is `low` to `xhigh` only. The plugin rejects `max` and `ultra`, and these models don't take `none`/`minimal`.
+- A failed or wrong result goes up one tier. Never retry at the same tier, never go down.
+- `--write` only for implementation. Investigation and review stay read-only.
+- `--background` for Hard and Second opinion.
+- Codex works under this file's rules: `dev-rebuild.bat` for engine changes, master only, explicit-path staging, no push.
+- "Model is not supported when using Codex with a ChatGPT account" on a new model usually means the npm CLI is stale: `npm install -g @openai/codex@latest`. Updating the Codex desktop app does not update it.
+
 ## Discord transcripts
 
 The MM3 working group lives in Discord, and a lot of project-relevant decisions
