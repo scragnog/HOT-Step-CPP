@@ -19,23 +19,25 @@ test('decideQueueOwnerAction: server and browser are terminal, regardless of pen
   assert.equal(decideQueueOwnerAction('browser', false), 'none');
 });
 
-test('decideQueueOwnerAction: a migration interrupted by reload is retried, not left stuck', () => {
+test('decideQueueOwnerAction: a migration interrupted by reload always retries, regardless of pending work', () => {
   // Reload after OWNER_KEY is set to 'migrating' used to leave resumeQueue()
-  // returning early forever. It must resolve to a real decision instead.
-  assert.equal(decideQueueOwnerAction('migrating', true), 'migrate');
-  assert.equal(decideQueueOwnerAction('migrating', false), 'set-server');
+  // returning early forever, or (an earlier fix) fall back to 'browser' and
+  // risk resubmitting work the server might already own. It must always
+  // retry instead — never silently decide 'browser' is safe again.
+  assert.equal(decideQueueOwnerAction('migrating', true), 'retry');
+  assert.equal(decideQueueOwnerAction('migrating', false), 'retry');
 });
 
 test('shouldShowMigrationBanner: hidden for a successful/silent outcome', () => {
-  assert.equal(shouldShowMigrationBanner(true, true, 'server', 5), false, 'server-owned, even with history, stays silent');
-  assert.equal(shouldShowMigrationBanner(true, true, 'browser', 0), false, 'nothing pending, nothing to show');
+  assert.equal(shouldShowMigrationBanner(true, true, 'server'), false, 'server-owned stays silent');
+  assert.equal(shouldShowMigrationBanner(true, true, 'browser'), false, 'browser-owned (never attempted, or rolled back) stays silent');
 });
 
 test('shouldShowMigrationBanner: hidden before the owner decision has landed, or with no token', () => {
-  assert.equal(shouldShowMigrationBanner(true, false, 'browser', 3), false, 'decision still in flight — no manual-prompt flash');
-  assert.equal(shouldShowMigrationBanner(false, true, 'browser', 3), false);
+  assert.equal(shouldShowMigrationBanner(true, false, 'migrating'), false, 'decision still in flight — no manual-prompt flash');
+  assert.equal(shouldShowMigrationBanner(false, true, 'migrating'), false);
 });
 
-test('shouldShowMigrationBanner: shown only once a failed migration leaves pending work stuck browser-side', () => {
-  assert.equal(shouldShowMigrationBanner(true, true, 'browser', 3), true);
+test('shouldShowMigrationBanner: shown only once stuck in migrating — the silent retry on load already failed', () => {
+  assert.equal(shouldShowMigrationBanner(true, true, 'migrating'), true);
 });

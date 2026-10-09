@@ -5,23 +5,28 @@
 
 export type QueueOwner = 'browser' | 'migrating' | 'server';
 
-export type OwnerDecisionAction = 'none' | 'set-server' | 'migrate';
+export type OwnerDecisionAction = 'none' | 'set-server' | 'migrate' | 'retry';
 
 /** What to do with a browser's audio queue ownership on load.
  *  - `'server'`/`'browser'` are terminal: already decided, nothing to do.
- *  - Anything else — a missing/unrecognised key (never decided) OR
- *    `'migrating'` (an attempt interrupted by reload; whoever was running it
- *    is gone, so it's safe to retry) — resolves fresh: no pending work goes
- *    straight to server-owned, pending work migrates. */
+ *  - `'migrating'` means an attempt was already made and may have reached
+ *    the server — per the rule that once an import has started the browser
+ *    executor never runs again on its own, this always retries (replaying
+ *    the persisted payload is idempotent), never reverts to `'browser'`.
+ *  - A missing/unrecognised key (never decided): no pending work goes
+ *    straight to server-owned, pending work migrates fresh. */
 export function decideQueueOwnerAction(raw: string | null, hasPending: boolean): OwnerDecisionAction {
   if (raw === 'server' || raw === 'browser') return 'none';
+  if (raw === 'migrating') return 'retry';
   return hasPending ? 'migrate' : 'set-server';
 }
 
 /** Pure visibility rule for AudioQueueMigrationBanner: silent/successful
  *  ownership (server-owned, or browser-owned with nothing pending) never
- *  shows anything. This only appears when the automatic migration actually
- *  failed and left pending work stuck browser-side. */
-export function shouldShowMigrationBanner(hasToken: boolean, ready: boolean, owner: QueueOwner, count: number): boolean {
-  return hasToken && ready && owner === 'browser' && count > 0;
+ *  shows anything. The only state needing the user's attention is a stuck
+ *  `'migrating'` — an attempt that's already failed once (the silent retry
+ *  on load didn't resolve it), where only a manual Retry or an explicit
+ *  rollback can move it forward. */
+export function shouldShowMigrationBanner(hasToken: boolean, ready: boolean, owner: QueueOwner): boolean {
+  return hasToken && ready && owner === 'migrating';
 }

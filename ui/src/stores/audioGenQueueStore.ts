@@ -243,8 +243,9 @@ const IDB_NAME = 'lireek-queue-store';
 const IDB_STORE = 'queue';
 const IDB_KEY = 'state';
 const LS_KEY = 'lireek-audio-gen-queue'; // legacy localStorage key for migration
-const OWNER_KEY = 'lireek-audio-queue-owner-v1';
-const BACKUP_KEY = 'server-migration-backup-v1';
+export const OWNER_KEY = 'lireek-audio-queue-owner-v1';
+export const BACKUP_KEY = 'server-migration-backup-v1';
+export const PENDING_IMPORT_KEY = `${BACKUP_KEY}:pending-import`; // the exact resolved import request, persisted before the POST so a reload can replay it verbatim
 type QueueOwner = 'browser' | 'migrating' | 'server';
 function queueOwner(): QueueOwner {
   const value = localStorage.getItem(OWNER_KEY);
@@ -463,6 +464,36 @@ function writtenSongIntentFor(item: AudioQueueItem): WrittenSongIntent {
   };
 }
 
+/** Finished items are already reflected in the library; nothing needs to
+ *  re-run them, so skip importing them into the live server queue. */
+async function _resolveImportItems(backup: QueueBackup, token: string): Promise<ImportAudioQueue['items']> {
+  const items: ImportAudioQueue['items'] = [];
+  for (const item of backupItems(backup).filter(i => i.status !== 'succeeded' && i.status !== 'failed')) {
+    items.push({
+      legacyId: item.id,
+      request: await resolvedRequestForImport(item, token),
+      meta: { view: item }, status: item.status, jobId: item.jobId,
+      error: item.error,
+    });
+  }
+  return items;
+}
+
+/** POSTs an already-resolved, already-persisted import payload. Only called
+ *  once OWNER_KEY is `'migrating'` and `PENDING_IMPORT_KEY` holds this exact
+ *  payload — on failure this deliberately does NOT revert OWNER_KEY. Once an
+ *  import has started it may already have reached the server, so the
+ *  browser executor stays fenced until an explicit retry or rollback
+ *  resolves it (never a silent fall back to running locally again). */
+async function _submitImport(token: string, payload: ImportAudioQueue): Promise<Awaited<ReturnType<typeof audioQueueApi.importLegacy>>> {
+  const receipt = await audioQueueApi.importLegacy(token, payload);
+  await _idbSet(`${BACKUP_KEY}:receipt`, receipt);
+  localStorage.setItem(OWNER_KEY, 'server');
+  _lastToken = token;
+  _startServerProjection(token);
+  return receipt;
+}
+
 /** Explicit handoff. Browser originals are retained; no server item can run
  * until the backup is saved, read back, and the browser executor is frozen. */
 export async function migrateAudioQueue(token: string, choice: 'hold' | 'resume' | 'discard' = 'hold', download = true): Promise<{
@@ -476,28 +507,35 @@ export async function migrateAudioQueue(token: string, choice: 'hold' | 'resume'
   const backup = await exportQueueBackup(migrationStore());
   if (download) downloadQueueExport(`audio-queue-backup-${backup.id}.json`, backup);
   localStorage.setItem(OWNER_KEY, 'migrating');
-  try {
-    const items: ImportAudioQueue['items'] = [];
-    // Finished items are already reflected in the library; nothing needs to
-    // re-run them, so skip importing them into the live server queue.
-    for (const item of backupItems(backup).filter(i => i.status !== 'succeeded' && i.status !== 'failed')) {
-      items.push({
-        legacyId: item.id,
-        request: await resolvedRequestForImport(item, token),
-        meta: { view: item }, status: item.status, jobId: item.jobId,
-        error: item.error,
-      });
-    }
-    const receipt = await audioQueueApi.importLegacy(token, { backupId: backup.id, choice, items });
-    await _idbSet(`${BACKUP_KEY}:receipt`, receipt);
-    localStorage.setItem(OWNER_KEY, 'server');
-    _lastToken = token;
-    _startServerProjection(token);
-    return { backup, receipt };
-  } catch (err) {
-    localStorage.setItem(OWNER_KEY, 'browser');
-    throw err;
+  const items = await _resolveImportItems(backup, token);
+  const payload: ImportAudioQueue = { backupId: backup.id, choice, items };
+  await _idbSet(PENDING_IMPORT_KEY, payload);
+  const receipt = await _submitImport(token, payload);
+  return { backup, receipt };
+}
+
+/** Recovers an interrupted migration (OWNER_KEY stuck at `'migrating'` —
+ *  a reload or crash during `migrateAudioQueue`). Replays the exact payload
+ *  persisted before the original POST, so it is idempotent even if that
+ *  POST already reached the server: `intentQueue.importLegacy` caches by
+ *  `backupId` (returns the same receipt instantly) and, failing that, by
+ *  each item's `legacyId` (already-imported items come back as `existing`,
+ *  never duplicated). If the payload was never persisted — the original
+ *  attempt died before its first network call — nothing could have reached
+ *  the server, so it is safe to rebuild fresh from the still-intact backup.
+ *  On failure this also does NOT revert OWNER_KEY away from `'migrating'`;
+ *  the caller (the banner's Retry button, or the silent first attempt on
+ *  load) decides what to show. */
+export async function retryQueueMigration(token: string): Promise<void> {
+  await _idbReady;
+  if (queueOwner() !== 'migrating') throw new Error('No interrupted migration to retry');
+  let payload = await _idbGet<ImportAudioQueue>(PENDING_IMPORT_KEY);
+  if (!payload) {
+    const backup = await exportQueueBackup(migrationStore());
+    payload = { backupId: backup.id, choice: 'resume', items: await _resolveImportItems(backup, token) };
+    await _idbSet(PENDING_IMPORT_KEY, payload);
   }
+  await _submitImport(token, payload);
 }
 
 let _serverProjectionTimer: ReturnType<typeof setInterval> | null = null;
@@ -586,13 +624,42 @@ function _startServerProjection(token: string): void {
 
 export function getAudioQueueOwner(): QueueOwner { return queueOwner(); }
 
+/** Test-only: resets every module-level singleton this file keeps (state,
+ *  the resume/owner-decision call-once guards, timers) so each test in the
+ *  migration test suite starts from a cold load. Never called by the app —
+ *  production has exactly one page lifetime per import. */
+export function _resetAudioQueueForTests(items: AudioQueueItem[] = []): void {
+  _state = { items, completionCounter: 0, awaitingResume: 0 };
+  _resumeCalled = false;
+  _running = false;
+  _lastToken = null;
+  _ownerDecision = null;
+  _heldIds.clear();
+  if (_serverProjectionTimer) clearInterval(_serverProjectionTimer);
+  _serverProjectionTimer = null;
+  _serverProjectionBusy = false;
+  if (_persistTimer) clearTimeout(_persistTimer);
+  _persistTimer = null;
+}
+
 /** Pause the Node executor, save its latest jobs, then restore browser
- * ownership. Any item that reached Node remains held for review on rollback. */
+ * ownership. Any item that reached Node remains held for review on rollback.
+ * Also the escape hatch from a stuck `'migrating'`: `rollbackExport` asks the
+ * server what it actually has, authoritatively, regardless of whether this
+ * browser ever learned the outcome of its own import attempt. */
 export async function rollbackAudioQueue(token: string): Promise<void> {
-  if (queueOwner() !== 'server') throw new Error('The server does not own the audio queue');
+  if (queueOwner() === 'browser') throw new Error('The browser already owns the audio queue');
   const receipt = await _idbGet<{ backupId: string }>(`${BACKUP_KEY}:receipt`);
-  if (!receipt) throw new Error('Migration receipt is missing; browser ownership was not changed');
-  const backup = await migrationStore().readBackup(receipt.backupId);
+  const pending = receipt ? undefined : await _idbGet<ImportAudioQueue>(PENDING_IMPORT_KEY);
+  const backupId = receipt?.backupId ?? pending?.backupId;
+  if (!backupId) {
+    // Neither a completed import nor a persisted attempt — nothing was ever
+    // sent, so there is nothing to reconcile. Just release the fence.
+    localStorage.setItem(OWNER_KEY, 'browser');
+    _emit(true);
+    return;
+  }
+  const backup = await migrationStore().readBackup(backupId);
   if (!backup) throw new Error('Original browser backup is missing; browser ownership was not changed');
   localStorage.setItem(OWNER_KEY, 'migrating');
   try {
@@ -1353,16 +1420,14 @@ export async function enqueueSimpleGen(
 
 /** One-time, silent owner decision for a browser that has never chosen, or
  *  whose last migration attempt never finished (page closed/reloaded with
- *  OWNER_KEY stuck at `'migrating'`). `migrateAudioQueue`'s per-item import
- *  is keyed by each item's legacyId (`intentQueue.importLegacy`), so a
- *  replay is idempotent even if the interrupted attempt already reached the
- *  server — already-imported items come back as `existing`, never
- *  duplicated. No pending items goes straight to server-owned — nothing to
- *  lose. Pending items migrate via the existing `resume` choice, no
- *  download and no held-for-review step; a failure leaves it on
- *  `'browser'` exactly as `migrateAudioQueue`'s own catch already does, so
- *  the queue keeps working and the banner is the only sign anything happened.
- *  Idempotent and safe to call from both `resumeQueue()` and the banner. */
+ *  OWNER_KEY stuck at `'migrating'`). No pending items goes straight to
+ *  server-owned — nothing to lose. Pending items migrate via the existing
+ *  `resume` choice, no download and no held-for-review step. A stuck
+ *  `'migrating'` retries via `retryQueueMigration` instead — see that
+ *  function and `decideQueueOwnerAction` for why that never falls back to
+ *  `'browser'` on failure. Either way, a failure leaves the banner as the
+ *  only sign anything happened. Idempotent and safe to call from both
+ *  `resumeQueue()` and the banner. */
 let _ownerDecision: Promise<void> | null = null;
 export function ensureQueueOwnerDecided(token: string): Promise<void> {
   if (!_ownerDecision) {
@@ -1372,7 +1437,11 @@ export function ensureQueueOwnerDecided(token: string): Promise<void> {
       const action = decideQueueOwnerAction(localStorage.getItem(OWNER_KEY), hasPending);
       if (action === 'none') return;
       if (action === 'set-server') { localStorage.setItem(OWNER_KEY, 'server'); _emit(true); return; }
-      localStorage.setItem(OWNER_KEY, 'browser'); // clears a stuck 'migrating' so the guard below passes
+      if (action === 'retry') {
+        try { await retryQueueMigration(token); }
+        catch (e) { console.error('[AudioGenQueue] migration retry failed, staying fenced:', e); }
+        return;
+      }
       try { await migrateAudioQueue(token, 'resume', false); }
       catch (e) { console.error('[AudioGenQueue] automatic migration failed:', e); }
     })();

@@ -439,7 +439,9 @@ re-runs from the Library wait in the same line.
   the server automatically the next time you load the app, keeping each item's state
   (queued work keeps running, nothing needs a manual Resume); finished history stays
   where it is. A versioned backup is kept regardless, and nothing is deleted. You only
-  see a banner about this if the move fails, with a button to retry it.
+  see a banner about this if the move gets stuck, with Retry and Export and roll back
+  buttons. Once a move has started, the browser queue stays paused — it does not pick
+  back up on its own — until one of those two resolves it, so nothing can run twice.
 
 An external agent (Claude Code, Codex) can also submit and poll generations through the
 `hotstep` MCP server, across all three backends. See [Driving HOT-Step with an
