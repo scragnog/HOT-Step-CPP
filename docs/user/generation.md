@@ -442,6 +442,9 @@ re-runs from the Library wait in the same line.
   see a banner about this if the move gets stuck, with Retry and Export and roll back
   buttons. Once a move has started, the browser queue stays paused — it does not pick
   back up on its own — until one of those two resolves it, so nothing can run twice.
+  The same banner appears if a roll back fails, for example because the server was
+  still submitting an item: the server queue stays paused and the browser queue stays
+  paused until you retry the roll back or move the queue to the server again.
 
 An external agent (Claude Code, Codex) can also submit and poll generations through the
 `hotstep` MCP server, across all three backends. See [Driving HOT-Step with an

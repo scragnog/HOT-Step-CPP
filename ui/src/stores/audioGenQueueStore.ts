@@ -245,7 +245,10 @@ const IDB_KEY = 'state';
 const LS_KEY = 'lireek-audio-gen-queue'; // legacy localStorage key for migration
 export const OWNER_KEY = 'lireek-audio-queue-owner-v1';
 export const BACKUP_KEY = 'server-migration-backup-v1';
-export const PENDING_IMPORT_KEY = `${BACKUP_KEY}:pending-import`; // the exact resolved import request, persisted before the POST so a reload can replay it verbatim
+export const PENDING_IMPORT_KEY = `${BACKUP_KEY}:pending-import`;
+export const ROLLBACK_PLAN_KEY = `${BACKUP_KEY}:rollback-plan`;
+/** Set while an explicit rollback is unfinished (localStorage, read at load). */
+export const ROLLBACK_REQUESTED_KEY = 'lireek-audio-queue-rollback-requested-v1'; // the exact resolved import request, persisted before the POST so a reload can replay it verbatim
 type QueueOwner = 'browser' | 'migrating' | 'server';
 function queueOwner(): QueueOwner {
   const value = localStorage.getItem(OWNER_KEY);
@@ -488,6 +491,10 @@ async function _resolveImportItems(backup: QueueBackup, token: string): Promise<
 async function _submitImport(token: string, payload: ImportAudioQueue): Promise<Awaited<ReturnType<typeof audioQueueApi.importLegacy>>> {
   const receipt = await audioQueueApi.importLegacy(token, payload);
   await _idbSet(`${BACKUP_KEY}:receipt`, receipt);
+  // The server owns the queue again: an unfinished rollback's plan no longer
+  // describes it.
+  await _idbSet(ROLLBACK_PLAN_KEY, null);
+  localStorage.removeItem(ROLLBACK_REQUESTED_KEY);
   localStorage.setItem(OWNER_KEY, 'server');
   _lastToken = token;
   _startServerProjection(token);
@@ -623,6 +630,8 @@ function _startServerProjection(token: string): void {
 }
 
 export function getAudioQueueOwner(): QueueOwner { return queueOwner(); }
+/** True while an explicit rollback started but has not finished. */
+export function isAudioQueueRollbackPending(): boolean { return localStorage.getItem(ROLLBACK_REQUESTED_KEY) !== null; }
 
 /** Test-only: resets every module-level singleton this file keeps (state,
  *  the resume/owner-decision call-once guards, timers) so each test in the
@@ -642,11 +651,28 @@ export function _resetAudioQueueForTests(items: AudioQueueItem[] = []): void {
   _persistTimer = null;
 }
 
+/** What a rollback will do (ROLLBACK_PLAN_KEY), saved before its first
+ *  destructive step: the reconciled browser queue to restore and the server
+ *  items to cancel. A retried rollback finishes this same plan rather than
+ *  recomputing it from a server export its own earlier, partial attempt
+ *  already changed. */
+interface RollbackPlan {
+  backupId: string;
+  restored: { items: AudioQueueItem[]; completionCounter: number };
+  cancelIds: string[];
+}
+
 /** Pause the Node executor, save its latest jobs, then restore browser
  * ownership. Any item that reached Node remains held for review on rollback.
  * Also the escape hatch from a stuck `'migrating'`: `rollbackExport` asks the
  * server what it actually has, authoritatively, regardless of whether this
- * browser ever learned the outcome of its own import attempt. */
+ * browser ever learned the outcome of its own import attempt.
+ *
+ * The only way back to browser ownership. Any failure leaves the owner
+ * `'migrating'` (browser execution fenced, Retry and rollback offered); it
+ * never falls back to `'server'` or `'browser'`, because by then the server
+ * may be paused or partly cancelled. Safe to retry: the plan is saved before
+ * anything is changed, and only items still pending or held are cancelled. */
 export async function rollbackAudioQueue(token: string): Promise<void> {
   if (queueOwner() === 'browser') throw new Error('The browser already owns the audio queue');
   const receipt = await _idbGet<{ backupId: string }>(`${BACKUP_KEY}:receipt`);
@@ -661,51 +687,70 @@ export async function rollbackAudioQueue(token: string): Promise<void> {
   }
   const backup = await migrationStore().readBackup(backupId);
   if (!backup) throw new Error('Original browser backup is missing; browser ownership was not changed');
+  localStorage.setItem(ROLLBACK_REQUESTED_KEY, backupId);
   localStorage.setItem(OWNER_KEY, 'migrating');
+  if (_serverProjectionTimer) clearInterval(_serverProjectionTimer);
+  _serverProjectionTimer = null;
+  _emit(true);
   try {
-    const serverExport = await audioQueueApi.rollbackExport(token);
-    const exportKey = `${BACKUP_KEY}:rollback:${serverExport.exportedAt}`;
-    await _idbSet(exportKey, serverExport);
-    if (JSON.stringify(await _idbGet(exportKey)) !== JSON.stringify(serverExport)) {
-      throw new Error('Post-import queue export failed readback');
-    }
-    downloadQueueExport(`audio-queue-server-export-${serverExport.exportedAt}.json`, serverExport);
-    await restoreQueueBackup(migrationStore(), backup);
-    const byId = new Map(backupItems(backup).map(item => [item.id, item]));
-    for (const server of serverExport.items) {
-      const legacyId = String(server.meta?.legacyId ?? (server.meta?.view as AudioQueueItem | undefined)?.id ?? server.id);
-      const view = byId.get(legacyId) ?? projectServerItem(server);
-      view.serverQueueId = undefined;
-      view.jobId = server.jobId ?? view.jobId;
-      if (server.status === 'succeeded') {
-        const projected = projectServerItem(server, view);
-        Object.assign(view, projected, { status: 'succeeded', serverQueueId: undefined });
-      } else if (server.status === 'failed' || server.status === 'cancelled') {
-        view.status = 'failed'; view.error = server.error ?? server.status;
-      } else if (['submitted', 'submitting', 'interrupted'].includes(server.status)) {
-        view.status = 'failed';
-        view.error = `Server job ${server.jobId ?? '(id pending)'} may have rendered; check the library before retrying`;
-      } else {
-        view.status = 'pending'; view.stage = 'Held after rollback';
+    let plan = await _idbGet<RollbackPlan>(ROLLBACK_PLAN_KEY);
+    if (!plan || plan.backupId !== backupId) {
+      const serverExport = await audioQueueApi.rollbackExport(token);
+      const exportKey = `${BACKUP_KEY}:rollback:${serverExport.exportedAt}`;
+      await _idbSet(exportKey, serverExport);
+      if (JSON.stringify(await _idbGet(exportKey)) !== JSON.stringify(serverExport)) {
+        throw new Error('Post-import queue export failed readback');
       }
-      byId.set(legacyId, view);
+      downloadQueueExport(`audio-queue-server-export-${serverExport.exportedAt}.json`, serverExport);
+      const byId = new Map(backupItems(backup).map(item => [item.id, item]));
+      for (const server of serverExport.items) {
+        const legacyId = String(server.meta?.legacyId ?? (server.meta?.view as AudioQueueItem | undefined)?.id ?? server.id);
+        const view = byId.get(legacyId) ?? projectServerItem(server);
+        view.serverQueueId = undefined;
+        view.jobId = server.jobId ?? view.jobId;
+        if (server.status === 'succeeded') {
+          const projected = projectServerItem(server, view);
+          Object.assign(view, projected, { status: 'succeeded', serverQueueId: undefined });
+        } else if (server.status === 'failed' || server.status === 'cancelled') {
+          view.status = 'failed'; view.error = server.error ?? server.status;
+        } else if (['submitted', 'submitting', 'interrupted'].includes(server.status)) {
+          view.status = 'failed';
+          view.error = `Server job ${server.jobId ?? '(id pending)'} may have rendered; check the library before retrying`;
+        } else {
+          view.status = 'pending'; view.stage = 'Held after rollback';
+        }
+        byId.set(legacyId, view);
+      }
+      plan = {
+        backupId,
+        restored: { items: [...byId.values()], completionCounter: _state.completionCounter },
+        cancelIds: serverExport.items.filter(item => item.status === 'pending' || item.status === 'held').map(item => item.id),
+      };
+      await _idbSet(ROLLBACK_PLAN_KEY, plan);
+      if (JSON.stringify(await _idbGet(ROLLBACK_PLAN_KEY)) !== JSON.stringify(plan)) throw new Error('Rollback plan failed readback');
     }
-    const restored = { items: [...byId.values()], completionCounter: _state.completionCounter };
-    await _idbSet(IDB_KEY, restored);
-    if (JSON.stringify(await _idbGet(IDB_KEY)) !== JSON.stringify(restored)) throw new Error('Reconciled browser queue failed readback');
-    for (const item of serverExport.items) {
-      if (item.status === 'pending' || item.status === 'held') await audioQueueApi.cancel(token, item.id);
+    await restoreQueueBackup(migrationStore(), backup);
+    await _idbSet(IDB_KEY, plan.restored);
+    if (JSON.stringify(await _idbGet(IDB_KEY)) !== JSON.stringify(plan.restored)) throw new Error('Reconciled browser queue failed readback');
+    // Cancel what is still waiting on the server. An earlier, partial attempt
+    // may have cancelled some already; those are now terminal and skipped.
+    const live = new Map((await audioQueueApi.list(token)).items.map(item => [item.id, item.status]));
+    for (const id of plan.cancelIds) {
+      const status = live.get(id);
+      if (status === 'pending' || status === 'held') await audioQueueApi.cancel(token, id);
     }
-    if (_serverProjectionTimer) clearInterval(_serverProjectionTimer);
-    _serverProjectionTimer = null;
-    _state.items = restored.items;
+    _state.items = plan.restored.items;
     _heldIds.clear();
-    for (const item of restored.items) if (item.status === 'pending') _heldIds.add(item.id);
+    for (const item of plan.restored.items) if (item.status === 'pending') _heldIds.add(item.id);
     _state.awaitingResume = _heldIds.size;
+    await _idbSet(ROLLBACK_PLAN_KEY, null);
+    localStorage.removeItem(ROLLBACK_REQUESTED_KEY);
     localStorage.setItem(OWNER_KEY, 'browser');
     _emit(true);
   } catch (err) {
-    localStorage.setItem(OWNER_KEY, 'server');
+    // Fenced: no browser execution, and the banner keeps Retry and rollback.
+    localStorage.setItem(OWNER_KEY, 'migrating');
+    _emit(true);
     throw err;
   }
 }
@@ -1434,7 +1479,7 @@ export function ensureQueueOwnerDecided(token: string): Promise<void> {
     _ownerDecision = (async () => {
       await _idbReady;
       const hasPending = _state.items.some(item => item.status !== 'succeeded' && item.status !== 'failed');
-      const action = decideQueueOwnerAction(localStorage.getItem(OWNER_KEY), hasPending);
+      const action = decideQueueOwnerAction(localStorage.getItem(OWNER_KEY), hasPending, isAudioQueueRollbackPending());
       if (action === 'none') return;
       if (action === 'set-server') { localStorage.setItem(OWNER_KEY, 'server'); _emit(true); return; }
       if (action === 'retry') {

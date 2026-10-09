@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
-  ensureQueueOwnerDecided, getAudioQueueOwner, retryQueueMigration, rollbackAudioQueue,
+  ensureQueueOwnerDecided, getAudioQueueOwner, isAudioQueueRollbackPending, retryQueueMigration, rollbackAudioQueue,
   useAudioGenQueueSelector,
 } from '../../stores/audioGenQueueStore';
 import { shouldShowMigrationBanner } from '../../stores/audioQueueOwnerDecision';
@@ -34,10 +34,12 @@ export const AudioQueueMigrationBanner: React.FC = () => {
     finally { setBusy(false); }
   };
   return <div className="fixed bottom-40 left-1/2 -translate-x-1/2 z-[60] max-w-[92vw] rounded-xl border border-amber-500/30 bg-white/95 dark:bg-zinc-900/95 px-4 py-3 shadow-2xl text-sm">
-    <div className="font-semibold">Audio queue: migration stuck</div>
+    <div className="font-semibold">Audio queue: {isAudioQueueRollbackPending() ? 'roll back stuck' : 'migration stuck'}</div>
     <div className="text-xs text-zinc-500">
-      Moving {count} queued item{count === 1 ? '' : 's'} to the server didn't finish. The browser queue stays
-      paused — nothing runs twice — until you retry or roll back.
+      {isAudioQueueRollbackPending()
+        ? 'Rolling the queue back to this browser didn’t finish.'
+        : `Moving ${count} queued item${count === 1 ? '' : 's'} to the server didn’t finish.`} The browser
+      queue stays paused (nothing runs twice) until you retry the move to the server or roll back.
     </div>
     {receipt && <div className="text-xs text-emerald-600">{receipt}</div>}
     {error && <div role="alert" className="text-xs text-red-500">{error}</div>}

@@ -41,3 +41,9 @@ test('shouldShowMigrationBanner: hidden before the owner decision has landed, or
 test('shouldShowMigrationBanner: shown only once stuck in migrating — the silent retry on load already failed', () => {
   assert.equal(shouldShowMigrationBanner(true, true, 'migrating'), true);
 });
+
+test('decideQueueOwnerAction: an unfinished rollback is left for the user, never replayed over', () => {
+  assert.equal(decideQueueOwnerAction('migrating', true, true), 'none');
+  assert.equal(decideQueueOwnerAction('migrating', false, true), 'none');
+  assert.equal(decideQueueOwnerAction('migrating', true, false), 'retry');
+});

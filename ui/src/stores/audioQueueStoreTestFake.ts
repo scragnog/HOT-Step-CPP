@@ -60,6 +60,9 @@ function json(status: number, body: unknown): Response {
 export class AudioQueueApiFake {
   calls: Call[] = [];
   rollbackCalls = 0;
+  /** Items the server holds, for rollback-export, GET /items and cancel. */
+  serverItems: Array<{ id: string; status: string; jobId?: string | null; meta?: Record<string, unknown>; request?: Record<string, unknown>; createdAt?: number; error?: string | null }> = [];
+  paused = false;
   private receiptsByBackupId = new Map<string, any>();
   private importedLegacyIds = new Set<string>();
   private failures: Array<(c: Call) => boolean> = [];
@@ -88,7 +91,7 @@ export class AudioQueueApiFake {
   }
 
   private answer(c: Call): Response {
-    if (c.path === '/api/audio-queue/items' && c.method === 'GET') return json(200, { items: [] });
+    if (c.path === '/api/audio-queue/items' && c.method === 'GET') return json(200, { items: this.serverItems });
     if (c.path === '/api/audio-queue/migration/import') {
       const { backupId, items } = c.body as { backupId: string; items: { legacyId: string; status: string }[] };
       const cached = this.receiptsByBackupId.get(backupId);
@@ -106,9 +109,22 @@ export class AudioQueueApiFake {
     }
     if (c.path === '/api/audio-queue/migration/rollback-export') {
       this.rollbackCalls++;
-      return json(200, { version: 1, exportedAt: Date.now(), state: {}, items: [] });
+      // Same order as the real route (routes/audioQueue.ts): pause first, then
+      // refuse while a submission is in flight.
+      this.paused = true;
+      if (this.serverItems.some(item => item.status === 'submitting')) {
+        return json(409, { error: 'Submission still in flight; retry export when it settles' });
+      }
+      return json(200, { version: 1, exportedAt: Date.now(), state: {}, items: structuredClone(this.serverItems) });
     }
-    if (/^\/api\/audio-queue\/items\/[^/]+\/cancel$/.test(c.path)) return json(200, { item: {} });
+    const cancel = c.path.match(/^\/api\/audio-queue\/items\/([^/]+)\/cancel$/);
+    if (cancel) {
+      const item = this.serverItems.find(i => i.id === decodeURIComponent(cancel[1]));
+      if (!item) return json(404, { error: 'Queue item not found' });
+      if (item.status !== 'pending' && item.status !== 'held') return json(409, { error: `Queue item is already ${item.status}` });
+      item.status = 'cancelled';
+      return json(200, { item });
+    }
     return json(404, { error: `No route ${c.method} ${c.path}` });
   }
 }

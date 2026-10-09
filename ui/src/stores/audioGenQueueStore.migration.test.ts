@@ -165,3 +165,98 @@ test('an explicit rollback is the only way back to browser ownership from a stuc
     assert.equal(getAudioQueueOwner(), 'browser');
   });
 });
+
+// ── Rollback failures (round 4): every failure stays 'migrating', fenced ──
+
+const { ROLLBACK_PLAN_KEY, isAudioQueueRollbackPending } = await import('./audioGenQueueStore.js') as any;
+const restoredItems = (idbData: Map<string, unknown>) => (idbData.get('state') as { items: AudioQueueItem[] } | undefined)?.items ?? [];
+/** A server queue item imported from browser item `legacyId`. */
+const srvItem = (legacyId: string, status: string) =>
+  ({ id: `srv-${legacyId}`, status, meta: { legacyId }, request: { title: legacyId }, createdAt: 1 });
+const generateCalls = (api: AudioQueueApiFake) => api.calls.filter((c: any) => c.path.startsWith('/api/generate'));
+
+test('rollback refused with 409 (submission in flight) stays fenced; reload neither replays the import nor runs locally; a later rollback succeeds', async () => {
+  const items = [fixtureItem('a')];
+  await withFakeQueue(items, async ({ storage, idbData, api }) => {
+    storage.setItem(OWNER_KEY, 'server');
+    idbData.set(`${BACKUP_KEY}:receipt`, { backupId: 'bk-r1' });
+    seedBackup(idbData, 'bk-r1', ['a']);
+    api.serverItems = [srvItem('a', 'submitting')];
+
+    await assert.rejects(() => rollbackAudioQueue('tok'), /in flight/);
+    assert.equal(getAudioQueueOwner(), 'migrating', 'never back to server after a failed rollback');
+    assert.equal(isAudioQueueRollbackPending(), true);
+    assert.equal(api.paused, true, 'the server queue stays paused, as the real route leaves it');
+
+    // Reload: the load-time decision must not replay the import over the
+    // user's rollback, and Resume must not run anything in the browser.
+    _resetAudioQueueForTests(items);
+    await ensureQueueOwnerDecided('tok');
+    await resumeQueue('tok');
+    assert.equal(getAudioQueueOwner(), 'migrating');
+    assert.equal(api.calls.filter((c: any) => c.path === '/api/audio-queue/migration/import').length, 0);
+    assert.deepEqual(generateCalls(api), []);
+    assert.equal(items[0].jobId, undefined);
+
+    // The submission settles; the user retries the rollback.
+    api.serverItems[0].status = 'pending';
+    await rollbackAudioQueue('tok');
+    assert.equal(getAudioQueueOwner(), 'browser');
+    assert.equal(isAudioQueueRollbackPending(), false);
+    assert.equal(api.serverItems[0].status, 'cancelled');
+    assert.deepEqual(restoredItems(idbData).map(i => [i.status, i.stage]), [['pending', 'Held after rollback']]);
+    assert.equal(idbData.get(ROLLBACK_PLAN_KEY), null, 'the finished plan is cleared');
+  });
+});
+
+test('a rollback that fails part-way through its cancels finishes the same plan on retry, without re-exporting', async () => {
+  await withFakeQueue([fixtureItem('a'), fixtureItem('b')], async ({ storage, idbData, api }) => {
+    storage.setItem(OWNER_KEY, 'server');
+    idbData.set(`${BACKUP_KEY}:receipt`, { backupId: 'bk-r2' });
+    seedBackup(idbData, 'bk-r2', ['a', 'b']);
+    api.serverItems = [
+      srvItem('a', 'pending'),
+      srvItem('b', 'pending'),
+    ];
+    api.failNext((c: any) => c.path === '/api/audio-queue/items/srv-b/cancel');
+
+    await assert.rejects(() => rollbackAudioQueue('tok'));
+    assert.equal(getAudioQueueOwner(), 'migrating');
+    assert.deepEqual(api.serverItems.map(i => i.status), ['cancelled', 'pending']);
+    assert.ok(idbData.get(ROLLBACK_PLAN_KEY), 'the plan was saved before the first cancel');
+
+    await rollbackAudioQueue('tok');
+    assert.equal(api.rollbackCalls, 1, 'the retry reuses the plan instead of exporting a half-cancelled server');
+    assert.deepEqual(api.serverItems.map(i => i.status), ['cancelled', 'cancelled']);
+    assert.equal(getAudioQueueOwner(), 'browser');
+    // Both come back pending: the first one's cancel by the earlier attempt
+    // does not turn it into a failed item.
+    assert.deepEqual(restoredItems(idbData).map(i => i.status), ['pending', 'pending']);
+  });
+});
+
+test('after a failed rollback, choosing Retry hands the queue back to the server and clears the rollback state', async () => {
+  const items = [fixtureItem('a')];
+  await withFakeQueue(items, async ({ storage, idbData, api }) => {
+    const payload = {
+      backupId: 'bk-r3', choice: 'resume',
+      items: [{ legacyId: 'a', request: { prompt: 'test' }, meta: { view: items[0] }, status: 'pending' }],
+    };
+    storage.setItem(OWNER_KEY, 'server');
+    idbData.set(PENDING_IMPORT_KEY, payload);
+    idbData.set(`${BACKUP_KEY}:receipt`, { backupId: 'bk-r3' });
+    seedBackup(idbData, 'bk-r3', ['a']);
+    api.serverItems = [srvItem('a', 'pending')];
+    api.failNext((c: any) => c.path === '/api/audio-queue/migration/rollback-export');
+
+    await assert.rejects(() => rollbackAudioQueue('tok'));
+    assert.equal(getAudioQueueOwner(), 'migrating');
+    assert.equal(isAudioQueueRollbackPending(), true);
+
+    await retryQueueMigration('tok');
+    assert.equal(getAudioQueueOwner(), 'server');
+    assert.equal(isAudioQueueRollbackPending(), false);
+    assert.equal(idbData.get(ROLLBACK_PLAN_KEY), null);
+    assert.equal(api.serverItems[0].status, 'pending', 'nothing was cancelled');
+  });
+});

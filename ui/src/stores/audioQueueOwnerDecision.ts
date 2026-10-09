@@ -15,9 +15,11 @@ export type OwnerDecisionAction = 'none' | 'set-server' | 'migrate' | 'retry';
  *    the persisted payload is idempotent), never reverts to `'browser'`.
  *  - A missing/unrecognised key (never decided): no pending work goes
  *    straight to server-owned, pending work migrates fresh. */
-export function decideQueueOwnerAction(raw: string | null, hasPending: boolean): OwnerDecisionAction {
+export function decideQueueOwnerAction(raw: string | null, hasPending: boolean, rollbackRequested = false): OwnerDecisionAction {
   if (raw === 'server' || raw === 'browser') return 'none';
-  if (raw === 'migrating') return 'retry';
+  // A failed rollback also leaves 'migrating'. Replaying the import on load
+  // would quietly undo the user's rollback: leave it fenced for the banner.
+  if (raw === 'migrating') return rollbackRequested ? 'none' : 'retry';
   return hasPending ? 'migrate' : 'set-server';
 }
 
