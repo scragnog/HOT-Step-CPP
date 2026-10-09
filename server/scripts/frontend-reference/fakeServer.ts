@@ -22,7 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Server } from 'node:http';
 import { startFakeAceEngine, type FakeAceEngine } from './fakeEngine.js';
-import { installNetworkGuard, installSubprocessGuard, violations } from './safetyGuards.js';
+import { allowedOrigins, installNetworkGuard, installSubprocessGuard, violations } from './safetyGuards.js';
 
 export interface FakeServer {
   app: Express;
@@ -59,18 +59,35 @@ export async function startFakeServer(): Promise<FakeServer> {
   // one of those a path that does not exist, so the real checkout's .env is
   // never touched and essentiaAvailable()'s fs.existsSync check — the thing
   // Cover's open step calls through to — is always false, with no change to
-  // coverWorkflow.ts or essentiaClient.ts. Delete the two binary-path env
-  // overrides too, in case the parent shell happens to export them.
+  // coverWorkflow.ts or essentiaClient.ts.
+  process.env.HOT_STEP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'frontend-reference-root-'));
+
+  // Delete every binary-path/model-path override the parent shell or an
+  // inherited .env might have exported — each of these overrides PROJECT_ROOT
+  // for its own setting (config.ts:66-69,124-125,306,324), so HOT_STEP_ROOT
+  // alone does not isolate them. Explicitly set fixture paths rather than
+  // deleting the model/adapter/training ones: config.ts's own fallback for
+  // TRAINING_DIR joins DATA_DIR, but ACESTEPCPP_MODELS/ADAPTERS fall back to
+  // PROJECT_ROOT, and WHISPER_MODELS_DIR falls back to ACESTEPCPP_MODELS — an
+  // inherited value for any of the four would override those fallbacks and
+  // escape the isolated root.
   delete process.env.ESSENTIA_BIN;
   delete process.env.WHISPER_EXE;
-  process.env.HOT_STEP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'frontend-reference-root-'));
+  process.env.ACESTEPCPP_MODELS = path.join(dataDir, 'fixture-models');
+  process.env.ACESTEPCPP_ADAPTERS = path.join(dataDir, 'fixture-adapters');
+  process.env.TRAINING_DIR = path.join(dataDir, 'fixture-training');
+  process.env.WHISPER_MODELS_DIR = path.join(dataDir, 'fixture-whisper-models');
 
   // Fail closed before any production module is imported: no route mounted
   // below may spawn a real process or reach a real network endpoint, and
   // production catching that error gracefully must not hide it from the
-  // suite (see safetyGuards.ts).
+  // suite (see safetyGuards.ts). Only this harness's own two servers —
+  // the fake engine, already listening, and the fake server about to start —
+  // may ever be fetch's target; nothing else on 127.0.0.1, any other port
+  // included, is a fixture.
   installSubprocessGuard();
-  installNetworkGuard(['127.0.0.1']);
+  installNetworkGuard();
+  allowedOrigins.add(engine.origin);
 
   const { initDb, closeDb } = await import('../../src/db/database.js');
   initDb();
@@ -154,13 +171,17 @@ export async function startFakeServer(): Promise<FakeServer> {
     const s = app.listen(0, '127.0.0.1', () => resolve(s));
   });
   const port = (server.address() as { port: number }).port;
+  const origin = `http://127.0.0.1:${port}`;
+  // The exact origin client.ts's fetch calls target — added only now, once
+  // it is actually known, so there is no window where a guess could be wrong.
+  allowedOrigins.add(origin);
 
   return {
     app,
     engine,
     dataDir,
     violations,
-    origin: `http://127.0.0.1:${port}`,
+    origin,
     close: async () => {
       // The queue's own setInterval is unref'd so it never blocks process
       // exit on its own, but it keeps firing on this module-level singleton
