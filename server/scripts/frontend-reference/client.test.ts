@@ -52,6 +52,21 @@ test('Create: auth failure — no bearer token is 401 before any job runs', asyn
   assert.equal(res.status, 401);
 });
 
+// ── Resolve → durable audio queue (the resolved Create path, not the legacy
+// direct-submit one above) ──────────────────────────────────────────────
+
+test('Resolve: preview then submit through the durable audio queue, not legacy direct-submit', async () => {
+  const { request } = await client.resolvePreview({
+    kind: 'create',
+    params: { caption: 'a resolved caption', lyrics: '[Instrumental]', instrumental: true, seed: 7, randomSeed: false, skipLm: true },
+  });
+  assert.equal(request.expectedBackend, 'ace');
+  const { item } = await client.enqueueAudioIntent(request);
+  const finished = await client.waitForAudioIntent(String((item as { id: string }).id));
+  assert.equal(finished.status, 'succeeded');
+  assert.ok(finished.jobId);
+});
+
 // ── Insta-Gen (insta-preview, insta-approve, insta-direct) ────────────────
 
 const instaInput = () => ({
@@ -118,7 +133,12 @@ test('Insta-Gen: a stale document revision on approve fails the job, not the sub
 // coverWorkflow.ts's defaultCaption (coverWorkflow.ts:167) unconditionally
 // calls getProvider(provider).call() — a real LLM provider — with no
 // availability guard (unlike analyzeWithEssentia's essentiaAvailable()
-// check, which is why cover-open below is safe). cover-transcribe's
+// check, which is why cover-open below is isolated: fakeServer.ts points
+// HOT_STEP_ROOT at an empty temp dir, so the essentia binary path it checks
+// never resolves regardless of what happens to be installed on the host
+// running the suite — availability is not isolation on its own, and
+// safetyGuards.ts's subprocess guard is the backstop if that check is ever
+// changed). cover-transcribe's
 // defaultTranscribe (coverWorkflow.ts:137) calls the real yue2CoverService,
 // the same YuE2 worker 7f-3 (training/streaming) is fixturing — not mine to
 // fake here. Neither has a dependency seam reachable from this harness:
@@ -217,4 +237,15 @@ test('SuperSep proxy: separate, progress, result, release — thin pass-through 
   assert.ok(result.stems.length > 0);
   const release = await client.supersepRelease(id);
   assert.equal((release as { ok: boolean }).ok, true);
+});
+
+// ── Safety ──────────────────────────────────────────────────────────────
+//
+// Last, so it covers every test above it. safetyGuards.ts records a
+// violation even when production code catches the guard's thrown error and
+// degrades gracefully (e.g. essentiaClient.ts treating any failure as a null
+// result) — this assertion is what actually fails the suite in that case.
+
+test('Safety: no real subprocess exec or off-origin network call occurred', () => {
+  assert.deepEqual(server.violations, []);
 });

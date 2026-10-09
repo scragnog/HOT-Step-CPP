@@ -75,6 +75,38 @@ export class ReferenceClient {
     }
   }
 
+  // ── Resolve (durable Create path: preview, then enqueue) ────────────────
+  async resolvePreview(intent: Record<string, unknown>): Promise<{ request: Record<string, unknown>; version: string }> {
+    return asJson(await fetch(`${this.origin}/api/resolve/preview`, {
+      method: 'POST',
+      headers: this.headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(intent),
+    }));
+  }
+
+  async enqueueAudioIntent(request: Record<string, unknown>, idempotencyKey = randomUUID()): Promise<{ item: Record<string, unknown> }> {
+    return asJson(await fetch(`${this.origin}/api/audio-queue/items`, {
+      method: 'POST',
+      headers: this.headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ idempotencyKey, request }),
+    }));
+  }
+
+  async audioQueueItem(id: string): Promise<{ item: Record<string, unknown> }> {
+    return asJson(await fetch(`${this.origin}/api/audio-queue/items/${id}`, { headers: this.headers() }));
+  }
+
+  /** Poll GET /api/audio-queue/items/:id until a terminal status or timeoutMs. */
+  async waitForAudioIntent(id: string, timeoutMs = 20_000): Promise<Record<string, unknown>> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const { item } = await this.audioQueueItem(id);
+      if (['succeeded', 'failed', 'cancelled', 'interrupted'].includes(String(item.status))) return item;
+      if (Date.now() > deadline) throw new Error(`audio intent ${id} did not finish within ${timeoutMs}ms (last status: ${item.status})`);
+      await new Promise(r => setTimeout(r, 300));
+    }
+  }
+
   // ── Generic workflow envelope (Insta-Gen, Cover, Repaint, Lego) ─────────
   async submitWorkflowJob(kind: string, input: Record<string, unknown>, idempotencyKey = randomUUID()): Promise<WorkflowJob> {
     const body = await asJson<{ job: WorkflowJob }>(await fetch(`${this.origin}/api/workflows/jobs`, {

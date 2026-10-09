@@ -22,12 +22,18 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Server } from 'node:http';
 import { startFakeAceEngine, type FakeAceEngine } from './fakeEngine.js';
+import { installNetworkGuard, installSubprocessGuard, violations } from './safetyGuards.js';
 
 export interface FakeServer {
   app: Express;
   origin: string;
   dataDir: string;
   engine: FakeAceEngine;
+  /** Safety-guard violations recorded during this server's lifetime (see
+   *  safetyGuards.ts) — a real subprocess exec or off-origin fetch attempt,
+   *  even one production code caught and degraded gracefully. A test asserts
+   *  this stays empty; it must never be populated and ignored. */
+  violations: string[];
   close(): Promise<void>;
 }
 
@@ -45,6 +51,26 @@ export async function startFakeServer(): Promise<FakeServer> {
   process.env.DATA_DIR = dataDir;
   process.env.ACESTEPCPP_HOST = engineUrl.hostname;
   process.env.ACESTEPCPP_PORT = engineUrl.port;
+
+  // PROJECT_ROOT (config.ts:14) governs everything else that points at the
+  // real checkout: the essentia/whisper binary paths, the models/adapters/
+  // noise-sample dirs, the engine dir, and ENV_FILE_PATH (settings.ts writes
+  // .env there). Pointing it at a fresh, otherwise-empty temp dir makes every
+  // one of those a path that does not exist, so the real checkout's .env is
+  // never touched and essentiaAvailable()'s fs.existsSync check — the thing
+  // Cover's open step calls through to — is always false, with no change to
+  // coverWorkflow.ts or essentiaClient.ts. Delete the two binary-path env
+  // overrides too, in case the parent shell happens to export them.
+  delete process.env.ESSENTIA_BIN;
+  delete process.env.WHISPER_EXE;
+  process.env.HOT_STEP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'frontend-reference-root-'));
+
+  // Fail closed before any production module is imported: no route mounted
+  // below may spawn a real process or reach a real network endpoint, and
+  // production catching that error gracefully must not hide it from the
+  // suite (see safetyGuards.ts).
+  installSubprocessGuard();
+  installNetworkGuard(['127.0.0.1']);
 
   const { initDb, closeDb } = await import('../../src/db/database.js');
   initDb();
@@ -85,6 +111,7 @@ export async function startFakeServer(): Promise<FakeServer> {
   const audioQueueRoutes = (await import('../../src/routes/audioQueue.js')).default;
   const settingsRoutes = (await import('../../src/routes/settings.js')).default;
   const uploadRoutes = (await import('../../src/routes/upload.js')).default;
+  const resolveRoutes = (await import('../../src/routes/resolve.js')).default;
   // Insta-Gen's and Cover's WorkflowKinds register as an IMPORT SIDE EFFECT
   // of these two route modules (inspire.ts:531, yue2Cover.ts:182) — there is
   // no separate registerXWorkflows() call anywhere else to make instead, so
@@ -112,6 +139,7 @@ export async function startFakeServer(): Promise<FakeServer> {
   app.use('/api/export-import', exportImportRoutes);
   app.use('/api/settings', settingsRoutes);
   app.use('/api/upload', uploadRoutes);
+  app.use('/api/resolve', resolveRoutes);
   app.use('/api/inspire', inspireRoutes);
   app.use('/api/yue2-cover', yue2CoverRoutes);
   // Mounted at '/api', not '/api/backends' — this router spells its own full
@@ -131,6 +159,7 @@ export async function startFakeServer(): Promise<FakeServer> {
     app,
     engine,
     dataDir,
+    violations,
     origin: `http://127.0.0.1:${port}`,
     close: async () => {
       // The queue's own setInterval is unref'd so it never blocks process
@@ -144,6 +173,7 @@ export async function startFakeServer(): Promise<FakeServer> {
       await engine.close();
       closeDb();
       fs.rmSync(dataDir, { recursive: true, force: true });
+      fs.rmSync(process.env.HOT_STEP_ROOT!, { recursive: true, force: true });
     },
   };
 }
