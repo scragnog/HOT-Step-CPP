@@ -491,10 +491,12 @@ async function _resolveImportItems(backup: QueueBackup, token: string): Promise<
 async function _submitImport(token: string, payload: ImportAudioQueue): Promise<Awaited<ReturnType<typeof audioQueueApi.importLegacy>>> {
   const receipt = await audioQueueApi.importLegacy(token, payload);
   await _idbSet(`${BACKUP_KEY}:receipt`, receipt);
-  // The server owns the queue again: an unfinished rollback's plan no longer
-  // describes it.
-  await _idbSet(ROLLBACK_PLAN_KEY, null);
+  // The server owns the queue again: an unfinished rollback no longer
+  // describes it. Marker and plan go before the owner changes. A crash in
+  // between leaves 'migrating' with no rollback pending, which reload
+  // resolves by replaying this same, idempotent import.
   localStorage.removeItem(ROLLBACK_REQUESTED_KEY);
+  await _idbSet(ROLLBACK_PLAN_KEY, null);
   localStorage.setItem(OWNER_KEY, 'server');
   _lastToken = token;
   _startServerProjection(token);
@@ -513,6 +515,9 @@ export async function migrateAudioQueue(token: string, choice: 'hold' | 'resume'
   }
   const backup = await exportQueueBackup(migrationStore());
   if (download) downloadQueueExport(`audio-queue-backup-${backup.id}.json`, backup);
+  // A fresh move: nothing left from an earlier rollback applies to it.
+  localStorage.removeItem(ROLLBACK_REQUESTED_KEY);
+  await _idbSet(ROLLBACK_PLAN_KEY, null);
   localStorage.setItem(OWNER_KEY, 'migrating');
   const items = await _resolveImportItems(backup, token);
   const payload: ImportAudioQueue = { backupId: backup.id, choice, items };
@@ -743,16 +748,24 @@ export async function rollbackAudioQueue(token: string): Promise<void> {
     _heldIds.clear();
     for (const item of plan.restored.items) if (item.status === 'pending') _heldIds.add(item.id);
     _state.awaitingResume = _heldIds.size;
-    await _idbSet(ROLLBACK_PLAN_KEY, null);
-    localStorage.removeItem(ROLLBACK_REQUESTED_KEY);
+    // Ownership first, recovery data after: a crash in between leaves a
+    // finished rollback with a stale plan and marker, which the next
+    // migrateAudioQueue clears. The reverse would leave 'migrating' with no
+    // plan, and a retry would rebuild the queue from a server export this
+    // rollback has already cancelled.
     localStorage.setItem(OWNER_KEY, 'browser');
-    _emit(true);
   } catch (err) {
     // Fenced: no browser execution, and the banner keeps Retry and rollback.
     localStorage.setItem(OWNER_KEY, 'migrating');
     _emit(true);
     throw err;
   }
+  // The rollback is done; failing to tidy up must not reopen it.
+  try {
+    localStorage.removeItem(ROLLBACK_REQUESTED_KEY);
+    await _idbSet(ROLLBACK_PLAN_KEY, null);
+  } catch (err) { console.warn('[AudioGenQueue] rollback finished; clearing its plan failed:', err); }
+  _emit(true);
 }
 
 window.addEventListener('storage', event => {
