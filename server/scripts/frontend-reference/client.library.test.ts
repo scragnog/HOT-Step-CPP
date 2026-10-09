@@ -81,8 +81,10 @@ test('Song Builder: a stale project revision on a section command is 409 with cu
 
   const unchanged = await client.getBuilderProject(project.id as string);
   assert.equal((unchanged.project as Record<string, unknown>).revision, beforeRevision);
+  assert.deepEqual(unchanged.sections, before.sections);
 
   const retried = await client.stopBuilderSection(generated.sectionId, currentRevision as number);
+  assert.equal((retried.project as Record<string, unknown>).revision, beforeRevision + 1);
   const retriedSection = (retried.sections as Array<Record<string, unknown>>)[0];
   assert.equal(retriedSection.status, 'ready');
 });
@@ -262,9 +264,11 @@ test('Studio drafts: a stale revision on PUT is 409 with currentRevision, state 
 
   const unchanged = await client.getDraft(created.document.id);
   assert.equal(unchanged.document.revision, created.document.revision);
+  assert.equal((unchanged.document as { body: { fields: Record<string, unknown> } }).body.fields['hs-caption'], 'v1');
 
   const retried = await client.putDraft(created.document.id, currentRevision as number, { studio: 'create', fields: { 'hs-caption': 'v2' } });
   assert.equal(retried.document.revision, created.document.revision + 1);
+  assert.equal((retried.document as { body: { fields: Record<string, unknown> } }).body.fields['hs-caption'], 'v2');
 });
 
 test('Studio drafts: import moves a browser value into a new draft', async () => {
