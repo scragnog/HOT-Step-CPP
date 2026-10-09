@@ -222,4 +222,259 @@ export class ReferenceClient {
   async supersepRelease(jobId: string): Promise<Record<string, unknown>> {
     return asJson(await fetch(`${this.origin}/api/supersep/${jobId}/release`, { method: 'POST', headers: this.headers() }));
   }
+
+  // ── 7f-2: Song Builder, Library, Playlists, studio drafts, presets,
+  // import/export and settings/backends. Added after the 7f-1 methods
+  // above; those are unchanged. ──────────────────────────────────────────
+
+  // ── Song Builder (/api/builder) ─────────────────────────────────────────
+  async createBuilderProject(body: Record<string, unknown> = {}): Promise<{ project: Record<string, unknown>; sections: unknown[] }> {
+    return asJson(await fetch(`${this.origin}/api/builder/projects`, {
+      method: 'POST', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify(body),
+    }));
+  }
+
+  async getBuilderProject(id: string): Promise<{ project: Record<string, unknown>; sections: unknown[] }> {
+    return asJson(await fetch(`${this.origin}/api/builder/projects/${id}`, { headers: this.headers() }));
+  }
+
+  async listBuilderProjects(): Promise<{ projects: unknown[] }> {
+    return asJson(await fetch(`${this.origin}/api/builder/projects`, { headers: this.headers() }));
+  }
+
+  async patchBuilderProject(id: string, body: Record<string, unknown>): Promise<{ project: Record<string, unknown>; sections: unknown[] }> {
+    return asJson(await fetch(`${this.origin}/api/builder/projects/${id}`, {
+      method: 'PATCH', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify(body),
+    }));
+  }
+
+  async deleteBuilderProject(id: string): Promise<{ ok: true }> {
+    return asJson(await fetch(`${this.origin}/api/builder/projects/${id}`, { method: 'DELETE', headers: this.headers() }));
+  }
+
+  async generateBuilderSection(projectId: string, body: Record<string, unknown>): Promise<{ project: Record<string, unknown>; sections: unknown[]; jobId: string; sectionId: string }> {
+    return asJson(await fetch(`${this.origin}/api/builder/projects/${projectId}/sections/generate`, {
+      method: 'POST', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify(body),
+    }));
+  }
+
+  async chooseBuilderSection(sectionId: string, songId: string, expectedRevision: number): Promise<{ project: Record<string, unknown>; sections: unknown[] }> {
+    return asJson(await fetch(`${this.origin}/api/builder/sections/${sectionId}/choose`, {
+      method: 'POST', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ songId, expectedRevision }),
+    }));
+  }
+
+  async stopBuilderSection(sectionId: string, expectedRevision: number): Promise<{ project: Record<string, unknown>; sections: unknown[] }> {
+    return asJson(await fetch(`${this.origin}/api/builder/sections/${sectionId}/stop`, {
+      method: 'POST', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ expectedRevision }),
+    }));
+  }
+
+  async patchBuilderSection(sectionId: string, body: Record<string, unknown>): Promise<{ project: Record<string, unknown>; sections: unknown[] }> {
+    return asJson(await fetch(`${this.origin}/api/builder/sections/${sectionId}`, {
+      method: 'PATCH', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify(body),
+    }));
+  }
+
+  async deleteBuilderSection(sectionId: string, expectedRevision: number): Promise<{ project: Record<string, unknown>; sections: unknown[] }> {
+    return asJson(await fetch(`${this.origin}/api/builder/sections/${sectionId}?expectedRevision=${expectedRevision}`, {
+      method: 'DELETE', headers: this.headers(),
+    }));
+  }
+
+  // ── Library (/api/songs) ────────────────────────────────────────────────
+  async listSongs(source?: string): Promise<{ songs: Array<Record<string, unknown>> }> {
+    const qs = source ? `?source=${encodeURIComponent(source)}` : '';
+    return asJson(await fetch(`${this.origin}/api/songs${qs}`, { headers: this.headers() }));
+  }
+
+  async songIds(): Promise<{ ids: string[] }> {
+    return asJson(await fetch(`${this.origin}/api/songs/ids`, { headers: this.headers() }));
+  }
+
+  async recentSongs(source = 'all', limit = 50): Promise<{ songs: Array<Record<string, unknown>> }> {
+    return asJson(await fetch(`${this.origin}/api/songs/recent?source=${source}&limit=${limit}`, { headers: this.headers() }));
+  }
+
+  async getSong(id: string): Promise<{ song: Record<string, unknown> }> {
+    return asJson(await fetch(`${this.origin}/api/songs/${id}`, { headers: this.headers() }));
+  }
+
+  async createSong(body: Record<string, unknown>): Promise<{ song: Record<string, unknown> }> {
+    return asJson(await fetch(`${this.origin}/api/songs`, {
+      method: 'POST', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify(body),
+    }));
+  }
+
+  async patchSong(id: string, body: Record<string, unknown>): Promise<{ song: Record<string, unknown> }> {
+    return asJson(await fetch(`${this.origin}/api/songs/${id}`, {
+      method: 'PATCH', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify(body),
+    }));
+  }
+
+  async deleteSong(id: string): Promise<{ success: true }> {
+    return asJson(await fetch(`${this.origin}/api/songs/${id}`, { method: 'DELETE', headers: this.headers() }));
+  }
+
+  async bulkDeleteSongs(ids: string[]): Promise<{ success: true; deletedCount: number }> {
+    return asJson(await fetch(`${this.origin}/api/songs/bulk-delete`, {
+      method: 'POST', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ ids }),
+    }));
+  }
+
+  async importSongs(files: Array<{ buf: Buffer; filename: string }>, description?: string): Promise<{ songs: unknown[]; errors: unknown[]; accepted: string[] }> {
+    const form = new FormData();
+    for (const f of files) form.append('audio', new Blob([f.buf], { type: 'audio/wav' }), f.filename);
+    if (description !== undefined) form.append('description', description);
+    return asJson(await fetch(`${this.origin}/api/songs/import`, { method: 'POST', headers: this.headers(), body: form }));
+  }
+
+  // ── Playlist (/api/studio-drafts/playlist) ──────────────────────────────
+  async getPlaylist(): Promise<{ document: { id: string; revision: number; body: { items: unknown[] } } | null }> {
+    return asJson(await fetch(`${this.origin}/api/studio-drafts/playlist`, { headers: this.headers() }));
+  }
+
+  async playlistCommand(expectedRevision: number, command: Record<string, unknown>): Promise<{ document: { id: string; revision: number; body: { items: unknown[] } } }> {
+    return asJson(await fetch(`${this.origin}/api/studio-drafts/playlist/commands`, {
+      method: 'POST', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ expectedRevision, command }),
+    }));
+  }
+
+  // ── Studio drafts (/api/studio-drafts/drafts) ───────────────────────────
+  async listDrafts(studio?: string): Promise<{ documents: unknown[] }> {
+    const qs = studio ? `?studio=${encodeURIComponent(studio)}` : '';
+    return asJson(await fetch(`${this.origin}/api/studio-drafts/drafts${qs}`, { headers: this.headers() }));
+  }
+
+  async createDraft(body: Record<string, unknown>): Promise<{ document: { id: string; revision: number } }> {
+    return asJson(await fetch(`${this.origin}/api/studio-drafts/drafts`, {
+      method: 'POST', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ body }),
+    }));
+  }
+
+  async getDraft(id: string): Promise<{ document: { id: string; revision: number }; sourceError: string | null }> {
+    return asJson(await fetch(`${this.origin}/api/studio-drafts/drafts/${id}`, { headers: this.headers() }));
+  }
+
+  async putDraft(id: string, expectedRevision: number, body: Record<string, unknown>): Promise<{ document: { id: string; revision: number } }> {
+    return asJson(await fetch(`${this.origin}/api/studio-drafts/drafts/${id}`, {
+      method: 'PUT', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ body, expectedRevision }),
+    }));
+  }
+
+  async deleteDraft(id: string, expectedRevision: number): Promise<{ removed: true }> {
+    return asJson(await fetch(`${this.origin}/api/studio-drafts/drafts/${id}?expectedRevision=${expectedRevision}`, {
+      method: 'DELETE', headers: this.headers(),
+    }));
+  }
+
+  async importDraft(body: Record<string, unknown>): Promise<{ receipt: unknown; document: unknown; created: boolean }> {
+    return asJson(await fetch(`${this.origin}/api/studio-drafts/import`, {
+      method: 'POST', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify(body),
+    }));
+  }
+
+  async getHandoff(id: string): Promise<{ document: unknown }> {
+    return asJson(await fetch(`${this.origin}/api/studio-drafts/handoffs/${id}`, { headers: this.headers() }));
+  }
+
+  // ── Presets (/api/preferences) — installation-scoped, no token ─────────
+  async listPresets(family: string): Promise<{ documents: Array<{ id: string; revision: number; body: unknown }> }> {
+    return asJson(await fetch(`${this.origin}/api/preferences/presets/${family}`));
+  }
+
+  async createPreset(family: string, body: unknown): Promise<{ document: { id: string; revision: number; body: unknown } }> {
+    return asJson(await fetch(`${this.origin}/api/preferences/presets/${family}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }),
+    }));
+  }
+
+  async putPreset(family: string, id: string, expectedRevision: number, body: unknown): Promise<{ document: { id: string; revision: number; body: unknown } }> {
+    return asJson(await fetch(`${this.origin}/api/preferences/presets/${family}/${id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedRevision, body }),
+    }));
+  }
+
+  async deletePreset(family: string, id: string, expectedRevision: number): Promise<{ removed: true }> {
+    return asJson(await fetch(`${this.origin}/api/preferences/presets/${family}/${id}?expectedRevision=${expectedRevision}`, { method: 'DELETE' }));
+  }
+
+  async importPresets(family: string, items: Array<Record<string, unknown>>): Promise<{ results: unknown[] }> {
+    return asJson(await fetch(`${this.origin}/api/preferences/presets/${family}/import`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }),
+    }));
+  }
+
+  async resolveYue2Preset(body: Record<string, unknown>): Promise<{ result: { effectiveForm: Record<string, unknown>; lyricTiming: boolean } }> {
+    return asJson(await fetch(`${this.origin}/api/preferences/presets/yue2-joint/resolve`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }));
+  }
+
+  async getSingletonSetting(family: string): Promise<{ document: { id: string; revision: number; body: unknown } | null }> {
+    return asJson(await fetch(`${this.origin}/api/preferences/settings/${family}`));
+  }
+
+  async putSingletonSetting(family: string, body: unknown, expectedRevision?: number): Promise<{ document: { id: string; revision: number; body: unknown } }> {
+    return asJson(await fetch(`${this.origin}/api/preferences/settings/${family}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expectedRevision, body }),
+    }));
+  }
+
+  // ── Import/export (/api/export-import) ──────────────────────────────────
+  async uploadAsset(wav: Buffer, filename = 'fixture.wav'): Promise<{ assetId: string }> {
+    const form = new FormData();
+    form.append('audio', new Blob([wav], { type: 'audio/wav' }), filename);
+    return asJson(await fetch(`${this.origin}/api/export-import/assets`, { method: 'POST', headers: this.headers(), body: form }));
+  }
+
+  async importAssets(items: Array<{ assetId: string; description?: string }>): Promise<{ items: Array<Record<string, unknown>> }> {
+    return asJson(await fetch(`${this.origin}/api/export-import/imports`, {
+      method: 'POST', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ items }),
+    }));
+  }
+
+  async resolveExport(body: Record<string, unknown>): Promise<{ items: Array<Record<string, unknown>> }> {
+    return asJson(await fetch(`${this.origin}/api/export-import/exports/resolve`, {
+      method: 'POST', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify(body),
+    }));
+  }
+
+  /** GET the resolved download URL; returns the raw Response (binary body,
+   *  no token needed) so the caller can check headers and bytes. */
+  async download(url: string): Promise<Response> {
+    return fetch(`${this.origin}${url}`);
+  }
+
+  async validateProfile(filename: string, profile: Record<string, unknown>): Promise<{ name: string; data: Record<string, unknown> }> {
+    return asJson(await fetch(`${this.origin}/api/export-import/profiles/validate`, {
+      method: 'POST', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ filename, profile }),
+    }));
+  }
+
+  // ── Settings/backends (/api/settings, /api/backends, /api/capabilities) ─
+  async getEnvSettings(): Promise<{ values: Record<string, string>; restartKeys: string[] }> {
+    return asJson(await fetch(`${this.origin}/api/settings/env`));
+  }
+
+  async putEnvSettings(values: Record<string, string>): Promise<{ updated: string[]; restartRequired: boolean }> {
+    return asJson(await fetch(`${this.origin}/api/settings/env`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values }),
+    }));
+  }
+
+  async listBackends(): Promise<{ backends: Array<Record<string, unknown>>; activeId: string }> {
+    return asJson(await fetch(`${this.origin}/api/backends`));
+  }
+
+  async setActiveBackend(id: string): Promise<{ activeId: string }> {
+    return asJson(await fetch(`${this.origin}/api/backends/active`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+    }));
+  }
+
+  async getCapabilities(backend?: string): Promise<Record<string, unknown>> {
+    const qs = backend ? `?backend=${encodeURIComponent(backend)}` : '';
+    return asJson(await fetch(`${this.origin}/api/capabilities${qs}`));
+  }
 }
