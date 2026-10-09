@@ -107,7 +107,7 @@ Every audited workflow group, its contract page and its reference-client coverag
 |---|---|---|
 | Create | [Create's control dictionary](frontend-create-controls.md), [Generate request](api-contracts.md#generate-request) | `client.test.ts` |
 | Insta-Gen | [Studio workflows](frontend-studios.md#insta-gen-insta-preview-insta-direct-insta-approve) | `client.test.ts` |
-| Lyric Studio | [Studio workflows](frontend-studios.md#lyric-studio-batch-lyric-batch) | `client.lyric.test.ts` (partial — see "What this page cannot prove") |
+| Lyric Studio | [Studio workflows](frontend-studios.md#lyric-studio-batch-lyric-batch) | `client.lyric.test.ts`, `client.lyric.chain.test.ts` (full chain, fixture orchestration — live LLM/Genius unverified, see "What this page cannot prove") |
 | Cover | [Studio workflows](frontend-studios.md#cover-cover-open-cover-caption-cover-transcribe-cover-render) | `client.test.ts` (open only), `client.cover.test.ts` (full chain) |
 | Repaint | [Studio workflows](frontend-studios.md#repaint-and-lego-layer-repaint-render-layer-render) | `client.test.ts` |
 | Stem separation | [Studio workflows](frontend-studios.md#stem-separation) | `client.test.ts` |
@@ -129,14 +129,15 @@ against the real training-job and workflow-job persistence, not simulated.
 
 ## What this page cannot prove
 
-- **Lyric Studio's generate, refine and fetch steps, plus retry and stale-revision.**
-  `generate`/`refine` call a real LLM provider and `fetch` calls the real Genius API, neither
-  with an injectable seam (`lyricWorkflow.ts`). `render` needs a Generation row that in
-  production only exists after a successful generate/refine, so it is blocked transitively,
-  and so is a successful `profile`. `client.lyric.test.ts` proves submission, validation,
-  per-item error ordering, idempotency conflict, and that cancelling an already-finished or
-  unknown job is refused (409/404) — not a successful generate, refine, fetch, render, or
-  profile, and not retry or stale-revision handling, which this harness has no test for.
+- **Lyric Studio's real LLM provider and Genius calls.** `generate`/`refine` call a real LLM
+  provider and `fetch` calls the real Genius API; `lyricWorkflow.ts`'s
+  `overrideLyricWorkflowDeps()` lets `client.lyric.chain.test.ts` exercise the full
+  fetch → profile → generate → refine → render chain, a mixed-batch per-item failure, a
+  stale-revision refine, and a cancel-and-retry, all for real against the production routes
+  and persistence — but Genius and the LLM themselves are fixtures. Whether the real Genius
+  API or a real LLM provider returns usable output is unverified by this harness.
+  `client.lyric.test.ts` separately proves auth failure, rejected input, an idempotency
+  conflict, and that cancelling an already-finished or unknown job is refused (409/404).
 - **Browser-only behaviour.** Which `localStorage` value a real browser reads, writes or
   migrates; crossfade/gapless playback; device-capture recording. These need a browser, not
   an HTTP client.
