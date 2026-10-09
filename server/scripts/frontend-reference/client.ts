@@ -6,6 +6,7 @@
 // to build a replacement frontend without reading server/src's internals.
 
 import type { WorkflowJob } from '../../src/contracts/workflow.js';
+import type { StudioDraftResponse } from '../../src/contracts/studioDrafts.js';
 import { randomUUID } from 'node:crypto';
 
 export class ClientError extends Error {
@@ -346,17 +347,17 @@ export class ReferenceClient {
     return asJson(await fetch(`${this.origin}/api/studio-drafts/drafts${qs}`, { headers: this.headers() }));
   }
 
-  async createDraft(body: Record<string, unknown>): Promise<{ document: { id: string; revision: number } }> {
+  async createDraft(body: Record<string, unknown>): Promise<StudioDraftResponse> {
     return asJson(await fetch(`${this.origin}/api/studio-drafts/drafts`, {
       method: 'POST', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ body }),
     }));
   }
 
-  async getDraft(id: string): Promise<{ document: { id: string; revision: number }; sourceError: string | null }> {
+  async getDraft(id: string): Promise<StudioDraftResponse & { sourceError: string | null }> {
     return asJson(await fetch(`${this.origin}/api/studio-drafts/drafts/${id}`, { headers: this.headers() }));
   }
 
-  async putDraft(id: string, expectedRevision: number, body: Record<string, unknown>): Promise<{ document: { id: string; revision: number } }> {
+  async putDraft(id: string, expectedRevision: number, body: Record<string, unknown>): Promise<StudioDraftResponse> {
     return asJson(await fetch(`${this.origin}/api/studio-drafts/drafts/${id}`, {
       method: 'PUT', headers: this.headers({ 'Content-Type': 'application/json' }), body: JSON.stringify({ body, expectedRevision }),
     }));

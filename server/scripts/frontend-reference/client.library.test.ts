@@ -264,11 +264,11 @@ test('Studio drafts: a stale revision on PUT is 409 with currentRevision, state 
 
   const unchanged = await client.getDraft(created.document.id);
   assert.equal(unchanged.document.revision, created.document.revision);
-  assert.equal((unchanged.document as { body: { fields: Record<string, unknown> } }).body.fields['hs-caption'], 'v1');
+  assert.equal(unchanged.document.body.fields['hs-caption'], 'v1');
 
   const retried = await client.putDraft(created.document.id, currentRevision as number, { studio: 'create', fields: { 'hs-caption': 'v2' } });
   assert.equal(retried.document.revision, created.document.revision + 1);
-  assert.equal((retried.document as { body: { fields: Record<string, unknown> } }).body.fields['hs-caption'], 'v2');
+  assert.equal(retried.document.body.fields['hs-caption'], 'v2');
 });
 
 test('Studio drafts: import moves a browser value into a new draft', async () => {
