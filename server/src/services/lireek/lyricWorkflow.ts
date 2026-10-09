@@ -319,4 +319,6 @@ export async function runLyricBatch(ctx: WorkflowContext<LyricBatchInput>) {
   return { results };
 }
 
-registerWorkflowKind({ kind: 'lyric-batch', input: lyricBatchInput, run: runLyricBatch, maxConcurrent: 1 });
+// A bulk run of hundreds of songs takes hours. Each LLM call has its own
+// timeout (LLM_TIMEOUT_MS), so this only bounds a run that never ends.
+registerWorkflowKind({ kind: 'lyric-batch', input: lyricBatchInput, run: runLyricBatch, maxConcurrent: 1, timeoutMs: 7 * 24 * 60 * 60_000 });
