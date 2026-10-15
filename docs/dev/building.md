@@ -57,6 +57,26 @@ cd HOT-Step-CPP
 If you cloned without `--recursive`, run `git submodule update --init --recursive` to fetch
 the `engine/ggml` and `engine/vendor/vst3sdk` submodules.
 
+## The Makefile wrapper (Linux and WSL)
+
+The root `Makefile` is the day-to-day entry point on Linux and WSL. It wraps
+`cmake`, `npm install` and the launcher for you:
+
+```
+make setup       # apt: build-essential, cmake, git (use nvm for Node 20-24)
+make submodules  # git submodule update --init --recursive
+make build       # build the C++ engine
+make install     # npm install in server/ and ui/
+make run         # ./launch.sh, production mode
+```
+
+`make check-config`, `make check-node` and `make clean CONFIRM=1` are also available;
+`make help` lists every target. The Makefile picks the backend on its own: CUDA when a
+driver is visible (the CUDA bridge under `/usr/lib/wsl/lib` on WSL, `/usr/local/cuda`
+on native Linux), Vulkan if `glslc` is present, CPU otherwise. Force one with
+`BACKEND=cuda`, `BACKEND=vulkan` or `BACKEND=cpu`. The steps below are the same work run
+by hand, and remain the path to use on Windows, where the Makefile does not apply.
+
 ## Build the engine
 
 `engine/ggml` is pinned to the HOT-ggml fork, which carries HOT-Step's ggml changes as

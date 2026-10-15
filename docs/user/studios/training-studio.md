@@ -13,6 +13,35 @@ Training follows whichever generation backend is active (ACE-Step, MiniMax-Music
 
 An external agent (Claude Code, Codex) can also drive the dataset and training pipeline through the `hotstep` MCP server. See [Driving HOT-Step with an agent](../mcp.md).
 
+## Preparing your files
+
+The folder you point the studio at is the source of truth: audio files live there, and each track's metadata lives in a small text **sidecar** next to it. Nothing is cached — edit or delete a sidecar on disk and the studio reflects that change. On first scan a track with no usable caption shows as **unlabeled**; the Label step fills in captions, lyrics and BPM/key for you, but you can also author sidecars by hand to skip it.
+
+**Supported audio:** `.wav`, `.mp3`, `.flac`, `.ogg`, `.opus`, `.m4a`, `.aac`. When several files share a base name (e.g. `song.flac` and `song.mp3`), only one is kept, in this priority order: `.flac` > `.wav` > `.m4a` > `.aac` > `.ogg` > `.opus` > `.mp3`.
+
+For a track at `…/MyArtist/song.wav`, the studio looks for sidecars beside it and uses the first convention that matches, in this order:
+
+1. **Single sidecar** — `song.txt` with one `key: value` per line. The six recognised keys are `caption`, `genre`, `bpm`, `key`, `signature`, `is_instrumental`; everything after a `lyrics:` line is taken verbatim as the lyric. A track counts as labeled as soon as this file has a `caption:` line:
+   ```
+   caption: dreamy lo-fi beat, soft vinyl crackle, warm bass
+   genre: lofi hip hop
+   bpm: 82
+   key: F# minor
+   signature: 4/4
+   is_instrumental: true
+   lyrics: [verse]
+   ...
+   ```
+   Only `caption` and `lyrics` matter for labeling; the rest are optional.
+2. **Split files** — `song.caption.txt` holds the caption (its whole contents) and `song.lyrics.txt` holds the lyrics. Used when there is no usable single sidecar.
+3. **Lyrics-only** — a bare `song.txt` with no `key: value` lines is read as plain lyrics, so the track has lyrics but still no caption and stays unlabeled until one is added.
+
+**How a caption is found:** a track's caption is the `caption:` line from its single sidecar, or the whole contents of a `song.caption.txt` file — whichever exists first. If neither is present the track has no caption and shows as **unlabeled**; that is what the Label step generates (an AI caption for style/genre, Genius for lyrics, Essentia for BPM/key).
+
+**File names with dots:** a sidecar's base name is the audio file minus its final extension, so `feat. jo.smith.wav` pairs with `feat. jo.smith.txt` — only the last dot (the extension) is stripped.
+
+Some backends also read a model-specific caption sidecar beside the generic ones above: `<name>.mm3.txt` for MiniMax-Music3's structured caption and `<name>.yue2.txt` for YuE2's planner sentence.
+
 ## Workflow
 
 1. Click **New dataset**, pick a source folder (recursively scanned by default), and confirm the auto-filled name, trigger word, and lyric language. HOT-Step scans the folder and shows a preview (file count, extensions, whether a `dataset.json` already exists) before anything is created.

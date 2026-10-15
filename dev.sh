@@ -1,5 +1,5 @@
 #!/bin/bash
-# HOT-Step CPP — macOS Development Mode
+# HOT-Step CPP — Development Mode (Linux / WSL / macOS)
 #
 # Starts Vite dev server (hot-reload UI) + Node.js server (tsx watch).
 # Automatically finds a compatible Node.js.

@@ -105,7 +105,7 @@ For contributors:
 
 ## Building from source
 
-Most people should use a [release](#download). To build it yourself, including the engine, the dev loop and portable packaging, follow [Building from source](docs/dev/building.md).
+Most people should use a [release](#download). To build it yourself, including the engine, the dev loop and portable packaging, follow [Building from source](docs/dev/building.md). On Linux and WSL the root `Makefile` covers the whole flow with `make setup`, `make build`, `make install` and `make run`; on Windows use `dev.bat` and `LAUNCH.bat`.
 
 ## Troubleshooting
 
