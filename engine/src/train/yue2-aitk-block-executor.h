@@ -23,6 +23,7 @@ struct Yue2AitkBlockForwardHost {
     std::vector<float> hidden;
     std::vector<float> key;
     std::vector<float> value;
+    bool attention_saved = false; // packed O+LSE was copied into device_attn
 };
 
 struct Yue2AitkBlockBackwardHost {
@@ -198,9 +199,10 @@ public:
                         Yue2AitkBlockWorkspace * workspace = nullptr,
                         ggml_tensor * device_input = nullptr, ggml_tensor * device_output = nullptr,
                         ggml_tensor * capture_k = nullptr, ggml_tensor * capture_v = nullptr,
-                        bool async = false) {
+                        bool async = false, ggml_tensor * device_attn = nullptr) {
         using namespace yue2_aitk_executor_detail;
         if (!result) return fail(error, "forward result is null");
+        result->attention_saved = false;
         if ((capture_k == nullptr) != (capture_v == nullptr)) return fail(error, "device K/V capture canvases must be paired");
         if ((prefix_k_canvas == nullptr) != (prefix_v_canvas == nullptr)) return fail(error, "prefix canvases must be paired");
         yue2_aitk_prof::Lap lap;
@@ -226,6 +228,12 @@ public:
         ggml_tensor * key_cont = capture_kv && out.key ? ggml_cont(r.ctx, out.key) : nullptr;
         ggml_tensor * value_cont = capture_kv && out.value ? ggml_cont(r.ctx, out.value) : nullptr;
         ggml_tensor * hidden_copy = device_output ? ggml_cpy(r.ctx, out.hidden, device_output) : nullptr;
+        // Keep the fused attention's packed O+LSE on the tape for the backward recompute.
+        ggml_tensor * attn_copy = nullptr;
+        if (device_attn && out.attention_packed && device_attn->type == GGML_TYPE_F32 && ggml_is_contiguous(device_attn) &&
+            device_attn->data && ggml_nelements(device_attn) == ggml_nelements(out.attention_packed))
+            attn_copy = ggml_cpy(r.ctx, out.attention_packed, device_attn);
+        if (attn_copy) ggml_build_forward_expand(graph, attn_copy);
         ggml_build_forward_expand(graph, hidden_copy ? hidden_copy : out.hidden); if (key_cont) ggml_build_forward_expand(graph, key_cont); if (value_cont) ggml_build_forward_expand(graph, value_cont);
         if (capture_k) {
             // The leading `sequence` rows of each [D, rows, Nkv] canvas take
@@ -248,6 +256,7 @@ public:
             ggml_set_input(h); ggml_set_output(hidden_copy ? hidden_copy : out.hidden);
             if (key_cont) ggml_set_output(key_cont);
             if (value_cont) ggml_set_output(value_cont);
+            if (attn_copy) ggml_set_output(attn_copy);
             if (!workspace->allocate(backend, graph, error)) return false;
         } else if (!allocate(&r, backend, error)) return false;
         lap.mark("fwd: gallocr/allocate");
@@ -263,6 +272,7 @@ public:
         if ((launch_async ? ggml_backend_graph_compute_async(backend, graph) : ggml_backend_graph_compute(backend, graph)) != GGML_STATUS_SUCCESS)
             return fail(error, "forward graph compute failed");
         lap.mark("fwd: graph_compute (launch)");
+        result->attention_saved = attn_copy != nullptr;
         result->hidden.clear();
         if (!device_output) { result->hidden.resize(static_cast<size_t>(config.hidden*sequence)); ggml_backend_tensor_get(out.hidden, result->hidden.data(), 0, ggml_nbytes(out.hidden)); }
         result->key.clear(); result->value.clear();
@@ -283,7 +293,8 @@ public:
                          ggml_tensor * device_input = nullptr, ggml_tensor * device_upstream = nullptr,
                          ggml_tensor * device_dx = nullptr,
                          const std::vector<ggml_tensor *> * gradient_sinks = nullptr,
-                         bool accumulate_sinks = false, bool async = false) {
+                         bool accumulate_sinks = false, bool async = false,
+                         ggml_tensor * device_attn = nullptr) {
         using namespace yue2_aitk_executor_detail;
         yue2_aitk_prof::Lap lap;
         if (!result || !adapters) return fail(error, "backward result/adapters is null");
@@ -310,8 +321,11 @@ public:
         ggml_tensor * mask=constants ? constants->mask : make_mask(r.ctx,sequence,prefix_length,mask_mode,&mask_data,error);
         if(!h||!upstream||!cos_t||!sin_t||!mask) return fail(error,"backward tensor allocation failed");
         TensorFlagsGuard input_flags(device_input);
+        // Saved packed O+LSE from the forward (a plain device leaf, like the other device tensors).
+        if (device_attn && !(device_attn->type == GGML_TYPE_F32 && ggml_is_contiguous(device_attn) && device_attn->data)) device_attn = nullptr;
+        TensorFlagsGuard attn_flags(device_attn);
         ggml_set_param(h);
-        Yue2AitkBlockResult out=yue2_aitk_graph::block(r.ctx,config,weights,norms,adapters,h,cos_t,sin_t,mask,prefix_k_canvas,prefix_v_canvas,prefix_length,causal_hint(mask_mode,prefix_length,sequence),constants ? constants->positions : nullptr);
+        Yue2AitkBlockResult out=yue2_aitk_graph::block(r.ctx,config,weights,norms,adapters,h,cos_t,sin_t,mask,prefix_k_canvas,prefix_v_canvas,prefix_length,causal_hint(mask_mode,prefix_length,sequence),constants ? constants->positions : nullptr,device_attn);
         ggml_tensor * loss=ggml_sum(r.ctx,ggml_mul(r.ctx,out.hidden,upstream)); ggml_cgraph * graph=ggml_new_graph_custom(r.ctx,65536,true); if(!loss||!graph) return fail(error,"backward graph allocation failed");
         ggml_build_forward_expand(graph,loss); ggml_set_loss(loss);
         lap.mark("bwd: graph build");

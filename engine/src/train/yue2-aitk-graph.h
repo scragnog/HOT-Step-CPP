@@ -33,6 +33,9 @@ struct Yue2AitkBlockResult {
     // independent non-param buffers before NAR; never connect AR to NAR backward.
     ggml_tensor * key = nullptr;
     ggml_tensor * value = nullptr;
+    // Packed O+LSE node of the fused attention (nullptr on the exact-math path).
+    // The forward can copy it into the tape; the backward recompute reuses it.
+    ggml_tensor * attention_packed = nullptr;
 };
 
 namespace yue2_aitk_graph {
@@ -285,7 +288,8 @@ inline Yue2AitkBlockResult block(ggml_context * ctx, const Yue2AitkGraphConfig &
                                  ggml_tensor * cosine, ggml_tensor * sine, ggml_tensor * mask,
                                  ggml_tensor * prefix_k_canvas = nullptr,
                                  ggml_tensor * prefix_v_canvas = nullptr, int64_t prefix_length = 0,
-                                 int64_t causal_hint = -1, ggml_tensor * positions = nullptr) {
+                                 int64_t causal_hint = -1, ggml_tensor * positions = nullptr,
+                                 ggml_tensor * saved_attention = nullptr) {
     const int64_t S = h->ne[1], D = c.head_dim, Q = D*c.heads, KV = D*c.kv_heads;
     GGML_ASSERT(c.hidden == Q && h->ne[0] == c.hidden && prefix_length >= 0);
     GGML_ASSERT((prefix_k_canvas == nullptr) == (prefix_v_canvas == nullptr));
@@ -357,6 +361,12 @@ inline Yue2AitkBlockResult block(ggml_context * ctx, const Yue2AitkGraphConfig &
     // go into the detached canvas, whose SET backward never reads them.
     if (causal_hint >= 0) ggml_flash_attn_train_set_causal(packed, int32_t(causal_hint));
     if (prefix_k_canvas && prefix_length > 0) ggml_flash_attn_train_set_kv_grad_start(packed, int32_t(prefix_length));
+    // A saved copy of this node's forward result (same inputs, same op params)
+    // lets the Metal backend copy instead of recompute. Type/shape are checked
+    // here so a mismatched slot silently falls back to the recompute.
+    if (saved_attention && saved_attention->type == GGML_TYPE_F32 && ggml_is_contiguous(saved_attention) &&
+        ggml_nelements(saved_attention) == ggml_nelements(packed)) ggml_flash_attn_train_set_saved(packed, saved_attention);
+    out.attention_packed = packed;
     attention = round(ctx, ggml_reshape_2d(ctx, ggml_flash_attn_train_get_o(ctx, packed), Q, S));
     }
 #endif
