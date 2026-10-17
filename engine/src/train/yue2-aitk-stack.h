@@ -47,6 +47,11 @@ struct Yue2AitkStackTape {
     ggml_context * device_ctx = nullptr;
     ggml_backend_buffer_t device_buffer = nullptr;
     std::vector<ggml_tensor *> device_layers;
+    // Per layer, the fused attention's packed O+LSE from the forward (empty when
+    // disabled or not on Metal). device_attn_ok[i] is set only when layer i's
+    // forward really copied into it, so the backward never reads a stale slot.
+    std::vector<ggml_tensor *> device_attn;
+    std::vector<char> device_attn_ok;
     ggml_tensor * device_grad[2] = {nullptr, nullptr};
     bool device_tape = false;
     bool device_saved = false;
@@ -58,6 +63,7 @@ struct Yue2AitkStackTape {
         if (device_buffer) ggml_backend_buffer_free(device_buffer);
         if (device_ctx) ggml_free(device_ctx);
         device_buffer = nullptr; device_ctx = nullptr; device_layers.clear(); device_final = nullptr;
+        device_attn.clear(); device_attn_ok.clear();
         device_grad[0] = device_grad[1] = nullptr; device_tape = false; device_saved = false;
     }
     ~Yue2AitkStackTape() {
@@ -112,13 +118,23 @@ inline Yue2AitkBlockNorms norms(const Yue2AitkModel & model, bool nar, size_t la
             model.ordinary((prefix+"self_attn.k_norm.weight").c_str())};
 }
 inline bool valid_norms(const Yue2AitkBlockNorms & n) { return n.input && n.post_attention && n.q && n.k; }
+// Keep the fused attention's packed O+LSE per layer on the tape so the backward
+// recompute can copy it instead of re-running the attention forward. Metal only
+// (the only backend that consumes it); YUE2_AITK_SAVE_ATTN=0 turns it off.
+inline bool save_attention_enabled(ggml_backend_t backend) {
+    const char * e = std::getenv("YUE2_AITK_SAVE_ATTN");
+    if (e && std::strcmp(e, "0") == 0) return false;
+    const char * n = backend ? ggml_backend_name(backend) : nullptr;
+    return n && std::strncmp(n, "MTL", 3) == 0;
+}
 inline bool make_device_tape(ggml_backend_t backend, const Yue2AitkGraphConfig & c,
                              size_t layers, int64_t length, bool save,
                              Yue2AitkStackTape * tape, std::string * error) {
     using yue2_aitk_executor_detail::fail;
     if (!backend || !tape || length <= 0 || c.hidden <= 0) return fail(error, "invalid device tape request");
     const size_t count = save ? layers + 1 : 2;
-    const size_t overhead = (count + 2) * ggml_tensor_overhead() + 4096;
+    const bool keep_attn = save && save_attention_enabled(backend);
+    const size_t overhead = (count + 2 + (keep_attn ? layers : 0)) * ggml_tensor_overhead() + 4096;
     ggml_init_params p{}; p.mem_size = overhead; p.no_alloc = true;
     tape->device_ctx = ggml_init(p);
     if (!tape->device_ctx) return fail(error, "device tape context allocation failed");
@@ -126,6 +142,18 @@ inline bool make_device_tape(ggml_backend_t backend, const Yue2AitkGraphConfig &
     for (size_t i = 0; i < count; ++i) {
         tape->device_layers[i] = ggml_new_tensor_2d(tape->device_ctx, GGML_TYPE_F32, c.hidden, length);
         if (!tape->device_layers[i]) return fail(error, "device tape tensor allocation failed");
+    }
+    if (keep_attn) {
+        // packed layout = O [D*Nh*S floats, padded to 128 B] + LSE [Nh*S floats]
+        // (ggml_flash_attn_train_nelements); the executor re-checks the element count.
+        const int64_t o_floats = c.head_dim * c.heads * length;
+        const int64_t nelem = (((o_floats * 4 + 127) / 128) * 128) / 4 + c.heads * length;
+        tape->device_attn.resize(layers);
+        tape->device_attn_ok.assign(layers, 0);
+        for (size_t i = 0; i < layers; ++i) {
+            tape->device_attn[i] = ggml_new_tensor_1d(tape->device_ctx, GGML_TYPE_F32, nelem);
+            if (!tape->device_attn[i]) return fail(error, "device attention tape tensor allocation failed");
+        }
     }
     tape->device_grad[0] = ggml_new_tensor_2d(tape->device_ctx, GGML_TYPE_F32, c.hidden, length);
     tape->device_grad[1] = ggml_new_tensor_2d(tape->device_ctx, GGML_TYPE_F32, c.hidden, length);
@@ -283,7 +311,9 @@ inline bool forward(ggml_backend_t backend, const Yue2AitkModel & model,
                 constants,fast?&workspace:nullptr,device_in,device_out,
                 device_capture ? capture_prefix->device->k[layer] : nullptr,
                 device_capture ? capture_prefix->device->v[layer] : nullptr,
-                device && async_blocks(prefix))) return false;
+                device && async_blocks(prefix),
+                (device && save_tape && layer < tape->device_attn.size()) ? tape->device_attn[layer] : nullptr)) return false;
+        if (device && save_tape && layer < tape->device_attn_ok.size()) tape->device_attn_ok[layer] = out.attention_saved ? 1 : 0;
         if (!device) hidden=std::move(out.hidden);
         if (capture_prefix && !device_capture) { capture_prefix->keys.push_back(std::move(out.key)); capture_prefix->values.push_back(std::move(out.value)); }
     }
@@ -348,7 +378,8 @@ inline bool backward(ggml_backend_t backend,const Yue2AitkModel & model,
                     tape.nar?Yue2AitkMaskMode::noncausal:Yue2AitkMaskMode::causal,&out,canvas.k,canvas.v,
                     prefix?prefix->length:0,error,constants,fast?&workspace:nullptr,
                     tape.device_layers[input_index],tape.device_grad[ping],tape.device_grad[next],
-                    slots,accumulate,async_blocks(prefix))) return false;
+                    slots,accumulate,async_blocks(prefix),
+                    (layer < tape.device_attn_ok.size() && tape.device_attn_ok[layer]) ? tape.device_attn[layer] : nullptr)) return false;
             if (!slots) { YUE2_PROF("state: gradient upload (host checks + H2D)"); if (!store(layer,out,error)) return false; }
             ping = next;
         }

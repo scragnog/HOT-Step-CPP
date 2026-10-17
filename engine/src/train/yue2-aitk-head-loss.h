@@ -147,8 +147,16 @@ struct CudaDeviceGuard { explicit CudaDeviceGuard(ggml_backend_t) {} bool valid 
 #endif
 
 // One graph/context/buffer per chunk shape. Full chunks are reused for every
+// With no KL weight and no teacher (base rows are the adapted rows) the KL term does not exist:
+// the gradient is (1+0) p - onehot, and ar_kl is reported 0. Skip q, log_q and the base logits then
+// (YUE2_AITK_HEAD_SKIPKL=0 restores the full graph). Portable (non-CUDA) loss only.
+inline bool want_skip_kl(const Request & r) {
+    static const bool off = [] { const char * e = std::getenv("YUE2_AITK_HEAD_SKIPKL"); return e && *e == '0'; }();
+    return !off && !yue2_aitk_is_cuda(r.backend) && r.adapted_rows && r.base_rows == r.adapted_rows && r.kl_weight == 0.0f;
+}
 // 128-position batch; a second cache is created only when a tail exists.
 struct ChunkWorkspace {
+    bool skip_kl = false;
     Temporary tmp;
     std::size_t count = 0;
     ggml_tensor * adapted = nullptr;
@@ -171,6 +179,7 @@ struct ChunkWorkspace {
     Status init(const Request & request, std::size_t requested_count, std::string * error) {
         if (tmp.ctx) return Status::success;
         count = requested_count;
+        skip_kl = want_skip_kl(request);
         ggml_init_params params{};
         params.mem_size = 2 * ggml_graph_overhead_custom(64, false) +
                           ggml_tensor_overhead() * 64 + 4096;
@@ -222,9 +231,10 @@ struct ChunkWorkspace {
             const float w = request.kl_weight, inv = 1.0f / float(request.positions);
             const int64_t V = int64_t(kVocab), n = int64_t(count);
             ggml_tensor * p = ggml_soft_max(tmp.ctx, adapted_logits);
-            ggml_tensor * q = ggml_soft_max(tmp.ctx, base_logits);
+            ggml_tensor * q = skip_kl ? nullptr : ggml_soft_max(tmp.ctx, base_logits);
             flat_index = ggml_new_tensor_1d(tmp.ctx, GGML_TYPE_I32, n);
-            ggml_tensor * g = ggml_add(tmp.ctx, ggml_scale(tmp.ctx, p, (1.0f + w) * inv), ggml_scale(tmp.ctx, q, -w * inv));
+            ggml_tensor * g = skip_kl ? ggml_scale(tmp.ctx, p, (1.0f + w) * inv)
+                : ggml_add(tmp.ctx, ggml_scale(tmp.ctx, p, (1.0f + w) * inv), ggml_scale(tmp.ctx, q, -w * inv));
             ggml_tensor * g_flat = ggml_reshape_2d(tmp.ctx, g, 1, V * n);
             ggml_tensor * at_target = ggml_scale_bias(tmp.ctx, ggml_get_rows(tmp.ctx, g_flat, flat_index), 1.0f, -inv);
             ggml_tensor * g_done = ggml_reshape_2d(tmp.ctx, ggml_set_rows(tmp.ctx, g_flat, at_target, flat_index), V, n);
@@ -232,14 +242,16 @@ struct ChunkWorkspace {
             // CE = -log p[target]; KL = sum q (log q - log p). Clamped logs: a
             // probability below 1e-30 contributes nothing measurable to either.
             ggml_tensor * log_p = ggml_log(tmp.ctx, ggml_clamp(tmp.ctx, p, 1e-30f, 1.0f));
-            ggml_tensor * log_q = ggml_log(tmp.ctx, ggml_clamp(tmp.ctx, q, 1e-30f, 1.0f));
+            ggml_tensor * log_q = skip_kl ? nullptr : ggml_log(tmp.ctx, ggml_clamp(tmp.ctx, q, 1e-30f, 1.0f));
             chunk_ce = ggml_scale(tmp.ctx, ggml_get_rows(tmp.ctx, ggml_reshape_2d(tmp.ctx, log_p, 1, V * n), flat_index), -1.0f);
-            chunk_kl = ggml_sum_rows(tmp.ctx, ggml_mul(tmp.ctx, q, ggml_sub(tmp.ctx, log_q, log_p)));
             ggml_build_forward_expand(forward, chunk_ce);
-            ggml_build_forward_expand(forward, chunk_kl);
+            if (!skip_kl) {
+                chunk_kl = ggml_sum_rows(tmp.ctx, ggml_mul(tmp.ctx, q, ggml_sub(tmp.ctx, log_q, log_p)));
+                ggml_build_forward_expand(forward, chunk_kl);
+            }
         }
         ggml_build_forward_expand(forward, adapted_logits);
-        ggml_build_forward_expand(forward, base_logits);
+        if (!skip_kl) ggml_build_forward_expand(forward, base_logits);
         ggml_build_forward_expand(backward, hidden_grad);
         if (bf16) yue2_aitk_bf16_storage::apply(forward, {});
         if (!validate_nodes(request.backend, forward, error) || !validate_nodes(request.backend, backward, error))
@@ -318,8 +330,11 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
         const std::size_t count = (request.positions - offset < kArChunk) ?
             request.positions - offset : kArChunk;
         ChunkWorkspace uncached_workspace;
-        ChunkWorkspace & workspace = std::getenv("YUE2_AITK_BASELINE") ? uncached_workspace :
-            (count == kArChunk ? full_workspace : tail_workspace);
+        ChunkWorkspace & cached_workspace = count == kArChunk ? full_workspace : tail_workspace;
+        // A cached workspace built for the other KL mode (e.g. a measure-KL eval step) is not reused.
+        const bool use_uncached = std::getenv("YUE2_AITK_BASELINE") ||
+            (cached_workspace.tmp.ctx && cached_workspace.skip_kl != want_skip_kl(request));
+        ChunkWorkspace & workspace = use_uncached ? uncached_workspace : cached_workspace;
         const Status init_status = workspace.init(request, count, error);
         if (init_status != Status::success) return init_status;
         ggml_tensor * adapted = workspace.adapted;
@@ -336,7 +351,7 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
         if (device) {
             ggml_reset(views.ctx);
             ggml_backend_tensor_copy(rows_view(request.adapted_rows, offset, count), adapted);
-            ggml_backend_tensor_copy(rows_view(request.base_rows, offset, count), base);
+            if (!workspace.skip_kl) ggml_backend_tensor_copy(rows_view(request.base_rows, offset, count), base);
         } else {
             ggml_backend_tensor_set(adapted, request.adapted_hidden + offset * request.hidden, 0, ggml_nbytes(adapted));
             ggml_backend_tensor_set(base, request.base_hidden + offset * request.hidden, 0, ggml_nbytes(base));
@@ -354,7 +369,7 @@ inline Status compute(const Request & request, std::string * error = nullptr) {
 
         if (!cuda) {
             ggml_backend_tensor_get(workspace.chunk_ce, per_ce.data() + offset, 0, count * sizeof(float));
-            ggml_backend_tensor_get(workspace.chunk_kl, per_kl.data() + offset, 0, count * sizeof(float));
+            if (workspace.chunk_kl) ggml_backend_tensor_get(workspace.chunk_kl, per_kl.data() + offset, 0, count * sizeof(float));
         }
 #if YUE2_AITK_CUDA_RUNTIME
         if (cuda) {
