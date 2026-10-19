@@ -91,6 +91,18 @@ inline bool token_ids(const PromptInput & p, size_t frames, std::string * e) {
     if (p.retained_prefix_ids.size() + p.abc_ids.size() + 2 * crop + 5 > 24576 ||
         p.dropped_prefix_ids.size() + p.abc_ids.size() + 2 * crop + 5 > 24576)
         return prep_fail(e, "prompt context exceeds YuE2 sequence limit");
+    // the language model learns the whole song: the reader refuses a song whose prompt, score and frames pass the context
+    const size_t prompt = std::max(p.retained_prefix_ids.size(), p.dropped_prefix_ids.size());
+    if (prompt + p.abc_ids.size() + frames + 3 > 24576) {
+        if (e) {
+            *e = "too long to train on: its style and lyrics (" + std::to_string(prompt) + " tokens), score (" +
+                 std::to_string(p.abc_ids.size()) + ") and " + std::to_string(frames / 25 / 60) + " min " +
+                 std::to_string(frames / 25 % 60) + " s of audio (" + std::to_string(frames) + " frames) make " +
+                 std::to_string(prompt + p.abc_ids.size() + frames + 3) +
+                 " tokens, the model takes 24576; shorten the song or train it without its score";
+        }
+        return false;
+    }
     return true;
 }
 
@@ -252,8 +264,13 @@ inline bool prepare_dataset(const PrepareRequest & request, std::string * error 
     size_t aggregate_payload = 0;
     for (size_t index = 0; index < request.items.size(); ++index) {
         const auto & item = request.items[index];
-        if (item.id.empty() || !no_nul(item.id) || !ids.insert(item.id).second || item.frames == 0 || item.frames > 24576 || !token_ids(item.prompt, item.frames, error))
+        if (item.id.empty() || !no_nul(item.id) || !ids.insert(item.id).second || item.frames == 0 || item.frames > 24576)
             return prep_fail(error, "native item metadata is invalid");
+        std::string token_error;
+        if (!token_ids(item.prompt, item.frames, &token_error)) {
+            if (error) *error = "song " + item.id + ": " + token_error;
+            return false;
+        }
         if (item.prompt.cursor.present &&
             (!no_nul(item.prompt.cursor.lyrics_sha256) || !no_nul(item.prompt.cursor.tokenizer_sha256)))
             return prep_fail(error, "cursor provenance contains embedded NUL");
@@ -333,7 +350,10 @@ inline bool prepare_dataset(const PrepareRequest & request, std::string * error 
     if (!ok) return prep_fail(error, "cannot write dataset manifest");
     Dataset verified;
     std::string verify_error;
-    if (!read_dataset(temp_manifest.u8string(), &verified, &verify_error)) return prep_fail(error, "prepared manifest failed reader roundtrip");
+    if (!read_dataset(temp_manifest.u8string(), &verified, &verify_error)) {
+        if (error) *error = "prepared manifest failed reader roundtrip: " + verify_error;
+        return false;
+    }
     if (std::filesystem::exists(final_manifest, ec)) return prep_fail(error, "dataset manifest appeared during publish");
     if (!publish_no_replace(temp_manifest, final_manifest, error)) return false;
     return true;
