@@ -214,13 +214,17 @@ export function scoreBarSegments(line: string): string[] {
 
 /** A cover needs at least one audible melody bar. Unvoiced ABC is a single
  * melody voice; an explicit Ins voice never counts toward this check unless
- * `includeInstrumental` is set and the score declares no vocal voice at all
- * (inference accepts instrumental-only scores; a silent Vocal still fails). */
+ * `includeInstrumental` is set and no vocal voice sounds: either none is
+ * declared, or every vocal bar is a rest (SheetSage2 writes instrumental
+ * sources as a silent Vocal voice holding the chords plus a sounding Ins). */
 export function hasSoundingVocalBar(abc: string, includeInstrumental = false): boolean {
-  let inVocal = true;
   const vocalIds = vocalVoiceIds(abc);
   const lines = abc.split('\n').map(l => l.trim());
-  const countAll = includeInstrumental && !lines.some(l => /^V:/.test(l) && isScoreVocalVoice(l, vocalIds));
+  return soundingBar(lines, vocalIds, false) || (includeInstrumental && soundingBar(lines, vocalIds, true));
+}
+
+function soundingBar(lines: string[], vocalIds: ReadonlySet<string>, countAll: boolean): boolean {
+  let inVocal = true;
   for (const line of lines) {
     if (!line || line.startsWith('%')) continue;
     if (/^V:/.test(line)) { inVocal = countAll || isScoreVocalVoice(line, vocalIds); continue; }

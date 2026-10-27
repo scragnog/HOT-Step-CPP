@@ -73,8 +73,13 @@ test('instrumental-only score is accepted only with includeInstrumental', () => 
   assert.equal(hasSoundingVocalBar(ins), false);
   assert.equal(hasSoundingVocalBar(ins, true), true);
   assert.equal(hasSoundingVocalBar('X:1\nV: Ins\nK:C\nzzzz|', true), false);
-  // a declared-but-silent Vocal voice still fails even with the flag
-  assert.equal(hasSoundingVocalBar('X:1\nV: Vocal\nZ4|\nV: Ins\nC4|', true), false);
+  // SheetSage2 instrumental output (#241): a silent Vocal voice carrying the chords
+  // plus a sounding Ins voice is accepted with the flag, never without it
+  const sheetSage = 'X:1\nV: Vocal\n"Bm"z8|"A/B"z8|\nV: Ins\nB4c4|d8|';
+  assert.equal(hasSoundingVocalBar(sheetSage, true), true);
+  assert.equal(hasSoundingVocalBar(sheetSage), false);
+  // silent in every voice still fails
+  assert.equal(hasSoundingVocalBar('X:1\nV: Vocal\nZ4|\nV: Ins\nz8|', true), false);
 });
 
 // Legibility: what a plan the verdict passed can still get wrong.

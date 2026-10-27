@@ -245,11 +245,22 @@ test('a cover submission with a blank ABC is rejected at submit', async () => {
   );
 });
 
-test('a cover submission rejects a silent Vocal score', async () => {
+test('a cover submission rejects a score silent in every voice', async () => {
   const { yue2Backend } = await import('./index.js');
   assert.throws(() => yue2Backend.resolveRequest({ caption: 'c',
-    yue2Cover: { sourceId: 's' }, yue2Abc: 'X:1\nV: Vocal\nZ4|z4|\nV: Ins\nC4|' }),
+    yue2Cover: { sourceId: 's' }, yue2Abc: 'X:1\nV: Vocal\nZ4|z4|\nV: Ins\nz4|' }),
   /The transcriber heard no melody in this source/);
+});
+
+test('a cover submission accepts a silent Vocal voice over a sounding Ins voice (#241)', async () => {
+  const { yue2Backend } = await import('./index.js');
+  // past the melody gate the request goes on to need a database, so only the gate is checked here
+  let message = '';
+  try {
+    yue2Backend.resolveRequest({ caption: 'c',
+      yue2Cover: { sourceId: 's' }, yue2Abc: 'X:1\nV: Vocal\n"Bm"z8|"A/B"z8|\nV: Ins\nB4c4|d8|' });
+  } catch (e) { message = String((e as Error).message); }
+  assert.doesNotMatch(message, /The transcriber heard no melody in this source/);
 });
 
 test('a vocal-only cover of an instrumental-only score is rejected after the transform', async () => {
