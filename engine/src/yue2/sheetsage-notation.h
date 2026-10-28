@@ -541,6 +541,25 @@ inline const std::unordered_map<std::string, int> & key_signature_accidentals() 
     return t;
 }
 
+// SheetSage2-Refined key_mode: ABC mode suffix and the mode's tonic offset
+// above its relative major. ABC has no harmonic minor or phrygian dominant;
+// they take the minor and phrygian signatures and the raised degree shows as
+// an accidental.
+inline bool key_mode_abc(const std::string & mode, std::string & suffix, int & offset) {
+    static const struct { const char * mode; const char * suffix; int offset; } t[] = {
+        { "dorian", "dor", 2 }, { "phrygian", "phr", 4 }, { "lydian", "lyd", 5 }, { "mixolydian", "mix", 7 },
+        { "locrian", "loc", 11 }, { "harmonic_minor", "m", 9 }, { "phrygian_dominant", "phr", 4 },
+    };
+    for (const auto & e : t) {
+        if (mode == e.mode) {
+            suffix = e.suffix;
+            offset = e.offset;
+            return true;
+        }
+    }
+    return false;
+}
+
 // _KEY_RELATIVE_PITCH_NAMES, notation_sheetsage2.py:181-197. Keyed by signed
 // accidental count (-7..7), 12 entries indexed by pitch class 0=C..11=B.
 inline const std::map<int, std::array<std::string, 12>> & key_relative_pitch_names() {
@@ -679,6 +698,34 @@ inline bool bass_degree_to_pitch(const std::string & root, const std::string & d
 
 // `chord_symbol_to_abc` (:606-625). Returns has_value=false for N/X/? (no
 // annotation — matches Python returning None).
+// SheetSage2-Refined chord_detail qualities (mir_eval spelling with
+// tensions, events.h yue2_sheet_detail_chord_label): lead-sheet names for the
+// irregular ones, otherwise the base symbol with its tensions in parentheses.
+// No '/' inside a quality, so a slash in the symbol always means a bass note.
+inline bool refined_quality_to_abc(const std::string & quality, std::string & out) {
+    static const std::unordered_map<std::string, std::string> special = {
+        { "5", "5" },                  { "maj(*5,b5)", "(b5)" },     { "7(*5,b5)", "7b5" },
+        { "7(*5,b5,b13)", "7b5(b13)" }, { "aug(b7)", "aug7" },        { "aug(7)", "aug(maj7)" },
+        { "aug(b7,9)", "aug9" },       { "aug(7,#9)", "aug(maj7,#9)" }, { "maj(9)", "add9" },
+        { "min(9)", "m(add9)" },       { "maj(9,#11)", "add9(#11)" }, { "maj6(9)", "6(9)" },
+        { "min6(9)", "m6(9)" },        { "hdim7(b9)", "m7b5(b9)" },
+    };
+    auto s = special.find(quality);
+    if (s != special.end()) {
+        out = s->second;
+        return true;
+    }
+    const size_t paren = quality.find('(');
+    if (paren == std::string::npos || quality.back() != ')') return false;
+    auto base = quality_to_abc().find(quality.substr(0, paren));
+    if (base == quality_to_abc().end()) return false;
+    const std::string & b = base->second;
+    // m(maj7) + (9) reads m(maj7,9)
+    out = !b.empty() && b.back() == ')' ? b.substr(0, b.size() - 1) + "," + quality.substr(paren + 1) :
+                                          b + quality.substr(paren);
+    return true;
+}
+
 inline bool chord_symbol_to_abc(const std::string & chord_in, bool & has_value, std::string & text_out, std::string * err) {
     std::string chord = strip(chord_in);
     if (chord == "N" || chord == "X" || chord == "?") {
@@ -703,14 +750,17 @@ inline bool chord_symbol_to_abc(const std::string & chord_in, bool & has_value, 
     } else {
         quality = descriptor;
     }
+    std::string quality_text;
     auto it = quality_to_abc().find(quality);
-    if (it == quality_to_abc().end()) {
+    if (it != quality_to_abc().end()) {
+        quality_text = it->second;
+    } else if (!refined_quality_to_abc(quality, quality_text)) {
         if (err) *err = "Unsupported chord quality '" + quality + "' in '" + chord + "'; refusing to rewrite it as major";
         return false;
     }
     std::string chord_root;
     if (!portable_pitch_name(root, /*preserve_double=*/true, chord_root, err)) return false;
-    std::string text = chord_root + it->second;
+    std::string text = chord_root + quality_text;
     if (has_bass && !bass_degree.empty()) {
         std::string bass;
         if (!bass_degree_to_pitch(root, bass_degree, bass, err)) return false;
@@ -722,6 +772,71 @@ inline bool chord_symbol_to_abc(const std::string & chord_in, bool & has_value, 
 }
 
 // `key_symbol_to_abc` (:628-649).
+// Ddor, Ephr, ... -> the accidental count of their relative major, spelled
+// from that major's scale.
+inline const std::unordered_map<std::string, int> & modal_key_signature_accidentals() {
+    static const std::unordered_map<std::string, int> t = [] {
+        std::unordered_map<std::string, int> m;
+        for (const auto & kv : key_signature_accidentals()) {
+            if (kv.first.back() == 'm') continue;
+            int pc = 0;
+            char letter = 0;
+            std::string acc;
+            if (!pitch_class(kv.first, pc, letter, acc, nullptr)) continue;
+            for (const char * mode : { "dorian", "phrygian", "lydian", "mixolydian", "locrian" }) {
+                std::string suffix;
+                int offset = 0;
+                key_mode_abc(mode, suffix, offset);
+                const std::string tonic = key_relative_pitch_names().at(kv.second)[(size_t) ((pc + offset) % 12)];
+                m.emplace(tonic + suffix, kv.second);
+            }
+        }
+        return m;
+    }();
+    return t;
+}
+
+inline bool modal_key_to_abc(const std::string & root, const std::string & mode, std::string & out, std::string * err) {
+    std::string suffix;
+    int offset = 0;
+    int root_pc = 0;
+    char root_letter = 0;
+    std::string accidental;
+    if (!key_mode_abc(mode, suffix, offset) || !pitch_class(root, root_pc, root_letter, accidental, err)) {
+        if (err && err->empty()) *err = "Unsupported key mode '" + mode + "'";
+        return false;
+    }
+    const int major_pc = ((root_pc - offset) % 12 + 12) % 12;
+    // The relative major with the fewest accidentals; a tie follows the root's spelling.
+    std::string best;
+    int best_count = 99;
+    for (const auto & kv : key_signature_accidentals()) {
+        if (kv.first.back() == 'm') continue;
+        int pc = 0;
+        char letter = 0;
+        std::string acc;
+        if (!pitch_class(kv.first, pc, letter, acc, nullptr) || pc != major_pc) continue;
+        const int n = std::abs(kv.second);
+        const bool prefer = n == best_count && (accidental.find('b') != std::string::npos) == (kv.second < 0);
+        if (n < best_count || prefer) {
+            best = kv.first;
+            best_count = n;
+        }
+    }
+    if (best.empty()) {
+        if (err) *err = "Cannot encode portable ABC key for '" + root + ":" + mode + "'";
+        return false;
+    }
+    const int count = key_signature_accidentals().at(best);
+    const std::string tonic = key_relative_pitch_names().at(count)[(size_t) root_pc];
+    out = suffix == "m" ? tonic + "m" : tonic + suffix;
+    if (suffix == "m" && !key_signature_accidentals().count(out)) {
+        // harmonic minor on a spelling the minor table lacks: use the minor table's own spelling
+        return key_symbol_to_abc(root + ":minor", out, err);
+    }
+    return true;
+}
+
 inline bool key_symbol_to_abc(const std::string & key_in, std::string & out, std::string * err) {
     std::string key = strip(key_in);
     std::string root, mode;
@@ -730,6 +845,9 @@ inline bool key_symbol_to_abc(const std::string & key_in, std::string & out, std
         root = key.substr(0, colon);
         mode = key.substr(colon + 1);
         if (mode != "major" && mode != "minor") {
+            std::string suffix;
+            int offset = 0;
+            if (key_mode_abc(mode, suffix, offset)) return modal_key_to_abc(root, mode, out, err);
             if (err) *err = "Unsupported key mode '" + mode + "' in '" + key + "'";
             return false;
         }
@@ -769,13 +887,18 @@ inline bool key_symbol_to_abc(const std::string & key_in, std::string & out, std
 
 // `get_key_accidentals` (:652-661). Returns a 7-entry per-letter array
 // (index by "CDEFGAB".index(letter)), values in {-1,0,1}.
+inline const std::unordered_map<std::string, int> & modal_key_signature_accidentals();
+
 inline bool get_key_accidentals(const std::string & key, std::array<int, 7> & out, std::string * err) {
-    auto it = key_signature_accidentals().find(key);
-    if (it == key_signature_accidentals().end()) {
+    const auto & major_minor = key_signature_accidentals();
+    const auto & modal       = modal_key_signature_accidentals();
+    auto         it          = major_minor.find(key);
+    auto         mt          = modal.find(key);
+    if (it == major_minor.end() && mt == modal.end()) {
         if (err) *err = "Unsupported ABC key signature '" + key + "'";
         return false;
     }
-    int count = it->second;
+    int count = it != major_minor.end() ? it->second : mt->second;
     out.fill(0);
     const std::string order = count > 0 ? "FCGDAEB" : "BEADGCF";
     for (int i = 0; i < std::abs(count); ++i) {

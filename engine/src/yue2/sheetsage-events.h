@@ -158,16 +158,25 @@ inline const char * prompt_sampling_group(const std::string & name) {
     if (name == "chord_full") return "chord";
     if (name == "melody_vocal") return "melody";
     if (name == "melody_full") return "melody";
+    if (name == "chord_detail") return "chord";  // SheetSage2-Refined
+    if (name == "key_mode") return "key";
     return "";
 }
 
 // Schema-order index of a prompt name (used by normalize_prompts's sort key,
 // tokenization_sheetsage2.py:245).
 inline int prompt_schema_index(const SheetSage2Tokens & vocab, const std::string & name) {
-    for (int i = 0; i < SheetSage2Tokens::N_PROMPT_TASKS; ++i) {
-        if (vocab.prompt_names[i] == name) return i;
-    }
-    return -1;
+    auto it = vocab.prompt_name_to_id.find(name);
+    return it == vocab.prompt_name_to_id.end() ? -1 : it->second - SheetSage2Tokens::PROMPT_TOKEN_START;
+}
+
+// vocab.prompt_prefix order: output field first, then schema index. For the
+// eight SheetSage2 prompts this is plain schema order.
+inline bool prompt_order_less(const SheetSage2Tokens & vocab, const std::string & a, const std::string & b) {
+    const int fa = yue2_sheet_field_index(prompt_sampling_group(a));
+    const int fb = yue2_sheet_field_index(prompt_sampling_group(b));
+    if (fa != fb) return fa < fb;
+    return prompt_schema_index(vocab, a) < prompt_schema_index(vocab, b);
 }
 
 }  // namespace yue2_sheet_events_detail
@@ -192,8 +201,7 @@ inline bool yue2_sheet_normalize_prompts(const SheetSage2Tokens & vocab,
         if (std::find(names.begin(), names.end(), name) == names.end()) names.push_back(name);
     }
     std::stable_sort(names.begin(), names.end(), [&](const std::string & a, const std::string & b) {
-        return yue2_sheet_events_detail::prompt_schema_index(vocab, a) <
-               yue2_sheet_events_detail::prompt_schema_index(vocab, b);
+        return yue2_sheet_events_detail::prompt_order_less(vocab, a, b);
     });
     std::unordered_map<std::string, std::string> selected_group;
     for (const std::string & name : names) {
@@ -258,13 +266,26 @@ inline bool yue2_sheet_decode_field(const SheetSage2Tokens & vocab, Yue2SheetFie
         }
         case Yue2SheetField::Key: {
             out->has_key = true;
-            out->key = yue2_sheet_key_label(toks[0] - SheetSage2Tokens::KEY_TOKEN_START);
+            if (yue2_sheet_token_type(toks[0]) == Yue2SheetTokenType::KeyMode) {
+                out->key = yue2_sheet_key_mode_label(toks[0] - (SheetSage2Tokens::N_TOKENS + 12 + 745));
+            } else {
+                out->key = yue2_sheet_key_label(toks[0] - SheetSage2Tokens::KEY_TOKEN_START);
+            }
             return true;
         }
         case Yue2SheetField::Chord: {
             out->has_chord = true;
             Yue2SheetTokenType t = yue2_sheet_token_type(toks[0]);
-            if (t == Yue2SheetTokenType::ChordMajmin) {
+            if (t == Yue2SheetTokenType::ChordBass || t == Yue2SheetTokenType::ChordDetail) {
+                // chord_detail: a missing bass reads as root position, a lone bass as N
+                int32_t detail = -1, bass = -1;
+                for (int32_t tok : toks) {
+                    const Yue2SheetTokenType tt = yue2_sheet_token_type(tok);
+                    if (tt == Yue2SheetTokenType::ChordBass) bass = tok - SheetSage2Tokens::N_TOKENS;
+                    if (tt == Yue2SheetTokenType::ChordDetail) detail = tok - (SheetSage2Tokens::N_TOKENS + 12);
+                }
+                out->chord = yue2_sheet_detail_chord_label(detail, bass);
+            } else if (t == Yue2SheetTokenType::ChordMajmin) {
                 out->chord = yue2_sheet_majmin_chord_label(vocab, toks[0] - SheetSage2Tokens::MAJMIN_CHORD_TOKEN_START);
             } else {
                 out->chord = yue2_sheet_full_chord_label(vocab, toks[0] - SheetSage2Tokens::FULL_CHORD_TOKEN_START);
@@ -353,17 +374,8 @@ inline bool yue2_sheet_decode_sequence(const SheetSage2Tokens & vocab, std::vect
     }
     bool active_field[6] = {false, false, false, false, false, false};
     for (const std::string & name : prompts) {
-        for (int i = 0; i < SheetSage2Tokens::N_PROMPT_TASKS; ++i) {
-            if (vocab.prompt_names[i] == name) {
-                // task->output_field, V1_TASKS (schema_sheetsage2.py:28-37):
-                // every task's output_field equals its sampling_group name
-                // except chord_majmin/chord_full->"chord" and
-                // melody_vocal/melody_full->"melody" — reuse the same table.
-                const char * group = yue2_sheet_events_detail::prompt_sampling_group(name);
-                int fi = yue2_sheet_field_index(group);
-                if (fi >= 0) active_field[fi] = true;
-            }
-        }
+        const int fi = yue2_sheet_field_index(yue2_sheet_events_detail::prompt_sampling_group(name));
+        if (fi >= 0) active_field[fi] = true;
     }
 
     std::vector<Yue2SheetEvent> events;
@@ -441,7 +453,11 @@ inline bool yue2_sheet_decode_sequence(const SheetSage2Tokens & vocab, std::vect
                         return false;
                     }
                 } else if (fi == 2 || fi == 3 || fi == 4 /* structure, key, chord */) {
-                    if (toks.size() != 1) {
+                    // chord_detail writes a chord as bass + root x quality
+                    const bool detail_pair = fi == 4 && toks.size() == 2 &&
+                                             yue2_sheet_token_type(toks[0]) == Yue2SheetTokenType::ChordBass &&
+                                             yue2_sheet_token_type(toks[1]) == Yue2SheetTokenType::ChordDetail;
+                    if (toks.size() != 1 && !detail_pair) {
                         static const char * field_names[6] = {"timestamp", "rhythm", "structure", "key", "chord", "melody"};
                         if (err) *err = std::string("field '") + field_names[fi] + "' must contain exactly one token";
                         return false;
@@ -964,6 +980,12 @@ inline const std::vector<Spelled> * quality_intervals(const std::string & qualit
         return t;
     }();
     for (const auto & [q, v] : table) if (q == quality) return &v;
+    // SheetSage2-Refined qualities: spell by the base triad/seventh (tensions
+    // do not move the root's spelling); "5" is root and fifth.
+    static const std::vector<Spelled> power = {{0, 0}, {4, 0}};
+    if (quality == "5") return &power;
+    const size_t paren = quality.find('(');
+    if (paren != std::string::npos && paren > 0) return quality_intervals(quality.substr(0, paren));
     return nullptr;
 }
 
@@ -991,11 +1013,18 @@ inline std::string correct_chord(const std::string & label, const std::string & 
     Spelled tonic;
     if (key_colon == std::string::npos || !parse_name(key_name.substr(0, key_colon), tonic)) return label;
     const std::string mode = key_name.substr(key_colon + 1);
-    if (mode != "major" && mode != "minor") return label;
+    // Tonic offset above the relative major (key_mode adds seven modes).
+    static const std::pair<const char *, int> mode_offset[] = {
+        {"major", 0}, {"minor", 9}, {"dorian", 2}, {"phrygian", 4}, {"lydian", 5}, {"mixolydian", 7},
+        {"locrian", 11}, {"harmonic_minor", 9}, {"phrygian_dominant", 4},
+    };
+    int offset = -1;
+    for (const auto & mo : mode_offset) if (mode == mo.first) offset = mo.second;
+    if (offset < 0) return label;
     // Key signature tonic: KEY_MAP[0][scale_semitone], the relative major.
     static const char * major_names[12] = {"C","Db","D","Eb","E","F","F#","G","Ab","A","Bb","B"};
     Spelled key;
-    parse_name(major_names[mod(pitch_class(tonic) - (mode == "minor" ? 9 : 0), 12)], key);
+    parse_name(major_names[mod(pitch_class(tonic) - offset, 12)], key);
 
     std::string chord = label, inversion;
     const size_t slash = chord.find('/');

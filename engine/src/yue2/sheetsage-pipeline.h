@@ -52,6 +52,7 @@
 #include "sheetsage-grammar.h"
 #include "sheetsage-model.h"
 #include "sheetsage-notation.h"
+#include "sheetsage-refined.h"
 #include "sheetsage-repair.h"
 #include "sheetsage-stitch.h"
 #include "sheetsage-tokens.h"
@@ -106,6 +107,11 @@ struct SheetSageTranscribeOptions {
     // SheetSageEncodeOptions::exact_rope: exact RoPE angles instead of the
     // bf16-rounded ones SheetSage2 was trained with. A/B and parity only.
     bool exact_rope = false;
+
+    // SheetSage2-Refined (model loaded with SheetSageModelLoadOptions::
+    // refined_path): keys with modes (dorian, mixolydian, ...) instead of
+    // major/minor.
+    bool key_mode = false;
 
     // Apply sheetsage-repair.h's deterministic repair pass when the FIRST
     // notation render fails (doc 23's "Repair" note, task 2026-09-16). On by
@@ -320,7 +326,20 @@ inline bool sheetsage_transcribe(const SheetSageModel & m, const float * mono24,
     const int64_t               window_samples = sheetsage_window_samples(m);
     bool                         hard_failed    = false;
 
-    for (size_t wi = 0; wi < windows.size() && !hard_failed; wi++) {
+    if (m.refined) {  // SheetSage2-Refined: its own window loop (sheetsage-refined.h)
+        SheetSageRefinedSongResult rr;
+        if (!sheetsage_refined_transcribe_song(m, &enc_graph, mono24, n, opt.key_mode, &rr, &terr)) {
+            out->ok     = false;
+            out->error  = "sheetsage2-refined: " + terr;
+            hard_failed = true;
+        }
+        stitched_so_far = std::move(rr.stitched);
+        out->windows    = rr.windows;
+        out->window_ids = std::move(rr.window_ids);
+        out->ms_encode  = rr.ms_encode;
+        out->ms_decode  = rr.ms_heads + rr.ms_decode;
+    }
+    for (size_t wi = 0; !m.refined && wi < windows.size() && !hard_failed; wi++) {
         const Yue2SheetWindow & w = windows[wi];
 
         // ── slice + encode ──

@@ -21,7 +21,9 @@
 
 #include "sheetsage-decoder.h"
 #include "sheetsage-encoder.h"
+#include "sheetsage-events.h"
 #include "sheetsage-heads.h"
+#include "sheetsage-stitch.h"
 #include "sheetsage-tokens.h"
 
 #include <algorithm>
@@ -560,4 +562,142 @@ inline bool sheetsage_refined_decode_window(const SheetSageModel & m, SheetSageE
     }
     out->ms_decode = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t2).count();
     return ok;
+}
+
+// ── whole song (transcribe.py transcribe_many, one song) ────────────────────
+//
+// Windows of 300 s overlapping by 200 s (yue2_sheet_sliding_window_plan, the
+// same plan as the reference window_plan). Each window after the first is
+// primed with the stitched events of its overlap (shortened while it would
+// fill the context), and stops on a time token at the hand-off point; the
+// last window stops at the end of the audio. A window that fills the decoder
+// context is decoded again from a beat 5 s before its last accepted beat,
+// primed with that one beat event, up to 4 times per window.
+
+struct SheetSageRefinedSongResult {
+    std::vector<Yue2SheetEvent>       stitched;
+    std::vector<std::vector<int32_t>> window_ids;  // every decode, resumes included
+    int                               windows = 0;
+    int                               resumes = 0;
+    double                            ms_encode = 0.0, ms_heads = 0.0, ms_decode = 0.0;
+};
+
+inline std::vector<std::string> sheetsage_refined_prompts(bool key_mode) {
+    return { "timestamp", "downbeat_meter", "structure", key_mode ? "key_mode" : "key", "chord_detail",
+             "melody_full" };
+}
+
+// transcribe.resume_point: the beat about 5 s before a full window's last
+// accepted beat, or a negative value when it is not worth resuming.
+inline double sheetsage_refined_resume_point(const std::vector<Yue2SheetEvent> & events, const Yue2SheetWindow & w) {
+    std::vector<double> beats;
+    for (const Yue2SheetEvent & e : events) {
+        if (e.has_rhythm && e.time >= w.accept_start) beats.push_back(e.time);
+    }
+    if (beats.empty() || beats.back() >= w.accept_end - 1.0) return -1.0;
+    double cut = -1.0;
+    for (double t : beats) {
+        if (t <= beats.back() - 5.0) cut = t;
+    }
+    return cut > w.accept_start + 1.0 ? cut : -1.0;
+}
+
+inline bool sheetsage_refined_transcribe_song(const SheetSageModel & m, SheetSageEncoderGraph * g, const float * mono24,
+                                              int64_t n, bool key_mode, SheetSageRefinedSongResult * out,
+                                              std::string * err) {
+    *out = SheetSageRefinedSongResult{};
+    SheetSage2Tokens vocab;
+    if (!yue2_sheet_tokens_build(vocab, err)) return false;
+    const double  sr       = (double) m.mert.cfg.sample_rate;
+    const double  duration = (double) n / sr;
+    const int64_t win      = sheetsage_window_samples(m);
+    const int64_t max_len  = (int64_t) m.cfg.max_output_seq_len;
+    std::vector<Yue2SheetWindow> plan;
+    if (!yue2_sheet_sliding_window_plan(duration, &plan, err, (double) m.cfg.window_seconds,
+                                        (double) m.cfg.overlap_seconds_default,
+                                        (double) m.cfg.lookahead_seconds_default)) {
+        return false;
+    }
+    out->windows                         = (int) plan.size();
+    const std::vector<std::string> names = sheetsage_refined_prompts(key_mode);
+    double resume  = -1.0;
+    int    resumes = 0;
+    for (size_t next = 0; next < plan.size();) {
+        Yue2SheetWindow        w = plan[next];
+        std::vector<int32_t>   prefix;
+        int32_t                base = 0;
+        Yue2SheetOverlapPrefix ov;
+        if (resume >= 0.0) {
+            const double cut = resume;
+            resume           = -1.0;
+            w.accept_start   = cut + 1e-3;  // the primed beat is already accepted
+            if (!yue2_sheet_build_overlap_prefix_tokens(vocab, out->stitched, names, cut, cut + 1e-3, &ov, err,
+                                                        w.start)) {
+                return false;
+            }
+        } else if (next > 0) {
+            if (!yue2_sheet_build_overlap_prefix_tokens(vocab, out->stitched, names, w.start, w.accept_start, &ov,
+                                                        err)) {
+                return false;
+            }
+            // A dense overlap can fill the context: prime with a shorter, later part.
+            double span = w.accept_start - w.start;
+            while (ov.ok && (int64_t) ov.prefix_ids.size() >= max_len - 128 && span > 5.0) {
+                span /= 2;
+                if (!yue2_sheet_build_overlap_prefix_tokens(vocab, out->stitched, names, w.accept_start - span,
+                                                            w.accept_start, &ov, err, w.start)) {
+                    return false;
+                }
+            }
+        }
+        if (ov.ok) {
+            if ((int64_t) ov.prefix_ids.size() >= max_len - 128) {
+                if (err) *err = "overlap prefix fills the decoder context";
+                return false;
+            }
+            prefix = ov.prefix_ids;
+            base   = ov.base_subbeat;
+        } else {
+            prefix = sheetsage_refined_prompt_prefix(key_mode);
+        }
+
+        const double  stop  = w.has_generation_stop ? w.generation_stop :
+                                                      std::min(duration - w.start, (double) m.cfg.window_seconds);
+        const int64_t start = (int64_t) std::llround(w.start * sr);
+        const int64_t avail = std::max<int64_t>(0, std::min<int64_t>(win, n - start));
+        SheetSageRefinedWindowResult r;
+        if (!sheetsage_refined_decode_window(m, g, mono24 + start, avail, prefix, stop, key_mode, &r, err)) {
+            return false;
+        }
+        out->ms_encode += r.ms_encode;
+        out->ms_heads += r.ms_heads;
+        out->ms_decode += r.ms_decode;
+        out->window_ids.push_back(r.tokens);
+
+        Yue2SheetDecoded decoded;
+        bool             recovered = false;
+        if (!yue2_sheet_decode_generated_tokens(vocab, r.tokens, &decoded, &recovered, err)) return false;
+        yue2_sheet_stitch_window(decoded.events, w, duration, base, &out->stitched);
+
+        // SheetSage2 tends to emit <eos> a few tokens before the context is full.
+        const bool full = std::string(r.ended) == "limit" || (int64_t) r.tokens.size() >= max_len - 64;
+        if (full && resumes < 4) {
+            const double cut = sheetsage_refined_resume_point(out->stitched, w);
+            if (cut >= 0.0) {
+                std::vector<Yue2SheetEvent> kept;
+                for (const Yue2SheetEvent & e : out->stitched) {
+                    if (e.time <= cut + 1e-6) kept.push_back(e);
+                }
+                out->stitched = std::move(kept);
+                resume        = cut;
+                resumes++;
+                out->resumes++;
+                continue;  // the same window again
+            }
+        }
+        next++;
+        resumes = 0;
+    }
+    yue2_sheet_sort_stitched_events(&out->stitched);
+    return true;
 }

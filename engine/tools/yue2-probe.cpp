@@ -4490,6 +4490,51 @@ static int run_sheetsage_refined_transcribe(const std::string & dir, const std::
     return 0;
 }
 
+// ── --sheetsage-refined-labels: every refined chord/key through the ABC path ─
+//
+// All 745 chord_detail offsets x 12 bass notes and all 109 key_mode offsets:
+// label (events.h) -> chord/key spelling under a key (correct_chord) -> ABC
+// chord symbol / key signature (notation.h). Exit 0 iff nothing is rejected.
+
+static int run_sheetsage_refined_labels() {
+    int         fails = 0, chords = 0, keys = 0;
+    std::string err;
+    for (int32_t k = 0; k <= 108; k++) {
+        const std::string key = yue2_sheet_key_mode_label(k);
+        if (key == "N") continue;
+        std::string abc;
+        std::array<int, 7> acc;
+        err.clear();
+        if (!yue2_sheet_notation_detail::key_symbol_to_abc(key, abc, &err) ||
+            !yue2_sheet_notation_detail::get_key_accidentals(abc, acc, &err)) {
+            printf("FAIL key %s: %s\n", key.c_str(), err.c_str());
+            fails++;
+        } else if (k % 12 == 2) {
+            printf("key %-22s -> K:%s\n", key.c_str(), abc.c_str());
+        }
+        keys++;
+        for (int32_t d = 0; d < 744; d += 1) {
+            for (int32_t b = -1; b < 12; b++) {
+                if (k % 12 != 0 && b != -1) continue;  // bass sweep under C-tonic modes only
+                const std::string label = yue2_sheet_detail_chord_label(d, b);
+                const std::string spelled = yue2_sheet_spelling::correct_chord(label, key);
+                bool has = false;
+                std::string text;
+                err.clear();
+                if (!yue2_sheet_notation_detail::chord_symbol_to_abc(spelled, has, text, &err) || !has) {
+                    if (fails < 40) printf("FAIL chord %s (%s under %s): %s\n", spelled.c_str(), label.c_str(), key.c_str(), err.c_str());
+                    fails++;
+                } else if (k == 0 && b == 4 && d % 12 == 0) {
+                    printf("chord %-22s -> \"%s\"\n", label.c_str(), text.c_str());
+                }
+                chords++;
+            }
+        }
+    }
+    printf("RESULT (sheetsage-refined-labels): %d keys, %d chord spellings, %d failures\n", keys, chords, fails);
+    return fails ? 1 : 0;
+}
+
 // ── --sheetsage-decoder-parity: SheetSage2's decoder, teacher-forced ───────
 //
 // AUTHORITY: docs/plans/yue2/20-sheetsage2-model-pin.md §3 (decoder math),
@@ -4760,11 +4805,13 @@ static int run_sheetsage_decoder_parity(const std::string & fixture_dir, const s
 // pass/fail is the final ABC/error match, per doc 19's own G4/G5/G6 rows
 // ("ABC byte-identical" / "matching abc_error").
 static int run_sheetsage_transcribe(const std::string & fixture_dir, const std::string & model_path, bool exact,
-                                     int threads, bool repair, bool exact_rope) {
+                                     int threads, bool repair, bool exact_rope, const std::string & refined_path,
+                                     bool key_mode) {
     SheetSageModel            m;
     std::string               err;
     SheetSageModelLoadOptions load_opt;
-    load_opt.exact = exact;
+    load_opt.exact        = exact;
+    load_opt.refined_path = refined_path;  // empty: SheetSage2; set: SheetSage2-Refined
     if (!sheetsage_model_load(&m, model_path, &err, load_opt)) {
         fprintf(stderr, "FATAL: SheetSage2 load failed (%s): %s\n", model_path.c_str(), err.c_str());
         return 1;
@@ -4792,6 +4839,7 @@ static int run_sheetsage_transcribe(const std::string & fixture_dir, const std::
     // against a fixture instead.
     opt.repair     = repair;
     opt.exact_rope = exact_rope;
+    opt.key_mode   = key_mode;
     SheetSageTranscribeResult res;
     const auto t0   = std::chrono::steady_clock::now();
     const bool call_ok = sheetsage_transcribe(m, song.data(), (int64_t) song.size(), opt, &res, &err);
@@ -4804,7 +4852,13 @@ static int run_sheetsage_transcribe(const std::string & fixture_dir, const std::
     }
     printf("windows=%d  ms_encode=%.0f ms_decode=%.0f ms_notation=%.0f wall=%.0f\n", res.windows, res.ms_encode,
            res.ms_decode, res.ms_notation, wall_ms);
-    if (!g_yue2_dump_dir.empty()) {  // full token ids per window, for A/B against a reference decode
+    if (!g_yue2_dump_dir.empty()) {  // full token ids per window and the ABC, for A/B against a reference decode
+        if (FILE * af = fopen((g_yue2_dump_dir + "/song.abc").c_str(), "wb")) {
+            fwrite(res.abc.data(), 1, res.abc.size(), af);
+            fclose(af);
+        }
+        printf("abc: ok=%d %zu bytes%s%s\n", (int) res.ok, res.abc.size(), res.error.empty() ? "" : " error: ",
+               res.error.c_str());
         for (size_t wi = 0; wi < res.window_ids.size(); wi++) {
             char nm[64];
             snprintf(nm, sizeof(nm), "/window-%04d_ids.i32", (int) wi);
@@ -5777,6 +5831,8 @@ int main(int argc, char ** argv) {
             sheetsage_refined_heads_dir = argv[++i];
         } else if (!strcmp(argv[i], "--sheetsage-refined-transcribe") && i + 1 < argc) {
             sheetsage_refined_transcribe_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--sheetsage-refined-labels")) {
+            return run_sheetsage_refined_labels();
         } else if (!strcmp(argv[i], "--key-mode")) {
             sheetsage_key_mode = true;
         } else if (!strcmp(argv[i], "--refined") && i + 1 < argc) {
@@ -6085,7 +6141,8 @@ int main(int argc, char ** argv) {
         const std::string model_path =
             sheetsage_model_path.empty() ? "models/yue2/sheetsage2-f16.gguf" : sheetsage_model_path;
         return run_sheetsage_transcribe(sheetsage_transcribe_dir, model_path, sheetsage_encoder_exact,
-                                        sheetsage_threads, sheetsage_transcribe_repair, sheetsage_exact_rope);
+                                        sheetsage_threads, sheetsage_transcribe_repair, sheetsage_exact_rope,
+                                        sheetsage_refined_path, sheetsage_key_mode);
     }
     if (do_generate) {
         if (models_dir.empty()) {

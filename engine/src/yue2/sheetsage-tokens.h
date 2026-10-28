@@ -446,6 +446,10 @@ inline bool yue2_sheet_tokens_build(SheetSage2Tokens & out, std::string * err) {
         out.prompt_names[i] = prompt_names[i];
         out.prompt_name_to_id[prompt_names[i]] = SheetSage2Tokens::PROMPT_TOKEN_START + i;
     }
+    // SheetSage2-Refined prompts (vocab.py PROMPTS, appended). Not part of
+    // prompt_names, so the SheetSage2 fingerprint is unchanged.
+    out.prompt_name_to_id["chord_detail"] = SheetSage2Tokens::PROMPT_TOKEN_START + 8;
+    out.prompt_name_to_id["key_mode"]     = SheetSage2Tokens::PROMPT_TOKEN_START + 9;
 
     yue2_sheet_detail::build_meter_pairs(out.meter_pairs);
     for (int i = 0; i < SheetSage2Tokens::N_METER_PAIRS; ++i) {
@@ -492,6 +496,9 @@ enum class Yue2SheetTokenType : int8_t {
     Prompt,
     SubbeatShift, Time, Meter, EighthPosition, Structure, Key,
     ChordMajmin, ChordFull, Pitch, Duration,
+    // SheetSage2-Refined appended blocks (vocab.py): chord_bass, chord_detail,
+    // key_mode. Only a refined decoder ever produces them.
+    ChordBass, ChordDetail, KeyMode,
     Invalid,  // ids [12,260) (dead prompt capacity) or >= N_TOKENS: never legitimately produced
 };
 
@@ -515,6 +522,9 @@ inline Yue2SheetTokenType yue2_sheet_token_type(int32_t token) {
     if (token >= T::FULL_CHORD_TOKEN_START && token < T::FULL_CHORD_TOKEN_END) return Yue2SheetTokenType::ChordFull;
     if (token >= T::PITCH_TOKEN_START && token < T::PITCH_TOKEN_END) return Yue2SheetTokenType::Pitch;
     if (token >= T::DURATION_TOKEN_START && token < T::DURATION_TOKEN_END) return Yue2SheetTokenType::Duration;
+    if (token >= T::N_TOKENS && token < T::N_TOKENS + 12) return Yue2SheetTokenType::ChordBass;
+    if (token >= T::N_TOKENS + 12 && token < T::N_TOKENS + 12 + 745) return Yue2SheetTokenType::ChordDetail;
+    if (token >= T::N_TOKENS + 12 + 745 && token < T::N_TOKENS + 12 + 745 + 109) return Yue2SheetTokenType::KeyMode;
     return Yue2SheetTokenType::Invalid;  // includes the dead [12,260) gap — doc 21 §1.2
 }
 
@@ -534,6 +544,9 @@ inline Yue2SheetField yue2_sheet_token_output_field(Yue2SheetTokenType t) {
         case Yue2SheetTokenType::EighthPosition:   return Yue2SheetField::Rhythm;
         case Yue2SheetTokenType::Structure:        return Yue2SheetField::Structure;
         case Yue2SheetTokenType::Key:               return Yue2SheetField::Key;
+        case Yue2SheetTokenType::KeyMode:           return Yue2SheetField::Key;
+        case Yue2SheetTokenType::ChordBass:         return Yue2SheetField::Chord;
+        case Yue2SheetTokenType::ChordDetail:       return Yue2SheetField::Chord;
         case Yue2SheetTokenType::ChordMajmin:       return Yue2SheetField::Chord;
         case Yue2SheetTokenType::ChordFull:         return Yue2SheetField::Chord;
         case Yue2SheetTokenType::Pitch:             return Yue2SheetField::Melody;
@@ -573,6 +586,40 @@ inline int32_t yue2_sheet_full_chord_id(const SheetSage2Tokens & t, const std::s
 // :495-498). Returns "{tonic}:{major|minor}" in upstream's canonical spelling
 // (normalize_key_name, chord_spelling_sheetsage2.py, upstream e8b16e3e):
 // KEY_MAP rows 0 and 5 re-indexed by tonic, so C# major is Db, A# minor Bb.
+// SheetSage2-Refined labels (vocab.py field_value, theory.chord_to_mir_eval).
+// chord_detail offset = 12 * quality + root (744 = N); key_mode offset =
+// 12 * mode + tonic (108 = N).
+inline std::string yue2_sheet_detail_chord_label(int32_t detail, int32_t bass /* -1: root position */) {
+    static const char * sharps[12]  = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    static const char * degrees[12] = { "1", "b2", "2", "b3", "3", "4", "b5", "5", "b6", "6", "b7", "7" };
+    // mir_eval spelling of the 62 Tsumugi qualities, in token order.
+    static const char * quality[62] = {
+        "5", "maj", "maj(*5,b5)", "min", "dim", "aug", "sus2", "sus4", "maj6", "7", "maj7", "min6", "min7",
+        "minmaj7", "7(*5,b5)", "hdim7", "aug(b7)", "aug(7)", "sus4(b7)", "dim7", "maj(9)", "min(9)", "maj6(9)",
+        "7(9)", "7(13)", "7(b9)", "7(#9)", "7(#11)", "7(b13)", "7(*5,b5,b13)", "maj7(9)", "maj7(b9)", "maj7(13)",
+        "maj7(#11)", "min6(9)", "min7(9)", "min7(11)", "min7(13)", "min7(b9)", "minmaj7(9)", "minmaj7(13)",
+        "aug(b7,9)", "aug(7,#9)", "maj(9,#11)", "hdim7(b9)", "7(9,13)", "7(9,b13)", "7(9,#11)", "7(b9,#9)",
+        "7(b9,13)", "7(b9,b13)", "7(b9,#11)", "7(#9,13)", "7(#9,b13)", "7(#11,13)", "min7(9,11)", "min7(9,13)",
+        "maj7(9,13)", "maj7(9,#11)", "7(9,#11,13)", "7(9,#11,b13)", "maj7(9,#11,13)",
+    };
+    if (detail < 0 || detail >= 744) return "N";
+    const int root = detail % 12;
+    std::string label = std::string(sharps[root]) + ":" + quality[detail / 12];
+    if (bass >= 0) {
+        const int interval = ((bass - root) % 12 + 12) % 12;
+        if (interval) label += std::string("/") + degrees[interval];
+    }
+    return label;
+}
+
+inline std::string yue2_sheet_key_mode_label(int32_t key_id) {
+    static const char * sharps[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    static const char * modes[9]   = { "major", "dorian", "phrygian", "lydian", "mixolydian", "minor",
+                                       "locrian", "harmonic_minor", "phrygian_dominant" };
+    if (key_id < 0 || key_id >= 108) return "N";
+    return std::string(sharps[key_id % 12]) + ":" + modes[key_id / 12];
+}
+
 inline std::string yue2_sheet_key_label(int32_t key_id) {
     static const std::array<std::string, 12> major = {"C","Db","D","Eb","E","F","F#","G","Ab","A","Bb","B"};
     static const std::array<std::string, 12> minor_ = {"C","C#","D","D#","E","F","F#","G","G#","A","Bb","B"};

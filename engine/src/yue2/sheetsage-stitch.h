@@ -380,7 +380,12 @@ struct Yue2SheetOverlapPrefix {
 inline bool yue2_sheet_build_overlap_prefix_tokens(const SheetSage2Tokens & vocab,
                                                     const std::vector<Yue2SheetEvent> & stitched_events_so_far,
                                                     const std::vector<std::string> & prompts, double window_start,
-                                                    double prefix_end, Yue2SheetOverlapPrefix * out, std::string * err) {
+                                                    double prefix_end, Yue2SheetOverlapPrefix * out, std::string * err,
+                                                    double origin = NAN) {
+    // Timestamps are relative to `origin`, the start of the window being
+    // decoded; it defaults to `window_start` (SheetSage2-Refined's resume and
+    // shortened-overlap prefixes start their source events later than that).
+    if (std::isnan(origin)) origin = window_start;
     const double eps = 1e-4;  // generation_sheetsage2.py:436 (doc 21 §4.2)
 
     std::vector<Yue2SheetEvent> source;
@@ -414,7 +419,7 @@ inline bool yue2_sheet_build_overlap_prefix_tokens(const SheetSage2Tokens & voca
         Yue2SheetEvent clone = e;
         clone.subbeat = std::max(0, e.global_subbeat - base_subbeat);
         if (clone.has_timestamp) {
-            yue2_sheet_set_event_local_timestamp(clone, e.time - window_start);
+            yue2_sheet_set_event_local_timestamp(clone, e.time - origin);
         }
         if (!yue2_sheet_refresh_event_values(vocab, clone, err)) return false;
         prefix_events.push_back(std::move(clone));
