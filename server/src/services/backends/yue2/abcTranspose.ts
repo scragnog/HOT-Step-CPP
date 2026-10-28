@@ -45,6 +45,24 @@ function signature(fifths: number): number[] {
   return sig;
 }
 
+/** Fifths of a mode's signature below its tonic's major signature, by the
+ *  ABC mode name (first three letters; "m" alone is minor). SheetSage2-Refined
+ *  writes dor/phr/lyd/mix/loc keys. */
+const MODE_FIFTHS: Record<string, number> = {
+  '': 0, maj: 0, ion: 0, m: -3, min: -3, aeo: -3, dor: -2, phr: -4, lyd: 1, mix: -1, loc: -5,
+};
+
+/** The 15 standard tonic names of a mode, by signature fifths - (-7). */
+function modeNames(delta: number): string[] {
+  if (delta === 0) return MAJOR;
+  if (delta === -3) return MINOR;
+  return Array.from({ length: 15 }, (_, i) => {
+    const x = i - 7 - delta + 1; // the tonic's fifths from F
+    const acc = Math.floor(x / 7);
+    return 'FCGDAEB'[mod(x, 7)] + (acc > 0 ? '#' : acc < 0 ? 'b' : '');
+  });
+}
+
 /** A K: value moved by `semitones`: the standard name with the fewest
  *  accidentals, ties broken toward the source key's side, then the shift's. */
 export function transposeKeyField(field: string, semitones: number): { text: string; key: Key } {
@@ -52,11 +70,11 @@ export function transposeKeyField(field: string, semitones: number): { text: str
   const rest = m?.[3] ?? '';
   const word = rest.trim().split(/\s+/)[0].toLowerCase();
   const mode = word.includes('=') ? '' : word; // clef=, middle= and the like are not a mode
-  const minor = /^m(in(or)?)?$/.test(mode);
-  if (!m || (!minor && !/^(maj(or)?)?$/.test(mode))) {
-    throw new Error(`Cannot transpose key "${field.trim()}": only major and minor keys are supported.`);
+  const delta = MODE_FIFTHS[mode === 'm' ? 'm' : mode.slice(0, 3)];
+  if (!m || delta === undefined) {
+    throw new Error(`Cannot transpose key "${field.trim()}": unsupported key mode.`);
   }
-  const names = minor ? MINOR : MAJOR;
+  const names = modeNames(delta);
   const from = names.indexOf(m[2]) - 7;
   if (from < -7) throw new Error(`Cannot transpose key "${field.trim()}": not a standard key name.`);
   const want = mod(pc(m[2]) + semitones, 12);

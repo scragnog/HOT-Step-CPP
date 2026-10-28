@@ -44,7 +44,18 @@ test('keys move with the fewest accidentals and keep their mode', () => {
   assert.equal(key(transposeAbc(score('Am', 'A32|'), 1)), 'Bbm');
   assert.equal(key(transposeAbc(score('Bb', 'B32|'), 3)), 'Db');
   assert.equal(key(transposeAbc(score('C', 'C32|'), 12)), 'C');
-  assert.throws(() => transposeAbc(score('Ddor', 'D32|'), 2), /only major and minor/);
+  assert.throws(() => transposeAbc(score('Dxyz', 'D32|'), 2), /unsupported key mode/);
+});
+
+test('modal keys (SheetSage2-Refined) move with their own signature', () => {
+  // D dorian has no accidentals; up a tone it is E dorian, two sharps.
+  const dor = assertMoved(score('Ddor', 'D8F8B8c8|'), 2);
+  assert.equal(key(dor), 'Edor');
+  assert.equal(body(dor), 'E8G8c8d8|');
+  for (let s = -12; s <= 12; s++) {
+    for (const k of ['Ephr', 'Flyd', 'Gmix', 'Bloc', 'F#dor']) assertMoved(score(k, 'C8^F8B8_e8|'), s);
+  }
+  assert.equal(key(transposeAbc(score('Gmix', 'G32|'), 6)), 'C#mix'); // six either way: up prefers sharps, as C +6 = F#;
 });
 
 test('a key change mid-piece moves its own signature and spelling', () => {

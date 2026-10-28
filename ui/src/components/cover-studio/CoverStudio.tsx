@@ -96,9 +96,13 @@ async function _drainCoverQueue() {
   _coverRunning = false;
 }
 
+// ABC mode suffixes SheetSage2-Refined's key_mode writes (K:Ddor, K:Gmix, ...).
+const KEY_MODES: Record<string, string> = { dor: 'dorian', phr: 'phrygian', lyd: 'lydian', mix: 'mixolydian', loc: 'locrian' };
+
 function coverScoreKeyLabel(abc: string): string {
-  const key = abc.match(/^K:\s*([A-Ga-g][#b]?)(m)?(?:\s+(minor|major|maj))?(?=\s|$)/m);
+  const key = abc.match(/^K:\s*([A-Ga-g][#b]?)(mix|dor|phr|lyd|loc|m)?(?:\s+(minor|major|maj))?(?=\s|$)/m);
   if (!key) return '';
+  if (key[2] && KEY_MODES[key[2]]) return `${key[1]} ${KEY_MODES[key[2]]}`;
   return `${key[1]} ${key[2] || key[3]?.toLowerCase() === 'minor' ? 'minor' : 'major'}`;
 }
 
@@ -106,7 +110,9 @@ function coverScoreKeyLabel(abc: string): string {
 function coverChoicesFor(abc: string, s: Omit<BuildSettings, 'arStrength'>) {
   const sourceKey = coverScoreKeyLabel(abc);
   const movedKey = s.keyShift && sourceKey ? transposeKey(sourceKey, s.keyShift) : '';
-  const key = movedKey ? movedKey.replace(/ major$/, '').replace(/ minor$/, 'm') : 'source';
+  const abcMode = (label: string) => Object.entries(KEY_MODES).reduce(
+    (text, [suffix, name]) => text.replace(new RegExp(` ${name}$`), suffix), label);
+  const key = movedKey ? abcMode(movedKey.replace(/ major$/, '').replace(/ minor$/, 'm')) : 'source';
   return { voices: s.voices, tempo: s.tempo, key, ...(movedKey ? { keyShift: s.keyShift } : {}), cfgScale: s.cfgScale };
 }
 
@@ -1145,7 +1151,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const scoreTempoFactor = scoreTempoScale.abc === sheetAbc ? scoreTempoScale.factor : 1;
   const scaledScoreBpm = Math.round(scoreBpm * scoreTempoFactor);
   const scaleScoreTempo = (by: number) => setScoreTempoScale({ abc: sheetAbc, factor: scoreTempoFactor * by });
-  const scoreKey = coverScoreKeyLabel(sheetAbc).replace(/(major|minor)$/, m => m[0].toUpperCase() + m.slice(1));
+  const scoreKey = coverScoreKeyLabel(sheetAbc).replace(/(major|minor|dorian|phrygian|lydian|mixolydian|locrian)$/, m => m[0].toUpperCase() + m.slice(1));
   const scoreDetailsDiffer = yue2Mode && datasetAnalysis && !!analysis && scoreBpm > 0 && !!scoreKey &&
     (Math.round(analysis.bpm) !== scoreBpm || analysis.key.toLowerCase() !== scoreKey.toLowerCase());
   // Both legs are silent — the sheet's "Save to dataset:" line is the sole

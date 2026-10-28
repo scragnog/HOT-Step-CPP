@@ -86,11 +86,14 @@ const PITCH_CLASS: Record<string, number> = {
   'A#': 10, Bb: 10, B: 11, Cb: 11,
 };
 
-function parsedKey(value: string): { pitch: number; minor: boolean; suffix: string; wordMode: boolean } {
-  const match = value.match(/^\s*([A-Ga-g])([#b]?)(m)?(?:(\s+)(minor|major|maj))?(\s+.*)?$/i);
+function parsedKey(value: string): { pitch: number; minor: boolean; mode: string; suffix: string; wordMode: boolean } {
+  // ABC modes as SheetSage2-Refined writes them (Ddor, Gmix, ...) besides major and minor.
+  const match = value.match(/^\s*([A-Ga-g])([#b]?)(mix|dor|phr|lyd|loc|m)?(?:(\s+)(minor|major|maj))?(\s+.*)?$/i);
   if (!match) throw new Error(`Unsupported cover key: ${value}`);
   const root = match[1].toUpperCase() + match[2];
-  return { pitch: PITCH_CLASS[root], minor: !!match[3] || match[5]?.toLowerCase() === 'minor',
+  const short = match[3]?.toLowerCase();
+  const minor = short === 'm' || match[5]?.toLowerCase() === 'minor';
+  return { pitch: PITCH_CLASS[root], minor, mode: minor ? 'minor' : short ?? 'major',
     suffix: `${match[4] ?? ''}${match[5] ?? ''}${match[6] ?? ''}`, wordMode: !!match[5] };
 }
 
@@ -107,7 +110,7 @@ export function coverTranspose(abc: string, targetKey: CoverKey, keyShift?: numb
   if (!sourceField) throw new Error('Cannot transpose a cover score without K:.');
   const source = parsedKey(sourceField[1]);
   const target = parsedKey(targetKey);
-  if (source.minor !== target.minor) throw new Error('Cover transposition keeps the source key mode.');
+  if (source.mode !== target.mode) throw new Error('Cover transposition keeps the source key mode.');
   let steps: number;
   if (typeof keyShift === 'number' && keyShift !== 0) {
     if (((source.pitch + keyShift) % 12 + 12) % 12 !== target.pitch) {
