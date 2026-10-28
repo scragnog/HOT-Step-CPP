@@ -121,6 +121,8 @@ struct Yue2SheetArgs {
     bool        fast    = false;  // --fast, load_opt.exact=false (default is exact=true)
     bool        repair  = true;   // --no-repair sets this false (sheetsage-repair.h's opt-out)
     bool        melody_only = false; // --melody-only, preserve training's full-score default
+    bool        refined  = false;  // --refined, SheetSage2-Refined overlay (sheetsage2-refined-*.gguf beside the base)
+    bool        key_mode = false;  // --key-mode, keys with modes (refined only)
 };
 
 // ── Small helpers ────────────────────────────────────────────────────────────
@@ -155,9 +157,11 @@ static std::string lower(std::string s) {
 // the converter names this file "sheetsage2-<type>.gguf" with no "yue2-"
 // segment (engine/tools/convert-sheetsage2.py:1048) — so it needs its own
 // four-line copy rather than a call into that function.
-static bool find_model(const std::string & models_dir, std::string * out_path) {
+// `refined`: the SheetSage2-Refined overlay (sheetsage2-refined-<quant>.gguf)
+// instead of the base, which never matches it.
+static bool find_model(const std::string & models_dir, std::string * out_path, bool refined = false) {
     const std::vector<std::string> dirs = { models_dir + YUE2_SEP "yue2", models_dir };
-    const std::string              prefix = "sheetsage2-";
+    const std::string              prefix = refined ? "sheetsage2-refined-" : "sheetsage2-";
     std::string                    best_path;
     int                             best_rank = 1 << 30;
     for (const auto & dir : dirs) {
@@ -169,6 +173,9 @@ static bool find_model(const std::string & models_dir, std::string * out_path) {
             }
             if (n.compare(n.size() - 5, 5, ".gguf") != 0) {
                 continue;
+            }
+            if (!refined && n.compare(0, 19, "sheetsage2-refined-") == 0) {
+                continue;  // an overlay, not a base model
             }
             const std::string quant = n.substr(prefix.size(), n.size() - prefix.size() - 5);
             const int         rank  = yue2_quant_rank(quant);
@@ -455,6 +462,16 @@ static int yue2_sheet_run(const Yue2SheetArgs & a) {
 
     SheetSageModelLoadOptions load_opt;
     load_opt.exact = !a.fast;  // default: the CPU-and-CUDA-alike precision fix (doc 23); --fast opts out
+    if (a.refined) {
+        if (!find_model(a.models_dir.empty() ? yue2_sheet_detail::dirname_of(model_path) : a.models_dir,
+                        &load_opt.refined_path, /*refined=*/true)) {
+            fprintf(stderr, "[yue2-sheet] SheetSage2 load failed: --refined given but no sheetsage2-refined-*.gguf "
+                            "under %s/yue2 or %s\n", a.models_dir.c_str(), a.models_dir.c_str());
+            return 1;
+        }
+        fprintf(stderr, "[yue2-sheet] SheetSage2-Refined overlay: %s%s\n", load_opt.refined_path.c_str(),
+                a.key_mode ? " (key_mode)" : "");
+    }
 
     SheetSageModel m;
     std::string    err;
@@ -465,7 +482,9 @@ static int yue2_sheet_run(const Yue2SheetArgs & a) {
 
     const std::string backend_tag = lower(ggml_backend_name(m.backend));
     const std::string producer_tag =
-        yue2_basename(model_path) + " " + (load_opt.exact ? "exact" : "fast") + " " + backend_tag;
+        yue2_basename(model_path) +
+        (a.refined ? " + " + yue2_basename(load_opt.refined_path) + (a.key_mode ? " key_mode" : "") : "") + " " +
+        (load_opt.exact ? "exact" : "fast") + " " + backend_tag;
     const std::string threads_tag =
         a.threads > 0 ? (" | --threads " + std::to_string(a.threads)) : std::string();
 
@@ -483,6 +502,7 @@ static int yue2_sheet_run(const Yue2SheetArgs & a) {
     topt.threads = a.threads;
     topt.repair  = a.repair;
     topt.melody_only = a.melody_only;
+    topt.key_mode    = a.refined && a.key_mode;
 
     // ── decode plumbing (the same two routes yue2-tokenize-run.h uses) ──────
     const std::string out_dir    = dirname_of(a.manifest);
