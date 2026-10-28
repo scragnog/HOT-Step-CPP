@@ -118,7 +118,10 @@ Cover Studio draft to resume the workflow.
    clears the previous source and its Prepare confirmations.
 2. For Source Audio, transcription starts by itself once the recording has
    loaded (after the upload, the analysis and the dataset lookup, which can supply
-   a score of its own). SheetSage2 writes the melody and detected chords into ABC.
+   a score of its own). SheetSage2 writes the melody and detected chords into ABC,
+   or SheetSage2-Refined when it is chosen in the YuE2 **Models** dropdown (it adds
+   odd meters, slash and tension chords and, with **Keys with modes**, keys such as
+   D Dorian; the key shift keeps the mode).
    The score panel shows queue and transcription progress, with **Cancel
    transcription** and **Retranscribe**; **Transcribe full score** is there if the automatic run was
    cancelled or failed. A source restored with the page is not transcribed again. SheetSage2 must be registered for automatic
