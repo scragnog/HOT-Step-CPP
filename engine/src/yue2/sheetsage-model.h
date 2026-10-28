@@ -87,6 +87,7 @@
 
 #include "yue2-mert.h"  // Yue2MertConfig/Weights/Model + reused mel/subsampling/block code
 #include "yue2-model.h"  // Yue2Loader, GGUFModel, WeightCtx, gf_get_*/yue2_get_i32_arr, backend_init/_release
+#include "sheetsage-heads.h"  // SheetSage2-Refined frame heads (CPU)
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -234,6 +235,12 @@ struct SheetSageDecoderWeights {
 // VRAM. Measured total (doc 23): see the progress doc's cost row.
 struct SheetSageModelLoadOptions {
     bool exact = false;  // default false: today's fast path, unchanged.
+
+    // SheetSage2-Refined overlay (sheetsage2-refined-<type>.gguf, arch
+    // sheetsage2r): dec.* comes from this file instead of the base, the
+    // vocabulary grows to the overlay's vocab_size, and the frame heads load
+    // into SheetSageModel::rheads. The encoder always comes from the base.
+    std::string refined_path;
 };
 
 struct SheetSageModel {
@@ -274,6 +281,11 @@ struct SheetSageModel {
     // record of a load-time decision -- setting this field directly does
     // nothing; only sheetsage_model_load() may write it.
     bool exact = false;
+
+    // SheetSage2-Refined: set when SheetSageModelLoadOptions::refined_path
+    // was loaded. The decoder in `dec` is then the refined one.
+    bool                  refined = false;
+    SheetSageRefinedHeads rheads;
 
     std::map<std::string, ggml_tensor *> tmap;  // introspection only
 };
@@ -474,6 +486,8 @@ static void sheetsage_model_free(SheetSageModel * m) {
     m->tmap.clear();
     m->vram  = 0;
     m->exact = false;
+    m->refined = false;
+    m->rheads  = SheetSageRefinedHeads{};
     if (m->backend_ref) {
         backend_release(m->backend, m->cpu_backend);
         m->backend     = nullptr;
@@ -519,6 +533,36 @@ static bool sheetsage_model_load(SheetSageModel * m, const std::string & path, s
         }
         gf_close(&gf);
         return false;
+    }
+
+    // SheetSage2-Refined overlay: opened now, kept open until wctx_alloc
+    // has copied its dec.* tensors (the loader stages pointers into it).
+    GGUFModel gr;
+    bool      gr_open = false;
+    if (!load_opt.refined_path.empty()) {
+        std::string herr;
+        if (!gf_load(&gr, load_opt.refined_path.c_str())) {
+            herr = "cannot open " + load_opt.refined_path;
+        } else {
+            gr_open = true;
+            if (std::string(gf_get_str(gr, "general.architecture")) != "sheetsage2r") {
+                herr = load_opt.refined_path + " is not a sheetsage2r (SheetSage2-Refined) GGUF";
+            } else if (!sheetsage_refined_heads_load(load_opt.refined_path, &m->rheads, &herr)) {
+                herr = "refined heads: " + herr;
+            }
+        }
+        if (!herr.empty()) {
+            if (err) {
+                *err = herr;
+            }
+            if (gr_open) {
+                gf_close(&gr);
+            }
+            gf_close(&gf);
+            return false;
+        }
+        m->cfg.vocab_size = gf_get_u32(gr, "sheetsage2r.vocab_size");
+        m->refined        = true;
     }
 
     const Yue2MertConfig & mc = m->mert.cfg;
@@ -719,6 +763,10 @@ static bool sheetsage_model_load(SheetSageModel * m, const std::string & path, s
     }
 
     // ---- decoder: loaded here, graph lives in sheetsage-decoder.h ----------
+    // From the refined overlay when one was given (same names and layout).
+    if (gr_open) {
+        ld.gf = &gr;
+    }
     if (errs.empty()) {
         const int64_t D  = (int64_t) m->cfg.dec.embedding_length;
         const int64_t FF = (int64_t) m->cfg.dec.feed_forward_length;
@@ -772,6 +820,9 @@ static bool sheetsage_model_load(SheetSageModel * m, const std::string & path, s
             *err = errs[0] + (errs.size() > 1 ? " (+" + std::to_string(errs.size() - 1) + " more)" : "");
         }
         gf_close(&gf);
+        if (gr_open) {
+            gf_close(&gr);
+        }
         sheetsage_model_free(m);
         return false;
     }
@@ -781,10 +832,16 @@ static bool sheetsage_model_load(SheetSageModel * m, const std::string & path, s
             *err = "backend buffer allocation failed for the SheetSage2 weights";
         }
         gf_close(&gf);
+        if (gr_open) {
+            gf_close(&gr);
+        }
         sheetsage_model_free(m);
         return false;
     }
     gf_close(&gf);  // safe: wctx_alloc has copied everything to the backend
+    if (gr_open) {
+        gf_close(&gr);
+    }
 
     m->vram = m->wctx.buffer ? ggml_backend_buffer_get_size(m->wctx.buffer) : 0;
 

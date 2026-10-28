@@ -62,6 +62,14 @@ struct SheetSageRefinedHeads {
     SheetSageHeadLinear        bar_proj;  // [512, 43]
     int chunk_core = 1500, chunk_context = 375;
 
+    // Decode-time rescoring (config.json "rescoring", transcribe.py
+    // FRAME_LOOKAHEAD / FRAME_REACH) and the key_mode bias.
+    std::map<std::string, float> rescore_weight;  // downbeat, meter, root, bass, quality, key, key_boundary
+    std::map<std::string, int>   lookahead;       // root, bass, quality, key, meter
+    std::map<std::string, int>   reach;           // key_boundary, downbeat
+    float                        mode_tau = 0.0f;
+    std::vector<float>           mode_counts;     // per theory.MODES
+
     const SheetSageHead * find(const std::string & key) const {
         for (const SheetSageHead & h : heads) {
             if (h.key == key) {
@@ -143,6 +151,30 @@ static bool sheetsage_refined_heads_load(const std::string & path, SheetSageRefi
         }
         ss2r_gguf_u32(g, "sheetsage2r.heads.chunk_core", &out->chunk_core);
         ss2r_gguf_u32(g, "sheetsage2r.heads.chunk_context", &out->chunk_context);
+        for (const char * t : { "downbeat", "meter", "root", "bass", "quality", "key", "key_boundary" }) {
+            const int64_t id = gguf_find_key(g, (std::string("sheetsage2r.rescore.") + t + ".weight").c_str());
+            if (id >= 0) {
+                out->rescore_weight[t] = gguf_get_val_f32(g, id);
+            }
+            int n = 0;
+            if (ss2r_gguf_u32(g, std::string("sheetsage2r.rescore.") + t + ".lookahead", &n)) {
+                out->lookahead[t] = n;
+            }
+            if (ss2r_gguf_u32(g, std::string("sheetsage2r.rescore.") + t + ".reach", &n)) {
+                out->reach[t] = n;
+            }
+        }
+        {
+            const int64_t tau = gguf_find_key(g, "sheetsage2r.key_mode.tau");
+            const int64_t cnt = gguf_find_key(g, "sheetsage2r.key_mode.counts");
+            if (tau >= 0) {
+                out->mode_tau = gguf_get_val_f32(g, tau);
+            }
+            if (cnt >= 0 && gguf_get_arr_type(g, cnt) == GGUF_TYPE_FLOAT32) {
+                const float * d = (const float *) gguf_get_arr_data(g, cnt);
+                out->mode_counts.assign(d, d + gguf_get_arr_n(g, cnt));
+            }
+        }
         if (!ss2r_linear(ctx, "bar.proj", &out->bar_proj, err)) {
             break;
         }
@@ -493,16 +525,38 @@ static void sheetsage_refined_run_heads(const SheetSageRefinedHeads & rh, const 
                                         int64_t T, SheetSageRefinedHeadOutputs * out) {
     *out   = SheetSageRefinedHeadOutputs{};
     out->T = T;
-    size_t mi = 0;
-    std::vector<std::vector<float>> facts;
+    // Every (head, chunked?) pass is independent; the unchunked GRUs step
+    // through all T frames one by one, so they run side by side.
+    struct Job {
+        const SheetSageHead *      h;
+        std::vector<const float *> mixes;
+        bool                       chunked;
+        std::map<std::string, std::vector<float>> * dst;
+    };
+    std::vector<Job> jobs;
+    size_t           mi = 0;
     for (const SheetSageHead & h : rh.heads) {
         std::vector<const float *> hm(mixes.begin() + (int64_t) mi, mixes.begin() + (int64_t) (mi + h.mixes));
         mi += (size_t) h.mixes;
-        sheetsage_head_forward(h, hm, T, false, rh.chunk_core, rh.chunk_context, &out->full[h.key]);
+        jobs.push_back({ &h, hm, false, &out->full[h.key] });
         if (h.key == "bar0" || h.key == "bar1") {
-            sheetsage_head_forward(h, hm, T, true, rh.chunk_core, rh.chunk_context, &out->chunked[h.key]);
+            jobs.push_back({ &h, hm, true, &out->chunked[h.key] });
+        }
+    }
+    std::vector<std::thread> th;
+    for (Job & j : jobs) {
+        th.emplace_back([&rh, &j, T] {
+            sheetsage_head_forward(*j.h, j.mixes, T, j.chunked, rh.chunk_core, rh.chunk_context, j.dst);
+        });
+    }
+    for (std::thread & t : th) {
+        t.join();
+    }
+    std::vector<std::vector<float>> facts;
+    for (const char * k : { "bar0", "bar1" }) {
+        if (out->chunked.count(k)) {
             facts.emplace_back();
-            sheetsage_bar_facts(out->chunked[h.key], T, &facts.back());
+            sheetsage_bar_facts(out->chunked[k], T, &facts.back());
         }
     }
     out->bar_facts.assign((size_t) (T * SS2R_BAR_FEATURES), 0.0f);

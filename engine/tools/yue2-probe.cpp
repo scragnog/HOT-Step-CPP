@@ -68,6 +68,7 @@
 #include "yue2/sheetsage-encoder.h"
 #include "yue2/sheetsage-events.h"
 #include "yue2/sheetsage-heads.h"
+#include "yue2/sheetsage-refined.h"
 #include "yue2/sheetsage-model.h"
 #include "yue2/sheetsage-pipeline.h"
 #include "yue2/yue2-lm-graph.h"
@@ -141,6 +142,8 @@ static void usage() {
             "       yue2-probe --sheetsage-refined-heads <oracle_dir> [--model <sheetsage2-*.gguf>] "
             "[--refined <sheetsage2-refined-*.gguf>]\n"
             "       (SheetSage2-Refined frame heads vs engine/tools/sheetsage2-refined-oracle.py dumps)\n"
+            "       yue2-probe --sheetsage-refined-transcribe <dir> [--model ..] [--refined ..] [--key-mode]\n"
+            "       (SheetSage2-Refined decode of <dir>/00_song_mono24.f32, one window; writes the token ids)\n"
             "       yue2-probe --sheetsage-decoder-parity <fixture_dir> [--model <sheetsage2-*.gguf>]\n"
             "       (SheetSage2's decoder: teacher-forced replay of every window-XXXX/ under <fixture_dir>\n"
             "        against 07_prompt_prefix_ids+08_generated_ids, gated on the oracle's own\n"
@@ -4434,6 +4437,59 @@ static int run_sheetsage_refined_heads(const std::string & dir, const std::strin
     return (fails_a || fails_b) ? 1 : 0;
 }
 
+// ── --sheetsage-refined-transcribe: SheetSage2-Refined, one window ─────────
+//
+// Decodes <dir>/00_song_mono24.f32 (at most one 300 s window) with the
+// refined decoder, heads and rescoring, and writes the token ids to
+// <dir>/ours_refined_<default|keymode>_window-0000_ids.i32 for comparison
+// with a reference decode of the same audio.
+
+static int run_sheetsage_refined_transcribe(const std::string & dir, const std::string & model_path,
+                                            const std::string & refined_path, bool key_mode) {
+    yue2_tok_disable_tf32();
+    std::string               err;
+    SheetSageModel            m;
+    SheetSageModelLoadOptions lo;
+    lo.refined_path = refined_path;
+    if (!sheetsage_model_load(&m, model_path, &err, lo)) {
+        fprintf(stderr, "FATAL: %s\n", err.c_str());
+        return 1;
+    }
+    std::vector<float> song;
+    if (!yue2_read_f32_bin(dir + "/00_song_mono24.f32", &song)) {
+        fprintf(stderr, "FATAL: %s/00_song_mono24.f32 not found\n", dir.c_str());
+        return 1;
+    }
+    const double  sr  = (double) m.mert.cfg.sample_rate;
+    const int64_t win = sheetsage_window_samples(m);
+    if ((int64_t) song.size() > win) {
+        fprintf(stderr, "FATAL: song is longer than one window (multi-window stitching is not in this mode)\n");
+        return 1;
+    }
+    SheetSageEncoderGraph        g;
+    SheetSageRefinedWindowResult r;
+    const double                 stop = std::min((double) song.size() / sr, (double) m.cfg.window_seconds);
+    const bool ok = sheetsage_refined_decode_window(m, &g, song.data(), (int64_t) song.size(),
+                                                    sheetsage_refined_prompt_prefix(key_mode), stop, key_mode, &r, &err);
+    sheetsage_enc_graph_free(&g);
+    sheetsage_model_free(&m);
+    if (!ok) {
+        fprintf(stderr, "FATAL: %s\n", err.c_str());
+        return 1;
+    }
+    const std::string tag  = key_mode ? "keymode" : "default";
+    const std::string path = dir + "/ours_refined_" + tag + "_window-0000_ids.i32";
+    FILE *            f    = fopen(path.c_str(), "wb");
+    if (f) {
+        fwrite(r.tokens.data(), sizeof(int32_t), r.tokens.size(), f);
+        fclose(f);
+    }
+    printf("refined %s: frames=%lld tokens=%zu ended=%s encode=%.0f ms heads=%.0f ms decode=%.0f ms -> %s\n",
+           tag.c_str(), (long long) r.frames, r.tokens.size(), r.ended, r.ms_encode, r.ms_heads, r.ms_decode,
+           path.c_str());
+    return 0;
+}
+
 // ── --sheetsage-decoder-parity: SheetSage2's decoder, teacher-forced ───────
 //
 // AUTHORITY: docs/plans/yue2/20-sheetsage2-model-pin.md §3 (decoder math),
@@ -5645,6 +5701,8 @@ int main(int argc, char ** argv) {
     std::string     sheetsage_encoder_parity_dir;
     std::string     sheetsage_refined_heads_dir;
     std::string     sheetsage_refined_path;
+    std::string     sheetsage_refined_transcribe_dir;
+    bool            sheetsage_key_mode = false;
     std::string     sheetsage_decoder_parity_dir;
     std::string     sheetsage_transcribe_dir;
     std::string     sheetsage_model_path;
@@ -5717,6 +5775,10 @@ int main(int argc, char ** argv) {
             sheetsage_encoder_parity_dir = argv[++i];
         } else if (!strcmp(argv[i], "--sheetsage-refined-heads") && i + 1 < argc) {
             sheetsage_refined_heads_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--sheetsage-refined-transcribe") && i + 1 < argc) {
+            sheetsage_refined_transcribe_dir = argv[++i];
+        } else if (!strcmp(argv[i], "--key-mode")) {
+            sheetsage_key_mode = true;
         } else if (!strcmp(argv[i], "--refined") && i + 1 < argc) {
             sheetsage_refined_path = argv[++i];
         } else if (!strcmp(argv[i], "--sheetsage-decoder-parity") && i + 1 < argc) {
@@ -5975,6 +6037,13 @@ int main(int argc, char ** argv) {
             yue2_tok_disable_tf32();
         }
         return run_mert_block_parity(models_dir, mert_block_parity_dir, tok_head_gguf, mert_gelu_mode);
+    }
+    if (!sheetsage_refined_transcribe_dir.empty()) {
+        return run_sheetsage_refined_transcribe(
+            sheetsage_refined_transcribe_dir,
+            sheetsage_model_path.empty() ? "models/yue2/sheetsage2-f16.gguf" : sheetsage_model_path,
+            sheetsage_refined_path.empty() ? "models/yue2/sheetsage2-refined-f16.gguf" : sheetsage_refined_path,
+            sheetsage_key_mode);
     }
     if (!sheetsage_refined_heads_dir.empty()) {
         return run_sheetsage_refined_heads(
