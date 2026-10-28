@@ -8,7 +8,7 @@ import { createJob, type TrainingJob } from './labelingQueue.js';
 import { gpuLaneOwner, runOnGpuLane } from '../generation/gpuLane.js';
 import { type RelayState, runYue2AceTrain } from './yue2TrainRunner.js';
 import {
-  buildYue2SheetArgs, readYue2CoverAbc, writeYue2CoverSheetManifest,
+  buildYue2SheetArgs, readYue2CoverAbc, setSheetTranscriberSource, writeYue2CoverSheetManifest,
   type ResolvedYue2SheetOptions,
 } from './yue2Sheet.js';
 
@@ -31,6 +31,17 @@ test('SheetSage2-Refined arguments: --refined, and --key-mode only with it', () 
   assert.equal(buildYue2SheetArgs(trainingOptions).includes('--refined'), false);
   assert.deepEqual(buildYue2SheetArgs({ ...trainingOptions, refined: true, keyMode: true }).slice(-2), ['--refined', '--key-mode']);
   assert.equal(buildYue2SheetArgs({ ...trainingOptions, keyMode: true }).includes('--key-mode'), false);
+});
+
+test('labelling and the AR sheet stage follow the stored transcriber choice', () => {
+  setSheetTranscriberSource(() => ({ refined: true, keyMode: true }));
+  try {
+    // No refined field: the Models dropdown's stored choice decides.
+    assert.deepEqual(buildYue2SheetArgs(trainingOptions).slice(-2), ['--refined', '--key-mode']);
+    assert.equal(buildYue2SheetArgs({ ...trainingOptions, refined: false }).includes('--refined'), false);
+  } finally {
+    setSheetTranscriberSource(() => ({ refined: false, keyMode: false }));
+  }
 });
 
 test('a cover source gets a private one-source manifest and usable ABC', () => {

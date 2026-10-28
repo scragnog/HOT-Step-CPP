@@ -24,7 +24,7 @@ const presetsOptions = <T>(family: PresetFamily) => queryOptions({
   gcTime: 0,
 });
 
-const settingOptions = <T>(family: SettingsFamily) => queryOptions({
+export const settingOptions = <T>(family: SettingsFamily) => queryOptions({
   queryKey: serverKey('shell-queue/setting', { filters: { family } }),
   queryFn: ({ signal }) => preferencesApi.settings.get<T>(family, { signal }),
   staleTime: 0,

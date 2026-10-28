@@ -465,7 +465,7 @@ static int yue2_sheet_run(const Yue2SheetArgs & a) {
     if (a.refined) {
         if (!find_model(a.models_dir.empty() ? yue2_sheet_detail::dirname_of(model_path) : a.models_dir,
                         &load_opt.refined_path, /*refined=*/true)) {
-            fprintf(stderr, "[yue2-sheet] SheetSage2 load failed: --refined given but no sheetsage2-refined-*.gguf "
+            fprintf(stderr, "[yue2-sheet] SheetSage2-Refined is not installed: --refined given but no sheetsage2-refined-*.gguf "
                             "under %s/yue2 or %s\n", a.models_dir.c_str(), a.models_dir.c_str());
             return 1;
         }

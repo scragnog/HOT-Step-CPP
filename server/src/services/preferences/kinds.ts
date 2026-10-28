@@ -4,8 +4,8 @@
 import { registerDocumentKind, type TypedDocumentKind } from '../workflows/revisions.js';
 import {
   aiContinuePresetBodySchema, aiContinueTemplateBodySchema,
-  stormTuningBodySchema, vstChainPresetBodySchema, yue2JointPresetBodySchema,
-  type AiContinuePresetBody, type AiContinueTemplateBody,
+  sheetTranscriberBodySchema, stormTuningBodySchema, vstChainPresetBodySchema, yue2JointPresetBodySchema,
+  type AiContinuePresetBody, type AiContinueTemplateBody, type SheetTranscriberBody,
   type StormTuningBody, type VstChainPresetBody, type Yue2JointPresetBody,
 } from '../../contracts/preferences.js';
 
@@ -26,6 +26,9 @@ export const YUE2_JOINT_PRESET = registerDocumentKind<Yue2JointPresetBody>({
 });
 export const STORM_TUNING = registerDocumentKind<StormTuningBody>({
   kind: 'preferences.storm-tuning', scope: 'installation', schemaVersion: 1, schema: stormTuningBodySchema,
+});
+export const SHEET_TRANSCRIBER = registerDocumentKind<SheetTranscriberBody>({
+  kind: 'preferences.sheet-transcriber', scope: 'installation', schemaVersion: 1, schema: sheetTranscriberBodySchema,
 });
 
 /** A family's kind and body are erased to `Record<string, unknown>` here:
@@ -56,5 +59,6 @@ export type PresetFamily = 'vst-chain' | 'ai-continue-style' | 'ai-continue-lyri
 export const SINGLETON_FAMILIES: Record<string, TypedDocumentKind<Record<string, unknown>>> = {
   'ai-continue-template': AI_CONTINUE_TEMPLATE as unknown as TypedDocumentKind<Record<string, unknown>>,
   'storm-tuning': STORM_TUNING as unknown as TypedDocumentKind<Record<string, unknown>>,
+  'sheet-transcriber': SHEET_TRANSCRIBER as unknown as TypedDocumentKind<Record<string, unknown>>,
 };
-export type SingletonFamily = 'ai-continue-template' | 'storm-tuning';
+export type SingletonFamily = 'ai-continue-template' | 'storm-tuning' | 'sheet-transcriber';

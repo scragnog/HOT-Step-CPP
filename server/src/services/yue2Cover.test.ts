@@ -34,6 +34,7 @@ function fixture(missing = false, defer = false) {
   let pending: (() => Promise<void>) | undefined;
   let alignTimes: Array<[string, number]> = [];
   let refinedInstalled = false;
+  let stored = { refined: false, keyMode: false };
   let ranWith: unknown;
   const fakeQueue = {
     createJob: (_kind: string, datasetId: string) => {
@@ -64,6 +65,7 @@ function fixture(missing = false, defer = false) {
     missingModels: () => missing ? ['SheetSage2'] : [],
     model: () => missing ? '' : 'sheetsage2-f16.gguf',
     refinedModel: () => refinedInstalled ? 'sheetsage2-refined-f16.gguf' : '',
+    transcriberSetting: () => stored,
     vocalStem: async (audioPath: string) => audioPath,
     align: async (_audio: Buffer, lyrics: string) => ({ words: alignTimes.map(([text, start]) => {
       const char0 = lyrics.indexOf(text);
@@ -98,6 +100,7 @@ function fixture(missing = false, defer = false) {
     failAbcWrites: (fail: boolean) => { failAbc = fail; },
     setAlign: (times: Array<[string, number]>) => { alignTimes = times; },
     setRefined: (installed: boolean) => { refinedInstalled = installed; }, ranWith: () => ranWith,
+    setStored: (next: { refined: boolean; keyMode: boolean }) => { stored = next; },
     counts: () => ({ started, cancelled, runnerCalls }), ranOn: () => ranOn, drain: async () => { await pending?.(); },
     close: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
@@ -182,6 +185,23 @@ test('SheetSage2-Refined is chosen per transcription and needs its overlay insta
     assert.deepEqual(f.ranWith(), { refined: true, keyMode: true });
     // key_mode only means something with the refined decoder
     await f.service.start({ sourceAudioUrl: `/references/${f.upload}`, keyMode: true }, 'owner');
+    await f.drain();
+    assert.deepEqual(f.ranWith(), { refined: false, keyMode: false });
+  } finally { f.close(); }
+});
+
+test('the Models dropdown choice applies when a transcription names none', async () => {
+  const f = fixture(false, true);
+  try {
+    const input = { sourceAudioUrl: `/references/${f.upload}` };
+    f.setStored({ refined: true, keyMode: true });
+    await assert.rejects(f.service.start(input, 'owner'), /chosen but not installed/);
+    f.setRefined(true);
+    await f.service.start(input, 'owner');
+    await f.drain();
+    assert.deepEqual(f.ranWith(), { refined: true, keyMode: true });
+    // an explicit SheetSage2 request still wins
+    await f.service.start({ ...input, transcriber: 'sheetsage2' }, 'owner');
     await f.drain();
     assert.deepEqual(f.ranWith(), { refined: false, keyMode: false });
   } finally { f.close(); }

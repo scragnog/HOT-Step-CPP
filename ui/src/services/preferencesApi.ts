@@ -15,7 +15,7 @@ import { apiClient, type ReadOptions } from './httpClient';
 
 export type { ImportPreferenceItem, ImportPreferenceResult };
 export type PresetFamily = 'vst-chain' | 'ai-continue-style' | 'ai-continue-lyric' | 'yue2-joint';
-export type SettingsFamily = 'ai-continue-template' | 'storm-tuning';
+export type SettingsFamily = 'ai-continue-template' | 'storm-tuning' | 'sheet-transcriber';
 
 async function request<T>(url: string, method = 'GET', body?: unknown, opts: ReadOptions = {}): Promise<T> {
   return apiClient.request<T>(method, url.replace(/^\/api/, ''), body, opts);

@@ -9,7 +9,8 @@ import type { TrainingJob } from './training/labelingQueue.js';
 import { runYue2AceTrain } from './training/yue2TrainRunner.js';
 import { jobsDir } from './training/paths.js';
 import { readDuration } from './training/audioMeta.js';
-import { missingYue2SheetModels, readYue2CoverAbc, resolveYue2SheetModel, resolveYue2SheetRefinedModel } from './training/yue2Sheet.js';
+import { MISSING_REFINED, missingYue2SheetModels, readYue2CoverAbc, resolveYue2SheetModel, resolveYue2SheetRefinedModel,
+  sheetTranscriberSetting } from './training/yue2Sheet.js';
 import { runYue2CoverSheetJob } from './training/yue2ArTrainRunner.js';
 import { resolveCoverDatasetSource, type CoverDatasetSource } from './coverDatasetSource.js';
 import { getDataset } from './training/datasetsRepo.js';
@@ -68,6 +69,7 @@ export function createYue2CoverService(deps = {
     runYue2CoverSheetJob(job, audioPath, dir,
       { missingModels: missingYue2SheetModels, run: runYue2AceTrain, vocalStem: coverStems.vocalStem }, transcriber),
   refinedModel: resolveYue2SheetRefinedModel,
+  transcriberSetting: sheetTranscriberSetting,
   datasetMatch: resolveCoverDatasetSource,
   toMp3: (file: string) => cachedMp3(file, path.join(config.data.dir, 'tmp', 'cover-mp3')),
   vocalStem: coverStems.vocalStem,
@@ -87,9 +89,12 @@ export function createYue2CoverService(deps = {
   function readiness() {
     const missing = deps.missingModels();
     const refinedModel = deps.refinedModel?.() ?? '';
+    const refinedMissing = missing.length === 1 && missing[0] === MISSING_REFINED;
     return { ready: missing.length === 0, model: missing.length ? null : path.basename(deps.model()),
-      refined: missing.length === 0 && !!refinedModel,
-      message: missing.length ? 'SheetSage2 is missing. Download the SheetSage2 Lead-Sheet Transcriber (yue2-sheetsage2-f16) in Model Manager, or supply an approved ABC score.' : null };
+      refined: !!deps.model() && !!refinedModel,
+      message: !missing.length ? null : refinedMissing
+        ? 'SheetSage2-Refined is chosen in the YuE2 Models dropdown but not installed. Download it (yue2-sheetsage2-refined-f16) in Model Manager, or choose SheetSage2.'
+        : 'SheetSage2 is missing. Download the SheetSage2 Lead-Sheet Transcriber (yue2-sheetsage2-f16) in Model Manager, or supply an approved ABC score.' };
   }
 
   function reviewScore(input: { abc?: unknown; lyrics?: unknown }) {
@@ -164,17 +169,20 @@ export function createYue2CoverService(deps = {
       if (abc) return { status: 'done' as const, abc, sections: scoreSections(abc), sourceId: selected.sourceId,
         sourceLabel: selected.sourceLabel, scoreSource: 'dataset' as const };
     }
-    const ready = readiness();
-    if (!ready.ready) throw new CoverRequestError(ready.message!, 400);
     if (input.transcriber !== undefined && input.transcriber !== 'sheetsage2' && input.transcriber !== 'sheetsage2-refined') {
       throw new CoverRequestError("transcriber must be 'sheetsage2' or 'sheetsage2-refined'.");
     }
     if (input.keyMode !== undefined && typeof input.keyMode !== 'boolean') throw new CoverRequestError('keyMode must be a boolean.');
-    const refined = input.transcriber === 'sheetsage2-refined';
+    // An explicit choice overrides the stored one (the YuE2 Models dropdown).
+    const stored = deps.transcriberSetting?.() ?? { refined: false, keyMode: false };
+    const refined = input.transcriber === undefined ? stored.refined : input.transcriber === 'sheetsage2-refined';
+    const keyMode = refined && (input.keyMode === undefined ? stored.keyMode : input.keyMode === true);
+    const ready = readiness();
+    if (!deps.model()) throw new CoverRequestError(ready.message!, 400);
     if (refined && !ready.refined) {
-      throw new CoverRequestError('SheetSage2-Refined is missing. Download it (yue2-sheetsage2-refined-f16) in Model Manager, or choose SheetSage2.', 400);
+      throw new CoverRequestError('SheetSage2-Refined is chosen but not installed. Download it (yue2-sheetsage2-refined-f16) in Model Manager, or choose SheetSage2.', 400);
     }
-    const transcriber = { refined, keyMode: refined && input.keyMode === true };
+    const transcriber = { refined, keyMode };
     const job = deps.queue.createJob('yue2-sheet', `cover:${userId}`, [], { sourceId: selected.sourceId });
     const dir = path.join(deps.jobRoot, job.id);
     try {

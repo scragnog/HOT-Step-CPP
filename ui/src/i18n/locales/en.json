@@ -22,7 +22,7 @@
     "globalBar.heartmulaNoAdapters": "No HeartMuLa GGUF adapters installed.",
     "globalBar.modelBucketInfo": "Selects the weights for this component. Different quantizations trade memory use for precision. Incompatible files cannot be selected.",
     "globalBar.yue2SheetTranscriber": "Lead-sheet transcriber",
-    "globalBar.yue2SheetTranscriberInfo": "Writes the ABC score a YuE2 cover follows. SheetSage2-Refined (anime-song) reads odd meters, slash chords and tension chords that SheetSage2 writes as 4/4 and plain triads. It needs SheetSage2 installed too: it reuses its encoder.",
+    "globalBar.yue2SheetTranscriberInfo": "Writes the ABC lead sheets that YuE2 covers follow, that the AR sheet stage trains on and that labelling saves beside each track. SheetSage2-Refined (anime-song) reads odd meters, slash chords and tension chords that SheetSage2 writes as 4/4 and plain triads. It needs SheetSage2 installed too: it reuses its encoder.",
     "globalBar.yue2SheetKeyMode": "Keys with modes (dorian, mixolydian, ...)",
     "globalBar.yue2SheetRefinedMissing": "Not installed: get yue2-sheetsage2-refined-f16 in Model Manager.",
     "globalBar.standardVariant": "Standard",

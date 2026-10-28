@@ -648,7 +648,7 @@ function relaySheetLine(job: TrainingJob, line: string, st: SheetState): void {
 function fatalishSheet(line: string): string {
   const usage = /^ace-train yue2-sheet:\s+(.+)$/.exec(line);
   if (usage) return usage[1];
-  const m = /^\[yue2-sheet\]\s+(cannot .+|no sheetsage2-.+|sources\[\d+\] is missing.+|FATAL .+|manifest not found:.+|SheetSage2 load failed.+)$/.exec(line);
+  const m = /^\[yue2-sheet\]\s+(cannot .+|no sheetsage2-.+|sources\[\d+\] is missing.+|FATAL .+|manifest not found:.+|SheetSage2 load failed.+|SheetSage2-Refined is not installed.+)$/.exec(line);
   return m ? m[1] : '';
 }
 
@@ -722,7 +722,8 @@ export async function runYue2CoverSheetJob(job: TrainingJob, audioPath: string, 
     const { manifest, name } = writeYue2CoverSheetManifest(audioPath, jobDir);
     const opts: ResolvedYue2SheetOptions = {
       manifest, only: '', force: false, fast: false, datasetSlug: '', melodyOnly: false,
-      refined: !!transcriber.refined, keyMode: !!transcriber.refined && !!transcriber.keyMode,
+      // Unset: the stored choice (buildYue2SheetArgs reads it).
+      refined: transcriber.refined, keyMode: transcriber.keyMode,
     };
     const st: SheetState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
     const verify = () => {

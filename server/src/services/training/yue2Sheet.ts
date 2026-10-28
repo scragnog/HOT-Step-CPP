@@ -146,10 +146,21 @@ export function resolveYue2SheetRefinedModel(): string {
   return '';
 }
 
+/** The transcriber the YuE2 Models dropdown chose (preferences family
+ *  `sheet-transcriber`). routes/preferences.ts registers the reader; until it
+ *  does, and on any read failure, SheetSage2. */
+export interface SheetTranscriberSetting { refined: boolean; keyMode: boolean }
+let transcriberSource: () => SheetTranscriberSetting = () => ({ refined: false, keyMode: false });
+export function setSheetTranscriberSource(read: () => SheetTranscriberSetting): void { transcriberSource = read; }
+export function sheetTranscriberSetting(): SheetTranscriberSetting {
+  try { return transcriberSource(); } catch { return { refined: false, keyMode: false }; }
+}
+
+export const MISSING_REFINED = 'SheetSage2-Refined (yue2-sheetsage2-refined-f16), chosen in the YuE2 Models dropdown';
+
 export function missingYue2SheetModels(): string[] {
-  return resolveYue2SheetModel()
-    ? []
-    : ['the SheetSage2 lead-sheet transcriber (sheetsage2-*.gguf)'];
+  if (!resolveYue2SheetModel()) return ['the SheetSage2 lead-sheet transcriber (sheetsage2-*.gguf)'];
+  return sheetTranscriberSetting().refined && !resolveYue2SheetRefinedModel() ? [MISSING_REFINED] : [];
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -322,7 +333,8 @@ export interface ResolvedYue2SheetOptions {
   melodyOnly?: boolean;
   /** Carried for the runner's own log lines and the run record. */
   datasetSlug: string;
-  /** SheetSage2-Refined instead of SheetSage2 (`--refined`). */
+  /** SheetSage2-Refined instead of SheetSage2 (`--refined`). Unset: the
+   *  stored choice (sheetTranscriberSetting). */
   refined?: boolean;
   /** With `refined`: keys with modes (`--key-mode`). */
   keyMode?: boolean;
@@ -338,9 +350,10 @@ export function buildYue2SheetArgs(o: ResolvedYue2SheetOptions): string[] {
   if (o.force) args.push('--force');
   if (o.fast) args.push('--fast');
   if (o.melodyOnly) args.push('--melody-only');
-  if (o.refined) {
+  const t = o.refined === undefined ? sheetTranscriberSetting() : { refined: o.refined, keyMode: !!o.keyMode };
+  if (t.refined) {
     args.push('--refined');
-    if (o.keyMode) args.push('--key-mode');
+    if (t.keyMode) args.push('--key-mode');
   }
   // Deliberately NOT emitted: --model, --threads. `--models` lets the
   // engine's quant ranking pick (and it prints which file it chose, same

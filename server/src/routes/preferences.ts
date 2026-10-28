@@ -12,7 +12,7 @@
 //   GET    /settings/:family                         the document, or { document: null }
 //   PUT    /settings/:family             { expectedRevision?, body }   create (first call) or update
 //   POST   /settings/:family/import      { items: [one item] }
-// family: ai-continue-template | storm-tuning
+// family: ai-continue-template | storm-tuning | sheet-transcriber
 //
 // No auth: every kind here is installation-scoped (no user id in any source
 // browser key), the same reasoning routes/vst.ts already applies to the VST
@@ -24,7 +24,8 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { WorkflowError } from '../services/workflows/workflowJobs.js';
 import { typedDocuments } from './workflows.js';
-import { PRESET_FAMILIES, SINGLETON_FAMILIES, type PresetFamily, type SingletonFamily } from '../services/preferences/kinds.js';
+import { PRESET_FAMILIES, SHEET_TRANSCRIBER, SINGLETON_FAMILIES, type PresetFamily, type SingletonFamily } from '../services/preferences/kinds.js';
+import { setSheetTranscriberSource } from '../services/training/yue2Sheet.js';
 import { getSingleton, importPreset, importSingleton, upsertSingleton, LOCAL_OWNER } from '../services/preferences/presets.js';
 import {
   createPreferenceSchema, importPreferenceBatchSchema, resolveYue2PresetSchema, updatePreferenceSchema,
@@ -32,6 +33,14 @@ import {
 import { resolveYue2Preset } from '../services/preferences/yue2PresetPolicy.js';
 
 const router = Router();
+
+// Every yue2-sheet run (covers, the AR sheet stage, labelling) reads the
+// stored transcriber choice through this; registered here, where the typed
+// store lives, so the training services never import a route module.
+setSheetTranscriberSource(() => {
+  const body = getSingleton(typedDocuments(SHEET_TRANSCRIBER))?.body;
+  return { refined: body?.transcriber === 'sheetsage2-refined', keyMode: body?.keyMode === true };
+});
 
 const fail = (res: Response, err: unknown) => {
   if (err instanceof WorkflowError) { res.status(err.status).json({ error: err.message, ...err.extra }); return; }

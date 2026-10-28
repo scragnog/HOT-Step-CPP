@@ -36,7 +36,10 @@ continue. Supplying an approved ABC score skips the transcriber.
 
 SheetSage2-Refined (`yue2-sheetsage2-refined-f16`, 156 MB) is an optional
 alternative transcriber. Choose it under the YuE2 **Models** dropdown >
-**Lead-sheet transcriber**. It reuses SheetSage2's encoder, so SheetSage2 must be
+**Lead-sheet transcriber**. The choice applies everywhere SheetSage runs: cover
+transcription, the YuE2 AR sheet stage and labelling (key source and `.abc` sidecars).
+Lead sheets already cached keep the transcriber that wrote them until you transcribe
+again. It reuses SheetSage2's encoder, so SheetSage2 must be
 installed as well. It reads odd meters and meter changes, slash chords and
 tension chords, and with **Keys with modes** on it writes modal keys such as
 `K:Ddor`. It is anime-song's fine-tune of SheetSage2, CC BY-NC 4.0: non-commercial

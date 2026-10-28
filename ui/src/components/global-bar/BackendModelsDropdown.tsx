@@ -30,15 +30,16 @@ import type { Mm3DitRuntime } from './Mm3RendererRow';
 import { Mm3RendererRow } from './Mm3RendererRow';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 import type { Yue2CoverReadiness } from '../../services/yue2CoverApi';
-import { setSheetTranscriberChoice, useSheetTranscriberChoice, type SheetTranscriber } from '../cover-studio/sheetTranscriber';
+import { useSheetTranscriber, type SheetTranscriber } from '../cover-studio/sheetTranscriber';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 
-/** YuE2 covers' lead-sheet transcriber: SheetSage2 or SheetSage2-Refined, and
- *  Refined's modal keys. Read when Cover Studio starts a transcription. */
+/** The lead-sheet transcriber: SheetSage2 or SheetSage2-Refined, and Refined's
+ *  modal keys. Stored on the server; covers, the AR sheet stage and labelling
+ *  all use it. */
 const Yue2SheetTranscriberRow: React.FC = () => {
   const { t } = useTranslation();
-  const choice = useSheetTranscriberChoice();
+  const { choice, set: setSheetTranscriberChoice } = useSheetTranscriber();
   const { data: readiness } = useQuery(snapshotOptions<Yue2CoverReadiness>('cover', '/yue2-cover/readiness'));
   const refinedInstalled = readiness?.refined === true;
   const refined = choice.transcriber === 'sheetsage2-refined';
@@ -47,7 +48,7 @@ const Yue2SheetTranscriberRow: React.FC = () => {
       <label htmlFor="yue2-sheet-transcriber">
         <ParamLabel
           label={t('globalBar.yue2SheetTranscriber', 'Lead-sheet transcriber')}
-          info={t('globalBar.yue2SheetTranscriberInfo', 'Writes the ABC score a YuE2 cover follows. SheetSage2-Refined (anime-song) reads odd meters, slash chords and tension chords that SheetSage2 writes as 4/4 and plain triads. It needs SheetSage2 installed too: it reuses its encoder.')}
+          info={t('globalBar.yue2SheetTranscriberInfo', 'Writes the ABC lead sheets that YuE2 covers follow, that the AR sheet stage trains on and that labelling saves beside each track. SheetSage2-Refined (anime-song) reads odd meters, slash chords and tension chords that SheetSage2 writes as 4/4 and plain triads. It needs SheetSage2 installed too: it reuses its encoder.')}
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
           rootClassName="block mb-1.5" />
       </label>

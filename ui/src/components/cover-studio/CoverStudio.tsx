@@ -15,7 +15,6 @@ import { Search, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
 import { useGlobalParamsStore } from '../../context/GlobalParamsContext';
-import { sheetTranscriberChoice } from './sheetTranscriber';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { DEFAULT_SETTINGS, type AppSettings } from '../settings/SettingsPanel';
 import { generateApi } from '../../services/api';
@@ -1011,8 +1010,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       }
       const source = await prepareYue2Source();
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
-      const result = await yue2CoverApi.start({ ...source, sourceLabel: sourceFileName.slice(0, 120), force: !!sheetAbc,
-        ...sheetTranscriberChoice() });
+      const result = await yue2CoverApi.start({ ...source, sourceLabel: sourceFileName.slice(0, 120), force: !!sheetAbc });
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) {
         if (result.jobId) await yue2CoverApi.cancel(result.jobId);
         return;
