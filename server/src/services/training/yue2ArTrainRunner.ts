@@ -713,13 +713,16 @@ export async function runYue2SheetJob(job: TrainingJob,
 export async function runYue2CoverSheetJob(job: TrainingJob, audioPath: string, jobDir: string,
   deps: { missingModels: typeof missingYue2SheetModels; run: typeof runYue2AceTrain;
     /** The source's vocal stem; with it, a silent Vocal line becomes the vocal's rhythm. */
-    vocalStem?: (audioPath: string) => Promise<string> } = { missingModels: missingYue2SheetModels, run: runYue2AceTrain }): Promise<string> {
+    vocalStem?: (audioPath: string) => Promise<string> } = { missingModels: missingYue2SheetModels, run: runYue2AceTrain },
+  /** SheetSage2-Refined, optionally with modal keys; SheetSage2 when absent. */
+  transcriber: { refined?: boolean; keyMode?: boolean } = {}): Promise<string> {
   try {
     const missing = deps.missingModels();
     if (missing.length) throw new Error(`The SheetSage2 transcriber is missing: ${missing.join(', ')}`);
     const { manifest, name } = writeYue2CoverSheetManifest(audioPath, jobDir);
     const opts: ResolvedYue2SheetOptions = {
       manifest, only: '', force: false, fast: false, datasetSlug: '', melodyOnly: false,
+      refined: !!transcriber.refined, keyMode: !!transcriber.refined && !!transcriber.keyMode,
     };
     const st: SheetState = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 0 };
     const verify = () => {

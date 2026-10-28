@@ -27,6 +27,12 @@ test('cover sheet arguments request melody-only notation', () => {
   assert.equal(args.filter(arg => arg === '--melody-only').length, 1);
 });
 
+test('SheetSage2-Refined arguments: --refined, and --key-mode only with it', () => {
+  assert.equal(buildYue2SheetArgs(trainingOptions).includes('--refined'), false);
+  assert.deepEqual(buildYue2SheetArgs({ ...trainingOptions, refined: true, keyMode: true }).slice(-2), ['--refined', '--key-mode']);
+  assert.equal(buildYue2SheetArgs({ ...trainingOptions, keyMode: true }).includes('--key-mode'), false);
+});
+
 test('a cover source gets a private one-source manifest and usable ABC', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-cover-sheet-'));
   try {

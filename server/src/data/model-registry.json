@@ -5990,6 +5990,27 @@
       ]
     },
     {
+      "id": "yue2-sheetsage2-refined-f16",
+      "filename": "sheetsage2-refined-f16.gguf",
+      "role": "yue2",
+      "family": "yue2",
+      "subdir": "yue2",
+      "displayName": "SheetSage2-Refined Lead-Sheet Transcriber (F16)",
+      "scale": null,
+      "variant": "sheetsage2-refined",
+      "quant": "F16",
+      "sizeBytes": 155963072,
+      "repo": "scragnog/SheetSage2-Refined-GGUF",
+      "description": "Optional alternative to SheetSage2 for YuE2 cover lead sheets, chosen under Models > Lead-sheet transcriber. A fine-tuned decoder plus small frame heads that steer it: odd meters and meter changes, slash chords, tension chords (9ths, 11ths, 13ths, add) and, as an option, keys with modes (dorian, mixolydian, ...). It reuses SheetSage2's encoder, so SheetSage2 (yue2-sheetsage2-f16) must be installed too. GGML port of anime-song's SheetSage2-Refined (https://huggingface.co/anime-song/SheetSage2-Refined), built on m-a-p's SheetSage2 and MERT-v2-FullSong. Weights are CC BY-NC 4.0: non-commercial use only.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-sheetsage2-refined",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
       "id": "yue2-mms-fa",
       "filename": "mms-fa-f32.gguf",
       "repoPath": "mms-fa/mms-fa-f32.gguf",

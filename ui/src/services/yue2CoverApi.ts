@@ -13,12 +13,18 @@ export interface Yue2CoverSourceInput {
   sourceLabel?: string;
   abc?: string;
   force?: boolean;
+  /** Lead-sheet transcriber (the YuE2 Models dropdown); SheetSage2 when absent. */
+  transcriber?: 'sheetsage2' | 'sheetsage2-refined';
+  /** With SheetSage2-Refined: keys with modes. */
+  keyMode?: boolean;
 }
 
 export interface Yue2CoverReadiness {
   ready: boolean;
   model: string | null;
   message: string | null;
+  /** SheetSage2-Refined's overlay is installed beside SheetSage2. */
+  refined?: boolean;
 }
 
 export interface Yue2CoverJob {

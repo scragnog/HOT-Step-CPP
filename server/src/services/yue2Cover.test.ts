@@ -33,6 +33,8 @@ function fixture(missing = false, defer = false) {
   let failAbc = false;
   let pending: (() => Promise<void>) | undefined;
   let alignTimes: Array<[string, number]> = [];
+  let refinedInstalled = false;
+  let ranWith: unknown;
   const fakeQueue = {
     createJob: (_kind: string, datasetId: string) => {
       started++;
@@ -61,6 +63,7 @@ function fixture(missing = false, defer = false) {
     duration: async () => duration,
     missingModels: () => missing ? ['SheetSage2'] : [],
     model: () => missing ? '' : 'sheetsage2-f16.gguf',
+    refinedModel: () => refinedInstalled ? 'sheetsage2-refined-f16.gguf' : '',
     vocalStem: async (audioPath: string) => audioPath,
     align: async (_audio: Buffer, lyrics: string) => ({ words: alignTimes.map(([text, start]) => {
       const char0 = lyrics.indexOf(text);
@@ -77,8 +80,9 @@ function fixture(missing = false, defer = false) {
     toMp3: async (file: string) => { const out = path.join(root, 'cover-mp3', path.basename(file) + '.mp3'); fs.mkdirSync(path.dirname(out), { recursive: true }); fs.writeFileSync(out, 'mp3'); return out; },
     datasetMatch: () => datasetAudio ? { datasetId: 'dataset-1', sampleId: 'sample-1', audioPath: datasetAudio } : null,
     song: (id, userId) => id === 'song-1' && userId === 'owner' ? { audio_url: '/audio/library.wav', title: 'Library track' } : undefined,
-    run: async (job, audioPath, dir) => {
+    run: async (job, audioPath, dir, transcriber) => {
       runnerCalls++;
+      ranWith = transcriber;
       ranOn = audioPath;
       job.status = 'running';
       job.phase = 'transcribing';
@@ -93,6 +97,7 @@ function fixture(missing = false, defer = false) {
     setDatasetAudio: (audio: string | null) => { datasetAudio = audio; },
     failAbcWrites: (fail: boolean) => { failAbc = fail; },
     setAlign: (times: Array<[string, number]>) => { alignTimes = times; },
+    setRefined: (installed: boolean) => { refinedInstalled = installed; }, ranWith: () => ranWith,
     counts: () => ({ started, cancelled, runnerCalls }), ranOn: () => ranOn, drain: async () => { await pending?.(); },
     close: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
@@ -159,6 +164,26 @@ test('force transcribes again even when the dataset has a cached score', async (
     const result = await f.service.start({ sourceAudioUrl: `/references/${f.upload}`, force: true }, 'owner');
     assert.equal(result.status, 'queued');
     assert.equal(f.counts().started, 1);
+  } finally { f.close(); }
+});
+
+test('SheetSage2-Refined is chosen per transcription and needs its overlay installed', async () => {
+  const f = fixture(false, true);
+  try {
+    const input = { sourceAudioUrl: `/references/${f.upload}`, transcriber: 'sheetsage2-refined', keyMode: true };
+    assert.equal(f.service.readiness().refined, false);
+    await assert.rejects(f.service.start(input, 'owner'), /yue2-sheetsage2-refined-f16.*Model Manager/);
+    await assert.rejects(f.service.start({ ...input, transcriber: 'other' }, 'owner'), /transcriber must be/);
+    assert.equal(f.counts().started, 0);
+    f.setRefined(true);
+    assert.equal(f.service.readiness().refined, true);
+    assert.equal((await f.service.start(input, 'owner')).status, 'queued');
+    await f.drain();
+    assert.deepEqual(f.ranWith(), { refined: true, keyMode: true });
+    // key_mode only means something with the refined decoder
+    await f.service.start({ sourceAudioUrl: `/references/${f.upload}`, keyMode: true }, 'owner');
+    await f.drain();
+    assert.deepEqual(f.ranWith(), { refined: false, keyMode: false });
   } finally { f.close(); }
 });
 

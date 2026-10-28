@@ -113,7 +113,9 @@ export function resolveYue2SheetModel(): string {
   for (const dir of sheetModelSearchDirs()) {
     let hits: string[] = [];
     try {
-      hits = fs.readdirSync(dir).filter(f => f.startsWith('sheetsage2-') && f.endsWith('.gguf')).sort();
+      // sheetsage2-refined-*.gguf is an overlay on the base, never a base itself.
+      hits = fs.readdirSync(dir).filter(f => f.startsWith('sheetsage2-') && !f.startsWith('sheetsage2-refined-')
+        && f.endsWith('.gguf')).sort();
     } catch {
       continue;  // a missing models dir reads as a missing file, never a throw
     }
@@ -127,6 +129,23 @@ export function resolveYue2SheetModel(): string {
  *  One file, and it is optional to the rest of the app: nothing in generation
  *  needs the SheetSage2 transcriber, so a fresh install will not have it.
  *  Registry id `yue2-sheetsage2-f16`, which the Model Manager can download. */
+/** The SheetSage2-Refined overlay (`sheetsage2-refined-*.gguf`) the engine's
+ *  `--refined` discovery would pick, or '' when it is not installed. It only
+ *  replaces the decoder; the base file must be there too. Registry id
+ *  `yue2-sheetsage2-refined-f16`. */
+export function resolveYue2SheetRefinedModel(): string {
+  for (const dir of sheetModelSearchDirs()) {
+    let hits: string[] = [];
+    try {
+      hits = fs.readdirSync(dir).filter(f => f.startsWith('sheetsage2-refined-') && f.endsWith('.gguf')).sort();
+    } catch {
+      continue;
+    }
+    if (hits.length) return path.join(dir, hits[0]);
+  }
+  return '';
+}
+
 export function missingYue2SheetModels(): string[] {
   return resolveYue2SheetModel()
     ? []
@@ -303,6 +322,10 @@ export interface ResolvedYue2SheetOptions {
   melodyOnly?: boolean;
   /** Carried for the runner's own log lines and the run record. */
   datasetSlug: string;
+  /** SheetSage2-Refined instead of SheetSage2 (`--refined`). */
+  refined?: boolean;
+  /** With `refined`: keys with modes (`--key-mode`). */
+  keyMode?: boolean;
 }
 
 export function buildYue2SheetArgs(o: ResolvedYue2SheetOptions): string[] {
@@ -315,6 +338,10 @@ export function buildYue2SheetArgs(o: ResolvedYue2SheetOptions): string[] {
   if (o.force) args.push('--force');
   if (o.fast) args.push('--fast');
   if (o.melodyOnly) args.push('--melody-only');
+  if (o.refined) {
+    args.push('--refined');
+    if (o.keyMode) args.push('--key-mode');
+  }
   // Deliberately NOT emitted: --model, --threads. `--models` lets the
   // engine's quant ranking pick (and it prints which file it chose, same
   // reasoning as buildYue2TokenizeArgs skipping --tok); --threads has no

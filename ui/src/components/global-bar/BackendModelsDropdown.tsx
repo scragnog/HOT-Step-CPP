@@ -28,6 +28,56 @@ import { VariantModelSelect } from './ModelSelect';
 import { splitModel } from './modelLabels';
 import type { Mm3DitRuntime } from './Mm3RendererRow';
 import { Mm3RendererRow } from './Mm3RendererRow';
+import { snapshotOptions } from '../../queries/cover-lyrics/reads';
+import type { Yue2CoverReadiness } from '../../services/yue2CoverApi';
+import { setSheetTranscriberChoice, useSheetTranscriberChoice, type SheetTranscriber } from '../cover-studio/sheetTranscriber';
+import { StyledSelect } from '../shared/StyledSelect';
+import { Toggle } from '../shared/Toggle';
+
+/** YuE2 covers' lead-sheet transcriber: SheetSage2 or SheetSage2-Refined, and
+ *  Refined's modal keys. Read when Cover Studio starts a transcription. */
+const Yue2SheetTranscriberRow: React.FC = () => {
+  const { t } = useTranslation();
+  const choice = useSheetTranscriberChoice();
+  const { data: readiness } = useQuery(snapshotOptions<Yue2CoverReadiness>('cover', '/yue2-cover/readiness'));
+  const refinedInstalled = readiness?.refined === true;
+  const refined = choice.transcriber === 'sheetsage2-refined';
+  return (
+    <div className="border-t border-zinc-200 dark:border-white/5 pt-3">
+      <label htmlFor="yue2-sheet-transcriber">
+        <ParamLabel
+          label={t('globalBar.yue2SheetTranscriber', 'Lead-sheet transcriber')}
+          info={t('globalBar.yue2SheetTranscriberInfo', 'Writes the ABC score a YuE2 cover follows. SheetSage2-Refined (anime-song) reads odd meters, slash chords and tension chords that SheetSage2 writes as 4/4 and plain triads. It needs SheetSage2 installed too: it reuses its encoder.')}
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          rootClassName="block mb-1.5" />
+      </label>
+      <StyledSelect<SheetTranscriber>
+        id="yue2-sheet-transcriber"
+        value={choice.transcriber}
+        onChange={(v) => setSheetTranscriberChoice({ transcriber: v })}
+        options={[
+          { value: 'sheetsage2', label: 'SheetSage2' },
+          { value: 'sheetsage2-refined', label: `SheetSage2-Refined${refinedInstalled ? '' : ' (not installed)'}`,
+            disabled: !refinedInstalled && !refined },
+        ]}
+        className="w-full"
+      />
+      {refined && (
+        <Toggle
+          className="mt-2"
+          checked={choice.keyMode}
+          onChange={(v) => setSheetTranscriberChoice({ keyMode: v })}
+          label={t('globalBar.yue2SheetKeyMode', 'Keys with modes (dorian, mixolydian, ...)')}
+        />
+      )}
+      {refined && !refinedInstalled && (
+        <p className="text-[10px] text-amber-500 mt-1.5">
+          {t('globalBar.yue2SheetRefinedMissing', 'Not installed: get yue2-sheetsage2-refined-f16 in Model Manager.')}
+        </p>
+      )}
+    </div>
+  );
+};
 
 /** Friendly names for the buckets we know about. Unknown buckets fall back to
  *  their raw key rather than being hidden — a backend that grows a bucket
@@ -172,6 +222,8 @@ export const BackendModelsDropdown: React.FC = () => {
           </div>
         );
       })}
+
+      {activeBackendId === 'yue2' && <Yue2SheetTranscriberRow />}
 
       {note && <p className="text-[10px] text-zinc-500 leading-relaxed">{note}</p>}
 

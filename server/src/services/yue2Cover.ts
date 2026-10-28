@@ -9,7 +9,7 @@ import type { TrainingJob } from './training/labelingQueue.js';
 import { runYue2AceTrain } from './training/yue2TrainRunner.js';
 import { jobsDir } from './training/paths.js';
 import { readDuration } from './training/audioMeta.js';
-import { missingYue2SheetModels, readYue2CoverAbc, resolveYue2SheetModel } from './training/yue2Sheet.js';
+import { missingYue2SheetModels, readYue2CoverAbc, resolveYue2SheetModel, resolveYue2SheetRefinedModel } from './training/yue2Sheet.js';
 import { runYue2CoverSheetJob } from './training/yue2ArTrainRunner.js';
 import { resolveCoverDatasetSource, type CoverDatasetSource } from './coverDatasetSource.js';
 import { getDataset } from './training/datasetsRepo.js';
@@ -41,7 +41,11 @@ export class CoverRequestError extends Error {
 // models read, a cached MP3 when the file is over MAX_AUDIO_BYTES.
 export interface CoverSource { sourceId: string; sourceLabel: string; audioPath: string; workPath: string }
 type SavedSource = Pick<CoverSource, 'sourceId' | 'sourceLabel'> & { userId: string; name: string };
-type CoverInput = { sourceAudioUrl?: unknown; songId?: unknown; sourceLabel?: unknown; abc?: unknown; force?: unknown };
+type CoverInput = { sourceAudioUrl?: unknown; songId?: unknown; sourceLabel?: unknown; abc?: unknown; force?: unknown;
+  /** 'sheetsage2' (default) or 'sheetsage2-refined'. */
+  transcriber?: unknown;
+  /** With the refined transcriber: keys with modes. */
+  keyMode?: unknown };
 
 // The source's vocal stem, separated once per audio content: MMS_FA places
 // words reliably on a stem, not on the full mix, and a score with no sung
@@ -60,8 +64,10 @@ export function createYue2CoverService(deps = {
   duration: readDuration,
   missingModels: missingYue2SheetModels,
   model: resolveYue2SheetModel,
-  run: (job: TrainingJob, audioPath: string, dir: string) => runYue2CoverSheetJob(job, audioPath, dir,
-    { missingModels: missingYue2SheetModels, run: runYue2AceTrain, vocalStem: coverStems.vocalStem }),
+  run: (job: TrainingJob, audioPath: string, dir: string, transcriber?: { refined: boolean; keyMode: boolean }) =>
+    runYue2CoverSheetJob(job, audioPath, dir,
+      { missingModels: missingYue2SheetModels, run: runYue2AceTrain, vocalStem: coverStems.vocalStem }, transcriber),
+  refinedModel: resolveYue2SheetRefinedModel,
   datasetMatch: resolveCoverDatasetSource,
   toMp3: (file: string) => cachedMp3(file, path.join(config.data.dir, 'tmp', 'cover-mp3')),
   vocalStem: coverStems.vocalStem,
@@ -80,7 +86,9 @@ export function createYue2CoverService(deps = {
 }) {
   function readiness() {
     const missing = deps.missingModels();
+    const refinedModel = deps.refinedModel?.() ?? '';
     return { ready: missing.length === 0, model: missing.length ? null : path.basename(deps.model()),
+      refined: missing.length === 0 && !!refinedModel,
       message: missing.length ? 'SheetSage2 is missing. Download the SheetSage2 Lead-Sheet Transcriber (yue2-sheetsage2-f16) in Model Manager, or supply an approved ABC score.' : null };
   }
 
@@ -158,6 +166,15 @@ export function createYue2CoverService(deps = {
     }
     const ready = readiness();
     if (!ready.ready) throw new CoverRequestError(ready.message!, 400);
+    if (input.transcriber !== undefined && input.transcriber !== 'sheetsage2' && input.transcriber !== 'sheetsage2-refined') {
+      throw new CoverRequestError("transcriber must be 'sheetsage2' or 'sheetsage2-refined'.");
+    }
+    if (input.keyMode !== undefined && typeof input.keyMode !== 'boolean') throw new CoverRequestError('keyMode must be a boolean.');
+    const refined = input.transcriber === 'sheetsage2-refined';
+    if (refined && !ready.refined) {
+      throw new CoverRequestError('SheetSage2-Refined is missing. Download it (yue2-sheetsage2-refined-f16) in Model Manager, or choose SheetSage2.', 400);
+    }
+    const transcriber = { refined, keyMode: refined && input.keyMode === true };
     const job = deps.queue.createJob('yue2-sheet', `cover:${userId}`, [], { sourceId: selected.sourceId });
     const dir = path.join(deps.jobRoot, job.id);
     try {
@@ -170,7 +187,7 @@ export function createYue2CoverService(deps = {
     }
     deps.queue.enqueue(job, async j => {
       if (j.controller.signal.aborted) return;
-      try { await deps.run(j, selected.workPath, dir); } catch { /* runner records failed/cancelled status */ }
+      try { await deps.run(j, selected.workPath, dir, transcriber); } catch { /* runner records failed/cancelled status */ }
     });
     return { status: 'queued' as const, jobId: job.id, sourceId: selected.sourceId, sourceLabel: selected.sourceLabel };
   }
