@@ -103,6 +103,10 @@ struct SheetSageTranscribeOptions {
     // everything the yue2-probe --sheetsage-transcribe mode needs without it.
     bool want_hidden_states = false;
 
+    // SheetSageEncodeOptions::exact_rope: exact RoPE angles instead of the
+    // bf16-rounded ones SheetSage2 was trained with. A/B and parity only.
+    bool exact_rope = false;
+
     // Apply sheetsage-repair.h's deterministic repair pass when the FIRST
     // notation render fails (doc 23's "Repair" note, task 2026-09-16). On by
     // default: a repaired sheet is better training conditioning than none.
@@ -327,6 +331,7 @@ inline bool sheetsage_transcribe(const SheetSageModel & m, const float * mono24,
         auto t0 = std::chrono::steady_clock::now();
         SheetSageEncodeOptions enc_opt;
         enc_opt.want_hidden_states = opt.want_hidden_states;
+        enc_opt.exact_rope         = opt.exact_rope;
         SheetSageEncodeResult enc_res;
         if (!sheetsage_encode_window(m, &enc_graph, win_pcm, avail, enc_opt, &enc_res, &terr)) {
             out->ok    = false;

@@ -1442,8 +1442,21 @@ static ggml_tensor * mert_ffn(ggml_context * ctx, ggml_tensor * x, ggml_tensor *
 //
 // `h` is the pre-normed input, ne [D, T]. Returns the out_proj result, ne
 // [D, T]; the caller adds the residual.
+//
+// `rope_cos`/`rope_sin` (optional, ne [head_dim, 1, T]): precomputed tables
+// applied as x*cos + rotate_half(x)*sin instead of ggml_rope_ext. SheetSage2
+// needs this: its angles were bf16-rounded in training (sheetsage-encoder.h).
+static ggml_tensor * mert_rope_tables(ggml_context * ctx, ggml_tensor * x, ggml_tensor * cs, ggml_tensor * sn) {
+    const int64_t half = x->ne[0] / 2;
+    const size_t  es   = ggml_element_size(x);
+    ggml_tensor * a    = ggml_cont(ctx, ggml_view_3d(ctx, x, half, x->ne[1], x->ne[2], x->nb[1], x->nb[2], 0));
+    ggml_tensor * b    = ggml_cont(ctx, ggml_view_3d(ctx, x, half, x->ne[1], x->ne[2], x->nb[1], x->nb[2], half * es));
+    ggml_tensor * rot  = ggml_concat(ctx, ggml_neg(ctx, b), a, 0);
+    return ggml_add(ctx, ggml_mul(ctx, x, cs), ggml_mul(ctx, rot, sn));
+}
+
 static ggml_tensor * mert_attn(ggml_context * ctx, const Yue2MertConfig & c, const Yue2MertBlock & w, ggml_tensor * h,
-                               ggml_tensor * pos) {
+                               ggml_tensor * pos, ggml_tensor * rope_cos = nullptr, ggml_tensor * rope_sin = nullptr) {
     const int64_t D  = (int64_t) c.embedding_length;
     const int64_t HD = (int64_t) c.key_length;
     const int64_t NH = (int64_t) c.head_count;
@@ -1457,10 +1470,15 @@ static ggml_tensor * mert_attn(ggml_context * ctx, const Yue2MertConfig & c, con
     // wants (positions index ne2).
     q = ggml_reshape_3d(ctx, q, HD, NH, T);
     k = ggml_reshape_3d(ctx, k, HD, NH, T);
-    q = ggml_rope_ext(ctx, q, pos, nullptr, (int) HD, GGML_ROPE_TYPE_NEOX, 0, c.rope_freq_base, 1.0f, 0.0f, 1.0f, 0.0f,
-                      0.0f);
-    k = ggml_rope_ext(ctx, k, pos, nullptr, (int) HD, GGML_ROPE_TYPE_NEOX, 0, c.rope_freq_base, 1.0f, 0.0f, 1.0f, 0.0f,
-                      0.0f);
+    if (rope_cos && rope_sin) {
+        q = mert_rope_tables(ctx, q, rope_cos, rope_sin);
+        k = mert_rope_tables(ctx, k, rope_cos, rope_sin);
+    } else {
+        q = ggml_rope_ext(ctx, q, pos, nullptr, (int) HD, GGML_ROPE_TYPE_NEOX, 0, c.rope_freq_base, 1.0f, 0.0f, 1.0f,
+                          0.0f, 0.0f);
+        k = ggml_rope_ext(ctx, k, pos, nullptr, (int) HD, GGML_ROPE_TYPE_NEOX, 0, c.rope_freq_base, 1.0f, 0.0f, 1.0f,
+                          0.0f, 0.0f);
+    }
 
     q = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3));  // [hd, t, head]
     k = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3));
@@ -1515,14 +1533,15 @@ static ggml_tensor * mert_conv_module(ggml_context * ctx, const Yue2MertConfig &
 // One Conformer block. `x` is [D, T]; the return value is what
 // hidden_states[k] holds for this block.
 static ggml_tensor * mert_block(ggml_context * ctx, const Yue2MertConfig & c, const Yue2MertBlock & w, ggml_tensor * x,
-                                ggml_tensor * pos, bool tanh_gelu) {
+                                ggml_tensor * pos, bool tanh_gelu, ggml_tensor * rope_cos = nullptr,
+                                ggml_tensor * rope_sin = nullptr) {
     const float eps = c.ln_eps;  // 1e-5 here, 1e-6 in the subsampling stack — trap 6
 
     ggml_tensor * f1 = mert_ffn(ctx, ln(ctx, x, w.ffn1_norm_w, w.ffn1_norm_b, eps), w.ffn1_up_w, w.ffn1_up_b,
                                 w.ffn1_down_w, w.ffn1_down_b, tanh_gelu);
     x = ggml_add(ctx, x, ggml_scale(ctx, f1, 0.5f));
 
-    x = ggml_add(ctx, mert_attn(ctx, c, w, ln(ctx, x, w.attn_norm_w, w.attn_norm_b, eps), pos), x);
+    x = ggml_add(ctx, mert_attn(ctx, c, w, ln(ctx, x, w.attn_norm_w, w.attn_norm_b, eps), pos, rope_cos, rope_sin), x);
 
     x = ggml_add(ctx, mert_conv_module(ctx, c, w, x, tanh_gelu), x);
 

@@ -102,6 +102,8 @@ struct SheetSageEncoderGraph {
 
     ggml_tensor * input  = nullptr;  // [n_mel, T_mel]  F32, input
     ggml_tensor * pos    = nullptr;  // [T_sub]         I32, input, always 0..T_sub-1
+    ggml_tensor * rope_cos = nullptr;  // [64, 1, T_sub] F32, input, bf16-rounded tables (unless exact_rope)
+    ggml_tensor * rope_sin = nullptr;
     ggml_tensor * mixed  = nullptr;  // [1024, T_sub]   == 05_memory_pre_proj
     ggml_tensor * memory = nullptr;  // [512, T_sub]    == 06_memory
 
@@ -111,8 +113,15 @@ struct SheetSageEncoderGraph {
     // production inference never needs these, only `memory`).
     std::vector<ggml_tensor *> hidden;
 
+    // Extra weighted sums of the 25 states (SheetSageEncodeOptions::
+    // extra_mix_weights: the SheetSage2-Refined frame heads' layer mixes),
+    // each [1024, T_sub], built alongside `mixed`.
+    std::vector<ggml_tensor *>      extra_mix;
+    std::vector<std::vector<float>> graph_extra_w;
+
     int64_t graph_T_mel       = 0;
     bool    graph_want_hidden = false;
+    bool    graph_exact_rope  = false;
 };
 
 static void sheetsage_enc_free_graph(SheetSageEncoderGraph * g) {
@@ -128,9 +137,13 @@ static void sheetsage_enc_free_graph(SheetSageEncoderGraph * g) {
     g->graph  = nullptr;
     g->input  = nullptr;
     g->pos    = nullptr;
+    g->rope_cos = nullptr;
+    g->rope_sin = nullptr;
     g->mixed  = nullptr;
     g->memory = nullptr;
     g->hidden.clear();
+    g->extra_mix.clear();
+    g->graph_extra_w.clear();
     g->graph_T_mel     = 0;
     g->graph_want_hidden = false;
 }
@@ -223,8 +236,10 @@ static bool sheetsage_enc_prepare(const SheetSageModel & m, SheetSageEncoderGrap
 // the scheduler is free to reuse block-output buffers instead of keeping all
 // 25 of them (each ~30 MB at T_sub=7500) alive as named outputs.
 static bool sheetsage_enc_ensure_graph(const SheetSageModel & m, SheetSageEncoderGraph * g, int64_t T_mel,
-                                       bool want_hidden, std::string * err) {
-    if (g->gctx && g->graph_T_mel == T_mel && g->graph_want_hidden == want_hidden) {
+                                       bool want_hidden, std::string * err,
+                                       const std::vector<std::vector<float>> & extra_w = {}, bool exact_rope = false) {
+    if (g->gctx && g->graph_T_mel == T_mel && g->graph_want_hidden == want_hidden && g->graph_extra_w == extra_w &&
+        g->graph_exact_rope == exact_rope) {
         return true;
     }
     sheetsage_enc_free_graph(g);
@@ -271,6 +286,16 @@ static bool sheetsage_enc_ensure_graph(const SheetSageModel & m, SheetSageEncode
     ggml_set_name(g->pos, "ss2_enc_pos");
     ggml_set_input(g->pos);
 
+    if (!exact_rope) {
+        const int64_t HD = (int64_t) m.mert.cfg.key_length;
+        g->rope_cos      = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, HD, 1, T_sub);
+        g->rope_sin      = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, HD, 1, T_sub);
+        ggml_set_name(g->rope_cos, "ss2_enc_rope_cos");
+        ggml_set_name(g->rope_sin, "ss2_enc_rope_sin");
+        ggml_set_input(g->rope_cos);
+        ggml_set_input(g->rope_sin);
+    }
+
     // state 0: post-subsampling embedding, BEFORE any Conformer block runs
     // (doc 20 §2.5 — "hidden at that point is the subsampling module's
     // output"). Reused verbatim from yue2-mert.h.
@@ -282,6 +307,10 @@ static bool sheetsage_enc_ensure_graph(const SheetSageModel & m, SheetSageEncode
     }
 
     ggml_tensor * mixed = ggml_scale(ctx, h0, g->softmax_w[0]);
+    std::vector<ggml_tensor *> extra;
+    for (const std::vector<float> & w : extra_w) {
+        extra.push_back(ggml_scale(ctx, h0, w[0]));
+    }
 
     ggml_tensor * x = h0;
     for (size_t n = 0; n < m.mert.w.blk.size(); n++) {
@@ -289,12 +318,22 @@ static bool sheetsage_enc_ensure_graph(const SheetSageModel & m, SheetSageEncode
         // approximate='none' at every site, no fused kernel to override it") —
         // same determination yue2-mert.h's own header already made for this
         // identical Conformer block code.
-        x = yue2_mert_detail::mert_block(ctx, m.mert.cfg, m.mert.w.blk[n], x, g->pos, /*tanh_gelu=*/false);
+        x = yue2_mert_detail::mert_block(ctx, m.mert.cfg, m.mert.w.blk[n], x, g->pos, /*tanh_gelu=*/false, g->rope_cos,
+                                         g->rope_sin);
         if (want_hidden) {
             g->hidden.push_back(x);
         }
         ggml_tensor * term = ggml_scale(ctx, x, g->softmax_w[n + 1]);
         mixed              = ggml_add(ctx, mixed, term);
+        for (size_t e = 0; e < extra.size(); e++) {
+            extra[e] = ggml_add(ctx, extra[e], ggml_scale(ctx, x, extra_w[e][n + 1]));
+        }
+    }
+    for (size_t e = 0; e < extra.size(); e++) {
+        char nm[48];
+        snprintf(nm, sizeof(nm), "ss2_enc_extra_mix%02d", (int) e);
+        ggml_set_name(extra[e], nm);
+        ggml_set_output(extra[e]);
     }
 
     g->mixed = mixed;
@@ -320,6 +359,9 @@ static bool sheetsage_enc_ensure_graph(const SheetSageModel & m, SheetSageEncode
     for (ggml_tensor * t : g->hidden) {
         ggml_build_forward_expand(g->graph, t);
     }
+    for (ggml_tensor * t : extra) {
+        ggml_build_forward_expand(g->graph, t);
+    }
 
     ggml_backend_sched_reset(g->sched);
     if (!ggml_backend_sched_alloc_graph(g->sched, g->graph)) {
@@ -338,6 +380,9 @@ static bool sheetsage_enc_ensure_graph(const SheetSageModel & m, SheetSageEncode
     g->gctx              = ctx;
     g->graph_T_mel       = T_mel;
     g->graph_want_hidden = want_hidden;
+    g->graph_exact_rope  = exact_rope;
+    g->extra_mix         = extra;
+    g->graph_extra_w     = extra_w;
     const size_t compute_bytes = ggml_backend_sched_get_buffer_size(g->sched, g->backend);
     fprintf(stderr,
             "[SheetSage2] Encoder graph: T_mel=%lld -> T_sub=%lld, %zu blocks, %d nodes, %d splits, "
@@ -346,6 +391,42 @@ static bool sheetsage_enc_ensure_graph(const SheetSageModel & m, SheetSageEncode
             ggml_backend_sched_get_n_splits(g->sched), (double) compute_bytes / (1024.0 * 1024.0),
             want_hidden ? " (+hidden-state taps)" : "");
     return true;
+}
+
+// ── bf16-rounded RoPE tables (SheetSage2 as trained) ────────────────────────
+//
+// encoder.py rotary_tables() in the SheetSage2-Refined reference:
+//   inv   = 1 / base^(arange(0, hd, 2) / hd)              fp32, on the CPU
+//   angle = bf16(bf16(pos) * bf16(inv))                   (the product is exact in fp32)
+//   cos, sin = bf16(cos(angle)), bf16(sin(angle))         angle repeated for both halves
+// Output layout [T][hd], matching a ggml [hd, 1, T] tensor.
+
+static inline float sheetsage_bf16(float x) {  // round to nearest even, as torch .bfloat16()
+    uint32_t u;
+    std::memcpy(&u, &x, 4);
+    if ((u & 0x7f800000u) != 0x7f800000u) {
+        u += 0x7fffu + ((u >> 16) & 1u);
+    }
+    u &= 0xffff0000u;
+    std::memcpy(&x, &u, 4);
+    return x;
+}
+
+static void sheetsage_rope_tables_bf16(int64_t T, int hd, float base, std::vector<float> * cs, std::vector<float> * sn) {
+    std::vector<float> inv((size_t) hd / 2);
+    for (int i = 0; i < hd / 2; i++) {
+        inv[(size_t) i] = sheetsage_bf16(1.0f / std::pow(base, (float) (2 * i) / (float) hd));
+    }
+    cs->resize((size_t) (T * hd));
+    sn->resize((size_t) (T * hd));
+    for (int64_t t = 0; t < T; t++) {
+        const float p = sheetsage_bf16((float) t);
+        for (int i = 0; i < hd; i++) {
+            const float a                      = sheetsage_bf16(p * inv[(size_t) (i % (hd / 2))]);
+            (*cs)[(size_t) (t * hd + i)] = sheetsage_bf16(std::cos(a));
+            (*sn)[(size_t) (t * hd + i)] = sheetsage_bf16(std::sin(a));
+        }
+    }
 }
 
 // ── Window pad/trim (doc 20 §1.2) ───────────────────────────────────────────
@@ -386,6 +467,22 @@ struct SheetSageEncodeOptions {
     // inference, which only needs `memory`.
     bool want_hidden_states = false;
 
+    // SheetSage2-Refined: extra layer mixes to return (each 25 weights, from
+    // sheetsage_refined_mix_weights()), and whether to pad the window to the
+    // full 300 s first. The refined decoder learnt on windows encoded at their
+    // own length (reference model.py pad_encoder=False); SheetSage2 pads.
+    std::vector<std::vector<float>> extra_mix_weights;
+    bool                            pad_to_window = true;
+
+    // RoPE angles. SheetSage2 computed them under bf16 autocast (an einsum in
+    // bf16: positions, frequencies and products rounded to bf16, so positions
+    // above 256 move in steps of up to 32 frames) and was trained that way;
+    // the SheetSage2-Refined reference (encoder.py rotary_tables) reproduces
+    // that rounding and reports beat F 0.985 -> 0.447 with exact angles. The
+    // default follows training; exact_rope keeps ggml_rope_ext's exact
+    // angles, which is what an fp32 CPU run of the original code computes.
+    bool exact_rope = false;
+
     // NOTE on "exact" precision (doc 23, 2026-09-16 investigation): there is
     // no per-encode "exact" switch here, deliberately. The precision lever
     // that closes the gap to the F32 oracle is which TYPE the encoder's
@@ -409,6 +506,9 @@ struct SheetSageEncodeResult {
     // [hidden_state_count][T_sub * 1024], row-major [T_sub,1024] per entry --
     // == 03_hidden_00..NN.f32. Only populated when opt.want_hidden_states.
     std::vector<std::vector<float>> hidden_states;
+
+    // [extra_mix_weights.size()][T_sub * 1024], row-major [T_sub,1024].
+    std::vector<std::vector<float>> extra_mixes;
 };
 
 // One window, start to finish: pad/trim -> mel (CPU) -> subsample + 24
@@ -432,7 +532,11 @@ static bool sheetsage_encode_window(const SheetSageModel & m, SheetSageEncoderGr
 
     const int64_t window_samples = sheetsage_window_samples(m);
     std::vector<float> win;
-    sheetsage_pad_window(pcm, n_samples, window_samples, &win);
+    if (opt.pad_to_window) {
+        sheetsage_pad_window(pcm, n_samples, window_samples, &win);
+    } else {  // own length, as the reference slices it (no rounding to whole frames)
+        sheetsage_pad_window(pcm, n_samples, std::min(n_samples, window_samples), &win);
+    }
 
     std::vector<float> mel;
     int64_t             T_mel = 0;
@@ -440,7 +544,7 @@ static bool sheetsage_encode_window(const SheetSageModel & m, SheetSageEncoderGr
         return false;
     }
 
-    if (!sheetsage_enc_ensure_graph(m, g, T_mel, opt.want_hidden_states, err)) {
+    if (!sheetsage_enc_ensure_graph(m, g, T_mel, opt.want_hidden_states, err, opt.extra_mix_weights, opt.exact_rope)) {
         return false;
     }
 
@@ -453,7 +557,15 @@ static bool sheetsage_encode_window(const SheetSageModel & m, SheetSageEncoderGr
     for (int64_t t = 0; t < T_sub; t++) {
         pos[(size_t) t] = (int32_t) t;
     }
-    ggml_backend_tensor_set(g->pos, pos.data(), 0, pos.size() * sizeof(int32_t));
+    if (g->pos->buffer) {  // unused (not allocated) when the bf16 tables drive RoPE
+        ggml_backend_tensor_set(g->pos, pos.data(), 0, pos.size() * sizeof(int32_t));
+    }
+    if (g->rope_cos) {
+        std::vector<float> cs, sn;
+        sheetsage_rope_tables_bf16(T_sub, (int) m.mert.cfg.key_length, m.mert.cfg.rope_freq_base, &cs, &sn);
+        ggml_backend_tensor_set(g->rope_cos, cs.data(), 0, cs.size() * sizeof(float));
+        ggml_backend_tensor_set(g->rope_sin, sn.data(), 0, sn.size() * sizeof(float));
+    }
 
     if (ggml_backend_sched_graph_compute(g->sched, g->graph) != GGML_STATUS_SUCCESS) {
         if (err) {
@@ -472,6 +584,12 @@ static bool sheetsage_encode_window(const SheetSageModel & m, SheetSageEncoderGr
     const int64_t HC = g->mixed->ne[0];  // 1024
     out->memory_pre_proj.resize((size_t) (HC * T_sub));
     ggml_backend_tensor_get(g->mixed, out->memory_pre_proj.data(), 0, out->memory_pre_proj.size() * sizeof(float));
+
+    out->extra_mixes.assign(g->extra_mix.size(), {});
+    for (size_t i = 0; i < g->extra_mix.size(); i++) {
+        out->extra_mixes[i].resize((size_t) ggml_nelements(g->extra_mix[i]));
+        ggml_backend_tensor_get(g->extra_mix[i], out->extra_mixes[i].data(), 0, ggml_nbytes(g->extra_mix[i]));
+    }
 
     if (opt.want_hidden_states) {
         out->hidden_states.assign(g->hidden.size(), {});
