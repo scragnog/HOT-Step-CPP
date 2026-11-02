@@ -168,6 +168,26 @@ input[type="number"]:focus {
   display: none;
 }
 
+/* Thin, visible scrollbar for the sidebar nav list. Unlike hide-scrollbar this
+   tells the user there are more items when the rail is shorter than its menu. */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(161, 161, 170, 0.35) transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(161, 161, 170, 0.35);
+  border-radius: 9999px;
+}
+
 /* ========================================
    Gradient Text
    ======================================== */

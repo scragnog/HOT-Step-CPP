@@ -48,7 +48,7 @@ export const ArtistGrid: React.FC<ArtistGridProps> = ({
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-6">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-4 p-3 sm:p-4 min-[1280px]:p-6">
         {Array.from({ length: 8 }).map((_, i) => (
           <div key={i} className="aspect-[3/4] rounded-2xl bg-white/5 animate-pulse" />
         ))}
@@ -57,20 +57,20 @@ export const ArtistGrid: React.FC<ArtistGridProps> = ({
   }
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-          <Music className="w-7 h-7 text-pink-400" />
-          Lyric Studio
+    <div className="p-3 sm:p-4 min-[1280px]:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6 min-w-0">
+        <h1 className="text-2xl font-bold text-white flex min-w-0 items-center gap-3">
+          <Music className="w-7 h-7 flex-shrink-0 text-pink-400" />
+          <span className="truncate">Lyric Studio</span>
         </h1>
-        <div className="relative" ref={addBtnRef}>
+        <div className="relative min-w-0 max-w-full" ref={addBtnRef}>
           <button
             onClick={() => setAddMenuOpen(!addMenuOpen)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold transition-all hover:scale-105 shadow-lg shadow-pink-600/20"
+            className="flex max-w-full min-w-0 items-center gap-2 px-4 py-2.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold transition-all hover:scale-105 shadow-lg shadow-pink-600/20"
           >
-            <Plus className="w-4 h-4" />
-            Add Artist
-            <ChevronDown className="w-3.5 h-3.5 opacity-70" />
+            <Plus className="w-4 h-4 flex-shrink-0" />
+            <span className="truncate">Add Artist</span>
+            <ChevronDown className="w-3.5 h-3.5 flex-shrink-0 opacity-70" />
           </button>
           {addMenuOpen && (
             <div className="absolute right-0 top-full mt-1 z-30 min-w-[180px] rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 shadow-2xl py-1 animate-in fade-in slide-in-from-top-1">
@@ -94,33 +94,33 @@ export const ArtistGrid: React.FC<ArtistGridProps> = ({
       </div>
 
       {artists.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 text-center">
+        <div className="flex max-w-full min-w-0 flex-col items-center justify-center py-24 text-center">
           <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mb-4">
             <Music className="w-10 h-10 text-zinc-600" />
           </div>
-          <h2 className="text-lg font-semibold text-zinc-600 dark:text-zinc-400 mb-2">No artists yet</h2>
-          <p className="text-sm text-zinc-500 max-w-sm mb-6">
+          <h2 className="text-lg font-semibold text-zinc-600 dark:text-zinc-400 mb-2 max-w-full">No artists yet</h2>
+          <p className="text-sm text-zinc-500 w-full max-w-sm mb-6">
             Start by fetching lyrics from Genius or adding an artist manually.
           </p>
-          <div className="flex items-center gap-3">
+          <div className="flex max-w-full min-w-0 flex-wrap items-center justify-center gap-3">
             <button
               onClick={onAddNew}
-              className="flex items-center gap-2 px-5 py-3 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold transition-all"
+              className="flex max-w-full min-w-0 items-center gap-2 px-5 py-3 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold transition-all"
             >
-              <Search className="w-4 h-4" />
-              Fetch from Genius
+              <Search className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">Fetch from Genius</span>
             </button>
             <button
               onClick={onAddManual}
-              className="flex items-center gap-2 px-5 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-zinc-300 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:text-white text-sm font-semibold transition-all"
+              className="flex max-w-full min-w-0 items-center gap-2 px-5 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-zinc-300 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:text-white text-sm font-semibold transition-all"
             >
-              <PenLine className="w-4 h-4" />
-              Add Manually
+              <PenLine className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">Add Manually</span>
             </button>
           </div>
         </div>
       ) : (
-        <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+        <div ref={gridRef} className="grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-4">
           {artists.map((artist, idx) => (
             <div
               key={artist.id}

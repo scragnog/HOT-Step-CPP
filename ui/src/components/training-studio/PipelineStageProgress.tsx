@@ -7,13 +7,13 @@
 // renders the same job through JobProgress/TrainingRunStats/TrainingChart.
 // This adopts the running stage's job so those components light up here too.
 //
-// WHY IT WRITES activeJob: the store fills the chart series only while
-// `activeJob.kind` is train-lm/train-dit (trainingStore's `metric` handler), so
-// subscribing to the stream alone would leave the chart empty. It restores the
-// previous activeJob on unmount and never clobbers a job the Train panel is
-// already showing.
+// WHY IT ADOPTS THE JOB: the store fills the chart series only while the
+// selected job's kind is train-lm/train-dit (trainingStore's `metric` handler),
+// so subscribing to the stream alone would leave the chart empty. It points the
+// studio's one projection at the stage job and restores the previous
+// activeJobId on unmount, never clobbering a job the Train panel owns.
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { blankTrainSeries, useTrainingStore } from '../../stores/trainingStore';
 import type { PipelineItem, PipelineStage } from '../../services/trainingApi';
@@ -22,7 +22,7 @@ import { trainingQueries } from '../../queries/training-data/queries';
 import { JobProgress } from './JobProgress';
 import { TrainingChart } from './TrainingChart';
 import { TrainingRunStats } from './TrainingRunStats';
-import { useTrainingStream } from './useTrainingStream';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 
@@ -46,22 +46,21 @@ export const PipelineStageProgress: React.FC<Props> = ({ item }) => {
   const active = runningStage(item);
   const jobId = active?.jobId || '';
 
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
   const trainLmEpochs = useTrainingStore(s => s.trainLmEpochs);
   const trainDitEpochs = useTrainingStore(s => s.trainDitEpochs);
   const trainStepSeries = useTrainingStore(s => s.trainStepSeries);
   const trainMilestones = useTrainingStore(s => s.trainMilestones);
   const trainMaxEpochs = useTrainingStore(s => s.trainMaxEpochs);
 
-  const [adopted, setAdopted] = useState('');
   // Only ever restore a job WE replaced, so navigating away cannot wipe a job
   // the Train panel legitimately owns.
-  const previous = useRef<typeof activeJob>(null);
+  const previous = useRef<string | null>(null);
 
   useEffect(() => {
     if (!jobId) return;
     let cancelled = false;
-    previous.current = useTrainingStore.getState().activeJob;
+    previous.current = useTrainingStore.getState().activeJobId;
     // The pipeline runs on the worker selected now; adopt only while it still is.
     const worker = useTrainingStore.getState().trainingWorker;
     void queryClient.query(trainingQueries.job(worker, jobId)).then(
@@ -75,28 +74,26 @@ export const PipelineStageProgress: React.FC<Props> = ({ item }) => {
         // thing allowed to reset the step-dedup high-water mark, which would
         // otherwise swallow the new run's early steps.
         //
-        // Safe against the SSE replay: the stream is subscribed only after
-        // `adopted` is set, and it replays the whole buffer on connect.
+        // Safe against the SSE replay: the projection opens only after the id
+        // is set, and it replays the whole buffer on connect.
         useTrainingStore.setState({
           ...blankTrainSeries(),
           trainLmEpochs: [], trainLmLast: null,
           trainDitEpochs: [], trainDitLast: null,
           jobLog: [],
-          activeJob: job,
+          activeJobId: job.id,
         });
-        setAdopted(jobId);
       },
       () => { /* job may have finished between poll and fetch — chips still show it */ },
     );
     return () => {
       cancelled = true;
-      const cur = useTrainingStore.getState().activeJob;
-      if (cur && cur.id === jobId) useTrainingStore.setState({ activeJob: previous.current });
+      if (useTrainingStore.getState().activeJobId === jobId) {
+        useTrainingStore.setState({ activeJobId: previous.current });
+      }
       previous.current = null;
     };
   }, [jobId]);
-
-  useTrainingStream(adopted && adopted === jobId ? jobId : null);
 
   if (!item || !active) return null;
 

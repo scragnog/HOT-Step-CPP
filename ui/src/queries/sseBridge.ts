@@ -39,6 +39,11 @@ export interface BridgeOptions<E> {
   reconnect?: boolean;
   /** Injection point for tests; defaults to the shared connection manager. */
   subscribe?: typeof subscribeEventSource;
+  /** Every parsed frame, before cache effects. The training projection uses
+   *  this to keep its store-owned samples/logs/previews in step. */
+  onMessage?: (event: E) => void;
+  /** The stream dropped. EventSource reconnects; a caller may probe once. */
+  onError?: () => void;
 }
 
 const ONCE_CAP = 2000;
@@ -86,11 +91,12 @@ export function bridgeEvents<E>(client: QueryClient, opts: BridgeOptions<E>): ()
       dropped = false;
       queue(opts.reconnectInvalidate);
     },
-    error: () => { dropped = true; },
+    error: () => { dropped = true; opts.onError?.(); },
     message: (data) => {
       if (closed) return;
       const event = parse(data);
       if (event === undefined) return;
+      opts.onMessage?.(event);
       const effect = opts.map(event);
       if (!effect) return;
       for (const { key, apply } of effect.update ?? []) {

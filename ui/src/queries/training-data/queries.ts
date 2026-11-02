@@ -11,12 +11,38 @@
 // Query; nothing else fetches these snapshots.
 
 import { queryOptions, type QueryClient, type QueryKey } from '@tanstack/react-query';
-import { scopeOf, serverKey, sharedKeys, type Resource } from '../keys';
+import { scopeOf, serverKey, sharedKeys, type Resource, type Worker } from '../keys';
 import * as api from '../../services/trainingApi';
 import * as preparation from '../../services/trainingPreparationApi';
 import { adapterApi } from '../../services/api';
+import { apiClient } from '../../services/httpClient';
 import { browseOptions } from '../shell-queue/settings';
 import type { LmSize } from '../../services/trainingApi';
+import { pollWhile } from '../contract';
+import type { HeartmulaPreviewListResponse, HeartmulaStatusResponse } from '../../../../server/src/contracts/heartmulaTraining';
+
+/** One captioned track in a YuE2 source dataset. The caption a render
+ *  contributes is `styled` (caption + trainer metadata tail) when present,
+ *  else `caption`. */
+export interface Yue2CaptionSourceTrack {
+  name: string;
+  caption: string;
+  genre?: string;
+  bpm?: string | number;
+  key?: string;
+  styled?: string;
+}
+
+export interface Yue2CaptionSourceSnapshot {
+  datasetId?: string;
+  datasetName?: string;
+  tracks?: Yue2CaptionSourceTrack[];
+}
+
+/** Resolve a caption source by dataset id, lyrics-set id, or adapter path.
+ *  The endpoint resolves the other two handles server-side; an unlinked or
+ *  unknown target answers all-empty (`tracks: []`). */
+export type Yue2CaptionSourceQuery = { dataset?: string; lyricsSet?: number; adapter?: string };
 
 export const TD = {
   capabilities: 'training-data/capabilities',
@@ -38,9 +64,11 @@ export const TD = {
   sampleMm3: 'training-data/sample-mm3',
   sampleYue2: 'training-data/sample-yue2',
   lyricStudioPreview: 'training-data/lyric-studio-preview',
+  yue2CaptionSource: 'training-data/yue2-caption-source',
+  heartmulaStatus: 'training-data/heartmula-status',
+  heartmulaPreviews: 'training-data/heartmula-previews',
 } as const satisfies Record<string, Resource>;
 
-type Worker = string | null;
 /** The worker captured in a key; reads never consult the live selection. */
 const workerOf = (key: QueryKey): Worker => scopeOf(key)?.worker ?? null;
 
@@ -149,6 +177,35 @@ export const trainingQueries = {
     queryKey: serverKey(TD.lyricStudioPreview, { worker, id }),
     queryFn: ({ queryKey, signal }) => api.getLyricStudioPreview(id, { worker: workerOf(queryKey), signal }),
     staleTime: 0,
+  }),
+  /** The captions a YuE2 render can source from. Fresh each ask (the caller is
+   *  an explicit "use this dataset" command, not a polled view), and one
+   *  request per resolved handle thanks to the query key. */
+  yue2CaptionSource: (by: Yue2CaptionSourceQuery) => {
+    const params = new URLSearchParams();
+    if (by.dataset) params.set('dataset', by.dataset);
+    else if (by.lyricsSet) params.set('lyricsSet', String(by.lyricsSet));
+    else if (by.adapter) params.set('adapter', by.adapter);
+    return queryOptions({
+      queryKey: serverKey(TD.yue2CaptionSource, { filters: Object.fromEntries(params) }),
+      queryFn: ({ signal }) => apiClient.get<Yue2CaptionSourceSnapshot>(
+        `/training/yue2-dataset-captions?${params.toString()}`, { signal }),
+      staleTime: 0,
+    });
+  },
+  /** HeartMuLa backbone LoRA: the dataset's prepare/train/run snapshot. */
+  heartmulaStatus: (worker: Worker, id: string, busy: boolean) => queryOptions({
+    queryKey: serverKey(TD.heartmulaStatus, { worker, id }),
+    queryFn: ({ queryKey, signal }) => api.getHeartmulaStatus(id, { worker: workerOf(queryKey), signal }),
+    staleTime: 0,
+    refetchInterval: pollWhile<HeartmulaStatusResponse>(() => busy),
+  }),
+  /** Takes of one HeartMuLa run; polls while the job runs or a take moves. */
+  heartmulaPreviews: (worker: Worker, id: string, run: string, busy: boolean) => queryOptions({
+    queryKey: serverKey(TD.heartmulaPreviews, { worker, id, filters: { run } }),
+    queryFn: ({ queryKey, signal }) => api.getHeartmulaPreviews(id, run, { worker: workerOf(queryKey), signal }),
+    refetchInterval: pollWhile<HeartmulaPreviewListResponse>(
+      data => busy || !!data?.previews.some(p => p.status === 'queued' || p.status === 'rendering')),
   }),
 };
 

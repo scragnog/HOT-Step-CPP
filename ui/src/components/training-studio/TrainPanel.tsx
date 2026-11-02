@@ -2,9 +2,7 @@
 import { Cpu, Database, Loader2, XCircle, AlertTriangle } from 'lucide-react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { useRunEvents } from '../../queries/training-runs/hooks';
 import { useTrainingStore } from '../../stores/trainingStore';
-import { useTrainingStream } from './useTrainingStream';
 import { getTrainingPlugin } from './trainingPlugins';
 import { resolveTrainGate } from './trainGates';
 import type { TrainingTargetId, TrainingSection } from './trainingPluginTypes';
@@ -18,15 +16,9 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: Training
   const datasets = useTrainingStore(s => s.datasets);
   const detail = useTrainingStore(s => s.detail);
   const trainingWorker = useTrainingStore(s => s.trainingWorker);
-  const activeJob = useTrainingStore(s => s.activeJob);
   const selectedDatasetId = useTrainingStore(s => s.selectedDatasetId);
   const openDataset = useTrainingStore(s => s.openDataset);
   const setPhase = useTrainingStore(s => s.setPhase);
-  // Preserve the existing stream owner for the other target cards. ACE owns
-  // these subscriptions in its plug-in, so never attach it twice.
-  const jobActive = activeJob?.status === 'queued' || activeJob?.status === 'running';
-  useTrainingStream(target !== 'ace' && jobActive ? activeJob!.id : null);
-  useRunEvents(target !== 'ace' ? activeJob?.id : undefined, trainingWorker);
 
   // ACE owns its status-dependent gates, including the initial dataset picker.
   if (target === 'ace') return <>{plugin.renderTrain?.({ datasetId: detail?.id ?? '', slug: detail?.slug ?? '', trigger: detail?.customTag || '', section })}</>;

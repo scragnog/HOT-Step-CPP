@@ -40,11 +40,12 @@ These reads never retry; each loop already decides what a failure means.
 Submits, cancels, retries, dismissals and migration commands stay direct
 calls and run once.
 
-The server projection remains the only queue poller: every 1.5 seconds while
-any row waits or runs, about every 10 seconds when the queue is idle (to see
-work another tab queued). A local command refreshes at once. A refresh asked
-for while one is in flight runs again straight after it, so an enqueue that
-races the poll still appears at once.
+`useAudioQueueProjection()` (in `projection.ts`, mounted once in `App.tsx`)
+is the only queue poller: every 1.5 seconds while any row waits or runs, about
+every 10 seconds when the queue is idle (to see work another tab queued). A
+local command refreshes at once. A refresh asked for while one is in flight
+runs again straight after it, so an enqueue that races the poll still appears
+at once.
 
 A finished render's song is delivered to the library once per page. A
 path claims the delivery only after its song read succeeds, so a failed
@@ -68,7 +69,7 @@ disco stem extraction it starts) twice.
 | Update notice | `shell-queue/updates` | Fresh each visit; polled every 2 s while a check started elsewhere (startup, another tab) is still running; Check now writes its result into the entry |
 | File browser listing | shared `browse` | Fresh each navigation; only the newest navigation lands |
 | Adapter folder scan | shared `adapter-scan` | Fresh per click |
-| YuE2 caption source | `shell-queue/yue2-captions` | Fresh; failures caught by the caller, never cached as empty |
+| YuE2 caption source | `training-data/yue2-caption-source` | Fresh; read by `utils/yue2CaptionSource.ts`, which keeps the error surface and local cache |
 | Workflow job (queue) | shared `workflow-job`, `after` 0 | Fresh per read, no retry |
 | Waveform peaks | shared `peaks` | `audio/peaksClient.ts`; never stale, `forgetPeaks` removes a rewritten file's entry, failures uncached |
 | Lyric sidecars | shared `lrc`, `lyrics-json` (`lyrics.ts`) | One entry per base render; missing caches null; crop (`TrimControls.tsx`) and retranscribe (`SongActionsMenu.tsx`) refresh them through `queryManager.sidecars.all` |
@@ -99,7 +100,7 @@ global-models' `referencesOptions`, and upload or delete invalidates that key.
 | `components/player/TrimControls.tsx` | mutation; invalidates song views and sidecars |
 | `components/settings/AdapterReferencesAction.tsx` | mutation (album preset adapter-reference cleanup); `lireekApi` invalidates the lireek snapshots after it |
 | `components/settings/DataFolderPanel.tsx` | query; preview, schedule, cancel and restart are commands |
-| `components/settings/SettingsPanel.tsx` | query (health, env, GPUs, stem stats); saves, purges and restart are mutations |
+| `components/settings/SettingsPanel.tsx` | query (health, GPUs, stem stats); the editable env form is `useEnvSettingsForm`; saves, purges and restart are mutations |
 | `components/settings/UpdatesPanel.tsx` | query (`shell-queue/updates`); Check now is a `useMutation` that writes its result into the entry |
 | `components/shared/FileBrowserModal.tsx` | query |
 | `components/shared/LatentImport.tsx` | mutation (upload) |

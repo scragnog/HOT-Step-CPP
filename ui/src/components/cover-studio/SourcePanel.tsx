@@ -10,6 +10,7 @@ import type { AudioMetadata, AudioAnalysis } from './coverStudioUtils';
 import { ALL_KEYS } from './coverStudioUtils';
 import { SEPARATION_LEVELS } from '../../services/supersepApi';
 import { LatentImport, type LatentMetadata } from '../shared/LatentImport';
+import { QueryError } from '../shared/QueryError';
 import { VOCAL_LANGUAGES } from '../../constants/languages';
 import { ProviderSelector } from '../lyric-studio/ProviderSelector';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -266,7 +267,13 @@ export const SourcePanel: React.FC<SourcePanelProps> = ({
               </button>
             </div>
             <div className="max-h-[160px] overflow-y-auto scrollbar-hide">
-              {timbreRefs.length === 0 ? (
+              {referenceQuery.isError ? (
+                <QueryError
+                  error={referenceQuery.error}
+                  onRetry={() => void referenceQuery.refetch()}
+                  className="mx-2 my-2"
+                />
+              ) : timbreRefs.length === 0 ? (
                 <div className="px-3 py-4 text-center text-[10px] text-zinc-500">
                   No references uploaded yet. Drop an audio file above to add one.
                 </div>

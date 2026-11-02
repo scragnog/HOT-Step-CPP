@@ -54,6 +54,7 @@ import { Toggle } from '../shared/Toggle';
 import { JobProgress } from './JobProgress';
 import { Yue2SplitChart } from './Yue2SplitChart';
 import { Yue2StageCard } from './Yue2StageCard';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
@@ -111,7 +112,7 @@ interface PreprocessForm {
 
 export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; onDone: () => void }> = ({ status, done, onDone }) => {
   const { t } = useTranslation();
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
   const startYue2Preprocess = useTrainingStore(s => s.startYue2Preprocess);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -650,7 +651,7 @@ export const Yue2NarTrainCard: React.FC<{
   datasetId: string; trigger?: string; status: Yue2Status | null; reload: () => void;
 }> = ({ datasetId, trigger, status, reload }) => {
   const { t } = useTranslation();
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
   const startYue2Train = useTrainingStore(s => s.startYue2Train);
   const yue2Live = useTrainingStore(s => s.yue2Live);
   const trainStepSeries = useTrainingStore(s => s.trainStepSeries);

@@ -100,10 +100,10 @@ const PaginationControls: React.FC<{
   onChangePageSize: (v: number | 'all') => void;
   onPage: (updater: (p: number) => number) => void;
 }> = ({ pageSize, page, totalPages, onChangePageSize, onPage }) => (
-  <div className="flex items-center gap-3 text-xs">
-    <div className="flex items-center gap-1.5">
+  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs min-w-0 max-w-full">
+    <div className="flex flex-wrap items-center gap-1.5 min-w-0">
       <span className="text-zinc-500">Per page</span>
-      <div className="flex items-center rounded-lg border border-zinc-200 dark:border-white/10 overflow-hidden">
+      <div className="flex flex-wrap items-center rounded-lg border border-zinc-200 dark:border-white/10 overflow-hidden max-w-full">
         {PAGE_SIZE_OPTIONS.map(opt => (
           <button
             key={String(opt)}
@@ -426,9 +426,9 @@ export const SongList: React.FC<SongListProps> = ({
   return (
     <div className="p-4">
       {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-lg font-bold text-white">{title}</h3>
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3 min-w-0">
+        <h3 className="text-lg font-bold text-white truncate min-w-0">{title}</h3>
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           <span className="text-xs text-zinc-500 font-medium">
             {filteredSongs.length}{showFilters && sourceFilter !== 'all' ? ` / ${songs.length}` : ''} song{filteredSongs.length !== 1 ? 's' : ''}
           </span>
@@ -669,7 +669,7 @@ export const SongList: React.FC<SongListProps> = ({
 
       {/* Top pagination — grid/list (table view renders it inline beside Columns) */}
       {activeViewMode !== 'table' && filteredSongs.length > 0 && (
-        <div className="flex justify-end mb-3">
+        <div className="flex flex-wrap justify-end gap-2 mb-3">
           <PaginationControls {...paginationProps} />
         </div>
       )}
@@ -686,7 +686,7 @@ export const SongList: React.FC<SongListProps> = ({
       >
       {/* Grid View */}
       {activeViewMode === 'grid' && filteredSongs.length > 0 && (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(150px,100%),1fr))] gap-3">
           {pagedSongs.map(song => (
             <SongCard
               key={song.id}
@@ -1307,7 +1307,7 @@ const SongCard: React.FC<SongCardProps> = ({
 
         <SongParameterBadges song={song} />
         {/* Subject, or the caption when there is no subject */}
-        <div className="text-[11px] text-zinc-600 dark:text-white/55 leading-snug line-clamp-2 min-h-[2rem]">
+        <div className="text-[11px] text-zinc-600 dark:text-white/55 leading-snug line-clamp-2 min-h-[2rem] [overflow-wrap:anywhere]">
           {isDisguised ? '' : (displaySubtext(song) || t('library.noDescription'))}
         </div>
 
@@ -1461,7 +1461,7 @@ type ColAlign = 'left' | 'center' | 'right';
 interface ColDef { id: string; label: string; defaultW: number; minW: number; align: ColAlign; resizable: boolean; defaultHidden?: boolean }
 
 const BASE_COLS: ColDef[] = [
-  { id: 'thumb',   label: '',        defaultW: 40,  minW: 32,  align: 'left', resizable: false },
+  { id: 'thumb',   label: '',        defaultW: 48,  minW: 48,  align: 'left', resizable: false },
   { id: 'title',   label: 'Title',   defaultW: 320, minW: 80,  align: 'left', resizable: true },
   { id: 'style',   label: 'Style',   defaultW: 320, minW: 80,  align: 'left', resizable: true },
   { id: 'bpm',     label: 'BPM',     defaultW: 60,  minW: 40,  align: 'left', resizable: true },

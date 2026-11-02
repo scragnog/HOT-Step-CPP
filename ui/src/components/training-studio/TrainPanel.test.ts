@@ -16,7 +16,7 @@ Object.assign(globalThis, {
   localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
 });
 const { useTrainingStore } = await import('../../stores/trainingStore');
-const { heartmulaStatusOptions } = await import('./useHeartmulaController');
+const { trainingQueries } = await import('../../queries/training-data/queries');
 const { TrainPanel } = await import('./TrainPanel');
 
 await i18n.use(initReactI18next).init({ lng: 'en', resources: {}, interpolation: { escapeValue: false } });
@@ -31,9 +31,9 @@ test('HeartMuLa Prepare and Train reach their cards independently of ACE capabil
     run: null, runs: [], adapter: null,
     defaults: HEARTMULA_RECIPE_DEFAULTS, previewDefaults: HEARTMULA_PREVIEW_DEFAULTS,
   } as HeartmulaStatusResponse;
-  client.setQueryData(heartmulaStatusOptions(null, 'ds-1', false).queryKey, status);
+  client.setQueryData(trainingQueries.heartmulaStatus(null, 'ds-1', false).queryKey, status);
   // Match the existing shell tests: SSR reads Zustand's initial snapshot.
-  Object.assign(initial, { selectedDatasetId: 'ds-1', trainingWorker: null, activeJob: null, error: null });
+  Object.assign(initial, { selectedDatasetId: 'ds-1', trainingWorker: null, activeJobId: null, error: null });
   const render = (section: 'prepare' | 'train') => renderToStaticMarkup(createElement(QueryClientProvider, { client },
     createElement(TrainPanel, { target: 'heartmula', section })));
   try {

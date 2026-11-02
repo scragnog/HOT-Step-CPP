@@ -28,7 +28,12 @@ test('a mounted panel rejects job adoption from a previous worker or dataset', a
     current = useJobSelection(worker, dataset);
     return createElement('span', {}, current[0]?.id ?? 'none');
   }
-  globalThis.fetch = async () => new Response(JSON.stringify({ job: { id: 'B-job', status: 'done' } }), {
+  // The real /jobs/:id returns the summary itself, and the job query has
+  // staleTime 0, so adopting a job immediately starts a refetch. A mock with
+  // the wrong shape would replace the seeded summary with an envelope whose
+  // `id` is undefined, and whether that landed before the assertion was a
+  // timing race — the source of this test's intermittent failure.
+  globalThis.fetch = async () => new Response(JSON.stringify({ id: 'B-job', status: 'done' }), {
     headers: { 'Content-Type': 'application/json' },
   });
   const root = createRoot(document.getElementById('root')!);

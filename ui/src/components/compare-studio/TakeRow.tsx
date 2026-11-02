@@ -5,12 +5,15 @@ import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
 import type { CompareAnalysis, CompareCriterion, CompareTake } from '../../services/compareApi';
-import { setScore, removeTake } from '../../stores/compareStore';
+import { useRemoveCompareTake, useSetCompareScore } from '../../queries/compare/writes';
 import type { AbEngine } from './useAbEngine';
 import { Waveform } from './Waveform';
 import { Toggle } from '../shared/Toggle';
+import { QueryError } from '../shared/QueryError';
 
 interface Props {
+  /** Session the take belongs to; commands patch its cache entry. */
+  sessionId: string;
   index: number;
   /** 'A' or 'B' when this take is in the A/B quick-switch pair. */
   abSlot?: 'A' | 'B' | null;
@@ -24,6 +27,9 @@ interface Props {
   criteria: CompareCriterion[];
   analysis: CompareAnalysis | null;
   analysisLoading: boolean;
+  /** Set when this take's analysis read failed. */
+  analysisError?: unknown;
+  onAnalysisRetry?: () => void;
   engine: AbEngine;
   duration: number;
   isBaseline: boolean;
@@ -40,8 +46,10 @@ const Chip: React.FC<{ label: string; value: string; warn?: boolean; title?: str
   </span>
 );
 
-export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, analysisLoading, engine, duration, isBaseline, abSlot, showAbButtons, onActivate, onSetSlot }) => {
+export const TakeRow: React.FC<Props> = ({ sessionId, index, take, criteria, analysis, analysisLoading, analysisError, onAnalysisRetry, engine, duration, isBaseline, abSlot, showAbButtons, onActivate, onSetSlot }) => {
   const { t } = useTranslation();
+  const score = useSetCompareScore();
+  const remove = useRemoveCompareTake();
   const active = engine.activeId === take.songId;
   const scoreOf = (c: string) => take.scores.find(s => s.criterion === c);
   const scored = take.scores.some(s => s.value !== null || s.keep !== null || (s.note ?? '').length > 0);
@@ -62,7 +70,7 @@ export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, anal
         title={t('compare.removeTakeTitle', 'Remove take')}
         message={t('compare.removeTakeConfirm', 'Remove this take from the comparison?')}
         danger
-        onConfirm={() => { setConfirmRemove(false); void removeTake(take.songId); }}
+        onConfirm={() => { setConfirmRemove(false); remove.mutate({ sessionId, songId: take.songId }); }}
         onCancel={() => setConfirmRemove(false)}
       />
     <div
@@ -125,6 +133,9 @@ export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, anal
       />
 
       <div className="flex flex-wrap gap-1.5 mt-2">
+        {(analysisError && !analysis) ? (
+          <QueryError error={analysisError} onRetry={onAnalysisRetry} compact />
+        ) : null}
         {analysisLoading && !analysis && <span className="text-[11px] text-zinc-500">{t('compare.analyzing', 'Analysing...')}</span>}
         {analysis && <>
           <Chip label="LUFS" value={fmt(analysis.integratedLufs)} />
@@ -149,7 +160,7 @@ export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, anal
               {opts.map(v => (
                 <button
                   key={v}
-                  onClick={() => void setScore({ songId: take.songId, criterion: c.id, value: cur === v ? null : v })}
+                  onClick={() => score.mutate({ sessionId, items: [{ songId: take.songId, criterion: c.id, value: cur === v ? null : v }] })}
                   className={`min-w-[40px] h-10 rounded-lg text-sm font-semibold border ${cur === v
                     ? 'bg-pink-500 border-pink-500 text-white'
                     : 'border-zinc-300 dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:border-pink-400'}`}
@@ -165,7 +176,7 @@ export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, anal
             accent="emerald"
             label={c.label}
             checked={scoreOf(c.id)?.keep === true}
-            onChange={v => void setScore({ songId: take.songId, criterion: c.id, keep: v })}
+            onChange={v => score.mutate({ sessionId, items: [{ songId: take.songId, criterion: c.id, keep: v }] })}
           />
         ))}
         {noteCrit && (
@@ -174,7 +185,7 @@ export const TakeRow: React.FC<Props> = ({ index, take, criteria, analysis, anal
             value={note}
             placeholder={noteCrit.label}
             onChange={e => setNote(e.target.value)}
-            onBlur={() => { if (note !== savedNote) void setScore({ songId: take.songId, criterion: noteCrit.id, note }); }}
+            onBlur={() => { if (note !== savedNote) score.mutate({ sessionId, items: [{ songId: take.songId, criterion: noteCrit.id, note }] }); }}
             onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
             className="w-full h-10 px-3 rounded-lg text-sm bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 text-zinc-900 dark:text-zinc-100"
           />

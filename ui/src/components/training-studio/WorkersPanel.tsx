@@ -8,6 +8,7 @@ import { trainingQueries } from '../../queries/training-data/queries';
 import { runQueries, trainingWritePlan } from '../../queries/training-runs/queries';
 import {
   cancelWorkerUpdate,
+  isTerminalStatus,
   startWorkerUpdate
 } from '../../services/trainingApi';
 
@@ -42,7 +43,7 @@ export const WorkersPanel: React.FC = () => {
       {error && <p className="text-xs text-red-500">{error}</p>}
       {workers.map(w => {
         const updateJob = updates[w.name];
-        const busy = updateJob && !['done', 'failed', 'cancelled'].includes(updateJob.status);
+        const busy = !!updateJob && !isTerminalStatus(updateJob.status);
         const updating = updateMut.isPending && updateMut.variables === w.name;
         const cancelling = cancelMut.isPending && cancelMut.variables === w.name;
         const badge = !w.online ? t('trainingStudio.workers.offlineBadge', 'Offline')

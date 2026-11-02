@@ -57,7 +57,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
 
   if (loading) {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 p-6">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-4 p-3 sm:p-4 min-[1280px]:p-6">
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="aspect-square rounded-2xl bg-white/5 animate-pulse" />
         ))}
@@ -66,30 +66,30 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
   }
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-3 sm:p-4 min-[1280px]:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6 min-w-0">
         <div>
           <h2 className="text-xl font-bold text-white">Albums</h2>
           <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-0.5">{disguiseArtist(artistName)}</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-3">
           {onCuratedProfile && albums.length >= 2 && (
             <button
               onClick={onCuratedProfile}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600/80 hover:bg-purple-500 text-white text-sm font-semibold transition-all hover:scale-105 shadow-lg shadow-purple-600/20"
+              className="flex max-w-full min-w-0 items-center gap-2 px-4 py-2 rounded-xl bg-purple-600/80 hover:bg-purple-500 text-white text-sm font-semibold transition-all hover:scale-105 shadow-lg shadow-purple-600/20"
             >
-              <Sparkles className="w-4 h-4" />
-              Curated Profile
+              <Sparkles className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">Curated Profile</span>
             </button>
           )}
-          <div className="relative" ref={addBtnRef}>
+          <div className="relative min-w-0 max-w-full" ref={addBtnRef}>
             <button
               onClick={() => setAddMenuOpen(!addMenuOpen)}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold transition-all hover:scale-105 shadow-lg shadow-pink-600/20"
+              className="flex max-w-full min-w-0 items-center gap-2 px-4 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-sm font-semibold transition-all hover:scale-105 shadow-lg shadow-pink-600/20"
             >
-              <Plus className="w-4 h-4" />
-              Add Album
-              <ChevronDown className="w-3.5 h-3.5 opacity-70" />
+              <Plus className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">Add Album</span>
+              <ChevronDown className="w-3.5 h-3.5 flex-shrink-0 opacity-70" />
             </button>
             {addMenuOpen && (
               <div className="absolute right-0 top-full mt-1 z-30 min-w-[180px] rounded-xl bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 shadow-2xl py-1 animate-in fade-in slide-in-from-top-1">
@@ -140,7 +140,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
           </div>
         </div>
       ) : (
-        <div ref={gridRef} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+        <div ref={gridRef} className="grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-4">
           {albums.map((album, idx) => {
             const songCount = album.total_songs ?? (album.songs ? parseSongs(album.songs).length : 0);
             return (

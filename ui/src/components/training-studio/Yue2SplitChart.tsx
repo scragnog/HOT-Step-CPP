@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { TrainingChart, type ChartStepPoint, type ChartMilestone } from './TrainingChart';
 import { klReading, reduceYue2Metric, type Yue2Point } from './yue2ChartData';
-import { jobStreamUrl, type TrainingJobSummary, type TrainingStreamEvent } from '../../services/trainingApi';
+import { isTerminalStatus, jobStreamUrl, type TrainingJobSummary, type TrainingStreamEvent } from '../../services/trainingApi';
 import { subscribeEventSource } from '../../services/sharedEventSource';
 import { useTrainingStore } from '../../stores/trainingStore';
 
@@ -24,9 +24,16 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
   const hasPoints = points !== undefined;
   // The job lives on the worker selected when its chart opened.
   const worker = useTrainingStore(s => s.trainingWorker);
+  // A new job starts its own series; a status change must not wipe the points
+  // the stream has already collected for this one.
   useEffect(() => {
     setStream([]); setStreamVram(undefined);
-    if (hasPoints || !job?.id) return;
+  }, [job?.id, hasPoints, worker]);
+  // Only a live job needs the stream. A finished one renders the series it
+  // already received, and a subscription left open would only reconnect and
+  // replay the closed stream's buffer forever.
+  useEffect(() => {
+    if (hasPoints || !job?.id || isTerminalStatus(job.status)) return;
     return subscribeEventSource(jobStreamUrl(job.id, { worker }), { message: data => {
       try {
         const item = JSON.parse(data) as TrainingStreamEvent;
@@ -35,7 +42,7 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
         else setStream(p => reduceYue2Metric(p, item));
       } catch { /* Ignore malformed replay frames. */ }
     } });
-  }, [job?.id, hasPoints, worker]);
+  }, [job?.id, job?.status, hasPoints, worker]);
   const history = points ?? stream;
   const last = history.at(-1);
   const lastStopMean = history.findLast(p => Number.isFinite(p.ma20))?.ma20;

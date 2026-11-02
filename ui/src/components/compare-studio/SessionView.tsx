@@ -5,15 +5,16 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { useTranslation } from 'react-i18next';
 import { Play, Pause, ArrowLeft, Archive, ArchiveRestore, Trash2, X } from 'lucide-react';
-import {
-  useCompareStore, loadAnalysis, loadDiff, toggleArchive, deleteSession,
-} from '../../stores/compareStore';
-import type { CompareSession } from '../../services/compareApi';
+import { useQueries, useQuery } from '@tanstack/react-query';
+import { compareQueries } from '../../queries/compare/queries';
+import { useArchiveCompareSession, useDeleteCompareSession } from '../../queries/compare/writes';
+import type { CompareAnalysis, CompareSession } from '../../services/compareApi';
 import { useAbEngine, type AbEngine } from './useAbEngine';
 import { TakeRow } from './TakeRow';
 import { DiffTrace } from './DiffTrace';
 import { LoopOverlay, Playhead } from './Waveform';
 import { Toggle } from '../shared/Toggle';
+import { QueryError } from '../shared/QueryError';
 import { initialPair, normalizePair, setSlot, tapTake, toggleTarget, type AbPair } from './abPair';
 
 const mmss = (s: number) => {
@@ -51,11 +52,24 @@ interface Props { session: CompareSession; onBack: () => void; }
 
 export const SessionView: React.FC<Props> = ({ session, onBack }) => {
   const { t } = useTranslation();
-  const { analysis, analysisLoading, diff } = useCompareStore();
   const takes = session.takes;
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const archive = useArchiveCompareSession();
+  const remove = useDeleteCompareSession();
 
-  useEffect(() => { takes.forEach(tk => { void loadAnalysis(tk.songId); }); }, [takes]);
+  // One analysis entry per take, shared with any other view that asked for
+  // the same song. A failed analysis stays local to its take row.
+  const analysisQueries = useQueries({
+    queries: useMemo(() => takes.map(tk => compareQueries.analysis(tk.songId)), [takes]),
+  });
+  const analysis = useMemo(() => {
+    const out: Record<string, CompareAnalysis> = {};
+    takes.forEach((tk, i) => {
+      const data = analysisQueries[i]?.data;
+      if (data) out[tk.songId] = data;
+    });
+    return out;
+  }, [takes, analysisQueries]);
 
   const abTakes = useMemo(() => takes.filter(tk => tk.audioUrl).map(tk => ({
     id: tk.songId, url: tk.audioUrl as string, integratedLufs: analysis[tk.songId]?.integratedLufs ?? null,
@@ -66,9 +80,10 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
   const baselineId = session.baselineSongId ?? takes[0]?.songId ?? null;
   const activeId = engine.activeId;
 
-  useEffect(() => {
-    if (activeId && baselineId && activeId !== baselineId) void loadDiff(activeId, baselineId);
-  }, [activeId, baselineId]);
+  const diffQuery = useQuery({
+    ...compareQueries.diff(activeId ?? '', baselineId ?? ''),
+    enabled: !!activeId && !!baselineId && activeId !== baselineId,
+  });
 
   // A/B quick switch: explicit {a, b} slots, normalized so a !== b with 2+ takes.
   const takeIds = useMemo(() => takes.map(tk => tk.songId), [takes]);
@@ -122,7 +137,7 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
         title={t('compare.deleteTitle', 'Delete comparison')}
         message={t('compare.deleteConfirm', 'Delete this comparison and its scores? Songs stay in the library.')}
         danger
-        onConfirm={() => { setConfirmDelete(false); void deleteSession(session.id); onBack(); }}
+        onConfirm={() => { setConfirmDelete(false); remove.mutate(session.id, { onSuccess: () => onBack() }); }}
         onCancel={() => setConfirmDelete(false)}
       />
       <div className="sticky top-0 z-10 px-3 sm:px-4 py-3 bg-white/90 dark:bg-zinc-950/90 backdrop-blur border-b border-zinc-200 dark:border-white/5">
@@ -134,7 +149,7 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
             <div className="text-sm font-bold truncate text-zinc-900 dark:text-zinc-100">{session.name}</div>
             <div className="text-[11px] text-zinc-500">{session.group || t('compare.ungrouped', 'Ungrouped')} · {session.scored}/{session.total} {t('compare.scored', 'scored')}</div>
           </div>
-          <button onClick={() => void toggleArchive(session.id)} className="p-2 rounded-lg text-zinc-500 hover:text-pink-400"
+          <button onClick={() => archive.mutate({ id: session.id, archived: !session.archived })} className="p-2 rounded-lg text-zinc-500 hover:text-pink-400"
             title={session.archived ? t('compare.unarchive', 'Unarchive') : t('compare.archive', 'Archive')}
             aria-label={session.archived ? t('compare.unarchive', 'Unarchive') : t('compare.archive', 'Archive')}>
             {session.archived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
@@ -196,11 +211,14 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
         {takes.map((tk, i) => (
           <TakeRow
             key={tk.songId}
+            sessionId={session.id}
             index={i}
             take={tk}
             criteria={session.criteria}
             analysis={analysis[tk.songId] ?? null}
-            analysisLoading={!!analysisLoading[tk.songId]}
+            analysisLoading={!!analysisQueries[i]?.isPending}
+            analysisError={analysisQueries[i]?.error}
+            onAnalysisRetry={() => void analysisQueries[i]?.refetch()}
             engine={engine}
             duration={duration}
             isBaseline={tk.songId === baselineId}
@@ -211,12 +229,17 @@ export const SessionView: React.FC<Props> = ({ session, onBack }) => {
           />
         ))}
         {takes.length > 1 && (
-          <DiffTrace
-            diff={diff && diff.a === activeId && diff.b === baselineId ? diff : null}
-            activeTitle={titleOf(activeId)}
-            baselineTitle={titleOf(baselineId)}
-            same={!activeId || activeId === baselineId}
-          />
+          <>
+            <DiffTrace
+              diff={diffQuery.data && diffQuery.data.a === activeId && diffQuery.data.b === baselineId ? diffQuery.data : null}
+              activeTitle={titleOf(activeId)}
+              baselineTitle={titleOf(baselineId)}
+              same={!activeId || activeId === baselineId}
+            />
+            {diffQuery.isError && (
+              <QueryError error={diffQuery.error} onRetry={() => void diffQuery.refetch()} />
+            )}
+          </>
         )}
       </div>
     </div>

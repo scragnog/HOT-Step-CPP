@@ -5,13 +5,37 @@ import { getReviewLadder } from '../../services/trainingReviewApi';
 import { trainingOperation } from '../../services/trainingOperations';
 import type { TrainingRecipe } from '../../services/trainingRecipesApi';
 import type { TrainingRecipeFamily } from '../../../../server/src/contracts/trainingRecipes';
-import { scopeOf, serverKey, resourceKey, SHARED } from '../keys';
+import { scopeOf, serverKey, resourceKey, SHARED, type Resource, type Worker } from '../keys';
 import { gpusOptions } from '../shell-queue/settings';
 import { trainingQueries } from '../training-data/queries';
 import { pollWhile } from '../contract';
 import { queryManager } from '../invalidation';
 
-export type Worker = string | null;
+export type { Worker };
+const TR = {
+  recipe: 'training-runs/recipe',
+  mm3Status: 'training-runs/mm3-status',
+  yue2Status: 'training-runs/yue2-status',
+  arStatus: 'training-runs/ar-status',
+  mm3Runs: 'training-runs/mm3-runs',
+  narRuns: 'training-runs/nar-runs',
+  arRuns: 'training-runs/ar-runs',
+  jointRuns: 'training-runs/joint-runs',
+  previews: 'training-runs/previews',
+  review: 'training-runs/review',
+  ladder: 'training-runs/ladder',
+  scores: 'training-runs/scores',
+  album: 'training-runs/album',
+  localBatches: 'training-runs/local-batches',
+  mirror: 'training-runs/mirror',
+  workerUpdate: 'training-runs/worker-update',
+  optimise: 'training-runs/optimise',
+  prepare: 'training-runs/prepare',
+  jobs: 'training-runs/jobs',
+  sources: 'training-runs/sources',
+  source: 'training-runs/source',
+  preparations: 'training-runs/preparations',
+} as const satisfies Record<string, Resource>;
 export const activeJob = (job: { status: string } | null | undefined) =>
   !job || job.status === 'queued' || job.status === 'running';
 
@@ -19,7 +43,7 @@ export const activeJob = (job: { status: string } | null | undefined) =>
 // and review records belong to this PC, regardless of the Train on selection.
 export const runQueries = {
   recipe: <T>(worker: Worker, family: TrainingRecipeFamily) => queryOptions({
-    queryKey: serverKey('training-runs/recipe', { worker, id: family }),
+    queryKey: serverKey(TR.recipe, { worker, id: family }),
     queryFn: ({ queryKey, signal }) => {
       const target = scopeOf(queryKey)!.worker;
       return trainingOperation<TrainingRecipe<T>>('recipes', `/${family}${target ? `?worker=${encodeURIComponent(target)}` : ''}`, { signal });
@@ -28,100 +52,100 @@ export const runQueries = {
   /** One owner: the settings GPUs factory. */
   gpus: () => gpusOptions(),
   mm3Status: (worker: Worker, id: string) => queryOptions({
-    queryKey: serverKey('training-runs/mm3-status', { worker, id }),
+    queryKey: serverKey(TR.mm3Status, { worker, id }),
     queryFn: ({ queryKey, signal }) => api.getMm3Status(id, { worker: scopeOf(queryKey)!.worker, signal }),
   }),
   yue2Status: (worker: Worker, id: string) => queryOptions({
-    queryKey: serverKey('training-runs/yue2-status', { worker, id }),
+    queryKey: serverKey(TR.yue2Status, { worker, id }),
     queryFn: ({ queryKey, signal }) => api.getYue2Status(id, { worker: scopeOf(queryKey)!.worker, signal }),
   }),
   arStatus: (worker: Worker, id: string) => queryOptions({
-    queryKey: serverKey('training-runs/ar-status', { worker, id }),
+    queryKey: serverKey(TR.arStatus, { worker, id }),
     queryFn: ({ queryKey, signal }) => api.getYue2ArStatus(id, { worker: scopeOf(queryKey)!.worker, signal }),
   }),
   mm3Runs: (id: string) => queryOptions({
-    queryKey: serverKey('training-runs/mm3-runs', { id }),
+    queryKey: serverKey(TR.mm3Runs, { id }),
     queryFn: ({ signal }) => api.listMm3Runs(id, { signal }),
   }),
   narRuns: (id: string) => queryOptions({
-    queryKey: serverKey('training-runs/nar-runs', { id }),
+    queryKey: serverKey(TR.narRuns, { id }),
     queryFn: ({ signal }) => api.listYue2Runs(id, { signal }),
   }),
   arRuns: (id: string) => queryOptions({
-    queryKey: serverKey('training-runs/ar-runs', { id }),
+    queryKey: serverKey(TR.arRuns, { id }),
     queryFn: ({ signal }) => api.listYue2ArRuns(id, { signal }),
   }),
   jointRuns: (id: string) => queryOptions({
-    queryKey: serverKey('training-runs/joint-runs', { id }),
+    queryKey: serverKey(TR.jointRuns, { id }),
     queryFn: ({ signal }) => api.listYue2AitkRuns(id, { signal }),
     refetchInterval: pollWhile<Awaited<ReturnType<typeof api.listYue2AitkRuns>>>(data =>
       !data || !!data.activeJob && activeJob(data.activeJob) || data.runs.some(run => run.live), 5000),
   }),
   previews: (id: string, run: string) => queryOptions({
-    queryKey: serverKey('training-runs/previews', { id, filters: { run } }),
+    queryKey: serverKey(TR.previews, { id, filters: { run } }),
     queryFn: ({ signal }) => api.listYue2JointPreviewsLocal(id, run, { signal }),
   }),
   review: () => queryOptions({
-    queryKey: serverKey('training-runs/review'),
+    queryKey: serverKey(TR.review),
     queryFn: ({ signal }) => api.listYue2Review({ signal }),
     refetchInterval: pollWhile(() => true, 30_000),
   }),
   ladder: (id: string, run: string) => queryOptions({
-    queryKey: serverKey('training-runs/ladder', { id, filters: { run } }),
+    queryKey: serverKey(TR.ladder, { id, filters: { run } }),
     queryFn: ({ signal }) => getReviewLadder(id, run, { signal }),
   }),
   scores: (id: string, run: string) => queryOptions({
-    queryKey: serverKey('training-runs/scores', { id, filters: { run } }),
+    queryKey: serverKey(TR.scores, { id, filters: { run } }),
     queryFn: ({ signal }) => api.listYue2RungScores(id, run, { signal }),
   }),
   album: (id: string, run: string) => queryOptions({
-    queryKey: serverKey('training-runs/album', { id, filters: { run } }),
+    queryKey: serverKey(TR.album, { id, filters: { run } }),
     queryFn: ({ signal }) => api.getYue2AlbumScore(id, run, { signal }),
   }),
   localBatches: () => queryOptions({
-    queryKey: serverKey('training-runs/local-batches'),
+    queryKey: serverKey(TR.localBatches),
     queryFn: ({ signal }) => api.listYue2BatchesLocal({ signal }),
     refetchInterval: pollWhile(() => true, 10_000),
   }),
   mirror: (name: string) => queryOptions({
-    queryKey: serverKey('training-runs/mirror', { id: name }),
+    queryKey: serverKey(TR.mirror, { id: name }),
     queryFn: ({ signal }) => api.getWorkerMirror(name, { signal }),
     refetchInterval: pollWhile(() => true, 15_000),
   }),
   workerUpdate: (name: string) => queryOptions({
-    queryKey: serverKey('training-runs/worker-update', { id: name }),
+    queryKey: serverKey(TR.workerUpdate, { id: name }),
     queryFn: ({ signal }) => api.getWorkerUpdate(name, { signal }),
     refetchInterval: pollWhile<Awaited<ReturnType<typeof api.getWorkerUpdate>>>(data =>
-      !!data && !['done', 'failed', 'cancelled'].includes(data.status), 5000),
+      !!data && !api.isTerminalStatus(data.status), 5000),
   }),
   optimise: (worker: Worker, id: string) => queryOptions({
-    queryKey: serverKey('training-runs/optimise', { worker, id }),
+    queryKey: serverKey(TR.optimise, { worker, id }),
     queryFn: ({ queryKey, signal }) => api.getYue2Optimise(id, { worker: scopeOf(queryKey)!.worker, signal }),
   }),
   prepare: (worker: Worker, id: string) => queryOptions({
-    queryKey: serverKey('training-runs/prepare', { worker, id }),
+    queryKey: serverKey(TR.prepare, { worker, id }),
     queryFn: ({ queryKey, signal }) => api.getYue2AitkPrepare(id, undefined, { worker: scopeOf(queryKey)!.worker, signal }),
   }),
   jobs: (worker: Worker, id: string) => queryOptions({
-    queryKey: serverKey('training-runs/jobs', { worker, id }),
+    queryKey: serverKey(TR.jobs, { worker, id }),
     queryFn: ({ queryKey, signal }) => api.listJobs(id, { worker: scopeOf(queryKey)!.worker, signal }),
   }),
   sources: (worker: Worker, id: string) => queryOptions({
-    queryKey: serverKey('training-runs/sources', { worker, id }),
+    queryKey: serverKey(TR.sources, { worker, id }),
     queryFn: ({ queryKey, signal }) => api.listYue2SheetSources(id, { worker: scopeOf(queryKey)!.worker, signal }),
   }),
   source: (worker: Worker, id: string, name: string) => queryOptions({
-    queryKey: serverKey('training-runs/source', { worker, id, filters: { name } }),
+    queryKey: serverKey(TR.source, { worker, id, filters: { name } }),
     queryFn: ({ queryKey, signal }) => api.getYue2SheetSource(id, name, { worker: scopeOf(queryKey)!.worker, signal }),
   }),
   preparations: (id: string) => queryOptions({
-    queryKey: serverKey('training-runs/preparations', { id }),
+    queryKey: serverKey(TR.preparations, { id }),
     queryFn: ({ signal }) => preparation.listYue2Preparations(id, { signal }),
     refetchInterval: pollWhile<Awaited<ReturnType<typeof preparation.listYue2Preparations>>>(data =>
       !data || data.some(p => !['done', 'failed', 'cancelled', 'interrupted'].includes(p.status))),
   }),
   /** One owner: training-data's factories; this view adds the polling cadence. */
-  preparation: (id: string) => ({
+  preparation: (id: string) => queryOptions({
     ...trainingQueries.preparation(id),
     refetchInterval: pollWhile<Awaited<ReturnType<typeof preparation.getYue2Preparation>>>(data =>
       !data || !['done', 'failed', 'cancelled', 'interrupted'].includes(data.status)),

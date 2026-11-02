@@ -128,3 +128,11 @@ export class AudioQueueApiFake {
     return json(404, { error: `No route ${c.method} ${c.path}` });
   }
 }
+
+/** Drive the store's server-projection read+apply on a test cadence. The app
+ *  gets this cadence from Query's refetchInterval via useAudioQueueProjection;
+ *  store tests have no React tree, so they tick the same reducer explicitly. */
+export function startProjectionForTests(refresh: () => unknown, ms = 150): () => void {
+  const timer = setInterval(() => { void refresh(); }, ms);
+  return () => clearInterval(timer);
+}

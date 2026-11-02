@@ -32,6 +32,12 @@ export const queryManager = {
   songs: {
     views: (c: QueryClient) => invalidateKeys(c, SONG_VIEWS),
   },
+  /** The editable .env snapshot, after Settings saved a diff. The key is
+   *  named here (not imported from shell-queue) so this file stays the only
+   *  invalidation owner without taking an area dependency. */
+  env: {
+    values: (c: QueryClient) => invalidateKeys(c, [resourceKey('shell-queue/env')]),
+  },
   /** A track's lyric sidecars, after a crop or retranscription rewrote them. */
   sidecars: {
     all: (c: QueryClient) => invalidateKeys(c, [resourceKey(SHARED.lrc), resourceKey(SHARED.lyricsJson)]),
@@ -68,8 +74,3 @@ export type EventRef = keyof typeof queryManager.events;
 export function invalidateEvents(client: QueryClient, events: readonly EventRef[]): Promise<unknown> {
   return Promise.all(events.map(e => queryManager.events[e](client)));
 }
-
-/** P2.4 transitional re-exports for keys.ts's old per-area helpers; P6 deletes
- *  them once every caller moves to the groups above. */
-export const invalidateSongViews = (c: QueryClient) => queryManager.songs.views(c);
-export const invalidateSidecars = (c: QueryClient) => queryManager.sidecars.all(c);

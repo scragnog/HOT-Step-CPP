@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { localOptions } from '../../queries/global-models/options';
-import type { VstPlugin } from '../../services/api';
+import { vstScanOptions } from '../../queries/global-models/options';
 // VstChainDropdown.tsx — VST3 Post-Processing chain panel for the global bar
 //
 // Shows the plugin chain, lets you add/remove/reorder plugins,
@@ -40,7 +39,7 @@ function formatTime(s: number): string {
 
 const PluginSearch: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { plugins, scanPlugins, addToChain, chain } = useVstChainStore();
-  const scan = useQuery(localOptions<{ plugins: VstPlugin[] }>('vst-scan', '/vst/scan'));
+  const scan = useQuery(vstScanOptions());
   const scanning = scan.isFetching;
   const { t } = useTranslation();
   const [filter, setFilter] = useState('');

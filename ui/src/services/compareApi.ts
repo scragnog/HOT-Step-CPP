@@ -1,9 +1,9 @@
 // compareApi.ts - typed client for /api/compare (Compare studio).
 
-import { apiClient } from './httpClient';
+import { apiClient, type ReadOptions } from './httpClient';
 
-async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
-  return apiClient.request<T>(method, `/compare${path}`, body);
+async function req<T>(method: string, path: string, body?: unknown, opts: ReadOptions = {}): Promise<T> {
+  return apiClient.request<T>(method, `/compare${path}`, body, opts);
 }
 
 export type CompareStatus = 'scored' | 'partial' | 'unscored';
@@ -63,31 +63,31 @@ export interface CreateSessionInput {
 const enc = encodeURIComponent;
 
 export const compareApi = {
-  listSessions: (opts: { archived?: boolean; group?: string } = {}) => {
+  listSessions: (opts: { archived?: boolean; group?: string } = {}, read: ReadOptions = {}) => {
     const q = new URLSearchParams();
     if (opts.archived !== undefined) q.set('archived', opts.archived ? '1' : '0');
     if (opts.group !== undefined) q.set('group', opts.group);
     const s = q.toString();
-    return req<{ sessions: CompareSessionSummary[] }>('GET', `/sessions${s ? '?' + s : ''}`);
+    return req<{ sessions: CompareSessionSummary[] }>('GET', `/sessions${s ? '?' + s : ''}`, undefined, read);
   },
   createSession: (body: CreateSessionInput) => req<CompareSession>('POST', '/sessions', body),
-  getSession: (id: string) => req<CompareSession>('GET', `/sessions/${enc(id)}`),
+  getSession: (id: string, read: ReadOptions = {}) => req<CompareSession>('GET', `/sessions/${enc(id)}`, undefined, read),
   deleteSession: (id: string) => req<{ ok: boolean }>('DELETE', `/sessions/${enc(id)}`),
   addTakes: (id: string, songIds: string[]) => req<CompareSession>('POST', `/sessions/${enc(id)}/takes`, { songIds }),
   removeTake: (id: string, songId: string) => req<CompareSession>('DELETE', `/sessions/${enc(id)}/takes/${enc(songId)}`),
   putScores: (id: string, items: ScoreInput[]) => req<ScoreResult>('PUT', `/sessions/${enc(id)}/scores`, items),
   setArchived: (id: string, archived: boolean) => req<CompareSessionSummary>('POST', `/sessions/${enc(id)}/archive`, { archived }),
-  getAnalysis: (songId: string) => req<CompareAnalysis>('GET', `/analysis/${enc(songId)}`),
-  getDiff: (a: string, b: string) => req<CompareDiff>('GET', `/diff?a=${enc(a)}&b=${enc(b)}`),
+  getAnalysis: (songId: string, read: ReadOptions = {}) => req<CompareAnalysis>('GET', `/analysis/${enc(songId)}`, undefined, read),
+  getDiff: (a: string, b: string, read: ReadOptions = {}) => req<CompareDiff>('GET', `/diff?a=${enc(a)}&b=${enc(b)}`, undefined, read),
 };
 
 export interface CompareSongHit {
   id: string; title: string; style: string; duration: number; backend: string; createdAt: string;
 }
 
-export function searchCompareSongs(q: string, limit = 25, offset = 0) {
+export function searchCompareSongs(q: string, limit = 25, offset = 0, read: ReadOptions = {}) {
   const p = new URLSearchParams({ q, limit: String(limit), offset: String(offset) });
-  return req<{ total: number; limit: number; offset: number; songs: CompareSongHit[] }>('GET', `/songs?${p.toString()}`);
+  return req<{ total: number; limit: number; offset: number; songs: CompareSongHit[] }>('GET', `/songs?${p.toString()}`, undefined, read);
 }
 
 // Library -> Compare hand-off: song ids picked in the library, consumed once by the studio.

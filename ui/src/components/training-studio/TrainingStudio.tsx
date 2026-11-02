@@ -27,6 +27,7 @@ import { Yue2BatchPanel } from './Yue2BatchPanel';
 import { getTrainingPlugin } from './trainingPlugins';
 import { resolvePhase, type TrainingTargetOverride } from './trainingTargets';
 import { useTrainingTarget } from './useTrainingTarget';
+import { useTrainingJobProjection } from '../../queries/training-runs/hooks';
 
 // ── URL helpers ──────────────────────────────────────────────────────────────
 //
@@ -64,6 +65,8 @@ function parseTrainingUrl(path: string): { datasetId?: string; phase?: 'preproce
 
 export const TrainingStudio: React.FC = () => {
   const { t } = useTranslation();
+  // One stream + poll owner for the selected job, shared by every card here.
+  useTrainingJobProjection();
   const phase = useTrainingStore(s => s.phase);
   const selectedDatasetId = useTrainingStore(s => s.selectedDatasetId);
   const error = useTrainingStore(s => s.error);

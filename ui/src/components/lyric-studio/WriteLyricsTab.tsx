@@ -5,6 +5,7 @@ import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 import type { ProviderInfo } from '../../../../server/src/services/lireek/llm/types';
 import { StyledSelect } from '../shared/StyledSelect';
 import { ParamLabel } from '../shared/ParamLabel';
+import { QueryError } from '../shared/QueryError';
 import { scratchRequest, submitScratchLyrics, followScratchLyrics, type ScratchBrief } from './scratchLyricsClient';
 
 const empty: ScratchBrief = { theme: '', style: '', structure: '', existingLyrics: '' };
@@ -68,6 +69,9 @@ export const WriteLyricsTab: React.FC<{
         <ParamLabel label={t('lyric.scratch.model', 'Ollama model')} info={t('lyric.scratch.modelInfo', 'Choose an installed Ollama model. Configure the Ollama address and default model in Settings, AI Services.')} />
         <StyledSelect accent="pink" value={selectedModel} onChange={setModel} disabled={busy}
           options={(ollama?.models || []).map(value => ({ value, label: value }))} />
+        {providers.isError && (
+          <QueryError error={providers.error} onRetry={() => void providers.refetch()} compact />
+        )}
       </div>
       {fields.map(field => (
         <label key={field.key} className="block space-y-1">

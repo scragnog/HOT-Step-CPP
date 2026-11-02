@@ -6,7 +6,8 @@ import type { TrainingPlugin, TrainingRenderContext } from '../trainingPluginTyp
 import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { heartmulaPreviewOptions, heartmulaStatusOptions } from '../useHeartmulaController';
+import { trainingQueries } from '../../../queries/training-data/queries';
+import { queryManager } from '../../../queries/invalidation';
 import { useTrainingStore } from '../../../stores/trainingStore';
 import { Cpu, Loader2, RefreshCw } from 'lucide-react';
 import { TrainingReviewHeader, TrainingReviewRunRow } from '../ReviewPanel';
@@ -59,7 +60,7 @@ function HeartmulaPage({ context, useController, review = false }: {
   const selectedRun = selection.scope === view.scopeKey && view.status?.runs.some(run => run.run === selection.run)
     ? selection.run : view.status?.run?.run ?? '';
   const olderRun = selectedRun !== (view.status?.run?.run ?? '');
-  const previews = useQuery({ ...heartmulaPreviewOptions(worker, context.datasetId, selectedRun, view.busy), enabled: olderRun && !!selectedRun });
+  const previews = useQuery({ ...trainingQueries.heartmulaPreviews(worker, context.datasetId, selectedRun, view.busy), enabled: olderRun && !!selectedRun });
   const previewCard = <HeartmulaPreviewCard runs={view.status?.runs} selectedRun={selectedRun}
     onSelectRun={run => setSelection({ scope: view.scopeKey, run })}
     previews={olderRun ? previews.data ?? null : view.previews} busy={view.busy || !!view.previewBusy}
@@ -71,8 +72,9 @@ function HeartmulaPage({ context, useController, review = false }: {
       <TrainingReviewHeader title={t('trainingStudio.review.title', 'Awaiting review')}
         description={t('trainingStudio.heartmula.reviewIntro', 'Choose a run to listen to its saved checkpoint previews.')}
         actions={<button type="button" disabled={view.loading} onClick={() => {
-          void client.invalidateQueries({ queryKey: heartmulaStatusOptions(worker, context.datasetId, false).queryKey });
-          void client.invalidateQueries({ queryKey: heartmulaPreviewOptions(worker, context.datasetId, selectedRun, false).queryKey });
+          void queryManager.invalidate(client,
+            trainingQueries.heartmulaStatus(worker, context.datasetId, false).queryKey,
+            trainingQueries.heartmulaPreviews(worker, context.datasetId, selectedRun, false).queryKey);
         }} className="p-1.5 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:bg-zinc-500/10"><RefreshCw size={13} className={view.loading ? 'animate-spin' : ''} /></button>} />
       <div className="flex flex-col gap-2">{view.status?.runs.map(run => <TrainingReviewRunRow key={run.run}
         onOpen={() => setSelection({ scope: view.scopeKey, run: run.run })}>

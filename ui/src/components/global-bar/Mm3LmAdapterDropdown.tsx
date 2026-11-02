@@ -1,5 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import { localOptions } from '../../queries/global-models/options';
+import {
+  mm3AdaptersOptions,
+  type Mm3LmAdapterScales,
+} from '../../queries/global-models/options';
 // Mm3LmAdapterDropdown.tsx — Adapters cluster for a backend whose adapters are
 // RUNTIME LM LoRAs rather than ACE's DiT adapter stack.
 //
@@ -51,37 +54,6 @@ const PARAM = {
   trigger: 'mm3LmAdapterTrigger',
 } as const;
 
-interface Mm3LmAdapterScales {
-  scale: number;
-  scaleAttn: number;
-  scaleMlp: number;
-  scaleEarly: number;
-  scaleMid: number;
-  scaleLate: number;
-}
-
-interface Mm3LmAdapterEntry {
-  /** Path relative to the mm3-lm-adapters root — what the request carries. */
-  file: string;
-  name?: string;
-  trigger?: string;
-  /** false when the run recorded a trigger it never trained. Absent on every
-   *  sidecar written before the field existed, and absent means trained. */
-  triggerPrepend?: boolean;
-  rank?: number;
-  dataset?: string;
-  encoder?: string;
-  trainedSteps?: number;
-  recommendedScales?: Partial<Mm3LmAdapterScales>;
-  notes?: string;
-}
-
-interface Mm3LmAdapterCatalogue {
-  adapters: Mm3LmAdapterEntry[];
-  defaultScales: Mm3LmAdapterScales;
-  dir: string;
-}
-
 /** Matches MM3_LM_ADAPTER_DEFAULT_SCALES server-side; used only until the
  *  catalogue lands (or if it fails to), so the sliders are never NaN. */
 const FALLBACK_SCALES: Mm3LmAdapterScales = {
@@ -90,7 +62,7 @@ const FALLBACK_SCALES: Mm3LmAdapterScales = {
 
 /** Fetched once per mount; the list only changes when files are installed. */
 function useMm3LmAdapters() {
-  const query = useQuery(localOptions<Mm3LmAdapterCatalogue>('mm3-adapters', '/mm3/lm-adapters'));
+  const query = useQuery(mm3AdaptersOptions());
   return { data: query.data ?? null, error: query.error?.message ?? null };
 }
 

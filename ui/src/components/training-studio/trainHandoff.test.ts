@@ -54,7 +54,7 @@ test('ACE shell preserves the tensor gate, independent DiT lock, defaults and Au
   const initial = useTrainingStore.getInitialState();
   const original = { ...initial };
   const state = {
-    ...initial, selectedDatasetId: 'ds-1', trainingWorker: null, activeJob: null,
+    ...initial, selectedDatasetId: 'ds-1', trainingWorker: null, activeJobId: null,
     detail: { id: 'ds-1', slug: 'my-set', name: 'My set', builtAt: '2026-10-23', datasetJsonPath: 'dataset.json', samples: [] },
     capabilities: {
       trainLm: { available: true, sizes: ['4B'], lmModels: ['lm-4B-bf16'], defaultLmBySize: { '4B': 'lm-4B-bf16' } },

@@ -8,7 +8,7 @@
 
 import { useCallback, useSyncExternalStore } from 'react';
 import { useBackendStore } from '../../stores/backendStore';
-import { useTrainingStore } from '../../stores/trainingStore';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 import {
   TRAINING_TARGET_STORAGE_KEY, isTargetPinned, parseTargetOverride, resolveTrainingTarget,
   type TrainingTargetOverride,
@@ -57,10 +57,9 @@ export interface TrainingTargetState {
 export function useTrainingTarget(): TrainingTargetState {
   const override = useSyncExternalStore(subscribe, () => current);
   const activeBackendId = useBackendStore(s => s.activeBackendId);
-  const jobKind = useTrainingStore(s => s.activeJob?.kind);
-  const jobStatus = useTrainingStore(s => s.activeJob?.status);
-  const running = jobStatus === 'queued' || jobStatus === 'running';
-  const runningJobKind = running ? jobKind : null;
+  const job = useActiveTrainingJob();
+  const running = job?.status === 'queued' || job?.status === 'running';
+  const runningJobKind = running ? job?.kind : null;
   const target = resolveTrainingTarget({ override, activeBackendId, runningJobKind });
   const set = useCallback((next: TrainingTargetOverride) => setOverride(next), []);
   return { target, override, setOverride: set, locked: isTargetPinned(runningJobKind) };

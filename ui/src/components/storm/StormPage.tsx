@@ -717,10 +717,10 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
             </div>
 
             {/* ── Three-column body ───────────────────────────────── */}
-            <div className="flex-1 flex flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+            <div className="flex-1 flex flex-col overflow-y-auto xl:flex-row xl:overflow-hidden">
 
               {/* Left — Compose */}
-              <div className="w-full lg:w-[380px] shrink-0 lg:overflow-y-auto hide-scrollbar p-4 space-y-3 border-b lg:border-b-0 lg:border-r border-zinc-800/60">
+              <div className="w-full xl:w-[360px] xl:min-w-[220px] xl:shrink xl:overflow-y-auto hide-scrollbar p-4 space-y-3 border-b xl:border-b-0 xl:border-r border-zinc-800/60">
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <ParamLabel label="Style" className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider"
@@ -750,9 +750,9 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
                       info="A trigger word prepended to the style caption. Leave blank to render with no adapter styling." />
                     <input type="text" value={loraTrigger} onChange={e=>setLoraTrigger(e.target.value)}
                       placeholder="trigger word"
-                      className="flex-1 px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-[11px] text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-pink-500/40 transition-colors"/>
+                      className="flex-1 min-w-0 px-2 py-1 rounded bg-zinc-900 border border-zinc-700 text-[11px] text-zinc-200 placeholder:text-zinc-600 outline-none focus:border-pink-500/40 transition-colors"/>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button onClick={()=>setBeatIntro(!beatIntro)}
                       className={`text-[10px] px-2 py-0.5 rounded font-medium transition-colors shrink-0 ${beatIntro ? 'bg-orange-600/30 text-orange-300 border border-orange-600/40' : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 border border-zinc-700'}`}>
                       Beat I/O
@@ -841,7 +841,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
               </div>
 
               {/* Middle — Sampler */}
-              <div className="w-full lg:w-[310px] shrink-0 lg:overflow-y-auto hide-scrollbar p-4 space-y-2.5 border-b lg:border-b-0 lg:border-r border-zinc-800/60">
+              <div className="w-full xl:w-[300px] xl:min-w-[200px] xl:shrink xl:overflow-y-auto hide-scrollbar p-4 space-y-2.5 border-b xl:border-b-0 xl:border-r border-zinc-800/60">
                 <span className="text-[10px] text-zinc-500 uppercase tracking-wider">{isYue2 ? 'YuE2 NAR' : isSa3 ? 'Stable Audio 3' : 'Sampler'}</span>
                 {/* YuE2-specific controls */}
                 {isYue2 && (() => {
@@ -1119,7 +1119,7 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
               </div>
 
               {/* Right — Live Controls */}
-              <div className="lg:flex-1 min-w-0 lg:overflow-y-auto hide-scrollbar">
+              <div className="min-w-0 xl:flex-1 xl:min-w-[220px] xl:overflow-y-auto hide-scrollbar">
                 <StormLiveControls
                   sa={sa}
                   lyrics={lyrics}
@@ -1154,14 +1154,14 @@ export const StormPage: React.FC<StormPageProps> = ({ onGenerate, activeJobCount
 
       {/* ── DJ Mode ── */}
       {mode==='dj' && (
-        <div className="flex-1 flex overflow-y-auto lg:overflow-hidden p-4">
-          <div className="flex flex-col lg:flex-row gap-4 w-full lg:h-full">
+        <div className="flex-1 flex overflow-y-auto xl:overflow-hidden p-4">
+          <div className="flex flex-col xl:flex-row gap-4 w-full xl:h-full">
             {/* Deck A */}
             <DeckPanel id="deck-a" label="Deck A" otherCamelot={camelotB} crossfadeGain={gainA}
               onRegister={sa => { deckARef.current = sa; setDeckAKey(sa.detectedKey); }} />
 
             {/* Crossfader center column */}
-            <div className="flex flex-col items-center justify-start pt-4 gap-4 w-full lg:w-48 shrink-0">
+            <div className="flex flex-col items-center justify-start pt-4 gap-4 w-full xl:w-48 shrink-0">
               {/* Camelot compatibility */}
               {camelotA && camelotB && (
                 <div className={`text-center px-3 py-2 rounded-lg border text-xs font-medium ${

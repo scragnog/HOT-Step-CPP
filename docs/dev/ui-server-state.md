@@ -153,9 +153,7 @@ completion or reconnect calls `queryManager.songs.views(client)` (or names the
 `song:written` event in a `writeAndInvalidate` plan), or passes `SONG_VIEWS`
 as a reconnect list, rather than naming feeds itself. An area may also edit
 its own feed in place first. `queryManager.sidecars.all(client)` refreshes
-lyric sidecars after a crop or retranscription. The older names
-`invalidateSongViews` and `invalidateSidecars` still exist as re-exports of
-those two groups until the P6 re-org in tanstack-query.md removes them.
+lyric sidecars after a crop or retranscription.
 
 `sharedKeys.songs()` is auth-scoped: read `token` and `sessionEpoch` from
 `useAuth()`, build the key in render and gate the query on the token
@@ -186,7 +184,7 @@ the policy above; aborts never surface; a request can opt out with
 `ClientOptions.silent`. Multipart `upload()` stays on XHR for its progress
 events and `streamEvents()` stays on fetch, and both report failures through
 the same `handleFailure`. The filters and status messages are in
-[tanstack-query.md](tanstack-query.md#global-error-filtering-in-the-response-interceptor).
+[tanstack-query.md](tanstack-query.md#errors).
 
 Every read in `api.ts` takes a trailing `opts?: ReadOptions` (`{ signal }`).
 Positional callers are unchanged, songs are still normalized, and errors are
@@ -262,14 +260,12 @@ useEffect(() => bridgeEvents(queryClient, {
 
 ## Sanctioned exceptions
 
-Three unusual patterns are deliberate. They stay, and new code copies them
-only for the same reason.
-
-| Pattern | Where | Why it stays |
-|---|---|---|
-| A disabled query as a stream's cache slot: `enabled: false`, a `queryFn` that never runs, `initialData: []` | `components/model-manager/useDownloadStream.ts:16–19`, key `global-models/downloads` | The download SSE bridge (`queries/global-models/downloads.ts`) replaces the whole entry with each validated frame, so there is no snapshot to fetch |
-| A read-only POST with its request body in the key's `filters` (a "queryable POST") | `services/yue2CoverApi.ts:199–203`, `cover-lyrics/cover` for `/source-metadata` and `/sections/review` | An idempotent read that needs a body. Every distinct body is a new cache entry until `gcTime` reaps it, so the body should hold only fields that change the answer |
-| A `useQuery` mounted only for its side effect, with its result unused | `components/global-bar/BackendToggle.tsx:32` (`global-models/backends`), `components/global-bar/MonitorBar.tsx:29` (`global-models/monitor`) | The observer keeps the entry fetched, and the monitor polled, for the store projections that read it (`backendStore`, `vstChainStore`). The entry's liveness follows the component's mount |
+The single exception list is owned by
+[tanstack-query.md §Sanctioned exceptions](tanstack-query.md#sanctioned-exceptions-change-the-doc-before-fixing-one).
+Three of its rows started here as architectural patterns: the disabled query as
+a stream's cache slot, the queryable POST, and the side-effect-only observer.
+New code copies one only for the same reason, and changing a row starts in that
+table.
 
 ## Consumer manifest
 
@@ -299,7 +295,7 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 
 | File | Area | Services | fetch | SSE | Timers | Disposition |
 |---|---|---|---|---|---|---|
-| `App.tsx` | shell-queue | api, sharedEventSource | 7 | 1 | 2 | Query library; liveness transport, commands, log stream |
+| `App.tsx` | shell-queue | api, sharedEventSource | 7 | 1 | 2 | Query library; liveness transport, commands, log stream, queue projection observer |
 | `audio/peaksClient.ts` | shell-queue | - | 1 | - | - | Query: shared `peaks`; failures uncached, `forgetPeaks` removes the entry (R5) |
 | `components/assistant/AssistantPanel.tsx` | studios | assistantApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/cover-studio/ArtistSettingsPanel.tsx` | cover-lyrics | lireekApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
@@ -359,7 +355,7 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `components/player/TrimControls.tsx` | shell-queue | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/repaint-studio/RepaintStudio.tsx` | studios | api, repaintLayerWorkflowApi, studioDraftMirror, workflowApi | 1 | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/settings/DataFolderPanel.tsx` | shell-queue | dataFolderApi | 1 | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/settings/SettingsPanel.tsx` | shell-queue | api, lireekApi, stemStudioApi | 2 | - | - | Query consumer; forms/commands/streams stay client-owned |
+| `components/settings/SettingsPanel.tsx` | shell-queue | api, lireekApi, stemStudioApi | 2 | - | - | Query consumer; env draft/save/restart lifecycle delegated to `useEnvSettingsForm` |
 | `components/shared/FileBrowserModal.tsx` | shell-queue | api | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/shared/LatentImport.tsx` | shell-queue | - | 1 | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/shared/PresetSyncNotices.tsx` | shell-queue | presetCollection | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
@@ -404,7 +400,7 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `components/training-studio/TrainDitForm.tsx` | training-runs | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/training-studio/TrainLmForm.tsx` | training-runs | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/training-studio/TrainPanel.tsx` | training-runs | trainingApi, trainingRecipesApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/TrainingRunStats.tsx` | training-runs | - | - | - | 1 | Client/types/props or scoped store projection; no independent HTTP read |
+| `components/training-studio/TrainingRunStats.tsx` | training-runs | - | - | - | - | Active job read from the job cache via `useActiveTrainingJob`; no independent HTTP read |
 | `components/training-studio/TrainingWorkerBar.tsx` | training-data | trainingApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
 | `components/training-studio/WorkersPanel.tsx` | training-runs | trainingApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
 | `components/training-studio/Yue2AitkTrainCard.tsx` | training-runs | api, preferencesApi, sharedEventSource, trainingApi, trainingOperations, trainingPreparationApi | - | 1 | 5 | Query consumer; forms/commands/streams stay client-owned |
@@ -419,7 +415,6 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `components/training-studio/Yue2TrainStages.tsx` | training-runs | trainingPreparationApi | - | - | 1 | Query consumer; forms/commands/streams stay client-owned |
 | `components/training-studio/sendAuditionToCustomGen.ts` | training-data | trainingApi, trainingOperations | 1 | - | - | Query: local `training-data/dataset` revision read (R2); explicit draft command |
 | `components/training-studio/useMm3Status.ts` | training-runs | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/useTrainingStream.ts` | training-data | sharedEventSource, trainingApi | - | 1 | - | Shared SSE; scoped Query job refresh |
 | `components/training-studio/useYue2ArStatus.ts` | training-runs | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/training-studio/useYue2Status.ts` | training-runs | trainingApi | - | - | - | Query consumer; forms/commands/streams stay client-owned |
 | `components/training-studio/yue2ChartData.ts` | training-data | trainingApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
@@ -463,7 +458,7 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `services/trainingReviewApi.ts` | training-runs | trainingApi, trainingOperations | - | - | - | Transport; area Query caller owns reads, commands/streams explicit |
 | `services/workflowApi.ts` | shell-queue | - | 2 | - | - | Transport; area Query caller owns reads, commands/streams explicit |
 | `services/yue2CoverApi.ts` | cover-lyrics | - | 1 | - | - | Query-backed reads; commands/working-copy reducers |
-| `stores/audioGenQueueStore.ts` | shell-queue | api, audioQueueApi, lireekApi, workflowApi | 1 | - | 1 | Query reads; client executor/scheduler and media transport |
+| `stores/audioGenQueueStore.ts` | shell-queue | api, audioQueueApi, lireekApi, workflowApi | 1 | - | - | Query reads and the queue-snapshot reducer; client executor/scheduler and media transport |
 | `stores/audioQueueStoreTestFake.ts` | shell-queue | preferencesTestFake | - | - | - | Test fake; excluded from production |
 | `stores/backendStore.ts` | global-models | - | 5 | - | - | Query exact-key projections and selection commands |
 | `stores/coverStemsStore.ts` | cover-lyrics | supersepApi | - | - | - | Query separation waiter; client execution/mixer |
@@ -488,6 +483,7 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `queries/global-models/presets.ts` | global-models | preferencesApi, workflowApi | - | - | - | Query owner/policy; area contract applies |
 | `queries/shell-queue/preferences.ts` | shell-queue | preferencesApi, workflowApi | - | - | - | Query owner/policy; area contract applies |
 | `queries/shell-queue/queue.ts` | shell-queue | api, audioQueueApi, httpClient | - | - | - | Query owner/policy; area contract applies |
+| `queries/shell-queue/projection.ts` | shell-queue | - | - | - | - | Query owner: dynamic `refetchInterval` for the server audio queue; `applyServerItems` reconciles snapshots |
 | `queries/shell-queue/settings.ts` | shell-queue | api, dataFolderApi, stemStudioApi | - | - | - | Query owner/policy; area contract applies |
 | `queries/shell-queue/songs.ts` | shell-queue | api | - | - | - | Query owner/policy; area contract applies |
 | `queries/studios/lyrics.ts` | studios | httpClient | 1 | - | - | Query owner/policy; area contract applies |
@@ -497,17 +493,17 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `queries/studios/workflows.ts` | studios | httpClient, workflowApi | - | - | - | Query owner/policy; area contract applies |
 | `queries/training-data/queries.ts` | training-data | api, trainingApi, trainingPreparationApi | - | - | - | Query owner/policy; area contract applies |
 | `queries/training-runs/events.ts` | training-runs | trainingApi | - | - | - | Query owner/policy; area contract applies |
-| `queries/training-runs/hooks.ts` | training-runs | trainingApi | - | - | - | Query owner/policy; area contract applies |
+| `queries/training-runs/hooks.ts` | training-runs | trainingApi | 1 | - | - | Query owner/policy; `useTrainingJobProjection` owns the active job's stream and cache, `useActiveTrainingJob` reads that cache, and the YuE2 chart cards keep their own metric-only subscription |
 | `queries/training-runs/queries.ts` | training-runs | api, trainingApi, trainingOperations, trainingPreparationApi, trainingRecipesApi, trainingReviewApi | - | - | - | Query owner/policy; area contract applies |
 | `stores/playbackStore.ts` | shell-queue | - | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `utils/mm3CaptionSource.ts` | shell-queue | - | - | - | - | Query-backed lireek read; client caption assembly |
 | `utils/paramProfiles.ts` | shell-queue | - | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `queries/shell-queue/lyrics.ts` | shell-queue | - | 1 | - | - | Query owner for shared `lrc`/`lyrics-json` (R5); owner and transport for shared `score-abc` |
-| `components/compare-studio/CompareStudio.tsx` | studios | compareApi | - | - | - | Open: song search calls `compareApi` directly and session state comes from `stores/compareStore.ts`; no Query owner ([tanstack-query.md](tanstack-query.md) F3) |
-| `components/compare-studio/DiffTrace.tsx` | studios | compareApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/compare-studio/SessionView.tsx` | studios | compareApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/compare-studio/TakeRow.tsx` | studios | compareApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
-| `components/compare-studio/useAbEngine.ts` | studios | - | 1 | - | - | Binary audio transport for the A/B engine's takes |
+| `components/compare-studio/CompareStudio.tsx` | compare | compareApi | - | - | - | Query consumer: sessions, session detail and library search; create/delete are mutations |
+| `components/compare-studio/DiffTrace.tsx` | compare | compareApi | - | - | - | Props only; the parent owns the diff query |
+| `components/compare-studio/SessionView.tsx` | compare | compareApi | - | - | - | Query consumer: per-take `analysis` and the active `diff`; archive/delete are mutations |
+| `components/compare-studio/TakeRow.tsx` | compare | compareApi | - | - | - | Query consumer: score and remove-take mutations over the session cache |
+| `components/compare-studio/useAbEngine.ts` | compare | - | 1 | - | - | Binary audio transport for the A/B engine's takes |
 | `components/cover-studio/PrepareLyrics.tsx` | cover-lyrics | yue2CoverApi | - | - | - | Client/types/props or scoped store projection; no independent HTTP read |
 | `components/cover-studio/PrepareStructure.tsx` | cover-lyrics | yue2CoverApi | - | - | 1 | Client/types/props; the interval loops a recording's playback window, no server reads |
 | `components/cover-studio/SectionPlayback.tsx` | cover-lyrics | - | - | - | 2 | Client audio playback timers; no server reads |
@@ -524,7 +520,10 @@ had no row. Of the listed files only `hooks/usePolling.ts` no longer exists.
 | `queries/sa3-previews/queries.ts` | training-runs | sa3PreviewApi | - | - | - | Query owner/policy; area contract applies |
 | `queries/writes.ts` | foundation | httpClient | - | - | - | Query owner/policy: shared write helpers (`writeAndInvalidate`, `useUpload`) |
 | `services/axiosClient.ts` | foundation | apiError | 1 | - | - | Transport: the axios instance, its fetch adapter and the global error catch |
-| `services/compareApi.ts` | studios | httpClient | - | - | - | Transport; its reads have no Query caller yet (`stores/compareStore.ts`) |
+| `services/compareApi.ts` | compare | httpClient | - | - | - | Transport; `queries/compare` owns the reads and commands |
 | `services/sa3PreviewApi.ts` | training-runs | httpClient | - | - | - | Transport; area Query caller owns reads, commands/streams explicit |
 | `services/updatesApi.ts` | shell-queue | httpClient | - | - | - | Transport; area Query caller owns reads, commands/streams explicit |
-| `stores/compareStore.ts` | studios | compareApi | - | - | - | Open: session list, session, analysis and diff reads held in a hand-rolled store, not Query ([tanstack-query.md](tanstack-query.md) F3) |
+| `queries/compare/queries.ts` | compare | compareApi | - | - | - | Query owner for sessions, session detail, picker search, analysis and diff |
+| `queries/compare/writes.ts` | compare | compareApi | - | - | - | Query owner: compare commands and the optimistic score cache follow-up |
+| `components/training-studio/useHeartmulaController.ts` | training-data | trainingApi | - | - | - | Query consumer (`training-data/heartmula-status`, `heartmula-previews`); prepare/train/batch are commands, the preview retry is a mutation |
+| `components/settings/useEnvSettingsForm.ts` | shell-queue | api | - | - | - | Query consumer (`shell-queue/env`, GPUs) and mutation owner (save/restart); draft seeded only while clean, `queryManager.env.values` invalidates |

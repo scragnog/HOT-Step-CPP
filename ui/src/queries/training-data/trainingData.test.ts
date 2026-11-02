@@ -188,14 +188,15 @@ test('a terminal stream event invalidates the worker scope once, replay included
   });
   setTrainingWorker('A');
   useTrainingStore.setState({
-    trainingWorker: 'A', selectedDatasetId: 'd',
-    activeJob: { id: 'job-term', kind: 'label', status: 'running' } as never,
+    trainingWorker: 'A', selectedDatasetId: 'd', activeJobId: 'job-term',
   });
+  queryClient.setQueryData(trainingQueries.job('A', 'job-term').queryKey,
+    { id: 'job-term', kind: 'label', status: 'done' } as never);
   await queryClient.query(trainingQueries.lsGenerations('A', 'd'));
   await queryClient.query(trainingQueries.lsGenerations('B', 'd'));
-  const apply = useTrainingStore.getState().applyStreamEvent;
-  apply({ type: 'status', status: 'done' });
-  apply({ type: 'status', status: 'done' }); // replayed on reconnect
+  const terminal = useTrainingStore.getState().jobTerminal;
+  terminal('job-term');
+  terminal('job-term'); // replayed on reconnect
   await tick(); await tick();
   const stateOf = (w: string) => queryClient.getQueryState(trainingQueries.lsGenerations(w, 'd').queryKey);
   assert.equal(stateOf('A')?.isInvalidated, true);
@@ -217,7 +218,7 @@ test('a job started on A is not adopted once the studio is on B', async () => {
   useTrainingStore.setState({ trainingWorker: 'B', selectedDatasetId: null });
   srv.release(`${A}/datasets/d/label`);
   await start;
-  assert.equal(useTrainingStore.getState().activeJob, null);
+  assert.equal(useTrainingStore.getState().activeJobId, null);
   assert.ok(!srv.calls.includes(`${A}/jobs/j1`), 'no adoption read for a scope that is gone');
 });
 

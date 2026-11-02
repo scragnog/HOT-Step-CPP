@@ -205,8 +205,16 @@ async function request<T>(path: string, init?: RequestInit, clientOpts?: ClientO
   const opts = { signal: init.signal ?? undefined, ...clientOpts };
   const body = init.body ? JSON.parse(String(init.body)) : undefined;
   if (path === '/source-metadata' || path === '/sections/review') {
+    // Queryable POST: only the body fields that change the answer belong in
+    // the cache key. `sourceLabel`, `force` and `abc` are request hints for
+    // /source-metadata (the lookup ignores them), so keying on the whole body
+    // would create a second entry for the same song. /sections/review reads
+    // exactly abc + lyrics.
+    const filters = path === '/source-metadata'
+      ? { songId: body?.songId, sourceAudioUrl: body?.sourceAudioUrl }
+      : { abc: body?.abc, lyrics: body?.lyrics };
     return queryClient.query({
-      queryKey: serverKey('cover-lyrics/cover', { auth: true, id: path, filters: body }),
+      queryKey: serverKey('cover-lyrics/cover', { auth: true, id: path, filters }),
       queryFn: ({ signal }) => apiClient.post<T>(url, body, { signal: opts.signal ? AbortSignal.any([signal, opts.signal]) : signal }),
     });
   }

@@ -35,6 +35,7 @@ import { Mm3RunsPanel } from './Mm3RunsPanel';
 import { useMm3Status } from './useMm3Status';
 import { TrainingChart } from './TrainingChart';
 import { TrainingPreviewSettings } from './TrainingPreviewPanel';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
@@ -151,7 +152,7 @@ const NumField: React.FC<{
 
 export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = ({ datasetId, trigger }) => {
   const { t } = useTranslation();
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
   const startMm3TrainLm = useTrainingStore(s => s.startMm3TrainLm);
   // Which codes cache this run trains on. Off = the standard cache, exactly as
   // every run before the launder gate existed.

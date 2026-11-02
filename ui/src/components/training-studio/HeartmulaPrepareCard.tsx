@@ -5,7 +5,7 @@ import type { HeartmulaPrepareRequest, HeartmulaPrepareStatus } from '../../../.
 import { Toggle } from '../shared/Toggle';
 import { Yue2StageCard } from './Yue2StageCard';
 import { JobProgress } from './JobProgress';
-import { useTrainingStore } from '../../stores/trainingStore';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 export interface HeartmulaPrepareCardProps {
   datasetId?: string;
@@ -19,7 +19,7 @@ export interface HeartmulaPrepareCardProps {
 export function HeartmulaPrepareCard({ datasetId, status, busy, preparing, blockedReason, onPrepare }: HeartmulaPrepareCardProps) {
   const { t } = useTranslation();
   const [force, setForce] = useState(false);
-  const job = useTrainingStore(s => s.activeJob);
+  const job = useActiveTrainingJob();
   const mine = job?.kind === 'heartmula-prepare' && (!datasetId || job.datasetId === datasetId);
   const ready = status.cacheValid && status.staleSamples === 0 && status.preparedSamples > 0;
   return <Yue2StageCard icon={<Database size={16} className="text-amber-500" />}

@@ -26,6 +26,7 @@ import { useTrainingStore } from '../../stores/trainingStore';
 import { AuditionPlayer } from './AuditionPlayer';
 import { JobProgress } from './JobProgress';
 import { LmAdapterPicker, type LmAdapterOption } from './LmAdapterPicker';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const FIELD = 'w-full rounded-lg px-3 py-2 text-xs bg-zinc-100 dark:bg-black/20 border border-zinc-300 dark:border-white/10 text-zinc-800 dark:text-zinc-200 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-amber-500 disabled:opacity-50';
@@ -70,7 +71,7 @@ export const AuditionCard: React.FC<AuditionCardProps> = ({ milestoneRequest }) 
   const capabilities = useTrainingStore(s => s.capabilities);
   const detail = useTrainingStore(s => s.detail);
   const selectedDatasetId = useTrainingStore(s => s.selectedDatasetId);
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
   const trainLmStatus = useTrainingStore(s => s.trainLmStatus);
   const trainDitStatus = useTrainingStore(s => s.trainDitStatus);
   const auditions = useTrainingStore(s => s.auditions);

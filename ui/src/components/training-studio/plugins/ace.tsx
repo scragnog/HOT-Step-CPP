@@ -10,7 +10,6 @@ import {
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { trainingQueries } from '../../../queries/training-data/queries';
-import { useRunEvents } from '../../../queries/training-runs/hooks';
 import { runQueries } from '../../../queries/training-runs/queries';
 import type { TrainDitOptions, TrainLmOptions } from '../../../services/trainingApi';
 import { assertRecipeWorker, resolveTrainingRecipe } from '../../../services/trainingRecipesApi';
@@ -23,8 +22,8 @@ import { TRAIN_DIT_LOKR_DEFAULTS, TrainDitForm, type TrainDitFormState } from '.
 import { TrainingChart } from '../TrainingChart';
 import { TrainingRunStats } from '../TrainingRunStats';
 import { TRAIN_LM_DEFAULTS, TrainLmForm, type TrainLmFormState } from '../TrainLmForm';
-import { useTrainingStream } from '../useTrainingStream';
 import { aceDitRecipeInput, aceLmRecipeInput, resolveTrainGate } from '../trainGates';
+import { useActiveTrainingJob } from '../../../queries/training-runs/hooks';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const STATUS_RELOAD_DEBOUNCE_MS = 400;
@@ -44,7 +43,7 @@ export const AceTrainingPage: React.FC = () => {
   const datasets = useTrainingStore(s => s.datasets);
   const detail = useTrainingStore(s => s.detail);
   const selectedDatasetId = useTrainingStore(s => s.selectedDatasetId);
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
   const storeError = useTrainingStore(s => s.error);
   const trainLmEpochs = useTrainingStore(s => s.trainLmEpochs);
   const trainLmLast = useTrainingStore(s => s.trainLmLast);
@@ -108,14 +107,9 @@ export const AceTrainingPage: React.FC = () => {
   const tl = capabilities?.trainLm;
   const jobKind = activeJob?.kind;
   const jobStatus = activeJob?.status;
-  const jobId = activeJob?.id;
   const jobActive = jobStatus === 'queued' || jobStatus === 'running';
   const trainJobActive = jobKind === 'train-lm' && jobActive;
   const ditJobActive = jobKind === 'train-dit' && jobActive;
-
-  // The dataset phase mounts the stream inside DatasetDetail, which is not
-  // rendered here — without this the progress bar and loss curve never move.
-  useTrainingStream(jobActive && jobId ? jobId : null);
 
   // The adapter defaults to the dataset's own slug (L12), re-seeded whenever a
   // different dataset is opened.
@@ -144,8 +138,6 @@ export const AceTrainingPage: React.FC = () => {
   const trainDitLoading = ditQuery.isPending;
   const statusPending = lmQuery.isPending || lmSize !== debounced.lmSize || adapterName !== debounced.adapterName;
   const ditStatusPending = ditQuery.isPending || ditAdapterName !== debounced.ditAdapterName;
-  useRunEvents(jobId, trainingWorker);
-
   const patchForm = (patch: Partial<TrainLmFormState>) => setForm(f => ({ ...f, ...patch }));
   const patchDitForm = (patch: Partial<TrainDitFormState>) => setDitForm(f => ({ ...f, ...patch }));
 

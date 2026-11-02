@@ -84,11 +84,14 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
   const jobBadge = useJobBadge();
   const available = useStudioAvailable();
   return (
-    <nav className="flex-1 flex flex-col gap-2 w-full px-3">
+    <nav className="flex-1 flex flex-col min-h-0 w-full min-w-0">
+      {/* Items scroll on short screens; the account/actions footer below stays
+          pinned so Theme/Assistant/Restart/Quit are always reachable. */}
+      <div className="flex-1 min-h-0 overflow-y-auto sidebar-scroll flex flex-col gap-2 short:gap-1 w-full min-w-0 px-3 pb-2">
       {/* ── Create section — framed by purple bars ── */}
-      {isExpanded && <div className="h-[3px] bg-purple-500/40 mx-1 mt-1" />}
+      {isExpanded && <div className="h-[3px] flex-shrink-0 bg-purple-500/40 mx-1 mt-1" />}
       {isExpanded && (
-        <div className="text-center -mb-1">
+        <div className="text-center -mb-1 flex-shrink-0">
           <span className="text-[1.2rem] font-bold text-purple-400 tracking-wide">{t('sidebar.createSection')}</span>
         </div>
       )}
@@ -107,9 +110,9 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
         isExpanded={isExpanded}
         badge={jobBadge}
       />
-      {isExpanded && <div className="h-[3px] bg-purple-500/40 mx-1" />}
-      {!isExpanded && <div className="h-px bg-white/5 mx-2" />}
-      <div className={isExpanded ? 'mb-1' : 'mb-0'} />
+      {isExpanded && <div className="h-[3px] flex-shrink-0 bg-purple-500/40 mx-1" />}
+      {!isExpanded && <div className="h-px flex-shrink-0 bg-white/5 mx-2" />}
+      <div className={`flex-shrink-0 ${isExpanded ? 'mb-1' : 'mb-0'}`} />
       <NavItem
         icon={<Library size={20} />}
         label={t('sidebar.library')}
@@ -204,40 +207,43 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
         onClick={() => onNav('settings')}
         isExpanded={isExpanded}
       />
+      </div>
 
-      {onToggleTheme && (
-        <button onClick={onToggleTheme}
-          className={`w-full rounded-xl flex items-center gap-3 transition-all duration-200
-            ${isExpanded ? 'px-3 py-2.5 justify-start' : 'aspect-square justify-center'}
-            text-zinc-500 hover:text-black dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5`}
-          title={theme === 'dark' ? t('sidebar.theme.switchToLight') : t('sidebar.theme.switchToDark')}>
-          <div className="flex-shrink-0">
-            {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-          </div>
-          {isExpanded && <span className="text-sm font-medium whitespace-nowrap">
-            {theme === 'dark' ? t('sidebar.theme.lightMode') : t('sidebar.theme.darkMode')}
-          </span>}
-        </button>
-      )}
-
-      <div className="mt-auto flex flex-col gap-2">
+      {/* Pinned footer — always on screen, even when the nav list scrolls. */}
+      <div className={`flex-shrink-0 w-full min-w-0 px-3 pt-2 border-t border-zinc-200/70 dark:border-white/5 flex flex-col gap-2 ${isExpanded ? 'short:grid short:grid-cols-4 short:gap-1' : 'short:grid short:grid-cols-2 short:gap-1'}`}>
+        {onToggleTheme && (
+          <button onClick={onToggleTheme}
+            className={`w-full flex-shrink-0 rounded-xl flex items-center gap-3 transition-all duration-200
+              ${isExpanded ? 'px-3 py-2.5 short:py-1.5 justify-start short:justify-center short:px-0' : 'aspect-square justify-center'}
+              text-zinc-500 hover:text-black dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5`}
+            title={theme === 'dark' ? t('sidebar.theme.switchToLight') : t('sidebar.theme.switchToDark')}
+            aria-label={theme === 'dark' ? t('sidebar.theme.switchToLight') : t('sidebar.theme.switchToDark')}>
+            <div className="flex-shrink-0">
+              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+            </div>
+            {isExpanded && <span className="text-sm font-medium truncate min-w-0 short:hidden">
+              {theme === 'dark' ? t('sidebar.theme.lightMode') : t('sidebar.theme.darkMode')}
+            </span>}
+          </button>
+        )}
 
         {/* Assistant toggle */}
         {onToggleAssistant && (
           <button
             onClick={onToggleAssistant}
             className={`
-              w-full rounded-xl flex items-center gap-3 transition-all duration-200
-              ${isExpanded ? 'px-3 py-2.5 justify-start' : 'aspect-square justify-center'}
+              w-full flex-shrink-0 rounded-xl flex items-center gap-3 transition-all duration-200
+              ${isExpanded ? 'px-3 py-2.5 short:py-1.5 justify-start short:justify-center short:px-0' : 'aspect-square justify-center'}
               ${showAssistant
                 ? 'bg-violet-500/10 text-violet-400 hover:bg-violet-500/15'
                 : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-white/5'}
             `}
             title={showAssistant ? t('sidebar.assistant.hide') : t('sidebar.assistant.show')}
+            aria-label={showAssistant ? t('sidebar.assistant.hide') : t('sidebar.assistant.show')}
           >
             <div className="flex-shrink-0"><Sparkles size={20} /></div>
             {isExpanded && (
-              <span className="text-sm font-medium whitespace-nowrap">{t('sidebar.assistant.label')}</span>
+              <span className="text-sm font-medium truncate min-w-0 short:hidden">{t('sidebar.assistant.label')}</span>
             )}
           </button>
         )}
@@ -247,14 +253,15 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
           <button
             onClick={onRestart}
             className={`
-              w-full rounded-xl flex items-center gap-3 transition-all duration-200 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10
-              ${isExpanded ? 'px-3 py-2.5 justify-start' : 'aspect-square justify-center'}
+              w-full flex-shrink-0 rounded-xl flex items-center gap-3 transition-all duration-200 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10
+              ${isExpanded ? 'px-3 py-2.5 short:py-1.5 justify-start short:justify-center short:px-0' : 'aspect-square justify-center'}
             `}
             title={t('sidebar.restartTitle')}
+            aria-label={t('sidebar.restartTitle')}
           >
             <div className="flex-shrink-0"><RotateCcw size={20} /></div>
             {isExpanded && (
-              <span className="text-sm font-medium whitespace-nowrap">{t('sidebar.restart')}</span>
+              <span className="text-sm font-medium truncate min-w-0 short:hidden">{t('sidebar.restart')}</span>
             )}
           </button>
         )}
@@ -263,14 +270,15 @@ const SidebarNav: React.FC<SidebarNavProps> = ({
         <button
           onClick={onQuit}
           className={`
-            w-full rounded-xl flex items-center gap-3 transition-all duration-200 text-red-400 hover:text-red-300 hover:bg-red-500/10
-            ${isExpanded ? 'px-3 py-2.5 justify-start' : 'aspect-square justify-center'}
+            w-full flex-shrink-0 rounded-xl flex items-center gap-3 transition-all duration-200 text-red-400 hover:text-red-300 hover:bg-red-500/10
+            ${isExpanded ? 'px-3 py-2.5 short:py-1.5 justify-start short:justify-center short:px-0' : 'aspect-square justify-center'}
           `}
           title={t('sidebar.quitTitle')}
+          aria-label={t('sidebar.quitTitle')}
         >
           <div className="flex-shrink-0"><Power size={20} /></div>
           {isExpanded && (
-            <span className="text-sm font-medium whitespace-nowrap">{t('sidebar.quit')}</span>
+            <span className="text-sm font-medium truncate min-w-0 short:hidden">{t('sidebar.quit')}</span>
           )}
         </button>
       </div>
@@ -345,9 +353,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           aria-hidden="true"
         />
       {/* ── Mobile overlay drawer — slides in from the left ── */}
-        <div ref={drawerRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Navigation" className="outline-none fixed inset-y-0 left-0 z-50 min-[1024px]:landscape:hidden flex flex-col w-[240px] h-full bg-white dark:bg-suno-sidebar border-r border-zinc-200 dark:border-white/5 py-4 overflow-y-auto hide-scrollbar">
+        <div ref={drawerRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Navigation" className="outline-none fixed inset-y-0 left-0 z-50 min-[1024px]:landscape:hidden flex flex-col w-[240px] h-full bg-white dark:bg-suno-sidebar border-r border-zinc-200 dark:border-white/5 py-4 overflow-hidden hide-scrollbar">
           {/* Close button */}
-          <div className="mb-6 flex items-center justify-between px-3">
+          <div className="mb-6 flex flex-shrink-0 items-center justify-between px-3">
             <span className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Menu</span>
             <button
               className="w-8 h-8 rounded-lg bg-zinc-200 dark:bg-white/5 hover:bg-zinc-300 dark:hover:bg-white/10 flex items-center justify-center transition-all flex-shrink-0"
@@ -357,7 +365,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <X size={16} className="text-zinc-600 dark:text-zinc-400" />
             </button>
           </div>
-          <div className="px-3 mb-4">
+          <div className="px-3 mb-4 flex-shrink-0">
             <BackendToggle />
           </div>
           <SidebarNav
@@ -376,17 +384,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* ── Desktop sidebar — hidden at narrow widths ── */}
       <div className={[
-        'flex flex-col h-full bg-white dark:bg-suno-sidebar border-r border-zinc-200 dark:border-white/5 flex-shrink-0 py-4 overflow-y-auto hide-scrollbar transition-all duration-300',
+        'flex flex-col h-full bg-white dark:bg-suno-sidebar border-r border-zinc-200 dark:border-white/5 flex-shrink-0 py-4 overflow-hidden hide-scrollbar transition-all duration-300',
         'max-[1023px]:hidden portrait:hidden',
         isOpen ? 'w-[200px]' : 'w-[72px]',
       ].join(' ')}>
         {/* Generation engine — directly under the logo (GlobalParamBar) */}
-        <div className="px-3 mb-3">
+        <div className="px-3 mb-3 flex-shrink-0">
           <BackendToggle collapsed={!isOpen} />
         </div>
 
         {/* Collapse / Expand toggle */}
-        <div className={`mb-6 flex items-center ${isOpen ? 'px-3' : 'justify-center'}`}>
+        <div className={`mb-6 flex flex-shrink-0 items-center ${isOpen ? 'px-3' : 'justify-center'}`}>
           <button
             className="w-8 h-8 rounded-lg bg-zinc-200 dark:bg-white/5 hover:bg-zinc-300 dark:hover:bg-white/10 flex items-center justify-center transition-all flex-shrink-0"
             onClick={() => setIsOpen(!isOpen)}
@@ -428,8 +436,8 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick, isExpan
   <button
     onClick={onClick}
     className={`
-      w-full rounded-xl flex items-center gap-3 transition-all duration-200 group relative overflow-hidden
-      ${isExpanded ? 'px-3 py-2.5 justify-start' : 'aspect-square justify-center'}
+      w-full flex-shrink-0 rounded-xl flex items-center gap-3 transition-all duration-200 group relative overflow-hidden
+      ${isExpanded ? 'px-3 py-2.5 short:py-1.5 justify-start' : 'aspect-square justify-center'}
       ${active ? 'bg-zinc-100 dark:bg-white/10 text-black dark:text-white' : 'text-zinc-500 hover:text-black dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5'}
     `}
     title={label}
@@ -437,10 +445,10 @@ const NavItem: React.FC<NavItemProps> = ({ icon, label, active, onClick, isExpan
     {active && <div className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 bg-pink-500 rounded-r-full"></div>}
     <div className="flex-shrink-0">{icon}</div>
     {isExpanded && (
-      <span className="text-sm font-medium whitespace-nowrap">{label}</span>
+      <span className="text-sm font-medium truncate min-w-0">{label}</span>
     )}
     {badge && (isExpanded
-      ? <span className="ml-auto px-1.5 py-0.5 rounded-full bg-pink-500 text-white text-[10px] font-semibold tabular-nums whitespace-nowrap">{badge}</span>
+      ? <span className="ml-auto flex-shrink-0 px-1.5 py-0.5 rounded-full bg-pink-500 text-white text-[10px] font-semibold tabular-nums whitespace-nowrap">{badge}</span>
       : <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-pink-500 animate-pulse" aria-hidden="true" />)}
   </button>
 );

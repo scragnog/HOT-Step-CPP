@@ -48,9 +48,10 @@ the job snapshot. EventSource and its flush timer close on unmount.
 | `insta-gen/InspirePreview.tsx` | Form props and types only |
 | `storm/StormPage.tsx` | Observes the canonical plugins key/read directly; dropdown projection uses `select` |
 | `storm/StormLiveControls.tsx` | LLM generation commands and audio controls |
-| `storm/DriftPanel.tsx` | Not on Query yet: polls `/api/generate/storm/control?streamId=` every 2 s with raw `fetch` into component state while the stream plays, and posts drift changes as commands ([tanstack-query.md](../../../../docs/dev/tanstack-query.md) F3, P4) |
-| `compare-studio/CompareStudio.tsx`, `stores/compareStore.ts` | Not on Query yet: session list, session, take analysis, diff and song search are read with direct `compareApi` calls into a hand-rolled store; scores, takes and archive are commands (tanstack-query.md F3) |
-| `compare-studio/SessionView.tsx`, `TakeRow.tsx`, `DiffTrace.tsx` | Types, store state and store actions (score, remove take); no reads of their own |
+| `storm/DriftPanel.tsx` | Observes `stormDriftOptions()` with a 2 s `refetchInterval` while the stream plays; drift/control posts are silent commands |
+| `compare-studio/CompareStudio.tsx` | Reads `compareQueries.sessions`/`session`/`songSearch`; create and delete are mutations in `queries/compare/writes.ts` |
+| `compare-studio/SessionView.tsx`, `TakeRow.tsx` | Session detail, per-take analysis and the active diff through `queries/compare`; score, remove-take, archive and delete are mutations |
+| `compare-studio/DiffTrace.tsx` | Props only; the parent owns the diff query |
 | `compare-studio/useAbEngine.ts` | Take audio fetched as media for the A/B engine; no snapshot |
 | `storm/AiContinuePresetModal.tsx` | Uses shared `PresetCollection`/`SettingDocument`; their Query adoption belongs to shell-queue's owned service files |
 | `assistant/AssistantPanel.tsx` | Provider query; chat remains a streaming command |

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { localOptions } from '../../queries/global-models/options';
+import { ppVaeOptions, stableStepAdaptersOptions, stableStepOptions } from '../../queries/global-models/options';
 import { usePluginRegistry } from '../../hooks/usePluginRegistry';
 import { useReferenceTracks } from '../../queries/global-models/hooks';
 // PostProcessingDropdown.tsx — Unified post-processing panel for the global bar
@@ -32,6 +32,7 @@ import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { Sa3SamplerControls } from './Sa3SamplerControls';
+import { QueryError } from '../shared/QueryError';
 import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
 
 // LUFS normalization presets
@@ -282,15 +283,13 @@ export const PostProcessingDropdown: React.FC = () => {
   // is a second model and a second forward over the whole track.
   const alignOk = !!capabilities?.features.forcedAlignment;
 
-  const ppVae = useQuery(localOptions<{ available: boolean }>('pp-vae', '/models/pp-vae'));
+  const ppVae = useQuery(ppVaeOptions());
   const ppVaeAvailable = !!ppVae.data?.available;
-  const stableStep = useQuery(localOptions<{
-    available: boolean; backends?: { gguf: boolean }; tokenizer: boolean; ggufWeights: boolean;
-  }>('stablestep', '/models/stablestep'));
+  const stableStep = useQuery(stableStepOptions());
   const stableStepAvailable = !!stableStep.data?.available;
   const stableStepBackends = { gguf: !!stableStep.data?.backends?.gguf };
   const stableStepParts = { tokenizer: stableStep.data?.tokenizer ?? true, ggufWeights: stableStep.data?.ggufWeights ?? true };
-  const sa3Adapters = useQuery(localOptions<{ adapters: Array<{ name: string; sizeMb: number }> }>('sa3-adapters', '/models/stablestep/adapters'));
+  const sa3Adapters = useQuery(stableStepAdaptersOptions());
   const stableStepAdapterList = sa3Adapters.data?.adapters ?? [];
   const ssAdapterState = (name: string) =>
     (gp.stableStepAdapters ?? []).find((a: any) => a.name === name);
@@ -499,6 +498,9 @@ export const PostProcessingDropdown: React.FC = () => {
       )}
 
       {/* 1. PP-VAE Re-encode (only visible when PP-VAE model is available) */}
+      {ppVae.isError && aceCoupledOk && (
+        <QueryError error={ppVae.error} onRetry={() => void ppVae.refetch()} compact />
+      )}
       {ppVaeAvailable && aceCoupledOk && (
         <Accordion
           icon={<AudioWaveform size={14} />}
@@ -546,7 +548,10 @@ export const PostProcessingDropdown: React.FC = () => {
         ) : undefined}
       >
         <div className="space-y-2 mt-2">
-          {!stableStepAvailable && (
+          {stableStep.isError && (
+            <QueryError error={stableStep.error} onRetry={() => void stableStep.refetch()} compact />
+          )}
+          {!stableStepAvailable && !stableStep.isError && (
             <div className="flex items-start gap-2 px-2.5 py-2 rounded-lg bg-sky-500/10 border border-sky-500/20">
               <span className="text-sky-400 text-xs mt-px">ⓘ</span>
               <p className="text-[10px] text-sky-300/80 leading-relaxed">
@@ -627,7 +632,9 @@ export const PostProcessingDropdown: React.FC = () => {
                   <span>Adapters{ssActiveAdapterCount > 0 ? ` (${ssActiveAdapterCount} active)` : ''}</span>
                 </button>
                 {ssAdaptersOpen && (<>
-                {stableStepAdapterList.length === 0 ? (
+                {sa3Adapters.isError ? (
+                  <QueryError error={sa3Adapters.error} onRetry={() => void sa3Adapters.refetch()} compact />
+                ) : stableStepAdapterList.length === 0 ? (
                   <p className="text-[10px] text-zinc-500 leading-relaxed">
                     No StableStep adapters installed — drop adapter .gguf files in
                     <span className="font-mono"> models/sa3-adapters/</span> and reopen this panel.

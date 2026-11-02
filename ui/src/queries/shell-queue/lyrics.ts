@@ -4,7 +4,7 @@
 // Shared keys: every variant of a track (`_mastered`, `_noadapter`, `?_t=`)
 // maps to one sidecar URL, so the lyrics bar and section markers share one
 // read per track. A missing sidecar caches null; failures are not cached.
-// A crop or retranscription rewrites them: invalidateSidecars (keys.ts).
+// A crop or retranscription rewrites them: queryManager.sidecars.all.
 
 import { queryOptions } from '@tanstack/react-query';
 import { fetchLrc } from '../../utils/lrcUtils';

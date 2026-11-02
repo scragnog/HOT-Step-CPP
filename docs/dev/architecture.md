@@ -153,8 +153,8 @@ ownership. R1, R2 and R5 now follow this rule through the shared reads.
 Later changes are not re-audited here. The axios transport (`18897e6c`) moved every
 service file's JSON calls and uploads onto `httpClient.ts`, so the raw fetches left under
 `services/` are the transport itself and three stream readers (assistant chat, the
-lireek SSE helper and workflow events). `components/compare-studio/useAbEngine.ts`,
-`stores/compareStore.ts` and `components/storm/DriftPanel.tsx` were added after the audit
+lireek SSE helper and workflow events). `components/compare-studio/useAbEngine.ts`
+(media transport) and `components/storm/DriftPanel.tsx` were added after the audit
 and fetch directly; they have no disposition yet. Rows below that name raw fetches in
 service files, upload components, MetadataEditorModal or `queries/studios/lyrics.ts`
 describe the audit, not the current code.
@@ -180,7 +180,7 @@ describe the audit, not the current code.
 | `services/sharedEventSource.ts` | Shared EventSource transport with subscription teardown |
 | `components/midi-studio/MidiPlayer.tsx` | Live-note EventSource and 200 ms note-buffer flush timer; terminal notes use Query |
 | `components/midi-studio/midiSynth.ts`, `components/training-studio/TrainingRunStats.tsx`, `utils/heapWatch.ts` | WebAudio scheduling, elapsed-time display and heap sampling intervals; no server reads |
-| `stores/audioGenQueueStore.ts` | Existing projection interval schedules Query reads, 1.5 s active and about 10 s idle. Serialized execution loops and one-second status reuse remain; no extra component poll owner |
+| `stores/audioGenQueueStore.ts` | Executor only: serialized execution loops and one-second status reuse. The server projection cadence lives in `queries/shell-queue/projection.ts` (1.5 s active, about 10 s idle) |
 | `hooks/usePolling.ts` | Removed, with no surviving network callers |
 
 Imperative `getState`/`getSnapshot` reads were also checked. Global-parameter
@@ -189,9 +189,10 @@ are client reads. `backendStore` capability/model fields and VST chain fields
 are Query compatibility projections; `fetchModels` routes through Query.
 Create's backend refusal, Cover/Lyric adapter defaults and queue parameter
 capture consume those projections without starting a second read owner.
-Training's PipelineStageProgress/useTrainingStream capture worker/selection and
-apply the scoped store projection; their job refresh enters Query. Stream
-metrics, preview buffers and pending sample edits remain reducers/client state.
+Training's PipelineStageProgress adopts the running stage into the studio's one
+job projection, which captures worker/selection; its job refresh enters Query.
+Stream metrics, preview buffers and pending sample edits remain
+reducers/client state.
 The preparation executor and run panels share local Query detail/job snapshots.
 
 ### Verification and remaining acceptance
@@ -400,7 +401,7 @@ Every API mount is registered in `server/src/index.ts`. Route files are in
 | Song Builder | `/api/builder` | `songBuilder.ts` | `songBuilder/sectionOps.ts` (section renders run as a workflow kind), `db/database.ts` | `song-builder/` | seed-latent path of `/synth` |
 | STORM (continuous stream) | `/api/generate/storm/*` | `generate.ts` | `storm/slot.ts`, `storm/drift.ts`, `streamSessions/`, `aceClient.ts` | `storm/` | `/synth`, `/yue2/synth`, `/sa3-synth` for ACE, YuE2 and SA3 slots |
 | Stream sessions and recordings | `/api/stream-sessions` | `streamSessions.ts` | `streamSessions/` | `services/streamSessionsApi.ts`, `stores/mm3StreamStore.ts`, `hooks/useStreamAudio.ts` | none of its own |
-| Compare Studio | `/api/compare` | `compare.ts` | `compare/` (`store.ts`, `analyzer.ts`) | `compare-studio/`, `services/compareApi.ts` | none |
+| Compare Studio | `/api/compare` | `compare.ts` | `compare/` (`store.ts`, `analyzer.ts`) | `compare-studio/`, `queries/compare/`, `services/compareApi.ts` | none |
 | MIDI Studio | `/api/midi-studio` | `midiStudio.ts` | `muscriptor.ts`, `midiParser.ts` | `midi-studio/` | `ace-midi` binary |
 | Training Studio | `/api/training` | `training.ts` | `training/*` | `training-studio/` | `ace-train`, `ace-caption`, `/understand` |
 | Training workers (training on another PC) | `/api/workers` (controller), `/api/training/worker` (worker) | `workers.ts` | `training/trainingWorkers.ts`, `training/workerUpdate.ts`, `training/yue2Mirror.ts` | `training-studio/WorkersPanel.tsx`, `training-studio/TrainingWorkerBar.tsx` | none |
@@ -674,7 +675,6 @@ migration. The historical test fake is retained here only to reconcile its row.
 | `components/training-studio/Yue2TrainStages.tsx` | training-runs | Query consumer; forms/commands/streams stay client-owned |
 | `components/training-studio/sendAuditionToCustomGen.ts` | training-data | Local Query dataset revision read; explicit draft command |
 | `components/training-studio/useMm3Status.ts` | training-runs | Query consumer; forms/commands/streams stay client-owned |
-| `components/training-studio/useTrainingStream.ts` | training-data | Shared SSE; scoped Query job refresh |
 | `components/training-studio/useYue2ArStatus.ts` | training-runs | Query consumer; forms/commands/streams stay client-owned |
 | `components/training-studio/useYue2Status.ts` | training-runs | Query consumer; forms/commands/streams stay client-owned |
 | `components/training-studio/yue2ChartData.ts` | training-data | Client/types/props or scoped store projection; no independent HTTP read |
