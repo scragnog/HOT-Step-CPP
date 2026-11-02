@@ -7,6 +7,8 @@
 // DOM hosts and wires their callbacks to the store.
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { viewFromUrl, urlForView } from './app/viewRoutes';
+import { RestartingOverlay, ServerOfflineOverlay } from './app/ServerOverlays';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from './context/AuthContext';
 import { GlobalParamsProvider, useGlobalParams } from './context/GlobalParamsContext';
@@ -101,89 +103,6 @@ import { HiHatParticles } from './components/shared/HiHatParticles';
 import { subscribeEventSource } from './services/sharedEventSource';
 
 // Inlined: the file could not be fetched from a server that has just died.
-import serverOfflineImage from './assets/server-offline.webp?inline';
-/** Derive top-level view from the browser URL */
-function viewFromUrl(path = window.location.pathname): string {
-  if (path.startsWith('/insta-gen')) return 'insta-gen';
-  if (path.startsWith('/lyric-studio')) return 'lyric-studio';
-  if (path.startsWith('/cover-studio')) return 'cover-studio';
-  if (path.startsWith('/stem-studio')) return 'stem-studio';
-  if (path.startsWith('/stem-builder')) return 'stem-builder';
-  if (path.startsWith('/song-builder')) return 'song-builder';
-  if (path.startsWith('/storm')) return 'storm';
-  if (path.startsWith('/midi-studio')) return 'midi-studio';
-  if (path.startsWith('/training-studio')) return 'training-studio';
-  if (path.startsWith('/compare')) return 'compare-studio';
-  if (path.startsWith('/repaint')) return 'repaint';
-  if (path.startsWith('/library')) return 'library';
-  if (path.startsWith('/settings')) return 'settings';
-  return 'create';
-}
-
-/** Map view names to URL paths */
-function urlForView(view: string): string {
-  if (view === 'insta-gen') return '/insta-gen';
-  if (view === 'lyric-studio') {
-    // Restore the last deep URL (artist/album/tab) if we have one
-    try {
-      const saved = localStorage.getItem('hs-lastLyricStudioUrl');
-      if (saved) return saved;
-    } catch { /* ignore */ }
-    return '/lyric-studio';
-  }
-  if (view === 'cover-studio') return '/cover-studio';
-  if (view === 'stem-studio') return '/stem-studio';
-  if (view === 'stem-builder') return '/stem-builder';
-  if (view === 'song-builder') return '/song-builder';
-  if (view === 'storm') return '/storm';
-  if (view === 'midi-studio') return '/midi-studio';
-  if (view === 'training-studio') {
-    // Restore the last deep URL (dataset/phase) if we have one
-    try {
-      const saved = localStorage.getItem('hs-lastTrainingStudioUrl');
-      if (saved) return saved;
-    } catch { /* ignore */ }
-    return '/training-studio';
-  }
-  if (view === 'compare-studio') return '/compare';
-  if (view === 'repaint') return '/repaint';
-  if (view === 'library') return '/library';
-  if (view === 'settings') return '/settings';
-  return '/';
-}
-
-/** Poll after either kind of disconnect, then reload once the server answers. */
-function useServerHealthReload(startDelayMs: number, onWaiting?: () => void, onReconnected?: () => void): void {
-  useEffect(() => {
-    let cancelled = false;
-    let checking = false;
-    let poll: number | undefined;
-    let reload: number | undefined;
-    const start = window.setTimeout(() => {
-      onWaiting?.();
-      poll = window.setInterval(async () => {
-        if (checking) return;
-        checking = true;
-        try {
-          const res = await fetch('/api/health', { signal: AbortSignal.timeout(2000) });
-          if (res.ok && !cancelled) {
-            window.clearInterval(poll);
-            onReconnected?.();
-            reload = window.setTimeout(() => window.location.reload(), 500);
-          }
-        } catch { /* The server is still offline. */ }
-        finally { checking = false; }
-      }, 2000);
-    }, startDelayMs);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(start);
-      window.clearInterval(poll);
-      window.clearTimeout(reload);
-    };
-  }, [startDelayMs, onWaiting, onReconnected]);
-}
-
 // Which recent-songs feed the activity column shows, per view. Views that are
 // not listed — library, settings, training — show every source.
 const ACTIVITY_SOURCE: Record<string, string | undefined> = {
@@ -194,48 +113,6 @@ const ACTIVITY_SOURCE: Record<string, string | undefined> = {
   'repaint': 'repaint',
 };
 
-/** Restarting overlay — polls /api/health and reloads when the server is back */
-const RestartingOverlay: React.FC = () => {
-  const { t } = useTranslation();
-  const [status, setStatus] = useState(t('app.restarting.stopping'));
-  const [dots, setDots] = useState('');
-
-  // Animate dots
-  useEffect(() => {
-    const iv = setInterval(() => {
-      setDots(prev => prev.length >= 3 ? '' : prev + '.');
-    }, 500);
-    return () => clearInterval(iv);
-  }, []);
-
-  const onWaiting = useCallback(() => setStatus(t('app.restarting.waiting')), [t]);
-  const onReconnected = useCallback(() => setStatus(t('app.restarting.reconnected')), [t]);
-  useServerHealthReload(3000, onWaiting, onReconnected);
-
-  return (
-    <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-white dark:bg-black text-zinc-900 dark:text-white">
-      {/* Animated spinner */}
-      <div className="relative mb-8">
-        <div className="w-16 h-16 rounded-full border-4 border-amber-500/20" />
-        <div className="absolute inset-0 w-16 h-16 rounded-full border-4 border-transparent border-t-amber-400 animate-spin" />
-      </div>
-      <h1 className="text-2xl font-bold mb-2">{t('app.restarting.title')}</h1>
-      <p className="text-zinc-600 dark:text-zinc-400 text-lg">{status}{dots}</p>
-      <p className="text-zinc-600 text-sm mt-4">{t('app.restarting.message')}</p>
-    </div>
-  );
-};
-
-const ServerOfflineOverlay: React.FC = () => {
-  useServerHealthReload(0);
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black">
-      <img src={serverOfflineImage} alt="Server offline. Please restart or close tab" className="max-w-[90vw] max-h-[90vh] object-contain" />
-    </div>
-  );
-};
-
-/** Compact A/B comparison bar — shows above the player when both tracks are pinned */
 const ABMiniBar: React.FC = () => {
   const trackA = useABCompareSelector(s => s.trackA);
   const trackB = useABCompareSelector(s => s.trackB);
