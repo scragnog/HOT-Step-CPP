@@ -627,6 +627,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   // The job SSE endpoint replays its buffer, so this also reconstructs the
   // curve after a reload or EventSource reconnect.
   const [stepHistory, setStepHistory] = useState<JointStepPoint[]>([]);
+  const [historyUnavailable, setHistoryUnavailable] = useState(false);
   // The KL stop reading at every step, for the chart: the same computation the
   // engine makes, so the line crosses the target where the run stops.
   // The planner freezes at its KL target: from then on steps carry no loss.
@@ -685,6 +686,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     setLiveMetric(null);
     setChartVram(undefined);
     setStepHistory([]);
+    setHistoryUnavailable(false);
     setMilestones([]);
     setJobLogs([]);
     setShowJobLogs(false);
@@ -696,24 +698,25 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         if (key.startsWith(JOB_KEY) && key.includes(':metrics:') && !key.startsWith(metricKey)) window.localStorage.removeItem(key);
       }
     } catch { /* storage unavailable */ }
-    const saved = readStored<{ steps?: JointStepPoint[]; milestones?: JointMilestone[]; status?: TrainingJobSummary['status'] }>(metricKey, {});
+    const saved = readStored<{ steps?: JointStepPoint[]; milestones?: JointMilestone[]; status?: TrainingJobSummary['status']; historyUnavailable?: boolean }>(metricKey, {});
     if (saved.steps?.length) setStepHistory(saved.steps);
     const savedMilestones = readStored<JointMilestone[]>(`${metricKey}:milestones`, saved.milestones ?? []);
     if (savedMilestones.length) setMilestones(savedMilestones);
     // An uncached finished job needs one replay. Legacy series lack status,
     // so retain their history when the job itself is known terminal.
-    const complete = saved.status ? !isActiveJob({ status: saved.status })
-      : !!saved.steps?.length && !isActiveJob(job);
+    const complete = !saved.historyUnavailable && (saved.status ? !isActiveJob({ status: saved.status })
+      : !!saved.steps?.length && !isActiveJob(job));
     if (complete) return;
     let steps = saved.steps ?? [];
     let points = savedMilestones;
     let status: TrainingJobSummary['status'] = 'running';
+    let unavailable = false;
     let dirty = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const persist = () => {
       clearTimeout(timer);
       timer = undefined;
-      if (!dirty) return;
+      if (!dirty || unavailable) return;
       writeStored(metricKey, { steps, status });
       writeStored(`${metricKey}:milestones`, points);
       dirty = false;
@@ -753,7 +756,21 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           stop();
         }
       } catch { /* Ignore malformed replay frames; polling remains authoritative. */ }
-    }, error: persist }, { isTerminal: data => {
+    }, error: () => {
+      // A failed terminal replay is final, and cannot complete a chart cache.
+      if (!isActiveJob(job)) {
+        stop();
+        unavailable = true;
+        dirty = false;
+        clearTimeout(timer);
+        try {
+          window.localStorage.removeItem(metricKey);
+          window.localStorage.removeItem(`${metricKey}:milestones`);
+        } catch { /* storage unavailable */ }
+        setHistoryUnavailable(true);
+      }
+      persist();
+    } }, { replayOnly: !isActiveJob(job), isTerminal: data => {
       try {
         const item = JSON.parse(data) as TrainingStreamEvent;
         return item.type === 'status' && !['queued', 'running'].includes(item.status);
@@ -1813,6 +1830,9 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           </div>
         </div>
       )}
+      {historyUnavailable && <p className="mt-3 text-xs text-zinc-500">
+        {t('trainingStudio.yue2.method.historyUnavailable', 'Training history for this run is no longer available.')}
+      </p>}
       {jobLogs.length > 0 && <details className="mt-2" open={showJobLogs} onToggle={event => setShowJobLogs(event.currentTarget.open)}>
         <summary className="cursor-pointer text-[11px] text-zinc-600 dark:text-zinc-400">{t('trainingStudio.yue2.method.showLogs', 'Show training log (last 100 lines)')}</summary>
         <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-zinc-950 p-2 text-[10px] leading-4 text-zinc-300 whitespace-pre-wrap">{jobLogs.join('\n')}</pre>

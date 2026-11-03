@@ -387,6 +387,71 @@ export function attachStream(job: TrainingJob, res: Response): void {
   res.on('close', () => job.listeners.delete(res));
 }
 
+/** Recover a finished joint run after its in-memory replay has been lost. */
+export async function attachFinishedJointStream(jobId: string, res: Response): Promise<boolean> {
+  const summary = listJobs().find(job => job.id === jobId);
+  if (!summary || summary.kind !== 'yue2-joint-train' || ['queued', 'running'].includes(summary.status)) return false;
+  const { listYue2AitkRuns } = await import('./yue2AitkRuns.js');
+  const run = listYue2AitkRuns(summary.datasetId).find(run => run.jobId === jobId);
+  if (!run || run.status === 'running') return false;
+  const frames = await finishedJointFrames(run.output, summary);
+  if (!frames.length) return false;
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('X-Accel-Buffering', 'no');
+  for (const frame of frames) res.write(`data: ${JSON.stringify(frame)}\n\n`);
+  for (const checkpoint of run.checkpoints) {
+    res.write(`data: ${JSON.stringify({ type: 'metric', metric: 'milestone', ts: summary.finishedAt ?? summary.createdAt,
+      step: checkpoint.step, loss: checkpoint.loss, path: checkpoint.dir })}\n\n`);
+  }
+  res.end(`data: ${JSON.stringify({ type: 'status', status: summary.status, ...(summary.error ? { error: summary.error } : {}) })}\n\n`);
+  return true;
+}
+
+/** Only server-catalogued directories reach this reader. Segment order and
+ * duplicate-step replacement match a resumed run's training clock. */
+export async function finishedJointFrames(output: string, summary: TrainingJobSummary): Promise<TrainingStreamEvent[]> {
+  const { parseYue2JointEvent } = await import('./yue2JointTrainRunner.js');
+  const dirs = [output];
+  try {
+    for (const entry of (await fs.promises.readdir(path.join(output, 'segments'), { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.isDirectory() && /^segment-\d{6}$/.test(entry.name)) dirs.push(path.join(output, 'segments', entry.name));
+    }
+  } catch { /* unsegmented run */ }
+  const byStep = new Map<number, TrainingStreamEvent & { type: 'metric' }>();
+  let budget = 64 * 1024 * 1024;
+  for (const dir of dirs) {
+    let text: string;
+    try {
+      const file = path.join(dir, 'train.jsonl');
+      const stat = await fs.promises.stat(file);
+      if (!stat.isFile() || stat.size > budget) return [];
+      budget -= stat.size;
+      text = await fs.promises.readFile(file, 'utf8');
+    } catch { continue; }
+    for (const line of text.split(/\r?\n/)) {
+      const event = parseYue2JointEvent(line, summary.total);
+      if (!event || event.step === undefined) continue;
+      const { stage, step, ...metrics } = event;
+      if (stage === 'joint') {
+        byStep.set(step, { type: 'metric', metric: 'step', ts: summary.startedAt ?? summary.createdAt, step, ...metrics });
+      } else if (stage === 'meters') {
+        const raw = JSON.parse(line) as Record<string, unknown>;
+        const prior = byStep.get(step);
+        if (prior) for (const [source, target] of [['nar_recon', 'narRecon'], ['nar_drift', 'narDrift']] as const) {
+          const value = raw[source];
+          if (typeof value === 'number' && Number.isFinite(value)) prior[target] = value;
+        }
+      }
+    }
+  }
+  let trainMs = 0;
+  return [...byStep.values()].sort((a, b) => a.step! - b.step!).map(frame => {
+    trainMs += frame.stepMs ?? 0;
+    return { ...frame, trainMs };
+  });
+}
+
 // ── Persistence (§7.9) ───────────────────────────────────────────────────
 
 /** Replace a job's _meta.json through a temp file and a rename, so a write

@@ -20,6 +20,41 @@ Object.assign(globalThis, { EventSource: FakeEventSource, window: globalThis });
 const { subscribeEventSource } = await import('./sharedEventSource');
 const tick = () => new Promise(r => setTimeout(r, 0));
 
+test('finished replays stop on every 4xx without EventSource or retry', async () => {
+  const original = globalThis.fetch;
+  try {
+    for (const status of [400, 401, 403, 404, 410, 429]) {
+      let requests = 0, failures = 0;
+      const before = FakeEventSource.made.length;
+      globalThis.fetch = async () => { requests++; return new Response(null, { status }); };
+      const stop = subscribeEventSource('/finished', { error: () => { failures++; } }, { replayOnly: true, reconnect: true });
+      await tick(); await tick();
+      assert.equal(requests, 1, String(status));
+      assert.equal(failures, 1);
+      assert.equal(FakeEventSource.made.length, before);
+      stop();
+    }
+  } finally { globalThis.fetch = original; }
+});
+
+test('finished replay parses split SSE frames and closes on terminal status', async () => {
+  const original = globalThis.fetch;
+  const seen: string[] = [];
+  let cancelled = false;
+  globalThis.fetch = async () => new Response(new ReadableStream({
+    start(controller) {
+      for (const chunk of ['data: step\r', '\n\r\ndata: done\n\ndata: ignored\n\n']) controller.enqueue(new TextEncoder().encode(chunk));
+    },
+    cancel() { cancelled = true; },
+  }));
+  const stop = subscribeEventSource('/finished-frames', { message: data => seen.push(data) }, { replayOnly: true, isTerminal: data => data === 'done' });
+  try {
+    await tick();
+    assert.deepEqual(seen, ['step', 'done']);
+    assert.equal(cancelled, true);
+  } finally { stop(); globalThis.fetch = original; }
+});
+
 test('subscribers to one URL share a connection and late ones get the replay', async () => {
   const a: string[] = [], b: string[] = [];
   const stopA = subscribeEventSource('/s1', { message: d => a.push(d) });

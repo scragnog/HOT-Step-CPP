@@ -17,6 +17,23 @@ const restart = async () => {
 
 test.after(() => fs.rmSync(process.env.TRAINING_DIR!, { recursive: true, force: true }));
 
+test('finished joint history recovers segmented metrics, meters and resumed step timing', async () => {
+  const output = path.join(process.env.TRAINING_DIR!, 'replay');
+  const a = path.join(output, 'segments', 'segment-000001');
+  const b = path.join(output, 'segments', 'segment-000002');
+  fs.mkdirSync(a, { recursive: true }); fs.mkdirSync(b, { recursive: true });
+  const metric = (step: number, ms: number) => JSON.stringify({ stage: 'joint', step, ar_ce: 1, ar_kl: 0.5, nar_mse: 2, step_ms: ms });
+  fs.writeFileSync(path.join(a, 'train.jsonl'), [metric(1, 10), metric(2, 99), '{broken'].join('\n'));
+  fs.writeFileSync(path.join(b, 'train.jsonl'), [metric(2, 20), JSON.stringify({ stage: 'meters', step: 2, nar_recon: 0.7, nar_drift: 0.2 })].join('\n'));
+  const job = q.createJob('yue2-joint-train', 'replay-set', [], {});
+  q.finishJob(job, 'done');
+  const frames = await q.finishedJointFrames(output, q.toSummary(job));
+  assert.equal(frames.length, 2);
+  assert.deepEqual(frames.map(frame => frame.type === 'metric' && [frame.step, frame.loss, frame.trainMs]), [[1, 3.1, 10], [2, 3.1, 30]]);
+  assert.equal(frames[1].type === 'metric' && frames[1].narRecon, 0.7);
+  assert.deepEqual(await q.finishedJointFrames(path.join(output, 'missing'), q.toSummary(job)), []);
+});
+
 test('a job is on disk from creation and its running state is kept current', () => {
   const job = q.createJob('build', 'ds-a', [], {});
   const metaOf = () => q.listJobs('ds-a').find(j => j.id === job.id);

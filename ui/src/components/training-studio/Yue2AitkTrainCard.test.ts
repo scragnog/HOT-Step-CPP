@@ -15,7 +15,7 @@ register('data:text/javascript,' + encodeURIComponent(
 Object.assign(globalThis, { React: await import('react') });
 const { createPresetLoadGate, baselineFor, Yue2AitkTrainCard } = await import('./Yue2AitkTrainCard');
 
-async function mountChart(status: TrainingJobSummary['status'], cache?: unknown) {
+async function mountChart(status: TrainingJobSummary['status'], cache?: unknown, replayStatus = 200) {
   const saved = { window: globalThis.window, document: globalThis.document,
     EventSource: globalThis.EventSource, fetch: globalThis.fetch, localStorage: globalThis.localStorage };
   const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>');
@@ -31,6 +31,8 @@ async function mountChart(status: TrainingJobSummary['status'], cache?: unknown)
     static CLOSED = 2; static OPEN = 1;
     readyState = 1;
     onmessage?: (event: { data: string }) => void;
+    onopen?: () => void;
+    onerror?: () => void;
     constructor() { Stream.made.push(this); }
     close() { this.readyState = 2; }
     send(event: unknown) { this.onmessage?.({ data: JSON.stringify(event) }); }
@@ -38,10 +40,24 @@ async function mountChart(status: TrainingJobSummary['status'], cache?: unknown)
   globalThis.EventSource = Stream as unknown as typeof EventSource;
   const job = { id: 'chart-job', datasetId: 'chart-set', kind: 'yue2-joint-train', status,
     createdAt: 1, startedAt: 1, finishedAt: null, total: 10, done: 0, failed: 0, phase: 'train' };
-  globalThis.fetch = async input => new Response(JSON.stringify(String(input).includes('/jobs/chart-job') ? job
+  let replayRequests = 0;
+  globalThis.fetch = async input => {
+    if (String(input).endsWith('/stream')) {
+      replayRequests++;
+      if (replayStatus !== 200) return new Response(null, { status: replayStatus });
+      const stream = new Stream();
+      return new Response(new ReadableStream({
+        start(controller) {
+          stream.onmessage = event => controller.enqueue(new TextEncoder().encode(`data: ${event.data}\n\n`));
+        },
+        cancel() { stream.close(); },
+      }));
+    }
+    return new Response(JSON.stringify(String(input).includes('/jobs/chart-job') ? job
     : { runs: [], previews: [], bases: [], defaults: null, jobs: [job], activeJob: null }), {
     headers: { 'Content-Type': 'application/json' },
   });
+  };
   const client = createQueryClient();
   const root = createRoot(document.getElementById('root')!);
   const render = async (key: string) => {
@@ -53,7 +69,7 @@ async function mountChart(status: TrainingJobSummary['status'], cache?: unknown)
     });
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
   };
-  return { Stream, client, stored, document, render,
+  return { Stream, client, stored, document, render, replayRequests: () => replayRequests,
     cleanup: async () => {
       await act(async () => root.unmount()); client.clear();
       Object.assign(globalThis, saved);
@@ -92,6 +108,19 @@ test('leaving a partial terminal-job replay keeps its cache incomplete', async (
     const cached = JSON.parse(view.stored.get('hs-yue2-aitk-job:chart-set:metrics:chart-job')!);
     assert.equal(cached.status, 'running');
     assert.equal(view.Stream.made.length, 2, 'partial replay must resume on the next visit');
+  } finally { await view.cleanup(); }
+});
+
+test('a terminal stream 404 is final and never persists a complete chart', async () => {
+  const view = await mountChart('done', undefined, 404);
+  try {
+    await view.render('first');
+    assert.equal(view.replayRequests(), 1);
+    assert.equal(view.Stream.made.length, 0, 'terminal replay must not create a reconnecting EventSource');
+    assert.equal(view.stored.has('hs-yue2-aitk-job:chart-set:metrics:chart-job'), false);
+    assert.match(view.document.body.textContent ?? '', /Training history for this run is no longer available/);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    assert.equal(view.replayRequests(), 1, '404 must not retry');
   } finally { await view.cleanup(); }
 });
 

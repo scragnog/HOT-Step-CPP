@@ -387,7 +387,7 @@ Build datasets from your own audio and train adapters on your GPU, for ACE-Step,
 | Quantized-base training | Train against a K-quant or MXFP4 base for a much lower VRAM floor. |
 | Flash-attention training | Fused attention that makes memory linear in sequence length; on by default for the ACE-Step DiT and LM trainers and the MiniMax-Music3 LM trainer. |
 | Target-loss stopping | Stop on a loss target instead of a step count, and continue a stopped run. |
-| Live monitoring | Loss chart, stats and milestone checkpoint badges. |
+| Live monitoring | Loss chart, stats and milestone checkpoint badges. Finished YuE2 joint charts recover from disk after a restart; missing history shows an unavailable message. |
 | YuE2 training charts | Separate AR planner and NAR decoder panels, metric explanations, More series controls and run-configured stop readings across joint, separate and Refine runs. [Details](docs/user/training/yue2.md#reading-the-training-charts) |
 | Audition | Same-seed A/B of base and adapter planner, optionally rendered through the DiT. |
 | Adapter scoring | Evaluation passes put an artist-match score in the planner adapter picker. |

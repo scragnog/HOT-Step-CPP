@@ -679,6 +679,7 @@
     "trainingStudio.yue2.method.ladderTitle": "Checkpoint ladder",
     "trainingStudio.yue2.method.awaitingMirror": "Waiting for the first sync from {{worker}}",
     "trainingStudio.yue2.method.plannerFrozen": "Planner frozen at step {{step}} (KL target reached). The decoder is still training, faster: the loss and KL lines end here, the step counter and pace below keep moving.",
+    "trainingStudio.yue2.method.historyUnavailable": "Training history for this run is no longer available.",
     "trainingStudio.yue2.method.admitting": "Starting joint training…",
     "trainingStudio.yue2.aitkBatch.discard": "Discard batch",
     "trainingStudio.yue2.aitkBatch.start": "Start batch ({{count}})",

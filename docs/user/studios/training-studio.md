@@ -133,7 +133,10 @@ Active job status refreshes while work runs and stops at a terminal state;
 returning to Train, Review or Refine does not repeat a start or audition command.
 The YuE2 Train tab keeps a finished run's chart and stops replaying its history
 once the complete chart is saved. An interrupted first replay resumes on the
-next visit. Finished and approved runs leave Review's "Scored or finished" list.
+next visit. After a server restart, joint runs recover their chart from the
+run folder's training logs. If those logs are unavailable, Train says the
+history is no longer available and does not retry or save an empty chart.
+Finished and approved runs leave Review's "Scored or finished" list.
 Review opens faster by reading the run catalogue once per request for all datasets.
 
 ## Related

@@ -535,10 +535,11 @@ router.delete('/jobs/:jobId', (req: Request, res: Response) => {
   }
 });
 
-router.get('/jobs/:jobId/stream', (req: Request, res: Response) => {
+router.get('/jobs/:jobId/stream', async (req: Request, res: Response) => {
   try {
     const job = queue.getJob(req.params.jobId as string);
     if (!job) {
+      if (await queue.attachFinishedJointStream(req.params.jobId as string, res)) return;
       res.status(404).json({ error: 'Job not found' });
       return;
     }

@@ -63,7 +63,48 @@ function connect(url: string, entry: Entry) {
 
 /** Subscribe to a server-sent event stream, sharing the tab's connection.
  *  `reconnect` reopens the stream after an HTTP error, not only after a drop. */
-export function subscribeEventSource(url: string, sub: Subscriber, opts: { reconnect?: boolean; isTerminal?: (data: string) => boolean } = {}): () => void {
+export function subscribeEventSource(url: string, sub: Subscriber, opts: { reconnect?: boolean; isTerminal?: (data: string) => boolean; replayOnly?: boolean } = {}): () => void {
+  // Finished jobs need a single replay. Native EventSource hides HTTP status
+  // and reports missing history as a console error; fetch lets us handle it.
+  if (opts.replayOnly) {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok || !response.body) throw new Error('History unavailable');
+        if (controller.signal.aborted) return;
+        sub.open?.();
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let pending = '';
+        try {
+          while (!controller.signal.aborted) {
+            const { value, done } = await reader.read();
+            pending += decoder.decode(value, { stream: !done });
+            pending = pending.replace(/\r\n/g, '\n');
+            let boundary: number;
+            while ((boundary = pending.indexOf('\n\n')) >= 0) {
+              const frame = pending.slice(0, boundary);
+              pending = pending.slice(boundary + 2);
+              const data = frame.split('\n').filter(line => line.startsWith('data:'))
+                .map(line => line.slice(5).replace(/^ /, '')).join('\n');
+              if (!data || controller.signal.aborted) continue;
+              const terminal = opts.isTerminal?.(data);
+              sub.message?.(data);
+              if (terminal) return;
+            }
+            if (done) throw new Error('Incomplete history');
+          }
+        } finally {
+          await reader.cancel().catch(() => {});
+          reader.releaseLock();
+        }
+      } catch {
+        if (!controller.signal.aborted) sub.error?.();
+      }
+    })();
+    return () => controller.abort();
+  }
   let entry = entries.get(url);
   if (!entry) {
     entry = { es: null as unknown as EventSource, subs: new Set(), seen: [], reconnect: !!opts.reconnect, isTerminal: opts.isTerminal };
