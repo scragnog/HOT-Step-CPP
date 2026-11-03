@@ -133,3 +133,38 @@ test('a failed GPU read leaves the env form usable instead of blocking it', asyn
     Object.assign(globalThis, saved);
   }
 });
+
+test('reopening Settings seeds the form from the cached env, even when the refetch is unchanged', async () => {
+  const saved = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch };
+  const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>');
+  Object.assign(globalThis, { window, document, IS_REACT_ACT_ENVIRONMENT: true });
+  const env = { values: { A: '1', B: '2' }, restartKeys: [] };
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes('/settings/env')) return json(env);
+    if (url.includes('/settings/gpus')) return json({ gpus: [] });
+    throw new Error(`Unexpected request: ${url}`);
+  }) as typeof fetch;
+
+  // A previous open left the snapshot in the cache; structural sharing keeps
+  // its identity across the unchanged refetch on this mount.
+  const client = createQueryClient();
+  client.setQueryData(envOptions().queryKey, env);
+  client.setQueryData(gpusOptions().queryKey, { gpus: [] });
+  let form!: EnvSettingsForm;
+  function Probe() { form = useEnvSettingsForm(); return null; }
+  const root = createRoot(document.getElementById('root')!);
+  try {
+    await act(async () => {
+      root.render(createElement(QueryClientProvider, { client }, createElement(Probe)));
+    });
+    for (let i = 0; i < 8; i++) await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    assert.equal(form.values.A, '1');
+    assert.equal(form.values.B, '2');
+    assert.equal(form.dirty, false);
+  } finally {
+    await act(async () => root.unmount());
+    client.clear();
+    Object.assign(globalThis, saved);
+  }
+});

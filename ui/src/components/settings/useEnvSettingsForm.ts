@@ -61,7 +61,12 @@ export function useEnvSettingsForm(): EnvSettingsForm {
   // place instead of blocking the form. No retries — the old one-shot load
   // did not retry either, and a missing nvidia-smi will not start working.
   const gpuQuery = useQuery({ ...gpusOptions(), retry: false });
-  const [form, setForm] = useState<EnvFormState>({ draft: {}, original: {} });
+  // Seed from a cached snapshot: reopening Settings marks it seen below, and an
+  // unchanged refetch keeps its identity, so it would never seed the form.
+  const [form, setForm] = useState<EnvFormState>(() => {
+    const values = envQuery.data?.values ?? {};
+    return { draft: values, original: values };
+  });
   const [status, setStatus] = useState<EnvFormStatus | null>(null);
   const [pendingRestartKeys, setPendingRestartKeys] = useState<string[]>([]);
 

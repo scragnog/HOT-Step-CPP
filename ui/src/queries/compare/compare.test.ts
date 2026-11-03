@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
+import { parseHTML } from 'linkedom';
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { createQueryClient } from '../client';
 import { resourceKey } from '../keys';
 import {
@@ -7,7 +11,7 @@ import {
 } from './queries';
 import {
   applyScores, beginOptimisticScores, commitScoreResult, localStatus, patchSession,
-  patchSessionSummary, reconcileScoreResult, rollbackScores, summaryOf,
+  patchSessionSummary, reconcileScoreResult, rollbackScores, summaryOf, useSetCompareScore,
 } from './writes';
 import type { CompareSession, CompareTake } from '../../services/compareApi';
 
@@ -133,4 +137,34 @@ test('session commands patch the detail and the list row together', () => {
     assert.equal(client.getQueryData<CompareSession>(key)?.takes.length, 1, 'summary merge keeps takes');
     assert.equal(client.getQueryData<{ sessions: { archived: boolean }[] }>(listKey)?.sessions[0].archived, true);
   } finally { client.clear(); }
+});
+
+test('scoring the final take refetches list membership after the server auto-archives', async () => {
+  const saved = { window: globalThis.window, document: globalThis.document };
+  const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>');
+  Object.assign(globalThis, { window, document, IS_REACT_ACT_ENVIRONMENT: true });
+  const client = createQueryClient();
+  const current = session();
+  current.takes[0].scores = [{ criterion: 'tone', value: 4, keep: null, note: '' }];
+  Object.assign(current, { status: 'partial', scored: 1 });
+  const listKey = compareQueries.sessions({ archived: false }).queryKey;
+  client.setQueryData(compareQueries.session('s1').queryKey, current);
+  client.setQueryData(listKey, { sessions: [summaryOf(current)] });
+  globalThis.fetch = async () => json({ status: 'scored', archived: true, scored: 2, total: 2 });
+  let mutation!: ReturnType<typeof useSetCompareScore>;
+  function Probe() { mutation = useSetCompareScore(); return null; }
+  const root = createRoot(document.getElementById('root')!);
+  try {
+    await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(Probe))));
+    await act(async () => {
+      await mutation.mutateAsync({ sessionId: 's1', items: [{ songId: 'b', criterion: 'tone', value: 4 }] });
+    });
+    // The optimistic patch already archived the cached session, so only the
+    // pre-mutation snapshot shows the membership change.
+    assert.equal(client.getQueryState(listKey)?.isInvalidated, true);
+  } finally {
+    await act(async () => root.unmount());
+    client.clear();
+    Object.assign(globalThis, saved);
+  }
 });

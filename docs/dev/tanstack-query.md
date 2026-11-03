@@ -29,8 +29,8 @@ in the sanctioned table below.
 | **P6** — composers and dedup | One factory per entity, duplicate factories removed | F4 | **Done.** F4 #1–#13 closed; #14–#17 sanctioned |
 | **P7** — structural | Training SSE second owner, audio-queue executor state | F3 remainder | **Done.** 7.2 (queue projection) and 7.1(a–d) (one job cache, one bridge owning the job stream, store keeps only the selected id) shipped |
 
-**Verification (2026-11-02):** `tsc -b` clean; UI suite **462 pass / 0 fail /
-1 skip** of 463; whole-`src` ESLint **824 findings**, all pre-existing categories
+**Verification (2026-11-03):** `tsc -b` clean; UI suite **467 pass / 0 fail /
+0 skip** of 467; whole-`src` ESLint **826 findings**, all pre-existing categories
 and zero project-guard hits; `npm run build` ✓;
 `node tools/docs/check-docs.mjs` → `ok`.
 
@@ -235,10 +235,10 @@ grep -rn "\.query(" src --include=*.ts --include=*.tsx | grep -v '\.test\.'
 Re-run them after a structural change and update this block in the same commit;
 the totals below are a dated snapshot, not a permanent truth.
 
-**2026-11-02:** `tsc -b` clean; UI suite **462 pass / 0 fail / 1 skip** of 463;
-whole-`src` ESLint **824 findings**, all pre-existing categories and zero
+**2026-11-03:** `tsc -b` clean; UI suite **467 pass / 0 fail / 0 skip** of 467;
+whole-`src` ESLint **826 findings**, all pre-existing categories and zero
 project-guard hits; `npm run build` ✓; `node tools/docs/check-docs.mjs` → `ok`;
-`useQuery` 145, `useMutation` 121, `queryClient.query()` on 62 lines in 29 files.
+`useQuery` 147, `useMutation` 122, `queryClient.query()` on 62 lines in 29 files.
 
 The P8 appendix's five-way split is the 45-site inventory measured on 2026-10-28;
 re-measure before starting a phase rather than trusting either figure.

@@ -184,12 +184,12 @@ export function useSetCompareScore() {
       compareApi.putScores(sessionId, items),
     onMutate: ({ sessionId, items }) => beginOptimisticScores(client, sessionId, items),
     onError: (_error, _vars, rollback) => { if (rollback) rollbackScores(client, rollback); },
-    onSuccess: (result, { sessionId }) => {
-      const key = compareQueries.session(sessionId).queryKey;
-      const old = client.getQueryData<CompareSession>(key);
+    onSuccess: (result, { sessionId }, rollback) => {
       commitScoreResult(client, sessionId, result);
       // Server auto-archive moved the session between lists — refetch both.
-      if (old && old.archived !== result.archived) {
+      // Compare with the pre-mutation snapshot: the cache is already
+      // optimistically archived. No snapshot means membership is unknown.
+      if (rollback?.session?.archived !== result.archived) {
         void queryManager.invalidate(client, sessionsPrefix());
       }
     },
