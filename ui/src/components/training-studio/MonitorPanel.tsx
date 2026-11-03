@@ -4,14 +4,13 @@
 // 2s, and on completion it also refreshes the dataset list so newly-created
 // datasets appear without a manual reload.
 //
-// DEVIATION from plan §5.2, which forbade wiring useTrainingStream here to keep
-// that SSE hook per-dataset. The stage CHIPS say which stage an item is on and
-// nothing about how far through it is, so a multi-hour train-dit inside a bulk
-// run had no visible progress anywhere in the app (Rob, 2026-07-31). The
-// subscription is delegated to PipelineStageProgress, which owns exactly one
-// stream — the single running stage's — and unsubscribes when it changes. The
-// per-dataset invariant §5.2 was protecting still holds; what changed is that
-// the bulk runner is now also a legitimate owner of a job worth watching.
+// DEVIATION from plan §5.2, which kept the SSE hook per-dataset. The stage
+// CHIPS say which stage an item is on and nothing about how far through it is,
+// so a multi-hour train-dit inside a bulk run had no visible progress anywhere
+// in the app (Rob, 2026-07-31). PipelineStageProgress now points the studio's
+// single job projection at the running stage and restores the previous
+// selection when it changes. The per-dataset invariant §5.2 was protecting
+// still holds: there is never more than one stream opener.
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Clock, Loader2, Pause, PauseCircle, Play, XCircle } from 'lucide-react';

@@ -21,7 +21,7 @@
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import { apiClient } from '../services/httpClient';
 
-export type Area = 'training-data' | 'training-runs' | 'global-models' | 'cover-lyrics' | 'studios' | 'shell-queue';
+export type Area = 'training-data' | 'training-runs' | 'global-models' | 'cover-lyrics' | 'studios' | 'shell-queue' | 'compare';
 
 /** Resources more than one area reads. Any area may query one directly with
  *  its canonical key and canonical read below, so no area waits on another's
@@ -88,6 +88,8 @@ export interface KeyScope {
   worker?: string | null;
   backend?: string;
 }
+/** A training target captured in a key: a worker name, or null for this PC. */
+export type Worker = string | null;
 export type Filters = Record<string, unknown>;
 export type ServerKey = readonly ['hs', Resource, KeyScope, string | number | null, Filters];
 
@@ -195,7 +197,3 @@ export const SONG_VIEWS: QueryKey[] = [
   resourceKey(SHARED.songs), resourceKey(SHARED.song), resourceKey('shell-queue/recent-songs'),
   resourceKey('studios/recent-songs'), resourceKey('cover-lyrics/cover-songs'),
 ];
-
-/** P2.4: invalidation moved to the one global manager (invalidation.ts);
- *  these re-exports keep existing importers compiling until P6 deletes them. */
-export { invalidateSidecars, invalidateSongViews } from './invalidation';

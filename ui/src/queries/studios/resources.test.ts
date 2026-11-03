@@ -27,8 +27,8 @@ test('Repaint and player variants share the LRC request and sidecar invalidation
     const results = await Promise.all([client.query(studio), client.query(player)]);
     assert.deepEqual(results, ['[00:01] Words', '[00:01] Words']);
     assert.equal(calls, 1);
-    const { invalidateSidecars } = await import('../keys');
-    await invalidateSidecars(client);
+    const { queryManager } = await import('../invalidation');
+    await queryManager.sidecars.all(client);
     assert.equal(client.getQueryState(studio.queryKey)?.isInvalidated, true);
   } finally { globalThis.fetch = original; client.clear(); }
 });

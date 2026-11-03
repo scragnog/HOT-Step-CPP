@@ -13,6 +13,7 @@ import { Clock, Gauge, Timer } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { selectTrainingEpochs, selectTrainingEta, useTrainingStore } from '../../stores/trainingStore';
 import { avgEpochMs, formatDurationMs, formatEpochPace, formatEtaMs } from '../../utils/trainingEta';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 /** Elapsed is wall-clock, so it has to tick on its own — the SSE metric frames
  *  are minutes apart on a DiT run and would leave the number frozen. */
@@ -28,9 +29,9 @@ function useNow(active: boolean): number {
 
 export const TrainingRunStats: React.FC = () => {
   const { t } = useTranslation();
-  const job = useTrainingStore(s => s.activeJob);
-  const eta = useTrainingStore(selectTrainingEta);
-  const epochs = useTrainingStore(selectTrainingEpochs);
+  const job = useActiveTrainingJob();
+  const eta = useTrainingStore(s => selectTrainingEta(s, job?.kind));
+  const epochs = useTrainingStore(s => selectTrainingEpochs(s, job?.kind));
 
   const active = job?.status === 'queued' || job?.status === 'running';
   const now = useNow(!!active);

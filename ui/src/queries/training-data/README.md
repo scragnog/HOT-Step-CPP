@@ -36,7 +36,9 @@ snapshots.
 | Scan preview | `training-data/scan-preview` | Worker-scoped; New dataset and each batch import row |
 | MM3 and YuE2 caption files | `training-data/sample-mm3`, `sample-yue2` | Seed the drawer's editors |
 | Lyric Studio export preview | `training-data/lyric-studio-preview` | Seeds the artist/album fields |
+| YuE2 caption source | `training-data/yue2-caption-source` | Fresh per handle (`dataset`, `lyricsSet` or `adapter`). Called by `utils/yue2CaptionSource.ts`; the util keeps the error surface and its local cache |
 | SA3 training status | `training-data/sa3-status` | Worker-scoped; polls while a job is active. Built inline in `components/training-studio/Sa3TrainCard.tsx`, not in `queries.ts` ([tanstack-query.md](../../../../docs/dev/tanstack-query.md) F4#17) |
+| HeartMuLa status and checkpoint takes | `training-data/heartmula-status`, `heartmula-previews` | Worker-scoped. Status is live (`staleTime` 0) and polls while a job or batch runs; takes poll per run while one is rendering. Read by `useHeartmulaController` and the review plugin; the preview retry is a mutation that invalidates both |
 
 The folder listing, scan preview, caption file and export preview rows are
 one-shot reads with `staleTime` 0: each open asks the server, and concurrent
@@ -82,4 +84,5 @@ lists every training-data file and its disposition. Files with reads:
 | `SampleDrawer.tsx`, `useCaptionFile.ts` | query (caption files); edits are client state, saves are commands |
 | `SendToLyricStudio.tsx` | query (export preview); export is a command |
 | `sendAuditionToCustomGen.ts` | query (local dataset revision); draft creation is a command |
-| `PipelineStageProgress.tsx`, `useTrainingStream.ts` | shared SSE; job refresh through Query |
+| `PipelineStageProgress.tsx` | adopts the stage job into the studio's one projection; job refresh through Query |
+| `useHeartmulaController.ts`, `plugins/heartmula.tsx` | query (status, takes); prepare/train/batch are commands, the preview retry is a mutation |

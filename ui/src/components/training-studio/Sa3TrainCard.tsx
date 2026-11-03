@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { pollWhile } from '../../queries/contract';
-import { localOptions } from '../../queries/global-models/options';
+import { stableStepAdaptersOptions } from '../../queries/global-models/options';
 import { scopeOf, serverKey } from '../../queries/keys';
 import { manualRenderRequest, renderSa3PreviewCommand, sa3PreviewOptions } from '../../queries/sa3-previews/queries';
 import { generationStatusOptions } from '../../queries/shell-queue/queue';
@@ -20,6 +20,7 @@ import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { TrainingChart } from './TrainingChart';
 import { PREVIEW_INPUT, PreviewField, TrainingPreviewRung, TrainingPreviewSettings, type PreviewTake } from './TrainingPreviewPanel';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const INPUT = 'w-full rounded-lg border border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-black/20 px-3 py-2 text-sm text-zinc-900 dark:text-white disabled:opacity-50';
@@ -83,7 +84,7 @@ export const Sa3TrainCard: React.FC<{ datasetId: string; slug: string }> = ({ da
   const { t } = useTranslation();
   const client = useQueryClient();
   const worker = useTrainingStore(s => s.trainingWorker);
-  const storedJob = useTrainingStore(s => s.activeJob);
+  const storedJob = useActiveTrainingJob();
   const error = useTrainingStore(s => s.error);
   const start = useTrainingStore(s => s.startSa3Train);
   const cancel = useTrainingStore(s => s.cancelJob);
@@ -136,8 +137,7 @@ export const Sa3TrainCard: React.FC<{ datasetId: string; slug: string }> = ({ da
     },
   });
   const previewSteps = [...new Set((previewsQuery.data?.previews ?? []).map(p => p.step))].sort((a, b) => a - b);
-  const adaptersQuery = useQuery({ ...localOptions<{ adapters: Array<{ name: string; sizeMb: number }> }>(
-    'sa3-adapters', '/models/stablestep/adapters'), enabled: worker === null });
+  const adaptersQuery = useQuery({ ...stableStepAdaptersOptions(), enabled: worker === null });
   const adapters = adaptersQuery.data?.adapters ?? [];
   const [pickedAdapter, setPickedAdapter] = useState('');
   const selectedAdapter = pickedAdapter || status?.runs.find(r => r.published && adapters.some(a => a.name === r.published))?.published || '';

@@ -25,7 +25,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
-import { createFakeIndexedDB, AudioQueueApiFake, MemoryStorage } from './audioQueueStoreTestFake.js';
+import { createFakeIndexedDB, AudioQueueApiFake, MemoryStorage, startProjectionForTests } from './audioQueueStoreTestFake.js';
 
 register('./cssStubLoader.mjs', import.meta.url);
 Object.assign(globalThis, {
@@ -35,7 +35,7 @@ Object.assign(globalThis, {
 });
 
 const {
-  OWNER_KEY, addManualQueueItem, updateManualQueueItem, resumeQueue,
+  OWNER_KEY, addManualQueueItem, updateManualQueueItem, resumeQueue, refreshServerProjection,
   _queueItemsForTests, _resetAudioQueueForTests,
 } = await import('./audioGenQueueStore.js');
 
@@ -54,6 +54,7 @@ test('server-owned queue: the row shows the server\'s elapsedSeconds live, and k
     return queue(url, init);
   }) as typeof fetch;
   _resetAudioQueueForTests([]);
+  const stop = startProjectionForTests(refreshServerProjection);
   try {
     await resumeQueue('t');
     await settle();
@@ -78,7 +79,7 @@ test('server-owned queue: the row shows the server\'s elapsedSeconds live, and k
     // Further polls must not grow or recompute it on the client.
     await settle(1700);
     assert.equal(row().elapsed, 8);
-  } finally { _resetAudioQueueForTests(); uninstall(); }
+  } finally { stop(); _resetAudioQueueForTests(); uninstall(); }
 });
 
 test('browser-owned queue: a workflow-backed Cover row reads the server\'s elapsedSeconds, not a client-side clock', async () => {

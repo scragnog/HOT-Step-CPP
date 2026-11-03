@@ -66,24 +66,24 @@ export const Section: React.FC<SectionProps> = ({
       style={boxed ? undefined : { flex: open ? '1 1 0%' : '0 0 auto', minHeight: open ? 0 : 'auto' }}>
       <div
         onClick={toggle}
-        className="flex items-center gap-2 px-4 py-3 min-h-[44px] border-b border-zinc-200 dark:border-white/5 bg-zinc-50 dark:bg-zinc-950/50 hover:bg-zinc-50/80 dark:hover:bg-zinc-950/80 transition-colors flex-shrink-0 cursor-pointer select-none">
+        className="flex items-center gap-2 px-4 py-3 min-h-[44px] min-w-0 border-b border-zinc-200 dark:border-white/5 bg-zinc-50 dark:bg-zinc-950/50 hover:bg-zinc-50/80 dark:hover:bg-zinc-950/80 transition-colors flex-shrink-0 cursor-pointer select-none">
         {open ? <ChevronDown className="w-3 h-3 text-zinc-500 flex-shrink-0" /> : <ChevronRight className="w-3 h-3 text-zinc-500 flex-shrink-0" />}
 
         {tabs ? (
-          <div className="flex items-center gap-1 min-w-0">
+          <div className="flex flex-1 flex-wrap items-center gap-1 min-w-0">
             {tabs.map(tab => {
               const active = tab.id === activeTab;
               return (
                 <button key={tab.id}
                   onClick={(e) => { e.stopPropagation(); if (!open) toggle(); onTabChange?.(tab.id); }}
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-semibold uppercase tracking-wider transition-colors whitespace-nowrap ${
+                  className={`flex min-w-0 max-w-full items-center gap-1.5 px-2 py-1 rounded-md text-xs font-semibold uppercase tracking-wider transition-colors ${
                     active
                       ? 'text-pink-500 dark:text-pink-400 bg-pink-500/10'
                       : 'text-zinc-500 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-white/5'
                   }`}>
-                  {tab.label}
+                  <span className="truncate">{tab.label}</span>
                   {tab.count !== undefined && tab.count > 0 && (
-                    <span className="min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center bg-pink-500/20 text-pink-400">
+                    <span className="min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center bg-pink-500/20 text-pink-400 flex-shrink-0">
                       {tab.count}
                     </span>
                   )}
@@ -93,11 +93,12 @@ export const Section: React.FC<SectionProps> = ({
           </div>
         ) : (
           <>
-            <span className="flex items-center gap-1.5 text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
-              {icon} {title}
+            <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+              {icon && <span className="flex-shrink-0">{icon}</span>}
+              <span className="truncate">{title}</span>
             </span>
             {count !== undefined && count > 0 && (
-              <span className={`min-w-[18px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${countColor}`}>
+              <span className={`min-w-[18px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center flex-shrink-0 ${countColor}`}>
                 {count}
               </span>
             )}

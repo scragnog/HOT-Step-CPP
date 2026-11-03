@@ -19,13 +19,15 @@ Object.assign(globalThis, {
   localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
 });
 const { useTrainingStore } = await import('../../stores/trainingStore');
-const { heartmulaStatusOptions } = await import('./useHeartmulaController');
+const { trainingQueries } = await import('../../queries/training-data/queries');
 const { TrainPanel } = await import('./TrainPanel');
+const { useTrainingJobProjection } = await import('../../queries/training-runs/hooks');
 
 await i18n.use(initReactI18next).init({ lng: 'en', resources: {}, interpolation: { escapeValue: false } });
 
-test('the phase host only streams active jobs and releases both subscribers when training finishes', async () => {
-  const saved = { window: globalThis.window, document: globalThis.document, EventSource: globalThis.EventSource };
+test('the job projection only streams active jobs and releases its subscriber when training finishes', async () => {
+  const saved = { window: globalThis.window, document: globalThis.document,
+    EventSource: globalThis.EventSource, fetch: globalThis.fetch };
   const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>');
   Object.assign(window, { localStorage: globalThis.localStorage });
   Object.assign(globalThis, { window, document, IS_REACT_ACT_ENVIRONMENT: true });
@@ -37,21 +39,26 @@ test('the phase host only streams active jobs and releases both subscribers when
     close() { this.readyState = 2; }
   }
   globalThis.EventSource = Stream as unknown as typeof EventSource;
+  // Keep revalidation pending so each status below comes from the job cache.
+  globalThis.fetch = () => new Promise<Response>(() => {});
   const original = useTrainingStore.getState();
   const client = new QueryClient();
+  const seed = (id: string, status: TrainingJobSummary['status']) =>
+    client.setQueryData(trainingQueries.job(null, id).queryKey, { id, status } as TrainingJobSummary);
+  function Projection() { useTrainingJobProjection(); return null; }
   const root = createRoot(document.getElementById('root')!);
   try {
-    useTrainingStore.setState({ detail: null, datasets: [], trainingWorker: null,
-      activeJob: { id: 'finished', status: 'done' } as TrainingJobSummary });
-    await act(async () => root.render(createElement(QueryClientProvider, { client },
-      createElement(TrainPanel, { target: 'heartmula' }))));
+    seed('finished', 'done');
+    useTrainingStore.setState({ detail: null, datasets: [], trainingWorker: null, activeJobId: 'finished' });
+    await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(Projection))));
     assert.equal(Stream.made.length, 0);
-    await act(async () => useTrainingStore.setState({ activeJob: { id: 'live-panel', status: 'running' } as TrainingJobSummary }));
-    assert.equal(Stream.made.length, 1, 'the live reducer and bridge share a socket');
-    await act(async () => useTrainingStore.setState({ activeJob: { id: 'live-panel', status: 'done' } as TrainingJobSummary }));
+    seed('live-panel', 'running');
+    await act(async () => useTrainingStore.setState({ activeJobId: 'live-panel' }));
+    assert.equal(Stream.made.length, 1);
+    await act(async () => { seed('live-panel', 'done'); await new Promise(resolve => setTimeout(resolve, 0)); });
     assert.equal(Stream.made[0].readyState, Stream.CLOSED);
     await act(async () => root.render(createElement(QueryClientProvider, { client },
-      createElement(TrainPanel, { target: 'heartmula', key: 'revisit' }))));
+      createElement(Projection, { key: 'revisit' }))));
     assert.equal(Stream.made.length, 1);
   } finally {
     await act(async () => root.unmount()); client.clear();
@@ -70,9 +77,9 @@ test('HeartMuLa Prepare and Train reach their cards independently of ACE capabil
     run: null, runs: [], adapter: null,
     defaults: HEARTMULA_RECIPE_DEFAULTS, previewDefaults: HEARTMULA_PREVIEW_DEFAULTS,
   } as HeartmulaStatusResponse;
-  client.setQueryData(heartmulaStatusOptions(null, 'ds-1', false).queryKey, status);
+  client.setQueryData(trainingQueries.heartmulaStatus(null, 'ds-1', false).queryKey, status);
   // Match the existing shell tests: SSR reads Zustand's initial snapshot.
-  Object.assign(initial, { selectedDatasetId: 'ds-1', trainingWorker: null, activeJob: null, error: null });
+  Object.assign(initial, { selectedDatasetId: 'ds-1', trainingWorker: null, activeJobId: null, error: null });
   const render = (section: 'prepare' | 'train') => renderToStaticMarkup(createElement(QueryClientProvider, { client },
     createElement(TrainPanel, { target: 'heartmula', section })));
   try {

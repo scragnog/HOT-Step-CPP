@@ -47,6 +47,7 @@ import { Yue2PreprocessCard } from './Yue2TrainCard';
 import { useYue2ArStatus } from './useYue2ArStatus';
 import { useYue2Status } from './useYue2Status';
 import { TrainingAllStagesCard, TrainingBatchCard } from './Yue2StageCard';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const LYRIC_TIMING_KEY = 'hs-yue2-aitk-lyric-timing:';
@@ -140,7 +141,7 @@ export const Yue2TrainStages: React.FC<{ datasetId: string; trigger?: string; se
   });
   const [, setTimingLocked] = useState(false);
   const storeError = useTrainingStore(s => s.error);
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
   const yue2RunAllActive = useTrainingStore(s => s.yue2RunAllActive);
   const yue2RunAllStage = useTrainingStore(s => s.yue2RunAllStage);
   const runYue2JointStages = useTrainingStore(s => s.runYue2JointStages);

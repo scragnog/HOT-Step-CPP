@@ -560,23 +560,15 @@ export async function retryQueueMigration(token: string): Promise<void> {
   await _submitImport(token, payload);
 }
 
-let _serverProjectionTimer: ReturnType<typeof setInterval> | null = null;
 let _serverProjectionBusy = false;
 /** A refresh was asked for while one was in flight (an enqueue racing the
  *  poll). The running read may predate the change, so read once more after
  *  it rather than wait for the next tick, which an idle queue spaces out. */
 let _serverProjectionAgain = false;
-/** Ticks skipped since the last idle read. With nothing waiting or running
- *  the projection reads every PROJECTION_IDLE_EVERY ticks (about 10 s), only
- *  to notice work another tab or client queued. Any local command refreshes
- *  at once, and active work brings back the 1.5 s cadence on the next tick. */
-let _projectionIdleTicks = 0;
-const PROJECTION_IDLE_EVERY = 7;
-
-/** True when no row is waiting or running, so polling has nothing to follow. */
-function _queueIdle(): boolean {
-  return !_state.items.some(item => item.status === 'pending' || item.status === 'loading-adapter' || item.status === 'generating');
-}
+/** Applies are serialized: two snapshots can resolve close together, and the
+ *  reducer compares each row against its previous status to deliver songs
+ *  exactly once. */
+let _applyChain: Promise<void> = Promise.resolve();
 
 /** Song ids already handed to the library (the `song-created` event or an
  *  enqueue's onSongCreated) this page. The server projection and an
@@ -625,12 +617,18 @@ function projectServerItem(server: AudioIntentItem, previous?: AudioQueueItem): 
   };
 }
 
-async function refreshServerProjection(token: string): Promise<void> {
-  if (queueOwner() !== 'server') return;
-  if (_serverProjectionBusy) { _serverProjectionAgain = true; return; }
-  _serverProjectionBusy = true;
+/** Reconcile one server snapshot into the local rows. The Query projection
+ *  hook calls this for every successful read; manual refresh calls it too.
+ *  Applies are serialized so two snapshots cannot both compare against the
+ *  same pre-completion rows. */
+export function applyServerItems(items: AudioIntentItem[]): Promise<void> {
+  const run = _applyChain.then(() => applyServerItemsNow(items));
+  _applyChain = run;
+  return run;
+}
+
+async function applyServerItemsNow(items: AudioIntentItem[]): Promise<void> {
   try {
-    const { items } = await readAudioQueue();
     const previous = new Map(_state.items.map(item => [item.id, item]));
     // A studio's own row (addManualQueueItem) lives only in this tab until its
     // render reaches the server queue: a Cover workflow queued behind another
@@ -670,23 +668,34 @@ async function refreshServerProjection(token: string): Promise<void> {
     }
     _emit();
   } catch (err) {
-    console.warn('[AudioQueue] Server projection refresh failed:', err);
-  } finally {
-    _serverProjectionBusy = false;
-    if (_serverProjectionAgain) { _serverProjectionAgain = false; void refreshServerProjection(token); }
+    console.warn('[AudioQueue] Server projection apply failed:', err);
   }
 }
 
+/** Read the server queue now and reconcile it. Reads are Query-cached, so a
+ *  command that refreshes while the projection hook is already fetching joins
+ *  that request. Cadence belongs to the hook; this is the event-driven path. */
+export async function refreshServerProjection(): Promise<void> {
+  if (queueOwner() !== 'server') return;
+  if (_serverProjectionBusy) { _serverProjectionAgain = true; return; }
+  _serverProjectionBusy = true;
+  try {
+    const { items } = await readAudioQueue();
+    await applyServerItems(items);
+  } catch (err) {
+    console.warn('[AudioQueue] Server projection refresh failed:', err);
+  } finally {
+    _serverProjectionBusy = false;
+    if (_serverProjectionAgain) { _serverProjectionAgain = false; void refreshServerProjection(); }
+  }
+}
+
+/** Ownership changed or the app resumed: enable the projection hook and take
+ *  one read now. The cadence itself is Query's refetchInterval. */
 function _startServerProjection(token: string): void {
   _lastToken = token;
-  if (_serverProjectionTimer) clearInterval(_serverProjectionTimer);
-  _projectionIdleTicks = 0;
-  void refreshServerProjection(token);
-  _serverProjectionTimer = setInterval(() => {
-    if (_queueIdle() && ++_projectionIdleTicks < PROJECTION_IDLE_EVERY) return;
-    _projectionIdleTicks = 0;
-    void refreshServerProjection(token);
-  }, ACTIVE_POLL_MS);
+  _emit(true);
+  void refreshServerProjection();
 }
 
 export function getAudioQueueOwner(): QueueOwner { return queueOwner(); }
@@ -707,11 +716,9 @@ export function _resetAudioQueueForTests(items: AudioQueueItem[] = []): void {
   _lastToken = null;
   _ownerDecision = null;
   _heldIds.clear();
-  if (_serverProjectionTimer) clearInterval(_serverProjectionTimer);
-  _serverProjectionTimer = null;
   _serverProjectionBusy = false;
   _serverProjectionAgain = false;
-  _projectionIdleTicks = 0;
+  _applyChain = Promise.resolve();
   _deliveredSongIds.clear();
   queryClient.clear();
   if (_persistTimer) clearTimeout(_persistTimer);
@@ -756,8 +763,6 @@ export async function rollbackAudioQueue(): Promise<void> {
   if (!backup) throw new Error('Original browser backup is missing; browser ownership was not changed');
   localStorage.setItem(ROLLBACK_REQUESTED_KEY, backupId);
   localStorage.setItem(OWNER_KEY, 'migrating');
-  if (_serverProjectionTimer) clearInterval(_serverProjectionTimer);
-  _serverProjectionTimer = null;
   _emit(true);
   try {
     let plan = await _idbGet<RollbackPlan>(ROLLBACK_PLAN_KEY);
@@ -987,7 +992,7 @@ export async function enqueueAudioGen(
     if (!request) throw new Error('Cannot resolve written-song request for server queue');
     await audioQueueApi.enqueue(item.id, request, { view: item });
     _lastToken = token;
-    await refreshServerProjection(token);
+    await refreshServerProjection();
     return;
   }
 
@@ -1034,7 +1039,7 @@ export function removeFromAudioQueue(id: string): void {
       void audioQueueApi.cancel(serverId)
         .catch(() => null)
         .then(() => audioQueueApi.dismiss(serverId))
-        .then(() => refreshServerProjection(_lastToken!));
+        .then(() => refreshServerProjection());
     }
     return;
   }
@@ -1052,7 +1057,7 @@ export function forceFailQueueItem(id: string): void {
   const workflowJobId = item?.workflowJobId;
   if (queueOwner() === 'server' && !workflowJobId) {
     const serverId = item?.serverQueueId;
-    if (serverId && _lastToken) void audioQueueApi.cancel(serverId).then(() => refreshServerProjection(_lastToken!));
+    if (serverId && _lastToken) void audioQueueApi.cancel(serverId).then(() => refreshServerProjection());
     return;
   }
   if (item && (item.status === 'generating' || item.status === 'loading-adapter')) {
@@ -1075,7 +1080,7 @@ export function clearFinishedFromAudioQueue(): void {
     if (_lastToken) void Promise.all(_state.items.filter(item => item.serverQueueId
       && (item.status === 'succeeded' || item.status === 'failed'))
       .map(item => audioQueueApi.dismiss(item.serverQueueId!)))
-      .then(() => refreshServerProjection(_lastToken!));
+      .then(() => refreshServerProjection());
     return;
   }
   _state.items = _state.items.filter(i => i.status !== 'succeeded' && i.status !== 'failed');
@@ -1089,7 +1094,7 @@ export function retryFailedInAudioQueue(): number {
   if (queueOwner() === 'server') {
     const failed = _state.items.filter(item => item.status === 'failed' && item.serverQueueId);
     if (_lastToken) void Promise.all(failed.map(item => audioQueueApi.retry(item.serverQueueId!)))
-      .then(() => refreshServerProjection(_lastToken!));
+      .then(() => refreshServerProjection());
     return failed.length;
   }
   let retried = 0;
@@ -1451,7 +1456,7 @@ export async function enqueueSimpleGen(
     const request = (preview?.request ?? params) as Record<string, unknown>;
     await audioQueueApi.enqueue(id, request, { view: item });
     _lastToken = token;
-    await refreshServerProjection(token);
+    await refreshServerProjection();
     if (onSongCreated) {
       void (async () => {
         for (;;) {
@@ -1679,7 +1684,7 @@ export function resumeRestoredQueue(token?: string): void {
     const t = token ?? _lastToken;
     if (t) {
       const ids = _state.items.filter(item => _heldIds.has(item.id) && item.serverQueueId).map(item => item.serverQueueId!);
-      void audioQueueApi.resumeHeld(ids).then(() => refreshServerProjection(t));
+      void audioQueueApi.resumeHeld(ids).then(() => refreshServerProjection());
     }
     return;
   }
@@ -1700,7 +1705,7 @@ export function discardRestoredQueue(): void {
     if (t) {
       const ids = _state.items.filter(item => _heldIds.has(item.id) && item.serverQueueId).map(item => item.serverQueueId!);
       void Promise.all(ids.map(id => audioQueueApi.cancel(id).then(() => audioQueueApi.dismiss(id))))
-        .then(() => refreshServerProjection(t));
+        .then(() => refreshServerProjection());
     }
     return;
   }
@@ -2491,6 +2496,19 @@ export function useResumeQueue(token?: string): void {
       resumeQueue(token);
     }
   }, [token]);
+}
+
+/** The current queue owner, reactive to migration/rollback transitions. The
+ *  projection hook uses it to enable itself only while the server owns the
+ *  queue. */
+export function useAudioQueueOwner(): 'browser' | 'migrating' | 'server' {
+  return useSyncExternalStore(_subscribe, queueOwner, queueOwner);
+}
+
+/** True while a row still needs the server projection followed at the active
+ *  cadence. Includes studio-only rows that have no server item yet. */
+export function hasActiveQueueWork(): boolean {
+  return _state.items.some(item => item.status === 'pending' || item.status === 'loading-adapter' || item.status === 'generating');
 }
 
 /**

@@ -8,6 +8,7 @@ import { pollWhile } from '../../queries/contract';
 import { trainingQueries } from '../../queries/training-data/queries';
 import { useJobSelection, useReload, useRunEvents, useScopedId } from '../../queries/training-runs/hooks';
 import { activeJob as isActiveJob, runQueries, trainingWritePlan } from '../../queries/training-runs/queries';
+import { waitForQuery } from '../../queries/wait';
 
 import { preferencesApi } from '../../services/preferencesApi';
 import { subscribeEventSource } from '../../services/sharedEventSource';
@@ -42,6 +43,7 @@ import { Yue2SplitChart } from './Yue2SplitChart';
 import { reduceYue2Metric, type Yue2Point } from './yue2ChartData';
 import { captureJointOverrides, submitJointStart } from './yue2JointCommand';
 import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 const JOB_KEY = 'hs-yue2-aitk-job:';
 export const FORM_KEY = 'hs-yue2-aitk-form:';
@@ -491,7 +493,16 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     ? savedCaption.provider : captionDefault;
   const autoCaption = form.autoCaption === false || !captionProvider ? null
     : { provider: captionProvider, ...(captionProvider === 'gemini' && savedCaption?.model ? { model: savedCaption.model } : {}) };
-  const [captioning, setCaptioning] = useState<TrainingJobSummary | null>(null);
+  const [captionJobId, setCaptionJobId] = useState<string | null>(null);
+  // The progress line renders the one job cache entry. The waiter below polls
+  // that same entry, so this observer only reads it — a second cadence here
+  // would fetch the job twice.
+  const captionQuery = useQuery({
+    ...trainingQueries.job(trainingWorker, captionJobId ?? ''),
+    enabled: !!captionJobId,
+    refetchInterval: false,
+  });
+  const captioning = captionJobId ? captionQuery.data ?? null : null;
   // No onError: the caller's catch (run, or the run-all orchestrator) sets the
   // error line, as before; the service is silent so that line is sole notifier.
   const captionStartMut = useMutation({
@@ -500,14 +511,14 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       // The stages list shows the captioning job as soon as it starts.
       await trainingWritePlan(client, trainingWorker);
       if (!started.jobId) return;
-      let j = await client.query(trainingQueries.job(trainingWorker, started.jobId));
-      setCaptioning(j);
-      while (j.status === 'queued' || j.status === 'running') {
-        await new Promise(r => setTimeout(r, 1500));
-        j = await client.query(trainingQueries.job(trainingWorker, started.jobId));
-        setCaptioning(j);
-      }
-      setCaptioning(null);
+      setCaptionJobId(started.jobId);
+      // The one non-React waiter owns the cadence (1.5 s active, backing off
+      // while failing) instead of a hand-rolled loop with its own timer.
+      const j = await waitForQuery<TrainingJobSummary>(
+        trainingQueries.job(trainingWorker, started.jobId),
+        job => isActiveJob(job),
+      );
+      setCaptionJobId(null);
       if (j.status !== 'done') throw new Error(`Captioning failed: ${j.error || j.status}`);
       const left = (await captionMissingYue2(datasetId, { checkOnly: true }, { worker: trainingWorker })).missing ?? 0;
       if (left) throw new Error(`${left} track(s) still have no YuE2 caption after captioning; see the Label log on the Dataset page. Not training on the ACE captions.`);
@@ -852,7 +863,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   // "Perform all stages" runs in the store and can outlive this card: after a
   // page remount it starts training through the old instance, so the job never
   // reaches this one. Adopt any joint job the store reports for this dataset.
-  const storeJob = useTrainingStore(s => s.activeJob);
+  const storeJob = useActiveTrainingJob();
   useEffect(() => {
     if (!storeJob || !isJointJob(storeJob, datasetId) || storeJob.id === job?.id) return;
     setJob(storeJob);

@@ -16,6 +16,7 @@ import { ParamLabel } from '../shared/ParamLabel';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { EnhancePanel } from './EnhancePanel';
 import { JobProgress } from './JobProgress';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 
@@ -29,7 +30,7 @@ const MERGE_OPTIONS: Array<{ id: MergePolicy; labelKey: string }> = [
 export const LabelPanel: React.FC = () => {
   const { t } = useTranslation();
   const caps = useTrainingStore(s => s.capabilities);
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
   const startLabel = useTrainingStore(s => s.startLabel);
   const selectedSampleIds = useTrainingStore(s => s.selectedSampleIds);
 

@@ -170,10 +170,10 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
             value={loraTrigger}
             onChange={e => onLoraTriggerChange(e.target.value)}
             placeholder={t('contentSection.loraTriggerPlaceholder')}
-            className="flex-1 px-2 py-1 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 outline-none focus:border-pink-500/30 transition-colors"
+            className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-white/10 text-xs text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 outline-none focus:border-pink-500/30 transition-colors"
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => onBeatIntroChange(!beatIntro)}
             title={t('contentSection.beatIOTooltip')}

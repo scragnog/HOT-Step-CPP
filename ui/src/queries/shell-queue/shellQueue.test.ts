@@ -11,7 +11,7 @@ import { queriedPresetsApi, queriedSettingsApi } from './preferences';
 import { ENGINE_WORKERS_POLL_MS, engineWorkersOptions, gpusOptions } from './settings';
 import { lrcOptions, lyricsJsonOptions, scoreAbcOptions } from './lyrics';
 import { fetchPeaks, forgetPeaks, peaksCached } from '../../audio/peaksClient';
-import { invalidateSidecars } from '../keys';
+import { queryManager } from '../invalidation';
 
 const clients: ReturnType<typeof createQueryClient>[] = [];
 const client = () => { const c = createQueryClient(); clients.push(c); return c; };
@@ -242,7 +242,7 @@ test('lyric sidecars: missing is cached as none, failures throw, crop/retranscri
   assert.equal(await c.query(lrcOptions('/audio/ok.wav')), '[00:01.00] Words');
   assert.deepEqual(await c.query(lyricsJsonOptions('/audio/ok.wav')), { version: 1, lines: [] });
   await assert.rejects(c.query({ ...lrcOptions('/audio/broken.wav'), retry: false }), /500/);
-  await invalidateSidecars(c);
+  await queryManager.sidecars.all(c);
   assert.equal(c.getQueryState(lrcOptions('/audio/ok.wav').queryKey)?.isInvalidated, true);
   assert.equal(c.getQueryState(lyricsJsonOptions('/audio/ok.wav').queryKey)?.isInvalidated, true);
 });

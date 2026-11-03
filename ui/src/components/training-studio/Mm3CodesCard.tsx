@@ -19,11 +19,12 @@ import { Toggle } from '../shared/Toggle';
 import { JobProgress } from './JobProgress';
 import { useMm3Status } from './useMm3Status';
 import { Yue2StageCard } from './Yue2StageCard';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 
 export const Mm3CodesCard: React.FC<{ datasetId: string }> = ({ datasetId }) => {
   const { t } = useTranslation();
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
   const startMm3Codes = useTrainingStore(s => s.startMm3Codes);
   const storeError = useTrainingStore(s => s.error);
   const { status, error } = useMm3Status(datasetId);

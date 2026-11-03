@@ -12,6 +12,7 @@ import { StyledSelect } from '../shared/StyledSelect';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { JobProgress } from './JobProgress';
 import { SendToLyricStudio } from './SendToLyricStudio';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 /** One PATCH per keystroke / slider tick would also rewind the control from the
@@ -31,7 +32,7 @@ export const BuildPanel: React.FC = () => {
   const sampleOrder = useTrainingStore(s => s.sampleOrder);
   const patchDataset = useTrainingStore(s => s.patchDataset);
   const startBuild = useTrainingStore(s => s.startBuild);
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
 
   const [building, setBuilding] = useState(false);
   const [copied, setCopied] = useState(false);

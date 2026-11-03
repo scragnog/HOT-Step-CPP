@@ -91,6 +91,20 @@ test('late source A is aborted and cannot populate source B or its cancelled cac
   assert.equal(queryClient.getQueriesData({ queryKey: ['hs', 'cover-lyrics/cover'] }).filter(([, data]) => data !== undefined).length, 1);
 });
 
+test('a queryable cover POST is keyed only by the body fields that change its answer', async () => {
+  startAuthSession(queryClient, 'source-key');
+  let posts = 0;
+  globalThis.fetch = async () => { posts++; return json({ matched: false }); };
+  // Different labels/force flags describe the same source; the lookup ignores
+  // them, so they must not create another cache entry.
+  await yue2CoverApi.sourceMetadata({ songId: 'S', sourceLabel: 'One', force: true });
+  await yue2CoverApi.sourceMetadata({ songId: 'S', sourceLabel: 'Two', force: false });
+  const entries = queryClient.getQueriesData({ queryKey: ['hs', 'cover-lyrics/cover'] })
+    .filter(([, data]) => data !== undefined);
+  assert.equal(entries.length, 1, 'one song has one metadata entry');
+  assert.ok(posts >= 1);
+});
+
 test('profile and draft writes refresh their snapshots and submit only once', async () => {
   startAuthSession(queryClient, 'write-test');
   // The key's auth scope now derives from the session accessor (P2), so pair

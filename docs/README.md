@@ -82,6 +82,6 @@ In sidebar order. The sidebar lists only the studios the active backend can run.
 | [Writing style](dev/writing-style.md) | Rules for prose a human reads |
 | [UI design rules](dev/ui-design.md) | The shared controls every screen uses (dropdown, toggle, hover explanation), accent colours, and the check that enforces them |
 | [UI server state](dev/ui-server-state.md) | The contract for server snapshots in the UI: TanStack Query owns them, Zustand keeps client state, event streams drive the cache |
-| [TanStack Query audit and migration](dev/tanstack-query.md) | Every TanStack integration audited: deprecated fetchQuery sweep, useQuery/useMutation gaps, hook folder conventions, phased migration plan |
+| [TanStack Query audit and roadmap](dev/tanstack-query.md) | Every TanStack integration audited, plus the P8 roadmap for `queryClient.query()` call sites, duplicate fetch owners, and the move to reactive reads |
 | [Skill library](../.claude/skills/README.md) | Procedures per maintenance domain for coding agents |
 | `AGENTS.md` (local only) | Project rules for agents, including the documentation ownership table |

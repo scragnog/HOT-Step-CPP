@@ -1,6 +1,6 @@
 // JobProgress.tsx — live job progress bar, log tail and cancel
 //
-// Progress arrives over SSE (see useTrainingStream). Understand work sits
+// Progress arrives over the studio's job projection (SSE). Understand work sits
 // behind the engine's single FIFO GPU worker, so queue depth is surfaced
 // rather than pretending labeling is instant.
 
@@ -8,6 +8,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock, Loader2, RotateCcw, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 const CARD ='rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 
@@ -68,7 +69,7 @@ function isTrainingKind(kind: string): boolean {
 
 export const JobProgress: React.FC = () => {
   const { t } = useTranslation();
-  const job = useTrainingStore(s => s.activeJob);
+  const job = useActiveTrainingJob();
   const jobLog = useTrainingStore(s => s.jobLog);
   const cancelJob = useTrainingStore(s => s.cancelJob);
   const startLabel = useTrainingStore(s => s.startLabel);

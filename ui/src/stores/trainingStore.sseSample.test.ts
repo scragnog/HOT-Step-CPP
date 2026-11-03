@@ -19,3 +19,30 @@ test('a labelled sample from the job stream also lands in the cached dataset det
   assert.deepEqual((queryClient.getQueryData(key) as { samples: unknown[] }).samples, [after]);
   queryClient.clear();
 });
+
+test('job frames belong to the projection, not the store reducer', () => {
+  const job = {
+    id: 'j1', datasetId: 'd1', kind: 'preprocess', status: 'queued',
+    total: 4, done: 0, failed: 0, currentSampleId: null, phase: '',
+    engineQueueDepth: 0, error: null, createdAt: 0, startedAt: null, finishedAt: null,
+  };
+  const key = tq.job(null, job.id).queryKey;
+  useTrainingStore.setState({ trainingWorker: null, activeJobId: 'j1' });
+  try {
+    useTrainingStore.getState().applyStreamEvent({ type: 'job', job } as never);
+    useTrainingStore.getState().applyStreamEvent({
+      type: 'progress', done: 2, total: 4, failed: 0,
+      phase: 'preprocess', currentSampleId: 's2', engineQueueDepth: 1,
+    } as never);
+    useTrainingStore.getState().applyStreamEvent({ type: 'status', status: 'done' } as never);
+    assert.equal(queryClient.getQueryData(key), undefined,
+      'the bridge, not the reducer, writes the job cache entry');
+    assert.equal(useTrainingStore.getState().activeJobId, 'j1',
+      'the store keeps only the selected id');
+    assert.equal('activeJob' in useTrainingStore.getState(), false,
+      'no second job summary exists in the store');
+  } finally {
+    useTrainingStore.setState({ activeJobId: null });
+    queryClient.clear();
+  }
+});

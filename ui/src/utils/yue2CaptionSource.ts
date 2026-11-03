@@ -37,9 +37,8 @@
  */
 
 import { useBackendStore } from '../stores/backendStore';
-import { apiClient } from '../services/httpClient';
 import { queryClient } from '../queries/client';
-import { serverKey } from '../queries/keys';
+import { trainingQueries, type Yue2CaptionSourceTrack } from '../queries/training-data/queries';
 
 /** The registered id of the YuE2 backend (server/src/services/backends/yue2/index.ts). */
 export const YUE2_BACKEND_ID = 'yue2';
@@ -49,16 +48,9 @@ export type Yue2CaptionMode = 'auto' | 'track' | 'custom';
 /** One song from the dataset, as `GET /api/training/yue2-dataset-captions`
  *  answers it. `bpm` is a string there, not a number — it is a sidecar field,
  *  not a measurement. */
-export interface Yue2SourceTrack {
-  name: string;
-  caption: string;
-  genre?: string;
-  bpm?: string | number;
-  key?: string;
-  /** Caption + metadata tail, composed server-side. Absent for a server that
-   *  predates it, in which case the bare caption is the honest fallback. */
-  styled?: string;
-}
+/** The owning area declares the server snapshot; this module keeps its
+ *  established name for the many caption consumers. */
+export type Yue2SourceTrack = Yue2CaptionSourceTrack;
 
 /** The per-dataset choice. Absent from storage means `{ mode: 'auto' }`. */
 export interface Yue2CaptionSelection {
@@ -214,22 +206,12 @@ export function clearYue2CaptionSources(): void {
 export async function fetchYue2CaptionSource(
   by: { dataset?: string; lyricsSet?: number; adapter?: string },
 ): Promise<{ datasetId: string; datasetName: string; tracks: Yue2SourceTrack[]; error?: string }> {
-  const params = new URLSearchParams();
-  if (by.dataset) params.set('dataset', by.dataset);
-  else if (by.lyricsSet) params.set('lyricsSet', String(by.lyricsSet));
-  else if (by.adapter) params.set('adapter', by.adapter);
-  else return { datasetId: '', datasetName: '', tracks: [] };
+  if (!by.dataset && !by.lyricsSet && !by.adapter) return { datasetId: '', datasetName: '', tracks: [] };
 
   try {
     // Query owns the read (fresh each time, concurrent asks share one
     // request); a failure is caught here, never cached as an empty answer.
-    const data = await queryClient.query({
-      queryKey: serverKey('shell-queue/yue2-captions', { filters: Object.fromEntries(params) }),
-      queryFn: ({ signal }) => apiClient.get<{
-        datasetId?: string; datasetName?: string; tracks?: Yue2SourceTrack[];
-      }>(`/training/yue2-dataset-captions?${params.toString()}`, { signal }),
-      staleTime: 0,
-    });
+    const data = await queryClient.query(trainingQueries.yue2CaptionSource(by));
     const datasetId = data.datasetId || '';
     const datasetName = data.datasetName || '';
     const tracks = (data.tracks ?? []).filter(t => t && t.name && (t.styled || t.caption));

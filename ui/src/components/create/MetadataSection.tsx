@@ -112,7 +112,7 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
     <div className="space-y-3 pt-3 border-t border-zinc-200 dark:border-white/5">
       <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">{t('metadataSection.musicParameters')}</h4>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(150px,100%),1fr))] gap-3">
         {/* BPM */}
         <div>
           <Slider label={t('metadataSection.bpm')} value={bpm} onChange={onBpmChange}
@@ -225,27 +225,30 @@ export const MetadataSection: React.FC<MetadataSectionProps> = ({
         </div>
         )}
 
-        {/* Language — YuE2 infers it from the lyrics; there is no field for it */}
-        {!tagsMode && (capabilities?.core.languageMeans !== 'lyrics' || mm3Mode) && (
-        <div className="col-span-2">
-          <ParamLabel
-            label={mm3Mode ? t('metadataSection.lyricsLanguage') : t('metadataSection.vocalLanguage')}
-            info={mm3Mode ? t('metadataSection.lyricsLanguageHint') : t('metadataSection.vocalLanguageInfo')}
-            className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-            rootClassName="flex items-center h-6 mb-1.5"
-            onReset={vocalLanguage !== 'en' ? () => onVocalLanguageChange('en') : undefined}
-          />
-          <StyledSelect
-            accent="pink"
-            size="sm"
-            value={vocalLanguage}
-            onChange={onVocalLanguageChange}
-            className="w-full"
-            options={VOCAL_LANGUAGES.map(l => ({ value: l.value, label: l.label }))}
-          />
-        </div>
-        )}
       </div>
+
+      {/* Language — YuE2 infers it from the lyrics; there is no field for it.
+          Kept outside the two-column grid so it stays full width without
+          forcing a second column in a narrow Create panel. */}
+      {!tagsMode && (capabilities?.core.languageMeans !== 'lyrics' || mm3Mode) && (
+      <div>
+        <ParamLabel
+          label={mm3Mode ? t('metadataSection.lyricsLanguage') : t('metadataSection.vocalLanguage')}
+          info={mm3Mode ? t('metadataSection.lyricsLanguageHint') : t('metadataSection.vocalLanguageInfo')}
+          className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
+          rootClassName="flex items-center h-6 mb-1.5"
+          onReset={vocalLanguage !== 'en' ? () => onVocalLanguageChange('en') : undefined}
+        />
+        <StyledSelect
+          accent="pink"
+          size="sm"
+          value={vocalLanguage}
+          onChange={onVocalLanguageChange}
+          className="w-full"
+          options={VOCAL_LANGUAGES.map(l => ({ value: l.value, label: l.label }))}
+        />
+      </div>
+      )}
     </div>
   );
 };

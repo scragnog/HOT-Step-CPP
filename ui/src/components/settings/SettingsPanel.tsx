@@ -3,8 +3,8 @@
 // All settings use localStorage via usePersistedState and survive page refreshes.
 // Environment settings read from / write to the server's .env file.
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Zap, Download, Tag, Loader2, Settings2,
   ChevronRight, Save,
@@ -12,10 +12,8 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { FALLBACK_LANGUAGE, SUPPORTED_LANGUAGES } from '../../i18n';
-import { settingsApi, shutdownApi } from '../../services/api';
-import { ApiError } from '../../services/apiError';
-import { engineWorkersOptions, envOptions, gpusOptions, healthOptions } from '../../queries/shell-queue/settings';
-import { queryManager } from '../../queries/invalidation';
+import { engineWorkersOptions, healthOptions } from '../../queries/shell-queue/settings';
+import { useEnvSettingsForm } from './useEnvSettingsForm';
 import { DataFolderPanel } from './DataFolderPanel';
 import { SettingsBackupPanel } from './SettingsBackupPanel';
 import { UpdatesPanel } from './UpdatesPanel';
@@ -85,7 +83,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onNukeComplete,
 }) => {
   const { t, i18n } = useTranslation();
-  const queryClient = useQueryClient();
   const [coverSet, setCoverSetState] = useState<CoverSet>(getCoverSet);
   // The release tag the server reports; a git checkout says "dev" (#185).
   const appVersion = String(useQuery(healthOptions()).data?.version || '');
@@ -94,20 +91,22 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     onSettingsChange({ ...settings, [key]: value });
   };
 
-  // ── Environment (.env) state ────────────────────────────────────
-  const [envValues, setEnvValues] = useState<Record<string, string>>({});
-  const [envOriginal, setEnvOriginal] = useState<Record<string, string>>({});
-  const [envLoading, setEnvLoading] = useState(true);
-  const [envStatus, setEnvStatus] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
-  // Keys saved to .env that the running engine will not pick up until it is
-  // restarted. Non-empty means the value shown above is NOT the value in use
-  // (issue #99), and the Restart now button below is the way to reconcile them.
-  const [pendingRestartKeys, setPendingRestartKeys] = useState<string[]>([]);
-  /** Keys the server marks as restart-required (RESTART_REQUIRED_KEYS). */
-  const [restartKeys, setRestartKeys] = useState<string[]>([]);
-
-  // Detected GPUs for the GPU selector dropdown
-  const [detectedGpus, setDetectedGpus] = useState<Array<{ index: number; uuid: string; name: string; memoryMB: number }>>([]);
+  // ── Environment (.env) form ─────────────────────────────────────
+  // The hook owns the draft/seed/save lifecycle over envOptions(); this panel
+  // only renders values and calls its handlers.
+  const {
+    values: envValues,
+    loading: envLoading,
+    status: envStatus,
+    dirty: envDirty,
+    saving: envSaving,
+    restarting,
+    pendingRestartKeys,
+    gpus: detectedGpus,
+    change: handleEnvChange,
+    save: handleEnvSave,
+    restartNow: handleRestartNow,
+  } = useEnvSettingsForm();
 
   // Engine workers for the experimental multi-GPU section: observed and polled
   // while mounted, separate from the editable env form (read-only status).
@@ -123,30 +122,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   // File browser modal state
   const [browseKey, setBrowseKey] = useState<string | null>(null);
-
-  // Load env settings on mount
-  const loadEnvSettings = useCallback(async () => {
-    try {
-      setEnvLoading(true);
-      const [data, gpuData] = await Promise.all([
-        queryClient.query(envOptions()),
-        queryClient.query(gpusOptions()).catch(() => ({ gpus: [] })),
-      ]);
-      setEnvValues(data.values);
-      setEnvOriginal(data.values);
-      setRestartKeys(data.restartKeys || []);
-      setDetectedGpus(gpuData.gpus);
-    } catch (err: any) {
-      console.error('[Settings] Failed to load .env:', err.message);
-    } finally {
-      setEnvLoading(false);
-    }
-  }, [queryClient]);
-
-  useEffect(() => { loadEnvSettings(); }, [loadEnvSettings]);
-
-  // Track which keys have changed
-  const envDirty = Object.keys(envValues).some((k) => envValues[k] !== envOriginal[k]);
 
   // The GPU picker stores a GPU UUID, not an index (issue #153 — nvidia-smi
   // and CUDA number GPUs differently, so an index could select the other card).
@@ -168,85 +143,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     const chosen = detectedGpus.filter(g => g.uuid && (g.uuid.toLowerCase() === key ? !workerGpuSet.has(key) : workerGpuSet.has(g.uuid.toLowerCase())));
     handleEnvChange('ACESTEPCPP_WORKER_GPUS', chosen.map(g => g.uuid).join(','));
   };
-
-  const handleEnvChange = (key: string, value: string) => {
-    setEnvValues((prev) => ({ ...prev, [key]: value }));
-    setEnvStatus(null);
-  };
-
-  // Save and restart are the env form's two commands; each owns its lifecycle.
-  // The status line below is their only notifier (both calls are silent at the
-  // transport), so a failure lands in envStatus, not a second toast.
-  const envSaveMut = useMutation({
-    mutationFn: () => {
-      // Build diff — only send changed keys
-      const diff: Record<string, string> = {};
-      for (const [key, value] of Object.entries(envValues)) {
-        if (value !== envOriginal[key]) {
-          diff[key] = value;
-        }
-      }
-      return settingsApi.updateEnv(diff);
-    },
-    onMutate: () => setEnvStatus(null),
-    onSuccess: res => {
-      setEnvOriginal({ ...envValues });
-      void queryManager.invalidate(queryClient, envOptions().queryKey);
-      if (res.restartRequired) {
-        // Name them. "Some changes require a restart" left the user to work out
-        // which value on screen is a lie about what the engine is running.
-        const stale = res.updated.filter(k => restartKeys.includes(k));
-        setPendingRestartKeys(stale);
-        setEnvStatus({
-          type: 'warning',
-          text: stale.length
-            ? `Saved. The engine is still running the old ${stale.join(', ')} until you restart.`
-            : `Saved ${res.updated.length} setting(s). Some changes require a restart.`,
-        });
-      } else {
-        setPendingRestartKeys([]);
-        setEnvStatus({ type: 'success', text: `Saved ${res.updated.length} setting(s). Changes are live.` });
-      }
-    },
-    onError: e => setEnvStatus({ type: 'error', text: `Failed to save: ${e instanceof Error ? e.message : String(e)}` }),
-  });
-  const envSaving = envSaveMut.isPending;
-  // Named zero-arg handler so the button can pass it straight to onClick —
-  // mutate itself takes `void` variables, which a click event is not. The dirty
-  // check guards an empty diff (the button is disabled when clean too).
-  const handleEnvSave = () => { if (envDirty) envSaveMut.mutate(); };
-
-  /** Apply restart-required settings by restarting, from where they were saved.
-   *  The restart control already existed in the sidebar, but nothing in the
-   *  Save Environment flow pointed at it, so a saved value could sit on screen
-   *  looking active while the engine ran on the old one indefinitely (#99).
-   *
-   *  The app-level restarting overlay has to be raised too. Without it the
-   *  Settings page stayed on screen against a server that was going away: the
-   *  button read "Restarting…" forever, nothing reloaded when the server came
-   *  back, and every panel that probes the engine (post-processing among them)
-   *  quietly degraded to "unavailable" (issue #153). */
-  const restartNowMut = useMutation({
-    mutationFn: () => shutdownApi.restart(),
-    onMutate: () => {
-      setEnvStatus({ type: 'warning', text: 'Restarting…' });
-      window.dispatchEvent(new CustomEvent('hotstep:restarting'));
-    },
-    onError: e => {
-      // A refused restart (an HTTP error) means the server is still up — drop
-      // the overlay and surface the refusal. A dropped connection (a plain
-      // Error, no status) is the expected outcome of a successful one: the
-      // server tears the socket down as it goes, so keep waiting for the reload.
-      if (e instanceof ApiError && e.status > 0) {
-        setEnvStatus({ type: 'error', text: t('api.error.refused') });
-        window.dispatchEvent(new CustomEvent('hotstep:restart-cancelled'));
-      }
-    },
-  });
-  const restarting = restartNowMut.isPending;
-  // Named zero-arg handler so the button can pass it straight to onClick —
-  // mutate itself takes `void` variables, which a click event is not.
-  const handleRestartNow = () => restartNowMut.mutate();
 
   const handleBrowse = (key: string) => {
     setBrowseKey(key);

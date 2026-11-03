@@ -12,7 +12,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
-import { createFakeIndexedDB, AudioQueueApiFake, MemoryStorage } from './audioQueueStoreTestFake.js';
+import { createFakeIndexedDB, AudioQueueApiFake, MemoryStorage, startProjectionForTests } from './audioQueueStoreTestFake.js';
 
 register('./cssStubLoader.mjs', import.meta.url);
 Object.assign(globalThis, {
@@ -22,7 +22,7 @@ Object.assign(globalThis, {
 });
 
 const {
-  OWNER_KEY, addManualQueueItem, updateManualQueueItem, resumeQueue,
+  OWNER_KEY, addManualQueueItem, updateManualQueueItem, resumeQueue, refreshServerProjection,
   _queueItemsForTests, _resetAudioQueueForTests,
 } = await import('./audioGenQueueStore.js');
 
@@ -42,6 +42,7 @@ test('server-owned queue: a queued studio row stays until the server item for it
     return queue(url, init);
   }) as typeof fetch;
   _resetAudioQueueForTests([]);
+  const stop = startProjectionForTests(refreshServerProjection);
   try {
     await resumeQueue('t');
     const id = addManualQueueItem({ title: 'Second' });
@@ -57,6 +58,7 @@ test('server-owned queue: a queued studio row stays until the server item for it
     assert.equal(rows.some(item => item.id === id), false, 'the server item replaces the studio row');
     assert.equal(rows.filter(item => item.serverQueueId === 'srv2').length, 1);
   } finally {
+    stop();
     _resetAudioQueueForTests([]);
     globalThis.fetch = queue;
     uninstall();

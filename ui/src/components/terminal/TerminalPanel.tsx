@@ -221,8 +221,8 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose, embedded 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-white dark:bg-[#0d0d0f]">
       {/* Header */}
-      <div className={`flex items-center justify-between px-3 ${embedded ? 'py-1.5' : 'py-3'} border-b border-zinc-200 dark:border-white/5 bg-zinc-100/80 dark:bg-zinc-900/80`}>
-        <div className="flex items-center gap-3">
+      <div className={`flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-3 ${embedded ? 'py-1.5' : 'py-3'} border-b border-zinc-200 dark:border-white/5 bg-zinc-100/80 dark:bg-zinc-900/80`}>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <div className="flex items-center gap-1.5">
             {connected
               ? <Wifi size={12} className="text-green-400" />
@@ -241,7 +241,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose, embedded 
           </span>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex flex-shrink-0 items-center gap-1">
           {/* Auto-scroll pin toggle — always visible */}
           <button
             onClick={() => (pinned ? setPinned(false) : pinAndSnap())}
@@ -284,7 +284,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({ onClose, embedded 
       </div>
 
       {/* Stream tabs */}
-      <div className="flex items-center gap-1 px-2 py-1.5 border-b border-zinc-200 dark:border-white/5 bg-zinc-100/50 dark:bg-zinc-900/60">
+      <div className="flex flex-wrap items-center gap-1 px-2 py-1.5 border-b border-zinc-200 dark:border-white/5 bg-zinc-100/50 dark:bg-zinc-900/60">
         {STREAM_TABS.map(tab => (
           <button key={tab.id}
             onClick={() => setStreamTab(tab.id)}

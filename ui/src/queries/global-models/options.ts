@@ -52,7 +52,7 @@ export const backendsOptions = () => localOptions<{ backends: BackendInfo[]; act
 export const backendModelsOptions = (backend: string) => read<BackendModelCatalogue>(
   serverKey('global-models/backend-models', { backend }), `/backends/models?backend=${encodeURIComponent(backend)}`,
 );
-export const capabilitiesOptions = (backend: string) => ({
+export const capabilitiesOptions = (backend: string) => queryOptions({
   ...read<BackendCapabilities>(sharedKeys.capabilities(backend), `/capabilities?backend=${encodeURIComponent(backend)}`),
   refetchInterval: pollWhile<BackendCapabilities>(data => !data?.up, 10_000),
 });
@@ -61,15 +61,15 @@ export function usableCapabilities(previous: BackendCapabilities | undefined, ne
 }
 export interface VramInfo { used_mb: number; total_mb: number; free_mb: number }
 export interface LoadedModel { label: string; mb: number; in_use: boolean }
-export const vramOptions = () => ({
+export const vramOptions = () => queryOptions({
   ...read<VramInfo>(sharedKeys.vram(), '/logs/vram'),
   refetchInterval: pollWhile<VramInfo>(() => true),
 });
-export const loadedModelsOptions = () => ({
+export const loadedModelsOptions = () => queryOptions({
   ...read<{ loaded: LoadedModel[] }>(sharedKeys.loadedModels(), '/logs/models-loaded'),
   refetchInterval: pollWhile<{ loaded: LoadedModel[] }>(() => true, 2000),
 });
-export const aceModelsOptions = () => ({
+export const aceModelsOptions = () => queryOptions({
   ...localOptions<AceModels>('ace-models', '/models'),
   refetchInterval: pollWhile<AceModels>(data => !data?.models?.dit?.length, 3000),
 });
@@ -111,7 +111,7 @@ export interface Mm3LmAdapterCatalogue {
 }
 export const mm3AdaptersOptions = () => localOptions<Mm3LmAdapterCatalogue>('mm3-adapters', '/mm3/lm-adapters');
 export interface MonitorStatus { running: boolean; paused: boolean; position: number; duration: number }
-export const monitorOptions = () => ({
+export const monitorOptions = () => queryOptions({
   ...localOptions<MonitorStatus>('monitor', '/vst/monitor/status'),
   staleTime: 0,
   refetchInterval: (query: Parameters<ReturnType<typeof pollWhile<MonitorStatus>>>[0]) =>

@@ -30,6 +30,7 @@ import { useTrainingStore } from '../../stores/trainingStore';
 import { formatDateTime } from '../../utils/dateUtils';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
 const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
@@ -52,7 +53,7 @@ function gb(bytes: number): string {
 export const Mm3RunsPanel: React.FC<{ datasetId: string }> = ({ datasetId }) => {
   const { t } = useTranslation();
   const resumeMm3TrainLm = useTrainingStore(s => s.resumeMm3TrainLm);
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
 
   const jobRunning = activeJob?.status === 'queued' || activeJob?.status === 'running';
   const query = useQuery(runQueries.mm3Runs(datasetId));

@@ -1,18 +1,19 @@
 // CompareStudio.tsx - A/B listening sessions: list, new-session picker, session view.
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useDeferredValue, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Plus, Search, X, GitCompare } from 'lucide-react';
+import { compareQueries } from '../../queries/compare/queries';
+import { useCreateCompareSession } from '../../queries/compare/writes';
 import {
-  useCompareStore, loadSessions, loadSession, createSession, clearError,
-} from '../../stores/compareStore';
-import {
-  searchCompareSongs, takePendingCompareSongs,
-  type CompareSessionSummary, type CompareSongHit, type CompareStatus,
+  takePendingCompareSongs,
+  type CompareSessionSummary, type CompareStatus,
 } from '../../services/compareApi';
 import { SessionView } from './SessionView';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
+import { QueryError } from '../shared/QueryError';
 
 const DOT: Record<CompareStatus, string> = {
   scored: 'bg-emerald-400', partial: 'bg-amber-400', unscored: 'bg-zinc-400',
@@ -29,37 +30,29 @@ const NewSessionPanel: React.FC<{ initialIds: string[]; onClose: () => void; onC
   const [group, setGroup] = useState('');
   const [q, setQ] = useState('');
   const [offset, setOffset] = useState(0);
-  const [hits, setHits] = useState<CompareSongHit[]>([]);
-  const [total, setTotal] = useState(0);
   const [picked, setPicked] = useState<string[]>(initialIds);
   const [titles, setTitles] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
+  const create = useCreateCompareSession();
 
-  useEffect(() => {
-    let live = true;
-    const h = setTimeout(() => {
-      searchCompareSongs(q, PAGE, offset)
-        .then(r => {
-          if (!live) return;
-          setHits(r.songs); setTotal(r.total);
-          setTitles(prev => ({ ...prev, ...Object.fromEntries(r.songs.map(s => [s.id, s.title])) }));
-        })
-        .catch(() => { if (live) { setHits([]); setTotal(0); } });
-    }, 250);
-    return () => { live = false; clearTimeout(h); };
-  }, [q, offset]);
+  // React defers the query string while typing; keepPreviousData holds the
+  // current page so the list never blanks between keystrokes.
+  const deferredQ = useDeferredValue(q);
+  const songsQuery = useQuery(compareQueries.songSearch(deferredQ, PAGE, offset));
+  const hits = songsQuery.data?.songs ?? [];
+  const total = songsQuery.data?.total ?? 0;
 
-  const toggle = (id: string) => setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]));
+  const toggle = (id: string) => {
+    setPicked(p => (p.includes(id) ? p.filter(x => x !== id) : [...p, id]));
+    const hit = hits.find(h => h.id === id);
+    if (hit) setTitles(prev => (prev[id] ? prev : { ...prev, [id]: hit.title }));
+  };
 
-  const create = async () => {
-    if (picked.length < 2 || busy) return;
-    setBusy(true);
-    const s = await createSession({
+  const submit = () => {
+    if (picked.length < 2 || create.isPending) return;
+    create.mutate({
       name: name.trim() || t('compare.defaultName', 'Comparison {{date}}', { date: new Date().toLocaleString() }),
       group: group.trim(), songIds: picked,
-    });
-    setBusy(false);
-    if (s) onCreated(s.id);
+    }, { onSuccess: s => onCreated(s.id) });
   };
 
   return (
@@ -95,6 +88,10 @@ const NewSessionPanel: React.FC<{ initialIds: string[]; onClose: () => void; onC
           onChange={e => { setQ(e.target.value); setOffset(0); }} />
       </div>
 
+      {songsQuery.isError && (
+        <QueryError error={songsQuery.error} onRetry={() => void songsQuery.refetch()} />
+      )}
+
       <div className="flex flex-col gap-1">
         {hits.map(s => {
           const on = picked.includes(s.id);
@@ -109,7 +106,10 @@ const NewSessionPanel: React.FC<{ initialIds: string[]; onClose: () => void; onC
             </button>
           );
         })}
-        {hits.length === 0 && <div className="text-sm text-zinc-500 py-2">{t('compare.noResults', 'No songs found.')}</div>}
+        {songsQuery.isPending && hits.length === 0 && <div className="text-sm text-zinc-500 py-2">{t('compare.loading', 'Loading...')}</div>}
+        {!songsQuery.isPending && !songsQuery.isError && hits.length === 0 && (
+          <div className="text-sm text-zinc-500 py-2">{t('compare.noResults', 'No songs found.')}</div>
+        )}
       </div>
 
       <div className="flex items-center gap-2 text-xs text-zinc-500">
@@ -118,7 +118,7 @@ const NewSessionPanel: React.FC<{ initialIds: string[]; onClose: () => void; onC
         <button className="h-10 px-3 rounded-lg border border-zinc-300 dark:border-white/10 disabled:opacity-40" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>{t('compare.next', 'Next')}</button>
       </div>
 
-      <button onClick={() => void create()} disabled={picked.length < 2 || busy}
+      <button onClick={submit} disabled={picked.length < 2 || create.isPending}
         className="h-12 rounded-xl bg-pink-500 hover:bg-pink-400 text-white font-semibold disabled:opacity-40">
         {picked.length < 2 ? t('compare.pickTwo', 'Pick at least two songs') : t('compare.createN', 'Compare {{count}} songs', { count: picked.length })}
       </button>
@@ -130,22 +130,20 @@ const NewSessionPanel: React.FC<{ initialIds: string[]; onClose: () => void; onC
 
 const SessionList: React.FC<{ onOpen: (id: string) => void; onNew: () => void }> = ({ onOpen, onNew }) => {
   const { t } = useTranslation();
-  const { sessions, loading } = useCompareStore();
   const [showArchived, setShowArchived] = useState(false);
+  const sessionsQuery = useQuery(compareQueries.sessions(showArchived ? {} : { archived: false }));
+  const sessions = sessionsQuery.data?.sessions ?? [];
 
-  useEffect(() => { void loadSessions(showArchived ? {} : { archived: false }); }, [showArchived]);
-
-  const visible = showArchived ? sessions : sessions.filter(s => !s.archived);
   const groups = useMemo(() => {
     const m = new Map<string, CompareSessionSummary[]>();
-    for (const s of visible) {
+    for (const s of sessions) {
       const k = s.group || '';
       if (!m.has(k)) m.set(k, []);
       m.get(k)!.push(s);
     }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [visible]);
-  const unscored = visible.filter(s => s.status !== 'scored');
+  }, [sessions]);
+  const unscored = sessions.filter(s => s.status !== 'scored');
   const statusLabel = (s: CompareSessionSummary) =>
     s.status === 'scored' ? t('compare.scored', 'scored')
       : s.status === 'partial' ? t('compare.partialN', 'partial {{n}}/{{m}}', { n: s.scored, m: s.total })
@@ -164,6 +162,10 @@ const SessionList: React.FC<{ onOpen: (id: string) => void; onNew: () => void }>
         </button>
       </div>
 
+      {sessionsQuery.isError && (
+        <QueryError error={sessionsQuery.error} onRetry={() => void sessionsQuery.refetch()} />
+      )}
+
       {unscored.length > 0 && (
         <div>
           <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1.5">{t('compare.unscoredRow', 'Unscored')}</div>
@@ -177,8 +179,8 @@ const SessionList: React.FC<{ onOpen: (id: string) => void; onNew: () => void }>
         </div>
       )}
 
-      {loading && sessions.length === 0 && <div className="text-sm text-zinc-500">{t('compare.loading', 'Loading...')}</div>}
-      {!loading && visible.length === 0 && <div className="text-sm text-zinc-500">{t('compare.empty', 'No comparisons yet. Start one, or select songs in the Library and press Compare.')}</div>}
+      {sessionsQuery.isPending && !sessionsQuery.data && <div className="text-sm text-zinc-500">{t('compare.loading', 'Loading...')}</div>}
+      {!sessionsQuery.isPending && !sessionsQuery.isError && sessions.length === 0 && <div className="text-sm text-zinc-500">{t('compare.empty', 'No comparisons yet. Start one, or select songs in the Library and press Compare.')}</div>}
 
       {groups.map(([g, list]) => (
         <div key={g || '_'}>
@@ -205,28 +207,46 @@ const SessionList: React.FC<{ onOpen: (id: string) => void; onNew: () => void }>
 
 export const CompareStudio: React.FC = () => {
   const { t } = useTranslation();
-  const { current, error } = useCompareStore();
   const [mode, setMode] = useState<'list' | 'new' | 'session'>('list');
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [pending] = useState<string[]>(() => takePendingCompareSongs());
+  const [pendingOpened, setPendingOpened] = useState(false);
+  const sessionQuery = useQuery({
+    ...compareQueries.session(sessionId ?? ''),
+    enabled: mode === 'session' && !!sessionId,
+  });
 
-  useEffect(() => { if (pending.length) setMode('new'); }, [pending]);
+  // Hand-off from the library opens the picker once; closing it must not
+  // reopen it on the next render.
+  if (pending.length && !pendingOpened) {
+    setPendingOpened(true);
+    setMode('new');
+  }
 
-  const open = (id: string) => { void loadSession(id).then(() => setMode('session')); };
+  const open = (id: string) => { setSessionId(id); setMode('session'); };
+  const created = (id: string) => { setSessionId(id); setMode('session'); };
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {error && (
-        <div className="flex items-center gap-2 px-4 py-2 text-xs bg-red-500/10 text-red-400 border-b border-red-500/20">
-          <span className="flex-1">{error}</span>
-          <button onClick={clearError} aria-label={t('compare.dismiss', 'Dismiss')}><X size={14} /></button>
-        </div>
-      )}
       <div className="flex-1 min-h-0 overflow-y-auto">
-        {mode === 'session' && current
-          ? <SessionView key={current.id} session={current} onBack={() => setMode('list')} />
-          : mode === 'new'
-            ? <NewSessionPanel initialIds={pending} onClose={() => setMode('list')} onCreated={() => setMode('session')} />
-            : <SessionList onOpen={open} onNew={() => setMode('new')} />}
+        {mode === 'session' ? (
+          sessionQuery.isError ? (
+            <div className="p-4 space-y-2">
+              <QueryError error={sessionQuery.error} onRetry={() => void sessionQuery.refetch()} />
+              <button onClick={() => setMode('list')} className="text-xs text-zinc-500 hover:text-pink-400">
+                {t('compare.back', 'Back to sessions')}
+              </button>
+            </div>
+          ) : sessionQuery.data ? (
+            <SessionView key={sessionQuery.data.id} session={sessionQuery.data} onBack={() => setMode('list')} />
+          ) : (
+            <div className="p-4 text-sm text-zinc-500">{t('compare.loading', 'Loading...')}</div>
+          )
+        ) : mode === 'new' ? (
+          <NewSessionPanel initialIds={pending} onClose={() => setMode('list')} onCreated={created} />
+        ) : (
+          <SessionList onOpen={open} onNew={() => setMode('new')} />
+        )}
       </div>
     </div>
   );

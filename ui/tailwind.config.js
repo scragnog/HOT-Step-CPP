@@ -48,5 +48,8 @@ export default {
   plugins: [
     // Portrait screens at desktop width (e.g. 1080x1920): stacked layout + mobile nav.
     ({ addVariant }) => addVariant('portrait-wide', '@media (orientation: portrait) and (min-width: 1024px)'),
+    // Short viewports (laptops, phone landscape): the sidebar compacts so its
+    // whole menu stays on screen instead of clipping below the fold.
+    ({ addVariant }) => addVariant('short', '@media (max-height: 1040px)'),
   ],
 };

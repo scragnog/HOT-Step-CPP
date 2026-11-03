@@ -17,11 +17,15 @@ also invalidate shared preparation snapshots.
 `hooks.ts` retains only job/pipeline IDs and reload signals as client state.
 Job adoption is guarded by a selection generation, including a switch away
 and back to the same worker or dataset. Query owns the job object and polling.
-Read cancellation only cancels the HTTP read; it never cancels a server job.
+`useActiveTrainingJob()` reads the selected job from that one cache entry; the
+store keeps only `activeJobId`, the worker, and the sample/log/preview/metric
+reducers. Read cancellation only cancels the HTTP read; it never cancels a
+server job.
 
 `events.ts` shares the existing job EventSource with chart/log reducers.
-Terminal events invalidate snapshots once per job and captured worker, including
-replayed events. Reconnect invalidates authoritative snapshots. Teardown drops
+Job, progress and status frames merge through `jobFrame.ts`, the job cache's one
+rule; the store keeps no job copy. Terminal events invalidate snapshots once per job and
+captured worker, including replayed events. Reconnect invalidates authoritative snapshots. Teardown drops
 late frames. Metrics, preview rows received over SSE, form values, selections,
 score-note drafts, playback and wall-clock timers remain client state.
 
@@ -54,7 +58,7 @@ use the canonical training-data job cache rather than a separate transport.
 | `Yue2OptimisePanel` | Worker-scoped Query optimise snapshot and job |
 | `WorkersPanel` | Canonical local worker list and Query update status per worker |
 | `TrainLmForm`, `TrainDitForm`, `Mm3TrainCard`, `Mm3CodesCard`, `Yue2TrainCard`, `Yue2StageCard`, `Yue2ArTrainCard`, `Yue2AitkBatchWizard` | Forms, pure estimates, cached status hooks and scoped training-store actions |
-| `TrainingRunStats`, `TrainingChart`, `Mm3PreviewStrip` | Scoped store compatibility projection and SSE reducers; elapsed-time/audio UI only |
+| `TrainingRunStats`, `TrainingChart`, `Mm3PreviewStrip` | Active job via `useActiveTrainingJob` (Query cache); charts, elapsed-time and audio UI stay client-owned |
 
 ## Endpoints and cadence for runtime acceptance
 

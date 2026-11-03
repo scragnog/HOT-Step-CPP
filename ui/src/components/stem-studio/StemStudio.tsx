@@ -285,7 +285,7 @@ export const StemStudio: React.FC = () => {
       {(modelsQuery.error) && <div role="alert" className="text-sm text-red-500">{(modelsQuery.error)?.message}</div>}
 
       {/* Narrow/portrait pane switcher — rendered below 1024px and on portrait >= 1024px */}
-      <div className="max-[1023px]:flex min-[1024px]:hidden portrait-wide:flex flex-shrink-0 border-b border-zinc-200 dark:border-white/5">
+      <div className="max-[1279px]:flex min-[1280px]:hidden portrait-wide:flex flex-shrink-0 border-b border-zinc-200 dark:border-white/5">
         {(['source', 'tracks', 'recent'] as const).map(pane => (
           <button
             key={pane}
@@ -306,7 +306,7 @@ export const StemStudio: React.FC = () => {
       <div className="flex-1 flex overflow-hidden min-h-0">
 
         {/* Left — Source Audio + Optional Fields */}
-        <div className={`flex flex-col gap-4 p-4 overflow-y-auto border-r border-zinc-200 dark:border-white/5 flex-shrink-0 ${!isPortrait ? 'min-[1024px]:w-[300px] min-[1024px]:flex' : ''} ${narrowPane === 'source' ? 'flex w-full min-w-0' : 'hidden'}`}>
+        <div className={`flex flex-col gap-4 p-4 overflow-y-auto border-r border-zinc-200 dark:border-white/5 flex-shrink-0 ${!isPortrait ? 'min-[1280px]:w-[280px] min-[1280px]:min-w-[200px] min-[1280px]:shrink min-[1280px]:flex' : ''} ${narrowPane === 'source' ? 'flex w-full min-w-0' : 'hidden'}`}>
           <SourceSelector
             sourceAudioUrl={sourceAudioUrl}
             sourceFileName={sourceFileName}
@@ -348,7 +348,7 @@ export const StemStudio: React.FC = () => {
         </div>
 
         {/* Center — Track Selection + Mixer */}
-        <div className={`flex-col gap-4 p-4 overflow-y-auto border-r border-zinc-200 dark:border-white/5 flex-1 min-w-0 ${!isPortrait ? 'min-[1024px]:flex' : ''} ${narrowPane === 'tracks' ? 'flex' : 'hidden'}`}>
+        <div className={`flex-col gap-4 p-4 overflow-y-auto border-r border-zinc-200 dark:border-white/5 flex-1 min-w-0 ${!isPortrait ? 'min-[1280px]:flex min-[1280px]:min-w-[220px]' : ''} ${narrowPane === 'tracks' ? 'flex' : 'hidden'}`}>
           {/* Model selector for Extract */}
           {mode === 'extract' && !modelsLoading && baseModels.length === 0 && (
             <div style={styles.noModelsWarning}>
@@ -431,7 +431,7 @@ export const StemStudio: React.FC = () => {
 
         {/* Resize handle — hidden on narrow screens */}
         <div
-          className={`${isPortrait ? 'hidden' : 'max-[1023px]:hidden'} flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-purple-500/20 active:bg-purple-500/30 transition-colors`}
+          className={`${isPortrait ? 'hidden' : 'max-[1279px]:hidden'} flex-shrink-0 w-1.5 h-full cursor-col-resize group z-20 flex items-center hover:bg-purple-500/20 active:bg-purple-500/30 transition-colors`}
           onMouseDown={handleSidebarResize}
         >
           <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-purple-400 transition-colors" />
@@ -439,7 +439,7 @@ export const StemStudio: React.FC = () => {
 
         {/* Right — Recent Extractions + Queue */}
         <div
-          className={`h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden flex-col ${!isPortrait ? 'min-[1024px]:flex' : ''} max-[1023px]:!w-full ${narrowPane === 'recent' ? 'flex' : 'hidden'}`}
+          className={`h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden flex-col ${!isPortrait ? 'min-[1280px]:flex min-[1280px]:max-w-[220px]' : ''} max-[1279px]:!w-full ${narrowPane === 'recent' ? 'flex' : 'hidden'}`}
           style={{ width: sidebarWidth }}
         >
           <Section

@@ -7,7 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
-import { createFakeIndexedDB, MemoryStorage } from './audioQueueStoreTestFake.js';
+import { createFakeIndexedDB, MemoryStorage, startProjectionForTests } from './audioQueueStoreTestFake.js';
 
 register('./cssStubLoader.mjs', import.meta.url);
 const songCreatedEvents: string[] = [];
@@ -28,7 +28,8 @@ Object.assign(globalThis, {
 });
 
 const {
-  OWNER_KEY, enqueueSimpleGen, resumeQueue, _queueItemsForTests, _resetAudioQueueForTests,
+  OWNER_KEY, enqueueSimpleGen, resumeQueue, refreshServerProjection,
+  _queueItemsForTests, _resetAudioQueueForTests,
 } = await import('./audioGenQueueStore.js');
 
 const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
@@ -106,6 +107,7 @@ test('a failed song read by the enqueue waiter does not stop the projection deli
   _resetAudioQueueForTests([]);
   const delivered: string[] = [];
   const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  const stop = startProjectionForTests(refreshServerProjection);
   try {
     await resumeQueue('t');
     await enqueueSimpleGen({ title: 'Done' } as never, 't', song => delivered.push(song.id));
@@ -120,6 +122,7 @@ test('a failed song read by the enqueue waiter does not stop the projection deli
     assert.deepEqual([...delivered, ...songCreatedEvents], ['song1'], 'delivered once after recovery');
   } finally {
     releaseStatus();
+    stop();
     _resetAudioQueueForTests();
     globalThis.fetch = saved;
   }

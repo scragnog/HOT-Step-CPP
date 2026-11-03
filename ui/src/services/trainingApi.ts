@@ -1601,6 +1601,15 @@ export interface TrainingJobSummary {
   finishedAt: number | null;
 }
 
+/** Statuses that never change again: `done`, `failed`, `cancelled`. Pipelines
+ *  add `interrupted` and keep their own rule. Everything job-like — training
+ *  jobs, worker updates — shares this one: the server ends a terminal job's
+ *  stream, so a subscriber left open only reconnects and replays the buffer. */
+export const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['done', 'failed', 'cancelled']);
+
+export const isTerminalStatus = (status: string | undefined): boolean =>
+  status !== undefined && TERMINAL_STATUSES.has(status);
+
 // ── Preprocess ───────────────────────────────────────────────────────────
 export type PreprocessDtype   = 'f32' | 'bf16';
 export type PreprocessCompat  = 'hotstep' | 'sidestep';
@@ -3333,8 +3342,14 @@ export async function getTrainingDefaults(reqOpts?: TrainingReadOptions): Promis
 
 // Worker update jobs always live on this PC, even while Training Studio is
 // viewing a remote worker through the training proxy.
+export type WorkerUpdatePhase =
+  | 'preparing' | 'uploading' | 'verifying' | 'resetting'
+  | 'engine-submodule' | 'server-install' | 'ui-install'
+  | 'ui-build' | 'engine-build' | 'restarting'
+  | 'done' | 'failed' | 'cancelled';
+
 export interface WorkerUpdateStatus {
-  id: string; worker: string; status: string; cancellable: boolean; lines: string[]; error?: string;
+  id: string; worker: string; status: WorkerUpdatePhase; cancellable: boolean; lines: string[]; error?: string;
 }
 export async function getWorkerUpdate(worker: string, reqOpts?: ReadOptions): Promise<WorkerUpdateStatus | null> {
   return (await workersRequest<{ update: WorkerUpdateStatus | null }>(`/${encodeURIComponent(worker)}/update`, undefined, reqOpts)).update;

@@ -18,6 +18,7 @@ import { pullWorkerAdapters, type WorkerDispatch } from '../../services/training
 import { TD, trainingQueries } from '../../queries/training-data/queries';
 import { resourceKey } from '../../queries/keys';
 import { queryManager } from '../../queries/invalidation';
+import { pollWhile } from '../../queries/contract';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-3';
 const HERE = '__here__';
@@ -36,11 +37,14 @@ export const TrainingWorkerBar: React.FC = () => {
   const [showWorkers, setShowWorkers] = useState(false);
 
   // A dispatch captions and pushes here for minutes before the worker's batch
-  // shows it, so its line is polled quickly while it is still running.
+  // shows it, so its line is polled quickly while it is still running and
+  // slowly while idle (a dispatch can start from another client). pollWhile's
+  // error backoff still applies because the active flag is always true.
   const dispatches = useQueries({
     queries: workers.map(w => ({
       ...trainingQueries.workerDispatch(w.name),
-      refetchInterval: (q: { state: { data?: WorkerDispatch | null } }) => (q.state.data?.running ? 3000 : 15000),
+      refetchInterval: (q: Parameters<ReturnType<typeof pollWhile<WorkerDispatch | null>>>[0]) =>
+        pollWhile<WorkerDispatch | null>(() => true, q.state.data?.running ? 3000 : 15000)(q),
     })),
   }).flatMap(q => (q.data && !q.isError ? [q.data] : []));
 

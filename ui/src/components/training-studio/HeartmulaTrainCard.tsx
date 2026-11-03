@@ -12,6 +12,7 @@ import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { Yue2AitkBatchWizard } from './Yue2AitkBatchWizard';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
 export interface HeartmulaTrainCardProps {
   datasetId?: string;
@@ -95,7 +96,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, previews: ta
   const runLive = !!run && (run.state === 'running' || run.state === 'previewing' || run.state === 'checkpointing');
   const eta = runLive && run ? heartmulaEta({ step: run.step, totalSteps: run.totalSteps, msPerStep: run.msPerStep,
     everySteps: takes?.settings.everySteps ?? 0, previews: takes?.previews ?? [] }) : null;
-  const job = useTrainingStore(s => s.activeJob);
+  const job = useActiveTrainingJob();
   const ownLog = job?.kind === 'heartmula-train' && job.datasetId === datasetId ? jobLog : [];
   const locked = busy || resume;
   const edited = (key: keyof HeartmulaPreviewSettings) => !locked && previewEdits[key] !== undefined && previewEdits[key] !== status.previewDefaults[key];

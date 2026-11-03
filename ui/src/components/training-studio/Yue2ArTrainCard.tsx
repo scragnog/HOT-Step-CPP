@@ -55,19 +55,12 @@ import { Toggle } from '../shared/Toggle';
 import { JobProgress } from './JobProgress';
 import { Yue2SplitChart } from './Yue2SplitChart';
 import { Yue2StageCard } from './Yue2StageCard';
+import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
+import { BTN_GO, BTN_SM, CARD, INPUT } from './yue2CardUi';
 
-const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
-const INPUT = 'w-full px-2.5 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 '
-            + 'dark:border-white/10 text-sm text-zinc-800 dark:text-zinc-200 outline-none '
-            + 'focus:border-amber-500/50';
-const BTN_SM = 'shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-medium border border-zinc-300 '
-             + 'dark:border-white/10 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 '
-             + 'dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 const BTN_STAGE = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/15 border '
                 + 'border-amber-500/25 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 '
                 + 'disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5';
-const BTN_GO = 'px-4 py-2 rounded-lg text-sm font-semibold bg-amber-500 text-black hover:bg-amber-400 '
-             + 'disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2';
 const LABEL = 'text-[11px] font-medium text-zinc-500 uppercase tracking-wider';
 
 const NumField: React.FC<{
@@ -136,7 +129,7 @@ interface TokenizeForm {
 
 export const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => void }> = ({ status, onDone }) => {
   const { t } = useTranslation();
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
   const startYue2Tokenize = useTrainingStore(s => s.startYue2Tokenize);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -337,7 +330,7 @@ interface SheetForm {
 export const Yue2SheetCard: React.FC<{ datasetId: string; status: Yue2ArStatus; onDone: () => void }> =
     ({ datasetId, status, onDone }) => {
   const { t } = useTranslation();
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
   const startYue2Sheet = useTrainingStore(s => s.startYue2Sheet);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -707,7 +700,7 @@ interface StemsForm {
 
 export const Yue2StemsCard: React.FC<{ status: Yue2ArStatus; onDone: () => void }> = ({ status, onDone }) => {
   const { t } = useTranslation();
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
   const startYue2Stems = useTrainingStore(s => s.startYue2Stems);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -850,7 +843,7 @@ interface AlignForm {
 
 export const Yue2AlignCard: React.FC<{ status: Yue2ArStatus; onDone: () => void }> = ({ status, onDone }) => {
   const { t } = useTranslation();
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
   const startYue2Align = useTrainingStore(s => s.startYue2Align);
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -1248,7 +1241,7 @@ export const Yue2ArTrainStageCard: React.FC<{
   datasetId: string; trigger?: string; status: Yue2ArStatus | null; reload: () => void;
 }> = ({ datasetId, trigger, status, reload }) => {
   const { t } = useTranslation();
-  const activeJob = useTrainingStore(s => s.activeJob);
+  const activeJob = useActiveTrainingJob();
   const startYue2ArTrain = useTrainingStore(s => s.startYue2ArTrain);
   const yue2ArLive = useTrainingStore(s => s.yue2ArLive);
   const yue2ArEvalSeries = useTrainingStore(s => s.yue2ArEvalSeries);

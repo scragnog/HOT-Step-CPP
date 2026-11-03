@@ -46,6 +46,7 @@ import type {
   TrainingCapabilities,
   TrainingDatasetDetail,
   TrainingDatasetSummary,
+  TrainingJobKind,
   TrainingJobSummary,
   TrainingPreview,
   TrainingSample,
@@ -209,11 +210,14 @@ interface TrainingState {
   sampleOrder: string[];                          // display order (relPath asc)
 
   // job
-  activeJob: TrainingJobSummary | null;
+  /** The selected job's id. The job summary itself has one owner: the Query
+   *  cache entry `trainingQueries.job(worker, id)`, fed by the one projection
+   *  mounted in TrainingStudio. */
+  activeJobId: string | null;
   jobLog: Array<{ level: string; message: string; ts: number }>;   // capped at 200
   /** YuE2 "Perform all stages": true from the click until the chain stops,
    *  either because every stage is done/skipped or because one failed. Not
-   *  persisted — a hard reload loses it, same as `activeJob`. */
+   *  persisted — a hard reload loses it, same as `activeJobId`. */
   /** Datasets ticked for a server-side YuE2 batch, waiting for the user to
    *  configure the recipe on the training card and press Start. */
   yue2BatchDraft: string[] | null;
@@ -426,7 +430,12 @@ interface TrainingState {
   startAudition(opts: AuditionOptions): Promise<void>;
   auditionSample(sampleId: string): Promise<void>;
   cancelJob(): Promise<void>;
-  applyStreamEvent(ev: TrainingStreamEvent): void;   // called by useTrainingStream
+  /** Post-job refresh, called once per terminal job by the projection
+   *  (replayed terminal frames dedupe on the job id). */
+  jobTerminal(jobId: string): void;
+  /** Store-owned stream reducers: samples, log, previews and metrics. Job
+   *  frames belong to the projection's cache entry, not here. */
+  applyStreamEvent(ev: TrainingStreamEvent): void;
   loadPipelines(): Promise<void>;
   setYue2BatchDraft(ids: string[] | null): void;
   setYue2BatchFollow(follow: boolean): void;
@@ -469,7 +478,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   samplesById: {},
   sampleOrder: [],
 
-  activeJob: null,
+  activeJobId: null,
   jobLog: [],
   yue2BatchDraft: null,
   yue2Batches: [],
@@ -538,7 +547,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
       detail: null,
       samplesById: {},
       sampleOrder: [],
-      activeJob: null,
+      activeJobId: null,
       jobLog: [],
       // Variant cards, adapter cards and previews are per-dataset; keeping them
       // would attribute one dataset's caches and runs to the next one opened.
@@ -621,11 +630,15 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
       });
       if (detail.activeJobId) {
         try {
-          const job = await queryClient.query(tq.job(worker, detail.activeJobId));
-          if (!superseded()) set({ activeJob: job });
-        } catch { /* job may have just ended */ }
+          await queryClient.query(tq.job(worker, detail.activeJobId));
+          if (!superseded()) set({ activeJobId: detail.activeJobId });
+        } catch {
+          // Job may have just ended. On a switch, clear the old dataset's id so
+          // its stream events don't leak into this dataset's projection.
+          if (!superseded() && isSwitch) set({ activeJobId: null });
+        }
       } else if (isSwitch) {
-        set({ activeJob: null });
+        set({ activeJobId: null });
       }
     } catch (err) {
       if (!superseded()) set({ error: errMessage(err), loading: false });
@@ -650,7 +663,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
       openSampleId: null,
       pendingEdits: {},
       jobLog: [],
-      activeJob: null,
+      activeJobId: null,
     });
     await get().loadDatasets();
     return detail.id;
@@ -1049,20 +1062,25 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   },
 
   cancelJob: async () => {
-    const { trainingWorker: worker, activeJob: job } = get();
+    const { trainingWorker: worker, activeJobId: jobId } = get();
+    if (!jobId) return;
+    const job = jobOf(get);
     if (!job) return;
     try {
-      await writeAndInvalidate(queryClient, () => trainingApi.cancelJob(job.id, { worker }),
-        keysPlan(resourceKey(TD.job, { worker }, job.id)));
-      if (get().trainingWorker !== worker || get().activeJob?.id !== job.id) return;
-      set({ activeJob: { ...job, status: 'cancelled' } });
-      // That status change unmounts the EventSource, so the server's terminal
-      // `status` frame may never arrive — run the authoritative refresh here.
-      refreshAfterJob(get, job.id);
+      await writeAndInvalidate(queryClient, () => trainingApi.cancelJob(jobId, { worker }),
+        keysPlan(resourceKey(TD.job, { worker }, jobId)));
+      if (get().trainingWorker !== worker || get().activeJobId !== jobId) return;
+      // The status change can close the stream before the server's terminal
+      // frame lands, so write the terminal status and refresh here.
+      queryClient.setQueryData(tq.job(worker, jobId).queryKey,
+        { ...job, status: 'cancelled' as const });
+      refreshAfterJob(get, jobId);
     } catch (err) {
       if (get().trainingWorker === worker) set({ error: errMessage(err) });
     }
   },
+
+  jobTerminal: (jobId) => { refreshAfterJob(get, jobId); },
 
   loadPipelines: async () => {
     const worker = get().trainingWorker;
@@ -1138,42 +1156,11 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   applyStreamEvent: (ev) => {
     switch (ev.type) {
       case 'job':
-        set({ activeJob: ev.job });
-        // finishJob() emits this terminal 'job' frame BEFORE the 'status'
-        // frame — and setting a terminal activeJob closes the EventSource
-        // (useTrainingStream keys on jobActive), racing the status frame's
-        // delivery. When the close won, refreshAfterJob never ran and a
-        // finished audition's previews (or a trained adapter's status) only
-        // appeared after a manual page refresh. Terminal is terminal whichever
-        // frame says it first; refreshedJobs dedupes the double-fire.
-        if (ev.job.status !== 'queued' && ev.job.status !== 'running') {
-          refreshAfterJob(get, ev.job.id);
-        }
+      case 'progress':
+      case 'status':
+        // Job frames are merged into the cache by the projection's bridge;
+        // this reducer owns only the samples, log, previews and metrics.
         break;
-
-      case 'progress': {
-        const job = get().activeJob;
-        if (!job) break;
-        set({
-          activeJob: {
-            ...job,
-            // A job that is reporting per-item progress is running, whatever
-            // the last status we were told was. adoptJob reads the status once,
-            // at start, and a job that was still queued at that instant stays
-            // labelled "Queued..." for its whole life if the 'job' event that
-            // would have corrected it was missed — which is how a separation
-            // sat there saying Queued at 7 of 12 tracks.
-            status: job.status === 'queued' ? 'running' : job.status,
-            done: ev.done,
-            total: ev.total,
-            failed: ev.failed,
-            phase: ev.phase,
-            currentSampleId: ev.currentSampleId,
-            engineQueueDepth: ev.engineQueueDepth,
-          },
-        });
-        break;
-      }
 
       case 'sample': {
         // Idempotent: REPLACE the row keyed by sampleId. The SSE buffer is
@@ -1231,7 +1218,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         // Only one job can own a dataset, so a single set of series is enough
         // and neither kind needs its own copy. Everything below is idempotent:
         // the SSE buffer is replayed on every reconnect.
-        const chartKind = get().activeJob?.kind;
+        const chartKind = jobOf(get)?.kind;
         // mm3-train-lm emits the SAME step/milestone metrics (the binary speaks
         // train-lm's JSONL vocabulary), so it draws on the same chart with no
         // other change.
@@ -1396,7 +1383,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
 
         // train-dit writes its own slices. Same event shape, same omit-vs-zero
         // discipline as the LM path below; only the destination differs.
-        if (get().activeJob?.kind === 'train-dit') {
+        if (jobOf(get)?.kind === 'train-dit') {
           if (ev.metric === 'vram') {
             // One-shot, before the first step. Parked in `ditVram` rather than
             // written into trainDitLast — see the note at the top of this file.
@@ -1498,19 +1485,21 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         break;
       }
 
-      case 'status': {
-        const job = get().activeJob;
-        if (job) set({ activeJob: { ...job, status: ev.status, error: ev.error ?? job.error } });
-        // Authoritative refresh — exactly once per job, replay-safe.
-        if (job) refreshAfterJob(get, job.id);
-        break;
-      }
     }
   },
 }));
 
 type SetState = (partial: Partial<TrainingState>) => void;
 type GetState = () => TrainingState;
+
+/** The selected job's cached summary, or null before the projection's first
+ *  read/frame. Store code that needs the job's kind (metric routing, the
+ *  post-job refresh) reads it here rather than keeping a second copy. */
+function jobOf(get: GetState, jobId = get().activeJobId): TrainingJobSummary | null {
+  if (!jobId) return null;
+  return queryClient.getQueryData<TrainingJobSummary>(
+    tq.job(get().trainingWorker, jobId).queryKey) ?? null;
+}
 
 /** Replace one sample row in the cached detail of the scope it belongs to. */
 function cacheSample(worker: string | null, datasetId: string, sample: TrainingSample): void {
@@ -1599,6 +1588,8 @@ function refreshAfterJob(get: GetState, jobId: string): void {
   const id = get().selectedDatasetId;
   if (!id || refreshedJobs.has(jobId)) return;
   refreshedJobs.add(jobId);
+  const job = jobOf(get, jobId);
+  const kind = job?.kind;
   // Everything a job can change on this worker is stale now: mounted readers
   // refetch, the rest refetch when next asked.
   void queryManager.filter(queryClient, workerReads(get().trainingWorker));
@@ -1606,7 +1597,7 @@ function refreshAfterJob(get: GetState, jobId: string): void {
   void get().loadDatasets();
   // A finished train-lm job wrote (or failed to write) the adapter dir — the
   // done-state card reads that from disk, so re-read it here.
-  if (get().activeJob?.kind === 'train-lm') {
+  if (kind === 'train-lm') {
     void get().loadTrainLmStatus();
     // ...and the adapter pickers list what is under adapters/lm.
     void queryManager.invalidate(queryClient, resourceKey(TD.lmAdapters));
@@ -1614,18 +1605,18 @@ function refreshAfterJob(get: GetState, jobId: string): void {
   // Same for the DiT adapter dir — the per-epoch export means even a cancelled
   // run usually leaves one on disk, so this refresh matters on every terminal
   // status, not just 'done'.
-  if (get().activeJob?.kind === 'train-dit') void get().loadTrainDitStatus();
+  if (kind === 'train-dit') void get().loadTrainDitStatus();
   // The published HeartMuLa adapter appears in the generation picker.
-  if (get().activeJob?.kind === 'heartmula-train' && get().trainingWorker === null) {
+  if (kind === 'heartmula-train' && get().trainingWorker === null) {
     void queryManager.invalidate(queryClient, resourceKey('global-models/backend-models'));
   }
-  if (get().activeJob?.kind === 'sa3-train' && get().trainingWorker === null) {
+  if (kind === 'sa3-train' && get().trainingWorker === null) {
     void queryManager.invalidate(queryClient, resourceKey('global-models/sa3-adapters'));
   }
   // A finished audition wrote data/training/previews/<id>/ — the card renders
   // its players from the list, so re-read it. Placed here rather than inline in
   // applyStreamEvent's `status` case so a cancelled job refreshes too (§6.6).
-  if (get().activeJob?.kind === 'audition') void get().loadAuditions();
+  if (kind === 'audition') void get().loadAuditions();
 }
 
 /**
@@ -1636,7 +1627,7 @@ function refreshAfterJob(get: GetState, jobId: string): void {
 async function adoptJob(set: SetState, get: GetState, worker: string | null, datasetId: string, jobId: string): Promise<void> {
   const job = await queryClient.query(tq.job(worker, jobId));
   if (!isCurrent(get, worker, datasetId)) return;
-  set({ activeJob: job });
+  set({ activeJobId: job.id });
   if (job.status !== 'queued' && job.status !== 'running') refreshAfterJob(get, job.id);
 }
 
@@ -1647,7 +1638,7 @@ async function runPreparation(
   payload: () => Yue2PreparationPayload, enabled = true,
 ): Promise<void> {
   if (get().yue2RunAllActive) return;
-  const running = get().activeJob;
+  const running = jobOf(get);
   if (running && (running.status === 'queued' || running.status === 'running')) {
     set({ error: 'A job is already running for this dataset — wait for it to finish first.' });
     return;
@@ -1702,7 +1693,7 @@ async function followYue2Preparation(
                 ...(stage === 'ar' ? { yue2ArLive: null, yue2ArEvalSeries: [] } : {}) }
             : {}) });
       }
-      set({ activeJob: job });
+      set({ activeJobId: job.id });
       if (job.status !== 'queued' && job.status !== 'running') refreshAfterJob(get, job.id);
     }
     if (pipeline.status === 'done') return true;
@@ -1799,8 +1790,7 @@ async function flushFields(set: SetState, get: GetState, sampleId: string, field
 let etaMemo: { key: readonly unknown[]; value: TrainingEta } | null = null;
 
 /** The live run's ETA, or `{kind:'none'}` when no training job is active. */
-export function selectTrainingEta(s: TrainingState): TrainingEta {
-  const kind = s.activeJob?.kind;
+export function selectTrainingEta(s: TrainingState, kind: TrainingJobKind | null | undefined): TrainingEta {
   if (kind !== 'train-lm' && kind !== 'train-dit') return NO_ETA;
   const series = kind === 'train-dit' ? s.trainDitEpochs : s.trainLmEpochs;
   const key = [kind, series, s.trainTargetLoss, s.trainMaxEpochs] as const;
@@ -1816,8 +1806,7 @@ export function selectTrainingEta(s: TrainingState): TrainingEta {
 const NO_ETA: TrainingEta = { kind: 'none' };
 
 /** The live run's epoch series, whichever kind owns the dataset. */
-export function selectTrainingEpochs(s: TrainingState): Array<TrainLmEpoch | TrainDitEpoch> {
-  const kind = s.activeJob?.kind;
+export function selectTrainingEpochs(s: TrainingState, kind: TrainingJobKind | null | undefined): Array<TrainLmEpoch | TrainDitEpoch> {
   if (kind === 'train-dit') return s.trainDitEpochs;
   if (kind === 'train-lm') return s.trainLmEpochs;
   return EMPTY_EPOCHS;

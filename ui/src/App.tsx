@@ -7,6 +7,8 @@
 // DOM hosts and wires their callbacks to the store.
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { viewFromUrl, urlForView } from './app/viewRoutes';
+import { RestartingOverlay, ServerOfflineOverlay } from './app/ServerOverlays';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from './context/AuthContext';
 import { GlobalParamsProvider, useGlobalParams } from './context/GlobalParamsContext';
@@ -25,6 +27,7 @@ import { SongList } from './components/library/SongList';
 import { StreamWaveform } from './components/player/StreamWaveform';
 import { mm3StreamEnsureTakes, useMm3StreamAudio } from './stores/mm3StreamStore';
 import { enqueueSimpleGen, useResumeQueue, useAudioGenQueueSelector, clearFinishedFromAudioQueue } from './stores/audioGenQueueStore';
+import { useAudioQueueProjection } from './queries/shell-queue/projection';
 import { NoModelsBanner } from './components/shared/NoModelsBanner';
 import { RestoredQueueBanner } from './components/shared/RestoredQueueBanner';
 import { AudioQueueMigrationBanner } from './components/shared/AudioQueueMigrationBanner';
@@ -100,89 +103,6 @@ import { HiHatParticles } from './components/shared/HiHatParticles';
 import { subscribeEventSource } from './services/sharedEventSource';
 
 // Inlined: the file could not be fetched from a server that has just died.
-import serverOfflineImage from './assets/server-offline.webp?inline';
-/** Derive top-level view from the browser URL */
-function viewFromUrl(path = window.location.pathname): string {
-  if (path.startsWith('/insta-gen')) return 'insta-gen';
-  if (path.startsWith('/lyric-studio')) return 'lyric-studio';
-  if (path.startsWith('/cover-studio')) return 'cover-studio';
-  if (path.startsWith('/stem-studio')) return 'stem-studio';
-  if (path.startsWith('/stem-builder')) return 'stem-builder';
-  if (path.startsWith('/song-builder')) return 'song-builder';
-  if (path.startsWith('/storm')) return 'storm';
-  if (path.startsWith('/midi-studio')) return 'midi-studio';
-  if (path.startsWith('/training-studio')) return 'training-studio';
-  if (path.startsWith('/compare')) return 'compare-studio';
-  if (path.startsWith('/repaint')) return 'repaint';
-  if (path.startsWith('/library')) return 'library';
-  if (path.startsWith('/settings')) return 'settings';
-  return 'create';
-}
-
-/** Map view names to URL paths */
-function urlForView(view: string): string {
-  if (view === 'insta-gen') return '/insta-gen';
-  if (view === 'lyric-studio') {
-    // Restore the last deep URL (artist/album/tab) if we have one
-    try {
-      const saved = localStorage.getItem('hs-lastLyricStudioUrl');
-      if (saved) return saved;
-    } catch { /* ignore */ }
-    return '/lyric-studio';
-  }
-  if (view === 'cover-studio') return '/cover-studio';
-  if (view === 'stem-studio') return '/stem-studio';
-  if (view === 'stem-builder') return '/stem-builder';
-  if (view === 'song-builder') return '/song-builder';
-  if (view === 'storm') return '/storm';
-  if (view === 'midi-studio') return '/midi-studio';
-  if (view === 'training-studio') {
-    // Restore the last deep URL (dataset/phase) if we have one
-    try {
-      const saved = localStorage.getItem('hs-lastTrainingStudioUrl');
-      if (saved) return saved;
-    } catch { /* ignore */ }
-    return '/training-studio';
-  }
-  if (view === 'compare-studio') return '/compare';
-  if (view === 'repaint') return '/repaint';
-  if (view === 'library') return '/library';
-  if (view === 'settings') return '/settings';
-  return '/';
-}
-
-/** Poll after either kind of disconnect, then reload once the server answers. */
-function useServerHealthReload(startDelayMs: number, onWaiting?: () => void, onReconnected?: () => void): void {
-  useEffect(() => {
-    let cancelled = false;
-    let checking = false;
-    let poll: number | undefined;
-    let reload: number | undefined;
-    const start = window.setTimeout(() => {
-      onWaiting?.();
-      poll = window.setInterval(async () => {
-        if (checking) return;
-        checking = true;
-        try {
-          const res = await fetch('/api/health', { signal: AbortSignal.timeout(2000) });
-          if (res.ok && !cancelled) {
-            window.clearInterval(poll);
-            onReconnected?.();
-            reload = window.setTimeout(() => window.location.reload(), 500);
-          }
-        } catch { /* The server is still offline. */ }
-        finally { checking = false; }
-      }, 2000);
-    }, startDelayMs);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(start);
-      window.clearInterval(poll);
-      window.clearTimeout(reload);
-    };
-  }, [startDelayMs, onWaiting, onReconnected]);
-}
-
 // Which recent-songs feed the activity column shows, per view. Views that are
 // not listed — library, settings, training — show every source.
 const ACTIVITY_SOURCE: Record<string, string | undefined> = {
@@ -191,59 +111,6 @@ const ACTIVITY_SOURCE: Record<string, string | undefined> = {
   'lyric-studio': 'lyric-studio',
   'cover-studio': 'cover-studio',
   'repaint': 'repaint',
-};
-
-/** Restarting overlay — polls /api/health and reloads when the server is back */
-const RestartingOverlay: React.FC = () => {
-  const { t } = useTranslation();
-  const [status, setStatus] = useState(t('app.restarting.stopping'));
-  const [dots, setDots] = useState('');
-
-  // Animate dots
-  useEffect(() => {
-    const iv = setInterval(() => {
-      setDots(prev => prev.length >= 3 ? '' : prev + '.');
-    }, 500);
-    return () => clearInterval(iv);
-  }, []);
-
-  // Keep polling, but say what to do once a restart has clearly stalled.
-  const [stalled, setStalled] = useState(false);
-  useEffect(() => {
-    const id = window.setTimeout(() => setStalled(true), 90_000);
-    return () => window.clearTimeout(id);
-  }, []);
-
-  const onWaiting = useCallback(() => setStatus(t('app.restarting.waiting')), [t]);
-  const onReconnected = useCallback(() => setStatus(t('app.restarting.reconnected')), [t]);
-  useServerHealthReload(3000, onWaiting, onReconnected);
-
-  return (
-    <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center bg-white dark:bg-black text-zinc-900 dark:text-white">
-      {/* Animated spinner */}
-      <div className="relative mb-8">
-        <div className="w-16 h-16 rounded-full border-4 border-amber-500/20" />
-        <div className="absolute inset-0 w-16 h-16 rounded-full border-4 border-transparent border-t-amber-400 animate-spin" />
-      </div>
-      <h1 className="text-2xl font-bold mb-2">{t('app.restarting.title')}</h1>
-      <p className="text-zinc-600 dark:text-zinc-400 text-lg">{status}{dots}</p>
-      <p className="text-zinc-600 text-sm mt-4">{t('app.restarting.message')}</p>
-      {stalled && (
-        <p className="text-amber-600 dark:text-amber-400 text-sm mt-4 max-w-md text-center">
-          {t('app.restarting.stalled', 'The server has not come back after 90 seconds. Check the HOT-Step Server window for errors. If it has closed, start HOT-Step again; this page reloads by itself once the server answers.')}
-        </p>
-      )}
-    </div>
-  );
-};
-
-const ServerOfflineOverlay: React.FC = () => {
-  useServerHealthReload(0);
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black">
-      <img src={serverOfflineImage} alt="Server offline. Please restart or close tab" className="max-w-[90vw] max-h-[90vh] object-contain" />
-    </div>
-  );
 };
 
 /** Compact A/B comparison bar — shows above the player when both tracks are pinned */
@@ -622,6 +489,7 @@ const AppContent: React.FC = () => {
 
   // Shared audio generation queue — resume on mount, subscribe only to active count
   useResumeQueue(token || undefined);
+  useAudioQueueProjection(token || undefined);
   const activeJobCount = useAudioGenQueueSelector(s =>
     s.items.filter(i => i.status === 'pending' || i.status === 'loading-adapter' || i.status === 'generating').length
   );
@@ -1128,7 +996,7 @@ const AppContent: React.FC = () => {
                 <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
               </div>
               <DiscoPulseWrapper hue={DISCO.rightSidebar}
-                className="flex-shrink-0 h-full bg-zinc-50 dark:bg-suno z-10 border-l border-zinc-200 dark:border-white/5"
+                className="flex-shrink-0 h-full bg-zinc-50 dark:bg-suno z-10 border-l border-zinc-200 dark:border-white/5 max-xl:max-w-[26vw]"
                 style={{ width: rightSidebarWidth }}
               >
                 <RightSidebar
@@ -1228,7 +1096,7 @@ const AppContent: React.FC = () => {
                 <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
               </div>
               <DiscoPulseWrapper hue={DISCO.rightSidebar}
-                className="flex-shrink-0 h-full bg-zinc-50 dark:bg-suno z-10 border-l border-zinc-200 dark:border-white/5"
+                className="flex-shrink-0 h-full bg-zinc-50 dark:bg-suno z-10 border-l border-zinc-200 dark:border-white/5 max-xl:max-w-[26vw]"
                 style={{ width: rightSidebarWidth }}
               >
                 <RightSidebar
@@ -1262,9 +1130,9 @@ const AppContent: React.FC = () => {
         <DiscoPulseWrapper
           hue={DISCO.createPanel}
           className="flex-shrink-0 min-w-0 border-zinc-200 dark:border-white/5
-            min-[1024px]:h-full min-[1024px]:border-r
+            min-[1024px]:h-full min-[1024px]:border-r min-[1024px]:max-xl:max-w-[32vw]
             max-[1023px]:!w-full max-[1023px]:border-b max-[1023px]:h-auto max-[1023px]:border-r-0
-            portrait-wide:!w-full portrait-wide:border-b portrait-wide:border-r-0 portrait-wide:h-auto"
+            portrait-wide:!w-full portrait-wide:border-b portrait-wide:border-r-0 portrait-wide:h-auto portrait-wide:max-w-none"
           style={{ width: createPanelWidth }}
         >
           <CreatePanel
@@ -1372,7 +1240,7 @@ const AppContent: React.FC = () => {
             </div>
             <DiscoPulseWrapper hue={DISCO.rightSidebar}
               className="flex-shrink-0 h-full bg-zinc-50 dark:bg-suno z-10 border-l border-zinc-200 dark:border-white/5
-                max-[1023px]:hidden portrait-wide:hidden"
+                max-xl:max-w-[26vw] max-[1023px]:hidden portrait-wide:hidden"
               style={{ width: rightSidebarWidth }}
             >
               <RightSidebar
@@ -1593,7 +1461,7 @@ const AppContent: React.FC = () => {
           <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-pink-400 transition-colors" />
         </div>
         <DiscoPulseWrapper hue={DISCO.activity}
-          className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden portrait-wide:hidden"
+          className="h-full flex-shrink-0 border-l border-zinc-200 dark:border-white/5 overflow-hidden max-xl:max-w-[30vw] max-[1023px]:hidden portrait-wide:hidden"
           style={{ width: activitySidebarWidth }}
         >
           <ActivitySidebar
@@ -1632,7 +1500,7 @@ const AppContent: React.FC = () => {
               <div className="w-0.5 h-8 rounded-full bg-zinc-600 group-hover:bg-violet-400 transition-colors" />
             </div>
             <DiscoPulseWrapper hue={DISCO.assistant}
-              className="flex-shrink-0 h-full border-l border-zinc-200 dark:border-white/5"
+              className="flex-shrink-0 h-full border-l border-zinc-200 dark:border-white/5 max-xl:max-w-[26vw]"
               style={{ width: assistantWidth }}
             >
               <AssistantPanel onClose={() => setShowAssistant(false)} activeView={activeView} />

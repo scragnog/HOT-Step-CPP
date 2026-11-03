@@ -200,3 +200,37 @@ test('terminal SSE replay invalidates once, reconnect refreshes scope, teardown 
   assert.equal(stopped, 1);
   assert.equal(cache.getQueryState(a.queryKey)?.isInvalidated, false);
 });
+
+test('run stream frames merge into the job cache and never blank omitted fields', async () => {
+  const { bridgeRunEvents } = await import('./events');
+  const cache = client();
+  const jobKey = trainingQueries.job('A', 'job1').queryKey;
+  cache.setQueryData(jobKey, {
+    id: 'job1', status: 'queued', done: 0, total: 10, failed: 0,
+    phase: '', currentSampleId: null, engineQueueDepth: 0, error: null,
+  } as never);
+  let handlers: { message?: (data: string) => void } = {};
+  const stop = bridgeRunEvents(cache, 'job1', 'A', (_url, callbacks) => {
+    handlers = callbacks; return () => {};
+  });
+  try {
+    handlers.message?.(JSON.stringify({
+      type: 'progress', done: 3, total: 10, failed: 0,
+      phase: 'preprocess', currentSampleId: 's1', engineQueueDepth: 2,
+    }));
+    let job = cache.getQueryData(jobKey) as Record<string, unknown>;
+    assert.equal(job.status, 'running', 'progress implies running');
+    assert.equal(job.done, 3);
+    assert.equal(job.phase, 'preprocess');
+
+    handlers.message?.(JSON.stringify({ type: 'job', job: { id: 'job1', status: 'running', done: 4 } }));
+    job = cache.getQueryData(jobKey) as Record<string, unknown>;
+    assert.equal(job.done, 4);
+    assert.equal(job.phase, 'preprocess', 'a job frame leaves fields it omits intact');
+
+    handlers.message?.(JSON.stringify({ type: 'status', status: 'failed', error: 'boom' }));
+    job = cache.getQueryData(jobKey) as Record<string, unknown>;
+    assert.equal(job.status, 'failed');
+    assert.equal(job.error, 'boom');
+  } finally { stop(); }
+});
