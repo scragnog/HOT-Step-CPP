@@ -7,10 +7,41 @@ import path from 'node:path';
 import test from 'node:test';
 import { Readable } from 'node:stream';
 import { PROJECT_ROOT } from '../../config.js';
-import { changedSteps, command, currentCommit, getUpdate, ggmlPointerChanged, platformCommands, receiveUpdate, runUpdatePlan, startUpdate, updateGgml, workerUpdateGate } from './workerUpdate.js';
+import { changedSteps, command, createDirtyCheckout, currentCommit, getUpdate, ggmlPointerChanged, platformCommands, receiveUpdate, runUpdatePlan, startUpdate, updateGgml, workerUpdateGate } from './workerUpdate.js';
 import { workerStatus } from './trainingWorkers.js';
 
 const git = (...args: string[]) => execFileSync('git', args, { cwd: PROJECT_ROOT, encoding: 'utf8' }).trim();
+
+test('dirty checkout caches the startup result and refreshes after 30 seconds without waiting', async () => {
+  let now = 0;
+  const pending: { resolve: (dirty: boolean) => void; reject: (error: Error) => void }[] = [];
+  const dirty = createDirtyCheckout(() => new Promise<boolean>((resolve, reject) => pending.push({ resolve, reject })), () => now);
+  assert.equal(pending.length, 1, 'starts a check at startup');
+  assert.equal(dirty(), false, 'returns immediately before the startup check completes');
+  pending[0].resolve(true);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(dirty(), true);
+  now = 29_999;
+  assert.equal(dirty(), true);
+  assert.equal(pending.length, 1);
+  now = 30_000;
+  assert.equal(dirty(), true, 'returns the cached value during refresh');
+  assert.equal(pending.length, 2);
+  now = 60_000;
+  assert.equal(dirty(), true);
+  assert.equal(pending.length, 2, 'only one refresh in flight');
+  pending[1].resolve(false);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(dirty(), false);
+  assert.equal(pending.length, 2, 'completed check stays cached for 30 seconds');
+  now = 90_000;
+  assert.equal(dirty(), false);
+  assert.equal(pending.length, 3);
+  pending[2].reject(new Error('git unavailable'));
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(dirty(), false);
+  assert.equal(pending.length, 3, 'failed checks are also throttled');
+});
 async function mockWorker(handler: (req: http.IncomingMessage, res: http.ServerResponse) => void) {
   const server = http.createServer(handler);
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));

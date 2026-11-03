@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { NextFunction, Request, Response } from 'express';
@@ -20,7 +21,30 @@ const git = (args: string[], cwd = PROJECT_ROOT) =>
   execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15000, windowsHide: true }).trim();
 export const startupCommit = (() => { try { return git(['rev-parse', 'HEAD']); } catch { return ''; } })();
 export const currentCommit = () => git(['rev-parse', 'HEAD']);
-export const dirtyCheckout = () => { try { return !!git(['status', '--porcelain', '--untracked-files=normal', '--ignore-submodules=none']); } catch { return false; } };
+/** Check at startup, then on demand 30 seconds after completion. Readers never wait. */
+export function createDirtyCheckout(read: () => Promise<boolean>, now = Date.now): () => boolean {
+  let cached = false;
+  let refreshAt = 0;
+  let refreshing = false;
+  const refresh = async () => {
+    refreshing = true;
+    try { cached = await read(); } catch { cached = false; }
+    finally { refreshAt = now() + 30_000; refreshing = false; }
+  };
+  void refresh();
+  return () => {
+    if (!refreshing && now() >= refreshAt) void refresh();
+    return cached;
+  };
+}
+
+const execFileAsync = promisify(execFile);
+export const dirtyCheckout = createDirtyCheckout(async () => {
+  const { stdout } = await execFileAsync('git', ['status', '--porcelain', '--untracked-files=normal', '--ignore-submodules=none'], {
+    cwd: PROJECT_ROOT, encoding: 'utf8', timeout: 15000, windowsHide: true,
+  });
+  return !!stdout.trim();
+});
 
 export function activeTraining() {
   if (gpuLaneBusy() || gpuLaneDepth() > 0) return { kind: 'generation', dataset: '', done: 0, total: 0, status: 'running' };
