@@ -900,6 +900,9 @@ export interface Yue2AitkCheckpointRecord {
   step: number;
   dir: string;
   loss?: number;
+  /** `loss` averaged decoder-only steps (the planner was frozen): it is the
+   *  decoder's flow loss, not the planner+decoder composite. */
+  decoderOnly?: boolean;
   /** From meters.json: planner KL reading, decoder reconstruction, frozen. */
   kl?: number;
   recon?: number;
@@ -2094,6 +2097,9 @@ export interface TrainingMetricEvent {
   narMse?: number;
   /** YuE2 joint: true once the planner is frozen (decoder-only steps). */
   plannerFrozen?: boolean;
+  /** YuE2 joint: `loss` is the decoder's alone (planner frozen), so it is not
+   *  comparable with the composite an earlier step reports. */
+  decoderOnly?: boolean;
   /** YuE2 joint, at a checkpoint: reconstruction meter and drift from base. */
   narRecon?: number;
   narDrift?: number;

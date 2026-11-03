@@ -82,6 +82,9 @@ export interface RelayState {
   lastStep: number;
   totalSteps: number;
   lastLoss?: number;
+  /** `lastLoss` came from a decoder-only step (the planner is frozen), so it
+   *  is the decoder's flow loss, not the planner+decoder composite. */
+  lastLossDecoderOnly?: boolean;
   /** The newest snapshot this run exported, absolute. */
   lastCkpt?: string;
   /** The final `<stem>.safetensors`, once the export line has been seen. */

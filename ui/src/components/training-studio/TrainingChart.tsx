@@ -55,6 +55,8 @@ export interface ChartMilestone {
   epoch: number;
   loss: number;
   path: string;
+  /** The loss is a decoder-only step's (planner frozen), not the composite. */
+  decoderOnly?: boolean;
 }
 
 /** What a step point may carry beyond the store's own shape: the 20-step stop
@@ -496,7 +498,7 @@ export const TrainingChart: React.FC<Props> = ({
                 x1={xFor(m.epoch)} y1={VB} x2={xFor(m.epoch)} y2={VB - 7}
                 stroke="#0ea5e9" strokeWidth={1.5} vectorEffect="non-scaling-stroke"
               >
-                <title>{`${m.loss.toFixed(2)} · #${m.epoch}`}</title>
+                <title>{`${m.decoderOnly ? 'decoder loss ' : ''}${m.loss.toFixed(m.decoderOnly ? 4 : 2)} · #${m.epoch}`}</title>
               </line>
             ))}
 

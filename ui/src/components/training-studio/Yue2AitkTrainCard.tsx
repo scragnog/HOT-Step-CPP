@@ -57,7 +57,7 @@ const METRIC_CAP = 2000;
 // the decoder's terms and the composite has no AR part. Those steps still
 // count for progress, pace and the gradient norm.
 type JointStepPoint = Yue2Point;
-type JointMilestone = { epoch: number; loss: number; path: string };
+type JointMilestone = { epoch: number; loss: number; path: string; decoderOnly?: boolean };
 function jointLossRate(points: JointStepPoint[]): number | null {
   const means = points.map(p => p.ma20).filter((v): v is number => typeof v === 'number');
   return means.length >= 9 ? descentRate(means) : null;
@@ -771,7 +771,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           setGateReading(item.plannerGate);
         } else if (item.type === 'metric' && item.metric === 'milestone'
           && typeof item.step === 'number' && typeof item.path === 'string') {
-          points = [...points.filter(point => point.path !== item.path), { epoch: item.step, loss: item.loss ?? 0, path: item.path }];
+          points = [...points.filter(point => point.path !== item.path), { epoch: item.step, loss: item.loss ?? 0, path: item.path,
+            ...(item.decoderOnly ? { decoderOnly: true } : {}) }];
           setMilestones(points);
           schedulePersist();
         } else if (item.type === 'log') {
@@ -1166,7 +1167,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
                 { value: '', label: t('trainingStudio.yue2.method.resumeStartNew', 'Start a new run') },
                 ...aitkRuns.flatMap(run => run.checkpoints.filter(checkpoint => !!checkpoint.optimizerPath).map(checkpoint => ({
                   value: `${run.jobId}|${checkpoint.step}`,
-                  label: `${new Date(run.createdAt).toLocaleString()} · step ${checkpoint.step}${checkpoint.loss !== undefined ? ` · 20-step mean loss ${checkpoint.loss.toFixed(4)}` : ''} · ${run.status}${run.resumeError ? ` — ${run.resumeError}` : ''}${run.live ? ' — running' : ''}`,
+                  label: `${new Date(run.createdAt).toLocaleString()} · step ${checkpoint.step}${checkpoint.loss !== undefined ? ` · 20-step ${checkpoint.decoderOnly ? 'decoder ' : ''}mean loss ${checkpoint.loss.toFixed(4)}` : ''} · ${run.status}${run.resumeError ? ` — ${run.resumeError}` : ''}${run.live ? ' — running' : ''}`,
                   disabled: !!run.resumeError || run.live,
                 }))),
                 ...aitkRuns.filter(run => !run.checkpoints.some(checkpoint => !!checkpoint.optimizerPath)).map(run => ({
@@ -1906,7 +1907,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         </button>
         {active && <button type="button" disabled={cancelMut.isPending || pipelineCancelMut.isPending} onClick={stop} className="text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
         {job && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">{job.status} · {job.phase || 'waiting'}{progress}
-          {liveMetric?.step !== undefined && ` · step ${liveMetric.step}${liveMetric.loss !== undefined ? ` · loss ${liveMetric.loss.toFixed(4)}` : ''}`}
+          {liveMetric?.step !== undefined && ` · step ${liveMetric.step}${liveMetric.loss !== undefined ? ` · ${liveMetric.decoderOnly ? 'decoder loss' : 'loss'} ${liveMetric.loss.toFixed(4)}` : ''}`}
         </span>}
         {job && gateReading && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">
           {t('trainingStudio.yue2.method.gateReading', 'held-out CE {{ce}} · best {{best}} (step {{bestStep}}) · stale {{stale}}/{{patience}}{{armed}}',
@@ -1921,7 +1922,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           <Yue2SplitChart points={stepHistory} milestones={milestones} totalSteps={job?.total ?? 0} vramMb={chartVram}
             options={aitkRuns.find(r => r.jobId === job?.id)?.options} />
           {frozenAt !== undefined && <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
-            {t('trainingStudio.yue2.method.plannerFrozen', 'Planner frozen at step {{step}} (KL target reached). The decoder is still training, faster: the loss and KL lines end here, the step counter and pace below keep moving.', { step: frozenAt })}
+            {t('trainingStudio.yue2.method.plannerFrozen', "Planner frozen at step {{step}} (KL target reached). The decoder is still training, faster: the planner's CE and KL lines end here, the step counter and pace below keep moving.", { step: frozenAt })}
           </div>}
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] tabular-nums text-zinc-500">
             {jointLossRate(stepHistory) !== null && <span>loss rate {jointLossRate(stepHistory)!.toFixed(5)}/step</span>}

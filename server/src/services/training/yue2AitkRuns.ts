@@ -12,6 +12,7 @@ import { runStamp } from './adapterLayout.js';
 import { config } from '../../config.js';
 import { listDatasets, updateDataset } from './datasetsRepo.js';
 import { uniqueDatasetTrigger } from './datasetTrigger.js';
+import { yue2JointStepLoss, type Yue2JointStepLoss } from './yue2JointLoss.js';
 
 export function yue2JointOutputDirectory(adaptersRoot: string, trigger: string, when = new Date()): string {
   const name = trigger.trim().replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^[. ]+|[. ]+$/g, '').slice(0, 120) || 'dataset';
@@ -69,6 +70,9 @@ export interface Yue2AitkCheckpointRecord {
   step: number;
   dir: string;
   loss?: number;
+  /** True when `loss` averaged decoder-only steps (the planner was frozen):
+   *  it is the decoder's flow loss, not the planner+decoder composite. */
+  decoderOnly?: boolean;
   /** From the checkpoint's meters.json: the planner's KL stop reading (or
    *  its 20-step mean), the decoder's reconstruction meter, frozen state. */
   kl?: number;
@@ -197,34 +201,37 @@ export function findYue2AitkRun(jobId: string): Yue2AitkRunRecord | undefined {
   return readIndex().find(r => r.jobId === jobId);
 }
 
-function jointLosses(text: string): Map<number, number> {
-  const losses = new Map<number, number>();
+function jointLosses(text: string): Map<number, Yue2JointStepLoss> {
+  const losses = new Map<number, Yue2JointStepLoss>();
   for (const line of text.split(/\r?\n/)) {
     try {
       const event = JSON.parse(line) as Record<string, unknown>;
       if (event.stage !== 'joint' || !Number.isInteger(event.step)) continue;
-      const { ar_ce, ar_kl, nar_mse, cursor_ce, cursor_weight } = event;
-      if (![ar_ce, ar_kl, nar_mse].every(v => typeof v === 'number' && Number.isFinite(v))) continue;
-      const cursor = typeof cursor_ce === 'number' && Number.isFinite(cursor_ce)
-        && typeof cursor_weight === 'number' && Number.isFinite(cursor_weight)
-        ? cursor_ce * cursor_weight : 0;
-      losses.set(event.step as number, (ar_ce as number) + 0.2 * (ar_kl as number) + (nar_mse as number) + cursor);
+      // Includes decoder-only steps after the planner froze: they still
+      // have a loss, and skipping them left every later checkpoint
+      // labelled with the last planner value (yue2JointStepLoss).
+      const composed = yue2JointStepLoss(event);
+      if (!composed) continue;
+      losses.set(event.step as number, composed);
     } catch { /* an incomplete log line does not invalidate other steps */ }
   }
   return losses;
 }
 
-function checkpointRow(dir: string, step: number, losses: Map<number, number>, meters: Record<string, unknown>,
+function checkpointRow(dir: string, step: number, losses: Map<number, Yue2JointStepLoss>, meters: Record<string, unknown>,
   files: Pick<Yue2AitkCheckpointRecord, 'adapterPath' | 'optimizerPath' | 'arPath' | 'narPath'>): Yue2AitkCheckpointRecord {
   const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? v : undefined;
   const kl = num(meters.kl_reading) ?? num(meters.ar_kl_mean20);
   const recent = [...losses].filter(([s]) => s <= step)
     .sort(([a], [b]) => b - a).slice(0, 20);
   const meanLoss = recent.length
-    ? recent.reduce((sum, [, loss]) => sum + loss, 0) / recent.length : undefined;
+    ? recent.reduce((sum, [, point]) => sum + point.loss, 0) / recent.length : undefined;
+  // Every step this average covers is frozen: the number is the decoder's.
+  const decoderOnly = recent.length > 0 && recent.every(([, point]) => point.decoderOnly);
   return {
     step, dir,
     ...(meanLoss !== undefined ? { loss: meanLoss } : {}),
+    ...(decoderOnly ? { decoderOnly: true } : {}),
     ...(kl !== undefined ? { kl } : {}),
     ...(num(meters.nar_recon) !== undefined ? { recon: num(meters.nar_recon) } : {}),
     ...(num(meters.nar_drift) !== undefined ? { drift: num(meters.nar_drift) } : {}),
@@ -246,7 +253,7 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
     } } catch { /* incomplete catalogue is handled by the caller */ }
   }
   for (const base of dirs) {
-   let losses = new Map<number, number>();
+   let losses = new Map<number, Yue2JointStepLoss>();
    try {
      const log = path.join(base, 'train.jsonl');
      if (fs.statSync(log).size <= 8 * 1024 * 1024) losses = jointLosses(fs.readFileSync(log, 'utf8'));
@@ -274,9 +281,9 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
 
 /** Parsed train.jsonl losses by path, reused while size and mtime match, so a
  *  catalogue refresh only re-parses logs that grew. */
-const lossCache = new Map<string, { size: number; mtimeMs: number; losses: Map<number, number> }>();
+const lossCache = new Map<string, { size: number; mtimeMs: number; losses: Map<number, Yue2JointStepLoss> }>();
 
-async function jointLossesAsync(log: string): Promise<Map<number, number>> {
+async function jointLossesAsync(log: string): Promise<Map<number, Yue2JointStepLoss>> {
   try {
     const st = await fs.promises.stat(log);
     if (st.size > 8 * 1024 * 1024) return new Map();

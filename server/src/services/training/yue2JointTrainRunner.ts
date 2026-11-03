@@ -9,6 +9,7 @@ import { buildGpuEnv, selectedGpuMemoryMB } from '../gpuDevices.js';
 const PARALLEL_PREVIEW_MIN_VRAM_MB = 28 * 1024;
 import { log, runYue2AceTrain, YUE2_IDLE_MS, type RelayState } from './yue2TrainRunner.js';
 import { checkpointRecords, isCheckpointLadder, listYue2AitkRuns, recordYue2AitkRun, yue2JointWeight } from './yue2AitkRuns.js';
+import { yue2JointStepLoss } from './yue2JointLoss.js';
 import { runYue2PlanCheck, type Yue2PlanCheckOptions } from './yue2PlanCheck.js';
 import { renderYue2JointPreview, listYue2JointPreviews, Yue2PreviewCleanupError } from './yue2JointPreview.js';
 import { yue2Unload } from '../backends/yue2/client.js';
@@ -672,7 +673,14 @@ export function relayJsonLine(job: TrainingJob, line: string, state: RelayState,
   if (step !== undefined) state.lastStep = step;
   if (stage === 'joint' && step !== undefined) {
     job.done = step; job.total = state.totalSteps; job.phase = 'training';
-    state.lastLoss = event.loss ?? state.lastLoss;
+    // A frozen step has no planner objective but the decoder still trains, so
+    // its loss is the decoder's own (yue2JointStepLoss) and must keep flowing.
+    // Holding the last planner value here is what froze every label built from
+    // `lastLoss` — milestones, the log — at the step the planner stopped.
+    if (event.loss !== undefined) {
+      state.lastLoss = event.loss;
+      state.lastLossDecoderOnly = event.decoderOnly === true;
+    }
     pushEvent(job, { type: 'metric', metric: 'step', ts: Date.now(), step,
       totalSteps: state.totalSteps, ...(event.loss === undefined ? {} : { loss: event.loss }),
       ...(event.arCe === undefined ? {} : { arCe: event.arCe }),
@@ -680,17 +688,19 @@ export function relayJsonLine(job: TrainingJob, line: string, state: RelayState,
       ...(event.arKl === undefined ? {} : { arKl: event.arKl }),
       ...(event.narMse === undefined ? {} : { narMse: event.narMse }),
       ...(event.plannerFrozen ? { plannerFrozen: true } : {}),
+      ...(event.decoderOnly ? { decoderOnly: true } : {}),
       ...(event.gradNorm === undefined ? {} : { gradNorm: event.gradNorm }),
       ...(event.lr === undefined ? {} : { lr: event.lr }),
       ...(event.stepMs === undefined ? {} : { stepMs: event.stepMs }),
       ...(clock && event.stepMs !== undefined ? (clock.byStep.set(step, event.stepMs), { trainMs: trainClockTotal(clock) }) : {}) });
     emitProgress(job);
-    log(job, 'info', `Joint training step ${step}${event.loss === undefined ? '' : ` loss ${event.loss}`}`);
+    log(job, 'info', `Joint training step ${step}${event.loss === undefined ? '' : ` loss ${event.loss}${event.decoderOnly ? ' (decoder)' : ''}`}`);
   } else if (stage === 'checkpoint' || stage === 'checkpoint_stage') {
     if (stage === 'checkpoint' && step !== undefined && opts) {
       const saved = checkpointRecords(opts.outDir).find(c => c.step === step && c.arPath && c.narPath);
       if (saved) pushEvent(job, { type: 'metric', metric: 'milestone', ts: Date.now(), step,
-        loss: state.lastLoss, path: saved.dir });
+        loss: state.lastLoss, path: saved.dir,
+        ...(state.lastLossDecoderOnly ? { decoderOnly: true } : {}) });
       // KL rungs preview on kl_mark; once the planner is frozen the KL stops
       // moving, so the decoder phase previews every step-cadence save.
       if (saved && (isCheckpointLadder(opts) || !(opts.klCheckpointEvery! > 0) || state.frozenAt !== undefined)) state.onRung?.(step);
@@ -781,20 +791,20 @@ function persistAitkCatalogue(
 
 /** Pure contract helper kept exportable for server-side event tests. */
 export function parseYue2JointEvent(line: string, totalSteps: number): {
-  stage: string; step?: number; loss?: number; arCe?: number; cursorCe?: number; arKl?: number; narMse?: number; plannerFrozen?: boolean; gradNorm?: number; lr?: number; stepMs?: number; totalSteps: number;
+  stage: string; step?: number; loss?: number; decoderOnly?: boolean; arCe?: number; cursorCe?: number; arKl?: number; narMse?: number; plannerFrozen?: boolean; gradNorm?: number; lr?: number; stepMs?: number; totalSteps: number;
 } | null {
   try {
     const event = JSON.parse(line) as Record<string, unknown>;
     if (!event || typeof event.stage !== 'string') return null;
     const step = typeof event.step === 'number' && Number.isInteger(event.step) && event.step >= 0 ? event.step : undefined;
     const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
-    const cursor = finite(event.cursor_ce) && finite(event.cursor_weight)
-      ? event.cursor_ce * event.cursor_weight : 0;
-    const loss = finite(event.ar_ce) && finite(event.ar_kl) && finite(event.nar_mse)
-      ? event.ar_ce + 0.2 * event.ar_kl + event.nar_mse + cursor : undefined;
+    // The frozen-planner path is deliberately included: a decoder step has a
+    // loss even though it has no planner terms (yue2JointStepLoss).
+    const composed = yue2JointStepLoss(event);
     const stepMs = finite(event.step_ms) && event.step_ms >= 0 ? event.step_ms : undefined;
     return { stage: event.stage, ...(step === undefined ? {} : { step }),
-      ...(loss === undefined ? {} : { loss }),
+      ...(composed === undefined ? {} : { loss: composed.loss }),
+      ...(composed?.decoderOnly ? { decoderOnly: true } : {}),
       ...(finite(event.ar_ce) ? { arCe: event.ar_ce } : {}),
       ...(finite(event.cursor_ce) ? { cursorCe: event.cursor_ce } : {}),
       ...(finite(event.ar_kl) ? { arKl: event.ar_kl } : {}),

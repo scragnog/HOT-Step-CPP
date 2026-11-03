@@ -97,6 +97,34 @@ test('AITK checkpoints show the trailing 20-step mean from their own segment', (
   }
 });
 
+test('a checkpoint above the planner freeze carries the decoder loss, not the freeze-time value', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-frozen-'));
+  try {
+    // 20 planner steps (composite 1.4 + 0.2 * 1 + 0 = 1.6), then 20 frozen
+    // steps that report only the decoder's flow loss.
+    fs.writeFileSync(path.join(root, 'train.jsonl'), [
+      ...Array.from({ length: 20 }, (_, i) => JSON.stringify({
+        stage: 'joint', step: i + 1, ar_ce: 1.4, ar_kl: 1, nar_mse: 0,
+      })),
+      ...Array.from({ length: 20 }, (_, i) => JSON.stringify({
+        stage: 'joint', step: i + 21, planner_frozen: true, nar_mse: 0.5,
+      })),
+    ].join('\n'));
+    // No meters.json on purpose: this label must not depend on it.
+    fs.mkdirSync(path.join(root, 'checkpoint-step20'));
+    fs.mkdirSync(path.join(root, 'checkpoint-step40'));
+    const rows = checkpointRecords(root);
+    const at = (step: number) => rows.find(row => row.step === step)!;
+    assert.ok(Math.abs((at(20).loss ?? 0) - 1.6) < 1e-10);
+    assert.equal(at(20).decoderOnly, undefined);
+    assert.ok(Math.abs((at(40).loss ?? 0) - 0.5) < 1e-10, 'the decoder phase must report its own mean');
+    assert.equal(at(40).decoderOnly, true, 'and say it is not the composite');
+    assert.notEqual(at(40).loss, at(20).loss, 'a post-freeze label must not repeat the freeze-time value');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('AR checkpoint mean includes a spike only as one of the last 20 logged steps', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ar-loss-'));
   try {
