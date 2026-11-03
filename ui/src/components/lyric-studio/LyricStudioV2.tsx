@@ -6,8 +6,8 @@
  *   2. Album Grid for selected artist
  *   3. Album Detail with tabbed content (Source Lyrics, Profiles, Written Songs)
  *
- * State management: All data is loaded via lireekApi, with URL-based routing
- * and popstate support for browser back/forward.
+ * State management: Query owns server snapshots; URL restore consumes the
+ * artists observer once, with popstate support for browser back/forward.
  *
  * Ported from hot-step-9000 with import path + API adaptations for the C++ engine.
  */
@@ -189,28 +189,31 @@ export const LyricStudioV2: React.FC = () => {
     setTimeout(() => setToast(null), 3500);
   }, []);
 
-  // ── Load artists ──
-  const loadArtists = useCallback(async (): Promise<Artist[]> => {
-    const { artists } = await lireekApi.listArtists();
-    void fillMissingArtwork(artists, 'artist');
-    return artists;
-  }, []);
-
-  // ── Initial load: artists + URL restore ──
+  // ── Initial artwork + URL restore from the artists observer ──
+  const initialLoad = useRef({ path: window.location.pathname, artworkStarted: false, restored: false });
   useEffect(() => {
+    const artistsList = artistsQuery.data;
+    if (!artistsList || initialLoad.current.restored) return;
+    if (!initialLoad.current.artworkStarted) {
+      initialLoad.current.artworkStarted = true;
+      void fillMissingArtwork(artistsList, 'artist');
+    }
     let live = true;
-    const initialPath = window.location.pathname;
+    const initialPath = initialLoad.current.path;
     const init = async () => {
-      const artistsList = await loadArtists();
       if (!live || initialPath !== window.location.pathname) return;
-      const parsed = parseUrl(window.location.pathname);
+      const parsed = parseUrl(initialPath);
       if (parsed.artistId) {
         isRestoringUrl.current = true;
         try {
           const artist = artistsList.find(a => a.id === parsed.artistId);
-          if (!artist) return;
+          if (!artist) {
+            initialLoad.current.restored = true;
+            return;
+          }
           const albumRes = await lireekApi.listLyricsSets(artist.id);
           if (!live || initialPath !== window.location.pathname) return;
+          initialLoad.current.restored = true;
 
           if (parsed.albumId) {
             const album = albumRes.lyrics_sets.find(a => a.id === parsed.albumId);
@@ -226,11 +229,13 @@ export const LyricStudioV2: React.FC = () => {
         } finally {
           isRestoringUrl.current = false;
         }
+      } else {
+        initialLoad.current.restored = true;
       }
     };
     void init().catch(console.error);
     return () => { live = false; };
-  }, [loadArtists]);
+  }, [artistsQuery.data]);
 
   // ── Load albums ──
   const loadAlbums = useCallback(async (artistId: number) => {
@@ -279,9 +284,8 @@ export const LyricStudioV2: React.FC = () => {
   const handleBackToArtists = useCallback(() => {
     setNav({ level: 'artists', selectedArtist: null, selectedAlbum: null });
     setSongCount(0);
-    loadArtists();
     pushUrl();
-  }, [loadArtists, pushUrl]);
+  }, [pushUrl]);
 
   const handleBackToAlbums = useCallback(() => {
     setNav(prev => ({ ...prev, level: 'albums', selectedAlbum: null }));
@@ -329,7 +333,6 @@ export const LyricStudioV2: React.FC = () => {
     mutationFn: (artist: Artist) => lireekApi.deleteArtist(artist.id),
     onSuccess: (_res, artist) => {
       showToast(`Deleted ${artist.name}`);
-      void loadArtists();
     },
   });
 
@@ -384,7 +387,6 @@ export const LyricStudioV2: React.FC = () => {
       lireekApi.fetchLyrics({ artist, album: album || undefined, max_songs: maxSongs }),
     onSuccess: async (res) => {
       showToast(`Fetched ${res.songs_fetched} songs`);
-      await loadArtists();
       if (nav.selectedArtist && res.artist.id === nav.selectedArtist.id) {
         await loadAlbums(nav.selectedArtist.id);
       }
@@ -513,9 +515,8 @@ export const LyricStudioV2: React.FC = () => {
   const addArtistMut = useMutation({
     mutationFn: ({ name, imageUrl }: { name: string; imageUrl?: string }) =>
       lireekApi.createArtist({ name, image_url: imageUrl }),
-    onSuccess: async (res) => {
+    onSuccess: (res) => {
       showToast(`Added ${res.artist.name}`);
-      await loadArtists();
       handleSelectArtist(res.artist);
     },
   });
@@ -833,7 +834,6 @@ export const LyricStudioV2: React.FC = () => {
         profilingModel={modelSelections.profiling} generationModel={modelSelections.generation}
         refinementModel={modelSelections.refinement} showToast={showToast}
         onFetchComplete={async () => {
-          await loadArtists();
           if (nav.selectedArtist) loadAlbums(nav.selectedArtist.id);
           try {
             await Promise.all([lireekApi.listLyricsSets(), lireekApi.listProfiles()]);
