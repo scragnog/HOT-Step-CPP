@@ -325,3 +325,29 @@ test('review catalogue scans each matching run once and sees changes on the next
     });
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('the all-runs catalogue serves a settled run from memory until the run is written again', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-memo-'));
+  try {
+    const script = [
+      "import fs from 'node:fs'; import path from 'node:path'; import assert from 'node:assert/strict';",
+      "import { recordYue2AitkRun, listAllYue2AitkRuns, jointRunForAdapter, yue2AitkCatalogueStamp } from './src/services/training/yue2AitkRuns.js';",
+      "const out = path.join(process.env.ACESTEPCPP_ADAPTERS, 'yue2-joint-adapters', 'run'); const ckpt = path.join(out, 'checkpoint-step4'); fs.mkdirSync(ckpt, { recursive: true });",
+      "for (const half of ['ar', 'nar']) fs.writeFileSync(path.join(ckpt, 'native-' + half + '.safetensors'), 'x');",
+      "const meters = path.join(ckpt, 'meters.json'); fs.writeFileSync(meters, '{}');",
+      "const record = { version: 1, jobId: 'job-memo', datasetId: 'ds', datasetSlug: 'ds', method: 'aitk', output: out, options: {}, status: 'done', createdAt: 1, updatedAt: 2, checkpoints: [] };",
+      "const kl = () => listAllYue2AitkRuns()[0].checkpoints[0].kl;",
+      "recordYue2AitkRun(record); assert.equal(kl(), undefined); const stamp = yue2AitkCatalogueStamp();",
+      "fs.writeFileSync(meters, JSON.stringify({ kl_reading: 0.5 }));",
+      "assert.equal(kl(), undefined, 'an in-place rewrite of a settled run is not rescanned per request'); assert.equal(yue2AitkCatalogueStamp(), stamp);",
+      "recordYue2AitkRun(record); assert.equal(kl(), 0.5, 'writing the run drops its cached checkpoints'); assert.notEqual(yue2AitkCatalogueStamp(), stamp);",
+      "assert.equal(jointRunForAdapter(path.join(ckpt, 'native-nar.safetensors'))?.jobId, 'job-memo');",
+      "recordYue2AitkRun({ ...record, status: 'running' }); fs.writeFileSync(meters, JSON.stringify({ kl_reading: 0.7 })); assert.equal(kl(), 0.7, 'a running run is rescanned on every read');",
+    ].join('\n');
+    execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)),
+      env: { ...process.env, DATA_DIR: path.join(root, 'data'), TRAINING_DIR: path.join(root, 'training'), ACESTEPCPP_ADAPTERS: path.join(root, 'adapters') },
+      stdio: 'pipe', timeout: 30_000,
+    });
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

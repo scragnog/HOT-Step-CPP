@@ -26,7 +26,8 @@ import { isEngineSuspended } from '../../aceEngineProcess.js';
 import { getSetting, setSetting } from '../../../db/lireekDb.js';
 import { listAllYue2Runs, readSafetensorsMeta, type Yue2AdapterMeta } from '../../training/yue2Runs.js';
 import { listAllYue2ArRuns } from '../../training/yue2ArRuns.js';
-import { listAllYue2AitkRuns } from '../../training/yue2AitkRuns.js';
+import { listAllYue2AitkRuns, yue2AitkCatalogueStamp } from '../../training/yue2AitkRuns.js';
+import { listDatasets } from '../../training/datasetsRepo.js';
 import { yue2AdapterTrigger, setYue2ManualTrigger } from './jointAdapterContext.js';
 import { coverScoreChoices, transformCoverScore, type CoverScoreChoices } from './coverScoreTransform.js';
 import { EMPTY_COVER_SCORE_ERROR, hasSoundingScore, hasSoundingVocalBar } from './scoreHealth.js';
@@ -1168,6 +1169,11 @@ interface Yue2CataloguedRun {
   }>;
 }
 
+/** The joint section of yue2LmAdapterCatalogue: two safetensors header reads
+ *  per file held the event loop ~0.5 s on 830 files. Reused while the run
+ *  catalogue and dataset triggers are unchanged; a typed trigger clears it. */
+let jointSection: { key: string; entries: Array<[string, Yue2LmAdapterEntry]> } | null = null;
+
 /** Every trained adapter on disk, both halves, newest run first, each
  *  checkpoint labelled with what its own safetensors header records.
  *
@@ -1234,7 +1240,10 @@ function yue2LmAdapterCatalogue(): {
   // The combined adapter.safetensors is an output/inspection artifact and is
   // intentionally not offered to either YuE2 slot.
   const jointRuns = listAllYue2AitkRuns();
-  for (const run of jointRuns) {
+  const jointKey = [yue2AitkCatalogueStamp(), ...listDatasets().map(ds => `${ds.id}:${ds.customTag}`)].join('\n');
+  const fresh = jointSection?.key !== jointKey;
+  const entries: Array<[string, Yue2LmAdapterEntry]> = fresh ? [] : jointSection!.entries;
+  for (const run of fresh ? jointRuns : []) {
     for (const ckpt of run.checkpoints) {
       const imported = run.options.source === 'comfyui-import';
       if (imported ? !ckpt.arPath && !ckpt.narPath : !ckpt.arPath || !ckpt.narPath) continue;
@@ -1253,8 +1262,7 @@ function yue2LmAdapterCatalogue(): {
         const { trigger, inferred, manual } = yue2AdapterTrigger(abs, jointRuns);
         const rank = fileMeta?.rank;
         const steps = fileMeta?.steps ?? ckpt.step;
-        paths.push(abs);
-        meta[abs] = {
+        entries.push([abs, {
           label: [kind.toUpperCase(), runName, `step ${ckpt.step}`, trigger ? `"${trigger}"` : '']
             .filter(Boolean).join(' · '),
           kind,
@@ -1271,12 +1279,14 @@ function yue2LmAdapterCatalogue(): {
           styleTemplate: fileMeta?.styleTemplate,
           captionDropout: fileMeta?.captionDropout,
           home: yue2AdapterHome(fileMeta?.baseSha),
-        };
+        }]);
       };
       if (ckpt.arPath) add('ar', ckpt.arPath);
       if (ckpt.narPath) add('nar', ckpt.narPath);
     }
   }
+  if (fresh) jointSection = { key: jointKey, entries };
+  for (const [abs, entry] of entries) { paths.push(abs); meta[abs] = { ...entry }; }
 
   // The user's adapter folder: anything the index above did not already list.
   // The half comes from the file's own `format`, the same field the engine
@@ -1590,6 +1600,7 @@ async function selectModel(selection: Record<string, string>) {
     const ref = resolveYue2Adapter(selection.lmAdapterTriggerPath.trim());
     if (!ref) throw new Error(`YuE2 adapter not usable: ${selection.lmAdapterTriggerPath}`);
     setYue2ManualTrigger(ref, selection.lmAdapterTrigger);
+    jointSection = null;
     if (Object.keys(selection).length === 2) return { changed: false };
   }
   const persisted = yue2PersistedSelection();

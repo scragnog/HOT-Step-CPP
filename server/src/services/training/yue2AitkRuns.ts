@@ -251,7 +251,85 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
   return rows.sort((a, b) => b.step - a.step);
 }
 
+/** checkpointRecords by output folder. Rescanning every run's logs and meters
+ *  per picker request held the event loop for ~1 s on 247 runs, and even a
+ *  stat pass over them costs ~70 ms on the adapter drive, so a hit is served
+ *  as is and revalidateCheckpointMemo compares stat signatures off the event
+ *  loop: a folder changed by hand shows up a request later. A running run is
+ *  rescanned on every read; recordYue2AitkRun, move and delete drop their
+ *  entry, which also covers a meters.json rewritten in place. */
+const checkpointMemo = new Map<string, { sig: string | null; rows: Yue2AitkCheckpointRecord[] }>();
+let checkpointMemoVersion = 0;
+let revalidating = false;
+let revalidatedAt = 0;
+
+/** Checkpoint dirs and train.jsonl logs, segments included, with mtime and size. */
+const signed = (e: fs.Dirent) => e.isDirectory() ? /^(checkpoint-step\d+|segments|segment-\d{6})$/.test(e.name) : e.name === 'train.jsonl';
+const descends = (e: fs.Dirent, depth: number) => e.isDirectory() && depth < 2 && !e.name.startsWith('checkpoint-');
+
+function checkpointSignature(dir: string, depth = 0): string {
+  let entries: fs.Dirent[];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return `${dir}|missing`; }
+  const parts: string[] = [];
+  for (const e of entries.filter(signed)) {
+    const p = path.join(dir, e.name);
+    try { const s = fs.statSync(p); parts.push(`${p}|${s.mtimeMs}|${s.size}`); } catch { continue; }
+    if (descends(e, depth)) parts.push(checkpointSignature(p, depth + 1));
+  }
+  return parts.join('\n');
+}
+
+async function checkpointSignatureAsync(dir: string, depth = 0): Promise<string> {
+  let entries: fs.Dirent[];
+  try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return `${dir}|missing`; }
+  const parts: string[] = [];
+  for (const e of entries.filter(signed)) {
+    const p = path.join(dir, e.name);
+    try { const s = await fs.promises.stat(p); parts.push(`${p}|${s.mtimeMs}|${s.size}`); } catch { continue; }
+    if (descends(e, depth)) parts.push(await checkpointSignatureAsync(p, depth + 1));
+  }
+  return parts.join('\n');
+}
+
+/** ponytail: one pass at most every 5 s, sequential; parallelise if a pass over
+ *  a much larger catalogue lags behind. */
+function revalidateCheckpointMemo(): void {
+  if (revalidating || Date.now() - revalidatedAt < 5000) return;
+  revalidating = true;
+  void (async () => {
+    for (const [output, entry] of [...checkpointMemo]) {
+      if (entry.sig === null || await checkpointSignatureAsync(output) === entry.sig) continue;
+      if (checkpointMemo.get(output) === entry) { checkpointMemo.delete(output); checkpointMemoVersion++; }
+    }
+  })().catch(() => {}).finally(() => { revalidating = false; revalidatedAt = Date.now(); });
+}
+
+function cachedCheckpointRecords(run: Yue2AitkRunRecord): Yue2AitkCheckpointRecord[] {
+  const hit = checkpointMemo.get(run.output);
+  if (hit?.sig != null && run.status !== 'running') {
+    revalidateCheckpointMemo();
+    return hit.rows.map(c => ({ ...c }));
+  }
+  const sig = run.status === 'running' ? null : checkpointSignature(run.output);
+  const rows = checkpointRecords(run.output);
+  if (!hit || JSON.stringify(hit.rows) !== JSON.stringify(rows)) checkpointMemoVersion++;
+  checkpointMemo.set(run.output, { sig, rows });
+  return rows.map(c => ({ ...c }));
+}
+
+/** Changes whenever listAllYue2AitkRuns could answer differently: the index
+ *  was rewritten, or a run's checkpoints were (re)scanned or dropped. */
+export function yue2AitkCatalogueStamp(): string {
+  try { const s = fs.statSync(INDEX); return `${s.mtimeMs}:${s.size}:${checkpointMemoVersion}`; }
+  catch { return `none:${checkpointMemoVersion}`; }
+}
+
+function forgetCheckpoints(output: string): void {
+  if (checkpointMemo.delete(output)) checkpointMemoVersion++;
+}
+
 export function recordYue2AitkRun(record: Yue2AitkRunRecord): void {
+  forgetCheckpoints(record.output);
   try {
     const index = readIndex();
     const prior = index.find(r => r.jobId === record.jobId);
@@ -271,6 +349,7 @@ export function deleteYue2AitkRun(jobId: string): { output: string } {
   if (!run) throw new Error('Unknown run');
   const output = path.resolve(run.output);
   if (!/yue2-joint-adapters/i.test(output)) throw new Error(`Refusing to delete outside the joint adapters folder: ${output}`);
+  forgetCheckpoints(run.output);
   try { archiveYue2TrainLogs(run.datasetSlug, run.jobId, output); }
   catch (err: any) { throw new Error(`Could not archive the loss log of run ${jobId}, refusing to delete: ${err?.message || err}`); }
   fs.rmSync(output, { recursive: true, force: true });
@@ -291,6 +370,7 @@ export function moveYue2AitkRun(jobId: string, newOutput: string): void {
   if (fs.existsSync(target)) throw new Error(`Refusing to move onto an existing path: ${target}`);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.renameSync(oldOutput, target);
+  forgetCheckpoints(run.output);
   const prefix = oldOutput.toLowerCase() + path.sep;
   const rebase = <T extends string | undefined>(p: T): T =>
     (p && path.resolve(p).toLowerCase().startsWith(prefix) ? path.join(target, path.resolve(p).slice(prefix.length)) : p) as T;
@@ -593,15 +673,27 @@ export function rungsOf(run: Yue2AitkRunRecord, checkpoints: Yue2AitkCheckpointR
 export function listAllYue2AitkRuns(): Yue2AitkRunRecord[] {
   reconcileFromDisk();
   return readIndex()
-    .map(r => ({ ...r, checkpoints: checkpointRecords(r.output) }))
+    .map(r => ({ ...r, checkpoints: cachedCheckpointRecords(r) }))
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
+
+/** Weight path → first run listing it, built once per `runs` array: the model
+ *  picker resolves every listed adapter against the same list. */
+const adapterRunIndexes = new WeakMap<Yue2AitkRunRecord[], Map<string, Yue2AitkRunRecord>>();
 
 /** Resolve only paths present in the durable joint catalogue. This is shared by
  * the model picker, prompt builder and caption-source route. */
 export function jointRunForAdapter(adapterPath: string, runs?: Yue2AitkRunRecord[]): Yue2AitkRunRecord | undefined {
   if (!adapterPath) return undefined;
-  const wanted = path.resolve(adapterPath).toLowerCase();
-  return (runs ?? listAllYue2AitkRuns()).find(run => run.checkpoints.some(checkpoint =>
-    [checkpoint.arPath, checkpoint.narPath].some(ref => ref && path.resolve(ref).toLowerCase() === wanted)));
+  const list = runs ?? listAllYue2AitkRuns();
+  let byPath = adapterRunIndexes.get(list);
+  if (!byPath) {
+    byPath = new Map();
+    for (const run of list) for (const c of run.checkpoints) for (const ref of [c.arPath, c.narPath]) {
+      const key = ref && path.resolve(ref).toLowerCase();
+      if (key && !byPath.has(key)) byPath.set(key, run);
+    }
+    adapterRunIndexes.set(list, byPath);
+  }
+  return byPath.get(path.resolve(adapterPath).toLowerCase());
 }
