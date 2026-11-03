@@ -570,9 +570,13 @@ itself steer the composer, not just its transcribed score. The real-audio tokeni
 reads the source and lists, for every 40 ms, the semantic codes that best describe
 it; the composer then leans toward those. **Source adherence** (0 to 1, default
 0.5) is the share of each moment taken from the source: on a 20-second test, 0.5
-kept 83% of the render on the source's top codes and 1.0 kept all of it. It needs
-the YuE2 semantic tokenizer (`yue2-tok-f16`) from the Model Manager. Reading a
-recording takes a few seconds the first time and is cached after that. Follow
+kept 83% of the render on the source's top codes and 1.0 kept all of it.
+**Source tokenizer**, below it, picks the real-audio tokenizer that reads the
+recording: v9 (`yue2-tok-f16`, the default) or WannabeTokenizer V1 or V2 by
+ManyOtherFunctions (`yue2-wannabe-v1-f16`, `yue2-wannabe-v2-f16`). Each is a
+separate download from the Model Manager. WannabeTokenizer reads the recording at
+its own level, where v9 first brings it to -14 LUFS. Reading a recording takes a
+few seconds the first time and is cached after that, separately per tokenizer. Follow
 source switches itself off while the pitch is shifted or a BPM is set, because
 the guide carries the source's own key and timing and would pull the render back
 to them. Build by section does not use it yet.
