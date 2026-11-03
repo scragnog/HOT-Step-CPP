@@ -12,7 +12,7 @@
 //   GET    /settings/:family                         the document, or { document: null }
 //   PUT    /settings/:family             { expectedRevision?, body }   create (first call) or update
 //   POST   /settings/:family/import      { items: [one item] }
-// family: ai-continue-template | storm-tuning | sheet-transcriber
+// family: ai-continue-template | storm-tuning | sheet-transcriber | yue2-tokenizer
 //
 // No auth: every kind here is installation-scoped (no user id in any source
 // browser key), the same reasoning routes/vst.ts already applies to the VST
@@ -24,8 +24,9 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { WorkflowError } from '../services/workflows/workflowJobs.js';
 import { typedDocuments } from './workflows.js';
-import { PRESET_FAMILIES, SHEET_TRANSCRIBER, SINGLETON_FAMILIES, type PresetFamily, type SingletonFamily } from '../services/preferences/kinds.js';
+import { PRESET_FAMILIES, SHEET_TRANSCRIBER, SINGLETON_FAMILIES, YUE2_TOKENIZER, type PresetFamily, type SingletonFamily } from '../services/preferences/kinds.js';
 import { setSheetTranscriberSource } from '../services/training/yue2Sheet.js';
+import { setYue2TokenizerSource } from '../services/training/yue2Tokenize.js';
 import { getSingleton, importPreset, importSingleton, upsertSingleton, LOCAL_OWNER } from '../services/preferences/presets.js';
 import {
   createPreferenceSchema, importPreferenceBatchSchema, resolveYue2PresetSchema, updatePreferenceSchema,
@@ -41,6 +42,8 @@ setSheetTranscriberSource(() => {
   const body = getSingleton(typedDocuments(SHEET_TRANSCRIBER))?.body;
   return { refined: body?.transcriber === 'sheetsage2-refined', keyMode: body?.keyMode === true };
 });
+// Same for the YuE2 real-audio tokenizer (the tokenize stage and cover guides).
+setYue2TokenizerSource(() => getSingleton(typedDocuments(YUE2_TOKENIZER))?.body ?? null);
 
 const fail = (res: Response, err: unknown) => {
   if (err instanceof WorkflowError) { res.status(err.status).json({ error: err.message, ...err.extra }); return; }

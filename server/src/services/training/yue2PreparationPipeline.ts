@@ -13,6 +13,7 @@ import { activeJobForDataset, cancelJob } from './labelingQueue.js';
 import { hasActivePipeline, registerYue2PreparationActivity } from './pipelineRunner.js';
 import { hasActiveBatch } from './yue2BatchRunner.js';
 import { YUE2_CACHE_LUFS } from './yue2Train.js';
+import { yue2CodesReady, yue2TokenizerSetting } from './yue2Tokenize.js';
 import { pushDataset, workerFetch } from './trainingWorkers.js';
 import { describeOwner, isMine, owner, ownerAlive, type Owner } from '../instance.js';
 
@@ -23,7 +24,7 @@ type JobState = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
 
 export interface Yue2PreparationArtifacts {
   preprocess: { done: boolean; captionModeOk: boolean; captionsStale?: boolean; loudnessLufs?: number | null };
-  tokenize: { done: boolean };
+  tokenize: { done: boolean; status?: { tokenizer?: string } | null };
   sheet: { done: boolean };
   align: { done: boolean; stemsReady: number };
   minted: { present: boolean };
@@ -349,7 +350,7 @@ export class Yue2PreparationPipeline {
     switch (stage) {
       case 'latents': return a.preprocess.done && a.preprocess.captionModeOk && !a.preprocess.captionsStale
         && (lufs === undefined || a.preprocess.loudnessLufs === lufs);
-      case 'codes': return a.tokenize.done;
+      case 'codes': return yue2CodesReady(a.tokenize, yue2TokenizerSetting().training);
       case 'sheet': return a.sheet.done;
       case 'stems': return a.align.stemsReady > 0;
       case 'align': return a.align.done;
@@ -373,6 +374,8 @@ export class Yue2PreparationPipeline {
       ? { trigger } : { allowNoTrigger: true }),
       ...(a.minted.present ? {} : { allowNoMinted: true }) };
     if (stage === 'joint') return { ...r.trainBodies.joint };
+    // This server's choice travels with the request, so a remote worker uses it too.
+    if (stage === 'codes') return { tokenizer: yue2TokenizerSetting().training };
     return {};
   }
 }

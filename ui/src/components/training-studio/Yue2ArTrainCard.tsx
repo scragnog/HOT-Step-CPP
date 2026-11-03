@@ -48,6 +48,7 @@ import {
 } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { ModelManagerModal } from '../model-manager/ModelManagerModal';
+import { useYue2Tokenizer, YUE2_TOKENIZER_LABELS, type Yue2TokenizerId } from '../cover-studio/yue2Tokenizer';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
@@ -140,8 +141,16 @@ export const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => vo
   const [busy, setBusy] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [edits, setEdits] = useState<Partial<TokenizeForm>>({});
+  const tokenizerPick = useYue2Tokenizer();
 
   const stage = status.stages.tokenize;
+  const tokenizer: Yue2TokenizerId = stage.tokenizer ?? tokenizerPick.choice.training;
+  const choices = stage.tokenizers
+    ?? (['v9', 'wannabe-v1', 'wannabe-v2'] as const).map(id => ({ id, label: YUE2_TOKENIZER_LABELS[id], installed: true, registryId: '' }));
+  const pickTokenizer = async (id: Yue2TokenizerId) => {
+    await tokenizerPick.set({ training: id });
+    onDone();  // the status names the chosen file and what is missing for it
+  };
   const d = stage.defaults;
   const base: TokenizeForm = { decode: d.decode, only: d.only, limit: d.limit, force: d.force };
   const form: TokenizeForm = { ...base, ...edits };
@@ -164,6 +173,7 @@ export const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => vo
         ...(form.only.trim() ? { only: form.only.trim() } : {}),
         ...(form.limit > 0 ? { limit: form.limit } : {}),
         force: form.force,
+        tokenizer,
       };
       await startYue2Tokenize(body);
     } finally {
@@ -177,8 +187,8 @@ export const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => vo
       <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
       <span>
         {t('trainingStudio.yue2ar.tokMissing',
-          'Missing: {{files}}. Install it from the Model Manager (yue2-tok-f16) — nothing in generation '
-          + 'needs it, so a fresh install will not have it.',
+          'Missing: {{files}}. Install it from the Model Manager, or pick a tokenizer you have — nothing '
+          + 'in generation needs it, so a fresh install will not have it.',
           { files: stage.missing.join(', ') })}
       </span>
     </div>
@@ -221,6 +231,20 @@ export const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => vo
           + 'skipped.')}
       </p>
 
+      <label className="flex flex-col gap-1 mb-3 max-w-xs">
+        <ParamLabel label={t('trainingStudio.yue2ar.tokenizer', 'Tokenizer')} className={LABEL}
+          info={t('trainingStudio.yue2ar.tokenizerHint',
+            'Which tokenizer turns the audio into codes. v9 is the default and renders with the companion '
+            + 'decoder adapter. WannabeTokenizer (by ManyOtherFunctions) is an alternative; adapters trained on '
+            + 'its codes train and render without the companion, automatically. Changing it re-encodes every '
+            + 'source on the next run.')} />
+        <StyledSelect accent="amber" value={tokenizer} onChange={v => void pickTokenizer(v)}
+          options={choices.map(c => ({
+            value: c.id,
+            label: c.installed ? c.label : `${c.label} (${t('trainingStudio.yue2ar.notInstalled', 'not installed')})`,
+          }))} />
+      </label>
+
       {!blocked && (
         <>
           <div className="text-[11px] text-zinc-500 leading-relaxed mb-3">
@@ -243,9 +267,8 @@ export const Yue2TokenizeCard: React.FC<{ status: Yue2ArStatus; onDone: () => vo
               <AlertTriangle size={13} className="mt-0.5 flex-shrink-0" />
               <span>
                 {t('trainingStudio.yue2ar.tokMixed',
-                  'These codes came from {{had}} and the installed tokenizer is now {{have}}. Two tokenizers '
-                  + 'across one cache is one corpus with two vocabularies — re-run with "Re-encode cached '
-                  + 'sources" ticked.',
+                  'These codes came from {{had}} and the chosen tokenizer is {{have}}. The next run re-encodes '
+                  + 'every source with it; training on these codes until then uses {{had}}.',
                   { had: codes.tokenizer, have: stage.tokenizerFile })}
               </span>
             </div>

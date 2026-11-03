@@ -23,6 +23,7 @@ import { trainingBaseDir } from './paths.js';
 import { isCheckpointLadder, listYue2AitkRuns, type Yue2AitkRunRecord } from './yue2AitkRuns.js';
 import { autoRefineRequest } from './yue2JointTrainRunner.js';
 import { YUE2_CACHE_LUFS } from './yue2Train.js';
+import { yue2CodesReady, yue2TokenizerSetting } from './yue2Tokenize.js';
 import { listPreparedCaches } from './preparedDataReset.js';
 import { samplesMissingYue2Caption } from './yue2CaptionJob.js';
 import { bestScoredRung } from './yue2BestRung.js';
@@ -484,7 +485,7 @@ async function runItem(state: BatchState, item: Yue2BatchItem): Promise<void> {
 interface ArStatus {
   stages: {
     preprocess: { done: boolean; captionModeOk: boolean; captionsStale?: boolean; loudnessLufs?: number | null };
-    tokenize: { done: boolean };
+    tokenize: { done: boolean; status?: { tokenizer?: string } | null };
     sheet: { done: boolean };
     align: { done: boolean; stemsReady: number; stemsNeeded: number };
   };
@@ -574,7 +575,10 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
       const cut = p.done && p.captionModeOk !== false && !p.captionsStale && p.loudnessLufs === lufs;
       return cut ? null : { captionMode: 'yue2', loudnessLufs: lufs };
     }
-    case 'codes': return st.stages.tokenize.done ? null : {};
+    case 'codes': {
+      const tokenizer = yue2TokenizerSetting().training;
+      return yue2CodesReady(st.stages.tokenize, tokenizer) ? null : { tokenizer };
+    }
     case 'sheet': return st.stages.sheet.done ? null : {};
     case 'stems': {
       if (st.stages.align.stemsNeeded < 1) throw new Error('The latent cache contains no songs to align.');

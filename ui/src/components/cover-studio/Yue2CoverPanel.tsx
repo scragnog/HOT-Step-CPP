@@ -7,6 +7,7 @@ import { transposeKey } from './coverStudioUtils';
 import type { Yue2SourceTrack } from '../../utils/yue2CaptionSource';
 import type { Artist, AlbumPreset } from '../../services/lireekApi';
 import { CoverArtistGrid } from './CoverArtistGrid';
+import { useYue2Tokenizer, YUE2_TOKENIZER_LABELS, type Yue2TokenizerId } from './yue2Tokenizer';
 
 interface Props {
   caption: string;
@@ -184,15 +185,21 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
   const arStrengthEl = <CoverArStrength value={p.arStrength} onChange={p.onArStrength} />;
   const g = p.guide;
   const setG = (patch: Partial<CoverGuideState>) => p.onGuide({ ...g, ...patch });
+  const tokenizer = useYue2Tokenizer();
   const guideBlock = coverGuideBlock(p.keyShift, p.tempoMode);
   const guideEl = p.hasSourceAudio && <div className="space-y-2">
     <div className="flex items-center justify-between">
-      <ParamLabel label="Follow source" info="Lets the source recording steer the composer, not just its transcribed score. The real-audio tokenizer reads the recording and, for every 40 ms, lists the semantic codes that best describe it; the composer then leans toward those. Needs the YuE2 semantic tokenizer (yue2-tok-f16) from the Model Manager. Reading the recording takes a few seconds the first time and is cached." />
+      <ParamLabel label="Follow source" info="Lets the source recording steer the composer, not just its transcribed score. The real-audio tokenizer reads the recording and, for every 40 ms, lists the semantic codes that best describe it; the composer then leans toward those. Needs the chosen tokenizer (v9 is yue2-tok-f16) from the Model Manager. Reading the recording takes a few seconds the first time and is cached." />
       <Toggle accent="cyan" checked={g.on} onChange={v => setG({ on: v })} aria-label="Follow source" />
     </div>
     {g.on && <EditableSlider label="Source adherence" value={g.scale} min={0} max={1} step={0.05}
       onChange={v => setG({ scale: v })} defaultValue={COVER_GUIDE_DEFAULT.scale} disabled={!!guideBlock}
       helpText={guideBlock || 'Share of each moment taken from the source. 0.5 kept 83% of a test render on the source\'s top codes; 1.0 kept all of it.'} />}
+    {g.on && <>
+      <ParamLabel label="Source tokenizer" info="Which real-audio tokenizer reads the recording. v9 is the default. WannabeTokenizer (by ManyOtherFunctions) is an alternative; it needs its own download from the Model Manager." />
+      <StyledSelect accent="pink" value={tokenizer.choice.cover} onChange={v => void tokenizer.set({ cover: v as Yue2TokenizerId })}
+        options={(Object.keys(YUE2_TOKENIZER_LABELS) as Yue2TokenizerId[]).map(id => ({ value: id, label: YUE2_TOKENIZER_LABELS[id] }))} />
+    </>}
   </div>;
   const guideAdvancedEl = p.hasSourceAudio && g.on && <div className="space-y-2 pt-2">
     <EditableSlider label="Source candidates" value={g.k} min={1} max={64} step={1}

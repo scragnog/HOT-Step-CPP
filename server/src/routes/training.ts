@@ -149,6 +149,7 @@ import {
 } from '../services/training/yue2ArTrain.js';
 import {
   missingYue2TokenizeModels, readYue2CodecIdsStatus, resolveYue2TokenizerModel,
+  YUE2_TOKENIZER_IDS, yue2TokenizerChoices, yue2TokenizerSetting, type Yue2TokenizerId,
   YUE2_TOKENIZE_DEFAULTS,
 } from '../services/training/yue2Tokenize.js';
 import {
@@ -4646,7 +4647,8 @@ router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
     const abc    = readYue2AbcStatus(manifestPath);
     const stemsDir = yue2StemsDir(ds.slug);
     const minted = yue2MintedManifest();
-    const tokenizer = resolveYue2TokenizerModel();
+    const tokenizerId = yue2TokenizerSetting().training;
+    const tokenizer = resolveYue2TokenizerModel(tokenizerId);
     const aligner = resolveYue2AlignerModel();
     const sheetModel = resolveYue2SheetModel();
 
@@ -4683,8 +4685,12 @@ router.get('/datasets/:id/yue2-ar', (req: Request, res: Response) => {
           // into the other.
           done: !!codes?.present && codes.sourcesWithCodes > 0,
           status: codes ?? null,
-          missing: missingYue2TokenizeModels(),
+          missing: missingYue2TokenizeModels(tokenizerId),
           tokenizerFile: tokenizer ? path.basename(tokenizer) : '',
+          /** The chosen tokenizer (preferences `yue2-tokenizer`.training) and
+           *  every choice with whether it is installed, for the card's picker. */
+          tokenizer: tokenizerId,
+          tokenizers: yue2TokenizerChoices(),
           defaults: YUE2_TOKENIZE_DEFAULTS,
         },
         align: {
@@ -4754,12 +4760,16 @@ router.post('/datasets/:id/yue2-tokenize', (req: Request, res: Response) => {
       return Number.isFinite(v) && v >= lo && v <= hi ? v : d;
     };
     const D = YUE2_TOKENIZE_DEFAULTS;
+    // An explicit choice wins (the preparation chain sends one, so a remote
+    // worker uses the main server's); otherwise the stored setting.
+    const tokenizer: Yue2TokenizerId = YUE2_TOKENIZER_IDS.includes(b.tokenizer as Yue2TokenizerId)
+      ? b.tokenizer as Yue2TokenizerId : yue2TokenizerSetting().training;
 
-    const missing = missingYue2TokenizeModels();
+    const missing = missingYue2TokenizeModels(tokenizer);
     if (missing.length) {
       res.status(400).json({
         error: `The tokenize stage is missing: ${missing.join(', ')}. Install it from the Model Manager `
-             + '(yue2-tok-f16) — nothing in generation needs it, so a fresh install will not have it.',
+             + '— nothing in generation needs it, so a fresh install will not have it.',
       });
       return;
     }
@@ -4794,12 +4804,13 @@ router.post('/datasets/:id/yue2-tokenize', (req: Request, res: Response) => {
       only: typeof b.only === 'string' ? b.only.trim() : D.only,
       limit: num('limit', D.limit, 0, 100000),
       force: b.force === true,
+      tokenizer,
       datasetSlug: ds.slug,
     });
     res.json({
       jobId: job.id, kind: job.kind, manifest,
       sources: cache.sources, clips: cache.clips,
-      tokenizer: path.basename(resolveYue2TokenizerModel()),
+      tokenizer: path.basename(resolveYue2TokenizerModel(tokenizer)),
       license: YUE2_LICENSE_NOTICE,
     });
   } catch (err: any) {

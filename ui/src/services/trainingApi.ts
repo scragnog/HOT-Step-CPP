@@ -1224,6 +1224,10 @@ export interface Yue2ArStatus {
       status: Yue2CodecIdsStatus | null;
       missing: string[];
       tokenizerFile: string;
+      /** The chosen tokenizer and every choice with whether it is installed
+       *  (absent from a server older than the choice). */
+      tokenizer?: 'v9' | 'wannabe-v1' | 'wannabe-v2';
+      tokenizers?: Array<{ id: 'v9' | 'wannabe-v1' | 'wannabe-v2'; label: string; installed: boolean; registryId: string }>;
       defaults: Yue2TokenizeDefaults;
     };
     align: {
@@ -1278,6 +1282,8 @@ export interface Yue2TokenizeRequest {
   /** Re-encode sources whose codes are already cached. Without it an already
    *  complete source is skipped, which is what makes a resumed run cheap. */
   force?: boolean;
+  /** Which tokenizer makes the codes; the stored choice when absent. */
+  tokenizer?: 'v9' | 'wannabe-v1' | 'wannabe-v2';
 }
 
 /** POST /api/training/datasets/:id/yue2-stems

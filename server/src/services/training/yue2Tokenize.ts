@@ -40,7 +40,10 @@ import fs from 'fs';
 import path from 'path';
 
 import { config, getFFmpegPath } from '../../config.js';
+import { YUE2_TOKENIZER_IDS, type Yue2TokenizerBody, type Yue2TokenizerId } from '../../contracts/preferences.js';
 import { yue2ModelDir } from './yue2Train.js';
+
+export { YUE2_TOKENIZER_IDS, type Yue2TokenizerId };
 
 // ── Model files ─────────────────────────────────────────────────────────────
 
@@ -52,18 +55,44 @@ function tokenizerSearchDirs(): string[] {
   return [yue2ModelDir(), config.aceServer.models];
 }
 
-/** The `yue2-tok-*.gguf` the engine would pick, or '' when there is none.
+/** Each tokenizer's file prefix and registry id. v9 is the engine's own
+ *  discovery target (`yue2-tok-*`); the WannabeTokenizer files have their own
+ *  prefixes, so discovery never picks one by accident and `--tok` names them. */
+export const YUE2_TOKENIZERS: Record<Yue2TokenizerId, { prefix: string; registryId: string; label: string }> = {
+  v9: { prefix: 'yue2-tok-', registryId: 'yue2-tok-f16', label: 'v9 (Mothersuperior)' },
+  'wannabe-v1': { prefix: 'yue2-wannabe-v1-', registryId: 'yue2-wannabe-v1-f16', label: 'WannabeTokenizer V1' },
+  'wannabe-v2': { prefix: 'yue2-wannabe-v2-', registryId: 'yue2-wannabe-v2-f16', label: 'WannabeTokenizer V2' },
+};
+
+/** Which tokenizer a file name belongs to (the manifest's codec_ids_tokenizer),
+ *  or '' when it is none of them. */
+export function yue2TokenizerOfFile(file: string): Yue2TokenizerId | '' {
+  const base = path.basename(file);
+  return YUE2_TOKENIZER_IDS.find(id => base.startsWith(YUE2_TOKENIZERS[id].prefix)) ?? '';
+}
+
+/** The stored choice (preferences family `yue2-tokenizer`): routes/preferences.ts
+ *  registers the reader; until it does, and on any read failure, v9 for both. */
+let tokenizerSource: () => Yue2TokenizerBody | null = () => null;
+export function setYue2TokenizerSource(read: () => Yue2TokenizerBody | null): void { tokenizerSource = read; }
+export function yue2TokenizerSetting(): Yue2TokenizerBody {
+  try { return tokenizerSource() ?? { training: 'v9', cover: 'v9' }; } catch { return { training: 'v9', cover: 'v9' }; }
+}
+
+/** The tokenizer's GGUF, or '' when it is not installed.
  *
- *  NOT passed to the engine — `buildYue2TokenizeArgs` sends `--models` and lets
- *  discovery choose, so the quant ranking stays in one place. This resolves the
- *  same file only to name it in a status payload and to answer "is the stage
- *  installed". The ranking differs in one harmless way: discovery prefers f16
- *  over f32, while this returns whichever the first search dir holds. */
-export function resolveYue2TokenizerModel(): string {
+ *  For v9 this is NOT passed to the engine — `buildYue2TokenizeArgs` sends
+ *  `--models` and lets discovery choose, so the quant ranking stays in one
+ *  place; it resolves the same file only to name it in a status payload and to
+ *  answer "is the stage installed". The ranking differs in one harmless way:
+ *  discovery prefers f16 over f32, while this returns whichever the first
+ *  search dir holds. A WannabeTokenizer file is passed as `--tok`. */
+export function resolveYue2TokenizerModel(id: Yue2TokenizerId = 'v9'): string {
+  const prefix = YUE2_TOKENIZERS[id].prefix;
   for (const dir of tokenizerSearchDirs()) {
     let hits: string[] = [];
     try {
-      hits = fs.readdirSync(dir).filter(f => f.startsWith('yue2-tok-') && f.endsWith('.gguf')).sort();
+      hits = fs.readdirSync(dir).filter(f => f.startsWith(prefix) && f.endsWith('.gguf')).sort();
     } catch {
       continue;  // a missing models dir reads as a missing file, never a throw
     }
@@ -77,10 +106,27 @@ export function resolveYue2TokenizerModel(): string {
  *  One file, and it is optional to the rest of the app: nothing in generation
  *  needs the tokenizer, so a fresh install will not have it. Registry id
  *  `yue2-tok-f16`, which the Model Manager can download. */
-export function missingYue2TokenizeModels(): string[] {
-  return resolveYue2TokenizerModel()
+export function missingYue2TokenizeModels(id: Yue2TokenizerId = 'v9'): string[] {
+  const t = YUE2_TOKENIZERS[id];
+  return resolveYue2TokenizerModel(id)
     ? []
-    : ['the YuE2 semantic tokenizer (yue2-tok-*.gguf)'];
+    : [id === 'v9' ? 'the YuE2 semantic tokenizer (yue2-tok-*.gguf)' : `the ${t.label} (${t.registryId})`];
+}
+
+/** The tokenize stage is done FOR THIS CHOICE: codes exist and the manifest
+ *  says the chosen tokenizer made them (a cache stamped before the choice
+ *  existed is v9's). The chains use it so a changed choice re-runs the stage. */
+export function yue2CodesReady(t: { done: boolean; status?: { tokenizer?: string } | null },
+  choice: Yue2TokenizerId): boolean {
+  return t.done && (yue2TokenizerOfFile(t.status?.tokenizer ?? '') || 'v9') === choice;
+}
+
+/** Every tokenizer with whether it is installed, for the pickers. */
+export function yue2TokenizerChoices(): Array<{ id: Yue2TokenizerId; label: string; installed: boolean; registryId: string }> {
+  return YUE2_TOKENIZER_IDS.map(id => ({
+    id, label: YUE2_TOKENIZERS[id].label, registryId: YUE2_TOKENIZERS[id].registryId,
+    installed: !!resolveYue2TokenizerModel(id),
+  }));
 }
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -163,6 +209,9 @@ export interface ResolvedYue2TokenizeOptions {
   only: string;
   limit: number;
   force: boolean;
+  /** Which tokenizer makes the codes. A change from the one the manifest
+   *  names re-encodes every source (the engine compares the two). */
+  tokenizer: Yue2TokenizerId;
   /** Carried for the runner's own log lines and the run record. */
   datasetSlug: string;
 }
@@ -183,8 +232,10 @@ export function buildYue2TokenizeArgs(o: ResolvedYue2TokenizeOptions): string[] 
   if (o.only) args.push('--only', o.only);
   if (o.limit > 0) args.push('--limit', String(o.limit));
   if (o.force) args.push('--force');
-  // Deliberately NOT emitted: --tok. `--models` lets the engine's quant
-  // ranking pick, and it prints which file it chose; naming one here would
-  // pin a precision the server has no opinion about.
+  // v9 sends no --tok: `--models` lets the engine's quant ranking pick, and it
+  // prints which file it chose. A WannabeTokenizer file is not discoverable by
+  // design, so it is named.
+  // (A job persisted before the choice existed carries none: v9.)
+  if (o.tokenizer && o.tokenizer !== 'v9') args.push('--tok', resolveYue2TokenizerModel(o.tokenizer));
   return args;
 }

@@ -13,7 +13,7 @@ import path from 'path';
 
 import { config, getFFmpegPath } from '../../../config.js';
 import { aceTrainExe } from '../../training/aceTrain.js';
-import { missingYue2TokenizeModels } from '../../training/yue2Tokenize.js';
+import { missingYue2TokenizeModels, resolveYue2TokenizerModel, yue2TokenizerSetting, YUE2_TOKENIZERS } from '../../training/yue2Tokenize.js';
 import type { Yue2SynthRequest } from './client.js';
 
 /** Candidates kept per frame in the file. The render can use fewer (k). */
@@ -90,16 +90,19 @@ function guideCacheDir(): string {
  *  the file's path, size and mtime. Throws with a user-facing message. */
 export async function buildYue2Guide(srcPath: string, log: (msg: string) => void, signal?: AbortSignal): Promise<string> {
   if (!fs.existsSync(srcPath)) throw new Error(`Follow source: the source recording is missing (${path.basename(srcPath)}).`);
-  const missing = missingYue2TokenizeModels();
+  // The cover tokenizer (preferences `yue2-tokenizer`.cover, the cover panel's picker).
+  const tokenizer = yue2TokenizerSetting().cover;
+  const missing = missingYue2TokenizeModels(tokenizer);
   if (missing.length) {
-    throw new Error(`Follow source needs ${missing.join(', ')}. Download "yue2-tok-f16" in the Model Manager, or turn Follow source off.`);
+    throw new Error(`Follow source needs ${missing.join(', ')}. Download "${YUE2_TOKENIZERS[tokenizer].registryId}" in the Model Manager, or turn Follow source off.`);
   }
   const exe = aceTrainExe();
   if (!exe) throw new Error('Follow source needs the ace-train engine binary, which this install does not have.');
 
   const st = fs.statSync(srcPath);
   const key = crypto.createHash('sha1')
-    .update(`${path.resolve(srcPath)}|${st.size}|${st.mtimeMs}|${YUE2_GUIDE_TOPK}|v1`).digest('hex').slice(0, 20);
+    .update(`${path.resolve(srcPath)}|${st.size}|${st.mtimeMs}|${YUE2_GUIDE_TOPK}|v1${tokenizer === 'v9' ? '' : `|${tokenizer}`}`)
+    .digest('hex').slice(0, 20);
   const dir = guideCacheDir();
   const out = path.join(dir, `${key}.y2gd`);
   if (fs.existsSync(out)) {
@@ -114,7 +117,10 @@ export async function buildYue2Guide(srcPath: string, log: (msg: string) => void
     '--models', config.aceServer.models];
   const ff = getFFmpegPath();
   if (ff) args.push('--ffmpeg', ff);
-  log(`[YuE2] Reading the source for Follow source: ${path.basename(srcPath)}`);
+  // WannabeTokenizer reads a track at its own level (its reference never
+  // normalises), so the engine's -14 LUFS default is turned off for it.
+  if (tokenizer !== 'v9') args.push('--tok', resolveYue2TokenizerModel(tokenizer), '--lufs', '0');
+  log(`[YuE2] Reading the source for Follow source (${YUE2_TOKENIZERS[tokenizer].label}): ${path.basename(srcPath)}`);
   const started = Date.now();
   const stderr = await new Promise<string>((resolve, reject) => {
     const child = execFile(exe, args, { timeout: 10 * 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true },

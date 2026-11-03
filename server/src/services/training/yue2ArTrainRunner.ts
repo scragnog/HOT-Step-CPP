@@ -530,7 +530,7 @@ export async function runYue2TokenizeJob(job: TrainingJob): Promise<void> {
   }
   // Re-checked here as well as at the route: the route's answer can be stale by
   // the time the job reaches the head of the GPU lane.
-  const missing = missingYue2TokenizeModels();
+  const missing = missingYue2TokenizeModels(opts.tokenizer ?? 'v9');
   if (missing.length) {
     finishJob(job, 'failed', `The YuE2 tokenizer is missing: ${missing.join(', ')}`);
     return;
