@@ -35,19 +35,15 @@ router.get('/', async (_req, res) => {
   let aceStatus = 'disconnected';
   let aceVersion = '';
 
-  try {
-    const health = await aceClient.health();
-    aceStatus = health.status || 'ok';
-
-    // Try to get version info from props
-    try {
-      const props = await aceClient.props();
-      aceVersion = (props as any).version || '';
-    } catch {
-      // Props not critical for health
-    }
-  } catch {
-    aceStatus = 'disconnected';
+  // Both probes at once, capped under the UI's 2 s abort on this route: the
+  // Restart overlay and the offline check must hear Node answer even while the
+  // engine is slow to reply or still booting (aceFetch retries a refused
+  // connect for ~1.5 s).
+  const [health, props] = await Promise.allSettled([aceClient.health(1500), aceClient.props(1500)]);
+  if (health.status === 'fulfilled') {
+    aceStatus = health.value.status || 'ok';
+    // Props not critical for health
+    if (props.status === 'fulfilled') aceVersion = (props.value as any).version || '';
   }
 
   res.json({

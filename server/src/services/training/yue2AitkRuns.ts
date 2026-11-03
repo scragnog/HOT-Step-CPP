@@ -181,6 +181,11 @@ function writeIndex(records: Yue2AitkRunRecord[], changedRecords: Yue2AitkRunRec
 
 export function aitkRunIndexPath(): string { return INDEX; }
 
+/** One run as indexed, without the checkpoint re-scan `listAllYue2AitkRuns` does. */
+export function findYue2AitkRun(jobId: string): Yue2AitkRunRecord | undefined {
+  return readIndex().find(r => r.jobId === jobId);
+}
+
 export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
   let entries: fs.Dirent[];
   try { entries = fs.readdirSync(output, { withFileTypes: true }); } catch { return []; }

@@ -18,7 +18,7 @@ import { config } from '../../config.js';
 import * as repo from './datasetsRepo.js';
 import { isInside, trainingBaseDir } from './paths.js';
 import { getWorker, listWorkers, workerFetch, workerJson, type MirrorRun, type WorkerInfo } from './trainingWorkers.js';
-import { checkpointRecords, deleteYue2AitkRun, freeYue2RunDirectory, listAllYue2AitkRuns, moveYue2AitkRun, recordYue2AitkRun, withYue2RunLock, yue2RunFinished,
+import { checkpointRecords, deleteYue2AitkRun, findYue2AitkRun, freeYue2RunDirectory, listAllYue2AitkRuns, moveYue2AitkRun, recordYue2AitkRun, withYue2RunLock, yue2RunFinished,
   type Yue2AitkRunRecord } from './yue2AitkRuns.js';
 import { listYue2JointPreviews, recordYue2JointPreview } from './yue2JointPreview.js';
 import { readYue2Linked, rebaseYue2JointLinks, refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
@@ -388,8 +388,9 @@ async function relocateRun(run: Yue2AitkRunRecord, target: string): Promise<void
 
 /** Runs pulled by the old ladder pull become ordinary mirrored runs: a folder
  *  still under `yue2-joint-adapters/_remote` moves to the plain
- *  `yue2-joint-adapters/<name>`, and each record is rewritten from the disk
- *  scan, which drops the pull's per-checkpoint fields. The `remote:<worker>:<id>`
+ *  `yue2-joint-adapters/<name>`, and a moved record, or one still carrying the
+ *  pull's per-checkpoint fields, is rewritten from the disk scan, which drops
+ *  them. The `remote:<worker>:<id>`
  *  jobId stays (rung scores are keyed by it); the mirror finds the run through
  *  `origin.remoteJobId` and fills in what the worker still holds. Idempotent. */
 export async function migrateYue2OriginRuns(): Promise<{ moved: number; errors: string[] }> {
@@ -397,17 +398,22 @@ export async function migrateYue2OriginRuns(): Promise<{ moved: number; errors: 
   const staging = path.join(joint, '_remote');
   let moved = 0;
   const errors: string[] = [];
+  // One catalogue scan, then index lookups: re-scanning every run's checkpoints
+  // per mirrored run, and rewriting every clean record, held boot (and so
+  // Restart) for minutes on a big catalogue.
   for (const { jobId } of listAllYue2AitkRuns().filter(r => r.origin)) {
     try {
       await withYue2RunLock(jobId, async () => {
-        let run = listAllYue2AitkRuns().find(r => r.jobId === jobId);
+        let run = findYue2AitkRun(jobId);
         if (!run) return;
+        let rewrite = run.checkpoints.some(c => 'availability' in c || 'manifestSha256' in c || 'prunedFiles' in c);
         if (isInside(staging, path.resolve(run.output)) && fs.existsSync(run.output)) {
           await relocateRun(run, freeYue2RunDirectory(path.join(joint, path.basename(run.output))));
           moved++;
-          run = listAllYue2AitkRuns().find(r => r.jobId === jobId)!;
+          run = findYue2AitkRun(jobId)!;
+          rewrite = true;
         }
-        recordYue2AitkRun(run);
+        if (rewrite) recordYue2AitkRun(run);
       });
     } catch (err) { errors.push(`${jobId}: ${errorText(err)}`); }
   }

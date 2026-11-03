@@ -123,7 +123,7 @@ function killSelf(): void {
     try {
       spawn('taskkill', ['/PID', String(parentPid), '/T', '/F'], {
         detached: true, stdio: 'ignore', windowsHide: true,
-      }).unref();
+      }).on('error', err => console.error(`[Shutdown] taskkill of ${parentPid} failed: ${err.message}`)).unref();
     } catch { /* fallback: process.exit below still runs */ }
   }, 500);
 }
@@ -138,11 +138,12 @@ async function stopEverything(restart: boolean): Promise<void> {
   // the old port-based taskkill made it log "crash 1/3, restarting in 3 s".
   await stopAllEngines(restart ? 'Server restarting' : 'Server shutting down', 15_000, { suspend: false });
   closeDb();
-  closeLogger();
   if (!restart) killVite();
   // Portable restart: HOT-Step.bat runs node directly, so our parent IS the
   // restart loop — exiting is enough there. Every other case needs the tree kill.
   if (!restart || !PORTABLE_MODE) killSelf();
+  // After the kill decisions, so a missed tree kill shows in the session log.
+  closeLogger();
   setTimeout(() => {
     console.log(restart ? '[Server] Exiting for restart.' : '[Server] Exiting.');
     process.exit(0);

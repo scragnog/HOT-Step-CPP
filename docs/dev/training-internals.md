@@ -704,8 +704,10 @@ unfinished runs under `yue2-joint-adapters/_remote/<worker>/`. It moves each sta
 to `yue2-joint-adapters/<name>` (`-N` on a clash) with `moveYue2AitkRun`, repoints album
 presets, `yue2_rung_scores.checkpoint_dir` and `yue2-linked.json` with
 `rebaseYue2JointLinks` (folder and records go back on failure), notes the new folder on the
-archived loss log, rewrites each record from the disk scan (dropping the pull's
-per-checkpoint fields), and removes the empty `_remote` tree. It is idempotent.
+archived loss log, rewrites a moved record, or one still carrying the pull's
+per-checkpoint fields, from the disk scan (dropping them), and removes the empty `_remote`
+tree. It scans the catalogue once and leaves clean records alone, since it runs on every
+boot before the server listens. It is idempotent.
 `startYue2Mirror()` awaits it before the first pass, so no pass writes into a folder about
 to move. The first mirror pass then fills in the rung weights the worker still holds.
 

@@ -425,14 +425,14 @@ async function acePost(path: string, body?: unknown, contentType = 'application/
 
 export const aceClient = {
   /** GET /health — check if ace-server is alive */
-  async health(): Promise<{ status: string }> {
-    const res = await aceGet('/health');
+  async health(timeoutMs?: number): Promise<{ status: string }> {
+    const res = await aceGet('/health', timeoutMs);
     return res.json();
   },
 
   /** GET /props — available models, config, defaults */
-  async props(): Promise<AceProps> {
-    const res = await aceGet('/props');
+  async props(timeoutMs?: number): Promise<AceProps> {
+    const res = await aceGet('/props', timeoutMs);
     return res.json();
   },
 

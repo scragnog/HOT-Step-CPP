@@ -2226,6 +2226,7 @@
     "app.restarting.stopping": "Stopping server...",
     "app.restarting.waiting": "Waiting for server",
     "app.restarting.reconnected": "Reconnected! Reloading",
+    "app.restarting.stalled": "The server has not come back after 90 seconds. Check the HOT-Step Server window for errors. If it has closed, start HOT-Step again; this page reloads by itself once the server answers.",
     "app.quitDialog.title": "Quit HOT-Step CPP",
     "app.quitDialog.message": "Are you sure you wish to shut down HOT-Step CPP? This will stop the engine and all servers.",
     "app.quitDialog.confirm": "Shut Down",

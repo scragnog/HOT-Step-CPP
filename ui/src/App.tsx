@@ -207,6 +207,13 @@ const RestartingOverlay: React.FC = () => {
     return () => clearInterval(iv);
   }, []);
 
+  // Keep polling, but say what to do once a restart has clearly stalled.
+  const [stalled, setStalled] = useState(false);
+  useEffect(() => {
+    const id = window.setTimeout(() => setStalled(true), 90_000);
+    return () => window.clearTimeout(id);
+  }, []);
+
   const onWaiting = useCallback(() => setStatus(t('app.restarting.waiting')), [t]);
   const onReconnected = useCallback(() => setStatus(t('app.restarting.reconnected')), [t]);
   useServerHealthReload(3000, onWaiting, onReconnected);
@@ -221,6 +228,11 @@ const RestartingOverlay: React.FC = () => {
       <h1 className="text-2xl font-bold mb-2">{t('app.restarting.title')}</h1>
       <p className="text-zinc-600 dark:text-zinc-400 text-lg">{status}{dots}</p>
       <p className="text-zinc-600 text-sm mt-4">{t('app.restarting.message')}</p>
+      {stalled && (
+        <p className="text-amber-600 dark:text-amber-400 text-sm mt-4 max-w-md text-center">
+          {t('app.restarting.stalled', 'The server has not come back after 90 seconds. Check the HOT-Step Server window for errors. If it has closed, start HOT-Step again; this page reloads by itself once the server answers.')}
+        </p>
+      )}
     </div>
   );
 };
