@@ -71,6 +71,7 @@ default rather than a fixed number baked into the page — so if a later update 
 recipe, an untouched field keeps following it and only fields you actually changed stay put.
 
 YuE2 Joint Training keeps its loss graph and step count visible with **Blind rungs** enabled. The **Review** tab lists unscored checkpoint ladders even when previews are disabled or have not finished rendering. Open a run to render previews and score its rungs.
+The ladder shows the dataset name from the Review list as a static heading above its rungs.
 
 ## Controls
 

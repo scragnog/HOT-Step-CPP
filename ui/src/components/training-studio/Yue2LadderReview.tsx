@@ -255,6 +255,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
   const totalBytes = items.reduce((s, i) => s + (choice[i.key] && i.item ? i.item.bytes : 0), 0);
   return (
     <>
+      {run && datasetName && <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100 break-words">{datasetName}</h3>}
       {cleanup && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => !cleaning && setCleanup(null)}>
         <div className="w-full max-w-xl rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white dark:bg-zinc-900 p-5 shadow-xl" onClick={e => e.stopPropagation()}>
           <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{cleanup.blind
