@@ -125,11 +125,21 @@ function readIndex(): Yue2AitkRunRecord[] {
       const moved = relocatedOutput(r.output);
       if (!moved) return r;
       relocated = true;
-      return { ...r, output: moved, updatedAt: Date.now() };
+      return rebasedRun(r, moved);
     });
     if (relocated) { try { writeIndex(healed, healed.filter((r, i) => r !== records[i])); } catch { /* next read heals again */ } }
     return healed;
   } catch { return []; }
+}
+
+/** `run` repointed at `target`, checkpoint paths under its old folder included. */
+function rebasedRun(run: Yue2AitkRunRecord, target: string): Yue2AitkRunRecord {
+  const prefix = path.resolve(run.output).toLowerCase() + path.sep;
+  const rebase = <T extends string | undefined>(p: T): T =>
+    (p && path.resolve(p).toLowerCase().startsWith(prefix) ? path.join(target, path.resolve(p).slice(prefix.length)) : p) as T;
+  return { ...run, output: target, updatedAt: Date.now(),
+    checkpoints: run.checkpoints.map(c => ({ ...c, dir: rebase(c.dir), adapterPath: rebase(c.adapterPath),
+      optimizerPath: rebase(c.optimizerPath), arPath: rebase(c.arPath), narPath: rebase(c.narPath) })) };
 }
 
 /** Where a recorded run folder went if it is gone from its recorded path:
@@ -166,7 +176,7 @@ function isRunRecord(value: unknown): value is Yue2AitkRunRecord {
       }));
 }
 
-function writeIndex(records: Yue2AitkRunRecord[], changedRecords: Yue2AitkRunRecord[]): void {
+function writeIndex(records: Yue2AitkRunRecord[], changedRecords: Yue2AitkRunRecord[], scanned: Yue2AitkRunRecord[] = []): void {
   fs.mkdirSync(path.dirname(INDEX), { recursive: true });
   const tmp = `${INDEX}.${process.pid}.${Date.now()}.tmp`;
   const persisted = records.slice(-MAX_RECORDS);
@@ -177,13 +187,51 @@ function writeIndex(records: Yue2AitkRunRecord[], changedRecords: Yue2AitkRunRec
     try { fs.writeFileSync(path.join(record.output, 'run.json'), JSON.stringify(record, null, 2), 'utf8'); }
     catch (err) { warnRunFile(record.output, err); }
   }
+  patchSnapshot(persisted, new Set(scanned));
 }
 
 export function aitkRunIndexPath(): string { return INDEX; }
 
-/** One run as indexed, without the checkpoint re-scan `listAllYue2AitkRuns` does. */
+/** One run as the durable index records it (a disk read, not the snapshot). */
 export function findYue2AitkRun(jobId: string): Yue2AitkRunRecord | undefined {
   return readIndex().find(r => r.jobId === jobId);
+}
+
+function jointLosses(text: string): Map<number, number> {
+  const losses = new Map<number, number>();
+  for (const line of text.split(/\r?\n/)) {
+    try {
+      const event = JSON.parse(line) as Record<string, unknown>;
+      if (event.stage !== 'joint' || !Number.isInteger(event.step)) continue;
+      const { ar_ce, ar_kl, nar_mse, cursor_ce, cursor_weight } = event;
+      if (![ar_ce, ar_kl, nar_mse].every(v => typeof v === 'number' && Number.isFinite(v))) continue;
+      const cursor = typeof cursor_ce === 'number' && Number.isFinite(cursor_ce)
+        && typeof cursor_weight === 'number' && Number.isFinite(cursor_weight)
+        ? cursor_ce * cursor_weight : 0;
+      losses.set(event.step as number, (ar_ce as number) + 0.2 * (ar_kl as number) + (nar_mse as number) + cursor);
+    } catch { /* an incomplete log line does not invalidate other steps */ }
+  }
+  return losses;
+}
+
+function checkpointRow(dir: string, step: number, losses: Map<number, number>, meters: Record<string, unknown>,
+  files: Pick<Yue2AitkCheckpointRecord, 'adapterPath' | 'optimizerPath' | 'arPath' | 'narPath'>): Yue2AitkCheckpointRecord {
+  const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+  const kl = num(meters.kl_reading) ?? num(meters.ar_kl_mean20);
+  const recent = [...losses].filter(([s]) => s <= step)
+    .sort(([a], [b]) => b - a).slice(0, 20);
+  const meanLoss = recent.length
+    ? recent.reduce((sum, [, loss]) => sum + loss, 0) / recent.length : undefined;
+  return {
+    step, dir,
+    ...(meanLoss !== undefined ? { loss: meanLoss } : {}),
+    ...(kl !== undefined ? { kl } : {}),
+    ...(num(meters.nar_recon) !== undefined ? { recon: num(meters.nar_recon) } : {}),
+    ...(num(meters.nar_drift) !== undefined ? { drift: num(meters.nar_drift) } : {}),
+    ...(meters.planner_frozen === true ? { frozen: true } : {}),
+    ...(meters.kl_rung === true ? { rung: true } : {}),
+    ...files,
+  };
 }
 
 export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
@@ -198,23 +246,10 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
     } } catch { /* incomplete catalogue is handled by the caller */ }
   }
   for (const base of dirs) {
-   const losses = new Map<number, number>();
+   let losses = new Map<number, number>();
    try {
      const log = path.join(base, 'train.jsonl');
-     if (fs.statSync(log).size <= 8 * 1024 * 1024) {
-       for (const line of fs.readFileSync(log, 'utf8').split(/\r?\n/)) {
-         try {
-           const event = JSON.parse(line) as Record<string, unknown>;
-           if (event.stage !== 'joint' || !Number.isInteger(event.step)) continue;
-           const { ar_ce, ar_kl, nar_mse, cursor_ce, cursor_weight } = event;
-           if (![ar_ce, ar_kl, nar_mse].every(v => typeof v === 'number' && Number.isFinite(v))) continue;
-           const cursor = typeof cursor_ce === 'number' && Number.isFinite(cursor_ce)
-             && typeof cursor_weight === 'number' && Number.isFinite(cursor_weight)
-             ? cursor_ce * cursor_weight : 0;
-           losses.set(event.step as number, (ar_ce as number) + 0.2 * (ar_kl as number) + (nar_mse as number) + cursor);
-         } catch { /* an incomplete log line does not invalidate other steps */ }
-       }
-     }
+     if (fs.statSync(log).size <= 8 * 1024 * 1024) losses = jointLosses(fs.readFileSync(log, 'utf8'));
    } catch { /* an unfinished segment may not have its JSONL log yet */ }
    let local: fs.Dirent[];
    try { local = fs.readdirSync(base, { withFileTypes: true }); } catch { continue; }
@@ -228,108 +263,131 @@ export function checkpointRecords(output: string): Yue2AitkCheckpointRecord[] {
     };
     let meters: Record<string, unknown> = {};
     try { meters = JSON.parse(fs.readFileSync(path.join(dir, 'meters.json'), 'utf8')) as Record<string, unknown>; } catch { /* older checkpoints have none */ }
-    const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? v : undefined;
-    const kl = num(meters.kl_reading) ?? num(meters.ar_kl_mean20);
-    const step = Number(match[1]);
-    const recent = [...losses].filter(([s]) => s <= step)
-      .sort(([a], [b]) => b - a).slice(0, 20);
-    const meanLoss = recent.length
-      ? recent.reduce((sum, [, loss]) => sum + loss, 0) / recent.length : undefined;
-    rows.push({
-      step, dir,
-      ...(meanLoss !== undefined ? { loss: meanLoss } : {}),
-      ...(kl !== undefined ? { kl } : {}),
-      ...(num(meters.nar_recon) !== undefined ? { recon: num(meters.nar_recon) } : {}),
-      ...(num(meters.nar_drift) !== undefined ? { drift: num(meters.nar_drift) } : {}),
-      ...(meters.planner_frozen === true ? { frozen: true } : {}),
-      ...(meters.kl_rung === true ? { rung: true } : {}),
+    rows.push(checkpointRow(dir, Number(match[1]), losses, meters, {
       adapterPath: file('adapter.safetensors'), optimizerPath: file('optimizer.resume'),
       arPath: yue2JointWeight(dir, 'ar'), narPath: yue2JointWeight(dir, 'nar'),
-    });
+    }));
    }
   }
   return rows.sort((a, b) => b.step - a.step);
 }
 
-/** checkpointRecords by output folder. Rescanning every run's logs and meters
- *  per picker request held the event loop for ~1 s on 247 runs, and even a
- *  stat pass over them costs ~70 ms on the adapter drive, so a hit is served
- *  as is and revalidateCheckpointMemo compares stat signatures off the event
- *  loop: a folder changed by hand shows up a request later. A running run is
- *  rescanned on every read; recordYue2AitkRun, move and delete drop their
- *  entry, which also covers a meters.json rewritten in place. */
-const checkpointMemo = new Map<string, { sig: string | null; rows: Yue2AitkCheckpointRecord[] }>();
-let checkpointMemoVersion = 0;
-let revalidating = false;
-let revalidatedAt = 0;
+/** Parsed train.jsonl losses by path, reused while size and mtime match, so a
+ *  catalogue refresh only re-parses logs that grew. */
+const lossCache = new Map<string, { size: number; mtimeMs: number; losses: Map<number, number> }>();
 
-/** Checkpoint dirs and train.jsonl logs, segments included, with mtime and size. */
-const signed = (e: fs.Dirent) => e.isDirectory() ? /^(checkpoint-step\d+|segments|segment-\d{6})$/.test(e.name) : e.name === 'train.jsonl';
-const descends = (e: fs.Dirent, depth: number) => e.isDirectory() && depth < 2 && !e.name.startsWith('checkpoint-');
-
-function checkpointSignature(dir: string, depth = 0): string {
-  let entries: fs.Dirent[];
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return `${dir}|missing`; }
-  const parts: string[] = [];
-  for (const e of entries.filter(signed)) {
-    const p = path.join(dir, e.name);
-    try { const s = fs.statSync(p); parts.push(`${p}|${s.mtimeMs}|${s.size}`); } catch { continue; }
-    if (descends(e, depth)) parts.push(checkpointSignature(p, depth + 1));
-  }
-  return parts.join('\n');
+async function jointLossesAsync(log: string): Promise<Map<number, number>> {
+  try {
+    const st = await fs.promises.stat(log);
+    if (st.size > 8 * 1024 * 1024) return new Map();
+    const hit = lossCache.get(log);
+    if (hit?.size === st.size && hit.mtimeMs === st.mtimeMs) return hit.losses;
+    const losses = jointLosses(await fs.promises.readFile(log, 'utf8'));
+    lossCache.set(log, { size: st.size, mtimeMs: st.mtimeMs, losses });
+    return losses;
+  } catch { return new Map(); }
 }
 
-async function checkpointSignatureAsync(dir: string, depth = 0): Promise<string> {
+/** checkpointRecords with fs/promises, for the catalogue refresh. null when
+ *  the run folder itself cannot be read. */
+async function checkpointRecordsAsync(output: string): Promise<Yue2AitkCheckpointRecord[] | null> {
+  const ls = (dir: string) => fs.promises.readdir(dir, { withFileTypes: true });
   let entries: fs.Dirent[];
-  try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return `${dir}|missing`; }
-  const parts: string[] = [];
-  for (const e of entries.filter(signed)) {
-    const p = path.join(dir, e.name);
-    try { const s = await fs.promises.stat(p); parts.push(`${p}|${s.mtimeMs}|${s.size}`); } catch { continue; }
-    if (descends(e, depth)) parts.push(await checkpointSignatureAsync(p, depth + 1));
+  try { entries = await ls(output); } catch { return null; }
+  const dirs = [output];
+  if (entries.some(e => e.isDirectory() && e.name === 'segments')) {
+    try { for (const e of await ls(path.join(output, 'segments'))) {
+      if (e.isDirectory() && /^segment-\d{6}$/.test(e.name)) dirs.push(path.join(output, 'segments', e.name));
+    } } catch { /* incomplete catalogue is handled by the caller */ }
   }
-  return parts.join('\n');
-}
-
-/** ponytail: one pass at most every 5 s, sequential; parallelise if a pass over
- *  a much larger catalogue lags behind. */
-function revalidateCheckpointMemo(): void {
-  if (revalidating || Date.now() - revalidatedAt < 5000) return;
-  revalidating = true;
-  void (async () => {
-    for (const [output, entry] of [...checkpointMemo]) {
-      if (entry.sig === null || await checkpointSignatureAsync(output) === entry.sig) continue;
-      if (checkpointMemo.get(output) === entry) { checkpointMemo.delete(output); checkpointMemoVersion++; }
+  const rows: Yue2AitkCheckpointRecord[] = [];
+  for (const base of dirs) {
+    const losses = await jointLossesAsync(path.join(base, 'train.jsonl'));
+    let local: fs.Dirent[];
+    try { local = await ls(base); } catch { continue; }
+    for (const e of local) {
+      const match = e.isDirectory() ? /^checkpoint-step(\d+)$/.exec(e.name) : null;
+      if (!match) continue;
+      const dir = path.join(base, e.name);
+      let names: fs.Dirent[] = [];
+      try { names = await ls(dir); } catch { /* removed mid-scan */ }
+      const file = (name: string) => names.some(f => f.isFile() && f.name === name) ? path.join(dir, name) : undefined;
+      // Same choice as yue2JointWeight: the legacy fixed name, else the named weight.
+      const weight = (half: 'ar' | 'nar') => {
+        if (names.some(f => f.name === `native-${half}.safetensors`)) return path.join(dir, `native-${half}.safetensors`);
+        const named = new RegExp(`(?:^|_)yue2_joint_${half}_step\\d+\\.safetensors$`);
+        const hit = names.find(f => f.isFile() && named.test(f.name));
+        return hit ? path.join(dir, hit.name) : undefined;
+      };
+      let meters: Record<string, unknown> = {};
+      try { meters = JSON.parse(await fs.promises.readFile(path.join(dir, 'meters.json'), 'utf8')) as Record<string, unknown>; } catch { /* older checkpoints have none */ }
+      rows.push(checkpointRow(dir, Number(match[1]), losses, meters, {
+        adapterPath: file('adapter.safetensors'), optimizerPath: file('optimizer.resume'),
+        arPath: weight('ar'), narPath: weight('nar'),
+      }));
     }
-  })().catch(() => {}).finally(() => { revalidating = false; revalidatedAt = Date.now(); });
-}
-
-function cachedCheckpointRecords(run: Yue2AitkRunRecord): Yue2AitkCheckpointRecord[] {
-  const hit = checkpointMemo.get(run.output);
-  if (hit?.sig != null && run.status !== 'running') {
-    revalidateCheckpointMemo();
-    return hit.rows.map(c => ({ ...c }));
   }
-  const sig = run.status === 'running' ? null : checkpointSignature(run.output);
-  const rows = checkpointRecords(run.output);
-  if (!hit || JSON.stringify(hit.rows) !== JSON.stringify(rows)) checkpointMemoVersion++;
-  checkpointMemo.set(run.output, { sig, rows });
-  return rows.map(c => ({ ...c }));
+  return rows.sort((a, b) => b.step - a.step);
 }
 
-/** Changes whenever listAllYue2AitkRuns could answer differently: the index
- *  was rewritten, or a run's checkpoints were (re)scanned or dropped. */
-export function yue2AitkCatalogueStamp(): string {
-  try { const s = fs.statSync(INDEX); return `${s.mtimeMs}:${s.size}:${checkpointMemoVersion}`; }
-  catch { return `none:${checkpointMemoVersion}`; }
+/** The catalogue with checkpoint state, held in memory for request paths.
+ *  Seeded from the durable index (its stored checkpoints) and patched by
+ *  writeIndex on every record, move, delete, checkpoint and mirror write. A
+ *  read of a snapshot older than SNAPSHOT_TTL_MS starts one fs/promises
+ *  rescan (concurrent reads share it), which covers changes made outside the
+ *  app. A rescan that saw any write land while it ran is discarded, so it can
+ *  never restore a run deleted or moved under it. */
+let snapshot: Yue2AitkRunRecord[] | null = null;
+let snapshotWrites = 0;
+let snapshotScannedAt = 0;
+let snapshotRefresh: Promise<void> | null = null;
+const SNAPSHOT_TTL_MS = 60_000;
+
+const newestFirst = (runs: Yue2AitkRunRecord[]) => runs.sort((a, b) => b.updatedAt - a.updatedAt);
+const snapshotListeners = new Set<() => void>();
+
+/** Called whenever the snapshot changes, inside the write that changed it, so
+ *  keep it short and never throwing. */
+export function onYue2AitkSnapshotChange(fn: () => void): void { snapshotListeners.add(fn); }
+
+function setSnapshot(runs: Yue2AitkRunRecord[]): void {
+  snapshot = newestFirst(runs);
+  for (const fn of snapshotListeners) fn();
 }
 
-function forgetCheckpoints(output: string): void {
-  if (checkpointMemo.delete(output)) checkpointMemoVersion++;
+/** writeIndex's hook. `scanned` records carry a fresh checkpoint scan; any
+ *  other run keeps the snapshot's checkpoints unless its folder moved, when
+ *  the record's own (rebased) ones stand in until the next rescan. */
+function patchSnapshot(persisted: Yue2AitkRunRecord[], scanned: Set<Yue2AitkRunRecord>): void {
+  snapshotWrites++;
+  if (!snapshot) return;
+  const prior = new Map(snapshot.map(r => [r.jobId, r]));
+  setSnapshot(persisted.map(r => {
+    const old = prior.get(r.jobId);
+    return !scanned.has(r) && old?.output === r.output ? { ...r, checkpoints: old.checkpoints } : r;
+  }));
+}
+
+export function refreshYue2AitkSnapshot(): Promise<void> {
+  return snapshotRefresh ??= (async () => {
+    // Yield first, so snapshotRefresh is set before a write below can call
+    // back into listAllYue2AitkRuns (via a snapshot listener) and start another.
+    await Promise.resolve();
+    reconcileFromDisk(); // two readdirs unless the folder set changed
+    // Read sync on purpose: an open async handle on the index would make a
+    // writer's rename over it fail on Windows. Also heals refined/ moves.
+    const index = readIndex();
+    const writes = snapshotWrites;
+    const runs: Yue2AitkRunRecord[] = [];
+    for (const r of index) runs.push({ ...r, checkpoints: await checkpointRecordsAsync(r.output) ?? [] });
+    if (writes !== snapshotWrites) return;
+    setSnapshot(runs);
+    snapshotScannedAt = Date.now();
+  })().catch(err => console.warn(`[YuE2] Joint catalogue refresh failed: ${String(err)}`))
+    .finally(() => { snapshotRefresh = null; });
 }
 
 export function recordYue2AitkRun(record: Yue2AitkRunRecord): void {
-  forgetCheckpoints(record.output);
   try {
     const index = readIndex();
     const prior = index.find(r => r.jobId === record.jobId);
@@ -337,7 +395,7 @@ export function recordYue2AitkRun(record: Yue2AitkRunRecord): void {
     // machine already assigned (or inherited on first pass) — prior wins
     // whenever it has any; incoming only seeds a brand new record.
     const updated = { ...record, blindLabels: prior?.blindLabels ?? record.blindLabels, checkpoints: checkpointRecords(record.output) };
-    writeIndex([...index.filter(r => r.jobId !== record.jobId), updated], [updated]);
+    writeIndex([...index.filter(r => r.jobId !== record.jobId), updated], [updated], [updated]);
   } catch { /* a catalogue failure must never change the training result */ }
 }
 
@@ -349,7 +407,6 @@ export function deleteYue2AitkRun(jobId: string): { output: string } {
   if (!run) throw new Error('Unknown run');
   const output = path.resolve(run.output);
   if (!/yue2-joint-adapters/i.test(output)) throw new Error(`Refusing to delete outside the joint adapters folder: ${output}`);
-  forgetCheckpoints(run.output);
   try { archiveYue2TrainLogs(run.datasetSlug, run.jobId, output); }
   catch (err: any) { throw new Error(`Could not archive the loss log of run ${jobId}, refusing to delete: ${err?.message || err}`); }
   fs.rmSync(output, { recursive: true, force: true });
@@ -370,13 +427,7 @@ export function moveYue2AitkRun(jobId: string, newOutput: string): void {
   if (fs.existsSync(target)) throw new Error(`Refusing to move onto an existing path: ${target}`);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.renameSync(oldOutput, target);
-  forgetCheckpoints(run.output);
-  const prefix = oldOutput.toLowerCase() + path.sep;
-  const rebase = <T extends string | undefined>(p: T): T =>
-    (p && path.resolve(p).toLowerCase().startsWith(prefix) ? path.join(target, path.resolve(p).slice(prefix.length)) : p) as T;
-  const moved: Yue2AitkRunRecord = { ...run, output: target, updatedAt: Date.now(),
-    checkpoints: run.checkpoints.map(c => ({ ...c, dir: rebase(c.dir), adapterPath: rebase(c.adapterPath),
-      optimizerPath: rebase(c.optimizerPath), arPath: rebase(c.arPath), narPath: rebase(c.narPath) })) };
+  const moved = rebasedRun(run, target);
   try { writeIndex(index.map(r => r.jobId === jobId ? moved : r), [moved]); }
   catch (err) { fs.renameSync(target, oldOutput); throw err; }
 }
@@ -504,7 +555,7 @@ function reconcileFromDisk(force = false): void {
       skippedFolders.add(folder);
     }
   }
-  if (retained.length !== index.length || retained.some((r, i) => r !== index[i])) writeIndex(retained, imported);
+  if (retained.length !== index.length || retained.some((r, i) => r !== index[i])) writeIndex(retained, imported, imported);
   lastFolderSet = folderSet;
   lastDatasetSet = datasetSetForSkipped();
 }
@@ -533,6 +584,8 @@ export function reconcileYue2AitkRunsAtStartup(): number {
       writeIndex(updated, updated.filter(r => r.status === 'interrupted' && stale.some(s => s.jobId === r.jobId)));
     }
     reconcileFromDisk(true);
+    setSnapshot(readIndex());
+    void refreshYue2AitkSnapshot();
     return stale.length;
   } catch { return 0; }
 }
@@ -666,15 +719,14 @@ export function rungsOf(run: Yue2AitkRunRecord, checkpoints: Yue2AitkCheckpointR
   return rows.some(c => c.rung) ? rows : flagAll(rows);
 }
 
-/** Every indexed joint run, newest first, with checkpoint files re-scanned.
- * The generation picker has no dataset filter, so it must use the same durable
- * index and checkpoint scanner as Training Studio rather than walking a second
- * directory tree. */
+/** Every indexed joint run, newest first, with its checkpoints, from the
+ * in-memory snapshot (no disk work once seeded). The generation picker has no
+ * dataset filter, so it must use the same durable index and checkpoint scanner
+ * as Training Studio rather than walking a second directory tree. */
 export function listAllYue2AitkRuns(): Yue2AitkRunRecord[] {
-  reconcileFromDisk();
-  return readIndex()
-    .map(r => ({ ...r, checkpoints: cachedCheckpointRecords(r) }))
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+  if (!snapshot) { reconcileFromDisk(); setSnapshot(readIndex()); }
+  if (Date.now() - snapshotScannedAt > SNAPSHOT_TTL_MS) void refreshYue2AitkSnapshot();
+  return snapshot!.map(r => ({ ...r, checkpoints: r.checkpoints.map(c => ({ ...c })) }));
 }
 
 /** Weight path → first run listing it, built once per `runs` array: the model

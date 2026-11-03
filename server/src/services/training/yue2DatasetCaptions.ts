@@ -83,13 +83,20 @@ export async function yue2DatasetCaptions(
     // Parity with the prepared style: a `.yue2.txt` caption is the whole
     // trained sentence (it carries its own BPM), so it gets no tail; an ACE
     // caption gets the trainer's "<genre>, <bpm> BPM, key of <key>." tail.
-    const yue2Sidecar = (audioPath: string): string => {
-      try { return fs.readFileSync(audioPath.slice(0, audioPath.length - path.extname(audioPath).length) + '.yue2.txt', 'utf8').replace(/\s+/g, ' ').trim(); }
-      catch { return ''; }
+    // datasetTrackCaption's order with fs/promises, the sidecar read once.
+    const read = async (file: string): Promise<string> => {
+      try { return await fs.promises.readFile(file, 'utf8'); } catch { return ''; }
     };
-    const tracks = samples
-      .filter(s => !s.excluded && !s.fileMissing)
-      .map(s => ({ name: s.filename, caption: datasetTrackCaption(s.audioPath, s.caption || ''), yue2: yue2Sidecar(s.audioPath),
+    const kept = samples.filter(s => !s.excluded && !s.fileMissing);
+    const sidecars = await Promise.all(kept.map(async s => {
+      const stem = s.audioPath ? s.audioPath.slice(0, s.audioPath.length - path.extname(s.audioPath).length) : '';
+      const yue2 = stem ? await read(`${stem}.yue2.txt`) : '';
+      const caption = yue2.trim() || (s.caption || '').trim()
+        || (stem ? (await read(`${stem}.mm3.txt`)).replace(/\s+/g, ' ').trim() : '');
+      return { caption, yue2: yue2.replace(/\s+/g, ' ').trim() };
+    }));
+    const tracks = kept
+      .map((s, i) => ({ name: s.filename, caption: sidecars[i].caption, yue2: sidecars[i].yue2,
         genre: s.genre || '', bpm: s.bpm === null || s.bpm === undefined ? '' : String(s.bpm), key: s.key || '' }))
       .filter(t => t.caption)
       .map(({ yue2, ...t }) => ({ ...t, styled: yue2 || yue2StyleString(t) }));

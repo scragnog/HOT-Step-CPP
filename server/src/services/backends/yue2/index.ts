@@ -26,7 +26,7 @@ import { isEngineSuspended } from '../../aceEngineProcess.js';
 import { getSetting, setSetting } from '../../../db/lireekDb.js';
 import { listAllYue2Runs, readSafetensorsMeta, type Yue2AdapterMeta } from '../../training/yue2Runs.js';
 import { listAllYue2ArRuns } from '../../training/yue2ArRuns.js';
-import { listAllYue2AitkRuns, yue2AitkCatalogueStamp } from '../../training/yue2AitkRuns.js';
+import { listAllYue2AitkRuns, onYue2AitkSnapshotChange, type Yue2AitkRunRecord } from '../../training/yue2AitkRuns.js';
 import { listDatasets } from '../../training/datasetsRepo.js';
 import { yue2AdapterTrigger, setYue2ManualTrigger } from './jointAdapterContext.js';
 import { coverScoreChoices, transformCoverScore, type CoverScoreChoices } from './coverScoreTransform.js';
@@ -1169,10 +1169,113 @@ interface Yue2CataloguedRun {
   }>;
 }
 
-/** The joint section of yue2LmAdapterCatalogue: two safetensors header reads
- *  per file held the event loop ~0.5 s on 830 files. Reused while the run
- *  catalogue and dataset triggers are unchanged; a typed trigger clears it. */
-let jointSection: { key: string; entries: Array<[string, Yue2LmAdapterEntry]> } | null = null;
+/** Picker entries for joint weight files. Each costs two safetensors header
+ *  reads (~0.5 s for 830 files), so an entry is kept per file and the facts
+ *  it is built from (`key`), built ahead by warmJointEntries whenever the
+ *  joint catalogue changes, and only rebuilt on a request if the warm has not
+ *  reached it yet. A typed trigger clears them. */
+const jointEntries = new Map<string, { key: string; entry: Yue2LmAdapterEntry }>();
+type JointPickerFile = { abs: string; key: string; build: () => Yue2LmAdapterEntry };
+
+function jointEntry(f: JointPickerFile): Yue2LmAdapterEntry {
+  let hit = jointEntries.get(f.abs);
+  if (hit?.key !== f.key) jointEntries.set(f.abs, hit = { key: f.key, entry: f.build() });
+  return hit.entry;
+}
+
+let warming = false;
+let warmAgain = false;
+let warmWaiters: Array<() => void> = [];
+
+/** Resolves once no warm is running. models() waits here rather than build a
+ *  whole catalogue inline: just after boot the warm (~1.3 s for ~2000 files)
+ *  can still be under way when the reloaded UI asks for the picker. */
+function jointEntriesWarm(): Promise<void> {
+  return warming ? new Promise(resolve => warmWaiters.push(resolve)) : Promise.resolve();
+}
+
+/** Builds missing or stale entries in ~10 ms slices, so no tick holds the
+ *  event loop for the whole catalogue. */
+function warmJointEntries(): void {
+  if (warming) { warmAgain = true; return; }
+  let todo: JointPickerFile[];
+  try {
+    const files = jointPickerFiles(listAllYue2AitkRuns());
+    const live = new Set(files.map(f => f.abs));
+    for (const abs of jointEntries.keys()) if (!live.has(abs)) jointEntries.delete(abs);
+    todo = files.filter(f => jointEntries.get(f.abs)?.key !== f.key);
+  } catch { return; } // no database yet (tests, early boot): the picker builds on demand
+  warming = true;
+  let i = 0;
+  const slice = (): void => {
+    const until = performance.now() + 10;
+    try { while (i < todo.length && performance.now() < until) jointEntry(todo[i++]); }
+    catch (err) { i = todo.length; console.warn(`[YuE2] Adapter picker warm failed: ${String(err)}`); }
+    if (i < todo.length) { setImmediate(slice); return; }
+    warming = false;
+    if (warmAgain) { warmAgain = false; warmJointEntries(); }
+    if (!warming) { for (const resolve of warmWaiters) resolve(); warmWaiters = []; }
+  };
+  setImmediate(slice);
+}
+onYue2AitkSnapshotChange(warmJointEntries);
+
+/** A joint AITK checkpoint is one training result with two loadable files.
+ *  Trained checkpoints need complete pairs: selecting one half from an
+ *  incomplete training result would make the global picker look ready while
+ *  the other slot still has no matching result. Imports can hold one half.
+ *  The combined adapter.safetensors is an output/inspection artifact and is
+ *  intentionally not offered to either YuE2 slot. */
+function jointPickerFiles(jointRuns: Yue2AitkRunRecord[]): JointPickerFile[] {
+  const tags = new Map(listDatasets().map(ds => [ds.id, ds.customTag]));
+  const files: JointPickerFile[] = [];
+  for (const run of jointRuns) {
+    for (const ckpt of run.checkpoints) {
+      const imported = run.options.source === 'comfyui-import';
+      if (imported ? !ckpt.arPath && !ckpt.narPath : !ckpt.arPath || !ckpt.narPath) continue;
+      const configuredSteps = Number(run.options.steps);
+      const final = Number.isFinite(configuredSteps) && configuredSteps > 0 && ckpt.step === configuredSteps;
+      // Several runs of one dataset list the same steps: name the run by its
+      // start time (the output folder's suffix), schedule and refinement.
+      const started = /_(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-\d{2}$/.exec(path.basename(run.output));
+      const runName = [imported ? `Imported · ${String(run.options.name ?? run.jobId)}` : `AITK · ${run.datasetSlug || run.datasetId || run.jobId}`,
+        started ? `${started[2]}-${started[3]} ${started[4]}:${started[5]}` : '',
+        typeof run.options.lrSchedule === 'string' ? run.options.lrSchedule : '',
+        run.options.refinePlanner === true || run.options.unfreezePlanner === true ? 'refine' : ''].filter(Boolean).join(' · ');
+      const add = (kind: Yue2LmAdapterKind, ref: string): void => {
+        const abs = path.resolve(ref);
+        const key = JSON.stringify([kind, runName, final, ckpt, run.jobId, run.datasetSlug, run.datasetId, tags.get(run.datasetId), run.options]);
+        files.push({ abs, key, build: () => {
+          const fileMeta = readSafetensorsMeta(abs);
+          const { trigger, inferred, manual } = yue2AdapterTrigger(abs, jointRuns);
+          const rank = fileMeta?.rank;
+          const steps = fileMeta?.steps ?? ckpt.step;
+          return {
+            label: [kind.toUpperCase(), runName, `step ${ckpt.step}`, trigger ? `"${trigger}"` : '']
+              .filter(Boolean).join(' · '),
+            kind,
+            runName,
+            trigger: trigger || undefined,
+            triggerInferred: inferred || undefined,
+            triggerManual: manual || undefined,
+            rank,
+            steps: Number.isFinite(steps) && steps > 0 && steps < Number.MAX_SAFE_INTEGER ? steps : undefined,
+            bytes: (() => { try { return fs.statSync(abs).size; } catch { return undefined; } })(),
+            dataset: run.datasetSlug || run.datasetId || undefined,
+            final,
+            loss: ckpt.loss,
+            styleTemplate: fileMeta?.styleTemplate,
+            captionDropout: fileMeta?.captionDropout,
+            home: yue2AdapterHome(fileMeta?.baseSha),
+          };
+        } });
+      };
+      if (ckpt.arPath) add('ar', ckpt.arPath);
+      if (ckpt.narPath) add('nar', ckpt.narPath);
+    }
+  }
+  return files;
+}
 
 /** Every trained adapter on disk, both halves, newest run first, each
  *  checkpoint labelled with what its own safetensors header records.
@@ -1233,60 +1336,8 @@ function yue2LmAdapterCatalogue(): {
     }
   }
 
-  // A joint AITK checkpoint is one training result with two loadable files.
-  // Trained checkpoints need complete pairs: selecting one half from an
-  // incomplete training result would make the global picker look ready while
-  // the other slot still has no matching result. Imports can hold one half.
-  // The combined adapter.safetensors is an output/inspection artifact and is
-  // intentionally not offered to either YuE2 slot.
   const jointRuns = listAllYue2AitkRuns();
-  const jointKey = [yue2AitkCatalogueStamp(), ...listDatasets().map(ds => `${ds.id}:${ds.customTag}`)].join('\n');
-  const fresh = jointSection?.key !== jointKey;
-  const entries: Array<[string, Yue2LmAdapterEntry]> = fresh ? [] : jointSection!.entries;
-  for (const run of fresh ? jointRuns : []) {
-    for (const ckpt of run.checkpoints) {
-      const imported = run.options.source === 'comfyui-import';
-      if (imported ? !ckpt.arPath && !ckpt.narPath : !ckpt.arPath || !ckpt.narPath) continue;
-      const configuredSteps = Number(run.options.steps);
-      const final = Number.isFinite(configuredSteps) && configuredSteps > 0 && ckpt.step === configuredSteps;
-      // Several runs of one dataset list the same steps: name the run by its
-      // start time (the output folder's suffix), schedule and refinement.
-      const started = /_(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-\d{2}$/.exec(path.basename(run.output));
-      const runName = [imported ? `Imported · ${String(run.options.name ?? run.jobId)}` : `AITK · ${run.datasetSlug || run.datasetId || run.jobId}`,
-        started ? `${started[2]}-${started[3]} ${started[4]}:${started[5]}` : '',
-        typeof run.options.lrSchedule === 'string' ? run.options.lrSchedule : '',
-        run.options.refinePlanner === true || run.options.unfreezePlanner === true ? 'refine' : ''].filter(Boolean).join(' · ');
-      const add = (kind: Yue2LmAdapterKind, ref: string): void => {
-        const abs = path.resolve(ref);
-        const fileMeta = readSafetensorsMeta(abs);
-        const { trigger, inferred, manual } = yue2AdapterTrigger(abs, jointRuns);
-        const rank = fileMeta?.rank;
-        const steps = fileMeta?.steps ?? ckpt.step;
-        entries.push([abs, {
-          label: [kind.toUpperCase(), runName, `step ${ckpt.step}`, trigger ? `"${trigger}"` : '']
-            .filter(Boolean).join(' · '),
-          kind,
-          runName,
-          trigger: trigger || undefined,
-          triggerInferred: inferred || undefined,
-          triggerManual: manual || undefined,
-          rank,
-          steps: Number.isFinite(steps) && steps > 0 && steps < Number.MAX_SAFE_INTEGER ? steps : undefined,
-          bytes: (() => { try { return fs.statSync(abs).size; } catch { return undefined; } })(),
-          dataset: run.datasetSlug || run.datasetId || undefined,
-          final,
-          loss: ckpt.loss,
-          styleTemplate: fileMeta?.styleTemplate,
-          captionDropout: fileMeta?.captionDropout,
-          home: yue2AdapterHome(fileMeta?.baseSha),
-        }]);
-      };
-      if (ckpt.arPath) add('ar', ckpt.arPath);
-      if (ckpt.narPath) add('nar', ckpt.narPath);
-    }
-  }
-  if (fresh) jointSection = { key: jointKey, entries };
-  for (const [abs, entry] of entries) { paths.push(abs); meta[abs] = { ...entry }; }
+  for (const f of jointPickerFiles(jointRuns)) { paths.push(f.abs); meta[f.abs] = { ...jointEntry(f) }; }
 
   // The user's adapter folder: anything the index above did not already list.
   // The half comes from the file's own `format`, the same field the engine
@@ -1355,6 +1406,7 @@ async function models(): Promise<BackendModels> {
     for (const f of v.lm.available) meta.lm[f.type] = { label: f.filename, bytes: f.bytes };
   }
 
+  await jointEntriesWarm();
   const adapters = yue2LmAdapterCatalogue();
   const persisted = yue2PersistedSelection();
 
@@ -1600,7 +1652,8 @@ async function selectModel(selection: Record<string, string>) {
     const ref = resolveYue2Adapter(selection.lmAdapterTriggerPath.trim());
     if (!ref) throw new Error(`YuE2 adapter not usable: ${selection.lmAdapterTriggerPath}`);
     setYue2ManualTrigger(ref, selection.lmAdapterTrigger);
-    jointSection = null;
+    jointEntries.clear();
+    warmJointEntries();
     if (Object.keys(selection).length === 2) return { changed: false };
   }
   const persisted = yue2PersistedSelection();

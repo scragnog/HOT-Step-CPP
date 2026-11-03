@@ -326,25 +326,30 @@ test('review catalogue scans each matching run once and sees changes on the next
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('the all-runs catalogue serves a settled run from memory until the run is written again', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-memo-'));
+test('the all-runs snapshot coalesces refreshes and never restores a run deleted mid-refresh', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-snapshot-'));
   try {
     const script = [
       "import fs from 'node:fs'; import path from 'node:path'; import assert from 'node:assert/strict';",
-      "import { recordYue2AitkRun, listAllYue2AitkRuns, jointRunForAdapter, yue2AitkCatalogueStamp } from './src/services/training/yue2AitkRuns.js';",
-      "const out = path.join(process.env.ACESTEPCPP_ADAPTERS, 'yue2-joint-adapters', 'run'); const ckpt = path.join(out, 'checkpoint-step4'); fs.mkdirSync(ckpt, { recursive: true });",
-      "for (const half of ['ar', 'nar']) fs.writeFileSync(path.join(ckpt, 'native-' + half + '.safetensors'), 'x');",
-      "const meters = path.join(ckpt, 'meters.json'); fs.writeFileSync(meters, '{}');",
-      "const record = { version: 1, jobId: 'job-memo', datasetId: 'ds', datasetSlug: 'ds', method: 'aitk', output: out, options: {}, status: 'done', createdAt: 1, updatedAt: 2, checkpoints: [] };",
-      "const kl = () => listAllYue2AitkRuns()[0].checkpoints[0].kl;",
-      "recordYue2AitkRun(record); assert.equal(kl(), undefined); const stamp = yue2AitkCatalogueStamp();",
-      "fs.writeFileSync(meters, JSON.stringify({ kl_reading: 0.5 }));",
-      "assert.equal(kl(), undefined, 'an in-place rewrite of a settled run is not rescanned per request'); assert.equal(yue2AitkCatalogueStamp(), stamp);",
-      "recordYue2AitkRun(record); assert.equal(kl(), 0.5, 'writing the run drops its cached checkpoints'); assert.notEqual(yue2AitkCatalogueStamp(), stamp);",
-      "assert.equal(jointRunForAdapter(path.join(ckpt, 'native-nar.safetensors'))?.jobId, 'job-memo');",
-      "recordYue2AitkRun({ ...record, status: 'running' }); fs.writeFileSync(meters, JSON.stringify({ kl_reading: 0.7 })); assert.equal(kl(), 0.7, 'a running run is rescanned on every read');",
+      "import { recordYue2AitkRun, listAllYue2AitkRuns, deleteYue2AitkRun, refreshYue2AitkSnapshot, jointRunForAdapter } from './src/services/training/yue2AitkRuns.js';",
+      "const root = path.join(process.env.ACESTEPCPP_ADAPTERS, 'yue2-joint-adapters');",
+      "function checkpoint(output, step) { const dir = path.join(output, 'checkpoint-step' + step); fs.mkdirSync(dir, { recursive: true }); for (const half of ['ar', 'nar']) fs.writeFileSync(path.join(dir, 'native-' + half + '.safetensors'), 'x'); return dir; }",
+      "function run(jobId, updatedAt) { const output = path.join(root, jobId); checkpoint(output, 10); recordYue2AitkRun({ version: 1, jobId, datasetId: 'ds', datasetSlug: '', method: 'aitk', output, options: {}, status: 'done', createdAt: 1, updatedAt, checkpoints: [] }); return output; }",
+      "const keep = run('keep', 2); const gone = run('gone', 1);",
+      "const steps = () => listAllYue2AitkRuns().map(r => r.jobId + ':' + r.checkpoints.map(c => c.step).join(','));",
+      "assert.deepEqual(steps(), ['keep:10', 'gone:10']);",
+      "const first = refreshYue2AitkSnapshot(); assert.equal(refreshYue2AitkSnapshot(), first, 'concurrent callers share one refresh');",
+      // Delete once the refresh has read the index and is scanning: its stale view must be discarded.
+      "const readdir = fs.promises.readdir; let deleted = false;",
+      "fs.promises.readdir = function(dir, ...args) { if (!deleted && String(dir) === keep) { deleted = true; deleteYue2AitkRun('gone'); } return readdir.call(this, dir, ...args); };",
+      "await first; fs.promises.readdir = readdir; assert.ok(deleted);",
+      "assert.deepEqual(steps(), ['keep:10'], 'a run deleted during a refresh stays deleted');",
+      "assert.equal(jointRunForAdapter(path.join(gone, 'checkpoint-step10', 'native-ar.safetensors')), undefined);",
+      "checkpoint(keep, 20);",
+      "assert.deepEqual(steps(), ['keep:10'], 'reads are served from memory');",
+      "await refreshYue2AitkSnapshot(); assert.deepEqual(steps(), ['keep:20,10'], 'a refresh picks up a checkpoint written outside the app');",
     ].join('\n');
-    execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
+    execFileSync(process.execPath, ['--import', 'tsx/esm', '--input-type=module', '--eval', script], {
       cwd: fileURLToPath(new URL('../../../', import.meta.url)),
       env: { ...process.env, DATA_DIR: path.join(root, 'data'), TRAINING_DIR: path.join(root, 'training'), ACESTEPCPP_ADAPTERS: path.join(root, 'adapters') },
       stdio: 'pipe', timeout: 30_000,
