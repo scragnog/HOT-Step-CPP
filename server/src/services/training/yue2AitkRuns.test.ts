@@ -288,3 +288,40 @@ test('a tuned run with no KL rungs gets every complete checkpoint as a rung', ()
   const kept = { ...partial, rung: true } as Yue2AitkCheckpointRecord;
   assert.deepEqual(rungsOf(run, [full, kept]).map(c => !!c.rung), [false, true]);
 });
+
+test('review catalogue scans each matching run once and sees changes on the next request', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-review-catalogue-'));
+  try {
+    const script = [
+      "import fs from 'node:fs'; import path from 'node:path'; import assert from 'node:assert/strict';",
+      "import { recordYue2AitkRun, listYue2AitkRuns, listYue2AitkRunsForDatasets, aitkRunIndexPath, setYue2ReviewComplete, yue2ReviewComplete, setYue2RunFinished, yue2RunFinished } from './src/services/training/yue2AitkRuns.js';",
+      "const root = path.join(process.env.ACESTEPCPP_ADAPTERS, 'yue2-joint-adapters');",
+      "function checkpoint(output, step) { const dir = path.join(output, 'checkpoint-step' + step); fs.mkdirSync(dir, { recursive: true }); for (const half of ['ar', 'nar']) fs.writeFileSync(path.join(dir, 'native-' + half + '.safetensors'), 'x'); }",
+      "function run(jobId, datasetId, datasetSlug, updatedAt, status = 'done') { const output = path.join(root, jobId); checkpoint(output, 10); fs.writeFileSync(path.join(output, 'train.jsonl'), ''); const record = { version: 1, jobId, datasetId, datasetSlug, method: 'aitk', output, options: { method: 'base-matched' }, status, createdAt: 1, updatedAt, checkpoints: [] }; recordYue2AitkRun(record); return record; }",
+      "const a = run('a', 'ds-a', 'alpha', 1); const b = run('b', 'ds-b', 'beta', 2, 'running'); const unrelated = run('unrelated', 'other', 'other', 3);",
+      "const datasets = [{ id: 'ds-a', slug: 'alpha' }, { id: 'ds-b', slug: 'beta' }, { id: 'new-id', slug: 'alpha' }, { id: 'empty' }];",
+      "const expected = new Map(datasets.map(ds => [ds.id, listYue2AitkRuns(ds.id, ds.slug)]));",
+      "const read = fs.readFileSync; const reads = new Map(); fs.readFileSync = function(file, ...args) { const key = String(file); reads.set(key, (reads.get(key) ?? 0) + 1); return read.call(this, file, ...args); };",
+      "let snapshot; try { snapshot = listYue2AitkRunsForDatasets(datasets); } finally { fs.readFileSync = read; }",
+      "assert.deepEqual(snapshot, expected, 'batch preserves ID matching, slug fallback, labels and ordering');",
+      "assert.equal(reads.get(aitkRunIndexPath()), 1, 'one index read for the entire warm request');",
+      "for (const r of [a, b]) assert.equal(reads.get(path.join(r.output, 'train.jsonl')), 1, 'scan a shared run only once');",
+      "assert.equal(reads.has(path.join(unrelated.output, 'train.jsonl')), false, 'do not scan unrelated runs');",
+      "checkpoint(a.output, 20); fs.rmSync(path.join(a.output, 'checkpoint-step10', 'native-nar.safetensors'));",
+      "recordYue2AitkRun({ ...b, status: 'done', updatedAt: 4 }); const newer = run('newer', 'ds-a', 'alpha', 5);",
+      "setYue2ReviewComplete(a.output, true); setYue2RunFinished(a.output, { pickedStep: 20, pickedBlind: false, pickedLabel: '' });",
+      "const fresh = listYue2AitkRunsForDatasets(datasets); const changed = fresh.get('ds-a').find(r => r.jobId === 'a');",
+      "assert.deepEqual(fresh.get('ds-a').map(r => r.jobId), ['newer', 'a']); assert.equal(fresh.get('ds-b')[0].status, 'done');",
+      "assert.deepEqual(changed.checkpoints.map(c => c.step), [20, 10]); assert.equal(changed.checkpoints[1].narPath, undefined); assert.ok(changed.blindLabels[20]);",
+      "assert.equal(changed.blindLabels[10], snapshot.get('ds-a')[0].blindLabels[10], 'existing labels survive a new checkpoint');",
+      "assert.ok(yue2ReviewComplete(changed.output)); assert.ok(yue2RunFinished(changed.output));",
+      "setYue2ReviewComplete(a.output, false); assert.equal(yue2ReviewComplete(listYue2AitkRunsForDatasets(datasets).get('ds-a')[1].output), false);",
+      "assert.equal(snapshot.get('ds-a').length, 1, 'earlier request keeps its own snapshot');",
+    ].join('\n');
+    execFileSync(process.execPath, ['--import', 'tsx/esm', '--eval', script], {
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)),
+      env: { ...process.env, DATA_DIR: path.join(root, 'data'), TRAINING_DIR: path.join(root, 'training'), ACESTEPCPP_ADAPTERS: path.join(root, 'adapters') },
+      stdio: 'pipe', timeout: 30_000,
+    });
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

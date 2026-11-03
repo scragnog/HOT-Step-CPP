@@ -501,10 +501,18 @@ export function setYue2RunFinished(output: string, pick: Omit<Yue2FinishedPick, 
 }
 
 export function listYue2AitkRuns(datasetId: string, datasetSlug?: string): Yue2AitkRunRecord[] {
+  return listYue2AitkRunsForDatasets([{ id: datasetId, slug: datasetSlug }]).get(datasetId)!;
+}
+
+/** One request-scoped catalogue read and checkpoint scan across datasets.
+ * Reusing this snapshot also keeps best-rung calculations on the same facts. */
+export function listYue2AitkRunsForDatasets(datasets: readonly { id: string; slug?: string }[]): Map<string, Yue2AitkRunRecord[]> {
   reconcileFromDisk();
   const index = readIndex();
   const changed: Yue2AitkRunRecord[] = [];
-  const runs = index.filter(r => r.datasetId === datasetId || (!!datasetSlug && r.datasetSlug === datasetSlug))
+  const matches = (r: Yue2AitkRunRecord, ds: { id: string; slug?: string }) =>
+    r.datasetId === ds.id || (!!ds.slug && r.datasetSlug === ds.slug);
+  const runs = index.filter(r => datasets.some(ds => matches(r, ds)))
     .map(r => {
       const checkpoints = rungsOf(r, checkpointRecords(r.output));
       if (assignBlindLabels(r, checkpoints)) changed.push(r);
@@ -512,7 +520,7 @@ export function listYue2AitkRuns(datasetId: string, datasetSlug?: string): Yue2A
     })
     .sort((a, b) => b.updatedAt - a.updatedAt);
   if (changed.length) writeIndex(index, changed);
-  return runs;
+  return new Map(datasets.map(ds => [ds.id, runs.filter(r => matches(r, ds))]));
 }
 
 function blindLetter(index: number): string {

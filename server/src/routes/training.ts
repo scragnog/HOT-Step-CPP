@@ -101,7 +101,7 @@ import { AUDIO_EXTENSIONS, datasetDir, isInside, sampleIdFor, trainingBaseDir } 
 import { isLocalCaptioner, LOCAL_CAPTIONER_NAMES, resolveMossPaths } from '../services/training/mossCaption.js';
 import { samplesMissingYue2Caption } from '../services/training/yue2CaptionJob.js';
 import { datasetTrackCaption, yue2DatasetCaptions } from '../services/training/yue2DatasetCaptions.js';
-import { bestScoredRung } from '../services/training/yue2BestRung.js';
+import { bestReviewFact, reviewRungFacts } from '../services/training/yue2BestRung.js';
 import { deleteLabel, deleteLabels, patchLabel, readLabel } from '../services/training/labelStore.js';
 import { listDatasetsWithAssets } from '../services/training/datasetAssets.js';
 import { createDatasetFromFolder, DatasetCreateError } from '../services/training/datasetCreate.js';
@@ -165,7 +165,7 @@ import {
 } from '../services/training/yue2ArRuns.js';
 import { YUE2_LICENSE_NOTICE } from '../services/backends/yue2/index.js';
 import { yue2StyleString } from '../services/backends/yue2/style.js';
-import { isCheckpointLadder, jointRunForAdapter, listYue2AitkRuns, yue2JointOutputDirectory, yue2ReviewComplete, setYue2ReviewComplete, yue2RunFinished } from '../services/training/yue2AitkRuns.js';
+import { isCheckpointLadder, jointRunForAdapter, listYue2AitkRuns, listYue2AitkRunsForDatasets, yue2JointOutputDirectory, yue2ReviewComplete, setYue2ReviewComplete, yue2RunFinished } from '../services/training/yue2AitkRuns.js';
 import { deleteYue2Run } from '../services/training/yue2Mirror.js';
 import { clearPreparedCaches, listPreparedCaches, YUE2_CORE_CACHE } from '../services/training/preparedDataReset.js';
 import { jointCaptionTracks } from '../services/training/yue2AitkCaptions.js';
@@ -4358,16 +4358,20 @@ router.get('/datasets/:id/yue2-joint-previews', (req: Request, res: Response) =>
 router.get('/yue2-review', (_req: Request, res: Response) => {
   try {
     const rows: Array<Record<string, unknown>> = [];
-    for (const ds of repo.listDatasets()) {
+    const datasets = repo.listDatasets();
+    const runsByDataset = listYue2AitkRunsForDatasets(datasets);
+    for (const ds of datasets) {
       const active = queue.activeJobForDataset(ds.id);
-      for (const run of listYue2AitkRuns(ds.id, ds.slug)) {
+      for (const run of runsByDataset.get(ds.id) ?? []) {
         const rungs = run.checkpoints.filter(c => c.rung && c.arPath && c.narPath);
         if (!rungs.length) continue;
-        const previews = listYue2JointPreviews(run.output).filter(p => p.status === 'done' && rungs.some(r => r.step === p.step));
-        const scored = new Set(listYue2RungScores(ds.id, run.jobId).filter(s => s.likeness !== null || s.corruption !== null || s.notes).map(s => s.step));
+        const allPreviews = listYue2JointPreviews(run.output);
+        const previews = allPreviews.filter(p => p.status === 'done' && rungs.some(r => r.step === p.step));
+        const scores = listYue2RungScores(ds.id, run.jobId);
+        const scored = new Set(scores.filter(s => s.likeness !== null || s.corruption !== null || s.notes).map(s => s.step));
         const kls = rungs.map(r => r.kl).filter((k): k is number => typeof k === 'number');
-        let best: ReturnType<typeof bestScoredRung> = null;
-        try { best = bestScoredRung(ds.id, run.jobId, ds.slug); } catch { /* stays null */ }
+        let best: ReturnType<typeof bestReviewFact> = null;
+        try { best = bestReviewFact(reviewRungFacts(run, scores, allPreviews)); } catch { /* stays null */ }
         // A mirrored run's own queue lives on its worker, not this machine's
         // `active` job — "still refining" tracks the worker's status as mirrored.
         const live = active?.id === run.jobId || (run.status === 'running' && !!run.origin);
