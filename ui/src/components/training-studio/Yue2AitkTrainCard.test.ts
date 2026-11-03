@@ -1,11 +1,117 @@
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import test from 'node:test';
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { parseHTML } from 'linkedom';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { createQueryClient } from '../../queries/client';
+import { trainingQueries } from '../../queries/training-data/queries';
+import type { TrainingJobSummary } from '../../services/trainingApi';
 
 // The card imports CSS, which the node loader cannot. Stub it for this file.
 register('data:text/javascript,' + encodeURIComponent(
   'export async function load(url, ctx, next) { if (url.endsWith(".css")) return { format: "module", source: "export default {}", shortCircuit: true }; return next(url, ctx); }'));
-const { createPresetLoadGate, baselineFor } = await import('./Yue2AitkTrainCard');
+Object.assign(globalThis, { React: await import('react') });
+const { createPresetLoadGate, baselineFor, Yue2AitkTrainCard } = await import('./Yue2AitkTrainCard');
+
+async function mountChart(status: TrainingJobSummary['status'], cache?: unknown) {
+  const saved = { window: globalThis.window, document: globalThis.document,
+    EventSource: globalThis.EventSource, fetch: globalThis.fetch, localStorage: globalThis.localStorage };
+  const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>');
+  const stored = new Map<string, string>([['hs-yue2-aitk-job:chart-set', JSON.stringify('chart-job')]]);
+  if (cache) stored.set('hs-yue2-aitk-job:chart-set:metrics:chart-job', JSON.stringify(cache));
+  const storage = { getItem: (key: string) => stored.get(key) ?? null,
+    setItem: (key: string, value: string) => { stored.set(key, value); },
+    removeItem: (key: string) => { stored.delete(key); } };
+  Object.assign(window, { localStorage: storage });
+  Object.assign(globalThis, { window, document, localStorage: storage, IS_REACT_ACT_ENVIRONMENT: true });
+  class Stream {
+    static made: Stream[] = [];
+    static CLOSED = 2; static OPEN = 1;
+    readyState = 1;
+    onmessage?: (event: { data: string }) => void;
+    constructor() { Stream.made.push(this); }
+    close() { this.readyState = 2; }
+    send(event: unknown) { this.onmessage?.({ data: JSON.stringify(event) }); }
+  }
+  globalThis.EventSource = Stream as unknown as typeof EventSource;
+  const job = { id: 'chart-job', datasetId: 'chart-set', kind: 'yue2-joint-train', status,
+    createdAt: 1, startedAt: 1, finishedAt: null, total: 10, done: 0, failed: 0, phase: 'train' };
+  globalThis.fetch = async input => new Response(JSON.stringify(String(input).includes('/jobs/chart-job') ? job
+    : { runs: [], previews: [], bases: [], defaults: null, jobs: [job], activeJob: null }), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const client = createQueryClient();
+  const root = createRoot(document.getElementById('root')!);
+  const render = async (key: string) => {
+    await act(async () => {
+      root.render(createElement(QueryClientProvider, { client }, createElement(Yue2AitkTrainCard, {
+        key, datasetId: 'chart-set', lyricTiming: false, onLyricTimingChange: () => {},
+      })));
+      await new Promise(resolve => setTimeout(resolve, 10));
+    });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+  };
+  return { Stream, client, stored, document, render,
+    cleanup: async () => {
+      await act(async () => root.unmount()); client.clear();
+      Object.assign(globalThis, saved);
+    } };
+}
+
+test('a finished job without a chart cache replays once and the next visit uses its saved chart', async () => {
+  const view = await mountChart('done');
+  try {
+    await view.render('first');
+    assert.equal(view.Stream.made.length, 1, 'uncached terminal history needs one replay');
+    const stream = view.Stream.made[0];
+    await act(async () => {
+      stream.send({ type: 'metric', metric: 'step', step: 10, loss: 0.25, ts: 10 });
+      stream.send({ type: 'status', status: 'done' });
+    });
+    assert.equal(stream.readyState, view.Stream.CLOSED);
+    assert.match(view.document.body.textContent ?? '', /step 10/);
+    const cached = JSON.parse(view.stored.get('hs-yue2-aitk-job:chart-set:metrics:chart-job')!);
+    assert.equal(cached.status, 'done');
+    assert.equal(cached.steps[0].step, 10);
+    await view.render('revisit');
+    assert.equal(view.Stream.made.length, 1, 'complete cache must suppress replay');
+    assert.match(view.document.body.textContent ?? '', /Step 10 \/ 10/, 'cached chart remains visible');
+  } finally { await view.cleanup(); }
+});
+
+test('terminal and legacy complete chart caches skip replay; a partial cache still replays', async () => {
+  for (const status of [undefined, 'done', 'running']) {
+    const view = await mountChart('done', { status, steps: [{ step: 3, ep: 3, loss: 0.5 }] });
+    try {
+      await view.render('cached');
+      assert.equal(view.Stream.made.length, status === 'running' ? 1 : 0, String(status));
+      assert.match(view.document.body.textContent ?? '', /Step 3 \/ 10/);
+    } finally { await view.cleanup(); }
+  }
+});
+
+test('a live job keeps its final metric and failure log when polling sees completion', async () => {
+  const view = await mountChart('running');
+  try {
+    await view.render('live');
+    const stream = view.Stream.made[0];
+    assert.ok(stream);
+    await act(async () => {
+      stream.send({ type: 'metric', metric: 'step', step: 7, loss: 0.4, ts: 10 });
+      stream.send({ type: 'log', level: 'error', message: 'training failure detail', ts: 10 });
+      stream.send({ type: 'status', status: 'failed' });
+      await view.client.cancelQueries({ queryKey: trainingQueries.job(null, 'chart-job').queryKey });
+      view.client.setQueryData(trainingQueries.job(null, 'chart-job').queryKey,
+        (previous: TrainingJobSummary) => ({ ...previous, status: 'failed' }));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    assert.match(view.document.body.textContent ?? '', /training failure detail/);
+    assert.match(view.document.body.textContent ?? '', /step 7.*loss 0\.4000/);
+    assert.equal(view.Stream.made.length, 1);
+  } finally { await view.cleanup(); }
+});
 
 test('a delayed preset response cannot submit the old form through batch or exposed Start', async () => {
   const gate = createPresetLoadGate();

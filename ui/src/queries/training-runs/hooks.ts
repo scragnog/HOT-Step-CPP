@@ -6,6 +6,7 @@ import { pollWhile } from '../contract';
 import { trainingQueries } from '../training-data/queries';
 import { activeJob, type Worker } from './queries';
 import { queryManager } from '../invalidation';
+import { subscribeEventSource } from '../../services/sharedEventSource';
 
 /** The stream is shared with the chart/log reducers. Replayed terminal
  * frames invalidate once per job; they never start a command or audition. */
@@ -13,7 +14,13 @@ export function useRunEvents(jobId: string | null | undefined, worker: Worker) {
   const client = useQueryClient();
   useEffect(() => {
     if (!jobId) return;
-    return bridgeRunEvents(client, jobId, worker);
+    return bridgeRunEvents(client, jobId, worker, (url, subscriber, options) =>
+      subscribeEventSource(url, subscriber, { ...options, isTerminal: data => {
+        try {
+          const event = JSON.parse(data) as api.TrainingStreamEvent;
+          return event.type === 'status' && !activeJob({ status: event.status });
+        } catch { return false; }
+      } }));
   }, [client, jobId, worker]);
 }
 

@@ -690,7 +690,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     setShowJobLogs(false);
     if (!job?.id) return;
     const metricKey = `${JOB_KEY}${datasetId}:metrics:${job.id}`;
-    // Only the job on screen keeps a cached chart (see the load-time sweep).
+    // Only the job on screen keeps a cached chart.
     try {
       for (const key of Object.keys(window.localStorage)) {
         if (key.startsWith(JOB_KEY) && key.includes(':metrics:') && !key.startsWith(metricKey)) window.localStorage.removeItem(key);
@@ -700,8 +700,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     if (saved.steps?.length) setStepHistory(saved.steps);
     const savedMilestones = readStored<JointMilestone[]>(`${metricKey}:milestones`, saved.milestones ?? []);
     if (savedMilestones.length) setMilestones(savedMilestones);
-    // Finished jobs retain their cached chart without replaying the stream.
-    if (!isActiveJob(job) || saved.status && !isActiveJob({ status: saved.status })) return;
+    // An uncached finished job needs one replay. Legacy series lack status,
+    // so retain their history when the job itself is known terminal.
+    const complete = saved.status ? !isActiveJob({ status: saved.status })
+      : !!saved.steps?.length && !isActiveJob(job);
+    if (complete) return;
     let steps = saved.steps ?? [];
     let points = savedMilestones;
     let status = job.status;
@@ -757,7 +760,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       } catch { return false; }
     } });
     return () => { stop(); persist(); };
-  }, [datasetId, trainingWorker, job?.id, job?.startedAt, job?.status]);
+  }, [datasetId, trainingWorker, job?.id, job?.startedAt]);
 
   useEffect(() => {
     setForm(readStoredForm(datasetId));

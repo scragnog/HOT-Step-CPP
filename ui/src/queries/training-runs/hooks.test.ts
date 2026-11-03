@@ -5,10 +5,39 @@ import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { createQueryClient } from '../client';
-import { useJobSelection, useReload } from './hooks';
+import { useJobSelection, useReload, useRunEvents } from './hooks';
 import { runQueries } from './queries';
 import type { TrainingJobSummary } from '../../services/trainingApi';
 import { trainingQueries } from '../training-data/queries';
+
+test('a standalone job bridge closes its shared source on a terminal frame without a chart', async () => {
+  const saved = { window: globalThis.window, document: globalThis.document, EventSource: globalThis.EventSource };
+  const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>');
+  Object.assign(globalThis, { window, document, IS_REACT_ACT_ENVIRONMENT: true });
+  class Stream {
+    static made: Stream[] = [];
+    static CLOSED = 2; static OPEN = 1;
+    readyState = 1;
+    onmessage?: (event: { data: string }) => void;
+    constructor() { Stream.made.push(this); }
+    close() { this.readyState = 2; }
+  }
+  globalThis.EventSource = Stream as unknown as typeof EventSource;
+  const client = createQueryClient();
+  function Panel() { useRunEvents('bridge-only', null); return null; }
+  const root = createRoot(document.getElementById('root')!);
+  try {
+    await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(Panel))));
+    const stream = Stream.made[0];
+    stream.onmessage?.({ data: JSON.stringify({ type: 'metric', metric: 'step', step: 1 }) });
+    assert.equal(stream.readyState, Stream.OPEN);
+    stream.onmessage?.({ data: JSON.stringify({ type: 'status', status: 'done' }) });
+    assert.equal(stream.readyState, Stream.CLOSED);
+  } finally {
+    await act(async () => root.unmount()); client.clear();
+    Object.assign(globalThis, saved);
+  }
+});
 
 test('restored terminal jobs never stream; live jobs release their bridge on completion', async () => {
   const saved = { window: globalThis.window, document: globalThis.document,
