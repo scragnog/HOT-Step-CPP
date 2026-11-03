@@ -41,8 +41,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Re-runnable auto-login: runs once on mount, and again via the axios
     // interceptor's setOnUnauthorized callback when a request hits 401 (the
     // interceptor dedupes bursts to one re-login per cooldown).
+    // /auth/auto mints a new token per call, and StrictMode runs this effect
+    // twice, so a login whose effect was torn down must not apply its token:
+    // doing so rotated the session epoch a second time, which cancelled every
+    // auth-scoped read the first token had in flight (CancelledError in the
+    // console, every query fetched twice on load).
+    let active = true;
     const login = () => authApi.autoLogin()
       .then(({ user, token }) => {
+        if (!active) return;
         // Before the token reaches any consumer, so no render pairs the new
         // token with the old session's keys. The transport reads the same
         // accessor (axiosClient.ts), updated here at the same site.
@@ -52,11 +59,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setToken(token);
       })
       .catch(err => console.error('[Auth] Auto-login failed:', err))
-      .finally(() => setIsLoading(false));
+      .finally(() => { if (active) setIsLoading(false); });
 
     login();
     setOnUnauthorized(login);
-    return () => setOnUnauthorized(null);
+    return () => { active = false; setOnUnauthorized(null); };
   }, []);
 
   const updateUsername = async (name: string) => {
