@@ -1435,6 +1435,16 @@ static bool yue2_apply_companion(Yue2Model * m, const GGUFModel & gf, std::vecto
     if (!m->companion_enabled) {
         return true;
     }
+    // An adapter trained on another tokenizer's codes (WannabeTokenizer) was
+    // trained without the companion, so the decoder it renders with goes
+    // without it too. Any one such adapter in the pick decides.
+    for (const Yue2AdapterSpec & spec : m->lm_adapter_want) {
+        if (!yue2_adapter_wants_companion(spec.path)) {
+            fprintf(stderr, "[YuE2-Companion] skipped: %s was trained on codes that render without it\n",
+                    spec.path.c_str());
+            return true;
+        }
+    }
     std::string path;
     for (const auto & dir : m->search_dirs) {
         const std::string cand = dir + YUE2_SEP + YUE2_COMPANION_FILE;

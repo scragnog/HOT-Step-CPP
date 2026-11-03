@@ -299,6 +299,9 @@ struct Yue2TokHeadConfig {
     uint32_t    cvq_dim    = 0;  // yue2tok.cvq.dim    (256)
     uint32_t    cvq_hidden = 0;  // yue2tok.cvq.hidden (8192)
     uint32_t    offset     = 0;  // yue2tok.cvq.offset: code[t] = argmax[max(t - offset, 0)]
+    // yue2tok.companion (absent = true): this tokenizer's codes are decoded
+    // with the v9 companion decoder adapter. WannabeTokenizer files say false.
+    bool        companion  = true;
     bool        is_cvq() const { return kind == "cvq"; }
 };
 
@@ -387,6 +390,8 @@ static void yue2_tok_head_free(Yue2TokHead * h) {
     wctx_free(&h->wctx);
     h->blk.clear();
     h->pos = h->inp_w = h->inp_b = h->norm_w = h->norm_b = h->head_w = h->head_b = nullptr;
+    h->cvq_norm_w = h->cvq_norm_b = h->cvq_gate_w = h->cvq_up_w = h->cvq_down_w = nullptr;
+    h->cvq_proj_w = h->cvq_proj_b = h->cvq_codebook = nullptr;
     if (h->backend_ref) {
         backend_release(h->backend, h->cpu_backend);
         h->backend     = nullptr;
@@ -421,6 +426,9 @@ static void yue2_tok_parse_head_config(const GGUFModel & gf, Yue2TokHeadConfig *
     c->cvq_dim       = gf_get_u32(gf, "yue2tok.cvq.dim");
     c->cvq_hidden    = gf_get_u32(gf, "yue2tok.cvq.hidden");
     c->offset        = gf_get_u32(gf, "yue2tok.cvq.offset");
+    if (gguf_find_key(gf.gguf, "yue2tok.companion") >= 0) {
+        c->companion = gf_get_bool(gf, "yue2tok.companion");
+    }
 }
 
 // Refuse a structurally different head before any VRAM is touched. Same

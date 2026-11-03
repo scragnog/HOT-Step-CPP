@@ -454,6 +454,23 @@ static int run_impl(Config config, std::string * error) {
     yue2_aitk::sha256::digest source_hash;
     if (!yue2_aitk::sha256::file(source_copy, source_hash, error)) return 1;
     if (source_hash.hex() != lower_hash(dataset.source_manifest_sha256)) { fail(error, "dataset source-manifest.json SHA-256 does not match source_manifest_sha256"); return 1; }
+    // The cache's tokenizer pairing (yue2-tokenize's codec_ids_companion). Codes
+    // from a tokenizer that renders without the companion (WannabeTokenizer)
+    // train without it, and the adapter says so for the renderer.
+    std::string codec_tokenizer;
+    bool        companion_off = false;
+    if (yyjson_doc * sm = yyjson_read_file(source_copy.u8string().c_str(), 0, nullptr, nullptr)) {
+        yyjson_val * r  = yyjson_doc_get_root(sm);
+        yyjson_val * cc = yyjson_obj_get(r, "codec_ids_companion");
+        yyjson_val * tk = yyjson_obj_get(r, "codec_ids_tokenizer");
+        companion_off   = cc && yyjson_is_bool(cc) && !yyjson_get_bool(cc);
+        if (tk && yyjson_is_str(tk)) codec_tokenizer = yyjson_get_str(tk);
+        yyjson_doc_free(sm);
+    }
+    if (companion_off && !config.companion.empty()) {
+        std::fprintf(stderr, "[yue2-aitk] codes from %s render without the companion: --companion ignored\n", codec_tokenizer.c_str());
+        config.companion.clear();
+    }
     // What a render needs to know about this adapter travels in its own
     // header: the CoT modes it trained (an item with a lead sheet trains full
     // unless --abc-dropout drops every one; off comes from the dropout or an
@@ -468,6 +485,10 @@ static int run_impl(Config config, std::string * error) {
         if (!cot.empty()) adapter_meta.push_back({"cot", cot});
         if (!config.style_norms.empty()) adapter_meta.push_back({"style_norms", config.style_norms});
         if (!dataset.trigger.empty()) adapter_meta.push_back({"style_template", dataset.style_template});
+        if (companion_off) {
+            adapter_meta.push_back({"decoder_companion", "off"});  // yue2_adapter_wants_companion
+            adapter_meta.push_back({"codec_tokenizer", codec_tokenizer});
+        }
     }
     yue2_aitk::Yue2NativeSampler sampler(config.seed);
     std::vector<size_t> order;

@@ -163,6 +163,11 @@ struct Yue2ArTrainArgs : Yue2OptimConfig {
     bool        allow_no_minted = false;
     std::string out_dir;
     std::string name = "yue2_ar_lora";  // export stem: <out>/<name>.safetensors
+    // Set by the run from the artist manifest, not flags: its codes came from a
+    // tokenizer that renders without the companion decoder (codec_ids_companion
+    // = false), so the export says decoder_companion=off and the renderer obeys.
+    bool        decoder_companion_off = false;
+    std::string codec_tokenizer;
 
     // Fallback conditioning. Real runs take these per song (manifest, then ACE
     // sidecar); these apply to every song when neither does, and they are what
@@ -564,6 +569,8 @@ struct Yue2ArSet {
     std::string             format;
     std::string             caption_format;
     bool                    codec_ids_present = false;
+    bool                    codec_ids_companion = true;  // manifest codec_ids_companion (absent = true)
+    std::string             codec_ids_tokenizer;
     std::string             abc_producer;  // manifest root's `abc_producer`, copied into export metadata
 };
 
@@ -796,6 +803,9 @@ static bool yue2_at_load_manifest(const std::string & path, bool want_minted, co
     {
         yyjson_val * cp        = yyjson_obj_get(root, "codec_ids_present");
         out->codec_ids_present = cp && yyjson_is_bool(cp) && yyjson_get_bool(cp);
+        yyjson_val * cc          = yyjson_obj_get(root, "codec_ids_companion");
+        out->codec_ids_companion = !(cc && yyjson_is_bool(cc) && !yyjson_get_bool(cc));
+        out->codec_ids_tokenizer = jstr(root, { "codec_ids_tokenizer" });
     }
 
     yyjson_val * arr = yyjson_obj_get(root, "sources");
@@ -1609,6 +1619,10 @@ static bool yue2_at_export(const Yue2AtAdapters & ad, const Yue2ArTrainArgs & a,
     // identity we actually have: the base LM file it trained against. An
     // invented hash would be worse than none.
     md.emplace_back("base_sha", base_id);
+    if (a.decoder_companion_off) {
+        md.emplace_back("decoder_companion", "off");  // yue2_adapter_wants_companion
+        md.emplace_back("codec_tokenizer", a.codec_tokenizer);
+    }
     md.emplace_back("cot", abc_possible ? "off,full" : "off");
     if (abc_possible) {
         // Generation reads this the way it already reads caption_dropout:
@@ -2531,7 +2545,8 @@ static int yue2_ar_forwardcheck_main(const Yue2ArTrainArgs & a) {
 
 // ── The loop ───────────────────────────────────────────────────────────────
 
-static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
+static int yue2_ar_train_loop(const Yue2ArTrainArgs & a_in) {
+    Yue2ArTrainArgs a = a_in;  // the run records the cache's tokenizer pairing (decoder_companion_off)
     std::string err;
 
     // ── arguments ──
@@ -2625,6 +2640,12 @@ static int yue2_ar_train_loop(const Yue2ArTrainArgs & a) {
     if (minted_present && !yue2_at_load_manifest(a.minted, /*want_minted=*/true, a, &minted, &err)) {
         fprintf(stderr, "[yue2-ar-train] minted: %s\n", err.c_str());
         return 1;
+    }
+    if (!artist.codec_ids_companion) {
+        a.decoder_companion_off = true;
+        a.codec_tokenizer       = artist.codec_ids_tokenizer;
+        fprintf(stderr, "[yue2-ar-train] codes from %s: the adapter will render without the companion decoder\n",
+                a.codec_tokenizer.c_str());
     }
 
     static Yue2Model m;

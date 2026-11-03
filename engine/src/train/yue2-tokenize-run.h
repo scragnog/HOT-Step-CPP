@@ -373,6 +373,9 @@ static int yue2_tokenize_run(const Yue2TokenizeArgs & a) {
             clips.push_back(std::move(c));
         }
     }
+    // The tokenizer that made the codes already on disk, if any. Another
+    // tokenizer's codes are not a cache hit for this one (see `force` below).
+    const std::string prev_tokenizer = pm_js_str(root, "codec_ids_tokenizer");
     yyjson_doc_free(doc);
     doc  = nullptr;
     root = nullptr;
@@ -423,6 +426,12 @@ static int yue2_tokenize_run(const Yue2TokenizeArgs & a) {
         fprintf(stderr, "[yue2-tokenize] tokenizer head load failed: %s\n", err.c_str());
         yue2_mert_free(&m);
         return 1;
+    }
+    const bool tok_companion = head.cfg.companion;
+    const bool force         = a.force || (!prev_tokenizer.empty() && prev_tokenizer != yue2_basename(tok_path));
+    if (force && !a.force) {
+        fprintf(stderr, "[yue2-tokenize] the cached codes came from %s; re-encoding every source with %s\n",
+                prev_tokenizer.c_str(), yue2_basename(tok_path).c_str());
     }
 
     const int64_t MERT_SR = (int64_t) m.cfg.sample_rate;   // 24000
@@ -481,7 +490,7 @@ static int yue2_tokenize_run(const Yue2TokenizeArgs & a) {
 
         std::vector<int32_t> codes;
 
-        if (!a.force && i32_file_has(cp, s.frames) && read_i32(cp, &codes) &&
+        if (!force && i32_file_has(cp, s.frames) && read_i32(cp, &codes) &&
             (int64_t) codes.size() == s.frames) {
             s.cache_hit = true;
             s.T25       = s.frames;
@@ -635,7 +644,7 @@ static int yue2_tokenize_run(const Yue2TokenizeArgs & a) {
             }
             const std::string rel = "codes/" + c.id + ".i32";
             const std::string p   = join_path(out_dir, rel);
-            if (a.force || !i32_file_has(p, c.frames)) {
+            if (force || !i32_file_has(p, c.frames)) {
                 if (!write_i32(p, codes.data() + c.offset, (size_t) c.frames)) {
                     fprintf(stderr, "[yue2-tokenize] FAIL clip \"%s\": cannot write %s\n", c.id.c_str(), p.c_str());
                     clip_ok = false;
@@ -766,6 +775,10 @@ static int yue2_tokenize_run(const Yue2TokenizeArgs & a) {
                               (std::string("ace-train yue2-tokenize ") + ACE_VERSION).c_str());
     yyjson_mut_obj_remove_str(mroot, "codec_ids_tokenizer");
     yyjson_mut_obj_add_strcpy(mdoc, mroot, "codec_ids_tokenizer", yue2_basename(tok_path).c_str());
+    // Read by the trainers (no companion under the decoder when false) and
+    // stamped into the adapters they export (decoder_companion=off).
+    yyjson_mut_obj_remove_str(mroot, "codec_ids_companion");
+    yyjson_mut_obj_add_bool(mdoc, mroot, "codec_ids_companion", tok_companion);
     yyjson_mut_obj_remove_str(mroot, "codec_ids_created_at");
     yyjson_mut_obj_add_strcpy(mdoc, mroot, "codec_ids_created_at", pm_iso8601_utc_now().c_str());
 

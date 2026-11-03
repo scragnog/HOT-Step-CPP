@@ -138,6 +138,11 @@ struct Yue2NarTrainArgs : Yue2OptimConfig {
     // (nar_lora_joint_v9) under the NAR before training, exactly as the server
     // does under every render, so the adapter learns on the decoder it ships on.
     bool        companion = false;
+    // Set by the run, not a flag: the cache's codes came from a tokenizer that
+    // renders without the companion (manifest codec_ids_companion = false), so
+    // --companion is dropped and the export says decoder_companion=off.
+    bool        decoder_companion_off = false;
+    std::string codec_tokenizer;  // the manifest's codec_ids_tokenizer, for the export metadata
     std::string out_dir;
     std::string name = "yue2_nar_lora";  // export stem: <out>/<name>.safetensors
 
@@ -1659,6 +1664,8 @@ struct Yue2TrainSet {
     int64_t                    clip_frames = 0;    // 0 = the manifest did not say
     double                     frame_rate  = 0.0;  // 0 = the manifest did not say
     bool                       codec_ids_present = false;
+    bool                       codec_ids_companion = true;  // manifest codec_ids_companion (absent = true)
+    std::string                codec_ids_tokenizer;
     std::string                format;
     std::string                dir;
     std::string                abc_producer;  // manifest root's `abc_producer`, copied into export metadata
@@ -1807,6 +1814,9 @@ static bool yue2_nt_load_manifest(const std::string & path, bool no_abc, Yue2Tra
     {
         yyjson_val * cp        = yue2_nt_jsv(root, { "codec_ids_present" });
         out->codec_ids_present = cp && yyjson_is_bool(cp) && yyjson_get_bool(cp);
+        yyjson_val * cc          = yue2_nt_jsv(root, { "codec_ids_companion" });
+        out->codec_ids_companion = !(cc && yyjson_is_bool(cc) && !yyjson_get_bool(cc));
+        out->codec_ids_tokenizer = yue2_nt_jstr(root, { "codec_ids_tokenizer" });
     }
     out->abc_producer = yue2_nt_jstr(root, { "abc_producer" });
     if (!out->format.empty() && out->format.compare(0, 16, "yue2-preprocess-") != 0) {
@@ -2818,6 +2828,12 @@ static bool yue2_nt_export(const Yue2TrainAdapters & ad, const Yue2NarTrainArgs 
     // Which decoder this adapter was trained on: it belongs on top of the
     // companion only if it was trained on top of it.
     md.emplace_back("companion", a.companion ? "nar_lora_joint_v9" : "none");
+    if (a.decoder_companion_off) {
+        // Read at render time (yue2_adapter_wants_companion): keeps the
+        // companion off for this adapter in every app, not only this one.
+        md.emplace_back("decoder_companion", "off");
+        md.emplace_back("codec_tokenizer", a.codec_tokenizer);
+    }
     // doc 19 decision 4 / contract §19, exactly the AR trainer's own
     // convention (yue2-ar-train-run.h): "off,full" iff this run could ever
     // draw "full" (a clip carried a sheet and --abc-dropout < 1), else the
@@ -2843,7 +2859,8 @@ static bool yue2_nt_export(const Yue2TrainAdapters & ad, const Yue2NarTrainArgs 
 
 // ── The loop ───────────────────────────────────────────────────────────────
 
-static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
+static int yue2_nar_train_loop(const Yue2NarTrainArgs & a_in) {
+    Yue2NarTrainArgs a = a_in;  // the run may drop --companion (see decoder_companion_off)
     std::string err;
 
     // ── arguments ──
@@ -2896,12 +2913,28 @@ static int yue2_nar_train_loop(const Yue2NarTrainArgs & a) {
             return 1;
         }
         ds.codec_ids_present = ds.codec_ids_present && more.codec_ids_present;
+        if (more.codec_ids_companion != ds.codec_ids_companion) {
+            fprintf(stderr, "[yue2-train] %s: its codes pair with %s the companion decoder and the first "
+                            "manifest's do not; tokenize every cache with the same tokenizer\n",
+                    extra.c_str(), more.codec_ids_companion ? "" : "NOT");
+            return 1;
+        }
         ds.clips.insert(ds.clips.end(), std::make_move_iterator(more.clips.begin()),
                         std::make_move_iterator(more.clips.end()));
     }
     if (!a.extra_manifests.empty()) {
         fprintf(stderr, "[yue2-train] %zu manifests, %zu clips in total\n", a.extra_manifests.size() + 1,
                 ds.clips.size());
+    }
+
+    if (!ds.codec_ids_companion) {
+        if (a.companion) {
+            fprintf(stderr, "[yue2-train] the cache was tokenized with %s, whose codes render without the "
+                            "companion: --companion ignored\n", ds.codec_ids_tokenizer.c_str());
+        }
+        a.companion             = false;
+        a.decoder_companion_off = true;
+        a.codec_tokenizer       = ds.codec_ids_tokenizer;
     }
 
     static Yue2Model m;

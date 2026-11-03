@@ -543,6 +543,9 @@ struct Yue2AdapterMeta {
     int64_t     rank  = 0;      // 0 => absent (informational only; rank always
                                 //      comes from the tensor shapes)
     int         steps = 0;
+    // "off" = trained on codes from a tokenizer that does not pair with the
+    // v9 companion decoder adapter (WannabeTokenizer): render without it.
+    std::string decoder_companion;
 };
 
 static bool yue2a_meta_str(yyjson_val * meta, const char * key, std::string * out) {
@@ -594,6 +597,7 @@ static Yue2AdapterMeta yue2_adapter_read_meta(const STFile & st) {
         yue2a_meta_str(meta, "base_sha", &md.base_sha);
         yue2a_meta_str(meta, "use_dora", &md.use_dora);
         yue2a_meta_str(meta, "dora_scaling", &md.dora_scaling);
+        yue2a_meta_str(meta, "decoder_companion", &md.decoder_companion);
         double d = 0.0;
         if (yue2a_meta_num(meta, "alpha", &d)) {
             md.alpha = (float) d;
@@ -1561,9 +1565,9 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
 // actually being loaded (doc 30 #5) — a merge against a half that is not
 // staged is fatal by design. Accepts the same path shapes yue2_adapter_merge
 // does (a file, or a directory holding one of the exporters' default names).
-static std::string yue2_adapter_probe_family(const std::string & path) {
+static bool yue2_adapter_probe_open(const std::string & path, STFile * st) {
     HS_STAT_T sb;
-    if (hs_stat(path, &sb) != 0) return "";
+    if (hs_stat(path, &sb) != 0) return false;
     std::string sf_path = path;
     if (S_ISDIR(sb.st_mode)) {
         const char * cands[] = { "/adapter_model.safetensors", "/yue2-nar-lora.safetensors",
@@ -1575,10 +1579,14 @@ static std::string yue2_adapter_probe_family(const std::string & path) {
                 break;
             }
         }
-        if (sf_path.empty()) return "";
+        if (sf_path.empty()) return false;
     }
+    return st_open(st, sf_path.c_str());
+}
+
+static std::string yue2_adapter_probe_family(const std::string & path) {
     STFile st = {};
-    if (!st_open(&st, sf_path.c_str())) return "";
+    if (!yue2_adapter_probe_open(path, &st)) return "";
     std::string fam;
     const Yue2AdapterMeta md = yue2_adapter_read_meta(st);
     if (yue2a_starts(md.format, "yue2-nar-lora") || yue2a_starts(md.format, "yue2-nar-lokr") ||
@@ -1595,6 +1603,16 @@ static std::string yue2_adapter_probe_family(const std::string & path) {
     }
     st_close(&st);
     return fam;
+}
+
+// False when the adapter says it was trained on codes that render without the
+// companion decoder adapter (__metadata__.decoder_companion = "off").
+static bool yue2_adapter_wants_companion(const std::string & path) {
+    STFile st = {};
+    if (!yue2_adapter_probe_open(path, &st)) return true;
+    const bool want = yue2_adapter_read_meta(st).decoder_companion != "off";
+    st_close(&st);
+    return want;
 }
 
 static int yue2_adapter_merge(WeightCtx *                 wctx,

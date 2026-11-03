@@ -151,6 +151,10 @@ def add_meta(b, outtype, name, meta, spec, sha):
     b.meta("add_string", "yue2tok.interpolate.mode", "none")
     b.meta("add_bool", "yue2tok.instance_norm.enabled", False)
     b.meta("add_bool", "yue2tok.feature_store_f16.apply", True)   # features.half() before the head
+    # Its codes render WITHOUT nar_lora_joint_v9 (the v9 head's companion): the
+    # author's own advice, and a blind ear test agreed. yue2-tokenize copies
+    # this into the cache manifest; trainers and the renderer follow it.
+    b.meta("add_bool", "yue2tok.companion", False)
 
     b.meta("add_string", "yue2tok.head.kind", "cvq")
     b.meta("add_uint32", "yue2tok.head.window", HEAD_WIN)
