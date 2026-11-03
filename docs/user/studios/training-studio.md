@@ -133,6 +133,7 @@ returning to Train, Review or Refine does not repeat a start or audition command
 The YuE2 Train tab keeps a finished run's chart and stops replaying its history
 once the complete chart is saved. An interrupted first replay resumes on the
 next visit. Finished and approved runs leave Review's "Scored or finished" list.
+Review opens faster by reading the run catalogue once per request for all datasets.
 
 ## Related
 

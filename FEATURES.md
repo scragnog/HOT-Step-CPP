@@ -391,7 +391,7 @@ Build datasets from your own audio and train adapters on your GPU, for ACE-Step,
 | YuE2 training charts | Separate AR planner and NAR decoder panels, metric explanations, More series controls and run-configured stop readings across joint, separate and Refine runs. [Details](docs/user/training/yue2.md#reading-the-training-charts) |
 | Audition | Same-seed A/B of base and adapter planner, optionally rendered through the DiT. |
 | Adapter scoring | Evaluation passes put an artist-match score in the planner adapter picker. |
-| YuE2 Review | The YuE2 phases are Dataset, Prepare, Optimise, Train and Review. Review lists the checkpoint ladders awaiting your scores; score them by ear and a scoreboard ranks the rungs by likeness, corruption and re-plans. Refine, which pushed a planner adapter up KL rungs, is no longer a tab and opens only from Review for ladders made with the earlier recipe. |
+| YuE2 Review | The YuE2 phases are Dataset, Prepare, Optimise, Train and Review. Review lists the checkpoint ladders awaiting your scores and opens faster with one run catalogue read per request for all datasets; score them by ear and a scoreboard ranks the rungs by likeness, corruption and re-plans. Refine, which pushed a planner adapter up KL rungs, is no longer a tab and opens only from Review for ladders made with the earlier recipe. |
 | Batch pipeline | Import multiple folders and run label, build, preprocess and train unattended; YuE2's Train multiple chains its stages over several datasets. |
 | Send to Lyric Studio | Export a dataset's artist and album with its trained adapters as a preset. |
 
