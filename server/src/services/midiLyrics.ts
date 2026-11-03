@@ -1,5 +1,7 @@
 // Add timestamped LRC lines to the tempo track written by ace-midi.
 
+import { splitLrcLine } from './lrcExport.js';
+
 interface MetaEvent {
   tick: number;
   bytes: Buffer;
@@ -32,16 +34,16 @@ function writeVlq(value: number): Buffer {
 function parseLrc(text: string): MetaEvent[] {
   const lines: MetaEvent[] = [];
   for (const line of text.replace(/\r/g, '').split('\n')) {
-    const match = line.match(/^\[(\d+):(\d+)(?:\.(\d+))?\]\s*(.*)$/);
-    if (!match) continue;
-    const lyric = match[4].trim();
-    if (!lyric || /^\[.*\]$/.test(lyric)) continue;
-    const minutes = parseInt(match[1], 10);
-    const seconds = parseInt(match[2], 10);
-    const centiseconds = match[3] ? parseInt(match[3].padEnd(2, '0').slice(0, 2), 10) : 0;
-    const tick = Math.round((minutes * 60 + seconds + centiseconds / 100) * 960);
-    const utf8 = Buffer.from(lyric, 'utf8');
-    lines.push({ tick, bytes: Buffer.concat([Buffer.from([0xff, 0x05]), writeVlq(utf8.length), utf8]), type: 0x05 });
+    const parsed = splitLrcLine(line);
+    if (!parsed) continue;
+    // A section label (`[Chorus]`) is a marker, not a sung line, and a line
+    // can carry several timestamps (a returning chorus); each is its own event.
+    if (!parsed.text || /^\[.*\]$/.test(parsed.text)) continue;
+    const utf8 = Buffer.from(parsed.text, 'utf8');
+    const bytes = Buffer.concat([Buffer.from([0xff, 0x05]), writeVlq(utf8.length), utf8]);
+    for (const time of parsed.times) {
+      lines.push({ tick: Math.round(time * 960), bytes, type: 0x05 });
+    }
   }
   return lines.sort((a, b) => a.tick - b.tick);
 }

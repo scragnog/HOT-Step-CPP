@@ -1544,8 +1544,9 @@ async function finishYue2Job(
           await import('../../whisperTranscribe.js');
         const { reconcileLyrics } = await import('../../lyricsReconcile.js');
 
-        if (!(await ensureWhisperCli())) {
-          log('WARNING', '[Whisper] whisper-cli unavailable — skipping');
+        const whisperCli = await ensureWhisperCli();
+        if (!whisperCli.ok) {
+          log('WARNING', `[Whisper] whisper-cli unavailable — skipping: ${whisperCli.reason}`);
         } else if (!findWhisperModel(job.params.whisperModel)) {
           log('WARNING', '[Whisper] no Whisper model installed — skipping');
         } else {

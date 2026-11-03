@@ -79,6 +79,8 @@ In sidebar order. The sidebar lists only the studios the active backend can run.
 | [Releasing](dev/releasing.md) | Cutting and publishing a release, CI caching, gotchas |
 | [RunPod Pod template](dev/runpod.md) | The `runpod` Docker target on a RunPod GPU Pod, its HTTP proxy and the missing login; the published image arrives with the next release |
 | [Writing and maintaining the docs](dev/docs-contributing.md) | Layout, page template, generated tables, the checker |
+| [Testing synced lyrics export](dev/testing-synced-lyrics.md) | Step by step checks for the `.lrc` export: track menu, endpoints, save folder, retranscribe, crop, delete |
+| [Lyric editor workflow audit](dev/lyric-editor-audit.md) | The editor walked stage by stage, with the issues a user hits, which are fixes and which are features, and the recommended order |
 | [Writing style](dev/writing-style.md) | Rules for prose a human reads |
 | [UI design rules](dev/ui-design.md) | The shared controls every screen uses (dropdown, toggle, hover explanation), accent colours, and the check that enforces them |
 | [UI server state](dev/ui-server-state.md) | The contract for server snapshots in the UI: TanStack Query owns them, Zustand keeps client state, event streams drive the cache |

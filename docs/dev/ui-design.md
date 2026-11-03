@@ -95,6 +95,22 @@ they move it. "Timestep bias" explains nothing; "Which part of the denoising the
 Higher values spend more steps on the noisy end, which shapes structure; lower values on the clean
 end, which shapes detail" does. Keep the tone of [writing-style.md](writing-style.md).
 
+A control that is already its own button is explained by passing it as `children`: the card opens
+from the control, `label` is its heading, and no native `title` is used. `HintButton` is the
+short version for buttons, so a toolbar explains itself the way a field does:
+
+```tsx
+<HintButton label={t('x.split', 'Split line')} info={t('x.splitInfo', '...')} className={btnSmall} onClick={split}>
+  <Scissors size={12} /> {t('x.split', 'Split line')}
+</HintButton>
+```
+
+```tsx
+<ParamLabel label={t('x.split', 'Split line')} info={t('x.splitInfo', 'Start a new line at the selected word. ...')}>
+  <button className={btnSmall} onClick={split}><Scissors size={12} /> {t('x.split', 'Split line')}</button>
+</ParamLabel>
+```
+
 `className` styles the label text (the studios' field-label style by default) and
 `rootClassName` the wrapper, so margins and `block` go there. `underline` (on by default) draws
 the dotted hint under an explainable label; section headings turn it off.
