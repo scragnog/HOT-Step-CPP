@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { register } from 'node:module';
-import { createElement } from 'react';
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { parseHTML } from 'linkedom';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import { HEARTMULA_PREVIEW_DEFAULTS, HEARTMULA_RECIPE_DEFAULTS } from '../../../../server/src/contracts/heartmulaTraining';
 import type { HeartmulaStatusResponse } from '../../../../server/src/contracts/heartmulaTraining';
+import type { TrainingJobSummary } from '../../services/trainingApi';
 
 register('data:text/javascript,' + encodeURIComponent(
   'export async function load(url, ctx, next) { if (url.endsWith(".css")) return { format: "module", source: "export default {}", shortCircuit: true }; return next(url, ctx); }'));
@@ -20,6 +23,42 @@ const { heartmulaStatusOptions } = await import('./useHeartmulaController');
 const { TrainPanel } = await import('./TrainPanel');
 
 await i18n.use(initReactI18next).init({ lng: 'en', resources: {}, interpolation: { escapeValue: false } });
+
+test('the phase host only streams active jobs and releases both subscribers when training finishes', async () => {
+  const saved = { window: globalThis.window, document: globalThis.document, EventSource: globalThis.EventSource };
+  const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>');
+  Object.assign(window, { localStorage: globalThis.localStorage });
+  Object.assign(globalThis, { window, document, IS_REACT_ACT_ENVIRONMENT: true });
+  class Stream {
+    static made: Stream[] = [];
+    static OPEN = 1; static CLOSED = 2;
+    readyState = 1;
+    constructor() { Stream.made.push(this); }
+    close() { this.readyState = 2; }
+  }
+  globalThis.EventSource = Stream as unknown as typeof EventSource;
+  const original = useTrainingStore.getState();
+  const client = new QueryClient();
+  const root = createRoot(document.getElementById('root')!);
+  try {
+    useTrainingStore.setState({ detail: null, datasets: [], trainingWorker: null,
+      activeJob: { id: 'finished', status: 'done' } as TrainingJobSummary });
+    await act(async () => root.render(createElement(QueryClientProvider, { client },
+      createElement(TrainPanel, { target: 'heartmula' }))));
+    assert.equal(Stream.made.length, 0);
+    await act(async () => useTrainingStore.setState({ activeJob: { id: 'live-panel', status: 'running' } as TrainingJobSummary }));
+    assert.equal(Stream.made.length, 1, 'the live reducer and bridge share a socket');
+    await act(async () => useTrainingStore.setState({ activeJob: { id: 'live-panel', status: 'done' } as TrainingJobSummary }));
+    assert.equal(Stream.made[0].readyState, Stream.CLOSED);
+    await act(async () => root.render(createElement(QueryClientProvider, { client },
+      createElement(TrainPanel, { target: 'heartmula', key: 'revisit' }))));
+    assert.equal(Stream.made.length, 1);
+  } finally {
+    await act(async () => root.unmount()); client.clear();
+    useTrainingStore.setState(original);
+    Object.assign(globalThis, saved);
+  }
+});
 
 test('HeartMuLa Prepare and Train reach their cards independently of ACE capabilities and manifests', () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });

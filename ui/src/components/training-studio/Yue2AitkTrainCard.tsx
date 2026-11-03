@@ -6,8 +6,8 @@ import { useTranslation } from 'react-i18next';
 import { YUE2_JOINT_BASE_MATCHED_DEFAULTS, YUE2_JOINT_BASE_MATCHED_VALUES, YUE2_JOINT_FIXED_RECIPE_DROPOUTS, YUE2_JOINT_FORM_DEFAULTS, YUE2_JOINT_LADDER_PREVIEW, YUE2_JOINT_LEGACY_VALUES, YUE2_JOINT_LOKR_STOP, YUE2_JOINT_LORA_STOP, YUE2_JOINT_PRESETS, YUE2_JOINT_TUNED_KEYS } from '../../../../server/src/contracts/trainingRecipes';
 import { pollWhile } from '../../queries/contract';
 import { trainingQueries } from '../../queries/training-data/queries';
-import { useJobSelection, useReload, useScopedId } from '../../queries/training-runs/hooks';
-import { runQueries, trainingWritePlan } from '../../queries/training-runs/queries';
+import { useJobSelection, useReload, useRunEvents, useScopedId } from '../../queries/training-runs/hooks';
+import { activeJob as isActiveJob, runQueries, trainingWritePlan } from '../../queries/training-runs/queries';
 
 import { preferencesApi } from '../../services/preferencesApi';
 import { subscribeEventSource } from '../../services/sharedEventSource';
@@ -49,15 +49,8 @@ export const PREP_KEY = 'hs-yue2-aitk-prepare:';
 // These dataset-scoped keys are local editing drafts; the accepted operation
 // carries its own captured form and source revisions.
 const METRIC_CAP = 2000;
-// Chart caches (~120 KB a run) were never deleted and filled the 5 MB storage
-// quota, after which every unguarded write on the Train page threw and blanked
-// it. Clear them once per page load, before any other write; a live job's
-// stream replays its history, and the card below keeps only the job on screen.
-try {
-  if (typeof window !== 'undefined') for (const key of Object.keys(window.localStorage)) {
-    if (key.startsWith(JOB_KEY) && key.includes(':metrics:')) window.localStorage.removeItem(key);
-  }
-} catch { /* storage unavailable */ }
+// The card prunes other jobs' chart caches when selecting a job. Preserve
+// the displayed job across page loads so terminal history needs no replay.
 // `loss` is absent once the planner is frozen: the trainer then reports only
 // the decoder's terms and the composite has no AR part. Those steps still
 // count for progress, pace and the gradient norm.
@@ -469,7 +462,22 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   latestLyricTiming.current = lyricTiming;
   const presetLoadRequest = useRef(0);
   const trainingWorker = useTrainingStore(s => s.trainingWorker);
-  const [job, setJob] = useJobSelection(trainingWorker, datasetId);
+  const client = useQueryClient();
+  // Keep the canonical Query owner, with the persisted terminal chart also
+  // gating the bridge if the HTTP snapshot briefly lags completion.
+  const [jobId, selectJob] = useScopedId(trainingWorker, datasetId);
+  const jobQuery = useQuery({ ...trainingQueries.job(trainingWorker, jobId), enabled: !!jobId,
+    refetchInterval: pollWhile<TrainingJobSummary>(isActiveJob) });
+  const job = jobQuery.data ?? null;
+  const cachedTerminal = useMemo(() => {
+    const saved = readStored<{ status?: TrainingJobSummary['status'] }>(`${JOB_KEY}${datasetId}:metrics:${jobId}`, {});
+    return !!saved.status && !isActiveJob({ status: saved.status });
+  }, [datasetId, trainingWorker, jobId]);
+  useRunEvents(job && isActiveJob(job) && !cachedTerminal ? job.id : null, trainingWorker);
+  const setJob = (selected: TrainingJobSummary | null) => {
+    if (selected) client.setQueryData(trainingQueries.job(trainingWorker, selected.id).queryKey, selected);
+    selectJob(selected?.id ?? '');
+  };
   const [jointPipelineId, setJointPipelineId] = useScopedId(trainingWorker, datasetId);
   // Tracks with no .yue2.txt are re-captioned from the audio before training
   // (on by default): otherwise they train on the long ACE caption. Gemini's
@@ -607,7 +615,6 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
       setError(err instanceof Error ? err.message : String(err));
     } finally { setBatchStarting(false); }
   };
-  const client = useQueryClient();
   const runsQuery = useQuery({ ...runQueries.jointRuns(datasetId),
     refetchInterval: pollWhile<Awaited<ReturnType<typeof import('../../services/trainingApi').listYue2AitkRuns>>>(data =>
       !data || data.runs.some(run => run.live) || job?.status === 'queued' || job?.status === 'running', 5000) });
@@ -689,10 +696,29 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         if (key.startsWith(JOB_KEY) && key.includes(':metrics:') && !key.startsWith(metricKey)) window.localStorage.removeItem(key);
       }
     } catch { /* storage unavailable */ }
-    const saved = readStored<{ steps?: JointStepPoint[]; milestones?: JointMilestone[] }>(metricKey, {});
+    const saved = readStored<{ steps?: JointStepPoint[]; milestones?: JointMilestone[]; status?: TrainingJobSummary['status'] }>(metricKey, {});
     if (saved.steps?.length) setStepHistory(saved.steps);
     const savedMilestones = readStored<JointMilestone[]>(`${metricKey}:milestones`, saved.milestones ?? []);
     if (savedMilestones.length) setMilestones(savedMilestones);
+    // Finished jobs retain their cached chart without replaying the stream.
+    if (!isActiveJob(job) || saved.status && !isActiveJob({ status: saved.status })) return;
+    let steps = saved.steps ?? [];
+    let points = savedMilestones;
+    let status = job.status;
+    let dirty = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const persist = () => {
+      clearTimeout(timer);
+      timer = undefined;
+      if (!dirty) return;
+      writeStored(metricKey, { steps, status });
+      writeStored(`${metricKey}:milestones`, points);
+      dirty = false;
+    };
+    const schedulePersist = () => {
+      dirty = true;
+      timer ??= setTimeout(persist, 1000);
+    };
     const stop = subscribeEventSource(jobStreamUrl(job.id, { worker: trainingWorker }), { message: data => {
       try {
         const item = JSON.parse(data) as TrainingStreamEvent;
@@ -701,33 +727,37 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         } else if (item.type === 'metric' && item.metric === 'step') {
           setLiveMetric(item);
           if (typeof item.step === 'number' && Number.isFinite(item.step)) {
-            setStepHistory(previous => {
-              const next = reduceYue2Metric(previous, { ...item,
-                // Older trainers lack cumulative time; retain the job-clock fallback.
-                trainMs: item.trainMs ?? (typeof job.startedAt === 'number' && typeof item.ts === 'number'
-                  ? Math.max(0, item.ts - job.startedAt) : undefined),
-              }, METRIC_CAP);
-              writeStored(metricKey, { steps: next });
-              return next;
-            });
+            steps = reduceYue2Metric(steps, { ...item,
+              // Older trainers lack cumulative time; retain the job-clock fallback.
+              trainMs: item.trainMs ?? (typeof job.startedAt === 'number' && typeof item.ts === 'number'
+                ? Math.max(0, item.ts - job.startedAt) : undefined),
+            }, METRIC_CAP);
+            setStepHistory(steps);
+            schedulePersist();
           }
         } else if (item.type === 'metric' && item.metric === 'milestone'
           && typeof item.step === 'number' && typeof item.path === 'string') {
-          setMilestones(previous => {
-            const next = [...previous.filter(point => point.path !== item.path), { epoch: item.step!, loss: item.loss ?? 0, path: item.path! }];
-            writeStored(`${metricKey}:milestones`, next);
-            return next;
-          });
+          points = [...points.filter(point => point.path !== item.path), { epoch: item.step, loss: item.loss ?? 0, path: item.path }];
+          setMilestones(points);
+          schedulePersist();
         } else if (item.type === 'log') {
           const stamp = new Date(item.ts).toLocaleTimeString();
           setJobLogs(previous => [...previous, `${stamp} ${item.level}: ${item.message}`].slice(-100));
         } else if (item.type === 'status' && !['queued', 'running'].includes(item.status)) {
+          status = item.status;
+          dirty = true;
+          persist();
           stop();
         }
       } catch { /* Ignore malformed replay frames; polling remains authoritative. */ }
+    }, error: persist }, { isTerminal: data => {
+      try {
+        const item = JSON.parse(data) as TrainingStreamEvent;
+        return item.type === 'status' && !['queued', 'running'].includes(item.status);
+      } catch { return false; }
     } });
-    return stop;
-  }, [trainingWorker, job?.id, job?.startedAt]);
+    return () => { stop(); persist(); };
+  }, [datasetId, trainingWorker, job?.id, job?.startedAt, job?.status]);
 
   useEffect(() => {
     setForm(readStoredForm(datasetId));
@@ -813,7 +843,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
 
   const pipelineQuery = useQuery({ ...runQueries.preparation(jointPipelineId), enabled: !!jointPipelineId });
   const pipelineJobQuery = useQuery({ ...runQueries.preparationJob(jointPipelineId), enabled: !!jointPipelineId,
-    refetchInterval: pollWhile(() => !!jointPipelineId) });
+    refetchInterval: pollWhile<TrainingJobSummary | null>(data => !!jointPipelineId && isActiveJob(data)) });
   useEffect(() => {
     const current = pipelineJobQuery.data;
     if (current && isJointJob(current, datasetId)) {

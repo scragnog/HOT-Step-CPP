@@ -26,7 +26,7 @@ export const TrainPanel: React.FC<{ target: TrainingTargetId; section?: Training
   // these subscriptions in its plug-in, so never attach it twice.
   const jobActive = activeJob?.status === 'queued' || activeJob?.status === 'running';
   useTrainingStream(target !== 'ace' && jobActive ? activeJob!.id : null);
-  useRunEvents(target !== 'ace' ? activeJob?.id : undefined, trainingWorker);
+  useRunEvents(target !== 'ace' && jobActive ? activeJob!.id : undefined, trainingWorker);
 
   // ACE owns its status-dependent gates, including the initial dataset picker.
   if (target === 'ace') return <>{plugin.renderTrain?.({ datasetId: detail?.id ?? '', slug: detail?.slug ?? '', trigger: detail?.customTag || '', section })}</>;

@@ -8,6 +8,49 @@ import { createQueryClient } from '../client';
 import { useJobSelection, useReload } from './hooks';
 import { runQueries } from './queries';
 import type { TrainingJobSummary } from '../../services/trainingApi';
+import { trainingQueries } from '../training-data/queries';
+
+test('restored terminal jobs never stream; live jobs release their bridge on completion', async () => {
+  const saved = { window: globalThis.window, document: globalThis.document,
+    EventSource: globalThis.EventSource, fetch: globalThis.fetch };
+  const { window, document } = parseHTML('<html><body><div id="root"></div></body></html>');
+  Object.assign(globalThis, { window, document, IS_REACT_ACT_ENVIRONMENT: true });
+  class Stream {
+    static made: Stream[] = [];
+    static CLOSED = 2; static OPEN = 1;
+    readyState = 1;
+    constructor() { Stream.made.push(this); }
+    close() { this.readyState = 2; }
+  }
+  globalThis.EventSource = Stream as unknown as typeof EventSource;
+  // Keep background revalidation pending so each transition below comes
+  // from the canonical job cache, as it does after a server status refresh.
+  globalThis.fetch = () => new Promise<Response>(() => {});
+  const client = createQueryClient();
+  let current: ReturnType<typeof useJobSelection>;
+  function Panel() { current = useJobSelection(null, 'set'); return null; }
+  const root = createRoot(document.getElementById('root')!);
+  try {
+    await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(Panel))));
+    for (const status of ['done', 'failed', 'cancelled', 'interrupted'] as const) {
+      await act(async () => current![1]({ id: status, status } as TrainingJobSummary));
+      assert.equal(Stream.made.length, 0, status);
+    }
+    await act(async () => current![1]({ id: 'live', status: 'running' } as TrainingJobSummary));
+    assert.equal(Stream.made.length, 1);
+    await act(async () => {
+      client.setQueryData(trainingQueries.job(null, 'live').queryKey, { id: 'live', status: 'done' });
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    assert.equal(Stream.made[0].readyState, Stream.CLOSED);
+    await act(async () => current![1](null));
+    await act(async () => current![1]({ id: 'live', status: 'done' } as TrainingJobSummary));
+    assert.equal(Stream.made.length, 1, 'revisiting the finished job must not reconnect');
+  } finally {
+    await act(async () => root.unmount()); client.clear();
+    Object.assign(globalThis, saved);
+  }
+});
 
 test('a mounted panel rejects job adoption from a previous worker or dataset', async () => {
   const savedWindow = globalThis.window;

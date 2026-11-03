@@ -11,7 +11,8 @@ export interface Yue2Point {
 export function reduceYue2Metric(previous: Yue2Point[], item: TrainingMetricEvent, cap = 2000): Yue2Point[] {
   if (item.metric !== 'step' || !Number.isFinite(item.step)) return previous;
   const step = item.step!;
-  const point: Yue2Point = { ...previous.find(p => p.step === step), step, ep: step };
+  const append = !previous.length || step > previous[previous.length - 1].step;
+  const point: Yue2Point = { ...(!append ? previous.find(p => p.step === step) : undefined), step, ep: step };
   for (const key of ['loss', 'arCe', 'cursorCe', 'arKl', 'narMse', 'narRecon', 'narDrift', 'gradNorm', 'lr', 'stepMs'] as const) {
     const v = item[key];
     if (typeof v === 'number' && Number.isFinite(v)) point[key] = v;
@@ -21,8 +22,12 @@ export function reduceYue2Metric(previous: Yue2Point[], item: TrainingMetricEven
     point.frozen = true;
     delete point.loss; delete point.arCe; delete point.cursorCe; delete point.arKl;
   }
-  const next = [...previous.filter(p => p.step !== step), point].sort((a, b) => a.step - b.step).slice(-cap);
-  return next.map((p, i) => {
+  const merged = append ? [...previous, point]
+    : [...previous.filter(p => p.step !== step), point].sort((a, b) => a.step - b.step);
+  const next = merged.slice(-cap);
+  const changed = append ? next.length - 1 : next.findIndex(p => p.step === step);
+  const updateMean = (i: number) => {
+    const p = next[i];
     const q = { ...p };
     delete q.ma5; delete q.ma20;
     if (p.loss !== undefined) {
@@ -30,8 +35,16 @@ export function reduceYue2Metric(previous: Yue2Point[], item: TrainingMetricEven
       q.ma5 = values.slice(-5).reduce((a, b) => a + b, 0) / Math.min(5, values.length);
       if (values.length === 20) q.ma20 = values.reduce((a, b) => a + b, 0) / 20;
     }
-    return q;
-  });
+    next[i] = q;
+  };
+  // A sparse update only affects its own average and the next 19. Evicting
+  // the oldest point also changes the partial windows at the start.
+  const prefix = merged.length > cap ? Math.min(19, next.length) : 0;
+  for (let i = 0; i < prefix; i++) updateMean(i);
+  if (changed >= 0) {
+    for (let i = Math.max(prefix, changed); i < Math.min(next.length, changed + 20); i++) updateMean(i);
+  }
+  return next;
 }
 
 export function klReading(values: number[], mode: 'mean' | 'trend', window = 20, partial = false): number | undefined {

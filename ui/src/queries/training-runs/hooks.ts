@@ -18,9 +18,11 @@ export function useRunEvents(jobId: string | null | undefined, worker: Worker) {
 }
 
 export function useRunJob(worker: Worker, id: string | null | undefined) {
-  useRunEvents(id, worker);
-  return useQuery({ ...trainingQueries.job(worker, id ?? ''), enabled: !!id,
+  const query = useQuery({ ...trainingQueries.job(worker, id ?? ''), enabled: !!id,
     refetchInterval: pollWhile<api.TrainingJobSummary>(activeJob) });
+  // Resolve status before subscribing, including a restored terminal job.
+  useRunEvents(query.data && activeJob(query.data) ? id : null, worker);
+  return query;
 }
 
 /** Only the selected id is client state. The job itself has one cache owner.

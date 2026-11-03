@@ -20,6 +20,8 @@ interface Entry {
   seen: string[];
   reconnect: boolean;
   retry?: number;
+  terminal?: boolean;
+  isTerminal?: (data: string) => boolean;
 }
 
 // ponytail: drops oldest-first, unlike the training buffer, which evicts logs
@@ -36,15 +38,23 @@ function connect(url: string, entry: Entry) {
     entry.subs.forEach(s => s.open?.());
   };
   es.onmessage = e => {
+    if (entry.terminal) return;
     entry.seen.push(e.data);
     if (entry.seen.length > REPLAY_CAP) entry.seen.shift();
+    if (entry.isTerminal?.(e.data)) {
+      entry.terminal = true;
+      window.clearTimeout(entry.retry);
+      es.close();
+    }
     entry.subs.forEach(s => s.message?.(e.data));
   };
   es.onerror = () => {
+    if (entry.terminal) return;
     entry.seen = [];  // whatever reconnects next replays from the start
     entry.subs.forEach(s => s.error?.());
-    // EventSource retries dropped connections itself; it gives up (CLOSED)
-    // only on an HTTP error, which long-lived streams retry after 3 s.
+    // EventSource retries drops and clean server closes alike. A terminal
+    // frame must close it explicitly above to prevent a full replay.
+    // CLOSED HTTP failures may also be retried for long-lived streams.
     if (es.readyState === EventSource.CLOSED && entry.reconnect && entries.get(url) === entry) {
       entry.retry = window.setTimeout(() => { entry.retry = undefined; connect(url, entry); }, 3000);
     }
@@ -53,16 +63,22 @@ function connect(url: string, entry: Entry) {
 
 /** Subscribe to a server-sent event stream, sharing the tab's connection.
  *  `reconnect` reopens the stream after an HTTP error, not only after a drop. */
-export function subscribeEventSource(url: string, sub: Subscriber, opts: { reconnect?: boolean } = {}): () => void {
+export function subscribeEventSource(url: string, sub: Subscriber, opts: { reconnect?: boolean; isTerminal?: (data: string) => boolean } = {}): () => void {
   let entry = entries.get(url);
   if (!entry) {
-    entry = { es: null as unknown as EventSource, subs: new Set(), seen: [], reconnect: !!opts.reconnect };
+    entry = { es: null as unknown as EventSource, subs: new Set(), seen: [], reconnect: !!opts.reconnect, isTerminal: opts.isTerminal };
     entries.set(url, entry);
     connect(url, entry);
   } else {
     entry.reconnect ||= !!opts.reconnect;
+    entry.isTerminal ??= opts.isTerminal;
+    if (!entry.terminal && entry.isTerminal && entry.seen.some(entry.isTerminal)) {
+      entry.terminal = true;
+      window.clearTimeout(entry.retry);
+      entry.es.close();
+    }
     // A stream that gave up (an HTTP error, no retry pending) reopens for a newcomer.
-    if (entry.es.readyState === EventSource.CLOSED && entry.retry === undefined) connect(url, entry);
+    if (!entry.terminal && entry.es.readyState === EventSource.CLOSED && entry.retry === undefined) connect(url, entry);
     // After returning, so a handler can already call its own unsubscribe.
     const joined = entry, backlog = [...entry.seen];
     queueMicrotask(() => {

@@ -69,7 +69,7 @@ export const ReviewPanel: React.FC = () => {
   // "Reviewing complete" on the Refine tab counts as scored; a finished
   // (linked and cleaned up) ladder has nothing left to review.
   const pending = rows.filter(awaitingReview);
-  const rest = rows.filter(r => !awaitingReview(r));
+  const rest = rows.filter(r => !r.finished && !awaitingReview(r));
   // Scored ladders can be finished in one go on the server: NAR further
   // training from the best-scored rung, then link + cleanup (yue2BatchRunner).
   // Finish always runs on this machine, so its batch is read from the local
