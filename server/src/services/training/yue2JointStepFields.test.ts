@@ -15,10 +15,14 @@ test('joint step keeps planner readings separate from composite loss and omits m
     arCe: 1, cursorCe: 4, arKl: 2, narMse: 3, lr: 0.0001,
   });
 
+  // A frozen step has no planner terms, but the decoder is still training, so
+  // it still has a loss: the decoder's own, flagged so it is never mistaken for
+  // the composite (the stale-label bug this replaced).
   const frozen = parseYue2JointEvent(JSON.stringify({
     stage: 'joint', step: 3, planner_frozen: true, nar_mse: 2.5,
   }), 10);
   assert.deepEqual(frozen, {
     stage: 'joint', step: 3, totalSteps: 10, plannerFrozen: true, narMse: 2.5,
+    loss: 2.5, decoderOnly: true,
   });
 });
