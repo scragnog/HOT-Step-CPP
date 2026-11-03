@@ -1,6 +1,6 @@
 # YuE2 training
 
-This guide covers training YuE2 adapters in the [Training Studio](../studios/training-studio.md) with Joint Training, the default method: what gets trained, what the dataset needs, which preset to start from, and how to pick the finished adapter by ear. YuE2 must be the training target: make YuE2 the active generation backend with the engine picker at the top of the sidebar, and leave the **Training target** picker above the phase tabs on **Active generation backend**. For how the trainer works inside, see [training internals](../../dev/training-internals.md).
+This guide covers training YuE2 adapters in the [Training Studio](../studios/training-studio.md) with Joint Training, the default method: what gets trained, what the dataset needs, which preset to start from, and how to pick the finished adapter by ear. YuE2 must be the training target: make YuE2 the active generation backend with the engine picker at the top of the sidebar. For how the trainer works inside, see [training internals](../../dev/training-internals.md).
 
 ## What you can train
 

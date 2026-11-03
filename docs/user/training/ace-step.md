@@ -1,6 +1,6 @@
 # ACE-Step training
 
-This guide covers training your own ACE-Step 1.5 adapters in the [Training Studio](../studios/training-studio.md): what each adapter type changes, how to prepare a dataset, which settings to start from and how to tell whether the result is any good. It assumes ACE-Step is the training target: make ACE-Step the active generation backend with the engine picker at the top of the sidebar, and leave the **Training target** picker above the phase tabs on **Active generation backend**. For how the trainers work inside, see [training internals](../../dev/training-internals.md).
+This guide covers training your own ACE-Step 1.5 adapters in the [Training Studio](../studios/training-studio.md): what each adapter type changes, how to prepare a dataset, which settings to start from and how to tell whether the result is any good. It assumes ACE-Step is the training target: make ACE-Step the active generation backend with the engine picker at the top of the sidebar. For how the trainers work inside, see [training internals](../../dev/training-internals.md).
 
 ## What you can train
 

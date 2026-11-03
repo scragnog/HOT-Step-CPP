@@ -11,8 +11,6 @@ import { AlertTriangle, GraduationCap, Layers } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useBackendStore } from '../../stores/backendStore';
 import { useTrainingStore, type TrainingPhase } from '../../stores/trainingStore';
-import { ParamLabel } from '../shared/ParamLabel';
-import { StyledSelect } from '../shared/StyledSelect';
 import { CapabilityBanner } from './CapabilityBanner';
 import { DatasetDetail } from './DatasetDetail';
 import { DatasetList } from './DatasetList';
@@ -25,7 +23,7 @@ import { TrainPanel } from './TrainPanel';
 import { TrainingWorkerBar } from './TrainingWorkerBar';
 import { Yue2BatchPanel } from './Yue2BatchPanel';
 import { getTrainingPlugin } from './trainingPlugins';
-import { resolvePhase, type TrainingTargetOverride } from './trainingTargets';
+import { resolvePhase } from './trainingTargets';
 import { useTrainingTarget } from './useTrainingTarget';
 
 // ── URL helpers ──────────────────────────────────────────────────────────────
@@ -80,9 +78,9 @@ export const TrainingStudio: React.FC = () => {
   const activeBackendId = useBackendStore(s => s.activeBackendId);
   const fetchBackends = useBackendStore(s => s.fetchBackends);
   const activeBackend = backends.find(b => b.id === activeBackendId);
-  // The ONE effective target (persisted override or active backend; a running
+  // The ONE effective target (active backend; a running
   // job pins it). Everything below follows it: chips, preparation, train, previews.
-  const { target, override, setOverride, locked } = useTrainingTarget();
+  const { target } = useTrainingTarget();
   const plugin = getTrainingPlugin(target);
   const multiBackend = backends.length > 1;
 
@@ -206,23 +204,6 @@ export const TrainingStudio: React.FC = () => {
 
         <TrainingWorkerBar />
         <CapabilityBanner />
-        {/* The picker moved out of the Train page: the target now drives the
-            chips and the stepper too, so it sits above them. Read-only while a
-            submitted job pins the target. SA3 as the active backend needs no
-            choice. */}
-        {activeBackendId !== 'sa3' && (
-          <div className="rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4 flex flex-col gap-1">
-            <ParamLabel label={t('trainingStudio.sa3.target')} info={t('trainingStudio.sa3.targetInfo')} />
-            <StyledSelect value={locked ? target : override} disabled={locked} accent="amber"
-              onChange={(v: string) => setOverride(v as TrainingTargetOverride)} options={[
-                { value: 'active', label: t('trainingStudio.sa3.activeTarget') },
-                { value: 'sa3', label: t('trainingStudio.sa3.title') },
-                // While a job pins the target, show it: ACE/MM3/YuE2 ids match neither option above.
-                ...(locked && target !== 'sa3'
-                  ? [{ value: target, label: backends.find(b => b.id === target)?.displayName ?? target }] : []),
-              ]} />
-          </div>
-        )}
         <PhaseStepper target={target} />
 
         {/* Above the phase content, not inside it: the batch runs datasets

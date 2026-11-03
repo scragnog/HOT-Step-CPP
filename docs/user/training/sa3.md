@@ -7,14 +7,9 @@ Small, SFX and other adapter families are outside this workflow.
 
 ## Where to find it
 
-Open Training Studio. With Stable Audio 3 as the active backend, the studio
-trains for it directly and the **Training target** picker is hidden. With
-ACE-Step, MiniMax-Music3 or YuE2 selected in the engine picker at the top of the
-sidebar, choose **Stable Audio 3 Medium · DoRA-rows** in the **Training target**
-picker above the phase tabs. The choice is remembered and drives every tab: the
-dataset chips, the phase tabs and the Train page. The picker is read-only while
-the open dataset has a training job queued or running, so a view change cannot
-retarget a submitted job.
+Choose Stable Audio 3 in the engine picker at the top of the sidebar, then open
+Training Studio. Training follows that global backend choice. While the open
+dataset has a training job queued or running, the studio keeps that job's target.
 
 SA3 has two tabs, **Dataset** and **Train**. It has no Preprocess tab: the Train
 page prepares the audio and the trainer encodes it. Each dataset card shows four

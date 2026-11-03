@@ -384,10 +384,9 @@ generation DiTs, with BF16 as the default; see [Generating a song](generation.md
 The Stable Audio 3 Training pack (~9.3 GB) installs all of them along with the
 training base.
 
-Training Studio trains Stable Audio 3 Medium DoRA-rows adapters. With Stable Audio 3
-active, the studio trains it directly. With another backend active, choose
-**Stable Audio 3 Medium · DoRA-rows** in the **Training target** picker above the phase
-tabs. The choice drives every tab and is locked while a job runs. SA3 shows only
+Training Studio trains Stable Audio 3 Medium DoRA-rows adapters. Select Stable
+Audio 3 in the global engine picker to train for it. The studio follows that
+backend choice and keeps a running job's target until it finishes. SA3 shows only
 Dataset and Train tabs. Preparation strips vocals with SuperSep level 5 and keeps the
 originals. Training supports CUDA and CPU; the card lists missing model files. See
 [Stable Audio 3 training](training/sa3.md) for the recipe, cancellation, saved-run

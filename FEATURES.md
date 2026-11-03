@@ -366,7 +366,7 @@ Build datasets from your own audio and train adapters on your GPU, for ACE-Step,
 | Local captioning | MOSS-Music-8B-Instruct and NVIDIA Music Flamingo in native GGML (`ace-caption`), in ACE-Step or MM3 caption formats, plus section-tagged lyric transcription. |
 | Review grid | Spreadsheet editing of every track with bulk actions and scoped re-labels. |
 | Dataset build | Writes a Side-Step-compatible `dataset.json` with trigger placement and genre ratio. |
-| Training target | One training target (the active backend, or Stable Audio 3) drives the phase tabs, dataset chips, Train page and checkpoint previews; it is locked while a job runs. [Details](docs/user/studios/training-studio.md) |
+| Training backend | The active global backend drives the phase tabs, dataset chips, Train page and checkpoint previews; a running job keeps its target. [Details](docs/user/studios/training-studio.md) |
 | Preprocess and codes | Encodes audio for ACE-Step, or RVQ codes for MiniMax-Music3 with an optional cover-laundering pass. |
 | ACE-Step adapters | Planner LM adapters (0.6B, 1.7B, 4B) and DiT adapters, as LoRA or LoKr. There are no automatic checkpoint previews; Audition compares adapters and saved milestones. |
 | MiniMax-Music3 adapters | Planner LM LoRA trained from RVQ codes. |

@@ -4,7 +4,7 @@ import { yue2PreparationStageSchema } from '../../../../server/src/contracts/tra
 import { trainingRecipeFamilySchema } from '../../../../server/src/contracts/trainingRecipes';
 import type { TrainingPhase } from '../../stores/trainingStore';
 import {
-  TRAINING_TARGETS, parseTargetOverride, resolvePhase, resolveTrainingTarget, targetForBackend, targetForJobKind,
+  TRAINING_TARGETS, resolvePhase, resolveTrainingTarget, targetForBackend, targetForJobKind,
 } from './trainingTargets';
 
 const ALL_PHASES: TrainingPhase[] = ['dataset', 'preprocess', 'optimise', 'train', 'refine', 'review', 'monitor'];
@@ -25,7 +25,7 @@ const legacyFallback = (backendId: string, phase: TrainingPhase): TrainingPhase 
 
 for (const backend of ['ace', 'minimax-m3', 'yue2']) {
   test(`${backend}, target=active: visible phases, labels and fallbacks match the pre-shell behaviour`, () => {
-    const target = resolveTrainingTarget({ override: 'active', activeBackendId: backend });
+    const target = resolveTrainingTarget({ activeBackendId: backend });
     assert.equal(target, backend);
     const spec = TRAINING_TARGETS[target];
     assert.deepEqual(spec.phases, LEGACY_VISIBLE[backend]);
@@ -51,34 +51,27 @@ test('stage ids and recipe families are stable and match the server contracts', 
 });
 
 // ── The target rule ──
-test('persisted override beats the active backend; active follows it', () => {
-  assert.equal(resolveTrainingTarget({ override: 'sa3', activeBackendId: 'ace' }), 'sa3');
-  assert.equal(resolveTrainingTarget({ override: 'active', activeBackendId: 'sa3' }), 'sa3');
-  assert.equal(resolveTrainingTarget({ override: 'active', activeBackendId: 'yue2' }), 'yue2');
+test('training follows the active generation backend', () => {
+  assert.equal(resolveTrainingTarget({ activeBackendId: 'ace' }), 'ace');
+  assert.equal(resolveTrainingTarget({ activeBackendId: 'sa3' }), 'sa3');
+  assert.equal(resolveTrainingTarget({ activeBackendId: 'yue2' }), 'yue2');
   assert.equal(targetForBackend('some-future-engine'), 'ace');
   assert.equal(targetForBackend(undefined), 'ace');
 });
 
-test('a stored value nobody recognises means active', () => {
-  assert.equal(parseTargetOverride('sa3'), 'sa3');
-  assert.equal(parseTargetOverride('active'), 'active');
-  assert.equal(parseTargetOverride('bogus'), 'active');
-  assert.equal(parseTargetOverride(null), 'active');
-});
-
 test('a running job keeps the target it was submitted with', () => {
-  assert.equal(resolveTrainingTarget({ override: 'active', activeBackendId: 'ace', runningJobKind: 'sa3-train' }), 'sa3');
-  assert.equal(resolveTrainingTarget({ override: 'sa3', activeBackendId: 'ace', runningJobKind: 'train-dit' }), 'ace');
-  assert.equal(resolveTrainingTarget({ override: 'sa3', activeBackendId: 'yue2', runningJobKind: 'yue2-joint-train' }), 'yue2');
-  assert.equal(resolveTrainingTarget({ override: 'active', activeBackendId: 'ace', runningJobKind: 'mm3-train-lm' }), 'minimax-m3');
+  assert.equal(resolveTrainingTarget({ activeBackendId: 'ace', runningJobKind: 'sa3-train' }), 'sa3');
+  assert.equal(resolveTrainingTarget({ activeBackendId: 'ace', runningJobKind: 'train-dit' }), 'ace');
+  assert.equal(resolveTrainingTarget({ activeBackendId: 'yue2', runningJobKind: 'yue2-joint-train' }), 'yue2');
+  assert.equal(resolveTrainingTarget({ activeBackendId: 'ace', runningJobKind: 'mm3-train-lm' }), 'minimax-m3');
   // Kinds that are not target-bound never pin it.
   for (const kind of ['label', 'build', 'audition', 'enhance-caption'] as const) {
     assert.equal(targetForJobKind(kind), null);
-    assert.equal(resolveTrainingTarget({ override: 'sa3', activeBackendId: 'ace', runningJobKind: kind }), 'sa3');
+    assert.equal(resolveTrainingTarget({ activeBackendId: 'ace', runningJobKind: kind }), 'ace');
   }
 });
 
-// ── SA3 override ──
+// ── SA3 backend ──
 test('SA3 has no Preprocess, Optimise or Monitor tab and shows Dataset and Train', () => {
   const sa3 = TRAINING_TARGETS.sa3;
   assert.deepEqual(sa3.phases, ['dataset', 'train']);
@@ -92,9 +85,9 @@ test('switching tabs: every phase SA3 cannot stand on falls back to Train, the r
   }
 });
 
-test('flipping the override from ACE to SA3 moves a user off Preprocess and Monitor', () => {
-  const before = resolveTrainingTarget({ override: 'active', activeBackendId: 'ace' });
-  const after = resolveTrainingTarget({ override: 'sa3', activeBackendId: 'ace' });
+test('switching the backend from ACE to SA3 moves a user off Preprocess and Monitor', () => {
+  const before = resolveTrainingTarget({ activeBackendId: 'ace' });
+  const after = resolveTrainingTarget({ activeBackendId: 'sa3' });
   assert.equal(resolvePhase(before, 'preprocess'), 'preprocess');
   assert.equal(resolvePhase(after, 'preprocess'), 'train');
   assert.equal(resolvePhase(after, 'monitor'), 'train');
@@ -112,6 +105,6 @@ test('HeartMuLa trains under its own target: Prepare, Train, Review, no ACE stag
   assert.equal(targetForJobKind('heartmula-prepare'), 'heartmula');
   assert.equal(targetForJobKind('heartmula-train'), 'heartmula');
   assert.equal(targetForBackend('heartmula'), 'heartmula');
-  assert.equal(resolveTrainingTarget({ override: 'ace', activeBackendId: 'ace', runningJobKind: 'heartmula-train' }), 'heartmula');
+  assert.equal(resolveTrainingTarget({ activeBackendId: 'ace', runningJobKind: 'heartmula-train' }), 'heartmula');
   assert.equal(resolvePhase('heartmula', 'optimise'), 'train');
 });

@@ -107,12 +107,11 @@ filesystem path crosses the wire.
 ### Training Studio shell and plug-ins
 
 Training Studio resolves one **effective target** above the tabs
-(`useTrainingTarget.ts`, rules in `trainingTargets.ts`): the persisted override
-(`hs-trainingTarget`, default `active`) or the active backend. A queued or
+(`useTrainingTarget.ts`, rules in `trainingTargets.ts`) from the active backend.
+The former `hs-trainingTarget` browser override is no longer read. A queued or
 running target-bound job pins the target to its own (`targetForJobKind`). The
 target feeds the phase stepper, dataset chips, Preprocess gate, Train page and
-previews, so changing a view cannot retarget a submitted job. An unknown stored
-value means `active`; an unregistered backend trains as ACE.
+previews, so changing a view cannot retarget a submitted job. An unregistered backend trains as ACE.
 
 Each target is one plug-in (`plugins/{ace,yue2,mm3,sa3}.tsx`, registry
 `trainingPlugins.tsx`). The static half is `TrainingTargetSpec` in

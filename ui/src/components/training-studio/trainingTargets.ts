@@ -9,18 +9,8 @@ import { TRAINING_TARGET_IDS, type TrainingTargetId } from '../../../../server/s
 import type { TrainingJobKind } from '../../services/trainingApi';
 import type { TrainingPhase, TrainingStageSpec, TrainingTargetSpec } from './trainingPluginTypes';
 
-export const TRAINING_TARGET_STORAGE_KEY = 'hs-trainingTarget';
-
-/** The persisted override: 'active' follows the generation backend. */
-export type TrainingTargetOverride = 'active' | TrainingTargetId;
-
 const isTargetId = (v: unknown): v is TrainingTargetId =>
   typeof v === 'string' && (TRAINING_TARGET_IDS as readonly string[]).includes(v);
-
-/** Unknown stored values mean 'active': a stale key never strands the studio. */
-export function parseTargetOverride(raw: unknown): TrainingTargetOverride {
-  return isTargetId(raw) ? raw : 'active';
-}
 
 /** An unregistered backend trains the way the studio always did for it: as ACE. */
 export function targetForBackend(backendId: string | null | undefined): TrainingTargetId {
@@ -42,23 +32,17 @@ export function targetForJobKind(kind: TrainingJobKind | null | undefined): Trai
 }
 
 /**
- * Persisted override, else the active backend. While a target-bound job is
- * queued or running, the job's own target wins: flipping the picker or the
- * backend mid-run must not retarget the views of a job already submitted.
+ * Follow the active backend. A queued or running job keeps its own target
+ * when the generation backend changes.
  */
 export function resolveTrainingTarget(input: {
-  override: TrainingTargetOverride;
   activeBackendId: string | null | undefined;
   runningJobKind?: TrainingJobKind | null;
 }): TrainingTargetId {
   const locked = targetForJobKind(input.runningJobKind);
   if (locked) return locked;
-  return input.override === 'active' ? targetForBackend(input.activeBackendId) : input.override;
+  return targetForBackend(input.activeBackendId);
 }
-
-/** True while a queued/running target-bound job pins the target, whatever the picker says. */
-export const isTargetPinned = (runningJobKind: TrainingJobKind | null | undefined): boolean =>
-  targetForJobKind(runningJobKind) !== null;
 
 // ── Static per-target facts ──────────────────────────────────────────────
 

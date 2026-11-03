@@ -1,6 +1,6 @@
 # MiniMax-Music3 training
 
-This guide covers training a MiniMax-Music3 (MM3) planner adapter in the [Training Studio](../studios/training-studio.md): what it changes, what the dataset needs, which recipe to pick and how to judge the checkpoints. MM3 must be the training target: make MiniMax-Music3 the active generation backend with the engine picker at the top of the sidebar, and leave the **Training target** picker above the phase tabs on **Active generation backend**. For how the trainer works inside, see [training internals](../../dev/training-internals.md).
+This guide covers training a MiniMax-Music3 (MM3) planner adapter in the [Training Studio](../studios/training-studio.md): what it changes, what the dataset needs, which recipe to pick and how to judge the checkpoints. MM3 must be the training target: make MiniMax-Music3 the active generation backend with the engine picker at the top of the sidebar. For how the trainer works inside, see [training internals](../../dev/training-internals.md).
 
 ## What you can train
 

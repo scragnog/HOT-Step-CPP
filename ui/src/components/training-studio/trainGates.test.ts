@@ -4,7 +4,7 @@ import { ACE_LM_FORM_DEFAULTS } from '../../../../server/src/contracts/trainingR
 import type { TrainingJobKind } from '../../services/trainingApi';
 import type { TrainingSection, TrainingTargetId } from './trainingPluginTypes';
 import { aceDitRecipeInput, aceLmRecipeInput, resolveTrainGate, type TrainGate, type TrainGateInput } from './trainGates';
-import { isTargetPinned, resolveTrainingTarget } from './trainingTargets';
+import { resolveTrainingTarget } from './trainingTargets';
 
 // ── "Before": TrainPanel's gate chain as it stood before the plug-in shell,
 // transcribed with the backend-id branches it used.
@@ -34,7 +34,7 @@ test('gate outcome matches the pre-shell chain for ace / yue2 / minimax-m3 acros
       for (const binaryAvailable of bools) for (const built of bools) for (const statusPending of bools)
         for (const noVariant of bools) for (const jobActive of bools) for (const jobKind of kinds) {
           const rest = { hasSelectedDataset, loaded, binaryAvailable, built, statusPending, noVariant, jobActive, jobKind };
-          const target = resolveTrainingTarget({ override: 'active', activeBackendId: backend });
+          const target = resolveTrainingTarget({ activeBackendId: backend });
           assert.equal(resolveTrainGate({ target, section, ...rest }), legacyGate(backend, section, rest), JSON.stringify({ backend, section, rest }));
           n++;
         }
@@ -68,18 +68,12 @@ test('ACE LM form seeds still come from the shared recipe defaults', async () =>
 });
 
 // ── Mismatch regressions: the job's target, not the generation backend ──
-test('MM3 job running, backend switched to ACE: consumers still resolve MM3 and the picker is pinned', () => {
-  const input = { override: 'active' as const, activeBackendId: 'ace', runningJobKind: 'mm3-codes' as TrainingJobKind };
+test('MM3 job running, backend switched to ACE: consumers still resolve MM3 and the target stays pinned', () => {
+  const input = { activeBackendId: 'ace', runningJobKind: 'mm3-codes' as TrainingJobKind };
   assert.equal(resolveTrainingTarget(input), 'minimax-m3'); // PreprocessPanel mm3Mode, stepper, Train gate
-  assert.equal(isTargetPinned(input.runningJobKind), true);
 });
 
-test('YuE2 job running under an SA3 override: DatasetList keeps YuE2; SA3 does not leak', () => {
-  assert.equal(resolveTrainingTarget({ override: 'sa3', activeBackendId: 'yue2', runningJobKind: 'yue2-nar-train' }), 'yue2');
-  assert.equal(resolveTrainingTarget({ override: 'sa3', activeBackendId: 'yue2' }), 'sa3');
-});
-
-test('an ordinary running ACE or SA3 job pins the picker; idle and non-bound jobs do not', () => {
-  for (const k of ['train-lm', 'train-dit', 'preprocess', 'sa3-train', 'yue2-joint-train', 'mm3-train-lm'] as TrainingJobKind[]) assert.equal(isTargetPinned(k), true, k);
-  for (const k of ['label', 'build', 'audition', undefined, null] as Array<TrainingJobKind | undefined | null>) assert.equal(isTargetPinned(k), false, String(k));
+test('YuE2 job running after switching to SA3: DatasetList keeps YuE2; SA3 does not leak', () => {
+  assert.equal(resolveTrainingTarget({ activeBackendId: 'sa3', runningJobKind: 'yue2-nar-train' }), 'yue2');
+  assert.equal(resolveTrainingTarget({ activeBackendId: 'sa3' }), 'sa3');
 });
