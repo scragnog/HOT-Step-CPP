@@ -19,7 +19,7 @@
  * Follows the useSyncExternalStore pattern of playbackStore/postProcessStore.
  */
 
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { toast } from 'react-toastify';
 import type { Song } from '../types';
 import { retranscribeLyrics, whisperModels } from '../services/api';
@@ -62,15 +62,29 @@ function setRunning(songId: string, startedAt: number | null): void {
 }
 
 /**
- * Whether this track has a retranscription running. True across every surface,
- * so the spinner does not disappear when the menu closes.
+ * A track's retranscription: whether one is running, and the two ways to act on
+ * it. `data` is what a surface renders — true across every surface, so the
+ * spinner does not disappear when the menu closes — and `start` and `cancel` are
+ * what it calls. Both types below are inferred from the hook, never retyped, so
+ * a new handler cannot be added without the consumers seeing it.
  */
-export function useIsTranscribing(songId: string): boolean {
-  return useSyncExternalStore(subscribe, getSnapshot)[songId] !== undefined;
+export function useRetranscribe(song: Song) {
+  const running = useSyncExternalStore(subscribe, getSnapshot);
+  const start = useCallback(() => startRetranscribe(song), [song]);
+  const cancel = useCallback(() => cancelRetranscribe(song.id), [song.id]);
+  return {
+    data: { transcribing: running[song.id] !== undefined },
+    start, cancel,
+  };
 }
 
+/** The hook's whole return, so its shape is never written twice. */
+export type Retranscribe = ReturnType<typeof useRetranscribe>;
+/** What a component may call: the handlers, without the state. */
+export type RetranscribeHandlers = Omit<Retranscribe, 'data'>;
+
 /** Stop a running retranscription. A no-op once it has finished. */
-export function cancelRetranscribe(songId: string): void {
+function cancelRetranscribe(songId: string): void {
   _controllers.get(songId)?.abort();
 }
 
@@ -80,7 +94,7 @@ export function cancelRetranscribe(songId: string): void {
  * toast with the counts or the server's reason for failing. A second click
  * while one is running is ignored.
  */
-export async function startRetranscribe(song: Song): Promise<void> {
+async function startRetranscribe(song: Song): Promise<void> {
   if (_running[song.id] !== undefined) return;
 
   const controller = new AbortController();

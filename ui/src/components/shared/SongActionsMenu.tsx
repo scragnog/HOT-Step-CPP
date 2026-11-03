@@ -35,7 +35,7 @@ import {
 import { openCoverArtPrompt } from '../library/CoverArtPromptModal';
 import { scoreAbcOptions, lrcOptions, lyricsJsonOptions } from '../../queries/shell-queue/lyrics';
 import { downloadLyricsLrc } from '../../utils/downloadTrack';
-import { startRetranscribe, useIsTranscribing } from '../../stores/retranscribeStore';
+import { useRetranscribe } from '../../stores/retranscribeStore';
 import { BottomSheet, useIsMobile } from './BottomSheet';
 
 // ── Portal ───────────────────────────────────────────────────────────────────
@@ -323,7 +323,7 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
   const run = usePostProcessRun(song.id);
   // Whisper runs for a while; the store keeps the spinner alive after this menu
   // closes, and the outcome arrives as a toast (retranscribeStore).
-  const transcribing = useIsTranscribing(song.id);
+  const { data: { transcribing }, start: startTranscribe } = useRetranscribe(song);
 
   const pp = canPostProcess(song);
   const ppBusy = !!run && (run.status === 'starting' || run.status === 'pending' || run.status === 'running');
@@ -485,7 +485,7 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
                 label={transcribing
                   ? t('songActions.retranscribing', 'Transcribing lyrics...')
                   : t('songActions.retranscribe', 'Retranscribe Lyrics')}
-                onClick={() => act(() => { void startRetranscribe(song); })}
+                onClick={() => act(() => { void startTranscribe(); })}
                 disabled={transcribing}
                 title={transcribing
                   ? 'Whisper is running on this track. The toast reports when it finishes.'

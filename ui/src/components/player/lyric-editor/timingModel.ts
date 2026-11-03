@@ -59,6 +59,43 @@ export const EDGE_SCROLL_STEP = 12;
 /** The shortest word the editor will produce or store. */
 export const MIN_WORD_SEC = 0.05;
 
+/** The nudge and length step, in milliseconds, and the box's allowed range. */
+export const STEP_MIN = 1;
+export const STEP_MAX = 1000;
+export const STEP_DEFAULT = 20;
+
+/** One zoom notch. The buttons and Ctrl+plus and Ctrl+minus share it. */
+export const ZOOM_FACTOR = 1.25;
+/** Pixels per second when the browser has no remembered zoom. */
+export const DEFAULT_PX = 120;
+
+/** Framing the selected word: this many times its length, and never shorter. */
+export const FRAME_SPAN_FACTOR = 8;
+export const FRAME_MIN_SPAN = 0.3;
+/** The narrowest span a zoom will fill, so it cannot divide by zero. */
+export const MIN_SPAN_SEC = 0.1;
+
+/** Lead-ins for checking a word by ear, and how far past it a loop may run. */
+export const PLAY_LEAD_SEC = 0.25;
+export const LOOP_LEAD_SEC = 0.2;
+export const LOOP_SLACK_SEC = 0.05;
+
+/** How much of the window sits left of the anchor after a zoom or a jump. */
+export const ANCHOR_RATIO = 0.35;
+/** Follow moves the window only when the playhead is this near an edge. */
+export const FOLLOW_LEAD_PX = 20;
+export const FOLLOW_TAIL_PX = 80;
+export const FOLLOW_REVEAL_RATIO = 0.3;
+/** Space left before a paged-to word, so it is not flush against the edge. */
+export const PAGE_PAD_PX = 4;
+
+/** Ruler banding: px/s at which labels tighten, and the spacing each band uses. */
+export const RULER_WIDE_PX = 90;
+export const RULER_DENSE_PX = 240;
+export const RULER_STEP_WIDE = 15;
+export const RULER_STEP_MEDIUM = 5;
+export const RULER_STEP_DENSE = 1;
+
 /** The editor's view choices, remembered per browser. */
 export const FOLLOW_KEY = 'hs-lyricEditorFollow';
 export const ZOOM_KEY = 'hs-lyricEditorZoom';
@@ -80,6 +117,15 @@ export function readNumber(key: string, fallback: number): number {
 
 export const round3 = (n: number) => Math.round(n * 1000) / 1000;
 export const clampPx = (v: number) => Math.max(MIN_PX, Math.min(MAX_PX, Math.round(v)));
+
+/** Milliseconds to seconds, for the step-driven edits. */
+export const msToSec = (ms: number) => ms / 1000;
+
+/** Clamp a typed step into the box's range, falling back to the default. */
+export function clampStep(value: number): number {
+  if (!Number.isFinite(value)) return STEP_DEFAULT;
+  return Math.max(STEP_MIN, Math.min(STEP_MAX, Math.round(value)));
+}
 
 /** `m:ss.d` — a tenth is the resolution that matters when placing a syllable. */
 export function fmt(sec: number): string {
@@ -157,9 +203,10 @@ function wordOrder(lines: EditLine[]): Selection[] {
 }
 
 function replaceWord(lines: EditLine[], li: number, wi: number, fn: (w: EditWord) => EditWord): EditLine[] {
-  return lines.map((line, i) => (
-    i !== li ? line : { ...line, words: line.words.map((w, j) => (j === wi ? fn(w) : w)) }
-  ));
+  return lines.map((line, i) => {
+    if (i !== li) return line;
+    return { ...line, words: line.words.map((w, j) => (j === wi ? fn(w) : w)) };
+  });
 }
 
 export function setWordRange(lines: EditLine[], li: number, wi: number, start: number, end: number): EditLine[] {
@@ -191,9 +238,10 @@ export function pushWordsAfter(lines: EditLine[], li: number, wi: number, delta:
   const moving = new Set(order.slice(from + 1).map(o => `${o.line}:${o.word}`));
   return lines.map((line, l) => withBounds({
     ...line,
-    words: line.words.map((w, w2) => (moving.has(`${l}:${w2}`)
-      ? { ...w, start: round3(w.start + delta), end: round3(w.end + delta) }
-      : w)),
+    words: line.words.map((w, w2) => {
+      if (!moving.has(`${l}:${w2}`)) return w;
+      return { ...w, start: round3(w.start + delta), end: round3(w.end + delta) };
+    }),
   }));
 }
 
@@ -273,9 +321,14 @@ export function shiftFrom(lines: EditLine[], li: number, wi: number, delta: numb
   const moving = new Set(order.slice(from).map(o => `${o.line}:${o.word}`));
   return lines.map((line, l) => withBounds({
     ...line,
-    words: line.words.map((w, w2) => (moving.has(`${l}:${w2}`)
-      ? { ...w, start: round3(Math.max(0, w.start + delta)), end: round3(Math.max(MIN_WORD_SEC, w.end + delta)) }
-      : w)),
+    words: line.words.map((w, w2) => {
+      if (!moving.has(`${l}:${w2}`)) return w;
+      return {
+        ...w,
+        start: round3(Math.max(0, w.start + delta)),
+        end: round3(Math.max(MIN_WORD_SEC, w.end + delta)),
+      };
+    }),
   }));
 }
 
@@ -319,6 +372,24 @@ export function pageTargetTime(lines: EditLine[], dir: -1 | 1, view: PageView): 
   let target = 0;
   for (const w of words) if (w.start <= left + 0.001) target = w.start;
   return target;
+}
+
+/** Label spacing at this zoom: dense when a syllable is wide, wide when not. */
+function rulerStep(pxPerSec: number): number {
+  if (pxPerSec >= RULER_DENSE_PX) return RULER_STEP_DENSE;
+  if (pxPerSec >= RULER_WIDE_PX) return RULER_STEP_MEDIUM;
+  return RULER_STEP_WIDE;
+}
+
+/**
+ * Ruler labels for the current zoom: every 15 s while a phrase is a few pixels
+ * wide, tightening to every second once a syllable is wide enough to read.
+ */
+export function rulerTicks(total: number, pxPerSec: number): number[] {
+  const step = rulerStep(pxPerSec);
+  const out: number[] = [];
+  for (let time = 0; time <= total; time += step) out.push(time);
+  return out;
 }
 
 /** Cut a line in two at `cut`, which becomes the first word of the new line. */

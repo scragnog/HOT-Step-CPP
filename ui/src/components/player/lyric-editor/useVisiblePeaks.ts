@@ -3,6 +3,10 @@
 // A canvas as wide as a four-minute track at 120 px/s would be 28,800 px of ink
 // per device pixel, so the peaks are sampled for the visible window each time
 // the window moves. Reads the same bucket arrays the player's waveform uses.
+//
+// This one returns nothing, unlike the editor's other hooks: it paints and has
+// no state of its own, so there is no `data` and no handlers to hand out. The
+// refs and the values to paint arrive as options.
 
 import { useEffect, type RefObject } from 'react';
 

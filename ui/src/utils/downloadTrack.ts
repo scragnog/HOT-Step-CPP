@@ -209,6 +209,24 @@ export async function downloadLyricsLrc(
 }
 
 /**
+ * The same `.lrc` export for a surface that only knows the audio URL, such as
+ * the lyric editor. The server resolves the song row from `audioUrl`, so the
+ * filename, title and saved artist still come out right.
+ */
+export async function downloadLyricsLrcForAudio(audioUrl: string, songId?: string): Promise<void> {
+  const settings = readSettings();
+  const version: TrackVersion = settings.downloadVersion === 'original' ? 'original' : 'mastered';
+  const prepend = readFilenamePrepend();
+  const params = new URLSearchParams({
+    version,
+    ...(settings.downloadEnhancedLrc ? { enhanced: '1' } : {}),
+    ...(audioUrl ? { audioUrl } : {}),
+    ...(prepend ? { prepend } : {}),
+  });
+  await triggerDownload(`/api/download/${songId || '_'}/lrc?${params}`);
+}
+
+/**
  * Bulk-download multiple tracks. The server resolves which versions exist and
  * which files to fetch; the browser only triggers the returned URLs, 800ms
  * apart so it doesn't throttle/block them.

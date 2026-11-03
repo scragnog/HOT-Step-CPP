@@ -1,8 +1,14 @@
 // useEditHistory.ts — the editor's undo stack, kept apart from the rendering
 // and from the saving. A change calls `record()` once, mutates through
 // `setLines`, and undo/redo step whole snapshots. One drag is one record call,
-// which is why the modal calls it on the first pointer move rather than every
+// which is why the editor calls it on the first pointer move rather than every
 // move: the granularity of history is a UI decision, so it stays in the UI.
+//
+// The return is `{ data, ...handlers }`: `data` is what the screen reads,
+// everything else is something it may call. A component takes the handler slice
+// it needs and cannot touch the rest, so `const { data, ...history } =
+// useEditHistory(...)` is the whole contract. The types below are inferred from
+// this function, never declared by hand, so the two cannot drift.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { MAX_HISTORY, type EditLine } from './timingModel';
@@ -69,9 +75,17 @@ export function useEditHistory(initial: EditLine[]) {
   }, []);
 
   return {
-    lines, setLines, linesRef,
-    record, undo, redo, reset,
-    canUndo: past.length > 0,
-    canRedo: future.length > 0,
+    data: {
+      lines,
+      linesRef,
+      canUndo: past.length > 0,
+      canRedo: future.length > 0,
+    },
+    setLines, record, undo, redo, reset,
   };
 }
+
+/** The hook's whole return, so its shape is never written twice. */
+export type EditHistory = ReturnType<typeof useEditHistory>;
+/** What a component may call: the handlers, without the state. */
+export type EditHistoryHandlers = Omit<EditHistory, 'data'>;

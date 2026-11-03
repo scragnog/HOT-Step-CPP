@@ -138,7 +138,8 @@ opens over the app:
   placement can be judged by ear. **Play from word** starts a moment before it. The same row shows
   how long the word lasts and has **Len -** and **Len +** buttons: a selected word carries a white
   handle at each end, and dragging one changes where that edge sits, so the word can be made longer
-  or shorter as well as moved.
+  or shorter as well as moved. **Export lyrics**, at the right end of the transport row, downloads
+  the `.lrc` for the timings on screen, saving pending changes first.
   **Snap to prev** starts it exactly where the word before it ends (across a line break too),
   which is how a word with a gap before it gets pulled onto the syllable.
 - **Auto shift**, on by default in the transport row, decides what happens when a word is made

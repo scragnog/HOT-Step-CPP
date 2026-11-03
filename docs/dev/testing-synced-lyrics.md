@@ -245,6 +245,11 @@ its `text` the words joined back together, and the `.lrc` must carry those times
 and artist headers intact. The strip and the waveform ticks move to the new times without a
 reload.
 
+Export: click **Export lyrics** at the right of the transport row. A `.lrc` arrives named like the
+audio download, with any pending change written first; with Enhanced LRC on in Settings it carries
+`<mm:ss.xx>` word stamps. With the file changed on disk underneath, the click must refuse and say
+to reload instead of exporting the old timeline.
+
 Autosave: change something and wait about a second — the badge goes **Saving…** then **Saved**
 with no toast, and the file on disk already has the change. With **Auto save** on, no Save button is
 shown. Switch it off in the footer: the green **Save** appears, a change no longer reaches the file

@@ -2,8 +2,12 @@
 //
 // The rules live here rather than in the modal: a write carries the revision it
 // read, a mismatch is stale and nothing is written, a failure is not retried on
-// a timer, and a successful write re-arms autosave. The modal only renders the
+// a timer, and a successful write re-arms autosave. The editor only renders the
 // resulting badge and offers Save or Reload.
+//
+// The return is `{ data, ...handlers }`, the shape every editor hook shares:
+// `data` is the state the badge and the buttons read, the rest is what they may
+// call. The exported types are inferred from the function, never retyped.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -78,7 +82,6 @@ export function useLyricSaver({ audioUrl, lines, getLines, autoSave, enabled, re
     if (serialized === baselineRef.current) return;
     savingRef.current = true;
     setSaving(true);
-    let ok = false;
     try {
       const result = await saveLyricTimings(audioUrl, snapshot, revisionRef.current);
       await refreshSidecars(audioUrl);
@@ -88,7 +91,10 @@ export function useLyricSaver({ audioUrl, lines, getLines, autoSave, enabled, re
       setSavedLines(snapshot);
       setSaveError(false);
       if (!opts.silent) toast.success(t('lyrics.editor.saved', 'Timings saved'));
-      ok = true;
+      // Autosave is re-armed here, on the success path, rather than after the
+      // try with a flag. A failure therefore leaves it disarmed and waits for
+      // the user's Save instead of retrying every 1.2 s with a toast each time.
+      setTick(n => n + 1);
     } catch (err: any) {
       if (err?.status === 409) {
         setStale(true);
@@ -101,9 +107,6 @@ export function useLyricSaver({ audioUrl, lines, getLines, autoSave, enabled, re
       savingRef.current = false;
       setSaving(false);
     }
-    // Only a successful write re-arms autosave. A failure used to retry every
-    // 1.2 s and toast each time; now it waits for the user's Save.
-    if (ok) setTick(n => n + 1);
   }, [audioUrl, getLines, t]);
 
   const saveRef = useRef(save);
@@ -127,5 +130,13 @@ export function useLyricSaver({ audioUrl, lines, getLines, autoSave, enabled, re
     return { lines: next, revision: rev };
   }, [audioUrl, adopt, t]);
 
-  return { dirty, saving, saveError, stale, savedLines, save, adopt, reload };
+  return {
+    data: { dirty, saving, saveError, stale, savedLines },
+    save, adopt, reload,
+  };
 }
+
+/** The hook's whole return, so its shape is never written twice. */
+export type LyricSaver = ReturnType<typeof useLyricSaver>;
+/** What a component may call: the handlers, without the state. */
+export type LyricSaverHandlers = Omit<LyricSaver, 'data'>;
