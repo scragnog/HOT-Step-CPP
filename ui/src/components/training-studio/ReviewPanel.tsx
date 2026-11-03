@@ -10,6 +10,7 @@ import { resourceKey } from '../../queries/keys';
 import { runQueries, trainingWritePlan } from '../../queries/training-runs/queries';
 import { formatBytes } from '../../services/stemStudioApi';
 import {
+  deleteYue2AitkRun,
   syncWorkerMirror,
   type Yue2ReviewRow
 } from '../../services/trainingApi';
@@ -57,6 +58,26 @@ export const ReviewPanel: React.FC = () => {
   const [commandError, setError] = useState('');
   const loading = reviewQuery.isFetching;
   const load = () => reviewQuery.refetch();
+  const removeMut = useMutation({
+    mutationFn: async (target: { datasetId: string; jobId: string }) => {
+      await client.cancelQueries({ queryKey: runQueries.review().queryKey });
+      await deleteYue2AitkRun(target.datasetId, target.jobId);
+      return target;
+    },
+    onSuccess: async target => {
+      await client.cancelQueries({ queryKey: runQueries.review().queryKey });
+      client.setQueryData(runQueries.review().queryKey, previous => previous && ({
+        ...previous, rows: previous.rows.filter(r => r.datasetId !== target.datasetId || r.refineRun !== target.jobId),
+      }));
+      await trainingWritePlan(client, null);
+    },
+    onError: err => setError(err instanceof Error ? err.message : String(err)),
+  });
+  const remove = (r: Yue2ReviewRow) => {
+    if (!window.confirm(t('trainingStudio.review.deleteRunConfirm', 'Delete this run? The run folder, including its checkpoints, previews and MP3 cache, will be removed. Archived logs and any checkpoint saved outside the run folder stay.'))) return;
+    setError('');
+    removeMut.mutate({ datasetId: r.datasetId, jobId: r.refineRun });
+  };
   const mirrorQuery = useQuery({ ...runQueries.mirror(trainingWorker ?? ''), enabled: !!trainingWorker });
   const mirror = mirrorQuery.data ?? null;
   const syncMut = useMutation({
@@ -120,16 +141,24 @@ export const ReviewPanel: React.FC = () => {
   // KL ladders still open on the (hidden) Refine tab.
   const open = (r: Yue2ReviewRow) => { setRefineLadderRun(r.refineRun); void openDataset(r.datasetId).then(() => setPhase(r.baseMatched ? 'train' : 'refine')); };
   const Row: React.FC<{ r: Yue2ReviewRow }> = ({ r }) => (
-    <TrainingReviewRunRow onOpen={() => open(r)}>
-      <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 max-[1023px]:min-w-0 min-[1024px]:min-w-[180px]">{r.datasetName}</span>
-      {r.origin && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300" title={t('trainingStudio.review.originInfo', 'Trained on this worker and mirrored here; previews and scoring run here.') as string}>{r.origin}</span>}
-      <span className="text-[11px] text-zinc-500">{new Date(r.createdAt).toLocaleString()}</span>
-      <span className="text-[11px] text-zinc-600 dark:text-zinc-300 tabular-nums">{t('trainingStudio.review.rungs', '{{n}} rungs', { n: r.rungs })}{!(r.baseMatched && blindRungs) && r.klMin !== null && r.klMax !== null ? ` · KL ${r.klMin.toFixed(2)}–${r.klMax.toFixed(2)}` : ''} · {t('trainingStudio.review.previews', '{{n}} previews', { n: r.previews })}</span>
-      <span className="flex-1" />
-      {r.live ? <span className="text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.review.stillRunning', 'still refining')}</span>
-        : r.unscored > 0 && !r.reviewed ? <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[11px] font-semibold">{t('trainingStudio.review.toScore', '{{n}} to score', { n: r.unscored })}</span>
-        : <span className="text-[11px] text-emerald-600 dark:text-emerald-400">{r.reviewed && r.unscored > 0 ? t('trainingStudio.review.reviewed', 'reviewed') : t('trainingStudio.review.scored', 'scored')}</span>}
-    </TrainingReviewRunRow>
+    <div className="flex items-center gap-2">
+      <div className="flex-1 min-w-0">
+        <TrainingReviewRunRow onOpen={() => open(r)}>
+          <span className="font-semibold text-sm text-zinc-800 dark:text-zinc-100 max-[1023px]:min-w-0 min-[1024px]:min-w-[180px]">{r.datasetName}</span>
+          {r.origin && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-700 dark:text-violet-300" title={t('trainingStudio.review.originInfo', 'Trained on this worker and mirrored here; previews and scoring run here.') as string}>{r.origin}</span>}
+          <span className="text-[11px] text-zinc-500">{new Date(r.createdAt).toLocaleString()}</span>
+          <span className="text-[11px] text-zinc-600 dark:text-zinc-300 tabular-nums">{t('trainingStudio.review.rungs', '{{n}} rungs', { n: r.rungs })}{!(r.baseMatched && blindRungs) && r.klMin !== null && r.klMax !== null ? ` · KL ${r.klMin.toFixed(2)}–${r.klMax.toFixed(2)}` : ''} · {t('trainingStudio.review.previews', '{{n}} previews', { n: r.previews })}</span>
+          <span className="flex-1" />
+          {r.live ? <span className="text-[11px] text-amber-600 dark:text-amber-400">{t('trainingStudio.review.stillRunning', 'still refining')}</span>
+            : r.unscored > 0 && !r.reviewed ? <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[11px] font-semibold">{t('trainingStudio.review.toScore', '{{n}} to score', { n: r.unscored })}</span>
+            : <span className="text-[11px] text-emerald-600 dark:text-emerald-400">{r.reviewed && r.unscored > 0 ? t('trainingStudio.review.reviewed', 'reviewed') : t('trainingStudio.review.scored', 'scored')}</span>}
+        </TrainingReviewRunRow>
+      </div>
+      <button type="button" onClick={() => remove(r)} disabled={removeMut.isPending}
+        className="shrink-0 px-2 py-1.5 rounded-lg border border-red-500/30 text-xs text-red-600 dark:text-red-400 hover:bg-red-500/10 disabled:opacity-40">
+        {t('trainingStudio.review.deleteRun', 'Delete run')}
+      </button>
+    </div>
   );
   return (
     <div className="flex flex-col gap-4">

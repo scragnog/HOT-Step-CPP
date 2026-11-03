@@ -177,7 +177,7 @@ export function listYue2JointPreviews(output: string): Yue2JointPreviewRecord[] 
 const execFileAsync = promisify(execFile);
 const mp3Encodes = new Map<string, Promise<string | null>>();
 /** A preview as a 192 kbps MP3 beside its WAV, for the ladder player. A 300 s
- *  float WAV is ~47 MB and holds one of Chrome's six connections per host for
+ *  16-bit PCM stereo 48 kHz WAV is ~58 MB and holds one of Chrome's six connections per host for
  *  as long as it streams, which queued every other request on the page. Encoded
  *  on first request and kept; null without ffmpeg or on failure, so the caller
  *  serves the WAV. Scoring, cleanup and downloads keep using the WAV. */

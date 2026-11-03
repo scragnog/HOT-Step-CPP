@@ -81,6 +81,20 @@ test('a finished job without a chart cache replays once and the next visit uses 
   } finally { await view.cleanup(); }
 });
 
+test('leaving a partial terminal-job replay keeps its cache incomplete', async () => {
+  const view = await mountChart('done');
+  try {
+    await view.render('first');
+    await act(async () => {
+      view.Stream.made[0].send({ type: 'metric', metric: 'step', step: 3, loss: 0.5, ts: 10 });
+    });
+    await view.render('revisit');
+    const cached = JSON.parse(view.stored.get('hs-yue2-aitk-job:chart-set:metrics:chart-job')!);
+    assert.equal(cached.status, 'running');
+    assert.equal(view.Stream.made.length, 2, 'partial replay must resume on the next visit');
+  } finally { await view.cleanup(); }
+});
+
 test('terminal and legacy complete chart caches skip replay; a partial cache still replays', async () => {
   for (const status of [undefined, 'done', 'running']) {
     const view = await mountChart('done', { status, steps: [{ step: 3, ep: 3, loss: 0.5 }] });

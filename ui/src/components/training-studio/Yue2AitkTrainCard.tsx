@@ -707,7 +707,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
     if (complete) return;
     let steps = saved.steps ?? [];
     let points = savedMilestones;
-    let status = job.status;
+    let status: TrainingJobSummary['status'] = 'running';
     let dirty = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const persist = () => {

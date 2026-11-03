@@ -87,7 +87,8 @@ YuE2 Joint Training keeps its loss graph and step count visible with **Blind run
 | Mirror status (Review, with Train on set to a worker) | One line under the Review heading: whether the worker is online, the time of the last sync, and how many files (and how much data) are still to copy. A failed sync shows its error. **Sync now** runs a sync straight away and reloads the list. Syncs also run on their own, every 15 seconds while the worker is training and every 2 minutes otherwise. |
 | Dataset chips | Every dataset card shows Labeled and Built, then pills that follow the target. ACE-Step: Tensors, DiT, LM. MiniMax-Music3: Codes, LM adapter. YuE2: Latents, Codes, Cursor spans, NAR and AR adapters. Stable Audio 3: Audio, Encoded, Snapshots, Adapter. A pill is on only when the file exists on disk. |
 | Phase tabs | Switches between the stages above. Which tabs show depends on the target. ACE-Step: Dataset, Preprocess, Train, Monitor. MiniMax-Music3: the same, with Preprocess named Codes. YuE2: Dataset, Prepare, Optimise, Train, Review. Stable Audio 3: Dataset and Train. The earlier Refine phase is hidden since 2026-09-27; Review still opens its ladders. With a dataset open, **All datasets** at the left of the tabs goes straight back to the grid. |
-| YuE2 ladder previews | The player streams a 192 kbps MP3 copy of each take, made the first time it is played (a few seconds) and kept beside the WAV. The **download** link still saves the WAV as `<dataset>_step<N>_take<M>_seed<S>.wav`, with `rung<letter>` in place of `step<N>` while Blind rungs is on. |
+| YuE2 ladder previews | The player streams a 192 kbps MP3 copy of each take, made the first time it is played (a few seconds) and kept beside the WAV. If ffmpeg is unavailable or conversion fails, it streams the WAV instead. The **download** link still saves the WAV as `<dataset>_step<N>_take<M>_seed<S>.wav`, with `rung<letter>` in place of `step<N>` while Blind rungs is on. |
+| Delete run (YuE2 Review) | Removes a joint run after confirmation. Deletes the run folder, including its checkpoints, previews and MP3 cache. Archived logs and any checkpoint saved outside the run folder stay. Live runs are refused by the server, and the error appears on Review. Legacy standalone NAR/AR runs have no delete control. |
 | Label step: scope, sources, merge policy | Restricts labeling to unlabeled/all/selected tracks, picks which of Essentia/Genius/caption to run, and how new data merges with what a track already has. |
 | Review grid | Per-track editable table with bulk actions (exclude, mark instrumental, set genre/tag, scoped re-label). Opens a full-detail drawer per track. |
 | Build: trigger position, genre ratio, Build | Where the trigger word sits in the built caption, and the mix ratio between genre-style and literal captions, then writes `dataset.json`. |
@@ -129,6 +130,9 @@ target. Switching workers does not cancel the job on the previous worker.
 Run indexes, mirrored previews and review records remain local to this PC.
 Active job status refreshes while work runs and stops at a terminal state;
 returning to Train, Review or Refine does not repeat a start or audition command.
+The YuE2 Train tab keeps a finished run's chart and stops replaying its history
+once the complete chart is saved. An interrupted first replay resumes on the
+next visit. Finished and approved runs leave Review's "Scored or finished" list.
 
 ## Related
 
