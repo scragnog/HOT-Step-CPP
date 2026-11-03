@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import { aceClient } from '../services/aceClient.js';
 import { APP_VERSION, BUILD_INFO, config } from '../config.js';
 import { engineReady, engineBootStatus, engineNoModels, engineDevice, backendFamily } from '../engineState.js';
-import { startupCommit, dirtyCheckout } from '../services/training/workerUpdate.js';
+import { startupCommit, cachedDirtyCheckout } from '../services/training/workerUpdate.js';
 import type { HealthResponse } from '../contracts/health.js';
 
 const router = Router();
@@ -50,7 +50,7 @@ router.get('/', async (_req, res) => {
     status: 'ok',
     version: APP_VERSION,
     commit: startupCommit,
-    dirty: dirtyCheckout(),
+    dirty: cachedDirtyCheckout(),
     build: {
       tag: BUILD_INFO?.tag ?? null,
       sha: BUILD_INFO?.sha ?? (startupCommit || null),

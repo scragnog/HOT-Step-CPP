@@ -13,7 +13,7 @@ import { pipeline } from 'node:stream/promises';
 import * as repo from '../services/training/datasetsRepo.js';
 import { APP_VERSION, config } from '../config.js';
 import { aceClient } from '../services/aceClient.js';
-import { activeTraining, dirtyCheckout, getUpdate, cancelUpdate, receiveUpdate, startUpdate, startupCommit } from '../services/training/workerUpdate.js';
+import { activeTraining, cachedDirtyCheckout, getUpdate, cancelUpdate, receiveUpdate, startUpdate, startupCommit } from '../services/training/workerUpdate.js';
 import {
   deleteWorkerMirrorRun, getDispatch, getWorker, listWorkers, proxyToWorker, pullLinked, receiveDatasetFile, startDispatch,
   upsertPushedDataset, workerAdapterFile, workerDatasetFiles, workerLinkedPairs, workerMirrorFile, workerMirrorManifest, workerStatus,
@@ -43,7 +43,7 @@ workerRouter.get('/status', async (_req: Request, res: Response) => {
   const job = activeTraining();
   let engineBuiltAt: string | null = null;
   try { engineBuiltAt = fs.statSync(config.aceServer.exe).mtime.toISOString(); } catch { /* binary absent */ }
-  res.json({ commit: startupCommit, dirty: dirtyCheckout(), version: APP_VERSION, aceServer: { status: engineStatus, version: engineVersion }, engineBuiltAt, gpu, job, idle: job === null });
+  res.json({ commit: startupCommit, dirty: cachedDirtyCheckout(), version: APP_VERSION, aceServer: { status: engineStatus, version: engineVersion }, engineBuiltAt, gpu, job, idle: job === null });
 });
 
 workerRouter.post('/update', async (req: Request, res: Response) => {

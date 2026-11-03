@@ -21,6 +21,12 @@ const git = (args: string[], cwd = PROJECT_ROOT) =>
   execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15000, windowsHide: true }).trim();
 export const startupCommit = (() => { try { return git(['rev-parse', 'HEAD']); } catch { return ''; } })();
 export const currentCommit = () => git(['rev-parse', 'HEAD']);
+const dirtyArgs = ['status', '--porcelain', '--untracked-files=normal', '--ignore-submodules=none'];
+/** Updater blockers require a fresh synchronous check before allowing updates. */
+export function dirtyCheckout(): boolean {
+  try { return !!git(dirtyArgs); } catch { return false; }
+}
+
 /** Check at startup, then on demand 30 seconds after completion. Readers never wait. */
 export function createDirtyCheckout(read: () => Promise<boolean>, now = Date.now): () => boolean {
   let cached = false;
@@ -28,7 +34,7 @@ export function createDirtyCheckout(read: () => Promise<boolean>, now = Date.now
   let refreshing = false;
   const refresh = async () => {
     refreshing = true;
-    try { cached = await read(); } catch { cached = false; }
+    try { cached = await read(); } catch { /* Keep the last known display value. */ }
     finally { refreshAt = now() + 30_000; refreshing = false; }
   };
   void refresh();
@@ -39,8 +45,9 @@ export function createDirtyCheckout(read: () => Promise<boolean>, now = Date.now
 }
 
 const execFileAsync = promisify(execFile);
-export const dirtyCheckout = createDirtyCheckout(async () => {
-  const { stdout } = await execFileAsync('git', ['status', '--porcelain', '--untracked-files=normal', '--ignore-submodules=none'], {
+// Health and Workers display tolerate stale state without blocking requests.
+export const cachedDirtyCheckout = createDirtyCheckout(async () => {
+  const { stdout } = await execFileAsync('git', dirtyArgs, {
     cwd: PROJECT_ROOT, encoding: 'utf8', timeout: 15000, windowsHide: true,
   });
   return !!stdout.trim();
