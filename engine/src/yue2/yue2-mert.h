@@ -214,6 +214,14 @@ struct Yue2MertConfig {
     float    rope_freq_base = 0.0f;  // 10000
     uint32_t rope_dim       = 0;     // 64 (== key_length)
     bool     rope_inv_freq_in_file = true;  // MUST be false: persistent=False, we build it
+
+    // Encoder variants. Defaults are MERT-v2-FullSong's; WannabeTokenizer's
+    // causal MERT2 (convert-yue2-wannabe.py) sets the other side of each.
+    bool     causal        = false;  // yue2tok.mert.attention.causal: is_causal=True SDPA
+    uint32_t chunk_seconds = 30;     // yue2tok.chunk_seconds; 0 = the whole track in one forward
+    bool     interpolate   = true;   // yue2tok.interpolate.mode != "none": resample to T25
+    bool     instance_norm = true;   // yue2tok.instance_norm.enabled (absent = on)
+    bool     fp16_store    = false;  // yue2tok.feature_store_f16.apply: round features to f16, always
 };
 
 // ── Weights ─────────────────────────────────────────────────────────────────
@@ -362,6 +370,16 @@ static void yue2_mert_parse_config(const GGUFModel & gf, Yue2MertConfig * c) {
     c->rope_freq_base        = gf_get_f32(gf, "yue2tok.mert.rope.freq_base");
     c->rope_dim              = gf_get_u32(gf, "yue2tok.mert.rope.dimension_count");
     c->rope_inv_freq_in_file = gf_get_bool(gf, "yue2tok.mert.rope.inv_freq_in_file");
+
+    c->causal = gf_get_bool(gf, "yue2tok.mert.attention.causal");
+    if (gguf_find_key(gf.gguf, "yue2tok.chunk_seconds") >= 0) {
+        c->chunk_seconds = gf_get_u32(gf, "yue2tok.chunk_seconds");
+    }
+    c->interpolate = std::string(gf_get_str(gf, "yue2tok.interpolate.mode")) != "none";
+    if (gguf_find_key(gf.gguf, "yue2tok.instance_norm.enabled") >= 0) {
+        c->instance_norm = gf_get_bool(gf, "yue2tok.instance_norm.enabled");
+    }
+    c->fp16_store = gf_get_bool(gf, "yue2tok.feature_store_f16.apply");
 }
 
 // Structural sanity, not taste. Every check below corresponds to something the
@@ -999,7 +1017,7 @@ struct Yue2MertChunk {
 // tail. RoPE also restarts at 0 in each chunk, which is what makes splitting
 // legitimate at all.
 static std::vector<Yue2MertChunk> yue2_mert_chunk_plan(const Yue2MertConfig & c, int64_t n_samples) {
-    const int64_t CH  = (int64_t) c.sample_rate * 30;
+    const int64_t CH  = c.chunk_seconds ? (int64_t) c.sample_rate * c.chunk_seconds : std::max<int64_t>(n_samples, 1);
     const int64_t MIN = (int64_t) c.sample_rate;  // a tail under 1 s is DROPPED
     std::vector<Yue2MertChunk> out;
     for (int64_t s = 0; s < n_samples; s += CH) {
@@ -1438,7 +1456,7 @@ static ggml_tensor * mert_ffn(ggml_context * ctx, ggml_tensor * x, ggml_tensor *
 // SelfAttention. Four SEPARATE projections with bias (pin §3.5) — MERT does
 // not fuse qkv, unlike the head. RoPE on q and k only, never v. Then SDPA with
 // is_causal=False and no mask of any kind: every frame sees every other frame,
-// scale 1/sqrt(head_dim).
+// scale 1/sqrt(head_dim). (A causal file, c.causal, masks future frames.)
 //
 // `h` is the pre-normed input, ne [D, T]. Returns the out_proj result, ne
 // [D, T]; the caller adds the residual.
@@ -1484,10 +1502,31 @@ static ggml_tensor * mert_attn(ggml_context * ctx, const Yue2MertConfig & c, con
     k = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3));
     ggml_tensor * v3 = ggml_cont(ctx, ggml_permute(ctx, ggml_reshape_3d(ctx, v, HD, NH, T), 1, 2, 0, 3));
 
-    ggml_tensor * kq = ggml_mul_mat(ctx, k, q);  // [t_k, t_q, head]
-    kq = ggml_soft_max_ext(ctx, kq, /*mask*/ nullptr, 1.0f / std::sqrt((float) HD), /*max_bias*/ 0.0f);
-
-    ggml_tensor * kqv = ggml_mul_mat(ctx, v3, kq);           // [hd, t, head]
+    const float   scale = 1.0f / std::sqrt((float) HD);
+    ggml_tensor * kqv   = nullptr;  // [hd, t, head]
+    if (!c.causal) {
+        ggml_tensor * kq = ggml_mul_mat(ctx, k, q);  // [t_k, t_q, head]
+        kq               = ggml_soft_max_ext(ctx, kq, /*mask*/ nullptr, scale, /*max_bias*/ 0.0f);
+        kqv              = ggml_mul_mat(ctx, v3, kq);
+    } else {
+        // is_causal=True over a whole track (WannabeTokenizer runs one forward,
+        // no 30 s chunks). Queries go in blocks so the score tensor is
+        // [t_k <= T, 1024, head] rather than [T, T, head]: 6000 frames (4 min)
+        // would otherwise be 2.3 GB per block. Block b sees keys 0..q0+nq-1 and
+        // diag_mask_inf(n_past = q0) hides the ones after each query.
+        // ponytail: O(T * 1024) scores per block; masked flash attention if long tracks ever run out of VRAM.
+        const int64_t QB = 1024;
+        for (int64_t q0 = 0; q0 < T; q0 += QB) {
+            const int64_t nq = std::min<int64_t>(QB, T - q0), nk = q0 + nq;
+            ggml_tensor * qb = ggml_cont(ctx, ggml_view_3d(ctx, q, HD, nq, NH, q->nb[1], q->nb[2], (size_t) q0 * q->nb[1]));
+            ggml_tensor * kb = ggml_cont(ctx, ggml_view_3d(ctx, k, HD, nk, NH, k->nb[1], k->nb[2], 0));
+            ggml_tensor * vb = ggml_cont(ctx, ggml_view_3d(ctx, v3, nk, HD, NH, v3->nb[1], v3->nb[2], 0));
+            ggml_tensor * kq = ggml_diag_mask_inf(ctx, ggml_mul_mat(ctx, kb, qb), (int) q0);  // [nk, nq, head]
+            kq               = ggml_soft_max_ext(ctx, kq, /*mask*/ nullptr, scale, /*max_bias*/ 0.0f);
+            ggml_tensor * ob = ggml_mul_mat(ctx, vb, kq);  // [hd, nq, head]
+            kqv              = kqv ? ggml_concat(ctx, kqv, ob, 1) : ob;
+        }
+    }
     kqv               = ggml_permute(ctx, kqv, 0, 2, 1, 3);  // [hd, head, t]
     ggml_tensor * att = ggml_cont_2d(ctx, kqv, D, T);        // [D, T]
     return ggml_add(ctx, ggml_mul_mat(ctx, w.attn_o_w, att), w.attn_o_b);
@@ -2036,7 +2075,7 @@ static bool yue2_mert_encode(const Yue2MertModel & m, Yue2MertEncGraph * g, cons
     // T25 comes from the FULL input length, including any sub-second tail the
     // chunk planner dropped — prep_real.py computes it from len(m24), not from
     // the frames it actually encoded.
-    const int64_t T25 = round_half_even((double) n_samples / (double) c.sample_rate * (double) c.frame_rate);
+    int64_t T25 = round_half_even((double) n_samples / (double) c.sample_rate * (double) c.frame_rate);
     if (T25 <= 0) {
         if (err) {
             *err = "T25 computed as " + std::to_string(T25);
@@ -2045,10 +2084,18 @@ static bool yue2_mert_encode(const Yue2MertModel & m, Yue2MertEncGraph * g, cons
     }
     out->T25 = T25;
 
+    // A file with interpolation off (WannabeTokenizer) feeds the head the raw
+    // subsampled frames; T25 then means "the head's frame count".
     std::vector<float> feat25;
-    interp_linear_time(hidden.data(), T_raw, C, T25, &feat25);
+    if (c.interpolate) {
+        interp_linear_time(hidden.data(), T_raw, C, T25, &feat25);
+    } else {
+        feat25   = hidden;
+        T25      = T_raw;
+        out->T25 = T_raw;
+    }
 
-    if (opt.fp16_feature_store) {
+    if (opt.fp16_feature_store || c.fp16_store) {
         for (float & v : feat25) {
             v = ggml_fp16_to_fp32(ggml_fp32_to_fp16(v));
         }
@@ -2068,7 +2115,7 @@ static bool yue2_mert_encode(const Yue2MertModel & m, Yue2MertEncGraph * g, cons
         }
     }
     for (int64_t k = 0; k < C; k++) {
-        mean[(size_t) k] /= (double) T25;
+        mean[(size_t) k] = c.instance_norm ? mean[(size_t) k] / (double) T25 : 0.0;  // off: an exact identity
     }
     for (int64_t t = 0; t < T25; t++) {
         const float * row = feat25.data() + t * C;
@@ -2080,7 +2127,7 @@ static bool yue2_mert_encode(const Yue2MertModel & m, Yue2MertEncGraph * g, cons
     std::vector<double> inv((size_t) C);
     for (int64_t k = 0; k < C; k++) {
         const double sd = std::sqrt(var[(size_t) k] / (double) T25);  // population std, ddof=0
-        inv[(size_t) k] = 1.0 / (sd + 1e-5);
+        inv[(size_t) k] = c.instance_norm ? 1.0 / (sd + 1e-5) : 1.0;
     }
     for (int64_t t = 0; t < T25; t++) {
         const float * row = feat25.data() + t * C;

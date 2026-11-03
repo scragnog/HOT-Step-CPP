@@ -779,7 +779,15 @@ def build_mert(src_dir, b):
         die(f"no config.json in {src_dir}")
     with open(cfg_path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
+    st_path = os.path.join(src_dir, "model.safetensors")
+    if not os.path.isfile(st_path):
+        die(f"no model.safetensors in {src_dir}")
+    build_mert_tensors(cfg, Source(st_path), b)
 
+
+# The mapping itself, split out so convert-yue2-wannabe.py can feed it a MERT2
+# encoder that lives inside another checkpoint (behind an "encoder." prefix).
+def build_mert_tensors(cfg, src, b):
     expect_config(cfg, "model_type", "mert2")
     expect_config(cfg, "sampling_rate", MERT_SR)
     expect_config(cfg, "n_fft", MERT_N_FFT)
@@ -799,11 +807,6 @@ def build_mert(src_dir, b):
     expect_config(cfg, "rotary_embedding_base", int(MERT_ROPE_BASE))
     expect_config(cfg, "subsampling_channels", list(MERT_SUB_CHANNELS))
     expect_config(cfg, "subsampling_depths", list(MERT_SUB_DEPTHS))
-
-    st_path = os.path.join(src_dir, "model.safetensors")
-    if not os.path.isfile(st_path):
-        die(f"no model.safetensors in {src_dir}")
-    src = Source(st_path)
 
     # ---- frontend buffers. All four are FORCED F32 (header policy note). ----
     # The filterbank keeps its checkpoint layout [n_freq=1025, n_mel=128]: the
