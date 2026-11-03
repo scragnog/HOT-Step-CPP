@@ -1,3 +1,3 @@
 {
-  "exclude": [".scratch/"]
+  "exclude": [".scratch/", ".tmp/", ".probe-logs/"]
 }

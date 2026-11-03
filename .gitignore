@@ -226,6 +226,8 @@ tools/vocal-end/out/
 # Local agent runtime (Multica) and scratch
 .multica/
 .scratch/
+.tmp/
+.probe-logs/
 .playwright-mcp/
 .claude/skills/multica-platform/
 server/tsconfig.tsbuildinfo
