@@ -281,9 +281,10 @@ test('two workers: identical engine job ids, logs, selection restore, crash and 
     };
     const recovered = async (n: number) => {
       const until = Date.now() + 5000;
-      while (!(kids.length === n && w1.ready) && Date.now() < until) await new Promise(r => setTimeout(r, 50));
+      while (!(kids.length === n && w1.ready && restores.length === n) && Date.now() < until) await new Promise(r => setTimeout(r, 50));
       assert.equal(kids.length, n, 'respawned once');
       assert.equal(w1.ready, true, 'ready again after /health');
+      assert.equal(restores.length, n, 'selection restored after recovery');
     };
     const seqBefore = w1.crashSeq;
     await crash();
