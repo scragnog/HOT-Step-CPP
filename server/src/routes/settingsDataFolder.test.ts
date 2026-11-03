@@ -102,7 +102,7 @@ test('Settings previews, refuses busy work, persists before restart and separate
   }
 });
 
-test('release restart writes the profile marker before scheduling graceful shutdown', () => {
+test('release restart writes the profile marker before scheduling graceful shutdown', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotstep-restart-'));
   const appRoot = path.join(dir, 'app');
   const root = path.join(dir, 'data');
@@ -134,6 +134,8 @@ test('release restart writes the profile marker before scheduling graceful shutd
       stdio: 'pipe',
     });
   } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
+    // The fresh files can still be held briefly (indexer or AV) under the full
+    // suite. Async rm: on Node 24 Windows, rmSync ignores maxRetries for EPERM.
+    await fs.promises.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

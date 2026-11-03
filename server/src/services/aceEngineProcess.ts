@@ -520,15 +520,16 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
     crashCount = 0;
     setNoModels(false);
     setReady(false, 'Restarting engine...');
+    const epoch = lifecycleEpoch;
 
     if (aceProcess && aceProcess.exitCode === null && aceProcess.signalCode === null) {
       // A stop that timed out left the old engine alive; a second spawn would
       // just fail to bind its port and burn the crash budget.
       console.warn(`${srv} restartAceServer: an engine child is still live — not spawning a second one`);
-      const ok = await isReachable();
-      setReady(ok, ok ? 'Ready' : 'Engine did not come back — restart the app');
-      if (ok) await restore();
-      return ok;
+      const live = aceProcess;
+      if (await isReachable()) return restoreThenReady(live, epoch);
+      setReady(false, 'Engine did not come back — restart the app');
+      return false;
     }
 
     const child = start();
@@ -540,10 +541,8 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
     const deadline = Date.now() + testHooks.restartHealthTimeoutMs;
     while (Date.now() < deadline) {
       if (await isReachable()) {
-        setReady(true, 'Ready');
         console.log(`${srv} ace-server is back up`);
-        await restore();
-        return true;
+        return restoreThenReady(child, epoch);
       }
       await new Promise(r => setTimeout(r, 1000));
     }
@@ -557,7 +556,21 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
     return false;
   }
 
-  /** Keep polling a live child until /health answers; then flip ready and restore. */
+  /**
+   * Replay the persisted selections, then report ready. Ready goes last so no job
+   * dispatches to an engine still on its defaults: a render holding the engine
+   * mutex makes the restore hooks skip as stale, and YuE2 has no later reconcile.
+   * A stop, restart or crash during the replay wins; its verdict stands.
+   */
+  async function restoreThenReady(child: ChildProcess, epoch: number): Promise<boolean> {
+    await restore();
+    if (aceProcess !== child || epoch !== lifecycleEpoch || suspended
+        || child.exitCode !== null || child.signalCode !== null) return false;
+    setReady(true, 'Ready');
+    return true;
+  }
+
+  /** Keep polling a live child until /health answers; then restore and flip ready. */
   async function lateReadyWatch(child: ChildProcess, epoch: number, when = 'after the restart timeout'): Promise<void> {
     while (aceProcess === child && epoch === lifecycleEpoch && !suspended
            && child.exitCode === null && child.signalCode === null) {
@@ -569,9 +582,8 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
       if (aceProcess !== child || epoch !== lifecycleEpoch || suspended
           || child.exitCode !== null || child.signalCode !== null) return;
       if (up) {
-        setReady(true, 'Ready');
         console.log(`${srv} ace-server answered /health ${when} — marking ready`);
-        await restore();
+        await restoreThenReady(child, epoch);
         return;
       }
     }
