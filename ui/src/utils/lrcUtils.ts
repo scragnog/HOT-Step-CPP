@@ -73,6 +73,22 @@ export function parseLrc(raw: string): LrcLine[] {
     .map(entry => ({ time: entry.time, text: entry.text }));
 }
 
+/** `[Verse 1 - whispered]` -> `Verse 1`: brackets off, style hint dropped. */
+function cleanSectionLabel(text: string): string {
+  const inner = text.slice(1, -1);
+  const dashIdx = inner.indexOf(' - ');
+  const base = dashIdx === -1 ? inner : inner.slice(0, dashIdx);
+  return base.charAt(0).toUpperCase() + base.slice(1);
+}
+
+/** Time of the first lyric line in `[from, to)`, or null when there is none. */
+function firstLyricTimeBetween(entries: RawLrcEntry[], from: number, to: number): number | null {
+  for (let i = from; i < to; i++) {
+    if (!entries[i].isSection && entries[i].text.length > 0) return entries[i].time;
+  }
+  return null;
+}
+
 /**
  * Parse raw LRC into section markers with corrected start times.
  * Section markers are lines like `[00:45.10] [Chorus]`.
@@ -92,30 +108,18 @@ export function parseSectionMarkers(raw: string): SectionMarker[] {
   for (let si = 0; si < sectionIndices.length; si++) {
     const idx = sectionIndices[si];
     const entry = allEntries[idx];
-    // Clean the label: strip brackets, remove style hints after " - "
-    let label = entry.text.slice(1, -1);
-    const dashIdx = label.indexOf(' - ');
-    if (dashIdx !== -1) label = label.slice(0, dashIdx);
-    label = label.charAt(0).toUpperCase() + label.slice(1);
-
-    // Find the first actual lyric line between this section and the next section
     const nextSectionIdx = si + 1 < sectionIndices.length
       ? sectionIndices[si + 1]
       : allEntries.length;
-    let firstLyricTime: number | null = null;
-    for (let j = idx + 1; j < nextSectionIdx; j++) {
-      if (!allEntries[j].isSection && allEntries[j].text.length > 0) {
-        firstLyricTime = allEntries[j].time;
-        break;
-      }
-    }
+    const firstLyricTime = firstLyricTimeBetween(allEntries, idx + 1, nextSectionIdx);
 
-    // Use first lyric timestamp if it's significantly later (>1s gap = instrumental lead-in)
-    const realTime = (firstLyricTime !== null && firstLyricTime - entry.time > 1)
+    // A marker well before its first line is an instrumental lead-in: start the
+    // section where the singing does (>1 s gap).
+    const realTime = firstLyricTime !== null && firstLyricTime - entry.time > 1
       ? firstLyricTime
       : entry.time;
 
-    markers.push({ time: realTime, label });
+    markers.push({ time: realTime, label: cleanSectionLabel(entry.text) });
   }
 
   // Step 3: Insert synthetic Intro if the first marker is well after 0:00

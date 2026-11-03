@@ -659,6 +659,17 @@ router.post('/:id/crop', (req, res) => {
 // word shifts by the same amount, and the `.lrc` is rebuilt from the word
 // timings so the export keeps agreeing with the player. This is the manual half
 // of alignment: Whisper's own error is usually one constant shift.
+
+/** The song row's generation params, or an empty object when it has none. */
+function generationParams(song: any): any {
+  try { return JSON.parse(song?.generation_params || '{}') || {}; } catch { return {}; }
+}
+
+/** A JSON sidecar as an object, or null when it is missing or unreadable. */
+function readJsonOrNull(file: string): any | null {
+  try { return JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { return null; }
+}
+
 router.post('/lyrics/offset', async (req, res) => {
   const userId = getUserId(req);
   if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
@@ -674,8 +685,7 @@ router.post('/lyrics/offset', async (req, res) => {
   try {
     const { shiftLyrics } = await import('../services/lyricsOffset.js');
     const song = getDb().prepare('SELECT * FROM songs WHERE audio_url = ?').get(audioUrl) as any;
-    let gp: any = {};
-    try { gp = JSON.parse(song?.generation_params || '{}') || {}; } catch { /* no params */ }
+    const gp = generationParams(song);
     const result = shiftLyrics(config.data.audioDir, audioUrl, deltaMs / 1000, {
       title: song?.title,
       artist: typeof gp.artist === 'string' ? gp.artist : '',
@@ -714,8 +724,7 @@ router.post('/lyrics/split', async (req, res) => {
   try {
     const { splitLyricLine } = await import('../services/lyricsSplit.js');
     const song = getDb().prepare('SELECT * FROM songs WHERE audio_url = ?').get(audioUrl) as any;
-    let gp: any = {};
-    try { gp = JSON.parse(song?.generation_params || '{}') || {}; } catch { /* no params */ }
+    const gp = generationParams(song);
     const result = splitLyricLine(config.data.audioDir, audioUrl, atSec, {
       title: song?.title,
       artist: typeof gp.artist === 'string' ? gp.artist : '',
@@ -756,8 +765,7 @@ router.post('/lyrics/timings', async (req, res) => {
   try {
     const { saveLyricTimings } = await import('../services/lyricTimings.js');
     const song = getDb().prepare('SELECT * FROM songs WHERE audio_url = ?').get(audioUrl) as any;
-    let gp: any = {};
-    try { gp = JSON.parse(song?.generation_params || '{}') || {}; } catch { /* no params */ }
+    const gp = generationParams(song);
     const expectedRevision = typeof req.body?.expectedRevision === 'number' ? req.body.expectedRevision : undefined;
     const result = saveLyricTimings(config.data.audioDir, audioUrl, req.body?.lines, {
       title: song?.title,
@@ -854,17 +862,14 @@ router.post('/:id/retranscribe', async (req, res) => {
     // Hand-placed timings are authoritative: a retranscription would replace
     // them with Whisper's guess, so it takes an explicit `force` to overwrite.
     const sidecarPath = path.join(config.data.audioDir, audioFilename.replace(/\.[^.]+$/, '.lyrics.json'));
-    let previousRevision = 0;
-    try {
-      const existing = JSON.parse(fs.readFileSync(sidecarPath, 'utf-8'));
-      previousRevision = Number(existing?.revision) || 0;
-      if (existing?.editedByHand === true && req.body?.force !== true) {
-        return res.status(409).json({
-          error: "This track's lyric timings were edited by hand. Click Retranscribe again to overwrite them.",
-          code: 'manual-timings',
-        });
-      }
-    } catch { /* no sidecar yet */ }
+    const existing = readJsonOrNull(sidecarPath);
+    if (existing?.editedByHand === true && req.body?.force !== true) {
+      return res.status(409).json({
+        error: "This track's lyric timings were edited by hand. Click Retranscribe again to overwrite them.",
+        code: 'manual-timings',
+      });
+    }
+    const previousRevision = Number(existing?.revision) || 0;
 
     const whisperModel = req.body?.model || '';
     const modelPath = findWhisperModel(whisperModel);

@@ -40,9 +40,14 @@ export type WhisperCliCheck =
 type CandidateState = 'ok' | 'missing' | 'not-a-file' | 'not-executable';
 
 /** Why a candidate cannot be run. A 0644 copy and a missing file look identical otherwise. */
+/** `statSync` that answers null instead of throwing, so the caller can branch. */
+function statOrNull(file: string): fs.Stats | null {
+  try { return fs.statSync(file); } catch { return null; }
+}
+
 function candidateState(file: string): CandidateState {
-  let stat: fs.Stats;
-  try { stat = fs.statSync(file); } catch { return 'missing'; }
+  const stat = statOrNull(file);
+  if (!stat) return 'missing';
   if (!stat.isFile()) return 'not-a-file';
   if (process.platform !== 'win32') {
     try { fs.accessSync(file, fs.constants.X_OK); } catch { return 'not-executable'; }

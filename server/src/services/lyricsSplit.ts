@@ -49,29 +49,42 @@ interface TimedLine {
   words?: TimedWord[];
 }
 
+/** The two halves of a line, whichever way the cut was found. */
+interface LineHalves {
+  leftText: string;
+  rightText: string;
+  leftWords?: TimedWord[];
+  rightWords?: TimedWord[];
+}
+
 const NO_SIDECAR: SplitResult = { ok: false, reason: 'no-sidecar' };
 const NO_LINE: SplitResult = { ok: false, reason: 'no-line' };
 const TOO_SHORT: SplitResult = { ok: false, reason: 'too-short' };
 
 /** A boundary closer than this to the line's own start is not a split. */
 const MIN_OFFSET_SEC = 0.02;
+/** Assumed line length when neither an end nor the next start is known. */
+const FALLBACK_SPAN_SEC = 4;
 
 const wordText = (w: TimedWord) => (w?.word || '').trim();
 
+/** Index of the last row whose time has started, or -1. Scans back, returns. */
+function findLastStarted<T>(rows: T[], startOf: (row: T) => number, atSec: number): number {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (startOf(rows[i]) <= atSec) return i;
+  }
+  return -1;
+}
+
 /** Index of the line the time falls in: the last one that has started. */
 function findLineIndex(lines: TimedLine[], atSec: number): number {
-  let idx = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if ((Number(lines[i]?.start) || 0) <= atSec) idx = i;
-    else break;
-  }
-  return idx;
+  return findLastStarted(lines, line => Number(line?.start) || 0, atSec);
 }
 
 /**
  * Divide a line's words in two at `atSec`: everything whose start is before the
- * playhead stays, the rest moves to the new line. Returns null when one side
- * would be empty, which is a sign the playhead is not inside the line's lyrics.
+ * playhead stays, the rest moves to the new line. Null when one side would be
+ * empty, which is a sign the playhead is not inside the line's lyrics.
  */
 function splitWords(words: TimedWord[], atSec: number): { left: TimedWord[]; right: TimedWord[] } | null {
   const cut = words.findIndex(w => (Number(w.start) || 0) >= atSec);
@@ -87,6 +100,37 @@ function splitWordsByRatio(parts: string[], ratio: number): { left: string[]; ri
   return { left: parts.slice(0, at), right: parts.slice(at) };
 }
 
+/**
+ * With real word times, only a word boundary is a split. Falling back to a
+ * proportional cut here would put the new line after its own syllable started,
+ * which is the drift this feature exists to remove.
+ */
+function halvesByWords(words: TimedWord[], atSec: number): LineHalves | null {
+  const halves = splitWords(words, atSec);
+  if (!halves) return null;
+  return {
+    leftWords: halves.left,
+    rightWords: halves.right,
+    leftText: halves.left.map(wordText).filter(Boolean).join(' '),
+    rightText: halves.right.map(wordText).filter(Boolean).join(' '),
+  };
+}
+
+/** No usable word times: divide the text by how far into the line we are. */
+function halvesByRatio(line: TimedLine, next: TimedLine | undefined, atSec: number): LineHalves | null {
+  const start = Number(line?.start) || 0;
+  const end = Number(line.end);
+  const nextStart = Number(next?.start);
+  const span = Number.isFinite(end) && end > start
+    ? end - start
+    : (Number.isFinite(nextStart) && nextStart > start ? nextStart - start : FALLBACK_SPAN_SEC);
+
+  const parts = (line.text || '').trim().split(/\s+/).filter(Boolean);
+  const byRatio = splitWordsByRatio(parts, Math.max(0, Math.min(1, (atSec - start) / span)));
+  if (!byRatio) return null;
+  return { leftText: byRatio.left.join(' '), rightText: byRatio.right.join(' ') };
+}
+
 function splitJson(data: any, atSec: number): SplitResult {
   if (!Array.isArray(data?.lines)) return NO_LINE;
   const lines: TimedLine[] = data.lines;
@@ -98,53 +142,34 @@ function splitJson(data: any, atSec: number): SplitResult {
   if (atSec - start < MIN_OFFSET_SEC) return TOO_SHORT;
 
   const words = (line.words || []).filter(w => wordText(w) || Number.isFinite(w?.start));
-  let leftText: string;
-  let rightText: string;
-  let leftWords: TimedWord[] | undefined;
-  let rightWords: TimedWord[] | undefined;
-
-  // With real word times, only a word boundary is a split. Falling back to a
-  // proportional cut here would put the new line after its own syllable started,
-  // which is the drift this feature exists to remove.
-  const hasWords = words.length >= 2;
-  const byWord = hasWords ? splitWords(words, atSec) : null;
-  if (hasWords) {
-    if (!byWord) return TOO_SHORT;
-    leftWords = byWord.left;
-    rightWords = byWord.right;
-    leftText = byWord.left.map(wordText).filter(Boolean).join(' ');
-    rightText = byWord.right.map(wordText).filter(Boolean).join(' ');
-  } else {
-    // No usable word times: divide the text by how far into the line we are.
-    const parts = (line.text || '').trim().split(/\s+/).filter(Boolean);
-    const nextStart = Number(lines[idx + 1]?.start);
-    const end = Number(line.end);
-    const span = Number.isFinite(end) && end > start
-      ? end - start
-      : (Number.isFinite(nextStart) && nextStart > start ? nextStart - start : 4);
-    const byRatio = splitWordsByRatio(parts, Math.max(0, Math.min(1, (atSec - start) / span)));
-    if (!byRatio) return TOO_SHORT;
-    leftText = byRatio.left.join(' ');
-    rightText = byRatio.right.join(' ');
-  }
-
-  if (!leftText || !rightText) return TOO_SHORT;
+  const halves = words.length >= 2
+    ? halvesByWords(words, atSec)
+    : halvesByRatio(line, lines[idx + 1], atSec);
+  if (!halves) return TOO_SHORT;
+  if (!halves.leftText || !halves.rightText) return TOO_SHORT;
 
   const left: TimedLine = {
     ...line,
     end: atSec,
-    text: leftText,
-    ...(leftWords ? { words: leftWords } : {}),
+    text: halves.leftText,
+    ...(halves.leftWords ? { words: halves.leftWords } : {}),
   };
   const right: TimedLine = {
     ...line,
     start: atSec,
-    text: rightText,
-    ...(rightWords ? { words: rightWords } : {}),
+    text: halves.rightText,
+    ...(halves.rightWords ? { words: halves.rightWords } : {}),
   };
   // The second half belongs to the same section; buildLrc drops the repeat.
   data.lines.splice(idx, 1, left, right);
-  return { ok: true, source: 'lyrics.json', atSec, left: leftText, right: rightText, lines: data.lines.length };
+  return {
+    ok: true,
+    source: 'lyrics.json',
+    atSec,
+    left: halves.leftText,
+    right: halves.rightText,
+    lines: data.lines.length,
+  };
 }
 
 /**
@@ -160,11 +185,7 @@ function splitLrcFile(lrcPath: string, atSec: number): SplitResult {
     .filter(r => r.p && r.p.text && !/^\[.*\]$/.test(r.p.text))
     .map(r => ({ index: r.i, times: r.p!.times, text: r.p!.text }));
 
-  let pick = -1;
-  for (let k = 0; k < lyricRows.length; k++) {
-    if (lyricRows[k].times[0] <= atSec) pick = k;
-    else break;
-  }
+  const pick = findLastStarted(lyricRows, row => row.times[0], atSec);
   if (pick < 0) return NO_LINE;
 
   const row = lyricRows[pick];
@@ -172,7 +193,7 @@ function splitLrcFile(lrcPath: string, atSec: number): SplitResult {
   if (atSec - rowTime < MIN_OFFSET_SEC) return TOO_SHORT;
 
   const next = lyricRows[pick + 1]?.times[0];
-  const span = next !== undefined && next > rowTime ? next - rowTime : 4;
+  const span = next !== undefined && next > rowTime ? next - rowTime : FALLBACK_SPAN_SEC;
   const parts = row.text.split(/\s+/).filter(Boolean);
   const byRatio = splitWordsByRatio(parts, Math.max(0, Math.min(1, (atSec - rowTime) / span)));
   if (!byRatio) return TOO_SHORT;

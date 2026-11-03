@@ -79,6 +79,25 @@ export function stripWordStamps(text: string): string {
   return text.replace(WORD_STAMP, '');
 }
 
+/**
+ * Shift the leading `[mm:ss.xx]` stamps of one line, leaving metadata lines and
+ * anything without a stamp untouched. Enhanced `<...>` stamps in the text move
+ * with it, because they are the same moment written twice.
+ */
+export function shiftLineStamps(line: string, deltaSec: number): string {
+  LINE_STAMP.lastIndex = 0;
+  const stamps: string[] = [];
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = LINE_STAMP.exec(line)) !== null) {
+    if (match.index !== cursor) break; // stamps must be one contiguous prefix
+    stamps.push(formatLrcTimestamp(stampSeconds(match[1], match[2], match[3]) + deltaSec));
+    cursor = match.index + match[0].length;
+  }
+  if (stamps.length === 0) return line;
+  return stamps.join('') + shiftWordStamps(line.slice(cursor), deltaSec);
+}
+
 /** Shift the `<mm:ss.xx>` stamps inside a line, leaving everything else alone. */
 export function shiftWordStamps(text: string, deltaSec: number): string {
   return text.replace(WORD_STAMP, (_all, mins: string, secs: string, frac?: string) => {

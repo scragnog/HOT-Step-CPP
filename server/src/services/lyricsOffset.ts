@@ -13,7 +13,7 @@
  */
 
 import fs from 'fs';
-import { buildLrc, formatLrcTimestamp, shiftWordStamps, sidecarPath } from './lrcExport.js';
+import { buildLrc, shiftLineStamps, sidecarPath } from './lrcExport.js';
 import { bumpRevision } from './lyricsRevision.js';
 
 export interface LyricsShiftResult {
@@ -48,32 +48,17 @@ function shiftJson(data: any, deltaSec: number): number {
   return data.lines.length;
 }
 
-const LINE_STAMP = /\[(\d+):(\d+)(?:\.(\d+))?\]/g;
-
 /**
  * Shift every timestamp in raw LRC text, in place.
  *
- * Written out longhand rather than through `splitLrcLine`, which strips the
- * enhanced `<mm:ss.xx>` stamps: those have to move with the line, not vanish.
- * Metadata lines (`[ti:]`, `[ar:]`) and anything else without a leading stamp
- * pass through untouched.
+ * Per line rather than through `splitLrcLine`, which strips the enhanced
+ * `<mm:ss.xx>` stamps: those have to move with the line, not vanish. Metadata
+ * lines (`[ti:]`, `[ar:]`) and anything else without a leading stamp pass
+ * through untouched, and the stamp scanner is `lrcExport`'s, so the parsing
+ * lives in one place.
  */
 function shiftLrcText(text: string, deltaSec: number): string {
-  const shifted = text.replace(/\r/g, '').split('\n').map(line => {
-    let out = '';
-    let cursor = 0;
-    LINE_STAMP.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = LINE_STAMP.exec(line)) !== null) {
-      if (match.index !== cursor) break; // stamps must be one contiguous prefix
-      const secs = parseInt(match[1], 10) * 60 + parseInt(match[2], 10)
-        + (match[3] ? parseInt(match[3].padEnd(2, '0').slice(0, 2), 10) / 100 : 0);
-      out += formatLrcTimestamp(shiftTime(secs, deltaSec));
-      cursor = match.index + match[0].length;
-    }
-    if (!out) return line;
-    return out + shiftWordStamps(line.slice(cursor), deltaSec);
-  });
+  const shifted = text.replace(/\r/g, '').split('\n').map(line => shiftLineStamps(line, deltaSec));
   return `${shifted.join('\n')}\n`;
 }
 
