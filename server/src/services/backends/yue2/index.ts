@@ -26,7 +26,7 @@ import { isEngineSuspended } from '../../aceEngineProcess.js';
 import { getSetting, setSetting } from '../../../db/lireekDb.js';
 import { listAllYue2Runs, readSafetensorsMeta, type Yue2AdapterMeta } from '../../training/yue2Runs.js';
 import { listAllYue2ArRuns } from '../../training/yue2ArRuns.js';
-import { listAllYue2AitkRuns, onYue2AitkSnapshotChange, type Yue2AitkRunRecord } from '../../training/yue2AitkRuns.js';
+import { listAllYue2AitkRuns, onYue2AitkSnapshotChange, yue2AitkWeightStamp, type Yue2AitkRunRecord } from '../../training/yue2AitkRuns.js';
 import { listDatasets } from '../../training/datasetsRepo.js';
 import { yue2AdapterTrigger, setYue2ManualTrigger } from './jointAdapterContext.js';
 import { coverScoreChoices, transformCoverScore, type CoverScoreChoices } from './coverScoreTransform.js';
@@ -1244,7 +1244,7 @@ function jointPickerFiles(jointRuns: Yue2AitkRunRecord[]): JointPickerFile[] {
         run.options.refinePlanner === true || run.options.unfreezePlanner === true ? 'refine' : ''].filter(Boolean).join(' · ');
       const add = (kind: Yue2LmAdapterKind, ref: string): void => {
         const abs = path.resolve(ref);
-        const key = JSON.stringify([kind, runName, final, ckpt, run.jobId, run.datasetSlug, run.datasetId, tags.get(run.datasetId), run.options]);
+        const key = JSON.stringify([kind, runName, final, ckpt, yue2AitkWeightStamp(abs), run.jobId, run.datasetSlug, run.datasetId, tags.get(run.datasetId), run.options]);
         files.push({ abs, key, build: () => {
           const fileMeta = readSafetensorsMeta(abs);
           const { trigger, inferred, manual } = yue2AdapterTrigger(abs, jointRuns);

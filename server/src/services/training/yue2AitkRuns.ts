@@ -289,8 +289,10 @@ async function jointLossesAsync(log: string): Promise<Map<number, number>> {
 }
 
 /** checkpointRecords with fs/promises, for the catalogue refresh. null when
- *  the run folder itself cannot be read. */
-async function checkpointRecordsAsync(output: string): Promise<Yue2AitkCheckpointRecord[] | null> {
+ *  the run folder itself cannot be read. Each weight file's size and mtime go
+ *  into `stamps`, since a file rewritten in place leaves its folder's mtime
+ *  and the checkpoint row unchanged. */
+async function checkpointRecordsAsync(output: string, stamps: Map<string, string>): Promise<Yue2AitkCheckpointRecord[] | null> {
   const ls = (dir: string) => fs.promises.readdir(dir, { withFileTypes: true });
   let entries: fs.Dirent[];
   try { entries = await ls(output); } catch { return null; }
@@ -321,9 +323,13 @@ async function checkpointRecordsAsync(output: string): Promise<Yue2AitkCheckpoin
       };
       let meters: Record<string, unknown> = {};
       try { meters = JSON.parse(await fs.promises.readFile(path.join(dir, 'meters.json'), 'utf8')) as Record<string, unknown>; } catch { /* older checkpoints have none */ }
+      const arPath = weight('ar'), narPath = weight('nar');
+      for (const ref of [arPath, narPath]) {
+        if (!ref) continue;
+        try { const st = await fs.promises.stat(ref); stamps.set(path.resolve(ref), `${st.size}:${st.mtimeMs}`); } catch { /* removed mid-scan */ }
+      }
       rows.push(checkpointRow(dir, Number(match[1]), losses, meters, {
-        adapterPath: file('adapter.safetensors'), optimizerPath: file('optimizer.resume'),
-        arPath: weight('ar'), narPath: weight('nar'),
+        adapterPath: file('adapter.safetensors'), optimizerPath: file('optimizer.resume'), arPath, narPath,
       }));
     }
   }
@@ -342,6 +348,13 @@ let snapshotWrites = 0;
 let snapshotScannedAt = 0;
 let snapshotRefresh: Promise<void> | null = null;
 const SNAPSHOT_TTL_MS = 60_000;
+/** Weight file size:mtime from the last committed refresh, by absolute path. */
+let weightStamps = new Map<string, string>();
+
+/** A weight file's size and mtime as of the last refresh, '' before one has
+ *  seen it. The model picker keys its per-file entries on this, so a weight
+ *  rewritten in place is re-read after the next refresh. */
+export function yue2AitkWeightStamp(file: string): string { return weightStamps.get(path.resolve(file)) ?? ''; }
 
 const newestFirst = (runs: Yue2AitkRunRecord[]) => runs.sort((a, b) => b.updatedAt - a.updatedAt);
 const snapshotListeners = new Set<() => void>();
@@ -379,8 +392,10 @@ export function refreshYue2AitkSnapshot(): Promise<void> {
     const index = readIndex();
     const writes = snapshotWrites;
     const runs: Yue2AitkRunRecord[] = [];
-    for (const r of index) runs.push({ ...r, checkpoints: await checkpointRecordsAsync(r.output) ?? [] });
+    const stamps = new Map<string, string>();
+    for (const r of index) runs.push({ ...r, checkpoints: await checkpointRecordsAsync(r.output, stamps) ?? [] });
     if (writes !== snapshotWrites) return;
+    weightStamps = stamps;
     setSnapshot(runs);
     snapshotScannedAt = Date.now();
   })().catch(err => console.warn(`[YuE2] Joint catalogue refresh failed: ${String(err)}`))

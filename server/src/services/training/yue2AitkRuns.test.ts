@@ -331,7 +331,7 @@ test('the all-runs snapshot coalesces refreshes and never restores a run deleted
   try {
     const script = [
       "import fs from 'node:fs'; import path from 'node:path'; import assert from 'node:assert/strict';",
-      "import { recordYue2AitkRun, listAllYue2AitkRuns, deleteYue2AitkRun, refreshYue2AitkSnapshot, jointRunForAdapter } from './src/services/training/yue2AitkRuns.js';",
+      "import { recordYue2AitkRun, listAllYue2AitkRuns, deleteYue2AitkRun, refreshYue2AitkSnapshot, jointRunForAdapter, yue2AitkWeightStamp } from './src/services/training/yue2AitkRuns.js';",
       "const root = path.join(process.env.ACESTEPCPP_ADAPTERS, 'yue2-joint-adapters');",
       "function checkpoint(output, step) { const dir = path.join(output, 'checkpoint-step' + step); fs.mkdirSync(dir, { recursive: true }); for (const half of ['ar', 'nar']) fs.writeFileSync(path.join(dir, 'native-' + half + '.safetensors'), 'x'); return dir; }",
       "function run(jobId, updatedAt) { const output = path.join(root, jobId); checkpoint(output, 10); recordYue2AitkRun({ version: 1, jobId, datasetId: 'ds', datasetSlug: '', method: 'aitk', output, options: {}, status: 'done', createdAt: 1, updatedAt, checkpoints: [] }); return output; }",
@@ -348,6 +348,12 @@ test('the all-runs snapshot coalesces refreshes and never restores a run deleted
       "checkpoint(keep, 20);",
       "assert.deepEqual(steps(), ['keep:10'], 'reads are served from memory');",
       "await refreshYue2AitkSnapshot(); assert.deepEqual(steps(), ['keep:20,10'], 'a refresh picks up a checkpoint written outside the app');",
+      // Files rewritten in place, with the checkpoint folder's mtime put back: only file-level checks can see it.
+      "const ckpt = path.join(keep, 'checkpoint-step20'); const ar = path.join(ckpt, 'native-ar.safetensors'); const dirTimes = fs.statSync(ckpt);",
+      "const kl = () => listAllYue2AitkRuns()[0].checkpoints.find(c => c.step === 20).kl; const stamp = yue2AitkWeightStamp(ar); assert.notEqual(stamp, '');",
+      "fs.writeFileSync(path.join(ckpt, 'meters.json'), JSON.stringify({ kl_reading: 0.9 })); fs.writeFileSync(ar, 'a longer weight'); fs.utimesSync(ckpt, dirTimes.atime, dirTimes.mtime);",
+      "await refreshYue2AitkSnapshot(); assert.equal(kl(), 0.9, 'a meters.json rewritten in place is read by the next refresh');",
+      "assert.notEqual(yue2AitkWeightStamp(ar), stamp, 'a weight rewritten in place changes its stamp, so the picker re-reads its header');",
     ].join('\n');
     execFileSync(process.execPath, ['--import', 'tsx/esm', '--input-type=module', '--eval', script], {
       cwd: fileURLToPath(new URL('../../../', import.meta.url)),
