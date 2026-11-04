@@ -93,6 +93,7 @@ tools/codegraph/node_modules/
 !tools/sa3-training-step-fixture.py
 !tools/sa3-training-check.mjs
 !tools/sa3-synth-model-check.mts
+!tools/lead-sheet-reference/
 !tools/yue2-aitk-reference/
 !tools/yue2-aitk-reference/**
 !tools/yue2-vae-train/
