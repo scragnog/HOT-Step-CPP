@@ -315,3 +315,12 @@ test('a YuE2 render with a Prepare document renders its exported lyrics, and ref
   assert.equal(s.jobs.get(quiet.id).status, 'succeeded');
   assert.equal(s.items.size, 2);
 });
+
+test('the Melody to Ins choice in engineParams reaches the YuE2 render request', () => {
+  const asset = { assetId: 'asset', sha256: 'sha', approvedAbc: 'X:1\nK:C\nC|' };
+  const resting = { ...input, expectedBackend: 'yue2' as const, instrumental: true,
+    engineParams: { ...input.engineParams, yue2InstrumentalMode: 'resting' } };
+  assert.equal(effectiveCoverRequest(resting, asset, '/references/source.wav').yue2InstrumentalMode, 'resting');
+  const plain = { ...input, expectedBackend: 'yue2' as const, instrumental: true };
+  assert.equal(effectiveCoverRequest(plain, asset, '/references/source.wav').yue2InstrumentalMode, undefined);
+});

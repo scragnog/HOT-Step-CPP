@@ -1236,7 +1236,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
   const submitCoverWorkflow = () => {
     if (!token || !coverDraftId || !coverDraftRevision) return;
-    const engineParams = gp.getGlobalParams() as Record<string, unknown>;
+    // The workflow's yue2* engine params reach the render; the instrumental melody mode rides with them.
+    const engineParams = { ...gp.getGlobalParams() as Record<string, unknown>,
+      ...(renderInstrumental ? { yue2InstrumentalMode: instrumentalMode } : {}) };
     const backend = useBackendStore.getState().activeBackendId;
     const input = {
       documentId: coverDraftId, revision: coverDraftRevision,
