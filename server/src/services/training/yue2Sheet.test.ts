@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { beforeEach } from 'node:test';
+import { listBackends } from '../backends/registry.js';
 import { runYue2CoverSheetJob } from './yue2ArTrainRunner.js';
 import { createJob, type TrainingJob } from './labelingQueue.js';
 import { gpuLaneOwner, runOnGpuLane } from '../generation/gpuLane.js';
@@ -11,6 +12,20 @@ import {
   buildYue2SheetArgs, readYue2CoverAbc, setSheetTranscriberSource, writeYue2CoverSheetManifest,
   type ResolvedYue2SheetOptions,
 } from './yue2Sheet.js';
+
+beforeEach(t => {
+  assert.ok('mock' in t);
+  // The runner is mocked below, but fallback also evicts other backends.
+  // Stub those releases so a unit test cannot unload the dev engine's models.
+  for (const backend of listBackends()) {
+    if (backend.releaseVram) t.mock.method(backend as Required<typeof backend>, 'releaseVram', async () => {});
+  }
+  const network = t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('SheetSage unit tests must not contact the network');
+  });
+  // Some clients swallow fetch errors, so throwing alone cannot enforce isolation.
+  t.after(() => assert.equal(network.mock.callCount(), 0, 'SheetSage tests made no network requests'));
+});
 
 const trainingOptions: ResolvedYue2SheetOptions = {
   manifest: 'training.json', only: '', force: false, fast: false, datasetSlug: 'fixture',
