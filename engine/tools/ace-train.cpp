@@ -397,6 +397,16 @@ static void print_usage(void) {
             "                [--encoder <dir>] HeartCodec encoder pack; default <models>/heartmula\n"
             "                [--ffmpeg <path>] decodes non-WAV audio; default ffmpeg on PATH\n"
             "                [--force]         re-encode samples whose codes are cached\n"
+            "  roundtrip     One track through a backend's training encode and straight back to\n"
+            "                audio, to hear what an adapter can learn from it.\n"
+            "                --backend ace|sa3|heartmula|mm3|yue2  --audio <file>  --models <dir>\n"
+            "                --out <x.wav>     reconstruction; x.source.wav is the encoder's input\n"
+            "                [--max-duration S] crop as that prep does (ace 600, sa3 384, else none)\n"
+            "                [--ffmpeg <path>] default ffmpeg on PATH\n"
+            "                ace:  --vae <name|path> [--normalize none|peak] [--target-db -1]\n"
+            "                      [--dtype f32|bf16] [--vae-chunk 384] [--vae-overlap 48]\n"
+            "                yue2: [--vae standard|legacy] [--loudness-lufs 0 = off, or a target]\n"
+            "                mm3:  [--enc <mm3-enc-*.gguf>]   heartmula: [--seed 42]\n"
             "  heartmula-train  HeartMuLa backbone LoRA (global q/k/v/o[, mlp]) on a heartmula-prepare\n"
             "                cache. Contract: engine/docs/HEARTMULA_TRAINING_CONTRACT.md.\n"
             "                --data <dir>      the heartmula-prepare --out directory\n"
@@ -6716,6 +6726,51 @@ static int cmd_yue2_joint_train(int argc, char ** argv) {
     if (rc != 0 && !error.empty()) fprintf(stderr, "ace-train yue2-joint-train: %s\n", error.c_str());
     return rc;
 }
+// ─── roundtrip ──────────────────────────────────────────────────────────────
+//
+// Source track -> a backend's training representation -> audio
+// (train/roundtrip-run.h). Included here, not at the top, because the ace path
+// resolves its VAE with resolve_model() above.
+#include "train/roundtrip-run.h"
+
+static int cmd_roundtrip(int argc, char ** argv) {
+    RoundtripArgs a;
+    for (int i = 1; i < argc; i++) {
+        auto next = [&](const char * w) -> const char * {
+            if (i + 1 >= argc) { fprintf(stderr, "ace-train: %s needs a value\n", w); exit(2); }
+            return argv[++i];
+        };
+        if      (!strcmp(argv[i], "--backend"))       a.backend       = next("--backend");
+        else if (!strcmp(argv[i], "--audio"))         a.audio         = next("--audio");
+        else if (!strcmp(argv[i], "--models"))        a.models_dir    = next("--models");
+        else if (!strcmp(argv[i], "--out"))           a.out           = next("--out");
+        else if (!strcmp(argv[i], "--ffmpeg"))        a.ffmpeg        = next("--ffmpeg");
+        else if (!strcmp(argv[i], "--vae"))           a.vae           = next("--vae");
+        else if (!strcmp(argv[i], "--enc"))           a.enc           = next("--enc");
+        else if (!strcmp(argv[i], "--max-duration"))  a.max_duration  = atoi(next("--max-duration"));
+        else if (!strcmp(argv[i], "--normalize"))     a.normalize     = next("--normalize");
+        else if (!strcmp(argv[i], "--target-db"))     a.target_db     = (float) atof(next("--target-db"));
+        else if (!strcmp(argv[i], "--dtype"))         a.dtype         = next("--dtype");
+        else if (!strcmp(argv[i], "--vae-chunk"))     a.vae_chunk     = atoi(next("--vae-chunk"));
+        else if (!strcmp(argv[i], "--vae-overlap"))   a.vae_overlap   = atoi(next("--vae-overlap"));
+        else if (!strcmp(argv[i], "--loudness-lufs")) a.loudness_lufs = atof(next("--loudness-lufs"));
+        else if (!strcmp(argv[i], "--seed"))          a.seed          = strtoull(next("--seed"), nullptr, 10);
+        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
+        else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
+    }
+    if (a.backend.empty() || a.audio.empty() || a.models_dir.empty() || a.out.empty() ||
+        (a.backend == "ace" && a.vae.empty())) {
+        fprintf(stderr, "ace-train roundtrip: --backend, --audio, --models and --out are required "
+                        "(and --vae for ace)\n");
+        return 2;
+    }
+    if (!pm_file_exists(a.audio)) {
+        fprintf(stderr, "ace-train roundtrip: audio not found: %s\n", a.audio.c_str());
+        return 2;
+    }
+    return roundtrip_run(a);
+}
+
 static int ace_train_main(int argc, char ** argv) {
     if (argc < 2) {
         print_usage();
@@ -6736,6 +6791,9 @@ static int ace_train_main(int argc, char ** argv) {
     }
     if (!strcmp(argv[1], "mm3-encode")) {
         return cmd_mm3_encode(argc - 1, argv + 1);
+    }
+    if (!strcmp(argv[1], "roundtrip")) {
+        return cmd_roundtrip(argc - 1, argv + 1);
     }
     if (!strcmp(argv[1], "detok-table")) {
         return cmd_detok_table(argc - 1, argv + 1);

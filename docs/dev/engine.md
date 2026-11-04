@@ -774,6 +774,34 @@ fails the request with a message instead of crashing the process.
 Timing breakdowns, benchmarking from logs and the list of what is done and planned
 are in `.claude/skills/engine-performance/SKILL.md`.
 
+## Training roundtrip
+
+`ace-train roundtrip --backend <backend> --audio <file> --models <dir> --out <x.wav>`
+puts one track through the encode that backend's training prep runs, decodes the
+result straight back and writes two WAVs. `x.wav` is the reconstruction: everything an
+adapter can learn from that track. `x.source.wav` is what the encoder was fed, cut and
+levelled the same way, so the two compare at matched level.
+
+| Backend | Training stores | Decoded with | Encode follows |
+|---|---|---|---|
+| `ace` | VAE latents (`target_latents`) | the same VAE's decoder | `preprocess`, through the shared `pp_encode_audio`. `--vae` is required; `--max-duration 600`, `--normalize none`, `--target-db -1`, `--dtype f32`, `--vae-chunk 384`, `--vae-overlap 48` |
+| `sa3` | SAME latents | the SAME decoder | the `sa3Stems.ts` conversion (`-t 384`, 44.1 kHz, 16-bit) and `sa3-train`'s clip prep |
+| `heartmula` | HeartCodec codes, 8 codebooks | the codec's flow decoder, 10 steps, guidance 1.25, `--seed 42` | `heartmula-prepare` |
+| `mm3` | DAV latents, the flow-DiT target | the vocoder | `mm3-preprocess`; `--enc` defaults to the newest `mm3-enc-*` |
+| `yue2` | VAE latents, the NAR target | the VAE decoder | `yue2-preprocess`; `--vae standard`, `--loudness-lufs 0` (off) |
+
+Pass the values the dataset was prepared with when they differ from these defaults.
+Every backend but `ace` runs with TF32 off, as its prep does. SA3 trains on the
+SuperSep instrumental stem, which this command does not separate: give it the prepared
+`instrumental.wav` to hear exactly what training reads, or a full mix to hear the codec
+on the vocals too.
+
+Four of the five decode deterministically. HeartCodec's decoder starts from noise, so
+its waveform does not line up with the source and another `--seed` gives another take;
+judge it by ear, not by sample error. The token streams LM adapters train on (ACE 5 Hz
+codes, MM3 RVQ codes, YuE2 semantic codes) need a generative model to become audio and
+are not covered. The code is `engine/src/train/roundtrip-run.h`.
+
 ## Training subcommands
 
 `ace-train` links no `acestep-core`. The trainers are headers under `engine/src/train/`;
@@ -814,6 +842,7 @@ usage. `ace-train --help` prints the full option list.
 | `yue2-batch-check` | CPU self-check of the AR sequence layouts the joint trainer builds, no model needed |
 | `heartmula-prepare` | Sample list (audio, tags, lyrics) to HeartCodec codes and prompt ids, one sample per track, none cut ([HeartMuLa training](#heartmula-training)) |
 | `heartmula-train` | Train a HeartMuLa backbone LoRA from a prepared cache; `--stop-after` and `--resume` drive checkpoint previews; `--eval` scores the base or adapters on held-out samples instead ([HeartMuLa training](#heartmula-training)) |
+| `roundtrip` | One track through a backend's training encode and straight back to audio, to hear what an adapter can learn from it ([Training roundtrip](#training-roundtrip)) |
 | `spike` | Phase-0 evidence runs |
 
 `yue2-prepare-aitk --caption-dropout-trigger <text>` sets the exact style text

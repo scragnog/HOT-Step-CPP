@@ -357,37 +357,32 @@ static const char * pp_skip_reason(const PreprocessOpts & o, const PSample & s) 
 
 // ─── per-song pipeline ──────────────────────────────────────────────────────
 
-static SongResult preprocess_song(PreprocessCtx & c, const PreprocessOpts & o, const PManifest & mf, const PSample & s,
-                                  const std::string & out_path, void (*warn)(const char *)) {
-    SongResult  r;
-    std::string tmp_wav;
-    char        wbuf[512];
-
-    auto fail = [&](const std::string & msg) -> SongResult {
-        r.ok    = false;
-        r.error = msg;
-        if (!tmp_wav.empty()) {
-            hs_remove(tmp_wav);
-        }
-        return r;
-    };
-
+// Steps 1-5 of preprocess_song: source file -> the [T,64] VAE latents a cache
+// stores as target_latents. Shared with `ace-train roundtrip` (roundtrip-run.h)
+// so what it decodes is exactly what training reads. A transcode goes to
+// <out_dir>/.tmp/<tmp_name>.wav and its path is left in tmp_wav for the caller
+// to remove. enc_input, when given, gets the interleaved [T,2] audio the
+// encoder saw (cut, normalized).
+static bool pp_encode_audio(VAEEncoder * vae, const PreprocessOpts & o, const std::string & audio_path,
+                            const std::string & tmp_name, std::string & tmp_wav, std::vector<float> & latents,
+                            std::string & err, std::vector<float> * enc_input = NULL) {
     // 1. Resolve the decodable audio path.
-    std::string src = s.audio_path;
+    std::string src = audio_path;
     if (!pm_file_exists(src)) {
-        return fail("audio file not found: " + src);
+        err = "audio file not found: " + src;
+        return false;
     }
     const std::string ext = pm_ext_of(src);
     if (ext != ".wav" && ext != ".mp3") {
         if (o.ffmpeg.empty()) {
-            return fail("unsupported audio format " + (ext.empty() ? std::string("(none)") : ext) +
-                        "; ffmpeg not configured");
+            err = "unsupported audio format " + (ext.empty() ? std::string("(none)") : ext) +
+                  "; ffmpeg not configured";
+            return false;
         }
         pm_mkdir_p(o.out_dir + "/.tmp");
-        tmp_wav = o.out_dir + "/.tmp/" + (s.id.empty() ? s.out_stem : s.id) + ".wav";
-        std::string err;
+        tmp_wav = o.out_dir + "/.tmp/" + tmp_name + ".wav";
         if (!pp_ffmpeg_transcode(o, src, tmp_wav, err)) {
-            return fail(err);
+            return false;
         }
         src = tmp_wav;
     }
@@ -408,7 +403,8 @@ static SongResult preprocess_song(PreprocessCtx & c, const PreprocessOpts & o, c
         if (planar) {
             free(planar);
         }
-        return fail("audio decode failed: " + s.audio_path);
+        err = "audio decode failed: " + audio_path;
+        return false;
     }
     int T_audio = T_orig;
     if (o.max_duration > 0) {
@@ -447,26 +443,59 @@ static SongResult preprocess_song(PreprocessCtx & c, const PreprocessOpts & o, c
     float * inter = (float *) malloc((size_t) T_audio * 2 * sizeof(float));
     if (!inter) {
         free(planar);
-        return fail("out of memory interleaving audio");
+        err = "out of memory interleaving audio";
+        return false;
     }
     for (int t = 0; t < T_audio; t++) {
         inter[(size_t) t * 2 + 0] = chL[t];
         inter[(size_t) t * 2 + 1] = chR[t];
     }
     free(planar);
+    if (enc_input) {
+        enc_input->assign(inter, inter + (size_t) T_audio * 2);
+    }
 
     // 5. VAE encode (tiled).
     const int max_T = T_audio / 1920 + 64;
-    r.latents.assign((size_t) max_T * 64, 0.0f);
-    int T = vae_enc_encode_tiled(&c.vae, inter, T_audio, r.latents.data(), max_T, o.vae_chunk, o.vae_overlap);
+    latents.assign((size_t) max_T * 64, 0.0f);
+    int T = vae_enc_encode_tiled(vae, inter, T_audio, latents.data(), max_T, o.vae_chunk, o.vae_overlap);
     free(inter);
     if (T <= 0) {
-        return fail("VAE encode failed");
+        err = "VAE encode failed";
+        return false;
     }
-    r.latents.resize((size_t) T * 64);
-    if (!pp_finite(r.latents.data(), r.latents.size())) {  // CHECK 1
-        return fail("VAE encode produced NaN/Inf");
+    latents.resize((size_t) T * 64);
+    if (!pp_finite(latents.data(), latents.size())) {  // CHECK 1
+        err = "VAE encode produced NaN/Inf";
+        return false;
     }
+    return true;
+}
+
+
+static SongResult preprocess_song(PreprocessCtx & c, const PreprocessOpts & o, const PManifest & mf, const PSample & s,
+                                  const std::string & out_path, void (*warn)(const char *)) {
+    SongResult  r;
+    std::string tmp_wav;
+    char        wbuf[512];
+
+    auto fail = [&](const std::string & msg) -> SongResult {
+        r.ok    = false;
+        r.error = msg;
+        if (!tmp_wav.empty()) {
+            hs_remove(tmp_wav);
+        }
+        return r;
+    };
+
+    // 1-5. Decode, cut, normalize, VAE encode.
+    {
+        std::string err;
+        if (!pp_encode_audio(&c.vae, o, s.audio_path, s.id.empty() ? s.out_stem : s.id, tmp_wav, r.latents, err)) {
+            return fail(err);
+        }
+    }
+    const int T = (int) (r.latents.size() / 64);
     r.t_latent = T;
 
     // 6. Prompts + text/lyric encode.
