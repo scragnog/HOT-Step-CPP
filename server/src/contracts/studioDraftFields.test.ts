@@ -18,7 +18,7 @@ const RECORDED: Record<string, string[]> = {
     'cover-studio-lyrics', 'cover-studio-songArtist', 'cover-studio-songTitle', 'cover-studio-sourceAssetId', 'cover-studio-sourceAudioUrl',
     'cover-studio-sourceFileName', 'cover-studio-sourceLatentUrl', 'cover-studio-sourceSongId',
     'cover-studio-sourceMode', 'cover-studio-pairMode', 'cover-studio-yue2Ar', 'cover-studio-yue2Nar',
-    'cover-studio-coverVoices', 'cover-studio-coverTempoMode', 'cover-studio-coverLyricSchedule',
+    'cover-studio-coverVoices', 'cover-studio-instrumentalMode', 'cover-studio-coverTempoMode', 'cover-studio-coverLyricSchedule',
     'cover-studio-captionMode', 'cover-studio-sheetAbc', 'cover-studio-sheetAudioUrl',
     'cover-studio-coveringBand', 'cover-studio-buildSessionId', 'cover-studio-draftName'],
   'cover|n,': ['cover-studio-audioCoverStrength', 'cover-studio-bpmCorrection', 'cover-studio-coverNoiseStrength', 'cover-studio-pitchShift',

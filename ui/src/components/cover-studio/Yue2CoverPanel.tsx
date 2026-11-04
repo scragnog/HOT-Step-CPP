@@ -41,6 +41,8 @@ interface Props {
   narOptions: Array<{ value: string; label: string }>;
   keepChords: boolean;
   onKeepChords: (value: boolean) => void;
+  instrumentalMode: 'overlap' | 'resting';
+  onInstrumentalMode: (value: 'overlap' | 'resting') => void;
   scoreAbc: string;
   scoreKeyLabel: string;
   voices: 'vocal' | 'both';
@@ -160,6 +162,11 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
     <ParamLabel label="Instrumental" info="Skip lyrics and render the approved melody without vocals." />
     <Toggle accent="cyan" checked={p.instrumental} onChange={p.onInstrumentalChange} aria-label="Instrumental" />
   </div>;
+  const instrumentalModeEl = p.instrumental && <div className="space-y-2">
+    <ParamLabel label="Melody to Ins" info="Where the sung melody goes in an instrumental. Vocal wins puts it on Ins and cuts any Ins notes it overlaps. Resting bars only moves it into bars where Ins is silent and keeps every bar Ins already plays." />
+    <StyledSelect accent="pink" value={p.instrumentalMode} onChange={v => p.onInstrumentalMode(v as 'overlap' | 'resting')}
+      options={[{ value: 'overlap', label: 'Vocal wins (default)' }, { value: 'resting', label: 'Resting Ins bars only' }]} />
+  </div>;
   const keepChordsEl = <div className="flex items-center justify-between">
     <ParamLabel label="Keep chords" info="Retain the original harmony; off lets the style decide." />
     <Toggle accent="cyan" checked={p.keepChords} onChange={p.onKeepChords} aria-label="Keep chords" />
@@ -271,6 +278,7 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
         {sourceEl}{captionSourceEl}
         <div className="col-span-2">{captionEl}</div>
         {instrumentalEl}{keepChordsEl}
+        {instrumentalModeEl && <div className="col-span-2">{instrumentalModeEl}</div>}
         {voicesEl}{tempoEl}
         {pitchEl}{bpmEl}
         <div className="col-span-2">{arStrengthEl}</div>
@@ -279,7 +287,7 @@ export const Yue2CoverPanel: React.FC<Props> = p => {
         <div className="col-span-2">{generateEl}</div>
       </div>
       : <div className="space-y-3">
-        {renderModeEl}{artistGridEl}{sourceEl}{captionSourceEl}{captionEl}{instrumentalEl}
+        {renderModeEl}{artistGridEl}{sourceEl}{captionSourceEl}{captionEl}{instrumentalEl}{instrumentalModeEl}
         {voicesEl}{keepChordsEl}{tempoEl}{bpmEl}{pitchEl}{arStrengthEl}{guideEl}{advancedEl}{generateEl}
       </div>}
   </div>

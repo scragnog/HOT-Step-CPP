@@ -250,6 +250,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const [buildLyricsDraft, setBuildLyricsDraft] = useState<{ source: string; text: string } | null>(() => restore('buildLyricsDraft', null));
   const [coverVoices, setCoverVoices] = useState<'vocal' | 'both'>(() => restore('coverVoices', 'both'));
   const [keepChords, setKeepChords] = useState(() => restore('keepChords', false));
+  const [instrumentalMode, setInstrumentalMode] = useState<'overlap' | 'resting'>(() => restore('instrumentalMode', 'overlap'));
   const [coverTempoMode, setCoverTempoMode] = useState<'free' | 'source' | 'set'>(() => restore('coverTempoMode', 'free'));
   const [coverBpm, setCoverBpm] = useState(() => restore('coverBpm', 120));
   const [coverKeyShift, setCoverKeyShift] = useState(() => restore('coverKeyShift', 0));
@@ -454,6 +455,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => { persist('yue2Nar', yue2Nar); }, [yue2Nar]);
   useEffect(() => { persist('coverVoices', coverVoices); }, [coverVoices]);
   useEffect(() => { persist('keepChords', keepChords); }, [keepChords]);
+  useEffect(() => { persist('instrumentalMode', instrumentalMode); }, [instrumentalMode]);
   useEffect(() => { persist('coverTempoMode', coverTempoMode); }, [coverTempoMode]);
   useEffect(() => { persist('coverBpm', coverBpm); }, [coverBpm]);
   useEffect(() => { persist('coverKeyShift', coverKeyShift); }, [coverKeyShift]);
@@ -469,7 +471,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // The editing fields, mirrored into this browser's revisioned server draft.
   // coverDraftId/Revision stay local: they point at the workflow's cover-draft.
   const draft = useStudioDraftMirror('cover', token, { 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel,
-    'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverGuide': coverGuide, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, ...prep.draftFields, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, 'cover-studio-buildMode': buildMode, 'cover-studio-buildSessionId': buildSessionId, 'cover-studio-buildLyricsDraft': buildLyricsDraft, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
+    'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-instrumentalMode': instrumentalMode, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverGuide': coverGuide, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, ...prep.draftFields, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, 'cover-studio-buildMode': buildMode, 'cover-studio-buildSessionId': buildSessionId, 'cover-studio-buildLyricsDraft': buildLyricsDraft, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
     { ...(sourceAssetId ? { sourceAssetId } : {}), ...(sourceSongId ? { sourceSongId } : {}) });
   // Loading a draft sets the same state the controls edit. Its uploaded source
   // gets a fresh cover-draft from the stored analysis (no re-analysis, no job
@@ -529,6 +531,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (Object.hasOwn(f, 'cover-studio-yue2Nar')) setYue2Nar(f['cover-studio-yue2Nar'] as never);
     if (Object.hasOwn(f, 'cover-studio-coverVoices')) setCoverVoices(f['cover-studio-coverVoices'] as never);
     if (Object.hasOwn(f, 'cover-studio-keepChords')) setKeepChords(f['cover-studio-keepChords'] as never);
+    if (Object.hasOwn(f, 'cover-studio-instrumentalMode')) setInstrumentalMode(f['cover-studio-instrumentalMode'] as never);
     if (Object.hasOwn(f, 'cover-studio-coverTempoMode')) setCoverTempoMode(f['cover-studio-coverTempoMode'] as never);
     if (Object.hasOwn(f, 'cover-studio-coverBpm')) setCoverBpm(f['cover-studio-coverBpm'] as never);
     if (Object.hasOwn(f, 'cover-studio-coverKeyShift')) setCoverKeyShift(f['cover-studio-coverKeyShift'] as never);
@@ -1459,7 +1462,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           ...(coverGuide.on && !coverGuideBlock(coverKeyShift, coverTempoMode)
             ? { guide: (({ on: _on, ...rest }) => rest)(coverGuide) } : {}) }
       : { sourceKind: 'musicxml', ...coverChoices },
-    yue2Abc: approvedSheet.abc, yue2Prepare: prep.doc, yue2Cot: keepChords ? 'full' : 'melody', yue2Pick: pair };
+    yue2Abc: approvedSheet.abc, yue2Prepare: prep.doc, yue2Cot: keepChords ? 'full' : 'melody', yue2Pick: pair,
+    ...(renderInstrumental ? { yue2InstrumentalMode: instrumentalMode } : {}) };
     return { params, title };
   };
 
@@ -2043,6 +2047,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           ar={yue2Ar} nar={yue2Nar} onAr={setYue2Ar} onNar={setYue2Nar}
           arOptions={adapterOptions('ar')} narOptions={adapterOptions('nar')}
           keepChords={keepChords} onKeepChords={setKeepChords}
+          instrumentalMode={instrumentalMode} onInstrumentalMode={setInstrumentalMode}
           scoreAbc={sheetAbc} scoreKeyLabel={coverScoreKeyLabel(sheetAbc)}
           voices={coverVoices} onVoices={setCoverVoices}
           tempoMode={coverTempoMode} onTempoMode={setCoverTempoMode}

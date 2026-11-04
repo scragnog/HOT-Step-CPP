@@ -77,7 +77,7 @@ export function jobCover(job: GenerationJob): { cover: Yue2CoverSubmission; abc:
   return { cover, abc };
 }
 import { applyYue2StyleTemplate, splitYue2Tail, type Yue2StyleTemplate } from './style.js';
-import { instrumentalScore, instrumentalStyle } from './instrumentalScore.js';
+import { instrumentalScore, instrumentalStyle, type InstrumentalMode } from './instrumentalScore.js';
 import type { GenerationJob, StageTiming } from '../../generation/jobTypes.js';
 import type { PollWatchdogOptions } from '../../generation/pollUntilDone.js';
 import type { GenerationAttempt } from '../types.js';
@@ -272,14 +272,22 @@ function yue2StyleForAdapter(
   return { style, notes, halves, trainedCot };
 }
 
+/** The Cover Studio's instrumentalise choice; anything but 'resting' is the default. */
+const yue2InstrumentalMode = (params: Record<string, unknown>): InstrumentalMode =>
+  params.yue2InstrumentalMode === 'resting' ? 'resting' : 'overlap';
+
 /** An instrumental render's score: the Vocal melody moved onto Ins
  *  (instrumentalScore.ts), with what happened written to `notes`. */
-function yue2InstrumentalAbc(abc: string, notes: string[]): string {
-  const moved = instrumentalScore(abc);
+function yue2InstrumentalAbc(abc: string, notes: string[], mode: InstrumentalMode): string {
+  const moved = instrumentalScore(abc, mode);
+  const resting = mode === 'resting';
   notes.push(moved.movedBars
-    ? `Instrumental: moved ${moved.movedBars} sung bar(s) from Vocal to Ins`
+    ? `Instrumental: moved ${moved.movedBars} sung bar(s) from Vocal to ${resting ? 'resting Ins bars' : 'Ins'}`
       + (moved.replacedInsBars ? `; Vocal cut overlapping Ins notes in ${moved.replacedInsBars} bar(s)` : '')
-    : 'Instrumental: the score has no sung Vocal bars to move to Ins');
+      + (moved.keptInsBars ? `; ${moved.keptInsBars} sung bar(s) dropped where Ins already plays` : '')
+    : moved.keptInsBars
+      ? `Instrumental: ${moved.keptInsBars} sung bar(s) dropped where Ins already plays; none moved`
+      : 'Instrumental: the score has no sung Vocal bars to move to Ins');
   return moved.abc;
 }
 
@@ -553,7 +561,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   const abcRaw = typeof params.yue2Abc === 'string' ? params.yue2Abc.trim() : '';
   const abcUsed = abcRaw && cot !== 'off' ? abcRaw : undefined;
   if (abcRaw && !abcUsed) notes.push('A previewed score was supplied but Chain of Thought is "off" — the score was ignored.');
-  const abc = abcUsed && !lyrics ? yue2InstrumentalAbc(abcUsed, notes) : abcUsed;
+  const abc = abcUsed && !lyrics ? yue2InstrumentalAbc(abcUsed, notes, yue2InstrumentalMode(params)) : abcUsed;
 
   // C6 lyric schedule: ties each sung lyric block to its score section's
   // timing. Off by default (2026-10-12: condition strength 1 with the old
@@ -971,7 +979,7 @@ export async function planYue2Jobs(members: Yue2PreparedJob[]): Promise<void> {
     autoReplan.accepted = yue2PlanUsable(picked.pick.verdict, p.instrumental);
     if (p.replanFlags) autoReplan.clean = picked.clean;
     const notes: string[] = [];
-    m.req.abc = m.req.lyrics ? p.sheets[picked.index] : yue2InstrumentalAbc(p.sheets[picked.index], notes);
+    m.req.abc = m.req.lyrics ? p.sheets[picked.index] : yue2InstrumentalAbc(p.sheets[picked.index], notes, yue2InstrumentalMode(m.job.params));
     m.abcPlanned = true;
     for (const n of notes) m.log('INFO', `[YuE2] ${n}`);
     m.req.seed = seed;

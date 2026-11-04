@@ -3,6 +3,11 @@
 // every Vocal note moves to Ins, Vocal keeps only rests and chord symbols, and
 // the style says plainly that nothing is sung. Empty lyrics alone leave the
 // melody on the Vocal voice, and YuE2 sings it as wordless oohs.
+//
+// Two modes. 'overlap' is the default above. 'resting' follows the ComfyUI node
+// nappaniconico/yue2_instrumental_node: a sung bar moves to Ins only when the
+// Ins bar is wholly resting, an Ins bar with any note is kept as it is, and
+// Vocal is muted either way.
 
 const LENGTHS = [48, 32, 24, 16, 12, 8, 6, 4, 3, 2, 1];
 const TOKEN = /"[^"]*"|\[[^\]]*\]|[_^=]*[A-Ga-g][,']*\d*(?:\/\d*)?-?|[zx]\d*(?:\/\d*)?|Z\d*|\S/g;
@@ -173,22 +178,27 @@ function vocalRemainder(bar: string): string | null {
   return kept ? fields.join('') + kept + rests(at - last) : 'Z';
 }
 
-export interface InstrumentalScore { abc: string; movedBars: number; replacedInsBars: number }
+export type InstrumentalMode = 'overlap' | 'resting';
+
+/** `keptInsBars` counts sung bars whose melody was dropped because Ins already
+ *  had notes ('resting' mode only). */
+export interface InstrumentalScore { abc: string; movedBars: number; replacedInsBars: number; keptInsBars: number }
 
 interface Group { vocal: string[]; vocalFields: string[]; ins: string[]; insFields: string[] }
 
-/** Moves the Vocal melody of a native YuE2 score onto Ins. Vocal notes win
- *  wherever they sound; Ins keeps whatever of its own notes they don't cover
- *  (upstream's default --overlap vocal). `replacedInsBars` counts bars where
- *  Ins notes were cut. Output keeps the native layout: Vocal/Ins line pairs
+/** Moves the Vocal melody of a native YuE2 score onto Ins. 'overlap' (default):
+ *  Vocal notes win wherever they sound; Ins keeps whatever of its own notes
+ *  they don't cover (upstream's default --overlap vocal). `replacedInsBars`
+ *  counts bars where Ins notes were cut. 'resting': only wholly resting Ins
+ *  bars take the melody. Output keeps the native layout: Vocal/Ins line pairs
  *  of at most four bars. */
-export function instrumentalScore(abc: string): InstrumentalScore {
+export function instrumentalScore(abc: string, mode: InstrumentalMode = 'overlap'): InstrumentalScore {
   const nl = abc.includes('\r\n') ? '\r\n' : '\n';
   const lines = abc.split(/\r?\n/);
   const out: (string | Group)[] = [];
   let header = true, voice = '';
   let group: Group | null = null;
-  let movedBars = 0, replacedInsBars = 0;
+  let movedBars = 0, replacedInsBars = 0, keptInsBars = 0;
   const keyLine = lines.findIndex(l => /^K:/.test(l));
   const hasInsDeclaration = lines.some((l, i) => /^V:\s*Ins\b/i.test(l) && i < keyLine);
   const vocalVoice: Voice = { key: '', pending: null }, insVoice: Voice = { key: '', pending: null };
@@ -196,6 +206,9 @@ export function instrumentalScore(abc: string): InstrumentalScore {
   // tie can be dropped when Vocal cuts the note it ties into.
   let lastIns: { bars: string[]; i: number; insTie: boolean } | null = null;
   let insTieBroken = false;
+  // 'resting': the last moved Ins bar when it ends on a tie, which is dropped
+  // unless the next bar moves too.
+  let movedTie: { bars: string[]; i: number } | null = null;
   const flush = () => {
     if (!group) return;
     const g = group;
@@ -211,6 +224,22 @@ export function instrumentalScore(abc: string): InstrumentalScore {
       const v = parseBar(bar, vocalVoice), ins = parseBar(g.ins[i], insVoice);
       const ticks = Math.max(v.ticks, ins.ticks);
       const kept = vocalRemainder(bar);
+      if (mode === 'resting') {
+        if (kept !== null) g.vocal[i] = kept;
+        if (kept === null || ins.events.length) {
+          if (kept !== null) keptInsBars++;
+          if (movedTie) movedTie.bars[movedTie.i] = movedTie.bars[movedTie.i].replace(/-$/, '');
+          movedTie = null;
+          return;
+        }
+        movedBars++;
+        // A tie into this bar from an unmoved one has nothing to tie to.
+        if (!movedTie) v.events[0].continued = false;
+        const last = v.events[v.events.length - 1];
+        g.ins[i] = writeBar(ins.fields.length ? ins.fields : v.fields, v.events, ticks, ins.fields.length ? insVoice.key : vocalVoice.key);
+        movedTie = last.tie && last.end === ticks ? { bars: g.ins, i } : null;
+        return;
+      }
       if (kept !== null) {
         movedBars++;
         g.vocal[i] = kept;
@@ -276,7 +305,7 @@ export function instrumentalScore(abc: string): InstrumentalScore {
     }
     return pairs;
   });
-  return { abc: text.join(nl), movedBars, replacedInsBars };
+  return { abc: text.join(nl), movedBars, replacedInsBars, keptInsBars };
 }
 
 /** Upstream's instrumental style wording: lead with "Instrumental", and say

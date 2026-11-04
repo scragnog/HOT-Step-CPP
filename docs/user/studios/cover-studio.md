@@ -211,9 +211,14 @@ Cover Studio draft to resume the workflow.
    column follows those assignments and cannot be set by itself; clicking it
    only says so. An Instrumental cover moves the melody to Ins whether or not
    re-planning is on; the score is already in hand. An instrument plays the
-   score's Vocal melody instead of a wordless voice. Where
-   both voices play at once the melody wins and Ins keeps only the notes it
-   doesn't cover. Vocal keeps its chord symbols. On Base YuE2 the style also
+   score's Vocal melody instead of a wordless voice. The **Melody to Ins**
+   choice, shown while Instrumental is on, sets where it goes. **Vocal wins**
+   (the default) puts the melody on Ins: where both voices play at once the
+   melody wins and Ins keeps only the notes it doesn't cover. **Resting Ins
+   bars only** follows the YuE2 instrumental ComfyUI node: a sung bar moves
+   only into a bar where Ins is wholly silent, and a bar where Ins already
+   plays stays as it is, so that bar's melody is dropped. Vocal is muted in both
+   modes and keeps its chord symbols. On Base YuE2 the style also
    gains "Instrumental" and "no vocals, no singing, no choir, no spoken words";
    with an adapter pair the style is left as the adapter was trained. The
    generation log reports how many bars moved. Write a YuE2 style caption; Generate
