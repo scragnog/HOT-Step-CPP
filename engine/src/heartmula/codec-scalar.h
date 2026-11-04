@@ -6,8 +6,11 @@ namespace heartcodec {
 inline ggml_tensor * scalar_conv(ggml_context * c, const Weights & w, const std::string & p,
                                  ggml_tensor * x, int dilation = 1, bool causal = true) {
     int pad = int(w.get(p + ".weight")->ne[0] - 1) * dilation;
-    if (causal && pad) x = ggml_pad_ext(c, x, pad, 0, 0, 0, 0, 0, 0, 0);
-    return conv(c, w, p, x, causal ? 0 : pad / 2, dilation);
+    if (!causal || !pad) return conv(c, w, p, x, pad / 2, dilation);
+    // Causal = symmetric im2col padding with the last `pad` outputs dropped.
+    // Metal has no left PAD (GH #329), so no ggml_pad_ext here.
+    auto y = conv(c, w, p, x, pad, dilation);
+    return ggml_cont(c, ggml_view_2d(c, y, x->ne[0], y->ne[1], y->nb[1], 0));
 }
 
 // relu(x) - slope * relu(-x), with the slope read in-graph (no host sync).

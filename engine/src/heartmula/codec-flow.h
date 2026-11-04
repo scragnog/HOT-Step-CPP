@@ -10,6 +10,10 @@ inline ggml_tensor * conv(ggml_context * c, const Weights & w, const std::string
     require(kernel->ne[1] == x->ne[1], p + ": convolution width mismatch");
     auto col = ggml_im2col(c, kernel, x, 1, 0, pad, 0, dilation, 0, false, GGML_TYPE_F32);
     const int64_t time = col->ne[1], batch = col->ne[2], channels = kernel->ne[2];
+    // Metal multiplies F32 by an F16 src1 only in its matrix kernel (more than 8
+    // rows, 64+ wide); smaller kernels go up to F32 first (exact, GH #329).
+    if (kernel->type != GGML_TYPE_F32 && (channels <= 8 || kernel->ne[0] * kernel->ne[1] < 64))
+        kernel = ggml_cast(c, kernel, GGML_TYPE_F32);
     auto y = ggml_mul_mat(c, ggml_reshape_2d(c, col, col->ne[0], time * batch),
                          ggml_reshape_2d(c, kernel, kernel->ne[0] * kernel->ne[1], channels));
     y = ggml_cont(c, ggml_permute(c, ggml_reshape_3d(c, y, time, batch, channels), 0, 2, 1, 3));
