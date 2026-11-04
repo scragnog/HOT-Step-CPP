@@ -794,6 +794,8 @@ export const aceClient = {
       postprocessPlugin?: string;
       /** Response sample format. Omitted = s16. */
       outFmt?: WavOutFormat;
+      /** Queue cancellation, combined with the 30-minute timeout. */
+      signal?: AbortSignal;
     },
   ): Promise<Buffer> {
     const params = new URLSearchParams();
@@ -835,7 +837,7 @@ export const aceClient = {
       method: 'POST',
       headers: { 'Content-Type': 'audio/wav' },
       body: wavBuffer,
-      signal: AbortSignal.timeout(TIMEOUT_SA3),
+      signal: withTimeout(opts.signal, TIMEOUT_SA3),
     });
     if (!res.ok) {
       const errBody = await res.text().catch(() => 'Unknown error');

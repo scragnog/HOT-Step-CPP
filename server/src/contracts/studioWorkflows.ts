@@ -86,7 +86,7 @@ export const coverTranscribeSchema = coverDraftRefSchema.extend({ force: z.boole
 export interface CoverTranscribeResult { documentId: string; revision: number; abc: string; scoreSource?: string }
 
 /** POST /api/workflows/jobs { kind: 'cover-render', input }. `analysis` and
- *  the ACE/YuE2 `controls` block carry every per-run override the engine
+ *  the ACE/YuE2/SA3 `controls` block carry every per-run override the engine
  *  request needs; the draft document supplies the resolved asset and, for
  *  YuE2, the approved ABC score (409 if the draft has none approved yet).
  *  `prepare` (YuE2, optional) is the Prepare document (contracts/yue2Prepare.ts):
@@ -94,7 +94,12 @@ export interface CoverTranscribeResult { documentId: string; revision: number; a
  *  be the approved score, and the lyrics rendered are the ones it exports,
  *  replacing `lyrics` (409 otherwise). */
 export const coverRenderSchema = coverDraftRefSchema.extend({
-  expectedBackend: z.enum(['ace', 'yue2']), engineParams: z.record(z.string(), z.unknown()),
+  expectedBackend: z.enum(['ace', 'yue2', 'sa3']), engineParams: z.record(z.string(), z.unknown()),
+  // SA3 overrides. The existing controls/engineParams fields remain accepted.
+  strength: z.number().min(0.1).max(0.9).optional(),
+  seed: z.number().int().min(-1).max(Number.MAX_SAFE_INTEGER).optional(),
+  adapter: z.string().regex(/^[^/\\:,]+:-?(?:\d+(?:\.\d*)?|\.\d+)$/).optional(),
+  steps: z.number().int().min(1).max(64).optional(),
   title: z.string(), artistName: z.string(), targetArtistName: z.string(),
   lyrics: z.string(), caption: z.string(),
   instrumental: z.boolean(), lyricsSource: z.string().nullable(),
@@ -103,6 +108,8 @@ export const coverRenderSchema = coverDraftRefSchema.extend({
   analysis: z.object({ bpm: z.number().finite(), key: z.string(), scale: z.string().optional() }).nullable().optional(),
   settings: z.record(z.string(), z.unknown()),
   controls: z.object({
+    sa3Transform: z.number().min(0.1).max(0.9).default(0.3),
+    sa3Adapters: z.string().default(''), // Comma-separated engine name:scale pairs.
     bpmOverride: z.number().finite().positive().nullable(), bpmCorrection: z.number().finite().positive(),
     keyOverride: z.string().nullable(), tempoScale: z.number().finite().positive(),
     pitchShift: z.number().int().min(-12).max(12), noFsq: z.boolean(),

@@ -203,7 +203,8 @@ async function capabilities(): Promise<BackendCapabilities> {
       stableStep: false,
       whisper: true,
       lyricTimestamps: false,
-      cover: false,
+      cover: true,
+      coverAudioTransform: true,
       repaint: false,
       lego: false,
       extract: false,
@@ -228,7 +229,7 @@ async function models(): Promise<BackendModels> {
   };
 }
 
-const SA3_OPERATIONS: readonly GenerationOperation[] = ['text2music'];
+const SA3_OPERATIONS: readonly GenerationOperation[] = ['text2music', 'cover'];
 
 function firstText(submission: Readonly<Record<string, unknown>>, keys: string[]): string {
   for (const key of keys) {
@@ -260,7 +261,7 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
     ...(typeof submission.title === 'string' ? { title: submission.title } : {}),
   };
   return {
-    operation: 'text2music',
+    operation: submission.taskType === 'cover' ? 'cover' : 'text2music',
     common,
     models: { dit: typeof submission.sa3DitModel === 'string'
       ? submission.sa3DitModel : sa3SelectedDit() },

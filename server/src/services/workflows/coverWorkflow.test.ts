@@ -6,6 +6,7 @@ import { WorkflowDocuments } from './revisions.js';
 import { coverScoreDetails, createCoverKinds, effectiveCoverRequest, type CoverRenderInput } from './coverWorkflow.js';
 import type { AudioIntentItem } from '../../contracts/audioQueue.js';
 import { structureHash } from '../../contracts/yue2Prepare.js';
+import { coverRenderSchema } from '../../contracts/studioWorkflows.js';
 
 const input: CoverRenderInput = {
   documentId: '11111111-1111-4111-8111-111111111111', revision: 1,
@@ -14,6 +15,7 @@ const input: CoverRenderInput = {
   instrumental: false, lyricsSource: null, scoreSource: null, analysis: { bpm: 100, key: 'C minor' },
   settings: { coResident: false, cacheLmCodes: true },
   controls: {
+    sa3Transform: 0.3, sa3Adapters: '',
     bpmOverride: null, bpmCorrection: 2, keyOverride: null, tempoScale: 0.5,
     pitchShift: 2, noFsq: false, audioCoverStrength: 0.5, coverNoiseStrength: 0,
     coverNoiseMethod: '', vocalLanguage: 'en', sourceLatentUrl: '', timbreOverridePath: '',
@@ -119,6 +121,78 @@ test('YuE2 requires score approval and preserves caption/tempo/key fallbacks', (
   assert.equal(request.sourceAudioUrl, '/references/source.wav');
   assert.equal(request.artistName, 'Target', 'covering band names the saved file');
   assert.equal(request.sourceArtist, 'Artist');
+});
+
+test('SA3 dispatch forwards its own controls without score approval or global caption leaks', () => {
+  const sa3 = { ...input, expectedBackend: 'sa3' as const,
+    engineParams: { seed: 73, randomSeed: false, caption: 'stale', masteringEnabled: true,
+      stableStepSteps: 12, yue2Cot: 'full', duration: 25 },
+    controls: { ...input.controls, sa3Transform: 0.7, sa3Adapters: 'texture:0.6,space:1' } };
+  const request = effectiveCoverRequest(sa3, { assetId: 'asset', sha256: 'sha' }, '/references/source.mp3');
+  assert.equal(request.backend, 'sa3');
+  assert.equal(request.expectedBackend, 'sa3');
+  assert.equal(request.taskType, 'cover');
+  assert.equal(request.style, input.caption);
+  assert.equal(request.caption, input.caption);
+  assert.equal(request.sourceAudioUrl, '/references/source.mp3');
+  assert.equal(request.seed, 73);
+  assert.equal(request.randomSeed, false);
+  assert.equal(request.masteringEnabled, true);
+  assert.equal(request.stableStepSteps, 12);
+  assert.deepEqual(request.sa3Cover, { transform: 0.7, adapters: 'texture:0.6,space:1' });
+  assert.equal(request.duration, 0);
+  assert.equal(request.instrumental, true);
+  assert.equal(request.lyrics, '');
+  assert.equal(request.artistName, 'Target');
+  assert.equal(request.sourceArtist, 'Artist');
+  assert.equal(request.yue2Cot, undefined);
+});
+
+test('cover schema accepts SA3 defaults and rejects invalid transforms and unknown backends', () => {
+  const { sa3Transform, sa3Adapters, ...legacyControls } = input.controls;
+  const parsed = coverRenderSchema.parse({ ...input, expectedBackend: 'sa3', controls: legacyControls });
+  assert.equal(parsed.controls.sa3Transform, 0.3);
+  assert.equal(parsed.controls.sa3Adapters, '');
+  for (const transform of [0, 1, NaN, Infinity]) {
+    assert.equal(coverRenderSchema.safeParse({ ...parsed,
+      controls: { ...parsed.controls, sa3Transform: transform } }).success, false);
+  }
+  assert.equal(coverRenderSchema.safeParse({ ...input, expectedBackend: 'heartmula' }).success, false);
+  assert.throws(() => effectiveCoverRequest({ ...input, expectedBackend: 'heartmula' } as unknown as CoverRenderInput,
+    { assetId: 'asset', sha256: 'sha', approvedAbc: 'X:1\nK:C\nC|' }, '/references/source.wav'),
+  { status: 400 });
+});
+
+test('SA3 queues the captured full source without lyrics or an approved score', async () => {
+  const s = setup({ capability: async backend => backend === 'sa3' });
+  const opened = await s.open();
+  const job = s.submit('cover-render', 'sa3-render', { ...input, ...opened,
+    expectedBackend: 'sa3', lyrics: '', instrumental: false }).job;
+  await s.jobs.settled();
+  assert.equal(s.jobs.get(job.id).status, 'succeeded');
+  const request = [...s.items.values()][0].request as Record<string, unknown>;
+  assert.equal(request.sourceAudioUrl, '/references/source.wav');
+  assert.equal(request.instrumental, true);
+  assert.equal(request.style, input.caption);
+});
+
+test('SA3 top-level overrides win over compatibility controls and use cover step defaults', () => {
+  const parsed = coverRenderSchema.parse({ ...input, expectedBackend: 'sa3',
+    strength: 0.9, seed: 0, adapter: 'texture:0.25', steps: 12,
+    engineParams: { seed: 99, randomSeed: true, stableStepSteps: 32 } });
+  const request = effectiveCoverRequest(parsed, { assetId: 'asset', sha256: 'sha' }, '/references/source.wav');
+  assert.equal(request.seed, 0);
+  assert.equal(request.randomSeed, false);
+  assert.equal(request.sa3Steps, 12);
+  assert.deepEqual(request.sa3Cover, { transform: 0.9, adapters: 'texture:0.25' });
+  const defaults = effectiveCoverRequest({ ...input, expectedBackend: 'sa3' },
+    { assetId: 'asset', sha256: 'sha' }, '/references/source.wav');
+  assert.equal(defaults.sa3Steps, 8);
+  assert.deepEqual(defaults.sa3Cover, { transform: 0.3, adapters: '' });
+  for (const bad of [{ strength: 1 }, { strength: 0 }, { steps: 0 }, { steps: 65 },
+    { seed: 0.5 }, { adapter: '../texture:1' }, { adapter: 'texture:NaN' }]) {
+    assert.equal(coverRenderSchema.safeParse({ ...parsed, ...bad }).success, false);
+  }
 });
 
 test('Cover\'s own Lyric Timing choice wins over a saved global yue2LyricSchedule', () => {

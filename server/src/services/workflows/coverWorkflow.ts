@@ -86,13 +86,6 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
     else if (typeof e.timbreReference === 'string' && e.timbreReference) request.timbreReference = e.timbreReference;
     return request;
   }
-  if (!d.approvedAbc) throw new WorkflowError(409, 'Review and approve the score first');
-  if (c.pairMode === 'pair' && (!c.lmAdapterAr || !c.lmAdapterNar)) throw new WorkflowError(400, 'Choose both YuE2 adapter halves');
-  const selection = c.captionMode === 'auto' ? { mode: 'auto' as const }
-    : c.captionMode.startsWith('track:') ? { mode: 'track' as const, selectedName: c.captionMode.slice(6) }
-      : { mode: 'custom' as const };
-  const caption = resolveYue2Caption(i.caption, analysis?.bpm, c.captionTracks as Yue2SourceTrack[], selection).caption;
-  const yue2 = Object.fromEntries(Object.entries(e).filter(([key]) => key.startsWith('yue2')));
   const keys = ['seed', 'randomSeed', 'batchSize', 'postProcessingEnabled', 'masteringEnabled',
     'masteringReference', 'lufsEnabled', 'lufsTarget', 'lufsCeilingDb', 'stableStepOn',
     'stableStepStrength', 'stableStepBackend', 'stableStepAdapters', 'stableStepSeed',
@@ -101,6 +94,24 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
     'whisperLyricsEnabled', 'whisperModel', 'whisperLanguage', 'whisperBeamSize',
     'whisperIsolateVocals', 'qualityEvalEnabled', 'qualityEvalTarget', 'coverArtEnabled', 'coverArtSubject'];
   const shared = Object.fromEntries(keys.map(k => [k, e[k]]));
+  if (i.expectedBackend === 'sa3') {
+    return { ...shared, backend: 'sa3', expectedBackend: 'sa3', taskType: 'cover',
+      customMode: true, sourceAudioUrl: url, style: i.caption, title: coverTitle(i),
+      instrumental: true, lyrics: '', duration: 0, source: 'cover-studio',
+      artistName: i.targetArtistName || i.artistName, sourceArtist: i.artistName,
+      caption: i.caption, sa3Steps: i.steps ?? 8,
+      ...(i.seed !== undefined ? { seed: i.seed, randomSeed: i.seed < 0 } : {}),
+      sa3Cover: { transform: i.strength ?? c.sa3Transform ?? 0.3,
+        adapters: i.adapter ?? c.sa3Adapters ?? '' } };
+  }
+  if (i.expectedBackend !== 'yue2') throw new WorkflowError(400, 'Backend does not support covers');
+  if (!d.approvedAbc) throw new WorkflowError(409, 'Review and approve the score first');
+  if (c.pairMode === 'pair' && (!c.lmAdapterAr || !c.lmAdapterNar)) throw new WorkflowError(400, 'Choose both YuE2 adapter halves');
+  const selection = c.captionMode === 'auto' ? { mode: 'auto' as const }
+    : c.captionMode.startsWith('track:') ? { mode: 'track' as const, selectedName: c.captionMode.slice(6) }
+      : { mode: 'custom' as const };
+  const caption = resolveYue2Caption(i.caption, analysis?.bpm, c.captionTracks as Yue2SourceTrack[], selection).caption;
+  const yue2 = Object.fromEntries(Object.entries(e).filter(([key]) => key.startsWith('yue2')));
   const moved = c.keyShift && scoreKey(d.approvedAbc) ? transposeCoverKey(scoreKey(d.approvedAbc), c.keyShift) : '';
   return { ...shared, ...yue2, backend: 'yue2', duration: -1, expectedBackend: 'yue2',
     coResident: s.coResident, cacheLmCodes: s.cacheLmCodes,
@@ -287,7 +298,7 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
       if (conflict) throw new WorkflowError(409, conflict);
       input = { ...input, lyrics: pair.lyrics };
     }
-    if (!input.instrumental && !input.lyrics.trim()) throw new WorkflowError(400, 'Enter lyrics or enable Instrumental mode');
+    if (input.expectedBackend !== 'sa3' && !input.instrumental && !input.lyrics.trim()) throw new WorkflowError(400, 'Enter lyrics or enable Instrumental mode');
     const source = asset(data.assetId, ctx.userId);
     if (source.sha256 !== data.sha256) throw new WorkflowError(409, 'Cover source changed');
     if (!await (dep('capability') || defaultCapability)(input.expectedBackend)) throw new WorkflowError(400, 'Backend does not support covers');

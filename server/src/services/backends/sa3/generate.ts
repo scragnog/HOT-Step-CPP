@@ -1,7 +1,7 @@
 // backends/sa3/generate.ts — Stable Audio 3 primary-backend generation path
 //
-// HOT-Step (MDMAchine / A&E Concepts). Runs one text-to-audio render through
-// the engine's POST /sa3-synth (hot-step-server.cpp) and lands the result in
+// HOT-Step (MDMAchine / A&E Concepts). Runs text-to-audio through /sa3-synth
+// or full-source Cover Studio transforms through /sa3-refine, and saves in
 // the library exactly the way backends/minimax/generate.ts does: WAV to
 // data.audioDir, model-agnostic post-processing, optional Whisper, a songs row,
 // job.result. Anything that pattern-matches MM3's file is deliberate — the
@@ -10,13 +10,13 @@
 // Deliberately SIMPLER than MM3's runner. /sa3-synth is synchronous (it
 // returns the WAV in the response body) so there is no job polling, no
 // progress stream, no takes, no LRC, no planner LM, no AR cache. The whole
-// render is one awaited fetch.
+// render is one awaited fetch. Covers preserve the source rate and length.
 //
 // Prompt: the caption is tokenised with the same T5Gemma tokenizer StableStep
 // uses (sa3Tokenizer.ts). NOT buildStableStepPrompt() — that strips vocal
 // descriptors and appends "Instrumental only", which is right for a refine
 // of an ACE instrumental bed and wrong for a primary render of whatever the
-// user asked for. The caption goes through as written.
+// user asked for. The caption goes through as written; covers append length.
 
 /** Stage shown from submit until the render returns. /sa3-synth is one
  *  synchronous call with no progress stream and no load phase, so model load
@@ -32,8 +32,11 @@ import fs from 'fs';
 import path from 'path';
 import { performance } from 'perf_hooks';
 import { v4 as uuidv4 } from 'uuid';
+import { parseBuffer } from 'music-metadata';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
-import { config } from '../../../config.js';
+import { config, getFFmpegPath } from '../../../config.js';
 import { getDb } from '../../../db/database.js';
 import { aceClient } from '../../aceClient.js';
 import { wavDurationSec } from '../../audioCrop.js';
@@ -41,6 +44,7 @@ import { tokenizeForSa3 } from '../../sa3Tokenizer.js';
 import { runPostProcessingChain } from '../../generation/postProcessing.js';
 import type { PostProcessParams } from '../../generation/postProcessing.js';
 import { normalizeLufs } from '../../generation/lufsNormalize.js';
+import { resolveSourceAudioPath } from '../../generation/sourceAudio.js';
 import {
   startGenerationLog, logGeneration, logGenerationParams,
   finishGenerationLog, failGenerationLog,
@@ -78,6 +82,9 @@ interface Sa3SynthWire {
   guidanceScale?: number;
   pluginParams?: Record<string, string | number>;
   postprocessPlugin?: string;
+  sourceAudioUrl?: string;
+  strength?: number;
+  sampleRate?: number;
 }
 
 /** Default SA3 step count (ear-tested 2026-10-02: 8 beats 12 and 24). */
@@ -171,6 +178,49 @@ export function mapSa3Adapters(params: any): Array<{ name: string; scale: number
     }));
 }
 
+/** Keep the complete source and its rate; the engine handles resampling and tiling. */
+export async function prepareSa3Cover(params: any, signal?: AbortSignal) {
+  if (typeof params.sourceAudioUrl !== 'string' || !params.sourceAudioUrl) {
+    throw new Error('SA3 cover needs source audio');
+  }
+  const sourcePath = resolveSourceAudioPath(params.sourceAudioUrl);
+  let source = fs.readFileSync(sourcePath);
+  const { format } = await parseBuffer(source, undefined, { duration: true });
+  const durationSec = format.duration, sampleRate = format.sampleRate;
+  if (!durationSec || !Number.isFinite(durationSec) || !sampleRate) {
+    throw new Error('SA3 cover source needs a readable duration and sample rate');
+  }
+  // The engine decodes WAV/MP3. Decode other uploads without changing rate
+  // or trimming the track, unlike the shared 48 kHz ACE conversion helper.
+  if (!['.wav', '.mp3'].includes(path.extname(sourcePath).toLowerCase())) {
+    const ffmpeg = getFFmpegPath();
+    if (!ffmpeg) throw new Error('SA3 cover needs ffmpeg to decode this source format');
+    fs.mkdirSync(config.data.audioDir, { recursive: true });
+    const temp = fs.mkdtempSync(path.join(config.data.audioDir, 'sa3-cover-source-'));
+    try {
+      const decoded = path.join(temp, 'source.wav');
+      await promisify(execFile)(ffmpeg, ['-y', '-i', sourcePath, '-vn', '-ac', '2',
+        '-c:a', 'pcm_s16le', decoded], { timeout: 120_000, windowsHide: true, signal });
+      source = fs.readFileSync(decoded);
+    } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+  }
+  const strength = params.sa3Cover?.transform ?? 0.3;
+  if (typeof strength !== 'number' || !Number.isFinite(strength) || strength < 0.1 || strength > 0.9) {
+    throw new Error('SA3 cover transform must be between 0.1 and 0.9');
+  }
+  const raw = params.sa3Cover?.adapters ?? '';
+  if (typeof raw !== 'string') throw new Error('SA3 cover adapters must be name:scale pairs');
+  const adapters = raw.trim() ? raw.split(',').map(pair => {
+    const match = pair.trim().match(/^([^:,]+):([^:,]+)$/);
+    const scale = match && match[2].trim() ? Number(match[2]) : NaN;
+    if (!match || !match[1].trim() || /[/\\]|\.\./.test(match[1]) || !Number.isFinite(scale)) {
+      throw new Error('SA3 cover adapters must be name:scale pairs');
+    }
+    return { name: match[1].trim(), scale };
+  }) : [];
+  return { source, durationSec, sampleRate, strength, adapters };
+}
+
 export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDeps): Promise<void> {
   const log = (level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', msg: string) =>
     logGeneration(job.id, level, msg);
@@ -183,8 +233,10 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
   await releaseMinimaxVramForAce();
 
   // ── Map params ────────────────────────────────────────────────────────
-  const caption: string = String(job.params.caption ?? job.params.style ?? '').trim();
-  if (!caption) {
+  const isCover = job.params.taskType === 'cover';
+  const rawCaption = String(job.params.caption ?? job.params.style ?? '');
+  const caption = isCover ? rawCaption : rawCaption.trim();
+  if (!caption.trim()) {
     job.status = 'failed';
     job.error  = 'Stable Audio 3 needs a caption (Style Description)';
     job.stage  = 'Failed';
@@ -222,35 +274,46 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
   startGenerationLog(job.id, TASK);
 
   try {
+    const cover = isCover ? await prepareSa3Cover(job.params, signal) : undefined;
+    if (cover) durationSec = cover.durationSec;
+    const renderSteps = cover ? Math.floor(steps) : steps;
+    const renderSampler = cover ? 'pingpong' as const : sampler;
+    const renderAdapters = cover ? cover.adapters : adapters;
+    const prompt = cover ? `${caption}\nLength: ${Math.round(durationSec)} seconds` : caption;
     // ── Tokenise ──────────────────────────────────────────────────────────
     job.status   = 'synth_running';
     job.stage    = SA3_LOADING_STAGE;
     job.progress = 2;
     const tokStart = performance.now();
-    const { ids, nTokens } = await tokenizeForSa3(caption);
+    const { ids, nTokens } = await tokenizeForSa3(prompt);
     timing.push({ name: 'Tokenise', ms: Math.round(performance.now() - tokStart) });
     log('INFO', `[SA3] Prompt: ${nTokens}/256 tokens`);
 
     const wire: Sa3SynthWire = {
       synthModel: job.envelope.models.dit || SA3_DEFAULT_DIT,
-      caption, prompt: caption, nTokens, durationSec, steps, sampler, seed, adapters, ...plugins,
+      caption, prompt, nTokens, durationSec, steps: renderSteps, sampler: renderSampler, seed,
+      adapters: renderAdapters, ...(cover ? { sourceAudioUrl: job.params.sourceAudioUrl,
+        strength: cover.strength, sampleRate: cover.sampleRate } : plugins),
     };
     logGenerationParams(job.id, wire as unknown as Record<string, unknown>);
-    if (plugins.solver || plugins.scheduler || plugins.guidanceMode) {
-      log('INFO', `[SA3] Plugins: solver=${plugins.solver ?? '(pingpong)'} `
-        + `scheduler=${plugins.scheduler ?? '(sa3 logsnr)'} `
-        + `guidance=${plugins.guidanceMode ?? '(none)'}`);
+    if (wire.solver || wire.scheduler || wire.guidanceMode) {
+      log('INFO', `[SA3] Plugins: solver=${wire.solver ?? '(pingpong)'} `
+        + `scheduler=${wire.scheduler ?? '(sa3 logsnr)'} `
+        + `guidance=${wire.guidanceMode ?? '(none)'}`);
     }
-    if (adapters.length > 0) {
-      log('INFO', `[SA3] Adapters: ${adapters.map(a => `${a.name}:${a.scale}`).join(', ')}`);
+    if (renderAdapters.length > 0) {
+      log('INFO', `[SA3] Adapters: ${renderAdapters.map(a => `${a.name}:${a.scale}`).join(', ')}`);
     }
 
     // ── Synth (one synchronous call) ──────────────────────────────────────
-    job.stage    = sa3RenderStage(durationSec, steps);
+    job.stage    = sa3RenderStage(durationSec, renderSteps);
     job.progress = 5;
-    if ((job.status as string) === 'cancelled') throw new Error('Cancelled');
+    if (signal.aborted || (job.status as string) === 'cancelled') throw new Error('Cancelled');
     const synthStart = performance.now();
-    const wavBuf = await aceClient.submitSa3Synth({
+    const wavBuf = cover ? await aceClient.submitSa3Refine(cover.source, {
+      tokens: ids, nTokens, strength: cover.strength, seed, adapters: cover.adapters,
+      steps: renderSteps, sampler: renderSampler, outSr: cover.sampleRate, outFmt: 'f32', signal,
+    }) : await aceClient.submitSa3Synth({
       synthModel: wire.synthModel,
       onModelResolved(filename) {
         wire.resolvedSynthModel = filename;
@@ -281,8 +344,8 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
       signal,
     });
     const synthMs = Math.round(performance.now() - synthStart);
-    timing.push({ name: 'SA3 synth', ms: synthMs });
-    if ((job.status as string) === 'cancelled') throw new Error('Cancelled');
+    timing.push({ name: cover ? 'SA3 cover refine' : 'SA3 synth', ms: synthMs });
+    if (signal.aborted || (job.status as string) === 'cancelled') throw new Error('Cancelled');
     if (!wavBuf || wavBuf.length === 0) throw new Error('Stable Audio 3 returned an empty audio body');
 
     // ── Save ──────────────────────────────────────────────────────────────
@@ -331,7 +394,8 @@ export async function runSa3Generation(job: GenerationJob, deps: Sa3GenerationDe
       duration: durationSec,
       sa3Request: wire,
       sa3DitModel: wire.resolvedSynthModel ?? wire.synthModel,
-      sa3: { steps, sampler, sample_rate: 44100, prompt_tokens: nTokens },
+      sa3: { steps: renderSteps, sampler: renderSampler,
+        sample_rate: cover?.sampleRate ?? 44100, prompt_tokens: nTokens },
     };
 
     // ── Post-processing (model-agnostic subset, same as MM3) ─────────────
