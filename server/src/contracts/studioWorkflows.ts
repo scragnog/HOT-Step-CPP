@@ -94,7 +94,7 @@ export interface CoverTranscribeResult { documentId: string; revision: number; a
  *  be the approved score, and the lyrics rendered are the ones it exports,
  *  replacing `lyrics` (409 otherwise). */
 export const coverRenderSchema = coverDraftRefSchema.extend({
-  expectedBackend: z.enum(['ace', 'yue2', 'sa3']), engineParams: z.record(z.string(), z.unknown()),
+  expectedBackend: z.enum(['ace', 'yue2', 'sa3', 'heartmula']), engineParams: z.record(z.string(), z.unknown()),
   // SA3 overrides. The existing controls/engineParams fields remain accepted.
   strength: z.number().min(0.1).max(0.9).optional(),
   seed: z.number().int().min(-1).max(Number.MAX_SAFE_INTEGER).optional(),

@@ -49,6 +49,7 @@ function coverTitle(i: CoverRenderInput) {
   return i.artistName ? `${i.title || 'Cover'} (${i.artistName} Cover)` : (i.title || 'Cover');
 }
 export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: string): Record<string, unknown> {
+  if (i.expectedBackend === 'heartmula') throw new WorkflowError(400, 'HeartMuLa covers are not available yet');
   const c = i.controls, e = i.engineParams, s = i.settings;
   const analysis = i.analysis ?? d.analysis;
   if (i.expectedBackend === 'ace') {
@@ -291,6 +292,7 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
   } }, { kind: 'cover-render', input: render, async run(ctx) {
     let input = ctx.input as CoverRenderInput;
     const data = draft(docs(), input.documentId, input.revision, ctx.userId);
+    if (input.expectedBackend === 'heartmula') throw new WorkflowError(400, 'HeartMuLa covers are not available yet');
     if (input.prepare !== undefined && input.expectedBackend === 'yue2') {
       const pair = preparedPair(input.prepare, data.approvedAbc || undefined);
       if ('error' in pair) throw new WorkflowError(409, pair.error);

@@ -157,10 +157,23 @@ test('cover schema accepts SA3 defaults and rejects invalid transforms and unkno
     assert.equal(coverRenderSchema.safeParse({ ...parsed,
       controls: { ...parsed.controls, sa3Transform: transform } }).success, false);
   }
-  assert.equal(coverRenderSchema.safeParse({ ...input, expectedBackend: 'heartmula' }).success, false);
-  assert.throws(() => effectiveCoverRequest({ ...input, expectedBackend: 'heartmula' } as unknown as CoverRenderInput,
+  assert.equal(coverRenderSchema.safeParse({ ...input, expectedBackend: 'unknown' }).success, false);
+  assert.throws(() => effectiveCoverRequest({ ...input, expectedBackend: 'unknown' } as unknown as CoverRenderInput,
     { assetId: 'asset', sha256: 'sha', approvedAbc: 'X:1\nK:C\nC|' }, '/references/source.wav'),
   { status: 400 });
+});
+
+test('HeartMuLa is recognized but rejects covers clearly before lyrics, score or capability checks', async () => {
+  const body = coverRenderSchema.parse({ ...input, expectedBackend: 'heartmula', lyrics: '' });
+  assert.throws(() => effectiveCoverRequest(body, { assetId: 'asset', sha256: 'sha' }, '/references/source.wav'),
+    { status: 400, message: 'HeartMuLa covers are not available yet' });
+  const s = setup({ capability: async () => { throw new Error('capability lookup must not run'); } });
+  const opened = await s.open();
+  const job = s.submit('cover-render', 'heartmula-pending', { ...body, ...opened }).job;
+  await s.jobs.settled();
+  assert.equal(s.jobs.get(job.id).status, 'failed');
+  assert.match(s.jobs.get(job.id).error ?? '', /HeartMuLa covers are not available yet/);
+  assert.equal(s.items.size, 0);
 });
 
 test('SA3 queues the captured full source without lyrics or an approved score', async () => {
