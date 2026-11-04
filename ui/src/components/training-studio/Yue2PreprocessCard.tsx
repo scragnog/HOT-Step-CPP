@@ -241,9 +241,8 @@ export const Yue2PreprocessCard: React.FC<{ status: Yue2Status; done: boolean; o
               {!!cache && cache.loudnessLufs === null && (
                 <span className="text-[10px] leading-snug text-amber-600 dark:text-amber-500">
                   {t('trainingStudio.yue2.loudnessStaleCache',
-                    "This cache was cut before loudness normalization, so it trains at each album's mastering "
-                    + 'level (loud albums then render clipped). Run the cache again: every track is brought to '
-                    + '-14 LUFS and re-encoded.')}
+                    'This cache was cut by an older audio prep that clipped loud tracks instead of turning '
+                    + 'them down, so loud albums render clipped. Run the cache again to re-encode every track.')}
                 </span>
               )}
               {!!cache && (status.sidecarsWithYue2 ?? 0) > 0 && cache.captionMode !== 'yue2' && (

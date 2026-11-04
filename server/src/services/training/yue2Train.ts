@@ -557,10 +557,13 @@ export function buildYue2PreprocessArgs(o: ResolvedYue2PreprocessOptions): strin
   return args;
 }
 
-/** The loudness every YuE2 cache is cut at, for every training method
- *  (2026-10-16): the engine's -14 LUFS default. An off cache flat-topped loud
- *  albums; the engine now peak-scales overs instead of clamping them. */
-export const YUE2_CACHE_LUFS = -14;
+/** The loudness every YuE2 cache is cut at, for every training method: 0 =
+ *  off, the track's own level, as MM3 and the other backends encode it
+ *  (2026-11-04), chosen after blind listening to `ace-train roundtrip`
+ *  output. -14 LUFS (2026-10-16 to 2026-11-04) measurably changed what the
+ *  VAE encodes. Overs are still peak-scaled by the engine, not clamped,
+ *  which is what had flat-topped loud albums before. */
+export const YUE2_CACHE_LUFS = 0;
 
 export interface ResolvedYue2TrainOptions extends Partial<Yue2OptimOptions> {
   /** `<latents>/yue2_preprocess.json`. */

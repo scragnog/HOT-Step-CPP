@@ -567,7 +567,7 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
   switch (stage) {
     case 'prepare': throw new Error('HeartMuLa preparation requires a HeartMuLa batch');
     case 'cache': {
-      // Every method trains on a -14 LUFS cache. A cache at another level is
+      // Every method trains on a YUE2_CACHE_LUFS cache. A cache at another level is
       // re-cut: the key changes, so codes, sheet and alignment are dropped and
       // their stages run again.
       const lufs = YUE2_CACHE_LUFS;

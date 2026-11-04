@@ -41,7 +41,9 @@ export const PREPROCESS_DEFAULTS: PreprocessFormState = {
   vaeModel: '',
   textEncoder: '',
   maxDuration: 600,
-  normalize: 'peak',
+  // Off (2026-11-04): every backend's training data is encoded at the
+  // track's own level, as MM3's always has been.
+  normalize: 'none',
   targetDb: -1.0,
   dtype: 'f32',
   compat: 'hotstep',

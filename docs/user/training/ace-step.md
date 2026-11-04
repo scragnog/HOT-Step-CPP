@@ -35,7 +35,7 @@ Changing the trigger word or its position after preprocessing makes Preprocess r
 
 Preprocess encodes the dataset into training tensors against one DiT base. It is a collapsible stage card with the run button outside the fold, like YuE2's stages, and the **Tensors** chip on the dataset card turns on when tensors exist. The Train page uses the same cards for the planner (LM) and sound (DiT) adapters. Pick a BF16 base: the app warns on quantized bases, and results from them may be degraded. The sound adapter can only be trained against the base you preprocessed with, so choose the base you intend to generate with.
 
-Defaults: max duration 600 s per track, peak normalisation to -1 dB, max caption tokens 512, max lyric tokens 2048. The engine stops for the duration of the job and restarts afterwards. Measured on an RTX 5090, preprocessing uses about 6 GB of VRAM and takes about 3 seconds per song.
+Defaults: max duration 600 s per track, no normalisation (each track is encoded at its own level, as every backend's training prep does since 2026-11-04; **Normalize** `peak` scales it to the target dB instead), max caption tokens 512, max lyric tokens 2048. The engine stops for the duration of the job and restarts afterwards. Measured on an RTX 5090, preprocessing uses about 6 GB of VRAM and takes about 3 seconds per song.
 
 ## Planner LoRA (LM)
 
