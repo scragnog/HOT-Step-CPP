@@ -223,6 +223,8 @@ AI-assisted lyric writing from a learned style profile, plus per-album render pr
 
 Re-style a recording with ACE-Step's audio-conditioned cover or YuE2's reviewed
 lead-sheet workflow, reusing dataset metadata and scores when available.
+Stable Audio 3 audio transform with caption, Transform strength, seed and an optional DoRA adapter; instrumental output from the full source.
+
 Details: [Cover Studio](docs/user/studios/cover-studio.md)
 
 | Feature | What it does |

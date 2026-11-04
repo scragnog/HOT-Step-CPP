@@ -2,19 +2,43 @@
 
 Make a new version of a recording. ACE-Step conditions its audio renderer on the
 source; YuE2 transcribes the source into a lead sheet and composes from the
-reviewed score. Both use your caption and lyrics or an Instrumental choice.
+reviewed score. Stable Audio 3 transforms the source audio using a caption,
+Transform strength, seed and optional DoRA adapter. Its output is instrumental
+and follows the source's feel, with no melody guarantee.
 
 ![Cover Studio](../../images/hot-step-cover-studio.webp)
 
 ## Where to find it
 
-Sidebar: **Cover Studio**, listed while ACE-Step 1.5 or YuE2 is the active backend.
-The two offer different cover workflows. MiniMax-Music3 and Stable Audio 3 have no
-covers, so the sidebar leaves the studio out, and switching to one of them while
-Cover Studio is open moves the app to Custom-Gen. You need to be signed in to upload
+Sidebar: **Cover Studio**, listed while ACE-Step 1.5, YuE2 or Stable Audio 3 is the
+active backend. Each offers a different workflow. On backends without covers,
+switching away while Cover Studio is open moves the app to Custom-Gen. You need to be signed in to upload
 a source track. The [engine picker](../backends.md#switching-backends) appears once a second
 backend is registered, so on a single-backend install this is not a decision you
 have to make.
+
+## Stable Audio 3 audio transform
+
+1. Select Stable Audio 3, open Cover Studio and upload a source recording.
+   This mode needs an uploaded source. If you sent a Library track to the studio,
+   upload its audio file to prepare it for the transform.
+2. Enter a caption describing the instruments, genre, mood and production.
+   You can choose a Lyric Studio artist and use **Draft caption** with the
+   Source panel's Caption LLM provider. The caption stays editable.
+3. Set **Transform** from 0.1, close to the source, to 0.9, a looser transform.
+   The default is 0.3. This range belongs to Cover Studio; it does not change
+   the separate StableStep post-processing strength.
+4. Set **Seed** to -1 for random, or a fixed whole number for repeatable settings.
+   Optionally pick one SA3 DoRA adapter from `models/sa3-adapters/`, used at
+   strength 1. This picker is separate from StableStep's adapters.
+5. Click **Transform audio**. The server queues the full-source transform and
+   saves its result to the Library. **Cancel** cancels the active submission.
+
+This is an instrumental audio transform. It follows the source's feel and does
+not guarantee the melody. It does not use lyrics, a lead sheet, latent import,
+timbre override or vocal language. Analysis, saved drafts and source separation
+remain available. Separation is for inspection here; mixer changes do not alter
+the full uploaded audio sent to the transform.
 
 ## ACE workflow
 
@@ -681,9 +705,9 @@ its value has moved from the default; click it to snap that one field back.
 
 ## Tips and limits
 
-- Cover generation needs ACE-Step 1.5 or YuE2 active. Under MiniMax-Music3 or
-  Stable Audio 3 the sidebar does not list the studio.
-- Splitting into stems is step one of two. The split by itself does not change the
+- Cover generation needs ACE-Step 1.5, YuE2 or Stable Audio 3 active.
+  MiniMax-Music3 does not list the studio.
+- For ACE-Step and YuE2, splitting into stems is step one of two. The split by itself does not change the
   render; the mixer is where muting or lowering a stem actually removes it from
   the cover.
 - For ACE-Step, BPM/key detection depends on the bundled Essentia analyzer. If it returns a

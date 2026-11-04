@@ -143,6 +143,8 @@ export interface BackendFeatureCapabilities {
    *  gp.yue2AlignLyrics. */
   forcedAlignment: boolean;
   cover: boolean;
+  /** Audio-to-audio transform without a lead sheet or vocal conditioning. */
+  coverAudioTransform?: boolean;
   repaint: boolean;
   lego: boolean;
   extract: boolean;

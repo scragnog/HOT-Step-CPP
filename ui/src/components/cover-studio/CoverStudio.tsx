@@ -48,6 +48,11 @@ import { normalizeAbc } from '../../../../server/src/contracts/yue2Prepare';
 import { LyricsSectionHighlight } from './LyricsSectionHighlight';
 import type { LatentMetadata } from '../shared/LatentImport';
 import { loadSelections, saveSelections } from '../lyric-studio/ProviderSelector';
+import { useCapabilities } from '../../hooks/useCapabilities';
+import { stableStepAdaptersOptions } from '../../queries/global-models/options';
+import { EditableSlider } from '../shared/EditableSlider';
+import { StyledSelect } from '../shared/StyledSelect';
+import { QueryError } from '../shared/QueryError';
 import { useBackendStore } from '../../stores/backendStore';
 import { fetchYue2CaptionSource, resolveYue2Caption, yue2PickAtEnqueue, type Yue2SourceTrack } from '../../utils/yue2CaptionSource';
 import { yue2CoverApi, type Yue2CoverDatasetMetadata, type Yue2CoverJob, type Yue2CoverReadiness,
@@ -136,7 +141,16 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const { token } = useAuth();
   const gp = useGlobalParamsStore();
   const [settings] = usePersistedState<AppSettings>('ace-settings', DEFAULT_SETTINGS);
+  const { capabilities } = useCapabilities();
+  const audioTransformMode = capabilities?.features.cover === true && capabilities.features.coverAudioTransform === true;
   const yue2Mode = useBackendStore(s => s.activeBackendId === 'yue2');
+  const sa3AdaptersQuery = useQuery({ ...stableStepAdaptersOptions(), enabled: audioTransformMode });
+  const [sa3Transform, setSa3Transform] = useState(() => restore('sa3Transform', 0.3));
+  const [sa3Seed, setSa3Seed] = useState(() => restore('sa3Seed', -1));
+  const [sa3Adapter, setSa3Adapter] = useState(() => restore('sa3Adapter', ''));
+  useEffect(() => { persist('sa3Transform', sa3Transform); }, [sa3Transform]);
+  useEffect(() => { persist('sa3Seed', sa3Seed); }, [sa3Seed]);
+  useEffect(() => { persist('sa3Adapter', sa3Adapter); }, [sa3Adapter]);
   const yue2Models = useBackendStore(s => s.models.yue2);
   const [sourceMode, setSourceMode] = useState<'audio' | 'musicxml'>(() => restore('sourceMode', 'audio'));
   const [draftName, setDraftName] = useState(() => restore('draftName', ''));
@@ -470,7 +484,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => { persist('approvedSheet', approvedSheet); }, [approvedSheet]);
   // The editing fields, mirrored into this browser's revisioned server draft.
   // coverDraftId/Revision stay local: they point at the workflow's cover-draft.
-  const draft = useStudioDraftMirror('cover', token, { 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel,
+  const draft = useStudioDraftMirror('cover', token, { 'cover-studio-sa3Transform': sa3Transform, 'cover-studio-sa3Seed': sa3Seed, 'cover-studio-sa3Adapter': sa3Adapter, 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel,
     'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-instrumentalMode': instrumentalMode, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverGuide': coverGuide, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, ...prep.draftFields, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, 'cover-studio-buildMode': buildMode, 'cover-studio-buildSessionId': buildSessionId, 'cover-studio-buildLyricsDraft': buildLyricsDraft, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
     { ...(sourceAssetId ? { sourceAssetId } : {}), ...(sourceSongId ? { sourceSongId } : {}) });
   // Loading a draft sets the same state the controls edit. Its uploaded source
@@ -478,6 +492,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // beyond opening the source); nothing is generated.
   const applyDraft = (body: { fields: Record<string, unknown> }) => {
     const f = body.fields;
+    setSa3Transform(typeof f['cover-studio-sa3Transform'] === 'number' ? Math.max(0.1, Math.min(0.9, f['cover-studio-sa3Transform'])) : 0.3);
+    setSa3Seed(typeof f['cover-studio-sa3Seed'] === 'number' ? f['cover-studio-sa3Seed'] : -1);
+    setSa3Adapter(typeof f['cover-studio-sa3Adapter'] === 'string' ? f['cover-studio-sa3Adapter'] : '');
     setDraftName(typeof f['cover-studio-draftName'] === 'string' ? f['cover-studio-draftName'] : '');
     const nextSourceKey = JSON.stringify([
       f['cover-studio-sourceMode'] ?? 'audio',
@@ -665,12 +682,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => {
     if (restoredPresetLoaded.current || !setsQuery.data || !presetsQuery.data) return;
     restoredPresetLoaded.current = true;
-    if (!yue2Mode && selectedArtistId && !selectedPreset) {
+    if (!yue2Mode && !audioTransformMode && selectedArtistId && !selectedPreset) {
       const ids = new Set(setsQuery.data.filter(ls => ls.artist_id === selectedArtistId).map(ls => ls.id));
       const preset = presetsQuery.data.presets.find(p => ids.has(p.lyrics_set_id) && p.adapter_path);
       if (preset) setSelectedPreset(preset);
     }
-  }, [yue2Mode, setsQuery.data, presetsQuery.data, selectedArtistId]);
+  }, [yue2Mode, audioTransformMode, setsQuery.data, presetsQuery.data, selectedArtistId]);
 
   useEffect(() => {
     if (!yue2Mode || renderMode !== 'artist' || selectedYue2ArtistId == null || !setsQuery.data || !presetsQuery.data) return;
@@ -1243,10 +1260,12 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const input = {
       documentId: coverDraftId, revision: coverDraftRevision,
       expectedBackend: backend, engineParams,
+      ...(audioTransformMode ? { strength: sa3Transform, seed: sa3Seed,
+        ...(sa3Adapter ? { adapter: `${sa3Adapter}:1` } : {}) } : {}),
       title: songTitle, artistName: songArtist,
-      targetArtistName: yue2Mode ? targetYue2Artist : artists.find(a => a.id === selectedArtistId)?.name || '',
-      lyrics: renderLyrics, caption: artistCaption,
-      instrumental: renderInstrumental, lyricsSource: renderLyricsSource, scoreSource: sheetScoreSource, analysis,
+      targetArtistName: audioTransformMode ? '' : yue2Mode ? targetYue2Artist : artists.find(a => a.id === selectedArtistId)?.name || '',
+      lyrics: audioTransformMode ? '' : renderLyrics, caption: artistCaption,
+      instrumental: audioTransformMode || renderInstrumental, lyricsSource: audioTransformMode ? null : renderLyricsSource, scoreSource: audioTransformMode ? null : sheetScoreSource, analysis,
       ...(yue2Mode ? { prepare: prep.doc } : {}),
       settings: { coResident: settings.coResident, cacheLmCodes: settings.cacheLmCodes,
         parallelWhisper: settings.parallelWhisper, parallelQualityEval: settings.parallelQualityEval,
@@ -1269,7 +1288,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     };
     const qId = addManualQueueItem({ title: songArtist
       ? `${songTitle || 'Cover'} (${songArtist} Cover)` : (songTitle || 'Cover'),
-      artistName: yue2Mode ? targetYue2Artist : artists.find(a => a.id === selectedArtistId)?.name || '', caption: artistCaption });
+      artistName: audioTransformMode ? '' : yue2Mode ? targetYue2Artist : artists.find(a => a.id === selectedArtistId)?.name || '', caption: artistCaption });
     updateManualQueueItem(qId, { stage: 'Preparing…' });
     setIsGenerating(true);
     void (async () => {
@@ -1470,6 +1489,11 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
 
   const handleGenerate = () => {
+    if (audioTransformMode) {
+      if (!token || !sourceAudioUrl || !coverDraftId || !coverDraftRevision || !artistCaption.trim()) return;
+      submitCoverWorkflow();
+      return;
+    }
     if (!token || (sourceMode === 'audio' && !sourceAudioUrl)) { showToast(t('cover.missingSrcOrLyrics')); return; }
     if (sourceMode === 'audio' && sourceAssetId && (!coverDraftId || !coverDraftRevision)) {
       showToast('Source is still being prepared'); return;
@@ -1747,7 +1771,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   };
 
   // Always allow queuing another cover — covers stack and run one at a time (#62).
-  const canGenerate = (!yue2Mode || sourceMode === 'audio' ? !!sourceAudioUrl && (!sourceAssetId || (!!coverDraftId && !!coverDraftRevision)) : true)
+  const canGenerate = audioTransformMode
+    ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision && !!artistCaption.trim()
+    : (!yue2Mode || sourceMode === 'audio' ? !!sourceAudioUrl && (!sourceAssetId || (!!coverDraftId && !!coverDraftRevision)) : true)
     && (yue2Mode ? !!confirmedPair : (!!lyrics.trim() || instrumental))
     && (!yue2Mode || (!!approvedSheet && approvedSheet.key === sourceKey && (renderMode === 'base' || (!!activeYue2Ar && !!activeYue2Nar))));
 
@@ -1772,6 +1798,52 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     <Fold title="Drafts" storageKey="cover-studio-fold-drafts">
       <StudioDraftPicker control={draft} textKey="cover-studio-songTitle" apply={applyDraft} namedSave={yue2Mode} inline />
     </Fold>
+  );
+
+  const renderAudioTransformPanel = () => (
+    <div className="flex-1 min-w-[300px] overflow-y-auto p-4 space-y-4">
+      <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">{t('cover.sa3.title', 'Audio transform')}</h2>
+      <p className="text-xs text-zinc-500">{t('cover.sa3.description', "Instrumental only. Follows the source's feel, with no melody guarantee.")}</p>
+      {sourceAudioUrl && !sourceAssetId && <p className="text-xs text-amber-600 dark:text-amber-400">{t('cover.sa3.uploadRequired', 'Upload the source audio to prepare an audio transform.')}</p>}
+      <label className="block space-y-2">
+        <ParamLabel label={t('cover.sa3.songTitle', 'Title')} info={t('cover.sa3.songTitleInfo', 'Name the transformed track saved in the Library.')} />
+        <input value={songTitle} onChange={e => setSongTitle(e.target.value)}
+          className="w-full rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-sm text-zinc-900 dark:text-white" />
+      </label>
+      <label className="block space-y-2">
+        <ParamLabel label={t('cover.sa3.caption', 'Caption')} info={t('cover.sa3.captionInfo', 'Describe the instruments, genre, mood and production you want the transform to use.')} />
+        <textarea value={artistCaption} onChange={e => setArtistCaption(e.target.value)} rows={5}
+          className="w-full rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-3 text-sm text-zinc-900 dark:text-white" />
+      </label>
+      <ParamLabel label={t('cover.targetArtist')} info={t('cover.sa3.artistInfo', 'Choose an artist from Lyric Studio to draft a caption with the Caption LLM. This does not load an ACE adapter.')} />
+      <StyledSelect accent="cyan" value={selectedArtistId == null ? '' : String(selectedArtistId)}
+        onChange={value => setSelectedArtistId(value ? Number(value) : null)}
+        options={[{ value: '', label: t('cover.sa3.customCaption', 'Custom caption') }, ...artists.map(artist => ({ value: String(artist.id), label: artist.name }))]} />
+      <button type="button" onClick={handleRegenerateCaption} disabled={!selectedArtistId || isGeneratingCaption || isAnalyzing}
+        className="rounded-lg bg-cyan-500/10 px-3 py-2 text-xs text-cyan-600 dark:text-cyan-300 disabled:opacity-50">
+        {t('cover.sa3.draftCaption', 'Draft caption')}
+      </button>
+      <EditableSlider label={t('cover.sa3.transform', 'Transform')} value={sa3Transform} onChange={setSa3Transform}
+        min={0.1} max={0.9} step={0.01} defaultValue={0.3}
+        tooltip={t('cover.sa3.transformInfo', 'Lower values keep closer to the source. Higher values allow a looser transform guided by your caption. Default 0.3; range 0.1 to 0.9.')}
+        helpText={t('cover.sa3.transformRange', '0.1 close / 0.9 loose')} />
+      <label className="block space-y-2">
+        <ParamLabel label={t('cover.sa3.seed', 'Seed')} info={t('cover.sa3.seedInfo', 'Use -1 for a random seed, or a fixed whole number to repeat a transform with the same settings.')} />
+        <input type="number" min={-1} step={1} value={sa3Seed} onChange={e => setSa3Seed(Math.max(-1, Math.trunc(Number(e.target.value))))}
+          className="w-full rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-sm text-zinc-900 dark:text-white" />
+      </label>
+      <ParamLabel label={t('cover.sa3.adapter', 'Adapter')} info={t('cover.sa3.adapterInfo', 'Optional SA3 DoRA adapter from models/sa3-adapters, applied at strength 1. This selection is separate from StableStep.')} />
+      {sa3AdaptersQuery.isError ? <QueryError error={sa3AdaptersQuery.error} onRetry={() => void sa3AdaptersQuery.refetch()} compact /> :
+        <StyledSelect accent="cyan" value={sa3Adapter} onChange={setSa3Adapter}
+          options={[{ value: '', label: t('cover.sa3.noAdapter', 'No adapter') }, ...(sa3AdaptersQuery.data?.adapters ?? []).map(a => ({ value: a.name, label: a.name }))]} />}
+      <p className="text-xs text-zinc-500">{t('cover.sa3.fullSource', 'Transforms the full uploaded source. Stem separation is available for inspection; mixer changes do not alter this transform.')}</p>
+      <button type="button" onClick={handleGenerate} disabled={!canGenerate}
+        className="rounded-lg bg-cyan-500/20 px-4 py-2 text-sm font-medium text-cyan-700 dark:text-cyan-300 disabled:opacity-50">
+        {t('cover.sa3.generate', 'Transform audio')}
+      </button>
+      {isGenerating && <button type="button" onClick={handleCancel} className="ml-3 text-xs text-zinc-500">{t('cover.sa3.cancel', 'Cancel')}</button>}
+      {draftsFold}
+    </div>
   );
 
   // ── Render ──
@@ -1824,7 +1896,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           </MusicXmlImport>}
         </div>}
         {(!yue2Mode || sourceMode === 'audio') && <>
-        <div className="px-4 pt-4 space-y-2">
+        {!audioTransformMode && <div className="px-4 pt-4 space-y-2">
           <Toggle size="sm" accent="cyan" checked={useDetectedDetails}
             disabled={isUploading || isAnalyzing}
             onChange={enabled => {
@@ -1846,9 +1918,10 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
               {factor === 0.5 ? '÷2' : '×2'}
             </button>)}
           </div>}
-        </div>
+        </div>}
         <SourcePanel
           yue2Mode={yue2Mode}
+          audioTransformMode={audioTransformMode}
           sourceFileName={sourceFileName} metadata={metadata} analysis={analysis}
           fromDataset={datasetAnalysis}
           scoreDetails={scoreDetailsDiffer ? { bpm: scaledScoreBpm, key: scoreKey, saving: scoreDetailsSaving,
@@ -1889,9 +1962,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         /></>}
         </div>
 
-        <CoverResizeHandle label="Resize source column" direction="horizontal" onMouseDown={e => startResize(e, sourceWidth, setSourceWidth, 240, 900)} />
+        {!audioTransformMode && <CoverResizeHandle label="Resize source column" direction="horizontal" onMouseDown={e => startResize(e, sourceWidth, setSourceWidth, 240, 900)} />}
         {/* Center: Lyrics and score */}
-        <div className="min-w-[320px] flex-shrink-0 flex flex-col overflow-hidden border-r border-zinc-200 dark:border-white/5" style={{ width: scoreWidth }}>
+        {!audioTransformMode && <><div className="min-w-[320px] flex-shrink-0 flex flex-col overflow-hidden border-r border-zinc-200 dark:border-white/5" style={{ width: scoreWidth }}>
           <div className="flex-shrink-0 px-4 py-3 border-b border-zinc-200 dark:border-white/5">
             <div className="flex items-center justify-between gap-2">
               {/* Artist + Title inputs */}
@@ -2028,9 +2101,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           )}
         </div>
 
-        <CoverResizeHandle label="Resize lyrics and score column" direction="horizontal" onMouseDown={e => startResize(e, scoreWidth, setScoreWidth, 320, 1200)} />
+        <CoverResizeHandle label="Resize lyrics and score column" direction="horizontal" onMouseDown={e => startResize(e, scoreWidth, setScoreWidth, 320, 1200)} /></>}
         {/* Right: Artist + Settings */}
-        {yue2Mode ? <div className="min-w-[300px] flex-1 flex flex-col min-h-0" style={{ flexBasis: settingsWidth }}>
+        {audioTransformMode ? renderAudioTransformPanel() : yue2Mode ? <div className="min-w-[300px] flex-1 flex flex-col min-h-0" style={{ flexBasis: settingsWidth }}>
           {renderMode === 'base' && (pickerAr || pickerNar) && <p className="px-4 pt-3 text-xs text-amber-600 dark:text-amber-400">
             {t('cover.yue2BaseIgnoresLora')}</p>}
           <Yue2CoverPanel
