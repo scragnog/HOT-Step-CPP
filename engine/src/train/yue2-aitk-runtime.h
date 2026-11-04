@@ -149,6 +149,17 @@ struct Config {
     std::int32_t eval_nar_window = -1;
     std::uint64_t eval_seed = 0;
     bool eval_seed_set = false;
+    // Held-out planner gate (GH #316). Every planner_gate_every updates, the
+    // live planner's token-weighted CE on --holdout-items (the --eval-adapted
+    // recipe, AR only: --eval-seed draws, no dropout, its own sampler). Once
+    // planner_gate_min_epochs training epochs have run, planner_gate_patience
+    // readings in a row that are not below best - planner_gate_epsilon freeze
+    // the planner where it is (no rollback), and the decoder trains
+    // --nar-extra-steps more. 0 = off.
+    std::int32_t planner_gate_every = 0;
+    std::int32_t planner_gate_min_epochs = 5;
+    std::int32_t planner_gate_patience = 3;
+    float planner_gate_epsilon = 0.001f;
     // Spike guard. A step whose pre-clip gradient norm exceeds spike_factor x
     // the median of the last 50 applied steps skips its update (0 = off; it
     // arms once 20 norms are in the window, and the window restarts when the
@@ -309,6 +320,53 @@ inline double lr_schedule_multiplier(const Config & c, int completed, int decayi
     return 0.5 * (1.0 + std::cos(pi * ratio));
 }
 
+// The held-out planner gate's state; every field rides in the resume record,
+// so a resumed run reaches the same verdict at the same step as a continuous
+// one. Readings before the epoch floor still set the best, never the count.
+struct PlannerGate {
+    double best = std::numeric_limits<double>::infinity();
+    std::int32_t best_step = -1;
+    std::int32_t stale = 0;  // readings in a row past the floor without improvement
+    enum class Verdict { keep, fire, nonfinite };
+    // Training epochs after `completed` updates: song draws over training songs.
+    static double epochs(const Config & c, int completed, size_t training_items) {
+        return training_items ? double(completed) * double(c.grad_accum) / double(training_items) : 0.0;
+    }
+    // Per-song (CE, tokens) to one CE over all held-out tokens: a long song
+    // weighs what its tokens weigh. NaN when there are no tokens.
+    static double token_mean(const std::vector<std::pair<double, size_t>> & songs) {
+        double weighted = 0.0; size_t total = 0;
+        for (const auto & s : songs) { weighted += s.first * double(s.second); total += s.second; }
+        return total ? weighted / double(total) : std::numeric_limits<double>::quiet_NaN();
+    }
+    static bool due(const Config & c, int completed) {
+        return c.planner_gate_every > 0 && completed > 0 && completed % c.planner_gate_every == 0;
+    }
+    Verdict observe(const Config & c, int completed, double epoch, double ce) {
+        if (!std::isfinite(ce)) return Verdict::nonfinite;
+        if (ce < best - double(c.planner_gate_epsilon)) { best = ce; best_step = completed; stale = 0; return Verdict::keep; }
+        if (epoch < double(c.planner_gate_min_epochs)) return Verdict::keep;
+        return ++stale >= c.planner_gate_patience ? Verdict::fire : Verdict::keep;
+    }
+};
+
+// What the gate needs from the rest of the configuration. Checked before any
+// model load; the training loop relies on every rule here.
+inline bool validate_planner_gate(const Config & c, std::string * error) {
+    const auto bad = [&](const char * why) { if (error) *error = why; return false; };
+    if (c.planner_gate_every <= 0) return true;
+    if (c.holdout_items.empty()) return bad("--planner-gate-every needs --holdout-items: the songs it scores, kept out of training");
+    if (!c.eval_dataset.empty()) return bad("--planner-gate-every scores --holdout-items; --eval-dataset is for --eval-adapted");
+    if (c.nar_extra_steps <= 0) return bad("--planner-gate-every needs --nar-extra-steps: the decoder's budget after the planner freezes");
+    if (c.lr_schedule == "wsd") return bad("--planner-gate-every does not support --lr-schedule wsd: its tail would end the run when the planner freezes");
+    if (c.eval_adapted || c.eval_base_loss || c.meter_only || !c.fixture_replay.empty())
+        return bad("--planner-gate-every is for training runs, not --eval-adapted, --eval-base-loss, --meter-only or --fixture-replay");
+    if (c.planner_gate_patience < 1) return bad("--planner-gate-patience must be at least 1");
+    if (c.planner_gate_min_epochs < 0) return bad("--planner-gate-min-epochs must be nonnegative");
+    if (!std::isfinite(c.planner_gate_epsilon) || c.planner_gate_epsilon < 0.0f) return bad("--planner-gate-epsilon must be a finite number >= 0");
+    return true;
+}
+
 enum class ParseResult { ok, help, error };
 
 inline void usage(FILE * out) {
@@ -328,6 +386,8 @@ inline void usage(FILE * out) {
         "[--eval-adapted (with --resume: held-out base vs adapted planner CE and decoder MSE to <output>/adapted-loss.jsonl, no training)] [--eval-dataset <dataset.json> (the held-out set for --eval-adapted)] "
         "[--holdout-items I,J,.. (leave these dataset items out of training; --eval-adapted without --eval-dataset scores only them)] "
         "[--eval-nar-window N (--eval-adapted window: default --nar-crop-frames, 0 = whole song)] [--eval-seed N (seed of the --eval-adapted draws: default --seed)] "
+        "[--planner-gate-every N (score the planner on --holdout-items every N updates; a plateau freezes it, then --nar-extra-steps; 0 = off)] "
+        "[--planner-gate-min-epochs 5] [--planner-gate-patience 3] [--planner-gate-epsilon 0.001] "
         "[--eval-base-loss (no training: per-item base planner CE and decoder flow MSE to <output>/base-loss.jsonl)] "
         "[--recon-stop F (planner frozen: stop when a line fitted through the last --recon-stop-window 3 reconstruction readings gains under F)] [--recon-reset (with --resume: empty window)] "
         "[--unfreeze-planner (with --resume: train the planner on past its freeze)] [--kl-checkpoint-every 0.1 (a checkpoint at each KL rung)] "
@@ -672,6 +732,18 @@ inline ParseResult parse(int argc, char ** argv, Config * config, std::string * 
             std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
                 !detail::decimal_u64(text.c_str(), &parsed.eval_seed)) { if (error) *error = "--eval-seed must be an unsigned decimal integer"; return ParseResult::error; }
             parsed.eval_seed_set = true;
+        } else if (!std::strcmp(arg, "--planner-gate-every")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::decimal_i32(text.c_str(), &parsed.planner_gate_every)) { if (error) *error = "--planner-gate-every must be a nonnegative integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--planner-gate-min-epochs")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::decimal_i32(text.c_str(), &parsed.planner_gate_min_epochs)) { if (error) *error = "--planner-gate-min-epochs must be a nonnegative integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--planner-gate-patience")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::decimal_i32(text.c_str(), &parsed.planner_gate_patience) || parsed.planner_gate_patience < 1) { if (error) *error = "--planner-gate-patience must be a positive integer"; return ParseResult::error; }
+        } else if (!std::strcmp(arg, "--planner-gate-epsilon")) {
+            std::string text; if (!detail::value(arg, argc, argv, &i, &text, error) ||
+                !detail::finite_float(text.c_str(), &parsed.planner_gate_epsilon) || parsed.planner_gate_epsilon < 0.0f) { if (error) *error = "--planner-gate-epsilon must be a finite number >= 0"; return ParseResult::error; }
         } else if (!std::strcmp(arg, "--meter-only")) {
             parsed.meter_only = true; parsed.nar_drift = true;
         } else if (!std::strcmp(arg, "--nar-extra-steps")) {

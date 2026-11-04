@@ -134,6 +134,10 @@ struct ResumeBinding {
     double rung_lr_mult = 1.0;
     // wsd: the step its decay tail started at; -1 = on the plateau.
     int lr_decaying_from = -1;
+    // Held-out planner gate (--planner-gate-every) and why the planner froze:
+    // kl, planner_ce or manual (empty in records written before reasons).
+    yue2_aitk_runtime::PlannerGate gate;
+    std::string frozen_reason;
 };
 // Steps in the KL trend fit. Kept in step with Yue2AitkTrainCard's chart.
 constexpr int kKlTrendWindow = 30;
@@ -237,6 +241,30 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
             if(!yyjson_is_int(v) || yyjson_get_sint(v)<0 || yyjson_get_sint(v)>plan->completed) return fail(error,"resume planner_frozen_at field is malformed");
             binding->planner_frozen_at=int(yyjson_get_sint(v));
         }
+        if(yyjson_val * v=yyjson_obj_get(root,"planner_frozen_reason")) { if(!str_field(v,&binding->frozen_reason)) return fail(error,"resume planner_frozen_reason field is malformed"); }
+    }
+    // The gate's settings bind the run like the split does: a resumed segment
+    // must reach the verdict a continuous run would, so they cannot change.
+    // Scoring a checkpoint (--eval-adapted, --meter-only) trains nothing.
+    if (!config.eval_adapted && !config.meter_only) {
+        yyjson_val * g=yyjson_obj_get(root,"planner_gate");
+        if((g!=nullptr)!=(config.planner_gate_every>0)) return fail(error,"resume planner gate mismatch: pass the same --planner-gate-* flags as the run started with");
+        if(g) {
+            yyjson_val * every=yyjson_obj_get(g,"every"), * floor=yyjson_obj_get(g,"min_epochs"), * patience=yyjson_obj_get(g,"patience"), * eps=yyjson_obj_get(g,"epsilon"),
+                       * eseed=yyjson_obj_get(g,"eval_seed"), * best=yyjson_obj_get(g,"best"), * best_step=yyjson_obj_get(g,"best_step"), * stale=yyjson_obj_get(g,"stale");
+            const uint64_t eval_seed=config.eval_seed_set?config.eval_seed:seed;
+            if(!yyjson_is_obj(g) || !yyjson_is_int(every) || !yyjson_is_int(floor) || !yyjson_is_int(patience) || !yyjson_is_num(eps) || !yyjson_is_uint(eseed) ||
+               !yyjson_is_int(best_step) || !yyjson_is_int(stale) || yyjson_get_sint(stale)<0 || yyjson_get_sint(best_step)<-1 || yyjson_get_sint(best_step)>plan->completed ||
+               (yyjson_get_sint(best_step)>=0)!=(best!=nullptr) || (best && (!yyjson_is_num(best) || !std::isfinite(yyjson_get_num(best)))))
+                return fail(error,"resume planner gate state is malformed");
+            if(yyjson_get_sint(every)!=config.planner_gate_every || yyjson_get_sint(floor)!=config.planner_gate_min_epochs || yyjson_get_sint(patience)!=config.planner_gate_patience ||
+               float(yyjson_get_num(eps))!=config.planner_gate_epsilon || yyjson_get_uint(eseed)!=eval_seed)
+                return fail(error,"resume planner gate mismatch: pass the same --planner-gate-* flags and --eval-seed as the run started with");
+            if(binding) {
+                if(best) binding->gate.best=yyjson_get_num(best);
+                binding->gate.best_step=int(yyjson_get_sint(best_step)); binding->gate.stale=int(yyjson_get_sint(stale));
+            }
+        }
     }
     if (config.optimizer!="adamw" && binding) {
         yyjson_val * vopt=yyjson_obj_get(root,"opt_iter");
@@ -255,7 +283,8 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
                              const yue2_aitk_runtime::Config & config, int opt_iter, double prodigy_d, double prodigy_r,
                              const std::vector<double> & kl_history, const std::vector<double> & loss_history, int planner_frozen_at,
                              const std::vector<double> & gnorm_history, const std::vector<double> & spike_steps,
-                             const std::vector<double> & recon_history = {}, double kl_mark_last = 0.0, int unfrozen_at = -1, double rung_lr_mult = 1.0, int lr_decaying_from = -1) {
+                             const std::vector<double> & recon_history = {}, double kl_mark_last = 0.0, int unfrozen_at = -1, double rung_lr_mult = 1.0, int lr_decaying_from = -1,
+                             const yue2_aitk_runtime::PlannerGate & gate = {}, const std::string & frozen_reason = {}) {
     yyjson_mut_doc * doc=yyjson_mut_doc_new(nullptr);
     if (!doc) return {};
     yyjson_mut_val * root=yyjson_mut_obj(doc), * arr=yyjson_mut_arr(doc);
@@ -293,6 +322,18 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
     if (config.uncond_dropout>0.0f) yyjson_mut_obj_add_real(doc,root,"uncond_dropout",config.uncond_dropout);
     if (config.nar_lr_scale!=1.0f) yyjson_mut_obj_add_real(doc,root,"nar_lr_scale",config.nar_lr_scale);  // absent = 1.0, keeps old records byte-identical
     if (planner_frozen_at>=0) { yyjson_mut_obj_add_int(doc,root,"planner_frozen_at",planner_frozen_at); yyjson_mut_obj_add_int(doc,root,"nar_extra_steps",config.nar_extra_steps); }
+    if (planner_frozen_at>=0 && !frozen_reason.empty()) yyjson_mut_obj_add_strcpy(doc,root,"planner_frozen_reason",frozen_reason.c_str());
+    // Only gated runs carry this, so other records are unchanged. No best
+    // until the first reading (JSON has no infinity).
+    if (config.planner_gate_every>0) {
+        yyjson_mut_val * g=yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_int(doc,g,"every",config.planner_gate_every); yyjson_mut_obj_add_int(doc,g,"min_epochs",config.planner_gate_min_epochs);
+        yyjson_mut_obj_add_int(doc,g,"patience",config.planner_gate_patience); yyjson_mut_obj_add_real(doc,g,"epsilon",config.planner_gate_epsilon);
+        yyjson_mut_obj_add_uint(doc,g,"eval_seed",config.eval_seed_set?config.eval_seed:seed);
+        if (gate.best_step>=0) yyjson_mut_obj_add_real(doc,g,"best",gate.best);
+        yyjson_mut_obj_add_int(doc,g,"best_step",gate.best_step); yyjson_mut_obj_add_int(doc,g,"stale",gate.stale);
+        yyjson_mut_obj_add_val(doc,root,"planner_gate",g);
+    }
     // Only guarded runs carry these, so other records are unchanged.
     if (config.spike_factor > 0.0f) for (auto [key, hist] : { std::pair<const char *, const std::vector<double> *>{"gnorm_history",&gnorm_history}, {"spike_steps",&spike_steps} }) {
         yyjson_mut_val * a=yyjson_mut_arr(doc); for(double v:*hist) yyjson_mut_arr_add_real(doc,a,v); yyjson_mut_obj_add_val(doc,root,key,a);
@@ -353,9 +394,10 @@ static int run_impl(Config config, std::string * error) {
         !std::isfinite(config.nar_lr_scale) || config.nar_lr_scale <= 0.0f || config.nar_extra_steps < 0) {
         fail(error, "invalid runtime configuration"); return 1;
     }
-    if (config.nar_extra_steps > 0 && !(config.target_kl > 0.0f)) {
-        fail(error, "--nar-extra-steps needs --target-kl: the planner freezes when it reaches that KL"); return 1;
+    if (config.nar_extra_steps > 0 && !(config.target_kl > 0.0f) && config.planner_gate_every <= 0) {
+        fail(error, "--nar-extra-steps needs --target-kl or --planner-gate-every: what freezes the planner"); return 1;
     }
+    if (!validate_planner_gate(config, error)) return 1;
     if (!std::isfinite(config.ar_loss_weight) || config.ar_loss_weight <= 0.0f || config.ar_loss_weight > 10.0f ||
         !std::isfinite(config.beta1) || config.beta1 < 0.0f || config.beta1 >= 1.0f ||
         !std::isfinite(config.beta2) || config.beta2 < 0.0f || config.beta2 >= 1.0f ||
@@ -938,16 +980,19 @@ static int run_impl(Config config, std::string * error) {
         // A frozen record resumes frozen: its planner weights, just restored,
         // are the held ones.
         int planner_frozen_at = resume_binding.planner_frozen_at;
+        std::string frozen_reason = resume_binding.frozen_reason;
+        PlannerGate gate = resume_binding.gate;
         if (planner_frozen_at >= 0 && config.unfreeze_planner) {
             // Planner refinement: both halves train on from here; the KL
-            // ceiling (--target-kl) is the new stop.
-            planner_frozen_at = -1;
+            // ceiling (--target-kl) is the new stop. The gate keeps its best
+            // and counts patience afresh.
+            planner_frozen_at = -1; frozen_reason.clear(); gate.stale = 0;
             std::fprintf(stderr, "[yue2-aitk] --unfreeze-planner: planner trains on from step %d\n", completed);
         }
         if (planner_frozen_at < 0 && config.freeze_planner_now) {
             // A stop decided outside the trainer: this checkpoint's planner is
             // the one kept. Same bookkeeping as the KL freeze.
-            planner_frozen_at = completed;
+            planner_frozen_at = completed; frozen_reason = "manual";
             std::fprintf(stderr, "[yue2-aitk] --freeze-planner-now: planner frozen at the resumed step %d\n", completed);
         }
         if (planner_frozen_at >= 0) {
@@ -1131,7 +1176,7 @@ static int run_impl(Config config, std::string * error) {
             const std::string sampler_state = sampler.export_rng_state();
             if (sampler_state.empty()) return false;
             const std::string metadata = make_resume_meta(checkpoint_hash.hex(), dataset_hash.hex(), source_hash.hex(), config.seed, config.cuda_index, step, cursor, order, sampler_state, cursor_weight,
-                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history, kl_mark_last, unfrozen_at, rung_lr_mult, lr_decaying_from);
+                config, use_lm ? lm->opt.opt_iter : 0, use_lm ? lm->opt.prodigy_d : 0.0, use_lm ? lm->opt.prodigy_r : 0.0, kl_window, loss_window, planner_frozen_at, gnorm_window, spike_steps, recon_history, kl_mark_last, unfrozen_at, rung_lr_mult, lr_decaying_from, gate, frozen_reason);
             if (metadata.empty()) return false;
             if (!state.export_snapshot(adapter.u8string().c_str(), step, error, (temp_dir / std::filesystem::u8path(joint_weight_name(dataset.trigger, "ar", step))).u8string().c_str(), (temp_dir / std::filesystem::u8path(joint_weight_name(dataset.trigger, "nar", step))).u8string().c_str(), dataset.trigger, config.caption_dropout, adapter_meta)) return false;
             if (use_lm) {
@@ -1173,19 +1218,55 @@ static int run_impl(Config config, std::string * error) {
             if (!save_ec) { last_saved=step; event("checkpoint", step); }
             return !save_ec;
         };
-        auto freeze_at_kl = [&](double reading) -> bool {
-            // Freeze first, so the KL checkpoint's resume record already says
+        auto freeze_here = [&](const char * reason) -> bool {
+            // Freeze first, so the checkpoint's resume record already says
             // frozen and resumes decoder-only.
-            planner_frozen_at = completed;
+            planner_frozen_at = completed; frozen_reason = reason;
             state.freeze_planner();
             // The decoder's gradient norm alone is ~10x below the joint one,
             // so the spike guard's baseline starts over.
             gnorm_window.clear(); spike_steps.clear();
             if (!save_checkpoint(completed)) return false;
-            event("planner_frozen", completed);
+            std::cout << "{\"stage\":\"planner_frozen\",\"step\":" << completed << ",\"reason\":\"" << reason << "\"}\n" << std::flush;
+            return true;
+        };
+        auto freeze_at_kl = [&](double reading) -> bool {
+            if (!freeze_here("kl")) return false;
             std::fprintf(stderr, "[yue2-aitk] planner reached KL %.4g at step %d: frozen; decoder-only until step %d\n", reading, completed, end_step());
             return true;
         };
+        // The gate's reading: the live planner's CE on every held-out song,
+        // token-weighted. The --eval-adapted draws (its seed formula, lead
+        // sheet kept, no dropout) on samplers of their own, so the training
+        // RNG and the optimizer are never touched; the forward keeps no tape
+        // and its head gradient lands in scratch.
+        const auto held_out_planner_ce = [&](double * ce, size_t * tokens) -> bool {
+            const std::int64_t eval_window = config.eval_nar_window >= 0 ? config.eval_nar_window : config.nar_crop_frames;
+            const std::uint64_t eval_seed = config.eval_seed_set ? config.eval_seed : config.seed;
+            std::vector<std::pair<double, size_t>> songs;
+            for (const size_t i : config.holdout_items) {
+                const auto & item = dataset.items[i];
+                size_t window = eval_window > 0 ? (size_t) eval_window : item.song.semantic_tokens.size();
+                {
+                    const auto & p = item.prompt;
+                    const size_t used = std::max({p.retained_prefix_ids.size() + p.abc_ids.size(), p.dropped_prefix_ids.size(),
+                                                  p.retained_nocap_prefix_ids.size() + p.abc_ids.size(), p.dropped_nocap_prefix_ids.size()}) + 5;
+                    const size_t fit = used < yue2_aitk::dataset_detail::kMaxFrames ? (yue2_aitk::dataset_detail::kMaxFrames - used) / 2 : 1;
+                    window = std::max<size_t>(1, std::min(window, fit));
+                }
+                yue2_aitk::Yue2NativeSampler item_sampler(eval_seed * 1000003ull + 104729ull * (i + 1));
+                auto sampled = item_sampler.sample(item.song, item.prompt, window, std::vector<float>{250.0f}, 0.0f, 0, 0, 0.0f, base_targets);
+                double item_ce = 0.0; size_t item_tokens = 0;
+                if (!yue2_aitk_joint::base_ar_ce(backend.value, model, sampled.batch, &item_ce, &item_tokens, error, &state.ar_adapters())) return false;
+                songs.emplace_back(item_ce, item_tokens); *tokens += item_tokens;
+            }
+            *ce = PlannerGate::token_mean(songs);
+            return true;
+        };
+        if (config.planner_gate_every > 0)
+            std::fprintf(stderr, "[yue2-aitk] planner gate: every %d updates on %zu held-out songs; past %d epochs, %d readings not below best - %.3g freeze it, then %d decoder steps\n",
+                         config.planner_gate_every, config.holdout_items.size(), config.planner_gate_min_epochs, config.planner_gate_patience,
+                         (double) config.planner_gate_epsilon, config.nar_extra_steps);
         while (completed < end_step()) {
             if (yue2_aitk_cancel_requested()) {
                 if (completed > 0 && !save_checkpoint(completed)) { fail(error, "cancel checkpoint publication failed"); return 1; }
@@ -1383,6 +1464,30 @@ static int run_impl(Config config, std::string * error) {
             if (planner_frozen_at < 0) {
                 kl_recent.push_back(metrics.ar_kl);
                 if (kl_recent.size() > 20) kl_recent.erase(kl_recent.begin());
+            }
+            // Held-out planner gate, ahead of every stop that writes this
+            // step's checkpoint, so each record carries this step's reading.
+            // A freeze here leaves the KL stop nothing to read.
+            if (planner_frozen_at < 0 && PlannerGate::due(config, completed)) {
+                const auto t0 = Clock::now();
+                double ce = 0.0; size_t tokens = 0;
+                if (!held_out_planner_ce(&ce, &tokens)) return 1;
+                const double epoch = PlannerGate::epochs(config, completed, order.size());
+                const auto verdict = gate.observe(config, completed, epoch, ce);
+                if (verdict == PlannerGate::Verdict::nonfinite) { fail(error, "nonfinite held-out planner CE"); return 1; }
+                std::ostringstream reading; reading << std::setprecision(9)
+                    << "{\"stage\":\"planner_gate\",\"step\":" << completed << ",\"epoch\":" << epoch << ",\"ce\":" << ce
+                    << ",\"best\":" << gate.best << ",\"best_step\":" << gate.best_step << ",\"stale\":" << gate.stale
+                    << ",\"patience\":" << config.planner_gate_patience << ",\"armed\":" << (epoch >= double(config.planner_gate_min_epochs) ? "true" : "false")
+                    << ",\"items\":" << config.holdout_items.size() << ",\"tokens\":" << tokens
+                    << ",\"ms\":" << std::chrono::duration<double, std::milli>(Clock::now() - t0).count() << "}\n";
+                jsonl << reading.str(); std::cout << reading.str() << std::flush;
+                if (!jsonl.flush()) { fail(error, "training JSONL write failed"); return 1; }
+                if (verdict == PlannerGate::Verdict::fire) {
+                    if (!freeze_here("planner_ce")) { fail(error, "planner-freeze checkpoint publication failed"); return 1; }
+                    std::fprintf(stderr, "[yue2-aitk] held-out planner CE %.4f has not beaten %.4f (step %d) in %d readings: planner frozen at step %d; decoder-only until step %d\n",
+                                 ce, gate.best, gate.best_step, gate.stale, completed, end_step());
+                }
             }
             if (config.target_loss > 0.0f && planner_frozen_at < 0) {
                 // Same composite the server reports: AR CE + weighted KL + NAR
