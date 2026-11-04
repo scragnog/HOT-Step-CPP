@@ -28,6 +28,18 @@ import { readAbcSidecar, writeAbcSidecar } from './training/abcSidecar.js';
 import { hasSoundingScore } from './backends/yue2/scoreHealth.js';
 import { lintScoreSections, scoreSections } from './backends/yue2/scoreSections.js';
 import { cachedMp3 } from './audioConvert.js';
+import { aceMidiExe, BEAT_MODEL, isModelDownloaded, MUSCRIPTOR_MODELS, type MuscriptorModel } from './muscriptor.js';
+
+export const LEAD_SHEET_SOURCES = ['sheetsage2', 'sheetsage2-refined', 'muscriptor', 'yourmt3-chordnet'] as const;
+export type LeadSheetSource = typeof LEAD_SHEET_SOURCES[number];
+export const YOURMT3_CHORDNET_MODEL_IDS = ['yourmt3-plus', 'chordnet'] as const;
+
+const muscriptorReadinessDeps = {
+  // MIDI Studio currently stores its choice in browser localStorage only.
+  modelChoice: (): MuscriptorModel | null => null,
+  installed: isModelDownloaded,
+  executable: aceMidiExe,
+};
 
 const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
 const MAX_AUDIO_SECONDS = 10 * 60;
@@ -85,13 +97,37 @@ export function createYue2CoverService(deps = {
   // Keeps the score it replaces, like saveDetails does for the .txt.
   saveAbc: (matched: CoverDatasetSource, abc: string) => writeAbcSidecar(matched.audioPath, abc, { keepBackups: true, anySounding: true }),
   song: (id: string, userId: string) => getDb().prepare('SELECT audio_url, title FROM songs WHERE id = ? AND user_id = ?').get(id, userId) as { audio_url: string; title: string } | undefined,
-}) {
-  function readiness() {
-    const missing = deps.missingModels();
+}, midi = muscriptorReadinessDeps) {
+  /** GET readiness accepts an optional lead-sheet source; omission uses the stored sheet preference. */
+  function readiness(requestedSource?: unknown) {
+    if (requestedSource !== undefined && !LEAD_SHEET_SOURCES.includes(requestedSource as LeadSheetSource)) {
+      throw new CoverRequestError(`source must be one of: ${LEAD_SHEET_SOURCES.join(', ')}`);
+    }
+    const source: LeadSheetSource = requestedSource as LeadSheetSource | undefined
+      ?? (deps.transcriberSetting().refined ? 'sheetsage2-refined' : 'sheetsage2');
+    if (source === 'yourmt3-chordnet') {
+      return { source, ready: false, model: null, refined: false,
+        message: `YourMT3+/ChordNet is not installed yet (${YOURMT3_CHORDNET_MODEL_IDS.join(', ')}).` };
+    }
+    if (source === 'muscriptor') {
+      const chosen = midi.modelChoice() ?? MUSCRIPTOR_MODELS.find(model => midi.installed(model)) ?? 'small';
+      const missing: string[] = [];
+      const modelReady = midi.installed(chosen);
+      if (!modelReady) missing.push(`MuScriptor (muscriptor-${chosen})`);
+      if (!midi.installed(BEAT_MODEL)) missing.push('Beat This! (muscriptor-beat-this)');
+      const executable = midi.executable();
+      return { source, ready: missing.length === 0 && !!executable,
+        model: modelReady ? `muscriptor-${chosen}` : null, refined: false,
+        message: missing.length ? `Download ${missing.join(' and ')} in Model Manager.${executable ? '' : ' The ace-midi executable is also missing.'}`
+          : executable ? null : 'The ace-midi executable is missing. Install a build that includes MIDI Studio.' };
+    }
+    const baseModel = deps.model();
     const refinedModel = deps.refinedModel?.() ?? '';
+    const missing = requestedSource === undefined ? deps.missingModels()
+      : !baseModel ? ['SheetSage2'] : source === 'sheetsage2-refined' && !refinedModel ? [MISSING_REFINED] : [];
     const refinedMissing = missing.length === 1 && missing[0] === MISSING_REFINED;
-    return { ready: missing.length === 0, model: missing.length ? null : path.basename(deps.model()),
-      refined: !!deps.model() && !!refinedModel,
+    return { source, ready: missing.length === 0, model: missing.length ? null : path.basename(baseModel),
+      refined: !!baseModel && !!refinedModel,
       message: !missing.length ? null : refinedMissing
         ? 'SheetSage2-Refined is chosen in the YuE2 Models dropdown but not installed. Download it (yue2-sheetsage2-refined-f16) in Model Manager, or choose SheetSage2.'
         : 'SheetSage2 is missing. Download the SheetSage2 Lead-Sheet Transcriber (yue2-sheetsage2-f16) in Model Manager, or supply an approved ABC score.' };

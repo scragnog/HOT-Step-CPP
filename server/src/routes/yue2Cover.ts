@@ -51,8 +51,12 @@ export function createYue2CoverRouter(service: CoverService = yue2CoverService, 
     res.status(500).json({ error: 'YuE2 cover request failed' });
   }
 
-  // A supplied ABC does not need the optional SheetSage2 model.
-  router.get('/readiness', (_req: Request, res: Response) => { res.json(service.readiness()); });
+  // Optional source: sheetsage2 | sheetsage2-refined | muscriptor | yourmt3-chordnet.
+  // Omission uses the stored sheet-transcriber preference. Supplied ABC needs no model.
+  router.get('/readiness', (req: Request, res: Response) => {
+    try { res.json(service.readiness(req.query.source)); }
+    catch (err) { fail(res, err); }
+  });
 
   router.post('/source-metadata', async (req: Request, res: Response) => {
     try { res.json(await service.lookup(req.body || {}, authenticate(req)!)); }
