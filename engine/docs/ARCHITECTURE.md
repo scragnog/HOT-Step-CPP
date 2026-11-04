@@ -1172,7 +1172,11 @@ for the evaluation output and sampling procedure.
 | `--eval-adapted --resume <optimizer.resume>` | off | Restore a checkpoint and compare base versus adapted planner CE and decoder MSE without updating weights. Pass the run's training flags and total `--steps` |
 | `--eval-dataset <dataset.json>` | training dataset or its hold-out split | Score every item of this separate prepared dataset; takes precedence over the in-dataset split for evaluation |
 | `--eval-nar-window N` | `--nar-crop-frames` | Adapted-evaluation window in frames; `0` means the whole song |
-| `--eval-seed N` | `--seed` | Unsigned seed for adapted-evaluation draws |
+| `--eval-seed N` | `--seed` | Unsigned seed for adapted-evaluation draws and planner-gate readings |
+| `--planner-gate-every N` | 0 (off) | Score the planner on `--holdout-items` every N updates; a plateau freezes it. Needs `--holdout-items` and `--nar-extra-steps`; refuses `--eval-dataset`, `--lr-schedule wsd` and the scoring modes |
+| `--planner-gate-min-epochs N` | 5 | Training epochs (song draws over training songs only) before the planner may freeze |
+| `--planner-gate-patience N` | 3 | Readings in a row not below the best by the epsilon before it freezes; at least 1 |
+| `--planner-gate-epsilon F` | 0.001 | Absolute CE a reading must beat the best by |
 
 Resume records bind the hold-out split as a set. Supply the same indices on
 training and evaluation resumes. The saved order must contain every non-held-out
@@ -1180,6 +1184,13 @@ item exactly once and its cursor must index that order. A legacy record with no
 saved split can resume only without a hold-out; a new split requires a new run.
 The summary reports `held_out:true` when using a saved split or a separate
 evaluation dataset, and `false` when scoring the unsplit training dataset.
+
+The planner gate keeps its settings, best, best step and stale count in the
+resume record. A resume must pass the same gate flags and `--eval-seed`
+(otherwise "resume planner gate mismatch"), frozen or not. Each reading prints a
+`planner_gate` line and a freeze prints `planner_frozen` with reason `kl`,
+`planner_ce` or `manual`. See
+[training internals](../../docs/dev/training-internals.md#held-out-planner-gate).
 These flags do not add a training early-stop rule.
 
 ## fattn-train-test reference

@@ -327,10 +327,17 @@ struct PlannerGate {
     double best = std::numeric_limits<double>::infinity();
     std::int32_t best_step = -1;
     std::int32_t stale = 0;  // readings in a row past the floor without improvement
+    // Training songs drawn so far: grad-accum per update, summed as the run
+    // goes, so a resume that changes --grad-accum keeps the epochs behind it.
+    std::int64_t draws = 0;
     enum class Verdict { keep, fire, nonfinite };
-    // Training epochs after `completed` updates: song draws over training songs.
-    static double epochs(const Config & c, int completed, size_t training_items) {
-        return training_items ? double(completed) * double(c.grad_accum) / double(training_items) : 0.0;
+    // Training epochs: song draws over training songs (the hold-out excluded).
+    static double epochs(std::int64_t draws, size_t training_items) {
+        return training_items ? double(draws) / double(training_items) : 0.0;
+    }
+    // The decoder window the reading's draws are cropped with; bound on resume.
+    static std::int64_t eval_window(const Config & c) {
+        return c.eval_nar_window >= 0 ? c.eval_nar_window : c.nar_crop_frames;
     }
     // Per-song (CE, tokens) to one CE over all held-out tokens: a long song
     // weighs what its tokens weigh. NaN when there are no tokens.
@@ -339,6 +346,9 @@ struct PlannerGate {
         for (const auto & s : songs) { weighted += s.first * double(s.second); total += s.second; }
         return total ? weighted / double(total) : std::numeric_limits<double>::quiet_NaN();
     }
+    // A fire verdict the run could not act on (a spike stop ended that step):
+    // the resumed segment freezes at once, where the continuous run would have.
+    bool pending(const Config & c) const { return c.planner_gate_every > 0 && stale >= c.planner_gate_patience; }
     static bool due(const Config & c, int completed) {
         return c.planner_gate_every > 0 && completed > 0 && completed % c.planner_gate_every == 0;
     }

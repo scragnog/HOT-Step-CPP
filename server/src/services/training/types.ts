@@ -541,6 +541,8 @@ export interface TrainingMetricEvent {
   trainMs?: number;
   /** eval: how many fixed held-out crops the number averages. */
   crops?: number;
+  /** YuE2 joint, on `eval`: one planner-gate reading (held-out CE). */
+  plannerGate?: { ce: number; best: number; bestStep: number; stale: number; patience: number; armed: boolean; epoch: number; items: number };
   etaMs?: number;
   ms?: number;
   best?: boolean;

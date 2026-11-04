@@ -32,7 +32,8 @@ static int run(const Config & c, PlannerGate & gate, const std::vector<double> &
     for (size_t k = from; k < curve.size(); ++k) {
         const int step = int(k + 1) * c.planner_gate_every;
         assert(PlannerGate::due(c, step));
-        const Verdict v = gate.observe(c, step, PlannerGate::epochs(c, step, kTrain), curve[k]);
+        gate.draws += std::int64_t(c.planner_gate_every) * c.grad_accum;  // the trainer adds grad-accum per update
+        const Verdict v = gate.observe(c, step, PlannerGate::epochs(gate.draws, kTrain), curve[k]);
         assert(v != Verdict::nonfinite);
         if (v == Verdict::fire) return step;
     }
@@ -68,12 +69,22 @@ int main() {
     { Config c1 = c; c1.planner_gate_min_epochs = 0; c1.planner_gate_patience = 1;
       PlannerGate g; assert(run(c1, g, {2.0, 1.0, 1.0}) == 30); }
 
-    // Epochs count song draws over TRAINING songs: grad-accum 4 is four draws
-    // an update; the hold-out is not in the denominator.
-    { Config c4 = c; c4.grad_accum = 4;
-      assert(PlannerGate::epochs(c4, 10, kTrain) == 4.0);
-      assert(PlannerGate::epochs(c, 25, kTrain) == 2.5);
-      assert(PlannerGate::epochs(c, 25, 0) == 0.0); }
+    // Epochs count song draws over TRAINING songs (the hold-out is not in the
+    // denominator), summed as the run goes: grad-accum 4 is four draws an
+    // update, and a resume that changes it keeps the epochs already run.
+    { assert(PlannerGate::epochs(25, kTrain) == 2.5 && PlannerGate::epochs(25, 0) == 0.0);
+      Config c4 = c; c4.grad_accum = 4;
+      PlannerGate g; run(c, g, {3.0});                     // 10 updates at accum 1: epoch 1
+      assert(g.draws == 10);
+      PlannerGate r = g;                                   // the record, resumed at accum 4
+      run(c4, r, {3.0, 2.9}, 1);                           // 10 more updates: 40 draws, epoch 5
+      assert(r.draws == 50 && PlannerGate::epochs(r.draws, kTrain) == 5.0); }  // steps x new accum would say 8
+
+    // Fire verdicts a spike stop kept the run from acting on stay pending in
+    // the record, so the resumed segment freezes at once.
+    { PlannerGate g; assert(run(c, g, std::vector<double>(7, 2.0)) == 70 && g.pending(c));
+      PlannerGate live; run(c, live, std::vector<double>(6, 2.0)); assert(!live.pending(c));
+      Config off; assert(!g.pending(off)); }
 
     // Schedule: multiples of the interval, never step 0, never when off.
     { assert(!PlannerGate::due(c, 0) && !PlannerGate::due(c, 9) && PlannerGate::due(c, 10) && PlannerGate::due(c, 20));
@@ -102,7 +113,7 @@ int main() {
           PlannerGate first; const int early = run(c, first, std::vector<double>(curve.begin(), curve.begin() + split));
           if (early >= 0) { assert(early == fired); continue; }
           char text[64]; std::snprintf(text, sizeof text, "%.17g", first.best);
-          PlannerGate resumed; resumed.best = std::strtod(text, nullptr); resumed.best_step = first.best_step; resumed.stale = first.stale;
+          PlannerGate resumed; resumed.best = std::strtod(text, nullptr); resumed.best_step = first.best_step; resumed.stale = first.stale; resumed.draws = first.draws;
           assert(run(c, resumed, curve, split) == fired);
           assert(resumed.best == whole.best && resumed.best_step == whole.best_step);
       } }

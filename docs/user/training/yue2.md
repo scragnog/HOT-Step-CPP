@@ -100,6 +100,17 @@ The optimizer is a setting under **Advanced**. Fast, Balanced and Thorough defau
 
 **Train the decoder on after the KL stop** (Legacy, KL target only; on by default when you pick Legacy): at the KL target the planner freezes instead of the run ending, and the decoder trains alone until its reconstruction meter flattens. That is the plateau test the Refine page used: a line fitted through the last 10 checkpoints must gain at least 0.5% across them, or the run stops. A decoder checkpoint is kept only if its reconstruction beats the best so far by 0.003, so the ladder shows real gains. The decoder budget (250 steps by default) and **Updates** both cap it, so raise Updates if the KL stop comes late. An optional reconstruction target also stops it.
 
+**Held-out planner gate** (Advanced, off by default, any preset): holds a few songs out of training and scores the planner on them every few updates. When that held-out loss stops improving, the planner freezes where it is and the decoder trains on for its own budget, so a run can end the planner's training at the point it starts to memorise instead of at a fixed KL or step count. The card shows how many songs are held out, which ones, and how many are left to train on before you start; 20% of the songs, rounded up and never fewer than 3, are chosen from the eval seed, and at least one song must remain. The settings are:
+
+- **Check every:** updates between readings (10).
+- **Min epochs:** passes over the training songs before the planner may freeze (5). The held-out songs do not count.
+- **Patience:** readings in a row that fail to beat the best before it freezes (3).
+- **Epsilon:** how far below the best a reading must be to count as better, in absolute cross-entropy (0.001).
+- **Eval seed:** seeds the choice of songs and the readings (42).
+- **Decoder steps after freeze:** the decoder's budget once the planner freezes (250). It must be above 0, and **Updates** caps the run as well.
+
+These are starting settings, not validated ones. A reading takes about 4 s for 5 held-out songs, so checking every 10 updates adds roughly 25% to the joint phase. The live line under the Start button shows the latest reading, the best so far and how many readings in a row have failed to improve. A resumed run keeps its own gate settings, held-out songs and decoder budget, and never holds out new songs. A run that used the gate cannot be planner-refined or chained into automatic refinement, and the gate does not work with the wsd schedule.
+
 Every joint run, whatever the preset, logs the planner's KL to the base model at every update and the decoder's reconstruction and drift meters at every checkpoint, so runs can be compared. The KL reading costs about 7% of each update under the new presets, which do not otherwise read it.
 
 The new presets save ten checkpoints each, so the ladder to listen through is ten rungs long; see Picking the adapter below.

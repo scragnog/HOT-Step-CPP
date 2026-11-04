@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { YUE2_JOINT_FORM_DEFAULTS } from '../../../../server/src/contracts/trainingRecipes';
 import type { Yue2AitkPrepareRequest, Yue2JointTrainRequest } from '../../services/trainingApi';
-import { captureJointOverrides, submitJointStart } from './yue2JointCommand';
+import { attachHoldout, captureJointOverrides, submitJointStart } from './yue2JointCommand';
 import type { Yue2PreparationSummary } from '../../services/trainingPreparationApi';
 
 test('joint command captures current form and preparation before the chain starts', () => {
@@ -134,4 +134,15 @@ test('joint preview request preserves AR scale and fills older forms with 0.6', 
     const captured = captureJointOverrides(form, {} as Yue2AitkPrepareRequest, false, '', '');
     assert.equal((captured.preview as { arScale: number }).arScale, arScale ?? 0.6);
   }
+});
+
+test('planner gate settings are captured with the form and the shown songs ride in the request', () => {
+  const form = { ...YUE2_JOINT_FORM_DEFAULTS, narExtraSteps: 250, plannerGate: { every: 10, patience: 3 } } as Yue2JointTrainRequest;
+  const captured = captureJointOverrides(form, {} as Yue2AitkPrepareRequest, false, '', '');
+  form.plannerGate!.every = 99;
+  assert.deepEqual(captured.plannerGate, { every: 10, patience: 3 });
+  attachHoldout(captured, ['a', 'c']);
+  assert.deepEqual(captured.plannerGate, { every: 10, patience: 3, holdoutIds: ['a', 'c'] });
+  // Off by default: nothing is sent.
+  assert.equal(captureJointOverrides({ ...YUE2_JOINT_FORM_DEFAULTS } as Yue2JointTrainRequest, {} as Yue2AitkPrepareRequest, false, '', '').plannerGate, undefined);
 });

@@ -41,7 +41,7 @@ import { Yue2LadderReview } from './Yue2LadderReview';
 import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 import { Yue2SplitChart } from './Yue2SplitChart';
 import { reduceYue2Metric, type Yue2Point } from './yue2ChartData';
-import { captureJointOverrides, submitJointStart } from './yue2JointCommand';
+import { attachHoldout, captureJointOverrides, submitJointStart } from './yue2JointCommand';
 import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
 import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
@@ -632,6 +632,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const aitkRuns = runsQuery.data?.runs ?? [];
   const [resumeChoice, setResumeChoice] = useState('');
   const [liveMetric, setLiveMetric] = useState<TrainingMetricEvent | null>(null);
+  const [gateReading, setGateReading] = useState<TrainingMetricEvent['plannerGate']>();
+  const gate = form.plannerGate;
+  // On a resume the run's own gate and split apply; the preview is for new runs.
+  const gateResuming = !!resumeChoice || !!form.resume?.trim();
+  const holdoutQuery = useQuery({ ...runQueries.holdout(trainingWorker, datasetId, gate?.evalSeed ?? 42), enabled: !!gate && !gateResuming });
+  // What Decoder steps held before the gate raised it, so switching the gate off puts it back.
+  const narBeforeGate = useRef<number | undefined>(undefined);
   const [chartVram, setChartVram] = useState<number>();
   // AITK's joint runner emits step metrics without an epoch stream. Keep the
   // history here in the same step-domain shape used by the legacy YuE2 chart.
@@ -695,6 +702,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
 
   useEffect(() => {
     setLiveMetric(null);
+    setGateReading(undefined);
     setChartVram(undefined);
     setStepHistory([]);
     setHistoryUnavailable(false);
@@ -752,6 +760,8 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             setStepHistory(steps);
             schedulePersist();
           }
+        } else if (item.type === 'metric' && item.metric === 'eval' && item.plannerGate) {
+          setGateReading(item.plannerGate);
         } else if (item.type === 'metric' && item.metric === 'milestone'
           && typeof item.step === 'number' && typeof item.path === 'string') {
           points = [...points.filter(point => point.path !== item.path), { epoch: item.step, loss: item.loss ?? 0, path: item.path }];
@@ -1004,6 +1014,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const captureJointRequest = async (): Promise<Record<string, unknown>> => {
     const request = presetLoadGate.current.capture(() =>
       captureJointOverrides(form, prepare, lyricTiming, defaultDevice, resumeChoice));
+    // The songs shown on the card are the songs held out: the ids go with the request.
+    if (request.plannerGate && !request.resume && !resumeChoice) {
+      const seed = form.plannerGate?.evalSeed ?? 42;
+      const pick = await client.fetchQuery({ ...runQueries.holdout(trainingWorker, datasetId, seed), staleTime: 0 });
+      if (pick.error) throw new Error(pick.error);
+      attachHoldout(request, pick.holdoutIds);
+    }
     if (!resumeChoice && !form.resume?.trim()) await captionMissing();
     return request;
   };
@@ -1646,6 +1663,65 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             </div>}
           </div>;
         })()}
+        {(() => {
+          const label = 'text-[10px] font-medium text-zinc-500 uppercase tracking-wider';
+          const locked = busy || gateResuming;
+          const gateNum = (key: 'every' | 'minEpochs' | 'patience' | 'epsilon' | 'evalSeed', name: string, info: string, meta: string) => (
+            <label key={key} className="flex flex-col gap-1">
+              <ParamLabel label={name} info={info} meta={meta} className={label} />
+              <input className={input} type="number" step="any" placeholder={meta.replace('default ', '')} value={String(gate?.[key] ?? '')} disabled={locked}
+                onChange={event => setForm(previous => ({ ...previous, plannerGate: { ...previous.plannerGate, [key]: event.target.value === '' ? undefined : Number(event.target.value) } }))} />
+            </label>
+          );
+          const pick = holdoutQuery.data;
+          return <div className="mt-4 pt-3 border-t border-zinc-300/70 dark:border-white/10">
+            <span className={label}>{t('trainingStudio.yue2.method.gateTitle', 'Held-out planner gate')}</span>
+            <Toggle
+              accent="amber"
+              className="mt-2"
+              checked={!!gate}
+              disabled={locked}
+              onChange={checked => {
+                if (checked) {
+                  narBeforeGate.current = form.narExtraSteps;
+                  setForm(previous => ({ ...previous, plannerGate: {}, narExtraSteps: (previous.narExtraSteps ?? 0) > 0 ? previous.narExtraSteps : 250 }));
+                } else setForm(previous => ({ ...previous, plannerGate: undefined, narExtraSteps: narBeforeGate.current }));
+              }}
+              label={t('trainingStudio.yue2.method.gateEnable', 'Freeze the planner when held-out loss stops improving')}
+              info={t('trainingStudio.yue2.method.gateEnableInfo', 'Holds a few songs out of training and scores the planner on them every few updates. Once the minimum epochs have passed, a run of readings that do not beat the best by the epsilon freezes the planner where it is (no rollback); the decoder then trains on for its own budget. Off by default.')}
+            />
+            {gate && <>
+              <p className="mt-1 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.gateStarting', 'These are starting settings, not validated ones.')} {t('trainingStudio.yue2.method.gateCost', 'Each reading takes about 4 s for 5 held-out songs; checking every 10 updates adds about 25% to the joint phase.')}</p>
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mt-2">
+                {gateNum('every', t('trainingStudio.yue2.method.gateEvery', 'Check every'),
+                  t('trainingStudio.yue2.method.gateEveryInfo', 'Optimiser updates between held-out readings. Lower reacts sooner and costs more time.'), 'default 10')}
+                {gateNum('minEpochs', t('trainingStudio.yue2.method.gateMinEpochs', 'Min epochs'),
+                  t('trainingStudio.yue2.method.gateMinEpochsInfo', 'The planner cannot freeze before this many passes over the training songs (the held-out ones do not count).'), 'default 5')}
+                {gateNum('patience', t('trainingStudio.yue2.method.gatePatience', 'Patience'),
+                  t('trainingStudio.yue2.method.gatePatienceInfo', 'How many readings in a row may fail to beat the best before the planner freezes.'), 'default 3')}
+                {gateNum('epsilon', t('trainingStudio.yue2.method.gateEpsilon', 'Epsilon'),
+                  t('trainingStudio.yue2.method.gateEpsilonInfo', 'A reading counts as better only if it is below the best by more than this, in absolute cross-entropy.'), 'default 0.001')}
+                {gateNum('evalSeed', t('trainingStudio.yue2.method.gateSeed', 'Eval seed'),
+                  t('trainingStudio.yue2.method.gateSeedInfo', 'Seeds both the choice of held-out songs and the readings, so every reading scores the same draws.'), 'default 42')}
+                <label className="flex flex-col gap-1">
+                  <ParamLabel label={t('trainingStudio.yue2.method.gateNarSteps', 'Decoder steps after freeze')} className={label}
+                    info={t('trainingStudio.yue2.method.gateNarStepsInfo', 'The most steps the decoder trains alone after the planner freezes. Must be above 0. Updates caps the run as well.')} meta="default 250" />
+                  <input className={input} type="number" step="1" value={String(form.narExtraSteps ?? '')} disabled={locked}
+                    onChange={event => set('narExtraSteps', event.target.value === '' ? undefined : Number(event.target.value))} />
+                </label>
+              </div>
+              {gateResuming
+                ? <p className="mt-2 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.gateResume', "Resuming keeps the run's own gate settings, held-out songs and decoder budget; no new songs are held out.")}</p>
+                : holdoutQuery.isError ? <p className="mt-2 text-[11px] text-red-600 dark:text-red-400">{holdoutQuery.error instanceof Error ? holdoutQuery.error.message : String(holdoutQuery.error)}</p>
+                : pick?.error ? <p className="mt-2 text-[11px] text-red-600 dark:text-red-400">{pick.error}</p>
+                : pick ? <p className="mt-2 text-[11px] text-zinc-600 dark:text-zinc-400">
+                  {t('trainingStudio.yue2.method.gateHoldout', 'Holding out {{count}} of {{songs}} songs ({{training}} left to train on): {{ids}}',
+                    { count: pick.holdoutIds.length, songs: pick.songs, training: pick.training, ids: pick.holdoutIds.join(', ') })}</p>
+                : <p className="mt-2 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.gateLoading', 'Choosing held-out songs…')}</p>}
+              {(form.narExtraSteps ?? 0) <= 0 && <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{t('trainingStudio.yue2.method.gateNeedsNar', "Set Decoder steps after freeze above 0: the gate needs the decoder's budget.")}</p>}
+            </>}
+          </div>;
+        })()}
       </details>
       <TrainingPreviewSettings
         title={t('trainingStudio.yue2.method.previewTitle', 'Checkpoint previews (optional)')}
@@ -1823,6 +1899,11 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         {active && <button type="button" disabled={cancelMut.isPending || pipelineCancelMut.isPending} onClick={stop} className="text-xs text-red-600 dark:text-red-400 hover:underline">{t('trainingStudio.yue2.method.cancel', 'Stop')}</button>}
         {job && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">{job.status} · {job.phase || 'waiting'}{progress}
           {liveMetric?.step !== undefined && ` · step ${liveMetric.step}${liveMetric.loss !== undefined ? ` · loss ${liveMetric.loss.toFixed(4)}` : ''}`}
+        </span>}
+        {job && gateReading && <span className="text-[11px] text-zinc-600 dark:text-zinc-400">
+          {t('trainingStudio.yue2.method.gateReading', 'held-out CE {{ce}} · best {{best}} (step {{bestStep}}) · stale {{stale}}/{{patience}}{{armed}}',
+            { ce: gateReading.ce.toFixed(4), best: gateReading.best.toFixed(4), bestStep: gateReading.bestStep, stale: gateReading.stale, patience: gateReading.patience,
+              armed: gateReading.armed ? '' : ' · not armed yet' })}
         </span>}
       </div>
       {job?.status === 'running' && isJointJob(job, datasetId) && <LiveIntervals key={job.id} datasetId={datasetId} jobId={job.id} worker={trainingWorker}

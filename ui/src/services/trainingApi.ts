@@ -804,6 +804,9 @@ export interface Yue2JointTrainRequest extends Partial<Yue2OptimOptions> {
   /** KL stop: freeze the planner at its KL target, then train the decoder
    *  alone for this many more steps. 0/absent = stop at the KL. */
   narExtraSteps?: number;
+  /** Held-out planner gate (GH #316); absent = off. Needs narExtraSteps above 0.
+   *  holdoutIds is filled in at Start from the preview, never stored in the form. */
+  plannerGate?: { every?: number; minEpochs?: number; patience?: number; epsilon?: number; evalSeed?: number; holdoutIds?: string[] };
   /** false keeps the engine running during training so generation stays
    *  available; both then share the GPU. Absent/true stops it (the default). */
   stopEngine?: boolean;
@@ -2103,6 +2106,8 @@ export interface TrainingMetricEvent {
   trainMs?: number;
   /** eval: how many fixed held-out crops the number averages. */
   crops?: number;
+  /** YuE2 joint, on `eval`: one planner-gate reading (held-out CE). */
+  plannerGate?: { ce: number; best: number; bestStep: number; stale: number; patience: number; armed: boolean; epoch: number; items: number };
   etaMs?: number;
   ms?: number;
   best?: boolean;
@@ -2689,6 +2694,14 @@ export async function captionMissingYue2(
   // silent: Yue2AitkTrainCard's captionMissing error line is the sole notifier
   // (both the start leg and the final checkOnly leg).
   return request(`/datasets/${encodeURIComponent(id)}/yue2-captions-missing`, { method: 'POST', ...jsonBody(opts), silent: true }, reqOpts);
+}
+
+/** The planner gate's default hold-out for a dataset, as Start will pick it. */
+export interface Yue2HoldoutPreview { songs: number; holdoutIds: string[]; training: number; error?: string }
+export async function getYue2JointHoldout(
+  id: string, params: { seed: number }, reqOpts?: TrainingReadOptions,
+): Promise<Yue2HoldoutPreview> {
+  return request(`/datasets/${encodeURIComponent(id)}/yue2-joint-holdout?seed=${params.seed}`, undefined, reqOpts);
 }
 
 /** Native AITK joint runs and their split AR/NAR checkpoint files. Always

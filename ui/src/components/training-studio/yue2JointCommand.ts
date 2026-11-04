@@ -29,6 +29,11 @@ export function captureJointOverrides(
   return structuredClone(request);
 }
 
+/** Put the held-out song ids the card showed into a captured request. */
+export function attachHoldout(request: Record<string, unknown>, holdoutIds: string[]): void {
+  request.plannerGate = { ...(request.plannerGate as Record<string, unknown>), holdoutIds };
+}
+
 /** A direct Start uses prepared inputs and admits only the joint train stage. */
 export function captureJointStart(dataset: TrainingDatasetRef, source: TrainingSourceRef,
   overrides: Record<string, unknown>, idempotencyKey: string, worker: TrainingWorkerRef) {

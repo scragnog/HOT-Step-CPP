@@ -251,18 +251,21 @@ bool parse_resume_meta(const std::string & text, const std::string & checkpoint,
         if((g!=nullptr)!=(config.planner_gate_every>0)) return fail(error,"resume planner gate mismatch: pass the same --planner-gate-* flags as the run started with");
         if(g) {
             yyjson_val * every=yyjson_obj_get(g,"every"), * floor=yyjson_obj_get(g,"min_epochs"), * patience=yyjson_obj_get(g,"patience"), * eps=yyjson_obj_get(g,"epsilon"),
-                       * eseed=yyjson_obj_get(g,"eval_seed"), * best=yyjson_obj_get(g,"best"), * best_step=yyjson_obj_get(g,"best_step"), * stale=yyjson_obj_get(g,"stale");
+                       * eseed=yyjson_obj_get(g,"eval_seed"), * ewin=yyjson_obj_get(g,"eval_window"), * draws=yyjson_obj_get(g,"draws"),
+                       * best=yyjson_obj_get(g,"best"), * best_step=yyjson_obj_get(g,"best_step"), * stale=yyjson_obj_get(g,"stale");
             const uint64_t eval_seed=config.eval_seed_set?config.eval_seed:seed;
             if(!yyjson_is_obj(g) || !yyjson_is_int(every) || !yyjson_is_int(floor) || !yyjson_is_int(patience) || !yyjson_is_num(eps) || !yyjson_is_uint(eseed) ||
+               !yyjson_is_int(ewin) || !yyjson_is_int(draws) || yyjson_get_sint(draws)<0 ||
                !yyjson_is_int(best_step) || !yyjson_is_int(stale) || yyjson_get_sint(stale)<0 || yyjson_get_sint(best_step)<-1 || yyjson_get_sint(best_step)>plan->completed ||
                (yyjson_get_sint(best_step)>=0)!=(best!=nullptr) || (best && (!yyjson_is_num(best) || !std::isfinite(yyjson_get_num(best)))))
                 return fail(error,"resume planner gate state is malformed");
             if(yyjson_get_sint(every)!=config.planner_gate_every || yyjson_get_sint(floor)!=config.planner_gate_min_epochs || yyjson_get_sint(patience)!=config.planner_gate_patience ||
-               float(yyjson_get_num(eps))!=config.planner_gate_epsilon || yyjson_get_uint(eseed)!=eval_seed)
-                return fail(error,"resume planner gate mismatch: pass the same --planner-gate-* flags and --eval-seed as the run started with");
+               float(yyjson_get_num(eps))!=config.planner_gate_epsilon || yyjson_get_uint(eseed)!=eval_seed || yyjson_get_sint(ewin)!=yue2_aitk_runtime::PlannerGate::eval_window(config))
+                return fail(error,"resume planner gate mismatch: pass the same --planner-gate-* flags, --eval-seed and evaluation window (--eval-nar-window, else --nar-crop-frames) as the run started with");
             if(binding) {
                 if(best) binding->gate.best=yyjson_get_num(best);
                 binding->gate.best_step=int(yyjson_get_sint(best_step)); binding->gate.stale=int(yyjson_get_sint(stale));
+                binding->gate.draws=yyjson_get_sint(draws);
             }
         }
     }
@@ -330,6 +333,7 @@ std::string make_resume_meta(const std::string & cp, const std::string & ds, con
         yyjson_mut_obj_add_int(doc,g,"every",config.planner_gate_every); yyjson_mut_obj_add_int(doc,g,"min_epochs",config.planner_gate_min_epochs);
         yyjson_mut_obj_add_int(doc,g,"patience",config.planner_gate_patience); yyjson_mut_obj_add_real(doc,g,"epsilon",config.planner_gate_epsilon);
         yyjson_mut_obj_add_uint(doc,g,"eval_seed",config.eval_seed_set?config.eval_seed:seed);
+        yyjson_mut_obj_add_int(doc,g,"eval_window",yue2_aitk_runtime::PlannerGate::eval_window(config)); yyjson_mut_obj_add_int(doc,g,"draws",gate.draws);
         if (gate.best_step>=0) yyjson_mut_obj_add_real(doc,g,"best",gate.best);
         yyjson_mut_obj_add_int(doc,g,"best_step",gate.best_step); yyjson_mut_obj_add_int(doc,g,"stale",gate.stale);
         yyjson_mut_obj_add_val(doc,root,"planner_gate",g);
@@ -995,6 +999,13 @@ static int run_impl(Config config, std::string * error) {
             planner_frozen_at = completed; frozen_reason = "manual";
             std::fprintf(stderr, "[yue2-aitk] --freeze-planner-now: planner frozen at the resumed step %d\n", completed);
         }
+        const bool pending_freeze = planner_frozen_at < 0 && gate.pending(config);
+        if (pending_freeze) {
+            // The record's last reading fired on a step a spike stop ended.
+            planner_frozen_at = completed; frozen_reason = "planner_ce";
+            std::cout << "{\"stage\":\"planner_frozen\",\"step\":" << completed << ",\"reason\":\"planner_ce\"}\n" << std::flush;
+            std::fprintf(stderr, "[yue2-aitk] the record's held-out reading fired at step %d: planner frozen there\n", completed);
+        }
         if (planner_frozen_at >= 0) {
             state.freeze_planner();
             std::fprintf(stderr, "[yue2-aitk] planner frozen since step %d; decoder-only until step %d\n", planner_frozen_at, std::min(config.steps, planner_frozen_at + config.nar_extra_steps));
@@ -1101,7 +1112,9 @@ static int run_impl(Config config, std::string * error) {
         // Only the FIRST unfreeze (the record still says frozen) restarts the
         // window; later segments keep theirs, or the guard is unarmed for 20
         // steps after every rung (a 19.9 spike at step 527 went through).
-        const bool first_unfreeze_guard = config.unfreeze_planner && resume_binding.planner_frozen_at >= 0;
+        // A pending gate freeze, consumed above, starts them over as
+        // freeze_here does: the record's norms and skips are joint ones.
+        const bool first_unfreeze_guard = (config.unfreeze_planner && resume_binding.planner_frozen_at >= 0) || pending_freeze;
         std::vector<double> gnorm_window = first_unfreeze_guard ? std::vector<double>{} : resume_binding.gnorm_history;
         std::vector<double> spike_steps = first_unfreeze_guard ? std::vector<double>{} : resume_binding.spike_steps;
         std::vector<double> recon_history = config.recon_reset ? std::vector<double>{} : resume_binding.recon_history;
@@ -1241,7 +1254,7 @@ static int run_impl(Config config, std::string * error) {
         // RNG and the optimizer are never touched; the forward keeps no tape
         // and its head gradient lands in scratch.
         const auto held_out_planner_ce = [&](double * ce, size_t * tokens) -> bool {
-            const std::int64_t eval_window = config.eval_nar_window >= 0 ? config.eval_nar_window : config.nar_crop_frames;
+            const std::int64_t eval_window = PlannerGate::eval_window(config);
             const std::uint64_t eval_seed = config.eval_seed_set ? config.eval_seed : config.seed;
             std::vector<std::pair<double, size_t>> songs;
             for (const size_t i : config.holdout_items) {
@@ -1391,6 +1404,7 @@ static int run_impl(Config config, std::string * error) {
             const double step_ms=std::chrono::duration<double,std::milli>(Clock::now()-step_start).count();
             ++completed;
             if (metrics.step != completed) { fail(error, "optimizer update count mismatch"); return 1; }
+            gate.draws += config.grad_accum;
             std::ostringstream line;
             line << std::setprecision(17) << "{\"stage\":\"joint\",\"step\":" << metrics.step;
             // Frozen steps have no planner objective, so no AR numbers: a
@@ -1428,6 +1442,28 @@ static int run_impl(Config config, std::string * error) {
                 yue2_aitk_prof::totals().clear();
             }
             if (!jsonl.flush()) { fail(error, "training JSONL write failed"); return 1; }
+            // Held-out planner gate: the reading comes before every stop that
+            // writes this step's checkpoint, so each record carries it. The
+            // freeze it asks for waits below the spike stop, which keeps
+            // precedence; a record that stop ends on keeps the verdict pending.
+            bool gate_fired = false;
+            if (planner_frozen_at < 0 && PlannerGate::due(config, completed)) {
+                const auto t0 = Clock::now();
+                double ce = 0.0; size_t tokens = 0;
+                if (!held_out_planner_ce(&ce, &tokens)) return 1;
+                const double epoch = PlannerGate::epochs(gate.draws, order.size());
+                const auto verdict = gate.observe(config, completed, epoch, ce);
+                if (verdict == PlannerGate::Verdict::nonfinite) { fail(error, "nonfinite held-out planner CE"); return 1; }
+                std::ostringstream reading; reading << std::setprecision(9)
+                    << "{\"stage\":\"planner_gate\",\"step\":" << completed << ",\"epoch\":" << epoch << ",\"ce\":" << ce
+                    << ",\"best\":" << gate.best << ",\"best_step\":" << gate.best_step << ",\"stale\":" << gate.stale
+                    << ",\"patience\":" << config.planner_gate_patience << ",\"armed\":" << (epoch >= double(config.planner_gate_min_epochs) ? "true" : "false")
+                    << ",\"items\":" << config.holdout_items.size() << ",\"tokens\":" << tokens
+                    << ",\"ms\":" << std::chrono::duration<double, std::milli>(Clock::now() - t0).count() << "}\n";
+                jsonl << reading.str(); std::cout << reading.str() << std::flush;
+                if (!jsonl.flush()) { fail(error, "training JSONL write failed"); return 1; }
+                gate_fired = verdict == PlannerGate::Verdict::fire;
+            }
             if (config.spike_factor > 0.0f) {
                 if (metrics.skipped) {
                     spike_steps.push_back(completed);
@@ -1465,29 +1501,11 @@ static int run_impl(Config config, std::string * error) {
                 kl_recent.push_back(metrics.ar_kl);
                 if (kl_recent.size() > 20) kl_recent.erase(kl_recent.begin());
             }
-            // Held-out planner gate, ahead of every stop that writes this
-            // step's checkpoint, so each record carries this step's reading.
-            // A freeze here leaves the KL stop nothing to read.
-            if (planner_frozen_at < 0 && PlannerGate::due(config, completed)) {
-                const auto t0 = Clock::now();
-                double ce = 0.0; size_t tokens = 0;
-                if (!held_out_planner_ce(&ce, &tokens)) return 1;
-                const double epoch = PlannerGate::epochs(config, completed, order.size());
-                const auto verdict = gate.observe(config, completed, epoch, ce);
-                if (verdict == PlannerGate::Verdict::nonfinite) { fail(error, "nonfinite held-out planner CE"); return 1; }
-                std::ostringstream reading; reading << std::setprecision(9)
-                    << "{\"stage\":\"planner_gate\",\"step\":" << completed << ",\"epoch\":" << epoch << ",\"ce\":" << ce
-                    << ",\"best\":" << gate.best << ",\"best_step\":" << gate.best_step << ",\"stale\":" << gate.stale
-                    << ",\"patience\":" << config.planner_gate_patience << ",\"armed\":" << (epoch >= double(config.planner_gate_min_epochs) ? "true" : "false")
-                    << ",\"items\":" << config.holdout_items.size() << ",\"tokens\":" << tokens
-                    << ",\"ms\":" << std::chrono::duration<double, std::milli>(Clock::now() - t0).count() << "}\n";
-                jsonl << reading.str(); std::cout << reading.str() << std::flush;
-                if (!jsonl.flush()) { fail(error, "training JSONL write failed"); return 1; }
-                if (verdict == PlannerGate::Verdict::fire) {
-                    if (!freeze_here("planner_ce")) { fail(error, "planner-freeze checkpoint publication failed"); return 1; }
-                    std::fprintf(stderr, "[yue2-aitk] held-out planner CE %.4f has not beaten %.4f (step %d) in %d readings: planner frozen at step %d; decoder-only until step %d\n",
-                                 ce, gate.best, gate.best_step, gate.stale, completed, end_step());
-                }
+            // The gate's freeze. It leaves the KL stop nothing to read.
+            if (gate_fired) {
+                if (!freeze_here("planner_ce")) { fail(error, "planner-freeze checkpoint publication failed"); return 1; }
+                std::fprintf(stderr, "[yue2-aitk] held-out planner CE has not beaten %.4f (step %d) in %d readings: planner frozen at step %d; decoder-only until step %d\n",
+                             gate.best, gate.best_step, gate.stale, completed, end_step());
             }
             if (config.target_loss > 0.0f && planner_frozen_at < 0) {
                 // Same composite the server reports: AR CE + weighted KL + NAR

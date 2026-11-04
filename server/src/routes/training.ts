@@ -195,7 +195,7 @@ import {
 } from '../services/training/yue2AitkPrepareRunner.js';
 import { isEngineSuspended } from '../services/aceEngineProcess.js';
 import { FIXED_RECIPE_CAPTION_GRAMMAR, fixedRecipeTrigger } from '../services/training/fixedRecipeCaption.js';
-import { legacyYue2DoraError, parseYue2JointStopMode, updateYue2JointParams, applyBaseMatchedRecipe, applyFixedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint } from '../services/training/yue2JointTrainRunner.js';
+import { legacyYue2DoraError, parseYue2JointStopMode, updateYue2JointParams, applyBaseMatchedRecipe, applyFixedRecipe, resolveYue2JointBase, yue2JointBases, defaultYue2JointBase, defaultYue2JointDevice, yue2ConvRotCheckpoint, planPlannerGateHoldout, PLANNER_GATE_DEFAULTS, yue2GateSongIds, yue2PlannerGatePreview, type Yue2PlannerGate } from '../services/training/yue2JointTrainRunner.js';
 import { jointAdmissionError, takeJointAdmission } from '../services/training/yue2JointAdmission.js';
 import { appendToBatch as appendToYue2Batch, hasActiveBatch, finishScoredLadders, cancelBatch as cancelYue2Batch, batchRunsElsewhere, getBatch as getYue2Batch, listBatches as listYue2Batches, pauseBatch as pauseYue2Batch, resumeBatch as resumeYue2Batch, startBatch as startYue2Batch } from '../services/training/yue2BatchRunner.js';
 import {
@@ -3686,7 +3686,18 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
         res.status(400).json({ error: `Set the total step count above checkpoint step ${step}.` });
         return;
       }
+      // A gated run resumes with its own gate, split and decoder budget (the
+      // engine refuses a mismatch); `inherited` already carries the gate.
+      if (b.plannerGate) {
+        if (b.refinePlanner === true) {
+          res.status(400).json({ error: 'A run that used the held-out planner gate cannot be planner-refined: the refinement unfreezes the planner without a decoder budget.' });
+          return;
+        }
+        b = { ...b, narExtraSteps: saved.narExtraSteps };
+      }
     }
+    const gateRequested = !!b.plannerGate && typeof b.plannerGate === 'object';
+    const gateNarExtraSteps = b.narExtraSteps;
     // Base-matched method: the fixed parts of the recipe replace whatever the
     // body says (they define the method); its knobs fill in where blank.
     if (b.method !== undefined && b.method !== 'tuned' && b.method !== 'base-matched' && b.method !== 'fixed-recipe') {
@@ -3715,6 +3726,8 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
     }
     if (method === 'base-matched') b = applyBaseMatchedRecipe(b);
     if (method === 'fixed-recipe') b = applyFixedRecipe(b);
+    // The recipes zero the decoder budget; the gate needs its own.
+    if (gateRequested) b = { ...b, narExtraSteps: gateNarExtraSteps };
     const str = (key: string): string => typeof b[key] === 'string' ? (b[key] as string).trim() : '';
     const automatic = b.autoPrepare === true && !str('resume');
     const prepDefaults = automatic ? yue2AitkPrepareDefaults(ds).options : undefined;
@@ -3989,13 +4002,47 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       if (typeof pc.lyrics === 'string') planCheck.lyrics = pc.lyrics;
     }
     let narExtraSteps: number | undefined;
-    if (stopMode === 'kl' && b.narExtraSteps !== undefined && b.narExtraSteps !== null && b.narExtraSteps !== '') {
+    if ((stopMode === 'kl' || gateRequested) && b.narExtraSteps !== undefined && b.narExtraSteps !== null && b.narExtraSteps !== '') {
       const raw = Number(b.narExtraSteps);
       if (!Number.isInteger(raw) || raw < 0 || raw > 0x7fffffff) {
         res.status(400).json({ error: 'narExtraSteps must be a non-negative integer.' });
         return;
       }
       if (raw > 0) narExtraSteps = raw;
+    }
+    // Held-out planner gate (GH #316): off unless the body asks for it.
+    let plannerGate: Yue2PlannerGate | undefined;
+    if (gateRequested) {
+      const pg = b.plannerGate as Record<string, unknown>;
+      const d = PLANNER_GATE_DEFAULTS;
+      const field = (key: 'every' | 'minEpochs' | 'patience' | 'epsilon' | 'evalSeed', lo: number, hi: number, int: boolean): number | null => {
+        const v = pg[key] === undefined || pg[key] === null || pg[key] === '' ? d[key] : Number(pg[key]);
+        return Number.isFinite(v) && v >= lo && v <= hi && (!int || Number.isInteger(v)) ? v : null;
+      };
+      const gate = { every: field('every', 1, 100000, true), minEpochs: field('minEpochs', 0, 100000, true), patience: field('patience', 1, 1000, true),
+        epsilon: field('epsilon', 0, 10, false), evalSeed: field('evalSeed', 0, 0xffffffff, true) };
+      const bad = (Object.keys(gate) as Array<keyof typeof gate>).find(k => gate[k] === null);
+      if (bad) { res.status(400).json({ error: `plannerGate.${bad} is out of range.` }); return; }
+      if (!(narExtraSteps !== undefined && narExtraSteps > 0)) { res.status(400).json({ error: 'The planner gate needs a decoder budget: set the decoder steps after the freeze above 0.' }); return; }
+      if (lrSchedule.lrSchedule === 'wsd') { res.status(400).json({ error: 'The planner gate does not support the wsd schedule: its tail would end the run when the planner freezes.' }); return; }
+      if (b.autoRefine === true) { res.status(400).json({ error: 'The planner gate cannot be combined with automatic planner refinement.' }); return; }
+      // A resume keeps the split it started with; a new run takes the ids the
+      // card showed, or the default pick for this dataset's songs.
+      // A resume checks the saved ids against the manifest it trains on; a new
+      // run against the current audio files, which preparation will name its items from.
+      const songs = resume ? yue2ManifestItemIds(dataset) : yue2GateSongIds(await buildSamples(ds));
+      const given = Array.isArray(pg.holdoutIds) && pg.holdoutIds.every(x => typeof x === 'string') ? [...new Set(pg.holdoutIds as string[])] : undefined;
+      let holdoutIds = given;
+      if (!holdoutIds?.length) {
+        const pick = planPlannerGateHoldout(songs, gate.evalSeed!);
+        if ('error' in pick) { res.status(400).json({ error: pick.error }); return; }
+        holdoutIds = pick.holdoutIds;
+      }
+      const unknown = holdoutIds.filter(id => !songs.includes(id));
+      if (songs.length && unknown.length) { res.status(400).json({ error: `Held-out songs are not in this dataset: ${unknown.join(', ')}` }); return; }
+      if (songs.length && songs.length - holdoutIds.length < 1) { res.status(400).json({ error: 'The planner gate would leave no song to train on.' }); return; }
+      const savedItems = resume && Array.isArray(pg.holdoutItems) && pg.holdoutItems.every(x => Number.isInteger(x)) ? pg.holdoutItems as number[] : undefined;
+      plannerGate = { ...(gate as Omit<Yue2PlannerGate, 'holdoutIds'>), holdoutIds, ...(savedItems ? { holdoutItems: savedItems } : {}) };
     }
     if (resume && (!fs.existsSync(resume) || !fs.statSync(resume).isFile())) {
       res.status(400).json({ error: `Joint-training resume record is missing: ${resume}` });
@@ -4039,6 +4086,7 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       ...(targetKl !== undefined ? { targetKl } : {}),
       ...(targetKlMode ? { targetKlMode } : {}),
       ...(narExtraSteps !== undefined ? { narExtraSteps } : {}),
+      ...(plannerGate ? { plannerGate } : {}),
       ...(b.stopEngine === false ? { stopEngine: false } : {}),
       ...spike,
       ...(planCheck ? { planCheck } : {}),
@@ -4063,7 +4111,35 @@ router.post('/datasets/:id/yue2-joint-train', async (req: Request, res: Response
       ...(calibration ? { calibration } : {}),
       optimizer, cautious, rank, alpha: alphaRaw, adapterType, ...(adapterType === 'lokr' ? { lokrDim, lokrFactor } : {}), stopMode, ...advanced,
       ...(targetLoss !== undefined ? { targetLoss } : {}), ...(targetKl !== undefined ? { targetKl } : {}), ...(targetKlMode ? { targetKlMode } : {}),
-      ...(narExtraSteps !== undefined ? { narExtraSteps } : {}) });
+      ...(narExtraSteps !== undefined ? { narExtraSteps } : {}), ...(plannerGate ? { plannerGate } : {}) });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+/** Item ids of a prepared manifest ([] when unreadable); the resume check. */
+function yue2ManifestItemIds(file: string): string[] {
+  try {
+    if (!file || !fs.existsSync(file) || fs.statSync(file).size > 16 * 1024 * 1024) return [];
+    const items = (JSON.parse(fs.readFileSync(file, 'utf8')) as { items?: unknown }).items;
+    return Array.isArray(items) ? items.map((x: any) => String(x?.id ?? '')).filter(Boolean) : [];
+  } catch { return []; }
+}
+
+/** GET /datasets/:id/yue2-joint-holdout?seed=42
+ *
+ * The planner gate's default split for this dataset, so the card can show the
+ * held-out songs before the run starts, even before any stage has run: the ids
+ * come from the dataset's current audio files, the same inventory preprocessing
+ * names its sources from. Start uses the same pick. A read, so it does not
+ * wait for an idle dataset or the trainer binary. */
+router.get('/datasets/:id/yue2-joint-holdout', async (req: Request, res: Response) => {
+  try {
+    const ds = repo.getDataset(req.params.id as string);
+    if (!ds) { res.status(404).json({ error: 'Dataset not found' }); return; }
+    const seed = req.query.seed === undefined ? PLANNER_GATE_DEFAULTS.evalSeed : Number(req.query.seed);
+    if (!Number.isInteger(seed) || seed < 0 || seed > 0xffffffff) { res.status(400).json({ error: 'seed must fit uint32.' }); return; }
+    res.json(yue2PlannerGatePreview(await buildSamples(ds), seed));
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
   }

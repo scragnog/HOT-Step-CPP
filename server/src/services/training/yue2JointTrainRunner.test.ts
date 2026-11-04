@@ -3,7 +3,8 @@ import test from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { applyFixedRecipe, buildYue2JointTrainArgs, legacyYue2DoraError, parseYue2JointEvent, parseYue2JointStopMode, reconKeepDecision, updateYue2JointParams, yue2JointExpectedStep, yue2JointLivePace } from './yue2JointTrainRunner.js';
+import { applyFixedRecipe, relayJsonLine, buildYue2JointTrainArgs, planPlannerGateHoldout, resolvePlannerGateItems, yue2GateSongIds, yue2PlannerGatePreview, legacyYue2DoraError, parseYue2JointEvent, parseYue2JointStopMode, reconKeepDecision, updateYue2JointParams, yue2JointExpectedStep, yue2JointLivePace } from './yue2JointTrainRunner.js';
+import { createJob } from './labelingQueue.js';
 
 test('Fixed recipe forces its recipe and retains the companion decoder', () => {
   const recipe = applyFixedRecipe({ method: 'fixed-recipe', rank: 16, alpha: 256, adapterType: 'lokr',
@@ -235,4 +236,89 @@ test('expected checkpoint follows the engine, never a pause a late edit moved', 
   assert.equal(yue2JointExpectedStep({ lastStep: 1500, targetStopped: false }, 1200, 1500), 1500);
   assert.equal(yue2JointExpectedStep({ pausedAt: 1212, lastStep: 1212, targetStopped: false }, 1200, 1500), 1212);
   assert.equal(yue2JointExpectedStep({ lastStep: 1340, targetStopped: true }, 1200, 1500), 1340);
+});
+
+test('planner gate flags ride on every segment, with the decoder budget on any stop mode', () => {
+  const gate = { every: 10, minEpochs: 5, patience: 3, epsilon: 0.001, evalSeed: 42, holdoutIds: ['a', 'c'], holdoutItems: [0, 2] };
+  const base = { checkpoint: 'b', dataset: 'd', outDir: 'o', steps: 750, saveEvery: 25, seed: 42, device: 'CUDA0', narExtraSteps: 100, stopMode: 'steps' as const };
+  const args = buildYue2JointTrainArgs({ ...base, plannerGate: gate });
+  const at = (flag: string) => args[args.indexOf(flag) + 1];
+  assert.equal(at('--nar-extra-steps'), '100');
+  assert.equal(at('--planner-gate-every'), '10');
+  assert.equal(at('--planner-gate-min-epochs'), '5');
+  assert.equal(at('--planner-gate-patience'), '3');
+  assert.equal(at('--planner-gate-epsilon'), '0.001');
+  assert.equal(at('--holdout-items'), '0,2');
+  assert.equal(at('--eval-seed'), '42');
+  // A resumed or paused segment carries the same flags.
+  const resumed = buildYue2JointTrainArgs({ ...base, plannerGate: gate, resume: 'r', pauseAt: 100 });
+  assert.deepEqual(resumed.slice(resumed.indexOf('--planner-gate-every'), resumed.indexOf('--planner-gate-every') + 8), args.slice(args.indexOf('--planner-gate-every'), args.indexOf('--planner-gate-every') + 8));
+  // Off: no gate flags, and steps mode still passes no budget.
+  const off = buildYue2JointTrainArgs(base);
+  assert.equal(off.some(a => a.startsWith('--planner-gate') || a === '--holdout-items' || a === '--eval-seed'), false);
+  assert.equal(off.includes('--nar-extra-steps'), false);
+  // An unresolved split must never be dropped silently.
+  assert.throws(() => buildYue2JointTrainArgs({ ...base, plannerGate: { ...gate, holdoutItems: undefined } }), /not resolved/);
+});
+
+test('planner gate hold-out: 20% rounded up, at least 3, deterministic, leaves training songs', () => {
+  const ids = (n: number) => Array.from({ length: n }, (_, i) => `song-${String(i).padStart(2, '0')}`);
+  const pick = (n: number, seed = 42) => planPlannerGateHoldout(ids(n), seed) as { holdoutIds: string[] };
+  assert.equal(pick(10).holdoutIds.length, 3);
+  assert.equal(pick(16).holdoutIds.length, 4);
+  assert.equal(pick(21).holdoutIds.length, 5);
+  assert.deepEqual(pick(16).holdoutIds, pick(16).holdoutIds);
+  assert.notDeepEqual(pick(16, 1).holdoutIds, pick(16, 2).holdoutIds);
+  assert.ok(pick(16).holdoutIds.every(id => ids(16).includes(id)));
+  assert.match((planPlannerGateHoldout(ids(3), 42) as { error: string }).error, /at least one more/);
+  assert.ok('holdoutIds' in planPlannerGateHoldout(ids(4), 42));
+});
+
+test('planner gate items resolve by id and a resume refuses a moved split', () => {
+  const gate = { every: 10, minEpochs: 5, patience: 3, epsilon: 0.001, evalSeed: 42, holdoutIds: ['c', 'a'] };
+  assert.deepEqual(resolvePlannerGateItems(['a', 'b', 'c', 'd'], gate), [2, 0]);
+  assert.match((resolvePlannerGateItems(['a', 'b'], gate) as { error: string }).error, /not in the prepared dataset: c/);
+  assert.deepEqual(resolvePlannerGateItems(['a', 'b', 'c', 'd'], { ...gate, holdoutItems: [2, 0] }), [2, 0]);
+  assert.match((resolvePlannerGateItems(['x', 'a', 'b', 'c'], { ...gate, holdoutItems: [2, 0] }) as { error: string }).error, /no longer matches/);
+  assert.match((resolvePlannerGateItems(['a', 'c'], gate) as { error: string }).error, /no song to train on/);
+});
+
+test('planner gate reading is a metric and leaves the phase alone; the freeze reason picks the log text', () => {
+  const job = createJob('yue2-joint-train', 'fixture', [], {});
+  job.phase = 'training';
+  const state = { fatalMessage: '', doneSeen: false, lastStep: 0, totalSteps: 100 };
+  relayJsonLine(job, JSON.stringify({ stage: 'planner_gate', step: 30, epoch: 6.5, ce: 2.31, best: 2.25, best_step: 20, stale: 2, patience: 3, armed: true, items: 4, tokens: 900, ms: 4300 }), state);
+  assert.equal(job.phase, 'training');
+  const metric = job.events.find(e => e.type === 'metric' && e.metric === 'eval') as any;
+  assert.deepEqual(metric.plannerGate, { ce: 2.31, best: 2.25, bestStep: 20, stale: 2, patience: 3, armed: true, epoch: 6.5, items: 4 });
+  const messages = () => job.events.filter(e => e.type === 'log').map((e: any) => e.message);
+  relayJsonLine(job, JSON.stringify({ stage: 'planner_frozen', step: 40, reason: 'planner_ce' }), state);
+  assert.equal((state as any).frozenAt, 40);
+  assert.ok(messages().some(m => /held-out loss stopped improving at step 40/.test(m)));
+  assert.ok(!messages().some(m => /KL target/.test(m)));
+  relayJsonLine(job, JSON.stringify({ stage: 'planner_frozen', step: 50, reason: 'kl' }), state);
+  assert.ok(messages().some(m => /reached its KL target at step 50/.test(m)));
+});
+
+test('planner gate preview works before any stage ran, from the current audio files alone', () => {
+  const sample = (relPath: string, extra: Record<string, unknown> = {}) => ({ audioPath: `/data/set/${relPath}`, relPath, excluded: false, fileMissing: false, ...extra });
+  const samples = [
+    ...Array.from({ length: 8 }, (_, i) => sample(`song-${i}.wav`)),
+    sample('a/same.flac'), sample('b/same.flac'),            // colliding basenames get flattened names
+    sample('skipped.wav', { excluded: true }), sample('gone.wav', { fileMissing: true }), sample('notes.txt'),
+    sample('song-0.engine.wav'),                              // the old conversion cache the engine skips
+  ];
+  const ids = yue2GateSongIds(samples);
+  assert.deepEqual(ids.slice(0, 8), Array.from({ length: 8 }, (_, i) => `song-${i}.wav`));
+  assert.deepEqual(ids.slice(8), ['a__same.flac', 'b__same.flac']);
+  const preview = yue2PlannerGatePreview(samples, 42);
+  assert.equal(preview.error, undefined);
+  assert.equal(preview.songs, 10);
+  assert.equal(preview.holdoutIds.length, 3);
+  assert.equal(preview.training, 7);
+  assert.ok(preview.holdoutIds.every(id => ids.includes(id)));
+  // A changed inventory changes the answer: nothing is cached.
+  assert.equal(yue2PlannerGatePreview([...samples, sample('new.wav')], 42).songs, 11);
+  assert.match(yue2PlannerGatePreview([], 42).error ?? '', /no included audio/);
+  assert.match(yue2PlannerGatePreview(samples.slice(0, 3), 42).error ?? '', /at least one more/);
 });
