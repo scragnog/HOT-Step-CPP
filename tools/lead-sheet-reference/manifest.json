@@ -1,0 +1,1961 @@
+{
+  "schema_version": 1,
+  "status": "ready-for-review",
+  "artifact_root": "_experiments/lead-sheet-reference",
+  "provenance": {
+    "upstream_commit": "e27fa7fa0da7c9817879cc6210cc5693f9327946",
+    "weights": [
+      {
+        "path": "yourmt3/last.ckpt",
+        "host": "huggingface-space",
+        "revision": "5e66c1ea173a8186e0d20432b841d3180cc015b5",
+        "url": "https://huggingface.co/spaces/mimbres/YourMT3/resolve/5e66c1ea173a8186e0d20432b841d3180cc015b5/amt/logs/2024/mc13_256_g4_all_v7_mt3f_sqr_rms_moe_wf4_n8k2_silu_rope_rp_b36_nops/checkpoints/last.ckpt",
+        "bytes": 561544628,
+        "sha256": "ae38e415c79efd5592dcb9b658cdb99ddb11d4c4e1eaa364cab04a052473fc25"
+      },
+      {
+        "path": "chord/joint_chord_net_ismir_naive_v1.0_reweight(0.0,10.0)_s0.best.sdict",
+        "host": "github",
+        "revision": "481f4ce703f8822b99f4037e9104ba1760e21ea3",
+        "url": "https://raw.githubusercontent.com/music-x-lab/ISMIR2019-Large-Vocabulary-Chord-Recognition/481f4ce703f8822b99f4037e9104ba1760e21ea3/cache_data/joint_chord_net_ismir_naive_v1.0_reweight(0.0,10.0)_s0.best.sdict",
+        "bytes": 5746183,
+        "sha256": "921b42d5d1cf9ce1c0c0e45a74d409b8066e0acec46058ef74e24ee0fb540761"
+      },
+      {
+        "path": "chord/joint_chord_net_ismir_naive_v1.0_reweight(0.0,10.0)_s1.best.sdict",
+        "host": "github",
+        "revision": "481f4ce703f8822b99f4037e9104ba1760e21ea3",
+        "url": "https://raw.githubusercontent.com/music-x-lab/ISMIR2019-Large-Vocabulary-Chord-Recognition/481f4ce703f8822b99f4037e9104ba1760e21ea3/cache_data/joint_chord_net_ismir_naive_v1.0_reweight(0.0,10.0)_s1.best.sdict",
+        "bytes": 5746175,
+        "sha256": "bcb75859e0efa256696cf5da396b320093317b9b1d9560c304f46c25fe1f8b17"
+      },
+      {
+        "path": "chord/joint_chord_net_ismir_naive_v1.0_reweight(0.0,10.0)_s2.best.sdict",
+        "host": "github",
+        "revision": "481f4ce703f8822b99f4037e9104ba1760e21ea3",
+        "url": "https://raw.githubusercontent.com/music-x-lab/ISMIR2019-Large-Vocabulary-Chord-Recognition/481f4ce703f8822b99f4037e9104ba1760e21ea3/cache_data/joint_chord_net_ismir_naive_v1.0_reweight(0.0,10.0)_s2.best.sdict",
+        "bytes": 5746179,
+        "sha256": "acddf85c3fff29954c4877021177d72e2cba9f729ce80c1010f054c477bf3f61"
+      },
+      {
+        "path": "chord/joint_chord_net_ismir_naive_v1.0_reweight(0.0,10.0)_s3.best.sdict",
+        "host": "github",
+        "revision": "481f4ce703f8822b99f4037e9104ba1760e21ea3",
+        "url": "https://raw.githubusercontent.com/music-x-lab/ISMIR2019-Large-Vocabulary-Chord-Recognition/481f4ce703f8822b99f4037e9104ba1760e21ea3/cache_data/joint_chord_net_ismir_naive_v1.0_reweight(0.0,10.0)_s3.best.sdict",
+        "bytes": 5746175,
+        "sha256": "65d81a3ab73435aaaade586981b4cabdf57b8953d76052703e6968c32ef8421c"
+      },
+      {
+        "path": "chord/joint_chord_net_ismir_naive_v1.0_reweight(0.0,10.0)_s4.best.sdict",
+        "host": "github",
+        "revision": "481f4ce703f8822b99f4037e9104ba1760e21ea3",
+        "url": "https://raw.githubusercontent.com/music-x-lab/ISMIR2019-Large-Vocabulary-Chord-Recognition/481f4ce703f8822b99f4037e9104ba1760e21ea3/cache_data/joint_chord_net_ismir_naive_v1.0_reweight(0.0,10.0)_s4.best.sdict",
+        "bytes": 5746227,
+        "sha256": "5ff6b0ec85640e17a09a9b3de68c93fdd45adc24488e8fa9be5715c28d561122"
+      }
+    ]
+  },
+  "tolerance_file": "tolerances.json",
+  "inventory_file": "inventory.json",
+  "captures": [
+    {
+      "alias": "library-vocal",
+      "input_sha256": "1181a061b9bf70f3c19f1f7268e0e4b17588db9e5a051abb6375a87b106dfe88",
+      "source_sha256": "f65f66d69f3f760bc774e750e108923f52fe739bbb33850859def07ac66d334e",
+      "start_seconds": 30,
+      "duration_seconds": 16.0,
+      "capture_directory": "captures/v2-vocal",
+      "status": "captured",
+      "bpm": 170.45454545454547,
+      "tuning_bins": 0.06000000000000005,
+      "timings_seconds": {
+        "yourmt3_load_and_inference": 9.98284239997156,
+        "chord_load_features_inference_and_bpm": 2.7122691000113264
+      },
+      "wall_seconds": 15.595611000084318,
+      "skips": [],
+      "verification": {
+        "integrity": "PASS",
+        "tensors": 65,
+        "status": "captured",
+        "coverage": {
+          "vocal_notes": 26,
+          "drum_notes": 78,
+          "repeated_vocal_pitches": {
+            "43": 2,
+            "45": 3,
+            "53": 2,
+            "51": 3,
+            "56": 15
+          },
+          "inversion_labels": [],
+          "chunk_crossing_notes": 30,
+          "non_120_estimated_bpm": true,
+          "inferred_labels_are_not_human_annotations": true
+        }
+      },
+      "files": [
+        {
+          "path": "captures/v2-vocal/baseline-check.json",
+          "bytes": 228,
+          "sha256": "be45ca47962b0f35fbefafcb0caa73a7ed15e7f31f308f2dd1a201afbdd6e024"
+        },
+        {
+          "path": "captures/v2-vocal/capture.log",
+          "bytes": 187,
+          "sha256": "962a8e0363985a34ac5d961e47771d0d2b4abf6ebb7c7f9bb140bdf3635bfe5d"
+        },
+        {
+          "path": "captures/v2-vocal/chord-frame-labels.json",
+          "bytes": 8833,
+          "sha256": "cb514285bb5fb19fbff097a2f7184a0214f0d4787f2171d1d40c97ed92854da4"
+        },
+        {
+          "path": "captures/v2-vocal/chord.cqt-magnitude.f32",
+          "bytes": 794880,
+          "sha256": "c909cc4a52c6201d15079e27034adb64bb865b130bb4a0a131d952dd52bebcb4"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold0.cnn.f32",
+          "bytes": 662400,
+          "sha256": "5bc8bee92fe163ba5bc0d7b689d7e542680c85d2042c90a29d7d0f763d105b15"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold0.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "3b4d8c94600d925510014b717a8c042cf813ffe8882f1fda96a2ee43573db8bb"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold0.head0.f32",
+          "bytes": 201480,
+          "sha256": "6c257b344fd48c752639be7aa950438f6a76ed0a106c1f84d4754c6def539a55"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold0.head1.f32",
+          "bytes": 35880,
+          "sha256": "69fd16a6eb602b22e10e2c37df80b6f7d2a2b6cc0623aa26ecaa33312894060f"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold0.head2.f32",
+          "bytes": 11040,
+          "sha256": "2e5edc2e7340057d9e4dfa4392a6a06cace0d2519d1f4f701cdd8aa64d2511e6"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold0.head3.f32",
+          "bytes": 11040,
+          "sha256": "27d15594f13b60698cb9aaf6d636a8f4276127094354b2929e5632330a62f542"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold0.head4.f32",
+          "bytes": 8280,
+          "sha256": "c0d72a18361442fd4a76b32746f63c54e9a90e5353c848d5921a68d8f0c58dac"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold0.head5.f32",
+          "bytes": 8280,
+          "sha256": "d3b172b42ee9f44125df1f5c55f7fab53b3de771038cc3b93ac2d7b0680376db"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold0.lstm.f32",
+          "bytes": 529920,
+          "sha256": "c45542729f2f8171a8cad7eded4fa7e7a3abaaf9f039a059f278ab69cdfb3ff2"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold1.cnn.f32",
+          "bytes": 662400,
+          "sha256": "77c431611767074798592e8adf0888d00b63e7647de162f5b900ad8a8843b7ea"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold1.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "3b4d8c94600d925510014b717a8c042cf813ffe8882f1fda96a2ee43573db8bb"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold1.head0.f32",
+          "bytes": 201480,
+          "sha256": "cb3da9070888880fdc5c2e9392ab328838b1326da92d4707e5ab9b93d95315e7"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold1.head1.f32",
+          "bytes": 35880,
+          "sha256": "c3fe4912b94e504ba53abd9ae93f86f487143238fea22912695d270126df563d"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold1.head2.f32",
+          "bytes": 11040,
+          "sha256": "142b8342460d060224d213383a8b32d5cf4f32a9a2d664e178fb185f87dc1453"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold1.head3.f32",
+          "bytes": 11040,
+          "sha256": "48e65cde6fcc967ddd54a6ca8897272428127bf8f7025226666733debfe77717"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold1.head4.f32",
+          "bytes": 8280,
+          "sha256": "264c4cf3456854c6505fd38736b60383ce5c21177a7d75374bab539d251f8732"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold1.head5.f32",
+          "bytes": 8280,
+          "sha256": "37a791aa8f9aa6f4d159d42040a7c1f10bfe7154f87f3e8e1a1f0ff638f9b69a"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold1.lstm.f32",
+          "bytes": 529920,
+          "sha256": "0b212361e100133f67b0d10297d635cd2361c458e9fe2827544e97c938e79c97"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold2.cnn.f32",
+          "bytes": 662400,
+          "sha256": "c63bd74f85e1e8d2e9619471ea470a73686c2358487f3e8f2ab5d3d988cb058c"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold2.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "3b4d8c94600d925510014b717a8c042cf813ffe8882f1fda96a2ee43573db8bb"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold2.head0.f32",
+          "bytes": 201480,
+          "sha256": "487bd3365c2892090fa6a8045c81091aa6ba5deff7b22272bfb57f22572b7315"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold2.head1.f32",
+          "bytes": 35880,
+          "sha256": "f00d87d39f8eca7f257a6e61b14823b62557f480b8044c3f3fc70083a742119a"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold2.head2.f32",
+          "bytes": 11040,
+          "sha256": "73f9dcc2ee7c700a62d7b2ac3c332c4ae96f9b33d159636e2946dc77dcbcf6b5"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold2.head3.f32",
+          "bytes": 11040,
+          "sha256": "719a1d50349859cc3a8eee47f449e55c52a4b503ee1d3327dc409350e44d2dff"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold2.head4.f32",
+          "bytes": 8280,
+          "sha256": "2769efc62a96aa31925976e099bdd990835ec352e034886c415be1339f653ad4"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold2.head5.f32",
+          "bytes": 8280,
+          "sha256": "58e9a7560b669877c69f2fb70af038413b42489eb2b727b9692935856cd82a35"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold2.lstm.f32",
+          "bytes": 529920,
+          "sha256": "19b53581638efec8a97ec7e58d59b6a6a79dae538df3f82133cd26d7c39668cb"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold3.cnn.f32",
+          "bytes": 662400,
+          "sha256": "44a0b043da0221671527b4cda1f8f8c8ed64633965f9c8c6599b309e274b11bf"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold3.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "3b4d8c94600d925510014b717a8c042cf813ffe8882f1fda96a2ee43573db8bb"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold3.head0.f32",
+          "bytes": 201480,
+          "sha256": "754c61dca098263d1acecc9bca62953ad5dc5c25dc2c80778e7a8c1197d21262"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold3.head1.f32",
+          "bytes": 35880,
+          "sha256": "02220a9bbb743fbde35a41bd6c4264286dee3e6392a1bdadb2a0b0cdd8062a23"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold3.head2.f32",
+          "bytes": 11040,
+          "sha256": "dbb5ebf42ea471b57ff7aefa8b922d6ddec28ebae5751abb381ea008986ac043"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold3.head3.f32",
+          "bytes": 11040,
+          "sha256": "d8db20bd94edabd6635602ae82f05cdd0aadb84df0c484bb1403bbede942dba3"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold3.head4.f32",
+          "bytes": 8280,
+          "sha256": "88008755a7b186ecb7b7633b3af4a6344644389e341e8e1fcbb88e85b6a0c564"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold3.head5.f32",
+          "bytes": 8280,
+          "sha256": "3954a1cee03cfbf7642f4baf9131bedb9a365e6deafd858cac86ce85441c76d7"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold3.lstm.f32",
+          "bytes": 529920,
+          "sha256": "adccaf466a285ddc958ce29c955c475ad5fc4c7e37fa9296c2fa91280b84a0ab"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold4.cnn.f32",
+          "bytes": 662400,
+          "sha256": "dee06b9313decbc77bd6c593cdd0027dd6fc5817b5cfa997e86f02ea5360bfba"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold4.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "3b4d8c94600d925510014b717a8c042cf813ffe8882f1fda96a2ee43573db8bb"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold4.head0.f32",
+          "bytes": 201480,
+          "sha256": "3a5c2636f5750c03ffaf8bc30aba3c1d1bc306379d2094ec0eea6b1e9b0601c1"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold4.head1.f32",
+          "bytes": 35880,
+          "sha256": "65980f21146a09d59968a3c997eb00e3b680ffc85c948ce8ae48e840aed4b411"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold4.head2.f32",
+          "bytes": 11040,
+          "sha256": "93751c2783711b1274de5868ed7c50896129fa3bc7b6935886f87bd0021d2fb6"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold4.head3.f32",
+          "bytes": 11040,
+          "sha256": "8190397043c2c27969a55d5b8596e7d3bb21b88725e22a3d47f00a4f6f131dc8"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold4.head4.f32",
+          "bytes": 8280,
+          "sha256": "9a33327e32983d4f8a21b53d09feb274e0d9e7bfa63c4ac9b4c12448b7ffcf6f"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold4.head5.f32",
+          "bytes": 8280,
+          "sha256": "908835d1d09e2be2af0ecd3bfd33af8aee6c2b954f0d55ea8933d675e79a0979"
+        },
+        {
+          "path": "captures/v2-vocal/chord.fold4.lstm.f32",
+          "bytes": 529920,
+          "sha256": "fb1d0f679f9aa6bec6382cd95ad0294fe3b9a93a0f96abea6e84260afea3f3a9"
+        },
+        {
+          "path": "captures/v2-vocal/chord.hybrid-cqt.f32",
+          "bytes": 794880,
+          "sha256": "c909cc4a52c6201d15079e27034adb64bb865b130bb4a0a131d952dd52bebcb4"
+        },
+        {
+          "path": "captures/v2-vocal/chord.mean.head0.f32",
+          "bytes": 201480,
+          "sha256": "9b7e44aeb141424e3f1c721e4241bb97fac0f58345bb625f802cf78374b863b4"
+        },
+        {
+          "path": "captures/v2-vocal/chord.mean.head1.f32",
+          "bytes": 35880,
+          "sha256": "0cee66b842f101bf21340876f0d6d25ed8bd9a7d5217715137f5abe63cf1a37e"
+        },
+        {
+          "path": "captures/v2-vocal/chord.mean.head2.f32",
+          "bytes": 11040,
+          "sha256": "42fbe20392a4bf618151708548e1faf438c8f7788ff9a10981cd8947ddb83dc6"
+        },
+        {
+          "path": "captures/v2-vocal/chord.mean.head3.f32",
+          "bytes": 11040,
+          "sha256": "72c0c45a8608ee50c3bd4f199dedf4a34935980c4b6a4c8012c18ace54a5ffc6"
+        },
+        {
+          "path": "captures/v2-vocal/chord.mean.head4.f32",
+          "bytes": 8280,
+          "sha256": "e24583759a51f155a58ebf06727f2eb0347316d7699e01dbcbc1c33a25d8619a"
+        },
+        {
+          "path": "captures/v2-vocal/chord.mean.head5.f32",
+          "bytes": 8280,
+          "sha256": "07ea9b8db0e0d72eb67ea61c54aacdcc8a419cc78fbec866ac9edc4a2f9a8368"
+        },
+        {
+          "path": "captures/v2-vocal/chord.waveform-22050.f32",
+          "bytes": 1411200,
+          "sha256": "c23e93134f73f092c9b3435608a34c72597bccabaadcfa40972c970702cdfc06"
+        },
+        {
+          "path": "captures/v2-vocal/chords-rounded-beats.json",
+          "bytes": 338,
+          "sha256": "d325d155ede9eeb3673bd6f82b01fc8a932b5d4bf928012d03441a63eff923d2"
+        },
+        {
+          "path": "captures/v2-vocal/chords-seconds.json",
+          "bytes": 582,
+          "sha256": "2fa6a1ce08f33ff0ad27667143389ecf7f7bf394c8a8b8b7521cff19e88b01bb"
+        },
+        {
+          "path": "captures/v2-vocal/drums-seconds.json",
+          "bytes": 10556,
+          "sha256": "408b8a7fb9a0a576c5aeb72ac1cbdc92d8e1b2cab24b4272fecc11a0ea731434"
+        },
+        {
+          "path": "captures/v2-vocal/event-vocabulary.json",
+          "bytes": 30075,
+          "sha256": "5ac32b5e6e9ff276065194c6e37ceabc081269f58e2f0ad6367fe9bd077402de"
+        },
+        {
+          "path": "captures/v2-vocal/manifest.json",
+          "bytes": 1764,
+          "sha256": "76e98c89657884b5b6998bfbe8b395f63b4daddb259f4e4e08f2663243927396"
+        },
+        {
+          "path": "captures/v2-vocal/merged-notes-seconds.json",
+          "bytes": 28597,
+          "sha256": "5b084581330d217277fb846c7ac1a2006be0a0bb90ecd0f375ac2884e8304ac3"
+        },
+        {
+          "path": "captures/v2-vocal/midi/bpm.txt",
+          "bytes": 15,
+          "sha256": "8c6262f2daf8dc7fc22f899299e80bd9fe553da41f9ae3a29525c103a31228d8"
+        },
+        {
+          "path": "captures/v2-vocal/midi/chord.mid",
+          "bytes": 189,
+          "sha256": "a4bb7dce545195ec23275a3cf3749acce6c99712294e7e6f0bd106f723f48c41"
+        },
+        {
+          "path": "captures/v2-vocal/midi/drums.mid",
+          "bytes": 646,
+          "sha256": "7eecbac6b4f9b3d00b6db11236b0057a59dd560e268de2ed771fe0b6c427c2ee"
+        },
+        {
+          "path": "captures/v2-vocal/midi/melody.mid",
+          "bytes": 282,
+          "sha256": "477af39dc42f7c149a0dd00b89070e59c822b9910bf9cb50490c603837a28fbe"
+        },
+        {
+          "path": "captures/v2-vocal/mt3.b0.cached-step.logits.f32",
+          "bytes": 247936,
+          "sha256": "c3737a1700ee0a415ba24eb5b7d149b0176e334cd8c3aadd59791d84920a9a6f"
+        },
+        {
+          "path": "captures/v2-vocal/mt3.b0.encoder.f32",
+          "bytes": 11714560,
+          "sha256": "96cf3a83c41abbaf26ba459a6732301137ece22b2d2283870a46c1b7ed06dc93"
+        },
+        {
+          "path": "captures/v2-vocal/mt3.b0.linear-spectrogram.f32",
+          "bytes": 3604480,
+          "sha256": "b694f6f863ed5021764b2d40accae69f56b9f4a0bea8a3cbb053cf258240108a"
+        },
+        {
+          "path": "captures/v2-vocal/mt3.b0.pre-decoder.f32",
+          "bytes": 23429120,
+          "sha256": "5e72f950dce83f3c18b95847d77435c693823d7969316368fe7cb1c25cff5c25"
+        },
+        {
+          "path": "captures/v2-vocal/mt3.b0.pre-encoder.f32",
+          "bytes": 57671680,
+          "sha256": "ef6eacec4441d4ddd9d3f8d6d88a26caaafe967c7bd28011e9dd42d835caf8c1"
+        },
+        {
+          "path": "captures/v2-vocal/mt3.b0.prefill.logits.f32",
+          "bytes": 247936,
+          "sha256": "1bc4328919fcf941279f73ee32bfff874295f554c04cf0116168a07ae4bfba0b"
+        },
+        {
+          "path": "captures/v2-vocal/mt3.b0.waveform-padded.f32",
+          "bytes": 1048544,
+          "sha256": "7641769e725cc8dbb5aa80df2484d3f8ace703137058098b82e290aa12e97284"
+        },
+        {
+          "path": "captures/v2-vocal/program-channel-map.json",
+          "bytes": 9823,
+          "sha256": "2372f631232426908f6199c5f993044f2e963e73856d5d54566a7c3256ba13e6"
+        },
+        {
+          "path": "captures/v2-vocal/roll.chord.f32",
+          "bytes": 8832,
+          "sha256": "62e558f44ad18160ef90fa02c712d2bf1941ff13fe3d50d3ebc0a6bb627edf71"
+        },
+        {
+          "path": "captures/v2-vocal/roll.context_mask.f32",
+          "bytes": 736,
+          "sha256": "c6c9b8650bdf333e657353246bc6f5b02f61950d8990935e2f0e38a63197c80c"
+        },
+        {
+          "path": "captures/v2-vocal/roll.drum_pianoroll.f32",
+          "bytes": 94208,
+          "sha256": "110e8b67a1bbb6322b1c03272eae65c0238ad9ec83df97658ee44981e2d53ae5"
+        },
+        {
+          "path": "captures/v2-vocal/roll.pianoroll.f32",
+          "bytes": 188416,
+          "sha256": "7465b104584f519be51160ca95f1faed355fde9dcb2947b5b614c1705dda7fe3"
+        },
+        {
+          "path": "captures/v2-vocal/run.json",
+          "bytes": 776,
+          "sha256": "66712111ffe954312d6ce3ce6185595d62166decb9ed5de50ab9d4f51845e324"
+        },
+        {
+          "path": "captures/v2-vocal/seconds-variant.json",
+          "bytes": 32717,
+          "sha256": "be8ce3180a502280426e15ab900204f2c955f75bf8071eac38cf4e2a38d63338"
+        },
+        {
+          "path": "captures/v2-vocal/tensors.json",
+          "bytes": 20167,
+          "sha256": "065c4f59d48c0b4432719343313ac659987819f4614c632448e3a5b1a8004f7c"
+        },
+        {
+          "path": "captures/v2-vocal/tokens-by-batch-channel.json",
+          "bytes": 73431,
+          "sha256": "79b7e2a4bcd54cc142630542b8d72cb10bc68095cef812f1e81ce981144deda1"
+        },
+        {
+          "path": "captures/v2-vocal/triplets-sixteenths.json",
+          "bytes": 5854,
+          "sha256": "4e3240b983815ae9c5b98e14e95f7babc996bcd47dd96d41ec38ac9e74060eb2"
+        },
+        {
+          "path": "captures/v2-vocal/verification.json",
+          "bytes": 416,
+          "sha256": "c19694156e1433af7e38054955dbf332cb5180fcf0b277a7ec43c61dc87ef3a1"
+        },
+        {
+          "path": "captures/v2-vocal/vocal-program-100-seconds.json",
+          "bytes": 3483,
+          "sha256": "6081f1fbc9a75a7909fdad88033cfb0af856ac0b8045755f08fcbf06a102dd6f"
+        },
+        {
+          "path": "captures/v2-vocal/without-drums/midi/bpm.txt",
+          "bytes": 15,
+          "sha256": "8c6262f2daf8dc7fc22f899299e80bd9fe553da41f9ae3a29525c103a31228d8"
+        },
+        {
+          "path": "captures/v2-vocal/without-drums/midi/chord.mid",
+          "bytes": 189,
+          "sha256": "a4bb7dce545195ec23275a3cf3749acce6c99712294e7e6f0bd106f723f48c41"
+        },
+        {
+          "path": "captures/v2-vocal/without-drums/midi/drums.mid",
+          "bytes": 42,
+          "sha256": "4295713dfed93dbb49ba495d492a7075d92679c7eadcb74a236778233bf3683d"
+        },
+        {
+          "path": "captures/v2-vocal/without-drums/midi/melody.mid",
+          "bytes": 282,
+          "sha256": "477af39dc42f7c149a0dd00b89070e59c822b9910bf9cb50490c603837a28fbe"
+        },
+        {
+          "path": "captures/v2-vocal/without-drums/roll.chord.f32",
+          "bytes": 8832,
+          "sha256": "62e558f44ad18160ef90fa02c712d2bf1941ff13fe3d50d3ebc0a6bb627edf71"
+        },
+        {
+          "path": "captures/v2-vocal/without-drums/roll.context_mask.f32",
+          "bytes": 736,
+          "sha256": "c6c9b8650bdf333e657353246bc6f5b02f61950d8990935e2f0e38a63197c80c"
+        },
+        {
+          "path": "captures/v2-vocal/without-drums/roll.drum_pianoroll.f32",
+          "bytes": 94208,
+          "sha256": "c6aeae82d3a49e6ce016e1f02fa93c918d50934f93847ae371816e5fdeb79dd5"
+        },
+        {
+          "path": "captures/v2-vocal/without-drums/roll.pianoroll.f32",
+          "bytes": 188416,
+          "sha256": "7465b104584f519be51160ca95f1faed355fde9dcb2947b5b614c1705dda7fe3"
+        },
+        {
+          "path": "captures/v2-vocal/without-drums/tensors.json",
+          "bytes": 1195,
+          "sha256": "9272b1a4fafb2e6e5008444267850d13e2922e69f75d17ec59cd6ce2eae5fd0a"
+        },
+        {
+          "path": "captures/v2-vocal/without-drums/triplets-sixteenths.json",
+          "bytes": 2232,
+          "sha256": "1f265fb25b3eaac7ddeddbf2005441271bc1ff412063703005a8b4c2794552ae"
+        },
+        {
+          "path": "captures/v2-vocal/yourmt3-config.json",
+          "bytes": 3509,
+          "sha256": "caa2e9f069fbbff1c68b82218284a85597faa21f5d53081135256cc3c6f6cf20"
+        }
+      ]
+    },
+    {
+      "alias": "library-vocal-silent-stretch",
+      "input_sha256": "3712863884e6bf610031f5198a58bd350cb8097caeb73b8a1f97a2e7e0d21cbd",
+      "source_sha256": "f65f66d69f3f760bc774e750e108923f52fe739bbb33850859def07ac66d334e",
+      "start_seconds": 30,
+      "duration_seconds": 16.0,
+      "capture_directory": "captures/v2-silent",
+      "status": "captured",
+      "bpm": 170.45454545454547,
+      "tuning_bins": 0.06000000000000005,
+      "timings_seconds": {
+        "yourmt3_load_and_inference": 10.34124039998278,
+        "chord_load_features_inference_and_bpm": 3.058510600007139
+      },
+      "wall_seconds": 16.111733099911362,
+      "skips": [],
+      "verification": {
+        "integrity": "PASS",
+        "tensors": 65,
+        "status": "captured",
+        "coverage": {
+          "vocal_notes": 21,
+          "drum_notes": 66,
+          "repeated_vocal_pitches": {
+            "43": 2,
+            "45": 3,
+            "51": 3,
+            "56": 11
+          },
+          "inversion_labels": [],
+          "chunk_crossing_notes": 33,
+          "non_120_estimated_bpm": true,
+          "inferred_labels_are_not_human_annotations": true
+        }
+      },
+      "files": [
+        {
+          "path": "captures/v2-silent/capture.log",
+          "bytes": 188,
+          "sha256": "b2556df3f024c4fb104dbf38033c5c5d6c12ec041215912c2796123925e6375f"
+        },
+        {
+          "path": "captures/v2-silent/chord-frame-labels.json",
+          "bytes": 8419,
+          "sha256": "7a270d230a775e3f1b1f1b9234aba3d4bb42e5e881e723232dd30f15d0f7c83b"
+        },
+        {
+          "path": "captures/v2-silent/chord.cqt-magnitude.f32",
+          "bytes": 794880,
+          "sha256": "40c0e5518c8b3084549509a4e72dcf3a648af317dd7be4c14e8132a3d20506af"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold0.cnn.f32",
+          "bytes": 662400,
+          "sha256": "b971b0fcd4358ecccb7a63b869f32af71c282de6d78f05314f273501ea8d8656"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold0.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "b7b940eca518a7b410afc40d637f9c0021c852e4d5bdf51c906f02a531f7d933"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold0.head0.f32",
+          "bytes": 201480,
+          "sha256": "b7bbd46bcf3598d30e9f79e9e55a29ae8bb0b18c6981a8a35da2179c110fa762"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold0.head1.f32",
+          "bytes": 35880,
+          "sha256": "efd6db4fc9ae651eac0f7ec48b19232f77c4e12d656c7ff9b83ab2d77657896e"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold0.head2.f32",
+          "bytes": 11040,
+          "sha256": "d6646c944c38d86bf50385394f21e0992a3030004b498f467625c84f53e3d818"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold0.head3.f32",
+          "bytes": 11040,
+          "sha256": "40c34e02e54c0f13e852e0d1c04208b1d46a4cd9354f55017ee7422980bbd9a9"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold0.head4.f32",
+          "bytes": 8280,
+          "sha256": "95200d5e4b55b5b29ef3ce3117889e581beef463fe4ae75ae6a88b34986aba7c"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold0.head5.f32",
+          "bytes": 8280,
+          "sha256": "7bc1a44e7dfd0b6365402e41179824491ae0cedd997944cd0692ac6df5e12e9d"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold0.lstm.f32",
+          "bytes": 529920,
+          "sha256": "24d4b4a22ac3ed4fb019ed1344c9d590c6fb9e2098c43cb2c4b5e38858d8ff86"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold1.cnn.f32",
+          "bytes": 662400,
+          "sha256": "429b68745e4541446a5cd414d07cc0b980f8339c39e52d630d509f8fbf502bd0"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold1.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "b7b940eca518a7b410afc40d637f9c0021c852e4d5bdf51c906f02a531f7d933"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold1.head0.f32",
+          "bytes": 201480,
+          "sha256": "c14308ec6882d4def2a6c56e7031d6860ea5956a19d40546864cc07d2a9199ac"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold1.head1.f32",
+          "bytes": 35880,
+          "sha256": "a0ed98060837d7b60f470b208b206d469ca84bc093cc3b7c7f0d8e6373381142"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold1.head2.f32",
+          "bytes": 11040,
+          "sha256": "d0cd291a149fe53ec5ba19ad9e43bd7d93d5d872a047bd963d440014379da8de"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold1.head3.f32",
+          "bytes": 11040,
+          "sha256": "20175fb3bd9285be3517cc39ebcf2727b1ded920ab401e8f39c18b74b1450513"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold1.head4.f32",
+          "bytes": 8280,
+          "sha256": "35ec72dff307e7df3a51c3a9adba7c0adf781c2154225eefe39fc977731b35a5"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold1.head5.f32",
+          "bytes": 8280,
+          "sha256": "aa087f7f728830ec55ecb6e6b6beaeb2edcf795048022a9888df36c827551336"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold1.lstm.f32",
+          "bytes": 529920,
+          "sha256": "d2796e219f646a02211202b708156fe43d2842dc69c601b0341cda7ba43de2b6"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold2.cnn.f32",
+          "bytes": 662400,
+          "sha256": "2d35e7c30cd3110d76efe205e42176629419e58c5290e5d76453d6ba8aab8315"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold2.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "b7b940eca518a7b410afc40d637f9c0021c852e4d5bdf51c906f02a531f7d933"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold2.head0.f32",
+          "bytes": 201480,
+          "sha256": "04cc2f34ca030798d67eadb5623e3b8abff491b5d72fc04fdcf412a024a3e760"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold2.head1.f32",
+          "bytes": 35880,
+          "sha256": "8eee61d311f1311317beb748104bd84ec893d093660f6a288e54e3ef17e3f05d"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold2.head2.f32",
+          "bytes": 11040,
+          "sha256": "0a2da9feae7d455e8a9fa0f2854d7d497f130f4d238ddcae9171b4ca1e74b46f"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold2.head3.f32",
+          "bytes": 11040,
+          "sha256": "a520932c8595e081069cbf9e5b1c751cdc6dd440d858adb44e88280b31c67b3f"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold2.head4.f32",
+          "bytes": 8280,
+          "sha256": "775a5699cabba368ffcc1228bf3406c89c6479adc156aeb0d470af0a49806054"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold2.head5.f32",
+          "bytes": 8280,
+          "sha256": "13b8aafbe0788be4aa4ae7206cc793cefbc627b99639f630c3e4205e175c8e0c"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold2.lstm.f32",
+          "bytes": 529920,
+          "sha256": "4968052235c3e2e9b17c0411187c90af6612d3313d53bdeaf9037e1a6c683ce6"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold3.cnn.f32",
+          "bytes": 662400,
+          "sha256": "4ec85917968b005f9b78eb8bbb1c37bfd87ed4bdbfb66d63cf6ead2aca74a4ba"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold3.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "b7b940eca518a7b410afc40d637f9c0021c852e4d5bdf51c906f02a531f7d933"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold3.head0.f32",
+          "bytes": 201480,
+          "sha256": "f50935c5c9b8b8dd10d2a2fccf150ef4fb54942ad4f07cafac06cd76a25c07c1"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold3.head1.f32",
+          "bytes": 35880,
+          "sha256": "7caaa07d73fa1b2f4df7ef4e3694cdc5211e9453f9516e7b9ec5f2a9945d446e"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold3.head2.f32",
+          "bytes": 11040,
+          "sha256": "f23c7768f79318b6610be642ed2888c2fad331f7b49ce655ededa02bd62e97a7"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold3.head3.f32",
+          "bytes": 11040,
+          "sha256": "054368805325d480196e1220df97c03be4e4755f7995676a45dd9ef5813f76f7"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold3.head4.f32",
+          "bytes": 8280,
+          "sha256": "14d42ad9ce2613583d927dc0ad2f21936d5af1f8037ecb67e8adb2f2e086b9b3"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold3.head5.f32",
+          "bytes": 8280,
+          "sha256": "b6388d6b49c05649d3d89d60e74ed23b56fdaf83025aed2c21b6ea1350a1c3d9"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold3.lstm.f32",
+          "bytes": 529920,
+          "sha256": "7dcc61e0053f1c6211161201a1f1d70cbad70ef56456c88b69919a978d4a1f18"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold4.cnn.f32",
+          "bytes": 662400,
+          "sha256": "504c012ddb5bd34e36912c95998a34f28fe3d450f5d85b13592869fd2339ab1d"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold4.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "b7b940eca518a7b410afc40d637f9c0021c852e4d5bdf51c906f02a531f7d933"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold4.head0.f32",
+          "bytes": 201480,
+          "sha256": "1966551d5e219035a867159a5a9a6bcfe7877398917df6bcef6421c88c52691e"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold4.head1.f32",
+          "bytes": 35880,
+          "sha256": "62cf0f296a8ab218c8456e18050f75b29292f67edac887581c4264e90bdb0425"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold4.head2.f32",
+          "bytes": 11040,
+          "sha256": "7259f1647a2cf9c1e31f4ce0bd289d603b784ad8349c0dcb4531470f2d0a20a2"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold4.head3.f32",
+          "bytes": 11040,
+          "sha256": "195661ffe4e673fdfa5bf46d8cf5dca2db0dddbb889868bae48866e5e17ecc69"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold4.head4.f32",
+          "bytes": 8280,
+          "sha256": "7bba21ffac47910d10d5d3fa840585b4cc20e5b8d7b5e8f8355991da5d53f1cd"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold4.head5.f32",
+          "bytes": 8280,
+          "sha256": "55297037328bdfca04d8c9db2484363deae5f1d32c8a491e59c28482bcaa0070"
+        },
+        {
+          "path": "captures/v2-silent/chord.fold4.lstm.f32",
+          "bytes": 529920,
+          "sha256": "17f7567811ac033d89a0a2095c32488b828f5a64ef17f4b75f5d0bacb02726fa"
+        },
+        {
+          "path": "captures/v2-silent/chord.hybrid-cqt.f32",
+          "bytes": 794880,
+          "sha256": "40c0e5518c8b3084549509a4e72dcf3a648af317dd7be4c14e8132a3d20506af"
+        },
+        {
+          "path": "captures/v2-silent/chord.mean.head0.f32",
+          "bytes": 201480,
+          "sha256": "369bbd717c9cbe8d4d3e8caede032ed1aff0e76a3582a6c78d2b6643bc5af9e2"
+        },
+        {
+          "path": "captures/v2-silent/chord.mean.head1.f32",
+          "bytes": 35880,
+          "sha256": "6b0b69c570fb14f994e347b457441c692a97f1918c3680bea2d8945b21458cc3"
+        },
+        {
+          "path": "captures/v2-silent/chord.mean.head2.f32",
+          "bytes": 11040,
+          "sha256": "545d05160b4b635d65eb3099b8e9abede4dd7edb389ef4c180aa3cad922ff27d"
+        },
+        {
+          "path": "captures/v2-silent/chord.mean.head3.f32",
+          "bytes": 11040,
+          "sha256": "ff1d30c4ee9ef8f6e25568bca3d7d2f1d6b9007ccdd26aa0059bd93873f756d1"
+        },
+        {
+          "path": "captures/v2-silent/chord.mean.head4.f32",
+          "bytes": 8280,
+          "sha256": "526483899e3bd053aa4e4d6d40ca553b736a238b38c578717a06526c55cbb951"
+        },
+        {
+          "path": "captures/v2-silent/chord.mean.head5.f32",
+          "bytes": 8280,
+          "sha256": "be7e9813188c7f054273cde088d894f6a4d174584f0c23abf5ef2e9ee6c3e286"
+        },
+        {
+          "path": "captures/v2-silent/chord.waveform-22050.f32",
+          "bytes": 1411200,
+          "sha256": "c2befe001c48212da6669df0c8a7550a4dbb4a9077e3b5e0794e170fea8a30ee"
+        },
+        {
+          "path": "captures/v2-silent/chords-rounded-beats.json",
+          "bytes": 376,
+          "sha256": "64d9d8baf8e9004873b7d58f05abbdef43b00a030c83eaa142824fa19201ddc7"
+        },
+        {
+          "path": "captures/v2-silent/chords-seconds.json",
+          "bytes": 648,
+          "sha256": "bd020cbb5fa161b8a7c17cb42521a53991cfe62312614576c07d8b2951ca1fb1"
+        },
+        {
+          "path": "captures/v2-silent/drums-seconds.json",
+          "bytes": 8939,
+          "sha256": "c58a1c947957d567ec56aa480b904a5bf82bee8bd21232324fd0c5824cefa19a"
+        },
+        {
+          "path": "captures/v2-silent/event-vocabulary.json",
+          "bytes": 30075,
+          "sha256": "5ac32b5e6e9ff276065194c6e37ceabc081269f58e2f0ad6367fe9bd077402de"
+        },
+        {
+          "path": "captures/v2-silent/manifest.json",
+          "bytes": 1764,
+          "sha256": "02c3cca7f54419d34b5cb5bf10169c3d7e05fd6c07f1bc7ca0839e375492f6b7"
+        },
+        {
+          "path": "captures/v2-silent/merged-notes-seconds.json",
+          "bytes": 25164,
+          "sha256": "cfc7a50d9de43b70c005fc918460c94272dd777c5cdda56c3c51c159cf75140f"
+        },
+        {
+          "path": "captures/v2-silent/midi/bpm.txt",
+          "bytes": 15,
+          "sha256": "8c6262f2daf8dc7fc22f899299e80bd9fe553da41f9ae3a29525c103a31228d8"
+        },
+        {
+          "path": "captures/v2-silent/midi/chord.mid",
+          "bytes": 190,
+          "sha256": "3943ea60c66fd56dbfc745e9c61052505d99fda3681fd45a9f6e11fc977692e9"
+        },
+        {
+          "path": "captures/v2-silent/midi/drums.mid",
+          "bytes": 560,
+          "sha256": "6ae9ad22c0586b769c533dc391bd687c5d0995aa460de7809ec7a75a7cc987e1"
+        },
+        {
+          "path": "captures/v2-silent/midi/melody.mid",
+          "bytes": 237,
+          "sha256": "a7ad147d74f1e6fa6705b16194421f8c0755523e4340ab85ad7c4115cd8d439a"
+        },
+        {
+          "path": "captures/v2-silent/mt3.b0.cached-step.logits.f32",
+          "bytes": 247936,
+          "sha256": "8497a322962d10ab81bb09d8bb9b5edaaf713de41b85d56db672e9636ad14d2b"
+        },
+        {
+          "path": "captures/v2-silent/mt3.b0.encoder.f32",
+          "bytes": 11714560,
+          "sha256": "172b6356d997daf716d015b32c3aae806fec11d6494eb701d93de03c104861dd"
+        },
+        {
+          "path": "captures/v2-silent/mt3.b0.linear-spectrogram.f32",
+          "bytes": 3604480,
+          "sha256": "638768f4ff6ca366bbe21bc5fff672aef307a781638d507cc477bfdd1aaa0c0e"
+        },
+        {
+          "path": "captures/v2-silent/mt3.b0.pre-decoder.f32",
+          "bytes": 23429120,
+          "sha256": "a64f4dd9bea65bac379460a11639759dbf56a5797ac8c432b51512066d1ab9ce"
+        },
+        {
+          "path": "captures/v2-silent/mt3.b0.pre-encoder.f32",
+          "bytes": 57671680,
+          "sha256": "85cb3b303730311d32e12a0a0bff5b446f6f1141dc93802292b8da8c827316f0"
+        },
+        {
+          "path": "captures/v2-silent/mt3.b0.prefill.logits.f32",
+          "bytes": 247936,
+          "sha256": "2b0a9c38e72269f1484de5744b5822b6432ccba4e2f6d379299ec5bf197633b5"
+        },
+        {
+          "path": "captures/v2-silent/mt3.b0.waveform-padded.f32",
+          "bytes": 1048544,
+          "sha256": "0995842a00088001e7967cb1c3de0f1119f19c2a562620da7b0268d8a9d4bec7"
+        },
+        {
+          "path": "captures/v2-silent/program-channel-map.json",
+          "bytes": 9823,
+          "sha256": "2372f631232426908f6199c5f993044f2e963e73856d5d54566a7c3256ba13e6"
+        },
+        {
+          "path": "captures/v2-silent/roll.chord.f32",
+          "bytes": 8832,
+          "sha256": "d941c6ad94267225be57e0ff624d1dbbcde005613d229bdc376064a2afce861e"
+        },
+        {
+          "path": "captures/v2-silent/roll.context_mask.f32",
+          "bytes": 736,
+          "sha256": "c6c9b8650bdf333e657353246bc6f5b02f61950d8990935e2f0e38a63197c80c"
+        },
+        {
+          "path": "captures/v2-silent/roll.drum_pianoroll.f32",
+          "bytes": 94208,
+          "sha256": "799105f6407e029fda713a4fbf9c01e4abffefca6597f982efde30e7ac4e1cb5"
+        },
+        {
+          "path": "captures/v2-silent/roll.pianoroll.f32",
+          "bytes": 188416,
+          "sha256": "3d43034a5bbe50c56e5a5062886d028a7c10aa48319b696ad64dc6209fdbf69b"
+        },
+        {
+          "path": "captures/v2-silent/run.json",
+          "bytes": 792,
+          "sha256": "010b8a77fe9d0a6fe9c3bf5e7ae8f0846dc530afb9fb431a554b69e90209ad1f"
+        },
+        {
+          "path": "captures/v2-silent/seconds-variant.json",
+          "bytes": 28944,
+          "sha256": "82acfa0fb3b27be23033a7ddcc0ad544320295c98c7f936cca8ada09865bac1b"
+        },
+        {
+          "path": "captures/v2-silent/tensors.json",
+          "bytes": 20167,
+          "sha256": "3ead90e726ea57a28243815bbb4cde9e19ec37f77ec8ac1cbb5bc89c149e0a35"
+        },
+        {
+          "path": "captures/v2-silent/tokens-by-batch-channel.json",
+          "bytes": 73251,
+          "sha256": "62cd445b4ecd34ebadea3cd99c15c4a18ee2f9ee42759f704fa6c34f2cd35432"
+        },
+        {
+          "path": "captures/v2-silent/triplets-sixteenths.json",
+          "bytes": 5072,
+          "sha256": "ff831083537d127c360191b496cb84615f534a12407e38cd01bf307f61d3082f"
+        },
+        {
+          "path": "captures/v2-silent/verification.json",
+          "bytes": 400,
+          "sha256": "02ac64e0da8f527762affa9333d2d5e8c48c218c303b2efb7e35681b27d1b165"
+        },
+        {
+          "path": "captures/v2-silent/vocal-program-100-seconds.json",
+          "bytes": 2821,
+          "sha256": "0d379a84db0d3a5eaaf905ae6345cf94b87348e7a22b9492a859919ccb9be443"
+        },
+        {
+          "path": "captures/v2-silent/yourmt3-config.json",
+          "bytes": 3509,
+          "sha256": "caa2e9f069fbbff1c68b82218284a85597faa21f5d53081135256cc3c6f6cf20"
+        }
+      ]
+    },
+    {
+      "alias": "library-instrumental",
+      "input_sha256": "90946c3d4115a764725e3a1b6274fab090d699f7ac59ee67a5d73f1c7d83d1db",
+      "source_sha256": "a894882bf826e3342d7bcb9d847f27104aef9194f43c244a0b2ceecad8258a48",
+      "start_seconds": 0,
+      "duration_seconds": 16.0,
+      "capture_directory": "captures/v2-instrumental",
+      "status": "captured",
+      "bpm": 86.1328125,
+      "tuning_bins": -0.32,
+      "timings_seconds": {
+        "yourmt3_load_and_inference": 9.917553200037219,
+        "chord_load_features_inference_and_bpm": 2.8151707000797614
+      },
+      "wall_seconds": 15.85655239992775,
+      "skips": [],
+      "verification": {
+        "integrity": "PASS",
+        "tensors": 65,
+        "status": "captured",
+        "coverage": {
+          "vocal_notes": 1,
+          "drum_notes": 16,
+          "repeated_vocal_pitches": {},
+          "inversion_labels": [
+            "Eb:maj/2"
+          ],
+          "chunk_crossing_notes": 6,
+          "non_120_estimated_bpm": true,
+          "inferred_labels_are_not_human_annotations": true
+        }
+      },
+      "files": [
+        {
+          "path": "captures/v2-instrumental/capture.log",
+          "bytes": 189,
+          "sha256": "6693cfd9b03434e2aefef94ac5e4b46de60a7f29f1bd2484e5fbe1aea76e23e0"
+        },
+        {
+          "path": "captures/v2-instrumental/chord-frame-labels.json",
+          "bytes": 7288,
+          "sha256": "b6a18f23f38e0bf4983cdce6533ce365c562bcda9e1205a8f0a02a0d52249af3"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.cqt-magnitude.f32",
+          "bytes": 794880,
+          "sha256": "6a4e057a0ced6b9c9c9152a279b300f2a3a78c64ee208e50f65c80402e2b1acf"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold0.cnn.f32",
+          "bytes": 662400,
+          "sha256": "dda7618f1e0e31917a322587b0f34aa9191dadaf5ff1176c75efaeff9fc44020"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold0.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "357de67520641345e01cca7c139f95b50d2111e565634339d85bbee3fd95cf1c"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold0.head0.f32",
+          "bytes": 201480,
+          "sha256": "d67ee4cf5594f8d6c1108eee69f448517e05a9e54c33c64b568e3c03b6ce3940"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold0.head1.f32",
+          "bytes": 35880,
+          "sha256": "113f1ac3c16a887d3f771d0a7ed0302a36a81571c2181eb16d9fdcc57f69f66f"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold0.head2.f32",
+          "bytes": 11040,
+          "sha256": "178e71e71087d0f89bdee9f7f81e3c229e3099a85fa82daca403ff1d00149648"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold0.head3.f32",
+          "bytes": 11040,
+          "sha256": "b1d5927618de42e0695a27034ba28fb3e872925835c358d744031138ffba07af"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold0.head4.f32",
+          "bytes": 8280,
+          "sha256": "89aa4fe74cf42e2d35fe7c49f05287451acdd7c7701ef6c5a00bec91e8be16c0"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold0.head5.f32",
+          "bytes": 8280,
+          "sha256": "9b1c639211fc67152732ef910fcfe31cc0a6aa40c89280db88208cd477c4277e"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold0.lstm.f32",
+          "bytes": 529920,
+          "sha256": "102af8729d817705939c58ad7f9c9f476e1f8e3da9e1f4c386a995fe22ff70fd"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold1.cnn.f32",
+          "bytes": 662400,
+          "sha256": "ab7133b2b049a3979b0d8ad54b5ac7191341f07dfc2ef9306cf248e5bfcd74b8"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold1.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "357de67520641345e01cca7c139f95b50d2111e565634339d85bbee3fd95cf1c"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold1.head0.f32",
+          "bytes": 201480,
+          "sha256": "450989fde052e8e608981d7b878ead44e2b92a1167d2d80fd01f0aa3a34c2760"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold1.head1.f32",
+          "bytes": 35880,
+          "sha256": "b9f4058e256664b7b87e98486bafff086910cb9c1d92a678343ac4f9411b1670"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold1.head2.f32",
+          "bytes": 11040,
+          "sha256": "9ab980d88a4cb4f98325f7b881be4febd0760798a3d1977d3a87b90780fab06e"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold1.head3.f32",
+          "bytes": 11040,
+          "sha256": "30766afbdbf6416d94967054d0f58aabf880b736503567afda65d16f86b13e80"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold1.head4.f32",
+          "bytes": 8280,
+          "sha256": "83d9754314d136a7aafe65e69a4e21a7784b5e481d9992f0c5f1d676a009fce0"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold1.head5.f32",
+          "bytes": 8280,
+          "sha256": "a4dcf045e76975f074b27ea1f132b63b4270393b8b4917a1ffd7f31b806802cd"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold1.lstm.f32",
+          "bytes": 529920,
+          "sha256": "509bc7b2fd6287549ad33eac943bfc146b36651aea1116ba4099d9b1b357e0a6"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold2.cnn.f32",
+          "bytes": 662400,
+          "sha256": "7f5037f5b39eff22488395152d08cf0d27d1bf568c88b77c049478bf23e5eb75"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold2.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "357de67520641345e01cca7c139f95b50d2111e565634339d85bbee3fd95cf1c"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold2.head0.f32",
+          "bytes": 201480,
+          "sha256": "1b7033c98406287794024aa196ed0c5e7ccd6eac95fb0d3a1431d6b50bad3dd6"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold2.head1.f32",
+          "bytes": 35880,
+          "sha256": "77e98cc46ef6407ddb7a2efe5896a38e5cf899b551946f02e5d8a84a1fa45188"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold2.head2.f32",
+          "bytes": 11040,
+          "sha256": "189f98089e25ea54523f1f1b47726ecbab49a7c51ceb5b8661569f9e43d5c547"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold2.head3.f32",
+          "bytes": 11040,
+          "sha256": "b0f5df3ad98c31b23f2ff24d028c560d9d64ea1317364a5035c72359b65c211c"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold2.head4.f32",
+          "bytes": 8280,
+          "sha256": "61b0404d757dfeb2e7671f4cefb2c3acef19ef14654f03c75ae701566c9424d6"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold2.head5.f32",
+          "bytes": 8280,
+          "sha256": "81e339310b300617bab70cc5137bf56708e5aac15871356f53100dc88f0d7fdb"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold2.lstm.f32",
+          "bytes": 529920,
+          "sha256": "187ab5ee506d4cd92eb13b41727409c38821e9bed7c062003e5c6fd74d7e4551"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold3.cnn.f32",
+          "bytes": 662400,
+          "sha256": "a09f40e3d367ffaff05dc62a2798c091a516b1a4036ce3a0ff475a3c40ab1395"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold3.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "357de67520641345e01cca7c139f95b50d2111e565634339d85bbee3fd95cf1c"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold3.head0.f32",
+          "bytes": 201480,
+          "sha256": "bd955221490619acdb64e18dd1c569ef3f88c4a6ab9bb84f3e07b1b2bec9b926"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold3.head1.f32",
+          "bytes": 35880,
+          "sha256": "801159862be96eb8c40b1eeef48be167128db7888079e5f967af73d2a276be76"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold3.head2.f32",
+          "bytes": 11040,
+          "sha256": "367bfbfa9548fe0877d25729a02a0e684067c6247726bad52f462d74ea31d610"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold3.head3.f32",
+          "bytes": 11040,
+          "sha256": "9d7686e1d0cedebe1a4751a3df04fec27ba12e89fc344e60dc4efbfe5f24f98f"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold3.head4.f32",
+          "bytes": 8280,
+          "sha256": "6c413958cd3562ba0218a047ce801f6f1f12ee7b203b2fde9230b74d1e82a355"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold3.head5.f32",
+          "bytes": 8280,
+          "sha256": "468e273c3a5eea0977698092cbb17b775e60b63317cc31c3a60b1ac40a7830f1"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold3.lstm.f32",
+          "bytes": 529920,
+          "sha256": "948e2431d395b552078afb7f9969ebe6253c01b56ac36afb2dcb8e60405de106"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold4.cnn.f32",
+          "bytes": 662400,
+          "sha256": "ceb441119ee14b00b5c2452bc2787b5ea41fa9557751640ec0ccfa3e9eada1be"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold4.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "357de67520641345e01cca7c139f95b50d2111e565634339d85bbee3fd95cf1c"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold4.head0.f32",
+          "bytes": 201480,
+          "sha256": "8637e96c44f640ee79734a620de7bef2abd2e8849b7c92df30c8f903d6240f92"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold4.head1.f32",
+          "bytes": 35880,
+          "sha256": "60d024f057ce8b16adeb0055c705011a611cfe86fab76575b76fbe09c81b5d4e"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold4.head2.f32",
+          "bytes": 11040,
+          "sha256": "b61f77d7aac256ac07345d6a8b079afe53b07be445ed9275750e13a559e3f471"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold4.head3.f32",
+          "bytes": 11040,
+          "sha256": "0d023872bb02ae2079b87a2bf22d7ed8f4aa30cc4fa2d9f08276cb34211eae90"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold4.head4.f32",
+          "bytes": 8280,
+          "sha256": "8a3a6c2ed5e2ddeec0a73b2b6500a7a58a72768ab8451245aeb4588ed1a47ea7"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold4.head5.f32",
+          "bytes": 8280,
+          "sha256": "fb295de47c9bcd7231ebeadb2998aa4b1f0cb35c9ec913e9ec25ff856c475338"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.fold4.lstm.f32",
+          "bytes": 529920,
+          "sha256": "e5fc37859bc71e119b03523b9646e061a1adddfed9081fe9fd3d7eed4d2a1f35"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.hybrid-cqt.f32",
+          "bytes": 794880,
+          "sha256": "6a4e057a0ced6b9c9c9152a279b300f2a3a78c64ee208e50f65c80402e2b1acf"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.mean.head0.f32",
+          "bytes": 201480,
+          "sha256": "3d297dcb05d412773773d42fe1e17bbc3ac9277c1050d028c943e5e58f0cf536"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.mean.head1.f32",
+          "bytes": 35880,
+          "sha256": "4867035cd4baafbff4eedc8bc2566f216c5dc859ba77364c179b4de3b6e0b489"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.mean.head2.f32",
+          "bytes": 11040,
+          "sha256": "462d747930de32954e88d70da790b0cb902afa00b4f3f81f9c6788f99b21a882"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.mean.head3.f32",
+          "bytes": 11040,
+          "sha256": "c7a2ebc42af5ce5c6c2d91b48df03ef80d4ad4955f5d6228901ebe5adefd3f74"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.mean.head4.f32",
+          "bytes": 8280,
+          "sha256": "dbf22f6dccdfa0660cfed58660f7ac09e1f768b102dc47d8bf70e54126487ff3"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.mean.head5.f32",
+          "bytes": 8280,
+          "sha256": "01eb7a53af79e80077a6a04ee3c60a57fe6181bfee5e7bec99f1e007f5c6b71a"
+        },
+        {
+          "path": "captures/v2-instrumental/chord.waveform-22050.f32",
+          "bytes": 1411200,
+          "sha256": "7f9355c79bc41475ca927689519964e33f6abd4949fe50259312e8fe2a1fadc3"
+        },
+        {
+          "path": "captures/v2-instrumental/chords-rounded-beats.json",
+          "bytes": 173,
+          "sha256": "f35dd756ad49e71fcd585ec2b9c106f0317518d1a8d2922a8de7e86ce33737e6"
+        },
+        {
+          "path": "captures/v2-instrumental/chords-seconds.json",
+          "bytes": 281,
+          "sha256": "2a808a4498acd126201e9e001615b1e551cfd9a6d9cd95688ed00b08b7a9dc4d"
+        },
+        {
+          "path": "captures/v2-instrumental/drums-seconds.json",
+          "bytes": 2185,
+          "sha256": "aa088bb57008363a114801034b55ca2b213cc011c553ba577cdb46a119df7b51"
+        },
+        {
+          "path": "captures/v2-instrumental/event-vocabulary.json",
+          "bytes": 30075,
+          "sha256": "5ac32b5e6e9ff276065194c6e37ceabc081269f58e2f0ad6367fe9bd077402de"
+        },
+        {
+          "path": "captures/v2-instrumental/manifest.json",
+          "bytes": 1743,
+          "sha256": "bd73462b95f1cd64c42180b06ce19951732ff40ca188ebd59dae68f4f30db3f1"
+        },
+        {
+          "path": "captures/v2-instrumental/merged-notes-seconds.json",
+          "bytes": 4604,
+          "sha256": "a4e72bf81186a9c4ea4aab250b7d844e80959c1bfb7f1cfb7b5cecd04aba5960"
+        },
+        {
+          "path": "captures/v2-instrumental/midi/bpm.txt",
+          "bytes": 12,
+          "sha256": "f526162eea2fb129bf0ac3c55da1fa47ddf76b6c35d0b94494c9220929f6ccf5"
+        },
+        {
+          "path": "captures/v2-instrumental/midi/chord.mid",
+          "bytes": 112,
+          "sha256": "9166549577ef77b4555ae1bf745461763406910054935ee6e4f9ce1a876a9766"
+        },
+        {
+          "path": "captures/v2-instrumental/midi/drums.mid",
+          "bytes": 162,
+          "sha256": "5d14e3753beba7ee129b2bd5f01964d061d695168e9ce1c5962ff0e01f7328b2"
+        },
+        {
+          "path": "captures/v2-instrumental/midi/melody.mid",
+          "bytes": 53,
+          "sha256": "d0feef289611672893eba778a320d665f69a9673f53fb0aad38b01449b6c4383"
+        },
+        {
+          "path": "captures/v2-instrumental/mt3.b0.cached-step.logits.f32",
+          "bytes": 247936,
+          "sha256": "d7c2a661cacfc3bf78551c49fd94a4ce9a39e533f84586b5390989997b4b2244"
+        },
+        {
+          "path": "captures/v2-instrumental/mt3.b0.encoder.f32",
+          "bytes": 11714560,
+          "sha256": "5a333f5e217fc66d0b691ff17bffe3790b0d1f28304481a406c10e8081e9cd36"
+        },
+        {
+          "path": "captures/v2-instrumental/mt3.b0.linear-spectrogram.f32",
+          "bytes": 3604480,
+          "sha256": "32e9c07fe6ca6786744d49757550809e29f5708cdce4f800cb5eac12ab4da231"
+        },
+        {
+          "path": "captures/v2-instrumental/mt3.b0.pre-decoder.f32",
+          "bytes": 23429120,
+          "sha256": "5f9efb28709baf99c7076127a38ac8604f717bd3703fbe249d866e39b7b7ec9d"
+        },
+        {
+          "path": "captures/v2-instrumental/mt3.b0.pre-encoder.f32",
+          "bytes": 57671680,
+          "sha256": "7afa925e3118dcdee2074895a3986429b89fc53f99c483c1cd6effc6a49bf5f5"
+        },
+        {
+          "path": "captures/v2-instrumental/mt3.b0.prefill.logits.f32",
+          "bytes": 247936,
+          "sha256": "cae53d5313f3cb85bcbb64d14ee42696636a3ee657c72f51ed82dbcadcfdc618"
+        },
+        {
+          "path": "captures/v2-instrumental/mt3.b0.waveform-padded.f32",
+          "bytes": 1048544,
+          "sha256": "a6f46583d9d4784cee85e7b4f13444acb7a1c3ba7963f96a9797f9eaf0b6ebed"
+        },
+        {
+          "path": "captures/v2-instrumental/program-channel-map.json",
+          "bytes": 9823,
+          "sha256": "2372f631232426908f6199c5f993044f2e963e73856d5d54566a7c3256ba13e6"
+        },
+        {
+          "path": "captures/v2-instrumental/roll.chord.f32",
+          "bytes": 4416,
+          "sha256": "0bd2964cf9197743769818f20f23ac1af43fe94d0fcd5dc7a26cfbdbc43085c6"
+        },
+        {
+          "path": "captures/v2-instrumental/roll.context_mask.f32",
+          "bytes": 368,
+          "sha256": "71818ecc26433c32172dd9a3544657971c7078daa2257da7c3c303e08693cb23"
+        },
+        {
+          "path": "captures/v2-instrumental/roll.drum_pianoroll.f32",
+          "bytes": 47104,
+          "sha256": "e823d9a323d983c4557b7e2b4eddd663b43d6d1e3dbcd8f088546cafd9fef3fd"
+        },
+        {
+          "path": "captures/v2-instrumental/roll.pianoroll.f32",
+          "bytes": 94208,
+          "sha256": "88aa6aae16ba5376040f796bb2da835e860b209d6e5f00e1eae0c4766dbf288d"
+        },
+        {
+          "path": "captures/v2-instrumental/run.json",
+          "bytes": 789,
+          "sha256": "8d252ec0da3a40d87e6b4b9e0b939ca77ac7f8df5dbfd0559371ac5f01449f1e"
+        },
+        {
+          "path": "captures/v2-instrumental/seconds-variant.json",
+          "bytes": 5503,
+          "sha256": "9afcfaa3670437e6fad7b7ba9e074c0250f5905884f4757cb9c545af277eb9e6"
+        },
+        {
+          "path": "captures/v2-instrumental/tensors.json",
+          "bytes": 20162,
+          "sha256": "b0976b94882e30aa0b11dc6847907893223cb5d926b3ab2cf19a4fe35637310b"
+        },
+        {
+          "path": "captures/v2-instrumental/tokens-by-batch-channel.json",
+          "bytes": 59867,
+          "sha256": "50586298de2fff38cbe55a00ad218aba3be8a22ca00fae3c75a8796dcbb28cea"
+        },
+        {
+          "path": "captures/v2-instrumental/triplets-sixteenths.json",
+          "bytes": 1305,
+          "sha256": "1504f9ca35ad6b901e13240144e55a5b17834105cb552aa7b6115622f25ce636"
+        },
+        {
+          "path": "captures/v2-instrumental/verification.json",
+          "bytes": 352,
+          "sha256": "357943b29653abd822149819d4f0088ac05fcfa0e816148ecf6292a542af9347"
+        },
+        {
+          "path": "captures/v2-instrumental/vocal-program-100-seconds.json",
+          "bytes": 144,
+          "sha256": "003cf0a2b64da46e3b0b0b73ca2f2c5b3664124b05fe917401ef56db4d5e3ba9"
+        },
+        {
+          "path": "captures/v2-instrumental/yourmt3-config.json",
+          "bytes": 3509,
+          "sha256": "caa2e9f069fbbff1c68b82218284a85597faa21f5d53081135256cc3c6f6cf20"
+        }
+      ]
+    },
+    {
+      "alias": "library-vocal-stem",
+      "input_sha256": "39de34f7e9c1fd795da75708cf84d91b8d104b24fadfe9384a49081c3d4c921a",
+      "source_sha256": "8bf6b10c122b2cf83cdeef40c75168d8d30c343761ed6174806ea473b55d0604",
+      "start_seconds": 30,
+      "duration_seconds": 16,
+      "capture_directory": "captures/v2-vocal-stem",
+      "status": "captured-with-upstream-rejection",
+      "bpm": 161.4990234375,
+      "tuning_bins": 0.010000000000000009,
+      "timings_seconds": {
+        "yourmt3_load_and_inference": 11.556424399954267,
+        "chord_load_features_inference_and_bpm": 3.0179753999691457
+      },
+      "wall_seconds": 17.315351300057955,
+      "skips": [
+        "Melody must contain at least one note."
+      ],
+      "verification": {
+        "integrity": "PASS",
+        "tensors": 61,
+        "status": "captured-with-upstream-rejection",
+        "coverage": {
+          "vocal_notes": 0,
+          "drum_notes": 0,
+          "repeated_vocal_pitches": {},
+          "inversion_labels": [],
+          "chunk_crossing_notes": 0,
+          "non_120_estimated_bpm": true,
+          "inferred_labels_are_not_human_annotations": true
+        }
+      },
+      "files": [
+        {
+          "path": "captures/v2-vocal-stem/capture.log",
+          "bytes": 215,
+          "sha256": "424fb7bde68cebd629cf27865115b66a6c05704242d553cded2c24e1773db9cc"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord-frame-labels.json",
+          "bytes": 5525,
+          "sha256": "ccee4811e0fef964649be63824db6086b7d47b844c903670c0bfbdf54c76db39"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.cqt-magnitude.f32",
+          "bytes": 794880,
+          "sha256": "40f2ea836d9895d91f7cd7479034b2bd20e75c1dbc36f3ed715b8503dfa53f77"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold0.cnn.f32",
+          "bytes": 662400,
+          "sha256": "f5cf1d452291dcec9f2cec95f6514cfc3e773a2d1472472926e5007cb2c7ac68"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold0.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "a28497955a53eb60ad1bbcdafec702beafd00523f31e47f9508d80a667500a92"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold0.head0.f32",
+          "bytes": 201480,
+          "sha256": "fe76d9cb24198df9b78941ce366c5280f6fb1c14217731061fc73760a492321f"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold0.head1.f32",
+          "bytes": 35880,
+          "sha256": "d68d4092105324a28b741d6a7f3725896886aac12584e49b1a053d68f86ef0dc"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold0.head2.f32",
+          "bytes": 11040,
+          "sha256": "d8863856c7b59bef5aa0320d93c352d657aefe530a1ecd03490e7b5e9bd27249"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold0.head3.f32",
+          "bytes": 11040,
+          "sha256": "ec0d249907dc8842a5e6bb8d2079b9bd346990c48b7f580df5f8d2c98099a71b"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold0.head4.f32",
+          "bytes": 8280,
+          "sha256": "82ad73594eb3eacbf4c5ff997c5a8d68708c8fc34fff161c40bd46030fbaa7f6"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold0.head5.f32",
+          "bytes": 8280,
+          "sha256": "1b1b15ce46076c6d306a255f58278c3aa2469ca9aa886af8c942628460979ac8"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold0.lstm.f32",
+          "bytes": 529920,
+          "sha256": "de3cae395b1d63b51edeb873e8a8ebfec580181c4ece4e4810fe80a83fb8b083"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold1.cnn.f32",
+          "bytes": 662400,
+          "sha256": "e944bbc13847b8efbdb6b9d5861f2769f366c0cd56a269da779f041e758a41ad"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold1.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "a28497955a53eb60ad1bbcdafec702beafd00523f31e47f9508d80a667500a92"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold1.head0.f32",
+          "bytes": 201480,
+          "sha256": "5a5b4a748c3ec9013493e75f554dffa6fca4ce603016ced72e479de04a6707ac"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold1.head1.f32",
+          "bytes": 35880,
+          "sha256": "b583c9a8c73513b131b40dd706af9132e77ac52e29fbd085ed8959f315c0d9f1"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold1.head2.f32",
+          "bytes": 11040,
+          "sha256": "ff5fd7065d85b91c985f7c18e81b0c2e3091fa73a66cd813b1d4c7697ad56515"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold1.head3.f32",
+          "bytes": 11040,
+          "sha256": "5c816d74c26792e47ca51c7dc667d4b55cee3a6d52a6e95c2712779e392d50dc"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold1.head4.f32",
+          "bytes": 8280,
+          "sha256": "fea8874aad6d88d6ddfb86463d30cbe262417b1230334d074ff83dffb7185c9e"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold1.head5.f32",
+          "bytes": 8280,
+          "sha256": "b0992e0dbae20f775ed25b9a5461bb36c9fea6c23692b106645a110c4ea231e0"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold1.lstm.f32",
+          "bytes": 529920,
+          "sha256": "7171aff8d3143537c23d292710746b82841489508c4d4453984020a3e0c90fcb"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold2.cnn.f32",
+          "bytes": 662400,
+          "sha256": "e77422833832959eb84b30f7aa26385b579eea99eb59225e68b65e95c1d9318e"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold2.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "a28497955a53eb60ad1bbcdafec702beafd00523f31e47f9508d80a667500a92"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold2.head0.f32",
+          "bytes": 201480,
+          "sha256": "be8013e84af8af264350d7f9ae34b1d98cb5cdcda0fdc49c40d0a9dd6be8107b"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold2.head1.f32",
+          "bytes": 35880,
+          "sha256": "3ac122e66919ad024b0d31ff245df3d2be2e9af79f56853af346ab01a6ed6bb7"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold2.head2.f32",
+          "bytes": 11040,
+          "sha256": "8d45869d9c87d6ede8fd158018db6d7713e25d2a45094ac9cfc0adc33d9acbcf"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold2.head3.f32",
+          "bytes": 11040,
+          "sha256": "340d50314eb123251055b448387a8fba18d959e2f7126332b13f25f37c33d471"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold2.head4.f32",
+          "bytes": 8280,
+          "sha256": "5c808a6953922a06a997aa9b673f9755122521486d3f82b062055bfc54677ce4"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold2.head5.f32",
+          "bytes": 8280,
+          "sha256": "78acd660e26a7e41e2ef18064dc1e959264ee079004039bb8d436236a9f9ccb7"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold2.lstm.f32",
+          "bytes": 529920,
+          "sha256": "4ff08cfdf42c6f6dc70e5ff3187e3986e73854fee1e191f4bb0922a6406e2abb"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold3.cnn.f32",
+          "bytes": 662400,
+          "sha256": "23db2b2c3f6bc618386b71336ee68b0b6037ab64977b1b32ff34fcb03b517240"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold3.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "a28497955a53eb60ad1bbcdafec702beafd00523f31e47f9508d80a667500a92"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold3.head0.f32",
+          "bytes": 201480,
+          "sha256": "848339443206249a4f2be0213246cd496bc0f3023d67bc73bd99949279875189"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold3.head1.f32",
+          "bytes": 35880,
+          "sha256": "26509f64eee11c6df8c73a9fed7bd8a5acd2aede0c908bd43074266da60609fc"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold3.head2.f32",
+          "bytes": 11040,
+          "sha256": "755e97e03202ee1f9a7c23f2dcbc62bedba9d6e21f61816df6f6681dc43cd4fd"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold3.head3.f32",
+          "bytes": 11040,
+          "sha256": "5721a3b0c87a5375a228ee1bcb723466a3dfc7f8c2576865bbc70dc4b7acbf56"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold3.head4.f32",
+          "bytes": 8280,
+          "sha256": "ea2296b9b41456e91075b729f13cfc1af05cb762651613234bc968c63208a743"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold3.head5.f32",
+          "bytes": 8280,
+          "sha256": "502440e4586b72272ca5871fde5e2447b66dcd3f205205c6dcc70b5690a2104e"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold3.lstm.f32",
+          "bytes": 529920,
+          "sha256": "b7c12fbfdc6ae6afd603011332280e18872340ecce45c7ea3cbedec8816e9f11"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold4.cnn.f32",
+          "bytes": 662400,
+          "sha256": "b8157528cc4099e1c01369cfca196a684ddf855899027e094b87e17f39507099"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold4.crop-18-270.f32",
+          "bytes": 695520,
+          "sha256": "a28497955a53eb60ad1bbcdafec702beafd00523f31e47f9508d80a667500a92"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold4.head0.f32",
+          "bytes": 201480,
+          "sha256": "dfadd71b7a03a3942457397fdf2497549660b52a46666f6304d07aa971519295"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold4.head1.f32",
+          "bytes": 35880,
+          "sha256": "1c308bd0a17cf27d17f1572f7acaaeee3c30acb5dc8470e8856d9253886a5a9f"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold4.head2.f32",
+          "bytes": 11040,
+          "sha256": "c45a5a6a6dc610092038906d1d0e2be52707ef56036e03761bf68cb29f644a7d"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold4.head3.f32",
+          "bytes": 11040,
+          "sha256": "454a73e33986ac92e9eb236b8ec6d2445591500eb4a6bd0e644542357bfe1cea"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold4.head4.f32",
+          "bytes": 8280,
+          "sha256": "eeceb50312aaddf8e2e128a0552cdfbc3ba7af28dc8bafebe0d0896d9dd05d09"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold4.head5.f32",
+          "bytes": 8280,
+          "sha256": "768393f6a391baa5b7ab730dc13026ef290b73e78f9f6105b4315f269d71c504"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.fold4.lstm.f32",
+          "bytes": 529920,
+          "sha256": "9565884796bd370e2de8de01bed0a178d803ea6f2188c676d26ba2dc68599a77"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.hybrid-cqt.f32",
+          "bytes": 794880,
+          "sha256": "40f2ea836d9895d91f7cd7479034b2bd20e75c1dbc36f3ed715b8503dfa53f77"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.mean.head0.f32",
+          "bytes": 201480,
+          "sha256": "48500ed5fcc255f28df8f74e86ae035b6f2b018d4aa0ad1d9c6662e6676481d5"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.mean.head1.f32",
+          "bytes": 35880,
+          "sha256": "9cdcdaed69d65de8745902cdeb6a3d10838cda44fc977ac76673ff4e46743ff1"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.mean.head2.f32",
+          "bytes": 11040,
+          "sha256": "094929b91c8aaa3f1331b06eac073cc266f29d5f1a3d371fa65b58fa7b6ec12c"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.mean.head3.f32",
+          "bytes": 11040,
+          "sha256": "46ec2c73d8b4216870dcc99b6cc22026fb1b167cac99ae334b75c8545f101a61"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.mean.head4.f32",
+          "bytes": 8280,
+          "sha256": "c2fc273cdc171dd5e46743f34acef83877fb00abb0f79dae06c3597b7bc87834"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.mean.head5.f32",
+          "bytes": 8280,
+          "sha256": "8882512f617775d1d8cc44e4fae00a0533e8caa033318a72fd8c6aad6d85d468"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chord.waveform-22050.f32",
+          "bytes": 1411200,
+          "sha256": "f9c6be1c771858d48daa7fc6431c5833c5c15b57584ff0ddace1a9f766b528f7"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chords-rounded-beats.json",
+          "bytes": 42,
+          "sha256": "947e710285221b92eb3a646d8e0fb744f81624b5dd27a322b2ddcd32b7f95b91"
+        },
+        {
+          "path": "captures/v2-vocal-stem/chords-seconds.json",
+          "bytes": 60,
+          "sha256": "811404d29f58456f5291c8ccac473bb4ed763b1b5965660e3820c69df4fe8e9a"
+        },
+        {
+          "path": "captures/v2-vocal-stem/drums-seconds.json",
+          "bytes": 4,
+          "sha256": "a5338d955b09046ec0b16f3a9625b7955c763aae07dc722e474e6078745f932f"
+        },
+        {
+          "path": "captures/v2-vocal-stem/event-vocabulary.json",
+          "bytes": 30075,
+          "sha256": "5ac32b5e6e9ff276065194c6e37ceabc081269f58e2f0ad6367fe9bd077402de"
+        },
+        {
+          "path": "captures/v2-vocal-stem/manifest.json",
+          "bytes": 1837,
+          "sha256": "77e5bc5505ca17210d7dd7faf757876001fada3eebae523bb4107cf38ec8c4c2"
+        },
+        {
+          "path": "captures/v2-vocal-stem/merged-notes-seconds.json",
+          "bytes": 3200,
+          "sha256": "2c27adde37bbf6cfbc9f7c3171b6e87f810bb83d9a24ae3f2afcb2b3072d155b"
+        },
+        {
+          "path": "captures/v2-vocal-stem/mt3.b0.cached-step.logits.f32",
+          "bytes": 247936,
+          "sha256": "cc951cf1d8161951d4fa18c0819ca6f5a077ae9926b8509ec57e0e0a1e795c90"
+        },
+        {
+          "path": "captures/v2-vocal-stem/mt3.b0.encoder.f32",
+          "bytes": 11714560,
+          "sha256": "03bf1c7ed041317abe21a5064b8c33c81d6e43c9a112c4ef7183787f738774fa"
+        },
+        {
+          "path": "captures/v2-vocal-stem/mt3.b0.linear-spectrogram.f32",
+          "bytes": 3604480,
+          "sha256": "c31520bdc9a2d03fa5c79574b56d170243a1ad10e3bae7b98698470aee838a82"
+        },
+        {
+          "path": "captures/v2-vocal-stem/mt3.b0.pre-decoder.f32",
+          "bytes": 23429120,
+          "sha256": "fc84820db5ae0dab7604e6a2ee9330628296f2e2cc55cfd9ac775817c5e6e8c5"
+        },
+        {
+          "path": "captures/v2-vocal-stem/mt3.b0.pre-encoder.f32",
+          "bytes": 57671680,
+          "sha256": "2d2ba1a0ed6187089c4f33c4d5f5b6c71ab05504417744afd6cd073afc76179b"
+        },
+        {
+          "path": "captures/v2-vocal-stem/mt3.b0.prefill.logits.f32",
+          "bytes": 247936,
+          "sha256": "5d56900392a4f5264f57d6b804f2c4c905cf7ac6d0a63e748ee63884d0d705ec"
+        },
+        {
+          "path": "captures/v2-vocal-stem/mt3.b0.waveform-padded.f32",
+          "bytes": 1048544,
+          "sha256": "79964fb9aa5e2701876fc50954d3def2a906b246f0981c96c8b44ab907946928"
+        },
+        {
+          "path": "captures/v2-vocal-stem/program-channel-map.json",
+          "bytes": 9823,
+          "sha256": "2372f631232426908f6199c5f993044f2e963e73856d5d54566a7c3256ba13e6"
+        },
+        {
+          "path": "captures/v2-vocal-stem/run.json",
+          "bytes": 786,
+          "sha256": "6525c70e0864da3e4886aeba2c9f7f82d041d317d8c290c5b7de566dc4ee85d6"
+        },
+        {
+          "path": "captures/v2-vocal-stem/seconds-variant.json",
+          "bytes": 3688,
+          "sha256": "81a4b4474c7de3f3dc85fad30cce5129231a5914b6db450d0eb8652b8658908a"
+        },
+        {
+          "path": "captures/v2-vocal-stem/tensors.json",
+          "bytes": 18977,
+          "sha256": "a45a04d065488ea3f210a8891378a120cd82be9c6e7022aaf571bb02704b9cd3"
+        },
+        {
+          "path": "captures/v2-vocal-stem/tokens-by-batch-channel.json",
+          "bytes": 101009,
+          "sha256": "49284f4637ee977a5e267693a227f787901e2e144bb042428fe00a8e2343eb18"
+        },
+        {
+          "path": "captures/v2-vocal-stem/verification.json",
+          "bytes": 351,
+          "sha256": "b3e0cdc1f67f37d064265e8f5ff3501152224131a0b0f6f8590c64b852c55fbe"
+        },
+        {
+          "path": "captures/v2-vocal-stem/vocal-program-100-seconds.json",
+          "bytes": 4,
+          "sha256": "a5338d955b09046ec0b16f3a9625b7955c763aae07dc722e474e6078745f932f"
+        },
+        {
+          "path": "captures/v2-vocal-stem/yourmt3-config.json",
+          "bytes": 3509,
+          "sha256": "caa2e9f069fbbff1c68b82218284a85597faa21f5d53081135256cc3c6f6cf20"
+        }
+      ]
+    }
+  ],
+  "baseline": {
+    "status": "PASS",
+    "comparison": "Exact merged notes, rounded chords and all four roll/mask arrays",
+    "elapsed_seconds": 12.095726099913009,
+    "no_drums": "Conditioning variant, not a source-separated audio claim"
+  },
+  "initial_candidate": {
+    "directory": "captures/library-vocal",
+    "status": "rejected-zero-bpm",
+    "note": "Preserved, excluded from accepted fixture set"
+  },
+  "limitations": [
+    "Instrumental source label and vocal-stem provenance are fixture metadata; human listening not performed.",
+    "Vocal stem yielded zero program-100 notes, so upstream rejected rolls/MIDI; model outputs retained.",
+    "Seconds variant preserves event timings, not a dense grid with an invented seconds-to-step mapping.",
+    "HOTSTEP-968 had no clip list; these hashed clips are the proposed shared comparison inputs.",
+    "tools/* ignore rule prevents ordinary commit until the owning agent allows this directory."
+  ],
+  "codegraph": [
+    "query ace-midi-validate: found engine/tools/ace-midi-validate.py",
+    "context reference tensor dumps audio transcription: index busy; file-read fallback"
+  ]
+}

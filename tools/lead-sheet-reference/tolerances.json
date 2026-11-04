@@ -1,0 +1,10 @@
+{
+  "declared_before_port": true,
+  "reference": "CPU fp32, deterministic algorithms, four intra-op threads, one inter-op thread",
+  "floating_tensors": {"max_absolute_error_strictly_less_than": 0.001, "relative_tolerance": 0},
+  "discrete": "Exact token IDs, event vocabulary, program/channel assignment, merged notes, Viterbi labels, triplets, binary rolls and MIDI events",
+  "seconds": {"max_absolute_error_strictly_less_than": 0.000001},
+  "bpm_and_tuning": {"max_absolute_error_strictly_less_than": 0.001},
+  "exceptions": [],
+  "exception_policy": "No looser tolerance preapproved. Report a failing stage and measured error before proposing an exception. CQT, resampling and recurrent accumulation remain subject to the same fp32 gate."
+}
