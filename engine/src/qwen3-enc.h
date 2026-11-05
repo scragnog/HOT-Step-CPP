@@ -561,17 +561,26 @@ static void qwen3_forward(Qwen3GGML * m, const int * token_ids, int S, float * o
 // MuLaCover style vector (upstream pipeline._encode_style). tags: the caller's lowercased,
 // trimmed tag line, tokenized bare (no chat template) with the trailing <|endoftext|> that
 // upstream's Qwen tokenizer also appends. Pools the final hidden row (batch 1, so no left
-// padding) and L2-normalises it in float. Empty tags give zeros, as upstream.
-// out: [H] float. Returns the token ids it ran (empty for empty tags).
-static std::vector<int> qwen3_style_vector(Qwen3GGML * m, const BPETokenizer * tok, const std::string & tags,
-                                           float * out) {
+// padding) and L2-normalises it in float. Empty tags give zeros, as upstream. More than
+// QWEN3_STYLE_MAX_TOKENS tokens is refused before anything is allocated, as upstream.
+// out: [H] float; *ids gets the token ids (empty for empty tags). False with *err on refusal.
+#define QWEN3_STYLE_MAX_TOKENS 8192
+
+static bool qwen3_style_vector(Qwen3GGML * m, const BPETokenizer * tok, const std::string & tags, float * out,
+                               std::vector<int> * ids_out, std::string * err) {
     const int H = m->cfg.hidden_size;
     std::fill(out, out + H, 0.0f);
+    ids_out->clear();
     if (tags.empty()) {
-        return {};
+        return true;
     }
-    std::vector<int>   ids = bpe_encode(tok, tags, true);
-    const int          S   = (int) ids.size();
+    std::vector<int> ids = bpe_encode(tok, tags, true);
+    const int        S   = (int) ids.size();
+    if (S > QWEN3_STYLE_MAX_TOKENS) {
+        *err = "tags are " + std::to_string(S) + " Qwen tokens; the style encoder takes at most " +
+               std::to_string(QWEN3_STYLE_MAX_TOKENS);
+        return false;
+    }
     std::vector<float> hidden((size_t) H * S);
     qwen3_forward(m, ids.data(), S, hidden.data());
     const float * last = hidden.data() + (size_t) H * (S - 1);
@@ -583,7 +592,8 @@ static std::vector<int> qwen3_style_vector(Qwen3GGML * m, const BPETokenizer * t
     for (int i = 0; i < H; i++) {
         out[i] = last[i] * inv;
     }
-    return ids;
+    *ids_out = std::move(ids);
+    return true;
 }
 
 // Embedding lookup via ggml graph (reuses text encoder weights + scheduler)

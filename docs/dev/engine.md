@@ -51,6 +51,7 @@ All targets are defined in `engine/CMakeLists.txt`.
 | `vst-host` | `tools/vst-host.cpp` | VST3 host: `--scan`, `--gui`, `--process`, `--process-chain`, `--monitor`. Each plugin gets a 10 s warm-up pre-roll of the track's opening, fed time-reversed so plugin buffers hold the song's own start when the real pass begins. `--monitor` (Windows, WASAPI) plays a track through the chain live, driven by a control file the server rewrites atomically with an increasing `seq`; see the note below |
 | `yue2-probe` | `tools/yue2-probe.cpp` | YuE2 bring-up and parity CLI (`--info`, `--load`, `--tokenize`, `--ar-parity` and more) |
 | `heartmula-generate` | `tools/heartmula-generate.cpp` | HeartMuLa text-to-music CLI using the same pipeline as `/heartmula/synth`, with seed, cancellation and audio checks |
+| `mulacover-check` | `tools/mulacover-check.cpp` | MuLaCover port checks: Qwen style vector against capture-layout fixtures, the converted pair through discovery and load, and refusals of bad cover tensors ([MuLaCover](#mulacover-cover-model)) |
 | `sa3-ggml-test`, `fattn-train-test`, `moss-ggml-test`, `bs-roformer-test`, `mdx23c-test` | `tools/*-test.cpp` | Parity tests against reference outputs |
 | `yue2-train-gemm-precision-test` | `tools/yue2-train-gemm-precision-test.cpp` | The YuE2 trainer's BF16 GEMMs against `YUE2_AITK_PRECISION=strict-f32`, forward and backward, at YuE2 shapes on the first GPU |
 | `yue2-convrot8-cpu-numeric-test`, `yue2-*-metal-*-test` | `tools/yue2-*.cpp` | YuE2 training-op gates: the CPU ConvRot8 kernels bit for bit against a scalar oracle, and each Metal training kernel against the CPU backend or the Metal kernel it replaced. The Metal ones skip without a Metal device |
@@ -176,6 +177,38 @@ the `heartmula_register_routes()` call. Synth jobs use the shared worker and
 `/job` polling. `heartmula-generate` exercises the same pipeline from JSON;
 `node tools/engine-smoke.mjs` includes a fixed-seed HeartMuLa render when its
 models are installed.
+
+### MuLaCover cover model
+
+MuLaCover is the HeartMuLa 3B/300M stack fine-tuned for covers from a lead sheet.
+Its weights are CC BY-NC 4.0 with a non-commercial model licence, and so are its
+outputs. `engine/tools/convert-mulacover.py` converts the checkpoint into
+`heartmula-mulacover-global-BF16.gguf` and `heartmula-mulacover-local-BF16.gguf`,
+using the HeartMuLa component contract with the variant `MuLaCover`. Discovery and
+the LM loader therefore treat it as one more variant. Tensors with two or more
+dimensions stay BF16 bit for bit, and 1-D tensors widen to F32, so no value
+changes. Nothing in the checkpoint is dropped. The converter takes the installed
+`heartmula-tokenizer.gguf` and `heartcodec-rvq-F32.gguf` as dependencies, and
+refuses unless the tokenizer is identical and the RVQ came from the HeartCodec
+checkpoint MuLaCover pins.
+
+The global file also holds the cover modules of backbone layers 20 to 27 (upstream
+`peft_layers`; these are full modules, not LoRA factors). Each layer has a
+symbolic adaptor for the melody, drum and chord rolls, gated adaptive cross
+attention and a tag MLP. The file also has `qwen_linear` for the style slot.
+`heartmula_cover_load` (`heartmula/model.h`) checks every one of these tensors'
+names, shapes and types from the header before it allocates anything, and names
+the first bad tensor. `heartmula_load_lm` loads them whenever the variant is
+MuLaCover.
+
+The style condition comes from Qwen3-Embedding-0.6B through the ACE text encoder
+(`qwen3_style_vector` in `qwen3-enc.h`). The input is the lowercased, trimmed tag
+line with no chat template, ending in the EOS token that upstream's tokenizer
+also adds. The function pools the last hidden row, applies an L2 norm in float,
+and refuses more than 8192 tokens. The parity reference is FP32, upstream's
+default for this model: with the BF16 text encoder the vector is within 1e-3 of it.
+The Q8_0 encoder is about 6e-3 away. Both registry files are tensor-identical to the
+pinned Qwen checkpoint (the Q8_0 one after re-quantisation).
 
 ## How ace-server is organised
 

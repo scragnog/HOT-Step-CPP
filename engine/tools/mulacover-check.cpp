@@ -5,7 +5,8 @@
 // 1. Qwen style vector (qwen3-enc.h qwen3_style_vector) against every capture case
 //    under --captures (<case>/input.json + <case>/observed/*.npy): token ids and mask
 //    exact, the pooled last row within the BF16 rule (|d| <= 0.0625 + 0.02 |ref|),
-//    the normalised vector within 1e-3 absolute. QWEN is a .gguf or a safetensors dir.
+//    the normalised vector within 1e-3 absolute; empty tags give zeros and the
+//    8192-token limit holds at its boundary. QWEN is a .gguf or a safetensors dir.
 // 2. The converted pair in DIR (heartmula/ or the root, as heartmula_discover scans):
 //    both files compatible in the catalogue, then heartmula_load_lm loads the LM and
 //    its cover modules.
@@ -116,8 +117,13 @@ static void check_qwen(const std::string & qwen_path, const HeartMuLaTokenizer &
         tags.erase(tags.find_last_not_of(" \t\r\n\v\f") + 1);
         tags = heartmula_tokenizer_detail::lowercase(hm_tok, tags);
 
-        std::vector<float>     vec((size_t) H);
-        const std::vector<int> ids = qwen3_style_vector(&qm, &bpe, tags, vec.data());
+        std::vector<float> vec((size_t) H);
+        std::vector<int>   ids;
+        std::string        err;
+        if (!qwen3_style_vector(&qm, &bpe, tags, vec.data(), &ids, &err) || ids.empty()) {
+            verdict(false, name + ": " + err);
+            continue;
+        }
         const Npy ref_ids = read_npy((o / "qwen.input_ids.npy").string());
         const Npy ref_mask = read_npy((o / "qwen.attention_mask.npy").string());
         bool ids_ok = ref_ids.v.size() == ids.size() && ref_mask.v.size() == ids.size();
@@ -152,10 +158,28 @@ static void check_qwen(const std::string & qwen_path, const HeartMuLaTokenizer &
                  vec_abs);
         verdict(vec_ok, name + buf);
     }
-    std::vector<float> zero((size_t) H, 1.0f);
-    verdict(qwen3_style_vector(&qm, &bpe, "", zero.data()).empty() &&
-                std::all_of(zero.begin(), zero.end(), [](float x) { return x == 0.0f; }),
+    std::vector<float> v((size_t) H, 1.0f);
+    std::vector<int>   ids;
+    std::string        err;
+    verdict(qwen3_style_vector(&qm, &bpe, "", v.data(), &ids, &err) && ids.empty() &&
+                std::all_of(v.begin(), v.end(), [](float x) { return x == 0.0f; }),
             "qwen: empty tags give a zero vector");
+
+    // Upstream's limit: "a" + n x " a" is n + 1 word tokens, plus the trailing EOS.
+    for (const int n : { QWEN3_STYLE_MAX_TOKENS, QWEN3_STYLE_MAX_TOKENS + 1 }) {
+        std::string tags = "a";
+        for (int i = 0; i < n - 2; i++) tags += " a";
+        std::fill(v.begin(), v.end(), 1.0f);
+        err.clear();
+        const bool ran  = qwen3_style_vector(&qm, &bpe, tags, v.data(), &ids, &err);
+        double     norm = 0;
+        for (float x : v) norm += (double) x * x;
+        const bool want = n <= QWEN3_STYLE_MAX_TOKENS;
+        verdict(bpe_encode(&bpe, tags, true).size() == (size_t) n && ran == want &&
+                    (want ? ids.size() == (size_t) n && std::fabs(norm - 1.0) < 1e-5
+                          : ids.empty() && norm == 0.0 && !err.empty()),
+                "qwen: " + std::to_string(n) + " tokens " + (ran ? "run, unit norm" : "refused: " + err));
+    }
     qwen3_free(&qm);
 }
 
