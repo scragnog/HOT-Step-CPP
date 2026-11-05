@@ -132,25 +132,34 @@ test('wrong-rate, wrong-length and non-WAV results cannot overwrite raw audio', 
   }
 });
 
-test('pending registry pack has measured sizes, licence companions and no public listing', () => {
+test('public refiner pack has measured downloads, required licences and a non-commercial MERT notice', () => {
   const registry = JSON.parse(fs.readFileSync(new URL('../../data/model-registry.json', import.meta.url), 'utf8'));
-  const pack = registry.pending.packs.find((p: any) => p.id === 'mm3-latent-refiner');
+  assert.equal(registry.pending, undefined);
+  const pack = registry.packs.find((p: any) => p.id === 'mm3-latent-refiner');
   assert.ok(pack);
-  const files = [...registry.files, ...registry.pending.files];
   for (const id of pack.fileIds) {
-    const file = files.find((f: any) => f.id === id);
+    const file = registry.files.find((f: any) => f.id === id);
     assert.ok(file, id);
     assert.ok(file.sizeBytes > 0, id);
     assert.ok(file.companions.length > 0, id);
   }
-  assert.equal(registry.pending.files[0].sizeBytes, 549104864);
-  assert.equal(registry.pending.files[1].sizeBytes, 377505664);
-  assert.equal(registry.pending.files[1].licence, 'CC-BY-NC-4.0');
-  assert.ok(registry.pending.files.every((f: any) => !f.repo && !f.repoPath));
+  const refiner = registry.files.find((f: any) => f.id === 'mm3-refiner-refiner-f32');
+  const mert = registry.files.find((f: any) => f.id === 'mm3-refiner-mert-f32');
+  assert.equal(refiner.sizeBytes, 549104864);
+  assert.equal(mert.sizeBytes, 377505664);
+  for (const file of [refiner, mert]) {
+    assert.equal(file.repo, 'scragnog/MiniMax-Music3-GGUF');
+    assert.match(file.sha256, /^[a-f0-9]{64}$/);
+    assert.ok(file.companions.every((c: any) => c.required));
+  }
+  assert.match(mert.licence, /CC-BY-NC-4.0/);
+  for (const text of [mert.displayName, mert.description, mert.licence, pack.description]) {
+    assert.match(text, /non-commercial/i);
+  }
   assert.equal(pack.pendingComponents[0].status, 'pending');
   const visible = modelDownloadService.getRegistry();
-  assert.ok(!visible.packs.some(p => p.id === pack.id));
-  assert.ok(!visible.files.some(f => registry.pending.files.some((p: any) => p.id === f.id)));
+  assert.ok(visible.packs.some(p => p.id === pack.id));
+  assert.ok([refiner, mert].every(file => visible.files.some(f => f.id === file.id)));
 });
 
 test('compact generation intents retain refiner settings on every backend and omit them when off', () => {
