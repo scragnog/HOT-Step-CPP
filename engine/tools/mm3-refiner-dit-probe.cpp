@@ -198,7 +198,7 @@ int main(int argc, char ** argv) {
 
             std::vector<float> x0 = mm3_dit_normalize(&dit, dav.data.data(), L);
             Metrics            mn = measure(x0.data(), nref.data.data(), x0.size());
-            bool               ok = g_norm.ok(mn);
+            bool               ok = s_bit && g_norm.ok(mn);
             worst_norm.worst_of(mn);
 
             auto & ws = worst_state[steps];

@@ -260,6 +260,13 @@ Test-GgmlHook "BF16_ROUND unary op on CUDA (Hook 16)" @("$ggml/include/ggml.h", 
 Test-GgmlHook "ggml.c BF16 MUL_MAT gradient (Hook 18)" @("$ggml/src/ggml.c") @('HOT-Step patch: bf16-mul-mat-grad') `
     "YuE2 joint training aborts in ggml_build_backward_expand unless YUE2_AITK_PRECISION=strict-f32."
 
+# Hook 19: GGML_HINT_STRICT_F32 keeps a MUL_MAT off TF32 on CUDA. The MM3 refiner's
+#   MERT conditioner sets it on every GEMM; SILENT if lost: its 13 states miss the
+#   parity gate under ggml-cuda's default TF32 (tools/mm3-refiner/check-mert.ps1 -Mode tf32).
+Test-GgmlHook "ggml-cuda strict-F32 MUL_MAT hint (Hook 19)" @("$ggml/include/ggml.h", "$cuda/ggml-cuda.cu") `
+    @('GGML_HINT_STRICT_F32\s*=', 'HOT-Step patch: strict-f32-hint') `
+    "The MM3 refiner will not compile, or SILENT: its MERT conditioning drifts under TF32."
+
 # Hook 17: engine/ggml is clean and at the commit this repo pins. The fork is
 #   the only place ggml changes live now; local edits in engine/ggml are lost
 #   on the next submodule update and are not what CI or a user builds. Untracked

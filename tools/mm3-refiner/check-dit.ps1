@@ -93,8 +93,12 @@ try {
         # Windows depend on the audio only, so one MERT pass serves steps 1, 8 and 32.
         foreach ($clip in Get-ChildItem $Fixtures -Directory) {
             $states = "tools/mm3-refiner/artifacts/dit-probe/mert-$Mode/$($clip.Name)"
+            # A failed MERT run must not leave an earlier run's states for the bridge to reuse.
+            Remove-Item -Recurse -Force $states -ErrorAction SilentlyContinue
             & $mertProbe --mert "$Gguf/mm3-refiner-mert-f32.gguf" --refiner $refiner --contract tools/mm3-refiner/fixtures.json `
                 --fixtures "$Fixtures/$($clip.Name)/steps-32" --out $states | Select-String -Pattern 'mert parity'
+            # Exit 1 is a parity miss, which still feeds the chain; 2 is an execution error.
+            if ($LASTEXITCODE -ge 2) { Write-Output "MERT probe error on $($clip.Name)"; $code = 2; break }
             foreach ($steps in 1, 8, 32) {
                 Write-Output "chain $($clip.Name) steps-$steps, engine MERT ($Mode) -> bridge:"
                 & $Probe --refiner $refiner --contract tools/mm3-refiner/fixtures.json `

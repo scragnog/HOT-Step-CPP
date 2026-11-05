@@ -377,6 +377,14 @@ static int64_t mm3_mert_frames(int64_t samples) {
 
 namespace mm3_mert_detail {
 
+// Every MERT GEMM runs in full FP32: on TF32 tensor cores (ggml-cuda's default) the
+// 13 states miss the slice-1 gate. GGML_HINT_STRICT_F32 is a HOT-ggml fork hint.
+static ggml_tensor * mul_mat_f32(ggml_context * ctx, ggml_tensor * a, ggml_tensor * b) {
+    ggml_tensor * y = ggml_mul_mat(ctx, a, b);
+    ggml_mul_mat_set_hint(y, GGML_HINT_STRICT_F32);
+    return y;
+}
+
 static ggml_tensor * ln(ggml_context * ctx, ggml_tensor * x, ggml_tensor * w, ggml_tensor * b) {
     return ggml_add(ctx, ggml_mul(ctx, ggml_norm(ctx, x, MM3_MERT_EPS), w), b);
 }
@@ -384,26 +392,26 @@ static ggml_tensor * ln(ggml_context * ctx, ggml_tensor * x, ggml_tensor * w, gg
 // Conv1d over time with an F32 im2col (ggml_conv_1d forces F16). x [T, IC], w [K, IC, OC] -> [T_out, OC].
 static ggml_tensor * conv(ggml_context * ctx, ggml_tensor * w, ggml_tensor * x, int stride, int pad) {
     ggml_tensor * col = ggml_im2col(ctx, w, x, stride, 0, pad, 0, 1, 0, false, GGML_TYPE_F32);
-    return ggml_mul_mat(ctx, ggml_reshape_2d(ctx, col, col->ne[0], col->ne[1] * col->ne[2]),
+    return mul_mat_f32(ctx, ggml_reshape_2d(ctx, col, col->ne[0], col->ne[1] * col->ne[2]),
                         ggml_reshape_2d(ctx, w, w->ne[0] * w->ne[1], w->ne[2]));
 }
 
 // One post-LN HuBERT encoder layer on h [D, T].
 static ggml_tensor * layer(ggml_context * ctx, const Mm3MertLayer & L, ggml_tensor * h) {
     const int64_t D = MM3_MERT_DIM, HD = D / MM3_MERT_HEADS, NH = MM3_MERT_HEADS, T = h->ne[1];
-    ggml_tensor * q = ggml_add(ctx, ggml_mul_mat(ctx, L.q_w, h), L.q_b);
-    ggml_tensor * k = ggml_add(ctx, ggml_mul_mat(ctx, L.k_w, h), L.k_b);
-    ggml_tensor * v = ggml_add(ctx, ggml_mul_mat(ctx, L.v_w, h), L.v_b);
+    ggml_tensor * q = ggml_add(ctx, mul_mat_f32(ctx, L.q_w, h), L.q_b);
+    ggml_tensor * k = ggml_add(ctx, mul_mat_f32(ctx, L.k_w, h), L.k_b);
+    ggml_tensor * v = ggml_add(ctx, mul_mat_f32(ctx, L.v_w, h), L.v_b);
     q = ggml_cont(ctx, ggml_permute(ctx, ggml_reshape_3d(ctx, q, HD, NH, T), 0, 2, 1, 3));  // [hd, T, head]
     k = ggml_cont(ctx, ggml_permute(ctx, ggml_reshape_3d(ctx, k, HD, NH, T), 0, 2, 1, 3));
     v = ggml_cont(ctx, ggml_permute(ctx, ggml_reshape_3d(ctx, v, HD, NH, T), 1, 2, 0, 3));  // [T, hd, head]
     // ponytail: dense [T, T, head] F32 scores (0.24 GB for a 30 s window, quadratic);
     // query-blocked or flash attention once direct mode feeds whole songs.
-    ggml_tensor * kq = ggml_soft_max_ext(ctx, ggml_mul_mat(ctx, k, q), nullptr, 1.0f / std::sqrt((float) HD), 0.0f);
-    ggml_tensor * a  = ggml_cont_2d(ctx, ggml_permute(ctx, ggml_mul_mat(ctx, v, kq), 0, 2, 1, 3), D, T);
-    h = ln(ctx, ggml_add(ctx, h, ggml_add(ctx, ggml_mul_mat(ctx, L.o_w, a), L.o_b)), L.ln_w, L.ln_b);
-    ggml_tensor * f = ggml_gelu_erf(ctx, ggml_add(ctx, ggml_mul_mat(ctx, L.up_w, h), L.up_b));
-    f               = ggml_add(ctx, ggml_mul_mat(ctx, L.down_w, f), L.down_b);
+    ggml_tensor * kq = ggml_soft_max_ext(ctx, mul_mat_f32(ctx, k, q), nullptr, 1.0f / std::sqrt((float) HD), 0.0f);
+    ggml_tensor * a  = ggml_cont_2d(ctx, ggml_permute(ctx, mul_mat_f32(ctx, v, kq), 0, 2, 1, 3), D, T);
+    h = ln(ctx, ggml_add(ctx, h, ggml_add(ctx, mul_mat_f32(ctx, L.o_w, a), L.o_b)), L.ln_w, L.ln_b);
+    ggml_tensor * f = ggml_gelu_erf(ctx, ggml_add(ctx, mul_mat_f32(ctx, L.up_w, h), L.up_b));
+    f               = ggml_add(ctx, mul_mat_f32(ctx, L.down_w, f), L.down_b);
     return ln(ctx, ggml_add(ctx, h, f), L.fln_w, L.fln_b);
 }
 
@@ -440,7 +448,7 @@ static bool mm3_mert_hidden(Mm3Mert * m, const std::vector<float> & input, std::
         x = ggml_gelu_erf(ctx, conv(ctx, m->conv_w[i], x, mm3_mert_conv_stride[i], 0));
     }
     x = ggml_cont(ctx, ggml_transpose(ctx, x));  // [512, T]
-    ggml_tensor * h = ggml_add(ctx, ggml_mul_mat(ctx, m->fp_w, ln(ctx, x, m->fp_ln_w, m->fp_ln_b)), m->fp_b);
+    ggml_tensor * h = ggml_add(ctx, mul_mat_f32(ctx, m->fp_w, ln(ctx, x, m->fp_ln_w, m->fp_ln_b)), m->fp_b);
 
     // Grouped positional conv: 16 groups of 48 channels, k 128, pad 64, drop the last frame.
     ggml_tensor * ht  = ggml_cont(ctx, ggml_transpose(ctx, h));  // [T, 768]

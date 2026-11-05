@@ -3,8 +3,9 @@
 #
 #   -Mode f32   CUDA (or the best GPU) with cuBLAS TF32 disabled through
 #               NVIDIA_TF32_OVERRIDE=0, the precision the fixtures were captured at.
-#   -Mode tf32  the backend's default; ggml-cuda enables TF32 on every cuBLAS
-#               handle, which misses the MERT gate (reported, exit 1).
+#   -Mode tf32  the backend's default, no override. ggml-cuda runs F32 GEMMs on
+#               TF32, but mm3-refiner-mert.h marks every MERT GEMM strict F32
+#               (GGML_HINT_STRICT_F32), so this mode must pass the gate too.
 #   -Mode cpu   GGML_BACKEND=CPU.
 #
 # Exit code is the probe's: 0 pass, 1 numerical fail, 2 error.
