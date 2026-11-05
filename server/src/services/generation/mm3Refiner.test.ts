@@ -5,6 +5,7 @@ import { aceClient } from '../aceClient.js';
 import { encodeWav } from './audioLevel.js';
 import { normalizeMm3RefinerParams, runMm3Refiner } from './mm3Refiner.js';
 import { modelDownloadService } from '../modelDownloadService.js';
+import { resolveGenerationIntent } from './intent.js';
 
 const wav = (rate = 48000, frames = 257) => encodeWav({
   channels: [new Float32Array(frames).fill(0.1)], sampleRate: rate,
@@ -150,4 +151,27 @@ test('pending registry pack has measured sizes, licence companions and no public
   const visible = modelDownloadService.getRegistry();
   assert.ok(!visible.packs.some(p => p.id === pack.id));
   assert.ok(!visible.files.some(f => registry.pending.files.some((p: any) => p.id === f.id)));
+});
+
+test('compact generation intents retain refiner settings on every backend and omit them when off', () => {
+  const explicit = { mm3RefinerEnabled: true, mm3RefinerSteps: 8,
+    mm3RefinerWindowSeconds: 0, mm3RefinerOverlapSeconds: 0, mm3RefinerMix: 0 };
+  const keys = Object.keys(explicit);
+  for (const backend of ['ace', 'minimax-m3', 'yue2', 'sa3', 'heartmula']) {
+    const resolve = (params: Record<string, unknown>) => JSON.parse(JSON.stringify(
+      resolveGenerationIntent({ contract: 'generation-intent/1', params }, backend, []),
+    ));
+    const enabled = resolve({ postProcessingEnabled: true, ...explicit });
+    for (const key of keys) assert.equal(enabled[key], explicit[key as keyof typeof explicit], `${backend}: ${key}`);
+    const defaults = resolve({ mm3RefinerEnabled: true });
+    assert.deepEqual(Object.fromEntries(keys.map(key => [key, defaults[key]])), {
+      mm3RefinerEnabled: true, mm3RefinerSteps: 32, mm3RefinerWindowSeconds: 30,
+      mm3RefinerOverlapSeconds: 2, mm3RefinerMix: 1,
+    });
+    for (const params of [{}, { ...explicit, mm3RefinerEnabled: false },
+      { ...explicit, postProcessingEnabled: false }]) {
+      const off = resolve(params);
+      for (const key of keys) assert.ok(!(key in off), `${backend}: off must omit ${key}`);
+    }
+  }
 });

@@ -166,6 +166,13 @@ export const generationControlsSchema = z.object({
   ppVaeReencode: z.unknown().optional(), // boolean, default false
   ppVaeBlend: z.unknown().optional(), // number, default 0.0
 
+  // MM3 latent refiner, shared by all generation backends
+  mm3RefinerEnabled: z.unknown().optional(), // boolean, default false
+  mm3RefinerSteps: z.unknown().optional(), // number, default 32
+  mm3RefinerWindowSeconds: z.unknown().optional(), // number, default 30; 0 = direct
+  mm3RefinerOverlapSeconds: z.unknown().optional(), // number, default 2
+  mm3RefinerMix: z.unknown().optional(), // number, default 1; 0 = exact bypass
+
   // StableStep (SA3) refinement
   stableStepOn: z.unknown().optional(), // boolean, default false
   stableStepStrength: z.unknown().optional(), // number, default 0.3
