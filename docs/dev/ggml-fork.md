@@ -43,6 +43,7 @@ submodule at configure time.
 | CUDA BF16 flash-attn-train | BF16 Q/K/V `FLASH_ATTN_TRAIN` / `_BACK` kernels on sm_80+ (`mma.sync` m16n8k16, F32 accumulate) for an explicit `GGML_PREC_BF16` request with D = 128 and 4-byte aligned views. Packed outputs stay F32. The CPU backend refuses BF16 operands, so the scheduler never hands it one, and the kernels also build under HIP | — |
 | fa-train-cuda-hints | the BF16 `FLASH_ATTN_TRAIN` kernels use the causal hint instead of reading the mask, and skip dK/dV below `kv_grad_start`; `GGML_CUDA_FA_TRAIN_NO_HINTS=1` turns it off. With the causal hint and 16-byte aligned rows they pipeline their tile loads with `cp.async` (bit-identical); `GGML_CUDA_FA_TRAIN_NO_PIPE=1` keeps the scalar kernels | — |
 | zzzz-vulkan-train-ops | Vulkan `BF16_ROUND` and fused training attention | 14 |
+| strict-f32-hint | `GGML_HINT_STRICT_F32` on a `MUL_MAT`: ggml-cuda skips the TF32 mma kernels, runs the cuBLAS F32 GEMM with `CUBLAS_DEFAULT_MATH` for that one call and puts the handle back in TF32 mode after. Nothing without the hint changes; `GGML_PREC_F32` keeps its meaning (existing YuE2 callers unchanged). Other backends ignore it. Set only by the MM3 refiner's MERT-v1 conditioner, which misses its parity gate under TF32 | 19 |
 | ggml-rpc patch-level check | refuse an RPC server that lacks the fork's ops | — |
 
 The YuE2 trainer's own speed changes sit outside the fork:
