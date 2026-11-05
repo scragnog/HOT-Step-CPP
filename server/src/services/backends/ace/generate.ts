@@ -502,6 +502,7 @@ export async function runAceGeneration(
     // wav32 skips normalization entirely, preserving natural headroom for PP stages.
     const ppEnabled = job.params.postProcessingEnabled !== false;
     const anyPpActive = ppEnabled && (
+      (!!job.params.mm3RefinerEnabled && job.params.mm3RefinerMix !== 0) ||
       !!job.params.ppVaeReencode ||
       !!(job.params.stableStepOn ?? job.params.stableStep) ||
       !!job.params.spectralLifterEnabled ||

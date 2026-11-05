@@ -1,5 +1,67 @@
 {
   "version": 1,
+  "pending": {
+    "reason": "Unlisted until the MERT non-commercial licence, CLAP conditioning and model uploads are approved. Pending entries are excluded from the public packs and files arrays.",
+    "packs": [
+      {
+        "id": "mm3-latent-refiner",
+        "family": "mm3",
+        "name": "MiniMax-Music3 Latent Refiner",
+        "description": "Optional deterministic audio post-process on any backend. Quality on other backends is untested. Requires MERT-v1-95M under CC-BY-NC-4.0; CLAP conditioning is pending.",
+        "fileIds": [
+          "mm3-refiner-refiner-f32",
+          "mm3-refiner-mert-f32",
+          "mm3-enc-f16",
+          "mm3-voc-f16"
+        ],
+        "pendingComponents": [
+          {
+            "id": "mm3-refiner-clap",
+            "status": "pending",
+            "licence": "Apache-2.0",
+            "reason": "CLAP GGUF or an approved frozen style vector; neither is shipped yet."
+          }
+        ]
+      }
+    ],
+    "files": [
+      {
+        "id": "mm3-refiner-refiner-f32",
+        "filename": "mm3-refiner-refiner-f32.gguf",
+        "role": "mm3",
+        "family": "mm3",
+        "subdir": "mm3",
+        "displayName": "MM3 Latent Refiner (F32)",
+        "variant": "refiner",
+        "quant": "F32",
+        "sizeBytes": 549104864,
+        "licence": "MiniMax-Music3 Community License",
+        "description": "Deterministic latent refiner with embedded normalization statistics. Code is Apache-2.0; weights use the MiniMax-Music3 Community License. Not published yet.",
+        "tags": [],
+        "companions": [
+          { "filename": "LICENSE-mm3-refiner-weights" },
+          { "filename": "LICENSE-mm3-refiner-code" }
+        ]
+      },
+      {
+        "id": "mm3-refiner-mert-f32",
+        "filename": "mm3-refiner-mert-f32.gguf",
+        "role": "mm3",
+        "family": "mm3",
+        "subdir": "mm3",
+        "displayName": "MERT-v1-95M (F32, non-commercial)",
+        "variant": "refiner-mert",
+        "quant": "F32",
+        "sizeBytes": 377505664,
+        "licence": "CC-BY-NC-4.0",
+        "description": "Required audio conditioner for the latent refiner. Non-commercial weights; licence policy and publication pending.",
+        "tags": [],
+        "companions": [
+          { "filename": "LICENSE-mm3-refiner-mert" }
+        ]
+      }
+    ]
+  },
   "packs": [
     {
       "id": "quick-start",
@@ -6287,7 +6349,7 @@
       "quant": "F16",
       "sizeBytes": 89466528,
       "repo": "scragnog/MiniMax-Music3-GGUF",
-      "description": "MiniMax-Music3 DAV audio encoder — 44.1 kHz stereo into the 128-channel flow latents. TRAINING ONLY: it is the input stage of the Training Studio's MM3 codes job, paired with the RVQ encoder. Generation does not use it. This file is ~0.1 GB.",
+      "description": "MiniMax-Music3 DAV audio encoder, 44.1 kHz stereo into the 128-channel flow latents. Used by the Training Studio's MM3 codes job with the RVQ encoder, and by the optional latent refiner post-process. Ordinary generation does not use it. This file is ~0.1 GB.",
       "tags": [
         "required"
       ],

@@ -1399,6 +1399,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
 function yue2FinishNeedsGpu(params: any): boolean {
   const pp = params.postProcessingEnabled !== false;
   return (pp && !!(params.stableStepOn ?? params.stableStep))
+    || (pp && !!params.mm3RefinerEnabled && params.mm3RefinerMix !== 0)
     || !!params.whisperLyricsEnabled || !!params.yue2AlignLyrics || !!params.coverArtEnabled;
 }
 

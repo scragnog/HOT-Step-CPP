@@ -259,6 +259,9 @@ export interface AceJobStatus {
  *  Lowercase snake_case mirrors job_phase_str(). */
 export type AceJobPhase =
   | 'queued'
+  | 'loading_refiner'
+  | 'refine_condition'
+  | 'refine_bridge'
   | 'loading_text_enc'
   | 'encoding_text'
   | 'loading_cond_enc'
@@ -657,6 +660,28 @@ export const aceClient = {
       method: 'POST',
       signal: AbortSignal.timeout(TIMEOUT_POLL),
     });
+  },
+
+  /** Queue the deterministic MM3 latent refiner. Audio mixing and resampling
+   *  belong to the engine; the returned job uses the shared /job endpoints. */
+  async submitMm3Refine(
+    wavBuffer: Buffer,
+    opts: { steps: number; window: number; overlap: number; mix: number },
+  ): Promise<string> {
+    const query = new URLSearchParams(Object.entries(opts).map(([key, value]) => [key, String(value)]));
+    const res = await aceFetch(`${base()}/mm3/refine?${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/wav' },
+      body: wavBuffer,
+      signal: AbortSignal.timeout(TIMEOUT_RESULT),
+    });
+    if (!res.ok) {
+      const reason = await res.text();
+      throw Object.assign(new Error(`MM3 refiner (${res.status}): ${reason}`), { status: res.status });
+    }
+    const data = await res.json() as { id?: string };
+    if (!data.id) throw new Error('MM3 refiner returned no job id');
+    return data.id;
   },
 
   /** POST /job?id=N&drop_songs=MASK — take songs out of a running YuE2

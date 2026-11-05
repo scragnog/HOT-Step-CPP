@@ -35,6 +35,7 @@ export interface RePostProcessJob {
   status: 'pending' | 'running' | 'succeeded' | 'failed';
   stage: string;
   error?: string;
+  warnings?: string[];
   /** Set on success — the URL now stored in songs.mastered_audio_url. */
   masteredAudioUrl?: string;
   createdAt: number;
@@ -79,6 +80,7 @@ export function findRePostProcessJobBySong(songId: string): RePostProcessJob | u
  */
 export function requestedPpStages(params: PostProcessParams): string[] {
   const stages: string[] = [];
+  if (params.mm3RefinerEnabled && params.mm3RefinerMix !== 0) stages.push('MM3 refiner');
   if (params.stableStepOn ?? params.stableStep) stages.push('StableStep');
   if (params.ppVaeReencode) stages.push('PP-VAE re-encode');
   if (params.spectralLifterEnabled) stages.push('Spectral Lifter');
@@ -296,6 +298,13 @@ export function startRePostProcess(song: any, params: PostProcessParams): RePost
     );
 
     const masteredUrl = result.masteredUrls[0] || '';
+    if (result.warnings?.length) job.warnings = result.warnings;
+    if (!masteredUrl && result.warnings?.length) {
+      job.status = 'succeeded';
+      job.stage = result.warnings.join('; ');
+      finishGenerationLog(jobId, 'postprocess');
+      return;
+    }
     if (!masteredUrl) {
       // Every requested stage declined to run — a missing model, or a VST that
       // failed to load. Reporting success here would leave the user wondering

@@ -21,6 +21,7 @@ import { evaluateAudioQuality, formatQualityLog, type QualityResult } from './au
 import { tokenizeForSa3, buildStableStepPrompt } from '../sa3Tokenizer.js';
 import { wavDurationSec } from '../audioCrop.js';
 import { stemCacheKey, readStemCache, writeStemCache } from './stemCache.js';
+import { runMm3Refiner, normalizeMm3RefinerParams, type Mm3RefinerParams } from './mm3Refiner.js';
 
 type LogFn = (level: 'INFO' | 'DEBUG' | 'WARNING' | 'ERROR', msg: string) => void;
 type StageFn = (stage: string) => void;
@@ -97,7 +98,7 @@ function clampCeilingDb(v: number | undefined): number {
 // was supposed to own the ceiling failed. Only engages on a broken chain.
 const FINAL_CEILING_DB = -0.3;
 
-export interface PostProcessParams {
+export interface PostProcessParams extends Mm3RefinerParams {
   postProcessingEnabled?: boolean;
   ppVaeReencode?: boolean;
   ppVaeBlend?: number;
@@ -205,6 +206,9 @@ export interface PostProcessResult {
   masteredUrls: string[];
   qualityScores: TrackQualityScores[];
   timing: Array<{ name: string; ms: number }>;
+  /** Declined optional stages. Re-processing can keep the raw track and
+   *  report a warning rather than fail when no stage produced a master. */
+  warnings?: string[];
 }
 
 // ── Shared vocal separation ─────────────────────────────────────────────────
@@ -310,6 +314,7 @@ async function separateVocalsCached(
 export function normalizePpParams(raw: any, captions: string[]): PostProcessParams {
   return {
     ...raw,
+    ...normalizeMm3RefinerParams(raw),
     parallelQualityEval: !!raw.parallelQualityEval,
     // StableStep (SA3 refine): normalize the flag (preset files may use the
     // "stableStep" alias) and default the strength.
@@ -391,6 +396,7 @@ export async function runPostProcessingChain(
   const masteredUrls: string[] = [];
   const qualityScores: TrackQualityScores[] = [];
   const timing: Array<{ name: string; ms: number }> = [];
+  const warnings: string[] = [];
   const qeOn = !!params.qualityEvalEnabled;
   const qeTarget = params.qualityEvalTarget || 'unmastered';
 
@@ -436,6 +442,19 @@ export async function runPostProcessingChain(
       qePrePromise = runQePre();
     } else {
       await runQePre();
+    }
+
+    if (ppMasterOn && params.mm3RefinerEnabled && params.mm3RefinerMix !== 0) {
+      const started = performance.now();
+      const refined = await runMm3Refiner(fs.readFileSync(processedPath), params, (level, message) => {
+        if (level === 'WARNING') warnings.push(message);
+        log(level, message);
+      }, setStage);
+      if (refined) {
+        fs.writeFileSync(processedPath, refined);
+        anyStageRan = true;
+      }
+      timing.push({ name: 'MM3 refiner', ms: Math.round(performance.now() - started) });
     }
 
     // ── Shared vocal separation (StableStep stem workflow + Whisper isolation) ──
@@ -1006,7 +1025,7 @@ export async function runPostProcessingChain(
     }
   }
 
-  return { masteredUrls, qualityScores, timing };
+  return { masteredUrls, qualityScores, timing, ...(warnings.length ? { warnings } : {}) };
 }
 
 // ── WAV mix helpers (StableStep recombine) ─────────────────────────
