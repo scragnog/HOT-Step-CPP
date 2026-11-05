@@ -1460,15 +1460,17 @@ export function yue2PickerLmVae(
  *  stopped being one answer — one half can be merged while the other is still
  *  waiting for the next load.
  *
- *  In force means the file AND every dial: `merged` is the engine's key for
- *  what is baked in (yue2AdapterKey), so a strength changed since the last load
- *  reads as pending rather than as merged at the old one. */
+ *  In force means the file AND every dial. `merged` is the key of the stack
+ *  last loaded (yue2AdapterKey), dials included, so a strength changed since
+ *  then reads as pending; but it spells the whole REQUESTED stack, a half that
+ *  matched nothing included, so which halves landed comes from `entries`. */
 export function slotDefaults(
   persisted: Yue2PersistedSelection,
   props: Yue2Props | null,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   const merged = (props?.adapter?.merged ?? '').split('; ').filter(Boolean);
+  const entries = props?.adapter?.entries ?? [];
   const legacy = yue2EngineIsPreDials(props);
   // Path compared resolved, dials compared as the engine spells them.
   const sameKey = (a: string, b: string): boolean => {
@@ -1479,7 +1481,12 @@ export function slotDefaults(
     const slot = persisted.adapters[kind];
     const Slot = kind === 'ar' ? 'Ar' : 'Nar';
     const want = slot.path ? yue2AdapterKey([{ path: slot.path, scales: slot.scales }], legacy) : '';
-    const inForce = !!want && merged.some(m => sameKey(m, want));
+    // An engine too old to send `entries` says nothing per half; fall back to
+    // the aggregate rather than claiming a half is unmerged when it may not be.
+    const landed = entries.length > 0
+      ? entries.some(e => e.family === kind && (!e.path || path.resolve(e.path) === path.resolve(slot.path)))
+      : props?.adapter?.in_force === true;
+    const inForce = !!want && landed && merged.some(m => sameKey(m, want));
     out[`lmAdapter${Slot}`] = slot.path;
     out[`lmAdapter${Slot}Scale`] = slot.scales.global;
     out[`lmAdapter${Slot}ScaleAttn`] = slot.scales.attn;

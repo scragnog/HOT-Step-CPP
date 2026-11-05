@@ -331,7 +331,9 @@ test('a pair explicitly chosen on a cover submission still renders, base-mode cl
 
 // GH #325: "in force" means the file and every dial, not just the file.
 test('slotDefaults: a slot is in force only when the engine merged its file at its dials', () => {
-  const props = (merged: string) => ({ synth_ready: true, adapter: { merged } }) as unknown as Yue2Props;
+  const narEntry = { path: fileA, family: 'nar' };
+  const props = (merged: string, entries = [narEntry]) =>
+    ({ synth_ready: true, adapter: { merged, entries, in_force: !!merged } }) as unknown as Yue2Props;
   const key = `${fileA}@0.8000,a1.0000,m0.5000,e1.0000,i1.0000,l1.0000`;
   assert.equal(slotDefaults(defaults, props(key)).lmAdapterNarInForce, true);
   assert.equal(slotDefaults(defaults, props(`other.safetensors@1.0000; ${key}`)).lmAdapterNarInForce, true);
@@ -343,6 +345,23 @@ test('slotDefaults: a slot is in force only when the engine merged its file at i
   // Nothing picked is never in force, whatever is resident.
   assert.equal(slotDefaults(defaults, props(key)).lmAdapterArInForce, false);
   // An engine older than the group dials spells only the master strength.
-  const preDials = { adapter: { merged: `${fileA}@0.8000` } } as unknown as Yue2Props;
-  assert.equal(slotDefaults(defaults, preDials).lmAdapterNarInForce, true);
+  // An engine older than the group dials spells only the master strength, and
+  // one older than `entries` falls back to the aggregate flag.
+  const preDials = (inForce: boolean) => ({ adapter: { merged: `${fileA}@0.8000`, in_force: inForce } }) as unknown as Yue2Props;
+  assert.equal(slotDefaults(defaults, preDials(true)).lmAdapterNarInForce, true);
+  assert.equal(slotDefaults(defaults, preDials(false)).lmAdapterNarInForce, false);
+});
+
+// `merged` spells the whole requested stack; `entries` says which halves landed.
+test('slotDefaults: a requested half that did not merge is not in force', () => {
+  const both: Yue2PersistedSelection = { ...defaults, adapters: {
+    ar: { path: fileB, scales: { global: 1, attn: 1, mlp: 1, early: 1, mid: 1, late: 1 } },
+    nar: defaults.adapters.nar,
+  } };
+  const merged = `${fileB}@1.0000,a1.0000,m1.0000,e1.0000,i1.0000,l1.0000; `
+    + `${fileA}@0.8000,a1.0000,m0.5000,e1.0000,i1.0000,l1.0000`;
+  const arOnly = { synth_ready: true, adapter: { merged, in_force: true, entries: [{ path: fileB, family: 'ar' }] } } as unknown as Yue2Props;
+  const out = slotDefaults(both, arOnly);
+  assert.equal(out.lmAdapterArInForce, true);
+  assert.equal(out.lmAdapterNarInForce, false);
 });

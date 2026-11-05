@@ -83,3 +83,37 @@ test('a YuE2 pick taken while a picker save is in flight carries the new values,
   assert.deepEqual(pendingSelection('yue2'), {});
   assert.equal(yue2PickAtEnqueue(null).lmAdapterArScale, 0.5);
 });
+
+test('a failed save does not drop an overlapping save that carries the same value', async () => {
+  const saved: Record<string, unknown> = { lmAdapterAr: 'C:/a/old.safetensors', lmAdapterArScale: 1 };
+  const gates = new Map<string, { release: (ok: boolean) => void; done: Promise<boolean> }>();
+  const gate = (scale: string) => {
+    let release!: (ok: boolean) => void;
+    const done = new Promise<boolean>(resolve => { release = resolve; });
+    gates.set(scale, { release, done });
+  };
+  gate('0.5'); gate('0.6');
+  globalThis.fetch = async (input, init) => {
+    const path = String(input);
+    if (init?.method === 'POST' && path.endsWith('/backends/models')) {
+      const scale = JSON.parse(String(init.body)).selection.lmAdapterArScale as string;
+      if (!(await gates.get(scale)!.done)) return new Response('{"error":"nope"}', { status: 400 });
+      Object.assign(saved, { lmAdapterAr: 'C:/a/new.safetensors', lmAdapterArScale: Number(scale) });
+      return json({ changed: true });
+    }
+    if (path.includes('/backends/models?backend=yue2')) return json({ buckets: {}, defaults: { ...saved } });
+    throw new Error(`Unexpected request ${path}`);
+  };
+  await useBackendStore.getState().fetchModels('yue2');
+  const store = useBackendStore.getState();
+  const first = store.selectModels({ lmAdapterAr: 'C:/a/new.safetensors', lmAdapterArScale: '0.5' }, 'yue2');
+  const second = store.selectModels({ lmAdapterAr: 'C:/a/new.safetensors', lmAdapterArScale: '0.6' }, 'yue2');
+  gates.get('0.5')!.release(false);
+  assert.equal(await first, false);
+  // The second save is still in flight and owns the same path.
+  assert.deepEqual(yue2PickAtEnqueue(null), { lmAdapterAr: 'C:/a/new.safetensors', lmAdapterArScale: '0.6' });
+  gates.get('0.6')!.release(true);
+  assert.equal(await second, true);
+  assert.deepEqual(pendingSelection('yue2'), {});
+  assert.deepEqual(yue2PickAtEnqueue(null), { lmAdapterAr: 'C:/a/new.safetensors', lmAdapterArScale: 0.6 });
+});

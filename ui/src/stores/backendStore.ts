@@ -257,12 +257,16 @@ interface BackendState {
   switchBackend: (id: string) => Promise<void>;
 }
 
-const _pending = new Map<string, Record<string, string>>();
+// One entry per selectModels call still in flight, in call order. Each call
+// removes only its own entry: two saves may carry the same value for a key, so
+// value equality cannot say whose it is.
+const _pending = new Map<string, Array<Record<string, string>>>();
 
-/** Selections posted by selectModels whose refetch has not landed yet, so a
- *  reader of `defaults` can lay them over the stale values. Empty otherwise. */
+/** Selections posted by selectModels whose refetch has not landed yet, later
+ *  calls winning, so a reader of `defaults` can lay them over the stale
+ *  values. Empty otherwise. */
 export function pendingSelection(backendId: string): Readonly<Record<string, string>> {
-  return _pending.get(backendId) ?? {};
+  return Object.assign({}, ...(_pending.get(backendId) ?? []));
 }
 
 export const useBackendStore = create<BackendState>((set, get) => ({
@@ -324,7 +328,8 @@ export const useBackendStore = create<BackendState>((set, get) => ({
     if (!backendId) return false;
     // Until the refetch lands, `defaults` still holds the previous pick; a job
     // queued in that window must see this selection (pendingSelection).
-    _pending.set(backendId, { ..._pending.get(backendId), ...selection });
+    const mine = { ...selection };
+    _pending.set(backendId, [...(_pending.get(backendId) ?? []), mine]);
     try {
       await queryClient.cancelQueries({ queryKey: backendModelsOptions(backendId).queryKey });
       // Re-read rather than trusting the request: the engine may fall back to
@@ -342,13 +347,9 @@ export const useBackendStore = create<BackendState>((set, get) => ({
       // inline note (or swallows deliberately).
       return false;
     } finally {
-      // Drop only the keys this call still owns: a later overlapping select
-      // of the same key keeps its own value pending.
-      const p = _pending.get(backendId);
-      if (p) {
-        for (const [k, v] of Object.entries(selection)) if (p[k] === v) delete p[k];
-        if (Object.keys(p).length === 0) _pending.delete(backendId);
-      }
+      const rest = (_pending.get(backendId) ?? []).filter(p => p !== mine);
+      if (rest.length) _pending.set(backendId, rest);
+      else _pending.delete(backendId);
     }
   },
 
