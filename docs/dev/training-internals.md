@@ -863,7 +863,7 @@ beside the base, or an ordinary rank-2r LoRA (F16, 1.4 GB) when none does or
 Training loss reads high under it by construction (the trailing mean sat at
 2.7–5 where LoRA reads 1.8–3), so stop on steps: the in-app recipes stop on
 steps (`stopMode: 'steps'`), and the checkpoint rated by ear that day was the
-step-500 one. Not resumable, like `--pissa`.
+step-500 one. Resumes the same way `--pissa` does (resume format v5).
 
 #### PiSSA residual: the frozen half shipped once (2026-09-09)
 
@@ -1044,8 +1044,10 @@ has been measured.
 
 MM3's binary resume format is now v4 and refuses a checkpoint whose
 parameterization or rsLoRA bit disagrees with the run being continued
-(`mm3-lm-resume.h`); `--pissa` cannot be resumed on either trainer (refused at
-the CLI). `hra`+`rslora` and `--prefix-n` combined with prior preservation
+(`mm3-lm-resume.h`). Format v5 lets `mm3-lm-train --pissa` resume: the frozen
+A0/B0 are rebuilt at init, and the state carries an FNV-1a hash of them (as F32,
+so `--pissa-frozen-f16` does not change it) that the load compares. A v4 PiSSA
+state has no hash and is trusted. `train-dit --pissa` still refuses `--resume`. `hra`+`rslora` and `--prefix-n` combined with prior preservation
 (`--reg-*`) are both refused with a 400 from the training routes rather than
 failing after the model loads.
 

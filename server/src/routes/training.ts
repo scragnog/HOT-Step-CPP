@@ -3036,21 +3036,9 @@ router.post('/datasets/:id/mm3-resume-lm', (req: Request, res: Response) => {
       return;
     }
 
-    // PiSSA is not resumable, and the failure mode is silent rather than loud:
-    // the exported/held A and B have the same names and shapes with and without
-    // it, so a leg that dropped --pissa would load them cleanly and then train
-    // against y = Wx + s*BAx where y = Wx + s*(BA - B0A0)x was fitted — the top-r
-    // singular energy counted twice from step 1. ace-train refuses --pissa
-    // --resume outright; refuse here so the user gets a sentence instead of a
-    // failed job.
-    if (opts.pissa) {
-      res.status(400).json({
-        error: 'This run was trained with PiSSA, which cannot be continued: the exported factors have '
-             + 'already absorbed the frozen SVD init they were measured against, and there is nothing '
-             + 'to re-derive it from. Start a fresh run instead.',
-      });
-      return;
-    }
+    // PiSSA runs resume like any other: --pissa stays on the resume leg (see
+    // buildMm3TrainLmArgs), the engine rebuilds the frozen A0/B0 from the base,
+    // and the state file's init hash refuses a rebuild that came out different.
 
     // How much further. `addSteps` is the natural way to ask ("another 250");
     // `steps` sets the new total outright. Either way the cap has to be ahead

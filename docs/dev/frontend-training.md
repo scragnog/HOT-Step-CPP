@@ -92,7 +92,7 @@ The ACE routes refuse out-of-range numbers. The MM3 and YuE2 routes mostly fall 
 
 There is no snapshot guard between resolve and start: the start route trusts its body. A client that wants the accepted values must send `execution` as returned and must not mix in fields from a later form.
 
-An MM3 run with saved optimizer state can train further. `GET /datasets/:id/mm3-runs` returns `{ runs, busy }`, and `POST /datasets/:id/mm3-resume-lm` with `{ runName, addSteps? }` (default 250 more) or `{ runName, steps }` (the new total) answers 200 `{ jobId, kind, runName, outDir, from, steps, optionsSource }`. The recipe comes from the run itself; the body may change only `saveEvery`, the stopping fields (`stopMode`, `targetLoss`, `targetLossMetric`, `targetLossEpochs`), `preview`, `attnBackend` and `prefixN`. An unknown run answers 404. A run without saved state, a PiSSA run, or a step cap that is not above the saved step answers 400.
+An MM3 run with saved optimizer state can train further. `GET /datasets/:id/mm3-runs` returns `{ runs, busy }`, and `POST /datasets/:id/mm3-resume-lm` with `{ runName, addSteps? }` (default 250 more) or `{ runName, steps }` (the new total) answers 200 `{ jobId, kind, runName, outDir, from, steps, optionsSource }`. The recipe comes from the run itself; the body may change only `saveEvery`, the stopping fields (`stopMode`, `targetLoss`, `targetLossMetric`, `targetLossEpochs`), `preview`, `attnBackend` and `prefixN`. An unknown run answers 404. A run without saved state or a step cap that is not above the saved step answers 400.
 
 ## Starting YuE2 joint training
 

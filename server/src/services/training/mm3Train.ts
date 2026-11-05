@@ -934,9 +934,9 @@ export const MM3_LM_DEFAULTS = {
   // are also real. Both are FD-gated on the MM3 trainer and both export as
   // ORDINARY PEFT LoRAs — PiSSA at rank 2r, HRA at rank r — so unlike HiRA and
   // LoHa they need nothing from the runtime or merge loaders and render as they
-  // trained. --pissa is refused together with --resume, which is why the arg
-  // builder below drops it when resumeFrom is set rather than letting the run
-  // exit 2. A trainable --prefix-n landed on that parser on 2026-09-05 and is
+  // trained. --pissa resumes (resume format v5 checks the rebuilt init), and
+  // the arg builder below keeps it on the resume leg. A trainable --prefix-n
+  // landed on that parser on 2026-09-05 and is
   // FD-gated (train/lm-prefix.h; still a different thing from --prefix-frames,
   // which is the FROZEN history prefix). It is checkpointed-path only, and the
   // engine refuses it together with --prefix-frames, --attn flash, or
@@ -1312,7 +1312,7 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
     // booleans never resolves to a different method on a different trainer:
     // dora, then rslora (independent of dora — a rank-scaling modifier, not a
     // competing method), then hira (excludes dora), loha (excludes dora/hira),
-    // pissa (excludes dora/hira/loha, and not resumable), hra (excludes
+    // pissa (excludes dora/hira/loha), hra (excludes
     // dora/hira/loha/pissa/rslora).
     if (o.dora) args.push('--dora');
     if (o.rslora) args.push('--rslora');
@@ -1322,9 +1322,8 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
     // delta IS (y = Wx + s*(BA - B0A0)x), and the A/B tensor set is identical
     // with and without it — so dropping the flag to make `--pissa --resume`
     // legal produced a run that looked like a resume and trained against a
-    // different function from step 1. The engine refuses the pair outright
-    // (ace-train.cpp) and the resume route refuses it before spawning; leaving
-    // it on here means the illegal state fails loudly instead of quietly.
+    // different function from step 1. With the flag kept, the engine rebuilds
+    // the frozen pair and checks it against the init hash in the resume state.
     if (o.pissa && !o.dora && !o.hira && !o.loha) {
       args.push(o.hotPizza ? '--hot-pizza' : '--pissa');
       if (o.pissaCache) args.push('--pissa-cache-dir', path.join(config.aceServer.adapters, 'mm3-lm-adapters', '_pissa-init-cache'));

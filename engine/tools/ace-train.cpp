@@ -224,7 +224,8 @@ static void print_usage(void) {
             "                written back into the base, because there is nowhere to put\n"
             "                an F32 residual on a quantized base. Exports a plain rank-2r\n"
             "                LoRA: s(BA - B0A0) = s[B,-B0][A;A0], so no loader learns\n"
-            "                anything. Plain LoRA only, and NOT resumable.\n"
+            "                anything. Plain LoRA only. Resumable: the init is rebuilt\n"
+            "                and checked against the hash in the resume state.\n"
             "                [--pissa-oversample n] default 8, [--pissa-iters n] default 2.\n"
             "                [--hra] Householder Reflection Adaptation: --rank (even)\n"
             "                reflections on each site's INPUT, y = W(Rx). Its own\n"
@@ -2459,14 +2460,9 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
                         "parameterization only\n");
         return 2;
     }
-    // The SVD basis and its frozen negative copy are derived from the base at
-    // step 0. Resuming would rebuild them against a base the trained factors
-    // were never fitted against, and the state file does not carry A0/B0.
-    if (a.pissa && !a.resume_path.empty()) {
-        fprintf(stderr, "ace-train mm3-lm-train: --pissa cannot --resume: the resume state carries the trainable "
-                        "factors but not the frozen PiSSA init they are measured against\n");
-        return 2;
-    }
+    // --pissa --resume is allowed: the frozen A0/B0 are rebuilt from the base
+    // at init (deterministic SVD, or its cache / residual file), and the
+    // resume state's v5 init hash refuses a rebuild that came out different.
     if (a.loha && (a.adapter_type != "lora" || a.dora || a.hira)) {
         fprintf(stderr, "ace-train mm3-lm-train: --loha applies to the LoRA parameterization only and cannot "
                         "combine with --dora or --hira\n");

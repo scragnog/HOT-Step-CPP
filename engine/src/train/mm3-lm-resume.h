@@ -58,7 +58,7 @@
 #include "train/lm-optim.h"
 
 static const char     MM3_RESUME_MAGIC[8] = { 'M', 'M', '3', 'R', 'E', 'S', 'U', 'M' };
-static const uint32_t MM3_RESUME_VERSION  = 4;   // v4 adds the parameterization identity
+static const uint32_t MM3_RESUME_VERSION  = 5;   // v4 adds the parameterization identity, v5 the PiSSA init hash
 static const uint32_t MM3_RESUME_VERSION_MIN = 1;   // v1 still readable
 
 /** Where a Prodigy run keeps x0 — the weights as they were at init, which the
@@ -89,6 +89,14 @@ struct MM3LmResumeState {
      *  with a note rather than refusing every state written before v4. */
     std::string param_method = "lora";
     int32_t     rslora       = 0;
+
+    /** PiSSA/HOT-PiZZA only (v5): hash of the frozen A0/B0 the trainable
+     *  factors are measured against. Those are not in the file: they are
+     *  base-dependent and rebuilt at init, like DoRA's norms, so a resume is
+     *  only exact if the rebuild lands on the same values. It does by
+     *  construction (fixed-seed SVD, or the cache / residual file that stores
+     *  its output), and this is the check that it did. 0 = not PiSSA. */
+    uint64_t    pissa_init_hash = 0;
 
     // Position in the run.
     int32_t  steps_done = 0;      // completed optimizer steps
@@ -124,6 +132,38 @@ struct MM3LmResumeState {
     double   prodigy_d = 0.0;
     double   prodigy_r = 0.0;
 };
+
+/** FNV-1a over every frozen A0/B0, as F32 values in site order. F32 so the
+ *  hash does not depend on --pissa-frozen-f16: the init rounds through F16
+ *  either way, so both storages hold the same numbers. */
+static uint64_t mm3_lm_pissa_init_hash(const LmLora & lora) {
+    uint64_t             h = 1469598103934665603ull;
+    std::vector<uint8_t> raw;
+    std::vector<float>   f32;
+    auto mix = [&](ggml_tensor * t) {
+        const int64_t n = ggml_nelements(t);
+        raw.resize(ggml_nbytes(t));
+        ggml_backend_tensor_get(t, raw.data(), 0, raw.size());
+        f32.resize((size_t) n);
+        if (t->type == GGML_TYPE_F16) {
+            ggml_fp16_to_fp32_row((const ggml_fp16_t *) raw.data(), f32.data(), n);
+        } else {
+            memcpy(f32.data(), raw.data(), (size_t) n * sizeof(float));
+        }
+        const uint8_t * b = (const uint8_t *) f32.data();
+        for (size_t i = 0; i < (size_t) n * sizeof(float); i++) h = (h ^ b[i]) * 1099511628211ull;
+    };
+    for (int l = lora.layer_lo; l < lora.layer_hi; l++) {
+        for (int s = 0; s < QW_LORA_NSLOTS; s++) {
+            const QwLoraPair & pr = lora.layers[l].p[s];
+            if (pr.A0 && pr.B0) {
+                mix(pr.A0);
+                mix(pr.B0);
+            }
+        }
+    }
+    return h;
+}
 
 // ── tiny binary IO ──────────────────────────────────────────────────────────
 
@@ -277,6 +317,7 @@ static bool mm3_lm_resume_save(const std::string & path, const MM3LmResumeState 
     }
     // v4: adapter identity that the tensor set cannot express.
     ok = ok && mm3_rs_w_str(f, st.param_method) && mm3_rs_w(f, st.rslora);
+    ok = ok && mm3_rs_w(f, st.pissa_init_hash);   // v5
 
     // Tensors: LoRA parameters, then momentum, each block prefixed by its count
     // so a reader knows what to expect without trusting the fingerprint alone.
@@ -408,6 +449,18 @@ static bool mm3_lm_resume_load(const std::string & path, MM3LmResumeState * st,
                 "run's --%s\n",
                 ver, st->param_method.c_str());
     }
+    // v5. A PiSSA state from v4 (written by a preview pause that could not be
+    // resumed before v5) has no hash; it inherits this run's, trusting the init
+    // to be as deterministic as the SVD cache already assumes it is.
+    if (ver >= 5) {
+        if (!mm3_rs_r(f, &in.pissa_init_hash)) return fail("truncated PiSSA init hash");
+    } else {
+        in.pissa_init_hash = st->pissa_init_hash;
+        if (st->pissa_init_hash != 0) {
+            fprintf(stderr, "[mm3-lm-train] resume: state file is v%u and records no PiSSA init hash; trusting "
+                            "the deterministic init\n", ver);
+        }
+    }
 
     // Fingerprint. Every one of these changes what the stored tensors MEAN.
     if (in.rank != st->rank || in.alpha != st->alpha || in.n_params != st->n_params
@@ -427,6 +480,11 @@ static bool mm3_lm_resume_load(const std::string & path, MM3LmResumeState * st,
                     + (in.rslora ? " (rslora)" : "") + " run, this run is " + st->param_method
                     + (st->rslora ? " (rslora)" : "")
                     + " — the factors mean different things under the two, so this is a new run, not a resume");
+    }
+    if (in.pissa_init_hash != st->pissa_init_hash) {
+        return fail("the frozen PiSSA init rebuilt for this run differs from the one the saved factors were "
+                    "trained against (base model, rank, oversample or iters changed), so this is a new run, "
+                    "not a resume");
     }
     st->prodigy_d = in.prodigy_d;
     st->prodigy_r = in.prodigy_r;
@@ -495,11 +553,13 @@ static bool mm3_lm_resume_load(const std::string & path, MM3LmResumeState * st,
     const int32_t keep_muon = st->optimizer_muon;
     const std::string keep_method = st->param_method;
     const int32_t     keep_rslora = st->rslora;
+    const uint64_t    keep_hash   = st->pissa_init_hash;
     *st = in;
     st->rank = keep_rank; st->alpha = keep_alpha; st->seed = keep_seed;
     st->n_params = keep_np; st->n_samples = keep_ns; st->n_holdout = keep_nh;
     st->optimizer_muon = keep_muon;
     st->param_method = keep_method; st->rslora = keep_rslora;
+    st->pissa_init_hash = keep_hash;
     return true;
 }
 

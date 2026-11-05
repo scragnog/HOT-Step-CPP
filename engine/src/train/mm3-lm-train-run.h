@@ -3409,6 +3409,9 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                             : a.dora  ? "dora"
                                       : "lora";
     rstate.rslora         = a.rslora ? 1 : 0;
+    // The frozen A0/B0 are rebuilt by this launch's init, not loaded from the
+    // state file, so the load compares this hash against the saved one.
+    if (a.pissa) rstate.pissa_init_hash = mm3_lm_pissa_init_hash(lora);
 
     // ── Prodigy x0 ─────────────────────────────────────────────────────────
     //

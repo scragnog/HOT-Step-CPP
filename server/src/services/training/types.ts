@@ -1055,7 +1055,7 @@ export interface TrainDitOptions {
   hira?: boolean;
   /** LoHa (LyCORIS): two LoRA pairs, Hadamard-combined. LoRA type only; not with dora/hira. */
   loha?: boolean;
-  /** PiSSA init: A/B start on the weight's principal directions; exported as a rank-2r LoRA. Plain LoRA only; not resumable. */
+  /** PiSSA init: A/B start on the weight's principal directions; exported as a rank-2r LoRA. Plain LoRA only. */
   pissa?: boolean;
   /** HRA: orthogonal fine-tuning by `rank` Householder reflections (even); exported as an exact rank-r LoRA. Plain LoRA slot only. */
   hra?: boolean;
