@@ -12,7 +12,10 @@ Their capability manifests also declare which Create and Lyric Studio caption so
 picker applies (`none`, MM3 tracks, or YuE2 dataset).
 ACE-Step 1.5 is the default and the only backend that supports every studio.
 YuE2 also supports Cover Studio, through a reviewed lead sheet rather than audio
-conditioning. MiniMax-Music3 and Stable Audio 3 are text-to-music only.
+conditioning. Stable Audio 3 also offers an instrumental source-audio refine
+in Cover Studio. HeartMuLa's MuLaCover mode uses the approved Prepare ABC lead
+sheet, four style tag fields and lyrics; its engine route and separate CC BY-NC
+model pack are pending. MiniMax-Music3 is text-to-music only.
 
 For which quant and settings give the best output on each backend, see
 [Getting higher quality output](quality.md), which has a per-backend cheat sheet. This
@@ -36,7 +39,7 @@ the server, and is hidden when there is only one.
   LM / Thinking clusters show that backend's own controls, and controls that do nothing
   on it are hidden.
 - The sidebar lists only the studios the active backend can use. Cover Studio is listed
-  under ACE-Step and YuE2; Repaint, Stem Builder and Song Builder under ACE-Step
+  under ACE-Step, YuE2, Stable Audio 3 and HeartMuLa; Repaint, Stem Builder and Song Builder under ACE-Step
   only; STORM under ACE-Step and YuE2. The rest, Training included, are always listed.
   If the open studio is not listed for the backend you switch to, the app moves to
   Custom-Gen.
@@ -61,7 +64,7 @@ A small text encoder model conditions the DiT on the caption.
 
 What sets it apart from the others:
 
-- It is the only backend with source-audio-conditioned covers, repaint
+- It supports source-audio-conditioned covers, repaint
   (Repaint) and stem generation (Stem Builder). It also supports continuous streaming in STORM.
 - BPM, key, time signature and duration are real input fields. Duration is a target the
   planner aims for, from 10 to 600 seconds.
@@ -404,10 +407,10 @@ controls the UI shows for it. "?" means not yet confirmed.
 | Caption format | Free text, plus BPM, key and time signature fields | Structured Caption | Free text; BPM and key folded into the style | Free text, up to 256 tokens |
 | Duration | Set by you, 10 to 600 s | Model-ended, ceiling 300 s | Model-ended, up to 360 s, no control | Set by you, up to 600 s; Auto gives 30 s |
 | Songs per request | Up to 9 | 1, or up to 4 with Variations Per Render | Up to 4 with Batch Size | 1 |
-| Cover Studio | Yes, source-audio conditioning | No | Yes, reviewed ABC composition conditioning | No |
+| Cover Studio | Yes, source-audio conditioning | No | Yes, reviewed ABC composition conditioning | Yes, source-audio refine |
 | Repaint | Yes (Repaint) | No | No | No |
 | Extend | Yes, in Song Builder | No | No | No |
-| Adapters at generation | DiT LoRA and LoKr, planner LM LoRA and LoKr | Planner LM LoRA and LoKr, runtime or merge, applied per render | AR and NAR LoRA and LoKr, merged at load; ComfyUI joint files via import | DoRA-rows, in Training Studio auditions only |
+| Adapters at generation | DiT LoRA and LoKr, planner LM LoRA and LoKr | Planner LM LoRA and LoKr, runtime or merge, applied per render | AR and NAR LoRA and LoKr, merged at load; ComfyUI joint files via import | DoRA-rows in Cover Studio, plus Training Studio auditions |
 | Training in Training Studio | Yes | Yes | Yes | Yes |
 | Streaming playback | Continuous streaming in STORM; no per-render preview | Play While Rendering | Continuous streaming in STORM | STORM slots, with no sidebar entry |
 | STORM Directed Drift | Caption, seed, guidance, LSS, steps, BPM and duration | No | Caption, seed, CFG scale, ODE steps and NAR cache ratio | Caption, seed, guidance, steps and duration |
@@ -477,7 +480,8 @@ component and adapter choices when the picker changes or another backend is sele
 | Post-processing | Shared chain, including VST, mastering and StableStep |
 | Shared Lua sampler plugins | Solvers, schedulers and guidance on the codec decode, opt-in |
 | PP-VAE, Spectral Lifter | No |
-| Covers, repaint, streaming, training, lyric alignment | No |
+| Cover Studio | Yes, lead-sheet conditioning from approved Prepare ABC; engine route pending |
+| Repaint, streaming, training, lyric alignment | No |
 | Output | 48 kHz stereo |
 
 The server maps `heartmulaTags` or the shared caption to `tags`. Optional request

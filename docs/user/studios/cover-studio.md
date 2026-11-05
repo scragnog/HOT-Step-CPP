@@ -4,18 +4,48 @@ Make a new version of a recording. ACE-Step conditions its audio renderer on the
 source; YuE2 transcribes the source into a lead sheet and composes from the
 reviewed score. Stable Audio 3 transforms the source audio using a caption,
 Transform strength, seed and optional DoRA adapter. Its output is instrumental
-and follows the source's feel, with no melody guarantee.
+and follows the source's feel, with no melody guarantee. HeartMuLa's MuLaCover
+mode uses the approved Prepare lead sheet, four style tag fields and lyrics;
+rendering awaits engine support and its separate non-commercial model pack.
 
 ![Cover Studio](../../images/hot-step-cover-studio.webp)
 
 ## Where to find it
 
-Sidebar: **Cover Studio**, listed while ACE-Step 1.5, YuE2 or Stable Audio 3 is the
+Sidebar: **Cover Studio**, listed while ACE-Step 1.5, YuE2, Stable Audio 3 or HeartMuLa is the
 active backend. Each offers a different workflow. On backends without covers,
 switching away while Cover Studio is open moves the app to Custom-Gen. You need to be signed in to upload
 a source track. The [engine picker](../backends.md#switching-backends) appears once a second
 backend is registered, so on a single-backend install this is not a decision you
 have to make.
+
+## HeartMuLa lead-sheet cover
+
+Select HeartMuLa and open Cover Studio. Upload a source recording, then use
+Prepare to review the lead sheet, confirm its structure and assign lyrics.
+Approve the confirmed score before submitting. Prepare readiness is shared
+with YuE2 and reports missing transcription models; a supplied ABC score
+can be reviewed without installing a transcriber.
+
+Enter **Topic**, **Genre**, **Instrument** and **Mood** separately. Each field
+allows up to 512 characters; brackets, semicolons and line breaks are invalid.
+Blank fields are allowed. These tags condition the style; captions and YuE2
+adapters do not condition this mode. **Seed** is -1 for random, or a fixed whole
+number. Tags and seed are saved with the cover draft separately from SA3 settings.
+
+Use Intro, Verse, Chorus, Bridge and Outro lyric section markers. Unmarked
+lyrics start as Verse. An instrumental cover uses Intro. Generation keeps
+the 240-second ceiling. The approved ABC supplies melody, chords and tempo.
+HeartMuLa uses the same confirmed score/lyrics checks as YuE2, with no YuE2
+Build controls. Score-only imports can be prepared and saved, but submission
+currently needs the workflow draft created by uploading source audio.
+
+The MuLaCover card in Model Manager and Cover Studio shows **CC BY-NC 4.0**:
+weights and outputs are for non-commercial use. MuLaCover is a separate model
+pack, not included in the normal HeartMuLa generation models. No download is
+offered yet. You can prepare and save drafts, but submitted renders currently
+report "HeartMuLa covers are not available yet" until engine support lands.
+Submission errors remain visible beside Generate cover and in the queue.
 
 ## Stable Audio 3 audio transform
 
@@ -706,6 +736,7 @@ its value has moved from the default; click it to snap that one field back.
 ## Tips and limits
 
 - Cover generation needs ACE-Step 1.5, YuE2 or Stable Audio 3 active.
+  HeartMuLa offers Prepare while MuLaCover rendering awaits engine support.
   MiniMax-Music3 does not list the studio.
 - For ACE-Step and YuE2, splitting into stems is step one of two. The split by itself does not change the
   render; the mixer is where muting or lowering a stem actually removes it from

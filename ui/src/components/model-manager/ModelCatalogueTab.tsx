@@ -1,3 +1,4 @@
+import { MulacoverPackNotice } from '../cover-studio/HeartmulaCoverPanel';
 // ModelCatalogueTab.tsx — Tabbed model catalogue browser
 //
 // Two-level tabs: a top-level family bar (ACE-Step 1.5 / MiniMax-Music3 /
@@ -834,8 +835,8 @@ export const ModelCatalogueTab: React.FC<Props> = ({ files, downloadJobs, onDown
         {activeSection === 'embedding' && renderSimpleGroup(embeddingFiles, ROLE_INFO.embedding)}
         {activeSection === 'vae' && renderSimpleGroup(vaeFiles, ROLE_INFO.vae)}
         {activeSection === 'pp-vae' && renderSimpleGroup(ppVaeFiles, ROLE_INFO['pp-vae'])}
-        {activeSection === 'heartmula' && renderSimpleGroup(files.filter(f => f.role === 'heartmula'),
-          t('models.heartmula.info', 'Choose matching global and local models from one variant, plus codec flow, waveform decoder, RVQ and tokenizer. Encoder files are optional. Global and local precision can differ, but their model variant must match.'))}
+        {activeSection === 'heartmula' && <div className="space-y-3"><MulacoverPackNotice />{renderSimpleGroup(files.filter(f => f.role === 'heartmula'),
+          t('models.heartmula.info', 'Choose matching global and local models from one variant, plus codec flow, waveform decoder, RVQ and tokenizer. Encoder files are optional. Global and local precision can differ, but their model variant must match.'))}</div>}
         {activeSection === 'stablestep' && (
           <StableStepTab
             files={stablestepFiles}
