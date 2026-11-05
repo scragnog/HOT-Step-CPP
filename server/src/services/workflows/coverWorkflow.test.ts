@@ -27,7 +27,8 @@ const input: CoverRenderInput = {
   },
 };
 
-function setup(opts: { transcribe?: (signal: AbortSignal) => Promise<{ abc: string }>;
+function setup(opts: { leadSheetDefault?: () => import('../../contracts/studioWorkflows.js').CoverLeadSheetSource;
+  transcribe?: (signal: AbortSignal, source?: string) => Promise<{ abc: string }>;
   audioStatus?: 'pending' | 'succeeded'; capability?: (backend: string) => Promise<boolean>;
   datasetAnalysis?: () => { bpm: number; key: string; scale: string } | null;
   analyze?: () => Promise<{ bpm: number | null; key: string; scale: string } | null> } = {}) {
@@ -49,7 +50,7 @@ function setup(opts: { transcribe?: (signal: AbortSignal) => Promise<{ abc: stri
     cancel: id => { const item = items.get(id)!; item.status = 'cancelled'; return item; },
   };
   const jobs = new WorkflowJobs({ db, audio, audioPollMs: 1 });
-  for (const kind of createCoverKinds({ documents,
+  for (const kind of createCoverKinds({ documents, leadSheetDefault: opts.leadSheetDefault || (() => 'sheetsage2'),
     asset: (id, user) => {
       if (user !== 'owner' || id !== '22222222-2222-4222-8222-222222222222') throw new Error('asset owner mismatch');
       return { url: '/references/source.wav', path: '/fake/source.wav', filename: 'source.wav', sha256: 'sha' };
@@ -57,7 +58,7 @@ function setup(opts: { transcribe?: (signal: AbortSignal) => Promise<{ abc: stri
     metadata: async () => ({ artist: '', title: '', album: '', duration: null }),
     datasetAnalysis: opts.datasetAnalysis || (() => null),
     analyze: opts.analyze || (async () => ({ bpm: 100, key: 'C', scale: 'minor' })),
-    transcribe: async (_url, _label, _user, signal) => opts.transcribe?.(signal) || { abc: 'X:1\nK:C\nC|' },
+    transcribe: async (_url, _label, _user, signal, _force, source) => opts.transcribe?.(signal, source) || { abc: 'X:1\nQ:1/4=120\nK:C\nC|' },
     capability: opts.capability || (async backend => backend === 'ace' || backend === 'yue2'),
     caption: async () => ({ text: 'Resolved style' }),
   })) jobs.register(kind);
@@ -270,6 +271,79 @@ test('headless asset open, idempotency, stale transcript and replay', async () =
   assert.equal(s.jobs.get(stale.id).status, 'failed');
   const replay = s.jobs.replay(job.id, 'owner', 0);
   assert.ok(replay.events.some(e => (e.data as any)?.status === 'succeeded'));
+});
+
+test('Models default is snapshotted for new drafts and explicit choices win', async () => {
+  let selected: 'sheetsage2' | 'sheetsage2-refined' = 'sheetsage2-refined';
+  let used: string | undefined;
+  const s = setup({ leadSheetDefault: () => selected,
+    transcribe: async (_signal, source) => { used = source; return { abc: 'X:1\nQ:1/4=120\nK:C\nC|' }; } });
+  const first = await s.open();
+  assert.equal(s.documents.get(first.documentId, 'owner').data.leadSheetSource, selected);
+  selected = 'sheetsage2';
+  const transcription = s.submit('cover-transcribe', 'default', first).job;
+  await s.jobs.settled();
+  assert.equal(s.jobs.get(transcription.id).status, 'succeeded');
+  assert.equal(used, 'sheetsage2-refined');
+  const explicit = s.submit('cover-open', 'explicit', { assetId: '22222222-2222-4222-8222-222222222222', leadSheetSource: 'muscriptor' }).job;
+  await s.jobs.settled();
+  assert.equal((s.jobs.get(explicit.id).result as any).leadSheetSource, 'muscriptor');
+  const second = s.submit('cover-open', 'second', { assetId: '22222222-2222-4222-8222-222222222222' }).job;
+  await s.jobs.settled();
+  assert.equal((s.jobs.get(second.id).result as any).leadSheetSource, 'sheetsage2');
+});
+
+test('changing source clears approval and rejects an in-flight transcription', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const s = setup({ transcribe: async () => { await gate; return { abc: 'X:1\nQ:1/4=120\nK:C\nC|' }; } });
+  const opened = await s.open();
+  s.documents.update(opened.documentId, 'owner', 1, { ...s.documents.get(opened.documentId, 'owner').data,
+    abc: 'old', approvedAbc: 'old', scoreSource: 'musicxml' });
+  const ref = { ...opened, revision: 2 };
+  const pending = s.submit('cover-transcribe', 'pending', ref).job;
+  await new Promise(resolve => setImmediate(resolve));
+  const changed = s.submit('cover-source', 'change', { ...ref, leadSheetSource: 'muscriptor' }).job;
+  // cover-source has its own lane, so it can invalidate a running Prepare.
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(s.jobs.get(changed.id).status, 'succeeded');
+  const data = s.documents.get(opened.documentId, 'owner').data;
+  assert.equal(data.approvedAbc, '');
+  assert.equal(data.abc, '');
+  assert.equal(data.scoreSource, undefined);
+  release();
+  await s.jobs.settled();
+  assert.equal(s.jobs.get(pending.id).status, 'failed');
+  assert.equal(s.documents.get(opened.documentId, 'owner').data.leadSheetSource, 'muscriptor');
+});
+
+test('audio content change through cover-source clears approval even with the same source', async () => {
+  const s = setup();
+  const opened = await s.open();
+  s.documents.update(opened.documentId, 'owner', 1, { ...s.documents.get(opened.documentId, 'owner').data,
+    sha256: 'old-bytes', approvedAbc: 'old', abc: 'old' });
+  const change = s.submit('cover-source', 'audio', { ...opened, revision: 2, leadSheetSource: 'sheetsage2' }).job;
+  await s.jobs.settled();
+  assert.equal(s.jobs.get(change.id).status, 'succeeded');
+  const data = s.documents.get(opened.documentId, 'owner').data;
+  assert.equal(data.sha256, 'sha');
+  assert.equal(data.approvedAbc, '');
+  assert.equal(data.analysis, null);
+});
+
+test('score sources accept stored import values and native; approved imports need no transcriber', async () => {
+  for (const scoreSource of ['dataset', 'musicxml', 'sheetsage2', 'muscriptor', 'yourmt3-chordnet']) {
+    assert.equal(coverRenderSchema.parse({ ...input, scoreSource }).scoreSource, scoreSource);
+  }
+  let calls = 0;
+  const s = setup({ transcribe: async () => { calls++; throw new Error('not installed'); } });
+  const doc = s.documents.create('owner', 'cover-draft', { assetId: '22222222-2222-4222-8222-222222222222',
+    sha256: 'sha', approvedAbc: 'X:1\nK:C\nC|', scoreSource: 'musicxml' });
+  const job = s.submit('cover-render', 'imported', { ...input, documentId: doc.id, revision: 1, expectedBackend: 'yue2' }).job;
+  await s.jobs.settled();
+  assert.equal(s.jobs.get(job.id).status, 'succeeded');
+  assert.equal(calls, 0);
+  assert.equal(s.documents.get(doc.id, 'owner').data.leadSheetSource, undefined, 'existing imports stay unchanged');
 });
 
 test('caption resolution advances the draft and rejects an old render snapshot', async () => {

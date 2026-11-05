@@ -18,12 +18,13 @@ import type { WorkflowDocuments } from './revisions.js';
 import {
   coverDraftRefSchema as ref, coverOpenSchema as open, coverTranscribeSchema as transcribe,
   coverCaptionSchema as captionInput, coverRenderSchema as render,
+  coverSourceSchema, type CoverLeadSheetSource, type CoverLeadSheetResult,
   type CoverRenderInput, type CoverDraft,
 } from '../../contracts/studioWorkflows.js';
 import { instrumentalConflict, preparedPair } from '../../contracts/yue2Prepare.js';
-import { abcLeadSheetRoll } from '../leadSheetRoll.js';
+import { abcCoverLeadSheet, coverRenderRolls, clearCoverScore } from '../coverLeadSheet.js';
+import { sheetTranscriberSetting } from '../training/yue2Sheet.js';
 import { heartmulaCoverLyrics, heartmulaCoverTags } from '../backends/heartmula/cover.js';
-import type { HeartmulaCoverRolls } from '../../contracts/studioWorkflows.js';
 
 export type { CoverRenderInput, CoverDraft };
 
@@ -54,6 +55,8 @@ function coverTitle(i: CoverRenderInput) {
 export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: string): Record<string, unknown> {
   const c = i.controls, e = i.engineParams, s = i.settings;
   const analysis = i.analysis ?? d.analysis;
+  const scoreSource = d.scoreSource || i.scoreSource;
+  const scoreMetadata = scoreSource ? { scoreSource: scoreSource === 'dataset' ? 'dataset-sidecar' : scoreSource } : {};
   if (i.expectedBackend === 'ace') {
     const bpm = c.bpmOverride ?? ((analysis?.bpm || 120) * c.bpmCorrection);
     const key = c.keyOverride || analysis?.key || 'C major';
@@ -110,14 +113,12 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
   if (i.expectedBackend === 'heartmula') {
     if (!d.approvedAbc) throw new WorkflowError(409, 'Review and approve the score first');
     try {
-      const r = abcLeadSheetRoll(d.approvedAbc);
-      const rolls: HeartmulaCoverRolls = { version: 1, dtype: 'float32', bpm: r.bpm, length: r.length,
-        pianoroll: Array.from(r.pianoroll), chord: Array.from(r.chord),
-        drum_pianoroll: Array.from(r.drum_pianoroll), context_mask: Array.from(r.context_mask) };
+      const { rolls, path } = coverRenderRolls(d);
       const tags = heartmulaCoverTags(i.heartmulaTags);
       return { ...shared, ...Object.fromEntries(Object.entries(e).filter(([key]) => key.startsWith('heartmula'))),
         backend: 'heartmula', expectedBackend: 'heartmula', taskType: 'cover', customMode: true,
-        heartmulaCover: rolls, heartmulaTags: tags, caption: tags, style: tags,
+        heartmulaCover: rolls, leadSheetRenderingPath: path,
+        ...scoreMetadata, heartmulaTags: tags, caption: tags, style: tags,
         lyrics: heartmulaCoverLyrics(i.instrumental ? '' : i.lyrics), instrumental: i.instrumental,
         duration: -1, batchSize: 1, title: coverTitle(i), sourceAudioUrl: url, source: 'cover-studio',
         artistName: i.targetArtistName || i.artistName, sourceArtist: i.artistName,
@@ -141,7 +142,8 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
     yue2CfgScale: c.cfgScale, yue2LyricSchedule: c.lyricSchedule, customMode: true, taskType: 'text2music',
     title: coverTitle(i), caption, style: caption, lyrics: i.instrumental ? '' : i.lyrics,
     ...(i.lyricsSource ? { lyricsSource: i.lyricsSource } : {}),
-    ...(i.scoreSource === 'dataset' || d.scoreSource === 'dataset' ? { scoreSource: 'dataset-sidecar' } : {}),
+    ...scoreMetadata,
+    leadSheetRenderingPath: d.leadSheet && d.leadSheet.abc !== d.approvedAbc ? 'abc-edited' : 'abc',
     instrumental: i.instrumental, source: 'cover-studio', sourceAudioUrl: url,
     // The covering band names the saved file and tags it, as on the ACE path.
     artistName: i.targetArtistName || i.artistName, sourceArtist: i.artistName,
@@ -161,10 +163,12 @@ export interface CoverDeps {
   analyze?: (path: string, signal: AbortSignal) => Promise<{ bpm: number | null; key: string; scale: string } | null>;
   datasetAnalysis?: (path: string) => { bpm: number; key: string; scale: string } | null;
   metadata?: (path: string) => Promise<{ artist: string; title: string; album: string; duration: number | null }>;
-  transcribe?: (url: string, label: string, user: string, signal: AbortSignal, force: boolean) => Promise<{ abc: string; scoreSource?: string }>;
+  transcribe?: (url: string, label: string, user: string, signal: AbortSignal, force: boolean, source?: CoverLeadSheetSource) => Promise<{ abc: string; scoreSource?: string; leadSheet?: CoverLeadSheetResult }>;
+  leadSheetDefault?: () => CoverLeadSheetSource;
   capability?: (backend: string) => Promise<boolean>;
   caption?: (artistId: number, provider: string, model: string, force: boolean, signal: AbortSignal) => Promise<{ text: string; generatedProfileId?: number }>;
 }
+const defaultLeadSheetSource = (): CoverLeadSheetSource => sheetTranscriberSetting().refined ? 'sheetsage2-refined' : 'sheetsage2';
 const defaultAsset = (id: string, user: string) => resolveAudioAsset(getDb(), id, user, config.data.dir);
 async function defaultMetadata(path: string) {
   try {
@@ -172,13 +176,18 @@ async function defaultMetadata(path: string) {
     return { artist: m.common.artist || '', title: m.common.title || '', album: m.common.album || '', duration: m.format.duration ?? null };
   } catch { return { artist: '', title: '', album: '', duration: null }; }
 }
-async function defaultTranscribe(url: string, label: string, user: string, signal: AbortSignal, force: boolean) {
-  const started = await yue2CoverService.start({ sourceAudioUrl: url, sourceLabel: label.slice(0, 120), force }, user);
+async function defaultTranscribe(url: string, label: string, user: string, signal: AbortSignal, force: boolean, source: CoverLeadSheetSource = 'sheetsage2'): Promise<{ abc: string; scoreSource?: string; leadSheet?: CoverLeadSheetResult }> {
+  if (source === 'yourmt3-chordnet') throw new WorkflowError(400, yue2CoverService.readiness(source).message!);
+  if (source === 'muscriptor') {
+    const { transcribeCoverMidi } = await import('../../routes/midiStudio.js');
+    return transcribeCoverMidi(url, signal);
+  }
+  const started = await yue2CoverService.start({ sourceAudioUrl: url, sourceLabel: label.slice(0, 120), force, transcriber: source }, user);
   if (signal.aborted) {
     if (started.jobId) yue2CoverService.cancel(started.jobId, user);
     throw new Error('Cancelled');
   }
-  if (started.abc) return { abc: started.abc, scoreSource: started.scoreSource };
+  if (started.abc) return { abc: started.abc, scoreSource: started.scoreSource || 'sheetsage2' };
   const id = started.jobId;
   if (!id) throw new Error('Transcription returned no score or job');
   const cancel = () => { try { yue2CoverService.cancel(id, user); } catch { /* already final */ } };
@@ -187,7 +196,7 @@ async function defaultTranscribe(url: string, label: string, user: string, signa
     for (;;) {
       if (signal.aborted) throw new Error('Cancelled');
       const result = yue2CoverService.find(id, user);
-      if (result.abc) return { abc: result.abc };
+      if (result.abc) return { abc: result.abc, scoreSource: 'sheetsage2' };
       if (result.job?.status === 'done') throw new Error('Transcription finished without a score');
       if (result.job?.status === 'failed' || result.job?.status === 'cancelled') throw new Error(result.job.error || `Transcription ${result.job.status}`);
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -272,9 +281,21 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
       : null);
     const document = docs().create(ctx.userId, 'cover-draft', {
       assetId, sha256: source.sha256, sourceLabel: source.filename, metadata, analysis,
-      abc: '', approvedAbc: '',
+      abc: '', approvedAbc: '', leadSheetSource: input.leadSheetSource || (dep('leadSheetDefault') || defaultLeadSheetSource)(),
     });
-    return { documentId: document.id, revision: document.revision, metadata, analysis };
+    return { documentId: document.id, revision: document.revision, metadata, analysis, leadSheetSource: document.data.leadSheetSource };
+  } }, { kind: 'cover-source', input: coverSourceSchema, async run(ctx) {
+    const input = ctx.input as z.infer<typeof coverSourceSchema>;
+    const data = draft(docs(), input.documentId, input.revision, ctx.userId);
+    const selected = asset(input.assetId || data.assetId, ctx.userId);
+    const changed = selected.sha256 !== data.sha256 || (input.assetId || data.assetId) !== data.assetId;
+    const next = changed || input.leadSheetSource !== data.leadSheetSource
+      ? clearCoverScore(data, input.leadSheetSource) : data;
+    const updated = docs().update(input.documentId, ctx.userId, input.revision, {
+      ...next, assetId: input.assetId || data.assetId, sha256: selected.sha256,
+      ...(changed ? { sourceLabel: selected.filename, analysis: null, metadata: null } : {}),
+    });
+    return { documentId: updated.id, revision: updated.revision, leadSheetSource: input.leadSheetSource };
   } }, { kind: 'cover-caption', input: captionInput, async run(ctx) {
     const input = ctx.input as z.infer<typeof captionInput>;
     const data = draft(docs(), input.documentId, input.revision, ctx.userId);
@@ -300,15 +321,19 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
     const data = draft(docs(), input.documentId, input.revision, ctx.userId);
     const source = asset(data.assetId, ctx.userId);
     if (source.sha256 !== data.sha256) throw new WorkflowError(409, 'Cover source changed');
+    const leadSheetSource = data.leadSheetSource || (dep('leadSheetDefault') || defaultLeadSheetSource)();
     ctx.emit('stage', { stage: 'Transcribing score' });
     const result = await (dep('transcribe') || defaultTranscribe)(source.url, data.sourceLabel || source.filename,
-      ctx.userId, ctx.signal, input.force);
+      ctx.userId, ctx.signal, input.force, leadSheetSource);
     ctx.throwIfCancelled();
     const updated = docs().update(input.documentId, ctx.userId, input.revision, current => {
       if (current.assetId !== data.assetId) throw new WorkflowError(409, 'Cover source changed');
-      return { ...current, abc: result.abc, approvedAbc: '', scoreSource: result.scoreSource || '' };
+      if (asset(data.assetId, ctx.userId).sha256 !== data.sha256) throw new WorkflowError(409, 'Cover source changed');
+      const scoreSource = result.scoreSource || (leadSheetSource === 'sheetsage2-refined' ? 'sheetsage2' : leadSheetSource);
+      const sheet = result.leadSheet || abcCoverLeadSheet(result.abc, leadSheetSource, scoreSource as CoverLeadSheetResult['scoreSource']);
+      return { ...current, leadSheetSource, abc: result.abc, approvedAbc: '', scoreSource, leadSheet: sheet };
     });
-    return { documentId: updated.id, revision: updated.revision, abc: result.abc, scoreSource: result.scoreSource };
+    return { documentId: updated.id, revision: updated.revision, abc: result.abc, scoreSource: updated.data.scoreSource, leadSheet: updated.data.leadSheet };
   } }, { kind: 'cover-render', input: render, async run(ctx) {
     let input = ctx.input as CoverRenderInput;
     const data = draft(docs(), input.documentId, input.revision, ctx.userId);
