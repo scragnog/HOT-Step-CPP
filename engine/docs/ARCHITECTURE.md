@@ -516,7 +516,7 @@ or MP3, mono or stereo, any rate). The job runs on the shared FIFO worker.
 | Query | Default | Meaning |
 |---|---|---|
 | `steps` | 32 | Bridge steps, a whole number 1 to 64 |
-| `window` | 30 | Window length in seconds. 0 is direct mode: the whole clip as one sequence, limited to 5168 frames (60 s) |
+| `window` | 30 | Window length in seconds. 0 is direct mode: the whole clip as one sequence. Whatever the mode, the sequence the DiT attends over (the clip, or the window when it is shorter than the clip) is limited to 5168 frames (60 s), answered with 413 |
 | `overlap` | 2 | Overlap between windows in seconds, 0 or more and shorter than the window. Window and overlap round to the 512-sample DAV hop, as in the package |
 | `mix` | 1 | 0 to 1, audio domain, after the loudness match. 0 returns the input unchanged without loading a model (and without queueing) |
 

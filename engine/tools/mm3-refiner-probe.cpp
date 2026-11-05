@@ -421,6 +421,29 @@ static int cmd_behave(int argc, char ** argv) {
         p.window_seconds = 0;
         t.check(code(5168 * 512, p) == 0 && plan.single(), "direct mode accepts 5168 frames (60 s)");
         t.check(code(5169 * 512, p) == 413, "direct mode refuses 5169 frames with 413");
+        // A large nonzero window picks the same dense attention, so it is bounded the same way.
+        const int64_t s61 = 5255 * 512;  // the 61 s clip
+        p                = {};
+        p.window_seconds = 120;
+        t.check(code(s61, p) == 413, "window=120 on a 61 s clip: 413, like window=0");
+        p.window_seconds = 120;
+        t.check(code(441000 / 512 * 512, p) == 0 && plan.single(), "window=120 on a 10 s clip is fine (the sequence is the clip)");
+        p.window_seconds = 61;
+        t.check(code(10 * 5255 * 512, p) == 413, "window=61 on a long clip: 413 (window itself past the limit)");
+        p.window_seconds = 60;
+        t.check(code(2 * 5168 * 512, p) == 0 && !plan.single() && plan.window_samples == 5168 * 512, "window=60 rounds to 5168 hops, exactly the limit: accepted on a long clip");
+        p                = {};
+        p.window_seconds = 1e300;
+        t.check(code(441000 / 512 * 512, p) == 0 && plan.single(), "window=1e300 on a 10 s clip: no overflow, one window");
+        t.check(code(s61, p) == 413, "window=1e300 on a 61 s clip: 413");
+        p.overlap_seconds = 1e300;
+        t.check(code(441000 / 512 * 512, p) == 400, "window=1e300 with overlap=1e300: 400 (overlap not shorter)");
+        p                 = {};
+        p.overlap_seconds = 1e300;
+        t.check(code(5000000, p) == 400, "overlap=1e300: 400, no overflow");
+        p                = {};
+        p.window_seconds = 1e308;
+        t.check(code(s61, p) == 413, "window=1e308 (hop count overflows a double): 413");
         p                 = {};
         p.window_seconds  = 4.0;
         p.overlap_seconds = 1.0;

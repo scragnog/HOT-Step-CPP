@@ -149,12 +149,23 @@ static int mm3_refiner_plan(int64_t total_samples, const Mm3RefinerParams & p, M
         plan->starts          = { 0 };
         return 0;
     }
-    // python round() is half-to-even; nearbyint is under the default rounding mode.
-    const int64_t w = std::max<int64_t>(MM3_REF_HOP, (int64_t) std::nearbyint(p.window_seconds * MM3_REF_SR / MM3_REF_HOP) * MM3_REF_HOP);
-    const int64_t o = std::max<int64_t>(0, (int64_t) std::nearbyint(p.overlap_seconds * MM3_REF_SR / MM3_REF_HOP) * MM3_REF_HOP);
+    // python round() is half-to-even; nearbyint is under the default rounding mode. The hop
+    // counts are clamped as doubles before the int64 conversion (a window of 1e300 s must not
+    // reach an out-of-range cast); 1e12 hops is far past any real clip and any limit below.
+    auto hops = [](double seconds) { return (int64_t) std::min(std::nearbyint(seconds * MM3_REF_SR / MM3_REF_HOP), 1e12); };
+    const int64_t w = std::max<int64_t>(1, hops(p.window_seconds)) * MM3_REF_HOP;
+    const int64_t o = hops(p.overlap_seconds) * MM3_REF_HOP;
     if (o >= w) {
         *err = "overlap must be shorter than the window";
         return 400;
+    }
+    // The DiT attends densely over 2L tokens whichever mode picked L, so L is bounded here too:
+    // the whole clip when it fits one window, else the window itself.
+    const int64_t seq_frames = total_samples <= w ? plan->frames : w / MM3_REF_HOP;
+    if (seq_frames > MM3_REF_DIRECT_MAX_FRAMES) {
+        *err = "each window is limited to " + std::to_string(MM3_REF_DIRECT_MAX_FRAMES) + " frames (60 s) because attention grows with its square; this request would use " +
+               std::to_string(seq_frames) + ". Use a shorter window";
+        return 413;
     }
     plan->window_samples  = w;
     plan->overlap_samples = o;

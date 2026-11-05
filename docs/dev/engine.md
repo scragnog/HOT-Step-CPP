@@ -411,9 +411,10 @@ run their GEMMs with `GGML_HINT_STRICT_F32`: on ggml-cuda's default TF32 the DAV
 MERT states miss the frozen parity gates. The refiner DiT and the decoder run on the default.
 
 **Cost.** A 30 s window peaks at about 2.3 GB of VRAM beyond the idle baseline, the DiT's dense
-attention being most of it. Direct mode (`window=0`) attends over 2L tokens, so memory grows with
-the square of the clip: 60 s peaks at about 6.3 GB, and the limit is 5168 frames (60 s), answered
-with 413 beyond it. Measured on an RTX 5090 with the GPU idle and all four modules cold-loaded
+attention being most of it. The DiT attends over 2L tokens, so memory grows with the square of
+the sequence L: 60 s peaks at about 6.3 GB. L is the whole clip in direct mode (`window=0`), the
+window in windowed mode, or the clip when it is shorter than the window; it is limited to 5168
+frames (60 s) in every case, answered with 413 before anything queues. Measured on an RTX 5090 with the GPU idle and all four modules cold-loaded
 (F32 refiner and MERT, F16 encoder and decoder): a 34 s clip at 32 steps takes 6.5 s, a 60 s clip
 (three windows) 8.9 s; the bridge is about two thirds of that.
 

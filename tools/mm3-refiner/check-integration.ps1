@@ -147,6 +147,14 @@ if (-not $SkipRoute) {
         Check ($r.StatusCode -eq 413) "direct mode on 61 s: 413 ($(Err $r))"
         $r = Submit ([IO.File]::ReadAllBytes($long)) '?window=0&mix=0'
         Check ($r.StatusCode -eq 413) "direct mode limit also guards mix=0 requests: 413"
+        foreach ($q in '?window=120', '?window=120&mix=0', '?window=61', '?window=1e300', '?window=1e308&mix=0') {
+            $r = Submit ([IO.File]::ReadAllBytes($long)) $q
+            Check ($r.StatusCode -eq 413) "a large window is bounded like direct mode ($q on 61 s): 413 ($(Err $r))"
+        }
+        $r = Submit $tone '?window=120&mix=0'
+        Check ($r.StatusCode -eq 200) "window=120 on an 8 s clip is fine (the sequence is the clip): 200"
+        $r = Submit $tone '?window=1e300&overlap=1e300'
+        Check ($r.StatusCode -eq 400) "window and overlap of 1e300: 400, no overflow"
         $r = Submit $tone '?mix=0'
         Check ($r.StatusCode -eq 200) "mix=0 needs no pack: 200"
         $id = ($r.Content | ConvertFrom-Json).id; $j = Wait-Job $id 30
