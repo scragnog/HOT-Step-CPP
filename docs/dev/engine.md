@@ -233,8 +233,11 @@ every captured key. Token ids, rolls, CFG rows, masks and positions match exactl
 Teacher-forced codes all fall inside the engine's top-250. The captures ran torch
 under BF16 autocast, and torch itself in FP32 misses them by as much as the engine
 does. With `--fp32` the float tensors are also checked against the same run in
-torch FP32. The engine stays within twice torch's own FP32-to-BF16 drift on every
-float tensor, the rule `heartmula-probe` uses for the plain model.
+torch FP32. The engine must stay within twice torch's own FP32-to-BF16 drift on
+every float tensor. On logits it must also flip no more argmaxes than torch BF16
+does, and only on near-ties, and stay no further from FP32's cross-entropy at the fed
+codes. These are the rules `heartmula-probe` uses for the plain model. A manifest
+that is empty, unreadable or missing a key the engine produces fails the case.
 
 ## How ace-server is organised
 

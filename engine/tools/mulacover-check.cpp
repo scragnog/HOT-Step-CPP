@@ -288,7 +288,12 @@ static void check_pack(const std::string & models) {
 // the margins the engine does. With --fp32 DIR (the same run in torch FP32, capture
 // layout) every float key also gets heartmula-probe's drift rule: engine vs torch FP32
 // within 2x torch's own FP32-vs-BF16 drift, in relative L2 and in max abs (floor 1e-3).
+// Logits keys also take that precedent's distribution checks: an argmax that differs
+// from torch FP32 must be a near-tie (FP32 top-2 margin within 2x drift max abs), and
+// per case the engine's cross-entropy gap to FP32 at the fed codes must not exceed
+// torch BF16's (sum, and max within 2x), nor its argmax flips torch BF16's.
 // A float key passes on the declared rule or on the drift rule; the table shows both.
+// A manifest that cannot be read, is empty, or lacks a key the run produces fails.
 
 using Vals = std::map<std::string, std::vector<double>>;
 
@@ -551,14 +556,85 @@ static std::string rule_for(const std::string & k, const std::string & dtype) {
     return dtype == "torch.bfloat16" ? "bf16" : "fp32";
 }
 
+static double cross_entropy(const double * x, int64_t n, int64_t target) {
+    const double top = *std::max_element(x, x + n);
+    double       sum = 0;
+    for (int64_t i = 0; i < n; i++) sum += std::exp(x[i] - top);
+    return std::log(sum) + top - x[target];
+}
+
+// heartmula-probe's distribution checks, accumulated over a case's logits keys.
+struct Dist {
+    int    flips_ours = 0, flips_torch = 0, rows = 0;
+    double ce_ours = 0, ce_torch = 0, ce_ours_max = 0, ce_torch_max = 0;
+};
+
+// Per row: engine and torch BF16 argmax against torch FP32's, the near-tie test and the
+// cross-entropy gaps at the fed code. Returns whether every engine flip is a near-tie.
+static bool logits_dist(const std::vector<double> & got, const std::vector<double> & bf16, const std::vector<double> & f32,
+                        int64_t target, double drift_max, Dist * d, std::string * note) {
+    const int64_t V    = HEARTMULA_AUDIO_VOCAB;
+    bool          ok   = true;
+    double        gap  = 0, tgap = 0;
+    int           flip = 0;
+    for (size_t r = 0; r * V < got.size(); r++) {
+        const double * w = f32.data() + r * V;
+        const int64_t  a = std::max_element(w, w + V) - w;
+        double         m2 = -INFINITY;
+        for (int64_t i = 0; i < V; i++) {
+            if (i != a) m2 = std::max(m2, w[i]);
+        }
+        const bool fo = std::max_element(got.data() + r * V, got.data() + (r + 1) * V) - (got.data() + r * V) != a;
+        const bool ft = std::max_element(bf16.data() + r * V, bf16.data() + (r + 1) * V) - (bf16.data() + r * V) != a;
+        ok            = ok && (!fo || w[a] - m2 <= 2.0 * drift_max);
+        flip += fo;
+        d->flips_ours += fo;
+        d->flips_torch += ft;
+        d->rows++;
+        const double ce = cross_entropy(w, V, target);
+        gap             = std::max(gap, std::fabs(cross_entropy(got.data() + r * V, V, target) - ce));
+        tgap            = std::max(tgap, std::fabs(cross_entropy(bf16.data() + r * V, V, target) - ce));
+    }
+    d->ce_ours += gap;
+    d->ce_torch += tgap;
+    d->ce_ours_max  = std::max(d->ce_ours_max, gap);
+    d->ce_torch_max = std::max(d->ce_torch_max, tgap);
+    char buf[120];
+    snprintf(buf, sizeof(buf), "dCE %.4f (torch BF16 %.4f)%s", gap, tgap, flip ? (ok ? ", argmax near-tie" : ", ARGMAX FLIP") : "");
+    *note = buf;
+    return ok;
+}
+
+static Row manifest_fail(const std::string & key, const std::string & why) {
+    Row r;
+    r.key  = key;
+    r.rule = "manifest";
+    r.note = why;
+    return r;
+}
+
 // Every key in observed/tensors.json against the run. Returns the rows. `fp32` is the
-// case's torch FP32 folder, or empty.
+// case's torch FP32 folder, or empty; `dist` collects the logits distribution checks.
 static std::vector<Row> compare_case(const std::filesystem::path & dir, const CaseRun & run, const Vals & extra,
-                                     const std::filesystem::path & fp32 = {}) {
+                                     const std::filesystem::path & fp32 = {}, Dist * dist = nullptr) {
     std::vector<Row> rows;
-    yyjson_doc *     doc = read_json(dir / "observed" / "tensors.json");
-    yyjson_obj_iter  it;
-    yyjson_obj_iter_init(yyjson_doc_get_root(doc), &it);
+    Dist             local;
+    if (!dist) dist = &local;
+    yyjson_doc * doc  = read_json(dir / "observed" / "tensors.json");
+    yyjson_val * root = doc ? yyjson_doc_get_root(doc) : nullptr;
+    if (!yyjson_is_obj(root) || yyjson_obj_size(root) == 0) {
+        yyjson_doc_free(doc);
+        rows.push_back(manifest_fail("tensors.json", root ? "manifest is empty or not an object" : "manifest unreadable"));
+        return rows;
+    }
+    // Coverage both ways: a key the engine produces but the manifest lacks fails too.
+    for (const Vals * vals : { &run.v, &extra }) {
+        for (const auto & kv : *vals) {
+            if (!yyjson_obj_get(root, kv.first.c_str())) rows.push_back(manifest_fail(kv.first, "absent from the manifest"));
+        }
+    }
+    yyjson_obj_iter it;
+    yyjson_obj_iter_init(root, &it);
     for (yyjson_val * key; (key = yyjson_obj_iter_next(&it));) {
         Row r;
         r.key  = yyjson_get_str(key);
@@ -596,7 +672,14 @@ static std::vector<Row> compare_case(const std::filesystem::path & dir, const Ca
                 r.fp32     = err_of(got, f.v);
                 r.drift    = err_of(f.v, ref.v);
                 r.drift_ok = r.fp32.rel_l2 <= 2 * r.drift.rel_l2 && r.fp32.max_abs <= 2 * std::max(r.drift.max_abs, 1e-3);
-                rule       = rule || r.drift_ok;
+                const size_t lg = r.key.rfind(".logits") != std::string::npos ? r.key.rfind(".logits")
+                                                                              : r.key.rfind(".guided-logits");
+                if (lg != std::string::npos) {
+                    const Npy code = read_npy((dir / "observed" / (r.key.substr(0, lg) + ".codes.npy")).string());
+                    r.drift_ok     = logits_dist(got, ref.v, f.v, (int64_t) code.v.at(0), r.drift.max_abs, dist, &r.note) &&
+                                 r.drift_ok;
+                }
+                rule = rule || r.drift_ok;
             }
         }
         if (r.rule == "teacher" && r.key != "frames") {
@@ -728,7 +811,8 @@ static void check_parity(HeartMuLaRuntime & rt, const HeartMuLaTokenizer & tok, 
         if (!ok) continue;
         int        fails = 0, n = 0, declared_fails = 0, drift_rows = 0;
         const auto fp    = fp32_dir.empty() ? fs::path() : fs::path(fp32_dir) / name;
-        for (const Row & r : compare_case(c, run, extra, fp)) {
+        Dist       dist;
+        for (const Row & r : compare_case(c, run, extra, fp, &dist)) {
             n++;
             fails += !r.ok;
             declared_fails += !r.declared && r.rule != "info";
@@ -741,6 +825,22 @@ static void check_parity(HeartMuLaRuntime & rt, const HeartMuLaTokenizer & tok, 
             }
         }
         compared += n;
+        if (dist.rows) {
+            const bool dok = dist.flips_ours <= dist.flips_torch && dist.ce_ours <= dist.ce_torch &&
+                            dist.ce_ours_max <= 2.0 * dist.ce_torch_max;
+            char buf[300];
+            snprintf(buf, sizeof(buf),
+                     "parity %s: logits vs torch FP32 over %d rows: argmax flips engine %d, torch BF16 %d; dCE sum %.4f "
+                     "vs %.4f, max %.4f vs %.4f",
+                     name.c_str(), dist.rows, dist.flips_ours, dist.flips_torch, dist.ce_ours, dist.ce_torch,
+                     dist.ce_ours_max, dist.ce_torch_max);
+            verdict(dok, buf);
+            md += std::string("| ") + name + " | logits distribution | drift | " + std::to_string(dist.rows) +
+                  " rows | | | | | | | | " + (dok ? "pass" : "fail") + " | " + (dok ? "PASS" : "FAIL") + " | " +
+                  (buf + name.size() + 9) + " |\n";
+        } else if (!fp32_dir.empty()) {
+            verdict(false, "parity " + name + ": no logits checked against torch FP32");
+        }
         verdict(fails == 0, "parity " + name + ": " + std::to_string(n) + " keys compared, " + std::to_string(fails) +
                                 " failed (" + std::to_string(declared_fails) + " miss the declared rule, " +
                                 std::to_string(drift_rows) + " checked against torch FP32)");
