@@ -203,3 +203,44 @@ test('DoRA and LoRA baselines carry their own alpha and KL stop, LoKr keeps the 
   assert.equal(lokr.targetKl, 1.0);
   assert.equal(lokr.plannerLrScale, 0.6);
 });
+
+for (const method of ['fixed-recipe', 'base-matched'] as const) {
+  test(`saved ${method} preset releases the loading gate after applying the form`, async () => {
+    const view = await mountChart('done', { complete: true, points: [] });
+    try {
+      view.stored.set('hs-yue2-joint-presets', JSON.stringify([
+        { version: 2, name: 'Saved recipe', settings: { method } },
+      ]));
+      const originalFetch = globalThis.fetch;
+      let resolutions = 0;
+      globalThis.fetch = async (input, init) => {
+        if (String(input).endsWith('/presets/yue2-joint/resolve')) {
+          resolutions++;
+          const body = JSON.parse(String(init?.body));
+          return new Response(JSON.stringify({ result: {
+            effectiveForm: { ...body.currentForm, method, steps: 2000, seed: 123, saveEvery: 100 },
+            lyricTiming: false,
+          } }), { headers: { 'Content-Type': 'application/json' } });
+        }
+        return originalFetch(input, init);
+      };
+      await view.render('preset');
+      const button = Array.from(view.document.querySelectorAll('button'))
+        .find(button => button.textContent === 'Saved recipe')!;
+      assert.ok(button);
+      for (let load = 1; load <= 2; load++) {
+        assert.equal(button.disabled, false);
+        await act(async () => {
+          button.dispatchEvent(new window.Event('click', { bubbles: true }));
+          await new Promise(resolve => setTimeout(resolve, 20));
+        });
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+        assert.equal(button.disabled, false, 'preset loading gate must release after applying the form');
+        assert.equal(resolutions, load, 'a subsequent preset load must pass the same gate');
+      }
+      const saved = JSON.parse(view.stored.get('hs-yue2-aitk-form:chart-set')!);
+      assert.deepEqual([saved.steps, saved.seed, saved.saveEvery],
+        method === 'fixed-recipe' ? [1500, 42, 200] : [2000, 123, 100]);
+    } finally { await view.cleanup(); }
+  });
+}

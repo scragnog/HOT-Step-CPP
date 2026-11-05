@@ -555,12 +555,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   const pendingPresetApplication = useRef<{ form: Yue2JointTrainRequest; lyricTiming: boolean } | null>(null);
   useEffect(() => {
     const pending = pendingPresetApplication.current;
-    if (pending && form === pending.form && lyricTiming === pending.lyricTiming) {
+    // Match the applied state object; the fixed-recipe display is a normalized copy.
+    if (pending && storedForm === pending.form && lyricTiming === pending.lyricTiming) {
       pendingPresetApplication.current = null;
       presetLoadGate.current.release();
       setPresetLoading(false);
     }
-  }, [form, lyricTiming]);
+  }, [storedForm, lyricTiming]);
   // The saved form, with the dataset's own manifest over whatever was saved:
   // a saved path that differs came from another dataset and trained its album.
   const readPrepare = (): PrepareForm => {
