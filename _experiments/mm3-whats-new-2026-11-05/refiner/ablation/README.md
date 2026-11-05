@@ -1,0 +1,225 @@
+# Conditioning ablation of the MM3 latent refiner (HOTSTEP-1007)
+
+Question: does the refiner need real CLAP and real MERT conditioning, or do constants do? Answer in one line:
+**MERT stays (constants change the latent 1x to 9x as much as the refiner itself does); CLAP is a constant on the ten native
+renders but not on the two damaged controls, so by the contract's every-clip gate neither port is deleted.**
+
+## Setup
+
+- Environment of HOTSTEP-1001 (`../README.md`, `../.venv`, torch 2.11 cu128, upstream package untouched). `python ablation/ablate.py --budget 480`
+  (resumable, exit 2 = rerun), then `python ablation/analyze.py`. One process, sequential, GPU idle beforehand.
+- Clips (12): the ten native renders in `../../native/`, plus `../control/degraded.wav` (`ctl_mild`: 8 kHz low-pass, -50 dBFS noise,
+  8-bit) and `../control/degraded_heavy.wav` (`ctl_heavy`). Defaults fixed: steps 32, window 30 s, overlap 2 s, runner's 512-sample zero pad.
+- Mechanism: pass 1 runs the stock pipeline's encoder, MERT and CLAP once per window and caches the normalised conditioning and the
+  encoder latent (`state/cache/`, 3.6 GB with the latents). Every condition then re-runs only `bridge_sample` on the cache, so only the
+  conditioning differs. `Afull` is the unpatched stock pipeline: it equals A1 exactly (max-abs 0), so the cache path is faithful.
+- Metrics on the raw refined latent [128, T] against A1: cosine (whole clip), relative RMS = rms(X-A1)/rms(A1), max-abs, and
+  **ratio = rms(X-A1) / rms(A1-input)**, where input is the encoder latent (the refiner's own effect, rms(A1-input)/rms(input) is
+  0.06 to 0.46 per clip, see the table below). Gate: every clip cosine >= 0.999 and ratio <= 0.1.
+- Conditions: A1/A2 real (A2 is the numeric floor: bit-identical, max-abs 0, the bridge is deterministic on this GPU); B style <- trained
+  `style_null`; C style <- frozen corpus mean; D MERT <- trained `mert_null`; E MERT <- frozen per-layer mean; F best style x best MERT
+  (picked by lowest worst-clip ratio: B and D). Extra, not in the contract: `Cloo` = C with the clip's own windows left out of the mean
+  (native clips only), because C is in-sample on the ten natives.
+- MERT-20 proxy (MERT-v2-FullSong layer 20, HOTSTEP-905 recipe) is advisory only and is in the last column: 1 - cos(decoded X, decoded A1).
+- Decoded WAVs for A1, B, C, D, E, F in `wav/<cond>/<clip>.wav` (24-bit, gain-matched to the input's integrated LUFS, as `run_refine.py`).
+  A2 and Afull are bit-identical to A1 so they are not decoded.
+
+## Verdict
+
+| Condition | Native 10 (cos / ratio) | Controls (ratio) | Every-clip gate |
+|---|---|---|---|
+| B style_null | >= 0.99997 / <= 0.094 | 0.106 mild, 0.076 heavy | fails (ctl_mild 0.106 > 0.1) |
+| C corpus-mean style | >= 0.999995 / <= 0.037 | 0.143 mild, 0.102 heavy | fails (both controls) |
+| Cloo (extra) | >= 0.999995 / <= 0.041 | n/a | passes natives, so C is not just in-sample |
+| D mert_null | 0.886 to 0.978 / 1.2 to 9.0 | 1.07 mild, 0.54 heavy | fails by 5x to 90x |
+| E per-layer mean | 0.892 to 0.978 / similar | see table | fails by the same margin |
+| F = B + D | 0.891 minimum / up to 8.8 | | fails (D dominates) |
+
+- **Slice 2 (MERT port): the numbers delete nothing.** Replacing MERT with any constant moves the output 0.5 to 9 times as far as the
+  refiner moves the input. Proxy delta up to 0.017, 30x the style conditions. The per-frame MERT signal is what the model runs on.
+- **Slice 3 (CLAP port): not deleted by the every-clip gate.** Style barely matters on MM3 renders (C changes the latent by at most 0.037
+  of the refiner's effect, MERT-20 delta 0.00001), but on the damaged controls it costs 0.10 to 0.14 of the effect, over the bar, and
+  those are the inputs the refiner is for. Reading the gate on the ten natives only, B and C both pass and C
+  would delete the CLAP port; that is a scope call, and C would then need its ten-pair blind sheet first.
+  No blind sheet was built: nothing passed the contract's gate.
+
+## Frozen constants
+
+Both come from the real conditioning of the ten **native** clips only (the controls are out of sample), post-normalisation, fp32.
+Files: `frozen_constants.npz` (sha256 `cc6a31c1791e484f`...), mirrored in `state/means.pt` with counts.
+
+| Key | Shape | How computed |
+|---|---|---|
+| `clap_mean` | [512] | mean of the 27 per-window CLAP vectors (`_clap_style`: centre 10 s of each 30 s window, pooled 512-d) over all windows of the ten native clips, equal weight per window. L2 norm 0.9916 (single windows have norm 1.0); residual rms of the windows around it is 13% of their rms |
+| `mert_layer_mean` | [13, 768] | per-layer, per-channel mean of the normalised MERT layers (after `(x - layer_mean) / layer_std`, interpolated to latent rate) over 69,768 frames of the same windows (overlap frames counted twice). Mean abs 0.135, max 0.948; the per-frame signal around it is 98.6% of the layers' rms |
+| `style_null` | [512] | trained parameter of the refiner (`model.py:96`), read from the weights, not computed |
+| `mert_null` | [13, 768] | trained parameter of the refiner (`model.py:101`), normalised space |
+
+Normalisation itself (`latent_mean/std`, `layer_mean/std`) stays in `repo/normalization.safetensors`.
+
+## Results
+
+
+#### A2
+
+| clip | cosine | rel RMS | max-abs | ratio | MERT-20 proxy |
+|---|---|---|---|---|---|
+| boombap-s1001 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| boombap-s1002 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| cinematic-s1001 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| cinematic-s1002 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| ctl_heavy | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| ctl_mild | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| folk-s1001 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| folk-s1002 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| soulpop-s1001 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| soulpop-s1002 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| synthwave-s1001 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| synthwave-s1002 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+
+#### Afull
+
+| clip | cosine | rel RMS | max-abs | ratio | MERT-20 proxy |
+|---|---|---|---|---|---|
+| boombap-s1001 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| boombap-s1002 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| cinematic-s1001 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| cinematic-s1002 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| ctl_heavy | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| ctl_mild | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| folk-s1001 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| folk-s1002 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| soulpop-s1001 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| soulpop-s1002 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| synthwave-s1001 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+| synthwave-s1002 | 1.000000 | 0.0000 | 0.0000 | 0.0000 | n/a |
+
+#### B
+
+| clip | cosine | rel RMS | max-abs | ratio | MERT-20 proxy |
+|---|---|---|---|---|---|
+| boombap-s1001 | 0.999995 | 0.0031 | 0.1050 | 0.0165 | 0.00001 |
+| boombap-s1002 | 0.999988 | 0.0048 | 0.1678 | 0.0635 | 0.00000 |
+| cinematic-s1001 | 0.999970 | 0.0078 | 0.1758 | 0.0827 | 0.00000 |
+| cinematic-s1002 | 0.999994 | 0.0036 | 0.2054 | 0.0459 | 0.00001 |
+| ctl_heavy | 0.999409 | 0.0350 | 0.7402 | 0.0762 | 0.00052 |
+| ctl_mild | 0.999767 | 0.0217 | 0.5347 | 0.1063 | 0.00024 |
+| folk-s1001 | 0.999971 | 0.0076 | 0.1919 | 0.0662 | 0.00001 |
+| folk-s1002 | 0.999989 | 0.0047 | 0.1941 | 0.0689 | 0.00000 |
+| soulpop-s1001 | 0.999982 | 0.0060 | 0.1195 | 0.0943 | 0.00000 |
+| soulpop-s1002 | 0.999983 | 0.0058 | 0.1710 | 0.0792 | 0.00000 |
+| synthwave-s1001 | 0.999991 | 0.0043 | 0.0628 | 0.0755 | 0.00000 |
+| synthwave-s1002 | 0.999986 | 0.0053 | 0.1041 | 0.0883 | 0.00001 |
+
+#### C
+
+| clip | cosine | rel RMS | max-abs | ratio | MERT-20 proxy |
+|---|---|---|---|---|---|
+| boombap-s1001 | 0.999996 | 0.0029 | 0.0659 | 0.0156 | 0.00000 |
+| boombap-s1002 | 1.000000 | 0.0005 | 0.0203 | 0.0065 | 0.00000 |
+| cinematic-s1001 | 0.999998 | 0.0021 | 0.0570 | 0.0220 | 0.00000 |
+| cinematic-s1002 | 0.999996 | 0.0028 | 0.0944 | 0.0364 | 0.00001 |
+| ctl_heavy | 0.998953 | 0.0468 | 0.8611 | 0.1018 | 0.00062 |
+| ctl_mild | 0.999581 | 0.0293 | 0.5955 | 0.1431 | 0.00025 |
+| folk-s1001 | 0.999996 | 0.0028 | 0.1231 | 0.0243 | 0.00000 |
+| folk-s1002 | 0.999998 | 0.0021 | 0.0522 | 0.0313 | 0.00000 |
+| soulpop-s1001 | 0.999997 | 0.0024 | 0.0529 | 0.0373 | 0.00000 |
+| soulpop-s1002 | 0.999999 | 0.0017 | 0.0462 | 0.0224 | 0.00000 |
+| synthwave-s1001 | 0.999999 | 0.0010 | 0.0173 | 0.0178 | 0.00000 |
+| synthwave-s1002 | 1.000000 | 0.0005 | 0.0168 | 0.0090 | 0.00001 |
+
+#### D
+
+| clip | cosine | rel RMS | max-abs | ratio | MERT-20 proxy |
+|---|---|---|---|---|---|
+| boombap-s1001 | 0.977668 | 0.2187 | 4.1540 | 1.1593 | 0.00264 |
+| boombap-s1002 | 0.958435 | 0.3112 | 4.5805 | 4.0893 | 0.00423 |
+| cinematic-s1001 | 0.926859 | 0.3942 | 4.2289 | 4.1875 | 0.00737 |
+| cinematic-s1002 | 0.913449 | 0.4142 | 6.2785 | 5.3407 | 0.01350 |
+| ctl_heavy | 0.970108 | 0.2461 | 3.3568 | 0.5352 | 0.01145 |
+| ctl_mild | 0.977073 | 0.2198 | 2.8998 | 1.0743 | 0.00522 |
+| folk-s1001 | 0.956744 | 0.3056 | 5.4167 | 2.6561 | 0.00810 |
+| folk-s1002 | 0.943904 | 0.3569 | 5.5935 | 5.2686 | 0.00911 |
+| soulpop-s1001 | 0.948237 | 0.3398 | 5.1079 | 5.3555 | 0.00573 |
+| soulpop-s1002 | 0.968189 | 0.2644 | 4.3252 | 3.5793 | 0.00350 |
+| synthwave-s1001 | 0.899845 | 0.5112 | 6.6050 | 8.9025 | 0.01048 |
+| synthwave-s1002 | 0.886489 | 0.5418 | 6.6994 | 9.0059 | 0.00959 |
+
+#### E
+
+| clip | cosine | rel RMS | max-abs | ratio | MERT-20 proxy |
+|---|---|---|---|---|---|
+| boombap-s1001 | 0.976457 | 0.2336 | 6.3786 | 1.2385 | 0.00317 |
+| boombap-s1002 | 0.957848 | 0.3234 | 4.5738 | 4.2490 | 0.00487 |
+| cinematic-s1001 | 0.927751 | 0.4006 | 4.5724 | 4.2548 | 0.00974 |
+| cinematic-s1002 | 0.919225 | 0.4090 | 6.4613 | 5.2742 | 0.01701 |
+| ctl_heavy | 0.947693 | 0.3295 | 4.0718 | 0.7164 | 0.01582 |
+| ctl_mild | 0.978888 | 0.2150 | 3.1626 | 1.0510 | 0.00690 |
+| folk-s1001 | 0.954039 | 0.3300 | 5.4620 | 2.8687 | 0.00982 |
+| folk-s1002 | 0.941483 | 0.3867 | 7.0658 | 5.7083 | 0.01127 |
+| soulpop-s1001 | 0.950264 | 0.3454 | 6.0757 | 5.4443 | 0.00693 |
+| soulpop-s1002 | 0.966915 | 0.2788 | 4.4688 | 3.7739 | 0.00438 |
+| synthwave-s1001 | 0.901407 | 0.5230 | 6.9336 | 9.1075 | 0.01119 |
+| synthwave-s1002 | 0.891786 | 0.5476 | 6.7567 | 9.1017 | 0.00980 |
+
+#### F
+
+| clip | cosine | rel RMS | max-abs | ratio | MERT-20 proxy |
+|---|---|---|---|---|---|
+| boombap-s1001 | 0.978945 | 0.2125 | 4.1091 | 1.1269 | 0.00244 |
+| boombap-s1002 | 0.960973 | 0.3019 | 4.4765 | 3.9662 | 0.00398 |
+| cinematic-s1001 | 0.930479 | 0.3848 | 4.2630 | 4.0871 | 0.00764 |
+| cinematic-s1002 | 0.914174 | 0.4121 | 6.2262 | 5.3139 | 0.01347 |
+| ctl_heavy | 0.971510 | 0.2405 | 3.0675 | 0.5229 | 0.01146 |
+| ctl_mild | 0.978342 | 0.2129 | 2.7291 | 1.0407 | 0.00444 |
+| folk-s1001 | 0.957428 | 0.3047 | 5.3520 | 2.6482 | 0.00805 |
+| folk-s1002 | 0.946042 | 0.3508 | 5.6499 | 5.1788 | 0.00891 |
+| soulpop-s1001 | 0.951527 | 0.3296 | 5.0885 | 5.1962 | 0.00581 |
+| soulpop-s1002 | 0.969290 | 0.2607 | 4.1884 | 3.5297 | 0.00353 |
+| synthwave-s1001 | 0.905935 | 0.4936 | 6.6129 | 8.5963 | 0.01028 |
+| synthwave-s1002 | 0.891211 | 0.5291 | 6.6174 | 8.7953 | 0.00943 |
+
+#### Cloo
+
+| clip | cosine | rel RMS | max-abs | ratio | MERT-20 proxy |
+|---|---|---|---|---|---|
+| boombap-s1001 | 0.999995 | 0.0032 | 0.0707 | 0.0168 | n/a |
+| boombap-s1002 | 1.000000 | 0.0005 | 0.0213 | 0.0069 | n/a |
+| cinematic-s1001 | 0.999997 | 0.0023 | 0.0625 | 0.0244 | n/a |
+| cinematic-s1002 | 0.999995 | 0.0032 | 0.1013 | 0.0414 | n/a |
+| folk-s1001 | 0.999995 | 0.0031 | 0.1304 | 0.0271 | n/a |
+| folk-s1002 | 0.999998 | 0.0021 | 0.0514 | 0.0314 | n/a |
+| soulpop-s1001 | 0.999997 | 0.0024 | 0.0532 | 0.0377 | n/a |
+| soulpop-s1002 | 0.999999 | 0.0017 | 0.0472 | 0.0233 | n/a |
+| synthwave-s1001 | 0.999999 | 0.0011 | 0.0185 | 0.0192 | n/a |
+| synthwave-s1002 | 1.000000 | 0.0006 | 0.0192 | 0.0098 | n/a |
+
+#### Refiner effect (A1 vs input)
+
+| clip | rms(A1-input)/rms(input) | rms(A1-input) | max abs latent | MERT-20 1-cos(A1,input) |
+|---|---|---|---|---|
+| boombap-s1001 | 0.1950 | 0.3758 | 16.90 | 0.00064 |
+| boombap-s1002 | 0.0767 | 0.1392 | 13.43 | 0.00020 |
+| cinematic-s1001 | 0.0938 | 0.1895 | 18.23 | 0.00133 |
+| cinematic-s1002 | 0.0769 | 0.1818 | 19.45 | 0.00117 |
+| ctl_heavy | 0.4550 | 0.8686 | 13.30 | 0.03193 |
+| ctl_mild | 0.2082 | 0.3805 | 13.99 | 0.00875 |
+| folk-s1001 | 0.1156 | 0.2717 | 18.10 | 0.00093 |
+| folk-s1002 | 0.0681 | 0.1598 | 17.24 | 0.00045 |
+| soulpop-s1001 | 0.0637 | 0.1315 | 20.65 | 0.00036 |
+| soulpop-s1002 | 0.0743 | 0.1604 | 13.72 | 0.00029 |
+| synthwave-s1001 | 0.0580 | 0.1115 | 19.13 | 0.00022 |
+| synthwave-s1002 | 0.0607 | 0.1202 | 15.18 | 0.00040 |
+
+#### Gate (cosine >= 0.999 and ratio <= 0.1 on every clip)
+
+| cond | min cosine | max ratio | worst clip | pass all 12 | pass 10 native |
+|---|---|---|---|---|---|
+| B | 0.999409 | 0.1063 | ctl_mild | False | True |
+| C | 0.998953 | 0.1431 | ctl_mild | False | True |
+| D | 0.886489 | 9.0059 | synthwave-s1002 | False | False |
+| E | 0.891786 | 9.1075 | synthwave-s1001 | False | False |
+| F | 0.891211 | 8.7953 | synthwave-s1002 | False | False |
+| Cloo | 0.999995 | 0.0414 | cinematic-s1002 | True | True |
+| A2 | 1.000000 | 0.0000 | boombap-s1001 | True | True |
+| Afull | 1.000000 | 0.0000 | boombap-s1001 | True | True |
