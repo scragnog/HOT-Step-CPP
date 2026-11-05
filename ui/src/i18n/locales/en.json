@@ -863,7 +863,7 @@
     "trainingStudio.yue2.method.presetBaseline": "1× time (baseline)",
     "trainingStudio.yue2.method.presetLegacySteps": "up to {{steps}} × 1 song",
     "trainingStudio.yue2.method.presetFixedSong": "song",
-    "trainingStudio.yue2.method.fixedRecipeNote": "The server fixes the adapter, optimizer, loss, crop and timing settings for this method. The base defaults to bf16 and can be changed below.",
+    "trainingStudio.yue2.method.fixedRecipeNote": "Fixed recipe: 1500 steps, seed 42 and a checkpoint every 200 steps. These fields are locked. The server also fixes the adapter, optimizer, loss, crop and timing settings. The base defaults to bf16 and can be changed below.",
     "trainingStudio.yue2.method.fixedRecipeBaseNote": "Not ear-tested on this base: HOT-Approved was tuned and scored on bf16. A quantized base uses less VRAM.",
     "trainingStudio.yue2.method.preset_fixed-recipe": "HOT-Approved",
     "trainingStudio.yue2.method.presetCustom": "custom",

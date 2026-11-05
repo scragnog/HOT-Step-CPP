@@ -7,7 +7,7 @@ import { applyFixedRecipe, relayJsonLine, buildYue2JointTrainArgs, planPlannerGa
 import { createJob } from './labelingQueue.js';
 
 test('Fixed recipe forces its recipe and retains the companion decoder', () => {
-  const recipe = applyFixedRecipe({ method: 'fixed-recipe', rank: 16, alpha: 256, adapterType: 'lokr',
+  const recipe = applyFixedRecipe({ method: 'fixed-recipe', steps: 2000, seed: 123, saveEvery: 100, rank: 16, alpha: 256, adapterType: 'lokr',
     optimizer: 'prodigy', gradAccum: 8, arCropFrames: 500, narCropFrames: 0,
     lrSchedule: 'wsd', lyricTiming: true, cursorWeight: 0.08, klWeight: 0,
     abcDropout: 1, captionDropout: 0, textDropout: 0.1, lyricDropout: 0.1, bothDropout: 0.1 });

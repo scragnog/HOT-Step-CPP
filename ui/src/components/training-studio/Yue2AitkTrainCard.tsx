@@ -116,11 +116,13 @@ function jointEta(points: JointStepPoint[], form: Yue2JointTrainRequest): string
 const PRESET_EXCLUDED_KEYS: ReadonlySet<keyof Yue2JointTrainRequest> = new Set([
   'trainingMethod', 'autoPrepare', 'preparation', 'checkpoint', 'dataset', 'output', 'resume', 'alignmentEnabled', 'gpuUuid',
 ]);
+const FIXED_RECIPE_SCHEDULE = { steps: 1500, seed: 42, saveEvery: 200 } as const;
 /** The recipe default for the chosen adapter type: picking LoRA/DoRA fills
  *  alpha and the KL stop, which are that type's defaults, not edits (#318).
  *  The adapter type itself still shows as changed. */
-export function baselineFor(f: Pick<Yue2JointTrainRequest, 'adapterType' | 'rank'>): Record<string, unknown> {
-  return { ...DEFAULT_FORM, ...((f.adapterType ?? 'lora') === 'lokr' ? LOKR_STOP : { alpha: f.rank ?? 64, ...LORA_STOP }) } as unknown as Record<string, unknown>;
+export function baselineFor(f: Pick<Yue2JointTrainRequest, 'adapterType' | 'rank' | 'method'>): Record<string, unknown> {
+  return { ...DEFAULT_FORM, ...((f.adapterType ?? 'lora') === 'lokr' ? LOKR_STOP : { alpha: f.rank ?? 64, ...LORA_STOP }),
+    ...(f.method === 'fixed-recipe' ? FIXED_RECIPE_SCHEDULE : {}) } as unknown as Record<string, unknown>;
 }
 function snapshotPresetSettings(form: Yue2JointTrainRequest, lyricTiming: boolean): Partial<Yue2JointTrainRequest> {
   const settings: Record<string, unknown> = {};
@@ -457,7 +459,11 @@ const LiveIntervals: React.FC<{ datasetId: string; jobId: string; worker?: strin
 
 export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: string; cursorReady?: boolean; lyricTiming: boolean; onLyricTimingChange: (value: boolean) => void; onTimingLockedChange?: (locked: boolean) => void; exposeStart?: (fn: () => Promise<Record<string, unknown>>) => void }> = ({ datasetId, legacyManifest, cursorReady = false, lyricTiming, onLyricTimingChange, onTimingLockedChange, exposeStart }) => {
   const { t } = useTranslation();
-  const [form, setForm] = useState<Yue2JointTrainRequest>(() => readStoredForm(datasetId));
+  const [storedForm, setForm] = useState<Yue2JointTrainRequest>(() => readStoredForm(datasetId));
+  // Saved forms, imported presets and resume records can contain old overrides.
+  // Display, persist and submit the same schedule the server will run.
+  const form = useMemo(() => storedForm.method === 'fixed-recipe'
+    ? { ...storedForm, ...FIXED_RECIPE_SCHEDULE } : storedForm, [storedForm]);
   const latestForm = useRef(form);
   latestForm.current = form;
   const latestLyricTiming = useRef(lyricTiming);
@@ -1120,12 +1126,13 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
   // input has, and 'seed' is also the resume-restored field name the preview
   // sub-object's own seed key collides with (field() has no notion of which
   // object it is reading from), so resumeChoice locks it too.
-  const fieldLocked = (key: string) =>
-    (!!resumeChoice && ['seed', 'device', 'rank', 'alpha', 'adapterType', 'lokrDim', 'lokrFactor', 'saveEvery', 'cursorWeight'].includes(key))
+  const fieldLocked = (key: string, source: unknown = form) =>
+    (source === form && form.method === 'fixed-recipe' && Object.hasOwn(FIXED_RECIPE_SCHEDULE, key))
+    || (!!resumeChoice && ['seed', 'device', 'rank', 'alpha', 'adapterType', 'lokrDim', 'lokrFactor', 'saveEvery', 'cursorWeight'].includes(key))
     || active || starting || preparing || yue2RunAllActive;
   const field = (label: string, key: string, type = 'text', source: unknown = form, update?: (value: string) => void, info?: string, meta?: string, onReset?: () => void) => (
     <PreviewField label={label} info={info} meta={meta} onReset={onReset}>
-      <input className={input} type={type} step={key === 'arScale' ? 0.1 : undefined} min={key === 'arScale' ? 0 : undefined} value={String((source as Record<string, unknown>)[key] ?? '')} disabled={fieldLocked(key)}
+      <input className={input} type={type} step={key === 'arScale' ? 0.1 : undefined} min={key === 'arScale' ? 0 : undefined} value={String((source as Record<string, unknown>)[key] ?? '')} disabled={fieldLocked(key, source)}
         onChange={event => update ? update(event.target.value) : set(key as keyof Yue2JointTrainRequest, type === 'number' ? Number(event.target.value) : event.target.value as never)} />
     </PreviewField>
   );
@@ -1282,7 +1289,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <TrainingPresetChoice selected={form.method === 'fixed-recipe'} disabled={busy || presetLoading} onClick={() => { onLyricTimingChange(false); setForm(previous => ({ ...previous,
             method: 'fixed-recipe', base: 'bf16', checkpoint: '', adapterType: 'lora', rank: 64, alpha: 64,
-            steps: 1500, saveEvery: 200, seed: 42,
+            ...FIXED_RECIPE_SCHEDULE,
             optimizer: 'adamw-lm', cautious: false, lr: 1e-4, weightDecay: 0.01,
             beta1: 0.9, beta2: 0.999, lrSchedule: 'constant', warmup: 0,
             stopMode: 'steps', arLossWeight: 0.5, klWeight: 0.2, plannerLrScale: 0.5,
@@ -1300,7 +1307,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
             <span className="text-xs text-zinc-500">{p.key === 'legacy' ? t('trainingStudio.yue2.method.presetLegacySteps', 'up to {{steps}} × 1 song', { steps: p.steps }) : `${p.steps} × ${p.gradAccum} songs`} · {p.key === 'balanced' ? t('trainingStudio.yue2.method.presetBaseline', '1× time (baseline)') : t('trainingStudio.yue2.method.presetRelative', '{{ratio}} the time', { ratio: presetTime(p) })}</span>
           </TrainingPresetChoice>)}
         </div>
-        {form.method === 'fixed-recipe' && <p className="mt-2 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.fixedRecipeNote', 'The server fixes the adapter, optimizer, loss, crop and timing settings for this method. The base defaults to bf16 and can be changed below.')}</p>}
+        {form.method === 'fixed-recipe' && <p className="mt-2 text-[11px] text-zinc-500">{t('trainingStudio.yue2.method.fixedRecipeNote', 'Fixed recipe: 1500 steps, seed 42 and a checkpoint every 200 steps. These fields are locked. The server also fixes the adapter, optimizer, loss, crop and timing settings. The base defaults to bf16 and can be changed below.')}</p>}
         {form.method === 'fixed-recipe' && (form.base || 'bf16') !== 'bf16' && <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.fixedRecipeBaseNote', 'Not ear-tested on this base: HOT-Approved was tuned and scored on bf16. A quantized base uses less VRAM.')}</p>}
         {activePreset(form) === 'legacy' && <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">{t('trainingStudio.yue2.method.presetLegacyNote', 'Legacy runs the previous recipe (Prodigy, one song per update, stops at planner KL 1.0, LoKr 256). It may train faster, but quality will not be as good as the new presets: they fixed the endings, structure and late-run degradation this recipe has. Lyric timing is off and the audio cache is not re-cut for it, so it is close to the old recipe rather than exact.')}</p>}
         <div className="mt-3 flex items-center gap-2 flex-wrap">
@@ -1767,7 +1774,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
               : undefined)}
           {field(t('trainingStudio.yue2.method.previewSeed', 'Preview seed'), 'seed', 'number', form.preview, value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: Number(value) } })),
             t('trainingStudio.yue2.method.previewSeedInfo', 'The random seed used for every preview render, so previews across checkpoints are directly comparable rather than each landing on a different random take.'), t('trainingStudio.yue2.method.previewSeedMeta', 'default 424242'),
-            !fieldLocked('seed') && form.preview.seed !== LADDER_PREVIEW.seed
+            !fieldLocked('seed', form.preview) && form.preview.seed !== LADDER_PREVIEW.seed
               ? () => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, seed: LADDER_PREVIEW.seed } }))
               : undefined)}
           {field(t('trainingStudio.yue2.method.previewTakes', 'Takes per checkpoint'), 'takes', 'number', form.preview, value => setForm(previous => ({ ...previous, preview: { ...defaultPreview(previous.saveEvery), ...previous.preview, takes: Math.max(1, Math.min(4, Math.round(Number(value)) || 1)) } })),
