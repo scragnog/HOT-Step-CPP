@@ -20,6 +20,10 @@
 #include "silence-latent.h"
 #include "timer.h"
 #include "weight-source.h"
+#include "minimax/mm3-dav-encode.h"
+#include "minimax/mm3-refiner-dit.h"  // no mm3-dit-graph.h in this translation unit, so no MM3_DIT_MAX_NODES clash
+#include "minimax/mm3-refiner-mert.h"
+#include "minimax/mm3-vocoder-graph.h"
 
 #include <algorithm>
 #include <cassert>
@@ -79,6 +83,9 @@ struct ModelKeyHash {
             // StableStep adapters are merged into the SA3 DiT at load —
             // distinct adapter specs must cache as distinct models.
             h ^= std::hash<std::string>{}(k.adapter_stack) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+        } else if (k.kind == MODEL_MM3_REFINER_MERT) {
+            // the layer statistics come from the refiner GGUF named in adapter_path
+            h ^= std::hash<std::string>{}(k.adapter_path) + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
         }
         return h;
     }
@@ -110,6 +117,9 @@ struct ModelKeyEq {
         if (a.kind == MODEL_SA3_GGML) {
             // StableStep adapter spec is baked into the loaded DiT weights.
             return a.adapter_stack == b.adapter_stack;
+        }
+        if (a.kind == MODEL_MM3_REFINER_MERT) {
+            return a.adapter_path == b.adapter_path;
         }
         return true;
     }
@@ -696,6 +706,130 @@ Sa3GgmlRefine * store_require_sa3_ggml(ModelStore * s, const ModelKey & k) {
     }
     install_entry(s, k, m, bytes_of_sa3_ggml(m), "SA3-Refine-GGML", del_sa3_ggml);
     fprintf(stderr, "[Store] Load SA3-Refine-GGML: %.0f ms (%zu adapters)\n", t.ms(), specs.size());
+    return m;
+}
+
+
+// ── MiniMax-Music3 latent refiner modules ───────────────────────────────────
+// Each loader reports why it failed through a thread-local string, so the refiner
+// job can name the bad file instead of saying "load failed".
+
+static thread_local std::string g_mm3_last_error;
+
+std::string store_mm3_last_error() {
+    return g_mm3_last_error;
+}
+
+static void del_mm3_enc(void * p) {
+    mm3_enc_free(static_cast<MM3Enc *>(p));
+    delete static_cast<MM3Enc *>(p);
+}
+
+static void del_mm3_mert(void * p) {
+    mm3_mert_free(static_cast<Mm3Mert *>(p));
+    delete static_cast<Mm3Mert *>(p);
+}
+
+static void del_mm3_dit(void * p) {
+    mm3_dit_free(static_cast<Mm3RefinerDit *>(p));
+    delete static_cast<Mm3RefinerDit *>(p);
+}
+
+static void del_mm3_voc(void * p) {
+    mm3_refvoc_free(static_cast<Mm3RefVoc *>(p));
+    delete static_cast<Mm3RefVoc *>(p);
+}
+
+static size_t buffer_bytes(const WeightCtx & w) {
+    return w.buffer ? ggml_backend_buffer_get_size(w.buffer) : 0;
+}
+
+MM3Enc * store_require_mm3_enc(ModelStore * s, const ModelKey & k) {
+    std::lock_guard<std::mutex> lock(s->mtx);
+    if (auto * hit = cache_hit<MM3Enc>(s, k)) {
+        return hit;
+    }
+    if (s->policy == EVICT_STRICT) {
+        evict_all_except(s, k);
+    }
+    Timer       t;
+    MM3Enc *    m = new MM3Enc();
+    std::string err;
+    g_mm3_last_error.clear();
+    if (!mm3_enc_load(m, k.path.c_str(), &err)) {
+        g_mm3_last_error = err;
+        delete m;
+        return nullptr;
+    }
+    m->strict_f32 = true;  // the refiner's DAV latents must meet its parity gate, which TF32 does not
+    install_entry(s, k, m, m->vram, "MM3-DAV-Enc", del_mm3_enc);
+    fprintf(stderr, "[Store] Load MM3-DAV-Enc: %.0f ms\n", t.ms());
+    return m;
+}
+
+Mm3Mert * store_require_mm3_refiner_mert(ModelStore * s, const ModelKey & k) {
+    std::lock_guard<std::mutex> lock(s->mtx);
+    if (auto * hit = cache_hit<Mm3Mert>(s, k)) {
+        return hit;
+    }
+    if (s->policy == EVICT_STRICT) {
+        evict_all_except(s, k);
+    }
+    Timer       t;
+    Mm3Mert *   m = new Mm3Mert();
+    std::string err;
+    g_mm3_last_error.clear();
+    if (!mm3_mert_load(m, k.path, k.adapter_path, &err)) {
+        g_mm3_last_error = err;
+        delete m;
+        return nullptr;
+    }
+    install_entry(s, k, m, buffer_bytes(m->wctx), "MM3-Refiner-MERT", del_mm3_mert);
+    fprintf(stderr, "[Store] Load MM3-Refiner-MERT: %.0f ms\n", t.ms());
+    return m;
+}
+
+Mm3RefinerDit * store_require_mm3_refiner_dit(ModelStore * s, const ModelKey & k) {
+    std::lock_guard<std::mutex> lock(s->mtx);
+    if (auto * hit = cache_hit<Mm3RefinerDit>(s, k)) {
+        return hit;
+    }
+    if (s->policy == EVICT_STRICT) {
+        evict_all_except(s, k);
+    }
+    Timer           t;
+    Mm3RefinerDit * m = new Mm3RefinerDit();
+    std::string     err;
+    g_mm3_last_error.clear();
+    if (!mm3_dit_load(m, k.path, &err)) {
+        g_mm3_last_error = err;
+        delete m;
+        return nullptr;
+    }
+    install_entry(s, k, m, buffer_bytes(m->wctx), "MM3-Refiner-DiT", del_mm3_dit);
+    fprintf(stderr, "[Store] Load MM3-Refiner-DiT: %.0f ms\n", t.ms());
+    return m;
+}
+
+Mm3RefVoc * store_require_mm3_refiner_voc(ModelStore * s, const ModelKey & k) {
+    std::lock_guard<std::mutex> lock(s->mtx);
+    if (auto * hit = cache_hit<Mm3RefVoc>(s, k)) {
+        return hit;
+    }
+    if (s->policy == EVICT_STRICT) {
+        evict_all_except(s, k);
+    }
+    Timer       t;
+    Mm3RefVoc * m = new Mm3RefVoc();
+    std::string err;
+    g_mm3_last_error.clear();
+    if (!mm3_refvoc_load(m, k.path, &err)) {
+        g_mm3_last_error = err;
+        delete m;
+        return nullptr;
+    }
+    install_entry(s, k, m, m->vram, "MM3-Refiner-Voc", del_mm3_voc);
+    fprintf(stderr, "[Store] Load MM3-Refiner-Voc: %.0f ms\n", t.ms());
     return m;
 }
 

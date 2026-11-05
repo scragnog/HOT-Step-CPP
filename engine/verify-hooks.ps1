@@ -82,6 +82,12 @@ $familyHooks = @(
         LostMsg = "MID-FILE include (after the job system: Job/job_create/work_push), not next to mm3-server.h at the top - re-add it AFTER job_status_str(), which is where Job, job_create, job_set_phase, work_push and g_store are defined. Lose the include and POST /mm3/synth vanishes, leaving only the deprecated /mm3/synth-e2e bring-up path that does GPU work on an httplib thread. Without the call, POST /mm3/synth and GET /mm3/job are not routed."
     }
     @{
+        Family  = "MiniMax-Music3 latent refiner"
+        Include = '#include\s+"minimax/mm3-refiner-job\.h"'
+        Call    = 'mm3_refiner_register_routes\s*\('
+        LostMsg = "MID-FILE include like mm3-job.h (it needs Job/job_create/job_set_phase/work_push/g_store), re-add it right after minimax/mm3-job.h. Without the include or the call, POST /mm3/refine is not routed and the optional refiner post-process stage 404s."
+    }
+    @{
         Family  = "YuE2"
         Include = '#include\s+"yue2/yue2-server\.h"'
         Call    = 'yue2_register_routes\s*\('

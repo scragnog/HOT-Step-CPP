@@ -62,6 +62,14 @@
 
 struct ModelStore;
 
+// MiniMax-Music3 latent refiner modules (engine/src/minimax/mm3-refiner*.h). Opaque
+// here: only model-store.cpp and the refiner include their definitions, so this
+// header stays light for every other translation unit.
+struct MM3Enc;
+struct Mm3Mert;
+struct Mm3RefinerDit;
+struct Mm3RefVoc;
+
 enum ModelKind {
     MODEL_LM,         // Qwen3LM        from acestep-5Hz-lm-*.gguf
     MODEL_TEXT_ENC,   // Qwen3GGML      from Qwen3-Embedding-*.gguf
@@ -72,6 +80,10 @@ enum ModelKind {
     MODEL_FSQ_TOK,    // TokGGML        from acestep-v15-*.gguf (tokenizer.*)
     MODEL_FSQ_DETOK,  // DetokGGML      from acestep-v15-*.gguf (detokenizer.*)
     MODEL_SA3_GGML,    // Sa3GgmlRefine: generation DiT + 3 sa3-*.gguf beside it (GGML backend)
+    MODEL_MM3_ENC,           // MM3Enc        from mm3-enc-*.gguf (DAV encoder, audio -> latents)
+    MODEL_MM3_REFINER_MERT,  // Mm3Mert       from mm3-refiner-mert-*.gguf (+ layer statistics from the refiner GGUF)
+    MODEL_MM3_REFINER_DIT,   // Mm3RefinerDit from mm3-refiner-refiner-*.gguf
+    MODEL_MM3_REFINER_VOC,   // Mm3RefVoc     from mm3-voc-*.gguf (DAV decoder, latents -> audio)
 };
 
 struct ModelKey {
@@ -130,6 +142,19 @@ DiTGGML *    store_require_dit(ModelStore * s, const ModelKey & k);
 VAEEncoder * store_require_vae_enc(ModelStore * s, const ModelKey & k);
 VAEGGML *    store_require_vae_dec(ModelStore * s, const ModelKey & k);
 Sa3GgmlRefine * store_require_sa3_ggml(ModelStore * s, const ModelKey & k);  // k.path = DiT GGUF path; the other 3 sa3-*.gguf sit in its directory
+// MM3 latent refiner modules. They share no VRAM with each other under EVICT_STRICT, so the
+// refiner requires, uses and releases them one phase at a time. Null on failure; the reason
+// is store_mm3_last_error() on the same thread.
+//   MM3Enc:        k.path = mm3-enc GGUF
+//   Mm3Mert:       k.path = MERT GGUF, k.adapter_path = refiner GGUF (normalization.layer_{mean,std})
+//   Mm3RefinerDit: k.path = refiner GGUF
+//   Mm3RefVoc:     k.path = mm3-voc GGUF (or a legacy bundle holding voc.*)
+MM3Enc *        store_require_mm3_enc(ModelStore * s, const ModelKey & k);
+Mm3Mert *       store_require_mm3_refiner_mert(ModelStore * s, const ModelKey & k);
+Mm3RefinerDit * store_require_mm3_refiner_dit(ModelStore * s, const ModelKey & k);
+Mm3RefVoc *     store_require_mm3_refiner_voc(ModelStore * s, const ModelKey & k);
+std::string     store_mm3_last_error();
+
 TokGGML *    store_require_fsq_tok(ModelStore * s, const ModelKey & k);
 DetokGGML *  store_require_fsq_detok(ModelStore * s, const ModelKey & k);
 

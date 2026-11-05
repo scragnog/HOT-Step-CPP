@@ -136,6 +136,9 @@ struct MM3Enc {
     bool                  backend_ref = false;
     WeightCtx             wctx        = {};
     size_t                vram        = 0;
+    // Full-FP32 GEMMs (see mm3_enc_conv1d). The refiner sets it: on TF32 the DAV latents miss its
+    // parity gate. Training leaves it off, so its speed and numbers are unchanged.
+    bool                  strict_f32  = false;
 
     // cached graph, rebuilt when the chunk length changes
     ggml_context *        gctx  = nullptr;
@@ -340,12 +343,16 @@ static ggml_tensor * mm3_enc_snake(ggml_context * ctx, ggml_tensor * x, ggml_ten
 
 // Conv1d (+bias) with stride and dilation. w [K, IC, OC], x [T, IC] -> [OL, OC].
 // Explicit F32 im2col: ggml_conv_1d forces F16 (vocoder design note 5).
+// strict: run the GEMM in full FP32 (HOT-ggml GGML_HINT_STRICT_F32) instead of ggml-cuda's TF32 default.
 static ggml_tensor * mm3_enc_conv1d(ggml_context * ctx, ggml_tensor * w, ggml_tensor * b, ggml_tensor * x,
-                                    int stride, int pad, int dilation) {
+                                    int stride, int pad, int dilation, bool strict = false) {
     ggml_tensor * col = ggml_im2col(ctx, w, x, stride, /*s1*/ 0, pad, 0, dilation, 0, /*is_2D*/ false,
                                     GGML_TYPE_F32);  // [IC*K, OL, 1, 1]
     ggml_tensor * y = ggml_mul_mat(ctx, ggml_reshape_2d(ctx, col, col->ne[0], col->ne[1] * col->ne[2]),
                                    ggml_reshape_2d(ctx, w, w->ne[0] * w->ne[1], w->ne[2]));  // [OL, OC]
+    if (strict) {
+        ggml_mul_mat_set_hint(y, GGML_HINT_STRICT_F32);
+    }
     if (b) {
         y = ggml_add(ctx, y, ggml_reshape_2d(ctx, b, 1, b->ne[0]));
     }
@@ -353,12 +360,12 @@ static ggml_tensor * mm3_enc_conv1d(ggml_context * ctx, ggml_tensor * w, ggml_te
 }
 
 static ggml_tensor * mm3_enc_res_unit(ggml_context * ctx, const MM3EncResUnit & r, ggml_tensor * x,
-                                      int dilation) {
+                                      int dilation, bool strict) {
     ggml_tensor * skip = x;
     ggml_tensor * y    = mm3_enc_snake(ctx, x, r.snake1_alpha, r.inv1);
-    y                  = mm3_enc_conv1d(ctx, r.conv1_w, r.conv1_b, y, 1, 3 * dilation, dilation);
+    y                  = mm3_enc_conv1d(ctx, r.conv1_w, r.conv1_b, y, 1, 3 * dilation, dilation, strict);
     y                  = mm3_enc_snake(ctx, y, r.snake2_alpha, r.inv2);
-    y                  = mm3_enc_conv1d(ctx, r.conv2_w, r.conv2_b, y, 1, 0, 1);
+    y                  = mm3_enc_conv1d(ctx, r.conv2_w, r.conv2_b, y, 1, 0, 1, strict);
     // Padding keeps the length, so this never fires — kept because the
     // reference has it and a config change that broke the invariant should
     // crop rather than assert.
@@ -375,23 +382,23 @@ static ggml_tensor * mm3_enc_build(ggml_context * ctx, const MM3Enc & e, ggml_te
     const MM3EncConfig &  c = e.cfg;
     const MM3EncWeights & w = e.w;
 
-    ggml_tensor * h = mm3_enc_conv1d(ctx, w.conv_in_w, w.conv_in_b, audio, 1, 3, 1);
+    ggml_tensor * h = mm3_enc_conv1d(ctx, w.conv_in_w, w.conv_in_b, audio, 1, 3, 1, e.strict_f32);
 
     for (size_t bi = 0; bi < w.blk.size(); bi++) {
         const MM3EncBlock & b = w.blk[bi];
         for (size_t ri = 0; ri < b.res.size(); ri++) {
-            h = mm3_enc_res_unit(ctx, b.res[ri], h, c.res_dilations[ri]);
+            h = mm3_enc_res_unit(ctx, b.res[ri], h, c.res_dilations[ri], e.strict_f32);
         }
         h = mm3_enc_snake(ctx, h, b.snake_alpha, b.inv);
         const int s = c.rates[bi];
         // k = 2s, pad = ceil(s/2); every rate is even so this is s/2 and the
         // output length is exactly T/s (see the header's length note).
-        h = mm3_enc_conv1d(ctx, b.conv_w, b.conv_b, h, s, (s + 1) / 2, 1);
+        h = mm3_enc_conv1d(ctx, b.conv_w, b.conv_b, h, s, (s + 1) / 2, 1, e.strict_f32);
     }
 
     h = mm3_enc_snake(ctx, h, w.snake_out_alpha, w.inv_out);
-    h = mm3_enc_conv1d(ctx, w.conv_out_w, w.conv_out_b, h, 1, 1, 1);
-    h = mm3_enc_conv1d(ctx, w.mean_w, w.mean_b, h, 1, 0, 1);   // posterior MEAN
+    h = mm3_enc_conv1d(ctx, w.conv_out_w, w.conv_out_b, h, 1, 1, 1, e.strict_f32);
+    h = mm3_enc_conv1d(ctx, w.mean_w, w.mean_b, h, 1, 0, 1, e.strict_f32);   // posterior MEAN
     return h;
 }
 

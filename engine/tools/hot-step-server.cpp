@@ -329,6 +329,11 @@ enum class JobPhase : int {
     YUE2_PLAN          = 15,
     YUE2_SEMANTIC      = 16,
     YUE2_NAR           = 17,
+    // HOT-Step: MM3 latent refiner (POST /mm3/refine, minimax/mm3-refiner-job.h).
+    // VAE_DECODE and ENCODING_OUTPUT are reused for its decode and WAV phases.
+    LOADING_REFINER    = 18,
+    REFINE_CONDITION   = 19,
+    REFINE_BRIDGE      = 20,
 };
 
 static const char * job_phase_str(JobPhase p) {
@@ -351,6 +356,9 @@ static const char * job_phase_str(JobPhase p) {
         case JobPhase::YUE2_PLAN:          return "plan";
         case JobPhase::YUE2_SEMANTIC:      return "semantic";
         case JobPhase::YUE2_NAR:           return "nar";
+        case JobPhase::LOADING_REFINER:    return "loading_refiner";
+        case JobPhase::REFINE_CONDITION:   return "refine_condition";
+        case JobPhase::REFINE_BRIDGE:      return "refine_bridge";
     }
     return "unknown";
 }
@@ -388,6 +396,9 @@ struct Job {
     // "tracks" in the status JSON; empty for a single-track job and for every
     // other family.
     std::string       result_tracks;
+    // Why a FAILED job failed, for families that report it (the MM3 refiner).
+    // Emitted as "error" in the status JSON; empty for every other family.
+    std::string       result_error;
     std::atomic<bool> cancel{ false };
 
     // Phase tracking (advisory, independent of `status`). phase_step/phase_total
@@ -491,6 +502,12 @@ static const char * job_status_str(int s) {
 // The call site is mm3_register_job_routes(svr) next to mm3_register_routes().
 // Checked by verify-hooks.ps1.
 #include "minimax/mm3-job.h"
+
+// HOT-STEP: POST /mm3/refine, the MM3 latent refiner as an audio -> audio job on the
+// same work queue. Mid-file for the same reason as mm3-job.h (Job, job_create(),
+// job_set_phase(), work_push(), g_store). Call site: mm3_refiner_register_routes(svr,
+// models_dir) next to mm3_register_job_routes(). Checked by verify-hooks.ps1.
+#include "minimax/mm3-refiner-job.h"
 
 // HOT-STEP: the only other hook wiring engine/src/yue2/ in. ONE include (not
 // MM3's two) — yue2-server.h itself pulls in yue2-job.h, which needs Job,
@@ -3475,6 +3492,9 @@ int main(int argc, char ** argv) {
     // minimax/mm3-job.h has to be included after this file's job system.
     mm3_register_job_routes(svr);
 
+    // HOT-STEP: POST /mm3/refine (the optional latent-refiner post-process stage).
+    mm3_refiner_register_routes(svr, models_dir);
+
     // HOT-STEP: YuE2 backend — GET /yue2/props, POST /yue2/warm, POST
     // /yue2/unload, POST /yue2/select-model, POST /yue2/tokenize-check, and
     // the production POST /yue2/synth (which rides the SHARED GET/POST /job
@@ -3662,6 +3682,20 @@ int main(int argc, char ** argv) {
                 yyjson_mut_doc_free(adoc);
             }
             body += "}";
+        }
+        // HOT-Step: a failed refiner job says why (read only once status is failed).
+        if (job->status.load() == 2 && !job->result_error.empty()) {
+            yyjson_mut_doc * edoc  = yyjson_mut_doc_new(NULL);
+            yyjson_mut_val * eroot = yyjson_mut_obj(edoc);
+            yyjson_mut_doc_set_root(edoc, eroot);
+            yyjson_mut_obj_add_strn(edoc, eroot, "error", job->result_error.c_str(), job->result_error.size());
+            if (char * ejson = yyjson_mut_write(edoc, 0, NULL)) {
+                std::string frag = ejson;  // {"error":"..."}
+                body.pop_back();
+                body += "," + frag.substr(1, frag.size() - 2) + "}";
+                free(ejson);
+            }
+            yyjson_mut_doc_free(edoc);
         }
         res.set_content(body, "application/json");
     });

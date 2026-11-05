@@ -573,15 +573,17 @@ static MM3VocGraph g_mm3_voc;
 //                That is the layout audio_encode_wav_* expects.
 //
 // Not thread-safe: the caller serialises (mm3-server.h holds g_mm3_mutex).
-static bool mm3_vocoder_decode(const MM3Model & m, const float * latents, int64_t L,
-                               std::vector<float> & out_stereo, std::string * err = nullptr) {
+// _with takes the graph state explicitly (the refiner owns its own); the plain
+// mm3_vocoder_decode below is the MM3 backend's, on the process-wide g_mm3_voc.
+static bool mm3_vocoder_decode_with(const MM3Model & m, MM3VocGraph * g, const float * latents, int64_t L,
+                                   std::vector<float> & out_stereo, std::string * err = nullptr) {
     if (L <= 0) {
         if (err) {
             *err = "frames must be > 0";
         }
         return false;
     }
-    if (!mm3_vocoder_prepare(m, &g_mm3_voc, err)) {
+    if (!mm3_vocoder_prepare(m, g, err)) {
         return false;
     }
 
@@ -590,8 +592,6 @@ static bool mm3_vocoder_decode(const MM3Model & m, const float * latents, int64_
     const int64_t        FC  = (int64_t) vc.fold_channels;
     const int64_t        T   = L * up;
     out_stereo.assign((size_t) (2 * T), 0.0f);
-
-    MM3VocGraph * g = &g_mm3_voc;
 
     // Single-shot path. Channels 0..63 and 64..127 are each a contiguous run of
     // FC*L floats, so the graph input can be fed straight from `latents`.
@@ -635,5 +635,76 @@ static bool mm3_vocoder_decode(const MM3Model & m, const float * latents, int64_
                    (size_t) ((ce - cs) * up) * sizeof(float));
         }
     }
+    return true;
+}
+
+static bool mm3_vocoder_decode(const MM3Model & m, const float * latents, int64_t L,
+                               std::vector<float> & out_stereo, std::string * err = nullptr) {
+    return mm3_vocoder_decode_with(m, &g_mm3_voc, latents, L, out_stereo, err);
+}
+
+// ── Vocoder-only holder (the MM3 latent refiner's decoder) ──────────────────
+//
+// The refiner decodes with the same DAV decoder as the MM3 backend but must not
+// need the 12-23 GB MM3 model warm, so it loads just the voc tensors from the
+// mm3-voc GGUF (or a legacy bundle) into an MM3Model that carries nothing else,
+// with its own graph state. ModelStore owns one of these (MODEL_MM3_REFINER_VOC).
+
+struct Mm3RefVoc {
+    MM3Model    model;
+    MM3VocGraph graph;
+    size_t      vram = 0;
+};
+
+static void mm3_refvoc_free(Mm3RefVoc * v) {
+    mm3_vocoder_free(&v->graph);  // graph state points into the weights: first
+    wctx_free(&v->model.wctx_synth);
+    if (v->model.backend_ref) {
+        backend_release(v->model.backend, v->model.cpu_backend);
+    }
+    v->model = MM3Model{};
+    v->vram  = 0;
+}
+
+static bool mm3_refvoc_load(Mm3RefVoc * v, const std::string & path, std::string * err) {
+    mm3_refvoc_free(v);
+    MM3Model &               m = v->model;
+    std::vector<std::string> errs;
+    MM3FileInfo              fi;
+    mm3_probe_file(path, &fi, nullptr, &m.synth_cfg, 1u << MM3_R_VOC, &errs);
+    if (!fi.probe_ok || !errs.empty()) {
+        *err = errs.empty() ? path + ": not a readable MiniMax-Music3 vocoder GGUF" : errs[0];
+        return false;
+    }
+    GGUFModel gf = {};
+    if (!gf_load(&gf, path.c_str())) {
+        *err = "cannot open " + path;
+        return false;
+    }
+    const MM3VocConfig & c = m.synth_cfg.voc;
+    wctx_init(&m.wctx_synth, 7 + (int) c.upsample_rates.size() * (3 + (int) c.res_dilations.size() * 6));
+    MM3Loader ld{ &m.wctx_synth, &gf, nullptr, &errs };
+    mm3_load_voc_tensors(&m, ld);
+    if (!errs.empty()) {
+        gf_close(&gf);
+        mm3_refvoc_free(v);
+        *err = errs[0];
+        return false;
+    }
+    BackendPair bp = backend_init("MM3-RefVoc");
+    m.backend      = bp.backend;
+    m.cpu_backend  = bp.cpu_backend;
+    m.backend_ref  = true;
+    const bool ok  = wctx_alloc(&m.wctx_synth, m.backend);
+    gf_close(&gf);
+    if (!ok) {
+        mm3_refvoc_free(v);
+        *err = "backend buffer allocation failed for the refiner vocoder";
+        return false;
+    }
+    v->vram         = m.wctx_synth.buffer ? ggml_backend_buffer_get_size(m.wctx_synth.buffer) : 0;
+    m.vram_synth    = v->vram;
+    m.rest_resident = true;  // what mm3_vocoder_prepare checks
+    m.loaded        = true;
     return true;
 }

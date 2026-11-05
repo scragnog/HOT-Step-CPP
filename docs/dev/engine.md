@@ -246,7 +246,7 @@ case.
 ## How ace-server is organised
 
 One process, one port, one GPU worker thread. `POST /lm`, `/synth`, `/understand`,
-`/vae`, `/codes-decode`, `/warm`, `/mm3/synth` and `/yue2/synth` create a job, push
+`/vae`, `/codes-decode`, `/warm`, `/mm3/synth`, `/mm3/refine` and `/yue2/synth` create a job, push
 it onto a FIFO queue and return `{"id":"..."}` straight away. Clients poll
 `GET /job?id=` and fetch the result with `GET /job?id=&result=1`. ACE-Step, MM3 and
 YuE2 jobs share that queue, so they never run on the GPU at the same time. The job
@@ -367,6 +367,74 @@ load. `mm3-plugins.h` lets the same Lua solvers, schedulers and guidance run on 
 MM3 flow stage. `mm3-ar-cache.h` and `mm3-hiddens-file.h` cache the planner output
 so a re-render can skip stage 1. Deeper notes, including the trap list, are in
 `.claude/skills/mm3-backend/SKILL.md`.
+
+### MM3 latent refiner: audio in, audio out
+
+An optional post-process stage, `POST /mm3/refine`, runs the terminusresearch
+minimax-music3-latent-refiner v0.10 on any finished render, not only MM3's. It is the
+package's `MiniMaxMusic3RefinerPipeline` plus the loudness convention of the runner we
+validated it with. Request and wire contract: [engine/docs/ARCHITECTURE.md](../../engine/docs/ARCHITECTURE.md#mm3-latent-refiner-request-post-mm3refine).
+
+```
+audio (any rate, mono or stereo) -> 44.1 kHz stereo, zero-padded to the 512-sample DAV hop
+  -> windows (30 s, 2 s overlap by default; window 0 = the whole clip as one sequence)
+  -> DAV encoder (mm3-dav-encode.h)               audio -> latents [128, L], 86.13 Hz
+  -> MERT-v1-95M (mm3-refiner-mert.h)             13 hidden states, resampled to L frames
+  -> refiner DiT bridge (mm3-refiner-dit.h)       32 deterministic Euler steps from the input latents
+  -> linear-fade overlap stitch (mm3-refiner.h)
+  -> DAV decoder (mm3-vocoder-graph.h)            latents -> 44.1 kHz stereo
+  -> trim, match the input's integrated loudness, clip, back to the input rate, mix
+```
+
+`mm3-refiner.h` holds the pipeline (`mm3_refiner_run`), the window plan, the overlap-add and a
+port of pyloudnorm's K-weighted integrated loudness; `mm3-refiner-job.h` is the route and job.
+Windowing, hop rounding (python's half-to-even `round`), the `torch.linspace` fades and the
+trim follow `pipeline.py` exactly. `mix` blends in the audio domain after the loudness match,
+and `mix=0` returns the input untouched without loading anything (the route answers it
+without queueing). A mono source (identical channels) comes back mono: the refiner is not
+channel-symmetric, so its two outputs differ slightly.
+
+**Residency.** All four modules go through `ModelStore` (`MODEL_MM3_ENC`,
+`MODEL_MM3_REFINER_MERT`, `MODEL_MM3_REFINER_DIT`, `MODEL_MM3_REFINER_VOC`; labels
+`MM3-DAV-Enc`, `MM3-Refiner-MERT`, `MM3-Refiner-DiT`, `MM3-Refiner-Voc`). Under `EVICT_STRICT`
+only one GPU module is resident, so the run is phased: every window is encoded, then every
+window gets its MERT states, then every window is bridged, then the stitched latents are
+decoded. Each module is required once and released before the next (RAII handles, so success,
+error and cancel all unload; under keep-loaded they stay for the next job). Conditioning stays on
+the host between phases: about 100 MB per 30 s window of MERT states, freed as each window's
+bridge finishes. The decoder is `Mm3RefVoc`, the `voc.*` tensors loaded on their own with their
+own graph state, so the 12 to 23 GB MM3 model need not be warm. All four files are opened
+before any module loads, so a missing or unreadable file fails fast and names its role.
+
+**Precision.** The DAV encoder (`strict_f32`, set by the store; training leaves it off) and MERT
+run their GEMMs with `GGML_HINT_STRICT_F32`: on ggml-cuda's default TF32 the DAV latents and
+MERT states miss the frozen parity gates. The refiner DiT and the decoder run on the default.
+
+**Cost.** A 30 s window peaks at about 2.3 GB of VRAM beyond the idle baseline, the DiT's dense
+attention being most of it. Direct mode (`window=0`) attends over 2L tokens, so memory grows with
+the square of the clip: 60 s peaks at about 6.3 GB, and the limit is 5168 frames (60 s), answered
+with 413 beyond it. Measured on an RTX 5090 with the GPU idle and all four modules cold-loaded
+(F32 refiner and MERT, F16 encoder and decoder): a 34 s clip at 32 steps takes 6.5 s, a 60 s clip
+(three windows) 8.9 s; the bridge is about two thirds of that.
+
+**Style vector.** The DiT takes a 512-d CLAP vector per window. No producer is wired yet, so
+`/mm3/refine` answers 501 rather than refine with zeros or a constant.
+`mm3_refiner_style_source()` is the one place a producer plugs in. For testing,
+`HOTSTEP_MM3_REFINE_TEST_STYLE=<raw float32 file of 512 values>` supplies one vector for every
+window; the probe feeds the torch fixtures' vectors per window.
+
+**Checks.** `mm3-refiner-probe` (`engine/tools/mm3-refiner-probe.cpp`) runs the whole pipeline
+against the torch fixtures (window starts, overlap weights, DAV latents, stitched latents, raw and
+final audio, loudness gain) and the behaviour tests; `tools/mm3-refiner/check-integration.ps1`
+runs it for steps 1, 8 and 32 on all twelve clips, then drives `POST /mm3/refine` on throwaway
+engines (400, 413, 501, bypass, phases, cancel, FIFO, 48 kHz, mono, VRAM growth). It needs the
+ignored fixtures from `tools/mm3-refiner/README.md` and a `tools/mm3-refiner/artifacts/models/mm3/`
+folder holding `mm3-refiner-refiner-f32`, `mm3-refiner-mert-f32`, `mm3-enc-f16` and `mm3-voc-f16`.
+
+Two header quirks: `mm3-refiner.h` hides the `MM3_DIT_MAX_NODES` macro of `mm3-dit-graph.h`
+while it reads `mm3-refiner-dit.h`, which declares a constant of that name; and
+`mm3-refiner-job.h` has its own error helper because `json_error()` is defined after its
+include point in `hot-step-server.cpp`.
 
 ### YuE2: plan, compose, render
 
@@ -589,9 +657,9 @@ The HOT-Step files these hooks bring in:
 - `hot-step-build-flags.h` carries `HOT_STEP_DISABLE_FA` for the Volta build.
 
 `hot-step-server.cpp` wires the model families in with one include and one
-registration call each: `minimax/mm3-server.h` plus `minimax/mm3-job.h`
-(`mm3_register_routes`, `mm3_register_job_routes`) and `yue2/yue2-server.h`
-(`yue2_register_routes`). SA3 has no subtree hook; its routes are written in
+registration call each: `minimax/mm3-server.h`, `minimax/mm3-job.h` and
+`minimax/mm3-refiner-job.h` (`mm3_register_routes`, `mm3_register_job_routes`,
+`mm3_refiner_register_routes`) and `yue2/yue2-server.h` (`yue2_register_routes`). SA3 has no subtree hook; its routes are written in
 `hot-step-server.cpp` itself.
 
 `engine/verify-hooks.ps1` checks the four hooks, the sentinel, `hot-step-server.cpp`'s own
@@ -1006,6 +1074,7 @@ response details are in [the endpoint reference](../../engine/docs/ARCHITECTURE.
 | `POST /spectral-lifter` | Spectral Lifter clean-up (CPU) |
 | `GET /mm3/props`, `POST /mm3/warm`, `POST /mm3/unload`, `POST /mm3/select-model` | MM3 status, residency and quant selection |
 | `POST /mm3/synth`, `GET /mm3/job`, `GET /mm3/take`, `GET /mm3/stream` | MM3 generation, progress, ensemble takes, live audio |
+| `POST /mm3/refine` | MM3 latent refiner on any audio (progress and result through `/job`; see [MM3 latent refiner](#mm3-latent-refiner-audio-in-audio-out)) |
 | `POST /mm3/tokenize-check`, `POST /mm3/imatrix` | MM3 prompt token count, imatrix collection for `quantize` |
 | `POST /mm3/voc-decode`, `/mm3/dit-forward`, `/mm3/flow-sample`, `/mm3/depth-frame`, `/mm3/cond-encode`, `/mm3/lm-plan`, `/mm3/synth-e2e` | MM3 bring-up and parity endpoints. They run GPU work outside the job queue; do not build features on them |
 | `GET /yue2/props`, `POST /yue2/warm`, `POST /yue2/unload`, `POST /yue2/select-model` | YuE2 status, residency, quant and adapter selection |

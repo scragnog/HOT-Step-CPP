@@ -1345,6 +1345,48 @@ static bool mm3_load_depth_tensors(MM3Model * m, const GGUFModel & gf, std::vect
     return errs->empty();
 }
 
+// The vocoder tensors: channel ladder hidden_dim >> B, strides from upsample_rates.
+// ld carries the file (gf) and WeightCtx; shared by the stage-2 bundle load below
+// and the refiner's vocoder-only load (mm3_refvoc_load).
+static void mm3_load_voc_tensors(MM3Model * m, MM3Loader & ld) {
+    const MM3VocConfig & v  = m->synth_cfg.voc;
+    const int            NB = (int) v.upsample_rates.size();
+    const int            NR = (int) v.res_dilations.size();
+
+    m->synth.voc.dec_in_w  = ld.req("voc.dec_in.weight", 1, v.fold_channels, v.dec_in_dim);
+    m->synth.voc.dec_in_b  = ld.req("voc.dec_in.bias", v.dec_in_dim);
+    m->synth.voc.conv_in_w = ld.req("voc.conv_in.weight", 7, v.dec_in_dim, v.hidden_dim);
+    m->synth.voc.conv_in_b = ld.req("voc.conv_in.bias", v.hidden_dim);
+
+    m->synth.voc.blk.assign((size_t) NB, MM3VocBlock{});
+    int64_t cin = (int64_t) v.hidden_dim;
+    for (int b = 0; b < NB && ld.errors->empty(); b++) {
+        const int64_t cout   = cin / 2;
+        const int64_t stride = v.upsample_rates[(size_t) b];
+        MM3VocBlock & vb     = m->synth.voc.blk[(size_t) b];
+
+        vb.snake_alpha = ld.req(mm3_fmt("voc.blk.%d.snake.alpha", b), 1, cin, 1);
+        vb.convt_w     = ld.req(mm3_fmt("voc.blk.%d.convt.weight", b), stride * 2, cout, cin);
+        vb.convt_b     = ld.req(mm3_fmt("voc.blk.%d.convt.bias", b), cout);
+
+        vb.res.assign((size_t) NR, MM3VocResUnit{});
+        for (int r = 0; r < NR && ld.errors->empty(); r++) {
+            MM3VocResUnit & ru = vb.res[(size_t) r];
+            ru.snake1_alpha    = ld.req(mm3_fmt2("voc.blk.%d.res.%d.snake1.alpha", b, r), 1, cout, 1);
+            ru.conv1_w         = ld.req(mm3_fmt2("voc.blk.%d.res.%d.conv1.weight", b, r), 7, cout, cout);
+            ru.conv1_b         = ld.req(mm3_fmt2("voc.blk.%d.res.%d.conv1.bias", b, r), cout);
+            ru.snake2_alpha    = ld.req(mm3_fmt2("voc.blk.%d.res.%d.snake2.alpha", b, r), 1, cout, 1);
+            ru.conv2_w         = ld.req(mm3_fmt2("voc.blk.%d.res.%d.conv2.weight", b, r), 1, cout, cout);
+            ru.conv2_b         = ld.req(mm3_fmt2("voc.blk.%d.res.%d.conv2.bias", b, r), cout);
+        }
+        cin = cout;
+    }
+
+    m->synth.voc.snake_out_alpha = ld.req("voc.snake_out.alpha", 1, cin, 1);
+    m->synth.voc.conv_out_w      = ld.req("voc.conv_out.weight", 7, cin, 1);
+    m->synth.voc.conv_out_b      = ld.req("voc.conv_out.bias", 1);
+}
+
 // The stage-2 parts: condition encoder + flow DiT + vocoder, one shared
 // backend buffer (they load and evict together), each read from its own
 // resolved file. In legacy bundle mode all three GGUFModel refs alias the same
@@ -1412,47 +1454,10 @@ static bool mm3_load_rest_tensors(MM3Model * m, const GGUFModel & gf_cond, const
         }
     }
 
-    // ── voc ── channel ladder hidden_dim >> B, strides from upsample_rates
-    ld.gf = &gf_voc;
+    // ── voc ──
+    ld.gf   = &gf_voc;
     ld.wctx = &m->wctx_synth;
-    {
-        const MM3VocConfig & v  = c.voc;
-        const int            NB = (int) v.upsample_rates.size();
-        const int            NR = (int) v.res_dilations.size();
-
-        m->synth.voc.dec_in_w  = ld.req("voc.dec_in.weight", 1, v.fold_channels, v.dec_in_dim);
-        m->synth.voc.dec_in_b  = ld.req("voc.dec_in.bias", v.dec_in_dim);
-        m->synth.voc.conv_in_w = ld.req("voc.conv_in.weight", 7, v.dec_in_dim, v.hidden_dim);
-        m->synth.voc.conv_in_b = ld.req("voc.conv_in.bias", v.hidden_dim);
-
-        m->synth.voc.blk.assign((size_t) NB, MM3VocBlock{});
-        int64_t cin = (int64_t) v.hidden_dim;
-        for (int b = 0; b < NB && errs->empty(); b++) {
-            const int64_t cout   = cin / 2;
-            const int64_t stride = v.upsample_rates[(size_t) b];
-            MM3VocBlock & vb     = m->synth.voc.blk[(size_t) b];
-
-            vb.snake_alpha = ld.req(mm3_fmt("voc.blk.%d.snake.alpha", b), 1, cin, 1);
-            vb.convt_w     = ld.req(mm3_fmt("voc.blk.%d.convt.weight", b), stride * 2, cout, cin);
-            vb.convt_b     = ld.req(mm3_fmt("voc.blk.%d.convt.bias", b), cout);
-
-            vb.res.assign((size_t) NR, MM3VocResUnit{});
-            for (int r = 0; r < NR && errs->empty(); r++) {
-                MM3VocResUnit & ru = vb.res[(size_t) r];
-                ru.snake1_alpha    = ld.req(mm3_fmt2("voc.blk.%d.res.%d.snake1.alpha", b, r), 1, cout, 1);
-                ru.conv1_w         = ld.req(mm3_fmt2("voc.blk.%d.res.%d.conv1.weight", b, r), 7, cout, cout);
-                ru.conv1_b         = ld.req(mm3_fmt2("voc.blk.%d.res.%d.conv1.bias", b, r), cout);
-                ru.snake2_alpha    = ld.req(mm3_fmt2("voc.blk.%d.res.%d.snake2.alpha", b, r), 1, cout, 1);
-                ru.conv2_w         = ld.req(mm3_fmt2("voc.blk.%d.res.%d.conv2.weight", b, r), 1, cout, cout);
-                ru.conv2_b         = ld.req(mm3_fmt2("voc.blk.%d.res.%d.conv2.bias", b, r), cout);
-            }
-            cin = cout;
-        }
-
-        m->synth.voc.snake_out_alpha = ld.req("voc.snake_out.alpha", 1, cin, 1);
-        m->synth.voc.conv_out_w      = ld.req("voc.conv_out.weight", 7, cin, 1);
-        m->synth.voc.conv_out_b      = ld.req("voc.conv_out.bias", 1);
-    }
+    mm3_load_voc_tensors(m, ld);
 
     return errs->empty();
 }

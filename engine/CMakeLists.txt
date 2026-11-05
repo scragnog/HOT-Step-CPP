@@ -769,6 +769,10 @@ link_ggml_backends(mm3-refiner-clap-probe)
 add_executable(mm3-refiner-dit-probe tools/mm3-refiner-dit-probe.cpp)
 target_link_libraries(mm3-refiner-dit-probe PRIVATE yyjson)
 link_ggml_backends(mm3-refiner-dit-probe)
+# MM3 refiner end to end (ModelStore, the four modules, windowing, loudness): fixture parity and behaviour checks.
+add_executable(mm3-refiner-probe tools/mm3-refiner-probe.cpp)
+target_link_libraries(mm3-refiner-probe PRIVATE acestep-core)
+link_ggml_backends(mm3-refiner-probe)
 # HeartMuLa text to music through heartmula/pipeline.h; the smoke test's HeartMuLa case.
 add_executable(heartmula-generate tools/heartmula-generate.cpp)
 target_link_libraries(heartmula-generate PRIVATE yyjson)

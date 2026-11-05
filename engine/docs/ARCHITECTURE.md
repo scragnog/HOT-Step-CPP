@@ -507,6 +507,36 @@ reads `nar` from the handoff. The lane is skipped, and the render runs inline, w
 than `YUE2_OVERLAP_MIN_FREE_GB` (default 4) of free VRAM. Warm, unload and select-model wait
 for a render in flight before touching weights.
 
+### MM3 latent refiner request (`POST /mm3/refine`)
+
+Audio in, audio out: the terminusresearch latent refiner as a post-process on any
+finished render. Parameters come in the query string and the body is the audio (WAV
+or MP3, mono or stereo, any rate). The job runs on the shared FIFO worker.
+
+| Query | Default | Meaning |
+|---|---|---|
+| `steps` | 32 | Bridge steps, a whole number 1 to 64 |
+| `window` | 30 | Window length in seconds. 0 is direct mode: the whole clip as one sequence, limited to 5168 frames (60 s) |
+| `overlap` | 2 | Overlap between windows in seconds, 0 or more and shorter than the window. Window and overlap round to the 512-sample DAV hop, as in the package |
+| `mix` | 1 | 0 to 1, audio domain, after the loudness match. 0 returns the input unchanged without loading a model (and without queueing) |
+
+There is no seed: the bridge is deterministic. Answers: `200 {"id"}`; `400` for an
+empty or undecodable body, a malformed or out-of-range parameter, or audio shorter than
+0.5 s; `413` for direct mode past the frame limit; `501` when a pack file is missing
+(the message names the pattern) or no style source is wired. Models are read from
+`<models>/mm3/`: `mm3-refiner-refiner-*.gguf`, `mm3-refiner-mert-*.gguf`, `mm3-enc-*.gguf`
+and `mm3-voc-*.gguf` (f32 or f16 first, else the first by name).
+
+Progress is `GET /job?id=`. `phase` is `queued`, `loading_refiner`, `refine_condition`
+(`phase_step`/`phase_total` count windows; reported once for the DAV encode pass and once
+for MERT), `refine_bridge` (DiT forwards done over windows x steps), `vae_decode`,
+`encoding_output`, then `done`, `failed` or `cancelled`. A failed job adds `"error"`.
+`POST /job?id=&cancel=1` is honoured between bridge steps and between phases.
+`GET /job?id=&result=1` returns `audio/wav`, float32 stereo at the input rate and with the
+input's frame count (a mono input comes back as identical channels). The result is the
+refined audio with the input's integrated loudness (BS.1770) restored and clipped to
+plus or minus 1, then mixed. Design, residency and checks: [docs/dev/engine.md](../../docs/dev/engine.md#mm3-latent-refiner-audio-in-audio-out).
+
 ### Stable Audio 3 request (`POST /sa3-synth`)
 
 `/sa3-synth` reads its parameters from the query string (or form fields), not a JSON
@@ -962,6 +992,8 @@ GET  /mm3/job?id=                MM3 progress: stage, window, seed, timings.
 GET  /mm3/take?id=&take=N        Audio for one take of an ensemble render.
                                  &lrc=1 returns its LRC, &ar=1 its planner codes.
 GET  /mm3/stream?id=             Live audio chunks of a running job (one reader).
+POST /mm3/refine                 MM3 latent refiner job on the shared queue (audio in,
+                                 audio out); progress and result through /job.
 POST /mm3/tokenize-check         Prompt token count (5000-token limit).
 POST /mm3/imatrix                Activation statistics for quantize --imatrix.
 POST /mm3/voc-decode, /mm3/dit-forward, /mm3/flow-sample, /mm3/depth-frame,
