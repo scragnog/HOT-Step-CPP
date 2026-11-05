@@ -57,12 +57,30 @@ export interface InstaRenderResult { request: Record<string, unknown>; audioInte
 /** Every Cover step after `cover-open` references its draft document by
  *  id + revision; a stale revision is a 409 naming the current one. */
 export const coverDraftRefSchema = z.object({ documentId: z.string().uuid(), revision: z.number().int().min(1) });
+export const leadSheetSourceSchema = z.enum(['sheetsage2', 'sheetsage2-refined', 'muscriptor', 'yourmt3-chordnet']);
+export type CoverLeadSheetSource = z.infer<typeof leadSheetSourceSchema>;
+export const coverScoreSourceSchema = z.enum(['dataset', 'musicxml', 'sheetsage2', 'muscriptor', 'yourmt3-chordnet']);
+/** `cover-source` changes the transcriber or audio at a pinned draft revision.
+ * A changed choice or audio clears ABC, approval and timing together. Use this
+ * kind rather than copying those fields into a generic document update.
+ * Readiness is GET /api/yue2/cover/readiness?source=<leadSheetSource>; the
+ * existing {source, ready, model, refined, message} response is unchanged.
+ * Native remains not installed until the native spawn wrapper is available.
+ * Approved MusicXML/dataset scores can render without invoking readiness.
+ * `dataset` stays the stored spelling; generation metadata uses dataset-sidecar. */
+export const coverSourceSchema = coverDraftRefSchema.extend({
+  leadSheetSource: leadSheetSourceSchema, assetId: z.string().uuid().optional(),
+});
 
-/** POST /api/workflows/jobs { kind: 'cover-open', input }. `cached` lets a
+/** POST /api/workflows/jobs { kind: 'cover-open', input }. `leadSheetSource`
+ *  overrides the stored Models choice, which is snapshotted on creation.
+ *  A subsequent global preference change never rewrites a saved draft.
+ *  `cached` lets a
  *  caller that already has metadata/analysis for this asset skip Node's
  *  parse + Essentia pass. Creates a `cover-draft` document. */
 export const coverOpenSchema = z.object({
   assetId: z.string().uuid(),
+  leadSheetSource: leadSheetSourceSchema.optional(),
   cached: z.object({
     metadata: z.object({ artist: z.string(), title: z.string(), album: z.string(), duration: z.number().finite().nullable() }),
     analysis: z.object({ bpm: z.number().finite(), key: z.string(), scale: z.string().optional() }),
@@ -70,6 +88,7 @@ export const coverOpenSchema = z.object({
 });
 export interface CoverOpenResult {
   documentId: string; revision: number;
+  leadSheetSource?: CoverLeadSheetSource;
   metadata: { artist: string; title: string; album: string; duration: number | null };
   analysis: { bpm: number; key: string; scale?: string } | null;
 }
@@ -80,10 +99,28 @@ export const coverCaptionSchema = coverDraftRefSchema.extend({
 });
 export interface CoverCaptionResult { documentId: string; revision: number; caption: string }
 
-/** POST /api/workflows/jobs { kind: 'cover-transcribe', input }. Resolves a
- *  YuE2 ABC score for the draft's source; `force` skips any cached score. */
+/** POST /api/workflows/jobs { kind: 'cover-transcribe', input }. Resolves an
+ *  editable ABC score using the draft's leadSheetSource. Legacy drafts without
+ *  that field snapshot the stored Models choice on first transcription.
+ *  `force` skips a cached score. Source/audio edits reject late results through
+ *  the document revision and source hash. Persist the returned revision.
+ *  HeartMuLa renders record leadSheetRenderingPath: native uses raw seconds,
+ *  abc uses parsed score seconds, abc-edited regenerates from approved edits. */
 export const coverTranscribeSchema = coverDraftRefSchema.extend({ force: z.boolean().default(false) });
-export interface CoverTranscribeResult { documentId: string; revision: number; abc: string; scoreSource?: string }
+export interface CoverLeadSheetResult {
+  abc: string; scoreSource: z.infer<typeof coverScoreSourceSchema>; leadSheetSource: CoverLeadSheetSource;
+  chordQuality: 'estimated' | 'transcribed' | 'provided';
+  timing: {
+    conversionVersion: 1; path: 'abc' | 'native'; bpm: number;
+    /** Raw seconds, never Beat This! positions or sixteenth indices. */
+    rawEvents: { melody: Array<{ onset: number; offset: number; pitch: number }>;
+      chords: Array<{ onset: number; offset: number; pitch: number }>;
+      drums?: Array<{ onset: number; offset: number; pitch: number }> };
+    grid?: { identity: string; data: unknown };
+    rawMidiEvents?: unknown[];
+  };
+}
+export interface CoverTranscribeResult { documentId: string; revision: number; abc: string; scoreSource?: string; leadSheet?: CoverLeadSheetResult }
 
 /** POST /api/workflows/jobs { kind: 'cover-render', input }. `analysis` and
  *  the ACE/YuE2/SA3 `controls` block carry every per-run override the engine
@@ -109,7 +146,7 @@ export const coverRenderSchema = coverDraftRefSchema.extend({
   title: z.string(), artistName: z.string(), targetArtistName: z.string(),
   lyrics: z.string(), caption: z.string(),
   instrumental: z.boolean(), lyricsSource: z.string().nullable(),
-  scoreSource: z.enum(['dataset']).nullable(),
+  scoreSource: coverScoreSourceSchema.nullable(),
   prepare: z.unknown().optional(),
   analysis: z.object({ bpm: z.number().finite(), key: z.string(), scale: z.string().optional() }).nullable().optional(),
   settings: z.record(z.string(), z.unknown()),
@@ -149,6 +186,8 @@ export interface CoverDraft {
   assetId: string; sha256: string; sourceLabel?: string;
   analysis?: { bpm: number; key: string; scale?: string } | null;
   abc?: string; approvedAbc?: string; scoreSource?: string;
+  leadSheetSource?: CoverLeadSheetSource;
+  leadSheet?: CoverLeadSheetResult;
 }
 export interface CoverRenderResult { request: Record<string, unknown>; audioIntentId: string; audio: unknown }
 
