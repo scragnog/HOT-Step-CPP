@@ -39,7 +39,7 @@ function writeKey<T>(key: string, value: T): void {
 type Mm3RefinerSettings = Pick<GenerationParams, 'mm3RefinerEnabled' | 'mm3RefinerSteps'
   | 'mm3RefinerWindowSeconds' | 'mm3RefinerOverlapSeconds' | 'mm3RefinerMix'>;
 
-/** Use the same bounds for stored settings, profiles and request assembly. */
+/** Use the same bounds for committed settings, profiles and request assembly. */
 export function normalizeMm3RefinerSettings(raw: Mm3RefinerSettings): Required<Mm3RefinerSettings> {
   const number = (v: number | undefined, fallback: number) =>
     typeof v === 'number' && Number.isFinite(v) ? v : fallback;

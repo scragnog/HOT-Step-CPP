@@ -10,7 +10,7 @@ import { useReferenceTracks } from '../../queries/global-models/hooks';
 //   2. VST Chain       — Plugin chain management (existing VstChainDropdown content)
 //   3. Mastering       — Reference-based mastering (existing MasteringDropdown content)
 
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Sparkles, AudioWaveform, Zap, Image, Mic2, BarChart3,
@@ -44,6 +44,16 @@ const LUFS_PRESETS = [
   { id: 'club', label: 'Club / DJ Playback', lufs: -8 },
   { id: 'custom', label: 'Custom', lufs: null },
 ] as const;
+
+function useMm3RefinerAvailability() {
+  const modelRegistry = useQuery(registryOptions());
+  const refinerPack = modelRegistry.data?.packs.find(pack => pack.id === 'mm3-latent-refiner');
+  // Pending packs are deliberately excluded from the public registry response.
+  // Without a pack, do not infer availability from the shared DAV files alone.
+  const refinerAvailable = !!refinerPack?.fileIds.length && refinerPack.fileIds.every(id =>
+    modelRegistry.data?.files.some(file => file.id === id && file.installed && !file.outdated));
+  return { modelRegistry, refinerPack, refinerAvailable };
+}
 
 // ── Mastering Content ───────────────────────────────────────────
 // (Extracted from MasteringDropdown — reference track management)
@@ -205,12 +215,8 @@ export const PostProcessingDropdown: React.FC = () => {
 
   const ppVae = useQuery(ppVaeOptions());
   const ppVaeAvailable = !!ppVae.data?.available;
-  const modelRegistry = useQuery(registryOptions());
-  const refinerPack = modelRegistry.data?.packs.find(pack => pack.id === 'mm3-latent-refiner');
-  // Pending packs are deliberately excluded from the public registry response.
-  // Without a pack, do not infer availability from the shared DAV files alone.
-  const refinerAvailable = !!refinerPack?.fileIds.length && refinerPack.fileIds.every(id =>
-    modelRegistry.data?.files.some(file => file.id === id && file.installed && !file.outdated));
+  const { modelRegistry, refinerPack, refinerAvailable } = useMm3RefinerAvailability();
+  const [refinerWindowDraft, setRefinerWindowDraft] = useState<string | null>(null);
   const stableStep = useQuery(stableStepOptions());
   const stableStepAvailable = !!stableStep.data?.available;
   const stableStepBackends = { gguf: !!stableStep.data?.backends?.gguf };
@@ -454,8 +460,18 @@ export const PostProcessingDropdown: React.FC = () => {
                 info={t('pp.mm3RefinerWindowInfo', 'Audio duration processed per window. Default 30 seconds. Set 0 for direct mode, which processes the whole clip as one dense sequence.')}
                 onReset={gp.mm3RefinerWindowSeconds !== GLOBAL_PARAM_DEFAULTS.mm3RefinerWindowSeconds
                   ? () => gp.setMm3RefinerWindowSeconds(GLOBAL_PARAM_DEFAULTS.mm3RefinerWindowSeconds) : undefined} />
-              <input type="number" min={0} step={0.1} value={gp.mm3RefinerWindowSeconds}
-                onChange={e => { if (e.target.value !== '') gp.setMm3RefinerWindowSeconds(e.target.valueAsNumber); }}
+              <input type="number" min={0} step={0.1} value={refinerWindowDraft ?? gp.mm3RefinerWindowSeconds}
+                onChange={e => setRefinerWindowDraft(e.target.value)}
+                onBlur={e => {
+                  if (e.target.value !== '') gp.setMm3RefinerWindowSeconds(e.target.valueAsNumber);
+                  setRefinerWindowDraft(null);
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  }
+                }}
                 className="w-full rounded-lg border border-zinc-300 dark:border-white/10 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 text-sm" />
             </label>
             {gp.mm3RefinerWindowSeconds === 0 && (
@@ -1234,6 +1250,7 @@ export const PostProcessingDropdown: React.FC = () => {
 
 export const PostProcessingBadge: React.FC = () => {
   const { t } = useTranslation();
+  const { refinerAvailable } = useMm3RefinerAvailability();
   const { masteringEnabled, masteringReference, spectralLifterEnabled, ppVaeReencode, mm3RefinerEnabled, stableStepOn, coverArtEnabled, vocalNaturalizerEnabled, gainOffsetDb, qualityEvalEnabled, postprocessEnabled, postprocessPlugin, whisperLyricsEnabled, yue2AlignLyrics, lufsEnabled, lufsTarget } = useGlobalParams();
   const { chain } = useVstChainStore();
   const vstEnabled = chain.filter(p => p.enabled).length;
@@ -1241,7 +1258,7 @@ export const PostProcessingBadge: React.FC = () => {
   const parts: string[] = [];
   if (postprocessEnabled && postprocessPlugin) parts.push('TD');
   if (ppVaeReencode) parts.push('PP-VAE');
-  if (mm3RefinerEnabled) parts.push(t('pp.mm3RefinerBadge', 'MM3 Refiner'));
+  if (mm3RefinerEnabled && refinerAvailable) parts.push(t('pp.mm3RefinerBadge', 'MM3 Refiner'));
   if (stableStepOn) parts.push('StableStep');
   if (spectralLifterEnabled) parts.push('SL');
   if (vocalNaturalizerEnabled) parts.push('Nat');
