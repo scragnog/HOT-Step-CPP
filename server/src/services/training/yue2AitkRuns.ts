@@ -222,12 +222,14 @@ function checkpointRow(dir: string, step: number, losses: Map<number, Yue2JointS
   files: Pick<Yue2AitkCheckpointRecord, 'adapterPath' | 'optimizerPath' | 'arPath' | 'narPath'>): Yue2AitkCheckpointRecord {
   const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? v : undefined;
   const kl = num(meters.kl_reading) ?? num(meters.ar_kl_mean20);
-  const recent = [...losses].filter(([s]) => s <= step)
-    .sort(([a], [b]) => b - a).slice(0, 20);
+  // Up to 20 latest readings of the newest objective: a window that crossed
+  // the freeze would average the composite with the decoder's loss.
+  const before = [...losses].filter(([s]) => s <= step).sort(([a], [b]) => b - a);
+  const decoderOnly = before.length > 0 && before[0][1].decoderOnly;
+  const boundary = before.findIndex(([, point]) => point.decoderOnly !== decoderOnly);
+  const recent = before.slice(0, Math.min(20, boundary < 0 ? before.length : boundary));
   const meanLoss = recent.length
     ? recent.reduce((sum, [, point]) => sum + point.loss, 0) / recent.length : undefined;
-  // Every step this average covers is frozen: the number is the decoder's.
-  const decoderOnly = recent.length > 0 && recent.every(([, point]) => point.decoderOnly);
   return {
     step, dir,
     ...(meanLoss !== undefined ? { loss: meanLoss } : {}),

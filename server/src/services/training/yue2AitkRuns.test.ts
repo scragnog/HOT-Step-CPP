@@ -125,6 +125,30 @@ test('a checkpoint above the planner freeze carries the decoder loss, not the fr
   }
 });
 
+test('a checkpoint window that crosses the freeze averages only the newest objective', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-aitk-crossing-'));
+  try {
+    // 20 planner steps at 1.6, then frozen steps at 0.5 and 0.7.
+    fs.writeFileSync(path.join(root, 'train.jsonl'), [
+      ...Array.from({ length: 20 }, (_, i) => JSON.stringify({
+        stage: 'joint', step: i + 1, ar_ce: 1.4, ar_kl: 1, nar_mse: 0,
+      })),
+      JSON.stringify({ stage: 'joint', step: 21, planner_frozen: true, nar_mse: 0.5 }),
+      JSON.stringify({ stage: 'joint', step: 22, planner_frozen: true, nar_mse: 0.7 }),
+    ].join('\n'));
+    fs.mkdirSync(path.join(root, 'checkpoint-step21'));
+    fs.mkdirSync(path.join(root, 'checkpoint-step22'));
+    const rows = checkpointRecords(root);
+    const at = (step: number) => rows.find(row => row.step === step)!;
+    assert.ok(Math.abs((at(21).loss ?? 0) - 0.5) < 1e-10, 'one frozen reading, not a blend with 1.6');
+    assert.equal(at(21).decoderOnly, true);
+    assert.ok(Math.abs((at(22).loss ?? 0) - 0.6) < 1e-10);
+    assert.equal(at(22).decoderOnly, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('AR checkpoint mean includes a spike only as one of the last 20 logged steps', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yue2-ar-loss-'));
   try {
