@@ -15,7 +15,8 @@
 # source; HOTSTEP_MM3_REFINE_TEST_STYLE is used only for the override and corrupt-file checks. Exit 0 pass, 1 fail.
 #
 #   pwsh -NoProfile -File tools\mm3-refiner\check-integration.ps1 [-SkipProbe] [-SkipRoute] [-Port 8185]
-param([switch]$SkipProbe, [switch]$SkipRoute, [int]$Port = 8185)
+param([switch]$SkipProbe, [switch]$SkipRoute, [int]$Port = 8185,
+      [ValidateSet(1, 8, 32)][int[]]$ParitySteps = @(8))
 $ErrorActionPreference = 'Stop'
 $repo      = (Resolve-Path "$PSScriptRoot\..\..").Path
 $art       = "$repo\tools\mm3-refiner\artifacts"
@@ -84,6 +85,8 @@ public class WavData {
     }
     // max |a-b| and the relative RMSE of a against b, over the first n frames of both channels
     public static double[] Compare(WavData a, WavData b, int n) {
+        if (a.Rate != b.Rate || a.N != b.N || a.Ch != b.Ch || n != a.N)
+            throw new ArgumentException("WAV comparison requires matching sample rates, frame counts and channels, over the complete clip");
         double max = 0, d2 = 0, r2 = 0;
         for (int c = 0; c < 2; c++) for (int i = 0; i < n; i++) {
             double d = a.Data[c][i] - b.Data[c][i]; if (Math.Abs(d) > max) max = Math.Abs(d); d2 += d * d; r2 += (double)b.Data[c][i] * b.Data[c][i];
@@ -201,26 +204,32 @@ if (-not $SkipRoute) {
         Check ($j.phases.Contains('loading_refiner') -and $j.phases.Contains('refine_condition') -and $j.phases.Contains('refine_bridge')) "phases seen: $($j.phases -join ', ')"
         Check ($j.bridge_total -eq 16 -and $j.bridge_step -ge 8) "bridge progress counts forwards over windows x steps (max $($j.bridge_step)/$($j.bridge_total))"
         $res = Read-Wav (Get-Result $id); $ref = Read-Wav ([IO.File]::ReadAllBytes("$fixtures\boombap-s1001\steps-8\final.wav")); $inp = Read-Wav $clipBytes
-        $cmp = [WavData]::Compare($res, $ref, [Math]::Min($res.N, $ref.N)); $dmax = $cmp[0]; $rel = $cmp[1]
+        $cmp = [WavData]::Compare($res, $ref, $res.N); $dmax = $cmp[0]; $rel = $cmp[1]
         Check ($res.Rate -eq 44100 -and $res.Ch -eq 2 -and $res.N -eq $inp.N) "result is 44.1 kHz stereo, $($res.N) frames = the input's"
         Check ($dmax -le 0.02 -and $rel -le 0.01) ("HTTP result vs torch final.wav: max_abs=$([Math]::Round($dmax,6)) rel_rmse=$([Math]::Round($rel,6)) (gates 0.02 / 0.01)")
         Start-Sleep -Seconds 1; $vramWarm = Get-VramMB   # after the first job: the CUDA context and pools now exist
         Write-Host "  peak VRAM during the job: $($j.peak_mb) MB; idle before the first job $vram0 MB, after it $vramWarm MB"
 
-        # all ten native clips, real CLAP style, 8 steps, against each fixture's final.wav (waveform gates 0.02 / 0.01)
-        $worst = @{ name = ''; dmax = 0.0; rel = 0.0 }; $allOk = $true; $peakClips = 0
-        foreach ($d in Get-ChildItem "$native\*.wav") {
-            $name = $d.BaseName; $bytes = [IO.File]::ReadAllBytes($d.FullName)
-            $r = Submit $bytes '?steps=8'; $id = ($r.Content | ConvertFrom-Json).id; $jc = Wait-Job $id 300
-            $res = Read-Wav (Get-Result $id); $ref = Read-Wav ([IO.File]::ReadAllBytes("$fixtures\$name\steps-8\final.wav"))
-            $cmp = [WavData]::Compare($res, $ref, [Math]::Min($res.N, $ref.N))
-            $ok = $jc.status.status -eq 'done' -and $cmp[0] -le 0.02 -and $cmp[1] -le 0.01; $allOk = $allOk -and $ok
-            $peakClips = [Math]::Max($peakClips, $jc.peak_mb)
-            if ($cmp[1] -gt $worst.rel) { $worst = @{ name = $name; dmax = $cmp[0]; rel = $cmp[1] } }
-            Write-Host ("    {0}: max_abs={1:N6} rel_rmse={2:N6} {3}" -f $name, $cmp[0], $cmp[1], $(if ($ok) { 'ok' } else { 'FAIL' }))
+        # all ten native clips, real CLAP style, requested steps, against each fixture's final.wav (waveform gates 0.02 / 0.01)
+        $nativeClips = @(Get-ChildItem "$native\*.wav")
+        if ($nativeClips.Count -ne 10) { throw "Expected exactly ten native clips, found $($nativeClips.Count)" }
+        foreach ($parityStep in $ParitySteps) {
+            $worst = @{ name = ''; dmax = 0.0; rel = 0.0 }; $allOk = $true; $peakClips = 0
+            foreach ($d in $nativeClips) {
+                $name = $d.BaseName; $bytes = [IO.File]::ReadAllBytes($d.FullName)
+                $r = Submit $bytes "?steps=$parityStep"; $id = ($r.Content | ConvertFrom-Json).id; $jc = Wait-Job $id 300
+                $resultBytes = Get-Result $id
+                [IO.File]::WriteAllBytes("$out\$name-steps-$parityStep.wav", [byte[]]$resultBytes)
+                $res = Read-Wav $resultBytes; $ref = Read-Wav ([IO.File]::ReadAllBytes("$fixtures\$name\steps-$parityStep\final.wav"))
+                $cmp = [WavData]::Compare($res, $ref, $res.N)
+                $ok = $jc.status.status -eq 'done' -and $cmp[0] -le 0.02 -and $cmp[1] -le 0.01; $allOk = $allOk -and $ok
+                $peakClips = [Math]::Max($peakClips, $jc.peak_mb)
+                if ($cmp[1] -gt $worst.rel) { $worst = @{ name = $name; dmax = $cmp[0]; rel = $cmp[1] } }
+                Write-Host ("    {0}: max_abs={1:N6} rel_rmse={2:N6} {3}" -f $name, $cmp[0], $cmp[1], $(if ($ok) { 'ok' } else { 'FAIL' }))
+            }
+            Check $allOk ("end-to-end parity on the ten native clips, real CLAP style, steps=$parityStep (worst by rel_rmse: {0} max_abs={1:N6} rel_rmse={2:N6})" -f $worst.name, $worst.dmax, $worst.rel)
+            Write-Host "  peak VRAM across the ten clips: $peakClips MB"
         }
-        Check $allOk ("end-to-end parity on the ten native clips, real CLAP style (worst by rel_rmse: {0} max_abs={1:N6} rel_rmse={2:N6})" -f $worst.name, $worst.dmax, $worst.rel)
-        Write-Host "  peak VRAM across the ten clips: $peakClips MB"
 
         # cancel in the bridge
         $r = Submit $clipBytes '?steps=64'; $id = ($r.Content | ConvertFrom-Json).id
