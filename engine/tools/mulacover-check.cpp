@@ -294,7 +294,8 @@ static void check_pack(const std::string & models) {
 // from torch FP32 must be a near-tie (FP32 top-2 margin within 2x drift max abs), and
 // per case the engine's cross-entropy gap to FP32 at the fed codes must not exceed
 // torch BF16's (sum, and max within 2x), nor its argmax flips torch BF16's.
-// A float key passes on the declared rule or on the drift rule; the table shows both.
+// For float keys the drift and distribution checks are the verdict and need a valid
+// FP32 tensor (missing or misshaped fails); the declared rule is reported, never gated.
 // A manifest that cannot be read, is empty, or lacks a key the run produces fails.
 
 using Vals = std::map<std::string, std::vector<double>>;
@@ -673,9 +674,12 @@ static std::vector<Row> compare_case(const std::filesystem::path & dir, const Ca
         }
         r.declared = rule;
         const std::filesystem::path fp = fp32 / "observed" / (r.key + ".npy");
-        if ((r.rule == "bf16" || r.rule == "fp32") && !fp32.empty() && std::filesystem::exists(fp)) {
-            const Npy f = read_npy(fp.string());
-            if (f.v.size() == got.size()) {
+        if (r.rule == "bf16" || r.rule == "fp32") {
+            rule = false;  // Lead's amendment: the FP32 drift result alone decides
+            const Npy f = !fp32.empty() && std::filesystem::exists(fp) ? read_npy(fp.string()) : Npy{};
+            if (f.v.size() != got.size()) {
+                r.note = f.v.empty() ? "no torch FP32 tensor" : "torch FP32 size " + std::to_string(f.v.size());
+            } else {
                 r.has_fp32 = true;
                 r.fp32     = err_of(got, f.v);
                 r.drift    = err_of(f.v, ref.v);
@@ -687,7 +691,7 @@ static std::vector<Row> compare_case(const std::filesystem::path & dir, const Ca
                     r.drift_ok     = logits_dist(got, ref.v, f.v, (int64_t) code.v.at(0), r.drift.max_abs, dist, &r.note) &&
                                  r.drift_ok;
                 }
-                rule = rule || r.drift_ok;
+                rule = r.drift_ok;
             }
         }
         if (r.rule == "teacher" && r.key != "frames") {
