@@ -78,6 +78,8 @@ models/onnx/dit-stream/
 
 # Downloaded tools (whisper.cpp, etc.)
 tools/*
+!tools/mm3-refiner/
+tools/mm3-refiner/artifacts/
 !tools/prod/
 !tools/cg
 !tools/cg.cmd
