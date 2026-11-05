@@ -36,7 +36,7 @@
  * opener twice when the selected caption already carries it.
  */
 
-import { useBackendStore } from '../stores/backendStore';
+import { pendingSelection, useBackendStore } from '../stores/backendStore';
 import { queryClient } from '../queries/client';
 import { trainingQueries, type Yue2CaptionSourceTrack } from '../queries/training-data/queries';
 
@@ -420,6 +420,10 @@ export function writeYue2SongSelection(
 
 // ── Album presets ────────────────────────────────────────────────────────────
 
+/** Every key a picker POST sets that a job's pick can carry: LM, VAE, and per
+ *  slot the path, its dials and its re-base strength. Mirrors the server's. */
+const YUE2_PICK_KEY = /^(lm|vae|lmAdapter(Ar|Nar)(Scale(Attn|Mlp|Early|Mid|Late|Plan)?|Rebase)?)$/;
+
 /** Apply an album preset's two YuE2 halves to the engine.
  *
  *  NOT a request param, unlike MM3's `mm3LmAdapter`: on this backend the
@@ -445,10 +449,14 @@ export function writeYue2SongSelection(
 export function yue2PickAtEnqueue(
   preset: { yue2_ar_adapter_path?: string | null; yue2_nar_adapter_path?: string | null } | null | undefined,
 ): Record<string, string | number> {
-  const defaults = (useBackendStore.getState().models[YUE2_BACKEND_ID]?.defaults ?? {}) as Record<string, unknown>;
+  // A picker save still in flight wins over the defaults it is replacing.
+  const defaults = {
+    ...useBackendStore.getState().models[YUE2_BACKEND_ID]?.defaults,
+    ...pendingSelection(YUE2_BACKEND_ID),
+  } as Record<string, unknown>;
   const pick: Record<string, string | number> = {};
   for (const [k, v] of Object.entries(defaults)) {
-    if (/^lmAdapter(Ar|Nar)(Scale(Attn|Mlp|Early|Mid|Late|Plan)?)?$/.test(k) && (typeof v === 'string' || typeof v === 'number')) {
+    if (YUE2_PICK_KEY.test(k) && (typeof v === 'string' || typeof v === 'number')) {
       pick[k] = v;
     }
   }

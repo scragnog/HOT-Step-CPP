@@ -39,11 +39,14 @@ interface SliderProps {
   /** Classes for the row holding the range input (e.g. a fixed height to line
    *  up with a select beside it). */
   controlClassName?: string;
+  /** Locks the range, the number box and the reset icon, e.g. while the
+   *  previous commit is still saving and a new one would be dropped. */
+  disabled?: boolean;
 }
 
 export const Slider: React.FC<SliderProps> = ({
   label, value, onChange, min, max, step, suffix = '', showInput = false, headerRight,
-  info, infoMeta, defaultValue, onReset, onCommit, controlClassName,
+  info, infoMeta, defaultValue, onReset, onCommit, controlClassName, disabled = false,
 }) => {
   return (
     <div>
@@ -53,14 +56,15 @@ export const Slider: React.FC<SliderProps> = ({
           info={info}
           meta={infoMeta}
           className="text-xs font-medium text-zinc-500 uppercase tracking-wider"
-          onReset={defaultValue !== undefined && value !== defaultValue ? () => { (onReset ?? (() => onChange(defaultValue)))(); onCommit?.(); } : undefined}
+          onReset={!disabled && defaultValue !== undefined && value !== defaultValue ? () => { (onReset ?? (() => onChange(defaultValue)))(); onCommit?.(); } : undefined}
         />
         <div className="flex items-center gap-1.5">
         {showInput ? (
           <input
             type="number"
-            className="w-16 px-2 py-0.5 text-xs text-right text-zinc-700 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded-lg outline-none focus:border-pink-500/50"
+            className="w-16 px-2 py-0.5 text-xs text-right text-zinc-700 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded-lg outline-none focus:border-pink-500/50 disabled:opacity-50"
             value={value}
+            disabled={disabled}
             onChange={e => onChange(parseFloat(e.target.value) || min)}
             onBlur={onCommit}
             onKeyDown={e => { if (e.key === 'Enter') onCommit?.(); }}
@@ -84,7 +88,8 @@ export const Slider: React.FC<SliderProps> = ({
           min={min}
           max={max}
           step={step}
-          className="w-full"
+          disabled={disabled}
+          className="w-full disabled:opacity-50"
         />
       </div>
     </div>

@@ -1421,7 +1421,7 @@ async function models(): Promise<BackendModels> {
     lmAdapterMeta: adapters.meta,
     defaults: {
       ...yue2PickerLmVae(persisted, props ?? null),
-      ...slotDefaults(persisted, props?.adapter),
+      ...slotDefaults(persisted, props ?? null),
       // Aggregate, kept for anything that just wants to know whether the
       // resident model is adapted at all.
       lmAdapterMerged: props?.adapter?.merged ?? '',
@@ -1458,21 +1458,28 @@ export function yue2PickerLmVae(
  *  picker that blanked itself there would read as "the choice was lost". What
  *  is in force is a separate flag, per slot, because with two slots "adapted"
  *  stopped being one answer — one half can be merged while the other is still
- *  waiting for the next load. */
-function slotDefaults(
+ *  waiting for the next load.
+ *
+ *  In force means the file AND every dial: `merged` is the engine's key for
+ *  what is baked in (yue2AdapterKey), so a strength changed since the last load
+ *  reads as pending rather than as merged at the old one. */
+export function slotDefaults(
   persisted: Yue2PersistedSelection,
-  adapter: { entries?: Array<{ path?: string; family?: string }>; in_force?: boolean } | undefined,
+  props: Yue2Props | null,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  const entries = adapter?.entries ?? [];
+  const merged = (props?.adapter?.merged ?? '').split('; ').filter(Boolean);
+  const legacy = yue2EngineIsPreDials(props);
+  // Path compared resolved, dials compared as the engine spells them.
+  const sameKey = (a: string, b: string): boolean => {
+    const i = a.lastIndexOf('@'), j = b.lastIndexOf('@');
+    return i > 0 && a.slice(i) === b.slice(j) && path.resolve(a.slice(0, i)) === path.resolve(b.slice(0, j));
+  };
   for (const kind of YUE2_ADAPTER_SLOTS) {
     const slot = persisted.adapters[kind];
     const Slot = kind === 'ar' ? 'Ar' : 'Nar';
-    // An engine too old to send `entries` says nothing per half; fall back to
-    // the aggregate rather than claiming a half is unmerged when it may not be.
-    const inForce = entries.length > 0
-      ? entries.some(e => e.family === kind && (!e.path || !slot.path || path.resolve(e.path) === path.resolve(slot.path)))
-      : (adapter?.in_force === true && !!slot.path);
+    const want = slot.path ? yue2AdapterKey([{ path: slot.path, scales: slot.scales }], legacy) : '';
+    const inForce = !!want && merged.some(m => sameKey(m, want));
     out[`lmAdapter${Slot}`] = slot.path;
     out[`lmAdapter${Slot}Scale`] = slot.scales.global;
     out[`lmAdapter${Slot}ScaleAttn`] = slot.scales.attn;
@@ -1482,7 +1489,7 @@ function slotDefaults(
     out[`lmAdapter${Slot}ScaleLate`] = slot.scales.late;
     if (slot.scales.plan !== undefined) out[`lmAdapter${Slot}ScalePlan`] = slot.scales.plan;
     out[`lmAdapter${Slot}Rebase`] = slot.scales.rebase ?? YUE2_REBASE_DEFAULT;
-    out[`lmAdapter${Slot}InForce`] = !!slot.path && inForce;
+    out[`lmAdapter${Slot}InForce`] = inForce;
   }
   return out;
 }

@@ -351,6 +351,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
                 min={0} max={1} step={0.05} showInput
                 defaultValue={UNITY.rebase}
                 onCommit={requestCommit}
+                disabled={disabled}
               />
             </>
           )}
@@ -366,6 +367,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
               min={0} max={2} step={0.05} showInput
               defaultValue={UNITY.scale}
               onCommit={requestCommit}
+              disabled={disabled}
             />
           )}
           <Slider
@@ -382,6 +384,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
             min={0} max={2} step={0.05} showInput
             defaultValue={UNITY.scale}
             onCommit={requestCommit}
+            disabled={disabled}
           />
           <Slider
             label={t('globalBar.yue2AdapterAttn', 'Attention')}
@@ -392,6 +395,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
             min={0} max={2} step={0.05} showInput
             defaultValue={UNITY.attn}
             onCommit={requestCommit}
+            disabled={disabled}
           />
           <Slider
             label={t('globalBar.yue2AdapterMlp', 'MLP')}
@@ -402,6 +406,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
             min={0} max={2} step={0.05} showInput
             defaultValue={UNITY.mlp}
             onCommit={requestCommit}
+            disabled={disabled}
           />
 
           <div className="flex items-center justify-between gap-2 pt-1">
@@ -415,9 +420,10 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
             </button>
             <button
               type="button"
+              disabled={disabled}
               onClick={() => { setDraft(UNITY); requestCommit(); }}
               title={t('globalBar.yue2AdapterResetHint', 'Back to 1.0 on every dial') as string}
-              className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors"
+              className="flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors disabled:opacity-40"
             >
               <RotateCcw size={11} />
               {t('globalBar.yue2AdapterReset', 'Reset')}
@@ -443,6 +449,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
                 min={0} max={2} step={0.05} showInput
                 defaultValue={UNITY.early}
                 onCommit={requestCommit}
+                disabled={disabled}
               />
               <Slider
                 label={t('globalBar.yue2AdapterMid', 'Middle third')}
@@ -453,6 +460,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
                 min={0} max={2} step={0.05} showInput
                 defaultValue={UNITY.mid}
                 onCommit={requestCommit}
+                disabled={disabled}
               />
               <Slider
                 label={t('globalBar.yue2AdapterLate', 'Late third')}
@@ -463,6 +471,7 @@ const SlotPanel: React.FC<SlotPanelProps> = ({
                 min={0} max={2} step={0.05} showInput
                 defaultValue={UNITY.late}
                 onCommit={requestCommit}
+                disabled={disabled}
               />
             </div>
           )}

@@ -138,15 +138,16 @@ export function yue2CaptionAdapterPath(defaults: Record<string, unknown> | undef
   return pick('lmAdapterAr') || pick('lmAdapterNar') || pick('lmAdapter');
 }
 
-/** The pick a queued song renders with: the picker's paths and dials, with the
- *  album preset's two halves in place of the paths when there is a preset. */
+/** The pick a queued song renders with: the picker's LM, VAE, paths, dials and
+ *  re-base strengths, with the album preset's two halves in place of the paths
+ *  when there is a preset. */
 export function yue2PickAtEnqueue(
   defaults: Record<string, unknown> | undefined,
   preset: { yue2_ar_adapter_path?: string | null; yue2_nar_adapter_path?: string | null } | null | undefined,
 ): Record<string, string | number> {
   const pick: Record<string, string | number> = {};
   for (const [k, v] of Object.entries(defaults ?? {})) {
-    if (/^lmAdapter(Ar|Nar)(Scale(Attn|Mlp|Early|Mid|Late|Plan)?)?$/.test(k) && (typeof v === 'string' || typeof v === 'number')) {
+    if (/^(lm|vae|lmAdapter(Ar|Nar)(Scale(Attn|Mlp|Early|Mid|Late|Plan)?|Rebase)?)$/.test(k) && (typeof v === 'string' || typeof v === 'number')) {
       pick[k] = v;
     }
   }

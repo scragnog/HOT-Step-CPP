@@ -257,6 +257,14 @@ interface BackendState {
   switchBackend: (id: string) => Promise<void>;
 }
 
+const _pending = new Map<string, Record<string, string>>();
+
+/** Selections posted by selectModels whose refetch has not landed yet, so a
+ *  reader of `defaults` can lay them over the stale values. Empty otherwise. */
+export function pendingSelection(backendId: string): Readonly<Record<string, string>> {
+  return _pending.get(backendId) ?? {};
+}
+
 export const useBackendStore = create<BackendState>((set, get) => ({
   backends: [],
   // Last known active id (mirrored to localStorage, see above) so the
@@ -314,6 +322,9 @@ export const useBackendStore = create<BackendState>((set, get) => ({
   selectModels: async (selection, id) => {
     const backendId = id || get().activeBackendId;
     if (!backendId) return false;
+    // Until the refetch lands, `defaults` still holds the previous pick; a job
+    // queued in that window must see this selection (pendingSelection).
+    _pending.set(backendId, { ..._pending.get(backendId), ...selection });
     try {
       await queryClient.cancelQueries({ queryKey: backendModelsOptions(backendId).queryKey });
       // Re-read rather than trusting the request: the engine may fall back to
@@ -330,6 +341,14 @@ export const useBackendStore = create<BackendState>((set, get) => ({
       // No global toast — the write is silent and every caller owns its own
       // inline note (or swallows deliberately).
       return false;
+    } finally {
+      // Drop only the keys this call still owns: a later overlapping select
+      // of the same key keeps its own value pending.
+      const p = _pending.get(backendId);
+      if (p) {
+        for (const [k, v] of Object.entries(selection)) if (p[k] === v) delete p[k];
+        if (Object.keys(p).length === 0) _pending.delete(backendId);
+      }
     }
   },
 

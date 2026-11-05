@@ -112,6 +112,13 @@ test('yue2: the enqueue pick keeps picker dials and takes the preset halves, abs
     { lmAdapterAr: 'presetAr', lmAdapterArScale: 0.8, lmAdapterNarScaleMid: 0.5, lmAdapterNar: '' });
 });
 
+test('yue2: the enqueue pick carries the LM, VAE and re-base strengths too (GH #325)', () => {
+  const defaults = { lm: 'q8_0', vae: 'standard', lmAdapterNar: 'n', lmAdapterNarRebase: 0.5, lmAdapterArRebase: 0.75,
+    lmAdapterArInForce: true, lmAdapterMerged: 'x', lmVariant: '' };
+  assert.deepEqual(yue2PickAtEnqueue(defaults, null),
+    { lm: 'q8_0', vae: 'standard', lmAdapterNar: 'n', lmAdapterNarRebase: 0.5, lmAdapterArRebase: 0.75 });
+});
+
 // ── Precedence (captionForBackend) ───────────────────────────────────────────
 
 const song = { id: 7, bpm: 128, caption: ' ace caption ', caption_mm3: 'mm3 own', caption_yue2: 'yue2 own' };
