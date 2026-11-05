@@ -38,6 +38,8 @@ A new draft uses the picker's choice, or snapshots the **Models** default if
 you have not selected a source. Changing that default later does not change an
 existing draft. Loading a saved draft restores its source; older drafts without
 a choice use the source the server reports when opened.
+Transcribing a Library recording also keeps a workflow draft, so approving its
+score and changing its source use the same draft and current revision.
 
 Changing the source or replacing the audio on an open draft clears its score
 and approval. Review and approve the new sheet before rendering. Transcription

@@ -13,7 +13,7 @@ export function selectedLeadSheetSource(stored: unknown, readinessDefault?: Cove
 }
 
 export function leadSheetReadinessPath(source?: CoverLeadSheetSource) {
-  return `/yue2/cover/readiness${source ? `?source=${encodeURIComponent(source)}` : ''}`;
+  return `/yue2-cover/readiness${source ? `?source=${encodeURIComponent(source)}` : ''}`;
 }
 
 /** Source mutations clear the score; incomplete transcriptions still supply editable ABC. */

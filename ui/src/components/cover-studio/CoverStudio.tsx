@@ -1093,7 +1093,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     let workflowId = '';
     setSheetError(''); setSheetPreparing(true);
     try {
-      if (sourceAssetId && coverDraftId && coverDraftRevision && (!advancedMode || heartmulaMode)) {
+      if (coverDraftId && coverDraftRevision && (!advancedMode || heartmulaMode)) {
         const { job } = await coverWorkflowApi.transcribe(coverDraftId, coverDraftRevision, !!sheetAbc);
         workflowId = job.id;
         coverWorkflowJobRef.current = job.id;
@@ -1128,11 +1128,15 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       const initial = await waitForCoverJob(workflowId, () => sourceKeyRef.current !== key || sheetRequestRef.current !== request);
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
       const draft = initial.result as CoverDraftResult;
+      sourceHydratedRef.current = draft.documentId;
+      setCoverDraftId(draft.documentId); setCoverDraftRevision(draft.revision);
+      setLeadSheetSource(draft.leadSheetSource);
       const { job } = await coverWorkflowApi.transcribe(draft.documentId, draft.revision, !!sheetAbc);
       workflowId = job.id; coverWorkflowJobRef.current = workflowId;
       const done = await waitForCoverJob(workflowId, () => sourceKeyRef.current !== key || sheetRequestRef.current !== request);
       if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
       const result = done.result as CoverDraftResult;
+      setCoverDraftRevision(result.revision);
       const score = leadSheetScoreUpdate(result);
       setApprovedSheet(score.approved); acceptTranscript(score.abc, []);
       setSheetScoreSource(score.scoreSource); setChordQuality(score.chordQuality);
@@ -1186,7 +1190,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     const request = ++sheetRequestRef.current;
     setSheetError(''); setSheetPreparing(true);
     try {
-      if (sourceAssetId && coverDraftId && coverDraftRevision && (!advancedMode || heartmulaMode)) {
+      if (coverDraftId && coverDraftRevision && (!advancedMode || heartmulaMode)) {
         const result = await coverWorkflowApi.approveScore(coverDraftId, coverDraftRevision, sheetAbc);
         if (sourceKeyRef.current !== key || sheetRequestRef.current !== request) return;
         setCoverDraftRevision(result.document.revision);
