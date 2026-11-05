@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "precision": "float32",
+  "tensor_layout": "torch C order, little-endian NPY; GGML ne dimensions reverse the NPY shape",
+  "packages": {
+    "torch": "2.11.0+cu128",
+    "torchaudio": "2.11.0+cu128",
+    "transformers": "4.57.6",
+    "diffusers": "0.39.0",
+    "huggingface-hub": "0.36.2",
+    "numpy": "2.5.4",
+    "safetensors": "0.8.0",
+    "soundfile": "0.14.0",
+    "pyloudnorm": "0.2.0",
+    "gguf": "0.17.1"
+  },
+  "models": {
+    "refiner": {
+      "repo": "terminusresearch/minimax-music3-latent-refiner-v0.10",
+      "revision": "452bf5e0e1b7225e919c1b4bef0026f13283396c",
+      "weights": "_experiments/mm3-whats-new-2026-11-05/refiner/repo/diffusion_pytorch_model.safetensors",
+      "config": "_experiments/mm3-whats-new-2026-11-05/refiner/repo/config.json",
+      "normalization": "_experiments/mm3-whats-new-2026-11-05/refiner/repo/normalization.safetensors",
+      "license": "MiniMax-Music3-Community-License",
+      "code_license": "Apache-2.0",
+      "style_mode": "real",
+      "constants": "_experiments/mm3-whats-new-2026-11-05/refiner/ablation/frozen_constants.npz"
+    },
+    "mert": {
+      "repo": "m-a-p/MERT-v1-95M",
+      "revision": "12af15fef9d0ac838c3f475bfbbf26d2060dd4f5",
+      "weights": "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--m-a-p--MERT-v1-95M/snapshots/12af15fef9d0ac838c3f475bfbbf26d2060dd4f5/pytorch_model.bin",
+      "config": "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--m-a-p--MERT-v1-95M/snapshots/12af15fef9d0ac838c3f475bfbbf26d2060dd4f5/config.json",
+      "processor": "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--m-a-p--MERT-v1-95M/snapshots/12af15fef9d0ac838c3f475bfbbf26d2060dd4f5/preprocessor_config.json",
+      "license": "CC-BY-NC-4.0"
+    },
+    "clap": {
+      "repo": "laion/larger_clap_music",
+      "revision": "a0b4534a14f58e20944452dff00a22a06ce629d1",
+      "weights": "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--laion--larger_clap_music/snapshots/a0b4534a14f58e20944452dff00a22a06ce629d1/pytorch_model.bin",
+      "config": "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--laion--larger_clap_music/snapshots/a0b4534a14f58e20944452dff00a22a06ce629d1/config.json",
+      "processor": "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--laion--larger_clap_music/snapshots/a0b4534a14f58e20944452dff00a22a06ce629d1/preprocessor_config.json",
+      "license": "Apache-2.0",
+      "decision": "pending"
+    },
+    "dav": {
+      "repo": "SimpleTuner/MiniMax-Music-3-Encoder",
+      "revision": "fce0d00b1ae42ee47874babb8c06fb859eb01443",
+      "weights": "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--SimpleTuner--MiniMax-Music-3-Encoder/snapshots/fce0d00b1ae42ee47874babb8c06fb859eb01443/audio_vae/diffusion_pytorch_model.safetensors",
+      "config": "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--SimpleTuner--MiniMax-Music-3-Encoder/snapshots/fce0d00b1ae42ee47874babb8c06fb859eb01443/audio_vae/config.json",
+      "license": "MiniMax-Music3-Community-License"
+    }
+  },
+  "source_sha256": {
+    "_experiments/mm3-whats-new-2026-11-05/refiner/ablation/frozen_constants.npz": "cc6a31c1791e484fc96c98c6c5a8f216d7596c1de7a418bf27863e167b5017e4",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--laion--larger_clap_music/snapshots/a0b4534a14f58e20944452dff00a22a06ce629d1/config.json": "2d7722d338bb83ea8824272b1431f088954d3425d79eb3c2d39489478516dc03",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--laion--larger_clap_music/snapshots/a0b4534a14f58e20944452dff00a22a06ce629d1/merges.txt": "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--laion--larger_clap_music/snapshots/a0b4534a14f58e20944452dff00a22a06ce629d1/preprocessor_config.json": "9739f58296aa6f9ac18008fd0150fb2649bc554985fbde86d0a4041c882ac753",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--laion--larger_clap_music/snapshots/a0b4534a14f58e20944452dff00a22a06ce629d1/pytorch_model.bin": "5c289311f4a030d768af7ffbfdecd01b008aa64824211899a4e59f4f9d154fd1",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--laion--larger_clap_music/snapshots/a0b4534a14f58e20944452dff00a22a06ce629d1/special_tokens_map.json": "06e405a36dfe4b9604f484f6a1e619af1a7f7d09e34a8555eb0b77b66318067f",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--laion--larger_clap_music/snapshots/a0b4534a14f58e20944452dff00a22a06ce629d1/tokenizer.json": "dc239041d98de27ffc3975473a1a23e3db4c937b23c138c38bbc66588bd247e5",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--laion--larger_clap_music/snapshots/a0b4534a14f58e20944452dff00a22a06ce629d1/tokenizer_config.json": "e2eb445cfdbf4711de620cbdf10478b0423950799e85652d9f28da47066ab86d",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--laion--larger_clap_music/snapshots/a0b4534a14f58e20944452dff00a22a06ce629d1/vocab.json": "ed19656ea1707df69134c4af35c8ceda2cc9860bf2c3495026153a133670ab5e",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--m-a-p--MERT-v1-95M/snapshots/12af15fef9d0ac838c3f475bfbbf26d2060dd4f5/config.json": "ea2627c4c7825cd66f3c944b6b966331604c35928174e0100cd4a82829424e32",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--m-a-p--MERT-v1-95M/snapshots/12af15fef9d0ac838c3f475bfbbf26d2060dd4f5/configuration_MERT.py": "ae0ec2bab8f59c724ba9878a7c20b67210189536ea62d34a56775968e9decb03",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--m-a-p--MERT-v1-95M/snapshots/12af15fef9d0ac838c3f475bfbbf26d2060dd4f5/modeling_MERT.py": "6c3ee73cef6f0c30ef494f88d96f891fa6925ffe663fa391b512f4b57abecc6c",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--m-a-p--MERT-v1-95M/snapshots/12af15fef9d0ac838c3f475bfbbf26d2060dd4f5/preprocessor_config.json": "cc5a5e4a5d3b1a758a5ed984b2eaa15bb0522d811d44a9eed82bfca4baa0dc8f",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--m-a-p--MERT-v1-95M/snapshots/12af15fef9d0ac838c3f475bfbbf26d2060dd4f5/pytorch_model.bin": "a2b8b747f72c06e0595aeae41ae5473f4364938c6b39b2c58be38c48e6bd3fcd",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--SimpleTuner--MiniMax-Music-3-Encoder/snapshots/fce0d00b1ae42ee47874babb8c06fb859eb01443/audio_vae/config.json": "0d68d619a0ea6746bca7f3492b4ae39ab9b575de8285d483aa398735d3dd32d5",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--SimpleTuner--MiniMax-Music-3-Encoder/snapshots/fce0d00b1ae42ee47874babb8c06fb859eb01443/audio_vae/diffusion_pytorch_model.safetensors": "ea6d2458de8d71e3d8b8210362ab31c547ac3c99bafa53ba004f3751acb5428e",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/repo/config.json": "dfe6a8a830691fac59d61fef9a067832a4badb590fac75b09935c9612344862e",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/repo/diffusion_pytorch_model.safetensors": "b6443c0396b8069b2d58ca36849635b7c6e3872e8392e89423e3d43818d22c9b",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/repo/normalization.safetensors": "bf847af917467c721c8c36ba18b8f11871a63ab56d1008cc27c883be47dd24e2",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/repo/src/minimax_music3_latent_refiner/__init__.py": "6db5c1c546aec3a7c10dbec6e182c25fcabd87a7fc8a0adebb7817f8378bf4cb",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/repo/src/minimax_music3_latent_refiner/cli.py": "60d785e0503081c5baafc1d4de2d4a57680ddf8b1c794731926268d7d6fd029d",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/repo/src/minimax_music3_latent_refiner/dav.py": "86d3736d47ce0812e185365c7599fb99a5e45285e305e7fa2f7791be6deade59",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/repo/src/minimax_music3_latent_refiner/diffusers_patch.py": "fcf3e8094c42f30ca7c7b606f07adb1926cac72d44014543fda62174a214e59c",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/repo/src/minimax_music3_latent_refiner/model.py": "34e4abaddf2062a67bffca1f9388fbee2a6c4aa2bf020fa3e9eacf914ca56646",
+    "_experiments/mm3-whats-new-2026-11-05/refiner/repo/src/minimax_music3_latent_refiner/pipeline.py": "21acc18fd92b4fe20615bb65daf3dc2a75e1f6af199dd7bedb5d91b02051ae99"
+  },
+  "clips": [
+    {
+      "id": "boombap-s1001",
+      "path": "_experiments/mm3-whats-new-2026-11-05/native/boombap-s1001.wav"
+    },
+    {
+      "id": "boombap-s1002",
+      "path": "_experiments/mm3-whats-new-2026-11-05/native/boombap-s1002.wav"
+    },
+    {
+      "id": "cinematic-s1001",
+      "path": "_experiments/mm3-whats-new-2026-11-05/native/cinematic-s1001.wav"
+    },
+    {
+      "id": "cinematic-s1002",
+      "path": "_experiments/mm3-whats-new-2026-11-05/native/cinematic-s1002.wav"
+    },
+    {
+      "id": "folk-s1001",
+      "path": "_experiments/mm3-whats-new-2026-11-05/native/folk-s1001.wav"
+    },
+    {
+      "id": "folk-s1002",
+      "path": "_experiments/mm3-whats-new-2026-11-05/native/folk-s1002.wav"
+    },
+    {
+      "id": "soulpop-s1001",
+      "path": "_experiments/mm3-whats-new-2026-11-05/native/soulpop-s1001.wav"
+    },
+    {
+      "id": "soulpop-s1002",
+      "path": "_experiments/mm3-whats-new-2026-11-05/native/soulpop-s1002.wav"
+    },
+    {
+      "id": "synthwave-s1001",
+      "path": "_experiments/mm3-whats-new-2026-11-05/native/synthwave-s1001.wav"
+    },
+    {
+      "id": "synthwave-s1002",
+      "path": "_experiments/mm3-whats-new-2026-11-05/native/synthwave-s1002.wav"
+    },
+    {
+      "id": "short",
+      "derive_from": "boombap-s1001",
+      "samples": 22050
+    },
+    {
+      "id": "odd",
+      "derive_from": "boombap-s1001",
+      "samples": 1324033
+    }
+  ],
+  "steps": [
+    1,
+    8,
+    32
+  ],
+  "window_seconds": 30.0,
+  "overlap_seconds": 2.0,
+  "sample_rate": 44100,
+  "dav_hop": 512,
+  "tolerances": {
+    "dav": {
+      "max_abs": 0.03,
+      "relative_rmse": 0.003,
+      "cosine": 0.99999
+    },
+    "mert": {
+      "max_abs": 0.02,
+      "relative_rmse": 0.002,
+      "cosine": 0.99999
+    },
+    "clap_processor": {
+      "max_abs": 0.0001,
+      "relative_rmse": 1e-05,
+      "cosine": 0.999999
+    },
+    "clap": {
+      "max_abs": 0.002,
+      "relative_rmse": 0.002,
+      "cosine": 0.99999
+    },
+    "normalized_latents": {
+      "max_abs": 0.03,
+      "relative_rmse": 0.003,
+      "cosine": 0.99999
+    },
+    "dit": {
+      "max_abs": 0.03,
+      "relative_rmse": 0.003,
+      "cosine": 0.99999
+    },
+    "bridge": {
+      "max_abs": 0.04,
+      "relative_rmse": 0.004,
+      "cosine": 0.99999
+    },
+    "overlap": {
+      "max_abs": 1e-06,
+      "relative_rmse": 1e-06,
+      "cosine": 0.999999
+    },
+    "waveform": {
+      "max_abs": 0.02,
+      "relative_rmse": 0.01,
+      "cosine": 0.9999
+    }
+  },
+  "tolerance_policy": "All three gates must pass independently on every tensor. Frozen before any engine port; no gain alignment for component tensors. Waveform is pre-PCM gain-matched output. These are proposed engineering bounds, not measured engine accuracy; changes require reviewer agreement and a new contract revision."
+}
