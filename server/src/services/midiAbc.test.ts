@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { midiAbcArgs } from './midiAbc.js';
+import { coverMidiModel, midiAbcArgs } from './midiAbc.js';
+
+test('Cover consumes the model selected by readiness and respects its dependency errors', () => {
+  assert.equal(coverMidiModel({ ready: true, model: 'muscriptor-medium', message: null }), 'medium');
+  assert.equal(coverMidiModel({ ready: true, model: 'muscriptor-large', message: null }), 'large');
+  assert.throws(() => coverMidiModel({ ready: false, model: 'muscriptor-medium', message: 'Beat This! missing' }), /Beat This! missing/);
+});
 
 test('ABC export consumes raw events and the beat grid, with each export option once', () => {
   const args = midiAbcArgs('job', { tempoMode: 'map', quantize: true, grid: 4 }, 100, true);

@@ -1,9 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { abcCoverLeadSheet, coverRenderRolls, coverScoreEvents, nativeCoverLeadSheet } from './coverLeadSheet.js';
+import { abcCoverLeadSheet, tryAbcCoverLeadSheet, coverRenderRolls, coverScoreEvents, nativeCoverLeadSheet } from './coverLeadSheet.js';
 import { abcLeadSheetEvents, leadSheetRoll } from './leadSheetRoll.js';
 
 const abc = 'X:1\nM:4/4\nL:1/8\nQ:1/4=90\nK:C\nV:Vocal\n"C" C | D2 [Q:1/4=180] E2 F2 |';
+
+test('MuScriptor preview can fail without discarding editable ABC or accepting it for render', () => {
+  assert.equal(tryAbcCoverLeadSheet('X:1\nK:C\nC|', 'muscriptor'), undefined);
+  assert.throws(() => coverRenderRolls({ assetId: 'a', sha256: 'h', approvedAbc: 'X:1\nK:C\nC|' }), /explicit Q: tempo/);
+  assert.deepEqual(tryAbcCoverLeadSheet(abc, 'muscriptor'), abcCoverLeadSheet(abc, 'muscriptor'));
+});
 
 test('ABC timing retains pickups and tempo changes in seconds before one quantiser', () => {
   const sheet = abcCoverLeadSheet(abc, 'sheetsage2');

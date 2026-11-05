@@ -104,6 +104,8 @@ export interface CoverCaptionResult { documentId: string; revision: number; capt
  *  that field snapshot the stored Models choice on first transcription.
  *  `force` skips a cached score. Source/audio edits reject late results through
  *  the document revision and source hash. Persist the returned revision.
+ *  Incomplete ABC is saved for editing without leadSheet timing. Rendering
+ *  still requires a readable tempo and supported notation.
  *  HeartMuLa renders record leadSheetRenderingPath: native uses raw seconds,
  *  abc uses parsed score seconds, abc-edited regenerates from approved edits. */
 export const coverTranscribeSchema = coverDraftRefSchema.extend({ force: z.boolean().default(false) });
@@ -117,7 +119,6 @@ export interface CoverLeadSheetResult {
       chords: Array<{ onset: number; offset: number; pitch: number }>;
       drums?: Array<{ onset: number; offset: number; pitch: number }> };
     grid?: { identity: string; data: unknown };
-    rawMidiEvents?: unknown[];
   };
 }
 export interface CoverTranscribeResult { documentId: string; revision: number; abc: string; scoreSource?: string; leadSheet?: CoverLeadSheetResult }

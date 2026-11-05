@@ -1,7 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { aceMidiExe, exportArgs, type MidiExportOptions } from './muscriptor.js';
+import { aceMidiExe, exportArgs, MUSCRIPTOR_MODELS, type MuscriptorModel, type MidiExportOptions } from './muscriptor.js';
+
+/** Consume readiness's resolved choice instead of choosing a second model. */
+export function coverMidiModel(readiness: { ready: boolean; model: string | null; message: string | null }): MuscriptorModel {
+  const model = MUSCRIPTOR_MODELS.find(model => `muscriptor-${model}` === readiness.model);
+  if (!readiness.ready || !model) throw new Error(readiness.message || 'MuScriptor and Beat This! must be installed');
+  return model;
+}
 
 export class MidiAbcError extends Error {
   constructor(message: string, public status: number, public summary?: unknown) { super(message); }

@@ -20,6 +20,12 @@ export function abcCoverLeadSheet(abc: string, source: CoverLeadSheetSource,
       rawEvents: { melody: events.melody, chords: events.chords, drums: events.drums } } };
 }
 
+/** Prepare preserves incomplete ABC for editing. Only rendering requires a
+ * readable tempo and supported notation; a failed preview must not lose work. */
+export function tryAbcCoverLeadSheet(...args: Parameters<typeof abcCoverLeadSheet>): CoverLeadSheetResult | undefined {
+  try { return abcCoverLeadSheet(...args); } catch { return undefined; }
+}
+
 /** The native wrapper in 6f supplies raw seconds separately from its editable ABC. */
 export function nativeCoverLeadSheet(abc: string, timing: CoverLeadSheetResult['timing']): CoverLeadSheetResult {
   if (timing.path !== 'native' || timing.conversionVersion !== 1 || !timing.grid?.identity) {

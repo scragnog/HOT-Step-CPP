@@ -28,7 +28,7 @@ const input: CoverRenderInput = {
 };
 
 function setup(opts: { leadSheetDefault?: () => import('../../contracts/studioWorkflows.js').CoverLeadSheetSource;
-  transcribe?: (signal: AbortSignal, source?: string) => Promise<{ abc: string }>;
+  transcribe?: (signal: AbortSignal, source?: string) => Promise<{ abc: string; scoreSource?: string }>;
   audioStatus?: 'pending' | 'succeeded'; capability?: (backend: string) => Promise<boolean>;
   datasetAnalysis?: () => { bpm: number; key: string; scale: string } | null;
   analyze?: () => Promise<{ bpm: number | null; key: string; scale: string } | null> } = {}) {
@@ -271,6 +271,29 @@ test('headless asset open, idempotency, stale transcript and replay', async () =
   assert.equal(s.jobs.get(stale.id).status, 'failed');
   const replay = s.jobs.replay(job.id, 'owner', 0);
   assert.ok(replay.events.some(e => (e.data as any)?.status === 'succeeded'));
+});
+
+test('incomplete transcriptions and dataset sidecars reach the editor without stale timing', async () => {
+  const abc = 'X:1\nK:C\nC|';
+  for (const scoreSource of ['sheetsage2', 'dataset']) {
+    const s = setup({ transcribe: async () => ({ abc, scoreSource }) });
+    const opened = await s.open();
+    const old = s.documents.get(opened.documentId, 'owner');
+    s.documents.update(old.id, 'owner', old.revision, { ...old.data,
+      abc: 'old', approvedAbc: 'old', leadSheet: { abc: 'old', timing: 'stale' } });
+    const job = s.submit('cover-transcribe', 'missing-tempo', { ...opened, revision: 2 }).job;
+    await s.jobs.settled();
+    assert.equal(s.jobs.get(job.id).status, 'succeeded', scoreSource);
+    const saved = s.documents.get(opened.documentId, 'owner');
+    assert.equal(saved.data.abc, abc);
+    assert.equal(saved.data.scoreSource, scoreSource);
+    assert.equal(saved.data.approvedAbc, '');
+    assert.equal(saved.data.leadSheet, undefined);
+    assert.equal((s.jobs.get(job.id).result as any).abc, abc);
+    assert.throws(() => effectiveCoverRequest({ ...input, expectedBackend: 'heartmula',
+      heartmulaTags: { topic: '', genre: '', instrument: '', mood: '' } },
+    { assetId: 'a', sha256: 'h', approvedAbc: abc }, '/references/source.wav'), /explicit Q: tempo/);
+  }
 });
 
 test('Models default is snapshotted for new drafts and explicit choices win', async () => {

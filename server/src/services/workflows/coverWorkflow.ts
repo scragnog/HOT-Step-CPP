@@ -22,7 +22,7 @@ import {
   type CoverRenderInput, type CoverDraft,
 } from '../../contracts/studioWorkflows.js';
 import { instrumentalConflict, preparedPair } from '../../contracts/yue2Prepare.js';
-import { abcCoverLeadSheet, coverRenderRolls, clearCoverScore } from '../coverLeadSheet.js';
+import { tryAbcCoverLeadSheet, coverRenderRolls, clearCoverScore } from '../coverLeadSheet.js';
 import { sheetTranscriberSetting } from '../training/yue2Sheet.js';
 import { heartmulaCoverLyrics, heartmulaCoverTags } from '../backends/heartmula/cover.js';
 
@@ -330,7 +330,7 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
       if (current.assetId !== data.assetId) throw new WorkflowError(409, 'Cover source changed');
       if (asset(data.assetId, ctx.userId).sha256 !== data.sha256) throw new WorkflowError(409, 'Cover source changed');
       const scoreSource = result.scoreSource || (leadSheetSource === 'sheetsage2-refined' ? 'sheetsage2' : leadSheetSource);
-      const sheet = result.leadSheet || abcCoverLeadSheet(result.abc, leadSheetSource, scoreSource as CoverLeadSheetResult['scoreSource']);
+      const sheet = result.leadSheet || tryAbcCoverLeadSheet(result.abc, leadSheetSource, scoreSource as CoverLeadSheetResult['scoreSource']);
       return { ...current, leadSheetSource, abc: result.abc, approvedAbc: '', scoreSource, leadSheet: sheet };
     });
     return { documentId: updated.id, revision: updated.revision, abc: result.abc, scoreSource: updated.data.scoreSource, leadSheet: updated.data.leadSheet };
