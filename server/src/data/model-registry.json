@@ -1,68 +1,26 @@
 {
   "version": 1,
-  "pending": {
-    "reason": "Unlisted until the MERT non-commercial licence, CLAP conditioning and model uploads are approved. Pending entries are excluded from the public packs and files arrays.",
-    "packs": [
-      {
-        "id": "mm3-latent-refiner",
-        "family": "mm3",
-        "name": "MiniMax-Music3 Latent Refiner",
-        "description": "Optional deterministic audio post-process on any backend. Quality on other backends is untested. Requires MERT-v1-95M under CC-BY-NC-4.0; CLAP conditioning is pending.",
-        "fileIds": [
-          "mm3-refiner-refiner-f32",
-          "mm3-refiner-mert-f32",
-          "mm3-enc-f16",
-          "mm3-voc-f16"
-        ],
-        "pendingComponents": [
-          {
-            "id": "mm3-refiner-clap",
-            "status": "pending",
-            "licence": "Apache-2.0",
-            "reason": "CLAP GGUF or an approved frozen style vector; neither is shipped yet."
-          }
-        ]
-      }
-    ],
-    "files": [
-      {
-        "id": "mm3-refiner-refiner-f32",
-        "filename": "mm3-refiner-refiner-f32.gguf",
-        "role": "mm3",
-        "family": "mm3",
-        "subdir": "mm3",
-        "displayName": "MM3 Latent Refiner (F32)",
-        "variant": "refiner",
-        "quant": "F32",
-        "sizeBytes": 549104864,
-        "licence": "MiniMax-Music3 Community License",
-        "description": "Deterministic latent refiner with embedded normalization statistics. Code is Apache-2.0; weights use the MiniMax-Music3 Community License. Not published yet.",
-        "tags": [],
-        "companions": [
-          { "filename": "LICENSE-mm3-refiner-weights" },
-          { "filename": "LICENSE-mm3-refiner-code" }
-        ]
-      },
-      {
-        "id": "mm3-refiner-mert-f32",
-        "filename": "mm3-refiner-mert-f32.gguf",
-        "role": "mm3",
-        "family": "mm3",
-        "subdir": "mm3",
-        "displayName": "MERT-v1-95M (F32, non-commercial)",
-        "variant": "refiner-mert",
-        "quant": "F32",
-        "sizeBytes": 377505664,
-        "licence": "CC-BY-NC-4.0",
-        "description": "Required audio conditioner for the latent refiner. Non-commercial weights; licence policy and publication pending.",
-        "tags": [],
-        "companions": [
-          { "filename": "LICENSE-mm3-refiner-mert" }
-        ]
-      }
-    ]
-  },
   "packs": [
+    {
+      "id": "mm3-latent-refiner",
+      "family": "mm3",
+      "name": "MiniMax-Music3 Latent Refiner",
+      "description": "MERT-v1-95M weights are non-commercial (CC-BY-NC-4.0). Optional deterministic audio post-process on any backend; quality on other backends is untested. CLAP conditioning arrives in a later update; refinement is unavailable until then.",
+      "fileIds": [
+        "mm3-refiner-refiner-f32",
+        "mm3-refiner-mert-f32",
+        "mm3-enc-f16",
+        "mm3-voc-f16"
+      ],
+      "pendingComponents": [
+        {
+          "id": "mm3-refiner-clap",
+          "status": "pending",
+          "licence": "Apache-2.0",
+          "reason": "CLAP audio conditioning and its GGUF arrive in a later update."
+        }
+      ]
+    },
     {
       "id": "quick-start",
       "family": "as1.5",
@@ -535,6 +493,54 @@
     }
   ],
   "files": [
+    {
+      "id": "mm3-refiner-refiner-f32",
+      "filename": "mm3-refiner-refiner-f32.gguf",
+      "role": "mm3",
+      "family": "mm3",
+      "subdir": "mm3",
+      "displayName": "MM3 Latent Refiner (F32)",
+      "variant": "refiner",
+      "quant": "F32",
+      "sizeBytes": 549104864,
+      "licence": "MiniMax-Music3 Community License",
+      "description": "Deterministic latent refiner with embedded normalization statistics. Code is Apache-2.0; weights use the MiniMax-Music3 Community License. Requires MERT and the forthcoming CLAP conditioning.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-mm3-refiner-weights",
+          "required": true
+        },
+        {
+          "filename": "LICENSE-mm3-refiner-code",
+          "required": true
+        }
+      ],
+      "repo": "scragnog/MiniMax-Music3-GGUF",
+      "sha256": "a36410867b4e0a89b829a8923b70b4f081c2223c65a4237d670ba9bb915e30c3"
+    },
+    {
+      "id": "mm3-refiner-mert-f32",
+      "filename": "mm3-refiner-mert-f32.gguf",
+      "role": "mm3",
+      "family": "mm3",
+      "subdir": "mm3",
+      "displayName": "MERT-v1-95M (F32, non-commercial)",
+      "variant": "refiner-mert",
+      "quant": "F32",
+      "sizeBytes": 377505664,
+      "licence": "CC-BY-NC-4.0 (non-commercial)",
+      "description": "Non-commercial weights (CC-BY-NC-4.0) by the m-a-p MERT authors. Required audio conditioner for the latent refiner, converted to GGUF F32.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-mm3-refiner-mert",
+          "required": true
+        }
+      ],
+      "repo": "scragnog/MiniMax-Music3-GGUF",
+      "sha256": "1d69950856b145c5a9dcd6642d2b40e8b91677ed315124bb15b1b6d6e0329c98"
+    },
     {
       "id": "dit-std-base-bf16",
       "filename": "acestep-v15-base-BF16.gguf",
