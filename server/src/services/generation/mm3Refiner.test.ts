@@ -156,10 +156,17 @@ test('public refiner pack has measured downloads, required licences and a non-co
   for (const text of [mert.displayName, mert.description, mert.licence, pack.description]) {
     assert.match(text, /non-commercial/i);
   }
-  assert.equal(pack.pendingComponents[0].status, 'pending');
+  assert.equal(pack.pendingComponents, undefined);
+  assert.deepEqual(pack.fileIds, ['mm3-refiner-refiner-f32', 'mm3-refiner-mert-f32', 'mm3-refiner-clap-f32', 'mm3-enc-f16', 'mm3-voc-f16']);
+  const clap = registry.files.find((f: any) => f.id === 'mm3-refiner-clap-f32');
+  assert.equal(clap.sizeBytes, 274780768);
+  assert.equal(clap.repo, 'scragnog/MiniMax-Music3-GGUF');
+  assert.match(clap.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(clap.licence, 'Apache-2.0');
+  assert.ok(clap.companions.every((c: any) => c.required));
   const visible = modelDownloadService.getRegistry();
   assert.ok(visible.packs.some(p => p.id === pack.id));
-  assert.ok([refiner, mert].every(file => visible.files.some(f => f.id === file.id)));
+  assert.ok([refiner, mert, clap].every(file => visible.files.some(f => f.id === file.id)));
 });
 
 test('compact generation intents retain refiner settings on every backend and omit them when off', () => {

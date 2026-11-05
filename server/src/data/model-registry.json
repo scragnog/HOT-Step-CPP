@@ -5,20 +5,13 @@
       "id": "mm3-latent-refiner",
       "family": "mm3",
       "name": "MiniMax-Music3 Latent Refiner",
-      "description": "MERT-v1-95M weights are non-commercial (CC-BY-NC-4.0). Optional deterministic audio post-process on any backend; quality on other backends is untested. CLAP conditioning arrives in a later update; refinement is unavailable until then.",
+      "description": "MERT-v1-95M weights are non-commercial (CC-BY-NC-4.0). Optional deterministic audio post-process on any backend; quality on other backends is untested.",
       "fileIds": [
         "mm3-refiner-refiner-f32",
         "mm3-refiner-mert-f32",
+        "mm3-refiner-clap-f32",
         "mm3-enc-f16",
         "mm3-voc-f16"
-      ],
-      "pendingComponents": [
-        {
-          "id": "mm3-refiner-clap",
-          "status": "pending",
-          "licence": "Apache-2.0",
-          "reason": "CLAP audio conditioning and its GGUF arrive in a later update."
-        }
       ]
     },
     {
@@ -504,7 +497,7 @@
       "quant": "F32",
       "sizeBytes": 549104864,
       "licence": "MiniMax-Music3 Community License",
-      "description": "Deterministic latent refiner with embedded normalization statistics. Code is Apache-2.0; weights use the MiniMax-Music3 Community License. Requires MERT and the forthcoming CLAP conditioning.",
+      "description": "Deterministic latent refiner with embedded normalization statistics. Code is Apache-2.0; weights use the MiniMax-Music3 Community License. Requires the MERT and CLAP conditioners.",
       "tags": [],
       "companions": [
         {
@@ -540,6 +533,28 @@
       ],
       "repo": "scragnog/MiniMax-Music3-GGUF",
       "sha256": "1d69950856b145c5a9dcd6642d2b40e8b91677ed315124bb15b1b6d6e0329c98"
+    },
+    {
+      "id": "mm3-refiner-clap-f32",
+      "filename": "mm3-refiner-clap-f32.gguf",
+      "role": "mm3",
+      "family": "mm3",
+      "subdir": "mm3",
+      "displayName": "CLAP Audio Tower (F32)",
+      "variant": "refiner-clap",
+      "quant": "F32",
+      "sizeBytes": 274780768,
+      "licence": "Apache-2.0",
+      "description": "laion/larger_clap_music audio tower and projection, converted to GGUF F32. Gives the latent refiner its per-window style vector.",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE-mm3-refiner-clap",
+          "required": true
+        }
+      ],
+      "repo": "scragnog/MiniMax-Music3-GGUF",
+      "sha256": "9fca3996fe0f1459fac976b6e1585afd7c348cb02a45e062ad6b6eee74efe385"
     },
     {
       "id": "dit-std-base-bf16",

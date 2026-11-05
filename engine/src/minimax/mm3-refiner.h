@@ -45,6 +45,7 @@
 #include "../audio-resample.h"
 #include "../model-store.h"
 #include "mm3-dav-encode.h"
+#include "mm3-refiner-clap.h"
 // mm3-dit-graph.h (the MM3 backend's flow DiT, in the server's include set) #defines
 // MM3_DIT_MAX_NODES; the refiner DiT header declares a constant of that name. Hide the macro
 // while that header is read. (Renaming the constant there would end this.)
@@ -75,10 +76,12 @@ struct Mm3RefinerPaths {
     std::string mert;     // mm3-refiner-mert-*.gguf
     std::string refiner;  // mm3-refiner-refiner-*.gguf
     std::string voc;      // mm3-voc-*.gguf
+    std::string clap;     // mm3-refiner-clap-*.gguf; read only when no Mm3StyleFn is passed
 };
 
-// Called once per window with the window's 44.1 kHz stereo audio ([2][n]
-// planar) so a producer can crop what it needs; writes the 512-d vector.
+// Optional override of the CLAP style producer (the parity probe feeds fixture vectors,
+// the job's test hook a fixed one). Called once per window with the window's 44.1 kHz
+// stereo audio ([2][n] planar) so a producer can crop what it needs; writes the 512-d vector.
 using Mm3StyleFn = std::function<bool(int window, const float * planar, int64_t n, float * out512, std::string * err)>;
 
 enum class Mm3RefinerPhase { LOAD, CONDITION, BRIDGE, DECODE, OUTPUT };
@@ -434,8 +437,8 @@ static bool mm3_refiner_run(ModelStore * store, const Mm3RefinerPaths & paths, c
         out->audio.assign(planar_in, planar_in + 2 * n_in);
         return true;
     }
-    if (!style) {
-        *err = "no style source: the refiner needs a CLAP style vector per window and none is wired";
+    if (!style && paths.clap.empty()) {
+        *err = "no style source: the refiner needs a CLAP style vector per window and no CLAP file is given";
         return false;
     }
     // Fail on a missing or unreadable file before anything loads, naming its role.
@@ -443,8 +446,11 @@ static bool mm3_refiner_run(ModelStore * store, const Mm3RefinerPaths & paths, c
         const struct {
             const char *        role;
             const std::string * path;
-        } files[] = { { "DAV encoder", &paths.enc }, { "MERT", &paths.mert }, { "refiner", &paths.refiner }, { "decoder", &paths.voc } };
+        } files[] = { { "DAV encoder", &paths.enc }, { "MERT", &paths.mert }, { "refiner", &paths.refiner }, { "decoder", &paths.voc }, { "CLAP", &paths.clap } };
         for (const auto & f : files) {
+            if (f.path == &paths.clap && style) {
+                continue;  // an override supplies the vectors, the file is not read
+            }
             GGUFModel gf = {};
             if (!gf_load(&gf, f.path->c_str())) {
                 *err = std::string(f.role) + ": cannot read " + *f.path;
@@ -524,6 +530,47 @@ static bool mm3_refiner_run(ModelStore * store, const Mm3RefinerPaths & paths, c
             }
             progress(Mm3RefinerPhase::CONDITION, W, W);
         }
+        // 2b. One style vector per window: the CLAP tower, or the override. It loads and
+        // releases on its own (the store holds one GPU module at a time), so the vectors
+        // wait on the host like the MERT states.
+        std::vector<float> styles((size_t) W * MM3_DIT_STYLE);
+        {
+            Mm3Clap *               clap = nullptr;
+            std::unique_ptr<ModelHandle> h;
+            if (!style) {
+                progress(Mm3RefinerPhase::LOAD, 0, 0);
+                stop();
+                clap = store_require_mm3_refiner_clap(store, key(MODEL_MM3_REFINER_CLAP, paths.clap));
+                if (!clap) {
+                    *err = "CLAP: " + store_mm3_last_error();
+                    return false;
+                }
+                h.reset(new ModelHandle(store, clap));
+            }
+            for (int w = 0; w < W; w++) {
+                stop();
+                progress(Mm3RefinerPhase::CONDITION, w, W);
+                const int64_t start = plan.single() ? 0 : plan.starts[(size_t) w];
+                const int64_t len   = plan.single() ? padded : plan.window_samples;
+                const std::vector<float> chunk = copy_window(wav, padded, start, len);
+                float *                  sv    = styles.data() + (size_t) w * MM3_DIT_STYLE;
+                if (style) {
+                    if (!style(w, chunk.data(), len, sv, err)) {
+                        if (err->empty()) {
+                            *err = "style source failed";
+                        }
+                        return false;
+                    }
+                } else {
+                    Mm3ClapResult r;
+                    if (!mm3_clap_encode(clap, chunk.data(), len, &r, err)) {
+                        return false;
+                    }
+                    std::memcpy(sv, r.vector.data(), MM3_DIT_STYLE * sizeof(float));
+                }
+            }
+            progress(Mm3RefinerPhase::CONDITION, W, W);
+        }
         // 3. Bridge every window, stitching as each finishes.
         {
             progress(Mm3RefinerPhase::LOAD, 0, 0);
@@ -538,19 +585,9 @@ static bool mm3_refiner_run(ModelStore * store, const Mm3RefinerPaths & paths, c
             const int total_steps = W * p.steps;
             for (int w = 0; w < W; w++) {
                 stop();
-                const int64_t start = plan.single() ? 0 : plan.starts[(size_t) w];
                 const int64_t len   = plan.single() ? padded : plan.window_samples;
                 const int64_t L     = len / MM3_REF_HOP;
-                float         sv[MM3_DIT_STYLE];
-                {
-                    const std::vector<float> chunk = copy_window(wav, padded, start, len);
-                    if (!style(w, chunk.data(), len, sv, err)) {
-                        if (err->empty()) {
-                            *err = "style source failed";
-                        }
-                        return false;
-                    }
-                }
+                const float * sv    = styles.data() + (size_t) w * MM3_DIT_STYLE;
                 const std::vector<float> x0 = mm3_dit_normalize(dit, dav[(size_t) w].data(), L);
                 std::vector<float>       x;
                 auto on_step = [&](int k, const float *, const float *) {

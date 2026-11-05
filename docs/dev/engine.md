@@ -394,17 +394,17 @@ and `mix=0` returns the input untouched without loading anything (the route answ
 without queueing). A mono source (identical channels) comes back mono: the refiner is not
 channel-symmetric, so its two outputs differ slightly.
 
-**Residency.** All four modules go through `ModelStore` (`MODEL_MM3_ENC`,
-`MODEL_MM3_REFINER_MERT`, `MODEL_MM3_REFINER_DIT`, `MODEL_MM3_REFINER_VOC`; labels
-`MM3-DAV-Enc`, `MM3-Refiner-MERT`, `MM3-Refiner-DiT`, `MM3-Refiner-Voc`). Under `EVICT_STRICT`
-only one GPU module is resident, so the run is phased: every window is encoded, then every
-window gets its MERT states, then every window is bridged, then the stitched latents are
-decoded. Each module is required once and released before the next (RAII handles, so success,
+**Residency.** All five modules go through `ModelStore` (`MODEL_MM3_ENC`,
+`MODEL_MM3_REFINER_MERT`, `MODEL_MM3_REFINER_CLAP`, `MODEL_MM3_REFINER_DIT`,
+`MODEL_MM3_REFINER_VOC`; labels `MM3-DAV-Enc`, `MM3-Refiner-MERT`, `MM3-Refiner-CLAP`,
+`MM3-Refiner-DiT`, `MM3-Refiner-Voc`). Under `EVICT_STRICT` only one GPU module is resident, so
+the run is phased: every window is encoded, then every window gets its MERT states, then its
+CLAP style vector, then every window is bridged, then the stitched latents are decoded. Each module is required once and released before the next (RAII handles, so success,
 error and cancel all unload; under keep-loaded they stay for the next job). Conditioning stays on
 the host between phases: about 100 MB per 30 s window of MERT states, freed as each window's
 bridge finishes. The decoder is `Mm3RefVoc`, the `voc.*` tensors loaded on their own with their
-own graph state, so the 12 to 23 GB MM3 model need not be warm. All four files are opened
-before any module loads, so a missing or unreadable file fails fast and names its role.
+own graph state, so the 12 to 23 GB MM3 model need not be warm. All five files are opened
+before any module loads (four when the style override below is set), so a missing or unreadable file fails fast and names its role.
 
 **Precision.** The DAV encoder (`strict_f32`, set by the store; training leaves it off) and MERT
 run their GEMMs with `GGML_HINT_STRICT_F32`: on ggml-cuda's default TF32 the DAV latents and
@@ -418,19 +418,25 @@ frames (60 s) in every case, answered with 413 before anything queues. Measured 
 (F32 refiner and MERT, F16 encoder and decoder): a 34 s clip at 32 steps takes 6.5 s, a 60 s clip
 (three windows) 8.9 s; the bridge is about two thirds of that.
 
-**Style vector.** The DiT takes a 512-d CLAP vector per window. No producer is wired yet, so
-`/mm3/refine` answers 501 rather than refine with zeros or a constant.
-`mm3_refiner_style_source()` is the one place a producer plugs in. For testing,
-`HOTSTEP_MM3_REFINE_TEST_STYLE=<raw float32 file of 512 values>` supplies one vector for every
-window; the probe feeds the torch fixtures' vectors per window.
+**Style vector.** The DiT takes a 512-d CLAP vector per window, made by the CLAP audio tower
+(`mm3-refiner-clap.h`, `mm3-refiner-clap-*.gguf`): channel mean, centre crop of at most 10 s,
+48 kHz, mel, HTSAT, projection, L2 norm, as `pipeline.py` does. `mm3_refiner_run` computes all
+windows' vectors in one CLAP phase after MERT (reported as `refine_condition`) and keeps them on
+the host. A missing CLAP file answers 501 like any other pack file; nothing falls back to zeros
+or a constant. For testing, `HOTSTEP_MM3_REFINE_TEST_STYLE=<raw float32 file of 512 values>`
+supplies one vector for every window instead (`mm3_refiner_style_override()`; the CLAP file is
+then not needed); the probe passes the torch fixtures' vectors per window through the same
+`Mm3StyleFn`.
 
 **Checks.** `mm3-refiner-probe` (`engine/tools/mm3-refiner-probe.cpp`) runs the whole pipeline
 against the torch fixtures (window starts, overlap weights, DAV latents, stitched latents, raw and
 final audio, loudness gain) and the behaviour tests; `tools/mm3-refiner/check-integration.ps1`
 runs it for steps 1, 8 and 32 on all twelve clips, then drives `POST /mm3/refine` on throwaway
-engines (400, 413, 501, bypass, phases, cancel, FIFO, 48 kHz, mono, VRAM growth). It needs the
+engines (400, 413, 501, bypass, phases, cancel, FIFO, 48 kHz, mono, VRAM growth, and the ten
+native clips end to end with the real CLAP style against the torch `final.wav`). It needs the
 ignored fixtures from `tools/mm3-refiner/README.md` and a `tools/mm3-refiner/artifacts/models/mm3/`
-folder holding `mm3-refiner-refiner-f32`, `mm3-refiner-mert-f32`, `mm3-enc-f16` and `mm3-voc-f16`.
+folder holding `mm3-refiner-refiner-f32`, `mm3-refiner-mert-f32`, `mm3-refiner-clap-f32`,
+`mm3-enc-f16` and `mm3-voc-f16`.
 
 Two header quirks: `mm3-refiner.h` hides the `MM3_DIT_MAX_NODES` macro of `mm3-dit-graph.h`
 while it reads `mm3-refiner-dit.h`, which declares a constant of that name; and

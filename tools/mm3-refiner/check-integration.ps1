@@ -10,8 +10,9 @@
 #
 # Needs the GPU idle (Unreal paused for timings), a built engine (dev-rebuild.bat) and the ignored
 # artifacts: fixtures-v1/ and gguf/ from convert.py / capture-reference.py, plus
-# artifacts/models/mm3/ holding mm3-refiner-refiner-f32, mm3-refiner-mert-f32, mm3-enc-f16 and
-# mm3-voc-f16 (hardlink or copy; see README). Exit 0 pass, 1 fail.
+# artifacts/models/mm3/ holding mm3-refiner-refiner-f32, mm3-refiner-mert-f32, mm3-refiner-clap-f32,
+# mm3-enc-f16 and mm3-voc-f16 (hardlink or copy; see README). The route half runs the real CLAP style
+# source; HOTSTEP_MM3_REFINE_TEST_STYLE is used only for the override and corrupt-file checks. Exit 0 pass, 1 fail.
 #
 #   pwsh -NoProfile -File tools\mm3-refiner\check-integration.ps1 [-SkipProbe] [-SkipRoute] [-Port 8185]
 param([switch]$SkipProbe, [switch]$SkipRoute, [int]$Port = 8185)
@@ -163,11 +164,20 @@ if (-not $SkipRoute) {
         Check ($j.status.status -eq 'done' -and $same -and $dmax -lt 1e-6) "mix=0 returns the input (max diff $dmax), same rate and length"
     } finally { Stop-Process -Id $e.Id -Force }
 
-    Write-Host "route: pack present, no style source"
-    $e = Start-Engine $models '' 'nostyle'
+    Write-Host "route: pack without the CLAP file"
+    $noclap = "$out\models-noclap"; New-Item -ItemType Directory -Force "$noclap\mm3" | Out-Null
+    foreach ($f in 'mm3-refiner-refiner-f32.gguf', 'mm3-refiner-mert-f32.gguf', 'mm3-enc-f16.gguf', 'mm3-voc-f16.gguf') { if (-not (Test-Path "$noclap\mm3\$f")) { New-Item -ItemType HardLink -Path "$noclap\mm3\$f" -Target "$models\mm3\$f" | Out-Null } }
+    $e = Start-Engine $noclap '' 'noclap'
     try {
         $r = Submit $tone '?steps=8'
-        Check ($r.StatusCode -eq 501 -and (Err $r) -like '*style*') "no style source: 501, never made-up conditioning ($(Err $r))"
+        Check ($r.StatusCode -eq 501 -and (Err $r) -like '*mm3-refiner-clap-*.gguf*') "missing CLAP file: 501 naming it, no silent fallback ($(Err $r))"
+        $r = Submit $tone '?mix=0'
+        Check ($r.StatusCode -eq 200) "mix=0 still needs no pack: 200"
+    } finally { Stop-Process -Id $e.Id -Force }
+    $e = Start-Engine $noclap $style 'override'
+    try {
+        $r = Submit $tone '?steps=2'; $id = ($r.Content | ConvertFrom-Json).id; $j = Wait-Job $id 120
+        Check ($r.StatusCode -eq 200 -and $j.status.status -eq 'done') "HOTSTEP_MM3_REFINE_TEST_STYLE overrides the CLAP tower (no CLAP file needed)"
     } finally { Stop-Process -Id $e.Id -Force }
 
     Write-Host "route: corrupt refiner file"
@@ -181,9 +191,9 @@ if (-not $SkipRoute) {
     } finally { Stop-Process -Id $e.Id -Force }
 
     Write-Host "route: full run"
-    $e = Start-Engine $models $style 'full'
+    $e = Start-Engine $models '' 'full'
     try {
-        # torch parity over HTTP: boombap-s1001, defaults but 8 steps, against the fixture's final.wav
+        # torch parity over HTTP with the real CLAP style source: boombap-s1001, defaults but 8 steps, against the fixture's final.wav
         $vram0 = Get-VramMB
         $r = Submit $clipBytes '?steps=8'; $id = ($r.Content | ConvertFrom-Json).id
         $j = Wait-Job $id 300
@@ -196,6 +206,21 @@ if (-not $SkipRoute) {
         Check ($dmax -le 0.02 -and $rel -le 0.01) ("HTTP result vs torch final.wav: max_abs=$([Math]::Round($dmax,6)) rel_rmse=$([Math]::Round($rel,6)) (gates 0.02 / 0.01)")
         Start-Sleep -Seconds 1; $vramWarm = Get-VramMB   # after the first job: the CUDA context and pools now exist
         Write-Host "  peak VRAM during the job: $($j.peak_mb) MB; idle before the first job $vram0 MB, after it $vramWarm MB"
+
+        # all ten native clips, real CLAP style, 8 steps, against each fixture's final.wav (waveform gates 0.02 / 0.01)
+        $worst = @{ name = ''; dmax = 0.0; rel = 0.0 }; $allOk = $true; $peakClips = 0
+        foreach ($d in Get-ChildItem "$native\*.wav") {
+            $name = $d.BaseName; $bytes = [IO.File]::ReadAllBytes($d.FullName)
+            $r = Submit $bytes '?steps=8'; $id = ($r.Content | ConvertFrom-Json).id; $jc = Wait-Job $id 300
+            $res = Read-Wav (Get-Result $id); $ref = Read-Wav ([IO.File]::ReadAllBytes("$fixtures\$name\steps-8\final.wav"))
+            $cmp = [WavData]::Compare($res, $ref, [Math]::Min($res.N, $ref.N))
+            $ok = $jc.status.status -eq 'done' -and $cmp[0] -le 0.02 -and $cmp[1] -le 0.01; $allOk = $allOk -and $ok
+            $peakClips = [Math]::Max($peakClips, $jc.peak_mb)
+            if ($cmp[1] -gt $worst.rel) { $worst = @{ name = $name; dmax = $cmp[0]; rel = $cmp[1] } }
+            Write-Host ("    {0}: max_abs={1:N6} rel_rmse={2:N6} {3}" -f $name, $cmp[0], $cmp[1], $(if ($ok) { 'ok' } else { 'FAIL' }))
+        }
+        Check $allOk ("end-to-end parity on the ten native clips, real CLAP style (worst by rel_rmse: {0} max_abs={1:N6} rel_rmse={2:N6})" -f $worst.name, $worst.dmax, $worst.rel)
+        Write-Host "  peak VRAM across the ten clips: $peakClips MB"
 
         # cancel in the bridge
         $r = Submit $clipBytes '?steps=64'; $id = ($r.Content | ConvertFrom-Json).id
@@ -233,7 +258,8 @@ if (-not $SkipRoute) {
 
         # leak: the engine is idle, STRICT residency unloads after each job, so VRAM sits at its baseline
         Start-Sleep -Seconds 1; $vram1 = Get-VramMB
-        Check ([Math]::Abs($vram1 - $vramWarm) -lt 150) "no VRAM growth over the 10 jobs after the first ($vramWarm MB -> $vram1 MB; STRICT residency unloads each job)"
+        # 300 MB: the desktop's own processes move this reading by +-250 MB (a 30-job loop on the same engine wandered 5944-6332 MB with no trend)
+        Check ([Math]::Abs($vram1 - $vramWarm) -lt 300) "no VRAM growth over the jobs after the first ($vramWarm MB -> $vram1 MB; STRICT residency unloads each job)"
     } finally { Stop-Process -Id $e.Id -Force }
 }
 

@@ -14,20 +14,20 @@
 //     200 {"id"}            queued on the GPU worker FIFO (mix=0 completes at once, no queue)
 //     400 {"error"}         empty or undecodable body, a parameter out of range or malformed
 //     413 {"error"}         direct mode past MM3_REF_DIRECT_MAX_FRAMES
-//     501 {"error"}         a pack file is missing (the message names it) or no style source is wired
+//     501 {"error"}         a pack file is missing (the message names it)
 //   GET  /job?id=           status JSON; phase is queued, loading_refiner, refine_condition
-//                           (window/windows, reported once for the DAV encode pass and once for MERT),
+//                           (window/windows, reported once each for the DAV encode pass, MERT and CLAP),
 //                           refine_bridge (DiT forwards done / windows x steps), vae_decode,
 //                           encoding_output; failed adds "error"
 //   POST /job?id=&cancel=1  honoured between bridge steps and between phases
 //   GET  /job?id=&result=1  audio/wav, float32 stereo at the input rate and frame count; 404 until done
 //
 // Files are read from <models>/mm3/: mm3-refiner-refiner-*.gguf, mm3-refiner-mert-*.gguf,
-// mm3-enc-*.gguf, mm3-voc-*.gguf (f32 / f16 first, else the first by name).
+// mm3-refiner-clap-*.gguf, mm3-enc-*.gguf, mm3-voc-*.gguf (f32 / f16 first, else the first by name).
 //
-// Style. The refiner needs a CLAP vector per window and no producer is wired yet:
-// mm3_refiner_style_source() returns an empty function and the route answers 501 rather
-// than refine with made-up conditioning. The CLAP port (or the frozen corpus mean) replaces it.
+// Style. The CLAP audio tower (mm3-refiner-clap.h, through ModelStore) makes the 512-d style
+// vector of every window. A missing CLAP file answers 501 like any other pack file; nothing
+// falls back to made-up conditioning. HOTSTEP_MM3_REFINE_TEST_STYLE overrides the tower.
 
 #include <algorithm>
 #include <cstdlib>
@@ -39,11 +39,11 @@
 
 static std::string g_mm3_refiner_dir;  // <models>/mm3
 
-// The style vector every window uses. TEST ONLY: HOTSTEP_MM3_REFINE_TEST_STYLE names a raw
-// little-endian float32 file of 512 values (tools/mm3-refiner/check-integration.ps1 writes one
-// from a fixture so the route can be exercised end to end). Unset, or anything else wrong with
-// it, leaves the route answering 501: it never invents a vector.
-static Mm3StyleFn mm3_refiner_style_source() {
+// TEST ONLY override of the CLAP tower: HOTSTEP_MM3_REFINE_TEST_STYLE names a raw
+// little-endian float32 file of 512 values used for every window (tools/mm3-refiner/check-integration.ps1
+// writes one from a fixture). Unset, or anything else wrong with it, returns an empty function and the
+// CLAP tower runs: a bad override never invents a vector.
+static Mm3StyleFn mm3_refiner_style_override() {
     static const std::vector<float> test_style = [] {
         std::vector<float> v;
         if (const char * path = std::getenv("HOTSTEP_MM3_REFINE_TEST_STYLE")) {
@@ -87,11 +87,13 @@ static std::string mm3_refiner_find(const std::string & dir, const std::string &
     return names.empty() ? std::string() : dir + "/" + names.front();
 }
 
-// Resolves the four files; on a miss says which one is absent.
-static bool mm3_refiner_resolve(Mm3RefinerPaths * out, std::string * err) {
+// Resolves the pack files; on a miss says which one is absent. The CLAP file is not needed
+// when the test override supplies the style.
+static bool mm3_refiner_resolve(Mm3RefinerPaths * out, bool need_clap, std::string * err) {
     const std::string & d = g_mm3_refiner_dir;
     out->refiner          = mm3_refiner_find(d, "mm3-refiner-refiner-", "f32");
     out->mert             = mm3_refiner_find(d, "mm3-refiner-mert-", "f32");
+    out->clap             = mm3_refiner_find(d, "mm3-refiner-clap-", "f32");
     out->enc              = mm3_refiner_find(d, "mm3-enc-", "f16");
     out->voc              = mm3_refiner_find(d, "mm3-voc-", "f16");
     const struct {
@@ -99,10 +101,11 @@ static bool mm3_refiner_resolve(Mm3RefinerPaths * out, std::string * err) {
         const char *        what;
     } need[] = { { &out->refiner, "mm3-refiner-refiner-*.gguf" },
                  { &out->mert, "mm3-refiner-mert-*.gguf" },
+                 { &out->clap, "mm3-refiner-clap-*.gguf" },
                  { &out->enc, "mm3-enc-*.gguf" },
                  { &out->voc, "mm3-voc-*.gguf" } };
     for (const auto & n : need) {
-        if (n.path->empty()) {
+        if (n.path->empty() && (n.path != &out->clap || need_clap)) {
             *err = std::string("latent refiner pack incomplete: no ") + n.what + " in " + d;
             return false;
         }
@@ -188,13 +191,9 @@ static void mm3_refiner_handle(const httplib::Request & req, httplib::Response &
         return;
     }
     Mm3RefinerPaths paths;
-    if (!mm3_refiner_resolve(&paths, &err)) {
+    const Mm3StyleFn style = mm3_refiner_style_override();
+    if (!mm3_refiner_resolve(&paths, !style, &err)) {
         bad(501, err);
-        return;
-    }
-    const Mm3StyleFn style = mm3_refiner_style_source();
-    if (!style) {
-        bad(501, "latent refiner has no style source: the CLAP style vector is not wired yet");
         return;
     }
 

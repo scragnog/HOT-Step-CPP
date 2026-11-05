@@ -523,13 +523,14 @@ or MP3, mono or stereo, any rate). The job runs on the shared FIFO worker.
 There is no seed: the bridge is deterministic. Answers: `200 {"id"}`; `400` for an
 empty or undecodable body, a malformed or out-of-range parameter, or audio shorter than
 0.5 s; `413` for direct mode past the frame limit; `501` when a pack file is missing
-(the message names the pattern) or no style source is wired. Models are read from
-`<models>/mm3/`: `mm3-refiner-refiner-*.gguf`, `mm3-refiner-mert-*.gguf`, `mm3-enc-*.gguf`
-and `mm3-voc-*.gguf` (f32 or f16 first, else the first by name).
+(the message names the pattern). Models are read from `<models>/mm3/`:
+`mm3-refiner-refiner-*.gguf`, `mm3-refiner-mert-*.gguf`, `mm3-refiner-clap-*.gguf` (the CLAP
+style vector, one per window), `mm3-enc-*.gguf` and `mm3-voc-*.gguf` (f32 or f16 first, else the
+first by name).
 
 Progress is `GET /job?id=`. `phase` is `queued`, `loading_refiner`, `refine_condition`
-(`phase_step`/`phase_total` count windows; reported once for the DAV encode pass and once
-for MERT), `refine_bridge` (DiT forwards done over windows x steps), `vae_decode`,
+(`phase_step`/`phase_total` count windows; reported once each for the DAV encode pass, MERT
+and CLAP), `refine_bridge` (DiT forwards done over windows x steps), `vae_decode`,
 `encoding_output`, then `done`, `failed` or `cancelled`. A failed job adds `"error"`.
 `POST /job?id=&cancel=1` is honoured between bridge steps and between phases.
 `GET /job?id=&result=1` returns `audio/wav`, float32 stereo at the input rate and with the

@@ -69,6 +69,7 @@ struct MM3Enc;
 struct Mm3Mert;
 struct Mm3RefinerDit;
 struct Mm3RefVoc;
+struct Mm3Clap;
 
 enum ModelKind {
     MODEL_LM,         // Qwen3LM        from acestep-5Hz-lm-*.gguf
@@ -84,6 +85,7 @@ enum ModelKind {
     MODEL_MM3_REFINER_MERT,  // Mm3Mert       from mm3-refiner-mert-*.gguf (+ layer statistics from the refiner GGUF)
     MODEL_MM3_REFINER_DIT,   // Mm3RefinerDit from mm3-refiner-refiner-*.gguf
     MODEL_MM3_REFINER_VOC,   // Mm3RefVoc     from mm3-voc-*.gguf (DAV decoder, latents -> audio)
+    MODEL_MM3_REFINER_CLAP,  // Mm3Clap       from mm3-refiner-clap-*.gguf (CLAP audio tower, window style vector)
 };
 
 struct ModelKey {
@@ -149,10 +151,12 @@ Sa3GgmlRefine * store_require_sa3_ggml(ModelStore * s, const ModelKey & k);  // 
 //   Mm3Mert:       k.path = MERT GGUF, k.adapter_path = refiner GGUF (normalization.layer_{mean,std})
 //   Mm3RefinerDit: k.path = refiner GGUF
 //   Mm3RefVoc:     k.path = mm3-voc GGUF (or a legacy bundle holding voc.*)
+//   Mm3Clap:       k.path = mm3-refiner-clap GGUF
 MM3Enc *        store_require_mm3_enc(ModelStore * s, const ModelKey & k);
 Mm3Mert *       store_require_mm3_refiner_mert(ModelStore * s, const ModelKey & k);
 Mm3RefinerDit * store_require_mm3_refiner_dit(ModelStore * s, const ModelKey & k);
 Mm3RefVoc *     store_require_mm3_refiner_voc(ModelStore * s, const ModelKey & k);
+Mm3Clap *       store_require_mm3_refiner_clap(ModelStore * s, const ModelKey & k);
 std::string     store_mm3_last_error();
 
 TokGGML *    store_require_fsq_tok(ModelStore * s, const ModelKey & k);

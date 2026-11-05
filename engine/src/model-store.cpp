@@ -21,6 +21,7 @@
 #include "timer.h"
 #include "weight-source.h"
 #include "minimax/mm3-dav-encode.h"
+#include "minimax/mm3-refiner-clap.h"
 #include "minimax/mm3-refiner-dit.h"  // no mm3-dit-graph.h in this translation unit, so no MM3_DIT_MAX_NODES clash
 #include "minimax/mm3-refiner-mert.h"
 #include "minimax/mm3-vocoder-graph.h"
@@ -740,6 +741,11 @@ static void del_mm3_voc(void * p) {
     delete static_cast<Mm3RefVoc *>(p);
 }
 
+static void del_mm3_clap(void * p) {
+    mm3_clap_free(static_cast<Mm3Clap *>(p));
+    delete static_cast<Mm3Clap *>(p);
+}
+
 static size_t buffer_bytes(const WeightCtx & w) {
     return w.buffer ? ggml_backend_buffer_get_size(w.buffer) : 0;
 }
@@ -830,6 +836,29 @@ Mm3RefVoc * store_require_mm3_refiner_voc(ModelStore * s, const ModelKey & k) {
     }
     install_entry(s, k, m, m->vram, "MM3-Refiner-Voc", del_mm3_voc);
     fprintf(stderr, "[Store] Load MM3-Refiner-Voc: %.0f ms\n", t.ms());
+    return m;
+}
+
+Mm3Clap * store_require_mm3_refiner_clap(ModelStore * s, const ModelKey & k) {
+    std::lock_guard<std::mutex> lock(s->mtx);
+    if (auto * hit = cache_hit<Mm3Clap>(s, k)) {
+        return hit;
+    }
+    if (s->policy == EVICT_STRICT) {
+        evict_all_except(s, k);
+    }
+    Timer       t;
+    Mm3Clap *   m = new Mm3Clap();
+    std::string err;
+    g_mm3_last_error.clear();
+    if (!mm3_clap_load(m, k.path, &err)) {
+        g_mm3_last_error = err;
+        mm3_clap_free(m);
+        delete m;
+        return nullptr;
+    }
+    install_entry(s, k, m, buffer_bytes(m->wctx), "MM3-Refiner-CLAP", del_mm3_clap);
+    fprintf(stderr, "[Store] Load MM3-Refiner-CLAP: %.0f ms\n", t.ms());
     return m;
 }
 
