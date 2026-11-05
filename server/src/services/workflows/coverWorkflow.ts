@@ -21,6 +21,9 @@ import {
   type CoverRenderInput, type CoverDraft,
 } from '../../contracts/studioWorkflows.js';
 import { instrumentalConflict, preparedPair } from '../../contracts/yue2Prepare.js';
+import { abcLeadSheetRoll } from '../leadSheetRoll.js';
+import { heartmulaCoverLyrics, heartmulaCoverTags } from '../backends/heartmula/cover.js';
+import type { HeartmulaCoverRolls } from '../../contracts/studioWorkflows.js';
 
 export type { CoverRenderInput, CoverDraft };
 
@@ -49,7 +52,6 @@ function coverTitle(i: CoverRenderInput) {
   return i.artistName ? `${i.title || 'Cover'} (${i.artistName} Cover)` : (i.title || 'Cover');
 }
 export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: string): Record<string, unknown> {
-  if (i.expectedBackend === 'heartmula') throw new WorkflowError(400, 'HeartMuLa covers are not available yet');
   const c = i.controls, e = i.engineParams, s = i.settings;
   const analysis = i.analysis ?? d.analysis;
   if (i.expectedBackend === 'ace') {
@@ -104,6 +106,24 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
       ...(i.seed !== undefined ? { seed: i.seed, randomSeed: i.seed < 0 } : {}),
       sa3Cover: { transform: i.strength ?? c.sa3Transform ?? 0.3,
         adapters: i.adapter ?? c.sa3Adapters ?? '' } };
+  }
+  if (i.expectedBackend === 'heartmula') {
+    if (!d.approvedAbc) throw new WorkflowError(409, 'Review and approve the score first');
+    try {
+      const r = abcLeadSheetRoll(d.approvedAbc);
+      const rolls: HeartmulaCoverRolls = { version: 1, dtype: 'float32', bpm: r.bpm, length: r.length,
+        pianoroll: Array.from(r.pianoroll), chord: Array.from(r.chord),
+        drum_pianoroll: Array.from(r.drum_pianoroll), context_mask: Array.from(r.context_mask) };
+      const tags = heartmulaCoverTags(i.heartmulaTags);
+      return { ...shared, ...Object.fromEntries(Object.entries(e).filter(([key]) => key.startsWith('heartmula'))),
+        backend: 'heartmula', expectedBackend: 'heartmula', taskType: 'cover', customMode: true,
+        heartmulaCover: rolls, heartmulaTags: tags, caption: tags, style: tags,
+        lyrics: heartmulaCoverLyrics(i.instrumental ? '' : i.lyrics), instrumental: i.instrumental,
+        duration: -1, batchSize: 1, title: coverTitle(i), sourceAudioUrl: url, source: 'cover-studio',
+        artistName: i.targetArtistName || i.artistName, sourceArtist: i.artistName,
+        ...(i.seed !== undefined ? { seed: i.seed, randomSeed: i.seed < 0 } : {}),
+        heartmulaTopK: e.heartmulaTopK ?? 250 };
+    } catch (error) { throw new WorkflowError(400, error instanceof Error ? error.message : String(error)); }
   }
   if (i.expectedBackend !== 'yue2') throw new WorkflowError(400, 'Backend does not support covers');
   if (!d.approvedAbc) throw new WorkflowError(409, 'Review and approve the score first');
@@ -292,8 +312,7 @@ export function createCoverKinds(deps: CoverDeps = {}): WorkflowKind<any>[] {
   } }, { kind: 'cover-render', input: render, async run(ctx) {
     let input = ctx.input as CoverRenderInput;
     const data = draft(docs(), input.documentId, input.revision, ctx.userId);
-    if (input.expectedBackend === 'heartmula') throw new WorkflowError(400, 'HeartMuLa covers are not available yet');
-    if (input.prepare !== undefined && input.expectedBackend === 'yue2') {
+    if (input.prepare !== undefined && (input.expectedBackend === 'yue2' || input.expectedBackend === 'heartmula')) {
       const pair = preparedPair(input.prepare, data.approvedAbc || undefined);
       if ('error' in pair) throw new WorkflowError(409, pair.error);
       const conflict = instrumentalConflict(pair, input.instrumental);

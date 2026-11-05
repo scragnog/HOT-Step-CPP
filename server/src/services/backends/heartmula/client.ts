@@ -1,4 +1,5 @@
 import { config } from '../../../config.js';
+import type { HeartmulaCoverRolls } from '../../../contracts/studioWorkflows.js';
 
 export const HEARTMULA_ROLES = ['global', 'local', 'flow', 'scalar_decoder'] as const;
 export type HeartmulaRole = typeof HEARTMULA_ROLES[number];
@@ -34,6 +35,12 @@ export interface HeartmulaRequest extends HeartmulaPick {
   cfg_scale: number;
   codec_steps: number;
   codec_guidance: number;
+}
+/** Stage 3c's /heartmula/cover body. The Node submission's heartmulaCover
+ * becomes rolls; tags and sectioned lyrics use the ordinary top-level fields.
+ * Submission remains disabled in mapHeartmulaRequest until that route exists. */
+export interface HeartmulaCoverRequest extends HeartmulaRequest {
+  rolls: HeartmulaCoverRolls;
 }
 export interface HeartmulaProps {
   synth_ready: boolean;

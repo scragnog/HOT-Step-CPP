@@ -50,6 +50,9 @@ function samplerPlugins(params: Readonly<Record<string, unknown>>): Partial<Hear
 
 /** Validate at enqueue time, before the job can enter the shared GPU lane. */
 export function mapHeartmulaRequest(params: Readonly<Record<string, unknown>>, models: BackendModelSelection): HeartmulaRequest {
+  // Stage 3c installs the cover endpoint. Fail before model/tag resolution and
+  // never submit a symbolic cover to the plain generation endpoint.
+  if (params.taskType === 'cover' || params.heartmulaCover !== undefined) throw new Error('HeartMuLa covers are not available yet');
   const tags = params.heartmulaTags ?? params.tags ?? params.caption ?? params.prompt ?? params.songDescription ?? params.style;
   if (typeof tags !== 'string' || !tags.trim() || Buffer.byteLength(tags) > 4096) throw new Error('tags must be non-empty text of at most 4096 bytes');
   const lyrics = params.instrumental === true ? '' : params.lyrics ?? '';

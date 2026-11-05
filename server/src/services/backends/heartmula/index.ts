@@ -50,7 +50,7 @@ export const heartmulaBackend: EngineBackend = {
       features: {
         models: true, lm: false, plugins: false, samplerPlugins: true, adapters: false,
         lmAdapters: true, lmAdapterSelectable: true, postProcess: true, stableStep: true,
-        whisper: false, lyricTimestamps: false, forcedAlignment: false, cover: false,
+        whisper: false, lyricTimestamps: false, forcedAlignment: false, cover: true,
         repaint: false, lego: false, extract: false, streaming: false, training: false,
         midi: false, stems: false, understand: false, conceptSteering: false,
       },
@@ -58,7 +58,7 @@ export const heartmulaBackend: EngineBackend = {
     };
   },
   models: heartmulaModels, selectModel: selectHeartmulaModel,
-  operations: ['text2music'],
+  operations: ['text2music', 'cover'],
   resolveRequest(submission) {
     const models = heartmulaSelection();
     for (const [key, target] of Object.entries({

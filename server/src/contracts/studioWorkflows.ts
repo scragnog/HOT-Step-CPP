@@ -88,13 +88,19 @@ export interface CoverTranscribeResult { documentId: string; revision: number; a
 /** POST /api/workflows/jobs { kind: 'cover-render', input }. `analysis` and
  *  the ACE/YuE2/SA3 `controls` block carry every per-run override the engine
  *  request needs; the draft document supplies the resolved asset and, for
- *  YuE2, the approved ABC score (409 if the draft has none approved yet).
- *  `prepare` (YuE2, optional) is the Prepare document (contracts/yue2Prepare.ts):
+ *  YuE2 or HeartMuLa, the approved ABC score (409 if not approved).
+ *  HeartMuLa requires heartmulaTags, ignores caption and YuE2 controls, and
+ *  derives fresh rolls from that approved score. Its generation backend still
+ *  returns "HeartMuLa covers are not available yet" until the engine is ready.
+ *  `prepare` (YuE2/HeartMuLa, optional) is contracts/yue2Prepare.ts's document:
  *  when sent, both its confirmations must be current and its structure must
  *  be the approved score, and the lyrics rendered are the ones it exports,
  *  replacing `lyrics` (409 otherwise). */
 export const coverRenderSchema = coverDraftRefSchema.extend({
   expectedBackend: z.enum(['ace', 'yue2', 'sa3', 'heartmula']), engineParams: z.record(z.string(), z.unknown()),
+  /** MuLaCover uses four explicit fields; caption is never parsed into tags. */
+  heartmulaTags: z.object({ topic: z.string().max(512), genre: z.string().max(512),
+    instrument: z.string().max(512), mood: z.string().max(512) }).optional(),
   // SA3 overrides. The existing controls/engineParams fields remain accepted.
   strength: z.number().min(0.1).max(0.9).optional(),
   seed: z.number().int().min(-1).max(Number.MAX_SAFE_INTEGER).optional(),
@@ -130,6 +136,14 @@ export const coverRenderSchema = coverDraftRefSchema.extend({
   }),
 });
 export type CoverRenderInput = z.infer<typeof coverRenderSchema>;
+/** MuLaCover JSON wire, contiguous row-major binary values represented as f32
+ * numbers. Shapes: pianoroll [length,256], chord [length,12], drums [length,128],
+ * mask [length]. Melody columns are pitch*2 onset, pitch*2+1 sustain.
+ * context_mask is zero, including rests. At most 5000 sixteenth steps. */
+export interface HeartmulaCoverRolls {
+  version: 1; bpm: number; length: number; dtype: 'float32';
+  pianoroll: number[]; chord: number[]; drum_pianoroll: number[]; context_mask: number[];
+}
 /** A persisted `cover-draft` document's body, as `cover-render` reads it. */
 export interface CoverDraft {
   assetId: string; sha256: string; sourceLabel?: string;

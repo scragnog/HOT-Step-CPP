@@ -113,7 +113,11 @@ test('HeartMuLa contract, queued picks, validation, persistence, cancellation an
         {heartmulaGlobalModel: 8}, {batchSize: 2}, {randomSeed: 'yes'},
         {tags: '界'.repeat(1366)}, {lyrics: '界'.repeat(10923)},
       ]) assert.throws(() => heartmulaBackend.resolveRequest({...raw, ...bad}), undefined, JSON.stringify(bad));
-      assert.throws(() => buildEnvelope({...raw, backendOverride: 'heartmula', taskType: 'cover'}, 'fixture-user', 'other', Date.now()), /does not support/);
+      assert.equal((await heartmulaBackend.capabilities()).features.cover, true);
+      const callsBeforeCover = calls.length;
+      assert.throws(() => buildEnvelope({...raw, backendOverride: 'heartmula', taskType: 'cover'}, 'fixture-user', 'other', Date.now()), /HeartMuLa covers are not available yet/);
+      assert.throws(() => heartmulaBackend.resolveRequest({...raw, heartmulaCover: {}}), /HeartMuLa covers are not available yet/);
+      assert.equal(calls.length, callsBeforeCover, 'cover must not call a missing endpoint or fall back to synth');
       assert.equal(heartmulaBackend.resolveRequest({...raw, instrumental: true}).common.lyrics, '');
       // Adapter dials ride on the wire only with an adapter; plugin picks only with the toggle on.
       const dialled = heartmulaBackend.resolveRequest({...raw, heartmulaAdapter: adapter, heartmulaAdapterScaleMlp: 0, heartmulaAdapterScaleLate: 1.5}).options;

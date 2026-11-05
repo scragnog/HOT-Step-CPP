@@ -163,17 +163,39 @@ test('cover schema accepts SA3 defaults and rejects invalid transforms and unkno
   { status: 400 });
 });
 
-test('HeartMuLa is recognized but rejects covers clearly before lyrics, score or capability checks', async () => {
-  const body = coverRenderSchema.parse({ ...input, expectedBackend: 'heartmula', lyrics: '' });
+test('HeartMuLa uses approved ABC, explicit tags and sectioned lyrics without YuE2 controls', async () => {
+  const body = coverRenderSchema.parse({ ...input, expectedBackend: 'heartmula', seed: 73,
+    heartmulaTags: { topic: 'Travel', genre: 'Folk', instrument: 'Piano', mood: 'Calm' },
+    engineParams: { seed: 5, heartmulaTemperature: 0.8, heartmulaTags: 'stale tags', heartmulaTopK: 200 },
+    controls: { ...input.controls, pairMode: 'pair' }, lyrics: '[verse 1]\nLine\n[CHORUS]\nAgain' });
+  const approvedAbc = 'X:1\nM:4/4\nL:1/4\nQ:1/4=90\nK:C\nV:Vocal\n"C"C4|';
   assert.throws(() => effectiveCoverRequest(body, { assetId: 'asset', sha256: 'sha' }, '/references/source.wav'),
-    { status: 400, message: 'HeartMuLa covers are not available yet' });
-  const s = setup({ capability: async () => { throw new Error('capability lookup must not run'); } });
+    { status: 409, message: 'Review and approve the score first' });
+  const request = effectiveCoverRequest(body, { assetId: 'asset', sha256: 'sha', approvedAbc }, '/references/source.wav');
+  assert.equal(request.backend, 'heartmula');
+  assert.equal(request.taskType, 'cover');
+  assert.equal(request.duration, -1);
+  assert.equal(request.seed, 73);
+  assert.equal(request.randomSeed, false);
+  assert.equal(request.heartmulaTemperature, 0.8);
+  assert.equal(request.heartmulaTopK, 200);
+  assert.equal(request.heartmulaTags, 'topic:[travel]; genre:[folk]; instrument:[piano]; mood:[calm]');
+  assert.equal(request.lyrics, '[Verse]\nLine\n[Chorus]\nAgain');
+  const rolls = request.heartmulaCover as { bpm: number; length: number; pianoroll: number[] };
+  assert.equal(rolls.bpm, 90);
+  assert.equal(rolls.length, 16);
+  assert.equal(rolls.pianoroll.length, 16 * 256);
+  assert.equal(request.yue2Abc, undefined);
+  assert.throws(() => effectiveCoverRequest({ ...body, heartmulaTags: undefined }, { assetId: 'asset', sha256: 'sha', approvedAbc }, 'url'),
+    /four HeartMuLa tag fields/);
+  const s = setup({ capability: async backend => backend === 'heartmula' });
   const opened = await s.open();
-  const job = s.submit('cover-render', 'heartmula-pending', { ...body, ...opened }).job;
+  const updated = s.documents.update(opened.documentId, 'owner', opened.revision, data => ({ ...data, approvedAbc }));
+  const job = s.submit('cover-render', 'heartmula-ready', { ...body, ...opened, revision: updated.revision }).job;
   await s.jobs.settled();
-  assert.equal(s.jobs.get(job.id).status, 'failed');
-  assert.match(s.jobs.get(job.id).error ?? '', /HeartMuLa covers are not available yet/);
-  assert.equal(s.items.size, 0);
+  assert.equal(s.jobs.get(job.id).status, 'succeeded');
+  assert.equal([...s.items.values()][0].request.backend, 'heartmula');
+  s.db.close();
 });
 
 test('SA3 queues the captured full source without lyrics or an approved score', async () => {
@@ -369,23 +391,25 @@ test('render cancellation cancels the audio intent', async () => {
   assert.equal(s.jobs.get(job.id).status, 'cancelled');
 });
 
-test('a YuE2 render with a Prepare document renders its exported lyrics, and refuses a stale one', async () => {
-  const abc = 'X:1\nK:C\n% intro\nV: Vocal\nZ|\n% verse\nV: Vocal\nC4|';
+for (const expectedBackend of ['yue2', 'heartmula'] as const) test(`${expectedBackend} Prepare renders its exported lyrics and refuses stale confirmations`, async () => {
+  const abc = 'X:1\nM:4/4\nL:1/4\nQ:1/4=90\nK:C\n% intro\nV: Vocal\nZ|\n% verse\nV: Vocal\nC4|';
   const confirmedPrepare = (score = abc) => ({ version: 2, sourceKey: 'src', abc: score, sectionIds: ['s1', 's2'], paste: '',
     blocks: [{ id: 'b1', text: 'hello', tag: 'Verse' }],
     assignments: { s1: { kind: 'instrumental' }, s2: { kind: 'words', blockIds: ['b1'] } },
     excluded: [], lyricRevision: 3, flagged: [], nextId: 4,
     confirmed: { structure: { structureHash: structureHash(score) }, lyrics: { structureHash: structureHash(score), lyricRevision: 3 } } });
   const prepare = confirmedPrepare();
-  const s = setup();
+  const s = setup({ capability: async () => true });
   const opened = await s.open();
   const doc = s.documents.get(opened.documentId, 'owner');
   const approved = s.documents.update(opened.documentId, 'owner', opened.revision, { ...doc.data, approvedAbc: prepare.abc });
-  const yue = { ...input, ...opened, revision: approved.revision, expectedBackend: 'yue2', lyrics: '[stale]\nold words' };
+  const yue = { ...input, ...opened, revision: approved.revision, expectedBackend, lyrics: '[stale]\nold words',
+    heartmulaTags: { topic: '', genre: '', instrument: '', mood: '' } };
   const ok = s.submit('cover-render', 'prepared', { ...yue, prepare }).job;
   await s.jobs.settled();
   assert.equal(s.jobs.get(ok.id).status, 'succeeded');
-  assert.equal((s.jobs.get(ok.id).result as any).request.lyrics, '[intro]\n\n[verse]\nhello');
+  assert.equal((s.jobs.get(ok.id).result as any).request.lyrics, expectedBackend === 'yue2'
+    ? '[intro]\n\n[verse]\nhello' : '[Intro]\n\n[Verse]\nhello');
   const stale = s.submit('cover-render', 'stale-lyrics', { ...yue, prepare: { ...prepare, lyricRevision: 9 } }).job;
   const moved = s.submit('cover-render', 'other-score', { ...yue,
     prepare: confirmedPrepare(abc.replace('C4|', 'E4|')) }).job;
