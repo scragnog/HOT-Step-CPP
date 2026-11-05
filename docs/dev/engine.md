@@ -232,12 +232,16 @@ embedding. Without a bound cover the graph is the plain HeartMuLa graph.
 every captured key. Token ids, rolls, CFG rows, masks and positions match exactly.
 Teacher-forced codes all fall inside the engine's top-250. The captures ran torch
 under BF16 autocast, and torch itself in FP32 misses them by as much as the engine
-does. With `--fp32` the float tensors are also checked against the same run in
-torch FP32. The engine must stay within twice torch's own FP32-to-BF16 drift on
-every float tensor. On logits it must also flip no more argmaxes than torch BF16
-does, and only on near-ties, and stay no further from FP32's cross-entropy at the fed
-codes. These are the rules `heartmula-probe` uses for the plain model. A manifest
-that is empty, unreadable or missing a key the engine produces fails the case.
+does. So the float tensors are gated against the same run in torch FP32:
+`fp32_ref.py`, beside the capture script, writes it to each case's `fp32/`
+folder, and a case without one fails. The engine must stay within twice torch's
+own FP32-to-BF16 drift on every float tensor, in relative L2 and in max abs. On
+logits it must also flip no more argmaxes than torch BF16 does, and only on
+near-ties. At the fed codes, its cross-entropy may sit no further from FP32's
+than torch BF16's does. These are the rules `heartmula-probe` uses for the plain
+model. The original rules are still evaluated and shown per key. A manifest that is
+unreadable, has fewer than 98 keys or lacks a key the engine produces fails the
+case.
 
 ## How ace-server is organised
 

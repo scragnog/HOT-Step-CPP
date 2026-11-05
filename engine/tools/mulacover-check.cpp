@@ -1,6 +1,6 @@
 // mulacover-check: Stage 3a and 3b receipts for the MuLaCover port.
 //
-//   mulacover-check --models DIR --qwen QWEN --captures DIR [--only qwen,pack,parity] [--fp32 DIR] [--table OUT.md]
+//   mulacover-check --models DIR --qwen QWEN --captures DIR [--only qwen,pack,parity] [--fp32 ROOT] [--table OUT.md]
 //
 // 1. Qwen style vector (qwen3-enc.h qwen3_style_vector) against every capture case
 //    under --captures (<case>/input.json + <case>/observed/*.npy): token ids and mask
@@ -285,8 +285,10 @@ static void check_pack(const std::string & models) {
 // have been drawn); the Qwen last row and vector are informational here (3a's checks).
 //
 // The 2c run used BF16 autocast, and torch itself in FP32 misses those float rules by
-// the margins the engine does. With --fp32 DIR (the same run in torch FP32, capture
-// layout) every float key also gets heartmula-probe's drift rule: engine vs torch FP32
+// the margins the engine does (Lead's tolerance amendment on HOTSTEP-980). Each case's
+// <case>/fp32/observed/ holds the same run in torch FP32 (fp32_ref.py beside capture.py;
+// --fp32 ROOT reads ROOT/<case>/fp32 instead), and a case without it fails. Every float
+// key also gets heartmula-probe's drift rule: engine vs torch FP32
 // within 2x torch's own FP32-vs-BF16 drift, in relative L2 and in max abs (floor 1e-3).
 // Logits keys also take that precedent's distribution checks: an argmax that differs
 // from torch FP32 must be a near-tie (FP32 top-2 margin within 2x drift max abs), and
@@ -605,6 +607,8 @@ static bool logits_dist(const std::vector<double> & got, const std::vector<doubl
     return ok;
 }
 
+#define MULACOVER_CAPTURE_KEYS 98  // keys per case in the 2c captures
+
 static Row manifest_fail(const std::string & key, const std::string & why) {
     Row r;
     r.key  = key;
@@ -622,9 +626,13 @@ static std::vector<Row> compare_case(const std::filesystem::path & dir, const Ca
     if (!dist) dist = &local;
     yyjson_doc * doc  = read_json(dir / "observed" / "tensors.json");
     yyjson_val * root = doc ? yyjson_doc_get_root(doc) : nullptr;
-    if (!yyjson_is_obj(root) || yyjson_obj_size(root) == 0) {
+    if (!yyjson_is_obj(root) || yyjson_obj_size(root) < MULACOVER_CAPTURE_KEYS) {
+        rows.push_back(manifest_fail("tensors.json", !root ? "manifest unreadable"
+                                                           : !yyjson_is_obj(root) ? "manifest is not an object"
+                                                           : "manifest has " + std::to_string(yyjson_obj_size(root)) +
+                                                                 " keys; the 2c captures have " +
+                                                                 std::to_string(MULACOVER_CAPTURE_KEYS)));
         yyjson_doc_free(doc);
-        rows.push_back(manifest_fail("tensors.json", root ? "manifest is empty or not an object" : "manifest unreadable"));
         return rows;
     }
     // Coverage both ways: a key the engine produces but the manifest lacks fails too.
@@ -810,7 +818,11 @@ static void check_parity(HeartMuLaRuntime & rt, const HeartMuLaTokenizer & tok, 
         verdict(ok, "parity " + name + ": teacher-forced run" + (ok ? "" : ": " + err));
         if (!ok) continue;
         int        fails = 0, n = 0, declared_fails = 0, drift_rows = 0;
-        const auto fp    = fp32_dir.empty() ? fs::path() : fs::path(fp32_dir) / name;
+        const auto fp    = (fp32_dir.empty() ? c : fs::path(fp32_dir) / name) / "fp32";
+        if (!fs::exists(fp / "observed" / "tensors.json")) {
+            verdict(false, "parity " + name + ": no torch FP32 reference at " + fp.string() + " (fp32_ref.py)");
+            continue;
+        }
         Dist       dist;
         for (const Row & r : compare_case(c, run, extra, fp, &dist)) {
             n++;
@@ -838,7 +850,7 @@ static void check_parity(HeartMuLaRuntime & rt, const HeartMuLaTokenizer & tok, 
             md += std::string("| ") + name + " | logits distribution | drift | " + std::to_string(dist.rows) +
                   " rows | | | | | | | | " + (dok ? "pass" : "fail") + " | " + (dok ? "PASS" : "FAIL") + " | " +
                   (buf + name.size() + 9) + " |\n";
-        } else if (!fp32_dir.empty()) {
+        } else {
             verdict(false, "parity " + name + ": no logits checked against torch FP32");
         }
         verdict(fails == 0, "parity " + name + ": " + std::to_string(n) + " keys compared, " + std::to_string(fails) +
