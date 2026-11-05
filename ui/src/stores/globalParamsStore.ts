@@ -36,6 +36,24 @@ function writeKey<T>(key: string, value: T): void {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* full */ }
 }
 
+type Mm3RefinerSettings = Pick<GenerationParams, 'mm3RefinerEnabled' | 'mm3RefinerSteps'
+  | 'mm3RefinerWindowSeconds' | 'mm3RefinerOverlapSeconds' | 'mm3RefinerMix'>;
+
+/** Use the same bounds for stored settings, profiles and request assembly. */
+export function normalizeMm3RefinerSettings(raw: Mm3RefinerSettings): Required<Mm3RefinerSettings> {
+  const number = (v: number | undefined, fallback: number) =>
+    typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+  const window = Math.max(0, number(raw.mm3RefinerWindowSeconds, GLOBAL_PARAM_DEFAULTS.mm3RefinerWindowSeconds));
+  const overlap = Math.max(0, number(raw.mm3RefinerOverlapSeconds, GLOBAL_PARAM_DEFAULTS.mm3RefinerOverlapSeconds));
+  return {
+    mm3RefinerEnabled: raw.mm3RefinerEnabled === true,
+    mm3RefinerSteps: Math.max(1, Math.min(64, Math.round(number(raw.mm3RefinerSteps, GLOBAL_PARAM_DEFAULTS.mm3RefinerSteps)))),
+    mm3RefinerWindowSeconds: window,
+    mm3RefinerOverlapSeconds: window > 0 && overlap >= window ? Math.max(0, window - 0.1) : overlap,
+    mm3RefinerMix: Math.max(0, Math.min(1, number(raw.mm3RefinerMix, GLOBAL_PARAM_DEFAULTS.mm3RefinerMix))),
+  };
+}
+
 // -- Default values --
 //
 // Every field's localStorage fallback, in one place, so a control can show a
@@ -153,6 +171,11 @@ export const GLOBAL_PARAM_DEFAULTS = {
   natTransitionSmooth: 1.0,
   ppVaeReencode: false,
   ppVaeBlend: 0.0,
+  mm3RefinerEnabled: false,
+  mm3RefinerSteps: 32,
+  mm3RefinerWindowSeconds: 30,
+  mm3RefinerOverlapSeconds: 2,
+  mm3RefinerMix: 1,
   stableStepOn: false,
   stableStepStrength: 0.3,
   stableStepBackend: 'auto' as StableStepBackend,
@@ -458,6 +481,13 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   natTransitionSmooth: readKey("hs-natTransitionSmooth", GLOBAL_PARAM_DEFAULTS.natTransitionSmooth),
   ppVaeReencode: readKey("hs-ppVaeReencode", GLOBAL_PARAM_DEFAULTS.ppVaeReencode),
   ppVaeBlend: readKey("hs-ppVaeBlend", GLOBAL_PARAM_DEFAULTS.ppVaeBlend),
+  ...normalizeMm3RefinerSettings({
+    mm3RefinerEnabled: readKey('hs-mm3RefinerEnabled', GLOBAL_PARAM_DEFAULTS.mm3RefinerEnabled),
+    mm3RefinerSteps: readKey('hs-mm3RefinerSteps', GLOBAL_PARAM_DEFAULTS.mm3RefinerSteps),
+    mm3RefinerWindowSeconds: readKey('hs-mm3RefinerWindowSeconds', GLOBAL_PARAM_DEFAULTS.mm3RefinerWindowSeconds),
+    mm3RefinerOverlapSeconds: readKey('hs-mm3RefinerOverlapSeconds', GLOBAL_PARAM_DEFAULTS.mm3RefinerOverlapSeconds),
+    mm3RefinerMix: readKey('hs-mm3RefinerMix', GLOBAL_PARAM_DEFAULTS.mm3RefinerMix),
+  }),
   stableStepOn: readKey("hs-stableStepOn", GLOBAL_PARAM_DEFAULTS.stableStepOn),
   stableStepStrength: readKey("hs-stableStepStrength", GLOBAL_PARAM_DEFAULTS.stableStepStrength),
   // Engine backend for the SA3 refine: 'auto' or 'gguf', both using GGML.
@@ -669,6 +699,16 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setNatTransitionSmooth: (v: any) => { set({ natTransitionSmooth: v }); writeKey("hs-natTransitionSmooth", v); },
   setPpVaeReencode: (v: any) => { set({ ppVaeReencode: v }); writeKey("hs-ppVaeReencode", v); },
   setPpVaeBlend: (v: any) => { set({ ppVaeBlend: v }); writeKey("hs-ppVaeBlend", v); },
+  setMm3RefinerSettings: (patch: Mm3RefinerSettings) => {
+    const next = normalizeMm3RefinerSettings({ ...get(), ...patch });
+    set(next);
+    for (const [key, value] of Object.entries(next)) writeKey(`hs-${key}`, value);
+  },
+  setMm3RefinerEnabled: (v: boolean) => get().setMm3RefinerSettings({ mm3RefinerEnabled: v }),
+  setMm3RefinerSteps: (v: number) => get().setMm3RefinerSettings({ mm3RefinerSteps: v }),
+  setMm3RefinerWindowSeconds: (v: number) => get().setMm3RefinerSettings({ mm3RefinerWindowSeconds: v }),
+  setMm3RefinerOverlapSeconds: (v: number) => get().setMm3RefinerSettings({ mm3RefinerOverlapSeconds: v }),
+  setMm3RefinerMix: (v: number) => get().setMm3RefinerSettings({ mm3RefinerMix: v }),
   setStableStepOn: (v: any) => { set({ stableStepOn: v }); writeKey("hs-stableStepOn", v); },
   setStableStepStrength: (v: any) => { set({ stableStepStrength: v }); writeKey("hs-stableStepStrength", v); },
   setStableStepBackend: (v: any) => { const backend = normalizeModelSelection('stableStepBackend', v); set({ stableStepBackend: backend }); writeKey("hs-stableStepBackend", backend); },
@@ -741,6 +781,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   // up by both paths automatically.
   getGlobalParams: (overrides?: Record<string, any>): Partial<GenerationParams> => {
     const s = overrides ? { ...get(), ...overrides } : get();
+    const refiner = normalizeMm3RefinerSettings(s);
     const settings: AppSettings = readKey('ace-settings', DEFAULT_SETTINGS);
     const backendState = useBackendStore.getState();
     const heartmulaModels = backendState.activeBackendId === 'heartmula'
@@ -950,6 +991,11 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       natTransitionSmooth: (s.postProcessingEnabled && s.vocalNaturalizerEnabled) ? s.natTransitionSmooth : undefined,
       ppVaeReencode: (s.postProcessingEnabled && s.ppVaeReencode) || undefined,
       ppVaeBlend: (s.postProcessingEnabled && s.ppVaeReencode && s.ppVaeBlend > 0) ? s.ppVaeBlend : undefined,
+      mm3RefinerEnabled: (s.postProcessingEnabled && s.mm3RefinerEnabled) || undefined,
+      mm3RefinerSteps: (s.postProcessingEnabled && s.mm3RefinerEnabled) ? refiner.mm3RefinerSteps : undefined,
+      mm3RefinerWindowSeconds: (s.postProcessingEnabled && s.mm3RefinerEnabled) ? refiner.mm3RefinerWindowSeconds : undefined,
+      mm3RefinerOverlapSeconds: (s.postProcessingEnabled && s.mm3RefinerEnabled) ? refiner.mm3RefinerOverlapSeconds : undefined,
+      mm3RefinerMix: (s.postProcessingEnabled && s.mm3RefinerEnabled) ? refiner.mm3RefinerMix : undefined,
       stableStepOn: (s.postProcessingEnabled && s.stableStepOn) || undefined,
       stableStepStrength: (s.postProcessingEnabled && s.stableStepOn) ? s.stableStepStrength : undefined,
       stableStepBackend: (s.postProcessingEnabled && s.stableStepOn && s.stableStepBackend === 'gguf')

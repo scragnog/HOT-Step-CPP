@@ -158,6 +158,11 @@ export interface GlobalParams {
   ppVaeReencode: boolean; setPpVaeReencode: (v: boolean) => void;
   ppVaeBlend: number; setPpVaeBlend: (v: number) => void;
   // StableStep (SA3 refine)
+  mm3RefinerEnabled: boolean; setMm3RefinerEnabled: (v: boolean) => void;
+  mm3RefinerSteps: number; setMm3RefinerSteps: (v: number) => void;
+  mm3RefinerWindowSeconds: number; setMm3RefinerWindowSeconds: (v: number) => void;
+  mm3RefinerOverlapSeconds: number; setMm3RefinerOverlapSeconds: (v: number) => void;
+  mm3RefinerMix: number; setMm3RefinerMix: (v: number) => void;
   stableStepOn: boolean; setStableStepOn: (v: boolean) => void;
   stableStepStrength: number; setStableStepStrength: (v: number) => void;
   stableStepBackend: 'auto' | 'gguf'; setStableStepBackend: (v: 'auto' | 'gguf') => void;

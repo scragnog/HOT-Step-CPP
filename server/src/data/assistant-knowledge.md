@@ -324,6 +324,14 @@ Adapters fine-tune the DiT for specific styles, artists, or genres.
 - `ppVaeReencode` (bool): Run an encode→decode pass through the PP-VAE for spectral cleanup
 - `ppVaeBlend` (0-1): 0 = fully PP-VAE, 1 = fully original
 
+### MM3 Latent Refiner
+
+- Optional whole-render post-process before vocal separation, StableStep, mastering and VST. Default off, deterministic, no seed. Other backends are accepted but their quality is untested.
+- `mm3RefinerEnabled` (bool, default false), `mm3RefinerSteps` (integer 1-64, default 32), `mm3RefinerWindowSeconds` (nonnegative, default 30; 0 is direct), `mm3RefinerOverlapSeconds` (nonnegative, default 2, shorter than a nonzero window), `mm3RefinerMix` (0-1, default 1). Mix 0 bypasses without loading models. Lowering the window also lowers overlap when needed.
+- Direct mode processes one dense sequence, with quadratic memory growth and an engine input limit. Prefer windows for long clips.
+- The model pack is unlisted in the registry's pending block. MERT-v1-95M is CC-BY-NC-4.0; licensing, conditioning and publication remain pending. Do not suggest downloading a public refiner pack. The UI shows models not installed until the complete pack is available. Missing models or a stage failure keep raw audio and log a warning.
+- Settings and presets persist the controls. Run Post-Processing uses the current controls even when the master switch is off.
+
 ### StableStep (SA3 Refine)
 - `stableStepOn` (bool): Re-render the track's instrumental through Stable Audio 3 to replace VAE fizz with real detail
 - `stableStepStrength` (0.10-0.60, default 0.30): "Refine strength" — how much of the instrumental is re-rendered; higher values re-interpret the instrumentation more

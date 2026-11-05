@@ -319,19 +319,20 @@ processed copy. See [Library](studios/library.md).
 The stages always run in this order, per track:
 
 1. Quality Evaluator on the unprocessed audio (if its target includes Unmastered).
-2. Vocal separation, when StableStep or Whisper's "Isolate vocals first" needs it. Runs once
+2. MM3 Latent Refiner, when enabled and its dependencies are installed.
+3. Vocal separation, when StableStep or Whisper's "Isolate vocals first" needs it. Runs once
    and is shared.
-3. StableStep.
-4. PP-VAE Re-encode.
-5. Spectral Lifter.
-6. Vocal Naturalizer (skipped on instrumentals).
-7. Pre-VST Gain Offset.
-8. VST Chain.
-9. Mastering.
-10. Final Normalizer.
-11. A peak guard that limits the file to just under full scale if a stage that was meant
+4. StableStep.
+5. PP-VAE Re-encode.
+6. Spectral Lifter.
+7. Vocal Naturalizer (skipped on instrumentals).
+8. Pre-VST Gain Offset.
+9. VST Chain.
+10. Mastering.
+11. Final Normalizer.
+12. A peak guard that limits the file to just under full scale if a stage that was meant
     to control peaks failed.
-12. Quality Evaluator on the processed audio (if its target includes Mastered).
+13. Quality Evaluator on the processed audio (if its target includes Mastered).
 
 A stage that fails is logged and skipped; the song is still saved. Cover art runs after
 the chain, or alongside it when Parallel Cover Art is on in Settings.
@@ -351,6 +352,7 @@ chain. Your own post-processing settings are left as they are. See
 | Tiled Decoder | off | Replaces the built-in VAE decode with a tiled decode plugin (overlap crossfading, optional dual-pass merge, channel suppression and a small DSP chain). Only shown when a postprocess plugin is installed; its settings come from the plugin. With none picked yet, it picks MD Audio Tiled Decoder V2.1 when that is installed. |
 | PP-VAE Re-encode | off | Runs the decoded audio through a second, higher-fidelity autoencoder to clean up fizz and high-frequency noise. Adds roughly 1 to 2 seconds. Original Blend (0 to 1, default 0) mixes the unprocessed audio back in. It runs on GGML and is shown when the PP-VAE model is installed. |
 | StableStep | off | Re-renders the instrumental through Stable Audio 3 to replace VAE fizz with real detail. See [StableStep](#stablestep). |
+| MM3 Latent Refiner | off | Optional deterministic whole-mix refinement before separation and the other audio stages. Its model pack is currently unlisted. See [MM3 Latent Refiner](#mm3-latent-refiner). |
 | Spectral Lifter | off | Removes AI shimmer, reduces spectral noise and can extend the high end. Denoise Strength (default 0.3), Noise Floor (0.1), HF Extension (0), Transient Boost (0), Shimmer Reduction (6 dB, applied to the 10 to 14 kHz band). |
 | Vocal Naturalizer | off | Experimental. Five DSP stages that pull back robotic and auto-tune artefacts: vibrato, formant variation, metallic cut (6 to 10 kHz), quantization masking and transition smoothing, with a master Amount (default 0.5). It processes the whole mix, so A/B it against the same render with it off. |
 | Pre-VST Gain Offset | 0 dB | A fixed gain (-10 to +10 dB) before the VST chain and mastering. Negative values give a VST chain headroom. When something runs after it, peaks above full scale are passed on for that stage to handle; when nothing does, it limits. |
@@ -364,6 +366,31 @@ When the active backend is not ACE-Step, the Tiled Decoder, PP-VAE and Spectral 
 panels are hidden because they depend on ACE-Step's VAE. The VST chain, Mastering and the
 Final Normalizer work with any backend. StableStep works with every backend except Stable
 Audio 3, whose output is already Stable Audio 3.
+
+### MM3 Latent Refiner
+
+The refiner processes the whole raw render before vocal separation, StableStep, mastering
+and VST. It can accept any backend's audio, resampling to 44.1 kHz internally and back to
+the source rate. Quality outside MiniMax-Music3 is untested. It is deterministic and has
+no seed control.
+
+The panel enables the switch only when the registry reports the complete model pack
+installed. The pack is currently unlisted pending the MERT-v1-95M non-commercial licence
+decision, conditioning and model publication. Until then, the panel says models are not
+installed, and Model Manager offers no public download. See [Model files](models.md).
+
+| Control | Default | What it does |
+|---|---|---|
+| Enable | off | Runs on new renders when the Post-Processing master switch is on. Run Post-Processing on an existing raw WAV uses the current settings even with the master switch off. |
+| Steps | 32 | 1 to 64 deterministic refinement steps. More steps take longer. |
+| Window seconds | 30 | Processes overlapping windows. Set 0 for direct mode, one dense sequence for the whole clip. Direct-mode memory grows quadratically with clip length and the engine rejects clips beyond its limit. |
+| Overlap seconds | 2 | Nonnegative crossfade duration, strictly shorter than a nonzero window. Reducing the window also reduces overlap when needed. Ignored in direct mode. |
+| Refined mix | 100% | Audio-domain dry/wet blend after decode and resampling. 0% is an exact bypass that loads no refiner models; 100% is the full refined output. |
+
+Settings persist locally and round-trip through parameter profiles and JSON presets.
+Older settings without refiner keys use the defaults. With the refiner off, no refiner
+parameters are sent. Missing models or a failed stage produce a warning in the generation
+log and keep the raw audio for the remaining stages.
 
 ### StableStep
 

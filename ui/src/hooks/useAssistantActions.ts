@@ -74,6 +74,11 @@ const LABEL_MAP: Record<string, string> = {
   ppVaeReencode: 'PP-VAE Re-encode',
   ppVaeBlend: 'PP-VAE Blend',
   // StableStep
+  mm3RefinerEnabled: 'MM3 Latent Refiner',
+  mm3RefinerSteps: 'MM3 Refiner Steps',
+  mm3RefinerWindowSeconds: 'MM3 Refiner Window',
+  mm3RefinerOverlapSeconds: 'MM3 Refiner Overlap',
+  mm3RefinerMix: 'MM3 Refiner Mix',
   stableStepOn: 'StableStep',
   stableStepStrength: 'StableStep Refine Strength',
   // DCW
@@ -164,6 +169,11 @@ export function useAssistantActions() {
     ppVaeReencode: gp.setPpVaeReencode,
     ppVaeBlend: gp.setPpVaeBlend,
     // StableStep
+    mm3RefinerEnabled: gp.setMm3RefinerEnabled,
+    mm3RefinerSteps: gp.setMm3RefinerSteps,
+    mm3RefinerWindowSeconds: gp.setMm3RefinerWindowSeconds,
+    mm3RefinerOverlapSeconds: gp.setMm3RefinerOverlapSeconds,
+    mm3RefinerMix: gp.setMm3RefinerMix,
     stableStepOn: gp.setStableStepOn,
     stableStepStrength: gp.setStableStepStrength,
     // DCW

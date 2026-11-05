@@ -13,7 +13,7 @@
 // v1 files (the old export, shaped like getGlobalParams() output) are still
 // accepted via a small reverse-mapping in applyProfileData().
 
-import { useGlobalParamsStore, scopedKey, normalizeModelSelection } from '../stores/globalParamsStore';
+import { useGlobalParamsStore, scopedKey, normalizeModelSelection, normalizeMm3RefinerSettings } from '../stores/globalParamsStore';
 import { writePersistedState } from '../hooks/usePersistedState';
 import { mergeProfileField } from './profileMerge';
 
@@ -101,6 +101,7 @@ export const PARAM_GROUPS: { title: string; fields: string[]; ace?: true }[] = [
       'vocalNaturalizerEnabled', 'gainOffsetDb', 'naturalizeAmount', 'natVibratoRate',
       'natVibratoDepth', 'natFormantStrength', 'natMetallicReduction', 'natQuantizationMask',
       'natTransitionSmooth', 'ppVaeReencode', 'ppVaeBlend',
+      'mm3RefinerEnabled', 'mm3RefinerSteps', 'mm3RefinerWindowSeconds', 'mm3RefinerOverlapSeconds', 'mm3RefinerMix',
       'stableStepOn', 'stableStepStrength', 'stableStepBackend',
       'stableStepAdapters', 'stableStepPreserveDynamics', 'stableStepVocalPpVae',
       'stableStepVocalTrimDb',
@@ -237,6 +238,13 @@ export function applyProfileData(raw: ProfileData): void {
   if (p.lmCodesStrength !== undefined && p.lmCodesMode === undefined) {
     partial.lmCodesMode = 'ratio';
     try { localStorage.setItem('hs-lmCodesMode', JSON.stringify('ratio')); } catch { /* full */ }
+  }
+  if (Object.keys(partial).some(key => key.startsWith('mm3Refiner'))) {
+    const refiner = normalizeMm3RefinerSettings({ ...live, ...partial });
+    Object.assign(partial, refiner);
+    for (const [key, value] of Object.entries(refiner)) {
+      try { localStorage.setItem(fieldStorageKey(key), JSON.stringify(value)); } catch { /* full */ }
+    }
   }
   useGlobalParamsStore.setState(partial);
 }

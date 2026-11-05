@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ppVaeOptions, stableStepAdaptersOptions, stableStepOptions } from '../../queries/global-models/options';
+import { ppVaeOptions, registryOptions, stableStepAdaptersOptions, stableStepOptions } from '../../queries/global-models/options';
 import { usePluginRegistry } from '../../hooks/usePluginRegistry';
 import { useReferenceTracks } from '../../queries/global-models/hooks';
 // PostProcessingDropdown.tsx — Unified post-processing panel for the global bar
@@ -205,6 +205,12 @@ export const PostProcessingDropdown: React.FC = () => {
 
   const ppVae = useQuery(ppVaeOptions());
   const ppVaeAvailable = !!ppVae.data?.available;
+  const modelRegistry = useQuery(registryOptions());
+  const refinerPack = modelRegistry.data?.packs.find(pack => pack.id === 'mm3-latent-refiner');
+  // Pending packs are deliberately excluded from the public registry response.
+  // Without a pack, do not infer availability from the shared DAV files alone.
+  const refinerAvailable = !!refinerPack?.fileIds.length && refinerPack.fileIds.every(id =>
+    modelRegistry.data?.files.some(file => file.id === id && file.installed && !file.outdated));
   const stableStep = useQuery(stableStepOptions());
   const stableStepAvailable = !!stableStep.data?.available;
   const stableStepBackends = { gguf: !!stableStep.data?.backends?.gguf };
@@ -416,6 +422,66 @@ export const PostProcessingDropdown: React.FC = () => {
           </div>
         </Accordion>
       )}
+
+      <Accordion
+        icon={<Sparkles size={14} />}
+        label={t('pp.mm3Refiner', 'MM3 Latent Refiner')}
+        info={t('pp.mm3RefinerInfo', 'Optional deterministic cleanup of the whole render before vocal separation, StableStep and mastering. Works on any backend; quality outside MiniMax-Music3 is untested. Requires the complete refiner model pack.')}
+        accentColor="sky"
+        persistKey="hs-ppAccordion-mm3Refiner"
+        toggle={refinerAvailable || gp.mm3RefinerEnabled
+          ? { checked: gp.mm3RefinerEnabled, onChange: v => { if (refinerAvailable || !v) gp.setMm3RefinerEnabled(v); } }
+          : undefined}
+        onReset={gp.mm3RefinerEnabled !== GLOBAL_PARAM_DEFAULTS.mm3RefinerEnabled
+          ? () => gp.setMm3RefinerEnabled(GLOBAL_PARAM_DEFAULTS.mm3RefinerEnabled) : undefined}
+        badge={!refinerAvailable ? <span className="text-[10px] text-zinc-500">{t('pp.mm3RefinerMissingBadge', 'models not installed')}</span> : undefined}
+      >
+        <div className="space-y-2 mt-2">
+          {modelRegistry.isError && <QueryError error={modelRegistry.error} onRetry={() => void modelRegistry.refetch()} compact />}
+          {!refinerAvailable && !modelRegistry.isError && (
+            <p className="text-xs text-zinc-500">
+              {t('pp.mm3RefinerMissing', 'Refiner models not installed.')}
+              {refinerPack && <> {t('pp.mm3RefinerInstall', 'Install the complete MiniMax-Music3 Latent Refiner pack in Model Manager.')}</>}
+            </p>
+          )}
+          {refinerAvailable && gp.mm3RefinerEnabled && <>
+            <EditableSlider label={t('pp.mm3RefinerSteps', 'Steps')}
+              tooltip={t('pp.mm3RefinerStepsInfo', 'Number of deterministic refinement steps. More steps take longer; the same input and settings reproduce the same result. No seed is used.')}
+              value={gp.mm3RefinerSteps} min={1} max={64} step={1}
+              onChange={gp.setMm3RefinerSteps} defaultValue={GLOBAL_PARAM_DEFAULTS.mm3RefinerSteps} />
+            <label className="flex flex-col gap-1">
+              <ParamLabel label={t('pp.mm3RefinerWindow', 'Window seconds')}
+                info={t('pp.mm3RefinerWindowInfo', 'Audio duration processed per window. Default 30 seconds. Set 0 for direct mode, which processes the whole clip as one dense sequence.')}
+                onReset={gp.mm3RefinerWindowSeconds !== GLOBAL_PARAM_DEFAULTS.mm3RefinerWindowSeconds
+                  ? () => gp.setMm3RefinerWindowSeconds(GLOBAL_PARAM_DEFAULTS.mm3RefinerWindowSeconds) : undefined} />
+              <input type="number" min={0} step={0.1} value={gp.mm3RefinerWindowSeconds}
+                onChange={e => { if (e.target.value !== '') gp.setMm3RefinerWindowSeconds(e.target.valueAsNumber); }}
+                className="w-full rounded-lg border border-zinc-300 dark:border-white/10 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 text-sm" />
+            </label>
+            {gp.mm3RefinerWindowSeconds === 0 && (
+              <p role="alert" className="text-xs text-amber-600 dark:text-amber-400">
+                {t('pp.mm3RefinerDirectWarning', 'Direct mode uses memory that grows quadratically with clip length. Long clips can exceed the engine memory limit; use 30-second windows for lower memory use.')}
+              </p>
+            )}
+            <label className="flex flex-col gap-1">
+              <ParamLabel label={t('pp.mm3RefinerOverlap', 'Overlap seconds')}
+                info={t('pp.mm3RefinerOverlapInfo', 'Crossfade between adjacent windows. Default 2 seconds. Must be shorter than the window; reducing the window also reduces overlap when needed. Ignored in direct mode.')}
+                onReset={gp.mm3RefinerOverlapSeconds !== GLOBAL_PARAM_DEFAULTS.mm3RefinerOverlapSeconds
+                  ? () => gp.setMm3RefinerOverlapSeconds(GLOBAL_PARAM_DEFAULTS.mm3RefinerOverlapSeconds) : undefined} />
+              <input type="number" min={0} step={0.1} value={gp.mm3RefinerOverlapSeconds}
+                disabled={gp.mm3RefinerWindowSeconds === 0}
+                max={gp.mm3RefinerWindowSeconds > 0 ? Math.max(0, gp.mm3RefinerWindowSeconds - 0.1) : undefined}
+                onChange={e => { if (e.target.value !== '') gp.setMm3RefinerOverlapSeconds(e.target.valueAsNumber); }}
+                className="w-full rounded-lg border border-zinc-300 dark:border-white/10 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 text-sm disabled:opacity-50" />
+            </label>
+            <EditableSlider label={t('pp.mm3RefinerMix', 'Refined mix')}
+              tooltip={t('pp.mm3RefinerMixInfo', 'Blend the decoded refiner output with the original audio. 0% bypasses the stage without loading models; 100% uses the full refined output.')}
+              value={gp.mm3RefinerMix} min={0} max={1} step={0.01}
+              onChange={gp.setMm3RefinerMix} defaultValue={GLOBAL_PARAM_DEFAULTS.mm3RefinerMix}
+              formatDisplay={v => `${Math.round(v * 100)}%`} />
+          </>}
+        </div>
+      </Accordion>
 
       {/* 1. PP-VAE Re-encode (only visible when PP-VAE model is available) */}
       {ppVae.isError && aceCoupledOk && (
@@ -1167,13 +1233,15 @@ export const PostProcessingDropdown: React.FC = () => {
 // ── Badge ───────────────────────────────────────────────────────
 
 export const PostProcessingBadge: React.FC = () => {
-  const { masteringEnabled, masteringReference, spectralLifterEnabled, ppVaeReencode, stableStepOn, coverArtEnabled, vocalNaturalizerEnabled, gainOffsetDb, qualityEvalEnabled, postprocessEnabled, postprocessPlugin, whisperLyricsEnabled, yue2AlignLyrics, lufsEnabled, lufsTarget } = useGlobalParams();
+  const { t } = useTranslation();
+  const { masteringEnabled, masteringReference, spectralLifterEnabled, ppVaeReencode, mm3RefinerEnabled, stableStepOn, coverArtEnabled, vocalNaturalizerEnabled, gainOffsetDb, qualityEvalEnabled, postprocessEnabled, postprocessPlugin, whisperLyricsEnabled, yue2AlignLyrics, lufsEnabled, lufsTarget } = useGlobalParams();
   const { chain } = useVstChainStore();
   const vstEnabled = chain.filter(p => p.enabled).length;
 
   const parts: string[] = [];
   if (postprocessEnabled && postprocessPlugin) parts.push('TD');
   if (ppVaeReencode) parts.push('PP-VAE');
+  if (mm3RefinerEnabled) parts.push(t('pp.mm3RefinerBadge', 'MM3 Refiner'));
   if (stableStepOn) parts.push('StableStep');
   if (spectralLifterEnabled) parts.push('SL');
   if (vocalNaturalizerEnabled) parts.push('Nat');

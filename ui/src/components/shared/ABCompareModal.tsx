@@ -82,6 +82,11 @@ const PARAM_LABELS: Record<string, string> = {
   ppVaeReencode: 'PP-VAE Re-encode',
   ppVaeBlend: 'PP-VAE Blend',
   // StableStep
+  mm3RefinerEnabled: 'MM3 Latent Refiner',
+  mm3RefinerSteps: 'MM3 Refiner Steps',
+  mm3RefinerWindowSeconds: 'MM3 Refiner Window',
+  mm3RefinerOverlapSeconds: 'MM3 Refiner Overlap',
+  mm3RefinerMix: 'MM3 Refiner Mix',
   stableStepOn: 'StableStep',
   stableStepStrength: 'StableStep Refine Strength',
   // Vocal Naturalizer

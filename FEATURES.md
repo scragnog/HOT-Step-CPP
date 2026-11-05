@@ -114,6 +114,7 @@ Everything runs on a copy of the render, in a fixed order, under one master swit
 | Feature | What it does |
 |---|---|
 | StableStep | Re-renders the instrumental through Stable Audio 3 and remixes the untouched vocal at its original balance. Optional adapters, crossover or mix blending, and its own sampler. |
+| MM3 Latent Refiner | Optional, default-off whole-mix refinement with steps, window/direct mode, overlap and dry/wet mix. Model pack unlisted pending licensing and publication. [Controls and limits](docs/user/generation.md#mm3-latent-refiner). |
 | PP-VAE re-encode | Second autoencoder pass against fizz, with an original-blend slider. |
 | Spectral Lifter | Denoise, noise floor, high-frequency extension, transient boost and shimmer reduction. |
 | Vocal Naturalizer | Experimental five-stage DSP pass against robotic vocal artefacts, skipped on instrumentals. |

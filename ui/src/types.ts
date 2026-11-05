@@ -310,6 +310,11 @@ export interface GenerationParams {
   ppVaeBlend?: number;         // 0.0 = fully PP-VAE, 1.0 = fully original
 
   // StableStep (SA3 SDEdit refine of the instrumental)
+  mm3RefinerEnabled?: boolean;
+  mm3RefinerSteps?: number;
+  mm3RefinerWindowSeconds?: number;
+  mm3RefinerOverlapSeconds?: number;
+  mm3RefinerMix?: number;
   stableStepOn?: boolean;
   stableStepStrength?: number; // 0.10–0.60 init noise level (default 0.3)
   stableStepBackend?: StableStepBackend; // engine backend (default 'auto')
