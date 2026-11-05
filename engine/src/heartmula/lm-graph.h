@@ -37,6 +37,15 @@
 //    are keyed on (adapter id, scale): a switch, a reload or a new scale drops both
 //    (heartmula_lm_sync_adapter) and the caller must prefill again. Scale 0 or no
 //    adapter builds the base graph node for node.
+//
+// G. MULACOVER (upstream MuLaCover.generate_frame), only while a cover is bound by
+//    heartmula_cover_bind (mulacover.h); unbound, the graph is the plain one node for
+//    node. Per adapted layer N = 20..27: tag MLP h = h * (1 + scale) + shift BEFORE the
+//    backbone block, from silu(style) per CFG row (Qwen vector, -1 on the unconditioned
+//    row); then GACA after it (heartmula_gaca). The prompt's style slot (g->qwen_pos)
+//    gets qwen_linear(style) on the conditioned row and the unconditional embedding on
+//    the other, as the MuQ slot does. The context K/V never change during a request, so
+//    bind writes them once; a step only adds the queries.
 
 #include "heartmula/adapter.h"
 #include "heartmula/model.h"
@@ -158,8 +167,17 @@ struct HeartMuLaSlot {
     ggml_tensor * in_rows  = nullptr;  // I64 [T]
     ggml_tensor * in_mask  = nullptr;  // F16 [n_kv, T]
 
+    // Note G, cover graphs only
+    ggml_tensor * in_style = nullptr;  // F32 [1024, 1, B] tag-MLP input per row
+    ggml_tensor * in_qwen  = nullptr;  // F32 [1024] style vector for the prompt slot
+    ggml_tensor * in_wq    = nullptr;  // F32 [1, T*B] style-slot gate
+    ggml_tensor * in_cmask = nullptr;  // F16 [steps, T] context padding mask
+
     ggml_tensor * out_hidden = nullptr;  // F32 [H, 1, B] last position, normed
     ggml_tensor * out_logits = nullptr;  // F32 [8197, 1, B] codebook 0
+
+    // Named intermediates kept as outputs for parity (HeartMuLaLmGraph::taps), [H, T, B]
+    std::vector<std::pair<std::string, ggml_tensor *>> taps;
 };
 
 static void heartmula_slot_free(HeartMuLaSlot * s) {
@@ -231,14 +249,49 @@ struct HeartMuLaLmGraph {
     HeartMuLaSlot prefill;
     HeartMuLaSlot decode;
 
+    // Note G. Bound by heartmula_cover_bind after heartmula_lm_reserve (a reserve that
+    // reallocates drops it). Per cover layer the roped cross-attention and gate K/V of
+    // that layer's context, F16 [384, steps, 8, B] and [12, steps, 1, B].
+    const HeartMuLaCover *     cover     = nullptr;
+    int64_t                    cover_len = 0;   // context steps
+    int64_t                    qwen_pos  = -1;  // prompt position of the style slot
+    ggml_context *             cover_ctx = nullptr;
+    ggml_backend_buffer_t      cover_buf = nullptr;
+    std::vector<ggml_tensor *> ca_k, ca_v, gate_k, gate_v;
+    std::vector<float>         style;      // [B][1024] tag-MLP input
+    std::vector<float>         qwen;       // [1024] style-slot input
+    std::vector<uint8_t>       cover_pad;  // [steps] 1 = padding row
+    bool                       taps = false;  // keep assembled/preN/postN for heartmula_lm_tap
+
     // host staging
     std::vector<int32_t>  text, audio, pos;
-    std::vector<float>    wt, wu, wm, wa;
+    std::vector<float>    wt, wu, wm, wa, wq;
     std::vector<int64_t>  rows;
-    std::vector<uint16_t> mask;
+    std::vector<uint16_t> mask, cmask;
 };
 
+static void heartmula_cover_unbind(HeartMuLaLmGraph * g) {
+    if (g->cover_buf) {
+        ggml_backend_buffer_free(g->cover_buf);
+    }
+    if (g->cover_ctx) {
+        ggml_free(g->cover_ctx);
+    }
+    g->cover     = nullptr;
+    g->cover_len = 0;
+    g->qwen_pos  = -1;
+    g->cover_ctx = nullptr;
+    g->cover_buf = nullptr;
+    g->ca_k.clear();
+    g->ca_v.clear();
+    g->gate_k.clear();
+    g->gate_v.clear();
+    heartmula_slot_free(&g->prefill);
+    heartmula_slot_free(&g->decode);
+}
+
 static void heartmula_lm_free(HeartMuLaLmGraph * g) {
+    heartmula_cover_unbind(g);
     heartmula_slot_free(&g->prefill);
     heartmula_slot_free(&g->decode);
     if (g->kv_buf) {
@@ -333,6 +386,38 @@ static void heartmula_lm_sync_adapter(HeartMuLaLmGraph * g) {
     g->key_scale = sc;
 }
 
+// Llama-3 scaled RoPE at any head width (x [D, heads, T, B], pos [T]).
+static ggml_tensor * heartmula_rope_dim(ggml_context * ctx, ggml_tensor * x, ggml_tensor * pos, ggml_tensor * ff) {
+    return ggml_rope_ext(ctx, x, pos, ff, (int) x->ne[0], GGML_ROPE_TYPE_NORMAL, 0, 500000.0f, 1.0f, 0.0f, 1.0f, 0.0f,
+                         0.0f);
+}
+
+// Note G: upstream CrossAttentionBlock, h + tanh(gate) * attn. attn is 8 x 384 cross
+// attention of norm(h) over the layer's context; gate is one-head x 12 attention of
+// x_gate_proj(norm(h)) over context_gate_proj(context), then gate_proj. Queries are
+// roped at the backbone positions, keys (cached) at the context row index; the mask
+// drops padding rows. Head dims 384 and 12 have no flash kernel: manual attention.
+static ggml_tensor * heartmula_gaca(ggml_context * ctx, const HeartMuLaCoverLayer & w, const HeartMuLaCover & c,
+                                    ggml_tensor * h, ggml_tensor * pos, ggml_tensor * cmask, ggml_tensor * ck,
+                                    ggml_tensor * cv, ggml_tensor * gk, ggml_tensor * gv) {
+    const int64_t T = h->ne[1], B = h->ne[2];
+    const int64_t D = HEARTMULA_COVER_CA_HD, G = HEARTMULA_COVER_GATE_DIM;
+    ggml_tensor * n = heartmula_rms(ctx, h, w.ca_norm, 1e-5f);
+
+    ggml_tensor * q = ggml_reshape_4d(ctx, ggml_mul_mat(ctx, w.ca_q, n), D, HEARTMULA_COVER_HEADS, T, B);
+    q               = ggml_cont(ctx, ggml_permute(ctx, heartmula_rope_dim(ctx, q, pos, c.ff_ca), 0, 2, 1, 3));
+    ggml_tensor * a = heartmula_attn_manual(ctx, q, ck, cv, cmask, 1.0f / sqrtf((float) D));
+    a               = ggml_mul_mat(ctx, w.ca_o, ggml_reshape_3d(ctx, a, D * HEARTMULA_COVER_HEADS, T, B));
+
+    ggml_tensor * x  = ggml_add(ctx, ggml_mul_mat(ctx, w.x_gate_w, n), w.x_gate_b);  // [12, T, B]
+    ggml_tensor * gq = ggml_reshape_4d(ctx, ggml_mul_mat(ctx, w.gate_q, x), G, 1, T, B);
+    gq               = ggml_cont(ctx, ggml_permute(ctx, heartmula_rope_dim(ctx, gq, pos, c.ff_gate), 0, 2, 1, 3));
+    ggml_tensor * ga = heartmula_attn_manual(ctx, gq, gk, gv, cmask, 1.0f / sqrtf((float) G));
+    ga               = ggml_mul_mat(ctx, w.gate_o, ggml_reshape_3d(ctx, ga, G, T, B));
+    ggml_tensor * gate = ggml_tanh(ctx, ggml_add(ctx, ggml_mul_mat(ctx, w.gate_w, ga), w.gate_b));  // [1, T, B]
+    return ggml_add(ctx, h, ggml_mul(ctx, a, gate));
+}
+
 static bool heartmula_lm_build(const HeartMuLaModel & m, HeartMuLaLmGraph * g, HeartMuLaSlot * s, int64_t T,
                                int64_t n_kv, std::string * err) {
     heartmula_slot_free(s);
@@ -383,13 +468,51 @@ static bool heartmula_lm_build(const HeartMuLaModel & m, HeartMuLaLmGraph * g, H
     h = ggml_add(ctx, h, ggml_mul(ctx, ggml_get_rows(ctx, m.text_embd, s->in_text), s->in_wt));
     h = ggml_add(ctx, h, ggml_mul(ctx, ggml_repeat(ctx, m.uncond_embd, h), s->in_wu));
     h = ggml_add(ctx, h, ggml_mul(ctx, ggml_repeat(ctx, m.muq_bias, h), s->in_wm));
+
+    // Note G: the style slot, the tag-MLP input and the context mask.
+    const HeartMuLaCover * cv    = g->cover;
+    ggml_tensor *          style = nullptr;
+    if (cv) {
+        s->in_style = heartmula_input(ctx, GGML_TYPE_F32, HEARTMULA_COVER_STYLE_DIM, 1, B, "hm_style");
+        s->in_qwen  = heartmula_input(ctx, GGML_TYPE_F32, HEARTMULA_COVER_STYLE_DIM, 1, 1, "hm_qwen");
+        s->in_wq    = heartmula_input(ctx, GGML_TYPE_F32, 1, N, 1, "hm_wq");
+        s->in_cmask = heartmula_input(ctx, GGML_TYPE_F16, g->cover_len, T, 1, "hm_cmask");
+        ggml_tensor * qp = ggml_add(ctx, ggml_mul_mat(ctx, cv->qwen_w, s->in_qwen), cv->qwen_b);  // [H]
+        h     = ggml_add(ctx, h, ggml_mul(ctx, ggml_repeat(ctx, qp, h), s->in_wq));
+        style = ggml_silu(ctx, s->in_style);
+    }
     h = ggml_reshape_3d(ctx, h, H, T, B);
+    auto tap = [&](const std::string & name, ggml_tensor * t) {
+        if (!g->taps) return t;
+        t = ggml_cont(ctx, t);
+        ggml_set_output(t);
+        ggml_build_forward_expand(gf, t);
+        s->taps.push_back({ name, t });
+        return t;
+    };
+    h = tap("assembled", h);
 
     for (int i = 0; i < st.cfg.n_layer; i++) {
+        const int                   ci = i - HEARTMULA_COVER_FIRST;
+        const HeartMuLaCoverLayer * cl = cv && ci >= 0 && ci < HEARTMULA_COVER_LAYERS ? &cv->layers[(size_t) ci] : nullptr;
+        if (cl) {
+            // upstream StyleMLP: (scale, shift) = mlp(silu(style)).chunk(2)
+            ggml_tensor * ss    = ggml_add(ctx, ggml_mul_mat(ctx, cl->tag_w, style), cl->tag_b);  // [2H, 1, B]
+            ggml_tensor * scale = ggml_cont(ctx, ggml_view_3d(ctx, ss, H, 1, B, ss->nb[1], ss->nb[2], 0));
+            ggml_tensor * shift =
+                ggml_cont(ctx, ggml_view_3d(ctx, ss, H, 1, B, ss->nb[1], ss->nb[2], (size_t) H * ss->nb[0]));
+            h = ggml_add(ctx, ggml_add(ctx, h, ggml_mul(ctx, h, scale)), shift);
+        }
         h = heartmula_block(ctx, gf, st, st.layers[(size_t) i], h, s->in_pos, s->in_mask, s->in_rows, g->kv_k[i],
                             g->kv_v[i], n_kv, g->flash, lora.empty() ? nullptr : &lora[(size_t) i],
                             lora.empty() || g->adapter->home.empty() ? nullptr : &g->adapter->home[(size_t) i],
                             g->key_scale.rebase);
+        if (cl) {
+            h = tap("pre" + std::to_string(i), h);
+            h = heartmula_gaca(ctx, *cl, *cv, h, s->in_pos, s->in_cmask, g->ca_k[(size_t) ci], g->ca_v[(size_t) ci],
+                               g->gate_k[(size_t) ci], g->gate_v[(size_t) ci]);
+            h = tap("post" + std::to_string(i), h);
+        }
     }
     ggml_tensor * last = ggml_view_3d(ctx, h, H, 1, B, h->nb[1], h->nb[2], (size_t) (T - 1) * h->nb[1]);
     s->out_hidden      = heartmula_rms(ctx, ggml_cont(ctx, last), st.norm, st.cfg.rms_eps);
@@ -441,6 +564,7 @@ static bool heartmula_lm_step(const HeartMuLaModel & m, HeartMuLaLmGraph * g, co
     g->wt.assign((size_t) N, 0.0f);
     g->wu.assign((size_t) N, 0.0f);
     g->wm.assign((size_t) N, 0.0f);
+    g->wq.assign((size_t) N, 0.0f);
     g->wa.assign((size_t) N * HEARTMULA_CODEBOOKS, 0.0f);
     for (int64_t r = 0; r < B; r++) {
         const bool uncond = r == 1;
@@ -462,6 +586,14 @@ static bool heartmula_lm_step(const HeartMuLaModel & m, HeartMuLaLmGraph * g, co
                 g->wt[n] = 0.0f;
                 g->wu[n] = uncond ? 1.0f : 0.0f;
                 g->wm[n] = uncond ? 0.0f : 1.0f;
+            }
+            if (g->cover && positions[i] == g->qwen_pos) {
+                // Note G: the style slot, overwritten like the MuQ slot.
+                std::fill(g->wa.begin() + (ptrdiff_t) (n * HEARTMULA_CODEBOOKS),
+                          g->wa.begin() + (ptrdiff_t) ((n + 1) * HEARTMULA_CODEBOOKS), 0.0f);
+                g->wt[n] = 0.0f;
+                g->wu[n] = uncond ? 1.0f : 0.0f;
+                g->wq[n] = uncond ? 0.0f : 1.0f;
             }
         }
     }
@@ -488,6 +620,19 @@ static bool heartmula_lm_step(const HeartMuLaModel & m, HeartMuLaLmGraph * g, co
     ggml_backend_tensor_set(s->in_pos, g->pos.data(), 0, g->pos.size() * sizeof(int32_t));
     ggml_backend_tensor_set(s->in_rows, g->rows.data(), 0, g->rows.size() * sizeof(int64_t));
     ggml_backend_tensor_set(s->in_mask, g->mask.data(), 0, g->mask.size() * sizeof(uint16_t));
+    if (g->cover) {
+        g->cmask.resize((size_t) (g->cover_len * T));
+        for (int64_t i = 0; i < T; i++) {
+            for (int64_t j = 0; j < g->cover_len; j++) {
+                g->cmask[(size_t) (i * g->cover_len + j)] =
+                    ggml_fp32_to_fp16(g->cover_pad[(size_t) j] ? -INFINITY : 0.0f);
+            }
+        }
+        ggml_backend_tensor_set(s->in_style, g->style.data(), 0, g->style.size() * sizeof(float));
+        ggml_backend_tensor_set(s->in_qwen, g->qwen.data(), 0, g->qwen.size() * sizeof(float));
+        ggml_backend_tensor_set(s->in_wq, g->wq.data(), 0, g->wq.size() * sizeof(float));
+        ggml_backend_tensor_set(s->in_cmask, g->cmask.data(), 0, g->cmask.size() * sizeof(uint16_t));
+    }
     if (ggml_backend_sched_graph_compute(s->sched, s->graph) != GGML_STATUS_SUCCESS) {
         if (err) {
             *err = "HeartMuLa global graph compute failed";
@@ -501,6 +646,19 @@ static bool heartmula_lm_step(const HeartMuLaModel & m, HeartMuLaLmGraph * g, co
         ggml_backend_tensor_get(s->out_logits, out_logits, 0, ggml_nbytes(s->out_logits));
     }
     return true;
+}
+
+// A tap of the last prefill (T > 1) or decode step, [B][T][H] as torch lays it out.
+static bool heartmula_lm_tap(const HeartMuLaLmGraph & g, bool prefill, const std::string & name,
+                             std::vector<float> * out) {
+    for (const auto & t : (prefill ? g.prefill : g.decode).taps) {
+        if (t.first == name) {
+            out->resize((size_t) ggml_nelements(t.second));
+            ggml_backend_tensor_get(t.second, out->data(), 0, ggml_nbytes(t.second));
+            return true;
+        }
+    }
+    return false;
 }
 
 // Prefill a prompt in chunks (note D). Positions are 0..T-1 as heartlib's `pos`.

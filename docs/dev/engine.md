@@ -51,7 +51,7 @@ All targets are defined in `engine/CMakeLists.txt`.
 | `vst-host` | `tools/vst-host.cpp` | VST3 host: `--scan`, `--gui`, `--process`, `--process-chain`, `--monitor`. Each plugin gets a 10 s warm-up pre-roll of the track's opening, fed time-reversed so plugin buffers hold the song's own start when the real pass begins. `--monitor` (Windows, WASAPI) plays a track through the chain live, driven by a control file the server rewrites atomically with an increasing `seq`; see the note below |
 | `yue2-probe` | `tools/yue2-probe.cpp` | YuE2 bring-up and parity CLI (`--info`, `--load`, `--tokenize`, `--ar-parity` and more) |
 | `heartmula-generate` | `tools/heartmula-generate.cpp` | HeartMuLa text-to-music CLI using the same pipeline as `/heartmula/synth`, with seed, cancellation and audio checks |
-| `mulacover-check` | `tools/mulacover-check.cpp` | MuLaCover port checks: Qwen style vector against capture-layout fixtures, the converted pair through discovery and load, and refusals of bad cover tensors ([MuLaCover](#mulacover-cover-model)) |
+| `mulacover-check` | `tools/mulacover-check.cpp` | MuLaCover port checks: Qwen style vector against capture-layout fixtures, the converted pair through discovery and load, refusals of bad cover tensors, and conditioning, GACA and prefill/decode parity against the 2c captures ([MuLaCover](#mulacover-cover-model)) |
 | `sa3-ggml-test`, `fattn-train-test`, `moss-ggml-test`, `bs-roformer-test`, `mdx23c-test` | `tools/*-test.cpp` | Parity tests against reference outputs |
 | `yue2-train-gemm-precision-test` | `tools/yue2-train-gemm-precision-test.cpp` | The YuE2 trainer's BF16 GEMMs against `YUE2_AITK_PRECISION=strict-f32`, forward and backward, at YuE2 shapes on the first GPU |
 | `yue2-convrot8-cpu-numeric-test`, `yue2-*-metal-*-test` | `tools/yue2-*.cpp` | YuE2 training-op gates: the CPU ConvRot8 kernels bit for bit against a scalar oracle, and each Metal training kernel against the CPU backend or the Metal kernel it replaced. The Metal ones skip without a Metal device |
@@ -209,6 +209,32 @@ and refuses more than 8192 tokens. The parity reference is FP32, upstream's
 default for this model: with the BF16 text encoder the vector is within 1e-3 of it.
 The Q8_0 encoder is about 6e-3 away. Both registry files are tensor-identical to the
 pinned Qwen checkpoint (the Q8_0 one after re-quantisation).
+
+The conditioning path is split between two files. `heartmula/mulacover.h` builds
+the prompt: tags, a style slot, a MuQ slot, then the lyrics, with upstream's
+special ids. It also runs the context graph once per request. The input is four
+rows on the source's sixteenth-note grid: the melody roll (onset and sustain per
+pitch, 256 wide), the drum roll (128), the chord chroma (12) and a padding mask,
+at most 5000 steps. Key positions are the row index, with no BPM scaling. Each
+cover layer's adaptor projects the rolls to 24 wide each, fuses them to 512 and
+runs two bidirectional Llama layers, then projects to 3072. Layer N's context is
+the running sum of adaptor outputs 20 to N. The graph writes every layer's roped
+cross-attention and gate keys and values into an F16 cache, which is about 940 MiB
+at 5000 steps with CFG. `heartmula/lm-graph.h` note G adds the per-step half while
+a cover is bound. Before each adapted layer, a tag MLP scales and shifts the hidden
+state from the style vector. After the layer, gated cross attention (8 heads x 384,
+gate one head x 12) reads that cache, with queries at the backbone positions. The
+style slot gets `qwen_linear` of the style vector. On the unconditioned CFG row the
+rolls and the tag-MLP input are all -1, and both slots take the unconditional
+embedding. Without a bound cover the graph is the plain HeartMuLa graph.
+
+`mulacover-check` checks this path against the five 2c capture cases, comparing
+every captured key. Token ids, rolls, CFG rows, masks and positions match exactly.
+Teacher-forced codes all fall inside the engine's top-250. The captures ran torch
+under BF16 autocast, and torch itself in FP32 misses them by as much as the engine
+does. With `--fp32` the float tensors are also checked against the same run in
+torch FP32. The engine stays within twice torch's own FP32-to-BF16 drift on every
+float tensor, the rule `heartmula-probe` uses for the plain model.
 
 ## How ace-server is organised
 

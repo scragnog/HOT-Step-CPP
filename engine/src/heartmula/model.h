@@ -184,6 +184,18 @@ inline std::vector<std::string> stack_names(const std::string & prefix, int n_la
     return out;
 }
 
+// Computed, not stored: staged like a converted weight so it rides the same buffer.
+inline ggml_tensor * stage_freq_factors(WeightCtx * w, int head_dim, float base, const std::string & name) {
+    const std::vector<float> ff = heartmula_rope_freq_factors(head_dim, base);
+    ggml_tensor *            t  = ggml_new_tensor_1d(w->ctx, GGML_TYPE_F32, (int64_t) ff.size());
+    ggml_set_name(t, name.c_str());
+    auto buf = std::make_unique<float[]>(ff.size());
+    std::copy(ff.begin(), ff.end(), buf.get());
+    w->pending.push_back({ t, buf.get(), ff.size() * sizeof(float), 0 });
+    w->staging.push_back(std::move(buf));
+    return t;
+}
+
 inline void load_stack(WeightCtx * w, const GGUFModel & gf, const std::string & prefix, HeartMuLaStack * s) {
     s->layers.resize((size_t) s->cfg.n_layer);
     for (int i = 0; i < s->cfg.n_layer; i++) {
@@ -199,16 +211,8 @@ inline void load_stack(WeightCtx * w, const GGUFModel & gf, const std::string & 
         l.w2                = gf_load_tensor(w, gf, p + "mlp.w2.weight");
         l.w3                = gf_load_tensor(w, gf, p + "mlp.w3.weight");
     }
-    s->norm = gf_load_tensor_f32(w, gf, prefix + ".norm.scale");
-
-    // Computed, not stored: staged like a converted weight so it rides the same buffer.
-    const std::vector<float> ff = heartmula_rope_freq_factors(s->cfg.head_dim, s->cfg.rope_base);
-    s->freq_factors              = ggml_new_tensor_1d(w->ctx, GGML_TYPE_F32, (int64_t) ff.size());
-    ggml_set_name(s->freq_factors, (prefix + ".rope_freq_factors").c_str());
-    auto buf = std::make_unique<float[]>(ff.size());
-    std::copy(ff.begin(), ff.end(), buf.get());
-    w->pending.push_back({ s->freq_factors, buf.get(), ff.size() * sizeof(float), 0 });
-    w->staging.push_back(std::move(buf));
+    s->norm         = gf_load_tensor_f32(w, gf, prefix + ".norm.scale");
+    s->freq_factors = stage_freq_factors(w, s->cfg.head_dim, s->cfg.rope_base, prefix + ".rope_freq_factors");
 }
 
 inline bool check_shapes(const HeartMuLaStack & s, const char * path, std::string * err) {
@@ -319,14 +323,23 @@ static bool heartmula_model_load(HeartMuLaModel * m, const char * global_path, c
 // The global GGUF written by engine/tools/convert-mulacover.py also holds the cover
 // modules of backbone layers 20..27 (upstream peft_layers; full modules, not LoRA):
 // a symbolic adaptor (melody 256, drums 128 and chords 12 to 24 each, fusion 72 to
-// 512, two Llama layers at 512 with 8 heads, out to 3072), gated adaptive cross
-// attention (main attention 3072 with 24 heads, gate attention 12 with one head,
+// 512, two Llama layers at 512 with 8 heads x 64, out to 3072), gated adaptive cross
+// attention (main attention 3072 as 8 heads x 384, gate attention 12 with one head,
 // x/context gates 3072 to 12, final gate 12 to 1) and the tag MLP (Qwen 1024 to
 // 6144, split into scale and shift); plus qwen_linear (1024 to 3072) for the
-// prompt's style slot.
+// prompt's style slot. Every attention uses torchtune's Llama-3 scaled RoPE (base
+// 5e5, factor 32) at its own head width, so the loader stages three freq-factor
+// vectors. The graphs are in heartmula/mulacover.h and heartmula/lm-graph.h.
 
-#define HEARTMULA_COVER_FIRST  20
-#define HEARTMULA_COVER_LAYERS 8
+#define HEARTMULA_COVER_FIRST     20
+#define HEARTMULA_COVER_LAYERS    8
+#define HEARTMULA_COVER_MAX_STEPS 5000  // upstream MAX_SYMBOLIC_LENGTH, sixteenth-note rows
+#define HEARTMULA_COVER_STYLE_DIM 1024  // Qwen3-Embedding-0.6B
+#define HEARTMULA_COVER_ADAPT_DIM 512
+#define HEARTMULA_COVER_ADAPT_HD  64   // adaptor: 8 heads x 64
+#define HEARTMULA_COVER_CA_HD     384  // cross attention: 8 heads x 384
+#define HEARTMULA_COVER_GATE_DIM  12   // gate attention: one head x 12
+#define HEARTMULA_COVER_HEADS     8
 
 struct HeartMuLaCoverLayer {
     ggml_tensor *  melody_w = nullptr, * melody_b = nullptr;  // adaptor.pianoroll_proj
@@ -348,6 +361,7 @@ struct HeartMuLaCoverLayer {
 struct HeartMuLaCover {
     std::vector<HeartMuLaCoverLayer> layers;  // [i] is backbone layer HEARTMULA_COVER_FIRST + i
     ggml_tensor *                    qwen_w = nullptr, * qwen_b = nullptr;
+    ggml_tensor *                    ff_adapt = nullptr, * ff_ca = nullptr, * ff_gate = nullptr;  // RoPE freq factors
     WeightCtx                        wctx   = {};
     bool                             loaded = false;
 };
@@ -472,10 +486,13 @@ static bool heartmula_cover_load(HeartMuLaCover * c, const HeartMuLaModel & m, c
             return false;
         }
     }
-    wctx_init(&c->wctx, (int) specs.size());
+    wctx_init(&c->wctx, (int) specs.size() + 3);
     for (const auto & s : specs) {
         *s.dst = s.ne1 ? gf_load_tensor(&c->wctx, gf, s.name) : gf_load_tensor_f32(&c->wctx, gf, s.name);
     }
+    c->ff_adapt = stage_freq_factors(&c->wctx, HEARTMULA_COVER_ADAPT_HD, 500000.0f, "cover.adaptor.rope_freq_factors");
+    c->ff_ca    = stage_freq_factors(&c->wctx, HEARTMULA_COVER_CA_HD, 500000.0f, "cover.cross_attn.rope_freq_factors");
+    c->ff_gate  = stage_freq_factors(&c->wctx, HEARTMULA_COVER_GATE_DIM, 500000.0f, "cover.gate.rope_freq_factors");
     const bool ok = wctx_alloc(&c->wctx, m.bp.backend);
     gf_close(&gf);
     if (!ok) {
