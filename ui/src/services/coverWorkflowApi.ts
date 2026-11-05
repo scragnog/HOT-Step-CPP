@@ -5,6 +5,7 @@ import { apiClient } from './httpClient';
 import type { WorkflowReplay } from '../../../server/src/contracts/workflow';
 import { coverLyricWorkflowApi as workflowApi } from '../queries/cover-lyrics/workflows';
 import type { WorkflowJob } from '../../../server/src/contracts/workflow';
+import type { CoverLeadSheetSource, CoverLeadSheetResult } from '../../../server/src/contracts/studioWorkflows';
 
 export interface CoverDraftResult {
   documentId: string;
@@ -14,6 +15,8 @@ export interface CoverDraftResult {
   abc?: string;
   scoreSource?: string;
   caption?: string;
+  leadSheetSource?: CoverLeadSheetSource;
+  leadSheet?: CoverLeadSheetResult;
 }
 
 export async function waitForCoverJob(jobId: string, cancelled: () => boolean,
@@ -37,7 +40,9 @@ export const coverWorkflowApi = {
   open: (assetId: string, cached?: {
     metadata: { artist: string; title: string; album: string; duration: number | null };
     analysis: { bpm: number; key: string; scale?: string };
-  }) => workflowApi.submit('cover-open', crypto.randomUUID(), { assetId, cached }),
+  }, leadSheetSource?: CoverLeadSheetSource) => workflowApi.submit('cover-open', crypto.randomUUID(), { assetId, cached, leadSheetSource }),
+  source: (documentId: string, revision: number, leadSheetSource: CoverLeadSheetSource, assetId?: string) =>
+    workflowApi.submit('cover-source', crypto.randomUUID(), { documentId, revision, leadSheetSource, assetId }),
   transcribe: (documentId: string, revision: number, force: boolean) =>
     workflowApi.submit('cover-transcribe', crypto.randomUUID(), { documentId, revision, force }),
   caption: (documentId: string, revision: number, artistId: number,

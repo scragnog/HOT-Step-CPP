@@ -5,6 +5,9 @@ upload a WAV, MP3 or FLAC, and the native transcription engine writes a `.mid` w
 separate parts for drums, bass, guitar, keys, and the rest of the mix. Reach
 for it when you want the notes behind a track, not just the audio, for
 example to see what a bassline is doing or to pull a MIDI file into a DAW.
+MuScriptor also feeds the shared lead-sheet source picker in
+[Cover Studio](cover-studio.md) for YuE2 and HeartMuLa, where its chords are shown
+as estimates.
 
 ![MIDI Studio](../../images/studio-midi-studio.webp)
 <!-- screenshot: needed -->

@@ -7,6 +7,9 @@ Transform strength, seed and optional DoRA adapter. Its output is instrumental
 and follows the source's feel, with no melody guarantee. HeartMuLa's MuLaCover
 mode uses the approved Prepare lead sheet, four style tag fields and lyrics;
 rendering awaits engine support and its separate non-commercial model pack.
+YuE2 and HeartMuLa share a lead-sheet source picker for SheetSage2,
+SheetSage2-Refined, MuScriptor and YourMT3+/ChordNet. Saved drafts keep their
+source choice; MuScriptor chords are estimates.
 
 ![Cover Studio](../../images/hot-step-cover-studio.webp)
 
@@ -18,6 +21,35 @@ switching away while Cover Studio is open moves the app to Custom-Gen. You need 
 a source track. The [engine picker](../backends.md#switching-backends) appears once a second
 backend is registered, so on a single-backend install this is not a decision you
 have to make.
+
+## Lead-sheet sources in Prepare
+
+YuE2 and HeartMuLa have the same **Lead-sheet source** picker in Prepare.
+Unavailable sources stay selectable; the score panel says what is missing.
+
+| Source | What needs installing |
+|---|---|
+| SheetSage2 | The SheetSage2 model in Model Manager. |
+| SheetSage2-Refined | SheetSage2 and its Refined overlay in Model Manager. |
+| MuScriptor | A MuScriptor transcription model, Beat This! and a build containing `ace-midi`. The readiness message names the chosen model and missing files. |
+| YourMT3+ / ChordNet | Not installed yet. No download entry is offered while model rights and native installation are pending. |
+
+A new draft uses the picker's choice, or snapshots the **Models** default if
+you have not selected a source. Changing that default later does not change an
+existing draft. Loading a saved draft restores its source; older drafts without
+a choice use the source the server reports when opened.
+
+Changing the source or replacing the audio on an open draft clears its score
+and approval. Review and approve the new sheet before rendering. Transcription
+uses the draft's saved source. **Chords: estimated** means the chord symbols are
+an estimate, as with MuScriptor. Check them against the recording before approving.
+If transcription produces ABC without a readable tempo, the ABC stays editable;
+add a tempo before trying to render.
+
+Dataset sidecar scores and MusicXML imports remain editable and approvable
+without installing a transcriber. A missing source model blocks transcription,
+not approval of a supplied score. There is no MIDI Studio hand-off button;
+MuScriptor can be selected directly here.
 
 ## HeartMuLa lead-sheet cover
 

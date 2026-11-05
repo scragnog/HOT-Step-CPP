@@ -4,6 +4,7 @@ import { apiClient, type ClientOptions, type ReadOptions } from './httpClient';
 import { readSnapshot, changed } from '../queries/cover-lyrics/reads';
 import { getSessionEpoch } from '../queries/keys';
 import type { PrepareV2 } from '../utils/yue2Prepare';
+import type { CoverLeadSheetSource, CoverLeadSheetResult } from '../../../server/src/contracts/studioWorkflows';
 // Authenticated YuE2 cover transcription endpoints.
 const BASE = '/api/yue2-cover';
 
@@ -20,6 +21,7 @@ export interface Yue2CoverSourceInput {
 }
 
 export interface Yue2CoverReadiness {
+  source?: CoverLeadSheetSource;
   ready: boolean;
   model: string | null;
   message: string | null;
@@ -43,7 +45,8 @@ export interface Yue2CoverResult {
   abc?: string;
   sourceId: string;
   sourceLabel: string;
-  scoreSource?: 'dataset';
+  scoreSource?: CoverLeadSheetResult['scoreSource'];
+  leadSheet?: CoverLeadSheetResult;
   sections?: Yue2ScoreSection[];
 }
 

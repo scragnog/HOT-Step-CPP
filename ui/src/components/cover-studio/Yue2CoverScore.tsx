@@ -25,7 +25,8 @@ interface Props {
   error: string;
   abc: string;
   sourceKey: string;
-  scoreSource?: 'dataset' | null;
+  scoreSource?: string | null;
+  chordQuality?: 'estimated' | 'transcribed' | 'provided' | null;
   /** The confirmed score has been approved for rendering. */
   approved: boolean;
   /** One edit of the score: the Apply button of the ABC text, a chart edit or an import. */
@@ -382,7 +383,10 @@ export const Yue2CoverScore: React.FC<Props> = p => {
         </div>
       )}
       {p.error && <p role="alert" className="text-xs text-red-500">{p.error}</p>}
-      {p.scoreSource && <p className="text-xs text-cyan-600 dark:text-cyan-300">Score from dataset · editable</p>}
+      {p.chordQuality && <p className="text-xs text-zinc-500">{t('cover.chordQuality', 'Chords')}: {p.chordQuality === 'estimated'
+        ? t('cover.chordEstimated', 'estimated, review before approving') : p.chordQuality === 'provided'
+        ? t('cover.chordProvided', 'provided') : t('cover.chordTranscribed', 'transcribed')}</p>}
+      {p.scoreSource === 'dataset' && <p className="text-xs text-cyan-600 dark:text-cyan-300">Score from dataset · editable</p>}
       {p.abc.trim() && !previewValid && <p className="text-xs text-amber-500">The ABC could not be previewed. Check its notation before confirming.</p>}
       {p.sourceMode === 'audio' && !p.readOnly
         ? <MusicXmlImport key={p.sourceKey} abc={p.abc} disabled={busy} onAbcChange={p.onAbcChange} action={transcribe}
