@@ -763,6 +763,10 @@ link_ggml_backends(heartcodec-probe)
 add_executable(heartmula-generate tools/heartmula-generate.cpp)
 target_link_libraries(heartmula-generate PRIVATE yyjson)
 link_ggml_backends(heartmula-generate)
+# MuLaCover Stage 3a receipts: Qwen style vector parity, cover-module load and refusals.
+add_executable(mulacover-check tools/mulacover-check.cpp)
+target_link_libraries(mulacover-check PRIVATE yyjson)
+link_ggml_backends(mulacover-check)
 # HeartMuLa imatrix collection and held-out quant scoring (tools/heartmula-quant-ladder.mjs).
 add_executable(heartmula-quant tools/heartmula-quant.cpp)
 target_link_libraries(heartmula-quant PRIVATE yyjson)

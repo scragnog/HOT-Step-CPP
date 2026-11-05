@@ -215,9 +215,14 @@ inline bool check_shapes(const HeartMuLaStack & s, const char * path, std::strin
     const int64_t H = s.cfg.n_embd, q = (int64_t) s.cfg.n_head * s.cfg.head_dim,
                   kv = (int64_t) s.cfg.n_head_kv * s.cfg.head_dim;
     for (const auto & l : s.layers) {
-        if (l.q->ne[0] != H || l.q->ne[1] != q || l.k->ne[1] != kv || l.v->ne[1] != kv || l.o->ne[0] != q ||
-            l.w1->ne[1] != s.cfg.n_ff || l.w2->ne[0] != s.cfg.n_ff) {
-            return fail(err, std::string(path) + ": layer shapes do not match the expected HeartMuLa config");
+        for (const ggml_tensor * t : { l.q->ne[0] != H || l.q->ne[1] != q ? l.q : nullptr,
+                                       l.k->ne[1] != kv ? l.k : nullptr, l.v->ne[1] != kv ? l.v : nullptr,
+                                       l.o->ne[0] != q ? l.o : nullptr, l.w1->ne[1] != s.cfg.n_ff ? l.w1 : nullptr,
+                                       l.w2->ne[0] != s.cfg.n_ff ? l.w2 : nullptr }) {
+            if (t) {
+                return fail(err, std::string(path) + ": tensor '" + ggml_get_name(t) +
+                                     "' does not match the expected HeartMuLa config");
+            }
         }
     }
     return true;
@@ -307,5 +312,176 @@ static bool heartmula_model_load(HeartMuLaModel * m, const char * global_path, c
         return fail(err, "HeartMuLa weight allocation failed (out of VRAM?)");
     }
     m->loaded = true;
+    return true;
+}
+
+// ── MuLaCover cover modules ─────────────────────────────────────────────────
+// The global GGUF written by engine/tools/convert-mulacover.py also holds the cover
+// modules of backbone layers 20..27 (upstream peft_layers; full modules, not LoRA):
+// a symbolic adaptor (melody 256, drums 128 and chords 12 to 24 each, fusion 72 to
+// 512, two Llama layers at 512 with 8 heads, out to 3072), gated adaptive cross
+// attention (main attention 3072 with 24 heads, gate attention 12 with one head,
+// x/context gates 3072 to 12, final gate 12 to 1) and the tag MLP (Qwen 1024 to
+// 6144, split into scale and shift); plus qwen_linear (1024 to 3072) for the
+// prompt's style slot.
+
+#define HEARTMULA_COVER_FIRST  20
+#define HEARTMULA_COVER_LAYERS 8
+
+struct HeartMuLaCoverLayer {
+    ggml_tensor *  melody_w = nullptr, * melody_b = nullptr;  // adaptor.pianoroll_proj
+    ggml_tensor *  drum_w = nullptr, * drum_b = nullptr;      // adaptor.drum_pianoroll_proj
+    ggml_tensor *  chord_w = nullptr, * chord_b = nullptr;    // adaptor.chord_proj
+    ggml_tensor *  fusion_w = nullptr, * fusion_b = nullptr;
+    HeartMuLaLayer adaptor[2];
+    ggml_tensor *  adaptor_norm = nullptr;
+    ggml_tensor *  out_w = nullptr, * out_b = nullptr;
+    ggml_tensor *  ca_norm = nullptr;                                                  // cross_attn.norm
+    ggml_tensor *  ca_q = nullptr, * ca_k = nullptr, * ca_v = nullptr, * ca_o = nullptr;  // cross_attn.attn
+    ggml_tensor *  gate_q = nullptr, * gate_k = nullptr, * gate_v = nullptr, * gate_o = nullptr;  // cross_attn.gate
+    ggml_tensor *  x_gate_w = nullptr, * x_gate_b = nullptr;
+    ggml_tensor *  ctx_gate_w = nullptr, * ctx_gate_b = nullptr;
+    ggml_tensor *  gate_w = nullptr, * gate_b = nullptr;  // cross_attn.gate_proj
+    ggml_tensor *  tag_w = nullptr, * tag_b = nullptr;    // tag_mlp_layers.N.mlp
+};
+
+struct HeartMuLaCover {
+    std::vector<HeartMuLaCoverLayer> layers;  // [i] is backbone layer HEARTMULA_COVER_FIRST + i
+    ggml_tensor *                    qwen_w = nullptr, * qwen_b = nullptr;
+    WeightCtx                        wctx   = {};
+    bool                             loaded = false;
+};
+
+static void heartmula_cover_free(HeartMuLaCover * c) {
+    wctx_free(&c->wctx);
+    *c = HeartMuLaCover{};
+}
+
+namespace heartmula_model_detail {
+
+// ne0 = input width, ne1 = output width; ne1 == 0 marks a 1-D vector (scale or bias).
+struct CoverSpec {
+    std::string    name;
+    int64_t        ne0, ne1;
+    ggml_tensor ** dst;
+};
+
+inline std::vector<CoverSpec> cover_specs(HeartMuLaCover * c) {
+    std::vector<CoverSpec> s;
+    auto vec    = [&](const std::string & n, int64_t w, ggml_tensor ** d) { s.push_back({ n, w, 0, d }); };
+    auto linear = [&](const std::string & n, int64_t in, int64_t out, ggml_tensor ** w, ggml_tensor ** b) {
+        s.push_back({ n + ".weight", in, out, w });
+        if (b) vec(n + ".bias", out, b);
+    };
+    c->layers.resize(HEARTMULA_COVER_LAYERS);
+    for (int i = 0; i < HEARTMULA_COVER_LAYERS; i++) {
+        HeartMuLaCoverLayer & l   = c->layers[(size_t) i];
+        const std::string     idx = std::to_string(HEARTMULA_COVER_FIRST + i);
+        const std::string     a = "peft_layers." + idx + ".adaptor.", x = "peft_layers." + idx + ".cross_attn.";
+        linear(a + "pianoroll_proj", 256, 24, &l.melody_w, &l.melody_b);
+        linear(a + "drum_pianoroll_proj", 128, 24, &l.drum_w, &l.drum_b);
+        linear(a + "chord_proj", 12, 24, &l.chord_w, &l.chord_b);
+        linear(a + "fusion_proj", 72, 512, &l.fusion_w, &l.fusion_b);
+        for (int j = 0; j < 2; j++) {
+            const std::string d  = a + "decoder.layers." + std::to_string(j) + ".";
+            HeartMuLaLayer &  dl = l.adaptor[j];
+            vec(d + "sa_norm.scale", 512, &dl.sa_norm);
+            linear(d + "attn.q_proj", 512, 512, &dl.q, nullptr);
+            linear(d + "attn.k_proj", 512, 512, &dl.k, nullptr);
+            linear(d + "attn.v_proj", 512, 512, &dl.v, nullptr);
+            linear(d + "attn.output_proj", 512, 512, &dl.o, nullptr);
+            vec(d + "mlp_norm.scale", 512, &dl.mlp_norm);
+            linear(d + "mlp.w1", 512, 2048, &dl.w1, nullptr);
+            linear(d + "mlp.w2", 2048, 512, &dl.w2, nullptr);
+            linear(d + "mlp.w3", 512, 2048, &dl.w3, nullptr);
+        }
+        vec(a + "decoder.norm.scale", 512, &l.adaptor_norm);
+        linear(a + "out_proj", 512, 3072, &l.out_w, &l.out_b);
+        vec(x + "norm.scale", 3072, &l.ca_norm);
+        linear(x + "attn.q_proj", 3072, 3072, &l.ca_q, nullptr);
+        linear(x + "attn.k_proj", 3072, 3072, &l.ca_k, nullptr);
+        linear(x + "attn.v_proj", 3072, 3072, &l.ca_v, nullptr);
+        linear(x + "attn.output_proj", 3072, 3072, &l.ca_o, nullptr);
+        linear(x + "gate.q_proj", 12, 12, &l.gate_q, nullptr);
+        linear(x + "gate.k_proj", 12, 12, &l.gate_k, nullptr);
+        linear(x + "gate.v_proj", 12, 12, &l.gate_v, nullptr);
+        linear(x + "gate.output_proj", 12, 12, &l.gate_o, nullptr);
+        linear(x + "x_gate_proj", 3072, 12, &l.x_gate_w, &l.x_gate_b);
+        linear(x + "context_gate_proj", 3072, 12, &l.ctx_gate_w, &l.ctx_gate_b);
+        linear(x + "gate_proj", 12, 1, &l.gate_w, &l.gate_b);
+        linear("tag_mlp_layers." + idx + ".mlp", 1024, 6144, &l.tag_w, &l.tag_b);
+    }
+    linear("qwen_linear", 1024, 3072, &c->qwen_w, &c->qwen_b);
+    return s;
+}
+
+// Name, shape and dtype from the header: vectors F32/F16/BF16 (widened to F32 on load),
+// matrices F32/F16/BF16 or a quant type whose block divides the row.
+inline bool check_cover_spec(const GGUFModel & gf, const CoverSpec & s, const char * path, std::string * err) {
+    const ggml_tensor * t = gguf_find_tensor(gf.gguf, s.name.c_str()) >= 0 ? ggml_get_tensor(gf.meta, s.name.c_str())
+                                                                            : nullptr;
+    if (!t) {
+        return fail(err, std::string(path) + ": tensor '" + s.name + "' is missing");
+    }
+    const int64_t ne1 = s.ne1 ? s.ne1 : 1;
+    if (t->ne[0] != s.ne0 || t->ne[1] != ne1 || t->ne[2] != 1 || t->ne[3] != 1) {
+        return fail(err, std::string(path) + ": tensor '" + s.name + "' has shape [" + std::to_string(t->ne[0]) +
+                             ", " + std::to_string(t->ne[1]) + "], expected [" + std::to_string(s.ne0) + ", " +
+                             std::to_string(ne1) + "]");
+    }
+    const bool plain = t->type == GGML_TYPE_F32 || t->type == GGML_TYPE_F16 || t->type == GGML_TYPE_BF16;
+    const bool quant = s.ne1 && ggml_is_quantized(t->type) && t->ne[0] % ggml_blck_size(t->type) == 0;
+    if (!plain && !quant) {
+        return fail(err, std::string(path) + ": tensor '" + s.name + "' has unsupported type " +
+                             ggml_type_name(t->type));
+    }
+    return true;
+}
+
+}  // namespace heartmula_model_detail
+
+// Load the cover modules from MuLaCover's global GGUF onto the backend `m` already holds.
+// `m` must be that same global (base fingerprint and variant match). Every name, shape and
+// dtype is checked against the header before anything is allocated; the error names the
+// first bad tensor.
+static bool heartmula_cover_load(HeartMuLaCover * c, const HeartMuLaModel & m, const char * global_path,
+                                 std::string * err) {
+    using namespace heartmula_model_detail;
+    heartmula_cover_free(c);
+    if (!m.loaded) {
+        return fail(err, "load the MuLaCover LM before its cover modules");
+    }
+    GGUFModel gf = {};
+    if (!gf_load(&gf, global_path)) {
+        return fail(err, std::string("cannot open ") + global_path);
+    }
+    if (!check_header(gf, global_path, "heartmula-global", err)) {
+        gf_close(&gf);
+        return false;
+    }
+    if (gf_get_str(gf, "heartmula.base_fingerprint") != m.base_fingerprint ||
+        gf_get_str(gf, "heartmula.variant") != m.variant) {
+        gf_close(&gf);
+        return fail(err, std::string(global_path) + ": not the global file of the loaded " + m.variant + " model");
+    }
+    const std::vector<CoverSpec> specs = cover_specs(c);
+    for (const auto & s : specs) {
+        if (!check_cover_spec(gf, s, global_path, err)) {
+            gf_close(&gf);
+            heartmula_cover_free(c);
+            return false;
+        }
+    }
+    wctx_init(&c->wctx, (int) specs.size());
+    for (const auto & s : specs) {
+        *s.dst = s.ne1 ? gf_load_tensor(&c->wctx, gf, s.name) : gf_load_tensor_f32(&c->wctx, gf, s.name);
+    }
+    const bool ok = wctx_alloc(&c->wctx, m.bp.backend);
+    gf_close(&gf);
+    if (!ok) {
+        heartmula_cover_free(c);
+        return fail(err, "MuLaCover cover weight allocation failed (out of VRAM?)");
+    }
+    c->loaded = true;
     return true;
 }

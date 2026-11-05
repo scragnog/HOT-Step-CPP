@@ -597,6 +597,7 @@ struct HeartMuLaRuntime {
     BackendPair     bp     = {};
     bool            bp_ref = false;
     HeartMuLaModel  lm;
+    HeartMuLaCover  cover;     // MuLaCover only, loaded with its LM
     HeartMuLaAdapter adapter;  // rides the LM phase
     std::string     lm_key;  // global path | local path
     uint64_t        lm_bytes = 0;
@@ -607,6 +608,7 @@ struct HeartMuLaRuntime {
 
 static void heartmula_free_lm(HeartMuLaRuntime * rt) {
     heartmula_adapter_free(&rt->adapter);
+    heartmula_cover_free(&rt->cover);
     heartmula_model_free(&rt->lm);
     rt->lm_key.clear();
     rt->lm_bytes = 0;
@@ -759,8 +761,14 @@ static bool heartmula_load_lm(HeartMuLaRuntime * rt, const HeartMuLaResolved & p
     if (rt->lm_key == key && rt->lm.loaded) return true;
     heartmula_free_lm(rt);
     if (!heartmula_model_load(&rt->lm, p.file[HM_GLOBAL].path.c_str(), p.file[HM_LOCAL].path.c_str(), err)) return false;
+    if (heartmula_pipeline_detail::lower(rt->lm.variant) == "mulacover" &&
+        !heartmula_cover_load(&rt->cover, rt->lm, p.file[HM_GLOBAL].path.c_str(), err)) {
+        heartmula_free_lm(rt);
+        return false;
+    }
     rt->lm_key   = key;
-    rt->lm_bytes = ggml_backend_buffer_get_size(rt->lm.wctx_global.buffer) + ggml_backend_buffer_get_size(rt->lm.wctx_local.buffer);
+    rt->lm_bytes = ggml_backend_buffer_get_size(rt->lm.wctx_global.buffer) + ggml_backend_buffer_get_size(rt->lm.wctx_local.buffer) +
+                   (rt->cover.loaded ? ggml_backend_buffer_get_size(rt->cover.wctx.buffer) : 0);
     return true;
 }
 

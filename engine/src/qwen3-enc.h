@@ -12,6 +12,7 @@
 
 #pragma once
 #include "backend.h"
+#include "bpe.h"
 #include "ggml-backend.h"
 #include "ggml.h"
 #include "gguf-weights.h"
@@ -19,6 +20,7 @@
 #include "weight-source.h"
 #include "yyjson.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -554,6 +556,34 @@ static void qwen3_forward(Qwen3GGML * m, const int * token_ids, int S, float * o
 
     ggml_backend_sched_reset(m->sched);
     ggml_free(ctx);
+}
+
+// MuLaCover style vector (upstream pipeline._encode_style). tags: the caller's lowercased,
+// trimmed tag line, tokenized bare (no chat template) with the trailing <|endoftext|> that
+// upstream's Qwen tokenizer also appends. Pools the final hidden row (batch 1, so no left
+// padding) and L2-normalises it in float. Empty tags give zeros, as upstream.
+// out: [H] float. Returns the token ids it ran (empty for empty tags).
+static std::vector<int> qwen3_style_vector(Qwen3GGML * m, const BPETokenizer * tok, const std::string & tags,
+                                           float * out) {
+    const int H = m->cfg.hidden_size;
+    std::fill(out, out + H, 0.0f);
+    if (tags.empty()) {
+        return {};
+    }
+    std::vector<int>   ids = bpe_encode(tok, tags, true);
+    const int          S   = (int) ids.size();
+    std::vector<float> hidden((size_t) H * S);
+    qwen3_forward(m, ids.data(), S, hidden.data());
+    const float * last = hidden.data() + (size_t) H * (S - 1);
+    double        ss   = 0.0;
+    for (int i = 0; i < H; i++) {
+        ss += (double) last[i] * last[i];
+    }
+    const float inv = 1.0f / std::max((float) std::sqrt(ss), 1e-12f);  // torch F.normalize eps
+    for (int i = 0; i < H; i++) {
+        out[i] = last[i] * inv;
+    }
+    return ids;
 }
 
 // Embedding lookup via ggml graph (reuses text encoder weights + scheduler)
