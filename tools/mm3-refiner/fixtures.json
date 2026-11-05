@@ -155,6 +155,11 @@
       "relative_rmse": 1e-05,
       "cosine": 0.999999
     },
+    "clap_full_chain_mel": {
+      "max_abs": 0.005,
+      "relative_rmse": 1e-05,
+      "cosine": 0.999999
+    },
     "clap": {
       "max_abs": 0.002,
       "relative_rmse": 0.002,
@@ -186,5 +191,5 @@
       "cosine": 0.9999
     }
   },
-  "tolerance_policy": "All three gates must pass independently on every tensor. Frozen before any engine port; no gain alignment for component tensors. Waveform is pre-PCM gain-matched output. These are proposed engineering bounds, not measured engine accuracy; changes require reviewer agreement and a new contract revision."
+  "tolerance_policy": "All three gates must pass independently on every tensor. Frozen before any engine port; no gain alignment for component tensors. Waveform is pre-PCM gain-matched output. These are proposed engineering bounds, not measured engine accuracy; changes require reviewer agreement and a new contract revision. Revision 2 (HOTSTEP-1010, agreed by the reviewer): added clap_full_chain_mel, the bound for the log-mel of the engine's own resampled audio, because torchaudio resamples in float32 and its 1-2 ulp noise reaches 3.9e-3 dB in the near-silent top mel bins (measured worst 3.937e-3 max_abs, 3.5e-6 relative RMSE, cosine 1 over 90 windows). clap_processor still gates the 48 kHz audio and the mel of the reference audio; clap gates the vector."
 }

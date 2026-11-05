@@ -4,9 +4,9 @@
 // bound from fixtures.json "tolerances", fed the reference's input where it has
 // one: the 48 kHz resampled audio on "clap_processor", the log-mel input_features
 // computed from the fixture's own 48 kHz audio on "clap_processor", and the pooled
-// vector from our own chain on "clap". The mel of OUR resampled audio is printed as
-// "e2e feat" but not gated: torchaudio resamples in float32, and its 1-2 ulp noise
-// reaches 6e-4 dB in the near-silent top mel bins (see mm3-refiner-clap.h).
+// vector from our own chain on "clap". The mel of OUR resampled audio is gated on
+// its own, wider "clap_full_chain_mel": torchaudio resamples in float32, and its
+// 1-2 ulp noise reaches 4e-3 dB in the near-silent top mel bins (see mm3-refiner-clap.h).
 // The CLAP stage does not depend on the bridge step count, so only steps-1
 // windows run unless --all is given. GGML_BACKEND=CPU forces the CPU backend.
 #include "minimax/mm3-refiner-clap.h"
@@ -144,7 +144,8 @@ int main(int argc, char ** argv) {
         yyjson_doc *  doc = yyjson_read(contract.data(), contract.size(), 0);
         require(doc != nullptr, "cannot parse " + args.at("--contract"));
         yyjson_val * tol = yyjson_obj_get(yyjson_doc_get_root(doc), "tolerances");
-        const Bound  proc = read_bound(tol, "clap_processor"), vec = read_bound(tol, "clap");
+        const Bound  proc = read_bound(tol, "clap_processor"), chain = read_bound(tol, "clap_full_chain_mel"),
+                     vec  = read_bound(tol, "clap");
         yyjson_doc_free(doc);
 
         std::vector<fs::path> windows;
@@ -202,7 +203,7 @@ int main(int argc, char ** argv) {
             std::vector<float> iso;
             require(mm3_clap_features(raud.data, &iso, &err), name + ": " + err);
             Metrics mi = measure(iso.data(), rfea.data.data(), rfea.data.size());
-            const bool ok = proc.ok(ma) && proc.ok(mi) && vec.ok(mv);
+            const bool ok = proc.ok(ma) && proc.ok(mi) && chain.ok(mf) && vec.ok(mv);
             pass          = pass && ok;
             fold(worst_aud, ma);
             fold(worst_mel, mi);
@@ -213,7 +214,7 @@ int main(int argc, char ** argv) {
                       << " | audio48k n=" << raud.data.size() << " max_abs=" << ma.max_abs
                       << " | mel(ref audio) max_abs=" << mi.max_abs << " rel=" << mi.rel
                       << " | vec max_abs=" << mv.max_abs << " rel=" << mv.rel << " cos=" << std::setprecision(9)
-                      << mv.cosine << std::setprecision(4) << " | e2e feat max_abs=" << mf.max_abs
+                      << mv.cosine << std::setprecision(4) << " | mel(own audio) max_abs=" << mf.max_abs << " rel=" << mf.rel
                       << (ok ? " PASS" : " FAIL") << "\n";
             if (args.count("--out")) {
                 fs::path out = fs::path(args.at("--out")) / name;
@@ -230,9 +231,9 @@ int main(int argc, char ** argv) {
         line("audio48k", worst_aud);
         line("mel(ref audio)", worst_mel);
         line("vector", worst_vec);
-        line("e2e feat (info)", worst_feat);
+        line("mel(own audio)", worst_feat);
         std::cout << (pass ? "PASS" : "FAIL") << " clap parity, " << windows.size()
-                  << " windows x (48 kHz audio, mel on reference audio, vector)\n";
+                  << " windows x (48 kHz audio, mel on reference audio, mel on own audio, vector)\n";
         mm3_clap_free(&clap);
         return pass ? 0 : 1;
     } catch (const std::exception & e) {

@@ -22,7 +22,7 @@
 //
 // Traps, each checked against the slice-1 fixtures:
 // - torchaudio resamples in float32, so its 48 kHz audio differs from an exact
-//   one by 1-2 ulp (1e-7). The mel stage turns that into up to 6e-4 dB in the
+//   one by 1-2 ulp (1e-7). The mel stage turns that into up to 4e-3 dB in the
 //   top, near-silent bins of band-limited material; the stage fed the reference
 //   audio itself is exact to 8e-6 dB, and the final vector moves by 1e-7.
 // - The processor works in float64 and takes a 1024-point periodic Hann

@@ -194,14 +194,16 @@ passed its round, odd and HeartMuLa cases with the GPU idle.
 at most 10 s, torchaudio-style 48 kHz resample, the stock processor (repeatpad,
 slaney log-mel), HTSAT, pooling, projection and L2 normalisation; no feature fusion
 and no text tower. `check-clap.ps1` runs `mm3-refiner-clap-probe` over the
-fixtures (steps-1 windows, `-All` for every copy) and gates three things, each on
+fixtures (steps-1 windows, `-All` for every copy) and gates four things, each on
 the bound frozen in `fixtures.json`: the 48 kHz audio and the log-mel computed from
-the reference's own 48 kHz audio on `clap_processor`, and the pooled vector on
-`clap`. The mel of the engine's own resampled audio is printed but not gated:
-torchaudio resamples in float32, and its 1-2 ulp noise moves the near-silent top
-mel bins of band-limited renders by up to 4e-3 dB, which is above the 1e-4 dB
-processor bound and changes the vector by 1e-7. The probe builds alone, with no
-`build.cmd`:
+the reference's own 48 kHz audio on `clap_processor`, the log-mel of the engine's
+own resampled audio on `clap_full_chain_mel`, and the pooled vector on `clap`.
+The full-chain mel has its own, wider bound (contract revision 2, agreed by the
+reviewer): torchaudio resamples in float32, and its 1-2 ulp noise moves the
+near-silent top mel bins of band-limited renders by up to 3.9e-3 dB, above the
+1e-4 dB processor bound, while the vector moves by 1e-7. Measured worst over 90
+windows: 3.937e-3 max_abs, 3.5e-6 relative RMSE, cosine 1. The probe builds
+alone, with no `build.cmd`:
 
 ```powershell
 cmake -S engine -B engine/build/clap-probe -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DGGML_BACKEND_DL=OFF
