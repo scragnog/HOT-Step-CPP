@@ -186,10 +186,11 @@ Every render and import lands here. Details: [Library](docs/user/studios/library
 | Cover lyric drift | Measures sung section timing against vocal notes; sections without lyrics or vocal notes show Instrumental / N/A and leave the scoring count. |
 | Streaming rows | A MiniMax-Music3 render in progress shows in the list and plays before its file exists. |
 | Tagged downloads | Metadata and cover art embedded in downloaded files, in the format chosen in Settings. |
+| Synced lyric export | Download .LRC saves a track's timings as a sidecar named like the audio, optionally with enhanced word stamps; a folder-mode audio download writes it too. |
 | Global player | Transport, repeat modes, spectrum analyzer, disco mode and volume, visible in every view. |
 | Rate and pitch preview | Playback speed from 0.5x to 2x, and a 48k/44.1k toggle that hears a render clocked at 44.1 kHz. |
 | Variant switch | No Adapter, Unmastered and Mastered versions, each with its own download. |
-| Waveform tools | Trim and crop in and out points, section markers and a synced LRC lyrics bar. |
+| Waveform tools | Trim and crop in and out points, section markers, and a synced LRC lyrics bar that highlights each Whisper word with a tick per syllable on the waveform. An Edit button on the open strip opens a lyric editor modal: transport, speed, volume, the waveform, a 30 to 600 px/s zoom, one row per line with a draggable chip per word, word nudge, loop and split, whole-track nudge, undo and redo, optional autosave, and revision-checked saves that rebuild the `.lrc`. Unsaved edits can be discarded on close. |
 | Playlist queue | One browser-local play queue with reorder, Play All and Download All. Ordered playlist snapshots save with server revisions. A browser playlist can be imported explicitly; a failed save keeps the local edit visible for reapplication. |
 
 ## Lyric Studio

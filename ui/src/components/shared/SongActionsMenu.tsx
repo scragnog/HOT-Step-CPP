@@ -22,7 +22,7 @@ import React, { useRef, useState, useLayoutEffect } from 'react';
 import ReactDOM from 'react-dom';
 import {
   MoreHorizontal, RotateCcw, Download, Disc3, Tags, Trash2, Upload,
-  Mic2, Image, ArrowLeftRight, ListPlus, Sparkles, Loader2, AlertCircle, Undo2, FileMusic,
+  Mic2, Image, ArrowLeftRight, ListPlus, Sparkles, Loader2, AlertCircle, Undo2, FileMusic, FileText,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -33,10 +33,9 @@ import {
   startPostProcessing, canPostProcess, revertPostProcessing, dismissRun, usePostProcessRun,
 } from '../../stores/postProcessStore';
 import { openCoverArtPrompt } from '../library/CoverArtPromptModal';
-import { queryClient } from '../../queries/client';
-import { queryManager } from '../../queries/invalidation';
-import { invalidateSongs } from '../../queries/shell-queue/songs';
-import { scoreAbcOptions } from '../../queries/shell-queue/lyrics';
+import { scoreAbcOptions, lrcOptions, lyricsJsonOptions } from '../../queries/shell-queue/lyrics';
+import { downloadLyricsLrc } from '../../utils/downloadTrack';
+import { useRetranscribe } from '../../stores/retranscribeStore';
 import { BottomSheet, useIsMobile } from './BottomSheet';
 
 // ── Portal ───────────────────────────────────────────────────────────────────
@@ -273,18 +272,6 @@ function downloadScoreAbc(song: Song, abc: string): void {
   URL.revokeObjectURL(url);
 }
 
-async function retranscribe(song: Song): Promise<void> {
-  try {
-    const { retranscribeLyrics } = await import('../../services/api');
-    const result = await retranscribeLyrics(song.id);
-    console.log(`[Retranscribe] ${result.wordCount} words, ${result.lineCount} lines`);
-    void invalidateSongs(queryClient);
-    void queryManager.sidecars.all(queryClient);
-  } catch (err: any) {
-    console.error('[Retranscribe] Failed:', err.message);
-  }
-}
-
 // ── Component ────────────────────────────────────────────────────────────────
 
 export interface SongActionsMenuProps {
@@ -334,6 +321,9 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
   const abTrackAId = useABCompareSelector(s => s.trackA?.id);
   const abTrackBId = useABCompareSelector(s => s.trackB?.id);
   const run = usePostProcessRun(song.id);
+  // Whisper runs for a while; the store keeps the spinner alive after this menu
+  // closes, and the outcome arrives as a toast (retranscribeStore).
+  const { data: { transcribing }, start: startTranscribe } = useRetranscribe(song);
 
   const pp = canPostProcess(song);
   const ppBusy = !!run && (run.status === 'starting' || run.status === 'pending' || run.status === 'running');
@@ -347,6 +337,11 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
   // Only YuE2 renders have a lead sheet; probe for it once the menu opens.
   const audioUrl = song.audioUrl || song.audio_url || '';
   const { data: scoreAbc } = useQuery({ ...scoreAbcOptions(audioUrl), enabled: open && !!audioUrl });
+  // Only offer the .lrc export when the track actually has synced lyrics —
+  // either the engine's LRC or the word-level JSON a retranscription writes.
+  const { data: lrc } = useQuery({ ...lrcOptions(audioUrl), enabled: open && !!audioUrl });
+  const { data: lyricsJson } = useQuery({ ...lyricsJsonOptions(audioUrl), enabled: open && !!audioUrl });
+  const hasSyncedLyrics = !!lrc || !!lyricsJson;
 
   const handleRevert = async () => {
     close();
@@ -486,11 +481,27 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
                 onClick={() => act(() => exportParams(song))}
               />
               <Item
-                icon={<Mic2 size={14} />}
-                label={t('songActions.retranscribe', 'Retranscribe Lyrics')}
-                onClick={() => act(() => { void retranscribe(song); })}
+                icon={transcribing ? <Loader2 size={14} className="animate-spin" /> : <Mic2 size={14} />}
+                label={transcribing
+                  ? t('songActions.retranscribing', 'Transcribing lyrics...')
+                  : t('songActions.retranscribe', 'Retranscribe Lyrics')}
+                onClick={() => act(() => { void startTranscribe(); })}
+                disabled={transcribing}
+                title={transcribing
+                  ? 'Whisper is running on this track. The toast reports when it finishes.'
+                  : 'Creates the word-level timings the lyric editor needs. Enable Whisper Lyrics before a render to get them automatically, or run this on a track that already exists. Once the timings are written, Edit appears in the Lyrics strip so they can be placed by hand.'}
                 tone="text-sky-400 hover:bg-sky-500/10"
               />
+              {hasSyncedLyrics && (
+                <Item
+                  icon={<FileText size={14} />}
+                  label={t('songActions.downloadLrc', 'Download .LRC')}
+                  onClick={() => act(() => { void downloadLyricsLrc(song); })}
+                  title={t('songActions.downloadLrcHint',
+                    'Synced lyrics with timestamps — for external players, DAWs and datasets')}
+                  tone="text-emerald-400 hover:bg-emerald-500/10"
+                />
+              )}
               <Item
                 icon={<Image size={14} />}
                 label={song.coverUrl

@@ -563,7 +563,66 @@ export function revertSongPostProcessing(songId: string): Promise<{ removed: boo
  *  can take minutes. */
 export function retranscribeLyrics(
   songId: string,
-  options?: { model?: string; language?: string; beamSize?: number }
-): Promise<{ success: boolean; lineCount: number; wordCount: number }> {
-  return apiClient.post(`/songs/${songId}/retranscribe`, options || {}, { timeout: SLOW_ROUTE_TIMEOUT_MS });
+  options?: { model?: string; language?: string; beamSize?: number; signal?: AbortSignal; force?: boolean }
+): Promise<{ success: boolean; lineCount: number; wordCount: number; model?: string }> {
+  const { signal, ...body } = options || {};
+  // Silent: the retranscribe store owns the single toast for this route, so the
+  // global interceptor must not add a second one with the same sentence.
+  return apiClient.post(`/songs/${songId}/retranscribe`, body, {
+    timeout: SLOW_ROUTE_TIMEOUT_MS,
+    silent: true,
+    ...(signal ? { signal } : {}),
+  });
+}
+
+/**
+ * Move a track's lyric timing by hand, in milliseconds (positive is later).
+ * Both sidecars move together on the server, so exports follow.
+ */
+export function nudgeLyrics(audioUrl: string, deltaMs: number): Promise<{
+  success: boolean;
+  source: 'lyrics.json' | 'lrc';
+  lines: number;
+  appliedSec: number;
+}> {
+  return post('/songs/lyrics/offset', { audioUrl, deltaMs });
+}
+
+/**
+ * Split the lyric line under the playhead in two at that moment. Word times are
+ * left alone; the new line boundary is what makes the second half light up when
+ * it is actually sung. The server rebuilds the `.lrc` to match.
+ */
+export function splitLyrics(audioUrl: string, atSec: number): Promise<{
+  success: boolean;
+  source: 'lyrics.json' | 'lrc';
+  atSec: number;
+  left: string;
+  right: string;
+  lines: number;
+}> {
+  return post('/songs/lyrics/split', { audioUrl, atSec });
+}
+
+/**
+ * Replace a track's word timings with hand-placed ones from the lyric editor.
+ * The server sorts them, recomputes each line's start/end from its words, and
+ * rebuilds the `.lrc`.
+ */
+export function saveLyricTimings(audioUrl: string, lines: unknown[], expectedRevision?: number): Promise<{
+  success: boolean;
+  lines: number;
+  words: number;
+  revision: number;
+}> {
+  return post('/songs/lyrics/timings', { audioUrl, lines, expectedRevision });
+}
+
+/** Which Whisper model a retranscription would use, plus the installed ones. */
+export function whisperModels(): Promise<{
+  model: string | null;
+  label: string | null;
+  models: { file: string; label: string }[];
+}> {
+  return get('/songs/retranscribe/model');
 }

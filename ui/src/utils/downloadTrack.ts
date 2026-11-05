@@ -16,6 +16,7 @@ interface DownloadSettings {
   downloadOpusBitrate: number;
   downloadVersion: DownloadVersion;
   downloadIncludeLatent: boolean;
+  downloadEnhancedLrc: boolean;
 }
 
 const DEFAULTS: DownloadSettings = {
@@ -24,6 +25,7 @@ const DEFAULTS: DownloadSettings = {
   downloadOpusBitrate: 192,
   downloadVersion: 'mastered',
   downloadIncludeLatent: false,
+  downloadEnhancedLrc: false,
 };
 
 /** Read current download settings from localStorage (same key as AppSettings). */
@@ -122,6 +124,8 @@ function buildDownloadParams(
     ...(noAdapterUrl ? { srcUrl: noAdapterUrl } : {}),
     ...(finalArtist ? { artist: finalArtist } : {}),
     ...(finalPrepend ? { prepend: finalPrepend } : {}),
+    // Only reaches the sidecar written beside a folder-mode download.
+    ...(settings.downloadEnhancedLrc ? { enhanced: '1' } : {}),
   });
 }
 
@@ -173,6 +177,53 @@ export async function downloadTrack(
     const latentParams = new URLSearchParams({ version: 'latent' });
     await triggerDownload(`/api/download/${song.id}?${latentParams}`);
   }
+}
+
+/**
+ * Download a track's synced lyrics as an `.lrc` sidecar — the file external
+ * players, DAWs and datasets read.
+ *
+ * Goes through the server so a DOWNLOAD_DIR folder is honoured, and so a track
+ * whose only timing data is `.lyrics.json` still exports: the server rebuilds
+ * the LRC when no `.lrc` was ever written.
+ */
+export async function downloadLyricsLrc(
+  song: Song,
+  options?: { artistName?: string; prepend?: string },
+): Promise<void> {
+  const artist = artistFor(song, options);
+  const prepend = options?.prepend || readFilenamePrepend();
+  const settings = readSettings();
+  // Name the .lrc after the same render the Download action would fetch: the
+  // unmastered file carries a " - Unmastered" suffix and a player pairs a
+  // sidecar by exact filename, so the two names have to agree.
+  const version: TrackVersion = settings.downloadVersion === 'original' ? 'original' : 'mastered';
+  const params = new URLSearchParams({
+    version,
+    ...(settings.downloadEnhancedLrc ? { enhanced: '1' } : {}),
+    ...(song.audioUrl ? { audioUrl: song.audioUrl } : {}),
+    ...(artist ? { artist } : {}),
+    ...(prepend ? { prepend } : {}),
+  });
+  await triggerDownload(`/api/download/${song.id}/lrc?${params}`);
+}
+
+/**
+ * The same `.lrc` export for a surface that only knows the audio URL, such as
+ * the lyric editor. The server resolves the song row from `audioUrl`, so the
+ * filename, title and saved artist still come out right.
+ */
+export async function downloadLyricsLrcForAudio(audioUrl: string, songId?: string): Promise<void> {
+  const settings = readSettings();
+  const version: TrackVersion = settings.downloadVersion === 'original' ? 'original' : 'mastered';
+  const prepend = readFilenamePrepend();
+  const params = new URLSearchParams({
+    version,
+    ...(settings.downloadEnhancedLrc ? { enhanced: '1' } : {}),
+    ...(audioUrl ? { audioUrl } : {}),
+    ...(prepend ? { prepend } : {}),
+  });
+  await triggerDownload(`/api/download/${songId || '_'}/lrc?${params}`);
 }
 
 /**

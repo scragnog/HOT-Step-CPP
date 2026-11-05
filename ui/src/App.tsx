@@ -38,6 +38,7 @@ import { Player } from './components/player/Player';
 import { Waveform } from './components/player/Waveform';
 import { getElement as getPlayerElement, subscribeFrame } from './audio/engine';
 import { SectionMarkers } from './components/player/SectionMarkers';
+import { LyricTimelineMarks } from './components/player/LyricTimelineMarks';
 import { LyricsBar } from './components/player/LyricsBar';
 import { TrimControls } from './components/player/TrimControls';
 import { SpectrumAnalyzer } from './components/player/SpectrumAnalyzer';
@@ -1376,6 +1377,15 @@ const AppContent: React.FC = () => {
                     onClickTime={trimMode ? pbHandleTrimClick : undefined}
                   />
                 )}
+                {/* Where each syllable starts, over the bars. Clicks pass
+                    through, so the waveform still owns seeking. */}
+                {!isStreamTrack && !trimMode && (
+                  <LyricTimelineMarks
+                    audioUrl={currentTrack?.audioUrl ?? undefined}
+                    duration={duration}
+                    currentTime={currentTime}
+                  />
+                )}
               </div>
               </div>
               {/* /inner overflow wrapper */}
@@ -1384,6 +1394,8 @@ const AppContent: React.FC = () => {
               audioUrl={currentTrack?.audioUrl ?? undefined}
               currentTime={currentTime}
               isPlaying={isPlaying}
+              duration={duration}
+              title={currentSong?.title}
             />
             {/* Global A/B comparison mini-bar — visible from any view when both tracks are pinned */}
             <ABMiniBar />

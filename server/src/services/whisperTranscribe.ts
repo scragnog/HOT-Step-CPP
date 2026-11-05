@@ -26,6 +26,91 @@ let resolvedWhisperExe: string | null = null;
 const WHISPER_RELEASE_URL = 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.8.4/whisper-cublas-12.4.0-bin-x64.zip';
 const WHISPER_FALLBACK_URL = 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.8.4/whisper-bin-x64.zip';
 
+/** Names the CLI has shipped under: `whisper-cli` now, `main` in older builds. */
+const WHISPER_BIN_NAMES = ['whisper-cli', 'whisper-cpp', 'main'];
+
+/** Install directories a GUI-launched server often leaves out of PATH. */
+const COMMON_BIN_DIRS = ['/usr/local/bin', '/usr/bin', '/opt/homebrew/bin', '/opt/local/bin'];
+
+/** The result of a CLI lookup, with a reason a user can act on. */
+export type WhisperCliCheck =
+  | { ok: true; exe: string }
+  | { ok: false; reason: string };
+
+type CandidateState = 'ok' | 'missing' | 'not-a-file' | 'not-executable';
+
+/** Why a candidate cannot be run. A 0644 copy and a missing file look identical otherwise. */
+/** `statSync` that answers null instead of throwing, so the caller can branch. */
+function statOrNull(file: string): fs.Stats | null {
+  try { return fs.statSync(file); } catch { return null; }
+}
+
+function candidateState(file: string): CandidateState {
+  const stat = statOrNull(file);
+  if (!stat) return 'missing';
+  if (!stat.isFile()) return 'not-a-file';
+  if (process.platform !== 'win32') {
+    try { fs.accessSync(file, fs.constants.X_OK); } catch { return 'not-executable'; }
+  }
+  return 'ok';
+}
+
+function isExecutableFile(file: string): boolean {
+  return candidateState(file) === 'ok';
+}
+
+function describeState(state: CandidateState): string {
+  if (state === 'not-executable') return 'exists but is not executable (chmod +x it)';
+  if (state === 'not-a-file') return 'exists but is not a file';
+  return 'missing';
+}
+
+interface WhisperLookup {
+  exe: string | null;
+  /** Candidates that exist but cannot be run, with the reason. */
+  problems: string[];
+}
+
+/** Look a binary up on PATH, without shelling out to `which`. */
+function findOnPath(name: string, problems: string[]): string | null {
+  const suffixes = process.platform === 'win32' ? ['.exe', ''] : [''];
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    if (!dir) continue;
+    for (const suffix of suffixes) {
+      const candidate = path.join(dir, name + suffix);
+      const state = candidateState(candidate);
+      if (state === 'ok') return candidate;
+      if (state !== 'missing') problems.push(`${candidate}: ${describeState(state)}`);
+    }
+  }
+  return null;
+}
+
+/** The first usable whisper binary, and every near-miss that could not be run. */
+function locateWhisperCli(): WhisperLookup {
+  const problems: string[] = [];
+
+  const configured = candidateState(config.whisper.exe);
+  if (configured === 'ok') return { exe: config.whisper.exe, problems };
+  if (configured !== 'missing') problems.push(`${config.whisper.exe}: ${describeState(configured)}`);
+
+  for (const name of WHISPER_BIN_NAMES) {
+    const found = findOnPath(name, problems);
+    if (found) return { exe: found, problems };
+  }
+  if (process.platform !== 'win32') {
+    for (const dir of COMMON_BIN_DIRS) {
+      for (const name of WHISPER_BIN_NAMES) {
+        const candidate = path.join(dir, name);
+        const state = candidateState(candidate);
+        if (state === 'ok') return { exe: candidate, problems };
+        if (state !== 'missing') problems.push(`${candidate}: ${describeState(state)}`);
+      }
+    }
+  }
+  return { exe: null, problems };
+}
+
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -54,6 +139,8 @@ export interface WhisperOptions {
   language?: string;
   /** Beam size for decoding. Default: 5 */
   beamSize?: number;
+  /** Aborts the CLI. The process is killed and no output is kept. */
+  signal?: AbortSignal;
 }
 
 // ── Model priority for fallback selection ───────────────────────────
@@ -92,11 +179,50 @@ export function stripSectionMarkers(lyrics: string): string {
  *
  * @returns Absolute path to the model file, or null if none found.
  */
-export function findWhisperModel(preferredModel?: string): string | null {
+/** Filenames the model pickers know; anything else shows its own name. */
+const MODEL_LABELS: Record<string, string> = {
+  'ggml-large-v3-turbo.bin': 'Large v3 Turbo',
+  'ggml-large-v3.bin': 'Large v3',
+  'ggml-medium.bin': 'Medium',
+  'ggml-base.bin': 'Base',
+};
+
+export function whisperModelLabel(file: string): string {
+  return MODEL_LABELS[file] || file;
+}
+
+/** Position in the priority list; unknown files sort last. */
+function modelRank(file: string): number {
+  const index = MODEL_PRIORITY.indexOf(file);
+  return index === -1 ? MODEL_PRIORITY.length : index;
+}
+
+/** The Whisper models actually installed, most-preferred first. */
+export function listWhisperModels(): { file: string; label: string }[] {
+  try {
+    return fs.readdirSync(config.whisper.modelsDir)
+      .filter(f => f.toLowerCase().endsWith('.bin'))
+      .sort((a, b) => modelRank(a) - modelRank(b) || a.localeCompare(b))
+      .map(file => ({ file, label: whisperModelLabel(file) }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Find the best available whisper GGML model file.
+ *
+ * If `preferredModel` is given and exists in the models directory, use it.
+ * Otherwise fall back through MODEL_PRIORITY in order, then to any `.bin`.
+ * `quiet` suppresses the choice log, for callers that only report the pick.
+ */
+export function findWhisperModel(preferredModel?: string, opts: { quiet?: boolean } = {}): string | null {
   const modelsDir = config.whisper.modelsDir;
+  const say = opts.quiet ? () => {} : console.log;
+  const warn = opts.quiet ? () => {} : console.warn;
 
   if (!fs.existsSync(modelsDir)) {
-    console.warn(`[Whisper] Models directory does not exist: ${modelsDir}`);
+    warn(`[Whisper] Models directory does not exist: ${modelsDir}`);
     return null;
   }
 
@@ -106,31 +232,31 @@ export function findWhisperModel(preferredModel?: string): string | null {
     if (fs.existsSync(preferredPath)) {
       return preferredPath;
     }
-    console.warn(`[Whisper] Preferred model not found: ${preferredModel}`);
+    warn(`[Whisper] Preferred model not found: ${preferredModel}`);
   }
 
   // Fall through priority list
   for (const modelName of MODEL_PRIORITY) {
     const modelPath = path.join(modelsDir, modelName);
     if (fs.existsSync(modelPath)) {
-      console.log(`[Whisper] Using model: ${modelName}`);
+      say(`[Whisper] Using model: ${modelName}`);
       return modelPath;
     }
   }
 
   // Last resort: any .bin file in the directory
   try {
-    const files = fs.readdirSync(modelsDir).filter(f => f.endsWith('.bin'));
+    const files = fs.readdirSync(modelsDir).filter(f => f.endsWith('.bin')).sort((a, b) => modelRank(a) - modelRank(b) || a.localeCompare(b));
     if (files.length > 0) {
       const fallback = path.join(modelsDir, files[0]);
-      console.log(`[Whisper] Fallback model: ${files[0]}`);
+      say(`[Whisper] Fallback model: ${files[0]}`);
       return fallback;
     }
   } catch {
     // Can't read directory
   }
 
-  console.warn('[Whisper] No model files found in models directory');
+  warn('[Whisper] No model files found in models directory');
   return null;
 }
 
@@ -159,48 +285,51 @@ function httpsDownload(url: string, dest: string): Promise<void> {
 }
 
 /**
- * Ensure whisper-cli is available. Windows downloads a binary if needed;
- * other platforms use WHISPER_EXE or an existing PATH installation.
- * Returns true if whisper-cli is ready, false if download failed.
+ * Ensure whisper-cli is available.
+ *
+ * Windows fetches the official release once. macOS and Linux have no official
+ * binary to download, so they use WHISPER_EXE, the data folder's `tools/whisper`,
+ * PATH, or a common install directory. Failures carry a reason: on a platform
+ * that never downloads anything, "auto-download failed" is a dead end.
  */
-export async function ensureWhisperCli(): Promise<boolean> {
-  const whisperExe = config.whisper.exe;
-  if (fs.existsSync(whisperExe)) {
-    resolvedWhisperExe = whisperExe;
-    return true;
+export async function ensureWhisperCli(): Promise<WhisperCliCheck> {
+  const found = locateWhisperCli();
+  if (found.exe) {
+    if (found.exe !== config.whisper.exe) console.log(`[Whisper] Using whisper-cli at ${found.exe}`);
+    resolvedWhisperExe = found.exe;
+    return { ok: true, exe: found.exe };
   }
 
   if (process.platform !== 'win32') {
-    for (const candidate of [whisperExe, 'whisper-cli']) {
-      try {
-        const { stdout } = await execFileAsync('which', [candidate]);
-        const found = stdout.trim().split(/\r?\n/)[0];
-        if (found && fs.existsSync(found)) {
-          resolvedWhisperExe = found;
-          return true;
-        }
-      } catch { /* try the next candidate */ }
-    }
-    console.error('[Whisper] whisper-cli not found. Set WHISPER_EXE to its executable path or install it with Homebrew: brew install whisper.cpp');
-    return false;
+    const unusable = found.problems.length ? ` Found but unusable: ${found.problems.join('; ')}.` : '';
+    const reason =
+      `whisper-cli not found: looked for ${WHISPER_BIN_NAMES.join(', ')} at ${config.whisper.exe}, `
+      + `on PATH, and in ${COMMON_BIN_DIRS.join(', ')}.${unusable} `
+      + 'It is not bundled with the app and is not auto-downloaded on this platform. '
+      + `Build whisper.cpp and put the binary at ${config.whisper.exe}, or set WHISPER_EXE to its path.`;
+    console.error(`[Whisper] ${reason}`);
+    return { ok: false, reason };
   }
 
+  const whisperExe = config.whisper.exe;
   const whisperDir = path.dirname(whisperExe);
   fs.mkdirSync(whisperDir, { recursive: true });
 
   const zipPath = path.join(whisperDir, 'whisper-download.zip');
+  const failures: string[] = [];
 
   // Try CUDA build first, fall back to CPU
   for (const url of [WHISPER_RELEASE_URL, WHISPER_FALLBACK_URL]) {
     try {
       console.log(`[Whisper] Downloading whisper-cli from: ${url}`);
-      console.log(`[Whisper] This is a one-time download (~30 MB)...`);
+      console.log('[Whisper] One-time download: about 460 MB for the CUDA build, 4 MB for the CPU build...');
 
       await httpsDownload(url, zipPath);
 
       if (!fs.existsSync(zipPath) || fs.statSync(zipPath).size < 1_000_000) {
         console.warn('[Whisper] Downloaded file too small, trying next URL...');
         try { fs.unlinkSync(zipPath); } catch {}
+        failures.push(`${path.basename(url)}: download too small`);
         continue;
       }
 
@@ -218,14 +347,14 @@ export async function ensureWhisperCli(): Promise<boolean> {
       if (fs.existsSync(whisperExe)) {
         resolvedWhisperExe = whisperExe;
         console.log(`[Whisper] ✓ whisper-cli ready at: ${whisperExe}`);
-        return true;
+        return { ok: true, exe: whisperExe };
       }
 
       // Search for it in subdirectories (some releases nest in a folder)
-      const found = findFileRecursive(whisperDir, 'whisper-cli.exe');
-      if (found && found !== whisperExe) {
+      const nested = findFileRecursive(whisperDir, 'whisper-cli.exe');
+      if (nested && nested !== whisperExe) {
         // Move all files from nested dir up to whisperDir
-        const nestedDir = path.dirname(found);
+        const nestedDir = path.dirname(nested);
         if (nestedDir !== whisperDir) {
           for (const f of fs.readdirSync(nestedDir)) {
             const src = path.join(nestedDir, f);
@@ -238,19 +367,26 @@ export async function ensureWhisperCli(): Promise<boolean> {
         if (fs.existsSync(whisperExe)) {
           resolvedWhisperExe = whisperExe;
           console.log(`[Whisper] ✓ whisper-cli ready at: ${whisperExe}`);
-          return true;
+          return { ok: true, exe: whisperExe };
         }
       }
 
       console.warn('[Whisper] Extracted but whisper-cli.exe not found in expected location');
+      failures.push(`${path.basename(url)}: archive contained no whisper-cli.exe`);
     } catch (err: any) {
       console.error(`[Whisper] Download failed: ${err.message}`);
+      failures.push(`${path.basename(url)}: ${err.message}`);
       try { fs.unlinkSync(zipPath); } catch {}
     }
   }
 
-  console.error('[Whisper] Could not download whisper-cli.exe — feature unavailable');
-  return false;
+  const reason =
+    `could not download whisper-cli (${failures.join('; ') || 'no download attempted'}). `
+    + 'Download whisper-cublas-12.4.0-bin-x64.zip or whisper-bin-x64.zip from '
+    + `https://github.com/ggml-org/whisper.cpp/releases, extract it into ${whisperDir}, `
+    + 'or set WHISPER_EXE to an existing whisper-cli.exe.';
+  console.error(`[Whisper] ${reason}`);
+  return { ok: false, reason };
 }
 
 /** Recursively find a file by name in a directory. */
@@ -273,7 +409,7 @@ function findFileRecursive(dir: string, filename: string): string | null {
  */
 export function isWhisperAvailable(): boolean {
   try {
-    return fs.existsSync(config.whisper.exe) || !!resolvedWhisperExe && fs.existsSync(resolvedWhisperExe);
+    return (!!resolvedWhisperExe && isExecutableFile(resolvedWhisperExe)) || !!locateWhisperCli().exe;
   } catch {
     return false;
   }
@@ -297,13 +433,13 @@ export async function transcribeWithWhisper(
   sourceLyrics: string,
   options: WhisperOptions = {},
 ): Promise<WhisperResult | null> {
-  // Auto-download if needed
+  // Auto-download if needed (Windows only); ensureWhisperCli logs why it failed.
   const ready = await ensureWhisperCli();
-  if (!ready) {
+  if (!ready.ok) {
     return null;
   }
 
-  const whisperExe = resolvedWhisperExe ?? config.whisper.exe;
+  const whisperExe = ready.exe;
 
   // Find model
   const modelPath = findWhisperModel(options.model);
@@ -331,7 +467,11 @@ export async function transcribeWithWhisper(
   const args: string[] = [
     '-m', modelPath,
     '-f', audioPath,
-    '-oj',                    // output JSON (writes <input>.json sidecar)
+    // Full JSON (`-ojf`), not the plain one. `-oj` carries no token array at
+    // all, so every word time had to be interpolated evenly across its segment,
+    // which is what puts lines early or late on sung audio. Tokens carry the
+    // per-word offsets, and normaliseWhisperJson already merges them into words.
+    '-ojf',
     '--split-on-word',        // split at word boundaries, not BPE tokens
     '--max-len', '1',         // 1 word per segment = real per-word timestamps
     '--beam-size', String(beamSize),
@@ -359,8 +499,15 @@ export async function transcribeWithWhisper(
     await execFileAsync(whisperExe, args, {
       timeout: 120_000,       // 2 minute timeout
       maxBuffer: 10 * 1024 * 1024,  // 10 MB stdout/stderr buffer
+      ...(options.signal ? { signal: options.signal } : {}),
     });
   } catch (err: any) {
+    // A cancelled run is not a failure: the caller aborted on purpose.
+    if (options.signal?.aborted) {
+      console.log(`[Whisper] Cancelled: ${path.basename(audioPath)}`);
+      try { fs.unlinkSync(jsonOutputPath); } catch {}
+      return null;
+    }
     const stderr = err.stderr?.toString()?.slice(-500) || '';
     const code = err.code || 'unknown';
     console.error(`[Whisper] Process failed (code: ${code}): ${stderr || err.message}`);
@@ -473,8 +620,11 @@ export function normaliseWhisperJson(raw: any): WhisperResult {
         // Skip empty tokens
         if (rawText.trim().length === 0 && currentWord.length === 0) continue;
 
-        // DTW timestamps can be in t_dtw (ms) or offsets.from/to
-        const tokStartMs = tok?.t_dtw ?? tok?.offsets?.from ?? 0;
+        // Token timing: t_dtw (ms) when DTW ran, else the decoder offsets.
+        // t_dtw is -1, not null, when it did not run, so `??` would keep the
+        // -1 and produce negative word times.
+        const dtw = tok?.t_dtw;
+        const tokStartMs = typeof dtw === 'number' && dtw >= 0 ? dtw : (tok?.offsets?.from ?? 0);
         const tokEndMs = tok?.offsets?.to ?? tokStartMs;
 
         // Leading space = start of new word

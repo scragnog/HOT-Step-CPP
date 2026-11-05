@@ -18,6 +18,8 @@
 // the waveform grows into place instead of rescaling under the playhead every
 // time a window arrives.
 
+import { ParamLabel } from '../shared/ParamLabel';
+
 import React, { useEffect, useRef } from 'react';
 import { useMm3StreamAudio, mm3StreamPeaks, mm3StreamSeek } from '../../stores/mm3StreamStore';
 
@@ -110,6 +112,11 @@ export const StreamWaveform: React.FC<StreamWaveformProps> = ({ height = 56 }) =
   }, [s.peaksVersion, s.position, s.received, s.expected, height]);
 
   return (
+    <ParamLabel
+      label="Seek in the stream"
+      info="The stream only contains the audio rendered so far, so a click jumps to that point in what exists. Clicking past the newest audio takes you to the newest audio, because seeking into silence is not useful."
+      rootClassName="w-full flex"
+    >
     <div
       ref={wrapRef}
       className="relative w-full cursor-pointer select-none"
@@ -125,9 +132,10 @@ export const StreamWaveform: React.FC<StreamWaveformProps> = ({ height = 56 }) =
         // clicking into the unrendered region actually wants.
         mm3StreamSeek(frac * total);
       }}
-      title="Click to seek within the audio rendered so far"
+      aria-label="Seek in the stream"
     >
       <canvas ref={canvasRef} className="block w-full" />
     </div>
+    </ParamLabel>
   );
 };

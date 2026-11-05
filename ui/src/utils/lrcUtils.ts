@@ -17,27 +17,76 @@ export interface SectionMarker {
   label: string;
 }
 
+/** One timestamped entry from an LRC file. */
+export interface RawLrcEntry {
+  time: number;
+  text: string;
+  isSection: boolean;
+}
+
 // ── LRC Parsing ──────────────────────────────────────────────────────────────
+
+/**
+ * Split one raw LRC line into every timestamp it carries and the text after
+ * them, or null when the line does not start with a timestamp.
+ *
+ * A repeated line may carry several stamps (`[00:12.00][01:20.00]Chorus`), and
+ * reading only the first both loses the repeat and leaves the other stamps in
+ * the displayed text. Enhanced LRC word stamps (`<mm:ss.xx>`) are timing too,
+ * so they are dropped from the text here.
+ */
+export function splitLrcLine(line: string): { times: number[]; text: string } | null {
+  const stamp = /\[(\d+):(\d+)(?:\.(\d+))?\]/g;
+  const times: number[] = [];
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = stamp.exec(line)) !== null) {
+    if (match.index !== cursor) break; // stamps must be one contiguous prefix
+    const cs = match[3] ? parseInt(match[3].padEnd(2, '0').slice(0, 2), 10) : 0;
+    times.push(parseInt(match[1], 10) * 60 + parseInt(match[2], 10) + cs / 100);
+    cursor = match.index + match[0].length;
+  }
+  if (times.length === 0) return null;
+  const text = line.slice(cursor).replace(/<(\d+):(\d+)(?:\.(\d+))?>/g, '').trim();
+  return { times, text };
+}
+
+/** Every timestamped entry in an LRC file, one per timestamp, sorted by time. */
+export function parseLrcEntries(raw: string): RawLrcEntry[] {
+  const entries: RawLrcEntry[] = [];
+  for (const line of raw.replace(/\r/g, '').split('\n')) {
+    const parsed = splitLrcLine(line);
+    if (!parsed || !parsed.text) continue;
+    const isSection = /^\[.*\]$/.test(parsed.text);
+    for (const time of parsed.times) entries.push({ time, text: parsed.text, isSection });
+  }
+  return entries.sort((a, b) => a.time - b.time);
+}
 
 /**
  * Parse raw LRC text into timestamped lyric lines.
  * Skips section markers (lines like `[Chorus]`) — use parseSectionMarkers for those.
  */
 export function parseLrc(raw: string): LrcLine[] {
-  const lines: LrcLine[] = [];
-  for (const line of raw.replace(/\r/g, '').split('\n')) {
-    const match = line.match(/^\[(\d+):(\d+)(?:\.(\d+))?\]\s*(.*)$/);
-    if (match) {
-      const mins = parseInt(match[1], 10);
-      const secs = parseInt(match[2], 10);
-      const cs = match[3] ? parseInt(match[3].padEnd(2, '0').slice(0, 2), 10) : 0;
-      const text = match[4].trim();
-      if (text && !/^\[.*\]$/.test(text)) {
-        lines.push({ time: mins * 60 + secs + cs / 100, text });
-      }
-    }
+  return parseLrcEntries(raw)
+    .filter(entry => !entry.isSection)
+    .map(entry => ({ time: entry.time, text: entry.text }));
+}
+
+/** `[Verse 1 - whispered]` -> `Verse 1`: brackets off, style hint dropped. */
+function cleanSectionLabel(text: string): string {
+  const inner = text.slice(1, -1);
+  const dashIdx = inner.indexOf(' - ');
+  const base = dashIdx === -1 ? inner : inner.slice(0, dashIdx);
+  return base.charAt(0).toUpperCase() + base.slice(1);
+}
+
+/** Time of the first lyric line in `[from, to)`, or null when there is none. */
+function firstLyricTimeBetween(entries: RawLrcEntry[], from: number, to: number): number | null {
+  for (let i = from; i < to; i++) {
+    if (!entries[i].isSection && entries[i].text.length > 0) return entries[i].time;
   }
-  return lines.sort((a, b) => a.time - b.time);
+  return null;
 }
 
 /**
@@ -46,21 +95,8 @@ export function parseLrc(raw: string): LrcLine[] {
  * The real section start is adjusted to the first lyric line after the marker.
  */
 export function parseSectionMarkers(raw: string): SectionMarker[] {
-  // Step 1: Parse ALL lines — both section markers and lyric lines
-  const allEntries: { time: number; text: string; isSection: boolean }[] = [];
-  for (const line of raw.replace(/\r/g, '').split('\n')) {
-    const match = line.match(/^\[(\d+):(\d+)(?:\.(\d+))?\]\s*(.*)$/);
-    if (match) {
-      const mins = parseInt(match[1], 10);
-      const secs = parseInt(match[2], 10);
-      const cs = match[3] ? parseInt(match[3].padEnd(2, '0').slice(0, 2), 10) : 0;
-      const text = match[4].trim();
-      const time = mins * 60 + secs + cs / 100;
-      const isSection = /^\[.*\]$/.test(text);
-      allEntries.push({ time, text, isSection });
-    }
-  }
-  allEntries.sort((a, b) => a.time - b.time);
+  // Step 1: every timestamped entry — section markers and lyric lines alike
+  const allEntries = parseLrcEntries(raw);
 
   // Step 2: Extract section markers with adjusted times
   const sectionIndices: number[] = [];
@@ -72,30 +108,18 @@ export function parseSectionMarkers(raw: string): SectionMarker[] {
   for (let si = 0; si < sectionIndices.length; si++) {
     const idx = sectionIndices[si];
     const entry = allEntries[idx];
-    // Clean the label: strip brackets, remove style hints after " - "
-    let label = entry.text.slice(1, -1);
-    const dashIdx = label.indexOf(' - ');
-    if (dashIdx !== -1) label = label.slice(0, dashIdx);
-    label = label.charAt(0).toUpperCase() + label.slice(1);
-
-    // Find the first actual lyric line between this section and the next section
     const nextSectionIdx = si + 1 < sectionIndices.length
       ? sectionIndices[si + 1]
       : allEntries.length;
-    let firstLyricTime: number | null = null;
-    for (let j = idx + 1; j < nextSectionIdx; j++) {
-      if (!allEntries[j].isSection && allEntries[j].text.length > 0) {
-        firstLyricTime = allEntries[j].time;
-        break;
-      }
-    }
+    const firstLyricTime = firstLyricTimeBetween(allEntries, idx + 1, nextSectionIdx);
 
-    // Use first lyric timestamp if it's significantly later (>1s gap = instrumental lead-in)
-    const realTime = (firstLyricTime !== null && firstLyricTime - entry.time > 1)
+    // A marker well before its first line is an instrumental lead-in: start the
+    // section where the singing does (>1 s gap).
+    const realTime = firstLyricTime !== null && firstLyricTime - entry.time > 1
       ? firstLyricTime
       : entry.time;
 
-    markers.push({ time: realTime, label });
+    markers.push({ time: realTime, label: cleanSectionLabel(entry.text) });
   }
 
   // Step 3: Insert synthetic Intro if the first marker is well after 0:00
@@ -125,26 +149,12 @@ export interface RegionLrcLine extends LrcLine {
  * Used by the RegionLyricsEditor to show context + editable lines.
  */
 export function parseAllLrcLines(raw: string): RegionLrcLine[] {
-  const lines: RegionLrcLine[] = [];
-  for (const line of raw.replace(/\r/g, '').split('\n')) {
-    const match = line.match(/^\[(\d+):(\d+)(?:\.(\d+))?\]\s*(.*)$/);
-    if (match) {
-      const mins = parseInt(match[1], 10);
-      const secs = parseInt(match[2], 10);
-      const cs = match[3] ? parseInt(match[3].padEnd(2, '0').slice(0, 2), 10) : 0;
-      const text = match[4].trim();
-      if (!text) continue;
-      const time = mins * 60 + secs + cs / 100;
-      const isSection = /^\[.*\]$/.test(text);
-      lines.push({
-        time,
-        text: isSection ? text : text,
-        sectionLabel: isSection ? text.slice(1, -1) : null,
-        inRegion: false, // computed later
-      });
-    }
-  }
-  return lines.sort((a, b) => a.time - b.time);
+  return parseLrcEntries(raw).map(entry => ({
+    time: entry.time,
+    text: entry.text,
+    sectionLabel: entry.isSection ? entry.text.slice(1, -1) : null,
+    inRegion: false, // computed later
+  }));
 }
 
 /**
@@ -222,6 +232,9 @@ export async function fetchLrc(audioUrl: string, opts: { signal?: AbortSignal } 
   const res = await fetch(sidecarUrl(audioUrl, '.lrc'), { signal: opts.signal });
   if (res.status === HttpStatus.notFound) return null;
   if (!res.ok) throw new ApiError(res.status, `Lyrics fetch failed (${res.status})`, null);
+  // A built UI answers a missing /audio file with the SPA's index.html and a
+  // 200, so check the type before trusting the body as LRC.
+  if (res.headers.get('content-type')?.includes('text/html')) return null;
   const text = await res.text();
   return text.includes('[') ? text : null;
 }

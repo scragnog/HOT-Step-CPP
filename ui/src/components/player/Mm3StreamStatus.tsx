@@ -14,6 +14,7 @@
 import React from 'react';
 import { Headphones, AlertTriangle, Play } from 'lucide-react';
 import { useMm3StreamAudio, mm3StreamResume } from '../../stores/mm3StreamStore';
+import { HintButton } from '../shared/HintButton';
 
 interface Mm3StreamStatusProps {
   /** The job this card is for — the line only speaks for the job the store is
@@ -60,14 +61,16 @@ export const Mm3StreamStatus: React.FC<Mm3StreamStatusProps> = ({ jobId, interle
         )}
       </div>
       {s.needsGesture && (
-        <button
+        <HintButton
+          label="Enable audio"
+          info="The browser does not allow sound before a click on the page, and this tab has not had one yet. Clicking resumes the audio for this stream at its current position. It is a permission prompt, not a play button: the transport stays in the player bar."
           onClick={mm3StreamResume}
           className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0
                      text-white bg-emerald-600 hover:bg-emerald-500 transition-colors"
-          title="Your browser blocked audio until you interact with the page"
+          ariaLabel="Enable audio"
         >
           <Play size={9} /> Enable audio
-        </button>
+        </HintButton>
       )}
     </div>
   );

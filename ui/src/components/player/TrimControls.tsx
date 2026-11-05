@@ -11,6 +11,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { songApi } from '../../services/api';
 import { invalidateEvents } from '../../queries/invalidation';
 import { useAuth } from '../../context/AuthContext';
+import { HintButton } from '../shared/HintButton';
 
 interface TrimControlsProps {
   trimInPoint: number | null;
@@ -138,17 +139,19 @@ export const TrimControls: React.FC<TrimControlsProps> = ({
         <div className="flex items-center gap-1 flex-shrink-0">
           {/* Reset markers */}
           {trimClickCount > 0 && (
-            <button
+            <HintButton
+              label={t('trim.resetMarkers')}
+              info={t('trim.resetMarkersInfo', 'Clears the in and out points so new ones can be clicked on the waveform. Nothing has been written yet, so this costs nothing.')}
               onClick={() => {
                 onCancel();
                 // Re-enter trim mode (cancel + re-enable handled by parent)
               }}
               className="p-1 rounded text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors"
-              title={t('trim.resetMarkers')}
               disabled={isCropping}
+              ariaLabel={t('trim.resetMarkers')}
             >
               <RotateCcw size={13} />
-            </button>
+            </HintButton>
           )}
 
           {/* Crop button */}
@@ -186,14 +189,16 @@ export const TrimControls: React.FC<TrimControlsProps> = ({
           )}
 
           {/* Cancel trim mode */}
-          <button
+          <HintButton
+            label={t('trim.exitTrimMode')}
+            info={t('trim.exitTrimModeInfo', 'Leaves trim mode and clears the markers. Nothing is cropped, so the audio is unchanged.')}
             onClick={onCancel}
             className="p-1 rounded text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors"
-            title={t('trim.exitTrimMode')}
             disabled={isCropping}
+            ariaLabel={t('trim.exitTrimMode')}
           >
             <X size={14} />
-          </button>
+          </HintButton>
         </div>
       </div>
     </div>

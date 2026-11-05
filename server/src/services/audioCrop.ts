@@ -10,6 +10,8 @@
  */
 
 import fs from 'fs';
+import { bumpRevision } from './lyricsRevision.js';
+import { formatLrcTimestamp, shiftWordStamps, splitLrcLine } from './lrcExport.js';
 
 // ── WAV parsing ──────────────────────────────────────────────────────────────
 
@@ -205,31 +207,77 @@ export function cropLrcFile(
   const result: string[] = [];
 
   for (const line of lines) {
-    const match = line.match(/^\[(\d+):(\d+)(?:\.(\d+))?\]\s*(.*)$/);
-    if (!match) {
+    const parsed = splitLrcLine(line);
+    if (!parsed) {
       // Non-timestamped line (metadata like [ti:], [ar:], etc.) — keep as-is
       if (line.trim().length > 0) result.push(line);
       continue;
     }
 
-    const mins = parseInt(match[1], 10);
-    const secs = parseInt(match[2], 10);
-    const cs = match[3] ? parseInt(match[3].padEnd(2, '0').slice(0, 2), 10) : 0;
-    const text = match[4];
-    const time = mins * 60 + secs + cs / 100;
+    // A line may carry several stamps (a returning chorus), and word stamps
+    // inside the text have to move with the line, or an enhanced file keeps
+    // pre-crop word times.
+    const text = shiftWordStamps(parsed.text, -inPointSec);
+    for (const time of parsed.times) {
+      // Filter: keep only lines within the crop range
+      if (time < inPointSec || time > outPointSec) continue;
 
-    // Filter: keep only lines within the crop range
-    if (time < inPointSec || time > outPointSec) continue;
-
-    // Shift timestamp by -inPointSec
-    const newTime = Math.max(0, time - inPointSec);
-    const newMins = Math.floor(newTime / 60);
-    const newSecs = Math.floor(newTime % 60);
-    const newCs = Math.round((newTime - Math.floor(newTime)) * 100);
-
-    const ts = `[${String(newMins).padStart(2, '0')}:${String(newSecs).padStart(2, '0')}.${String(newCs).padStart(2, '0')}]`;
-    result.push(`${ts} ${text}`);
+      // Shift timestamp by -inPointSec. Shared formatter, so rounding at a
+      // centisecond boundary cannot emit `.100` here.
+      result.push(`${formatLrcTimestamp(Math.max(0, time - inPointSec))} ${text}`);
+    }
   }
 
   fs.writeFileSync(lrcPath, result.join('\n') + '\n', 'utf-8');
+}
+
+// ── Word-level lyrics crop ───────────────────────────────────────────────────
+
+/**
+ * Crop a `.lyrics.json` file in place, mirroring `cropLrcFile`.
+ *
+ * The player prefers this sidecar over the `.lrc`, so cropping only the LRC
+ * left the karaoke highlighting — and every export read through the JSON —
+ * pointing at the pre-crop timeline. Lines and words outside the range are
+ * dropped; the rest shift by `-inPointSec`.
+ *
+ * A file that is missing or not shaped like word timings is left alone: a crop
+ * must not fail over a sidecar.
+ */
+export function cropLyricsJsonFile(
+  jsonPath: string,
+  inPointSec: number,
+  outPointSec: number,
+): void {
+  const data = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
+  if (!Array.isArray(data?.lines)) return;
+
+  type Timed = { start?: number; end?: number };
+  const shift = (t: number) => Math.max(0, t - inPointSec);
+  const inRange = (t: unknown): t is number =>
+    typeof t === 'number' && Number.isFinite(t) && t >= inPointSec && t <= outPointSec;
+
+  data.lines = data.lines
+    .filter((line: Timed) => inRange(line?.start))
+    .map((line: Timed & { words?: Timed[] }) => ({
+      ...line,
+      start: shift(line.start as number),
+      ...(typeof line.end === 'number' ? { end: shift(line.end) } : {}),
+      ...(Array.isArray(line.words)
+        ? {
+            words: line.words
+              .filter(w => inRange(w?.start))
+              .map(w => ({
+                ...w,
+                start: shift(w.start as number),
+                ...(typeof w.end === 'number' ? { end: shift(w.end) } : {}),
+              })),
+          }
+        : {}),
+    }));
+
+  // Cropping moves the whole timeline, so any editor open on the old one must
+  // be refused when it next saves.
+  bumpRevision(data);
+  fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2));
 }

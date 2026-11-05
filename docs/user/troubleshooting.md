@@ -151,6 +151,45 @@ is usually in a subfolder. ACE-Step 1.5 files must sit directly in `models/`; th
 not look in subfolders for them, but the Model Manager does. Otherwise the engine has not been
 restarted since the download.
 
+## Whisper lyrics finds no executable
+
+Retranscribe Lyrics answers **Whisper CLI not available** and no timestamps appear.
+
+`whisper-cli` is not bundled with the app on any platform, and only Windows fetches it
+automatically. The error names every path that was searched. The model is a separate file in
+the `whisper/` subfolder of your models folder, so you need both.
+
+On Windows the one-time download can fail behind a proxy or firewall, or an antivirus can
+quarantine the extracted files. Download `whisper-cublas-12.4.0-bin-x64.zip` (CUDA, about
+460 MB) or `whisper-bin-x64.zip` (CPU, about 4 MB) from
+[whisper.cpp releases](https://github.com/ggml-org/whisper.cpp/releases/tag/v1.8.4), then
+extract `whisper-cli.exe` and the DLLs beside it into `tools/whisper/` in the data folder.
+
+On macOS and Linux there is no official binary to download, so build it once:
+
+```
+git clone https://github.com/ggml-org/whisper.cpp
+cd whisper.cpp
+cmake -B build -DGGML_CUDA=1 -DBUILD_SHARED_LIBS=OFF   # drop -DGGML_CUDA=1 for a CPU build
+cmake --build build -j --config Release
+```
+
+`-DBUILD_SHARED_LIBS=OFF` links ggml and whisper into the one binary. Without it the
+build expects `libwhisper.so` and `libggml*.so` at their build paths, and a copied
+`whisper-cli` fails to start.
+
+The binary is `build/bin/whisper-cli`. Either copy it to `tools/whisper/whisper-cli` in the
+data folder, which is the default path the app checks, or set `WHISPER_EXE` to its absolute
+path in the data folder's `settings/.env` and save. A copy is found on the next request; a
+changed `WHISPER_EXE` takes effect when the setting is saved.
+
+The copy has to be executable (`chmod +x`). If `ldd build/bin/whisper-cli` lists
+`libwhisper.so` or `libggml*.so`, the build is dynamically linked: copy those libraries
+beside the binary too, or leave it in `build/bin` and point `WHISPER_EXE` there.
+
+Run Retranscribe Lyrics again. The server logs `[Whisper] Using whisper-cli from ...` and
+`[Whisper] Using model: ...`, then `[Whisper] Done in Ns` when it finishes.
+
 ## Model downloads fail
 
 The Model Manager tries each file three times, then marks it failed. **Resume** continues from

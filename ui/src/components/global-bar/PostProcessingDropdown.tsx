@@ -281,7 +281,7 @@ export const PostProcessingDropdown: React.FC = () => {
       <Accordion
         icon={<Mic2 size={14} />}
         label="Whisper Lyrics"
-        info="Transcribes the actual sung lyrics with Whisper, at word-level timestamps, using the source lyrics as a spelling guide. Needs a Whisper model from the Model Manager."
+        info="Transcribes the actual sung lyrics with Whisper, at word-level timestamps, using the source lyrics as a spelling guide. Those timings are what the lyric editor edits, so with this enabled a render gets an Edit control in its Lyrics strip. Retranscribe Lyrics does the same for tracks that already exist. Needs a Whisper model from the Model Manager."
         accentColor="sky"
         persistKey="hs-ppAccordion-whisper"
         toggle={{ checked: gp.whisperLyricsEnabled, onChange: gp.setWhisperLyricsEnabled }}

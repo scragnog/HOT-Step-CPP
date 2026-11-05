@@ -46,6 +46,10 @@ const MIN_CARD_H = 120;
 interface Props {
   /** The field name, shown as the label and as the hover card's heading. */
   label: string;
+  /** A control to explain, instead of the label-plus-icon trigger. The card
+   *  opens from the control itself, so a row of icon buttons explains itself
+   *  the same way a field does. `label` is still the card's heading. */
+  children?: React.ReactNode;
   /** The explanation. Nothing renders the hover affordance without it. */
   info?: string;
   /** Optional one-liner under the heading — default value, accepted range. */
@@ -94,6 +98,7 @@ function findBoundary(el: HTMLElement | null): HTMLElement | null {
 
 export const ParamLabel: React.FC<Props> = ({
   label,
+  children,
   info,
   meta,
   className = 'text-xs font-semibold text-zinc-600 dark:text-zinc-400',
@@ -212,6 +217,51 @@ export const ParamLabel: React.FC<Props> = ({
 
   const show = () => { cancelHide(); setOpen(true); };
 
+  const card = open && pos && ReactDOM.createPortal(
+    <div
+      role="tooltip"
+      onMouseEnter={cancelHide}
+      onMouseLeave={scheduleHide}
+      className="fixed z-[10000] rounded-xl p-3
+                 bg-white dark:bg-zinc-900
+                 border border-zinc-200 dark:border-white/10
+                 shadow-xl shadow-black/25"
+      style={{
+        left: pos.left,
+        width: CARD_W,
+        ...(pos.top !== undefined ? { top: pos.top } : { bottom: pos.bottom }),
+        ...(pos.maxHeight !== undefined
+          ? { maxHeight: pos.maxHeight, overflowY: 'auto' as const }
+          : {}),
+      }}
+    >
+      <div className="text-xs font-bold text-zinc-800 dark:text-zinc-100">{label}</div>
+      {meta && (
+        <div className="mt-0.5 text-[10px] font-mono text-amber-600 dark:text-amber-500/90">{meta}</div>
+      )}
+      <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-300">
+        {info}
+      </p>
+    </div>,
+    document.body,
+  );
+
+  if (children) {
+    return (
+      <span
+        ref={anchorRef}
+        className={`inline-flex items-center ${rootClassName}`}
+        onMouseEnter={show}
+        onMouseLeave={scheduleHide}
+        onFocus={show}
+        onBlur={scheduleHide}
+      >
+        {children}
+        {card}
+      </span>
+    );
+  }
+
   return (
     <span
       ref={anchorRef}
@@ -242,34 +292,7 @@ export const ParamLabel: React.FC<Props> = ({
       </span>
       {resetIcon}
 
-      {open && pos && ReactDOM.createPortal(
-        <div
-          role="tooltip"
-          onMouseEnter={cancelHide}
-          onMouseLeave={scheduleHide}
-          className="fixed z-[10000] rounded-xl p-3
-                     bg-white dark:bg-zinc-900
-                     border border-zinc-200 dark:border-white/10
-                     shadow-xl shadow-black/25"
-          style={{
-            left: pos.left,
-            width: CARD_W,
-            ...(pos.top !== undefined ? { top: pos.top } : { bottom: pos.bottom }),
-            ...(pos.maxHeight !== undefined
-              ? { maxHeight: pos.maxHeight, overflowY: 'auto' as const }
-              : {}),
-          }}
-        >
-          <div className="text-xs font-bold text-zinc-800 dark:text-zinc-100">{label}</div>
-          {meta && (
-            <div className="mt-0.5 text-[10px] font-mono text-amber-600 dark:text-amber-500/90">{meta}</div>
-          )}
-          <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-300">
-            {info}
-          </p>
-        </div>,
-        document.body,
-      )}
+      {card}
     </span>
   );
 };

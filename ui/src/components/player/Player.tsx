@@ -15,6 +15,8 @@ import { isPitchShiftReady } from '../../audio/pitchShift';
 import type { Song } from '../../types';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { CoverImage } from '../shared/CoverImage';
+import { HintButton } from '../shared/HintButton';
+import { ParamLabel } from '../shared/ParamLabel';
 import { useIsMobile } from '../shared/BottomSheet';
 import { FullScreenPlayer } from './FullScreenPlayer';
 
@@ -79,22 +81,25 @@ const VariantSegment: React.FC<{
   onDownload?: () => void;
 }> = ({ active, label, hint, downloadHint, activeClass, idleClass, onSelect, onDownload }) => (
   <div className={`flex items-center transition-colors ${active ? activeClass : idleClass}`}>
-    <button
-      onClick={onSelect}
+    <HintButton
+      label={label}
+      info={hint}
       className="pl-2 py-1 text-[10px] font-medium"
-      title={hint}
+      onClick={onSelect}
+      ariaLabel={label}
     >
       {label}
-    </button>
+    </HintButton>
     {onDownload ? (
-      <button
+      <HintButton
+        label={label}
+        info={downloadHint}
         onClick={(e) => { e.stopPropagation(); onDownload(); }}
         className="pl-1 pr-2 py-1 opacity-50 hover:opacity-100 transition-opacity"
-        title={downloadHint}
-        aria-label={downloadHint}
+        ariaLabel={downloadHint}
       >
         <Download size={10} />
-      </button>
+      </HintButton>
     ) : (
       <span className="pr-2" />
     )}
@@ -202,56 +207,83 @@ export const Player: React.FC<PlayerProps> = ({
       {/* Center: Transport Controls */}
       <div className="flex-1 flex items-center justify-center gap-3 min-[1024px]:max-w-[500px] min-[1024px]:mx-auto max-[1023px]:flex-1 max-[1023px]:min-w-0 max-[1023px]:gap-2">
         <span className="text-[10px] text-zinc-500 font-mono w-10 text-right flex-shrink-0">{formatTime(currentTime)}</span>
-        <button
+        <HintButton
+          label={t('player.shuffle')}
+          info={t('player.shuffleInfo', 'Shuffles the play queue. Off: plays it in order. The queue order itself is not changed, only the order it is walked in.')}
           onClick={onToggleShuffle}
           className={`p-1.5 rounded-lg transition-colors ${isShuffle ? 'text-pink-400' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'}`}
-          title={t('player.shuffle')}
+          ariaLabel={t('player.shuffle')}
         >
           <Shuffle size={16} />
-        </button>
-        <button onClick={onPrevious} className="p-1.5 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors">
+        </HintButton>
+        <HintButton
+          label={t('player.previous', 'Previous track')}
+          info={t('player.previousInfo', 'Plays the track before this one in the queue. At the start of the queue it goes to the last track.')}
+          onClick={onPrevious}
+          className="p-1.5 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
+          ariaLabel={t('player.previous', 'Previous track')}
+        >
           <SkipBack size={18} />
-        </button>
-        <button
+        </HintButton>
+        <HintButton
+          label={t('player.stop')}
+          info={t('player.stopInfo', 'Stops playback and returns the playhead to the start of the track. Pause keeps the position, this does not.')}
           onClick={onStop}
           className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-          title={t('player.stop')}
+          ariaLabel={t('player.stop')}
         >
           <Square size={14} fill="currentColor" />
-        </button>
-        <button
+        </HintButton>
+        <HintButton
+          label={isPlaying ? t('player.pause', 'Pause') : t('player.play', 'Play')}
+          info={isPlaying
+            ? t('player.pauseInfo', 'Pauses where it is, so the playhead stays put. Space does the same anywhere that is not a text field.')
+            : t('player.playInfo', 'Plays from the playhead. Space does the same anywhere that is not a text field.')}
           onClick={onTogglePlay}
           className="w-9 h-9 rounded-full bg-zinc-900 dark:bg-white flex items-center justify-center hover:scale-105 transition-transform shadow-md"
+          ariaLabel={isPlaying ? t('player.pause', 'Pause') : t('player.play', 'Play')}
         >
           {isPlaying
             ? <Pause size={18} className="text-white dark:text-black" fill="currentColor" />
             : <Play size={18} className="text-white dark:text-black ml-0.5" fill="currentColor" />
           }
-        </button>
-        <button onClick={onNext} className="p-1.5 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors">
+        </HintButton>
+        <HintButton
+          label={t('player.next', 'Next track')}
+          info={t('player.nextInfo', 'Plays the next track in the queue. At the end of the queue it wraps to the first track.')}
+          onClick={onNext}
+          className="p-1.5 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
+          ariaLabel={t('player.next', 'Next track')}
+        >
           <SkipForward size={18} />
-        </button>
-        <button
+        </HintButton>
+        <HintButton
+          label={repeatMode === 'one' ? t('player.repeatOne') : repeatMode === 'all' ? t('player.repeatAll') : t('player.repeatOff')}
+          info={t('player.repeatInfo', 'Cycles repeat off, all and one. All loops the queue; one loops the current track; off stops at the end of the queue.')}
           onClick={onToggleRepeat}
           className={`p-1.5 rounded-lg transition-colors ${repeatMode !== 'none' ? 'text-pink-400' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'}`}
-          title={repeatMode === 'one' ? t('player.repeatOne') : repeatMode === 'all' ? t('player.repeatAll') : t('player.repeatOff')}
+          ariaLabel={t('player.repeat', 'Repeat')}
         >
           {repeatMode === 'one' ? <Repeat1 size={16} /> : <Repeat size={16} />}
-        </button>
-        <button
+        </HintButton>
+        <HintButton
+          label={spectrumEnabled ? t('player.spectrumOn') : t('player.spectrumOff')}
+          info={t('player.spectrumInfo', 'Draws a live frequency spectrum beside the player. It reads the same audio output, so it costs a little CPU while playing and nothing while paused.')}
           onClick={onToggleSpectrum}
           className={`p-1.5 rounded-lg transition-colors max-[1023px]:hidden ${spectrumEnabled ? 'text-purple-400' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'}`}
-          title={spectrumEnabled ? t('player.spectrumOn') : t('player.spectrumOff')}
+          ariaLabel={t('player.spectrum', 'Spectrum')}
         >
           <Activity size={16} />
-        </button>
-        <button
+        </HintButton>
+        <HintButton
+          label={discoMode ? t('player.discoOn', 'Disco mode on') : t('player.discoOff', 'Disco mode off')}
+          info={t('player.discoInfo', 'Tints the player with colours that follow the music. Presentation only: it changes nothing about the render or the audio.')}
           onClick={onToggleDisco}
           className={`p-1.5 rounded-lg transition-colors max-[1023px]:hidden ${discoMode ? 'text-yellow-400 animate-pulse' : 'text-zinc-500 hover:text-yellow-400 hover:bg-yellow-500/5'}`}
-          title={discoMode ? 'Disco mode ON' : 'Disco mode OFF'}
+          ariaLabel={t('player.disco', 'Disco mode')}
         >
           <DiscoIcon size={16} />
-        </button>
+        </HintButton>
         <span className="text-[10px] text-zinc-500 font-mono w-10 flex-shrink-0">{formatTime(duration)}</span>
       </div>
 
@@ -259,37 +291,41 @@ export const Player: React.FC<PlayerProps> = ({
           cluster may grow when the text variant switch is present */}
       <div className="flex items-center gap-3 min-[1024px]:min-w-[280px] min-[1024px]:flex-shrink-0 max-[1023px]:gap-2 justify-end">
         {/* Playback Rate — hidden on mobile */}
-        <button
+        <HintButton
+          label={t('player.playbackSpeed')}
+          info={t('player.playbackSpeedInfo', 'Cycles 0.5x, 0.75x, 1x, 1.25x, 1.5x and 2x. Pitch is corrected, so a slower speed is not also a lower key. The lyric editor shares this speed.')}
           onClick={() => {
             const rates = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
             const idx = rates.indexOf(playbackRate);
             onPlaybackRateChange(rates[(idx + 1) % rates.length]);
           }}
           className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-white px-1.5 py-0.5 rounded font-mono transition-colors max-[1023px]:hidden"
-          title={t('player.playbackSpeed')}
+          ariaLabel={t('player.playbackSpeed')}
         >
           {playbackRate}x
-        </button>
+        </HintButton>
 
         {/* 44.1 kHz replay test — the pitch drop a 48 kHz render takes when it
             is clocked out at 44.1 kHz, without the slowdown that comes with it
             on real hardware. Tempo held on purpose: a track that is both lower
             AND slower is much harder to A/B than one that is only lower. */}
-        <button
+        <HintButton
+          label={t('player.pitchTest', '44.1 kHz replay test')}
+          info={!isPitchShiftReady()
+            ? t('player.pitchUnavailable', 'The pitch shifter is not available in this browser, so the replay test cannot run. The console says why.')
+            : pitch441
+              ? t('player.pitchOnInfo', 'Pitched down about 1.47 semitones, as a 48 kHz render sounds clocked out at 44.1 kHz, with the tempo held. Click for 48 kHz.')
+              : t('player.pitchOffInfo', 'Hear the 48 kHz render at 44.1 kHz pitch, about 1.47 semitones lower, at the same tempo. A way to hear that pitch drop without a slower track.')}
           onClick={onTogglePitch441}
           className={`text-xs px-1.5 py-0.5 rounded font-mono transition-colors max-[1023px]:hidden ${
             pitch441
               ? 'text-amber-400 bg-amber-500/10'
               : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
           }`}
-          title={!isPitchShiftReady()
-            ? 'Pitch shifter unavailable in this browser — see the console'
-            : pitch441
-              ? 'Pitched down ~1.47 semitones (44.1 kHz clock), tempo unchanged — click for 48 kHz'
-              : 'Hear the 48 kHz render at 44.1 kHz pitch (down ~1.47 semitones, same tempo)'}
+          ariaLabel={t('player.pitchTest', '44.1 kHz replay test')}
         >
           {pitch441 ? '44.1k' : '48k'}
-        </button>
+        </HintButton>
 
         {/* Variant switch — hidden on mobile (space-constrained), visible on desktop */}
         {!abMode && (currentSong.masteredAudioUrl || currentSong.noAdapterAudioUrl) && (
@@ -343,87 +379,108 @@ export const Player: React.FC<PlayerProps> = ({
         {/* A/B toggle — only in A/B comparison mode */}
         {abMode && (
           <>
-            <button
+            <HintButton
+              label={t('player.abSwitch', 'Switch A/B')}
+              info={t('player.abSwitchInfo', 'Switches between the two comparison tracks without leaving the player. The label shows which one is playing.')}
               onClick={onToggleAB}
               className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
                 abActiveLabel === 'A'
                   ? 'bg-blue-500/15 text-blue-400 border border-blue-500/25 shadow-[0_0_8px_rgba(59,130,246,0.15)]'
                   : 'bg-orange-500/15 text-orange-400 border border-orange-500/25 shadow-[0_0_8px_rgba(249,115,22,0.15)]'
               }`}
-              title={`Playing Track ${abActiveLabel} — click to switch`}
+              ariaLabel={t('player.abSwitch', 'Switch A/B')}
             >
               {abActiveLabel}
-            </button>
-            <button
+            </HintButton>
+            <HintButton
+              label={t('player.exitAB', 'Exit A/B')}
+              info={t('player.exitABInfo', 'Leaves A/B comparison and returns the player to the normal single-track controls.')}
               onClick={onExitABMode}
               className="p-1 rounded-lg text-zinc-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-              title="Exit A/B mode"
+              ariaLabel={t('player.exitAB', 'Exit A/B')}
             >
               <X size={14} />
-            </button>
+            </HintButton>
           </>
         )}
 
         {/* Trim / Crop toggle — hidden on mobile */}
-        <button
+        <HintButton
+          label={trimMode ? t('player.exitTrimMode') : t('player.trimCrop')}
+          info={t('player.trimInfo', 'Shows the trim controls above the waveform: click an in point and an out point, then crop. Cropping rewrites the audio file and cuts its lyric sidecars to the new timeline, so it cannot be undone.')}
           onClick={onToggleTrimMode}
           className={`p-1.5 rounded-lg transition-all max-[1023px]:hidden ${
             trimMode
               ? 'text-cyan-400 bg-cyan-500/10 shadow-[0_0_8px_rgba(6,182,212,0.15)]'
               : 'text-zinc-500 hover:text-cyan-400 hover:bg-cyan-500/5'
           }`}
-          title={trimMode ? t('player.exitTrimMode') : t('player.trimCrop')}
+          ariaLabel={trimMode ? t('player.exitTrimMode') : t('player.trimCrop')}
         >
           <Scissors size={15} />
-        </button>
+        </HintButton>
 
 
         {/* Volume */}
         <div className="flex items-center gap-1.5 group flex-shrink-0">
-          <button
+          <HintButton
+            label={volume === 0 ? t('player.unmute', 'Unmute') : t('player.mute', 'Mute')}
+            info={t('player.muteInfo', 'Mutes the player, or restores the volume to 80 percent. The lyric editor shares this volume.')}
             onClick={() => onVolumeChange(volume > 0 ? 0 : 0.8)}
             className="text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
+            ariaLabel={volume === 0 ? t('player.unmute', 'Unmute') : t('player.mute', 'Mute')}
           >
             {volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
-          </button>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={volume}
-            onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
-            className="min-[1024px]:w-20 min-[1024px]:min-w-[80px] max-[1023px]:w-14"
-          />
+          </HintButton>
+          <ParamLabel
+            label={t('player.volume', 'Volume')}
+            info={t('player.volumeInfo', 'Player volume, shared with the lyric editor because they use the same audio element. Quiet is often better than muted when placing a syllable by ear.')}
+          >
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={volume}
+              onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
+              className="min-[1024px]:w-20 min-[1024px]:min-w-[80px] max-[1023px]:w-14"
+              aria-label={t('player.volume', 'Volume')}
+            />
+          </ParamLabel>
         </div>
 
         {/* Quick Actions, hidden on mobile */}
         {onReusePrompt && (
-          <button
+          <HintButton
+            label={t('player.edit')}
+            info={t('player.editInfo', 'Loads this render\u2019s parameters back into Custom-Gen so the same prompt and settings can be generated again, with changes.')}
             onClick={onReusePrompt}
             className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors max-[1023px]:hidden"
-            title={t('player.edit')}
+            ariaLabel={t('player.edit')}
           >
             <RotateCcw size={14} />
-          </button>
+          </HintButton>
         )}
         {onDownload && (
-          <button
+          <HintButton
+            label={t('player.download')}
+            info={t('player.downloadInfo', 'Downloads this track in the format and version set on the Settings page. When a download folder is configured the file is saved there instead, with the matching .lrc beside it.')}
             onClick={onDownload}
             className="p-1.5 rounded-lg text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors max-[1023px]:hidden"
-            title={t('player.download')}
+            ariaLabel={t('player.download')}
           >
             <Download size={14} />
-          </button>
+          </HintButton>
         )}
         {onDelete && (
-          <button
+          <HintButton
+            label={t('player.delete')}
+            info={t('player.deleteInfo', 'Deletes the track, its audio file and its lyric sidecars. This cannot be undone.')}
             onClick={onDelete}
             className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors max-[1023px]:hidden"
-            title={t('player.delete')}
+            ariaLabel={t('player.delete')}
           >
             <Trash2 size={14} />
-          </button>
+          </HintButton>
         )}
       </div>
       {/* /row-2 wrapper */}

@@ -36,7 +36,7 @@ disk.
 | Per page | 20, 40 (the default), 60, 80, 100, or All. Remembered per browser. |
 | Columns (table view only) | Choose which columns show. The cover thumbnail, Title and Actions are always on. Style, BPM, Key, Model, Quality, Time and Date (and Source on the All tab) show by default; the generation details, such as seed, LM seed, steps, CFG, shift, solver, scheduler, guidance, LoRA, LM and VAE, are off until you tick them. Column widths are drag-resizable and persist. |
 | Rename (pencil icon) | Inline title edit, on the card, row, or table cell. |
-| Track menu (⋯) | Run Post-Processing (shown greyed out, with the reason on hover, when it cannot run), Remove Post-Processed Version (when one exists), Download ABC Lead Sheet (YuE2 renders), Edit (loads the track's parameters back into Custom-Gen), Add to Playlist, Download, Send to Cover Studio, Edit Metadata, Export Params, Retranscribe Lyrics, Generate/Regenerate Cover Art, Set as Track A / Track B, Delete. The same menu sits on grid cards, list rows, table rows, the playlist and the right sidebar, with the items that surface supports. On phones (1023px wide or less) it opens as a bottom sheet instead of a dropdown: drag the handle down, tap the backdrop or press Esc to close it. |
+| Track menu (⋯) | Run Post-Processing (shown greyed out, with the reason on hover, when it cannot run), Remove Post-Processed Version (when one exists), Download ABC Lead Sheet (YuE2 renders), Edit (loads the track's parameters back into Custom-Gen), Add to Playlist, Download, Send to Cover Studio, Edit Metadata, Export Params, Retranscribe Lyrics (the item spins and a toast names the Whisper model it picked, with a Cancel button; the same toast then reports the line and word counts), Download .LRC (when the track has synced lyrics), Generate/Regenerate Cover Art, Set as Track A / Track B, Delete. The same menu sits on grid cards, list rows, table rows, the playlist and the right sidebar, with the items that surface supports. On phones (1023px wide or less) it opens as a bottom sheet instead of a dropdown: drag the handle down, tap the backdrop or press Esc to close it. |
 | Set as Track A / Track B | Pins two tracks for the A/B comparison bar above the list, with a Play A/B button and a Compare button that opens a parameter diff modal. |
 | Upload into Library | Opens the import dialog (see below). Only on the Library page. |
 
@@ -102,6 +102,92 @@ Clearing the current track removes its lock-screen metadata and playback
 position. Selecting a paused track afterwards restores its media controls
 and playback position.
 
+## Lyric timing
+
+Whisper's timings are usually close, and the error is often one constant offset: every line a
+little early or a little late. The other common case is a line that covers two phrases, so it
+appears before it is sung. Both are fixed by hand, in the lyric editor.
+
+Expand the **Lyrics** strip under the waveform and click **Edit** in its header. The pencil is
+there only when the strip is open and the track has word timings (a Whisper retranscription, or
+a render whose lyric aligner wrote them), so editing is never one stray click away. The editor
+opens over the app:
+
+- **Transport**, along the bottom, is the player itself: play/pause, seek by 1 s or 0.1 s, speed
+  at 0.5x, 0.75x or 1x, volume, and Follow, which keeps the playhead in view while it plays.
+  Follow can be switched off and the choice is remembered. Dragging the timeline while it is on
+  switches Follow off with a toast saying Follow has been disabled, so the pan is never snapped
+  back; the paging arrows do the same.
+- **The timeline** is one row per lyric line with a chip per word, against a seconds ruler with
+  tenths. Drag a chip to move that word: a timestamp follows its leading edge so the exact
+  landing time is visible while you move it. Click a chip to select it. Dragging empty timeline
+  pans the view (it never moves the playhead); a click that does not drag seeks there. The grey
+  strip above it is the track's waveform, tall enough to place a word against the transient you
+  hear rather than by arithmetic. Arrows on the left and right edges page the view by words: back
+  scrolls left one window so the first word on screen ends up last, forward scrolls right one
+  window so the last word on screen becomes the first.
+- **The line being sung** is the last row of the editor, under the transport, as karaoke read
+  from the editor's own timings, so a placement can be checked without closing the modal.
+- **Zoom** is the point of the modal. It lives in the bottom-left corner of the footer as a short
+  slider, so it costs the timeline no height; it runs from 30 to 600 pixels per second, and at
+  300 a syllable is wide enough to read and place. `Ctrl+-` and `Ctrl+=` change it from anywhere,
+  the frame-the-word button beside it fills the view with the selected word, and the ruler's tick spacing follows on its own
+  (15 s, 5 s or 1 s). **Scroll to the playhead**, beside it, brings the view back after a pan.
+- **A selected word** gets its own row: nudge it by a step you set (1 to 1000 ms), **Start at
+  playhead** puts its onset exactly where the audio is, and **Loop word** replays it so the
+  placement can be judged by ear. **Play from word** starts a moment before it. The same row shows
+  how long the word lasts and has **Len -** and **Len +** buttons: a selected word carries a white
+  handle at each end, and dragging one changes where that edge sits, so the word can be made longer
+  or shorter as well as moved. **Export lyrics**, at the right end of the transport row, downloads
+  the `.lrc` for the timings on screen, saving pending changes first.
+  **Snap to prev** starts it exactly where the word before it ends (across a line break too),
+  which is how a word with a gap before it gets pulled onto the syllable.
+- **Auto shift**, on by default in the transport row, decides what happens when a word is made
+  longer than the room before the next one: on, the words after it move later by the overhang, so
+  the spacing you set survives and nothing overlaps; off, the word stops at the next word's start.
+  Hovering the switch explains it. Words cannot overlap either way — a drag or nudge stops at the
+  previous word's end, and a save repairs any overlap the same way, so two words can never share
+  an instant.
+- **Split line** cuts the line in two at the **selected word** (or at the word under the playhead
+  when nothing is selected), which is the fix for a line that spans two phrases: the selected word
+  becomes the first word of the new line, so the break lands exactly where that syllable is sung
+  rather than wherever the playhead happens to sit. **Merge previous** and **Merge next**, beside
+  it, fold the line into its neighbour (the words are re-sorted, so the result stays in order). All
+  three keep every word's timing.
+- **Whole track** moves every word by the step, for an offset that is wrong all the way through.
+  **From selected** moves the selected word and everything after it by the step, left or right:
+  the fix for timing that drifts as the track goes on, because the part already right stays put.
+-  The timeline keeps empty space below the last line, so the final line can be scrolled up to the
+  middle before it is edited. The step box applies what you type when you leave it or press Enter,
+  so a three-digit step no longer passes through one and ten.
+
+**Auto save**, in the footer, is on by default: changes are written about a second after the last
+one, the header says **Saving…**, **Saved** or **Unsaved**, and no Save button is shown because
+there is nothing to press. Switch it off and the green **Save** appears instead: nothing is written
+until it is pressed, closing with unsaved edits asks first, and the choice is remembered.
+**Reload saved** stays available either way. Every change
+is undoable — the header's arrows, or `Ctrl+Z` and `Ctrl+Shift+Z` — one entry per action, with a
+whole drag counting as one. Clicking outside the modal does nothing; close it with the X or
+Escape, which asks before throwing away edits that are still unsaved. A save writes the word
+timings and rebuilds the `.lrc`, taking each line's start from its first word, so a line no
+longer lights up before its own syllable. The strip, the waveform ticks and an exported file then
+agree.
+
+Keys, while the editor is open: `Space` plays and pauses even when a word is selected, the arrow
+keys move the selected word by the step, `Shift` with them shortens and lengthens it, `Ctrl+-` and
+`Ctrl+=` zoom, `Ctrl+Z` and `Ctrl+Shift+Z` undo and redo, and `Esc` closes. Every button's tooltip
+names the key it answers to.
+
+A track whose timings were placed by hand is marked as hand-timed when it is saved.
+**Retranscribe Lyrics** then refuses the first click and says so; clicking again within a minute
+means overwrite. If a crop, a retranscription or another window changes the file while the editor
+is open, the save is refused: the footer turns red and offers **Reload**, which reads the file as
+it is now and discards the edits on screen, instead of writing the old timeline back. A failed
+save is not retried on a timer. The badge reads **Not saved** and the green **Save** stays there
+until it works.
+
+The waveform above the transport shows the same timing with the editor closed: a faint rule at
+every line, a short tick per word, and the syllable being sung in pink.
 ## Keyboard shortcuts
 
 On desktop these work anywhere in the app. Press `?` to see them in a small cheat sheet.
@@ -225,6 +311,21 @@ can still download.
 Export Params, on the track menu, downloads that render's parameters as a
 JSON preset file, separate from the audio and not affected by the
 Settings page format.
+
+Download .LRC, also on the track menu, saves the track's synced lyrics as an
+`.lrc` file for external players, DAWs and datasets. It only appears when the
+track has timings to export, meaning either the render's own lyric alignment
+or a run of Retranscribe Lyrics. The file is named exactly like the audio
+download (prepend, artist, title, and the `- Unmastered` suffix when the
+preferred version is the original), so a player that pairs a sidecar by
+filename finds it. When Settings has a Download folder, the file is saved
+there; otherwise it arrives as a browser download. A download of the audio
+itself, in folder mode, also writes the matching `.lrc` beside it.
+
+With Enhanced LRC (word timings) on in Settings, the exported file carries an
+`<mm:ss.xx>` stamp before every word, which players that support enhanced LRC use
+for word-by-word highlighting. A track without word timings still exports, with
+plain lines.
 
 Downloaded audio has metadata (title, artist, album, year, genre, comment,
 cover art) embedded into the file server-side; WAV downloads with no

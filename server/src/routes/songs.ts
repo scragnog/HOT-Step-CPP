@@ -11,7 +11,7 @@ import { config } from '../config.js';
 import { getUserId } from './auth.js';
 import { deleteAudioGenerationsByJobIds } from '../db/lireekDb.js';
 import { cleanupDeletedSongs } from '../services/compare/store.js';
-import { cropWavFile, cropLrcFile } from '../services/audioCrop.js';
+import { cropWavFile, cropLrcFile, cropLyricsJsonFile } from '../services/audioCrop.js';
 import { analyzeAndSaveDiscoData } from '../services/disco-analyzer.js';
 import {
   startRePostProcess, checkPpEligibility, requestedPpStages, revertPostProcessing,
@@ -22,6 +22,25 @@ import { SONG_EDITABLE_FIELDS } from '../contracts/songs.js';
 import { planZipEntries, parseZipIds, streamZip, MAX_ZIP_IDS, MAX_ZIP_BYTES } from '../services/library/exportZip.js';
 
 const router = Router();
+
+/**
+ * Delete the lyric sidecars that share a render's filename stem.
+ *
+ * Deleting a song removed its audio variants but left `.lrc` and
+ * `.lyrics.json` behind, so every deleted track leaked two orphan files into
+ * the audio folder. Sidecars live beside the BASE render, so one stem covers
+ * every variant of the song.
+ */
+function deleteLyricSidecars(audioUrl: string | null | undefined): void {
+  if (!audioUrl) return;
+  const stem = path.basename(audioUrl).replace(/\.[^.]+$/, '');
+  for (const ext of ['.lrc', '.lyrics.json']) {
+    const filepath = path.join(config.data.audioDir, stem + ext);
+    try {
+      if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
+    } catch { /* best effort — never fail a delete over a sidecar */ }
+  }
+}
 
 // Uploads land on disk rather than in memory: an album's worth of FLAC at
 // 100 MB a file is not something to hold in the heap while ffmpeg works.
@@ -342,6 +361,8 @@ router.delete('/:id', (req, res) => {
     }
   }
 
+  deleteLyricSidecars(song.audio_url);
+
   getDb().prepare('DELETE FROM songs WHERE id = ?').run(req.params.id);
   cleanupDeletedSongs([req.params.id]);
 
@@ -366,6 +387,7 @@ router.delete('/', (req, res) => {
       if (fs.existsSync(filepath)) {
         fs.unlinkSync(filepath);
       }
+      deleteLyricSidecars(song.audio_url);
     }
   }
 
@@ -413,6 +435,7 @@ router.post('/bulk-delete', (req, res) => {
       const filepath = path.join(config.data.audioDir, path.basename(song.noadapter_audio_url));
       if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
     }
+    deleteLyricSidecars(song.audio_url);
   }
 
   // Delete from DB
@@ -602,11 +625,19 @@ router.post('/:id/crop', (req, res) => {
       }
     }
 
-    // 3. Crop companion LRC file (if exists)
+    // 3. Crop companion lyric sidecars (if they exist). Both, because the
+    //    player prefers `.lyrics.json` while exports read the `.lrc`: cropping
+    //    only one leaves the other on the pre-crop timeline.
     const lrcFilename = audioFilename.replace(/\.[^.]+$/, '.lrc');
     const lrcPath = path.join(config.data.audioDir, lrcFilename);
     if (fs.existsSync(lrcPath)) {
       cropLrcFile(lrcPath, inPoint, outPoint);
+    }
+    const lyricsJsonPath = path.join(config.data.audioDir, audioFilename.replace(/\.[^.]+$/, '.lyrics.json'));
+    if (fs.existsSync(lyricsJsonPath)) {
+      try { cropLyricsJsonFile(lyricsJsonPath, inPoint, outPoint); } catch (err: any) {
+        console.warn(`[Songs] Crop: word-level lyrics not cropped: ${err.message}`);
+      }
     }
 
     // 4. Update duration in DB
@@ -622,10 +653,189 @@ router.post('/:id/crop', (req, res) => {
 });
 
 
-// POST /api/songs/:id/retranscribe — Re-run Whisper transcription
-router.post('/:id/retranscribe', async (req, res) => {
+// POST /api/songs/lyrics/offset — move a track's lyric timing by hand.
+//
+// Body: { audioUrl, deltaMs }. Positive moves the lyrics later. Every line and
+// word shifts by the same amount, and the `.lrc` is rebuilt from the word
+// timings so the export keeps agreeing with the player. This is the manual half
+// of alignment: Whisper's own error is usually one constant shift.
+
+/** The song row's generation params, or an empty object when it has none. */
+function generationParams(song: any): any {
+  try { return JSON.parse(song?.generation_params || '{}') || {}; } catch { return {}; }
+}
+
+/** A JSON sidecar as an object, or null when it is missing or unreadable. */
+function readJsonOrNull(file: string): any | null {
+  try { return JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { return null; }
+}
+
+router.post('/lyrics/offset', async (req, res) => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+  const audioUrl = typeof req.body?.audioUrl === 'string' ? req.body.audioUrl.trim() : '';
+  const deltaMs = Number(req.body?.deltaMs);
+  if (!audioUrl) { res.status(400).json({ error: 'audioUrl is required' }); return; }
+  if (!Number.isFinite(deltaMs) || Math.abs(deltaMs) > 30_000) {
+    res.status(400).json({ error: 'deltaMs must be a number within ±30000' });
+    return;
+  }
+
   try {
-    const { id } = req.params;
+    const { shiftLyrics } = await import('../services/lyricsOffset.js');
+    const song = getDb().prepare('SELECT * FROM songs WHERE audio_url = ?').get(audioUrl) as any;
+    const gp = generationParams(song);
+    const result = shiftLyrics(config.data.audioDir, audioUrl, deltaMs / 1000, {
+      title: song?.title,
+      artist: typeof gp.artist === 'string' ? gp.artist : '',
+    });
+    if (!result) {
+      res.status(404).json({ error: 'No synced lyrics for this track' });
+      return;
+    }
+    console.log(`[Lyrics] Shifted ${audioUrl} by ${deltaMs}ms (${result.lines} lines, ${result.source})`);
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('[Lyrics] Offset failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/songs/lyrics/split — give a line a boundary at the playhead.
+//
+// Body: { audioUrl, atSec }. Whisper times a phrase as a unit, so on a slow
+// passage one line covers several seconds and lights up long before its words
+// are sung. Splitting at the playhead adds the missing boundary; word times stay
+// where they are and the `.lrc` is rebuilt, so the strip, the waveform and the
+// export all agree on where the second half starts.
+router.post('/lyrics/split', async (req, res) => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+  const audioUrl = typeof req.body?.audioUrl === 'string' ? req.body.audioUrl.trim() : '';
+  const atSec = Number(req.body?.atSec);
+  if (!audioUrl) { res.status(400).json({ error: 'audioUrl is required' }); return; }
+  if (!Number.isFinite(atSec) || atSec <= 0 || atSec > 86_400) {
+    res.status(400).json({ error: 'atSec must be a positive number of seconds' });
+    return;
+  }
+
+  try {
+    const { splitLyricLine } = await import('../services/lyricsSplit.js');
+    const song = getDb().prepare('SELECT * FROM songs WHERE audio_url = ?').get(audioUrl) as any;
+    const gp = generationParams(song);
+    const result = splitLyricLine(config.data.audioDir, audioUrl, atSec, {
+      title: song?.title,
+      artist: typeof gp.artist === 'string' ? gp.artist : '',
+    });
+    if (!result.ok) {
+      if (result.reason === 'no-sidecar') {
+        res.status(404).json({ error: 'No synced lyrics for this track' });
+        return;
+      }
+      res.status(400).json({
+        error: result.reason === 'no-line'
+          ? 'No lyric line at that position'
+          : 'Nothing to split there: move the playhead into the middle of a line',
+      });
+      return;
+    }
+    console.log(`[Lyrics] Split ${audioUrl} at ${atSec.toFixed(2)}s: "${result.left}" / "${result.right}"`);
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('[Lyrics] Split failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/songs/lyrics/timings — save hand-placed word timings from the
+// lyric editor.
+//
+// Body: { audioUrl, lines }. The editor sends the whole array; the service sorts
+// it, drops broken entries, recomputes each line's start/end from its words and
+// rebuilds the `.lrc`, so a line no longer starts before its first syllable.
+router.post('/lyrics/timings', async (req, res) => {
+  const userId = getUserId(req);
+  if (!userId) { res.status(401).json({ error: 'Unauthorized' }); return; }
+
+  const audioUrl = typeof req.body?.audioUrl === 'string' ? req.body.audioUrl.trim() : '';
+  if (!audioUrl) { res.status(400).json({ error: 'audioUrl is required' }); return; }
+
+  try {
+    const { saveLyricTimings } = await import('../services/lyricTimings.js');
+    const song = getDb().prepare('SELECT * FROM songs WHERE audio_url = ?').get(audioUrl) as any;
+    const gp = generationParams(song);
+    const expectedRevision = typeof req.body?.expectedRevision === 'number' ? req.body.expectedRevision : undefined;
+    const result = saveLyricTimings(config.data.audioDir, audioUrl, req.body?.lines, {
+      title: song?.title,
+      artist: typeof gp.artist === 'string' ? gp.artist : '',
+    }, expectedRevision);
+    if (!result.ok) {
+      if (result.reason === 'no-sidecar') {
+        res.status(404).json({ error: 'This track has no word timings to edit' });
+        return;
+      }
+      if (result.reason === 'stale') {
+        res.status(409).json({
+          error: 'The lyric timings changed on disk. Reload the editor before saving.',
+          code: 'stale',
+          revision: result.revision,
+        });
+        return;
+      }
+      res.status(400).json({ error: 'No timed lyrics in that request' });
+      return;
+    }
+    console.log(`[Lyrics] Saved timings for ${audioUrl}: ${result.lines} lines, ${result.words} words`);
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    console.error('[Lyrics] Save timings failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/songs/retranscribe/model — which Whisper model a retranscription
+ * would pick, plus the models installed.
+ *
+ * The pick is made server-side by priority, so the UI cannot name the model in
+ * its progress toast without asking. No song id is involved: the choice is
+ * global, and this route answers before a run starts.
+ */
+router.get('/retranscribe/model', async (_req, res) => {
+  try {
+    const { findWhisperModel, whisperModelLabel, listWhisperModels } =
+      await import('../services/whisperTranscribe.js');
+    const selected = findWhisperModel(undefined, { quiet: true });
+    res.json({
+      model: selected ? path.basename(selected) : null,
+      label: selected ? whisperModelLabel(path.basename(selected)) : null,
+      models: listWhisperModels(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** In-flight retranscriptions, so a disconnect or a Cancel click can stop one. */
+const activeRetranscribes = new Map<string, AbortController>();
+
+// POST /api/songs/:id/retranscribe — Re-run Whisper transcription
+//
+// Runs inline (CPU only, never the GPU lane) and can take minutes on a long
+// track. Abortable: the response closing kills whisper-cli, and a cancelled
+// run writes no sidecars.
+router.post('/:id/retranscribe', async (req, res) => {
+  const { id } = req.params;
+  if (activeRetranscribes.has(id)) {
+    return res.status(409).json({ error: 'A retranscription is already running for this track.' });
+  }
+  const controller = new AbortController();
+  activeRetranscribes.set(id, controller);
+  res.on('close', () => { if (!res.writableEnded) controller.abort(); });
+
+  try {
     const song = getDb().prepare('SELECT * FROM songs WHERE id = ?').get(id) as any;
     if (!song) return res.status(404).json({ error: 'Song not found' });
 
@@ -642,11 +852,24 @@ router.post('/:id/retranscribe', async (req, res) => {
 
     const { ensureWhisperCli, findWhisperModel, transcribeWithWhisper } = await import('../services/whisperTranscribe.js');
     const { reconcileLyrics } = await import('../services/lyricsReconcile.js');
+    const { buildLrc } = await import('../services/lrcExport.js');
 
     const whisperReady = await ensureWhisperCli();
-    if (!whisperReady) {
-      return res.status(400).json({ error: 'Whisper CLI not available and auto-download failed.' });
+    if (!whisperReady.ok) {
+      return res.status(400).json({ error: whisperReady.reason });
     }
+
+    // Hand-placed timings are authoritative: a retranscription would replace
+    // them with Whisper's guess, so it takes an explicit `force` to overwrite.
+    const sidecarPath = path.join(config.data.audioDir, audioFilename.replace(/\.[^.]+$/, '.lyrics.json'));
+    const existing = readJsonOrNull(sidecarPath);
+    if (existing?.editedByHand === true && req.body?.force !== true) {
+      return res.status(409).json({
+        error: "This track's lyric timings were edited by hand. Click Retranscribe again to overwrite them.",
+        code: 'manual-timings',
+      });
+    }
+    const previousRevision = Number(existing?.revision) || 0;
 
     const whisperModel = req.body?.model || '';
     const modelPath = findWhisperModel(whisperModel);
@@ -660,25 +883,49 @@ router.post('/:id/retranscribe', async (req, res) => {
       model: whisperModel,
       language: req.body?.language || 'auto',
       beamSize: req.body?.beamSize || 5,
+      signal: controller.signal,
     });
 
+    // Cancelled or navigated away: whisper-cli is dead, and writing a half run
+    // over the existing sidecars would be worse than writing nothing.
+    if (controller.signal.aborted) return;
     if (!whisperResult || !whisperResult.segments?.length) {
       return res.status(500).json({ error: 'Whisper returned no transcription' });
     }
 
-    const lyricsJson = reconcileLyrics(whisperResult, sourceLyrics, whisperModel || 'auto', false);
+    // Record the model that actually ran, not the (usually empty) request value.
+    const modelName = path.basename(modelPath);
+    const lyricsJson = reconcileLyrics(whisperResult, sourceLyrics, modelName, false);
+    // Freshly machine-timed: clear the manual marker and move the revision on,
+    // so an editor that was open on the old file is refused on its next save.
+    (lyricsJson as any).editedByHand = false;
+    (lyricsJson as any).revision = previousRevision + 1;
 
     const lyricsJsonFilename = audioFilename.replace(/\.[^.]+$/, '.lyrics.json');
     const lyricsJsonPath = path.join(config.data.audioDir, lyricsJsonFilename);
     fs.writeFileSync(lyricsJsonPath, JSON.stringify(lyricsJson, null, 2));
 
-    const wordCount = lyricsJson.lines.reduce((n: number, l: any) => n + l.words.length, 0);
-    console.log(`[Retranscribe] Song ${id}: saved ${lyricsJsonFilename} (${lyricsJson.lines.length} lines, ${wordCount} words)`);
+    // Refresh the `.lrc` too. The player prefers this sidecar, and it is the
+    // file users export — leaving the engine's original alignment in place
+    // would hand out timings that no longer match what the UI shows.
+    const lrcFilename = audioFilename.replace(/\.[^.]+$/, '.lrc');
+    const lrcPath = path.join(config.data.audioDir, lrcFilename);
+    fs.writeFileSync(lrcPath, buildLrc(lyricsJson.lines, {
+      title: song.title,
+      artist: typeof genParams.artist === 'string' ? genParams.artist : '',
+    }));
 
-    res.json({ success: true, lineCount: lyricsJson.lines.length, wordCount });
+    const wordCount = lyricsJson.lines.reduce((n: number, l: any) => n + l.words.length, 0);
+    console.log(`[Retranscribe] Song ${id}: saved ${lyricsJsonFilename} and ${lrcFilename} (${lyricsJson.lines.length} lines, ${wordCount} words)`);
+
+    res.json({ success: true, lineCount: lyricsJson.lines.length, wordCount, model: modelName });
   } catch (err: any) {
+    // The socket is gone when this is a cancel; there is nobody to answer.
+    if (controller.signal.aborted) return;
     console.error('[Retranscribe] Error:', err.message);
     res.status(500).json({ error: err.message });
+  } finally {
+    activeRetranscribes.delete(id);
   }
 });
 

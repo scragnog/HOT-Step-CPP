@@ -24,6 +24,12 @@ export interface LyricsJson {
   whisperModel: string;
   vocalsIsolated: boolean;
   lines: LyricsLine[];
+  /** Bumped by every writer (editor save, retranscription, crop, shift, split).
+   *  The editor sends the one it loaded so a stale save is refused. */
+  revision?: number;
+  /** True once a person has placed the words, so a retranscription must ask. */
+  editedByHand?: boolean;
+  editedAt?: string;
 }
 
 /**

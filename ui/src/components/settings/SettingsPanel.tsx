@@ -41,6 +41,7 @@ export interface AppSettings {
   downloadOpusBitrate: number;
   downloadVersion: 'original' | 'mastered' | 'both';
   downloadIncludeLatent: boolean;
+  downloadEnhancedLrc: boolean;
   // Adapter trigger word
   triggerUseFilename: boolean;
   triggerPlacement: 'prepend' | 'append' | 'replace';
@@ -62,6 +63,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   downloadOpusBitrate: 192,
   downloadVersion: 'mastered',
   downloadIncludeLatent: false,
+  downloadEnhancedLrc: false,
   triggerUseFilename: false,
   triggerPlacement: 'prepend',
   discoKickExtract: false,
@@ -814,6 +816,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           checked={settings.downloadIncludeLatent}
           onChange={(v) => update('downloadIncludeLatent', v)}
           defaultValue={DEFAULT_SETTINGS.downloadIncludeLatent}
+        />
+
+        <SettingRow
+          id="setting-dl-enhanced-lrc"
+          label={t('settings.general.enhancedLrc')}
+          description={t('settings.general.enhancedLrcDesc')}
+          checked={settings.downloadEnhancedLrc}
+          onChange={(v) => update('downloadEnhancedLrc', v)}
+          defaultValue={DEFAULT_SETTINGS.downloadEnhancedLrc}
         />
       </div>
 

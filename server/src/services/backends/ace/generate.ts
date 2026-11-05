@@ -555,8 +555,8 @@ export async function runAceGeneration(
         const { reconcileLyrics } = await import('../../lyricsReconcile.js');
 
         const whisperReady = await ensureWhisperCli();
-        if (!whisperReady) {
-          logGeneration(job.id, 'WARNING', '[Whisper] whisper-cli unavailable — skipping');
+        if (!whisperReady.ok) {
+          logGeneration(job.id, 'WARNING', `[Whisper] whisper-cli unavailable — skipping: ${whisperReady.reason}`);
           return;
         }
         if (!findWhisperModel(job.params.whisperModel)) {

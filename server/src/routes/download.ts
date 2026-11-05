@@ -19,6 +19,7 @@ import {
   gatherSongMetadata, buildMetadataArgs, buildCoverArtArgs,
   type AudioMetadata,
 } from '../services/audioMetadata.js';
+import { readTrackLrc } from '../services/lrcExport.js';
 
 const execFileAsync = promisify(execFile);
 const router = Router();
@@ -132,13 +133,30 @@ const mimeTypes: Record<string, string> = {
   opus: 'audio/ogg',
 };
 
+/** Put exported synced lyrics next to a saved audio file, same stem. */
+function writeLrcBeside(savedAudioPath: string, lrcText: string): void {
+  const dir = path.dirname(savedAudioPath);
+  const stem = path.basename(savedAudioPath).replace(/\.[^.]+$/, '');
+  const tempDir = path.join(config.data.dir, 'download_temp');
+  fs.mkdirSync(tempDir, { recursive: true });
+  const tempFile = path.join(tempDir, `lrc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}.lrc`);
+  fs.writeFileSync(tempFile, lrcText, 'utf-8');
+  try {
+    saveIntoDir(dir, `${stem}.lrc`, tempFile);
+  } finally {
+    try { fs.unlinkSync(tempFile); } catch {}
+  }
+}
+
 /**
  * Hand the finished file to the caller: stream it as an attachment, or, in
  * save mode, copy it into the DOWNLOAD_DIR folder and answer with the path.
- * `tempFile` (when set) is removed once delivered.
+ * `tempFile` (when set) is removed once delivered. `sidecarLrc` (save mode
+ * only) is written beside the audio as a matching `.lrc` file.
  */
 function deliver(
-  res: Response, save: boolean, filePath: string, filename: string, mime: string, tempFile?: string,
+  res: Response, save: boolean, filePath: string, filename: string, mime: string,
+  tempFile?: string, sidecarLrc?: string,
 ): void {
   const cleanup = () => {
     if (!tempFile) return;
@@ -148,6 +166,12 @@ function deliver(
   if (save) {
     try {
       const saved = saveIntoDir(config.data.downloadDir, filename, filePath);
+      // A sidecar that cannot be written must not fail the download itself.
+      if (sidecarLrc) {
+        try { writeLrcBeside(saved, sidecarLrc); } catch (err: any) {
+          console.warn('[Download] LRC sidecar failed (non-fatal):', err.message);
+        }
+      }
       res.json({ path: saved, filename: path.basename(saved) });
     } catch (err: any) {
       console.error('[Download] Save failed:', err.message);
@@ -188,15 +212,8 @@ const downloadHandler = (save: boolean) => async (req: Request, res: Response) =
     return;
   }
 
-  // Get song from DB — try by ID first, then by audio_url
-  let song = getDb().prepare('SELECT * FROM songs WHERE id = ?').get(id) as any;
-  if (!song) {
-    // Fallback: try looking up by audio_url (for Lyric Studio queue items)
-    const audioUrlParam = req.query.audioUrl as string;
-    if (audioUrlParam) {
-      song = getDb().prepare('SELECT * FROM songs WHERE audio_url = ?').get(audioUrlParam) as any;
-    }
-  }
+  // Get song from DB — by ID first, then by audio_url (Lyric Studio queue items)
+  const song = findSong(id, req.query.audioUrl as string);
   if (!song) {
     // Last resort: serve the audio file directly without DB metadata
     const audioUrlParam = (req.query.audioUrl as string) || srcUrlParam;
@@ -290,32 +307,37 @@ const downloadHandler = (save: boolean) => async (req: Request, res: Response) =
     console.warn(`[Download] Metadata gathering failed (non-fatal): ${metaErr.message}`);
   }
 
+  // Synced lyrics travel with the audio into the download folder. Save mode
+  // only — a browser stream stays one file, and the .lrc has its own button.
+  const lrcText = save
+    ? readTrackLrc(config.data.audioDir, song.audio_url || audioUrl, {
+        title: song.title, artist: metadata?.artist,
+      }, { enhanced: wantsEnhanced(req.query.enhanced) })?.text
+    : undefined;
+
   // Build download filename: Prepend - Artist - Title_suffix.format
   // Strip leading/trailing underscores and the old backend-injected prefix patterns
   const badPrefixes = /^_?(XL|STD)(\s*\(CPP\))?_?\s*-?\s*/i;
   
-  let rawTitle = song.title || 'Untitled';
-  // Strip backend-generated prefix strings if they accidentally got committed to the DB
-  rawTitle = rawTitle.replace(badPrefixes, '');
-  rawTitle = rawTitle.replace(/_mastered/g, ''); // User wants mastered as default, so explicitly strip it out just in case
-  const songTitle = rawTitle.replace(/[^a-zA-Z0-9 _()-]/g, '').trim();
+  // Strip backend-generated prefixes if they were committed to the DB, and the
+  // mastered marker, which is the default render anyway.
+  const songTitle = (song.title || 'Untitled')
+    .replace(badPrefixes, '')
+    .replace(/_mastered/g, '')
+    .replace(/[^a-zA-Z0-9 _()-]/g, '')
+    .trim();
 
   const suffix = versionSuffix(version);
   // The caller's artist, else the one the song was made with (a cover's
   // covering band is recorded as artistName).
-  let gp: { artist?: unknown; artistName?: unknown } = {};
-  try { gp = JSON.parse(song.generation_params || '{}') || {}; } catch { /* no params */ }
+  const gp = generationParams(song);
   const savedArtist = [gp.artist, gp.artistName, song.artist].find(v => typeof v === 'string' && v.trim()) as string | undefined;
   const resolvedArtist = artistName || (savedArtist || '').replace(badPrefixes, '').replace(/[^a-zA-Z0-9 _()-]/g, '').trim();
 
   // Strip leading "Artist - " prefix from title if it duplicates the resolved artist.
   // generate.ts stores titles as "Artist - Song Title", so without this the artist
   // would appear twice in the download filename.
-  let finalTitle = songTitle;
-  if (resolvedArtist) {
-    const artistPrefix = new RegExp(`^${resolvedArtist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*-\\s*`, 'i');
-    finalTitle = songTitle.replace(artistPrefix, '').trim() || songTitle;
-  }
+  const finalTitle = stripArtistPrefix(songTitle, resolvedArtist);
 
   // Clean prepend: the user typed this, just trim whitespace
   const cleanPrepend = prepend.trim();
@@ -325,7 +347,7 @@ const downloadHandler = (save: boolean) => async (req: Request, res: Response) =
   try {
     if (format === 'wav' && sourcePath.endsWith('.wav') && !metadata) {
       // Source is already WAV with no metadata to embed — stream directly
-      deliver(res, save, sourcePath, downloadFilename, mimeTypes.wav);
+      deliver(res, save, sourcePath, downloadFilename, mimeTypes.wav, undefined, lrcText);
       return;
     }
 
@@ -336,13 +358,119 @@ const downloadHandler = (save: boolean) => async (req: Request, res: Response) =
 
     await convertAudio(sourcePath, format, bitrate, tempFile, metadata);
 
-    deliver(res, save, tempFile, downloadFilename, mimeTypes[format] || 'application/octet-stream', tempFile);
+    deliver(res, save, tempFile, downloadFilename, mimeTypes[format] || 'application/octet-stream', tempFile, lrcText);
   } catch (err: any) {
     console.error(`[Download] Conversion failed:`, err.message);
     res.status(500).json({ error: err.message });
   }
 };
 
+// ── Synced lyrics export (.lrc) ─────────────────────────────────────────
+
+/** Cleanup of old backend-injected filename prefixes. */
+const TRACK_PREFIXES = /^_?(XL|STD)(\s*\(CPP\))?_?\s*-?\s*/i;
+
+/** Song row by id, else by audio_url (Lyric Studio queue items have no row). */
+function findSong(id: unknown, audioUrl?: string): any {
+  const byId = typeof id === 'string' && id
+    ? getDb().prepare('SELECT * FROM songs WHERE id = ?').get(id) as any
+    : null;
+  if (byId) return byId;
+  if (!audioUrl) return null;
+  return getDb().prepare('SELECT * FROM songs WHERE audio_url = ?').get(audioUrl) as any ?? null;
+}
+
+/** The song row's generation params, or an empty object when it has none. */
+function generationParams(song: any): { artist?: unknown; artistName?: unknown } {
+  try { return JSON.parse(song?.generation_params || '{}') || {}; } catch { return {}; }
+}
+
+/** Drop a leading "Artist - " from a title, which generation may have added. */
+function stripArtistPrefix(title: string, artist: string): string {
+  if (!artist) return title;
+  const prefix = new RegExp(`^${artist.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*-\\s*`, 'i');
+  return title.replace(prefix, '').trim() || title;
+}
+
+/** `enhanced=1` asks for A2 word stamps (`<mm:ss.xx>`) in the exported LRC. */
+function wantsEnhanced(value: unknown): boolean {
+  return value === '1' || value === 'true';
+}
+
+/** Artist as recorded on the song row, cleaned of old backend prefixes. */
+function savedArtistFor(song: any): string {
+  const gp = generationParams(song);
+  const saved = [gp.artist, gp.artistName, song?.artist]
+    .find(v => typeof v === 'string' && v.trim()) as string | undefined;
+  return (saved || '').replace(TRACK_PREFIXES, '').replace(/[^a-zA-Z0-9 _()-]/g, '').trim();
+}
+
+/**
+ * Filename stem for an exported `.lrc`, matching the audio download name
+ * (`Prepend - Artist - Title`) so a folder of tracks keeps its pairs.
+ */
+function lrcNameStem(song: any, audioUrl: string, artistName: string, prepend: string): string {
+  const artist = artistName || savedArtistFor(song);
+  const rawTitle = song?.title || path.basename(audioUrl || '').replace(/\.[^.]+$/, '') || 'track';
+  const title = stripArtistPrefix(
+    rawTitle.replace(TRACK_PREFIXES, '').replace(/_mastered/g, '')
+      .replace(/[^a-zA-Z0-9 _()-]/g, '').trim() || 'track',
+    artist,
+  );
+  return [prepend, artist, title].filter(Boolean).join(' - ');
+}
+
+// GET /api/download/:id/lrc — the track's synced lyrics as an .lrc file.
+// POST /api/download/:id/lrc/save — same text, written into DOWNLOAD_DIR.
+// `enhanced=1` adds `<mm:ss.xx>` word stamps, rebuilt from `.lyrics.json`.
+//
+// Reads the `.lrc` beside the render, else rebuilds it from `.lyrics.json`, so
+// a retranscribed track exports even when the engine never wrote an LRC.
+const lrcHandler = (save: boolean) => async (req: Request, res: Response) => {
+  if (save && !config.data.downloadDir) {
+    res.status(409).json({ error: 'No download folder is set' });
+    return;
+  }
+  const audioUrlParam = (req.query.audioUrl as string || '').trim();
+  const artistName = (req.query.artist as string || '').trim();
+  const prepend = (req.query.prepend as string || '').trim();
+  // Which render the caller would have downloaded, so the .lrc gets the same
+  // " - Unmastered" suffix. External players pair a sidecar by exact filename.
+  const version = (req.query.version as string || 'mastered').toLowerCase();
+
+  const song = findSong(req.params.id, audioUrlParam);
+
+  const audioUrl = song?.audio_url || audioUrlParam;
+  if (!audioUrl) {
+    res.status(404).json({ error: 'Song not found' });
+    return;
+  }
+
+  const artist = artistName || savedArtistFor(song);
+  const lrc = readTrackLrc(
+    config.data.audioDir, audioUrl, { title: song?.title, artist },
+    { enhanced: wantsEnhanced(req.query.enhanced) },
+  );
+  if (!lrc) {
+    res.status(404).json({ error: 'No synced lyrics for this track — run Retranscribe Lyrics first.' });
+    return;
+  }
+
+  const filename = `${lrcNameStem(song, audioUrl, artistName, prepend)}${versionSuffix(version)}.lrc`;
+  try {
+    const tempDir = path.join(config.data.dir, 'download_temp');
+    fs.mkdirSync(tempDir, { recursive: true });
+    const tempFile = path.join(tempDir, `lrc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}.lrc`);
+    fs.writeFileSync(tempFile, lrc.text, 'utf-8');
+    deliver(res, save, tempFile, filename, 'text/plain; charset=utf-8', tempFile);
+  } catch (err: any) {
+    console.error('[Download] LRC export failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+router.get('/:id/lrc', lrcHandler(false));
+router.post('/:id/lrc/save', lrcHandler(true));
 router.get('/:id', downloadHandler(false));
 router.post('/:id/save', downloadHandler(true));
 
