@@ -1,8 +1,12 @@
 @echo off
 setlocal
+REM Stock Windows ships PowerShell 5.1 only; use pwsh (7+) when it is installed.
+REM Resolved before any step that can replace this script, and on every re-entry.
+set "HOTSTEP_PS=powershell.exe -NoProfile -ExecutionPolicy Bypass"
+where pwsh >nul 2>&1 && set "HOTSTEP_PS=pwsh -NoProfile"
 REM Serialize engine snapshots with rebuilds and updates in this checkout.
 if /i not "%HOTSTEP_ENGINE_LOCK_ROOT%\"=="%~dp0" (
-    pwsh -NoProfile -File "%~dp0tools\prod\engine-lock.ps1" -Script "%~f0" %*
+    %HOTSTEP_PS% -File "%~dp0tools\prod\engine-lock.ps1" -Script "%~f0" %*
     goto :engine_lock_result
 )
 goto :engine_lock_held
@@ -50,10 +54,10 @@ if not defined HOTSTEP_SHUTDOWN_PORT (
 )
 REM A trailing directory separator excludes sibling checkouts with a shared prefix.
 if /i "%~1"=="--dry-run" (
-    pwsh -NoProfile -File "%HOTSTEP_REPO_DIR%tools\prod\stop-checkout.ps1" -Root "%HOTSTEP_REPO_DIR%." -Port %HOTSTEP_SHUTDOWN_PORT% -DryRun
+    %HOTSTEP_PS% -File "%HOTSTEP_REPO_DIR%tools\prod\stop-checkout.ps1" -Root "%HOTSTEP_REPO_DIR%." -Port %HOTSTEP_SHUTDOWN_PORT% -DryRun
     goto :engine_lock_result
 )
-pwsh -NoProfile -File "%HOTSTEP_REPO_DIR%tools\prod\stop-checkout.ps1" -Root "%HOTSTEP_REPO_DIR%." -Port %HOTSTEP_SHUTDOWN_PORT%
+%HOTSTEP_PS% -File "%HOTSTEP_REPO_DIR%tools\prod\stop-checkout.ps1" -Root "%HOTSTEP_REPO_DIR%." -Port %HOTSTEP_SHUTDOWN_PORT%
 if errorlevel 1 exit /b 1
 
 :build
