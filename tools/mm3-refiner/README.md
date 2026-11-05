@@ -19,7 +19,7 @@ The source is read locally without modifications.
 |---|---|---|---|
 | Refiner and normalization | `452bf5e0e1b7225e919c1b4bef0026f13283396c` | MiniMax-Music3 Community License | Local conversion only |
 | [MERT-v1-95M](https://huggingface.co/m-a-p/MERT-v1-95M) including remote Python code and feature extractor | `12af15fef9d0ac838c3f475bfbbf26d2060dd4f5` | CC-BY-NC-4.0 | Public pack policy still requires a decision |
-| [larger_clap_music](https://huggingface.co/laion/larger_clap_music) checkpoint, config and processor | `a0b4534a14f58e20944452dff00a22a06ce629d1` | Apache-2.0 | Conversion waits for the conditioning decision |
+| [larger_clap_music](https://huggingface.co/laion/larger_clap_music) checkpoint, config and processor | `a0b4534a14f58e20944452dff00a22a06ce629d1` | Apache-2.0 | Retained; audio tower and projection converted to F32 |
 | [DAV encoder/decoder](https://huggingface.co/SimpleTuner/MiniMax-Music-3-Encoder), `audio_vae` | `fce0d00b1ae42ee47874babb8c06fb859eb01443` | MiniMax-Music3 Community License | Reference only; existing engine GGUFs are reused |
 
 The old experiment cache also contains an automatically converted CLAP safetensors
@@ -48,7 +48,7 @@ Metadata includes architecture `mm3-refiner-{refiner,mert,clap}`, source revisio
 licence, original config, processor config where applicable, layout and the
 SHA-256 of this contract. Full inventories in `artifacts/gguf/*-inventory.json`
 list every tensor's name, shape, byte count and hash, and every deliberate CLAP
-omission. The two completed conversions contain no omitted source tensors.
+omission. The MERT and refiner conversions contain no omitted source tensors; the CLAP one omits exactly the 207 text-tower and logit-scale tensors listed below.
 
 | Refiner group | Tensors | F32 payload bytes |
 |---|---:|---:|
@@ -89,10 +89,13 @@ weight-normalization dimension when reconstructing the convolution.
 
 CLAP accounting is 555 source tensors: 348 `audio_model.*` and
 `audio_projection.*` tensors, 274,742,884 F32 payload bytes, and 207 explicitly
-excluded text-tower/projection or training logit-scale tensors. No CLAP GGUF has
-been emitted while its decision is pending. The converter refuses `--components
-clap` until the contract records `decision: retained`. Config/processor tensors
-and style vectors are captured regardless of that decision.
+excluded text-tower/projection or training logit-scale tensors. The contract
+records `decision: retained` (the frozen-mean style constant was rejected), so
+`convert.py --components clap` emits `mm3-refiner-clap-f32.gguf`, architecture
+`mm3-refiner-clap`: **274,780,768 bytes**, 348 tensors, 274,742,884 payload
+bytes, byte-exact readback verified, the 207 omissions listed in
+`artifacts/gguf/clap-inventory.json`. The converter still refuses `--components
+clap` while the decision is not `retained`.
 
 ## Capturing and comparing
 
@@ -184,3 +187,29 @@ identity/raw-F32 comparisons and rejected drift, independent-limit failures,
 non-finite tensors and bad shapes. Python compilation and the docs check passed;
 the docs check reported 12 existing missing-screenshot warnings. Engine smoke
 passed its round, odd and HeartMuLa cases with the GPU idle.
+
+## CLAP port check
+
+`engine/src/minimax/mm3-refiner-clap.h` ports the invoked path only: centre crop of
+at most 10 s, torchaudio-style 48 kHz resample, the stock processor (repeatpad,
+slaney log-mel), HTSAT, pooling, projection and L2 normalisation; no feature fusion
+and no text tower. `check-clap.ps1` runs `mm3-refiner-clap-probe` over the
+fixtures (steps-1 windows, `-All` for every copy) and gates three things, each on
+the bound frozen in `fixtures.json`: the 48 kHz audio and the log-mel computed from
+the reference's own 48 kHz audio on `clap_processor`, and the pooled vector on
+`clap`. The mel of the engine's own resampled audio is printed but not gated:
+torchaudio resamples in float32, and its 1-2 ulp noise moves the near-silent top
+mel bins of band-limited renders by up to 4e-3 dB, which is above the 1e-4 dB
+processor bound and changes the vector by 1e-7. The probe builds alone, with no
+`build.cmd`:
+
+```powershell
+cmake -S engine -B engine/build/clap-probe -DGGML_CUDA=OFF -DGGML_VULKAN=OFF -DGGML_BACKEND_DL=OFF
+cmake --build engine/build/clap-probe --config Release --target mm3-refiner-clap-probe
+pwsh -NoProfile -File tools/mm3-refiner/check-clap.ps1
+```
+
+Changing `decision` in `fixtures.json` changes the contract hash. The slice-1
+fixture manifests and the refiner and MERT GGUF metadata still carry the earlier
+hash, so `capture-reference.py --reload` needs a recapture (or a manifest rebind)
+before it runs again; the engine probes do not read that hash.

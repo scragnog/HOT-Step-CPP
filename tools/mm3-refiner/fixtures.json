@@ -41,7 +41,7 @@
       "config": "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--laion--larger_clap_music/snapshots/a0b4534a14f58e20944452dff00a22a06ce629d1/config.json",
       "processor": "_experiments/mm3-whats-new-2026-11-05/refiner/hf-cache/hub/models--laion--larger_clap_music/snapshots/a0b4534a14f58e20944452dff00a22a06ce629d1/preprocessor_config.json",
       "license": "Apache-2.0",
-      "decision": "pending"
+      "decision": "retained"
     },
     "dav": {
       "repo": "SimpleTuner/MiniMax-Music-3-Encoder",
