@@ -70,6 +70,8 @@ number. Tags and seed are saved with the cover draft separately from SA3 setting
 Use Intro, Verse, Chorus, Bridge and Outro lyric section markers. Unmarked
 lyrics start as Verse. An instrumental cover uses Intro. Generation keeps
 the 240-second ceiling. The approved ABC supplies melody, chords and tempo.
+Chord roots and slash chords accept ASCII or Unicode flats and sharps, including
+the symbols produced by SheetSage2 score parsing.
 HeartMuLa uses the same confirmed score/lyrics checks as YuE2, with no YuE2
 Build controls. Score-only imports can be prepared and saved, but submission
 currently needs the workflow draft created by uploading source audio.

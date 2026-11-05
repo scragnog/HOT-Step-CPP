@@ -94,6 +94,24 @@ test('ABC holds chord symbols including inversions and no-chord boundaries, with
 });
 
 const captures = fileURLToPath(new URL('../../../_experiments/lead-sheet-reference/captures/', import.meta.url));
+test('ABC chord accidentals from abcjs preserve flats, sharps and slash chords', () => {
+  for (const [symbol, pitches] of [
+    ['Db', [1, 5, 8]], ['D♭', [1, 5, 8]],
+    ['F#', [1, 6, 10]], ['F♯', [1, 6, 10]],
+    ['Bbm7/Db', [1, 5, 8, 10]], ['B♭m7/D♭', [1, 5, 8, 10]],
+    ['C#/G#', [1, 5, 8]], ['C♯/G♯', [1, 5, 8]],
+  ] as const) {
+    const events = abcLeadSheetEvents(abc(`"${symbol}"C4|`));
+    assert.deepEqual(events.chords.map(n => n.pitch).sort((a, b) => a - b), pitches, symbol);
+    const roll = abcLeadSheetRoll(abc(`"${symbol}"C4|`));
+    for (let t = 0; t < 16; t++) {
+      assert.deepEqual(Array.from(roll.chord.slice(t * 12, (t + 1) * 12)),
+        Array.from({ length: 12 }, (_, pc) => Number((pitches as readonly number[]).includes(pc))), symbol);
+    }
+  }
+  assert.throws(() => abcLeadSheetRoll(abc('"D♭unknown"C4|')), /Unsupported.*chord/);
+});
+
 test('upstream MIDI-to-roll fixtures match every byte through raw note events', async t => {
   if (!fs.existsSync(captures)) return t.skip('Local 6a captures absent; gitignored reference data is required for parity');
   let count = 0;

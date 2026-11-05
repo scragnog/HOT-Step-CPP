@@ -70,7 +70,8 @@ const intervals: Record<string, number[]> = { '': [0, 4, 7], maj: [0, 4, 7], m: 
   min7: [0, 3, 7, 10], sus2: [0, 2, 7], sus4: [0, 5, 7], '5': [0, 7] };
 function chordPitches(name: string): number[] {
   if (/^(N\.?C\.?|none)$/i.test(name)) return [];
-  const match = /^([A-G])([#b]?)([^/]*)(?:\/[A-G][#b]?)?$/.exec(name.replace(':', ''));
+  const normalized = name.replace(/♭/g, 'b').replace(/♯/g, '#').replace(':', '');
+  const match = /^([A-G])([#b]?)([^/]*)(?:\/[A-G][#b]?)?$/.exec(normalized);
   if (!match || !intervals[match[3]]) throw new Error(`Unsupported lead sheet chord: ${name}`);
   const root = roots[match[1]] + (match[2] === '#' ? 1 : match[2] === 'b' ? -1 : 0);
   return intervals[match[3]].map(pitch => (root + pitch + 12) % 12);
