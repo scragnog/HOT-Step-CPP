@@ -150,6 +150,33 @@ static MM3TrtStatus mm3_trt_status(const MM3Model & m) {
     return s;
 }
 
+// Host copy of the last refitted engine plan read from mm3-trt-cache. With
+// keep-loaded off the runtime (and its GPU memory) is dropped after every job,
+// so the next job would read the ~4.5 GB file again: ~3 s warm, and 35-45 s
+// when the read ran at ~130 MB/s (seen 2026-11-05). Holding the bytes leaves
+// only deserialize + context (~0.7 s) per job, and no VRAM is held between
+// jobs. Keyed by path + size + mtime; the file name already hashes the whole
+// refit identity. HOST memory, so like the AR slot it is not dropped by
+// mm3_unload() (that runs after every job) but by POST /mm3/unload, a model
+// selection change and a switch to the GGML renderer. Guarded by g_mm3_mutex.
+// ponytail: one slot, no RAM-size check; add one if low-RAM users run TensorRT.
+struct MM3TrtPlanCache {
+    std::string             key;
+    std::unique_ptr<char[]> bytes;
+    size_t                  size = 0;
+};
+
+static MM3TrtPlanCache g_mm3_trt_plan;
+
+static void mm3_trt_plan_drop(const char * why) {
+    if (!g_mm3_trt_plan.bytes) {
+        return;
+    }
+    fprintf(stderr, "[MM3-TRT] Dropped %.0f MB host engine plan (%s)\n", double(g_mm3_trt_plan.size) / 1048576.0,
+            why);
+    g_mm3_trt_plan = MM3TrtPlanCache{};
+}
+
 static bool mm3_trt_available(const MM3Model & m, std::string * reason) {
     const auto s = mm3_trt_status(m);
     if (reason) {
@@ -482,20 +509,65 @@ class Runtime final : public MM3DitRuntime {
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
     }
 
-    bool deserialize(const std::filesystem::path & path) {
-        std::ifstream file(path, std::ios::binary | std::ios::ate);
-        if (!file || file.tellg() <= 0) {
+    // `keep` serves the plan from / stores it in g_mm3_trt_plan. The read is
+    // unbuffered 64 MB chunks into an uninitialised buffer: std::ifstream into
+    // a zero-filled vector took 3.2 s for the 4.5 GB plan.
+    bool deserialize(const std::filesystem::path & path, bool keep = false) {
+        const auto      t0 = std::chrono::steady_clock::now();
+        std::error_code ec;
+        const auto      size = std::filesystem::file_size(path, ec);
+        if (ec || size == 0) {
             return false;
         }
-        const auto        length = file.tellg();
-        std::vector<char> bytes(size_t(length), 0);
-        file.seekg(0);
-        file.read(bytes.data(), length);
-        if (!file) {
+        const auto        mtime = std::filesystem::last_write_time(path, ec);
+        const std::string key =
+            path.string() + '|' + std::to_string(size) + '|' + std::to_string(mtime.time_since_epoch().count());
+        const bool hit = keep && !ec && g_mm3_trt_plan.bytes && g_mm3_trt_plan.key == key;
+        std::unique_ptr<char[]> local;
+        if (!hit) {
+            if (keep) {
+                mm3_trt_plan_drop("superseded");
+            }
+#    ifdef _WIN32
+            std::FILE * file = _wfopen(path.c_str(), L"rb");
+#    else
+            std::FILE * file = std::fopen(path.c_str(), "rb");
+#    endif
+            if (!file) {
+                return false;
+            }
+            std::setvbuf(file, nullptr, _IONBF, 0);
+            local.reset(new char[size]);
+            size_t done = 0;
+            while (done < size) {
+                const size_t got = std::fread(local.get() + done, 1, std::min<size_t>(size - done, 64u << 20), file);
+                if (got == 0) {
+                    break;
+                }
+                done += got;
+            }
+            std::fclose(file);
+            if (done != size) {
+                return false;
+            }
+        }
+        const char * data = hit ? g_mm3_trt_plan.bytes.get() : local.get();
+        const auto   t1   = std::chrono::steady_clock::now();
+        engine.reset(runtime->deserializeCudaEngine(data, size));
+        fprintf(stderr, "[MM3-TRT] Engine plan %s %.0f ms (%.2f GB), deserialize %.0f ms\n",
+                hit ? "from host copy" : "file read", std::chrono::duration<double, std::milli>(t1 - t0).count(),
+                double(size) / 1073741824.0,
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count());
+        if (!engine) {
+            if (hit) {
+                mm3_trt_plan_drop("rejected by TensorRT");
+            }
             return false;
         }
-        engine.reset(runtime->deserializeCudaEngine(bytes.data(), bytes.size()));
-        return bool(engine);
+        if (keep && !hit && !ec) {
+            g_mm3_trt_plan = MM3TrtPlanCache{ key, std::move(local), size_t(size) };
+        }
+        return true;
     }
 
     void save_cache(const std::filesystem::path & path) {
@@ -680,7 +752,7 @@ class Runtime final : public MM3DitRuntime {
         runtime.reset(nvinfer1::createInferRuntime(logger));
         check(bool(runtime), "Cannot create TensorRT runtime");
         const auto prepared  = cache_path(m, path, manifest);
-        bool       cache_hit = std::filesystem::is_regular_file(prepared) && deserialize(prepared);
+        bool       cache_hit = std::filesystem::is_regular_file(prepared) && deserialize(prepared, /*keep=*/true);
         if (!cache_hit) {
             // A rejected file belongs to our derived cache, not the supplied
             // engine. Remove it so successful refitting can repair the cache.
@@ -723,6 +795,8 @@ class Runtime final : public MM3DitRuntime {
                   context->setTensorAddress("output", dy.data),
               "Cannot bind TensorRT inputs");
         cuda_check(cudaStreamSynchronize(stream), "finish setup");
+        fprintf(stderr, "[MM3-TRT] Context and buffers %.0f ms\n",
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - refitted).count());
         size_t free_after = 0;
         cuda_check(cudaMemGetInfo(&free_after, &total), "query resident memory");
         resident_bytes = free_before > free_after ? free_before - free_after : size_t(length);

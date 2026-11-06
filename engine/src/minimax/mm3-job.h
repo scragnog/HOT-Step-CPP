@@ -694,6 +694,9 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         mm3_cond_free(&g_mm3_cond);
         mm3_dit_free(&g_mm3_dit);
         mm3_free_rest(&g_mm3);
+        if (req.dit_backend != "tensorrt") {
+            mm3_trt_plan_drop("renderer switched to GGML");
+        }
         g_mm3.dit_backend = req.dit_backend;
     }
     g_mm3.depth_fused = req.depth_fused;

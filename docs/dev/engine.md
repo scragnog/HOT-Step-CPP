@@ -891,7 +891,12 @@ MM3 the request's `dit_backend` does.
     `-DHOT_STEP_TRTLLM_ENABLE=ON`.
   - MM3 DiT: `"dit_backend": "tensorrt"` on `/mm3/synth` uses `mm3-dit-trt.h`, which
     builds a base engine per GPU under `<models>/mm3/mm3-trt-cache/` and refits it
-    per DiT GGUF and adapter stack.
+    per DiT GGUF and adapter stack. With keep-loaded off the runtime is freed after
+    every job, but the refitted plan's bytes (~4.5 GB) stay in host RAM
+    (`g_mm3_trt_plan`), so the next job only deserializes (~0.5 s) instead of
+    reading the file again. `POST /mm3/unload` (without `keep_ar_cache`), a model
+    selection change and a switch to the GGML renderer drop them; `/mm3/props`
+    reports the size as `dit_runtime.host_plan_mb`.
 
 ONNX Runtime is gone from the engine: no build links it, and there is no CMake option
 for it. What used to run on it:

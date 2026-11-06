@@ -6,6 +6,45 @@ can place individual children elsewhere.
 
 > Reference for the `mm3-backend` skill. Read only when the task needs it.
 
+## TensorRT DiT per-job load cost (measured 2026-11-06)
+
+With keep-loaded off, `mm3_unload()` frees the TensorRT runtime after every
+job, so each job loads the refitted engine again
+(`mm3-trt-cache/<hash>.engine`, 4.54 GB). The log now splits the load:
+`[MM3-TRT] Engine plan file read|from host copy N ms, deserialize N ms` and
+`Context and buffers N ms`. Bench (`tools/mm3-bench`, TensorRT, lm q8_0,
+depth f16, dit q8_0, 30 steps, 60 s, seed 4242, RTX 5090, page-cached file):
+
+| build | read | deserialize | context | engine total | job total (runs 2-3) |
+|---|---|---|---|---|---|
+| before (ifstream into a zero-filled vector) | 3194-3382 ms | 401-491 ms | 212-238 ms | 3.9-4.1 s | 45.9-46.3 s |
+| chunked unbuffered read + host plan slot | 1422 ms (job 1), 0 after | 414-597 ms | 209-277 ms | 0.4-0.5 s from job 2 | 42.1-42.9 s |
+
+The sha stayed `045092857b873ef7`. Two fixes, one commit:
+
+- **The read.** `std::ifstream::read` into `std::vector<char>(n, 0)` took
+  3.2 s for a file Node reads in 0.65 s. `fread` in 64 MB chunks with
+  `_IONBF` into an uninitialised buffer takes 1.4 s.
+- **The host plan slot** (`g_mm3_trt_plan`, `mm3-dit-trt.h`). It keeps the
+  bytes of the last refit-cache plan in host RAM, keyed by
+  path+size+mtime. The file name already hashes the full refit identity. A
+  later job only deserializes. Nothing stays on the GPU between jobs, so
+  keep-loaded off still frees all VRAM. Like the AR slot, it is not dropped by
+  `mm3_unload()`. It is dropped by `POST /mm3/unload` (unless
+  `keep_ar_cache`), a select-model change, and a switch to the GGML renderer.
+  Cost: ~4.5 GB of host RAM. The size is shown as
+  `dit_runtime.host_plan_mb` in `/mm3/props`. Keep-loaded on already keeps
+  the whole runtime resident, so this path never runs then.
+
+**The 37-44 s loads (2026-11-05 23:12-23:59 sessions).** The same file loaded
+in 3.5 s at 22:35 and again from 00:05 on, with the same exe. That rate is
+~130 MB/s on an SN850X that `cat` reads in 2.4 s. Deserialize is in-memory and
+measured at 0.4-0.6 s, so the lost time was in the read. It could not be
+reproduced afterwards, so the cause is open. On-access AV scanning of a 4.5 GB
+file runs at about that rate, and so would small synchronous reads from a cold
+cache. Either way the host slot means only the first job after an unload pays
+the read.
+
 ## Alternative composer LMs (depth-pruned + guidance-distilled) — 2026-08-22
 
 The composer LM is **independently swappable**: the 5-way split means a variant replaces

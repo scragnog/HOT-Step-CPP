@@ -319,6 +319,7 @@ static void mm3_handle_props(const httplib::Request &, httplib::Response & res) 
         yyjson_mut_obj_add_strcpy(doc, rt, "backend", g_mm3.dit_backend.c_str());
         yyjson_mut_obj_add_strcpy(doc, rt, "reason", st.reason.c_str());
         yyjson_mut_obj_add_real(doc, rt, "gpu_mb", g_mm3.dit_runtime ? double(g_mm3.dit_runtime->gpu_bytes()) / 1048576 : 0);
+        yyjson_mut_obj_add_real(doc, rt, "host_plan_mb", double(g_mm3_trt_plan.size) / 1048576);
         yyjson_mut_obj_add_int(doc, rt, "sm", st.sm);
         yyjson_mut_obj_add_bool(doc, rt, "needs_build", st.needs_build);
         {
@@ -523,6 +524,7 @@ static void mm3_handle_unload(const httplib::Request & req, httplib::Response & 
         }
     } else {
         mm3_ar_cache_clear("engine unload");
+        mm3_trt_plan_drop("engine unload");  // host RAM too, same rule as the AR slot
     }
 
     yyjson_mut_doc * doc  = yyjson_mut_doc_new(NULL);
@@ -2007,6 +2009,7 @@ static void mm3_handle_select_model(const httplib::Request & req, httplib::Respo
         // could never hit it again anyway — this just stops a dead slot from
         // holding hundreds of MB of host RAM for the rest of the session.
         mm3_ar_cache_clear("model selection changed");
+        mm3_trt_plan_drop("model selection changed");
     }
 
     std::string err;
