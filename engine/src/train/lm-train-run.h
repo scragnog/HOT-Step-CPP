@@ -1444,13 +1444,10 @@ static int lm_train_stage(const LmTrainArgs & a, LmExportMeta * meta, LmTrainOut
         if (S == last_mask_S) {
             return;
         }
-        std::vector<float> m;
-        if (pfx.active()) {
-            lm_causal_mask_prefix(pfx.n, /*pfx_lo=*/0, S, /*n_prompt=*/0, &m);  // every row sees the prefix
-        } else {
-            lm_causal_mask(S, &m);
-        }
-        lm_mask_set(t_msk, m);  // converts to F16 when t_msk is F16 (D4)
+        // Written straight in t_msk's type (F16 under --attn flash, D4): the
+        // bytes lm_causal_mask{,_prefix} + lm_mask_set give, without the F32
+        // staging. Every row sees the prefix when there is one.
+        lm_mask_set_causal(t_msk, pfx.active() ? pfx.n : 0, /*pfx_lo=*/0, S, /*n_prompt=*/0);
         last_mask_S = S;
     };
 

@@ -847,7 +847,10 @@ or per-element conversion. The same bytes as before, checked by
 `engine/tests/test-lm-causal-mask.cpp`. The MM3 loop also marks the
 checkpointed path's last-S cache, because both wrote the same `t_msk` and each
 rebuilt it when S changed. Whole-song crops change S on almost every step, so
-that was two ~100 ms host builds per step at S 7,178. `HOTSTEP_LM_PHASE_TIMER`
+that was two ~100 ms host builds per step at S 7,178. The ACE trainer's naive
+path (`upload_mask` in `train/lm-train-run.h`) uses the same call since later
+that day; it already kept one last-S cache, so there it only drops the F32
+staging. `HOTSTEP_LM_PHASE_TIMER`
 now starts its clock before the mask and token uploads. The measured step
 breakdown (FP32 SIMT GEMMs are 58 % of kernel time, flash attention 24 %) is in
 [.claude/skills/mm3-backend/reference/training.md](../../.claude/skills/mm3-backend/reference/training.md).
