@@ -115,6 +115,7 @@ tools/vocal-end/out/
 tools/mm3-retarget/out/
 !tools/mm3-runtime-probes/
 !tools/mm3-trt-export/
+!tools/mm3-bench/
 !tools/tensorrt-sdk/
 !tools/release-gate/
 !tools/mm3-runtime-probes/sglang/
