@@ -45,7 +45,7 @@ export const Mm3StreamStatus: React.FC<Mm3StreamStatusProps> = ({ jobId, interle
           </span>
         ) : s.chunks === 0 ? (
           interleaved === false
-            ? 'streaming — audio starts once planning finishes (both model stacks would not fit in VRAM)'
+            ? 'streaming — audio starts once planning finishes (Require Natural Ending is on, or both model stacks would not fit in VRAM)'
             : 'streaming — waiting for the first window…'
         ) : (
           <>
