@@ -601,7 +601,34 @@ class Runtime final : public MM3DitRuntime {
         }
     }
 
+    // The DiT as a CPU refit source. The rest load stages it only when an
+    // MM3_ADAPTER merge needs it; a cache hit never reads it.
+    struct StagedDit {
+        WeightCtx w = {};
+        ~StagedDit() { wctx_free(&w); }
+    };
+
+    static void stage_dit(const MM3Model & m, WeightCtx * w) {
+        const std::string & path = m.role_file[MM3_R_DIT].path;
+        GGUFModel           gf   = {};
+        check(gf_load(&gf, path.c_str()), "Cannot open DiT GGUF for the TensorRT refit: " + path);
+        std::vector<std::string> errs;
+        MM3DitWeights            unused;
+        wctx_init(w, 10 + int(m.synth_cfg.dit.block_count) * 10);
+        MM3Loader ld{ w, &gf, nullptr, &errs };
+        mm3_load_dit_tensors(m.synth_cfg.dit, &unused, ld);
+        const bool ok = errs.empty() && wctx_alloc(w, m.cpu_backend);
+        gf_close(&gf);
+        check(ok, errs.empty() ? std::string("CPU allocation failed for TensorRT DiT refit sources") : errs[0]);
+    }
+
     void refit(const MM3Model & m, const std::string & manifest_path) {
+        StagedDit      staged;
+        ggml_context * dit = m.wctx_dit_cpu.ctx;
+        if (!dit || !ggml_get_tensor(dit, "dit.proj_in.weight")) {
+            stage_dit(m, &staged.w);
+            dit = staged.w.ctx;
+        }
         yyjson_read_err                                         json_error{};
         std::unique_ptr<yyjson_doc, decltype(&yyjson_doc_free)> doc(
             yyjson_read_file(manifest_path.c_str(), 0, nullptr, &json_error), yyjson_doc_free);
@@ -625,7 +652,7 @@ class Runtime final : public MM3DitRuntime {
             auto         transpose_value = yyjson_obj_get(entry, "transpose");
             check(source && target && yyjson_is_bool(transpose_value), "Invalid weight mapping");
             check(seen_gguf.insert(source).second && seen_engine.insert(target).second, "Duplicate weight mapping");
-            auto tensor = ggml_get_tensor(m.wctx_dit_cpu.ctx, source);
+            auto tensor = ggml_get_tensor(dit, source);
             check(tensor != nullptr, std::string("Missing DiT tensor: ") + source);
             const size_t n         = size_t(ggml_nelements(tensor));
             const auto   prototype = refitter->getWeightsPrototype(target);
@@ -676,8 +703,7 @@ class Runtime final : public MM3DitRuntime {
             check(refitter->setNamedWeights(target, { nvinfer1::DataType::kBF16, dest.data(), int64_t(n) }),
                   std::string("Cannot refit ") + target);
         }
-        for (auto tensor = ggml_get_first_tensor(m.wctx_dit_cpu.ctx); tensor;
-             tensor      = ggml_get_next_tensor(m.wctx_dit_cpu.ctx, tensor)) {
+        for (auto tensor = ggml_get_first_tensor(dit); tensor; tensor = ggml_get_next_tensor(dit, tensor)) {
             const std::string name = ggml_get_name(tensor);
             if (name != "dit.rope_inv_freq" && name != "dit.time_fourier.weight") {
                 check(seen_gguf.count(name) == 1, "Unmapped DiT parameter: " + name);
@@ -776,6 +802,7 @@ class Runtime final : public MM3DitRuntime {
         } else {
             fprintf(stderr, "[MM3-TRT] Reused refitted weight cache: %s\n", prepared.string().c_str());
         }
+        const auto setup = std::chrono::steady_clock::now();
         basis.resize(128);
         check(m.synth.dit.time_fourier->type == GGML_TYPE_F32, "Fourier basis must remain F32");
         ggml_backend_tensor_get(m.synth.dit.time_fourier, basis.data(), 0, basis.size() * 4);
@@ -796,7 +823,7 @@ class Runtime final : public MM3DitRuntime {
               "Cannot bind TensorRT inputs");
         cuda_check(cudaStreamSynchronize(stream), "finish setup");
         fprintf(stderr, "[MM3-TRT] Context and buffers %.0f ms\n",
-                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - refitted).count());
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - setup).count());
         size_t free_after = 0;
         cuda_check(cudaMemGetInfo(&free_after, &total), "query resident memory");
         resident_bytes = free_before > free_after ? free_before - free_after : size_t(length);

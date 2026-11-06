@@ -19,8 +19,9 @@ depth f16, dit q8_0, 30 steps, 60 s, seed 4242, RTX 5090, page-cached file):
 |---|---|---|---|---|---|
 | before (ifstream into a zero-filled vector) | 3194-3382 ms | 401-491 ms | 212-238 ms | 3.9-4.1 s | 45.9-46.3 s |
 | chunked unbuffered read + host plan slot | 1422 ms (job 1), 0 after | 414-597 ms | 209-277 ms | 0.4-0.5 s from job 2 | 42.1-42.9 s |
+| + no DiT CPU staging on a cache hit | 990 ms (job 1), 0 after | 325-422 ms | 208-239 ms | 0.36-0.42 s from job 2 | 40.5-40.7 s |
 
-The sha stayed `045092857b873ef7`. Two fixes, one commit:
+The sha stayed `045092857b873ef7` throughout. The first commit made two fixes:
 
 - **The read.** `std::ifstream::read` into `std::vector<char>(n, 0)` took
   3.2 s for a file Node reads in 0.65 s. `fread` in 64 MB chunks with
@@ -35,6 +36,22 @@ The sha stayed `045092857b873ef7`. Two fixes, one commit:
   Cost: ~4.5 GB of host RAM. The size is shown as
   `dit_runtime.host_plan_mb` in `/mm3/props`. Keep-loaded on already keeps
   the whole runtime resident, so this path never runs then.
+
+**No DiT CPU staging on a cache hit.** The stage-2 load used to stage the
+whole DiT GGUF (2.47 GB for q8_0) into a CPU buffer as the refit source,
+even when the refit cache hit and nothing read it. `[MM3] Loaded
+cond/dit/voc` took 1.6-2.5 s at the staged handover, on the critical path.
+Now, without `MM3_ADAPTER`, the rest load stages only `dit.time_fourier`, and
+`Runtime::refit` stages its own copy through `mm3_load_dit_tensors` on a miss,
+freed once the refit is done. That load is now 86-215 ms. A forced miss (cache
+file moved aside) refit from the lazily staged copy, rendered the same sha,
+and wrote a cache file byte-identical to the original. With `MM3_ADAPTER` set,
+the rest load still stages and merges the full DiT, as before. Note that the
+DiT on the TensorRT path was never on the GPU: `synth 0.25 GB` in the load
+line is cond + voc.
+
+The remaining per-job warm (3.6-4.5 s) is the LM + depth upload,
+`[MM3] Loaded lm depth: 9.70 GB in ~4 s`.
 
 **The 37-44 s loads (2026-11-05 23:12-23:59 sessions).** The same file loaded
 in 3.5 s at 22:35 and again from 00:05 on, with the same exe. That rate is

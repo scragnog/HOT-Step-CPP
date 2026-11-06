@@ -896,7 +896,10 @@ MM3 the request's `dit_backend` does.
     (`g_mm3_trt_plan`), so the next job only deserializes (~0.5 s) instead of
     reading the file again. `POST /mm3/unload` (without `keep_ar_cache`), a model
     selection change and a switch to the GGML renderer drop them; `/mm3/props`
-    reports the size as `dit_runtime.host_plan_mb`.
+    reports the size as `dit_runtime.host_plan_mb`. The DiT GGUF is staged on the
+    CPU only as a refit source: on a refit-cache miss `Runtime::refit` stages it
+    for the refit and frees it after. The rest load stages the whole DiT only when
+    `MM3_ADAPTER` is set, because the adapter merge patches that copy.
 
 ONNX Runtime is gone from the engine: no build links it, and there is no CMake option
 for it. What used to run on it:

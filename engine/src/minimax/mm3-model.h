@@ -1387,6 +1387,42 @@ static void mm3_load_voc_tensors(MM3Model * m, MM3Loader & ld) {
     m->synth.voc.conv_out_b      = ld.req("voc.conv_out.bias", 1);
 }
 
+// The flow-DiT tensors. Shared by the stage-2 load below and by the TensorRT
+// renderer, which stages them only when it has to refit (mm3-dit-trt.h).
+static void mm3_load_dit_tensors(const MM3DitConfig & t, MM3DitWeights * w, MM3Loader & ld) {
+    const int64_t        E  = t.embedding_length;
+    const int64_t        CC = t.concat_channels;
+    const int64_t        IC = t.in_channels;
+    const int64_t        FI = t.ff_inner;
+    const int            L  = (int) t.block_count;
+
+    w->preprocess_conv  = ld.req("dit.preprocess_conv.weight", 1, CC, CC);
+    w->postprocess_conv = ld.req("dit.postprocess_conv.weight", 1, IC, IC);
+    w->time_fourier     = ld.req("dit.time_fourier.weight", 1, t.fourier_dim / 2);
+    w->time_embd_w[0]   = ld.req("dit.time_embd.0.weight", t.fourier_dim, E);
+    w->time_embd_b[0]   = ld.req("dit.time_embd.0.bias", E);
+    w->time_embd_w[1]   = ld.req("dit.time_embd.1.weight", E, E);
+    w->time_embd_b[1]   = ld.req("dit.time_embd.1.bias", E);
+    w->proj_in          = ld.req("dit.proj_in.weight", CC, E);
+    w->proj_out         = ld.req("dit.proj_out.weight", E, IC);
+    w->rope_inv_freq    = ld.req("dit.rope_inv_freq", t.rope_dim / 2);
+
+    w->blk.assign((size_t) L, MM3DitBlock{});
+    for (int i = 0; i < L && ld.errors->empty(); i++) {
+        MM3DitBlock & b = w->blk[(size_t) i];
+        b.attn_norm_w   = ld.req(mm3_fmt("dit.blk.%d.attn_norm.weight", i), E);
+        b.attn_norm_b   = ld.req(mm3_fmt("dit.blk.%d.attn_norm.bias", i), E);
+        b.attn_qkv      = ld.req(mm3_fmt("dit.blk.%d.attn_qkv.weight", i), E, E * 3);
+        b.attn_output   = ld.req(mm3_fmt("dit.blk.%d.attn_output.weight", i), E, E);
+        b.ffn_norm_w    = ld.req(mm3_fmt("dit.blk.%d.ffn_norm.weight", i), E);
+        b.ffn_norm_b    = ld.req(mm3_fmt("dit.blk.%d.ffn_norm.bias", i), E);
+        b.ffn_in_w      = ld.req(mm3_fmt("dit.blk.%d.ffn_in.weight", i), E, FI * 2);
+        b.ffn_in_b      = ld.req(mm3_fmt("dit.blk.%d.ffn_in.bias", i), FI * 2);
+        b.ffn_out_w     = ld.req(mm3_fmt("dit.blk.%d.ffn_out.weight", i), FI, E);
+        b.ffn_out_b     = ld.req(mm3_fmt("dit.blk.%d.ffn_out.bias", i), E);
+    }
+}
+
 // The stage-2 parts: condition encoder + flow DiT + vocoder, one shared
 // backend buffer (they load and evict together), each read from its own
 // resolved file. In legacy bundle mode all three GGUFModel refs alias the same
@@ -1414,44 +1450,19 @@ static bool mm3_load_rest_tensors(MM3Model * m, const GGUFModel & gf_cond, const
     }
 
     // ── dit ──
+    // TensorRT keeps the DiT on the CPU only as a refit source. Without a DiT
+    // adapter to merge, the refit (a refit-cache miss) stages its own copy,
+    // so a cache hit reads just the Fourier basis instead of ~2.5 GB.
     ld.gf = &gf_dit;
     if (m->dit_backend == "tensorrt") {
         wctx_init(&m->wctx_dit_cpu, n_dit);
         ld.wctx = &m->wctx_dit_cpu;
     }
-    {
-        const MM3DitConfig & t  = c.dit;
-        const int64_t        E  = t.embedding_length;
-        const int64_t        CC = t.concat_channels;
-        const int64_t        IC = t.in_channels;
-        const int64_t        FI = t.ff_inner;
-        const int            L  = (int) t.block_count;
-
-        m->synth.dit.preprocess_conv  = ld.req("dit.preprocess_conv.weight", 1, CC, CC);
-        m->synth.dit.postprocess_conv = ld.req("dit.postprocess_conv.weight", 1, IC, IC);
-        m->synth.dit.time_fourier     = ld.req("dit.time_fourier.weight", 1, t.fourier_dim / 2);
-        m->synth.dit.time_embd_w[0]   = ld.req("dit.time_embd.0.weight", t.fourier_dim, E);
-        m->synth.dit.time_embd_b[0]   = ld.req("dit.time_embd.0.bias", E);
-        m->synth.dit.time_embd_w[1]   = ld.req("dit.time_embd.1.weight", E, E);
-        m->synth.dit.time_embd_b[1]   = ld.req("dit.time_embd.1.bias", E);
-        m->synth.dit.proj_in          = ld.req("dit.proj_in.weight", CC, E);
-        m->synth.dit.proj_out         = ld.req("dit.proj_out.weight", E, IC);
-        m->synth.dit.rope_inv_freq    = ld.req("dit.rope_inv_freq", t.rope_dim / 2);
-
-        m->synth.dit.blk.assign((size_t) L, MM3DitBlock{});
-        for (int i = 0; i < L && errs->empty(); i++) {
-            MM3DitBlock & b = m->synth.dit.blk[(size_t) i];
-            b.attn_norm_w   = ld.req(mm3_fmt("dit.blk.%d.attn_norm.weight", i), E);
-            b.attn_norm_b   = ld.req(mm3_fmt("dit.blk.%d.attn_norm.bias", i), E);
-            b.attn_qkv      = ld.req(mm3_fmt("dit.blk.%d.attn_qkv.weight", i), E, E * 3);
-            b.attn_output   = ld.req(mm3_fmt("dit.blk.%d.attn_output.weight", i), E, E);
-            b.ffn_norm_w    = ld.req(mm3_fmt("dit.blk.%d.ffn_norm.weight", i), E);
-            b.ffn_norm_b    = ld.req(mm3_fmt("dit.blk.%d.ffn_norm.bias", i), E);
-            b.ffn_in_w      = ld.req(mm3_fmt("dit.blk.%d.ffn_in.weight", i), E, FI * 2);
-            b.ffn_in_b      = ld.req(mm3_fmt("dit.blk.%d.ffn_in.bias", i), FI * 2);
-            b.ffn_out_w     = ld.req(mm3_fmt("dit.blk.%d.ffn_out.weight", i), FI, E);
-            b.ffn_out_b     = ld.req(mm3_fmt("dit.blk.%d.ffn_out.bias", i), E);
-        }
+    const char * adapter = getenv("MM3_ADAPTER");
+    if (m->dit_backend == "tensorrt" && !(adapter && *adapter)) {
+        m->synth.dit.time_fourier = ld.req("dit.time_fourier.weight", 1, c.dit.fourier_dim / 2);
+    } else {
+        mm3_load_dit_tensors(c.dit, &m->synth.dit, ld);
     }
 
     // ── voc ──
