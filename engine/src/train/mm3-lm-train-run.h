@@ -2927,8 +2927,21 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     jl("{\"type\":\"cropPolicy\",\"mode\":\"%s\",\"startFrac\":%.3f,\"endFrac\":%.3f}",
        a.crop_mode.c_str(), a.crop_start_frac, a.crop_end_frac);
     std::vector<int32_t> sem_in, ac_in, tgt, pos, pfx_pos;
-    std::vector<float>   msk;
     int                  last_mask_S = 0;
+    // The square causal mask for a window of S rows. Skipped entirely under a
+    // trainable prefix: lm_ckpt_upload_mask owns t_msk then (the mask is
+    // rectangular, [n + S, S]), and a square upload here would be silently
+    // reinstated over it. ckpt_run.t_msk IS t_msk, so the checkpointed path's
+    // own cache is marked too; before that, every change of S built and
+    // uploaded the mask twice (here, then again in lm_ckpt_upload_mask).
+    auto upload_square_mask = [&](int S) {
+        if (pfx.active() || S == last_mask_S) {
+            return;
+        }
+        lm_mask_set_causal(t_msk, 0, 0, S, 0);   // F16 under --attn flash, F32 under exact
+        last_mask_S         = S;
+        ckpt_st.last_mask_S = S;
+    };
     double               running = 0.0;
     int                  n_micro = 0, rc = 0;
     LmStepStats          stats;
@@ -3161,14 +3174,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                                     ? mm3_lm_train_slice_eos(t)
                                     : mm3_lm_train_slice_index(t, es.codes[(size_t) ((ec.c0 + j) * 8)]);
             }
-            // Skipped entirely under a trainable prefix: lm_ckpt_upload_mask
-            // owns t_msk then (the mask is rectangular, [n + S, S]), and a
-            // square upload here would be silently reinstated over it.
-            if (!pfx.active() && (int) S != last_mask_S) {
-                lm_causal_mask((int) S, &msk);
-                lm_mask_set(t_msk, msk);   // F16 under --attn flash, same bytes under exact
-                last_mask_S = (int) S;
-            }
+            upload_square_mask((int) S);
             // Same anchoring as training — an eval measured under a different
             // position convention is not measuring the thing being trained.
             pos.resize((size_t) S);
@@ -3649,14 +3655,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                                     ? mm3_lm_train_slice_eos(t)
                                     : mm3_lm_train_slice_index(t, rs.codes[(size_t) ((c0 + j) * 8)]);
             }
-            // Skipped entirely under a trainable prefix: lm_ckpt_upload_mask
-            // owns t_msk then (the mask is rectangular, [n + S, S]), and a
-            // square upload here would be silently reinstated over it.
-            if (!pfx.active() && (int) S != last_mask_S) {
-                lm_causal_mask((int) S, &msk);
-                lm_mask_set(t_msk, msk);   // F16 under --attn flash, same bytes under exact
-                last_mask_S = (int) S;
-            }
+            upload_square_mask((int) S);
             pos.resize((size_t) S);
             for (int64_t j = 0; j < P; j++)   pos[(size_t) j] = (int32_t) j;
             // Excerpt corpora carry their true start; under --crop-anchor song the
@@ -3906,14 +3905,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                                     : mm3_lm_train_slice_index(t, s.codes[(size_t) ((c0 + j) * 8)]);
             }
 
-            // Skipped entirely under a trainable prefix: lm_ckpt_upload_mask
-            // owns t_msk then (the mask is rectangular, [n + S, S]), and a
-            // square upload here would be silently reinstated over it.
-            if (!pfx.active() && (int) S != last_mask_S) {
-                lm_causal_mask((int) S, &msk);
-                lm_mask_set(t_msk, msk);   // F16 under --attn flash, same bytes under exact
-                last_mask_S = (int) S;
-            }
+            upload_square_mask((int) S);
             // Prompt at 0..P-1; frames at their TRUE position in the track
             // under --crop-anchor song (see MM3LmTrainArgs). Under "zero" the
             // frames restart at P, which is what every crop used to claim.

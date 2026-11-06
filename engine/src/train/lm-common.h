@@ -31,6 +31,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <memory>  // std::unique_ptr — lm_mask_set_causal
 #include <string>
 #include <utility>  // std::pair — lm_normalize_language's name table
 #include <vector>
@@ -585,6 +586,45 @@ static inline void lm_mask_set(ggml_tensor * t, const std::vector<float> & m) {
         h[i] = ggml_fp32_to_fp16(m[i]);
     }
     ggml_backend_tensor_set(t, h.data(), 0, h.size() * sizeof(ggml_fp16_t));
+}
+
+// The causal (optionally prefixed) mask layout, written as row fills in any
+// element type: [n_kv, S] row-major, n_kv = n_pfx + S. Row i sees prefix
+// columns [pfx_lo, n_pfx) when i >= n_prompt, and window columns [0, i].
+// lm_causal_mask{,_prefix} (lm-data.h) are this with T = float; the semantics
+// are documented there.
+template <typename T>
+static inline void lm_causal_mask_fill(T * m, int n_pfx, int pfx_lo, int S, int n_prompt, T zero, T ninf) {
+    const size_t n_kv = (size_t) n_pfx + (size_t) S;
+    for (int i = 0; i < S; i++) {
+        T * row = m + (size_t) i * n_kv;
+        const int lo = (i >= n_prompt) ? std::min(std::max(pfx_lo, 0), n_pfx) : n_pfx;
+        std::fill(row, row + lo, ninf);
+        std::fill(row + lo, row + n_pfx, zero);
+        std::fill(row + n_pfx, row + n_pfx + i + 1, zero);
+        std::fill(row + n_pfx + i + 1, row + n_kv, ninf);
+    }
+}
+
+// Build the causal mask straight into `t`'s element type and upload it: the
+// same bytes lm_mask_set(t, lm_causal_mask_prefix(...)) produces, without the
+// F32 intermediate or the per-element F16 conversion. An MM3 whole-song crop
+// changes S every step (S up to ~7,200), where the old path wrote ~200 MB of
+// F32, converted 51 M elements one by one and allocated twice per step.
+static inline void lm_mask_set_causal(ggml_tensor * t, int n_pfx, int pfx_lo, int S, int n_prompt) {
+    GGML_ASSERT(t != nullptr);
+    const size_t n = ((size_t) n_pfx + (size_t) S) * (size_t) S;
+    GGML_ASSERT((int64_t) n <= ggml_nelements(t));
+    if (t->type == GGML_TYPE_F32) {
+        std::unique_ptr<float[]> h(new float[n]);
+        lm_causal_mask_fill(h.get(), n_pfx, pfx_lo, S, n_prompt, 0.0f, -INFINITY);
+        ggml_backend_tensor_set(t, h.get(), 0, n * sizeof(float));
+        return;
+    }
+    GGML_ASSERT(t->type == GGML_TYPE_F16);
+    std::unique_ptr<ggml_fp16_t[]> h(new ggml_fp16_t[n]);
+    lm_causal_mask_fill(h.get(), n_pfx, pfx_lo, S, n_prompt, ggml_fp32_to_fp16(0.0f), ggml_fp32_to_fp16(-INFINITY));
+    ggml_backend_tensor_set(t, h.get(), 0, n * sizeof(ggml_fp16_t));
 }
 
 // ─── graph signature (self-test T22, --attn flag-off structural identity) ───

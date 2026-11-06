@@ -397,30 +397,12 @@ struct LmChunkLabelGuard {
 // The prefill's own chunks use pfx_lo = 0, n_prompt = 0 — a plain causal
 // stream against everything stored so far.
 static void lm_causal_mask_prefix(int n_pfx, int pfx_lo, int S, int n_prompt, std::vector<float> * out) {
-    const size_t n_kv = (size_t) n_pfx + (size_t) S;
-    out->assign(n_kv * (size_t) S, 0.0f);
-    float * m = out->data();
-    for (int i = 0; i < S; i++) {
-        float *    row      = m + (size_t) i * n_kv;
-        const bool sees_pfx = (i >= n_prompt);
-        for (int j = 0; j < n_pfx; j++) {
-            row[j] = (sees_pfx && j >= pfx_lo) ? 0.0f : -INFINITY;
-        }
-        for (int t = 0; t < S; t++) {
-            row[(size_t) n_pfx + (size_t) t] = (t <= i) ? 0.0f : -INFINITY;
-        }
-    }
+    out->resize(((size_t) n_pfx + (size_t) S) * (size_t) S);
+    lm_causal_mask_fill(out->data(), n_pfx, pfx_lo, S, n_prompt, 0.0f, -INFINITY);
 }
 
 static void lm_causal_mask(int S, std::vector<float> * out) {
-    out->assign((size_t) S * (size_t) S, 0.0f);
-    float * m = out->data();
-    for (int i = 0; i < S; i++) {
-        float * row = m + (size_t) i * (size_t) S;
-        for (int j = 0; j < S; j++) {
-            row[j] = (j <= i) ? 0.0f : -INFINITY;
-        }
-    }
+    lm_causal_mask_prefix(0, 0, S, 0, out);
 }
 
 // ─── epoch order ────────────────────────────────────────────────────────────

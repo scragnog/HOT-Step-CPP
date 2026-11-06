@@ -838,7 +838,6 @@ static inline int lm_ckpt_n_kv(const LmCkptState & st, int S) {
 }
 
 static inline void lm_ckpt_upload_mask(LmCkptRun & r, int S, int n_prompt) {
-    std::vector<float> m;
     if (r.st->cfg.kv) {
         // The prefix length moves with the crop, so there is nothing stable to
         // cache on — rebuild every micro-step. It is a host memset of a few
@@ -848,23 +847,18 @@ static inline void lm_ckpt_upload_mask(LmCkptRun & r, int S, int n_prompt) {
         // own prompt, so the prompt's stored columns are skipped: pfx_lo =
         // n_prompt. Prompt ROWS stay blind to the whole prefix, which is what
         // keeps their hidden states identical to the no-prefix case.
-        lm_causal_mask_prefix(r.st->cfg.kv->n, n_prompt, S, n_prompt, &m);
-        // lm_mask_set converts to F16 when the buffer is F16 (--attn flash, D4)
-        // and is a plain ggml_backend_tensor_set of the same bytes when it is
-        // F32 — which every current caller of this path is.
-        lm_mask_set(r.t_msk, m);
+        // Written straight in the buffer's type (F16 under --attn flash, D4;
+        // F32 otherwise), the bytes lm_causal_mask_prefix + lm_mask_set give.
+        lm_mask_set_causal(r.t_msk, r.st->cfg.kv->n, n_prompt, S, n_prompt);
         r.st->last_mask_S = -1;
         return;
     }
     if (S == r.st->last_mask_S) {
         return;
     }
-    if (r.st->cfg.pfx) {
-        lm_causal_mask_prefix(r.st->cfg.pfx->n, /*pfx_lo=*/0, S, /*n_prompt=*/0, &m);
-    } else {
-        lm_causal_mask(S, &m);
-    }
-    lm_mask_set(r.t_msk, m);
+    // MM3 whole-song crops change S nearly every step, so this runs per step
+    // there: row fills in the target type, no F32 staging.
+    lm_mask_set_causal(r.t_msk, r.st->cfg.pfx ? r.st->cfg.pfx->n : 0, /*pfx_lo=*/0, S, /*n_prompt=*/0);
     r.st->last_mask_S = S;
 }
 
@@ -1303,6 +1297,11 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
 
     GGML_ASSERT(S <= st.cfg.s_max && Hi > Lo);
 
+    // Started before P0 so the mask/token uploads land in `build(host)`, as the
+    // §6.1 comment below says they do (until 2026-11-06 the clock started after them).
+    const bool    phase_tm = lm_phase_enabled();
+    const int64_t step_t0  = phase_tm ? ggml_time_us() : 0;
+
     // ── P0: inputs ───────────────────────────────────────────────────────
     lm_ckpt_upload_mask(r, S, s.n_prompt >= 0 ? s.n_prompt : s.n_masked);
     const int NKV = lm_ckpt_n_kv(st, S);
@@ -1328,9 +1327,6 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
     // clears). That makes it an UPPER bound on what batching could amortise —
     // which is the honest way round for a gate whose job is to decide whether
     // the lever is worth building.
-    const bool    phase_tm = lm_phase_enabled();
-    const int64_t step_t0  = phase_tm ? ggml_time_us() : 0;
-
     auto run_graph = [&](ggml_cgraph * gf) -> bool {
         const int64_t p0 = phase_tm ? ggml_time_us() : 0;
         ggml_backend_sched_reset(r.sched);

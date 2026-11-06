@@ -838,6 +838,20 @@ top of the 16 GB f16 base — so flash is proven correct only on an F32-isolated
 2-layer slice, not the full model. Full per-frame numbers and fitting caveats:
 `.claude/skills/flash-attn-training/SKILL.md` §3/§7.
 
+### Attention mask upload and the step profile (2026-11-06)
+
+`lm_ckpt_upload_mask` and the MM3 loop now build the causal mask with
+`lm_mask_set_causal` (`train/lm-common.h`): row fills written straight in the
+buffer's type (F16 under flash, F32 under exact), with no F32 staging vector
+or per-element conversion. The same bytes as before, checked by
+`engine/tests/test-lm-causal-mask.cpp`. The MM3 loop also marks the
+checkpointed path's last-S cache, because both wrote the same `t_msk` and each
+rebuilt it when S changed. Whole-song crops change S on almost every step, so
+that was two ~100 ms host builds per step at S 7,178. `HOTSTEP_LM_PHASE_TIMER`
+now starts its clock before the mask and token uploads. The measured step
+breakdown (FP32 SIMT GEMMs are 58 % of kernel time, flash attention 24 %) is in
+[.claude/skills/mm3-backend/reference/training.md](../../.claude/skills/mm3-backend/reference/training.md).
+
 ### HOT-PiZZA — the MM3 default method (2026-09-06)
 
 HOT-PiZZA is PiSSA with principal-subspace dropout. It was called HOT-PiSSA on

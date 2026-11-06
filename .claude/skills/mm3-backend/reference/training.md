@@ -135,6 +135,49 @@ WDDM — measured at 12–14 s/step against q8_0's 3.75 on the same 12 steps.
    byte-identical graphs. Keep it that way — that file is what makes ACE 4B
    training fit.
 
+### Where a whole-song step goes (measured 2026-11-06)
+
+The in-app recipe (q8_0, `--weights f32-window`, HOT-PiZZA r16, `--attn flash`,
+whole-song crops, S up to 7,178), 20 steps on a 13-track album, RTX 5090:
+
+- **Phase timer** (`HOTSTEP_LM_PHASE_TIMER=1`, prints a `[phase0]` line every
+  20 micro-steps): 6.55 s per micro-step, 94.5 % GPU (`gpu_sync`), 4.2 % host
+  graph build and input uploads, 1.2 % kernel submit, 0.05 % planning. About
+  106 graphs per step. Since 2026-11-06 the clock starts before the mask and
+  token uploads, so `build(host)` really includes them.
+- **Kernels** (Nsight Systems, 8 steps, 51.3 s of kernel time): GEMM 63.7 %,
+  flash attention 24.1 % (fwd 7.5, dQ 7.7, dK/dV 8.8), elementwise 9.0 % (mostly
+  `add`/`sub` over `[out, S]`), q8_0 to F32 weight copies 3.1 %. **Every big
+  GEMM is `cutlass_80_simt_sgemm`: plain FP32 SIMT, no tensor cores.** That is
+  57.8 % of kernel time, and the place to look for a BF16 or TF32 win.
+  Adapter-sized GEMMs (small tiles, all four LoRA/PiSSA products forward and
+  backward) are 4.8 %.
+
+**The causal mask was rebuilt twice per step.** Whole-song crops change S on
+almost every step, and the MM3 loop and `lm_ckpt_upload_mask` each kept their
+own last-S cache over the same buffer, so each one built the S x S mask in F32,
+converted it to F16 one element at a time, and uploaded it. That took about
+104 ms of host time per build at S = 7,178. Now it is built once, with
+row fills straight in the buffer's type (`lm_mask_set_causal`, `lm-common.h`),
+and the loop marks the checkpointed path's cache. A fill takes 10.5 ms. Bytes
+are unchanged (`engine/tests/test-lm-causal-mask.cpp`). Two interleaved
+20-step pairs gave identical losses, gradient norms and resume state; the patched
+binary was faster on 20 of 20 steps in both pairs, by 1.4 % and 3.2 % in
+total (about 90 ms a step, more on longer songs).
+
+**Flash still needs the full mask.** The fused op's causal hint
+(`ggml_flash_attn_train_set_causal`) is only read by the BF16 CUDA kernels and
+Metal, and is ignored when no mask is attached. The TF32 kernels the recipe
+runs read the mask, and CUDA requires it contiguous, so a strided view of one
+S_max mask is not an option without a fork change.
+
+**Stacking [A; A0] into one matmul was measured and not built.** HOT-PiZZA's
+frozen branch reads x a second time per site, but all adapter-sized GEMMs
+together are 4.8 % of kernel time, so merging the A-side read would save
+under 1 %, below the 3 % bar for kernel churn. The larger cost of that branch
+is the `[out, S]` output of `B0 (A0 x)` and the `sub` after it. Merging that
+needs a differentiable concat, and ggml's `CONCAT` has no backward.
+
 ## Native codes export: `ace-train mm3-codes` (SHIPPED 2026-08-20)
 
 Audio -> RVQ codes, natively. `engine/src/minimax/mm3-rvq-encode.h` ports
