@@ -23,11 +23,15 @@ cache is not worth building.
 per-channel scale refits (weights and scales), and the refitted plan stores
 FP8 weights (4.88 GB plan -> 3.07 GB). No pre-quantization needed.
 
-**`MM3_DIT_TRT_FP8=1` (engine env, opt-in, default off, not ear-validated).**
+**FP8 MLP engine (opt-in, default off, not ear-validated).** Selected per job by
+`"dit_precision": "fp8"` on `/mm3/synth` (UI: Models > Flow DiT > TensorRT
+precision > "TensorRT FP8 (experimental)"; server param `mm3DitPrecision`);
+`MM3_DIT_TRT_FP8=1` stays as a dev override that forces it on.
 `mm3-dit-trt.h` inserts FP8 E4M3 Q/DQ on the ff_in and ff_out GEMMs of blocks
 2..33 after parsing the shipped ONNX: per-output-channel weight scales computed
 at refit from the merged weights (so adapters are covered), per-tensor static
-activation scales from `<models>/mm3/mm3-dit-trt.fp8.json`. The GLU feeding
+activation scales from the request's `dit_fp8_calib` (the server ships
+`server/src/data/mm3-dit-trt.fp8.json`; fallback `<models>/mm3/`). The GLU feeding
 ff_out (value * silu(gate)) is recomputed in FP32, cast to BF16, then
 quantized; Myelin rejects a GEMM whose two operand scales differ in type, so
 the activation scale is BF16. Separate base engine (`base-fp8-*.engine`) and
@@ -67,6 +71,44 @@ compare` on two dumps; final latent of each window from its last forward):
   0.24 dB. FP8 is consistently +0.06-0.10 dB louder, most in the top band.
 
 A/B WAVs for listening: `_experiments/_LISTENING/2026-11-06-mm3-speed/fp8/`.
+
+**Six-prompt calibration and held-out parity (2026-11-06, shipped file).** The
+numbers above used a one-prompt calibration (the bench prompt). The shipped
+`server/src/data/mm3-dit-trt.fp8.json` takes, per GEMM, the max |activation| over
+six BF16 renders (bench synth-pop, pop rock, nu-disco, ambient instrumental,
+boom-bap rap, thrash metal; 60 s, seed 4242, 2280 forwards) x 2. Per-GEMM amax
+varies across prompts by a median 1.47x (max 3.18x); the ambient instrumental
+sets the max on the most GEMMs. Held-out parity against the BF16 TensorRT engine
+(q8_0 DiT, 60 s, 30 steps, seed 7, `fp8_lab.py compare`):
+
+| held-out prompt | merge | full-clip corr | worst window |
+|---|---|---|---|
+| indie folk (vocal) | max x2 (shipped) | 0.99947 | 0.99897 |
+| vocal jazz ballad | max x2 (shipped) | 0.99917 | **0.99758** |
+| techno (instrumental) | max x2 (shipped) | 0.99943 | **0.99849** |
+| indie folk | median over prompts x2 | 0.99953 | 0.99919 |
+| vocal jazz ballad | median x2 | 0.99899 | **0.99519** |
+| techno | median x2 | 0.99948 | 0.99925 |
+| vocal jazz ballad | old one-prompt file | 0.99910 | **0.99757** |
+| techno | old one-prompt file | 0.99946 | 0.99901 |
+
+**Ship blocker: two of three held-out prompts miss the 0.9988 worst-window
+gate** with the shipped calibration, and the jazz ballad misses it with every
+calibration tried, so it is not a calibration problem; the full clip stays
+above 0.9989 everywhere. Max x2 was kept: it has the best worst case
+(0.99758 against 0.99519 for the median) and cannot clip an activation seen in
+calibration. The worst-window number moves non-monotonically with the scales
+(per-window trajectories diverge), so treat single-window gaps of ~0.001 as
+noise around a real shortfall. That is why FP8 stays experimental and default
+off. A/B WAVs (BF16 vs FP8, seed 7, plus the bench prompt in FP8):
+`_experiments/_LISTENING/2026-11-06-mm3-speed/fp8-calib/`.
+
+Bench with the shipped file (same setup as above, per-job field): BF16
+`045092857b873ef7` before and after FP8 jobs; FP8 flow 12.5-13.2 s against
+17.0-17.6 s (-25%), total 36.5-36.7 s against 40.5-41.7 s, sha `8c4b362857152d25`
+stable over 4 runs and across a deleted-and-rebuilt refit cache. The first FP8
+job builds its refit cache (+18 s). Switching bf16 -> fp8 -> bf16 drops the
+kept runtime and re-reads the other plan (0.5-2 s), no refit.
 
 **CLOSED NEGATIVE for now: NVFP4 MLP by post-training quantization.** Lab only
 (`fp8_lab.py build --variant nvfp4mlp`, blocks 2..33): weights quantized on the

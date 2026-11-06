@@ -684,6 +684,15 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     std::lock_guard<std::mutex> mm3_lock(g_mm3_mutex);
     holds_mm3_lock = true;
 
+    // FP8 vs BF16 TensorRT engine: a different base engine and refit cache, so
+    // a change drops a kept-loaded runtime. The host plan slot keys on the
+    // refit-cache file, which already hashes the precision and calibration.
+    const bool want_fp8 = req.dit_backend == "tensorrt" && req.dit_precision == "fp8";
+    if (g_mm3.dit_fp8 != want_fp8 || g_mm3.dit_fp8_calib != req.dit_fp8_calib) {
+        g_mm3.dit_runtime.reset();
+        g_mm3.dit_fp8       = want_fp8;
+        g_mm3.dit_fp8_calib = req.dit_fp8_calib;
+    }
     if (req.dit_backend == "tensorrt") {
         std::string reason;
         // Any DiT quant works: the loader dequantizes to BF16 for the refit.
@@ -700,7 +709,8 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
         g_mm3.dit_backend = req.dit_backend;
     }
     g_mm3.depth_fused = req.depth_fused;
-    fprintf(stderr, "[MM3-Job] %s: renderer=%s, depth=%s\n", job->id.c_str(), g_mm3.dit_backend.c_str(),
+    fprintf(stderr, "[MM3-Job] %s: renderer=%s%s, depth=%s\n", job->id.c_str(), g_mm3.dit_backend.c_str(),
+            g_mm3.dit_backend == "tensorrt" && mm3_trt_fp8(g_mm3) ? " fp8" : "",
             req.depth_fused ? "fused" : "stepped");
 
     // ── AR cache lookup ─────────────────────────────────────────────────────

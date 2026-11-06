@@ -401,6 +401,8 @@ are reported, not ignored.
 | `get_lrc` | false | Lyric timestamps from the LM's alignment heads |
 | `get_ar_codes` | false | Keep the planner codes on the job (`GET /mm3/job?id=&ar=1` or `GET /mm3/take?...&ar=1`) |
 | `dit_backend` | `"ggml"` | `ggml` or `tensorrt` |
+| `dit_precision` | `"bf16"` | `bf16` or `fp8`. With `tensorrt`, `fp8` uses the experimental FP8 MLP engine (own base engine and refit cache); ignored by `ggml` |
+| `dit_fp8_calib` | `<models>/mm3/mm3-dit-trt.fp8.json` | FP8 activation calibration JSON. The server sends the one it ships, `server/src/data/mm3-dit-trt.fp8.json` |
 | `depth_fused` | true | Fused depth-decoder graph with GPU sampling |
 | `infer_method`, `scheduler`, `guidance_mode`, `plugin_params` | `""`, `""`, `""`, `{}` | Lua plugins for the flow stage. Empty keeps the native Euler path and plain CFG. `guidance_mode: "apg"` uses native APG |
 | `flow_shift` | 1.0 | Above 0 up to 20. Only used with a scheduler plugin |

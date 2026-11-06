@@ -41,7 +41,7 @@ import path from 'path';
 import { performance } from 'perf_hooks';
 import { v4 as uuidv4 } from 'uuid';
 
-import { config } from '../../../config.js';
+import { config, PORTABLE_MODE, PROJECT_ROOT } from '../../../config.js';
 import { getDb } from '../../../db/database.js';
 import { aceClient } from '../../aceClient.js';
 import { wavDurationSec } from '../../audioCrop.js';
@@ -317,6 +317,12 @@ export interface MinimaxParamMapping {
  * those three fields DO travel — but only on explicit opt-in. See
  * mapMinimaxSamplerPlugins below for why that gate exists.
  */
+/** FP8 activation calibration for the TensorRT FP8 MLP engine, shipped with the
+ *  app (release.yml copies server/src/data to server/data). Sent as
+ *  dit_fp8_calib with dit_precision 'fp8'; see mm3-dit-trt.h. */
+export const MM3_FP8_CALIB_PATH = path.join(
+  PROJECT_ROOT, 'server', PORTABLE_MODE ? 'data' : path.join('src', 'data'), 'mm3-dit-trt.fp8.json');
+
 export function mapMinimaxParams(params: any): MinimaxParamMapping {
   const notes: string[] = [];
   // Unset means "TensorRT when this machine can, else GGML": resolved in
@@ -325,6 +331,12 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   const requestedDitBackend = params.mm3DitBackend ?? 'auto';
   if (requestedDitBackend !== 'ggml' && requestedDitBackend !== 'tensorrt' && requestedDitBackend !== 'auto') {
     throw new Error(`Invalid MM3 renderer: ${String(requestedDitBackend)}`);
+  }
+  // TensorRT precision: 'bf16' (default, omitted from the wire) or the
+  // experimental 'fp8' MLP engine. The engine ignores it on the GGML renderer.
+  const ditPrecision = params.mm3DitPrecision ?? 'bf16';
+  if (ditPrecision !== 'bf16' && ditPrecision !== 'fp8') {
+    throw new Error(`Invalid MM3 DiT precision: ${String(ditPrecision)}`);
   }
 
   // Resolved up here rather than where the request's adapter fields are built,
@@ -503,6 +515,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   return {
     req: {
       dit_backend: requestedDitBackend,
+      ...(ditPrecision === 'fp8' ? { dit_precision: 'fp8' as const, dit_fp8_calib: MM3_FP8_CALIB_PATH } : {}),
       depth_fused: params.mm3DepthFused === undefined ? true : Boolean(params.mm3DepthFused),
       caption,
       lyrics,

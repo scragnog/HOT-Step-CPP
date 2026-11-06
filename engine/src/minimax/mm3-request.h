@@ -542,6 +542,11 @@ static std::string mm3_assemble_prompt(const std::string & caption, const std::s
 // attached.
 struct MM3SynthRequest {
     std::string dit_backend = "ggml";
+    // TensorRT DiT precision: "bf16" (default) or "fp8" (the opt-in FP8 MLP
+    // engine, mm3-dit-trt.h), plus the FP8 activation calibration file
+    // (empty = <models>/mm3/mm3-dit-trt.fp8.json). Ignored by the GGML renderer.
+    std::string dit_precision = "bf16";
+    std::string dit_fp8_calib;
     // Depth decoder: one fused graph per frame with GPU sampling (default)
     // or the seven-step host-sampled path (mm3-depth-graph.h design note E).
     bool        depth_fused = true;
@@ -737,6 +742,13 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
         if (err) *err = "dit_backend must be ggml or tensorrt";
         return false;
     }
+    if (!mm3_req_str(root, "dit_precision", &out->dit_precision, &present, err)) return false;
+    if (!present) out->dit_precision = "bf16";
+    if (out->dit_precision != "bf16" && out->dit_precision != "fp8") {
+        if (err) *err = "dit_precision must be bf16 or fp8";
+        return false;
+    }
+    if (!mm3_req_str(root, "dit_fp8_calib", &out->dit_fp8_calib, &present, err)) return false;
     {
         yyjson_val * v = yyjson_obj_get(root, "depth_fused");
         if (v && !yyjson_is_null(v)) {

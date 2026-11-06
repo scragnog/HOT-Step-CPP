@@ -18,7 +18,7 @@ const CASE_INSENSITIVE = process.platform === 'win32' || process.platform === 'd
 /** Names the release ships in server/data. A stock release's .env pointed
  *  DATA_DIR at that same folder, so migration must leave these behind.
  *  ponytail: fixed list; a new bundled resource in server/src/data must be added here. */
-export const BUNDLED_DATA_NAMES = ['assistant-knowledge.md', 'mm3-corpus.json', 'mm3-reg-corpus', 'model-registry.json'];
+export const BUNDLED_DATA_NAMES = ['assistant-knowledge.md', 'mm3-corpus.json', 'mm3-dit-trt.fp8.json', 'mm3-reg-corpus', 'model-registry.json'];
 
 export const DEFAULT_DATA_FOLDER = 'HOT-Step-Data';
 

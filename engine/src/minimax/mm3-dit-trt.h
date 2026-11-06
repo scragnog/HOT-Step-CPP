@@ -63,17 +63,19 @@ static std::string mm3_trt_manifest_path(const MM3Model & m) {
     return (mm3_trt_dir(m) / "mm3-dit-trt.engine.json").string();
 }
 
-// Opt-in FP8 MLP engine (dev, not ear-validated): MM3_DIT_TRT_FP8=1 builds a
-// separate base engine whose ff_in/ff_out GEMMs (blocks 2..33) run in FP8 E4M3, and keys
-// the refit cache apart. Activation scales come from a calibration file made by
-// tools/mm3-trt-export/fp8_lab.py; weight scales are computed at refit.
-static bool mm3_trt_fp8() {
+// Opt-in FP8 MLP engine (not ear-validated): request field dit_precision "fp8"
+// (MM3Model::dit_fp8), or MM3_DIT_TRT_FP8=1 as a dev override that forces it on,
+// builds a separate base engine whose ff_in/ff_out GEMMs (blocks 2..33) run in FP8
+// E4M3, and keys the refit cache apart. Activation scales come from a calibration
+// file made by tools/mm3-trt-export/fp8_lab.py (the server ships one and passes its
+// path as dit_fp8_calib); weight scales are computed at refit.
+static bool mm3_trt_fp8(const MM3Model & m) {
     const char * v = std::getenv("MM3_DIT_TRT_FP8");
-    return v && *v == '1';
+    return m.dit_fp8 || (v && *v == '1');
 }
 
 static std::string mm3_trt_fp8_calib_path(const MM3Model & m) {
-    return (mm3_trt_dir(m) / "mm3-dit-trt.fp8.json").string();
+    return m.dit_fp8_calib.empty() ? (mm3_trt_dir(m) / "mm3-dit-trt.fp8.json").string() : m.dit_fp8_calib;
 }
 
 // Everything /mm3/props needs to explain why TensorRT is or is not usable,
@@ -136,8 +138,8 @@ static MM3TrtStatus mm3_trt_status(const MM3Model & m) {
         s.reason = "The MM3 TensorRT weight manifest is not installed; get it from the Model Manager";
         return s;
     }
-    if (mm3_trt_fp8() && !std::filesystem::is_regular_file(mm3_trt_fp8_calib_path(m), ec)) {
-        s.reason = "MM3_DIT_TRT_FP8 needs mm3-dit-trt.fp8.json (tools/mm3-trt-export/fp8_lab.py calib)";
+    if (mm3_trt_fp8(m) && !std::filesystem::is_regular_file(mm3_trt_fp8_calib_path(m), ec)) {
+        s.reason = "TensorRT FP8 needs its calibration file " + mm3_trt_fp8_calib_path(m);
         return s;
     }
     if (!s.engine) {
@@ -283,7 +285,7 @@ static std::filesystem::path mm3_trt_base_engine_path(const MM3Model & m, int de
     const auto      onnx = std::filesystem::absolute(mm3_trt_onnx_path(m)).lexically_normal();
     identity << onnx.string() << '\n' << std::filesystem::file_size(onnx, ec) << '\n'
              << std::filesystem::last_write_time(onnx, ec).time_since_epoch().count() << '\n';
-    const bool fp8 = mm3_trt_fp8();
+    const bool fp8 = mm3_trt_fp8(m);
     if (fp8) {
         identity << "fp8-mlp-v2\n";
     }
@@ -328,7 +330,7 @@ class Runtime final : public MM3DitRuntime {
         add_file(source);
         add_file(manifest);
         add_file(m.role_file[MM3_R_DIT].path);
-        if (mm3_trt_fp8()) {
+        if (mm3_trt_fp8(m)) {
             identity << "fp8-mlp-v2\n";
             add_file(mm3_trt_fp8_calib_path(m));
         }
@@ -517,7 +519,8 @@ class Runtime final : public MM3DitRuntime {
         }
     }
 
-    void build(const std::string & onnx_path, const std::string & manifest_path, const std::filesystem::path & out) {
+    void build(const std::string & onnx_path, const std::string & manifest_path, const std::filesystem::path & out,
+               bool fp8) {
         const auto start = std::chrono::steady_clock::now();
         fprintf(stderr, "[MM3-TRT] Building the MM3 DiT engine for this GPU from %s (one time, a few minutes)\n",
                 onnx_path.c_str());
@@ -565,7 +568,7 @@ class Runtime final : public MM3DitRuntime {
         check(parser->parseFromFile(onnx_path.c_str(), int(nvinfer1::ILogger::Severity::kWARNING)),
               "Cannot parse the MM3 DiT ONNX graph");
         std::deque<std::vector<uint16_t>> keep;  // FP8 scale constants live until the build ends
-        if (mm3_trt_fp8()) {
+        if (fp8) {
             insert_fp8(*network, ff_names(manifest_path), keep);
         }
         std::unique_ptr<nvinfer1::IBuilderConfig> config(builder->createBuilderConfig());
@@ -782,7 +785,7 @@ class Runtime final : public MM3DitRuntime {
         // FP8 engine: per-tensor activation amax from the calibration file,
         // for the GEMMs the build quantized.
         std::map<std::string, float> act_amax;
-        if (mm3_trt_fp8()) {
+        if (mm3_trt_fp8(m)) {
             const auto ff = ff_names(manifest_path);
             const auto                                              path = mm3_trt_fp8_calib_path(m);
             std::unique_ptr<yyjson_doc, decltype(&yyjson_doc_free)> calib(
@@ -967,7 +970,7 @@ class Runtime final : public MM3DitRuntime {
                 check(std::filesystem::is_regular_file(onnx), "Missing MM3 TensorRT DiT graph: " + onnx);
                 const auto rt = hot_step_trt_runtime_probe(0);
                 check(rt.parser, "TensorRT ONNX parser (nvonnxparser_10.dll) is not installed");
-                build(onnx, manifest, base);
+                build(onnx, manifest, base, mm3_trt_fp8(m));
             }
             path = base.string();
         }

@@ -498,6 +498,10 @@ struct MM3Model {
     std::string    dit_backend    = "ggml";
     // Depth decoder fused frame graph (mm3-depth-graph.h note E); per request.
     bool           depth_fused    = true;
+    // TensorRT FP8 MLP engine (mm3-dit-trt.h) and its calibration file; per
+    // request (dit_precision, dit_fp8_calib). Empty calib = <models>/mm3/.
+    bool           dit_fp8        = false;
+    std::string    dit_fp8_calib;
     mutable std::shared_ptr<MM3DitRuntime> dit_runtime;
     size_t         vram_lm        = 0;
     size_t         vram_depth     = 0;

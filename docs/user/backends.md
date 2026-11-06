@@ -139,6 +139,12 @@ What sets it apart:
 - Renderer (in the Models cluster, under the Flow DiT picker) switches the DiT between
   GGML and TensorRT. TensorRT needs the MM3 TensorRT DiT pack plus one builder DLL for
   your GPU, and the first render builds an engine once, which takes a few minutes.
+  With TensorRT on, a TensorRT precision choice appears below it. BF16 is the default.
+  TensorRT FP8 (experimental) runs part of the DiT in 8-bit: on an RTX 5090 the flow
+  stage is about 27% faster (a 60 s song renders about 5 s sooner) and it uses about
+  1.5 GB less VRAM. Its output differs slightly from BF16, more on some songs than
+  others, and it has not been checked by ear yet. Its first render builds a second
+  engine once.
 
 Models: five GGUFs (planner LM, depth decoder, condition encoder, flow DiT, vocoder), each
 selectable at its own quantisation in the Models cluster. Picking a quant loads it into

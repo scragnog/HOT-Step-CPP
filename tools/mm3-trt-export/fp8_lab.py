@@ -16,9 +16,10 @@ Subcommands:
   time   --plan PLAN [--gguf G] [--calib J] [--profile]
                             refit from the GGUF, time B=2 L=689 enqueues, optional
                             per-layer profile bucketed by kernel
-  calib  --dump DIR --gguf G --out J [--margin 2]
-                            replay an MM3_DIT_TRT_DUMP render through a BF16 engine with
+  calib  --dump DIR [DIR...] --gguf G --out J [--margin 2]
+                            replay MM3_DIT_TRT_DUMP renders through a BF16 engine with
                             the MLP inputs exposed; write per-GEMM activation amax x margin
+                            (max over all dumps; per-dump amax kept under "per_dump")
                             (copy J to <models>/mm3/mm3-dit-trt.fp8.json for MM3_DIT_TRT_FP8)
   compare --a DIR --b DIR [--cfg 1.7]
                             per-window final-latent and velocity corr between two dumps
@@ -678,18 +679,22 @@ def cmd_compare(a):
 
 
 def calib_network():
-    """BF16 refit network with the 72 MLP GEMM inputs as extra outputs."""
+    """BF16 refit network with max |input| of each of the 72 MLP GEMMs as extra
+    scalar outputs (reduced on the GPU: copying the full activations to the host
+    took ~1.3 s per call)."""
     b, net, p = parse()
     for wname, C, S, M, kind in mlp_gemms(net):
         t = M.get_input(0)
-        net.mark_output(t)
-        t.name = "act." + wname
+        a = net.add_unary(t, trt.UnaryOperation.ABS).get_output(0)
+        r = net.add_reduce(a, trt.ReduceOperation.MAX, (1 << len(t.shape)) - 1, False).get_output(0)
+        r.name = "act." + wname
+        net.mark_output(r)
     return b, net
 
 
 def cmd_calib(a):
     init_ff_names()
-    plan_path = os.path.join(HERE, "calib-bf16.plan")
+    plan_path = os.path.join(HERE, "calib-bf16-amax.plan")
     if not os.path.exists(plan_path):
         b, net = calib_network()
         plan = b.build_serialized_network(net, config(b, refit=True, detailed=False))
@@ -700,22 +705,31 @@ def cmd_calib(a):
     print(f"refit {r.refit(W):.1f} s")
     basis = basis_from(a.gguf)
     amax = {}
+    per_dump = {}
     worst = 1.0
     calls = 0
-    for w in windows(a.dump):
-        cond = w[0]["cond"].T  # later calls of a window reuse its condition
-        for c in w[::a.stride]:
-            r.inputs(c["x"], cond, c["t"], basis, B=c["B"])
-            r.run()
-            worst = min(worst, corr(r.get("output"), c["out"]))
-            for n in FF_NAMES:
-                amax[n] = max(amax.get(n, 0.0), float(np.abs(r.get("act." + n)).max()))
-            calls += 1
+    for d in a.dump:
+        da = per_dump[os.path.basename(os.path.normpath(d))] = {}
+        for w in windows(d):
+            cond = w[0]["cond"].T  # later calls of a window reuse its condition
+            for c in w[::a.stride]:
+                r.inputs(c["x"], cond, c["t"], basis, B=c["B"])
+                r.run()
+                worst = min(worst, corr(r.get("output"), c["out"]))
+                for n in FF_NAMES:
+                    da[n] = max(da.get(n, 0.0), float(r.get("act." + n)))
+                calls += 1
+        for n, v in da.items():
+            amax[n] = max(amax.get(n, 0.0), v)
+        print(f"{d}: done, {calls} calls so far")
     print(f"{calls} calls replayed; min velocity corr vs C++ dump {worst:.6f}")
     vals = np.array(list(amax.values()))
     print(f"act amax over MLP inputs: min {vals.min():.2f} median {np.median(vals):.2f} max {vals.max():.2f}")
     json.dump({"version": 1, "source": os.path.basename(a.gguf), "calls": calls, "margin": a.margin,
-               "act_amax": {k: v * a.margin for k, v in sorted(amax.items())}}, open(a.out, "w"), indent=1)
+               "dumps": sorted(per_dump),
+               "act_amax": {k: v * a.margin for k, v in sorted(amax.items())},
+               "per_dump": {d: {k: v for k, v in sorted(m.items())} for d, m in sorted(per_dump.items())}},
+              open(a.out, "w"), indent=1)
     print("wrote", a.out)
 
 
@@ -742,7 +756,7 @@ def main():
     s.add_argument("--b", required=True)
     s.add_argument("--cfg", type=float, default=1.7)
     s = sp.add_parser("calib")
-    s.add_argument("--dump", required=True)
+    s.add_argument("--dump", required=True, nargs="+")
     s.add_argument("--gguf", required=True)
     s.add_argument("--out", required=True)
     s.add_argument("--stride", type=int, default=1)

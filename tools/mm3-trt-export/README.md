@@ -205,8 +205,13 @@ a GGUF through the manifest, and builds the same variants the engine builds.
 Commands: `placeholder`, `inspect`, `build`, `time` (with a per-layer
 profile), `calib` and `compare`; the docstring lists the flags.
 
-The FP8 calibration file comes from a BF16 render with
-`MM3_DIT_TRT_DUMP=<dir>` set on the engine: `calib --dump <dir> --gguf <dit>
---out mm3-dit-trt.fp8.json`, then copy it to `<models>/mm3/`. `compare` on two
+The FP8 calibration file comes from BF16 renders with
+`MM3_DIT_TRT_DUMP=<dir>` set on the engine (one dump directory per render; the
+engine numbers calls across renders, so move them out between jobs): `calib
+--dump <dir> [<dir>...] --gguf <dit> --out mm3-dit-trt.fp8.json` takes the max
+over all dumps, reduced on the GPU (~3 min for six 60 s renders), and keeps each
+dump's amax under `per_dump`. The shipped file is
+`server/src/data/mm3-dit-trt.fp8.json`; the engine falls back to
+`<models>/mm3/mm3-dit-trt.fp8.json` when a request carries no `dit_fp8_calib`. `compare` on two
 dumps of the same seed gives the per-window latent parity. Results are in the
 `mm3-backend` skill, `reference/performance.md`.

@@ -168,6 +168,10 @@ export interface Mm3SynthRequest {
   adapter_runtime_dora?: boolean;
   /** DiT renderer. GGML is the portable default; TensorRT needs a prepared engine. */
   dit_backend?: 'ggml' | 'tensorrt' | 'auto';
+  /** TensorRT DiT precision. 'fp8' = the experimental FP8 MLP engine; default 'bf16'. */
+  dit_precision?: 'bf16' | 'fp8';
+  /** FP8 activation calibration JSON; the engine defaults to <models>/mm3/mm3-dit-trt.fp8.json. */
+  dit_fp8_calib?: string;
   /** Depth decoder: fused one-graph frame with GPU sampling (default true). */
   depth_fused?: boolean;
   /** REQUIRED, non-blank. The Structured Caption (see .claude/skills/mm3-captioning). */

@@ -15,6 +15,8 @@
 import React from 'react';
 import { Download } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { StyledSelect } from '../shared/StyledSelect';
+import { ParamLabel } from '../shared/ParamLabel';
 
 /** Mirrors server/src/services/backends/minimax/client.ts Mm3DitRuntime.
  *  Every field beyond the original four is optional: an engine build from
@@ -35,10 +37,13 @@ interface Props {
   ditRuntime: Mm3DitRuntime | undefined;
   value: 'ggml' | 'tensorrt';
   onChange: (v: 'ggml' | 'tensorrt') => void;
+  /** TensorRT precision (backendParams.mm3DitPrecision -> request dit_precision). */
+  precision: 'bf16' | 'fp8';
+  onPrecisionChange: (v: 'bf16' | 'fp8') => void;
   onOpenModelManager: () => void;
 }
 
-export const Mm3RendererRow: React.FC<Props> = ({ ditRuntime, value, onChange, onOpenModelManager }) => {
+export const Mm3RendererRow: React.FC<Props> = ({ ditRuntime, value, onChange, precision, onPrecisionChange, onOpenModelManager }) => {
   const { t } = useTranslation();
   const trtAvailable = ditRuntime?.available === true;
   // reason is engine-supplied prose (Mm3DitRuntime.reason) and stays as-is —
@@ -83,10 +88,31 @@ export const Mm3RendererRow: React.FC<Props> = ({ ditRuntime, value, onChange, o
       </div>
 
       {trtAvailable ? (
-        value === 'tensorrt' && ditRuntime?.needs_build && (
-          <p className="mt-1.5 text-[10px] text-amber-500 dark:text-amber-400 leading-relaxed">
-            {t('globalBar.mm3RendererNeedsBuild')}
-          </p>
+        value === 'tensorrt' && (
+          <>
+            {ditRuntime?.needs_build && (
+              <p className="mt-1.5 text-[10px] text-amber-500 dark:text-amber-400 leading-relaxed">
+                {t('globalBar.mm3RendererNeedsBuild')}
+              </p>
+            )}
+            <div className="mt-2">
+              <ParamLabel
+                label={t('globalBar.mm3PrecisionLabel', 'TensorRT precision')}
+                className="block text-xs font-medium text-zinc-500 uppercase tracking-wider mb-1.5"
+                info={t('globalBar.mm3PrecisionInfo')}
+              />
+              <StyledSelect
+                accent="pink"
+                value={precision}
+                onChange={onPrecisionChange}
+                options={[
+                  { value: 'bf16', label: t('globalBar.mm3PrecisionBf16', 'BF16 (default)') },
+                  { value: 'fp8', label: t('globalBar.mm3PrecisionFp8', 'TensorRT FP8 (experimental)') },
+                ]}
+                className="w-full"
+              />
+            </div>
+          </>
         )
       ) : (
         <div className="mt-1.5 space-y-1.5">
