@@ -253,14 +253,18 @@ Not bit-identical: against the f32-window run the 20-step loss is within
 0.34 % (the unfolded BF16 run: 0.65 %). Needs an A/B by ear before any default.
 
 After tonight, whole-song micro-step on the 5090: default 6.54 s, `--weights
-bf16` 3.71 s, plus `--attn flash-bf16` 2.48 s, plus `--pissa-fold on` 2.25 s.
+bf16` 3.71 s, plus `--attn flash-bf16` 2.48 s, plus `--pissa-fold on` 2.25 s,
+plus `--tf32 on` 2.20 s (3.0x the 6.64 s default at the start of the night;
+loss within 0.25 % of the f32-window run over 20 steps).
 Kernel time under the last (Nsight, 8 steps, 2.18 s a step): BF16
 tensor-core GEMMs 47 %, elementwise, norms and RoPE 21 % (mostly the residual
 and adapter adds and gradient accumulation, which cannot go without changing
 the summation order), flash attention 15 %, FP32 GEMMs 10 % (the rank-16
 adapter products and the depth head), copies and casts 7 % (activation casts
 to BF16 inside ggml's BF16 matmul, Q/K/V casts, the transposed weights, the
-stage).
+stage). The adds run at about 0.8 TB/s against the card's 1.8
+(`k_bin_bcast_unravel`, one element per thread), so a contiguous vectorised
+add in HOT-ggml is the next lead: up to about 7 % of the step, a fork change.
 
 Gates. `mm3-lm-probe` on f16 (it now takes `--weights` and `--attn`) passes
 every arm; `--weights bf16 --attn flash-bf16` gives cos 0.999999898, rel
