@@ -253,6 +253,10 @@ static void print_usage(void) {
             "                (BF16 kernels, causal tile skip); CUDA sm_80+ only.\n"
             "                [--tf32 on|off] default off: F32 GEMMs run strict FP32\n"
             "                (SIMT). on lets cuBLAS use TF32 tensor cores.\n"
+            "                [--pissa-fold on|off] default off. With --weights bf16 on a\n"
+            "                q8_0 base (CUDA) and --pissa/--hot-pizza: each layer's BF16\n"
+            "                weights are built as W - s B0 A0, so the frozen branch\n"
+            "                leaves the graph (~11 % per step). Not bit-identical.\n"
             "  mm3-lm-loss   Teacher-forced training forward, scored. --lm --depth --codes\n"
             "                --caption [--lyrics] [--max-frames N] [--crop-offset N]\n"
             "                [--target-shift N] [--no-prompt]  (falsification diagnostics).\n"
@@ -2345,6 +2349,7 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--crop-mode"))     a.crop_mode    = next("--crop-mode");
         else if (!strcmp(argv[i], "--weights"))       a.weights      = next("--weights");
         else if (!strcmp(argv[i], "--tf32"))          a.tf32         = !strcmp(next("--tf32"), "on");
+        else if (!strcmp(argv[i], "--pissa-fold"))    a.pissa_fold   = !strcmp(next("--pissa-fold"), "on");
         else if (!strcmp(argv[i], "--depth-loss-weight")) a.depth_loss_weight = atof(next("--depth-loss-weight"));
         else if (!strcmp(argv[i], "--depth-loss-frames")) a.depth_loss_frames = atoi(next("--depth-loss-frames"));
         else if (!strcmp(argv[i], "--crop-start-frac")) a.crop_start_frac = atof(next("--crop-start-frac"));
@@ -2582,6 +2587,10 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
     }
     if (a.weights != "f32-window" && a.weights != "bf16") {
         fprintf(stderr, "ace-train mm3-lm-train: --weights must be f32-window or bf16\n");
+        return 2;
+    }
+    if (a.pissa_fold && (a.weights != "bf16" || !(a.pissa || a.hot_pizza))) {
+        fprintf(stderr, "ace-train mm3-lm-train: --pissa-fold on needs --weights bf16 and --pissa or --hot-pizza\n");
         return 2;
     }
     if (a.depth_loss_weight < 0.0 || a.depth_loss_frames < 1 || a.depth_loss_frames > 1024) {

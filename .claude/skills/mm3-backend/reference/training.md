@@ -244,6 +244,24 @@ from 2.85 to 2.48 s (1.15x) tonight, 2.68x against the f32-window default.
 A direct q8_0 to BF16 copy in HOT-ggml would give the same win in-graph, but
 it is no longer needed for this path.
 
+**`--pissa-fold on` (opt-in, not heard).** The stage kernel can also subtract
+HOT-PiZZA's frozen term, writing `bf16(W - s B0 A0)`, and the graph then drops
+the frozen branch (two adapter GEMMs, an `[out, S]` add per site and their
+backward). 2.47 to 2.25 s a step (1.10x on top of everything above; removing
+the branch outright measured 2.19 s, so the fold kernel costs about 30 ms).
+Not bit-identical: against the f32-window run the 20-step loss is within
+0.34 % (the unfolded BF16 run: 0.65 %). Needs an A/B by ear before any default.
+
+After tonight, whole-song micro-step on the 5090: default 6.54 s, `--weights
+bf16` 3.71 s, plus `--attn flash-bf16` 2.48 s, plus `--pissa-fold on` 2.25 s.
+Kernel time under the last (Nsight, 8 steps, 2.18 s a step): BF16
+tensor-core GEMMs 47 %, elementwise, norms and RoPE 21 % (mostly the residual
+and adapter adds and gradient accumulation, which cannot go without changing
+the summation order), flash attention 15 %, FP32 GEMMs 10 % (the rank-16
+adapter products and the depth head), copies and casts 7 % (activation casts
+to BF16 inside ggml's BF16 matmul, Q/K/V casts, the transposed weights, the
+stage).
+
 Gates. `mm3-lm-probe` on f16 (it now takes `--weights` and `--attn`) passes
 every arm; `--weights bf16 --attn flash-bf16` gives cos 0.999999898, rel
 9.5e-4 against the 1e-3 bar (f32-window exact: 0.999999951, 3.5e-4). On q8_0

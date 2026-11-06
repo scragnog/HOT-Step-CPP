@@ -921,6 +921,21 @@ override. `--tf32 on` stays command-line only.
   (1.09x), peak VRAM 19,087 to 19,465 MB (the stage; the compute buffer's
   peak is elsewhere in the graph, so the dropped F32 copies do not lower it).
   Other bases and other backends keep the in-graph cast.
+- **`--pissa-fold on` (opt-in, `mm3-lm-train`).** With the stage in place, the
+  frozen PiSSA/HOT-PiZZA term can go into the weights: the stage kernel writes
+  `bf16(W - s B0 A0)` and `lm_linear` skips the frozen branch
+  (`LmLayerOpts::pissa_folded`, set only in `lm_ckpt_micro_step`, never for an
+  adapter-off pass and never for the KV-prefix builders, which read the
+  unstaged base). That removes the `A0 x` and `B0 t0` GEMMs, an `[out, S]` add
+  per site and their backward: 2.47 to 2.25 s per micro-step (1.10x) under
+  `--weights bf16 --attn flash-bf16`. It is the same function, but
+  `W - s B0 A0` is rounded to BF16 instead of `W`, so it is not bit-identical.
+  Against the f32-window run over 20 steps it is no further off than the
+  unfolded BF16 path (loss max 0.34 % / mean 0.06 %, unfolded 0.65 % / 0.07 %).
+  The fd gate cannot test it (the F32-isolated layers never take the BF16
+  path) and it has not been heard, so it stays off; the server does not pass
+  it. Refused for DoRA, HRA, HiRA, LoHa, LoKr and plain PiSSA under rank
+  dropout, where the frozen term is not constant.
 - **`HOTSTEP_LM_PHASE_TIMER` now sees that head.** It ran outside the timer,
   so its GPU time was reported as `build(host)`: of the 274 ms "host" per
   micro-step, 161 ms was this head on the GPU. True host time is about 85 ms

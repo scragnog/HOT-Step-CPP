@@ -875,6 +875,10 @@ struct LmLayerOpts {
                                            // nullptr in the P2/P3 forward-collect
                                            // graphs, which have no backward and
                                            // would only carry dead nodes
+    // --pissa-fold: the layer's projections already hold W - s B0 A0 (the
+    // q8_0 -> BF16 weight stage in lm-ckpt.h), so the frozen PiSSA branch is
+    // not emitted. Set only by lm_ckpt_micro_step, next to the stage.
+    bool          pissa_folded = false;
 
     // ── RANK DROPOUT ───────────────────────────────────────────────────────
     //
@@ -1159,7 +1163,7 @@ static ggml_tensor * lm_linear(ggml_context * ctx, ggml_tensor * w, const QwLora
             }
             t               = ggml_scale(ctx, t, pr->scale);
             ggml_tensor * d = ggml_mul_mat(ctx, pr->B, t);
-            if (pr->has_pissa()) {
+            if (pr->has_pissa() && !opts.pissa_folded) {
                 // The folded PiSSA residual: subtract the FROZEN init's own
                 // contribution, so the effective weight is (W - s B0 A0) + s B A
                 // and step 0 is exactly W. A0/B0 carry no gradient, so this adds

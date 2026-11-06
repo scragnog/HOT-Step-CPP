@@ -425,6 +425,12 @@ struct MM3LmTrainArgs {
      *  every big f32-window GEMM profiles as cutlass_80_simt_sgemm (plain FP32
      *  SIMT). The --fd-check gate always runs with TF32 off. */
     bool        tf32       = false;
+    /** `--pissa-fold on` (opt-in, 2026-11-06): with --weights bf16 on the q8_0
+     *  base, the per-layer BF16 weight stage holds W - s B0 A0 and the graph
+     *  drops the frozen PiSSA/HOT-PiZZA branch (two adapter GEMMs, an [out, S]
+     *  add per site, and their backward). ~11 % per step. Same function, but
+     *  W - s B0 A0 is rounded to BF16 instead of W, so the numerics move. */
+    bool        pissa_fold = false;
     /** The acoustic loss (mm3-depth-train.h): teacher-forced CE through the
      *  FROZEN depth decoder, gradient into the adapter via last_hidden. This
      *  is the fix for adapters that shift vocal timbre ("chipmunk"/"goblin"):
@@ -2611,7 +2617,8 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
             weights_bf16 ? "bf16 (tensor cores, Lever A)" : "f32-window (weights dequantized to F32 in-graph)",
             weights_bf16 && !lm_bf16_base_is_bf16(t.lm) ? ", base cast to BF16 in-graph from " : "",
             weights_bf16 && !lm_bf16_base_is_bf16(t.lm) ? lm_bf16_base_proj_type_name(t.lm) : "");
-    jl("{\"type\":\"weights\",\"mode\":\"%s\"}", weights_used.c_str());
+    jl("{\"type\":\"weights\",\"mode\":\"%s\",\"pissaFold\":%s}", weights_used.c_str(),
+       a.pissa_fold ? "true" : "false");
 
     LmCkptState  ckpt_st;
     LmCkptRun    ckpt_run;
@@ -2675,6 +2682,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         cc.pfx          = pfx.active() ? &pfx : nullptr;
         cc.chunk        = a.ckpt_chunk;
         cc.weights_bf16 = weights_bf16;                 // Lever A
+        cc.pissa_fold   = a.pissa_fold;                 // needs the weight stage; lm_ckpt_alloc refuses otherwise
         // lm_ckpt_layer_opts is the ONLY place the segment graphs get their
         // options, so P2 (forward collect), P3 (tail) and P7 (backward) cannot
         // disagree about the attention formulation — which is what D13's

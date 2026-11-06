@@ -87,20 +87,21 @@ Smaller base precisions trade fidelity for memory. Step time barely moves betwee
 | Choice | Trainer flags | Speed on a 5090, whole-song recipe |
 |---|---|---|
 | Full (FP32, default) | none | 1x |
-| Fast (BF16 matmuls) | `--weights bf16` | 1.65x |
-| Fastest (BF16 matmuls + attention), experimental | `--weights bf16 --attn flash-bf16` | 2.3x |
+| Fast (BF16 matmuls) | `--weights bf16` | 1.8x |
+| Fastest (BF16 matmuls + attention), experimental | `--weights bf16 --attn flash-bf16` | 2.6x |
 
-Peak memory stays where it was. Fastest only changes the attention when **Flash attention** is on; with it off, Fastest trains like Fast. Both need a CUDA card; on another engine the trainer falls back to full precision with a warning. The run records its choice, so a run paused for a preview, or continued later, resumes with the same precision. Fastest is marked experimental because its gradients are too coarse for the trainer's finite-difference check, even though they match the full-precision gradients to within 0.15 %.
+On the q8_0 base, Fast and Fastest add about 0.4 GB to the peak (one layer of weights kept in BF16). Fastest only changes the attention when **Flash attention** is on; with it off, Fastest trains like Fast. Both need a CUDA card; on another engine the trainer falls back to full precision with a warning. The run records its choice, so a run paused for a preview, or continued later, resumes with the same precision. Fastest is marked experimental because its gradients are too coarse for the trainer's finite-difference check, even though they match the full-precision gradients to within 0.15 %.
 
 The same flags on the command line (`ace-train mm3-lm-train`), all off by default:
 
 | Flag | Speed on a 5090, whole-song recipe | What changes |
 |---|---|---|
-| `--weights bf16` | 1.65x | The base weights' matrix products run in BF16 on the tensor cores. Works on any base, including q8_0. |
+| `--weights bf16` | 1.8x | The base weights' matrix products run in BF16 on the tensor cores. Works on any base, including q8_0. |
 | `--attn flash-bf16` | 1.19x | Flash attention runs in BF16. CUDA only. |
 | `--tf32 on` | 1.39x alone, little extra on top of the two above | The remaining F32 products may use TF32. Command line only. |
+| `--pissa-fold on` | 1.1x on top of the two above | With `--weights bf16` on a q8_0 base and HOT-PiZZA or PiSSA, the frozen half of the adapter is subtracted from the BF16 weights once per layer instead of being multiplied out at every step. Same function, different rounding. Command line only, not heard yet. |
 
-`--weights bf16 --attn flash-bf16` together trained 2.3 times as fast with the same memory, and the training loss stayed within 0.6 % of the default over 20 steps. Each flag changes the trained weights slightly.
+`--weights bf16 --attn flash-bf16` together trained 2.6 times as fast, and the training loss stayed within 0.7 % of the default over 20 steps. Each flag changes the trained weights slightly.
 
 Flash attention training needs a CUDA build. On Vulkan or Metal the checkbox is greyed out and the trainer uses exact attention, whose longest practical window on a 32 GB card was about 4300 frames (172 s).
 <!-- TODO(verify): whether whole-song MM3 training is practical at all on a non-CUDA build. -->

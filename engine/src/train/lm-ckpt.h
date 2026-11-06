@@ -177,6 +177,12 @@ struct LmCkptCfg {
     // Lever A (--weights bf16). Default OFF => lm_ckpt_layer_opts() returns a
     // default LmLayerOpts and every graph below is emitted verbatim (§6.0).
     bool weights_bf16   = false;
+    // --pissa-fold (MM3, opt-in): the q8_0 -> BF16 weight stage carries
+    // W - s B0 A0 for every PiSSA site and the graphs drop the frozen branch.
+    // Needs the stage (weights_bf16, q8_0 base, CUDA); lm_ckpt_alloc refuses
+    // otherwise. Changes the numerics: W - s B0 A0 is rounded to BF16 once
+    // instead of W alone.
+    bool pissa_fold     = false;
 
     // Trainable KV prefix (train/lm-prefix.h). nullptr = off, byte-identical.
     // Every row of the mask sees the whole prefix (pfx_lo = 0, n_prompt = 0):
@@ -479,31 +485,55 @@ static bool lm_ckpt_alloc_wstage(LmCkptState * st, Qwen3LM * lm, std::string * e
 }
 
 // The layer a graph should read: lm.layers[l] itself, or with the stage on, a
-// copy whose projections are the stage, refilled from layer l now.
-static Qwen3Layer * lm_ckpt_layer_w(LmCkptState & st, int l, Qwen3Layer * tmp) {
+// copy whose projections are the stage, refilled from layer l now. `fold`
+// (--pissa-fold) writes W - s B0 A0 for each PiSSA site; the graph must then
+// be built with LmLayerOpts::pissa_folded, which drops the frozen branch.
+static Qwen3Layer * lm_ckpt_layer_w(LmCkptState & st, int l, Qwen3Layer * tmp, bool fold = false) {
     Qwen3Layer * ly = &st.lm->layers[l];
 #if LM_CKPT_WSTAGE
     if (st.buf_wst) {
         *tmp = *ly;
         ggml_tensor ** ps[7];
         lm_ckpt_layer_projs(tmp, ps);
-        const void * src[7];
-        void *       dst[7];
-        int64_t      n[7];
+        const void *          src[7];
+        void *                dst[7];
+        int64_t               ne0[7], ne1[7];
+        hs_q8_bf16_cuda::Fold fd[7];
         for (int j = 0; j < 7; j++) {
             GGML_ASSERT((*ps[j])->type == GGML_TYPE_Q8_0 && ggml_are_same_shape(*ps[j], st.wst[j]));
             src[j] = (*ps[j])->data;
             dst[j] = st.wst[j]->data;
-            n[j]   = ggml_nelements(st.wst[j]);
+            ne0[j] = st.wst[j]->ne[0];
+            ne1[j] = st.wst[j]->ne[1];
             *ps[j] = st.wst[j];
+            const QwLoraPair * pr = ly->lora ? &ly->lora->p[j] : nullptr;
+            if (fold && pr && pr->A && pr->B && pr->has_pissa()) {
+                // The graph's frozen branch is B0 (-s A0 x) with A0/B0 widened
+                // to F32 (lm_linear); anything else on the pair would make the
+                // fold a different function, so it is refused, not approximated.
+                if (pr->has_dora() || pr->hra || pr->hira || pr->has_loha() || pr->has_lokr() ||
+                    (!pr->hot_pizza && st.cfg.rank_mask) || pr->A0->type != pr->B0->type ||
+                    (pr->A0->type != GGML_TYPE_F16 && pr->A0->type != GGML_TYPE_F32) ||
+                    !ggml_is_contiguous(pr->A0) || !ggml_is_contiguous(pr->B0) || !pr->A0->buffer ||
+                    ggml_backend_buffer_is_host(pr->A0->buffer) || pr->A0->ne[0] != ne0[j] ||
+                    pr->B0->ne[1] != ne1[j] || pr->A0->ne[1] != pr->B0->ne[0]) {
+                    GGML_ABORT("--pissa-fold: layer %d slot %d is not a plain PiSSA/HOT-PiZZA pair", l, j);
+                }
+                fd[j].A0    = pr->A0->data;
+                fd[j].B0    = pr->B0->data;
+                fd[j].f16   = pr->A0->type == GGML_TYPE_F16;
+                fd[j].r     = (int) pr->A0->ne[1];
+                fd[j].scale = pr->scale;
+            }
         }
-        if (const char * e = hs_q8_bf16_cuda::convert(src, dst, n, 7)) {
+        if (const char * e = hs_q8_bf16_cuda::convert(src, dst, ne0, ne1, fd, 7)) {
             GGML_ABORT("q8_0 -> BF16 weight stage, layer %d: %s", l, e);
         }
         return tmp;
     }
 #else
     (void) tmp;
+    (void) fold;
 #endif
     return ly;
 }
@@ -642,6 +672,10 @@ static bool lm_ckpt_alloc(LmCkptState * st, Qwen3LM * lm, const LmCkptCfg & cfg,
         return false;
     }
     if (!lm_ckpt_alloc_wstage(st, lm, err)) {
+        return false;
+    }
+    if (st->cfg.pissa_fold && !st->buf_wst) {
+        *err = "--pissa-fold needs --weights bf16 on a q8_0 base with the CUDA backend";
         return false;
     }
     ggml_backend_buffer_clear(st->buf_ckpt, 0);
@@ -1427,7 +1461,17 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
     // ONE opts for the whole micro-step (D13). `r.adapter_off` is the only
     // field that can differ between micro-steps of the same run, and it is read
     // exactly here, so P2, P3 and P7 cannot disagree about the adapter.
-    const LmLayerOpts opts = lm_ckpt_layer_opts(st, r.adapter_off);
+    //
+    // --pissa-fold rides on the weight stage, so it is set here, next to the
+    // only builders that fill it, and never in lm_ckpt_layer_opts (the KV
+    // prefix builders read the unstaged base). Not in an adapter-off pass,
+    // whose stage must hold the plain base.
+    const bool        fold = st.cfg.pissa_fold && st.buf_wst && !r.adapter_off;
+    const LmLayerOpts opts = [&] {
+        LmLayerOpts o  = lm_ckpt_layer_opts(st, r.adapter_off);
+        o.pissa_folded = fold;
+        return o;
+    }();
 
     // §6.1: `build` is derived as total - reset - plan - submit - sync, so it absorbs every
     // remaining host cost (graph construction, ggml_free, input uploads, buffer
@@ -1475,7 +1519,8 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         ggml_tensor *    X   = ggml_view_2d(ctx, st.C[(size_t) l], H, S, st.C[(size_t) l]->nb[1], 0);
         // D13: SAME opts as the P7 recompute. Not an optimisation opportunity.
         Qwen3Layer    lw;
-        ggml_tensor * Y = lm_train_layer(ctx, c, lm_ckpt_layer_w(st, l, &lw), X, pv, mv, S, lm_ckpt_layer_kv(st, opts, l));
+        ggml_tensor * Y = lm_train_layer(ctx, c, lm_ckpt_layer_w(st, l, &lw, fold), X, pv, mv, S,
+                                         lm_ckpt_layer_kv(st, opts, l));
         ggml_build_forward_expand(
             gf, ggml_cpy(ctx, Y, ggml_view_2d(ctx, st.C[(size_t) (l + 1)], H, S, st.C[(size_t) (l + 1)]->nb[1], 0)));
         const bool ok = run_graph(gf);
@@ -1494,7 +1539,7 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         ggml_tensor *    mv  = ggml_view_2d(ctx, r.t_msk, NKV, S, (size_t) NKV * ggml_element_size(r.t_msk), 0);
         ggml_tensor *    X   = ggml_view_2d(ctx, st.C[(size_t) (Hi - 1)], H, S, st.C[(size_t) (Hi - 1)]->nb[1], 0);
         Qwen3Layer       lw;
-        ggml_tensor *    Y   = lm_train_layer(ctx, c, lm_ckpt_layer_w(st, Hi - 1, &lw), X, pv, mv, S,
+        ggml_tensor *    Y   = lm_train_layer(ctx, c, lm_ckpt_layer_w(st, Hi - 1, &lw, fold), X, pv, mv, S,
                                               lm_ckpt_layer_kv(st, opts, Hi - 1));
         ggml_tensor *    hN  = lm_rms(ctx, Y, lm.final_norm, c.rms_norm_eps);
         ggml_build_forward_expand(gf, ggml_cpy(ctx, hN, ggml_view_2d(ctx, st.t_H, H, S, st.t_H->nb[1], 0)));
@@ -1568,7 +1613,8 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         ggml_tensor * mv = ggml_view_2d(ctx, r.t_msk, NKV, S, (size_t) NKV * ggml_element_size(r.t_msk), 0);
         ggml_tensor * X  = ggml_view_2d(ctx, st.C[(size_t) l], H, S, st.C[(size_t) l]->nb[1], 0);
         Qwen3Layer    lw;
-        ggml_tensor * Y  = lm_train_layer(ctx, c, lm_ckpt_layer_w(st, l, &lw), X, pv, mv, S, lm_ckpt_layer_kv(st, sopts, l));
+        ggml_tensor * Y  = lm_train_layer(ctx, c, lm_ckpt_layer_w(st, l, &lw, fold), X, pv, mv, S,
+                                          lm_ckpt_layer_kv(st, sopts, l));
         if (l == Hi - 1) {
             Y = lm_rms(ctx, Y, lm.final_norm, c.rms_norm_eps);
         }
