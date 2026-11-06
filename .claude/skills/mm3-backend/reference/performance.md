@@ -379,6 +379,41 @@ check, `GET /mm3/stream`) -> `minimax/client.ts`
 `components/player/Mm3StreamStatus.tsx`, shown in the active queue card
 (`InlineAudioQueue.tsx`).
 
+## Flow window hop: `flow_hop_frames` (built + measured 2026-11-06, NOT yet heard)
+
+The flow stage renders 200-frame windows on a 100-frame hop, so every kept frame is
+denoised twice. `flow_hop_frames` (request field, 100..160, absent = the checkpoint's
+`mm3.dit.hop_frames`) lengthens the hop. UI: **Window Hop** (`mm3FlowHop`, Generation cluster, default 100 = omitted from the wire).
+
+**The carry/crop literals are one number.** diffusers hard-codes 172 / 86 / 258, but
+they all follow from the latent span two windows share, `span = L - round(hop * 3.4453125)`
+(689 - 345 = 344): carry = span/2, crop left = span/4, crop right = span - span/4.
+`mm3_window_geom()` in mm3-pipeline.h. Round, not truncate: `L - span` is where the stitch
+puts the next window's origin, and rounding keeps it within half a latent of the true one
+(the reference itself sits 0.47 off); truncating `(win - hop)` also gives 344 at the default
+but drifts up to a whole latent at 120/140/160. The window starts became
+`range(0, F - (win - hop), hop)`: the reference's `F - 100` is the overlap, not the hop,
+and `F - hop` leaves the tail unrendered once hop > win/2.
+
+**Default is untouched by construction and by measurement.** With no field the pipeline
+uses the literal `MM3WindowGeom{}`; `flow_hop_frames: 100` sent explicitly goes through the
+derivation. Both give the baseline sha `045092857b873ef7` (TRT, lm q8_0, depth f16, dit
+q8_0, 30 steps, 60 s, seed 4242). `check-mm3-stream.mjs --extra '{"flow_hop_frames":N}'`
+passes 8/8 at 100, 133 and 150: streamed bytes equal saved bytes at any hop.
+
+| 60 s, TRT, same config | windows | flow | total (engine) |
+|---|---|---|---|
+| hop 100 (reference) | 14 | 16.4-17.0 s | 39.8-43.6 s |
+| hop 133 | 11 | 13.2 s | 36.0 s |
+| hop 150 | 10 | 11.8-12.0 s | 34.5 s |
+| hop 160 | 10 | 11.4 s | 34.1 s |
+
+Flow scales with the window count, plus a smaller last window (-27 % at 150); AR (21 s) is the bigger stage and is
+untouched. Seams get half as much shared context at 150 (carry 86 latents, crop 43/129).
+Blind A/B/C renders, 3 seeds x 75 s with lyrics, staged in
+`_experiments/_LISTENING/2026-11-06-mm3-speed/hop/` (score sheet + KEY.txt). Keep the
+default at 100 until those are scored.
+
 ## MM3 AR cache: the speedup the Plank is not (built + measured 2026-08-21)
 
 `engine/src/minimax/mm3-ar-cache.h`. One slot holding the previous render's

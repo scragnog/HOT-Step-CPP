@@ -705,6 +705,11 @@ static bool mm3_req_str(yyjson_val * root, const char * key, std::string * out, 
 //                cache. 1 is the exact reference; N >= 2 evaluates the
 //                unconditional branch only every Nth step (plus warmup and
 //                the final step) and holds the delta in between.
+//   flow_hop_frames  integer, default = the checkpoint's hop (100 frames
+//                against 200-frame windows) — the exact reference. Range
+//                window/2 .. window*4/5 (100..160). A longer hop shares fewer
+//                frames between flow windows, so fewer windows and less flow
+//                work; the carry and seam crop scale with the overlap.
 //   get_wav_bits integer in {16, 24, 32}, default 16
 //   get_lrc      bool, default false — lyric timestamps (LRC) from the
 //                alignment heads; costs the manual attention path on 3 of
@@ -842,6 +847,24 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
     if (uncond_iv < 1.0 || uncond_iv > 16.0) {
         if (err) {
             *err = "\"flow_uncond_interval\" must be in 1..16";
+        }
+        return false;
+    }
+
+    // Flow window hop. Absent = the checkpoint's, and then nothing is sent on
+    // to the pipeline (0), so a default render takes the reference literals.
+    const int64_t win_frames = m.synth_cfg.dit.window_frames ? (int64_t) m.synth_cfg.dit.window_frames : 200;
+    const int64_t hop_lo     = win_frames / 2;
+    const int64_t hop_hi     = win_frames * 4 / 5;
+    double        hop_d      = 0.0;
+    bool          have_hop   = false;
+    if (!mm3_req_num(root, "flow_hop_frames", &hop_d, &have_hop, err)) {
+        return false;
+    }
+    if (have_hop && (hop_d != std::floor(hop_d) || hop_d < (double) hop_lo || hop_d > (double) hop_hi)) {
+        if (err) {
+            *err = "\"flow_hop_frames\" must be an integer in " + std::to_string(hop_lo) + ".." +
+                   std::to_string(hop_hi);
         }
         return false;
     }
@@ -1291,6 +1314,7 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
     out->gen.steps      = (int) nsteps;
     out->gen.cfg_flow   = (float) cfg;
     out->gen.flow_uncond_interval = (int) llround(uncond_iv);
+    out->gen.flow_hop_frames      = have_hop ? (int64_t) hop_d : 0;
     out->gen.require_eos = out->require_eos;
     out->gen.stop_after_first_eos = out->stop_after_first_eos;
     out->gen.eos_rounds  = out->eos_rounds;

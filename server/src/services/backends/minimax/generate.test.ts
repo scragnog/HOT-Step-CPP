@@ -13,3 +13,14 @@ test('MM3 sends the shared runtime DoRA opt-in without changing legacy requests'
   assert.equal(adapter_runtime_dora, true);
   assert.deepEqual(rest, legacy);
 });
+
+test('MM3 sends flow_hop_frames only for a hop above the checkpoint default', () => {
+  const params = { prompt: 'Instrumental ambient', seed: 42 };
+  const legacy = mapMinimaxParams(params).req;
+  for (const mm3FlowHop of [100, '100', 99, 161, 'x', undefined]) {
+    assert.deepEqual(mapMinimaxParams({ ...params, mm3FlowHop }).req, legacy);
+  }
+  const { flow_hop_frames, ...rest } = mapMinimaxParams({ ...params, mm3FlowHop: '150' }).req;
+  assert.equal(flow_hop_frames, 150);
+  assert.deepEqual(rest, legacy);
+});

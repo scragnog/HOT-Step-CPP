@@ -354,7 +354,7 @@ caption + lyrics -> prompt assembly and caption cleaning (mm3-request.h)
   -> AR planning loop (mm3-ar-loop.h): global LM (mm3-lm-graph.h) emits one semantic
      code per 25 fps frame; the RVQ depth decoder (mm3-depth-graph.h) adds 7 acoustic
      codebooks per frame -> frame hiddens
-  -> per 200-frame window, 100-frame hop (mm3-pipeline.h):
+  -> per 200-frame window, 100-frame hop by default, `flow_hop_frames` up to 160 (mm3-pipeline.h):
        condition encoder (mm3-cond-graph.h)
        flow DiT, Euler (mm3-dit-graph.h), or the TensorRT DiT (mm3-dit-trt.h)
        vocoder (mm3-vocoder-graph.h), 44.1 kHz

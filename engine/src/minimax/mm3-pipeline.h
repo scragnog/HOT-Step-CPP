@@ -27,6 +27,10 @@
 //    end of the frame array and is simply shorter. 300 frames -> starts
 //    [0, 100] -> 2 windows, both a full 200 frames. This is the 12 s fixture.
 //
+//    The hop is a request knob (flow_hop_frames, default the checkpoint's).
+//    In general the bound is `F - (win - hop)` and every overlap size in
+//    facts 3 and 4 scales with `win - hop`; see mm3_window_geom().
+//
 // 2. LATENT LENGTH. Each window's condition encoder output is
 //    L = int(win_frames * 3.4453125) latent frames (86.1328125 Hz against
 //    25 fps). 200 frames -> 689 latents. mm3_cond_latent_length() owns the
@@ -110,14 +114,49 @@
 #include <vector>
 
 // Reference constants. `_OVERLAP_LATENT_LENGTH` and `_CROP_LEFT_LATENT` are
-// literals in diffusers too (denoise.py / decoders.py) — they are NOT derived
-// from the window geometry there, so they are not derived here either. The
-// relations 344 = 2*172 and 258 = 344 - 86 hold, and are documented rather
-// than exploited.
+// literals in diffusers too (denoise.py / decoders.py), written for the
+// checkpoint's one geometry (200-frame windows, 100-frame hop). They are what
+// mm3_window_geom() below returns at that geometry, exactly.
 #define MM3_OVERLAP_LATENTS    172
 #define MM3_CARRY_SPAN_LATENTS 344  // = 2 * MM3_OVERLAP_LATENTS
 #define MM3_CROP_LEFT_LATENTS  86
 #define MM3_CROP_RIGHT_LATENTS 258  // = MM3_CARRY_SPAN_LATENTS - MM3_CROP_LEFT_LATENTS
+
+// The overlap arithmetic for any hop (flow_hop_frames). The reference literals
+// all follow from one number, the latent length of the span two windows share:
+//
+//     span    = L - round(hop * 3.4453125)              344 = 689 - round(344.53)
+//     overlap = span / 2   (carried and spliced)       172
+//     left    = span / 4   (seam: middle of the splice) 86
+//     right   = span - left                            258
+//
+// L - span is where the stitch puts the next window's origin, so rounding the
+// hop's latent position keeps that within half a latent of the true one for
+// any hop (the reference sits 0.47 off). Truncating (win - hop) instead gives
+// the same 344 here but drifts up to a whole latent at other hops.
+// left + right = span, so the kept spans still tile the song exactly once, and
+// the seam still sits in the middle of the spliced half, where both sides of
+// the vocoder's input are the previous window's latents.
+struct MM3WindowGeom {
+    int64_t span       = MM3_CARRY_SPAN_LATENTS;
+    int64_t overlap    = MM3_OVERLAP_LATENTS;
+    int64_t crop_left  = MM3_CROP_LEFT_LATENTS;
+    int64_t crop_right = MM3_CROP_RIGHT_LATENTS;
+};
+
+static inline MM3WindowGeom mm3_window_geom(const MM3CondConfig & cc, int64_t win, int64_t hop) {
+    MM3WindowGeom g;
+    // Same rate expression, in the same order, as mm3_cond_latent_length().
+    const double  r       = (double) hop * (double) cc.output_sampling_rate / (double) cc.input_sampling_rate *
+                     (double) cc.input_hop_length / (double) cc.output_hop_length;
+    const int64_t hop_lat = (int64_t) std::llround(r);
+    const int64_t L       = mm3_cond_latent_length(cc, win);
+    g.span                = L > hop_lat ? L - hop_lat : 0;
+    g.overlap    = g.span / 2;
+    g.crop_left  = g.span / 4;
+    g.crop_right = g.span - g.crop_left;
+    return g;
+}
 
 // ── Progress ────────────────────────────────────────────────────────────────
 
@@ -167,12 +206,12 @@ using MM3ChunkCb = std::function<void(int take, int64_t seq, int64_t sample_offs
 // for sample, or the streamed concatenation stops being the saved file — and
 // that is exactly the bug an ear cannot localise.
 static inline void mm3_window_crop_lr(bool is_first, bool is_last, int64_t L, int64_t UP, int64_t * left,
-                                      int64_t * len) {
+                                      int64_t * len, const MM3WindowGeom & g = MM3WindowGeom{}) {
     const int64_t T = L * UP;
-    const int64_t l = is_first ? 0 : (int64_t) MM3_CROP_LEFT_LATENTS * UP;
+    const int64_t l = is_first ? 0 : g.crop_left * UP;
     // The LAST window has no right crop — getting this wrong truncates the
     // ending, and on a streamed render it would truncate it silently.
-    const int64_t r = is_last ? 0 : (int64_t) MM3_CROP_RIGHT_LATENTS * UP;
+    const int64_t r = is_last ? 0 : g.crop_right * UP;
     int64_t       n = T - l - r;
     if (n < 0) {
         n = 0;
@@ -187,8 +226,9 @@ static inline void mm3_window_crop_lr(bool is_first, bool is_last, int64_t L, in
  *  window after this one?" before it knows how many there are in total — but
  *  they resolve to ONE piece of arithmetic, which is what keeps the streamed
  *  bytes and the stitched file identical. */
-static inline void mm3_window_crop(int64_t k, int64_t NW, int64_t L, int64_t UP, int64_t * left, int64_t * len) {
-    mm3_window_crop_lr(k == 0, k == NW - 1, L, UP, left, len);
+static inline void mm3_window_crop(int64_t k, int64_t NW, int64_t L, int64_t UP, int64_t * left, int64_t * len,
+                                   const MM3WindowGeom & g = MM3WindowGeom{}) {
+    mm3_window_crop_lr(k == 0, k == NW - 1, L, UP, left, len, g);
 }
 
 /** The finished-audio value of one vocoder sample. Shared by the streaming
@@ -688,6 +728,12 @@ struct MM3GenRequest {
      *  the guidance delta in between. N=2 removes ~22% of the flow forwards. */
     int      flow_uncond_interval = 1;
 
+    /** Flow window hop in AR frames. 0 = the checkpoint's (mm3.dit.hop_frames,
+     *  100 against 200-frame windows), the exact reference. A longer hop means
+     *  less overlap, so fewer windows and less flow work; the carry and crop
+     *  scale with it (mm3_window_geom). mm3-request.h validates the range. */
+    int64_t  flow_hop_frames = 0;
+
     // Seed for the AR stage ONLY. Unset (the default) ties it to `seed`, which
     // is what MM3 natively does — one seed drives both the code sampling and
     // the per-window flow noise. Splitting them exists for the same reason ACE
@@ -922,7 +968,26 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
     const int K = mm3_clamp_takes(m.lm_cfg, takes);
 
     const int64_t win_frames = m.synth_cfg.dit.window_frames ? (int64_t) m.synth_cfg.dit.window_frames : 200;
-    const int64_t hop_frames = m.synth_cfg.dit.hop_frames ? (int64_t) m.synth_cfg.dit.hop_frames : 100;
+    const int64_t ckpt_hop   = m.synth_cfg.dit.hop_frames ? (int64_t) m.synth_cfg.dit.hop_frames : 100;
+    const int64_t hop_frames = req.flow_hop_frames > 0 ? req.flow_hop_frames : ckpt_hop;
+    if (hop_frames >= win_frames) {
+        if (err) {
+            *err = "flow_hop_frames must be shorter than the " + std::to_string(win_frames) + "-frame window";
+        }
+        return false;
+    }
+    // Frames two consecutive windows share. At the reference geometry it equals
+    // the hop, which is why the reference can write `F - 100` for it.
+    const int64_t ov_frames = win_frames - hop_frames;
+    // The reference literals unless a hop was asked for, so a default render
+    // takes the exact numbers it always has.
+    const MM3WindowGeom geom = req.flow_hop_frames > 0 ? mm3_window_geom(cc, win_frames, hop_frames) : MM3WindowGeom{};
+    if (req.flow_hop_frames > 0) {
+        fprintf(stderr,
+                "[MM3-Pipe] flow hop %lld frames (checkpoint %lld): carry %lld latents, crop %lld/%lld\n",
+                (long long) hop_frames, (long long) ckpt_hop, (long long) geom.overlap, (long long) geom.crop_left,
+                (long long) geom.crop_right);
+    }
 
     for (int t = 0; t < K; t++) {
         outs[t]             = MM3GenResult{};
@@ -1120,7 +1185,7 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
     // How many windows a full-length plan would produce. Only ever used for
     // progress reporting while the true count is still unknown.
     const int64_t nw_estimate =
-        req.max_frames <= win_frames ? 1 : (req.max_frames - hop_frames + hop_frames - 1) / hop_frames;
+        req.max_frames <= win_frames ? 1 : (req.max_frames - ov_frames + hop_frames - 1) / hop_frames;
     int64_t ar_frames_done = 0;
     // Interleaving nests stage 2 INSIDE the AR call, so the wall time of that
     // call is no longer the AR stage's cost - it is AR plus every window
@@ -1214,9 +1279,10 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
         out->flow_forwards += fstats.forwards;
         out->dit_compute_bytes = fstats.compute_bytes;
 
-        // (3) carry: latents[L-344 : L-172] and the matching condition rows.
-        const int64_t ostart = L - MM3_CARRY_SPAN_LATENTS > 0 ? L - MM3_CARRY_SPAN_LATENTS : 0;
-        const int64_t oend   = L - MM3_OVERLAP_LATENTS > ostart ? L - MM3_OVERLAP_LATENTS : ostart;
+        // (3) carry: latents[L-344 : L-172] and the matching condition rows
+        // (at the reference geometry; geom.span / geom.overlap in general).
+        const int64_t ostart = L - geom.span > 0 ? L - geom.span : 0;
+        const int64_t oend   = L - geom.overlap > ostart ? L - geom.overlap : ostart;
         st.prev_len          = oend - ostart;
         st.prev_latent.assign((size_t) (CH * st.prev_len), 0.0f);
         for (int64_t c = 0; c < CH; c++) {
@@ -1248,7 +1314,7 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
             out->voc_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_v1).count();
 
             int64_t left = 0, len = 0;
-            mm3_window_crop_lr(k == 0, is_last, L, UP, &left, &len);
+            mm3_window_crop_lr(k == 0, is_last, L, UP, &left, &len, geom);
             stream_buf.assign((size_t) (2 * len), 0.0f);
             for (int ch = 0; ch < 2; ch++) {
                 const float * src = st.wavs[(size_t) k].data() + (int64_t) ch * (L * UP) + left;
@@ -1555,7 +1621,9 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
         if (F <= win_frames) {
             st.starts.push_back(0);
         } else {
-            for (int64_t s = 0; s < F - hop_frames; s += hop_frames) {
+            // The reference's `F - 100` is `F - ov_frames`: the last window must
+            // still reach F, which `F - hop` would not once hop > win / 2.
+            for (int64_t s = 0; s < F - ov_frames; s += hop_frames) {
                 st.starts.push_back(s);
             }
         }
@@ -1668,7 +1736,8 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
         std::vector<int64_t> keep_left((size_t) NW), keep_len((size_t) NW);
         int64_t              total = 0;
         for (int64_t k = 0; k < NW; k++) {
-            mm3_window_crop(k, NW, out->window_L[(size_t) k], UP, &keep_left[(size_t) k], &keep_len[(size_t) k]);
+            mm3_window_crop(k, NW, out->window_L[(size_t) k], UP, &keep_left[(size_t) k], &keep_len[(size_t) k],
+                            geom);
             total += keep_len[(size_t) k];
         }
 

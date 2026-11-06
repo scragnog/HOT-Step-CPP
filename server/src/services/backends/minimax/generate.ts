@@ -525,6 +525,12 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
           Number(params.mm3FlowUncondInterval) >= 2 && Number(params.mm3FlowUncondInterval) <= 16
             ? { flow_uncond_interval: Math.round(Number(params.mm3FlowUncondInterval)) }
             : {}),
+      // Flow window hop. Omitted at the checkpoint's 100 so the default request
+      // is unchanged; 101..160 is the engine's accepted range.
+      ...(Number.isFinite(Number(params.mm3FlowHop)) &&
+          Math.round(Number(params.mm3FlowHop)) > 100 && Math.round(Number(params.mm3FlowHop)) <= 160
+            ? { flow_hop_frames: Math.round(Number(params.mm3FlowHop)) }
+            : {}),
       // ── LM sampling knobs. Omitted from the wire at their defaults so the
       // engine's reference recipe stays authoritative (and bit-identical). ──
       ...(Number.isFinite(Number(params.mm3LmTemperature)) && Number(params.mm3LmTemperature) !== 1.0

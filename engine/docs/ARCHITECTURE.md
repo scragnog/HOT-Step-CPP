@@ -396,6 +396,7 @@ are reported, not ignored.
 | `steps` | checkpoint (30) | Flow steps, 1 to 1000 |
 | `cfg_flow` | checkpoint (1.7) | Flow CFG, above 0 up to 100 |
 | `flow_uncond_interval` | 1 | 1 to 16. Above 1, the unconditional branch runs only every Nth step |
+| `flow_hop_frames` | checkpoint (100) | Flow window hop in frames, 100 to 160 against the 200-frame window. Longer hops overlap less, so there are fewer windows and less flow work; the carry and seam crop scale with the overlap. Absent is the exact reference |
 | `get_wav_bits` | 16 | 16, 24 or 32 |
 | `get_lrc` | false | Lyric timestamps from the LM's alignment heads |
 | `get_ar_codes` | false | Keep the planner codes on the job (`GET /mm3/job?id=&ar=1` or `GET /mm3/take?...&ar=1`) |

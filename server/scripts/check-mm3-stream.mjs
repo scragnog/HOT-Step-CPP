@@ -9,9 +9,13 @@
 //      BYTE-IDENTICAL to the saved WAV's PCM. Any seam is an offset bug, and
 //      it is measurable, so it gets measured rather than listened for.
 //
-// Usage: node mm3-stream-test.mjs [engineUrl]
+// Usage: node mm3-stream-test.mjs [engineUrl] [--extra '{"flow_hop_frames":150}']
+//   --extra merges into both requests, to prove a knob keeps both claims.
 
-const ENGINE = process.argv[2] || 'http://127.0.0.1:8085';
+const argv = process.argv.slice(2);
+const xi = argv.indexOf('--extra');
+const EXTRA = xi >= 0 ? JSON.parse(argv.splice(xi, 2)[1]) : {};
+const ENGINE = argv[0] || 'http://127.0.0.1:8085';
 
 const CAPTION = [
   'Global Metadata: genre: synthwave; mood: driving; bpm: 110; key: A minor.',
@@ -31,7 +35,7 @@ async function submit(stream) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       caption: CAPTION, lyrics: '', duration: DURATION, seed: SEED,
-      steps: STEPS, get_wav_bits: 16, get_lrc: false, reuse_ar: false, stream,
+      steps: STEPS, get_wav_bits: 16, get_lrc: false, reuse_ar: false, stream, ...EXTRA,
     }),
   });
   if (!res.ok) throw new Error(`submit failed ${res.status}: ${await res.text()}`);

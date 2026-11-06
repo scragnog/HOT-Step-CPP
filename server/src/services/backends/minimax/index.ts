@@ -455,6 +455,26 @@ async function capabilities(): Promise<BackendCapabilities> {
         step: 1,
       },
       {
+        // Flow window hop (engine flow_hop_frames). 100 is the checkpoint's hop
+        // and is omitted from the wire, so the default stays the exact
+        // reference. Longer hops cut the flow stage; seams are not yet judged
+        // by ear, hence experimental.
+        key: 'mm3FlowHop',
+        type: 'slider',
+        label: 'Window Hop',
+        hint: 'The flow stage renders the song in 8-second windows (200 frames, '
+            + '25 per second) that start every 100 frames, so neighbouring windows '
+            + 'overlap by half and most of the song is rendered twice. A longer hop '
+            + 'overlaps less: 150 needs about a third fewer windows and cuts the '
+            + 'flow stage by about that much. The seams between windows get less '
+            + 'shared context, so treat anything above 100 as experimental and '
+            + 'listen at the joins. 100 (default) is the reference.',
+        default: 100,
+        min: 100,
+        max: 160,
+        step: 10,
+      },
+      {
         // Backend-NEUTRAL key: BackendGenerationDropdown reads it to decide
         // whether to render the shared solver/scheduler/guidance pickers, and
         // that component must stay free of MM3-specific names. Any future

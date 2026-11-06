@@ -223,6 +223,9 @@ export interface Mm3SynthRequest {
    *  only on the warmup steps, the final step, and every Nth step, holding the
    *  guidance delta in between — N=2 removes ~22% of the flow forwards. */
   flow_uncond_interval?: number;
+  /** Flow window hop in frames, 100..160. Absent = the checkpoint's 100, the
+   *  exact reference; longer hops overlap less and cut the flow stage. */
+  flow_hop_frames?: number;
   /** 16 | 24 | 32, default 16. */
   get_wav_bits?: number;
   /** Emit LRC lyric timestamps from the LM's alignment heads. Since the

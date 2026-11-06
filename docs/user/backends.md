@@ -119,6 +119,11 @@ What sets it apart:
 - Flow Steps (default 30, range 2 to 60) is the main speed control. Below 30, Low-Step
   Compensation reshapes the schedule so short renders keep their low end and stereo
   image.
+- Window Hop (default 100 frames, range 100 to 160) is an experimental speed control.
+  The flow stage renders the song in 8-second windows that overlap by half, so most of
+  the song is rendered twice. A longer hop overlaps less: 150 needs about a third fewer
+  windows. The seams between windows get less shared context, so listen before you
+  rely on it.
 - The Lua solver, scheduler and guidance plugins can drive its flow DiT, behind the
   Sampler Plugins toggle, which is off by default and marked experimental. Postprocess
   plugins do not apply.
