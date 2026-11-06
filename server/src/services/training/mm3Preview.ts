@@ -42,8 +42,8 @@ import fs from 'fs';
 import path from 'path';
 
 import { aceClient } from '../aceClient.js';
-import { mm3JobDetail, mm3SelectModel, mm3Synth } from '../backends/minimax/client.js';
-import { mm3PersistedSelection } from '../backends/minimax/index.js';
+import { mm3JobDetail, mm3PropsCached, mm3SelectModel, mm3Synth } from '../backends/minimax/client.js';
+import { mm3EffectiveSelection } from '../backends/minimax/index.js';
 import { MM3_LM_ADAPTER_DEFAULT_SCALES } from '../backends/minimax/lmAdapter.js';
 import type { Mm3PreviewOptions, TrainingPreview } from './types.js';
 import { applyMm3Trigger } from '../backends/minimax/trigger.js';
@@ -365,7 +365,9 @@ const PREVIEW_ADAPTER_BASE = 'q8_0';
  *  training runner restores the whole selection once the run is over. */
 async function pinPreviewBase(): Promise<string> {
   try {
-    const want = mm3PersistedSelection();
+    // The selection the app runs (persisted picks, else the default ladder),
+    // so a user who never picked a depth quant does not drop to f16 here.
+    const want = mm3EffectiveSelection(mm3PropsCached());
     const r = await mm3SelectModel({
       lm: PREVIEW_ADAPTER_BASE,
       depth: want.depth,

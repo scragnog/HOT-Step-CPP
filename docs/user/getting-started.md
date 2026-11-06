@@ -107,7 +107,7 @@ than guessing.
 | XL Quality | ACE-Step 1.5 | ~11.9 GB | About 12 GB |
 | Blackwell Optimized | ACE-Step 1.5 | ~9.3 GB | RTX 50-series, CUDA builds only. <!-- TODO(verify): VRAM figure. --> |
 | MiniMax-Music3 Q4_K_M | MiniMax-Music3 | ~7.6 GB | Described as the option for limited VRAM. |
-| MiniMax-Music3 Q8_0 | MiniMax-Music3 | ~13.4 GB | Not stated. |
+| MiniMax-Music3 Q8_0 | MiniMax-Music3 | ~13.8 GB | Not stated. |
 | MiniMax-Music3 F16 | MiniMax-Music3 | ~23.6 GB | About 22.5 GB of weights plus about 3 GB of working memory. |
 | YuE2 Compact (imatrix) | YuE2 | ~3.1 GB | Described as the usual choice for limited VRAM. |
 | YuE2 Recommended | YuE2 | ~4.6 GB | Not stated. |

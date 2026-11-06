@@ -29,8 +29,9 @@ addendum). Caption format: the **mm3-captioning** skill.
 ```
 caption+lyrics → Qwen2 BPE → Global LM 8.59B (Qwen3 arch, semantic codes @ ids 151675–168058,
   EOS 151670, AR CFG 1.5 as persistent 2-row batch) → per frame: RVQ depth decoder 0.6B
-  (7 acoustic codebooks) → frame_hiddens [F,8,4096] → per 200-frame window (hop 100):
-  condition encoder 25M (×3.4453125 nearest resample) → flow DiT 2.4B (30 Euler steps,
+  (7 acoustic codebooks) → frame_hiddens [F,8,4096] → per 200-frame window (hop 100;
+  app default 150): condition encoder 25M (×3.4453125 nearest resample) → flow DiT 2.4B
+  (30 Euler steps, app default 20;
   CFG 1.7, zeros-cond uncond as separate pass) → vocoder 54M (DAC-style, ×512 → 44.1 kHz)
   → overlap-crop stitch
 ```

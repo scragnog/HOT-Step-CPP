@@ -89,7 +89,7 @@ Quick Start pack for ACE-Step 1.5; add a pack per backend you want to use.
 | CUDA 13 Runtime | shared | 3 | 0.53 GB | NVIDIA CUDA 13.x runtime libraries required for GPU-accelerated generation. ~510 MB download. |
 | CUDA 12 Runtime | shared | 3 | 0.81 GB | NVIDIA CUDA 12.x runtime libraries for the CUDA 12.8 compatibility build. ~810 MB download. |
 | MiniMax-Music3 (F16) | mm3 | 2 | 23.6 GB | All five MiniMax-Music3 components at full precision — the reference quality bar. ~24 GB download. |
-| MiniMax-Music3 (Q8_0) | mm3 | 3 | 13.4 GB | LM, DiT and depth decoder at Q8_0 with the frontends near-native — near-lossless, about half the size and a faster LM step. Recommended. ~13 GB download. |
+| MiniMax-Music3 (Q8_0) | mm3 | 4 | 13.8 GB | LM, DiT and depth decoder at Q8_0 with the frontends near-native — near-lossless, about half the size and a faster LM step. Also brings the NVFP4 depth decoder, which the app uses by default on RTX 50-series cards. Recommended. ~13 GB download. |
 | MiniMax-Music3 (Balanced mix) | mm3 | 6 | 12.2 GB | The split format's point: LM at Q8_0 (quality lives in the language model) with the DiT at Q4_K_M (VRAM lives in the flow stack), depth at Q8_0, frontends near-native. ~12 GB download. |
 | MiniMax-Music3 (Q6_K) | mm3 | 2 | 9.9 GB | LM and DiT at Q6_K, depth at Q8_0 (its validated floor), frontends near-native. ~10 GB download. |
 | MiniMax-Music3 (Q4_K_M) | mm3 | 2 | 7.6 GB | LM and DiT at Q4_K_M, depth at Q8_0, frontends near-native — the compact option for limited VRAM. ~8 GB download. |

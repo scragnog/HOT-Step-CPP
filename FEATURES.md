@@ -31,7 +31,7 @@ Pick the backend from the Generation engine box at the top of the sidebar; it ap
 | Feature | What it does |
 |---|---|
 | Native port | 8B planner LM, depth decoder, condition encoder, flow-matching DiT and vocoder, all in C++/GGML, producing 44.1 kHz stereo. |
-| Split model format | Five GGUFs, each selectable at its own quantisation, so a high-precision planner can pair with a compact DiT. |
+| Split model format | Five GGUFs, each selectable at its own quantisation, so a high-precision planner can pair with a compact DiT. Unpicked, the planner runs at Q8_0 and the depth decoder at NVFP4 on RTX 50-series cards. |
 | Importance-matrix quants | Planner quants below Q8 are built against an importance matrix measured from the full-precision model. |
 | Structured Caption | Global Metadata, Vocal Details and Arrangement sections, with tempo and key in the prose. Compose Caption builds one from a plain description with no AI model. |
 | Natural endings | The planner decides where the song stops (ceiling 300 s), planning several candidates and keeping the first to end. |
@@ -39,6 +39,7 @@ Pick the backend from the Generation engine box at the top of the sidebar; it ap
 | Play While Rendering | Playback starts a few seconds in while later windows are still rendering. The full file saves as usual. |
 | Plan cache | Changing only flow-stage settings replays the saved plan instead of planning again. |
 | Saved plans | Save AR Plan (Plank) keeps a render's planner codes so flow-stage settings can be compared on the same plan. Save Plan To Disk keeps the planner output as a file that skips the planner on replay and survives a restart. |
+| Fast defaults | 20 flow steps, a 150-frame window hop and TensorRT FP8, each ear-tested against the reference settings with no audible loss. [Details](docs/user/backends.md) |
 | Low-step compensation | Below 30 flow steps the schedule reshapes so short renders keep their low end and stereo image. |
 | Planner adapters | LoRA adapters with Strength, Attention, MLP and depth-thirds dials, in runtime or merge mode. |
 | LRC from the planner | Line-level lyric timestamps read from the planner's attention. |
@@ -379,7 +380,7 @@ Build datasets from your own audio and train adapters on your GPU, for ACE-Step,
 | Training backend | The active global backend drives the phase tabs, dataset chips, Train page and checkpoint previews; a running job keeps its target. [Details](docs/user/studios/training-studio.md) |
 | Preprocess and codes | Encodes audio for ACE-Step, or RVQ codes for MiniMax-Music3 with an optional cover-laundering pass. |
 | ACE-Step adapters | Planner LM adapters (0.6B, 1.7B, 4B) and DiT adapters, as LoRA or LoKr. There are no automatic checkpoint previews; Audition compares adapters and saved milestones. |
-| MiniMax-Music3 adapters | Planner LM LoRA trained from RVQ codes, with an opt-in BF16 training precision up to 2.3x faster. |
+| MiniMax-Music3 adapters | Planner LM LoRA trained from RVQ codes, at a BF16 training precision about 2.6x faster than FP32 by default. |
 | HeartMuLa adapters | A native backbone LoRA trained on the 3B model, with HeartCodec preparation, recipe presets, a default 30-epoch budget capped at 480 updates, a durable multi-dataset queue, Prepare-then-Train chains, scoped cache reset and checkpoint Review. Needs a CUDA build and about 12 GB of VRAM. [Details](docs/user/training/heartmula.md) |
 | HeartMuLa checkpoint previews | Training pauses every N steps, renders a full song from the saved checkpoint, with the tags and lyrics taken from the dataset, then resumes; the base model and the final adapter are rendered too. [Details](docs/user/training/heartmula.md#checkpoint-previews) |
 | MiniMax-Music3 checkpoint previews | Render previews during training pauses the trainer at checkpoints to render samples beside the base model, then resumes it. |

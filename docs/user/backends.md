@@ -116,14 +116,15 @@ What sets it apart:
   usual.
 - Variations Per Render (1 to 4) renders several different songs from one prompt in a
   single pass, sharing the planner. Each request is otherwise one take.
-- Flow Steps (default 30, range 2 to 60) is the main speed control. Below 30, Low-Step
+- Flow Steps (default 20, range 2 to 60) is the main speed control. The checkpoint's
+  own value is 30; an ear test heard no difference at 20. Below 30, Low-Step
   Compensation reshapes the schedule so short renders keep their low end and stereo
   image.
-- Window Hop (default 100 frames, range 100 to 160) is an experimental speed control.
-  The flow stage renders the song in 8-second windows that overlap by half, so most of
-  the song is rendered twice. A longer hop overlaps less: 150 needs about a third fewer
-  windows. The seams between windows get less shared context, so listen before you
-  rely on it.
+- Window Hop (default 150 frames, range 100 to 160) sets how far apart the flow
+  stage's 8-second windows start. The checkpoint's 100 overlaps them by half, so most
+  of the song is rendered twice; 150 needs about a third fewer windows, and an ear test
+  heard no difference at the seams. 100 is the reference. Above 150 the seams get less
+  shared context still, so listen at the joins.
 - The Lua solver, scheduler and guidance plugins can drive its flow DiT, behind the
   Sampler Plugins toggle, which is off by default and marked experimental. Postprocess
   plugins do not apply.
@@ -139,16 +140,19 @@ What sets it apart:
 - Renderer (in the Models cluster, under the Flow DiT picker) switches the DiT between
   GGML and TensorRT. TensorRT needs the MM3 TensorRT DiT pack plus one builder DLL for
   your GPU, and the first render builds an engine once, which takes a few minutes.
-  With TensorRT on, a TensorRT precision choice appears below it. BF16 is the default.
-  TensorRT FP8 (experimental) runs part of the DiT in 8-bit: on an RTX 5090 the flow
-  stage is about 27% faster (a 60 s song renders about 5 s sooner) and it uses about
-  1.5 GB less VRAM. Its output differs slightly from BF16, more on some songs than
-  others, and it has not been checked by ear yet. Its first render builds a second
-  engine once.
+  With TensorRT on, a TensorRT precision choice appears below it. FP8 is the default:
+  it runs part of the DiT in 8-bit, so on an RTX 5090 the flow stage is about 27%
+  faster (a 60 s song renders about 5 s sooner) and uses about 1.5 GB less VRAM. In an
+  ear test it was indistinguishable from BF16; one of three held-out test prompts sits
+  slightly below our latent-parity target, so BF16 stays available as the exact path.
+  The first render at each precision builds its own engine once.
 
 Models: five GGUFs (planner LM, depth decoder, condition encoder, flow DiT, vocoder), each
 selectable at its own quantisation in the Models cluster. Picking a quant loads it into
-the engine and the choice is remembered across restarts. The packs:
+the engine and the choice is remembered across restarts. Until you pick one, the app runs
+the planner LM at Q8_0 and the depth decoder at NVFP4 on RTX 50-series cards or Q8_0 on
+others, falling back to the best installed file when that quant is missing; the other
+three keep the best installed file. The packs:
 
 | Pack | Precision | Download |
 |---|---|---|
@@ -156,7 +160,7 @@ the engine and the choice is remembered across restarts. The packs:
 | MiniMax-Music3 (NVFP4) | LM and DiT NVFP4, for RTX 50-series cards | ~7.7 GB |
 | MiniMax-Music3 (Q6_K) | LM and DiT Q6_K, depth Q8_0 | ~9.9 GB |
 | MiniMax-Music3 (Balanced mix) | LM Q8_0, DiT Q4_K_M, depth Q8_0 | ~12.2 GB |
-| MiniMax-Music3 (Q8_0) | Q8_0 throughout, recommended | ~13.4 GB |
+| MiniMax-Music3 (Q8_0) | Q8_0 throughout plus the NVFP4 depth decoder, recommended | ~13.8 GB |
 | MiniMax-Music3 (F16) | Full precision | ~23.6 GB |
 
 Training an adapter also needs the MiniMax-Music3 Training pack (~2.8 GB) on top of a

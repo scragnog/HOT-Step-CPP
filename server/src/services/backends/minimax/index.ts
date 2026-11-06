@@ -17,7 +17,7 @@ import { listMm3Planks } from './plank.js';
 import { MM3_HIDDENS_EXT, listMm3Hiddens } from './hiddens.js';
 import { listMm3LmAdapters } from './lmAdapter.js';
 import { mm3Props, mm3PropsCached, mm3SelectModel, mm3Unload } from './client.js';
-import { runMinimaxGeneration } from './generate.js';
+import { MM3_DEFAULT_FLOW_HOP, MM3_DEFAULT_STEPS, runMinimaxGeneration } from './generate.js';
 import type { Mm3Props, Mm3RoleVariants } from './client.js';
 import type {
   EngineBackend,
@@ -84,6 +84,32 @@ export function mm3PersistedSelection(): { lm: string } & Record<Mm3Role, string
     dit:   roleOf('dit'),
     voc:   roleOf('voc'),
   };
+}
+
+/** The quant a role runs when the user has never picked one, best first; the
+ *  first installed file wins and none installed means engine auto. Ear-tested
+ *  2026-11-06: LM q8_0, and the depth decoder at NVFP4 on Blackwell consumer
+ *  cards (sm >= 120, RTX 50-series), q8_0 elsewhere. The DiT, cond and vocoder
+ *  keep engine auto. */
+export function mm3DefaultQuantLadder(role: 'lm' | Mm3Role, sm: number): string[] {
+  if (role === 'lm') return ['q8_0'];
+  if (role === 'depth') return sm >= 120 ? ['NVFP4', 'q8_0'] : ['q8_0'];
+  return [];
+}
+
+/** What the engine should run: the persisted pick where its file is still on
+ *  disk, else the role's default ladder. With no variants in `props` (stale or
+ *  older engine) persisted picks are kept as-is and defaults fall to auto. */
+export function mm3EffectiveSelection(props: Mm3Props | null): { lm: string } & Record<Mm3Role, string> {
+  const want = mm3PersistedSelection();
+  const sm = Number(props?.dit_runtime?.sm) || 0;
+  const pick = (k: 'lm' | Mm3Role): string => {
+    const avail = props?.variants?.[k]?.available;
+    const has = (q: string) => avail?.some(f => f.quant === q) ?? false;
+    if (want[k] && (!avail || has(want[k]))) return want[k];
+    return mm3DefaultQuantLadder(k, sm).find(has) ?? '';
+  };
+  return { lm: pick('lm'), depth: pick('depth'), cond: pick('cond'), dit: pick('dit'), voc: pick('voc') };
 }
 
 const MM3_OPERATIONS: readonly GenerationOperation[] = ['text2music'];
@@ -170,22 +196,12 @@ async function reconcileSelection(props: Mm3Props | null, stale: boolean): Promi
   // guess.
   if (stale || !props?.variants) return;
 
-  const want = mm3PersistedSelection();
-  if (!want.lm && MM3_ROLES.every(r => !want[r])) return;  // never chosen — engine default is right
-
   // Only ask for a quant the engine can actually see; a file deleted since the
   // choice was made must fall back, not wedge every capability poll on a 400.
+  // A role never chosen gets the app default (mm3DefaultQuantLadder), not the
+  // engine's best-first f16.
   const variantsOf = (key: 'lm' | Mm3Role) => props.variants?.[key];
-  const has = (key: 'lm' | Mm3Role, q: string) =>
-    !q || (variantsOf(key)?.available?.some(f => f.quant === q) ?? false);
-
-  const target = {
-    lm:    has('lm', want.lm) ? want.lm : '',
-    depth: has('depth', want.depth) ? want.depth : '',
-    cond:  has('cond', want.cond) ? want.cond : '',
-    dit:   has('dit', want.dit) ? want.dit : '',
-    voc:   has('voc', want.voc) ? want.voc : '',
-  };
+  const target = mm3EffectiveSelection(props);
 
   // Engines predating the split have no per-role variants; skip rather than
   // send a per-role body they would misread.
@@ -414,13 +430,14 @@ async function capabilities(): Promise<BackendCapabilities> {
         key: 'mm3Steps',
         type: 'slider',
         label: 'Flow Steps',
-        hint: 'Euler steps per window. The checkpoint default is 30; lower is '
+        hint: 'Euler steps per window. The default is 20, ear-tested against the '
+            + 'checkpoint\'s 30 with no audible difference; lower is '
             + 'proportionally faster (the flow stage dominates long renders). '
             + 'Below 30, Low-Step Compensation reshapes the schedule to keep the '
             + 'stereo image and low end intact — without it, low step counts go '
             + 'thin and phasey rather than merely soft. Under 8 steps is '
             + 'experimental territory.',
-        default: 30,
+        default: MM3_DEFAULT_STEPS,
         min: 2,
         max: 60,
         step: 1,
@@ -455,21 +472,20 @@ async function capabilities(): Promise<BackendCapabilities> {
         step: 1,
       },
       {
-        // Flow window hop (engine flow_hop_frames). 100 is the checkpoint's hop
-        // and is omitted from the wire, so the default stays the exact
-        // reference. Longer hops cut the flow stage; seams are not yet judged
-        // by ear, hence experimental.
+        // Flow window hop (engine flow_hop_frames). 100 is the checkpoint's hop;
+        // the app default 150 was ear-tested at the seams with no audible
+        // difference (2026-11-06) and is always sent.
         key: 'mm3FlowHop',
         type: 'slider',
         label: 'Window Hop',
         hint: 'The flow stage renders the song in 8-second windows (200 frames, '
-            + '25 per second) that start every 100 frames, so neighbouring windows '
+            + '25 per second). The checkpoint starts one every 100 frames, so neighbouring windows '
             + 'overlap by half and most of the song is rendered twice. A longer hop '
-            + 'overlaps less: 150 needs about a third fewer windows and cuts the '
-            + 'flow stage by about that much. The seams between windows get less '
-            + 'shared context, so treat anything above 100 as experimental and '
-            + 'listen at the joins. 100 (default) is the reference.',
-        default: 100,
+            + 'overlaps less: 150 (default) needs about a third fewer windows and '
+            + 'cuts the flow stage by about that much, and an ear test heard no '
+            + 'difference at the seams. 100 is the reference; above 150 the seams '
+            + 'get less shared context still, so listen at the joins.',
+        default: MM3_DEFAULT_FLOW_HOP,
         min: 100,
         max: 160,
         step: 10,

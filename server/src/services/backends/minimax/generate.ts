@@ -178,6 +178,11 @@ const MM3_MAX_TAKES = 8;
 const MM3_REFERENCE_STEPS = 30;
 const MM3_MIN_STEPS = 2;
 const MM3_MAX_STEPS = 60;
+/** App defaults for an untouched control (ear-tested 2026-11-06, no audible
+ *  loss against 30 steps / hop 100 / BF16). Exported so index.ts declares the
+ *  same numbers in the manifest. */
+export const MM3_DEFAULT_STEPS = 20;
+export const MM3_DEFAULT_FLOW_HOP = 150;
 const MM3_FLOW_SHIFT_MAX = 20;  // engine-side ceiling, mm3-request.h:986
 
 /** Schedule shift that gives `steps` the same high-noise resolution as 30 steps. */
@@ -332,9 +337,9 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   if (requestedDitBackend !== 'ggml' && requestedDitBackend !== 'tensorrt' && requestedDitBackend !== 'auto') {
     throw new Error(`Invalid MM3 renderer: ${String(requestedDitBackend)}`);
   }
-  // TensorRT precision: 'bf16' (default, omitted from the wire) or the
-  // experimental 'fp8' MLP engine. The engine ignores it on the GGML renderer.
-  const ditPrecision = params.mm3DitPrecision ?? 'bf16';
+  // TensorRT precision: 'fp8' (default since 2026-11-06, ear-tested) or 'bf16'
+  // (omitted from the wire). The engine ignores it on the GGML renderer.
+  const ditPrecision = params.mm3DitPrecision ?? 'fp8';
   if (ditPrecision !== 'bf16' && ditPrecision !== 'fp8') {
     throw new Error(`Invalid MM3 DiT precision: ${String(ditPrecision)}`);
   }
@@ -466,7 +471,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   const resolvedSteps =
     Number.isFinite(rawSteps) && rawSteps >= MM3_MIN_STEPS && rawSteps <= MM3_MAX_STEPS
       ? Math.round(rawSteps)
-      : undefined;
+      : MM3_DEFAULT_STEPS;
 
   const samplerPlugins = mapMinimaxSamplerPlugins(params, resolvedSteps, notes);
 
@@ -523,11 +528,12 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
       seed,
       // Surfaced as capability `extensions` (backends/minimax/index.ts) rather
       // than left checkpoint-fixed: the flow stage is the majority of wall time
-      // on a full-length render and `steps` is a linear dial on it. Both are
-      // omitted from the wire when unset so the engine keeps applying the
-      // checkpoint defaults (30 / 1.7) — an out-of-range value is dropped here
-      // rather than sent for the engine to reject mid-job.
-      ...(resolvedSteps !== undefined ? { steps: resolvedSteps } : {}),
+      // on a full-length render and `steps` is a linear dial on it. Steps
+      // always travel (the app default 20 is not the checkpoint's 30); cfg is
+      // omitted when unset so the engine keeps the checkpoint's 1.7. An
+      // out-of-range value falls back here rather than being sent for the
+      // engine to reject mid-job.
+      steps: resolvedSteps,
       ...(Number.isFinite(Number(params.mm3CfgFlow)) && Number(params.mm3CfgFlow) >= 1.0 &&
           Number(params.mm3CfgFlow) <= 5.0
             ? { cfg_flow: Number(params.mm3CfgFlow) }
@@ -538,12 +544,13 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
           Number(params.mm3FlowUncondInterval) >= 2 && Number(params.mm3FlowUncondInterval) <= 16
             ? { flow_uncond_interval: Math.round(Number(params.mm3FlowUncondInterval)) }
             : {}),
-      // Flow window hop. Omitted at the checkpoint's 100 so the default request
-      // is unchanged; 101..160 is the engine's accepted range.
-      ...(Number.isFinite(Number(params.mm3FlowHop)) &&
-          Math.round(Number(params.mm3FlowHop)) > 100 && Math.round(Number(params.mm3FlowHop)) <= 160
-            ? { flow_hop_frames: Math.round(Number(params.mm3FlowHop)) }
-            : {}),
+      // Flow window hop, always sent: the app default (150) is not the
+      // checkpoint's 100, and an explicit 100 takes the same reference path.
+      // 100..160 is the engine's accepted range; anything else is the default.
+      flow_hop_frames: Number.isFinite(Number(params.mm3FlowHop)) &&
+          Math.round(Number(params.mm3FlowHop)) >= 100 && Math.round(Number(params.mm3FlowHop)) <= 160
+            ? Math.round(Number(params.mm3FlowHop))
+            : MM3_DEFAULT_FLOW_HOP,
       // ── LM sampling knobs. Omitted from the wire at their defaults so the
       // engine's reference recipe stays authoritative (and bit-identical). ──
       ...(Number.isFinite(Number(params.mm3LmTemperature)) && Number(params.mm3LmTemperature) !== 1.0

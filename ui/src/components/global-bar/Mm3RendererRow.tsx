@@ -106,8 +106,8 @@ export const Mm3RendererRow: React.FC<Props> = ({ ditRuntime, value, onChange, p
                 value={precision}
                 onChange={onPrecisionChange}
                 options={[
-                  { value: 'bf16', label: t('globalBar.mm3PrecisionBf16', 'BF16 (default)') },
-                  { value: 'fp8', label: t('globalBar.mm3PrecisionFp8', 'TensorRT FP8 (experimental)') },
+                  { value: 'fp8', label: t('globalBar.mm3PrecisionFp8', 'FP8 (default)') },
+                  { value: 'bf16', label: t('globalBar.mm3PrecisionBf16', 'BF16') },
                 ]}
                 className="w-full"
               />

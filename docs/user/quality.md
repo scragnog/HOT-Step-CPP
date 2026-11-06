@@ -43,7 +43,7 @@ result, so they are a poor trade for anyone chasing quality per minute.
 | Q4_K_M | Q4_K_M | ~8 GB | Smallest, for limited VRAM |
 | Q6_K | Q6_K, depth Q8_0 | ~10 GB | |
 | Balanced | LM Q8_0, DiT Q4_K_M | ~12 GB | Quality lives in the LM, VRAM lives in the DiT |
-| Q8_0 | Q8_0 throughout | ~13 GB | Recommended: near-lossless, about half the F16 size |
+| Q8_0 | Q8_0 throughout, plus the NVFP4 depth decoder | ~14 GB | Recommended: near-lossless, about half the F16 size |
 | F16 | Full precision | ~24 GB | Reference quality bar |
 | NVFP4 | LM and DiT NVFP4, depth Q8_0 | ~8 GB | Fastest on RTX 50-series cards; quality not yet judged by ear |
 
@@ -52,6 +52,11 @@ full-precision model, so error is spent on the weights that carry signal
 rather than spread evenly. The Model Manager notes that these K-quant LMs run
 the autoregressive stage five to six times slower than Q8_0 or NVFP4 on CUDA, so
 the Q6_K and Q4_K_M packs save VRAM, not time.
+
+Until you pick a quant yourself, MiniMax-Music3 runs the LM at Q8_0 and the
+depth decoder at NVFP4 on RTX 50-series cards (Q8_0 on other cards). Both were
+judged by ear against F16 with no audible loss. A missing file falls back to
+the next quant on that list, then to the best installed one.
 
 ### YuE2
 
@@ -120,8 +125,8 @@ more musical result at the same step count.
 
 ### MiniMax-Music3
 
-The Flow Steps slider (`mm3Steps`) defaults to the checkpoint's own 30 and
-ranges from 2 to 60. Fewer steps are proportionally faster, since the flow
+The Flow Steps slider (`mm3Steps`) defaults to 20 and ranges from 2 to 60.
+The checkpoint's own value is 30; an ear test heard no difference at 20. Fewer steps are proportionally faster, since the flow
 stage dominates render time on longer tracks. Below 30 steps, Low-Step
 Compensation reshapes the noise schedule automatically to keep the low end
 and stereo image intact; without it, low step counts go thin and phasey
@@ -192,7 +197,9 @@ What to change first, per backend, when you want slower but better:
 
 - ACE-Step 1.5: XL Turbo DiT at Q8_0 or BF16, 4B LM at Q8_0, apply the
   Maximum quality assistant preset, then consider StableStep and PP-VAE.
-- MiniMax-Music3: the Q8_0 pack, Flow Steps above 30 up to 60, Flow Guidance
+- MiniMax-Music3: the Q8_0 pack with the depth decoder at Q8_0 or F16, Flow
+  Steps raised from 20 toward 60, Window Hop at 100, TensorRT precision BF16,
+  Flow Guidance
   (`mm3CfgFlow`) raised from its 1.7 default if the render is drifting from
   the caption.
 - YuE2: the Q8_0 or full-precision LM pack, ODE Steps raised from 32 toward

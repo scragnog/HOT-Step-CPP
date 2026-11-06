@@ -6,7 +6,7 @@ can place individual children elsewhere.
 
 > Reference for the `mm3-backend` skill. Read only when the task needs it.
 
-## TensorRT DiT: where the time goes, and the opt-in FP8 MLP (measured 2026-11-06)
+## TensorRT DiT: where the time goes, and the default FP8 MLP (measured 2026-11-06)
 
 **Profile of the BF16 engine** (TRT layer profiler, B=2 L=689, q8_0 DiT, RTX
 5090): 38.1 ms per enqueue, of which GEMMs are 91%. The 72 MLP GEMMs
@@ -23,9 +23,11 @@ cache is not worth building.
 per-channel scale refits (weights and scales), and the refitted plan stores
 FP8 weights (4.88 GB plan -> 3.07 GB). No pre-quantization needed.
 
-**FP8 MLP engine (opt-in, default off, not ear-validated).** Selected per job by
-`"dit_precision": "fp8"` on `/mm3/synth` (UI: Models > Flow DiT > TensorRT
-precision > "TensorRT FP8 (experimental)"; server param `mm3DitPrecision`);
+**FP8 MLP engine (the app default since 2026-11-06, ear-tested as
+indistinguishable from BF16).** Selected per job by `"dit_precision": "fp8"` on
+`/mm3/synth` (UI: Models > Flow DiT > TensorRT precision > "FP8 (default)";
+server param `mm3DitPrecision`, absent = fp8, `bf16` omits the field); the
+engine's own default without the field is still BF16;
 `MM3_DIT_TRT_FP8=1` stays as a dev override that forces it on.
 `mm3-dit-trt.h` inserts FP8 E4M3 Q/DQ on the ff_in and ff_out GEMMs of blocks
 2..33 after parsing the shipped ONNX: per-output-channel weight scales computed
@@ -50,7 +52,7 @@ x2 and x8 gave the same parity to within run noise.
 |---|---|---|---|
 | BF16 (default) | 38.1 | 1250 ms | 17.2-17.5 s |
 | FP8 MLP, all 36 blocks | 26.2 | 846 ms (with dump) | 11.9 s |
-| FP8 MLP, blocks 2..33 (shipped opt-in) | 27.5 | 920 ms | 12.5-12.8 s |
+| FP8 MLP, blocks 2..33 (shipped, default) | 27.5 | 920 ms | 12.5-12.8 s |
 | FP8 ff_in only | 30.1 | | |
 
 Bench: lm q8_0, depth f16, dit q8_0, 30 steps, 60 s, seed 4242; the FP8 job
@@ -99,8 +101,9 @@ above 0.9989 everywhere. Max x2 was kept: it has the best worst case
 (0.99758 against 0.99519 for the median) and cannot clip an activation seen in
 calibration. The worst-window number moves non-monotonically with the scales
 (per-window trajectories diverge), so treat single-window gaps of ~0.001 as
-noise around a real shortfall. That is why FP8 stays experimental and default
-off. A/B WAVs (BF16 vs FP8, seed 7, plus the bench prompt in FP8):
+noise around a real shortfall. It was kept opt-in until the ear test
+(2026-11-06), which heard no difference; the held-out shortfall stays a known
+caveat and BF16 stays selectable as the exact path. A/B WAVs (BF16 vs FP8, seed 7, plus the bench prompt in FP8):
 `_experiments/_LISTENING/2026-11-06-mm3-speed/fp8-calib/`.
 
 Bench with the shipped file (same setup as above, per-job field): BF16
@@ -279,6 +282,10 @@ never perturb a default render. Lives in `mm3LowStepShift()`
 (`server/src/services/backends/minimax/generate.ts`), applied by the `mm3AutoLowStep`
 extension (default ON). It forces **scheduler + shift only** — forwarding the shared
 `inferMethod`/`guidanceMode` pickers would silently swap MM3 onto ACE's APG default.
+
+**App default 20 steps (2026-11-06, shift 1.53), ear-tested against 30 with no audible
+difference.** `MM3_DEFAULT_STEPS` in generate.ts; the server always sends `steps`, so the
+GGUF's `mm3.flow.steps = 30` only applies to direct engine calls.
 
 **EAR-VALIDATED at 10 steps (shift 3.2).** 8–29 is interpolation on a curve anchored at
 both ends. **Below 8 is extrapolation** — the first-step match is bought with an
@@ -494,11 +501,13 @@ check, `GET /mm3/stream`) -> `minimax/client.ts`
 `components/player/Mm3StreamStatus.tsx`, shown in the active queue card
 (`InlineAudioQueue.tsx`).
 
-## Flow window hop: `flow_hop_frames` (built + measured 2026-11-06, NOT yet heard)
+## Flow window hop: `flow_hop_frames` (built + measured 2026-11-06, app default 150)
 
 The flow stage renders 200-frame windows on a 100-frame hop, so every kept frame is
 denoised twice. `flow_hop_frames` (request field, 100..160, absent = the checkpoint's
-`mm3.dit.hop_frames`) lengthens the hop. UI: **Window Hop** (`mm3FlowHop`, Generation cluster, default 100 = omitted from the wire).
+`mm3.dit.hop_frames`) lengthens the hop. UI: **Window Hop** (`mm3FlowHop`, Generation cluster, default 150 since 2026-11-06; the
+server always sends the field, so an explicit 100 takes the derived-geometry path, which is
+bit-identical to the reference).
 
 **The carry/crop literals are one number.** diffusers hard-codes 172 / 86 / 258, but
 they all follow from the latent span two windows share, `span = L - round(hop * 3.4453125)`
@@ -526,8 +535,8 @@ passes 8/8 at 100, 133 and 150: streamed bytes equal saved bytes at any hop.
 Flow scales with the window count, plus a smaller last window (-27 % at 150); AR (21 s) is the bigger stage and is
 untouched. Seams get half as much shared context at 150 (carry 86 latents, crop 43/129).
 Blind A/B/C renders, 3 seeds x 75 s with lyrics, staged in
-`_experiments/_LISTENING/2026-11-06-mm3-speed/hop/` (score sheet + KEY.txt). Keep the
-default at 100 until those are scored.
+`_experiments/_LISTENING/2026-11-06-mm3-speed/hop/` (score sheet + KEY.txt). Scored
+2026-11-06: no audible seam difference at 150, which became the default.
 
 ## MM3 AR cache: the speedup the Plank is not (built + measured 2026-08-21)
 
@@ -697,6 +706,14 @@ mystery 2× LM slowdown that looked exactly like CUDA-graph thrash until the loa
 (16,374 MB) gave it away. The Node layer now merges missing roles from persisted settings
 (index.ts selectModel) and the UI always sends every role; when poking the ENGINE directly,
 always send the full selection.
+
+**App defaults for a role nobody picked (2026-11-06, ear-tested).** `mm3EffectiveSelection`
+(index.ts) resolves each role as the persisted pick if its file is on disk, else the first
+installed quant on `mm3DefaultQuantLadder`: LM `q8_0`; depth `NVFP4` then `q8_0` when
+`/mm3/props` `dit_runtime.sm >= 120`, else `q8_0`; DiT, cond and vocoder empty (engine
+auto). `reconcileSelection` pushes that on every capability poll without persisting it, and
+the training preview pin uses the same resolution. The recommended Q8_0 pack carries
+`mm3-depth-NVFP4` so a new Blackwell install gets the default.
 
 **CLOSED NEGATIVE (2026-08-21): batching the flow DiT's cond+uncond CFG passes.** Full batch-2
 graph built and A/B'd (bcdcab0): 81 ms/step vs 66 two-pass at L=689 — **22 % SLOWER**, corr

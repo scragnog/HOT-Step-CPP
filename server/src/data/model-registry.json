@@ -125,11 +125,12 @@
       "id": "minimax-music3-q8",
       "family": "mm3",
       "name": "MiniMax-Music3 (Q8_0)",
-      "description": "LM, DiT and depth decoder at Q8_0 with the frontends near-native — near-lossless, about half the size and a faster LM step. Recommended. ~13 GB download.",
+      "description": "LM, DiT and depth decoder at Q8_0 with the frontends near-native — near-lossless, about half the size and a faster LM step. Also brings the NVFP4 depth decoder, which the app uses by default on RTX 50-series cards. Recommended. ~13 GB download.",
       "fileIds": [
         "mm3-lm-q8_0",
         "mm3-lm-q8_0-pissa-r128",
-        "mm3-synth-q8_0"
+        "mm3-synth-q8_0",
+        "mm3-depth-NVFP4"
       ],
       "components": [
         "mm3-lm-q8_0",
