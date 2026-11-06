@@ -234,6 +234,9 @@ export const MM3_VRAM_MODEL = {
   /** Typical MM3 prompt. Added to maxFrames to get the sequence length. */
   promptTokens: 1142,
   constMb: 441,
+  /** Fast/Fastest precision on a non-BF16 base: the one-layer BF16 weight
+   *  stage the trainer fills each layer (measured +368-378 MB on q8_0). */
+  bf16StageMb: 378,
   /** Frozen KV prefix (engine train/lm-kvprefix.h). NOT fitted — this one is
    *  arithmetic: 36 layers x K and V x n_kv_heads*head_dim (1024) x 4 bytes is
    *  exactly 0.28125 MB per stored column, and the store spans the prefill

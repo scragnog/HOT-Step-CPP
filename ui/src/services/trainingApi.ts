@@ -253,6 +253,9 @@ export interface Mm3VramModel {
    *  measured yet — estimateMm3PeakMb then falls back to the exact-mode
    *  quadratic term instead of guessing a saving. See MM3_VRAM_MODEL.flash. */
   flash?: { perTokenSqMb: number; perTokenMb?: number; constMb?: number } | null;
+  /** Extra MB for Fast/Fastest precision on a non-BF16 base (the BF16 weight
+   *  stage). Optional: an older server does not send it. */
+  bf16StageMb?: number;
 }
 
 /** Whether `m.flash` carries a real measurement. False for any server that

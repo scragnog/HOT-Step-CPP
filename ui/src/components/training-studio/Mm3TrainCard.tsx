@@ -298,7 +298,8 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                                     form.optimizer,
                                     form.cropAnchor === 'song' ? form.prefixFrames : 0,
                                     256, attnEffective)
-                + (chosen.extraMb || 0);
+                + (chosen.extraMb || 0)
+                + (form.trainPrecision !== 'full' && chosen.id !== 'bf16' ? status.vramModel.bf16StageMb ?? 0 : 0);
     // Flash mode's own coefficients are not measured yet (MM3_VRAM_MODEL.flash
     // is null server-side), so the number above is silently standing in for
     // exact mode's — say so rather than presenting it as a proven saving.
@@ -1127,13 +1128,14 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       info={t('trainingStudio.mm3.trainPrecisionInfo',
                         'How exactly the trainer does its arithmetic. Full keeps every matrix product in '
                         + 'FP32. Fast runs the frozen base weights\' products in BF16 on the tensor cores: '
-                        + 'about 1.65x per step on an RTX 5090. Fastest also runs flash attention in BF16: '
-                        + 'about 2.3x per step. Peak VRAM is the same for all three. The faster choices '
+                        + 'about 1.8x per step on an RTX 5090. Fastest also runs flash attention in BF16: '
+                        + 'about 2.6x per step. Fast and Fastest add about 0.4 GB of peak VRAM on a quantized base, for a BF16 copy of one layer at a time; the estimate includes it. The faster choices '
                         + 'change the trained weights slightly and have not been judged by ear yet. '
                         + 'Fastest is experimental: its gradients are too coarse for the trainer\'s '
                         + 'finite-difference check, though they match Full within 0.15%. Fastest only '
                         + 'changes attention when Flash attention is on; otherwise it trains as Fast. '
-                        + 'Needs a CUDA card.')}
+                        + 'Needs a CUDA card; on cards older than the RTX 30 series, Fastest keeps the default '
+                        + 'attention precision.')}
                       className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
                       onReset={form.trainPrecision !== base.trainPrecision ? () => reset('trainPrecision') : undefined}
                     />
@@ -1144,9 +1146,9 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       options={[
                         { value: 'full', label: t('trainingStudio.mm3.trainPrecisionFull', 'Full (FP32, default)') },
                         { value: 'fast', label: t('trainingStudio.mm3.trainPrecisionFast', 'Fast (BF16 matmuls)'),
-                          hint: t('trainingStudio.mm3.trainPrecisionFastHint', 'About 1.65x per step') },
+                          hint: t('trainingStudio.mm3.trainPrecisionFastHint', 'About 1.8x per step') },
                         { value: 'fastest', label: t('trainingStudio.mm3.trainPrecisionFastest', 'Fastest (BF16 matmuls + attention)'),
-                          hint: t('trainingStudio.mm3.trainPrecisionFastestHint', 'About 2.3x per step, experimental') },
+                          hint: t('trainingStudio.mm3.trainPrecisionFastestHint', 'About 2.6x per step, experimental') },
                       ]}
                       className="w-full"
                     />

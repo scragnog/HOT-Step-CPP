@@ -90,7 +90,7 @@ Smaller base precisions trade fidelity for memory. Step time barely moves betwee
 | Fast (BF16 matmuls) | `--weights bf16` | 1.8x |
 | Fastest (BF16 matmuls + attention), experimental | `--weights bf16 --attn flash-bf16` | 2.6x |
 
-On the q8_0 base, Fast and Fastest add about 0.4 GB to the peak (one layer of weights kept in BF16). Fastest only changes the attention when **Flash attention** is on; with it off, Fastest trains like Fast. Both need a CUDA card; on another engine the trainer falls back to full precision with a warning. The run records its choice, so a run paused for a preview, or continued later, resumes with the same precision. Fastest is marked experimental because its gradients are too coarse for the trainer's finite-difference check, even though they match the full-precision gradients to within 0.15 %.
+On the q8_0 base, Fast and Fastest add about 0.4 GB to the peak (one layer of weights kept in BF16). Fastest only changes the attention when **Flash attention** is on; with it off, Fastest trains like Fast. BF16 attention needs an RTX 30-series card or newer; on an older card Fastest keeps the default attention precision and says so in the log. Both need a CUDA card; on another engine the trainer falls back to full precision with a warning. The run records its choice, so a run paused for a preview, or continued later, resumes with the same precision. Fastest is marked experimental because its gradients are too coarse for the trainer's finite-difference check, even though they match the full-precision gradients to within 0.15 %.
 
 The same flags on the command line (`ace-train mm3-lm-train`), all off by default:
 
