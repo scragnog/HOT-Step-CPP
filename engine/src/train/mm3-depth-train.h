@@ -356,8 +356,19 @@ static bool mm3_depth_train_head(LmCkptRun & r, const LmSample & s, void * user)
                        ggml_mul(ctx, ggml_repeat(ctx, ggml_reshape_3d(ctx, eb, H, 1, K), base),
                                 sel[(size_t) (2 + b)]));
     }
+    // A frozen weight times [in, 8, K] activations, as ONE GEMM over 8K
+    // columns. Fed the 3D tensor, ggml-cuda runs K batched products of 8
+    // columns each (mul_mat_f forward, cuBLAS small-N backward), re-reading the
+    // whole F32 weight per frame. At K = 128 the head's compute went from
+    // 161 to 65 ms a micro-step (2026-11-06). Same products, but another
+    // kernel sums them in another order, so results are not bit-identical to
+    // the 3D form's (step 1: same printed loss, gradient norm 0.03 % apart).
+    auto wmm = [&](ggml_tensor * w, ggml_tensor * t) {
+        ggml_tensor * y2 = ggml_mul_mat(ctx, qwen3_f32(ctx, w), ggml_reshape_2d(ctx, t, t->ne[0], t->ne[1] * t->ne[2]));
+        return ggml_reshape_3d(ctx, y2, y2->ne[0], t->ne[1], t->ne[2]);
+    };
     // proj + learned absolute positions (rows 0..7 of a 16-row table).
-    ggml_tensor * x = ggml_mul_mat(ctx, qwen3_f32(ctx, d.proj), seq);       // [H, 8, K]
+    ggml_tensor * x = wmm(d.proj, seq);                                      // [H, 8, K]
     ggml_tensor * pos8 = ggml_view_2d(ctx, d.pos, H, 8, d.pos->nb[1], 0);
     x = ggml_add(ctx, x, qwen3_f32(ctx, ggml_cont(ctx, pos8)));
 
@@ -367,9 +378,9 @@ static bool mm3_depth_train_head(LmCkptRun & r, const LmSample & s, void * user)
     for (int b = 0; b < 4; b++) {
         const MM3DepthTrainBlock & B = d.blk[b];
         ggml_tensor * a = lm_rms(ctx, x, B.attn_norm, 1e-6f);
-        ggml_tensor * q = ggml_mul_mat(ctx, qwen3_f32(ctx, B.wq), a);
-        ggml_tensor * k = ggml_mul_mat(ctx, qwen3_f32(ctx, B.wk), a);
-        ggml_tensor * v = ggml_mul_mat(ctx, qwen3_f32(ctx, B.wv), a);
+        ggml_tensor * q = wmm(B.wq, a);
+        ggml_tensor * k = wmm(B.wk, a);
+        ggml_tensor * v = wmm(B.wv, a);
         q = ggml_cont(ctx, ggml_permute(ctx, ggml_reshape_4d(ctx, q, hd, nh, 8, K), 0, 2, 1, 3));
         k = ggml_cont(ctx, ggml_permute(ctx, ggml_reshape_4d(ctx, k, hd, nh, 8, K), 0, 2, 1, 3));
         v = ggml_cont(ctx, ggml_permute(ctx, ggml_reshape_4d(ctx, v, hd, nh, 8, K), 1, 2, 0, 3));
@@ -380,12 +391,12 @@ static bool mm3_depth_train_head(LmCkptRun & r, const LmSample & s, void * user)
         ggml_tensor * o = ggml_mul_mat(ctx, v, kq);                          // [hd, 8, nh, K]
         o = ggml_cont(ctx, ggml_permute(ctx, o, 0, 2, 1, 3));                // [hd, nh, 8, K]
         o = ggml_reshape_3d(ctx, o, (int64_t) hd * nh, 8, K);
-        o = ggml_mul_mat(ctx, qwen3_f32(ctx, B.wo), o);
+        o = wmm(B.wo, o);
         x = ggml_add(ctx, x, o);
         ggml_tensor * m = lm_rms(ctx, x, B.ffn_norm, 1e-6f);
-        ggml_tensor * g = ggml_silu(ctx, ggml_mul_mat(ctx, qwen3_f32(ctx, B.gate), m));
-        ggml_tensor * u = ggml_mul_mat(ctx, qwen3_f32(ctx, B.up), m);
-        x = ggml_add(ctx, x, ggml_mul_mat(ctx, qwen3_f32(ctx, B.down), ggml_mul(ctx, g, u)));
+        ggml_tensor * g = ggml_silu(ctx, wmm(B.gate, m));
+        ggml_tensor * u = wmm(B.up, m);
+        x = ggml_add(ctx, x, wmm(B.down, ggml_mul(ctx, g, u)));
     }
     ggml_tensor * y = lm_rms(ctx, x, d.onorm, 1e-6f);                        // [H, 8, K]
 
@@ -465,7 +476,16 @@ static bool mm3_depth_train_head(LmCkptRun & r, const LmSample & s, void * user)
                                 0, (size_t) (AV * K) * sizeof(float));
     }
 
-    if (ggml_backend_sched_graph_compute(r.sched, gf) != GGML_STATUS_SUCCESS) {
+    // Counted as gpu_sync by HOTSTEP_LM_PHASE_TIMER (submit included). Until
+    // 2026-11-06 the timer did not see this graph, so its GPU time, 160 ms a
+    // micro-step then, was reported as host build time.
+    const int64_t pt0 = lm_phase_enabled() ? ggml_time_us() : 0;
+    const bool    cok = ggml_backend_sched_graph_compute(r.sched, gf) == GGML_STATUS_SUCCESS;
+    if (lm_phase_enabled()) {
+        g_lm_phase.sync_us += ggml_time_us() - pt0;
+        g_lm_phase.graphs++;
+    }
+    if (!cok) {
         ggml_backend_sched_reset(r.sched);
         ggml_backend_buffer_free(gbuf);
         ggml_free(gctx);

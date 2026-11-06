@@ -208,10 +208,30 @@ against the f32-window run:
 - After both (Nsight, 8 steps): kernel time 51.3 s to 22.9 s. BF16
   tensor-core GEMMs (`cutlass_80_tensorop_s16816gemm_bf16`) 41.6 %,
   elementwise 17.9 %, FP32 SIMT left (adapter, head, depth) 9.9 %, F32 to BF16
-  and other copies 9.7 %, q8_0 to F32 7.5 %, flash 10.7 %. Host build is now
-  9.7 % of the step (12.8 % amortisable, over Lever B's 10 % bar). Next
-  candidates: a direct q8_0 to BF16 copy in HOT-ggml (most of the 17 % of
-  casts), then graph reuse.
+  and other copies 9.7 %, q8_0 to F32 7.5 %, flash 10.7 %. The phase timer
+  then read host build at 9.7 % of the step, but most of that was the
+  acoustic-loss head's GPU time, which ran outside the timer (next block).
+  Next candidate: a direct q8_0 to BF16 copy in HOT-ggml (most of the 17 % of
+  casts).
+
+**Later the same night: the host share was the depth head.** Per-phase
+timers inside the micro-step (BF16 levers, 20 steps): forward 795 ms, CE head
+85, acoustic-loss head 198, backward segments 1,736, and building all 36
+backward graphs only 2.5 ms. The acoustic-loss head (`mm3_depth_train_head`)
+called `ggml_backend_sched_graph_compute` directly, so its 161 ms of GPU work
+landed in `build(host)`. It now counts as `gpu_sync`; real host time is about
+85 ms a step (3 %), and an overlap that built graph i+1 while graph i ran
+measured 0.3 %, so it was dropped. Graph reuse and Lever B are closed for MM3.
+The head itself was slow for a fixable reason: its frozen-weight GEMMs took
+`[in, 8, K]` activations, which ggml-cuda runs as K batched 8-column products
+(`mul_mat_f` forward, cuBLAS `gemmSN_NN` backward, 5.3 % of kernel time
+together), re-reading each F32 weight per frame. As one 2D GEMM the head takes
+65 ms instead of 161: 2.85 to 2.70 s a step under the levers, 6.69 to 6.54 s
+with the default flags. Not bit-identical (summation order), loss within
+0.18 % over 20 steps, the head's fd tripwire passes. Also bit-identical and
+small: HOT-PiZZA's frozen branch now adds `B0 (-s A0 x)` instead of
+subtracting, which drops a NEG over `[out, S]` per site from the backward
+(1.2 % of kernel time).
 
 Gates. `mm3-lm-probe` on f16 (it now takes `--weights` and `--attn`) passes
 every arm; `--weights bf16 --attn flash-bf16` gives cos 0.999999898, rel

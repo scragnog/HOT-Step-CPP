@@ -898,6 +898,24 @@ override. `--tf32 on` stays command-line only.
   MM3 step's kernel time under `--weights bf16 --attn flash-bf16`, and ADD's
   is nothing. 20-step losses, gradient norms and depth losses are identical to
   the previous binary with and without the BF16 flags.
+- **The acoustic-loss head runs its weight GEMMs in 2D.** `mm3_depth_train_head`
+  fed the frozen depth decoder `[in, 8, K]` activations, which ggml-cuda runs
+  as K batched products of 8 columns, re-reading each F32 weight per frame.
+  Reshaped to one `[in, 8K]` GEMM, the head's compute at K = 128 fell from
+  161 to 65 ms per micro-step. The products are the same, but the kernel sums
+  them in another order, so results are not bit-identical: over 20 steps,
+  loss within 0.18 % (mean 0.02 %), depth loss within 0.06 %, step 1's loss
+  unchanged; the head's finite-difference tripwire passes as before.
+  Whole-song recipe: 2.85 to 2.70 s per micro-step with
+  `--weights bf16 --attn flash-bf16` (1.05x), 6.69 to 6.54 s with the
+  default flags.
+- **`HOTSTEP_LM_PHASE_TIMER` now sees that head.** It ran outside the timer,
+  so its GPU time was reported as `build(host)`: of the 274 ms "host" per
+  micro-step, 161 ms was this head on the GPU. True host time is about 85 ms
+  (3 % under the BF16 levers), and graph construction in the 36 backward
+  segments is about 2.5 ms of it. Building graph i+1 while graph i ran was
+  tried and measured 0.3 % (noise), so it was not kept; graph reuse and
+  Lever B have nothing left to amortise here.
 
 ### HOT-PiZZA — the MM3 default method (2026-09-06)
 
