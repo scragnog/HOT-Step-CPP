@@ -1000,10 +1000,25 @@ struct LmLayerOpts {
 // required); materialising them would hand back part of the saving.
 //
 // Mirrors dit_attn_flash in train/dit-train-graph.h op for op.
+//
+// GGML_PREC_BF16 (--attn flash-bf16) is the YuE2 trainer's pattern
+// (yue2-aitk-graph.h): Q/K/V are cast to contiguous BF16 so CUDA takes its BF16
+// kernels, and `causal` (key j visible iff j <= causal + row, or -1 for none)
+// lets those kernels skip reading the mask. The mask stays attached: the hint
+// is ignored without one, and the other kernels still read it.
 static ggml_tensor * lm_attn_flash(ggml_context * ctx, ggml_tensor * q, ggml_tensor * k, ggml_tensor * v,
-                                   ggml_tensor * mask, float scale, ggml_prec prec) {
+                                   ggml_tensor * mask, float scale, ggml_prec prec, int causal = -1) {
+    const bool bf16 = prec == GGML_PREC_BF16;
+    if (bf16) {
+        q = ggml_cast(ctx, q, GGML_TYPE_BF16);
+        k = ggml_cast(ctx, k, GGML_TYPE_BF16);
+        v = ggml_cast(ctx, v, GGML_TYPE_BF16);
+    }
     ggml_tensor * packed = ggml_flash_attn_train(ctx, q, k, v, mask, scale);
     ggml_flash_attn_train_set_prec(packed, prec);
+    if (bf16 && causal >= 0) {
+        ggml_flash_attn_train_set_causal(packed, causal);
+    }
     return ggml_flash_attn_train_get_o(ctx, packed);  // [D,Nh,S]
 }
 
@@ -1092,6 +1107,16 @@ static ggml_tensor * lm_linear(ggml_context * ctx, ggml_tensor * w, const QwLora
     } else {
         // Lever A. src0 stays BF16 -> ggml-cuda.cu's cublasGemmEx(CUDA_R_16BF,
         // CUBLAS_COMPUTE_32F) instead of cublasSgemm/TF32.
+        //
+        // A non-BF16 base (q8_0 and the other quants, F16) is cast to BF16 in
+        // the graph first. ggml-cuda has no direct quant -> BF16 copy, so a
+        // quant goes through F32; gallocr frees the F32 step once the BF16
+        // copy exists. The rewrite map is keyed by the tensor the mul_mat
+        // reads (its out_prod's src[0]), so it must be the cast, not w.
+        if (w->type != GGML_TYPE_BF16) {
+            ggml_tensor * wf = w->type == GGML_TYPE_F16 ? w : ggml_cast(ctx, w, GGML_TYPE_F32);
+            w                = ggml_cast(ctx, wf, GGML_TYPE_BF16);
+        }
         y = ggml_mul_mat(ctx, w, x);
         if (opts.wt && !opts.wt->map.count(w)) {
             // [K,N] -> [N,K], SAME dtype. Consumed ONLY by the rewritten backward
@@ -1472,7 +1497,9 @@ static ggml_tensor * lm_train_layer(ggml_context * ctx, const Qwen3LMConfig & c,
         // untouched, so with the flag off this layer emits the byte-identical
         // node sequence it emitted before the flag existed.
         attn = opts.attn_flash
-                   ? lm_attn_flash(ctx, q, k, v, mask, 1.0f / sqrtf((float) D), opts.attn_prec)
+                   ? lm_attn_flash(ctx, q, k, v, mask, 1.0f / sqrtf((float) D), opts.attn_prec,
+                                   // plain causal only: a prefix mask has prompt-row rules
+                                   n_pfx == 0 ? 0 : -1)
                    : qwen3_attn_f32(ctx, q, k, v, mask, 1.0f / sqrtf((float) D));
         attn = ggml_reshape_2d(ctx, attn, Nh * D, S);
     }

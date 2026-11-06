@@ -852,6 +852,32 @@ now starts its clock before the mask and token uploads. The measured step
 breakdown (FP32 SIMT GEMMs are 58 % of kernel time, flash attention 24 %) is in
 [.claude/skills/mm3-backend/reference/training.md](../../.claude/skills/mm3-backend/reference/training.md).
 
+### BF16 and TF32 levers on `mm3-lm-train` (2026-11-06)
+
+Three opt-in flags, all off by default, so a default run is unchanged (a
+flags-off 20-step run reproduced the earlier binary's losses exactly):
+
+- **`--weights bf16` on any base.** Lever A used to need a BF16-native base.
+  `lm_linear` now casts a non-BF16 projection to BF16 in-graph (a quant goes
+  through F32, since ggml-cuda has no quant-to-BF16 copy) and keys the
+  out_prod rewrite by the cast, so the shipped q8_0 base reaches
+  `cublasGemmEx(CUDA_R_16BF)` in both directions. 1.65x per step, VRAM level.
+- **`--attn flash-bf16`.** `lm_attn_flash` casts Q/K/V to BF16 with
+  `GGML_PREC_BF16` and sets causal hint 0 when there is no KV prefix, as
+  `yue2-aitk-graph.h` does. 1.19x. `dit_flash_probe` (`flash-prec.h`) takes
+  the precision so the probe asks about the BF16 kernels.
+- **`--tf32 on`.** The trainer sets `NVIDIA_TF32_OVERRIDE=0` before the CUDA
+  backend starts, which is why every F32 GEMM ran `cutlass_80_simt_sgemm`.
+  The flag skips it. 1.39x alone, +1.4 % on top of the other two.
+
+`--weights bf16 --attn flash-bf16` measured 2.32x (6.64 to 2.86 s per
+micro-step) on a whole-song recipe, max per-step loss delta 0.57 % over 20
+steps. `mm3-lm-probe` accepts `--weights` and `--attn` and passes on f16 for
+every arm. The `--fd-check` finite differences fail for `flash-bf16` on
+attention-side probes while the route check passes; the full table, the
+kernel split after the change and the gate numbers are in
+[.claude/skills/mm3-backend/reference/training.md](../../.claude/skills/mm3-backend/reference/training.md).
+
 ### HOT-PiZZA — the MM3 default method (2026-09-06)
 
 HOT-PiZZA is PiSSA with principal-subspace dropout. It was called HOT-PiSSA on

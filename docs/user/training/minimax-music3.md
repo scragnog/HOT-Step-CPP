@@ -82,6 +82,16 @@ The form estimates the peak for your card and tells you whether it fits, is tigh
 
 Smaller base precisions trade fidelity for memory. Step time barely moves between them. The form marks bases that are too lossy to train against.
 
+Faster arithmetic is available from the command line only (`ace-train mm3-lm-train`), all off by default and not yet judged by ear:
+
+| Flag | Speed on a 5090, whole-song recipe | What changes |
+|---|---|---|
+| `--weights bf16` | 1.65x | The base weights' matrix products run in BF16 on the tensor cores. Works on any base, including q8_0. |
+| `--attn flash-bf16` | 1.19x | Flash attention runs in BF16. CUDA only. |
+| `--tf32 on` | 1.39x alone, little extra on top of the two above | The remaining F32 products may use TF32. |
+
+`--weights bf16 --attn flash-bf16` together trained 2.3 times as fast with the same memory, and the training loss stayed within 0.6 % of the default over 20 steps. Each flag changes the trained weights slightly.
+
 Flash attention training needs a CUDA build. On Vulkan or Metal the checkbox is greyed out and the trainer uses exact attention, whose longest practical window on a 32 GB card was about 4300 frames (172 s).
 <!-- TODO(verify): whether whole-song MM3 training is practical at all on a non-CUDA build. -->
 

@@ -178,6 +178,54 @@ under 1 %, below the 3 % bar for kernel churn. The larger cost of that branch
 is the `[out, S]` output of `B0 (A0 x)` and the `sub` after it. Merging that
 needs a differentiable concat, and ggml's `CONCAT` has no backward.
 
+**Why the GEMMs were SIMT: `NVIDIA_TF32_OVERRIDE=0`.** ggml-cuda puts every
+cuBLAS handle in TF32 mode, but `mm3_lm_train_main` sets the override before
+the backend starts (TF32 was judged "a few percent"), so every F32 GEMM ran
+`cutlass_80_simt_sgemm`. The override does not reach the custom `fa_train`
+TF32 kernels or BF16 `GemmEx`.
+
+**Three opt-in levers (2026-11-06), all off by default.** Same recipe, 20
+steps, seed 42, app shut down, no Unreal. ms is the phase timer's
+per-micro-step total; VRAM is device peak minus idle; loss deltas are per step
+against the f32-window run:
+
+| flags | ms/step | speedup | peak VRAM | max / mean loss delta |
+|---|---|---|---|---|
+| f32-window, flash (in-app today) | 6,643 | 1.00x | 19,105 MB | (losses identical to the pre-change binary) |
+| `--tf32 on` | 4,791 | 1.39x | 19,054 MB | 0.29 % / 0.06 % |
+| `--attn flash-bf16` | 5,554 | 1.19x | 18,959 MB | 0.84 % / 0.12 % |
+| `--weights bf16` | 4,043 | 1.65x | 19,200 MB | 0.32 % / 0.07 % |
+| `--weights bf16 --attn flash-bf16` | 2,861 | 2.32x | 19,163 MB | 0.57 % / 0.08 % |
+| the two plus `--tf32 on` | 2,821 | 2.35x | 19,214 MB | 0.80 % / 0.11 % |
+
+- `--weights bf16` now takes any base. `lm_linear` casts a q8_0 (or other
+  quant, or F16) projection to BF16 in-graph (q8_0 goes through F32: the fork
+  has no direct quant-to-BF16 copy), and Lever A's rewrite is keyed by the
+  cast. The S18 tripwire (7 rewrites per segment) still holds.
+- `--attn flash-bf16` is the YuE2 trainer's attention: Q/K/V cast to BF16,
+  `GGML_PREC_BF16`, and causal hint 0 when there is no prefix, so the BF16
+  kernels skip reading the mask.
+- After both (Nsight, 8 steps): kernel time 51.3 s to 22.9 s. BF16
+  tensor-core GEMMs (`cutlass_80_tensorop_s16816gemm_bf16`) 41.6 %,
+  elementwise 17.9 %, FP32 SIMT left (adapter, head, depth) 9.9 %, F32 to BF16
+  and other copies 9.7 %, q8_0 to F32 7.5 %, flash 10.7 %. Host build is now
+  9.7 % of the step (12.8 % amortisable, over Lever B's 10 % bar). Next
+  candidates: a direct q8_0 to BF16 copy in HOT-ggml (most of the 17 % of
+  casts), then graph reuse.
+
+Gates. `mm3-lm-probe` on f16 (it now takes `--weights` and `--attn`) passes
+every arm; `--weights bf16 --attn flash-bf16` gives cos 0.999999898, rel
+9.5e-4 against the 1e-3 bar (f32-window exact: 0.999999951, 3.5e-4). On q8_0
+every arm misses the rel bar, the unchanged one included (4.5e-3), so probe on
+f16. `--fd-check 8 --f32-layers 2`: the F32-isolated layers take the shipped
+path, so it cannot test `--weights bf16`. With `--attn flash-bf16` the route
+check passes (2.75e-4) but finite differences fail on the q_proj probes
+(worst 0.64 at the default eps, 0.068 at `--fd-eps 0.2`, where TF32 flash
+gives 0.002). The analytic gradients match TF32 flash within 0.15 % on all 8
+probes, so the BF16-rounded forward is too coarse for central differences on
+attention-side factors. All three stay opt-in until matched adapters have
+been heard.
+
 ## Native codes export: `ace-train mm3-codes` (SHIPPED 2026-08-20)
 
 Audio -> RVQ codes, natively. `engine/src/minimax/mm3-rvq-encode.h` ports

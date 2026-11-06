@@ -237,7 +237,7 @@ static void print_usage(void) {
             "                mode refuses them by name rather than loading an adapter it\n"
             "                would then silently ignore. Mutually exclusive with --dora\n"
             "                and with each other.\n"
-            "                [--attn exact|flash|flash-f32] default exact. flash swaps\n"
+            "                [--attn exact|flash|flash-f32|flash-bf16] default exact. flash swaps\n"
             "                the manual attention chain for the fused\n"
             "                FLASH_ATTN_TRAIN/_BACK pair, so the [S_kv,S,Nh] softmax is\n"
             "                never materialised and attention memory is LINEAR in S\n"
@@ -249,7 +249,10 @@ static void print_usage(void) {
             "                rectangular (exit 2). flash-f32 pins the same ops to strict\n"
             "                f32 (the v1 scalar kernels) — slower, and the mode\n"
             "                --fd-check should use. Gradients under flash are NOT\n"
-            "                bit-identical to exact.\n"
+            "                bit-identical to exact. flash-bf16 casts Q/K/V to BF16\n"
+            "                (BF16 kernels, causal tile skip); CUDA sm_80+ only.\n"
+            "                [--tf32 on|off] default off: F32 GEMMs run strict FP32\n"
+            "                (SIMT). on lets cuBLAS use TF32 tensor cores.\n"
             "  mm3-lm-loss   Teacher-forced training forward, scored. --lm --depth --codes\n"
             "                --caption [--lyrics] [--max-frames N] [--crop-offset N]\n"
             "                [--target-shift N] [--no-prompt]  (falsification diagnostics).\n"
@@ -259,8 +262,9 @@ static void print_usage(void) {
             "  mm3-lm-probe  Wiring gate for the MM3 LM trainer: load the MM3 LM into the\n"
             "                ACE LM trainer's struct and compare its cache-free forward\n"
             "                against the engine's own prefill. --lm <mm3-lm-*.gguf>\n"
-            "                [--tokens a,b,c] [--layers N] [--depth <mm3-depth-*.gguf>].\n"
-            "                Runs the two sides\n"
+            "                [--tokens a,b,c] [--layers N] [--depth <mm3-depth-*.gguf>]\n"
+            "                [--weights f32-window|bf16] [--attn exact|flash|flash-bf16]\n"
+            "                (the trainer's arithmetic). Runs the two sides\n"
             "                SEQUENTIALLY: two 17 GB copies do not fit on one card.\n"
             "  mm3-retarget  Rescue dataset tracks over MM3's 6:00 cap by removing one\n"
             "                repeated section, keeping the intro and the real ending.\n"
@@ -357,11 +361,11 @@ static void print_usage(void) {
             "                [0, --prefix-frames], so a real ending is learned as a state rather\n"
             "                than one memorised frame. Off = the pinned end crop.\n"
             "                [--weights f32-window|bf16] default f32-window. `bf16` is\n"
-            "                Lever A: the raw BF16 weight goes to mul_mat and the\n"
+            "                Lever A: the BF16 weight goes to mul_mat and the\n"
             "                backward's out_prod nodes are rewritten to mul_mat, so both\n"
-            "                directions reach the tensor cores instead of TF32. Needs CUDA\n"
-            "                and a BF16-native base (convert-mm3.py --quant bf16); falls\n"
-            "                back with a warning otherwise. It CHANGES the trained weights\n"
+            "                directions reach the BF16 tensor cores. Needs CUDA (falls\n"
+            "                back with a warning otherwise); a q8_0/quant/F16 base is\n"
+            "                cast to BF16 in-graph. It CHANGES the trained weights\n"
             "                — activation gradients are BF16-rounded at every layer.\n"
             "                [--depth-loss-weight 1.0] the acoustic loss: teacher-forced CE\n"
             "                through the FROZEN depth decoder, gradient into the adapter via\n"
@@ -2340,6 +2344,7 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--drop-over-frames")) a.drop_over_frames = atoll(next("--drop-over-frames"));
         else if (!strcmp(argv[i], "--crop-mode"))     a.crop_mode    = next("--crop-mode");
         else if (!strcmp(argv[i], "--weights"))       a.weights      = next("--weights");
+        else if (!strcmp(argv[i], "--tf32"))          a.tf32         = !strcmp(next("--tf32"), "on");
         else if (!strcmp(argv[i], "--depth-loss-weight")) a.depth_loss_weight = atof(next("--depth-loss-weight"));
         else if (!strcmp(argv[i], "--depth-loss-frames")) a.depth_loss_frames = atoi(next("--depth-loss-frames"));
         else if (!strcmp(argv[i], "--crop-start-frac")) a.crop_start_frac = atof(next("--crop-start-frac"));
@@ -2433,8 +2438,8 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
     // of the validation below it: the gate runs the same graphs under the same
     // flag, so a typo that silently fell through to "exact" there would report a
     // PASS for a formulation the run never used.
-    if (a.attn != "exact" && a.attn != "flash" && a.attn != "flash-f32") {
-        fprintf(stderr, "ace-train mm3-lm-train: --attn must be exact|flash|flash-f32\n");
+    if (a.attn != "exact" && a.attn != "flash" && a.attn != "flash-f32" && a.attn != "flash-bf16") {
+        fprintf(stderr, "ace-train mm3-lm-train: --attn must be exact|flash|flash-f32|flash-bf16\n");
         return 2;
     }
     // Parameterization exclusivity, the same block train-dit carries
@@ -2974,6 +2979,9 @@ static int cmd_mm3_lm_probe(int argc, char ** argv) {
     std::string          lm_path, depth_path;
     std::vector<int32_t> ids;
     int                  layers = 0;   // 0 = all
+    // The trainer's arithmetic options, so the probe can measure what the
+    // BF16 levers do to the forward: --weights bf16, --attn flash|flash-bf16.
+    std::string          weights = "f32-window", attn = "exact";
 
     for (int i = 1; i < argc; i++) {
         auto next = [&](const char * what) -> const char * {
@@ -2983,6 +2991,8 @@ static int cmd_mm3_lm_probe(int argc, char ** argv) {
         if      (!strcmp(argv[i], "--lm"))     lm_path    = next("--lm");
         else if (!strcmp(argv[i], "--depth"))  depth_path = next("--depth");
         else if (!strcmp(argv[i], "--layers")) layers     = atoi(next("--layers"));
+        else if (!strcmp(argv[i], "--weights")) weights   = next("--weights");
+        else if (!strcmp(argv[i], "--attn"))   attn       = next("--attn");
         else if (!strcmp(argv[i], "--tokens")) {
             std::string v = next("--tokens");
             size_t      a = 0;
@@ -3118,12 +3128,17 @@ static int cmd_mm3_lm_probe(int argc, char ** argv) {
 
     ggml_tensor * t_tok = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, S);
     ggml_tensor * t_pos = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, S);
-    ggml_tensor * t_msk = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, S * S);
+    LmLayerOpts popts;
+    popts.weights_bf16  = weights == "bf16";
+    popts.attn_flash    = attn != "exact";
+    popts.attn_prec     = mm3_lm_attn_prec(attn);
+    ggml_tensor * t_msk = lm_mask_alloc(ctx, S * S, popts.attn_flash);
     ggml_set_input(t_tok);
     ggml_set_input(t_pos);
     ggml_set_input(t_msk);
+    fprintf(stderr, "[mm3-lm-probe] trainer side: --weights %s --attn %s\n", weights.c_str(), attn.c_str());
 
-    ggml_tensor * hidden = lm_build_trunk(ctx, &t.lm, t_tok, t_pos, t_msk, (int) S, 0, L);
+    ggml_tensor * hidden = lm_build_trunk(ctx, &t.lm, t_tok, t_pos, t_msk, (int) S, 0, L, popts);
     // The UNTIED head — the one wiring difference from ACE that a copy-paste of
     // the trainer's `mul_mat(lm.embed_tokens, h)` would get silently wrong.
     ggml_tensor * logits = ggml_mul_mat(ctx, t.lm_head, hidden);          // [V, S]
@@ -3140,11 +3155,9 @@ static int cmd_mm3_lm_probe(int argc, char ** argv) {
     }
     std::vector<int32_t> pos((size_t) S);
     for (int64_t i = 0; i < S; i++) pos[(size_t) i] = (int32_t) i;
-    std::vector<float> msk;
-    lm_causal_mask((int) S, &msk);
     ggml_backend_tensor_set(t_tok, ids.data(), 0, (size_t) S * sizeof(int32_t));
     ggml_backend_tensor_set(t_pos, pos.data(), 0, (size_t) S * sizeof(int32_t));
-    ggml_backend_tensor_set(t_msk, msk.data(), 0, msk.size() * sizeof(float));
+    lm_mask_set_causal(t_msk, 0, 0, (int) S, 0);
 
     if (ggml_backend_graph_compute(t.lm.backend, gf2) != GGML_STATUS_SUCCESS) {
         fprintf(stderr, "[mm3-lm-probe] forward compute failed\n");

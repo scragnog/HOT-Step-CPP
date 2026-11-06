@@ -409,15 +409,22 @@ struct MM3LmTrainArgs {
      *  cores; `f32-window` is the shipped path, which dequantizes each weight to
      *  F32 in-graph because ggml_out_prod is F32-only.
      *
-     *  Requires CUDA (only ggml-cuda carries the HOT-ggml bf16-out-prod change)
-     *  AND a BF16-native base (mm3-lm-bf16.gguf, from convert-mm3.py --quant
-     *  bf16). Both are checked below and FALL BACK with a warning rather than
-     *  failing, because a run that silently ran F32 under a bf16 label is worse
-     *  than one that says so.
+     *  Requires CUDA (only ggml-cuda carries the HOT-ggml bf16-out-prod change),
+     *  checked below with a warned FALL BACK rather than a failure, because a
+     *  run that silently ran F32 under a bf16 label is worse than one that says
+     *  so. Since 2026-11-06 any base works: a q8_0 (or other quant, or F16)
+     *  projection is cast to BF16 in-graph (lm_linear), so on the shipped q8_0
+     *  base the GEMM inputs are the dequantized weight rounded to BF16.
      *
      *  It CHANGES THE TRAINED WEIGHTS: activation gradients are BF16-rounded at
      *  every layer. That is the trade, and it is recorded in the run log. */
     std::string weights    = "f32-window";   // f32-window | bf16
+    /** `--tf32 on` lets cuBLAS run the remaining F32 GEMMs (the f32-window
+     *  projections, the adapters, the head) on TF32 tensor cores. Off by
+     *  default: mm3_lm_train_main sets NVIDIA_TF32_OVERRIDE=0, and that is why
+     *  every big f32-window GEMM profiles as cutlass_80_simt_sgemm (plain FP32
+     *  SIMT). The --fd-check gate always runs with TF32 off. */
+    bool        tf32       = false;
     /** The acoustic loss (mm3-depth-train.h): teacher-forced CE through the
      *  FROZEN depth decoder, gradient into the adapter via last_hidden. This
      *  is the fix for adapters that shift vocal timbre ("chipmunk"/"goblin"):
@@ -450,6 +457,10 @@ struct MM3LmTrainArgs {
     //                 "flash" selects. Slower; it separates "did fusion move the
     //                 training" from "did TF32 move it", and it is the mode the
     //                 --fd-check gate should use.
+    //   "flash-bf16" = Q/K/V cast to BF16 and GGML_PREC_BF16, the YuE2
+    //                 trainer's attention (2026-11-06). The BF16 CUDA kernels
+    //                 also honour the causal hint, so they skip reading the
+    //                 mask. CUDA sm_80+ only; probed like the others.
     //
     // NOT combinable with --prefix-frames: the frozen KV prefix makes the mask
     // rectangular (S_kv = n_pfx + S), which is outside both the capability probe
@@ -1122,6 +1133,15 @@ static bool mm3_lm_load_samples(const MM3LmTrainArgs & a, const MM3TrainLm & t,
 // put its loss change ~30x above the floor and failed the gate on arithmetic.
 // `--fd-eps` is therefore a FLOOR on the step, not the step: see the step-floor
 // block by the probe loop for the measurement and the rule.
+// --attn -> the fused op's arithmetic request (exact ignores it).
+static ggml_prec mm3_lm_attn_prec(const std::string & attn) {
+    return attn == "flash-f32" ? GGML_PREC_F32 : attn == "flash-bf16" ? GGML_PREC_BF16 : GGML_PREC_DEFAULT;
+}
+
+static const char * mm3_lm_attn_prec_label(ggml_prec p) {
+    return p == GGML_PREC_F32 ? "strict f32" : p == GGML_PREC_BF16 ? "bf16" : "tf32 where available";
+}
+
 static int mm3_lm_fdcheck_main(const MM3LmTrainArgs & a, int n_probe, double eps, int64_t frames,
                                int64_t prompt_cap, int f32_layers) {
 #ifdef _WIN32
@@ -1206,8 +1226,8 @@ static int mm3_lm_fdcheck_main(const MM3LmTrainArgs & a, int n_probe, double eps
     // analytic side is the FUSED backward, so the finite-difference rung
     // validates GGML_OP_FLASH_ATTN_TRAIN_BACK on its own terms rather than
     // diffing it against the exact arm. Under isolation that is a verdict.
-    const bool      fd_flash    = (a.attn == "flash" || a.attn == "flash-f32");
-    const ggml_prec fd_prec_req = (a.attn == "flash-f32") ? GGML_PREC_F32 : GGML_PREC_DEFAULT;
+    const bool      fd_flash    = (a.attn == "flash" || a.attn == "flash-f32" || a.attn == "flash-bf16");
+    const ggml_prec fd_prec_req = mm3_lm_attn_prec(a.attn);
     LmLayerOpts     fd_opts;
     fd_opts.attn_flash = fd_flash;
     fd_opts.attn_prec  = fd_prec_req;
@@ -1220,7 +1240,7 @@ static int mm3_lm_fdcheck_main(const MM3LmTrainArgs & a, int n_probe, double eps
         const float ascale = 1.0f / sqrtf((float) c.head_dim);
         bool        pf = false, pb = false;
         dit_flash_probe(t.lm.backend, c.head_dim, c.n_heads, c.n_kv_heads, (int) S, (int) S, /*B=*/1, ascale, &pf,
-                        &pb);
+                        &pb, fd_prec_req);
         if (!(pf && pb)) {
             fprintf(stderr,
                     "[mm3-fd] --attn %s: backend %s does not support the fused attention ops at this geometry "
@@ -1235,7 +1255,7 @@ static int mm3_lm_fdcheck_main(const MM3LmTrainArgs & a, int n_probe, double eps
         fprintf(stderr, "[mm3-fd] --attn %s: %s runs FLASH_ATTN_TRAIN and _BACK at D %d, Nh %d, Nkv %d, S %lld "
                         "— no CPU split. Requested arithmetic: %s\n",
                 a.attn.c_str(), ggml_backend_name(t.lm.backend), c.head_dim, c.n_heads, c.n_kv_heads,
-                (long long) S, fd_prec_req == GGML_PREC_F32 ? "strict f32" : "tf32 where available");
+                (long long) S, mm3_lm_attn_prec_label(fd_prec_req));
     }
 
     LmLora     lora;
@@ -1943,12 +1963,20 @@ static int mm3_lm_fdcheck_main(const MM3LmTrainArgs & a, int n_probe, double eps
 static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     // TF32 off for the same reason every other MM3 training-data path turns it
     // off: this is gradient arithmetic against a frozen f16 base, and TF32's
-    // ~1e-3 is not a trade worth taking for a few percent.
+    // ~1e-3 was judged not worth it. Measured 2026-11-06, the cost is not "a
+    // few percent": with the override every big f32-window GEMM runs as
+    // cutlass_80_simt_sgemm (57.8 % of kernel time on a whole-song step).
+    // `--tf32 on` skips it. It must be set before the CUDA backend initialises.
+    if (!a.tf32) {
 #ifdef _WIN32
-    _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
+        _putenv_s("NVIDIA_TF32_OVERRIDE", "0");
 #else
-    setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
+        setenv("NVIDIA_TF32_OVERRIDE", "0", 1);
 #endif
+    }
+    fprintf(stderr, "[mm3-lm-train] F32 GEMMs: %s\n",
+            a.tf32 ? "TF32 tensor cores allowed (--tf32 on)" : "strict FP32 (NVIDIA_TF32_OVERRIDE=0)");
+    jl("{\"type\":\"tf32\",\"on\":%s}", a.tf32 ? "true" : "false");
 
     std::string err;
     MM3TrainLm  t = {};
@@ -2164,8 +2192,8 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     // S_max. Nkv is the NATIVE GQA width — lm_train_layer never expands heads on
     // the way to lm_attn_flash, so probing Nh would ask about a geometry that is
     // never built.
-    const bool      attn_flash    = (a.attn == "flash" || a.attn == "flash-f32");
-    const ggml_prec attn_prec_req = (a.attn == "flash-f32") ? GGML_PREC_F32 : GGML_PREC_DEFAULT;
+    const bool      attn_flash    = (a.attn == "flash" || a.attn == "flash-f32" || a.attn == "flash-bf16");
+    const ggml_prec attn_prec_req = mm3_lm_attn_prec(a.attn);
     // A frozen KV prefix makes the attention rectangular: S_kv = n_pfx + S,
     // with the prompt's stored columns in front of the history. Until
     // 2026-09-06 this pair was refused; the fused op always took the shape
@@ -2178,7 +2206,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         const float ascale = 1.0f / sqrtf((float) c.head_dim);
         bool        pf = false, pb = false;
         dit_flash_probe(t.lm.backend, c.head_dim, c.n_heads, c.n_kv_heads, (int) S_max, (int) S_kv_max, /*B=*/1,
-                        ascale, &pf, &pb);
+                        ascale, &pf, &pb, attn_prec_req);
         if (!(pf && pb)) {
             fprintf(stderr,
                     "[mm3-lm-train] --attn %s: backend %s does not support the fused attention ops at this "
@@ -2198,15 +2226,17 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
                 "Nh %d, Nkv %d, S %lld, S_kv %lld, B 1 — no CPU split. Requested arithmetic: %s (the backend "
                 "resolves it per launch; the attn event after step 1 records what actually ran)\n",
                 a.attn.c_str(), ggml_backend_name(t.lm.backend), c.head_dim, c.n_heads, c.n_kv_heads,
-                (long long) S_max, (long long) S_kv_max,
-                attn_prec_req == GGML_PREC_F32 ? "strict f32" : "tf32 where available");
+                (long long) S_max, (long long) S_kv_max, mm3_lm_attn_prec_label(attn_prec_req));
     }
     // The REQUESTED arithmetic. GGML_PREC_DEFAULT is 0, which is also what a
     // zero-initialised op_params gives, and on sm_80+ it resolves to the TF32
     // kernels — so "flash" already means TF32 unless asked otherwise. What ran
     // is a separate event, emitted after step 1.
     jl("{\"type\":\"attn\",\"mode\":\"%s\",\"prec\":\"%s\"}", a.attn.c_str(),
-       attn_flash ? (attn_prec_req == GGML_PREC_F32 ? "f32" : "tf32-where-available") : "n/a");
+       attn_flash ? (attn_prec_req == GGML_PREC_F32    ? "f32"
+                     : attn_prec_req == GGML_PREC_BF16 ? "bf16"
+                                                       : "tf32-where-available")
+                  : "n/a");
 
     // ── LoRA (attaches to the model) + optimizer ──
     LmLora     lora;
@@ -2562,33 +2592,25 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     // ── Lever A (--weights bf16) ────────────────────────────────────────────
     //
     // Resolved BEFORE the graph is built, and it falls back rather than failing.
-    // Neither gate has a graceful path further in: on a non-CUDA backend the
-    // BF16 out_prod patch is absent and ggml would GGML_ABORT mid-backward, and
-    // on a non-BF16 base the surgery has no weights to rewrite. `weights_used`
+    // There is no graceful path further in: on a non-CUDA backend the BF16
+    // out_prod patch is absent and ggml would GGML_ABORT mid-backward. A
+    // non-BF16 base is no longer a reason (lm_linear casts it). `weights_used`
     // (not a.weights) is what gets reported, so a fallback is never mislabelled
     // as the bf16 run it was not.
     bool        weights_bf16 = (a.weights == "bf16");
     std::string weights_used = a.weights;
-    if (weights_bf16) {
-        std::string why;
-        if (strncmp(ggml_backend_name(t.lm.backend), "CUDA", 4) != 0) {
-            why = std::string("BF16 weights require CUDA (only ggml-cuda carries the BF16 out_prod patch) "
-                              "— falling back to f32-window; this run is on ")
-                + ggml_backend_name(t.lm.backend);
-        } else if (!lm_bf16_base_is_bf16(t.lm)) {
-            why = std::string("BF16 weights require a BF16-native base — falling back to f32-window; ")
-                + a.lm_path + " loads its projections as " + lm_bf16_base_proj_type_name(t.lm)
-                + ". Build one with: python engine/tools/convert-mm3.py --components lm --quant bf16";
-        }
-        if (!why.empty()) {
-            fprintf(stderr, "[mm3-lm-train] WARNING: %s\n", why.c_str());
-            weights_bf16 = false;
-            weights_used = "f32-window";
-        }
+    if (weights_bf16 && strncmp(ggml_backend_name(t.lm.backend), "CUDA", 4) != 0) {
+        fprintf(stderr,
+                "[mm3-lm-train] WARNING: BF16 weights require CUDA (only ggml-cuda carries the BF16 out_prod "
+                "patch) — falling back to f32-window; this run is on %s\n",
+                ggml_backend_name(t.lm.backend));
+        weights_bf16 = false;
+        weights_used = "f32-window";
     }
-    fprintf(stderr, "[mm3-lm-train] base matmuls: %s\n",
-            weights_bf16 ? "bf16 (tensor cores, Lever A)"
-                         : "f32-window (weights dequantized to F32 in-graph)");
+    fprintf(stderr, "[mm3-lm-train] base matmuls: %s%s%s\n",
+            weights_bf16 ? "bf16 (tensor cores, Lever A)" : "f32-window (weights dequantized to F32 in-graph)",
+            weights_bf16 && !lm_bf16_base_is_bf16(t.lm) ? ", base cast to BF16 in-graph from " : "",
+            weights_bf16 && !lm_bf16_base_is_bf16(t.lm) ? lm_bf16_base_proj_type_name(t.lm) : "");
     jl("{\"type\":\"weights\",\"mode\":\"%s\"}", weights_used.c_str());
 
     LmCkptState  ckpt_st;
@@ -2631,13 +2653,10 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     jl("{\"type\":\"depthLossCfg\",\"weight\":%.6g,\"frames\":%d}",
        a.ckpt ? a.depth_loss_weight : 0.0, a.depth_loss_frames);
     if (a.ckpt) {
-        // Quantized bases are allowed ONLY on the f32-window path, where
-        // lm_linear casts every weight to F32 in-graph so the backward never
-        // sees the quantized tensor. Under Lever A the raw weight goes straight
-        // to mul_mat, so a quantized one would hit the transpose path that
-        // block-quantized types cannot take — hence the gate above, which has
-        // already forced weights_bf16 off unless every projection is BF16.
-        if (!lm_ckpt_check_base(&t.lm, &err, /*allow_quantized=*/!weights_bf16)) {
+        // Quantized bases are fine on both paths: lm_linear casts every
+        // non-F32 weight in-graph (to F32 on f32-window, to BF16 under Lever
+        // A), so neither the backward nor the transpose ever sees a quant.
+        if (!lm_ckpt_check_base(&t.lm, &err, /*allow_quantized=*/true)) {
             fprintf(stderr, "[mm3-lm-train] %s\n", err.c_str());
             lm_lora_detach(&lora, &t.lm);
             lm_lora_free(&lora);

@@ -35,8 +35,11 @@
 // check is allowed to be shape-dependent, and ours is (D must be 64 or 128).
 // Contiguous probe tensors are faithful enough: the only stride the CUDA check
 // looks at is nb[0], which is sizeof(float) for the real permuted views too.
+//
+// `prec` GGML_PREC_BF16 probes the BF16 kernels the way the graph builds them
+// (lm_attn_flash: contiguous BF16 Q/K/V, the request on both nodes).
 static bool dit_flash_probe(ggml_backend_t backend, int D, int Nh, int Nkv, int S, int S_kv, int B, float scale,
-                            bool * fwd_ok, bool * bwd_ok) {
+                            bool * fwd_ok, bool * bwd_ok, ggml_prec prec = GGML_PREC_DEFAULT) {
     *fwd_ok = false;
     *bwd_ok = false;
     ggml_context * probe;
@@ -47,16 +50,23 @@ static bool dit_flash_probe(ggml_backend_t backend, int D, int Nh, int Nkv, int 
     if (!probe) {
         return false;
     }
-    ggml_tensor * pq = ggml_new_tensor_4d(probe, GGML_TYPE_F32, D, S, Nh, B);
-    ggml_tensor * pk = ggml_new_tensor_4d(probe, GGML_TYPE_F32, D, S_kv, Nkv, B);
-    ggml_tensor * pv = ggml_new_tensor_4d(probe, GGML_TYPE_F32, D, S_kv, Nkv, B);
+    const ggml_type qt = prec == GGML_PREC_BF16 ? GGML_TYPE_BF16 : GGML_TYPE_F32;
+    ggml_tensor * pq = ggml_new_tensor_4d(probe, qt, D, S, Nh, B);
+    ggml_tensor * pk = ggml_new_tensor_4d(probe, qt, D, S_kv, Nkv, B);
+    ggml_tensor * pv = ggml_new_tensor_4d(probe, qt, D, S_kv, Nkv, B);
     ggml_tensor * pm = ggml_new_tensor_2d(probe, GGML_TYPE_F16, S_kv, S);
     ggml_tensor * pf = ggml_flash_attn_train(probe, pq, pk, pv, pm, scale);
+    if (prec == GGML_PREC_BF16) {
+        ggml_flash_attn_train_set_prec(pf, prec);
+    }
     *fwd_ok          = ggml_backend_supports_op(backend, pf);
     // The back node needs a forward-shaped `fwd` and a same-sized `dfwd`; the
     // forward node itself is exactly the former.
     ggml_tensor * pd = ggml_new_tensor_1d(probe, GGML_TYPE_F32, ggml_flash_attn_train_nelements(pq));
     ggml_tensor * pb = ggml_flash_attn_train_back(probe, pq, pk, pv, pm, pf, pd, scale);
+    if (prec == GGML_PREC_BF16) {
+        ggml_flash_attn_train_set_prec(pb, prec);
+    }
     *bwd_ok          = ggml_backend_supports_op(backend, pb);
     ggml_free(probe);
     return *fwd_ok && *bwd_ok;
