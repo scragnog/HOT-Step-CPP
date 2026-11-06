@@ -878,6 +878,13 @@ attention-side probes while the route check passes; the full table, the
 kernel split after the change and the gate numbers are in
 [.claude/skills/mm3-backend/reference/training.md](../../.claude/skills/mm3-backend/reference/training.md).
 
+The server exposes the first two as one request field, `trainPrecision`
+(`full` default, `fast` = `--weights bf16`, `fastest` = `--weights bf16`
+plus `--attn flash-bf16` when the resolved attention is flash). The mapping is
+in `buildMm3TrainLmArgs`; the run manifest records the field, so a preview
+relaunch and the resume route keep it, and the resume route accepts it as an
+override. `--tf32 on` stays command-line only.
+
 ### HOT-PiZZA — the MM3 default method (2026-09-06)
 
 HOT-PiZZA is PiSSA with principal-subspace dropout. It was called HOT-PiSSA on

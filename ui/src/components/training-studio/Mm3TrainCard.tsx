@@ -66,6 +66,7 @@ interface FormState {
   lokrFactor: number;
   // ── Flag-contract parity fields (2026-09-05) ───────────────────────────
   attnBackend: 'exact' | 'flash';
+  trainPrecision: 'full' | 'fast' | 'fastest';
   rslora: boolean;
   dora: boolean;
   hira: boolean;
@@ -216,6 +217,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     // --attn/--dora/--hira/--loha/--pissa/--hra/--prefix-n are landing in the
     // mm3-lm-train engine parser concurrently with this UI, not before it.
     attnBackend: status.defaults.attnBackend ?? 'exact',
+    trainPrecision: status.defaults.trainPrecision ?? 'full',
     rslora: status.defaults.rslora ?? false,
     dora: status.defaults.dora ?? false,
     hira: status.defaults.hira ?? false,
@@ -1118,6 +1120,37 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                             'Fused attention kernels, once mm3-lm-train gains --attn (landing '
                             + 'concurrently). VRAM saving not yet measured — the estimate above stands '
                             + 'in with exact mode\'s number until it is.')} />
+                  <label className="flex flex-col gap-1">
+                    <ParamLabel
+                      label={t('trainingStudio.mm3.trainPrecision', 'Training precision')}
+                      meta={t('trainingStudio.mm3.trainPrecisionMeta', 'default Full')}
+                      info={t('trainingStudio.mm3.trainPrecisionInfo',
+                        'How exactly the trainer does its arithmetic. Full keeps every matrix product in '
+                        + 'FP32. Fast runs the frozen base weights\' products in BF16 on the tensor cores: '
+                        + 'about 1.65x per step on an RTX 5090. Fastest also runs flash attention in BF16: '
+                        + 'about 2.3x per step. Peak VRAM is the same for all three. The faster choices '
+                        + 'change the trained weights slightly and have not been judged by ear yet. '
+                        + 'Fastest is experimental: its gradients are too coarse for the trainer\'s '
+                        + 'finite-difference check, though they match Full within 0.15%. Fastest only '
+                        + 'changes attention when Flash attention is on; otherwise it trains as Fast. '
+                        + 'Needs a CUDA card.')}
+                      className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                      onReset={form.trainPrecision !== base.trainPrecision ? () => reset('trainPrecision') : undefined}
+                    />
+                    <StyledSelect
+                      accent="amber"
+                      value={form.trainPrecision}
+                      onChange={v => set('trainPrecision', v)}
+                      options={[
+                        { value: 'full', label: t('trainingStudio.mm3.trainPrecisionFull', 'Full (FP32, default)') },
+                        { value: 'fast', label: t('trainingStudio.mm3.trainPrecisionFast', 'Fast (BF16 matmuls)'),
+                          hint: t('trainingStudio.mm3.trainPrecisionFastHint', 'About 1.65x per step') },
+                        { value: 'fastest', label: t('trainingStudio.mm3.trainPrecisionFastest', 'Fastest (BF16 matmuls + attention)'),
+                          hint: t('trainingStudio.mm3.trainPrecisionFastestHint', 'About 2.3x per step, experimental') },
+                      ]}
+                      className="w-full"
+                    />
+                  </label>
                   {form.adapterType === 'lokr' && (
                     <NumField label={t('trainingStudio.mm3.lokrFactor', 'LoKr factor')}
                       value={form.lokrFactor} onChange={v => set('lokrFactor', v)}

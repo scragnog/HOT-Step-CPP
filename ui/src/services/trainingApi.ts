@@ -398,6 +398,9 @@ export interface Mm3TrainLmRequest {
    *  flag-contract work); on an engine that predates it the run is refused, not
    *  silently trained as 'exact'. */
   attnBackend?: 'exact' | 'flash';
+  /** 'full' (default, FP32) | 'fast' (--weights bf16) | 'fastest' (also
+   *  --attn flash-bf16 when attention is flash). */
+  trainPrecision?: 'full' | 'fast' | 'fastest';
   /** LoRA-family parameterizations (2026-09-05). LoKr-incompatible and
    *  mutually exclusive with each other — see DitMethod in TrainDitForm.tsx
    *  for the same shape on the DiT trainer. */

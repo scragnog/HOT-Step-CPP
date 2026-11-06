@@ -964,6 +964,12 @@ export const MM3_LM_DEFAULTS = {
    *  (self-test, FD, step-1 loss within tf32 rounding), tied exact blind
    *  (68 vs 72 of 90) and takes 14% off the step, 1 GB off the peak. */
   attnBackend: 'flash' as 'exact' | 'flash',
+  /** Training precision (2026-11-06). 'full' = today's arithmetic, no flag.
+   *  'fast' = --weights bf16 (BF16 base GEMMs, 1.65x per step on a 5090).
+   *  'fastest' = also --attn flash-bf16 when attention is flash (2.32x). Same
+   *  peak VRAM. Off until matched adapters have been heard. See
+   *  mm3PrecisionFlags. */
+  trainPrecision: 'full' as Mm3TrainPrecision,
   /** LoRA-family parameterizations, mutually exclusive with each other and
    *  with LoKr (adapterType). Same semantics as train-dit's dora/hira/loha/
    *  pissa/hra — see DitMethod in TrainDitForm.tsx. */
@@ -1177,6 +1183,9 @@ export interface ResolvedMm3TrainLmOptions {
   lokrAlpha: number;
   /** Attention backend. See MM3_LM_DEFAULTS.attnBackend. */
   attnBackend: 'exact' | 'flash';
+  /** See MM3_LM_DEFAULTS.trainPrecision. Absent (a manifest from before it
+   *  existed) = 'full'. */
+  trainPrecision?: Mm3TrainPrecision;
   /** LoRA-family parameterizations. All five are LoKr-incompatible and
    *  mutually exclusive with each other (dora > rslora > hira > loha > pissa
    *  > hra precedence in buildMm3TrainLmArgs, textually identical to
@@ -1246,14 +1255,29 @@ export interface ResolvedMm3TrainLmOptions {
   resumeStep?: number;
 }
 
+export type Mm3TrainPrecision = 'full' | 'fast' | 'fastest';
+export function isMm3TrainPrecision(v: unknown): v is Mm3TrainPrecision {
+  return v === 'full' || v === 'fast' || v === 'fastest';
+}
+
+/** The --weights value and the --attn value (null = do not emit) for a
+ *  precision choice. A BF16 base always trains Lever A: it is the same size as
+ *  f16 and worse for inference, so it has no other reason to be picked.
+ *  'fastest' only upgrades flash to flash-bf16; when attention resolved to
+ *  exact (switched off, or a build with no fused kernel) it trains as 'fast'
+ *  rather than turning flash on behind the user's back. */
+export function mm3PrecisionFlags(precision: Mm3TrainPrecision | undefined, basePrecision: Mm3BasePrecision,
+                                  attnBackend: 'exact' | 'flash'): { weights: string; attn: string | null } {
+  const p = precision ?? 'full';
+  return {
+    weights: basePrecision === 'bf16' || p !== 'full' ? 'bf16' : 'f32-window',
+    attn: attnBackend === 'exact' ? null : p === 'fastest' ? 'flash-bf16' : attnBackend,
+  };
+}
+
 export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   const m = resolveMm3TrainModels(o.basePrecision);
-  // DERIVED, not a separate knob. Lever A needs a BF16-native base and a BF16
-  // base has no other reason to be selected — it is the same size as f16 and
-  // worse for inference — so the two are one decision. Offering them separately
-  // would only create two ways to ask for a run the engine then falls back out
-  // of, with a warning the user has to notice.
-  const weights = o.basePrecision === 'bf16' ? 'bf16' : 'f32-window';
+  const { weights, attn } = mm3PrecisionFlags(o.trainPrecision, o.basePrecision, o.attnBackend ?? 'exact');
   const args = [
     'mm3-lm-train', '--jsonl',
     '--lm', m.lm,
@@ -1344,7 +1368,7 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   // caller still asks for. The route resolves the flash+frozen-prefix
   // collision (engine exit) before this ever runs — see attnBackendResolved
   // in routes/training.ts.
-  if (o.attnBackend && o.attnBackend !== 'exact') args.push('--attn', o.attnBackend);
+  if (attn) args.push('--attn', attn);
   // Whole-song recipe (2026-09-11): tracks that do not fit the window are left
   // out rather than trained in pieces. Emitted only for 'exclude' so an older
   // engine never sees the flag for the 'crop' behaviour it already has.

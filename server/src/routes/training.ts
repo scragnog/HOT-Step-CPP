@@ -127,8 +127,8 @@ import {
   availableMm3Bases, MM3_VRAM_MODEL, mm3FlashVramCalibrated, recommendMm3Config,
   MM3_LM_DEFAULTS, MM3_LM_PRESETS, MM3_LM_DEFAULT_PRESET, applyMm3Preset,
   missingMm3TrainModels, mm3AdapterRunDir, mm3CodesDir, mm3PriorDir,
-  mm3RunName,
-  type Mm3BasePrecision,
+  mm3RunName, isMm3TrainPrecision,
+  type Mm3BasePrecision, type Mm3TrainPrecision,
 } from '../services/training/mm3Train.js';
 import {
   listMm3Runs, mm3AdapterRoot, readMm3Run, resolveMm3RunDir, resumeOptionsFor,
@@ -2758,6 +2758,14 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
       attnBackendResolved = 'exact';
     }
     void framesWillBeEmitted;
+    // Refused, not coerced: a typo silently training at full precision would
+    // look like the speed-up simply did not work.
+    if (b.trainPrecision !== undefined && b.trainPrecision !== null && !isMm3TrainPrecision(b.trainPrecision)) {
+      res.status(400).json({ error: 'trainPrecision must be full, fast or fastest' });
+      return;
+    }
+    const trainPrecisionResolved: Mm3TrainPrecision =
+      isMm3TrainPrecision(b.trainPrecision) ? b.trainPrecision : D.trainPrecision;
     // HOT-PiZZA is the default method, so an ABSENT method block must resolve to
     // it rather than to a plain LoRA — but an explicit `pissa: false` has to turn
     // its own variant off too, or unticking PiSSA in the form would leave
@@ -2838,6 +2846,7 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
       // has no control for it, so every Training Studio run trained without the
       // 0.6 GB saving the shipped recipe was rated with).
       attnBackend: attnBackendResolved,
+      trainPrecision: trainPrecisionResolved,
       rslora: bool('rslora', D.rslora),
       dora:   bool('dora', D.dora),
       hira:   bool('hira', D.hira),
@@ -3090,6 +3099,9 @@ router.post('/datasets/:id/mm3-resume-lm', (req: Request, res: Response) => {
     // stays fixed to whatever `base` recovered from the manifest or the log —
     // there is no override for it here, on purpose.
     if (b.attnBackend === 'exact' || b.attnBackend === 'flash') opts.attnBackend = b.attnBackend;
+    // Precision is a recipe knob too (the adapter's tensors are the same), so a
+    // resume may change it; absent = whatever the run recorded.
+    if (isMm3TrainPrecision(b.trainPrecision)) opts.trainPrecision = b.trainPrecision;
     if (Number.isFinite(Number(b.prefixN))) {
       opts.prefixN = Math.min(64, Math.max(0, Math.trunc(Number(b.prefixN))));
     }

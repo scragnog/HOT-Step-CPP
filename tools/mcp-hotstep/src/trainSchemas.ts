@@ -254,6 +254,7 @@ export const mm3LmSchema = z.object({
   lokrDim: n.optional().describe('Default 512; 1..8192.'),
   lokrAlpha: n.optional().describe('Default 512; 1..8192.'),
   attnBackend: z.enum(['exact', 'flash']).optional().describe("Default 'flash'. Coerced to 'exact' on an engine with no fused attention-training kernel (Vulkan, Metal); the response echoes the value used."),
+  trainPrecision: z.enum(['full', 'fast', 'fastest']).optional().describe("Default 'full' (FP32). 'fast' = --weights bf16 (1.65x on a 5090). 'fastest' = also --attn flash-bf16 when attention is flash (2.3x, experimental). Same peak VRAM; not yet judged by ear."),
   rslora: bool.optional().describe('Default false.'),
   dora: bool.optional().describe('Default false. More than one of dora/hira/loha/pissa/hra sent as true, or any of them with lokr, is a 400.'),
   hira: bool.optional().describe('Default false.'),

@@ -142,6 +142,9 @@ export interface Mm3TrainLmRequest {
   preview?: Mm3PreviewOptions;
   /** Prior preservation. Omitted or `every: 0` = off. */
   regularisation?: Mm3RegularisationOptions;
+  /** 'full' (default) | 'fast' (--weights bf16) | 'fastest' (also --attn
+   *  flash-bf16 under flash). Anything else is a 400. */
+  trainPrecision?: 'full' | 'fast' | 'fastest';
 }
 
 /** Prior preservation: train some steps against the FROZEN BASE MODEL'S OWN

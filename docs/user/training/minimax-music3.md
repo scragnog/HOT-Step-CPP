@@ -82,13 +82,23 @@ The form estimates the peak for your card and tells you whether it fits, is tigh
 
 Smaller base precisions trade fidelity for memory. Step time barely moves between them. The form marks bases that are too lossy to train against.
 
-Faster arithmetic is available from the command line only (`ace-train mm3-lm-train`), all off by default and not yet judged by ear:
+**Training precision** in the Advanced drawer trades exact arithmetic for speed. None of the faster settings has been judged by ear yet:
+
+| Choice | Trainer flags | Speed on a 5090, whole-song recipe |
+|---|---|---|
+| Full (FP32, default) | none | 1x |
+| Fast (BF16 matmuls) | `--weights bf16` | 1.65x |
+| Fastest (BF16 matmuls + attention), experimental | `--weights bf16 --attn flash-bf16` | 2.3x |
+
+Peak memory stays where it was. Fastest only changes the attention when **Flash attention** is on; with it off, Fastest trains like Fast. Both need a CUDA card; on another engine the trainer falls back to full precision with a warning. The run records its choice, so a run paused for a preview, or continued later, resumes with the same precision. Fastest is marked experimental because its gradients are too coarse for the trainer's finite-difference check, even though they match the full-precision gradients to within 0.15 %.
+
+The same flags on the command line (`ace-train mm3-lm-train`), all off by default:
 
 | Flag | Speed on a 5090, whole-song recipe | What changes |
 |---|---|---|
 | `--weights bf16` | 1.65x | The base weights' matrix products run in BF16 on the tensor cores. Works on any base, including q8_0. |
 | `--attn flash-bf16` | 1.19x | Flash attention runs in BF16. CUDA only. |
-| `--tf32 on` | 1.39x alone, little extra on top of the two above | The remaining F32 products may use TF32. |
+| `--tf32 on` | 1.39x alone, little extra on top of the two above | The remaining F32 products may use TF32. Command line only. |
 
 `--weights bf16 --attn flash-bf16` together trained 2.3 times as fast with the same memory, and the training loss stayed within 0.6 % of the default over 20 steps. Each flag changes the trained weights slightly.
 
