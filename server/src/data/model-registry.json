@@ -321,33 +321,30 @@
       "id": "yue2-rs-4-0x0-7",
       "family": "yue2",
       "name": "YuE2-RS 4.0x0.7 (Ruach Studio)",
-      "description": "Ruach Studio's YuE2-RS 4.0x0.7 fine-tune of YuE2-3B (Q8_0 LM) plus the standard VAE and the companion decoder adapter. ~4.6 GB total. License: CC BY-NC-SA 4.0 (the fine-tune's own licence, share-alike), unlike the CC BY-NC of the other YuE2 packs. Credit: Ruach Studio, goldhub/YuE2-RS-Finetunes.",
+      "description": "Ruach Studio's YuE2-RS 4.0x0.7 fine-tune of YuE2-3B (Q8_0 LM) plus the standard VAE (fine-tunes render without the companion decoder adapter). ~4.4 GB total. License: CC BY-NC-SA 4.0 (the fine-tune's own licence, share-alike), unlike the CC BY-NC of the other YuE2 packs. Credit: Ruach Studio, goldhub/YuE2-RS-Finetunes.",
       "fileIds": [
         "yue2-lm-rs-4.0x0.7-q8_0",
-        "yue2-vae-standard-f32",
-        "yue2-nar-companion-v9"
+        "yue2-vae-standard-f32"
       ]
     },
     {
       "id": "yue2-rs-tw-2-0x0-75",
       "family": "yue2",
       "name": "YuE2-RS Tsunami Wave 2.0x0.75 (Ruach Studio)",
-      "description": "Ruach Studio's YuE2-RS Tsunami Wave 2.0x0.75 fine-tune of YuE2-3B (Q8_0 LM), Ruach Studio's default Tsunami Wave merge, their safe balance, plus the standard VAE and the companion decoder adapter. ~4.6 GB total. License: CC BY-NC-SA 4.0 (the fine-tune's own licence, share-alike), unlike the CC BY-NC of the other YuE2 packs. Credit: Ruach Studio, goldhub/YuE2-RS-Finetunes.",
+      "description": "Ruach Studio's YuE2-RS Tsunami Wave 2.0x0.75 fine-tune of YuE2-3B (Q8_0 LM), Ruach Studio's default Tsunami Wave merge, their safe balance, plus the standard VAE (fine-tunes render without the companion decoder adapter). ~4.4 GB total. License: CC BY-NC-SA 4.0 (the fine-tune's own licence, share-alike), unlike the CC BY-NC of the other YuE2 packs. Credit: Ruach Studio, goldhub/YuE2-RS-Finetunes.",
       "fileIds": [
         "yue2-lm-rs-tw-2.0x0.75-q8_0",
-        "yue2-vae-standard-f32",
-        "yue2-nar-companion-v9"
+        "yue2-vae-standard-f32"
       ]
     },
     {
       "id": "yue2-rs-tw-2-0x0-9",
       "family": "yue2",
       "name": "YuE2-RS Tsunami Wave 2.0x0.9 (Ruach Studio)",
-      "description": "Ruach Studio's YuE2-RS Tsunami Wave 2.0x0.9 fine-tune of YuE2-3B (Q8_0 LM), the \"tectonic\" Tsunami Wave merge, the most energetic in Ruach Studio's listening tests, with no promise of stability, plus the standard VAE and the companion decoder adapter. ~4.6 GB total. License: CC BY-NC-SA 4.0 (the fine-tune's own licence, share-alike), unlike the CC BY-NC of the other YuE2 packs. Credit: Ruach Studio, goldhub/YuE2-RS-Finetunes.",
+      "description": "Ruach Studio's YuE2-RS Tsunami Wave 2.0x0.9 fine-tune of YuE2-3B (Q8_0 LM), the \"tectonic\" Tsunami Wave merge, the most energetic in Ruach Studio's listening tests, with no promise of stability, plus the standard VAE (fine-tunes render without the companion decoder adapter). ~4.4 GB total. License: CC BY-NC-SA 4.0 (the fine-tune's own licence, share-alike), unlike the CC BY-NC of the other YuE2 packs. Credit: Ruach Studio, goldhub/YuE2-RS-Finetunes.",
       "fileIds": [
         "yue2-lm-rs-tw-2.0x0.9-q8_0",
-        "yue2-vae-standard-f32",
-        "yue2-nar-companion-v9"
+        "yue2-vae-standard-f32"
       ]
     },
     {

@@ -178,8 +178,10 @@ A native C++/GGML port of YuE2. Its language model has two halves that share no 
    and decides where the song ends.
 2. The NAR half renders those frames into audio latents with a flow-matching solver.
 
-A VAE decoder then produces 48 kHz stereo. Every GGUF generation also applies a small
-companion decoder adapter to the NAR half, which ships in each YuE2 pack.
+A VAE decoder then produces 48 kHz stereo. Every GGUF generation on the base model also
+applies a small companion decoder adapter to the NAR half, which ships in each YuE2 pack.
+Fine-tunes such as the YuE2-RS merges render without it: they retrained the NAR half,
+and the companion, trained on the base model's NAR, garbles their vocals.
 
 What sets it apart:
 

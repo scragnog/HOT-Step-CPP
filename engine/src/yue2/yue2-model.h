@@ -1435,6 +1435,16 @@ static bool yue2_apply_companion(Yue2Model * m, const GGUFModel & gf, std::vecto
     if (!m->companion_enabled) {
         return true;
     }
+    // The companion was trained on the base model's decoder. A fine-tune that
+    // retrained the NAR (the YuE2-RS merges) renders garbled vocals under it:
+    // on RS-TW 2.0x0.9 it cut Whisper's lyric recall from ~0.98 to under 0.15
+    // on half the seeds, with the same codes. So only the base variant gets it.
+    const std::string variant = yue2_lm_variant(yue2_lm_type_of(m->lm_file.path));
+    if (!variant.empty()) {
+        fprintf(stderr, "[YuE2-Companion] skipped: %s is a fine-tune (variant %s), not the decoder it was trained on\n",
+                m->lm_file.name.c_str(), variant.c_str());
+        return true;
+    }
     // An adapter trained on another tokenizer's codes (WannabeTokenizer) was
     // trained without the companion, so the decoder it renders with goes
     // without it too. Any one such adapter in the pick decides.
