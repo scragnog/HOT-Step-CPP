@@ -226,6 +226,14 @@ probes, so the BF16-rounded forward is too coarse for central differences on
 attention-side factors. All three stay opt-in until matched adapters have
 been heard.
 
+Matched 150-step adapters (same recipe and seed): f32-window 1,024 s,
+`--weights bf16` 625 s (1.64x), plus `--attn flash-bf16` 440 s (2.34x).
+Per-step losses drift apart over 150 steps (mean 2 %, single steps up to 20 %),
+but held-out loss at step 150 is 3.026 / 3.033 / 3.044. Two 60 s renders per
+adapter are staged under
+`D:\Ace-Step-Latest\_experiments\_LISTENING\2026-11-06-mm3-speed\bf16-train\`
+for the ear test.
+
 ## Native codes export: `ace-train mm3-codes` (SHIPPED 2026-08-20)
 
 Audio -> RVQ codes, natively. `engine/src/minimax/mm3-rvq-encode.h` ports
