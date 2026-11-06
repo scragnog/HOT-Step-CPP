@@ -68,6 +68,17 @@ compare` on two dumps; final latent of each window from its last forward):
 
 A/B WAVs for listening: `_experiments/_LISTENING/2026-11-06-mm3-speed/fp8/`.
 
+**CLOSED NEGATIVE for now: NVFP4 MLP by post-training quantization.** Lab only
+(`fp8_lab.py build --variant nvfp4mlp`, blocks 2..33): weights quantized on the
+CPU at refit (E2M1, E4M3 block-16 scales, FP32 global) and refit as FP4
+constants, activations by dynamic FP4 quantize. It builds and refits on 10.16
+(the block-scale DQ must output BF16; FP32 fails type inference) and runs at
+**20.7 ms** per enqueue (0.62 s per window). But standalone-window latent corr
+against BF16 is 0.9923-0.9969, far under the 0.9988 gate. NVFP4 ff_in with FP8
+ff_out: 23.8 ms, 0.9962-0.9980, still under. The ~9.5% FP4 weight rounding
+error is the cause; it needs QAT or an SVDQuant-style low-rank branch, not a
+different calibration. Not in the engine.
+
 ## TensorRT DiT per-job load cost (measured 2026-11-06)
 
 With keep-loaded off, `mm3_unload()` frees the TensorRT runtime after every

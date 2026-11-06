@@ -331,7 +331,7 @@ def add_nvfp4(net, keep, act_amax=None):
         assert net.set_weights_name(ww, "fp4q." + wname)
         s8 = named_const(net, np.full((K // 16, N), 0x38, np.uint8), trt.DataType.FP8, "fp4s." + wname, keep)
         g = named_const(net, np.array(1.0, np.float32), trt.DataType.FLOAT, "fp4g." + wname, keep)
-        sw = net.add_dequantize(s8, g, trt.DataType.FLOAT).get_output(0)
+        sw = net.add_dequantize(s8, g, trt.DataType.BF16).get_output(0)  # FP32 here fails type inference with a BF16 output
         dw = net.add_dequantize(c4.get_output(0), sw, trt.DataType.BF16)
         dw.axis = 0
         S.set_input(0, dw.get_output(0))
