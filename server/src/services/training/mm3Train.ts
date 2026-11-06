@@ -456,8 +456,11 @@ export function recommendMm3Config(gpuTotalMb: number,
     if (base.quality === 'poor') {
       continue;
     }
+    // The default precision's BF16 weight stage, as the UI estimate adds it.
+    const stageMb = MM3_LM_DEFAULTS.trainPrecision !== 'full' && base.id !== 'bf16'
+      ? MM3_VRAM_MODEL.bf16StageMb : 0;
     for (const rank of rankLadder()) {
-      const peak = estimateMm3PeakMb(base.bytes, rank, maxFrames, base.extraMb);
+      const peak = estimateMm3PeakMb(base.bytes, rank, maxFrames, base.extraMb) + stageMb;
       if (peak + headroom <= gpuTotalMb) {
         return { base: base.id, rank, overBudget: false };
       }
@@ -967,12 +970,14 @@ export const MM3_LM_DEFAULTS = {
    *  (self-test, FD, step-1 loss within tf32 rounding), tied exact blind
    *  (68 vs 72 of 90) and takes 14% off the step, 1 GB off the peak. */
   attnBackend: 'flash' as 'exact' | 'flash',
-  /** Training precision (2026-11-06). 'full' = today's arithmetic, no flag.
-   *  'fast' = --weights bf16 (BF16 base GEMMs, 1.65x per step on a 5090).
-   *  'fastest' = also --attn flash-bf16 when attention is flash (2.32x). Same
-   *  peak VRAM. Off until matched adapters have been heard. See
+  /** Training precision (2026-11-06). 'full' = FP32 arithmetic, no flag.
+   *  'fast' = --weights bf16 (BF16 base GEMMs, ~1.8x per step on a 5090).
+   *  'fastest' = also --attn flash-bf16 when attention is flash (~2.6x). Fast
+   *  and Fastest add the one-layer BF16 weight stage on a non-BF16 base
+   *  (MM3_VRAM_MODEL.bf16StageMb). Fastest is the default since matched
+   *  adapters were ear-tested against Full with no audible loss. See
    *  mm3PrecisionFlags. */
-  trainPrecision: 'full' as Mm3TrainPrecision,
+  trainPrecision: 'fastest' as Mm3TrainPrecision,
   /** LoRA-family parameterizations, mutually exclusive with each other and
    *  with LoKr (adapterType). Same semantics as train-dit's dora/hira/loha/
    *  pissa/hra — see DitMethod in TrainDitForm.tsx. */

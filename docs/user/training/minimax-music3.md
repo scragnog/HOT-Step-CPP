@@ -82,15 +82,15 @@ The form estimates the peak for your card and tells you whether it fits, is tigh
 
 Smaller base precisions trade fidelity for memory. Step time barely moves between them. The form marks bases that are too lossy to train against.
 
-**Training precision** in the Advanced drawer trades exact arithmetic for speed. None of the faster settings has been judged by ear yet:
+**Training precision** in the Advanced drawer trades exact arithmetic for speed. Fastest is the default: adapters trained at Fastest and at Full were compared by ear with no audible difference.
 
 | Choice | Trainer flags | Speed on a 5090, whole-song recipe |
 |---|---|---|
-| Full (FP32, default) | none | 1x |
+| Full (FP32) | none | 1x |
 | Fast (BF16 matmuls) | `--weights bf16` | 1.8x |
-| Fastest (BF16 matmuls + attention), experimental | `--weights bf16 --attn flash-bf16` | 2.6x |
+| Fastest (BF16 matmuls + attention), default | `--weights bf16 --attn flash-bf16` | 2.6x |
 
-On the q8_0 base, Fast and Fastest add about 0.4 GB to the peak (one layer of weights kept in BF16). Fastest only changes the attention when **Flash attention** is on; with it off, Fastest trains like Fast. BF16 attention needs an RTX 30-series card or newer; on an older card Fastest keeps the default attention precision and says so in the log. Both need a CUDA card; on another engine the trainer falls back to full precision with a warning. The run records its choice, so a run paused for a preview, or continued later, resumes with the same precision. Fastest is marked experimental because its gradients are too coarse for the trainer's finite-difference check, even though they match the full-precision gradients to within 0.15 %.
+On the q8_0 base, Fast and Fastest add about 0.4 GB to the peak (one layer of weights kept in BF16); the form's estimate and its suggested base and rank include it. Fastest only changes the attention when **Flash attention** is on; with it off, Fastest trains like Fast. BF16 attention needs an RTX 30-series card or newer; on an older card Fastest keeps the default attention precision and says so in the log. Both need a CUDA card; on another engine the trainer falls back to full precision with a warning. The run records its choice, so a run paused for a preview, or continued later, resumes with the same precision. Fastest's gradients are too coarse for the trainer's finite-difference check, even though they match the full-precision gradients to within 0.15 %. A run from before Fastest became the default resumes at the precision it recorded.
 
 The same flags on the command line (`ace-train mm3-lm-train`), all off by default:
 

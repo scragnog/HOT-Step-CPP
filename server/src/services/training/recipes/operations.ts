@@ -152,9 +152,9 @@ export function mm3ExecutionBody(form: Record<string, any>, activePreset: string
           },
         } : {}),
         attnBackend: flashSupported ? form.attnBackend : 'exact',
-        // Only the non-default value, so a worker that predates the field sees
-        // the same body as before.
-        ...(form.trainPrecision && form.trainPrecision !== 'full' ? { trainPrecision: form.trainPrecision } : {}),
+        // Always sent when the form has one: Full is no longer the server
+        // default, so omitting it would train at Fastest.
+        ...(form.trainPrecision ? { trainPrecision: form.trainPrecision } : {}),
         dora:   form.adapterType === 'lora' && form.dora,
         hira:   form.adapterType === 'lora' && form.hira,
         loha:   form.adapterType === 'lora' && form.loha,

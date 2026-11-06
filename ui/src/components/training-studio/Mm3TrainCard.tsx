@@ -217,7 +217,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     // --attn/--dora/--hira/--loha/--pissa/--hra/--prefix-n are landing in the
     // mm3-lm-train engine parser concurrently with this UI, not before it.
     attnBackend: status.defaults.attnBackend ?? 'exact',
-    trainPrecision: status.defaults.trainPrecision ?? 'full',
+    trainPrecision: status.defaults.trainPrecision ?? 'fastest',
     rslora: status.defaults.rslora ?? false,
     dora: status.defaults.dora ?? false,
     hira: status.defaults.hira ?? false,
@@ -1124,15 +1124,15 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   <label className="flex flex-col gap-1">
                     <ParamLabel
                       label={t('trainingStudio.mm3.trainPrecision', 'Training precision')}
-                      meta={t('trainingStudio.mm3.trainPrecisionMeta', 'default Full')}
+                      meta={t('trainingStudio.mm3.trainPrecisionMeta', 'default Fastest')}
                       info={t('trainingStudio.mm3.trainPrecisionInfo',
                         'How exactly the trainer does its arithmetic. Full keeps every matrix product in '
                         + 'FP32. Fast runs the frozen base weights\' products in BF16 on the tensor cores: '
                         + 'about 1.8x per step on an RTX 5090. Fastest also runs flash attention in BF16: '
                         + 'about 2.6x per step. Fast and Fastest add about 0.4 GB of peak VRAM on a quantized base, for a BF16 copy of one layer at a time; the estimate includes it. The faster choices '
-                        + 'change the trained weights slightly and have not been judged by ear yet. '
-                        + 'Fastest is experimental: its gradients are too coarse for the trainer\'s '
-                        + 'finite-difference check, though they match Full within 0.15%. Fastest only '
+                        + 'change the trained weights slightly; matched adapters showed no audible loss '
+                        + 'in an ear test, so Fastest is the default. Its gradients are too coarse for '
+                        + 'the trainer\'s finite-difference check, though they match Full within 0.15%. Fastest only '
                         + 'changes attention when Flash attention is on; otherwise it trains as Fast. '
                         + 'Needs a CUDA card; on cards older than the RTX 30 series, Fastest keeps the default '
                         + 'attention precision.')}
@@ -1144,11 +1144,11 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       value={form.trainPrecision}
                       onChange={v => set('trainPrecision', v)}
                       options={[
-                        { value: 'full', label: t('trainingStudio.mm3.trainPrecisionFull', 'Full (FP32, default)') },
+                        { value: 'full', label: t('trainingStudio.mm3.trainPrecisionFull', 'Full (FP32)') },
                         { value: 'fast', label: t('trainingStudio.mm3.trainPrecisionFast', 'Fast (BF16 matmuls)'),
                           hint: t('trainingStudio.mm3.trainPrecisionFastHint', 'About 1.8x per step') },
-                        { value: 'fastest', label: t('trainingStudio.mm3.trainPrecisionFastest', 'Fastest (BF16 matmuls + attention)'),
-                          hint: t('trainingStudio.mm3.trainPrecisionFastestHint', 'About 2.6x per step, experimental') },
+                        { value: 'fastest', label: t('trainingStudio.mm3.trainPrecisionFastest', 'Fastest (BF16 matmuls + attention, default)'),
+                          hint: t('trainingStudio.mm3.trainPrecisionFastestHint', 'About 2.6x per step') },
                       ]}
                       className="w-full"
                     />

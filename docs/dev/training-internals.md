@@ -882,8 +882,12 @@ kernel split after the change and the gate numbers are in
 [.claude/skills/mm3-backend/reference/training.md](../../.claude/skills/mm3-backend/reference/training.md).
 
 The server exposes the first two as one request field, `trainPrecision`
-(`full` default, `fast` = `--weights bf16`, `fastest` = `--weights bf16`
-plus `--attn flash-bf16` when the resolved attention is flash). The mapping is
+(`fastest` default since 2026-11-06, `fast` = `--weights bf16`, `fastest` =
+`--weights bf16` plus `--attn flash-bf16` when the resolved attention is
+flash, `full` = FP32). The recipe projection always sends the form's value, so
+an explicit Full is not lost to the server default; a run manifest without
+the field resumes as `full`. `recommendMm3Config` adds the BF16 weight stage
+(`MM3_VRAM_MODEL.bf16StageMb`) for the default precision on a non-BF16 base. The mapping is
 in `buildMm3TrainLmArgs`; the run manifest records the field, so a preview
 relaunch and the resume route keep it, and the resume route accepts it as an
 override. `--tf32 on` stays command-line only.

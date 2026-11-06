@@ -60,12 +60,13 @@ writing; the ledger `docs/plans/mm3-endings-checklist.md` has the tables.
 
 The block mirrors `MM3_LM_DEFAULTS` with the Balanced preset laid over it
 (`server/src/services/training/mm3Train.ts`); the server also passes
-`--depth mm3-depth-f16.gguf`, `--grad-accum 1`, `--seed 42` and `--weights
-f32-window` unless the request's `trainPrecision` asks for `fast`
-(`--weights bf16`) or `fastest` (plus `--attn flash-bf16`); the Training
-Studio shows it as "Training precision". Faster opt-in arithmetic (`--weights
-bf16` on any base, `--attn flash-bf16`, `--tf32 on`; 2.3x together, not yet
-heard) is measured in
+`--depth mm3-depth-f16.gguf`, `--grad-accum 1`, `--seed 42` and the
+`trainPrecision` flags: `fastest` by default since 2026-11-06 (`--weights
+bf16` plus `--attn flash-bf16` when attention is flash, about 2.6x, heard
+with no loss against Full), `fast` (`--weights bf16`) or `full` (`--weights
+f32-window`); the Training Studio shows it as "Training precision". The levers
+(`--weights bf16` on any base, `--attn flash-bf16`, `--tf32 on`) are
+measured in
 [../mm3-backend/reference/training.md](../mm3-backend/reference/training.md).
 
 Previews: every 100 steps (= every checkpoint), 40 s, seed 424242, control +

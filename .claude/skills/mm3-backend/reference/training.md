@@ -276,8 +276,7 @@ check passes (2.75e-4) but finite differences fail on the q_proj probes
 (worst 0.64 at the default eps, 0.068 at `--fd-eps 0.2`, where TF32 flash
 gives 0.002). The analytic gradients match TF32 flash within 0.15 % on all 8
 probes, so the BF16-rounded forward is too coarse for central differences on
-attention-side factors. All three stay opt-in until matched adapters have
-been heard.
+attention-side factors.
 
 Matched 150-step adapters (same recipe and seed): f32-window 1,024 s,
 `--weights bf16` 625 s (1.64x), plus `--attn flash-bf16` 440 s (2.34x).
@@ -285,7 +284,10 @@ Per-step losses drift apart over 150 steps (mean 2 %, single steps up to 20 %),
 but held-out loss at step 150 is 3.026 / 3.033 / 3.044. Two 60 s renders per
 adapter are staged under
 `D:\Ace-Step-Latest\_experiments\_LISTENING\2026-11-06-mm3-speed\bf16-train\`
-for the ear test.
+for the ear test. Heard 2026-11-06: no audible loss at either level, so the
+app's `trainPrecision` default is `fastest` (`--weights bf16 --attn
+flash-bf16`). The CLI flags themselves stay off by default, and `--tf32 on`
+stays command-line only.
 
 ## Native codes export: `ace-train mm3-codes` (SHIPPED 2026-08-20)
 

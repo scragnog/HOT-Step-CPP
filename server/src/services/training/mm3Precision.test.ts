@@ -20,7 +20,8 @@ const flag = (args: string[], name: string) => {
 
 test('training precision maps to the trainer flags', () => {
   const cases: Array<[Partial<ResolvedMm3TrainLmOptions>, string, string | null]> = [
-    [{ basePrecision: 'q8_0' }, 'f32-window', 'flash'],                                   // absent = full
+    [{ basePrecision: 'q8_0' }, 'bf16', 'flash-bf16'],                                    // the default = fastest
+    [{ basePrecision: 'q8_0', trainPrecision: undefined }, 'f32-window', 'flash'],        // absent (old manifest) = full
     [{ basePrecision: 'q8_0', trainPrecision: 'full' }, 'f32-window', 'flash'],
     [{ basePrecision: 'q8_0', trainPrecision: 'fast' }, 'bf16', 'flash'],
     [{ basePrecision: 'q8_0', trainPrecision: 'fastest' }, 'bf16', 'flash-bf16'],
@@ -61,8 +62,13 @@ test('a resumed run reads its precision back from the run manifest', () => {
   }
 });
 
-test('the recipe projection sends trainPrecision only when it is not full', () => {
+test('the default training precision is fastest', () => {
+  assert.equal(MM3_LM_DEFAULTS.trainPrecision, 'fastest');
+});
+
+test('the recipe projection sends the chosen precision, Full included', () => {
   const form = { ...MM3_LM_DEFAULTS, trigger: '', previewCaption: '', regDatasetId: '' } as Record<string, any>;
-  assert.equal('trainPrecision' in mm3ExecutionBody(form, 'custom', false, true), false);
-  assert.equal(mm3ExecutionBody({ ...form, trainPrecision: 'fast' }, 'custom', false, true).trainPrecision, 'fast');
+  assert.equal(mm3ExecutionBody(form, 'custom', false, true).trainPrecision, 'fastest');
+  assert.equal(mm3ExecutionBody({ ...form, trainPrecision: 'full' }, 'custom', false, true).trainPrecision, 'full');
+  assert.equal('trainPrecision' in mm3ExecutionBody({ ...form, trainPrecision: undefined }, 'custom', false, true), false);
 });
