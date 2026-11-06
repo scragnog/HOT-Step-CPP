@@ -909,6 +909,18 @@ override. `--tf32 on` stays command-line only.
   Whole-song recipe: 2.85 to 2.70 s per micro-step with
   `--weights bf16 --attn flash-bf16` (1.05x), 6.69 to 6.54 s with the
   default flags.
+- **`--weights bf16` on a q8_0 base converts each layer's weights once per
+  graph, outside it.** The in-graph cast went q8_0 to F32 to BF16, writing and
+  re-reading a full F32 copy of every projection (12.5 % of kernel time). On a
+  CUDA build `lm_ckpt_alloc` now keeps a one-layer BF16 stage (368 MB on MM3)
+  and `lm_ckpt_layer_w` fills it from layer l with `q8_bf16_cuda.cu` before
+  each layer graph, which then reads it as a BF16 base. The kernel does what
+  the two ggml copies do (F16 scale to float, times the int8, round to BF16
+  nearest-even), so the 20-step run reproduces the previous commit's losses,
+  gradient norms and depth losses exactly. 2.70 to 2.48 s per micro-step
+  (1.09x), peak VRAM 19,087 to 19,465 MB (the stage; the compute buffer's
+  peak is elsewhere in the graph, so the dropped F32 copies do not lower it).
+  Other bases and other backends keep the in-graph cast.
 - **`HOTSTEP_LM_PHASE_TIMER` now sees that head.** It ran outside the timer,
   so its GPU time was reported as `build(host)`: of the 274 ms "host" per
   micro-step, 161 ms was this head on the GPU. True host time is about 85 ms

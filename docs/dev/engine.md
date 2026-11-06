@@ -962,7 +962,8 @@ are not covered. The code is `engine/src/train/roundtrip-run.h`.
 `ace-train` links no `acestep-core`. The trainers are headers under `engine/src/train/`;
 the one compiled piece is `yue2-aitk-kernels` (`train/aitk-runtime.cmake`), the YuE2
 joint trainer's runtime, which on a CUDA build adds the 8-bit AdamW, fused head-loss and
-gradient-clip kernels. It writes machine-readable JSONL on stdout with `--jsonl` and
+gradient-clip kernels, and the LM trainers' q8_0 to BF16 weight stage (`q8_bf16_cuda.cu`,
+used by `--weights bf16` on a q8_0 base). It writes machine-readable JSONL on stdout with `--jsonl` and
 human logs on stderr, and exits 0 on success, 1 on a runtime failure and 2 on bad
 usage. `ace-train --help` prints the full option list.
 

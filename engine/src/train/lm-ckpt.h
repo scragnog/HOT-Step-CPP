@@ -45,8 +45,16 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <string>
 #include <vector>
+
+#if defined(YUE2_AITK_CUDA_RUNTIME) && YUE2_AITK_CUDA_RUNTIME
+#    include "train/q8_bf16_cuda.h"
+#    define LM_CKPT_WSTAGE 1
+#else
+#    define LM_CKPT_WSTAGE 0
+#endif
 
 // ─── §6.1 Phase-0 instrumentation: the Lever B build gate ───────────────────
 //
@@ -291,14 +299,20 @@ struct LmCkptState {
     ggml_tensor *              t_teach_sel = nullptr;  // [1, chunk] 1 at code positions, 0 elsewhere
 
     std::vector<uint8_t>       arena;  // one reused graph arena, sized in lm_ckpt_alloc
+    // --weights bf16 on a q8_0 base, CUDA builds: ONE layer's seven
+    // projections in BF16, refilled by lm_ckpt_layer_w() before each layer
+    // graph. Null otherwise, and the graphs cast in-graph as before.
+    ggml_context *             ctx_wst = nullptr;
+    ggml_backend_buffer_t      buf_wst = nullptr;
+    ggml_tensor *              wst[7]  = {};
     std::vector<ggml_tensor *> gacc;
     std::vector<int32_t>       pos_scratch;
     int                        last_mask_S = 0;
 
     size_t fixed_bytes() const {
         size_t b = 0;
-        const ggml_backend_buffer_t bufs[6] = { buf_ckpt, buf_gh0, buf_gh1, buf_misc, buf_embt, buf_labc };
-        for (int i = 0; i < 6; i++) {
+        const ggml_backend_buffer_t bufs[7] = { buf_ckpt, buf_gh0, buf_gh1, buf_misc, buf_embt, buf_labc, buf_wst };
+        for (int i = 0; i < 7; i++) {
             if (bufs[i]) {
                 b += ggml_backend_buffer_get_size(bufs[i]);
             }
@@ -323,14 +337,16 @@ static int lm_ckpt_segment_graph_nodes(const LmCkptState & st) {
 }
 
 static void lm_ckpt_free(LmCkptState * st) {
-    ggml_backend_buffer_t bufs[6] = { st->buf_ckpt, st->buf_gh0, st->buf_gh1, st->buf_misc, st->buf_embt, st->buf_labc };
-    for (int i = 0; i < 6; i++) {
+    ggml_backend_buffer_t bufs[7] = { st->buf_ckpt, st->buf_gh0, st->buf_gh1, st->buf_misc,
+                                      st->buf_embt, st->buf_labc, st->buf_wst };
+    for (int i = 0; i < 7; i++) {
         if (bufs[i]) {
             ggml_backend_buffer_free(bufs[i]);
         }
     }
-    ggml_context * ctxs[6] = { st->ctx_ckpt, st->ctx_gh0, st->ctx_gh1, st->ctx_misc, st->ctx_embt, st->ctx_labc };
-    for (int i = 0; i < 6; i++) {
+    ggml_context * ctxs[7] = { st->ctx_ckpt, st->ctx_gh0, st->ctx_gh1, st->ctx_misc,
+                               st->ctx_embt, st->ctx_labc, st->ctx_wst };
+    for (int i = 0; i < 7; i++) {
         if (ctxs[i]) {
             ggml_free(ctxs[i]);
         }
@@ -404,6 +420,94 @@ static bool lm_ckpt_check_base(Qwen3LM * lm, std::string * err, bool allow_quant
 }
 
 // Allocate after sample building, when S_max / V are known.
+// ─── q8_0 -> BF16 weight stage (--weights bf16, 2026-11-06) ────────────────
+//
+// On a q8_0 base, Lever A's in-graph cast runs q8_0 -> F32 -> BF16 (the fork
+// has no direct copy), which writes and re-reads a full F32 copy of every
+// projection twice per step: 12.5 % of an MM3 step's kernel time. The stage
+// holds one layer's seven projections in BF16, filled by one engine-side
+// kernel (q8_bf16_cuda.cu, same arithmetic as the two ggml copies, so the
+// values are bit-identical) before each layer graph, which then reads them
+// as a BF16 base: the graph Lever A builds for a BF16-native model. Layer
+// graphs run one at a time and synchronize, so one layer's worth is enough.
+static inline void lm_ckpt_layer_projs(Qwen3Layer * ly, ggml_tensor ** ps[7]) {
+    ps[0] = &ly->q_proj;
+    ps[1] = &ly->k_proj;
+    ps[2] = &ly->v_proj;
+    ps[3] = &ly->o_proj;
+    ps[4] = &ly->gate_proj;
+    ps[5] = &ly->up_proj;
+    ps[6] = &ly->down_proj;
+}
+
+static bool lm_ckpt_alloc_wstage(LmCkptState * st, Qwen3LM * lm, std::string * err) {
+#if LM_CKPT_WSTAGE
+    if (!st->cfg.weights_bf16 || strncmp(ggml_backend_name(lm->backend), "CUDA", 4) != 0) {
+        return true;
+    }
+    ggml_tensor ** p0[7];
+    lm_ckpt_layer_projs(&lm->layers[st->cfg.layer_lo], p0);
+    for (int l = st->cfg.layer_lo; l < st->cfg.layer_hi; l++) {
+        ggml_tensor ** pl[7];
+        lm_ckpt_layer_projs(&lm->layers[l], pl);
+        for (int j = 0; j < 7; j++) {
+            const ggml_tensor * w = *pl[j];
+            if (!w || w->type != GGML_TYPE_Q8_0 || !ggml_is_contiguous(w) || !ggml_are_same_shape(w, *p0[j])) {
+                return true;  // not a uniform q8_0 base: keep the in-graph cast
+            }
+        }
+    }
+    ggml_init_params p = { 8 * ggml_tensor_overhead(), nullptr, true };
+    st->ctx_wst        = ggml_init(p);
+    for (int j = 0; j < 7; j++) {
+        st->wst[j] = ggml_new_tensor_2d(st->ctx_wst, GGML_TYPE_BF16, (*p0[j])->ne[0], (*p0[j])->ne[1]);
+        ggml_format_name(st->wst[j], "wstage.%d", j);
+    }
+    st->buf_wst = ggml_backend_alloc_ctx_tensors(st->ctx_wst, lm->backend);
+    if (!st->buf_wst) {
+        *err = "q8_0 -> BF16 weight stage allocation failed";
+        return false;
+    }
+    fprintf(stderr, "[train-lm] --weights bf16: q8_0 -> BF16 weight stage, one layer (%.1f MB)\n",
+            (double) ggml_backend_buffer_get_size(st->buf_wst) / 1048576.0);
+#else
+    (void) st;
+    (void) lm;
+    (void) err;
+#endif
+    return true;
+}
+
+// The layer a graph should read: lm.layers[l] itself, or with the stage on, a
+// copy whose projections are the stage, refilled from layer l now.
+static Qwen3Layer * lm_ckpt_layer_w(LmCkptState & st, int l, Qwen3Layer * tmp) {
+    Qwen3Layer * ly = &st.lm->layers[l];
+#if LM_CKPT_WSTAGE
+    if (st.buf_wst) {
+        *tmp = *ly;
+        ggml_tensor ** ps[7];
+        lm_ckpt_layer_projs(tmp, ps);
+        const void * src[7];
+        void *       dst[7];
+        int64_t      n[7];
+        for (int j = 0; j < 7; j++) {
+            GGML_ASSERT((*ps[j])->type == GGML_TYPE_Q8_0 && ggml_are_same_shape(*ps[j], st.wst[j]));
+            src[j] = (*ps[j])->data;
+            dst[j] = st.wst[j]->data;
+            n[j]   = ggml_nelements(st.wst[j]);
+            *ps[j] = st.wst[j];
+        }
+        if (const char * e = hs_q8_bf16_cuda::convert(src, dst, n, 7)) {
+            GGML_ABORT("q8_0 -> BF16 weight stage, layer %d: %s", l, e);
+        }
+        return tmp;
+    }
+#else
+    (void) tmp;
+#endif
+    return ly;
+}
+
 static bool lm_ckpt_alloc(LmCkptState * st, Qwen3LM * lm, const LmCkptCfg & cfg, std::string * err) {
     const Qwen3LMConfig & c = lm->cfg;
     const int             L = c.n_layers, H = c.hidden_size;
@@ -535,6 +639,9 @@ static bool lm_ckpt_alloc(LmCkptState * st, Qwen3LM * lm, const LmCkptCfg & cfg,
     st->buf_labc = ggml_backend_alloc_ctx_tensors(st->ctx_labc, lm->backend);
     if (!st->buf_ckpt || !st->buf_gh0 || !st->buf_gh1 || !st->buf_misc || !st->buf_embt || !st->buf_labc) {
         *err = "checkpoint buffer allocation failed";
+        return false;
+    }
+    if (!lm_ckpt_alloc_wstage(st, lm, err)) {
         return false;
     }
     ggml_backend_buffer_clear(st->buf_ckpt, 0);
@@ -1367,7 +1474,8 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         ggml_tensor *    mv  = ggml_view_2d(ctx, r.t_msk, NKV, S, (size_t) NKV * ggml_element_size(r.t_msk), 0);
         ggml_tensor *    X   = ggml_view_2d(ctx, st.C[(size_t) l], H, S, st.C[(size_t) l]->nb[1], 0);
         // D13: SAME opts as the P7 recompute. Not an optimisation opportunity.
-        ggml_tensor * Y = lm_train_layer(ctx, c, &lm.layers[l], X, pv, mv, S, lm_ckpt_layer_kv(st, opts, l));
+        Qwen3Layer    lw;
+        ggml_tensor * Y = lm_train_layer(ctx, c, lm_ckpt_layer_w(st, l, &lw), X, pv, mv, S, lm_ckpt_layer_kv(st, opts, l));
         ggml_build_forward_expand(
             gf, ggml_cpy(ctx, Y, ggml_view_2d(ctx, st.C[(size_t) (l + 1)], H, S, st.C[(size_t) (l + 1)]->nb[1], 0)));
         const bool ok = run_graph(gf);
@@ -1385,7 +1493,9 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         ggml_tensor *    pv  = ggml_view_1d(ctx, r.t_pos, S, 0);
         ggml_tensor *    mv  = ggml_view_2d(ctx, r.t_msk, NKV, S, (size_t) NKV * ggml_element_size(r.t_msk), 0);
         ggml_tensor *    X   = ggml_view_2d(ctx, st.C[(size_t) (Hi - 1)], H, S, st.C[(size_t) (Hi - 1)]->nb[1], 0);
-        ggml_tensor *    Y   = lm_train_layer(ctx, c, &lm.layers[Hi - 1], X, pv, mv, S, lm_ckpt_layer_kv(st, opts, Hi - 1));
+        Qwen3Layer       lw;
+        ggml_tensor *    Y   = lm_train_layer(ctx, c, lm_ckpt_layer_w(st, Hi - 1, &lw), X, pv, mv, S,
+                                              lm_ckpt_layer_kv(st, opts, Hi - 1));
         ggml_tensor *    hN  = lm_rms(ctx, Y, lm.final_norm, c.rms_norm_eps);
         ggml_build_forward_expand(gf, ggml_cpy(ctx, hN, ggml_view_2d(ctx, st.t_H, H, S, st.t_H->nb[1], 0)));
         const bool ok = run_graph(gf);
@@ -1457,7 +1567,8 @@ static bool lm_ckpt_micro_step(LmCkptRun & r, const LmSample & s, bool count_los
         ggml_tensor * pv = ggml_view_1d(ctx, r.t_pos, S, 0);
         ggml_tensor * mv = ggml_view_2d(ctx, r.t_msk, NKV, S, (size_t) NKV * ggml_element_size(r.t_msk), 0);
         ggml_tensor * X  = ggml_view_2d(ctx, st.C[(size_t) l], H, S, st.C[(size_t) l]->nb[1], 0);
-        ggml_tensor * Y  = lm_train_layer(ctx, c, &lm.layers[l], X, pv, mv, S, lm_ckpt_layer_kv(st, sopts, l));
+        Qwen3Layer    lw;
+        ggml_tensor * Y  = lm_train_layer(ctx, c, lm_ckpt_layer_w(st, l, &lw), X, pv, mv, S, lm_ckpt_layer_kv(st, sopts, l));
         if (l == Hi - 1) {
             Y = lm_rms(ctx, Y, lm.final_norm, c.rms_norm_eps);
         }

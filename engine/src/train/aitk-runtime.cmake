@@ -1,5 +1,6 @@
 # Native joint training runtime. Built on every backend; the CUDA build adds
 # the 8-bit AdamW and fused head-loss kernels (YUE2_AITK_CUDA_RUNTIME=1), and
+# the LM trainer's q8_0 -> BF16 weight stage (q8_bf16_cuda.cu, lm-ckpt.h), and
 # the others run the same trainer through ggml ops (LmOptim, portable loss).
 
 add_library(yue2-aitk-kernels STATIC ${CMAKE_CURRENT_LIST_DIR}/yue2-aitk-runtime.cpp)
@@ -10,6 +11,7 @@ if(GGML_CUDA AND TARGET ggml-cuda)
         ${CMAKE_CURRENT_LIST_DIR}/adamw8bit_cuda.cu
         ${CMAKE_CURRENT_LIST_DIR}/joint_loss_cuda.cu
         ${CMAKE_CURRENT_LIST_DIR}/clip_cuda.cu
+        ${CMAKE_CURRENT_LIST_DIR}/q8_bf16_cuda.cu
     )
     set_target_properties(yue2-aitk-kernels PROPERTIES
         CUDA_STANDARD 17

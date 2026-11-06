@@ -233,6 +233,17 @@ small: HOT-PiZZA's frozen branch now adds `B0 (-s A0 x)` instead of
 subtracting, which drops a NEG over `[out, S]` per site from the backward
 (1.2 % of kernel time).
 
+**q8_0 to BF16 without the F32 copy.** Under `--weights bf16` on q8_0, the
+in-graph weight cast (q8_0 to F32 to BF16, 12.5 % of kernel time) is replaced
+by a one-layer BF16 stage that an engine-side kernel (`q8_bf16_cuda.cu`,
+compiled into `yue2-aitk-kernels`) fills before each layer graph, with the
+same arithmetic as the two ggml copies. Bit-identical 20-step losses; 2.70 to
+2.48 s a step; +378 MB peak VRAM (the stage itself). Together with the depth
+head fix, the whole-song step under `--weights bf16 --attn flash-bf16` went
+from 2.85 to 2.48 s (1.15x) tonight, 2.68x against the f32-window default.
+A direct q8_0 to BF16 copy in HOT-ggml would give the same win in-graph, but
+it is no longer needed for this path.
+
 Gates. `mm3-lm-probe` on f16 (it now takes `--weights` and `--attn`) passes
 every arm; `--weights bf16 --attn flash-bf16` gives cos 0.999999898, rel
 9.5e-4 against the 1e-3 bar (f32-window exact: 0.999999951, 3.5e-4). On q8_0
