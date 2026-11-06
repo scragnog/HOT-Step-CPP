@@ -53,6 +53,16 @@ line is cond + voc.
 The remaining per-job warm (3.6-4.5 s) is the LM + depth upload,
 `[MM3] Loaded lm depth: 9.70 GB in ~4 s`.
 
+**CLOSED NEGATIVE: pinned bounce buffer in `wctx_alloc`.** Tried two 64 MB
+pinned slots, memcpy from the mmapped GGUF overlapped with
+`ggml_backend_tensor_set_async`. LM + depth stayed at 3.5-4.0 s (steady
+3521/3520 ms against 3589/3604 ms before), with the same sha. Reverted, because
+the shared loader is not worth touching for that. 9.7 GB in 3.5 s is about
+2.8 GB/s, the rate of soft page faults on a mapped view (~2.4 M 4 KB pages),
+not of the H2D copy. A real gain would need `ReadFile` straight into pinned
+memory instead of copying out of the mapping. That changes `gf_load` and
+`PendingCopy` for every backend, so it was not attempted.
+
 **The 37-44 s loads (2026-11-05 23:12-23:59 sessions).** The same file loaded
 in 3.5 s at 22:35 and again from 00:05 on, with the same exe. That rate is
 ~130 MB/s on an SN850X that `cat` reads in 2.4 s. Deserialize is in-memory and
