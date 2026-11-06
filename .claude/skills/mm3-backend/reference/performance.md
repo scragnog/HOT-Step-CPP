@@ -6,6 +6,68 @@ can place individual children elsewhere.
 
 > Reference for the `mm3-backend` skill. Read only when the task needs it.
 
+## TensorRT DiT: where the time goes, and the opt-in FP8 MLP (measured 2026-11-06)
+
+**Profile of the BF16 engine** (TRT layer profiler, B=2 L=689, q8_0 DiT, RTX
+5090): 38.1 ms per enqueue, of which GEMMs are 91%. The 72 MLP GEMMs
+(ff_in, ff_out) take 25.5 ms, the 72 qkv/out GEMMs 9.2 ms, fused MHA 2.3 ms,
+casts 1.4 ms, norms/RoPE/GLU kernels ~1.8 ms. The GEMM kernels are
+`sm80_xmma_gemm_bf16bf16_bf16f32_f32` at ~190 TFLOPS, near the BF16 peak.
+
+**kREFIT costs nothing here (closed).** A BF16 engine built without kREFIT,
+weights baked in, ran 37.9 ms against 38.1 ms, and a standalone 30-step window
+through both matched at latent corr 1.000000. A per-stack non-refit engine
+cache is not worth building.
+
+**FP8 refit works on TRT 10.16.** Q/DQ on a BF16 weight constant with a named
+per-channel scale refits (weights and scales), and the refitted plan stores
+FP8 weights (4.88 GB plan -> 3.07 GB). No pre-quantization needed.
+
+**`MM3_DIT_TRT_FP8=1` (engine env, opt-in, default off, not ear-validated).**
+`mm3-dit-trt.h` inserts FP8 E4M3 Q/DQ on the ff_in and ff_out GEMMs of blocks
+2..33 after parsing the shipped ONNX: per-output-channel weight scales computed
+at refit from the merged weights (so adapters are covered), per-tensor static
+activation scales from `<models>/mm3/mm3-dit-trt.fp8.json`. The GLU feeding
+ff_out (value * silu(gate)) is recomputed in FP32, cast to BF16, then
+quantized; Myelin rejects a GEMM whose two operand scales differ in type, so
+the activation scale is BF16. Separate base engine (`base-fp8-*.engine`) and
+refit cache keys (variant + calibration file identity). The default path,
+ONNX and manifest are untouched: default renders keep sha
+`045092857b873ef7`.
+
+Calibration: run a BF16 render with `MM3_DIT_TRT_DUMP=<dir>` (every forward's
+input and velocity as `call_<n>.bin`), then
+`tools/mm3-trt-export/fp8_lab.py calib` replays it through a BF16 engine with
+the MLP inputs exposed and writes max |activation| x 2 per GEMM. The replay
+matched the C++ velocities at corr 1.000000. Margin did not matter: x0.5, x1,
+x2 and x8 gave the same parity to within run noise.
+
+| | ms / B=2 enqueue (lab) | flow per 200-frame window (app) | flow, 60 s bench |
+|---|---|---|---|
+| BF16 (default) | 38.1 | 1250 ms | 17.2-17.5 s |
+| FP8 MLP, all 36 blocks | 26.2 | 846 ms (with dump) | 11.9 s |
+| FP8 MLP, blocks 2..33 (shipped opt-in) | 27.5 | 920 ms | 12.5-12.8 s |
+| FP8 ff_in only | 30.1 | | |
+
+Bench: lm q8_0, depth f16, dit q8_0, 30 steps, 60 s, seed 4242; the FP8 job
+total is 35.5-36.0 s against 40.7-41.2 s. FP8 sha `439277255828e2a3`, stable
+across runs. VRAM resident 3.4 GB against ~4.9 GB; the host plan slot shrinks
+the same way.
+
+Parity against the BF16 TensorRT engine, same seed and plan (`fp8_lab.py
+compare` on two dumps; final latent of each window from its last forward):
+
+- All 36 blocks in FP8: full-clip latent corr 0.99925, worst window 0.99827.
+  Standalone windows showed the first two blocks matter most, then the last two.
+- Blocks 2..33: full clip 0.99944, mean window 0.99944, worst window 0.99883
+  (window 8, the most sensitive one in every variant). Per-step velocity corr
+  on identical input 0.9993-0.9999.
+- WAV, 3 seeds (4242, 7, 1234): waveform corr 0.9976-0.9986, side/mid ratio
+  within 0.11 dB, L/R corr within 0.004, 1/3-octave-ish band energy within
+  0.24 dB. FP8 is consistently +0.06-0.10 dB louder, most in the top band.
+
+A/B WAVs for listening: `_experiments/_LISTENING/2026-11-06-mm3-speed/fp8/`.
+
 ## TensorRT DiT per-job load cost (measured 2026-11-06)
 
 With keep-loaded off, `mm3_unload()` frees the TensorRT runtime after every

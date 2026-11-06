@@ -900,6 +900,12 @@ MM3 the request's `dit_backend` does.
     CPU only as a refit source: on a refit-cache miss `Runtime::refit` stages it
     for the refit and frees it after. The rest load stages the whole DiT only when
     `MM3_ADAPTER` is set, because the adapter merge patches that copy.
+    Dev env, both default off: `MM3_DIT_TRT_FP8=1` builds a separate base engine
+    with FP8 Q/DQ on the MLP GEMMs of blocks 2..33 (weight scales computed at
+    refit, activation scales from `<models>/mm3/mm3-dit-trt.fp8.json`, made by
+    `tools/mm3-trt-export/fp8_lab.py calib`) and keys its refit cache apart;
+    `MM3_DIT_TRT_DUMP=<dir>` writes every forward's input and velocity for that
+    tool. Measurements: `mm3-backend` skill, `reference/performance.md`.
 
 ONNX Runtime is gone from the engine: no build links it, and there is no CMake option
 for it. What used to run on it:

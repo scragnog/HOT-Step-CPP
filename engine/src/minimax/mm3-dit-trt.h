@@ -5,8 +5,10 @@
 #include "yyjson.h"
 
 #include <algorithm>
+#include <deque>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -59,6 +61,19 @@ static std::string mm3_trt_manifest_path(const MM3Model & m) {
         return std::string(path) + ".json";
     }
     return (mm3_trt_dir(m) / "mm3-dit-trt.engine.json").string();
+}
+
+// Opt-in FP8 MLP engine (dev, not ear-validated): MM3_DIT_TRT_FP8=1 builds a
+// separate base engine whose ff_in/ff_out GEMMs (blocks 2..33) run in FP8 E4M3, and keys
+// the refit cache apart. Activation scales come from a calibration file made by
+// tools/mm3-trt-export/fp8_lab.py; weight scales are computed at refit.
+static bool mm3_trt_fp8() {
+    const char * v = std::getenv("MM3_DIT_TRT_FP8");
+    return v && *v == '1';
+}
+
+static std::string mm3_trt_fp8_calib_path(const MM3Model & m) {
+    return (mm3_trt_dir(m) / "mm3-dit-trt.fp8.json").string();
 }
 
 // Everything /mm3/props needs to explain why TensorRT is or is not usable,
@@ -119,6 +134,10 @@ static MM3TrtStatus mm3_trt_status(const MM3Model & m) {
     }
     if (!s.manifest) {
         s.reason = "The MM3 TensorRT weight manifest is not installed; get it from the Model Manager";
+        return s;
+    }
+    if (mm3_trt_fp8() && !std::filesystem::is_regular_file(mm3_trt_fp8_calib_path(m), ec)) {
+        s.reason = "MM3_DIT_TRT_FP8 needs mm3-dit-trt.fp8.json (tools/mm3-trt-export/fp8_lab.py calib)";
         return s;
     }
     if (!s.engine) {
@@ -264,8 +283,12 @@ static std::filesystem::path mm3_trt_base_engine_path(const MM3Model & m, int de
     const auto      onnx = std::filesystem::absolute(mm3_trt_onnx_path(m)).lexically_normal();
     identity << onnx.string() << '\n' << std::filesystem::file_size(onnx, ec) << '\n'
              << std::filesystem::last_write_time(onnx, ec).time_since_epoch().count() << '\n';
+    const bool fp8 = mm3_trt_fp8();
+    if (fp8) {
+        identity << "fp8-mlp-v2\n";
+    }
     std::ostringstream name;
-    name << "base-" << std::hex << mm3_trt::fnv1a(identity.str()) << ".engine";
+    name << (fp8 ? "base-fp8-" : "base-") << std::hex << mm3_trt::fnv1a(identity.str()) << ".engine";
     return mm3_trt_dir(m) / "mm3-trt-cache" / name.str();
 }
 
@@ -305,6 +328,10 @@ class Runtime final : public MM3DitRuntime {
         add_file(source);
         add_file(manifest);
         add_file(m.role_file[MM3_R_DIT].path);
+        if (mm3_trt_fp8()) {
+            identity << "fp8-mlp-v2\n";
+            add_file(mm3_trt_fp8_calib_path(m));
+        }
         identity << m.rest_adapter_desc << '\n';
         // Keep the exact requested scale too: rest_adapter_desc is formatted
         // for display and rounds floats to six decimal places.
@@ -386,6 +413,110 @@ class Runtime final : public MM3DitRuntime {
         check(bool(out), "Cannot write " + path.string());
     }
 
+    // Engine names of the MLP weights (ff_in, ff_out) that run in FP8: blocks
+    // 2..33. The first and last two blocks stay BF16; with them in FP8 the
+    // worst window's latent corr vs BF16 was 0.9974, without 0.9994.
+    static std::set<std::string> ff_names(const std::string & manifest_path) {
+        yyjson_read_err                                         json_error{};
+        std::unique_ptr<yyjson_doc, decltype(&yyjson_doc_free)> doc(
+            yyjson_read_file(manifest_path.c_str(), 0, nullptr, &json_error), yyjson_doc_free);
+        check(bool(doc), "Cannot read TensorRT weight manifest");
+        std::set<std::string> names;
+        size_t                index, count;
+        yyjson_val *          entry;
+        yyjson_arr_foreach(yyjson_obj_get(yyjson_doc_get_root(doc.get()), "weights"), index, count, entry) {
+            const char * gguf   = yyjson_get_str(yyjson_obj_get(entry, "gguf_name"));
+            const char * engine = yyjson_get_str(yyjson_obj_get(entry, "engine_name"));
+            int block = -1;
+            if (gguf && engine && sscanf(gguf, "dit.blk.%d.", &block) == 1 && block >= 2 && block <= 33 &&
+                (strstr(gguf, ".ffn_in.weight") || strstr(gguf, ".ffn_out.weight"))) {
+                names.insert(engine);
+            }
+        }
+        check(names.size() == 64, "FP8: expected 64 MLP weights (blocks 2..33) in the manifest");
+        return names;
+    }
+
+    // FP8 E4M3 on the MLP GEMMs named in `ff`. Weight: Q/DQ per
+    // output channel with scale fp8w.<name>. Activation: Q/DQ per tensor with
+    // scale fp8a.<name>. Both scales are named weights the refit sets (the
+    // placeholders here are never used). The GLU feeding ff_out (value *
+    // silu(gate), BF16 in the ONNX) is recomputed in FP32. Norms, attention,
+    // qkv/out projections and the first/last layers stay BF16.
+    static void insert_fp8(nvinfer1::INetworkDefinition &      net,
+                           const std::set<std::string> &       ff,
+                           std::deque<std::vector<uint16_t>> & keep) {
+        using namespace nvinfer1;
+        std::map<ITensor *, std::vector<std::pair<ILayer *, int>>> users;
+        std::map<ITensor *, ILayer *>                              maker;
+        std::vector<ILayer *>                                      weights;
+        for (int i = 0; i < net.getNbLayers(); ++i) {
+            ILayer * l = net.getLayer(i);
+            for (int j = 0; j < l->getNbInputs(); ++j) {
+                if (ITensor * t = l->getInput(j)) {
+                    users[t].push_back({ l, j });
+                }
+            }
+            for (int j = 0; j < l->getNbOutputs(); ++j) {
+                maker[l->getOutput(j)] = l;
+            }
+            if (l->getType() == LayerType::kCONSTANT && ff.count(l->getName())) {
+                weights.push_back(l);
+            }
+        }
+        check(weights.size() == ff.size(), "FP8: MLP weights not found in the parsed graph");
+        auto sole_user = [&](ITensor * t, LayerType type) {
+            const auto & u = users[t];
+            check(u.size() == 1 && u[0].first->getType() == type, "FP8: unexpected MLP graph shape");
+            return u[0];
+        };
+        auto scale = [&](const std::string & name, Dims dims) -> ITensor & {
+            keep.emplace_back(size_t(dims.nbDims ? dims.d[0] : 1), bf16(1.0f / 448));
+            Weights w{ DataType::kBF16, keep.back().data(), int64_t(keep.back().size()) };
+            IConstantLayer * c = net.addConstant(dims, w);
+            check(c && net.setWeightsName(w, name.c_str()), "FP8: cannot add scale " + name);
+            return *c->getOutput(0);
+        };
+        for (ILayer * c : weights) {
+            const std::string name     = c->getName();
+            ITensor *         w        = c->getOutput(0);
+            ILayer *          shuffle  = sole_user(w, LayerType::kSHUFFLE).first;
+            const auto [mm, slot]      = sole_user(shuffle->getOutput(0), LayerType::kMATRIX_MULTIPLY);
+            const Dims        wd       = w->getDimensions();
+            check(slot == 1 && wd.nbDims == 2, "FP8: unexpected MLP weight layout");
+            Dims channels{};
+            channels.nbDims = 1;
+            channels.d[0]   = wd.d[1];
+            ITensor & sw    = scale("fp8w." + name, channels);
+            auto *    qw    = net.addQuantize(*w, sw, DataType::kFP8);
+            qw->setAxis(1);
+            auto * dw = net.addDequantize(*qw->getOutput(0), sw, DataType::kBF16);
+            dw->setAxis(1);
+            shuffle->setInput(0, *dw->getOutput(0));
+
+            ITensor * a = mm->getInput(0);
+            if (wd.d[0] != 2048) {  // ff_out: its input is value * silu(gate)
+                ILayer * glu  = maker[a];
+                ILayer * silu = glu ? maker[glu->getInput(1)] : nullptr;
+                check(glu && silu && glu->getType() == LayerType::kELEMENTWISE &&
+                          silu->getType() == LayerType::kELEMENTWISE,
+                      "FP8: unexpected GLU graph shape");
+                ITensor * g  = net.addCast(*silu->getInput(0), DataType::kFLOAT)->getOutput(0);
+                ITensor * s  = net.addActivation(*g, ActivationType::kSIGMOID)->getOutput(0);
+                ITensor * gs = net.addElementWise(*g, *s, ElementWiseOperation::kPROD)->getOutput(0);
+                ITensor * v  = net.addCast(*glu->getInput(0), DataType::kFLOAT)->getOutput(0);
+                a            = net.addElementWise(*v, *gs, ElementWiseOperation::kPROD)->getOutput(0);
+                // Myelin rejects a matmul whose operand scales differ in type
+                // (FP32 activation, BF16 weight), so quantize from BF16.
+                a = net.addCast(*a, DataType::kBF16)->getOutput(0);
+            }
+            ITensor & sa = scale("fp8a." + name, Dims{});
+            auto *    qa = net.addQuantize(*a, sa, DataType::kFP8);
+            auto *    da = net.addDequantize(*qa->getOutput(0), sa, DataType::kBF16);
+            mm->setInput(0, *da->getOutput(0));
+        }
+    }
+
     void build(const std::string & onnx_path, const std::string & manifest_path, const std::filesystem::path & out) {
         const auto start = std::chrono::steady_clock::now();
         fprintf(stderr, "[MM3-TRT] Building the MM3 DiT engine for this GPU from %s (one time, a few minutes)\n",
@@ -433,6 +564,10 @@ class Runtime final : public MM3DitRuntime {
         check(bool(parser), "Cannot create TensorRT ONNX parser");
         check(parser->parseFromFile(onnx_path.c_str(), int(nvinfer1::ILogger::Severity::kWARNING)),
               "Cannot parse the MM3 DiT ONNX graph");
+        std::deque<std::vector<uint16_t>> keep;  // FP8 scale constants live until the build ends
+        if (mm3_trt_fp8()) {
+            insert_fp8(*network, ff_names(manifest_path), keep);
+        }
         std::unique_ptr<nvinfer1::IBuilderConfig> config(builder->createBuilderConfig());
         check(bool(config), "Cannot create TensorRT builder config");
         config->setMemoryPoolLimit(nvinfer1::MemoryPoolType::kWORKSPACE, 2ULL << 30);
@@ -643,7 +778,27 @@ class Runtime final : public MM3DitRuntime {
         check(bool(refitter), "Engine is not refittable");
         std::set<std::string>              seen_gguf, seen_engine;
         std::vector<std::vector<uint16_t>> storage;
-        storage.reserve(368);
+        storage.reserve(368 + 2 * 72);
+        // FP8 engine: per-tensor activation amax from the calibration file,
+        // for the GEMMs the build quantized.
+        std::map<std::string, float> act_amax;
+        if (mm3_trt_fp8()) {
+            const auto ff = ff_names(manifest_path);
+            const auto                                              path = mm3_trt_fp8_calib_path(m);
+            std::unique_ptr<yyjson_doc, decltype(&yyjson_doc_free)> calib(
+                yyjson_read_file(path.c_str(), 0, nullptr, &json_error), yyjson_doc_free);
+            check(bool(calib), "Cannot read FP8 calibration " + path);
+            auto         amax = yyjson_obj_get(yyjson_doc_get_root(calib.get()), "act_amax");
+            size_t       i, n;
+            yyjson_val * key;
+            yyjson_val * value;
+            yyjson_obj_foreach(amax, i, n, key, value) {
+                if (ff.count(yyjson_get_str(key))) {
+                    act_amax[yyjson_get_str(key)] = float(yyjson_get_num(value));
+                }
+            }
+            check(act_amax.size() == ff.size(), "FP8 calibration is missing MLP inputs");
+        }
         size_t       index, count;
         yyjson_val * entry;
         yyjson_arr_foreach(weights, index, count, entry) {
@@ -694,6 +849,26 @@ class Runtime final : public MM3DitRuntime {
                         dest[size_t(i * out + o)] = bf16(values[size_t(o * in + i)]);
                     }
                 }
+                const auto act = act_amax.find(target);
+                if (act != act_amax.end()) {
+                    // FP8 scales: weight amax per output channel (of the merged
+                    // weights, so adapters are covered), activation amax / 448.
+                    auto & sw = storage.emplace_back(size_t(out));
+#    pragma omp parallel for schedule(static)
+                    for (int64_t o = 0; o < out; ++o) {
+                        float amax = 1e-8f;
+                        for (int64_t i = 0; i < in; ++i) {
+                            amax = std::max(amax, std::fabs(values[size_t(o * in + i)]));
+                        }
+                        sw[size_t(o)] = bf16(amax / 448.0f);
+                    }
+                    auto & sa = storage.emplace_back(1, bf16(act->second / 448.0f));
+                    check(refitter->setNamedWeights(("fp8w." + std::string(target)).c_str(),
+                                                    { nvinfer1::DataType::kBF16, sw.data(), int64_t(out) }) &&
+                              refitter->setNamedWeights(("fp8a." + std::string(target)).c_str(),
+                                                        { nvinfer1::DataType::kBF16, sa.data(), 1 }),
+                          std::string("Cannot refit FP8 scales of ") + target);
+                }
             } else {
 #    pragma omp parallel for schedule(static)
                 for (int64_t i = 0; i < int64_t(n); ++i) {
@@ -712,6 +887,29 @@ class Runtime final : public MM3DitRuntime {
         check(refitter->getMissingWeights(0, nullptr) == 0, "Incomplete refit weights");
         check(refitter->refitCudaEngine(), "DiT weight refit failed");
     }
+    // Dev only: MM3_DIT_TRT_DUMP=<dir> writes every forward as call_<n>.bin
+    // (int32 L, B; float t, gate; int32 has_cond; x [128,L]; cond [L,2048] if
+    // present; velocity [B,128,L]) for tools/mm3-trt-export/fp8_lab.py, which
+    // calibrates FP8 activation scales and compares renderers on identical input.
+    void dump(const float * x, const float * cond, float gate, float t, int L, int B) {
+        static const char * dir = std::getenv("MM3_DIT_TRT_DUMP");
+        static int          n   = 0;
+        if (!dir || !*dir) {
+            return;
+        }
+        char name[32];
+        snprintf(name, sizeof(name), "call_%05d.bin", n++);
+        std::ofstream f(std::filesystem::path(dir) / name, std::ios::binary);
+        const int32_t head[2] = { L, B }, has = cond != nullptr;
+        const float   tg[2]   = { t, gate };
+        f.write((const char *) head, 8).write((const char *) tg, 8).write((const char *) &has, 4);
+        f.write((const char *) x, std::streamsize(size_t(128) * L * 4));
+        if (cond) {
+            f.write((const char *) cond, std::streamsize(size_t(2048) * L * 4));
+        }
+        f.write((const char *) velocity.data(), std::streamsize(velocity.size() * 4));
+    }
+
   public:
     size_t gpu_bytes() const override { return resident_bytes; }
 
@@ -931,6 +1129,7 @@ class Runtime final : public MM3DitRuntime {
             }
             uploaded_B    = B;
             uploaded_gate = effective_gate;
+            dump(x, cond, gate, t, L, B);
             std::copy_n(velocity.data(), N, out_c);
             if (out_u) {
                 std::copy_n(velocity.data() + N, N, out_u);

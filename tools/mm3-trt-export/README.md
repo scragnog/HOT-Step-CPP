@@ -195,3 +195,18 @@ files together, and publish them together.
 the probe's builder, refits it from the F16 DiT GGUF, replays the 273-frame
 saved plan, and compares the audio byte-for-byte against the prepared-engine
 baseline. It is the only GPU step; read the header comment before running it.
+
+## FP8 lab (`fp8_lab.py`)
+
+Dev-only companion for the opt-in FP8 MLP engine (`MM3_DIT_TRT_FP8=1`). It
+parses the same weightless ONNX with the TensorRT Python wheel that matches the
+engine (10.16.1.11, plus numpy and cuda-python; no torch or onnx), refits from
+a GGUF through the manifest, and builds the same variants the engine builds.
+Commands: `placeholder`, `inspect`, `build`, `time` (with a per-layer
+profile), `calib` and `compare`; the docstring lists the flags.
+
+The FP8 calibration file comes from a BF16 render with
+`MM3_DIT_TRT_DUMP=<dir>` set on the engine: `calib --dump <dir> --gguf <dit>
+--out mm3-dit-trt.fp8.json`, then copy it to `<models>/mm3/`. `compare` on two
+dumps of the same seed gives the per-window latent parity. Results are in the
+`mm3-backend` skill, `reference/performance.md`.
