@@ -1199,8 +1199,13 @@ static ggml_tensor * lm_linear(ggml_context * ctx, ggml_tensor * w, const QwLora
                 if (opts.rank_mask && !pr->hot_pizza) {
                     t0 = ggml_mul(ctx, t0, opts.rank_mask);
                 }
-                t0 = ggml_scale(ctx, t0, pr->scale);
-                d  = ggml_sub(ctx, d, ggml_mul_mat(ctx, B0, t0));
+                // Negated in the [r, S] scale and ADDED, rather than scaled by
+                // +s and subtracted: the same bits (IEEE negation is exact, a
+                // GEMM of a negated input is the negated GEMM, and a - b is
+                // a + (-b)), but SUB's backward is a NEG over [out, S] at every
+                // site, 1.2 % of an MM3 step's kernel time, and ADD's is none.
+                t0 = ggml_scale(ctx, t0, -pr->scale);
+                d  = ggml_add(ctx, d, ggml_mul_mat(ctx, B0, t0));
             }
             y               = ggml_add(ctx, y, d);
             // DoRA. Emits nothing when the pair carries no magnitude, so a plain

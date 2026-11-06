@@ -888,6 +888,17 @@ in `buildMm3TrainLmArgs`; the run manifest records the field, so a preview
 relaunch and the resume route keep it, and the resume route accepts it as an
 override. `--tf32 on` stays command-line only.
 
+### Step cost after the BF16 levers (2026-11-06)
+
+- **The PiSSA frozen branch adds a negated term instead of subtracting.**
+  `lm_linear` scales `A0 x` by `-s` and adds `B0` times it, where it used to
+  scale by `s` and subtract. The bits are the same (negation is exact in
+  IEEE arithmetic and a GEMM of a negated input is the negated GEMM), but the
+  backward of SUB is a NEG over `[out, S]` at every site, about 1.2 % of an
+  MM3 step's kernel time under `--weights bf16 --attn flash-bf16`, and ADD's
+  is nothing. 20-step losses, gradient norms and depth losses are identical to
+  the previous binary with and without the BF16 flags.
+
 ### HOT-PiZZA — the MM3 default method (2026-09-06)
 
 HOT-PiZZA is PiSSA with principal-subspace dropout. It was called HOT-PiSSA on
