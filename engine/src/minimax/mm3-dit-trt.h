@@ -794,7 +794,12 @@ class Runtime final : public MM3DitRuntime {
             yyjson_val * value;
             yyjson_obj_foreach(amax, i, n, key, value) {
                 if (ff.count(yyjson_get_str(key))) {
-                    act_amax[yyjson_get_str(key)] = float(yyjson_get_num(value));
+                    // A zero, negative or non-numeric amax gives a zero scale,
+                    // and the quantize then writes inf/NaN into a cached plan.
+                    const double v = yyjson_get_num(value);
+                    check(yyjson_is_num(value) && std::isfinite(v) && v > 0.0,
+                          std::string("FP8 calibration has a bad act_amax for ") + yyjson_get_str(key));
+                    act_amax[yyjson_get_str(key)] = float(v);
                 }
             }
             check(act_amax.size() == ff.size(), "FP8 calibration is missing MLP inputs");

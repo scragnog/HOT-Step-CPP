@@ -2199,7 +2199,7 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
     // the way to lm_attn_flash, so probing Nh would ask about a geometry that is
     // never built.
     const bool      attn_flash    = (a.attn == "flash" || a.attn == "flash-f32" || a.attn == "flash-bf16");
-    const ggml_prec attn_prec_req = mm3_lm_attn_prec(a.attn);
+    ggml_prec       attn_prec_req = mm3_lm_attn_prec(a.attn);
     // A frozen KV prefix makes the attention rectangular: S_kv = n_pfx + S,
     // with the prompt's stored columns in front of the history. Until
     // 2026-09-06 this pair was refused; the fused op always took the shape
@@ -2213,6 +2213,25 @@ static int mm3_lm_train_main(const MM3LmTrainArgs & a) {
         bool        pf = false, pb = false;
         dit_flash_probe(t.lm.backend, c.head_dim, c.n_heads, c.n_kv_heads, (int) S_max, (int) S_kv_max, /*B=*/1,
                         ascale, &pf, &pb, attn_prec_req);
+        // The BF16 kernels need Ampere or newer. The Training Studio offers
+        // "Fastest" on any CUDA card, so a pre-Ampere card falls back to the
+        // default flash precision rather than failing the run.
+        if (!(pf && pb) && attn_prec_req == GGML_PREC_BF16) {
+            const ggml_prec fallback = mm3_lm_attn_prec("flash");
+            bool            ff = false, fb = false;
+            dit_flash_probe(t.lm.backend, c.head_dim, c.n_heads, c.n_kv_heads, (int) S_max, (int) S_kv_max,
+                            /*B=*/1, ascale, &ff, &fb, fallback);
+            if (ff && fb) {
+                fprintf(stderr,
+                        "[mm3-lm-train] --attn flash-bf16: %s has no BF16 fused attention (needs Ampere or "
+                        "newer); training with --attn flash instead\n",
+                        ggml_backend_name(t.lm.backend));
+                jl("{\"type\":\"warn\",\"message\":\"--attn flash-bf16 unsupported by %s; using --attn flash\"}",
+                   ggml_backend_name(t.lm.backend));
+                attn_prec_req = fallback;
+                pf = pb = true;
+            }
+        }
         if (!(pf && pb)) {
             fprintf(stderr,
                     "[mm3-lm-train] --attn %s: backend %s does not support the fused attention ops at this "
