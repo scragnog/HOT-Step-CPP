@@ -305,7 +305,9 @@ correcting after the vocoder. Analysis scripts + A/B renders:
 
 Capture the AR stage's output codes on one render, replay them on later ones.
 Opt in per request: `get_ar_codes: true` captures; `forced_semantic` +
-`forced_acoustic` replay. The blob comes back from `GET /mm3/job?id=<id>&ar=1`
+`forced_acoustic` replay. `forced_semantic` alone pins content and lets the
+depth decoder sample the acoustic codes from the new caption (cover probe,
+HOTSTEP-1048). The blob comes back from `GET /mm3/job?id=<id>&ar=1`
 as little-endian i32 — `[n_sem][sem…][n_ac][ac…]` — and is stored as
 `<uuid>.mm3plank` beside a `.mm3plank.json` sidecar in `<data>/mm3-planks/`.
 

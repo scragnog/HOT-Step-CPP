@@ -1158,23 +1158,23 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
     }
 
     // ── MM3 Plank: AR replay ──
-    // Both arrays or neither. A half-specified replay is a caller bug worth a
-    // 400, not a silent fall back to sampling — the whole point of asking for
-    // replay is that the codes are pinned.
+    // Both arrays, or forced_semantic alone (semantic-only forcing: content pinned,
+    // the depth decoder samples the acoustic codes from the new caption, see
+    // mm3-ar-loop.h). forced_acoustic without forced_semantic is a caller bug.
     {
         yyjson_val * sem_v  = yyjson_obj_get(root, "forced_semantic");
         yyjson_val * ac_v   = yyjson_obj_get(root, "forced_acoustic");
         const bool   has_sem = sem_v && !yyjson_is_null(sem_v);
         const bool   has_ac  = ac_v  && !yyjson_is_null(ac_v);
 
-        if (has_sem != has_ac) {
+        if (has_ac && !has_sem) {
             if (err) {
-                *err = "\"forced_semantic\" and \"forced_acoustic\" must be provided together";
+                *err = "\"forced_acoustic\" needs \"forced_semantic\"";
             }
             return false;
         }
         if (has_sem) {
-            if (!yyjson_is_arr(sem_v) || !yyjson_is_arr(ac_v)) {
+            if (!yyjson_is_arr(sem_v) || (has_ac && !yyjson_is_arr(ac_v))) {
                 if (err) {
                     *err = "\"forced_semantic\" and \"forced_acoustic\" must be arrays of integers";
                 }
@@ -1191,19 +1191,21 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
                 }
                 out->forced_semantic.push_back((int32_t) yyjson_get_int(item));
             }
-            yyjson_arr_foreach(ac_v, idx, imax, item) {
-                if (!yyjson_is_int(item)) {
-                    if (err) {
-                        *err = "\"forced_acoustic\" must be an array of integers";
+            if (has_ac) {
+                yyjson_arr_foreach(ac_v, idx, imax, item) {
+                    if (!yyjson_is_int(item)) {
+                        if (err) {
+                            *err = "\"forced_acoustic\" must be an array of integers";
+                        }
+                        return false;
                     }
-                    return false;
+                    out->forced_acoustic.push_back((int32_t) yyjson_get_int(item));
                 }
-                out->forced_acoustic.push_back((int32_t) yyjson_get_int(item));
             }
 
             const int64_t NCB      = 7;  // acoustic codebooks per frame
             const int64_t expected = (int64_t) out->forced_semantic.size() * NCB;
-            if ((int64_t) out->forced_acoustic.size() != expected) {
+            if (has_ac && (int64_t) out->forced_acoustic.size() != expected) {
                 if (err) {
                     char buf[160];
                     snprintf(buf, sizeof(buf),

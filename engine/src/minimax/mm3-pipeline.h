@@ -1069,14 +1069,16 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
     aopt.lm_adapter_scales = req.lm_adapter_scales;
     aopt.lm_soft           = req.lm_soft;
     if (!req.forced_semantic.empty()) {
-        if ((int64_t) req.forced_acoustic.size() != (int64_t) req.forced_semantic.size() * NCB) {
+        // Empty forced_acoustic = semantic-only forcing (the depth decoder samples it).
+        const bool has_ac = !req.forced_acoustic.empty();
+        if (has_ac && (int64_t) req.forced_acoustic.size() != (int64_t) req.forced_semantic.size() * NCB) {
             if (err) {
                 *err = "forced_acoustic must be forced_semantic.size() * 7 entries";
             }
             return false;
         }
         aopt.forced_semantic = req.forced_semantic.data();
-        aopt.forced_acoustic = req.forced_acoustic.data();
+        aopt.forced_acoustic = has_ac ? req.forced_acoustic.data() : nullptr;
         aopt.forced_len      = (int64_t) req.forced_semantic.size();
     }
     aopt.should_cancel = req.should_cancel;

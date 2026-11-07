@@ -413,7 +413,7 @@ are reported, not ignored.
 | `require_eos`, `stop_after_first_eos`, `eos_rounds`, `min_frames` | false, false, 4, 0 | Natural-ending controls. `eos_rounds` is 1 to 16; `min_frames` drops plans shorter than that |
 | `reuse_ar` | false | Reuse the previous planner output when every planner input matches |
 | `forced_frame_hiddens_file`, `save_frame_hiddens`, `frame_hiddens_save_path` | | Load or save the planner output as a `.mm3hiddens` file |
-| `forced_semantic`, `forced_acoustic` | | Replay captured codes. Both or neither; `forced_acoustic` has 7 entries per semantic entry |
+| `forced_semantic`, `forced_acoustic` | | Replay captured codes; `forced_acoustic` has 7 entries per semantic entry. `forced_semantic` alone pins content and samples the acoustic codes from the caption |
 | `stream` | false | Emit audio per window for `GET /mm3/stream` |
 | `lm_adapter` | `""` | Path to a PEFT LM adapter |
 | `lm_adapter_mode` | `"runtime"` | `runtime` or `merge` |
