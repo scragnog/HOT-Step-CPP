@@ -3,7 +3,7 @@
 //
 // Mounts at: /listening (top-level, like /audio — not under /api)
 // Routes:
-//   GET  /listening/:folder/{*splat}  — serve a file from _experiments/_LISTENING/<folder>/
+//   GET  /listening/:folder/{*splat}  — serve a file from <root>/_experiments/_LISTENING/<folder>/
 //   POST /listening/:folder/scores    — write that folder's scores.json (body = JSON)
 //
 // These pages write to disk with no auth, so every request is restricted to
@@ -27,7 +27,13 @@ import { PROJECT_ROOT, config } from '../config.js';
 
 const router = Router();
 
-const LISTENING_ROOT = path.resolve(PROJECT_ROOT, '_experiments', '_LISTENING');
+// Studies live under the checkout's _experiments/_LISTENING, and older ones
+// (plus some agent renders) under the checkout's parent. A folder is served
+// from whichever root has it; a new folder defaults to the first.
+const LISTENING_ROOTS = [PROJECT_ROOT, path.dirname(PROJECT_ROOT)]
+  .map(r => path.resolve(r, '_experiments', '_LISTENING'));
+const rootFor = (folder: string) =>
+  LISTENING_ROOTS.find(r => SAFE_NAME.test(folder) && fs.existsSync(path.join(r, folder))) ?? LISTENING_ROOTS[0];
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 // Leading underscore allowed — this repo's own convention for scratch/hidden
 // study folders (_LISTENING itself, a throwaway _save-test copy).
@@ -86,7 +92,7 @@ export function resolveConfined(root: string, folder: string, segments: string[]
 router.get('/:folder/{*splat}', (req, res) => {
   const splat = ([] as string[]).concat((req.params as any).splat ?? []);
   const segments = splat.length ? splat : ['index.html'];
-  const target = resolveConfined(LISTENING_ROOT, req.params.folder, segments);
+  const target = resolveConfined(rootFor(req.params.folder), req.params.folder, segments);
   if (!target) {
     res.status(400).json({ error: 'Invalid path' });
     return;
@@ -109,7 +115,7 @@ router.post('/:folder/scores', (req, res) => {
     res.status(400).json({ error: 'Body is not a score snapshot ({scores: {...}})' });
     return;
   }
-  const target = resolveConfined(LISTENING_ROOT, req.params.folder, ['scores.json']);
+  const target = resolveConfined(rootFor(req.params.folder), req.params.folder, ['scores.json']);
   if (!target) {
     res.status(400).json({ error: 'Invalid path' });
     return;

@@ -27,6 +27,20 @@ const SCORES_POST_URL=(location.protocol.startsWith("http")&&LISTENING_FOLDER)?(
 // that GET has landed and been merged in, or an edit made before it resolves
 // gets written as a full snapshot that's missing everything the GET would
 // have added, overwriting the file with less than it had.
+// Opened from disk while HOT-Step is running: hop to the app's copy of this
+// page, which saves scores.json with no dialog. Scores kept in this file://
+// page's browser storage ride along in the URL hash and merge in there.
+// ponytail: assumes the app's default port 3001; a moved port falls back to the file picker.
+const DISK=location.protocol==="file:"?location.pathname.match(/\\/_LISTENING\\/([^/]+)\\/([^/]*)$/):null;
+if(DISK){
+  const url="http://localhost:3001/listening/"+DISK[1]+"/"+(DISK[2]||"index.html");
+  fetch(url,{method:"HEAD"}).then(r=>{if(r.ok)location.replace(url+"#carry="+encodeURIComponent(JSON.stringify(snapshot())));}).catch(()=>{});
+}
+let carried=false;
+if(location.hash.startsWith("#carry=")){
+  try{merge(JSON.parse(decodeURIComponent(location.hash.slice(7))));carried=true;}catch{}
+  history.replaceState(null,"",location.pathname+location.search);
+}
 let loadState=SCORES_POST_URL?"pending":"ready";
 function loadInitial(){
   if(!SCORES_POST_URL)return;
@@ -39,6 +53,7 @@ function loadInitial(){
   .catch(e=>{loadState="failed";say("Could not load existing scores.json: "+e.message+". Not saving until this is resolved — edits are kept in this browser.",true);});
 }
 loadInitial();
+if(carried)setTimeout(()=>persist(),0);
 const idb=()=>new Promise((ok,no)=>{const r=indexedDB.open("scoresheet",1);r.onupgradeneeded=()=>r.result.createObjectStore("handles");r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error);});
 async function idbDo(mode,fn){const db=await idb();return new Promise((ok,no)=>{const tx=db.transaction("handles",mode);const q=fn(tx.objectStore("handles"));tx.oncomplete=()=>ok(q?.result);tx.onerror=()=>no(tx.error);});}
 let writing=false, again=false, timer=null;
@@ -96,6 +111,6 @@ if(SCORES_POST_URL){
   document.getElementById("export").hidden=true;
   say("Scores save automatically to scores.json in this folder.");
 }else if(!window.showSaveFilePicker){document.getElementById("connect").hidden=true;say("This browser can't save to a file: use Export scores when you finish and put scores.json next to this page.");}
-else say("Scores are kept in this browser. Click “Save scores to a file…” and save scores.json next to this page so Claude can read them.");
+else say("Scores are kept in this browser. Start HOT-Step and reload to save scores.json automatically, or click “Save scores to a file…” and save it next to this page.");
 if(!SCORES_POST_URL)idbDo("readonly",s=>s.get(STUDY.id)).then(h=>h&&useHandle(h,false)).catch(()=>{});
 `;

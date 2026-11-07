@@ -32,7 +32,7 @@ test('autosave waits for the initial load before POSTing, and merges it in', asy
     say: () => {},
     el: () => ({}),
     render: () => { renderCalls++; },
-    location: { protocol: 'http:', pathname: '/listening/study-a/index.html' },
+    location: { protocol: 'http:', pathname: '/listening/study-a/index.html', search: '', hash: '' },
     localStorage: { getItem: () => null, setItem: () => {} },
     document: { getElementById: () => ({ set hidden(_v) {}, set textContent(_v) {}, onclick: null }) },
     fetch: async (url, opts) => {
@@ -74,4 +74,42 @@ test('autosave waits for the initial load before POSTing, and merges it in', asy
   assert.deepEqual(last.scores['remote-row'], { v: 1 }, 'remote row must survive the save');
   assert.deepEqual(last.scores['local-row'], { v: 2 }, 'local edit must survive the save');
   assert.ok(renderCalls >= 1, 'render() runs once the merge lands');
+});
+
+// Runs PERSISTENCE_SCRIPT in a minimal page scope; fetch(url, opts) answers every request.
+function runScript({ location, fetch }) {
+  const scope = {
+    STUDY: { id: 'hop-test' }, LS: 'scoresheet:hop-test', scores: {}, picks: {}, fileHandle: null,
+    say: () => {}, el: () => ({}), render: () => {}, location, fetch, window: {},
+    history: { replaceState: (_s, _t, url) => { location.hash = ''; location.replaced = url; } },
+    localStorage: { getItem: () => null, setItem: () => {} },
+    document: { getElementById: () => ({ set hidden(_v) {}, set textContent(_v) {}, onclick: null }) },
+  };
+  scope.merge = (data) => { for (const [k, v] of Object.entries(data?.scores || {})) if (!scope.scores[k]) scope.scores[k] = v; };
+  scope.snapshot = () => ({ study: scope.STUDY.id, scores: scope.scores, picks: scope.picks });
+  new Function(...Object.keys(scope), PERSISTENCE_SCRIPT)(...Object.values(scope));
+  return scope;
+}
+
+test('a page opened from disk hops to the running app, carrying its scores, and the app page saves them', async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let hop = null;
+  const disk = {
+    protocol: 'file:', pathname: '/D:/x/_experiments/_LISTENING/study-a/index.html', search: '', hash: '',
+    replace: (url) => { hop = url; },
+  };
+  const page = runScript({ location: disk, fetch: async (url, opts) => ({ ok: opts?.method === 'HEAD' && url === 'http://localhost:3001/listening/study-a/index.html' }) });
+  page.scores['disk-row'] = { v: 3 };
+  await sleep(10);
+  assert.ok(hop?.startsWith('http://localhost:3001/listening/study-a/index.html#carry='), 'hops to the app copy: ' + hop);
+
+  const posts = [];
+  const served = { protocol: 'http:', pathname: '/listening/study-a/index.html', search: '', hash: hop.slice(hop.indexOf('#')) };
+  runScript({ location: served, fetch: async (url, opts) => {
+    if (opts?.method === 'POST') { posts.push(JSON.parse(opts.body)); return { ok: true, status: 200 }; }
+    return { ok: false, status: 404 };
+  } });
+  assert.equal(served.hash, '', 'carry hash is cleared from the address bar');
+  await sleep(600);
+  assert.deepEqual(posts.at(-1)?.scores['disk-row'], { v: 3 }, 'carried score is saved to scores.json without a click');
 });

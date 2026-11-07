@@ -21,6 +21,8 @@
   --accent:#58A9C6;--accent-ink:#0E1512;--good:#5BC08A;--warn:#E0AE4C;--bad:#E57A68;
   --good-bg:#1D3326;--warn-bg:#352C17;--bad-bg:#3A221E;}
 *{box-sizing:border-box}
+/* Each score click rebuilds the rows; Chrome's scroll anchoring then lost its anchor and jumped the page. */
+html{overflow-anchor:none}
 body{background:var(--ground);color:var(--ink);font-family:var(--body);font-size:14px;line-height:1.45;margin:0}
 .wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:24px 64px}
 header h1{font-family:var(--display);font-weight:700;font-size:34px;letter-spacing:.01em;margin:0;text-wrap:balance}

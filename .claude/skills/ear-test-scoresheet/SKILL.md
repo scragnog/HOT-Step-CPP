@@ -84,21 +84,23 @@ node .claude/skills/ear-test-scoresheet/make-scoresheet.mjs <study-folder>/study
 
 ### 3. Hand it to the user
 
-Served by the app (the default when it is running): give the user
-`http://localhost:3001/listening/<folder>/`, where `<folder>` is the study
-folder directly under `_experiments/_LISTENING/`. The Node server serves the
-folder (`index.html` by default), loads any `scores.json` already there, and
-every change POSTs to `/listening/<folder>/scores`, which writes `scores.json`
-beside the page: no dialog, no download. The route answers loopback requests
-only and refuses foreign origins (`server/src/routes/listening.ts`). Vite on
-:3000 does not proxy `/listening`, so this page opens on :3001.
+The user opens `index.html` from the folder (`file://`); hand over the
+folder path, not a URL. A browser page can't write a file on its own, so:
 
-Opened from disk (`file://`): on first use the user clicks **Save scores to a
-file…** and saves `scores.json` next to the page. After that every change
-writes to it; the browser remembers the file and asks once per session to
-reconnect. Scores are also kept in the browser either way. Browsers without
-file saving (Firefox) get **Export scores** instead: the user exports and drops
-`scores.json` in the folder.
+- HOT-Step running: the page finds the app's copy at
+  `http://localhost:3001/listening/<folder>/` and moves itself there, carrying
+  any scores already kept in the browser. The app serves study folders from the
+  checkout's `_experiments/_LISTENING/` or its parent's, and every change POSTs
+  to `/listening/<folder>/scores`, which writes `scores.json` beside the page:
+  no dialog, no download. The route answers loopback requests only and refuses
+  foreign origins (`server/src/routes/listening.ts`).
+- HOT-Step not running: on first use the user clicks **Save scores to a
+  file…** and saves `scores.json` next to the page. After that every change
+  writes to it; the browser remembers the file and asks once per session to
+  reconnect. Browsers without file saving (Firefox) get **Export scores**
+  instead: the user exports and drops `scores.json` in the folder.
+
+Scores are also kept in the browser either way.
 
 ### 4. Read the results
 
