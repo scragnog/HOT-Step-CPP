@@ -33,8 +33,10 @@ import { refreshYue2PresetsForJointCheckpoint } from './lyricStudioExport.js';
 import { hasActivePipeline } from './pipelineRunner.js';
 import { describeOwner, isMine, owner, ownerAlive, type Owner } from '../instance.js';
 import type { HeartmulaStatusResponse } from '../../contracts/heartmulaTraining.js';
+import { mm3CodesDir } from './mm3Train.js';
 
 export type Yue2BatchStage = 'prepare' | 'captions' | 'cache' | 'codes' | 'sheet' | 'stems' | 'align' | 'train' | 'refine' | 'nar' | 'finish';
+export type BatchFamily = 'yue2' | 'heartmula' | 'mm3';
 export type Yue2BatchStatus = 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
 export type Yue2BatchItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
 
@@ -71,7 +73,7 @@ export interface Yue2BatchItem {
 
 export interface Yue2BatchSummary {
   /** Absent in older snapshots, which are all YuE2. */
-  family?: 'yue2' | 'heartmula';
+  family?: BatchFamily;
   id: string;
   status: Yue2BatchStatus;
   items: Yue2BatchItem[];
@@ -196,7 +198,7 @@ export function getBatch(id: string): Yue2BatchSummary | undefined {
   return live ? toSummary(live) : readSnapshots().find(s => s.id === id);
 }
 
-export function startBatch(input: { datasetIds: string[]; family?: 'yue2' | 'heartmula'; lyricTiming: boolean; clearCache?: boolean; recipe: Record<string, unknown> }): Yue2BatchSummary | { error: string } {
+export function startBatch(input: { datasetIds: string[]; family?: BatchFamily; lyricTiming: boolean; clearCache?: boolean; recipe: Record<string, unknown> }): Yue2BatchSummary | { error: string } {
   if (hasActiveBatch()) return { error: 'A training batch is already running' };
   // A captured YuE2 preparation may not have queued a job yet, so check it too.
   if (hasActivePipeline()) return { error: 'A training pipeline or YuE2 preparation is already running' };
@@ -205,7 +207,7 @@ export function startBatch(input: { datasetIds: string[]; family?: 'yue2' | 'hea
     const ds = repo.getDataset(id);
     if (!ds) return { error: `Dataset not found: ${id}` };
     items.push({ datasetId: ds.id, name: ds.name || ds.slug, status: 'pending', currentStage: null, error: null,
-      stages: (input.family === 'heartmula' ? ['prepare', 'train'] as const : stagesFor(input.lyricTiming, wantsRefine(input.recipe), !!input.recipe.autoCaption)).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
+      stages: stagesOf(input.family, input.lyricTiming, input.recipe).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
   }
   if (!items.length) return { error: 'Select at least one dataset' };
   const recipe: Record<string, unknown> = {};
@@ -230,7 +232,7 @@ export function appendToBatch(id: string, datasetIds: string[]): Yue2BatchSummar
     const ds = repo.getDataset(dsId);
     if (!ds) return { error: `Dataset not found: ${dsId}` };
     state.items.push({ datasetId: ds.id, name: ds.name || ds.slug, status: 'pending', currentStage: null, error: null,
-      stages: (state.family === 'heartmula' ? ['prepare', 'train'] as const : stagesFor(state.lyricTiming, wantsRefine(state.recipe), !!state.recipe.autoCaption)).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
+      stages: stagesOf(state.family, state.lyricTiming, state.recipe).map(stage => ({ stage, jobId: '', status: 'pending', error: null, startedAt: null, finishedAt: null })) });
   }
   persist(state);
   return toSummary(state);
@@ -273,7 +275,7 @@ export function finishScoredLadders(entries: Array<{ datasetId: string; refineRu
   }
   if (!items.length) return { error: 'Nothing to finish' };
   const live = [...batches.values()].find(b => isActive(b.status));
-  if (live?.family === 'heartmula') return { error: 'A HeartMuLa batch is already running' };
+  if (live && live.family !== undefined && live.family !== 'yue2') return { error: `A ${live.family === 'mm3' ? 'MM3' : 'HeartMuLa'} batch is already running` };
   if (live) {
     for (const item of items) if (!live.items.some(i => i.refineRun === item.refineRun)) live.items.push(item);
     persist(live);
@@ -391,6 +393,17 @@ export function cancelBatch(id: string): boolean {
 
 // ── The loop ─────────────────────────────────────────────────────────────
 
+function mm3CodesCount(slug: string, launder: boolean): number {
+  try { return fs.readdirSync(path.join(mm3CodesDir(slug, launder), 'codes')).filter(f => f.endsWith('.codes')).length; } catch { return 0; }
+}
+function mm3ManifestRows(manifest: string | null | undefined): number {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(manifest ?? '', 'utf-8'));
+    const rows: unknown[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.samples) ? parsed.samples : [];
+    return rows.length;
+  } catch { return Infinity; }
+}
+
 function stagesFor(lyricTiming: boolean, refine = true, captions = false): Yue2BatchStage[] {
   // The batch owns the chain: train, then the planner refinement with its
   // rung previews, then the next dataset. The run-level auto-refine hook is
@@ -399,6 +412,29 @@ function stagesFor(lyricTiming: boolean, refine = true, captions = false): Yue2B
   // recipe.autoCaption: tracks with no .yue2.txt are re-captioned from the
   // audio first, so nothing trains on the long ACE caption.
   return [...(captions ? ['captions' as const] : []), ...base, ...(refine ? ['refine' as const] : [])];
+}
+
+/** The stage chain per family. YuE2 builds its own (stagesFor); the others are fixed. */
+const FIXED_STAGES: Partial<Record<BatchFamily, readonly Yue2BatchStage[]>> = {
+  heartmula: ['prepare', 'train'],
+  mm3: ['codes', 'train'],
+};
+function stagesOf(family: BatchFamily | undefined, lyricTiming: boolean, recipe: Record<string, unknown>): readonly Yue2BatchStage[] {
+  return (family && FIXED_STAGES[family]) || stagesFor(lyricTiming, wantsRefine(recipe), !!recipe.autoCaption);
+}
+
+/** Per-family start route for a stage where it differs from STAGE_PATH. */
+const FAMILY_ROUTE: Partial<Record<BatchFamily, Partial<Record<Yue2BatchStage, string>>>> = {
+  heartmula: { train: 'heartmula-train' },
+  mm3: { codes: 'mm3-codes', train: 'mm3-train-lm' },
+};
+
+/** Which caches `clearCache` removes. Each family clears only its own: the
+ *  others belong to other backends. */
+function cacheScope(family: BatchFamily | undefined): { scope: { target?: 'heartmula' }; owns: (name: string) => boolean } {
+  if (family === 'heartmula') return { scope: { target: 'heartmula' }, owns: () => true };
+  if (family === 'mm3') return { scope: {}, owns: name => name === 'mm3-codes' || name === 'mm3-codes-laundered' };
+  return { scope: {}, owns: name => name.startsWith('yue2-') };
 }
 
 const STAGE_PATH: Record<Yue2BatchStage, string> = {
@@ -441,8 +477,9 @@ async function runItem(state: BatchState, item: Yue2BatchItem): Promise<void> {
       // YuE2 caches only: this dataset's ACE and MM3 caches belong to other backends.
       // The core (latents, codes, lead sheets, prepared set) is kept: stale
       // parts are rebuilt by the stages' own checks, so this clears the stems.
-      for (const cache of listPreparedCaches(ds.slug, ds.sourceDir, state.family === 'heartmula' ? { target: 'heartmula' } : {})) {
-        if (state.family === 'heartmula' || cache.name.startsWith('yue2-')) fs.rmSync(cache.path, { recursive: true, force: false });
+      const { scope, owns } = cacheScope(state.family);
+      for (const cache of listPreparedCaches(ds.slug, ds.sourceDir, scope)) {
+        if (owns(cache.name)) fs.rmSync(cache.path, { recursive: true, force: false });
       }
     } catch (err) {
       item.status = 'failed'; item.error = `Clearing cached data failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -521,6 +558,20 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
       if (run.resumable) return { resumeRun: run.run };
       throw new Error('The interrupted HeartMuLa run has no checkpoint to resume');
     }
+    return state.recipe;
+  }
+  if (state.family === 'mm3') {
+    const ds = repo.getDataset(item.datasetId);
+    if (!ds) throw new Error('Dataset not found');
+    const launder = state.recipe.launder === true;
+    // Codes are done when every manifest row has a .codes file; a dataset that
+    // grew since gets re-encoded. One rank/base for the whole batch: the recipe
+    // is pinned, not re-recommended per dataset.
+    if (stage === 'codes') {
+      const have = mm3CodesCount(ds.slug, launder);
+      return have > 0 && have >= mm3ManifestRows(ds.datasetJsonPath) ? null : { launder };
+    }
+    if (stage !== 'train') throw new Error(`Unsupported MM3 batch stage: ${stage}`);
     return state.recipe;
   }
   if (stage === 'train' && result.resumeJobId) {
@@ -640,7 +691,7 @@ async function runStage(state: BatchState, item: Yue2BatchItem, result: Yue2Batc
 
   let response: Response;
   try {
-    const route = state.family === 'heartmula' && result.stage === 'train' ? 'heartmula-train' : STAGE_PATH[result.stage];
+    const route = FAMILY_ROUTE[state.family ?? 'yue2']?.[result.stage] ?? STAGE_PATH[result.stage];
     response = await fetch(`${self()}/api/training/datasets/${encodeURIComponent(item.datasetId)}/${route}`,
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   } catch (err: any) { finishStage(state, result, 'failed', err?.message || String(err)); return; }

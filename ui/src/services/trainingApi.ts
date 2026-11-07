@@ -3269,19 +3269,24 @@ export type Yue2BatchItemStatus = 'pending' | 'running' | 'done' | 'failed' | 'c
 export interface Yue2BatchStageResult { stage: Yue2BatchStage; jobId: string; status: Yue2BatchItemStatus; error: string | null; startedAt: number | null; finishedAt: number | null }
 export interface Yue2BatchItem { datasetId: string; name: string; status: Yue2BatchItemStatus; currentStage: Yue2BatchStage | null; stages: Yue2BatchStageResult[]; error: string | null; refineRun?: string; pickStep?: number }
 export interface Yue2BatchSummary {
-  family?: 'yue2' | 'heartmula';
+  family?: 'yue2' | 'heartmula' | 'mm3';
   id: string;
   status: 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
   items: Yue2BatchItem[];
   currentDatasetId: string | null;
   lyricTiming: boolean;
-  recipe: Partial<Yue2JointTrainRequest>;
+  recipe: Partial<Yue2JointTrainRequest> & Record<string, unknown>;
   createdAt: number;
   finishedAt: number | null;
   pauseRequested?: boolean;
 }
 export async function startYue2Batch(input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Partial<Yue2JointTrainRequest> }, reqOpts?: TrainingTarget): Promise<Yue2BatchSummary> {
   const data = await request<{ batch: Yue2BatchSummary }>('/yue2-batch', { method: 'POST', ...jsonBody(input) }, reqOpts);
+  return data.batch;
+}
+/** One MM3 recipe (the mm3-train-lm body, minus per-dataset fields) for every dataset, in turn. */
+export async function startMm3Batch(datasetIds: string[], recipe: Mm3TrainLmRequest, reqOpts?: TrainingTarget): Promise<Yue2BatchSummary> {
+  const data = await request<{ batch: Yue2BatchSummary }>('/mm3-batch', { method: 'POST', ...jsonBody({ datasetIds, recipe }) }, reqOpts);
   return data.batch;
 }
 export async function startHeartmulaBatch(datasetIds: string[], recipe: HeartmulaTrainRequest, reqOpts?: TrainingTarget): Promise<Yue2BatchSummary> {

@@ -809,6 +809,19 @@ router.post('/heartmula-batch', (req: Request, res: Response) => {
     res.status(202).json({ batch: result });
   } catch (err: any) { res.status(400).json({ error: err.message }); }
 });
+router.post('/mm3-batch', (req: Request, res: Response) => {
+  try {
+    const b = req.body;
+    if (!b || !Array.isArray(b.datasetIds) || !b.datasetIds.length || b.datasetIds.some((id: unknown) => typeof id !== 'string' || !id)
+      || !b.recipe || typeof b.recipe !== 'object' || Array.isArray(b.recipe)) {
+      res.status(400).json({ error: 'Expected datasetIds and an MM3 training request in recipe' }); return;
+    }
+    // Same body as POST /datasets/:id/mm3-train-lm, which validates it per dataset when each run starts.
+    const result = startYue2Batch({ family: 'mm3', datasetIds: b.datasetIds, lyricTiming: false, clearCache: b.clearCache === true, recipe: b.recipe });
+    if ('error' in result) { res.status(result.error.includes('already running') ? 409 : 400).json({ error: result.error }); return; }
+    res.status(202).json({ batch: result });
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
+});
 router.get('/yue2-batch', (_req: Request, res: Response) => {
   try { res.json({ batches: listYue2Batches() }); } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
 });

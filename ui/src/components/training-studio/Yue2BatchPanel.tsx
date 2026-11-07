@@ -79,7 +79,7 @@ export const Yue2BatchPanel: React.FC = () => {
         <div className="flex items-center gap-2 min-w-0">
           <ListChecks size={15} className="text-amber-500 flex-shrink-0" />
           <span className="text-sm font-semibold text-zinc-900 dark:text-white">
-            {batch.family === 'heartmula' ? t('trainingStudio.heartmula.batchTitle', 'HeartMuLa batch') : t('trainingStudio.yue2.batch.title', 'YuE2 batch')} · {batch.status}
+            {batch.family === 'heartmula' ? t('trainingStudio.heartmula.batchTitle', 'HeartMuLa batch') : batch.family === 'mm3' ? t('trainingStudio.mm3.batchTitle', 'MiniMax-Music3 batch') : t('trainingStudio.yue2.batch.title', 'YuE2 batch')} · {batch.status}
           </span>
           <span className="text-[11px] text-zinc-500">{done}/{batch.items.length} done{failed ? ` · ${failed} failed` : ''}</span>
           {current && current !== selectedDatasetId && (
@@ -102,7 +102,7 @@ export const Yue2BatchPanel: React.FC = () => {
           <button type="button" onClick={() => void cancel(batch.id)} className="flex items-center gap-1 text-red-600 dark:text-red-400 hover:underline"><StopCircle size={12} />{t('common.cancel', 'Cancel')}</button>
         </div>
       </div>
-      {batch.family !== 'heartmula' && Object.keys(recipe).length > 0 && <p className="text-[11px] text-zinc-500">
+      {(!batch.family || batch.family === 'yue2') && Object.keys(recipe).length > 0 && <p className="text-[11px] text-zinc-500">
         {t('trainingStudio.yue2.batch.recipe', 'Recipe')}: {String(recipe.optimizer ?? 'adamw')} · rank {String(recipe.rank ?? 32)}/{String(recipe.alpha ?? 32)}
         {recipe.lr !== undefined ? ` · lr ${recipe.lr}` : ''}{recipe.plannerLrScale !== undefined ? ` · planner ×${recipe.plannerLrScale}` : ''}
         {recipe.stopMode === 'kl' ? ` · until AR KL ${recipe.targetKl}${Number(recipe.narExtraSteps) > 0 ? `, then decoder +${recipe.narExtraSteps}` : ''} (cap ${recipe.steps})` : recipe.stopMode === 'loss' ? ` · until loss ${recipe.targetLoss} (cap ${recipe.steps})` : ` · ${recipe.steps} steps`}
@@ -118,6 +118,7 @@ export const Yue2BatchPanel: React.FC = () => {
               <span className="text-[11px] text-zinc-500 flex-shrink-0">
                 {item.status === 'running' && item.currentStage ? (batch.family === 'heartmula'
                   ? item.currentStage === 'prepare' ? t('trainingStudio.heartmula.prepare', 'Prepare HeartMuLa audio') : t('trainingStudio.heartmula.start', 'Start training')
+                  : batch.family === 'mm3' && item.currentStage === 'train' ? 'LoRA training'
                   : STAGE_LABEL[item.currentStage] ?? item.currentStage) : item.status}
                 {item.status === 'running' && job && job.total > 0 && ` · ${job.done}/${job.total}${job.phase && job.phase !== 'training' && job.phase !== 'train' ? ` (${job.phase})` : ''}`}
               </span>

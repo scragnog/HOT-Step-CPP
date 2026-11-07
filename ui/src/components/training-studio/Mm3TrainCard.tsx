@@ -149,6 +149,10 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
   const { t } = useTranslation();
   const activeJob = useActiveTrainingJob();
   const startMm3TrainLm = useTrainingStore(s => s.startMm3TrainLm);
+  // A batch draft (Train multiple…) turns this card into the recipe editor for N datasets.
+  const batchDraft = useTrainingStore(s => s.yue2BatchDraft);
+  const setBatchDraft = useTrainingStore(s => s.setYue2BatchDraft);
+  const startMm3Batch = useTrainingStore(s => s.startMm3Batch);
   // Which codes cache this run trains on. Off = the standard cache, exactly as
   // every run before the launder gate existed.
   const [trainLaunder, setTrainLaunder] = useState(false);
@@ -361,6 +365,14 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
       }, activePreset === 'custom' ? undefined : activePreset);
       const body = recipe.execution as Mm3TrainLmRequest;
       assertRecipeWorker(recipe);
+      if (batchDraft?.length) {
+        // One recipe for every dataset: rank and base are pinned, not re-recommended per dataset.
+        // The preview song belongs to this dataset, so each run picks its own.
+        const { previewSongId: _song, ...preview } = body.preview ?? {};
+        await startMm3Batch(batchDraft, { ...body, ...(body.preview ? { preview } : {}) });
+        setPhase('train');
+        return;
+      }
       await startMm3TrainLm(body);
     } catch (err) {
       useTrainingStore.setState({ error: err instanceof Error ? err.message : String(err) });
@@ -1416,8 +1428,12 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               className="mt-4 px-4 py-2 rounded-lg text-sm font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 transition-colors flex items-center gap-2"
             >
               <Play size={14} />
-              {t('trainingStudio.mm3.start', 'Start training')}
+              {batchDraft?.length ? t('trainingStudio.mm3.startBatch', 'Start batch') : t('trainingStudio.mm3.start', 'Start training')}
             </button>
+            {batchDraft?.length ? <div className="mt-2 flex items-center gap-3 text-xs text-amber-600 dark:text-amber-400">
+              {t('trainingStudio.mm3.batchSelected', 'Recipe applies to {{count}} datasets, in order.', { count: batchDraft.length })}
+              <button type="button" disabled={busy} onClick={() => setBatchDraft(null)}>{t('common.cancel', 'Cancel')}</button>
+            </div> : null}
           </>
         )}
       </div>

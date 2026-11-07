@@ -443,6 +443,8 @@ interface TrainingState {
   setTrainingWorker(name: string | null): Promise<void>;
   loadYue2Batches(): Promise<void>;
   startYue2Batch(input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Partial<trainingApi.Yue2JointTrainRequest> }): Promise<trainingApi.Yue2BatchSummary>;
+  /** MM3: the same server-side queue, one recipe for every ticked dataset. */
+  startMm3Batch(datasetIds: string[], recipe: trainingApi.Mm3TrainLmRequest): Promise<trainingApi.Yue2BatchSummary>;
   pauseYue2Batch(id: string): Promise<void>;
   resumeYue2Batch(id: string): Promise<void>;
   cancelYue2Batch(id: string): Promise<void>;
@@ -1125,6 +1127,16 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
   startYue2Batch: async (input) => {
     const worker = get().trainingWorker;
     const batch = await writeAndInvalidate(queryClient, () => trainingApi.startYue2Batch(input, { worker }),
+      keysPlan(resourceKey(TD.yue2Batches, { worker })));
+    if (get().trainingWorker === worker) {
+      set({ yue2BatchDraft: null });
+      await get().loadYue2Batches();
+    }
+    return batch;
+  },
+  startMm3Batch: async (datasetIds, recipe) => {
+    const worker = get().trainingWorker;
+    const batch = await writeAndInvalidate(queryClient, () => trainingApi.startMm3Batch(datasetIds, recipe, { worker }),
       keysPlan(resourceKey(TD.yue2Batches, { worker })));
     if (get().trainingWorker === worker) {
       set({ yue2BatchDraft: null });

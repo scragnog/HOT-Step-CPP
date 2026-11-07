@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { Toggle } from '../shared/Toggle';
 
-interface Props { open: boolean; onClose: () => void; family?: 'yue2' | 'heartmula'; onSelect?: (ids: string[]) => void }
+interface Props { open: boolean; onClose: () => void; family?: 'yue2' | 'heartmula' | 'mm3'; onSelect?: (ids: string[]) => void }
 
 export const Yue2AitkBatchWizard: React.FC<Props> = ({ open, onClose, family = 'yue2', onSelect }) => {
   const { t } = useTranslation();

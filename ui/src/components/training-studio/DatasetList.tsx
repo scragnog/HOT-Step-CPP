@@ -40,11 +40,13 @@ export const DatasetList: React.FC = () => {
 
   // "Train multiple…" is YuE2's server-owned batch (yue2BatchRunner.ts:
   // caches, preparation, joint training, refinement per dataset). ACE's bulk
-  // path is the pipeline behind "Import multiple…" and MM3 has none, so the
-  // button appears only when YuE2 is the active backend.
+  // path is the pipeline behind "Import multiple…" and the
+  // button appears only when YuE2 or MM3 (same runner) is the active backend.
   // YuE2's batch actions and done-filter follow the effective target, so an
   // SA3 override does not keep them.
-  const isYue2 = useTrainingTarget().target === 'yue2';
+  const target = useTrainingTarget().target;
+  const isYue2 = target === 'yue2';
+  const batchFamily = target === 'minimax-m3' ? 'mm3' : isYue2 ? 'yue2' : null;
 
   const [wizardOpen, setWizardOpen] = useState(false);
   const [batchWizardOpen, setBatchWizardOpen] = useState(false);
@@ -102,7 +104,7 @@ export const DatasetList: React.FC = () => {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-sm font-bold text-zinc-900 dark:text-white">{t('trainingStudio.list.title')}</h2>
         <div className="flex items-center gap-2 flex-wrap">
-          {isYue2 && (
+          {batchFamily && (
             <button
               onClick={() => setYue2BatchOpen(true)}
               title={t('trainingStudio.yue2.batch.ctaHint',
@@ -226,7 +228,7 @@ export const DatasetList: React.FC = () => {
 
       <NewDatasetWizard open={wizardOpen} onClose={() => setWizardOpen(false)} />
       <BatchImportWizard open={batchWizardOpen} onClose={() => setBatchWizardOpen(false)} />
-      <Yue2AitkBatchWizard open={yue2BatchOpen} onClose={() => setYue2BatchOpen(false)} />
+      <Yue2AitkBatchWizard open={yue2BatchOpen} family={batchFamily ?? 'yue2'} onClose={() => setYue2BatchOpen(false)} />
 
       <ConfirmDialog
         isOpen={!!confirmTarget}
