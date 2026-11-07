@@ -122,6 +122,4 @@ node tools/docs/check-docs.mjs      # exit 1 on drift or broken links
    `node tools/docs/check-docs.mjs --update-ui-baseline`.
 
 `node server/scripts/check-release-prereqs.mjs` runs `check-docs.mjs`, and so does CI
-(`.github/workflows/docs.yml`, on every push to master and every pull request). Claude Code
-also has a Stop hook (`tools/docs/stop-hook.mjs`, set in `.claude/settings.json`) that blocks
-once when code changed with no doc change.
+(`.github/workflows/docs.yml`, on every push to master and every pull request).
