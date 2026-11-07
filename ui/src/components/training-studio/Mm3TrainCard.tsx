@@ -503,7 +503,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               {t('trainingStudio.mm3.missing', 'Missing model files')}: {status?.missingForTrain.join(', ')}
             </span>
           </div>
-        ) : !hasCodes && !hasLaundered ? (
+        ) : !hasCodes && !hasLaundered && !batchDraft?.length ? (   // a batch exports codes itself
           <div className="flex flex-col items-start gap-3">
             <div className="flex items-start gap-2 text-xs text-zinc-500">
               <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />

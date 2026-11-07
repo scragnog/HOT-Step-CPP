@@ -393,15 +393,15 @@ export function cancelBatch(id: string): boolean {
 
 // ── The loop ─────────────────────────────────────────────────────────────
 
-function mm3CodesCount(slug: string, launder: boolean): number {
-  try { return fs.readdirSync(path.join(mm3CodesDir(slug, launder), 'codes')).filter(f => f.endsWith('.codes')).length; } catch { return 0; }
-}
-function mm3ManifestRows(manifest: string | null | undefined): number {
+/** True when every manifest row has its `<id>.codes` file (the trainer silently skips a row without one).
+ *  An unreadable or empty manifest is "not complete", so the codes stage runs and reports the real error. */
+export function mm3CodesComplete(manifest: string | null | undefined, codesInner: string): boolean {
   try {
     const parsed = JSON.parse(fs.readFileSync(manifest ?? '', 'utf-8'));
     const rows: unknown[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.samples) ? parsed.samples : [];
-    return rows.length;
-  } catch { return Infinity; }
+    const ids = rows.map(r => (r as { id?: unknown })?.id);
+    return ids.length > 0 && ids.every(id => typeof id === 'string' && id !== '' && fs.existsSync(path.join(codesInner, `${id}.codes`)));
+  } catch { return false; }
 }
 
 function stagesFor(lyricTiming: boolean, refine = true, captions = false): Yue2BatchStage[] {
@@ -564,13 +564,10 @@ async function stageRequest(state: BatchState, item: Yue2BatchItem, result: Yue2
     const ds = repo.getDataset(item.datasetId);
     if (!ds) throw new Error('Dataset not found');
     const launder = state.recipe.launder === true;
-    // Codes are done when every manifest row has a .codes file; a dataset that
-    // grew since gets re-encoded. One rank/base for the whole batch: the recipe
+    // Codes are done when every current manifest row has its .codes file; a
+    // dataset that grew or swapped tracks since gets re-encoded. One rank/base for the whole batch: the recipe
     // is pinned, not re-recommended per dataset.
-    if (stage === 'codes') {
-      const have = mm3CodesCount(ds.slug, launder);
-      return have > 0 && have >= mm3ManifestRows(ds.datasetJsonPath) ? null : { launder };
-    }
+    if (stage === 'codes') return mm3CodesComplete(ds.datasetJsonPath, path.join(mm3CodesDir(ds.slug, launder), 'codes')) ? null : { launder };
     if (stage !== 'train') throw new Error(`Unsupported MM3 batch stage: ${stage}`);
     return state.recipe;
   }

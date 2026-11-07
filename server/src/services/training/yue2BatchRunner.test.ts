@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { pickedCheckpointError, skipNarFurther } from './yue2BatchRunner.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { mm3CodesComplete, pickedCheckpointError, skipNarFurther } from './yue2BatchRunner.js';
 import type { Yue2AitkRunRecord } from './yue2AitkRuns.js';
 
 function run(over: Partial<Yue2AitkRunRecord>): Pick<Yue2AitkRunRecord, 'options'> {
@@ -37,4 +40,19 @@ test('a captured pick finishes only from a complete checkpoint of that run', () 
   assert.match(pickedCheckpointError(runs, 'ladder', 60)!, /No complete checkpoint at step 60/);
   assert.match(pickedCheckpointError(runs, 'ladder', 80)!, /No checkpoint at step 80/);
   assert.match(pickedCheckpointError(runs, 'gone', 40)!, /not one of this dataset's runs/);
+});
+
+test('MM3 codes are complete only when every current manifest id has its file', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm3-codes-'));
+  try {
+    const manifest = path.join(dir, 'dataset.json');
+    const inner = path.join(dir, 'codes');
+    fs.mkdirSync(inner);
+    fs.writeFileSync(manifest, JSON.stringify({ samples: [{ id: 'kept' }, { id: 'added' }] }));
+    for (const id of ['kept', 'removed']) fs.writeFileSync(path.join(inner, `${id}.codes`), 'x');
+    assert.equal(mm3CodesComplete(manifest, inner), false);   // same count as the manifest, wrong ids
+    fs.writeFileSync(path.join(inner, 'added.codes'), 'x');
+    assert.equal(mm3CodesComplete(manifest, inner), true);
+    assert.equal(mm3CodesComplete(path.join(dir, 'missing.json'), inner), false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
