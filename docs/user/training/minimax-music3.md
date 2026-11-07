@@ -37,18 +37,17 @@ Pick a recipe on the Recipe row. All three train each track as a whole song and 
 
 | Recipe | Steps | Time per album on a 32 GB card | Status |
 |---|---|---|---|
-| Fast | 300 | 30 to 60 minutes | Heard: about half of renders ended naturally across three albums. |
-| Balanced (default) | 600 | 1 to 2 hours | Fast at twice the depth. Not yet judged by ear. |
-| Thorough | 900 | 1.5 to 3 hours | Whether the extra steps buy anything is not yet measured. |
+| Fast (default) | 300 | 15 to 60 minutes | Heard: the best-scored recipe in a blind test of 14 settings on one album, and about half of renders ended naturally across three albums. |
+| Balanced | 600 | 30 minutes to 2 hours | Fast at twice the depth. Not yet judged by ear. |
+| Thorough | 900 | 45 minutes to 3 hours | Whether the extra steps buy anything is not yet measured. |
 
-The form opens with 500 steps, which the Recipe row shows as Custom. Click Balanced to get the 600-step recipe.
-<!-- TODO(verify): MM3_LM_DEFAULTS.steps is 500 while the Balanced preset is 600, so the card opens on Custom. -->
+The form opens on Fast. Times are at the default Fastest precision; the long end is a long album at Full precision.
 
 The rest of the recipe is shared:
 
 | Setting | Default | Notes |
 |---|---|---|
-| Adapter method | HOT-PiZZA, rank 128, alpha 128 | PiSSA with principal-subspace dropout. It won a blind test against plain LoRA, LoKr, DoRA and corrected PiSSA on one album. |
+| Adapter method | HOT-PiZZA, rank 128, alpha 128 | PiSSA with principal-subspace dropout. It won two blind tests against plain LoRA, LoKr, DoRA and plain PiSSA, the second under whole-song training. Keep alpha equal to rank: rank 16 with alpha 128 trains every update 8 times too hard and gave dull, boxy, "through a tube" renders. On a smaller card the form lowers rank and alpha together. |
 | Optimizer | AdamW, learning rate 8e-5 | |
 | Base precision | q8_0 | |
 | Flash attention | On | What makes whole-song training fit. |
@@ -66,11 +65,11 @@ The rest of the recipe is shared:
 When to move off them:
 
 - Leave the learning rate alone. Doubling it to shorten the run scored lower every time it was tried, and one such run planned a song with no vocals.
-- Leave the acoustic loss on. Turning it off was the lowest-scored variant tested.
+- Leave the acoustic loss on. Turning it off was the lowest-scored variant in two tests, and it is one cause of the dull, boxy sound.
 - Do not pick Muon. Its learning-rate scale was tuned on a different model, and on MM3 it produced silent renders at rank 64. Prodigy is selectable; it tied AdamW by ear and uses about 2.3 GB more memory.
 - Stop on step count. HOT-PiZZA's training loss reads high by construction, so a target-loss stop would run to the cap anyway. Target loss is there for plain LoRA runs, where 1.0 on the training mean was the measured stopping point.
 - Rank 64 is not a free saving. In an earlier sweep rank 64 turned lyrics into gibberish while keeping the likeness; rank 128 was enough to avoid it.
-- LoKr, DoRA, HiRA, LoHa, HRA, PiSSA, the artist token and trainable prefix columns are selectable but have not been heard on MM3.
+- LoKr, DoRA and plain PiSSA were heard and scored below HOT-PiZZA. LoKr also trains about 3.5 times slower. HiRA, LoHa, HRA, the artist token and trainable prefix columns are selectable but have not been heard on MM3.
 
 <!-- TODO(verify): the Optimizer hint in the MM3 Advanced drawer still says Muon is the default; the shipped default is AdamW. -->
 

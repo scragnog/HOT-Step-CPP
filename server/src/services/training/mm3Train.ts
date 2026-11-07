@@ -365,7 +365,11 @@ export function availableMm3Bases(rank: number = MM3_LM_DEFAULTS.rank,
         lossDelta: facts.lossDelta,
         quality:   facts.quality,
         extraMb,
-        peakMb:    estimateMm3PeakMb(bytes, rank, maxFrames, extraMb),
+        // At the recipe's own optimizer and attention. Exact attention's
+        // quadratic term put q8_0 at ~65 GB for a whole song, so on a 32 GB
+        // card nothing "fitted" and the recommender fell to rank 16.
+        peakMb:    estimateMm3PeakMb(bytes, rank, maxFrames, extraMb, MM3_LM_DEFAULTS.optimizer, 0,
+                                     MM3_LM_DEFAULTS.attnBackend),
       };
     })
     .filter(b => b.bytes > 0)
@@ -460,7 +464,8 @@ export function recommendMm3Config(gpuTotalMb: number,
     const stageMb = MM3_LM_DEFAULTS.trainPrecision !== 'full' && base.id !== 'bf16'
       ? MM3_VRAM_MODEL.bf16StageMb : 0;
     for (const rank of rankLadder()) {
-      const peak = estimateMm3PeakMb(base.bytes, rank, maxFrames, base.extraMb) + stageMb;
+      const peak = estimateMm3PeakMb(base.bytes, rank, maxFrames, base.extraMb, MM3_LM_DEFAULTS.optimizer, 0,
+                                     MM3_LM_DEFAULTS.attnBackend) + stageMb;
       if (peak + headroom <= gpuTotalMb) {
         return { base: base.id, rank, overBudget: false };
       }
@@ -533,7 +538,7 @@ export const MM3_LM_DEFAULTS = {
   // copy, are on MM3LmTrainArgs in engine/src/train/mm3-lm-train-run.h.
   rank: 128,
   alpha: 128,
-  lr: 8e-5,     // the default (Balanced) recipe; Fast's 1.6e-4 is experimental — see MM3_LM_PRESETS
+  lr: 8e-5,     // every preset's LR; 2x broke vocals (2026-09-07)
   /** 1200, down from 2500, because a step is no longer the same size. At the
    *  128-frame crop a step supervised 5 seconds; at 4272 it supervises 171, so
    *  2500 steps went from 320k supervised frames to 10.7M — 312 epochs over 8
@@ -559,7 +564,11 @@ export const MM3_LM_DEFAULTS = {
    *  250 on 2026-08-26 to give a target-loss run room to reach one; a 250-step
    *  cap would have ended almost every run before the target could bind, which
    *  is the same as not having a target. */
-  steps: 500,   // the default (Balanced) recipe; Fast's 300 is experimental — see MM3_LM_PRESETS
+  /** 300 since 2026-11-07 (Rob): the Fast preset. In the HOTSTEP-1033 blind
+   *  matrix (one album, 14 arms at 300 steps) the recipe's three arms scored
+   *  4.22-4.72 of 5 against 3.1-3.9 for every other method and setting, and
+   *  its step-300 checkpoint beat step 100. 600 and 900 are not heard. */
+  steps: 300,
   /** ── Stopping strategy ──────────────────────────────────────────────────
    *
    *  'steps', 500, since 2026-09-06 (Rob): the default method is HOT-PiZZA
@@ -1046,11 +1055,13 @@ export const MM3_LM_DEFAULTS = {
  *             history behind the highest scores recorded here (72 and 70.5
  *             of 90); the gain over Balanced sat inside the listening noise.
  *
- *  MM3_LM_DEFAULTS carries the Balanced values, so an empty request and the
+ *  (The three descriptions above predate the whole-song presets below.)
+ *  MM3_LM_DEFAULTS carries the Fast values since 2026-11-07, so an empty request and the
  *  form's initial state are the same recipe. The route applies a named
  *  preset UNDER the request's own fields (applyMm3Preset). */
 export type Mm3PresetName = 'fast' | 'balanced' | 'thorough';
-export const MM3_LM_DEFAULT_PRESET: Mm3PresetName = 'balanced';
+// Fast since 2026-11-07: the depth the HOTSTEP-1033 matrix heard and scored best.
+export const MM3_LM_DEFAULT_PRESET: Mm3PresetName = 'fast';
 export const MM3_LM_PRESETS: Record<Mm3PresetName, {
   steps: number; lr: number; maxFrames: number; prefixFrames: number; prefixChunk: number;
 }> = {
@@ -1070,7 +1081,7 @@ export function isMm3PresetName(v: unknown): v is Mm3PresetName {
   return v === 'fast' || v === 'balanced' || v === 'thorough';
 }
 /** Defaults with a named preset laid over them; an unknown or absent name
- *  returns the defaults untouched (which are the Balanced preset). */
+ *  returns the defaults untouched (which are the Fast preset). */
 type Mm3PresetFields = (typeof MM3_LM_PRESETS)[Mm3PresetName];
 /** The defaults with the preset-governed fields widened to plain numbers. */
 export type Mm3EffectiveDefaults = Omit<typeof MM3_LM_DEFAULTS, keyof Mm3PresetFields> & Mm3PresetFields;

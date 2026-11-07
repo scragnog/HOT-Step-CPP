@@ -49,7 +49,7 @@ writing; the ledger `docs/plans/mm3-endings-checklist.md` has the tables.
 --crop-mode structured --crop-start-frac 0.2 --crop-end-frac 0.15   # only matters for a track longer than the window (none, with the drop)
 --crop-start-tiles 1 --crop-anchor song
 --rank-dropout 0.1                                             # the mask IS the method under --hot-pizza; never 0
---steps 600 --save-every 100                                   # Balanced = 600, Fast = 300, Thorough = 900 (2026-09-11); stop on STEPS
+--steps 300 --save-every 100                                   # Fast = 300 is the default since 2026-11-07; Balanced 600, Thorough 900; stop on STEPS
 --depth-loss-weight 1.0 --depth-loss-frames 128
 # captions: per-track <stem>.mm3.txt from MOSS/Gemini, and ONLY those. No --caption-file:
 # the shared caption killed endings (0/6 vs 4/6) and was removed on 2026-09-09.
@@ -58,7 +58,7 @@ writing; the ledger `docs/plans/mm3-endings-checklist.md` has the tables.
 --holdout 0.15 --eval-every 250 --eval-crop 750
 ```
 
-The block mirrors `MM3_LM_DEFAULTS` with the Balanced preset laid over it
+The block mirrors `MM3_LM_DEFAULTS` (the Fast preset since 2026-11-07)
 (`server/src/services/training/mm3Train.ts`); the server also passes
 `--depth mm3-depth-f16.gguf`, `--grad-accum 1`, `--seed 42` and the
 `trainPrecision` flags: `fastest` by default since 2026-11-06 (`--weights
@@ -102,9 +102,12 @@ fields, so `{preset:'thorough'}` alone trains Thorough):**
 
 | preset | steps | lr | window | history | min/album (5090) | record |
 |---|---|---|---|---|---|---|
-| Fast | 300 | 8e-5 | whole song (9000) | none | 30-60 | the 2026-09-10 overnight arm: album B 7/12, album S 7/12, album P 3/12 at 300 s and 6/12 at 360 s |
-| **Balanced** (default) | 600 | 8e-5 | whole song (9000) | none | 60-120 | Fast at twice the depth; the maintainer's pick for the default (2026-09-11), not yet heard |
+| **Fast** (default since 2026-11-07) | 300 | 8e-5 | whole song (9000) | none | 15-60 | the 2026-09-10 overnight arm: album B 7/12, album S 7/12, album P 3/12 at 300 s and 6/12 at 360 s |
+| Balanced | 600 | 8e-5 | whole song (9000) | none | 60-120 | Fast at twice the depth; the maintainer's pick for the default (2026-09-11), not yet heard |
 | Thorough | 900 | 8e-5 | whole song (9000) | none | 90-180 | three times Fast's depth; not yet heard |
+
+Minutes are at Full precision. At Fastest (the app default) the 300-step
+whole-song arm took 14 min on a 12-track album with a 238 s longest track.
 
 (Superseded 2026-09-11: Fast 300 / Balanced 500 / Thorough 1000 at crop 750
 with a 2048- or 4096-frame history. That regime's record — Fast's Simlish
@@ -112,8 +115,28 @@ vocals of 2026-09-07, Balanced's 4/6 on album B — is in this file's git
 history.) All three share flash, AdamW, HOT-PiZZA r128, f16 factors and the
 acoustic loss; tracks longer than the window are left out (`longTracks:
 'exclude'`, engine `--drop-over-frames`). `MM3_LM_DEFAULTS` carries the
-Balanced values, so an empty API body trains Balanced. Prior preservation is
+Fast values, so an empty API body trains Fast. Prior preservation is
 OFF unless the request names a corpus (since 2026-09-09).
+
+**2026-11-07, the whole-song method matrix (HOTSTEP-1033).** One album, 14
+arms at 300 steps, three prompts each, scored blind on six criteria (1-5).
+The recipe's three arms (Fastest, Full precision, a second seed) took the top
+three places at 4.22-4.72 overall. Every other arm scored 3.1-3.9: plain LoRA,
+DoRA, LoKr (AdamW and Prodigy), plain PiSSA, LoRA at half the LR, HOT-PiZZA
+without the acoustic loss, and rank 16. Fastest vs Full sat inside the noise,
+and Fastest scored the best Audio of the night. LoRA r128 peaks early (step
+100 above step 300); HOT-PiZZA improves from 100 to 300.
+
+**The "through a tube" adapters were rank 16 with alpha 128 (alpha/rank 8),
+often with the acoustic loss off.** The in-app form took rank from
+`recommendMm3Config` and alpha from the defaults, and the recommender sized
+whole-song runs with exact attention's quadratic term (q8_0 at about 65 GB).
+It found nothing that fitted on a 32 GB card and fell to rank 16. Fixed
+2026-11-07: the recommender and `availableMm3Bases` size at the recipe's
+attention and optimizer, and the form scales alpha with a recommended rank.
+Rank 16 at alpha 16 sounds clean but generic (quality 4.4, likeness 2.8).
+App runs from before the fix are likely r16/α128; the `HOT-PiZZA-LoRA ...
+rank N alpha M` line in `train-console.log` says which. Retrain those.
 
 **The maintainer, 2026-08-25, on the LoKr configuration this replaced: "the closest we've ever
 gotten to artist replication."** Crop 750 = 30 s = ~3 s/step, set by ear after

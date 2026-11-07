@@ -199,7 +199,11 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     // default 256 nothing fits below ~24 GB, so a 16 GB card would open on a
     // red 'will not fit' form with the fix two fields away and unstated.
     rank: status.recommended?.rank ?? status.defaults.rank ?? 256,
-    alpha: status.defaults.alpha ?? 256,
+    // Alpha keeps the recipe's alpha/rank ratio when the recommender lowers the
+    // rank. A fixed alpha 128 over a recommended rank 16 trained every update
+    // 8x too hard: the "tube" adapters of HOTSTEP-1033.
+    alpha: Math.round((status.defaults.alpha ?? 256)
+      * (status.recommended?.rank ?? status.defaults.rank ?? 256) / (status.defaults.rank ?? 256)),
     lr: status.defaults.lr ?? 8e-5,
     maxFrames: status.defaults.maxFrames ?? 1500,
     cropMode: (status.defaults.cropMode as 'random' | 'beginning' | 'structured') ?? 'structured',
@@ -434,7 +438,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
   // whichever preset the four governing fields currently equal, and shows
   // Custom otherwise. Editing a field therefore leaves the preset row honest
   // without a second piece of state that could disagree with the form.
-  const PRESET_ORDER: Mm3PresetName[] = ['balanced', 'thorough', 'fast'];   // default first; Fast is experimental
+  const PRESET_ORDER: Mm3PresetName[] = ['fast', 'balanced', 'thorough'];   // default first (Fast since 2026-11-07)
   const presets = status?.presets;
   const activePreset: Mm3PresetName | 'custom' = (() => {
     if (!presets || !form) return 'custom';
