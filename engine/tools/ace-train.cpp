@@ -3493,7 +3493,7 @@ static int cmd_mm3_codes(int argc, char ** argv) {
     }
 
     const std::string tmp_wav = out_dir + "/_mm3_codes_tmp.wav";
-    size_t            idx = 0, ok_n = 0, fail_n = 0;
+    size_t            idx = 0, ok_n = 0, fail_n = 0, missing_n = 0;
     const size_t      n_samples = yyjson_arr_size(samples);
 
     yyjson_val *    s2;
@@ -3502,10 +3502,17 @@ static int cmd_mm3_codes(int argc, char ** argv) {
         idx++;
         const std::string id       = jstr(s2, "id");
         const std::string filename = jstr(s2, "filename");
-        const std::string audio    = jstr(s2, "audio_path");
+        const std::string audio    = pm_resolve_audio(jstr(s2, "audio_path"), ds_path);
         if (audio.empty()) {
             fprintf(stderr, "[mm3-codes] %zu/%zu SKIP %s: no audio_path\n", idx, n_samples, filename.c_str());
             fail_n++;
+            continue;
+        }
+        if (!pm_file_exists(audio)) {
+            fprintf(stderr, "[mm3-codes] %zu/%zu FAIL %s: audio file not found: %s\n", idx, n_samples,
+                    filename.c_str(), audio.c_str());
+            fail_n++;
+            missing_n++;
             continue;
         }
 
@@ -3711,7 +3718,12 @@ static int cmd_mm3_codes(int argc, char ** argv) {
     mm3_enc_free(&enc);
     mm3_rvq_free(&rvq);
     fprintf(stderr, "[mm3-codes] done: %zu ok, %zu failed\n", ok_n, fail_n);
-    if (ok_n == 0 && fail_n > 0) {
+    if (ok_n == 0 && missing_n == fail_n && fail_n > 0) {
+        // The job card shows only this line, so say why rather than send the
+        // user digging through train-console.log.
+        jl("{\"type\":\"fatal\",\"message\":\"every track failed to encode: no audio file found at the "
+           "paths in dataset.json or beside it. Rebuild the dataset if its audio moved.\"}");
+    } else if (ok_n == 0 && fail_n > 0) {
         jl("{\"type\":\"fatal\",\"message\":\"every track failed to encode\"}");
     } else {
         jl("{\"type\":\"done\",\"ok\":%zu,\"failed\":%zu}", ok_n, fail_n);
@@ -3840,7 +3852,7 @@ static int cmd_mm3_preprocess(int argc, char ** argv) {
         idx++;
         const std::string id       = jstr(s, "id");
         const std::string filename = jstr(s, "filename");
-        const std::string audio    = jstr(s, "audio_path");
+        const std::string audio    = pm_resolve_audio(jstr(s, "audio_path"), ds_path);
         if (audio.empty()) {
             fprintf(stderr, "[mm3-preprocess] %zu/%zu SKIP %s: no audio_path\n", idx, n_samples, filename.c_str());
             fail_n++;
@@ -6274,7 +6286,7 @@ static int cmd_mm3_launder(int argc, char ** argv) {
         idx++;
         const std::string id      = jstr(s2, "id");
         const std::string fname   = jstr(s2, "filename");
-        const std::string audio   = jstr(s2, "audio_path");
+        const std::string audio   = pm_resolve_audio(jstr(s2, "audio_path"), ds_path);
         const std::string caption = jstr(s2, "caption");
         const std::string stem    = id.empty() ? std::to_string(idx) : id;
         const std::string cp      = out_dir + "/codes/" + stem + ".codes";
