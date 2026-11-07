@@ -31,6 +31,7 @@ import {
 } from './mm3Train.js';
 import { mm3AdapterRoot, writeMm3RunManifest } from './mm3Runs.js';
 import { pointMm3PresetsAt } from './lyricStudioExport.js';
+import type { TrainingPreview } from './types.js';
 import {
   emitJob, emitProgress, finishJob, isCancelled, killJobChild, pushEvent, type TrainingJob,
   trainerLine,
@@ -492,9 +493,10 @@ async function renderPreviewSet(
   step: number,
   totalSteps: number,
   loss?: number,
-): Promise<void> {
+): Promise<TrainingPreview | undefined> {
+  let last: TrainingPreview | undefined;
   for (const spec of plan.specs) {
-    if (isCancelled(job)) return;
+    if (isCancelled(job)) return last;
     const label = adapterPath ? `step ${step}` : 'base model';
     try {
       job.phase = 'preview';
@@ -505,6 +507,7 @@ async function renderPreviewSet(
         scaleMlp: plan.scaleMlp, scaleAttn: plan.scaleAttn,
       });
       pushEvent(job, { type: 'preview', run: runName, preview });
+      last = preview;
       log(job, 'info',
         `Preview (${spec.kind}, ${label}): ${plan.seconds}s rendered in `
         + `${(preview.ms / 1000).toFixed(1)}s — ${preview.file}`);
@@ -513,6 +516,7 @@ async function renderPreviewSet(
         `Preview (${spec.kind}, ${label}) failed: ${err?.message || String(err)} — training continues.`);
     }
   }
+  return last;
 }
 
 /** Point the dataset's album presets at the run's final checkpoint, unless the
@@ -645,6 +649,11 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
         `Continuing this run from step ${lastStep} to ${opts.steps} — weights, optimizer momentum, `
         + 'the shuffled pass and the crop RNG all come back from the saved state.');
     }
+    // The pause being timed: from the trainer's stop request to the first step of
+    // the next segment. That is what a checkpoint preview really costs, so the
+    // UI's ETA can use it (its last take then gets a second frame with pauseMs).
+    let pauseT0 = 0;
+    let pausedTake: TrainingPreview | undefined;
     for (;;) {
       if (isCancelled(job)) return;
 
@@ -658,6 +667,7 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
       const askPause = () => {
         if (pauseAsked) return;
         pauseAsked = true;
+        pauseT0 = Date.now();
         requestPause(opts.outDir);
       };
       if (plan && plan.everyMinutes > 0) {
@@ -666,6 +676,10 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
 
       const onStep = (step: number, _loss: number | undefined) => {
         lastStep = Math.max(lastStep, step);
+        if (pausedTake) {
+          pushEvent(job, { type: 'preview', run: runName, preview: { ...pausedTake, pauseMs: Date.now() - pauseT0 } });
+          pausedTake = undefined;
+        }
         if (!plan) return;
         // Never pause on the last step: the run is about to end and export a
         // checkpoint anyway, and the final preview is rendered after `done`
@@ -697,8 +711,8 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
         // would otherwise show a stalled bar while the render happens.
         log(job, 'info', `Paused at step ${st.pausedAt}/${opts.steps} to render a preview…`);
         clearPause(opts.outDir);
-        await renderPreviewSet(job, plan, runName, st.pauseCkpt || '', st.pausedAt, opts.steps,
-                               st.lastLoss);
+        pausedTake = await renderPreviewSet(job, plan, runName, st.pauseCkpt || '', st.pausedAt, opts.steps,
+                                            st.lastLoss);
         if (isCancelled(job)) return;
         resumeFrom = st.pauseState;
         lastStep = st.pausedAt;

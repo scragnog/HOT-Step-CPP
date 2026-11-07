@@ -243,6 +243,10 @@ export interface TrainingPreview {
   bytes: number;
   /** Wall time of the render itself. */
   ms: number;
+  /** Wall time the training pause around this take cost: trainer exit, engine
+   *  restart, render, reload up to the next step. Set on the last take of a
+   *  checkpoint, by a second frame once training has resumed. */
+  pauseMs?: number;
   ts: number;
 }
 

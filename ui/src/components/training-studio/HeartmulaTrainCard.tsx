@@ -5,7 +5,8 @@ import type { HeartmulaPreviewListResponse, HeartmulaPreviewSettings, HeartmulaR
 import { HEARTMULA_RECIPE_LEGACY, heartmulaDefaultSteps } from '../../../../server/src/contracts/heartmulaTraining';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { TrainingChart } from './TrainingChart';
-import { formatDuration, heartmulaEta } from './heartmulaEta';
+import { trainingRunEta } from './trainingRunEta';
+import { TrainingEtaLine } from './TrainingEtaLine';
 import { PreviewField, TrainingPreviewSettings, TrainingRunPicker, TrainingPresetChoice } from './TrainingPreviewPanel';
 import { TrainingBatchCard, TrainingAllStagesCard, TrainingRunPanel } from './Yue2StageCard';
 import { ParamLabel } from '../shared/ParamLabel';
@@ -94,7 +95,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, previews: ta
   const jobLog = useTrainingStore(s => s.jobLog);
   // Time left: steps at the mean step time plus the previews still to come at their measured cost.
   const runLive = !!run && (run.state === 'running' || run.state === 'previewing' || run.state === 'checkpointing');
-  const eta = runLive && run ? heartmulaEta({ step: run.step, totalSteps: run.totalSteps, msPerStep: run.msPerStep,
+  const eta = runLive && run ? trainingRunEta({ step: run.step, totalSteps: run.totalSteps, msPerStep: run.msPerStep,
     everySteps: takes?.settings.everySteps ?? 0, previews: takes?.previews ?? [] }) : null;
   const job = useActiveTrainingJob();
   const ownLog = job?.kind === 'heartmula-train' && job.datasetId === datasetId ? jobLog : [];
@@ -339,13 +340,7 @@ export function HeartmulaTrainCard({ datasetId, status, slug, busy, previews: ta
         <span>{t('trainingStudio.heartmula.loss', 'Loss')}: {run.loss?.toFixed(4) ?? '—'}</span>
         <span>{t('trainingStudio.heartmula.msPerStep', 'ms/step')}: {run.msPerStep?.toFixed(1) ?? '—'}</span>
         <span>{t('trainingStudio.heartmula.vram', 'Peak VRAM, MiB')}: {run.peakVramMiB?.toFixed(0) ?? '—'}</span>
-        {eta && <span title={eta.previewsLeft
-          ? t('trainingStudio.heartmula.etaPreviewsInfo', 'Includes {{n}} preview(s) at {{each}} each, measured from this run.', { n: eta.previewsLeft, each: eta.previewMs ? formatDuration(eta.previewMs) : '?' })
-          : undefined}>
-          {t('trainingStudio.heartmula.eta', 'ETA')}: {formatDuration(eta.ms)}
-          {eta.previewsLeft > 0 && ` (${t('trainingStudio.heartmula.etaPreviews', 'incl. {{n}} preview(s)', { n: eta.previewsLeft })})`}
-          {' · '}{t('trainingStudio.heartmula.etaDone', 'done ≈ {{time}}', { time: new Date(Date.now() + eta.ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}
-        </span>}
+        {eta && <TrainingEtaLine eta={eta} />}
       </div>
     </div>}
     {ownLog.length > 0 && <details className="mt-2">

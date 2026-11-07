@@ -40,6 +40,8 @@ import { TrainingRunPanel } from './Yue2StageCard';
 import { Yue2LadderReview } from './Yue2LadderReview';
 import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 import { Yue2SplitChart } from './Yue2SplitChart';
+import { trainingRunEta } from './trainingRunEta';
+import { TrainingEtaLine } from './TrainingEtaLine';
 import { reduceYue2Metric, type Yue2Point } from './yue2ChartData';
 import { attachHoldout, captureJointOverrides, submitJointStart } from './yue2JointCommand';
 import { YUE2_JOINT_PRESETS_KEY, type Yue2JointPreset } from './yue2JointPresets';
@@ -79,35 +81,44 @@ function klStopReading(kls: number[], mode: 'mean' | 'trend'): { value: number; 
   const slope = sxy / sxx;
   return { value: ym + slope * (n - 1 - xm), slope };
 }
-function jointEta(points: JointStepPoint[], form: Yue2JointTrainRequest): string {
+function jointCapEta(points: JointStepPoint[], form: Yue2JointTrainRequest) {
+  const last = points[points.length - 1];
+  const durations = points.map(p => p.stepMs).filter((ms): ms is number => typeof ms === 'number' && ms > 0).slice(-20);
+  if (!last || !durations.length) return null;
+  // Previews render in parallel with training here, so none are left to add.
+  return trainingRunEta({ step: last.step, totalSteps: form.steps, msPerStep: durations.reduce((s, ms) => s + ms, 0) / durations.length, everySteps: 0, previews: [] });
+}
+/** The stop-mode branches' text; null when the run just stops at its step cap, which the shared ETA line states. */
+function jointEta(points: JointStepPoint[], form: Yue2JointTrainRequest): string | null {
   const last = points[points.length - 1];
   const durations = points.map(p => p.stepMs).filter((ms): ms is number => typeof ms === 'number' && ms > 0).slice(-20);
   if (!last || !durations.length) return '';
   const pace = durations.reduce((sum, ms) => sum + ms, 0) / durations.length;
   const remaining = Math.max(0, form.steps - last.step);
+  const capMs = jointCapEta(points, form)?.ms ?? 0;
   if (form.stopMode === 'kl' && form.targetKl && form.targetKl > 0) {
     const all = points.map(p => p.arKl).filter((v): v is number => typeof v === 'number');
     const reading = klStopReading(all, form.targetKlMode ?? 'mean');
-    if (!reading) return `AR KL warming up · cap ${formatDurationMs(remaining * pace)}`;
+    if (!reading) return `AR KL warming up · cap ${formatDurationMs(capMs)}`;
     const mean = reading.value;
-    if (mean >= form.targetKl) return `KL target reached · cap ${formatDurationMs(remaining * pace)}`;
+    if (mean >= form.targetKl) return `KL target reached · cap ${formatDurationMs(capMs)}`;
     const older = points.slice(-40, -20).map(p => p.arKl).filter((v): v is number => typeof v === 'number');
     const rate = reading.slope ?? (older.length === 20 ? (mean - older.reduce((s, v) => s + v, 0) / 20) / 20 : 0);
-    if (!(rate > 0)) return `AR KL ${mean.toFixed(2)} of ${form.targetKl} · cap ${formatDurationMs(remaining * pace)}`;
+    if (!(rate > 0)) return `AR KL ${mean.toFixed(2)} of ${form.targetKl} · cap ${formatDurationMs(capMs)}`;
     const stepsToTarget = (form.targetKl - mean) / rate;
     return stepsToTarget > remaining
-      ? `KL ${mean.toFixed(2)} · target unlikely before cap · cap ${formatDurationMs(remaining * pace)}`
+      ? `KL ${mean.toFixed(2)} · target unlikely before cap · cap ${formatDurationMs(capMs)}`
       : `KL ${mean.toFixed(2)} · target ETA ${formatDurationMs(Math.max(1, stepsToTarget) * pace)}`;
   }
   if (form.stopMode !== 'loss' || !(form.targetLoss && form.targetLoss > 0))
-    return `cap ETA ${formatDurationMs(remaining * pace)}`;
+    return null;
   const current = last.ma20;
   const rate = jointLossRate(points);
-  if (rate === null || current === undefined) return `target ETA estimating · cap ${formatDurationMs(remaining * pace)}`;
-  if (current <= form.targetLoss) return `target reached · cap ${formatDurationMs(remaining * pace)}`;
-  if (!(rate > 0)) return `target trend stalled · cap ${formatDurationMs(remaining * pace)}`;
+  if (rate === null || current === undefined) return `target ETA estimating · cap ${formatDurationMs(capMs)}`;
+  if (current <= form.targetLoss) return `target reached · cap ${formatDurationMs(capMs)}`;
+  if (!(rate > 0)) return `target trend stalled · cap ${formatDurationMs(capMs)}`;
   const stepsToTarget = (current - form.targetLoss) / rate;
-  if (stepsToTarget > remaining) return `target unlikely before cap · cap ${formatDurationMs(remaining * pace)}`;
+  if (stepsToTarget > remaining) return `target unlikely before cap · cap ${formatDurationMs(capMs)}`;
   return `target ETA ${formatDurationMs(Math.max(1, stepsToTarget) * pace)}`;
 }
 /** A named snapshot of the training settings. Per-run and per-machine values
@@ -1927,7 +1938,7 @@ export const Yue2AitkTrainCard: React.FC<{ datasetId: string; legacyManifest?: s
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] tabular-nums text-zinc-500">
             {jointLossRate(stepHistory) !== null && <span>loss rate {jointLossRate(stepHistory)!.toFixed(5)}/step</span>}
             {stepHistory.at(-1)?.elapsedMs !== undefined && <span>elapsed {formatDurationMs(stepHistory.at(-1)!.elapsedMs!)}</span>}
-            {job?.status === 'running' && <span>{jointEta(stepHistory, form)}</span>}
+            {job?.status === 'running' && (jointEta(stepHistory, form) !== null ? <span>{jointEta(stepHistory, form)}</span> : jointCapEta(stepHistory, form) && <TrainingEtaLine eta={jointCapEta(stepHistory, form)!} />)}
           </div>
         </div>
       )}

@@ -7,7 +7,8 @@ import { subscribeEventSource } from '../../services/sharedEventSource';
 import { useTrainingStore } from '../../stores/trainingStore';
 
 interface Props {
-  mode?: 'joint' | 'ar' | 'nar';
+  /** 'mm3' is one planner trained alone: a single chart with the AR-only series. */
+  mode?: 'joint' | 'ar' | 'nar' | 'mm3';
   points?: Yue2Point[];
   job?: TrainingJobSummary | null;
   options?: Record<string, unknown>;
@@ -15,9 +16,11 @@ interface Props {
   evals?: Array<{ ep: number; loss: number }>;
   totalSteps?: number;
   vramMb?: number;
+  /** Loss the run stops on (mm3 only); 0 or absent draws no line. */
+  target?: number;
 }
 
-export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, options, milestones = [], evals = [], totalSteps = 0, vramMb }) => {
+export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, options, milestones = [], evals = [], totalSteps = 0, vramMb, target = 0 }) => {
   const { t } = useTranslation();
   const [stream, setStream] = useState<Yue2Point[]>([]);
   const [streamVram, setStreamVram] = useState<number>();
@@ -58,11 +61,11 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
       klStop: options && p.arKl !== undefined ? klReading(kls, klMode, window, partial) : undefined };
   });
   const labels = {
-    loss: t(mode === 'ar' ? 'trainingStudio.split.ce' : 'trainingStudio.split.decoderLoss', mode === 'ar' ? 'CE' : 'Decoder loss'),
+    loss: mode === 'mm3' ? t('trainingStudio.split.loss', 'Loss') : t(mode === 'ar' ? 'trainingStudio.split.ce' : 'trainingStudio.split.decoderLoss', mode === 'ar' ? 'CE' : 'Decoder loss'),
     arCe: t('trainingStudio.split.arCe', 'AR CE'), cursorCe: t('trainingStudio.split.cursorCe', 'Cursor CE'),
     arKl: t('trainingStudio.split.kl', 'KL vs base'), narMse: t('trainingStudio.split.decoderLoss', 'Decoder loss'),
     narRecon: t('trainingStudio.split.recon', 'Reconstruction'), narDrift: t('trainingStudio.split.drift', 'Drift'),
-    eval: t('trainingStudio.split.grammar', 'Token-grammar check'),
+    eval: mode === 'mm3' ? t('trainingStudio.split.heldOut', 'Held-out loss') : t('trainingStudio.split.grammar', 'Token-grammar check'),
     klStop: t('trainingStudio.split.klStop', { mode: klMode, window: klMode === 'trend' ? 30 : window, defaultValue: 'KL {{mode}} ({{window}} readings)' }),
     grad: t('trainingStudio.split.grad', 'Grad norm'), lr: t('trainingStudio.chart.mLr', 'Learning rate'),
   };
@@ -75,19 +78,21 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
   };
   const missing = t('trainingStudio.split.missing', 'Not recorded for this run');
   const chart = (side: 'ar' | 'nar') => {
-    const inactive = mode !== 'joint' && mode !== side;
-    const series = side === 'ar' ? (mode === 'ar' ? ['loss', 'eval', 'grad', 'lr'] : ['arCe', 'arKl', 'klStop', 'cursorCe', 'lr'])
+    const inactive = mode !== 'joint' && mode !== 'mm3' && mode !== side;
+    const series = side === 'ar' ? (mode === 'ar' || mode === 'mm3' ? ['loss', 'eval', 'grad', 'lr'] : ['arCe', 'arKl', 'klStop', 'cursorCe', 'lr'])
       : (mode === 'nar' ? ['loss', 'grad', 'lr'] : ['narMse', 'narRecon', 'narDrift', 'lr']);
-    const defaults = side === 'ar' ? (mode === 'ar' ? ['loss', 'eval', 'grad'] : ['arCe', 'arKl', 'klStop']) : (mode === 'nar' ? ['loss', 'grad'] : ['narMse', 'narRecon']);
+    const defaults = side === 'ar' ? (mode === 'ar' || mode === 'mm3' ? ['loss', 'eval', 'grad'] : ['arCe', 'arKl', 'klStop']) : (mode === 'nar' ? ['loss', 'grad'] : ['narMse', 'narRecon']);
     const hasData = steps.some(p => series.some(key => Number.isFinite(p[key === 'grad' ? 'gradNorm' : key as keyof ChartStepPoint]))) || (side === 'ar' && evals.length > 0);
     return <section className="min-w-0 rounded-lg border border-zinc-300/50 dark:border-white/10 p-2">
+      {mode !== 'mm3' && <>
       <h4 className="text-xs font-semibold">{t(side === 'ar' ? 'trainingStudio.split.ar' : 'trainingStudio.split.nar', side === 'ar' ? 'AR (stage 1)' : 'NAR (stage 2)')}</h4>
       <p className="text-[11px] text-zinc-500 mb-2">{side === 'ar'
         ? t('trainingStudio.split.arBlurb', "Stage 1 writes the song's coarse token plan from lyrics and tags.")
         : t('trainingStudio.split.narBlurb', "Stage 2 turns stage 1's tokens into fine audio detail.")}</p>
+      </>}
       {inactive ? <p className="text-xs text-zinc-500">{t('trainingStudio.split.inactive', { stage: side === 'ar' ? 1 : 2, defaultValue: 'Stage {{stage}} not trained in this run' })}</p>
         : hasData ? <>
-          <TrainingChart epochs={[]} steps={steps} milestones={milestones} evals={side === 'ar' ? evals : []} target={0}
+          <TrainingChart epochs={[]} steps={steps} milestones={milestones} evals={side === 'ar' ? evals : []} target={mode === 'mm3' ? target : 0}
             klTarget={side === 'ar' && options?.stopMode === 'kl' && typeof options.targetKl === 'number' ? options.targetKl : 0}
             klStopLabel={labels.klStop} config={{ series, defaults, more: series.filter(k => !defaults.includes(k)), labels, tooltips,
               xMax: last?.step, markers: side === 'ar' && frozen !== undefined ? [{ step: frozen, label: t('trainingStudio.split.frozen', 'Planner frozen') }] : [] }} />
@@ -98,7 +103,7 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
   const pace = history.slice(-20).map(p => p.stepMs).filter((v): v is number => v !== undefined);
   const vram = vramMb ?? streamVram;
   return <div>
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">{chart('ar')}{chart('nar')}</div>
+    {mode === 'mm3' ? chart('ar') : <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">{chart('ar')}{chart('nar')}</div>}
     <div className="mt-1 flex flex-wrap gap-x-3 text-[10px] text-zinc-500 tabular-nums">
       <span>{t('trainingStudio.split.steps', { step: last?.step ?? 0, total: totalSteps || job?.total || 0, defaultValue: 'Step {{step}} / {{total}}' })}</span>
       {mode === 'joint' && last?.gradNorm !== undefined && <span title={tooltips.grad}>{labels.grad} {last.gradNorm.toFixed(3)}</span>}

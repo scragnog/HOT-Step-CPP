@@ -67,7 +67,7 @@ function isTrainingKind(kind: string): boolean {
   return kind === 'train-lm' || kind === 'train-dit';
 }
 
-export const JobProgress: React.FC = () => {
+export const JobProgress: React.FC<{ hideEta?: boolean }> = ({ hideEta }) => {
   const { t } = useTranslation();
   const job = useActiveTrainingJob();
   const jobLog = useTrainingStore(s => s.jobLog);
@@ -135,7 +135,7 @@ export const JobProgress: React.FC = () => {
   // answers "when does the loss reach the target", the tile row's old one
   // answered "when does the epoch cap arrive") and both were labelled "ETA".
   const etaLabel = eta ? t('trainingStudio.job.eta', { eta }) : t('trainingStudio.job.etaEstimating');
-  const showEta = active && !isTrainingKind(job.kind);
+  const showEta = active && !hideEta && !isTrainingKind(job.kind);
 
   // Retry has to re-run the job the card is actually showing. The enhance kinds
   // carry provider/model options this card does not have, so they use the

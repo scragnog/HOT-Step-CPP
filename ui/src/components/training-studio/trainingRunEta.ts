@@ -1,4 +1,4 @@
-// Time left in a HeartMuLa run: the steps still to train at the run's mean step time,
+// Time left in a training run: the steps still to train at the run's mean step time,
 // plus the checkpoint previews still to come at what a preview has cost so far.
 //
 // A preview's cost is measured, not guessed. Before the first mid-run take only the
@@ -6,7 +6,7 @@
 // After one, its pause is used instead: trainer exit, engine restart, the render,
 // engine stop and model reload, which is what each later take will cost too.
 
-export interface HeartmulaEtaInput {
+export interface TrainingRunEtaInput {
   step: number;
   totalSteps: number;
   msPerStep: number | null;
@@ -15,7 +15,7 @@ export interface HeartmulaEtaInput {
   previews: Array<{ kind: string; step: number; status: string; renderMs: number | null; pauseMs: number | null }>;
 }
 
-export interface HeartmulaEta {
+export interface TrainingRunEta {
   ms: number;
   /** Previews still to render, the final take included. */
   previewsLeft: number;
@@ -23,7 +23,7 @@ export interface HeartmulaEta {
   previewMs: number | null;
 }
 
-export function heartmulaEta(i: HeartmulaEtaInput): HeartmulaEta | null {
+export function trainingRunEta(i: TrainingRunEtaInput): TrainingRunEta | null {
   if (!i.msPerStep || i.totalSteps <= 0 || i.step >= i.totalSteps) return null;
   const done = i.previews.filter(p => p.status === 'done');
   const paused = done.filter(p => p.kind === 'step' && p.pauseMs).sort((a, b) => b.step - a.step)[0];
@@ -41,4 +41,18 @@ export function formatDuration(ms: number): string {
   if (min < 1) return '<1 min';
   const h = Math.floor(min / 60), m = min % 60;
   return h ? `${h} h ${String(m).padStart(2, '0')} min` : `${m} min`;
+}
+
+/** MM3 preview rows (one per spec, so a checkpoint has an artist and a control
+ *  take) folded to one entry per checkpoint: the renders add up, the pause is
+ *  carried once on the last take of the set. */
+export function previewsFromRows(rows: Array<{ step: number; base: boolean; ms: number; pauseMs?: number }>): TrainingRunEtaInput['previews'] {
+  const byStep = new Map<number, { kind: string; step: number; status: string; renderMs: number; pauseMs: number | null }>();
+  for (const r of rows) {
+    const e = byStep.get(r.step) ?? { kind: r.base ? 'base' : 'step', step: r.step, status: 'done', renderMs: 0, pauseMs: null };
+    e.renderMs += r.ms;
+    e.pauseMs = r.pauseMs ?? e.pauseMs;
+    byStep.set(r.step, e);
+  }
+  return [...byStep.values()];
 }

@@ -1216,8 +1216,10 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
         // Append-and-dedupe: the whole SSE buffer replays on every reconnect,
         // and the id (step + kind, or base + kind) is stable per render.
         const cur = get().trainPreviews;
-        if (cur.some(p => p.id === ev.preview.id && p.run === ev.run)) break;
-        const next = [...cur, { ...ev.preview, run: ev.run }];
+        // A later frame for the same take carries its measured pause (pauseMs): replace, don't skip.
+        const seen = cur.find(p => p.id === ev.preview.id && p.run === ev.run);
+        if (seen && (seen.pauseMs !== undefined || ev.preview.pauseMs === undefined)) break;
+        const next = [...cur.filter(p => p !== seen), { ...ev.preview, run: ev.run }];
         // Oldest first, base pinned to the front — the reference belongs at the
         // start of the strip, and it is the only row with step 0.
         next.sort((a, b) => (a.step - b.step) || a.kind.localeCompare(b.kind));
@@ -1388,7 +1390,7 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
             const path = typeof ev.path === 'string' ? ev.path : '';
             const known = get().trainMilestones;
             if (path && !known.some(m => m.path === path)) {
-              set({ trainMilestones: [...known, { epoch: ev.epoch ?? 0, loss: ev.loss ?? 0, path }] });
+              set({ trainMilestones: [...known, { epoch: ev.epoch ?? ev.step ?? 0, loss: ev.loss ?? 0, path }] });
             }
           }
         }

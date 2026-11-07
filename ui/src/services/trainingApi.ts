@@ -546,6 +546,8 @@ export interface TrainingPreview {
   loss?: number;
   bytes: number;
   ms: number;
+  /** Training pause around this take, ms; arrives in a second frame once training resumes. */
+  pauseMs?: number;
   ts: number;
 }
 

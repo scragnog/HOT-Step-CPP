@@ -33,7 +33,9 @@ import { JobProgress } from './JobProgress';
 import { Mm3CheckpointLadder } from './Mm3CheckpointLadder';
 import { Mm3RunsPanel } from './Mm3RunsPanel';
 import { useMm3Status } from './useMm3Status';
-import { TrainingChart } from './TrainingChart';
+import { Yue2SplitChart } from './Yue2SplitChart';
+import { TrainingEtaLine } from './TrainingEtaLine';
+import { previewsFromRows, trainingRunEta } from './trainingRunEta';
 import { TrainingPreviewSettings } from './TrainingPreviewPanel';
 import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 import { runQueries } from '../../queries/training-runs/queries';
@@ -163,9 +165,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
   const setPhase = useTrainingStore(s => s.setPhase);
   const trainStepSeries = useTrainingStore(s => s.trainStepSeries);
   const trainMilestones = useTrainingStore(s => s.trainMilestones);
-  const trainLmEpochs = useTrainingStore(s => s.trainLmEpochs);
   const trainEvalSeries = useTrainingStore(s => s.trainEvalSeries);
-  const trainMaxEpochs = useTrainingStore(s => s.trainMaxEpochs);
   const trainTargetLoss = useTrainingStore(s => s.trainTargetLoss);
 
   const { status, error: statusError } = useMm3Status(datasetId);
@@ -291,6 +291,13 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     regTopK: status.defaults.regularisation?.topK ?? 64,
   } : null;
   const form: FormState | null = base ? { ...base, ...edits } : null;
+  // Time left: steps at the run's mean step time plus the checkpoint previews still to come.
+  const mm3Eta = jobKind === 'mm3-train-lm' && jobStatus === 'running' && trainStepSeries.length > 0 ? (() => {
+    const ms = trainStepSeries.map(p => p.stepMs).filter((v): v is number => !!v && v > 0);
+    return trainingRunEta({ step: trainStepSeries[trainStepSeries.length - 1].step, totalSteps: activeJob?.total ?? 0,
+      msPerStep: ms.length ? ms.reduce((a, b) => a + b, 0) / ms.length : null,
+      everySteps: form?.previewEverySteps ?? 0, previews: previewsFromRows(trainPreviews) });
+  })() : null;
 
   // Peak VRAM for the CURRENT form, not for the defaults — rank is the biggest
   // single term after the base itself, so an estimate pinned to the defaults
@@ -1448,7 +1455,8 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
       {/* ── Live run: the shared job machinery, unchanged ── */}
       {mine && activeJob && (
         <div className={CARD}>
-          <JobProgress />
+          <JobProgress hideEta={jobKind === 'mm3-train-lm'} />
+          {mm3Eta && <div className="mt-1 text-[11px] text-zinc-500"><TrainingEtaLine eta={mm3Eta} /></div>}
           {jobKind === 'mm3-train-lm' && mm3Live && (
             // The run-stats row. MM3 has no epochs, so none of the ACE tiles
             // apply — these are the numbers that actually say what the run is
@@ -1495,20 +1503,14 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
             reloadKey={`${trainPreviews.length}:${trainMilestones.length}:${jobStatus}`} />}
           {jobKind === 'mm3-train-lm' && trainStepSeries.length > 1 && (
             <div className="mt-3">
-              {/* Four series on one fractional-epoch axis: per-step noise, the
-                  epoch mean, its 5-epoch average, and — the one that matters —
-                  held-out loss. The target line is drawn only when the run is
-                  actually stopping on one; the store seeds it from the engine's
-                  own announcement, so a run adopted after a reload still has
-                  it. */}
-              <TrainingChart
-                epochs={trainLmEpochs}
-                steps={trainStepSeries}
+              {/* Same chart as YuE2's: loss, held-out loss, grad norm and
+                  learning rate on a step axis, checkpoint markers from the
+                  milestones. The target line is drawn only when the run is
+                  stopping on one. */}
+              <Yue2SplitChart mode="mm3" points={trainStepSeries.map(s => ({ ...s, ep: s.step }))}
                 milestones={trainMilestones}
-                evals={trainEvalSeries}
-                target={trainTargetLoss}
-                maxEpochs={trainMaxEpochs}
-              />
+                evals={trainEvalSeries.map(e => ({ ep: e.step, loss: e.loss }))}
+                target={trainTargetLoss} vramMb={mm3Live?.usedMb} totalSteps={activeJob.total} />
             </div>
           )}
         </div>
