@@ -470,8 +470,10 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     // Logit scale under soft forcing, take 0, logged once at the end: the
     // guided top-1 minus top-2 margin, the gap from top-1 down to the forced
     // code, and how often the draw agreed with the source.
+    // fb_in50: forced frames whose source code survived the conditional
+    // top-k (the LM's own candidates), read before the bias re-admits it.
     std::vector<float> fb_margin, fb_gap;
-    int64_t            fb_agree = 0, fb_biased = 0;
+    int64_t            fb_agree = 0, fb_biased = 0, fb_forced = 0, fb_in50 = 0;
 
     // KV budget: prompt + one iteration per emitted frame + the un-emitted first
     // one, plus slack so the last decode step never sits exactly on the boundary.
@@ -851,6 +853,10 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                     if (fs_it >= 0 && std::isfinite(fs_guided)) {
                         fb_gap.push_back(top1 - fs_guided);
                     }
+                    if (fs_it >= 0) {
+                        fb_forced++;
+                        fb_in50 += std::isfinite(cand_guided[(size_t) (1 + fs_it)]) ? 1 : 0;
+                    }
                 }
                 // A positive bias re-admits the source code if the conditional
                 // top-k dropped it; at 0 the frame is left exactly free.
@@ -1100,11 +1106,19 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             std::nth_element(v.begin(), v.begin() + (ptrdiff_t) (v.size() / 2), v.end());
             return v[v.size() / 2];
         };
+        const float gap_med = median(fb_gap);
+        float       gap_p90 = NAN;
+        if (!fb_gap.empty()) {
+            const size_t i = (size_t) (0.9 * (double) (fb_gap.size() - 1));
+            std::nth_element(fb_gap.begin(), fb_gap.begin() + (ptrdiff_t) i, fb_gap.end());
+            gap_p90 = fb_gap[i];
+        }
         fprintf(stderr,
                 "[MM3-AR] Soft forcing: bias %.2f, %lld biased frames, %lld free; agree %.1f%%; "
-                "median guided top-1 margin %.2f, median top-1 minus source %.2f\n",
+                "median guided top-1 margin %.2f, median top-1 minus source %.2f, p90 %.2f; source in top-%d %.1f%%\n",
                 opt.force_bias, (long long) fb_biased, (long long) (fb_margin.size() - (size_t) fb_biased),
-                fb_biased ? 100.0 * (double) fb_agree / (double) fb_biased : 0.0, median(fb_margin), median(fb_gap));
+                fb_biased ? 100.0 * (double) fb_agree / (double) fb_biased : 0.0, median(fb_margin), gap_med, gap_p90,
+                TOPK, fb_forced ? 100.0 * (double) fb_in50 / (double) fb_forced : 0.0);
     }
 
     // A take with no frames is a failed render, not a short one — and because
