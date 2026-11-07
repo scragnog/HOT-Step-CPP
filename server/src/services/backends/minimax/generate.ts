@@ -46,6 +46,7 @@ import { getDb } from '../../../db/database.js';
 import { aceClient } from '../../aceClient.js';
 import { wavDurationSec } from '../../audioCrop.js';
 import { MM3_PLANK_EXT, mm3PlankDir, readMm3Plank } from './plank.js';
+import { applyMm3ForcePattern, parseMm3ForcePattern, trimMm3Codes } from './coverPattern.js';
 import {
   MM3_HIDDENS_EXT, ensureMm3HiddensDir, resolveMm3HiddensPath, sanitiseMm3HiddensName,
 } from './hiddens.js';
@@ -481,8 +482,13 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   // nothing for a control the user has never touched (see the mm3ReuseAr note
   // below). An absent value therefore has to resolve to the declared default or
   // the toggle would lie about its own state.
-  const requireEnding = params.mm3RequireEnding !== false;
-  const askedTakes = Number(params.mm3Takes) > 1
+  // A plank replay is a single-take path in the engine (mm3-ar-loop.h), and
+  // EOS is masked across the forced span, so endings, takes and the length
+  // floor all stand down while one is loaded. Read once, here, so the plank
+  // block below and these switches agree on whether it loaded.
+  const plankCodes = params.mm3PlankPath ? readMm3Plank(String(params.mm3PlankPath)) : null;
+  const requireEnding = !plankCodes && params.mm3RequireEnding !== false;
+  const askedTakes = !plankCodes && Number(params.mm3Takes) > 1
     ? Math.min(MM3_MAX_TAKES, Math.max(1, Math.round(Number(params.mm3Takes))))
     : 1;
   // Variations and natural endings want the same batched AR pass, so they share
@@ -506,7 +512,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   // Rides the ending machinery: a plan under the floor is dropped and re-planned
   // exactly like one that never ended, because the remedy is the same. Works
   // with endings off too — the engine then accepts any plan that is long enough.
-  const minLengthOn = params.mm3MinLength !== false;
+  const minLengthOn = !plankCodes && params.mm3MinLength !== false;
   const minDurationSec = minLengthOn ? mm3MinDurationSec(lyrics) : 0;
   const minFrames = minDurationSec > 0 ? Math.round(minDurationSec * MM3_FPS) : 0;
   if (minFrames > 0) {
@@ -616,22 +622,39 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
       // MM3 Plank replay. A plank that will not load is a note, not a failure:
       // the render proceeds with a normal AR pass.
       ...(params.mm3PlankPath ? (() => {
-        const codes = readMm3Plank(String(params.mm3PlankPath));
-        if (!codes) {
+        if (!plankCodes) {
           notes.push(`AR plank not found or unreadable (${params.mm3PlankPath}) — running a normal AR pass`);
           return {};
         }
+        // Cover Studio levers (coverPattern.ts). Trim first, then the pattern,
+        // so pattern seconds count from the start of what is kept.
+        let sem = plankCodes.forced_semantic, ac = plankCodes.forced_acoustic;
+        const trim = Number(params.mm3PlankTrimSeconds);
+        if (Number.isFinite(trim) && trim > 0) ({ sem, ac } = trimMm3Codes(sem, ac, trim));
+        const semanticOnly = params.mm3PlankSemanticOnly === true;
+        const pattern = parseMm3ForcePattern(params.mm3ForcePattern);
+        const biasRaw = String(params.mm3ForceBias ?? '').trim();
+        const bias = biasRaw === '' ? NaN : Number(biasRaw);
+        const biasSet = Number.isFinite(bias) && bias >= 0;
+        // The engine 400s on either with forced_acoustic; drop them with a note
+        // rather than fail the render.
+        if (!semanticOnly && (pattern || biasSet)) {
+          notes.push('Force bias and free-frame patterns need semantic-only forcing — ignored for this full replay');
+        }
+        if (semanticOnly && pattern) sem = applyMm3ForcePattern(sem, pattern);
         // Entry 0 is the un-emitted iteration, so I codes render I-1 frames.
         // The engine derives max_frames/duration from the array itself
         // (mm3-request.h), so nothing needs overriding here.
         notes.push(
           `AR replay from ${path.basename(String(params.mm3PlankPath))} `
-          + `(${codes.forced_semantic.length - 1} frames — codes pinned, AR compute still runs)`,
+          + `(${sem.length - 1} frames — codes pinned, AR compute still runs`
+          + (semanticOnly ? `; semantic only${biasSet ? `, force bias ${bias}` : ', hard pin'}`
+              + (pattern ? `, ${sem.filter(c => c === -1).length} free frames` : '') : '')
+          + ')',
         );
-        return {
-          forced_semantic: codes.forced_semantic,
-          forced_acoustic: codes.forced_acoustic,
-        };
+        return semanticOnly
+          ? { forced_semantic: sem, ...(biasSet ? { lm_force_bias: bias } : {}) }
+          : { forced_semantic: sem, forced_acoustic: ac };
       })() : {}),
       // ── Saved plans (engine mm3-hiddens-file.h) ──
       //

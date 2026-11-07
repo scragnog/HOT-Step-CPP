@@ -110,6 +110,23 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
       sa3Cover: { transform: i.strength ?? c.sa3Transform ?? 0.3,
         adapters: i.adapter ?? c.sa3Adapters ?? '' } };
   }
+  if (i.expectedBackend === 'minimax-m3') {
+    const m = i.mm3Cover;
+    if (!m) throw new WorkflowError(400, 'Encode or pick a reference plank first');
+    // The global bar's MM3 settings (LM knobs, adapter, flow) ride along; the
+    // plank pins the length, so takes, endings and saved plans stand down.
+    const mm3 = Object.fromEntries(Object.entries(e).filter(([key]) => key.startsWith('mm3')));
+    return { ...shared, ...mm3, backend: 'minimax-m3', expectedBackend: 'minimax-m3', taskType: 'text2music',
+      customMode: true, caption: i.caption, style: i.caption, title: coverTitle(i),
+      lyrics: i.instrumental ? '' : i.lyrics, instrumental: i.instrumental, batchSize: 1,
+      source: 'cover-studio', sourceAudioUrl: url,
+      artistName: i.targetArtistName || i.artistName, sourceArtist: i.artistName,
+      ...(i.seed !== undefined ? { seed: i.seed, randomSeed: i.seed < 0 } : {}),
+      mm3PlankPath: m.plank, mm3PlankSemanticOnly: m.semanticOnly,
+      mm3ForceBias: m.forceBias ?? '', mm3ForcePattern: m.pattern ?? undefined,
+      mm3PlankTrimSeconds: m.trimSeconds ?? undefined, mm3ArSeed: m.arSeed >= 0 ? m.arSeed : '',
+      mm3Takes: 1, mm3HiddensPath: '', mm3SaveHiddens: false };
+  }
   if (i.expectedBackend === 'heartmula') {
     if (!d.approvedAbc) throw new WorkflowError(409, 'Review and approve the score first');
     try {

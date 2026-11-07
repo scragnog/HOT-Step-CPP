@@ -379,7 +379,10 @@ async function capabilities(): Promise<BackendCapabilities> {
       // minimax/mm3-align.h). Line-level, ~1 s — the granularity ACE ships.
       lyricTimestamps: true,
       forcedAlignment: false,
-      cover: false,
+      // Cover Studio replays an encoded reference as a plank (code forcing),
+      // not an audio-to-audio transform.
+      cover: true,
+      coverCodeForcing: true,
       repaint: false,
       lego: false,
       extract: false,

@@ -23,6 +23,7 @@ import { spawn } from 'child_process';
 import { pushLog } from '../../routes/logs.js';
 import { resumeEngines, suspendEngines } from '../aceEngineProcess.js';
 import { restoreMm3Selection } from '../backends/minimax/index.js';
+import { writeMm3PlankFromCodes } from '../backends/minimax/plank.js';
 import { aceTrainExe } from './aceTrain.js';
 import { getDataset } from './datasetsRepo.js';
 import {
@@ -445,6 +446,46 @@ export async function runMm3CodesJob(job: TrainingJob): Promise<void> {
     if (!isCancelled(job)) finishJob(job, 'done');
   } catch (err: any) {
     if (!isCancelled(job)) finishJob(job, 'failed', err?.message || String(err));
+  }
+}
+
+// ── Cover Studio reference encode ───────────────────────────────────────────
+//
+// One source file through mm3-codes, converted into a plank so the existing
+// replay path (and its picker) carry it into a render. The plank is named
+// after the job id, so the caller knows its name before the job finishes.
+
+export async function runMm3CoverEncodeJob(job: TrainingJob): Promise<void> {
+  const opts = job.opts as { sourcePath: string; sourceName: string; workDir: string } | undefined;
+  if (!opts?.sourcePath || !opts.workDir) {
+    finishJob(job, 'failed', 'Cover encode is missing its source');
+    return;
+  }
+  const missing = missingMm3TrainModels('codes');
+  if (missing.length) {
+    finishJob(job, 'failed', `MiniMax-Music3 encoder files are missing: ${missing.join(', ')}`);
+    return;
+  }
+  try {
+    fs.mkdirSync(opts.workDir, { recursive: true });
+    const datasetJson = path.join(opts.workDir, 'dataset.json');
+    fs.writeFileSync(datasetJson, JSON.stringify({
+      samples: [{ id: 'source', audio_path: opts.sourcePath, filename: opts.sourceName }],
+    }));
+    const codesPath = path.join(opts.workDir, 'codes', 'source.codes');
+    // 359 s: the engine's 9000-frame ceiling, so the plank can always replay.
+    await runMm3AceTrain(job, 'mm3-codes', buildMm3CodesArgs({ datasetJson, outDir: opts.workDir, maxDuration: 359 }),
+      30 * 60 * 1000, () => (fs.existsSync(codesPath) ? null : 'mm3-codes finished but wrote no codes'));
+    if (isCancelled(job) || job.status === 'failed') return;
+    const file = writeMm3PlankFromCodes(codesPath, job.id, {
+      jobId: job.id, caption: '', lyrics: '', source: opts.sourceName,
+    });
+    log(job, 'info', `Saved ${file}`);
+    finishJob(job, 'done');
+  } catch (err: any) {
+    if (!isCancelled(job)) finishJob(job, 'failed', err?.message || String(err));
+  } finally {
+    fs.rmSync(opts.workDir, { recursive: true, force: true });
   }
 }
 

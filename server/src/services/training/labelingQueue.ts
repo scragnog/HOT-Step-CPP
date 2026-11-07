@@ -1918,6 +1918,17 @@ export function startMm3CodesJob(datasetId: string, opts: unknown): TrainingJob 
   return job;
 }
 
+/** Cover Studio: encode one reference into a plank (mm3TrainRunner). Shares
+ *  the mm3-codes kind and lane; the fixed dataset key runs one at a time. */
+export function startMm3CoverEncodeJob(opts: unknown): TrainingJob {
+  const job = createJob('mm3-codes', 'mm3-cover', [], opts);
+  enqueue(job, async (j) => {
+    const { runMm3CoverEncodeJob } = await import('./mm3TrainRunner.js');
+    await runMm3CoverEncodeJob(j);
+  });
+  return job;
+}
+
 /**
  * MiniMax-Music3 LM LoRA training (S4). `sampleIds` is empty: the inputs are
  * the codes cache and the caption sidecars, not dataset rows, so there is no

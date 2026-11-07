@@ -135,7 +135,7 @@ export interface CoverTranscribeResult { documentId: string; revision: number; a
  *  be the approved score, and the lyrics rendered are the ones it exports,
  *  replacing `lyrics` (409 otherwise). */
 export const coverRenderSchema = coverDraftRefSchema.extend({
-  expectedBackend: z.enum(['ace', 'yue2', 'sa3', 'heartmula']), engineParams: z.record(z.string(), z.unknown()),
+  expectedBackend: z.enum(['ace', 'yue2', 'sa3', 'heartmula', 'minimax-m3']), engineParams: z.record(z.string(), z.unknown()),
   /** MuLaCover uses four explicit fields; caption is never parsed into tags. */
   heartmulaTags: z.object({ topic: z.string().max(512), genre: z.string().max(512),
     instrument: z.string().max(512), mood: z.string().max(512) }).optional(),
@@ -144,6 +144,15 @@ export const coverRenderSchema = coverDraftRefSchema.extend({
   seed: z.number().int().min(-1).max(Number.MAX_SAFE_INTEGER).optional(),
   adapter: z.string().regex(/^[^/\\:,]+:-?(?:\d+(?:\.\d*)?|\.\d+)$/).optional(),
   steps: z.number().int().min(1).max(64).optional(),
+  /** MM3 code-forcing cover: the generation request's mm3Plank and force levers. */
+  mm3Cover: z.object({
+    plank: z.string().min(1), semanticOnly: z.boolean(),
+    forceBias: z.number().min(0).max(1000).nullable(),
+    pattern: z.object({ prefixSeconds: z.number().positive().optional(), anchorEvery: z.number().int().positive().optional(),
+      pinnedRanges: z.array(z.tuple([z.number().min(0), z.number().positive()])).optional(), invert: z.boolean().optional() }).nullable(),
+    trimSeconds: z.number().positive().nullable(),
+    arSeed: z.number().int().min(-1).max(Number.MAX_SAFE_INTEGER),
+  }).optional(),
   title: z.string(), artistName: z.string(), targetArtistName: z.string(),
   lyrics: z.string(), caption: z.string(),
   instrumental: z.boolean(), lyricsSource: z.string().nullable(),

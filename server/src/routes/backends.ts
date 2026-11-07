@@ -5,6 +5,7 @@
 // GET  /api/capabilities        — active (or ?backend=<id>) backend's manifest
 // POST /api/backends/active     — switch the active backend { id }
 // POST /api/yue2/import-adapter — split a ComfyUI joint YuE2 adapter { path }
+// POST /api/mm3/cover/encode    — encode a Cover Studio source into a plank
 //
 // Style follows routes/plugins.ts (minimal route, short TTL cache so the UI
 // can poll cheaply) and generalises the capabilities-endpoint pattern in
@@ -26,7 +27,13 @@ import {
   getActiveBackendId,
   setActiveBackendId,
 } from '../services/backends/registry.js';
-import { listMm3Planks, readMm3PlankMeta } from '../services/backends/minimax/plank.js';
+import fs from 'fs';
+import path from 'path';
+import { listMm3Planks, mm3PlankDir, MM3_PLANK_EXT, readMm3PlankMeta } from '../services/backends/minimax/plank.js';
+import { resolveSourceAudioPath } from '../services/generation/sourceAudio.js';
+import { missingMm3TrainModels } from '../services/training/mm3Train.js';
+import { aceTrainExe } from '../services/training/aceTrain.js';
+import { startMm3CoverEncodeJob } from '../services/training/labelingQueue.js';
 import {
   listMm3Hiddens, readMm3HiddensMeta, deleteMm3Hiddens, mm3HiddensDir,
 } from '../services/backends/minimax/hiddens.js';
@@ -218,6 +225,37 @@ router.get('/mm3/plank-meta', (req, res) => {
     return;
   }
   res.json(meta);
+});
+
+/** POST /api/mm3/cover/encode { sourceAudioUrl, sourceName? } — run mm3-codes on one file
+ *  and save it as a plank. Returns { jobId, plank } at once; poll
+ *  GET /api/training/jobs/:jobId until done. Stops and restarts the engine. */
+router.post('/mm3/cover/encode', (req, res) => {
+  try {
+    const url = String(req.body?.sourceAudioUrl ?? '');
+    const sourcePath = url ? resolveSourceAudioPath(url) : '';
+    if (!sourcePath || !fs.existsSync(sourcePath)) {
+      res.status(400).json({ error: 'Pick or upload a source first' });
+      return;
+    }
+    const missing = missingMm3TrainModels('codes');
+    if (missing.length) {
+      res.status(400).json({ error: `MiniMax-Music3 encoder files are missing: ${missing.join(', ')}. Download them in Model Manager.` });
+      return;
+    }
+    if (!aceTrainExe()) {
+      res.status(503).json({ error: 'ace-train was not found next to ace-server — rebuild the engine' });
+      return;
+    }
+    fs.mkdirSync(mm3PlankDir(), { recursive: true });
+    const workDir = fs.mkdtempSync(path.join(mm3PlankDir(), '.encode-'));
+    // The picker's label: the name the user knows, not the stored upload's uuid.
+    const given = typeof req.body?.sourceName === 'string' ? path.basename(req.body.sourceName).slice(0, 200) : '';
+    const job = startMm3CoverEncodeJob({ sourcePath, sourceName: given || path.basename(sourcePath), workDir });
+    res.json({ jobId: job.id, plank: `${job.id}${MM3_PLANK_EXT}` });
+  } catch (err: any) {
+    res.status(409).json({ error: err?.message || String(err) });
+  }
 });
 
 // ── MM3 saved plans ──────────────────────────────────────────────────────────

@@ -50,6 +50,8 @@ export interface Mm3PlankMeta {
   seed: number;
   frames: number;
   sizeBytes: number;
+  /** Source filename, for a plank encoded from a reference (Cover Studio). */
+  source?: string;
 }
 
 /** Sibling of the audio directory, so planks travel with a data-dir move. */
@@ -131,4 +133,31 @@ export function readMm3Plank(ref: string): { forced_semantic: number[]; forced_a
     console.error(`[MM3 Plank] Failed to read ${plankPath}: ${err?.message ?? err}`);
     return null;
   }
+}
+
+/** Convert an `ace-train mm3-codes` cache file (int32 [rows, 8], column 0
+ *  semantic, columns 1-7 acoustic, row 0 the warm-up row — the same iteration
+ *  indexing a plank uses) into `<id>.mm3plank` plus its sidecar. Returns the
+ *  plank's file name. Throws on a malformed file. */
+export function writeMm3PlankFromCodes(codesPath: string, id: string,
+  meta: Pick<Mm3PlankMeta, 'jobId' | 'caption' | 'lyrics' | 'source'>): string {
+  const raw = fs.readFileSync(codesPath);
+  const rows = raw.length / 32;
+  if (!Number.isInteger(rows) || rows < 2) throw new Error(`${path.basename(codesPath)} is not an [rows, 8] int32 codes file`);
+  const blob = Buffer.alloc(8 + rows * 32);
+  let o = 0;
+  blob.writeInt32LE(rows, o); o += 4;
+  for (let r = 0; r < rows; r++) { blob.writeInt32LE(raw.readInt32LE(r * 32), o); o += 4; }
+  blob.writeInt32LE(rows * 7, o); o += 4;
+  for (let r = 0; r < rows; r++) raw.copy(blob, o + r * 28, r * 32 + 4, r * 32 + 32);
+  const dir = mm3PlankDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const file = `${id}${MM3_PLANK_EXT}`;
+  fs.writeFileSync(path.join(dir, file), blob);
+  const sidecar: Mm3PlankMeta = {
+    id, created: new Date().toISOString(), seed: 0, frames: rows - 1,
+    duration: Math.round(((rows - 1) / 25) * 100) / 100, sizeBytes: blob.length, ...meta,
+  };
+  fs.writeFileSync(path.join(dir, `${file}.json`), JSON.stringify(sidecar, null, 2));
+  return file;
 }
