@@ -157,6 +157,9 @@ function rungLabel(t){if(t.label)return[t.label,t.sublabel||""];return isRef(t)?
 function avg(s,keys){const v=keys.map(k=>s?.[k]).filter(Number.isFinite);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;}
 
 function render(){
+  // Building the rows moves every audio player out of the page for a moment; at the
+  // bottom of the page that shrink clamps the scroll, so put it back afterwards.
+  const keepY=scrollY;
   const rounds=[...new Set(tracks.map(t=>t.round))].sort();
   if(round===null||!rounds.includes(round))round=rounds[rounds.length-1]??null;
   const artists=[...new Set(tracks.filter(t=>t.round===round).map(groupOf))];
@@ -180,6 +183,7 @@ function render(){
     chart(list),
     el("div",{class:"rows"},...list.map(row))
   );
+  if(scrollY!==keepY)scrollTo(0,keepY);
 }
 
 function chart(list){

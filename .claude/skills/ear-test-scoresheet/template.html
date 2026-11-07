@@ -151,6 +151,9 @@ const isRef=t=>!!t.reference;
 const avg=(s,keys)=>{const v=keys.map(k=>s?.[k]).filter(Number.isFinite);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null;};
 let noteTimer=null;
 function render(){
+  // Building the rows moves every audio player out of the page for a moment; at the
+  // bottom of the page that shrink clamps the scroll, so put it back afterwards.
+  const keepY=scrollY;
   const rounds=[...new Set(TRACKS.map(t=>t.round))].sort((a,b)=>a-b);
   if(round===null||!rounds.includes(round))round=rounds[rounds.length-1]??null;
   const groups=[...new Set(TRACKS.filter(t=>t.round===round).map(t=>t.group))];
@@ -172,6 +175,7 @@ function render(){
     el("div",{class:"pick"},el("label",{for:sel.id},CONFIG.pickLabel||"Last good rung"),sel,pnote,el("span",{class:"count"},`${scored}/${list.length} scored`)),
     chart(list),
     el("div",{class:"rows"},...list.map(row)));
+  if(scrollY!==keepY)scrollTo(0,keepY);
   // Put the cursor back if a redraw (a render landing) happened mid-note.
   if(focusId){const n=document.getElementById(focusId);if(n&&n.tagName==="TEXTAREA"){n.focus();if(Number.isFinite(caret))n.setSelectionRange(caret,caret);}}
 }
