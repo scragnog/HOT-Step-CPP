@@ -158,6 +158,26 @@ static inline MM3WindowGeom mm3_window_geom(const MM3CondConfig & cc, int64_t wi
     return g;
 }
 
+// ── Route B: the source's DAV latents in the flow (audio2audio, SDEdit) ─────
+//
+// The latent column where AR frame `frame` starts: round(frame * 3.4453125),
+// the rate expression of mm3_cond_latent_length() in its order, rounded.
+static inline int64_t mm3_a2a_column(const MM3CondConfig & cc, int64_t frame) {
+    const double r = (double) frame * (double) cc.output_sampling_rate / (double) cc.input_sampling_rate *
+                     (double) cc.input_hop_length / (double) cc.output_hop_length;
+    return (int64_t) std::llround(r);
+}
+
+// One window's view of the source. `src` points at the window's first column
+// of a channel-major [128, stride] block; `cols` (<= L) of them are covered.
+struct MM3A2aWindow {
+    const float * src      = nullptr;
+    int64_t       stride   = 0;
+    int64_t       cols     = 0;
+    float         strength = 0.0f;  // t0 on the noise-to-clean axis
+    float         hold     = 0.0f;  // fraction of the remaining steps that re-impose the source
+};
+
 // ── Progress ────────────────────────────────────────────────────────────────
 
 // One callback for every stage transition and every unit of inner work. The
@@ -271,12 +291,22 @@ static inline float mm3_clamp_sample(float v) {
 //                UNCONDITIONAL branch only on the warmup steps (0, 1), the
 //                final step, and every Nth step, reconstructing it in between
 //                from the cached guidance delta. See the design note below.
+//   a2a          Route B source (nullptr = off, the exact path above). The
+//                window starts at the first scheduled t >= strength from
+//                x = (1 - (1-1e-6)*t) * noise + t * src over [overlap, cols),
+//                the steps before it skipped (SDEdit), and the same blend is
+//                re-imposed at the top of the first `hold` fraction of the
+//                steps that remain. A window the source ends inside runs the
+//                full schedule instead, the source imposed on its covered
+//                columns until that point, so the uncovered tail is inpainted
+//                rather than started from noise at t0.
 static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const float * cond, int64_t L, int steps,
                                   float cfg_scale, int64_t overlap, const float * prev_latent, int64_t prev_stride,
                                   std::vector<float> & out_latents, MM3FlowStats * stats,
                                   const std::function<void(int, int)> & on_step,
                                   const std::function<bool()> & should_cancel, std::string * err,
-                                  MM3PluginRun * plugins = nullptr, int uncond_interval = 1) {
+                                  MM3PluginRun * plugins = nullptr, int uncond_interval = 1,
+                                  const MM3A2aWindow * a2a = nullptr) {
     if (L <= 0 || L > MM3_DIT_MAX_FRAMES) {
         if (err) {
             *err = "frames must be in 1.." + std::to_string(MM3_DIT_MAX_FRAMES);
@@ -377,6 +407,37 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
         mm3_flow_sigmas(steps, &sigmas, &timesteps);
     }
 
+    // Route B. i0 = the first step that runs; steps in [.., impose_end)
+    // re-impose the source. Both stay 0 without a source, so the loop below is
+    // the original one.
+    int i0 = 0, impose_end = 0;
+    if (a2a && a2a->cols > overlap) {
+        int is = 0;
+        while (is < steps && timesteps[(size_t) is] < a2a->strength - 1e-4f) {
+            is++;
+        }
+        if (a2a->strength < 1.0f && is == steps) {
+            is = steps - 1;  // below 1 the last step always runs, so no noise is left in the output
+        }
+        const int hold = (int) std::lround((double) a2a->hold * (double) (steps - is));
+        impose_end     = is + (hold > 1 ? hold : 1);
+        i0             = a2a->cols == L ? is : 0;
+    }
+    auto impose_source = [&](float t) {
+        const float a = 1.0f - (1.0f - 1e-6f) * t;
+        for (int64_t c = 0; c < C; c++) {
+            const float * np = noise + c * L;
+            const float * sp = a2a->src + c * a2a->stride;
+            float *       x  = out_latents.data() + c * L;
+            for (int64_t j = overlap; j < a2a->cols; j++) {
+                x[j] = a * np[j] + t * sp[j];
+            }
+        }
+    };
+    if (i0 == steps) {
+        impose_source(a2a->strength > 1.0f ? 1.0f : a2a->strength);  // strength 1: the source back, no step runs
+    }
+
     std::vector<float> pred_c((size_t) N);
     std::vector<float> pred_u((size_t) N);
 
@@ -470,7 +531,7 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
     const auto t_all  = std::chrono::steady_clock::now();
     double     fwd_ms = 0.0, first_ms = 0.0, last_ms = 0.0;
 
-    for (int i = 0; i < steps; i++) {
+    for (int i = i0; i < steps; i++) {
         const float t = timesteps[(size_t) i];
 
         // ── the overlap blend (the new logic) ──
@@ -488,6 +549,9 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
                 }
             }
         }
+        if (i < impose_end) {
+            impose_source(t);
+        }
 
         const auto t0 = std::chrono::steady_clock::now();
 
@@ -496,19 +560,19 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
         // returns both branches (batch 0 gated 1.0 = conditional, batch 1
         // gated 0.0 == zeros_like(condition)).
         if (batched_cfg) {
-            if (!mm3_dit_run_cfg2(m, &g_mm3_dit, out_latents.data(), i == 0 ? cond : nullptr, t, L, pred_c.data(),
+            if (!mm3_dit_run_cfg2(m, &g_mm3_dit, out_latents.data(), i == i0 ? cond : nullptr, t, L, pred_c.data(),
                                   pred_u.data(), err)) {
                 return false;
             }
             n_uncond++;
         } else {
-            if (!mm3_dit_run(m, &g_mm3_dit, out_latents.data(), i == 0 ? cond : nullptr, 1.0f, t, L, pred_c.data(),
+            if (!mm3_dit_run(m, &g_mm3_dit, out_latents.data(), i == i0 ? cond : nullptr, 1.0f, t, L, pred_c.data(),
                              err)) {
                 return false;
             }
             // Warmup, final step, and every Nth step evaluate the real
             // unconditional branch and refresh the delta; the rest rebuild it.
-            const bool eval_uncond = !delta_cache || i < 2 || i == steps - 1 || (i % uncond_every) == 0;
+            const bool eval_uncond = !delta_cache || i < i0 + 2 || i == steps - 1 || (i % uncond_every) == 0;
             if (eval_uncond) {
                 if (!mm3_dit_run(m, &g_mm3_dit, out_latents.data(), nullptr, 0.0f, t, L, pred_u.data(), err)) {
                     return false;
@@ -528,7 +592,7 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
 
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         fwd_ms += ms;
-        if (i == 0) {
+        if (i == i0) {
             first_ms = ms;
         }
         last_ms = ms;
@@ -647,7 +711,7 @@ static bool mm3_flow_sample_chunk(const MM3Model & m, const float * noise, const
     const double total_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_all).count();
     // Multi-eval solvers and post_step() add forwards that a flat 2/step count
     // would hide, making a Heun run look as cheap as an Euler one.
-    const int64_t n_forwards = (int64_t) steps + n_uncond + (use_plugins ? plugins->extra_forwards : 0);
+    const int64_t n_forwards = (int64_t) (steps - i0) + n_uncond + (use_plugins ? plugins->extra_forwards : 0);
     if (stats) {
         stats->steps         = steps;
         stats->forwards      = (int) n_forwards;
@@ -779,6 +843,15 @@ struct MM3GenRequest {
     // the seeded derivation for that window, so supplying window 0 alone is
     // legal.
     std::vector<std::vector<float>> forced_noise;
+
+    // Route B (audio2audio): the source's DAV latents, channel-major
+    // [128, a2a_cols] at the flow latent rate. Empty = off. The job layer
+    // (mm3-job.h) fills it, encoding the source on the GPU worker; window k
+    // reads from column mm3_a2a_column(k * hop). See MM3A2aWindow.
+    std::vector<float> a2a_src;
+    int64_t            a2a_cols     = 0;
+    float              a2a_strength = 0.0f;
+    float              a2a_hold     = 0.0f;
 
     bool keep_window_latents = false;  // populate MM3GenResult::window_latents
 
@@ -1198,6 +1271,7 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
     // means what it has always meant. (Observed before the fix: ar 50.3 s +
     // flow 27.4 s on a 60.2 s render.)
     double dispatch_ms = 0.0;
+    bool   a2a_end_logged = false;  // Route B: "the source ends here" is said once per job
 
     // In interleaved mode every stage collapses into ONE line. The planner and
     // the flow stage are now taking turns several times a second, so reporting
@@ -1274,9 +1348,25 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
                 rep(MM3GenProgress{ "flow", k, nw_hint, i, n });
             }
         };
+        MM3A2aWindow a2a;
+        if (!req.a2a_src.empty()) {
+            const int64_t col = mm3_a2a_column(cc, cs);
+            const int64_t avail = req.a2a_cols - col;
+            a2a.cols     = avail <= 0 ? 0 : avail < L ? avail : L;
+            a2a.src      = req.a2a_src.data() + (a2a.cols > 0 ? col : 0);
+            a2a.stride   = req.a2a_cols;
+            a2a.strength = req.a2a_strength;
+            a2a.hold     = req.a2a_hold;
+            if (a2a.cols < L && !a2a_end_logged) {
+                a2a_end_logged = true;
+                fprintf(stderr, "[MM3-Flow] a2a: the source ends at column %lld of window %lld (L=%lld); no blending "
+                                "past it\n", (long long) a2a.cols, (long long) k, (long long) L);
+            }
+        }
         if (!mm3_flow_sample_chunk(m, noise.data(), cond.data(), L, req.steps, req.cfg_flow, overlap,
                                    overlap > 0 ? st.prev_latent.data() : nullptr, st.prev_len, lat, &fstats, on_step,
-                                   req.should_cancel, err, &st.plugin_run, req.flow_uncond_interval)) {
+                                   req.should_cancel, err, &st.plugin_run, req.flow_uncond_interval,
+                                   a2a.cols > 0 ? &a2a : nullptr)) {
             return false;
         }
         out->flow_ms += fstats.total_ms;

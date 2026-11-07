@@ -64,10 +64,13 @@
 
 #include "hot-step-fsutf8.h"  // hs_stat / HS_STAT_T
 #include "mm3-ar-cache.h"
+#include "mm3-dav-encode.h"
 #include "mm3-hiddens-file.h"
 #include "mm3-lm-merge.h"
 #include "mm3-request.h"
 #include "mm3-server.h"
+#include "audio-resample.h"
+#include "model-store.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -581,6 +584,61 @@ static std::string mm3_b64_encode(const std::string & in) {
 
 // ── The worker ──────────────────────────────────────────────────────────────
 
+// Route B: the source through the DAV encoder, the refiner's encode phase
+// (mm3-refiner.h step 1) with its loader: 44.1 kHz stereo, zero-padded to the
+// 512-sample hop, then [128, L] latents at 86.1328125 Hz into gen.a2a_src.
+// Runs once at job start; the handle is released before the MM3 stack loads,
+// and arbitration evicts the module if keep-loaded parked it.
+static bool mm3_a2a_encode(MM3SynthRequest * req, std::string * err) {
+    std::string path;
+    for (const std::string & d : g_mm3.search_dirs) {
+        const std::string p = d + MM3_SEP "mm3-enc-f16.gguf";
+        HS_STAT_T         sb{};
+        if (hs_stat(p, &sb) == 0) {
+            path = p;
+            break;
+        }
+    }
+    if (path.empty()) {
+        *err = "a2a needs the DAV encoder mm3-enc-f16.gguf in " + g_mm3.models_dir + MM3_SEP "mm3";
+        return false;
+    }
+    const int64_t      hop = 512;
+    std::vector<float> wav;
+    int64_t            n = req->a2a_n;
+    if (req->a2a_rate == 44100) {
+        wav.swap(req->a2a_audio);
+    } else {
+        int     n_rs = 0;
+        float * rs   = audio_resample(req->a2a_audio.data(), (int) n, req->a2a_rate, 44100, 2, &n_rs);
+        if (!rs) {
+            *err = "a2a: resample to 44.1 kHz failed";
+            return false;
+        }
+        wav.assign(rs, rs + 2 * (int64_t) n_rs);
+        free(rs);
+        n = n_rs;
+    }
+    req->a2a_audio = std::vector<float>();
+    const int64_t padded = (n + hop - 1) / hop * hop;
+    std::vector<float> pad((size_t) (2 * padded), 0.0f);
+    for (int ch = 0; ch < 2; ch++) {
+        memcpy(pad.data() + ch * padded, wav.data() + ch * n, (size_t) n * sizeof(float));
+    }
+    ModelKey k{};
+    k.kind          = MODEL_MM3_ENC;
+    k.path          = path;
+    k.adapter_scale = 1.0f;
+    MM3Enc * enc = store_require_mm3_enc(g_store, k);
+    if (!enc) {
+        *err = "a2a DAV encoder: " + store_mm3_last_error();
+        return false;
+    }
+    ModelHandle   h(g_store, enc);
+    const float * ch[2] = { pad.data(), pad.data() + padded };
+    return mm3_enc_encode(enc, ch, padded, &req->gen.a2a_src, &req->gen.a2a_cols, err);
+}
+
 static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobState> st, MM3SynthRequest req) {
     auto set_stage = [&](const char * stage, int64_t window, int64_t n_windows, int64_t step, int64_t n_steps) {
         std::lock_guard<std::mutex> lock(st->mtx);
@@ -681,6 +739,21 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     if (job->cancel.load()) {
         fail(3, "cancelled", "cancelled before it started");
         return;
+    }
+
+    // Route B: encode the source once, before anything MM3 loads.
+    if (!req.a2a_audio.empty()) {
+        set_stage("a2a encode", -1, 0, 0, 0);
+        const auto t_enc = std::chrono::steady_clock::now();
+        std::string aerr;
+        if (!mm3_a2a_encode(&req, &aerr)) {
+            fprintf(stderr, "[MM3-Job] %s: %s\n", job->id.c_str(), aerr.c_str());
+            fail(2, "failed", aerr);
+            return;
+        }
+        fprintf(stderr, "[MM3-Job] %s: a2a source encoded - %lld latent columns (%.1f s) in %.0f ms\n", job->id.c_str(),
+                (long long) req.gen.a2a_cols, (double) req.gen.a2a_cols * 512.0 / 44100.0,
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_enc).count());
     }
 
     // Serialise against the bring-up /mm3/* endpoints, which still run on
@@ -1220,6 +1293,11 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
             fail(2, "failed", err.empty() ? "MM3 generation failed" : err);
         }
         return;
+    }
+    if (!req.gen.a2a_src.empty()) {
+        fprintf(stderr, "[MM3-Flow] a2a: strength %.2f hold %.2f src %lld cols windows %lld\n",
+                (double) req.gen.a2a_strength, (double) req.gen.a2a_hold, (long long) req.gen.a2a_cols,
+                (long long) rs[0].n_windows);
     }
     // Natural-ending candidates: the capped takes were never rendered; take
     // them out of the job here so everything downstream (take 0 = the primary

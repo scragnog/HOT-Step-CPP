@@ -77,12 +77,15 @@
 #include "mm3-pipeline.h"
 #include "mm3-tokenizer.h"
 
+#include "audio-io.h"
 #include "yyjson.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <random>
 #include <string>
@@ -630,6 +633,15 @@ struct MM3SynthRequest {
     std::vector<int32_t> forced_semantic;  // [I]
     std::vector<int32_t> forced_acoustic;  // [I * 7], flat, iteration-major
 
+    // ── Route B (audio2audio) ──────────────────────────────────────────────
+    // The source as read at parse time, planar stereo [2][a2a_n] at
+    // a2a_rate, already trimmed. Empty = off. mm3-job.h encodes it on the
+    // GPU worker into gen.a2a_src.
+    std::string        a2a_source;
+    std::vector<float> a2a_audio;
+    int64_t            a2a_n    = 0;
+    int                a2a_rate = 0;
+
     // ── Runtime LM LoRA (mm3-lm-adapter.h) ─────────────────────────────────
     // Path to a PEFT LM adapter (SimpleTuner language_model checkpoints).
     // Empty = base model. The group scales mirror the 2026-08-20 ablation
@@ -729,6 +741,19 @@ static bool mm3_req_str(yyjson_val * root, const char * key, std::string * out, 
 //                      a scheduler plugin. Ignored without one.
 //   apg_norm_threshold number in [0, 100], default 2.5
 //   plugin_params      object {"pluginName:key": value}, default {}
+//   a2a_source         string, absolute path to WAV or MP3 — Route B: the
+//                      source's DAV latents steer the flow (mm3-pipeline.h
+//                      MM3A2aWindow). Read here, encoded on the GPU worker.
+//   a2a_strength       number 0..1, default 0 = off: the flow starts at
+//                      t0 = strength from the noised source (SDEdit); 1 =
+//                      the source back. > 0 needs a2a_source.
+//   a2a_hold           number 0..1, default 0 — fraction of the remaining
+//                      steps that re-impose the source (RePaint-style).
+//   a2a_source_seconds number > 0, optional — use only the first N seconds.
+//                      Without forced codes or a saved plan the render
+//                      length is capped to the (trimmed) source.
+//   None of the a2a fields is in the AR cache key: they act on the flow only
+//   (the length cap reaches the key through max_frames, as any cap does).
 //
 //   The five plugin fields are ALL optional and all default to the native
 //   path, which is the one the parity fixtures cover. See mm3-plugins.h.
@@ -1243,6 +1268,64 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
         }
     }
 
+    // ── Route B: the source's sound in the flow ──
+    double a2a_strength = 0.0, a2a_hold = 0.0, a2a_secs = 0.0;
+    {
+        bool have_strength = false, have_hold = false, have_secs = false;
+        if (!mm3_req_str(root, "a2a_source", &out->a2a_source, &present, err) ||
+            !mm3_req_num(root, "a2a_strength", &a2a_strength, &have_strength, err) ||
+            !mm3_req_num(root, "a2a_hold", &a2a_hold, &have_hold, err) ||
+            !mm3_req_num(root, "a2a_source_seconds", &a2a_secs, &have_secs, err)) {
+            return false;
+        }
+        if (!(a2a_strength >= 0.0 && a2a_strength <= 1.0) || !(a2a_hold >= 0.0 && a2a_hold <= 1.0)) {
+            if (err) *err = "\"a2a_strength\" and \"a2a_hold\" must be 0 to 1";
+            return false;
+        }
+        if (have_secs && !(a2a_secs > 0.0 && std::isfinite(a2a_secs))) {
+            if (err) *err = "\"a2a_source_seconds\" must be greater than 0";
+            return false;
+        }
+        if (a2a_strength > 0.0) {
+            if (out->a2a_source.empty()) {
+                if (err) *err = "\"a2a_strength\" needs \"a2a_source\"";
+                return false;
+            }
+            int     T = 0, sr = 0;
+            float * planar = audio_read(out->a2a_source.c_str(), &T, &sr);
+            if (!planar || T <= 0 || sr <= 0) {
+                free(planar);
+                if (err) *err = "\"a2a_source\": cannot read audio from " + out->a2a_source;
+                return false;
+            }
+            int64_t n = T;
+            if (have_secs) {
+                n = std::min<int64_t>(n, (int64_t) std::llround(a2a_secs * sr));
+            }
+            out->a2a_audio.resize((size_t) (2 * n));
+            for (int ch = 0; ch < 2; ch++) {
+                memcpy(out->a2a_audio.data() + ch * n, planar + (int64_t) ch * T, (size_t) n * sizeof(float));
+            }
+            free(planar);
+            out->a2a_n    = n;
+            out->a2a_rate = sr;
+            // The frames the source covers: F frames need trunc(F * 3.4453125)
+            // latents, the source holds n / 512 at 44.1 kHz, so F = n * 25 / sr.
+            const int64_t src_frames = n * frame_rate / sr;
+            if (src_frames < frame_rate) {
+                if (err) *err = "\"a2a_source\" is shorter than 1 second";
+                return false;
+            }
+            if (out->forced_semantic.empty() && out->forced_frame_hiddens_file.empty() &&
+                out->max_frames > src_frames) {
+                out->max_frames = src_frames;
+                out->duration   = (double) src_frames / (double) frame_rate;
+            }
+        } else {
+            out->a2a_source.clear();  // strength 0 = off, whatever else came along
+        }
+    }
+
     // ── Sampler plugins (mm3-plugins.h) ──
     // Field names are ACE's on purpose: one UI control set, one wire vocabulary,
     // and a request that can be moved between backends without translation.
@@ -1346,6 +1429,8 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
     // lifetime — a path string must never be dereferenced this early because
     // parse runs on the HTTP thread and load must run on the GPU worker.
     out->gen.lm_adapter_scales = out->lm_adapter_scales;
+    out->gen.a2a_strength      = (float) a2a_strength;
+    out->gen.a2a_hold          = (float) a2a_hold;
 
     // Sampling knobs parse LAST, after the finalize above REBUILDS out->gen
     // from scratch (out->gen = MM3GenRequest{}). Parsed any earlier they are

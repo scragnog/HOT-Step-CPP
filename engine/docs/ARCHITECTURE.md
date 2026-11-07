@@ -415,6 +415,7 @@ are reported, not ignored.
 | `forced_frame_hiddens_file`, `save_frame_hiddens`, `frame_hiddens_save_path` | | Load or save the planner output as a `.mm3hiddens` file |
 | `forced_semantic`, `forced_acoustic` | | Replay captured codes; `forced_acoustic` has 7 entries per semantic entry. `forced_semantic` alone pins content and samples the acoustic codes from the caption. A `-1` entry is a free frame |
 | `lm_force_bias` | absent | Semantic-only soft forcing, 0 to 1000: adds this to the forced code's guided logit and samples instead of pinning. Absent = hard pin. With a bias or a `-1` frame, `forced_acoustic` is refused |
+| `a2a_source`, `a2a_strength`, `a2a_hold`, `a2a_source_seconds` | absent, 0, 0, absent | Audio to audio (Route B). The WAV or MP3 at the absolute path `a2a_source` is DAV-encoded once at job start, and each flow window starts at `t0 = a2a_strength` from the noised source, skipping the steps before it (SDEdit). 0 = off, 1 = the source back. `a2a_hold` (0 to 1) re-imposes the source at the top of that fraction of the remaining steps. `a2a_source_seconds` trims the source. Without forced codes or a saved plan the render length is capped to the source. Not in the AR cache key |
 | `stream` | false | Emit audio per window for `GET /mm3/stream` |
 | `lm_adapter` | `""` | Path to a PEFT LM adapter |
 | `lm_adapter_mode` | `"runtime"` | `runtime` or `merge` |

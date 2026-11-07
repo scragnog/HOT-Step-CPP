@@ -321,6 +321,21 @@ is a different acoustic take from the hard pin. The blob comes back from `GET /m
 as little-endian i32 — `[n_sem][sem…][n_ac][ac…]` — and is stored as
 `<uuid>.mm3plank` beside a `.mm3plank.json` sidecar in `<data>/mm3-planks/`.
 
+**Route B: the source's sound in the flow (HOTSTEP-1056).** The Plank steers the
+plan; `a2a_source` + `a2a_strength` steer the sound. The job DAV-encodes the source
+once through the refiner's encoder (`mm3_a2a_encode` in `mm3-job.h`, ModelStore
+`mm3-enc-f16`, released before the MM3 stack loads). Window k reads source columns
+from `round(k * hop * 3.4453125)`; `mm3_flow_sample_chunk` starts at the first
+scheduled t >= strength from the noised source and skips the steps before it, so
+strength 0.5 costs half the flow forwards. `a2a_hold` re-imposes the source over
+`[overlap, L)` for that fraction of the remaining steps. A window the source ends
+inside runs the full schedule with the source imposed on its covered columns
+(inpainting the rest), and later windows render normally. Strength 1 returns the
+source at 0.93 to 0.998 per-segment correlation. The stitch advances 345 latents
+per window against 344.53 true, so the output drifts one column (512 samples)
+about every two windows against the source; that drift predates Route B. Absent
+fields keep the old path bit-identical.
+
 **Read this before building on it: replay is NOT a speedup.** The AR loop still
 executes every per-frame forward pass, so the planning progress bar still runs
 to 100 % on a replay job. Forcing fixes *which tokens come out*, not how much
