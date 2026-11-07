@@ -45,6 +45,8 @@ import { config, PORTABLE_MODE, PROJECT_ROOT } from '../../../config.js';
 import { getDb } from '../../../db/database.js';
 import { aceClient } from '../../aceClient.js';
 import { wavDurationSec } from '../../audioCrop.js';
+import { engineFormatPath } from '../../audioConvert.js';
+import { resolveSourceAudioPath } from '../../generation/sourceAudio.js';
 import { MM3_PLANK_EXT, mm3PlankDir, readMm3Plank } from './plank.js';
 import { applyMm3ForcePattern, parseMm3ForcePattern, trimMm3Codes } from './coverPattern.js';
 import {
@@ -487,7 +489,24 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   // floor all stand down while one is loaded. Read once, here, so the plank
   // block below and these switches agree on whether it loaded.
   const plankCodes = params.mm3PlankPath ? readMm3Plank(String(params.mm3PlankPath)) : null;
-  const requireEnding = !plankCodes && params.mm3RequireEnding !== false;
+  // Audio to audio (engine Route B): the source's DAV latents steer the flow.
+  // On when a strength above 0 arrives with a source. Without a plank the
+  // engine caps the length to the source, so endings and the length floor
+  // stand down here as they do for a plank.
+  const a2aStrength = Math.min(1, Number(params.mm3A2aStrength));
+  let a2aSource = '';
+  if (a2aStrength > 0 && params.sourceAudioUrl) {
+    const src = resolveSourceAudioPath(String(params.sourceAudioUrl));
+    if (!fs.existsSync(src)) throw new Error(`Source audio file is missing (${path.basename(src)}); re-upload the track.`);
+    a2aSource = engineFormatPath(src);
+  }
+  const a2aHold = Math.min(1, Math.max(0, Number(params.mm3A2aHold) || 0));
+  const a2aSeconds = Number(params.mm3A2aSourceSeconds) > 0 ? Number(params.mm3A2aSourceSeconds) : 0;
+  if (a2aSource) {
+    notes.push(`audio to audio: source sound at strength ${a2aStrength}${a2aHold > 0 ? `, hold ${a2aHold}` : ''}`
+      + (a2aSeconds ? `, first ${a2aSeconds} s` : '') + (plankCodes ? '' : ' (length follows the source)'));
+  }
+  const requireEnding = !plankCodes && !a2aSource && params.mm3RequireEnding !== false;
   const askedTakes = !plankCodes && Number(params.mm3Takes) > 1
     ? Math.min(MM3_MAX_TAKES, Math.max(1, Math.round(Number(params.mm3Takes))))
     : 1;
@@ -512,7 +531,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   // Rides the ending machinery: a plan under the floor is dropped and re-planned
   // exactly like one that never ended, because the remedy is the same. Works
   // with endings off too — the engine then accepts any plan that is long enough.
-  const minLengthOn = !plankCodes && params.mm3MinLength !== false;
+  const minLengthOn = !plankCodes && !a2aSource && params.mm3MinLength !== false;
   const minDurationSec = minLengthOn ? mm3MinDurationSec(lyrics) : 0;
   const minFrames = minDurationSec > 0 ? Math.round(minDurationSec * MM3_FPS) : 0;
   if (minFrames > 0) {
@@ -618,6 +637,12 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
       ...(minFrames > 0 ? {
         min_frames: minFrames,
         ...(requireEnding ? {} : { eos_rounds: MM3_ENDING_ROUNDS }),
+      } : {}),
+      ...(a2aSource ? {
+        a2a_source: a2aSource,
+        a2a_strength: a2aStrength,
+        ...(a2aHold > 0 ? { a2a_hold: a2aHold } : {}),
+        ...(a2aSeconds ? { a2a_source_seconds: a2aSeconds } : {}),
       } : {}),
       // MM3 Plank replay. A plank that will not load is a note, not a failure:
       // the render proceeds with a normal AR pass.

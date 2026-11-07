@@ -383,6 +383,8 @@ async function capabilities(): Promise<BackendCapabilities> {
       // not an audio-to-audio transform.
       cover: true,
       coverCodeForcing: true,
+      // ...and can blend the source's DAV latents into the flow (a2a_strength).
+      coverLatentBlend: true,
       repaint: false,
       lego: false,
       extract: false,

@@ -224,6 +224,12 @@ function mm3Facts(gp: any): FactGroup[] {
     }
     if (gp.mm3PlankTrimSeconds) add(cover, 'Trim', `${num(gp.mm3PlankTrimSeconds)} s`);
   }
+  // Sound: the source's latents blended into the flow (audio to audio).
+  if (Number(gp.mm3A2aStrength) > 0) {
+    add(cover, 'Sound', num(gp.mm3A2aStrength));
+    if (Number(gp.mm3A2aHold) > 0) add(cover, 'Hold', num(gp.mm3A2aHold));
+    if (Number(gp.mm3A2aSourceSeconds) > 0) add(cover, 'Source trim', `${num(gp.mm3A2aSourceSeconds)} s`);
+  }
   if (cover.length) groups.push({ title: 'Cover', facts: cover });
 
   const seeds: Fact[] = [];

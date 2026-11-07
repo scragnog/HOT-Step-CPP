@@ -15,7 +15,9 @@ YuE2 also supports Cover Studio, through a reviewed lead sheet rather than audio
 conditioning. Stable Audio 3 also offers an instrumental source-audio refine
 in Cover Studio. HeartMuLa's MuLaCover mode uses the approved Prepare ABC lead
 sheet, four style tag fields and lyrics; its engine route and separate CC BY-NC
-model pack are pending. MiniMax-Music3 is text-to-music only.
+model pack are pending. MiniMax-Music3 covers in Cover Studio by forcing the
+source's encoded codes on its planner, blending the source audio into its flow
+stage, or both.
 
 For which quant and settings give the best output on each backend, see
 [Getting higher quality output](quality.md), which has a per-backend cheat sheet. This
@@ -424,7 +426,7 @@ controls the UI shows for it. "?" means not yet confirmed.
 | Caption format | Free text, plus BPM, key and time signature fields | Structured Caption | Free text; BPM and key folded into the style | Free text, up to 256 tokens |
 | Duration | Set by you, 10 to 600 s | Model-ended, ceiling 300 s | Model-ended, up to 360 s, no control | Set by you, up to 600 s; Auto gives 30 s |
 | Songs per request | Up to 9 | 1, or up to 4 with Variations Per Render | Up to 4 with Batch Size | 1 |
-| Cover Studio | Yes, source-audio conditioning | No | Yes, reviewed ABC composition conditioning | Yes, source-audio refine |
+| Cover Studio | Yes, source-audio conditioning | Yes, planner code forcing and source-audio blend | Yes, reviewed ABC composition conditioning | Yes, source-audio refine |
 | Repaint | Yes (Repaint) | No | No | No |
 | Extend | Yes, in Song Builder | No | No | No |
 | Adapters at generation | DiT LoRA and LoKr, planner LM LoRA and LoKr | Planner LM LoRA and LoKr, runtime or merge, applied per render | AR and NAR LoRA and LoKr, merged at load; ComfyUI joint files via import | DoRA-rows in Cover Studio, plus Training Studio auditions |

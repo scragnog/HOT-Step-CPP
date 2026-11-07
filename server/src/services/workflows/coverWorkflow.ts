@@ -112,9 +112,9 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
   }
   if (i.expectedBackend === 'minimax-m3') {
     const m = i.mm3Cover;
-    if (!m) throw new WorkflowError(400, 'Encode or pick a reference plank first');
+    if (!m || (!m.plank && !m.soundStrength)) throw new WorkflowError(400, 'Turn on Plan (encode or pick a reference) or Sound');
     // The global bar's MM3 settings (LM knobs, adapter, flow) ride along; the
-    // plank pins the length, so takes, endings and saved plans stand down.
+    // plank or the source pins the length, so takes, endings and saved plans stand down.
     const mm3 = Object.fromEntries(Object.entries(e).filter(([key]) => key.startsWith('mm3')));
     return { ...shared, ...mm3, backend: 'minimax-m3', expectedBackend: 'minimax-m3', taskType: 'text2music',
       customMode: true, caption: i.caption, style: i.caption, title: coverTitle(i),
@@ -122,7 +122,10 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
       source: 'cover-studio', sourceAudioUrl: url,
       artistName: i.targetArtistName || i.artistName, sourceArtist: i.artistName,
       ...(i.seed !== undefined ? { seed: i.seed, randomSeed: i.seed < 0 } : {}),
-      mm3PlankPath: m.plank, mm3PlankSemanticOnly: m.semanticOnly,
+      mm3PlankPath: m.plank ?? '', mm3PlankSemanticOnly: m.semanticOnly,
+      // Sound: the source's latents in the flow. Trim covers both when both are on.
+      mm3A2aStrength: m.soundStrength ?? '', mm3A2aHold: m.soundStrength ? m.soundHold ?? 0 : '',
+      mm3A2aSourceSeconds: m.soundStrength && m.plank ? m.trimSeconds ?? '' : '',
       mm3ForceBias: m.forceBias ?? '', mm3ForcePattern: m.pattern ?? undefined,
       mm3PlankTrimSeconds: m.trimSeconds ?? undefined, mm3ArSeed: m.arSeed >= 0 ? m.arSeed : '',
       mm3Takes: 1, mm3HiddensPath: '', mm3SaveHiddens: false };

@@ -63,7 +63,7 @@ import { readLeadSheetSource, selectedLeadSheetSource, leadSheetReadinessPath, l
 import { documentOptions } from '../../queries/cover-lyrics/workflows';
 import { HeartmulaCoverPanel } from './HeartmulaCoverPanel';
 import { Mm3CoverPanel } from './Mm3CoverPanel';
-import { DEFAULT_MM3_COVER, mm3CoverInput, type Mm3CoverSettings } from './mm3CoverState';
+import { DEFAULT_MM3_COVER, mm3CoverInput, mm3CoverReady, type Mm3CoverSettings } from './mm3CoverState';
 import { EMPTY_HEARTMULA_TAGS, type HeartmulaCoverTags } from './heartmulaCoverState';
 import { Yue2CoverPanel, COVER_AR_DEFAULT, clampCoverAr, COVER_GUIDE_DEFAULT, coverGuideBlock, type CoverGuideState } from './Yue2CoverPanel';
 import { resolveYue2Render, type Yue2RenderMode } from './yue2RenderMode';
@@ -1619,7 +1619,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       submitCoverWorkflow(); return;
     }
     if (mm3Mode) {
-      if (!token || !sourceAudioUrl || !coverDraftId || !coverDraftRevision || !mm3Cover.plank) return;
+      if (!token || !sourceAudioUrl || !coverDraftId || !coverDraftRevision || !mm3CoverReady(mm3Cover)) return;
       submitCoverWorkflow();
       return;
     }
@@ -1910,7 +1910,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     ? !!token && sourceMode === 'audio' && !!sourceAssetId && !!coverDraftId && !!coverDraftRevision
       && !!confirmedPair && !!approvedSheet && approvedSheet.key === sourceKey
     : mm3Mode
-    ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision && !!mm3Cover.plank
+    ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision && mm3CoverReady(mm3Cover)
     : audioTransformMode
     ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision && !!artistCaption.trim()
     : (!yue2Mode || sourceMode === 'audio' ? !!sourceAudioUrl && (!sourceAssetId || (!!coverDraftId && !!coverDraftRevision)) : true)

@@ -2,6 +2,12 @@
 // cover-render workflow's `mm3Cover` field (contracts/studioWorkflows.ts).
 
 export interface Mm3CoverSettings {
+  /** Plan: force the reference's codes (everything from plank to trim). Off = no codes sent. */
+  plan: boolean;
+  /** Sound: blend the source's DAV latents into the flow at soundStrength. */
+  sound: boolean;
+  soundStrength: number;
+  soundHold: number;
   plank: string;
   semanticOnly: boolean;
   /** Blank = hard pin. */
@@ -17,6 +23,7 @@ export interface Mm3CoverSettings {
 }
 
 export const DEFAULT_MM3_COVER: Mm3CoverSettings = {
+  plan: true, sound: false, soundStrength: 0.5, soundHold: 0,
   plank: '', semanticOnly: true, forceBias: '', patternMode: 'all', patternValue: '', invert: false,
   trimSeconds: '', seed: -1, arSeed: -1,
 };
@@ -42,9 +49,13 @@ export function mm3CoverInput(s: Mm3CoverSettings) {
       : ranges.length ? { pinnedRanges: ranges } : null;
   const bias = s.forceBias.trim() === '' ? NaN : Number(s.forceBias);
   return {
-    plank: s.plank, semanticOnly: s.semanticOnly,
+    plank: s.plan && s.plank ? s.plank : null, semanticOnly: s.semanticOnly,
+    soundStrength: s.sound && s.soundStrength > 0 ? s.soundStrength : null, soundHold: s.soundHold,
     forceBias: Number.isFinite(bias) && bias >= 0 ? Math.min(bias, 1000) : null,
     pattern: pattern ? { ...pattern, ...(s.invert ? { invert: true } : {}) } : null,
     trimSeconds: positive(s.trimSeconds), arSeed: s.arSeed,
   };
 }
+
+/** Something to render: Plan with a reference, Sound with a strength, or both. */
+export const mm3CoverReady = (s: Mm3CoverSettings) => (s.plan && !!s.plank) || (s.sound && s.soundStrength > 0);

@@ -1,12 +1,14 @@
-// Mm3CoverPanel.tsx — Cover Studio on MiniMax-Music3: encode the source into a
-// plank (its RVQ codes), then replay those codes under a new caption and lyrics
-// with every forcing lever exposed. Server side: POST /api/mm3/cover/encode,
-// the plank block in backends/minimax/generate.ts, coverPattern.ts.
+// Mm3CoverPanel.tsx — Cover Studio on MiniMax-Music3. Two switches: Plan
+// encodes the source into a plank (its RVQ codes) and replays them under a new
+// caption and lyrics with every forcing lever exposed; Sound blends the
+// source's DAV latents into the flow (engine a2a_strength). Server side: POST
+// /api/mm3/cover/encode, the plank and a2a blocks in backends/minimax/generate.ts.
 import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { apiClient } from '../../services/httpClient';
 import { ParamLabel } from '../shared/ParamLabel';
+import { Slider } from '../shared/Slider';
 import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import type { Mm3CoverSettings } from './mm3CoverState';
@@ -74,6 +76,13 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
     <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">{t('cover.mm3.title', 'MiniMax-Music3 cover')}</h2>
     <p className="text-xs text-zinc-500">{t('cover.mm3.description', "Encodes the source into MM3's own codes, then replays them under your caption and lyrics. The codes carry the song; the levers below set how tightly it is held.")}</p>
 
+    <ParamLabel label={t('cover.mm3.influence', 'Source influence')} underline={false}
+      className="text-sm font-semibold text-zinc-700 dark:text-zinc-300"
+      info={t('cover.mm3.influenceInfo', "Plan steers what the LM writes: the source's codes, held as tightly as the levers say. Sound steers how the render sounds: the source's audio blended into the flow. Use either or both.")} />
+    <Toggle size="sm" accent="cyan" checked={settings.plan} onChange={plan => set({ plan })} defaultValue
+      label={t('cover.mm3.plan', 'Plan')}
+      info={t('cover.mm3.planInfo', "Force the reference's codes on the LM planner. Off: no codes are sent and the planner writes its own song from the caption and lyrics.")} />
+    {settings.plan && <div className="space-y-4 border-l border-cyan-500/20 pl-3">
     <div className="space-y-2">
       <ParamLabel label={t('cover.mm3.reference', 'Reference')}
         info={t('cover.mm3.referenceInfo', 'Encode the loaded source once; it is saved as a plank and appears in this list for later covers. Encoding stops the engine for a minute or two, so do not start it during a render.')} />
@@ -123,6 +132,21 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
       <input className={inputClass} type="number" min={1} step={1} placeholder={t('cover.mm3.wholeReference', 'Whole reference')}
         value={settings.trimSeconds} onChange={e => set({ trimSeconds: e.target.value })} />
     </label>
+    </div>}
+
+    <Toggle size="sm" accent="cyan" checked={settings.sound} onChange={sound => set({ sound })} defaultValue={false}
+      label={t('cover.mm3.sound', 'Sound')}
+      info={t('cover.mm3.soundInfo', "Blend the source's audio into the flow, so its harmony, rhythm placement and energy steer the render. Without Plan the render is as long as the source.")} />
+    {settings.sound && <div className="space-y-3 border-l border-cyan-500/20 pl-3">
+      <Slider label={t('cover.mm3.soundStrength', 'Strength')} value={settings.soundStrength}
+        onChange={soundStrength => set({ soundStrength })} min={0} max={1} step={0.05} defaultValue={0.5}
+        info={t('cover.mm3.soundStrengthInfo', 'How much of the source survives. The flow starts this far along from the noised source and skips the steps before it, so higher is also faster. 1 gives the source back; 0 is off.')} />
+      <Slider label={t('cover.mm3.soundHold', 'Hold')} value={settings.soundHold}
+        onChange={soundHold => set({ soundHold })} min={0} max={1} step={0.05} defaultValue={0}
+        info={t('cover.mm3.soundHoldInfo', 'Fraction of the remaining steps that put the source back at the top of each step. 0 lets the render drift from the source after the start; higher keeps it closer.')} />
+      <p className="text-xs text-zinc-500">{t('cover.mm3.soundNote', "Follows the source's timeline. With Plan off the planner writes its own song and the two can fight; start with Plan on.")}</p>
+      {settings.plan && settings.trimSeconds.trim() !== '' && <p className="text-xs text-zinc-500">{t('cover.mm3.soundTrim', 'Trim applies to the source audio too.')}</p>}
+    </div>}
 
     <label className="block space-y-2">
       <ParamLabel label={t('cover.sa3.caption', 'Caption')} info={t('cover.mm3.captionInfo', 'The style for the cover, in the MM3 caption format.')} />

@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   MM3_DEFAULT_FLOW_HOP, MM3_DEFAULT_STEPS, MM3_FP8_CALIB_PATH, mapMinimaxParams, mm3LowStepShift,
 } from './generate.js';
@@ -52,4 +55,28 @@ test('MM3 defaults to TensorRT FP8 with the shipped calibration; BF16 stays sele
   assert.equal(Object.hasOwn(bf16, 'dit_precision'), false);
   assert.equal(Object.hasOwn(bf16, 'dit_fp8_calib'), false);
   assert.throws(() => mapMinimaxParams({ ...params, mm3DitPrecision: 'int4' }), /Invalid MM3 DiT precision/);
+});
+
+test('MM3 audio to audio: source and dials travel only with a strength, and the source sets the length', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm3-a2a-'));
+  const src = path.join(dir, 'source.mp3');
+  fs.writeFileSync(src, '');
+  try {
+    const params = { prompt: 'Instrumental ambient', seed: 42, sourceAudioUrl: src };
+    const plain = mapMinimaxParams(params).req;
+    assert.equal(Object.keys(plain).some(k => k.startsWith('a2a_')), false);
+    assert.deepEqual(mapMinimaxParams({ ...params, mm3A2aStrength: 0, mm3A2aHold: 0.5 }).req, plain);
+    const on = mapMinimaxParams({ ...params, mm3A2aStrength: '0.5', mm3A2aHold: 0.25, mm3A2aSourceSeconds: 20 }).req;
+    assert.equal(on.a2a_source, src);
+    assert.equal(on.a2a_strength, 0.5);
+    assert.equal(on.a2a_hold, 0.25);
+    assert.equal(on.a2a_source_seconds, 20);
+    assert.equal(Object.hasOwn(on, 'require_eos'), false);
+    assert.equal(Object.hasOwn(on, 'min_frames'), false);
+    assert.equal(Object.hasOwn(mapMinimaxParams({ ...params, mm3A2aStrength: 1 }).req, 'a2a_hold'), false);
+    assert.throws(() => mapMinimaxParams({ ...params, sourceAudioUrl: path.join(dir, 'gone.mp3'), mm3A2aStrength: 0.5 }),
+      /Source audio file is missing/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

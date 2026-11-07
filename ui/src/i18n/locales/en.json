@@ -2615,6 +2615,7 @@
     "library.badge.quant": "Quant",
     "library.badge.scale": "Adapter",
     "library.badge.bias": "Force bias",
+    "library.badge.sound": "Sound",
     "library.download": "Download",
     "library.delete": "Delete",
     "library.rename": "Rename",

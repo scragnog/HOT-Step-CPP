@@ -106,6 +106,28 @@ timbre override or vocal language. Analysis, saved drafts and source separation
 remain available. Separation is for inspection here; mixer changes do not alter
 the full uploaded audio sent to the transform.
 
+## MiniMax-Music3 cover
+
+On MiniMax-Music3 the right column holds two switches under **Source influence**.
+Use either or both.
+
+- **Plan** steers what the LM planner writes. **Encode source** turns the loaded
+  source into MM3 codes, saved as a reference you can pick again later. The
+  levers set how tightly the codes are held: semantic codes only, force bias
+  (blank pins every frame), which frames are forced, and a trim. Off sends no
+  codes, and the planner writes its own song from the caption and lyrics.
+- **Sound** steers how the render sounds. The source audio is blended into the
+  flow stage, so its harmony, rhythm placement and energy carry over.
+  **Strength** (0 to 1) sets how much of the source survives: 1 gives the source
+  back, and higher values also render faster because the steps before that point
+  are skipped. **Hold** (0 to 1) puts the source back at the start of that share
+  of the remaining steps, keeping the render closer to it. Without Plan the
+  render is as long as the source, and the planner can pull against it, so start
+  with Plan on. With both on, the trim applies to the source audio too.
+
+Caption, lyrics, seed and planner seed sit below. LM sampling and the LM adapter
+come from the MM3 settings in the top bar. Each cover is one take.
+
 ## ACE workflow
 
 1. Drop a source track of up to 200 MB into the upload zone (MP3, WAV, FLAC, OGG, M4A, Opus, AAC),
@@ -771,9 +793,8 @@ its value has moved from the default; click it to snap that one field back.
 
 ## Tips and limits
 
-- Cover generation needs ACE-Step 1.5, YuE2 or Stable Audio 3 active.
-  HeartMuLa offers Prepare while MuLaCover rendering awaits engine support.
-  MiniMax-Music3 does not list the studio.
+- Cover generation needs ACE-Step 1.5, YuE2, Stable Audio 3 or MiniMax-Music3
+  active. HeartMuLa offers Prepare while MuLaCover rendering awaits engine support.
 - For ACE-Step and YuE2, splitting into stems is step one of two. The split by itself does not change the
   render; the mixer is where muting or lowering a stem actually removes it from
   the cover.
