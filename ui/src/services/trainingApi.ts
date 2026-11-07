@@ -2645,6 +2645,29 @@ export async function listMm3Runs(id: string, reqOpts?: ReadOptions): Promise<{ 
   );
 }
 
+/** One saved MM3 preview take (server mm3Ladder.ts). */
+export type Mm3LadderPreview = TrainingPreview & { audioUrl: string };
+/** An MM3 run's checkpoint ladder: GET /datasets/:id/mm3-previews?run=. */
+export interface Mm3Ladder {
+  dataset: { id: string; revision: string };
+  run: string;
+  running: boolean;
+  /** The adapter the dataset's album presets use now, or null. */
+  inUse: string | null;
+  checkpoints: Array<{ step: number; ref: string; loss?: number }>;
+  previews: Mm3LadderPreview[];
+}
+
+export function getMm3Ladder(id: string, run: string, reqOpts?: ReadOptions): Promise<Mm3Ladder> {
+  return localRequest<Mm3Ladder>(`/datasets/${encodeURIComponent(id)}/mm3-previews?run=${encodeURIComponent(run)}`, undefined, reqOpts);
+}
+
+/** One more take of a saved step (0 = base). Silent: the ladder shows the error. */
+export function renderMm3LadderTake(id: string, run: string, step: number): Promise<{ previews: TrainingPreview[] }> {
+  return localRequest(`/datasets/${encodeURIComponent(id)}/mm3-previews/render`,
+    { method: 'POST', ...jsonBody({ run, step }), timeout: 15 * 60_000, silent: true });
+}
+
 /** Continue a previous run: same adapter directory, same recipe, more steps.
  *  Everything not named here comes from what that run was trained with. */
 export async function resumeMm3TrainLm(

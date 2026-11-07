@@ -30,7 +30,7 @@ import {
   type Mm3CodesArgs, type ResolvedMm3TrainLmOptions,
 } from './mm3Train.js';
 import { mm3AdapterRoot, writeMm3RunManifest } from './mm3Runs.js';
-import { refreshMm3PresetsForNewRun } from './lyricStudioExport.js';
+import { pointMm3PresetsAt } from './lyricStudioExport.js';
 import {
   emitJob, emitProgress, finishJob, isCancelled, killJobChild, pushEvent, type TrainingJob,
   trainerLine,
@@ -520,7 +520,7 @@ async function renderPreviewSet(
  *  injectable so the on/off cases can be tested without a database. */
 export function refreshLinkedMm3Presets(
   job: TrainingJob, opts: { updateLinkedPresets?: boolean }, finalCkpt: string | undefined,
-  deps = { refresh: refreshMm3PresetsForNewRun, lookup: getDataset },
+  deps = { refresh: pointMm3PresetsAt, lookup: getDataset },
 ): void {
   if (!finalCkpt) return;
   if (opts.updateLinkedPresets === false) {

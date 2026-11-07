@@ -275,6 +275,13 @@ export function scopedKey(base: string, backendId: string = activeBackendId()): 
   return backendId === 'ace' ? base : `${base}@${backendId}`;
 }
 
+/** setBackendParam for `backendId`'s bag, whichever backend is active: a
+ *  training ladder's "Use this checkpoint" sets MM3's adapter from any mode. */
+export function setBackendParamFor(backendId: string, key: string, v: unknown): void {
+  if (activeBackendId() === backendId) { useGlobalParamsStore.getState().setBackendParam(key, v); return; }
+  writeKey(scopedKey('hs-backendParams', backendId), { ...readScoped<Record<string, unknown>>('hs-backendParams', {}, backendId), [key]: v });
+}
+
 /** The YuE2 LM tab's planner/composer sampler settings and CFG, whichever
  *  backend is active: training previews render with them. */
 export function yue2SamplerSnapshot(): Record<string, number | string> {

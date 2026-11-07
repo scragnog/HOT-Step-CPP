@@ -18,6 +18,7 @@ const TR = {
   yue2Status: 'training-runs/yue2-status',
   arStatus: 'training-runs/ar-status',
   mm3Runs: 'training-runs/mm3-runs',
+  mm3Ladder: 'training-runs/mm3-ladder',
   narRuns: 'training-runs/nar-runs',
   arRuns: 'training-runs/ar-runs',
   jointRuns: 'training-runs/joint-runs',
@@ -67,6 +68,10 @@ export const runQueries = {
   mm3Runs: (id: string) => queryOptions({
     queryKey: serverKey(TR.mm3Runs, { id }),
     queryFn: ({ signal }) => api.listMm3Runs(id, { signal }),
+  }),
+  mm3Ladder: (id: string, run: string) => queryOptions({
+    queryKey: serverKey(TR.mm3Ladder, { id, filters: { run } }),
+    queryFn: ({ signal }) => api.getMm3Ladder(id, run, { signal }),
   }),
   narRuns: (id: string) => queryOptions({
     queryKey: serverKey(TR.narRuns, { id }),

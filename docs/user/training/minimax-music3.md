@@ -109,13 +109,13 @@ The engine is paused while training runs, so you cannot generate until it finish
 
 ## Picking a checkpoint
 
-Checkpoints land straight in the MM3 adapter folder, so each one shows up in the LM Adapter dropdown as soon as it is saved. Each checkpoint gets a 40-second preview in the **Previews** list under the running job. The preview settings sit in the collapsible **Audio previews during training** block, the shared block YuE2 and Stable Audio 3 also use; turning off **Render previews during training** sets both cadences (steps and minutes) to zero.
+Checkpoints land straight in the MM3 adapter folder, so each one shows up in the LM Adapter dropdown as soon as it is saved. Each checkpoint gets a 40-second preview in the **Checkpoint ladder** under the running job, the same ladder YuE2 uses. After the run, **Checkpoints** on a run in **Previous runs** opens that run's ladder again (the newest finished run's is open by default). **Render more** adds a take of a step on a new random seed, and **Use this checkpoint** makes that step the LM adapter in the global bar and in the album presets linked to the dataset; pick another step to move it. MM3 has no likeness or corruption scores. The preview settings sit in the collapsible **Audio previews during training** block, the shared block YuE2 and Stable Audio 3 also use; turning off **Render previews during training** sets both cadences (steps and minutes) to zero.
 
 Do not pick by held-out loss. It bottoms out early and then rises, while the checkpoint that sounds right came 1 to 8 times later in the sweeps behind this recipe. The held-out loss measures how well the adapter generalises to unseen songs, and the goal here is a clone of the seen ones. Treat it as an alarm for a run going badly wrong, nothing more.
 
 Listen for two things that move in opposite directions as training goes on. Likeness (does it sound like the band) rises with steps. Coherence (does the song hold together, are the vocals articulate) falls; the symptom is jumbled, slurred vocals. The MLP slider at generation time recovers coherence at a late checkpoint without giving back much likeness, so try MLP 0.5 before retraining.
 
-A preview is one sample at one seed. A single garbled preview between two good ones may be sampling luck, not a broken checkpoint. Render that checkpoint at two other seeds before believing it.
+A preview is one sample at one seed. A single garbled preview between two good ones may be sampling luck, not a broken checkpoint. Press **Render more** on that checkpoint twice before believing it.
 
 Albums differ. One album had a rhythm defect at an early checkpoint that went away with more training, and a dense-lyric album never got coherent at any rung. Do not apply a blanket stop-early rule.
 

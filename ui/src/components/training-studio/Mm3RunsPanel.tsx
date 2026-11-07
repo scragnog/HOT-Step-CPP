@@ -29,6 +29,7 @@ import { type Mm3RunSummary } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { formatDateTime } from '../../utils/dateUtils';
 import { ParamLabel } from '../shared/ParamLabel';
+import { Mm3CheckpointLadder } from './Mm3CheckpointLadder';
 import { StyledSelect } from '../shared/StyledSelect';
 import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
 
@@ -64,6 +65,11 @@ export const Mm3RunsPanel: React.FC<{ datasetId: string }> = ({ datasetId }) => 
   const [mode, setMode] = useState<'steps' | 'loss'>('steps');
   const [targetLoss, setTargetLoss] = useState(0.4);
   const [busy, setBusy] = useState(false);
+  // Whose checkpoint ladder is open; until the user picks, the newest finished
+  // run with checkpoints, so a reload lands on its ladder.
+  const [ladderPick, setLadderPick] = useState<string | null | undefined>(undefined);
+  const ladderRun = ladderPick !== undefined ? ladderPick
+    : runs?.find(r => !r.running && r.checkpoints.length > 0)?.runName ?? null;
 
   const load = () => query.refetch();
   useReload(runQueries.mm3Runs(datasetId).queryKey, activeJob ? `${activeJob.id}:${activeJob.status}` : undefined);
@@ -170,6 +176,16 @@ export const Mm3RunsPanel: React.FC<{ datasetId: string }> = ({ datasetId }) => 
                     <div className="text-[10px] text-rose-500 mt-1 break-words">{run.failure}</div>
                   )}
                 </div>
+                {!run.running && run.checkpoints.length > 0 && (
+                  <button
+                    onClick={() => setLadderPick(ladderRun === run.runName ? null : run.runName)}
+                    className="shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-sky-500/30 text-sky-700 dark:text-sky-300 hover:bg-sky-500/10 transition-colors"
+                  >
+                    {ladderRun === run.runName
+                      ? t('trainingStudio.mm3.runsHideLadder', 'Hide checkpoints')
+                      : t('trainingStudio.mm3.runsShowLadder', 'Checkpoints')}
+                  </button>
+                )}
                 {run.resume && !run.running && (
                   <button
                     onClick={() => setOpen(open === run.runName ? null : run.runName)}
@@ -305,6 +321,9 @@ export const Mm3RunsPanel: React.FC<{ datasetId: string }> = ({ datasetId }) => 
                     {t('trainingStudio.mm3.runsGo', 'Continue training')}
                   </button>
                 </div>
+              )}
+              {ladderRun === run.runName && !run.running && (
+                <Mm3CheckpointLadder datasetId={datasetId} run={run.runName} reloadKey={run.updatedAt} />
               )}
             </div>
           );

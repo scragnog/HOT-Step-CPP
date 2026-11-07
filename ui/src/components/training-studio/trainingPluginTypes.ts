@@ -1,7 +1,9 @@
 // trainingPluginTypes.ts — the React plug-in and presentation contracts of Training Studio.
 //
 // FROZEN for the Training unification batch (HOTSTEP-674); the server half is
-// server/src/contracts/training.ts. Each training backend is one plug-in. The
+// server/src/contracts/training.ts. Changed since: previewSource 'mm3-records'
+// became 'mm3-ladder' when MM3 moved onto the shared checkpoint ladder
+// (HOTSTEP-1043). Each training backend is one plug-in. The
 // shared shell owns layout, phase selection and perform-all sequencing; a
 // plug-in owns its own parameters and serialization. Server validation stays
 // authoritative. This is deliberately not a generic form engine.
@@ -33,7 +35,7 @@ export interface TrainingRecipeSpec {
 }
 
 /** Where a backend's checkpoint previews come from. */
-export type TrainingPreviewSource = 'none' | 'yue2-ladder' | 'mm3-records' | 'sa3-previews' | 'heartmula-previews';
+export type TrainingPreviewSource = 'none' | 'yue2-ladder' | 'mm3-ladder' | 'sa3-previews' | 'heartmula-previews';
 
 export interface TrainingPhaseLabel {
   key: string;

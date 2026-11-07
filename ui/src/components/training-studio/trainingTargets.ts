@@ -74,7 +74,7 @@ export const TRAINING_TARGETS: Record<TrainingTargetId, TrainingTargetSpec> = {
     prepareStages: [stage('codes', 'trainingStudio.assets.codes', 'Codes')],
     trainStages: [stage('lm', 'trainingStudio.assets.lmAdapter', 'LM adapter')],
     recipeFields: [{ stage: 'lm', family: 'mm3-lm' }],
-    previewSource: 'mm3-records',
+    previewSource: 'mm3-ladder',
   },
   yue2: {
     id: 'yue2',

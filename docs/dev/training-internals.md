@@ -128,9 +128,16 @@ form engine.
 
 The preview view is shared. `TrainingPreviewPanel.tsx` holds the settings
 block, field, checkpoint card and take rows (presentation only, no server
-state). YuE2's ladder, MM3's strip and the SA3 card all draw it and keep their
-own actions and scoring. `previewSource` records where each target's previews
-come from: `yue2-ladder`, `mm3-records`, `sa3-previews` or `none`. ACE is
+state). YuE2's ladder, MM3's ladder and the SA3 card all draw it and keep their
+own scoring. YuE2's and MM3's ladders share the rung actions
+(`TrainingLadderActions`: Render, Use this rung or checkpoint). MM3's ladder
+(`Mm3CheckpointLadder.tsx`) reads `GET /datasets/:id/mm3-previews?run=`, the
+WAVs in `<run>/previews` with a `<file>.json` record beside each; "Use this
+checkpoint" is the `mm3/select` operation (`services/training/mm3Ladder.ts`),
+which points the dataset's album presets at the step (`pointMm3PresetsAt`, the
+same rule a finished run uses) and sets the global LM adapter. `previewSource`
+records where each target's previews come from: `yue2-ladder`, `mm3-ladder`,
+`sa3-previews` or `none`. ACE is
 `none`: it has no checkpoint exports or renderer, so it keeps Audition. SA3
 previews are read through `ui/src/queries/sa3-previews/`.
 

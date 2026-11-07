@@ -30,12 +30,14 @@ import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import { ParamLabel } from '../shared/ParamLabel';
 import { JobProgress } from './JobProgress';
-import { Mm3PreviewStrip } from './Mm3PreviewStrip';
+import { Mm3CheckpointLadder } from './Mm3CheckpointLadder';
 import { Mm3RunsPanel } from './Mm3RunsPanel';
 import { useMm3Status } from './useMm3Status';
 import { TrainingChart } from './TrainingChart';
 import { TrainingPreviewSettings } from './TrainingPreviewPanel';
 import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
+import { runQueries } from '../../queries/training-runs/queries';
+import { useQuery } from '@tanstack/react-query';
 import { BTN_SM, CARD, INPUT } from './yue2CardUi';
 
 
@@ -179,6 +181,11 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
   const jobStatus = activeJob?.status;
   const jobRunning = jobStatus === 'queued' || jobStatus === 'running';
   const mine = jobKind === 'mm3-train-lm';
+  // The live run's ladder: the run the job is writing, else the one its
+  // previews came from once the job has ended.
+  const trainPreviews = useTrainingStore(s => s.trainPreviews);
+  const runsQuery = useQuery({ ...runQueries.mm3Runs(datasetId), enabled: mine });
+  const liveRun = runsQuery.data?.runs.find(r => r.running)?.runName ?? trainPreviews[trainPreviews.length - 1]?.run ?? '';
 
   // Muon normalises its update, so the schedule LR alone understates what the
   // optimizer applied by the scale factor.
@@ -1484,7 +1491,8 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               ))}
             </div>
           )}
-          {jobKind === 'mm3-train-lm' && <Mm3PreviewStrip />}
+          {jobKind === 'mm3-train-lm' && liveRun && <Mm3CheckpointLadder datasetId={datasetId} run={liveRun}
+            reloadKey={`${trainPreviews.length}:${trainMilestones.length}:${jobStatus}`} />}
           {jobKind === 'mm3-train-lm' && trainStepSeries.length > 1 && (
             <div className="mt-3">
               {/* Four series on one fractional-epoch axis: per-step noise, the

@@ -3,6 +3,7 @@
 // notes, a floating scoreboard, "Render more", and "Use this rung", which
 // links the checkpoint as the dataset's adapter and opens the cleanup modal.
 //
+// Rungs draw through TrainingLadderActions, which MM3's ladder shares.
 // Shared by the training card (every base-matched run's own ladder, 2026-09-27)
 // and the Refine tab (KL-rung ladders of the earlier recipe). Extracted from
 // RefinePanel; the scoring maths mirrors server/src/services/training/
@@ -23,7 +24,7 @@ import {
 } from '../../services/trainingApi';
 import { Toggle } from '../settings/SettingsPrimitives';
 import { ParamLabel } from '../shared/ParamLabel';
-import { TrainingPreviewLadderRows, TrainingPreviewRung, type PreviewTake } from './TrainingPreviewPanel';
+import { LADDER_IN_USE, TrainingLadderActions, TrainingPreviewLadderRows, TrainingPreviewRung, type PreviewTake } from './TrainingPreviewPanel';
 
 import { cleanupReviewRung, pickFromLadder, selectReviewRung, type ReviewPick } from '../../services/trainingReviewApi';
 
@@ -313,7 +314,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
           const stats = rungStats(c.step);
           const { mine, plannerReplans, composerReplans, hasReplanData, flaggedTakes, flagReasons, overall } = stats;
           return <TrainingPreviewRung key={c.step} id={`${idPrefix}-${c.step}`} title={rungName(c.step)} takes={takeRows(mine, c.step)}
-            className={picked === c.dir ? 'border-emerald-500/60 bg-emerald-500/5' : c.step === bestStep ? 'border-sky-500/70' : c.rung ? 'border-amber-500/40' : 'border-zinc-300/70 dark:border-white/10'}
+            className={picked === c.dir ? LADDER_IN_USE : c.step === bestStep ? 'border-sky-500/70' : c.rung ? 'border-amber-500/40' : 'border-zinc-300/70 dark:border-white/10'}
             badges={<>
               {!blind && c.rung && c.kl !== undefined && <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-semibold">{t('trainingStudio.refine.rungBadge', 'rung')}</span>}
               {!blind && !c.rung && <span className="text-[10px] text-zinc-500">{t('trainingStudio.refine.routineSave', 'routine save')}</span>}
@@ -324,17 +325,9 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
               {flaggedTakes.length > 0 && <span className="font-mono text-red-600 dark:text-red-400" title={flagReasons}>{t('trainingStudio.refine.planFlags', 'plan flags {{n}}/{{takes}}', { n: flaggedTakes.length, takes: stats.doneTakes.length })}</span>}
               {overall && <span className="font-mono text-sky-700 dark:text-sky-300" title={t('trainingStudio.refine.overallInfo', 'overall = (likeness + (6 − corruption)) / 2, minus a soft penalty for replan load')}>{t('trainingStudio.refine.overall', 'overall {{n}}', { n: overall.overall.toFixed(2) })}</span>}
             </>}
-            actions={<>
-              <span className="flex-1" />
-              <button type="button" onClick={() => render(c.step)} disabled={rendering !== null}
-                className="px-2 py-1 rounded-lg text-[11px] border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 disabled:opacity-40">
-                {rendering === c.step ? t('trainingStudio.refine.rendering', 'Rendering…') : mine.length ? t('trainingStudio.refine.render', 'Render more') : t('trainingStudio.refine.renderFirst', 'Render')}
-              </button>
-              <button type="button" onClick={() => void use(c.dir, c.step)} disabled={usingStep !== null || selectMut.isPending}
-                className={`px-2 py-1 rounded-lg text-[11px] font-semibold border disabled:opacity-40 ${picked === c.dir ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300' : 'border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10'}`}>
-                {picked === c.dir ? t('trainingStudio.refine.picked', 'In use') : t('trainingStudio.refine.use', 'Use this rung')}
-              </button>
-            </>}>
+            actions={<TrainingLadderActions hasTakes={mine.length > 0} rendering={rendering === c.step} renderDisabled={rendering !== null}
+              onRender={() => render(c.step)} inUse={picked === c.dir} useDisabled={usingStep !== null || selectMut.isPending}
+              onUse={() => void use(c.dir, c.step)} useLabel={t('trainingStudio.refine.use', 'Use this rung')} />}>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px]">
               {(['likeness', 'corruption'] as const).map(key => <div key={key} className="flex items-center gap-1">
                 <span className="text-zinc-500 w-16">{key === 'likeness' ? t('trainingStudio.refine.scoreLikeness', 'Likeness') : t('trainingStudio.refine.scoreCorruption', 'Corruption')}</span>

@@ -404,6 +404,9 @@ export interface Mm3RenderRequest {
   loss?: number;
   scaleAttn?: number;
   scaleMlp?: number;
+  /** A "Render more" take beside the run's own: the seed goes into the file
+   *  name so it never overwrites the fixed-seed take. */
+  extraTake?: boolean;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -489,11 +492,12 @@ export async function renderMm3Preview(r: Mm3RenderRequest): Promise<TrainingPre
   if (audio.length < 1024) throw new Error(`preview result was ${audio.length} bytes`);
 
   const tag = r.adapterPath ? `step-${String(r.step).padStart(6, '0')}` : 'base';
-  const file = `${tag}-${r.spec.kind}.wav`;
+  const id = `${tag}-${r.spec.kind}${r.extraTake ? `-s${r.seed}` : ''}`;
+  const file = `${id}.wav`;
   fs.writeFileSync(path.join(r.dir, file), audio);
 
-  return {
-    id: `${tag}-${r.spec.kind}`,
+  const preview: TrainingPreview = {
+    id,
     step: r.step,
     totalSteps: r.totalSteps,
     kind: r.spec.kind,
@@ -508,4 +512,36 @@ export async function renderMm3Preview(r: Mm3RenderRequest): Promise<TrainingPre
     ms: Date.now() - t0,
     ts: Date.now(),
   };
+  // The record beside the WAV, so the ladder can list it after a reload.
+  try { fs.writeFileSync(path.join(r.dir, `${file}.json`), JSON.stringify(preview)); } catch { /* the WAV alone still lists */ }
+  return preview;
+}
+
+/** `step-000100-artist.wav`, `step-000100-artist-s123.wav`, `base-control.wav`. */
+const PREVIEW_FILE = /^(?:base|step-(\d+))-(artist|control)(?:-s(\d+))?\.wav$/;
+
+/** Every preview WAV in a run's previews/ folder, by step then render time.
+ *  A WAV from before the sidecar existed is listed from its name, with
+ *  the run's own seed and length standing in. */
+export function listMm3RunPreviews(dir: string, fallback: { seconds: number; seed: number }): TrainingPreview[] {
+  let names: string[];
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  const out: TrainingPreview[] = [];
+  for (const file of names) {
+    const m = PREVIEW_FILE.exec(file);
+    if (!m) continue;
+    let rec: Partial<TrainingPreview> = {};
+    try { rec = JSON.parse(fs.readFileSync(path.join(dir, `${file}.json`), 'utf-8')); } catch { /* no sidecar */ }
+    let stat: fs.Stats | null = null;
+    try { stat = fs.statSync(path.join(dir, file)); } catch { continue; }
+    out.push({
+      id: file.slice(0, -4), totalSteps: 0, caption: '', ms: 0,
+      ...rec,
+      step: m[1] ? Number(m[1]) : 0, base: !m[1], kind: m[2] as 'artist' | 'control', file,
+      seed: rec.seed ?? (m[3] ? Number(m[3]) : fallback.seed),
+      seconds: rec.seconds ?? fallback.seconds,
+      bytes: stat.size, ts: rec.ts ?? stat.mtimeMs,
+    });
+  }
+  return out.sort((a, b) => a.step - b.step || a.ts - b.ts);
 }

@@ -55,6 +55,8 @@ import { selectYue2Audio, YUE2_AUDIO_EXTS, yue2SeparationAudioDir } from '../ser
 //   GET    /datasets/:id/mm3                            — MM3 codes cache + model readiness
 //   POST   /datasets/:id/mm3-codes                      — audio -> RVQ codes (MM3)
 //   POST   /datasets/:id/mm3-train-lm                   — start an MM3 LM LoRA training job
+//   GET    /datasets/:id/mm3-previews?run=              — an MM3 run's checkpoint ladder (saved previews per step)
+//   POST   /datasets/:id/mm3-previews/render            — render one more take of a saved step (0 = base)
 //   GET    /datasets/:id/yue2                           — YuE2 latent cache + model readiness
 //   POST   /datasets/:id/yue2-preprocess                — audio -> cached YuE2 VAE latents
 //   POST   /datasets/:id/yue2-train                     — start a YuE2 NAR LoRA training job
@@ -228,11 +230,12 @@ import {
 } from '../services/training/lyricStudioExport.js';
 import { datasetLanguage } from '../services/languageCodes.js';
 import { getGenerations, getLyricsSet } from '../db/lireekDb.js';
-import { trainingOperationsRouter } from '../services/training/operations.js';
+import { trainingOp, TrainingOperationFailure, trainingOperationsRouter } from '../services/training/operations.js';
 // Training operation domains register themselves at import (operations.ts).
 import '../services/training/recipes/operations.js';
 import '../services/training/review/operations.js';
 import '../services/training/yue2PreparationOperations.js';
+import { mm3Ladder, renderMm3LadderTake } from '../services/training/mm3Ladder.js';
 import type {
   AuditionListResponse, AuditionOptions, AuditionSideSpec,
   BulkSetInput, CaptionOptions, CreateDatasetInput, FieldSource, GeniusOptions, LabelOptions, LmSize, NormaliseLyricsOptions,
@@ -2524,6 +2527,19 @@ router.get('/mm3/preview', (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
   res.sendFile(full);
 });
+
+/** GET /datasets/:id/mm3-previews?run=<runName> — the run's checkpoints, its
+ *  saved previews and the adapter the album presets use (mm3Ladder.ts). */
+router.get('/datasets/:id/mm3-previews', trainingOp(async req =>
+  mm3Ladder(String(req.params.id), String(req.query.run || ''))));
+
+/** POST /datasets/:id/mm3-previews/render — body { run, step }; step 0 = base. */
+router.post('/datasets/:id/mm3-previews/render', trainingOp(async req => {
+  const b = (req.body || {}) as Record<string, unknown>;
+  const step = Number(b.step);
+  if (!Number.isSafeInteger(step) || step < 0) throw new TrainingOperationFailure(400, { error: 'step must be a whole number' });
+  return { previews: await renderMm3LadderTake(String(req.params.id), String(b.run || ''), step) };
+}));
 
 /** POST /datasets/:id/mm3-train-lm */
 router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) => {

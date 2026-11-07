@@ -78,3 +78,11 @@ export function decideReviewUse(pick: ReviewPick, narFurther: boolean, nar: {
   return trainingOperation<{ outcome: 'skip' | 'reject' | 'chain'; worker?: string; jobId?: string }>('review', '/decision',
     { body: snapshot('review:decision', { ...payload, narFurther, nar }, [pick]), silent: true });
 }
+
+/** "Use this checkpoint" on an MM3 ladder: the dataset's album presets move to
+ *  `step`. Returns the adapter reference the global LM adapter should take. */
+export function selectMm3Checkpoint(dataset: { id: string; revision: string }, runName: string, step: number) {
+  return trainingOperation<{ ref: string; presets: number }>('mm3', '/select', { body: snapshotFor({
+    kind: 'mm3:select', idempotencyKey: crypto.randomUUID(), worker: { kind: 'local' }, dataset,
+    sources: [], payload: { datasetId: dataset.id, runName, step } }), silent: true });
+}

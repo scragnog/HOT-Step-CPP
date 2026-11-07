@@ -6,6 +6,7 @@
 // its own records to PreviewTake rows and keeps its own actions, scoring and
 // labels in the slots, so YuE2's lead-sheet and ladder features stay in YuE2.
 import React, { type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ParamLabel } from '../shared/ParamLabel';
 import { Toggle } from '../shared/Toggle';
 import { PreviewPlayer } from './PreviewPlayer';
@@ -101,6 +102,35 @@ export const TrainingPreviewTakes: React.FC<{ takes: PreviewTake[] }> = ({ takes
       : <div key={take.id} className="text-[11px] text-zinc-500">{take.text ?? take.label}</div>)}
   </div>
 );
+
+/** A rung that is the adapter in use. */
+export const LADDER_IN_USE = 'border-emerald-500/60 bg-emerald-500/5';
+
+/** A checkpoint ladder rung's actions, the same for every engine: "Render"
+ *  (more takes of this step) and "Use this …", which makes it the adapter. */
+export const TrainingLadderActions: React.FC<{
+  hasTakes: boolean;
+  rendering: boolean;
+  renderDisabled: boolean;
+  onRender: () => void;
+  inUse: boolean;
+  useDisabled: boolean;
+  onUse?: () => void;
+  useLabel: string;
+}> = ({ hasTakes, rendering, renderDisabled, onRender, inUse, useDisabled, onUse, useLabel }) => {
+  const { t } = useTranslation();
+  return <>
+    <span className="flex-1" />
+    <button type="button" onClick={onRender} disabled={renderDisabled}
+      className="px-2 py-1 rounded-lg text-[11px] border border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10 disabled:opacity-40">
+      {rendering ? t('trainingStudio.refine.rendering', 'Rendering…') : hasTakes ? t('trainingStudio.refine.render', 'Render more') : t('trainingStudio.refine.renderFirst', 'Render')}
+    </button>
+    {onUse && <button type="button" onClick={onUse} disabled={useDisabled}
+      className={`px-2 py-1 rounded-lg text-[11px] font-semibold border disabled:opacity-40 ${inUse ? 'border-emerald-500 text-emerald-700 dark:text-emerald-300' : 'border-zinc-300/70 dark:border-white/10 hover:bg-zinc-500/10'}`}>
+      {inUse ? t('trainingStudio.refine.picked', 'In use') : useLabel}
+    </button>}
+  </>;
+};
 
 /** A checkpoint's card: title and badges on the left, actions on the right,
  *  the caller's own rows (scores, notes) as children, then the takes. */
