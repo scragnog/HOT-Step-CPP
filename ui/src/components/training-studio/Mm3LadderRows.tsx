@@ -1,10 +1,11 @@
-// Mm3LadderRows.tsx — the MM3 checkpoint ladder's rungs, with no server state
-// (Mm3CheckpointLadder.tsx owns the queries). Drawn with YuE2's rung and
-// actions: TrainingPreviewRung and TrainingLadderActions.
+// Mm3LadderRows.tsx — an MM3 run's records as CheckpointLadder rungs, with no
+// server state (Mm3CheckpointLadder.tsx owns the queries). MM3 has no scores,
+// so the score slots stay empty.
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Mm3Ladder, Mm3LadderPreview } from '../../services/trainingApi';
-import { LADDER_IN_USE, TrainingLadderActions, TrainingPreviewLadderRows, TrainingPreviewRung, type PreviewTake } from './TrainingPreviewPanel';
+import { CheckpointLadder } from './CheckpointLadder';
+import type { PreviewTake } from './TrainingPreviewPanel';
 
 const sameRef = (a: string | null | undefined, b: string) => !!a && a.replace(/\\/g, '/').toLowerCase() === b.replace(/\\/g, '/').toLowerCase();
 
@@ -35,27 +36,23 @@ export const Mm3LadderRows: React.FC<{
   onUse: (step: number) => void;
 }> = ({ ladder, rendering, picking, onRender, onUse }) => {
   const { t } = useTranslation();
-  const rungs = mm3Rungs(ladder);
-  if (!rungs.length) return null;
   const takeRows = (r: Mm3Rung): PreviewTake[] => r.takes.map(p => ({
     id: p.id, src: p.audioUrl,
     label: `${p.kind === 'control' ? t('trainingStudio.mm3.previewControlCaption', 'Control caption') : t('trainingStudio.mm3.previewArtistCaption', 'Artist caption')} · ${t('trainingStudio.mm3.previewTake', '{{seconds}} s · seed {{seed}} · rendered in {{renderSeconds}} s', {
       seconds: p.seconds, seed: p.seed, renderSeconds: (p.ms / 1000).toFixed(0) })}`,
     sublabel: p.caption || undefined,
   }));
-  return <TrainingPreviewLadderRows>
-    {rungs.map(r => {
-      const inUse = !!r.ref && sameRef(ladder.inUse, r.ref);
-      return <TrainingPreviewRung key={r.base ? 'base' : r.step}
-        title={r.base ? t('trainingStudio.mm3.previewBase', 'Base') : t('trainingStudio.refine.rungStep', 'Step {{step}}', { step: r.step })}
-        takes={takeRows(r)}
-        className={inUse ? LADDER_IN_USE : r.base ? 'border-sky-500/30 bg-sky-500/5' : undefined}
-        badges={r.loss !== undefined && <span className="text-[11px] text-zinc-500 tabular-nums">
-          {t('trainingStudio.mm3.previewLoss', 'Loss {{loss}}', { loss: r.loss.toFixed(3) })}</span>}
-        actions={<TrainingLadderActions hasTakes={r.takes.length > 0} rendering={rendering === r.step}
-          renderDisabled={ladder.running || rendering !== null || (!r.base && !r.ref)} onRender={() => onRender(r.step)}
-          inUse={inUse} useDisabled={ladder.running || picking} onUse={r.ref ? () => onUse(r.step) : undefined}
-          useLabel={t('trainingStudio.mm3.useCheckpoint', 'Use this checkpoint')} />} />;
-    })}
-  </TrainingPreviewLadderRows>;
+  return <CheckpointLadder rendering={rendering} onRender={onRender} picking={picking} locked={ladder.running}
+    useLabel={t('trainingStudio.mm3.useCheckpoint', 'Use this checkpoint')}
+    rungs={mm3Rungs(ladder).map(r => ({
+      key: r.base ? 'base' : r.step, step: r.step,
+      title: r.base ? t('trainingStudio.mm3.previewBase', 'Base') : t('trainingStudio.refine.rungStep', 'Step {{step}}', { step: r.step }),
+      takes: takeRows(r),
+      className: r.base ? 'border-sky-500/30 bg-sky-500/5' : undefined,
+      badges: r.loss !== undefined && <span className="text-[11px] text-zinc-500 tabular-nums">
+        {t('trainingStudio.mm3.previewLoss', 'Loss {{loss}}', { loss: r.loss.toFixed(3) })}</span>,
+      inUse: !!r.ref && sameRef(ladder.inUse, r.ref),
+      canRender: r.base || !!r.ref,
+      onUse: r.ref ? () => onUse(r.step) : undefined,
+    }))} />;
 };

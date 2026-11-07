@@ -3,7 +3,8 @@
 // notes, a floating scoreboard, "Render more", and "Use this rung", which
 // links the checkpoint as the dataset's adapter and opens the cleanup modal.
 //
-// Rungs draw through TrainingLadderActions, which MM3's ladder shares.
+// The rungs draw through CheckpointLadder, the ladder MM3 shares; scores,
+// blind labels, the album score and cleanup are this file's slots and state.
 // Shared by the training card (every base-matched run's own ladder, 2026-09-27)
 // and the Refine tab (KL-rung ladders of the earlier recipe). Extracted from
 // RefinePanel; the scoring maths mirrors server/src/services/training/
@@ -24,7 +25,8 @@ import {
 } from '../../services/trainingApi';
 import { Toggle } from '../settings/SettingsPrimitives';
 import { ParamLabel } from '../shared/ParamLabel';
-import { LADDER_IN_USE, TrainingLadderActions, TrainingPreviewLadderRows, TrainingPreviewRung, type PreviewTake } from './TrainingPreviewPanel';
+import { CheckpointLadder, type CheckpointLadderRung } from './CheckpointLadder';
+import type { PreviewTake } from './TrainingPreviewPanel';
 
 import { cleanupReviewRung, pickFromLadder, selectReviewRung, type ReviewPick } from '../../services/trainingReviewApi';
 
@@ -184,7 +186,7 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
   };
   useImperativeHandle(ref, () => ({ finishPick }), [datasetId]);
   const [usingStep, setUsingStep] = useState<number | null>(null);
-  const use = async (dir: string, step: number) => {
+  const pickRung = async (dir: string, step: number) => {
     if (!runId) return;
     setCleanupNote(''); setUsingStep(step);
     try {
@@ -283,7 +285,8 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
       {labelsPending && <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-200">
         {t('trainingStudio.refine.labelsPending', 'Blind labels for this run are not in yet — scoring opens once they are.')}
       </div>}
-      {ladder.length > 0 && <TrainingPreviewLadderRows>
+      <CheckpointLadder rendering={rendering} onRender={render} picking={usingStep !== null || selectMut.isPending}
+        useLabel={t('trainingStudio.refine.use', 'Use this rung')} header={<>
         {jointLadder && <div className="flex items-center gap-2 text-xs">
           <Toggle id={`blind-${idPrefix}`} checked={blindRungs} onChange={value => writePersistedState('hs-yue2-blind-rungs', value)} />
           <ParamLabel label={t('trainingStudio.refine.blindToggle', 'Blind rungs')}
@@ -310,12 +313,13 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
             value={albumNote ?? album?.notes ?? ''} onChange={e => setAlbumNote(e.target.value)}
             onBlur={e => { if (e.target.value !== (album?.notes ?? '')) scoreAlbum({ notes: e.target.value }); }} />
         </div>
-        {visibleLadder.map(c => {
+        </>} rungs={visibleLadder.map((c): CheckpointLadderRung => {
           const stats = rungStats(c.step);
           const { mine, plannerReplans, composerReplans, hasReplanData, flaggedTakes, flagReasons, overall } = stats;
-          return <TrainingPreviewRung key={c.step} id={`${idPrefix}-${c.step}`} title={rungName(c.step)} takes={takeRows(mine, c.step)}
-            className={picked === c.dir ? LADDER_IN_USE : c.step === bestStep ? 'border-sky-500/70' : c.rung ? 'border-amber-500/40' : 'border-zinc-300/70 dark:border-white/10'}
-            badges={<>
+          return { key: c.step, step: c.step, id: `${idPrefix}-${c.step}`, title: rungName(c.step), takes: takeRows(mine, c.step),
+            inUse: picked === c.dir, canRender: true, onUse: () => void pickRung(c.dir, c.step),
+            className: c.step === bestStep ? 'border-sky-500/70' : c.rung ? 'border-amber-500/40' : 'border-zinc-300/70 dark:border-white/10',
+            badges: <>
               {!blind && c.rung && c.kl !== undefined && <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 text-[10px] font-semibold">{t('trainingStudio.refine.rungBadge', 'rung')}</span>}
               {!blind && !c.rung && <span className="text-[10px] text-zinc-500">{t('trainingStudio.refine.routineSave', 'routine save')}</span>}
               {c.step === bestStep && <span className="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-700 dark:text-sky-300 text-[10px] font-semibold">{t('trainingStudio.refine.bestBadge', 'best by score')}</span>}
@@ -324,10 +328,8 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
               {hasReplanData && <span className="font-mono text-zinc-500" title={blind ? undefined : t('trainingStudio.refine.replansInfo', 'planner / composer re-plans across this rung\'s takes; rising counts are a sign of over-training')}>{t('trainingStudio.refine.replans', 'replans {{p}}/{{c}}', { p: plannerReplans, c: composerReplans })}</span>}
               {flaggedTakes.length > 0 && <span className="font-mono text-red-600 dark:text-red-400" title={flagReasons}>{t('trainingStudio.refine.planFlags', 'plan flags {{n}}/{{takes}}', { n: flaggedTakes.length, takes: stats.doneTakes.length })}</span>}
               {overall && <span className="font-mono text-sky-700 dark:text-sky-300" title={t('trainingStudio.refine.overallInfo', 'overall = (likeness + (6 − corruption)) / 2, minus a soft penalty for replan load')}>{t('trainingStudio.refine.overall', 'overall {{n}}', { n: overall.overall.toFixed(2) })}</span>}
-            </>}
-            actions={<TrainingLadderActions hasTakes={mine.length > 0} rendering={rendering === c.step} renderDisabled={rendering !== null}
-              onRender={() => render(c.step)} inUse={picked === c.dir} useDisabled={usingStep !== null || selectMut.isPending}
-              onUse={() => void use(c.dir, c.step)} useLabel={t('trainingStudio.refine.use', 'Use this rung')} />}>
+            </>,
+            children: <>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px]">
               {(['likeness', 'corruption'] as const).map(key => <div key={key} className="flex items-center gap-1">
                 <span className="text-zinc-500 w-16">{key === 'likeness' ? t('trainingStudio.refine.scoreLikeness', 'Likeness') : t('trainingStudio.refine.scoreCorruption', 'Corruption')}</span>
@@ -342,9 +344,9 @@ export const Yue2LadderReview = forwardRef<Yue2LadderReviewHandle, {
               <div className="font-semibold">{t('trainingStudio.refine.noCleanPlan', 'This checkpoint is not writing good plans: no clean lead sheet in {{n}} tries.', { n: stats.unclean[0].plan!.attempts.length })}</div>
               <div className="mt-0.5">{t('trainingStudio.refine.noCleanPlanDetail', 'The take below was rendered from the least-flagged plan anyway. Flags on it:')} {(stats.unclean[0].score?.flags ?? stats.unclean[0].plan!.attempts[stats.unclean[0].plan!.attempts.length - 1].flags ?? []).join('; ') || t('trainingStudio.refine.noCleanPlanBroken', 'the judge rejected every plan')}</div>
             </div>}
-          </TrainingPreviewRung>;
-        })}
-      </TrainingPreviewLadderRows>}
+            </>,
+          };
+        })} />
       {bestStep !== undefined && <div className="hidden md:block fixed right-4 bottom-4 z-40 max-w-xs rounded-xl border border-zinc-300/70 dark:border-white/10 bg-white/90 dark:bg-zinc-900/90 shadow-xl p-3">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">{t('trainingStudio.refine.scoreboardTitle', 'Scoreboard')}</span>

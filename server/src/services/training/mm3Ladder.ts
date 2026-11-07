@@ -16,8 +16,8 @@ import { evictOtherFamilies } from '../generation/residency.js';
 import { getDataset } from './datasetsRepo.js';
 import { activeJobForDataset, reserveGpuForPreview, runReservedPreview } from './labelingQueue.js';
 import { mm3PresetRefFor, pointMm3PresetsAt } from './lyricStudioExport.js';
-import { listMm3RunPreviews, MM3_PREVIEW_DEFAULTS, planMm3Previews, renderMm3Preview } from './mm3Preview.js';
-import { listMm3Runs, mm3AdapterRoot, readMm3RunManifest } from './mm3Runs.js';
+import { listMm3RunPreviews, MM3_PREVIEW_DEFAULTS, planMm3Previews, renderMm3Preview, type Mm3PreviewPlan } from './mm3Preview.js';
+import { listMm3Runs, mm3AdapterRoot, mm3RunManifestPath, readMm3RunManifest, type Mm3RecordedPreviewPlan, type Mm3RunManifest } from './mm3Runs.js';
 import { mm3CodesDir } from './mm3Train.js';
 import { acceptTrainingSnapshot, registerTrainingOperations, trainingOp, TrainingOperationFailure } from './operations.js';
 import type { TrainingPreview } from './types.js';
@@ -76,6 +76,23 @@ export function mm3Ladder(datasetId: string, runName: string): Mm3LadderResponse
   };
 }
 
+/** The prompt "Render more" renders: the one the run recorded when it
+ *  started, so editing a caption or clearing the codes cache later can neither
+ *  change what the checkpoints are compared on nor break the render. A run from
+ *  before the prompt was recorded resolves it once through `rebuild` (the
+ *  dataset's captions and codes as they are now) and records it then. */
+export function ladderPreviewPlan(runDir: string, manifest: Mm3RunManifest,
+                                  rebuild: () => Mm3PreviewPlan | null): (Mm3RecordedPreviewPlan & { dir: string }) | null {
+  const dir = path.join(runDir, 'previews');
+  if (manifest.previewPlan?.specs.length) return { ...manifest.previewPlan, dir };
+  const p = rebuild();
+  if (!p) return null;
+  const previewPlan: Mm3RecordedPreviewPlan = { specs: p.specs, seconds: p.seconds, seed: p.seed, scaleMlp: p.scaleMlp, scaleAttn: p.scaleAttn };
+  try { fs.writeFileSync(mm3RunManifestPath(runDir), JSON.stringify({ ...manifest, previewPlan }, null, 2), 'utf-8'); }
+  catch { /* rendered from the rebuilt plan anyway; recorded next time */ }
+  return { ...previewPlan, dir };
+}
+
 /** POST /datasets/:id/mm3-previews/render — one more take of a saved step (0 =
  *  the base model) with the run's own preview recipe. The rung's first take
  *  uses the run's seed so it compares with the other rungs; later takes use a
@@ -89,14 +106,14 @@ export async function renderMm3LadderTake(datasetId: string, runName: string, st
   const manifest = readMm3RunManifest(run.dir);
   if (!manifest) throw fail(400, 'This run has no recorded recipe, so the caption its previews used is unknown.');
   const o = manifest.options;
-  const plan = planMm3Previews({
+  const plan = ladderPreviewPlan(run.dir, manifest, () => planMm3Previews({
     // everySteps only switches the plan on; nothing here is periodic.
     preview: { ...o.preview, everySteps: 1, previewSongId: o.preview?.previewSongId || manifest.previewSong?.id },
     manifest: ds.datasetJsonPath,
     captionsDir: ds.sourceDir,
     codesDir: fs.existsSync(o.codesDir) ? o.codesDir : path.join(mm3CodesDir(ds.slug), 'codes'),
     outDir: run.dir, holdout: o.holdout, trigger: o.trigger, captionFile: o.captionFile,
-  });
+  }));
   if (!plan) throw fail(400, 'No preview caption could be built for this run.');
   if (isEngineSuspended() || !engineReady) throw fail(503, 'The engine is not running; previews need it up');
   const have = listMm3RunPreviews(plan.dir, { seconds: plan.seconds, seed: plan.seed });

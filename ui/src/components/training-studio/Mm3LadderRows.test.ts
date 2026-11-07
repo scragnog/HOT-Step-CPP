@@ -37,6 +37,6 @@ test('rungs draw takes, Render and Use; the in-use step says so, either slash', 
 
 test('a running run cannot render or pick, and an empty ladder draws nothing', () => {
   const html = render(ladder({ running: true }));
-  assert.equal(html.match(/<button[^>]*disabled/g)?.length, 6);
+  assert.equal(html.match(/disabled=""/g)?.length, 6);
   assert.equal(render(ladder({ checkpoints: [], previews: [] })), '');
 });

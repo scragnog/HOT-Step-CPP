@@ -40,6 +40,7 @@ import path from 'path';
 import { config } from '../../config.js';
 import { MM3_LM_DEFAULTS, type ResolvedMm3TrainLmOptions } from './mm3Train.js';
 import type { TrainingAdapterHit } from './types.js';
+import type { Mm3PreviewSpec } from './mm3Preview.js';
 
 /** Where every MM3 LM run lives. One level above a run directory. */
 export function mm3AdapterRoot(): string {
@@ -66,6 +67,19 @@ export interface Mm3RunManifest {
    *  recent launch, and how it was picked. Absent when previews are off or the
    *  plan had nothing to render an artist take from. See mm3Preview.ts. */
   previewSong?: { id: string; filename: string; source: 'held' | 'train' | 'explicit' };
+  /** The preview prompt as resolved on the most recent launch (caption with
+   *  trigger, lyrics, seed, length, scales). "Render more" on the ladder
+   *  renders from this, so a later caption edit or a cleared codes cache can't
+   *  change or break what a checkpoint is compared on. */
+  previewPlan?: Mm3RecordedPreviewPlan;
+}
+
+export interface Mm3RecordedPreviewPlan {
+  specs: Mm3PreviewSpec[];
+  seconds: number;
+  seed: number;
+  scaleMlp: number;
+  scaleAttn: number;
 }
 
 /** Record what a run was started with, so it can be continued with the same
@@ -75,7 +89,8 @@ export interface Mm3RunManifest {
 export function writeMm3RunManifest(opts: ResolvedMm3TrainLmOptions,
                                     meta: { datasetId: string; datasetSlug: string;
                                             datasetName: string;
-                                            previewSong?: Mm3RunManifest['previewSong'] }): void {
+                                            previewSong?: Mm3RunManifest['previewSong'];
+                                            previewPlan?: Mm3RecordedPreviewPlan }): void {
   try {
     const file = mm3RunManifestPath(opts.outDir);
     const prev = readJson<Mm3RunManifest>(file);
@@ -96,6 +111,7 @@ export function writeMm3RunManifest(opts: ResolvedMm3TrainLmOptions,
       // resume that renders no new artist take (previews off this time)
       // should not erase what the last launch recorded.
       previewSong: meta.previewSong ?? prev?.previewSong,
+      previewPlan: meta.previewPlan ?? prev?.previewPlan,
     };
     fs.mkdirSync(opts.outDir, { recursive: true });
     fs.writeFileSync(file, JSON.stringify(out, null, 2), 'utf-8');

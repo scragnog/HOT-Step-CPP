@@ -586,6 +586,7 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
     datasetSlug: ds?.slug || '',
     datasetName: opts.datasetName || ds?.name || ds?.slug || '',
     previewSong: plan?.previewSong,
+    previewPlan: plan ? { specs: plan.specs, seconds: plan.seconds, seed: plan.seed, scaleMlp: plan.scaleMlp, scaleAttn: plan.scaleAttn } : undefined,
   });
   clearPause(opts.outDir);
 

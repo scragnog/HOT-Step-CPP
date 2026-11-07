@@ -1,12 +1,15 @@
 // mm3Ladder.test.ts — which album presets follow "Use this checkpoint", and
-// how saved MM3 previews are listed back after a reload.
+// how saved MM3 previews are listed back after a reload, and which prompt
+// "Render more" uses.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { mm3PresetFollows } from './lyricStudioExport.js';
-import { listMm3RunPreviews } from './mm3Preview.js';
+import { listMm3RunPreviews, planMm3Previews } from './mm3Preview.js';
+import { ladderPreviewPlan } from './mm3Ladder.js';
+import { readMm3RunManifest, type Mm3RunManifest } from './mm3Runs.js';
 
 const ds = { slug: 'albumx', lyricsSetId: 7 };
 const ref = (run: string, step: number) => `${run}\\ckpt-${step}\\adapter_model.safetensors`;
@@ -47,4 +50,39 @@ test('saved previews list from their sidecar, or from the file name before sidec
     assert.equal(list.find(p => p.seed === 77)?.caption, 'cap');
     assert.equal(listMm3RunPreviews(path.join(dir, 'missing'), { seconds: 40, seed: 1 }).length, 0);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Render more uses the prompt the run recorded: a caption edit or a cleared codes cache changes nothing', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mm3-ladder-plan-'));
+  try {
+    const data = path.join(root, 'data'), codes = path.join(root, 'codes'), run = path.join(root, 'run');
+    fs.mkdirSync(data); fs.mkdirSync(codes); fs.mkdirSync(run);
+    const lyrics = '[Verse]\n' + 'a line that is long enough to count as real lyrics\n'.repeat(6);
+    fs.writeFileSync(path.join(data, 'dataset.json'), JSON.stringify({ samples: [{ id: 's1', filename: 'one.flac', lyrics, duration: 200 }] }));
+    fs.writeFileSync(path.join(data, 'one.mm3.txt'), 'Original caption');
+    fs.writeFileSync(path.join(codes, 's1.codes'), 'x');
+    const rebuild = () => planMm3Previews({ preview: { everySteps: 1 }, manifest: path.join(data, 'dataset.json'),
+      captionsDir: data, codesDir: codes, outDir: run, holdout: 0, trigger: 'trig' });
+    const manifest = { version: 1, runName: 'run', options: {} } as unknown as Mm3RunManifest;
+    fs.writeFileSync(path.join(run, 'hotstep-run.json'), JSON.stringify(manifest));
+
+    // A run with no recorded prompt resolves it once and records it.
+    const first = ladderPreviewPlan(run, manifest, rebuild)!;
+    assert.match(first.specs[0].caption, /Original caption/);
+    assert.equal(first.specs[0].lyrics, lyrics);
+    assert.deepEqual(readMm3RunManifest(run)?.previewPlan?.specs, first.specs);
+
+    // Edit the caption: the rebuilt prompt would differ, the recorded one does not.
+    fs.writeFileSync(path.join(data, 'one.mm3.txt'), 'Edited caption');
+    assert.match(rebuild()!.specs[0].caption, /Edited caption/);
+    const again = ladderPreviewPlan(run, readMm3RunManifest(run)!, rebuild)!;
+    assert.deepEqual(again.specs, first.specs);
+
+    // Clear the codes cache: rebuilding finds nothing, the recorded prompt still renders.
+    fs.rmSync(path.join(codes, 's1.codes'));
+    assert.equal(rebuild(), null);
+    const noCodes = ladderPreviewPlan(run, readMm3RunManifest(run)!, () => { throw new Error('must not rebuild'); })!;
+    assert.deepEqual(noCodes.specs, first.specs);
+    assert.equal(noCodes.dir, path.join(run, 'previews'));
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

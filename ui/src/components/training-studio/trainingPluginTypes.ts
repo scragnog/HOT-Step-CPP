@@ -34,7 +34,8 @@ export interface TrainingRecipeSpec {
   family: TrainingRecipeFamily | 'sa3';
 }
 
-/** Where a backend's checkpoint previews come from. */
+/** Where a backend's checkpoint previews come from. The ladder sources
+ *  ('yue2-ladder', 'mm3-ladder') both draw CheckpointLadder.tsx. */
 export type TrainingPreviewSource = 'none' | 'yue2-ladder' | 'mm3-ladder' | 'sa3-previews' | 'heartmula-previews';
 
 export interface TrainingPhaseLabel {
