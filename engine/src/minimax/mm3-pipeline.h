@@ -718,6 +718,7 @@ struct MM3GenRequest {
     std::string lm_rep_mode    = "dry";
     float       lm_dry_base    = 1.75f;
     int         lm_dry_min_len = 15;
+    float       lm_force_bias  = -1.0f;  // < 0 = hard pin (MM3ArOptions::force_bias)
     uint64_t seed       = 42;
     int      steps      = 30;
     float    cfg_flow   = 1.7f;
@@ -1080,6 +1081,7 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
         aopt.forced_semantic = req.forced_semantic.data();
         aopt.forced_acoustic = has_ac ? req.forced_acoustic.data() : nullptr;
         aopt.forced_len      = (int64_t) req.forced_semantic.size();
+        aopt.force_bias      = req.lm_force_bias;
     }
     aopt.should_cancel = req.should_cancel;
 

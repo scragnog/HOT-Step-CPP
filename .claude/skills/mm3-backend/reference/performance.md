@@ -307,7 +307,17 @@ Capture the AR stage's output codes on one render, replay them on later ones.
 Opt in per request: `get_ar_codes: true` captures; `forced_semantic` +
 `forced_acoustic` replay. `forced_semantic` alone pins content and lets the
 depth decoder sample the acoustic codes from the new caption (cover probe,
-HOTSTEP-1048). The blob comes back from `GET /mm3/job?id=<id>&ar=1`
+HOTSTEP-1048). Two softer forms, semantic-only (HOTSTEP-1051): a `-1` entry
+is a free frame (sampled, EOS masked inside the span), and `lm_force_bias`
+adds a bias to the forced code's CFG-guided logit, before temperature, and
+samples instead of pinning. The engine log prints the logit scale per run
+(`[MM3-AR] Soft forcing:`). Measured with an LM adapter: the top-1/top-2 margin
+is about 1 logit, but the source code sits about 6 below the top pick while the
+LM tracks and about 30 below once it has lost the source. So the response is a
+cliff, not a slope: bias 12 or less matched the source on under 3% of frames,
+16 on 46%, 20 on 93%, 24 or more on 99%. The free and soft paths draw the
+semantic code from the same RNG the depth decoder uses, so even 100% agreement
+is a different acoustic take from the hard pin. The blob comes back from `GET /mm3/job?id=<id>&ar=1`
 as little-endian i32 — `[n_sem][sem…][n_ac][ac…]` — and is stored as
 `<uuid>.mm3plank` beside a `.mm3plank.json` sidecar in `<data>/mm3-planks/`.
 

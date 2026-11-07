@@ -1368,6 +1368,22 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
         if (!mm3_req_num(root, "lm_dry_min_len", &dv, &present, err)) { return false; }
         if (present) { out->gen.lm_dry_min_len = (int) (dv < 1 ? 1 : dv > 200 ? 200 : dv); }
         if (!mm3_req_str(root, "lm_rep_mode", &out->gen.lm_rep_mode, &present, err)) { return false; }
+        // Soft forcing (mm3-ar-loop.h): absent = the hard pin. Checked here as
+        // well as in the loop so the caller gets a 400, not a failed job.
+        if (!mm3_req_num(root, "lm_force_bias", &dv, &present, err)) { return false; }
+        if (present) { out->gen.lm_force_bias = (float) (dv < 0.0 ? 0.0 : dv > 1000.0 ? 1000.0 : dv); }
+        bool has_free = false;
+        for (const int32_t fs : out->forced_semantic) {
+            if (fs < -1) {
+                if (err) { *err = "\"forced_semantic\" entries must be codes >= 0 or -1 (free)"; }
+                return false;
+            }
+            has_free = has_free || fs == -1;
+        }
+        if ((present || has_free) && !out->forced_acoustic.empty()) {
+            if (err) { *err = "\"lm_force_bias\" and free (-1) frames need semantic-only forcing (no \"forced_acoustic\")"; }
+            return false;
+        }
     }
 
     return true;

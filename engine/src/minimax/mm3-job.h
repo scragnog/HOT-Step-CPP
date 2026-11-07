@@ -548,6 +548,11 @@ static std::string mm3_ar_cache_key(const MM3Model & m, const MM3SynthRequest & 
     if (!req.forced_semantic.empty()) {
         add_codes("fs", req.forced_semantic);
         add_codes("fa", req.forced_acoustic);
+        // Soft forcing samples around the plank. Only written when set, so
+        // hard-pin keys stay what they were.
+        if (req.gen.lm_force_bias >= 0.0f) {
+            add_s("fb", std::to_string(req.gen.lm_force_bias));
+        }
     }
 
     // The models and the adapter — the half a saved file is checked against.

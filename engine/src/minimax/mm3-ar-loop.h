@@ -218,6 +218,12 @@ struct MM3ArOptions {
     const int32_t * forced_semantic = nullptr;  // [forced_len]
     const int32_t * forced_acoustic = nullptr;  // [forced_len, NC]
     int64_t         forced_len      = 0;
+    // Soft forcing (semantic-only). < 0 = the hard pin. >= 0: the forced code
+    // gets this added to its CFG-guided logit (before temperature) and the
+    // normal sampler draws; 0 = free, large = the pin. A -1 entry in
+    // forced_semantic is a free iteration under either mode. EOS stays masked
+    // inside the forced span, so the length is still the forced length.
+    float           force_bias      = -1.0f;
 
     int64_t dump_iters      = 0;
     bool    collect_hiddens = true;
@@ -441,6 +447,31 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             return false;
         }
     }
+    // Soft or free frames resample the semantic code, so a pinned acoustic
+    // replay for that frame would describe a code that was not drawn.
+    bool soft_force = forced && opt.force_bias >= 0.0f;
+    for (int64_t i = 0; forced && i < opt.forced_len; i++) {
+        const int32_t fs = opt.forced_semantic[i];
+        if (fs < -1 || (int64_t) fs >= SV) {
+            if (err) {
+                *err = "forced semantic code " + std::to_string(fs) + " at iteration " + std::to_string((long long) i) +
+                       " is outside [0, " + std::to_string((long long) SV) + ") and is not -1 (free)";
+            }
+            return false;
+        }
+        soft_force = soft_force || fs == -1;
+    }
+    if (soft_force && forced_ac_given) {
+        if (err) {
+            *err = "lm_force_bias and free (-1) frames need semantic-only forcing (no forced_acoustic)";
+        }
+        return false;
+    }
+    // Logit scale under soft forcing, take 0, logged once at the end: the
+    // guided top-1 minus top-2 margin, the gap from top-1 down to the forced
+    // code, and how often the draw agreed with the source.
+    std::vector<float> fb_margin, fb_gap;
+    int64_t            fb_agree = 0, fb_biased = 0;
 
     // KV budget: prompt + one iteration per emitted frame + the un-emitted first
     // one, plus slack so the last decode step never sits exactly on the boundary.
@@ -658,7 +689,10 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             break;
         }
         // Under forced_continue the iterations past the forced frames sample freely.
-        const bool forced_it = forced && it < opt.forced_len;
+        const bool    forced_it = forced && it < opt.forced_len;
+        const int32_t fs_it     = forced_it ? opt.forced_semantic[it] : -1;
+        // Biased or free: sampled normally (rep penalty, knobs) with EOS masked.
+        const bool    soft_it   = forced_it && (opt.force_bias >= 0.0f || fs_it < 0);
         const auto t_host0 = std::chrono::steady_clock::now();
 
         // ── sample this iteration's semantic code, once per take ──
@@ -713,6 +747,8 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                 const float u           = cand_unc[(size_t) i];
                 cand_guided[(size_t) i] = u + (cand_cond[(size_t) i] - u) * CFG;
             }
+            // Read before the conditional top-k below can mask it out.
+            const float fs_guided = soft_it && fs_it >= 0 ? cand_guided[(size_t) (1 + fs_it)] : 0.0f;
             {
                 int64_t k = TOPK < NCAND ? (int64_t) TOPK : NCAND;
                 if (k < 1) {
@@ -796,25 +832,44 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                 }
             }
 
+            // ── soft forcing: pull toward the source code, never end early ──
+            if (soft_it) {
+                if (t == 0) {
+                    float top1 = -INFINITY, top2 = -INFINITY;
+                    for (int64_t i = 1; i < NCAND; i++) {
+                        const float g = cand_guided[(size_t) i];
+                        if (g > top1) {
+                            top2 = top1;
+                            top1 = g;
+                        } else if (g > top2) {
+                            top2 = g;
+                        }
+                    }
+                    if (std::isfinite(top2)) {
+                        fb_margin.push_back(top1 - top2);
+                    }
+                    if (fs_it >= 0 && std::isfinite(fs_guided)) {
+                        fb_gap.push_back(top1 - fs_guided);
+                    }
+                }
+                // A positive bias re-admits the source code if the conditional
+                // top-k dropped it; at 0 the frame is left exactly free.
+                if (fs_it >= 0 && opt.force_bias > 0.0f) {
+                    cand_guided[(size_t) (1 + fs_it)] = fs_guided + opt.force_bias;
+                }
+                cand_guided[0] = -INFINITY;
+            }
+
             // ── repetition penalty on the guided candidates (knobs at
             // defaults: no-op). History = this take's emitted codes. ──
-            if (!forced_it && opt.knobs.rep_penalty > 1.0f) {
+            if ((!forced_it || soft_it) && opt.knobs.rep_penalty > 1.0f) {
                 mm3_apply_rep_penalty(cand_guided.data(), NCAND, outs[t].semantic_all.data(),
                                       (int64_t) outs[t].semantic_all.size(), opt.knobs);
             }
 
             // ── sample (or replay) ──
-            if (forced_it) {
-                const int32_t fs = opt.forced_semantic[it];
-                if (fs < 0 || (int64_t) fs >= SV) {
-                    if (err) {
-                        *err = "forced semantic code " + std::to_string(fs) + " at iteration " +
-                               std::to_string((long long) it) + " is outside [0, " + std::to_string((long long) SV) +
-                               ")";
-                    }
-                    return false;
-                }
-                sem_code[(size_t) t] = fs;
+            if (forced_it && !soft_it) {
+                sem_code[(size_t) t] = fs_it;  // range-checked at entry
             } else {
                 const int64_t idx = opt.knobs.any_active()
                                         ? mm3_sample_knobbed(cand_guided.data(), NCAND, TOPK, opt.knobs,
@@ -832,6 +887,10 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                     continue;
                 }
                 sem_code[(size_t) t] = (int32_t) (idx - 1);
+                if (soft_it && fs_it >= 0 && t == 0) {
+                    fb_biased++;
+                    fb_agree += sem_code[0] == fs_it ? 1 : 0;
+                }
             }
         }
         out->host_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_host0).count();
@@ -1032,6 +1091,20 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
         std::chrono::steady_clock::now() - t_start).count();
     for (int t = 0; t < K; t++) {
         outs[t].total_ms = total_ms;
+    }
+    if (soft_force) {
+        auto median = [](std::vector<float> & v) -> float {
+            if (v.empty()) {
+                return NAN;
+            }
+            std::nth_element(v.begin(), v.begin() + (ptrdiff_t) (v.size() / 2), v.end());
+            return v[v.size() / 2];
+        };
+        fprintf(stderr,
+                "[MM3-AR] Soft forcing: bias %.2f, %lld biased frames, %lld free; agree %.1f%%; "
+                "median guided top-1 margin %.2f, median top-1 minus source %.2f\n",
+                opt.force_bias, (long long) fb_biased, (long long) (fb_margin.size() - (size_t) fb_biased),
+                fb_biased ? 100.0 * (double) fb_agree / (double) fb_biased : 0.0, median(fb_margin), median(fb_gap));
     }
 
     // A take with no frames is a failed render, not a short one — and because
