@@ -73,7 +73,7 @@ export interface GlobalParams {
   inferMethod: string; setInferMethod: (v: string) => void;
   scheduler: string; setScheduler: (v: string) => void;
   guidanceMode: string; setGuidanceMode: (v: string) => void;
-  seed: number; setSeed: (v: number) => void;
+  seed: number | string; setSeed: (v: number | string) => void;
   randomSeed: boolean; setRandomSeed: (v: boolean) => void;
   // LM Seed — independent from seed/randomSeed above; drives LM-phase
   // sampling. When lmSeedFollowsDit is true, it's tied to `seed` instead.

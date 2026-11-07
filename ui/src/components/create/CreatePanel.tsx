@@ -464,7 +464,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
   const handleGenerate = () => {
     // Wildcard auto-expand: reproducible from the DiT seed when it's locked,
     // fresh randomness when the seed is random anyway
-    const wcSeed = gp.randomSeed ? randomWildcardSeed() : gp.seed;
+    const wcSeed = gp.randomSeed ? randomWildcardSeed() : Number(gp.seed);
     const resolvedCaption = compose.autoExpand && hasWildcards(caption)
       ? expandWildcards(caption, wcSeed, 0) : caption;
     const resolvedLyrics = compose.autoExpand && hasWildcards(lyrics)
@@ -641,7 +641,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
           beatIntro={beatIntro} onBeatIntroChange={setBeatIntro}
           introBars={introBars} onIntroBarsChange={setIntroBars}
           autoExpand={autoExpand} onAutoExpandChange={setAutoExpand}
-          wildcardSeed={gp.randomSeed ? undefined : gp.seed}
+          wildcardSeed={gp.randomSeed ? undefined : Number(gp.seed)}
           captionReadOnly={mm3CaptionLocked || yue2CaptionLocked}
           yue2Mode={yue2Ui}
           afterStyle={yue2DatasetFold}

@@ -43,6 +43,11 @@ test('HeartMuLa requests freeze components, preserve lyrics, cap duration/batch 
     assert.equal(request.duration, 240);
     assert.equal(request.batchSize, 1);
     assert.equal(request.seed, 73);
+    // GH #337: a uint64 seed (here one an older build had already rounded to a
+    // double) goes to HeartMuLa as its exact decimal string, never as a number.
+    gp.setSeed(16302813008879570944);
+    assert.equal(useGlobalParamsStore.getState().getGlobalParams().seed, '16302813008879570944');
+    gp.setSeed(73);
     assert.equal(request.randomSeed, false);
     assert.equal(request.lyrics, content.lyrics);
     assert.equal(request.caption, content.caption);

@@ -14,17 +14,19 @@ import { ToggleSwitch } from './BarSection';
 import { SeedManagerDrawer } from './SeedManagerDrawer';
 import { ParamLabel } from '../shared/ParamLabel';
 import { GLOBAL_PARAM_DEFAULTS } from '../../stores/globalParamsStore';
+import { parseSeed, toSeed, U64_MAX, type Seed } from '../../utils/seed';
 
 // Matches the seed range used elsewhere in the app (StormLiveControls, TrainDitForm).
 const MAX_SEED = 2147483647;
 
-/** Seed input with local string buffer — prevents parseInt("-") snap-back. */
-const SeedInput: React.FC<{ value: number; onChange: (v: number) => void; className: string }> = ({
+/** Seed input with local string buffer — prevents parseInt("-") snap-back.
+ *  Commits through parseSeed so a uint64 seed keeps every digit. */
+const SeedInput: React.FC<{ value: Seed; onChange: (v: Seed) => void; className: string }> = ({
   value, onChange, className,
 }) => {
   const [local, setLocal] = useState(String(value));
   useEffect(() => { setLocal(String(value)); }, [value]);
-  const commit = () => { onChange(parseInt(local) || 42); };
+  const commit = () => { onChange(parseSeed(local) ?? 42); };
   return (
     <input type="number" className={className} value={local}
       onChange={e => setLocal(e.target.value)}
@@ -38,6 +40,14 @@ export const SeedControl: React.FC<{ inputClasses: string; hint?: string }> = ({
   const { t } = useTranslation();
   const gp = useGlobalParams();
   const [seedDrawerOpen, setSeedDrawerOpen] = useState(false);
+  // BigInt so a uint64 seed steps by exactly one; seeds already past MAX_SEED
+  // step within the uint64 range instead of snapping down to MAX_SEED.
+  const stepSeed = (delta: bigint) => {
+    const cur = BigInt(gp.seed);
+    const max = cur > BigInt(MAX_SEED) ? U64_MAX : BigInt(MAX_SEED);
+    const next = cur + delta;
+    gp.setSeed(toSeed(next < 0n ? 0n : next > max ? max : next));
+  };
   const stepButtonClasses = 'flex-shrink-0 p-1.5 rounded-lg text-zinc-500 hover:text-amber-400 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-zinc-500 disabled:hover:bg-transparent';
 
   return (
@@ -64,13 +74,13 @@ export const SeedControl: React.FC<{ inputClasses: string; hint?: string }> = ({
         <div className="flex items-center gap-1">
           <button type="button" title={t('seed.decrement')} aria-label={t('seed.decrement')}
             disabled={gp.randomSeed} className={stepButtonClasses}
-            onClick={() => gp.setSeed(Math.max(0, gp.seed - 1))}>
+            onClick={() => stepSeed(-1n)}>
             <Minus size={12} />
           </button>
           <SeedInput value={gp.seed} onChange={gp.setSeed} className={inputClasses} />
           <button type="button" title={t('seed.increment')} aria-label={t('seed.increment')}
             disabled={gp.randomSeed} className={stepButtonClasses}
-            onClick={() => gp.setSeed(Math.min(MAX_SEED, gp.seed + 1))}>
+            onClick={() => stepSeed(1n)}>
             <Plus size={12} />
           </button>
         </div>
@@ -78,7 +88,7 @@ export const SeedControl: React.FC<{ inputClasses: string; hint?: string }> = ({
       <SeedManagerDrawer
         isOpen={seedDrawerOpen}
         onClose={() => setSeedDrawerOpen(false)}
-        currentSeed={gp.seed}
+        currentSeed={Number(gp.seed)}
         onLoad={(seed) => { gp.setSeed(seed); gp.setRandomSeed(false); setSeedDrawerOpen(false); }}
         onLoadRandom={(seed) => { gp.setSeed(seed); gp.setRandomSeed(false); }}
       />

@@ -10,6 +10,7 @@
 
 import type { Song } from '../../types';
 import { formatDitModel, formatLmModel } from '../global-bar/modelLabels';
+import { seedText } from '../../utils/seed';
 
 export type Backend = 'ace' | 'minimax-m3' | 'yue2' | 'sa3';
 
@@ -97,7 +98,9 @@ const STAGE_REASON: Record<string, { text: string; tone?: Fact['tone'] }> = {
 };
 
 function num(value: unknown): string {
-  return value === undefined || value === null || value === '' ? '' : String(value);
+  if (value === undefined || value === null || value === '') return '';
+  // Seeds past 2^53: print the exact integer, not "...570000".
+  return typeof value === 'number' ? seedText(value) : String(value);
 }
 
 /** Push a fact only when it has a value — keeps every builder below flat. */
@@ -316,11 +319,11 @@ function yue2Facts(gp: any): FactGroup[] {
   // index, or a re-plan seed). Rows before baseSeed existed show only one.
   const base = gp.baseSeed;
   add(seeds, 'Seed', num(base ?? seed), { mono: true });
-  if (base !== undefined && seed !== undefined && String(base) !== String(seed)) {
+  if (base !== undefined && seed !== undefined && num(base) !== num(seed)) {
     add(seeds, 'Rendered seed', num(seed), { mono: true });
   }
   // Only worth a line when it is actually a second seed.
-  if (noise !== undefined && String(noise) !== String(seed)) {
+  if (noise !== undefined && num(noise) !== num(seed)) {
     add(seeds, 'Noise seed', num(noise), { mono: true });
   }
   if (y.song !== undefined) add(seeds, 'Variation', `${Number(y.song) + 1}.${Number(y.variation) + 1}`);

@@ -162,7 +162,7 @@ export interface GenerationParams {
   guidanceMode: string;
 
   // Seed (DiT / generation phase)
-  seed: number;
+  seed: number | string;  // decimal string above 2^53 (utils/seed.ts)
   randomSeed: boolean;
 
   // LM Seed — independent from the seed above. Controls the LM phase's

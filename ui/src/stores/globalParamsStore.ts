@@ -10,6 +10,9 @@ import { create } from 'zustand';
 import type { GenerationParams, LmRepMode, StableStepBackend, StableStepBlendMode } from '../types';
 import { DEFAULT_SETTINGS, type AppSettings } from '../components/settings/SettingsPanel';
 import { useBackendStore } from './backendStore';
+import { normalizeSeed, type Seed } from '../utils/seed';
+
+const STRING_SEED_BACKENDS = new Set(['heartmula', 'yue2']);
 import { apiClient } from '../services/httpClient';
 
 // -- Types --
@@ -402,7 +405,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   // re-read on every backend switch by the subscription at the bottom of this
   // file. Changing a solver in MiniMax-Music3 mode must not touch ACE-Step's.
   ...hydrateBackendScoped(),
-  seed: readKey("hs-seed", GLOBAL_PARAM_DEFAULTS.seed),
+  seed: normalizeSeed(readKey<Seed>("hs-seed", GLOBAL_PARAM_DEFAULTS.seed)),
   randomSeed: readKey("hs-randomSeed", GLOBAL_PARAM_DEFAULTS.randomSeed),
   // `backendParams` -- backend-declared knobs (capabilities().extensions),
   // keyed by the schema's `key`. One persisted bag rather than a named field
@@ -619,7 +622,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setInferMethod: (v: any) => { set({ inferMethod: v }); writeKey(scopedKey("hs-inferMethod"), v); },
   setScheduler: (v: any) => { set({ scheduler: v }); writeKey(scopedKey("hs-scheduler"), v); },
   setGuidanceMode: (v: any) => { set({ guidanceMode: v }); writeKey(scopedKey("hs-guidanceMode"), v); },
-  setSeed: (v: any) => { set({ seed: v }); writeKey("hs-seed", v); },
+  setSeed: (v: any) => { const seed = normalizeSeed(v); set({ seed }); writeKey("hs-seed", seed); },
   setBackendParam: (key: string, v: any) => {
     const next = { ...(get().backendParams || {}), [key]: v };
     set({ backendParams: next });
@@ -924,7 +927,10 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       lmCfgCutoffRatio: s.lmCfgCutoffRatio < 1.0 ? s.lmCfgCutoffRatio : undefined,
       cacheRatio: s.cacheRatio > 0 ? s.cacheRatio : undefined,
       inferMethod: s.inferMethod, scheduler: s.scheduler, guidanceMode: s.guidanceMode,
-      seed: s.seed, randomSeed: s.randomSeed,
+      // HeartMuLa and YuE2 take a uint64 seed as a decimal string; ACE and MM3
+      // read only JSON numbers and would treat the string as "random".
+      seed: STRING_SEED_BACKENDS.has(backendState.activeBackendId) ? s.seed : Number(s.seed),
+      randomSeed: s.randomSeed,
       lmSeed: s.lmSeed, lmSeedFollowsDit: s.lmSeedFollowsDit,
       batchSize: Math.min(s.batchSize, backendState.capabilities[backendState.activeBackendId]?.core.batch.max ?? s.batchSize),
       storkSubsteps: (s.inferMethod === 'stork2' || s.inferMethod === 'stork4') ? s.storkSubsteps : undefined,
