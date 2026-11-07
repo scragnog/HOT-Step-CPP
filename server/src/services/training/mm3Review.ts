@@ -142,19 +142,36 @@ function inside(root: string, p: string): boolean {
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
+/** Throw unless `p` (when it exists) is no link or junction and really lies
+ *  inside the run folder. Cleanup deletes and writes these paths, so a
+ *  `previews` junction to another run must stop it before anything changes. */
+function assertOwn(runReal: string, p: string): void {
+  let stat: fs.Stats;
+  try { stat = fs.lstatSync(p); } catch { return; }
+  if (stat.isSymbolicLink() || !inside(runReal, fs.realpathSync.native(p))) throw new Error(`Refusing to clean up a path outside the run folder: ${p}`);
+}
+
 function parts(ds: Ds & { sourceDir: string }, run: Pick<Mm3RunSummary, 'runName' | 'dir' | 'checkpoints'>, step: number) {
   const keep = run.checkpoints.find(c => c.step === step);
   if (!keep) throw new Error(`No checkpoint at step ${step}`);
+  if (fs.lstatSync(run.dir).isSymbolicLink()) throw new Error(`Refusing to clean up a linked run folder: ${run.dir}`);
+  const runReal = fs.realpathSync.native(run.dir);
   const others = run.checkpoints.filter(c => c.step !== step);
-  // checkpointsIn lists the run's own ckpt-<step> folders; checked again
-  // because this deletes them.
-  if (others.some(c => !inside(run.dir, c.dir))) throw new Error('A checkpoint lies outside its run folder');
+  // checkpointsIn lists the run's own ckpt-<step> folders; checked again,
+  // through links, because this deletes them.
+  for (const c of others) { if (!inside(run.dir, c.dir)) throw new Error('A checkpoint lies outside its run folder'); assertOwn(runReal, c.dir); }
   const p = readMm3RunManifest(run.dir)?.options.preview;
   const previewsDir = path.join(run.dir, 'previews');
+  assertOwn(runReal, previewsDir);
   // The base takes stay: they are the reference every rung is heard against.
   const previews = listMm3RunPreviews(previewsDir, { seconds: p?.seconds ?? MM3_PREVIEW_DEFAULTS.seconds, seed: p?.seed ?? MM3_PREVIEW_DEFAULTS.seed })
     .filter(v => !v.base && v.step !== step);
+  for (const v of previews) {
+    const wav = path.join(previewsDir, v.file);
+    for (const f of [wav, `${wav}.json`, wav.replace(/\.wav$/i, '.mp3')]) assertOwn(runReal, f);
+  }
   const resume = RESUME_FILES.map(f => path.join(run.dir, f)).filter(f => fs.existsSync(f));
+  for (const f of resume) assertOwn(runReal, f);
   const caches = listPreparedCaches(ds.slug, ds.sourceDir).filter(c => !keepsCache(c.name));
   return { keep, others, previewsDir, previews, resume, caches };
 }

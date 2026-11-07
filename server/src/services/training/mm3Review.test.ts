@@ -77,3 +77,37 @@ test('blind letters stick, scores round-trip, cleanup keeps the chosen step and 
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// A `previews` folder or a checkpoint that is a junction into another run must
+// stop the plan before cleanup writes or deletes anything there.
+test('cleanup refuses junctions out of the run, before any write', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mm3-review-link-'));
+  process.env.DATA_DIR = root;
+  process.env.TRAINING_DIR = path.join(root, 'training');
+  const m = await import('./mm3Review.js');
+  const runDir = path.join(root, 'runs', 'albumx-2026-11-07_13-11-56');
+  const other = path.join(root, 'runs', 'albumx-2026-11-01_00-00-00');
+  const write = (f: string) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, 'x'); };
+  const ckpt = (step: number) => ({ step, name: `ckpt-${step}`, dir: path.join(runDir, `ckpt-${step}`) });
+  const ds = { id: 'ds1', slug: 'albumx', sourceDir: path.join(root, 'src') };
+  try {
+    for (const s of [10, 20]) write(path.join(runDir, `ckpt-${s}`, 'adapter_model.safetensors'));
+    write(path.join(other, 'previews', 'step-000010-artist.wav'));
+    write(path.join(other, 'ckpt-30', 'adapter_model.safetensors'));
+    fs.symlinkSync(path.join(other, 'previews'), path.join(runDir, 'previews'), 'junction');
+    const run = { runName: path.basename(runDir), dir: runDir, checkpoints: [ckpt(10), ckpt(20)] };
+    assert.throws(() => m.planMm3Cleanup(ds, run, 20), /outside the run folder/);
+    assert.throws(() => m.runMm3Cleanup(ds, run, 20, { otherPreviews: true, otherCheckpoints: true }), /outside the run folder/);
+    assert.deepEqual(fs.readdirSync(path.join(other, 'previews')), ['step-000010-artist.wav']);
+    assert.equal(fs.existsSync(path.join(runDir, 'ckpt-10')), true);
+
+    // A checkpoint folder linked to another run's checkpoint: refused too.
+    fs.rmdirSync(path.join(runDir, 'previews')); // the junction only
+    fs.symlinkSync(path.join(other, 'ckpt-30'), path.join(runDir, 'ckpt-30'), 'junction');
+    assert.throws(() => m.runMm3Cleanup(ds, { ...run, checkpoints: [ckpt(10), ckpt(20), ckpt(30)] }, 20, { otherCheckpoints: true }), /outside the run folder/);
+    assert.equal(fs.existsSync(path.join(other, 'ckpt-30', 'adapter_model.safetensors')), true);
+    assert.equal(fs.existsSync(path.join(runDir, 'ckpt-10')), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
