@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 import type { Mm3Ladder, Mm3LadderPreview } from '../../services/trainingApi';
-import { Mm3LadderRows } from './Mm3LadderRows';
+import { Mm3LadderRows, type Mm3ReviewState } from './Mm3LadderRows';
 
 await i18n.use(initReactI18next).init({ lng: 'en', fallbackLng: 'en', resources: {}, interpolation: { escapeValue: false } });
 
@@ -17,11 +17,12 @@ const take = (o: Partial<Mm3LadderPreview> = {}): Mm3LadderPreview => ({
   audioUrl: '/api/training/mm3/preview?run=r&file=step-000100-artist.wav', ...o,
 });
 const ladder = (o: Partial<Mm3Ladder> = {}): Mm3Ladder => ({
-  dataset: { id: 'd', revision: '1' }, run: 'r', running: false, inUse: null,
+  dataset: { id: 'd', revision: '1' }, run: 'r', running: false, inUse: null, blindLabels: { 100: 'B', 200: 'A' }, scores: [], album: null,
   checkpoints: [{ step: 100, ref: 'r\\ckpt-100\\adapter_model.safetensors', loss: 2.5 }, { step: 200, ref: 'r\\ckpt-200\\adapter_model.safetensors' }],
   previews: [take(), take({ id: 'base', base: true, step: 0, file: 'base-artist.wav' }), take({ id: 'gone', step: 50 })], ...o,
 });
-const render = (l: Mm3Ladder) => renderToStaticMarkup(createElement(Mm3LadderRows, { ladder: l, rendering: null, picking: false, onRender: () => {}, onUse: () => {} }));
+const review = (o: Partial<Mm3ReviewState> = {}): Mm3ReviewState => ({ blind: false, scores: {}, notes: {}, onNote: () => {}, onScore: () => {}, idPrefix: 't', ...o });
+const render = (l: Mm3Ladder, r = review()) => renderToStaticMarkup(createElement(Mm3LadderRows, { ladder: l, review: r, rendering: null, picking: false, onRender: () => {}, onUse: () => {} }));
 
 // Base first, then every checkpoint, plus a step whose checkpoint is gone
 // (listen only: it has no Use button).
@@ -39,4 +40,28 @@ test('a running run cannot render or pick, and an empty ladder draws nothing', (
   const html = render(ladder({ running: true }));
   assert.equal(html.match(/disabled=""/g)?.length, 6);
   assert.equal(render(ladder({ checkpoints: [], previews: [] })), '');
+});
+
+// The YuE2 review on MM3 rungs: blind letters in letter order with the loss
+// hidden, scores per checkpoint, the best rung, and takes cleanup pruned.
+test('blind rungs sort by letter and hide the loss; scored rungs show overall and the best', () => {
+  const l = ladder({ scores: [
+    { run: 'r', step: 100, checkpointDir: 'c1', loss: null, likeness: 5, corruption: 2, notes: 'nice', blind: true, blindLabel: 'B', updatedAt: '' },
+    { run: 'r', step: 200, checkpointDir: 'c2', loss: null, likeness: 3, corruption: 3, notes: '', blind: true, blindLabel: 'A', updatedAt: '' }] });
+  const scores = Object.fromEntries(l.scores.map(s => [s.step, s]));
+  const blind = render(l, review({ blind: true, scores }));
+  assert.match(blind, /Base[\s\S]*Rung A[\s\S]*Rung B[\s\S]*Step 50/);
+  assert.doesNotMatch(blind, /Loss 2\.500|Step 100|Step 200/);
+  assert.match(blind, /overall 4\.50[\s\S]*best by score|best by score[\s\S]*overall 4\.50/);
+  assert.equal(blind.match(/Likeness/g)?.length, 2);
+  assert.match(blind, /value="nice"/);
+  assert.match(render(l), /Step 100[\s\S]*Loss 2\.500/);
+});
+
+test('the fixed-seed take comes first; a Render more take and a pruned take say what they are', () => {
+  const html = render(ladder({ previews: [
+    take({ id: 'extra', file: 'step-000100-artist-s9.wav', seed: 9, ts: 0 }), take({ ts: 5 }),
+    take({ id: 'gone', step: 200, file: 'step-000200-artist.wav', audioUrl: '', pruned: true })] }));
+  assert.match(html, /seed 424242[^<]*same seed on every rung[\s\S]*seed 9[^<]*random seed/);
+  assert.match(html, /Take 1: audio removed by cleanup/);
 });

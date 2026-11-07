@@ -1,4 +1,4 @@
-import type { Yue2CleanupChoice, Yue2CleanupPlan } from './trainingApi';
+import type { Mm3AlbumScore, Mm3CleanupPlan, Mm3RungScore, Yue2CleanupChoice, Yue2CleanupPlan, Yue2TrainedDirection } from './trainingApi';
 import { snapshotFor, trainingOperation, type TrainingSnapshot } from './trainingOperations';
 
 export interface ReviewRung {
@@ -82,7 +82,24 @@ export function decideReviewUse(pick: ReviewPick, narFurther: boolean, nar: {
 /** "Use this checkpoint" on an MM3 ladder: the dataset's album presets move to
  *  `step`. Returns the adapter reference the global LM adapter should take. */
 export function selectMm3Checkpoint(dataset: { id: string; revision: string }, runName: string, step: number) {
-  return trainingOperation<{ ref: string; presets: number }>('mm3', '/select', { body: snapshotFor({
+  return trainingOperation<{ ref: string; presets: number; plan: Mm3CleanupPlan | null }>('mm3', '/select', { body: snapshotFor({
     kind: 'mm3:select', idempotencyKey: crypto.randomUUID(), worker: { kind: 'local' }, dataset,
     sources: [], payload: { datasetId: dataset.id, runName, step } }), silent: true });
+}
+/** Cleanup around the MM3 checkpoint just chosen, while it is still linked. */
+export function cleanupMm3Checkpoint(dataset: { id: string; revision: string }, runName: string, step: number,
+  choice: Yue2CleanupChoice, blindLabel?: string) {
+  const { otherRuns: _otherRuns, ...mm3Choice } = choice;
+  return trainingOperation<{ freedBytes: number; done: string[] }>('mm3', '/cleanup', { body: snapshotFor({
+    kind: 'mm3:cleanup', idempotencyKey: crypto.randomUUID(), worker: { kind: 'local' }, dataset,
+    sources: [], payload: { datasetId: dataset.id, runName, step, choice: mm3Choice, ...(blindLabel ? { blindLabel } : {}) } }), silent: true });
+}
+/** A rung's likeness, corruption or notes; a field not sent keeps its value. */
+export function scoreMm3Rung(body: { datasetId: string; runName: string; step: number; likeness?: number | null;
+  corruption?: number | null; notes?: string; blind: boolean; blindLabel: string }) {
+  return trainingOperation<{ score: Mm3RungScore }>('mm3', '/score', { body, silent: true });
+}
+export function scoreMm3Album(body: { datasetId: string; runName: string; score?: number | null;
+  instruments?: Yue2TrainedDirection | null; vocals?: Yue2TrainedDirection | null; notes?: string }) {
+  return trainingOperation<{ score: Mm3AlbumScore }>('mm3', '/album', { body, silent: true });
 }

@@ -2647,8 +2647,19 @@ export async function listMm3Runs(id: string, reqOpts?: ReadOptions): Promise<{ 
   );
 }
 
-/** One saved MM3 preview take (server mm3Ladder.ts). */
-export type Mm3LadderPreview = TrainingPreview & { audioUrl: string };
+/** One saved MM3 preview take (server mm3Ladder.ts). `pruned`: cleanup
+ *  removed its audio, and `audioUrl` is empty. */
+export type Mm3LadderPreview = TrainingPreview & { audioUrl: string; pruned?: boolean };
+/** An ear score on one MM3 checkpoint (server mm3Review.ts). */
+export interface Mm3RungScore {
+  run: string; step: number; checkpointDir: string; loss: number | null;
+  likeness: number | null; corruption: number | null; notes: string;
+  blind: boolean; blindLabel: string; updatedAt: string;
+}
+export interface Mm3AlbumScore {
+  run: string; score: number | null; instruments: Yue2TrainedDirection | null; vocals: Yue2TrainedDirection | null;
+  notes: string; updatedAt: string;
+}
 /** An MM3 run's checkpoint ladder: GET /datasets/:id/mm3-previews?run=. */
 export interface Mm3Ladder {
   dataset: { id: string; revision: string };
@@ -2658,7 +2669,13 @@ export interface Mm3Ladder {
   inUse: string | null;
   checkpoints: Array<{ step: number; ref: string; loss?: number }>;
   previews: Mm3LadderPreview[];
+  /** Blind letter per checkpoint step. */
+  blindLabels: Record<string, string>;
+  scores: Mm3RungScore[];
+  album: Mm3AlbumScore | null;
 }
+/** MM3's cleanup never leaves the chosen run, so it has no "other runs". */
+export type Mm3CleanupPlan = Omit<Yue2CleanupPlan, 'otherRuns'>;
 
 export function getMm3Ladder(id: string, run: string, reqOpts?: ReadOptions): Promise<Mm3Ladder> {
   return localRequest<Mm3Ladder>(`/datasets/${encodeURIComponent(id)}/mm3-previews?run=${encodeURIComponent(run)}`, undefined, reqOpts);

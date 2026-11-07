@@ -72,6 +72,9 @@ export interface Mm3RunManifest {
    *  renders from this, so a later caption edit or a cleared codes cache can't
    *  change or break what a checkpoint is compared on. */
   previewPlan?: Mm3RecordedPreviewPlan;
+  /** Blind letter per checkpoint step for the ladder review, given as the
+   *  ladder first lists a step and never changed after (mm3Review.ts). */
+  blindLabels?: Record<string, string>;
 }
 
 export interface Mm3RecordedPreviewPlan {
@@ -112,6 +115,7 @@ export function writeMm3RunManifest(opts: ResolvedMm3TrainLmOptions,
       // should not erase what the last launch recorded.
       previewSong: meta.previewSong ?? prev?.previewSong,
       previewPlan: meta.previewPlan ?? prev?.previewPlan,
+      blindLabels: prev?.blindLabels,
     };
     fs.mkdirSync(opts.outDir, { recursive: true });
     fs.writeFileSync(file, JSON.stringify(out, null, 2), 'utf-8');
