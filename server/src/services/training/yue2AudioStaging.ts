@@ -42,11 +42,14 @@ function removeFile(file: string): void {
 }
 
 /** Separation must use the same flattened names as preprocessing. Old caches
- * without an audio_dir retain the original-folder fallback. */
+ * without an audio_dir retain the original-folder fallback, and so does a
+ * cache whose audio_dir was moved away (the manifest is fingerprinted, so it
+ * is not rewritten to follow the move). */
 export function yue2SeparationAudioDir(manifestPath: string, sourceDir: string): string {
   if (!fs.existsSync(manifestPath)) return sourceDir;
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { audio_dir?: string };
-  return typeof manifest.audio_dir === 'string' && manifest.audio_dir ? manifest.audio_dir : sourceDir;
+  const dir = manifest.audio_dir;
+  return typeof dir === 'string' && dir && fs.existsSync(dir) ? dir : sourceDir;
 }
 
 /** Re-pair current original sidecars with the stable staged audio names.

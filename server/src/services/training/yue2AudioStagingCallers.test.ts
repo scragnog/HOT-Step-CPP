@@ -104,4 +104,6 @@ test('separation reads nested and renamed staged sources with the exact aligner 
   }
   fs.writeFileSync(f.manifestPath, JSON.stringify({ sources: [] }));
   assert.equal(yue2SeparationAudioDir(f.manifestPath, f.source), f.source);
+  fs.writeFileSync(f.manifestPath, JSON.stringify({ audio_dir: path.join(dir, 'moved-away'), sources: [] }));
+  assert.equal(yue2SeparationAudioDir(f.manifestPath, f.source), f.source);
 });
