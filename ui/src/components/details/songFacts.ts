@@ -208,8 +208,27 @@ function mm3Facts(gp: any): FactGroup[] {
   }
   if (adapter.length) groups.push({ title: 'Adapter', facts: adapter });
 
+  // Cover Studio (code forcing): which plank, and how hard it was held.
+  const cover: Fact[] = [];
+  if (gp.mm3PlankPath) {
+    add(cover, 'Plank', String(gp.mm3PlankPath).replace(/\.mm3plank$/, '').slice(0, 8), { mono: true, title: String(gp.mm3PlankPath) });
+    add(cover, 'Forcing', gp.mm3PlankSemanticOnly ? 'Semantic only' : 'Full replay');
+    if (gp.mm3PlankSemanticOnly) {
+      add(cover, 'Bias', gp.mm3ForceBias === '' || gp.mm3ForceBias === undefined ? 'Hard pin' : num(gp.mm3ForceBias));
+      const p = gp.mm3ForcePattern;
+      if (p) {
+        const rules = [p.prefixSeconds && `prefix ${p.prefixSeconds} s`, p.anchorEvery && `every ${p.anchorEvery} frames`,
+          p.pinnedRanges?.length && p.pinnedRanges.map((r: number[]) => `${r[0]}-${r[1]}`).join(', ')].filter(Boolean);
+        add(cover, 'Pattern', `${rules.join(' + ')}${p.invert ? ' (inverted)' : ''}`);
+      }
+    }
+    if (gp.mm3PlankTrimSeconds) add(cover, 'Trim', `${num(gp.mm3PlankTrimSeconds)} s`);
+  }
+  if (cover.length) groups.push({ title: 'Cover', facts: cover });
+
   const seeds: Fact[] = [];
   add(seeds, 'Seed', num(gp.seed), { mono: true });
+  if (gp.mm3ArSeed !== undefined && gp.mm3ArSeed !== '') add(seeds, 'Planner seed', num(gp.mm3ArSeed), { mono: true });
   if (gp.mm3Takes > 1) {
     add(seeds, 'Take', `${Number(gp.mm3Take) + 1} of ${gp.mm3Takes}`);
     add(seeds, 'Base seed', num(gp.mm3BaseSeed), { mono: true });

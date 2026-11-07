@@ -145,6 +145,8 @@ export interface BackendFeatureCapabilities {
   cover: boolean;
   /** Audio-to-audio transform without a lead sheet or vocal conditioning. */
   coverAudioTransform?: boolean;
+  /** Cover by replaying a reference's encoded codes (MM3 planks). */
+  coverCodeForcing?: boolean;
   repaint: boolean;
   lego: boolean;
   extract: boolean;

@@ -62,6 +62,8 @@ import { LeadSheetSourcePicker } from './LeadSheetSourcePicker';
 import { readLeadSheetSource, selectedLeadSheetSource, leadSheetReadinessPath, leadSheetScoreUpdate } from './leadSheetSource';
 import { documentOptions } from '../../queries/cover-lyrics/workflows';
 import { HeartmulaCoverPanel } from './HeartmulaCoverPanel';
+import { Mm3CoverPanel } from './Mm3CoverPanel';
+import { DEFAULT_MM3_COVER, mm3CoverInput, type Mm3CoverSettings } from './mm3CoverState';
 import { EMPTY_HEARTMULA_TAGS, type HeartmulaCoverTags } from './heartmulaCoverState';
 import { Yue2CoverPanel, COVER_AR_DEFAULT, clampCoverAr, COVER_GUIDE_DEFAULT, coverGuideBlock, type CoverGuideState } from './Yue2CoverPanel';
 import { resolveYue2Render, type Yue2RenderMode } from './yue2RenderMode';
@@ -152,6 +154,11 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const yue2Mode = useBackendStore(s => s.activeBackendId === 'yue2');
   const heartmulaMode = useBackendStore(s => s.activeBackendId === 'heartmula');
   const leadSheetMode = yue2Mode || heartmulaMode;
+  // MM3 covers replay the source's encoded codes (a plank): no score, no ACE settings.
+  const mm3Mode = useBackendStore(s => s.activeBackendId === 'minimax-m3') && capabilities?.features.coverCodeForcing === true;
+  const audioOnly = audioTransformMode || mm3Mode;
+  const [mm3Cover, setMm3Cover] = useState<Mm3CoverSettings>(() => ({ ...DEFAULT_MM3_COVER, ...restore<Partial<Mm3CoverSettings>>('mm3Cover', {}) }));
+  useEffect(() => { persist('mm3Cover', mm3Cover); }, [mm3Cover]);
   const [heartmulaTags, setHeartmulaTags] = useState(() => restore<HeartmulaCoverTags>('heartmulaTags', EMPTY_HEARTMULA_TAGS));
   const [heartmulaSeed, setHeartmulaSeed] = useState(() => restore('heartmulaSeed', -1));
   const [heartmulaErrorOf, setHeartmulaErrorOf] = useState<{ sourceKey: string; message: string } | null>(null);
@@ -1366,10 +1373,11 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       ...(audioTransformMode ? { strength: sa3Transform, seed: sa3Seed,
         ...(sa3Adapter ? { adapter: `${sa3Adapter}:1` } : {}) } : {}),
       ...(heartmulaMode ? { heartmulaTags: { ...heartmulaTags }, seed: heartmulaSeed } : {}),
+      ...(mm3Mode ? { seed: mm3Cover.seed, mm3Cover: mm3CoverInput(mm3Cover) } : {}),
       title: songTitle, artistName: songArtist,
-      targetArtistName: audioTransformMode || heartmulaMode ? '' : yue2Mode ? targetYue2Artist : artists.find(a => a.id === selectedArtistId)?.name || '',
+      targetArtistName: audioTransformMode || heartmulaMode || mm3Mode ? '' : yue2Mode ? targetYue2Artist : artists.find(a => a.id === selectedArtistId)?.name || '',
       lyrics: audioTransformMode ? '' : renderLyrics, caption: artistCaption,
-      instrumental: audioTransformMode || renderInstrumental, lyricsSource: audioTransformMode ? null : renderLyricsSource, scoreSource: audioTransformMode ? null : sheetScoreSource, analysis,
+      instrumental: audioTransformMode || (mm3Mode ? !lyrics.trim() : renderInstrumental), lyricsSource: audioTransformMode ? null : renderLyricsSource, scoreSource: audioTransformMode ? null : sheetScoreSource, analysis,
       ...(leadSheetMode ? { prepare: prep.doc } : {}),
       settings: { coResident: settings.coResident, cacheLmCodes: settings.cacheLmCodes,
         parallelWhisper: settings.parallelWhisper, parallelQualityEval: settings.parallelQualityEval,
@@ -1609,6 +1617,11 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         setHeartmulaError(t('cover.heartmula.invalidTags', 'Use up to 512 characters per tag field, without brackets, semicolons or line breaks.')); return;
       }
       submitCoverWorkflow(); return;
+    }
+    if (mm3Mode) {
+      if (!token || !sourceAudioUrl || !coverDraftId || !coverDraftRevision || !mm3Cover.plank) return;
+      submitCoverWorkflow();
+      return;
     }
     if (audioTransformMode) {
       if (!token || !sourceAudioUrl || !coverDraftId || !coverDraftRevision || !artistCaption.trim()) return;
@@ -1896,6 +1909,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   const canGenerate = !sourceChanging && (heartmulaMode
     ? !!token && sourceMode === 'audio' && !!sourceAssetId && !!coverDraftId && !!coverDraftRevision
       && !!confirmedPair && !!approvedSheet && approvedSheet.key === sourceKey
+    : mm3Mode
+    ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision && !!mm3Cover.plank
     : audioTransformMode
     ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision && !!artistCaption.trim()
     : (!yue2Mode || sourceMode === 'audio' ? !!sourceAudioUrl && (!sourceAssetId || (!!coverDraftId && !!coverDraftRevision)) : true)
@@ -2024,7 +2039,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
           </MusicXmlImport>}
         </div>}
         {(!leadSheetMode || sourceMode === 'audio') && <>
-        {!audioTransformMode && <div className="px-4 pt-4 space-y-2">
+        {!audioOnly && <div className="px-4 pt-4 space-y-2">
           <Toggle size="sm" accent="cyan" checked={useDetectedDetails}
             disabled={isUploading || isAnalyzing}
             onChange={enabled => {
@@ -2049,7 +2064,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         </div>}
         <SourcePanel
           yue2Mode={leadSheetMode}
-          audioTransformMode={audioTransformMode}
+          audioTransformMode={audioOnly}
           sourceFileName={sourceFileName} metadata={metadata} analysis={analysis}
           fromDataset={datasetAnalysis}
           scoreDetails={scoreDetailsDiffer ? { bpm: scaledScoreBpm, key: scoreKey, saving: scoreDetailsSaving,
@@ -2090,9 +2105,9 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         /></>}
         </div>
 
-        {!audioTransformMode && <CoverResizeHandle label="Resize source column" direction="horizontal" onMouseDown={e => startResize(e, sourceWidth, setSourceWidth, 240, 900)} />}
+        {!audioOnly && <CoverResizeHandle label="Resize source column" direction="horizontal" onMouseDown={e => startResize(e, sourceWidth, setSourceWidth, 240, 900)} />}
         {/* Center: Lyrics and score */}
-        {!audioTransformMode && <><div className="min-w-[320px] flex-shrink-0 flex flex-col overflow-hidden border-r border-zinc-200 dark:border-white/5" style={{ width: scoreWidth }}>
+        {!audioOnly && <><div className="min-w-[320px] flex-shrink-0 flex flex-col overflow-hidden border-r border-zinc-200 dark:border-white/5" style={{ width: scoreWidth }}>
           <div className="flex-shrink-0 px-4 py-3 border-b border-zinc-200 dark:border-white/5">
             <div className="flex items-center justify-between gap-2">
               {/* Artist + Title inputs */}
@@ -2231,7 +2246,11 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
 
         <CoverResizeHandle label="Resize lyrics and score column" direction="horizontal" onMouseDown={e => startResize(e, scoreWidth, setScoreWidth, 320, 1200)} /></>}
         {/* Right: Artist + Settings */}
-        {audioTransformMode ? renderAudioTransformPanel() : heartmulaMode ? <HeartmulaCoverPanel
+        {audioTransformMode ? renderAudioTransformPanel() : mm3Mode ? <Mm3CoverPanel
+          settings={mm3Cover} onSettings={setMm3Cover} sourceAudioUrl={sourceAudioUrl || ''} sourceName={sourceFileName || ''}
+          caption={artistCaption} onCaption={setArtistCaption} lyrics={lyrics} onLyrics={setLyrics}
+          canGenerate={canGenerate} generating={isGenerating} onGenerate={handleGenerate} onCancel={handleCancel}
+          footer={draftsFold} /> : heartmulaMode ? <HeartmulaCoverPanel
           tags={heartmulaTags} onTags={setHeartmulaTags} seed={heartmulaSeed} onSeed={setHeartmulaSeed}
           canGenerate={canGenerate} generating={isGenerating} error={heartmulaError || (sourceMode !== 'audio' || !sourceAssetId
             ? t('cover.heartmula.uploadRequired', 'Upload a source recording before submitting a HeartMuLa cover.') : '')}
