@@ -285,6 +285,11 @@ step went from 4.24 to 3.31 s on an RTX 5090 (4.30 to 3.38 s with the companion)
 `joint` line in `train.jsonl` records `gemm` plus how many GEMMs took each path
 (`gemm_bf16`, `gemm_f32`). The casts need the HOT-ggml `bf16-mul-mat-grad` change.
 `yue2-train-gemm-precision-test` checks both paths against each other at YuE2 shapes.
+Since 2026-11-08 bf16 mode no longer sets `NVIDIA_TF32_OVERRIDE=0`, so the F32 GEMMs
+that remain (quantized bases, the companion decoder) run on TF32 tensor cores on sm_80+:
+2008 to 1880 ms a step on an RTX 5090 over 20 steps, loss within 0.025 %. strict-f32
+still sets it, and an inherited `NVIDIA_TF32_OVERRIDE=0` turns TF32 off for an A/B. The
+start-up log says which is in force (`[yue2-aitk] F32 GEMMs: ...`).
 
 `YUE2_AITK_HOST_PROFILE=1` adds one `{"stage":"host_profile","step":N,"ms":{...}}` line per
 step on stderr: host wall time per trainer phase (block executor phases, constants, gradient
