@@ -67,6 +67,18 @@ export function listMm3RungScores(datasetId: string, runName: string): Mm3RungSc
     .all(datasetId, runName) as Array<Record<string, unknown>>).map(rungRow);
 }
 
+/** Every saved MM3 rung score, for GET /mm3-rung-scores/export. */
+export function listAllMm3RungScores(): Array<Mm3RungScore & { datasetSlug: string }> {
+  return (getDb().prepare('SELECT * FROM mm3_rung_scores ORDER BY dataset_slug, run, step').all() as Array<Record<string, unknown>>)
+    .map(r => ({ ...rungRow(r), datasetSlug: (r.dataset_slug as string) ?? '' }));
+}
+
+export function mm3RungScoresCsv(rows: ReturnType<typeof listAllMm3RungScores>): string {
+  const cols = ['datasetSlug', 'run', 'step', 'loss', 'likeness', 'corruption', 'notes', 'blind', 'blindLabel', 'updatedAt'] as const;
+  const cell = (v: unknown) => { const s = typeof v === 'string' ? v : v === null || v === undefined ? '' : JSON.stringify(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  return [cols.join(','), ...rows.map(r => cols.map(c => cell(r[c])).join(','))].join('\n') + '\n';
+}
+
 /** Upsert the judgement on one checkpoint. A field the client did not send
  *  keeps its stored value; a blind rating must name the step's own letter. */
 export function scoreMm3Rung(ds: Ds, run: Pick<Mm3RunSummary, 'runName' | 'dir' | 'checkpoints'>,

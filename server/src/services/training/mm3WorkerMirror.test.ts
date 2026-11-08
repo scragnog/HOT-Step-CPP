@@ -204,3 +204,44 @@ test('an MM3 dispatch refuses an unbuilt or uncaptioned dataset before contactin
     server.close();
   }
 });
+
+// HOTSTEP-1078: deleting a mirrored MM3 run here (the Review page, Previous
+// runs, the ladder) drops its folder and its mirror record, waits out a pass,
+// and no later pass brings it back. The Review page lists the run first.
+test('a mirrored MM3 run shows on the Review page with its worker, and deleting it here sticks', async () => {
+  const { deleteMm3RunFolder, mm3RunOrigin } = await import('./yue2Mirror.js');
+  const { mm3ReviewRows } = await import('./mm3Ladder.js');
+  const run: FakeMm3 = { run: 'album-2026-11-08_12-00-00', datasetId: 'ds-album', live: false, files: {
+    'hotstep-run.json': file(manifest('album-2026-11-08_12-00-00', 'ds-album')),
+    'train-log.jsonl': file('{"type":"step","step":1,"loss":2.5}\n{"type":"done"}\n'),
+    'ckpt-100/adapter_model.safetensors': file('W-100'),
+    'previews/step-000100-artist.wav': file('WAV'),
+  } };
+  const fake = await fakeWorker([run]);
+  const w = { name: 'DelW', url: fake.url };
+  try {
+    await syncYue2Mirror(w);
+    const dir = path.join(mm3AdapterRoot(), run.run);
+    assert.equal(mm3RunOrigin(run.run), 'DelW');
+    const row = mm3ReviewRows({ id: 'ds-album', slug: 'album', name: 'album' }).find(r => r.refineRun === run.run);
+    assert.ok(row);
+    assert.equal(row.family, 'mm3');
+    assert.equal(row.origin, 'DelW');
+    assert.equal(row.rungs, 1);
+    assert.equal(row.unscored, 1);
+    assert.equal(row.best, null);
+
+    // Outside the adapters root, or under another run's name: refused, nothing removed.
+    await assert.rejects(deleteMm3RunFolder(run.run, path.join(root, 'src')), /outside the MM3 adapters folder/);
+    await assert.rejects(deleteMm3RunFolder('other', dir), /outside the MM3 adapters folder/);
+    assert.equal(fs.existsSync(dir), true);
+
+    await Promise.all([syncYue2Mirror(w), deleteMm3RunFolder(run.run, dir)]);
+    assert.equal(fs.existsSync(dir), false);
+    assert.equal(mm3RunOrigin(run.run), null);
+    run.files['train-log.jsonl'] = file('{"type":"done"}\n', 3000);
+    await syncYue2Mirror(w);
+    assert.equal(fs.existsSync(dir), false);
+    assert.equal(mm3ReviewRows({ id: 'ds-album', slug: 'album', name: 'album' }).some(r => r.refineRun === run.run), false);
+  } finally { fake.close(); }
+});

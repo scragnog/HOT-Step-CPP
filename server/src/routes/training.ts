@@ -236,7 +236,9 @@ import { trainingOp, TrainingOperationFailure, trainingOperationsRouter } from '
 import '../services/training/recipes/operations.js';
 import '../services/training/review/operations.js';
 import '../services/training/yue2PreparationOperations.js';
-import { mm3Ladder, renderMm3LadderTake } from '../services/training/mm3Ladder.js';
+import { deleteMm3Run, mm3Ladder, mm3ReviewRows, renderMm3LadderTake, setMm3ReviewComplete } from '../services/training/mm3Ladder.js';
+import { listAllMm3RungScores, mm3RungScoresCsv } from '../services/training/mm3Review.js';
+import { mm3RunOrigin } from '../services/training/yue2Mirror.js';
 import type {
   AuditionListResponse, AuditionOptions, AuditionSideSpec,
   BulkSetInput, CaptionOptions, CreateDatasetInput, FieldSource, GeniusOptions, LabelOptions, LmSize, NormaliseLyricsOptions,
@@ -2525,13 +2527,39 @@ router.get('/mm3/preview', (req: Request, res: Response) => {
 router.get('/datasets/:id/mm3-previews', trainingOp(async req =>
   mm3Ladder(String(req.params.id), String(req.query.run || ''))));
 
-/** POST /datasets/:id/mm3-previews/render — body { run, step }; step 0 = base. */
+/** POST /datasets/:id/mm3-previews/render — body { run, step, seconds?,
+ *  scaleMlp? }; step 0 = base. Absent seconds or scale = the run's own. */
 router.post('/datasets/:id/mm3-previews/render', trainingOp(async req => {
   const b = (req.body || {}) as Record<string, unknown>;
   const step = Number(b.step);
   if (!Number.isSafeInteger(step) || step < 0) throw new TrainingOperationFailure(400, { error: 'step must be a whole number' });
-  return { previews: await renderMm3LadderTake(String(req.params.id), String(b.run || ''), step) };
+  const seconds = b.seconds === undefined ? undefined : Number(b.seconds);
+  const scaleMlp = b.scaleMlp === undefined ? undefined : Number(b.scaleMlp);
+  if (seconds !== undefined && !(Number.isFinite(seconds) && seconds >= 4 && seconds <= 600)) throw new TrainingOperationFailure(400, { error: 'seconds must be between 4 and 600' });
+  if (scaleMlp !== undefined && !(Number.isFinite(scaleMlp) && scaleMlp >= 0 && scaleMlp <= 4)) throw new TrainingOperationFailure(400, { error: 'scaleMlp must be between 0 and 4' });
+  return { previews: await renderMm3LadderTake(String(req.params.id), String(b.run || ''), step, { seconds, scaleMlp }) };
 }));
+
+/** DELETE /datasets/:id/mm3-runs/:run — the run folder and its mirror record
+ *  (mm3Ladder.ts deleteMm3Run). */
+router.delete('/datasets/:id/mm3-runs/:run', trainingOp(async req =>
+  deleteMm3Run(String(req.params.id), String(req.params.run))));
+
+/** POST /datasets/:id/mm3-review-complete — body { run, complete }. */
+router.post('/datasets/:id/mm3-review-complete', trainingOp(async req =>
+  setMm3ReviewComplete(String(req.params.id), String(req.body?.run || ''), req.body?.complete !== false)));
+
+/** GET /mm3-rung-scores/export?format=csv|json — every saved MM3 rung score. */
+router.get('/mm3-rung-scores/export', (req: Request, res: Response) => {
+  try {
+    const rows = listAllMm3RungScores();
+    if (req.query.format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="mm3-rung-scores.csv"');
+      res.send(mm3RungScoresCsv(rows));
+    } else res.json({ scores: rows });
+  } catch (err: any) { res.status(500).json({ error: err?.message || String(err) }); }
+});
 
 /** POST /datasets/:id/mm3-train-lm */
 router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) => {
@@ -2968,11 +2996,12 @@ router.get('/datasets/:id/mm3-runs', (req: Request, res: Response) => {
     const active = queue.activeJobForDataset(ds.id);
     const activeDir = active && active.kind === 'mm3-train-lm'
       ? String((active.opts as { outDir?: string } | undefined)?.outDir || '') : '';
-    const out = runs.map(r => (
-      activeDir && path.resolve(activeDir) === path.resolve(r.dir)
+    const out = runs.map(r => ({
+      ...(activeDir && path.resolve(activeDir) === path.resolve(r.dir)
         ? { ...r, outcome: 'unknown' as const, running: true }
-        : { ...r, running: false }
-    ));
+        : { ...r, running: false }),
+      origin: mm3RunOrigin(r.runName),
+    }));
     res.json({ runs: out, busy: !!active });
   } catch (err: any) {
     res.status(500).json({ error: err?.message || String(err) });
@@ -4474,7 +4503,8 @@ router.get('/datasets/:id/yue2-joint-previews', (req: Request, res: Response) =>
 
 /** GET /yue2-review — every refinement ladder (a run with KL-rung
  * checkpoints) across datasets, with preview and score counts. The
- * "Awaiting review" page. */
+ * "Awaiting review" page. MM3 runs come in the same list with
+ * `family: 'mm3'` (mm3ReviewRows); the page shows the engine's own. */
 router.get('/yue2-review', (_req: Request, res: Response) => {
   try {
     const rows: Array<Record<string, unknown>> = [];
@@ -4500,8 +4530,9 @@ router.get('/yue2-review', (_req: Request, res: Response) => {
           live, rungs: rungs.length, previews: previews.length, scored: scored.size,
           unscored: rungs.filter(r => !scored.has(r.step)).length, reviewed: yue2ReviewComplete(run.output), best: best ? { step: best.step, overall: best.overall, blindLabel: run.blindLabels?.[best.step] ?? '' } : null,
           decoderOnly: (run.options as Record<string, unknown>)?.freezePlannerNow === true, klMin: kls.length ? Math.min(...kls) : null, klMax: kls.length ? Math.max(...kls) : null,
-          baseMatched: isCheckpointLadder(run.options), finished: yue2RunFinished(run.output) });
+          baseMatched: isCheckpointLadder(run.options), finished: yue2RunFinished(run.output), family: 'yue2' });
       }
+      rows.push(...mm3ReviewRows(ds));
     }
     rows.sort((a, b) => (b.createdAt as number) - (a.createdAt as number));
     res.json({ rows });

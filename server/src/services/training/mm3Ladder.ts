@@ -24,6 +24,10 @@ import { getMm3AlbumScore, listMm3RungScores, mm3BlindLabels, planMm3Cleanup, pr
 import { listMm3RunPreviews, MM3_PREVIEW_DEFAULTS, planMm3Previews, renderMm3Preview, type Mm3PreviewPlan } from './mm3Preview.js';
 import { listMm3Runs, mm3AdapterRoot, mm3RunManifestPath, readMm3RunManifest, type Mm3RecordedPreviewPlan, type Mm3RunManifest } from './mm3Runs.js';
 import { mm3CodesDir } from './mm3Train.js';
+import { getAllPresets } from '../../db/lireekDb.js';
+import { setYue2ReviewComplete, setYue2RunFinished, yue2ReviewComplete, yue2RunFinished } from './yue2AitkRuns.js';
+import type { Yue2CleanupItem } from './yue2Cleanup.js';
+import { deleteMm3RunFolder, mm3RunOrigin } from './yue2Mirror.js';
 import { acceptTrainingSnapshot, registerTrainingOperations, trainingOp, TrainingOperationFailure } from './operations.js';
 import type { TrainingPreview } from './types.js';
 
@@ -56,8 +60,14 @@ export type Mm3LadderPreview = TrainingPreview & { audioUrl: string; pruned?: bo
 
 export interface Mm3LadderResponse {
   dataset: { id: string; revision: string };
+  datasetName: string;
   run: string;
   running: boolean;
+  createdAt: number;
+  /** The worker this run was mirrored from; null = trained here. */
+  origin: string | null;
+  /** Marked reviewed without scoring every rung (the Review page counts it scored). */
+  reviewComplete: boolean;
   /** The adapter the dataset's album presets use now, or null. */
   inUse: string | null;
   checkpoints: Array<{ step: number; ref: string; loss?: number }>;
@@ -77,8 +87,9 @@ export function mm3Ladder(datasetId: string, runName: string): Mm3LadderResponse
   }).map(v => ({ ...v, audioUrl: `/api/training/mm3/preview?run=${encodeURIComponent(run.runName)}&file=${encodeURIComponent(v.file)}` }))
     .concat(prunedMm3Previews(path.join(run.dir, 'previews')).map(v => ({ ...v, audioUrl: '' })));
   return {
-    dataset: { id: ds.id, revision: ds.updatedAt },
-    run: run.runName, running, inUse: mm3PresetRefFor(ds),
+    dataset: { id: ds.id, revision: ds.updatedAt }, datasetName: ds.name,
+    run: run.runName, running, createdAt: run.startedAt ?? run.updatedAt, origin: mm3RunOrigin(run.runName),
+    reviewComplete: yue2ReviewComplete(run.dir), inUse: mm3PresetRefFor(ds),
     checkpoints: run.checkpoints.flatMap(c => {
       const ref = mm3CheckpointRef(c.dir);
       return ref ? [{ step: c.step, ref, loss: c.loss }] : [];
@@ -108,11 +119,13 @@ export function ladderPreviewPlan(runDir: string, manifest: Mm3RunManifest,
 }
 
 /** POST /datasets/:id/mm3-previews/render — one more take of a saved step (0 =
- *  the base model) with the run's own preview recipe. The rung's first take
- *  uses the run's seed so it compares with the other rungs; later takes use a
- *  random seed. The run is over, so nothing pauses, but previews pin the LM to
+ *  the base model) with the run's own preview recipe, at the length and MLP
+ *  scale the form shows now when given (as YuE2's Render does). The rung's
+ *  first take uses the run's seed so it compares with the other rungs; later
+ *  takes use a random seed. The run is over, so nothing pauses, but previews pin the LM to
  *  the base adapters render on, so the user's selection is put back after. */
-export async function renderMm3LadderTake(datasetId: string, runName: string, step: number): Promise<TrainingPreview[]> {
+export async function renderMm3LadderTake(datasetId: string, runName: string, step: number,
+                                          over: { seconds?: number; scaleMlp?: number } = {}): Promise<TrainingPreview[]> {
   const { ds, run, running } = runOf(datasetId, runName);
   if (running) throw fail(409, 'This run is still training; its previews render at each checkpoint.');
   const ckpt = step === 0 ? null : run.checkpoints.find(c => c.step === step);
@@ -129,6 +142,8 @@ export async function renderMm3LadderTake(datasetId: string, runName: string, st
     outDir: run.dir, holdout: o.holdout, trigger: o.trigger, captionFile: o.captionFile,
   }));
   if (!plan) throw fail(400, 'No preview caption could be built for this run.');
+  if (over.seconds !== undefined) plan.seconds = over.seconds;
+  if (over.scaleMlp !== undefined) plan.scaleMlp = over.scaleMlp;
   if (isEngineSuspended() || !engineReady) throw fail(503, 'The engine is not running; previews need it up');
   const have = listMm3RunPreviews(plan.dir, { seconds: plan.seconds, seed: plan.seed });
   if (!reserveGpuForPreview()) throw fail(409, 'The GPU is busy with a training job or another preview; previews wait until it ends.');
@@ -159,7 +174,7 @@ export const mm3SelectSchema = z.object({
 export const mm3CleanupSchema = mm3SelectSchema.extend({
   blindLabel: z.string().optional(),
   choice: z.object({ caches: z.boolean().optional(), otherCheckpoints: z.boolean().optional(),
-    resume: z.boolean().optional(), otherPreviews: z.boolean().optional() }),
+    otherRuns: z.boolean().optional(), resume: z.boolean().optional(), otherPreviews: z.boolean().optional() }),
 });
 const rating = z.number().int().min(1).max(5).nullable().optional();
 const scoreSchema = z.object({ datasetId: z.string(), runName: z.string(), step: z.number().int().positive(),
@@ -209,7 +224,8 @@ registerTrainingOperations('mm3', (router, deps) => {
       if (activeJobForDataset(ds.id)) throw fail(409, 'A job is running for this dataset; pick a checkpoint when it ends.');
       const ref = chosenRef(run, pick.step);
       const presets = pointMm3PresetsAt(ds, ref);
-      return { ref, presets, plan: sameRef(mm3PresetRefFor(ds), ref) ? planMm3Cleanup(ds, run, pick.step) : null };
+      return { ref, presets, plan: sameRef(mm3PresetRefFor(ds), ref)
+        ? { ...planMm3Cleanup(ds, run, pick.step), otherRuns: otherRunsItem(otherMm3Runs(ds, run.runName)) } : null };
     });
   }));
   /** Cleanup around the chosen step, only while it is still the linked
@@ -218,12 +234,93 @@ registerTrainingOperations('mm3', (router, deps) => {
     const { snapshot } = await acceptTrainingSnapshot(req.body, mm3CleanupSchema, 'review', deps);
     const pick = snapshot.payload;
     if (snapshot.dataset?.id !== pick.datasetId) throw fail(409, 'Dataset selection changed');
-    return withReviewMutation(pick.datasetId, () => {
+    return withReviewMutation(pick.datasetId, async () => {
       const { ds, run, running } = runOf(pick.datasetId, pick.runName);
       if (running || activeJobForDataset(ds.id) || hasActivePipeline()) throw fail(409, 'A job or pipeline is active for this dataset');
       if (!sameRef(mm3PresetRefFor(ds), chosenRef(run, pick.step))) throw fail(409, 'This checkpoint is no longer the linked adapter');
       if (pick.blindLabel && pick.blindLabel !== mm3BlindLabels(run)[pick.step]) throw fail(409, 'Blind label no longer identifies the selected rung');
-      return runMm3Cleanup(ds, run, pick.step, pick.choice);
+      const result = runMm3Cleanup(ds, run, pick.step, pick.choice);
+      const others = pick.choice.otherRuns ? otherMm3Runs(ds, run.runName) : [];
+      for (const r of others) await deleteMm3RunFolder(r.runName, r.dir);
+      if (others.length) {
+        result.freedBytes += otherRunsItem(others).bytes;
+        result.done.push(`${others.length} other run(s)`);
+      }
+      // As YuE2's: a picked and cleaned-up run has nothing left to review.
+      setYue2RunFinished(run.dir, { pickedStep: pick.step, pickedBlind: !!pick.blindLabel, pickedLabel: pick.blindLabel ?? '' });
+      return result;
     });
   }));
 });
+
+// ── the other runs, the Review page and run deletion ────────────────────────
+
+/** The dataset's other runs that cleanup may delete: as YuE2's, never one
+ *  training now and never one already finished (picked and cleaned up). */
+function otherMm3Runs(ds: { id: string; slug: string }, keep: string) {
+  const job = activeJobForDataset(ds.id);
+  const live = job?.kind === 'mm3-train-lm' ? path.resolve(String((job.opts as { outDir?: string } | undefined)?.outDir || '')) : '';
+  return listMm3Runs(ds.id, ds.slug).filter(r => r.runName !== keep && path.resolve(r.dir) !== live && !yue2RunFinished(r.dir) && !presetsUse(r.runName));
+}
+const otherRunsItem = (runs: Array<{ runName: string; sizeBytes: number }>): Yue2CleanupItem =>
+  ({ count: runs.length, bytes: runs.reduce((s, r) => s + r.sizeBytes, 0), detail: runs.map(r => r.runName) });
+
+/** True when any album preset points at a checkpoint of this run. */
+function presetsUse(runName: string): boolean {
+  const name = runName.toLowerCase();
+  return getAllPresets().some(p => typeof p.mm3_adapter_path === 'string'
+    && p.mm3_adapter_path.split(/[\\/]/).filter(Boolean)[0]?.toLowerCase() === name);
+}
+
+/** DELETE /datasets/:id/mm3-runs/:run — the run folder and its mirror record.
+ *  Refused while it trains, and while an album preset still uses one of its
+ *  checkpoints (the preset would point at nothing). Rung scores stay. */
+export function deleteMm3Run(datasetId: string, runName: string): Promise<{ run: string }> {
+  return withReviewMutation(datasetId, async () => {
+    const { run, running } = runOf(datasetId, runName);
+    if (running) throw fail(409, 'That run is still training; stop it first');
+    if (presetsUse(run.runName)) throw fail(409, 'An album preset uses a checkpoint of this run. Use a checkpoint of another run first.');
+    await deleteMm3RunFolder(run.runName, run.dir);
+    return { run: run.runName };
+  });
+}
+
+/** POST /datasets/:id/mm3-review-complete — mark a ladder reviewed without
+ *  scoring every rung, as YuE2's Refine toggle does. */
+export function setMm3ReviewComplete(datasetId: string, runName: string, complete: boolean): { reviewComplete: boolean } {
+  const { run } = runOf(datasetId, runName);
+  setYue2ReviewComplete(run.dir, complete);
+  return { reviewComplete: yue2ReviewComplete(run.dir) };
+}
+
+/** One Review-page row per MM3 run with a checkpoint, in YuE2's row shape
+ *  (`family: 'mm3'`), so the same panel lists both. */
+export function mm3ReviewRows(ds: { id: string; slug: string; name: string }) {
+  const job = activeJobForDataset(ds.id);
+  const live = job?.kind === 'mm3-train-lm' ? path.resolve(String((job.opts as { outDir?: string } | undefined)?.outDir || '')) : '';
+  return listMm3Runs(ds.id, ds.slug).flatMap(run => {
+    const rungs = run.checkpoints.filter(c => mm3CheckpointRef(c.dir)).map(c => c.step);
+    if (!rungs.length) return [];
+    const scores = listMm3RungScores(ds.id, run.runName);
+    const scored = new Set(scores.filter(s => s.likeness !== null || s.corruption !== null || s.notes).map(s => s.step));
+    let best: { step: number; overall: number } | null = null;
+    for (const s of [...scores].sort((a, b) => a.step - b.step)) {
+      if (s.likeness === null || s.corruption === null || !rungs.includes(s.step)) continue;
+      const overall = (s.likeness + (6 - s.corruption)) / 2;
+      if (!best || overall > best.overall) best = { step: s.step, overall };
+    }
+    const manifest = readMm3RunManifest(run.dir);
+    const p = manifest?.options.preview;
+    const previews = listMm3RunPreviews(path.join(run.dir, 'previews'), { seconds: p?.seconds ?? MM3_PREVIEW_DEFAULTS.seconds, seed: p?.seed ?? MM3_PREVIEW_DEFAULTS.seed })
+      .filter(v => !v.base && rungs.includes(v.step)).length;
+    const running = !!live && path.resolve(run.dir) === live;
+    return [{
+      family: 'mm3' as const, datasetId: ds.id, datasetSlug: ds.slug, datasetName: ds.name, refineRun: run.runName,
+      status: running ? 'running' : run.outcome, createdAt: run.startedAt ?? run.updatedAt, origin: mm3RunOrigin(run.runName),
+      live: running, rungs: rungs.length, previews, scored: scored.size, unscored: rungs.filter(s => !scored.has(s)).length,
+      reviewed: yue2ReviewComplete(run.dir),
+      best: best ? { ...best, blindLabel: manifest?.blindLabels?.[best.step] ?? '' } : null,
+      decoderOnly: false, klMin: null, klMax: null, baseMatched: true, finished: yue2RunFinished(run.dir),
+    }];
+  });
+}

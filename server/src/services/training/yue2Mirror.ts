@@ -371,6 +371,24 @@ function saveMm3Record(rec: Mm3Record): void {
   fs.renameSync(tmp, file);
 }
 
+/** The worker an MM3 run was mirrored from, or null when it was trained here. */
+export function mm3RunOrigin(run: string): string | null {
+  return readMm3Records().find(r => r.run === run && !r.discarded)?.worker ?? null;
+}
+
+/** Delete an MM3 run folder here for good. Its mirror records are marked
+ *  discarded first, so no later pass brings it back, and any pass already
+ *  running is waited out, so none writes into the folder as it goes. The
+ *  worker keeps its copy (MM3 runs are never deleted there). */
+export async function deleteMm3RunFolder(run: string, dir: string): Promise<void> {
+  if (path.dirname(path.resolve(dir)) !== path.resolve(mm3AdapterRoot()) || path.basename(dir) !== run)
+    throw new Error(`Refusing to delete outside the MM3 adapters folder: ${dir}`);
+  if (fs.lstatSync(dir).isSymbolicLink()) throw new Error(`Refusing to delete a linked run folder: ${dir}`);
+  for (const rec of readMm3Records().filter(r => r.run === run && !r.discarded)) saveMm3Record({ ...rec, discarded: true });
+  await Promise.allSettled([...states.values()].map(s => s.pass));
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 /** The local hotstep-run.json carries this machine's blind ladder letters;
  *  a newer copy from the worker must not drop them. */
 function keepLocalBlindLabels(file: string, labels: Record<string, string> | undefined): void {
