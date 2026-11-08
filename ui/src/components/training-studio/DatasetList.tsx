@@ -15,6 +15,7 @@ import { BatchImportWizard } from './BatchImportWizard';
 import { DatasetAssetChips } from './DatasetAssetChips';
 import { NewDatasetWizard } from './NewDatasetWizard';
 import { Yue2AitkBatchWizard } from './Yue2AitkBatchWizard';
+import { TRAINED_BY_FAMILY } from './plugins/chips';
 import { formatDayYear } from '../../utils/dateUtils';
 
 const CARD = 'rounded-xl border border-zinc-200 dark:border-white/5 bg-white dark:bg-suno-card p-4';
@@ -57,11 +58,10 @@ export const DatasetList: React.FC = () => {
   const [doneFilter, setDoneFilter] = useState<'all' | 'done' | 'todo'>('all');
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const isDone = (d: typeof datasets[number]) => !!(d.assets?.yue2?.arAdapter && d.assets?.yue2?.narAdapter);
     return datasets.filter(d =>
       (!q || [d.name, d.artistName, d.albumName, d.customTag].some(v => (v ?? '').toLowerCase().includes(q)))
-      && (!isYue2 || doneFilter === 'all' || (doneFilter === 'done') === isDone(d)));
-  }, [datasets, query, doneFilter, isYue2]);
+      && (!batchFamily || doneFilter === 'all' || (doneFilter === 'done') === TRAINED_BY_FAMILY[batchFamily](d.assets)));
+  }, [datasets, query, doneFilter, batchFamily]);
 
   if (loading && datasets.length === 0) {
     return (
@@ -136,7 +136,7 @@ export const DatasetList: React.FC = () => {
           placeholder={t('trainingStudio.list.filter', 'Filter by dataset, artist or album…') as string}
           className="flex-1 max-[1023px]:max-w-full max-w-md rounded-lg bg-zinc-100 dark:bg-black/20 px-3 py-1.5 text-xs"
         />
-        {isYue2 && (
+        {batchFamily && (
           <div className="flex flex-col gap-1">
             <ParamLabel
               label={t('trainingStudio.list.filterStatusLabel', 'Adapter status')}
@@ -153,7 +153,7 @@ export const DatasetList: React.FC = () => {
               aria-label={t('trainingStudio.list.filterStatusLabel', 'Adapter status') as string}
               options={[
                 { value: 'all', label: t('trainingStudio.list.filterAll', 'All datasets') },
-                { value: 'done', label: t('trainingStudio.list.filterDone', 'AR + NAR adapters done') },
+                { value: 'done', label: batchFamily === 'yue2' ? t('trainingStudio.list.filterDone', 'AR + NAR adapters done') : t('trainingStudio.list.filterDoneAdapter', 'Adapter done') },
                 { value: 'todo', label: t('trainingStudio.list.filterTodo', 'Not done yet') },
               ]}
             />
