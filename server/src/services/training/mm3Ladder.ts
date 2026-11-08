@@ -28,7 +28,7 @@ import { getAllPresets } from '../../db/lireekDb.js';
 import { setYue2ReviewComplete, setYue2RunFinished, yue2ReviewComplete, yue2RunFinished } from './yue2AitkRuns.js';
 import type { Yue2CleanupItem } from './yue2Cleanup.js';
 import { deleteMm3RunFolder, mm3RunOrigin, withMm3RunLock } from './yue2Mirror.js';
-import { acceptTrainingSnapshot, registerTrainingOperations, trainingOp, TrainingOperationFailure } from './operations.js';
+import { acceptTrainingSnapshot, assertDatasetCurrent, registerTrainingOperations, trainingOp, TrainingOperationFailure } from './operations.js';
 import type { TrainingPreview } from './types.js';
 
 const fail = (status: 400 | 404 | 409 | 503, error: string) => new TrainingOperationFailure(status, { error });
@@ -226,14 +226,16 @@ registerTrainingOperations('mm3', (router, deps) => {
     const { snapshot } = await acceptTrainingSnapshot(req.body, mm3SelectSchema, 'review', deps);
     const pick = snapshot.payload;
     if (snapshot.dataset?.id !== pick.datasetId) throw fail(409, 'Dataset selection changed');
-    return withReviewMutation(pick.datasetId, () => {
+    // Under the run's lock, so a finishing mirror pass cannot link its own
+    // pick over this one while it is made.
+    return withReviewMutation(pick.datasetId, () => withMm3RunLock(pick.runName, async () => {
       const { ds, run } = runOf(pick.datasetId, pick.runName);
       if (activeJobForDataset(ds.id)) throw fail(409, 'A job is running for this dataset; pick a checkpoint when it ends.');
       const ref = chosenRef(run, pick.step);
       const presets = pointMm3PresetsAt(ds, ref);
       return { ref, presets, plan: sameRef(mm3PresetRefFor(ds), ref)
         ? { ...planMm3Cleanup(ds, run, pick.step), otherRuns: otherRunsItem(otherMm3Runs(ds, run.runName)) } : null };
-    });
+    }));
   }));
   /** Cleanup around the chosen step, only while it is still the linked
    *  adapter and nothing runs for the dataset. Never leaves the run's folder. */
@@ -242,15 +244,17 @@ registerTrainingOperations('mm3', (router, deps) => {
     const pick = snapshot.payload;
     if (snapshot.dataset?.id !== pick.datasetId) throw fail(409, 'Dataset selection changed');
     return withReviewMutation(pick.datasetId, async () => {
-      const { ds, run, running } = runOf(pick.datasetId, pick.runName);
-      if (running || activeJobForDataset(ds.id) || hasActivePipeline()) throw fail(409, 'A job or pipeline is active for this dataset');
-      if (!sameRef(mm3PresetRefFor(ds), chosenRef(run, pick.step))) throw fail(409, 'This checkpoint is no longer the linked adapter');
-      if (pick.blindLabel && pick.blindLabel !== mm3BlindLabels(run)[pick.step]) throw fail(409, 'Blind label no longer identifies the selected rung');
-      // Under the run's lock, as a ladder render holds it; the GPU check
-      // covers a render of another run that cleanup would also touch.
-      const result = await withMm3RunLock(run.runName, async () => {
+      // Every check runs under the run's lock, right before anything goes: a
+      // mirror pass or a ladder render holding it may have moved the linked
+      // checkpoint or the dataset while this waited.
+      const { ds, run, result } = await withMm3RunLock(pick.runName, async () => {
+        assertDatasetCurrent(snapshot, deps);
+        const { ds, run, running } = runOf(pick.datasetId, pick.runName);
+        if (running || activeJobForDataset(ds.id) || hasActivePipeline()) throw fail(409, 'A job or pipeline is active for this dataset');
         if (gpuPreviewReserved()) throw fail(409, PREVIEW_BUSY);
-        return runMm3Cleanup(ds, run, pick.step, pick.choice);
+        if (!sameRef(mm3PresetRefFor(ds), chosenRef(run, pick.step))) throw fail(409, 'This checkpoint is no longer the linked adapter');
+        if (pick.blindLabel && pick.blindLabel !== mm3BlindLabels(run)[pick.step]) throw fail(409, 'Blind label no longer identifies the selected rung');
+        return { ds, run, result: runMm3Cleanup(ds, run, pick.step, pick.choice) };
       });
       // Each other run is re-checked under its own lock; one that changed
       // since the plan (a preview started, a preset moved to it) is kept.

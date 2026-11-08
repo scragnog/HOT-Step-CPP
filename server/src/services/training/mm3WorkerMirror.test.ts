@@ -302,3 +302,66 @@ test('a delete is refused while an on-demand preview holds the GPU', async () =>
   try { await assert.rejects(deleteMm3Run('ds-preview', name), /preview|busy/i); }
   finally { await runReservedPreview(async () => {}); }
 });
+
+test('cleanup revalidates the linked checkpoint after waiting for a finishing mirror pass', async () => {
+  await import('./mm3Ladder.js');
+  const { trainingOperationsRouter } = await import('./operations.js');
+  const { withReviewMutation } = await import('./review/operations.js');
+  const { getOrCreateArtist, saveLyricsSet, upsertPreset, getPreset } = await import('../../db/lireekDb.js');
+  const { default: express } = await import('express');
+  const artist = getOrCreateArtist('fixture');
+  const lyrics = saveLyricsSet(Number(artist.id), 'fixture', 0, []);
+  dataset('ds-cleanrace', 'cleanrace', path.join(root, 'src', 'cleanrace'));
+  const name = 'cleanrace-2026-11-08_15-00-00';
+  const ref = (step: number) => name + '/ckpt-' + step + '/adapter_model.safetensors';
+  const run: FakeMm3 = { run: name, datasetId: 'ds-cleanrace', live: true, files: {
+    'hotstep-run.json': file(manifest(name, 'ds-cleanrace', { datasetSlug: 'cleanrace' })),
+    'train-log.jsonl': file('{"type":"step","step":200,"loss":2.5}\n'),
+    'ckpt-100/adapter_model.safetensors': file('W-100'),
+    'ckpt-200/adapter_model.safetensors': file('W-200'),
+  }};
+  let release: (() => void) | undefined;
+  let entered: (() => void) | undefined;
+  const reached = new Promise<void>(r => { entered = r; });
+  let holding = false;
+  const fake = await fakeWorker([run], (rel, res, buf) => {
+    if (holding && rel === 'train-log.jsonl') { release = () => res.end(buf); entered!(); return true; }
+    return false;
+  });
+  const w = { name: 'CleanRaceW', url: fake.url };
+  const app = express();
+  app.use(express.json());
+  app.use('/ops', trainingOperationsRouter);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>(r => server.once('listening', r));
+  try {
+    await syncYue2Mirror(w);
+    upsertPreset(Number(lyrics.id), { mm3AdapterPath: ref(100) });
+    run.live = false;
+    run.files['train-log.jsonl'] = file('{"type":"step","step":200,"loss":2.5}\n{"type":"done"}\n', 2000);
+    holding = true;
+    const pass = syncYue2Mirror(w);
+    await reached;
+    const response = fetch('http://127.0.0.1:' + (server.address() as any).port + '/ops/mm3/cleanup', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        version: 1, operation: { kind: 'mm3:cleanup', idempotencyKey: 'review-cleanrace' },
+        worker: { kind: 'local' }, dataset: { id: 'ds-cleanrace', revision: iso }, sources: [],
+        payload: { datasetId: 'ds-cleanrace', runName: name, step: 100, choice: { otherCheckpoints: true } },
+      }),
+    });
+    let waiting = false;
+    for (let i = 0; i < 200 && !waiting; i++) {
+      await new Promise(r => setTimeout(r, 5));
+      try { await withReviewMutation('ds-cleanrace', () => {}); } catch { waiting = true; }
+    }
+    assert.ok(waiting, 'cleanup reached the review lock');
+    release!();
+    await pass;
+    const res = await response;
+    const result = await res.json();
+    const linked = String(getPreset(Number(lyrics.id))!.mm3_adapter_path);
+    const linkedExists = fs.existsSync(path.join(mm3AdapterRoot(), linked));
+    assert.equal(res.status, 409, JSON.stringify(result));
+    assert.equal(linkedExists, true, 'cleanup must never remove the newly linked checkpoint');
+  } finally { release?.(); fake.close(); server.closeAllConnections(); await new Promise<void>(r => server.close(() => r())); }
+});
