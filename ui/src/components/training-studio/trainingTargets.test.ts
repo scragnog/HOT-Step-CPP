@@ -14,14 +14,16 @@ const ALL_PHASES: TrainingPhase[] = ['dataset', 'preprocess', 'optimise', 'train
 // plug-in shell (the backend-id branches and the two phase-fallback lines).
 const LEGACY_VISIBLE: Record<string, TrainingPhase[]> = {
   ace: ['dataset', 'preprocess', 'train', 'monitor'],
-  'minimax-m3': ['dataset', 'preprocess', 'train', 'monitor'],
+  // MM3 took YuE2's tabs, less Optimise (HOTSTEP-1078).
+  'minimax-m3': ['dataset', 'preprocess', 'train', 'review'],
   yue2: ['dataset', 'preprocess', 'optimise', 'train', 'review'],
 };
 const LEGACY_LABEL: Record<string, string | undefined> = {
-  ace: undefined, 'minimax-m3': 'trainingStudio.mm3.phaseCodes', yue2: 'trainingStudio.phase.prepare',
+  ace: undefined, 'minimax-m3': 'trainingStudio.phase.prepare', yue2: 'trainingStudio.phase.prepare',
 };
 const legacyFallback = (backendId: string, phase: TrainingPhase): TrainingPhase =>
-  (backendId === 'yue2' && phase === 'monitor') || (backendId !== 'yue2' && phase === 'optimise') ? 'train' : phase;
+  (backendId === 'yue2' && phase === 'monitor') || (backendId !== 'yue2' && phase === 'optimise')
+  || (backendId === 'minimax-m3' && phase === 'refine') ? 'train' : phase;
 
 for (const backend of ['ace', 'minimax-m3', 'yue2']) {
   test(`${backend}, target=active: visible phases, labels and fallbacks match the pre-shell behaviour`, () => {

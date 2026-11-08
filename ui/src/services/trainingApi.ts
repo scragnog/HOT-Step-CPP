@@ -476,6 +476,8 @@ export interface Mm3RunSummary {
   optionsSource: 'manifest' | 'log' | 'none';
   sizeBytes: number;
   running?: boolean;
+  /** The worker this run was mirrored from; null = trained here. */
+  origin?: string | null;
 }
 
 export interface Mm3ResumeRequest {
@@ -2663,8 +2665,14 @@ export interface Mm3AlbumScore {
 /** An MM3 run's checkpoint ladder: GET /datasets/:id/mm3-previews?run=. */
 export interface Mm3Ladder {
   dataset: { id: string; revision: string };
+  datasetName: string;
   run: string;
   running: boolean;
+  createdAt: number;
+  /** The worker this run was mirrored from; null = trained here. */
+  origin: string | null;
+  /** Marked reviewed without scoring every rung. */
+  reviewComplete: boolean;
   /** The adapter the dataset's album presets use now, or null. */
   inUse: string | null;
   checkpoints: Array<{ step: number; ref: string; loss?: number }>;
@@ -2674,17 +2682,29 @@ export interface Mm3Ladder {
   scores: Mm3RungScore[];
   album: Mm3AlbumScore | null;
 }
-/** MM3's cleanup never leaves the chosen run, so it has no "other runs". */
-export type Mm3CleanupPlan = Omit<Yue2CleanupPlan, 'otherRuns'>;
+/** Same items as YuE2's: "other runs" is the dataset's other MM3 runs. */
+export type Mm3CleanupPlan = Yue2CleanupPlan;
 
 export function getMm3Ladder(id: string, run: string, reqOpts?: ReadOptions): Promise<Mm3Ladder> {
   return localRequest<Mm3Ladder>(`/datasets/${encodeURIComponent(id)}/mm3-previews?run=${encodeURIComponent(run)}`, undefined, reqOpts);
 }
 
-/** One more take of a saved step (0 = base). Silent: the ladder shows the error. */
-export function renderMm3LadderTake(id: string, run: string, step: number): Promise<{ previews: TrainingPreview[] }> {
+/** One more take of a saved step (0 = base), at the given length and MLP
+ *  scale (absent = the run's own). Silent: the ladder shows the error. */
+export function renderMm3LadderTake(id: string, run: string, step: number,
+  opts: { seconds?: number; scaleMlp?: number } = {}): Promise<{ previews: TrainingPreview[] }> {
   return localRequest(`/datasets/${encodeURIComponent(id)}/mm3-previews/render`,
-    { method: 'POST', ...jsonBody({ run, step }), timeout: 15 * 60_000, silent: true });
+    { method: 'POST', ...jsonBody({ run, step, ...opts }), timeout: 15 * 60_000, silent: true });
+}
+
+/** Delete an MM3 run folder (and its mirror record). Silent: the caller shows the error. */
+export function deleteMm3Run(id: string, run: string): Promise<{ run: string }> {
+  return localRequest(`/datasets/${encodeURIComponent(id)}/mm3-runs/${encodeURIComponent(run)}`, { method: 'DELETE', silent: true });
+}
+
+/** Mark an MM3 ladder reviewed without scoring every rung. */
+export function setMm3ReviewComplete(id: string, run: string, complete: boolean): Promise<{ reviewComplete: boolean }> {
+  return localRequest(`/datasets/${encodeURIComponent(id)}/mm3-review-complete`, { method: 'POST', ...jsonBody({ run, complete }), silent: true });
 }
 
 /** Continue a previous run: same adapter directory, same recipe, more steps.
@@ -2810,7 +2830,7 @@ export function pickLadderRun<T extends { jobId: string; live?: boolean; created
 }
 
 /** Awaiting review: refinement ladders across datasets with score counts. */
-export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number; blindLabel: string } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean; /** Mirrored from this training worker; absent/null = trained here. */ origin?: string | null }
+export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number; blindLabel: string } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean; /** Mirrored from this training worker; absent/null = trained here. */ origin?: string | null; /** Absent = 'yue2' (an older server). */ family?: 'yue2' | 'mm3' }
 export async function listYue2Review(reqOpts?: ReadOptions): Promise<{ rows: Yue2ReviewRow[] }> {
   return localRequest('/yue2-review', undefined, reqOpts);
 }
@@ -2880,6 +2900,7 @@ export async function scoreYue2Album(id: string, body: { refineRun: string; scor
   return localRequest(`/datasets/${encodeURIComponent(id)}/yue2-album-score`, { method: 'PUT', ...jsonBody(body), silent: true });
 }
 export const yue2RungScoresExportUrl = (format: 'csv' | 'json') => `${LOCAL_BASE}/yue2-rung-scores/export?format=${format}`;
+export const mm3RungScoresExportUrl = (format: 'csv' | 'json') => `${LOCAL_BASE}/mm3-rung-scores/export?format=${format}`;
 
 /** POST /datasets/:id/yue2-joint-previews/render — previews for one checkpoint, on demand. */
 export async function renderYue2JointPreviews(

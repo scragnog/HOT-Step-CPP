@@ -89,10 +89,9 @@ export function selectMm3Checkpoint(dataset: { id: string; revision: string }, r
 /** Cleanup around the MM3 checkpoint just chosen, while it is still linked. */
 export function cleanupMm3Checkpoint(dataset: { id: string; revision: string }, runName: string, step: number,
   choice: Yue2CleanupChoice, blindLabel?: string) {
-  const { otherRuns: _otherRuns, ...mm3Choice } = choice;
   return trainingOperation<{ freedBytes: number; done: string[] }>('mm3', '/cleanup', { body: snapshotFor({
     kind: 'mm3:cleanup', idempotencyKey: crypto.randomUUID(), worker: { kind: 'local' }, dataset,
-    sources: [], payload: { datasetId: dataset.id, runName, step, choice: mm3Choice, ...(blindLabel ? { blindLabel } : {}) } }), silent: true });
+    sources: [], payload: { datasetId: dataset.id, runName, step, choice, ...(blindLabel ? { blindLabel } : {}) } }), silent: true });
 }
 /** A rung's likeness, corruption or notes; a field not sent keeps its value. */
 export function scoreMm3Rung(body: { datasetId: string; runName: string; step: number; likeness?: number | null;
