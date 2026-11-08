@@ -17,12 +17,13 @@ const take = (o: Partial<Mm3LadderPreview> = {}): Mm3LadderPreview => ({
   audioUrl: '/api/training/mm3/preview?run=r&file=step-000100-artist.wav', ...o,
 });
 const ladder = (o: Partial<Mm3Ladder> = {}): Mm3Ladder => ({
-  dataset: { id: 'd', revision: '1' }, run: 'r', running: false, inUse: null, blindLabels: { 100: 'B', 200: 'A' }, scores: [], album: null,
+  dataset: { id: 'd', revision: '1' }, datasetName: 'Album', run: 'r', running: false, createdAt: 1, origin: null, reviewComplete: false, inUse: null, blindLabels: { 100: 'B', 200: 'A' }, scores: [], album: null,
   checkpoints: [{ step: 100, ref: 'r\\ckpt-100\\adapter_model.safetensors', loss: 2.5 }, { step: 200, ref: 'r\\ckpt-200\\adapter_model.safetensors' }],
   previews: [take(), take({ id: 'base', base: true, step: 0, file: 'base-artist.wav' }), take({ id: 'gone', step: 50 })], ...o,
 });
 const review = (o: Partial<Mm3ReviewState> = {}): Mm3ReviewState => ({ blind: false, scores: {}, notes: {}, onNote: () => {}, onScore: () => {}, idPrefix: 't', ...o });
-const render = (l: Mm3Ladder, r = review()) => renderToStaticMarkup(createElement(Mm3LadderRows, { ladder: l, review: r, rendering: null, picking: false, onRender: () => {}, onUse: () => {} }));
+const render = (l: Mm3Ladder, r = review(), o: { rendering?: number | null; renderError?: { step: number; message: string } } = {}) =>
+  renderToStaticMarkup(createElement(Mm3LadderRows, { ladder: l, review: r, rendering: o.rendering ?? null, renderError: o.renderError, picking: false, onRender: () => {}, onUse: () => {} }));
 
 // Base first, then every checkpoint, plus a step whose checkpoint is gone
 // (listen only: it has no Use button).
@@ -64,4 +65,11 @@ test('the fixed-seed take comes first; a Render more take and a pruned take say 
     take({ id: 'gone', step: 200, file: 'step-000200-artist.wav', audioUrl: '', pruned: true })] }));
   assert.match(html, /seed 424242[^<]*same seed on every rung[\s\S]*seed 9[^<]*random seed/);
   assert.match(html, /Take 1: audio removed by cleanup/);
+});
+
+test('takes download as WAV under the dataset, rung and seed; a pending or failed render shows on its rung', () => {
+  assert.match(render(ladder()), /download="Album_step100_take1_seed424242\.wav"/);
+  assert.match(render(ladder(), review({ blind: true })), /download="Album_rungB_take1_seed424242\.wav"/);
+  assert.match(render(ladder(), review(), { rendering: 200 }), /Step 200[\s\S]*Take 1: pending/);
+  assert.match(render(ladder(), review(), { renderError: { step: 100, message: 'engine down' } }), /Take 2: failed — engine down/);
 });

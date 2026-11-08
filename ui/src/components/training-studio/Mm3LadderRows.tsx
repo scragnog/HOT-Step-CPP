@@ -57,27 +57,35 @@ export const Mm3LadderRows: React.FC<{
   header?: ReactNode;
   /** Step being rendered, or null. */
   rendering: number | null;
+  /** The last Render that failed, shown on its rung as YuE2 shows a failed take. */
+  renderError?: { step: number; message: string } | null;
   picking: boolean;
   onRender: (step: number) => void;
   onUse: (step: number) => void;
-}> = ({ ladder, review, header, rendering, picking, onRender, onUse }) => {
+}> = ({ ladder, review, header, rendering, renderError, picking, onRender, onUse }) => {
   const { t } = useTranslation();
   const { blind } = review;
   const label = (step: number) => ladder.blindLabels[step] ?? '';
   const { overall, best } = mm3Overall(ladder);
-  const takeRows = (r: Mm3Rung): PreviewTake[] => r.takes.map((p, i) => {
+  const takeRows = (r: Mm3Rung): PreviewTake[] => [...r.takes.map((p, i): PreviewTake => {
     const caption = p.kind === 'control' ? t('trainingStudio.mm3.previewControlCaption', 'Control caption') : t('trainingStudio.mm3.previewArtistCaption', 'Artist caption');
     if (p.pruned || !p.audioUrl) return { id: p.id, label: caption,
       text: `${t('trainingStudio.refine.take', 'Take {{n}}', { n: i + 1 })}: ${t('trainingStudio.refine.audioPruned', 'audio removed by cleanup')}` };
     return {
       id: p.id, src: p.audioUrl,
+      downloadName: `${ladder.datasetName || 'preview'}_${r.base ? 'base' : blind ? `rung${label(r.step)}` : `step${r.step}`}_take${i + 1}_seed${p.seed}.wav`,
       label: `${caption} · ${t('trainingStudio.mm3.previewTake', '{{seconds}} s · seed {{seed}} · rendered in {{renderSeconds}} s', {
         seconds: p.seconds, seed: p.seed, renderSeconds: (p.ms / 1000).toFixed(0) })}${r.base ? '' : extraTake(p)
         ? ` · ${t('trainingStudio.refine.seedRandom', 'random seed: a new song, not comparable with other rungs')}`
         : ` · ${t('trainingStudio.refine.seedFixed', 'same seed on every rung: compare rungs on this one')}`}`,
       sublabel: p.caption || undefined,
     };
-  });
+  }),
+  // The render in flight, or the one that failed, as a take row of its rung.
+  ...(rendering === r.step ? [{ id: `pending-${r.step}`, label: t('trainingStudio.refine.take', 'Take {{n}}', { n: r.takes.length + 1 }),
+    text: `${t('trainingStudio.refine.take', 'Take {{n}}', { n: r.takes.length + 1 })}: ${t('trainingStudio.mm3.takePending', 'pending')}` }] : []),
+  ...(rendering !== r.step && renderError?.step === r.step ? [{ id: `failed-${r.step}`, label: t('trainingStudio.refine.take', 'Take {{n}}', { n: r.takes.length + 1 }),
+    text: `${t('trainingStudio.refine.take', 'Take {{n}}', { n: r.takes.length + 1 })}: ${t('trainingStudio.mm3.takeFailed', 'failed')} — ${renderError.message}` }] : [])];
   const rungs = mm3Rungs(ladder);
   // Blind: the checkpoints in letter order, so step order cannot show
   // through; listen-only steps (checkpoint deleted) after them.
