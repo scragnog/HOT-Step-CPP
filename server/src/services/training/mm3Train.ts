@@ -1310,19 +1310,25 @@ export function isMm3TrainPrecision(v: unknown): v is Mm3TrainPrecision {
  *  f16 and worse for inference, so it has no other reason to be picked.
  *  'fastest' only upgrades flash to flash-bf16; when attention resolved to
  *  exact (switched off, or a build with no fused kernel) it trains as 'fast'
- *  rather than turning flash on behind the user's back. */
+ *  rather than turning flash on behind the user's back.
+ *  'fast' and 'fastest' also pass --tf32 on: their big GEMMs already round to
+ *  BF16 (8-bit mantissa), so TF32's 11 bits on the leftover F32 GEMMs costs
+ *  nothing they have not accepted. 1.09x on a 4090, +1.4 % on a 5090. The flag
+ *  only skips NVIDIA_TF32_OVERRIDE=0; cuBLAS ignores TF32 math below sm_80 and
+ *  other backends never read it. 'full' keeps strict FP32. */
 export function mm3PrecisionFlags(precision: Mm3TrainPrecision | undefined, basePrecision: Mm3BasePrecision,
-                                  attnBackend: 'exact' | 'flash'): { weights: string; attn: string | null } {
+                                  attnBackend: 'exact' | 'flash'): { weights: string; attn: string | null; tf32: boolean } {
   const p = precision ?? 'full';
   return {
     weights: basePrecision === 'bf16' || p !== 'full' ? 'bf16' : 'f32-window',
     attn: attnBackend === 'exact' ? null : p === 'fastest' ? 'flash-bf16' : attnBackend,
+    tf32: p !== 'full',
   };
 }
 
 export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   const m = resolveMm3TrainModels(o.basePrecision);
-  const { weights, attn } = mm3PrecisionFlags(o.trainPrecision, o.basePrecision, o.attnBackend ?? 'exact');
+  const { weights, attn, tf32 } = mm3PrecisionFlags(o.trainPrecision, o.basePrecision, o.attnBackend ?? 'exact');
   const args = [
     'mm3-lm-train', '--jsonl',
     '--lm', m.lm,
@@ -1414,6 +1420,7 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   // collision (engine exit) before this ever runs — see attnBackendResolved
   // in routes/training.ts.
   if (attn) args.push('--attn', attn);
+  if (tf32) args.push('--tf32', 'on');
   // Whole-song recipe (2026-09-11): tracks that do not fit the window are left
   // out rather than trained in pieces. Emitted only for 'exclude' so an older
   // engine never sees the flag for the 'crop' behaviour it already has.

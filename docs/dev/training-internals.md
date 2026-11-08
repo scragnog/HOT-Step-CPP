@@ -932,7 +932,9 @@ the field resumes as `full`. `recommendMm3Config` adds the BF16 weight stage
 (`MM3_VRAM_MODEL.bf16StageMb`) for the default precision on a non-BF16 base. The mapping is
 in `buildMm3TrainLmArgs`; the run manifest records the field, so a preview
 relaunch and the resume route keep it, and the resume route accepts it as an
-override. `--tf32 on` stays command-line only.
+override. Since 2026-11-08 `fast` and `fastest` also pass `--tf32 on` (their
+big GEMMs already round to BF16, so TF32 on the leftover F32 GEMMs is the
+smaller rounding; 1.09x on a 4090) and `full` keeps strict FP32.
 
 ### Step cost after the BF16 levers (2026-11-06)
 

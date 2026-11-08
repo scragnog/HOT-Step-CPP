@@ -97,7 +97,7 @@ The same flags on the command line (`ace-train mm3-lm-train`), all off by defaul
 |---|---|---|
 | `--weights bf16` | 1.8x | The base weights' matrix products run in BF16 on the tensor cores. Works on any base, including q8_0. |
 | `--attn flash-bf16` | 1.19x | Flash attention runs in BF16. CUDA only. |
-| `--tf32 on` | 1.39x alone, little extra on top of the two above | The remaining F32 products may use TF32. Command line only. |
+| `--tf32 on` | 1.39x alone, little extra on top of the two above | The remaining F32 products may use TF32. Fast and Fastest in the app pass it; Full does not. On a card older than the RTX 30 series it changes nothing. |
 | `--pissa-fold on` | 1.1x on top of the two above | With `--weights bf16` on a q8_0 base and HOT-PiZZA or PiSSA, the frozen half of the adapter is subtracted from the BF16 weights once per layer instead of being multiplied out at every step. Same function, different rounding. Command line only, not heard yet. |
 
 `--weights bf16 --attn flash-bf16` together trained 2.6 times as fast, and the training loss stayed within 0.7 % of the default over 20 steps. Each flag changes the trained weights slightly.

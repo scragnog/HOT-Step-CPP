@@ -19,23 +19,23 @@ const flag = (args: string[], name: string) => {
 };
 
 test('training precision maps to the trainer flags', () => {
-  const cases: Array<[Partial<ResolvedMm3TrainLmOptions>, string, string | null]> = [
-    [{ basePrecision: 'q8_0' }, 'bf16', 'flash-bf16'],                                    // the default = fastest
-    [{ basePrecision: 'q8_0', trainPrecision: undefined }, 'f32-window', 'flash'],        // absent (old manifest) = full
-    [{ basePrecision: 'q8_0', trainPrecision: 'full' }, 'f32-window', 'flash'],
-    [{ basePrecision: 'q8_0', trainPrecision: 'fast' }, 'bf16', 'flash'],
-    [{ basePrecision: 'q8_0', trainPrecision: 'fastest' }, 'bf16', 'flash-bf16'],
+  const cases: Array<[Partial<ResolvedMm3TrainLmOptions>, string, string | null, string | null]> = [
+    [{ basePrecision: 'q8_0' }, 'bf16', 'flash-bf16', 'on'],                              // the default = fastest
+    [{ basePrecision: 'q8_0', trainPrecision: undefined }, 'f32-window', 'flash', null],  // absent (old manifest) = full
+    [{ basePrecision: 'q8_0', trainPrecision: 'full' }, 'f32-window', 'flash', null],
+    [{ basePrecision: 'q8_0', trainPrecision: 'fast' }, 'bf16', 'flash', 'on'],
+    [{ basePrecision: 'q8_0', trainPrecision: 'fastest' }, 'bf16', 'flash-bf16', 'on'],
     // Attention off (or coerced to exact): Fastest trains as Fast, no --attn.
-    [{ basePrecision: 'q8_0', trainPrecision: 'fastest', attnBackend: 'exact' }, 'bf16', null],
-    [{ basePrecision: 'q8_0', trainPrecision: 'full', attnBackend: 'exact' }, 'f32-window', null],
-    // A BF16 base always trains Lever A, as before.
-    [{ basePrecision: 'bf16', trainPrecision: 'full' }, 'bf16', 'flash'],
+    [{ basePrecision: 'q8_0', trainPrecision: 'fastest', attnBackend: 'exact' }, 'bf16', null, 'on'],
+    [{ basePrecision: 'q8_0', trainPrecision: 'full', attnBackend: 'exact' }, 'f32-window', null, null],
+    // A BF16 base always trains Lever A, as before; Full still keeps strict FP32.
+    [{ basePrecision: 'bf16', trainPrecision: 'full' }, 'bf16', 'flash', null],
   ];
-  for (const [over, weights, attn] of cases) {
+  for (const [over, weights, attn, tf32] of cases) {
     const args = buildMm3TrainLmArgs(opts(over));
     assert.equal(flag(args, '--weights'), weights, JSON.stringify(over));
     assert.equal(flag(args, '--attn'), attn, JSON.stringify(over));
-    assert.ok(!args.includes('--tf32'), 'tf32 stays command-line only');
+    assert.equal(flag(args, '--tf32'), tf32, JSON.stringify(over));
   }
 });
 
@@ -44,6 +44,7 @@ test('a preview relaunch keeps the precision flags', () => {
   const args = buildMm3TrainLmArgs({ ...o, resumeFrom: 'state.bin' });
   assert.equal(flag(args, '--weights'), 'bf16');
   assert.equal(flag(args, '--attn'), 'flash-bf16');
+  assert.equal(flag(args, '--tf32'), 'on');
   assert.equal(flag(args, '--resume'), 'state.bin');
 });
 

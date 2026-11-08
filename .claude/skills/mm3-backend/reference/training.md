@@ -286,8 +286,8 @@ adapter are staged under
 `D:\Ace-Step-Latest\_experiments\_LISTENING\2026-11-06-mm3-speed\bf16-train\`
 for the ear test. Heard 2026-11-06: no audible loss at either level, so the
 app's `trainPrecision` default is `fastest` (`--weights bf16 --attn
-flash-bf16`). The CLI flags themselves stay off by default, and `--tf32 on`
-stays command-line only.
+flash-bf16`). The CLI flags themselves stay off by default. Since 2026-11-08 the
+app's `fast` and `fastest` also pass `--tf32 on`; `full` does not.
 
 ## Native codes export: `ace-train mm3-codes` (SHIPPED 2026-08-20)
 
