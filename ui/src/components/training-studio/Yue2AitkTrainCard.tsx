@@ -30,7 +30,7 @@ import {
 import { currentWorkerRef } from '../../services/trainingOperations';
 import * as preparationApi from '../../services/trainingPreparationApi';
 import { useTrainingStore } from '../../stores/trainingStore';
-import { descentRate, formatDurationMs } from '../../utils/trainingEta';
+import { formatDurationMs } from '../../utils/trainingEta';
 import { formatMB, yue2AdapterHalfBytes } from '../../utils/yue2AdapterSize';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -41,6 +41,7 @@ import { Yue2LadderReview } from './Yue2LadderReview';
 import { Yue2OptimizerFields } from './Yue2OptimizerFields';
 import { Yue2SplitChart } from './Yue2SplitChart';
 import { trainingRunEta } from './trainingRunEta';
+import { lossDescentRate, lossTargetEta } from './trainingTargetEta';
 import { TrainingEtaLine } from './TrainingEtaLine';
 import { reduceYue2Metric, type Yue2Point } from './yue2ChartData';
 import { attachHoldout, captureJointOverrides, submitJointStart } from './yue2JointCommand';
@@ -62,8 +63,7 @@ const METRIC_CAP = 2000;
 type JointStepPoint = Yue2Point;
 type JointMilestone = { epoch: number; loss: number; path: string; decoderOnly?: boolean };
 function jointLossRate(points: JointStepPoint[]): number | null {
-  const means = points.map(p => p.ma20).filter((v): v is number => typeof v === 'number');
-  return means.length >= 9 ? descentRate(means) : null;
+  return lossDescentRate(points.map(p => p.ma20).filter((v): v is number => typeof v === 'number'));
 }
 /** Steps in the KL trend fit; the engine's kKlTrendWindow (yue2-aitk-runtime.cpp). */
 const KL_TREND_WINDOW = 30;
@@ -113,14 +113,7 @@ function jointEta(points: JointStepPoint[], form: Yue2JointTrainRequest): string
   }
   if (form.stopMode !== 'loss' || !(form.targetLoss && form.targetLoss > 0))
     return null;
-  const current = last.ma20;
-  const rate = jointLossRate(points);
-  if (rate === null || current === undefined) return `target ETA estimating · cap ${formatDurationMs(capMs)}`;
-  if (current <= form.targetLoss) return `target reached · cap ${formatDurationMs(capMs)}`;
-  if (!(rate > 0)) return `target trend stalled · cap ${formatDurationMs(capMs)}`;
-  const stepsToTarget = (current - form.targetLoss) / rate;
-  if (stepsToTarget > remaining) return `target unlikely before cap · cap ${formatDurationMs(capMs)}`;
-  return `target ETA ${formatDurationMs(Math.max(1, stepsToTarget) * pace)}`;
+  return lossTargetEta({ current: last.ma20, rate: jointLossRate(points), target: form.targetLoss, remaining, paceMs: pace, capMs });
 }
 /** A named snapshot of the training settings. Per-run and per-machine values
  *  (dataset/checkpoint/output paths, resume record) are deliberately not part
