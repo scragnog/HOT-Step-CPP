@@ -165,6 +165,18 @@ is a different song from the same seed by design (check-mm3-ensemble.mjs).
 Knock-ons: Save Plan To Disk is dead while the toggle is on; each ended
 candidate costs its own flow pass.
 
+**Adapter fade (2026-11-08, 28c79e42, opt-in, no UI dial yet).** Adapters
+suppress the base's ending instinct, so `lm_adapter_fade_*` (engine
+ARCHITECTURE.md) can step the LM adapter down to the base for the tail
+(`MM3LmAdapterSchedule`; runtime mode only, the server forces it). Plan-only
+count, one adapter, one prompt, 12 takes, 300 s cap: control 2/12, base 12/12,
+**ramp from 210 s to the base at 270 s 9/12**, hard handoff at 210 s 5/12, ramp
+or handoff at 150 s 2/12 and 0/12. A fade during the lyrics loses: the base
+then has to finish the adapter's song and runs to the cap. A fade after the
+last lyric works. On that prompt the base sang the sheet by ~183 s and the
+adapter by ~260 s; the 210 s start was base pace + 30 s. Runtime mode costs
+about +44% LM step on q8_0 against merge.
+
 ## The trap list (each cost real debugging — do not relearn)
 
 1. **ComfyUI's wrapper NEGATES the DiT output; the diffusers reference (and our port) does not.**
