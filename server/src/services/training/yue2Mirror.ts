@@ -362,13 +362,26 @@ function readMm3Records(): Mm3Record[] {
     return Array.isArray(v) ? v.filter((r): r is Mm3Record => typeof r?.worker === 'string' && typeof r?.run === 'string') : [];
   } catch { return []; }
 }
-function saveMm3Record(rec: Mm3Record): void {
-  const list = readMm3Records().filter(r => !(r.worker === rec.worker && r.run === rec.run));
+function writeMm3Records(list: Mm3Record[]): void {
   const file = mm3RecordsPath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify([...list, rec], null, 1), 'utf8');
+  fs.writeFileSync(tmp, JSON.stringify(list, null, 1), 'utf8');
   fs.renameSync(tmp, file);
+}
+/** A tombstone sticks: a pass still holding an older copy of the record must
+ *  not undo a delete made while it ran. */
+function saveMm3Record(rec: Mm3Record): void {
+  const all = readMm3Records();
+  const same = (r: Mm3Record) => r.worker === rec.worker && r.run === rec.run;
+  writeMm3Records([...all.filter(r => !same(r)), all.find(same)?.discarded ? { ...rec, discarded: true } : rec]);
+}
+const mm3Discarded = (worker: string, run: string) => !!readMm3Records().find(r => r.worker === worker && r.run === run)?.discarded;
+
+/** One MM3 run at a time: a mirror pass's work on it, its deletion, a ladder
+ *  render and the cleanup around a checkpoint of it. */
+export function withMm3RunLock<T>(run: string, fn: () => Promise<T>): Promise<T> {
+  return withYue2RunLock(`mm3:${run}`, fn);
 }
 
 /** The worker an MM3 run was mirrored from, or null when it was trained here. */
@@ -376,17 +389,30 @@ export function mm3RunOrigin(run: string): string | null {
   return readMm3Records().find(r => r.run === run && !r.discarded)?.worker ?? null;
 }
 
-/** Delete an MM3 run folder here for good. Its mirror records are marked
- *  discarded first, so no later pass brings it back, and any pass already
- *  running is waited out, so none writes into the folder as it goes. The
- *  worker keeps its copy (MM3 runs are never deleted there). */
-export async function deleteMm3RunFolder(run: string, dir: string): Promise<void> {
+/** Delete an MM3 run folder here for good. Its mirror records are tombstoned
+ *  first, outside the lock, so a pass working on the run sees it before it
+ *  links the run's checkpoint; then, under the run's lock (no pass, render or
+ *  cleanup on it), `guard` re-checks what may have changed while waiting and
+ *  the folder goes. A refused guard puts the records back. The worker keeps
+ *  its copy (MM3 runs are never deleted there). */
+export async function deleteMm3RunFolder(run: string, dir: string, guard?: () => void): Promise<void> {
   if (path.dirname(path.resolve(dir)) !== path.resolve(mm3AdapterRoot()) || path.basename(dir) !== run)
     throw new Error(`Refusing to delete outside the MM3 adapters folder: ${dir}`);
-  if (fs.lstatSync(dir).isSymbolicLink()) throw new Error(`Refusing to delete a linked run folder: ${dir}`);
-  for (const rec of readMm3Records().filter(r => r.run === run && !r.discarded)) saveMm3Record({ ...rec, discarded: true });
-  await Promise.allSettled([...states.values()].map(s => s.pass));
-  fs.rmSync(dir, { recursive: true, force: true });
+  const before = readMm3Records().filter(r => r.run === run);
+  if (before.some(r => !r.discarded)) writeMm3Records(readMm3Records().map(r => r.run === run ? { ...r, discarded: true as const } : r));
+  let removing = false;
+  try {
+    await withMm3RunLock(run, async () => {
+      guard?.();
+      if (!fs.existsSync(dir)) return;
+      if (fs.lstatSync(dir).isSymbolicLink()) throw new Error(`Refusing to delete a linked run folder: ${dir}`);
+      removing = true;
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+  } catch (err) {
+    if (!removing) writeMm3Records([...readMm3Records().filter(r => r.run !== run), ...before]);
+    throw err;
+  }
 }
 
 /** The local hotstep-run.json carries this machine's blind ladder letters;
@@ -406,55 +432,67 @@ async function mirrorMm3Runs(w: WorkerInfo, st: WorkerState, errors: string[]): 
     if (!SAFE_NAME.test(run.run) || /^\.+$/.test(run.run)) { errors.push(`${w.name} sent an unsafe MM3 run name: ${run.run}`); continue; }
     const ds = repo.getDataset(run.datasetId);
     if (!ds) continue;
-    let rec = readMm3Records().find(r => r.worker === w.name && r.run === run.run);
-    if (rec?.discarded) continue;
-    const dir = path.join(mm3AdapterRoot(), run.run);
-    if (!rec) {
-      if (fs.existsSync(dir)) { errors.push(`${run.run}: a run of that name was trained here; not mirrored`); continue; }
-      rec = { worker: w.name, run: run.run };
-      saveMm3Record(rec);
-      fs.mkdirSync(dir, { recursive: true });
-    } else if (!fs.existsSync(dir)) {
-      // Deleted here: leave it deleted.
-      saveMm3Record({ ...rec, discarded: true });
-      continue;
-    }
-    runs++;
-    if (run.live && !rec.seenLive) { rec = { ...rec, seenLive: true }; saveMm3Record(rec); }
-    sweepPartials(dir);
-    const ledger = readLedger(dir);
-    const failedBefore = errors.length;
-    const files = run.files.filter(f => {
-      if (MM3_MIRROR_REL.test(f.rel)) return true;
-      errors.push(`${run.run}: refused ${f.rel}`); return false;
-    });
-    // Current = the copy here is the worker's version. A file copied before
-    // and missing now was cleaned up here (a ladder cleanup): it stays gone.
-    const copied = (f: MirrorFile) => !!ledger[f.rel];
-    const current = (f: MirrorFile) => ledger[f.rel]?.mtimeMs === f.mtimeMs && ledger[f.rel]?.size === f.size;
-    const todo = files.filter(f => !current(f) && !(copied(f) && localSize(path.join(dir, ...f.rel.split('/'))) < 0))
-      .sort((a, b) => a.size - b.size);
-    st.status.pendingFiles += todo.length;
-    st.status.pendingBytes += todo.reduce((n, f) => n + f.size, 0);
-    for (const f of todo) {
-      const dest = path.join(dir, ...f.rel.split('/'));
-      if (!isInside(dir, dest)) continue;
-      try {
-        const labels = f.rel === 'hotstep-run.json' ? readMm3RunManifest(dir)?.blindLabels : undefined;
-        ledger[f.rel] = await fetchVerified(w, `/api/training/worker/mm3-mirror-file?run=${encodeURIComponent(run.run)}&rel=${encodeURIComponent(f.rel)}`, dest);
-        if (labels) keepLocalBlindLabels(dest, labels);
-        writeLedger(dir, ledger);
-        st.status.pendingFiles--; st.status.pendingBytes -= f.size;
-      } catch (err) { errors.push(`${run.run}/${f.rel}: ${errorText(err)}`); }
-    }
-    const complete = errors.length === failedBefore;
-    if (run.live || !complete) { active = true; continue; }
-    if (rec.seenLive && !rec.linked) {
-      linkMirroredMm3Run(ds, dir);
-      saveMm3Record({ ...rec, linked: true });
-    }
+    const r = await withMm3RunLock(run.run, () => mirrorMm3Run(w, st, errors, run, ds));
+    if (r.counted) runs++;
+    if (r.active) active = true;
   }
   return { runs, active };
+}
+
+/** One worker run, under its lock (deleteMm3RunFolder). */
+async function mirrorMm3Run(w: WorkerInfo, st: WorkerState, errors: string[], run: Mm3MirrorRun,
+                            ds: { slug: string; lyricsSetId?: number }): Promise<{ counted: boolean; active: boolean }> {
+  const skip = { counted: false, active: false };
+  let rec = readMm3Records().find(r => r.worker === w.name && r.run === run.run);
+  if (rec?.discarded) return skip;
+  const dir = path.join(mm3AdapterRoot(), run.run);
+  if (!rec) {
+    if (fs.existsSync(dir)) { errors.push(`${run.run}: a run of that name was trained here; not mirrored`); return skip; }
+    rec = { worker: w.name, run: run.run };
+    saveMm3Record(rec);
+    fs.mkdirSync(dir, { recursive: true });
+  } else if (!fs.existsSync(dir)) {
+    // Deleted here: leave it deleted.
+    saveMm3Record({ ...rec, discarded: true });
+    return skip;
+  }
+  if (run.live && !rec.seenLive) { rec = { ...rec, seenLive: true }; saveMm3Record(rec); }
+  sweepPartials(dir);
+  const ledger = readLedger(dir);
+  const failedBefore = errors.length;
+  const files = run.files.filter(f => {
+    if (MM3_MIRROR_REL.test(f.rel)) return true;
+    errors.push(`${run.run}: refused ${f.rel}`); return false;
+  });
+  // Current = the copy here is the worker's version. A file copied before
+  // and missing now was cleaned up here (a ladder cleanup): it stays gone.
+  const copied = (f: MirrorFile) => !!ledger[f.rel];
+  const current = (f: MirrorFile) => ledger[f.rel]?.mtimeMs === f.mtimeMs && ledger[f.rel]?.size === f.size;
+  const todo = files.filter(f => !current(f) && !(copied(f) && localSize(path.join(dir, ...f.rel.split('/'))) < 0))
+    .sort((a, b) => a.size - b.size);
+  st.status.pendingFiles += todo.length;
+  st.status.pendingBytes += todo.reduce((n, f) => n + f.size, 0);
+  for (const f of todo) {
+    // Deleted here while this pass copies it: stop, the delete waits on us.
+    if (mm3Discarded(w.name, run.run)) return { counted: true, active: false };
+    const dest = path.join(dir, ...f.rel.split('/'));
+    if (!isInside(dir, dest)) continue;
+    try {
+      const labels = f.rel === 'hotstep-run.json' ? readMm3RunManifest(dir)?.blindLabels : undefined;
+      ledger[f.rel] = await fetchVerified(w, `/api/training/worker/mm3-mirror-file?run=${encodeURIComponent(run.run)}&rel=${encodeURIComponent(f.rel)}`, dest);
+      if (labels) keepLocalBlindLabels(dest, labels);
+      writeLedger(dir, ledger);
+      st.status.pendingFiles--; st.status.pendingBytes -= f.size;
+    } catch (err) { errors.push(`${run.run}/${f.rel}: ${errorText(err)}`); }
+  }
+  const complete = errors.length === failedBefore;
+  if (run.live || !complete) return { counted: true, active: true };
+  // Re-read: a delete may have tombstoned the run since the top of this.
+  if (rec.seenLive && !rec.linked && !mm3Discarded(w.name, run.run)) {
+    linkMirroredMm3Run(ds, dir);
+    saveMm3Record({ ...rec, linked: true });
+  }
+  return { counted: true, active: false };
 }
 
 /** What the runner does when a run ends here (refreshLinkedMm3Presets): point

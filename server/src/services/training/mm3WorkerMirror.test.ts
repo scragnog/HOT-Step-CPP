@@ -41,7 +41,7 @@ dataset('ds-album', 'album', path.join(root, 'src', 'album'));
 type FakeFile = { buf: Buffer; mtimeMs: number };
 interface FakeMm3 { run: string; datasetId: string; live: boolean; files: Record<string, FakeFile> }
 
-async function fakeWorker(runs: FakeMm3[]) {
+async function fakeWorker(runs: FakeMm3[], hold?: (rel: string, res: http.ServerResponse, buf: Buffer) => boolean) {
   const gets: string[] = [];
   const server = http.createServer((req, res) => {
     const u = new URL(req.url!, 'http://x');
@@ -60,7 +60,7 @@ async function fakeWorker(runs: FakeMm3[]) {
       res.setHeader('content-type', 'application/octet-stream');
       res.setHeader('x-sha256', sha(f.buf));
       res.setHeader('x-mtime', String(f.mtimeMs));
-      res.end(f.buf);
+      if (!hold?.(rel, res, f.buf)) res.end(f.buf);
       return;
     }
     res.statusCode = 404; res.end('{}');
@@ -244,4 +244,61 @@ test('a mirrored MM3 run shows on the Review page with its worker, and deleting 
     assert.equal(fs.existsSync(dir), false);
     assert.equal(mm3ReviewRows({ id: 'ds-album', slug: 'album', name: 'album' }).some(r => r.refineRun === run.run), false);
   } finally { fake.close(); }
+});
+
+// From review (HOTSTEP-1078): a pass and a delete racing on one run, and a
+// delete during a ladder render.
+test('a delete during the final mirror pass wins: the pass does not link the deleted checkpoint', async () => {
+  const { deleteMm3Run } = await import('./mm3Ladder.js');
+  const { getOrCreateArtist, saveLyricsSet, upsertPreset, getPreset } = await import('../../db/lireekDb.js');
+  const artist = getOrCreateArtist('fixture');
+  const lyrics = saveLyricsSet(Number(artist.id), 'fixture', 0, []);
+  dataset('ds-race', 'race', path.join(root, 'src', 'race'), { lyricsSetId: Number(lyrics.id) });
+  upsertPreset(Number(lyrics.id), { mm3AdapterPath: 'race-old/ckpt-100/adapter_model.safetensors' });
+  const name = 'race-2026-11-08_13-00-00';
+  const run: FakeMm3 = { run: name, datasetId: 'ds-race', live: true, files: {
+    'hotstep-run.json': file(manifest(name, 'ds-race', { datasetSlug: 'race' })),
+    'train-log.jsonl': file('{"type":"step","step":100,"loss":2.5}\n'),
+    'ckpt-100/adapter_model.safetensors': file('W-100'),
+  }};
+  let release: (() => void) | undefined;
+  let entered: (() => void) | undefined;
+  const reached = new Promise<void>(r => { entered = r; });
+  let holding = false;
+  const fake = await fakeWorker([run], (rel, res, buf) => {
+    if (holding && rel === 'train-log.jsonl') {
+      release = () => res.end(buf); entered!(); return true;
+    }
+    return false;
+  });
+  const w = { name: 'RaceW', url: fake.url };
+  try {
+    await syncYue2Mirror(w);
+    run.live = false;
+    run.files['train-log.jsonl'] = file('{"type":"step","step":100,"loss":2.5}\n{"type":"done"}\n', 2000);
+    holding = true;
+    const pass = syncYue2Mirror(w);
+    await reached;
+    const removal = deleteMm3Run('ds-race', name);
+    release!();
+    await Promise.all([pass, removal]);
+    const dir = path.join(mm3AdapterRoot(), name);
+    assert.equal(fs.existsSync(dir), false);
+    const preset = getPreset(Number(lyrics.id))!;
+    assert.equal(preset.mm3_adapter_path, 'race-old/ckpt-100/adapter_model.safetensors');
+  } finally { release?.(); fake.close(); }
+});
+
+test('a delete is refused while an on-demand preview holds the GPU', async () => {
+  const { deleteMm3Run } = await import('./mm3Ladder.js');
+  const { reserveGpuForPreview, runReservedPreview } = await import('./labelingQueue.js');
+  const name = 'preview-2026-11-08_14-00-00';
+  dataset('ds-preview', 'preview', path.join(root, 'src', 'preview'));
+  const dir = path.join(mm3AdapterRoot(), name);
+  fs.mkdirSync(path.join(dir, 'ckpt-100'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'hotstep-run.json'), manifest(name, 'ds-preview', { datasetSlug: 'preview' }));
+  fs.writeFileSync(path.join(dir, 'ckpt-100', 'adapter_model.safetensors'), 'W');
+  assert.equal(reserveGpuForPreview(), true);
+  try { await assert.rejects(deleteMm3Run('ds-preview', name), /preview|busy/i); }
+  finally { await runReservedPreview(async () => {}); }
 });

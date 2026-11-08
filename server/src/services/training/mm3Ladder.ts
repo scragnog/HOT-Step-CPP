@@ -15,7 +15,7 @@ import { restoreMm3Selection } from '../backends/minimax/index.js';
 import { runOnGpuLane } from '../generation/gpuLane.js';
 import { evictOtherFamilies } from '../generation/residency.js';
 import { getDataset } from './datasetsRepo.js';
-import { activeJobForDataset, reserveGpuForPreview, runReservedPreview } from './labelingQueue.js';
+import { activeJobForDataset, gpuPreviewReserved, reserveGpuForPreview, runReservedPreview } from './labelingQueue.js';
 import { mm3PresetRefFor, pointMm3PresetsAt } from './lyricStudioExport.js';
 import { hasActivePipeline } from './pipelineRunner.js';
 import { withReviewMutation } from './review/operations.js';
@@ -27,7 +27,7 @@ import { mm3CodesDir } from './mm3Train.js';
 import { getAllPresets } from '../../db/lireekDb.js';
 import { setYue2ReviewComplete, setYue2RunFinished, yue2ReviewComplete, yue2RunFinished } from './yue2AitkRuns.js';
 import type { Yue2CleanupItem } from './yue2Cleanup.js';
-import { deleteMm3RunFolder, mm3RunOrigin } from './yue2Mirror.js';
+import { deleteMm3RunFolder, mm3RunOrigin, withMm3RunLock } from './yue2Mirror.js';
 import { acceptTrainingSnapshot, registerTrainingOperations, trainingOp, TrainingOperationFailure } from './operations.js';
 import type { TrainingPreview } from './types.js';
 
@@ -123,9 +123,16 @@ export function ladderPreviewPlan(runDir: string, manifest: Mm3RunManifest,
  *  scale the form shows now when given (as YuE2's Render does). The rung's
  *  first take uses the run's seed so it compares with the other rungs; later
  *  takes use a random seed. The run is over, so nothing pauses, but previews pin the LM to
- *  the base adapters render on, so the user's selection is put back after. */
-export async function renderMm3LadderTake(datasetId: string, runName: string, step: number,
-                                          over: { seconds?: number; scaleMlp?: number } = {}): Promise<TrainingPreview[]> {
+ *  the base adapters render on, so the user's selection is put back after.
+ *  Holds the run's lock to the end, so no delete or cleanup removes the
+ *  checkpoint or the previews folder while the render reads and writes them. */
+export function renderMm3LadderTake(datasetId: string, runName: string, step: number,
+                                    over: { seconds?: number; scaleMlp?: number } = {}): Promise<TrainingPreview[]> {
+  return withMm3RunLock(runName, () => renderLocked(datasetId, runName, step, over));
+}
+
+async function renderLocked(datasetId: string, runName: string, step: number,
+                            over: { seconds?: number; scaleMlp?: number }): Promise<TrainingPreview[]> {
   const { ds, run, running } = runOf(datasetId, runName);
   if (running) throw fail(409, 'This run is still training; its previews render at each checkpoint.');
   const ckpt = step === 0 ? null : run.checkpoints.find(c => c.step === step);
@@ -239,12 +246,23 @@ registerTrainingOperations('mm3', (router, deps) => {
       if (running || activeJobForDataset(ds.id) || hasActivePipeline()) throw fail(409, 'A job or pipeline is active for this dataset');
       if (!sameRef(mm3PresetRefFor(ds), chosenRef(run, pick.step))) throw fail(409, 'This checkpoint is no longer the linked adapter');
       if (pick.blindLabel && pick.blindLabel !== mm3BlindLabels(run)[pick.step]) throw fail(409, 'Blind label no longer identifies the selected rung');
-      const result = runMm3Cleanup(ds, run, pick.step, pick.choice);
+      // Under the run's lock, as a ladder render holds it; the GPU check
+      // covers a render of another run that cleanup would also touch.
+      const result = await withMm3RunLock(run.runName, async () => {
+        if (gpuPreviewReserved()) throw fail(409, PREVIEW_BUSY);
+        return runMm3Cleanup(ds, run, pick.step, pick.choice);
+      });
+      // Each other run is re-checked under its own lock; one that changed
+      // since the plan (a preview started, a preset moved to it) is kept.
       const others = pick.choice.otherRuns ? otherMm3Runs(ds, run.runName) : [];
-      for (const r of others) await deleteMm3RunFolder(r.runName, r.dir);
-      if (others.length) {
-        result.freedBytes += otherRunsItem(others).bytes;
-        result.done.push(`${others.length} other run(s)`);
+      const removed: typeof others = [];
+      for (const r of others) {
+        try { await deleteMm3RunFolder(r.runName, r.dir, () => assertRemovable(ds.id, r.runName)); removed.push(r); }
+        catch (err) { result.done.push(`kept ${r.runName} (${err instanceof Error ? err.message : String(err)})`); }
+      }
+      if (removed.length) {
+        result.freedBytes += otherRunsItem(removed).bytes;
+        result.done.push(`${removed.length} other run(s)`);
       }
       // As YuE2's: a picked and cleaned-up run has nothing left to review.
       setYue2RunFinished(run.dir, { pickedStep: pick.step, pickedBlind: !!pick.blindLabel, pickedLabel: pick.blindLabel ?? '' });
@@ -272,15 +290,26 @@ function presetsUse(runName: string): boolean {
     && p.mm3_adapter_path.split(/[\\/]/).filter(Boolean)[0]?.toLowerCase() === name);
 }
 
+const PREVIEW_BUSY = 'A checkpoint preview is rendering; try again when it ends.';
+
+/** Whether a run's folder may go, checked under its lock just before it does
+ *  (deleteMm3RunFolder): no preview rendering, not training, and no album
+ *  preset using one of its checkpoints (a mirror pass may have linked one
+ *  while the delete waited). */
+function assertRemovable(datasetId: string, runName: string): void {
+  if (gpuPreviewReserved()) throw fail(409, PREVIEW_BUSY);
+  if (runOf(datasetId, runName).running) throw fail(409, 'That run is still training; stop it first');
+  if (presetsUse(runName)) throw fail(409, 'An album preset uses a checkpoint of this run. Use a checkpoint of another run first.');
+}
+
 /** DELETE /datasets/:id/mm3-runs/:run — the run folder and its mirror record.
- *  Refused while it trains, and while an album preset still uses one of its
- *  checkpoints (the preset would point at nothing). Rung scores stay. */
+ *  Refused while a preview renders, while it trains, and while an album
+ *  preset still uses one of its checkpoints (the preset would point at
+ *  nothing). Rung scores stay. */
 export function deleteMm3Run(datasetId: string, runName: string): Promise<{ run: string }> {
   return withReviewMutation(datasetId, async () => {
-    const { run, running } = runOf(datasetId, runName);
-    if (running) throw fail(409, 'That run is still training; stop it first');
-    if (presetsUse(run.runName)) throw fail(409, 'An album preset uses a checkpoint of this run. Use a checkpoint of another run first.');
-    await deleteMm3RunFolder(run.runName, run.dir);
+    const { run } = runOf(datasetId, runName);
+    await deleteMm3RunFolder(run.runName, run.dir, () => assertRemovable(datasetId, run.runName));
     return { run: run.runName };
   });
 }
