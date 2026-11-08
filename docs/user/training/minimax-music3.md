@@ -79,8 +79,9 @@ Measured on an RTX 5090 at rank 128: whole-song training peaks at about 29 GB an
 
 The form estimates the peak for your card and tells you whether it fits, is tight, or is over. Close to the limit, Windows spills into shared memory and steps take several times longer. On a 24 GB card, the levers are a lower rank or turning the acoustic loss off, and neither has been heard under the whole-song recipe. The app's own floor is roughly 11 GB at the smallest usable settings.
 
-When a run would not fit the card it trains on, the trainer keeps the recipe and moves the per-layer activation checkpoints into system RAM instead (`--ckpt-offload on`), about 4.5 GB for a 290 s track. The trained weights are the same; each step copies those checkpoints over PCIe twice. The app decides this when training starts, from the same estimate and the card's own size, so it works the same on a training worker; the training log names it. This is not measured on a 24 GB card yet, so whether it alone fits the whole-song recipe there, and what it costs per step, is still open.
-<!-- TODO(verify): step time and peak with --ckpt-offload on an RTX 4090, whole-song rank 128 (HOTSTEP-1070). -->
+When a run would not fit the card it trains on, the trainer keeps the recipe and moves the per-layer activation checkpoints into system RAM instead (`--ckpt-offload on`), about 4.5 GB for a 290 s track. The trained weights are the same; each step copies those checkpoints over PCIe twice. The app decides this when training starts, from the same estimate and the card's own size, so it works the same on a training worker; the training log names it.
+
+Measured with the Fast recipe at rank 128 on an album whose longest track is 290 s. On an RTX 5090, 6 steps with and without it gave the same losses to every printed digit, 7 GB less memory and 3.7 % more time. On an RTX 4090 (24 GB) the run used 22.2 GB and averaged 5.4 s per step; without it the same album filled the card, spilled into shared memory and took 40 to 90 s per step. A track near the 360 s limit needs about 1 GB more, which the 4090 had free.
 
 
 Smaller base precisions trade fidelity for memory. Step time barely moves between them. The form marks bases that are too lossy to train against.
