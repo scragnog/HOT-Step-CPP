@@ -288,6 +288,10 @@ struct MM3ArOptions {
     // (adapter, scales) actually changed.
     const MM3LmAdapter * lm_adapter = nullptr;
     MM3LmAdapterScales   lm_adapter_scales = {};
+    // Strength along the song (MM3LmAdapterSchedule), a multiplier on
+    // lm_adapter_scales.global. Needs a runtime adapter: merge mode has baked
+    // the delta into the weights, so there is nothing to turn down.
+    MM3LmAdapterSchedule lm_adapter_sched = {};
 
     // The adapter whose SOFT-PROMPT halves (artist token, trained KV prefix)
     // apply. Usually the same object as lm_adapter, and deliberately a separate
@@ -624,10 +628,36 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
         memcpy(logits.data() + hn, logits.data(), (size_t) hn * sizeof(float));
     };
 
+    // The adapter strength schedule. Takes decode in lockstep, so one shared
+    // multiplier per iteration is exact for every take. Iteration `it` is
+    // song time it / 25 s; the decode at the end of iteration it makes the
+    // logits iteration it + 1 samples from, so that is the time it is set for.
+    const bool sched_on = opt.lm_adapter && opt.lm_adapter_sched.active();
+    if (opt.lm_adapter_sched.active() && !opt.lm_adapter) {
+        fprintf(stderr, "[MM3-AR] adapter schedule ignored: no runtime LM adapter (none loaded, or merge mode)\n");
+    }
+    float      sched_cur   = -1.0f;
+    const auto sched_apply = [&](int64_t it) {
+        const float mult = opt.lm_adapter_sched.at((float) it / 25.0f);
+        if (mult == sched_cur) {
+            return;
+        }
+        sched_cur             = mult;
+        MM3LmAdapterScales sc = opt.lm_adapter_scales;
+        sc.global *= mult;
+        // Zero is the base itself: no delta in the graph, and no delta cost.
+        mm3_lm_set_adapter(&g_mm3_lm, mult > 0.0f ? opt.lm_adapter : nullptr, sc);
+        fprintf(stderr, "[MM3-AR] adapter schedule: x%.2f from %.1f s\n", mult, (double) it / 25.0);
+    };
+
     const auto t_start = std::chrono::steady_clock::now();
     {
         const auto t0 = std::chrono::steady_clock::now();
-        mm3_lm_set_adapter(&g_mm3_lm, opt.lm_adapter, opt.lm_adapter_scales);
+        if (sched_on) {
+            sched_apply(0);
+        } else {
+            mm3_lm_set_adapter(&g_mm3_lm, opt.lm_adapter, opt.lm_adapter_scales);
+        }
         if (!mm3_lm_prefill(m, &g_mm3_lm, cond_ids, uncond_ids, n_prompt, hidden.data(), logits.data(), err)) {
             return false;
         }
@@ -1048,6 +1078,9 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                 ac_rows[(size_t) (t * NC + i)] = frames[(size_t) t].codes[i] + (int32_t) (i * AV);
             }
         }
+        if (sched_on) {
+            sched_apply(it + 1);
+        }
         {
             const auto t0 = std::chrono::steady_clock::now();
             if (!mm3_lm_decode(m, &g_mm3_lm, sem_tok.data(), ac_rows.data(), hidden.data(), logits.data(),
@@ -1173,6 +1206,12 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     // kv_pos, which is why it can only run here, after the batched decode is
     // finished with the cache.
     if (opt.want_lrc && opt.tok != nullptr && !g_mm3_lm.align_capture && !align_dump && lyr0 >= 0 && lyr1 > lyr0) {
+        // The replay runs the whole plan under ONE adapter setting. A schedule
+        // left the graph at its tail strength; align under the body's instead,
+        // which is where the lyrics are. The tail's timestamps are approximate.
+        if (sched_on) {
+            mm3_lm_set_adapter(&g_mm3_lm, opt.lm_adapter, opt.lm_adapter_scales);
+        }
         for (int t = 0; t < K; t++) {
             MM3ArResult * o = &outs[t];
             // Selection is already known, before any alignment work.

@@ -427,9 +427,11 @@ static void mm3_lm_free(MM3LmGraph * g) {
 // Set (or clear) the runtime LM adapter + scales for subsequent graphs. The
 // scales are baked into the cached prefill/decode graphs as constants, so any
 // change frees the slots — they rebuild lazily on the next step (graph
-// construction only; weights and the KV cache are untouched). Only call
-// BETWEEN generations: an adapter swap mid-sequence would splice two different
-// models' hidden-state streams through one KV cache.
+// construction only; weights and the KV cache are untouched). Call it between
+// generations, with one deliberate exception: the AR loop's strength schedule
+// (MM3LmAdapterSchedule) changes the scale mid-song on purpose, keeping the
+// KV built under the earlier strength. Swapping to a DIFFERENT adapter
+// mid-sequence is still never right.
 static void mm3_lm_set_adapter(MM3LmGraph * g, const MM3LmAdapter * ad, const MM3LmAdapterScales & sc) {
     // Before the early return: a re-run norm pass (base reload) resets nrm to
     // the trained scale while the dials stay put.

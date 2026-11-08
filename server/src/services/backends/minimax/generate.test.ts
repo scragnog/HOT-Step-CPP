@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   MM3_DEFAULT_FLOW_HOP, MM3_DEFAULT_STEPS, MM3_FP8_CALIB_PATH, mapMinimaxParams, mm3LowStepShift,
 } from './generate.js';
+import { listMm3LmAdapters } from './lmAdapter.js';
 
 test('MM3 sends the shared runtime DoRA opt-in without changing legacy requests', () => {
   const params = { prompt: 'Instrumental ambient', seed: 42 };
@@ -79,4 +80,19 @@ test('MM3 audio to audio: source and dials travel only with a strength, and the 
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('MM3 sends the LM adapter fade only when set, and a fade forces runtime mode', (t) => {
+  const installed = listMm3LmAdapters()[0];
+  if (!installed) return t.skip('no MM3 LM adapter installed');
+  const params = { prompt: 'x', seed: 42, mm3LmAdapter: installed.file, mm3LmAdapterMode: 'merge' };
+  const plain = mapMinimaxParams(params).req as unknown as Record<string, unknown>;
+  assert.equal(plain.lm_adapter_mode, 'merge');
+  assert.equal(Object.keys(plain).some((k) => k.startsWith('lm_adapter_fade')), false);
+  const faded = mapMinimaxParams({ ...params, mm3LmAdapterFadeOut: 150, mm3LmAdapterFadeLen: 60, mm3LmAdapterFadeFloor: 7 })
+    .req as unknown as Record<string, unknown>;
+  assert.equal(faded.lm_adapter_mode, 'runtime');
+  assert.equal(faded.lm_adapter_fade_out, 150);
+  assert.equal(faded.lm_adapter_fade_len, 60);
+  assert.equal(faded.lm_adapter_fade_floor, undefined);  // out of range is dropped
 });

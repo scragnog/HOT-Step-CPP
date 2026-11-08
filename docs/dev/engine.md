@@ -865,7 +865,10 @@ Other adapter paths:
 - MM3 LM adapters are runtime or merge (`mm3-lm-adapter.h`, `mm3-lm-merge.h`). A
   runtime DoRA gets a one-time norm pass (`mm3-lm-dora.h`), and `adapter_runtime_dora`
   re-normalises it for the request's scale dials. MM3 DiT LoRAs and DoRAs merge at
-  load (`mm3-adapter.h`).
+  load (`mm3-adapter.h`). A runtime MM3 LM adapter can change strength along the
+  song (`lm_adapter_fade_*`, `MM3LmAdapterSchedule` in `mm3-lm-adapter.h`): the AR
+  loop re-sets the scales between iterations, which rebuilds the decode graph and
+  keeps the KV cache.
 - YuE2 adapters merge at load (`yue2-adapter.h`): AR (composer) and NAR files in
   LoRA, LoKr or DoRA form (`yue2-{ar,nar}-{lora,lokr,dora}-v1`), chosen with
   `POST /yue2/select-model`. On a ConvRot INT8 base the LoRA factors are applied at

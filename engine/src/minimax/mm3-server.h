@@ -1201,6 +1201,16 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
     // Ensemble takes: plan K independent songs from this prompt in one batched
     // pass (mm3-ar-loop.h). Clamped inside mm3_ar_plan_takes to the row budget.
     opt.n_takes         = (int) mm3_json_i64(root, "takes", 1);
+    // LRC per take ("lrc" in the JSON reply), to see where a plan sang its last line.
+    if (mm3_json_bool(root, "lrc", false)) {
+        std::string terr;
+        if (!mm3_tokenizer_load(g_mm3, &g_mm3_tokenizer, &terr)) {
+            mm3_json_error(res, 503, terr);
+            return;
+        }
+        opt.want_lrc = true;
+        opt.tok      = &g_mm3_tokenizer;
+    }
 
     // ── LM adapter, runtime deltas only ──
     //
@@ -1283,6 +1293,11 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
             opt.lm_adapter_scales.early  = num("lm_adapter_scale_early", 1.0f);
             opt.lm_adapter_scales.mid    = num("lm_adapter_scale_mid", 1.0f);
             opt.lm_adapter_scales.late   = num("lm_adapter_scale_late", 1.0f);
+            opt.lm_adapter_sched.in_sec      = num("lm_adapter_fade_in", 0.0f);
+            opt.lm_adapter_sched.out_sec     = num("lm_adapter_fade_out", 0.0f);
+            opt.lm_adapter_sched.out_len_sec = num("lm_adapter_fade_len", 0.0f);
+            opt.lm_adapter_sched.floor       = num("lm_adapter_fade_floor", 0.0f);
+            opt.lm_adapter_sched.step_sec    = num("lm_adapter_fade_step", 10.0f);
         } else if (yyjson_obj_get(root, "lm_adapter_clear")) {
             // Explicit "run the pristine base" after an adapter has been cached.
             mm3_lm_adapter_drop();
@@ -1414,6 +1429,9 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
     yyjson_mut_obj_add_uint(o, orot, "frames", r.n_frames);
     yyjson_mut_obj_add_uint(o, orot, "iterations", r.n_iterations);
     yyjson_mut_obj_add_bool(o, orot, "eos", r.eos_hit);
+    if (opt.want_lrc) {
+        yyjson_mut_obj_add_strcpy(o, orot, "lrc", r.lrc.c_str());
+    }
     yyjson_mut_obj_add_uint(o, orot, "prompt_tokens", ids_cond.size());
     yyjson_mut_obj_add_uint(o, orot, "hidden_dim", r.hidden_dim);
     yyjson_mut_obj_add_uint(o, orot, "num_codebooks", r.n_codebooks);
@@ -1459,6 +1477,9 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
             yyjson_mut_obj_add_uint(o, e, "frames", rs[(size_t) t].n_frames);
             yyjson_mut_obj_add_uint(o, e, "iterations", rs[(size_t) t].n_iterations);
             yyjson_mut_obj_add_bool(o, e, "eos", rs[(size_t) t].eos_hit);
+            if (opt.want_lrc) {
+                yyjson_mut_obj_add_strcpy(o, e, "lrc", rs[(size_t) t].lrc.c_str());
+            }
             yyjson_mut_obj_add_real(o, e, "prefill_sum", rs[(size_t) t].prefill_sum);
             yyjson_mut_obj_add_real(o, e, "iter0_max", rs[(size_t) t].iter0_max);
             yyjson_mut_obj_add_int(o, e, "iter0_argmax", rs[(size_t) t].iter0_argmax);

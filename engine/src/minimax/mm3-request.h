@@ -650,6 +650,10 @@ struct MM3SynthRequest {
     // thirds are advanced dials (halving `late` destabilised termination).
     std::string        lm_adapter;
     MM3LmAdapterScales lm_adapter_scales = {};
+    // Strength along the song (MM3LmAdapterSchedule): lm_adapter_fade_in,
+    // lm_adapter_fade_out, lm_adapter_fade_len, lm_adapter_fade_floor,
+    // lm_adapter_fade_step. All absent = off.
+    MM3LmAdapterSchedule lm_adapter_sched = {};
     // "runtime" (default) = low-rank deltas in-graph, live dials, +28 %/step
     // at r256. "merge" = fold scale·B·A into the resident weights once
     // (mm3-lm-merge.h) — zero per-step cost, scale changes re-merge.
@@ -1167,6 +1171,32 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
                 *d.dst = f;
             }
         }
+        struct {
+            const char * key;
+            float *      dst;
+            float        lo, hi;
+        } sched[] = {
+            { "lm_adapter_fade_in",    &out->lm_adapter_sched.in_sec,      0.0f, 360.0f },
+            { "lm_adapter_fade_out",   &out->lm_adapter_sched.out_sec,     0.0f, 360.0f },
+            { "lm_adapter_fade_len",   &out->lm_adapter_sched.out_len_sec, 0.0f, 360.0f },
+            { "lm_adapter_fade_floor", &out->lm_adapter_sched.floor,       0.0f, 1.0f   },
+            { "lm_adapter_fade_step",  &out->lm_adapter_sched.step_sec,    1.0f, 60.0f  },
+        };
+        for (auto & d : sched) {
+            yyjson_val * sv = yyjson_obj_get(root, d.key);
+            if (sv && !yyjson_is_null(sv)) {
+                const float f = yyjson_is_num(sv) ? (float) yyjson_get_num(sv) : NAN;
+                if (!(f >= d.lo && f <= d.hi)) {
+                    if (err) {
+                        char buf[96];
+                        snprintf(buf, sizeof(buf), "\"%s\" must be a number in [%g, %g]", d.key, d.lo, d.hi);
+                        *err = buf;
+                    }
+                    return false;
+                }
+                *d.dst = f;
+            }
+        }
         // The DoRA dial opt-in (mm3_lm_dora_set_scales). Same key ACE reads
         // into g_hotstep_params, so one switch covers both engines; absent or
         // false keeps the legacy render.
@@ -1429,6 +1459,7 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
     // lifetime — a path string must never be dereferenced this early because
     // parse runs on the HTTP thread and load must run on the GPU worker.
     out->gen.lm_adapter_scales = out->lm_adapter_scales;
+    out->gen.lm_adapter_sched  = out->lm_adapter_sched;
     out->gen.a2a_strength      = (float) a2a_strength;
     out->gen.a2a_hold          = (float) a2a_hold;
 

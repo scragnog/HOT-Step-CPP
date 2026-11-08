@@ -478,6 +478,12 @@ static void mm3_ar_key_add_models(std::string & k, const MM3Model & m, const MM3
         const MM3LmAdapterScales & s = req.lm_adapter_scales;
         add_f("ad_g", s.global); add_f("ad_a", s.attn);  add_f("ad_m", s.mlp);
         add_f("ad_e", s.early);  add_f("ad_i", s.mid);   add_f("ad_l", s.late);
+        // Only when on, so every key from before the schedule existed still hits.
+        const MM3LmAdapterSchedule & f = req.lm_adapter_sched;
+        if (f.active()) {
+            add_f("fd_in", f.in_sec);  add_f("fd_out", f.out_sec); add_f("fd_len", f.out_len_sec);
+            add_f("fd_fl", f.floor);   add_f("fd_st", f.step_sec);
+        }
     }
 
     // The two models that produce the block. Quant flips borderline codes, so

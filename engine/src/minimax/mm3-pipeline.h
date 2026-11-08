@@ -832,6 +832,7 @@ struct MM3GenRequest {
     // adapter and outlives the generation); nullptr = base model.
     const MM3LmAdapter * lm_adapter = nullptr;
     MM3LmAdapterScales   lm_adapter_scales = {};
+    MM3LmAdapterSchedule lm_adapter_sched  = {};
     // The adapter whose artist token / trained KV prefix apply. Same object as
     // lm_adapter in runtime mode; set in MERGE mode too, where lm_adapter is
     // null because the LoRA has been folded into the weights and a soft prompt
@@ -1141,6 +1142,7 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
     aopt.collect_hiddens   = true;  // the whole point: the condition encoder eats these
     aopt.lm_adapter        = req.lm_adapter;
     aopt.lm_adapter_scales = req.lm_adapter_scales;
+    aopt.lm_adapter_sched  = req.lm_adapter_sched;
     aopt.lm_soft           = req.lm_soft;
     if (!req.forced_semantic.empty()) {
         // Empty forced_acoustic = semantic-only forcing (the depth decoder samples it).

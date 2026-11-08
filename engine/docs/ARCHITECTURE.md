@@ -421,6 +421,7 @@ are reported, not ignored.
 | `lm_adapter_mode` | `"runtime"` | `runtime` or `merge` |
 | `lm_adapter_merge_gpu` | true | Merge mode: merge on the GPU |
 | `lm_adapter_scale`, `lm_adapter_scale_attn`, `lm_adapter_scale_mlp`, `lm_adapter_scale_early`, `lm_adapter_scale_mid`, `lm_adapter_scale_late` | 1.0 each | Adapter scales, -4 to 4: overall, by module group, and by depth third |
+| `lm_adapter_fade_in`, `lm_adapter_fade_out`, `lm_adapter_fade_len`, `lm_adapter_fade_floor`, `lm_adapter_fade_step` | 0, 0, 0, 0, 10 | Adapter strength along the song, in seconds: the base alone for the first `fade_in`, full strength for the body, then from `fade_out` a ramp to `fade_floor` (0 to 1, a multiplier on `lm_adapter_scale`) over `fade_len` (0 = a hard handoff), in `fade_step` steps (1 to 60). Times 0 to 360. Runtime mode only; ignored with a log line in merge mode. In the AR cache key when set. `/mm3/lm-plan` takes the same keys, plus `lrc: true` for each take's LRC |
 | `lm_soft_off` | false | Run the adapter's weight delta without its artist token or KV prefix |
 | `adapter_runtime_dora` | false | The same key ACE reads, here for the LM adapter: true recomputes a DoRA adapter's column norms at the dialled scale instead of its base scale |
 

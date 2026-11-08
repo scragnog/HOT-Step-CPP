@@ -743,7 +743,25 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
         // Application mode: "runtime" (default; low-rank deltas in-graph, live
         // dials, ~+28%/step at r256) or "merge" (folded into the resident
         // weights once — zero per-step cost; scale changes re-merge).
-        const mode = params.mm3LmAdapterMode === 'merge' ? 'merge' : 'runtime';
+        // Strength along the song (engine MM3LmAdapterSchedule): the base for
+        // the first N s, full strength for the body, then a ramp back to the
+        // base (or a floor) for the ending. Off unless a fade is set. It needs
+        // the deltas in the graph, so it wins over merge mode.
+        const fadeNum = (key: string, max: number): number | undefined => {
+          const v = Number((params as Record<string, unknown>)[key]);
+          return Number.isFinite(v) && v >= 0 && v <= max ? v : undefined;
+        };
+        const fade = {
+          lm_adapter_fade_in: fadeNum('mm3LmAdapterFadeIn', 360),
+          lm_adapter_fade_out: fadeNum('mm3LmAdapterFadeOut', 360),
+          lm_adapter_fade_len: fadeNum('mm3LmAdapterFadeLen', 360),
+          lm_adapter_fade_floor: fadeNum('mm3LmAdapterFadeFloor', 1),
+        };
+        const fadeOn = (fade.lm_adapter_fade_in ?? 0) > 0 || (fade.lm_adapter_fade_out ?? 0) > 0;
+        if (fadeOn && params.mm3LmAdapterMode === 'merge') {
+          notes.push('LM adapter fade set: rendering in runtime mode, since a merged adapter cannot change strength mid-song');
+        }
+        const mode = params.mm3LmAdapterMode === 'merge' && !fadeOn ? 'merge' : 'runtime';
         notes.push(`LM adapter: ${path.basename(resolved)} (${mode})`);
         const mergeGpu = params.mm3LmMergeGpu !== false;
         if (mode === 'merge') notes.push(`LM adapter merging: ${mergeGpu ? 'GPU preferred' : 'CPU-assisted'}`);
@@ -757,6 +775,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
           lm_adapter_scale_early: dial('mm3LmAdapterScaleEarly', d.scaleEarly),
           lm_adapter_scale_mid: dial('mm3LmAdapterScaleMid', d.scaleMid),
           lm_adapter_scale_late: dial('mm3LmAdapterScaleLate', d.scaleLate),
+          ...(fadeOn ? fade : {}),
         };
       })() : {}),
     },
