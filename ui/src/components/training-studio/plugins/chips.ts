@@ -144,7 +144,7 @@ export const heartmulaChips: Chips = (assets, { t, formatWhen }) => {
 
 export const heartmulaReadiness: Ready = assets => ({ prepared: !!assets?.heartmula?.prepared, trained: !!assets?.heartmula?.adapter });
 
-/** "Done" for the dataset list and the Train-multiple wizard: the adapter(s) the family trains are linked. YuE2 needs the AR+NAR pair; other families never count as trained. */
+/** "Done" for the dataset list and the Train-multiple wizard: the adapter(s) the family trains are linked. YuE2 needs the AR+NAR pair; HeartMuLa and MM3 their single adapter. A new family adds one line. */
 export const TRAINED_BY_FAMILY: Record<'yue2' | 'heartmula' | 'mm3', (a: DatasetAssets | undefined) => boolean> = {
   yue2: a => !!(a?.yue2?.arAdapter && a.yue2.narAdapter),
   heartmula: a => !!a?.heartmula?.adapter,
