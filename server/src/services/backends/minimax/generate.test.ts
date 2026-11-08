@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   MM3_DEFAULT_FLOW_HOP, MM3_DEFAULT_STEPS, MM3_FP8_CALIB_PATH, mapMinimaxParams, mm3LowStepShift,
+  mm3TailFadeStartSec,
 } from './generate.js';
 import { listMm3LmAdapters } from './lmAdapter.js';
 
@@ -95,4 +96,20 @@ test('MM3 sends the LM adapter fade only when set, and a fade forces runtime mod
   assert.equal(faded.lm_adapter_fade_out, 150);
   assert.equal(faded.lm_adapter_fade_len, 60);
   assert.equal(faded.lm_adapter_fade_floor, undefined);  // out of range is dropped
+});
+
+test('MM3 tail fade toggle times the fade from the lyrics', (t) => {
+  assert.equal(mm3TailFadeStartSec(''), null);
+  assert.equal(mm3TailFadeStartSec('[Verse] ' + 'word '.repeat(336)), 212);  // the 2026-11-08 test sheet: ~210 s
+  assert.equal(mm3TailFadeStartSec('word '.repeat(10)), 60);
+  assert.equal(mm3TailFadeStartSec('word '.repeat(2000)), 240);
+  const installed = listMm3LmAdapters()[0];
+  if (!installed) return t.skip('no MM3 LM adapter installed');
+  const base = { prompt: 'x', seed: 42, mm3LmAdapter: installed.file, mm3AdapterTailFade: true };
+  const sung = mapMinimaxParams({ ...base, lyrics: 'word '.repeat(336) }).req as unknown as Record<string, unknown>;
+  assert.equal(sung.lm_adapter_fade_out, 212);
+  assert.equal(sung.lm_adapter_fade_len, 60);
+  assert.equal(sung.lm_adapter_mode, 'runtime');
+  const inst = mapMinimaxParams({ ...base, lyrics: '' }).req as unknown as Record<string, unknown>;
+  assert.equal(inst.lm_adapter_fade_out, undefined);
 });

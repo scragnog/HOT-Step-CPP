@@ -97,6 +97,23 @@ const MM3_MAX_DURATION_SEC = 300;
 const MM3_ENDING_TAKES  = 3;
 const MM3_ENDING_ROUNDS = 4;
 
+// ── Adapter tail fade (mm3AdapterTailFade) ───────────────────────────────────
+//
+// An LM adapter suppresses the base model's ending, so the fade hands the tail
+// back: full strength until the lyrics should be sung, then a 60 s ramp to the
+// base. The start is the base model's own pace (it sang a 336-word sheet by
+// ~183 s, 1.85 words/s) plus 30 s. Starting while lyrics remain does not work:
+// the base inherits half a song and runs to the cap (HOTSTEP-1068: 9/12 natural
+// endings with this rule against 2/12 without; 0-2/12 fading at 150 s).
+// Clamped so the base always gets a minute before the 300 s cap.
+const MM3_BASE_WORDS_PER_SEC = 1.85;
+const MM3_TAIL_FADE_LEN_SEC = 60;
+export function mm3TailFadeStartSec(lyrics: string): number | null {
+  const words = mm3SungWords(lyrics);
+  if (words === 0) return null;
+  return Math.round(Math.min(MM3_MAX_DURATION_SEC - MM3_TAIL_FADE_LEN_SEC, Math.max(60, words / MM3_BASE_WORDS_PER_SEC + 30)));
+}
+
 // ── Minimum length (mm3MinLength) ────────────────────────────────────────────
 //
 // A plan that reaches EOS after two seconds has ended, correctly, on a song the
@@ -123,14 +140,18 @@ const MM3_MIN_FLOOR_SEC = 15;
  *  round on arithmetic rather than on quality. */
 const MM3_MIN_CEILING_SHARE = 0.5;
 
-/** Shortest plausible length for these lyrics, in seconds. */
-function mm3MinDurationSec(lyrics: string): number {
-  const words = (lyrics || '')
-    // Section markers ([Verse], [Chorus]) are not sung.
+/** Words that get sung: section markers ([Verse], [Chorus]) are not. */
+function mm3SungWords(lyrics: string): number {
+  return (lyrics || '')
     .replace(/\[[^\]]*\]/g, ' ')
     .split(/\s+/)
     .filter(w => /[\p{L}\p{N}]/u.test(w))
     .length;
+}
+
+/** Shortest plausible length for these lyrics, in seconds. */
+function mm3MinDurationSec(lyrics: string): number {
+  const words = mm3SungWords(lyrics);
   const sung = words > 0 ? words / MM3_MAX_WORDS_PER_SEC : 0;
   return Math.min(
     Math.max(MM3_MIN_FLOOR_SEC, Math.ceil(sung)),
@@ -757,6 +778,18 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
           lm_adapter_fade_len: fadeNum('mm3LmAdapterFadeLen', 360),
           lm_adapter_fade_floor: fadeNum('mm3LmAdapterFadeFloor', 1),
         };
+        // The Generation toggle derives the fade from the lyrics; explicit fade
+        // params (scripts, A/B arms) win over it.
+        if (params.mm3AdapterTailFade === true && fade.lm_adapter_fade_out === undefined) {
+          const start = mm3TailFadeStartSec(lyrics);
+          if (start === null) {
+            notes.push('Adapter tail fade skipped: no sung lyrics to time it from');
+          } else {
+            fade.lm_adapter_fade_out = start;
+            fade.lm_adapter_fade_len ??= MM3_TAIL_FADE_LEN_SEC;
+            notes.push(`Adapter tail fade: full strength to ${start}s, then down to the base model by ${start + MM3_TAIL_FADE_LEN_SEC}s`);
+          }
+        }
         const fadeOn = (fade.lm_adapter_fade_in ?? 0) > 0 || (fade.lm_adapter_fade_out ?? 0) > 0;
         if (fadeOn && params.mm3LmAdapterMode === 'merge') {
           notes.push('LM adapter fade set: rendering in runtime mode, since a merged adapter cannot change strength mid-song');

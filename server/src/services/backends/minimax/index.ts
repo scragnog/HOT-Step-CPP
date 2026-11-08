@@ -627,6 +627,17 @@ async function capabilities(): Promise<BackendCapabilities> {
         default: true,
       },
       {
+        key: 'mm3AdapterTailFade',
+        type: 'toggle',
+        label: 'Adapter Tail Fade',
+        hint: 'With an LM adapter loaded: keeps the adapter at full strength until '
+            + 'the lyrics should be sung, then steps it down to the base model over '
+            + '60 s so the song can end on its own. The start comes from the word '
+            + 'count. Renders the adapter in runtime mode (slower planning than merge). '
+            + 'No effect without an adapter or without lyrics.',
+        default: false,
+      },
+      {
         key: 'mm3LmTemperature',
         group: 'lm',
         type: 'slider',
