@@ -81,7 +81,7 @@ The form estimates the peak for your card and tells you whether it fits, is tigh
 
 When a run would not fit the card it trains on, the trainer keeps the recipe and moves the per-layer activation checkpoints into system RAM instead (`--ckpt-offload on`), about 4.5 GB for a 290 s track. The trained weights are the same; each step copies those checkpoints over PCIe twice. The app decides this when training starts, from the same estimate and the card's own size, so it works the same on a training worker; the training log names it.
 
-Measured with the Fast recipe at rank 128 on an album whose longest track is 290 s. On an RTX 5090, 6 steps with and without it gave the same losses to every printed digit, 7 GB less memory and 3.7 % more time. On an RTX 4090 (24 GB) the run used 22.2 GB and averaged 5.4 s per step; without it the same album filled the card, spilled into shared memory and took 40 to 90 s per step. A track near the 360 s limit needs about 1 GB more, which the 4090 had free.
+Measured with the Fast recipe at rank 128 on an album whose longest track is 290 s. On an RTX 5090, 6 steps with and without it gave the same losses to every printed digit, 7 GB less memory and 3.7 % more time. On an RTX 4090 (24 GB) the run used 22.2 GB and averaged 5.4 s per step; without it the same album filled the card, spilled into shared memory and took 40 to 90 s per step. The memory model puts a track near the 360 s limit at about 1 GB more, which the 4090 had free; that case is not measured.
 
 
 Smaller base precisions trade fidelity for memory. Step time barely moves between them. The form marks bases that are too lossy to train against.
