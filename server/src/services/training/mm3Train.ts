@@ -458,6 +458,31 @@ function rankLadder(): number[] {
   return capped.length ? capped : [MM3_LM_DEFAULTS.rank];
 }
 
+/** MM3's LM: 36 layers of 4096. What --ckpt-offload moves off the card is
+ *  all but two of its [H, S] f32 checkpoints (engine train/lm-ckpt.h). */
+const MM3_LM_LAYERS = 36;
+const MM3_LM_HIDDEN = 4096;
+
+export interface Mm3OffloadPlan { offload: boolean; peakMb: number; budgetMb: number; offloadedMb: number }
+
+/** Whether a run needs --ckpt-offload to stay on the card, from the same model
+ *  as the VRAM estimate. `frames` is the longest window the run trains (the
+ *  engine sizes its buffers to the longest track it keeps). The budget leaves
+ *  the recommender's headroom. Unknown card (0) or base: no offload. */
+export function mm3CkptOffloadPlan(o: {
+  basePrecision: string; rank: number; frames: number; optimizer: 'muon' | 'adamw' | 'prodigy';
+  attn: 'exact' | 'flash'; prefixFrames: number; trainPrecision: string;
+}, gpuTotalMb: number, bases: Array<Pick<Mm3BaseInfo, 'id' | 'bytes' | 'extraMb'>> = availableMm3Bases()): Mm3OffloadPlan {
+  const S = MM3_VRAM_MODEL.promptTokens + Math.max(0, o.frames);
+  const offloadedMb = Math.round((MM3_LM_LAYERS - 2) * MM3_LM_HIDDEN * S * 4 / 1048576);
+  const base = bases.find(b => b.id === o.basePrecision);
+  if (!base || !(gpuTotalMb > 0)) return { offload: false, peakMb: 0, budgetMb: 0, offloadedMb };
+  const stageMb = o.trainPrecision !== 'full' && o.basePrecision !== 'bf16' ? MM3_VRAM_MODEL.bf16StageMb : 0;
+  const peakMb = estimateMm3PeakMb(base.bytes, o.rank, o.frames, base.extraMb, o.optimizer, o.prefixFrames, o.attn) + stageMb;
+  const budgetMb = gpuTotalMb - Math.min(1536, Math.round(gpuTotalMb * 0.08));
+  return { offload: peakMb > budgetMb, peakMb, budgetMb, offloadedMb };
+}
+
 export function recommendMm3Config(gpuTotalMb: number,
                                    maxFrames: number = MM3_LM_DEFAULTS.maxFrames,
                                    headroomMb?: number): Mm3Recommendation {
@@ -1245,6 +1270,9 @@ export interface ResolvedMm3TrainLmOptions {
   /** See MM3_LM_DEFAULTS.pissaCache / pissaFrozenF16. */
   pissaCache: boolean;
   pissaFrozenF16: boolean;
+  /** --ckpt-offload on: activation checkpoints in host RAM. Set by the route
+   *  from mm3CkptOffloadPlan when the run would not fit the card. */
+  ckptOffload?: boolean;
   hra: boolean;
   loraPlusRatio: number;
   /** Soft prompt. '' = no token. See MM3_LM_DEFAULTS.artistToken. */
@@ -1427,6 +1455,7 @@ export function buildMm3TrainLmArgs(o: ResolvedMm3TrainLmOptions): string[] {
   // 'excise' keeps the flag too: the retarget pass shortens what it can, and whatever it refused must still be
   // left out rather than silently falling back to crops.
   if ((o.longTracks ?? 'exclude') !== 'crop') args.push('--drop-over-frames', String(o.maxFrames));
+  if (o.ckptOffload) args.push('--ckpt-offload', 'on');
   // Soft prompt. Uses the SAME flag names the parser already accepts
   // (--artist-token/-k/-lr) — this is not a new engine surface, just a
   // previously-unwired one.

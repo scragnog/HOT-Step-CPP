@@ -1,3 +1,4 @@
+import { execFileSync } from 'child_process';
 import { yue2OptimRequest } from '../services/training/yue2Optim.js';
 import { selectYue2Audio, YUE2_AUDIO_EXTS, yue2SeparationAudioDir } from '../services/training/yue2AudioStaging.js';
 // training.ts — Dataset Studio HTTP surface (Training Studio phase 1)
@@ -129,7 +130,7 @@ import {
   availableMm3Bases, MM3_VRAM_MODEL, mm3FlashVramCalibrated, recommendMm3Config,
   MM3_LM_DEFAULTS, MM3_LM_PRESETS, MM3_LM_DEFAULT_PRESET, applyMm3Preset,
   missingMm3TrainModels, mm3AdapterRunDir, mm3CodesDir, mm3PriorDir,
-  mm3RunName, isMm3TrainPrecision, countMm3Captions,
+  mm3RunName, isMm3TrainPrecision, countMm3Captions, mm3CkptOffloadPlan,
   type Mm3BasePrecision, type Mm3TrainPrecision,
 } from '../services/training/mm3Train.js';
 import {
@@ -2185,6 +2186,19 @@ function mm3Preflight(req: Request, res: Response): TrainingDatasetRow | null {
   return ds;
 }
 
+/** This machine's GPU memory in MB: the engine's reading, else nvidia-smi's
+ *  first card (a batch stops the engine between its stages), else 0 = unknown. */
+async function trainingGpuTotalMb(): Promise<number> {
+  try {
+    const r = await fetch(`${config.aceServer.url}/vram`, { signal: AbortSignal.timeout(1500) });
+    if (r.ok) { const v: any = await r.json(); if (Number(v?.total_mb) > 0) return Number(v.total_mb); }
+  } catch { /* engine down */ }
+  try {
+    const out = execFileSync('nvidia-smi', ['--query-gpu=memory.total', '--format=csv,noheader,nounits'], { encoding: 'utf8', timeout: 3000, windowsHide: true });
+    return Number(out.trim().split(/\r?\n/)[0]) || 0;
+  } catch { return 0; }
+}
+
 /** GET /datasets/:id/mm3 — codes cache state + which model files are missing.
  *  Cheap and never throws: the UI polls it to decide what to enable. */
 router.get('/datasets/:id/mm3', async (req: Request, res: Response) => {
@@ -2798,12 +2812,33 @@ router.post('/datasets/:id/mm3-train-lm', async (req: Request, res: Response) =>
       return;
     }
 
+    // Fit the card this run trains on without touching the recipe: when the
+    // VRAM model says the run would spill, its activation checkpoints move to
+    // host RAM (--ckpt-offload, bit-identical). A request can force it either
+    // way. The window is the longest track the run keeps, as the engine sizes
+    // its buffers.
+    const rankResolved = num('rank', D.rank, 1, 512);
+    const keptFrames = longTracksResolved === 'exclude'
+      ? (await buildSamples(ds)).filter(s => !s.excluded && !s.fileMissing && s.duration > 0)
+          .map(s => Math.ceil(s.duration * 25)).filter(f => f <= maxFramesResolved)
+      : [];
+    const offloadPlan = mm3CkptOffloadPlan({
+      basePrecision, rank: rankResolved, optimizer, attn: attnBackendResolved, prefixFrames: prefixFramesResolved,
+      trainPrecision: trainPrecisionResolved, frames: keptFrames.length ? Math.max(...keptFrames) : maxFramesResolved,
+    }, process.platform === 'darwin' ? 0 : await trainingGpuTotalMb());  // unified memory: nothing to move
+    const ckptOffload = typeof b.ckptOffload === 'boolean' ? b.ckptOffload : offloadPlan.offload;
+    if (offloadPlan.offload) {
+      console.log(`[Training] mm3-train-lm ${runName}: predicted ${offloadPlan.peakMb} MB against a ${offloadPlan.budgetMb} MB budget; `
+                + `${ckptOffload ? '' : 'NOT '}moving ~${offloadPlan.offloadedMb} MB of checkpoints to host RAM`);
+    }
+
     const job = queue.startMm3TrainLmJob(ds.id, {
       manifest:    ds.datasetJsonPath,
       captionsDir,
       codesDir:    codesInner,
       outDir:      mm3AdapterRunDir(runName),
-      rank:        num('rank', D.rank, 1, 512),
+      rank:        rankResolved,
+      ckptOffload,
       alpha:       num('alpha', D.alpha, 1, 2048),
       lr:          num('lr', D.lr, 1e-7, 1e-2),
       steps:       num('steps', stepsDefault, 1, 100000),

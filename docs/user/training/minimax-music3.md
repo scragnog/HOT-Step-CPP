@@ -79,6 +79,10 @@ Measured on an RTX 5090 at rank 128: whole-song training peaks at about 29 GB an
 
 The form estimates the peak for your card and tells you whether it fits, is tight, or is over. Close to the limit, Windows spills into shared memory and steps take several times longer. On a 24 GB card, the levers are a lower rank or turning the acoustic loss off, and neither has been heard under the whole-song recipe. The app's own floor is roughly 11 GB at the smallest usable settings.
 
+When a run would not fit the card it trains on, the trainer keeps the recipe and moves the per-layer activation checkpoints into system RAM instead (`--ckpt-offload on`), about 4.5 GB for a 290 s track. The trained weights are the same; each step copies those checkpoints over PCIe twice. The app decides this when training starts, from the same estimate and the card's own size, so it works the same on a training worker; the training log names it. This is not measured on a 24 GB card yet, so whether it alone fits the whole-song recipe there, and what it costs per step, is still open.
+<!-- TODO(verify): step time and peak with --ckpt-offload on an RTX 4090, whole-song rank 128 (HOTSTEP-1070). -->
+
+
 Smaller base precisions trade fidelity for memory. Step time barely moves between them. The form marks bases that are too lossy to train against.
 
 **Training precision** in the Advanced drawer trades exact arithmetic for speed. Fastest is the default: adapters trained at Fastest and at Full were compared by ear with no audible difference.
@@ -142,7 +146,7 @@ A second PC with its own GPU can train MM3 batches, set up the same way as for [
 
 The copy shares the YuE2 syncs: every 15 seconds while the worker is training or files are left to copy, every 2 minutes otherwise, with **Sync now** on the Review page. The optimizer state is never copied, so a run can only be continued on the worker. The worker keeps its own copy of every run. A checkpoint, preview or whole run deleted here is not copied again.
 
-The recipe, including the recommended rank, is sized for this PC's GPU. On a worker with less memory, check that the peak shown on the card fits it, or lower the rank.
+The recipe, including the recommended rank, is sized for this PC's GPU. A worker with less memory moves activation checkpoints to its system RAM rather than change the recipe; see [VRAM and time](#vram-and-time).
 
 ## Known limits
 
