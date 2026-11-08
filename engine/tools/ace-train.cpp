@@ -258,6 +258,9 @@ static void print_usage(void) {
             "                q8_0 base (CUDA) and --pissa/--hot-pizza: each layer's BF16\n"
             "                weights are built as W - s B0 A0, so the frozen branch\n"
             "                leaves the graph (~11 % per step). Not bit-identical.\n"
+            "                [--ckpt-offload on|off] default off. The per-layer\n"
+            "                activation checkpoints live in pinned host RAM, two on\n"
+            "                the GPU: less VRAM for PCIe copies. Bit-identical.\n"
             "  mm3-lm-loss   Teacher-forced training forward, scored. --lm --depth --codes\n"
             "                --caption [--lyrics] [--max-frames N] [--crop-offset N]\n"
             "                [--target-shift N] [--no-prompt]  (falsification diagnostics).\n"
@@ -2351,6 +2354,7 @@ static int cmd_mm3_lm_train(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--weights"))       a.weights      = next("--weights");
         else if (!strcmp(argv[i], "--tf32"))          a.tf32         = !strcmp(next("--tf32"), "on");
         else if (!strcmp(argv[i], "--pissa-fold"))    a.pissa_fold   = !strcmp(next("--pissa-fold"), "on");
+        else if (!strcmp(argv[i], "--ckpt-offload"))  a.ckpt_offload = !strcmp(next("--ckpt-offload"), "on");
         else if (!strcmp(argv[i], "--depth-loss-weight")) a.depth_loss_weight = atof(next("--depth-loss-weight"));
         else if (!strcmp(argv[i], "--depth-loss-frames")) a.depth_loss_frames = atoi(next("--depth-loss-frames"));
         else if (!strcmp(argv[i], "--crop-start-frac")) a.crop_start_frac = atof(next("--crop-start-frac"));
