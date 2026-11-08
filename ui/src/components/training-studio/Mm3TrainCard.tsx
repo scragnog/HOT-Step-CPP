@@ -1658,7 +1658,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
           </details>}
         </div>
       )}
-      <Mm3RunsPanel key={datasetId} datasetId={datasetId} />
+      <Mm3RunsPanel key={datasetId} datasetId={datasetId} renderOpts={{ seconds: form?.previewSeconds, scaleMlp: form?.previewScaleMlp }} />
     </div>
   );
 };
