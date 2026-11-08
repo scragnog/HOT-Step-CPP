@@ -83,7 +83,7 @@ export const TrainingWorkerBar: React.FC = () => {
         <ParamLabel
           label={t('trainingStudio.workers.trainOn', 'Train on')}
           className="text-xs font-semibold text-zinc-700 dark:text-zinc-300"
-          info={t('trainingStudio.workers.trainOnInfo', 'This PC, or a training worker listed in Settings. On a worker, everything below (datasets, batches, training charts, previews and rung scores) is the worker\'s: you listen and score here while its GPU trains. Datasets reach it through "Run on" when you start a YuE2 batch from this PC.')}
+          info={t('trainingStudio.workers.trainOnInfo', 'This PC, or a training worker listed in Settings. On a worker, everything below (datasets, batches, training charts, previews and rung scores) is the worker\'s: you listen and score here while its GPU trains. Datasets reach it through "Run on" when you start a YuE2 or MiniMax-Music3 batch from this PC.')}
         />
         <StyledSelect
           accent="amber"

@@ -132,6 +132,18 @@ Your caption should look like a training caption. When you send a song from Lyri
 
 Write a full song's worth of lyrics even for a short render: MM3 plans the whole track from the whole lyric, and the duration only truncates. Irregular line lengths that match the artist's own writing work far better than tidy four-line verses.
 
+## Training on another PC
+
+A second PC with its own GPU can train MM3 batches, set up the same way as for [YuE2](yue2.md#training-on-another-pc): the same app version on both, **Worker token** on the worker, **Training workers** and **Training worker token** here. The worker needs the MM3 training models in its `models/mm3` folder: the LM base you train on (`mm3-lm-q8_0.gguf` by default), `mm3-depth-f16.gguf`, the RVQ and DAV encoders (`mm3-rvq-*.gguf`, `mm3-enc-*.gguf`), and the render files its previews use (a synth bundle, or the split DiT, cond, depth and vocoder files).
+
+1. Build each dataset and make its `.mm3.txt` captions here first. The worker trains on them as sent and never writes captions itself.
+2. Start **Train multiple** with MiniMax-Music3 as the target, set the recipe, and pick the worker under **Run on**. For each dataset this PC sends the audio, captions and `dataset.json` (only files the worker lacks) and adds the dataset to the worker's batch, which exports codes and then trains. A dataset with no build or no MM3 captions fails here, before anything is sent.
+3. The studio switches **Train on** to the worker so you can follow the run. Each finished checkpoint, the run's logs and every preview are copied into this PC's `mm3-lm-adapters/<run>` folder as they land, under the same run name. From then on the run opens here like one trained on this PC: the ladder, previews, scores and cleanup all use the local copy. When a run that this PC watched train finishes, the album presets linked to its dataset point at its final checkpoint, unless **Update linked album presets** was off.
+
+The copy shares the YuE2 syncs: every 15 seconds while the worker is training or files are left to copy, every 2 minutes otherwise, with **Sync now** on the Review page. The optimizer state is never copied, so a run can only be continued on the worker. The worker keeps its own copy of every run. A checkpoint, preview or whole run deleted here is not copied again.
+
+The recipe, including the recommended rank, is sized for this PC's GPU. On a worker with less memory, check that the peak shown on the card fits it, or lower the rank.
+
 ## Known limits
 
 - Endings are not solved. Even with per-track captions, each plan ends naturally only about 20 to 50 percent of the time, and the rate depends on the caption and lyrics pair. Whole-song training raised it a lot compared with the older 30-second-crop recipe, and no training-side change has raised it further without losing likeness.

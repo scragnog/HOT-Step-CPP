@@ -43,6 +43,10 @@ async function fakeWorker(runs: FakeRun[]): Promise<Fake> {
   const fake = { runs, gets: [] as string[], heads: [] as string[], deletes: [] as string[], deleteStatus: 200 } as Fake;
   const server = http.createServer((req, res) => {
     const u = new URL(req.url!, 'http://x');
+    // MM3 runs ride the same pass (mm3WorkerMirror.test.ts); this worker has none.
+    if (req.method === 'GET' && u.pathname === '/api/training/worker/mm3-mirror') {
+      res.setHeader('content-type', 'application/json'); res.end('{"runs":[]}'); return;
+    }
     if (req.method === 'GET' && u.pathname === '/api/training/worker/yue2-mirror') {
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ runs: fake.runs.map(r => ({

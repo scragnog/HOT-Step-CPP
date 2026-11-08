@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { estimateMm3PeakMb, estimateMm3PrefixMb, mm3FlashVramCalibrated, type Mm3PresetName } from '../../services/trainingApi';
+import { dispatchMm3Batch, estimateMm3PeakMb, estimateMm3PrefixMb, mm3FlashVramCalibrated, type Mm3PresetName } from '../../services/trainingApi';
 import type { Mm3TrainLmRequest } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { StyledSelect } from '../shared/StyledSelect';
@@ -38,8 +38,9 @@ import { TrainingEtaLine } from './TrainingEtaLine';
 import { previewsFromRows, trainingRunEta } from './trainingRunEta';
 import { TrainingPreviewSettings } from './TrainingPreviewPanel';
 import { useActiveTrainingJob } from '../../queries/training-runs/hooks';
-import { runQueries } from '../../queries/training-runs/queries';
-import { useQuery } from '@tanstack/react-query';
+import { runQueries, trainingWritePlan } from '../../queries/training-runs/queries';
+import { trainingQueries } from '../../queries/training-data/queries';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BTN_SM, CARD, INPUT } from './yue2CardUi';
 
 
@@ -157,6 +158,14 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
   const batchDraft = useTrainingStore(s => s.yue2BatchDraft);
   const setBatchDraft = useTrainingStore(s => s.setYue2BatchDraft);
   const startMm3Batch = useTrainingStore(s => s.startMm3Batch);
+  // Run on: a batch started here can train on a training worker instead
+  // (pushed there, then copied back by the mirror), as YuE2's does.
+  const client = useQueryClient();
+  const trainingWorker = useTrainingStore(s => s.trainingWorker);
+  const setTrainingWorker = useTrainingStore(s => s.setTrainingWorker);
+  const workersQuery = useQuery({ ...trainingQueries.workers(), enabled: !!batchDraft?.length && !trainingWorker });
+  const workers = workersQuery.data ?? [];
+  const [runOn, setRunOn] = useState('');
   // Which codes cache this run trains on. Off = the standard cache, exactly as
   // every run before the launder gate existed.
   const [trainLaunder, setTrainLaunder] = useState(false);
@@ -383,7 +392,15 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
         // One recipe for every dataset: rank and base are pinned, not re-recommended per dataset.
         // The preview song belongs to this dataset, so each run picks its own.
         const { previewSongId: _song, ...preview } = body.preview ?? {};
-        await startMm3Batch(batchDraft, { ...body, ...(body.preview ? { preview } : {}) });
+        const batchBody = { ...body, ...(body.preview ? { preview } : {}) };
+        if (runOn) {
+          await dispatchMm3Batch(runOn, { datasetIds: batchDraft, recipe: batchBody });
+          void trainingWritePlan(client, runOn);
+          setBatchDraft(null);
+          await setTrainingWorker(runOn);
+          return;
+        }
+        await startMm3Batch(batchDraft, batchBody);
         setPhase('train');
         return;
       }
@@ -1436,9 +1453,25 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
               </div>
             )}
 
+            {!!batchDraft?.length && !trainingWorker && workers.length > 0 && <div className="mt-4 flex items-center gap-3 flex-wrap">
+              <ParamLabel
+                label={t('trainingStudio.workers.runOn', 'Run on')}
+                className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300"
+                info={t('trainingStudio.workers.runOnInfoMm3', 'A training worker trains the batch on its own GPU. Each dataset\'s audio, .mm3.txt captions and dataset.json are sent to the worker (only files it does not already have), and it joins the worker\'s batch: codes, then training. Switch "Train on" at the top to that worker to follow the run. Each checkpoint and preview is copied back here as it lands, so the run then opens here like one trained on this PC. The recipe is sized for this PC\'s GPU; check it fits the worker\'s.')}
+              />
+              <StyledSelect
+                accent="amber"
+                value={runOn}
+                disabled={busy}
+                onChange={value => setRunOn(String(value))}
+                options={[{ value: '', label: t('trainingStudio.workers.thisPc', 'This PC') }, ...workers.map(w => ({ value: w.name, label: w.online ? w.name : `${w.name} (offline)`, disabled: !w.online }))]}
+                className="w-48"
+              />
+            </div>}
+
             <button
               onClick={() => void startTrain()}
-              disabled={busy || jobRunning}
+              disabled={busy || (jobRunning && !runOn)}
               className="mt-4 px-4 py-2 rounded-lg text-sm font-semibold bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-40 transition-colors flex items-center gap-2"
             >
               <Play size={14} />

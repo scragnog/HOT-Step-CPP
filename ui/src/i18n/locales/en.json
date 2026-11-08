@@ -706,6 +706,7 @@
     "trainingStudio.yue2.aitkBatch.start": "Start batch ({{count}})",
     "trainingStudio.workers.thisPc": "This PC",
     "trainingStudio.workers.runOnInfo": "A training worker trains the batch on its own GPU. Each dataset is captioned here first (Gemini, when captioning is on), its audio and sidecars are sent to the worker (only files it does not already have), and it joins the worker's batch. Switch \"Train on\" at the top to that worker to follow the run. The ladder, its previews and scoring stay here: they open on this run once it lands in this machine's own index.",
+    "trainingStudio.workers.runOnInfoMm3": "A training worker trains the batch on its own GPU. Each dataset's audio, .mm3.txt captions and dataset.json are sent to the worker (only files it does not already have), and it joins the worker's batch: codes, then training. Switch \"Train on\" at the top to that worker to follow the run. Each checkpoint and preview is copied back here as it lands, so the run then opens here like one trained on this PC. The recipe is sized for this PC's GPU; check it fits the worker's.",
     "trainingStudio.workers.runOn": "Run on",
     "trainingStudio.yue2.aitkBatch.clearCacheHint": "Deletes each dataset's YuE2 caches (latents, codes, lead sheets, vocal stems, lyric timing, prepared datasets) before it starts, so everything is rebuilt from the audio. Source audio, captions and trained adapters are not touched. Each album then takes as long as a first-time preparation.",
     "trainingStudio.yue2.aitkBatch.clearCache": "Clear out all cached data",

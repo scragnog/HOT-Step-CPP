@@ -3370,7 +3370,7 @@ export interface TrainingWorkerStatus {
   job?: { kind: string; dataset: string; done: number; total: number; status: string } | null; idle?: boolean;
 }
 export interface WorkerDispatchItem { datasetId: string; name: string; status: 'pending' | 'captioning' | 'pushing' | 'queued' | 'failed'; error: string | null; sent?: number; bytes?: number }
-export interface WorkerDispatch { worker: string; batchId: string | null; items: WorkerDispatchItem[]; running: boolean; startedAt: number }
+export interface WorkerDispatch { worker: string; family?: 'yue2' | 'mm3'; batchId: string | null; items: WorkerDispatchItem[]; running: boolean; startedAt: number }
 
 async function workersRequest<T>(path: string, init?: TrainingInit, opts?: ReadOptions): Promise<T> {
   const { method, body } = initToArgs(init);
@@ -3385,6 +3385,11 @@ export async function listTrainingWorkers(reqOpts?: ReadOptions): Promise<Traini
 export async function dispatchYue2Batch(worker: string, input: { datasetIds: string[]; lyricTiming: boolean; clearCache?: boolean; recipe: Partial<Yue2JointTrainRequest> }): Promise<WorkerDispatch> {
   // silent: Yue2AitkTrainCard's batch-dispatch error line is the sole notifier.
   return (await workersRequest<{ dispatch: WorkerDispatch }>(`/${encodeURIComponent(worker)}/yue2-dispatch`, { method: 'POST', ...jsonBody(input), silent: true })).dispatch;
+}
+/** Push each dataset (audio, .mm3.txt captions, manifest) and queue it on the worker's MM3 batch. */
+export async function dispatchMm3Batch(worker: string, input: { datasetIds: string[]; clearCache?: boolean; recipe: Mm3TrainLmRequest }): Promise<WorkerDispatch> {
+  // silent: the store error line under Mm3TrainCard is the sole notifier.
+  return (await workersRequest<{ dispatch: WorkerDispatch }>(`/${encodeURIComponent(worker)}/mm3-dispatch`, { method: 'POST', ...jsonBody(input), silent: true })).dispatch;
 }
 export async function getWorkerDispatch(worker: string, reqOpts?: ReadOptions): Promise<WorkerDispatch | null> {
   return (await workersRequest<{ dispatch: WorkerDispatch | null }>(`/${encodeURIComponent(worker)}/yue2-dispatch`, undefined, reqOpts)).dispatch;

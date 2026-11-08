@@ -129,7 +129,7 @@ import {
   availableMm3Bases, MM3_VRAM_MODEL, mm3FlashVramCalibrated, recommendMm3Config,
   MM3_LM_DEFAULTS, MM3_LM_PRESETS, MM3_LM_DEFAULT_PRESET, applyMm3Preset,
   missingMm3TrainModels, mm3AdapterRunDir, mm3CodesDir, mm3PriorDir,
-  mm3RunName, isMm3TrainPrecision,
+  mm3RunName, isMm3TrainPrecision, countMm3Captions,
   type Mm3BasePrecision, type Mm3TrainPrecision,
 } from '../services/training/mm3Train.js';
 import {
@@ -2183,28 +2183,6 @@ function mm3Preflight(req: Request, res: Response): TrainingDatasetRow | null {
     return null;
   }
   return ds;
-}
-
-/** How many manifest rows have a `<stem>.mm3.txt` beside their audio. Mirrors
- *  the trainer's own rule (mm3-lm-train-run.h): stem = filename minus its last
- *  extension, caption = `<captionsDir>/<stem>.mm3.txt`. Never throws. */
-function countMm3Captions(manifest: string, captionsDir: string): { total: number; captioned: number } {
-  let rows: unknown[] = [];
-  try {
-    const parsed = JSON.parse(fs.readFileSync(manifest, 'utf-8'));
-    rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.samples) ? parsed.samples : [];
-  } catch {
-    return { total: 0, captioned: 0 };
-  }
-  let total = 0, captioned = 0;
-  for (const raw of rows) {
-    const filename = (raw as { filename?: unknown })?.filename;
-    if (typeof filename !== 'string' || !filename) continue;
-    total++;
-    const stem = filename.replace(/\.[^.]*$/, '');
-    if (fs.existsSync(path.join(captionsDir, `${stem}.mm3.txt`))) captioned++;
-  }
-  return { total, captioned };
 }
 
 /** GET /datasets/:id/mm3 — codes cache state + which model files are missing.

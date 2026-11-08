@@ -17,6 +17,7 @@ import { activeTraining, cachedDirtyCheckout, getUpdate, cancelUpdate, receiveUp
 import {
   deleteWorkerMirrorRun, getDispatch, getWorker, listWorkers, proxyToWorker, pullLinked, receiveDatasetFile, startDispatch,
   upsertPushedDataset, workerAdapterFile, workerDatasetFiles, workerLinkedPairs, workerMirrorFile, workerMirrorManifest, workerStatus,
+  workerMm3MirrorFile, workerMm3MirrorManifest, type DispatchFamily,
 } from '../services/training/trainingWorkers.js';
 import { syncYue2Mirror, yue2MirrorStatus } from '../services/training/yue2Mirror.js';
 
@@ -96,12 +97,17 @@ workerRouter.get('/yue2-mirror', (_req: Request, res: Response) => {
   try { res.json({ runs: workerMirrorManifest() }); } catch (err) { fail(res, err); }
 });
 
-/** GET /api/training/worker/yue2-mirror-file?jobId=&rel= — one manifest entry,
- *  with its sha256 in x-sha256 and the mtime it was served at in x-mtime.
- *  HEAD returns the same headers without the body. */
-workerRouter.get('/yue2-mirror-file', async (req: Request, res: Response) => {
+/** GET /api/training/worker/mm3-mirror — MM3 runs of the datasets pushed here, same shape. */
+workerRouter.get('/mm3-mirror', (_req: Request, res: Response) => {
+  try { res.json({ runs: workerMm3MirrorManifest() }); } catch (err) { fail(res, err); }
+});
+
+/** GET /api/training/worker/yue2-mirror-file?jobId=&rel= (and mm3-mirror-file?run=&rel=)
+ *  — one manifest entry, with its sha256 in x-sha256 and the mtime it was
+ *  served at in x-mtime. HEAD returns the same headers without the body. */
+const mirrorFileRoute = (find: (req: Request) => ReturnType<typeof workerMirrorFile>) => async (req: Request, res: Response) => {
   try {
-    const f = await workerMirrorFile(String(req.query.jobId ?? ''), String(req.query.rel ?? ''));
+    const f = await find(req);
     res.setHeader('content-type', 'application/octet-stream');
     res.setHeader('content-length', String(f.size));
     res.setHeader('x-sha256', f.sha256);
@@ -110,7 +116,9 @@ workerRouter.get('/yue2-mirror-file', async (req: Request, res: Response) => {
     if (!f.size || req.method === 'HEAD') { res.end(); return; }
     await pipeline(fs.createReadStream(f.abs, { start: 0, end: f.size - 1 }), res);
   } catch (err) { if (!res.headersSent) fail(res, err); else res.destroy(); }
-});
+};
+workerRouter.get('/yue2-mirror-file', mirrorFileRoute(req => workerMirrorFile(String(req.query.jobId ?? ''), String(req.query.rel ?? ''))));
+workerRouter.get('/mm3-mirror-file', mirrorFileRoute(req => workerMm3MirrorFile(String(req.query.run ?? ''), String(req.query.rel ?? ''))));
 
 /** DELETE /api/training/worker/yue2-mirror/:jobId — the run's folder and index
  *  entry, once the controller holds a full copy. 409 while anything may still
@@ -141,17 +149,21 @@ router.delete('/:name/update', (req: Request, res: Response) => {
 });
 
 /** POST /api/workers/:name/yue2-dispatch — the batch-start body
- *  { datasetIds, lyricTiming, clearCache, recipe }. Joins a dispatch already running. */
-router.post('/:name/yue2-dispatch', json, (req: Request, res: Response) => {
+ *  { datasetIds, lyricTiming, clearCache, recipe }. POST /:name/mm3-dispatch —
+ *  the mm3-batch body { datasetIds, clearCache, recipe }. Each joins a dispatch
+ *  of its own family already running. */
+const dispatchRoute = (family: DispatchFamily) => (req: Request, res: Response) => {
   const w = getWorker(req.params.name as string);
   if (!w) { res.status(404).json({ error: 'No such worker' }); return; }
   const b = (req.body || {}) as Record<string, unknown>;
   const datasetIds = Array.isArray(b.datasetIds) ? b.datasetIds.filter((x): x is string => typeof x === 'string' && x.length > 0) : [];
   const recipe = b.recipe && typeof b.recipe === 'object' ? b.recipe as Record<string, unknown> : {};
-  const result = startDispatch(w, { datasetIds, lyricTiming: b.lyricTiming !== false, clearCache: b.clearCache === true, recipe });
+  const result = startDispatch(w, { family, datasetIds, lyricTiming: b.lyricTiming !== false, clearCache: b.clearCache === true, recipe });
   if ('error' in result) { res.status(400).json(result); return; }
   res.status(202).json({ dispatch: result });
-});
+};
+router.post('/:name/yue2-dispatch', json, dispatchRoute('yue2'));
+router.post('/:name/mm3-dispatch', json, dispatchRoute('mm3'));
 
 router.get('/:name/yue2-dispatch', (req: Request, res: Response) => {
   res.json({ dispatch: getDispatch(req.params.name as string) });

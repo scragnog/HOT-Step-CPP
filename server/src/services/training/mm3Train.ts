@@ -110,6 +110,28 @@ export function missingMm3TrainModels(need: 'codes' | 'train' | 'launder',
   return wanted.filter(([p]) => !p || !fs.existsSync(p)).map(([, label]) => label);
 }
 
+/** How many manifest rows have a `<stem>.mm3.txt` beside their audio. Mirrors
+ *  the trainer's own rule (mm3-lm-train-run.h): stem = filename minus its last
+ *  extension, caption = `<captionsDir>/<stem>.mm3.txt`. Never throws. */
+export function countMm3Captions(manifest: string, captionsDir: string): { total: number; captioned: number } {
+  let rows: unknown[] = [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(manifest, 'utf-8'));
+    rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.samples) ? parsed.samples : [];
+  } catch {
+    return { total: 0, captioned: 0 };
+  }
+  let total = 0, captioned = 0;
+  for (const raw of rows) {
+    const filename = (raw as { filename?: unknown })?.filename;
+    if (typeof filename !== 'string' || !filename) continue;
+    total++;
+    const stem = filename.replace(/\.[^.]*$/, '');
+    if (fs.existsSync(path.join(captionsDir, `${stem}.mm3.txt`))) captioned++;
+  }
+  return { total, captioned };
+}
+
 // ── Base catalogue ──────────────────────────────────────────────────────────
 //
 // FIDELITY IS MEASURED, NOT ASSUMED. Each `lossDelta` is the first-step

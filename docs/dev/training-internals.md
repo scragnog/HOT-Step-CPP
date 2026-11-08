@@ -730,6 +730,37 @@ boot before the server listens. It is idempotent.
 `startYue2Mirror()` awaits it before the first pass, so no pass writes into a folder about
 to move. The first mirror pass then fills in the rung weights the worker still holds.
 
+#### MM3 on a worker
+
+`POST /api/workers/:name/mm3-dispatch` (body `{ datasetIds, clearCache, recipe }`, the
+`mm3-batch` body) runs the same dispatch as `yue2-dispatch` with `family: 'mm3'`: no
+captioning, a check that the dataset is built with its manifest at
+`<sourceDir>/dataset.json` (the only path `upsertPushedDataset` adopts on the worker) and
+has at least one `.mm3.txt`, then the push, then `POST /api/training/mm3-batch` on the
+worker. A dispatch or a worker batch of the other family is never joined. The pushed
+manifest keeps this machine's absolute `audio_path`s; `pm_resolve_audio` in
+`preprocess-io.h` falls back to the file beside the manifest.
+
+MM3 runs need no index: a run is its folder, attributed by `hotstep-run.json`. The worker
+offers `GET /api/training/worker/mm3-mirror` (`workerMm3MirrorManifest`: runs of datasets
+whose `sourceDir` is under `worker-datasets/`, with `live` while a job for the dataset or
+the GPU lane is busy) and `mm3-mirror-file?run=&rel=` (same headers as
+`yue2-mirror-file`). Files offered: `hotstep-run.json`, `train-log.jsonl`,
+`train-console.log`, every file of a `ckpt-N/` once its weights' `.json` sidecar exists
+(the engine writes the folder in place and the sidecar last) and `previews/*.wav|json`.
+Never `resume-state.*`.
+
+`mirrorMm3Runs` in `yue2Mirror.ts` runs inside each pass and lands a run at
+`mm3-lm-adapters/<run>` with the same `.mirror.json` ledger. A file is fetched again when
+the worker's size or mtime moves past the ledger's; a file in the ledger but gone from
+disk was cleaned up here and stays gone. A fetched `hotstep-run.json` keeps the local
+`blindLabels`. `<training dir>/mm3-mirror.json` records each `{ worker, run }`: a recorded
+run whose folder is gone is marked `discarded` and never copied again, and a run name that
+already exists here without a record is refused. Once a run seen `live` by a pass is no
+longer live and fully copied, `linkMirroredMm3Run` points the dataset's album presets at
+its last checkpoint (`pointMm3PresetsAt`, as `refreshLinkedMm3Presets` does locally),
+once. Nothing is deleted on the worker.
+
 ## YuE2 NAR audio-domain loss
 
 `yue2-nar-train` gained two flags on 2026-10-17. `--companion` merges the
