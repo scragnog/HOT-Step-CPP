@@ -11,7 +11,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { config } from '../../config.js';
+import { config, getFFmpegPath } from '../../config.js';
 import { datasetDir } from './paths.js';
 import type { Mm3PreviewOptions } from './types.js';
 
@@ -1158,6 +1158,10 @@ export function buildMm3CodesArgs(a: Mm3CodesArgs): string[] {
   const cap = a.launder ? 359 : Infinity;
   const md = a.maxDuration && a.maxDuration > 0 ? Math.min(Math.round(a.maxDuration), cap) : (a.launder ? 359 : 0);
   if (md > 0) args.push('--max-duration', String(md));
+  // Without it the engine runs whatever "ffmpeg" is on PATH, and a PC with no
+  // system ffmpeg fails every track ("ffmpeg exit 1").
+  const ffmpeg = getFFmpegPath();
+  if (ffmpeg) args.push('--ffmpeg', ffmpeg);
   return args;
 }
 
