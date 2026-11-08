@@ -48,7 +48,8 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
   }, [job?.id, job?.status, hasPoints, worker]);
   const history = points ?? stream;
   const last = history.at(-1);
-  const lastStopMean = history.findLast(p => Number.isFinite(p.ma20))?.ma20;
+  // MM3 computes its own trailing mean (train or held-out) and passes it in.
+  const lastStopMean = typeof options?.stopReading === 'number' ? options.stopReading : history.findLast(p => Number.isFinite(p.ma20))?.ma20;
   const frozenIndex = history.findIndex(p => p.frozen);
   const frozen = frozenIndex < 0 ? undefined : history[Math.max(0, frozenIndex - 1)].step;
   const kls: number[] = [];
@@ -74,7 +75,9 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
     narDrift: t('trainingStudio.split.driftInfo', "How much the decoder's predictions changed from its starting adapter on fixed probes."),
     narRecon: t('trainingStudio.split.reconInfo', 'How closely one denoising step rebuilds the training latents on fixed probes. Lower is better on those probes, not a listening score.'),
     grad: t('trainingStudio.split.gradInfo', 'Overall gradient size before clipping. Spikes flag an unstable update.'),
-    eval: t('trainingStudio.split.grammarInfo', 'Validation on the minted token pack. It should stay roughly flat; rising means token-grammar damage.'),
+    eval: mode === 'mm3'
+      ? t('trainingStudio.split.heldOutInfo', 'Loss on songs the run never trains on. It says whether the adapter generalises: rising while the training loss falls means it is memorising.')
+      : t('trainingStudio.split.grammarInfo', 'Validation on the minted token pack. It should stay roughly flat; rising means token-grammar damage.'),
   };
   const missing = t('trainingStudio.split.missing', 'Not recorded for this run');
   const chart = (side: 'ar' | 'nar') => {
@@ -110,7 +113,9 @@ export const Yue2SplitChart: React.FC<Props> = ({ mode = 'joint', points, job, o
       {pace.length > 0 && <span>{t('trainingStudio.split.pace', { value: (pace.reduce((a, b) => a + b, 0) / pace.length / 1000).toFixed(2), defaultValue: 'Pace {{value}} s/step' })}</span>}
       {vram !== undefined && <span>{t('trainingStudio.split.vram', { value: (vram / 1024).toFixed(1), defaultValue: 'VRAM {{value}} GB' })}</span>}
       {frozen !== undefined && <span>{t('trainingStudio.split.frozenAt', { step: frozen, defaultValue: 'Planner frozen at step {{step}}' })}</span>}
-      {options?.stopMode === 'loss' && <span>{t('trainingStudio.split.compositeStop', { value: lastStopMean?.toFixed(4) ?? missing, target: options.targetLoss, defaultValue: 'Composite loss stop mean {{value}} / target {{target}}' })}</span>}
+      {options?.stopMode === 'loss' && (mode === 'mm3'
+        ? <span>{t('trainingStudio.split.mm3Stop', { value: lastStopMean?.toFixed(4) ?? missing, target: options.targetLoss, metric: options.targetLossMetric === 'eval' ? 'held-out loss' : 'training loss, trailing mean', defaultValue: 'Stop on {{metric}}: {{value}} / target {{target}}' })}</span>
+        : <span>{t('trainingStudio.split.compositeStop', { value: lastStopMean?.toFixed(4) ?? missing, target: options.targetLoss, defaultValue: 'Composite loss stop mean {{value}} / target {{target}}' })}</span>)}
     </div>
   </div>;
 };

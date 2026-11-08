@@ -102,6 +102,12 @@ export const Yue2BatchPanel: React.FC = () => {
           <button type="button" onClick={() => void cancel(batch.id)} className="flex items-center gap-1 text-red-600 dark:text-red-400 hover:underline"><StopCircle size={12} />{t('common.cancel', 'Cancel')}</button>
         </div>
       </div>
+      {batch.family === 'mm3' && Object.keys(recipe).length > 0 && <p className="text-[11px] text-zinc-500">
+        {t('trainingStudio.yue2.batch.recipe', 'Recipe')}: {String(recipe.optimizer ?? 'prodigy')} · {String(recipe.adapterType ?? 'lora')} rank {String(recipe.rank ?? '?')}/{String(recipe.alpha ?? '?')}
+        {recipe.lr !== undefined ? ` · lr ${recipe.lr}` : ''}{recipe.basePrecision ? ` · base ${recipe.basePrecision}` : ''}{recipe.maxFrames !== undefined ? ` · crop ${recipe.maxFrames}` : ''}
+        {recipe.stopMode === 'loss' ? ` · until ${recipe.targetLossMetric === 'eval' ? 'held-out' : 'training'} loss ${recipe.targetLoss} (cap ${recipe.steps})` : ` · ${recipe.steps} steps`}
+        {recipe.saveEvery ? ` · checkpoint every ${recipe.saveEvery}` : ''}
+      </p>}
       {(!batch.family || batch.family === 'yue2') && Object.keys(recipe).length > 0 && <p className="text-[11px] text-zinc-500">
         {t('trainingStudio.yue2.batch.recipe', 'Recipe')}: {String(recipe.optimizer ?? 'adamw')} · rank {String(recipe.rank ?? 32)}/{String(recipe.alpha ?? 32)}
         {recipe.lr !== undefined ? ` · lr ${recipe.lr}` : ''}{recipe.plannerLrScale !== undefined ? ` · planner ×${recipe.plannerLrScale}` : ''}

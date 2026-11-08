@@ -3327,8 +3327,8 @@ export async function startYue2Batch(input: { datasetIds: string[]; lyricTiming:
   return data.batch;
 }
 /** One MM3 recipe (the mm3-train-lm body, minus per-dataset fields) for every dataset, in turn. */
-export async function startMm3Batch(datasetIds: string[], recipe: Mm3TrainLmRequest, reqOpts?: TrainingTarget): Promise<Yue2BatchSummary> {
-  const data = await request<{ batch: Yue2BatchSummary }>('/mm3-batch', { method: 'POST', ...jsonBody({ datasetIds, recipe }) }, reqOpts);
+export async function startMm3Batch(datasetIds: string[], recipe: Mm3TrainLmRequest, reqOpts?: TrainingTarget, clearCache?: boolean): Promise<Yue2BatchSummary> {
+  const data = await request<{ batch: Yue2BatchSummary }>('/mm3-batch', { method: 'POST', ...jsonBody({ datasetIds, recipe, ...(clearCache ? { clearCache } : {}) }) }, reqOpts);
   return data.batch;
 }
 export async function startHeartmulaBatch(datasetIds: string[], recipe: HeartmulaTrainRequest, reqOpts?: TrainingTarget): Promise<Yue2BatchSummary> {
