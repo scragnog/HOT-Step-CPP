@@ -1157,6 +1157,32 @@ export interface Mm3CodesArgs {
    *  (deftones A/B, 2026-08-31). Off = plain mm3-codes, byte-identical to the
    *  pipeline before this option existed. */
   launder?: boolean;
+  /** Re-encode from scratch: the cache (and the prior capture beside it) is cleared before the job. */
+  force?: boolean;
+  /** Only tracks whose name contains this text (case-insensitive). */
+  only?: string;
+  /** Cap on how many tracks this run encodes; 0 or absent = all. */
+  limit?: number;
+}
+
+/** Clear the cache when forced and return the manifest the job should read. `mm3-codes` takes neither
+ *  a filter nor a limit, so a filtered run reads a subset manifest written beside the full one, which
+ *  stays untouched. Throws when the filter matches nothing. */
+export function prepareMm3CodesInput(a: Mm3CodesArgs): string {
+  if (a.force) fs.rmSync(a.outDir, { recursive: true, force: true });
+  const only = a.only?.trim().toLowerCase() ?? '';
+  const limit = a.limit && a.limit > 0 ? Math.floor(a.limit) : 0;
+  if (!only && !limit) return a.datasetJson;
+  const manifest = JSON.parse(fs.readFileSync(a.datasetJson, 'utf-8'));
+  let samples: any[] = Array.isArray(manifest.samples) ? manifest.samples : [];
+  if (only) {
+    samples = samples.filter(s => String(s.filename || path.basename(String(s.audio_path || ''))).toLowerCase().includes(only));
+  }
+  if (limit) samples = samples.slice(0, limit);
+  if (!samples.length) throw new Error(`No tracks match the name filter "${a.only}".`);
+  const subset = path.join(path.dirname(a.datasetJson), 'dataset.mm3-codes-subset.json');
+  fs.writeFileSync(subset, JSON.stringify({ ...manifest, samples }));
+  return subset;
 }
 
 export function buildMm3CodesArgs(a: Mm3CodesArgs): string[] {

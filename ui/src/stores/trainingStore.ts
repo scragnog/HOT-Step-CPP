@@ -392,7 +392,7 @@ interface TrainingState {
   /** HeartMuLa: checkpoint the running trainer and stop; the run stays resumable. */
   requestHeartmulaCheckpoint(run: string): Promise<void>;
   /** MiniMax-Music3: audio -> RVQ codes. */
-  startMm3Codes(opts?: { launder?: boolean }): Promise<void>;
+  startMm3Codes(opts?: trainingApi.Mm3CodesRequest): Promise<void>;
   /** MiniMax-Music3: codes + captions -> an LM LoRA. */
   startMm3TrainLm(opts: trainingApi.Mm3TrainLmRequest): Promise<void>;
   /** MiniMax-Music3: carry on training into an existing run directory. Same
@@ -903,8 +903,8 @@ export const useTrainingStore = create<TrainingState>((set, get) => ({
     catch (err) { if (isCurrent(get, worker, id)) set({ error: errMessage(err) }); }
   },
 
-  startMm3Codes: async (opts?: { launder?: boolean }) => {
-    await startJob(set, get, (id, t) => trainingApi.startMm3Codes(id, opts?.launder ? { launder: true } : {}, t));
+  startMm3Codes: async (opts?: trainingApi.Mm3CodesRequest) => {
+    await startJob(set, get, (id, t) => trainingApi.startMm3Codes(id, opts ?? {}, t));
   },
 
   // MM3 reports STEPS, not epochs, so the epoch series stays empty and the

@@ -97,6 +97,9 @@ interface FormState {
   previewSongId: string;
   gradAccum: number;
   seed: number;
+  warmup: number;
+  lyricsDropout: number;
+  lrEndFrac: number;
   trigger: string;
   triggerPrepend: boolean;
   basePrecision: string;
@@ -109,6 +112,7 @@ interface FormState {
   previewSeconds: number;
   previewSeed: number;
   previewCaption: string;
+  previewLyrics: string;
   previewControl: boolean;
   previewBaseline: boolean;
   previewScaleMlp: number;
@@ -281,6 +285,9 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     previewSongId: '',
     gradAccum: status.defaults.gradAccum ?? 1,
     seed: status.defaults.seed ?? 42,
+    warmup: status.defaults.warmup ?? 25,
+    lyricsDropout: status.defaults.lyricsDropout ?? 0,
+    lrEndFrac: status.defaults.lrEndFrac ?? 0.005,
     trigger: trigger ?? '',
     triggerPrepend: status.defaults.triggerPrepend !== false,
     // The RECOMMENDED base, not the global default: the default was chosen on a
@@ -309,6 +316,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
     previewSeconds: 40,
     previewSeed: 424242,
     previewCaption: '',
+    previewLyrics: '',
     // Off by default (Rob, 2026-08-25): with a preview at every checkpoint the
     // control and baseline renders would double the pause cost for takes that
     // rarely get listened to. Both remain a checkbox away.
@@ -995,6 +1003,21 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                   onChange={e => set('previewCaption', e.target.value)}
                 />
               </label>
+              <label className="md:col-span-2 flex flex-col gap-1 mt-3">
+                <ParamLabel
+                  label={t('trainingStudio.mm3.previewLyrics', 'Preview lyrics')}
+                  info={t('trainingStudio.mm3.previewLyricsHint',
+                    'Lyrics sung in the preview. Blank uses the lyrics of the picked or auto-chosen song.')}
+                  className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider"
+                  onReset={form.previewLyrics !== base.previewLyrics ? () => reset('previewLyrics') : undefined}
+                />
+                <textarea
+                  disabled={locked}
+                  className={`${INPUT} font-mono text-[11px] leading-snug`} rows={3}
+                  value={form.previewLyrics}
+                  onChange={e => set('previewLyrics', e.target.value)}
+                />
+              </label>
               <div className="md:col-span-2 flex flex-col gap-1.5 mt-3">
                 <Toggle accent="amber" disabled={locked} checked={form.previewControl}
                   onChange={v => set('previewControl', v)}
@@ -1127,6 +1150,27 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
                       'The random seed for crop order and initialisation. Changing it gives a different '
                       + 'run outcome for otherwise-identical settings; keeping it fixed makes two runs '
                       + 'comparable.')} />
+                  <NumField label={t('trainingStudio.mm3.warmup', 'Warmup steps')} value={form.warmup}
+                    onChange={v => set('warmup', v)} step={5} min={0}
+                    defaultValue={base.warmup} onReset={() => reset('warmup')}
+                    meta={t('trainingStudio.mm3.warmupMeta', 'default 25')}
+                    info={t('trainingStudio.mm3.warmupInfo',
+                      'Steps over which the learning rate ramps up from zero to its peak before the '
+                      + 'decay begins. Step 1 still runs at a rate of 0.')} />
+                  <NumField label={t('trainingStudio.mm3.lrEndFrac', 'LR end fraction')} value={form.lrEndFrac}
+                    onChange={v => set('lrEndFrac', v)} step={0.001} min={0} max={1}
+                    defaultValue={base.lrEndFrac} onReset={() => reset('lrEndFrac')}
+                    meta={t('trainingStudio.mm3.lrEndFracMeta', 'default 0.005')}
+                    info={t('trainingStudio.mm3.lrEndFracInfo',
+                      'Where the learning-rate decay ends, as a fraction of the peak rate. 1 holds the '
+                      + 'rate flat after warmup; 0 decays to nothing at the last step.')} />
+                  <NumField label={t('trainingStudio.mm3.lyricsDropout', 'Lyric dropout')} value={form.lyricsDropout}
+                    onChange={v => set('lyricsDropout', v)} step={0.05} min={0} max={1}
+                    defaultValue={base.lyricsDropout} onReset={() => reset('lyricsDropout')}
+                    meta={t('trainingStudio.mm3.lyricsDropoutMeta', 'default 0')}
+                    info={t('trainingStudio.mm3.lyricsDropoutInfo',
+                      'Share of steps trained with the lyrics removed and the caption kept, so the adapter '
+                      + 'does not depend on lyrics being present. 0 trains on the lyrics every step.')} />
                 </div>
                 {/* The dataset-wide caption box lived here until 2026-09-09. One caption for
                     every track replaced the per-track .mm3.txt captions the renders use, and

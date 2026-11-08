@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { MM3_LM_DEFAULTS, buildMm3TrainLmArgs, type ResolvedMm3TrainLmOptions } from './mm3Train.js';
+import { MM3_LM_DEFAULTS, buildMm3TrainLmArgs, prepareMm3CodesInput, type ResolvedMm3TrainLmOptions } from './mm3Train.js';
 import { resumeOptionsFor, writeMm3RunManifest } from './mm3Runs.js';
 import { mm3ExecutionBody } from './recipes/operations.js';
 
@@ -72,4 +72,35 @@ test('the recipe projection sends the chosen precision, Full included', () => {
   assert.equal(mm3ExecutionBody(form, 'custom', false, true).trainPrecision, 'fastest');
   assert.equal(mm3ExecutionBody({ ...form, trainPrecision: 'full' }, 'custom', false, true).trainPrecision, 'full');
   assert.equal('trainPrecision' in mm3ExecutionBody({ ...form, trainPrecision: undefined }, 'custom', false, true), false);
+});
+
+test('mm3ExecutionBody carries warmup, lyric dropout, LR end fraction and preview lyrics', () => {
+  const form = { ...MM3_LM_DEFAULTS, trigger: '', cropAnchor: 'song', prefixFrames: 0, adapterType: 'lora',
+    warmup: 7, lyricsDropout: 0.2, lrEndFrac: 0.1, previewEverySteps: 50, previewCaption: 'c', previewLyrics: ' la la ' };
+  const body = mm3ExecutionBody(form as any, 'custom', false, true) as any;
+  assert.equal(body.warmup, 7);
+  assert.equal(body.lyricsDropout, 0.2);
+  assert.equal(body.lrEndFrac, 0.1);
+  assert.equal(body.preview.lyrics, 'la la');
+});
+
+test('prepareMm3CodesInput: force clears the cache, filter and limit write a subset beside the full manifest', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mm3codes-'));
+  const full = path.join(dir, 'dataset.json');
+  const samples = ['Alpha one.flac', 'beta.flac', 'alpha two.flac'].map((f, i) => ({ id: String(i), filename: f, audio_path: `/x/${f}` }));
+  fs.writeFileSync(full, JSON.stringify({ metadata: {}, samples }));
+  const outDir = path.join(dir, 'mm3-codes');
+  fs.mkdirSync(path.join(outDir, 'codes'), { recursive: true });
+  fs.writeFileSync(path.join(outDir, 'codes', 'a.codes'), 'x');
+
+  assert.equal(prepareMm3CodesInput({ datasetJson: full, outDir }), full);
+  assert.ok(fs.existsSync(path.join(outDir, 'codes', 'a.codes')));
+
+  const subset = prepareMm3CodesInput({ datasetJson: full, outDir, force: true, only: 'ALPHA', limit: 1 });
+  assert.ok(!fs.existsSync(outDir));
+  assert.notEqual(subset, full);
+  assert.deepEqual(JSON.parse(fs.readFileSync(subset, 'utf8')).samples.map((s: any) => s.id), ['0']);
+  assert.equal(JSON.parse(fs.readFileSync(full, 'utf8')).samples.length, 3);
+  assert.throws(() => prepareMm3CodesInput({ datasetJson: full, outDir, only: 'zzz' }), /No tracks match/);
+  fs.rmSync(dir, { recursive: true, force: true });
 });

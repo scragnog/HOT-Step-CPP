@@ -2320,7 +2320,16 @@ router.post('/datasets/:id/mm3-codes', (req: Request, res: Response) => {
   try {
     const ds = mm3Preflight(req, res);
     if (!ds) return;
-    const body = (req.body || {}) as { maxDuration?: unknown; launder?: unknown };
+    const body = (req.body || {}) as { maxDuration?: unknown; launder?: unknown; force?: unknown; only?: unknown; limit?: unknown };
+    if (body.only !== undefined && typeof body.only !== 'string') {
+      res.status(400).json({ error: 'only must be a string' });
+      return;
+    }
+    const limit = Number(body.limit ?? 0);
+    if (!Number.isInteger(limit) || limit < 0 || limit > 100000) {
+      res.status(400).json({ error: 'limit must be a whole number from 0 to 100000' });
+      return;
+    }
     // The launder gate. Off (absent/false) = plain mm3-codes into mm3-codes/,
     // byte-identical to the pipeline before the gate existed. On = ace-train
     // mm3-launder into mm3-codes-laundered/ — a SEPARATE cache, so the toggle
@@ -2338,6 +2347,9 @@ router.post('/datasets/:id/mm3-codes', (req: Request, res: Response) => {
       outDir: mm3CodesDir(ds.slug, launder),
       maxDuration: Number.isFinite(maxDuration) && maxDuration > 0 ? maxDuration : undefined,
       launder,
+      force: body.force === true,
+      only: body.only?.trim() || undefined,
+      limit: limit || undefined,
     });
     res.json({ jobId: job.id, kind: job.kind });
   } catch (err: any) {

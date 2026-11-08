@@ -117,6 +117,7 @@ export function mm3ExecutionBody(form: Record<string, any>, activePreset: string
         optimizer: form.optimizer, muonLrScale: form.muonLrScale,
         adapterType: form.adapterType, lokrFactor: form.lokrFactor,
         gradAccum: form.gradAccum, seed: form.seed,
+        warmup: form.warmup, lyricsDropout: form.lyricsDropout, lrEndFrac: form.lrEndFrac,
         basePrecision: form.basePrecision, holdout: form.holdout, evalEvery: form.evalEvery,
         cropAnchor: form.cropAnchor,
         stopMode: form.stopMode,
@@ -147,6 +148,7 @@ export function mm3ExecutionBody(form: Record<string, any>, activePreset: string
             baseline: form.previewBaseline,
             scaleMlp: form.previewScaleMlp,
             ...(form.previewCaption.trim() ? { caption: form.previewCaption.trim() } : {}),
+            ...(form.previewLyrics?.trim() ? { lyrics: form.previewLyrics?.trim() } : {}),
             ...(!form.previewCaption.trim() && form.previewSongId
               ? { previewSongId: form.previewSongId } : {}),
           },

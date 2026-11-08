@@ -312,6 +312,12 @@ export interface Mm3CodesRequest {
   /** Cover-launder the codes (rec7 states -> flow render -> champion encode).
    *  Writes to a separate cache; off = the standard export, unchanged. */
   launder?: boolean;
+  /** Clear the dataset's codes cache before the job. */
+  force?: boolean;
+  /** Only tracks whose name contains this text. */
+  only?: string;
+  /** Cap on tracks encoded; 0/absent = all. */
+  limit?: number;
 }
 
 /** Every field optional: omitted means the validated recipe, which lives
@@ -333,6 +339,10 @@ export interface Mm3TrainLmRequest {
   /** Tracks longer than the window: exclude (default) or crop. */
   longTracks?: 'exclude' | 'crop';
   warmup?: number;
+  /** Share of steps trained without lyrics; 0 = never. */
+  lyricsDropout?: number;
+  /** Where the LR decay ends, as a fraction of the peak. */
+  lrEndFrac?: number;
   gradAccum?: number;
   seed?: number;
   maxFrames?: number;

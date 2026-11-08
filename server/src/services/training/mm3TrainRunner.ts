@@ -27,7 +27,7 @@ import { writeMm3PlankFromCodes } from '../backends/minimax/plank.js';
 import { aceTrainExe } from './aceTrain.js';
 import { getDataset } from './datasetsRepo.js';
 import {
-  buildMm3CodesArgs, buildMm3TrainLmArgs, missingMm3TrainModels,
+  buildMm3CodesArgs, buildMm3TrainLmArgs, missingMm3TrainModels, prepareMm3CodesInput,
   type Mm3CodesArgs, type ResolvedMm3TrainLmOptions,
 } from './mm3Train.js';
 import { mm3AdapterRoot, writeMm3RunManifest } from './mm3Runs.js';
@@ -427,7 +427,6 @@ export async function runMm3CodesJob(job: TrainingJob): Promise<void> {
     return;
   }
 
-  const args = buildMm3CodesArgs(opts);
   // Plain codes: DAV + a 169M encoder per track — minutes. Laundered codes
   // render every track through the flow DiT (~0.7x realtime), so budget by
   // song at the cover rate instead. Both floors cover a cold model cache.
@@ -438,6 +437,7 @@ export async function runMm3CodesJob(job: TrainingJob): Promise<void> {
     : Math.max(30 * 60 * 1000, songs * 60 * 1000);
 
   try {
+    const args = buildMm3CodesArgs({ ...opts, datasetJson: prepareMm3CodesInput(opts) });
     await runMm3AceTrain(job, opts.launder ? 'mm3-launder' : 'mm3-codes', args, timeoutMs, () => {
       const dir = path.join(opts.outDir, 'codes');
       const n = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => f.endsWith('.codes')).length : 0;
