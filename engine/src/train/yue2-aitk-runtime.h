@@ -811,7 +811,8 @@ void yue2_aitk_clear_cancel();
 
 // Returns 0 on completion, 130 at a safe cancellation boundary, and 1 on a
 // runtime/data/model error. The implementation emits JSONL before CUDA
-// allocation and sets NVIDIA_TF32_OVERRIDE=0 before touching CUDA.
+// allocation and, in strict-f32 mode, sets NVIDIA_TF32_OVERRIDE=0 before
+// touching CUDA (bf16 mode lets the remaining F32 GEMMs use TF32).
 int yue2_aitk_run(const Config & config, std::string * error);
 
 } // namespace yue2_aitk_runtime
