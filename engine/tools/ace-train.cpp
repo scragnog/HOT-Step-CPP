@@ -68,6 +68,7 @@
 #include "train/heartmula-prepare.h"  // HeartMuLa: audio + text -> codes + prompt ids
 #include "train/heartmula-train-run.h"  // HeartMuLa backbone LoRA trainer
 
+#include <chrono>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -3516,6 +3517,8 @@ static int cmd_mm3_codes(int argc, char ** argv) {
             continue;
         }
 
+        const auto t_dec0 = std::chrono::steady_clock::now();
+
         // --ffmpeg none: the caller already wrote a stereo WAV at the encoder's
         // rate, and it is read as it stands.
         const bool        direct = ffmpeg == "none";
@@ -3565,6 +3568,7 @@ static int cmd_mm3_codes(int argc, char ** argv) {
             continue;
         }
 
+        const auto t_enc0 = std::chrono::steady_clock::now();
         const float *      chans[2] = { planar, planar + T };
         std::vector<float> lat;
         int64_t            L = 0;
@@ -3687,6 +3691,11 @@ static int cmd_mm3_codes(int argc, char ** argv) {
         ok_n++;
         fprintf(stderr, "[mm3-codes] %zu/%zu %s  %lld frames -> %s\n", idx, n_samples, stem.c_str(),
                 (long long) n_frames, cp.c_str());
+        const auto t_end = std::chrono::steady_clock::now();
+        fprintf(stderr, "[mm3-codes] %zu/%zu OK %s: decode %lld ms, encode %lld ms\n", idx, n_samples,
+                stem.c_str(),
+                (long long) std::chrono::duration_cast<std::chrono::milliseconds>(t_enc0 - t_dec0).count(),
+                (long long) std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_enc0).count());
         jl("{\"type\":\"progress\",\"completed\":%zu,\"total\":%zu,\"failed\":%zu,\"phase\":\"codes\"}",
            idx, n_samples, fail_n);
     }
