@@ -3,6 +3,7 @@
 #include "heartmula/local-graph.h"
 #include "heartmula/tokenizer.h"
 
+#include <cstring>
 #include <chrono>
 #include <cstdio>
 #include <fstream>

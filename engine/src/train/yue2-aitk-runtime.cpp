@@ -14,6 +14,7 @@ static void jl(const char * fmt, ...) { (void) fmt; }
 #include "yue2-aitk-embedding-dequant.h"
 #include "yue2-aitk-fixture-replay.h"
 
+#include <cstring>
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>

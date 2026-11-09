@@ -15,6 +15,7 @@
 
 #include "audio-io.h"
 
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <iostream>

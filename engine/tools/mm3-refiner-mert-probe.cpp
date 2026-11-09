@@ -5,6 +5,7 @@
 // GGML_BACKEND=CPU forces the CPU backend.
 #include "minimax/mm3-refiner-mert.h"
 
+#include <cstring>
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
