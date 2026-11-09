@@ -7,7 +7,7 @@ import path from 'node:path';
 import { config } from '../../../config.js';
 import { buildMm3CodesArgs } from '../../training/mm3Train.js';
 import { mm3PlankProvenance } from '../../workflows/coverWorkflow.js';
-import { readMm3PlankMeta, writeMm3PlankFromCodes } from './plank.js';
+import { readMm3PlankMeta, writeMm3PlankFromCodes, matchesMm3CoverPlank, mm3SourceIdentity } from './plank.js';
 
 /** A plank dir in a temp root, plus a 3-row [rows, 8] int32 codes file. */
 function setup(t: { mock: { getter: Function } }): string {
@@ -53,4 +53,24 @@ test('plank sidecar records a launder and the cover request carries it to the so
   // A plank captured from a render has no launder field: nothing is claimed.
   const captured = writeMm3PlankFromCodes(codes, 'cap', { jobId: 'cap', caption: 'c', lyrics: '' });
   assert.deepEqual(mm3PlankProvenance(captured), {});
+});
+
+test('cover reuse requires exact bytes and launder settings, independent of filename', async t => {
+  const codes = setup(t);
+  const identity = await mm3SourceIdentity(codes);
+  const settings = { launderSteps: 30, launderSeed: 42, launderCaption: 'source caption' };
+  const file = writeMm3PlankFromCodes(codes, 'reuse', { jobId: 'reuse', caption: '', lyrics: '', laundered: true, ...identity, ...settings });
+  const meta = readMm3PlankMeta(file)!;
+  assert.equal(meta.sourceSizeBytes, 96);
+  assert.match(meta.sourceSha256!, /^[a-f0-9]{64}$/);
+  assert.equal(matchesMm3CoverPlank(meta, identity, settings), true);
+  for (const change of [{ sourceSizeBytes: 95 }, { sourceSha256: 'different' }])
+    assert.equal(matchesMm3CoverPlank(meta, { ...identity, ...change }, settings), false);
+  for (const change of [{ launderSteps: 31 }, { launderSeed: 43 }, { launderCaption: 'other' }])
+    assert.equal(matchesMm3CoverPlank(meta, identity, { ...settings, ...change }), false);
+  assert.equal(matchesMm3CoverPlank({ ...meta, laundered: false }, identity, settings), false);
+  assert.equal(matchesMm3CoverPlank({ ...meta, sourceSha256: undefined }, identity, settings), false);
+  assert.equal(matchesMm3CoverPlank({ ...meta, launderSeed: 123, launderRequestedSeed: -1 }, identity, { ...settings, launderSeed: -1 }), true);
+  const renamed = path.join(path.dirname(codes), 'renamed.codes'); fs.copyFileSync(codes, renamed);
+  assert.deepEqual(await mm3SourceIdentity(renamed), identity);
 });

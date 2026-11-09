@@ -62,7 +62,7 @@ import { LeadSheetSourcePicker } from './LeadSheetSourcePicker';
 import { readLeadSheetSource, selectedLeadSheetSource, leadSheetReadinessPath, leadSheetScoreUpdate } from './leadSheetSource';
 import { documentOptions } from '../../queries/cover-lyrics/workflows';
 import { HeartmulaCoverPanel } from './HeartmulaCoverPanel';
-import { Mm3CoverPanel } from './Mm3CoverPanel';
+import { Mm3CoverPanel, type Mm3SourceFacts } from './Mm3CoverPanel';
 import { restoreMm3Cover, mm3CoverInput, mm3CoverReady, type Mm3CoverSettings } from './mm3CoverState';
 import { EMPTY_HEARTMULA_TAGS, type HeartmulaCoverTags } from './heartmulaCoverState';
 import { Yue2CoverPanel, COVER_AR_DEFAULT, clampCoverAr, COVER_GUIDE_DEFAULT, coverGuideBlock, type CoverGuideState } from './Yue2CoverPanel';
@@ -523,7 +523,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   useEffect(() => { persist('approvedSheet', approvedSheet); }, [approvedSheet]);
   // The editing fields, mirrored into this browser's revisioned server draft.
   // coverDraftId/Revision stay local: they point at the workflow's cover-draft.
-  const draft = useStudioDraftMirror('cover', token, { 'cover-studio-leadSheetSource': leadSheetSource, 'cover-studio-sheetScoreSource': sheetScoreSource, 'cover-studio-chordQuality': chordQuality, 'cover-studio-heartmulaTags': heartmulaTags, 'cover-studio-heartmulaSeed': heartmulaSeed, 'cover-studio-sa3Transform': sa3Transform, 'cover-studio-sa3Seed': sa3Seed, 'cover-studio-sa3Adapter': sa3Adapter, 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel,
+  const draft = useStudioDraftMirror('cover', token, { 'cover-studio-mm3Cover': mm3Cover, 'cover-studio-leadSheetSource': leadSheetSource, 'cover-studio-sheetScoreSource': sheetScoreSource, 'cover-studio-chordQuality': chordQuality, 'cover-studio-heartmulaTags': heartmulaTags, 'cover-studio-heartmulaSeed': heartmulaSeed, 'cover-studio-sa3Transform': sa3Transform, 'cover-studio-sa3Seed': sa3Seed, 'cover-studio-sa3Adapter': sa3Adapter, 'cover-studio-sourceFileName': sourceFileName, 'cover-studio-sourceAudioUrl': sourceAudioUrl, 'cover-studio-sourceAssetId': sourceAssetId, 'cover-studio-sourceSongId': sourceSongId, 'cover-studio-metadata': metadata, 'cover-studio-analysis': analysis, 'cover-studio-songArtist': songArtist, 'cover-studio-songTitle': songTitle, 'cover-studio-lyrics': lyrics, 'cover-studio-lyricsSource': lyricsSource, 'cover-studio-datasetAnalysis': datasetAnalysis, 'cover-studio-selectedArtistId': selectedArtistId, 'cover-studio-selectedPreset': selectedPreset, 'cover-studio-artistCaption': artistCaption, 'cover-studio-audioCoverStrength': audioCoverStrength, 'cover-studio-coverNoiseStrength': coverNoiseStrength, 'cover-studio-coverNoiseMethod': coverNoiseMethod, 'cover-studio-tempoScale': tempoScale, 'cover-studio-pitchShift': pitchShift, 'cover-studio-bpmCorrection': bpmCorrection, 'cover-studio-bpmOverride': bpmOverride, 'cover-studio-keyOverride': keyOverride, 'cover-studio-noFsq': noFsq, 'cover-studio-coverInstrumental': instrumental, 'cover-studio-sourceLatentUrl': sourceLatentUrl, 'cover-studio-coverVocalLanguage': vocalLanguage, 'cover-studio-coverTimbreOverride': timbreOverridePath, 'cover-studio-sepLevel': sepLevel,
     'cover-studio-sourceMode': sourceMode, 'cover-studio-advancedMode': advancedMode, 'cover-studio-pairMode': renderMode, 'cover-studio-yue2Ar': yue2Ar, 'cover-studio-yue2Nar': yue2Nar, 'cover-studio-coverVoices': coverVoices, 'cover-studio-keepChords': keepChords, 'cover-studio-instrumentalMode': instrumentalMode, 'cover-studio-coverTempoMode': coverTempoMode, 'cover-studio-coverBpm': coverBpm, 'cover-studio-coverKeyShift': coverKeyShift, 'cover-studio-coverCfgScale': coverCfgScale, 'cover-studio-coverGuide': coverGuide, 'cover-studio-coverLyricSchedule': coverLyricSchedule, 'cover-studio-captionMode': captionMode, 'cover-studio-sheetAbc': sheetAbc, 'cover-studio-scoreSections': scoreSections, ...prep.draftFields, 'cover-studio-scoreTempoScale': scoreTempoScale, 'cover-studio-sheetAudioUrl': sheetAudioUrl, 'cover-studio-approvedSheet': approvedSheet, 'cover-studio-selectedYue2ArtistId': selectedYue2ArtistId, 'cover-studio-selectedYue2LyricsSetId': selectedYue2LyricsSetId, 'cover-studio-coveringBand': coveringBand, 'cover-studio-buildMode': buildMode, 'cover-studio-buildSessionId': buildSessionId, 'cover-studio-buildLyricsDraft': buildLyricsDraft, ...(draftName ? { 'cover-studio-draftName': draftName } : {}) },
     { ...(sourceAssetId ? { sourceAssetId } : {}), ...(sourceSongId ? { sourceSongId } : {}) });
   // Loading a draft sets the same state the controls edit. Its uploaded source
@@ -555,6 +555,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     captionRequestRef.current++;
     setHeartmulaTags((f['cover-studio-heartmulaTags'] as HeartmulaCoverTags) ?? EMPTY_HEARTMULA_TAGS);
     setHeartmulaSeed((f['cover-studio-heartmulaSeed'] as number) ?? -1);
+    if (Object.hasOwn(f, 'cover-studio-mm3Cover')) setMm3Cover(restoreMm3Cover(f['cover-studio-mm3Cover']));
     setHeartmulaError('');
     setCoverDraftId(''); setCoverDraftRevision(0);
     if (Object.hasOwn(f, 'cover-studio-sourceFileName')) setSourceFileName(f['cover-studio-sourceFileName'] as never);
@@ -655,6 +656,42 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     if (!token) return null;
     try { return await yue2CoverApi.sourceMetadata(input); }
     catch { return null; }
+  };
+
+  const prepareMm3Source = async (signal: AbortSignal): Promise<Mm3SourceFacts> => {
+    const lookup = sourceLookupRef.current;
+    const data = await yue2CoverApi.sourceMetadata(sourceSongId ? { songId: sourceSongId } : { sourceAudioUrl });
+    signal.throwIfAborted();
+    let facts = data.metadataAvailable && data.bpm && data.key
+      ? { bpm: data.bpm, key: data.key, scale: data.key.split(' ')[1] } : analysis;
+    if (!facts) {
+      const found = await apiClient.post<{ bpm: number; key: string; scale?: string }>('/analyze', { audioUrl: sourceAudioUrl });
+      signal.throwIfAborted();
+      facts = { bpm: found.bpm, key: `${found.key} ${found.scale || 'major'}`, scale: found.scale };
+    }
+    if (lookup !== sourceLookupRef.current) throw new DOMException('Source changed', 'AbortError');
+    // Library sends and older drafts need the same asset-backed render document as uploads.
+    if (!coverDraftId || !coverDraftRevision) {
+      let assetId = sourceAssetId;
+      if (!assetId) {
+        const audio = await apiClient.get<Blob>(sourceAudioUrl, { baseURL: '', responseType: 'blob', signal });
+        const uploaded = await uploadMut.mutateAsync({ path: '/upload/audio', files: [{ field: 'audio', file: audio,
+          name: sourceAudioUrl.split('/').pop() || 'cover-source.wav' }] });
+        signal.throwIfAborted();
+        if (lookup !== sourceLookupRef.current) throw new DOMException('Source changed', 'AbortError');
+        assetId = uploaded.asset_id || '';
+        setSourceAssetId(assetId);
+      }
+      if (!assetId) throw new Error(t('cover.mm3.assetMissing', 'Source upload did not return an asset. Retry.'));
+      await openUploadedAsset(assetId, lookup, metadata ? { metadata, analysis: facts } : undefined);
+      signal.throwIfAborted();
+    }
+    setAnalysis(facts);
+    setDatasetAnalysis(!!data.metadataAvailable);
+    setLyrics(data.lyrics || '');
+    return { ...facts, lyrics: data.lyrics || '', mm3Caption: data.mm3Caption || '',
+      instrumental: data.isInstrumental === true,
+      origin: data.metadataAvailable ? 'dataset' : 'analysis' };
   };
 
   // ── "Send to Cover Studio" — load a library track as the cover source (#61) ──
@@ -1619,7 +1656,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
       submitCoverWorkflow(); return;
     }
     if (mm3Mode) {
-      if (!token || !sourceAudioUrl || !coverDraftId || !coverDraftRevision || !mm3CoverReady(mm3Cover)) return;
+      if (!token || !sourceAudioUrl || !coverDraftId || !coverDraftRevision || !mm3CoverReady(mm3Cover, sourceAudioUrl)) return;
       submitCoverWorkflow();
       return;
     }
@@ -1910,7 +1947,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     ? !!token && sourceMode === 'audio' && !!sourceAssetId && !!coverDraftId && !!coverDraftRevision
       && !!confirmedPair && !!approvedSheet && approvedSheet.key === sourceKey
     : mm3Mode
-    ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision && mm3CoverReady(mm3Cover)
+    ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision && mm3CoverReady(mm3Cover, sourceAudioUrl)
     : audioTransformMode
     ? !!sourceAudioUrl && !!coverDraftId && !!coverDraftRevision && !!artistCaption.trim()
     : (!yue2Mode || sourceMode === 'audio' ? !!sourceAudioUrl && (!sourceAssetId || (!!coverDraftId && !!coverDraftRevision)) : true)
@@ -2249,6 +2286,8 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
         {audioTransformMode ? renderAudioTransformPanel() : mm3Mode ? <Mm3CoverPanel
           settings={mm3Cover} onSettings={setMm3Cover} sourceAudioUrl={sourceAudioUrl || ''} sourceName={sourceFileName || ''}
           caption={artistCaption} onCaption={setArtistCaption} lyrics={lyrics} onLyrics={setLyrics}
+          sourceReady={!sourceChanging && !isAnalyzing} prepareSource={prepareMm3Source}
+          duration={metadata?.duration || 0} artists={artists} albums={allSets} presets={allPresets}
           canGenerate={canGenerate} generating={isGenerating} onGenerate={handleGenerate} onCancel={handleCancel}
           footer={draftsFold} /> : heartmulaMode ? <HeartmulaCoverPanel
           tags={heartmulaTags} onTags={setHeartmulaTags} seed={heartmulaSeed} onSeed={setHeartmulaSeed}

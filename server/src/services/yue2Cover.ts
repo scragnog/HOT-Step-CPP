@@ -241,6 +241,9 @@ export function createYue2CoverService(deps = {
     const matched = deps.datasetMatch(selected.audioPath);
     if (!matched) return { matched: false as const };
     const fields = readSidecar(sidecarPathFor(matched.audioPath));
+    const stem = matched.audioPath.slice(0, -path.extname(matched.audioPath).length);
+    let mm3Caption = '';
+    try { mm3Caption = fs.readFileSync(`${stem}.mm3.txt`, 'utf8').trim(); } catch { /* optional caption */ }
     const bpm = Number(fields.bpm);
     const key = fields.key?.trim() || '';
     const instrumental = fields.is_instrumental?.trim().toLowerCase();
@@ -251,11 +254,14 @@ export function createYue2CoverService(deps = {
     const validBpm = Number.isFinite(bpm) && bpm >= 20 && bpm <= 300;
     const abc = readAbcSidecar(matched.audioPath);
     if (!validBpm || !key || !validInstrumental || (!hasLyrics && !isInstrumental)) {
-      return abc ? { matched: true as const, metadataAvailable: false as const, abc, sections: scoreSections(abc) } : { matched: false as const };
+      if (!mm3Caption) return abc ? { matched: true as const, metadataAvailable: false as const, abc, sections: scoreSections(abc) } : { matched: false as const };
+      return { matched: true as const, metadataAvailable: false as const, mm3Caption, lyrics: fields.lyrics || '',
+        ...(validBpm ? { bpm } : {}), ...(key ? { key } : {}),
+        ...(abc ? { abc, sections: scoreSections(abc) } : {}) };
     }
     return { matched: true as const, datasetId: matched.datasetId, sampleId: matched.sampleId,
       metadataAvailable: true as const,
-      lyrics: fields.lyrics || '', bpm, key,
+      lyrics: fields.lyrics || '', bpm, key, ...(mm3Caption ? { mm3Caption } : {}),
       isInstrumental,
       abc, ...(abc ? { sections: scoreSections(abc) } : {}), lyricsSource: 'dataset-sidecar' as const };
   }

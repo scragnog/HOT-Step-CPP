@@ -100,6 +100,7 @@ export interface Yue2AssignmentSuggestions {
 export interface Yue2CoverDatasetMetadata {
   matched: boolean;
   metadataAvailable?: boolean;
+  mm3Caption?: string;
   datasetId?: string;
   sampleId?: string;
   lyrics?: string;

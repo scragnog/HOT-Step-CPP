@@ -35,8 +35,11 @@
 
 import fs from 'fs';
 import path from 'path';
+import { createHash } from 'node:crypto';
 
 import { config } from '../../../config.js';
+
+export const MM3_LAUNDER_FALLBACK_CAPTION = 'a full song with vocals and instruments';
 
 export const MM3_PLANK_EXT = '.mm3plank';
 
@@ -52,6 +55,9 @@ export interface Mm3PlankMeta {
   sizeBytes: number;
   /** Source filename, for a plank encoded from a reference (Cover Studio). */
   source?: string;
+  sourceSizeBytes?: number;
+  sourceSha256?: string;
+  launderRequestedSeed?: number;
   /** Cover Studio encodes only: true when the codes came from ace-train
    *  mm3-launder rather than mm3-codes. Absent on planks captured from a render. */
   laundered?: boolean;
@@ -149,7 +155,7 @@ export function readMm3Plank(ref: string): { forced_semantic: number[]; forced_a
  *  indexing a plank uses) into `<id>.mm3plank` plus its sidecar. Returns the
  *  plank's file name. Throws on a malformed file. */
 export function writeMm3PlankFromCodes(codesPath: string, id: string,
-  meta: Pick<Mm3PlankMeta, 'jobId' | 'caption' | 'lyrics' | 'source' | 'laundered' | 'rec7' | 'encoder' | 'launderSteps' | 'launderSeed' | 'launderCaption'>): string {
+  meta: Pick<Mm3PlankMeta, 'jobId' | 'caption' | 'lyrics' | 'source' | 'laundered' | 'rec7' | 'encoder' | 'launderSteps' | 'launderSeed' | 'launderCaption' | 'sourceSizeBytes' | 'sourceSha256' | 'launderRequestedSeed'>): string {
   const raw = fs.readFileSync(codesPath);
   const rows = raw.length / 32;
   if (!Number.isInteger(rows) || rows < 2) throw new Error(`${path.basename(codesPath)} is not an [rows, 8] int32 codes file`);
@@ -169,4 +175,23 @@ export function writeMm3PlankFromCodes(codesPath: string, id: string,
   };
   fs.writeFileSync(path.join(dir, `${file}.json`), JSON.stringify(sidecar, null, 2));
   return file;
+}
+
+/** Hash the actual bytes, so renamed/re-uploaded sources can reuse a plank. */
+export async function mm3SourceIdentity(sourcePath: string) {
+  const hash = createHash('sha256');
+  let sourceSizeBytes = 0;
+  for await (const chunk of fs.createReadStream(sourcePath)) {
+    sourceSizeBytes += chunk.length;
+    hash.update(chunk);
+  }
+  return { sourceSizeBytes, sourceSha256: hash.digest('hex') };
+}
+
+export function matchesMm3CoverPlank(meta: Partial<Mm3PlankMeta>, source: { sourceSizeBytes: number; sourceSha256: string },
+  settings: { launderSteps: number; launderSeed: number; launderCaption: string }): boolean {
+  return meta.laundered === true && meta.sourceSizeBytes === source.sourceSizeBytes && meta.sourceSha256 === source.sourceSha256
+    && meta.launderSteps === settings.launderSteps
+    && (meta.launderRequestedSeed ?? meta.launderSeed) === settings.launderSeed
+    && meta.launderCaption === (settings.launderCaption.trim() || MM3_LAUNDER_FALLBACK_CAPTION);
 }

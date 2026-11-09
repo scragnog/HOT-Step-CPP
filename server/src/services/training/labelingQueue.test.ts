@@ -122,3 +122,38 @@ test('a preview and a GPU job exclude each other across datasets', async () => {
   assert.equal(fresh.reserveGpuForPreview(), true);
   await fresh.runReservedPreview(async () => {});
 });
+
+test('MM3 source prep serializes with encode and persists its result after restart', async () => {
+  const fresh = await restart();
+  const events: string[] = [];
+  const deps = {
+    suspend: async () => { events.push('suspend'); return true; }, resume: async () => { events.push('resume'); return true; },
+    lyrics: async () => { events.push('lyrics'); return '[Verse]\nWords'; },
+    caption: async () => { events.push('caption'); return { mm3: 'Global Metadata\nBasic Attributes: Jazz.' } as Awaited<ReturnType<typeof import('./mossCaption.js').captionWithMoss>>; },
+  };
+  const opts = { sourcePath: 'source.wav', wantLyrics: true, wantCaption: true, bpm: 120, key: 'C Major' };
+  const job = fresh.createJob('mm3-codes', 'mm3-cover-prep-test', [], opts);
+  let release!: () => void;
+  const held = new Promise<void>(r => { release = r; });
+  const encoder = fresh.createJob('mm3-codes', 'encode-test', [], {});
+  fresh.enqueue(encoder, async j => { events.push('encode'); await held; fresh.finishJob(j, 'done'); });
+  let complete!: () => void;
+  const done = new Promise<void>(r => { complete = r; });
+  fresh.enqueue(job, async j => { await fresh.runMm3CoverPrepJob(j, deps); complete(); });
+  await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(events, ['encode']);
+  release(); await done;
+  assert.deepEqual(events, ['encode', 'suspend', 'lyrics', 'caption', 'resume']);
+  const after = await restart();
+  assert.deepEqual(after.listJobs().find(j => j.id === job.id)?.result,
+    { lyrics: '[Verse]\nWords', mm3Caption: 'Global Metadata\nBasic Attributes: Jazz.' });
+  const failed = fresh.createJob('mm3-codes', 'prep-failure', [], opts);
+  await fresh.runMm3CoverPrepJob(failed, { ...deps, lyrics: async () => { throw new Error('captioner failed'); } });
+  assert.equal(failed.status, 'failed'); assert.equal(failed.error, 'captioner failed');
+  assert.equal(events.at(-1), 'resume');
+  const cancelled = fresh.createJob('mm3-codes', 'prep-cancelled', [], opts);
+  fresh.cancelJob(cancelled.id);
+  const count = events.length;
+  await fresh.runMm3CoverPrepJob(cancelled, deps);
+  assert.equal(events.length, count);
+});

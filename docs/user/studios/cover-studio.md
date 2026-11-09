@@ -106,35 +106,45 @@ timbre override or vocal language. Analysis, saved drafts and source separation
 remain available. Separation is for inspection here; mixer changes do not alter
 the full uploaded audio sent to the transform.
 
-## MiniMax-Music3 cover
+## MiniMax-Music3 covers
 
-On MiniMax-Music3, **Encode source** always launders the loaded recording through
-MM3's flow stage before encoding it into a reusable plank. It takes about as long
-as the clip and needs about 14.5 GB of VRAM. Encoding stops the engine; wait for
-other generation or training jobs to finish first. Model Manager provides the
-rec7 and audio encoder models, and the panel lists missing files. During encoding
-the button shows the phase and elapsed seconds.
+Load a recording in Cover Studio with MiniMax-Music3 active. Source preparation
+runs automatically after upload, Library send or restoring a draft. The progress
+strip shows metadata/BPM/key, lyrics, source caption and encoding. Dataset sidecars
+supply BPM, key, lyrics and the matching `<stem>.mm3.txt` source caption. Otherwise
+the usual source analysis supplies BPM/key and Music-Flamingo supplies lyrics
+when installed. The facts line identifies the source of the analysis.
 
-The **Launder** group controls that source render:
+The source is always laundered through MM3 before its semantic codes are saved as
+a reference plank. This takes roughly the clip duration and about 14.5 GB of VRAM.
+The rec7 model needs a source longer than about 5.5 seconds.
+Install the missing encoder/rec7 files in Model Manager when prompted. A matching
+saved plank is reused only when the source bytes, launder steps, seed and caption
+match. **Re-encode** always makes a new plank. **Retry** restarts failed preparation.
 
-- **Launder steps**, default 30, sets the number of flow steps.
-- **Launder seed**, default 42. Use -1 to choose a random seed. The actual seed
-  is saved so the encode can be repeated.
-- **Source caption** describes the SOURCE as it sounds, not the target style.
-  It defaults to "a full song with vocals and instruments"; blank uses that same
-  neutral caption. The launder LM stays at Q8_0.
+**Source caption** is read-only until you choose **Edit source caption**. If no
+sidecar caption exists, **Caption with Music-Flamingo** captions the recording
+and re-encodes it with that description. The button explains when Music-Flamingo
+is unavailable and directs you to Model Manager. A blank source caption uses a
+neutral source description for laundering.
 
-Pick the encoded plank from **Reference**. Laundered references carry a
-"laundered" tag; old raw planks remain available. **Trim to seconds** keeps the
-first part of a plank; blank uses all of it. Covers always hard-pin semantic
-codes. The target caption and LM adapter shape the sound.
+Choose a **Target artist**, **Album**, then **Caption source**. Only albums with
+MM3 captions appear. The nearest-tempo track is selected first. Its caption keeps
+the target genre and arrangement, with BPM, key and scale replaced by the source
+facts. Choose **Custom** to edit the Caption box. An album's saved MM3 LM adapter
+is selected in the top bar; an album without one leaves that setting unchanged.
 
-**Caption** starts empty. Enter the target style for the cover in MM3 caption
-format; do not describe the source here. The source's words are kept; **Lyrics**
-gives the planner context. **Seed** controls the cover render, and **Planner
-seed** overrides its planner seed. LM sampling, the LM adapter and flow settings
-come from the MM3 top bar. Each cover is one take. The song facts show the plank's
-launder status, steps, actual seed and source caption when available.
+**Match** ranges from 0 to 100, default 100. At 100 the source semantic codes are
+hard-pinned. Lower values allow more freedom: the semantic bias is
+`round(10^(3 * Match/100))`, shown under the slider. Match 50 gives 32, 33 gives 10,
+and 25 gives 6. Try 20 to 60 when the target artist needs more room.
+
+**Advanced** holds launder steps, default 30, and launder seed, default 42.
+Seed -1 chooses a random value, saved in the plank sidecar. Change these or the
+source caption, then Re-encode to apply them. **Trim to seconds** limits the
+reference. **Seed**, **Planner seed** and **Generate cover** remain on the panel.
+LM sampling and adapter scales come from the top bar. The saved song facts record
+launder settings and the semantic bias when Match is below 100.
 
 ## ACE workflow
 

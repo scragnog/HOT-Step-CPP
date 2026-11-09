@@ -19,14 +19,24 @@ the Training Studio. Flow-DiT LoRAs merge only through the `MM3_ADAPTER` env var
 (`mm3_apply_adapters`, `engine/src/minimax/mm3-model.h`), and the native DiT trainer
 (`ace-train mm3-train-dit`) is CLI-only. Output = raw 44.1 kHz stereo WAV (app norm is 48 k;
 PP-VAE and Spectral Lifter, which assume ACE's VAE, are skipped for MM3).
-Cover Studio always sends `launder: true` to `POST /api/mm3/cover/encode`.
+Cover Studio automatically prepares each source: dataset BPM/key/lyrics and
+`<stem>.mm3.txt` first, ordinary source analysis and queued Music-Flamingo lyrics
+otherwise. The source caption can be edited; an empty caption offers a
+Music-Flamingo button, with Model Manager guidance when unavailable.
+`POST /api/mm3/cover/source-prep` queues lyrics/caption on the labeling GPU lane
+alongside encoding and returns them in the job summary's `result`.
+The panel always sends `launder: true` to `POST /api/mm3/cover/encode`.
 API callers can still use plain `mm3-codes`. Laundering needs rec7 and the encoder,
-takes roughly real time and about 14.5 GB of VRAM. `launderSteps` defaults to 30,
-`launderSeed` to 42 (-1 resolves to a recorded random seed), and `launderCaption`
-to the neutral source caption. LM quant stays Q8_0. The sidecar and song facts
-record those settings and the model files. The panel sends semantic-only hard
-pinning, trim and planner seed; bias, patterns and audio2audio remain API-only.
-The target caption starts empty and describes the cover style, not the source.
+takes roughly real time and about 14.5 GB of VRAM. Advanced holds `launderSteps`
+(default 30) and `launderSeed` (42; -1 records the random seed actually used).
+Source SHA-256, byte size and requested launder settings identify reusable planks;
+`force: true` on encode bypasses reuse. The sidecar and song facts record launder
+settings and model files. LM quant stays Q8_0.
+Target artist/album/track captions use the source BPM, key and scale while keeping
+the genre tail. Selecting an album applies its saved `mm3_adapter_path` through
+the global params store. Match 100 omits forceBias for semantic hard pinning;
+below 100 it sends `round(10^(3 * match/100))`, shown as bias in song facts.
+Trim and planner seed remain; patterns and audio2audio remain API-only.
 
 Deep docs (local, gitignored): `docs/plans/multi-backend-architecture.md` (architecture plan,
 day-0 findings, op inventory) and `docs/plans/mm3-gguf-layout.md` (GGUF contract + loader

@@ -438,7 +438,10 @@ export interface TrainingDatasetDetail extends TrainingDatasetSummary {
 }
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────
+export interface Mm3CoverPrepResult { lyrics?: string; mm3Caption?: string }
+
 export interface TrainingJobSummary {
+  result?: Mm3CoverPrepResult;
   id: string;
   datasetId: string;
   kind: TrainingJobKind;

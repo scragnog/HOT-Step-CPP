@@ -635,3 +635,24 @@ test('suggestions stamp what they were made for, stay instant unless asked, and 
     assert.equal(sneaky.structureHash, instant.structureHash);
   } finally { f.close(); }
 });
+
+test('source lookup reads the matched track MM3 caption, including partial metadata', async () => {
+  const f = fixture();
+  try {
+    const audio = path.join(f.root, 'track.mix.wav'); fs.writeFileSync(audio, 'audio');
+    f.setDatasetAudio(audio);
+    fs.writeFileSync(path.join(f.root, 'track.mix.mm3.txt'), 'Global Metadata\nBasic Attributes: Jazz.');
+    const found = await f.service.lookup({ sourceAudioUrl: `/references/${f.upload}` }, 'owner');
+    assert.ok(found.matched);
+    assert.ok('mm3Caption' in found);
+    assert.equal(found.mm3Caption, 'Global Metadata\nBasic Attributes: Jazz.');
+    assert.equal(found.metadataAvailable, false);
+    await writeSidecar(sidecarPathFor(audio), { bpm: '120', key: 'D Minor', lyrics: '[Verse]\nWords' });
+    const complete = await f.service.lookup({ sourceAudioUrl: `/references/${f.upload}` }, 'owner');
+    assert.ok(complete.matched);
+    assert.ok('mm3Caption' in complete);
+    assert.equal(complete.mm3Caption, found.mm3Caption);
+    assert.equal(complete.metadataAvailable, true);
+    assert.equal(complete.bpm, 120);
+  } finally { f.close(); }
+});

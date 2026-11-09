@@ -23,7 +23,7 @@ import { spawn } from 'child_process';
 import { pushLog } from '../../routes/logs.js';
 import { resumeEngines, suspendEngines } from '../aceEngineProcess.js';
 import { restoreMm3Selection } from '../backends/minimax/index.js';
-import { writeMm3PlankFromCodes } from '../backends/minimax/plank.js';
+import { writeMm3PlankFromCodes, mm3SourceIdentity, MM3_LAUNDER_FALLBACK_CAPTION } from '../backends/minimax/plank.js';
 import { aceTrainExe } from './aceTrain.js';
 import { getDataset } from './datasetsRepo.js';
 import {
@@ -455,7 +455,7 @@ export async function runMm3CodesJob(job: TrainingJob): Promise<void> {
 // replay path (and its picker) carry it into a render. The plank is named
 // after the job id, so the caller knows its name before the job finishes.
 
-export const MM3_LAUNDER_FALLBACK_CAPTION = 'a full song with vocals and instruments';
+export { MM3_LAUNDER_FALLBACK_CAPTION } from '../backends/minimax/plank.js';
 
 export async function runMm3CoverEncodeJob(job: TrainingJob): Promise<void> {
   const opts = job.opts as { sourcePath: string; sourceName: string; workDir: string; launder?: boolean; caption?: string; launderCaption?: string; launderSteps?: number; launderSeed?: number } | undefined;
@@ -477,6 +477,7 @@ export async function runMm3CoverEncodeJob(job: TrainingJob): Promise<void> {
   }
   try {
     fs.mkdirSync(opts.workDir, { recursive: true });
+    const sourceIdentity = await mm3SourceIdentity(opts.sourcePath);
     const datasetJson = path.join(opts.workDir, 'dataset.json');
     fs.writeFileSync(datasetJson, JSON.stringify({
       samples: [{ id: 'source', audio_path: opts.sourcePath, filename: opts.sourceName, ...(caption ? { caption } : {}) }],
@@ -491,7 +492,8 @@ export async function runMm3CoverEncodeJob(job: TrainingJob): Promise<void> {
     if (isCancelled(job) || job.status === 'failed') return;
     const m = resolveMm3TrainModels();
     const file = writeMm3PlankFromCodes(codesPath, job.id, {
-      jobId: job.id, caption, lyrics: '', source: opts.sourceName, laundered: launder,
+      jobId: job.id, caption, lyrics: '', source: opts.sourceName, laundered: launder, ...sourceIdentity,
+      ...(launder ? { launderRequestedSeed: opts.launderSeed ?? 42 } : {}),
       ...(launder ? { launderSteps, launderSeed, launderCaption: caption, rec7: path.basename(m.rec7), encoder: path.basename(m.enc) } : {}),
     });
     log(job, 'info', `Saved ${file}${launder ? ' (laundered)' : ''}`);

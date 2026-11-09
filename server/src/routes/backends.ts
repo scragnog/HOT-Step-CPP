@@ -29,11 +29,12 @@ import {
 } from '../services/backends/registry.js';
 import fs from 'fs';
 import path from 'path';
-import { listMm3Planks, mm3PlankDir, MM3_PLANK_EXT, readMm3PlankMeta } from '../services/backends/minimax/plank.js';
+import { listMm3Planks, matchesMm3CoverPlank, mm3SourceIdentity, mm3PlankDir, MM3_PLANK_EXT, readMm3PlankMeta } from '../services/backends/minimax/plank.js';
 import { resolveSourceAudioPath } from '../services/generation/sourceAudio.js';
 import { missingMm3TrainModels } from '../services/training/mm3Train.js';
 import { aceTrainExe } from '../services/training/aceTrain.js';
-import { startMm3CoverEncodeJob } from '../services/training/labelingQueue.js';
+import { mossCaptionAvailable } from '../services/training/mossCaption.js';
+import { getJob, listJobs, startMm3CoverPrepJob, startMm3CoverEncodeJob } from '../services/training/labelingQueue.js';
 import {
   listMm3Hiddens, readMm3HiddensMeta, deleteMm3Hiddens, mm3HiddensDir,
 } from '../services/backends/minimax/hiddens.js';
@@ -230,14 +231,32 @@ router.get('/mm3/plank-meta', (req, res) => {
 /** GET /api/mm3/cover/launder-models — the files a laundered encode still
  *  needs, as user-facing names. Empty = ready. Plain API encodes do not need rec7. */
 router.get('/mm3/cover/launder-models', (_req, res) => {
-  res.json({ missing: missingMm3TrainModels('launder') });
+  res.json({ missing: missingMm3TrainModels('launder'), flamingo: mossCaptionAvailable('flamingo') });
+});
+
+/** POST /api/mm3/cover/source-prep � queued Music-Flamingo lyrics/caption. */
+router.post('/mm3/cover/source-prep', (req, res) => {
+  try {
+    const { sourceAudioUrl, wantLyrics, wantCaption, bpm, key } = req.body ?? {};
+    const sourcePath = typeof sourceAudioUrl === 'string' ? resolveSourceAudioPath(sourceAudioUrl) : '';
+    if (!sourcePath || !fs.existsSync(sourcePath) || typeof wantLyrics !== 'boolean' || typeof wantCaption !== 'boolean'
+      || (!wantLyrics && !wantCaption) || (bpm !== undefined && (typeof bpm !== 'number' || !Number.isFinite(bpm) || bpm < 20 || bpm > 300))
+      || (key !== undefined && (typeof key !== 'string' || key.length > 100))) {
+      res.status(400).json({ error: 'Pick a source and request lyrics or caption, with valid optional BPM/key.' }); return;
+    }
+    if (!mossCaptionAvailable('flamingo')) {
+      res.status(400).json({ error: 'Music-Flamingo is not installed. Download it in Model Manager.' }); return;
+    }
+    const job = startMm3CoverPrepJob({ sourcePath, wantLyrics, wantCaption, bpm, key });
+    res.json({ jobId: job.id });
+  } catch (err) { res.status(409).json({ error: err instanceof Error ? err.message : String(err) }); }
 });
 
 /** POST /api/mm3/cover/encode { sourceAudioUrl, sourceName?, launder?, launderSteps?, launderSeed?, launderCaption?, caption? } — run mm3-codes
  *  (or, with launder, mm3-launder under `caption`) on one file and save it as a plank. Returns
  *  { jobId, plank } at once; poll GET /api/training/jobs/:jobId until done.
  *  Stops and restarts the engine. */
-router.post('/mm3/cover/encode', (req, res) => {
+router.post('/mm3/cover/encode', async (req, res) => {
   try {
     const url = String(req.body?.sourceAudioUrl ?? '');
     const sourcePath = url ? resolveSourceAudioPath(url) : '';
@@ -253,6 +272,22 @@ router.post('/mm3/cover/encode', (req, res) => {
       res.status(400).json({ error: 'Launder steps must be 1..1000 and seed must be an integer >= -1' });
       return;
     }
+    const sourceCaption = req.body?.launderCaption ?? req.body?.caption;
+    const launderCaption = typeof sourceCaption === 'string' ? sourceCaption.trim().slice(0, 64_000) : '';
+    if (launder && req.body?.force !== true) {
+      const identity = await mm3SourceIdentity(sourcePath);
+      const reused = listMm3Planks().find(p => matchesMm3CoverPlank(p, identity, { launderSteps, launderSeed, launderCaption }));
+      if (reused) { res.json({ plank: reused.file, reused: true }); return; }
+    }
+    for (const summary of listJobs('mm3-cover')) {
+      if (summary.status !== 'queued' && summary.status !== 'running') continue;
+      const active = getJob(summary.id);
+      const options = active?.opts as Record<string, unknown> | undefined;
+      if (options?.sourcePath === sourcePath && options.launder === launder && options.launderSteps === launderSteps
+        && options.launderSeed === launderSeed && options.launderCaption === launderCaption) {
+        res.json({ jobId: summary.id, plank: `${summary.id}${MM3_PLANK_EXT}` }); return;
+      }
+    }
     const missing = missingMm3TrainModels(launder ? 'launder' : 'codes');
     if (missing.length) {
       res.status(400).json({ error: `MiniMax-Music3 ${launder ? 'launder' : 'encoder'} files are missing: ${missing.join(', ')}. Download them in Model Manager.` });
@@ -266,8 +301,6 @@ router.post('/mm3/cover/encode', (req, res) => {
     const workDir = fs.mkdtempSync(path.join(mm3PlankDir(), '.encode-'));
     // The picker's label: the name the user knows, not the stored upload's uuid.
     const given = typeof req.body?.sourceName === 'string' ? path.basename(req.body.sourceName).slice(0, 200) : '';
-    const sourceCaption = req.body?.launderCaption ?? req.body?.caption;
-    const launderCaption = typeof sourceCaption === 'string' ? sourceCaption.trim().slice(0, 2000) : '';
     const job = startMm3CoverEncodeJob({ sourcePath, sourceName: given || path.basename(sourcePath), workDir, launder, launderSteps, launderSeed, launderCaption });
     res.json({ jobId: job.id, plank: `${job.id}${MM3_PLANK_EXT}` });
   } catch (err: any) {
