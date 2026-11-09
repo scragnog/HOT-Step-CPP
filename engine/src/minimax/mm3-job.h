@@ -484,6 +484,9 @@ static void mm3_ar_key_add_models(std::string & k, const MM3Model & m, const MM3
             add_f("fd_in", f.in_sec);  add_f("fd_out", f.out_sec); add_f("fd_len", f.out_len_sec);
             add_f("fd_fl", f.floor);   add_f("fd_st", f.step_sec);
         }
+        if (req.lm_adapter_plan < 1.0f) {
+            add_f("ad_p", req.lm_adapter_plan);
+        }
     }
 
     // The two models that produce the block. Quant flips borderline codes, so
@@ -938,7 +941,11 @@ static void mm3_synth_worker(std::shared_ptr<Job> job, std::shared_ptr<MM3JobSta
     // n_ctx the AR stage will want: prompt + every frame it may emit, plus the
     // slack mm3_lm_prepare() adds for the feedback position.
     const int64_t n_ctx_needed = req.n_tokens + req.max_frames + 8;
-    const int rows = mm3_cfg_rows(g_mm3.lm_cfg) * st->n_takes;
+    // The plan dial doubles the LM rows (base pairs). Counted whenever it could
+    // apply; the AR loop may still stand it down (soft prompt), which only
+    // over-reserves.
+    const bool plan_rows = req.lm_adapter_plan < 1.0f && !req.lm_adapter.empty() && req.lm_adapter_mode != "merge";
+    const int  rows      = mm3_cfg_rows(g_mm3.lm_cfg) * st->n_takes * (plan_rows ? 2 : 1);
 
     const auto t_arb = std::chrono::steady_clock::now();
     mm3_arbitrate_vram(g_mm3, n_ctx_needed, rows, st.get(), /*stage2_only=*/ar_hit);
@@ -1643,7 +1650,11 @@ static void mm3_handle_synth(const httplib::Request & hreq, httplib::Response & 
     // so `takes` reflects what will actually be rendered — a reader asking for
     // take 3 on a checkpoint that only allows two must 404 now, not silently
     // wait forever on a queue nothing will ever push to.
-    st->n_takes = mm3_clamp_takes(g_mm3.lm_cfg, req.takes);
+    // The plan dial halves the budget (mm3_max_takes). The adapter is not
+    // loaded yet, so a soft-prompt adapter (which ignores the dial) is clamped
+    // too: fewer takes than allowed, never more.
+    st->n_takes = mm3_clamp_takes(g_mm3.lm_cfg, req.takes,
+                                  req.lm_adapter_plan < 1.0f && !req.lm_adapter.empty() && req.lm_adapter_mode != "merge");
     st->takes.resize((size_t) st->n_takes);
     for (int t = 0; t < st->n_takes; t++) {
         st->takes[(size_t) t].seed = req.gen.seed + (uint64_t) t;

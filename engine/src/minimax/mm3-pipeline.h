@@ -833,6 +833,7 @@ struct MM3GenRequest {
     const MM3LmAdapter * lm_adapter = nullptr;
     MM3LmAdapterScales   lm_adapter_scales = {};
     MM3LmAdapterSchedule lm_adapter_sched  = {};
+    float                lm_adapter_plan   = 1.0f;  // MM3ArOptions::lm_adapter_plan
     // The adapter whose artist token / trained KV prefix apply. Same object as
     // lm_adapter in runtime mode; set in MERGE mode too, where lm_adapter is
     // null because the LoRA has been folded into the weights and a soft prompt
@@ -1040,7 +1041,7 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
     // (mm3-model.h). Clamped rather than rejected, and mm3_ar_plan_takes logs
     // when it bites, so a caller asking for more than the checkpoint allows
     // gets fewer songs rather than an error.
-    const int K = mm3_clamp_takes(m.lm_cfg, takes);
+    const int K = mm3_clamp_takes(m.lm_cfg, takes, mm3_plan_rows_on(req.lm_adapter_plan, req.lm_adapter, req.lm_soft));
 
     const int64_t win_frames = m.synth_cfg.dit.window_frames ? (int64_t) m.synth_cfg.dit.window_frames : 200;
     const int64_t ckpt_hop   = m.synth_cfg.dit.hop_frames ? (int64_t) m.synth_cfg.dit.hop_frames : 100;
@@ -1143,6 +1144,7 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
     aopt.lm_adapter        = req.lm_adapter;
     aopt.lm_adapter_scales = req.lm_adapter_scales;
     aopt.lm_adapter_sched  = req.lm_adapter_sched;
+    aopt.lm_adapter_plan   = req.lm_adapter_plan;
     aopt.lm_soft           = req.lm_soft;
     if (!req.forced_semantic.empty()) {
         // Empty forced_acoustic = semantic-only forcing (the depth decoder samples it).

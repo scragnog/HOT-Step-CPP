@@ -292,6 +292,13 @@ struct MM3ArOptions {
     // lm_adapter_scales.global. Needs a runtime adapter: merge mode has baked
     // the delta into the weights, so there is nothing to turn down.
     MM3LmAdapterSchedule lm_adapter_sched = {};
+    // Plan dial, 0..1: how much the adapter plans the song. Below 1 every take
+    // gets a base pair (same prompt, delta masked off), guidance runs per
+    // model, the semantic draw samples base + plan * (adapter - base), and the
+    // drawn code feeds all four rows. The depth decoder still reads the
+    // adapter rows, so the adapter sings whatever is planned. 1 (or no runtime
+    // adapter) = no base rows: today's graph and today's RNG draws.
+    float                lm_adapter_plan  = 1.0f;
 
     // The adapter whose SOFT-PROMPT halves (artist token, trained KV prefix)
     // apply. Usually the same object as lm_adapter, and deliberately a separate
@@ -306,6 +313,16 @@ struct MM3ArOptions {
 #define MM3_ERR_CANCELLED "cancelled"
 
 static MM3LmGraph g_mm3_lm;
+
+// Whether the plan dial actually adds base rows: it needs a runtime delta to
+// mask (merge mode has none), and stands down for a soft prompt.
+// ponytail: a soft prompt (artist token, KV prefix) would need a per-row
+// attention mask to keep off the base rows; no MM3 adapter ships one yet, so
+// the dial is ignored for them. Add the mask when one does.
+static bool mm3_plan_rows_on(float plan, const MM3LmAdapter * ad, const MM3LmAdapter * soft) {
+    const bool has_soft = soft && (soft->has_artist_token() || soft->has_prefix());
+    return plan < 1.0f && ad && !has_soft;
+}
 
 // ── Runtime LM adapter cache ────────────────────────────────────────────────
 //
@@ -364,10 +381,12 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     // Ensemble takes, clamped to what ggml's matrix-vector kernels can serve
     // (mm3-model.h). Clamping rather than failing: a caller asking for 8 takes
     // on a CFG-pair checkpoint gets 4 and a log line, not an error.
-    const int           K = mm3_clamp_takes(c, opt.n_takes);
+    const float         plan     = opt.lm_adapter_plan;
+    const bool          plan_mix = mm3_plan_rows_on(plan, opt.lm_adapter, opt.lm_soft);
+    const int           K        = mm3_clamp_takes(c, opt.n_takes, plan_mix);
     if (K != opt.n_takes && opt.n_takes > 1) {
-        fprintf(stderr, "[MM3-AR] %d takes requested; the row budget allows %d — rendering %d\n", opt.n_takes,
-                mm3_max_takes(c), K);
+        fprintf(stderr, "[MM3-AR] %d takes requested; the row budget allows %d%s — rendering %d\n", opt.n_takes,
+                mm3_max_takes(c, plan_mix), plan_mix ? " with the plan dial's base rows" : "", K);
     }
 
     if (n_prompt <= 0) {
@@ -514,10 +533,22 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
         mm3_lm_free_slot(&g_mm3_lm.decode);
         mm3_lm_free_slot(&g_mm3_lm.replay);
     }
+    // Plan dial (mm3_plan_rows_on, settled above with K).
+    if (plan < 1.0f && !plan_mix) {
+        fprintf(stderr, "[MM3-AR] plan dial %.2f ignored: %s\n", (double) plan,
+                !opt.lm_adapter ? "no runtime LM adapter (none loaded, or merge mode)"
+                                : "the adapter carries a soft prompt (artist token or KV prefix)");
+    }
+    // Rows of the adapter half; the base half starts here.
+    const size_t KP = (size_t) K * (size_t) P;
     // Both graph sets bake rows() into their shapes, so K has to be settled
     // before either is prepared. Kept in lockstep on purpose: the depth decoder
     // reads the LM's hidden rows straight out of the same buffer.
-    mm3_lm_set_takes(&g_mm3_lm, K);
+    mm3_lm_set_takes(&g_mm3_lm, K, plan_mix);
+    if (plan_mix) {
+        fprintf(stderr, "[MM3-AR] plan dial %.2f: base rows active (%d take%s, %zu adapter + %zu base LM rows)\n",
+                (double) plan, K, K == 1 ? "" : "s", KP, KP);
+    }
     mm3_depth_set_takes(&g_mm3_depth, K);
     // BEFORE prepare: a trained prefix occupies real KV columns, so the cache
     // has to be sized with them in it (mm3_lm_prepare adds them to the ask).
@@ -602,6 +633,7 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     // Cut to the batch ceiling rather than to what this run uses: the readback
     // helpers size their transfers from the graph, so a ceiling-sized buffer
     // can never be the thing that overruns.
+    // The plan dial's base rows fit too: mm3_max_takes halves K for them.
     std::vector<float> hidden((size_t) (H * MM3_MAX_BATCH_ROWS));
     std::vector<float> logits((size_t) (hn * MM3_MAX_BATCH_ROWS));
     std::vector<float> feedback((size_t) H);
@@ -620,8 +652,9 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     // no second row to give them, so mirror the conditional one into place and
     // keep them meaningful. Only ever needed at K == 1, which is the only K
     // those surfaces are reachable at.
+    // Not with base rows: row 1 is then the base model's conditional row.
     const auto mirror_uncond = [&]() {
-        if (P > 1 || K != 1) {
+        if (P > 1 || K != 1 || plan_mix) {
             return;
         }
         memcpy(hidden.data() + H, hidden.data(), (size_t) H * sizeof(float));
@@ -754,6 +787,30 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             for (int64_t j = 0; j < SV; j++) {
                 cand_cond[(size_t) (j + 1)] = fix(lrow_c[OFF - hlo + j]);
                 cand_unc[(size_t) (j + 1)]  = fix(lrow_u[OFF - hlo + j]);
+            }
+            // Plan dial: mix each row with the base model's, base + plan *
+            // (adapter - base). Guidance is linear, so mixing cond and uncond
+            // here IS mixing the two guided rows, and the conditional top-k
+            // below then ranks by the mixed conditional row: the base's own
+            // filter at 0, the adapter's at 1. -inf on either side stays -inf.
+            if (plan_mix) {
+                const float * brow_c = logits.data() + (row_c(t) + KP) * (size_t) hn;
+                const float * brow_u = logits.data() + (row_u(t) + KP) * (size_t) hn;
+                // At 0 the base row is the answer outright: the adapter has no
+                // vote, so an adapter -inf (or a clamped NaN) cannot mask a code
+                // the base allows.
+                const auto    mix    = [&](float a, float b) -> float {
+                    if (plan == 0.0f) {
+                        return b;
+                    }
+                    return (std::isinf(a) || std::isinf(b)) ? -INFINITY : b + plan * (a - b);
+                };
+                cand_cond[0] = mix(cand_cond[0], fix(brow_c[EOS - hlo]));
+                cand_unc[0]  = mix(cand_unc[0], fix(brow_u[EOS - hlo]));
+                for (int64_t j = 0; j < SV; j++) {
+                    cand_cond[(size_t) (j + 1)] = mix(cand_cond[(size_t) (j + 1)], fix(brow_c[OFF - hlo + j]));
+                    cand_unc[(size_t) (j + 1)]  = mix(cand_unc[(size_t) (j + 1)], fix(brow_u[OFF - hlo + j]));
+                }
             }
 
             if (it == 0) {
@@ -998,10 +1055,14 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
         if (dumping) {
             // Single-take path only (guarded at entry), so the [2, H] / [2, SV]
             // shapes these carry are still literally true.
-            const float * lrow_c = logits.data();
-            const float * lrow_u = logits.data() + hn;
+            // Through row_c/row_u: at P == 1 with base rows, row 1 is the base.
+            const float * lrow_c = logits.data() + row_c(0) * (size_t) hn;
+            const float * lrow_u = logits.data() + row_u(0) * (size_t) hn;
             MM3ArDump     d;
-            d.last_hidden.assign(hidden.begin(), hidden.begin() + 2 * H);
+            d.last_hidden.assign(hidden.begin() + (ptrdiff_t) (row_c(0) * (size_t) H),
+                                 hidden.begin() + (ptrdiff_t) ((row_c(0) + 1) * (size_t) H));
+            d.last_hidden.insert(d.last_hidden.end(), hidden.begin() + (ptrdiff_t) (row_u(0) * (size_t) H),
+                                 hidden.begin() + (ptrdiff_t) ((row_u(0) + 1) * (size_t) H));
             d.sem_logits.resize((size_t) (2 * SV));
             memcpy(d.sem_logits.data(), lrow_c + (OFF - hlo), (size_t) SV * sizeof(float));
             memcpy(d.sem_logits.data() + SV, lrow_u + (OFF - hlo), (size_t) SV * sizeof(float));
@@ -1326,10 +1387,14 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     const int64_t candidates_per_row = SV + 1;
     const int64_t row_equivalents    = out->n_iterations * (int64_t) K * (int64_t) P;
     const int64_t budget             = candidates_per_row * row_equivalents;
+    // The plan dial's base rows are counted by fix() too, so the PERCENTAGE is
+    // over all of them; the fatal threshold below stays one dead row per take
+    // per step, because a dead row on either side poisons the mixed row.
+    const int64_t counted = budget * (plan_mix ? 2 : 1);
     if (out->nonfinite_logits) {
         fprintf(stderr, "[MM3-AR] WARNING: %lld non-finite candidate logits were clamped to -inf (%.1f%% of %lld)\n",
-                (long long) out->nonfinite_logits, budget ? 100.0 * (double) out->nonfinite_logits / (double) budget : 0.0,
-                (long long) budget);
+                (long long) out->nonfinite_logits, counted ? 100.0 * (double) out->nonfinite_logits / (double) counted : 0.0,
+                (long long) counted);
     }
     if (budget > 0 && out->nonfinite_logits * (int64_t) P >= budget) {
         char buf[352];

@@ -868,7 +868,10 @@ Other adapter paths:
   load (`mm3-adapter.h`). A runtime MM3 LM adapter can change strength along the
   song (`lm_adapter_fade_*`, `MM3LmAdapterSchedule` in `mm3-lm-adapter.h`): the AR
   loop re-sets the scales between iterations, which rebuilds the decode graph and
-  keeps the KV cache.
+  keeps the KV cache. The plan dial (`lm_adapter_plan` < 1) adds a base copy of every
+  take's CFG pair (`MM3LmGraph::base_rows`), masks the adapter delta off on those rows
+  with a resident `[1, 1, B]` tensor in the KV buffer, and mixes the two models' logits
+  before the semantic draw (`mm3-ar-loop.h`).
 - YuE2 adapters merge at load (`yue2-adapter.h`): AR (composer) and NAR files in
   LoRA, LoKr or DoRA form (`yue2-{ar,nar}-{lora,lokr,dora}-v1`), chosen with
   `POST /yue2/select-model`. On a ConvRot INT8 base the LoRA factors are applied at

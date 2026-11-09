@@ -1298,6 +1298,7 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
             opt.lm_adapter_sched.out_len_sec = num("lm_adapter_fade_len", 0.0f);
             opt.lm_adapter_sched.floor       = num("lm_adapter_fade_floor", 0.0f);
             opt.lm_adapter_sched.step_sec    = num("lm_adapter_fade_step", 10.0f);
+            opt.lm_adapter_plan              = std::clamp(num("lm_adapter_plan", 1.0f), 0.0f, 1.0f);
         } else if (yyjson_obj_get(root, "lm_adapter_clear")) {
             // Explicit "run the pristine base" after an adapter has been cached.
             mm3_lm_adapter_drop();
@@ -1333,7 +1334,8 @@ static void mm3_handle_lm_plan(const httplib::Request & req, httplib::Response &
     // Sized to the request, then to what the checkpoint's row budget actually
     // allows — mm3_ar_plan_takes clamps, so the vector has to cover the ASK or
     // it would write past the end when the ask is legal but large.
-    const int                K = mm3_clamp_takes(g_mm3.lm_cfg, opt.n_takes);
+    const int                K =
+        mm3_clamp_takes(g_mm3.lm_cfg, opt.n_takes, mm3_plan_rows_on(opt.lm_adapter_plan, opt.lm_adapter, opt.lm_soft));
     std::vector<MM3ArResult> rs((size_t) (K > 0 ? K : 1));
     std::string              err;
     if (!mm3_ar_plan_takes(g_mm3, ids_cond.data(), ids_uncond.data(), (int64_t) ids_cond.size(), opt, rs.data(),

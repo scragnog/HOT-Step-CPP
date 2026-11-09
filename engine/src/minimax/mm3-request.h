@@ -654,6 +654,15 @@ struct MM3SynthRequest {
     // lm_adapter_fade_out, lm_adapter_fade_len, lm_adapter_fade_floor,
     // lm_adapter_fade_step. All absent = off.
     MM3LmAdapterSchedule lm_adapter_sched = {};
+    // lm_adapter_plan, 0..1 (default 1): how much the adapter plans the song.
+    // 1 = the adapter plans and sings it (no change). 0 = the base model plans
+    // it and the adapter sings it: each take gets a base CFG pair, the semantic
+    // draw samples base + plan * (adapter - base) logits, and the depth decoder
+    // reads the adapter rows. Runtime mode only (merge has no base weights to
+    // mask back to); ignored with a log line otherwise, and for an adapter that
+    // carries a soft prompt. Doubles the LM rows and KV, so takes clamp to 2
+    // with a CFG pair (mm3_max_takes); in the AR cache key when below 1.
+    float              lm_adapter_plan  = 1.0f;
     // "runtime" (default) = low-rank deltas in-graph, live dials, +28 %/step
     // at r256. "merge" = fold scale·B·A into the resident weights once
     // (mm3-lm-merge.h) — zero per-step cost, scale changes re-merge.
@@ -1181,6 +1190,7 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
             { "lm_adapter_fade_len",   &out->lm_adapter_sched.out_len_sec, 0.0f, 360.0f },
             { "lm_adapter_fade_floor", &out->lm_adapter_sched.floor,       0.0f, 1.0f   },
             { "lm_adapter_fade_step",  &out->lm_adapter_sched.step_sec,    1.0f, 60.0f  },
+            { "lm_adapter_plan",       &out->lm_adapter_plan,              0.0f, 1.0f   },
         };
         for (auto & d : sched) {
             yyjson_val * sv = yyjson_obj_get(root, d.key);
@@ -1460,6 +1470,7 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
     // parse runs on the HTTP thread and load must run on the GPU worker.
     out->gen.lm_adapter_scales = out->lm_adapter_scales;
     out->gen.lm_adapter_sched  = out->lm_adapter_sched;
+    out->gen.lm_adapter_plan   = out->lm_adapter_plan;
     out->gen.a2a_strength      = (float) a2a_strength;
     out->gen.a2a_hold          = (float) a2a_hold;
 
