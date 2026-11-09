@@ -19,6 +19,9 @@ the Training Studio. Flow-DiT LoRAs merge only through the `MM3_ADAPTER` env var
 (`mm3_apply_adapters`, `engine/src/minimax/mm3-model.h`), and the native DiT trainer
 (`ace-train mm3-train-dit`) is CLI-only. Output = raw 44.1 kHz stereo WAV (app norm is 48 k;
 PP-VAE and Spectral Lifter, which assume ACE's VAE, are skipped for MM3).
+Cover Studio's MM3 encode (`POST /api/mm3/cover/encode`) runs `ace-train mm3-codes` on one
+file into a plank; its opt-in `launder` flag runs `mm3-launder` instead (needs rec7, ~real time,
+~14.5 GB) and the plank sidecar records `laundered` plus the rec7/encoder files.
 
 Deep docs (local, gitignored): `docs/plans/multi-backend-architecture.md` (architecture plan,
 day-0 findings, op inventory) and `docs/plans/mm3-gguf-layout.md` (GGUF contract + loader
