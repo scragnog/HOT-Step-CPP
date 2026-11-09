@@ -98,6 +98,21 @@ test('MM3 sends the LM adapter fade only when set, and a fade forces runtime mod
   assert.equal(faded.lm_adapter_fade_floor, undefined);  // out of range is dropped
 });
 
+test('MM3 sends the plan dial only below 1, and it forces runtime mode', (t) => {
+  const installed = listMm3LmAdapters()[0];
+  if (!installed) return t.skip('no MM3 LM adapter installed');
+  const params = { prompt: 'x', seed: 42, mm3LmAdapter: installed.file, mm3LmAdapterMode: 'merge' };
+  const req = (p: Record<string, unknown>) => mapMinimaxParams({ ...params, ...p }).req as unknown as Record<string, unknown>;
+  assert.equal(req({ mm3LmAdapterScalePlan: 1 }).lm_adapter_plan, undefined);
+  assert.equal(req({ mm3LmAdapterScalePlan: 1 }).lm_adapter_mode, 'merge');
+  assert.equal(req({ mm3LmAdapterScalePlan: 0.5 }).lm_adapter_plan, 0.5);
+  assert.equal(req({ mm3LmAdapterScalePlan: 0 }).lm_adapter_plan, 0);
+  assert.equal(req({ mm3LmAdapterScalePlan: 0 }).lm_adapter_mode, 'runtime');
+  assert.equal(req({ mm3LmAdapterScalePlan: -1 }).lm_adapter_plan, undefined);  // out of range is dropped
+  const noAdapter = mapMinimaxParams({ prompt: 'x', seed: 42, mm3LmAdapterScalePlan: 0 }).req as unknown as Record<string, unknown>;
+  assert.equal(noAdapter.lm_adapter_plan, undefined);
+});
+
 test('MM3 tail fade toggle times the fade from the lyrics', (t) => {
   assert.equal(mm3TailFadeStartSec(''), null);
   assert.equal(mm3TailFadeStartSec('[Verse] ' + 'word '.repeat(336)), 212);  // the 2026-11-08 test sheet: ~210 s

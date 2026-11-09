@@ -794,7 +794,18 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
         if (fadeOn && params.mm3LmAdapterMode === 'merge') {
           notes.push('LM adapter fade set: rendering in runtime mode, since a merged adapter cannot change strength mid-song');
         }
-        const mode = params.mm3LmAdapterMode === 'merge' && !fadeOn ? 'merge' : 'runtime';
+        // Plan dial (engine lm_adapter_plan): below 1 the engine adds base rows
+        // with the adapter delta masked off, which a merged LM has no base
+        // weights for. Sent only when it does something.
+        const planRaw = Number((params as Record<string, unknown>).mm3LmAdapterScalePlan);
+        const plan = Number.isFinite(planRaw) && planRaw >= 0 && planRaw < 1 ? planRaw : undefined;
+        if (plan !== undefined && params.mm3LmAdapterMode === 'merge') {
+          notes.push('LM adapter plan dial below 1: rendering in runtime mode, since a merged adapter has no base weights to plan with');
+        }
+        // The base rows double the planner's batch, so the engine plans at most
+        // 2 takes (engine mm3_max_takes); a 3- or 4-candidate ask gets 2.
+        if (plan !== undefined) notes.push(`LM adapter plan dial: ${plan} (at most 2 takes per planning round)`);
+        const mode = params.mm3LmAdapterMode === 'merge' && !fadeOn && plan === undefined ? 'merge' : 'runtime';
         notes.push(`LM adapter: ${path.basename(resolved)} (${mode})`);
         const mergeGpu = params.mm3LmMergeGpu !== false;
         if (mode === 'merge') notes.push(`LM adapter merging: ${mergeGpu ? 'GPU preferred' : 'CPU-assisted'}`);
@@ -809,6 +820,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
           lm_adapter_scale_mid: dial('mm3LmAdapterScaleMid', d.scaleMid),
           lm_adapter_scale_late: dial('mm3LmAdapterScaleLate', d.scaleLate),
           ...(fadeOn ? fade : {}),
+          ...(plan !== undefined ? { lm_adapter_plan: plan } : {}),
         };
       })() : {}),
     },

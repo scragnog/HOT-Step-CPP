@@ -87,7 +87,7 @@ export const stableStepOptions = () => localOptions<StableStepStatus>('stableste
 export interface StableStepAdapterList { adapters: Array<{ name: string; sizeMb: number }> }
 export const stableStepAdaptersOptions = () => localOptions<StableStepAdapterList>('sa3-adapters', '/models/stablestep/adapters');
 export interface Mm3LmAdapterScales {
-  scale: number; scaleAttn: number; scaleMlp: number; scaleEarly: number; scaleMid: number; scaleLate: number;
+  scale: number; scaleAttn: number; scaleMlp: number; scaleEarly: number; scaleMid: number; scaleLate: number; scalePlan?: number;
 }
 export interface Mm3LmAdapterEntry {
   /** Path relative to the mm3-lm-adapters root — what the request carries. */
