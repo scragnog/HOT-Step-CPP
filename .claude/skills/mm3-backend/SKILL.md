@@ -185,6 +185,40 @@ last lyric works. On that prompt the base sang the sheet by ~183 s and the
 adapter by ~260 s; the 210 s start was base pace + 30 s. Runtime mode costs
 about +44% LM step on q8_0 against merge.
 
+**Plan dial (2026-11-09, `lm_adapter_plan`, UI "Plan", default 1).** Splits
+the adapter's two jobs at the semantic/acoustic seam: the LM's semantic draw
+is the plan, the depth decoder reading the LM hidden is the voice. Below 1
+every take gets a second CFG pair (`MM3LmGraph::base_rows`, rows
+`[K*P, 2*K*P)`) on the same prompt and the same fed-back codes, with the
+adapter delta masked off by a resident `[1, 1, B]` tensor in the KV buffer
+(`mm3_lm_mm`: plain LoRA masks `A x`; DoRA and LoKr mask the whole
+contribution). The loop mixes each row as `base + plan * (adapter - base)`
+before CFG and the conditional top-k, draws once, feeds the code to all four
+rows, and the depth decoder keeps reading the adapter rows. **Parity rule:**
+at 1, or with no runtime adapter, there are no base rows: same graph, same
+draws. Proven by WAV hash: plan 1.0 at seed 20261208, 3 takes reproduced the
+fade study's three control WAVs byte for byte; `check-mm3-ensemble.mjs
+--adapter` section 4 holds it. The base rows match a pure-base batch at the
+same row positions exactly. Costs (5090, q8_0, PiSSA r128 adapter, 2 takes,
+300 s): LM step 15.0 -> 18.2 ms, KV 4.8 -> 9.6 GB, peak 23.4 -> 29.4 GB
+on the card with ~4.5 GB of other apps. The rows double, so takes clamp to 2
+(`mm3_max_takes(c, plan_rows)`): 3 takes wanted a 14.3 GB KV, filled the 32
+GB card and ran ~10x slower. A graph input for the mask (uploaded per step)
+cost +3.8 ms/step at one take; the resident tensor costs +0.85. Merge mode
+has no base weights, so the server forces runtime; an adapter with an artist
+token or KV prefix ignores the dial (it would need a per-row attention mask).
+At plan 0 the mix returns the base logit outright, so an adapter -inf cannot
+veto a base code; the fatal non-finite threshold stays one dead row per take
+per step (the base rows only widen the reported percentage).
+**4090 (24 GB):** 1 take, 300 s, plan-only: 16.2 ms/step at 1, 18.3 at 0.5,
+peak 20.5 GB. 2 takes below 1 spills under `/mm3/lm-plan` (DiT and vocoder
+stay resident there) but fits the app's staged `/mm3/synth`: 21.8 ms/step,
+peak 23.5 of 24.5 GB. Do not add VRAM to that path without re-checking it.
+**The base's ending instinct did not come back:** natural endings were 1/6 at
+1, 0/6 at 0.5, 0/6 at 0 on that prompt with 2 takes on the 5090 (the base
+alone: 12/12), and 1/12 below 1 at 1 take across both cards. The base
+plans over the adapter's acoustic codes, which is not the base's own song.
+
 ## The trap list (each cost real debugging — do not relearn)
 
 1. **ComfyUI's wrapper NEGATES the DiT output; the diffusers reference (and our port) does not.**
