@@ -69,7 +69,7 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
       data => data.status === 'queued' || data.status === 'running', data => {
         signal.throwIfAborted();
         setElapsed(data.startedAt ? Math.round((Date.now() - data.startedAt) / 1000) : 0);
-      }, { signal, timeoutMs: 35 * 60_000 });
+      }, { signal, timeoutMs: 35 * 60_000, deliverRepeats: true });
     signal.throwIfAborted();
     if (job.status !== 'done') throw new Error(job.error || t('cover.mm3.encodeFailed', 'Encoding failed'));
     return job.result;
