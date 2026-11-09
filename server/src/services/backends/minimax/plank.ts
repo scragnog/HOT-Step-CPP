@@ -52,6 +52,12 @@ export interface Mm3PlankMeta {
   sizeBytes: number;
   /** Source filename, for a plank encoded from a reference (Cover Studio). */
   source?: string;
+  /** Cover Studio encodes only: true when the codes came from ace-train
+   *  mm3-launder rather than mm3-codes. Absent on planks captured from a render. */
+  laundered?: boolean;
+  /** Model files the launder used (basenames), so a later A/B knows what it hears. */
+  rec7?: string;
+  encoder?: string;
 }
 
 /** Sibling of the audio directory, so planks travel with a data-dir move. */
@@ -140,7 +146,7 @@ export function readMm3Plank(ref: string): { forced_semantic: number[]; forced_a
  *  indexing a plank uses) into `<id>.mm3plank` plus its sidecar. Returns the
  *  plank's file name. Throws on a malformed file. */
 export function writeMm3PlankFromCodes(codesPath: string, id: string,
-  meta: Pick<Mm3PlankMeta, 'jobId' | 'caption' | 'lyrics' | 'source'>): string {
+  meta: Pick<Mm3PlankMeta, 'jobId' | 'caption' | 'lyrics' | 'source' | 'laundered' | 'rec7' | 'encoder'>): string {
   const raw = fs.readFileSync(codesPath);
   const rows = raw.length / 32;
   if (!Number.isInteger(rows) || rows < 2) throw new Error(`${path.basename(codesPath)} is not an [rows, 8] int32 codes file`);

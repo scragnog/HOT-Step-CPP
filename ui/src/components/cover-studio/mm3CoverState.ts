@@ -9,6 +9,8 @@ export interface Mm3CoverSettings {
   soundStrength: number;
   soundHold: number;
   plank: string;
+  /** Encode through ace-train mm3-launder instead of mm3-codes. Off by default. */
+  launder: boolean;
   semanticOnly: boolean;
   /** Blank = hard pin. */
   forceBias: string;
@@ -24,7 +26,7 @@ export interface Mm3CoverSettings {
 
 export const DEFAULT_MM3_COVER: Mm3CoverSettings = {
   plan: true, sound: false, soundStrength: 0.5, soundHold: 0,
-  plank: '', semanticOnly: true, forceBias: '', patternMode: 'all', patternValue: '', invert: false,
+  plank: '', launder: false, semanticOnly: true, forceBias: '', patternMode: 'all', patternValue: '', invert: false,
   trimSeconds: '', seed: -1, arSeed: -1,
 };
 

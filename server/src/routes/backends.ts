@@ -227,9 +227,17 @@ router.get('/mm3/plank-meta', (req, res) => {
   res.json(meta);
 });
 
-/** POST /api/mm3/cover/encode { sourceAudioUrl, sourceName? } — run mm3-codes on one file
- *  and save it as a plank. Returns { jobId, plank } at once; poll
- *  GET /api/training/jobs/:jobId until done. Stops and restarts the engine. */
+/** GET /api/mm3/cover/launder-models — the files a laundered encode still
+ *  needs, as user-facing names. Empty = ready. Only the Cover Studio's
+ *  launder switch asks; plain encodes never need rec7. */
+router.get('/mm3/cover/launder-models', (_req, res) => {
+  res.json({ missing: missingMm3TrainModels('launder') });
+});
+
+/** POST /api/mm3/cover/encode { sourceAudioUrl, sourceName?, launder?, caption? } — run mm3-codes
+ *  (or, with launder, mm3-launder under `caption`) on one file and save it as a plank. Returns
+ *  { jobId, plank } at once; poll GET /api/training/jobs/:jobId until done.
+ *  Stops and restarts the engine. */
 router.post('/mm3/cover/encode', (req, res) => {
   try {
     const url = String(req.body?.sourceAudioUrl ?? '');
@@ -238,9 +246,10 @@ router.post('/mm3/cover/encode', (req, res) => {
       res.status(400).json({ error: 'Pick or upload a source first' });
       return;
     }
-    const missing = missingMm3TrainModels('codes');
+    const launder = req.body?.launder === true;
+    const missing = missingMm3TrainModels(launder ? 'launder' : 'codes');
     if (missing.length) {
-      res.status(400).json({ error: `MiniMax-Music3 encoder files are missing: ${missing.join(', ')}. Download them in Model Manager.` });
+      res.status(400).json({ error: `MiniMax-Music3 ${launder ? 'launder' : 'encoder'} files are missing: ${missing.join(', ')}. Download them in Model Manager.` });
       return;
     }
     if (!aceTrainExe()) {
@@ -251,7 +260,8 @@ router.post('/mm3/cover/encode', (req, res) => {
     const workDir = fs.mkdtempSync(path.join(mm3PlankDir(), '.encode-'));
     // The picker's label: the name the user knows, not the stored upload's uuid.
     const given = typeof req.body?.sourceName === 'string' ? path.basename(req.body.sourceName).slice(0, 200) : '';
-    const job = startMm3CoverEncodeJob({ sourcePath, sourceName: given || path.basename(sourcePath), workDir });
+    const caption = typeof req.body?.caption === 'string' ? req.body.caption.trim().slice(0, 2000) : '';
+    const job = startMm3CoverEncodeJob({ sourcePath, sourceName: given || path.basename(sourcePath), workDir, launder, caption });
     res.json({ jobId: job.id, plank: `${job.id}${MM3_PLANK_EXT}` });
   } catch (err: any) {
     res.status(409).json({ error: err?.message || String(err) });

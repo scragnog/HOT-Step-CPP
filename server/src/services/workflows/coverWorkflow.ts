@@ -25,6 +25,7 @@ import { instrumentalConflict, preparedPair } from '../../contracts/yue2Prepare.
 import { tryAbcCoverLeadSheet, coverRenderRolls, clearCoverScore } from '../coverLeadSheet.js';
 import { sheetTranscriberSetting } from '../training/yue2Sheet.js';
 import { heartmulaCoverLyrics, heartmulaCoverTags } from '../backends/heartmula/cover.js';
+import { readMm3PlankMeta } from '../backends/minimax/plank.js';
 
 export type { CoverRenderInput, CoverDraft };
 
@@ -52,6 +53,15 @@ export function coverScoreDetails(abc: string, factor: number): { bpm: number; k
 function coverTitle(i: CoverRenderInput) {
   return i.artistName ? `${i.title || 'Cover'} (${i.artistName} Cover)` : (i.title || 'Cover');
 }
+/** The plank sidecar's launder record as generation params. A plank without a
+ *  sidecar, or one captured from a render, reports nothing. */
+export function mm3PlankProvenance(plank: string): Record<string, unknown> {
+  const meta = readMm3PlankMeta(plank);
+  if (typeof meta?.laundered !== 'boolean') return {};
+  return { mm3PlankLaundered: meta.laundered,
+    ...(meta.laundered ? { mm3PlankLaunderModels: [meta.rec7, meta.encoder].filter(Boolean).join(', ') } : {}) };
+}
+
 export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: string): Record<string, unknown> {
   const c = i.controls, e = i.engineParams, s = i.settings;
   const analysis = i.analysis ?? d.analysis;
@@ -123,6 +133,9 @@ export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: s
       artistName: i.targetArtistName || i.artistName, sourceArtist: i.artistName,
       ...(i.seed !== undefined ? { seed: i.seed, randomSeed: i.seed < 0 } : {}),
       mm3PlankPath: m.plank ?? '', mm3PlankSemanticOnly: m.semanticOnly,
+      // Provenance for the song facts: a laundered plank sounds different, and
+      // A/Bs need to know which kind they rendered from.
+      ...(m.plank ? mm3PlankProvenance(m.plank) : {}),
       // Sound: the source's latents in the flow. Trim covers both when both are on.
       mm3A2aStrength: m.soundStrength ?? '', mm3A2aHold: m.soundStrength ? m.soundHold ?? 0 : '',
       mm3A2aSourceSeconds: m.soundStrength && m.plank ? m.trimSeconds ?? '' : '',

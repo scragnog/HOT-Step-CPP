@@ -212,6 +212,10 @@ function mm3Facts(gp: any): FactGroup[] {
   const cover: Fact[] = [];
   if (gp.mm3PlankPath) {
     add(cover, 'Plank', String(gp.mm3PlankPath).replace(/\.mm3plank$/, '').slice(0, 8), { mono: true, title: String(gp.mm3PlankPath) });
+    if (gp.mm3PlankLaundered !== undefined) {
+      add(cover, 'Laundered', gp.mm3PlankLaundered ? 'Yes' : 'No',
+        gp.mm3PlankLaunderModels ? { title: String(gp.mm3PlankLaunderModels) } : undefined);
+    }
     add(cover, 'Forcing', gp.mm3PlankSemanticOnly ? 'Semantic only' : 'Full replay');
     if (gp.mm3PlankSemanticOnly) {
       add(cover, 'Bias', gp.mm3ForceBias === '' || gp.mm3ForceBias === undefined ? 'Hard pin' : num(gp.mm3ForceBias));

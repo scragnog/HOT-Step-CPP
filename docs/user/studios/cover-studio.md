@@ -116,6 +116,13 @@ Use either or both.
   levers set how tightly the codes are held: semantic codes only, force bias
   (blank pins every frame), which frames are forced, and a trim. Off sends no
   codes, and the planner writes its own song from the caption and lyrics.
+  **Launder source (slower, experimental)**, off by default, re-renders the
+  source through MM3's own flow stage under the caption below before encoding,
+  so the codes come from MM3-made audio. Fill in the caption first. It takes about as long as the clip itself, needs about
+  14.5 GB of VRAM (the engine is stopped while it runs) and the rec7 state
+  encoder from Model Manager; the panel lists any missing file. A laundered
+  reference carries a "laundered" tag in the list, and the song's facts record
+  whether its reference was laundered.
 - **Sound** steers how the render sounds. The source audio is blended into the
   flow stage, so its harmony, rhythm placement and energy carry over.
   **Strength** (0 to 1) sets how much of the source survives: 1 gives the source

@@ -13,8 +13,8 @@ import { StyledSelect } from '../shared/StyledSelect';
 import { Toggle } from '../shared/Toggle';
 import type { Mm3CoverSettings } from './mm3CoverState';
 
-interface PlankRow { file: string; source?: string; caption?: string; duration?: number; created?: string }
-interface JobSummary { status: string; phase: string; error: string | null }
+interface PlankRow { file: string; source?: string; caption?: string; duration?: number; created?: string; laundered?: boolean }
+interface JobSummary { status: string; phase: string; error: string | null; startedAt: number | null }
 
 export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName, caption, onCaption, lyrics, onLyrics,
   canGenerate, generating, onGenerate, onCancel, footer }: {
@@ -26,7 +26,10 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
   const queryClient = useQueryClient();
   const set = (patch: Partial<Mm3CoverSettings>) => onSettings(s => ({ ...s, ...patch }));
   const planks = useQuery({ queryKey: ['mm3-planks'], queryFn: () => apiClient.get<{ planks: PlankRow[] }>('/mm3/planks') });
-  const [encode, setEncode] = useState<{ jobId: string; plank: string; phase: string } | null>(null);
+  const launderModels = useQuery({ queryKey: ['mm3-launder-models'], enabled: settings.launder,
+    queryFn: () => apiClient.get<{ missing: string[] }>('/mm3/cover/launder-models') });
+  const launderMissing = settings.launder ? launderModels.data?.missing ?? [] : [];
+  const [encode, setEncode] = useState<{ jobId: string; plank: string; phase: string; seconds: number } | null>(null);
   const [error, setError] = useState('');
 
   // Poll the encode job until it ends; it runs on the training queue.
@@ -45,7 +48,10 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
           setEncode(null);
           setError(job.error || t('cover.mm3.encodeFailed', 'Encoding failed'));
         } else {
-          setEncode(e => (e && e.phase !== job.phase ? { ...e, phase: job.phase } : e));
+          // One file reports no per-frame progress, so show the phase and the
+          // elapsed time; a launder runs at roughly the clip's own length.
+          const seconds = job.startedAt ? Math.round((Date.now() - job.startedAt) / 1000) : 0;
+          setEncode(e => (e ? { ...e, phase: job.phase, seconds } : e));
         }
       } catch { /* transient; next tick retries */ }
     }, 2000);
@@ -56,15 +62,16 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
   const startEncode = async () => {
     setError('');
     try {
-      const res = await apiClient.post<{ jobId: string; plank: string }>('/mm3/cover/encode', { sourceAudioUrl, sourceName });
-      setEncode({ ...res, phase: 'queued' });
+      const res = await apiClient.post<{ jobId: string; plank: string }>('/mm3/cover/encode', { sourceAudioUrl, sourceName, launder: settings.launder, caption });
+      setEncode({ ...res, phase: 'queued', seconds: 0 });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
   };
 
   const inputClass = 'w-full rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-sm text-zinc-900 dark:text-white';
-  const plankLabel = (p: PlankRow) => `${p.source || p.caption?.slice(0, 40) || p.file}${p.duration ? ` · ${Math.round(p.duration)} s` : ''}`;
+  const plankLabel = (p: PlankRow) => `${p.source || p.caption?.slice(0, 40) || p.file}${p.duration ? ` · ${Math.round(p.duration)} s` : ''}`
+    + (p.laundered ? ` · ${t('cover.mm3.launderedTag', 'laundered')}` : '');
   const patternInfo: Record<Mm3CoverSettings['patternMode'], string> = {
     all: '',
     prefix: t('cover.mm3.prefixValue', 'Seconds pinned from the start'),
@@ -86,9 +93,14 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
     <div className="space-y-2">
       <ParamLabel label={t('cover.mm3.reference', 'Reference')}
         info={t('cover.mm3.referenceInfo', 'Encode the loaded source once; it is saved as a plank and appears in this list for later covers. Encoding stops the engine for a minute or two, so do not start it during a render.')} />
-      <button type="button" onClick={startEncode} disabled={!sourceAudioUrl || !!encode}
+      <Toggle size="sm" accent="cyan" checked={settings.launder} onChange={launder => set({ launder })} defaultValue={false}
+        label={t('cover.mm3.launder', 'Launder source (slower, experimental)')}
+        info={t('cover.mm3.launderInfo', "Re-renders the source through MM3's own flow before encoding, so the codes come from MM3-made audio. Takes about as long as the clip, needs about 14.5 GB of VRAM and the rec7 state encoder.")} />
+      {launderMissing.length > 0 && <p role="alert" className="text-xs text-amber-600 dark:text-amber-400">
+        {t('cover.mm3.launderMissing', 'Laundering needs {{files}}. Download them in Model Manager.', { files: launderMissing.join(', ') })}</p>}
+      <button type="button" onClick={startEncode} disabled={!sourceAudioUrl || !!encode || launderMissing.length > 0}
         className="rounded-lg bg-cyan-500/10 px-3 py-2 text-xs text-cyan-600 dark:text-cyan-300 disabled:opacity-50">
-        {encode ? t('cover.mm3.encoding', 'Encoding… ({{phase}})', { phase: encode.phase }) : t('cover.mm3.encode', 'Encode source')}
+        {encode ? t('cover.mm3.encodingTimed', 'Encoding… ({{phase}}, {{seconds}} s)', { phase: encode.phase, seconds: encode.seconds }) : t('cover.mm3.encode', 'Encode source')}
       </button>
       <StyledSelect accent="cyan" value={settings.plank} onChange={plank => set({ plank })}
         options={[{ value: '', label: t('cover.mm3.noPlank', 'No reference selected') },
