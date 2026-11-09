@@ -228,13 +228,12 @@ router.get('/mm3/plank-meta', (req, res) => {
 });
 
 /** GET /api/mm3/cover/launder-models — the files a laundered encode still
- *  needs, as user-facing names. Empty = ready. Only the Cover Studio's
- *  launder switch asks; plain encodes never need rec7. */
+ *  needs, as user-facing names. Empty = ready. Plain API encodes do not need rec7. */
 router.get('/mm3/cover/launder-models', (_req, res) => {
   res.json({ missing: missingMm3TrainModels('launder') });
 });
 
-/** POST /api/mm3/cover/encode { sourceAudioUrl, sourceName?, launder?, caption? } — run mm3-codes
+/** POST /api/mm3/cover/encode { sourceAudioUrl, sourceName?, launder?, launderSteps?, launderSeed?, launderCaption?, caption? } — run mm3-codes
  *  (or, with launder, mm3-launder under `caption`) on one file and save it as a plank. Returns
  *  { jobId, plank } at once; poll GET /api/training/jobs/:jobId until done.
  *  Stops and restarts the engine. */
@@ -247,6 +246,13 @@ router.post('/mm3/cover/encode', (req, res) => {
       return;
     }
     const launder = req.body?.launder === true;
+    const launderSteps = req.body?.launderSteps ?? 30;
+    const launderSeed = req.body?.launderSeed ?? 42;
+    if (launder && (!Number.isInteger(launderSteps) || launderSteps < 1 || launderSteps > 1000
+      || !Number.isSafeInteger(launderSeed) || launderSeed < -1)) {
+      res.status(400).json({ error: 'Launder steps must be 1..1000 and seed must be an integer >= -1' });
+      return;
+    }
     const missing = missingMm3TrainModels(launder ? 'launder' : 'codes');
     if (missing.length) {
       res.status(400).json({ error: `MiniMax-Music3 ${launder ? 'launder' : 'encoder'} files are missing: ${missing.join(', ')}. Download them in Model Manager.` });
@@ -260,8 +266,9 @@ router.post('/mm3/cover/encode', (req, res) => {
     const workDir = fs.mkdtempSync(path.join(mm3PlankDir(), '.encode-'));
     // The picker's label: the name the user knows, not the stored upload's uuid.
     const given = typeof req.body?.sourceName === 'string' ? path.basename(req.body.sourceName).slice(0, 200) : '';
-    const caption = typeof req.body?.caption === 'string' ? req.body.caption.trim().slice(0, 2000) : '';
-    const job = startMm3CoverEncodeJob({ sourcePath, sourceName: given || path.basename(sourcePath), workDir, launder, caption });
+    const sourceCaption = req.body?.launderCaption ?? req.body?.caption;
+    const launderCaption = typeof sourceCaption === 'string' ? sourceCaption.trim().slice(0, 2000) : '';
+    const job = startMm3CoverEncodeJob({ sourcePath, sourceName: given || path.basename(sourcePath), workDir, launder, launderSteps, launderSeed, launderCaption });
     res.json({ jobId: job.id, plank: `${job.id}${MM3_PLANK_EXT}` });
   } catch (err: any) {
     res.status(409).json({ error: err?.message || String(err) });

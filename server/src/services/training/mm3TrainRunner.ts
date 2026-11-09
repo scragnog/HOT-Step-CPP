@@ -458,7 +458,7 @@ export async function runMm3CodesJob(job: TrainingJob): Promise<void> {
 export const MM3_LAUNDER_FALLBACK_CAPTION = 'a full song with vocals and instruments';
 
 export async function runMm3CoverEncodeJob(job: TrainingJob): Promise<void> {
-  const opts = job.opts as { sourcePath: string; sourceName: string; workDir: string; launder?: boolean; caption?: string } | undefined;
+  const opts = job.opts as { sourcePath: string; sourceName: string; workDir: string; launder?: boolean; caption?: string; launderCaption?: string; launderSteps?: number; launderSeed?: number } | undefined;
   if (!opts?.sourcePath || !opts.workDir) {
     finishJob(job, 'failed', 'Cover encode is missing its source');
     return;
@@ -466,7 +466,10 @@ export async function runMm3CoverEncodeJob(job: TrainingJob): Promise<void> {
   const launder = opts.launder === true;
   // The launder re-renders the source through the flow DiT, which needs a
   // prompt of at least 3 tokens; its own empty-caption fallback is shorter.
-  const caption = launder ? opts.caption?.trim() || MM3_LAUNDER_FALLBACK_CAPTION : '';
+  const caption = launder ? (opts.launderCaption ?? opts.caption)?.trim() || MM3_LAUNDER_FALLBACK_CAPTION : '';
+  const launderSteps = opts.launderSteps ?? 30;
+  // Resolve randomness here so the sidecar records the seed actually used.
+  const launderSeed = opts.launderSeed === -1 ? Math.floor(Math.random() * 0x100000000) : opts.launderSeed ?? 42;
   const missing = missingMm3TrainModels(launder ? 'launder' : 'codes');
   if (missing.length) {
     finishJob(job, 'failed', `MiniMax-Music3 ${launder ? 'launder' : 'encoder'} files are missing: ${missing.join(', ')}`);
@@ -483,13 +486,13 @@ export async function runMm3CoverEncodeJob(job: TrainingJob): Promise<void> {
     const kind = launder ? 'mm3-launder' : 'mm3-codes';
     // 359 s: the engine's 9000-frame ceiling, so the plank can always replay.
     // The launder runs at roughly real time, so 30 min covers it with room.
-    await runMm3AceTrain(job, kind, buildMm3CodesArgs({ datasetJson, outDir: opts.workDir, maxDuration: 359, launder }),
+    await runMm3AceTrain(job, kind, buildMm3CodesArgs({ datasetJson, outDir: opts.workDir, maxDuration: 359, launder, launderSteps, launderSeed }),
       30 * 60 * 1000, () => (fs.existsSync(codesPath) ? null : `${kind} finished but wrote no codes`));
     if (isCancelled(job) || job.status === 'failed') return;
     const m = resolveMm3TrainModels();
     const file = writeMm3PlankFromCodes(codesPath, job.id, {
       jobId: job.id, caption, lyrics: '', source: opts.sourceName, laundered: launder,
-      ...(launder ? { rec7: path.basename(m.rec7), encoder: path.basename(m.enc) } : {}),
+      ...(launder ? { launderSteps, launderSeed, launderCaption: caption, rec7: path.basename(m.rec7), encoder: path.basename(m.enc) } : {}),
     });
     log(job, 'info', `Saved ${file}${launder ? ' (laundered)' : ''}`);
     finishJob(job, 'done');

@@ -1,14 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_MM3_COVER, mm3CoverInput, mm3CoverReady } from './mm3CoverState';
+import { DEFAULT_MM3_COVER, mm3CoverInput, mm3CoverReady, restoreMm3Cover } from './mm3CoverState';
 
-test('MM3 cover: Plan and Sound each switch their half of the request off', () => {
-  const both = { ...DEFAULT_MM3_COVER, plank: 'a.mm3plank', sound: true, soundStrength: 0.5, soundHold: 0.2 };
-  assert.deepEqual([mm3CoverInput(both).plank, mm3CoverInput(both).soundStrength, mm3CoverInput(both).soundHold], ['a.mm3plank', 0.5, 0.2]);
-  assert.equal(mm3CoverInput({ ...both, plan: false }).plank, null);
-  assert.equal(mm3CoverInput({ ...both, sound: false }).soundStrength, null);
-  assert.equal(mm3CoverInput({ ...both, soundStrength: 0 }).soundStrength, null);
+test('old saved controls are ignored and cannot change semantic hard pinning', () => {
+  const restored = restoreMm3Cover({ plank: 'a.mm3plank', plan: false, sound: true,
+    semanticOnly: false, forceBias: '16', patternMode: 'prefix', launder: false });
+  assert.deepEqual(restored, { ...DEFAULT_MM3_COVER, plank: 'a.mm3plank' });
+  assert.deepEqual(mm3CoverInput(restored), { plank: 'a.mm3plank', semanticOnly: true, trimSeconds: null, arSeed: -1 });
   assert.equal(mm3CoverReady(DEFAULT_MM3_COVER), false);
-  assert.equal(mm3CoverReady({ ...DEFAULT_MM3_COVER, plan: false, sound: true }), true);
-  assert.equal(mm3CoverReady({ ...both, plan: false, sound: false }), false);
+  assert.equal(mm3CoverReady(restored), true);
+  assert.deepEqual(restoreMm3Cover(null), DEFAULT_MM3_COVER);
+});
+
+test('trim, planner seed and launder settings survive restore', () => {
+  const restored = restoreMm3Cover({ launderSteps: 40, launderSeed: -1, launderCaption: 'acoustic guitar', trimSeconds: '12', arSeed: 9 });
+  assert.equal(restored.launderSteps, 40);
+  assert.equal(restored.launderSeed, -1);
+  assert.equal(restored.launderCaption, 'acoustic guitar');
+  assert.equal(mm3CoverInput(restored).trimSeconds, 12);
+  assert.equal(mm3CoverInput(restored).arSeed, 9);
+  assert.equal(mm3CoverInput({ ...restored, trimSeconds: 'bad' }).trimSeconds, null);
 });

@@ -243,6 +243,7 @@ Details: [Cover Studio](docs/user/studios/cover-studio.md)
 | Target artist (ACE-Step) | Fills the style description from an artist profile, or drafts one with an LLM, and loads a matching album adapter preset. |
 | Structure Fidelity (ACE-Step) | Controls how closely the output follows the source arrangement. |
 | Source Preservation and noise method (ACE-Step) | Starts from source audio with Classic or Full Denoise noise methods. |
+| MiniMax-Music3 cover | Launders the source into a reusable plank with steps, seed and source caption controls, then covers its semantic codes under a target caption. Launder settings appear in song facts. |
 | NoFSQ mode (ACE-Step) | Skips FSQ quantisation in the cover path. |
 | Tempo and pitch (ACE-Step) | 0.5x to 2x tempo and -12 to +12 semitones, with the target key shown. |
 | Timbre reference (ACE-Step) | A second reference track for the DiT's timbre conditioning. |

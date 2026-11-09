@@ -15,6 +15,17 @@ request capture, and the engine capability manifest are in
 The C++ engine has its own HTTP API on port 8085, used only by the Node server. Its request
 format is documented in [engine/docs/ARCHITECTURE.md](../../engine/docs/ARCHITECTURE.md).
 
+MM3 cover encoding uses `POST /api/mm3/cover/encode` with `sourceAudioUrl`, optional
+`sourceName`, and `launder: true` for the Cover Studio path. API callers can omit
+`launder` for plain encoding. Laundering accepts `launderSteps` (integer 1..1000,
+default 30), `launderSeed` (safe integer >= -1, default 42; -1 chooses a random
+seed), and `launderCaption` (source description, at most 2000 characters). Blank
+caption uses "a full song with vocals and instruments". The older `caption` field
+is an alias when `launderCaption` is absent. The response is `{ jobId, plank }`;
+poll `/api/training/jobs/:jobId` until done. The plank sidecar saves the actual
+steps, seed and caption, copied into cover song facts as `mm3PlankLaunderSteps`,
+`mm3PlankLaunderSeed` and `mm3PlankLaunderCaption`. LM quant remains Q8_0.
+
 Conventions:
 
 - Long-running work (generation, training, separation, transcription) is submitted with a

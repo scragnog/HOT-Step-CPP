@@ -63,7 +63,7 @@ import { readLeadSheetSource, selectedLeadSheetSource, leadSheetReadinessPath, l
 import { documentOptions } from '../../queries/cover-lyrics/workflows';
 import { HeartmulaCoverPanel } from './HeartmulaCoverPanel';
 import { Mm3CoverPanel } from './Mm3CoverPanel';
-import { DEFAULT_MM3_COVER, mm3CoverInput, mm3CoverReady, type Mm3CoverSettings } from './mm3CoverState';
+import { restoreMm3Cover, mm3CoverInput, mm3CoverReady, type Mm3CoverSettings } from './mm3CoverState';
 import { EMPTY_HEARTMULA_TAGS, type HeartmulaCoverTags } from './heartmulaCoverState';
 import { Yue2CoverPanel, COVER_AR_DEFAULT, clampCoverAr, COVER_GUIDE_DEFAULT, coverGuideBlock, type CoverGuideState } from './Yue2CoverPanel';
 import { resolveYue2Render, type Yue2RenderMode } from './yue2RenderMode';
@@ -157,7 +157,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
   // MM3 covers replay the source's encoded codes (a plank): no score, no ACE settings.
   const mm3Mode = useBackendStore(s => s.activeBackendId === 'minimax-m3') && capabilities?.features.coverCodeForcing === true;
   const audioOnly = audioTransformMode || mm3Mode;
-  const [mm3Cover, setMm3Cover] = useState<Mm3CoverSettings>(() => ({ ...DEFAULT_MM3_COVER, ...restore<Partial<Mm3CoverSettings>>('mm3Cover', {}) }));
+  const [mm3Cover, setMm3Cover] = useState<Mm3CoverSettings>(() => restoreMm3Cover(restore('mm3Cover', {})));
   useEffect(() => { persist('mm3Cover', mm3Cover); }, [mm3Cover]);
   const [heartmulaTags, setHeartmulaTags] = useState(() => restore<HeartmulaCoverTags>('heartmulaTags', EMPTY_HEARTMULA_TAGS));
   const [heartmulaSeed, setHeartmulaSeed] = useState(() => restore('heartmulaSeed', -1));
@@ -688,7 +688,7 @@ export const CoverStudio: React.FC<CoverStudioProps> = ({ coverSource }) => {
     setSongTitle(s.title || '');
     if (s.artistName) setSongArtist(s.artistName);
     setLyrics(s.lyrics || gpData.lyrics || '');
-    setArtistCaption(s.style || s.caption || gpData.caption || '');
+    setArtistCaption(mm3Mode ? '' : s.style || s.caption || gpData.caption || '');
 
     // Instrumental / vocal intent
     const lyr = (s.lyrics || gpData.lyrics || '').trim().toLowerCase();

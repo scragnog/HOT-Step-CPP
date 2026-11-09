@@ -216,6 +216,9 @@ function mm3Facts(gp: any): FactGroup[] {
       add(cover, 'Laundered', gp.mm3PlankLaundered ? 'Yes' : 'No',
         gp.mm3PlankLaunderModels ? { title: String(gp.mm3PlankLaunderModels) } : undefined);
     }
+    if (gp.mm3PlankLaunderSteps !== undefined) add(cover, 'Launder steps', num(gp.mm3PlankLaunderSteps));
+    if (gp.mm3PlankLaunderSeed !== undefined) add(cover, 'Launder seed', String(gp.mm3PlankLaunderSeed));
+    if (gp.mm3PlankLaunderCaption !== undefined) add(cover, 'Source caption', String(gp.mm3PlankLaunderCaption));
     add(cover, 'Forcing', gp.mm3PlankSemanticOnly ? 'Semantic only' : 'Full replay');
     if (gp.mm3PlankSemanticOnly) {
       add(cover, 'Bias', gp.mm3ForceBias === '' || gp.mm3ForceBias === undefined ? 'Hard pin' : num(gp.mm3ForceBias));

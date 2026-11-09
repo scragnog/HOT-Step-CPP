@@ -108,32 +108,33 @@ the full uploaded audio sent to the transform.
 
 ## MiniMax-Music3 cover
 
-On MiniMax-Music3 the right column holds two switches under **Source influence**.
-Use either or both.
+On MiniMax-Music3, **Encode source** always launders the loaded recording through
+MM3's flow stage before encoding it into a reusable plank. It takes about as long
+as the clip and needs about 14.5 GB of VRAM. Encoding stops the engine; wait for
+other generation or training jobs to finish first. Model Manager provides the
+rec7 and audio encoder models, and the panel lists missing files. During encoding
+the button shows the phase and elapsed seconds.
 
-- **Plan** steers what the LM planner writes. **Encode source** turns the loaded
-  source into MM3 codes, saved as a reference you can pick again later. The
-  levers set how tightly the codes are held: semantic codes only, force bias
-  (blank pins every frame), which frames are forced, and a trim. Off sends no
-  codes, and the planner writes its own song from the caption and lyrics.
-  **Launder source (slower, experimental)**, off by default, re-renders the
-  source through MM3's own flow stage under the caption below before encoding,
-  so the codes come from MM3-made audio. Fill in the caption first. It takes about as long as the clip itself, needs about
-  14.5 GB of VRAM (the engine is stopped while it runs) and the rec7 state
-  encoder from Model Manager; the panel lists any missing file. A laundered
-  reference carries a "laundered" tag in the list, and the song's facts record
-  whether its reference was laundered.
-- **Sound** steers how the render sounds. The source audio is blended into the
-  flow stage, so its harmony, rhythm placement and energy carry over.
-  **Strength** (0 to 1) sets how much of the source survives: 1 gives the source
-  back, and higher values also render faster because the steps before that point
-  are skipped. **Hold** (0 to 1) puts the source back at the start of that share
-  of the remaining steps, keeping the render closer to it. Without Plan the
-  render is as long as the source, and the planner can pull against it, so start
-  with Plan on. With both on, the trim applies to the source audio too.
+The **Launder** group controls that source render:
 
-Caption, lyrics, seed and planner seed sit below. LM sampling and the LM adapter
-come from the MM3 settings in the top bar. Each cover is one take.
+- **Launder steps**, default 30, sets the number of flow steps.
+- **Launder seed**, default 42. Use -1 to choose a random seed. The actual seed
+  is saved so the encode can be repeated.
+- **Source caption** describes the SOURCE as it sounds, not the target style.
+  It defaults to "a full song with vocals and instruments"; blank uses that same
+  neutral caption. The launder LM stays at Q8_0.
+
+Pick the encoded plank from **Reference**. Laundered references carry a
+"laundered" tag; old raw planks remain available. **Trim to seconds** keeps the
+first part of a plank; blank uses all of it. Covers always hard-pin semantic
+codes. The target caption and LM adapter shape the sound.
+
+**Caption** starts empty. Enter the target style for the cover in MM3 caption
+format; do not describe the source here. The source's words are kept; **Lyrics**
+gives the planner context. **Seed** controls the cover render, and **Planner
+seed** overrides its planner seed. LM sampling, the LM adapter and flow settings
+come from the MM3 top bar. Each cover is one take. The song facts show the plank's
+launder status, steps, actual seed and source caption when available.
 
 ## ACE workflow
 

@@ -59,7 +59,12 @@ export function mm3PlankProvenance(plank: string): Record<string, unknown> {
   const meta = readMm3PlankMeta(plank);
   if (typeof meta?.laundered !== 'boolean') return {};
   return { mm3PlankLaundered: meta.laundered,
-    ...(meta.laundered ? { mm3PlankLaunderModels: [meta.rec7, meta.encoder].filter(Boolean).join(', ') } : {}) };
+    ...(meta.laundered ? {
+      mm3PlankLaunderModels: [meta.rec7, meta.encoder].filter(Boolean).join(', '),
+      ...(meta.launderSteps !== undefined ? { mm3PlankLaunderSteps: meta.launderSteps } : {}),
+      ...(meta.launderSeed !== undefined ? { mm3PlankLaunderSeed: meta.launderSeed } : {}),
+      ...(meta.launderCaption !== undefined ? { mm3PlankLaunderCaption: meta.launderCaption } : {}),
+    } : {}) };
 }
 
 export function effectiveCoverRequest(i: CoverRenderInput, d: CoverDraft, url: string): Record<string, unknown> {

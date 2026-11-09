@@ -1157,6 +1157,8 @@ export interface Mm3CodesArgs {
    *  (deftones A/B, 2026-08-31). Off = plain mm3-codes, byte-identical to the
    *  pipeline before this option existed. */
   launder?: boolean;
+  launderSteps?: number;
+  launderSeed?: number;
   /** Re-encode from scratch: the cache (and the prior capture beside it) is cleared before the job. */
   force?: boolean;
   /** Only tracks whose name contains this text (case-insensitive). */
@@ -1196,6 +1198,8 @@ export function buildMm3CodesArgs(a: Mm3CodesArgs): string[] {
         '--rec7', m.rec7,
         '--models', mm3ModelDir(),
         '--out', a.outDir,
+        '--steps', String(a.launderSteps ?? 30),
+        '--seed', String(a.launderSeed ?? 42),
       ]
     : [
         'mm3-codes', '--jsonl',

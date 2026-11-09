@@ -149,9 +149,9 @@ export const coverRenderSchema = coverDraftRefSchema.extend({
   mm3Cover: z.object({
     plank: z.string().min(1).nullable(), semanticOnly: z.boolean(),
     soundStrength: z.number().gt(0).max(1).nullable().optional(), soundHold: z.number().min(0).max(1).optional(),
-    forceBias: z.number().min(0).max(1000).nullable(),
+    forceBias: z.number().min(0).max(1000).nullable().optional(),
     pattern: z.object({ prefixSeconds: z.number().positive().optional(), anchorEvery: z.number().int().positive().optional(),
-      pinnedRanges: z.array(z.tuple([z.number().min(0), z.number().positive()])).optional(), invert: z.boolean().optional() }).nullable(),
+      pinnedRanges: z.array(z.tuple([z.number().min(0), z.number().positive()])).optional(), invert: z.boolean().optional() }).nullable().optional(),
     trimSeconds: z.number().positive().nullable(),
     arSeed: z.number().int().min(-1).max(Number.MAX_SAFE_INTEGER),
   }).optional(),

@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { config } from '../../config.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
@@ -531,4 +534,32 @@ test('the Melody to Ins choice in engineParams reaches the YuE2 render request',
   assert.equal(effectiveCoverRequest(resting, asset, '/references/source.wav').yue2InstrumentalMode, 'resting');
   const plain = { ...input, expectedBackend: 'yue2' as const, instrumental: true };
   assert.equal(effectiveCoverRequest(plain, asset, '/references/source.wav').yue2InstrumentalMode, undefined);
+});
+
+
+test('MM3 panel request omits retired controls and carries the plank launder settings', t => {
+  const root = fs.mkdtempSync(path.resolve('.test-mm3-cover-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.mock.getter(config.data, 'audioDir', () => path.join(root, 'audio'));
+  fs.mkdirSync(path.join(root, 'mm3-planks'));
+  fs.writeFileSync(path.join(root, 'mm3-planks', 'source.mm3plank.json'), JSON.stringify({
+    laundered: true, launderSteps: 45, launderSeed: 0, launderCaption: 'acoustic guitar and vocals',
+  }));
+  const parsed = coverRenderSchema.parse({ ...input, expectedBackend: 'minimax-m3',
+    mm3Cover: { plank: 'source.mm3plank', semanticOnly: true, trimSeconds: 12, arSeed: -1 } });
+  const request = effectiveCoverRequest(parsed, { assetId: 'asset', sha256: 'sha' }, '/references/source.wav');
+  assert.equal(request.mm3PlankSemanticOnly, true);
+  assert.equal(request.mm3PlankTrimSeconds, 12);
+  assert.equal(request.mm3ForceBias, '');
+  assert.equal(request.mm3ForcePattern, undefined);
+  assert.equal(request.mm3A2aStrength, '');
+  assert.equal(request.mm3PlankLaundered, true);
+  assert.equal(request.mm3PlankLaunderSteps, 45);
+  assert.equal(request.mm3PlankLaunderSeed, 0);
+  assert.equal(request.mm3PlankLaunderCaption, 'acoustic guitar and vocals');
+  // Existing API callers can still use the controls removed from the panel.
+  assert.doesNotThrow(() => coverRenderSchema.parse({ ...parsed, mm3Cover: {
+    ...parsed.mm3Cover, semanticOnly: false, soundStrength: 0.1, soundHold: 0.2,
+    forceBias: 16, pattern: { prefixSeconds: 5 },
+  } }));
 });
