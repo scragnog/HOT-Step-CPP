@@ -583,6 +583,17 @@ static std::string mm3_ar_cache_key(const MM3Model & m, const MM3SynthRequest & 
         }
         add_codes("gg", gate_bits);
     }
+    // The blend is applied to the hiddens the cache stores. Path and size name
+    // the block; a re-encode writes a new file name.
+    if (!req.gen.lm_blend_file.empty()) {
+        long long sz = -1;
+        if (FILE * f = hs_fopen(req.gen.lm_blend_file, "rb")) {
+            MM3_FSEEK(f, 0, SEEK_END);
+            sz = (long long) MM3_FTELL(f);
+            fclose(f);
+        }
+        add_s("bl", req.gen.lm_blend_file + "," + std::to_string(sz) + "," + std::to_string(req.gen.lm_blend_amount));
+    }
 
     // The models and the adapter — the half a saved file is checked against.
     mm3_ar_key_add_models(k, m, req, merge_backend);

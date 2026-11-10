@@ -1525,6 +1525,17 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
             }
             Yue2Guide & g = out->gen.lm_guide;
             if (!yue2_guide_read(gpath, &g, err)) { return false; }
+            // Trim: keep the first N seconds of the guide (Cover Studio's trim).
+            {
+                double secs = 0.0;
+                if (!mm3_req_num(root, "lm_guide_seconds", &secs, &present, err)) { return false; }
+                const int64_t keep = present && secs > 0.0 ? (int64_t) std::llround(secs * (double) frame_rate) : 0;
+                if (keep > 0 && keep < g.T) {
+                    g.T = keep;
+                    g.ids.resize((size_t) (g.T * g.K));
+                    g.lp.resize((size_t) (g.T * g.K));
+                }
+            }
             for (const int32_t id : g.ids) {
                 if (id < 0 || id >= 16384) {
                     if (err) { *err = "\"lm_guide_file\" holds codes outside the MM3 semantic range"; }
@@ -1568,6 +1579,32 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
             out->max_frames     = std::min<int64_t>(g.T, 9000);
             out->duration       = (double) out->max_frames / (double) frame_rate;
             out->gen.max_frames = out->max_frames;
+        }
+    }
+
+    // State blend (MM3ArOptions::blend): the emitted hiddens move toward a
+    // saved block, typically the source's launder. Read on the worker.
+    {
+        std::string bpath;
+        double      amount = 0.0;
+        bool        have_amount = false;
+        if (!mm3_req_str(root, "lm_blend_file", &bpath, &present, err) ||
+            !mm3_req_num(root, "lm_blend_amount", &amount, &have_amount, err)) {
+            return false;
+        }
+        if (!bpath.empty() && have_amount && amount > 0.0) {
+            if (!out->forced_frame_hiddens_file.empty()) {
+                if (err) { *err = "\"lm_blend_file\" needs a planned render; it cannot blend a \"forced_frame_hiddens_file\" replay"; }
+                return false;
+            }
+            FILE * f = hs_fopen(bpath, "rb");
+            if (!f) {
+                if (err) { *err = "\"lm_blend_file\" not found: " + bpath; }
+                return false;
+            }
+            fclose(f);
+            out->gen.lm_blend_file   = bpath;
+            out->gen.lm_blend_amount = (float) std::min(1.0, amount);
         }
     }
 

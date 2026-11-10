@@ -250,6 +250,12 @@ struct MM3ArOptions {
     // guide_product >= 0 replaces the probability mix with a product rule on the
     // candidates only: a * ln p_enc + ln p_LM. < 0 = off (the mix).
     float             guide_product = -1.0f;
+    // State blend: [blend_frames, NC+1, H], the emitted hiddens of frame f move
+    // blend_amount of the way toward frame f of this block (frames past its end
+    // are left alone). Null = off. Needs collect_hiddens.
+    const float *     blend        = nullptr;
+    int64_t           blend_frames = 0;
+    float             blend_amount = 0.0f;
 
     int64_t dump_iters      = 0;
     bool    collect_hiddens = true;
@@ -1401,6 +1407,19 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                     outs[t].frame_hiddens.insert(outs[t].frame_hiddens.end(), hc, hc + H);
                     outs[t].frame_hiddens.insert(outs[t].frame_hiddens.end(), frames[(size_t) t].hiddens.begin(),
                                                  frames[(size_t) t].hiddens.end());
+                    // State blend: every stream of this frame moves toward the
+                    // matching frame of another block (a launder's). Output
+                    // only; the LM and its feedback never see it.
+                    const int64_t f = outs[t].n_frames;
+                    if (opt.blend && f < opt.blend_frames) {
+                        const int64_t FH = (NC + 1) * H;
+                        float *       dst = outs[t].frame_hiddens.data() + (size_t) (f * FH);
+                        const float * src = opt.blend + (size_t) (f * FH);
+                        const float   a   = opt.blend_amount;
+                        for (int64_t i = 0; i < FH; i++) {
+                            dst[i] += a * (src[i] - dst[i]);
+                        }
+                    }
                 }
                 outs[t].n_frames++;
                 frames_done[(size_t) t] = outs[t].n_frames;

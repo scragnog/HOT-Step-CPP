@@ -99,6 +99,7 @@
 
 #include "mm3-ar-loop.h"
 #include "mm3-cond-graph.h"
+#include "mm3-hiddens-file.h"
 #include "mm3-dit-graph.h"
 #include "mm3-model.h"
 #include "mm3-plugins.h"
@@ -791,6 +792,8 @@ struct MM3GenRequest {
     bool               lm_depth_greedy = false;  // MM3ArOptions::depth_greedy
     int                lm_state_fix    = 0;      // MM3ArOptions::state_fix
     float              lm_guide_product = -1.0f; // MM3ArOptions::guide_product
+    std::string        lm_blend_file;            // MM3ArOptions::blend, a .mm3hiddens path
+    float              lm_blend_amount = 0.0f;
     uint64_t seed       = 42;
     int      steps      = 30;
     float    cfg_flow   = 1.7f;
@@ -1176,6 +1179,29 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
         aopt.depth_greedy = req.lm_depth_greedy;
         aopt.state_fix    = req.lm_state_fix;
         aopt.guide_product = req.lm_guide_product;
+    }
+    // State blend: read on the worker, held for the AR run only (~3.2 MB/s of song).
+    std::vector<float> blend_block;
+    if (!req.lm_blend_file.empty() && req.lm_blend_amount > 0.0f) {
+        MM3HiddensFile hf;
+        std::string    berr;
+        if (!mm3_hiddens_read(req.lm_blend_file, &hf, &berr)) {
+            if (err) *err = "lm_blend_file: " + berr;
+            return false;
+        }
+        if (hf.num_codebooks != (int64_t) m.lm_cfg.num_codebooks ||
+            hf.embedding_len != (int64_t) m.lm_cfg.embedding_length) {
+            if (err) *err = "lm_blend_file holds [F, " + std::to_string((long long) hf.num_codebooks) + ", " +
+                            std::to_string((long long) hf.embedding_len) + "]; this model needs [F, " +
+                            std::to_string(m.lm_cfg.num_codebooks) + ", " + std::to_string(m.lm_cfg.embedding_length) + "]";
+            return false;
+        }
+        blend_block       = std::move(hf.hiddens);
+        aopt.blend        = blend_block.data();
+        aopt.blend_frames = hf.frames;
+        aopt.blend_amount = std::min(1.0f, req.lm_blend_amount);
+        fprintf(stderr, "[MM3-AR] state blend %.2f toward %s (%lld frames)\n", (double) aopt.blend_amount,
+                req.lm_blend_file.c_str(), (long long) hf.frames);
     }
     aopt.should_cancel = req.should_cancel;
 
