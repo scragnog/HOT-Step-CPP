@@ -60,6 +60,11 @@ export function resolveDuration(
   if (getUseLlmDuration() && llmDuration && llmDuration > 0) {
     return llmDuration;
   }
+  // An instrumental track has no lyric lines to measure: the estimate below
+  // would clamp to its 90s floor whatever the track is. Keep the stored length.
+  if (lyrics.trim() === '[Instrumental]') {
+    return llmDuration && llmDuration > 0 ? llmDuration : fallback;
+  }
   const estimated = estimateDuration(lyrics, bpm);
   return estimated > 0 ? estimated : fallback;
 }
