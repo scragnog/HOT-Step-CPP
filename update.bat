@@ -112,6 +112,9 @@ REM Save current HEAD (and the ggml submodule pointer) for later
 for /f "tokens=*" %%h in ('git rev-parse HEAD 2^>nul') do set "OLD_HEAD=%%h"
 for /f "tokens=*" %%h in ('git rev-parse HEAD:engine/ggml 2^>nul') do set "OLD_GGML=%%h"
 
+REM npm install can rewrite these generated lockfiles across npm versions.
+git checkout -- server/package-lock.json ui/package-lock.json
+
 REM Check for uncommitted changes to TRACKED files only.
 REM
 REM   --ignore-submodules=dirty: engine/ggml is checked on its own just below.
