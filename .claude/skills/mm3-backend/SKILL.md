@@ -37,6 +37,16 @@ the genre tail. Selecting an album applies its saved `mm3_adapter_path` through
 the global params store. Match 100 omits forceBias for semantic hard pinning;
 below 100 it sends `round(10^(3 * match/100))`, shown as bias in song facts.
 Trim and planner seed remain; patterns and audio2audio remain API-only.
+Source guide (`lm_guide_*`, API `mm3Guide*`; `--guide-k` on mm3-codes/mm3-launder)
+ports YuE2's Follow-source mix to the semantic draw: the LM picks among the
+encoder's top-K codes. Guide frame j is emitted frame j and iteration 0 reads
+frame 0. Scale 1 with k 1 is byte-identical to the hard pin; keep that gate when
+touching the loop. Round 8 of the cover probe (one real song, K 32): agreement
+with the source tracks the scale almost linearly, and even at 0.9 the LM puts
+only about 0.2 of its mass on the candidates. The guide lowers the cost of
+following, but it does not make the LM agree. A vocal-forward source (backing
+-12 dB) raised adapter word recall from 0.43 to 0.83. Vocal only comes back
+spectrally off (LTAS about 20 dB), and a second pass loses words.
 
 Deep docs (local, gitignored): `docs/plans/multi-backend-architecture.md` (architecture plan,
 day-0 findings, op inventory) and `docs/plans/mm3-gguf-layout.md` (GGUF contract + loader
