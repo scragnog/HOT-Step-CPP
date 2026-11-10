@@ -60,9 +60,10 @@ export const Mm3LadderRows: React.FC<{
   /** The last Render that failed, shown on its rung as YuE2 shows a failed take. */
   renderError?: { step: number; message: string } | null;
   picking: boolean;
+  pickError?: { step: number; message: string } | null;
   onRender: (step: number) => void;
   onUse: (step: number) => void;
-}> = ({ ladder, review, header, rendering, renderError, picking, onRender, onUse }) => {
+}> = ({ ladder, review, header, rendering, renderError, picking, pickError, onRender, onUse }) => {
   const { t } = useTranslation();
   const { blind } = review;
   const label = (step: number) => ladder.blindLabels[step] ?? '';
@@ -108,8 +109,11 @@ export const Mm3LadderRows: React.FC<{
           {r.ref && r.step === best && <span className="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-700 dark:text-sky-300 text-[10px] font-semibold">{t('trainingStudio.refine.bestBadge', 'best by score')}</span>}
           {o !== null && <span className="font-mono text-sky-700 dark:text-sky-300" title={t('trainingStudio.mm3.overallInfo', 'overall = (likeness + (6 − corruption)) / 2')}>{t('trainingStudio.refine.overall', 'overall {{n}}', { n: o.toFixed(2) })}</span>}
         </>,
-        children: r.ref ? <RungScoreRow score={review.scores[r.step]} note={review.notes[r.step]}
-          onNote={v => review.onNote(r.step, v)} onScore={patch => review.onScore(r.step, patch)} /> : undefined,
+        children: <>
+          {r.ref && <RungScoreRow score={review.scores[r.step]} note={review.notes[r.step]}
+            onNote={v => review.onNote(r.step, v)} onScore={patch => review.onScore(r.step, patch)} />}
+          {pickError?.step === r.step && <div role="alert" className="mt-2 text-xs text-rose-600 dark:text-rose-400">{pickError.message}</div>}
+        </>,
         inUse: !!r.ref && sameRef(ladder.inUse, r.ref),
         canRender: r.base || !!r.ref,
         onUse: r.ref ? () => onUse(r.step) : undefined,

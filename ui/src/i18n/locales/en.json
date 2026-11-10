@@ -1,5 +1,6 @@
 {
   "translation": {
+    "trainingStudio.mm3.useDatasetRung": "{{name}} is now this dataset's LM adapter.",
     "cover.mm3.generate": "Generate cover",
     "cover.mm3.globalBar": "One take per cover. LM sampling (temperature, top-k, top-p, repetition) and the LM adapter and its scales come from the MM3 settings in the top bar, as for any MM3 render.",
     "cover.mm3.arSeedInfo": "Seed for the LM planner. -1 follows the seed.",

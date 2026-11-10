@@ -22,8 +22,8 @@ const ladder = (o: Partial<Mm3Ladder> = {}): Mm3Ladder => ({
   previews: [take(), take({ id: 'base', base: true, step: 0, file: 'base-artist.wav' }), take({ id: 'gone', step: 50 })], ...o,
 });
 const review = (o: Partial<Mm3ReviewState> = {}): Mm3ReviewState => ({ blind: false, scores: {}, notes: {}, onNote: () => {}, onScore: () => {}, idPrefix: 't', ...o });
-const render = (l: Mm3Ladder, r = review(), o: { rendering?: number | null; renderError?: { step: number; message: string } } = {}) =>
-  renderToStaticMarkup(createElement(Mm3LadderRows, { ladder: l, review: r, rendering: o.rendering ?? null, renderError: o.renderError, picking: false, onRender: () => {}, onUse: () => {} }));
+const render = (l: Mm3Ladder, r = review(), o: { rendering?: number | null; renderError?: { step: number; message: string }; pickError?: { step: number; message: string } } = {}) =>
+  renderToStaticMarkup(createElement(Mm3LadderRows, { ladder: l, review: r, rendering: o.rendering ?? null, renderError: o.renderError, pickError: o.pickError, picking: false, onRender: () => {}, onUse: () => {} }));
 
 // Base first, then every checkpoint, plus a step whose checkpoint is gone
 // (listen only: it has no Use button).
@@ -72,4 +72,10 @@ test('takes download as WAV under the dataset, rung and seed; a pending or faile
   assert.match(render(ladder(), review({ blind: true })), /download="Album_rungB_take1_seed424242\.wav"/);
   assert.match(render(ladder(), review(), { rendering: 200 }), /Step 200[\s\S]*Take 1: pending/);
   assert.match(render(ladder(), review(), { renderError: { step: 100, message: 'engine down' } }), /Take 2: failed — engine down/);
+});
+
+test('a failed pick appears only beside the rung that was clicked', () => {
+  const html = render(ladder(), review(), { pickError: { step: 100, message: 'Checkpoint changed; reload the ladder' } });
+  assert.match(html, /Step 100[\s\S]*role="alert"[^>]*>Checkpoint changed; reload the ladder[\s\S]*Step 200/);
+  assert.equal(html.match(/Checkpoint changed; reload the ladder/g)?.length, 1);
 });

@@ -54,6 +54,8 @@ export const Mm3CheckpointLadder: React.FC<{
   const idPrefix = `mm3-rung-${run}`;
 
   const [renderError, setRenderError] = useState<{ step: number; message: string } | null>(null);
+  const [pickError, setPickError] = useState<{ step: number; message: string } | null>(null);
+  useEffect(() => { setPickError(null); }, [datasetId, run]);
   const renderMut = useMutation({
     mutationFn: (step: number) => renderMm3LadderTake(datasetId, run, step, renderOpts),
     onMutate: () => { setError(''); setRenderError(null); },
@@ -116,17 +118,17 @@ export const Mm3CheckpointLadder: React.FC<{
       if (!fresh.checkpoints.some(c => c.step === step)) throw new Error('That checkpoint is no longer on disk. Reload the ladder.');
       return { dataset: fresh.dataset, ...(await selectMm3Checkpoint(fresh.dataset, run, step)) };
     },
-    onMutate: () => { setError(''); setNote(''); },
+    onMutate: () => { setError(''); setNote(''); setPickError(null); },
     onSuccess: (r, step) => {
       setBackendParamFor('minimax-m3', 'mm3LmAdapter', r.ref);
       const name = blind ? rungName(step) : t('trainingStudio.refine.rungStep', 'Step {{step}}', { step });
       setNote(r.presets
         ? t('trainingStudio.mm3.usePresetsRung', '{{name}} is now the LM adapter, and {{count}} album preset(s) use it.', { name, count: r.presets })
-        : t('trainingStudio.mm3.useNoPresetRung', '{{name}} is now the LM adapter. No album preset was linked to this dataset to update, so there is nothing to clean up around.', { name }));
+        : t('trainingStudio.mm3.useDatasetRung', '{{name}} is now this dataset\'s LM adapter.', { name }));
       if (r.plan) setCleanup({ dataset: r.dataset, plan: r.plan, blind, blindLabel: blind ? label(step) : '' });
       refresh();
     },
-    onError: fail,
+    onError: (err, step) => setPickError({ step, message: err instanceof Error ? err.message : String(err) }),
   });
   const cleanupMut = useMutation({
     mutationFn: (over: Yue2CleanupChoice) => cleanupMm3Checkpoint(cleanup!.dataset, run, cleanup!.plan.step, over, cleanup!.blindLabel || undefined),
@@ -193,7 +195,7 @@ export const Mm3CheckpointLadder: React.FC<{
     {labelsPending ? <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-200">
       {t('trainingStudio.refine.labelsPending', 'Blind labels for this run are not in yet — scoring opens once they are.')}
     </div> : <Mm3LadderRows ladder={ladder} rendering={renderMut.isPending ? renderMut.variables ?? null : null} renderError={renderError}
-      picking={selectMut.isPending} onRender={step => renderMut.mutate(step)} onUse={step => selectMut.mutate(step)}
+      picking={selectMut.isPending} pickError={pickError} onRender={step => renderMut.mutate(step)} onUse={step => selectMut.mutate(step)}
       review={{ blind, scores, notes: noteDraft, idPrefix, onScore: score, onNote: (step, v) => setNoteDraft(prev => ({ ...prev, [step]: v })) }}
       header={ladder.checkpoints.length > 0 && <>
         <BlindRungsToggle id={`blind-${idPrefix}`} checked={blindRungs} />

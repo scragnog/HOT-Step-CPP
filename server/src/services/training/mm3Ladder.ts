@@ -16,7 +16,7 @@ import { runOnGpuLane } from '../generation/gpuLane.js';
 import { evictOtherFamilies } from '../generation/residency.js';
 import { getDataset } from './datasetsRepo.js';
 import { activeJobForDataset, gpuPreviewReserved, reserveGpuForPreview, runReservedPreview } from './labelingQueue.js';
-import { mm3PresetRefFor, pointMm3PresetsAt } from './lyricStudioExport.js';
+import { clearMm3LinkedRun, mm3LinkedRefFor, pointMm3PresetsAt, readMm3Linked } from './lyricStudioExport.js';
 import { hasActivePipeline } from './pipelineRunner.js';
 import { withReviewMutation } from './review/operations.js';
 import { deleteMm3RunScores, getMm3AlbumScore, listMm3RungScores, mm3BlindLabels, planMm3Cleanup, prunedMm3Previews, runMm3Cleanup,
@@ -68,7 +68,7 @@ export interface Mm3LadderResponse {
   origin: string | null;
   /** Marked reviewed without scoring every rung (the Review page counts it scored). */
   reviewComplete: boolean;
-  /** The adapter the dataset's album presets use now, or null. */
+  /** The checkpoint recorded for this dataset, or null. */
   inUse: string | null;
   checkpoints: Array<{ step: number; ref: string; loss?: number }>;
   previews: Mm3LadderPreview[];
@@ -89,7 +89,7 @@ export function mm3Ladder(datasetId: string, runName: string): Mm3LadderResponse
   return {
     dataset: { id: ds.id, revision: ds.updatedAt }, datasetName: ds.name,
     run: run.runName, running, createdAt: run.startedAt ?? run.updatedAt, origin: mm3RunOrigin(run.runName),
-    reviewComplete: yue2ReviewComplete(run.dir), inUse: mm3PresetRefFor(ds),
+    reviewComplete: yue2ReviewComplete(run.dir), inUse: mm3LinkedRefFor(ds),
     checkpoints: run.checkpoints.flatMap(c => {
       const ref = mm3CheckpointRef(c.dir);
       return ref ? [{ step: c.step, ref, loss: c.loss }] : [];
@@ -190,7 +190,7 @@ const direction = z.enum(['under', 'right', 'over']).nullable().optional();
 const albumSchema = z.object({ datasetId: z.string(), runName: z.string(),
   score: rating, instruments: direction, vocals: direction, notes: z.string().optional() });
 
-const sameRef = (a: string | null, b: string) => !!a && path.normalize(a).toLowerCase() === path.normalize(b).toLowerCase();
+const sameRef = (a: string | null, b: string) => !!a && path.normalize(a.replace(/[\\/]/g, path.sep)).toLowerCase() === path.normalize(b.replace(/[\\/]/g, path.sep)).toLowerCase();
 function parse<T extends z.ZodType>(schema: T, body: unknown): z.infer<T> {
   const r = schema.safeParse(body);
   if (!r.success) throw fail(400, r.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
@@ -219,9 +219,8 @@ registerTrainingOperations('mm3', (router, deps) => {
     const { ds, run } = runOf(datasetId, runName);
     return { score: scoreMm3Album(ds, run.runName, input) };
   }));
-  /** "Use this checkpoint": the dataset's album presets move to this step.
-   *  Idempotent; picking another step moves them again. When the presets now
-   *  use it, the cleanup plan comes back for the modal. */
+  /** Record the dataset's pick, update existing album presets, and return the
+   *  cleanup plan even when there are no presets. */
   router.post('/select', trainingOp(async req => {
     const { snapshot } = await acceptTrainingSnapshot(req.body, mm3SelectSchema, 'review', deps);
     const pick = snapshot.payload;
@@ -229,12 +228,12 @@ registerTrainingOperations('mm3', (router, deps) => {
     // Under the run's lock, so a finishing mirror pass cannot link its own
     // pick over this one while it is made.
     return withReviewMutation(pick.datasetId, () => withMm3RunLock(pick.runName, async () => {
+      assertDatasetCurrent(snapshot, deps);
       const { ds, run } = runOf(pick.datasetId, pick.runName);
       if (activeJobForDataset(ds.id)) throw fail(409, 'A job is running for this dataset; pick a checkpoint when it ends.');
       const ref = chosenRef(run, pick.step);
       const presets = pointMm3PresetsAt(ds, ref);
-      return { ref, presets, plan: sameRef(mm3PresetRefFor(ds), ref)
-        ? { ...planMm3Cleanup(ds, run, pick.step), otherRuns: otherRunsItem(otherMm3Runs(ds, run.runName)) } : null };
+      return { ref, presets, plan: { ...planMm3Cleanup(ds, run, pick.step), otherRuns: otherRunsItem(otherMm3Runs(ds, run.runName)) } };
     }));
   }));
   /** Cleanup around the chosen step, only while it is still the linked
@@ -252,7 +251,9 @@ registerTrainingOperations('mm3', (router, deps) => {
         const { ds, run, running } = runOf(pick.datasetId, pick.runName);
         if (running || activeJobForDataset(ds.id) || hasActivePipeline()) throw fail(409, 'A job or pipeline is active for this dataset');
         if (gpuPreviewReserved()) throw fail(409, PREVIEW_BUSY);
-        if (!sameRef(mm3PresetRefFor(ds), chosenRef(run, pick.step))) throw fail(409, 'This checkpoint is no longer the linked adapter');
+        assertMm3CleanupLinked(mm3LinkedRefFor(ds), chosenRef(run, pick.step),
+          pick.choice.otherCheckpoints ? run.checkpoints.filter(c => c.step !== pick.step).map(c => c.dir) : [],
+          getAllPresets().flatMap(p => typeof p.mm3_adapter_path === 'string' ? [p.mm3_adapter_path] : []));
         if (pick.blindLabel && pick.blindLabel !== mm3BlindLabels(run)[pick.step]) throw fail(409, 'Blind label no longer identifies the selected rung');
         return { ds, run, result: runMm3Cleanup(ds, run, pick.step, pick.choice) };
       });
@@ -282,7 +283,18 @@ registerTrainingOperations('mm3', (router, deps) => {
 function otherMm3Runs(ds: { id: string; slug: string }, keep: string) {
   const job = activeJobForDataset(ds.id);
   const live = job?.kind === 'mm3-train-lm' ? path.resolve(String((job.opts as { outDir?: string } | undefined)?.outDir || '')) : '';
-  return listMm3Runs(ds.id, ds.slug).filter(r => r.runName !== keep && path.resolve(r.dir) !== live && !yue2RunFinished(r.dir) && !presetsUsing(r.runName).length);
+  return listMm3Runs(ds.id, ds.slug).filter(r => r.runName !== keep && path.resolve(r.dir) !== live && !yue2RunFinished(r.dir) && !presetsUsing(r.runName).length && !recordUsesRun(r.runName));
+}
+
+/** Validate the link and every checkpoint folder about to be deleted. */
+function assertMm3CleanupLinked(linked: string | null, chosen: string, deleting: string[], presetRefs: string[]): void {
+  if (!sameRef(linked, chosen)) throw fail(409, 'This checkpoint is no longer the linked adapter');
+  const norm = (p: string) => path.resolve(p.replace(/[\\/]/g, path.sep)).toLowerCase();
+  if (deleting.some(dir => presetRefs.some(ref => norm(path.resolve(mm3AdapterRoot(), ref.replace(/[\\/]/g, path.sep))).startsWith(norm(dir) + path.sep))))
+    throw fail(409, 'An album preset uses a checkpoint that cleanup would delete');
+}
+function recordUsesRun(runName: string): boolean {
+  return Object.values(readMm3Linked()).some(p => p.ref.split(/[\\/]/)[0]?.toLowerCase() === runName.toLowerCase());
 }
 const otherRunsItem = (runs: Array<{ runName: string; sizeBytes: number }>): Yue2CleanupItem =>
   ({ count: runs.length, bytes: runs.reduce((s, r) => s + r.sizeBytes, 0), detail: runs.map(r => r.runName) });
@@ -305,9 +317,11 @@ const PREVIEW_BUSY = 'A checkpoint preview is rendering; try again when it ends.
 function assertRemovable(datasetId: string, runName: string, unlink: boolean): void {
   if (gpuPreviewReserved()) throw fail(409, PREVIEW_BUSY);
   if (runOf(datasetId, runName).running) throw fail(409, 'That run is still training; stop it first');
+  if (recordUsesRun(runName) && !unlink) throw fail(409, 'The dataset uses a checkpoint of this run. Use a checkpoint of another run first.');
   const linked = presetsUsing(runName);
   if (linked.length && !unlink) throw fail(409, 'An album preset uses a checkpoint of this run. Use a checkpoint of another run first.');
   for (const p of linked) clearMm3AdapterPath(p.lyricsSetId);
+  if (unlink) clearMm3LinkedRun(runName);
 }
 
 /** DELETE /datasets/:id/mm3-runs/:run — the run folder and its mirror record.

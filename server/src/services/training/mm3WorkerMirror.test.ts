@@ -357,6 +357,8 @@ test('cleanup revalidates the linked checkpoint after waiting for a finishing mi
     assert.ok(waiting, 'cleanup reached the review lock');
     release!();
     await pass;
+    const { readMm3Linked } = await import('./lyricStudioExport.js');
+    assert.equal(readMm3Linked().cleanrace?.ref, path.join(name, 'ckpt-200', 'adapter_model.safetensors'));
     const res = await response;
     const result = await res.json();
     const linked = String(getPreset(Number(lyrics.id))!.mm3_adapter_path);

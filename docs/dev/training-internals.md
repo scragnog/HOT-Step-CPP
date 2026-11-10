@@ -138,8 +138,14 @@ uses the preview prompt the run recorded in `hotstep-run.json`
 (`previewPlan`), so a caption edit or a cleared codes cache does not change
 or break it; a run from before that resolves it once and records it. "Use this
 checkpoint" is the `mm3/select` operation (`services/training/mm3Ladder.ts`),
-which points the dataset's album presets at the step (`pointMm3PresetsAt`, the
-same rule a finished run uses) and sets the global LM adapter. `previewSource`
+which records the dataset slug's chosen reference in `<training>/mm3-linked.json`
+using YuE2's atomic JSON pattern, updates any existing album presets
+(`pointMm3PresetsAt`, the same function the local runner and worker mirror use
+at run end), and sets the global LM adapter. Like YuE2, a linked album without
+a preset row gets a durable record but no new preset row. The record drives
+`inUse`, cleanup eligibility and run deletion; presets are also checked
+independently so cleanup never removes a checkpoint they use. Older datasets
+fall back to their existing preset reference until their next pick. `previewSource`
 records where each target's previews come from: `yue2-ladder`, `mm3-ladder`,
 `sa3-previews` or `none`. ACE is
 `none`: it has no checkpoint exports or renderer, so it keeps Audition. SA3
