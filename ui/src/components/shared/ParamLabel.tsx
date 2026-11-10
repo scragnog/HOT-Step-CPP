@@ -42,6 +42,10 @@ import { useTranslation } from 'react-i18next';
 const CARD_W = 340;
 const GAP = 10;      // breathing room between the card and whatever it flanks
 const MIN_CARD_H = 120;
+// Hover waits this long before a card opens, so sweeping the pointer along a
+// toolbar on the way to a button does not throw a card up for every icon it
+// crosses. Keyboard focus and a click on the "?" still open it at once.
+const SHOW_DELAY = 500;
 
 interface Props {
   /** The field name, shown as the label and as the hover card's heading. */
@@ -91,6 +95,12 @@ export function hoverCardIsOpen(): boolean {
   return openCardCount > 0;
 }
 
+// Closes whichever card is up. Only one card shows at a time: a new one takes
+// the old one down instead of stacking over it during its hide grace. While a
+// card is up, the next hover opens at once, so reading along a row of buttons
+// does not pay the delay at every stop.
+let closeActiveCard: (() => void) | null = null;
+
 /** The nearest ancestor the card should sit beside instead of on top of. */
 function findBoundary(el: HTMLElement | null): HTMLElement | null {
   return el?.closest<HTMLElement>('[data-hovercard-boundary]') ?? null;
@@ -111,6 +121,7 @@ export const ParamLabel: React.FC<Props> = ({
   const [pos, setPos] = useState<CardPos | null>(null);
   const anchorRef = useRef<HTMLSpanElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const cancelHide = () => {
     if (hideTimer.current) {
@@ -127,7 +138,13 @@ export const ParamLabel: React.FC<Props> = ({
     // card sat 6px below the label and is not enough now.
     hideTimer.current = setTimeout(() => setOpen(false), 320);
   };
-  useEffect(() => () => cancelHide(), []);
+  const cancelShow = () => {
+    if (showTimer.current) {
+      clearTimeout(showTimer.current);
+      showTimer.current = null;
+    }
+  };
+  useEffect(() => () => { cancelHide(); cancelShow(); }, []);
 
   const measure = useCallback(() => {
     const el = anchorRef.current;
@@ -172,7 +189,17 @@ export const ParamLabel: React.FC<Props> = ({
   useEffect(() => {
     if (!open) return;
     openCardCount += 1;
-    return () => { openCardCount -= 1; };
+    const close = () => {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+      hideTimer.current = null;
+      setOpen(false);
+    };
+    closeActiveCard?.();
+    closeActiveCard = close;
+    return () => {
+      openCardCount -= 1;
+      if (closeActiveCard === close) closeActiveCard = null;
+    };
   }, [open]);
 
   useLayoutEffect(() => {
@@ -215,13 +242,25 @@ export const ParamLabel: React.FC<Props> = ({
     );
   }
 
-  const show = () => { cancelHide(); setOpen(true); };
+  const show = () => { cancelHide(); cancelShow(); setOpen(true); };
+  const hoverShow = () => {
+    cancelHide();
+    if (open || showTimer.current) return;
+    if (closeActiveCard) { show(); return; }
+    showTimer.current = setTimeout(show, SHOW_DELAY);
+  };
+  const hoverHide = () => { cancelShow(); scheduleHide(); };
+  // A mouse click focuses the button too; only keyboard focus opens at once.
+  const focusShow = (e: React.FocusEvent) => {
+    if ((e.target as HTMLElement).matches?.(':focus-visible')) show();
+  };
+  const toggle = () => { cancelShow(); setOpen(o => !o); };
 
   const card = open && pos && ReactDOM.createPortal(
     <div
       role="tooltip"
       onMouseEnter={cancelHide}
-      onMouseLeave={scheduleHide}
+      onMouseLeave={hoverHide}
       className="fixed z-[10000] rounded-xl p-3
                  bg-white dark:bg-zinc-900
                  border border-zinc-200 dark:border-white/10
@@ -251,10 +290,10 @@ export const ParamLabel: React.FC<Props> = ({
       <span
         ref={anchorRef}
         className={`inline-flex items-center ${rootClassName}`}
-        onMouseEnter={show}
-        onMouseLeave={scheduleHide}
-        onFocus={show}
-        onBlur={scheduleHide}
+        onMouseEnter={hoverShow}
+        onMouseLeave={hoverHide}
+        onFocus={focusShow}
+        onBlur={hoverHide}
       >
         {children}
         {card}
@@ -266,8 +305,8 @@ export const ParamLabel: React.FC<Props> = ({
     <span
       ref={anchorRef}
       className={`inline-flex items-center gap-1 w-fit ${rootClassName}`}
-      onMouseEnter={show}
-      onMouseLeave={scheduleHide}
+      onMouseEnter={hoverShow}
+      onMouseLeave={hoverHide}
     >
       <span className={`${className} cursor-help${underline ? ' decoration-dotted underline underline-offset-[3px] decoration-zinc-400/40' : ''}`}>
         {label}
@@ -277,14 +316,14 @@ export const ParamLabel: React.FC<Props> = ({
         tabIndex={0}
         aria-label={`About ${label}`}
         aria-expanded={open}
-        onFocus={show}
-        onBlur={scheduleHide}
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(o => !o); }}
+        onFocus={focusShow}
+        onBlur={hoverHide}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle(); }}
         onKeyDown={(e) => {
           if (e.key !== 'Enter' && e.key !== ' ') return;
           e.preventDefault();
           e.stopPropagation();
-          setOpen(o => !o);
+          toggle();
         }}
         className="shrink-0 inline-flex text-zinc-400/70 hover:text-amber-500 focus:text-amber-500 outline-none transition-colors cursor-help"
       >

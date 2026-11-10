@@ -118,6 +118,10 @@ the dotted hint under an explainable label; section headings turn it off.
 Inside a panel that closes when the pointer leaves it (the global bar's dropdowns), mark the panel
 `data-hovercard-boundary` so the card lands beside the panel instead of covering the knobs.
 
+The card opens after a 500 ms hover, or at once on keyboard focus or a click on the `?`. Only one
+card shows at a time, and while one is up the next hover opens without the delay. Do not add a
+delay of your own around a `ParamLabel` or `HintButton`.
+
 ### Reset to default
 
 `ParamLabel` takes an `onReset` callback: pass it and a small RotateCcw icon appears after the help
