@@ -1,5 +1,5 @@
 // MM3 covers launder the source before encoding and pin its semantic codes.
-import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { apiClient } from '../../services/httpClient';
@@ -52,11 +52,14 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
   const onLyricsRef = useRef(onLyrics);
   useEffect(() => { prepareRef.current = prepareSource; settingsRef.current = settings; onLyricsRef.current = onLyrics; });
   const loadedSource = useRef('');
-  const catalog = useQuery({ queryKey: serverKey('cover-lyrics/cover', { auth: true, id: 'mm3-caption-catalog', filters: { albums: albums.map(a => a.id).join(',') } }),
-    queryFn: async () => Promise.all(albums.map(async album => ({ id: album.id, tracks: await ensureMm3SourceTracks(album.id) }))),
-    enabled: albums.length > 0,
+  const availableAlbums = useMemo(() => {
+    const eligibleIds = new Set(presets.filter(p => p.mm3_adapter_path).map(p => p.lyrics_set_id));
+    return albums.filter(a => eligibleIds.has(a.id));
+  }, [albums, presets]);
+  const catalog = useQuery({ queryKey: serverKey('cover-lyrics/cover', { auth: true, id: 'mm3-caption-catalog', filters: { albums: availableAlbums.map(a => a.id).join(',') } }),
+    queryFn: async () => Promise.all(availableAlbums.map(async album => ({ id: album.id, tracks: await ensureMm3SourceTracks(album.id) }))),
+    enabled: availableAlbums.length > 0,
   });
-  const availableAlbums = albums.filter(a => catalog.data?.some(c => c.id === a.id && c.tracks.length));
   const targetArtists = artists.filter(a => availableAlbums.some(album => album.artist_id === a.id));
   const tracks = catalog.data?.find(a => a.id === albumId)?.tracks || [];
   const chosen = tracks.find(track => track.title === trackTitle);
@@ -149,7 +152,7 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
     } catch (err) { if (!next.signal.aborted) setError(err instanceof Error ? err.message : String(err)); }
     finally { if (!next.signal.aborted) setBusy(false); }
   };
-  const selectAlbum = (id: number) => {
+  const selectAlbum = useCallback((id: number) => {
     setAlbumId(id); setAdapterNote('');
     const available = catalog.data?.find(a => a.id === id)?.tracks || [];
     const nearest = pickNearestBpmTrack(available, facts?.bpm);
@@ -159,7 +162,19 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
       useGlobalParamsStore.getState().setBackendParam('mm3LmAdapter', adapter);
       setAdapterNote(t('cover.mm3.adapterSelected', 'Album LM adapter selected in the top bar.'));
     }
-  };
+  }, [catalog.data, facts?.bpm, presets, t]);
+  useEffect(() => {
+    if (artistId == null) return;
+    const available = availableAlbums.filter(a => a.artist_id === artistId);
+    if (!available.length) {
+      setArtistId(null); setAlbumId(null); setTrackTitle('custom'); setAdapterNote('');
+    } else if (!available.some(a => a.id === albumId)) {
+      selectAlbum(available[0].id);
+    }
+  }, [artistId, albumId, availableAlbums, selectAlbum]);
+  useEffect(() => {
+    if (trackTitle !== 'custom' && !tracks.some(track => track.title === trackTitle)) setTrackTitle('custom');
+  }, [tracks, trackTitle]);
   const inputClass = 'w-full rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-sm text-zinc-900 dark:text-white';
   const plankLabel = (p: PlankRow) => `${p.source || p.caption?.slice(0, 40) || p.file}${p.duration ? ` · ${Math.round(p.duration)} s` : ''}`
     + (p.laundered ? ` · ${t('cover.mm3.launderedTag', 'laundered')}` : '');
@@ -208,10 +223,10 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
       <StyledSelect accent="cyan" value={settings.plank} disabled={busy} onChange={plank => set({ plank, preparedSourceUrl: sourceAudioUrl })}
         options={[{ value: '', label: t('cover.mm3.noPlank', 'No reference selected') }, ...(planks.data?.planks ?? []).map(p => ({ value: p.file, label: plankLabel(p) }))]} />
     </div>
-    <ParamLabel label={t('cover.mm3.targetArtist', 'Target artist')} info={t('cover.mm3.targetArtistInfo', 'Choose an artist and album with MM3 training captions. The nearest-tempo caption is selected first.')} />
-    <CoverArtistGrid artists={targetArtists} loading={catalog.isPending && albums.length > 0} selectedArtistId={artistId}
+    <ParamLabel label={t('cover.mm3.targetArtist', 'Target artist')} info={t('cover.mm3.targetArtistInfo', 'Choose an artist and album with an assigned MM3 adapter. The nearest-tempo caption is selected first when available; otherwise use Custom.')} />
+    <CoverArtistGrid artists={targetArtists} loading={catalog.isPending && availableAlbums.length > 0} selectedArtistId={artistId}
       onSelectArtist={artist => { setArtistId(artist.id); const first = availableAlbums.find(a => a.artist_id === artist.id); if (first) selectAlbum(first.id); }} />
-    <ParamLabel label={t('cover.mm3.album', 'Album')} info={t('cover.mm3.albumInfo', 'Albums with an MM3 caption. Selecting an album also selects its LM adapter when one is saved.')} />
+    <ParamLabel label={t('cover.mm3.album', 'Album')} info={t('cover.mm3.albumInfo', 'Albums with an assigned MM3 adapter in Lyric Studio. Selecting an album also selects its LM adapter.')} />
     <StyledSelect accent="cyan" value={albumId ? String(albumId) : ''} onChange={id => selectAlbum(Number(id))}
       options={availableAlbums.filter(a => a.artist_id === artistId).map(a => ({ value: String(a.id), label: a.album || String(a.id) }))} />
     <ParamLabel label={t('cover.mm3.captionSource', 'Caption source')} info={t('cover.mm3.captionSourceInfo', 'Use a named track or write a Custom caption. Source BPM, key and scale replace the target track facts.')} />

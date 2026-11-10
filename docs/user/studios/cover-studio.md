@@ -128,11 +128,14 @@ and re-encodes it with that description. The button explains when Music-Flamingo
 is unavailable and directs you to Model Manager. A blank source caption uses a
 neutral source description for laundering.
 
-Choose a **Target artist**, **Album**, then **Caption source**. Only albums with
-MM3 captions appear. The nearest-tempo track is selected first. Its caption keeps
+Choose a **Target artist**, **Album**, then **Caption source**. Only artists and
+albums with an MM3 adapter assigned in Lyric Studio appear. Caption lookups run
+only for those albums. The nearest-tempo track is selected first when available;
+an album without captioned tracks uses **Custom**. Its caption keeps
 the target genre and arrangement, with BPM, key and scale replaced by the source
 facts. Choose **Custom** to edit the Caption box. An album's saved MM3 LM adapter
-is selected in the top bar; an album without one leaves that setting unchanged.
+is selected in the top bar. If an album loses its adapter, the selection moves to
+the artist's first eligible album, or clears if none remain.
 
 **Match** ranges from 0 to 100, default 100. At 100 the source semantic codes are
 hard-pinned. Lower values allow more freedom: the semantic bias is
