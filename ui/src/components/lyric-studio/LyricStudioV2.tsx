@@ -51,6 +51,9 @@ import { restoreLyricQueue } from '../../stores/streamingStore';
 import { loadSelections, saveSelections, type ModelSelections } from './ProviderSelector';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 import { cacheMm3SourceTracks, collectMm3SourceTracks } from '../../utils/mm3CaptionSource';
+import { useBackendStore } from '../../stores/backendStore';
+import { MM3_BACKEND_ID } from '../../utils/captionForBackend';
+import { YUE2_BACKEND_ID } from '../../utils/yue2CaptionSource';
 
 // ── URL helpers ──────────────────────────────────────────────────────────────
 
@@ -69,6 +72,15 @@ async function fillMissingArtwork(items: Array<{ id: number; image_url?: string 
 }
 
 const LS_BASE = '/lyric-studio';
+
+/** The adapter an album preset assigns to this engine, if any. MM3 and YuE2
+ *  keep their own columns; every other engine renders with `adapter_path`, the
+ *  field the preset modal shows for it. */
+function presetAdapterFor(p: AlbumPreset, backendId: string): string | undefined {
+  if (backendId === MM3_BACKEND_ID) return p.mm3_adapter_path;
+  if (backendId === YUE2_BACKEND_ID) return p.yue2_ar_adapter_path || p.yue2_nar_adapter_path;
+  return p.adapter_path;
+}
 
 function buildUrl(artistId?: number, albumId?: number, tab?: TabId): string {
   if (artistId && albumId && tab) return `${LS_BASE}/artist/${artistId}/album/${albumId}/${tab}`;
@@ -171,7 +183,12 @@ export const LyricStudioV2: React.FC = () => {
   const allProfiles = allProfilesQuery.data ?? [];
 
   const presetsQuery = useQuery(snapshotOptions<{ presets: Array<AlbumPreset & { artist_id?: number }> }>('lireek', '/lireek/presets'));
-  const artistIdsWithAdapters = new Set((presetsQuery.data?.presets ?? []).filter(p => p.adapter_path && p.artist_id).map(p => p.artist_id!));
+  // Per engine: the field that engine's renders read from the album preset.
+  const activeBackendId = useBackendStore(s => s.activeBackendId);
+  const activeBackendName = useBackendStore(s => s.backends.find(b => b.id === s.activeBackendId)?.displayName ?? s.activeBackendId);
+  const artistIdsWithAdapters = new Set((presetsQuery.data?.presets ?? [])
+    .filter(p => p.artist_id && presetAdapterFor(p, activeBackendId))
+    .map(p => p.artist_id!));
 
   // ── Playback (for backdrop effect) ──
   const isPlaying = usePlaybackSelector(s => s.isPlaying);
@@ -626,7 +643,7 @@ export const LyricStudioV2: React.FC = () => {
             <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden portrait-wide:hidden">
               <ArtistSidebar artists={artists} selectedArtistId={-1}
                 onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
-                artistIdsWithAdapters={artistIdsWithAdapters} />
+                artistIdsWithAdapters={artistIdsWithAdapters} adapterEngineName={activeBackendName} />
             </div>
             <div className="flex-1 flex flex-col overflow-hidden min-w-0">
               {/* Header bar — spans above ArtistPageSidebar + Grid, matches ContentTabs height */}
@@ -670,7 +687,7 @@ export const LyricStudioV2: React.FC = () => {
             <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden portrait-wide:hidden">
               <ArtistSidebar artists={artists} selectedArtistId={nav.selectedArtist.id}
                 onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
-                artistIdsWithAdapters={artistIdsWithAdapters} />
+                artistIdsWithAdapters={artistIdsWithAdapters} adapterEngineName={activeBackendName} />
             </div>
             <div className="flex-1 flex flex-col overflow-hidden min-w-0">
               {/* Header bar — spans above ArtistPageSidebar + Grid, matches ContentTabs height */}
@@ -723,7 +740,7 @@ export const LyricStudioV2: React.FC = () => {
               <div className="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden max-[1023px]:hidden portrait-wide:hidden">
                 <ArtistSidebar artists={artists} selectedArtistId={nav.selectedArtist.id}
                   onSelectArtist={handleSelectArtist} onBack={handleBackToArtists}
-                  artistIdsWithAdapters={artistIdsWithAdapters} />
+                  artistIdsWithAdapters={artistIdsWithAdapters} adapterEngineName={activeBackendName} />
               </div>
               <div className="w-64 flex-shrink-0 border-r border-zinc-200 dark:border-white/5 overflow-hidden relative max-[1023px]:hidden portrait-wide:hidden">
                 <div className="relative z-[1] h-full">

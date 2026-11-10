@@ -1,5 +1,7 @@
 import React, { useRef, useEffect, useCallback, useMemo, useState } from 'react';
 import { ChevronLeft, Search, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { Toggle } from '../shared/Toggle';
 import type { Artist } from '../../services/lireekApi';
 import { useDisguiseMode } from '../../hooks/useDisguiseMode';
 
@@ -8,11 +10,15 @@ interface ArtistSidebarProps {
   selectedArtistId: number;
   onSelectArtist: (artist: Artist) => void;
   onBack: () => void;
+  /** Artists with an album preset that assigns the active engine an adapter. */
   artistIdsWithAdapters?: Set<number>;
+  /** The active engine's name, for the adapter filter's label. */
+  adapterEngineName?: string;
 }
 
 const SCROLL_KEY = 'ls-artist-sidebar-scroll';
 const FILTER_KEY = 'ls-artist-sidebar-filter';
+const ADAPTER_FILTER_KEY = 'ls-artist-sidebar-adapter-filter';
 
 /** Lowercase + strip diacritics, so "Motorhead" finds "Motörhead". */
 const normalize = (s: string) =>
@@ -23,8 +29,9 @@ const sortKey = (name: string) => normalize(name).replace(/^the\s+/, '').trim();
 
 export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
   artists, selectedArtistId, onSelectArtist, onBack,
-  artistIdsWithAdapters,
+  artistIdsWithAdapters, adapterEngineName,
 }) => {
+  const { t } = useTranslation();
   const { disguiseArtist, disguiseImageUrl } = useDisguiseMode();
   const [imageErrors, setImageErrors] = React.useState<Set<number>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -35,23 +42,36 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
     try { return sessionStorage.getItem(FILTER_KEY) ?? ''; } catch { return ''; }
   });
 
+  // Off by default; like the name filter it lasts for the session.
+  const [adapterOnly, setAdapterOnlyState] = useState(() => {
+    try { return sessionStorage.getItem(ADAPTER_FILTER_KEY) === '1'; } catch { return false; }
+  });
+  const filtering = adapterOnly && !!artistIdsWithAdapters;
+
   // Sort + filter run on the REAL names — disguise mode is display-only
   const visibleArtists = useMemo(() => {
     const sorted = [...artists].sort((a, b) =>
       sortKey(a.name).localeCompare(sortKey(b.name), undefined, { numeric: true })
     );
+    const withAdapter = filtering ? sorted.filter(a => artistIdsWithAdapters!.has(a.id)) : sorted;
     const q = normalize(query.trim());
-    if (!q) return sorted;
-    return sorted.filter(a => {
+    if (!q) return withAdapter;
+    return withAdapter.filter(a => {
       const n = normalize(a.name);
       return n.includes(q) || n.replace(/^the\s+/, '').includes(q);
     });
-  }, [artists, query]);
+  }, [artists, query, filtering, artistIdsWithAdapters]);
 
   const setFilter = useCallback((value: string) => {
     setQuery(value);
     try { sessionStorage.setItem(FILTER_KEY, value); } catch { /* ignore */ }
     // Jump back to the top of the (now different) list
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, []);
+
+  const setAdapterOnly = useCallback((on: boolean) => {
+    setAdapterOnlyState(on);
+    try { sessionStorage.setItem(ADAPTER_FILTER_KEY, on ? '1' : '0'); } catch { /* ignore */ }
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, []);
 
@@ -115,13 +135,23 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
             </button>
           )}
         </div>
+        {artistIdsWithAdapters && (
+          <Toggle
+            size="sm" accent="pink" className="mt-2"
+            checked={adapterOnly} onChange={setAdapterOnly}
+            label={t('lyric.adapterFilter', 'Has {{engine}} adapter', { engine: adapterEngineName ?? '' })}
+            info={t('lyric.adapterFilterInfo', 'Shows only artists with at least one album whose preset assigns an adapter for the active engine. Switch engines and the list follows. Off: every artist.')}
+          />
+        )}
       </div>
 
       {/* Artist list */}
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto py-2">
         {visibleArtists.length === 0 && (
           <p className="px-4 py-6 text-xs text-zinc-500 text-center">
-            No artists match that filter
+            {filtering && !query.trim()
+              ? t('lyric.adapterFilterEmpty', 'No artists have an adapter for this engine')
+              : 'No artists match that filter'}
           </p>
         )}
         {visibleArtists.map((artist) => {
@@ -176,7 +206,7 @@ export const ArtistSidebar: React.FC<ArtistSidebarProps> = ({
 
       {/* Artist count */}
       <div className="px-4 py-2 border-t border-zinc-200 dark:border-white/5 text-[10px] text-zinc-600 text-center">
-        {query.trim()
+        {query.trim() || filtering
           ? `${visibleArtists.length} of ${artists.length} artists`
           : `${artists.length} artist${artists.length !== 1 ? 's' : ''}`}
       </div>
