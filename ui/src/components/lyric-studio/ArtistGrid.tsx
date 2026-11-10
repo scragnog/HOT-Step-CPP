@@ -48,7 +48,7 @@ export const ArtistGrid: React.FC<ArtistGridProps> = ({
 
   if (loading) {
     return (
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-4 p-3 sm:p-4 min-[1280px]:p-6">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(180px,calc(50%_-_8px)),1fr))] gap-4 p-3 sm:p-4 min-[1280px]:p-6">
         {Array.from({ length: 8 }).map((_, i) => (
           <div key={i} className="aspect-[3/4] rounded-2xl bg-white/5 animate-pulse" />
         ))}
@@ -120,7 +120,7 @@ export const ArtistGrid: React.FC<ArtistGridProps> = ({
           </div>
         </div>
       ) : (
-        <div ref={gridRef} className="grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-4">
+        <div ref={gridRef} className="grid grid-cols-[repeat(auto-fill,minmax(min(180px,calc(50%_-_8px)),1fr))] gap-4">
           {artists.map((artist, idx) => (
             <div
               key={artist.id}

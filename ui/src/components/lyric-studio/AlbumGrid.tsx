@@ -57,7 +57,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
 
   if (loading) {
     return (
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-4 p-3 sm:p-4 min-[1280px]:p-6">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(220px,calc(50%_-_8px)),1fr))] gap-4 p-3 sm:p-4 min-[1280px]:p-6">
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={i} className="aspect-square rounded-2xl bg-white/5 animate-pulse" />
         ))}
@@ -140,7 +140,7 @@ export const AlbumGrid: React.FC<AlbumGridProps> = ({
           </div>
         </div>
       ) : (
-        <div ref={gridRef} className="grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-4">
+        <div ref={gridRef} className="grid grid-cols-[repeat(auto-fill,minmax(min(220px,calc(50%_-_8px)),1fr))] gap-4">
           {albums.map((album, idx) => {
             const songCount = album.total_songs ?? (album.songs ? parseSongs(album.songs).length : 0);
             return (
