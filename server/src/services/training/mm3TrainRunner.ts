@@ -23,7 +23,7 @@ import { spawn } from 'child_process';
 import { pushLog } from '../../routes/logs.js';
 import { resumeEngines, suspendEngines } from '../aceEngineProcess.js';
 import { restoreMm3Selection } from '../backends/minimax/index.js';
-import { writeMm3PlankFromCodes, mm3SourceIdentity, MM3_LAUNDER_FALLBACK_CAPTION } from '../backends/minimax/plank.js';
+import { writeMm3PlankFromCodes, mm3SourceIdentity, mm3PlankDir, mm3PlankSiblings, MM3_LAUNDER_FALLBACK_CAPTION } from '../backends/minimax/plank.js';
 import { aceTrainExe } from './aceTrain.js';
 import { getDataset } from './datasetsRepo.js';
 import {
@@ -487,7 +487,10 @@ export async function runMm3CoverEncodeJob(job: TrainingJob): Promise<void> {
     const kind = launder ? 'mm3-launder' : 'mm3-codes';
     // 359 s: the engine's 9000-frame ceiling, so the plank can always replay.
     // The launder runs at roughly real time, so 30 min covers it with room.
-    await runMm3AceTrain(job, kind, buildMm3CodesArgs({ datasetJson, outDir: opts.workDir, maxDuration: 359, launder, launderSteps, launderSeed }),
+    // The guide and the launder's condition serve Cover Studio's guided modes.
+    const hidDir = path.join(opts.workDir, 'hid');
+    await runMm3AceTrain(job, kind, buildMm3CodesArgs({ datasetJson, outDir: opts.workDir, maxDuration: 359, launder, launderSteps, launderSeed,
+      guideK: 32, keepHiddens: hidDir }),
       30 * 60 * 1000, () => (fs.existsSync(codesPath) ? null : `${kind} finished but wrote no codes`));
     if (isCancelled(job) || job.status === 'failed') return;
     const m = resolveMm3TrainModels();
@@ -496,6 +499,10 @@ export async function runMm3CoverEncodeJob(job: TrainingJob): Promise<void> {
       ...(launder ? { launderRequestedSeed: opts.launderSeed ?? 42 } : {}),
       ...(launder ? { launderSteps, launderSeed, launderCaption: caption, rec7: path.basename(m.rec7), encoder: path.basename(m.enc) } : {}),
     });
+    const sib = mm3PlankSiblings(file);
+    for (const [from, to] of [[path.join(opts.workDir, 'codes', 'source.guide'), sib.guide], [path.join(hidDir, 'source.mm3hiddens'), sib.state]]) {
+      if (fs.existsSync(from)) fs.renameSync(from, path.join(mm3PlankDir(), to));
+    }
     log(job, 'info', `Saved ${file}${launder ? ' (laundered)' : ''}`);
     finishJob(job, 'done');
   } catch (err: any) {

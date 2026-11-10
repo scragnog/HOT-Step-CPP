@@ -1159,6 +1159,10 @@ export interface Mm3CodesArgs {
   launder?: boolean;
   launderSteps?: number;
   launderSeed?: number;
+  /** Also write <id>.guide: the encoder's top N codes per frame (cover modes). */
+  guideK?: number;
+  /** Launder only: also write the renderer condition as <dir>/<id>.mm3hiddens. */
+  keepHiddens?: string;
   /** Re-encode from scratch: the cache (and the prior capture beside it) is cleared before the job. */
   force?: boolean;
   /** Only tracks whose name contains this text (case-insensitive). */
@@ -1217,6 +1221,8 @@ export function buildMm3CodesArgs(a: Mm3CodesArgs): string[] {
   // system ffmpeg fails every track ("ffmpeg exit 1").
   const ffmpeg = getFFmpegPath();
   if (ffmpeg) args.push('--ffmpeg', ffmpeg);
+  if (a.guideK && a.guideK > 0) args.push('--guide-k', String(Math.round(a.guideK)));
+  if (a.launder && a.keepHiddens) args.push('--keep-hiddens', a.keepHiddens);
   return args;
 }
 

@@ -563,3 +563,35 @@ test('MM3 panel request omits retired controls and carries the plank launder set
     forceBias: 16, pattern: { prefixSeconds: 5 },
   } }));
 });
+
+test('MM3 cover modes map to guide fields, and a plank without a guide asks for a Re-encode', t => {
+  const root = fs.mkdtempSync(path.resolve('.test-mm3-modes-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  t.mock.getter(config.data, 'audioDir', () => path.join(root, 'audio'));
+  const planks = path.join(root, 'mm3-planks');
+  fs.mkdirSync(planks);
+  const render = (mm3Cover: Record<string, unknown>) => effectiveCoverRequest(coverRenderSchema.parse({ ...input,
+    expectedBackend: 'minimax-m3', mm3Cover: { plank: 'src.mm3plank', semanticOnly: true, trimSeconds: 20, arSeed: -1, ...mm3Cover } }),
+  { assetId: 'asset', sha256: 'sha' }, '/references/source.wav');
+  // Pin, and drafts saved before modes existed, stay on the plank.
+  assert.equal(render({}).mm3PlankPath, 'src.mm3plank');
+  assert.equal(render({}).mm3GuidePath, undefined);
+  assert.throws(() => render({ mode: 'follow' }), /Re-encode/);
+  fs.writeFileSync(path.join(planks, 'src.guide'), '');
+  const follow = render({ mode: 'follow-depth', strength: 0.9, candidates: 32, stateFix: 'depth' });
+  assert.equal(follow.mm3PlankPath, '');
+  assert.equal(follow.mm3GuidePath, 'src.guide');
+  assert.equal(follow.mm3GuideOutside, -100);
+  assert.equal(follow.mm3GuideStateFix, 1);
+  assert.equal(follow.mm3GuideSeconds, 20);
+  assert.equal(follow.mm3CoverMode, 'follow-depth');
+  const product = render({ mode: 'product', weight: 1, candidates: 8 });
+  assert.equal(product.mm3GuideProduct, 1);
+  assert.equal(product.mm3GuideK, 8);
+  assert.equal(product.mm3GuideStateFix, undefined);
+  assert.throws(() => render({ mode: 'blend' }), /Re-encode/);
+  fs.writeFileSync(path.join(planks, 'src.mm3hiddens'), '');
+  const blend = render({ mode: 'blend', blend: 25, strength: 0.9, candidates: 32 });
+  assert.equal(blend.mm3BlendPath, 'src.mm3hiddens');
+  assert.equal(blend.mm3BlendAmount, 0.25);
+});

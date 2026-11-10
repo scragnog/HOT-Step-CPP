@@ -99,8 +99,16 @@ export function readMm3PlankMeta(ref: string): Partial<Mm3PlankMeta> | null {
   }
 }
 
+/** A Cover Studio encode also keeps the encoder's source guide (`<id>.guide`)
+ *  and the launder's renderer condition (`<id>.mm3hiddens`) beside the plank,
+ *  for the guided cover modes. Planks encoded before that have neither. */
+export function mm3PlankSiblings(plank: string): { guide: string; state: string } {
+  const base = path.basename(plank).replace(/\.mm3plank$/, '');
+  return { guide: `${base}.guide`, state: `${base}.mm3hiddens` };
+}
+
 /** Saved planks, newest first. Never throws — a missing directory is []. */
-export function listMm3Planks(): Array<{ file: string } & Partial<Mm3PlankMeta>> {
+export function listMm3Planks(): Array<{ file: string; guide: boolean; state: boolean } & Partial<Mm3PlankMeta>> {
   try {
     const dir = mm3PlankDir();
     if (!fs.existsSync(dir)) return [];
@@ -108,7 +116,11 @@ export function listMm3Planks(): Array<{ file: string } & Partial<Mm3PlankMeta>>
       .filter(f => f.endsWith(MM3_PLANK_EXT))
       // A plank with no readable sidecar is still replayable (the codes are in
       // the blob), so surface it with just its filename rather than hiding it.
-      .map(file => ({ file, ...(readMm3PlankMeta(file) ?? {}) }))
+      .map(file => {
+        const sib = mm3PlankSiblings(file);
+        return { file, ...(readMm3PlankMeta(file) ?? {}),
+          guide: fs.existsSync(path.join(dir, sib.guide)), state: fs.existsSync(path.join(dir, sib.state)) };
+      })
       .sort((a, b) => String(b.created ?? '').localeCompare(String(a.created ?? '')));
   } catch {
     return [];

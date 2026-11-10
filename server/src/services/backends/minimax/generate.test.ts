@@ -149,3 +149,18 @@ test('MM3 source guide: sent only from the plank folder, with its dials, and end
   assert.equal(Object.hasOwn(bare, 'lm_guide_scale'), false);
   assert.equal(Object.hasOwn(req({ mm3GuidePath: '../escape.guide' }), 'lm_guide_file'), false);
 });
+
+test('MM3 cover modes: state fix, product rule, guide trim and the state blend reach the engine', () => {
+  const req = (p: Record<string, unknown>) => mapMinimaxParams({ prompt: 'x', seed: 42, ...p }).req as unknown as Record<string, unknown>;
+  const guided = req({ mm3GuidePath: 'a.guide', mm3GuideStateFix: 2, mm3GuideProduct: '', mm3GuideSeconds: 30 });
+  assert.equal(guided.lm_state_fix, 2);
+  assert.equal(Object.hasOwn(guided, 'lm_guide_product'), false);
+  assert.equal(guided.lm_guide_seconds, 30);
+  assert.equal(Object.hasOwn(req({ mm3GuidePath: 'a.guide', mm3GuideStateFix: 0 }), 'lm_state_fix'), false);
+  assert.equal(req({ mm3GuidePath: 'a.guide', mm3GuideProduct: 1 }).lm_guide_product, 1);
+  const blend = req({ mm3GuidePath: 'a.guide', mm3BlendPath: 'a.mm3hiddens', mm3BlendAmount: 0.25 });
+  assert.equal(blend.lm_blend_file, path.join(mm3PlankDir(), 'a.mm3hiddens'));
+  assert.equal(blend.lm_blend_amount, 0.25);
+  assert.equal(Object.hasOwn(req({ mm3BlendPath: 'a.mm3hiddens', mm3BlendAmount: 0 }), 'lm_blend_file'), false);
+  assert.equal(Object.hasOwn(req({ mm3BlendPath: '../x.mm3hiddens', mm3BlendAmount: 0.5 }), 'lm_blend_file'), false);
+});

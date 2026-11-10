@@ -715,17 +715,32 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
         const num = (v: unknown) => (String(v ?? '').trim() === '' ? NaN : Number(v));
         const scale = num(params.mm3GuideScale), k = num(params.mm3GuideK), outside = num(params.mm3GuideOutside);
         const gate = params.mm3GuideGatePath ? resolveMm3PlankPath(String(params.mm3GuideGatePath)) : null;
+        const fix = num(params.mm3GuideStateFix), product = num(params.mm3GuideProduct), seconds = num(params.mm3GuideSeconds);
         notes.push(`source guide ${path.basename(guidePath)}`
           + (Number.isFinite(scale) ? `, scale ${scale}` : '') + (Number.isFinite(k) ? `, ${k} candidates` : '')
-          + (gate ? ', vocal gate' : '') + (params.mm3HiddensPath ? '; saved plan ignored' : ''));
+          + (gate ? ', vocal gate' : '') + (fix > 0 ? `, state fix ${fix}` : '')
+          + (product >= 0 ? `, product rule ${product}` : '') + (seconds > 0 ? `, first ${seconds} s` : '')
+          + (params.mm3HiddensPath ? '; saved plan ignored' : ''));
         return {
           lm_guide_file: guidePath,
           ...(Number.isFinite(scale) ? { lm_guide_scale: scale } : {}),
           ...(Number.isFinite(k) ? { lm_guide_k: k } : {}),
           ...(Number.isFinite(outside) ? { lm_guide_outside: outside } : {}),
           ...(gate ? { lm_guide_gate_file: gate } : {}),
+          ...([1, 2, 3].includes(fix) ? { lm_state_fix: fix } : {}),
+          ...(product >= 0 ? { lm_guide_product: Math.min(4, product) } : {}),
+          ...(seconds > 0 ? { lm_guide_seconds: seconds } : {}),
         };
       })() : {}),
+      // State blend (engine lm_blend_*): the planner's hiddens move toward a
+      // saved block, for a cover its launder's, before the flow. Plank folder only.
+      ...(() => {
+        const amount = Number(params.mm3BlendAmount);
+        const blend = params.mm3BlendPath && amount > 0 ? resolveMm3PlankPath(String(params.mm3BlendPath)) : null;
+        if (!blend) return {};
+        notes.push(`state blend ${Math.round(Math.min(1, amount) * 100)}% toward ${path.basename(blend)}`);
+        return { lm_blend_file: blend, lm_blend_amount: Math.min(1, amount) };
+      })(),
       // ── Saved plans (engine mm3-hiddens-file.h) ──
       //
       // Replay. Unlike the plank above this IS a speedup — the hiddens are what
