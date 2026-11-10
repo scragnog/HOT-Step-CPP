@@ -469,9 +469,11 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
       assertRecipeWorker(recipe);
       if (batchDraft?.length) {
         // One recipe for every dataset: rank and base are pinned, not re-recommended per dataset.
-        // The preview song belongs to this dataset, so each run picks its own.
+        // The preview song and the trigger word belong to this dataset, so each run picks its own
+        // (the server falls back to each dataset's custom tag when no trigger is sent).
         const { previewSongId: _song, ...preview } = body.preview ?? {};
-        const batchBody = { ...body, ...(body.preview ? { preview } : {}) };
+        const { trigger: _trigger, ...shared } = body;
+        const batchBody = { ...shared, ...(body.preview ? { preview } : {}) };
         if (runOn) {
           await dispatchMm3Batch(runOn, { datasetIds: batchDraft, clearCache: batchClearCache, recipe: batchBody });
           void trainingWritePlan(client, runOn);
