@@ -790,6 +790,7 @@ struct MM3GenRequest {
     std::string        lm_guide_trace;  // per-frame JSON path, or empty
     bool               lm_depth_greedy = false;  // MM3ArOptions::depth_greedy
     int                lm_state_fix    = 0;      // MM3ArOptions::state_fix
+    float              lm_guide_product = -1.0f; // MM3ArOptions::guide_product
     uint64_t seed       = 42;
     int      steps      = 30;
     float    cfg_flow   = 1.7f;
@@ -1174,6 +1175,7 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
         aopt.guide_trace = req.lm_guide_trace;
         aopt.depth_greedy = req.lm_depth_greedy;
         aopt.state_fix    = req.lm_state_fix;
+        aopt.guide_product = req.lm_guide_product;
     }
     aopt.should_cancel = req.should_cancel;
 

@@ -1550,6 +1550,8 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
                 if (dv != 0 && dv != 1 && dv != 2 && dv != 3) { if (err) { *err = "\"lm_state_fix\" must be 0 (off), 1 (depth), 2 (stream 0) or 3 (both)"; } return false; }
                 out->gen.lm_state_fix = (int) dv;
             }
+            if (!mm3_req_num(root, "lm_guide_product", &dv, &present, err)) { return false; }
+            if (present && dv >= 0.0) { out->gen.lm_guide_product = (float) std::min(4.0, dv); }
             if (!mm3_req_str(root, "lm_guide_gate_file", &gate_path, &present, err)) { return false; }
             if (!gate_path.empty()) {
                 // Raw f32, one multiplier per guide frame.

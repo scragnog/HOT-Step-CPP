@@ -247,6 +247,9 @@ struct MM3ArOptions {
     // The LM's feedback and KV cache never see the moved row.
     bool              depth_greedy = false;
     int               state_fix    = 0;
+    // guide_product >= 0 replaces the probability mix with a product rule on the
+    // candidates only: a * ln p_enc + ln p_LM. < 0 = off (the mix).
+    float             guide_product = -1.0f;
 
     int64_t dump_iters      = 0;
     bool    collect_hiddens = true;
@@ -669,6 +672,7 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     std::vector<float>   gd_gap, gd_mass, gd_surprise, gd_scale;
     std::vector<int32_t> gd_overlap, gd_rank;
     std::vector<float>   gd_pre;
+    int64_t              gd_fallback = 0;  // frames where the LM's top-k dropped every candidate
 
     // KV budget: prompt + one iteration per emitted frame + the un-emitted first
     // one, plus slack so the last decode step never sits exactly on the boundary.
@@ -1017,8 +1021,8 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             }
             // Read before the conditional top-k below can mask it out.
             const float fs_guided = soft_it && fs_it >= 0 ? cand_guided[(size_t) (1 + fs_it)] : 0.0f;
-            if (guide_it && t == 0) {
-                gd_pre = cand_guided;
+            if (guide_it) {
+                gd_pre = cand_guided;  // per take: the fallback below reads it too
             }
             {
                 int64_t k = TOPK < NCAND ? (int64_t) TOPK : NCAND;
@@ -1177,7 +1181,18 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                     gd_gap.push_back(std::min(100.0f, top1 - gd_pre[(size_t) (1 + gids[0])]));
                     gd_scale.push_back(gp.scale);
                 }
-                yue2_guide_apply(cand_guided.data(), NCAND, 0, 1, NCAND, 0, g, gp, gf);
+                if (opt.guide_product >= 0.0f) {
+                    // Product rule (probe): candidates only, a * ln p_enc + ln p_LM,
+                    // the LM's side from its CFG'd logits before the top-k filter.
+                    const float * glp = g.lp.data() + (size_t) (gf * g.K);
+                    std::fill(cand_guided.begin(), cand_guided.end(), -INFINITY);
+                    for (int64_t j = 0; j < gk; j++) {
+                        const size_t v = (size_t) (1 + gids[j]);
+                        cand_guided[v] = opt.guide_product * glp[j] + gd_pre[v];
+                    }
+                } else {
+                    yue2_guide_apply(cand_guided.data(), NCAND, 0, 1, NCAND, 0, g, gp, gf);
+                }
                 // One survivor (scale 1, k 1) is taken without a draw, so the
                 // shared RNG stays where the hard pin leaves it and the depth
                 // decoder samples the same acoustic codes: the parity gate.
@@ -1190,6 +1205,19 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                 }
                 if (n_fin != 1) {
                     guide_pick = -1;
+                }
+                // Scale 0 with candidates only leaves the LM's own logits on the
+                // candidates, so when its top-k dropped all of them nothing is
+                // left and the sampler would fall back to EOS. Re-admit them at
+                // their CFG'd logits from before that filter: the LM still picks
+                // its favourite among the source's candidates.
+                if (n_fin == 0) {
+                    for (int64_t j = 0; j < gk; j++) {
+                        cand_guided[(size_t) (1 + gids[j])] = gd_pre[(size_t) (1 + gids[j])];
+                    }
+                    if (t == 0) {
+                        gd_fallback++;
+                    }
                 }
             }
 
@@ -1544,6 +1572,15 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                 (long long) (opt.guide_p.k > 0 ? std::min<int64_t>(opt.guide_p.k, opt.guide->K) : opt.guide->K),
                 (double) opt.guide_p.outside, n, 100.0 * (double) a1 / (double) n, 100.0 * (double) ak / (double) n,
                 TOPK, 100.0 * (double) ov / (double) n, ms / (double) n, (double) gs[gs.size() / 2]);
+        if (opt.guide_product >= 0.0f) {
+            fprintf(stderr, "[MM3-AR] Guide rule: product, a %.2f (scale and outside unused)\n",
+                    (double) opt.guide_product);
+        }
+        if (gd_fallback) {
+            fprintf(stderr, "[MM3-AR] Guide fallback: the LM's top-%d held no candidate on %lld frames (%.1f%%); "
+                            "re-admitted at their unfiltered logits\n",
+                    TOPK, (long long) gd_fallback, 100.0 * (double) gd_fallback / (double) n);
+        }
         if (!opt.guide_trace.empty()) {
             FILE * f = hs_fopen(opt.guide_trace, "wb");
             if (!f) {
