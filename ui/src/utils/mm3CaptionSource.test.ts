@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { withSourceAttributes } from './mm3CaptionSource';
+import { collectMm3SourceTracks, withSourceAttributes } from './mm3CaptionSource';
+
+test('instrumental tracks with empty lyrics remain MM3 album caption sources', () => {
+  const songs = [{ title: 'Quiet', lyrics: '', instrumental: true, bpm: 80, mm3Caption: 'Piano and strings' }];
+  assert.deepEqual(collectMm3SourceTracks(songs), [{ title: 'Quiet', bpm: 80, caption: 'Piano and strings' }]);
+});
 
 test('source facts replace only the attributes and keep genre and arrangement', () => {
   const original = 'Global Metadata\nBasic Attributes: bpm is 80. key is D, and scale is minor. Jazz.\nVocal Details\nWarm voice\nArrangement\nGuitar';

@@ -79,6 +79,7 @@ export function captureLyricItems(requested: LyricRequest[], concurrency?: numbe
     if (req.type === 'profile') {
       const source = db.getLyricsSet(id);
       if (!source) throw new Error(`Lyrics set ${id} not found`);
+      if (!profiler.lyricSongs(source.songs).length) throw new Error(profiler.NO_LYRICS_TO_PROFILE);
       captured = { ...options, type: 'profile', sourceId: id, sourceRevision: revision(source), artist: source.artist_name, songs: source.songs };
     } else if (req.type === 'generate') {
       const source = db.getProfile(id);

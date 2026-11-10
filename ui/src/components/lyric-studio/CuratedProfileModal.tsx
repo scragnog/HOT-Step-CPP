@@ -65,12 +65,13 @@ export const CuratedProfileModal: React.FC<CuratedProfileModalProps> = ({
     const album = fullAlbums.find(a => a.id === albumId);
     if (!album) return;
     const songs = parseSongs(album.songs);
+    const lyricIndices = songs.flatMap((song, index) => !song.instrumental && song.lyrics?.trim() ? [index] : []);
     setSelections(prev => {
       const next = { ...prev };
       const currentSet = next[albumId] || new Set();
-      next[albumId] = currentSet.size === songs.length
+      next[albumId] = currentSet.size === lyricIndices.length
         ? new Set()
-        : new Set(songs.map((_, i) => i));
+        : new Set(lyricIndices);
       return next;
     });
   }, [fullAlbums]);
@@ -206,7 +207,8 @@ export const CuratedProfileModal: React.FC<CuratedProfileModalProps> = ({
               const songs = parseSongs(album.songs);
               const isExpanded = expandedAlbumId === album.id;
               const selectedInAlbum = selections[album.id]?.size || 0;
-              const allSelected = selectedInAlbum === songs.length && songs.length > 0;
+              const lyricCount = songs.filter(song => !song.instrumental && song.lyrics?.trim()).length;
+              const allSelected = selectedInAlbum === lyricCount && lyricCount > 0;
 
               return (
                 <div key={album.id} className="rounded-xl border border-zinc-200 dark:border-white/5 overflow-hidden">
@@ -230,6 +232,7 @@ export const CuratedProfileModal: React.FC<CuratedProfileModalProps> = ({
                         {allSelected ? t('lyric.deselectAll') : t('lyric.selectAll')}
                       </button>
                       {songs.map((song, idx) => {
+                        if (song.instrumental || !song.lyrics?.trim()) return null;
                         const isSelected = selections[album.id]?.has(idx) || false;
                         return (
                           <button key={idx}

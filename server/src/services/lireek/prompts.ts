@@ -491,7 +491,7 @@ export function computeAlbumEnrichment(
     if (typeof s.yue2Caption === 'string' && s.yue2Caption.trim()) yue2Captions.push(s.yue2Caption.trim());
     // Vocal pacing needs BOTH real lyrics and a real duration on the same song.
     const dur = Number(s.duration);
-    if (Number.isFinite(dur) && dur > 30 && typeof s.lyrics === 'string') {
+    if (!s.instrumental && Number.isFinite(dur) && dur > 30 && typeof s.lyrics === 'string') {
       const words = countLyricWords(s.lyrics);
       const rate = words / dur;
       // Per-song clamp guards against corrupt metadata (one dataset measures a

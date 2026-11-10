@@ -122,21 +122,20 @@ function splitSamples(samples: TrainingSample[]): SongSplit {
   const out: SongSplit = { included: [], skippedInstrumental: 0, skippedNoLyrics: 0, skippedExcluded: 0 };
   for (const s of samples) {
     if (s.excluded || s.fileMissing) { out.skippedExcluded++; continue; }
-    if (s.isInstrumental) { out.skippedInstrumental++; continue; }
-    if (!s.lyrics.trim()) { out.skippedNoLyrics++; continue; }
+    if (!s.isInstrumental && !s.lyrics.trim()) { out.skippedNoLyrics++; continue; }
     out.included.push(s);
   }
   return out;
 }
 
-/** The enriched song object stored in lyrics_sets.songs. Extra fields beyond
- *  {title, album, lyrics} are additive — every existing consumer reads only
- *  those three (profilerService, prompts) and ignores the rest. */
+/** Enriched songs retain caption metadata for instrumental tracks; lyric
+ *  consumers skip their instrumental flag. */
 function toStoredSong(s: TrainingSample, ds: TrainingDatasetRow, setAlbum: string): Record<string, any> {
   const song: Record<string, any> = {
     title: resolveArtistTitle(s, ds, {}).title || s.filename.replace(/\.[^.]+$/, ''),
     album: s.tagAlbum.trim() || setAlbum,
-    lyrics: s.lyrics,
+    lyrics: s.isInstrumental ? '' : s.lyrics,
+    instrumental: !!s.isInstrumental,
   };
   if (s.caption.trim()) song.caption = s.caption.trim();
   // The MM3 Structured Caption lives beside the audio (<stem>.mm3.txt), not in
@@ -230,6 +229,7 @@ export async function previewLyricStudioExport(
     title: resolveArtistTitle(s, ds, {}).title || s.filename.replace(/\.[^.]+$/, ''),
     album: s.tagAlbum.trim() || album.value,
     hasCaption: !!s.caption.trim(),
+    instrumental: !!s.isInstrumental,
   }));
 
   const existingArtist = findArtistByName(artist.value);
@@ -249,6 +249,7 @@ export async function previewLyricStudioExport(
     existingSongCount: existingSet ? existingSet.total_songs : 0,
     ditAdapter: findDitAdapter(ds),
     lmAdapter: findLmAdapter(ds),
+    mm3Adapter: mm3LinkedRefFor(ds),
     // Whole sample list, not split.included: a reference track needs audio on
     // disk, not lyrics, so instrumentals and un-Geniused tracks still count.
     referenceTrack: pickReferenceTrack(samples),
@@ -641,7 +642,7 @@ export async function commitLyricStudioExport(
 ): Promise<LyricStudioExportResult> {
   const split = splitSamples(samples);
   if (!split.included.length) {
-    throw new LyricStudioExportError('No exportable songs — every sample is excluded, instrumental, or has no lyrics.');
+    throw new LyricStudioExportError('No exportable songs: every sample is excluded or is a vocal track without lyrics.');
   }
 
   // Only when the caller did NOT name both: the manual path posts explicit
@@ -694,15 +695,19 @@ export async function commitLyricStudioExport(
   if (input.linkAdapters !== false) {
     const dit = findDitAdapter(ds);
     const lm = findLmAdapter(ds);
+    const mm3 = mm3LinkedRefFor(ds);
+    const yue2 = readYue2Linked()[ds.slug.toLowerCase()];
     const data = presetDataFromRow(getPreset(lyricsSetId));
     // A reference the user chose by hand outranks our pick; one pointing at
     // a file that has since gone does not.
     const refStale = !data.referenceTrackPath
       || !fs.existsSync(data.referenceTrackPath);
     const ref = refStale ? pickReferenceTrack(samples) : null;
-    if (dit || lm || ref) {
+    if (dit || lm || mm3 || yue2 || ref) {
       if (dit) data.adapterPath = dit.path;
       if (lm) data.lmAdapterPath = lm.path;
+      if (mm3) data.mm3AdapterPath = mm3;
+      if (yue2?.arPath && yue2?.narPath) { data.yue2ArAdapterPath = yue2.arPath; data.yue2NarAdapterPath = yue2.narPath; }
       if (ref) data.referenceTrackPath = ref;
       upsertPreset(lyricsSetId, data);
       presetUpdated = true;

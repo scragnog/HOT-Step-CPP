@@ -106,6 +106,11 @@ The ladder shows the dataset name from the Review list as a static heading above
 | Send to Lyric Studio (Build step) | Exports the dataset's artist/album metadata into Lyric Studio, optionally linking the dataset's trained adapters and a reference track as that album's generation preset. |
 | Monitor queue | Read-only view of the batch pipeline: one row per dataset, a status chip per stage, live progress on whichever stage is currently running. |
 
+Instrumental tracks are included in the Lyric Studio export as captions only.
+Vocal tracks without lyrics are skipped. Artist and album names remain editable,
+so collections can be named before export. The album preset receives the saved
+MM3 checkpoint and YuE2 adapter pair along with any ACE-Step adapters.
+
 ## Tips and limits
 
 ### Updating a training worker

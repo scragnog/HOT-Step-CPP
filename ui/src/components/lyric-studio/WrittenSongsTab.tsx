@@ -346,6 +346,7 @@ export function resolveGenerationProvider(
 }
 
 interface WrittenSongsTabProps {
+  instrumentalOnly?: boolean;
   generations: Generation[];
   profiles: Profile[];
   /** The album these songs belong to. Its preset owns the YuE2 adapter, and
@@ -367,7 +368,7 @@ interface WrittenSongsTabProps {
 }
 
 export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
-  generations, profiles, lyricsSetId, mm3SourceTracks = [], onRefresh, onGenerateAudio,
+  generations, profiles, lyricsSetId, mm3SourceTracks = [], onRefresh, onGenerateAudio, instrumentalOnly = false,
   onSendToCreate, onRenderAs, onRenderFrom, onViewRecordings, showToast, generationModel, refinementModel,
 }) => {
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -554,7 +555,7 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
       <div className="flex items-center gap-3 flex-wrap">
         <button
           onClick={() => handleQuickGenerate(false)}
-          disabled={generating || profiles.length === 0}
+          disabled={generating || profiles.length === 0 || instrumentalOnly}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-200 dark:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-semibold transition-all"
         >
           {generating ? (
@@ -571,7 +572,7 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
         </button>
         <button
           onClick={() => handleQuickGenerate(true)}
-          disabled={generating || profiles.length === 0}
+          disabled={generating || profiles.length === 0 || instrumentalOnly}
           title={t('lyric.generateNoThinkHint')}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:bg-zinc-200 dark:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-semibold transition-all"
         >
@@ -592,8 +593,8 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
             className="w-16"
           />
         </div>
-        {profiles.length === 0 && (
-          <span className="text-xs text-amber-400/60">{t('lyric.buildProfileFirst')}</span>
+        {(profiles.length === 0 || instrumentalOnly) && (
+          <span className="text-xs text-amber-400/60">{t(instrumentalOnly ? 'lyric.instrumentalNoLyrics' : 'lyric.buildProfileFirst')}</span>
         )}
         {onRenderFrom && (
           <button

@@ -49,6 +49,8 @@ export interface LyricsSet {
 export interface SongLyric {
   title: string;
   lyrics: string;
+  instrumental?: boolean;
+  duration?: number;
   url?: string;
   album?: string;
   /** Enriched fields from a Training Studio export (absent on plain Genius fetches). */

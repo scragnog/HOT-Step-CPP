@@ -573,6 +573,8 @@ export const LyricStudioV2: React.FC = () => {
   }, [nav.level, fetchModalOpen, handleBackToAlbums, handleBackToArtists]);
 
   const sourceLyricsCount = nav.selectedAlbum ? parseSongs(nav.selectedAlbum.songs).length : 0;
+  const instrumentalOnly = !!nav.selectedAlbum && parseSongs(nav.selectedAlbum.songs).length > 0
+    && parseSongs(nav.selectedAlbum.songs).every(song => song.instrumental || !song.lyrics?.trim());
 
   // ── MM3 caption sources ──
   // The album's own source tracks that carry an MM3 Structured Caption. A
@@ -759,15 +761,18 @@ export const LyricStudioV2: React.FC = () => {
                     )}
                     {activeTab === 'profiles' && (
                       <ProfilesTab lyricsSetId={nav.selectedAlbum.id} profiles={profiles}
+                        instrumentalOnly={instrumentalOnly}
                         onRefresh={refreshAlbumData} showToast={showToast}
                         profilingModel={modelSelections.profiling} />
                     )}
                     {activeTab === 'write-lyrics' && (
-                      <WriteLyricsTab key={nav.selectedAlbum.id} lyricsSetId={nav.selectedAlbum.id}
-                        onRefresh={refreshAlbumData} onViewLyrics={() => handleTabChange('written-songs')} />
+                      instrumentalOnly ? <p className="p-4 text-sm text-zinc-500">{t('lyric.instrumentalNoLyrics')}</p>
+                        : <WriteLyricsTab key={nav.selectedAlbum.id} lyricsSetId={nav.selectedAlbum.id}
+                          onRefresh={refreshAlbumData} onViewLyrics={() => handleTabChange('written-songs')} />
                     )}
                     {activeTab === 'written-songs' && (
                       <WrittenSongsTab generations={generations} profiles={profiles}
+                        instrumentalOnly={instrumentalOnly}
                         lyricsSetId={nav.selectedAlbum.id}
                         mm3SourceTracks={mm3SourceTracks}
                         onRefresh={refreshAlbumData} onGenerateAudio={handleGenerateAudio}

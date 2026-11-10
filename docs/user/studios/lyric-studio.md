@@ -58,6 +58,24 @@ narrow screen, the **Queue** button on the artist list). See
 [Bulk operations](#bulk-operations) below. Esc steps back from an album to
 its artist, and from an artist to the artist list.
 
+### Instrumental collections
+
+Training Studio exports instrumental tracks with empty lyrics, an instrumental
+flag, captions in all available formats, BPM, key and duration. You can edit the
+artist and album names before exporting, including when the source is a
+collection. Re-exporting a mixed album adds its instrumental tracks; existing
+albums stay as they are until re-exported.
+
+Open the tracks on **Source Lyrics** to read their captions. The album preset
+accepts adapters and a reference track without a lyric profile. Export links
+the saved MM3 checkpoint and YuE2 pair as well as ACE-Step adapters while
+preserving other preset settings. An assigned MM3 adapter makes the album
+available in the MM3 Cover Studio grid.
+
+Lyric profiles and lyric statistics use vocal songs only. An album with no
+lyric songs cannot build a lyric profile or use **Write Lyrics**. Its captions
+and preset remain available.
+
 ## Controls
 
 ### Write lyrics from a prompt

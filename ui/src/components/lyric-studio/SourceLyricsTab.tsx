@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronRight, Pencil, Trash2, Save, X, FileText, Plus } from 'lucide-react';
 import type { LyricsSet, SongLyric } from '../../services/lireekApi';
 
@@ -17,6 +18,7 @@ interface SourceLyricsTabProps {
 }
 
 export const SourceLyricsTab: React.FC<SourceLyricsTabProps> = ({ album, onDeleteSong, onEditSong, onAddSong }) => {
+  const { t } = useTranslation();
   const songs = parseSongs(album.songs);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -92,7 +94,7 @@ export const SourceLyricsTab: React.FC<SourceLyricsTabProps> = ({ album, onDelet
                 <span className="text-[11px] text-zinc-500 font-mono">{song.key}</span>
               ) : null}
               <span className="text-xs text-zinc-500">
-                {lyrics.split('\n').length} lines
+                {song.instrumental ? t('trainingStudio.lyricStudio.captionsOnly') : `${lyrics.split('\n').length} lines`}
               </span>
             </button>
 
@@ -100,7 +102,7 @@ export const SourceLyricsTab: React.FC<SourceLyricsTabProps> = ({ album, onDelet
             {isExpanded && (
               <div className="border-t border-zinc-200 dark:border-white/5">
                 {/* Enriched metadata from a Training Studio export */}
-                {(song.caption || song.mm3Caption || song.genre || song.bpm || song.key || song.signature) && (
+                {(song.caption || song.mm3Caption || song.yue2Caption || song.genre || song.bpm || song.key || song.signature) && (
                   <div className="px-4 pt-3 space-y-3">
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                       {song.genre && (
@@ -163,7 +165,7 @@ export const SourceLyricsTab: React.FC<SourceLyricsTabProps> = ({ album, onDelet
                     />
                   ) : (
                     <pre className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap font-sans leading-relaxed max-h-96 overflow-y-auto">
-                      {lyrics || '(No lyrics available)'}
+                      {song.instrumental ? t('trainingStudio.lyricStudio.captionsOnly') : lyrics || '(No lyrics available)'}
                     </pre>
                   )}
                 </div>
@@ -190,7 +192,7 @@ export const SourceLyricsTab: React.FC<SourceLyricsTabProps> = ({ album, onDelet
                     </>
                   ) : (
                     <>
-                      {onEditSong && (
+                      {onEditSong && !song.instrumental && (
                         <button
                           onClick={() => { setEditingIdx(idx); setEditText(lyrics); }}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-indigo-400 hover:bg-indigo-500/10 transition-colors"

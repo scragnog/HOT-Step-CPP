@@ -85,6 +85,9 @@ export function registerLlmRoutes(router: Router): void {
       const { provider_name, model } = req.body;
       const lyricsSet = db.getLyricsSet(id);
       if (!lyricsSet) return res.status(404).json({ error: 'Lyrics set not found' });
+      if (!profilerService.lyricSongs(lyricsSet.songs).length) {
+        return res.status(400).json({ error: profilerService.NO_LYRICS_TO_PROFILE });
+      }
       const artist = db.getArtist(lyricsSet.artist_id);
       if (!artist) return res.status(404).json({ error: 'Artist not found' });
       
@@ -108,6 +111,9 @@ export function registerLlmRoutes(router: Router): void {
       const { provider_name, model } = req.body;
       const lyricsSet = db.getLyricsSet(id);
       if (!lyricsSet) throw new Error('Lyrics set not found');
+      if (!profilerService.lyricSongs(lyricsSet.songs).length) {
+        return res.status(400).json({ error: profilerService.NO_LYRICS_TO_PROFILE });
+      }
       const artist = db.getArtist(lyricsSet.artist_id);
       if (!artist) throw new Error('Artist not found');
 
@@ -154,7 +160,7 @@ export function registerLlmRoutes(router: Router): void {
           skipped.push({ id: profile.id, reason: 'lyrics set not found' });
           continue;
         }
-        const songs = (lyricsSet.songs || []) as { title: string; album?: string; lyrics: string }[];
+        const songs = profilerService.lyricSongs((lyricsSet.songs || []) as profilerService.SongLyrics[]);
         if (!songs.length) {
           skipped.push({ id: profile.id, reason: 'lyrics set has no songs' });
           continue;

@@ -2327,6 +2327,7 @@ export interface CaptionOptions {
 export type LyricStudioFieldSource = 'tags' | 'default' | 'filename' | 'folder' | 'dataset-name';
 
 export interface LyricStudioExportSong {
+  instrumental: boolean;
   sampleId: string;
   title: string;
   album: string;              // per-song album (own tag first, set album else)
@@ -2341,6 +2342,7 @@ export interface LyricStudioAdapterHit {
 }
 
 export interface LyricStudioExportPreview {
+  mm3Adapter: string | null;
   artist: string;             // detected, pre-fills the override field
   album: string;
   artistSource: LyricStudioFieldSource;

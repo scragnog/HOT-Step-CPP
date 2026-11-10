@@ -696,7 +696,10 @@ server.tool(
       return { content: [{ type: 'text', text: `Lyrics set ${lyrics_set_id} not found.` }] };
     }
 
-    const songs = lyricsSet.songs;
+    const songs = lyricsSet.songs.filter((song: any) => !song.instrumental && song.lyrics?.trim());
+    if (!songs.length) {
+      return { content: [{ type: 'text', text: 'no lyrics to profile: this album is instrumental' }] };
+    }
     const artistName = lyricsSet.artist_name;
     const album = lyricsSet.album;
 

@@ -80,7 +80,7 @@ export const SendToLyricStudio: React.FC = () => {
     }
   };
 
-  const hasPresetAssets = !!(preview?.ditAdapter || preview?.lmAdapter || preview?.referenceTrack);
+  const hasPresetAssets = !!(preview?.ditAdapter || preview?.lmAdapter || preview?.mm3Adapter || preview?.referenceTrack);
   const canSend = !!preview && preview.songs.length > 0 && !!artist.trim() && !!album.trim() && !sending;
 
   return (
@@ -166,6 +166,9 @@ export const SendToLyricStudio: React.FC = () => {
                   ) : (
                     <div className="text-xs text-zinc-600 dark:text-zinc-400">
                       {t('trainingStudio.lyricStudio.songs', { count: preview.songs.length })}
+                      {preview.songs.some(s => s.instrumental) && <span className="block text-[11px] text-zinc-500 mt-0.5">
+                        {t('trainingStudio.lyricStudio.instrumentalIncluded', { count: preview.songs.filter(s => s.instrumental).length })}
+                      </span>}
                       {(preview.skippedExcluded + preview.skippedInstrumental + preview.skippedNoLyrics) > 0 && (
                         <span className="block text-[11px] text-zinc-500 mt-0.5">
                           {t('trainingStudio.lyricStudio.skipped', {
@@ -184,6 +187,7 @@ export const SendToLyricStudio: React.FC = () => {
                       {preview.songs.map(s => (
                         <div key={s.sampleId} className="px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
                           <span className="truncate flex-1">{s.title}</span>
+                          {s.instrumental && <span className="text-[10px] text-zinc-500">{t('trainingStudio.lyricStudio.captionsOnly')}</span>}
                           {!s.hasCaption && (
                             <span className="text-[10px] text-zinc-400 dark:text-zinc-600 flex-shrink-0">{t('trainingStudio.grid.statusUnlabeled')}</span>
                           )}
@@ -214,6 +218,9 @@ export const SendToLyricStudio: React.FC = () => {
                         info={t('trainingStudio.lyricStudio.linkAdaptersInfo')}
                       />
                       <div className="pl-[52px] flex flex-col gap-0.5">
+                        {preview.mm3Adapter && <span className="block text-[11px] font-mono text-zinc-500" title={preview.mm3Adapter}>
+                          MM3: {preview.mm3Adapter}
+                        </span>}
                         {preview.ditAdapter && (
                           <span className="block text-[11px] font-mono text-zinc-500" title={preview.ditAdapter.path}>
                             {t('trainingStudio.lyricStudio.adapterDit', { name: lastFolder(preview.ditAdapter.path), detail: preview.ditAdapter.detail })}

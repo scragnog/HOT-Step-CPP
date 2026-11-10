@@ -10,6 +10,7 @@ import { StreamingPanel } from './StreamingPanel';
 
 interface ProfilesTabProps {
   lyricsSetId: number;
+  instrumentalOnly?: boolean;
   profiles: Profile[];
   onRefresh: () => void;
   showToast: (msg: string) => void;
@@ -17,7 +18,7 @@ interface ProfilesTabProps {
 }
 
 export const ProfilesTab: React.FC<ProfilesTabProps> = ({
-  lyricsSetId, profiles, onRefresh, showToast, profilingModel,
+  lyricsSetId, profiles, onRefresh, showToast, profilingModel, instrumentalOnly = false,
 }) => {
   const [building, setBuilding] = useState(false);
   const { t } = useTranslation();
@@ -93,7 +94,7 @@ export const ProfilesTab: React.FC<ProfilesTabProps> = ({
       <div className="flex items-center gap-3">
         <button
           onClick={handleBuild}
-          disabled={building}
+          disabled={building || instrumentalOnly}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-200 dark:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-semibold transition-all"
         >
           {building ? (
@@ -108,6 +109,7 @@ export const ProfilesTab: React.FC<ProfilesTabProps> = ({
             </>
           )}
         </button>
+        {instrumentalOnly && <span className="text-xs text-zinc-500">{t('lyric.instrumentalNoLyrics')}</span>}
       </div>
 
       {/* Streaming panel */}
