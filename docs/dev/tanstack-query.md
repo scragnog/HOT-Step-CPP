@@ -356,7 +356,7 @@ monitor bar each produce one request per key.
 | File | Change |
 |---|---|
 | `PipelineStageProgress.tsx:66` | Observe `trainingQueries.job(worker, jobId)` with `enabled: !!jobId`, then adopt on `data`. It currently races `useActiveTrainingJob()`. |
-| `SendToLyricStudio.tsx:54` | `useQuery({ ...tq.lyricStudioPreview(worker, datasetId), enabled: open })`; seed the form once from `data`. |
+| `SendToLyricStudio.tsx:54` | `useQuery({ ...tq.lyricStudioPreview(datasetId), enabled: open })`; seed the form once from `data`. |
 | `BatchImportWizard.tsx:166` | `useQuery(tq.browse(dir, 'trainingAudio'))`, `enabled: open && !!dir`. Rows stay client state. |
 | `InstaGenPanel.tsx:157` | Replace the `instaWorkflowApi.getDocument` recovery read with `documentOptions(id)`. |
 

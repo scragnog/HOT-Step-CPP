@@ -28,7 +28,6 @@ const fileName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 export const SendToLyricStudio: React.FC = () => {
   const { t } = useTranslation();
   const detail = useTrainingStore(s => s.detail);
-  const worker = useTrainingStore(s => s.trainingWorker);
 
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -51,7 +50,7 @@ export const SendToLyricStudio: React.FC = () => {
     setError('');
     try {
       // Seeds the editable artist/album fields, so it is a one-shot read.
-      const p = await queryClient.query(tq.lyricStudioPreview(worker, datasetId));
+      const p = await queryClient.query(tq.lyricStudioPreview(datasetId));
       setPreview(p);
       setArtist(p.artist);
       setAlbum(p.album);
@@ -71,7 +70,7 @@ export const SendToLyricStudio: React.FC = () => {
         artist: artist.trim(),
         album: album.trim(),
         linkAdapters,
-      }, { worker });
+      });
       setResult(r);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'export failed');

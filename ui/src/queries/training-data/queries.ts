@@ -173,9 +173,10 @@ export const trainingQueries = {
     queryFn: ({ queryKey, signal }) => api.getSampleYue2(id, sampleId, { worker: workerOf(queryKey), signal }),
     staleTime: 0,
   }),
-  lyricStudioPreview: (worker: Worker, id: string) => queryOptions({
-    queryKey: serverKey(TD.lyricStudioPreview, { worker, id }),
-    queryFn: ({ queryKey, signal }) => api.getLyricStudioPreview(id, { worker: workerOf(queryKey), signal }),
+  /** This PC only (worker null), whatever "Train on" says. */
+  lyricStudioPreview: (id: string) => queryOptions({
+    queryKey: serverKey(TD.lyricStudioPreview, { worker: null, id }),
+    queryFn: ({ signal }) => api.getLyricStudioPreview(id, { signal }),
     staleTime: 0,
   }),
   /** The captions a YuE2 render can source from. Fresh each ask (the caller is
