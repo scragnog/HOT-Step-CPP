@@ -47,6 +47,13 @@ only about 0.2 of its mass on the candidates. The guide lowers the cost of
 following, but it does not make the LM agree. A vocal-forward source (backing
 -12 dB) raised adapter word recall from 0.43 to 0.83. Vocal only comes back
 spectrally off (LTAS about 20 dB), and a second pass loses words.
+Round 9: the flow DiT renders mostly from stream 0, the LM's hidden row. Swapping
+streams 1 to 7 of a cover for the clean launder's moved the audio 0.15 dB; swapping
+stream 0 alone turned it into the launder. Nudging stream 0 until the drawn code
+is in its top 10 (`lm_state_fix`) needs only about 3% of its norm and changes the
+audio by 0.3 dB. A greedy depth decoder (`lm_depth_greedy`) derails the plan.
+Blending the whole block between cover and launder (`--keep-hiddens`, then
+`forced_frame_hiddens_file` under model key `external`) is a smooth dial.
 
 Deep docs (local, gitignored): `docs/plans/multi-backend-architecture.md` (architecture plan,
 day-0 findings, op inventory) and `docs/plans/mm3-gguf-layout.md` (GGUF contract + loader
