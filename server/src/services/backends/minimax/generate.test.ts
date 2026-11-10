@@ -7,6 +7,7 @@ import {
   MM3_DEFAULT_FLOW_HOP, MM3_DEFAULT_STEPS, MM3_FP8_CALIB_PATH, mapMinimaxParams, mm3LowStepShift,
   mm3TailFadeStartSec,
 } from './generate.js';
+import { mm3PlankDir } from './plank.js';
 import { listMm3LmAdapters } from './lmAdapter.js';
 
 test('MM3 sends the shared runtime DoRA opt-in without changing legacy requests', () => {
@@ -127,4 +128,24 @@ test('MM3 tail fade toggle times the fade from the lyrics', (t) => {
   assert.equal(sung.lm_adapter_mode, 'runtime');
   const inst = mapMinimaxParams({ ...base, lyrics: '' }).req as unknown as Record<string, unknown>;
   assert.equal(inst.lm_adapter_fade_out, undefined);
+});
+
+test('MM3 source guide: sent only from the plank folder, with its dials, and endings stand down', () => {
+  const params = { prompt: 'x', seed: 42 };
+  const req = (p: Record<string, unknown>) => mapMinimaxParams({ ...params, ...p }).req as unknown as Record<string, unknown>;
+  const plain = req({});
+  assert.equal(Object.keys(plain).some(k => k.startsWith('lm_guide')), false);
+  const on = req({ mm3GuidePath: 'song.guide', mm3GuideScale: '0.9', mm3GuideK: 32, mm3GuideOutside: -100,
+    mm3GuideGatePath: 'song.gate', mm3Takes: 4 });
+  assert.equal(on.lm_guide_file, path.join(mm3PlankDir(), 'song.guide'));
+  assert.equal(on.lm_guide_gate_file, path.join(mm3PlankDir(), 'song.gate'));
+  assert.equal(on.lm_guide_scale, 0.9);
+  assert.equal(on.lm_guide_k, 32);
+  assert.equal(on.lm_guide_outside, -100);
+  assert.equal(Object.hasOwn(on, 'require_eos'), false);
+  assert.equal(Object.hasOwn(on, 'min_frames'), false);
+  assert.equal(on.takes ?? 1, 1);
+  const bare = req({ mm3GuidePath: 'song.guide', mm3GuideScale: '' });
+  assert.equal(Object.hasOwn(bare, 'lm_guide_scale'), false);
+  assert.equal(Object.hasOwn(req({ mm3GuidePath: '../escape.guide' }), 'lm_guide_file'), false);
 });

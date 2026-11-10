@@ -41,6 +41,17 @@ it afterwards. Missing Music-Flamingo returns Model Manager guidance.
 launder model files. `POST /api/yue2-cover/source-metadata` also returns
 `mm3Caption` from the matched dataset track's `<stem>.mm3.txt`, when present.
 
+An MM3 generation can follow a source guide instead of a plank (experimental,
+API only). `mm3GuidePath` names a `.guide` file in the plank folder, written by
+`ace-train mm3-codes` or `mm3-launder` with `--guide-k N`: the encoder's top N
+codes per frame. The planner then chooses among those candidates.
+`mm3GuideScale` (0 to 1, engine default 0.5) sets how often the source wins.
+`mm3GuideK` uses fewer candidates than the file holds, and `mm3GuideOutside`
+(-100 or lower) restricts the draw to the candidates. `mm3GuideGatePath` names a
+raw f32 file in the same folder, one multiplier on the scale per frame. The
+song is as long as the guide, so natural endings, takes and the length floor
+are skipped. A loaded plank wins over a guide, and a guide wins over a saved plan.
+
 Conventions:
 
 - Long-running work (generation, training, separation, transcription) is submitted with a

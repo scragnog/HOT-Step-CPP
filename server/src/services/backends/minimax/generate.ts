@@ -47,7 +47,7 @@ import { aceClient } from '../../aceClient.js';
 import { wavDurationSec } from '../../audioCrop.js';
 import { engineFormatPath } from '../../audioConvert.js';
 import { resolveSourceAudioPath } from '../../generation/sourceAudio.js';
-import { MM3_PLANK_EXT, mm3PlankDir, readMm3Plank } from './plank.js';
+import { MM3_PLANK_EXT, mm3PlankDir, readMm3Plank, resolveMm3PlankPath } from './plank.js';
 import { applyMm3ForcePattern, parseMm3ForcePattern, trimMm3Codes } from './coverPattern.js';
 import {
   MM3_HIDDENS_EXT, ensureMm3HiddensDir, resolveMm3HiddensPath, sanitiseMm3HiddensName,
@@ -527,8 +527,17 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
     notes.push(`audio to audio: source sound at strength ${a2aStrength}${a2aHold > 0 ? `, hold ${a2aHold}` : ''}`
       + (a2aSeconds ? `, first ${a2aSeconds} s` : '') + (plankCodes ? '' : ' (length follows the source)'));
   }
-  const requireEnding = !plankCodes && !a2aSource && params.mm3RequireEnding !== false;
-  const askedTakes = !plankCodes && Number(params.mm3Takes) > 1
+  // Source guide (engine lm_guide_file, API only): the LM picks among the
+  // encoder's top-K codes per frame. Files live in the plank folder, and the
+  // song is as long as the guide, so endings, takes and the length floor stand
+  // down as they do for a plank. A plank wins: the engine takes one or the other.
+  const guidePath = params.mm3GuidePath && !plankCodes ? resolveMm3PlankPath(String(params.mm3GuidePath)) : null;
+  if (params.mm3GuidePath && !guidePath) {
+    notes.push(plankCodes ? 'Source guide ignored: a plank is loaded and the engine takes one or the other'
+      : `Source guide ignored: ${params.mm3GuidePath} is not inside the plank folder`);
+  }
+  const requireEnding = !plankCodes && !guidePath && !a2aSource && params.mm3RequireEnding !== false;
+  const askedTakes = !plankCodes && !guidePath && Number(params.mm3Takes) > 1
     ? Math.min(MM3_MAX_TAKES, Math.max(1, Math.round(Number(params.mm3Takes))))
     : 1;
   // Variations and natural endings want the same batched AR pass, so they share
@@ -552,7 +561,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   // Rides the ending machinery: a plan under the floor is dropped and re-planned
   // exactly like one that never ended, because the remedy is the same. Works
   // with endings off too — the engine then accepts any plan that is long enough.
-  const minLengthOn = !plankCodes && !a2aSource && params.mm3MinLength !== false;
+  const minLengthOn = !plankCodes && !guidePath && !a2aSource && params.mm3MinLength !== false;
   const minDurationSec = minLengthOn ? mm3MinDurationSec(lyrics) : 0;
   const minFrames = minDurationSec > 0 ? Math.round(minDurationSec * MM3_FPS) : 0;
   if (minFrames > 0) {
@@ -702,6 +711,21 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
           ? { forced_semantic: sem, ...(biasSet ? { lm_force_bias: bias } : {}) }
           : { forced_semantic: sem, forced_acoustic: ac };
       })() : {}),
+      ...(guidePath ? (() => {
+        const num = (v: unknown) => (String(v ?? '').trim() === '' ? NaN : Number(v));
+        const scale = num(params.mm3GuideScale), k = num(params.mm3GuideK), outside = num(params.mm3GuideOutside);
+        const gate = params.mm3GuideGatePath ? resolveMm3PlankPath(String(params.mm3GuideGatePath)) : null;
+        notes.push(`source guide ${path.basename(guidePath)}`
+          + (Number.isFinite(scale) ? `, scale ${scale}` : '') + (Number.isFinite(k) ? `, ${k} candidates` : '')
+          + (gate ? ', vocal gate' : '') + (params.mm3HiddensPath ? '; saved plan ignored' : ''));
+        return {
+          lm_guide_file: guidePath,
+          ...(Number.isFinite(scale) ? { lm_guide_scale: scale } : {}),
+          ...(Number.isFinite(k) ? { lm_guide_k: k } : {}),
+          ...(Number.isFinite(outside) ? { lm_guide_outside: outside } : {}),
+          ...(gate ? { lm_guide_gate_file: gate } : {}),
+        };
+      })() : {}),
       // ── Saved plans (engine mm3-hiddens-file.h) ──
       //
       // Replay. Unlike the plank above this IS a speedup — the hiddens are what
@@ -714,7 +738,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
       // A plank and a plan together is a 400 from the engine, so the plank wins
       // here and says so — the two pin the same thing and the engine would
       // otherwise reject the whole render over a UI state the user can reach.
-      ...(params.mm3HiddensPath && !params.mm3PlankPath ? (() => {
+      ...(params.mm3HiddensPath && !params.mm3PlankPath && !guidePath ? (() => {
         const resolved = resolveMm3HiddensPath(String(params.mm3HiddensPath));
         if (!resolved || !fs.existsSync(resolved)) {
           notes.push(`Saved plan not found (${params.mm3HiddensPath}) — planning fresh`);
