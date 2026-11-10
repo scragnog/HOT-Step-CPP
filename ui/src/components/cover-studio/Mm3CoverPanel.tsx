@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { apiClient } from '../../services/httpClient';
 import { ParamLabel } from '../shared/ParamLabel';
 import { StyledSelect } from '../shared/StyledSelect';
-import { mm3MatchBias, type Mm3CoverSettings } from './mm3CoverState';
+import { MM3_COVER_MODES, mm3MatchBias, mm3ModeNeeds, withMm3CoverMode, type Mm3CoverMode, type Mm3CoverSettings, type Mm3StateFix } from './mm3CoverState';
 import { snapshotOptions } from '../../queries/cover-lyrics/reads';
 import { waitForQuery } from '../../queries/wait';
 import { serverKey } from '../../queries/keys';
@@ -18,7 +18,7 @@ import type { Artist, LyricsSet, AlbumPreset } from '../../services/lireekApi';
 export interface Mm3SourceFacts { bpm: number; key: string; scale?: string; lyrics: string; mm3Caption: string; instrumental: boolean; origin: 'dataset' | 'analysis' }
 
 
-interface PlankRow { file: string; source?: string; caption?: string; duration?: number; created?: string; laundered?: boolean }
+interface PlankRow { file: string; source?: string; caption?: string; duration?: number; created?: string; laundered?: boolean; guide?: boolean; state?: boolean }
 interface JobSummary { status: string; phase: string; error: string | null; startedAt: number | null; result?: { lyrics?: string; mm3Caption?: string } }
 
 export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName, caption, onCaption, lyrics, onLyrics,
@@ -175,6 +175,17 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
   useEffect(() => {
     if (trackTitle !== 'custom' && !tracks.some(track => track.title === trackTitle)) setTrackTitle('custom');
   }, [tracks, trackTitle]);
+  const modeLabels: Record<Mm3CoverMode, string> = {
+    pin: t('cover.mm3.mode.pin', 'Pin'),
+    follow: t('cover.mm3.mode.follow', 'Follow source'),
+    'follow-depth': t('cover.mm3.mode.followDepth', 'Follow source, depth fix'),
+    'follow-stream': t('cover.mm3.mode.followStream', 'Follow source, stream fix'),
+    product: t('cover.mm3.mode.product', 'Product rule'),
+    blend: t('cover.mm3.mode.blend', 'State blend'),
+  };
+  const needs = mm3ModeNeeds(settings.mode);
+  const plankRow = planks.data?.planks.find(p => p.file === settings.plank);
+  const modeBlocked = !!plankRow && ((needs.guide && !plankRow.guide) || (needs.state && !plankRow.state));
   const inputClass = 'w-full rounded-lg border border-zinc-300 dark:border-white/10 bg-white dark:bg-black/20 p-2 text-sm text-zinc-900 dark:text-white';
   const plankLabel = (p: PlankRow) => `${p.source || p.caption?.slice(0, 40) || p.file}${p.duration ? ` · ${Math.round(p.duration)} s` : ''}`
     + (p.laundered ? ` · ${t('cover.mm3.launderedTag', 'laundered')}` : '');
@@ -182,6 +193,12 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
     <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">{t('cover.mm3.title', 'MiniMax-Music3 cover')}</h2>
     <p className="text-xs text-zinc-500">{t('cover.mm3.description', "Launders the source through MM3 before encoding, then keeps its semantic codes under your target caption.")}</p>
 
+    <div className="space-y-2">
+      <ParamLabel label={t('cover.mm3.modeLabel', 'Mode')} info={t('cover.mm3.modeInfo', "How the cover uses the source. Pin holds its codes. Follow source lets the planner pick among the source's top candidates on each frame; the depth and stream fixes adjust what the renderer hears. Product rule weighs the candidates by both the planner and the source. State blend moves the result part of the way back toward the source's own render. Changing mode resets that mode's sliders.")} />
+      <StyledSelect accent="cyan" value={settings.mode} disabled={busy} onChange={mode => onSettings(s => withMm3CoverMode(s, mode as Mm3CoverMode))}
+        options={MM3_COVER_MODES.map(mode => ({ value: mode, label: modeLabels[mode] }))} />
+      {modeBlocked && <p role="alert" className="text-xs text-amber-600 dark:text-amber-400">{t('cover.mm3.modeReencode', 'This source was encoded before cover modes. Re-encode it to use this mode.')}</p>}
+    </div>
     <div role="status" className="rounded-lg border border-cyan-500/20 p-3 space-y-2">
       <div className="flex flex-wrap gap-3 text-xs">{['metadata', 'lyrics', 'caption', 'encode', 'done'].map(step =>
         <span key={step} className={phase === step ? 'font-semibold text-cyan-600 dark:text-cyan-300' : 'text-zinc-500'}>{t(`cover.mm3.phase.${step}`, step)}</span>)}</div>
@@ -232,9 +249,23 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
     <ParamLabel label={t('cover.mm3.captionSource', 'Caption source')} info={t('cover.mm3.captionSourceInfo', 'Use a named track or write a Custom caption. Source BPM, key and scale replace the target track facts.')} />
     <StyledSelect accent="cyan" value={trackTitle} onChange={setTrackTitle} options={[{ value: 'custom', label: t('cover.mm3.custom', 'Custom') }, ...tracks.map(track => ({ value: track.title, label: track.title }))]} />
     {adapterNote && <p className="text-xs text-zinc-500">{adapterNote}</p>}
-    <EditableSlider label={t('cover.mm3.match', 'Match')} value={settings.match} min={0} max={100} step={1} defaultValue={100}
+    {settings.mode === 'pin' && <EditableSlider label={t('cover.mm3.match', 'Match')} value={settings.match} min={0} max={100} step={1} defaultValue={100}
       onChange={match => set({ match })} tooltip={t('cover.mm3.matchInfo', '100 pins the source semantic codes. Lower values give the target artist more room to freestyle. Try 20–60 for a looser match.')}
-      helpText={settings.match >= 100 ? t('cover.mm3.hardPin', 'Hard pin') : t('cover.mm3.biasHelp', 'Semantic bias: {{bias}}', { bias: mm3MatchBias(settings.match) })} />
+      helpText={settings.match >= 100 ? t('cover.mm3.hardPin', 'Hard pin') : t('cover.mm3.biasHelp', 'Semantic bias: {{bias}}', { bias: mm3MatchBias(settings.match) })} />}
+    {settings.mode === 'blend' && <EditableSlider label={t('cover.mm3.blend', 'Blend')} value={settings.blend} min={0} max={100} step={5} defaultValue={25}
+      onChange={blend => set({ blend })} tooltip={t('cover.mm3.blendInfo', "How far the cover moves back toward the source's own render before it is voiced, in percent. 0 is the Follow source cover; higher sounds more like the original.")} />}
+    {settings.mode === 'product' && <EditableSlider label={t('cover.mm3.weight', 'Weight')} value={settings.weight} min={0} max={4} step={0.1} defaultValue={1}
+      onChange={weight => set({ weight })} tooltip={t('cover.mm3.weightInfo', "How much the source's own ranking counts against the planner's when they pick among the candidates. 0 leaves it to the planner.")} />}
+    {settings.mode !== 'pin' && settings.mode !== 'product' && <EditableSlider label={t('cover.mm3.strength', 'Strength')} value={settings.strength} min={0} max={1} step={0.05} defaultValue={0.9}
+      onChange={strength => set({ strength })} tooltip={t('cover.mm3.strengthInfo', 'How often the source wins over the planner on each frame. Lower values loosen the cover but cut out more; 0.9 is the tested setting.')} />}
+    {settings.mode !== 'pin' && <EditableSlider label={t('cover.mm3.candidates', 'Candidates')} value={settings.candidates} min={1} max={32} step={1} defaultValue={32}
+      onChange={candidates => set({ candidates })} tooltip={t('cover.mm3.candidatesInfo', "How many of the source's best codes per frame the planner may choose from. 1 is the pin.")} />}
+    {settings.mode.startsWith('follow') && <div className="space-y-2">
+      <ParamLabel label={t('cover.mm3.stateFix', 'State fix')} info={t('cover.mm3.stateFixInfo', "Adjusts the planner's state to agree with each chosen code before the sound is made: for the depth decoder, for the renderer (stream 0), or both.")} />
+      <StyledSelect accent="cyan" value={settings.stateFix} onChange={stateFix => set({ stateFix: stateFix as Mm3StateFix })}
+        options={[{ value: 'off', label: t('cover.mm3.fix.off', 'Off') }, { value: 'depth', label: t('cover.mm3.fix.depth', 'Depth') },
+          { value: 'stream', label: t('cover.mm3.fix.stream', 'Stream 0') }, { value: 'both', label: t('cover.mm3.fix.both', 'Both') }]} />
+    </div>}
 
     <label className="block space-y-2">
       <ParamLabel label={t('cover.mm3.trim', 'Trim to seconds')}
@@ -265,7 +296,7 @@ export function Mm3CoverPanel({ settings, onSettings, sourceAudioUrl, sourceName
     </div>
     <p className="text-xs text-zinc-500">{t('cover.mm3.globalBar', 'One take per cover. LM sampling (temperature, top-k, top-p, repetition) and the LM adapter and its scales come from the MM3 settings in the top bar, as for any MM3 render.')}</p>
 
-    <button type="button" onClick={onGenerate} disabled={!canGenerate || busy || !!error}
+    <button type="button" onClick={onGenerate} disabled={!canGenerate || busy || !!error || modeBlocked}
       className="rounded-lg bg-cyan-500/20 px-4 py-2 text-sm font-medium text-cyan-700 dark:text-cyan-300 disabled:opacity-50">
       {t('cover.mm3.generate', 'Generate cover')}
     </button>

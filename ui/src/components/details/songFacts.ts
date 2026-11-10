@@ -210,8 +210,13 @@ function mm3Facts(gp: any): FactGroup[] {
 
   // Cover Studio (code forcing): which plank, and how hard it was held.
   const cover: Fact[] = [];
-  if (gp.mm3PlankPath) {
-    add(cover, 'Plank', String(gp.mm3PlankPath).replace(/\.mm3plank$/, '').slice(0, 8), { mono: true, title: String(gp.mm3PlankPath) });
+  const plank = gp.mm3PlankPath || gp.mm3CoverPlank;
+  if (plank) {
+    // Cover modes (Cover Studio): Pin forces the plank; the others follow its guide.
+    const MODES: Record<string, string> = { follow: 'Follow source', 'follow-depth': 'Follow source, depth fix',
+      'follow-stream': 'Follow source, stream fix', product: 'Product rule', blend: 'State blend' };
+    add(cover, 'Mode', MODES[String(gp.mm3CoverMode)] ?? 'Pin');
+    add(cover, 'Plank', String(plank).replace(/\.mm3plank$/, '').slice(0, 8), { mono: true, title: String(plank) });
     if (gp.mm3PlankLaundered !== undefined) {
       add(cover, 'Laundered', gp.mm3PlankLaundered ? 'Yes' : 'No',
         gp.mm3PlankLaunderModels ? { title: String(gp.mm3PlankLaunderModels) } : undefined);
@@ -219,8 +224,16 @@ function mm3Facts(gp: any): FactGroup[] {
     if (gp.mm3PlankLaunderSteps !== undefined) add(cover, 'Launder steps', num(gp.mm3PlankLaunderSteps));
     if (gp.mm3PlankLaunderSeed !== undefined) add(cover, 'Launder seed', String(gp.mm3PlankLaunderSeed));
     if (gp.mm3PlankLaunderCaption !== undefined) add(cover, 'Source caption', String(gp.mm3PlankLaunderCaption));
-    add(cover, 'Forcing', gp.mm3PlankSemanticOnly ? 'Semantic only' : 'Full replay');
-    if (gp.mm3PlankSemanticOnly) {
+    if (gp.mm3CoverMode) {
+      if (gp.mm3GuideProduct !== undefined) add(cover, 'Weight', num(gp.mm3GuideProduct));
+      else add(cover, 'Strength', num(gp.mm3GuideScale));
+      add(cover, 'Candidates', num(gp.mm3GuideK));
+      const FIX = ['Off', 'Depth', 'Stream 0', 'Both'];
+      if (gp.mm3GuideStateFix !== undefined) add(cover, 'State fix', FIX[Number(gp.mm3GuideStateFix)] ?? String(gp.mm3GuideStateFix));
+      if (gp.mm3BlendAmount !== undefined) add(cover, 'Blend', `${Math.round(Number(gp.mm3BlendAmount) * 100)}%`);
+      if (Number(gp.mm3GuideSeconds) > 0) add(cover, 'Trim', `${num(gp.mm3GuideSeconds)} s`);
+    } else add(cover, 'Forcing', gp.mm3PlankSemanticOnly ? 'Semantic only' : 'Full replay');
+    if (gp.mm3PlankSemanticOnly && !gp.mm3CoverMode) {
       add(cover, 'Bias', gp.mm3ForceBias === '' || gp.mm3ForceBias === undefined ? 'Hard pin' : num(gp.mm3ForceBias));
       const p = gp.mm3ForcePattern;
       if (p) {
@@ -229,7 +242,7 @@ function mm3Facts(gp: any): FactGroup[] {
         add(cover, 'Pattern', `${rules.join(' + ')}${p.invert ? ' (inverted)' : ''}`);
       }
     }
-    if (gp.mm3PlankTrimSeconds) add(cover, 'Trim', `${num(gp.mm3PlankTrimSeconds)} s`);
+    if (gp.mm3PlankTrimSeconds && !gp.mm3CoverMode) add(cover, 'Trim', `${num(gp.mm3PlankTrimSeconds)} s`);
   }
   // Sound: the source's latents blended into the flow (audio to audio).
   if (Number(gp.mm3A2aStrength) > 0) {

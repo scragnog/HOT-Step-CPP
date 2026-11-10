@@ -137,7 +137,32 @@ facts. Choose **Custom** to edit the Caption box. An album's saved MM3 LM adapte
 is selected in the top bar. If an album loses its adapter, the selection moves to
 the artist's first eligible album, or clears if none remain.
 
-**Match** ranges from 0 to 100, default 100. At 100 the source semantic codes are
+**Mode**, at the top of the panel, picks how the cover uses the source. These are
+experimental. On the test song every mode still breaks up in the chorus.
+
+| Mode | What it does | Sliders (default) |
+|---|---|---|
+| **Pin** | Holds the source's semantic codes. Sounds closest to the original. | Match (100) |
+| **Follow source** | On each frame the planner picks among the source's best candidate codes. Gives a cover with a different voice and genre over the same melody and chords. | Strength (0.9), Candidates (32), State fix (Off) |
+| **Follow source, depth fix** | Follow source with **State fix** set to Depth. | the same, State fix Depth |
+| **Follow source, stream fix** | Follow source with **State fix** set to Stream 0. | the same, State fix Stream 0 |
+| **Product rule** | The candidates are weighed by both the planner and the source. | Weight (1.0), Candidates (32) |
+| **State blend** | A Follow source cover moved part of the way back toward the source's own render. | Blend (25%), Strength (0.9), Candidates (32) |
+
+Changing mode resets only that mode's sliders. The source preparation, seeds,
+trim, caption and lyrics stay as they are. **Strength** is how often the source
+wins on each frame; values well below 0.9 tend to cut out. **Candidates** is how
+many of the source's codes per frame the planner may choose from. **State fix**
+(Off, Depth, Stream 0, Both) adjusts the planner's state to agree with each chosen
+code before the sound is made. The LM adapter in the top bar works with every mode.
+
+The modes other than Pin need two extra files that encoding now writes beside the
+plank: the source guide and the launder state. The launder state takes about
+3.2 MB per second of source. A plank encoded before cover modes has neither, so
+these modes show a notice and **Generate cover** stays disabled until you
+**Re-encode**. A mode never falls back to Pin.
+
+**Match** (Pin only) ranges from 0 to 100, default 100. At 100 the source semantic codes are
 hard-pinned. Lower values allow more freedom: the semantic bias is
 `round(10^(3 * Match/100))`, shown under the slider. Match 50 gives 32, 33 gives 10,
 and 25 gives 6. Try 20 to 60 when the target artist needs more room.
@@ -145,9 +170,9 @@ and 25 gives 6. Try 20 to 60 when the target artist needs more room.
 **Advanced** holds launder steps, default 30, and launder seed, default 42.
 Seed -1 chooses a random value, saved in the plank sidecar. Change these or the
 source caption, then Re-encode to apply them. **Trim to seconds** limits the
-reference. **Seed**, **Planner seed** and **Generate cover** remain on the panel.
+reference in every mode. **Seed**, **Planner seed** and **Generate cover** remain on the panel.
 LM sampling and adapter scales come from the top bar. The saved song facts record
-launder settings and the semantic bias when Match is below 100.
+the mode and its sliders, launder settings, and the semantic bias when Match is below 100.
 
 ## ACE workflow
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_MM3_COVER, mm3CoverInput, mm3CoverReady, restoreMm3Cover, mm3MatchBias } from './mm3CoverState';
+import { DEFAULT_MM3_COVER, mm3CoverInput, mm3CoverReady, restoreMm3Cover, mm3MatchBias, withMm3CoverMode } from './mm3CoverState';
 
 test('old saved controls are ignored and cannot change semantic hard pinning', () => {
   const restored = restoreMm3Cover({ plank: 'a.mm3plank', plan: false, sound: true,
@@ -32,4 +32,27 @@ test('trim, planner seed and launder settings survive restore', () => {
   assert.equal(mm3CoverInput(restored).trimSeconds, 12);
   assert.equal(mm3CoverInput(restored).arSeed, 9);
   assert.equal(mm3CoverInput({ ...restored, trimSeconds: 'bad' }).trimSeconds, null);
+});
+
+test('MM3 cover modes: a mode change applies only that mode\'s defaults, and old drafts open as Pin', () => {
+  const prepared = { ...DEFAULT_MM3_COVER, plank: 'a.mm3plank', seed: 7, arSeed: 3, trimSeconds: '40', match: 60 };
+  const follow = withMm3CoverMode({ ...prepared, strength: 0.4, stateFix: 'both' }, 'follow-depth');
+  assert.equal(follow.strength, 0.9);
+  assert.equal(follow.stateFix, 'depth');
+  assert.equal(follow.seed, 7);
+  assert.equal(follow.trimSeconds, '40');
+  assert.equal(withMm3CoverMode(follow, 'pin').match, 100);
+  assert.deepEqual(mm3CoverInput(follow), { plank: 'a.mm3plank', semanticOnly: true, trimSeconds: 40, arSeed: 3,
+    mode: 'follow-depth', strength: 0.9, candidates: 32, stateFix: 'depth' });
+  const blend = mm3CoverInput(withMm3CoverMode(follow, 'blend'));
+  assert.equal(blend.blend, 25);
+  assert.equal('stateFix' in blend, false);
+  assert.deepEqual(mm3CoverInput(withMm3CoverMode(follow, 'product')), { plank: 'a.mm3plank', semanticOnly: true,
+    trimSeconds: 40, arSeed: 3, mode: 'product', weight: 1, candidates: 32 });
+  assert.equal(restoreMm3Cover({ plank: 'a.mm3plank' }).mode, 'pin');
+  assert.equal(restoreMm3Cover({ mode: 'greedy', stateFix: 'x', candidates: 99, weight: 9 }).mode, 'pin');
+  assert.equal(restoreMm3Cover({ stateFix: 'x' }).stateFix, 'off');
+  assert.equal(restoreMm3Cover({ candidates: 99 }).candidates, 32);
+  assert.equal(restoreMm3Cover({ mode: 'blend', blend: 40 }).blend, 40);
+  assert.equal('mode' in mm3CoverInput(DEFAULT_MM3_COVER), false);
 });

@@ -41,6 +41,18 @@ it afterwards. Missing Music-Flamingo returns Model Manager guidance.
 launder model files. `POST /api/yue2-cover/source-metadata` also returns
 `mm3Caption` from the matched dataset track's `<stem>.mm3.txt`, when present.
 
+A laundered encode also writes `<id>.guide` (the encoder's top 32 codes per frame)
+and `<id>.mm3hiddens` (the launder's renderer condition) beside the plank, and
+`GET /api/mm3/planks` reports them as `guide` and `state`. The Cover Studio render
+workflow's `mm3Cover` takes `mode` (`pin`, `follow`, `follow-depth`,
+`follow-stream`, `product`, `blend`; absent = `pin`) with `strength`,
+`candidates`, `stateFix` (`off`, `depth`, `stream`, `both`), `weight` and `blend`
+(percent). Every mode but `pin` sends the plank's guide instead of the plank, and
+returns 409 asking for a Re-encode when the guide (or, for `blend`, the state) is
+missing. The generation params behind it are `mm3GuideStateFix` (0 to 3),
+`mm3GuideProduct`, `mm3GuideSeconds` (trim), and `mm3BlendPath` with
+`mm3BlendAmount` (0 to 1), all resolved inside the plank folder.
+
 An MM3 generation can follow a source guide instead of a plank (experimental,
 API only). `mm3GuidePath` names a `.guide` file in the plank folder, written by
 `ace-train mm3-codes` or `mm3-launder` with `--guide-k N`: the encoder's top N
