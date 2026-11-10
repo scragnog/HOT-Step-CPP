@@ -736,6 +736,18 @@ const AppContent: React.FC = () => {
     return () => window.removeEventListener('song-postprocess-reverted', handler);
   }, [queryClient]);
 
+  // A rename from the shared song menu (SongActionsMenu) — already saved.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { songId, title } = (e as CustomEvent).detail || {};
+      if (!songId || !title) return;
+      void patchSong(queryClient, songId, { title });
+      setSelectedSong(prev => (prev?.id === songId ? { ...prev, title } as Song : prev));
+    };
+    window.addEventListener('song-renamed', handler);
+    return () => window.removeEventListener('song-renamed', handler);
+  }, [queryClient]);
+
   // Listen for song-created events (fired by audioGenQueueStore on completion)
   // This covers Lyric Studio, Cover Studio, and resumed queue items.
   useEffect(() => {

@@ -938,6 +938,21 @@ window.addEventListener('song-postprocess-reverted', (e: Event) => {
   if (songId) _syncMastered(songId, '');
 });
 
+// A rename from the song menu. The row keeps its new title for this page;
+// ponytail: a server-owned queue row re-reads its submitted title on reload,
+// write it back to the intent's view if that matters.
+window.addEventListener('song-renamed', (e: Event) => {
+  const { songId, title } = (e as CustomEvent).detail || {};
+  if (!songId || !title) return;
+  let touched = false;
+  _state.items = _state.items.map(item => {
+    if (item.songId !== songId && item.id !== songId) return item;
+    touched = true;
+    return { ...item, generation: { ...item.generation, title } };
+  });
+  if (touched) _emit(true);
+});
+
 function _getSnapshot(): AudioGenQueueState { return _state; }
 function _subscribe(listener: () => void): () => void {
   _listeners.add(listener);

@@ -271,3 +271,8 @@ window.addEventListener('song-postprocess-reverted', (e: Event) => {
   const { songId } = (e as CustomEvent).detail || {};
   if (songId) updatePlaylistItem(songId, { masteredAudioUrl: '' });
 });
+
+window.addEventListener('song-renamed', (e: Event) => {
+  const { songId, title } = (e as CustomEvent).detail || {};
+  if (songId && title) updatePlaylistItem(songId, { title });
+});

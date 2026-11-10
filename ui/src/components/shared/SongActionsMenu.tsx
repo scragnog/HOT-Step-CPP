@@ -8,7 +8,7 @@
 //
 // Two kinds of action live here:
 //   - self-contained ones the component implements itself (Export Params,
-//     Retranscribe, Cover Art, A/B pinning, Post-Processing) — always present,
+//     Retranscribe, Cover Art, A/B pinning, Post-Processing, Rename) — always present,
 //     because they need nothing from the host
 //   - host-supplied ones passed as callbacks (Edit, Download, Send to Cover,
 //     Edit Metadata, Add to Playlist, Delete) — each hidden when its callback
@@ -22,12 +22,14 @@ import React, { useRef, useState, useLayoutEffect } from 'react';
 import ReactDOM from 'react-dom';
 import {
   MoreHorizontal, RotateCcw, Download, Disc3, Tags, Trash2, Upload,
-  Mic2, Image, ArrowLeftRight, ListPlus, Sparkles, Loader2, AlertCircle, Undo2, FileMusic, FileText,
+  Mic2, Image, ArrowLeftRight, ListPlus, Sparkles, Loader2, AlertCircle, Undo2, FileMusic, FileText, Pencil,
 } from 'lucide-react';
+import { toast } from 'react-toastify';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import type { Song, UnifiedRecentSong } from '../../types';
 import { songToTrack } from '../../stores/playbackStore';
+import { songApi } from '../../services/api';
 import { useABCompareSelector, setTrackA, setTrackB } from '../../stores/abCompareStore';
 import {
   startPostProcessing, canPostProcess, revertPostProcessing, dismissRun, usePostProcessRun,
@@ -272,6 +274,20 @@ function downloadScoreAbc(song: Song, abc: string): void {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * Save a new title, then announce it. Every list that caches the title (the
+ * library and recent-songs queries, the playlist, the audio queue, the open
+ * Song Details) listens for `song-renamed`, so the menu needs no host wiring.
+ */
+async function renameSong(song: Song, title: string): Promise<void> {
+  try {
+    await songApi.update(song.id, { title });
+    window.dispatchEvent(new CustomEvent('song-renamed', { detail: { songId: song.id, title } }));
+  } catch (err) {
+    toast.error(`Rename failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export interface SongActionsMenuProps {
@@ -330,7 +346,19 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
   const ppFailed = run?.status === 'failed';
   const ppDone = run?.status === 'succeeded';
 
-  const close = () => setOpen(false);
+  // Rename edits in place inside the open menu, so no modal is needed.
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState('');
+  // Enter closes the menu, and the input can then also blur: commit once.
+  const editing = useRef(false);
+  const close = () => { setOpen(false); setRenaming(false); };
+  const commitRename = () => {
+    if (!editing.current) return;
+    editing.current = false;
+    const title = draft.trim();
+    close();
+    if (title && title !== song.title) void renameSong(song, title);
+  };
   const act = (fn: () => void) => { fn(); close(); };
 
   const hasMastered = !!(song.masteredAudioUrl || (song as any).mastered_audio_url);
@@ -459,6 +487,34 @@ export const SongActionsMenu: React.FC<SongActionsMenuProps> = ({
               label={t('library.sendToCover', 'Send to Cover Studio')}
               onClick={() => act(onSendToCover)}
               tone="text-cyan-400 hover:bg-cyan-500/10"
+            />
+          )}
+          {renaming ? (
+            <div className={`${ITEM_BASE} text-zinc-700 dark:text-zinc-300`}>
+              <Pencil size={14} className="flex-shrink-0" />
+              <input
+                autoFocus
+                value={draft}
+                aria-label={t('library.rename', 'Rename')}
+                onChange={(e) => setDraft(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                // The menu portals out of the row, but React still bubbles
+                // portal events to the row, which would start playback.
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === 'Enter') commitRename();
+                  if (e.key === 'Escape') { editing.current = false; setRenaming(false); }
+                }}
+                onBlur={commitRename}
+                className="flex-1 min-w-0 bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-white/10 rounded px-1.5 py-0.5 text-sm outline-none focus:border-violet-400"
+              />
+            </div>
+          ) : (
+            <Item
+              icon={<Pencil size={14} />}
+              label={t('library.rename', 'Rename')}
+              onClick={() => { setDraft(song.title || ''); editing.current = true; setRenaming(true); }}
             />
           )}
           {onEditMetadata && (
