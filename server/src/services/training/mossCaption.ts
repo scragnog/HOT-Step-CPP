@@ -222,8 +222,9 @@ export function resolveMossPaths(model: LocalCaptioner = 'moss'): { paths: MossP
     .find(p => fs.existsSync(p));
   const audio = path.join(modelsDir, `${model}-aud-f16.gguf`);
 
-  if (!lm) return { missing: `no ${model}-lm-*.gguf in ${modelsDir}` };
-  if (!fs.existsSync(audio)) return { missing: `${model}-aud-f16.gguf missing from ${modelsDir}` };
+  const get = 'download it in Model Manager > Shared > Captioning';
+  if (!lm) return { missing: `no ${model}-lm-*.gguf in ${modelsDir}; ${get}` };
+  if (!fs.existsSync(audio)) return { missing: `${model}-aud-f16.gguf missing from ${modelsDir}; ${get}` };
   return { paths: { exe, modelsDir, lm, audio } };
 }
 

@@ -284,6 +284,16 @@
       ]
     },
     {
+      "id": "flamingo-captioning",
+      "family": "shared",
+      "name": "Local Captioning and Lyrics (Music Flamingo)",
+      "description": "NVIDIA Music Flamingo, local: captions your tracks and transcribes lyrics with section tags in the Training Studio, and captions or transcribes MM3 cover sources in Cover Studio. Non-commercial, academic use only (NVIDIA OneWay Noncommercial License).",
+      "fileIds": [
+        "flamingo-lm-q8_0",
+        "flamingo-aud-f16"
+      ]
+    },
+    {
       "id": "yue2-recommended",
       "family": "yue2",
       "name": "YuE2 Recommended",
@@ -5335,6 +5345,79 @@
       "sizeBytes": 1724480640,
       "repo": "scragnog/MOSS-Music-8B-Instruct-GGUF",
       "description": "MOSS-Music audio encoder — 32-layer Whisper-style tower plus the SwiGLU adapter and deepstack mergers that inject audio into the LM. F16 only, never quantised: the adapter output runs ~770x hotter than the encoder's, so quantisation error lands straight in the LM's input embeddings. Required by every moss-lm file; ~1.6 GB.",
+      "tags": [
+        "required"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "flamingo-lm-q8_0",
+      "filename": "flamingo-lm-q8_0.gguf",
+      "role": "moss",
+      "family": "shared",
+      "subdir": "flamingo",
+      "displayName": "Music Flamingo LM (Q8_0, non-commercial)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "Q8_0",
+      "sizeBytes": 8095527936,
+      "licence": "NVIDIA OneWay Noncommercial License (academic use only)",
+      "repo": "scragnog/Music-Flamingo-2601-GGUF",
+      "sha256": "b56e0d2428f6f61982df384fb28685b8fec4741c42da581643266c389af8b965",
+      "description": "NVIDIA Music Flamingo 7B language model (Qwen2) — writes captions and section-tagged lyric transcripts from what the audio encoder heard. The stronger lyric transcriber of the two local captioners. Near-lossless and half the size of F16; the recommended default. Requires flamingo-aud-f16 as well; this file is ~7.5 GB. Non-commercial, academic use only (NVIDIA OneWay Noncommercial License).",
+      "tags": [
+        "recommended"
+      ],
+      "companions": [
+        {
+          "filename": "LICENSE",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "flamingo-lm-f16",
+      "filename": "flamingo-lm-f16.gguf",
+      "role": "moss",
+      "family": "shared",
+      "subdir": "flamingo",
+      "displayName": "Music Flamingo LM (F16, non-commercial)",
+      "scale": null,
+      "variant": "lm",
+      "quant": "F16",
+      "sizeBytes": 15232221696,
+      "licence": "NVIDIA OneWay Noncommercial License (academic use only)",
+      "repo": "scragnog/Music-Flamingo-2601-GGUF",
+      "sha256": "4fb7a000cae7ec6441033126f959a079c6527af409aed46542c265907ac3079c",
+      "description": "NVIDIA Music Flamingo 7B language model at full precision — the reference quality bar. Requires flamingo-aud-f16 as well; this file is ~14.2 GB. Non-commercial, academic use only (NVIDIA OneWay Noncommercial License).",
+      "tags": [],
+      "companions": [
+        {
+          "filename": "LICENSE",
+          "repoPath": "LICENSE"
+        }
+      ]
+    },
+    {
+      "id": "flamingo-aud-f16",
+      "filename": "flamingo-aud-f16.gguf",
+      "role": "moss",
+      "family": "shared",
+      "subdir": "flamingo",
+      "displayName": "Music Flamingo Audio Encoder (F16, non-commercial)",
+      "scale": null,
+      "variant": "aud",
+      "quant": "F16",
+      "sizeBytes": 1313695008,
+      "licence": "NVIDIA OneWay Noncommercial License (academic use only)",
+      "repo": "scragnog/Music-Flamingo-2601-GGUF",
+      "sha256": "4a7440abdaea9c242f1b324353038ecca097d17e6d8b57fa6f8ff4b103962c3e",
+      "description": "Music Flamingo audio encoder — Whisper-large (AF-Whisper) with its learned positions, plus the 2-layer projector into the LM. F16 only, never quantised. Required by every flamingo-lm file; ~1.2 GB. Non-commercial, academic use only (NVIDIA OneWay Noncommercial License).",
       "tags": [
         "required"
       ],
