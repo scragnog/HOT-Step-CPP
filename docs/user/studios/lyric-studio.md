@@ -73,8 +73,20 @@ preserving other preset settings. An assigned MM3 adapter makes the album
 available in the MM3 Cover Studio grid.
 
 Lyric profiles and lyric statistics use vocal songs only. An album with no
-lyric songs cannot build a lyric profile or use **Write Lyrics**. Its captions
-and preset remain available.
+lyric songs builds a **Sound profile** from its source captions and measured
+tempo, keys, genres, signatures and duration range, without lyric analysis.
+In **Generated Lyrics**, **Generate instrumental** creates a title, mood or
+scene, BPM, key, duration and separate ACE-Step, MM3 and YuE2 captions. The
+planner reads the source captions in all three formats and avoids repeating
+past subjects, tempos, keys, durations and titles. Subject and extra instructions
+still steer the result. Duration stays within the source tracks' range.
+
+Instrumental generations keep the `[Instrumental]` marker in place of lyrics.
+Refine and the lyric editor are unavailable with an explanation. **Write Lyrics**
+points to the sound-profile generation path. Captions and metadata remain
+editable; audio generation, bulk queues, presets and **Send to Custom-Gen**
+carry the instrumental setting. MM3 still offers automatic, named-track and
+custom caption sources. Mixed albums keep their vocal lyric profile.
 
 ## Controls
 

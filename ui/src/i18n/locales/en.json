@@ -1,5 +1,13 @@
 {
   "translation": {
+    "lyric.soundProfile": "Sound profile",
+    "lyric.soundProfileHint": "Build a sound profile from the source captions and audio metadata.",
+    "lyric.soundProfileFacts": "Source tempo, keys, genres, signatures and duration range",
+    "lyric.generateInstrumental": "Generate instrumental",
+    "lyric.instrumentalNoRefine": "Instrumental tracks have no lyrics to refine",
+    "lyric.refineHint": "Refine these lyrics using the refinement LLM",
+    "lyric.instrumentalWriteHint": "Generate instrumental tracks from the sound profile in Written Songs. Freeform lyric writing is unavailable for this album.",
+
     "trainingStudio.mm3.useDatasetRung": "{{name}} is now this dataset's LM adapter.",
     "cover.mm3.generate": "Generate cover",
     "cover.mm3.globalBar": "One take per cover. LM sampling (temperature, top-k, top-p, repetition) and the LM adapter and its scales come from the MM3 settings in the top bar, as for any MM3 render.",

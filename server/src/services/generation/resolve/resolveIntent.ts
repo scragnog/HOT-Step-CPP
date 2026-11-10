@@ -190,7 +190,7 @@ export function resolveWrittenSongIntent(intent: WrittenSongIntent, engine: stri
   });
   params.caption = cap.caption;
   params.title = gen.title || '';
-  params.instrumental = false;
+  params.instrumental = gen.lyrics?.trim() === '[Instrumental]';
 
   let duration: ResolveProvenance['duration'];
   if (engine !== MM3_ENGINE_ID) {

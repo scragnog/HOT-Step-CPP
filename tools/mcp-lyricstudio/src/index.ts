@@ -168,6 +168,14 @@ server.tool(
       if (set) pd.audio_enrichment = prompts.computeAlbumEnrichment(set.songs);
     }
 
+    if (pd.instrumental) return { content: [{ type: 'text', text: [
+      prompts.INSTRUMENTAL_METADATA_SYSTEM_PROMPT,
+      prompts.buildInstrumentalMetadataPrompt(pd, history, user_subject, extra_instructions),
+      'Choose a title from the mood and source captions, avoiding these titles: '+JSON.stringify(history.usedTitles),
+      'Skip build_lyrics_prompt and all lyric writing/refinement. Use lyrics = '+prompts.INSTRUMENTAL_MARKER+'.',
+      'Call prepare_mm3_caption and prepare_yue2_caption with empty lyrics. Plan the instrumental arrangement from the source captions. Then save_generation with the marker, planned metadata, title and all three captions.',
+    ].join('\n') }] };
+
     const metadataUserPrompt = prompts.buildMetadataPrompt(
       pd, history.usedSubjects, history.usedBpms, history.usedKeys, history.usedDurations, user_subject
     );
@@ -234,6 +242,8 @@ server.tool(
       const set = db.getLyricsSet(profile.lyrics_set_id);
       if (set) pd.audio_enrichment = prompts.computeAlbumEnrichment(set.songs);
     }
+
+    if (pd.instrumental) return { content: [{ type: 'text', text: 'This is a sound profile. Skip lyric writing. Use '+prompts.INSTRUMENTAL_MARKER+' and call prepare_mm3_caption and prepare_yue2_caption with empty lyrics, then save_generation.' }] };
 
     // Add subject to extra instructions
     let fullInstructions = `The song must be about: ${subject}`;
@@ -312,7 +322,7 @@ server.tool(
       bpm,
       key,
       signature: pd.audio_enrichment?.signatures?.[0],
-      instrumental: !lyrics.trim(),
+      instrumental: !!pd.instrumental || !lyrics.trim() || lyrics.trim() === prompts.INSTRUMENTAL_MARKER,
     });
 
     const text = [
@@ -374,7 +384,7 @@ server.tool(
 
     const userPrompt = prompts.buildYue2CaptionPrompt(pd, {
       lyrics, aceCaption: caption, subject, bpm, key, language,
-      instrumental: !lyrics.trim(),
+      instrumental: !!pd.instrumental || !lyrics.trim() || lyrics.trim() === prompts.INSTRUMENTAL_MARKER,
     });
 
     const text = [
@@ -431,7 +441,8 @@ server.tool(
     // Intro FIRST — a declared instrumental intro is time the duration
     // derivation counts, so applying it afterwards would under-time the song.
     let introNote = '';
-    const withIntro = prompts.ensureInstrumentalIntro(lyrics, `${profile.artist_name}|${title}`);
+    if (profile.profile_data.instrumental) lyrics = prompts.INSTRUMENTAL_MARKER;
+    const withIntro = profile.profile_data.instrumental ? null : prompts.ensureInstrumentalIntro(lyrics, `${profile.artist_name}|${title}`);
     if (withIntro !== null) {
       lyrics = withIntro;
       introNote = `\n🎸 Instrumental intro applied (${prompts.INSTRUMENTAL_INTRO_TAG})`;
@@ -443,7 +454,10 @@ server.tool(
     {
       const set = db.getLyricsSet(profile.lyrics_set_id);
       const rate = set ? (prompts.computeAlbumEnrichment(set.songs)?.wordsPerSec || 0) : 0;
-      const reconciled = prompts.reconcileDurationToLyrics(lyrics, bpm ?? 0, duration ?? 0, rate);
+      const evidence = set ? prompts.computeAlbumEnrichment(set.songs) : null;
+      const reconciled = profile.profile_data.instrumental
+        ? Math.max(evidence?.durationMin || 1, Math.min(evidence?.durationMax || duration || 1, duration || evidence?.durationMin || 1))
+        : prompts.reconcileDurationToLyrics(lyrics, bpm ?? 0, duration ?? 0, rate);
       if (reconciled !== (duration ?? 0)) {
         durationNote = `\n⏱ Duration reconciled to lyrics: ${duration ?? 0}s → ${reconciled}s (${rate > 0 ? `artist rate ${rate.toFixed(2)} w/s` : 'global rate'})`;
         duration = reconciled;
@@ -461,7 +475,7 @@ server.tool(
         return set ? prompts.computeAlbumEnrichment(set.songs) : null;
       })();
       captionMm3 = prompts.normalizeMm3Caption(caption_mm3, {
-        bpm, key, signature: enrich?.signatures?.[0], fallbackGenre: enrich?.genres?.[0],
+        bpm, key, signature: enrich?.signatures?.[0], fallbackGenre: enrich?.genres?.[0], instrumental: !!profile.profile_data.instrumental,
       });
       const issues = prompts.validateMm3Caption(captionMm3);
       mm3Note = issues.length
@@ -538,6 +552,8 @@ server.tool(
     const lyricsSet = profile ? db.getLyricsSet(profile.lyrics_set_id) : null;
     const artistName = lyricsSet?.artist_name || profile?.artist_name || 'Unknown';
     const pd = profile?.profile_data;
+    if (pd?.instrumental || gen.lyrics?.trim() === prompts.INSTRUMENTAL_MARKER)
+      return { content: [{ type: 'text', text: 'Instrumental tracks have no lyrics to refine.' }] };
 
     const userPrompt = prompts.buildRefinementPrompt(gen.lyrics, artistName, gen.title, pd);
 
@@ -697,9 +713,12 @@ server.tool(
     }
 
     const songs = lyricsSet.songs.filter((song: any) => !song.instrumental && song.lyrics?.trim());
-    if (!songs.length) {
-      return { content: [{ type: 'text', text: 'no lyrics to profile: this album is instrumental' }] };
+    if (!songs.length && lyricsSet.songs.some((song: any) => song.instrumental)) {
+      const data = { artist: lyricsSet.artist_name, album: lyricsSet.album, instrumental: true,
+        audio_enrichment: prompts.computeAlbumEnrichment(lyricsSet.songs) };
+      return { content: [{ type: 'text', text: 'No lyric analysis is needed. Call save_profile with this sound profile JSON: '+JSON.stringify(data) }] };
     }
+    if (!songs.length) return { content: [{ type: 'text', text: 'No songs to profile.' }] };
     const artistName = lyricsSet.artist_name;
     const album = lyricsSet.album;
 
@@ -819,7 +838,14 @@ server.tool(
     // excerpts or structural vocabulary into generation prompts.
     // The profiler imports app startup; load it only after database startup guards pass.
     const { recalculateProfileStats } = await import('../../../server/src/services/lireek/profilerService.js');
-    parsed = recalculateProfileStats(lyricsSet.songs, parsed);
+    const vocalSongs = lyricsSet.songs.filter((song: any) => !song.instrumental && song.lyrics?.trim());
+    if (!vocalSongs.length && lyricsSet.songs.some((song: any) => song.instrumental)) {
+      parsed = { artist: lyricsSet.artist_name, album: lyricsSet.album, instrumental: true,
+        audio_enrichment: prompts.computeAlbumEnrichment(lyricsSet.songs) };
+    } else {
+      delete parsed.instrumental;
+      parsed = recalculateProfileStats(lyricsSet.songs, parsed);
+    }
 
     // The provider/model were hardcoded to 'antigravity'/'claude-opus-4' here, so
     // EVERY profile built through MCP was stamped claude-opus-4 whatever actually

@@ -2192,7 +2192,7 @@ async function _executeItem(item: AudioQueueItem): Promise<void> {
   const renderingAs = !!item.sourceLyricsSetId && item.sourceLyricsSetId !== item.lyricsSetId;
   params.caption = captionForBackend(gen, backendId, item.lyricsSetId, yue2AdapterInForce, renderingAs);
   params.title = gen.title || '';
-  params.instrumental = false;
+  params.instrumental = gen.lyrics?.trim() === '[Instrumental]';
   // Duration is an ACE-only field now.
   //
   // The lyric-derived estimate is a TARGET for ACE, which is told a length and

@@ -4,10 +4,14 @@ import { buildProfile, recalculateProfileStats } from './profilerService.js';
 import { computeAlbumEnrichment } from './prompts.js';
 import { getProvider } from './llm/registry.js';
 
-test('instrumental profile refuses before provider lookup or LLM calls', async () => {
-  await assert.rejects(buildProfile('Fixture', null,
-    [{ title: 'Quiet', lyrics: 'stale words', instrumental: true }], 'provider-must-not-be-called'),
-  /no lyrics to profile: this album is instrumental/);
+test('instrumental sound profile uses source captions without provider lookup or lyric analysis', async () => {
+  const profile = await buildProfile('Fixture', null,
+    [{ title: 'Quiet', lyrics: 'stale words', instrumental: true, bpm: 80, key: 'D Minor',
+      duration: 160, caption: 'Sparse piano', mm3Caption: 'Source MM3', yue2Caption: 'Source YuE2' }], 'provider-must-not-be-called');
+  assert.equal(profile.instrumental, true);
+  assert.equal(profile.audio_enrichment?.durationMin, 160);
+  assert.deepEqual(profile.audio_enrichment?.mm3CaptionExamples, ['Source MM3']);
+  assert.equal(profile.meter_stats, undefined);
 });
 
 test('mixed lyric statistics equal vocal-only statistics and empty stats stay finite', () => {

@@ -85,7 +85,7 @@ export function registerLlmRoutes(router: Router): void {
       const { provider_name, model } = req.body;
       const lyricsSet = db.getLyricsSet(id);
       if (!lyricsSet) return res.status(404).json({ error: 'Lyrics set not found' });
-      if (!profilerService.lyricSongs(lyricsSet.songs).length) {
+      if (!profilerService.lyricSongs(lyricsSet.songs).length && !lyricsSet.songs.some((song: any) => song.instrumental)) {
         return res.status(400).json({ error: profilerService.NO_LYRICS_TO_PROFILE });
       }
       const artist = db.getArtist(lyricsSet.artist_id);
@@ -111,7 +111,7 @@ export function registerLlmRoutes(router: Router): void {
       const { provider_name, model } = req.body;
       const lyricsSet = db.getLyricsSet(id);
       if (!lyricsSet) throw new Error('Lyrics set not found');
-      if (!profilerService.lyricSongs(lyricsSet.songs).length) {
+      if (!profilerService.lyricSongs(lyricsSet.songs).length && !lyricsSet.songs.some((song: any) => song.instrumental)) {
         return res.status(400).json({ error: profilerService.NO_LYRICS_TO_PROFILE });
       }
       const artist = db.getArtist(lyricsSet.artist_id);
@@ -161,6 +161,11 @@ export function registerLlmRoutes(router: Router): void {
           continue;
         }
         const songs = profilerService.lyricSongs((lyricsSet.songs || []) as profilerService.SongLyrics[]);
+        if (profile.profile_data.instrumental) {
+          db.updateProfileData(profile.id, { ...profile.profile_data, audio_enrichment: computeAlbumEnrichment(lyricsSet.songs) });
+          updated.push(profile.id);
+          continue;
+        }
         if (!songs.length) {
           skipped.push({ id: profile.id, reason: 'lyrics set has no songs' });
           continue;
@@ -313,6 +318,7 @@ export function registerLlmRoutes(router: Router): void {
     try {
       const id = intParam(req, 'id');
       const existing = db.getGeneration(id);
+      if (existing?.lyrics?.trim() === '[Instrumental]') return res.status(400).json({ error: 'Instrumental tracks have no lyrics to refine' });
       if (!existing) return res.status(404).json({ error: 'Generation not found' });
       
       const { provider_name, model, auto_save = true } = req.body;
@@ -355,6 +361,7 @@ export function registerLlmRoutes(router: Router): void {
     try {
       const id = intParam(req, 'id');
       const existing = db.getGeneration(id);
+      if (existing?.lyrics?.trim() === '[Instrumental]') return res.status(400).json({ error: 'Instrumental tracks have no lyrics to refine' });
       if (!existing) throw new Error('Generation not found');
       
       const { provider_name, model, auto_save = true } = req.body;

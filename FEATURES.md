@@ -197,7 +197,7 @@ Every render and import lands here. Details: [Library](docs/user/studios/library
 
 ## Lyric Studio
 
-AI-assisted lyric writing from a learned style profile, plus per-album render presets and instrumental collections with captions and adapters. Details: [Lyric Studio](docs/user/studios/lyric-studio.md)
+AI-assisted lyric writing from a learned style profile, plus caption-based sound profiles and instrumental generation, per-album render presets and adapters. Details: [Lyric Studio](docs/user/studios/lyric-studio.md)
 
 | Feature | What it does |
 |---|---|

@@ -766,7 +766,7 @@ export const LyricStudioV2: React.FC = () => {
                         profilingModel={modelSelections.profiling} />
                     )}
                     {activeTab === 'write-lyrics' && (
-                      instrumentalOnly ? <p className="p-4 text-sm text-zinc-500">{t('lyric.instrumentalNoLyrics')}</p>
+                      instrumentalOnly ? <p className="p-4 text-sm text-zinc-500">{t('lyric.instrumentalWriteHint', 'Generate instrumental tracks from the sound profile in Written Songs. Freeform lyric writing is unavailable for this album.')}</p>
                         : <WriteLyricsTab key={nav.selectedAlbum.id} lyricsSetId={nav.selectedAlbum.id}
                           onRefresh={refreshAlbumData} onViewLyrics={() => handleTabChange('written-songs')} />
                     )}

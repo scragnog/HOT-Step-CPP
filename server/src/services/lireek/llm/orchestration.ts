@@ -7,6 +7,10 @@
 import * as slopDetector from '../slopDetector.js';
 import {
   GENERATION_SYSTEM_PROMPT,
+  INSTRUMENTAL_MARKER,
+  INSTRUMENTAL_METADATA_SYSTEM_PROMPT,
+  buildInstrumentalMetadataPrompt,
+  normalizeKeyScale,
   SONG_METADATA_SYSTEM_PROMPT,
   REFINEMENT_SYSTEM_PROMPT,
   TITLE_DERIVATION_PROMPT,
@@ -147,7 +151,7 @@ async function writeMm3Caption(
   callOptions?: CallOptions,
 ): Promise<string> {
   const provider = getProvider(providerName);
-  const facts = { bpm: ctx.bpm, key: ctx.key, signature: ctx.signature };
+  const facts = { bpm: ctx.bpm, key: ctx.key, signature: ctx.signature, instrumental: !!profile.instrumental || !ctx.lyrics.trim() };
   const userPrompt = buildMm3CaptionPrompt(profile, { ...ctx, instrumental: !ctx.lyrics.trim() });
 
   const attempt = async (prompt: string): Promise<string> => {
@@ -199,6 +203,35 @@ export async function generateLyricsStreaming(
 ): Promise<GenerationResponse> {
   const provider = getProvider(providerName);
   const effectiveModel = model || provider.defaultModel;
+
+  if (profile.instrumental) {
+    const evidence = profile.audio_enrichment;
+    if (!evidence?.durationMin || !evidence.durationMax) throw new Error('Sound profile needs source track durations');
+    onPhase?.('Planning instrumental metadata…');
+    const userPrompt = buildInstrumentalMetadataPrompt(profile, { usedSubjects, usedBpms, usedKeys, usedDurations }, userSubject, extraInstructions);
+    const planned = await provider.call(cacheBustPrompt(INSTRUMENTAL_METADATA_SYSTEM_PROMPT), userPrompt, effectiveModel, onChunk, callOptions);
+    const clean = stripThinkingBlocks(planned).replace(/^```(?:json)?\s*|\s*```$/gm, '').trim();
+    const metadata: PlannedMetadata = JSON.parse(clean);
+    if (userSubject) metadata.subject = userSubject;
+    metadata.key = normalizeKeyScale(metadata.key);
+    if (!metadata.subject || !metadata.caption || !metadata.key || !Number.isFinite(metadata.bpm) || metadata.bpm <= 0 || !Number.isFinite(metadata.duration)) {
+      throw new Error('Instrumental planner returned incomplete metadata');
+    }
+    metadata.duration = Math.max(evidence.durationMin, Math.min(evidence.durationMax, Math.round(metadata.duration)));
+    onPhase?.('Choosing instrumental title…');
+    const titleRaw = await provider.call(cacheBustPrompt('Choose a short title for an instrumental piece from its mood, scene and sound. Avoid all used titles. Output only the title.'),
+      JSON.stringify({ subject: metadata.subject, caption: metadata.caption, source: evidence, usedTitles }), effectiveModel, onChunk, callOptions);
+    const title = withModelSuffix(stripThinkingBlocks(titleRaw).trim().split('\n')[0].replace(/^(?:Title:\s*|#\s*)/i, '').replace(/^["'`]|["'`]$/g, ''), effectiveModel);
+    const captionProfile = { ...profile, additional_notes: [profile.additional_notes, extraInstructions, `Planned instrumental arrangement: ${metadata.structure || metadata.caption}`].filter(Boolean).join('\n') };
+    const ctx = { lyrics: '', aceCaption: metadata.caption, subject: metadata.subject, bpm: metadata.bpm, key: metadata.key };
+    onPhase?.('Writing MM3 caption…');
+    const caption_mm3 = await writeMm3Caption(captionProfile, ctx, providerName, effectiveModel, onChunk, callOptions);
+    onPhase?.('Writing YuE2 caption…');
+    const caption_yue2 = await writeYue2Caption(captionProfile, ctx, providerName, effectiveModel, onChunk, callOptions);
+    if (!caption_mm3 || !caption_yue2) throw new Error('Instrumental caption generation failed; try again');
+    return { ...metadata, title, lyrics: INSTRUMENTAL_MARKER, caption_mm3, caption_yue2,
+      provider: providerName, model: effectiveModel, system_prompt: INSTRUMENTAL_METADATA_SYSTEM_PROMPT, user_prompt: userPrompt };
+  }
 
   if (onPhase) onPhase("Planning song metadata…");
   let metadata: PlannedMetadata = { subject: '', bpm: 0, key: '', caption: '', duration: 0 };
@@ -390,6 +423,7 @@ export async function refineLyricsStreaming(
   providerName: string, model?: string, profile?: LyricsProfile,
   onChunk?: ChunkCallback
 ): Promise<GenerationResponse> {
+  if (profile?.instrumental || originalLyrics.trim() === INSTRUMENTAL_MARKER) throw new Error('Instrumental tracks have no lyrics to refine');
   const provider = getProvider(providerName);
   const effectiveModel = model || provider.defaultModel;
   const slopScan = slopDetector.scanForSlop(originalLyrics);

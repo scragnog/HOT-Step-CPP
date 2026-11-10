@@ -309,6 +309,15 @@ test('written: filename trigger off clears the global triggers; default placemen
   assert.equal((noScale.request.loraStack as any)[0].scale, 1.0);
 });
 
+test('written: instrumental marker reaches every backend and vocal requests stay vocal', () => {
+  for (const engine of ['ace', 'minimax-m3', 'yue2']) {
+    const instrumental = resolveWrittenSongIntent(base, engine, { gen: { ...gen, lyrics: '[Instrumental]' }, preset: null });
+    assert.equal(instrumental.request.instrumental, true);
+    assert.equal(instrumental.request.lyrics, '[Instrumental]');
+    assert.equal(resolveWrittenSongIntent(base, engine, { gen, preset: null }).request.instrumental, false);
+  }
+});
+
 test('written: preset reference without a dedicated timbre uses the reference itself', () => {
   const r = resolveWrittenSongIntent({ ...base, params: { ...snapshot, timbreReference: '' } }, 'ace', { gen, preset: { reference_track_path: 'r.wav' } });
   assert.equal(r.request.timbreReference, true);

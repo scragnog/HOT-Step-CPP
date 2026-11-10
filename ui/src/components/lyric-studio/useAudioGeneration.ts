@@ -125,7 +125,7 @@ export function useAudioGeneration({ profiles, showToast: _showToast }: UseAudio
     } else {
       clearYue2CaptionSources();
     }
-    write('hs-instrumental', false);
+    write('hs-instrumental', gen.lyrics?.trim() === '[Instrumental]');
 
     // Song info (Title / Artist / Subject)
     write('hs-title', gen.title || '');

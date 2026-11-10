@@ -21,6 +21,22 @@ import { CAPTION_DIMENSIONS } from '../training/captionPrompt.js';
 /** Loose profile shape — accepts both the app's LyricsProfile and the MCP's raw profile_data JSON. */
 export type PromptProfile = Record<string, any>;
 
+export const INSTRUMENTAL_MARKER = '[Instrumental]';
+export const INSTRUMENTAL_METADATA_SYSTEM_PROMPT = `Plan an instrumental piece from the supplied dataset evidence. Return JSON only with subject (a one-line mood or scene), bpm, key (lowercase major/minor), duration (seconds), caption (an ACE audio description), and structure (an instrumental arrangement). Ground every choice in the source captions and measured distributions. Never describe a singer, singing, spoken words or backing vocals. Use the dataset duration range, never a lyric pacing estimate. Respect the user's subject and extra instructions and avoid the supplied history.`;
+
+export function buildInstrumentalMetadataPrompt(profile: PromptProfile, history: {
+  usedSubjects: string[]; usedBpms: number[]; usedKeys: string[]; usedDurations: number[];
+}, userSubject?: string, extraInstructions?: string): string {
+  return [
+    `Artist: ${profile.artist}. Album: ${profile.album || ''}`,
+    'SOURCE DATASET: captionExamples = ACE; mm3CaptionExamples = MM3; yue2CaptionExamples = YuE2. Distributions contain occurrence counts.',
+    JSON.stringify(profile.audio_enrichment),
+    `Avoid repeating: ${JSON.stringify(history)}`,
+    `User mood or scene: ${userSubject || '(choose from source evidence)'}`,
+    `Extra instructions: ${extraInstructions || '(none)'}`,
+  ].join('\n');
+}
+
 export const SCRATCH_LYRICS_SYSTEM_PROMPT = `Write an original, complete song from the user's brief.
 Use optional starter lyrics for their meaning and idea. Do not quote unrelated existing songs.
 Follow the requested language, style and structure. Label sections with square brackets, such as [Verse] and [Chorus].
@@ -414,6 +430,10 @@ export interface AlbumEnrichment {
   genres: string[];             // unique tags (comma-split), most-frequent first
   signatures: string[];         // unique, most-frequent first
   captionExamples: string[];    // up to 3 verbatim training captions
+  mm3CaptionExamples?: string[];
+  durationMin?: number;
+  durationMax?: number;
+  distributions?: Record<string, Record<string, number>>;
   /** Up to 3 of the album's own one-sentence YuE2 captions (`<stem>.yue2.txt`),
    *  when the dataset has been captioned for YuE2. Empty otherwise. */
   yue2CaptionExamples: string[];
@@ -478,6 +498,8 @@ export function computeAlbumEnrichment(
   const signatures: string[] = [];
   const captions: string[] = [];
   const yue2Captions: string[] = [];
+  const mm3Captions: string[] = [];
+  const durations: number[] = [];
   const paceRates: number[] = [];
   let enriched = 0;
 
@@ -491,6 +513,8 @@ export function computeAlbumEnrichment(
     if (typeof s.yue2Caption === 'string' && s.yue2Caption.trim()) yue2Captions.push(s.yue2Caption.trim());
     // Vocal pacing needs BOTH real lyrics and a real duration on the same song.
     const dur = Number(s.duration);
+    if (Number.isFinite(dur) && dur > 0) durations.push(dur);
+    if (typeof s.mm3Caption === 'string' && s.mm3Caption.trim()) mm3Captions.push(s.mm3Caption.trim());
     if (!s.instrumental && Number.isFinite(dur) && dur > 30 && typeof s.lyrics === 'string') {
       const words = countLyricWords(s.lyrics);
       const rate = words / dur;
@@ -498,7 +522,7 @@ export function computeAlbumEnrichment(
       // physically impossible 8 w/s — bad sidecar durations, not fast rapping).
       if (words >= 40 && rate >= 0.3 && rate <= 3.6) paceRates.push(rate);
     }
-    const has = (Number.isFinite(bpm) && bpm > 0) || !!key || !!genre || !!caption || !!signature;
+    const has = (Number.isFinite(bpm) && bpm > 0) || !!key || !!genre || !!caption || !!signature || !!s.mm3Caption || !!s.yue2Caption || dur > 0;
     if (!has) continue;
     enriched++;
     if (Number.isFinite(bpm) && bpm > 0) bpms.push(Math.round(bpm));
@@ -534,6 +558,12 @@ export function computeAlbumEnrichment(
     // until the corpus is fully recaptioned.
     captionExamples: [...new Set(captions)].slice(0, 3).map(c => c.slice(0, CAPTION_EXAMPLE_MAX_CHARS)),
     yue2CaptionExamples: [...new Set(yue2Captions)].slice(0, 3),
+    mm3CaptionExamples: [...new Set(mm3Captions)].slice(0, 3),
+    durationMin: durations.length ? Math.min(...durations) : 0,
+    durationMax: durations.length ? Math.max(...durations) : 0,
+    distributions: Object.fromEntries(Object.entries({ bpm: bpms, key: keys, genre: genres, signature: signatures }).map(([name, values]) => [name,
+      values.reduce<Record<string, number>>((counts, value) => { counts[value] = (counts[value] || 0) + 1; return counts; }, {}),
+    ])),
     enrichedSongs: enriched,
     totalSongs: songs.length,
     wordsPerSec,
@@ -802,7 +832,7 @@ export function buildMm3CaptionPrompt(profile: PromptProfile, ctx: Mm3CaptionCon
   const enrich: AlbumEnrichment | null = profile.audio_enrichment ?? null;
   const sig = normalizeTimeSignature(ctx.signature || enrich?.signatures?.[0]);
   const [note, scale] = parseKeyScale(ctx.key);
-  const tags = extractSectionTags(ctx.lyrics);
+  const tags = ctx.instrumental ? [] : extractSectionTags(ctx.lyrics);
 
   const lines: string[] = [];
 
@@ -841,8 +871,10 @@ export function buildMm3CaptionPrompt(profile: PromptProfile, ctx: Mm3CaptionCon
   if (ctx.subject) lines.push(`What this song is about (context for the emotional arc only — never state it in the caption): ${ctx.subject}`, '');
 
   if (ctx.instrumental) {
+    lines.push('Plan the arrangement from the source captions and instrumental plan, without lyric sections. No singer, singing, speech or backing vocals.',
+      JSON.stringify(profile.audio_enrichment), profile.additional_notes || '', '');
     lines.push(
-      'THIS TRACK IS INSTRUMENTAL. There is no singing. Under "Vocal Gender & Timbre:" state that the piece is instrumental and name the instrument carrying the lead melodic line; keep the other three Vocal Details fields consistent with that. Never add a vocalist.',
+      'THIS TRACK IS INSTRUMENTAL. There is no singing. Under "Vocal Gender & Timbre:" begin with "Instrumental." and name the instrument carrying the lead melodic line; keep the other three Vocal Details fields consistent with that. Never use a Singer A label or add a vocalist.',
       '',
     );
   }
@@ -884,9 +916,10 @@ export function buildMm3CaptionPrompt(profile: PromptProfile, ctx: Mm3CaptionCon
  */
 export function normalizeMm3Caption(
   raw: string,
-  facts: { bpm?: number; key?: string; signature?: string; fallbackGenre?: string } = {},
+  facts: { bpm?: number; key?: string; signature?: string; fallbackGenre?: string; instrumental?: boolean } = {},
 ): string {
   let text = String(raw ?? '');
+  if (facts.instrumental) text = text.replace(/\bSinger\s+[A-Z]\s*\(instrumental\)\.?/gi, 'Instrumental.');
 
   // Fenced block: keep only what is inside the first fence.
   const fence = text.match(/```(?:[a-z]*)\n([\s\S]*?)```/i);
@@ -934,7 +967,18 @@ export function normalizeMm3Caption(
     }
   }
 
-  return cleaned.join('\n').trim();
+  const caption = cleaned.join('\n').trim();
+  // These format-required fields have no vocal evidence on an instrumental.
+  // Replace the whole block so a template cannot invent a singer or voice analogy.
+  if (facts.instrumental) return caption.replace(/^Vocal Details\s*$[\s\S]*?(?=^Arrangement\s*$)/m, [
+    'Vocal Details',
+    'Vocal Gender & Timbre: Instrumental. No human voice is present.',
+    'Vocal Style: Not applicable. The performance is entirely instrumental.',
+    'Harmony/Backing Vocals: No backing vocals or choir are present.',
+    'Vocal FX: Not applicable. There is no vocal track.',
+    '',
+  ].join('\n'));
+  return caption;
 }
 
 /** Strip the bpm and key sentences out of a Basic Attributes body, leaving the
@@ -1658,6 +1702,7 @@ export function buildMetadataPrompt(
   usedDurations: number[],
   userSubject?: string
 ): string {
+  if (profile.instrumental) return buildInstrumentalMetadataPrompt(profile, { usedSubjects, usedBpms, usedKeys, usedDurations }, userSubject);
   const lines: string[] = [`Artist: ${profile.artist}`];
   if (profile.album) lines.push(`Album style: ${profile.album}`);
   if (profile.themes?.length) lines.push(`Themes: ${profile.themes.join(', ')}`);
@@ -2192,9 +2237,10 @@ export function buildYue2CaptionPrompt(profile: PromptProfile, ctx: Yue2CaptionC
   lines.push('');
   lines.push(`Language: ${ctx.instrumental ? 'instrumental (no vocal)' : (ctx.language || 'English')}`);
   if (ctx.bpm) lines.push(`BPM: ${Math.round(ctx.bpm)} — end the sentence with exactly "${Math.round(ctx.bpm)} BPM".`);
-  if (ctx.instrumental) lines.push('This track is INSTRUMENTAL: write "instrumental" as the language part and name the lead instrument in the vocal part.');
+  if (ctx.instrumental) lines.push('This track is INSTRUMENTAL: write "instrumental" as the language part and name the lead instrument in the vocal part. Never describe a singer, singing, speech or backing vocals.',
+    JSON.stringify(profile.audio_enrichment), profile.additional_notes || '');
   lines.push('');
-  const tags = extractSectionTags(ctx.lyrics);
+  const tags = ctx.instrumental ? [] : extractSectionTags(ctx.lyrics);
   if (tags.length) lines.push(`Section structure (evidence of the arrangement only): ${tags.join(' ')}`, '');
   lines.push('Write the one-sentence YuE2 caption now.');
   return lines.join('\n');

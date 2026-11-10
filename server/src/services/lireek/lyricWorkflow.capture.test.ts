@@ -70,6 +70,20 @@ test('capture pins provider, overrides and source revisions; invalid batch items
       assert.equal(seen[1].includes('subject 1'), true);
     } finally { restore(); }
 
+    const soundSet = rows.saveLyricsSet(artist.id as number, 'Sound Fixture', 1,
+      [{ title: 'Instrumental', lyrics: '', instrumental: true, caption: 'Piano', duration: 120 }]);
+    const soundCapture = captureLyricItems([{ type: 'profile', targetId: soundSet.id as number, provider: 'fixture-provider' }]);
+    assert.equal(soundCapture.items[0].type, 'profile');
+    const { buildProfile } = await import('./profilerService.js');
+    const soundData = await buildProfile('Fixture', null, rows.getLyricsSet(soundSet.id as number)!.songs, 'never-called');
+    const soundProfile = rows.saveProfile(soundSet.id as number, 'fixture-provider', 'fixture', soundData);
+    const soundBatch = captureLyricItems([{ type: 'generate', targetId: soundProfile.id as number, provider: 'fixture-provider', count: 2 }]);
+    assert.equal(soundBatch.profiles?.[soundProfile.id as number]?.instrumental, true);
+    assert.equal(soundBatch.items.length, 2);
+    const instrumental = rows.saveGeneration({ profileId: soundProfile.id as number, provider: 'fixture-provider', model: 'fixture', title: 'Quiet', lyrics: '[Instrumental]' });
+    const refinement = captureLyricItems([{ type: 'refine', targetId: instrumental.id as number, provider: 'fixture-provider' }]);
+    assert.equal(refinement.items[0].type, 'preflight-error');
+
     // Concurrency runs different artists side by side; one artist stays in order.
     const artist2 = rows.getOrCreateArtist('Second Artist');
     const set2 = rows.saveLyricsSet(artist2.id as number, 'Second Album', 1, [{ title: 'Other Song', lyrics: 'Words' }]);

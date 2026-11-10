@@ -555,7 +555,7 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
       <div className="flex items-center gap-3 flex-wrap">
         <button
           onClick={() => handleQuickGenerate(false)}
-          disabled={generating || profiles.length === 0 || instrumentalOnly}
+          disabled={generating || profiles.length === 0}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-200 dark:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-semibold transition-all"
         >
           {generating ? (
@@ -566,13 +566,13 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
           ) : (
             <>
               <Wand2 className="w-4 h-4" />
-              {t('lyric.generateLyrics')}
+              {instrumentalOnly ? t('lyric.generateInstrumental', 'Generate instrumental') : t('lyric.generateLyrics')}
             </>
           )}
         </button>
         <button
           onClick={() => handleQuickGenerate(true)}
-          disabled={generating || profiles.length === 0 || instrumentalOnly}
+          disabled={generating || profiles.length === 0}
           title={t('lyric.generateNoThinkHint')}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:bg-zinc-200 dark:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-semibold transition-all"
         >
@@ -593,8 +593,8 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
             className="w-16"
           />
         </div>
-        {(profiles.length === 0 || instrumentalOnly) && (
-          <span className="text-xs text-amber-400/60">{t(instrumentalOnly ? 'lyric.instrumentalNoLyrics' : 'lyric.buildProfileFirst')}</span>
+        {(profiles.length === 0) && (
+          <span className="text-xs text-amber-400/60">{t('lyric.buildProfileFirst')}</span>
         )}
         {onRenderFrom && (
           <button
@@ -863,9 +863,9 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
                         )}
                         <button
                           onClick={() => handleRefine(gen)}
-                          disabled={refiningId === gen.id}
+                          disabled={refiningId === gen.id || gen.lyrics?.trim() === '[Instrumental]'}
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 text-sm font-medium transition-colors disabled:opacity-50"
-                          title="Refine these lyrics using the refinement LLM"
+                          title={gen.lyrics?.trim() === '[Instrumental]' ? t('lyric.instrumentalNoRefine', 'Instrumental tracks have no lyrics to refine') : t('lyric.refineHint', 'Refine these lyrics using the refinement LLM')}
                         >
                           {refiningId === gen.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
                           {t('lyric.refine')}
@@ -891,6 +891,7 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
 
                       {/* Editable lyrics */}
                       <div>
+                        {gen.lyrics?.trim() === '[Instrumental]' ? <p className="text-sm text-zinc-500">{t('lyric.instrumentalNoRefine', 'Instrumental tracks have no lyrics to refine')}</p> : <>
                         <h3 className="text-sm font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-2">{t('lyric.lyrics')}</h3>
                         <textarea
                           className="w-full p-4 rounded-xl bg-black/20 dark:bg-black/40 border border-zinc-200 dark:border-white/5 text-sm text-zinc-800 dark:text-zinc-200 font-mono leading-relaxed focus:outline-none focus:border-pink-500/30 resize-y transition-colors"
@@ -898,6 +899,7 @@ export const WrittenSongsTab: React.FC<WrittenSongsTabProps> = ({
                           defaultValue={gen.lyrics || ''}
                           onBlur={(e) => { if (e.target.value !== (gen.lyrics || '')) handleSaveField(gen.id, 'lyrics', e.target.value); }}
                         />
+                        </>}
                       </div>
                     </div>
                   </div>

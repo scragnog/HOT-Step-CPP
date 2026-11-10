@@ -79,7 +79,7 @@ export function captureLyricItems(requested: LyricRequest[], concurrency?: numbe
     if (req.type === 'profile') {
       const source = db.getLyricsSet(id);
       if (!source) throw new Error(`Lyrics set ${id} not found`);
-      if (!profiler.lyricSongs(source.songs).length) throw new Error(profiler.NO_LYRICS_TO_PROFILE);
+      if (!profiler.lyricSongs(source.songs).length && !source.songs.some((song: any) => song.instrumental)) throw new Error(profiler.NO_LYRICS_TO_PROFILE);
       captured = { ...options, type: 'profile', sourceId: id, sourceRevision: revision(source), artist: source.artist_name, songs: source.songs };
     } else if (req.type === 'generate') {
       const source = db.getProfile(id);
@@ -96,6 +96,7 @@ export function captureLyricItems(requested: LyricRequest[], concurrency?: numbe
       const source = db.getGeneration(id);
       if (!source) throw new Error(`Generation ${id} not found`);
       const p = db.getProfile(source.profile_id);
+      if (p?.profile_data.instrumental || source.lyrics?.trim() === '[Instrumental]') throw new Error('Instrumental tracks have no lyrics to refine');
       const set = p ? db.getLyricsSet(p.lyrics_set_id) : null;
       const artist = set ? db.getArtist(set.artist_id) : null;
       captured = { ...options, type: 'refine', sourceId: id, sourceRevision: revision(source), profileId: p?.id, profileRevision: p ? revision(p) : undefined, source, profileData: p?.profile_data, artist: artist?.name || 'Unknown' };

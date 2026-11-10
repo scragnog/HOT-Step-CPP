@@ -94,7 +94,7 @@ export const ProfilesTab: React.FC<ProfilesTabProps> = ({
       <div className="flex items-center gap-3">
         <button
           onClick={handleBuild}
-          disabled={building || instrumentalOnly}
+          disabled={building}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-200 dark:bg-zinc-700 disabled:text-zinc-500 text-white text-sm font-semibold transition-all"
         >
           {building ? (
@@ -109,7 +109,7 @@ export const ProfilesTab: React.FC<ProfilesTabProps> = ({
             </>
           )}
         </button>
-        {instrumentalOnly && <span className="text-xs text-zinc-500">{t('lyric.instrumentalNoLyrics')}</span>}
+        {instrumentalOnly && <span className="text-xs text-zinc-500">{t('lyric.soundProfileHint', 'Build a sound profile from the source captions and audio metadata.')}</span>}
       </div>
 
       {/* Streaming panel */}
@@ -157,7 +157,7 @@ export const ProfilesTab: React.FC<ProfilesTabProps> = ({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-xs px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 font-medium">
-                        {profile.provider}
+                        {data?.instrumental ? t('lyric.soundProfile', 'Sound profile') : profile.provider}
                       </span>
                       {profile.model && (
                         <span className="text-xs text-zinc-500 truncate">
@@ -187,7 +187,20 @@ export const ProfilesTab: React.FC<ProfilesTabProps> = ({
                 </div>
 
                 {/* Expanded profile detail */}
-                {selectedProfile?.id === profile.id && data && (
+                {selectedProfile?.id === profile.id && data?.instrumental && (
+                  <div className="border-t border-zinc-200 dark:border-white/5 p-4 space-y-3 text-sm text-zinc-500">
+                    <p>{t('lyric.soundProfileFacts', 'Source tempo, keys, genres, signatures and duration range')}</p>
+                    <p>{data.audio_enrichment?.bpmMin}–{data.audio_enrichment?.bpmMax} BPM · {data.audio_enrichment?.durationMin}–{data.audio_enrichment?.durationMax}s</p>
+                    <p>{data.audio_enrichment?.keys?.join(', ')}</p>
+                    <p>{data.audio_enrichment?.genres?.join(', ')} · {data.audio_enrichment?.signatures?.join(', ')}</p>
+                    {[['captionExamples', 'ACE-Step'], ['mm3CaptionExamples', 'MM3'], ['yue2CaptionExamples', 'YuE2']].map(([format, label]) => (
+                      <details key={format}><summary>{label}</summary>
+                        {data.audio_enrichment?.[format]?.map((caption: string, i: number) => <p key={i} className="whitespace-pre-wrap mt-2">{caption}</p>)}
+                      </details>
+                    ))}
+                  </div>
+                )}
+                {selectedProfile?.id === profile.id && data && !data.instrumental && (
                   <div className="border-t border-zinc-200 dark:border-white/5 p-4 space-y-4">
                     {/* Themes */}
                     {data.themes?.length > 0 && (
