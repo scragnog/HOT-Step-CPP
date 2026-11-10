@@ -104,6 +104,13 @@ export function scoreMm3Rung(ds: Ds, run: Pick<Mm3RunSummary, 'runName' | 'dir' 
   return rungRow(db.prepare('SELECT * FROM mm3_rung_scores WHERE checkpoint_dir = ?').get(ckpt.dir) as Record<string, unknown>);
 }
 
+/** Drop a deleted run's rung and album scores. */
+export function deleteMm3RunScores(datasetId: string, runName: string): void {
+  const db = getDb();
+  db.prepare('DELETE FROM mm3_rung_scores WHERE dataset_id = ? AND run = ?').run(datasetId, runName);
+  db.prepare('DELETE FROM mm3_album_scores WHERE run = ?').run(runName);
+}
+
 export function getMm3AlbumScore(runName: string): Mm3AlbumScore | null {
   const r = getDb().prepare('SELECT * FROM mm3_album_scores WHERE run = ?').get(runName) as Record<string, unknown> | undefined;
   return r ? { run: r.run as string, score: r.score as number | null, instruments: direction(r.instruments), vocals: direction(r.vocals),

@@ -19,12 +19,12 @@ import { activeJobForDataset, gpuPreviewReserved, reserveGpuForPreview, runReser
 import { mm3PresetRefFor, pointMm3PresetsAt } from './lyricStudioExport.js';
 import { hasActivePipeline } from './pipelineRunner.js';
 import { withReviewMutation } from './review/operations.js';
-import { getMm3AlbumScore, listMm3RungScores, mm3BlindLabels, planMm3Cleanup, prunedMm3Previews, runMm3Cleanup,
+import { deleteMm3RunScores, getMm3AlbumScore, listMm3RungScores, mm3BlindLabels, planMm3Cleanup, prunedMm3Previews, runMm3Cleanup,
   scoreMm3Album, scoreMm3Rung, type Mm3AlbumScore, type Mm3RungScore } from './mm3Review.js';
 import { listMm3RunPreviews, MM3_PREVIEW_DEFAULTS, planMm3Previews, renderMm3Preview, type Mm3PreviewPlan } from './mm3Preview.js';
 import { listMm3Runs, mm3AdapterRoot, mm3RunManifestPath, readMm3RunManifest, type Mm3RecordedPreviewPlan, type Mm3RunManifest } from './mm3Runs.js';
 import { mm3CodesDir } from './mm3Train.js';
-import { getAllPresets } from '../../db/lireekDb.js';
+import { clearMm3AdapterPath, getAllPresets } from '../../db/lireekDb.js';
 import { setYue2ReviewComplete, setYue2RunFinished, yue2ReviewComplete, yue2RunFinished } from './yue2AitkRuns.js';
 import type { Yue2CleanupItem } from './yue2Cleanup.js';
 import { deleteMm3RunFolder, mm3RunOrigin, withMm3RunLock } from './yue2Mirror.js';
@@ -261,7 +261,7 @@ registerTrainingOperations('mm3', (router, deps) => {
       const others = pick.choice.otherRuns ? otherMm3Runs(ds, run.runName) : [];
       const removed: typeof others = [];
       for (const r of others) {
-        try { await deleteMm3RunFolder(r.runName, r.dir, () => assertRemovable(ds.id, r.runName)); removed.push(r); }
+        try { await deleteMm3RunFolder(r.runName, r.dir, () => assertRemovable(ds.id, r.runName, false)); removed.push(r); }
         catch (err) { result.done.push(`kept ${r.runName} (${err instanceof Error ? err.message : String(err)})`); }
       }
       if (removed.length) {
@@ -282,16 +282,17 @@ registerTrainingOperations('mm3', (router, deps) => {
 function otherMm3Runs(ds: { id: string; slug: string }, keep: string) {
   const job = activeJobForDataset(ds.id);
   const live = job?.kind === 'mm3-train-lm' ? path.resolve(String((job.opts as { outDir?: string } | undefined)?.outDir || '')) : '';
-  return listMm3Runs(ds.id, ds.slug).filter(r => r.runName !== keep && path.resolve(r.dir) !== live && !yue2RunFinished(r.dir) && !presetsUse(r.runName));
+  return listMm3Runs(ds.id, ds.slug).filter(r => r.runName !== keep && path.resolve(r.dir) !== live && !yue2RunFinished(r.dir) && !presetsUsing(r.runName).length);
 }
 const otherRunsItem = (runs: Array<{ runName: string; sizeBytes: number }>): Yue2CleanupItem =>
   ({ count: runs.length, bytes: runs.reduce((s, r) => s + r.sizeBytes, 0), detail: runs.map(r => r.runName) });
 
-/** True when any album preset points at a checkpoint of this run. */
-function presetsUse(runName: string): boolean {
+/** The album presets that point at a checkpoint of this run. */
+function presetsUsing(runName: string): Array<{ lyricsSetId: number; name: string }> {
   const name = runName.toLowerCase();
-  return getAllPresets().some(p => typeof p.mm3_adapter_path === 'string'
-    && p.mm3_adapter_path.split(/[\\/]/).filter(Boolean)[0]?.toLowerCase() === name);
+  return getAllPresets().filter(p => typeof p.mm3_adapter_path === 'string'
+    && p.mm3_adapter_path.split(/[\\/]/).filter(Boolean)[0]?.toLowerCase() === name)
+    .map(p => ({ lyricsSetId: p.lyrics_set_id as number, name: p.album ? `${p.artist_name} / ${p.album}` : String(p.artist_name) }));
 }
 
 const PREVIEW_BUSY = 'A checkpoint preview is rendering; try again when it ends.';
@@ -299,22 +300,29 @@ const PREVIEW_BUSY = 'A checkpoint preview is rendering; try again when it ends.
 /** Whether a run's folder may go, checked under its lock just before it does
  *  (deleteMm3RunFolder): no preview rendering, not training, and no album
  *  preset using one of its checkpoints (a mirror pass may have linked one
- *  while the delete waited). */
-function assertRemovable(datasetId: string, runName: string): void {
+ *  while the delete waited). `unlink` clears those presets' MM3 adapter
+ *  instead of refusing. */
+function assertRemovable(datasetId: string, runName: string, unlink: boolean): void {
   if (gpuPreviewReserved()) throw fail(409, PREVIEW_BUSY);
   if (runOf(datasetId, runName).running) throw fail(409, 'That run is still training; stop it first');
-  if (presetsUse(runName)) throw fail(409, 'An album preset uses a checkpoint of this run. Use a checkpoint of another run first.');
+  const linked = presetsUsing(runName);
+  if (linked.length && !unlink) throw fail(409, 'An album preset uses a checkpoint of this run. Use a checkpoint of another run first.');
+  for (const p of linked) clearMm3AdapterPath(p.lyricsSetId);
 }
 
 /** DELETE /datasets/:id/mm3-runs/:run — the run folder and its mirror record.
- *  Refused while a preview renders, while it trains, and while an album
- *  preset still uses one of its checkpoints (the preset would point at
- *  nothing). Rung scores stay. */
-export function deleteMm3Run(datasetId: string, runName: string): Promise<{ run: string }> {
+ *  Refused while a preview renders and while it trains. Without `purge` it is
+ *  also refused while an album preset uses one of its checkpoints (the preset
+ *  would point at nothing), and rung scores stay. `purge` (the Review page's
+ *  delete) removes everything: it unlinks those presets' MM3 adapter and drops
+ *  the run's rung and album scores. */
+export function deleteMm3Run(datasetId: string, runName: string, purge = false): Promise<{ run: string; unlinked: string[] }> {
   return withReviewMutation(datasetId, async () => {
     const { run } = runOf(datasetId, runName);
-    await deleteMm3RunFolder(run.runName, run.dir, () => assertRemovable(datasetId, run.runName));
-    return { run: run.runName };
+    const unlinked = purge ? presetsUsing(run.runName).map(p => p.name) : [];
+    await deleteMm3RunFolder(run.runName, run.dir, () => assertRemovable(datasetId, run.runName, purge));
+    if (purge) deleteMm3RunScores(datasetId, run.runName);
+    return { run: run.runName, unlinked };
   });
 }
 
@@ -352,6 +360,7 @@ export function mm3ReviewRows(ds: { id: string; slug: string; name: string }) {
       status: running ? 'running' : run.outcome, createdAt: run.startedAt ?? run.updatedAt, origin: mm3RunOrigin(run.runName),
       live: running, rungs: rungs.length, previews, scored: scored.size, unscored: rungs.filter(s => !scored.has(s)).length,
       reviewed: yue2ReviewComplete(run.dir),
+      linkedAlbums: presetsUsing(run.runName).map(p => p.name),
       best: best ? { ...best, blindLabel: manifest?.blindLabels?.[best.step] ?? '' } : null,
       decoderOnly: false, klMin: null, klMax: null, baseMatched: true, finished: yue2RunFinished(run.dir),
     }];

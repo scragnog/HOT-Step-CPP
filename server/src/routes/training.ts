@@ -2555,7 +2555,7 @@ router.post('/datasets/:id/mm3-previews/render', trainingOp(async req => {
 /** DELETE /datasets/:id/mm3-runs/:run — the run folder and its mirror record
  *  (mm3Ladder.ts deleteMm3Run). */
 router.delete('/datasets/:id/mm3-runs/:run', trainingOp(async req =>
-  deleteMm3Run(String(req.params.id), String(req.params.run))));
+  deleteMm3Run(String(req.params.id), String(req.params.run), req.query.purge === '1')));
 
 /** POST /datasets/:id/mm3-review-complete — body { run, complete }. */
 router.post('/datasets/:id/mm3-review-complete', trainingOp(async req =>

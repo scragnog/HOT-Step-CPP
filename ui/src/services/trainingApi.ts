@@ -2707,9 +2707,10 @@ export function renderMm3LadderTake(id: string, run: string, step: number,
     { method: 'POST', ...jsonBody({ run, step, ...opts }), timeout: 15 * 60_000, silent: true });
 }
 
-/** Delete an MM3 run folder (and its mirror record). Silent: the caller shows the error. */
-export function deleteMm3Run(id: string, run: string): Promise<{ run: string }> {
-  return localRequest(`/datasets/${encodeURIComponent(id)}/mm3-runs/${encodeURIComponent(run)}`, { method: 'DELETE', silent: true });
+/** Delete an MM3 run folder (and its mirror record). `purge` also unlinks any
+ *  Lyric Studio album using it and drops its scores. Silent: the caller shows the error. */
+export function deleteMm3Run(id: string, run: string, purge = false): Promise<{ run: string; unlinked?: string[] }> {
+  return localRequest(`/datasets/${encodeURIComponent(id)}/mm3-runs/${encodeURIComponent(run)}${purge ? '?purge=1' : ''}`, { method: 'DELETE', silent: true });
 }
 
 /** Mark an MM3 ladder reviewed without scoring every rung. */
@@ -2840,7 +2841,7 @@ export function pickLadderRun<T extends { jobId: string; live?: boolean; created
 }
 
 /** Awaiting review: refinement ladders across datasets with score counts. */
-export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number; blindLabel: string } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean; /** Mirrored from this training worker; absent/null = trained here. */ origin?: string | null; /** Absent = 'yue2' (an older server). */ family?: 'yue2' | 'mm3' }
+export interface Yue2ReviewRow { datasetId: string; datasetSlug: string; datasetName: string; refineRun: string; status: string; createdAt: number; live: boolean; rungs: number; previews: number; scored: number; unscored: number; klMin: number | null; klMax: number | null; reviewed: boolean; best: { step: number; overall: number; blindLabel: string } | null; decoderOnly: boolean; baseMatched?: boolean; /** Linked and cleaned up: nothing left to finish. */ finished?: boolean; /** Mirrored from this training worker; absent/null = trained here. */ origin?: string | null; /** Absent = 'yue2' (an older server). */ family?: 'yue2' | 'mm3'; /** MM3: Lyric Studio albums using one of its checkpoints. */ linkedAlbums?: string[] }
 export async function listYue2Review(reqOpts?: ReadOptions): Promise<{ rows: Yue2ReviewRow[] }> {
   return localRequest('/yue2-review', undefined, reqOpts);
 }

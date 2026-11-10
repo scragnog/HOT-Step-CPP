@@ -20,6 +20,7 @@ import {
 import { cleanupMm3Checkpoint, finishReviewBatch, pickFromLadder, selectMm3Checkpoint, type ReviewPick } from '../../services/trainingReviewApi';
 import { mm3Overall } from './Mm3LadderRows';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { ConfirmDialog } from '../shared/ConfirmDialog';
 import { Toggle } from '../shared/Toggle';
 
 export function TrainingReviewHeader({ title, description, actions }: {
@@ -104,7 +105,7 @@ export const ReviewPanel: React.FC<{ family?: 'yue2' | 'mm3' }> = ({ family = 'y
   const removeMut = useMutation({
     mutationFn: async (target: { datasetId: string; jobId: string }) => {
       await client.cancelQueries({ queryKey: runQueries.review().queryKey });
-      await (mm3 ? deleteMm3Run : deleteYue2AitkRun)(target.datasetId, target.jobId);
+      await (mm3 ? deleteMm3Run(target.datasetId, target.jobId, true) : deleteYue2AitkRun(target.datasetId, target.jobId));
       return target;
     },
     onSuccess: async target => {
@@ -116,9 +117,11 @@ export const ReviewPanel: React.FC<{ family?: 'yue2' | 'mm3' }> = ({ family = 'y
     },
     onError: err => setError(err instanceof Error ? err.message : String(err)),
   });
+  // MM3 deletes everything from here, Lyric Studio links included, so it asks in a modal that names them.
+  const [confirmMm3, setConfirmMm3] = useState<Yue2ReviewRow | null>(null);
   const remove = (r: Yue2ReviewRow) => {
-    if (!window.confirm(mm3 ? t('trainingStudio.mm3.deleteRunConfirm', MM3_DELETE_CONFIRM)
-      : t('trainingStudio.review.deleteRunConfirm', 'Delete this run? The run folder, including its checkpoints, previews and MP3 cache, will be removed. Archived logs and any checkpoint saved outside the run folder stay.'))) return;
+    if (mm3) { setConfirmMm3(r); return; }
+    if (!window.confirm(t('trainingStudio.review.deleteRunConfirm', 'Delete this run? The run folder, including its checkpoints, previews and MP3 cache, will be removed. Archived logs and any checkpoint saved outside the run folder stay.'))) return;
     setError('');
     removeMut.mutate({ datasetId: r.datasetId, jobId: r.refineRun });
   };
@@ -229,6 +232,14 @@ export const ReviewPanel: React.FC<{ family?: 'yue2' | 'mm3' }> = ({ family = 'y
   );
   return (
     <div className="flex flex-col gap-4">
+      <ConfirmDialog isOpen={!!confirmMm3} danger
+        title={t('trainingStudio.mm3.deleteRunTitle', 'Delete run')}
+        message={confirmMm3?.linkedAlbums?.length
+          ? t('trainingStudio.mm3.deleteLinkedRunConfirm', 'This will unlink the adapter in Lyric Studio from {{albums}}. The run folder (checkpoints, previews and resume state) and its scores will be removed.', { albums: confirmMm3.linkedAlbums.join(', ') })
+          : t('trainingStudio.mm3.deleteRunPurgeConfirm', 'Delete this run? The run folder (checkpoints, previews and resume state) and its scores will be removed.')}
+        confirmLabel={confirmMm3?.linkedAlbums?.length ? t('trainingStudio.mm3.unlinkAndDelete', 'Unlink and delete') : t('trainingStudio.review.deleteRun', 'Delete run')}
+        onConfirm={() => { const r = confirmMm3!; setConfirmMm3(null); setError(''); removeMut.mutate({ datasetId: r.datasetId, jobId: r.refineRun }); }}
+        onCancel={() => setConfirmMm3(null)} />
       <TrainingReviewHeader title={t('trainingStudio.review.title', 'Awaiting review')}
         description={t('trainingStudio.review.intro', 'Runs with rungs you have not scored yet. Click one to render previews, listen and score.')}
         actions={<button type="button" onClick={() => void load()} disabled={loading} className="p-1.5 rounded-lg border border-zinc-300/70 dark:border-white/10 text-zinc-500 hover:bg-zinc-500/10"><RefreshCw size={13} className={loading ? 'animate-spin' : ''} /></button>} />
