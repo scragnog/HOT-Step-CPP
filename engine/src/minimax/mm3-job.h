@@ -571,6 +571,9 @@ static std::string mm3_ar_cache_key(const MM3Model & m, const MM3SynthRequest & 
         add_codes("gi", req.gen.lm_guide.ids);
         add_s("gp", std::to_string(req.gen.lm_guide_p.scale) + "," + std::to_string(req.gen.lm_guide_p.k) + "," +
                         std::to_string(req.gen.lm_guide_p.outside));
+        if (req.gen.lm_depth_greedy || req.gen.lm_state_fix) {
+            add_s("gx", std::to_string(req.gen.lm_depth_greedy ? 1 : 0) + "," + std::to_string(req.gen.lm_state_fix));
+        }
         std::vector<int32_t> gate_bits(req.gen.lm_guide_gate.size());
         if (!gate_bits.empty()) {
             memcpy(gate_bits.data(), req.gen.lm_guide_gate.data(), gate_bits.size() * sizeof(float));

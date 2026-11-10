@@ -238,6 +238,15 @@ struct MM3ArOptions {
     Yue2GuideParams   guide_p;               // scale, k, outside; the rest unused
     const float *     guide_gate = nullptr;  // [guide->T] multiplies scale; null = 1
     std::string       guide_trace;           // per-frame JSON for take 0; empty = none
+    // Probes on guided frames only (HOTSTEP-1090 round 9), both off by default.
+    // depth_greedy: the depth decoder takes argmax acoustic codes, like the
+    // launder, instead of sampling them.
+    // state_fix: bit 1 = the depth decoder's input, bit 2 = emitted stream 0.
+    // After the draw of code c, the conditional hidden row is stepped along
+    // d(ln p(c))/dh through the head until c is in its top 10 (mm3_state_fix).
+    // The LM's feedback and KV cache never see the moved row.
+    bool              depth_greedy = false;
+    int               state_fix    = 0;
 
     int64_t dump_iters      = 0;
     bool    collect_hiddens = true;
@@ -358,6 +367,118 @@ static void mm3_lm_adapter_drop() {
         mm3_lm_adapter_free(g_mm3_lm_adapter);
         g_mm3_lm_adapter = nullptr;
     }
+}
+
+// ── State fix (MM3ArOptions::state_fix) ─────────────────────────────────────
+// Host copy of the head's semantic rows as stored (possibly quantized), so a
+// row costs one dequantize instead of a device round trip. ~71 MB at q8_0.
+// The hidden row is post-norm and the head has no bias, so logits = W h.
+struct MM3HeadRows {
+    const ggml_tensor *  t = nullptr;
+    std::vector<uint8_t> raw;
+    size_t               nb1 = 0;
+    int64_t              H   = 0;
+};
+static MM3HeadRows g_mm3_head_rows;
+
+static bool mm3_head_rows_load(const MM3Model & m, std::string * err) {
+    const ggml_tensor * w = m.lm.output;
+    if (g_mm3_head_rows.t == w) {
+        return true;
+    }
+    if (!w || (w->type != GGML_TYPE_F32 && !ggml_get_type_traits(w->type)->to_float)) {
+        if (err) *err = "state fix: the LM head type cannot be read on the host";
+        return false;
+    }
+    const int64_t OFF = (int64_t) m.lm_cfg.semantic_vocab_offset, SV = (int64_t) m.lm_cfg.semantic_vocab_size;
+    g_mm3_head_rows.raw.resize((size_t) SV * w->nb[1]);
+    ggml_backend_tensor_get(w, g_mm3_head_rows.raw.data(), (size_t) OFF * w->nb[1], (size_t) SV * w->nb[1]);
+    g_mm3_head_rows.t   = w;
+    g_mm3_head_rows.nb1 = w->nb[1];
+    g_mm3_head_rows.H   = w->ne[0];
+    return true;
+}
+
+static void mm3_head_row(int64_t code, float * dst) {
+    const MM3HeadRows & r = g_mm3_head_rows;
+    const uint8_t *     p = r.raw.data() + (size_t) code * r.nb1;
+    if (r.t->type == GGML_TYPE_F32) {
+        memcpy(dst, p, (size_t) r.H * sizeof(float));
+    } else {
+        ggml_get_type_traits(r.t->type)->to_float(p, dst, r.H);
+    }
+}
+
+// Move the conditional hidden row h [H] until semantic code c is in the top
+// `rank` of its own logits. Works over S = the row's top 50 plus c, the codes
+// that carry the mass. Logits are linear in h, so each step is exact along its
+// direction d = W[c] - sum_{j in S} p_j W[j] (the gradient of ln p(c) on S),
+// sized to land c just above the current rank-th competitor. Returns the steps
+// used (0 = already there) or -1 when the cap ran out; *rel_dh = |dh| / |h|.
+static int mm3_state_fix(float * h, int64_t H, const float * sem_logits, int64_t SV, int32_t c, int rank,
+                         int max_steps, float * rel_dh) {
+    static std::vector<int32_t> S;
+    static std::vector<float>   W, l, d, r, tmp;
+    S.resize((size_t) SV);
+    for (int64_t j = 0; j < SV; j++) S[(size_t) j] = (int32_t) j;
+    const int64_t top = std::min<int64_t>(50, SV);
+    std::nth_element(S.begin(), S.begin() + top, S.end(),
+                     [&](int32_t a, int32_t b) { return sem_logits[a] > sem_logits[b]; });
+    S.resize((size_t) top);
+    if (std::find(S.begin(), S.end(), c) == S.end()) S.push_back(c);
+    const size_t n  = S.size();
+    const size_t ci = (size_t) (std::find(S.begin(), S.end(), c) - S.begin());
+    W.resize(n * (size_t) H);
+    l.resize(n);
+    r.resize(n);
+    d.resize((size_t) H);
+    for (size_t j = 0; j < n; j++) {
+        mm3_head_row(S[j], W.data() + j * (size_t) H);
+        l[j] = sem_logits[S[j]];
+    }
+    double h2 = 0.0, dh2 = 0.0;
+    for (int64_t i = 0; i < H; i++) h2 += (double) h[i] * h[i];
+    std::vector<float> dh((size_t) H, 0.0f);
+    int                steps = 0;
+    for (;; steps++) {
+        // The rank-th best competitor, and whether c already beats it.
+        tmp.clear();
+        size_t thr_j = 0;
+        for (size_t j = 0; j < n; j++) if (j != ci) tmp.push_back(l[j]);
+        const size_t k = std::min<size_t>((size_t) rank, tmp.size()) - 1;
+        std::nth_element(tmp.begin(), tmp.begin() + (ptrdiff_t) k, tmp.end(), std::greater<float>());
+        const float thr = tmp[k];
+        for (size_t j = 0; j < n; j++) if (j != ci && l[j] == thr) { thr_j = j; break; }
+        if (l[ci] >= thr) break;
+        if (steps >= max_steps) { steps = -1; break; }
+        float mx = -INFINITY;
+        for (size_t j = 0; j < n; j++) mx = std::max(mx, l[j]);
+        double z = 0.0;
+        for (size_t j = 0; j < n; j++) z += std::exp((double) (l[j] - mx));
+        for (int64_t i = 0; i < H; i++) d[(size_t) i] = W[ci * (size_t) H + (size_t) i];
+        for (size_t j = 0; j < n; j++) {
+            const float pj = (float) (std::exp((double) (l[j] - mx)) / z);
+            const float * wj = W.data() + j * (size_t) H;
+            for (int64_t i = 0; i < H; i++) d[(size_t) i] -= pj * wj[i];
+        }
+        for (size_t j = 0; j < n; j++) {
+            const float * wj = W.data() + j * (size_t) H;
+            double        s  = 0.0;
+            for (int64_t i = 0; i < H; i++) s += (double) wj[i] * d[(size_t) i];
+            r[j] = (float) s;
+        }
+        const float rel = r[ci] - r[thr_j];
+        if (!(rel > 1e-6f)) { steps = -1; break; }
+        const float eta = (thr - l[ci] + 0.25f) / rel;
+        for (int64_t i = 0; i < H; i++) {
+            h[i] += eta * d[(size_t) i];
+            dh[(size_t) i] += eta * d[(size_t) i];
+        }
+        for (size_t j = 0; j < n; j++) l[j] += eta * r[j];
+    }
+    for (int64_t i = 0; i < H; i++) dh2 += (double) dh[(size_t) i] * dh[(size_t) i];
+    *rel_dh = h2 > 0.0 ? (float) std::sqrt(dh2 / h2) : 0.0f;
+    return steps;
 }
 
 // Plan K songs at once. `cond_ids` / `uncond_ids` are the two prefill rows,
@@ -500,7 +621,17 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             return false;
         }
         max_frames = std::min(max_frames, opt.guide->T);
+        if (opt.state_fix && !mm3_head_rows_load(m, err)) {
+            return false;
+        }
+    } else if (opt.state_fix || opt.depth_greedy) {
+        if (err) {
+            *err = "state_fix and depth_greedy act on guided frames and need a source guide";
+        }
+        return false;
     }
+    std::vector<float> sf_rel;
+    std::vector<int>   sf_steps;
     // Soft or free frames resample the semantic code, so a pinned acoustic
     // replay for that frame would describe a code that was not drawn.
     bool soft_force = forced && opt.force_bias >= 0.0f;
@@ -778,6 +909,9 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
     std::vector<char>          active((size_t) K, 1);
     int                       first_eos_take = -1;
     std::vector<MM3DepthFrame> frames((size_t) K);
+    std::vector<float>              depth_in;              // state fix: the depth decoder's copy of `hidden`
+    std::vector<std::vector<float>> fixed((size_t) K);     // state fix: each take's moved conditional row
+    std::vector<char>               fixed_ok((size_t) K, 0);
 
     for (int t = 0; t < K; t++) {
         outs[t].semantic_all.reserve((size_t) (max_frames + 1));
@@ -1142,13 +1276,45 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
             }
         }
 
+        // ── state fix (probe): make the conditional state agree with the
+        // drawn code, for the depth decoder and/or emitted stream 0 only.
+        // The unconditional row is left alone. ──
+        const float * depth_rows = hidden.data();
+        std::fill(fixed_ok.begin(), fixed_ok.end(), (char) 0);
+        if (guide_it && opt.state_fix) {
+            if (opt.state_fix & 1) {
+                depth_in = hidden;
+                depth_rows = depth_in.data();
+            }
+            for (int t = 0; t < K; t++) {
+                if (!active[t]) {
+                    continue;
+                }
+                std::vector<float> & fr = fixed[(size_t) t];
+                const float *        hc = hidden.data() + row_c(t) * (size_t) H;
+                fr.assign(hc, hc + H);
+                float     rel = 0.0f;
+                const int st  = mm3_state_fix(fr.data(), H, logits.data() + row_c(t) * (size_t) hn + (OFF - hlo), SV,
+                                              sem_code[(size_t) t], 10, 8, &rel);
+                if (opt.state_fix & 1) {
+                    memcpy(depth_in.data() + row_c(t) * (size_t) H, fr.data(), (size_t) H * sizeof(float));
+                }
+                fixed_ok[(size_t) t] = (opt.state_fix & 2) ? 1 : 0;
+                if (t == 0) {
+                    sf_rel.push_back(rel);
+                    sf_steps.push_back(st);
+                }
+            }
+        }
+
         // ── depth decoder: the seven acoustic codes and their hidden states ──
         // Semantic-only forcing keeps the RNG alive so the depth decoder samples
         // the acoustic codebooks; full forcing passes null and replays them.
         const bool      forced_ac_it = forced_ac_given && it < opt.forced_len;
         const int32_t * forced_ac = forced_ac_it ? opt.forced_acoustic + it * NC : nullptr;
-        if (!mm3_depth_decode_takes(m, hidden.data(), sem_code.data(), forced_ac, frames.data(), err,
-                                    forced_ac_it ? nullptr : rngs.data(), TOPK)) {
+        const bool      greedy_it = forced_ac_it || (opt.depth_greedy && guide_it);
+        if (!mm3_depth_decode_takes(m, depth_rows, sem_code.data(), forced_ac, frames.data(), err,
+                                    greedy_it ? nullptr : rngs.data(), TOPK)) {
             return false;
         }
         out->depth_ms += frames[0].ms;
@@ -1202,7 +1368,8 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                     continue;
                 }
                 if (opt.collect_hiddens) {
-                    const float * hc = hidden.data() + row_c(t) * (size_t) H;
+                    const float * hc = fixed_ok[(size_t) t] ? fixed[(size_t) t].data()
+                                                            : hidden.data() + row_c(t) * (size_t) H;
                     outs[t].frame_hiddens.insert(outs[t].frame_hiddens.end(), hc, hc + H);
                     outs[t].frame_hiddens.insert(outs[t].frame_hiddens.end(), frames[(size_t) t].hiddens.begin(),
                                                  frames[(size_t) t].hiddens.end());
@@ -1336,6 +1503,27 @@ static bool mm3_ar_plan_takes(const MM3Model & m, const int32_t * cond_ids, cons
                 opt.force_bias, (long long) fb_biased, (long long) (fb_margin.size() - (size_t) fb_biased),
                 fb_biased ? 100.0 * (double) fb_agree / (double) fb_biased : 0.0, median(fb_margin), gap_med, gap_p90,
                 TOPK, fb_forced ? 100.0 * (double) fb_in50 / (double) fb_forced : 0.0);
+    }
+    if (!sf_rel.empty()) {
+        std::vector<float> rs = sf_rel;
+        std::sort(rs.begin(), rs.end());
+        size_t ok = 0, moved = 0, big = 0;
+        double st = 0.0;
+        for (size_t i = 0; i < sf_steps.size(); i++) {
+            ok += sf_steps[i] >= 0 ? 1 : 0;
+            moved += sf_steps[i] > 0 ? 1 : 0;
+            st += sf_steps[i] > 0 ? sf_steps[i] : 0;
+            big += sf_rel[i] > 0.3f ? 1 : 0;
+        }
+        fprintf(stderr,
+                "[MM3-AR] State fix (%s%s%s): %zu frames, %.1f%% moved, %.1f%% reached top-10, mean steps %.2f; "
+                "|dh|/|h| median %.3f p90 %.3f max %.3f; above 0.3 on %.1f%%%s\n",
+                opt.state_fix & 1 ? "depth" : "", opt.state_fix == 3 ? "+" : "", opt.state_fix & 2 ? "stream0" : "",
+                rs.size(), 100.0 * (double) moved / (double) rs.size(), 100.0 * (double) ok / (double) rs.size(),
+                moved ? st / (double) moved : 0.0, (double) rs[rs.size() / 2], (double) rs[(size_t) (0.9 * (double) (rs.size() - 1))],
+                (double) rs.back(), 100.0 * (double) big / (double) rs.size(), opt.depth_greedy ? ", depth greedy" : "");
+    } else if (opt.depth_greedy && guided) {
+        fprintf(stderr, "[MM3-AR] Depth decoder greedy on guided frames\n");
     }
     if (guided && !gd_rank.empty()) {
         const size_t n   = gd_rank.size();

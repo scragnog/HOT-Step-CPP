@@ -1540,6 +1540,16 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
             if (!mm3_req_num(root, "lm_guide_outside", &dv, &present, err)) { return false; }
             if (present) { p.outside = (float) std::min(0.0, dv); }
             if (!mm3_req_str(root, "lm_guide_trace_file", &out->gen.lm_guide_trace, &present, err)) { return false; }
+            // Round 9 probes (MM3ArOptions::depth_greedy, state_fix).
+            if (yyjson_val * v = yyjson_obj_get(root, "lm_depth_greedy"); v && !yyjson_is_null(v)) {
+                if (!yyjson_is_bool(v)) { if (err) { *err = "\"lm_depth_greedy\" must be a boolean"; } return false; }
+                out->gen.lm_depth_greedy = yyjson_get_bool(v);
+            }
+            if (!mm3_req_num(root, "lm_state_fix", &dv, &present, err)) { return false; }
+            if (present) {
+                if (dv != 0 && dv != 1 && dv != 2 && dv != 3) { if (err) { *err = "\"lm_state_fix\" must be 0 (off), 1 (depth), 2 (stream 0) or 3 (both)"; } return false; }
+                out->gen.lm_state_fix = (int) dv;
+            }
             if (!mm3_req_str(root, "lm_guide_gate_file", &gate_path, &present, err)) { return false; }
             if (!gate_path.empty()) {
                 // Raw f32, one multiplier per guide frame.

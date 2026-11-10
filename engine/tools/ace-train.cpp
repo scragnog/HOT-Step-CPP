@@ -14,6 +14,7 @@
 #include "minimax/mm3-tokenizer.h"
 #include "minimax/mm3-request.h"
 #include "minimax/mm3-ar-loop.h"
+#include "minimax/mm3-hiddens-file.h"
 #include "minimax/mm3-cond-graph.h"
 #include "minimax/mm3-rvq-encode.h"  // audio -> RVQ codes (open-RVQ 169M)
 #include "minimax/mm3-rec7.h"        // audio -> LM frame hiddens (rec7 state encoder)
@@ -295,7 +296,8 @@ static void print_usage(void) {
             "                [--guide-k N] also writes <id>.guide: the encoder's top-N\n"
             "                semantic codes and log-softmax per frame (Y2GD), for the\n"
             "                synth request's lm_guide_file. mm3-launder takes it too,\n"
-            "                plus [--keep-wav <dir>] to keep its render as <id>.wav.\n"
+            "                plus [--keep-wav <dir>] to keep its render as <id>.wav and\n"
+            "                [--keep-hiddens <dir>] to keep its condition as <id>.mm3hiddens.\n"
             "  mm3-preprocess  MiniMax-Music3 dataset -> flow-DiT target latents.\n"
             "                --dataset <dataset.json> --enc <mm3-enc-*.gguf> --out <dir>\n"
             "                [--ffmpeg <path>] [--max-duration <sec>] [--tf32 on|off]\n"
@@ -6219,7 +6221,7 @@ static int cmd_train_dit(int argc, char ** argv) {
 // keeps the launder render that is otherwise discarded.
 static int cmd_mm3_launder(int argc, char ** argv) {
     std::string ds_path, rvq_path, enc_path, rec7_path, models_dir, out_dir, ffmpeg = "ffmpeg";
-    std::string lm_quant = "q8_0", keep_wav;
+    std::string lm_quant = "q8_0", keep_wav, keep_hiddens;
     int         max_duration = 359, steps = 30, guide_k = 0;
     uint64_t    seed = 42;
 
@@ -6241,6 +6243,7 @@ static int cmd_mm3_launder(int argc, char ** argv) {
         else if (!strcmp(argv[i], "--seed"))         seed         = (uint64_t) atoll(next("--seed"));
         else if (!strcmp(argv[i], "--guide-k"))      guide_k      = atoi(next("--guide-k"));
         else if (!strcmp(argv[i], "--keep-wav"))     keep_wav     = next("--keep-wav");
+        else if (!strcmp(argv[i], "--keep-hiddens")) keep_hiddens = next("--keep-hiddens");
         else if (!strcmp(argv[i], "--jsonl"))        g_jsonl      = true;
         else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) { print_usage(); return 0; }
         else { fprintf(stderr, "ace-train: unknown option %s\n", argv[i]); return 2; }
@@ -6318,7 +6321,8 @@ static int cmd_mm3_launder(int argc, char ** argv) {
         if (doc) yyjson_doc_free(doc);
         return 1;
     }
-    if (!pm_mkdir_p(out_dir) || !pm_mkdir_p(out_dir + "/codes") || (!keep_wav.empty() && !pm_mkdir_p(keep_wav))) {
+    if (!pm_mkdir_p(out_dir) || !pm_mkdir_p(out_dir + "/codes") || (!keep_wav.empty() && !pm_mkdir_p(keep_wav)) ||
+        (!keep_hiddens.empty() && !pm_mkdir_p(keep_hiddens))) {
         yyjson_doc_free(doc);
         fprintf(stderr, "cannot create %s\n", out_dir.c_str());
         return 1;
@@ -6456,6 +6460,19 @@ static int cmd_mm3_launder(int argc, char ** argv) {
             memcpy(dst + H, fr.hiddens.data(), (size_t) (NC * H) * sizeof(float));
         }
         if (!song_ok) { fail_n++; continue; }
+        if (!keep_hiddens.empty()) {
+            // The renderer condition itself, for state-swap probes. "external":
+            // rec7 read it from audio, no LM made it (mm3-job.h accepts that key).
+            MM3HiddensFile hf;
+            hf.frames        = T;
+            hf.num_codebooks = LAY;
+            hf.embedding_len = H;
+            hf.model_key     = "external";
+            const std::string hp = keep_hiddens + "/" + stem + ".mm3hiddens";
+            if (!mm3_hiddens_write(hp, hf, cond.data(), &err)) {
+                fprintf(stderr, "[mm3-launder] %s: %s\n", hp.c_str(), err.c_str());
+            }
+        }
 
         // ── 5. the flow DiT, stage 1 skipped, window latents kept ──
         MM3GenRequest greq;
