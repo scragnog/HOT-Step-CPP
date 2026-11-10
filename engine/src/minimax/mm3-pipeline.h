@@ -783,6 +783,11 @@ struct MM3GenRequest {
     float       lm_dry_base    = 1.75f;
     int         lm_dry_min_len = 15;
     float       lm_force_bias  = -1.0f;  // < 0 = hard pin (MM3ArOptions::force_bias)
+    // Source guide (MM3ArOptions::guide). lm_guide.T == 0 = off.
+    Yue2Guide          lm_guide;
+    Yue2GuideParams    lm_guide_p;
+    std::vector<float> lm_guide_gate;   // [lm_guide.T] or empty
+    std::string        lm_guide_trace;  // per-frame JSON path, or empty
     uint64_t seed       = 42;
     int      steps      = 30;
     float    cfg_flow   = 1.7f;
@@ -1159,6 +1164,12 @@ static bool mm3_generate_takes(const MM3Model & m, const MM3GenRequest & req, MM
         aopt.forced_acoustic = has_ac ? req.forced_acoustic.data() : nullptr;
         aopt.forced_len      = (int64_t) req.forced_semantic.size();
         aopt.force_bias      = req.lm_force_bias;
+    }
+    if (req.lm_guide.T > 0) {
+        aopt.guide       = &req.lm_guide;
+        aopt.guide_p     = req.lm_guide_p;
+        aopt.guide_gate  = req.lm_guide_gate.empty() ? nullptr : req.lm_guide_gate.data();
+        aopt.guide_trace = req.lm_guide_trace;
     }
     aopt.should_cancel = req.should_cancel;
 

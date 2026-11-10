@@ -1513,6 +1513,52 @@ static bool mm3_parse_synth_request(const MM3Model & m, yyjson_val * root, MM3Sy
         }
     }
 
+    // Source guide (mm3-ar-loop.h, MM3ArOptions::guide). Read here so a bad
+    // file is a 400; the song is as long as the guide.
+    {
+        std::string gpath, gate_path;
+        if (!mm3_req_str(root, "lm_guide_file", &gpath, &present, err)) { return false; }
+        if (!gpath.empty()) {
+            if (!out->forced_semantic.empty() || !out->forced_frame_hiddens_file.empty()) {
+                if (err) { *err = "\"lm_guide_file\" is exclusive with \"forced_semantic\" and \"forced_frame_hiddens_file\""; }
+                return false;
+            }
+            Yue2Guide & g = out->gen.lm_guide;
+            if (!yue2_guide_read(gpath, &g, err)) { return false; }
+            for (const int32_t id : g.ids) {
+                if (id < 0 || id >= 16384) {
+                    if (err) { *err = "\"lm_guide_file\" holds codes outside the MM3 semantic range"; }
+                    return false;
+                }
+            }
+            Yue2GuideParams & p = out->gen.lm_guide_p;
+            double dv = 0.0;
+            if (!mm3_req_num(root, "lm_guide_scale", &dv, &present, err)) { return false; }
+            if (present) { p.scale = (float) std::min(1.0, std::max(0.0, dv)); }
+            if (!mm3_req_num(root, "lm_guide_k", &dv, &present, err)) { return false; }
+            if (present) { p.k = (int) std::max(0.0, std::min(16384.0, dv)); }
+            if (!mm3_req_num(root, "lm_guide_outside", &dv, &present, err)) { return false; }
+            if (present) { p.outside = (float) std::min(0.0, dv); }
+            if (!mm3_req_str(root, "lm_guide_trace_file", &out->gen.lm_guide_trace, &present, err)) { return false; }
+            if (!mm3_req_str(root, "lm_guide_gate_file", &gate_path, &present, err)) { return false; }
+            if (!gate_path.empty()) {
+                // Raw f32, one multiplier per guide frame.
+                FILE * f = hs_fopen(gate_path, "rb");
+                std::vector<float> & gate = out->gen.lm_guide_gate;
+                gate.resize((size_t) g.T);
+                const bool ok = f && fread(gate.data(), sizeof(float), gate.size(), f) == gate.size();
+                if (f) { fclose(f); }
+                if (!ok) {
+                    if (err) { *err = "\"lm_guide_gate_file\" must hold one f32 per guide frame (" + std::to_string((long long) g.T) + ")"; }
+                    return false;
+                }
+            }
+            out->max_frames     = std::min<int64_t>(g.T, 9000);
+            out->duration       = (double) out->max_frames / (double) frame_rate;
+            out->gen.max_frames = out->max_frames;
+        }
+    }
+
     return true;
 }
 

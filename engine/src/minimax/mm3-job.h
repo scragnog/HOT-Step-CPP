@@ -566,6 +566,17 @@ static std::string mm3_ar_cache_key(const MM3Model & m, const MM3SynthRequest & 
             add_s("fb", std::to_string(req.gen.lm_force_bias));
         }
     }
+    // The source guide steers every draw. Only written when set.
+    if (req.gen.lm_guide.T > 0) {
+        add_codes("gi", req.gen.lm_guide.ids);
+        add_s("gp", std::to_string(req.gen.lm_guide_p.scale) + "," + std::to_string(req.gen.lm_guide_p.k) + "," +
+                        std::to_string(req.gen.lm_guide_p.outside));
+        std::vector<int32_t> gate_bits(req.gen.lm_guide_gate.size());
+        if (!gate_bits.empty()) {
+            memcpy(gate_bits.data(), req.gen.lm_guide_gate.data(), gate_bits.size() * sizeof(float));
+        }
+        add_codes("gg", gate_bits);
+    }
 
     // The models and the adapter — the half a saved file is checked against.
     mm3_ar_key_add_models(k, m, req, merge_backend);
