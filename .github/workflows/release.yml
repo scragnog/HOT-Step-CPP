@@ -741,6 +741,13 @@ jobs:
 
           New-Item -ItemType Directory -Force "release/out" | Out-Null
 
+          # Protocol 1+ packages move into app/<id>/ under the stable launcher
+          # root; protocol 0 stays flat. Same script as build-release.ps1.
+          node release/updater/package-layout.mjs release/staging
+          if ($LASTEXITCODE) { throw "package-layout.mjs failed" }
+          node release/check-layout.mjs --package release/staging --os windows --variant $variant
+          if ($LASTEXITCODE) { throw "package layout check failed" }
+
           # Compress with .NET for better compression
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           [System.IO.Compression.ZipFile]::CreateFromDirectory(

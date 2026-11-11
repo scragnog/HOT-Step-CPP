@@ -2,7 +2,9 @@
 //
 // Usage: node release/esbuild.config.mjs
 //
-// Produces: release/staging/server/server.mjs plus server/chunks/*.mjs
+// Produces: release/staging/server/server.mjs, server/updater-tool.mjs (the
+// snapshot/restore tool the Windows launcher runs; services/updates/tool.ts)
+// plus server/chunks/*.mjs
 // - All TypeScript/JS source bundled as ESM. Code splitting keeps dynamic
 //   import() targets as real ESM chunks. Without it esbuild wraps them in lazy
 //   init functions; dataroot/bootstrap.ts's top-level await makes those async,
@@ -26,14 +28,17 @@ const nodeExternals = [
 ];
 
 const result = await esbuild.build({
-  entryPoints: [path.join(projectRoot, 'server/src/index.ts')],
+  entryPoints: {
+    server: path.join(projectRoot, 'server/src/index.ts'),
+    'updater-tool': path.join(projectRoot, 'server/src/services/updates/tool.ts'),
+  },
   bundle: true,
   platform: 'node',
   target: 'node22',
   format: 'esm',
   outdir: path.join(projectRoot, 'release/staging/server'),
   splitting: true,
-  entryNames: 'server',
+  entryNames: '[name]',
   chunkNames: 'chunks/[name]-[hash]',
   outExtension: { '.js': '.mjs' },
 

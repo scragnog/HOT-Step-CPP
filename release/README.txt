@@ -32,6 +32,14 @@ older app folder stays in place without them. Repoint copies and deletes nothing
 If a drive is missing or a transfer stops, keep the pointer and data intact.
 Read the explanation page, fix the reported problem and restart to resume.
 
+IN-APP UPDATES (Windows packages with an app folder and current.json)
+Settings > Updates downloads and installs new releases. HOT-Step.bat installs
+the new version beside the old one in app, checks that it starts, and keeps it.
+If it does not start, the old version comes back with your data as it was.
+Always start HOT-Step.bat; never start anything inside app directly. If the
+window says recovery is required, nothing was started or deleted: the reason
+is in updater/last-result.json.
+
 CONFIGURATION
 Settings writes <data folder>/settings/.env from the shipped .env.example.
 Leave managed paths unset. A process HOT_STEP_DATA_ROOT override selects another

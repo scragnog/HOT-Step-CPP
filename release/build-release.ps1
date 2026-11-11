@@ -1,7 +1,11 @@
 # release/build-release.ps1 — Build a complete portable release of HOT-Step CPP
 #
 # Usage:
-#   .\release\build-release.ps1 [-Version "1.5.0"] [-SkipEngine] [-SkipUI] [-Variant cuda -CudaAsset cuda13.1] [-BuildBackend all]
+#   .\release\build-release.ps1 [-Version "1.5.0"] [-SkipEngine] [-SkipUI] [-Variant cuda -CudaAsset cuda13.1] [-BuildBackend all] [-UpdaterProtocol 1]
+#
+# -UpdaterProtocol 1 builds the versioned layout the Windows launcher updates
+# (release/updater/package-layout.mjs), for updater test fixtures. Releases
+# ship protocol 0, the flat package, until the updater has passed acceptance.
 #
 # Produces:
 #   release/out/HOT-Step-CPP-v{version}-win-x64-{variant}.zip
@@ -22,7 +26,9 @@ param(
     [string]$BuildBackend = "all",   # Backends to compile
     [ValidateSet("", "cuda13.1", "cuda12.8", "cuda12-volta")]
     [string]$CudaAsset = "",         # CI asset this CUDA build stands in for (build-info.json)
-    [string]$NodeVersion = "24.18.0" # Node.js LTS version to bundle
+    [string]$NodeVersion = "24.18.0", # Node.js LTS version to bundle
+    [ValidateSet(-1, 0, 1)]
+    [int]$UpdaterProtocol = -1        # -1 = build-info.mjs default (UPDATER_PROTOCOL)
 )
 
 $ErrorActionPreference = "Stop"
@@ -415,7 +421,8 @@ Copy-Item (Join-Path $ProjectRoot "open-browser-if-needed.mjs") (Join-Path $dist
 Set-Content -Path (Join-Path $dist "VERSION") -Value $Version -NoNewline
 
 # Exact package identity for the updater (docs/dev/releasing.md)
-& $NodeExe (Join-Path $ReleaseDir "build-info.mjs") $dist --os windows --arch x64 --variant $assetVariant --tag "v$Version"
+$protocolArgs = if ($UpdaterProtocol -ge 0) { @("--protocol", "$UpdaterProtocol") } else { @() }
+& $NodeExe (Join-Path $ReleaseDir "build-info.mjs") $dist --os windows --arch x64 --variant $assetVariant --tag "v$Version" @protocolArgs
 if ($LASTEXITCODE) { throw "build-info.mjs failed" }
 & $NodeExe (Join-Path $ReleaseDir "check-layout.mjs") --package $dist --os windows --variant $assetVariant
 if ($LASTEXITCODE) { throw "build-info.json check failed" }
@@ -425,6 +432,13 @@ Write-Host "  Assembly complete" -ForegroundColor Green
 # ── Phase 6: Package ──────────────────────────────────────────────────
 
 Write-Host "`n[Phase 6] Packaging..." -ForegroundColor Yellow
+
+# Protocol 1+: move the package into app/<id>/ under the stable launcher root.
+# The same script runs in release.yml, so this is what CI zips.
+& $NodeExe (Join-Path $ReleaseDir "updater/package-layout.mjs") $dist
+if ($LASTEXITCODE) { throw "package-layout.mjs failed" }
+& $NodeExe (Join-Path $ReleaseDir "check-layout.mjs") --package $dist --os windows --variant $assetVariant
+if ($LASTEXITCODE) { throw "package layout check failed" }
 
 $zipName = "HOT-Step-CPP-v${Version}-win-x64-${Variant}.zip"
 $zipPath = Join-Path $OutputDir $zipName

@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BUILD_INFO_FILE, buildInfoErrors } from './build-info.mjs';
+import { payloadIdFor } from './updater/launcher.mjs';
+import { MANIFEST_FILE, ROOT_ENTRIES } from './updater/package-layout.mjs';
 
 export function checkReleaseLayout(root) {
   const errors = [];
@@ -17,6 +19,7 @@ export function checkReleaseLayout(root) {
     ['package-release.sh', read('package-release.sh')],
   ];
   for (const [name, src] of assemblers) {
+    if (/windows|ps1/.test(name) && !/updater[\\/]package-layout\.mjs/.test(src)) errors.push(`${name}: does not run release/updater/package-layout.mjs before zipping`);
     if (!src.includes('release/.env.example') && !src.includes('$ReleaseDir ".env.example"')) errors.push(`${name}: missing release env template`);
     for (const file of ['profile-path.mjs', 'README.txt', 'HOT-Step.']) {
       if (!src.includes(file)) errors.push(`${name}: missing ${file}`);
@@ -42,18 +45,43 @@ export function checkReleaseLayout(root) {
     if (/powershell|pwsh/i.test(src)) errors.push(`${launcher}: spawns PowerShell, which behaviour-based antivirus quarantines`);
     if (/HOT_STEP_DATA_ROOT|HOT_STEP_PROFILE_DIR/.test(src)) errors.push(`${launcher}: pins the data root or profile, so two unpacked releases would stop sharing one library`);
   }
+  const rootBat = read('release/updater/HOT-Step.bat');
+  if (!rootBat.includes('runtime\\node.exe') || !rootBat.includes('launcher.mjs')) errors.push('release/updater/HOT-Step.bat: must run launcher.mjs on the root runtime');
+  if (/powershell|pwsh/i.test(rootBat)) errors.push('release/updater/HOT-Step.bat: spawns PowerShell, which behaviour-based antivirus quarantines');
   return errors;
 }
 
 const BACKEND_LIB = /ggml-(cuda|vulkan|hip)\.(?:dll|so|dylib)$/;
 
-/** Checks an assembled package root against the asset it is meant to be. */
-export function checkPackageBuildInfo(root, { os, variant }) {
+/** Checks an assembled package root against the asset it is meant to be: the
+ *  flat layout (protocol 0) or the versioned one package-layout.mjs makes. */
+export function checkPackageBuildInfo(root, opts) {
+  if (!fs.existsSync(path.join(root, 'current.json'))) return checkPayload(root, opts, 0);
+  const errors = [];
+  let id = null;
+  try { id = JSON.parse(fs.readFileSync(path.join(root, 'current.json'), 'utf8')).payload; } catch { errors.push('current.json: unreadable'); }
+  for (const e of fs.readdirSync(root)) if (!ROOT_ENTRIES.includes(e)) errors.push(`root: unexpected ${e}`);
+  for (const f of ['HOT-Step.bat', 'launcher.mjs', 'runtime/node.exe', 'README.txt']) if (!fs.existsSync(path.join(root, f))) errors.push(`root: missing ${f}`);
+  const apps = fs.existsSync(path.join(root, 'app')) ? fs.readdirSync(path.join(root, 'app')) : [];
+  if (apps.length !== 1 || apps[0] !== id) errors.push(`app/: must hold exactly the payload current.json names (${id})`);
+  if (errors.length) return errors;
+  const payload = path.join(root, 'app', id);
+  errors.push(...checkPayload(payload, opts, 1));
+  if (errors.length) return errors;
+  const info = JSON.parse(fs.readFileSync(path.join(payload, BUILD_INFO_FILE), 'utf8'));
+  if (payloadIdFor(info) !== id) errors.push(`app/${id}: name does not match build-info.json (${payloadIdFor(info)})`);
+  if (fs.existsSync(path.join(payload, 'HOT-Step.bat'))) errors.push(`app/${id}: still has the flat HOT-Step.bat`);
+  for (const f of ['server/updater-tool.mjs', 'runtime/node.exe', MANIFEST_FILE]) if (!fs.existsSync(path.join(payload, f))) errors.push(`app/${id}: missing ${f}`);
+  return errors;
+}
+
+function checkPayload(root, { os, variant }, minProtocol) {
   let info;
   try { info = JSON.parse(fs.readFileSync(path.join(root, BUILD_INFO_FILE), 'utf8')); }
   catch (e) { return [`${BUILD_INFO_FILE}: ${e.code === 'ENOENT' ? 'missing' : 'unreadable'}`]; }
   const errors = buildInfoErrors(info).map(e => `${BUILD_INFO_FILE}: ${e}`);
   if (info?.os !== os || info?.variant !== variant) errors.push(`${BUILD_INFO_FILE}: is ${info?.os} ${info?.variant}, expected ${os} ${variant}`);
+  if (!errors.length && minProtocol && info.updaterProtocol < minProtocol) errors.push(`${BUILD_INFO_FILE}: the versioned layout needs updaterProtocol ${minProtocol} or higher`);
   if (errors.length) return errors;
   let version = '';
   try { version = fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim().replace(/^v/, ''); } catch { errors.push('VERSION: missing'); }
