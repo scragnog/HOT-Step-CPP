@@ -117,7 +117,10 @@ What sets it apart:
   seconds in, while later windows are still being rendered. The full file is saved as
   usual.
 - Variations Per Render (1 to 4) renders several different songs from one prompt in a
-  single pass, sharing the planner. Each request is otherwise one take.
+  single pass, sharing the planner. Each request is otherwise one take. The queue shows
+  each variation as its own row inside one batch box, as it does for a YuE2 batch, and
+  each finished variation is saved and listed as its own song (and sent to the playlist
+  as its own track when that option is on).
 - Flow Steps (default 20, range 2 to 60) is the main speed control. The checkpoint's
   own value is 30; an ear test heard no difference at 20. Below 30, Low-Step
   Compensation reshapes the schedule so short renders keep their low end and stereo

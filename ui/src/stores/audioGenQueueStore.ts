@@ -180,6 +180,8 @@ function _expandTakes(item: AudioQueueItem, status: GenerationJob): void {
   item.mm3Take = 0;
   item.mm3TakeCount = takes;
   item.mm3TakeSeed = seeds[0];
+  // One render, so one box in the queue, like a coalesced YuE2 batch.
+  item.batchId ??= item.jobId;
 
   const at = _state.items.findIndex(i => i.id === item.id);
   if (at < 0) return;
@@ -617,6 +619,47 @@ function projectServerItem(server: AudioIntentItem, previous?: AudioQueueItem): 
   };
 }
 
+/** The extra rows of a multi-song render (MM3 variations, a YuE2 or ACE
+ *  batch). The server queue holds one intent per render, so the siblings
+ *  _expandTakes made live only here: rebuilt from the last snapshot's rows on
+ *  every refresh, or the next refresh drops them. A finished render fans out
+ *  by its song count too, so a reload keeps one row per song. */
+function projectTakeSiblings(item: AudioQueueItem, server: AudioIntentItem, previous: Map<string, AudioQueueItem>): AudioQueueItem[] {
+  const result = server.result as { audioUrls?: string[]; songIds?: string[]; masteredAudioUrls?: string[];
+    noAdapterAudioUrls?: string[]; durations?: number[] } | null;
+  const songIds = server.status === 'succeeded' ? result?.songIds ?? [] : [];
+  const count = Math.max(item.mm3TakeCount ?? 1, songIds.length);
+  if (item.mm3TakeOf || count <= 1) return [];
+  item.mm3Take = 0;
+  item.mm3TakeCount = count;
+  item.batchId ??= item.jobId ?? item.id;
+  const siblings: AudioQueueItem[] = [];
+  for (let t = 1; t < count; t++) {
+    const id = `${item.id}:take${t}`;
+    const s: AudioQueueItem = previous.get(id) ?? {
+      ...item, id, mm3Take: t, mm3TakeSeed: undefined, audioUrl: undefined, songId: undefined,
+      masteredAudioUrl: undefined, noAdapterAudioUrl: undefined, audioDuration: undefined, coverUrl: undefined,
+    };
+    Object.assign(s, { mm3TakeCount: count, mm3TakeOf: item.id, batchId: item.batchId, jobId: item.jobId,
+      serverQueueId: item.serverQueueId, elapsed: item.elapsed });
+    if (songIds[t]) {
+      Object.assign(s, { status: 'succeeded', progress: 100, stage: 'Complete!', error: undefined, songId: songIds[t],
+        audioUrl: result?.audioUrls?.[t] ?? s.audioUrl,
+        masteredAudioUrl: result?.masteredAudioUrls?.[t] ?? s.masteredAudioUrl,
+        noAdapterAudioUrl: result?.noAdapterAudioUrls?.[t] ?? s.noAdapterAudioUrl,
+        audioDuration: result?.durations?.[t] ?? s.audioDuration });
+    } else if (item.status === 'succeeded') {
+      Object.assign(s, { status: 'failed', progress: 0, stage: 'No natural ending',
+        error: 'Reached the length cap without ending; dropped by Require Natural Ending' });
+    } else {
+      // Live progress: _syncTakeSiblings refines this from the job poll below.
+      Object.assign(s, { status: item.status, progress: item.progress, stage: item.stage, error: item.error });
+    }
+    siblings.push(s);
+  }
+  return siblings;
+}
+
 /** Reconcile one server snapshot into the local rows. The Query projection
  *  hook calls this for every successful read; manual refresh calls it too.
  *  Applies are serialized so two snapshots cannot both compare against the
@@ -637,9 +680,10 @@ async function applyServerItemsNow(items: AudioIntentItem[]): Promise<void> {
     const claimed = new Set(items.flatMap(server => [server.jobId, server.meta?.workflowJobId]).filter(Boolean));
     const local = _state.items.filter(item => _manualIds.has(item.id) && !item.serverQueueId
       && !claimed.has(item.jobId) && !claimed.has(item.workflowJobId));
-    _state.items = items.map(server => {
+    _state.items = items.flatMap(server => {
       const id = (server.meta?.view as AudioQueueItem | undefined)?.id ?? server.id;
-      return projectServerItem(server, previous.get(id));
+      const item = projectServerItem(server, previous.get(id));
+      return [item, ...projectTakeSiblings(item, server, previous)];
     }).concat(local);
     _heldIds.clear();
     for (const server of items) if (server.status === 'held') {
