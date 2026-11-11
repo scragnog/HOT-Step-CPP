@@ -379,6 +379,8 @@ for (const fault of ['failed-health', 'no-models', 'both-no-models', 'before-poi
           fs.writeFileSync(path.join(evidence, 'committed-missing-ui.txt'), await page.locator('body').innerText());
           await page.screenshot({ path: path.join(evidence, 'committed-missing-ui.png') });
         }
+        await pause(9000);
+        assert.equal(await page.getByRole('heading', { name: 'Model Manager', exact: true }).count(), 0, 'engine failure must not auto-open Model Manager');
         assert.ok(!fs.readFileSync(path.join(evidence, `${f.name}-launcher-2.log`), 'utf8').includes('recovery-required'));
       }
       const trace = fs.readFileSync(f.cfg.trace, 'utf8').trim().split('\n').map(JSON.parse);
@@ -520,6 +522,47 @@ await run('recovery-no-server', async () => {
     assert.equal(result.outcome, 'recovery-required');
     write(path.join(evidence, 'recovery-no-server-last-result.json'), result);
     await until(() => fs.readFileSync(path.join(evidence, `${f.name}-launcher-2.log`), 'utf8').includes('Recovery required'));
+    if (process.env.UPDATE_GATE_RECOVERY_SHORT === '1') {
+      const text = fs.readFileSync(path.join(evidence, `${f.name}-launcher-2.log`), 'utf8');
+      assert.match(text, /snapshot file .* is damaged/);
+      assert.match(text, /First step: close this window/);
+      assert.ok(text.includes('https://github.com/scragnog/HOT-Step-CPP/blob/master/docs/user/update-recovery.md'));
+      await assert.rejects(health, 'no server starts at recovery-required');
+      await stopTree(child, 'recovery-state-edit-stop');
+      const updater = path.join(f.install, 'updater');
+      const backup = path.join(f.dir, 'updater-before-state-edit');
+      fs.cpSync(updater, backup, { recursive: true, errorOnExist: true, force: false });
+      const txFile = path.join(updater, 'transaction.json');
+      const original = fs.readFileSync(txFile, 'utf8');
+      assert.equal((original.match(/"state": "pending"/g) || []).length, 1);
+      const edited = original.replace('"state": "pending"', '"state": "committed"');
+      assert.deepEqual(JSON.parse(edited), { ...JSON.parse(original), state: 'committed' });
+      fs.writeFileSync(txFile, edited);
+      const beforeRows = snapshotRows(f.data);
+      const beforeEnv = fs.readFileSync(path.join(f.data, 'settings/.env'), 'utf8');
+      write(path.join(evidence, 'state-edit-before-rows.json'), beforeRows);
+      child = f.start();
+      const settled = await until(() => { const r = read(path.join(updater, 'last-result.json')); return r.at !== result.at && r; });
+      write(path.join(evidence, 'state-edit-last-result.json'), settled);
+      await until(health);
+      const afterRows = snapshotRows(f.data);
+      write(path.join(evidence, 'state-edit-after-rows.json'), afterRows);
+      compareRows(afterRows, beforeRows);
+      assert.equal(fs.readFileSync(path.join(f.data, 'settings/.env'), 'utf8'), beforeEnv);
+      const records = Object.fromEntries(['transaction.json', 'maintenance-lease.json', 'retained.json', 'last-result.json'].map(n => [n, fs.existsSync(path.join(updater, n)) ? read(path.join(updater, n)) : null]));
+      const dataLease = path.join(f.data, '.hot-step-maintenance.json');
+      records.dataLease = fs.existsSync(dataLease) ? read(dataLease) : null;
+      records.pointer = read(path.join(f.install, 'current.json'));
+      records.backup = backup;
+      records.candidateFailure = 'Candidate never started: killed before pointer activation; then deliberately damaged the rollback snapshot. No candidate health failure occurred.';
+      write(path.join(evidence, 'state-edit-records.json'), records);
+      assert.equal(settled.outcome, 'installed');
+      assert.equal(records.pointer.payload, tx.newPayload);
+      assert.equal(records['transaction.json'], null);
+      assert.equal(records['maintenance-lease.json'], null);
+      assert.equal(records.dataLease, null);
+      return { result, launcherText: text, timeout: 'Five-minute wait already proven in round2; not repeated', stateEdit: { result: settled, records, persistentRowsMatch: true, envMatch: true } };
+    }
     if (!overlayPresent) {
       const images = await page.locator('img').evaluateAll(imgs => imgs.map(i => ({ alt: i.alt })));
       const e = new Error('Reconnect overlay unmounted on server disconnect; offline splash replaces the five-minute launcher guidance');

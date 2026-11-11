@@ -50,3 +50,19 @@ verify the dialog survives a real disconnect, ignores a stale receipt, and waits
 for manual Reload. The no-server case waits five real minutes for launcher
 guidance after a damaged snapshot. CUDA packages and subjective UI approval are
 outside this CPU-only batch.
+
+For the focused third run, build with `-SourceCommit 1ced828d7273b01c9269b8f74f5334c6fc55845c
+-VersionMajor 93 -Batch round3 -Reuse`. Set `UPDATE_GATE_BATCH=round3`,
+`UPDATE_GATE_MAJOR=93`, and `UPDATE_GATE_RECOVERY_SHORT=1`, then run
+`node tools/update-gate/run.mjs committed-missing,recovery-no-server`.
+The short recovery case verifies the closing text, saves `updater/` aside,
+changes only the pending transaction state to committed, and records the result
+and remaining leases. This is a maintainer experiment on a disposable fixture,
+not a user recovery instruction. It does not repeat the proven five-minute wait.
+
+`build-owner-kit.ps1` packages the CUDA 13.1 pair using existing native binaries
+and prepares an isolated owner kit without starting it. Run after fixture builds
+and before suites, because packaging temporarily rebuilds the clone's SQLite
+addon. `verify-owner-kit.mjs` checks both archive identities and the feed seam
+without launching the kit. The kit's README gives the manual steps. Keep the
+fixture and owner kit until the owner check is complete.
