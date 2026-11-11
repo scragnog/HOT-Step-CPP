@@ -408,6 +408,10 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     // Engine params — full reproducibility
     if (gpData.inferenceSteps) gp.setInferenceSteps(gpData.inferenceSteps);
     if (gpData.guidanceScale !== undefined) gp.setGuidanceScale(gpData.guidanceScale);
+    if (gpData.cfgIntervalStart !== undefined) gp.setCfgIntervalStart(gpData.cfgIntervalStart);
+    if (gpData.cfgIntervalEnd !== undefined) gp.setCfgIntervalEnd(gpData.cfgIntervalEnd);
+    if (gpData.retakeSeed !== undefined) gp.setRetakeSeed(gpData.retakeSeed);
+    if (gpData.retakeVariance !== undefined) gp.setRetakeVariance(gpData.retakeVariance);
     if (gpData.cfgCutoffRatio !== undefined) gp.setCfgCutoffRatio(gpData.cfgCutoffRatio);
     if (gpData.lmCfgCutoffRatio !== undefined) gp.setLmCfgCutoffRatio(gpData.lmCfgCutoffRatio);
     if (gpData.cacheRatio !== undefined) gp.setCacheRatio(gpData.cacheRatio);

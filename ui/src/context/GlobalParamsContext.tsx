@@ -65,6 +65,10 @@ export interface GlobalParams {
   // Generation
   inferenceSteps: number; setInferenceSteps: (v: number) => void;
   guidanceScale: number; setGuidanceScale: (v: number) => void;
+  cfgIntervalStart: number; setCfgIntervalStart: (v: number) => void;
+  cfgIntervalEnd: number; setCfgIntervalEnd: (v: number) => void;
+  retakeSeed: number; setRetakeSeed: (v: number) => void;
+  retakeVariance: number; setRetakeVariance: (v: number) => void;
   cfgCutoffRatio: number; setCfgCutoffRatio: (v: number) => void;
   lmCfgCutoffRatio: number; setLmCfgCutoffRatio: (v: number) => void;
   cacheRatio: number; setCacheRatio: (v: number) => void;

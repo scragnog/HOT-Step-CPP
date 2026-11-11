@@ -57,6 +57,9 @@ struct AceRequest {
     float   seed_blend;        // 0 = seed A only, 1 = seed B only (slerp of initial noise)
     float   seed_blend_end;    // -1 = off; else seed morph: blend goes seed_blend -> this along time
 
+    int64_t retake_seed;     // -1 = random; resolved and echoed when variance > 0
+    float retake_variance;   // 0 = unchanged, 1 = independent retake seed
+
     // LM control
     float       lm_temperature;      // 0.85
     float       lm_cfg_scale;        // 2.0
@@ -117,6 +120,8 @@ struct AceRequest {
     // DiT control (0 = auto-detect from model: turbo vs base/sft)
     int   inference_steps;  // 0 = auto (turbo: 8, base/sft: 50)
     float guidance_scale;   // 0 = auto (1.0 for all models)
+    float cfg_interval_start; // 0; inclusive diffusion timestep lower bound
+    float cfg_interval_end;   // 1; inclusive diffusion timestep upper bound
     float shift;            // 0 = auto (turbo: 3.0, base/sft: 1.0)
 
     // Self-attention sliding-window override for the DiT's layer_type=0 layers.

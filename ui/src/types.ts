@@ -150,6 +150,10 @@ export interface GenerationParams {
   // DiT settings
   inferenceSteps: number;
   guidanceScale: number;
+  cfgIntervalStart?: number;
+  cfgIntervalEnd?: number;
+  retakeSeed?: number;
+  retakeVariance?: number;
   cfgCutoffRatio?: number;
   lmCfgCutoffRatio?: number;
   cacheRatio?: number;

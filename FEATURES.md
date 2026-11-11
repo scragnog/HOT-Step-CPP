@@ -98,6 +98,10 @@ The global bar holds every setting that applies to a render, whichever studio st
 | Auto-trim | Renders past the requested length, cuts at a natural ending, and fades out only if none is found. |
 | Latent post-processing | Latent shift, latent rescale and custom timestep lists. |
 | Denoiser and LSS | An in-engine spectral gate after decode and a latent spectral suppressor before it. |
+| ADG guidance | ACE base-model angle guidance, with a clipped clean-latent rotation. See [Generation](docs/user/generation.md#ace-step-variations-and-guidance-intervals). |
+| CFG intervals | Apply ACE guidance only inside inclusive diffusion timestep bounds, for GGML and TensorRT. |
+| Retake variations | Mix a second seeded noise draw with variance from 0 to 1; saves the actual retake seed per song. |
+| Repeated PEFT wrappers | ACE DiT adapter keys with repeated PEFT prefixes map to the intended base weights. |
 | Seed Manager | Save, star, search and reload seeds; the seed actually used is stored with each song. |
 | Seed breeding | Blend the initial noise of two seeds (`seedB`, `seedBlend`) to get children between two keeper takes. API only for now. |
 | Seed morph | Time-varying seed blend (`seedBlendEnd`): the noise morphs from `seedBlend` at the start to `seedBlendEnd` at the end, slerped per latent frame. API only for now. |

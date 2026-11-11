@@ -11,6 +11,35 @@ This page is the map. For the request JSON and every CLI flag, see
 tiers fit together, see [architecture.md](architecture.md). For build scripts and
 toolchains, see [building.md](building.md).
 
+## ACE-Step parity controls
+
+`AceRequest` parses and serializes `cfg_interval_start`/`cfg_interval_end`
+(0/1), `retake_variance` (0), and `retake_seed` (-1). The two interval bounds
+and variance clamp to [0,1]; inverted bounds select no guidance. They are request
+fields, so the LM echo retains them. The Node translation and defaults mirror
+the generation store; the current request remains the base for post-LM rebuilds.
+Node resolves a random retake seed per track before synth and saves it in song
+parameters. CLI seed resolution does the same only for nonzero variance.
+
+`retake-noise.h` mixes a second Philox draw before cover/repaint initialization.
+Zero returns without touching the original bytes; one copies the second draw.
+`guidance/adg-core.h` implements the local ACE-Step 1.5 base
+`apg_guidance.py:adg_forward`, including its 3.14/6 angle clip and sigma<1e-4
+CFG fallback. ADG has a Lua registry descriptor and native dispatch in the GGML
+and TRT ACE samplers. Other family bridges use the descriptor's ordinary CFG
+fallback because their guidance callback has no current latent argument.
+Both ACE samplers gate guidance using the actual evaluation sigma, not step
+fraction, and use conditional velocity outside the interval. Restricted
+intervals bypass velocity caching; the old CFG cutoff still applies.
+
+The local custom Python build predates retake. Its sin/cos mixing and placement
+were checked against the [official base model implementation](https://github.com/ace-step/ACE-Step-1.5/blob/main/acestep/models/base/modeling_acestep_v15_base.py).
+CPU regression checks are in `engine/tests/test-ace-parity.cpp`:
+`make -C engine/tests test-ace-parity && engine/tests/test-ace-parity`.
+The ADG golden vector comes from the local PyTorch reference on CPU, with an
+absolute tolerance of 3e-5. Render comparisons still need the same GPU, model,
+request, pin and backend settings.
+
 ## Layout
 
 | Path | Contents |

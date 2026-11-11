@@ -159,6 +159,11 @@ exercises generated/read identity, export and mismatch/legacy loading.
 
 ## Key files
 
+ACE DiT LoRA key normalization lives in `engine/src/adapter-names.h`.
+It strips all repeated leading PEFT/ComfyUI wrappers before adding `decoder.`.
+`engine/tests/test-ace-parity.cpp` covers double-wrapped keys. Both merge and
+runtime loaders keep using the same `lora_base_name` helper.
+
 | Path | Role |
 |---|---|
 | `engine/src/adapter-merge.h` | Merge mode: safetensors/PEFT/LyCORIS parsing, LoKr detection (`adapter_detect_lokr` :514), LoHa (`adapter_merge_loha` :1339), GPU merge graph (`adapter_merge_on_backend` :599, contains the DoRA weight-decompose for both GPU and host paths), delta compute (`adapter_compute_delta` :556), basin re-base (`adapter_rebase_fetch` :79), PEFT DoRA magnitude detection (`lora_is_magnitude` :184), DoRA preflight (`adapter_dora_preflight` :894), rsLoRA (`adapter_read_rslora` :243), per-module `alpha_pattern` parser (`adapter_read_alpha_pattern` :321 — REQUIRED for PEFT rank_pattern adapters, else per-module strength is alpha_global/rank_actual ≈ wildly wrong), entry `adapter_merge` (:1914) |

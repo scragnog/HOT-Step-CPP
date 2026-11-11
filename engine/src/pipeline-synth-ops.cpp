@@ -7,6 +7,7 @@
 #include "pipeline-synth-ops.h"
 #include "synth-finite.h"
 
+#include "retake-noise.h"
 #include "hot-step-sampler.h"
 #include "hot-step-sampler-trt.h"
 #include "adapter-trt.h"
@@ -1002,6 +1003,11 @@ void ops_init_noise(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
         float * dst = s.noise.data() + b * s.Oc * s.T;
         s.seeds[b]  = reqs[b].seed;
         philox_randn(reqs[b].seed, dst, s.Oc * s.T, /*bf16_round=*/true);
+        retake_noise(dst, s.Oc * s.T, reqs[b].retake_seed, reqs[b].retake_variance);
+        if (reqs[b].retake_variance > 0.0f) {
+            fprintf(stderr, "[Init-Noise Batch%d] Retake seed=%lld variance=%.3f\n", b,
+                    (long long) reqs[b].retake_seed, reqs[b].retake_variance);
+        }
         fprintf(stderr, "[Init-Noise Batch%d] Philox noise seed=%lld, [%d, %d] solver=%s\n", b,
                 (long long) reqs[b].seed, s.T, s.Oc, s.rr.solver.c_str());
 
@@ -1378,7 +1384,8 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
             /*real_S=*/nullptr, s.per_enc_S.data(), s.enc_hidden_nc.empty() ? nullptr : s.enc_hidden_nc.data(),
             s.per_enc_S_nc_final.empty() ? nullptr : s.per_enc_S_nc_final.data(), /*use_sde=*/false, s.seeds.data(),
             ctx->params.use_batch_cfg,
-            !s.neg_pooled.empty() ? s.neg_pooled.data() : (s.null_cond_vec.empty() ? nullptr : s.null_cond_vec.data()) /* pooled negative, else pristine null (TRT CFG requires non-null) */);
+            !s.neg_pooled.empty() ? s.neg_pooled.data() : (s.null_cond_vec.empty() ? nullptr : s.null_cond_vec.data()) /* pooled negative, else pristine null (TRT CFG requires non-null) */,
+            s.rr.cfg_interval_start, s.rr.cfg_interval_end);
         if (dit_rc != 0) {
             return -1;
         }
@@ -1512,7 +1519,7 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
             /*repaint_injection_ratio=*/0.5f, /*repaint_crossfade_frames=*/0,
             /*neg_enc_data=*/s.neg_pooled.empty() ? nullptr : s.neg_pooled.data(),
             /*neg_enc_seq=*/s.neg_enc_seq.empty() ? nullptr : s.neg_enc_seq.data(),
-            /*neg_enc_seq_S=*/s.neg_enc_S);
+            /*neg_enc_seq_S=*/s.neg_enc_S, s.rr.cfg_interval_start, s.rr.cfg_interval_end);
         if (dit_rc != 0) {
             return -1;
         }

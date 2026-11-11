@@ -56,6 +56,10 @@ export const generationControlsSchema = z.object({
   // Core DiT sampling
   inferenceSteps: z.unknown().optional(), // number, default 12
   guidanceScale: z.unknown().optional(), // number, default 9.0
+  cfgIntervalStart: z.unknown().optional(), // number, default 0
+  cfgIntervalEnd: z.unknown().optional(), // number, default 1
+  retakeSeed: z.unknown().optional(), // number, default -1
+  retakeVariance: z.unknown().optional(), // number, default 0
   cfgCutoffRatio: z.unknown().optional(), // number, default 1.0 (no-op)
   lmCfgCutoffRatio: z.unknown().optional(), // number, default 1.0 (no-op)
   cacheRatio: z.unknown().optional(), // number, default 0 (off)

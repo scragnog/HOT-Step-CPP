@@ -18,6 +18,11 @@ plans the song. On MiniMax-Music3 and YuE2 adapters act on the language model. S
 Audio 3 adapters act on its DiT and have no picker in the generation bar: the Training
 Studio trains them and renders auditions with them (see [File formats](#file-formats)).
 
+ACE DiT PEFT exports may repeat the `base_model.model.` wrapper after an
+adapter is wrapped more than once. The loader strips every leading PEFT or
+ComfyUI wrapper before matching base tensor names, so those exports reach the
+same weights as single-wrapped adapters.
+
 ## Where to find it
 
 The **Adapters** section of the generation bar. Its contents follow the active backend

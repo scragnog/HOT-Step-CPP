@@ -65,7 +65,7 @@ export const PARAM_GROUPS: { title: string; fields: string[]; ace?: true }[] = [
     title: 'DiT Sampling',
     ace: true,
     fields: [
-      'inferenceSteps', 'guidanceScale', 'cfgCutoffRatio', 'lmCfgCutoffRatio', 'cacheRatio',
+      'inferenceSteps', 'guidanceScale', 'cfgIntervalStart', 'cfgIntervalEnd', 'retakeSeed', 'retakeVariance', 'cfgCutoffRatio', 'lmCfgCutoffRatio', 'cacheRatio',
       'shift', 'inferMethod', 'scheduler', 'guidanceMode', 'storkSubsteps', 'beatStability', 'frequencyDamping', 'temporalSmoothing',
       'apgMomentum', 'apgNormThreshold', 'dcwEnabled', 'dcwMode', 'dcwLowScaler', 'dcwHighScaler',
       'latentShift', 'latentRescale', 'customTimesteps',

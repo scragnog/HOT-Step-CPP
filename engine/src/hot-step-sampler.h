@@ -12,6 +12,7 @@
 #include "dit-alignment-graph.h"
 #include "dit-graph.h"
 #include "dit.h"
+#include "guidance/adg-core.h"
 #include "guidance/apg-core.h"
 #include "hot-step-params.h"
 #include "lua-plugin-registry.h"
@@ -70,6 +71,8 @@ static int dit_ggml_generate(DiTGGML *           model,
                              const float *   neg_enc_data             = nullptr,
                              const float *   neg_enc_seq              = nullptr,
                              int             neg_enc_seq_S            = 0,
+                             float cfg_interval_start = 0.0f,
+                             float cfg_interval_end = 1.0f,
                              const char *    solver_name              = "euler",
                              const char *    guidance_mode            = "apg",
                               float           apg_momentum             = 0.75f,
@@ -862,7 +865,12 @@ static int dit_ggml_generate(DiTGGML *           model,
             memcpy(vt_cond.data(), full_output.data(), n_total * sizeof(float));
             memcpy(vt_uncond.data(), full_output.data() + n_total, n_total * sizeof(float));
             for (int b = 0; b < N; b++) {
-                if (use_apg_native) {
+                if (!cfg_in_interval(t_val, cfg_interval_start, cfg_interval_end)) {
+                    memcpy(vt.data() + b * n_per, vt_cond.data() + b * n_per, n_per * sizeof(float));
+                } else if (guidance_plugin->name == "adg") {
+                    adg_forward(xt_in + b * n_per, vt_cond.data() + b * n_per, vt_uncond.data() + b * n_per,
+                                guidance_scale, t_val, vt.data() + b * n_per, Oc, T);
+                } else if (use_apg_native) {
                     apg_forward(vt_cond.data() + b * n_per, vt_uncond.data() + b * n_per, guidance_scale,
                                 apg_mbufs[b], vt.data() + b * n_per, Oc, T, apg_norm_threshold, apg_ws);
                 } else {
@@ -897,7 +905,12 @@ static int dit_ggml_generate(DiTGGML *           model,
             static_graph_compute(&dit_graph, model->backend, model->sched, gf);
             ggml_backend_tensor_get(t_output, vt_uncond.data(), 0, n_total * sizeof(float));
             for (int b = 0; b < N; b++) {
-                if (use_apg_native) {
+                if (!cfg_in_interval(t_val, cfg_interval_start, cfg_interval_end)) {
+                    memcpy(vt.data() + b * n_per, vt_cond.data() + b * n_per, n_per * sizeof(float));
+                } else if (guidance_plugin->name == "adg") {
+                    adg_forward(xt_in + b * n_per, vt_cond.data() + b * n_per, vt_uncond.data() + b * n_per,
+                                guidance_scale, t_val, vt.data() + b * n_per, Oc, T);
+                } else if (use_apg_native) {
                     apg_forward(vt_cond.data() + b * n_per, vt_uncond.data() + b * n_per, guidance_scale,
                                 apg_mbufs[b], vt.data() + b * n_per, Oc, T, apg_norm_threshold, apg_ws);
                 } else {
@@ -967,6 +980,9 @@ static int dit_ggml_generate(DiTGGML *           model,
     // Pattern: always compute first 2 and last 2 steps (boundaries matter most).
     // Middle steps are computed every Nth step based on cache_ratio.
     float cache_ratio = g_hotstep_params.cache_ratio;
+    // Cached guided velocities can cross an interval boundary, including solver
+    // sub-evaluations. Keep real conditional predictions for restricted intervals.
+    if (cfg_interval_start != 0.0f || cfg_interval_end != 1.0f) cache_ratio = 0.0f;
     std::vector<bool> step_computes(num_steps, true);
     std::vector<float> vt_cached;
     bool has_cached_vt = false;
@@ -1088,7 +1104,7 @@ static int dit_ggml_generate(DiTGGML *           model,
             // solvers are responsible for their own vt state).
             // TODO: snapshot vt in loop_on_step if full-loop multi-eval solvers need DCW
             sampler_apply_dcw(xt.data(), vt.data(), N, T, Oc, t_curr, t_next, step_idx, num_steps);
-            if (guidance_plugin->has_post_step && do_cfg && step_idx < num_steps - 1) {
+            if (guidance_plugin->has_post_step && do_cfg && cfg_in_interval(t_curr, cfg_interval_start, cfg_interval_end) && step_idx < num_steps - 1) {
                 PostStepModelFn eval_cond_fn = [&](const float * xt_in, float t_v) {
                     eval_single_pass(xt_in, t_v, enc_cond_full, vt_cond.data());
                 };
@@ -1447,7 +1463,7 @@ static int dit_ggml_generate(DiTGGML *           model,
             sampler_apply_dcw(xt.data(), vt_readonly, N, T, Oc, t_curr, t_next, step, num_steps);
 
             // ── Post-step guidance hook (CFG-MP manifold projection etc.) ──
-            if (guidance_plugin->has_post_step && do_cfg && step < num_steps - 1) {
+            if (guidance_plugin->has_post_step && do_cfg && cfg_in_interval(t_curr, cfg_interval_start, cfg_interval_end) && step < num_steps - 1) {
                 // Build eval lambdas that write to vt_cond / vt_uncond
                 PostStepModelFn eval_cond_fn = [&](const float * xt_in, float t_v) {
                     eval_single_pass(xt_in, t_v, enc_cond_full, vt_cond.data());

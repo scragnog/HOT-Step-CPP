@@ -668,6 +668,11 @@ export async function runAceGeneration(
         synthReq.seed = Math.floor(Math.random() * 2_147_483_647);
       }
 
+      // Resolve before submission so every track keeps its reproducible retake seed.
+      if ((synthReq.retake_variance ?? 0) > 0 && (synthReq.retake_seed ?? -1) < 0) {
+        synthReq.retake_seed = Math.floor(Math.random() * 0x1_0000_0000);
+      }
+
       // Log the synth caption to verify trigger word presence
       const synthCaptionPreview = (synthReq.caption || '').substring(0, 150);
       console.log(`[Synth] Track ${trackIdx + 1} caption: ${synthCaptionPreview}`);
@@ -1251,6 +1256,7 @@ export async function runAceGeneration(
       const trackParams = {
         ...job.params,
         seed: trackResult.seed !== undefined ? trackResult.seed : job.params.seed,
+        retakeSeed: trackResult.retake_seed ?? job.params.retakeSeed,
         lmSeed: trackResult.lm_seed !== undefined ? trackResult.lm_seed : job.params.lmSeed,
       };
 

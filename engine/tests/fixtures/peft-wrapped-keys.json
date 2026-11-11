@@ -1,0 +1,18 @@
+[
+  {
+    "key": "base_model.model.layers.0.self_attn.q_proj.lora_A.weight",
+    "expected": "decoder.layers.0.self_attn.q_proj.weight"
+  },
+  {
+    "key": "base_model.model.base_model.model.layers.0.self_attn.q_proj.lora_A.weight",
+    "expected": "decoder.layers.0.self_attn.q_proj.weight"
+  },
+  {
+    "key": "diffusion_model.base_model.model.layers.0.self_attn.q_proj.lora_B.weight",
+    "expected": "decoder.layers.0.self_attn.q_proj.weight"
+  },
+  {
+    "key": "base_model.model.base_model.model.layers.0.mlp.original_mlp.down_proj.lora_A.default.weight",
+    "expected": "decoder.layers.0.mlp.down_proj.weight"
+  }
+]

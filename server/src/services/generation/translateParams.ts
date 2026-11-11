@@ -318,6 +318,10 @@ export function translateParams(params: any): AceRequest {
   if (params.latentShift !== undefined) req.latent_shift = params.latentShift;
   if (params.latentRescale !== undefined) req.latent_rescale = params.latentRescale;
   if (params.customTimesteps) req.custom_timesteps = params.customTimesteps;
+  if (params.cfgIntervalStart !== undefined) req.cfg_interval_start = params.cfgIntervalStart;
+  if (params.cfgIntervalEnd !== undefined) req.cfg_interval_end = params.cfgIntervalEnd;
+  if (params.retakeSeed !== undefined) req.retake_seed = params.retakeSeed;
+  if (params.retakeVariance !== undefined) req.retake_variance = params.retakeVariance;
   if (params.cfgCutoffRatio !== undefined) req.cfg_cutoff_ratio = params.cfgCutoffRatio;
   if (params.lmCfgCutoffRatio !== undefined) req.lm_cfg_cutoff_ratio = params.lmCfgCutoffRatio;
   if (params.cacheRatio !== undefined) req.cache_ratio = params.cacheRatio;

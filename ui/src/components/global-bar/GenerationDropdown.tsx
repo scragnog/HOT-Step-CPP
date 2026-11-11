@@ -439,10 +439,32 @@ export const GenerationDropdown: React.FC = () => {
             registry.guidance.map(g => ({ value: g.name, label: g.display }))
           ) : [
             { value: 'apg', label: 'APG (Default)' },
+            { value: 'adg', label: 'ADG' },
             { value: 'cfg_pp', label: 'CFG++' },
             { value: 'dynamic_cfg', label: 'Dynamic CFG' },
             { value: 'rescaled_cfg', label: 'Rescaled CFG' },
           ]} />
+      </div>
+
+      <div className="space-y-3">
+        <Slider label="CFG interval start" value={gp.cfgIntervalStart}
+          onChange={gp.setCfgIntervalStart} min={0} max={1} step={0.01} showInput
+          defaultValue={0} infoMeta="default 0 · range 0-1"
+          info="Lowest diffusion timestep where guidance applies. Sampling runs from 1 (noise) down to 0 (clean). Raise this to stop guidance before the final detail steps. Requires guidance above 1; an inverted interval disables guidance." />
+        <Slider label="CFG interval end" value={gp.cfgIntervalEnd}
+          onChange={gp.setCfgIntervalEnd} min={0} max={1} step={0.01} showInput
+          defaultValue={1} infoMeta="default 1 · range 0-1"
+          info="Highest diffusion timestep where guidance applies. Lower this to leave the early noisy steps unguided. The existing CFG cutoff still limits which steps can use guidance." />
+        <Slider label="Retake variance" value={gp.retakeVariance}
+          onChange={gp.setRetakeVariance} min={0} max={1} step={0.01} showInput
+          defaultValue={0} infoMeta="default 0 · range 0-1"
+          info="Mixes fresh seeded noise into the starting noise. Zero keeps the original take; one uses the retake seed alone. Intermediate values make variations while preserving noise variance. Keep the prompt, codes and main seed fixed to compare takes." />
+        <label className="flex flex-col gap-1">
+          <ParamLabel label="Retake seed" meta="default -1 · -1 = random"
+            info="Seed for the second noise draw. A fixed value makes retakes reproducible. Minus one chooses a fresh seed, which is saved with the generation. Ignored when retake variance is zero." />
+          <input type="number" min={-1} max={4294967295} step={1} value={gp.retakeSeed}
+            className={selectClasses} onChange={e => gp.setRetakeSeed(Number(e.target.value))} />
+        </label>
       </div>
 
       {/* ── APG Sub-Controls (native C++ path — always show for APG) ── */}

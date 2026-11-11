@@ -373,6 +373,9 @@ only the first object's sideband fields are read.
 | `scheduler` | `""` | Scheduler plugin name, or `composite:<a>+<b>:<crossover>:<split>` to blend two. Empty uses the shift schedule; an unknown name uses `linear` |
 | `guidance_mode` | `"apg"` | Guidance plugin name. Unknown names fall back to `apg` |
 | `plugin_params` | `{}` | Plugin parameters, `{"pluginName:key": value}`. Values may be strings, numbers or booleans |
+| `cfg_interval_start`, `cfg_interval_end` | 0, 1 | Inclusive diffusion timestep bounds for ACE guidance; outside uses conditional prediction. Inverted bounds disable guidance. Restricted intervals disable velocity caching. |
+| `retake_variance`, `retake_seed` | 0, -1 | Variance-preserving initial-noise mixing; zero leaves noise unchanged, one uses the retake seed alone. -1 resolves randomly only when variance > 0. |
+| `guidance_mode: "adg"` | opt-in | ACE base-model angle guidance; needs guidance > 1 and a null conditioning embedding. Implemented by the GGML and TensorRT samplers. |
 | `apg_momentum`, `apg_norm_threshold` | 0.75, 2.5 | APG tuning |
 | `stork_substeps`, `beat_stability`, `frequency_damping`, `temporal_smoothing` | 10, 0.25, 0.4, 0.13 | Copied into the solver state |
 | `cfg_cutoff_ratio` | 1.0 | Fraction of DiT steps that run CFG |

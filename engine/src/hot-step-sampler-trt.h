@@ -13,6 +13,7 @@
 #include "dcw.h"
 #include "debug.h"
 #include "dit-trt.h"
+#include "guidance/adg-core.h"
 #include "guidance/apg-core.h"
 #include "hot-step-params.h"
 #include "lua-plugin-registry.h"
@@ -147,6 +148,8 @@ static int dit_trt_generate(DitTrt *              trt,
                              const int64_t *       seeds               = nullptr,
                              bool                  use_batch_cfg       = true,
                              const float *         neg_enc_data        = nullptr,
+                             float cfg_interval_start = 0.0f,
+                             float cfg_interval_end = 1.0f,
                              const char *          solver_name         = "euler",
                              const char *          guidance_mode       = "apg",
                              float                 apg_momentum        = 0.75f,
@@ -430,7 +433,12 @@ static int dit_trt_generate(DitTrt *              trt,
             memcpy(vt_cond.data(), full_output.data(), n_total * sizeof(float));
             memcpy(vt_uncond.data(), full_output.data() + n_total, n_total * sizeof(float));
             for (int b = 0; b < N; b++) {
-                if (use_apg_native) {
+                if (!cfg_in_interval(t_val, cfg_interval_start, cfg_interval_end)) {
+                    memcpy(vt.data() + b * n_per, vt_cond.data() + b * n_per, n_per * sizeof(float));
+                } else if (guidance_plugin->name == "adg") {
+                    adg_forward(xt_in + b * n_per, vt_cond.data() + b * n_per, vt_uncond.data() + b * n_per,
+                                guidance_scale, t_val, vt.data() + b * n_per, Oc, T);
+                } else if (use_apg_native) {
                     apg_forward(vt_cond.data() + b * n_per, vt_uncond.data() + b * n_per,
                                 guidance_scale, apg_mbufs[b], vt.data() + b * n_per,
                                 Oc, T, apg_norm_threshold, apg_ws);
@@ -454,7 +462,12 @@ static int dit_trt_generate(DitTrt *              trt,
             memcpy(enc_buf.data(), enc_hidden_data, H_enc * enc_S * N * sizeof(float));
 
             for (int b = 0; b < N; b++) {
-                if (use_apg_native) {
+                if (!cfg_in_interval(t_val, cfg_interval_start, cfg_interval_end)) {
+                    memcpy(vt.data() + b * n_per, vt_cond.data() + b * n_per, n_per * sizeof(float));
+                } else if (guidance_plugin->name == "adg") {
+                    adg_forward(xt_in + b * n_per, vt_cond.data() + b * n_per, vt_uncond.data() + b * n_per,
+                                guidance_scale, t_val, vt.data() + b * n_per, Oc, T);
+                } else if (use_apg_native) {
                     apg_forward(vt_cond.data() + b * n_per, vt_uncond.data() + b * n_per,
                                 guidance_scale, apg_mbufs[b], vt.data() + b * n_per,
                                 Oc, T, apg_norm_threshold, apg_ws);
@@ -474,6 +487,9 @@ static int dit_trt_generate(DitTrt *              trt,
 
     // ── Step-level velocity caching (shared by both solver paths) ────────
     float cache_ratio = g_hotstep_params.cache_ratio;
+    // Cached guided velocities can cross an interval boundary, including solver
+    // sub-evaluations. Keep real conditional predictions for restricted intervals.
+    if (cfg_interval_start != 0.0f || cfg_interval_end != 1.0f) cache_ratio = 0.0f;
     std::vector<bool> step_computes(num_steps, true);
     std::vector<float> vt_cached;
     bool has_cached_vt = false;

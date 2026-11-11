@@ -12,6 +12,34 @@ time you open the app. A different browser, or one with its site data cleared, s
 the defaults listed below. To keep a set of settings you can return to, save a
 [profile](#profiles).
 
+## ACE-Step variations and guidance intervals
+
+Generation includes ADG, CFG interval start/end, and retake controls.
+ADG is Angle-based Dynamic Guidance from ACE-Step 1.5. It rotates the clean
+latent estimates using their conditional/unconditional angle, clipped at
+3.14/6 radians. Use a base model with Guidance Scale above 1. Turbo models do
+not have the unconditional embedding ADG needs. Other backend plugin bridges
+use ordinary CFG when this ACE-specific plugin is selected.
+
+CFG interval start and end are inclusive diffusion timestep bounds, defaulting
+to 0 and 1. Sampling runs from noisy 1 toward clean 0. Raising start stops
+guidance during the final steps; lowering end skips it during the early steps.
+Outside the interval the conditional prediction is used. Start above end makes
+the interval empty. These controls apply to every ACE guidance mode, including
+solver sub-evaluations. The existing step-based CFG Cutoff remains an additional
+limit. A restricted interval disables velocity caching so a cached guided
+prediction cannot leak across an interval boundary.
+
+Retake variance mixes the original seeded noise with a second draw using
+`cos(v*pi/2)*noise + sin(v*pi/2)*retake_noise`. Zero, the default, leaves the
+original take unchanged. One uses the retake seed's noise alone. Intermediate
+values preserve variance while varying the take. Keep the caption, lyrics,
+audio codes and primary seed fixed when comparing. Retake seed defaults to -1
+for a fresh draw; the resolved per-track seed is saved with the song so Apply
+Settings can reproduce it. Mixing happens before seed breeding and cover or
+repaint initialization. These controls work in both GGML and TensorRT ACE
+sampling; ADG and interval controls need Guidance Scale above 1.
+
 ## HeartMuLa controls
 
 Choose HeartMuLa in the engine picker. In Custom-Gen, Tags describes the genre,

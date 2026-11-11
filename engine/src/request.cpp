@@ -32,6 +32,10 @@ void request_init(AceRequest * r) {
     r->seed_b               = -1;
     r->seed_blend           = 0.0f;
     r->seed_blend_end       = -1.0f;
+    r->retake_seed = -1;
+    r->retake_variance = 0.0f;
+    r->cfg_interval_start = 0.0f;
+    r->cfg_interval_end = 1.0f;
     r->lm_temperature       = 0.85f;
     r->lm_cfg_scale         = 2.0f;
     r->lm_cfg_cutoff_ratio  = 1.0f;
@@ -293,6 +297,19 @@ static void request_parse_obj(yyjson_val * obj, AceRequest * r) {
     if ((v = yyjson_obj_get(obj, "lm_dry_min_len")) && yyjson_is_num(v)) {
         r->lm_dry_min_len = (int) yyjson_get_num(v);
     }
+    if ((v = yyjson_obj_get(obj, "retake_seed")) && yyjson_is_num(v)) {
+        r->retake_seed = (int64_t) yyjson_get_num(v);
+    }
+    if ((v = yyjson_obj_get(obj, "retake_variance")) && yyjson_is_num(v)) {
+        r->retake_variance = std::clamp((float) yyjson_get_num(v), 0.0f, 1.0f);
+    }
+    if ((v = yyjson_obj_get(obj, "cfg_interval_start")) && yyjson_is_num(v)) {
+        r->cfg_interval_start = std::clamp((float) yyjson_get_num(v), 0.0f, 1.0f);
+    }
+    if ((v = yyjson_obj_get(obj, "cfg_interval_end")) && yyjson_is_num(v)) {
+        r->cfg_interval_end = std::clamp((float) yyjson_get_num(v), 0.0f, 1.0f);
+    }
+    // An inverted interval is empty, matching the reference's two comparisons.
     if ((v = yyjson_obj_get(obj, "guidance_scale")) && yyjson_is_num(v)) {
         r->guidance_scale = (float) yyjson_get_num(v);
     }
@@ -591,6 +608,18 @@ static yyjson_mut_doc * request_build_doc(const AceRequest * r, bool sparse) {
     // DiT control (0 = auto-detect from model)
     if (all || r->inference_steps != def.inference_steps) {
         yyjson_mut_obj_add_int(doc, root, "inference_steps", r->inference_steps);
+    }
+    if (all || r->retake_seed != def.retake_seed) {
+        yyjson_mut_obj_add_sint(doc, root, "retake_seed", r->retake_seed);
+    }
+    if (all || r->retake_variance != def.retake_variance) {
+        yyjson_mut_obj_add_real(doc, root, "retake_variance", r->retake_variance);
+    }
+    if (all || r->cfg_interval_start != def.cfg_interval_start) {
+        yyjson_mut_obj_add_real(doc, root, "cfg_interval_start", r->cfg_interval_start);
+    }
+    if (all || r->cfg_interval_end != def.cfg_interval_end) {
+        yyjson_mut_obj_add_real(doc, root, "cfg_interval_end", r->cfg_interval_end);
     }
     if (all || r->guidance_scale != def.guidance_scale) {
         yyjson_mut_obj_add_real(doc, root, "guidance_scale", r->guidance_scale);
@@ -903,6 +932,10 @@ void request_dump(const AceRequest * r, FILE * f) {
 }
 
 void request_resolve_seed(AceRequest * r) {
+    if (r->retake_variance > 0.0f && r->retake_seed < 0) {
+        std::random_device rd;
+        r->retake_seed = (int64_t) rd();
+    }
     if (r->seed < 0) {
         std::random_device rd;
         r->seed = (int64_t) rd();
