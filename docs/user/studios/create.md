@@ -5,6 +5,12 @@ other music parameters by hand, then queue the render. Reach for it when you wan
 over every field instead of the genre-picker shortcuts in Auto-Gen, or when refining a song that
 arrived here from Lyric Studio or Auto-Gen's preview screen.
 
+For a YuE2 song, Library's Edit action restores that track's rendered seed, saved score and
+NAR noise seed. It sets the song and variation counts to one, so Generate reuses the selected
+batch member rather than composing another batch. Use the same model and adapters when
+reproducing a track. Older batch results may lack the per-track score, and a score that was
+not saved cannot be recovered.
+
 ![Custom-Gen](../../images/studio-create.webp)
 <!-- screenshot: needed -->
 
