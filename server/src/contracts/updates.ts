@@ -1,5 +1,5 @@
 // contracts/updates.ts — wire shapes for /api/updates (routes/updates.ts).
-// Notices only: nothing here downloads, prepares or installs anything.
+// Preparation stages a verified payload; activation belongs to the launcher.
 
 export type UpdateChannel = 'release' | 'master';
 
@@ -73,6 +73,8 @@ export type UpdateStatusKind =
   | 'could-not-check';
 
 export interface UpdatesStatusResponse {
+  /** Present on the HTTP endpoints; absent on the notice checker's internal result. */
+  prepare?: UpdatePrepareStatus;
   channel: UpdateChannel;
   installed: InstalledIdentity;
   status: UpdateStatusKind;
@@ -110,3 +112,29 @@ export interface UpdatesCheckResponse extends UpdatesStatusResponse {
   /** True when a manual check was inside the one-minute limit and the cached result was returned. */
   throttled: boolean;
 }
+
+export interface UpdateCandidate {
+  /** Opaque, server-issued, expires after one hour or a server restart. */
+  id: string;
+  tag: string;
+  sha: string;
+  variant: BuildVariant;
+  assetName: string;
+  bytes: number;
+}
+
+export interface UpdatePrepareStatus {
+  offered: boolean;
+  /** Plain reason when prepare is unavailable, otherwise null. */
+  reason: string | null;
+  candidate: UpdateCandidate | null;
+  phase: 'idle' | 'checking' | 'downloading' | 'verifying' | 'extracting' | 'ready' | 'failed' | 'cancelled';
+  downloadedBytes: number;
+  totalBytes: number;
+  error: string | null;
+  /** Opaque directory ID for the launcher, never a client-supplied path. */
+  preparedId: string | null;
+}
+
+export interface UpdatesPrepareRequest { candidateId: string }
+export interface UpdatesCancelPrepareRequest { candidateId: string }
