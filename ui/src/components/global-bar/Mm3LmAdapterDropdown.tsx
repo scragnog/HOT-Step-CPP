@@ -282,7 +282,7 @@ export const Mm3LmAdapterDropdown: React.FC = () => {
           <Slider
             label={t('globalBar.mm3LmPlan', 'Plan')}
             info={t('globalBar.mm3LmPlanInfo',
-              '1 = the adapter plans the song, 0 = the base model plans it and the adapter sings it, between = a mix. Below 1 the planner runs the base model beside the adapter on every step, so it renders in Runtime mode and planning is slower. It also halves the planner\'s batch, so Variations Per Render gives at most 2 songs.')}
+              '1 = the adapter plans the song, 0 = the base model plans it and the adapter sings it, between = a mix. Below 1 the planner runs the base model beside the adapter on every step, so it renders in Runtime mode and planning is slower. It also doubles the planner\'s memory, so more than 2 Variations Per Render need Compact Planner Cache (on by default).')}
             infoMeta={t('globalBar.mm3LmPlanMeta', 'default 1.0 · range 0-1 · Runtime mode')}
             value={num(PARAM.plan, defaults.scalePlan ?? 1.0)}
             onChange={v => setBackendParam(PARAM.plan, v)}

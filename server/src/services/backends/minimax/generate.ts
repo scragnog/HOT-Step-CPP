@@ -543,7 +543,23 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
   // Variations and natural endings want the same batched AR pass, so they share
   // it rather than fighting: asking for more variations than the ending check
   // needs simply raises the candidate count.
-  const takes = requireEnding ? Math.max(MM3_ENDING_TAKES, askedTakes) : askedTakes;
+  //
+  // The plan dial below 1 doubles the planner's rows. More than 2 takes then
+  // need the engine's 16-row budget, which is only affordable with the KV cache
+  // at q8_0 (mm3KvQ8, default on): 4 takes cost about the VRAM 2 do at f16.
+  // Otherwise, and for the ending check's own candidates when the user asked
+  // for 2 or fewer songs, it stays at 2 takes, as before the budget grew.
+  const planRaw = Number(params.mm3LmAdapterScalePlan);
+  const planRows = !!lmAdapterPath && fs.existsSync(lmAdapterPath)
+    && Number.isFinite(planRaw) && planRaw >= 0 && planRaw < 1;
+  const kvQ8 = planRows && askedTakes > 2 && params.mm3KvQ8 !== false;
+  const wantTakes = requireEnding ? Math.max(MM3_ENDING_TAKES, askedTakes) : askedTakes;
+  const takes = planRows && !kvQ8 ? Math.min(2, wantTakes) : wantTakes;
+  if (planRows && wantTakes > takes) {
+    notes.push(`LM adapter plan dial below 1: ${takes} takes per planning round`
+      + (askedTakes > 2 ? ' (Compact Planner Cache is off)' : ''));
+  }
+  if (kvQ8) notes.push(`planner KV cache at q8_0 for ${takes} takes with the plan dial's base rows`);
   if (requireEnding) {
     notes.push(
       `natural ending required: ${takes} candidate plans per round, up to ${MM3_ENDING_ROUNDS} rounds. `
@@ -652,6 +668,7 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
       // batched AR pass. Omitted at 1 so an ordinary render's wire request is
       // byte-for-byte what it always was.
       ...(takes > 1 ? { takes } : {}),
+      ...(kvQ8 ? { lm_kv_q8: true } : {}),
       // Natural endings. Omitted entirely when off, so turning the toggle off
       // gives back exactly the request this backend sent before the feature
       // existed.
@@ -839,9 +856,9 @@ export function mapMinimaxParams(params: any): MinimaxParamMapping {
         if (plan !== undefined && params.mm3LmAdapterMode === 'merge') {
           notes.push('LM adapter plan dial below 1: rendering in runtime mode, since a merged adapter has no base weights to plan with');
         }
-        // The base rows double the planner's batch, so the engine plans at most
-        // 2 takes (engine mm3_max_takes); a 3- or 4-candidate ask gets 2.
-        if (plan !== undefined) notes.push(`LM adapter plan dial: ${plan} (at most 2 takes per planning round)`);
+        // The base rows double the planner's batch; the take count is settled
+        // with the q8 cache above (planRows).
+        if (plan !== undefined) notes.push(`LM adapter plan dial: ${plan}`);
         const mode = params.mm3LmAdapterMode === 'merge' && plan === undefined ? 'merge' : 'runtime';
         if (fadeOn && mode === 'merge') {
           notes.push('LM adapter fade in merge mode: merged speed until the fade, runtime ops for the faded stretch');

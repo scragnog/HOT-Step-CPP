@@ -120,6 +120,32 @@ test('MM3 sends the plan dial only below 1, and it forces runtime mode', (t) => 
   assert.equal(noAdapter.lm_adapter_plan, undefined);
 });
 
+test('MM3 plan dial: more than 2 takes ride the q8 planner cache, otherwise 2 as before', (t) => {
+  const installed = listMm3LmAdapters()[0];
+  if (!installed) return t.skip('no MM3 LM adapter installed');
+  const params = { prompt: 'x', seed: 42, mm3LmAdapter: installed.file };
+  const req = (p: Record<string, unknown>) => mapMinimaxParams({ ...params, ...p }).req as unknown as Record<string, unknown>;
+  const four = req({ mm3LmAdapterScalePlan: 0.25, mm3Takes: 4 });
+  assert.equal(four.takes, 4);
+  assert.equal(four.lm_kv_q8, true);
+  const off = req({ mm3LmAdapterScalePlan: 0.25, mm3Takes: 4, mm3KvQ8: false });
+  assert.equal(off.takes, 2);
+  assert.equal(Object.hasOwn(off, 'lm_kv_q8'), false);
+  // The ending check's own 3 candidates stay at 2 and f16 when one song was asked.
+  const one = req({ mm3LmAdapterScalePlan: 0.25 });
+  assert.equal(one.takes, 2);
+  assert.equal(Object.hasOwn(one, 'lm_kv_q8'), false);
+  // Plan 1: no base rows, nothing changes.
+  const plain = req({ mm3LmAdapterScalePlan: 1, mm3Takes: 4 });
+  assert.equal(plain.takes, 4);
+  assert.equal(Object.hasOwn(plain, 'lm_kv_q8'), false);
+  assert.equal(req({ mm3LmAdapterScalePlan: 1 }).takes, 3);
+  // A missing adapter renders the base model: no base rows, so no q8 cache.
+  const missing = req({ mm3LmAdapter: 'no-such-run/adapter_model.safetensors', mm3LmAdapterScalePlan: 0.25, mm3Takes: 4 });
+  assert.equal(missing.takes, 4);
+  assert.equal(Object.hasOwn(missing, 'lm_kv_q8'), false);
+});
+
 test('MM3 tail fade toggle times the fade from the lyrics', (t) => {
   assert.equal(mm3TailFadeStartSec(''), null);
   assert.equal(mm3TailFadeStartSec('[Verse] ' + 'word '.repeat(336)), 212);  // the 2026-11-08 test sheet: ~210 s

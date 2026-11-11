@@ -582,6 +582,21 @@ async function capabilities(): Promise<BackendCapabilities> {
         default: 1,
       },
       {
+        // The plan dial's base rows double the planner's rows, so more than 2
+        // takes only fit in VRAM with the KV cache at q8_0 (generate.ts kvQ8).
+        key: 'mm3KvQ8',
+        type: 'toggle',
+        label: 'Compact Planner Cache',
+        hint: 'With the LM adapter\'s Plan dial below 1, stores the planner\'s memory at '
+            + '8 bits so 3 or 4 variations fit in VRAM (4 use about what 2 do without it). '
+            + 'Off keeps full precision and limits Plan renders to 2 variations. No effect '
+            + 'when Plan is 1.',
+        default: true,
+        // ponytail: greater_than is read by BackendExtensionControls only; add it to
+        // aceClient's visible_when type when that file is free.
+        visible_when: { key: 'mm3Takes', greater_than: 2 } as { key: string; equals?: string },
+      },
+      {
         // ── Natural endings ──
         //
         // A plan either reaches EOS or runs into the frame cap, and the second
