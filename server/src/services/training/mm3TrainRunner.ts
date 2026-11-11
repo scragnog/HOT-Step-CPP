@@ -612,7 +612,7 @@ export async function runMm3TrainLmJob(job: TrainingJob): Promise<void> {
     finishJob(job, 'failed', 'mm3-lm-train job is missing its manifest, codes or output path');
     return;
   }
-  const missing = missingMm3TrainModels('train', opts.basePrecision);
+  const missing = missingMm3TrainModels('train', opts.basePrecision, opts);
   if (missing.length) {
     finishJob(job, 'failed', `MiniMax-Music3 training models are missing: ${missing.join(', ')}`);
     return;

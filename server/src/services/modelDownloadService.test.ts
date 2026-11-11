@@ -177,6 +177,64 @@ function hashSandbox() {
   return { service, dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 
+test('replacing a stale residual keeps its bytes; other stale models are removed', async () => {
+  const service = new (svc.constructor as any)();
+  const dir = fs.mkdtempSync(path.join(process.cwd(), '.test-residual-backup-'));
+  service.getTargetDir = () => dir;
+  try {
+    for (const variant of ['residual', 'lm']) {
+      const filename = `${variant}.safetensors`;
+      const target = path.join(dir, filename);
+      fs.writeFileSync(target, 'old bytes needed by adapters');
+      const job = { status: 'queued', bytesDownloaded: 0, totalBytes: 0 };
+      // Stop at the network boundary, after the replacement decision.
+      service._downloadWithRedirects = async (_url: string, _dest: string, active: any) => { active.status = 'cancelled'; };
+      await service._executeDownload(job, {
+        filename, variant, repo: 'fixture/model', sha256: sha('published bytes'), sizeBytes: 0,
+      });
+      assert.equal(fs.existsSync(target), false);
+      const backups = fs.readdirSync(dir).filter(name => name.startsWith(`${filename}.backup-`));
+      assert.equal(backups.length, variant === 'residual' ? 1 : 0);
+      if (variant === 'residual') {
+        assert.equal(fs.readFileSync(path.join(dir, backups[0]), 'utf8'), 'old bytes needed by adapters');
+        // A second replacement cannot overwrite the first backup.
+        fs.writeFileSync(target, 'second residual');
+        await service._executeDownload({ ...job, status: 'queued' }, {
+          filename, variant, repo: 'fixture/model', sha256: sha('published bytes'), sizeBytes: 0,
+        });
+        assert.equal(fs.readdirSync(dir).filter(name => name.startsWith(`${filename}.backup-`)).length, 2);
+      }
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a residual that cannot be backed up is never replaced', async () => {
+  const service = new (svc.constructor as any)();
+  const dir = fs.mkdtempSync(path.join(process.cwd(), '.test-residual-rename-'));
+  const target = path.join(dir, 'residual.safetensors');
+  fs.writeFileSync(target, 'only copy');
+  service.getTargetDir = () => dir;
+  let fetched = false;
+  service._downloadWithRedirects = async () => { fetched = true; };
+  const rename = fs.renameSync;
+  fs.renameSync = (source, destination) => {
+    if (source === target) throw new Error('backup rename refused');
+    return rename(source, destination);
+  };
+  try {
+    await assert.rejects(service._executeDownload({ status: 'queued' }, {
+      filename: 'residual.safetensors', variant: 'residual', sha256: sha('published bytes'),
+    }), /backup rename refused/);
+    assert.equal(fs.readFileSync(target, 'utf8'), 'only copy');
+    assert.equal(fetched, false);
+  } finally {
+    fs.renameSync = rename;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 async function hashesSettled(service: any) {
   for (let i = 0; i < 500 && service._hashing.size; i++) {
     await new Promise(resolve => setTimeout(resolve, 10));

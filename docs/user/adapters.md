@@ -286,8 +286,21 @@ PiSSA and HOT-PiZZA adapters need the exact residual file used in training,
 beside the language model. New adapters record its fingerprint. If a load
 reports a mismatch, restore that run's residual backup or retrain against
 the installed residual. A file with the same name and rank can still differ.
-Keep a locally generated residual with your adapters before replacing it
-with a download. Older adapters load as before and cannot detect this mismatch.
+Rank-128 PiSSA and HOT-PiZZA training on Q8_0 asks you to install the residual
+from the Model Manager if none is present. An existing residual is accepted,
+including one generated locally. Other ranks and bases still initialise their
+own factors because no registry residual is available for them.
+
+When the Model Manager replaces a residual whose hash differs from the
+catalogue, it keeps the previous file beside the language model as
+`mm3-lm-q8_0.pissa-r128.safetensors.backup-<timestamp>-<unique-id>` and logs
+the full path. It keeps this copy even if the replacement download fails.
+To restore it, wait for training and generation to finish, move the current
+residual to a safe location, and rename the kept copy back to
+`mm3-lm-q8_0.pissa-r128.safetensors` in the same folder. Load the adapter again.
+The loader's fingerprint mismatch means it needs that run's exact residual;
+re-downloading a different residual cannot repair the pairing. Keep a copy
+with your adapters. Older adapters cannot detect this mismatch.
 
 1. Put adapters in `adapters/mm3-lm-adapters/`, up to two folder levels deep. The Training
    Studio already writes there. The list is read when the panel opens, so reopen it after

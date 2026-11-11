@@ -94,7 +94,9 @@ export function resolveMm3TrainModels(base: Mm3BasePrecision = 'f16'): Mm3TrainM
 /** Which of the required files are missing, as user-facing names. Empty = ready.
  *  `need` narrows the check: the codes job does not need the LM. */
 export function missingMm3TrainModels(need: 'codes' | 'train' | 'launder',
-                                      base: Mm3BasePrecision = 'f16'): string[] {
+                                      base: Mm3BasePrecision = 'f16',
+                                      options?: Pick<ResolvedMm3TrainLmOptions,
+                                        'rank' | 'adapterType' | 'pissa' | 'hotPizza' | 'dora' | 'hira' | 'loha'>): string[] {
   const m = resolveMm3TrainModels(base);
   const wanted: Array<[string, string]> = need === 'codes'
     ? [[m.rvq, 'an RVQ encoder (mm3-rvq-*.gguf)'], [m.enc, 'the DAV encoder (mm3-enc-*.gguf)']]
@@ -107,6 +109,14 @@ export function missingMm3TrainModels(need: 'codes' | 'train' | 'launder',
        [path.join(mm3ModelDir(), 'mm3-lm-q8_0.gguf'), 'mm3-lm-q8_0.gguf'],
        [m.depth, 'mm3-depth-f16.gguf']]
     : [[m.lm, path.basename(m.lm)], [m.depth, 'mm3-depth-f16.gguf']];
+  // Match buildMm3TrainLmArgs' method precedence. Only this base/rank has a
+  // registry residual; the server uses its SVD defaults and all 36 layers.
+  if (need === 'train' && base === 'q8_0' && options?.rank === 128
+      && options.adapterType !== 'lokr' && options.pissa
+      && !options.dora && !options.hira && !options.loha) {
+    const residual = 'mm3-lm-q8_0.pissa-r128.safetensors';
+    wanted.push([path.join(mm3ModelDir(), residual), residual]);
+  }
   return wanted.filter(([p]) => !p || !fs.existsSync(p)).map(([, label]) => label);
 }
 

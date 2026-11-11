@@ -630,7 +630,15 @@ class ModelDownloadService extends EventEmitter {
         return;
       }
       console.log(`[ModelManager] ${file.filename} on disk does not match the registry sha256 — re-downloading`);
-      try { fs.unlinkSync(finalPath); } catch {}
+      if (file.variant === 'residual') {
+        // Adapters may depend on these exact bytes. A failed rename must stop
+        // the download before anything can replace the user's only copy.
+        const backupPath = `${finalPath}.backup-${Date.now()}-${randomUUID()}`;
+        fs.renameSync(finalPath, backupPath);
+        console.log(`[ModelManager] Kept previous PiSSA residual at ${backupPath}`);
+      } else {
+        try { fs.unlinkSync(finalPath); } catch {}
+      }
       try { fs.unlinkSync(`${finalPath}.sha256`); } catch {}
     }
 

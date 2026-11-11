@@ -9,10 +9,6 @@ const registryPath = new URL('../src/data/model-registry.json', import.meta.url)
 const original = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
 const metadata = new Map();
 const errors = new Map();
-// Remove this deferral when HOTSTEP-1137 preserves user-generated residuals.
-const deferred = new Map([
-  ['mm3-lm-q8_0-pissa-r128', 'deferred until HOTSTEP-1137 preserves user-generated residuals required by existing adapters'],
-]);
 for (const repo of new Set(original.files.map(f => f.repo).filter(Boolean))) {
   try {
     let response;
@@ -46,7 +42,7 @@ for (const file of registry.files) {
   const repoPath = file.repoPath || file.filename;
   const inventory = metadata.get(file.repo);
   const hash = inventory?.get(repoPath);
-  if (!deferred.has(file.id) && typeof hash === 'string' && /^[a-f0-9]{64}$/.test(hash)) {
+  if (typeof hash === 'string' && /^[a-f0-9]{64}$/.test(hash)) {
     if (!file.sha256) { file.sha256 = hash; added++; }
     else if (file.sha256 !== hash) {
       console.error(`CONFLICT ${file.id}: retained ${file.sha256}; HF ${hash}`);
@@ -54,11 +50,11 @@ for (const file of registry.files) {
     }
   }
   if (!file.sha256) {
-    const reason = deferred.get(file.id) ?? (!file.repo ? 'no repo'
+    const reason = !file.repo ? 'no repo'
       : errors.has(file.repo) ? `repository unavailable: ${errors.get(file.repo)}`
       : !inventory ? 'repo added during this run; run again'
       : !inventory.has(repoPath) ? `path absent from HF: ${repoPath}`
-      : 'not an LFS file; HF provides no content sha256');
+      : 'not an LFS file; HF provides no content sha256';
     missing.push(`${file.id}: ${reason}`);
   }
 }

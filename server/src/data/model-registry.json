@@ -6997,7 +6997,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "aa9c40c18ecc6ca89fd60d53fc3a39e8a09ad9fc7a2dca64487fd4e04559b057"
     },
     {
       "id": "mm3-enc-f16",
