@@ -97,13 +97,24 @@ export interface Yue2GenerationDeps {
    *  Absent = never coalesce. */
   pendingJobs?(): GenerationJob[];
   /** Lane handoff for the engine's NAR lane (yue2-job.h): once this job is
-   *  composed and rendering, the next YuE2 job may start composing. */
+   *  composed and rendering with overlap eligible, the next YuE2 job may start composing. */
   releaseLane?(): boolean;
   nextLaneFamily?(): string | undefined;
   runOnLane?<T>(fn: () => Promise<T>): Promise<T>;
   /** Bind a claimed follower to this job's engine worker, or unbind one
    *  handed back to the queue (lead null). */
   assignFollower?(follower: GenerationJob, lead: GenerationJob | null): void;
+}
+
+/** Release only when the server knows no inline-render restriction applies.
+ *  The engine can still refuse overlap for device or residency reasons. */
+export function releaseYue2RenderLane(
+  req: Yue2SynthRequest, phase: string | undefined,
+  deps: Pick<Yue2GenerationDeps, 'releaseLane' | 'nextLaneFamily'>,
+): boolean {
+  if (!config.aceServer.keepLoaded || req.infer_method || req.scheduler) return false;
+  return !!deps.releaseLane && (phase === 'nar' || phase === 'vae_decode')
+    && deps.nextLaneFamily?.() === 'yue2' && deps.releaseLane();
 }
 
 /** Mirrors the capability manifest's core.duration (max 360, auto: true). */
@@ -1284,14 +1295,14 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
             m.job.acePhase = phase;
             if (total > 0) m.job.acePhaseProgress = `step ${step}/${total}`;
           }
-          // Composed. The engine renders this song on its own NAR lane
-          // (yue2-job.h), so the next YuE2 job can start composing now; any
-          // other family stays behind us, since it would evict our weights.
-          // The GPU work left here (post-processing) takes the lane again.
-          if (!laneReleased && deps.releaseLane && (phase === 'nar' || phase === 'vae_decode')
-              && deps.nextLaneFamily?.() === 'yue2') {
-            laneReleased = deps.releaseLane();
-            if (laneReleased) log('INFO', '[YuE2] Composed; the GPU lane goes to the next YuE2 job while this one renders');
+          // With keep-loaded off or Lua NAR plugins, the engine renders
+          // inline on the shared worker. Keep the lane until it finishes.
+          // Otherwise allow the next YuE2 compose to overlap the render;
+          // other families wait because they would evict our weights.
+          // GPU post-processing takes the lane again.
+          if (!laneReleased && releaseYue2RenderLane(req, phase, deps)) {
+            laneReleased = true;
+            log('INFO', '[YuE2] Composed; the GPU lane goes to the next YuE2 job while this one renders');
           }
         } catch { /* transient poll failure — pollUntilDone owns the real watchdog */ }
       })();

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jobCover, mapYue2Params, planYue2Jobs, yue2PlanMode, type Yue2PreparedJob } from './generate.js';
+import { releaseYue2RenderLane, jobCover, mapYue2Params, planYue2Jobs, yue2PlanMode, type Yue2PreparedJob } from './generate.js';
 import { yue2Seed, yue2SeedPlus } from './client.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
 import type { Yue2PersistedSelection } from './index.js';
@@ -322,4 +322,69 @@ test('yue2CaptionBpmKey: on and absent keep the tail, off leaves it out', async 
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('inline YuE2 renders hold the lane until completion; eligible renders hand it over', async t => {
+  const { config } = await import('../../../config.js');
+  const lane = await import('../../generation/gpuLane.js');
+  const saved = config.aceServer.keepLoaded;
+  t.after(() => { config.aceServer.keepLoaded = saved; });
+  for (const keepLoaded of [false, true]) {
+    for (const params of [{}, { yue2NarSolver: 'midpoint', yue2NarScheduler: 'uniform' },
+      { yue2NarSolver: 'tlie', yue2NarScheduler: 'plan_overdrive' },
+      { yue2NarSolver: 'wasserstein' }, { yue2NarSolver: 'ancestral' },
+      { yue2NarSolver: 'latent_eq' }, { yue2NarSolver: 'tlie' }, { yue2NarScheduler: 'ht_v3' },
+      { yue2NarScheduler: 'plan_aware' }, { yue2NarScheduler: 'plan_loose' }, { yue2NarScheduler: 'plan_overdrive' }]) {
+      for (const phase of ['queued', 'plan', 'semantic', 'nar', 'vae_decode', 'done']) {
+        config.aceServer.keepLoaded = keepLoaded;
+        const { req } = mapYue2Params({ caption: 'folk', ...params }, pick);
+        const expected = keepLoaded && !req.infer_method && !req.scheduler
+          && (phase === 'nar' || phase === 'vae_decode');
+        let finish!: () => void;
+        const rendering = new Promise<void>(resolve => { finish = resolve; });
+        let lease!: Parameters<typeof lane.releaseGpuLane>[0];
+        const first = lane.runOnWorkerLane(async held => { lease = held; await rendering; }, { family: 'yue2' });
+        let secondStarted = false;
+        const second = lane.runOnWorkerLane(async () => { secondStarted = true; }, { family: 'yue2' });
+        await Promise.resolve();
+        let releases = 0;
+        const released = releaseYue2RenderLane(req, phase, {
+          releaseLane: () => { releases++; return lane.releaseGpuLane(lease); },
+          nextLaneFamily: lane.gpuLaneNextFamily,
+        });
+        await Promise.resolve();
+        try {
+          const label = JSON.stringify({ keepLoaded, params, phase });
+          assert.equal(released, expected, label);
+          assert.equal(releases, Number(expected), label);
+          assert.equal(secondStarted, expected, label);
+        } finally {
+          finish();
+          await Promise.all([first, second]);
+        }
+        assert.equal(secondStarted, true, 'the next job starts after completion');
+      }
+    }
+  }
+});
+
+test('YuE2 handoff waits for other families and tolerates absent callbacks', async () => {
+  const { config } = await import('../../../config.js');
+  const saved = config.aceServer.keepLoaded;
+  config.aceServer.keepLoaded = true;
+  try {
+    const { req } = mapYue2Params({ caption: 'folk' }, pick);
+    let releases = 0;
+    for (const family of [undefined, 'ace', 'minimax-m3']) {
+      assert.equal(releaseYue2RenderLane(req, 'nar', {
+        releaseLane: () => { releases++; return true; }, nextLaneFamily: () => family,
+      }), false);
+    }
+    assert.equal(releases, 0);
+    assert.equal(releaseYue2RenderLane(req, 'nar', { nextLaneFamily: () => 'yue2' }), false);
+    assert.equal(releaseYue2RenderLane(req, 'nar', { releaseLane: () => true }), false);
+    assert.equal(releaseYue2RenderLane(req, 'nar', {
+      releaseLane: () => false, nextLaneFamily: () => 'yue2',
+    }), false);
+  } finally { config.aceServer.keepLoaded = saved; }
 });
