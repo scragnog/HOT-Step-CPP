@@ -187,6 +187,14 @@ interface LogFacts {
  *  and the facts wanted live at both ends of it. */
 function readLog(dir: string): LogFacts {
   const out: LogFacts = { lastStep: 0, milestones: new Map(), ending: 'none', adapterKinds: new Set() };
+  // A checkpoint's loss is the mean of the last 5 pass means, the window the
+  // target-loss stop uses. The milestone's own value is one step, one song's
+  // crop, and swings further between checkpoints than the run improves.
+  const passLoss = new Map<number, number>();
+  const trailingLoss = (): number | undefined => {
+    const v = [...passLoss.values()].slice(-5);
+    return v.length ? v.reduce((a, b) => a + b, 0) / v.length : undefined;
+  };
   let text: string;
   try {
     text = fs.readFileSync(path.join(dir, 'train-log.jsonl'), 'utf-8');
@@ -242,9 +250,21 @@ function readLog(dir: string): LogFacts {
         out.lastStep = Math.max(out.lastStep, num('step') ?? 0);
         out.lastLoss = num('loss') ?? out.lastLoss;
         break;
+      case 'epoch': {
+        const ep = num('epoch'), ls = num('loss');
+        if (ep !== undefined && ls !== undefined) passLoss.set(ep, ls);
+        break;
+      }
+      // A resume replays from its saved pass: passes logged after it by the
+      // interrupted launch are not part of this run's history any more.
+      case 'resumed': {
+        const ep = num('epoch');
+        if (ep !== undefined) for (const k of passLoss.keys()) if (k > ep) passLoss.delete(k);
+        break;
+      }
       case 'milestone': {
         const st = num('step'), ls = num('loss');
-        if (st !== undefined) out.milestones.set(st, ls ?? 0);
+        if (st !== undefined) out.milestones.set(st, trailingLoss() ?? ls ?? 0);
         break;
       }
       case 'best': {

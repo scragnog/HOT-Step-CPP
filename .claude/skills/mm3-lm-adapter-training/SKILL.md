@@ -72,7 +72,8 @@ measured in
 
 Previews: every 100 steps (= every checkpoint), 40 s, seed 424242, control +
 baseline off, rendered on q8_0 at MLP 1.0 — the same dials generation uses.
-<!-- TODO(verify): each preview pause restarts the trainer with --resume while still passing --hot-pizza, and cmd_mm3_lm_train in engine/tools/ace-train.cpp refuses --pissa with --resume (exit 2). Statically, a default run with previews would stop at its first preview; not run. -->
+Each preview pause restarts the trainer with `--resume`; HOT-PiZZA resumes
+exactly (see [stopping-and-resume](reference/stopping-and-resume.md)).
 
 
 **The maintainer, 2026-09-06, on the stacked HOT-PiZZA recipe above

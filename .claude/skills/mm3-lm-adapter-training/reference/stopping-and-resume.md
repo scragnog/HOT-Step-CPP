@@ -98,5 +98,14 @@ fails loudly rather than training on a half-restored adapter. Format v4
 (2026-09-05) also records the parameterization and the rsLoRA bit and refuses a
 mismatch (`engine/src/train/mm3-lm-resume.h`). Prodigy resumes too (state format
 v2), and its `x0` lives once in the run directory. `--pissa`, and so the default
-HOT-PiZZA method, cannot resume at all: the state does not carry the frozen
-A0/B0 init, and both the engine and the resume route refuse it.
+HOT-PiZZA method, resumes too: the frozen A0/B0 are rebuilt from the base at
+init (the cached residual file), and state format v5 records an init hash that
+refuses a rebuild that came out different. A resume is exact: on 2026-11-11 a
+HOT-PiZZA run killed at step 444 and resumed from its step-400 state replayed
+steps 410-440 with bit-identical losses, then carried on improving.
+
+**Loss readings.** One step is one song's crop, so a single step's loss (the
+console line, the old milestone value) swings further between checkpoints than
+the run improves: that same run read 0.61 at step 400 and 1.51 at step 500 while
+its 5-pass mean fell from 2.40 to 1.30. Since 2026-11-11 the checkpoint ladder
+and the live loss tile show the 5-pass trailing mean.

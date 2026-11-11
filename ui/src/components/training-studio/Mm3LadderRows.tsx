@@ -105,7 +105,7 @@ export const Mm3LadderRows: React.FC<{
         className: r.base ? 'border-sky-500/30 bg-sky-500/5' : r.ref && r.step === best ? 'border-sky-500/70' : undefined,
         badges: <>
           {!blind && r.loss !== undefined && <span className="text-[11px] text-zinc-500 tabular-nums">
-            {t('trainingStudio.mm3.previewLoss', 'Loss {{loss}}', { loss: r.loss.toFixed(3) })}</span>}
+            {t('trainingStudio.mm3.previewLoss', 'Avg loss {{loss}}', { loss: r.loss.toFixed(3) })}</span>}
           {r.ref && r.step === best && <span className="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-700 dark:text-sky-300 text-[10px] font-semibold">{t('trainingStudio.refine.bestBadge', 'best by score')}</span>}
           {o !== null && <span className="font-mono text-sky-700 dark:text-sky-300" title={t('trainingStudio.mm3.overallInfo', 'overall = (likeness + (6 − corruption)) / 2')}>{t('trainingStudio.refine.overall', 'overall {{n}}', { n: o.toFixed(2) })}</span>}
         </>,

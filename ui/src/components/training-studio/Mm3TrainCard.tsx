@@ -364,8 +364,12 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
   // `targetLossEpochs` passes of the songs (approximate: the trainer's own window is the one that stops
   // the run). Held-out loss: the last evaluation.
   const stopLossLive = mine && trainTargetLoss > 0;
+  const win = Math.max(1, (form?.targetLossEpochs ?? 5) * Math.max(1, status?.codes ?? 1));
+  // The loss tile reads this trailing mean, not the last step: one step is one song's crop and
+  // swings more than a whole run's progress. Partial window until the run has `win` steps.
+  const lossTail = trainStepSeries.slice(-win);
+  const smoothLoss = lossTail.length ? lossTail.reduce((a, p) => a + p.loss, 0) / lossTail.length : undefined;
   const lossMeans = (() => {
-    const win = Math.max(1, (form?.targetLossEpochs ?? 5) * Math.max(1, status?.codes ?? 1));
     const out: number[] = []; let sum = 0;
     trainStepSeries.forEach((p, i) => {
       sum += p.loss;
@@ -1644,7 +1648,7 @@ export const Mm3TrainCard: React.FC<{ datasetId: string; trigger?: string }> = (
             // 4 s when it fits, ~10x that when it pages to host memory).
             <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2">
               {[
-                { k: 'loss', v: mm3Live.loss ? mm3Live.loss.toFixed(4) : '—' },
+                { k: 'lossMean', v: smoothLoss !== undefined ? smoothLoss.toFixed(4) : '—' },
                 { k: 'gradNorm', v: mm3Live.gradNorm ? mm3Live.gradNorm.toFixed(3) : '—' },
                 // The SCHEDULE value is not what Muon applies: its update is
                 // normalised, so the effective rate is lr x muon-lr-scale.
