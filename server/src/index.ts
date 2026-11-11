@@ -29,7 +29,7 @@ import songRoutes from './routes/songs.js';
 import generateRoutes from './routes/generate.js';
 import modelRoutes from './routes/models.js';
 import healthRoutes from './routes/health.js';
-import updatesRoutes from './routes/updates.js';
+import updatesRoutes, { updateDownloads } from './routes/updates.js';
 import { startUpdateCheck } from './services/updates/index.js';
 import shutdownRoutes from './routes/shutdown.js';
 import masteringRoutes from './routes/mastering.js';
@@ -110,6 +110,11 @@ registerBusyCheck('workers', () => listWorkers().flatMap(w => [
   ...(yue2MirrorStatus(w.name)?.running ? [`copying runs from ${w.name}`] : []),
   ...(['done', 'failed', 'cancelled', undefined].includes(getUpdate(w.name)?.status) ? [] : [`updating worker ${w.name}`]),
 ]));
+// Slice D's staging must not be mid-write when a transaction opens.
+maintenance.addBlocker(() => {
+  const { phase } = updateDownloads.status();
+  return ['downloading', 'verifying', 'extracting'].includes(phase) ? [`the update download is ${phase}`] : [];
+});
 // An update also waits for queued rows; a data-folder move lets them resume after its restart.
 maintenance.addBlocker(() => {
   const db = getDb();

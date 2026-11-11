@@ -15,6 +15,7 @@ import { createHash, randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { config, PORTABLE_MODE, PROJECT_ROOT, RUNTIME_LIB_DIR } from '../config.js';
 import { getBusyBlockers, registerBusyCheck } from '../dataroot/pointer.js';
+import { maintenance } from './updates/maintenance.js';
 import type { RegistryFileEntry as RegistryFile, ModelRegistryResponse, DownloadStatus, DownloadJob } from '../contracts/modelManager.js';
 import { MODEL_ROOTS, getHfToken, looksLikeGatedError, type DownloadableModel, type ModelDownloadState } from './muscriptor.js';
 import { MODEL_FILES, resolveModelDir, targetRoot } from './muscriptorPaths.js';
@@ -1137,3 +1138,6 @@ export const modelDownloadService = new ModelDownloadService();
 registerBusyCheck('model-downloads', () => modelDownloadService.getJobs()
   .filter(j => j.status === 'downloading' || j.status === 'queued')
   .map(j => `downloading ${j.filename}`));
+// A paused download can sit for hours, so it holds an update only: in the shared
+// registry it would also stall the hash queue and refuse a data-folder move.
+maintenance.addBlocker(() => modelDownloadService.getJobs().filter(j => j.status === 'paused').map(j => `download of ${j.filename} is paused`));

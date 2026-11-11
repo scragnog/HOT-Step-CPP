@@ -674,6 +674,11 @@ export function cancelJob(id: string): boolean {
   return true;
 }
 
+/** Cancelled trainers whose child is still exiting (busy check, routes/settings.ts). */
+export function trainersExiting(): string[] {
+  return [...jobs.values()].filter(j => j.cleanupPending).map(j => j.id);
+}
+
 export function isCancelled(job: TrainingJob): boolean {
   return job.status === 'cancelled' || job.controller.signal.aborted;
 }

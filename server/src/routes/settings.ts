@@ -21,15 +21,17 @@ import { engineWorkerStatus } from '../services/engineWorkers.js';
 import { validateDownloadDir } from '../services/downloadSave.js';
 import type { EngineWorkersResponse, EnvResponse, EnvUpdateResponse, GpusResponse } from '../contracts/settings.js';
 import { getDataLocation, getBusyBlockers, previewOperation, scheduleOperation, cancelPending, registerBusyCheck } from '../dataroot/pointer.js';
-import { listJobs } from '../services/training/labelingQueue.js';
+import { listJobs, trainersExiting } from '../services/training/labelingQueue.js';
 import { gpuLaneBusy, gpuLaneDepth } from '../services/generation/gpuLane.js';
 import { createDataFolderHandlers } from './settingsDataFolder.js';
 import { requestWorkerRestart } from './shutdown.js';
 
 const router = Router();
 
-registerBusyCheck('training', () => listJobs().filter(j => j.status === 'queued' || j.status === 'running')
-  .map(j => `Training ${j.id}: ${j.status}`));
+registerBusyCheck('training', () => [
+  ...listJobs().filter(j => j.status === 'queued' || j.status === 'running').map(j => `Training ${j.id}: ${j.status}`),
+  ...trainersExiting().map(id => `Training ${id}: stopping`),
+]);
 registerBusyCheck('gpu-lane', () => gpuLaneBusy() || gpuLaneDepth() > 0 ? ['GPU work is running or queued'] : []);
 
 const dataFolder = createDataFolderHandlers({

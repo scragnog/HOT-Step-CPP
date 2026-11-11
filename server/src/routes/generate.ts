@@ -52,7 +52,7 @@ import type {
 import { openStreamSession, type StreamSession } from '../services/streamSessions/index.js';
 import { getDb } from '../db/database.js';
 import { GenerationJobLedger, ledgerStatusBody, type LedgerEntry } from '../services/generation/jobLedger.js';
-import { registerJobsBusyCheck, trackBusy } from '../dataroot/pointer.js';
+import { registerBusyCheck, registerJobsBusyCheck, trackBusy } from '../dataroot/pointer.js';
 
 export type { GenerationJob, StageTiming } from '../services/generation/jobTypes.js';
 
@@ -789,6 +789,7 @@ interface StreamControlState {
 }
 
 const streamRunning = new Map<string, boolean>();
+registerBusyCheck('storm', () => [...streamRunning.values()].some(Boolean) ? ['a Storm stream is running'] : []);
 const streamControl = new Map<string, StreamControlState>();
 /** In-flight engine job per stream so stop/disconnect can cancel promptly. */
 const streamAceJob = new Map<string, string>();

@@ -10,6 +10,7 @@ import { execFile } from 'child_process';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { config, getFFmpegPath } from '../../config.js';
+import { registerBusyCheck, trackBusy } from '../../dataroot/pointer.js';
 import { DawError, DAW_API_VERSION, ditKind, isBaseModel, mapJobStatus, type DawGenerateRequest } from './dawSchema.js';
 
 /** 127.0.0.0/8, ::1, and IPv4-mapped ::ffff:127.0.0.0/8. */
@@ -303,7 +304,7 @@ export async function submitGenerate(id: string, req: DawGenerateRequest, params
     const seq: SeqState = { takes, upstreamIds: [first], results: [], current: 0, cancelled: false };
     const j: FacadeJob = { id, upstreamId: first, seeds, backend, ditModel: req.dit_model ?? null, trimTo, seq, eta, createdAt: Date.now() };
     jobs.set(id, j);
-    seq.done = runSequential(j, params).catch((e) => { seq.failed = e?.message ?? String(e); });
+    seq.done = trackBusy('DAW multi-take', runSequential(j, params)).catch((e) => { seq.failed = e?.message ?? String(e); });
     return id;
   }
   const { status, data } = await call('POST', '/api/generate', params);
@@ -569,6 +570,7 @@ let converter: Converter = (src, dst, opts) => runFfmpeg(ffmpegArgs(src, dst, op
 export function __setConverter(c: Converter): Converter { const prev = converter; converter = c; return prev; }
 
 const inflight = new Map<string, Promise<void>>();
+registerBusyCheck('daw-convert', () => inflight.size ? [`${inflight.size} DAW audio conversion(s) running`] : []);
 
 /** Convert src to out once; concurrent callers share one conversion. Unique .part, atomic rename. */
 export function convertOnce(src: string, out: string, opts?: ConvertOpts): Promise<void> {

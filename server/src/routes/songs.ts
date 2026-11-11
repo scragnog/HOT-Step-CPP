@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
 import { getDb } from '../db/database.js';
+import { registerBusyCheck } from '../dataroot/pointer.js';
 import { config } from '../config.js';
 import { getUserId } from './auth.js';
 import { deleteAudioGenerationsByJobIds } from '../db/lireekDb.js';
@@ -1007,6 +1008,11 @@ router.delete('/:id/postprocess', (req, res) => {
 
 // Track in-flight extractions to prevent duplicate SuperSep jobs
 const extractionsInFlight = new Set<string>();
+// Extraction answers before it finishes and retranscribe runs for minutes; both write the library.
+registerBusyCheck('songs', () => [
+  ...(extractionsInFlight.size ? [`${extractionsInFlight.size} drum stem extraction(s) running`] : []),
+  ...(activeRetranscribes.size ? [`${activeRetranscribes.size} retranscription(s) running`] : []),
+]);
 
 // POST /api/songs/:id/extract-kick — extract kick drum stem for beat visualization
 router.post('/:id/extract-kick', async (req, res) => {

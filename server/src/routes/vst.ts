@@ -20,6 +20,7 @@ import type {
 } from '../contracts/vst.js';
 import { createControlWriter, createSerializer, releaseMonitor } from './vstControl.js';
 import { getSessionDir } from '../services/logger.js';
+import { maintenance } from '../services/updates/maintenance.js';
 
 const execFileAsync = promisify(execFile);
 // macOS objc runtime prints 'Class X is implemented in both A and B' for every
@@ -316,6 +317,13 @@ function writeMonitorControl(data: Record<string, unknown>, reset = false): void
 // time so two overlapping requests cannot both resume and spawn a host that
 // shares the control and status files with another.
 const monitorTransition = createSerializer();
+
+// An open plugin window or the monitor can stay up for hours, so they hold an
+// update only, never the shared busy registry (hash queue, data-folder move).
+maintenance.addBlocker(() => [
+  ...(guiProcs.size ? [`${guiProcs.size} VST plugin window(s) open`] : []),
+  ...(isMonitorAlive() ? ['the VST monitor is running'] : []),
+]);
 
 function isMonitorAlive(): boolean {
   if (!monitorProcess) return false;

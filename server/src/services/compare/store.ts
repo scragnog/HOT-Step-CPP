@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { getDb } from '../../db/database.js';
+import { registerBusyCheck } from '../../dataroot/pointer.js';
 import { config } from '../../config.js';
 import { analyze, ANALYZER_VERSION, type AnalysisResult } from './analyzer.js';
 
@@ -308,11 +309,15 @@ export function songAudioPath(songId: string): string {
 
 // One analysis at a time so a burst of requests does not hog the CPU.
 let queue: Promise<unknown> = Promise.resolve();
+let queued = 0;
 function enqueue<T>(fn: () => Promise<T>): Promise<T> {
   const run = queue.then(fn, fn);
   queue = run.catch(() => undefined);
+  queued++;
+  run.then(() => { queued--; }, () => { queued--; });
   return run;
 }
+registerBusyCheck('compare', () => queued ? [`${queued} comparison analysis job(s) running or queued`] : []);
 const inflight = new Map<string, Promise<AnalysisResult>>();
 
 export async function getAnalysis(songId: string): Promise<{ cached: boolean; result: AnalysisResult }> {
