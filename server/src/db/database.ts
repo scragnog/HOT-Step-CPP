@@ -14,6 +14,10 @@ import { config } from '../config.js';
 
 let db: Database.Database;
 
+/** What initDb() finished with, for the updater's health attestation: `ok`
+ *  once every migration ran, `errors` for any it caught and carried on past. */
+export const dbInitState: { ok: boolean; finishedAt: string | null; errors: string[] } = { ok: false, finishedAt: null, errors: [] };
+
 /** How long a write waits for the other copy's write lock before SQLITE_BUSY.
  *  better-sqlite3 already defaults to 5000 ms; it is set here so it stays
  *  true whatever the driver default becomes. Dev and prod can share one
@@ -569,6 +573,8 @@ export function initDb(): void {
   // ── One-time migration: import data from lireek.db if it exists ───────────
   migrateLireekData();
 
+  dbInitState.ok = true;
+  dbInitState.finishedAt = new Date().toISOString();
   console.log(`[DB] Initialized: ${config.data.dbPath}`);
 }
 
@@ -667,6 +673,7 @@ function migrateLireekData(): void {
     console.log(`[DB] ═══════════════════════════════════════════════════════════`);
   } catch (err: any) {
     console.error(`[DB] Migration failed: ${err.message}`);
+    dbInitState.errors.push(`lireek.db migration: ${err.message}`);
     console.error(`[DB] lireek.db was NOT modified — data is safe`);
     try { db.exec('DETACH DATABASE lireek_old'); } catch { /* may not be attached */ }
   } finally {

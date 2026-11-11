@@ -23,6 +23,7 @@ import {
 } from './paths.js';
 import { planOperation, runPending, sharedRoot } from './transfer.js';
 import { CHECKOUT_ROOT, accessibleRoot, pointerLocation, selectPointerRoot } from './locate.js';
+import { UPDATER_DIR_ENV, leaseForStartup } from '../services/updates/maintenance.js';
 
 export interface Runtime {
   mode: 'dev' | 'release';
@@ -61,7 +62,16 @@ function dev(checkout: string, prof: string, ptrFile: string, root: string | nul
   };
 }
 
-export type Resolution = { ok: true; runtime: Runtime } | { ok: false; error: string; pointerPath: string | null };
+/** `lease`: an update holds this install or data folder; the process exits
+ *  rather than serve the error page on a port the update will need. */
+export type Resolution = { ok: true; runtime: Runtime } | { ok: false; error: string; pointerPath: string | null; lease?: true };
+
+/** Another process's maintenance lease on the updater folder or `root`.
+ *  Checked before any SQLite or bootstrap work; a no-op with no lease on disk. */
+function leaseRefusal(env: NodeJS.ProcessEnv, root: string | null, pointerPath: string | null): Resolution | null {
+  try { leaseForStartup({ updaterDir: env[UPDATER_DIR_ENV] || null, dataRoot: root }, env); return null; }
+  catch (e: any) { return { ok: false, error: String(e?.message ?? e), pointerPath, lease: true }; }
+}
 
 function release(appRoot: string, root: string, prof: string, override: string | null): Runtime {
   const l = dataLayout(root);
@@ -145,6 +155,8 @@ async function resolveDev(opts: ResolveOptions, env: NodeJS.ProcessEnv, log: (m:
     let ptr: Pointer | null;
     try { ptr = readPointer(ptrFile); } catch (e: any) { return fail(`${e.message}. Fix or delete it, then restart.`); }
     if (!ptr || (!ptr.root && !ptr.pending)) return { ok: true, runtime: dev(checkout, prof, ptrFile, null) };
+    const held = leaseRefusal(env, ptr.root, ptrFile);
+    if (held) return held;
     const err = await runPendingAtBoot(ptrFile, ptr, checkout, prof, opts, log);
     if (err) return fail(err);
     if (!ptr.root) return { ok: true, runtime: dev(checkout, prof, ptrFile, null) }; // abandoned before any root
@@ -173,9 +185,13 @@ export async function resolveRuntime(opts: ResolveOptions = {}): Promise<Resolut
   const fail = (error: string): Resolution => ({ ok: false, error, pointerPath: ptrFile });
 
   try {
+    const held = leaseRefusal(env, null, ptrFile);
+    if (held) return held;
     if (env.HOT_STEP_DATA_ROOT) {
       const root = path.resolve(env.HOT_STEP_DATA_ROOT);
       if (!fs.existsSync(root)) return fail(`HOT_STEP_DATA_ROOT is ${root}, which does not exist.`);
+      const heldRoot = leaseRefusal(env, root, ptrFile);
+      if (heldRoot) return heldRoot;
       initLayout(dataLayout(root));
       log(`[Data] Using HOT_STEP_DATA_ROOT: ${root}`);
       return { ok: true, runtime: release(appRoot, root, prof, root) };
@@ -212,6 +228,8 @@ export async function resolveRuntime(opts: ResolveOptions = {}): Promise<Resolut
       }
     }
 
+    const heldRoot = leaseRefusal(env, ptr.root, ptrFile);
+    if (heldRoot) return heldRoot;
     const err = await runPendingAtBoot(ptrFile, ptr, appRoot, prof, opts, log);
     if (err) return fail(err);
 
@@ -258,6 +276,10 @@ ${pointerPath ? `<p>The data location is recorded in <code>${escapeHtml(pointerP
 }
 
 const resolution = await resolveRuntime();
+if (!resolution.ok && resolution.lease) {
+  console.error(`\n[Data] HOT-Step cannot start: ${resolution.error}\n`);
+  process.exit(1);
+}
 if (!resolution.ok) await serveErrorPage(resolution.error, resolution.pointerPath);
 
 export const RUNTIME: Runtime = (resolution as { ok: true; runtime: Runtime }).runtime;

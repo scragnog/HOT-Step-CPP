@@ -12,13 +12,17 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
-import { config, PROJECT_ROOT, PORTABLE_MODE, APP_VERSION, DATA_ROOT } from './config.js';
+import { config, PROJECT_ROOT, PORTABLE_MODE, APP_VERSION, DATA_ROOT, BUILD_INFO } from './config.js';
 import { initLogger, closeLogger } from './services/logger.js';
 import os from 'node:os';
-import { initDb, closeDb, getDb } from './db/database.js';
+import { initDb, closeDb, getDb, dbInitState } from './db/database.js';
+import { UPDATER_DIR_ENV, leaseForStartup, maintenance, maintenanceRouter } from './services/updates/maintenance.js';
 import { startInstance, stopInstance } from './services/instance.js';
-import { recoverStalePipelines } from './services/training/pipelineRunner.js';
-import { recoverStaleBatches } from './services/training/yue2BatchRunner.js';
+import { hasActivePipeline, recoverStalePipelines } from './services/training/pipelineRunner.js';
+import { hasActiveBatch, recoverStaleBatches } from './services/training/yue2BatchRunner.js';
+import { getDispatch, listWorkers } from './services/training/trainingWorkers.js';
+import { getUpdate } from './services/training/workerUpdate.js';
+import { registerBusyCheck } from './dataroot/pointer.js';
 // lireekDb is now part of the unified hotstep.db — no separate init needed
 import authRoutes from './routes/auth.js';
 import songRoutes from './routes/songs.js';
@@ -55,7 +59,7 @@ import workerRoutes, { workerRouter } from './routes/workers.js';
 import { workerTokenGate } from './services/training/trainingWorkers.js';
 import { workerUpdateGate } from './services/training/workerUpdate.js';
 import { reconcileYue2AitkRunsAtStartup } from './services/training/yue2AitkRuns.js';
-import { startYue2Mirror } from './services/training/yue2Mirror.js';
+import { startYue2Mirror, yue2MirrorStatus } from './services/training/yue2Mirror.js';
 import backendsRoutes from './routes/backends.js';
 import audioRoutes from './routes/audio.js';
 import yue2CoverRoutes from './routes/yue2Cover.js';
@@ -87,18 +91,44 @@ console.log(`
 `);
 console.log(`[Logger] Session logs: ${logDir}`);
 
+// An update's candidate starts under the maintenance lease (bootstrap.ts has
+// already refused any other process). Its gate stays closed and the startup
+// work below waits until the launcher releases it; only DB migrations and the
+// engine run before that. With no lease on disk whenOpen() runs at once.
+const startupLease = leaseForStartup({ updaterDir: process.env[UPDATER_DIR_ENV] || null, dataRoot: DATA_ROOT });
+if (startupLease) maintenance.close(startupLease);
+
 // Initialize databases
 initDb();
-// Register this process, then settle what earlier processes left behind.
-// Dev and prod can share this database and training folder: every sweep
-// below skips work a live process in the other copy owns (services/instance.ts).
-startInstance(getDb(), { copy: `${os.hostname()}:${config.server.port}` });
-recoverStaleJobs();
-recoverStalePipelines();
-recoverStaleBatches();
-reconcileYue2AitkRunsAtStartup();
-// Moves any old pulled ladders out of _remote, then copies each worker's runs here as they land.
-void startYue2Mirror();
+
+// Busy-check gaps found by the update audit (HOTSTEP-1139). These also hold a
+// data-folder move, which restarts the app the same way.
+registerBusyCheck('pipelines', () => hasActivePipeline() ? ['a training pipeline is running or paused'] : []);
+registerBusyCheck('batches', () => hasActiveBatch() ? ['a training batch is running'] : []);
+registerBusyCheck('workers', () => listWorkers().flatMap(w => [
+  ...(getDispatch(w.name)?.running ? [`sending work to ${w.name}`] : []),
+  ...(yue2MirrorStatus(w.name)?.running ? [`copying runs from ${w.name}`] : []),
+  ...(['done', 'failed', 'cancelled', undefined].includes(getUpdate(w.name)?.status) ? [] : [`updating worker ${w.name}`]),
+]));
+// An update also waits for queued rows; a data-folder move lets them resume after its restart.
+maintenance.addBlocker(() => {
+  const db = getDb();
+  const audio = (db.prepare(`SELECT COUNT(*) AS n FROM audio_intents WHERE status = 'pending'`).get() as { n: number }).n;
+  const flows = (db.prepare(`SELECT COUNT(*) AS n FROM workflow_jobs WHERE status = 'pending'`).get() as { n: number }).n;
+  return [...(audio ? [`${audio} audio queue item(s) waiting`] : []), ...(flows ? [`${flows} workflow job(s) waiting`] : [])];
+});
+maintenance.whenOpen(() => {
+  // Register this process, then settle what earlier processes left behind.
+  // Dev and prod can share this database and training folder: every sweep
+  // below skips work a live process in the other copy owns (services/instance.ts).
+  startInstance(getDb(), { copy: `${os.hostname()}:${config.server.port}` });
+  recoverStaleJobs();
+  recoverStalePipelines();
+  recoverStaleBatches();
+  reconcileYue2AitkRunsAtStartup();
+  // Moves any old pulled ladders out of _remote, then copies each worker's runs here as they land.
+  void startYue2Mirror();
+});
 // lireek tables are created in initDb() — no separate init
 
 // Create Express app
@@ -106,6 +136,8 @@ const app = express();
 
 // Middleware
 app.use(cors());
+// Update maintenance gate: ahead of every feature and static route.
+app.use(maintenance.middleware);
 // Training on another PC: a worker checks its token first; the controller's
 // proxy goes before the body parsers so proxied bodies stream through.
 app.use('/api', workerTokenGate);
@@ -122,6 +154,14 @@ app.use('/api/songs', songRoutes);
 app.use('/api/generate', generateRoutes);
 app.use('/api/models', modelRoutes);
 app.use('/api/health', healthRoutes);
+// The launcher's health attestation and gate release (token-only during an update).
+app.use('/api/maintenance', maintenanceRouter(maintenance, () => ({
+  version: APP_VERSION,
+  build: BUILD_INFO,
+  db: dbInitState,
+  ui: fs.existsSync(path.join(PROJECT_ROOT, 'ui', 'dist', 'index.html')),
+  engine: { ready: engineReady, status: engineBootStatus },
+})));
 app.use('/api/updates', updatesRoutes);
 app.use('/api/shutdown', shutdownRoutes);
 app.use('/api/mastering', masteringRoutes);
@@ -224,7 +264,7 @@ if (fs.existsSync(uiDistPath)) {
 // The ace-server child lifecycle (spawn, log fan-out, crash-respawn limiter,
 // deliberate stop/restart) lives in services/aceEngineProcess.ts so that the
 // training preprocess job can borrow the GPU. §4.1 of the preprocess plan.
-import { setEngineReady } from './engineState.js';
+import { setEngineReady, engineReady, engineBootStatus } from './engineState.js';
 import { restoreMm3Selection } from './services/backends/minimax/index.js';
 import { restoreYue2Selection } from './services/backends/yue2/index.js';
 import { aceClient } from './services/aceClient.js';
@@ -403,10 +443,12 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   // Multi-GPU opt-in: one more engine per further opted-in card. Each runs the
   // restore hooks below in its own scope once its /health answers. A no-op
   // with the opt-in empty (the default).
-  void startEngineWorkers();
-  // Generations run side by side only with two or more workers; one worker
-  // (the default) keeps the single lane. Placement skips a worker until it is ready.
-  setWorkerConcurrency(engineWorkers().length > 1);
+  maintenance.whenOpen(() => {
+    void startEngineWorkers();
+    // Generations run side by side only with two or more workers; one worker
+    // (the default) keeps the single lane. Placement skips a worker until it is ready.
+    setWorkerConcurrency(engineWorkers().length > 1);
+  });
 
   // The engine scans models once at boot, so wait for the whole queue to
   // drain before retrying — retrying after the first file can boot it on a
@@ -424,9 +466,9 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   // pick. Put the persisted choice back before the first generation can run.
   // Fire-and-forget: a failed restore leaves the engine on its default, which
   // still generates — it must never block request serving.
-  void restoreMm3Selection().catch(err => {
+  maintenance.whenOpen(() => void restoreMm3Selection().catch(err => {
     console.warn('[Server] MM3 model restore failed:', err?.message || err);
-  });
+  }));
 
   // Same restore, but for every LATER respawn. Training stops and restarts the
   // engine on the way into and out of every run (and once per preview pause),
@@ -441,9 +483,9 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   // restart. The adapter is the one that matters most: without this a user
   // trains an adapter, picks it, restarts, and gets base-model renders while
   // the picker still shows their pick.
-  void restoreYue2Selection().catch(err => {
+  maintenance.whenOpen(() => void restoreYue2Selection().catch(err => {
     console.warn('[Server] YuE2 model restore failed:', err?.message || err);
-  });
+  }));
   onEngineRestarted(restoreYue2Selection);
 
   // Fire-and-forget warm-on-startup: once the engine /health is up, POST /warm
@@ -452,7 +494,7 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   // making warm pointless) and a configured warmDit. Off by default since
   // keepLoaded is off. Failures only log — they never block request serving.
   if (config.aceServer.warmOnStartup && config.aceServer.keepLoaded && config.aceServer.warmDit) {
-    void warmEngineOnStartup();
+    maintenance.whenOpen(() => void warmEngineOnStartup());
   } else if (config.aceServer.warmOnStartup && config.aceServer.warmDit && !config.aceServer.keepLoaded) {
     console.log('[Server] warm-on-startup skipped: keep-loaded is off (engine would evict immediately)');
   }
@@ -500,13 +542,15 @@ const server = app.listen(config.server.port, config.server.host, () => {
   console.log('');
   console.log(`  🎵 Open http://localhost:${config.server.port} in your browser`);
   console.log('');
-  // Durable audio queue: surface items a previous process left mid-submit,
-  // then start submitting pending ones.
-  startAudioIntentQueue();
-  // Workflow jobs: mark jobs a previous process left running as interrupted,
-  // then start pending ones.
-  startWorkflowJobs();
-  startUpdateCheck();
+  maintenance.whenOpen(() => {
+    // Durable audio queue: surface items a previous process left mid-submit,
+    // then start submitting pending ones.
+    startAudioIntentQueue();
+    // Workflow jobs: mark jobs a previous process left running as interrupted,
+    // then start pending ones.
+    startWorkflowJobs();
+    startUpdateCheck();
+  });
 });
 
 // Graceful shutdown
