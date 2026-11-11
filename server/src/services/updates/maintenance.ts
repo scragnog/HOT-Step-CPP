@@ -53,9 +53,11 @@ function createJsonExclusive(file: string, data: unknown): void {
   try { fs.linkSync(tmp, file); } finally { fs.rmSync(tmp, { force: true }); }
 }
 
-function readJson(file: string): unknown | null {
+/** `undefined` only when the file is missing (JSON never parses to it); any
+ *  content, `null` included, goes to the caller's validator. */
+function readJson(file: string): unknown {
   let raw: string;
-  try { raw = fs.readFileSync(file, 'utf-8'); } catch (e: any) { if (e.code === 'ENOENT') return null; throw e; }
+  try { raw = fs.readFileSync(file, 'utf-8'); } catch (e: any) { if (e.code === 'ENOENT') return undefined; throw e; }
   try { return JSON.parse(raw); } catch { throw new Error(`${file} is not valid JSON`); }
 }
 
@@ -92,7 +94,7 @@ const leaseFiles = (d: LeaseDirs) => [
 /** Every lease present in these folders. Throws on an unreadable one. */
 export function readLeases(d: LeaseDirs): Lease[] {
   const out: Lease[] = [];
-  for (const f of leaseFiles(d)) { const v = readJson(f); if (v !== null) out.push(parseLease(v, f)); }
+  for (const f of leaseFiles(d)) { const v = readJson(f); if (v !== undefined) out.push(parseLease(v, f)); }
   return out;
 }
 
@@ -122,7 +124,7 @@ export function acquireLease(o: { updaterDir: string; installRoot: string; dataR
 export function releaseLease(d: LeaseDirs, id: string): void {
   for (const f of leaseFiles(d).reverse()) {
     const v = readJson(f);
-    if (v === null) continue;
+    if (v === undefined) continue;
     if (parseLease(v, f).id !== id) throw fail(`${f} belongs to another update`, 409);
     fs.rmSync(f, { force: true });
   }
@@ -179,7 +181,7 @@ function parseTransaction(v: unknown, file: string): TransactionRecord {
 export function readTransaction(updaterDir: string): TransactionRecord | null {
   const file = path.join(updaterDir, TRANSACTION_FILE);
   const v = readJson(file);
-  return v === null ? null : parseTransaction(v, file);
+  return v === undefined ? null : parseTransaction(v, file);
 }
 
 export function writeTransaction(updaterDir: string, t: TransactionRecord): void {
@@ -194,11 +196,17 @@ export function clearTransaction(updaterDir: string): void {
 // ── Gate ─────────────────────────────────────────────────────────────
 
 const MUTATING = (m: string) => m !== 'GET' && m !== 'HEAD' && m !== 'OPTIONS';
+/** Writes count until they end. A GET counts until it sends headers: by then
+ *  it is streaming (SSE, audio files), which may last as long as a tab is open.
+ *  ponytail: a handler that never ends a disconnected write keeps refusing
+ *  updates until restart; safe, but log it if it ever shows up. */
+const busy = (res: Response, method: string) => MUTATING(method) || !res.headersSent;
 
 export function createGate() {
   let closed = false;
   let lease: Lease | null = null;
-  let inflight = 0;
+  /** Admitted requests whose work may not be done, with their method. */
+  const live = new Map<Response, string>();
   const deferred: Array<() => void> = [];
   /** Update-only blockers (queued work a data-folder move may leave queued). */
   const extraBlockers: Array<() => string[]> = [];
@@ -213,11 +221,12 @@ export function createGate() {
       });
       return;
     }
-    if (MUTATING(req.method)) {
-      inflight++;
-      let done = false;
-      res.once('close', () => { if (!done) { done = true; inflight--; } });
-    }
+    // A request counts until its handler ends the response. A client
+    // disconnect alone never does: the handler may still be writing.
+    live.set(res, req.method);
+    const end = res.end.bind(res);
+    res.end = ((...a: unknown[]) => { live.delete(res); return (end as (...x: unknown[]) => Response)(...a); }) as Response['end'];
+    res.once('close', () => { if (res.writableEnded || !busy(res, req.method)) live.delete(res); });
     next();
   }
 
@@ -239,7 +248,8 @@ export function createGate() {
 
   async function drain(allow: number, timeoutMs: number): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
-    while (inflight > allow) {
+    const count = () => [...live].filter(([res, m]) => busy(res, m)).length;
+    while (count() > allow) {
       if (Date.now() > deadline) return false;
       await new Promise(r => setTimeout(r, 50));
     }
@@ -260,7 +270,6 @@ export function createGate() {
     if (errors.length) throw fail(errors.join('; '), 400, { errors });
     const taken = acquireLease(o);
     close(taken.lease);
-    // ponytail: only non-GET requests are waited for; a GET that starts work is caught by the blocker check alone.
     const drained = await drain(o.fromRequest ? 1 : 0, o.drainMs ?? 10_000);
     const blockers = drained ? [...o.blockers(), ...extraBlockers.flatMap(f => f())] : ['requests still in flight'];
     if (blockers.length) {

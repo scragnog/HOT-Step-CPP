@@ -48,9 +48,13 @@ test('no lease on disk: the gate passes through synchronously and startup work r
   assert.equal(leaseForStartup({}, {}), null);
   const gate = createGate();
   let nextCalled = false;
-  const res = new Proxy({}, { get: (_t, k) => { if (k === 'once') return () => {}; throw new Error(`res.${String(k)} touched`); } });
-  gate.middleware({ method: 'GET', path: '/api/songs' } as any, res as any, () => { nextCalled = true; });
+  // Only end() (wrapped to count in-flight work) and once() exist: any status, header or body write throws.
+  let ended: unknown[] | null = null;
+  const res: any = { end(...a: unknown[]) { ended = a; return this; }, once() { return this; } };
+  gate.middleware({ method: 'GET', path: '/api/songs' } as any, res, () => { nextCalled = true; });
   assert.ok(nextCalled, 'next() ran in the same tick');
+  res.end('body', 'utf-8');
+  assert.deepEqual(ended, ['body', 'utf-8'], 'the wrapped end() passes everything through');
   const order: number[] = [];
   gate.whenOpen(() => order.push(1));
   order.push(2);
@@ -62,16 +66,26 @@ test('no lease on disk: the gate passes through synchronously and startup work r
 // ── Gate ─────────────────────────────────────────────────────────────
 
 function serve(gate: ReturnType<typeof createGate>) {
+  const work: string[] = [];
   const app = express();
   app.use(gate.middleware);
   app.get('/api/health', (_q, r) => { r.json({ status: 'ok' }); });
   app.use('/api/maintenance', maintenanceRouter(gate, () => ({ build: 'test' })));
   app.get('/api/songs', (_q, r) => { r.json([]); });
-  app.post('/api/songs', (_q, r) => { setTimeout(() => r.json({ ok: true }), 300); });
+  app.post('/api/songs', (_q, r) => { setTimeout(() => { work.push('post'); r.json({ ok: true }); }, 300); });
+  app.get('/api/compare/analyse', (_q, r) => { setTimeout(() => { work.push('get'); r.json({ ok: true }); }, 300); });
+  app.get('/api/logs/stream', (_q, r) => { r.writeHead(200, { 'Content-Type': 'text/event-stream' }); r.write('retry: 2000\n\n'); });
   app.get('/{*splat}', (_q, r) => { r.send('<html>'); });
   const server = app.listen(0);
   const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
   const port = () => (server.address() as { port: number }).port;
+  /** Send a request and drop the connection after `ms`, without waiting for an answer. */
+  const abort = (method: string, p: string, ms: number) => {
+    const r = http.request({ host: '127.0.0.1', port: port(), path: p, method });
+    r.on('error', () => {});
+    r.end();
+    setTimeout(() => r.destroy(), ms);
+  };
   const req = (method: string, p: string, headers: Record<string, string> = {}) => new Promise<{ status: number; body: string; socket: unknown; retry: string | undefined }>((resolve, reject) => {
     const r = http.request({ host: '127.0.0.1', port: port(), path: p, method, agent, headers }, res => {
       let body = '';
@@ -81,7 +95,7 @@ function serve(gate: ReturnType<typeof createGate>) {
     r.on('error', reject);
     r.end();
   });
-  return { req, close: () => { agent.destroy(); server.close(); } };
+  return { req, abort, work, close: () => { agent.destroy(); server.closeAllConnections(); server.close(); } };
 }
 
 function fakeLease(token: string): Lease {
@@ -165,6 +179,35 @@ test('begin waits for in-flight writes, then holds the lease in both places', as
   } finally { s.close(); }
 });
 
+test('a write whose client hung up still holds begin() until the handler finishes', async () => {
+  const d = dirs();
+  const gate = createGate();
+  const s = serve(gate);
+  try {
+    s.abort('POST', '/api/songs', 50);
+    await new Promise(r => setTimeout(r, 120));
+    let seen: string[] = [];
+    await gate.begin({ ...d, preflight: () => [], blockers: () => { seen = [...s.work]; return []; } });
+    assert.deepEqual(seen, ['post'], 'blockers ran only after the disconnected write finished');
+  } finally { s.close(); }
+});
+
+test('a GET doing work holds begin(); an open event stream does not', async () => {
+  const d = dirs();
+  const gate = createGate();
+  const s = serve(gate);
+  try {
+    s.abort('GET', '/api/logs/stream', 5_000);
+    s.abort('GET', '/api/compare/analyse', 50);
+    await new Promise(r => setTimeout(r, 120));
+    let seen: string[] = [];
+    const t0 = Date.now();
+    await gate.begin({ ...d, preflight: () => [], blockers: () => { seen = [...s.work]; return []; }, drainMs: 2_000 });
+    assert.deepEqual(seen, ['get'], 'the GET finished first');
+    assert.ok(Date.now() - t0 < 1_500, 'the event stream was not waited for');
+  } finally { s.close(); }
+});
+
 // ── Lease and second process ─────────────────────────────────────────
 
 test('a second process is refused before bootstrap; a dead PID does not end the lease', async () => {
@@ -205,7 +248,18 @@ test('a malformed lease or an unleased transaction record fails closed', () => {
   const d = dirs();
   fs.writeFileSync(path.join(d.dataRoot, DATA_LEASE_FILE), '{not json');
   assert.throws(() => leaseForStartup(d, {}), /not valid JSON/);
+  for (const bad of ['null', '{}', '[]', '0', '"x"']) {
+    fs.writeFileSync(path.join(d.dataRoot, DATA_LEASE_FILE), bad);
+    fs.writeFileSync(path.join(d.updaterDir, LEASE_FILE), bad);
+    assert.throws(() => leaseForStartup(d, {}), /not a format 1 maintenance lease/, `lease file holding ${bad}`);
+  }
   fs.rmSync(path.join(d.dataRoot, DATA_LEASE_FILE));
+  fs.rmSync(path.join(d.updaterDir, LEASE_FILE));
+  for (const bad of ['null', '{}']) {
+    fs.writeFileSync(path.join(d.updaterDir, 'transaction.json'), bad);
+    assert.throws(() => readTransaction(d.updaterDir), /not a valid format 1/, `transaction holding ${bad}`);
+    assert.throws(() => leaseForStartup(d, {}), /not a valid format 1/);
+  }
 
   const tx = {
     format: 1 as const, id: 'tx1', state: 'pending' as const, leaseId: 'l1', oldPayload: 'v1.5.1-abc-cuda13.1', newPayload: 'v1.6.0-def-cuda13.1',
