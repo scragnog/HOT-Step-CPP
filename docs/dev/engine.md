@@ -470,6 +470,13 @@ include point in `hot-step-server.cpp`.
 
 ### YuE2: plan, compose, render
 
+YuE2 accepts an empty style, including in each entry of a batched request. A request
+with `codec_ids` and no ABC skips score planning even when CoT is enabled. Uploaded
+continuations use `continue_codec_ids: true` with CoT off. Node captures the source URL
+and section in `yue2Continuation`, tokenizes through the existing cached `yue2-guide`
+path, and slices the best raw code per frame at 25 Hz. Prefix jobs do not coalesce with
+other jobs and use a single song, preserving their own seed and variation noise seeds.
+
 ```
 style + lyrics (+ optional ABC) -> tokenizer and prompt assembly (yue2-tokenizer.h)
   -> plan stage: ABC lead sheet, only when cot is "melody" or "full"

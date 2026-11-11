@@ -5,6 +5,7 @@ import { yue2Seed, yue2SeedPlus } from './client.js';
 import type { GenerationJob } from '../../generation/jobTypes.js';
 import type { Yue2PersistedSelection } from './index.js';
 
+
 // #S3: a cover job's source identity and approved ABC are captured into the
 // envelope at submit (index.ts's resolveRequest) and read ONLY from there —
 // never from job.params, the raw request body. These tests build a job whose
@@ -97,6 +98,12 @@ const pick: Yue2PersistedSelection = {
 };
 const abc = ['X:1', 'M:4/4', 'L:1/4', 'Q:1/4=60', 'K:C', '% verse', 'V: Vocal', 'C4|', ''].join('\n');
 const lyrics = '[Verse]\nfirst line';
+
+test('empty style and lyrics remain empty on the wire', () => {
+  const { req } = mapYue2Params({ caption: '', lyrics: '', yue2CaptionBpmKey: false }, pick);
+  assert.equal(req.style, '');
+  assert.equal(req.lyrics, undefined);
+});
 
 test('batch member metadata replays its own score and exact semantic and noise seeds', () => {
   const firstAbc = 'X:1\nK:C\nC4|';

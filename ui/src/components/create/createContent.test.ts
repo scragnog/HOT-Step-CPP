@@ -11,7 +11,7 @@ import { createTrainingCreateDraft, mirroredGenerationDraft } from '../../../../
 import { resolveGenerationIntent } from '../../../../server/src/services/generation/intent.js';
 import type { BackendExtensionParam } from '../../../../server/src/services/backends/types.js';
 import type { AuditionPreview, AuditionSideResult } from '../../../../server/src/services/training/types.js';
-import { applyCreateDraft, createContentFromDraft, createContentParams, createDraftBackendRefusal, liveBackendRefusal } from './createContent';
+import { applyCreateDraft, createContentFromDraft, createContentParams, createDraftBackendRefusal, createYue2Replay, liveBackendRefusal } from './createContent';
 import { applyTrainingCreateDraft, type TrainingCreateDraftData } from './trainingCreateDraft';
 import { createDraftMirror } from '../../services/studioDraftMirror';
 
@@ -173,4 +173,23 @@ test('YuE2 sends no LoRA-trigger prefix, whatever a saved draft holds (#238)', (
   const c = createContentFromDraft({ 'hs-caption': 'pop', 'hs-lora-trigger': 'rock' });
   assert.equal(createContentParams(c, { mm3Mode: false, yue2Active: true }).caption, 'pop');
   assert.equal(createContentParams(c, { mm3Mode: false }).caption, 'rock, pop');
+});
+
+test('Create Edit restores a continuation without passing it to shared controls or a cover', () => {
+  const continuation = { sourceAudioUrl: '/references/source.wav', start: 2, end: 5 };
+  const replay = createYue2Replay({ yue2Continuation: continuation, yue2Cot: 'full',
+    yue2Request: { codec_ids: [1, 2] }, yue2Adapters: {}, yue2: {} });
+  assert.deepEqual(replay.continuation, continuation);
+  assert.deepEqual(replay.shared, { yue2Cot: 'full' });
+  const content = { ...createContentFromDraft({ 'hs-caption': 'piano' }), yue2Continuation: replay.continuation };
+  const globalParams = { ...replay.shared, seed: 42 };
+  const create = { ...globalParams, ...createContentParams(content, { mm3Mode: false, yue2Active: true }) };
+  assert.deepEqual(create.yue2Continuation, continuation);
+  // Cover Studio copies all yue2* controls from getGlobalParams at submission.
+  const cover = { ...Object.fromEntries(Object.entries(globalParams).filter(([key]) => key.startsWith('yue2'))),
+    yue2Cover: { sourceId: 'cover-source' }, yue2Abc: 'X:1\nK:C\nC4|' };
+  assert.equal('yue2Continuation' in cover, false);
+  assert.equal('yue2Continuation' in createContentParams(content, { mm3Mode: false, yue2Active: false }), false);
+  // Editing an ordinary song clears the previous per-song continuation.
+  assert.equal(createYue2Replay({ yue2Cot: 'full' }).continuation, undefined);
 });

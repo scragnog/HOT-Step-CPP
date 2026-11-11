@@ -2,6 +2,7 @@
 // CreatePanel's Generate and by resuming a saved draft, so a resumed draft
 // produces the same request the form would.
 import type { GenerationParams } from '../../types';
+import type { Yue2Continuation } from '../../../../server/src/contracts/yue2Continuation';
 
 export interface CreateContent {
   caption: string; lyrics: string; negativePrompt: string; instrumental: boolean;
@@ -9,6 +10,18 @@ export interface CreateContent {
   title: string; artist: string; subject: string;
   bpm: number; keyScale: string; timeSignature: string; duration: number; vocalLanguage: string;
   sourceLatentUrl: string;
+  yue2Continuation?: Yue2Continuation;
+}
+
+/** Edit restores per-song source state separately from shared YuE2 controls. */
+export function createYue2Replay(saved: Record<string, unknown>): {
+  continuation: Yue2Continuation | undefined; shared: Record<string, unknown>;
+} {
+  return {
+    continuation: saved.yue2Continuation as Yue2Continuation | undefined,
+    shared: Object.fromEntries(Object.entries(saved).filter(([key]) => key.startsWith('yue2')
+      && !['yue2', 'yue2Request', 'yue2Adapters', 'yue2Continuation'].includes(key))),
+  };
 }
 
 /** LoRA trigger word prepended (unless already typed), beat intro/outro request appended. */
@@ -52,6 +65,7 @@ export function createContentParams(c: CreateContent, opts: { mm3Mode: boolean; 
   if (c.artist.trim()) params.artist = c.artist.trim();
   if (c.subject.trim()) params.subject = c.subject.trim();
   if (c.sourceLatentUrl) params.sourceLatentUrl = c.sourceLatentUrl;
+  if (opts.yue2Active && c.yue2Continuation) Object.assign(params, { yue2Continuation: c.yue2Continuation });
   return params;
 }
 

@@ -17,6 +17,16 @@ Older songs use their saved score-provenance flags when available. Without those
 Edit leaves the score input empty and plans again. Missing scores or settings cannot be
 recovered, so exact reproduction of those older songs is not guaranteed.
 
+For YuE2, **Continue from recording** uploads audio and selects its start and end in seconds.
+Choose up to 30 seconds, then Generate. YuE2 tokenizes the recording, uses the selected
+section as the beginning of a new song, and continues composing with score planning off.
+The prefix is synthesized again, so it will differ from the original audio. A real-audio
+NAR adapter can help with recordings that YuE2 did not generate. The feature renders one
+song per job; the variation count still applies. It cannot be combined with a cover or a
+build session. The selected recording section belongs only to Custom-Gen; it does not
+change Cover Studio's requests. Library's Edit action restores the saved section for a
+continuation, and clears it for an ordinary YuE2 song. Style and lyrics may both be empty for YuE2.
+
 ![Custom-Gen](../../images/studio-create.webp)
 <!-- screenshot: needed -->
 

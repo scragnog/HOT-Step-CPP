@@ -49,6 +49,8 @@ Pick the backend from the Generation engine box at the top of the sidebar; it ap
 
 ### YuE2
 
+- [Continue from a recording](docs/user/studios/create.md): upload audio, select up to 30 seconds and compose a new song from that prefix, with an optional empty style.
+
 | Feature | What it does |
 |---|---|
 | Native port | AR composer and NAR renderer halves plus a VAE decoder, in C++/GGML, producing 48 kHz stereo. |

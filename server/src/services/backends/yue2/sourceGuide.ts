@@ -89,6 +89,7 @@ function guideCacheDir(): string {
 /** The guide file for a source recording, built on first use and cached by
  *  the file's path, size and mtime. Throws with a user-facing message. */
 export async function buildYue2Guide(srcPath: string, log: (msg: string) => void, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
   if (!fs.existsSync(srcPath)) throw new Error(`Follow source: the source recording is missing (${path.basename(srcPath)}).`);
   // The cover tokenizer (preferences `yue2-tokenizer`.cover, the cover panel's picker).
   const tokenizer = yue2TokenizerSetting().cover;

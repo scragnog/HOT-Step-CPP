@@ -295,7 +295,7 @@ static bool yue2_run_plan_stage(Yue2Model & m, const BPETokenizer & tok, const Y
         if (!sg.abc_given) {
             // cot=off plans nothing; a song that brought an abc still gets its
             // score_abc below so the Lua yue2 plan table is populated.
-            if (req.cot == YUE2_COT_OFF) {
+            if (req.cot == YUE2_COT_OFF || !req.codec_ids.empty()) {
                 sg.stage_end_reason[YUE2_STAGE_PLAN] = "skipped";
             } else {
                 plan_idx.push_back(b);

@@ -17,6 +17,14 @@ the named symbol when one has drifted.
 
 ## Glossary (read first — no prior context assumed)
 
+YuE2 ComfyUI import preserves per-module alpha, ordinary distilled slider keys and
+NAR flow heads. It captures `lora_alpha` or `alpha` from adjacent `adapter_config.json`
+with tensor alpha taking precedence, followed by file metadata and then the sidecar.
+Native `yue2.{vae2llm,llm2vae}.{diff,diff_b}` are scaled deltas;
+`weight` and `bias` are full replacements independent of nonzero strength. A flow-head
+import sets `decoder_companion=off` so it does not stack on the automatic companion.
+Validate imports with the published adapter, including an output comparison.
+
 Album-preset maintenance: Settings > General > Adapters > **Update adapter references**
 calls `POST /api/lireek/presets/update-adapter-references`. The service in
 `server/src/services/lireek/adapterReferences.ts` checks all five adapter columns in

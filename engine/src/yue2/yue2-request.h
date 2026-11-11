@@ -363,13 +363,7 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
         yyjson_doc_free(doc);
         return false;
     }
-    if ((!present || out->style.empty()) && !yyjson_obj_get(root, "songs")) {
-        if (err) {
-            *err = "\"style\" is required and must be non-empty";
-        }
-        yyjson_doc_free(doc);
-        return false;
-    }
+    // Empty or absent style is valid, including an unconditional instrumental.
 
     if (!yue2_req_str(root, "lyrics", &out->lyrics, &present, err)) {
         yyjson_doc_free(doc);
@@ -581,11 +575,6 @@ static bool yue2_parse_request(const std::string & body, Yue2Request * out, std:
                 return false;
             }
             spec.abc_provided = !spec.abc.empty();
-            if (spec.style.empty()) {
-                if (err) *err = "\"songs\" entry " + std::to_string(idx) + " needs a non-empty \"style\"";
-                yyjson_doc_free(doc);
-                return false;
-            }
             if (!yue2_req_seed(sv, "seed", &spec.seed, &sp, err)) {
                 yyjson_doc_free(doc);
                 return false;

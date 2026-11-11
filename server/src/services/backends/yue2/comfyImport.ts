@@ -20,7 +20,7 @@ import { config } from '../../../config.js';
 import { runStamp } from '../../training/adapterLayout.js';
 import { recordYue2AitkRun } from '../../training/yue2AitkRuns.js';
 
-const KEY = /^(?:(?:model\.)?(diffusion_model|text_encoders)\.model\.)?layers\.(\d+)\.(self_attn\.qkv_proj|self_attn\.o_proj|mlp\.gate_up_proj|mlp\.down_proj|[qkvo]_proj|(?:gate|up|down)_proj)\.(.+)$/;
+const KEY = /^(?:(?:model\.)?(diffusion_model|text_encoders)\.model\.)?layers\.(\d+)\.(self_attn\.(?:qkv|[qkvo])_proj|mlp\.(?:gate_up|gate|up|down)_proj|[qkvo]_proj|(?:gate|up|down)_proj)\.(.+)$/;
 const SITES: Record<string, [number, number]> = {
   'self_attn.qkv_proj': [2048, 4096], 'self_attn.o_proj': [2048, 2048],
   'mlp.gate_up_proj': [2048, 12288], 'mlp.down_proj': [6144, 2048],
@@ -120,15 +120,34 @@ export function importYue2ComfyAdapter(src: string, adaptersRoot = config.aceSer
   }
   if (fs.statSync(src).size > MAX_BYTES) throw new Error('File is larger than 2 GB, which no YuE2 adapter is');
   const { tensors, meta } = readSafetensors(src);
+  const sidecar = path.join(path.dirname(src), 'adapter_config.json');
+  const cfg = fs.existsSync(sidecar) ? JSON.parse(fs.readFileSync(sidecar, 'utf8')) : {};
+  const suppliedAlpha = meta.alpha === undefined ? cfg.lora_alpha ?? cfg.alpha : Number(meta.alpha);
+  if (suppliedAlpha !== undefined && (typeof suppliedAlpha !== 'number' || !Number.isFinite(suppliedAlpha) || suppliedAlpha <= 0)) {
+    throw new Error('Adapter alpha must be a finite positive number.');
+  }
   if (/^yue2-(ar|nar)-/.test(meta.format ?? '')) {
     throw new Error('This is already a native YuE2 adapter. Point the adapter folder at it instead of importing it.');
   }
 
   const groups = new Map<string, { ar: boolean; layer: number; site: string; parts: Record<string, Tensor> }>();
+  const flow: Array<[string, Tensor]> = [];
   const unknown: string[] = [];
   for (const [name, t] of tensors) {
-    const m = KEY.exec(name);
+    const head = /^(?:diffusion_model\.)?(vae2llm|llm2vae)\.(diff|diff_b|weight|bias)$/.exec(name);
+    if (head) {
+      const bias = head[2] === 'diff_b' || head[2] === 'bias';
+      const inp = head[1] === 'vae2llm' ? 64 : 2048, outp = head[1] === 'vae2llm' ? 2048 : 64;
+      if (JSON.stringify(t.shape) !== JSON.stringify(bias ? [outp] : [outp, inp])) throw new Error(`${name}: flow-head shape does not fit YuE2`);
+      flow.push([`yue2.${head[1]}.${head[2]}`, t]);
+      continue;
+    }
+    const key = name.replace(/^adapters\.model-layers-(\d+)-(self_attn|mlp)-([a-z_]+)\./, 'layers.$1.$2.$3.')
+      .replace(/^model\.(?=layers\.)/, '')
+      .replace(/^layers\.(\d+)\.nar_(self_attn|mlp)\./, 'diffusion_model.model.layers.$1.$2.');
+    const m = KEY.exec(key);
     if (!m) { unknown.push(name); continue; }
+    if (!SITES[m[3]]) m[3] = m[3].replace(/^(self_attn|mlp)\./, '');
     const id = `${m[1]}|${m[2]}|${m[3]}`;
     if (!groups.has(id)) groups.set(id, { ar: m[1] !== 'diffusion_model', layer: Number(m[2]), site: m[3], parts: {} });
     const part = {
@@ -143,9 +162,7 @@ export function importYue2ComfyAdapter(src: string, adaptersRoot = config.aceSer
   if (kinds.size !== 1) throw new Error('File mixes LoRA and LoKr modules');
   const kind = [...kinds][0] as 'lora' | 'lokr';
   const alphas = new Set([...groups.values()].filter(g => g.parts.alpha).map(g => scalar(g.parts.alpha)));
-  if (alphas.size > 1) throw new Error(`Modules carry different alphas (${[...alphas].slice(0, 4).join(', ')}); not supported`);
-
-  const out: Record<'ar' | 'nar', Array<[string, Tensor]>> = { ar: [], nar: [] };
+  const out: Record<'ar' | 'nar', Array<[string, Tensor]>> = { ar: [], nar: flow };
   let rank = 0;
   const sorted = [...groups.values()].sort((a, b) => Number(a.ar) - Number(b.ar) || a.layer - b.layer || a.site.localeCompare(b.site));
   for (const g of sorted) {
@@ -160,6 +177,12 @@ export function importYue2ComfyAdapter(src: string, adaptersRoot = config.aceSer
       rank ||= r;
       for (const [name, first, count] of splits(g.site, g.layer, g.ar)) {
         dst.push([`yue2.${name}.lora_A.weight`, A], [`yue2.${name}.lora_B.weight`, rows(B, first, count)]);
+        // Fused modules can carry a different rank/alpha from their neighbours.
+        const data = Buffer.alloc(4);
+        const alpha = g.parts.alpha ? scalar(g.parts.alpha) : suppliedAlpha ?? r;
+        if (!Number.isFinite(alpha) || alpha <= 0) throw new Error(`${where}: alpha must be finite and positive`);
+        data.writeFloatLE(alpha);
+        dst.push([`yue2.${name}.alpha`, { dtype: 'F32', shape: [], data }]);
       }
     } else {
       const w1 = g.parts.lokr_w1, w2 = g.parts.lokr_w2, w2a = g.parts.lokr_w2_a, w2b = g.parts.lokr_w2_b;
@@ -172,6 +195,12 @@ export function importYue2ComfyAdapter(src: string, adaptersRoot = config.aceSer
         dst.push([`yue2.${name}.lokr_w1`, rows(w1, first / outK, count / outK)]);
         if (w2) dst.push([`yue2.${name}.lokr_w2`, w2]);
         else dst.push([`yue2.${name}.lokr_w2_a`, w2a], [`yue2.${name}.lokr_w2_b`, w2b]);
+        if (g.parts.alpha || w2a) {
+          const alpha = g.parts.alpha ? scalar(g.parts.alpha) : suppliedAlpha ?? w2a.shape[1];
+          if (!Number.isFinite(alpha) || alpha <= 0) throw new Error(`${where}: alpha must be finite and positive`);
+          const data = Buffer.alloc(4); data.writeFloatLE(alpha);
+          dst.push([`yue2.${name}.alpha`, { dtype: 'F32', shape: [], data }]);
+        }
       }
     }
   }
@@ -179,7 +208,7 @@ export function importYue2ComfyAdapter(src: string, adaptersRoot = config.aceSer
 
   // No alpha in the file means ComfyUI merges at scale 1.0, i.e. alpha = rank.
   // Recording that keeps the app playing it the way ComfyUI does.
-  const alpha = alphas.size ? [...alphas][0] : (rank || undefined);
+  const alpha = alphas.size === 1 ? [...alphas][0] : alphas.size > 1 ? undefined : suppliedAlpha ?? (rank || undefined);
   let steps = 0;
   try { steps = Number(JSON.parse(meta.training_info ?? '{}').step) || 0; } catch { /* unknown */ }
   const trigger = comfyTrigger(meta);
@@ -201,6 +230,7 @@ export function importYue2ComfyAdapter(src: string, adaptersRoot = config.aceSer
       yue2_adapter_layout: 'native_split_v1', converted_from: 'comfyui', source_file: path.basename(src),
     };
     if (alpha !== undefined) md.alpha = String(alpha);
+    if (half === 'nar' && flow.length) md.decoder_companion = 'off';
     if (meta.lokr_dim) md.lokr_dim = meta.lokr_dim;
     if (meta.lokr_factor) md.lokr_factor = meta.lokr_factor;
     if (trigger) Object.assign(md, { trigger, style_template: 'upstream' });

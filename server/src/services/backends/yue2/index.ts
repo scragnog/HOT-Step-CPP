@@ -33,6 +33,7 @@ import { coverScoreChoices, transformCoverScore, type CoverScoreChoices } from '
 import { EMPTY_COVER_SCORE_ERROR, hasSoundingScore, hasSoundingVocalBar } from './scoreHealth.js';
 import { yue2CoverGuide, type Yue2CoverGuide } from './sourceGuide.js';
 import { runYue2Generation } from './generate.js';
+import { yue2Continuation } from './continuation.js';
 import {
   yue2Props, yue2PropsCached, yue2SelectModel, yue2Unload, TIMEOUT_DRAIN,
   yue2AssetReason, yue2ValidateAssets, yue2Preflight,
@@ -409,6 +410,8 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
     || !(typeof submission.lyrics === 'string' && submission.lyrics);
   const soundingFor = (abc: string) => instrumentalRender ? hasSoundingScore(abc) : hasSoundingVocalBar(abc, true);
   const cover = yue2CoverFromSubmission(submission);
+  const continuation = yue2Continuation(submission.yue2Continuation);
+  if (continuation && (cover || submission.yue2Build)) throw new Error('Continuation cannot be combined with a cover or a build session.');
   if (cover?.sourceKind === 'musicxml' && submission.sourceAudioUrl) {
     throw new Error('MusicXML covers cannot also supply source audio.');
   }
@@ -434,6 +437,7 @@ function resolveRequest(submission: Readonly<Record<string, unknown>>): Resolved
   for (const key of Object.keys(submission)) {
     if (key.startsWith('yue2')) options[key] = submission[key];
   }
+  if (continuation) options.yue2Continuation = continuation;
   if (cover && coverAbc) {
     const choices = coverScoreChoices(cover);
     const score = transformCoverScore(coverAbc, choices);

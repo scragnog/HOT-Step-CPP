@@ -32,6 +32,7 @@ import path from 'path';
 import { performance } from 'perf_hooks';
 import { v4 as uuidv4 } from 'uuid';
 import { clampYue2SemanticSampling } from './semanticGuard.js';
+import { applyContinuation, buildContinuation, jobContinuation } from './continuation.js';
 
 import { config } from '../../../config.js';
 import { getDb } from '../../../db/database.js';
@@ -371,7 +372,7 @@ export function mapYue2Params(params: any, pick: Yue2PersistedSelection = yue2Re
   // Instrumental: upstream's wording on the base model. An adapter's style is
   // the template it trained on, so it is left as composed.
   const adapted = !!(styled.halves.ar.path || styled.halves.nar.path);
-  const style = !lyrics && !adapted ? instrumentalStyle(styled.style) : styled.style;
+  const style = !lyrics && !adapted && styled.style.trim() ? instrumentalStyle(styled.style) : styled.style;
 
   const cotRaw = typeof params.yue2Cot === 'string' ? params.yue2Cot : 'full';
   const cot: Yue2SynthRequest['cot'] =
@@ -781,7 +782,7 @@ export function yue2RequestForJob(job: GenerationJob): Yue2SynthRequest {
   return mapYue2Params(yue2JobParams(job), jobPick(job)).req;
 }
 
-async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): Promise<Yue2PreparedJob> {
+async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt, signal?: AbortSignal): Promise<Yue2PreparedJob> {
   const pipelineStart = performance.now();
   const timing: StageTiming[] = [];
   const log: Yue2Log = (level, msg) => logGeneration(job.id, level, msg);
@@ -795,6 +796,15 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
   startGenerationLog(job.id, 'yue2-text2music');
   logGenerationParams(job.id, req as unknown as Record<string, unknown>);
   for (const n of notes) log('WARNING', `[YuE2] ${n}`);
+  const section = jobContinuation(job);
+  if (section) {
+    job.stage = 'YuE2: reading source recording...';
+    const t0 = performance.now();
+    const codes = await buildContinuation(section, msg => log('INFO', msg), signal);
+    applyContinuation(req, codes);
+    timing.push({ name: 'Source tokenizer', ms: performance.now() - t0 });
+    log('INFO', `[YuE2] Continuing ${section.start}-${section.end} s (${codes.length} frames), with score planning off.`);
+  }
   // A song built section by section: the kept codec stream is rendered as it
   // is (prefilled, not sampled), so the job only runs the audio stages, under
   // the score and lyrics in the build's arranged order (the job params hold
@@ -850,11 +860,7 @@ async function prepareYue2Job(job: GenerationJob, attempt?: GenerationAttempt): 
   log('INFO', `[YuE2] Style sent: ${req.style}`);
   if (req.lyrics) log('DEBUG', `[YuE2] Lyrics sent (${req.lyrics.length} chars):\n${req.lyrics}`);
 
-  if (!req.style.trim()) {
-    throw new Error('YuE2 needs a caption — the Style Description field is empty');
-  }
-
-  return { job, req, abcSupplied, caption, halves, timing, pipelineStart, log, attempt, cover: captured?.cover, trimStart };
+  return { job, req, abcSupplied: section ? false : abcSupplied, caption, halves, timing, pipelineStart, log, attempt, cover: captured?.cover, trimStart };
 }
 
 // ── Auto-replan ──
@@ -1114,7 +1120,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
 
   let lead: Yue2PreparedJob;
   try {
-    lead = await prepareYue2Job(job, deps.attempt);
+    lead = await prepareYue2Job(job, deps.attempt, deps.signal);
   } catch (err: any) {
     failYue2Job(job, err);
     return;
@@ -1129,7 +1135,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
   const props = yue2PropsCached() ?? (await yue2Props()).props;
   const maxSongs = Math.max(1, Number(props?.max_lm_batch) || 1);
   let songsSoFar = Math.max(1, lead.req.lm_batch_size ?? 1);
-  if (job.params.yue2Coalesce !== false && deps.pendingJobs && songsSoFar < maxSongs && (job.status as string) !== 'cancelled') {
+  if (!lead.req.codec_ids?.length && job.params.yue2Coalesce !== false && deps.pendingJobs && songsSoFar < maxSongs && (job.status as string) !== 'cancelled') {
     const key = yue2CoalesceKey(job, lead.req);
     // Songs queued together arrive milliseconds apart, and with auto-replan
     // off this job reaches here before its siblings have been posted. A short
@@ -1143,6 +1149,7 @@ export async function runYue2Generation(job: GenerationJob, deps: Yue2Generation
     for (const cand of deps.pendingJobs()) {
       if (songsSoFar >= maxSongs) break;
       if (cand.status !== 'pending' || cand.coalescedInto || cand.params?.yue2Coalesce === false) continue;
+      if (cand.envelope.options?.yue2?.yue2Continuation) continue;
       let mapped: Yue2ParamMapping;
       try { mapped = mapYue2Params(cand.params, jobPick(cand)); } catch { continue; }
       if (yue2CoalesceKey(cand, mapped.req) !== key) continue;
@@ -1660,6 +1667,7 @@ async function finishYue2Job(
       const trackParams = {
         ...job.params,
         backend: 'yue2',
+        ...(jobContinuation(job) ? { yue2Continuation: jobContinuation(job) } : {}),
         ...yue2TrackReplayParams(req, td, parts.length === 1 ? finalDetail.abc : undefined,
           p.abcSupplied || !!p.abcPlanned),
         // The AR/NAR pick is engine state rather than a request field, so
@@ -1788,7 +1796,6 @@ export interface Yue2PlanPreview {
 export async function runYue2PlanPreview(params: any, signal?: AbortSignal): Promise<Yue2PlanPreview> {
   const pick = yue2ResolvePick(params);
   const { req, notes } = mapYue2Params(params, pick);
-  if (!req.style.trim()) throw new Error('YuE2 needs a caption — the Style Description field is empty');
   if (req.cot === 'off') throw new Error('Score preview needs Chain of Thought "melody" or "full" — cot=off has no lead sheet to preview');
   // params.semantic: run the semantic stage too and return its codec ids
   // (about a minute) instead of stopping at the lead sheet (seconds).

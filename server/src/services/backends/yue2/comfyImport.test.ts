@@ -15,6 +15,9 @@ function writeFixture(file: string, options: {
   experts?: Array<'diffusion_model' | 'text_encoders' | 'bare'>;
   sites?: Record<string, [number, number]>;
   suffixes?: readonly [string, string];
+  key?: (name: string) => string;
+  alphas?: Record<string, number>;
+  flow?: 'diff' | 'replacement';
 } = {}): void {
   const sites = options.sites ?? {
     'self_attn.qkv_proj': [2048, 4096], 'self_attn.o_proj': [2048, 2048],
@@ -32,10 +35,26 @@ function writeFixture(file: string, options: {
       for (const [suffix, shape] of [[down, [1, inp]], [up, [outp, 1]]] as const) {
         const n = shape[0] * shape[1];
         const data = Buffer.from(Float32Array.from({ length: n }, (_, i) => i).buffer);
-        header[`${prefix}layers.0.${site}.${suffix}`] = { dtype: 'F32', shape, data_offsets: [off, off + data.length] };
+        const key = `${prefix}layers.0.${site}.${suffix}`;
+        header[options.key?.(key) ?? key] = { dtype: 'F32', shape, data_offsets: [off, off + data.length] };
         parts.push(data);
         off += data.length;
       }
+      if (options.alphas?.[site] !== undefined) {
+        const data = Buffer.alloc(4); data.writeFloatLE(options.alphas[site]);
+        const key = `${prefix}layers.0.${site}.alpha`;
+        header[options.key?.(key) ?? key] = { dtype: 'F32', shape: [], data_offsets: [off, off + 4] };
+        parts.push(data); off += 4;
+      }
+    }
+  }
+  if (options.flow) {
+    for (const [site, shape, bias] of [['llm2vae', [64, 2048], false], ['llm2vae', [64], true],
+      ['vae2llm', [2048, 64], false], ['vae2llm', [2048], true]] as const) {
+      const data = Buffer.alloc(shape.reduce((a, b) => a * b, 1) * 4); data.writeFloatLE(0.25);
+      const suffix = options.flow === 'diff' ? bias ? 'diff_b' : 'diff' : bias ? 'bias' : 'weight';
+      header[`diffusion_model.${site}.${suffix}`] = { dtype: 'F32', shape, data_offsets: [off, off + data.length] };
+      parts.push(data); off += data.length;
     }
   }
   const json = Buffer.from(JSON.stringify(header));
@@ -110,7 +129,7 @@ test('unfused projections map directly to all seven native sites', () => {
       assert.ok(header[`yue2.blk.0.${prefix}${name}.lora_A.weight`]);
       assert.ok(header[`yue2.blk.0.${prefix}${name}.lora_B.weight`]);
     }
-    assert.equal(Object.keys(header).length, 15); // 14 tensors and metadata
+    assert.equal(Object.keys(header).length, 22); // seven pairs, seven module alphas, metadata
   }
 });
 
@@ -139,4 +158,44 @@ test('a file without YuE2 modules is refused', () => {
   const src = path.join(tmp, 'other.safetensors');
   writeFixture(src, { sites: { other_proj: [2048, 2048] } });
   assert.throws(() => importYue2ComfyAdapter(src, path.join(tmp, 'adapters')), /No YuE2 adapter tensors/);
+});
+
+test('fused slider modules retain their different alpha values after splitting', () => {
+  const src = path.join(tmp, 'slider.safetensors');
+  writeFixture(src, { experts: ['text_encoders'], alphas: { 'self_attn.qkv_proj': 24, 'self_attn.o_proj': 8 } });
+  const result = importYue2ComfyAdapter(src, path.join(tmp, 'adapters'));
+  const { first } = read(result.arPath!);
+  assert.equal(first('yue2.blk.0.attn_q.alpha'), 24);
+  assert.equal(first('yue2.blk.0.attn_k.alpha'), 24);
+  assert.equal(first('yue2.blk.0.attn_output.alpha'), 8);
+  assert.equal(result.alpha, undefined);
+});
+
+test('ordinary native slider names map to the AR family', () => {
+  const src = path.join(tmp, 'native-slider.safetensors');
+  writeFixture(src, { experts: ['bare'], sites: { 'self_attn.k_proj': [2048, 1024] },
+    key: key => key.replace('layers.0.self_attn.k_proj', 'adapters.model-layers-0-self_attn-k_proj') });
+  const result = importYue2ComfyAdapter(src, path.join(tmp, 'adapters'));
+  assert.ok(read(result.arPath!).header['yue2.blk.0.attn_k.lora_A.weight']);
+  assert.equal(result.narPath, undefined);
+});
+
+test('sidecar alpha is captured in each module and baked module alpha takes precedence', () => {
+  const dir = path.join(tmp, 'sidecar'); fs.mkdirSync(dir);
+  const src = path.join(dir, 'adapter.safetensors');
+  writeFixture(src, { experts: ['bare'], alphas: { 'self_attn.o_proj': 8 } });
+  fs.writeFileSync(path.join(dir, 'adapter_config.json'), JSON.stringify({ lora_alpha: 0.5 }));
+  const result = importYue2ComfyAdapter(src, path.join(tmp, 'adapters'));
+  const { first } = read(result.arPath!);
+  assert.equal(first('yue2.blk.0.attn_q.alpha'), 0.5);
+  assert.equal(first('yue2.blk.0.attn_output.alpha'), 8);
+});
+
+for (const flow of ['diff', 'replacement'] as const) test(`NAR ${flow} flow heads survive conversion and disable the companion`, () => {
+  const src = path.join(tmp, `flow-${flow}.safetensors`);
+  writeFixture(src, { experts: ['diffusion_model'], flow });
+  const { header, first } = read(importYue2ComfyAdapter(src, path.join(tmp, 'adapters')).narPath!);
+  assert.equal(header.__metadata__.decoder_companion, 'off');
+  assert.equal(first(`yue2.vae2llm.${flow === 'diff' ? 'diff_b' : 'bias'}`), 0.25);
+  assert.deepEqual(header[`yue2.llm2vae.${flow === 'diff' ? 'diff' : 'weight'}`].shape, [64, 2048]);
 });

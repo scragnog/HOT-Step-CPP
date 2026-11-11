@@ -1,5 +1,13 @@
 {
   "translation": {
+    "yue2Continuation.label": "Continue from recording",
+    "yue2Continuation.info": "Use a section of an uploaded recording as the beginning of a new YuE2 song. Score planning is turned off.",
+    "yue2Continuation.upload": "Upload a recording",
+    "yue2Continuation.start": "Start (seconds)",
+    "yue2Continuation.end": "End (seconds)",
+    "yue2Continuation.rangeInfo": "Select up to 30 seconds, in 0.04 second frames. The selected section becomes the song's prefix.",
+    "yue2Continuation.hint": "The prefix is synthesized again by YuE2. One song per job; variations still apply. Real recordings may work better with a real-audio NAR adapter.",
+    "yue2Continuation.uploading": "Uploading recording...",
     "lyric.soundProfile": "Sound profile",
     "lyric.soundProfileHint": "Build a sound profile from the source captions and audio metadata.",
     "lyric.soundProfileFacts": "Source tempo, keys, genres, signatures and duration range",

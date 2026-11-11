@@ -1,5 +1,10 @@
 # Engine request and CLI reference
 
+YuE2 `style` and `lyrics` can both be empty. `codec_ids` without `abc` skips score
+planning, even if `cot` is enabled. With `continue_codec_ids: true`, these raw IDs in
+`[0, 32768)` become a forced prefix followed by sampled semantic frames. Recording
+continuations send `cot: "off"` and one song; NAR variations remain available.
+
 This page is the reference for the engine's request JSON, generation modes, CLI
 flags and HTTP endpoints. For how the engine is put together (binaries, pipelines,
 hook files, plugins, adapters, TensorRT, training, the HOT-ggml fork), read the

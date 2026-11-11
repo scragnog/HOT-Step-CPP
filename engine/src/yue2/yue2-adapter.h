@@ -678,6 +678,9 @@ static size_t yue2a_elem_size(const std::string & dtype) {
 // One (A, B, alpha) triple bound for one GGUF tensor. No slot field: YuE2 has
 // no fused projection, so a target never collects more than one triple.
 struct Yue2LoraFactor {
+    const STEntry * direct = nullptr;  // NAR flow-head delta or replacement
+    bool replacement = false;
+    bool bias = false;
     const STEntry * a     = nullptr;
     const STEntry * b     = nullptr;
     // LoKr (w1 set, a/b null): delta = scale * kron(w1, w2) with w2 either the
@@ -828,7 +831,23 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
     struct LokrEntry { const STEntry * w1 = nullptr, * w2 = nullptr, * w2a = nullptr, * w2b = nullptr; };
     std::map<std::string, LokrEntry>       lokr_by_module;
     std::map<std::string, const STEntry *> mag_by_module;
+    std::vector<std::pair<std::string, Yue2LoraFactor>> flow;
     for (const auto & e : st.entries) {
+        std::string key = e.name;
+        if (yue2a_starts(key, "yue2.")) key = key.substr(5);
+        bool is_flow = false;
+        for (const char * head : { "vae2llm", "llm2vae" }) {
+            for (const char * suffix : { ".diff", ".diff_b", ".weight", ".bias" }) {
+                if (key != std::string(head) + suffix) continue;
+                Yue2LoraFactor f;
+                f.direct = &e;
+                f.replacement = std::string(suffix) == ".weight" || std::string(suffix) == ".bias";
+                f.bias = std::string(suffix) == ".diff_b" || std::string(suffix) == ".bias";
+                flow.emplace_back(head, f);
+                is_flow = true;
+            }
+        }
+        if (is_flow) continue;
         std::string mod;
         if (yue2_magnitude_suffix(e.name, mod)) {
             if (mag_by_module.count(mod)) {
@@ -869,7 +888,8 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
     // LoKr set filled). false = refusal with err_out set; a module that is not
     // a merge site is counted and skipped without failing.
     auto bind = [&](const std::string & mod, Yue2LoraFactor f) -> bool {
-        const Yue2LoraTarget t = yue2_lora_target(mod);
+        Yue2LoraTarget t = yue2_lora_target(mod);
+        if (f.direct && f.bias) t.gguf_name = mod + ".bias";
         if (t.gguf_name.empty()) {
             switch (t.why) {
                 case YUE2_LR_FUSED_QKV: n_fused++;   break;
@@ -918,6 +938,9 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
         targets[t.gguf_name] = f;
         return true;
     };
+    for (const auto & entry : flow) {
+        if (!bind(entry.first, entry.second)) return -1;
+    }
 
     for (const auto & kv : a_by_module) {
         const std::string & mod = kv.first;
@@ -1096,7 +1119,28 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
             ws.data(name.c_str(), ttype);
             ws.shape(name.c_str(), n_dims, ne);
 
-            if (f.lokr()) {
+            if (f.direct) {
+                const int64_t count = ne[0] * ne[1];
+                bool ok = (f.direct->dtype == "F32" || f.direct->dtype == "F16" || f.direct->dtype == "BF16") &&
+                    f.direct->n_dims == (f.bias ? 1 : 2) && f.direct->shape[0] == (f.bias ? ne[0] : ne[1]) &&
+                    (f.bias || f.direct->shape[1] == ne[0]) &&
+                    yue2a_extent_ok(st, *f.direct, count, yue2a_elem_size(f.direct->dtype)) &&
+                    (ttype == GGML_TYPE_F32 || ttype == GGML_TYPE_F16 || ttype == GGML_TYPE_BF16);
+                const WeightCtx::PendingCopy * pc = nullptr;
+                for (const auto & p : wctx->pending) {
+                    if (p.tensor && std::string(ggml_get_name(p.tensor)) == name) pc = &p;
+                }
+                ok = ok && pc && pc->src && ggml_nelements(pc->tensor) == count;
+                if (ok) {
+                    std::vector<float> values((size_t) count);
+                    ok = adapter_to_f32(st_data(st, *f.direct), values.data(), count, f.direct->dtype);
+                    for (float v : values) ok = ok && std::isfinite(v);
+                }
+                if (!ok) {
+                    if (err_out) *err_out = name + ": invalid flow-head shape, dtype, extent or non-finite value";
+                    return -1;
+                }
+            } else if (f.lokr()) {
                 // torch shapes: w1 [a, b]; w2 [c, d] or w2_a [c, r] + w2_b [r, d].
                 // kron(w1, W2) is [a*c, b*d] and must equal [out, in] exactly.
                 const STEntry * w2c = f.w2 ? f.w2 : f.w2a;
@@ -1317,6 +1361,32 @@ static int yue2_adapter_merge_st(WeightCtx *                 wctx,
 
         const int64_t in_feat  = ne[0];
         const int64_t out_feat = ne[1];
+
+        if (f.direct) {
+            // Full replacements are companion weights, independent of strength.
+            // Deltas follow the flat-site global strength and stack on staged data.
+            const int64_t count = in_feat * out_feat;
+            std::vector<float> values((size_t) count), base((size_t) count);
+            adapter_to_f32(st_data(st, *f.direct), values.data(), count, f.direct->dtype);
+            WeightCtx::PendingCopy * pc = nullptr;
+            for (auto & p : wctx->pending) {
+                if (p.tensor && std::string(ggml_get_name(p.tensor)) == gguf_name) pc = &p;
+            }
+            const char * dtype = ttype == GGML_TYPE_F32 ? "F32" : ttype == GGML_TYPE_F16 ? "F16" : "BF16";
+            adapter_to_f32(pc->src, base.data(), count, dtype);
+            wctx->staging.emplace_back(new float[(pc->nbytes + 3) / 4]);
+            void * dst = wctx->staging.back().get();
+            for (int64_t i = 0; i < count; i++) {
+                const float v = f.replacement ? values[(size_t) i] : base[(size_t) i] + eff * values[(size_t) i];
+                if (ttype == GGML_TYPE_F32) ((float *) dst)[i] = v;
+                else if (ttype == GGML_TYPE_F16) ((ggml_fp16_t *) dst)[i] = ggml_fp32_to_fp16(v);
+                else ((ggml_bf16_t *) dst)[i] = ggml_fp32_to_bf16(v);
+            }
+            if (verify && memcmp(dst, pc->src, pc->nbytes) != 0) verify_changed++;
+            pc->src = dst;
+            merged++;
+            continue;
+        }
 
         // Shapes, dtypes and byte extents were all validated in the preflight
         // above, which is why nothing in this loop can bail out half way and

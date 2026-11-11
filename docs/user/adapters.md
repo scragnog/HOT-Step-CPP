@@ -384,12 +384,21 @@ one or both halves, in naming the engine does not load. **Import adapter…** co
 
 The trigger is read from the file's training tags, and the step count from its training
 info. A file with no alpha imports at the strength ComfyUI applies (alpha equal to the
-rank, scale 1.0); one whose modules carry different alphas is refused. If the adapter
+rank, scale 1.0). Each module retains its own alpha, including fused slider projections.
+Import reads `lora_alpha` or `alpha` from an adjacent `adapter_config.json`; a tensor's
+own alpha takes precedence, then file metadata, then the sidecar. If the adapter
 sounds too strong or too weak, use the **Strength** dials. LoRA and LoKr adapters are
 both supported. Import accepts fused and separate projection names, plus
 `lora_A`/`lora_B` and `lora_down`/`lora_up` names. Adapters trained in this app never
 need importing; a file that is already a native YuE2 adapter is refused, so point
 **Adapter folder** at it instead.
+
+Import also accepts ordinary distilled slider keys (`adapters.model-layers-*`), NAR
+`nar_self_attn` / `nar_mlp` keys, and `vae2llm` / `llm2vae` weights and biases. Flow-head
+`.diff` / `.diff_b` tensors add a delta at the global strength; `.weight` / `.bias`
+tensors replace the head independently of strength, except that zero disables the
+adapter. Imported flow heads turn off the automatic decoder companion to avoid applying
+it twice. Nonlinear particle sliders still need their own inference implementation.
 
 YuE2 weights are licensed CC BY-NC 4.0, with the authors' exception for individual
 creators, and an adapter trained on them carries the same terms. The panel shows the full
