@@ -115,6 +115,29 @@ test('a complete pre-#228 copy shows as installed and is reused without any netw
   } finally { sb.restore(); }
 });
 
+test('wrong legacy bytes without a current sidecar are refused by the reuse path', async () => {
+  for (const staleSidecar of [false, true]) {
+    const requested: string[] = [];
+    const sb = sandbox({
+      simple: async (url) => { requested.push(url); throw new Error('replacement fetch attempted'); },
+    });
+    const dir = path.join(sb.legacy, 'small');
+    const weights = path.join(dir, 'model.safetensors');
+    try {
+      put(dir, { 'model.safetensors': 'wrong legacy bytes', 'config.json': '{}' });
+      const expected = catalogue.files.find((f: any) => f.id === 'muscriptor-small').sha256;
+      if (staleSidecar) fs.writeFileSync(`${weights}.sha256`, `${expected} 0:0\n`);
+      assert.equal(svc._cachedSha(weights), null);
+      const job = await settle(svc.startDownload('muscriptor-small'));
+      assert.equal(job.status, 'failed', 'corrupt legacy weights cannot count as completed');
+      assert.match(job.error, /replacement fetch attempted/);
+      assert.ok(requested.length > 0, 'refusing reuse must attempt a replacement');
+      assert.equal(svc._cachedSha(weights), sha('wrong legacy bytes'));
+      assert.equal(fs.readFileSync(weights, 'utf8'), 'wrong legacy bytes');
+    } finally { sb.restore(); }
+  }
+});
+
 test('a download fetches config.json with the token before the weights, into the shared folder', async () => {
   const calls: string[] = [];
   const sb = sandbox({
