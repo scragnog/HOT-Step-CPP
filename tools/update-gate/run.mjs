@@ -11,9 +11,11 @@ import { chromium, browserOptions } from './browser.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(process.env.UPDATE_GATE_ROOT || 'D:/Ace-Step-Latest/hotstep-1148-fixture');
-const evidence = path.join(here, 'evidence');
+const batch = process.env.UPDATE_GATE_BATCH || 'round2';
+const evidence = path.join(here, 'evidence', batch);
 const archiveDir = path.join(root, 'source/release/out');
-const baseTag = 'v91.0.0', nextTag = 'v91.0.1';
+const major = process.env.UPDATE_GATE_MAJOR || '92';
+const baseTag = `v${major}.0.0`, nextTag = `v${major}.0.1`;
 const port = 13948, enginePort = 18948, url = `http://127.0.0.1:${port}`;
 const require = createRequire(import.meta.url);
 const Database = require(path.join(root, 'source/server/node_modules/better-sqlite3'));
@@ -38,7 +40,10 @@ async function api(route, body) {
 }
 const health = () => api('/api/health').then(r => r.status === 200 && r.body);
 function snapshotRows(data) {
-  const db = new Database(path.join(data, 'library/hotstep.db'), { readonly: true });
+  return databaseRows(path.join(data, 'library/hotstep.db'));
+}
+function databaseRows(file) {
+  const db = new Database(file, { readonly: true });
   try {
     return Object.fromEntries(db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(({ name }) => [name, db.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`).all().map(r => JSON.stringify(r)).sort()]));
   } finally { db.close(); }
@@ -70,9 +75,20 @@ async function stopTree(child, name) {
   if (tree.length) {
     const killed = spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { encoding: 'utf8', timeout: 20_000, windowsHide: true });
     fs.writeFileSync(path.join(evidence, `${name}-kill.txt`), killed.stdout + killed.stderr);
-    assert.equal(killed.status, 0);
+    if (killed.status !== 0) {
+      // taskkill can race an already-exiting engine. Accept only independently
+      // verified disappearance of every recorded process, never its message.
+      await until(() => {
+        const remaining = JSON.parse(ps(`@(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -in @(${tree.map(p => p.ProcessId).join(',')}) } | Select-Object ProcessId) | ConvertTo-Json -Compress` ) || '[]');
+        return !remaining || (Array.isArray(remaining) && remaining.length === 0);
+      }, 10_000);
+    }
   }
   await until(() => child.exitCode !== null || child.signalCode !== null, 10_000);
+}
+async function closeFixture(child, name, browser) {
+  try { await stopTree(child, name); }
+  finally { await browser?.close(); }
 }
 const assetName = `HOT-Step-CPP-${nextTag}-win-x64-cpu.zip`;
 function releaseFeed() {
@@ -83,12 +99,14 @@ function releaseFeed() {
   };
 }
 async function fixture(name, fault = '') {
-  const dir = path.join(root, name), install = path.join(dir, 'install'), data = path.join(dir, 'data'), profile = path.join(dir, 'profile');
+  name = (process.env.UPDATE_GATE_CASE_SUFFIX || '') + name;
+  const dir = path.join(root, batch, name), install = path.join(dir, 'install'), data = path.join(dir, 'data'), profile = path.join(dir, 'profile');
   assert.ok(!fs.existsSync(dir), `Refusing to overwrite ${dir}`);
   fs.mkdirSync(dir, { recursive: true });
   fs.mkdirSync(data, { recursive: true });
   fs.mkdirSync(profile, { recursive: true });
-  writeStubs(path.join(data, 'models'));
+  if (fault === 'both-no-models') fs.mkdirSync(path.join(data, 'models'), { recursive: true });
+  else writeStubs(path.join(data, 'models'));
   const cachedRuntime = path.join(root, 'clean-ready/data/tools/runtime');
   if (fs.existsSync(cachedRuntime)) fs.cpSync(cachedRuntime, path.join(data, 'tools/runtime'), { recursive: true });
   ps(`Expand-Archive -LiteralPath ${psQuote(path.join(archiveDir, `HOT-Step-CPP-${baseTag}-win-x64-cpu.zip`))} -DestinationPath ${psQuote(install)}`);
@@ -123,6 +141,58 @@ async function run(name, action) {
   try { const details = await action(); results.push({ name, verdict: 'PASS', seconds: (Date.now() - at) / 1000, ...details }); console.log(`PASS ${name}`); }
   catch (e) { results.push({ name, verdict: 'FAIL', seconds: (Date.now() - at) / 1000, error: e.stack, details: e.details }); console.error(`FAIL ${name}: ${e.stack}`); }
   write(path.join(evidence, `${name}-result.json`), results.at(-1));
+}
+
+async function beginUiUpdate(page, f, name) {
+  // A matching but old receipt must not complete this new attempt.
+  write(path.join(f.install, 'updater/last-result.json'), { format: 1, outcome: 'installed', from: f.payload, to: f.payload.replace(baseTag, nextTag), at: '2026-01-01T00:00:00.000Z', message: 'Stale fixture receipt' });
+  // API-driven preparation does not invalidate this tab's settings query.
+  if (name !== 'clean') {
+    await page.reload();
+    await page.getByRole('button', { name: /^Updates/ }).click();
+    await page.locator('.settings-updates').getByRole('button', { name: 'Restart and install', exact: true }).waitFor();
+  }
+  const failedRequests = [];
+  page.on('requestfailed', request => { if (request.url().startsWith(url)) failedRequests.push({ at: Date.now(), url: request.url(), error: request.failure() }); });
+  await page.evaluate(() => {
+    window.__updateGate = { token: Math.random(), states: [], timer: null };
+    window.__updateGate.timer = setInterval(() => {
+      const dialog = document.querySelector('.settings-update-overlay');
+      const state = { overlay: !!dialog, text: dialog?.textContent || '', reload: !!dialog?.querySelector('button') };
+      const states = window.__updateGate.states;
+      if (!states.length || JSON.stringify(state) !== JSON.stringify(states.at(-1).state)) states.push({ at: Date.now(), state });
+    }, 50);
+  });
+  const startedAt = Date.now();
+  await page.locator('.settings-updates').getByRole('button', { name: 'Restart and install', exact: true }).click();
+  await page.getByRole('button', { name: 'Restart and install', exact: true }).last().click();
+  await page.locator('.settings-update-overlay').waitFor();
+  return { startedAt, failedRequests, name, trace: f.cfg.trace };
+}
+
+async function finishUiUpdate(page, attempt, receipt) {
+  const dialog = page.locator('.settings-update-overlay');
+  await dialog.getByRole('button', { name: 'Reload', exact: true }).waitFor({ timeout: 330_000 });
+  const text = await dialog.innerText();
+  fs.writeFileSync(path.join(evidence, `${attempt.name}-dialog.txt`), text);
+  if (receipt.message) assert.ok(text.includes(receipt.message), 'dialog shows the fresh receipt message');
+  assert.ok(!text.includes('Stale fixture receipt'));
+  const token = await page.evaluate(() => window.__updateGate.token);
+  await pause(12_000); // Include the launcher's eight-second existing-tab grace.
+  const states = await page.evaluate(() => window.__updateGate.states);
+  const firstOverlay = states.findIndex(s => s.state.overlay);
+  assert.ok(firstOverlay >= 0);
+  assert.ok(states.slice(firstOverlay).every(s => s.state.overlay), 'dialog persists through disconnect');
+  assert.ok(attempt.failedRequests.length > 0, 'real connection failure was observed');
+  assert.ok(states.find(s => s.state.reload).at >= Date.parse(receipt.at), 'completion follows fresh receipt');
+  assert.equal(await page.evaluate(() => window.__updateGate.token), token, 'no automatic reload');
+  assert.ok(!fs.readFileSync(attempt.trace, 'utf8').includes('browser-open'), 'launcher does not open a duplicate tab');
+  const details = { text, states, failedRequests: attempt.failedRequests, manualReloadRequired: true };
+  write(path.join(evidence, `${attempt.name}-browser.json`), details);
+  await dialog.screenshot({ path: path.join(evidence, `${attempt.name}-dialog.png`) });
+  await Promise.all([page.waitForNavigation(), dialog.getByRole('button', { name: 'Reload', exact: true }).click()]);
+  assert.equal(await page.locator('.settings-update-overlay').count(), 0);
+  return details;
 }
 
 await run('clean', async () => {
@@ -174,9 +244,8 @@ await run('clean', async () => {
     write(path.join(evidence, 'hand-edited-refusal.json'), edited);
     assert.equal(edited.status, 400);
     assert.match(JSON.stringify(edited), /VERSION/);
-    await page.locator('.settings-updates').getByRole('button', { name: 'Restart and install', exact: true }).click();
-    await page.getByRole('button', { name: 'Restart and install', exact: true }).last().click();
-    const result = await until(() => fs.existsSync(path.join(f.install, 'updater/last-result.json')) && read(path.join(f.install, 'updater/last-result.json')), 180_000);
+    const attempt = await beginUiUpdate(page, f, 'clean');
+    const result = await until(() => { const r = read(path.join(f.install, 'updater/last-result.json')); return Date.parse(r.at) >= attempt.startedAt && r; }, 330_000);
     write(path.join(evidence, 'clean-last-result.json'), result);
     assert.equal(result.outcome, 'installed');
     await until(health);
@@ -190,8 +259,15 @@ await run('clean', async () => {
     assert.equal(final.install.lastResult.outcome, 'installed');
     const engine = await fetch(`http://127.0.0.1:${enginePort}/health`).then(r => r.json());
     write(path.join(evidence, 'clean-engine-health.json'), engine);
-    await pause(12_000);
-    return { result, engine, browserPages: browser.contexts().flatMap(c => c.pages()).length, health: await health(), secondLauncher: 'refused', handEdits: 'added and modified refused' };
+    const browserResult = await finishUiUpdate(page, attempt, result);
+    const trace = fs.readFileSync(f.cfg.trace, 'utf8').trim().split('\n').map(JSON.parse);
+    const spawn = trace.find(t => t.payload?.includes(nextTag + '-') && t.message.engineSpawn);
+    const firstHealth = trace.find(t => t.payload === spawn.payload && t.message.url?.endsWith('/health') && t.message.status === 200 && Date.parse(t.at) >= Date.parse(spawn.at));
+    const ready = trace.find(t => Date.parse(t.at) >= Date.parse(spawn.at) && t.message.body?.engine?.ready === true);
+    assert.ok(ready, 'observed real engine-ready attestation');
+    const engineStartSeconds = (Date.parse(firstHealth.at) - Date.parse(spawn.at)) / 1000;
+    const readyObservedSeconds = (Date.parse(ready.at) - Date.parse(spawn.at)) / 1000;
+    return { result, engine, engineStartSeconds, readyObservedSeconds, healthBoundSeconds: 300, browserResult, browserPages: browser.contexts().flatMap(c => c.pages()).length, health: await health(), secondLauncher: 'refused', handEdits: 'added and modified refused' };
   } finally {
     await stopTree(second, 'second-launcher-final');
     await stopTree(child, 'clean');
@@ -209,7 +285,7 @@ async function prepare() {
     return s.prepare.phase === 'ready' && s;
   }, 120_000);
 }
-for (const fault of ['failed-health', 'no-models', 'before-pointer', 'after-pointer', 'mid-restore', 'after-commit']) {
+for (const fault of ['failed-health', 'no-models', 'both-no-models', 'before-pointer', 'after-pointer', 'mid-restore', 'after-commit', 'committed-missing']) {
   await run(fault, async () => {
     const f = await fixture(fault + '-run', fault);
     let child, browser;
@@ -222,20 +298,30 @@ for (const fault of ['failed-health', 'no-models', 'before-pointer', 'after-poin
       await page.goto(url + '/settings');
       await page.getByRole('button', { name: /^Updates/ }).click();
       await page.locator('.settings-updates').getByText('Installed build', { exact: true }).waitFor();
+      const staged = await prepare();
+      await pause(3000); // Allow initial UI model-selection persistence to settle.
+      const beforeHealth = await health();
+      write(path.join(evidence, `${fault}-before-health.json`), beforeHealth);
+      if (fault === 'both-no-models') assert.equal(beforeHealth.engine.noModels, true);
+      if (fault === 'no-models') assert.equal(beforeHealth.engine.ready, true);
       seed(f.data);
       const before = snapshotRows(f.data);
       const envBefore = fs.readFileSync(path.join(f.data, 'settings/.env'), 'utf8');
       write(path.join(evidence, `${fault}-before-rows.json`), before);
-      const staged = await prepare();
-      const applied = await api('/api/updates/apply', { candidateId: staged.prepare.candidate.id });
-      write(path.join(evidence, `${fault}-apply.json`), applied);
-      assert.equal(applied.status, 202, JSON.stringify(applied));
-      if (!['failed-health', 'no-models'].includes(fault)) {
+      const startedAt = Date.now();
+      let attempt;
+      if (fault === 'failed-health') attempt = await beginUiUpdate(page, f, fault);
+      else {
+        const applied = await api('/api/updates/apply', { candidateId: staged.prepare.candidate.id });
+        write(path.join(evidence, `${fault}-apply.json`), applied);
+        assert.equal(applied.status, 202, JSON.stringify(applied));
+      }
+      if (!['failed-health', 'no-models', 'both-no-models'].includes(fault)) {
         await until(() => fs.existsSync(f.cfg.marker), fault === 'mid-restore' ? 180_000 : 90_000);
         const tx = read(path.join(f.install, 'updater/transaction.json'));
         write(path.join(evidence, `${fault}-interrupted-tx.json`), tx);
         write(path.join(evidence, `${fault}-interrupted-pointer.json`), read(path.join(f.install, 'current.json')));
-        if (fault === 'after-commit') {
+        if (['after-commit', 'committed-missing'].includes(fault)) {
           assert.equal(tx.state, 'committed');
           const db = new Database(path.join(f.data, 'library/hotstep.db'));
           db.prepare("UPDATE settings SET value='committed value must survive' WHERE key='update-gate'").run();
@@ -244,24 +330,62 @@ for (const fault of ['failed-health', 'no-models', 'before-pointer', 'after-poin
         }
         await stopTree(child, fault + '-interruption');
         // Remove injection for the real next HOT-Step.bat start.
-        f.cfg.fault = '';
+        f.cfg.fault = fault === 'committed-missing' ? 'committed-engine-absent' : '';
         write(f.cfgFile, f.cfg);
         child = f.start();
       }
       const resultFile = path.join(f.install, 'updater/last-result.json');
-      const result = await until(() => fs.existsSync(resultFile) && read(resultFile), 180_000);
+      const result = await until(() => { const r = read(resultFile); return Date.parse(r.at) >= startedAt && r; }, 330_000);
+      const receiptSeconds = (Date.now() - startedAt) / 1000;
       write(path.join(evidence, `${fault}-last-result.json`), result);
-      assert.equal(result.outcome, fault === 'after-commit' ? 'installed' : 'rolled-back');
+      const installs = ['after-commit', 'committed-missing', 'no-models', 'both-no-models'].includes(fault);
+      assert.equal(result.outcome, installs ? 'installed' : 'rolled-back');
+      if (fault === 'failed-health') { assert.match(result.message, /engine.*cannot start/i); assert.ok(receiptSeconds < 120); }
       await until(health);
       const after = snapshotRows(f.data);
       write(path.join(evidence, `${fault}-after-rows.json`), after);
-      compareRows(after, before);
+      if (fault === 'failed-health') {
+        // Reloading Settings before Apply can persist a model selection. The
+        // rollback contract is equality with the actual pre-update snapshot.
+        const snapshots = path.join(f.install, 'updater/snapshots');
+        const dirs = fs.readdirSync(snapshots);
+        assert.equal(dirs.length, 1);
+        const snapshot = path.join(snapshots, dirs[0]);
+        const entry = read(path.join(snapshot, 'manifest.json')).entries.find(e => e.kind === 'db' && e.existed);
+        const expected = databaseRows(path.join(snapshot, entry.name));
+        write(path.join(evidence, `${fault}-snapshot-rows.json`), expected);
+        compareRows(after, expected);
+        assert.ok(expected.songs.some(s => s.includes('preserve this library song')));
+        assert.ok(expected.settings.some(s => s.includes('update-gate') && s.includes('original')));
+      } else compareRows(after, before);
       assert.equal(fs.readFileSync(path.join(f.data, 'settings/.env'), 'utf8'), envBefore);
       const final = (await api('/api/updates/status')).body;
       write(path.join(evidence, `${fault}-final-status.json`), final);
-      assert.equal(final.installed.tag, fault === 'after-commit' ? nextTag : baseTag);
-      return { result, tablesCompared: Object.keys(after).length, settingsMatch: true, health: await health() };
-    } finally { await stopTree(child, fault + '-final'); await browser?.close(); }
+      assert.equal(final.installed.tag, installs ? nextTag : baseTag);
+      const browserResult = attempt ? await finishUiUpdate(page, attempt, result) : undefined;
+      const finalHealth = await health();
+      write(path.join(evidence, `${fault}-final-health.json`), finalHealth);
+      if (['no-models', 'both-no-models'].includes(fault)) assert.equal(finalHealth.engine.noModels, true);
+      if (fault === 'committed-missing') {
+        assert.equal(finalHealth.engine.ready, false);
+        assert.match(finalHealth.engine.bootStatus, /not found|missing|cannot/i);
+        await page.reload();
+        await page.getByRole('button', { name: /^Updates/ }).click();
+        await page.locator('.settings-updates').getByText('Installed build', { exact: true }).waitFor();
+        try {
+          // The terminal log includes a colon after "at"; the health field does not.
+          await page.getByText(/ace-server not found at:? /).first().waitFor({ timeout: 20_000 });
+        } finally {
+          fs.writeFileSync(path.join(evidence, 'committed-missing-ui.txt'), await page.locator('body').innerText());
+          await page.screenshot({ path: path.join(evidence, 'committed-missing-ui.png') });
+        }
+        assert.ok(!fs.readFileSync(path.join(evidence, `${f.name}-launcher-2.log`), 'utf8').includes('recovery-required'));
+      }
+      const trace = fs.readFileSync(f.cfg.trace, 'utf8').trim().split('\n').map(JSON.parse);
+      const failed = trace.find(t => t.message.body?.engine?.failed === true);
+      const rollbackAfterFailureSeconds = failed && result.outcome === 'rolled-back' ? (Date.parse(result.at) - Date.parse(failed.at)) / 1000 : undefined;
+      return { result, receiptSeconds, rollbackAfterFailureSeconds, browserResult, tablesCompared: Object.keys(after).length, settingsMatch: true, health: finalHealth };
+    } finally { await closeFixture(child, fault + '-final', browser); }
   });
 }
 await run('busy-lock', async () => {
@@ -334,7 +458,7 @@ await run('busy-lock', async () => {
 await run('protocol-zero', async () => {
   const f = await fixture('protocol-zero');
   const flat = path.join(f.dir, 'flat');
-  ps(`Expand-Archive -LiteralPath ${psQuote(path.join(archiveDir, 'HOT-Step-CPP-v91.0.2-win-x64-cpu.zip'))} -DestinationPath ${psQuote(flat)}`);
+  ps(`Expand-Archive -LiteralPath ${psQuote(path.join(archiveDir, `HOT-Step-CPP-v${major}.0.2-win-x64-cpu.zip`))} -DestinationPath ${psQuote(flat)}`);
   assert.equal(read(path.join(flat, 'build-info.json')).updaterProtocol, 0);
   assert.ok(!fs.existsSync(path.join(flat, 'current.json')));
   assert.ok(!fs.existsSync(path.join(flat, 'app')));
@@ -370,6 +494,7 @@ await run('recovery-no-server', async () => {
     await page.reload();
     await page.getByRole('button', { name: /^Updates/ }).click();
     await page.locator('.settings-updates').getByRole('button', { name: 'Restart and install', exact: true }).click();
+    const startedAt = Date.now();
     await page.getByRole('button', { name: 'Restart and install', exact: true }).last().click();
     await page.locator('.settings-update-overlay').waitFor();
     await until(() => fs.existsSync(f.cfg.marker));
@@ -408,8 +533,10 @@ await run('recovery-no-server', async () => {
     let listening = true;
     try { await health(); } catch { listening = false; }
     assert.equal(listening, false);
-    return { result, text, timeout: 'Real five-minute wait; launcher refused damaged snapshot and started no server' };
-  } finally { await stopTree(child, 'recovery-no-server-final'); await browser?.close(); }
+    const elapsedSeconds = (Date.now() - startedAt) / 1000;
+    assert.ok(elapsedSeconds >= 300);
+    return { result, text, elapsedSeconds, timeout: 'Real five-minute wait; launcher refused damaged snapshot and started no server' };
+  } finally { await closeFixture(child, 'recovery-no-server-final', browser); }
 });
-console.log(JSON.stringify(results, null, 2));
+console.log(JSON.stringify(results.map(({ name, verdict, seconds }) => ({ name, verdict, seconds })), null, 2));
 process.exitCode = results.some(r => r.verdict === 'FAIL') ? 1 : 0;

@@ -11,14 +11,16 @@ import { createRequire, syncBuiltinESMExports } from 'node:module';
 const cfgPath = process.env.UPDATE_GATE_CONFIG;
 if (!cfgPath) throw new Error('UPDATE_GATE_CONFIG is required');
 const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-const append = message => fs.appendFileSync(cfg.trace, JSON.stringify({ at: new Date().toISOString(), pid: process.pid, entry: path.basename(process.argv[1] || ''), message }) + '\n');
+const append = message => fs.appendFileSync(cfg.trace, JSON.stringify({ at: new Date().toISOString(), pid: process.pid, entry: path.basename(process.argv[1] || ''), payload: process.env.HOT_STEP_ROOT, message }) + '\n');
 const emit = net.Server.prototype.emit;
 net.Server.prototype.emit = function (event, ...args) {
   if (event === 'error') append(`net error ${args[0]?.stack}`);
-  if (event === 'request' && cfg.fault === 'mid-restore' && process.env.HOT_STEP_ROOT?.includes(cfg.release.tag_name + '-') && args[0].url === '/api/maintenance/status') {
-    args[1].writeHead(503, { 'content-type': 'application/json' });
-    args[1].end(JSON.stringify({ error: 'Injected unhealthy candidate for restore interruption' }));
-    return true;
+  if (event === 'request' && args[0].url === '/api/maintenance/status') {
+    const response = args[1], end = response.end;
+    response.end = function (chunk, ...rest) {
+      try { append({ attestation: true, body: { engine: JSON.parse(String(chunk)).engine } }); } catch {}
+      return end.call(this, chunk, ...rest);
+    };
   }
   return emit.call(this, event, ...args);
 };
@@ -48,10 +50,19 @@ globalThis.fetch = async (input, init) => {
     append(`asset ${asset.name}`);
     return new Response(Readable.toWeb(fs.createReadStream(path.join(cfg.archiveDir, asset.name))), { headers: { 'content-length': String(asset.size) } });
   }
-  return nativeFetch(input, init);
+  const response = await nativeFetch(input, init);
+  if (url.includes('/api/maintenance/status') || url.endsWith('/health')) {
+    try { append({ url, status: response.status, body: await response.clone().json() }); } catch {}
+  }
+  return response;
 };
 
 const entry = path.basename(process.argv[1] || '');
+const nativeSpawn = childProcess.spawn;
+childProcess.spawn = function (exe, args, options) {
+  if (String(exe).endsWith('ace-server.exe')) append({ engineSpawn: String(exe) });
+  return nativeSpawn.apply(this, arguments);
+};
 if (entry === 'open-browser-if-needed.mjs') {
   const log = console.log;
   console.log = (...args) => { append(args.join(' ')); log(...args); };
@@ -79,18 +90,25 @@ fs.renameSync = function (from, to) {
   if (nextPointer && fault === 'before-pointer') freeze(fault);
   const result = rename.apply(this, arguments);
   if (nextPointer && fault === 'after-pointer') freeze(fault);
-  if (entry === 'launcher.mjs' && path.basename(target) === 'transaction.json' && value?.state === 'committed' && fault === 'after-commit') freeze(fault);
+  if (entry === 'launcher.mjs' && path.basename(target) === 'transaction.json' && value?.state === 'committed' && ['after-commit', 'committed-missing'].includes(fault)) freeze(fault);
   if (entry === 'updater-tool.mjs' && String(from).endsWith('.restore-tmp') && fault === 'mid-restore') freeze(fault);
   return result;
 };
 syncBuiltinESMExports();
 
-if (entry === 'server.mjs' && process.env.HOT_STEP_ROOT?.includes(cfg.release.tag_name + '-') && ['failed-health', 'mid-restore', 'no-models'].includes(fault)) {
+const candidate = process.env.HOT_STEP_ROOT?.includes(cfg.release.tag_name + '-');
+if (entry === 'server.mjs' && (fault === 'both-no-models' || (candidate && fault === 'no-models'))) {
+  process.env.ACESTEPCPP_MODELS = path.join(cfg.data, 'empty-models');
+  fs.mkdirSync(process.env.ACESTEPCPP_MODELS, { recursive: true });
+  append(`injected ${fault}`);
+}
+if (entry === 'server.mjs' && candidate && fault === 'committed-engine-absent') {
+  process.env.ACESTEPCPP_EXE = path.join(cfg.data, 'deliberately-absent-engine.exe');
+  append('injected committed engine absent');
+}
+if (entry === 'server.mjs' && candidate && ['failed-health', 'mid-restore'].includes(fault)) {
   // An absent engine gives the real server a permanently failed attestation.
-  if (fault === 'no-models') {
-    process.env.ACESTEPCPP_MODELS = path.join(cfg.data, 'empty-models');
-    fs.mkdirSync(process.env.ACESTEPCPP_MODELS, { recursive: true });
-  } else process.env.ACESTEPCPP_EXE = path.join(cfg.data, 'deliberately-absent-engine.exe');
+  process.env.ACESTEPCPP_EXE = path.join(cfg.data, 'deliberately-absent-engine.exe');
   const require = createRequire(path.join(process.env.HOT_STEP_ROOT, 'server', 'server.mjs'));
   const Database = require('better-sqlite3');
   const db = new Database(path.join(cfg.data, 'library', 'hotstep.db'));

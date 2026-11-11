@@ -1,48 +1,33 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-const out = path.join(path.dirname(fileURLToPath(import.meta.url)), 'evidence');
+const batch = process.env.UPDATE_GATE_BATCH || 'round2';
+const out = path.join(path.dirname(fileURLToPath(import.meta.url)), 'evidence', batch);
 const root = path.resolve(process.env.UPDATE_GATE_ROOT || 'D:/Ace-Step-Latest/hotstep-1148-fixture');
 const read = f => JSON.parse(fs.readFileSync(f, 'utf8'));
-const write = (f, value) => fs.writeFileSync(f, JSON.stringify(value, null, 2) + '\n');
 const suites = read(path.join(out, 'suites.json'));
-for (const suite of suites) suite.summary = fs.readFileSync(path.join(out, `${suite.name}.log`), 'utf8').split('\n').filter(l => /^(?:#|ℹ) (tests|pass|fail|cancelled|skipped|duration_ms)/.test(l));
-write(path.join(out, 'suites.json'), suites);
-const cases = ['clean', 'failed-health', 'no-models', 'before-pointer', 'after-pointer', 'mid-restore', 'after-commit', 'busy-lock', 'protocol-zero', 'recovery-no-server'].map(name => read(path.join(out, `${name}-result.json`)));
-for (const c of cases) {
-  if (c.details?.images) c.details.images = c.details.images.map(({ alt }) => ({ alt }));
-  write(path.join(out, `${c.name}-result.json`), c);
-}
-const require = createRequire(import.meta.url);
-const Database = require(path.join(root, 'source/server/node_modules/better-sqlite3'));
-const db = new Database(path.join(root, 'failed-health-run/data/library/hotstep.db'), { readonly: true });
-const failedRows = {
-  song: db.prepare("SELECT id,title FROM songs WHERE id='update-gate-song'").get(),
-  setting: db.prepare("SELECT key,value FROM settings WHERE key='update-gate'").get(),
-};
-db.close();
-write(path.join(out, 'failed-health-retained-candidate-rows.json'), failedRows);
+const cases = ['clean', 'failed-health', 'no-models', 'both-no-models', 'before-pointer', 'after-pointer', 'mid-restore', 'after-commit', 'committed-missing', 'busy-lock', 'protocol-zero', 'recovery-no-server'].map(name => read(path.join(out, `${name}-result.json`)));
+const passed = cases.every(c => c.verdict === 'PASS') && suites.every(s => s.exit === 0);
+const source = cases.find(c => c.name === 'clean')?.health?.build?.sha;
+const major = process.env.UPDATE_GATE_MAJOR || '92';
 const summary = {
-  source: read(path.join(root, 'clean-confirm/install/app', read(path.join(root, 'clean-confirm/install/current.json')).payload, 'build-info.json')).sha,
-  recommendation: 'Keep UPDATER_PROTOCOL=0. Fix failed-engine attestation and preserve updater reconnect UI through global offline handling; then rerun the failed cases and obtain the owner portable check.',
-  packages: ['91.0.0', '91.0.1', '91.0.2'].map(version => ({ version, protocol: version === '91.0.2' ? 0 : 1, buildLog: `build-${version}.stdout.log` })),
+  source,
+  verdict: passed ? 'PASS: CPU Windows portable acceptance' : 'FAIL: see case and suite receipts',
+  packages: [0, 1, 2].map(patch => ({ version: `${major}.0.${patch}`, protocol: patch === 2 ? 0 : 1, buildLog: `build-${major}.0.${patch}.stdout.log` })),
+  commands: ['pwsh -NoProfile -File tools/update-gate/build-fixtures.ps1 -Reuse', 'node tools/update-gate/suites.mjs', 'node tools/update-gate/run.mjs all', "$env:UPDATE_GATE_CASE_SUFFIX='retry-'; node tools/update-gate/run.mjs clean,failed-health,no-models,both-no-models,after-pointer,mid-restore,committed-missing", "$env:UPDATE_GATE_CASE_SUFFIX='retry2-'; node tools/update-gate/run.mjs failed-health,committed-missing", "$env:UPDATE_GATE_CASE_SUFFIX='retry3-'; node tools/update-gate/run.mjs committed-missing"],
   method: {
-    commands: ['node tools/update-gate/run.mjs failed-health', 'node tools/update-gate/run.mjs clean,before-pointer,after-pointer,mid-restore,after-commit', 'node tools/update-gate/run.mjs busy-lock,protocol-zero,recovery-no-server', 'node tools/update-gate/run.mjs recovery-no-server', 'node tools/update-gate/run.mjs no-models'],
-    feed: 'NODE_OPTIONS --import process-local fetch replacement for exact GitHub latest-release, commit, archive and checksum URLs; all package/launcher/server/UI code unmodified',
-    native: 'Copied engine binaries via -SkipEngine; CPU backend; metadata-only GGUF fixtures; no weight loading or generation',
-    data: 'Separate profile/data folders for every case; server 13948, engine 18948; process trees recorded with Get-CimInstance and killed by exact owned PID after daemon PID check',
-    comparisons: 'All 31 table row sets retained as evidence. Equality excludes only server_instances, whose UUID/PID/heartbeat change on restart. Settings .env compared byte-for-byte. After-commit case deliberately changes a setting after commit and proves it survives recovery.',
-    failedHealth: 'Candidate preload makes its engine path absent and changes a song, setting and .env. Real attestation incorrectly accepts it. Mid-restore uses an injected HTTP 503 to enter rollback independently of this defect.',
-    busy: 'Real model-download job fed a slow local HTTP response through a process-local HTTPS redirect. No model loaded. Job continues after refusal, then the test cancels it.',
-    protocolZero: 'Default flat archive verified. Its packaged server command is run directly with isolated ports because the old flat bat hardcodes its browser helper to port 3001.',
-    recoveryUi: 'Final reproduction uses real browser time. Offline transition unmounts the updater overlay before its timeout; screenshot and launcher recovery-required receipt retained. No five-minute timeout is claimed to have elapsed.',
+    feed: 'Process-local interception of exact release/feed URLs. Production launcher/server/UI sources are unchanged.',
+    native: 'CPU package with reused binaries (-SkipEngine), metadata-only GGUF stubs; no weights loaded or generation. Native version appears in clean health receipt.',
+    data: 'Isolated profile/data folders; ports 13948/18948. Exact owned process trees checked against daemon PID before termination.',
+    comparisons: 'All database rows retained. Equality excludes only server_instances process heartbeat rows. Settings .env compared byte-for-byte. Failed-health compares every persistent row to the actual pre-update SQLite snapshot, because refreshing Settings before Apply can save a model selection. Post-commit sentinel proves recovery does not restore old data.',
+    faults: 'Missing engine path and reversible candidate data changes force rollback. Filesystem hooks freeze at four actual durable transaction boundaries. Empty models uses an empty directory, with no data mutation.',
+    ui: 'Real Chromium time and real failed requests. Matching stale receipts cannot finish the attempt. Clean/rollback dialogs retain the old document until manual Reload. Damaged snapshot waits five minutes once.',
+    busy: 'A real model download reads controlled slow HTTP bytes; it continues after apply refusal, then the harness cancels it.',
+    protocolZero: 'Flat package layout checked; packaged server started directly on isolated ports to avoid the flat launcher browser URL hardcoded to 3001.',
   },
-  failedRows,
-  cases,
-  suites,
-  evidenceDirectory: out,
-  cleanup: { processes: 'All fixture process trees stopped; final port/process inspection saved separately', folders: root, reason: 'Automatic approval review rejected recursive cleanup with blocked by policy. Fixtures and disposable clone retained.' },
+  limits: ['CUDA package not run: local GPU prohibited for this batch.', 'No visual or listening approval claimed.', 'Packager npm install changes fixture-only ui/package-lock.json metadata; application source remains the requested commit.'],
+  harnessRetries: 'Initial attempts are retained under initial-harness, first-retry and second-retry. Harness corrections: nullable success message, stale query after API preparation, model-selection baseline timing, actual snapshot comparison, health field names, and precise visible engine-status matching. No application code or package archive changed between attempts.',
+  cases, suites, evidenceDirectory: out, fixtureDirectory: root,
 };
-write(path.join(out, 'summary.json'), summary);
-console.log(JSON.stringify({ cases: cases.map(({ name, verdict }) => ({ name, verdict })), suites: suites.map(({ name, exit, summary }) => ({ name, exit, summary })), failedRows }, null, 2));
+fs.writeFileSync(path.join(out, 'summary.json'), JSON.stringify(summary, null, 2) + '\n');
+console.log(JSON.stringify({ verdict: summary.verdict, cases: cases.map(({ name, verdict }) => ({ name, verdict })), suites: suites.map(({ name, exit, summary }) => ({ name, exit, summary })) }, null, 2));

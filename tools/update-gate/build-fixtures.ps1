@@ -1,13 +1,27 @@
-param([string]$FixtureRoot = 'D:\Ace-Step-Latest\hotstep-1148-fixture')
+param(
+    [string]$FixtureRoot = 'D:\Ace-Step-Latest\hotstep-1148-fixture',
+    [string]$SourceCommit = 'f2b666d80b1acfdb8d3046b2c8ea7973a1822d4e',
+    [int]$VersionMajor = 92,
+    [string]$Batch = 'round2',
+    [switch]$Reuse
+)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $clone = Join-Path $FixtureRoot 'source'
-$logs = Join-Path $PSScriptRoot 'evidence'
+$logs = Join-Path $PSScriptRoot "evidence/$Batch"
 New-Item -ItemType Directory -Force $logs | Out-Null
-if (Test-Path $clone) { throw "Refusing to overwrite existing clone: $clone" }
-New-Item -ItemType Directory -Force $FixtureRoot | Out-Null
-git clone --no-hardlinks --single-branch --branch master $repo $clone
-if ($LASTEXITCODE) { throw 'Clone failed' }
+if (Test-Path $clone) {
+    if (-not $Reuse) { throw "Existing clone requires -Reuse: $clone" }
+    git -C $clone fetch $repo master
+    if ($LASTEXITCODE) { throw 'Fetch failed' }
+    git -C $clone merge --ff-only $SourceCommit
+    if ($LASTEXITCODE) { throw 'Fixture fast-forward failed' }
+} else {
+    New-Item -ItemType Directory -Force $FixtureRoot | Out-Null
+    git clone --no-hardlinks --single-branch --branch master $repo $clone
+    if ($LASTEXITCODE) { throw 'Clone failed' }
+}
+if ((git -C $clone rev-parse HEAD) -ne $SourceCommit) { throw 'Fixture source differs from requested commit' }
 function CopyTree($source, $target) {
     robocopy $source $target /E /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "Copy failed: $source" }
@@ -22,12 +36,12 @@ foreach ($name in @('ace-server.exe','ace-train.exe','ace-midi.exe','ace-caption
     Copy-Item -LiteralPath "$repo\engine\build\Release\$name" -Destination $engineOut
 }
 Get-ChildItem "$repo\engine\build\Release\ggml-cpu-*.dll" | Copy-Item -Destination $engineOut
-foreach ($version in @('91.0.0','91.0.1','91.0.2')) {
+foreach ($version in @("$VersionMajor.0.0","$VersionMajor.0.1","$VersionMajor.0.2")) {
     git -C $clone tag "v$version"
     if ($LASTEXITCODE) { throw 'Fixture tag failed' }
     $argsList = @('-NoProfile','-File',"$clone\release\build-release.ps1",'-Version',$version,'-Variant','cpu','-SkipEngine')
-    if ($version -ne '91.0.2') { $argsList += @('-UpdaterProtocol','1') }
-    if ($version -ne '91.0.0') { $argsList += '-SkipUI' }
+    if ($version -ne "$VersionMajor.0.2") { $argsList += @('-UpdaterProtocol','1') }
+    if ($version -ne "$VersionMajor.0.0") { $argsList += '-SkipUI' }
     $p = Start-Process pwsh -ArgumentList $argsList -PassThru -WindowStyle Hidden -RedirectStandardOutput "$logs\build-$version.stdout.log" -RedirectStandardError "$logs\build-$version.stderr.log"
     if (-not $p.WaitForExit(900000)) { Stop-Process -Id $p.Id; throw "Build timeout $version, PID $($p.Id)" }
     if ($p.ExitCode -ne 0) { throw "Build $version failed with $($p.ExitCode), see evidence logs" }
