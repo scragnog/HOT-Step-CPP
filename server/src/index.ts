@@ -165,7 +165,10 @@ app.use('/api/maintenance', maintenanceRouter(maintenance, () => ({
   build: BUILD_INFO,
   db: dbInitState,
   ui: fs.existsSync(path.join(PROJECT_ROOT, 'ui', 'dist', 'index.html')),
-  engine: { ready: engineReady, status: engineBootStatus },
+  // ready: /health answered. noModels: the binary ran and reported an empty
+  // models folder. failed: it cannot come up without help (no binary, spawn
+  // failed, crash limiter gave up). The launcher rolls back unless ready or noModels.
+  engine: { ready: engineReady, status: engineBootStatus, noModels: engineNoModels, failed: engineFailed },
 })));
 app.use('/api/updates', updatesRoutes);
 app.use('/api/shutdown', shutdownRoutes);
@@ -269,11 +272,11 @@ if (fs.existsSync(uiDistPath)) {
 // The ace-server child lifecycle (spawn, log fan-out, crash-respawn limiter,
 // deliberate stop/restart) lives in services/aceEngineProcess.ts so that the
 // training preprocess job can borrow the GPU. §4.1 of the preprocess plan.
-import { setEngineReady, engineReady, engineBootStatus } from './engineState.js';
+import { setEngineReady, engineReady, engineBootStatus, engineNoModels, engineFailed } from './engineState.js';
 import { restoreMm3Selection } from './services/backends/minimax/index.js';
 import { restoreYue2Selection } from './services/backends/yue2/index.js';
 import { aceClient } from './services/aceClient.js';
-import { onEngineRestarted, retryIfGaveUp, startAceServer, startEngineWorkers, stopAceServer, stopEngineWorkers } from './services/aceEngineProcess.js';
+import { bootAceServer, onEngineRestarted, retryIfGaveUp, startEngineWorkers, stopAceServer, stopEngineWorkers } from './services/aceEngineProcess.js';
 import { engineWorkers } from './services/engineWorkers.js';
 import { setWorkerConcurrency } from './services/generation/gpuLane.js';
 import { killActiveChildren, recoverStaleJobs } from './services/training/labelingQueue.js';
@@ -443,8 +446,8 @@ async function ensureRequiredRuntime(): Promise<{ ok: boolean; missing: string[]
   }
 
   setEngineReady(false, cudaReady ? 'Starting engine...' : 'Starting engine (CPU only — CUDA runtime missing)...');
-  startAceServer();
-  setEngineReady(true, cudaReady ? 'Ready' : 'Ready (CPU only — GPU runtime missing)');
+  // Ready only once the engine's /health answers; a missing binary or failed spawn stays down with its reason.
+  bootAceServer(cudaReady ? 'Ready' : 'Ready (CPU only — GPU runtime missing)');
   // Multi-GPU opt-in: one more engine per further opted-in card. Each runs the
   // restore hooks below in its own scope once its /health answers. A no-op
   // with the opt-in empty (the default).

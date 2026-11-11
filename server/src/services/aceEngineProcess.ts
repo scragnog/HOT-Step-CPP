@@ -23,7 +23,7 @@ import { spawn, execSync, ChildProcess } from 'child_process';
 import { config, USER_PLUGINS_DIR } from '../config.js';
 import { logEngine } from './logger.js';
 import { pushLog } from '../routes/logs.js';
-import { setEngineReady, setEngineNoModels, backendLineFeeder, resetEngineDevice,
+import { setEngineReady, setEngineNoModels, setEngineFailed, backendLineFeeder, resetEngineDevice,
          engineBackendFromLine, noteEngineBackendLine } from '../engineState.js';
 import { aceClient } from './aceClient.js';
 import { buildGpuEnv, listGpusSync } from './gpuDevices.js';
@@ -106,6 +106,7 @@ async function runRestoreHooks(): Promise<void> {
 
 interface EngineProcess {
   start(): ChildProcess | null;
+  boot(readyStatus: string): ChildProcess | null;
   stop(reason?: string, timeoutMs?: number, opts?: { suspend?: boolean }): Promise<boolean>;
   restart(): Promise<boolean>;
   retryIfGaveUp(): void;
@@ -133,6 +134,7 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
     worker.status = status;
   };
   const setNoModels = (v: boolean) => { if (worker.primary) setEngineNoModels(v); };
+  const setFailed = (v: boolean) => { if (worker.primary) setEngineFailed(v); };
   const isReachable = () => inWorkerScope(worker, () => aceClient.isReachable());
   const restore = () => inWorkerScope(worker, runRestoreHooks);
 
@@ -194,6 +196,7 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
    * Also assigns the current process.
    */
   function start(): ChildProcess | null {
+    setFailed(false);
     const exe = config.aceServer.exe;
     if (!exe || !fs.existsSync(exe)) {
       console.log(`${srv} ace-server not found at: ${exe}`);
@@ -201,6 +204,7 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
       // A crash respawn lands here when the binary has vanished (an unmounted
       // volume, #179). Nothing else will ever retry, so say so.
       setReady(false, `ace-server not found at ${exe}`);
+      setFailed(true);
       aceProcess = null;
       worker.pid = null;
       return null;
@@ -274,6 +278,7 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
     } catch (err: any) {
       console.error(`${srv} ${err?.message || err}`);
       setReady(false, `GPU ${worker.gpuUuid} not found`);
+      setFailed(true);
       aceProcess = null;
       worker.pid = null;
       return null;
@@ -304,7 +309,18 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
 
     if (worker.primary) resetEngineDevice();   // w0 reads the global
     else worker.device = null;
-    const child = testHooks.spawn(exe, args, spawnOpts);
+    let child: ChildProcess;
+    try {
+      child = testHooks.spawn(exe, args, spawnOpts);
+    } catch (err: any) {
+      // Node throws (rather than emitting 'error') for some spawn failures, e.g. a file that is not an executable.
+      console.error(`${tag} Failed to start: ${err?.message || err}`);
+      setReady(false, `ace-server could not start: ${err?.message || err}`);
+      setFailed(true);
+      aceProcess = null;
+      worker.pid = null;
+      return null;
+    }
 
     // Filter repetitive GGML noise from console output (still written to ace_engine.log via logEngine)
     const isNoise = (line: string) =>
@@ -391,6 +407,7 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
           console.error(`${tag} Check the error above: usually no models downloaded yet, or a DLL missing from the engine/ directory.`);
           console.error(`${tag} The engine starts again by itself once a model download finishes.`);
           setReady(false, `Engine crashed ${MAX_CRASHES} times — download a model in the Model Manager, or check the logs`);
+          setFailed(true);
           gaveUp = true;
           return;
         }
@@ -414,6 +431,14 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
 
     child.on('error', (err) => {
       console.error(`${tag} Failed to start: ${err.message}`);
+      // No pid: the spawn itself failed and no 'exit' will follow. Drop the
+      // child so nothing waits on it, and say why it is down.
+      if (child.pid === undefined && aceProcess === child) {
+        aceProcess = null;
+        worker.pid = null;
+        setReady(false, `ace-server could not start: ${err.message}`);
+        setFailed(true);
+      }
     });
 
     aceProcess = child;
@@ -570,8 +595,21 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
     return true;
   }
 
-  /** Keep polling a live child until /health answers; then restore and flip ready. */
-  async function lateReadyWatch(child: ChildProcess, epoch: number, when = 'after the restart timeout'): Promise<void> {
+  /**
+   * Boot: spawn, then report ready only once /health answers. The restore
+   * hooks are not run here: boot schedules its own restores through
+   * maintenance.whenOpen, after an update's gate opens.
+   */
+  function boot(readyStatus: string): ChildProcess | null {
+    const child = start();
+    if (child) void lateReadyWatch(child, lifecycleEpoch, 'at startup', readyStatus);
+    return child;
+  }
+
+  /** Keep polling a live child until /health answers; then restore and flip ready
+   *  (or, with `bootStatus`, flip ready with that status and leave restores to boot). */
+  async function lateReadyWatch(child: ChildProcess, epoch: number, when = 'after the restart timeout',
+                                bootStatus?: string): Promise<void> {
     while (aceProcess === child && epoch === lifecycleEpoch && !suspended
            && child.exitCode === null && child.signalCode === null) {
       await new Promise(r => setTimeout(r, testHooks.lateReadyPollMs));
@@ -583,14 +621,15 @@ function createEngineProcess(worker: EngineWorker): EngineProcess {
           || child.exitCode !== null || child.signalCode !== null) return;
       if (up) {
         console.log(`${srv} ace-server answered /health ${when} — marking ready`);
-        await restoreThenReady(child, epoch);
+        if (bootStatus === undefined) await restoreThenReady(child, epoch);
+        else setReady(true, bootStatus);
         return;
       }
     }
   }
 
   return {
-    start, stop, restart, retryIfGaveUp,
+    start, boot, stop, restart, retryIfGaveUp,
     process: () => aceProcess,
     suspended: () => suspended,
   };
@@ -603,6 +642,14 @@ const primary = () => engineProcess(primaryWorker());
  */
 export function startAceServer(): ChildProcess | null {
   return primary().start();
+}
+
+/**
+ * Server boot: spawn the primary and mark it ready with `readyStatus` once its
+ * /health answers. A missing binary or failed spawn leaves it down, with the reason.
+ */
+export function bootAceServer(readyStatus = 'Ready'): ChildProcess | null {
+  return primary().boot(readyStatus);
 }
 
 /** The primary's live child, or null. */

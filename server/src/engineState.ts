@@ -3,7 +3,7 @@
 // Extracted to avoid circular imports between index.ts and route modules.
 // index.ts sets these values; routes read them.
 
-/** True only after runtime DLLs are downloaded and ace-server is spawned. */
+/** True only once the engine's own /health has answered (boot, restart or crash respawn). */
 export let engineReady = false;
 
 /** Human-readable status for what the engine is doing before it's ready. */
@@ -14,6 +14,14 @@ export let engineNoModels = false;
 
 export function setEngineNoModels(v: boolean) {
   engineNoModels = v;
+}
+
+/** True when the engine cannot come up without help: binary missing, spawn
+ *  failed, or the crash limiter gave up. Cleared by the next spawn. */
+export let engineFailed = false;
+
+export function setEngineFailed(v: boolean) {
+  engineFailed = v;
 }
 
 /** Update the engine boot status (called from index.ts bootstrap) */

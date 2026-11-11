@@ -65,6 +65,9 @@ db.pragma('journal_mode = WAL');
 db.exec('CREATE TABLE IF NOT EXISTS runs (who TEXT)');
 db.prepare('INSERT INTO runs VALUES (?)').run(cfg.version);
 let closed = !!lease;
+const bootAt = Date.now();
+// The server's engine attestation: cfg.engine as given, or Ready (after cfg.engineReadyAfterMs).
+const engineNow = () => cfg.engine ?? (Date.now() - bootAt < (cfg.engineReadyAfterMs ?? 0) ? { ready: false, status: 'Starting engine...' } : { ready: true, status: 'Ready' });
 function stop() {
   db.close();
   process.send({ type: 'stopped', clean: !cfg.unclean, problems: cfg.unclean ? ['an engine process did not exit'] : [] }, () => process.exit(0));
@@ -77,7 +80,7 @@ const srv = http.createServer((req, res) => {
     if (req.url === '/api/health') return json(cfg.health503 ? 503 : 200, { status: 'ok' });
     if (req.url === '/api/maintenance/status') {
       if (lease && !authorised) return json(403, {});
-      return json(200, { closed, leaseId: lease?.id ?? null, build, db: { ok: !cfg.badDb, errors: cfg.badDb ? ['migration 42 failed'] : [] }, ui: true, engine: { ready: true, status: 'Ready' } });
+      return json(200, { closed, leaseId: lease?.id ?? null, build, db: { ok: !cfg.badDb, errors: cfg.badDb ? ['migration 42 failed'] : [] }, ui: true, engine: engineNow() });
     }
     if (req.url === '/api/maintenance/release') {
       if (lease && !authorised) return json(403, {});
@@ -244,6 +247,58 @@ test('failed health: candidate stopped, pointer back, DB restored to the snapsho
   assert.equal(await run, 0);
 });
 
+test('engine cannot start (ace-server missing): rolled back at once, with the engine status', async t => {
+  const f = install(t, { engine: { ready: false, failed: true, noModels: false, status: 'ace-server not found at X:\nowhere.exe' } });
+  f.seed();
+  const run = f.start();
+  await f.apply(await f.port(f.oldId));
+  await f.port(f.newId);
+  const started = Date.now();
+  const r = await f.waitResult();
+  assert.equal(r.outcome, 'rolled-back');
+  assert.match(r.message, /health check: its engine cannot start \(ace-server not found at/);
+  assert.ok(Date.now() - started < timing.healthMs / 2, 'a failed engine ends the wait without the full bound');
+  const port = await f.port(f.oldId);
+  assert.equal(f.pointer(), f.oldId);
+  assert.deepEqual(f.runs(), ['before', 'old', 'old']);
+  await f.post(port, '/test/quit');
+  assert.equal(await run, 0);
+});
+
+test('engine that never answers /health: rolled back after the bound, with the engine status', async t => {
+  const f = install(t, { engine: { ready: false, failed: false, noModels: false, status: 'Starting engine...' } });
+  const run = f.start();
+  await f.apply(await f.port(f.oldId));
+  const r = await f.waitResult(timing.healthMs + 15_000);
+  assert.equal(r.outcome, 'rolled-back');
+  assert.match(r.message, /no healthy answer within \d+ s \(its engine is not ready \(Starting engine\.\.\.\)\)/);
+  await quit(f, f.oldId, run);
+  assert.equal(f.pointer(), f.oldId);
+});
+
+test('engine slower than the server: the launcher waits for its answer and commits', async t => {
+  const f = install(t, { engineReadyAfterMs: 1_500 });
+  const run = f.start();
+  await f.apply(await f.port(f.oldId));
+  const port = await f.port(f.newId);
+  const r = await f.waitResult();
+  assert.equal(r.outcome, 'installed', r.message);
+  await f.post(port, '/test/quit');
+  assert.equal(await run, 0);
+});
+
+test('no models yet: the engine ran and reported an empty folder, so the update is installed', async t => {
+  const f = install(t, { engine: { ready: false, failed: false, noModels: true, status: 'No models installed — download one in the Model Manager' } });
+  const run = f.start();
+  await f.apply(await f.port(f.oldId));
+  const port = await f.port(f.newId);
+  const r = await f.waitResult();
+  assert.equal(r.outcome, 'installed', r.message);
+  assert.equal(f.pointer(), f.newId);
+  await f.post(port, '/test/quit');
+  assert.equal(await run, 0);
+});
+
 test('a version that cannot prove a clean stop is restarted, and the candidate never runs', async t => {
   const f = install(t);
   fs.writeFileSync(path.join(f.root, 'app', f.oldId, 'stub.json'), JSON.stringify({ version: 'old', unclean: true }));
@@ -313,6 +368,22 @@ test('crash between commit and release: the new version is started under a fresh
   assert.deepEqual(f.runs(), ['before', 'new', 'new']);
   assert.equal(f.tx(), false);
   assert.deepEqual(f.leases(), []);
+  await f.post(port, '/test/quit');
+  assert.equal(await run, 0);
+});
+
+test('crash between commit and release, engine now down: the committed version still starts, not restored', async t => {
+  const f = install(t, { engine: { ready: false, failed: true, noModels: false, status: 'ace-server not found at X:\nowhere.exe' } });
+  f.seed();
+  f.snapshotTx('committed');
+  f.movePayload();
+  fs.writeFileSync(path.join(f.root, 'current.json'), JSON.stringify({ format: 1, payload: f.newId }));
+  const run = f.start();
+  const port = await f.port(f.newId);
+  const r = await f.waitResult();
+  assert.equal(r.outcome, 'installed', r.message);
+  assert.equal(f.pointer(), f.newId);
+  assert.equal(f.tx(), false);
   await f.post(port, '/test/quit');
   assert.equal(await run, 0);
 });

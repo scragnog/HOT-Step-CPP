@@ -12,9 +12,10 @@
 // acknowledges, waits for that exact process to report a clean stop and exit,
 // snapshots the databases with the old payload's own tool, writes the pending
 // record, switches the pointer and starts the candidate under the maintenance
-// lease. Its attestation passes within 120 s: committed, gate released, UI
-// opened. It fails: candidate stopped, pointer back, snapshot restored, old
-// version started. Plain Node with no dependencies; see docs/dev/releasing.md.
+// lease. Its attestation passes within 300 s: committed, gate released, UI
+// opened. The engine must have answered: /health, or an empty models folder
+// reported by the binary itself. It fails: candidate stopped, pointer back,
+// snapshot restored, old version started. Plain Node with no dependencies; see docs/dev/releasing.md.
 
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -25,8 +26,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const LAUNCHER_PROTOCOL = 1;
-/** Tests shorten these. */
-export const timing = { retryDelaysMs: [5_000, 10_000], healthMs: 120_000, pollMs: 1_000, ackMs: 15_000, stopMs: 90_000, toolMs: 900_000 };
+/** Tests shorten these. healthMs covers a real engine start (first load of a new
+ *  binary past the antivirus, CUDA kernel JIT); an engine that reports it cannot
+ *  start ends the wait at once, so only a hung one costs the whole bound. */
+export const timing = { retryDelaysMs: [5_000, 10_000], healthMs: 300_000, pollMs: 1_000, ackMs: 15_000, stopMs: 90_000, toolMs: 900_000 };
 
 const PAYLOAD_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const PREPARED_ID = /^prepare-[A-Za-z0-9]{6}$/;
@@ -358,20 +361,22 @@ async function getJson(url, headers = {}, method = 'GET') {
   return { ok: r.ok, status: r.status, body: await r.json().catch(() => null) };
 }
 
-/** Why the candidate's attestation does not match, or null when it does. */
-export function attestProblem(s, want) {
+/** Why the candidate's attestation does not match, or null when it does.
+ *  `engine: false` skips the engine (recovery of a committed update). */
+export function attestProblem(s, want, { engine = true } = {}) {
   if (!s || typeof s !== 'object') return 'no status';
   if (s.closed !== true || s.leaseId !== want.leaseId) return 'it is not running under this update\'s lease';
   const b = s.build;
   if (!b || b.sha !== want.sha || b.tag !== want.tag || b.variant !== want.variant || b.updaterProtocol !== want.updaterProtocol) return 'it reports a different build';
   if (s.db?.ok !== true) return `its database did not open (${(s.db?.errors ?? []).join('; ') || 'not finished'})`;
   if (s.ui !== true) return 'its UI files are missing';
-  if (s.engine?.ready !== true) return `its engine is not ready (${s.engine?.status ?? 'unknown'})`;
+  // No models yet still counts: the binary ran and said so, and the user must be able to update before downloading one.
+  if (engine && s.engine?.ready !== true && s.engine?.noModels !== true) return `its engine is not ready (${s.engine?.status ?? 'unknown'})`;
   return null;
 }
 
 /** Wait up to timing.healthMs for /api/maintenance/status to attest exactly `want`. */
-async function attest(s, token, want) {
+async function attest(s, token, want, opts = {}) {
   const deadline = Date.now() + timing.healthMs;
   const a = await Promise.race([address(s, timing.healthMs), s.exited.then(() => null)]);
   if (!a) return s.exit ? `it exited (code ${s.exit.code})` : 'it never started listening';
@@ -380,8 +385,9 @@ async function attest(s, token, want) {
     if (s.exit) return `it exited (code ${s.exit.code})`;
     try {
       const r = await getJson(`${a.url}/api/maintenance/status`, { [TOKEN_HEADER]: token });
-      last = r.ok ? attestProblem(r.body, want) : `HTTP ${r.status}`;
+      last = r.ok ? attestProblem(r.body, want, opts) : `HTTP ${r.status}`;
       if (!last) return null;
+      if (opts.engine !== false && r.body?.engine?.failed === true) return `its engine cannot start (${r.body.engine.status ?? 'unknown'})`;
     } catch (e) { last = e.message; }
     await sleep(timing.pollMs);
   }
@@ -557,7 +563,9 @@ async function finishCommitted(ctx, tx) {
   tx.leaseId = lease.id;
   writeTx(ctx.L, tx);
   const c = startServer(ctx, tx.newPayload, { HOT_STEP_MAINTENANCE_TOKEN: token, HOT_STEP_DATA_ROOT: tx.dataRoot });
-  let problem = await attest(c, token, { ...readBuild(ctx, path.join(ctx.L.app, tx.newPayload)), leaseId: lease.id });
+  // The engine already answered before the commit; a broken one now must not
+  // keep a working server and database from starting. The app shows its status.
+  let problem = await attest(c, token, { ...readBuild(ctx, path.join(ctx.L.app, tx.newPayload)), leaseId: lease.id }, { engine: false });
   if (!problem && !await releaseGate(c, token)) problem = 'its maintenance gate did not open';
   if (problem) {
     await stopServer(c);
