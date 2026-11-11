@@ -66,6 +66,8 @@ const BUILD_VARIANTS: Record<string, string[]> = {
   'linux/x64': ['cuda13.1', 'cuda12.8', 'cuda12-volta', 'vulkan', 'rocm', 'cpu'],
   'macos/arm64': ['metal'],
 };
+/** Highest updater protocol this server speaks (release/build-info.mjs MAX_UPDATER_PROTOCOL). */
+export const MAX_UPDATER_PROTOCOL = 1;
 const FULL_SHA = /^[0-9a-f]{40}$/;
 /** A build-info.json that meets the whole contract, else null (unknown identity). */
 export function parseBuildInfo(text: string): BuildInfo | null {
@@ -78,9 +80,13 @@ export function parseBuildInfo(text: string): BuildInfo | null {
     && typeof i.engineSha === 'string' && FULL_SHA.test(i.engineSha)
     && i.channel === (i.tag ? 'release' : 'master')
     && BUILD_VARIANTS[`${i.os}/${i.arch}`]?.includes(i.variant) === true
-    && i.updaterProtocol === 0;
+    && (i.updaterProtocol === 0 || i.updaterProtocol === MAX_UPDATER_PROTOCOL);
   return ok ? i : null;
 }
+/** Protocol of the stable launcher that started this process (release/updater/launcher.mjs),
+ *  0 when it was not started by one. Apply needs it to equal build-info's updaterProtocol. */
+export const LAUNCHER_PROTOCOL = typeof process.send === 'function' && process.env.HOT_STEP_INSTALL_ROOT
+  ? Number.parseInt(process.env.HOT_STEP_LAUNCHER_PROTOCOL ?? '', 10) || 0 : 0;
 /** The package's exact identity; null (unknown) for older releases, git checkouts and invalid files. */
 export const BUILD_INFO: BuildInfo | null = (() => {
   let text: string;

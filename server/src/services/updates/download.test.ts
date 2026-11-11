@@ -48,11 +48,18 @@ function zip(entries: Entry[]): Buffer {
   end.writeUInt32LE(directory.length, 12); end.writeUInt32LE(offset, 16);
   return Buffer.concat([...local, directory, end]);
 }
+// The versioned layout (release/updater/package-layout.mjs). The payload folder
+// is named for the expected build, so an identity mismatch is caught inside it.
+const PAYLOAD = 'v2.0.0-aaaaaaaaaaaa-cpu';
+const P = `app/${PAYLOAD}/`;
 function layout(info: BuildInfo = INFO): Entry[] {
   return [
-    { name: 'build-info.json', text: JSON.stringify(info) }, { name: 'VERSION', text: '2.0.0' },
-    ...['node/node.exe', 'server/server.mjs', 'server/node_modules/better-sqlite3/build/Release/better_sqlite3.node', 'ui/dist/index.html', 'HOT-Step.bat', 'profile-path.mjs', '.env.example', 'README.txt',
-      ...['ace-server', 'ace-train', 'ace-midi', 'ace-caption', 'mastering', 'mp3-codec', 'neural-codec', 'vst-host', 'quantize'].map(n => `engine/${n}.exe`)].map(name => ({ name, text: 'fixture', deflate: true })),
+    { name: 'current.json', text: JSON.stringify({ format: 1, payload: PAYLOAD }) },
+    ...['HOT-Step.bat', 'launcher.mjs', 'runtime/node.exe', 'README.txt'].map(name => ({ name, text: 'fixture', deflate: true })),
+    { name: `${P}build-info.json`, text: JSON.stringify(info) }, { name: `${P}VERSION`, text: '2.0.0' },
+    ...['runtime/node.exe', 'server/server.mjs', 'server/updater-tool.mjs', 'server/node_modules/better-sqlite3/build/Release/better_sqlite3.node', 'ui/dist/index.html',
+      'profile-path.mjs', '.env.example', 'payload-manifest.json', 'README.txt',
+      ...['ace-server', 'ace-train', 'ace-midi', 'ace-caption', 'mastering', 'mp3-codec', 'neural-codec', 'vst-host', 'quantize'].map(n => `engine/${n}.exe`)].map(name => ({ name: P + name, text: 'fixture', deflate: true })),
   ];
 }
 
@@ -102,7 +109,7 @@ test('stages a complete stored/deflate archive, leaves active payload and data u
   assert.equal(result.downloadedBytes, s.archive.length);
   const ready = s.d.getPrepared(); assert.ok(ready);
   assert.equal(ready.buildInfo.sha, SOURCE);
-  assert.equal(fs.readFileSync(path.join(ready.payloadRoot, 'ui/dist/index.html'), 'utf8'), 'fixture');
+  assert.equal(fs.readFileSync(path.join(ready.payloadRoot, P, 'ui/dist/index.html'), 'utf8'), 'fixture');
   assert.ok(fs.existsSync(path.join(s.deps.stateRoot!, ready.id, 'ready.json')));
   assert.deepEqual(fs.readdirSync(s.deps.payloadRoot), []);
   assert.deepEqual(fs.readdirSync(s.deps.dataRoot!), []);
@@ -111,7 +118,7 @@ test('stages a complete stored/deflate archive, leaves active payload and data u
 });
 
 test('accepts empty directories, UTF-8 filenames and CRC across multiple inflate chunks', async t => {
-  const s = setup(t, [...layout(), { name: 'engine/empty/', text: '', attrs: 0x10 }, { name: 'plugins/caf\u00e9.lua', text: 'fixture'.repeat(30_000), deflate: true }]);
+  const s = setup(t, [...layout(), { name: P + 'engine/empty/', text: '', attrs: 0x10 }, { name: P + 'plugins/caf\u00e9.lua', text: 'fixture'.repeat(30_000), deflate: true }]);
   assert.equal((await s.prepare()).phase, 'ready', s.d.status().error ?? '');
 });
 
@@ -256,17 +263,33 @@ test('a crashed owner lock is recovered and its incomplete stage is swept', asyn
   assert.equal(fs.existsSync(path.join(s.deps.stateRoot!, 'prepare.lock')), false);
 });
 
-test('a ready stage survives restart and prevents duplicate staging until launcher reconciliation', async t => {
+test('a ready stage survives restart: the receipt is taken back, not downloaded twice', async t => {
   const s = setup(t); const r = await s.prepare(); assert.equal(r.phase, 'ready');
   const original = s.d.getPrepared()!;
-  const restarted = createDownloader(s.deps); await restarted.discover();
   const downloads = s.calls.filter(url => url === URL).length;
-  restarted.prepare(restarted.status().candidate!.id); await restarted.wait();
-  assert.equal(restarted.status().phase, 'failed');
-  assert.match(restarted.status().error!, /launcher.*reconcile/i);
-  assert.ok(fs.existsSync(path.join(s.deps.stateRoot!, original.id, 'ready.json')));
+  const restarted = createDownloader(s.deps); await restarted.discover();
+  const st = restarted.status();
+  assert.equal(st.phase, 'ready'); assert.equal(st.preparedId, original.id); assert.equal(st.candidate?.id, original.candidate.id);
+  assert.deepEqual(restarted.getPrepared(), original);
+  assert.deepEqual(restarted.revalidate(), original);
+  assert.throws(() => restarted.prepare(original.candidate.id), /already staged/);
   assert.deepEqual(fs.readdirSync(s.deps.stateRoot!), [original.id]);
   assert.equal(s.calls.filter(url => url === URL).length, downloads);
+});
+
+test('a stale or damaged receipt is removed at restart, and revalidate notices damage', async t => {
+  const s = setup(t); await s.prepare();
+  const original = s.d.getPrepared()!;
+  fs.rmSync(path.join(original.payloadRoot, P, 'server/updater-tool.mjs'));
+  assert.throws(() => s.d.revalidate(), /missing or invalid/);
+  const restarted = createDownloader(s.deps);
+  assert.equal(restarted.getPrepared(), null);
+  assert.deepEqual(fs.readdirSync(s.deps.stateRoot!), []);
+
+  const s2 = setup(t); await s2.prepare();
+  s2.install({ ...s2.installed(), version: '2.0.0', tag: 'v2.0.0', buildInfo: { ...INFO } });
+  assert.equal(createDownloader(s2.deps).getPrepared(), null, 'already installed: stale');
+  assert.deepEqual(fs.readdirSync(s2.deps.stateRoot!), []);
 });
 
 test('a live owner, including an EPERM probe, keeps its lock and staging', async t => {
@@ -328,15 +351,15 @@ test('cancellation cleans .part and staging, then a retry starts from zero', asy
 
 for (const e of [
   { name: '../escape' }, { name: '/absolute' }, { name: 'C:/absolute' }, { name: '\\\\server\\share' },
-  { name: 'engine/../../escape' }, { name: 'engine\\..\\..\\escape' }, { name: 'engine/CON.txt' },
-  { name: 'engine/com1.dll' }, { name: 'engine/alias.' }, { name: 'engine/ads:stream' },
-  { name: 'engine/CONIN$' }, { name: 'engine/CONOUT$.txt' }, { name: 'engine/NUL .txt' },
+  { name: P + 'engine/../../escape' }, { name: 'engine\\..\\..\\escape' }, { name: P + 'engine/CON.txt' },
+  { name: P + 'engine/com1.dll' }, { name: P + 'engine/alias.' }, { name: P + 'engine/ads:stream' },
+  { name: P + 'engine/CONIN$' }, { name: P + 'engine/CONOUT$.txt' }, { name: P + 'engine/NUL .txt' },
   { name: 'models/weights' }, { name: 'HOT-Step-CPP/engine/ace-server.exe' },
-  { name: 'engine/link', attrs: 0xa1ff0000 }, { name: 'engine/junction', attrs: 0x400 },
-  { name: 'engine/device', attrs: 0x40 }, { name: 'engine/pipe', attrs: 0x11ff0000 },
-  { name: 'engine/wrong-local', localName: 'engine/escape-name' },
-  { name: 'engine/unix-link', extra: Buffer.from([0x0d, 0, 0, 0]) },
-  { name: 'engine/zip64', extra: Buffer.from([1, 0, 0, 0]) },
+  { name: P + 'engine/link', attrs: 0xa1ff0000 }, { name: P + 'engine/junction', attrs: 0x400 },
+  { name: P + 'engine/device', attrs: 0x40 }, { name: P + 'engine/pipe', attrs: 0x11ff0000 },
+  { name: P + 'engine/wrong-local', localName: 'engine/escape-name' },
+  { name: P + 'engine/unix-link', extra: Buffer.from([0x0d, 0, 0, 0]) },
+  { name: P + 'engine/zip64', extra: Buffer.from([1, 0, 0, 0]) },
 ] satisfies Entry[]) test(`archive refuses ${JSON.stringify(e.name)} attrs=${e.attrs ?? 0}`, async t => {
   const s = setup(t, [...layout(), e]); const r = await s.prepare();
   assert.equal(r.phase, 'failed', r.error ?? ''); assert.ok(r.error); s.assertClean();
@@ -344,10 +367,10 @@ for (const e of [
 });
 
 for (const entries of [
-  [...layout(), { name: 'engine/ACE-SERVER.exe' }],
-  [...layout(), { name: 'ENGINE/new.exe' }],
-  [...layout(), { name: 'engine/ace-server.exe' }],
-  [...layout(), { name: 'engine' }],
+  [...layout(), { name: P + 'engine/ACE-SERVER.exe' }],
+  [...layout(), { name: P + 'ENGINE/new.exe' }],
+  [...layout(), { name: P + 'engine/ace-server.exe' }],
+  [...layout(), { name: P + 'engine' }],
 ]) test('case collisions, duplicate files and file-directory collisions are refused', async t => {
   const s = setup(t, entries); assert.equal((await s.prepare()).phase, 'failed'); s.assertClean();
 });
@@ -356,7 +379,7 @@ test('caps entry count and expanded size, including dishonest deflate sizes', as
   for (const [name, entries, limits] of [
     ['entry count', layout(), { entries: 2 }],
     ['expanded bytes', layout(), { expandedBytes: 1 }],
-    ['dishonest size', [...layout(), { name: 'engine/bomb', text: 'x'.repeat(100_000), deflate: true, declaredSize: 1 }], {}],
+    ['dishonest size', [...layout(), { name: P + 'engine/bomb', text: 'x'.repeat(100_000), deflate: true, declaredSize: 1 }], {}],
   ] as const) {
     await t.test(name, async sub => {
       const s = setup(sub, [...entries]); s.deps.limits = limits;
@@ -371,9 +394,11 @@ for (const [name, entries] of [
   ['source mismatch', layout({ ...INFO, sha: 'c'.repeat(40) })],
   ['protocol mismatch', layout({ ...INFO, updaterProtocol: 2 })],
   ['old protocol', layout({ ...INFO, updaterProtocol: 0 })],
-  ['missing UI', layout().filter(e => e.name !== 'ui/dist/index.html')],
-  ['unexpected backend', [...layout(), { name: 'engine/ggml-cuda.dll' }]],
-  ['wrong marker', [...layout(), { name: 'engine/.variant', text: 'vulkan' }]],
+  ['missing UI', layout().filter(e => e.name !== P + 'ui/dist/index.html')],
+  ['missing launcher', layout().filter(e => e.name !== 'launcher.mjs')],
+  ['flat package', layout().filter(e => e.name.startsWith(P)).map(e => ({ ...e, name: e.name.slice(P.length) }))],
+  ['unexpected backend', [...layout(), { name: P + 'engine/ggml-cuda.dll' }]],
+  ['wrong marker', [...layout(), { name: P + 'engine/.variant', text: 'vulkan' }]],
 ] as const) test(`layout refuses ${name}`, async t => {
   const s = setup(t, [...entries]); assert.equal((await s.prepare()).phase, 'failed'); s.assertClean();
 });

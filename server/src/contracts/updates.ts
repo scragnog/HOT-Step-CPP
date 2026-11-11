@@ -1,5 +1,6 @@
 // contracts/updates.ts — wire shapes for /api/updates (routes/updates.ts).
-// Preparation stages a verified payload; activation belongs to the launcher.
+// Preparation stages a verified payload; POST /apply hands it to the stable
+// Windows launcher (release/updater/launcher.mjs), which installs it.
 
 export type UpdateChannel = 'release' | 'master';
 
@@ -75,6 +76,8 @@ export type UpdateStatusKind =
 export interface UpdatesStatusResponse {
   /** Present on the HTTP endpoints; absent on the notice checker's internal result. */
   prepare?: UpdatePrepareStatus;
+  /** Present on the HTTP endpoints: whether a prepared update can be installed, and the last outcome. */
+  install?: UpdateInstallStatus;
   channel: UpdateChannel;
   installed: InstalledIdentity;
   status: UpdateStatusKind;
@@ -137,4 +140,38 @@ export interface UpdatePrepareStatus {
 }
 
 export interface UpdatesPrepareRequest { candidateId: string }
+/** POST /api/updates/apply: the prepared candidate's ID and nothing else. */
+export interface UpdatesApplyRequest { candidateId: string }
+
+/** What the launcher recorded about the last update (updater/last-result.json). */
+export interface UpdateApplyResult {
+  /** installed: committed and running. rolled-back: the new version failed before commit;
+   *  the old one runs on its restored data. recovery-required: nothing was started; the
+   *  launcher window says what to fix. failed: stopped before anything changed. */
+  outcome: 'installed' | 'rolled-back' | 'recovery-required' | 'failed';
+  /** Payload folder names under app/ (`<tag>-<sha12>-<variant>`). */
+  from: string | null;
+  to: string | null;
+  at: string;
+  message: string | null;
+}
+
+export interface UpdateInstallStatus {
+  /** True when this install can apply a prepared update: updater protocol 1 or
+   *  higher, started by the stable launcher, Windows portable. */
+  supported: boolean;
+  /** Why not, when unsupported; otherwise null. */
+  reason: string | null;
+  /** 'stopping': apply was accepted and the server is about to stop for the launcher. */
+  phase: 'idle' | 'stopping';
+  lastResult: UpdateApplyResult | null;
+}
+
+/** 202 from POST /api/updates/apply. The server stops about 300 ms later; poll
+ *  GET /api/health until it answers again, then read install.lastResult. */
+export interface UpdatesApplyResponse {
+  phase: 'stopping';
+  from: string;
+  to: string;
+}
 export interface UpdatesCancelPrepareRequest { candidateId: string }

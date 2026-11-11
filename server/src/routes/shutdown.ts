@@ -2,6 +2,8 @@
 //
 // POST /api/shutdown — stops ace-server, Vite (dev only) and the Node process tree
 // POST /api/restart  — stops and relaunches (writes marker for the loop wrapper)
+// exitForLauncher()  — the updater shutdown: stops for the stable launcher
+//                      (release/updater/launcher.mjs), which installs an update
 //
 // SAFETY: we only kill processes we own — the ace-server children (via
 // stopAllEngines), the dev Vite server on :3000 (only when dev.bat set
@@ -11,12 +13,13 @@ import { Router } from 'express';
 import { execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { RESTART_MARKER_PATH, PORTABLE_MODE } from '../config.js';
+import { RESTART_MARKER_PATH, PORTABLE_MODE, LAUNCHER_PROTOCOL } from '../config.js';
 import { closeDb } from '../db/database.js';
 import { getDataLocation, getBusyBlockers } from '../dataroot/pointer.js';
 import { closeLogger } from '../services/logger.js';
 import { killActiveChildren } from '../services/training/labelingQueue.js';
 import { stopAllEngines } from '../services/aceEngineProcess.js';
+import { stopInstance } from '../services/instance.js';
 import type { ShutdownResponse, RestartResponse } from '../contracts/shutdown.js';
 
 const router = Router();
@@ -141,14 +144,42 @@ async function stopEverything(restart: boolean): Promise<void> {
   closeDb();
   if (!restart) killVite();
   // Portable restart: HOT-Step.bat runs node directly, so our parent IS the
-  // restart loop — exiting is enough there. Every other case needs the tree kill.
-  if (!restart || !PORTABLE_MODE) killSelf();
+  // restart loop — exiting is enough there. Every other case needs the tree
+  // kill, except under the stable launcher: it is our parent, it must outlive
+  // us (restart marker, updates), and it sees our exit.
+  if (!LAUNCHER_PROTOCOL && (!restart || !PORTABLE_MODE)) killSelf();
   setTimeout(() => {
     console.log(restart ? '[Server] Exiting for restart.' : '[Server] Exiting.');
     // Keep the log open for the delayed taskkill callbacks until final exit.
     closeLogger();
     process.exit(0);
   }, 1000);
+}
+
+/** The updater shutdown: the launcher installs an update, or stops a candidate
+ *  that failed its health check, once this process is gone. Every owned child,
+ *  the DB and the logger close; engines are suspended so nothing respawns; no
+ *  restart marker is written and the launcher (our parent) is never touched.
+ *  Tells the launcher whether the stop was clean, then exits 0. */
+let exiting = false;
+export async function exitForLauncher(): Promise<void> {
+  if (exiting) return;
+  exiting = true;
+  const problems: string[] = [];
+  try {
+    const { audioIntentQueue } = await import('./audioQueue.js');
+    audioIntentQueue().stop();
+  } catch (e) { problems.push(`audio queue: ${(e as Error).message}`); }
+  killTrainingChildren();
+  if (!await stopAllEngines('Installing an update', 15_000)) problems.push('an engine process did not exit');
+  try { stopInstance(); } catch (e) { console.error('[Shutdown] stopInstance failed:', e); }
+  try { closeDb(); } catch (e) { problems.push(`database: ${(e as Error).message}`); }
+  console.log(problems.length ? `[Server] Stopped for the updater, not cleanly: ${problems.join('; ')}` : '[Server] Stopped for the updater.');
+  closeLogger();
+  const exit = () => process.exit(0);
+  setTimeout(exit, 5_000).unref();
+  if (typeof process.send === 'function') process.send({ type: 'stopped', clean: !problems.length, problems }, exit);
+  else exit();
 }
 
 /** Used by a completed worker bundle update after its builds have finished. */

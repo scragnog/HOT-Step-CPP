@@ -172,13 +172,25 @@ async function releaseCandidate(d: DownloadDeps, limits: Limits, signal: AbortSi
  * ZIP64, split/encrypted archives and alternate filename/link extra fields fail closed.
  * Limits are deliberately below ZIP64's compressed size boundary. */
 interface ZipEntry { name: string; rawName: Buffer; directory: boolean; flags: number; method: number; crc: number; packed: number; size: number; offset: number; start: number }
-const ROOT_DIRS = new Set(['node', 'engine', 'server', 'ui', 'Essentia', 'noise_samples', 'plugins', 'presets']);
-const ROOT_FILES = new Set(['VERSION', 'build-info.json', '.env.example', 'profile-path.mjs', 'HOT-Step.bat', 'open-browser-if-needed.mjs', 'README.txt']);
+// The versioned layout release/updater/package-layout.mjs builds (protocol 1+):
+// the stable root files, runtime/node.exe for the launcher, and app/<id>/.
+const ROOT_FILES = new Set(['HOT-Step.bat', 'launcher.mjs', 'current.json', 'README.txt']);
+const PAYLOAD_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const PAYLOAD_DIRS = new Set(['runtime', 'engine', 'server', 'ui', 'Essentia', 'noise_samples', 'plugins', 'presets']);
+const PAYLOAD_FILES = new Set(['VERSION', 'build-info.json', 'payload-manifest.json', '.env.example', 'profile-path.mjs', 'open-browser-if-needed.mjs', 'README.txt']);
+function allowedPath(parts: string[], directory: boolean): boolean {
+  const [top, id, child] = parts;
+  if (parts.length === 1) return directory ? top === 'app' || top === 'runtime' : ROOT_FILES.has(top);
+  if (top === 'runtime') return parts.length === 2 && !directory && id === 'node.exe';
+  if (top !== 'app' || !PAYLOAD_ID.test(id) || id.includes('..')) return false;
+  if (parts.length === 2) return directory;
+  return parts.length === 3 && !directory ? PAYLOAD_FILES.has(child) : PAYLOAD_DIRS.has(child);
+}
 function zipName(name: string): string[] {
   if (!name || name.length > 220 || /[\\\x00-\x1f\x7f<>:"|?*]/.test(name) || name.startsWith('/') || name.normalize('NFC') !== name) refuse('Archive has an unsafe or absolute path');
   const parts = name.replace(/\/$/, '').split('/');
   if (parts.some(p => !p || p === '.' || p === '..' || /[. ]$/.test(p) || /^(con|conin\$|conout\$|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:[ .]|$)/i.test(p))) refuse('Archive has traversal, an alias or a Windows device name');
-  if (!(parts.length === 1 && !name.endsWith('/') ? ROOT_FILES.has(parts[0]) : ROOT_DIRS.has(parts[0]))) refuse('Archive has an unexpected root');
+  if (!allowedPath(parts, name.endsWith('/'))) refuse('Archive has an unexpected root');
   return parts;
 }
 function zipExtras(b: Buffer): void {
@@ -240,7 +252,7 @@ async function zipEntries(file: string, limits: Limits, signal: AbortSignal): Pr
         seen.set(key, { spelling, file, explicit: !!old?.explicit || last });
       }
       const entry: ZipEntry = { name, rawName, directory, flags, method, crc: central.readUInt32LE(p + 16), packed: central.readUInt32LE(p + 20), size: central.readUInt32LE(p + 24), offset: central.readUInt32LE(p + 42), start: 0 };
-      if (['build-info.json', 'VERSION', 'engine/.variant', 'engine/.cuda-version'].includes(name) && entry.size > 16_384) refuse('Package identity file is too large');
+      if (/(?:^|\/)(?:build-info\.json|VERSION|current\.json|\.variant|\.cuda-version)$/.test(name) && entry.size > 16_384) refuse('Package identity file is too large');
       expanded += entry.size;
       if (expanded > limits.expandedBytes || entry.packed === 0xffffffff || entry.size === 0xffffffff || entry.offset === 0xffffffff || (directory && (entry.size || entry.packed))) refuse('Archive expanded size exceeds the limit or uses ZIP64');
       const local = await readAt(h, entry.offset, 30);
@@ -348,29 +360,39 @@ async function extract(file: string, target: string, entries: ZipEntry[], signal
   }
 }
 
-/** Mirrors checkPackageBuildInfo: release/*.mjs is not shipped in the server bundle. */
-function checkLayout(root: string, c: Candidate): BuildInfo {
-  const read = (name: string) => fs.readFileSync(path.join(root, name), 'utf8').trim();
+/** Mirrors release/check-layout.mjs checkPackageBuildInfo for the versioned
+ *  layout: release/*.mjs is not shipped in the server bundle. */
+function checkLayout(root: string, c: Candidate): { info: BuildInfo; payloadId: string } {
+  let pointer: any;
+  try { pointer = JSON.parse(fs.readFileSync(path.join(root, 'current.json'), 'utf8')); } catch { refuse('The package has no readable current.json'); }
+  const id = pointer?.payload;
+  if (pointer?.format !== 1 || typeof id !== 'string' || !PAYLOAD_ID.test(id)) refuse('The package current.json is invalid');
+  const apps = fs.readdirSync(path.join(root, 'app'));
+  if (apps.length !== 1 || apps[0] !== id) refuse('The package must hold exactly the version current.json names');
+  const payload = path.join(root, 'app', id);
+  const read = (name: string) => fs.readFileSync(path.join(payload, name), 'utf8').trim();
   const raw = read('build-info.json');
   if (raw.length > 16_384) refuse('Embedded build identity is too large');
   const info = parseBuildInfo(raw).info;
   if (!info || !validIdentity(info) || info.tag !== c.tag || info.sha !== c.sha || info.os !== 'windows' || info.arch !== 'x64' || info.variant !== c.variant
     || info.updaterProtocol < 1 || info.updaterProtocol !== c.protocol) refuse('Embedded build-info.json does not match the candidate or updater protocol');
+  if (id !== `${info!.tag}-${info!.sha.slice(0, 12)}-${info!.variant}`) refuse('The payload folder is named for another build');
   if (read('VERSION').replace(/^v/, '') !== c.tag.slice(1)) refuse('VERSION disagrees with the candidate');
-  const required = ['node/node.exe', 'server/server.mjs', 'server/node_modules/better-sqlite3/build/Release/better_sqlite3.node', 'ui/dist/index.html', 'HOT-Step.bat', 'profile-path.mjs', '.env.example', 'README.txt',
+  const inPayload = ['runtime/node.exe', 'server/server.mjs', 'server/updater-tool.mjs', 'server/node_modules/better-sqlite3/build/Release/better_sqlite3.node',
+    'ui/dist/index.html', '.env.example', 'payload-manifest.json',
     ...['ace-server', 'ace-train', 'ace-midi', 'ace-caption', 'mastering', 'mp3-codec', 'neural-codec', 'vst-host', 'quantize'].map(n => `engine/${n}.exe`)];
-  for (const name of required) {
-    const st = fs.lstatSync(path.join(root, name));
-    if (!st.isFile() || st.isSymbolicLink() || st.size === 0) refuse(`Required runtime file is missing or invalid: ${name}`);
+  for (const name of ['HOT-Step.bat', 'launcher.mjs', 'runtime/node.exe', ...inPayload.map(n => `app/${id}/${n}`)]) {
+    const st = fs.lstatSync(path.join(root, name), { throwIfNoEntry: false });
+    if (!st || !st.isFile() || st.isSymbolicLink() || st.size === 0) refuse(`Required runtime file is missing or invalid: ${name}`);
   }
   const backend = c.variant.startsWith('cuda') ? 'cuda' : c.variant === 'vulkan' ? 'vulkan' : null;
-  const libs = fs.readdirSync(path.join(root, 'engine')).map(n => n.match(/^ggml-(cuda|vulkan|hip)\.dll$/)?.[1]).filter(Boolean);
+  const libs = fs.readdirSync(path.join(payload, 'engine')).map(n => n.match(/^ggml-(cuda|vulkan|hip)\.dll$/)?.[1]).filter(Boolean);
   if ((backend && !libs.includes(backend)) || libs.some(l => l !== backend)) refuse('Packaged backend libraries disagree with the candidate variant');
   for (const [name, expected] of [['.variant', backend === 'cuda' ? 'cuda' : c.variant], ['.cuda-version', backend === 'cuda' ? c.variant.match(/^cuda(\d+)/)![1] : null]]) {
-    const marker = path.join(root, 'engine', name!);
+    const marker = path.join(payload, 'engine', name!);
     if (fs.existsSync(marker) && fs.readFileSync(marker, 'utf8').trim() !== expected) refuse('Packaged engine markers disagree with the candidate variant');
   }
-  return info!;
+  return { info: info!, payloadId: id };
 }
 
 export function createDownloader(d: DownloadDeps) {
@@ -381,7 +403,8 @@ export function createDownloader(d: DownloadDeps) {
   let discovering: Promise<void> | null = null;
   let running: Promise<void> | null = null;
   let controller: AbortController | null = null;
-  let prepared: { id: string; payloadRoot: string; buildInfo: BuildInfo; candidate: UpdateCandidate } | null = null;
+  /** payloadRoot is the staged package root; the launcher installs payloadRoot/app/<payloadId>. */
+  let prepared: { id: string; payloadRoot: string; payloadId: string; buildInfo: BuildInfo; candidate: UpdateCandidate } | null = null;
   const publicCandidate = (c: Candidate): UpdateCandidate => ({ id: c.id, tag: c.tag, sha: c.sha, variant: c.variant, assetName: c.assetName, bytes: c.bytes });
   function status(): UpdatePrepareStatus {
     const blocker = prepareBlocker(d);
@@ -453,9 +476,9 @@ export function createDownloader(d: DownloadDeps) {
       const payloadRoot = path.join(folder, 'payload');
       await extract(archive, payloadRoot, entries, signal);
       signal.throwIfAborted();
-      const buildInfo = checkLayout(payloadRoot, c);
+      const { info: buildInfo, payloadId } = checkLayout(payloadRoot, c);
       const id = path.basename(folder);
-      prepared = { id, payloadRoot, buildInfo, candidate: publicCandidate(c) };
+      prepared = { id, payloadRoot, payloadId, buildInfo, candidate: publicCandidate(c) };
       await fsp.writeFile(path.join(folder, 'ready.json'), JSON.stringify({ ...prepared, archiveSha256: match![1].toLowerCase() }), { flag: 'wx', mode: 0o600 });
       signal.throwIfAborted();
       progress.phase = 'ready'; progress.preparedId = id;
@@ -505,5 +528,44 @@ export function createDownloader(d: DownloadDeps) {
     controller!.abort();
     return status();
   }
-  return { status, discover, prepare, cancel, wait: async () => { await running; }, getPrepared: () => prepared ? structuredClone(prepared) : null };
+  /** A ready.json survives a restart only on disk. Take back a valid receipt for
+   *  a newer release; delete one that is stale or no longer checks out (staging
+   *  is updater-owned, and nothing installs while this server runs). */
+  function restoreReceipt(): void {
+    if (!d.stateRoot || prepareBlocker(d)) return;
+    const state = path.resolve(d.stateRoot);
+    let names: string[];
+    try { names = fs.readdirSync(state); } catch { return; }
+    for (const name of names.filter(n => /^prepare-[a-zA-Z0-9]{6}$/.test(n))) {
+      const folder = path.join(state, name);
+      const receipt = path.join(folder, 'ready.json');
+      if (!fs.existsSync(receipt)) continue;
+      try {
+        noLinks(folder);
+        const r = JSON.parse(fs.readFileSync(receipt, 'utf8'));
+        const installed = d.install().buildInfo!;
+        if (prepared || r?.id !== name || r.payloadRoot !== path.join(folder, 'payload') || typeof r.candidate?.tag !== 'string'
+          || !newer(r.candidate.tag, installed.tag!)) throw new Error('stale receipt');
+        const c = { ...r.candidate, protocol: installed.updaterProtocol, expiresAt: Infinity } as Candidate;
+        const { info, payloadId } = checkLayout(r.payloadRoot, c);
+        prepared = { id: name, payloadRoot: r.payloadRoot, payloadId, buildInfo: info, candidate: publicCandidate(c) };
+        candidate = c;
+        reason = null;
+        progress = { phase: 'ready', downloadedBytes: c.bytes, totalBytes: c.bytes, error: null, preparedId: name };
+      } catch {
+        try { fs.rmSync(folder, { recursive: true, force: true }); } catch { /* the launcher removes it later */ }
+      }
+    }
+  }
+  /** The staged update, checked again just before it is handed to the launcher. */
+  function revalidate(): NonNullable<typeof prepared> {
+    const blocker = prepareBlocker(d); if (blocker) refuse(blocker);
+    if (!prepared || !candidate || progress.phase !== 'ready') refuse('No verified update is staged; download it first');
+    if (!fs.existsSync(path.join(path.dirname(prepared!.payloadRoot), 'ready.json'))) refuse('The staged update is gone; download it again');
+    const { info, payloadId } = checkLayout(prepared!.payloadRoot, candidate!);
+    if (payloadId !== prepared!.payloadId || info.sha !== prepared!.buildInfo.sha) refuse('The staged update changed on disk; download it again');
+    return structuredClone(prepared!);
+  }
+  restoreReceipt();
+  return { status, discover, prepare, cancel, revalidate, wait: async () => { await running; }, getPrepared: () => prepared ? structuredClone(prepared) : null };
 }

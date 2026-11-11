@@ -12,7 +12,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 
-import { config, PROJECT_ROOT, PORTABLE_MODE, APP_VERSION, DATA_ROOT, BUILD_INFO } from './config.js';
+import { config, PROJECT_ROOT, PORTABLE_MODE, APP_VERSION, DATA_ROOT, BUILD_INFO, LAUNCHER_PROTOCOL } from './config.js';
 import { initLogger, closeLogger } from './services/logger.js';
 import os from 'node:os';
 import { initDb, closeDb, getDb, dbInitState } from './db/database.js';
@@ -31,7 +31,7 @@ import modelRoutes from './routes/models.js';
 import healthRoutes from './routes/health.js';
 import updatesRoutes, { updateDownloads } from './routes/updates.js';
 import { startUpdateCheck } from './services/updates/index.js';
-import shutdownRoutes from './routes/shutdown.js';
+import shutdownRoutes, { exitForLauncher } from './routes/shutdown.js';
 import masteringRoutes from './routes/mastering.js';
 import downloadRoutes from './routes/download.js';
 import adapterRoutes from './routes/adapters.js';
@@ -539,6 +539,8 @@ async function warmEngineOnStartup(): Promise<void> {
 
 // Start Express server
 const server = app.listen(config.server.port, config.server.host, () => {
+  // The stable launcher (release/updater/launcher.mjs) learns where to check health from this.
+  if (LAUNCHER_PROTOCOL) process.send?.({ type: 'listening', port: (server.address() as { port: number }).port, host: config.server.host });
   console.log(`[Server] HOT-Step CPP v${APP_VERSION}`);
   console.log(`[Server] Listening on http://localhost:${config.server.port}`);
   console.log(`[Server] ace-server URL: ${config.aceServer.url}`);
@@ -600,6 +602,12 @@ function shutdown() {
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+if (LAUNCHER_PROTOCOL) {
+  // The launcher stops a server through the updater shutdown path, and a
+  // server whose launcher died stops rather than outlive it on the install.
+  process.on('message', (m: any) => { if (m?.type === 'stop') void exitForLauncher(); });
+  process.on('disconnect', shutdown);
+}
 process.on('uncaughtException', (err) => {
   console.error('[Server] Uncaught exception:', err);
 });
