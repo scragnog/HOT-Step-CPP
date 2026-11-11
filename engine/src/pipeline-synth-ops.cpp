@@ -435,6 +435,12 @@ void ops_encode_timbre(const AceSynth * ctx,
     // VAE encoder entirely, raw audio takes the encoder path. Latents win
     // when both are set. Without either input the timbre falls back to a
     // single silence frame, disabling timbre conditioning.
+    // Strength 0 is defined as no reference, so it takes that path exactly.
+    if (s.rr.timbre_reference_strength <= 0.0f && ((ref_latents && ref_T_latent > 0) || (ref_audio && ref_len > 0))) {
+        fprintf(stderr, "[Encode-Timbre] Strength 0: reference ignored\n");
+        ref_latents = nullptr;
+        ref_audio   = nullptr;
+    }
     if (ref_latents && ref_T_latent > 0) {
         if (s.rr.timbre_reference_window) {
             s.timbre_feats = timbre_window(ref_latents, ref_T_latent, 64, 25);
@@ -739,6 +745,36 @@ int ops_encode_text(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
 
         H_cond = ce->lyric_cfg.hidden_size;
 
+        // Timbre reference strength: token = none + k * (ref - none), where none
+        // is the token the encoder gives for the no-reference silence frame.
+        // The timbre token sits right after the lyric tokens in each encoding.
+        // Skipped at exactly 1.0 so the default stays bit-identical; with no
+        // reference the token already equals none and the blend is a no-op.
+        // ponytail: k is clamped to [0, 1]. Extrapolating the token past 1 gave a
+        // different render, not a stronger pull (and clipping on XL); a stronger
+        // pull needs guidance in the DiT loop, an extra pass per step.
+        const float        timbre_k = s.rr.timbre_reference_strength;
+        std::vector<float> timbre_none;
+        if (timbre_k != 1.0f && timbre_k > 0.0f) {  // 0 already took the no-reference path
+            std::vector<float> none_enc;
+            int                none_S = 0;
+            cond_ggml_forward(ce, main_fwd[0].text_hidden.data(), main_fwd[0].S_text, main_fwd[0].lyric_embed.data(),
+                              main_fwd[0].S_lyric, ctx->meta->silence_full.data(), 1, none_enc, &none_S);
+            timbre_none.assign(none_enc.begin() + (size_t) main_fwd[0].S_lyric * H_cond,
+                               none_enc.begin() + (size_t) (main_fwd[0].S_lyric + 1) * H_cond);
+            fprintf(stderr, "[Encode-Timbre] Strength %.3f: blending the timbre token against no reference\n",
+                    timbre_k);
+        }
+        auto blend_timbre = [&](std::vector<float> & enc, int S_lyric) {
+            if (timbre_none.empty()) {
+                return;
+            }
+            float * t = enc.data() + (size_t) S_lyric * H_cond;
+            for (int h = 0; h < H_cond; h++) {
+                t[h] = timbre_none[h] + timbre_k * (t[h] - timbre_none[h]);
+            }
+        };
+
         // null_condition_emb lives on the DiTMeta. Empty when the model has none.
         s.null_cond_vec.resize(H_cond);
         if (!ctx->meta->null_cond_cpu.empty()) {
@@ -758,6 +794,7 @@ int ops_encode_text(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
                               nullptr, 0,
                               s.timbre_feats.data(), s.S_ref_timbre, neg_enc, &neg_enc_S);
             if (neg_enc_S > 0 && !neg_enc.empty()) {
+                blend_timbre(neg_enc, 0);
                 s.neg_pooled.assign(H_cond, 0.0f);
                 for (int si = 0; si < neg_enc_S; si++)
                     for (int h = 0; h < H_cond; h++)
@@ -774,6 +811,7 @@ int ops_encode_text(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
             cond_ggml_forward(ce, main_fwd[b].text_hidden.data(), main_fwd[b].S_text, main_fwd[b].lyric_embed.data(),
                               main_fwd[b].S_lyric, s.timbre_feats.data(), s.S_ref_timbre, s.per_enc[b],
                               &s.per_enc_S[b]);
+            blend_timbre(s.per_enc[b], main_fwd[b].S_lyric);
             fprintf(stderr, "[Encode-Text Batch%d] %d+%d tokens -> enc_S=%d, %.1f ms\n", b, main_fwd[b].S_text,
                     main_fwd[b].S_lyric, s.per_enc_S[b], s.timer.ms());
         }
@@ -784,6 +822,7 @@ int ops_encode_text(const AceSynth * ctx, const AceRequest * reqs, int batch_n, 
                 cond_ggml_forward(ce, nc_fwd[b].text_hidden.data(), nc_fwd[b].S_text, nc_fwd[b].lyric_embed.data(),
                                   nc_fwd[b].S_lyric, s.timbre_feats.data(), s.S_ref_timbre, s.per_enc_nc[b],
                                   &s.per_enc_S_nc[b]);
+                blend_timbre(s.per_enc_nc[b], nc_fwd[b].S_lyric);
                 fprintf(stderr, "[Encode-Text Batch%d] non-cover: %d+%d tokens -> enc_S=%d\n", b, nc_fwd[b].S_text,
                         nc_fwd[b].S_lyric, s.per_enc_S_nc[b]);
             }

@@ -265,6 +265,7 @@ export interface GenerationParams {
   masteringEnabled?: boolean;
   masteringReference?: string;
   timbreReference?: boolean | string;  // true = reuse mastering ref, string = dedicated timbre audio path
+  timbreReferenceStrength?: number;  // ACE only; absent = 1
 
   // Pre-VST gain offset (dB adjustment to unmastered track before VST chain)
   gainOffsetDb?: number;           // -10 to +10, 0 = no change

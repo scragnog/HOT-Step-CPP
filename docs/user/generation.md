@@ -202,6 +202,12 @@ With no timbre reference set, the mastering reference is used instead when Maste
 and its "Also use as timbre reference" switch is on. A dedicated timbre reference always
 wins over the mastering one.
 
+Reference Strength appears once a reference is picked. It runs from 0 to 1, default 1. At 1
+the reference pulls as hard as it always has; at 0 the render is the same as having no
+reference; values between blend the two. The setting is saved with the song, so Reuse
+restores it, and songs made before it existed load at 1. Lyric Studio presets do not carry it
+yet.
+
 If a saved profile points at a reference file that has since been deleted, the generation
 is refused at submit with a message telling you to re-upload or clear it.
 

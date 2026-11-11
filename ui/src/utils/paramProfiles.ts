@@ -97,7 +97,7 @@ export const PARAM_GROUPS: { title: string; fields: string[]; ace?: true }[] = [
     fields: [
       'postProcessingEnabled', 'spectralLifterEnabled', 'slDenoiseStrength', 'slNoiseFloor',
       'slHfMix', 'slTransientBoost', 'slShimmerReduction',
-      'masteringEnabled', 'masteringReference', 'timbreReference', 'timbreAudioPath',
+      'masteringEnabled', 'masteringReference', 'timbreReference', 'timbreAudioPath', 'timbreReferenceStrength',
       'vocalNaturalizerEnabled', 'gainOffsetDb', 'naturalizeAmount', 'natVibratoRate',
       'natVibratoDepth', 'natFormantStrength', 'natMetallicReduction', 'natQuantizationMask',
       'natTransitionSmooth', 'ppVaeReencode', 'ppVaeBlend',

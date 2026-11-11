@@ -167,6 +167,7 @@ export const GLOBAL_PARAM_DEFAULTS = {
   masteringReference: '',
   timbreReference: false,
   timbreAudioPath: '',
+  timbreReferenceStrength: 1,
   vocalNaturalizerEnabled: false,
   gainOffsetDb: 0,
   naturalizeAmount: 0.5,
@@ -488,6 +489,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   masteringReference: readKey("hs-masteringReference", GLOBAL_PARAM_DEFAULTS.masteringReference),
   timbreReference: readKey("hs-timbreReference", GLOBAL_PARAM_DEFAULTS.timbreReference),
   timbreAudioPath: readKey("hs-timbreAudioPath", GLOBAL_PARAM_DEFAULTS.timbreAudioPath),
+  timbreReferenceStrength: readKey("hs-timbreReferenceStrength", GLOBAL_PARAM_DEFAULTS.timbreReferenceStrength),
   vocalNaturalizerEnabled: readKey("hs-vocalNaturalizerEnabled", GLOBAL_PARAM_DEFAULTS.vocalNaturalizerEnabled),
   gainOffsetDb: readKey("hs-gainOffsetDb", GLOBAL_PARAM_DEFAULTS.gainOffsetDb),
   naturalizeAmount: readKey("hs-naturalizeAmount", GLOBAL_PARAM_DEFAULTS.naturalizeAmount),
@@ -710,6 +712,7 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
   setMasteringReference: (v: any) => { set({ masteringReference: v }); writeKey("hs-masteringReference", v); },
   setTimbreReference: (v: any) => { set({ timbreReference: v }); writeKey("hs-timbreReference", v); },
   setTimbreAudioPath: (v: any) => { set({ timbreAudioPath: v }); writeKey("hs-timbreAudioPath", v); },
+  setTimbreReferenceStrength: (v: any) => { set({ timbreReferenceStrength: v }); writeKey("hs-timbreReferenceStrength", v); },
   setVocalNaturalizerEnabled: (v: any) => { set({ vocalNaturalizerEnabled: v }); writeKey("hs-vocalNaturalizerEnabled", v); },
   setGainOffsetDb: (v: any) => { set({ gainOffsetDb: v }); writeKey("hs-gainOffsetDb", v); },
   setNaturalizeAmount: (v: any) => { set({ naturalizeAmount: v }); writeKey("hs-naturalizeAmount", v); },
@@ -988,6 +991,8 @@ export const useGlobalParamsStore = create<any>()((set, get) => ({
       timbreReference: s.timbreAudioPath
         ? s.timbreAudioPath
         : (s.postProcessingEnabled && s.masteringEnabled && s.timbreReference && s.masteringReference) ? true : undefined,
+      timbreReferenceStrength: (s.timbreAudioPath || (s.postProcessingEnabled && s.masteringEnabled && s.timbreReference && s.masteringReference)) && s.timbreReferenceStrength !== 1
+        ? s.timbreReferenceStrength : undefined,
       dcwEnabled: s.dcwEnabled,
       dcwMode: s.dcwEnabled ? s.dcwMode : undefined,
       // Route the correct scaler to dcw_scaler based on mode:

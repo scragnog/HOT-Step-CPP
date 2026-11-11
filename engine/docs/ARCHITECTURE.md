@@ -278,6 +278,12 @@ VAE encoding; cached whole-file latents are selected after loading. The default
 retains whole-file conditioning. Node accepts `timbreReferenceWindow` on an ACE
 generation request; there is no UI control.
 
+**`timbre_reference_strength`** (float, default 1.0, clamped to 0-1). Blends the
+condition encoder's timbre token between the no-reference token (0) and the
+reference's token (1). 1 is bit-identical to a request without the field; 0 is
+bit-identical to a request without a reference. Non-finite values are ignored.
+Applies to every ACE task that reads a timbre reference, covers included.
+
 ACE synth fails on non-finite DiT output, latent post-processing or decoded
 audio. The `[Synth-Finite]` diagnostic names the stage and invalid-value count;
 Node includes it in the generation failure. No output is saved for that job.

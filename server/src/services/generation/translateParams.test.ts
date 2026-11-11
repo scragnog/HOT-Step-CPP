@@ -26,6 +26,17 @@ test('ACE parity controls preserve zeros and survive compact intent resolution',
   assert.equal(zero.retake_variance, 0);
 });
 
+test('timbre reference strength keeps zero through compact intents and is absent by default', () => {
+  // Compact intents carry UI state: the dedicated reference is timbreAudioPath.
+  const state = { timbreAudioPath: 'ref.wav', timbreReferenceStrength: 0 };
+  assert.equal(translateParams({ timbreReference: 'ref.wav', timbreReferenceStrength: 0 }).timbre_reference_strength, 0);
+  assert.equal(translateParams(resolveGenerationIntent({ contract: 'generation-intent/1', params: state }, 'ace', [])).timbre_reference_strength, 0);
+  // No reference, or the default 1: the field stays off the request.
+  for (const params of [{ timbreReferenceStrength: 0 }, { timbreAudioPath: 'ref.wav', timbreReferenceStrength: 1 }]) {
+    assert.equal(translateParams(resolveGenerationIntent({ contract: 'generation-intent/1', params }, 'ace', [])).timbre_reference_strength, undefined);
+  }
+});
+
 test('old ONNX VAE selections use the engine default', () => {
   assert.equal(translateParams({ vaeModel: 'vae-DreamVAE.onnx' }).vae_model, undefined);
   assert.equal(translateParams({ vaeModel: '' }).vae_model, undefined);

@@ -469,6 +469,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, activeJobC
     if (gpData.postProcessingEnabled !== undefined) gp.setPostProcessingEnabled(gpData.postProcessingEnabled);
     if (gpData.masteringEnabled !== undefined) gp.setMasteringEnabled(gpData.masteringEnabled);
     if (gpData.masteringReference !== undefined) gp.setMasteringReference(gpData.masteringReference);
+    // Songs from before the dial, or rendered without a reference, carry no value: 1 is the old behaviour.
+    gp.setTimbreReferenceStrength(typeof gpData.timbreReferenceStrength === 'number' ? gpData.timbreReferenceStrength : 1);
   }, [reuseData?.timestamp]);
 
   // ── AI generation result handler ──

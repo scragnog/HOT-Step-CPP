@@ -139,6 +139,7 @@ export interface AceRequest {
   audio_cover_strength?: number;
   cover_noise_strength?: number;
   cover_noise_method?: string;
+  timbre_reference_strength?: number;  // 1 by default; 0 = no reference, above 1 pulls past it
   repainting_start?: number;
   repainting_end?: number;
   seed_strength?: number;

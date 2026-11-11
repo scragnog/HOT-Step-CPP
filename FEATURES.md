@@ -93,7 +93,7 @@ The global bar holds every setting that applies to a render, whichever studio st
 | Plugin pickers | Solver, schedule and guidance mode come from Lua plugins, each with its own settings panel. |
 | Built-in schedules | Beta (Custom), Power and Composite (2-Stage), plus an Auto shift derived from duration and step count. |
 | Performance trades | CFG Cutoff, LM CFG Cutoff and Step Cache for speed at some cost in adherence. |
-| Timbre reference | A reference track fed to the DiT to guide tone and texture. |
+| Timbre reference | A reference track fed to the DiT to guide tone and texture, with a strength dial from none to full. |
 | DCW correction | Wavelet-domain correction during sampling, low band, high band, both, or latent space. |
 | Auto-trim | Renders past the requested length, cuts at a natural ending, and fades out only if none is found. |
 | Latent post-processing | Latent shift, latent rescale and custom timestep lists. |

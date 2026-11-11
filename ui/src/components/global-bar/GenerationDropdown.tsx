@@ -578,6 +578,13 @@ export const GenerationDropdown: React.FC = () => {
               </div>
             )}
 
+            {(gp.timbreAudioPath || (gp.timbreReference && gp.masteringReference)) && (
+              <Slider label="Reference Strength" value={gp.timbreReferenceStrength}
+                onChange={gp.setTimbreReferenceStrength} min={0} max={1} step={0.05} showInput
+                defaultValue={GLOBAL_PARAM_DEFAULTS.timbreReferenceStrength} infoMeta="default 1 · range 0-1"
+                info="How much the timbre reference pulls the render. 1 is the full pull, 0 is the same as no reference, and values between blend the two. ACE-Step only." />
+            )}
+
             {/* Upload button */}
             <div className="flex items-center gap-2">
               <input

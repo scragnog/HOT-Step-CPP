@@ -158,6 +158,7 @@ export const generationControlsSchema = z.object({
   masteringReference: z.unknown().optional(), // string, default ''
   timbreReference: z.unknown().optional(), // boolean | string — string wire value is filled from timbreAudioPath
   timbreAudioPath: z.unknown().optional(), // string, default ''; folded into the `timbreReference` wire value, not sent as its own key
+  timbreReferenceStrength: z.unknown().optional(), // number, default 1; sent only with a timbre reference
   vocalNaturalizerEnabled: z.unknown().optional(), // boolean, default false
   gainOffsetDb: z.unknown().optional(), // number, default 0
   naturalizeAmount: z.unknown().optional(), // number, default 0.5

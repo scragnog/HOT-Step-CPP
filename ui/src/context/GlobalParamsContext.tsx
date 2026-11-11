@@ -147,6 +147,7 @@ export interface GlobalParams {
   masteringReference: string; setMasteringReference: (v: string) => void;
   timbreReference: boolean; setTimbreReference: (v: boolean) => void;
   timbreAudioPath: string; setTimbreAudioPath: (v: string) => void;
+  timbreReferenceStrength: number; setTimbreReferenceStrength: (v: number) => void;
   // Naturalizer
   vocalNaturalizerEnabled: boolean; setVocalNaturalizerEnabled: (v: boolean) => void;
   // Pre-VST gain offset

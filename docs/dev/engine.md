@@ -323,6 +323,23 @@ both modes. The engine makes a separate feature buffer for each request;
 the cache never contains windowed features or rendered output. The Node
 generation parameter is `timbreReferenceWindow`; there is no UI control yet.
 
+`timbre_reference_strength` (default 1, clamped to 0 to 1) scales how far the
+reference moves the condition encoder's single timbre token from the token it
+gives for no reference: `token = none + k * (ref - none)`, where `none` comes
+from the same silence frame the no-reference path feeds the timbre encoder.
+`ops_encode_text` (`pipeline-synth-ops.cpp`) computes `none` with one extra
+condition-encoder pass and blends the token in the main, non-cover and
+negative-prompt encodings, so the GGML and TensorRT DiT paths both see it. At
+exactly 1 the blend is skipped and the render is bit-identical to a build
+without the field. At 0 the reference is dropped before encoding, so the render
+matches no reference bit for bit. The dial does not touch the reference latents,
+so it stays out of Node's latent cache key. Extrapolating the token past 1 was
+tried and rejected: the render moved away from the reference instead of further
+towards it, and the XL models clipped. A stronger pull would need guidance on
+the reference inside the DiT loop, at the cost of an extra DiT pass per
+evaluation. The Node parameter is `timbreReferenceStrength`, sent only with a
+timbre reference and only when it is not 1.
+
 All synthesis backends reject NaN or infinity in decoded PCM before encoding a
 successful result. The shared `synth-finite.h` check logs
 `[Synth-Finite] <stage>: N non-finite values out of M`; the Node job failure

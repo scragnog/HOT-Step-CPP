@@ -109,6 +109,7 @@ export const GENERATION_DEFAULTS = {
   masteringReference: '',
   timbreReference: false,
   timbreAudioPath: '',
+  timbreReferenceStrength: 1,
   vocalNaturalizerEnabled: false,
   gainOffsetDb: 0,
   naturalizeAmount: 0.5,
@@ -337,6 +338,8 @@ export function resolveGenerationParams(
       timbreReference: s.timbreAudioPath
         ? s.timbreAudioPath
         : (s.postProcessingEnabled && s.masteringEnabled && s.timbreReference && s.masteringReference) ? true : undefined,
+      timbreReferenceStrength: (s.timbreAudioPath || (s.postProcessingEnabled && s.masteringEnabled && s.timbreReference && s.masteringReference)) && s.timbreReferenceStrength !== 1
+        ? s.timbreReferenceStrength : undefined,
       dcwEnabled: s.dcwEnabled,
       dcwMode: s.dcwEnabled ? s.dcwMode : undefined,
       // Route the correct scaler to dcw_scaler based on mode:
