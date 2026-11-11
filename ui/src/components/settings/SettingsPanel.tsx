@@ -579,7 +579,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <span className="settings-section-title">Pipeline Parallelism</span>
         </div>
 
-        <div className="setting-row">
+        <div className="setting-row setting-row--wide">
           <div className="setting-info">
             <div className="setting-description" style={{ marginTop: 0 }}>
               Run independent pipeline stages concurrently instead of sequentially.

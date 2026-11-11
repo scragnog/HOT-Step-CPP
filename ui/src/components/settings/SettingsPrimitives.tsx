@@ -109,7 +109,7 @@ export const EnvTextRow: React.FC<{
   placeholder?: string;
   fullWidth?: boolean;
 }> = ({ envKey, label, description, value, onChange, type = 'text', placeholder, fullWidth = false }) => (
-  <div className={`setting-row${fullWidth ? '' : ' setting-row--compact'}`}>
+  <div className={`setting-row${fullWidth ? ' setting-row--wide' : ' setting-row--compact'}`}>
     <div className="setting-info">
       <div className="setting-label">
         <ParamLabel label={label} info={description} className="" />

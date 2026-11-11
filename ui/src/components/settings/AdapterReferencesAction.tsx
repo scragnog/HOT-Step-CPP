@@ -16,7 +16,7 @@ export function AdapterReferencesAction() {
   const result = updateMut.data ?? null;
   const error = updateMut.error?.message ?? null;
   return (
-    <div className="space-y-2">
+    <>
       <div className="setting-row">
         <div className="setting-info">
           <p className="setting-description">{t('settings.adapters.updateInfo')}</p>
@@ -36,6 +36,6 @@ export function AdapterReferencesAction() {
           </ul>}
         </>}
       </div>
-    </div>
+    </>
   );
 }

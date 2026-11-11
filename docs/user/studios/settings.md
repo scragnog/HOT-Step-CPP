@@ -29,7 +29,7 @@ A small reset arrow appears beside a General or Performance setting whenever its
 from the default; click it to snap that one field back. The reset persists like any other change;
 it is not a page reload. The Environment and AI Services fields have no reset arrow.
 
-Short controls, text fields and credentials share a row on wide screens. Labels and controls stay side by side until the Settings area becomes too narrow for both. Path pickers and the training-worker list keep a full row. Tabs wrap so Updates and its notification dot stay visible with the sidebars open.
+Settings use a grid of cards, including paths, GPU selection, storage actions and update information. Labels and controls stay side by side when they fit inside a card; otherwise the control drops below its label. Multi-line text, the training-worker list, the Report form and status banners keep the full width. Tabs wrap so Updates and its notification dot stay visible with the sidebars open.
 
 ## Settings and Lyric Studio backup
 
