@@ -3,8 +3,9 @@
 //
 //   node release/build-info.mjs <packageRoot> --os windows|linux|macos --arch x64|arm64 --variant <asset variant> [--tag v1.2.3] [--protocol 1]
 //
-// --protocol overrides UPDATER_PROTOCOL for one build (a protocol-1 fixture for
-// updater tests); release/updater/package-layout.mjs then builds the versioned layout.
+// --protocol overrides the default for one build (a flat protocol-0 fixture for
+// updater tests); release/updater/package-layout.mjs builds the versioned layout
+// for protocol 1 and leaves protocol 0 flat.
 //
 // The tag is kept only when it names the commit being packaged; anything else
 // (a preflight version, a local build off a tag) packages as channel "master"
@@ -16,8 +17,9 @@ import { fileURLToPath } from 'node:url';
 
 export const BUILD_INFO_FILE = 'build-info.json';
 export const BUILD_INFO_FORMAT = 1;
-/** What release builds ship. Stays 0 until the updater's acceptance run passes. */
-export const UPDATER_PROTOCOL = 0;
+/** What Windows release builds ship: 1 is the versioned layout the in-app updater
+ *  installs into. Linux and macOS stay 0 (buildInfo below). */
+export const UPDATER_PROTOCOL = 1;
 /** Highest protocol release/updater/launcher.mjs speaks (LAUNCHER_PROTOCOL). */
 export const MAX_UPDATER_PROTOCOL = 1;
 /** Exact asset variants per os/arch, matching the release.yml matrices. */

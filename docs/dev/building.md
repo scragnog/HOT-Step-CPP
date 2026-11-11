@@ -474,9 +474,9 @@ release test, use `-Variant cpu -BuildBackend cpu`; use matching `cuda` or `vulk
 values for those backends. A single build backend must match `-Variant`, including
 with `-SkipEngine`, and mismatches fail before staging is changed. `-Variant cuda` also
 needs `-CudaAsset`, the CI asset the build stands in for, because `build-info.json` records
-an exact variant and the script will not guess one from the toolkit. `-UpdaterProtocol 1`
-builds the versioned layout the Windows updater installs (stable launcher root plus
-`app/<id>/`), for updater test fixtures; releases stay protocol 0 and flat. See
+an exact variant and the script will not guess one from the toolkit. The package is the
+versioned layout the Windows updater installs (stable launcher root plus `app/<id>/`),
+which is what releases ship; `-UpdaterProtocol 0` builds the old flat layout instead. See
 [Windows updater layout](releasing.md#windows-updater-layout-protocol-1).
 
 | Build backend | GGML_CUDA | GGML_VULKAN | Packaged GPU DLL |

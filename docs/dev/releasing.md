@@ -379,13 +379,15 @@ Every package carries `build-info.json` beside `VERSION`. All five assemblers (t
 | `os`, `arch` | `windows`/`linux` with `x64`, or `macos` with `arm64` |
 | `variant` | Exact asset variant: `cuda13.1`, `cuda12.8`, `cuda12-volta`, `vulkan`, `cpu`, `rocm` (Linux), `metal` (macOS) |
 | `engineSha` | Git tree id of `engine/` at that commit; it changes with any engine source or ggml pin change |
-| `updaterProtocol` | Windows uses `UPDATER_PROTOCOL` in `release/build-info.mjs`, currently `0` pending release-readiness checks. Linux and macOS default to `0` regardless of that constant. Explicit `--protocol` overrides the default for one build |
+| `updaterProtocol` | Windows uses `UPDATER_PROTOCOL` in `release/build-info.mjs`, currently `1`. Linux and macOS default to `0` regardless of that constant. Explicit `--protocol` overrides the default for one build |
 
 The package check also matches the ggml backend library in `engine/` to the variant, and `engine/.variant` and `.cuda-version` when present. `engine/.variant` keeps its coarse meaning (`cuda` for every CUDA asset) for the code that reads it. The server reads the file in `config.ts` (`BUILD_INFO`) and reports `build.tag`, `build.sha`, `build.variant` and `build.channel` in `/api/health`. A package without the file (an older release), a package whose file breaks those rules (the server logs a warning and ignores it), or a git checkout has unknown identity: `sha` falls back to the checkout's HEAD and the rest is `null`. Nothing guesses a variant. The update notices read the same file for the installed identity (`server/src/services/updates/install.ts`).
 
 ## Windows updater layout (protocol 1)
 
-Windows releases currently ship protocol 0, the flat package. Changing `UPDATER_PROTOCOL` changes the Windows default only; Linux and macOS stay notify-only at protocol 0. A Windows package built with `updaterProtocol` 1 (`.\release\build-release.ps1 ... -UpdaterProtocol 1`) is the versioned layout the in-app updater installs into. Both Windows assemblers run `node release/updater/package-layout.mjs <staging>` and then the package check just before zipping, so a local build and CI produce the same archive. For protocol 0 the script changes nothing.
+Windows releases ship protocol 1. `UPDATER_PROTOCOL` sets the Windows default only; Linux and macOS stay notify-only at protocol 0. A Windows package built with `updaterProtocol` 1 is the versioned layout the in-app updater installs into; `.\release\build-release.ps1 ... -UpdaterProtocol 0` still builds the flat package.
+
+The first protocol-1 release updates nobody: a flat install refuses apply, so every Windows user downloads that release by hand once. Its release notes must say so, and must say that the zip can go over the old folder or into a new one, and that an install from before v1.4.1 (data still inside the app folder) put into a new folder needs **Import previous install** before anything is created in the new library ([Data folder](../user/data-folder.md)). Unzipped over the old folder, the first start moves that data out by itself. Both Windows assemblers run `node release/updater/package-layout.mjs <staging>` and then the package check just before zipping, so a local build and CI produce the same archive. For protocol 0 the script changes nothing.
 
 ```
 HOT-Step.bat        runs runtime\node.exe launcher.mjs (release/updater/HOT-Step.bat)

@@ -1,11 +1,11 @@
 # release/build-release.ps1 — Build a complete portable release of HOT-Step CPP
 #
 # Usage:
-#   .\release\build-release.ps1 [-Version "1.5.0"] [-SkipEngine] [-SkipUI] [-Variant cuda -CudaAsset cuda13.1] [-BuildBackend all] [-UpdaterProtocol 1]
+#   .\release\build-release.ps1 [-Version "1.5.0"] [-SkipEngine] [-SkipUI] [-Variant cuda -CudaAsset cuda13.1] [-BuildBackend all] [-UpdaterProtocol 0]
 #
-# -UpdaterProtocol 1 builds the versioned layout the Windows launcher updates
-# (release/updater/package-layout.mjs). Without an override, Windows packages
-# use UPDATER_PROTOCOL in build-info.mjs; protocol 0 keeps the flat layout.
+# Without an override, Windows packages use UPDATER_PROTOCOL in build-info.mjs
+# (1: the versioned layout the Windows launcher updates, built by
+# release/updater/package-layout.mjs). -UpdaterProtocol 0 builds the old flat layout.
 #
 # Produces:
 #   release/out/HOT-Step-CPP-v{version}-win-x64-{variant}.zip
