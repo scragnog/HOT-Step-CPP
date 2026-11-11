@@ -238,7 +238,9 @@ What sets it apart:
   renders whatever it is, with no redraw. With Chain of Thought off there is no score
   to move, so the melody may still come out as wordless vocals.
 - Without the preview, the app plans first anyway and redraws the seed when the lead sheet
-  is a runaway, has no vocal line, or hit its cap, up to **Re-plan tries** (3 by default). A
+  is a runaway, has no vocal line, or hit its cap, up to **Re-plan tries** (3 by default).
+  A missing `M:` meter is filled with `2/4` and logged; a missing `L:` note length or
+  `K:` key, a malformed header, or stray colons in note runs triggers a redraw. A
   single unnamed ABC voice, such as `V:1`, counts as the vocal melody; in a multi-voice
   score, an unnamed voice with `w:` lyric lines counts as vocal too. With
   **Re-plan flagged scores** (on by default) it also redraws a plan that passes but is

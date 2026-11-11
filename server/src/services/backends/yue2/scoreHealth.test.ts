@@ -66,6 +66,54 @@ test('repair preserves malformed fields and needs a value for every missing fiel
   assert.equal(classifyYue2Score(missing).verdict, 'runaway');
 });
 
+test('the generation repair policy fills only a dropped meter', () => {
+  const abc = `${HEADER}V: Vocal\nCDEF|`;
+  const missingMeter = abc.replace('M:4/4\n', '');
+  const repaired = repairYue2ScoreHeader(missingMeter, { M: '2/4' });
+  assert.match(repaired, /M:2\/4\n/);
+  assert.equal(classifyYue2Score(repaired).verdict, 'healthy');
+  for (const missing of [
+    abc.replace('L:1/16\n', ''), abc.replace('K:C\n', ''),
+    missingMeter.replace('L:1/16\n', ''), missingMeter.replace('K:C\n', ''),
+  ]) {
+    assert.equal(repairYue2ScoreHeader(missing, { M: '2/4' }), missing);
+    assert.equal(classifyYue2Score(missing).verdict, 'runaway');
+  }
+});
+
+test('auto-replan retains the repaired meter and redraws missing length or key', async t => {
+  const { planYue2Jobs } = await import('./generate.js');
+  const healthy = `${HEADER}V: Vocal\nCDEF|`;
+  let score = healthy;
+  let draws = 0;
+  t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    if (url.pathname === '/yue2/props') return Response.json({ max_plan_batch: 1 });
+    if (url.pathname === '/yue2/synth') { draws++; return Response.json({ id: 'header-plan' }); }
+    assert.equal(url.pathname, '/job');
+    return Response.json({ status: 'done', tracks: [{ song: 0, seed: 42, noise_seed: 42,
+      variation: 0, abc: draws === 1 ? score : healthy, end_reason: 'completed' }] });
+  });
+  for (const missingField of ['M', 'L', 'K', 'none']) {
+    score = missingField === 'none' ? healthy : healthy.replace(new RegExp(`^${missingField}:.*\\n`, 'm'), '');
+    draws = 0;
+    const logs: string[] = [];
+    const member = {
+      job: { status: 'queued', params: { yue2ReplanAttempts: 2, yue2ReplanFlags: false },
+        envelope: { backendId: 'yue2', models: {}, options: {} } },
+      req: { cot: 'full', style: 'folk', lyrics: 'la', seed: 42 },
+      log: (_level: string, line: string) => { logs.push(line); },
+    } as unknown as import('./generate.js').Yue2PreparedJob;
+    await planYue2Jobs([member]);
+    assert.equal(draws, missingField === 'L' || missingField === 'K' ? 2 : 1);
+    assert.equal(member.req.abc, missingField === 'M' ? repairYue2ScoreHeader(score, { M: '2/4' }) : healthy);
+    assert.equal(logs.filter(line => line.includes('Filled missing score header M:2/4')).length, missingField === 'M' ? 1 : 0);
+    if (missingField === 'L' || missingField === 'K') {
+      assert.ok(logs.some(line => line.includes(`score header missing ${missingField}:`)));
+    }
+  }
+});
+
 function song(bars: number, vocalEvery: number, sections: string[]): string {
   const lines: string[] = [HEADER];
   let bar = 0;
