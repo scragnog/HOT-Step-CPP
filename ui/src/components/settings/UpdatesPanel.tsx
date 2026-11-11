@@ -1,14 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { ExternalLink, RefreshCw } from 'lucide-react';
-import { updatesApi, type UpdateChannel, type UpdatesStatus, type UpdateRestartAttempt } from '../../services/updatesApi';
+import { updatesApi, type UpdateChannel, type UpdatesStatus } from '../../services/updatesApi';
 import { updatesStatusOptions } from '../../queries/shell-queue/settings';
 import { ParamLabel } from '../shared/ParamLabel';
 import { SelectRow } from './SettingsPrimitives';
 import { ConfirmDialog } from '../shared/ConfirmDialog';
-import { UpdateOutcome, UpdateReconnectOverlay } from './UpdateReconnectOverlay';
+import { UpdateOutcome, UpdateRestartContext } from './UpdateReconnectOverlay';
 import { updateRefusal, updatesViewState } from './updatesViewState';
 
 const short = (sha: string | null) => (sha ? sha.slice(0, 8) : null);
@@ -25,7 +25,7 @@ export function UpdatesPanel() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [confirmCandidate, setConfirmCandidate] = useState<string | null>(null);
-  const [attempt, setAttempt] = useState<UpdateRestartAttempt | null>(null);
+  const { attempt, setAttempt } = useContext(UpdateRestartContext)!;
   const releaseReset = useRef(false);
   const query = useQuery({
     ...updatesStatusOptions(),
@@ -154,7 +154,6 @@ export function UpdatesPanel() {
         setConfirmCandidate(null);
         if (candidateId && !command.isPending && view?.ready && candidateId === view.candidate?.id) command.mutate({ kind: 'apply', candidateId });
       }} />, document.body)}
-    {attempt && <UpdateReconnectOverlay attempt={attempt} />}
   </section>;
 }
 

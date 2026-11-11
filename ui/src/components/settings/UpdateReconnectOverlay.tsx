@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { createContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -6,6 +6,13 @@ import { RefreshCw } from 'lucide-react';
 import type { UpdateApplyResult, UpdateRestartAttempt } from '../../services/updatesApi';
 import { updateReconnectOptions } from '../../queries/shell-queue/settings';
 import { updateVersion } from './updatesViewState';
+
+// App owns the attempt so replacing Settings with a liveness screen cannot
+// discard it. Settings starts the attempt only after apply returns 202.
+export const UpdateRestartContext = createContext<{
+  attempt: UpdateRestartAttempt | null;
+  setAttempt: (attempt: UpdateRestartAttempt) => void;
+} | null>(null);
 
 export function UpdateOutcome({ result }: { result: UpdateApplyResult }) {
   const { t } = useTranslation();

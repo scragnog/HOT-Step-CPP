@@ -9,6 +9,8 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { viewFromUrl, urlForView } from './app/viewRoutes';
 import { RestartingOverlay, ServerOfflineOverlay } from './app/ServerOverlays';
+import { UpdateReconnectOverlay, UpdateRestartContext } from './components/settings/UpdateReconnectOverlay';
+import type { UpdateRestartAttempt } from './services/updatesApi';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from './context/AuthContext';
 import { GlobalParamsProvider, useGlobalParams } from './context/GlobalParamsContext';
@@ -328,6 +330,7 @@ const AppContent: React.FC = () => {
   const [isShutdown, setIsShutdown] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  const [updateAttempt, setUpdateAttempt] = useState<UpdateRestartAttempt | null>(null);
 
   // Presence beacon: the launcher asks /api/health whether any tab is already
   // open before opening a new one. The server counts each tab's /api/logs
@@ -799,6 +802,13 @@ const AppContent: React.FC = () => {
     );
   }
 
+  // Update recovery owns its health polling and waits for a matching receipt.
+  // Never mount the ordinary liveness screens, which reload on health alone.
+  if (updateAttempt) {
+    return <div className="fixed inset-0 bg-white dark:bg-black">
+      <UpdateReconnectOverlay attempt={updateAttempt} />
+    </div>;
+  }
   if (isRestarting) {
     return <RestartingOverlay />;
   }
@@ -810,18 +820,20 @@ const AppContent: React.FC = () => {
     if (activeView === 'settings') {
       return (
         <DiscoPulseWrapper hue={DISCO.activity} className="flex-1 overflow-y-auto">
-          <SettingsPanel
-            settings={settings}
-            onSettingsChange={setSettings}
-            onNukeComplete={() => {
-              patchLibrary(queryClient, () => []);
-              void invalidateSongs(queryClient);
-              setSelectedSong(null);
-              // The queue is a persisted singleton store outside the song
-              // cache, so it survives the nuke unless explicitly cleared.
-              clearFinishedFromAudioQueue();
-            }}
-          />
+          <UpdateRestartContext.Provider value={{ attempt: updateAttempt, setAttempt: setUpdateAttempt }}>
+            <SettingsPanel
+              settings={settings}
+              onSettingsChange={setSettings}
+              onNukeComplete={() => {
+                patchLibrary(queryClient, () => []);
+                void invalidateSongs(queryClient);
+                setSelectedSong(null);
+                // The queue is a persisted singleton store outside the song
+                // cache, so it survives the nuke unless explicitly cleared.
+                clearFinishedFromAudioQueue();
+              }}
+            />
+          </UpdateRestartContext.Provider>
         </DiscoPulseWrapper>
       );
     }
