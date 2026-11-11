@@ -271,7 +271,7 @@ test('a ready stage survives restart: the receipt is taken back, not downloaded 
   const st = restarted.status();
   assert.equal(st.phase, 'ready'); assert.equal(st.preparedId, original.id); assert.equal(st.candidate?.id, original.candidate.id);
   assert.deepEqual(restarted.getPrepared(), original);
-  assert.deepEqual(restarted.revalidate(), original);
+  assert.deepEqual(await restarted.revalidate(), original);
   assert.throws(() => restarted.prepare(original.candidate.id), /already staged/);
   assert.deepEqual(fs.readdirSync(s.deps.stateRoot!), [original.id]);
   assert.equal(s.calls.filter(url => url === URL).length, downloads);
@@ -281,7 +281,7 @@ test('a stale or damaged receipt is removed at restart, and revalidate notices d
   const s = setup(t); await s.prepare();
   const original = s.d.getPrepared()!;
   fs.rmSync(path.join(original.payloadRoot, P, 'server/updater-tool.mjs'));
-  assert.throws(() => s.d.revalidate(), /missing or invalid/);
+  await assert.rejects(s.d.revalidate(), /missing/);
   const restarted = createDownloader(s.deps);
   assert.equal(restarted.getPrepared(), null);
   assert.deepEqual(fs.readdirSync(s.deps.stateRoot!), []);
@@ -290,6 +290,27 @@ test('a stale or damaged receipt is removed at restart, and revalidate notices d
   s2.install({ ...s2.installed(), version: '2.0.0', tag: 'v2.0.0', buildInfo: { ...INFO } });
   assert.equal(createDownloader(s2.deps).getPrepared(), null, 'already installed: stale');
   assert.deepEqual(fs.readdirSync(s2.deps.stateRoot!), []);
+});
+
+test('staged contents are checked against the hashes recorded from the verified archive', async t => {
+  const s = setup(t); await s.prepare();
+  const original = s.d.getPrepared()!;
+  const server = path.join(original.payloadRoot, P, 'server/server.mjs');
+  // Same size, different bytes: only the hash catches it, before handoff and after a restart.
+  fs.writeFileSync(server, 'FIXTURE');
+  await assert.rejects(s.d.revalidate(), /changed on disk \(app\/.*server\.mjs\)/);
+  const restarted = createDownloader(s.deps);
+  assert.ok(restarted.getPrepared(), 'names and sizes still match at recovery');
+  await assert.rejects(restarted.revalidate(), /changed on disk/);
+  fs.writeFileSync(server, 'fixture');
+  assert.deepEqual(await restarted.revalidate(), original);
+  // An added file is refused; a size change makes recovery drop the receipt.
+  fs.writeFileSync(path.join(original.payloadRoot, P, 'server/extra.mjs'), 'x');
+  await assert.rejects(restarted.revalidate(), /unexpected file/);
+  fs.rmSync(path.join(original.payloadRoot, P, 'server/extra.mjs'));
+  fs.writeFileSync(server, 'longer than before');
+  assert.equal(createDownloader(s.deps).getPrepared(), null);
+  assert.deepEqual(fs.readdirSync(s.deps.stateRoot!), []);
 });
 
 test('a live owner, including an EPERM probe, keeps its lock and staging', async t => {

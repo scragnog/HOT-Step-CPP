@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import type { UpdateApplyResult, UpdateInstallStatus, UpdatesApplyResponse } from '../../contracts/updates.js';
+import { isInside } from '../../dataroot/paths.js';
 import { PrepareError } from './download.js';
 import { releaseLease, type Gate } from './maintenance.js';
 
@@ -24,7 +25,7 @@ export interface ApplyDeps {
   /** Why this process cannot install updates at all, else null. */
   unsupported(): string | null;
   /** The staged update, checked again (throws PrepareError). */
-  revalidate(): { id: string; payloadId: string; candidate: { id: string } };
+  revalidate(): Promise<{ id: string; payloadId: string; candidate: { id: string } }>;
   /** This payload: its folder and its name under app/. */
   payloadDir: string;
   installRoot: string;
@@ -82,6 +83,20 @@ export async function payloadProblems(dir: string): Promise<string[]> {
   return out;
 }
 
+/** The data folder or a path setting inside the install folder: an update, or
+ *  the later deletion of an old app/<id>, would take it along. Relative
+ *  settings resolve against the data folder, links resolve first. */
+export function installTreeProblems(installRoot: string, dataRoot: string, settings: Record<string, string | undefined>): string[] {
+  const real = (p: string) => { try { return fs.realpathSync.native(p); } catch { return path.resolve(p); } };
+  const root = real(installRoot);
+  const out: string[] = [];
+  for (const [key, value] of [['the data folder', dataRoot], ...Object.entries(settings)] as Array<[string, string | undefined]>) {
+    if (!value) continue;
+    if (isInside(root, real(path.resolve(dataRoot, value)))) out.push(`${key} is inside the install folder (${value}); move it to the data folder first`);
+  }
+  return out;
+}
+
 export function readLastResult(updaterDir: string | null): UpdateApplyResult | null {
   if (!updaterDir) return null;
   try {
@@ -114,7 +129,7 @@ export function createApplier(d: ApplyDeps) {
     if (phase !== 'idle') throw new PrepareError('An update is already being installed');
     const why = d.unsupported();
     if (why) throw new PrepareError(why);
-    const prepared = d.revalidate();
+    const prepared = await d.revalidate();
     if (prepared.candidate.id !== candidateId) throw new PrepareError('That is not the update that was downloaded; check for updates again');
     const oldPayload = path.basename(d.payloadDir);
     const edits = await payloadProblems(d.payloadDir);

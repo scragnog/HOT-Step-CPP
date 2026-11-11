@@ -52,16 +52,19 @@ lock, the service removes incomplete `prepare-xxxxxx` directories left by a
 crashed prepare. It preserves links, unrelated directories, and every directory
 with a `ready.json` receipt. An existing ready receipt blocks a second prepare.
 After a server restart the service takes back a valid receipt for a newer release
-(status `ready`, same `preparedId` and candidate ID) and deletes one that is stale
-or no longer checks out. The launcher deletes staging it has installed from.
+(status `ready`, same `preparedId` and candidate ID) when the staged files still
+match the names and sizes in `ready.json`, and deletes one that is stale or no
+longer checks out; hashes are checked again before apply. The launcher deletes staging it has installed from.
 
 `POST /api/updates/apply` accepts only `{ "candidateId": "<staged candidate ID>" }`
 and rejects cross-origin requests. It needs `install.supported` from the status
 endpoint: updater protocol 1 or higher, started by the stable launcher, Windows.
-It revalidates the staged receipt, refuses a payload whose files differ from its
-`payload-manifest.json`, then opens the maintenance transaction: preflight (a
-scheduled data-folder move, data overlapping the app, path settings inside the
-app), lease, gate closed, in-flight requests drained, busy check. Answers:
+It checks every staged file against the SHA-256 recorded while extracting the
+verified archive (same names, sizes and hashes), refuses a payload whose files
+differ from its `payload-manifest.json`, then opens the maintenance transaction:
+preflight (a scheduled data-folder move, data overlapping the app, the data folder
+or a path setting anywhere inside the install folder, older `app/<id>` included),
+lease, gate closed, in-flight requests drained, busy check. Answers:
 
 - 202 `{ phase: "stopping", from, to }`: the launcher took the update. The server
   stops about 300 ms later. Poll `GET /api/health` until it answers, then read

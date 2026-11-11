@@ -337,8 +337,12 @@ async function sweepIncompleteStages(state: string): Promise<void> {
   if (ready) refuse('The launcher must reconcile an existing ready update before preparing another');
 }
 
-async function extract(file: string, target: string, entries: ZipEntry[], signal: AbortSignal): Promise<void> {
+/** Size and SHA-256 of every staged file, keyed by its '/' path in the archive. */
+type StagedFiles = Record<string, [number, string]>;
+
+async function extract(file: string, target: string, entries: ZipEntry[], signal: AbortSignal): Promise<StagedFiles> {
   await fsp.mkdir(target, { mode: 0o700 });
+  const staged: StagedFiles = {};
   for (const e of entries) {
     signal.throwIfAborted();
     const dest = path.join(target, e.name);
@@ -347,16 +351,43 @@ async function extract(file: string, target: string, entries: ZipEntry[], signal
     noLinks(e.directory ? dest : path.dirname(dest));
     if (e.directory) continue;
     let count = 0, crc = 0xffffffff;
+    const sha = createHash('sha256');
     const guard = new Transform({ transform(chunk: Buffer, _enc, cb) {
       count += chunk.length;
       if (count > e.size) { cb(new Error('ZIP entry exceeds its expanded size')); return; }
-      crc = crcChunk(crc, chunk); cb(null, chunk);
+      crc = crcChunk(crc, chunk); sha.update(chunk); cb(null, chunk);
     } });
     const input = e.packed ? fs.createReadStream(file, { start: e.start, end: e.start + e.packed - 1 }) : Readable.from([]);
     const output = fs.createWriteStream(dest, { flags: 'wx', mode: 0o600 });
     if (e.method === 8) await pipeline(input, createInflateRaw(), guard, output, { signal });
     else await pipeline(input, guard, output, { signal });
     if (count !== e.size || ((crc ^ 0xffffffff) >>> 0) !== e.crc) refuse('ZIP entry is truncated or has a wrong checksum');
+    staged[e.name] = [count, sha.digest('hex')];
+  }
+  return staged;
+}
+
+/** The staged folder still holds exactly the files extraction recorded, by
+ *  name and size; with `hashes`, also by SHA-256 read again from disk. */
+function checkStagedFiles(root: string, files: StagedFiles): string[] {
+  const rels: string[] = [];
+  for (const e of fs.readdirSync(root, { recursive: true, withFileTypes: true }) as fs.Dirent[]) {
+    if (e.isDirectory()) continue;
+    const full = path.join(e.parentPath, e.name);
+    const rel = path.relative(root, full).split(path.sep).join('/');
+    const want = Object.hasOwn(files, rel) ? files[rel] : null;
+    if (!want || e.isSymbolicLink() || !e.isFile()) refuse(`The staged update has an unexpected file (${rel}); download it again`);
+    if (fs.statSync(full).size !== want![0]) refuse(`The staged update changed on disk (${rel}); download it again`);
+    rels.push(rel);
+  }
+  if (rels.length !== Object.keys(files).length) refuse('The staged update is missing files; download it again');
+  return rels;
+}
+async function checkStaged(root: string, files: StagedFiles): Promise<void> {
+  for (const rel of checkStagedFiles(root, files)) {
+    const h = createHash('sha256');
+    for await (const chunk of fs.createReadStream(path.join(root, ...rel.split('/')))) h.update(chunk as Buffer);
+    if (h.digest('hex') !== files[rel][1]) refuse(`The staged update changed on disk (${rel}); download it again`);
   }
 }
 
@@ -405,6 +436,8 @@ export function createDownloader(d: DownloadDeps) {
   let controller: AbortController | null = null;
   /** payloadRoot is the staged package root; the launcher installs payloadRoot/app/<payloadId>. */
   let prepared: { id: string; payloadRoot: string; payloadId: string; buildInfo: BuildInfo; candidate: UpdateCandidate } | null = null;
+  /** What extraction wrote, from the verified archive (ready.json after a restart). */
+  let stagedFiles: StagedFiles | null = null;
   const publicCandidate = (c: Candidate): UpdateCandidate => ({ id: c.id, tag: c.tag, sha: c.sha, variant: c.variant, assetName: c.assetName, bytes: c.bytes });
   function status(): UpdatePrepareStatus {
     const blocker = prepareBlocker(d);
@@ -474,12 +507,13 @@ export function createDownloader(d: DownloadDeps) {
       await free(state, entries.reduce((sum, e) => sum + e.size, 0));
       progress.phase = 'extracting';
       const payloadRoot = path.join(folder, 'payload');
-      await extract(archive, payloadRoot, entries, signal);
+      const files = await extract(archive, payloadRoot, entries, signal);
       signal.throwIfAborted();
       const { info: buildInfo, payloadId } = checkLayout(payloadRoot, c);
       const id = path.basename(folder);
       prepared = { id, payloadRoot, payloadId, buildInfo, candidate: publicCandidate(c) };
-      await fsp.writeFile(path.join(folder, 'ready.json'), JSON.stringify({ ...prepared, archiveSha256: match![1].toLowerCase() }), { flag: 'wx', mode: 0o600 });
+      stagedFiles = files;
+      await fsp.writeFile(path.join(folder, 'ready.json'), JSON.stringify({ ...prepared, archiveSha256: match![1].toLowerCase(), files }), { flag: 'wx', mode: 0o600 });
       signal.throwIfAborted();
       progress.phase = 'ready'; progress.preparedId = id;
     } catch (e) {
@@ -547,7 +581,11 @@ export function createDownloader(d: DownloadDeps) {
         if (prepared || r?.id !== name || r.payloadRoot !== path.join(folder, 'payload') || typeof r.candidate?.tag !== 'string'
           || !newer(r.candidate.tag, installed.tag!)) throw new Error('stale receipt');
         const c = { ...r.candidate, protocol: installed.updaterProtocol, expiresAt: Infinity } as Candidate;
+        const files = r.files as StagedFiles;
+        if (!files || typeof files !== 'object' || Object.values(files).some(v => !Array.isArray(v) || !Number.isSafeInteger(v[0]) || !/^[0-9a-f]{64}$/.test(v[1]))) throw new Error('no file record');
+        checkStagedFiles(r.payloadRoot, files); // names and sizes now; hashes again before handoff
         const { info, payloadId } = checkLayout(r.payloadRoot, c);
+        stagedFiles = files;
         prepared = { id: name, payloadRoot: r.payloadRoot, payloadId, buildInfo: info, candidate: publicCandidate(c) };
         candidate = c;
         reason = null;
@@ -557,11 +595,13 @@ export function createDownloader(d: DownloadDeps) {
       }
     }
   }
-  /** The staged update, checked again just before it is handed to the launcher. */
-  function revalidate(): NonNullable<typeof prepared> {
+  /** The staged update, checked again just before it is handed to the launcher:
+   *  every file against the SHA-256 recorded while extracting the verified archive. */
+  async function revalidate(): Promise<NonNullable<typeof prepared>> {
     const blocker = prepareBlocker(d); if (blocker) refuse(blocker);
-    if (!prepared || !candidate || progress.phase !== 'ready') refuse('No verified update is staged; download it first');
+    if (!prepared || !candidate || !stagedFiles || progress.phase !== 'ready') refuse('No verified update is staged; download it first');
     if (!fs.existsSync(path.join(path.dirname(prepared!.payloadRoot), 'ready.json'))) refuse('The staged update is gone; download it again');
+    await checkStaged(prepared!.payloadRoot, stagedFiles!);
     const { info, payloadId } = checkLayout(prepared!.payloadRoot, candidate!);
     if (payloadId !== prepared!.payloadId || info.sha !== prepared!.buildInfo.sha) refuse('The staged update changed on disk; download it again');
     return structuredClone(prepared!);

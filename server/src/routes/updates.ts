@@ -13,7 +13,8 @@ import { BUILD_INFO, DATA_ROOT, LAUNCHER_PROTOCOL, PROJECT_ROOT, config } from '
 import { RUNTIME } from '../dataroot/bootstrap.js';
 import { getBusyBlockers, updatePreflight } from '../dataroot/pointer.js';
 import { maintenance } from '../services/updates/maintenance.js';
-import { askLauncher, createApplier } from '../services/updates/apply.js';
+import { askLauncher, createApplier, installTreeProblems } from '../services/updates/apply.js';
+import { ENV_PATH_KEYS } from '../dataroot/paths.js';
 import { exitForLauncher } from './shutdown.js';
 import { trustedOrigin } from '../services/updates/origin.js';
 import { updates } from '../services/updates/index.js';
@@ -42,7 +43,10 @@ export const updateApplier = createApplier({
   },
   revalidate: () => updateDownloads.revalidate(),
   payloadDir: PROJECT_ROOT, installRoot: stableRoot ?? '', updaterDir, dataRoot: DATA_ROOT ?? '',
-  preflight: () => updatePreflight(), blockers: getBusyBlockers, gate: maintenance,
+  // updatePreflight guards the running app/<id>; any other payload, and the
+  // launcher's own files, are covered by checking the whole install folder.
+  preflight: () => [...updatePreflight(), ...installTreeProblems(stableRoot!, DATA_ROOT!, Object.fromEntries(ENV_PATH_KEYS.map(k => [k, process.env[k]])))],
+  blockers: getBusyBlockers, gate: maintenance,
   snapshotSet: () => ({
     dbs: [config.data.dbPath, config.lireek.dbPath],
     files: [RUNTIME.envPath, RUNTIME.pointerPath, path.join(config.data.dir, 'lireek.db.migrated')].filter((f): f is string => !!f),

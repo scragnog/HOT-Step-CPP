@@ -74,7 +74,7 @@ const srv = http.createServer((req, res) => {
   const authorised = req.headers['x-hotstep-maintenance-token'] === token;
   let body = ''; req.on('data', d => { body += d; });
   req.on('end', () => {
-    if (req.url === '/api/health') return json(200, { status: 'ok' });
+    if (req.url === '/api/health') return json(cfg.health503 ? 503 : 200, { status: 'ok' });
     if (req.url === '/api/maintenance/status') {
       if (lease && !authorised) return json(403, {});
       return json(200, { closed, leaseId: lease?.id ?? null, build, db: { ok: !cfg.badDb, errors: cfg.badDb ? ['migration 42 failed'] : [] }, ui: true, engine: { ready: true, status: 'Ready' } });
@@ -416,6 +416,29 @@ test('a first start records the data folder beside the install, never inside app
   assert.equal(JSON.parse(fs.readFileSync(ptr, 'utf8')).root, path.join(path.dirname(f.root), 'HOT-Step-Data'));
   await f.post(port, '/test/quit');
   assert.equal(await run, 0);
+});
+
+for (const [name, prepare, snapshots] of [
+  ['the next start never answers health', f => fs.writeFileSync(path.join(f.root, 'app', f.newId, 'stub.json'), JSON.stringify({ version: 'new', health503: true })), 1],
+  ['a setting points into the old payload', f => { fs.mkdirSync(path.join(f.data, 'settings'), { recursive: true }); fs.writeFileSync(path.join(f.data, 'settings', '.env'), `ACESTEPCPP_MODELS="${path.join(f.root, 'app', f.oldId, 'models')}"
+`); }, 0],
+]) test(`retained folders are kept when ${name}`, async t => {
+  const f = install(t);
+  const run = f.start();
+  await f.apply(await f.port(f.oldId));
+  const port = await f.port(f.newId);
+  assert.equal((await f.waitResult()).outcome, 'installed');
+  await f.post(port, '/test/quit');
+  assert.equal(await run, 0);
+  prepare(f);
+  const run2 = f.start();
+  const port2 = await f.port(f.newId);
+  await sleep(timing.healthMs + 500); // past the health deadline and any cleanup
+  assert.ok(fs.existsSync(path.join(f.root, 'app', f.oldId)), f.logs.join('\n'));
+  assert.deepEqual(f.retained().payloads, [f.oldId]);
+  assert.equal(f.retained().snapshots.length, snapshots, 'a setting keeps the payload, not the snapshot');
+  await f.post(port2, '/test/quit');
+  assert.equal(await run2, 0);
 });
 
 // ── Packaging ────────────────────────────────────────────────────────

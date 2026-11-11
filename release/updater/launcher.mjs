@@ -223,20 +223,45 @@ function retain(ctx, add) {
   writeJsonAtomic(ctx.L.retained, r);
 }
 
+/** Absolute paths the user's settings name: the process env and the data
+ *  folder's settings/.env. A retained payload one of them points into is kept. */
+function settingPaths(ctx) {
+  const values = Object.values(ctx.env);
+  let dataRoot = ctx.dataEnv?.HOT_STEP_DATA_ROOT || ctx.env.HOT_STEP_DATA_ROOT;
+  if (!dataRoot) { try { dataRoot = readJson(path.join(ctx.dataEnv.HOT_STEP_PROFILE_DIR, 'data-location.json'))?.root; } catch { /* none */ } }
+  if (typeof dataRoot === 'string') {
+    try {
+      for (const line of fs.readFileSync(path.join(dataRoot, 'settings', '.env'), 'utf8').split(/\r?\n/)) {
+        const m = /^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=\s*(.*)$/.exec(line);
+        if (m) values.push(m[1].trim().replace(/^(['"])(.*)\1$/, '$2'));
+      }
+    } catch { /* no settings file */ }
+  }
+  return values.filter(v => typeof v === 'string' && path.isAbsolute(v));
+}
+
 /** Delete retained folders. Only recorded names in updater-owned places, never
- *  the current payload; a locked folder stays recorded for the next start. */
+ *  the current payload or one a setting points into; a locked or referenced
+ *  folder stays recorded for a later start. */
 async function cleanRetained(ctx) {
   const L = ctx.L;
   if (fs.existsSync(L.tx)) return;
   const r = readRetained(L);
   if (!r.payloads.length && !r.snapshots.length && !r.staging.length) return;
   const current = readPointer(L.root);
+  const referenced = settingPaths(ctx);
   const keep = { format: 1, payloads: [], snapshots: [], staging: [] };
   const remove = async (kind, value, target) => {
     try { await retry(() => fs.rmSync(target, { recursive: true, force: true })); }
     catch (e) { keep[kind].push(value); ctx.log(`[Launcher] ${target} is in use (${e.code ?? e.message}); it will be removed after a later start.`); }
   };
-  for (const id of r.payloads) if (validPayloadId(id) && id !== current) await remove('payloads', id, path.join(L.app, id));
+  for (const id of r.payloads) {
+    if (!validPayloadId(id) || id === current) continue;
+    const dir = path.join(L.app, id);
+    const used = referenced.find(p => sameDir(p, dir) || inside(real(dir), real(p)));
+    if (used) { keep.payloads.push(id); ctx.log(`[Launcher] Keeping ${dir}: a setting points into it (${used}).`); continue; }
+    await remove('payloads', id, dir);
+  }
   for (const dir of r.snapshots) if (inside(L.snapshots, dir)) await remove('snapshots', dir, path.resolve(dir));
   for (const id of r.staging) if (PREPARED_ID.test(id)) await remove('staging', id, path.join(L.updater, id));
   if (keep.payloads.length + keep.snapshots.length + keep.staging.length) writeJsonAtomic(L.retained, keep);
@@ -547,11 +572,13 @@ function afterStart(ctx, s, open, clean) {
   ctx.cleaning = (async () => {
     const a = await address(s, timing.healthMs);
     if (!a) return;
-    for (const deadline = Date.now() + timing.healthMs; Date.now() < deadline && !s.exit;) {
-      try { if ((await getJson(`${a.url}/api/health`)).ok) break; } catch { /* starting */ }
-      await sleep(timing.pollMs);
+    let healthy = false;
+    for (const deadline = Date.now() + timing.healthMs; !healthy && Date.now() < deadline && !s.exit;) {
+      try { healthy = (await getJson(`${a.url}/api/health`)).ok; } catch { /* starting */ }
+      if (!healthy) await sleep(timing.pollMs);
     }
-    if (s.exit) return;
+    // No proven good start: the previous payload and its snapshot stay.
+    if (!healthy || s.exit) return;
     if (open) ctx.openBrowser(ctx, s.payload, a.url);
     if (clean) await cleanRetained(ctx);
   })().catch(e => ctx.log(`[Launcher] Cleanup skipped: ${e.message}`));

@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createApplier, payloadProblems, readLastResult, MANIFEST_FILE, type ApplyDeps } from './apply.js';
+import { createApplier, installTreeProblems, payloadProblems, readLastResult, MANIFEST_FILE, type ApplyDeps } from './apply.js';
 import { PrepareError } from './download.js';
 import { DATA_LEASE_FILE, LEASE_FILE, createGate, readLeases } from './maintenance.js';
 
@@ -32,7 +32,7 @@ function fixture(t: test.TestContext, over: Partial<ApplyDeps> = {}) {
   let reply: (m: any) => any = () => ({ type: 'apply-ack', ok: true });
   const deps: ApplyDeps = {
     unsupported: () => null,
-    revalidate: () => ({ id: 'prepare-abc123', payloadId: 'v2.0.0-bbbbbbbbbbbb-cpu', candidate: { id: 'cand-1' } }),
+    revalidate: async () => ({ id: 'prepare-abc123', payloadId: 'v2.0.0-bbbbbbbbbbbb-cpu', candidate: { id: 'cand-1' } }),
     payloadDir, installRoot, updaterDir, dataRoot,
     preflight: () => [], blockers: () => busy, gate,
     snapshotSet: () => ({ dbs: [path.join(dataRoot, 'library', 'hotstep.db')], files: [] }),
@@ -129,4 +129,16 @@ test('the last result is read from the launcher record, and ignored when malform
   assert.equal(readLastResult(f.updaterDir), null);
   fs.writeFileSync(file, 'not json');
   assert.equal(readLastResult(f.updaterDir), null);
+});
+
+test('a path setting or the data folder inside the install folder blocks apply, any app/<id> included', t => {
+  const f = fixture(t);
+  const install = path.dirname(path.dirname(f.payloadDir));
+  const older = path.join(install, 'app', 'v0.9.0-cccccccccccc-cpu', 'models');
+  fs.mkdirSync(older, { recursive: true });
+  assert.deepEqual(installTreeProblems(install, f.dataRoot, { ACESTEPCPP_MODELS: path.join(f.dataRoot, 'models'), DATA_DIR: 'library', TRAINING_DIR: undefined }), []);
+  const p = installTreeProblems(install, f.dataRoot, { ACESTEPCPP_MODELS: older, ACESTEPCPP_ADAPTERS: path.relative(f.dataRoot, path.join(install, 'adapters')) });
+  assert.equal(p.length, 2);
+  assert.match(p[0], /ACESTEPCPP_MODELS is inside the install folder/);
+  assert.match(installTreeProblems(install, path.join(install, 'data'), {})[0], /the data folder is inside/);
 });
