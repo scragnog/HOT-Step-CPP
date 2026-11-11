@@ -585,22 +585,47 @@ static bool lm_pissa_init(LmLora * L, ggml_backend_sched_t sched, int oversample
             host.assign((size_t) in * (size_t) q, 0.0f);
             lm_rng_fill_normal(&rng, host, 1.0f);
             ggml_backend_tensor_set(t_omega, host.data(), 0, host.size() * sizeof(float));
-            {
+            // One graph per pass, with Y's columns brought back to norm [0.5, 1)
+            // on the host in between. The power iteration grows Y by about
+            // sigma_max^2 a pass (2.5e6 on layer 0's q_proj), and a GPU matmul
+            // that stages F32 operands through f16 turns that into inf: cuBLAS's
+            // F16 path did (hence both operands F32 below), and Metal's
+            // kernel_mul_mm_f32_f32 stages BOTH operands as half whatever the
+            // dtype (GH #335, mlp.up_proj on layer 0). Scaling by a power of two
+            // is exact and the range finder only uses Y's column space, so this
+            // is bit-identical wherever the old single graph did not overflow.
+            for (int it = 0; it <= iters; it++) {
+                if (it > 0) {
+                    host.resize((size_t) out * (size_t) q);
+                    ggml_backend_tensor_get(t_y, host.data(), 0, host.size() * sizeof(float));
+                    for (int k = 0; k < q; k++) {
+                        float * col = host.data() + (size_t) k * (size_t) out;
+                        double  n2  = 0.0;
+                        for (int j = 0; j < out; j++) {
+                            n2 += (double) col[j] * (double) col[j];
+                        }
+                        int e = 0;
+                        std::frexp(std::sqrt(n2), &e);
+                        if (std::isfinite(n2) && n2 > 0.0 && e != 0) {
+                            for (int j = 0; j < out; j++) {
+                                col[j] = std::ldexp(col[j], -e);
+                            }
+                        }
+                    }
+                    ggml_backend_tensor_set(t_y, host.data(), 0, host.size() * sizeof(float));
+                }
                 ggml_init_params ip  = { arena.size(), arena.data(), true };
                 ggml_context *   ctx = ggml_init(ip);
                 ggml_cgraph *    gf  = ggml_new_graph_custom(ctx, 256, false);
-                // BOTH operands are F32 here, and that is not tidiness. Using
-                // the base in its own F16 dtype sends src1 through cuBLAS's F16
-                // conversion, and the power iteration deliberately grows Y — it
-                // reached 2.5e6 on layer 0's q_proj — so the SECOND iteration's
-                // src1 goes over f16's 65504 and the whole SVD comes back NaN.
-                // It surfaced as a dead depth-loss gradient forty lines later.
-                ggml_tensor * wf  = qwen3_f32(ctx, w);
-                ggml_tensor * wtv = view2(ctx, t_wt, out, in);
-                ggml_tensor * y   = ggml_mul_mat(ctx, wf, view2(ctx, t_omega, in, q));  // [out, q]
-                for (int it = 0; it < iters; it++) {
-                    ggml_tensor * z = ggml_mul_mat(ctx, wtv, y);                        // [in, q]
-                    y               = ggml_mul_mat(ctx, wf, z);                         // [out, q]
+                // BOTH operands are F32 here, and that is not tidiness: the base
+                // in its own F16 dtype sends src1 through cuBLAS's F16 conversion.
+                ggml_tensor * wf = qwen3_f32(ctx, w);
+                ggml_tensor * y;
+                if (it == 0) {
+                    y = ggml_mul_mat(ctx, wf, view2(ctx, t_omega, in, q));                    // [out, q]
+                } else {
+                    ggml_tensor * z = ggml_mul_mat(ctx, view2(ctx, t_wt, out, in), view2(ctx, t_y, out, q));  // [in, q]
+                    y               = ggml_mul_mat(ctx, wf, z);                                // [out, q]
                 }
                 ggml_build_forward_expand(gf, ggml_cpy(ctx, y, view2(ctx, t_y, out, q)));
                 if (!compute(gf, ctx)) {
