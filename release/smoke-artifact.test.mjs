@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { assertBackends, cudaRuntimeFiles, cudaRuntimeKey, runCommand, smokeArtifact, smokeEngine, writeStubs } from './smoke-artifact.mjs';
+import { artifactPayload, assertBackends, cudaRuntimeFiles, cudaRuntimeKey, runCommand, smokeArtifact, smokeEngine, writeStubs } from './smoke-artifact.mjs';
+import { buildInfo, UPDATER_PROTOCOL } from './build-info.mjs';
+import { packageLayout } from './updater/package-layout.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const out = path.join(here, 'out');
@@ -18,6 +20,44 @@ function fixture(t) {
 function alive(pid) {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
+
+for (const protocol of [0, 1]) {
+  test(`archive payload: protocol ${protocol}, package validation and missing binary`, t => {
+    const root = fixture(t);
+    const info = { format: 1, tag: 'v1.2.3', sha: 'a'.repeat(40), engineSha: 'b'.repeat(40),
+      channel: 'release', os: 'windows', arch: 'x64', variant: 'cpu', updaterProtocol: protocol };
+    for (const file of ['runtime/node.exe', 'server/server.mjs', 'server/updater-tool.mjs', 'engine/ace-server.exe', 'HOT-Step.bat']) {
+      fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      fs.writeFileSync(path.join(root, file), 'fixture');
+    }
+    fs.writeFileSync(path.join(root, 'build-info.json'), JSON.stringify(info));
+    fs.writeFileSync(path.join(root, 'VERSION'), '1.2.3');
+    const { id } = packageLayout(root);
+    const payload = id ? path.join(root, 'app', id) : root;
+    assert.equal(artifactPayload(root), payload);
+    fs.writeFileSync(path.join(payload, 'VERSION'), '9.9.9');
+    assert.throws(() => artifactPayload(root), /disagrees with VERSION/);
+    fs.writeFileSync(path.join(payload, 'VERSION'), '1.2.3');
+    if (id) {
+      fs.writeFileSync(path.join(root, 'unexpected.txt'), 'bad root');
+      assert.throws(() => artifactPayload(root), /root: unexpected/);
+      fs.unlinkSync(path.join(root, 'unexpected.txt'));
+      fs.writeFileSync(path.join(root, 'current.json'), JSON.stringify({ format: 1, payload: '../escape' }));
+      assert.throws(() => artifactPayload(root), /not a valid version pointer/);
+      fs.writeFileSync(path.join(root, 'current.json'), JSON.stringify({ format: 1, payload: id }));
+    }
+    fs.unlinkSync(path.join(payload, 'engine/ace-server.exe'));
+    assert.throws(() => artifactPayload(root), /missing engine\/ace-server.exe/);
+  });
+}
+
+test('protocol default is Windows-only and explicit protocol wins on every platform', () => {
+  for (const [os, arch, variant] of [['windows', 'x64', 'cpu'], ['linux', 'x64', 'cpu'], ['macos', 'arm64', 'metal']]) {
+    const opts = { os, arch, variant };
+    assert.equal(buildInfo(opts).updaterProtocol, os === 'windows' ? UPDATER_PROTOCOL : 0);
+    for (const protocol of [0, 1]) assert.equal(buildInfo({ ...opts, protocol }).updaterProtocol, protocol);
+  }
+});
 
 // Real child processes exercise HTTP errors, crashes, hangs and cleanup without
 // a GPU, native compiler or release archive. Full archive runs are separate.

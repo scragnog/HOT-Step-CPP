@@ -41,6 +41,7 @@ foreach ($version in @("$VersionMajor.0.0","$VersionMajor.0.1","$VersionMajor.0.
     if ($LASTEXITCODE) { throw 'Fixture tag failed' }
     $argsList = @('-NoProfile','-File',"$clone\release\build-release.ps1",'-Version',$version,'-Variant','cpu','-SkipEngine')
     if ($version -ne "$VersionMajor.0.2") { $argsList += @('-UpdaterProtocol','1') }
+    else { $argsList += @('-UpdaterProtocol','0') }
     if ($version -ne "$VersionMajor.0.0") { $argsList += '-SkipUI' }
     $p = Start-Process pwsh -ArgumentList $argsList -PassThru -WindowStyle Hidden -RedirectStandardOutput "$logs\build-$version.stdout.log" -RedirectStandardError "$logs\build-$version.stderr.log"
     if (-not $p.WaitForExit(900000)) { Stop-Process -Id $p.Id; throw "Build timeout $version, PID $($p.Id)" }

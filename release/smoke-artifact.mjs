@@ -8,6 +8,8 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+import { checkPackageBuildInfo } from './check-layout.mjs';
+import { readPointer } from './updater/launcher.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -255,6 +257,19 @@ async function negativeChecks(root, env, work, variant, runtimeDir, timeoutMs) {
   return results;
 }
 
+/** Resolve and check an extracted archive before starting anything from it. */
+export function artifactPayload(root) {
+  const payload = fs.existsSync(path.join(root, 'current.json'))
+    ? path.join(root, 'app', readPointer(root)) : root;
+  for (const file of ['runtime/node.exe', 'server/server.mjs', 'engine/ace-server.exe']) {
+    if (!fs.statSync(path.join(payload, file), { throwIfNoEntry: false })?.isFile()) throw new Error(`Archive is missing ${file}`);
+  }
+  const info = JSON.parse(fs.readFileSync(path.join(payload, 'build-info.json'), 'utf8'));
+  const errors = checkPackageBuildInfo(root, { os: 'windows', variant: info.variant });
+  if (errors.length) throw new Error(`Archive package check: ${errors.join('; ')}`);
+  return payload;
+}
+
 export async function smokeArtifact(zipArg, { outputParent = os.tmpdir(), timeoutMs = 60000, runtimeDir } = {}) {
   if (process.platform !== 'win32') throw new Error('This gate requires Windows and the packaged Windows runtime');
   if (!Number.isFinite(timeoutMs) || timeoutMs < 100 || timeoutMs > 600000) throw new Error('timeoutMs must be 100..600000');
@@ -273,38 +288,38 @@ export async function smokeArtifact(zipArg, { outputParent = os.tmpdir(), timeou
     await runCommand('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
       '$ErrorActionPreference = "Stop"; Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::ExtractToDirectory($env:HOTSTEP_SMOKE_ZIP, $env:HOTSTEP_SMOKE_DEST)'],
     { env: { ...process.env, HOTSTEP_SMOKE_ZIP: zip, HOTSTEP_SMOKE_DEST: root } }, 120000, path.join(work, 'extract.log'));
-    for (const file of ['runtime/node.exe', 'server/server.mjs', 'engine/ace-server.exe']) {
-      if (!fs.statSync(path.join(root, file), { throwIfNoEntry: false })?.isFile()) throw new Error(`Archive is missing ${file}`);
-    }
+    const payload = artifactPayload(root);
+    evidence.payload = payload;
     const temp = path.join(work, 'temp');
     fs.mkdirSync(temp);
     const env = { ...process.env, TEMP: temp, TMP: temp,
-      HOT_STEP_ROOT: root, HOT_STEP_DATA_ROOT: path.join(work, 'data'), HOT_STEP_PROFILE_DIR: path.join(work, 'profile'),
+      HOT_STEP_ROOT: payload, HOT_STEP_DATA_ROOT: path.join(work, 'data'), HOT_STEP_PROFILE_DIR: path.join(work, 'profile'),
       // Do not let a developer's DLL search paths mask an incomplete package.
       PATH: `${path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')};${process.env.SystemRoot || 'C:\\Windows'}`,
     };
-    await runCommand(path.join(root, 'runtime/node.exe'), [path.join(here, 'smoke-boot.mjs'), path.join(root, 'server/server.mjs'), String(timeoutMs / 1000)],
-      { cwd: root, env }, timeoutMs + 10000, path.join(work, 'server.log'));
+    await runCommand(path.join(payload, 'runtime/node.exe'), [path.join(here, 'smoke-boot.mjs'), path.join(payload, 'server/server.mjs'), String(timeoutMs / 1000)],
+      { cwd: payload, env }, timeoutMs + 10000, path.join(work, 'server.log'));
     evidence.server = 'pass';
     const models = path.join(work, 'stub-models');
     writeStubs(models);
-    // Same defaults as the app when a marker is absent (server/src/index.ts).
-    const marker = name => fs.readFileSync(path.join(root, 'engine', name), 'utf8').trim();
-    const variant = fs.existsSync(path.join(root, 'engine/.variant')) ? marker('.variant') : 'cuda';
+    // Local packages may omit the coarse markers; build identity is required
+    // and the package check has already matched any markers that are present.
+    const info = JSON.parse(fs.readFileSync(path.join(payload, 'build-info.json'), 'utf8'));
+    const variant = info.variant.startsWith('cuda') ? 'cuda' : info.variant;
     let backendEnv = env;
     if (variant === 'cuda') {
-      const major = fs.existsSync(path.join(root, 'engine/.cuda-version')) ? Number(marker('.cuda-version')) : 13;
-      const registry = JSON.parse(fs.readFileSync(path.join(root, 'server/data/model-registry.json'), 'utf8'));
+      const major = Number(info.variant.match(/^cuda(\d+)/)[1]);
+      const registry = JSON.parse(fs.readFileSync(path.join(payload, 'server/data/model-registry.json'), 'utf8'));
       runtimeDir = path.resolve(runtimeDir || path.join(work, 'data', 'tools', 'runtime'));
       evidence.runtime = await provisionCudaRuntime(registry, major, runtimeDir);
       backendEnv = { ...env, PATH: `${runtimeDir};${env.PATH}` };
     } else {
       runtimeDir = undefined;
     }
-    await smokeEngine(path.join(root, 'engine/ace-server.exe'), root, models, backendEnv, path.join(work, 'engine.log'), timeoutMs);
+    await smokeEngine(path.join(payload, 'engine/ace-server.exe'), payload, models, backendEnv, path.join(work, 'engine.log'), timeoutMs);
     evidence.engine = 'pass';
-    evidence.backends = await checkBackends(path.join(root, 'engine/ace-server.exe'), root, backendEnv, path.join(work, 'backend.log'), variant, timeoutMs);
-    evidence.negative = await negativeChecks(root, backendEnv, work, variant, runtimeDir, timeoutMs);
+    evidence.backends = await checkBackends(path.join(payload, 'engine/ace-server.exe'), payload, backendEnv, path.join(work, 'backend.log'), variant, timeoutMs);
+    evidence.negative = await negativeChecks(payload, backendEnv, work, variant, runtimeDir, timeoutMs);
     evidence.status = 'pass';
     console.log(`smoke-artifact: PASS - extracted portable server, engine endpoints and ${variant} backends`);
     for (const line of [...evidence.backends, ...evidence.negative]) console.log(`  ${line}`);
@@ -322,15 +337,18 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const args = process.argv.slice(2);
   const checkoutRegistry = () => JSON.parse(fs.readFileSync(path.join(here, '../server/src/data/model-registry.json'), 'utf8'));
   try {
-    if (args[0] === 'runtime-key' && args.length === 2) {
+    if (args[0] === 'payload-root' && args.length === 2) {
+      console.log(artifactPayload(path.resolve(args[1])));
+    } else if (args[0] === 'runtime-key' && args.length === 2) {
       console.log(cudaRuntimeKey(checkoutRegistry(), Number(args[1])));
     } else if (args[0] === 'runtime-fetch' && args.length === 3) {
       console.log(JSON.stringify(await provisionCudaRuntime(checkoutRegistry(), Number(args[1]), path.resolve(args[2]))));
-    } else if (args.length >= 1 && args.length <= 4 && !args[0].startsWith('runtime-')) {
+    } else if (args.length >= 1 && args.length <= 4 && !args[0].startsWith('runtime-') && args[0] !== 'payload-root') {
       const [zip, parent, seconds = '60', runtimeDir] = args;
       await smokeArtifact(zip, { outputParent: parent || undefined, timeoutMs: Number(seconds) * 1000, runtimeDir });
     } else {
       console.error('Usage: node release/smoke-artifact.mjs <windows.zip> [output-parent] [timeout-seconds] [cuda-runtime-dir]\n'
+        + '       node release/smoke-artifact.mjs payload-root <extracted-root>\n'
         + '       node release/smoke-artifact.mjs runtime-key <cuda-major>\n'
         + '       node release/smoke-artifact.mjs runtime-fetch <cuda-major> <dir>');
       process.exitCode = 2;

@@ -47,7 +47,7 @@ const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8'
 
 export function buildInfo({ os, arch, variant, tag, protocol }) {
   if (!VARIANTS[`${os}/${arch}`]?.includes(variant)) throw new Error(`build-info: no ${variant} asset for ${os}/${arch}`);
-  const updaterProtocol = protocol === undefined ? UPDATER_PROTOCOL : Number(protocol);
+  const updaterProtocol = protocol === undefined ? (os === 'windows' ? UPDATER_PROTOCOL : 0) : Number(protocol);
   if (!Number.isInteger(updaterProtocol) || updaterProtocol < 0 || updaterProtocol > MAX_UPDATER_PROTOCOL) throw new Error(`build-info: unsupported updater protocol ${protocol}`);
   const sha = git('rev-parse', 'HEAD');
   let tagSha = '';

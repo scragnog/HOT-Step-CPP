@@ -4,7 +4,7 @@
 //
 //   node release/updater/package-layout.mjs <staging>
 //
-// build-info.json updaterProtocol 0 (what releases ship today): the flat
+// build-info.json updaterProtocol 0: the flat
 // package is left exactly as it is. Protocol 1 or higher: the assembled
 // package moves into app/<id>/ and the stable root is added:
 //   HOT-Step.bat, launcher.mjs, runtime/node.exe (the Node that runs the

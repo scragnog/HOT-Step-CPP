@@ -854,7 +854,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $root = $env:CPU_TRIAL_ROOT
           $evidence = "$root/evidence"
-          $engine = "$root/app/engine"
+          $payload = node release/smoke-artifact.mjs payload-root "$root/app"
+          if ($LASTEXITCODE -ne 0) { throw 'CPU archive package check failed' }
+          $engine = Join-Path $payload 'engine'
           # The CPU archive supplies its DLLs; exclude build/toolkit search paths.
           $env:PATH = "$env:SystemRoot/System32;$env:SystemRoot"
           $env:GGML_BACKEND_PATH = $engine

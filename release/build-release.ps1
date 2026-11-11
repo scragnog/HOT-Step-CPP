@@ -4,8 +4,8 @@
 #   .\release\build-release.ps1 [-Version "1.5.0"] [-SkipEngine] [-SkipUI] [-Variant cuda -CudaAsset cuda13.1] [-BuildBackend all] [-UpdaterProtocol 1]
 #
 # -UpdaterProtocol 1 builds the versioned layout the Windows launcher updates
-# (release/updater/package-layout.mjs), for updater test fixtures. Releases
-# ship protocol 0, the flat package, until the updater has passed acceptance.
+# (release/updater/package-layout.mjs). Without an override, Windows packages
+# use UPDATER_PROTOCOL in build-info.mjs; protocol 0 keeps the flat layout.
 #
 # Produces:
 #   release/out/HOT-Step-CPP-v{version}-win-x64-{variant}.zip

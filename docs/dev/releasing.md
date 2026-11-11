@@ -379,13 +379,13 @@ Every package carries `build-info.json` beside `VERSION`. All five assemblers (t
 | `os`, `arch` | `windows`/`linux` with `x64`, or `macos` with `arm64` |
 | `variant` | Exact asset variant: `cuda13.1`, `cuda12.8`, `cuda12-volta`, `vulkan`, `cpu`, `rocm` (Linux), `metal` (macOS) |
 | `engineSha` | Git tree id of `engine/` at that commit; it changes with any engine source or ggml pin change |
-| `updaterProtocol` | `0` (`UPDATER_PROTOCOL` in `release/build-info.mjs`) until the Windows updater has passed its acceptance run. `--protocol 1` overrides it for one build |
+| `updaterProtocol` | Windows uses `UPDATER_PROTOCOL` in `release/build-info.mjs`, currently `0` pending release-readiness checks. Linux and macOS default to `0` regardless of that constant. Explicit `--protocol` overrides the default for one build |
 
 The package check also matches the ggml backend library in `engine/` to the variant, and `engine/.variant` and `.cuda-version` when present. `engine/.variant` keeps its coarse meaning (`cuda` for every CUDA asset) for the code that reads it. The server reads the file in `config.ts` (`BUILD_INFO`) and reports `build.tag`, `build.sha`, `build.variant` and `build.channel` in `/api/health`. A package without the file (an older release), a package whose file breaks those rules (the server logs a warning and ignores it), or a git checkout has unknown identity: `sha` falls back to the checkout's HEAD and the rest is `null`. Nothing guesses a variant. The update notices read the same file for the installed identity (`server/src/services/updates/install.ts`).
 
 ## Windows updater layout (protocol 1)
 
-Releases ship protocol 0, the flat package. A Windows package built with `updaterProtocol` 1 (`.\release\build-release.ps1 ... -UpdaterProtocol 1`) is the versioned layout the in-app updater installs into. Both Windows assemblers run `node release/updater/package-layout.mjs <staging>` and then the package check just before zipping, so a local build and CI produce the same archive. For protocol 0 the script changes nothing.
+Windows releases currently ship protocol 0, the flat package. Changing `UPDATER_PROTOCOL` changes the Windows default only; Linux and macOS stay notify-only at protocol 0. A Windows package built with `updaterProtocol` 1 (`.\release\build-release.ps1 ... -UpdaterProtocol 1`) is the versioned layout the in-app updater installs into. Both Windows assemblers run `node release/updater/package-layout.mjs <staging>` and then the package check just before zipping, so a local build and CI produce the same archive. For protocol 0 the script changes nothing.
 
 ```
 HOT-Step.bat        runs runtime\node.exe launcher.mjs (release/updater/HOT-Step.bat)
@@ -397,7 +397,9 @@ app/<id>/           the old flat package, minus its HOT-Step.bat, plus payload-m
 updater/            created at run time: staging, transaction.json, lease, snapshots, last-result.json
 ```
 
-`<id>` is `<tag>-<first 12 of sha>-<variant>`, for example `v1.6.0-0123456789ab-cuda13.1`. `payload-manifest.json` holds the SHA-256 of every file in the payload; apply refuses a payload with added, edited or missing files, because an update would strand them in an old folder. The archive check (`checkPackageBuildInfo`) accepts both layouts and, for the versioned one, requires exactly one payload named for its build. Slice D's staging (`server/src/services/updates/download.ts`) checks the same layout.
+`<id>` is `<tag>-<first 12 of sha>-<variant>`, for example `v1.6.0-0123456789ab-cuda13.1`. `payload-manifest.json` holds the SHA-256 of every file in the payload; apply refuses a payload with added, edited or missing files, because an update would strand them in an old folder. The archive check (`checkPackageBuildInfo`) accepts both layouts and, for the versioned one, requires exactly one payload named for its build. Update staging (`server/src/services/updates/download.ts`) checks the same layout.
+
+The Windows archive smoke gate and optional CPU generation trial resolve `current.json` with the launcher pointer reader, check the whole archive with `checkPackageBuildInfo`, and run binaries from the selected payload. Flat archives still run from the extraction root. `node release/smoke-artifact.mjs payload-root <extracted-root>` exposes that same check to the CPU trial. The updater harness explicitly builds its flat fixture with `-UpdaterProtocol 0`, independent of the release default.
 
 The launcher is the only thing that starts a server on the root. It refuses a second launcher (a named pipe the OS frees on exit), settles an interrupted update before anything opens SQLite, clears a stale `updater/prepare.lock`, pins the profile (and the data folder only where the server would otherwise derive it from `app/<id>`), and starts `app/<id>/runtime/node.exe app/<id>/server/server.mjs` with an IPC channel. An update runs like this:
 
