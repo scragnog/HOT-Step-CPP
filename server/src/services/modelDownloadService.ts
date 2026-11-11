@@ -14,7 +14,7 @@ import http from 'http';
 import { createHash, randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { config, PORTABLE_MODE, PROJECT_ROOT, RUNTIME_LIB_DIR } from '../config.js';
-import { registerBusyCheck } from '../dataroot/pointer.js';
+import { getBusyBlockers, registerBusyCheck } from '../dataroot/pointer.js';
 import type { RegistryFileEntry as RegistryFile, ModelRegistryResponse, DownloadStatus, DownloadJob } from '../contracts/modelManager.js';
 import { MODEL_ROOTS, getHfToken, looksLikeGatedError, type DownloadableModel, type ModelDownloadState } from './muscriptor.js';
 import { MODEL_FILES, resolveModelDir, targetRoot } from './muscriptorPaths.js';
@@ -726,9 +726,11 @@ class ModelDownloadService extends EventEmitter {
     }
   }
 
-  /** Paths whose sha256 is being computed in the background right now, so a
+  /** Paths queued for or undergoing a background sha256 check, so a
    *  burst of registry reads schedules each file once. */
   private readonly _hashing = new Set<string>();
+  private readonly _hashQueue = new Map<string, { file: RegistryFile; size: number }>();
+  private _hashWorkerRunning = false;
 
   /** True when a sha256-declaring entry is installed and ALREADY KNOWN to
    *  hold the wrong bytes -- a republished model still sitting under its old
@@ -744,14 +746,39 @@ class ModelDownloadService extends EventEmitter {
     if (cached) return cached !== file.sha256;
     if (!this._hashing.has(filePath)) {
       this._hashing.add(filePath);
-      void this._matchesRegistry(filePath, file)
-        .catch(() => {})
-        .finally(() => {
-          this._hashing.delete(filePath);
-          this.emit('progress');
-        });
+      this._hashQueue.set(filePath, { file, size: file.sizeBytes });
+      if (!this._hashWorkerRunning) {
+        this._hashWorkerRunning = true;
+        // Collect this registry read's entries before choosing the smallest.
+        setImmediate(() => { void this._drainHashQueue(); });
+      }
     }
     return false;
+  }
+
+  /** One background read at a time, smallest first. Completed sidecars survive
+   *  restarts; _matchesRegistry checks them again when a queued file starts.
+   *  Let generation, training and other registered work finish between files. */
+  private async _drainHashQueue(): Promise<void> {
+    try {
+      while (this._hashQueue.size) {
+        if (getBusyBlockers().length) {
+          await new Promise<void>(resolve => { setTimeout(resolve, 2000).unref(); });
+          continue;
+        }
+        const [filePath, { file }] = [...this._hashQueue.entries()]
+          .sort((a, b) => a[1].size - b[1].size)[0];
+        this._hashQueue.delete(filePath);
+        try { await this._matchesRegistry(filePath, file); }
+        catch { /* A missing or unreadable file can be retried on a later read. */ }
+        finally {
+          this._hashing.delete(filePath);
+          this.emit('progress');
+        }
+      }
+    } finally {
+      this._hashWorkerRunning = false;
+    }
   }
 
   /** describeDownloadError, plus what to do about it for a gated MuScriptor repo. */

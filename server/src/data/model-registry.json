@@ -598,7 +598,8 @@
       "sizeBytes": 4791642016,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Raw generative range — needs 60-100 steps. Maximum creative diversity.",
-      "tags": []
+      "tags": [],
+      "sha256": "ef880d77ffec8e6638f268c6237b73a8965af24bdd10fd5cfc27432c9d19ee57"
     },
     {
       "id": "dit-std-base-q80",
@@ -612,7 +613,8 @@
       "sizeBytes": 2549527936,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Raw generative range — needs 60-100 steps. Maximum creative diversity.",
-      "tags": []
+      "tags": [],
+      "sha256": "10329f321010cedc3571c24b6371d002ce49238f48be47def4a1c76bf27ee150"
     },
     {
       "id": "dit-std-base-q6k",
@@ -626,7 +628,8 @@
       "sizeBytes": 1970472000,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Raw generative range — needs 60-100 steps. Maximum creative diversity.",
-      "tags": []
+      "tags": [],
+      "sha256": "08cf80fcc73f518c9eddfdc1e0ddcb786dc04f7d260479482794f371925b0207"
     },
     {
       "id": "dit-std-base-q5km",
@@ -640,7 +643,8 @@
       "sizeBytes": 1700140160,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Raw generative range — needs 60-100 steps. Maximum creative diversity.",
-      "tags": []
+      "tags": [],
+      "sha256": "b7a5c6d1b0729ab8630c96fabc14a47640a708e9bddff60666d8d07279aa57a7"
     },
     {
       "id": "dit-std-base-q4km",
@@ -654,7 +658,8 @@
       "sizeBytes": 1445710208,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Raw generative range — needs 60-100 steps. Maximum creative diversity.",
-      "tags": []
+      "tags": [],
+      "sha256": "942ec6a7bc11a40809af5f337063f2af2acc63e4fcd4a92b0cb42dc2bc7c41e8"
     },
     {
       "id": "dit-std-sft-bf16",
@@ -668,7 +673,8 @@
       "sizeBytes": 4791642016,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Supervised fine-tuned — strong lyric adherence and musical structure. 32-50 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "82db4849bfa9fd6438f049a5bce3fbd57b70f57e7433238db2d97becd0eee282"
     },
     {
       "id": "dit-std-sft-q80",
@@ -682,7 +688,8 @@
       "sizeBytes": 2549527936,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Supervised fine-tuned — strong lyric adherence and musical structure. 32-50 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "17f1984e48aaab27b3eb8ccbf0b754a6656e677884c60ea7003845cfc0059b70"
     },
     {
       "id": "dit-std-sft-q6k",
@@ -696,7 +703,8 @@
       "sizeBytes": 1970472000,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Supervised fine-tuned — strong lyric adherence and musical structure. 32-50 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "8ebf354d21058283fc65f377ceb3488901159cfc96866dd23f2c49347535061b"
     },
     {
       "id": "dit-std-sft-q5km",
@@ -710,7 +718,8 @@
       "sizeBytes": 1700140160,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Supervised fine-tuned — strong lyric adherence and musical structure. 32-50 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "ad8fd75d58c53b3e6a6b23c2660df8f65d96603118a2a5e3c67a744c470efb82"
     },
     {
       "id": "dit-std-sft-q4km",
@@ -724,7 +733,8 @@
       "sizeBytes": 1445710208,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Supervised fine-tuned — strong lyric adherence and musical structure. 32-50 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "2531bb61b9e5017fbc8875446e02f54b052eeec41ba3200dd72c6061b59b33d0"
     },
     {
       "id": "dit-std-turbo-bf16",
@@ -740,7 +750,8 @@
       "description": "Fast generation — only 8 steps needed. Great starting point.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "c7b463b728cdce2f3d4e5205fc5747d0344ebfea37f19542f5236cd8a76cf462"
     },
     {
       "id": "dit-std-turbo-q80",
@@ -756,7 +767,8 @@
       "description": "Fast generation — only 8 steps needed. Great starting point.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "288f708a61cfc241013a98a62f98ba331f83fe34d0d3559acdd9b0f6a2f7cd6b"
     },
     {
       "id": "dit-std-turbo-q6k",
@@ -772,7 +784,8 @@
       "description": "Fast generation — only 8 steps needed. Great starting point.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "693fc82977d9af2b5569238e363c11ae9b055d464f036d51127fba4eab016693"
     },
     {
       "id": "dit-std-turbo-q5km",
@@ -788,7 +801,8 @@
       "description": "Fast generation — only 8 steps needed. Great starting point.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "a241c9a721e3704cb04b17ce6a40c9aa714d3ee5cf49c2219972020eb761f5a4"
     },
     {
       "id": "dit-std-turbo-q4km",
@@ -804,7 +818,8 @@
       "description": "Fast generation — only 8 steps needed. Great starting point.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "55b4d8514850f3d0f82536f37e99673aaf48df802b5ae5b153eea32a2e2daa5e"
     },
     {
       "id": "dit-std-sftturbo50-bf16",
@@ -818,7 +833,8 @@
       "sizeBytes": 4791642016,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Weight merge of SFT and Turbo — richer than Turbo, faster than SFT. 8-15 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "af24191ae7748e16e5d1860dbe37e581baea5a5d39a7bd479ca09c84fa023fc7"
     },
     {
       "id": "dit-std-sftturbo50-q80",
@@ -832,7 +848,8 @@
       "sizeBytes": 2549527936,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Weight merge of SFT and Turbo — richer than Turbo, faster than SFT. 8-15 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "3fab14cf0d8efa249edf49b6fd0392bac54f1a80514567a5ae4164853339ecb3"
     },
     {
       "id": "dit-std-turbo-continuous-bf16",
@@ -846,7 +863,8 @@
       "sizeBytes": 4791642080,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo variant optimised for continuous/long-form generation.",
-      "tags": []
+      "tags": [],
+      "sha256": "ead4b8717f7297f96cda6dc3d37d69504b007cbb6d79e1c8c931337019bfc377"
     },
     {
       "id": "dit-std-turbo-continuous-q80",
@@ -860,7 +878,8 @@
       "sizeBytes": 2549527968,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo variant optimised for continuous/long-form generation.",
-      "tags": []
+      "tags": [],
+      "sha256": "ed50670ad55ab53bd1c753529e3b6a8e58512e1c5f4df15426948c73fd407abf"
     },
     {
       "id": "dit-std-turbo-continuous-q6k",
@@ -874,7 +893,8 @@
       "sizeBytes": 1970472032,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo variant optimised for continuous/long-form generation.",
-      "tags": []
+      "tags": [],
+      "sha256": "84fcd2612530ad1d8ec57a46e786db378f6af78e1071c3ee70d4396fc8909282"
     },
     {
       "id": "dit-std-turbo-continuous-q5km",
@@ -888,7 +908,8 @@
       "sizeBytes": 1700140192,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo variant optimised for continuous/long-form generation.",
-      "tags": []
+      "tags": [],
+      "sha256": "23d66597916bc9da2a214481dadb2bb301e12b7e50bac59372486e2ff7fc4f6b"
     },
     {
       "id": "dit-std-turbo-continuous-q4km",
@@ -902,7 +923,8 @@
       "sizeBytes": 1445710240,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo variant optimised for continuous/long-form generation.",
-      "tags": []
+      "tags": [],
+      "sha256": "695a304965672025cb55574ff3c78f4da2ad5239fc7ff678a275b93aecac26b5"
     },
     {
       "id": "dit-std-turbo-shift1-bf16",
@@ -916,7 +938,8 @@
       "sizeBytes": 4791642048,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo with shift=1 scheduling — altered noise schedule for different tonal character.",
-      "tags": []
+      "tags": [],
+      "sha256": "6c626ac0c282961f1494e6cfa5f1c79956e4fc4b1000e51f29cdc048a06f512c"
     },
     {
       "id": "dit-std-turbo-shift1-q80",
@@ -930,7 +953,8 @@
       "sizeBytes": 2549527968,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo with shift=1 scheduling — altered noise schedule for different tonal character.",
-      "tags": []
+      "tags": [],
+      "sha256": "3cc621a46b0d4906c0bce09c7b8d563bdc1aa39a4b4856271045bae12287027c"
     },
     {
       "id": "dit-std-turbo-shift1-q6k",
@@ -944,7 +968,8 @@
       "sizeBytes": 1970472032,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo with shift=1 scheduling — altered noise schedule for different tonal character.",
-      "tags": []
+      "tags": [],
+      "sha256": "4c8bb2652ea5bbd28b716059757e9789627d16424f73c0a3374e872e7c12ee5d"
     },
     {
       "id": "dit-std-turbo-shift1-q5km",
@@ -958,7 +983,8 @@
       "sizeBytes": 1700140192,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo with shift=1 scheduling — altered noise schedule for different tonal character.",
-      "tags": []
+      "tags": [],
+      "sha256": "b68ae397c326b92316c967e0cb9deea904c0d10e16321052376aa9cef988f033"
     },
     {
       "id": "dit-std-turbo-shift1-q4km",
@@ -972,7 +998,8 @@
       "sizeBytes": 1445710240,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo with shift=1 scheduling — altered noise schedule for different tonal character.",
-      "tags": []
+      "tags": [],
+      "sha256": "a65d44d12fb88ce99cf3e93197a02592bb3065121417a3d3efced254b63ca6bd"
     },
     {
       "id": "dit-std-turbo-shift3-bf16",
@@ -986,7 +1013,8 @@
       "sizeBytes": 4791642048,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo with shift=3 scheduling — more aggressive noise schedule.",
-      "tags": []
+      "tags": [],
+      "sha256": "8e4c08ccb89030a5be5c21a24d59109341aa79b2fb17d04f790e169705eb112c"
     },
     {
       "id": "dit-std-turbo-shift3-q80",
@@ -1000,7 +1028,8 @@
       "sizeBytes": 2549527968,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo with shift=3 scheduling — more aggressive noise schedule.",
-      "tags": []
+      "tags": [],
+      "sha256": "21cc9ec83378c71a28aef4a5c1bacab3fe5025e9de8f76487656b6f9de330d21"
     },
     {
       "id": "dit-std-turbo-shift3-q6k",
@@ -1014,7 +1043,8 @@
       "sizeBytes": 1970472032,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo with shift=3 scheduling — more aggressive noise schedule.",
-      "tags": []
+      "tags": [],
+      "sha256": "ef550c4441b1a39ff89e79f6cf5f88676b4a5766f6b684b618763f1de7a1e0a9"
     },
     {
       "id": "dit-std-turbo-shift3-q5km",
@@ -1028,7 +1058,8 @@
       "sizeBytes": 1700140192,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo with shift=3 scheduling — more aggressive noise schedule.",
-      "tags": []
+      "tags": [],
+      "sha256": "33a15a34f90fbdf1d161d3d1a760cd064cd4a454b2103f108123c0e6a3abd404"
     },
     {
       "id": "dit-std-turbo-shift3-q4km",
@@ -1042,7 +1073,8 @@
       "sizeBytes": 1445710240,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Turbo with shift=3 scheduling — more aggressive noise schedule.",
-      "tags": []
+      "tags": [],
+      "sha256": "0d1facb7069f1ad2236408ca8018a21d38424d2526ef488dc3775261c19a9b03"
     },
     {
       "id": "dit-xlbase-bf16",
@@ -1056,7 +1088,8 @@
       "sizeBytes": 9978530784,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL architecture with raw generative range — needs 60-100 steps. Larger model = richer detail.",
-      "tags": []
+      "tags": [],
+      "sha256": "3ebd8e3ff0951dfe9f424a7f7a8e829f05875669b5939bde5c16cf09a940d982"
     },
     {
       "id": "dit-xlbase-q80",
@@ -1070,7 +1103,8 @@
       "sizeBytes": 5305828704,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL architecture with raw generative range — needs 60-100 steps. Larger model = richer detail.",
-      "tags": []
+      "tags": [],
+      "sha256": "45d05b88ccbfa0ea27208ea618d7f0749b2be040b457cfa661d37646ea39f207"
     },
     {
       "id": "dit-xlbase-q6k",
@@ -1084,7 +1118,8 @@
       "sizeBytes": 4098812960,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL architecture with raw generative range — needs 60-100 steps. Larger model = richer detail.",
-      "tags": []
+      "tags": [],
+      "sha256": "44f14805faffa9ee3a28ba02a69915dcc0f0d44218c91292d1e2c0896ac4ee82"
     },
     {
       "id": "dit-xlbase-q5km",
@@ -1098,7 +1133,8 @@
       "sizeBytes": 3527566432,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL architecture with raw generative range — needs 60-100 steps. Larger model = richer detail.",
-      "tags": []
+      "tags": [],
+      "sha256": "c8d639af9f37dca6b02255ef736e6ebbac9318287c9d043db4a30dddc3a2fc3c"
     },
     {
       "id": "dit-xlbase-q4km",
@@ -1112,7 +1148,8 @@
       "sizeBytes": 2989922656,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL architecture with raw generative range — needs 60-100 steps. Larger model = richer detail.",
-      "tags": []
+      "tags": [],
+      "sha256": "13b08ac84e0cdca8ac770d6bc12842046113c9479ddcedd2672ac87ac458ff78"
     },
     {
       "id": "dit-xlsft-bf16",
@@ -1126,7 +1163,8 @@
       "sizeBytes": 9978530784,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL supervised fine-tuned — best lyric adherence and structure at XL scale. 32-50 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "c998effb0c3b447202c49242fd9ebf55ea7afccf766d4b4dd4ecedaed92bcbbb"
     },
     {
       "id": "dit-xlsft-q80",
@@ -1140,7 +1178,8 @@
       "sizeBytes": 5305828704,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL supervised fine-tuned — best lyric adherence and structure at XL scale. 32-50 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "d7b06fadab214375ef5ebcfa44bf4a10489ea364b119f5b9ecbcd870408bdab9"
     },
     {
       "id": "dit-xlsft-q6k",
@@ -1154,7 +1193,8 @@
       "sizeBytes": 4098812960,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL supervised fine-tuned — best lyric adherence and structure at XL scale. 32-50 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "b7af16f54b3181c5f0e4558410245cfa4d73dd2f0635cd7d14a76668fc49660c"
     },
     {
       "id": "dit-xlsft-q5km",
@@ -1168,7 +1208,8 @@
       "sizeBytes": 3527566432,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL supervised fine-tuned — best lyric adherence and structure at XL scale. 32-50 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "e7c5fdfa5075d666def2585b76f6537bba478ceedc54eec4d041538ce2fe3842"
     },
     {
       "id": "dit-xlsft-q4km",
@@ -1182,7 +1223,8 @@
       "sizeBytes": 2989922656,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL supervised fine-tuned — best lyric adherence and structure at XL scale. 32-50 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "fa144d3ea8a892a11a43753070e40bb2105c5bfddb57c99d542fda22297bb1b5"
     },
     {
       "id": "dit-xlturbo-bf16",
@@ -1198,7 +1240,8 @@
       "description": "XL fast generation — 8 steps. Best balance of speed, quality, and detail.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "10d445a71653a8fef9a16a8457d9fb66da432ac500b357cce028f36c489c1b63"
     },
     {
       "id": "dit-xlturbo-q80",
@@ -1214,7 +1257,8 @@
       "description": "XL fast generation — 8 steps. Best balance of speed, quality, and detail.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "4f1044fb646374fb5730e10f64325766883eb2fc02a643c1b403f2d61f39dc19"
     },
     {
       "id": "dit-xlturbo-q6k",
@@ -1230,7 +1274,8 @@
       "description": "XL fast generation — 8 steps. Best balance of speed, quality, and detail.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "e1f6665567e9bc0331b8dfd95c2b43a84e8bf114075c9b16abdd25ae97dc58fe"
     },
     {
       "id": "dit-xlturbo-q5km",
@@ -1246,7 +1291,8 @@
       "description": "XL fast generation — 8 steps. Best balance of speed, quality, and detail.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "108dbf1b1a5cfe41c46b23ee7481a1c6f6d21f7254bed4ac15ff8f307df69d3d"
     },
     {
       "id": "dit-xlturbo-q4km",
@@ -1262,7 +1308,8 @@
       "description": "XL fast generation — 8 steps. Best balance of speed, quality, and detail.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "475e60e8644b1f91eebc0cd25f24c060bed06e64a862b4e60ffafe634c740478"
     },
     {
       "id": "dit-xlsftturbo50-bf16",
@@ -1276,7 +1323,8 @@
       "sizeBytes": 9978530816,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL weight merge — richer than XL Turbo with SFT musicality. 8-15 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "aef16e967740eeb1f91e145504fe9699fb31c423759fd4bc190683e535f3ba2c"
     },
     {
       "id": "dit-xlsftturbo50-q80",
@@ -1290,7 +1338,8 @@
       "sizeBytes": 5305828768,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL weight merge — richer than XL Turbo with SFT musicality. 8-15 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "ec6bef50f2aec3176aafa4836401394913f567ceb7a4d53a459948a8b5294e51"
     },
     {
       "id": "dit-xlsftturbo50-q6k",
@@ -1304,7 +1353,8 @@
       "sizeBytes": 4098813024,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL weight merge — richer than XL Turbo with SFT musicality. 8-15 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "d43bad21c85c7a250815367b4c5f7fafdf6b8f7d21f9f27d8a3c47171cf79e7f"
     },
     {
       "id": "dit-xlsftturbo50-q5km",
@@ -1318,7 +1368,8 @@
       "sizeBytes": 3527566496,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL weight merge — richer than XL Turbo with SFT musicality. 8-15 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "3d4db8b6ec02c1fd15889bb61be65ce474e3b291fa0ff53fe7be90cd819d3e6b"
     },
     {
       "id": "dit-xlsftturbo50-q4km",
@@ -1332,7 +1383,8 @@
       "sizeBytes": 2989922720,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "XL weight merge — richer than XL Turbo with SFT musicality. 8-15 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "7f7619d78037f9cfbe7b7816f758dc99f2841f48010da12eed732a8faef2eb0d"
     },
     {
       "id": "dit-mergebasesftxlta0.5-bf16",
@@ -1346,7 +1398,8 @@
       "sizeBytes": 9978530784,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Equal blend of XL Base and XL SFT — balances creative range with structure. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "9b91f7f63c320e6fbfd87bc89c7bd24b5b566036edb8d8a824b50a8948c3600a"
     },
     {
       "id": "dit-mergebasesftxlta0.5-q80",
@@ -1360,7 +1413,8 @@
       "sizeBytes": 5305828736,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Equal blend of XL Base and XL SFT — balances creative range with structure. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "638cf3904e86db829d768232e079ae06560df7dab14bd3f896672ac2bbe02e41"
     },
     {
       "id": "dit-mergebasesftxlta0.5-q6k",
@@ -1374,7 +1428,8 @@
       "sizeBytes": 4098812992,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Equal blend of XL Base and XL SFT — balances creative range with structure. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "5c84dd6318913c4ece053ba8d2402d75c91b45434139ba967f647c52b0d13484"
     },
     {
       "id": "dit-mergebasesftxlta0.5-q5km",
@@ -1388,7 +1443,8 @@
       "sizeBytes": 3527566464,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Equal blend of XL Base and XL SFT — balances creative range with structure. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "2bfd376e38fce556dafabbf54fcbeae5c26b694304ab3f2d31c2ab085e9f3968"
     },
     {
       "id": "dit-mergebasesftxlta0.5-q4km",
@@ -1402,7 +1458,8 @@
       "sizeBytes": 2989922688,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Equal blend of XL Base and XL SFT — balances creative range with structure. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "145540355c30d998683313debaa4b9a2a1e4cad491fbc45e7fe1746cece3b58c"
     },
     {
       "id": "dit-mergebaseturboxlta0.5-bf16",
@@ -1416,7 +1473,8 @@
       "sizeBytes": 9978530784,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Equal blend of XL Base and XL Turbo — Base generative range with Turbo efficiency. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "4ddc5bb457c2d0ea31b99555d6c4b7f54bff86e855d28ba062ebf1de0b483248"
     },
     {
       "id": "dit-mergebaseturboxlta0.5-q80",
@@ -1430,7 +1488,8 @@
       "sizeBytes": 5305828736,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Equal blend of XL Base and XL Turbo — Base generative range with Turbo efficiency. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "0d46b51054433830d3a589383baca299b8554f0e4c440f354cb218d8c893634f"
     },
     {
       "id": "dit-mergebaseturboxlta0.5-q6k",
@@ -1444,7 +1503,8 @@
       "sizeBytes": 4098812992,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Equal blend of XL Base and XL Turbo — Base generative range with Turbo efficiency. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "815c34b7085c60e5b9851246708a8177e9db5ef794b9735b8d88ac60721c5d2c"
     },
     {
       "id": "dit-mergebaseturboxlta0.5-q5km",
@@ -1458,7 +1518,8 @@
       "sizeBytes": 3527566464,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Equal blend of XL Base and XL Turbo — Base generative range with Turbo efficiency. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "527481ab6b793dfcd9853561c6238e97a9f96527dbfc977ed20ab57c18bc6a59"
     },
     {
       "id": "dit-mergebaseturboxlta0.5-q4km",
@@ -1472,7 +1533,8 @@
       "sizeBytes": 2989922688,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Equal blend of XL Base and XL Turbo — Base generative range with Turbo efficiency. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "2dfa8beceb59b41ad2421a58700b7f55f9d8528648fc4c44ecb39ff571118593"
     },
     {
       "id": "dit-mergesftturboxlta0.3-bf16",
@@ -1488,7 +1550,8 @@
       "description": "Mostly SFT with a touch of Turbo speed — strong lyrics, slightly faster. 60-100 steps.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "fd71304f65faa465b34ec34af4ce761c28e130bed24e61b4a77623b050ef0ec7"
     },
     {
       "id": "dit-mergesftturboxlta0.3-q80",
@@ -1504,7 +1567,8 @@
       "description": "Mostly SFT with a touch of Turbo speed — strong lyrics, slightly faster. 60-100 steps.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "5d34d816a735edfc80bdafdd94739b624117d74ee048452b0c2af086874e3a3e"
     },
     {
       "id": "dit-mergesftturboxlta0.3-q6k",
@@ -1520,7 +1584,8 @@
       "description": "Mostly SFT with a touch of Turbo speed — strong lyrics, slightly faster. 60-100 steps.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "e8f9703ecdac1c69bc0b4f7610a411426057dbf7fee3c15ba76d34524f65591c"
     },
     {
       "id": "dit-mergesftturboxlta0.3-q5km",
@@ -1536,7 +1601,8 @@
       "description": "Mostly SFT with a touch of Turbo speed — strong lyrics, slightly faster. 60-100 steps.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "23309c8da98f361ed0f748106e3596fa070ff9d264f070ef90a049c1c8bfb1dd"
     },
     {
       "id": "dit-mergesftturboxlta0.3-q4km",
@@ -1552,7 +1618,8 @@
       "description": "Mostly SFT with a touch of Turbo speed — strong lyrics, slightly faster. 60-100 steps.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "474c49dc4c556e6c7a087ec65bc04b82e8403a1d47ae8778d944f01a4e50082b"
     },
     {
       "id": "dit-mergesftturboxlta0.7-bf16",
@@ -1566,7 +1633,8 @@
       "sizeBytes": 9978530784,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Mostly Turbo with SFT musicality — fast with better structure. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "f18579380227f4540bb56a6f8fa1cd33354d88db8002c43ea34a7b9d0aba2c2d"
     },
     {
       "id": "dit-mergesftturboxlta0.7-q80",
@@ -1580,7 +1648,8 @@
       "sizeBytes": 5305828736,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Mostly Turbo with SFT musicality — fast with better structure. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "e246c8478d904086572def8d5ad6306d2a06d98d787a7147f830c95bcc0c5c7b"
     },
     {
       "id": "dit-mergesftturboxlta0.7-q6k",
@@ -1594,7 +1663,8 @@
       "sizeBytes": 4098812992,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Mostly Turbo with SFT musicality — fast with better structure. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "d0693132bd076d098e423431b1c9e9ccd69b534d29cccca462e4ededdfeeef79"
     },
     {
       "id": "dit-mergesftturboxlta0.7-q5km",
@@ -1608,7 +1678,8 @@
       "sizeBytes": 3527566464,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Mostly Turbo with SFT musicality — fast with better structure. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "59de4078a14c8e706dcb053dad827418bc60434b08cd7b9ad1e261ab160c9548"
     },
     {
       "id": "dit-mergesftturboxlta0.7-q4km",
@@ -1622,7 +1693,8 @@
       "sizeBytes": 2989922688,
       "repo": "scragnog/ace-step-1.5-gguf-merge-models",
       "description": "Mostly Turbo with SFT musicality — fast with better structure. 60-100 steps.",
-      "tags": []
+      "tags": [],
+      "sha256": "9589e948ef5f7476a7449bf397bbf97916dae8936139cb7f0ec3f6ca5a3cffba"
     },
     {
       "id": "dit-mxfp4-base",
@@ -1638,7 +1710,8 @@
       "description": "Base model in MXFP4 — 3.7x compression, native FP4 on Blackwell GPUs.",
       "tags": [
         "blackwell"
-      ]
+      ],
+      "sha256": "fc40ba55ea30cacbe9863d0f7ed3a33c0758676df89d74380bc50ae1da070df6"
     },
     {
       "id": "dit-mxfp4-sft",
@@ -1654,7 +1727,8 @@
       "description": "SFT model in MXFP4 — strong structure with minimal VRAM.",
       "tags": [
         "blackwell"
-      ]
+      ],
+      "sha256": "2c5a3d1686bd283db8b94132451faa5878f2a4f7b72de915a785e0b5a16d027e"
     },
     {
       "id": "dit-mxfp4-sftturbo50",
@@ -1670,7 +1744,8 @@
       "description": "SFT+Turbo merge in MXFP4 — balanced and tiny.",
       "tags": [
         "blackwell"
-      ]
+      ],
+      "sha256": "d09687038fda3f05c4feddf98d1282def5de27a4187f0e1685cd383bb9096901"
     },
     {
       "id": "dit-mxfp4-turbo",
@@ -1686,7 +1761,8 @@
       "description": "Turbo in MXFP4 — fastest possible generation with minimal VRAM.",
       "tags": [
         "blackwell"
-      ]
+      ],
+      "sha256": "4c1e6ef7fca88111e3def961372435aa9096cf71200a2887443d5f61234dd92c"
     },
     {
       "id": "dit-mxfp4-turbocontinuous",
@@ -1702,7 +1778,8 @@
       "description": "Continuous generation variant in MXFP4.",
       "tags": [
         "blackwell"
-      ]
+      ],
+      "sha256": "b4023b581530a51b61f572270c1f732634c98086211ff714a8f73ddc07d1b66a"
     },
     {
       "id": "dit-mxfp4-turboshift1",
@@ -1718,7 +1795,8 @@
       "description": "Shift1 scheduling in MXFP4.",
       "tags": [
         "blackwell"
-      ]
+      ],
+      "sha256": "ccbda7b544fef52d3b4669297a185bca5ead2913cb74025957f674acd2e3302c"
     },
     {
       "id": "dit-mxfp4-turboshift3",
@@ -1734,7 +1812,8 @@
       "description": "Shift3 scheduling in MXFP4.",
       "tags": [
         "blackwell"
-      ]
+      ],
+      "sha256": "301f059684267d62135a4b4630672a741891aea7137647b7d1eac837cb4ddeff"
     },
     {
       "id": "dit-mxfp4-xlbase",
@@ -1750,7 +1829,8 @@
       "description": "XL Base in MXFP4 — large model, small footprint.",
       "tags": [
         "blackwell"
-      ]
+      ],
+      "sha256": "4d45d06b7c7304ff0334e378a7538dfc2d750acb1263b4ab1f59190b1722295e"
     },
     {
       "id": "dit-mxfp4-xlsft",
@@ -1766,7 +1846,8 @@
       "description": "XL SFT in MXFP4 — best structure with low VRAM.",
       "tags": [
         "blackwell"
-      ]
+      ],
+      "sha256": "082487454773da575628d613e80da15f88505919cca209bad46dea09b27fd47d"
     },
     {
       "id": "dit-mxfp4-xlsftturbo50",
@@ -1782,7 +1863,8 @@
       "description": "XL SFT+Turbo merge in MXFP4.",
       "tags": [
         "blackwell"
-      ]
+      ],
+      "sha256": "faf4bc94052c0c9ce6bc9ddb32a6b78220d512e8ab4d83f79ac54b1f2a755c5c"
     },
     {
       "id": "dit-mxfp4-xlturbo",
@@ -1799,7 +1881,8 @@
       "tags": [
         "recommended",
         "blackwell"
-      ]
+      ],
+      "sha256": "dfb0ba27f2dd25c6bb31ad7f1a7c8d6e5c538593c5fff92e3329d186c81751e4"
     },
     {
       "id": "dit-mxfp4-mergebaseturboxlta0.5",
@@ -1815,7 +1898,8 @@
       "description": "Base+Turbo merge in MXFP4.",
       "tags": [
         "blackwell"
-      ]
+      ],
+      "sha256": "484e0cf0a2f46bf4950c9033f700b8698445b0680c23e20f0f7cf2f42424983a"
     },
     {
       "id": "dit-mxfp4-mergesftturboxlta0.3",
@@ -1831,7 +1915,8 @@
       "description": "SFT+Turbo (mostly SFT) merge in MXFP4.",
       "tags": [
         "blackwell"
-      ]
+      ],
+      "sha256": "8847b8a566918873205d0920b09b750d4b8dc1ff7f1c55988020552d1654c11e"
     },
     {
       "id": "dit-mxfp4-mergesftturboxlta0.7",
@@ -1847,7 +1932,8 @@
       "description": "SFT+Turbo (mostly Turbo) merge in MXFP4.",
       "tags": [
         "blackwell"
-      ]
+      ],
+      "sha256": "baa8fb4c74b2a76c927c89a4bf442a0fed8436efa032c1f8bfa07a83998930d2"
     },
     {
       "id": "lm-4b-bf16",
@@ -1861,7 +1947,8 @@
       "sizeBytes": 8384454592,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Full-size language model — best audio code generation quality. 7.9GB.",
-      "tags": []
+      "tags": [],
+      "sha256": "9fca9915919a1108da33d8d98fbe6c1a07bfee101d27098416650dcbde037b72"
     },
     {
       "id": "lm-4b-q80",
@@ -1877,7 +1964,8 @@
       "description": "Near-lossless 4B LM — recommended balance of quality and size.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "972f91147a167f0c041f1b158d67985a82c0f6a852e68cdf70e46030cf08b1bc"
     },
     {
       "id": "lm-4b-q6k",
@@ -1891,7 +1979,8 @@
       "sizeBytes": 3442713504,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "4B LM with good quality at reduced size.",
-      "tags": []
+      "tags": [],
+      "sha256": "d39b8b5070fa617a0f57dcc26e710f8096a293c21721c5f714318bab7b40cfdb"
     },
     {
       "id": "lm-4b-q5km",
@@ -1905,7 +1994,8 @@
       "sizeBytes": 3025965984,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "4B LM — smaller with some quality trade-off.",
-      "tags": []
+      "tags": [],
+      "sha256": "938ed7067c8897f66acf4c3a86fc1fa8113d5cd1a5f13e6edec2e03207514e2d"
     },
     {
       "id": "lm-1.7b-bf16",
@@ -1919,7 +2009,8 @@
       "sizeBytes": 3713827104,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Mid-size LM — good quality with lower VRAM. 3.5GB. ⚠️ Not compatible with Vulkan builds (use 4B instead).",
-      "tags": []
+      "tags": [],
+      "sha256": "6e1b625ca8dc0bfe912fa7e16a563ec6e8c44e4199b612e3157e1e320a7d3077"
     },
     {
       "id": "lm-1.7b-q80",
@@ -1933,7 +2024,8 @@
       "sizeBytes": 1975837568,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Mid-size LM quantised — decent quality, very compact. ⚠️ Not compatible with Vulkan builds (use 4B instead).",
-      "tags": []
+      "tags": [],
+      "sha256": "726f99a82f050b32ebc5c5e36acaa9d7acd06bfe5e579a62b00e0d0d6d0b7ec6"
     },
     {
       "id": "lm-0.6b-bf16",
@@ -1947,7 +2039,8 @@
       "sizeBytes": 1331108128,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Smallest LM — fast but lower quality audio codes. 1.3GB. ⚠️ Not compatible with Vulkan builds (use 4B instead).",
-      "tags": []
+      "tags": [],
+      "sha256": "8bc3e1de50fc91751ab893965c78c17589323bf4d2a9c1be2750ada7c7fabfaa"
     },
     {
       "id": "lm-0.6b-q80",
@@ -1961,7 +2054,8 @@
       "sizeBytes": 709846656,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Tiny LM — minimum viable for quick experiments. ⚠️ Not compatible with Vulkan builds (use 4B instead).",
-      "tags": []
+      "tags": [],
+      "sha256": "bdaf9e292d4470f31c19cafeaca1b74936a114667e3a85e5d33b65247e9908ec"
     },
     {
       "id": "embedding-bf16",
@@ -1975,7 +2069,8 @@
       "sizeBytes": 1196890592,
       "repo": "Serveurperso/ACE-Step-1.5-GGUF",
       "description": "Full-precision text encoder — architecturally locked to all DiT models.",
-      "tags": []
+      "tags": [],
+      "sha256": "6f57900773fbd447b2943bc8126e2dc68ed009151ba89a47c14d1be05d4c73df"
     },
     {
       "id": "embedding-q8",
@@ -1991,7 +2086,8 @@
       "description": "Quantised text encoder — recommended, minimal quality loss.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "972f23255e46adfe744a0eb9a0039f3c63988f65753b0968d776e8b27168c321"
     },
     {
       "id": "vae-bf16",
@@ -2007,7 +2103,8 @@
       "description": "Original ACE-Step VAE decoder — always BF16, required for all generation.",
       "tags": [
         "essential"
-      ]
+      ],
+      "sha256": "0599862ac5d15cd308e1d2e368373aea6c02e25ebd1737ad4a4562a0901b0ef8"
     },
     {
       "id": "scragvae-bf16",
@@ -2023,7 +2120,8 @@
       "description": "Fine-tuned VAE decoder with +38% high-frequency energy, +29dB dynamic range. Drop-in replacement for clearer, brighter audio.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "2e56bd72b2c1599932513c9089171c171221d6edee02f1f903c9d34daa7d63d6"
     },
     {
       "id": "vae-f32-st",
@@ -2040,7 +2138,8 @@
       "description": "Original ACE-Step VAE in safetensors format. Full F32 precision — better encode quality for cover/restyle vs GGUF.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "da17edb604c40deaf09e9b24974e590d1ca83a374070e5d0884cfa4bed9a99b0"
     },
     {
       "id": "scragvae-f32-st",
@@ -2057,7 +2156,8 @@
       "description": "ScragVAE in safetensors format. Full F32 precision + reduced artifacts. Best quality for cover/restyle.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "fa4558a263b230fe480066f2b0c04a1a6fe2d05c0b64d0f432a43e8a8c0379c0"
     },
     {
       "id": "vae-regrind-v7-st",
@@ -2072,7 +2172,8 @@
       "repo": "mdmachine/ACEStep-XL-Regrind-V1",
       "repoPath": "vae/acestep_1.5_vae_Regrind_V7.safetensors",
       "description": "Regrind V7 — earlier retrained decoder for improved spectral fidelity.",
-      "tags": []
+      "tags": [],
+      "sha256": "fd2f5eb270824192ecef32c915f4ef503341fb084eaa6523db5d7e33f1820026"
     },
     {
       "id": "vae-regrind-v9b-bf16",
@@ -2087,7 +2188,8 @@
       "repo": "mdmachine/ACEStep-XL-Regrind-V1",
       "repoPath": "vae/acestep_1.5_vae_Regrind_V9b-BF16.gguf",
       "description": "Regrind V9b — refined high-frequency response and reduced artifacts.",
-      "tags": []
+      "tags": [],
+      "sha256": "3758d496e23fa06c12fa963375f75feb52d574525589d498c483ffc470ce1399"
     },
     {
       "id": "vae-regrind-v9b-blend50-bf16",
@@ -2102,7 +2204,8 @@
       "repo": "mdmachine/ACEStep-XL-Regrind-V1",
       "repoPath": "vae/acestep_1.5_vae_Regrind_V9b_blend50-BF16.gguf",
       "description": "Regrind V9b Blend50 — 50/50 blend of Regrind V9b with stock weights for balanced clarity.",
-      "tags": []
+      "tags": [],
+      "sha256": "cf9fa7cc273f2b6215a1ef59eff9a4b945b986d5ece4dfc0cd9e73f12296f6ae"
     },
     {
       "id": "vae-regrind-v9b-blend50-st",
@@ -2117,7 +2220,8 @@
       "repo": "mdmachine/ACEStep-XL-Regrind-V1",
       "repoPath": "vae/acestep_1.5_vae_Regrind_V9b_blend50.safetensors",
       "description": "Regrind V9b Blend50 in safetensors format — 50/50 blend of Regrind V9b with stock weights for balanced clarity.",
-      "tags": []
+      "tags": [],
+      "sha256": "a9f499c71df0d4607c07c2434d6c908775362c4965d28d51c36f57e7dcbafe99"
     },
     {
       "id": "vae-regrind-v10b-bf16",
@@ -2132,7 +2236,8 @@
       "repo": "mdmachine/ACEStep-XL-Regrind-V1",
       "repoPath": "vae/acestep_1.5_vae_Regrind_V10b-BF16.gguf",
       "description": "Regrind V10b — latest iteration with more aggressive artifact suppression. Use when Blend50 isn't cleaning up enough.",
-      "tags": []
+      "tags": [],
+      "sha256": "f1a0dd870b59a4c15f528ff3f890f8d31ff33225533d19e633579f1893263603"
     },
     {
       "id": "vae-regrind-v10b-st",
@@ -2147,7 +2252,8 @@
       "repo": "mdmachine/ACEStep-XL-Regrind-V1",
       "repoPath": "vae/acestep_1.5_vae_Regrind_V10b.safetensors",
       "description": "Regrind V10b in safetensors format — latest iteration with more aggressive artifact suppression.",
-      "tags": []
+      "tags": [],
+      "sha256": "f9da520ecfedaa376fc58755bb7969cd96b623a9d00644a2b537bd92842d895d"
     },
     {
       "id": "vae-regrind-v10b-blend50-bf16",
@@ -2164,7 +2270,8 @@
       "description": "Regrind V10b Blend50 — 50/50 blend of V10b with stock weights. Recommended starting point for most material.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "9cca7d4f48b977e97189cdf80491a87da30a50e8e5c15c2d8d33494390bcc4e7"
     },
     {
       "id": "vae-regrind-v10b-blend50-st",
@@ -2181,7 +2288,8 @@
       "description": "Regrind V10b Blend50 in safetensors format — 50/50 blend of V10b with stock weights. Recommended starting point for most material.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "95695df13fb82a256f95b4fd3d78752d9b695495395856da6291e7013f5b2fd9"
     },
     {
       "id": "pp-vae-f32",
@@ -2197,7 +2305,8 @@
       "description": "Post-processing VAE (full precision) — neural audio polish via encode→decode round-trip. Recommended for best cleanup quality.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "f18f7dfda0d5e1297ee26a2df5c4a4e464dff1f996bc1ccb83f195ac92487008"
     },
     {
       "id": "pp-vae-bf16",
@@ -2211,7 +2320,8 @@
       "sizeBytes": 337420896,
       "repo": "scragnog/HOT-Step-CPP-PP-VAE",
       "description": "Post-processing VAE (half precision) — good balance of quality and size.",
-      "tags": []
+      "tags": [],
+      "sha256": "6da05cc0c06f12d02efdd355118f3d3d73dbf3617a8262d5bd11d308e77fcfd7"
     },
     {
       "id": "pp-vae-f16",
@@ -2225,7 +2335,8 @@
       "sizeBytes": 337420896,
       "repo": "scragnog/HOT-Step-CPP-PP-VAE",
       "description": "Post-processing VAE (FP16) — alternative half-precision variant.",
-      "tags": []
+      "tags": [],
+      "sha256": "345d30c781a0702b675ffb62dfcc45d8eaf28046e72ee17aad9521634d25679a"
     },
     {
       "id": "stablestep-tokenizer",
@@ -2242,7 +2353,8 @@
       "description": "T5Gemma SentencePiece tokenizer — required for prompt tokenization.",
       "tags": [
         "essential"
-      ]
+      ],
+      "sha256": "7794135caa3ea73918949c902a781cc61dab674a4b59c17d85931c77c1114cbd"
     },
     {
       "id": "stablestep-tokenizer-config",
@@ -3730,7 +3842,8 @@
       "sizeBytes": 852575904,
       "repo": "scragnog/HOT-Step-CPP-StableStep",
       "description": "GGML backend: Stable Audio autoencoder (encoder half, F16 GGUF) — encodes the instrumental into SA3 latents.",
-      "tags": []
+      "tags": [],
+      "sha256": "465257fdea87aa80a3fe77459e6130a6eeeb230e4249aea5854edb6ce63fc7a5"
     },
     {
       "id": "stablestep-gguf-same-dec",
@@ -3744,7 +3857,8 @@
       "sizeBytes": 852574880,
       "repo": "scragnog/HOT-Step-CPP-StableStep",
       "description": "GGML backend: Stable Audio autoencoder (decoder half, F16 GGUF) — decodes refined SA3 latents back to audio.",
-      "tags": []
+      "tags": [],
+      "sha256": "c9e6ec019d0aa834c575e839f331ddca90cc3e080a8fddfcfd57db058b308a69"
     },
     {
       "id": "stablestep-gguf-text-enc",
@@ -3758,7 +3872,8 @@
       "sizeBytes": 1183213792,
       "repo": "scragnog/HOT-Step-CPP-StableStep",
       "description": "GGML backend: T5Gemma text encoder (BF16 GGUF) — turns the refine prompt into conditioning embeddings.",
-      "tags": []
+      "tags": [],
+      "sha256": "9945540fe3d89d3a2736c7125cf9e677775013607e7a53840a7f2deed055a3ef"
     },
     {
       "id": "supersep-bs-roformer",
@@ -3775,7 +3890,8 @@
       "description": "Stage 1: primary 6-stem separation on native GGML.",
       "tags": [
         "essential"
-      ]
+      ],
+      "sha256": "3c012a0ad9228cb15a36a844021e4e61e8f5e1f18056ce408dae60ce39cb1396"
     },
     {
       "id": "supersep-leap-xe-voc",
@@ -3790,7 +3906,8 @@
       "sizeBytes": 267433600,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "StableStep vocal split: vocal-target BS-Roformer-Leap Xe. Runs on the native GGML engine. Paired with the instrumental model so both stems are direct model outputs rather than mix-minus residuals.",
-      "tags": []
+      "tags": [],
+      "sha256": "fe39e28997fbbd1ba29ea4dd4d1bc419dfafa7546c052f0d34680d8db2fafc32"
     },
     {
       "id": "supersep-leap-xe-inst",
@@ -3805,7 +3922,8 @@
       "sizeBytes": 267433600,
       "repo": "scragnog/HOT-Step-CPP-SuperSep",
       "description": "StableStep instrumental split: instrumental-target BS-Roformer-Leap Xe. Its output feeds the SA3 refine on the native GGML engine.",
-      "tags": []
+      "tags": [],
+      "sha256": "b35c2d88b87c7aa863d79f80df1d15899fbdebbaebbf0be4bf8e4602493763c0"
     },
     {
       "id": "supersep-mel-band",
@@ -3822,7 +3940,8 @@
       "description": "Stage 2: vocal sub-separation into lead and backing on native GGML.",
       "tags": [
         "essential"
-      ]
+      ],
+      "sha256": "72214519337d78d1977b5772a6518c4d154ad46f2740818cd2faf65298490b5e"
     },
     {
       "id": "supersep-mdx23c",
@@ -3839,7 +3958,8 @@
       "description": "Stage 3: drum sub-separation (kick, snare, toms, hi-hat, ride, crash) on native GGML.",
       "tags": [
         "essential"
-      ]
+      ],
+      "sha256": "b5d68b64e46a0fb2e03b9192d9dc570b73a213c0080aa072ee53bfa9083e1dd8"
     },
     {
       "id": "supersep-rt-cudnn",
@@ -3857,7 +3977,8 @@
       "tags": [
         "runtime"
       ],
-      "repoPath": "runtime/cudnn64_9.dll"
+      "repoPath": "runtime/cudnn64_9.dll",
+      "sha256": "1ac8e84bb6b4c049259dfc32942b91c4b5a0db165b8f14bc64086eb32ad4ff27"
     },
     {
       "id": "supersep-rt-cudnn-adv",
@@ -3875,7 +3996,8 @@
       "tags": [
         "runtime"
       ],
-      "repoPath": "runtime/cudnn_adv64_9.dll"
+      "repoPath": "runtime/cudnn_adv64_9.dll",
+      "sha256": "48bf01f154d8b973d4eecaba7eac10a6c8dc978f48e989adc76262cd27311262"
     },
     {
       "id": "supersep-rt-cudnn-cnn",
@@ -3893,7 +4015,8 @@
       "tags": [
         "runtime"
       ],
-      "repoPath": "runtime/cudnn_cnn64_9.dll"
+      "repoPath": "runtime/cudnn_cnn64_9.dll",
+      "sha256": "7c025c5cd90a68420c4ea4570489ba47945d874fa010ec4b8b23871f25fc5e2d"
     },
     {
       "id": "supersep-rt-cudnn-precompiled",
@@ -3911,7 +4034,8 @@
       "tags": [
         "runtime"
       ],
-      "repoPath": "runtime/cudnn_engines_precompiled64_9.dll"
+      "repoPath": "runtime/cudnn_engines_precompiled64_9.dll",
+      "sha256": "ade50dd872948ee10f61babf1b51ed890df3e96ac4b3e703bf69823155a4cfa5"
     },
     {
       "id": "supersep-rt-cudnn-runtime",
@@ -3929,7 +4053,8 @@
       "tags": [
         "runtime"
       ],
-      "repoPath": "runtime/cudnn_engines_runtime_compiled64_9.dll"
+      "repoPath": "runtime/cudnn_engines_runtime_compiled64_9.dll",
+      "sha256": "eb716310c9a8d41ff2c10bcf766e4e067c3eec6f3d6301ab2febdcefbad1701f"
     },
     {
       "id": "supersep-rt-cudnn-tensorir",
@@ -3947,7 +4072,8 @@
       "tags": [
         "runtime"
       ],
-      "repoPath": "runtime/cudnn_engines_tensor_ir64_9.dll"
+      "repoPath": "runtime/cudnn_engines_tensor_ir64_9.dll",
+      "sha256": "8a90fd3ce2e5110741017a8a434fc5d31cf61ba5adcdeb8b0085a8226c793580"
     },
     {
       "id": "supersep-rt-cudnn-graph",
@@ -3965,7 +4091,8 @@
       "tags": [
         "runtime"
       ],
-      "repoPath": "runtime/cudnn_graph64_9.dll"
+      "repoPath": "runtime/cudnn_graph64_9.dll",
+      "sha256": "16b2868d4952ec68d2ad6f13a85f423844033df579276dc47fc806a521cbdcd0"
     },
     {
       "id": "supersep-rt-cudnn-heuristic",
@@ -3983,7 +4110,8 @@
       "tags": [
         "runtime"
       ],
-      "repoPath": "runtime/cudnn_heuristic64_9.dll"
+      "repoPath": "runtime/cudnn_heuristic64_9.dll",
+      "sha256": "ad6b92dd11365d4fda9942c79b79cd7c45e0184e3b419bc3f00ab68b308f9635"
     },
     {
       "id": "supersep-rt-cudnn-ops",
@@ -4001,7 +4129,8 @@
       "tags": [
         "runtime"
       ],
-      "repoPath": "runtime/cudnn_ops64_9.dll"
+      "repoPath": "runtime/cudnn_ops64_9.dll",
+      "sha256": "43a7847e8b9e05ea31e56978b2d27fc878cd92ba816e1278bff02f1bff839758"
     },
     {
       "id": "cuda-rt-cublas",
@@ -4020,7 +4149,8 @@
         "required",
         "cuda13"
       ],
-      "repoPath": "runtime/cuda13/cublas64_13.dll"
+      "repoPath": "runtime/cuda13/cublas64_13.dll",
+      "sha256": "101ae2b98be62704ec96e90a3c49373b76122fc6b502497a7b6fae9ab0f01564"
     },
     {
       "id": "cuda-rt-cublaslt",
@@ -4039,7 +4169,8 @@
         "required",
         "cuda13"
       ],
-      "repoPath": "runtime/cuda13/cublasLt64_13.dll"
+      "repoPath": "runtime/cuda13/cublasLt64_13.dll",
+      "sha256": "517b6a69ac9faa7354cffcbd92179aec0cc18a8f6237d36b28d9adfe8c912d8d"
     },
     {
       "id": "cuda-rt-cudart",
@@ -4058,7 +4189,8 @@
         "required",
         "cuda13"
       ],
-      "repoPath": "runtime/cuda13/cudart64_13.dll"
+      "repoPath": "runtime/cuda13/cudart64_13.dll",
+      "sha256": "352ba4ebe61e9a3b171f357a3daf5dd15b6af4a9857673ff893bd6fd2964c075"
     },
     {
       "id": "cuda-rt-cublas-12",
@@ -4077,7 +4209,8 @@
         "required",
         "cuda12"
       ],
-      "repoPath": "runtime/cuda12/cublas64_12.dll"
+      "repoPath": "runtime/cuda12/cublas64_12.dll",
+      "sha256": "0a60a7ecbf906f7f3842826fecaf412f1587ff6269729339245a1ec224364161"
     },
     {
       "id": "cuda-rt-cublaslt-12",
@@ -4096,7 +4229,8 @@
         "required",
         "cuda12"
       ],
-      "repoPath": "runtime/cuda12/cublasLt64_12.dll"
+      "repoPath": "runtime/cuda12/cublasLt64_12.dll",
+      "sha256": "a21ddfc1c9cd090ab07d2c6aad235aa4f15fe60fe896d5db28adf7a279c09ef3"
     },
     {
       "id": "cuda-rt-cudart-12",
@@ -4115,7 +4249,8 @@
         "required",
         "cuda12"
       ],
-      "repoPath": "runtime/cuda12/cudart64_12.dll"
+      "repoPath": "runtime/cuda12/cudart64_12.dll",
+      "sha256": "9d9b868955149875ac4ef43442aaaa8913d4a7b3e4d6dd60ee871626aa045768"
     },
     {
       "id": "mm3-lm-bf16",
@@ -4136,7 +4271,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "6eab6bdba681ddcaf02fdc185237cea0e02dd7042032d7982f71ebc3f605495c"
     },
     {
       "id": "mm3-lm-f16",
@@ -4157,7 +4293,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "1aa07c6afd9bb51908d5df8ed2847fa89f03d336cc5f0f33dfe91cd60239ddaa"
     },
     {
       "id": "mm3-lm-q8_0",
@@ -4180,7 +4317,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "f13c7ff8c0d00f83e1464a01424da0fc2ca97d9fbb1b5e0dc8f23eaa4653059e"
     },
     {
       "id": "mm3-lm-Q6_K-imat",
@@ -4201,7 +4339,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "3fceb04df9d0506e395fbe536861979930cb6f993edfd0ec554517e5f579c353"
     },
     {
       "id": "mm3-lm-Q5_K_M-imat",
@@ -4222,7 +4361,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "eea787594911a8c21d5138e4377a1e98425ecaaf5a2a760c0dcf15c473fc4f08"
     },
     {
       "id": "mm3-lm-Q5_K_S-imat",
@@ -4243,7 +4383,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "7be707bcdd1b33d03eaa395c77f442ce8d7ca1dfde10b60c5b3eb5c8993d94a5"
     },
     {
       "id": "mm3-lm-Q4_K_M-imat",
@@ -4264,7 +4405,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "e405cb0cb806e489b376786c099db8040861558bc10f8f3e74ba591b5976a9b0"
     },
     {
       "id": "mm3-lm-Q4_K_S-imat",
@@ -4285,7 +4427,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "5dad7257a76b5a440b5ba17f212716aaf0f6e9e3cb2a00cbd3e1be61ec9a75f9"
     },
     {
       "id": "mm3-lm-NVFP4",
@@ -4308,7 +4451,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "5d1e9e238c447cd5671d5695431d7df433d04ab18550d9f8ac6616b7c14e0e3e"
     },
     {
       "id": "mm3-lm-MXFP4",
@@ -4329,7 +4473,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "a881bf6236bd517eb761814d06b43d95b6c68d5d2d7d2b0c0abccea683caaf0c"
     },
     {
       "id": "mm3-lm-Q3_K_L-imat",
@@ -4350,7 +4495,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "5035d2542b840f9f3cc8ddc7346920548ac4164dd75192b30b34a0838016d8ef"
     },
     {
       "id": "mm3-lm-Q3_K_M-imat",
@@ -4371,7 +4517,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "18e020b894f605f418a97ee7d222be277e7ae75e111592d576c706bb13b3c891"
     },
     {
       "id": "mm3-lm-Q3_K_S-imat",
@@ -4392,7 +4539,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "35bd56bcb3537e5eec3df25c3412cd86bc44d63bee64252b6ee83dfe9050b5d4"
     },
     {
       "id": "mm3-lm-Q2_K-imat",
@@ -4413,7 +4561,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "21bde3c537987b09e4fa4d2f7550d543d66e160493d8e9138b5301f164108015"
     },
     {
       "id": "mm3-synth-f16",
@@ -4434,7 +4583,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "f4404e4335c2fef4d85f98f431d7d3775dee02fd68e905cbcbbf93c65354ff89"
     },
     {
       "id": "mm3-synth-q8_0",
@@ -4457,7 +4607,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "3540ad0ad59336bb50eb0bdfc045b296eefbbba8371b6d2270a3205555f886bd"
     },
     {
       "id": "mm3-synth-Q6_K",
@@ -4478,7 +4629,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "71fd4ed8da8f338f5b97918aa9dec852c6fcce22b8bc5d11f94609da4c04c5ae"
     },
     {
       "id": "mm3-synth-Q5_K_M",
@@ -4499,7 +4651,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "d19a04f4460902c23259ab11f8b3c624caa3aab3d12ff7aca6c364b70cfefca8"
     },
     {
       "id": "mm3-synth-Q5_K_S",
@@ -4520,7 +4673,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "7af98cbce80af7776833e83bb27286b7c7093f297060111f25f0c4d3e1967568"
     },
     {
       "id": "mm3-synth-Q4_K_M",
@@ -4541,7 +4695,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "f3b2803fba5579dd144ff7a4d30d82017b6d1f77d9a8fa10667e6ffeb31cfef3"
     },
     {
       "id": "mm3-synth-Q4_K_S",
@@ -4562,7 +4717,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "3b42d36e1abe3f538ef080e855660691497946f590a1d93608e0b6953223d0f4"
     },
     {
       "id": "mm3-synth-NVFP4",
@@ -4585,7 +4741,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "ba5e9cf6ed0f117190127ad053850dfd9aa7283559ce577428b3ad0664319cac"
     },
     {
       "id": "mm3-synth-MXFP4",
@@ -4606,7 +4763,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "0b6cac584a6ef000f847ddf3b85a4e329dc67757927b4bda7e26bdd4e180eed9"
     },
     {
       "id": "mm3-synth-Q3_K_L",
@@ -4627,7 +4785,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "2909f0cba4d15218537154304fc92770e322c624195fce27f09e42a72f637c71"
     },
     {
       "id": "mm3-synth-Q3_K_M",
@@ -4648,7 +4807,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "5edade26b4c3d4311f6de8c5278892f6de0519efa468cd1d8de405bec1e5e425"
     },
     {
       "id": "mm3-synth-Q3_K_S",
@@ -4669,7 +4829,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "87779a746eaa18136a8bf8de79755ee38bfcfc60f6b183b8fc55943d5d85bf35"
     },
     {
       "id": "mm3-synth-Q2_K",
@@ -4690,7 +4851,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "5494df7117e6635a8939cdf4d125c18fdf5ea81c0d6f3d855ddba82fb47a81ca"
     },
     {
       "id": "mm3-cond-f16",
@@ -4713,7 +4875,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "526a7682d5135ef46fa3e42de367ea3d411c8804c34796bc0c50822a3b4a2461"
     },
     {
       "id": "mm3-depth-MXFP4",
@@ -4734,7 +4897,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "34c80af745814c4f96ca8e744c39666480a0cdbfb862d51faac7d5f9c1a861e9"
     },
     {
       "id": "mm3-depth-NVFP4",
@@ -4755,7 +4919,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "33b9cf7b2324157ec13d5d9b105cc80e94104d93647229a9f83b9824efcba415"
     },
     {
       "id": "mm3-depth-Q2_K",
@@ -4776,7 +4941,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "a549c0ab113b61ea046013b8de71625783e7c44d586e1b2fcb2856a972c8b496"
     },
     {
       "id": "mm3-depth-Q3_K_L",
@@ -4797,7 +4963,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "14c4b656447c18fc8dd6113d48aa31a859e89ac792f14ef862f199e4e684d8fc"
     },
     {
       "id": "mm3-depth-Q3_K_M",
@@ -4818,7 +4985,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "26a6329092c37993d15d0be5a81696a516abbe5a9ed46315cfb35328cb61036d"
     },
     {
       "id": "mm3-depth-Q3_K_S",
@@ -4839,7 +5007,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "f6fb24c62b43f469af73a39f220d2e0183219177735848d668c9b4962b2360a1"
     },
     {
       "id": "mm3-depth-Q4_K_M",
@@ -4860,7 +5029,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "77e729d6e0599ed7928a3c0f13a36e1d3ef5f7de9259eaf01a19445549fa958e"
     },
     {
       "id": "mm3-depth-Q4_K_S",
@@ -4881,7 +5051,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "c9c320f0a1b03fd91723a6fe6e8fd6d0977af6f567f8997a53a15b98df06df0c"
     },
     {
       "id": "mm3-depth-Q5_K_M",
@@ -4902,7 +5073,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "82f6fd51fdb7bd4ee154492b24a358b718b40b121be15cc7afd7ed431a77b01c"
     },
     {
       "id": "mm3-depth-Q5_K_S",
@@ -4923,7 +5095,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "9e3e2b8db44f320f5b38bfd1fa976676587a88cdae6f5b9a7a3674f90823e15a"
     },
     {
       "id": "mm3-depth-Q6_K",
@@ -4944,7 +5117,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "6ab067c2d4589d39758e46a54cc8554c2145a1675b3dcfb570ab698d2ba26fc8"
     },
     {
       "id": "mm3-depth-f16",
@@ -4965,7 +5139,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "2a4b8aea7a5a1d3522f2a3c5a571307c0fd5c0efaf105685dfb7f8464894891d"
     },
     {
       "id": "mm3-depth-q8_0",
@@ -4988,7 +5163,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "125a95762fd539a784f91f6b344e8ca1f3ef10fb2dfe9936d16c0d5806192432"
     },
     {
       "id": "mm3-dit-MXFP4",
@@ -5009,7 +5185,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "e9ef42c62c319cfde635f7ecafff685b4c44767acb71ee85cf471dcff96f18a8"
     },
     {
       "id": "mm3-dit-NVFP4",
@@ -5030,7 +5207,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "99fa7349f3e06fa79af4a4ab7b89dab490caeb034e543e83a51844353abf41ed"
     },
     {
       "id": "mm3-dit-Q2_K",
@@ -5051,7 +5229,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "849a7e6f3803622055c5894f83a327adfad1ae8a06f4882ac2de45fe2bdc5e60"
     },
     {
       "id": "mm3-dit-Q3_K_L",
@@ -5072,7 +5251,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "b443dd6446ebb74f9514d5202e2008d02c28e959ca27c52ab0e468aca014cb6d"
     },
     {
       "id": "mm3-dit-Q3_K_M",
@@ -5093,7 +5273,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "f1a67119c34ede23e27240d3ebd630fa492247e1d0184263574482302ab48f3f"
     },
     {
       "id": "mm3-dit-Q3_K_S",
@@ -5114,7 +5295,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "bd9a89c7a7c5069dd63a24f67f1f41bc35ce188fce10015e15925bcf5745da44"
     },
     {
       "id": "mm3-dit-Q4_K_M",
@@ -5135,7 +5317,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "3e840a4345ccdc5d986de1e4c6e6b5a2fd0c8f7744345f1b62aae0d29d32942c"
     },
     {
       "id": "mm3-dit-Q4_K_S",
@@ -5156,7 +5339,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "e20449c3f6a73a8cc2672947f2ee41728b12f0dcfd351c1c9a34a04a1c193031"
     },
     {
       "id": "mm3-dit-Q5_K_M",
@@ -5177,7 +5361,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "93b2fc23e81990c0f2e55a8ad0b337ef106acce19db585e3682293e78b4a2d17"
     },
     {
       "id": "mm3-dit-Q5_K_S",
@@ -5198,7 +5383,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "05f3044b9d81a3f80a17cfcc4a13095ed039f9f2b1c7bef3f409be03597328a0"
     },
     {
       "id": "mm3-dit-Q6_K",
@@ -5219,7 +5405,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "706a11fa36547a3e0012a07a2e6fd311b9b07c4e757d85fd1d1ff366ef944fcb"
     },
     {
       "id": "mm3-dit-f16",
@@ -5240,7 +5427,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "9b9d3c14bc3d7df12f4601ed17cbd114633108ee12232efd9af303223d42e6cb"
     },
     {
       "id": "mm3-dit-q8_0",
@@ -5263,7 +5451,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "4e226903be52ff96b53e6ad6094e50b057e02cb558a14c62e0f6ec17c3c4128d"
     },
     {
       "id": "mm3-voc-f16",
@@ -5286,7 +5475,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "90e578bbbec4fb363b22af4c9203a246f09e18bc3261ca16805ebc2bebdbeb4c"
     },
     {
       "id": "moss-lm-q8_0",
@@ -5309,7 +5499,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "482e1e82c66f819401708c82b3eaa1dd6635c68a211f03b645b0055d0b7b031b"
     },
     {
       "id": "moss-lm-f16",
@@ -5330,7 +5521,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "75d6f76d1e75088ab7d20545f1bed9f2f37c8b8159b6c14dc738cc65a71c2265"
     },
     {
       "id": "moss-aud-f16",
@@ -5353,7 +5545,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "014b971719a9b46586ea78ea3d15f39ac0f1932678e30c72fa63222f8aea5f79"
     },
     {
       "id": "flamingo-lm-q8_0",
@@ -5454,7 +5647,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "96fe199377309001ed8cd26a944baeee8cc31a20ba7c36d1d3c0a7e1f4149db6"
     },
     {
       "id": "yue2-lm-bf16",
@@ -5475,7 +5669,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "3beefa2f0f78354521c0f26764585fbd7f8760beab14be6d34f4b2cd832c4dcb"
     },
     {
       "id": "yue2-lm-q8_0",
@@ -5498,7 +5693,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "30c109196a3cfd94edda644946dcdf46aacbc4fce10a18551e2165aa86c7108a"
     },
     {
       "id": "yue2-lm-Q6_K",
@@ -5519,7 +5715,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "c6b94ef16e96937a57070d8daf43ad6b7505107dcb2b50d71e61a375f5349c1a"
     },
     {
       "id": "yue2-lm-Q5_K_M",
@@ -5540,7 +5737,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "45076697443cd2097b809e850620dc4bf22fbe4ba89fe784bafba36c1fa5e82f"
     },
     {
       "id": "yue2-lm-Q4_K_M-imat",
@@ -5561,7 +5759,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "9d46d4cc86d3d774c7bcf5dc547aa837a5a1bca107361d1bf7adf446cbaedf91"
     },
     {
       "id": "yue2-lm-Q4_K_S-imat",
@@ -5582,7 +5781,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "7876d4e963c84aa0cce135afb598d13fadf733c646c97a74d3ee054e15e268c3"
     },
     {
       "id": "yue2-lm-IQ4_XS-imat",
@@ -5603,7 +5803,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "648c3e37c2f894b9a996d13491b3ba9a9f17d2ba2d84894d7475edd4fad512c8"
     },
     {
       "id": "yue2-lm-NVFP4",
@@ -5624,7 +5825,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "a917bfb067e0852bb014db0b3919c0ff582492637b8a60064396021def8c4a0f"
     },
     {
       "id": "yue2-lm-MXFP4",
@@ -5645,7 +5847,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "46b0b754fbe5db6da00e100833397c80c1bcf51df7812656238537cc3fb24b36"
     },
     {
       "id": "yue2-lm-Q3_K_M-imat",
@@ -5666,7 +5869,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "bf2dabfcfd5bac9e58469bdff6b5d341cc020090e6f012479c056addbebf0211"
     },
     {
       "id": "yue2-lm-Q3_K_S-imat",
@@ -5687,7 +5891,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "8e50ad0947af0a000f7ff158f54de1cc868c7361b6a4b4e6e9a0ae86dd7e2e84"
     },
     {
       "id": "yue2-lm-IQ3_XXS-imat",
@@ -5708,7 +5913,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "19d6273c9c9637f2ef220dfb7a480ede9239d8231e701aa833d5de437ffe2bc3"
     },
     {
       "id": "yue2-lm-Q2_K-imat",
@@ -5729,7 +5935,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "83431105025277c199195020debf3d6eb0162209459543a402ecabbde4c6965f"
     },
     {
       "id": "yue2-lm-IQ2_XS-imat",
@@ -5750,7 +5957,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "d689941ae27b204ed9645a413d19dfcc057324bab06ed628f3dcf8b7dc0c9122"
     },
     {
       "id": "yue2-lm-imatrix",
@@ -5771,7 +5979,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "de6fdb9a19ec0ae204e35aed0d4beb6bafbaed5b2ab1b8d9fa46c0ab4a0164c4"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-bf16",
@@ -5792,7 +6001,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "5a71cceceffd108b6d62b20c42f3c2ac3bacb43b0760dbd0ce6a460f88454a32"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-q8_0",
@@ -5813,7 +6023,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "8e5eee66b286c4ccb533c72f09f750f7bf7faf1737cedfa263c22c94a038e23b"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-Q6_K",
@@ -5834,7 +6045,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "a0842159858a5033b2efaa3f73aabdaa22bcabdfc7fd1d9744bd3d5dd0b7fc6b"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-Q5_K_M",
@@ -5855,7 +6067,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "40735b1d8b239c8c3035b746b7c9e96c6d821f892b296d1468beafe2d04e6a5a"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-Q4_K_M-imat",
@@ -5876,7 +6089,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "e00d1f95252eb335ca46694bfce9bb20d44e71eda1ad542032ab591809f01900"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-Q4_K_S-imat",
@@ -5897,7 +6111,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "f30ea46914a8aaf760244866fa6c17433e72dd65bcc79a0fde7f7049f4a9901b"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-IQ4_XS-imat",
@@ -5918,7 +6133,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "bc460ac97692b06d6d07c134dddf5c1f2bd9905a4600f448b4e584f02f4d80bc"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-NVFP4",
@@ -5939,7 +6155,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "70fcd8601413962e221319a79e501e5aac7869d20d60cc2950d1ed06f2948e2a"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-MXFP4",
@@ -5960,7 +6177,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "029580fa41bf37a2667e2e0bbbbd850a5eb8b5b9ccea7c28258c2b9693515b02"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-Q3_K_M-imat",
@@ -5981,7 +6199,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "ffc2cbbdd7afdbb187817b1013c42577bafd4e0d1bf55f4854f544213641d173"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-Q3_K_S-imat",
@@ -6002,7 +6221,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "d7d2efdb2ed09c3033fce447376b12f2ebd4418f792926460b4d1674823adb19"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-IQ3_XXS-imat",
@@ -6023,7 +6243,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "23d8d4e7e643eee99b6fae2b8866372e0a10f6c09abfdfa2441ab8fd76c07bc6"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-Q2_K-imat",
@@ -6044,7 +6265,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "2a4ae94ff8580c0da0d92f8b1e7326c75427c45965bf0e32af908db8c993afba"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-IQ2_XS-imat",
@@ -6065,7 +6287,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "688b8416e804e8ab5439c1cf063b087a9f04f6186ebd8209482ef7481f61b9c3"
     },
     {
       "id": "yue2-lm-rs-4.0x0.7-imatrix",
@@ -6086,7 +6309,8 @@
           "filename": "LICENSE-YuE2-RS-4.0x0.7",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "7d1d1f1d40a7932fe3802031cc4bfa0723118ac8796d80c283461c533eb70cfd"
     },
     {
       "id": "yue2-lm-rs-tw-2.0x0.75-bf16",
@@ -6373,7 +6597,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "c4ffc363b246f404c1d150075da4c41c4a031524036042ce45aeb500d4d5fe71"
     },
     {
       "id": "yue2-vae-legacy-f32",
@@ -6394,7 +6619,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "0e790e2be7b6c5674b776df053d74da6fc65b13246a41210d82d836c5b26e6fa"
     },
     {
       "id": "yue2-tok-f16",
@@ -6471,7 +6697,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "6a205c7ca90f60b388d925c0e4aea8f4ed8bb4404520bb49dbd095d1b7320bd1"
     },
     {
       "id": "yue2-sheetsage2-refined-f16",
@@ -6492,7 +6719,8 @@
           "filename": "LICENSE-sheetsage2-refined",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "aab21b68a1d4189800c4ecc8d920abee9e5ae514c220d732be9f21e24af11832"
     },
     {
       "id": "yue2-mms-fa",
@@ -6505,7 +6733,8 @@
       "sizeBytes": 1261892736,
       "repo": "scragnog/YuE2-GGUF",
       "description": "Meta's MMS forced aligner, converted to GGUF (CC BY-NC-4.0 upstream). Two jobs, same model: ace-train yue2-align writes per-word lyric spans into the preprocess manifest for the AR trainer's --cursor-weight, and POST /yue2/align times a finished YuE2 render against its own lyrics so the player can show the current line and the section markers (Post-Processing > Lyric Timestamps). Optional for both - YuE2 generates without it. F32 because the port's stage gates were measured in fp32.",
-      "tags": []
+      "tags": [],
+      "sha256": "2a7df904c5f7d18f595da03e9636541686dfe41292d983e4dc7bfeb11b71b7c3"
     },
     {
       "id": "yue2-minted-manifest",
@@ -6531,7 +6760,8 @@
       "sizeBytes": 86521688,
       "repo": "scragnog/YuE2-GGUF",
       "description": "Codes half of the minted regulariser pack: true YuE2 semantic codes as headerless little-endian int32, indexed by minted_manifest.json. Not useful alone.",
-      "tags": []
+      "tags": [],
+      "sha256": "38124fcaa484448e3a387f6844f16ed6e4d8cf7c86c188e572912e4f3c0a5faf"
     },
     {
       "id": "yue2-nar-companion-v9",
@@ -6567,7 +6797,8 @@
       "description": "Best balance of speed and accuracy (1.5 GB). Recommended. ~5-10s per 30s track on GPU.",
       "tags": [
         "recommended"
-      ]
+      ],
+      "sha256": "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"
     },
     {
       "id": "whisper-large-v3",
@@ -6580,7 +6811,8 @@
       "repo": "ggerganov/whisper.cpp",
       "repoPath": "ggml-large-v3.bin",
       "description": "Maximum accuracy (2.9 GB). Slower but best for difficult transcriptions. ~10-20s per 30s track on GPU.",
-      "tags": []
+      "tags": [],
+      "sha256": "64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2"
     },
     {
       "id": "whisper-medium",
@@ -6593,7 +6825,8 @@
       "repo": "ggerganov/whisper.cpp",
       "repoPath": "ggml-medium.bin",
       "description": "Good accuracy with lower VRAM usage (1.4 GB). ~3-8s per 30s track on GPU.",
-      "tags": []
+      "tags": [],
+      "sha256": "6c14d5adee5f86394037b4e4e8b59f1673b6cee10e3cf0b11bbdbee79c156208"
     },
     {
       "id": "whisper-base",
@@ -6606,7 +6839,8 @@
       "repo": "ggerganov/whisper.cpp",
       "repoPath": "ggml-base.bin",
       "description": "Fastest, smallest (141 MB). Good for quick previews but lower accuracy. ~1-3s per 30s track on GPU.",
-      "tags": []
+      "tags": [],
+      "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"
     },
     {
       "id": "mm3-lm-IQ2_XXS-imat",
@@ -6627,7 +6861,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "f7a9360cf8923c43d8fc1bed8f1617d7c7fc656395fd487e2028d6ed5f1a0492"
     },
     {
       "id": "mm3-lm-IQ3_XXS-imat",
@@ -6648,7 +6883,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "91cbf766647044c26a52f8b16c2ff05b3894e1fafccfcca352bb665c644db801"
     },
     {
       "id": "mm3-lm-IQ2_XS-imat",
@@ -6669,7 +6905,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "e36cb7fd2de7194c407b4678cf22c8b94d7a59d35070d6cb00b434f27c367e4c"
     },
     {
       "id": "mm3-lm-IQ4_XS-imat",
@@ -6690,7 +6927,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "7ade47331aaada06229a34f24395f964e1d77131fcf7b943cd9c730128827be2"
     },
     {
       "id": "mm3-rvq-53kpooled",
@@ -6713,7 +6951,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "84b058c3361500995c12fd15b96b8db1f1ca1b25ef5c036b75324b095fcdbdf3"
     },
     {
       "id": "mm3-rec7-f16",
@@ -6734,7 +6973,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "4e9af5d0100068776f65d8bf5b9c3b2e9210bfeaab8c9b343f0cf459fb007d5a"
     },
     {
       "id": "mm3-lm-q8_0-pissa-r128",
@@ -6757,7 +6997,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "aa9c40c18ecc6ca89fd60d53fc3a39e8a09ad9fc7a2dca64487fd4e04559b057"
     },
     {
       "id": "mm3-enc-f16",
@@ -6780,7 +7021,8 @@
           "filename": "LICENSE",
           "repoPath": "LICENSE"
         }
-      ]
+      ],
+      "sha256": "e3bf7beee1f6cd242c53b2e6b664f8418c7d16434bf4d8b5b3804366c17e3ca0"
     },
     {
       "id": "mm3-dit-trt-onnx",
@@ -6800,7 +7042,8 @@
         {
           "filename": "mm3-dit-trt.engine.json"
         }
-      ]
+      ],
+      "sha256": "448fba20906a6b283b1c2962ff1b227a176a8381d84be54551b7276968e3c8ac"
     },
     {
       "id": "trt-rt-nvinfer",
@@ -6818,7 +7061,8 @@
       "tags": [
         "runtime",
         "required"
-      ]
+      ],
+      "sha256": "73fd99ba7448ebe7b75f3a97bca5fd996f166fa75760f616c0b0eda5c2f7005b"
     },
     {
       "id": "trt-rt-onnxparser",
@@ -6836,7 +7080,8 @@
       "tags": [
         "runtime",
         "required"
-      ]
+      ],
+      "sha256": "4474757aac9e6abe12b3086fa2ed95f97e93e7b26cc5e89dbada2670842f471e"
     },
     {
       "id": "trt-rt-builder-sm75",
@@ -6854,7 +7099,8 @@
       "description": "TensorRT's engine-builder resource for compute capability 7.5 (Turing — RTX 20-series, GTX 16-series, T4). Needed only on first use per GPU, to build the MM3 DiT TensorRT engine; pick the ONE matching your card, not all of them.",
       "tags": [
         "runtime"
-      ]
+      ],
+      "sha256": "ac67f4219db18e5e24bb2022f746d6b61804cd4278b57f7908734317f0bb05d2"
     },
     {
       "id": "trt-rt-builder-sm80",
@@ -6872,7 +7118,8 @@
       "description": "TensorRT's engine-builder resource for compute capability 8.0 (Ampere datacenter — A100). Needed only on first use per GPU, to build the MM3 DiT TensorRT engine; pick the ONE matching your card, not all of them.",
       "tags": [
         "runtime"
-      ]
+      ],
+      "sha256": "edd5cea62a070fdabe6826aa4e51cbd123e045324758ee54f7254e2d63bd1afd"
     },
     {
       "id": "trt-rt-builder-sm86",
@@ -6890,7 +7137,8 @@
       "description": "TensorRT's engine-builder resource for compute capability 8.6 (Ampere — RTX 30-series, A40). Needed only on first use per GPU, to build the MM3 DiT TensorRT engine; pick the ONE matching your card, not all of them.",
       "tags": [
         "runtime"
-      ]
+      ],
+      "sha256": "35331ca0164b785b85a9f3d48bb7be1195af9d5ccb760033c0854e133f53b621"
     },
     {
       "id": "trt-rt-builder-sm89",
@@ -6908,7 +7156,8 @@
       "description": "TensorRT's engine-builder resource for compute capability 8.9 (Ada Lovelace — RTX 40-series, L4/L40). Needed only on first use per GPU, to build the MM3 DiT TensorRT engine; pick the ONE matching your card, not all of them.",
       "tags": [
         "runtime"
-      ]
+      ],
+      "sha256": "5126cb3feb13ef2f5841fb30085cf304fa0dfacb7645078dd77c7fc8eeb125ad"
     },
     {
       "id": "trt-rt-builder-sm90",
@@ -6926,7 +7175,8 @@
       "description": "TensorRT's engine-builder resource for compute capability 9.0 (Hopper — H100). Needed only on first use per GPU, to build the MM3 DiT TensorRT engine; pick the ONE matching your card, not all of them.",
       "tags": [
         "runtime"
-      ]
+      ],
+      "sha256": "2fb60ef2998a876027fc4b99366af82d3c23fbfa5d4b5dbc8c82325d8ca66dc3"
     },
     {
       "id": "trt-rt-builder-sm100",
@@ -6944,7 +7194,8 @@
       "description": "TensorRT's engine-builder resource for compute capability 10.0 (Blackwell datacenter — B100/B200). Needed only on first use per GPU, to build the MM3 DiT TensorRT engine; pick the ONE matching your card, not all of them.",
       "tags": [
         "runtime"
-      ]
+      ],
+      "sha256": "c88d5abfccc601194b2a32c9e43956eb0c3435ee07114493d862e7c12640c17d"
     },
     {
       "id": "trt-rt-builder-sm120",
@@ -6962,7 +7213,8 @@
       "description": "TensorRT's engine-builder resource for compute capability 12.0 (Blackwell consumer — RTX 50-series). Needed only on first use per GPU, to build the MM3 DiT TensorRT engine; pick the ONE matching your card, not all of them.",
       "tags": [
         "runtime"
-      ]
+      ],
+      "sha256": "3aa2d721ffa793cd5dc1088f4c1b98c29155aa64ad2fc1d5c12daa03f2a0e023"
     },
     {
       "id": "trt-rt-builder-ptx",
@@ -6979,7 +7231,8 @@
       "description": "TensorRT's PTX-JIT builder resource — compiles at engine-build time for whatever compute capability the specific SM DLLs above don't cover (a newer GPU than this release shipped for). Slower to build than a matching SM DLL, but works on anything CUDA can target. Use this only if none of the numbered SM entries match your GPU.",
       "tags": [
         "runtime"
-      ]
+      ],
+      "sha256": "29fcebf04f2bf6ac6a99b805953d02d0442eeafe0f45fe9fa162e43537e4285b"
     },
     {
       "id": "heartcodec-flow-f16",
@@ -10200,7 +10453,8 @@
           "filename": "config.json",
           "required": true
         }
-      ]
+      ],
+      "sha256": "bbd482c786b895cf7d8f44185073d951adae2ebb8a66f82ca84cd1f84569549c"
     },
     {
       "id": "muscriptor-medium",
@@ -10222,7 +10476,8 @@
           "filename": "config.json",
           "required": true
         }
-      ]
+      ],
+      "sha256": "ac80adbdf85d87231735fd948af7013441c0afced316c4e9067fd5d8a7fb97ec"
     },
     {
       "id": "muscriptor-large",
@@ -10244,7 +10499,8 @@
           "filename": "config.json",
           "required": true
         }
-      ]
+      ],
+      "sha256": "ac4eb6ea87dfc26b6ca6b954c6b967ab87ad4c7d08e078b25214f13ed051f397"
     },
     {
       "id": "muscriptor-beat-this",
