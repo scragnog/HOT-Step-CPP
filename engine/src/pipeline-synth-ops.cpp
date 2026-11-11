@@ -17,6 +17,7 @@
 
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -39,6 +40,35 @@ static inline int hs_vae_chunk(const AceSynth * ctx) {
 }
 
 static const int FRAMES_PER_SECOND = 25;
+
+// data is frame-major; channels is 2 for stereo PCM and 64 for VAE latents.
+// Repeat short inputs to at least 30 s, then take the centre 10 s of each
+// third. Fixed centres avoid adding a second source of request randomness.
+static std::vector<float> timbre_window(const float * data, int frames, int channels, int rate) {
+    const int segment = 10 * rate;
+    const int target = 3 * segment;
+    const int repeated = frames < target ? ((target + frames - 1) / frames) * frames : frames;
+    const int third = repeated / 3;
+    std::vector<float> window((size_t) target * channels);
+    for (int part = 0; part < 3; ++part) {
+        const int length = part == 2 ? repeated - 2 * third : third;
+        const int start = part * third + (length - segment) / 2;
+        for (int t = 0; t < segment; ++t) {
+            memcpy(window.data() + (size_t) (part * segment + t) * channels,
+                   data + (size_t) ((start + t) % frames) * channels,
+                   channels * sizeof(float));
+        }
+    }
+    return window;
+}
+
+static bool synth_finite(const float * data, size_t n, const char * stage) {
+    size_t count = 0;
+    for (size_t i = 0; i < n; ++i) count += !std::isfinite(data[i]);
+    if (!count) return true;
+    fprintf(stderr, "[Synth-Finite] %s: %zu non-finite values out of %zu\n", stage, count, n);
+    return false;
+}
 
 // ─── Determinism diagnostic ─────────────────────────────────────────────────
 static void diag_stats_f32(const char * label, const float * data, size_t n) {
@@ -412,6 +442,13 @@ void ops_encode_timbre(const AceSynth * ctx,
     // when both are set. Without either input the timbre falls back to a
     // single silence frame, disabling timbre conditioning.
     if (ref_latents && ref_T_latent > 0) {
+        if (s.rr.timbre_reference_window) {
+            s.timbre_feats = timbre_window(ref_latents, ref_T_latent, 64, 25);
+            s.S_ref_timbre = 750;
+            fprintf(stderr, "[Encode-Timbre] Window: latents in %d frames (%.2fs) -> 750 frames (30s)\n",
+                    ref_T_latent, ref_T_latent / 25.0);
+            return;
+        }
         s.S_ref_timbre = ref_T_latent;
         s.timbre_feats.assign(ref_latents, ref_latents + (size_t) ref_T_latent * 64);
         fprintf(stderr, "[Encode-Timbre] Latents in: %d frames (%.1fs), VAE encode skipped\n", ref_T_latent,
@@ -419,6 +456,15 @@ void ops_encode_timbre(const AceSynth * ctx,
         return;
     }
     if (ref_audio && ref_len > 0) {
+        std::vector<float> window;
+        if (s.rr.timbre_reference_window) {
+            const int input_len = ref_len;
+            window = timbre_window(ref_audio, ref_len, 2, 48000);
+            ref_audio = window.data();
+            ref_len = 30 * 48000;
+            fprintf(stderr, "[Encode-Timbre] Window: audio in %d samples (%.2fs) -> 750 frames (30s)\n",
+                    input_len, input_len / 48000.0);
+        }
         s.timer.reset();
         VAEEncoder * ref_vae = store_require_vae_enc(ctx->store, ctx->vae_enc_key);
         if (!ref_vae) {
@@ -1489,6 +1535,8 @@ int ops_dit_generate(const AceSynth * ctx, int batch_n, SynthState & s, bool (*c
 post_dit:
 #endif
 
+    if (!synth_finite(s.output.data(), s.output.size(), "DiT output")) return -1;
+
     // Latent post-processing before VAE decode: pred = pred * rescale + shift.
     // Skipped at defaults (1.0 / 0.0).
     if (s.rr.latent_rescale != 1.0f || s.rr.latent_shift != 0.0f) {
@@ -1499,6 +1547,8 @@ post_dit:
             s.output[i] = s.output[i] * s.rr.latent_rescale + s.rr.latent_shift;
         }
     }
+
+    if (!synth_finite(s.output.data(), s.output.size(), "DiT latent post-processing")) return -1;
 
     // ── Latent output RMS guard ─────────────────────────────────────────
     // Detect latent blowup (common with XL models at high noise + high CFG)
@@ -1641,6 +1691,8 @@ int ops_vae_decode(const AceSynth * ctx,
         }
         fprintf(stderr, "[VAE-Decode Batch%d] Decode: %.1f ms\n", b, s.timer.ms());
 
+        if (!synth_finite(audio.data(), (size_t) 2 * T_audio, "VAE decode")) return -1;
+
         if (b == 0) {
             debug_dump_2d(&s.dbg, "vae_audio", audio.data(), 2, T_audio);
         }
@@ -1756,10 +1808,15 @@ int ops_vae_decode_postprocess(const AceSynth * ctx,
         // This wraps vae_ggml_decode_tiled with the engine's VAE and chunk params
         // vae_ggml_decode_tiled packs ch1 at the returned count; the bridge
         // contract is capacity stride, so move ch1 out to max_T.
+        bool nonfinite_decode = false;
         PostprocessVaeDecodeFn decode_fn = [&](const float * latent, int T_lat, float * aud_out, int max_T) -> int {
             int n = vae_ggml_decode_tiled(vae, latent, T_lat, aud_out, max_T,
                                           hs_vae_chunk(ctx), ctx->params.vae_overlap,
                                           cancel, cancel_data);
+            if (n > 0 && !synth_finite(aud_out, (size_t) 2 * n, "VAE plugin tile decode")) {
+                nonfinite_decode = true;
+                return -1;
+            }
             if (n > 0 && n < max_T) {
                 memmove(aud_out + max_T, aud_out + n, (size_t) n * sizeof(float));
             }
@@ -1774,6 +1831,8 @@ int ops_vae_decode_postprocess(const AceSynth * ctx,
             *plugin, dit_out, T_latent, s.Oc, 2,
             audio.data(), T_audio_max, decode_fn,
             g_hotstep_params.plugin_params);
+
+        if (nonfinite_decode) return -1;
 
         if (T_audio < 0) {
             fprintf(stderr, "[Postprocess Batch%d] ERROR: plugin decode failed, falling back to built-in\n", b);
@@ -1792,6 +1851,8 @@ int ops_vae_decode_postprocess(const AceSynth * ctx,
             memmove(audio.data() + T_audio, audio.data() + T_audio_max, (size_t) T_audio * sizeof(float));
         }
         fprintf(stderr, "[Postprocess Batch%d] Decode: %.1f ms (T_audio=%d)\n", b, s.timer.ms(), T_audio);
+
+        if (!synth_finite(audio.data(), (size_t) 2 * T_audio, "VAE postprocess output")) return -1;
 
         int n_total    = 2 * T_audio;
         out[b].samples = (float *) malloc((size_t) n_total * sizeof(float));
@@ -1969,6 +2030,8 @@ int ops_pp_vae_reencode(const AceSynth * ctx, int batch_n, AceAudio * out, Synth
                 fprintf(stderr, "[PP-VAE Batch%d] WARNING: decode failed\n", b);
                 continue;
             }
+
+            if (!synth_finite(audio.data(), (size_t) 2 * T_audio, "PP-VAE decode")) return -1;
 
             // DEBUG: raw decode output stats (before gain)
             {

@@ -48,7 +48,8 @@ export async function runAceGeneration(
   // never stall an ACE generation.
   await releaseMinimaxVramForAce();
 
-  const aceReq = translateParams(job.params);
+  // Experimental engine request field; intentionally has no UI control yet.
+  const aceReq = { ...translateParams(job.params), timbre_reference_window: job.params.timbreReferenceWindow === true };
 
   // Write the resolved seeds back into job.params so the DB stores the actual
   // values used — critical for reproducibility when randomSeed is true, or
@@ -460,6 +461,8 @@ export async function runAceGeneration(
     const masteringRef = job.params.masteringReference;
     refAudioBuf = await loadTimbreReference(job.params, masteringRef, aceReq.seed, job.id, log);
 
+    // Cache whole-file VAE latents in both modes. The engine windows its own
+    // copy after loading; windowed features and rendered audio are never cached here.
     // ── Auto-cache timbre latent (VAE encode via /vae endpoint) ──
     if (refAudioBuf) {
       // Resolve timbre ref path for cache key
@@ -696,8 +699,11 @@ export async function runAceGeneration(
       let resolveParamsAt = 0;   // [Resolve-T] or [Resolve-Params] marks job setup
       const synthModelLoads: Array<{ type: string; ms: number; sizeMb?: number }> = [];
 
+      let synthFiniteError: string | undefined;
       const unsubSynth = subscribeLines((line) => {
         if (line.source !== 'engine') return;
+        const finiteError = line.text.match(/\[Synth-Finite\] (.+)/);
+        if (finiteError) synthFiniteError = finiteError[1];
         const now = performance.now();
         if (!firstEngineLogAt) firstEngineLogAt = now;
         // Capture model load times from [Store] Load <TYPE>: <N> ms
@@ -830,6 +836,9 @@ export async function runAceGeneration(
       job.aceJobId = synthJobId;
 
       await pollUntilDone(synthJobId, job, deps.signal, timeoutMinutes);
+      } catch (err) {
+        if (synthFiniteError) throw new Error(`Generation failed: ${synthFiniteError}`);
+        throw err;
       } finally {
         unsubSynth();
       }

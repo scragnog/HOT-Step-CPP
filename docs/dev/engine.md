@@ -268,6 +268,26 @@ optional test targets, embeds the UTF-8 active-code-page and long-path manifest.
 Filesystem wrappers that explicitly convert UTF-8 to UTF-16 keep their existing
 behavior.
 
+## Timbre references and numerical failures
+
+The experimental ACE request field `timbre_reference_window` defaults to `false`.
+When enabled, references shorter than 30 seconds repeat to at least 30 seconds.
+The encoder input joins the centre 10 seconds of each third, giving 750 latent
+frames. Fixed centres make the selection reproducible. The Python reference
+chooses a random segment within each third instead.
+
+Raw audio is windowed before VAE encoding. Pre-encoded timbre latents are
+windowed after loading, so Node keeps caching the whole-file VAE result in
+both modes. The engine makes a separate feature buffer for each request;
+the cache never contains windowed features or rendered output. The Node
+generation parameter is `timbreReferenceWindow`; there is no UI control yet.
+
+ACE synthesis rejects NaN or infinity in DiT output, after latent shift and
+rescale, and after native, plugin and PP-VAE decodes. It reports the stage
+and number of invalid values instead of letting the WAV writer replace them
+with silence. Node preserves the `[Synth-Finite]` diagnostic in the failed
+generation's error through the engine log subscription.
+
 ## How ace-server is organised
 
 One process, one port, one GPU worker thread. `POST /lm`, `/synth`, `/understand`,

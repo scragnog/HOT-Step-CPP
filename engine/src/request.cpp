@@ -58,6 +58,7 @@ void request_init(AceRequest * r) {
     r->dcw_high_scaler      = 0.0f;
     r->dcw_mode             = DCW_MODE_LOW;
     r->audio_cover_strength = 1.0f;
+    r->timbre_reference_window = false;
     r->cover_noise_strength = 0.0f;
     r->cover_noise_method   = "";
     r->repainting_start     = 0.0f;
@@ -309,6 +310,9 @@ static void request_parse_obj(yyjson_val * obj, AceRequest * r) {
     }
     if ((v = yyjson_obj_get(obj, "dcw_mode")) && yyjson_is_str(v)) {
         r->dcw_mode = yyjson_get_str(v);
+    }
+    if ((v = yyjson_obj_get(obj, "timbre_reference_window")) && yyjson_is_bool(v)) {
+        r->timbre_reference_window = yyjson_get_bool(v);
     }
     if ((v = yyjson_obj_get(obj, "audio_cover_strength")) && yyjson_is_num(v)) {
         r->audio_cover_strength = (float) yyjson_get_num(v);
@@ -623,6 +627,9 @@ static yyjson_mut_doc * request_build_doc(const AceRequest * r, bool sparse) {
     }
 
     // cover/repaint
+    if (all || r->timbre_reference_window != def.timbre_reference_window) {
+        yyjson_mut_obj_add_bool(doc, root, "timbre_reference_window", r->timbre_reference_window);
+    }
     if (all || r->audio_cover_strength != def.audio_cover_strength) {
         yyjson_mut_obj_add_real(doc, root, "audio_cover_strength", r->audio_cover_strength);
     }

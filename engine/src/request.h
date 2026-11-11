@@ -145,6 +145,7 @@ struct AceRequest {
 
     // cover mode (active when source audio is provided)
     float audio_cover_strength;  // 1.0 (0-1, fraction of DiT steps using source context)
+    bool timbre_reference_window;  // false; join centred 10 s segments from each third
     float cover_noise_strength;  // 0.0 (0-1, how close to source: 0=pure noise, 1=source)
     std::string cover_noise_method;  // "" = truncate (default), "rescale" = rebuild schedule
 

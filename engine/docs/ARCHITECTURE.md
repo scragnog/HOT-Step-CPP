@@ -270,6 +270,18 @@ toward `1 - lss_strength`, with optional per-channel DC removal.
 
 **`track`** (string, default `""`). Stem name for `lego`, `extract` and `complete`.
 
+**`timbre_reference_window`** (bool, default false). Experimental timbre reference
+selection for both raw `ref_audio` and pre-encoded `ref_latents`. Repeat short
+inputs to at least 30 seconds, then join the centre 10 seconds of each third.
+The resulting reference has 750 frames at 25 Hz. Raw audio is selected before
+VAE encoding; cached whole-file latents are selected after loading. The default
+retains whole-file conditioning. Node accepts `timbreReferenceWindow` on an ACE
+generation request; there is no UI control.
+
+ACE synth fails on non-finite DiT output, latent post-processing or decoded
+audio. The `[Synth-Finite]` diagnostic names the stage and invalid-value count;
+Node includes it in the generation failure. No output is saved for that job.
+
 **`audio_cover_strength`** (float, default 1.0). Fraction of DiT steps that see the
 source as context. Below 1.0 the remaining steps switch to silence context and the
 text2music instruction.
