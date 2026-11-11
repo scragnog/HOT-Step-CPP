@@ -6,7 +6,8 @@ import { queryOptions } from '@tanstack/react-query';
 import { adapterApi, healthApi, profileApi, reportLogsApi, settingsApi } from '../../services/api';
 import { audioQueueApi } from '../../services/audioQueueApi';
 import { dataFolderApi } from '../../services/dataFolderApi';
-import { updatesApi } from '../../services/updatesApi';
+import { updatesApi, type UpdateRestartAttempt } from '../../services/updatesApi';
+import { completedUpdate, updatesViewState } from '../../components/settings/updatesViewState';
 import { getStemStats } from '../../services/stemStudioApi';
 import { serverKey, sharedKeys } from '../keys';
 import { pollWhile } from '../contract';
@@ -96,4 +97,21 @@ export const updatesStatusOptions = () => queryOptions({
   queryKey: serverKey('shell-queue/updates'),
   queryFn: ({ signal }) => updatesApi.status({ signal }),
   staleTime: 0,
+  refetchInterval: q => {
+    const s = q.state.data;
+    return s && updatesViewState(s).active ? 1000 : s?.checking ? 2000 : false;
+  },
+});
+
+/** Restart probes continue through network failures and 503, including hidden tabs. */
+export const updateReconnectOptions = (attempt: UpdateRestartAttempt) => queryOptions({
+  queryKey: serverKey('shell-queue/update-reconnect', { id: String(attempt.startedAt) }),
+  queryFn: async ({ signal }) => {
+    await updatesApi.health({ signal });
+    return completedUpdate(await updatesApi.status({ signal }), attempt);
+  },
+  staleTime: 0,
+  retry: false,
+  refetchInterval: q => q.state.data ? false : 1000,
+  refetchIntervalInBackground: true,
 });

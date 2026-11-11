@@ -534,6 +534,10 @@ Engine binaries, the bundled Node runtime, UI, shipped plugins, noise samples an
 
 ## Upgrade to a new version
 
+In **Settings > Updates**, Windows portable installs started by a compatible updater launcher offer **Download update**. Downloading verifies and stages the release without changing the running app. You can cancel it. When ready, finish running jobs, click **Restart and install** and confirm. The screen waits for the launcher to restart HOT-Step, shows the outcome and offers **Reload** for the new UI. If the new version fails and rolls back, the old version runs with its restored data. If recovery is required, follow the HOT-Step launcher window. After five minutes without a result, the screen points to that window and keeps checking.
+
+Older releases, Linux and macOS require the manual upgrade below. The Updates panel explains why and links to the release. Source checkouts must close HOT-Step and run `update.bat` in the install folder. Portable installs follow releases only.
+
 1. Stop HOT-Step and back up your data folder, including `settings/.env`.
 2. Extract the complete new archive into a separate folder.
 3. Start `HOT-Step.bat` on Windows or `./HOT-Step.sh` on Linux and macOS.

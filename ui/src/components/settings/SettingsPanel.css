@@ -775,6 +775,38 @@
   background: #ec4899;
 }
 
+.settings-update-download { display: grid; gap: 0.75rem; margin-top: 1rem; }
+.settings-update-download progress { width: 100%; height: 0.65rem; accent-color: #ec4899; }
+.settings-update-result > div { display: grid; gap: 0.5rem; }
+.settings-update-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 1.25rem;
+  border: 0;
+  background: #09090b;
+  color: #e4e4e7;
+}
+.settings-update-overlay[open] { display: grid; place-items: center; }
+.settings-update-overlay::backdrop { background: #09090b; }
+.settings-update-overlay-card {
+  display: grid;
+  gap: 1.25rem;
+  width: min(100%, 36rem);
+  padding: 2rem;
+  border: 1px solid #3f3f46;
+  border-radius: 1rem;
+  overflow-wrap: anywhere;
+}
+.settings-update-overlay-card h2 { font-size: 1.25rem; font-weight: 600; }
+.settings-update-overlay-card .settings-save-btn { justify-self: start; }
+:root:not(.dark) .settings-update-overlay { background: #fafafa; color: #27272a; }
+:root:not(.dark) .settings-update-overlay-card { border-color: #d4d4d8; }
+
 @container settings (max-width: 28rem) {
   .settings-panel .setting-row { flex-wrap: wrap; padding: 1rem; }
   .settings-panel .setting-info { flex-basis: 100%; }

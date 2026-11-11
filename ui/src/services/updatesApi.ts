@@ -1,36 +1,28 @@
 import { apiClient, type ReadOptions } from './httpClient';
+import type {
+  UpdatePrepareStatus, UpdateApplyResult, UpdatesApplyResponse, UpdateChannel,
+  UpdatesStatusResponse, UpdatesCheckResponse,
+} from '../../../server/src/contracts/updates';
+export type {
+  UpdateApplyResult, UpdateChannel, UpdateInstallStatus, UpdatePrepareStatus,
+  UpdateStatusKind, UpdatesApplyResponse,
+} from '../../../server/src/contracts/updates';
 
-// Wire shapes of /api/updates (server/src/contracts/updates.ts). Notices only.
-export type UpdateChannel = 'release' | 'master';
-export type UpdateStatusKind = 'never-checked' | 'up-to-date' | 'update-available' | 'ahead' | 'unknown' | 'could-not-check';
-export interface UpdatesStatus {
-  channel: UpdateChannel;
-  installed: {
-    kind: 'portable' | 'git' | 'unknown';
-    version: string;
-    tag: string | null;
-    sha: string | null;
-    variant: string | null;
-    buildInfoProblem: string | null;
-    git: { head: string; branch: string | null; dirty: boolean; originOk: boolean } | null;
-  };
-  status: UpdateStatusKind;
-  latest: {
-    release: { tag: string; name: string; url: string; publishedAt: string | null } | null;
-    master: { sha: string; url: string } | null;
-  };
-  gitRelation: 'up-to-date' | 'behind' | 'ahead' | 'diverged' | 'unknown';
-  notesUrl: string | null;
-  lastSuccessAt: string | null;
-  lastAttemptAt: string | null;
-  stale: boolean;
-  error: string | null;
-  retryAfter: string | null;
-  checking: boolean;
+export type UpdatesStatus = UpdatesStatusResponse;
+export type UpdatesCheckResult = UpdatesCheckResponse;
+
+export interface UpdateRestartAttempt {
+  from: string | null;
+  to: string | null;
+  previousResult: UpdateApplyResult | null;
+  startedAt: number;
 }
-export interface UpdatesCheckResult extends UpdatesStatus { throttled: boolean }
 
 export const updatesApi = {
-  status: (opts?: ReadOptions) => apiClient.get<UpdatesStatus>('/updates/status', opts),
-  check: (channel?: UpdateChannel) => apiClient.post<UpdatesCheckResult>('/updates/check', channel ? { channel } : {}),
+  status: (opts?: ReadOptions) => apiClient.get<UpdatesStatus>('/updates/status', { ...opts, silent: true }),
+  check: (channel?: UpdateChannel) => apiClient.post<UpdatesCheckResult>('/updates/check', channel ? { channel } : {}, { silent: true }),
+  prepare: (candidateId: string) => apiClient.post<UpdatePrepareStatus>('/updates/prepare', { candidateId }, { silent: true }),
+  cancel: (candidateId: string) => apiClient.post<UpdatePrepareStatus>('/updates/prepare/cancel', { candidateId }, { silent: true }),
+  apply: (candidateId: string) => apiClient.post<UpdatesApplyResponse>('/updates/apply', { candidateId }, { silent: true }),
+  health: (opts?: ReadOptions) => apiClient.get('/health', { ...opts, silent: true, timeout: 4000 }),
 };
