@@ -36,6 +36,7 @@ struct VAEEncoder {
     struct ggml_tensor *  graph_input;   // [T_audio, 2]
     struct ggml_tensor *  graph_output;  // [T_latent, 128]
     int                   graph_T;       // cached T_audio (0 = no cache)
+    size_t                graph_budget = 0; // Optional per-backend graph limit in bytes; 0 uses device memory.
 
     std::vector<float> scratch_in;       // transposed input [2 * T_audio]
 };
@@ -195,18 +196,15 @@ static struct ggml_tensor * vae_enc_build_graph(struct ggml_context * ctx,
     return x;  // [T_latent, 128]
 }
 
-// Core compute: build/cache graph, set input, run. Returns T_latent or -1.
+// Core compute: returns T_latent, -1 on error, or VAE_GRAPH_NO_FIT.
 // Output stays in m->graph_output for caller to read.
 static int vae_enc_compute(VAEEncoder *  m,
                            const float * audio,  // [T_audio, 2] time-major interleaved stereo
-                           int           T_audio) {
+                           int           T_audio,
+                           bool          check_budget = true) {
     // Rebuild graph when T_audio changes
     if (m->graph_T != T_audio) {
-        if (m->graph_ctx) {
-            ggml_backend_sched_reset(m->sched);
-            ggml_free(m->graph_ctx);
-            free(m->graph_buf);
-        }
+        vae_graph_clear(m);
 
         size_t ctx_size = ggml_tensor_overhead() * 1024 + ggml_graph_overhead_custom(8192, false);
         m->graph_buf    = (uint8_t *) malloc(ctx_size);
@@ -217,6 +215,7 @@ static int vae_enc_compute(VAEEncoder *  m,
         }
         struct ggml_init_params p   = { ctx_size, m->graph_buf, true };
         struct ggml_context *   ctx = ggml_init(p);
+        m->graph_ctx = ctx;
 
         m->graph_input = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, T_audio, 2);
         ggml_set_name(m->graph_input, "enc_input");
@@ -229,14 +228,15 @@ static int vae_enc_compute(VAEEncoder *  m,
         m->graph = ggml_new_graph_custom(ctx, 8192, false);
         ggml_build_forward_expand(m->graph, m->graph_output);
 
+        if (check_budget) {
+            const bool fits = vae_graph_fits(m->sched, m->graph, "VAE-Enc", m->graph_budget);
+            vae_graph_clear(m);
+            return fits ? vae_enc_compute(m, audio, T_audio, false) : VAE_GRAPH_NO_FIT;
+        }
         if (!ggml_backend_sched_alloc_graph(m->sched, m->graph)) {
-            fprintf(stderr, "[VAE-Enc] FATAL: graph alloc failed for T=%d\n", T_audio);
-            ggml_free(ctx);
-            free(m->graph_buf);
-            m->graph_ctx = NULL;
-            m->graph_buf = NULL;
-            m->graph_T   = 0;
-            return -1;
+            fprintf(stderr, "[VAE-Enc] Graph allocation did not fit for T=%d\n", T_audio);
+            vae_graph_clear(m);
+            return VAE_GRAPH_NO_FIT;
         }
 
         m->graph_ctx = ctx;
@@ -257,7 +257,10 @@ static int vae_enc_compute(VAEEncoder *  m,
     }
     ggml_backend_tensor_set(m->graph_input, m->scratch_in.data(), 0, in_size * sizeof(float));
 
-    ggml_backend_sched_graph_compute(m->sched, m->graph);
+    if (!backend_compute_ok(ggml_backend_sched_graph_compute(m->sched, m->graph))) {
+        fprintf(stderr, "[VAE-Enc] FATAL: graph compute failed\n");
+        return -1;
+    }
 
     return (int) m->graph_output->ne[0];  // T_latent
 }
@@ -272,7 +275,7 @@ static int vae_enc_encode(VAEEncoder *  m,
                           int           max_T_latent) {
     int T_latent = vae_enc_compute(m, audio, T_audio);
     if (T_latent < 0) {
-        return -1;
+        return T_latent;
     }
 
     if (T_latent > max_T_latent) {
@@ -304,21 +307,19 @@ static int vae_enc_encode(VAEEncoder *  m,
 
 // Tiled encode for long audio (same chunking strategy as decoder)
 // chunk_size: latent frames per tile, overlap: context frames on each side
-static int vae_enc_encode_tiled(VAEEncoder *  m,
+static int vae_enc_encode_tiles(VAEEncoder *  m,
                                 const float * audio,       // [T_audio, 2] interleaved stereo
                                 int           T_audio,
                                 float *       latent_out,  // [T_latent, 64] output, time-major
                                 int           max_T_latent,
                                 int           chunk_size = 256,
                                 int           overlap    = 64) {
-    // Work in audio-sample space. Each latent frame = 1920 audio samples.
+    // Keep every tile boundary aligned to a latent frame when overlap shrinks.
+    while (chunk_size - 2 * overlap <= 0 && overlap > 0) {
+        overlap /= 2;
+    }
     int audio_chunk   = chunk_size * 1920;
     int audio_overlap = overlap * 1920;
-
-    // Shrink overlap until stride is positive
-    while (audio_chunk - 2 * audio_overlap <= 0 && audio_overlap > 0) {
-        audio_overlap /= 2;
-    }
 
     // Short audio: encode directly
     if (T_audio <= audio_chunk) {
@@ -355,6 +356,7 @@ static int vae_enc_encode_tiled(VAEEncoder *  m,
 
         // Encode this window
         int tile_T = vae_enc_compute(m, audio + win_start * 2, win_len);
+        if (tile_T == VAE_GRAPH_NO_FIT) return VAE_GRAPH_NO_FIT;
         if (tile_T < 0) {
             fprintf(stderr, "[VAE-Enc] FATAL: tile %d encode failed\n", i);
             return -1;
@@ -402,6 +404,27 @@ static int vae_enc_encode_tiled(VAEEncoder *  m,
             latent_write_pos, (float) T_audio / 48000.0f);
 
     return latent_write_pos;
+}
+
+// Retry only allocation failures. Each pass overwrites output from frame zero.
+static int vae_enc_encode_tiled(VAEEncoder * m, const float * audio, int T_audio,
+                                float * latent_out, int max_T_latent,
+                                int chunk_size = 256, int overlap = 64) {
+    if (T_audio <= 0 || chunk_size <= 0 || overlap < 0) {
+        fprintf(stderr, "[VAE-Enc] FATAL: invalid sample count or tile parameters\n");
+        return -1;
+    }
+    for (;;) {
+        int result = vae_enc_encode_tiles(m, audio, T_audio, latent_out, max_T_latent, chunk_size, overlap);
+        if (result != VAE_GRAPH_NO_FIT) return result;
+        const int frames = (T_audio + 1919) / 1920 < chunk_size ? (T_audio + 1919) / 1920 : chunk_size;
+        if (frames <= VAE_MIN_TILE) {
+            fprintf(stderr, "[VAE-Enc] FATAL: cannot allocate graph at the smallest tile (%d frames); insufficient memory\n", frames);
+            return -1;
+        }
+        chunk_size = frames / 2 < VAE_MIN_TILE ? VAE_MIN_TILE : frames / 2;
+        fprintf(stderr, "[VAE-Enc] Graph did not fit: retrying with %d-frame tiles\n", chunk_size);
+    }
 }
 
 // Free all resources

@@ -268,6 +268,18 @@ optional test targets, embeds the UTF-8 active-code-page and long-path manifest.
 Filesystem wrappers that explicitly convert UTF-8 to UTF-16 keep their existing
 behavior.
 
+## VAE graph memory
+
+ACE-Step VAE encoding and decoding measure each new graph's backend buffers
+before allocation. If memory is insufficient or allocation fails, the full pass
+restarts with smaller tiles, down to 64 latent frames. A failure at the smallest
+tile reports insufficient memory. Compute failures and cancellation do not retry.
+A graph that fits keeps the existing untiled math. Tiling can introduce small
+differences at seams. Internal probes can set `VAEEncoder::graph_budget` or
+`VAEGGML::graph_budget` to a per-backend byte limit; zero uses device memory.
+Measurements use a separate scheduler and disposable graph metadata, because
+GGML's reservation query rewrites graph edges and allocator bookkeeping.
+
 ## Timbre references and numerical failures
 
 The experimental ACE request field `timbre_reference_window` defaults to `false`.

@@ -793,6 +793,10 @@ link_ggml_backends(heartcodec-encode-probe)
 add_executable(yue2-vae-lifetime-test tests/test-yue2-vae-lifetime.cpp)
 target_link_libraries(yue2-vae-lifetime-test PRIVATE yyjson)
 link_ggml_backends(yue2-vae-lifetime-test)
+add_executable(yue2-empty-style-test tests/test-yue2-empty-style.cpp)
+target_include_directories(yue2-empty-style-test PRIVATE src/yue2)
+target_link_libraries(yue2-empty-style-test PRIVATE yyjson)
+link_ggml_backends(yue2-empty-style-test)
 # yue2-nar-graph.h also contains the optional Lua sampler dispatch. The probe
 # includes that header for parity fixtures even though it uses native midpoint.
 target_link_libraries(yue2-probe PRIVATE yyjson luajit)

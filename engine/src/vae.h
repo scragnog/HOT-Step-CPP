@@ -61,6 +61,7 @@ struct VAEGGML {
     struct ggml_tensor *  graph_input;
     struct ggml_tensor *  graph_output;
     int                   graph_T;  // cached T_latent (0 = no cache)
+    size_t                graph_budget = 0; // Optional per-backend graph limit in bytes; 0 uses device memory.
 
     // Scratch buffer (reused across tiles, grown as needed)
     std::vector<float> scratch_in;  // transposed input [64 * T]
@@ -694,20 +695,73 @@ static struct ggml_tensor * vae_ggml_build_graph(struct ggml_context * ctx,
     return x;  // [T_audio, 2]
 }
 
-// Core compute: ensure graph cached, set input, run. Returns T_audio or -1.
+// Internal result: graph allocation can be retried with a smaller window.
+static constexpr int VAE_GRAPH_NO_FIT = -2;
+static constexpr int VAE_MIN_TILE = 64;
+
+// Measure the actual backend allocations, including scheduler copies. No device
+// buffer is allocated here. A retained compute buffer is reusable capacity.
+static bool vae_graph_fits(ggml_backend_sched_t sched, ggml_cgraph * graph,
+                           const char * label, size_t budget) {
+    const int count = ggml_backend_sched_get_n_backends(sched);
+    std::vector<ggml_backend_t> backends(count);
+    std::vector<ggml_backend_buffer_type_t> bufts(count);
+    for (int i = 0; i < count; ++i) {
+        backends[i] = ggml_backend_sched_get_backend(sched, i);
+        bufts[i] = ggml_backend_sched_get_buffer_type(sched, backends[i]);
+    }
+    // reserve_size also changes allocator bookkeeping. Keep it off the live
+    // scheduler so a measurement cannot make an unallocated buffer look ready.
+    ggml_backend_sched_t measure = ggml_backend_sched_new(backends.data(), bufts.data(), count, 8192, false, true);
+    if (!measure) return false;
+    std::vector<size_t> sizes(count);
+    // Measurement can rewrite graph edges and backend-specific ops. The caller
+    // discards this graph and builds fresh metadata before real allocation.
+    ggml_backend_sched_reserve_size(measure, graph, sizes.data());
+    bool fits = true;
+    for (int i = 0; i < count; ++i) {
+        ggml_backend_t backend = ggml_backend_sched_get_backend(sched, i);
+        size_t free_b = 0, total_b = 0;
+        if (ggml_backend_dev_t dev = ggml_backend_get_device(backend)) {
+            ggml_backend_dev_memory(dev, &free_b, &total_b);
+        }
+        const size_t retained = ggml_backend_sched_get_buffer_size(sched, backend);
+        if ((budget && sizes[i] > budget) ||
+            (total_b && sizes[i] > retained && sizes[i] - retained > free_b)) {
+            fprintf(stderr, "[%s] Graph needs %zu bytes on %s, free=%zu, retained=%zu, budget=%zu: reducing tile\n",
+                    label, sizes[i], ggml_backend_name(backend), free_b, retained, budget);
+            fits = false;
+        }
+    }
+    ggml_backend_sched_free(measure);
+    return fits;
+}
+
+// Discard metadata only after the scheduler has stopped using its tensors.
+// Encoder and decoder caches have the same lifetime rules.
+template <typename Model> static void vae_graph_clear(Model * m) {
+    ggml_backend_sched_reset(m->sched);
+    if (m->graph_ctx) ggml_free(m->graph_ctx);
+    free(m->graph_buf);
+    m->graph_ctx = nullptr;
+    m->graph_buf = nullptr;
+    m->graph = nullptr;
+    m->graph_input = nullptr;
+    m->graph_output = nullptr;
+    m->graph_T = 0;
+}
+
+// Core compute: returns T_audio, -1 on error, or VAE_GRAPH_NO_FIT.
 // Output remains in m->graph_output for caller to read as needed.
 static int vae_ggml_compute(VAEGGML *     m,
                             const float * latent,    // [T_full, 64] time-major
                             int           T_latent,  // window length to decode
-                            int           win_start = 0) {     // offset into latent
+                            int           win_start = 0,       // offset into latent
+                            bool          check_budget = true) {
 
     // Build graph only when T_latent changes (cached for tiled decode reuse)
     if (m->graph_T != T_latent) {
-        if (m->graph_ctx) {
-            ggml_backend_sched_reset(m->sched);
-            ggml_free(m->graph_ctx);
-            free(m->graph_buf);
-        }
+        vae_graph_clear(m);
 
         // Graph context (generous fixed allocation)
         size_t ctx_size = ggml_tensor_overhead() * 1024 + ggml_graph_overhead_custom(8192, false);
@@ -719,6 +773,7 @@ static int vae_ggml_compute(VAEGGML *     m,
         }
         struct ggml_init_params p   = { ctx_size, m->graph_buf, true };
         struct ggml_context *   ctx = ggml_init(p);
+        m->graph_ctx = ctx;
 
         m->graph_input = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, T_latent, 64);
         ggml_set_name(m->graph_input, "vae_input");
@@ -731,14 +786,15 @@ static int vae_ggml_compute(VAEGGML *     m,
         m->graph = ggml_new_graph_custom(ctx, 8192, false);
         ggml_build_forward_expand(m->graph, m->graph_output);
 
+        if (check_budget) {
+            const bool fits = vae_graph_fits(m->sched, m->graph, "VAE", m->graph_budget);
+            vae_graph_clear(m);
+            return fits ? vae_ggml_compute(m, latent, T_latent, win_start, false) : VAE_GRAPH_NO_FIT;
+        }
         if (!ggml_backend_sched_alloc_graph(m->sched, m->graph)) {
-            fprintf(stderr, "[VAE] FATAL: graph alloc failed for T=%d\n", T_latent);
-            ggml_free(ctx);
-            free(m->graph_buf);
-            m->graph_ctx = NULL;
-            m->graph_buf = NULL;
-            m->graph_T   = 0;
-            return -1;
+            fprintf(stderr, "[VAE] Graph allocation did not fit for T=%d\n", T_latent);
+            vae_graph_clear(m);
+            return VAE_GRAPH_NO_FIT;
         }
 
         m->graph_ctx = ctx;
@@ -758,7 +814,10 @@ static int vae_ggml_compute(VAEGGML *     m,
     }
     ggml_backend_tensor_set(m->graph_input, m->scratch_in.data(), 0, in_size * sizeof(float));
 
-    ggml_backend_sched_graph_compute(m->sched, m->graph);
+    if (!backend_compute_ok(ggml_backend_sched_graph_compute(m->sched, m->graph))) {
+        fprintf(stderr, "[VAE] FATAL: graph compute failed\n");
+        return -1;
+    }
 
     return (int) m->graph_output->ne[0];
 }
@@ -774,7 +833,7 @@ static int vae_ggml_decode(VAEGGML * m, const float * latent, int T_latent, floa
 
     int T_out = vae_ggml_compute(m, latent, T_latent, 0);
     if (T_out < 0) {
-        return -1;
+        return T_out;
     }
 
     ggml_backend_tensor_get(m->graph_output, audio_out, 0, T_out * 2 * sizeof(float));
@@ -790,7 +849,7 @@ static int vae_ggml_decode(VAEGGML * m, const float * latent, int T_latent, floa
 // Default chunk=256/overlap=64 matches reference code. Larger chunks (e.g. 1024)
 // reduce tile count and improve throughput; adjust chunk/overlap to tune.
 // Returns T_audio (total samples per channel) or -1 on error.
-static int vae_ggml_decode_tiled(VAEGGML *     m,
+static int vae_ggml_decode_tiles(VAEGGML *     m,
                                  const float * latent,     // [T_latent, 64] flat time-major (DiT output layout)
                                  int           T_latent,
                                  float *       audio_out,  // [2, T_audio] flat (caller allocs)
@@ -799,26 +858,6 @@ static int vae_ggml_decode_tiled(VAEGGML *     m,
                                  int           overlap    = 64,
                                  bool (*cancel)(void *)   = nullptr,
                                  void * cancel_data       = nullptr) {
-    // A track at or under chunk_size decodes untiled, in one graph, which
-    // wants roughly 10 MB of activations per latent frame: 726 frames asked
-    // Vulkan for 6.78 GB and took ace-server down on a 4 GB card (#186). When
-    // the device cannot hold that, tile at 256 regardless of the setting.
-    // ponytail: per-frame figure is the #186 measurement (9.3 MB), not a graph
-    // size query; replace with ggml_backend_sched's reserve size if it drifts.
-    if (T_latent <= chunk_size && T_latent > 256 && m->backend) {
-        size_t free_b = 0, total_b = 0;
-        if (ggml_backend_dev_t dev = ggml_backend_get_device(m->backend)) {
-            ggml_backend_dev_memory(dev, &free_b, &total_b);
-        }
-        const size_t need = (size_t) T_latent * (10u << 20);
-        if (free_b > 0 && need > free_b) {
-            fprintf(stderr, "[VAE] Untiled decode of %d frames needs about %.2f GB, device reports %.2f GB free: tiling at 256\n",
-                    T_latent, need / 1073741824.0, free_b / 1073741824.0);
-            chunk_size = 256;
-            if (overlap > 64) overlap = 64;
-        }
-    }
-
     // Ensure positive stride (matches Python effective_overlap reduction)
     while (chunk_size - 2 * overlap <= 0 && overlap > 0) {
         overlap /= 2;
@@ -863,6 +902,7 @@ static int vae_ggml_decode_tiled(VAEGGML *     m,
 
         // Compute tile (graph cached, extract+transpose fused)
         int tile_T = vae_ggml_compute(m, latent, win_len, win_start);
+        if (tile_T == VAE_GRAPH_NO_FIT) return VAE_GRAPH_NO_FIT;
         if (tile_T < 0) {
             fprintf(stderr, "[VAE] FATAL: tile %d decode failed\n", i);
             return -1;
@@ -908,6 +948,31 @@ static int vae_ggml_decode_tiled(VAEGGML *     m,
             (float) audio_write_pos / 48000.0f);
 
     return audio_write_pos;
+}
+
+// Restart the whole pass after allocation failure, so no partial output from
+// the previous tile size escapes. Compute errors and cancellation never retry.
+static int vae_ggml_decode_tiled(VAEGGML * m, const float * latent, int T_latent,
+                                 float * audio_out, int max_T_audio, int chunk_size = 256,
+                                 int overlap = 64, bool (*cancel)(void *) = nullptr,
+                                 void * cancel_data = nullptr) {
+    if (T_latent <= 0 || chunk_size <= 0 || overlap < 0) {
+        fprintf(stderr, "[VAE] FATAL: invalid frame count or tile parameters\n");
+        return -1;
+    }
+    for (;;) {
+        if (cancel && cancel(cancel_data)) return -1;
+        int result = vae_ggml_decode_tiles(m, latent, T_latent, audio_out, max_T_audio,
+                                           chunk_size, overlap, cancel, cancel_data);
+        if (result != VAE_GRAPH_NO_FIT) return result;
+        const int frames = T_latent < chunk_size ? T_latent : chunk_size;
+        if (frames <= VAE_MIN_TILE) {
+            fprintf(stderr, "[VAE] FATAL: cannot allocate graph at the smallest tile (%d frames); insufficient memory\n", frames);
+            return -1;
+        }
+        chunk_size = frames / 2 < VAE_MIN_TILE ? VAE_MIN_TILE : frames / 2;
+        fprintf(stderr, "[VAE] Graph did not fit: retrying with %d-frame tiles\n", chunk_size);
+    }
 }
 
 // Free
