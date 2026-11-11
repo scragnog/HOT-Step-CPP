@@ -29,7 +29,7 @@ const render = (l: Mm3Ladder, r = review(), o: { rendering?: number | null; rend
 // (listen only: it has no Use button).
 test('rungs draw takes, Render and Use; the in-use step says so, either slash', () => {
   const html = render(ladder({ inUse: 'r/ckpt-200/adapter_model.safetensors' }));
-  assert.match(html, /Base[\s\S]*Step 50[\s\S]*Step 100[\s\S]*Loss 2\.500[\s\S]*Step 200/);
+  assert.match(html, /Base[\s\S]*Step 50[\s\S]*Step 100[\s\S]*Avg loss 2\.500[\s\S]*Step 200/);
   assert.match(html, /40 s · seed 424242 · rendered in 16 s/);
   assert.equal(html.match(/Use this checkpoint/g)?.length, 1);
   assert.equal(html.match(/In use/g)?.length, 1);
@@ -52,11 +52,11 @@ test('blind rungs sort by letter and hide the loss; scored rungs show overall an
   const scores = Object.fromEntries(l.scores.map(s => [s.step, s]));
   const blind = render(l, review({ blind: true, scores }));
   assert.match(blind, /Base[\s\S]*Rung A[\s\S]*Rung B[\s\S]*Step 50/);
-  assert.doesNotMatch(blind, /Loss 2\.500|Step 100|Step 200/);
+  assert.doesNotMatch(blind, /Avg loss 2\.500|Step 100|Step 200/);
   assert.match(blind, /overall 4\.50[\s\S]*best by score|best by score[\s\S]*overall 4\.50/);
   assert.equal(blind.match(/Likeness/g)?.length, 2);
   assert.match(blind, /value="nice"/);
-  assert.match(render(l), /Step 100[\s\S]*Loss 2\.500/);
+  assert.match(render(l), /Step 100[\s\S]*Avg loss 2\.500/);
 });
 
 test('the fixed-seed take comes first; a Render more take and a pruned take say what they are', () => {

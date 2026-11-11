@@ -53,13 +53,20 @@ test('instrumental and mixed exports preserve captions and merge linked adapters
       for (const endpoint of ['build-profile', 'build-profile-stream']) {
         const response = await fetch(`http://127.0.0.1:${address.port}/lyrics-sets/${result.lyricsSetId}/${endpoint}`,
           { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider_name: 'must-not-be-called' }) });
-        assert.equal(response.status, 400);
-        assert.deepEqual(await response.json(), { error: 'no lyrics to profile: this album is instrumental' });
+        assert.equal(response.status, 200);
+        const profile = endpoint === 'build-profile'
+          ? await response.json()
+          : JSON.parse((await response.text()).match(/event: complete\ndata: ([^\n]+)/)![1]);
+        assert.equal(profile.profile_data.instrumental, true);
+        assert.deepEqual(profile.profile_data.audio_enrichment.captionExamples, ['Quiet piano']);
+        assert.deepEqual(profile.profile_data.audio_enrichment.mm3CaptionExamples, ['MM3 piano caption']);
+        assert.deepEqual(profile.profile_data.audio_enrichment.yue2CaptionExamples, ['YuE2 piano caption']);
+        assert.equal(profile.profile_data.representative_excerpts, undefined);
       }
     } finally { await new Promise<void>((resolve, reject) => http.close(err => err ? reject(err) : resolve())); }
     const { captureLyricItems } = await import('../lireek/lyricWorkflow.js');
     const batch = captureLyricItems([{ type: 'profile', targetId: result.lyricsSetId, provider: 'must-not-be-called' }]);
-    assert.equal(batch.items[0].type, 'preflight-error');
+    assert.equal(batch.items[0].type, 'profile');
     const reference = path.join(root, 'reference.wav');
     fs.writeFileSync(reference, 'fixture');
     rows.upsertPreset(result.lyricsSetId, { mm3AdapterPath: 'other/adapter.safetensors', audioCoverStrength: 0.42,
