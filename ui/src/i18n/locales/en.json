@@ -3481,7 +3481,7 @@
     "settings.updates.notes": "Release notes on GitHub",
     "settings.updates.commit": "View the commit on GitHub",
     "settings.updates.noInstall": "Download it from GitHub and install it yourself; the app does not update itself yet.",
-    "settings.updates.dirty": "This source checkout has uncommitted changes, so it is not compared with the feed. Commit or stash them, then check again.",
+    "settings.updates.dirty": "This source checkout has local uncommitted changes.",
     "settings.updates.unknownIdentity": "This copy has no build record (an older release, or a source folder without git), so we can't tell which version it is. Compare with the latest release on GitHub by hand.",
     "settings.updates.couldNotCheck": "Could not check for updates. {{error}} This is not the same as being up to date.",
     "settings.updates.cannotCompare": "The latest version was found, but it can't be compared with this build. See the link for what is current.",
